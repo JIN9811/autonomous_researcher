@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from agents.bo_agent import BOAgent
+from learning.bo_parameter_space import BOParameterSpace
 from mcp_tools.experiment_tools import register_experiment_tools
 from mcp_tools.tool_registry import ToolRegistry
 from orchestrator.state import Mode, OrchestratorState, Stage
@@ -16,6 +17,35 @@ class _CtxStub:
     def __init__(self) -> None:
         self.tools = ToolRegistry()
         register_experiment_tools(self.tools)
+
+
+def _add_completed_lhs_observations(state: OrchestratorState, *, count: int = 8) -> None:
+    """Seed measured points so tests that target ranking run after LHS initialization."""
+    for index in range(count):
+        density = 0.21 + (0.26 * index / max(1, count - 1))
+        state.experiment_evaluations.append(
+            {
+                "evaluation_id": f"eval-complete-lhs-{index + 1:03d}",
+                "candidate_id": f"candidate-complete-lhs-{index + 1:03d}",
+                "objective_score": 0.35 + density,
+                "metrics": {"specific_energy_absorption_J_per_g": 0.35 + density},
+                "objective": {
+                    "constraints": {
+                        "geometry_type": "gyroid",
+                        "cell_size_mm": 10.0,
+                        "relative_density": density,
+                        "wall_thickness_mm": 1.2,
+                        "tpms_thickness": 0.0,
+                        "orientation_deg": 0.0,
+                        "anisotropy_ratio": 1.0,
+                        "skin_thickness_mm": 0.8,
+                        "bottom_cap_enabled": True,
+                        "top_cap_enabled": False,
+                        "skirt_enabled": False,
+                    }
+                },
+            }
+        )
 
 
 @pytest.mark.asyncio
@@ -45,7 +75,6 @@ async def test_bo_agent_returns_recommendation_and_curve() -> None:
             "random_seed": 11,
         },
     )
-
     bo_result = result.data["bo_result"]
 
     assert result.success is True
@@ -55,11 +84,108 @@ async def test_bo_agent_returns_recommendation_and_curve() -> None:
     assert bo_result["recommendation"]["candidate_id"]
     assert bo_result["recommendation"]["parameters"]
     assert bo_result["knowledge_context"]["memory_summary"].startswith("Prefer FDM-printable")
-    assert len(bo_result["best_so_far"]) == 4
-    assert bo_result["visualization"]["schema"] == "bo_visualization.v1"
-    assert bo_result["visualization"]["step"] == 4
-    assert [item["step"] for item in bo_result["visualization_steps"]] == [1, 2, 3, 4]
+    assert len(bo_result["best_so_far"]) == 1
+    assert bo_result["lhs_visualization"]["schema"] == "lhs_design_visualization.v1"
+    assert bo_result["lhs_visualization"]["step"] == 1
+    assert bo_result["visualization"] == {}
+    assert [item["step"] for item in bo_result["lhs_visualization_steps"]] == [1]
+    assert bo_result["benchmark"]["strategies"]["bo"]["surrogate_trace"][0]["phase"] == "initial_design"
     assert state.run_metadata["bo_agent"]["recommendation"]["candidate_id"] == bo_result["recommendation"]["candidate_id"]
+
+
+@pytest.mark.asyncio
+async def test_bo_agent_preserves_lhs_proposal_without_acquisition_reranking() -> None:
+    state = OrchestratorState(
+        run_id="run-lhs-reporting",
+        experiment_id="exp-lhs-reporting",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+        active_goal="initialize two-variable gyroid design",
+    )
+    space = BOParameterSpace.from_mapping(BOAgent.DEFAULT_PARAMETER_SPACE)
+    lhs = space.lhs_points(8, seed=7)
+    state.experiment_evaluations.append(
+        {
+            "evaluation_id": "eval-lhs-001",
+            "candidate_id": "candidate-lhs-001",
+            "metrics": {"specific_energy_absorption_J_per_g": 0.42},
+            "objective": {"constraints": lhs[0]},
+        }
+    )
+
+    result = await BOAgent().run_with_settings(
+        state,
+        _CtxStub(),
+        {"strategy": "bo", "budget": 1, "bo_backend": "botorch", "random_seed": 7},
+    )
+    bo_result = result.data["bo_result"]
+    recommendation = bo_result["recommendation"]
+
+    assert bo_result["optimization_phase"] == "initial_design"
+    assert bo_result["backend_active"] == "lhs"
+    assert bo_result["initial_design"] == {
+        "sampler": "latin_hypercube",
+        "completed": 1,
+        "target": 8,
+        "next_index": 2,
+    }
+    assert recommendation["parameters"] == lhs[1]
+    assert recommendation["selection_method"] == "latin_hypercube"
+    assert recommendation["objective_score"] is None
+    assert "combined_score" not in recommendation
+    assert "acquisition=" not in recommendation["why_this_candidate"]
+    assert bo_result["candidate_ranking"] == []
+    assert "Latin Hypercube initial design point 2/8" in result.data["next_design_request"]["rationale"]
+
+
+def test_initial_design_request_counts_prior_lhs_points_when_derived_fields_changed() -> None:
+    """LHS progress is defined by the two active variables, not derived TPMS fields."""
+    state = OrchestratorState(
+        run_id="run-lhs-derived-fields",
+        experiment_id="exp-lhs-derived-fields",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+        active_goal="initialize two-variable gyroid design",
+    )
+    space = BOParameterSpace.from_mapping(BOAgent.DEFAULT_PARAMETER_SPACE)
+    lhs = space.lhs_points(8, seed=7)
+    for index, point in enumerate(lhs[:2], start=1):
+        state.experiment_evaluations.append(
+            {
+                "evaluation_id": f"eval-lhs-derived-{index:03d}",
+                "candidate_id": f"candidate-lhs-derived-{index:03d}",
+                "source": "analysis_agent",
+                "status": "measured_analysis_complete",
+                "ok": True,
+                "objective_score": 0.40 + index * 0.01,
+                "metrics": {
+                    "geometry_type": "gyroid",
+                    "cell_size_mm": point["cell_size_mm"],
+                    "relative_density": point["relative_density"],
+                    "wall_thickness_mm": 1.2,
+                    # This is a derived geometry value and legitimately changes
+                    # as relative density changes between LHS observations.
+                    "tpms_thickness": 0.31 + index * 0.08,
+                    "specific_energy_absorption_J_per_g": 0.40 + index * 0.01,
+                },
+                "objective": {
+                    # The objective contract can still contain the preceding
+                    # cycle's fixed manufacturing values.
+                    "constraints": {
+                        **lhs[max(0, index - 2)],
+                        "tpms_thickness": 0.27 + index * 0.03,
+                    }
+                },
+            }
+        )
+
+    request = BOAgent.initial_design_request(state, seed=7)
+
+    assert request["phase"] == "initial_design"
+    assert request["index"] == 3
+    assert request["constraints"]["cell_size_mm"] == lhs[2]["cell_size_mm"]
+    assert request["constraints"]["relative_density"] == pytest.approx(lhs[2]["relative_density"])
+    assert [point["status"] for point in request["points"][:3]] == ["measured", "measured", "next"]
 
 
 @pytest.mark.asyncio
@@ -83,7 +209,7 @@ async def test_bo_agent_mbo_without_priors_degrades_to_bo() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bo_agent_locks_current_cell_size_between_cycles() -> None:
+async def test_bo_agent_keeps_cell_size_as_a_feasible_optimization_dimension() -> None:
     agent = BOAgent()
     state = OrchestratorState(
         run_id="run-test",
@@ -106,17 +232,18 @@ async def test_bo_agent_locks_current_cell_size_between_cycles() -> None:
             "parameter_space": {
                 "geometry_type": ["gyroid"],
                 "relative_density": [0.18, 0.48],
-                "wall_thickness_mm": [1.2, 2.0],
-                "cell_size_mm": [5.0, 10.0],
+                "cell_size_mm": [5.0, 6.0, 7.5, 10.0],
+                "orientation_deg": [0.0],
+                "anisotropy_ratio": [1.0],
             },
         },
     )
     bo_result = result.data["bo_result"]
 
     assert result.success is True
-    assert bo_result["parameter_space"]["cell_size_mm"] == [10.0]
+    assert bo_result["parameter_space"]["cell_size_mm"] == [5.0, 6.0, 7.5, 10.0]
     assert bo_result["parameter_space"]["relative_density"][0] == 0.20
-    assert bo_result["recommendation"]["parameters"]["cell_size_mm"] == 10.0
+    assert bo_result["recommendation"]["parameters"]["cell_size_mm"] in {5.0, 6.0, 7.5, 10.0}
     assert bo_result["recommendation"]["parameters"]["relative_density"] >= 0.20
     assert result.data["experiment_spec_update"]["cell_size_mm"] == 10.0
 
@@ -170,6 +297,232 @@ async def test_bo_agent_uses_prior_shape_to_avoid_repeat_recommendation() -> Non
     assert signature != (0.32, 1.2, 0.0, 1.0, 0.34)
 
 
+def test_bo_agent_restores_full_parameter_vector_from_objective_constraints() -> None:
+    state = OrchestratorState(
+        run_id="run-test",
+        experiment_id="exp-test",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+        active_goal="restore historical BO observations",
+    )
+    state.experiment_evaluations.append(
+        {
+            "evaluation_id": "eval-001",
+            "objective_score": 0.82,
+            "objective": {
+                "constraints": {
+                    "geometry_type": "gyroid",
+                    "relative_density": 0.31,
+                    "wall_thickness_mm": 1.4,
+                    "cell_size_mm": 10.0,
+                    "tpms_thickness": 0.36,
+                    "orientation_deg": 30.0,
+                    "anisotropy_ratio": 1.2,
+                    "skin_thickness_mm": 0.6,
+                    "bottom_cap_enabled": True,
+                    "top_cap_enabled": False,
+                    "skirt_enabled": False,
+                }
+            },
+            "metrics": {
+                "relative_density": 0.33,
+                "wall_thickness_mm": 1.5,
+                "cell_size_mm": 10.0,
+                "tpms_thickness": 0.38,
+            },
+        }
+    )
+
+    priors = BOAgent._prior_evaluations_from_state(state)
+
+    assert len(priors) == 1
+    assert priors[0]["parameters"] == {
+        "geometry_type": "gyroid",
+        "relative_density": 0.33,
+        "wall_thickness_mm": 1.5,
+        "cell_size_mm": 10.0,
+        "tpms_thickness": 0.38,
+        "orientation_deg": 30.0,
+        "anisotropy_ratio": 1.2,
+        "skin_thickness_mm": 0.6,
+        "bottom_cap_enabled": True,
+        "top_cap_enabled": False,
+        "skirt_enabled": False,
+    }
+
+
+def test_bo_agent_uses_analysis_scores_without_inventing_observation_noise() -> None:
+    state = OrchestratorState(
+        run_id="run-test",
+        experiment_id="exp-test",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+        active_goal="fit measured experiment outcomes",
+    )
+    parameters = {
+        "geometry_type": "gyroid",
+        "relative_density": 0.31,
+        "wall_thickness_mm": 1.4,
+        "cell_size_mm": 10.0,
+        "tpms_thickness": 0.36,
+    }
+    state.experiment_evaluations.extend(
+        [
+            {
+                "evaluation_id": "eval-design",
+                "candidate_id": "cand-001",
+                "objective_score": 0.84,
+                "objective": {"constraints": parameters},
+            },
+            {
+                "source": "analysis_agent",
+                "evaluation_id": "eval-analysis",
+                "candidate_id": "specimen-cand-001",
+                "objective_score": 0.27,
+                "metrics": {"specific_energy_absorption_J_per_g": 0.27},
+                "objective": {"constraints": parameters},
+            },
+        ]
+    )
+
+    priors = BOAgent._prior_evaluations_from_state(state)
+    design = next(item for item in priors if item.get("candidate_id") == "cand-001")
+    measured = next(item for item in priors if item.get("candidate_id") == "specimen-cand-001")
+
+    assert "score" not in design
+    assert measured["score"] == 0.27
+    assert "uncertainty" not in measured
+
+
+def test_bo_agent_does_not_treat_generic_objective_uncertainty_as_sea_noise() -> None:
+    state = OrchestratorState(
+        run_id="run-test",
+        experiment_id="exp-test",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+        active_goal="fit measured SEA observations",
+        latest_analysis={
+            "bo_handoff": {
+                "schema": "analysis_bo_handoff.v2",
+                "candidate_id": "specimen-001",
+                "parameters": {
+                    "geometry_type": "gyroid",
+                    "cell_size_mm": 7.5,
+                    "relative_density": 0.31,
+                },
+                "metrics": {"specific_energy_absorption_J_per_g": 0.0124},
+                "objective": {"uncertainty": 0.17},
+            }
+        },
+    )
+
+    records = BOAgent._analysis_handoff_records(state)
+
+    assert records[0]["score"] == pytest.approx(0.0124)
+    assert "uncertainty" not in records[0]
+
+
+def test_bo_agent_does_not_treat_top_level_analysis_uncertainty_as_sea_noise() -> None:
+    state = OrchestratorState(
+        run_id="run-test",
+        experiment_id="exp-test",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+        active_goal="fit measured SEA observations",
+    )
+    state.experiment_evaluations.append(
+        {
+            "source": "analysis_agent",
+            "evaluation_id": "eval-analysis-001",
+            "candidate_id": "specimen-001",
+            "objective_score": 0.0124,
+            "uncertainty": 0.17,
+            "metrics": {
+                "specific_energy_absorption_J_per_g": 0.0124,
+                "cell_size_mm": 7.5,
+                "relative_density": 0.31,
+                "geometry_type": "gyroid",
+            },
+        }
+    )
+
+    records = BOAgent._prior_evaluations_from_state(state)
+    measured = next(item for item in records if item.get("candidate_id") == "specimen-001")
+
+    assert measured["score"] == pytest.approx(0.0124)
+    assert "uncertainty" not in measured
+
+
+@pytest.mark.asyncio
+async def test_bo_agent_uses_current_fixed_surface_settings_for_botorch_history() -> None:
+    state = OrchestratorState(
+        run_id="run-test",
+        experiment_id="exp-test",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+        active_goal="fit the measured closed-loop history",
+        current_experiment_spec={
+            "geometry_type": "gyroid",
+            "cell_size_mm": 10.0,
+            "bottom_cap_enabled": False,
+            "top_cap_enabled": False,
+            "skirt_enabled": False,
+        },
+    )
+    state.run_metadata["latest_mission_contract"] = {
+        "safety_budget": {"max_loop_count": 5},
+    }
+    initial_points = (
+        (5.0, 0.215),
+        (6.0, 0.245),
+        (7.5, 0.275),
+        (10.0, 0.305),
+        (5.0, 0.335),
+        (6.0, 0.365),
+        (7.5, 0.405),
+        (10.0, 0.455),
+    )
+    for index, (cell_size, density) in enumerate(initial_points, start=1):
+        state.experiment_evaluations.append(
+            {
+                "evaluation_id": f"eval-{index:03d}",
+                "candidate_id": f"candidate-{index:03d}",
+                "objective_score": 0.4 + density,
+                "metrics": {"specific_energy_absorption_J_per_g": 0.4 + density},
+                "objective": {
+                    "constraints": {
+                        "geometry_type": "gyroid",
+                        "relative_density": density,
+                            "wall_thickness_mm": 1.2,
+                            "cell_size_mm": cell_size,
+                            "tpms_thickness": 0.0,
+                            "orientation_deg": 0.0,
+                            "anisotropy_ratio": 1.0,
+                            "skin_thickness_mm": 0.8,
+                        "bottom_cap_enabled": False,
+                        "top_cap_enabled": False,
+                        "skirt_enabled": False,
+                    }
+                },
+            }
+        )
+
+    result = await BOAgent().run_with_settings(
+        state,
+        _CtxStub(),
+        {
+            "strategy": "bo",
+            "budget": 1,
+            "bo_backend": "botorch",
+        },
+    )
+    trace = result.data["bo_result"]["benchmark"]["strategies"]["bo"]["surrogate_trace"][-1]
+
+    assert trace["phase"] == "acquisition"
+    assert trace["backend_active"] == "botorch"
+    assert trace["model"]["class"] == "SingleTaskGP"
+
+
 def test_bo_agent_normalize_settings_fallbacks() -> None:
     settings, warnings = BOAgent.normalize_settings(
         {
@@ -184,16 +537,167 @@ def test_bo_agent_normalize_settings_fallbacks() -> None:
     assert settings["acquisition"] == "expected_improvement"
     assert settings["budget"] == 1
     assert settings["random_seed"] == 7
-    assert settings["bo_backend"] == "lightweight_pool"
+    assert settings["bo_backend"] == "botorch"
     assert warnings
 
 
 def test_bo_agent_normalize_settings_accepts_botorch_optional_backend() -> None:
     settings, warnings = BOAgent.normalize_settings({"bo_backend": "botorch_optional", "top_k": 99})
 
-    assert settings["bo_backend"] == "botorch_optional"
+    assert settings["bo_backend"] == "botorch"
     assert settings["top_k"] == 12
     assert warnings == []
+
+
+def test_bo_agent_auto_initial_design_requires_eight_valid_observations() -> None:
+    state = OrchestratorState(
+        run_id="run-test",
+        experiment_id="exp-test",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+    )
+    state.run_metadata["latest_mission_contract"] = {
+        "safety_budget": {"max_loop_count": 5},
+    }
+
+    assert BOAgent._initial_design_size_for_run("auto", state) == 8
+    assert BOAgent._initial_design_size_for_run(7, state) == 7
+
+
+def test_bo_agent_initial_design_uses_configured_contract_size() -> None:
+    state = OrchestratorState(
+        run_id="run-configured-lhs",
+        experiment_id="exp-configured-lhs",
+        mode=Mode.TEST,
+        stage=Stage.DESIGN,
+    )
+    state.run_metadata["orchestrator_design_contract"] = {
+        "optimization": {
+            "initial_design": {
+                "sampler": "latin_hypercube",
+                "size": 3,
+                "seed": 11,
+            }
+        }
+    }
+
+    request = BOAgent.initial_design_request(state, seed=11)
+
+    assert BOAgent._initial_design_size_for_run("auto", state) == 3
+    assert BOAgent._initial_design_size_for_run(8, state) == 3
+    assert request["target"] == 3
+    assert len(request["points"]) == 3
+
+
+def test_bo_agent_default_space_is_two_variable_gyroid_problem() -> None:
+    settings, _warnings = BOAgent.normalize_settings({})
+    space = BOParameterSpace.from_mapping(settings["parameter_space"])
+
+    assert [item.name for item in space.active_dimensions] == ["cell_size_mm", "relative_density"]
+    assert settings["parameter_space"]["cell_size_mm"] == [5.0, 6.0, 7.5, 10.0]
+    assert settings["parameter_space"]["relative_density"] == [0.20, 0.48]
+    assert settings["parameter_space"]["orientation_deg"] == [0.0]
+    assert settings["parameter_space"]["anisotropy_ratio"] == [1.0]
+    assert settings["initial_design_size"] == 8
+
+
+def test_bo_agent_initial_design_request_advances_through_canonical_lhs() -> None:
+    state = OrchestratorState(
+        run_id="run-initial-lhs",
+        experiment_id="exp-initial-lhs",
+        mode=Mode.TEST,
+        stage=Stage.DESIGN,
+    )
+    space = BOParameterSpace.from_mapping(BOAgent.DEFAULT_PARAMETER_SPACE)
+    expected = space.lhs_points(8, seed=7)
+
+    first = BOAgent.initial_design_request(state, seed=7)
+    state.experiment_evaluations.append(
+        {
+            "candidate_id": "lhs-observation-001",
+            "metrics": {"specific_energy_absorption_J_per_g": 0.42},
+            "objective": {"constraints": first["constraints"]},
+        }
+    )
+    second = BOAgent.initial_design_request(state, seed=7)
+
+    assert first["phase"] == "initial_design"
+    assert first["sampler"] == "latin_hypercube"
+    assert first["index"] == 1
+    assert first["target"] == 8
+    assert first["constraints"] == expected[0]
+    assert len(first["points"]) == 8
+    assert first["points"][0] == {
+        "index": 1,
+        "status": "next",
+        "parameters": expected[0],
+    }
+    assert first["points"][1] == {
+        "index": 2,
+        "status": "planned",
+        "parameters": expected[1],
+    }
+    assert second["index"] == 2
+    assert second["constraints"] == expected[1]
+    assert second["points"][0]["status"] == "measured"
+    assert second["points"][1]["status"] == "next"
+
+
+def test_eight_observations_complete_lhs_phase() -> None:
+    state = OrchestratorState(
+        run_id="run-eight-point-lhs",
+        experiment_id="exp-eight-point-lhs",
+        mode=Mode.TEST,
+        stage=Stage.DESIGN,
+    )
+    state.run_metadata["latest_mission_contract"] = {
+        "safety_budget": {"max_loop_count": 20},
+    }
+
+    for cycle in range(1, 9):
+        request = BOAgent.initial_design_request(state, seed=7)
+        assert request["phase"] == "initial_design"
+        assert request["sampler"] == "latin_hypercube"
+        assert request["index"] == cycle
+        assert request["target"] == 8
+        state.experiment_evaluations.append(
+            {
+                "evaluation_id": f"eval-{cycle:03d}",
+                "candidate_id": f"candidate-{cycle:03d}",
+                "metrics": {"specific_energy_absorption_J_per_g": 0.4 + cycle * 0.01},
+                "objective": {"constraints": request["constraints"]},
+            }
+        )
+
+    next_request = BOAgent.initial_design_request(state, seed=7)
+    assert next_request["phase"] == "acquisition_ready"
+    assert next_request["index"] == 8
+    assert next_request["target"] == 8
+
+
+def test_bo_agent_uses_measured_sea_instead_of_composite_objective_score() -> None:
+    state = OrchestratorState(
+        run_id="run-sea",
+        experiment_id="exp-sea",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+    )
+    state.experiment_evaluations.append(
+        {
+            "source": "analysis_agent",
+            "evaluation_id": "eval-sea",
+            "candidate_id": "candidate-sea",
+            "objective_score": 0.91,
+            "parameters": {"cell_size_mm": 7.5, "relative_density": 0.34},
+            "metrics": {"specific_energy_absorption_J_per_g": 0.237},
+        }
+    )
+
+    prior = next(item for item in BOAgent._prior_evaluations_from_state(state) if item.get("candidate_id") == "candidate-sea")
+
+    assert prior["score"] == pytest.approx(0.237)
+    assert prior["metric_name"] == "specific_energy_absorption_J_per_g"
+    assert prior["unit"] == "J/g"
 
 class _LLMResponse:
     def __init__(self, text: str) -> None:
@@ -222,6 +726,7 @@ async def test_bo_agent_emits_reasoning_ranking_handoff_and_artifacts() -> None:
         active_goal="reasoning augmented BO",
         current_experiment_spec={"cell_size_mm": 10.0, "constraints": {"cell_size_mm": 10.0}},
     )
+    _add_completed_lhs_observations(state)
     state.latest_analysis = {
         "bo_handoff": {
             "schema_version": "analysis_bo_handoff_v1",
@@ -236,7 +741,12 @@ async def test_bo_agent_emits_reasoning_ranking_handoff_and_artifacts() -> None:
                 "orientation_deg": 0,
                 "anisotropy_ratio": 1.0,
             },
-            "objective": {"score": 0.71, "uncertainty": 0.12},
+            "objective": {
+                "metric_name": "specific_energy_absorption_J_per_g",
+                "specific_energy_absorption_J_per_g": 0.71,
+                "score": 0.71,
+                "uncertainty": 0.12,
+            },
             "quality": {"score": 0.91},
             "failure_tags": [],
         }
@@ -251,8 +761,9 @@ async def test_bo_agent_emits_reasoning_ranking_handoff_and_artifacts() -> None:
     assert bo_result["candidate_ranking"]
     assert bo_result["recommendation"]["why_this_candidate"]
     assert bo_result["next_design_request"]["schema"] == "next_design_request.v1"
-    assert bo_result["next_design_request"]["constraints"]["cell_size_mm"] == 10.0
-    assert state.run_metadata["bo_recommended_constraints"]["cell_size_mm"] == 10.0
+    selected_cell = bo_result["next_design_request"]["constraints"]["cell_size_mm"]
+    assert selected_cell in {5.0, 6.0, 7.5, 10.0}
+    assert state.run_metadata["bo_recommended_constraints"]["cell_size_mm"] == selected_cell
     for path in bo_result["artifacts"].values():
         assert Path(path).exists()
 
@@ -451,6 +962,7 @@ async def test_bo_agent_uses_llm_reasoning_as_soft_preference() -> None:
         active_goal="prefer high density safe region",
         current_experiment_spec={"cell_size_mm": 10.0},
     )
+    _add_completed_lhs_observations(state)
     llm_json = """
     {
       "schema_version": "bo_reasoning_v1",

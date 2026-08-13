@@ -29,6 +29,7 @@ from typing import Any
 from urllib.parse import quote
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
+from mcp_tools.tpms_geometry import tpms_level_for_relative_density
 from orchestrator.state import Mode, OrchestratorState
 from utils.paths import resolve_path
 
@@ -172,6 +173,22 @@ class DesignAgent(BaseAgent):
                 + [self._rejection_summary(item) for item in rejected[:3]],
             }
         )
+        design_contract = state.run_metadata.get("orchestrator_design_contract") if isinstance(state.run_metadata, dict) else {}
+        requested_parameters = (
+            design_contract.get("requested_parameters")
+            if isinstance(design_contract, dict) and isinstance(design_contract.get("requested_parameters"), dict)
+            else {}
+        )
+        if requested_parameters:
+            selected["requested_parameters"] = {
+                "cell_size_mm": float(requested_parameters["cell_size_mm"]),
+                "relative_density": float(requested_parameters["relative_density"]),
+            }
+            selected["realized_parameters"] = {
+                "cell_size_mm": float(selected["cell_size_mm"]),
+                "relative_density": float(selected["relative_density"]),
+            }
+            selected["orchestrator_design_contract_ref"] = str(design_contract.get("contract_id") or "")
         selected["bambu_autoejection_readiness"] = self._bambu_autoejection_design_readiness(
             candidate=selected,
             constraints=constraints,
@@ -244,15 +261,49 @@ class DesignAgent(BaseAgent):
         if isinstance(state.run_metadata, dict):
             raw_bo = state.run_metadata.get("bo_recommended_constraints")
             bo_recommended = raw_bo if isinstance(raw_bo, dict) else {}
+        if bo_recommended:
+            try:
+                bo_cell = float(bo_recommended.get("cell_size_mm", 5.0))
+                bo_density = float(bo_recommended.get("relative_density", 0.32))
+                bo_valid = bo_cell in {5.0, 6.0, 7.5, 10.0} and 0.20 <= bo_density <= 0.48
+            except (TypeError, ValueError):
+                bo_valid = False
+            if not bo_valid:
+                bo_recommended = {}
+        design_contract = state.run_metadata.get("orchestrator_design_contract") if isinstance(state.run_metadata, dict) else {}
+        requested_parameters = (
+            design_contract.get("requested_parameters")
+            if isinstance(design_contract, dict) and isinstance(design_contract.get("requested_parameters"), dict)
+            else {}
+        )
+        if requested_parameters:
+            try:
+                requested_cell = float(requested_parameters["cell_size_mm"])
+                requested_density = float(requested_parameters["relative_density"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError("orchestrator design contract requires numeric cell_size_mm and relative_density") from exc
+            if requested_cell not in {5.0, 6.0, 7.5, 10.0}:
+                raise ValueError(f"orchestrator design contract cell_size_mm={requested_cell} is not feasible")
+            if not 0.20 <= requested_density <= 0.48:
+                raise ValueError(f"orchestrator design contract relative_density={requested_density} is outside [0.20, 0.48]")
+            requested_parameters = {
+                "cell_size_mm": requested_cell,
+                "relative_density": requested_density,
+            }
+        explicit_cell_size = bool(
+            explicit_cell_size
+            or bo_recommended.get("cell_size_mm") not in (None, "", [])
+            or requested_parameters.get("cell_size_mm") not in (None, "", [])
+        )
         for key, value in bo_recommended.items():
             if value in (None, "", []):
-                continue
-            if key == "cell_size_mm":
                 continue
             if key in constraints:
                 constraints[key] = value
             elif key == "geometry_type":
                 constraints["preferred_geometry_type"] = value
+        for key, value in requested_parameters.items():
+            constraints[key] = value
         explicit_top_cap = any(isinstance(item, dict) and "top_cap_enabled" in item for item in (source, nested))
         explicit_bottom_cap = any(isinstance(item, dict) and "bottom_cap_enabled" in item for item in (source, nested))
         explicit_legacy_cap = any(isinstance(item, dict) and "top_bottom_cap" in item for item in (source, nested))
@@ -365,6 +416,7 @@ class DesignAgent(BaseAgent):
                 wall = self._clamp(wall, min_wall, max(min_wall, cell * max_ratio))
                 wall = self._clamp(float(constraints.get("wall_thickness_mm", wall)), min_wall, max(min_wall, cell * max_ratio))
                 rel_density = self._clamp(float(constraints.get("relative_density", rel_density)), 0.10, 0.60)
+                anisotropy = float(constraints.get("anisotropy_ratio", 1.0))
             candidate = {
                 "candidate_id": f"cand-{state.loop_count + 1}-{idx + 1:02d}",
                 "geometry_type": geometry,
@@ -374,7 +426,11 @@ class DesignAgent(BaseAgent):
                 "relative_density": round(rel_density, 4),
                 "porosity": round(1.0 - rel_density, 4),
                 "anisotropy_ratio": round(anisotropy, 3),
-                "orientation_deg": float(orientations[(base + idx) % len(orientations)]),
+                "orientation_deg": float(
+                    constraints.get("orientation_deg", 0.0)
+                    if geometry == "gyroid"
+                    else orientations[(base + idx) % len(orientations)]
+                ),
                 "defect_seed": int(base + idx + 1),
                 "defect_ratio": round(defect_ratio, 4),
                 "skin_thickness_mm": round(skin, 3),
@@ -799,12 +855,8 @@ class DesignAgent(BaseAgent):
     @classmethod
     def _tpms_fields(cls, candidate: dict[str, Any]) -> dict[str, Any]:
         """Expose optional TPMS controls while preserving the existing payload contract."""
-        wall = float(candidate.get("wall_thickness_mm", 1.2))
-        cell = max(float(candidate.get("cell_size_mm", 7.5)), 1e-6)
         rel_density = float(candidate.get("relative_density", 0.32))
-        physical_min = cls._clamp(0.50 * wall * (6.283185307179586 / cell), 0.18, 0.68)
-        density_threshold = 0.10 + 0.40 * rel_density + min(0.06, 0.20 * wall / cell)
-        thickness = cls._clamp(max(density_threshold, physical_min), 0.18, 0.68)
+        thickness = tpms_level_for_relative_density(rel_density)
         return {
             "tpms_surface": "gyroid",
             "tpms_thickness": round(thickness, 4),

@@ -7,6 +7,7 @@ from pathlib import Path
 import os
 import subprocess
 import sys
+import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -145,3 +146,80 @@ def test_basic_ci_has_windows_bridge_job() -> None:
     assert "windows-latest" in workflow
     assert "windows-bridge" in workflow
     assert "native_acceptance.ps1" in workflow
+
+
+def test_windows_bridge_portable_release_has_one_click_offline_contract() -> None:
+    package = ROOT / "Pyautogui_server_for_window"
+    launcher = (package / "portable" / "START_EQUIPMENT_BRIDGE.cmd").read_text(encoding="utf-8")
+    bootstrap = (package / "portable" / "bootstrap_portable.ps1").read_text(encoding="utf-8")
+    runtime_requirements = (package / "requirements-portable.txt").read_text(encoding="utf-8").lower()
+
+    assert "%~dp0" in launcher
+    assert "bootstrap_portable.ps1" in launcher
+    assert "scripts\\run_bridge.ps1" in bootstrap
+    assert "-DataRoot" in bootstrap
+    assert "data" in bootstrap.lower()
+    assert "-OpenBrowser" in bootstrap
+
+    assert "runtime\\python" in bootstrap
+    assert '"python.exe"' in bootstrap
+    assert 'Join-Path $vendorRoot "python' in bootstrap
+    assert 'Join-Path $vendorRoot "wheelhouse"' in bootstrap
+    assert "--no-index" in bootstrap
+    assert "--find-links" in bootstrap
+    assert "requirements-portable.txt" in bootstrap
+    assert "Start-Process" in bootstrap
+    assert "RunAs" not in bootstrap
+
+    assert "pyinstaller" not in runtime_requirements
+    for dependency in ("pyautogui", "pillow", "opencv-python", "pynput", "pywinauto", "pytesseract"):
+        assert dependency in runtime_requirements
+
+
+def test_windows_bridge_portable_builder_emits_clean_single_folder_manifest() -> None:
+    package = ROOT / "Pyautogui_server_for_window"
+    builder_path = package / "scripts" / "build_portable_release.py"
+    assert builder_path.is_file()
+
+    with tempfile.TemporaryDirectory(prefix="atr_portable_release_contract_") as tmp:
+        output_root = Path(tmp) / "release"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(builder_path),
+                "--output",
+                str(output_root),
+                "--source-only",
+            ],
+            cwd=package,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr + result.stdout
+        manifest = json.loads((output_root / "portable_manifest.json").read_text(encoding="utf-8"))
+
+        assert manifest["schema"] == "atr.windows_equipment_bridge.portable.v1"
+        assert manifest["offline_ready"] is False
+        assert manifest["data_root"] == "data"
+        for relative in (
+            "START_EQUIPMENT_BRIDGE.cmd",
+            "STOP_EQUIPMENT_BRIDGE.cmd",
+            "bootstrap_portable.ps1",
+            "bridge/windows_pyautogui_bridge_server.py",
+            "scripts/run_bridge.ps1",
+            "requirements-portable.txt",
+            "PORTABLE_README_KO.txt",
+        ):
+            assert (output_root / relative).is_file(), relative
+
+        env_example = (output_root / "examples" / "windows_bridge.env.example.ps1").read_text(encoding="utf-8")
+        assert "WINDOWS_PYAUTOGUI_ATR_API_URL" in env_example
+        assert "optional" in env_example.lower()
+        packaged_server = (output_root / "bridge" / "windows_pyautogui_bridge_server.py").read_text(encoding="utf-8")
+        assert "atr.windows_controller_connection.v1" in packaged_server
+        assert "ATR_CONTROLLER_MULTIPLE_CANDIDATES" in packaged_server
+
+        forbidden_names = {".bridge_token", "bridge_requests.jsonl", "controller_connection.json", "__pycache__"}
+        assert not any(path.name in forbidden_names for path in output_root.rglob("*"))

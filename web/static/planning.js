@@ -210,6 +210,7 @@ let liveKnowledgeActivityChart = null;
 let liveKnowledgeActivityChartMount = null;
 let liveKnowledgeActivityResizeObserver = null;
 let liveBoVisualization = null;
+let liveBoVisualizationHydrationTimer = null;
 let liveKnowledgeRelationSummary = {
   examined: 0,
   proposed: 0,
@@ -833,6 +834,8 @@ function compactPlanningStateForStorage(state = {}) {
     "latest_orchestrator_followup",
     "latest_orchestrator_decision",
     "latest_orchestrator_handoff",
+    "planning_cycle_contract",
+    "safety_budget",
     "latest_mission_contract",
     "latest_orchestration_plan",
     "design_report",
@@ -987,6 +990,7 @@ function discardStaleLivePlanningCache(serverSession = {}) {
   liveLastSession = {};
   liveLastSnapshot = {};
   liveBrowserCacheRestoredRunId = "";
+  clearLiveBoVisualization();
   if (planningChatLog) planningChatLog.innerHTML = "";
   return true;
 }
@@ -2476,8 +2480,12 @@ function boCardKey(msg, index = "") {
   return parts.map((item) => String(item || "").replace(/[^a-zA-Z0-9_.:-]+/g, "-")).join("::");
 }
 
-function renderBoExpandedBody(trace) {
-  const visibleTrace = trace.length > 12 ? trace.slice(-12) : trace;
+function renderBoExpandedBody(trace, visualization) {
+  const renderer = window.BOVisualization;
+  const latestTrace = trace.length ? trace[trace.length - 1] : {};
+  const latestVisualization = renderer && renderer.isValid(visualization)
+    ? visualization
+    : (renderer && renderer.isValid(latestTrace.visualization) ? latestTrace.visualization : null);
   const selectedRows = trace
     .map((item) => {
       const selected = item.selected || {};
@@ -2494,10 +2502,9 @@ function renderBoExpandedBody(trace) {
 
   return `
     <div class="bo-plot-stack">
-      ${trace.length > visibleTrace.length ? `<p class="hint">최근 ${visibleTrace.length}/${trace.length} step만 표시합니다.</p>` : ""}
-      ${visibleTrace.length
-        ? visibleTrace.map((item) => `<article class="bo-trace-card">${renderBoTraceSvg(item)}</article>`).join("")
-        : `<div class="bo-plot-empty">BO surrogate/acquisition trace가 없습니다. BO/MBO strategy 결과가 들어오면 여기에 표시됩니다.</div>`}
+      ${latestVisualization
+        ? `<article class="bo-trace-card bo-trace-card-shared">${BOVisualization.renderPlot(latestVisualization, { mode: "parameter_slice", parameter: latestVisualization.view?.selected_parameter || "" })}</article>`
+        : `<div class="bo-plot-empty">BO posterior/acquisition 산출물이 아직 없습니다.</div>`}
     </div>
     ${selectedRows ? `<div class="bo-selected-points">${selectedRows}</div>` : ""}
   `;
@@ -2524,29 +2531,45 @@ function renderBoResultCard(msg, index = "") {
   const latestSelected = latestTrace.selected || {};
   const cardKey = boCardKey(msg, index);
   const expanded = liveExpandedBoCards.has(cardKey);
+  const initialDesignPhase = boOptimizationPhase(boResult) === "initial_design";
+  const initial = boInitialDesignStatus(boResult);
+  const summaryRows = initialDesignPhase
+    ? [
+      ["phase", "Latin Hypercube Initial Design"],
+      ["sampler", initial.sampler],
+      ["progress", `${initial.completed}/${initial.target}`],
+      ["next_lhs_point", `${initial.nextIndex}/${initial.target}`],
+      ["candidate", recommendation.candidate_id],
+      ["selection_method", recommendation.selection_method || "latin_hypercube"],
+      ["acquisition", "acquisition inactive"],
+      ["parameters", recommendation.parameters || {}],
+    ]
+    : [
+      ["strategy", `${boResult.strategy || "-"} / benchmark=${boResult.benchmark_strategy || "-"}`],
+      ["acquisition", boResult.acquisition],
+      ["budget", boResult.budget],
+      ["trace_steps", trace.length],
+      ["latest_candidate", latestSelected.candidate_id],
+      ["recommended_candidate", recommendation.candidate_id],
+      ["combined_score", recommendation.combined_score],
+      ["recommended_score", recommendation.objective_score],
+      ["reasoning", boResult.reasoning && boResult.reasoning.operator_summary ? boResult.reasoning.operator_summary : "-"],
+    ];
 
   return `
     <div class="bo-live-card" data-bo-card-key="${escapeHtml(cardKey)}">
       <div class="runtime-card-section bo-card-summary">
         <div class="bo-card-head">
-          <h4>BO Surrogate / Acquisition Trace</h4>
+          <h4>${initialDesignPhase ? "Latin Hypercube Initial Design" : "BO Surrogate / Acquisition Trace"}</h4>
           <button class="btn small bo-graph-toggle" type="button" data-bo-card-key="${escapeHtml(cardKey)}" aria-expanded="${expanded ? "true" : "false"}">${expanded ? "그래프 접기" : "그래프 보기"}</button>
         </div>
-        ${runtimeRows([
-          ["strategy", `${boResult.strategy || "-"} / benchmark=${boResult.benchmark_strategy || "-"}`],
-          ["acquisition", boResult.acquisition],
-          ["budget", boResult.budget],
-          ["trace_steps", trace.length],
-          ["latest_candidate", latestSelected.candidate_id],
-          ["recommended_candidate", recommendation.candidate_id],
-          ["combined_score", recommendation.combined_score],
-          ["recommended_score", recommendation.objective_score],
-          ["reasoning", boResult.reasoning && boResult.reasoning.operator_summary ? boResult.reasoning.operator_summary : "-"],
-        ])}
+        ${runtimeRows(summaryRows)}
         ${Array.isArray(boResult.candidate_ranking) && boResult.candidate_ranking.length ? `<div class="bo-candidate-mini-list">${boResult.candidate_ranking.slice(0, 5).map((item) => `<div><strong>${escapeHtml(item.candidate_id || "candidate")}</strong><span>score=${escapeHtml(numberText(item.combined_score, 5))}</span><code>${escapeHtml(compactBoParams(item.parameters || {}))}</code></div>`).join("")}</div>` : ""}
       </div>
       <div class="bo-graph-body">
-        ${expanded ? renderBoExpandedBody(trace) : renderBoCollapsedBody(trace, latestSelected)}
+        ${initialDesignPhase
+          ? `<div class="bo-plot-collapsed"><strong>LHS ${escapeHtml(`${initial.completed}/${initial.target}`)}</strong><span>GP posterior and Expected Improvement activate after the initial design is complete.</span><code>${escapeHtml(compactBoParams(recommendation.parameters || {}))}</code></div>`
+          : (expanded ? renderBoExpandedBody(trace, boResult.visualization || latestTrace.visualization) : renderBoCollapsedBody(trace, latestSelected))}
       </div>
     </div>
   `;
@@ -3657,13 +3680,7 @@ function liveAgentShort(agentId) {
 }
 
 function formatPlanningCycleLabel(state = {}, running = false) {
-  const mode = String(state.mode || "test").toLowerCase();
-  const stage = String(state.stage || "idle").toLowerCase();
-  const completed = Number(state.loop_count || 0);
-  const active = Boolean(running && !["complete", "error", "idle"].includes(stage));
-  const current = Math.max(active ? completed + 1 : completed, 0);
-  if (mode === "test") return `Cycle ${current}/5`;
-  return `Cycle ${current}`;
+  return window.ATRRuntimeCycle.format(state, running, { prefix: "Cycle " });
 }
 
 function setCompactTextWithTitle(element, text, title) {
@@ -3899,6 +3916,15 @@ function eventStatusForAgent(agentId, state, running) {
   const events = currentRunEventSources();
   const agentEvents = events.filter((event) => agentIdFromEvent(event) === agentId);
   const activeAgent = agentIdFromStage(state.stage || "");
+  const runtimeStatus = state.agent_status && typeof state.agent_status === "object"
+    ? state.agent_status[`${agentId}_agent`]
+    : null;
+  if (
+    !running
+    && String(state.stage || "").toLowerCase() === "complete"
+    && runtimeStatus
+    && runtimeStatus.success === true
+  ) return "done";
   const pendingInput = agentEvents.some(eventRequiresOperatorInput)
     || planningMessagesCache.some((msg) => agentIdFromMessage(msg) === agentId && Boolean(msg.pending_operator_input));
   if (pendingInput) return running && activeAgent === agentId ? "running" : "waiting";
@@ -3993,6 +4019,8 @@ function renderAgentBinder(session) {
 function liveCenterRenderKey(session = liveLastSession) {
   const snapshot = liveLastSnapshot || {};
   const state = session?.state || snapshot.state || {};
+  const metadata = state.run_metadata && typeof state.run_metadata === "object" ? state.run_metadata : {};
+  const boVisualization = metadata.bo_visualization && typeof metadata.bo_visualization === "object" ? metadata.bo_visualization : {};
   const runId = state.run_id || liveCurrentRunId() || "none";
   const stage = state.stage || "idle";
   const messageCount = Array.isArray(session?.messages) ? session.messages.length : planningMessagesCache.length;
@@ -4006,6 +4034,9 @@ function liveCenterRenderKey(session = liveLastSession) {
   return [
     runId,
     stage,
+    Number(state.loop_count || 0),
+    Number(boVisualization.step || 0),
+    String(boVisualization.generated_at || ""),
     liveSelectedAgent,
     liveReportPage,
     liveSelectedEventKey,
@@ -4525,6 +4556,40 @@ function latestDesignAgentReport(report) {
   return latestReportPayload(report, ["latest_design_agent_report", "design_agent_report", "data.design_agent_report", "role_specific.design_agent_report", "sections.design_agent_report"]);
 }
 
+function latestDesignInitialDesign(report) {
+  const state = report && report.state ? report.state : {};
+  const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  const lhsVisualization = metadata.lhs_visualization && typeof metadata.lhs_visualization === "object"
+    ? metadata.lhs_visualization
+    : (metadata.bo_agent && typeof metadata.bo_agent.lhs_visualization === "object" ? metadata.bo_agent.lhs_visualization : null);
+  const lhsRenderer = window.LHSDesignVisualization;
+  if (lhsVisualization && lhsRenderer && lhsRenderer.isValid(lhsVisualization)) {
+    return { ...lhsVisualization.initial_design, visualization: lhsVisualization };
+  }
+  const contract = metadata.orchestrator_design_contract && typeof metadata.orchestrator_design_contract === "object"
+    ? metadata.orchestrator_design_contract
+    : {};
+  const contractInitial = contract.initial_design && typeof contract.initial_design === "object"
+    ? contract.initial_design
+    : {};
+  const seeded = metadata.bo_initial_design && typeof metadata.bo_initial_design === "object"
+    ? metadata.bo_initial_design
+    : {};
+  const points = Array.isArray(contractInitial.points) && contractInitial.points.length
+    ? contractInitial.points
+    : (Array.isArray(seeded.points) ? seeded.points : []);
+  if (!points.length) return null;
+  const completed = Number(contractInitial.completed ?? seeded.completed ?? points.filter((item) => item && item.status === "measured").length);
+  const target = Number(contractInitial.target ?? seeded.target ?? points.length);
+  return {
+    sampler: contractInitial.sampler || seeded.sampler || "latin_hypercube",
+    completed: Number.isFinite(completed) ? completed : 0,
+    target: Number.isFinite(target) && target > 0 ? target : points.length,
+    index: Number(contractInitial.index ?? contractInitial.next_index ?? seeded.index ?? 1),
+    points,
+  };
+}
+
 function latestSpecimenFabricationReport(report) {
   const state = report && report.state ? report.state : {};
   const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
@@ -4862,7 +4927,7 @@ function latestReportBoResult(report) {
     ? metadata.bo_visualization
     : null;
   if (metadata.bo_agent && typeof metadata.bo_agent === "object") {
-    return metadataVisualization && !metadata.bo_agent.visualization
+    return metadataVisualization
       ? { ...metadata.bo_agent, visualization: metadataVisualization }
       : metadata.bo_agent;
   }
@@ -5936,6 +6001,31 @@ function renderBoReportDetails(report) {
     return `${item.candidate_id || "candidate"} · combined=${renderRuntimeValue(item.combined_score)} · acq=${renderRuntimeValue((item.numeric || {}).acquisition_value)} · llm=${renderRuntimeValue(llm.preference_score)} · risk=${renderRuntimeValue(constraints.risk_score)} · valid=${renderRuntimeValue(constraints.valid)} · ${compactBoParams(item.parameters || {})}`;
   });
   const artifactRows = Object.entries(artifacts).map(([key, value]) => `${key} · ${renderRuntimeValue(value)}`);
+  if (boOptimizationPhase(boResult) === "initial_design") {
+    const initial = boInitialDesignStatus(boResult);
+    return `
+      <div class="live-agent-specific-report-detail live-agent-specific-bo-details">
+        <h5>Initial Design / LHS</h5>
+        ${runtimeRows([
+          ["sampler", initial.sampler],
+          ["progress", `${initial.completed}/${initial.target}`],
+          ["next_point", `${initial.nextIndex}/${initial.target}`],
+          ["backend", boResult.backend_active || "lhs"],
+          ["selection_method", recommendation.selection_method || "latin_hypercube"],
+          ["candidate_id", recommendation.candidate_id || "-"],
+          ["parameters", recommendation.parameters || {}],
+        ])}
+        <h5>Phase Contract</h5>
+        ${renderReportList([
+          "Candidate ranking is disabled during the LHS initial design.",
+          "LLM preference does not alter the selected LHS point.",
+          `GP posterior and Expected Improvement activate after ${initial.target} measured designs.`,
+        ], "No initial-design contract recorded.", 6)}
+        <h5>Artifacts</h5>
+        ${renderReportList(artifactRows, "No BO artifact paths recorded.", 8)}
+      </div>
+    `;
+  }
   return `
     <div class="live-agent-specific-report-detail live-agent-specific-bo-details">
       <h5>Evidence / Prior Intake</h5>
@@ -6012,6 +6102,95 @@ function renderAgentSpecificReportSection(report, status, agentLabel) {
 function liveCurrentRunId() {
   const state = (liveLastSession && liveLastSession.state) || (liveLastSnapshot && liveLastSnapshot.state) || {};
   return String(state.run_id || "");
+}
+
+function currentRunBoVisualization(visualization, runId = liveCurrentRunId()) {
+  const renderer = window.BOVisualization;
+  if (!renderer || !renderer.isValid(visualization)) return null;
+  const expectedRunId = String(runId || "");
+  const visualizationRunId = String(visualization.run_id || "");
+  if (expectedRunId && visualizationRunId !== expectedRunId) return null;
+  return visualization;
+}
+
+function boVisualizationPointCount(visualization) {
+  if (!visualization || typeof visualization !== "object") return 0;
+  const objectiveRows = Array.isArray(visualization.objective_trace?.rows)
+    ? visualization.objective_trace.rows.length
+    : 0;
+  const posteriorPoints = Array.isArray(visualization.posterior?.x)
+    ? visualization.posterior.x.length
+    : 0;
+  return objectiveRows + posteriorPoints;
+}
+
+function preferredLiveBoVisualization(incoming, cached, runId = liveCurrentRunId()) {
+  const incomingVisualization = currentRunBoVisualization(incoming, runId);
+  const cachedVisualization = currentRunBoVisualization(cached, runId);
+  if (!incomingVisualization) return cachedVisualization;
+  if (!cachedVisualization) return incomingVisualization;
+
+  const incomingStep = Number(incomingVisualization.step || 0);
+  const cachedStep = Number(cachedVisualization.step || 0);
+  if (incomingStep < cachedStep) return cachedVisualization;
+  const incomingPoints = boVisualizationPointCount(incomingVisualization);
+  const cachedPoints = boVisualizationPointCount(cachedVisualization);
+  if (incomingStep > cachedStep && incomingPoints < cachedPoints) return cachedVisualization;
+  if (incomingStep === cachedStep && incomingPoints < cachedPoints) return cachedVisualization;
+  return incomingVisualization;
+}
+
+function clearLiveBoVisualization() {
+  if (liveBoVisualizationHydrationTimer) {
+    window.clearTimeout(liveBoVisualizationHydrationTimer);
+    liveBoVisualizationHydrationTimer = null;
+  }
+  liveBoVisualization = null;
+  invalidateLiveCenterRender("report");
+  if (liveSelectedAgent !== "bo" || liveCurrentView !== "report") return;
+  const waiting = '<div class="bo-viz-empty">Waiting for a completed BO step.</div>';
+  const equation = liveReportPanel?.querySelector("[data-live-bo-equation]");
+  const posterior = liveReportPanel?.querySelector("[data-live-bo-posterior]");
+  if (equation) equation.innerHTML = waiting;
+  if (posterior) posterior.innerHTML = waiting;
+}
+
+function syncLiveBoVisualizationFromState(state = {}) {
+  const metadata = state.run_metadata && typeof state.run_metadata === "object" ? state.run_metadata : {};
+  const hasVisualizationField = Object.prototype.hasOwnProperty.call(metadata, "bo_visualization");
+  const cachedVisualization = currentRunBoVisualization(liveBoVisualization, state.run_id);
+  if (!hasVisualizationField && cachedVisualization) {
+    return true;
+  }
+  const visualization = currentRunBoVisualization(metadata.bo_visualization, state.run_id);
+  if (!visualization) {
+    const incomingRunId = String(metadata.bo_visualization?.run_id || "");
+    if (cachedVisualization && (!incomingRunId || incomingRunId === String(state.run_id || ""))) {
+      const cachedStep = Number(cachedVisualization.step || 0);
+      const incomingStep = Number(metadata.bo_visualization?.step || 0);
+      if (incomingStep > cachedStep) scheduleLiveBoVisualizationHydration();
+      return true;
+    }
+    clearLiveBoVisualization();
+    return false;
+  }
+  liveBoVisualization = preferredLiveBoVisualization(visualization, cachedVisualization, state.run_id);
+  if (
+    cachedVisualization
+    && liveBoVisualization === cachedVisualization
+    && Number(visualization.step || 0) > Number(cachedVisualization.step || 0)
+  ) {
+    scheduleLiveBoVisualizationHydration();
+  }
+  return true;
+}
+
+function scheduleLiveBoVisualizationHydration() {
+  if (liveBoVisualizationHydrationTimer) return;
+  liveBoVisualizationHydrationTimer = window.setTimeout(() => {
+    liveBoVisualizationHydrationTimer = null;
+    hydrateLiveBoVisualization();
+  }, 80);
 }
 
 function liveObjectiveExpressionSummary(node) {
@@ -6262,6 +6441,29 @@ function liveRunningFlag(session = {}, snapshot = {}, state = {}) {
   if (typeof snapshot.is_running === "boolean") return snapshot.is_running;
   if (typeof state.is_running === "boolean") return state.is_running;
   return false;
+}
+
+function shouldFreezeCompletedTestRun(session = liveLastSession) {
+  const snapshot = liveLastSnapshot || {};
+  const state = (session && session.state) || snapshot.state || {};
+  const metadata = state.run_metadata && typeof state.run_metadata === "object" ? state.run_metadata : {};
+  const cycleContract = metadata.planning_cycle_contract && typeof metadata.planning_cycle_contract === "object"
+    ? metadata.planning_cycle_contract
+    : {};
+  const missionContract = metadata.latest_mission_contract && typeof metadata.latest_mission_contract === "object"
+    ? metadata.latest_mission_contract
+    : metadata.mission_contract && typeof metadata.mission_contract === "object"
+      ? metadata.mission_contract
+      : {};
+  const testMode = String(cycleContract.mode || missionContract.mode || "").toLowerCase() === "test";
+  const totalCycles = Number(cycleContract.total_cycles || missionContract.safety_budget?.max_loop_count || 0);
+  const completedCycles = Number(state.loop_count || missionContract.loop_id || 0);
+  return testMode
+    && String(state.stage || "").toLowerCase() === "complete"
+    && !liveRunningFlag(session || {}, snapshot, state)
+    && Number.isFinite(totalCycles)
+    && totalCycles > 0
+    && completedCycles >= totalCycles;
 }
 
 function liveChatContextSummary() {
@@ -12208,6 +12410,34 @@ function renderDesignEvidenceCard(artifactLedger, rejected) {
   `;
 }
 
+function renderDesignInitialDesignBoard(report) {
+  const initial = latestDesignInitialDesign(report);
+  if (!initial) return renderDesignEmpty("Waiting for initial design data.");
+  const renderer = window.LHSDesignVisualization;
+  if (renderer && typeof renderer.renderPlot === "function") {
+    const legacyPoints = Array.isArray(initial.points) ? initial.points : [];
+    const legacyPayload = {
+      schema: "lhs_design_visualization.v1",
+      run_id: "legacy-live-state",
+      step: initial.index || Math.min(initial.completed + 1, initial.target),
+      initial_design: initial,
+      design_space: {
+        x: { name: "cell_size_mm", label: "Cell size", unit: "mm", kind: "discrete", values: [5.0, 6.0, 7.5, 10.0] },
+        y: { name: "relative_density", label: "Relative density", unit: "1", kind: "continuous", bounds: [0.20, 0.48] },
+      },
+      diagnostics: { coverage_fraction: initial.target ? initial.completed / initial.target : 0, duplicate_count: 0 },
+      status: "active",
+    };
+    return renderer.renderPlot(initial.visualization || { ...legacyPayload, initial_design: { ...initial, points: legacyPoints } });
+  }
+  return renderDashboardRows([
+    ["sampler", initial.sampler],
+    ["progress", `${initial.completed}/${initial.target}`],
+    ["next_index", initial.index],
+    ["variables", "cell_size_mm x relative_density"],
+  ]);
+}
+
 function renderDesignDashboardCards(report, status, agentLabel, profile) {
   const spec = report.spec || {};
   const screenReport = latestDesignAgentReport(report) || {};
@@ -12233,10 +12463,13 @@ function renderDesignDashboardCards(report, status, agentLabel, profile) {
   const generatedCount = specimenRows.length;
   const validCount = specimenRows.filter((item) => !/reject|fail|block|invalid/i.test(String(item.status || item.candidate_status || ""))).length;
   const previewCount = specimenRows.filter((item) => designImageUrlFromSource(item)).length;
+  const initialDesign = latestDesignInitialDesign(report);
   return `
     ${renderDashboardCard("Experiment Contract", renderDesignBriefCard(brief, objective, hypothesis, spec, prior, material, manufacturability, selected), { span: 3, tone: "design", eyebrow: "mission input", className: "ar-design-reference-card ar-design-brief-card" })}
     ${renderDashboardCard("Generated Specimens", renderDesignCandidateCards(screenReport, designReport, report), { span: 9, tone: "design", eyebrow: "built specimen log", className: "ar-design-reference-card ar-design-candidates-card", meta: `${renderRuntimeValue(generatedCount)} built / ${renderRuntimeValue(validCount)} usable / ${renderRuntimeValue(previewCount)} previews` })}
-    ${renderDashboardCard("DOE Map / Design Space", renderDesignParameterSweep(screenReport), { span: 4, tone: "metrics", eyebrow: "parameter sweep", className: "ar-design-reference-card ar-design-sweep-card" })}
+    ${initialDesign
+      ? renderDashboardCard("Initial Design / LHS", renderDesignInitialDesignBoard(report), { span: 4, tone: "metrics", eyebrow: "mixed-space experimental design", className: "ar-design-reference-card ar-design-sweep-card ar-design-lhs-card" })
+      : renderDashboardCard("DOE Map / Design Space", renderDesignParameterSweep(screenReport), { span: 4, tone: "metrics", eyebrow: "parameter sweep", className: "ar-design-reference-card ar-design-sweep-card" })}
     ${renderDashboardCard("Evaluation Matrix", renderDesignExpectedPerformance(screenReport, designReport, selected), { span: 4, tone: "metrics", eyebrow: "objective vs mass", className: "ar-design-reference-card ar-design-performance-card" })}
     ${renderDashboardCard("Buildability Gate", renderDesignManufacturabilityCard(screenReport, designReport, selected, spec, material, specimenRows.length ? specimenRows : candidateRows), { span: 4, tone: handoff.required_fields_present === false || (manufacturability.warnings || []).length ? "warning" : "success", eyebrow: "print path", className: "ar-design-reference-card ar-design-manufacturing-card" })}
     ${renderDashboardCard("Active Handoff", renderDesignHandoffCard(handoff, selected, material, spec, artifactLedger), { span: 12, tone: handoff.required_fields_present === false || rejected.length ? "warning" : "success", eyebrow: "dsn -> spc", className: "ar-design-reference-card ar-design-handoff-card" })}
@@ -15068,6 +15301,72 @@ function renderBoRankingBoard(boResult) {
   `;
 }
 
+function boLatestTrace(boResult) {
+  const benchmark = boResult && boResult.benchmark && typeof boResult.benchmark === "object"
+    ? boResult.benchmark
+    : {};
+  const strategy = boStrategyFromBenchmark(benchmark);
+  const traces = strategy && Array.isArray(strategy.surrogate_trace) ? strategy.surrogate_trace : [];
+  const trace = traces.length ? traces[traces.length - 1] : {};
+  return trace && typeof trace === "object" ? trace : {};
+}
+
+function boOptimizationPhase(boResult) {
+  const trace = boLatestTrace(boResult);
+  const visualizationBackend = boResult && boResult.visualization && boResult.visualization.backend
+    && typeof boResult.visualization.backend === "object"
+    ? boResult.visualization.backend
+    : {};
+  const phase = String(
+    (boResult && boResult.optimization_phase)
+    || trace.phase
+    || visualizationBackend.phase
+    || (String(visualizationBackend.active || "").toLowerCase() === "lhs" ? "initial_design" : "")
+    || (boResult && boResult.initial_design && "initial_design")
+    || ""
+  ).trim().toLowerCase();
+  return phase;
+}
+
+function boInitialDesignStatus(boResult) {
+  const trace = boLatestTrace(boResult);
+  const traceInitial = trace.initial_design && typeof trace.initial_design === "object"
+    ? trace.initial_design
+    : {};
+  const initial = boResult && boResult.initial_design && typeof boResult.initial_design === "object"
+    ? boResult.initial_design
+    : {};
+  const visualizationInitial = boResult && boResult.visualization && boResult.visualization.initial_design
+    && typeof boResult.visualization.initial_design === "object"
+    ? boResult.visualization.initial_design
+    : {};
+  const completed = Number(initial.completed ?? traceInitial.completed ?? visualizationInitial.completed ?? 0);
+  const target = Number(initial.target ?? traceInitial.target ?? visualizationInitial.target ?? 8);
+  const nextIndex = Number(initial.next_index ?? Math.min(completed + 1, target));
+  return {
+    sampler: String(initial.sampler || traceInitial.sampler || visualizationInitial.sampler || "latin_hypercube"),
+    completed: Number.isFinite(completed) ? completed : 0,
+    target: Number.isFinite(target) && target > 0 ? target : 8,
+    nextIndex: Number.isFinite(nextIndex) ? nextIndex : 1,
+  };
+}
+
+function renderBoInitialDesignBoard(boResult) {
+  const initial = boInitialDesignStatus(boResult);
+  const recommendation = boResult.recommendation || boResult.selected || {};
+  const pct = dashboardPercent((initial.completed / initial.target) * 100);
+  return `
+    <div class="ar-bo-ranking-board ar-bo-initial-design-board">
+      <article class="selected" style="--score:${numberText(pct, 2)}%;">
+        <div><strong>Latin Hypercube Initial Design</strong><span>${escapeHtml(`${initial.completed}/${initial.target}`)}</span></div>
+        <div class="bar"><i></i></div>
+        <small>next LHS point ${escapeHtml(`${initial.nextIndex}/${initial.target}`)} · normalized 2D design space</small>
+      </article>
+      <div class="ar-bo-lhs-parameters">${renderBoParameterChips(recommendation)}</div>
+    </div>
+  `;
+}
+
 function renderBoParameterChips(candidate) {
   const params = candidate && typeof candidate.parameters === "object" ? candidate.parameters : {};
   const entries = Object.entries(params).slice(0, 12);
@@ -15517,8 +15816,13 @@ function renderKnowledgeDashboardCards(report, status, agentLabel, profile) {
 
 function renderBoDashboardCards(report, status, agentLabel, profile) {
   const boResult = latestReportBoResult(report) || {};
-  const visualization = boResult.visualization || liveBoVisualization;
   const renderer = window.BOVisualization;
+  const reportRunId = String(report?.state?.run_id || liveCurrentRunId());
+  const visualization = preferredLiveBoVisualization(
+    boResult.visualization,
+    liveBoVisualization,
+    reportRunId
+  );
   const hasVisualization = Boolean(renderer && renderer.isValid(visualization));
   if (hasVisualization) liveBoVisualization = visualization;
   const equationBody = hasVisualization
@@ -15528,7 +15832,7 @@ function renderBoDashboardCards(report, status, agentLabel, profile) {
     ? BOVisualization.renderPlot(visualization, { mode: "parameter_slice", parameter: visualization.view?.selected_parameter || "" })
     : '<div class="bo-viz-empty">Waiting for a completed BO step.</div>';
   const visualizationCards = `
-    ${renderDashboardCard("BO Objective Equation", `<div data-live-bo-equation>${equationBody}</div>`, { span: 4, tone: "bo", eyebrow: "active objective" })}
+    ${renderDashboardCard("BO Objective Equation", `<div data-live-bo-equation>${equationBody}</div>`, { span: 4, tone: "bo", eyebrow: "active objective", className: "bo-objective-summary-card" })}
     ${renderDashboardCard("Live Posterior", `<div data-live-bo-posterior>${posteriorBody}</div>`, { span: 8, tone: "bo", eyebrow: "uncertainty + acquisition" })}
   `;
   const recommendation = boResult.recommendation || boResult.selected || {};
@@ -15665,7 +15969,7 @@ function renderAgentSpecializedDashboardSections(session, report, status, agentL
   const specialized = hasBuiltInReferenceDashboard ? cardsByAgent[dashboardAgentId]() : renderAgentWorkcellCard(profile, report, status, agentLabel);
   const descriptorCards = hasBuiltInReferenceDashboard ? "" : renderAgentDescriptorCards(report, agentId);
   const descriptorReportSections = hasBuiltInReferenceDashboard ? "" : renderAgentDescriptorReportSections(report, agentId);
-  const visualization = ["orchestrator", "design", "specimen", "vision", "manipulation", "equipment", "analysis", "knowledge"].includes(dashboardAgentId) ? "" : renderAgentVisualizationCard(report, status, agentLabel);
+  const visualization = ["orchestrator", "design", "specimen", "vision", "manipulation", "equipment", "analysis", "knowledge", "bo"].includes(dashboardAgentId) ? "" : renderAgentVisualizationCard(report, status, agentLabel);
   const checklistItems = Array.isArray(profile.checklist) ? profile.checklist : [];
   const checklist = controlSurface && !["objective", "orchestrator"].includes(agentId) && checklistItems.length
     ? renderDashboardCard(`${agentLabel} Checklist`, dashboardList(checklistItems, "No checklist recorded.", 5), { span: 4, tone: agentId || "agent", eyebrow: "operator" })
@@ -17943,6 +18247,7 @@ function applyPlanningSession(session) {
   const snapshot = liveLastSnapshot || {};
   const state = liveLastSession.state || snapshot.state || {};
   const metadata = state.run_metadata || {};
+  syncLiveBoVisualizationFromState(state);
   planningPendingSpecimenInput = metadata.pending_specimen_input || null;
   const running = liveRunningFlag(liveLastSession, snapshot, state);
   setLiveBackendPlanningBusy(Boolean(liveLastSession.is_planning_busy));
@@ -18138,6 +18443,7 @@ async function refreshPlanningAuxiliaryState(session) {
 async function refreshPlanningState(options = {}) {
   if (liveRefreshInFlight && !options.force) return liveRefreshInFlight;
   const background = Boolean(options.background);
+  if (background && shouldFreezeCompletedTestRun(liveLastSession)) return liveLastSession;
   markLiveSyncRefreshStart();
   liveRefreshInFlight = (async () => {
     try {
@@ -18154,7 +18460,7 @@ async function refreshPlanningState(options = {}) {
       if (!session.runtime && liveLastSnapshot.runtime) session.runtime = liveLastSnapshot.runtime;
       applyPlanningSession(session);
       markLiveSyncComplete();
-      refreshPlanningAuxiliaryState(session);
+      if (!shouldFreezeCompletedTestRun(session)) refreshPlanningAuxiliaryState(session);
       return session;
     } catch (err) {
       markLiveSyncError(err);
@@ -18307,19 +18613,61 @@ function shouldRefreshPlanningForRuntimeEvent(eventType, data = {}) {
   return Boolean(payload.stage || payload.agent || payload.node_id || payload.module_id || payload.status);
 }
 
-function updateLiveBoVisualizationCards(visualization) {
+function updateLiveBoVisualizationCards(visualization, expectedRunId = liveCurrentRunId()) {
   const renderer = window.BOVisualization;
-  if (!renderer || !renderer.isValid(visualization)) return false;
-  liveBoVisualization = visualization;
+  const cachedVisualization = currentRunBoVisualization(liveBoVisualization, expectedRunId);
+  const incomingVisualization = currentRunBoVisualization(visualization, expectedRunId);
+  const currentVisualization = preferredLiveBoVisualization(
+    incomingVisualization,
+    cachedVisualization,
+    expectedRunId
+  );
+  if (!currentVisualization) {
+    const incomingRunId = String(visualization?.run_id || "");
+    if (cachedVisualization && (!incomingRunId || incomingRunId === String(expectedRunId || ""))) return false;
+    clearLiveBoVisualization();
+    return false;
+  }
+  if (!incomingVisualization && cachedVisualization) {
+    const incomingStep = Number(visualization?.step || 0);
+    const cachedStep = Number(cachedVisualization.step || 0);
+    if (incomingStep >= cachedStep) scheduleLiveBoVisualizationHydration();
+    return false;
+  }
+  if (
+    incomingVisualization
+    && cachedVisualization
+    && currentVisualization === cachedVisualization
+    && Number(incomingVisualization.step || 0) > Number(cachedVisualization.step || 0)
+  ) {
+    scheduleLiveBoVisualizationHydration();
+  }
+  liveBoVisualization = currentVisualization;
+  invalidateLiveCenterRender("report");
   if (liveSelectedAgent !== "bo" || liveCurrentView !== "report") return true;
   const equation = liveReportPanel?.querySelector("[data-live-bo-equation]");
   const posterior = liveReportPanel?.querySelector("[data-live-bo-posterior]");
-  if (equation) equation.innerHTML = renderer.renderEquationCard(visualization);
-  if (posterior) posterior.innerHTML = renderer.renderPlot(visualization, {
+  if (equation) equation.innerHTML = renderer.renderEquationCard(currentVisualization);
+  if (posterior) posterior.innerHTML = renderer.renderPlot(currentVisualization, {
     mode: "parameter_slice",
-    parameter: visualization.view?.selected_parameter || "",
+    parameter: currentVisualization.view?.selected_parameter || "",
   });
   return Boolean(equation || posterior);
+}
+
+async function hydrateLiveBoVisualization() {
+  try {
+    const response = await fetch("/api/bo/config", { cache: "no-store" });
+    if (!response.ok) return false;
+    const payload = await response.json();
+    const runId = String(payload?.state?.run_id || payload?.run_id || liveCurrentRunId());
+    if (!payload.recent_visualization || !Object.keys(payload.recent_visualization).length) {
+      return Boolean(currentRunBoVisualization(liveBoVisualization, runId));
+    }
+    return updateLiveBoVisualizationCards(payload.recent_visualization, runId);
+  } catch (_err) {
+    return false;
+  }
 }
 
 function connectPlanningEventStream() {
@@ -18340,11 +18688,18 @@ function connectPlanningEventStream() {
       markLiveStreamState("live", eventTime);
       if (eventType === "bo.visualization.updated") {
         updateLiveBoVisualizationCards(data.payload?.visualization);
+        // SSE keeps large posterior arrays compact; fetch the complete state
+        // and its server-rendered artifact URLs after the notification.
+        hydrateLiveBoVisualization();
       }
       if (eventType) {
         liveRecentEvents.push(data);
         liveRecentEvents = liveRecentEvents.slice(-160);
       }
+      const eventRunId = String(data.run_id || data.payload?.run_id || "");
+      const sameCompletedRunEvent = shouldFreezeCompletedTestRun(liveLastSession)
+        && (!eventRunId || eventRunId === liveCurrentRunId());
+      if (sameCompletedRunEvent) return;
       if (shouldRefreshPlanningForRuntimeEvent(eventType, data)) {
         schedulePlanningRefresh();
       } else {
@@ -19510,6 +19865,7 @@ async function requestLiveEmergencyReset() {
     const endpoint = liveEmergencyEndpoint("emergency-reset", "/api/run/emergency-reset");
     await recordLiveIntentEvent("runtime_command_requested", "emergency_reset", "Live GUI emergency reset requested.", { command: "emergency_reset", endpoint });
     await fetchJsonOrThrow(endpoint, { method: "POST" });
+    clearLiveBoVisualization();
     resetPlanningMessageDisplayState();
     resetPlanningSessionIdForEmergencyReset();
     await refreshPlanningState({ force: true });
@@ -19551,7 +19907,7 @@ setInterval(() => {
   tickLiveRuntimeClock();
   updateLiveConnectionChips();
   updateVisionSpecimenCountdowns();
-  if (liveSyncIsStale() && !liveRefreshInFlight && planningThinkingCount === 0) {
+  if (!shouldFreezeCompletedTestRun(liveLastSession) && liveSyncIsStale() && !liveRefreshInFlight && planningThinkingCount === 0) {
     refreshPlanningState({ background: true }).catch(() => setChatStatus("SYNC ERROR", "warning"));
   }
   if (liveSelectedAgent === "knowledge" && liveCurrentView === "report") {
@@ -19618,6 +19974,10 @@ async function initializeLiveGuiRuntime() {
   }
   connectPlanningEventStream();
   return refreshPlanningState()
+    .then(async (session) => {
+      await hydrateLiveBoVisualization();
+      return session;
+    })
     .then(bootstrapLiveOrchestrator)
     .catch(() => setChatStatus("ERROR", "warning"));
 }

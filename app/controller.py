@@ -36,6 +36,7 @@ from typing import Any
 import httpx
 
 from agents.base_agent import AgentContext
+from agents.bo_agent import BOAgent
 from agents.registry import AgentRegistry
 from logging_system.event_logger import log_system_event
 from logging_system.logger_factory import LoggerBundle, build_logger_bundle
@@ -48,6 +49,7 @@ from mcp_tools.tpms_geometry import (
 from graphs import load_graph_config, load_module_config
 from orchestrator.run_loop import RunLoop
 from orchestrator.langgraph_runtime import compact_runtime_payload, trim_runtime_memory
+from orchestrator.runtime_defaults import TEST_MODE_LOOP_CYCLES as DEFAULT_TEST_MODE_LOOP_CYCLES
 from orchestrator.state import AgentRuntimeStatus, Mode, OrchestratorState, Stage
 from orchestrator.supervisor import (
     build_decision_record,
@@ -69,7 +71,9 @@ from utils.vision_operator_intervention import (
 )
 from device_bridges.bambu_bridge import PrinterDeviceBridgeManager
 from experiments.bo_visualization import validate_bo_visualization
+from experiments.lhs_design_visualization import validate_lhs_design_visualization
 from reporting.bo_visualization_artifacts import write_bo_visualization_artifacts
+from reporting.lhs_design_visualization_artifacts import write_lhs_design_visualization_artifacts
 from utils.config_loader import load_all_configs
 from utils.paths import resolve_path
 from utils.printer_profile import adapt_print_profile_for_provider, load_prusa_print_profile
@@ -99,7 +103,7 @@ class MainController:
     """Stateful controller for orchestrator execution and event fanout."""
 
     TEST_MODE_FIXED_GEOMETRY = "gyroid"
-    TEST_MODE_LOOP_CYCLES = 5
+    TEST_MODE_LOOP_CYCLES = DEFAULT_TEST_MODE_LOOP_CYCLES
     TRANSIENT_PRINTER_COMMUNICATION_FAILURE_CODES = {
         "BAMBU_MQTT_REPORT_TIMEOUT",
         "BAMBU_MQTT_REPORT_NOT_FRESH",
@@ -112,6 +116,7 @@ class MainController:
     CLOSED_LOOP_FREE_SHAPE_KEYS = {
         "candidate_id",
         "specimen_id",
+        "cell_size_mm",
         "wall_thickness_mm",
         "relative_density",
         "porosity",
@@ -1173,6 +1178,53 @@ class MainController:
                 return item["visualization"]
         return {}
 
+    @staticmethod
+    def _lhs_visualization_from_result(result: dict[str, Any]) -> dict[str, Any]:
+        """Extract the latest dedicated LHS design visualization."""
+        direct = result.get("lhs_visualization")
+        if isinstance(direct, dict):
+            return direct
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        bo_result = data.get("bo_result") if isinstance(data.get("bo_result"), dict) else {}
+        if isinstance(bo_result.get("lhs_visualization"), dict):
+            return bo_result["lhs_visualization"]
+        strategies = MainController._bo_strategies_from_result(result)
+        bo_payload = strategies.get("bo") if isinstance(strategies.get("bo"), dict) else {}
+        trace = bo_payload.get("surrogate_trace") if isinstance(bo_payload.get("surrogate_trace"), list) else []
+        for item in reversed(trace):
+            if isinstance(item, dict) and isinstance(item.get("lhs_visualization"), dict):
+                return item["lhs_visualization"]
+        return {}
+
+    def _write_lhs_visualization_artifacts(self, *, workspace: str, result: dict[str, Any]) -> list[dict[str, Any]]:
+        """Write the initial-design figure independently from BO posterior artifacts."""
+        visualization = self._lhs_visualization_from_result(result)
+        if not visualization:
+            return []
+        try:
+            output_dir = self._workspace_artifact_dir(workspace)
+            records = write_lhs_design_visualization_artifacts(visualization, output_dir)
+            return [
+                {
+                    **record,
+                    "key": f"workspace.lhs_design.{Path(str(record['path'])).suffix.lstrip('.')}",
+                    "path": self._workspace_artifact_relpath(Path(str(record["path"]))),
+                    "workspace": workspace,
+                }
+                for record in records
+            ]
+        except Exception as exc:
+            return [
+                {
+                    "key": "workspace.lhs_design.warning",
+                    "path": "",
+                    "name": "",
+                    "source": "lhs_design_visualization.v1",
+                    "workspace": workspace,
+                    "error": f"{exc.__class__.__name__}: {exc}",
+                }
+            ]
+
     def _write_bo_visualization_artifacts(self, *, workspace: str, result: dict[str, Any]) -> list[dict[str, Any]]:
         """Write publication artifacts without allowing rendering to fail BO execution."""
         visualization = self._bo_visualization_from_result(result)
@@ -1313,6 +1365,9 @@ class MainController:
         if result_record:
             records.append(result_record)
         if workspace == "bo":
+            lhs_visualization = self._lhs_visualization_from_result(result)
+            if lhs_visualization:
+                records.extend(self._write_lhs_visualization_artifacts(workspace=workspace, result=result))
             bo_visualization = self._bo_visualization_from_result(result)
             if bo_visualization:
                 records.extend(self._write_bo_visualization_artifacts(workspace=workspace, result=result))
@@ -1863,7 +1918,13 @@ class MainController:
         await self._broadcast_controller_event(event)
         return event
 
-    async def emit_bo_visualization(self, visualization: dict[str, Any], *, source: str) -> dict[str, Any]:
+    async def emit_bo_visualization(
+        self,
+        visualization: dict[str, Any],
+        *,
+        source: str,
+        force_event: bool = False,
+    ) -> dict[str, Any]:
         """Persist and stream one monotonic BO visualization projection."""
         normalized = dict(validate_bo_visualization(visualization))
         run_id = str(normalized.get("run_id") or self._state.run_id)
@@ -1873,23 +1934,28 @@ class MainController:
         latest = metadata.get("bo_visualization") if isinstance(metadata.get("bo_visualization"), dict) else {}
         latest_run_id = str(latest.get("run_id") or "")
         latest_step = int(latest.get("step") or 0)
-        if latest_run_id == run_id and latest_step >= step:
+        if latest_run_id == run_id and latest_step > step:
             return {"emitted": False, "reason": "duplicate_or_older_step", "run_id": run_id, "step": step}
 
-        metadata["bo_visualization"] = normalized
-        steps = metadata.setdefault("bo_visualization_steps", [])
-        if not isinstance(steps, list):
-            steps = []
-            metadata["bo_visualization_steps"] = steps
-        steps.append(
-            {
-                "run_id": run_id,
-                "step": step,
-                "selected_parameter": str((normalized.get("view") or {}).get("selected_parameter") or ""),
-                "generated_at": str(normalized.get("generated_at") or ""),
-            }
-        )
-        metadata["bo_visualization_steps"] = steps[-80:]
+        duplicate = latest_run_id == run_id and latest_step == step
+        if duplicate and not force_event:
+            return {"emitted": False, "reason": "duplicate_or_older_step", "run_id": run_id, "step": step}
+
+        if not duplicate:
+            metadata["bo_visualization"] = normalized
+            steps = metadata.setdefault("bo_visualization_steps", [])
+            if not isinstance(steps, list):
+                steps = []
+                metadata["bo_visualization_steps"] = steps
+            steps.append(
+                {
+                    "run_id": run_id,
+                    "step": step,
+                    "selected_parameter": str((normalized.get("view") or {}).get("selected_parameter") or ""),
+                    "generated_at": str(normalized.get("generated_at") or ""),
+                }
+            )
+            metadata["bo_visualization_steps"] = steps[-80:]
         event = await self.emit_runtime_event(
             event_type="bo.visualization.updated",
             message=f"BO visualization step {step} updated",
@@ -1898,6 +1964,50 @@ class MainController:
                 "agent": "bo",
                 "node_id": "bo",
                 "module_id": "bo",
+                "status": "done",
+                "source": source,
+                "run_id": run_id,
+                "step": step,
+                "visualization": normalized,
+            },
+        )
+        return {"emitted": True, "run_id": run_id, "step": step, "event": event}
+
+    async def emit_lhs_visualization(self, visualization: dict[str, Any], *, source: str) -> dict[str, Any]:
+        """Persist and stream one monotonic initial-design visualization."""
+        normalized = dict(validate_lhs_design_visualization(visualization))
+        run_id = str(normalized.get("run_id") or self._state.run_id)
+        normalized["run_id"] = run_id
+        step = int(normalized.get("step") or 0)
+        metadata = self._state.run_metadata
+        latest = metadata.get("lhs_visualization") if isinstance(metadata.get("lhs_visualization"), dict) else {}
+        latest_run_id = str(latest.get("run_id") or "")
+        latest_step = int(latest.get("step") or 0)
+        if latest_run_id == run_id and latest_step >= step:
+            return {"emitted": False, "reason": "duplicate_or_older_step", "run_id": run_id, "step": step}
+
+        metadata["lhs_visualization"] = normalized
+        steps = metadata.setdefault("lhs_visualization_steps", [])
+        if not isinstance(steps, list):
+            steps = []
+            metadata["lhs_visualization_steps"] = steps
+        steps.append(
+            {
+                "run_id": run_id,
+                "step": step,
+                "completed": int((normalized.get("initial_design") or {}).get("completed") or 0),
+                "generated_at": str(normalized.get("generated_at") or ""),
+            }
+        )
+        metadata["lhs_visualization_steps"] = steps[-80:]
+        event = await self.emit_runtime_event(
+            event_type="lhs.visualization.updated",
+            message=f"LHS design visualization step {step} updated",
+            run_id=run_id,
+            payload={
+                "agent": "design",
+                "node_id": "design",
+                "module_id": "design",
                 "status": "done",
                 "source": source,
                 "run_id": run_id,
@@ -2654,13 +2764,38 @@ class MainController:
         if not isinstance(bo_result, dict):
             return {}
         compact: dict[str, Any] = {}
-        for key in ("strategy", "benchmark_strategy", "acquisition", "status", "summary", "budget", "bo_backend"):
+        lhs_visualization = cls._lhs_visualization_from_result(bo_result)
+        if lhs_visualization:
+            compact["lhs_visualization"] = compact_runtime_payload(lhs_visualization)
+        visualization = cls._bo_visualization_from_result(bo_result)
+        if visualization:
+            compact["visualization"] = compact_runtime_payload(visualization)
+        for key in (
+            "strategy",
+            "benchmark_strategy",
+            "acquisition",
+            "status",
+            "summary",
+            "budget",
+            "bo_backend",
+            "optimization_phase",
+            "backend_active",
+            "selection_rule",
+            "failure_penalty",
+        ):
             if key in bo_result:
                 value = bo_result.get(key)
                 compact[key] = value[:500] if isinstance(value, str) else value
+        initial_design = bo_result.get("initial_design") if isinstance(bo_result.get("initial_design"), dict) else {}
+        if initial_design:
+            compact["initial_design"] = {
+                key: initial_design.get(key)
+                for key in ("sampler", "completed", "target", "next_index", "seed", "status")
+                if key in initial_design
+            }
         for key in ("recommendation", "next_design_request", "prior_summary"):
             if isinstance(bo_result.get(key), dict):
-                compact[key] = cls._planning_scalar_summary(bo_result.get(key))
+                compact[key] = compact_runtime_payload(bo_result.get(key))
         reasoning = bo_result.get("reasoning") if isinstance(bo_result.get("reasoning"), dict) else {}
         if reasoning:
             compact["reasoning"] = cls._planning_scalar_summary(reasoning, keys=("source", "preference", "rationale", "recommendation"))
@@ -2679,7 +2814,7 @@ class MainController:
                 }
         ranking = bo_result.get("candidate_ranking")
         if isinstance(ranking, list):
-            compact["candidate_ranking"] = [cls._planning_scalar_summary(item) for item in ranking[:3] if isinstance(item, dict)]
+            compact["candidate_ranking"] = [compact_runtime_payload(item) for item in ranking[:3] if isinstance(item, dict)]
         return compact
 
     @classmethod
@@ -3009,6 +3144,7 @@ class MainController:
         }
         allow_keys = {
             "pending_specimen_input",
+            "planning_cycle_contract",
             "mission_contract",
             "latest_mission_contract",
             "latest_orchestration_plan",
@@ -3046,9 +3182,13 @@ class MainController:
             "knowledge_report",
             "knowledge_context",
             "bo_agent",
+            "lhs_visualization",
+            "lhs_visualization_steps",
             "bo_visualization",
+            "bo_initial_design",
             "bo_recommended_constraints",
             "next_design_request",
+            "orchestrator_design_contract",
             "guardian",
             "latest_guardian_gate",
             "latest_guardian_gate_decision",
@@ -4365,6 +4505,10 @@ class MainController:
                 test_constraints = self._apply_specimen_printer_choice_to_spec(test_constraints, inline_printer_choice)
             else:
                 test_constraints = self._strip_specimen_printer_choice_from_spec(test_constraints)
+            test_constraints = self._seed_initial_bo_design_constraints(
+                test_constraints,
+                total_cycles=self._planning_cycle_limit(test_constraints),
+            )
             assistant_entry = {
                 "role": "orchestrator",
                 "content": (
@@ -5515,6 +5659,56 @@ class MainController:
             **requested_ejection,
             "enabled": bool(requested_ejection.get("enabled", default_ejection.get("enabled", False))),
         }
+        requested_optimization = (
+            merged.get("design_optimization")
+            if isinstance(merged.get("design_optimization"), dict)
+            else {}
+        )
+        requested_initial = (
+            requested_optimization.get("initial_design")
+            if isinstance(requested_optimization.get("initial_design"), dict)
+            else {}
+        )
+        try:
+            initial_design_size = max(
+                2,
+                int(requested_initial.get("size", BOAgent.defaults()["initial_design_size"])),
+            )
+        except (TypeError, ValueError):
+            initial_design_size = int(BOAgent.defaults()["initial_design_size"])
+        try:
+            initial_design_seed = int(requested_initial.get("seed", 7))
+        except (TypeError, ValueError):
+            initial_design_seed = 7
+        merged["design_optimization"] = {
+            "schema": "design_optimization_contract.v1",
+            "objective": {
+                "metric": "specific_energy_absorption_J_per_g",
+                "direction": "maximize",
+                "unit": "J/g",
+            },
+            "active_variables": {
+                "cell_size_mm": {
+                    "definition": "a=L/N",
+                    "specimen_length_mm": 30.0,
+                    "feasible_values": [5.0, 6.0, 7.5, 10.0],
+                },
+                "relative_density": {
+                    "bounds": [0.20, 0.48],
+                    "normalization": "min_max_0_1",
+                },
+            },
+            "initial_design": {
+                "sampler": "latin_hypercube",
+                "size": initial_design_size,
+                "seed": initial_design_seed,
+            },
+            "surrogate": {
+                "model": "single_task_gp",
+                "kernel": "ard_matern_5_2_plus_noise",
+            },
+            "acquisition": "expected_improvement",
+        }
         merged["test_mode_llm_generated"] = True
         return merged
 
@@ -5552,6 +5746,22 @@ class MainController:
     def _planning_cycle_limit(self, payload: dict[str, Any]) -> int:
         """Return planned Live GUI cycle count for test-mode handoffs."""
         return self.TEST_MODE_LOOP_CYCLES if self._is_planning_test_spec(payload) else 1
+
+    def _bind_planning_cycle_contract(self, payload: dict[str, Any]) -> int:
+        """Publish the resolved loop budget as the only GUI cycle denominator."""
+        total_cycles = self._planning_cycle_limit(payload)
+        is_test_plan = self._is_planning_test_spec(payload)
+        self._state.run_metadata["planning_cycle_contract"] = {
+            "schema": "planning_cycle_contract.v1",
+            "mode": "test" if is_test_plan else self._state.mode.value,
+            "total_cycles": int(total_cycles),
+            "source": "planning_runtime",
+        }
+        safety_budget = self._state.run_metadata.get("safety_budget")
+        safety_budget = dict(safety_budget) if isinstance(safety_budget, dict) else {}
+        safety_budget["max_loop_count"] = int(total_cycles)
+        self._state.run_metadata["safety_budget"] = safety_budget
+        return total_cycles
 
     def _reset_planning_workflow_controls(self) -> None:
         """Clear stale operator-control flags before a newly requested Live GUI workflow."""
@@ -5604,8 +5814,6 @@ class MainController:
         bo_update = self._state.run_metadata.get("bo_recommended_constraints")
         if isinstance(bo_update, dict):
             for key, value in bo_update.items():
-                if key == "cell_size_mm":
-                    continue
                 if value not in (None, "", []):
                     constraints[key] = value
             geometry = self._normalize_planning_geometry_type(
@@ -5614,6 +5822,12 @@ class MainController:
             if geometry:
                 constraints["geometry_type"] = geometry
                 constraints["preferred_geometry_type"] = geometry
+        contract = self._state.run_metadata.get("orchestrator_design_contract")
+        requested = contract.get("requested_parameters") if isinstance(contract, dict) else {}
+        if isinstance(requested, dict):
+            for key in ("cell_size_mm", "relative_density"):
+                if requested.get(key) not in (None, "", []):
+                    constraints[key] = requested[key]
         geometry = self._normalize_planning_geometry_type(
             constraints.get("geometry_type") or constraints.get("preferred_geometry_type")
         )
@@ -5624,6 +5838,151 @@ class MainController:
                 density = 0.32
             constraints["relative_density"] = max(0.20, density)
         return constraints
+
+    def _publish_orchestrator_design_contract(
+        self,
+        base_constraints: dict[str, Any],
+        *,
+        cycle_index: int,
+        total_cycles: int,
+    ) -> dict[str, Any]:
+        """Publish the only authoritative active-variable request consumed by DesignAgent."""
+        constraints = dict(base_constraints)
+        is_test = self._is_planning_test_spec(constraints)
+        if is_test and total_cycles > 1:
+            # The closed-loop design artifact must contain only the TPMS body.
+            # Compression platens belong to CAE, not to the generated STL.
+            constraints.update(
+                {
+                    "top_cap_enabled": False,
+                    "bottom_cap_enabled": False,
+                    "top_bottom_cap": False,
+                    "skin_thickness_mm": 0.0,
+                    "require_flat_compression_faces": False,
+                    "test_loop_surface_caps_disabled": True,
+                }
+            )
+        next_request = self._state.run_metadata.get("next_design_request")
+        next_request = next_request if isinstance(next_request, dict) else {}
+        next_parameters = next_request.get("constraints") if isinstance(next_request.get("constraints"), dict) else {}
+
+        initial_request: dict[str, Any] = {}
+        if is_test and (cycle_index <= 1 or not next_parameters):
+            optimization = constraints.get("design_optimization") if isinstance(constraints.get("design_optimization"), dict) else {}
+            initial_design = optimization.get("initial_design") if isinstance(optimization.get("initial_design"), dict) else {}
+            initial_request = BOAgent.initial_design_request(
+                self._state,
+                seed=int(initial_design.get("seed", 7) or 7),
+                initial_design_size=initial_design.get("size", "auto"),
+            )
+            requested = initial_request.get("constraints") if isinstance(initial_request.get("constraints"), dict) else {}
+            phase = str(initial_request.get("phase") or "initial_design")
+            source = "test_mode_deterministic_lhs" if phase == "initial_design" else "test_mode_acquisition_ready"
+        elif is_test:
+            requested = dict(next_parameters)
+            bo_result = self._state.run_metadata.get("bo_agent")
+            bo_result = bo_result if isinstance(bo_result, dict) else {}
+            phase = str(bo_result.get("optimization_phase") or "acquisition")
+            source = "bo_agent_next_design_request"
+        else:
+            requested = {
+                key: constraints.get(key)
+                for key in ("cell_size_mm", "relative_density")
+                if constraints.get(key) not in (None, "", [])
+            }
+            phase = "orchestrator_defined"
+            source = "orchestrator_json"
+
+        active = {
+            key: requested[key]
+            for key in ("cell_size_mm", "relative_density")
+            if requested.get(key) not in (None, "", [])
+        }
+        contract: dict[str, Any] = {
+            "schema": "orchestrator_design_contract.v1",
+            "contract_id": f"design-{self._state.run_id}-c{int(cycle_index):03d}",
+            "producer_agent": "orchestrator_agent",
+            "consumer_agent": "design_agent",
+            "mode": "test" if is_test else self._state.mode.value,
+            "phase": phase,
+            "cycle_index": int(cycle_index),
+            "total_cycles": int(total_cycles),
+            "source": source,
+            "requested_parameters": active,
+            "optimization": constraints.get("design_optimization")
+            if isinstance(constraints.get("design_optimization"), dict)
+            else {},
+            "status": "ready" if len(active) == 2 else "blocked",
+        }
+        if initial_request:
+            contract["initial_design"] = {
+                "sampler": initial_request.get("sampler"),
+                "index": initial_request.get("index"),
+                "target": initial_request.get("target"),
+                "seed": initial_request.get("seed"),
+                "normalization": initial_request.get("normalization"),
+                "points": [
+                    dict(point)
+                    for point in initial_request.get("points", [])
+                    if isinstance(point, dict)
+                ],
+            }
+            self._state.run_metadata["bo_initial_design"] = dict(initial_request)
+        elif is_test and phase == "initial_design":
+            bo_result = self._state.run_metadata.get("bo_agent")
+            bo_result = bo_result if isinstance(bo_result, dict) else {}
+            bo_initial = bo_result.get("initial_design") if isinstance(bo_result.get("initial_design"), dict) else {}
+            visualization = bo_result.get("visualization") if isinstance(bo_result.get("visualization"), dict) else {}
+            visual_initial = (
+                visualization.get("initial_design")
+                if isinstance(visualization.get("initial_design"), dict)
+                else {}
+            )
+            optimization = constraints.get("design_optimization") if isinstance(constraints.get("design_optimization"), dict) else {}
+            configured_initial = optimization.get("initial_design") if isinstance(optimization.get("initial_design"), dict) else {}
+            contract["initial_design"] = {
+                "sampler": bo_initial.get("sampler") or visual_initial.get("sampler") or "latin_hypercube",
+                "index": bo_initial.get("next_index"),
+                "next_index": bo_initial.get("next_index"),
+                "completed": bo_initial.get("completed", visual_initial.get("completed")),
+                "target": bo_initial.get(
+                    "target",
+                    visual_initial.get(
+                        "target",
+                        configured_initial.get("size", BOAgent.defaults()["initial_design_size"]),
+                    ),
+                ),
+                "seed": configured_initial.get("seed", 7),
+                "normalization": "unit_hypercube",
+                "points": [
+                    dict(point)
+                    for point in visual_initial.get("points", [])
+                    if isinstance(point, dict)
+                ],
+            }
+
+        self._state.run_metadata["orchestrator_design_contract"] = contract
+        if active:
+            # Keep the legacy projection synchronized for existing GUI/report consumers.
+            self._state.run_metadata["bo_recommended_constraints"] = dict(active)
+            constraints.update(active)
+        return constraints
+
+    def _seed_initial_bo_design_constraints(
+        self,
+        base_constraints: dict[str, Any],
+        *,
+        total_cycles: int,
+    ) -> dict[str, Any]:
+        """Seed only multi-cycle test workflows with the first unobserved LHS design."""
+        constraints = dict(base_constraints)
+        if total_cycles <= 1 or not self._is_planning_test_spec(constraints):
+            return constraints
+        return self._publish_orchestrator_design_contract(
+            constraints,
+            cycle_index=1,
+            total_cycles=total_cycles,
+        )
 
     @classmethod
     def _closed_loop_static_design_constraints(cls, constraints: dict[str, Any]) -> dict[str, Any]:
@@ -5777,6 +6136,11 @@ class MainController:
                 event_type="planning_handoff",
                 message="Planning handoff to DesignAgent started.",
             )
+        design_constraints = self._publish_orchestrator_design_contract(
+            design_constraints,
+            cycle_index=cycle_index,
+            total_cycles=total_cycles,
+        )
         effective_constraints = self._design_constraints_for_cycle(design_constraints)
         previous_constraints = previous_spec.get("constraints") if isinstance(previous_spec, dict) and isinstance(previous_spec.get("constraints"), dict) else {}
         self._state.stage = Stage.DESIGN
@@ -6073,6 +6437,7 @@ class MainController:
         """Call DesignAgent for planning-only candidate generation and emit handoff chat messages."""
         self._reset_planning_workflow_controls()
         self._state.active_goal = goal or self._state.active_goal
+        total_cycles = self._bind_planning_cycle_contract(constraints)
         await self._append_planning_message(
             {
                 "role": "orchestrator",
@@ -6115,7 +6480,10 @@ class MainController:
                     design_constraints.get("preferred_geometry_type") or geometry_hint
                 ) or geometry_hint
             previous_spec = dict(self._state.current_experiment_spec or {})
-            total_cycles = self._planning_cycle_limit(design_constraints)
+            design_constraints = self._seed_initial_bo_design_constraints(
+                design_constraints,
+                total_cycles=total_cycles,
+            )
             experiment_spec = await self._run_planning_design_stage(
                 previous_spec=previous_spec,
                 design_constraints=design_constraints,
@@ -7033,8 +7401,8 @@ class MainController:
         *,
         cycle_index: int,
     ) -> dict[str, Any]:
-        """Disable generated-model cap skins from cycle 2 onward in test-mode series."""
-        if cycle_index < 2 or not self._is_planning_test_spec(experiment_spec):
+        """Keep generated test-loop STL artifacts free of CAE-only surface platens."""
+        if not self._is_planning_test_spec(experiment_spec):
             return experiment_spec
         updated = dict(experiment_spec)
         updated["top_cap_enabled"] = False
@@ -7212,12 +7580,7 @@ class MainController:
         if "bo_result" in data:
             self._state.run_metadata["bo_agent"] = data["bo_result"]
         if "experiment_spec_update" in data and isinstance(data["experiment_spec_update"], dict):
-            update = {
-                key: value
-                for key, value in data["experiment_spec_update"].items()
-                if key != "cell_size_mm"
-            }
-            self._state.run_metadata["bo_recommended_constraints"] = update
+            self._state.run_metadata["bo_recommended_constraints"] = dict(data["experiment_spec_update"])
         if "guardian" in data:
             self._state.run_metadata["guardian"] = data["guardian"]
         self._state.run_metadata["last_stage_payload"] = {"stage": stage.value, "data": data}
@@ -7639,6 +8002,22 @@ class MainController:
         knowledge = bo_result.get("knowledge_context") if isinstance(bo_result.get("knowledge_context"), dict) else {}
         reasoning = bo_result.get("reasoning") if isinstance(bo_result.get("reasoning"), dict) else {}
         prior_summary = bo_result.get("prior_summary") if isinstance(bo_result.get("prior_summary"), dict) else {}
+        if str(bo_result.get("optimization_phase") or "") == "initial_design":
+            initial = bo_result.get("initial_design") if isinstance(bo_result.get("initial_design"), dict) else {}
+            completed = self._runtime_value(initial.get("completed"))
+            target = self._runtime_value(initial.get("target"))
+            next_index = self._runtime_value(initial.get("next_index"))
+            return (
+                "BO Agent가 Latin Hypercube initial design의 다음 미관측 설계점을 선택했습니다.\n\n"
+                f"- phase: initial_design / backend={self._runtime_value(bo_result.get('backend_active'))}\n"
+                f"- LHS progress: {completed}/{target}\n"
+                f"- next LHS point: {next_index}/{target}\n"
+                f"- acquisition: inactive until LHS {target}/{target}\n"
+                f"- priors: measured={self._runtime_value(prior_summary.get('measured_count'))}, failed={self._runtime_value(prior_summary.get('failed_count'))}\n"
+                f"- recommended_candidate: {self._runtime_value(recommendation.get('candidate_id'))}\n"
+                f"- why: {self._runtime_value(recommendation.get('why_this_candidate') or recommendation.get('reason'))}\n"
+                f"- recommended_parameters: {json.dumps(recommendation.get('parameters', {}), ensure_ascii=False)}"
+            )
         return (
             "BO Agent가 측정 evidence, Knowledge memory, acquisition score, reasoning preference를 결합해 다음 설계 후보를 추천했습니다.\n\n"
             f"- strategy: {self._runtime_value(bo_result.get('strategy'))} / benchmark={self._runtime_value(bo_result.get('benchmark_strategy'))}\n"
@@ -7819,6 +8198,15 @@ class MainController:
                 return
 
             if stage == Stage.BO:
+                visualization = self._bo_visualization_from_result(data)
+                if visualization:
+                    # Runtime state already owns this step. Re-emit only the
+                    # notification so Live GUI hydrates its complete artifact.
+                    await self.emit_bo_visualization(
+                        visualization,
+                        source="planning_langgraph",
+                        force_event=True,
+                    )
                 await self._append_planning_message(
                     {
                         "role": "bo_ai",

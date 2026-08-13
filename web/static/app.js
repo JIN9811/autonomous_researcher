@@ -979,14 +979,7 @@ function renderDeviceStatus(deviceHealth) {
 }
 
 function formatRuntimeCycleLabel(state = {}, isRunning = false) {
-  const mode = String(state.mode || "test").toLowerCase();
-  const stage = String(state.stage || "idle").toLowerCase();
-  const completed = Number(state.loop_count || 0);
-  const active = Boolean(isRunning && !["complete", "error", "idle"].includes(stage));
-  const current = Math.max(active ? completed + 1 : completed, 0);
-  if (mode === "test") return `C:${current}/5`;
-  if (mode === "live") return current > 0 ? `C:${current}` : "C:0";
-  return `C:${current}`;
+  return window.ATRRuntimeCycle.format(state, isRunning, { prefix: "C:" });
 }
 
 function updateIndicators(snapshot) {

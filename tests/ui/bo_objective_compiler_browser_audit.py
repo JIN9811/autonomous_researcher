@@ -155,7 +155,7 @@ def audit(base_url: str, out_dir: Path, *, geckodriver: str) -> dict[str, object
               svgCount: plot.querySelectorAll('svg.bo-viz-svg').length,
               confidenceBands: plot.querySelectorAll('.bo-viz-confidence-band').length,
               observations: plot.querySelectorAll('.bo-viz-observation').length,
-              nextPoints: plot.querySelectorAll('.bo-viz-next').length,
+              nextPoints: plot.querySelectorAll('.bo-viz-next-cross').length,
               equation: equation.textContent.trim(),
               cardWidth: card.getBoundingClientRect().width,
               cardScrollWidth: card.scrollWidth,

@@ -536,61 +536,19 @@ function defaultModuleNodePosition(record) {
 }
 
 function normalizeNodePositions(graph) {
-  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
-  nodes.forEach((node, index) => {
-    const fallback = defaultNodePosition(index);
-    const source = node.position || node.metadata?.position || fallback;
-    node.position = {
-      x: snapToGrid(source.x ?? fallback.x),
-      y: snapToGrid(source.y ?? fallback.y),
-    };
+  return GRAPH_GEOMETRY.normalizeNodePositions(graph, {
+    ...graphGeometryOptions(),
+    grid: GRAPH_GRID,
+    collisionGapX: GRAPH_NODE_COLLISION_GAP_X,
+    collisionGapY: GRAPH_NODE_COLLISION_GAP_Y,
+    defaultPosition: defaultNodePosition,
   });
-  return resolveNodeCollisions(graph);
 }
 
 function graphBounds(nodes) {
   const maxX = Math.max(...nodes.map((node, index) => (node.position?.x ?? defaultNodePosition(index).x) + GRAPH_NODE_WIDTH), GRAPH_NODE_WIDTH);
   const maxY = Math.max(...nodes.map((node, index) => (node.position?.y ?? defaultNodePosition(index).y) + GRAPH_NODE_HEIGHT), GRAPH_NODE_HEIGHT);
   return { width: maxX + 96, height: maxY + 96 };
-}
-
-function nodeCollisionRect(node = {}) {
-  const x = Number(node.position?.x || 0);
-  const y = Number(node.position?.y || 0);
-  return {
-    left: x,
-    top: y,
-    right: x + GRAPH_NODE_WIDTH + GRAPH_NODE_COLLISION_GAP_X,
-    bottom: y + GRAPH_NODE_HEIGHT + GRAPH_NODE_COLLISION_GAP_Y,
-  };
-}
-
-function nodeRectsCollide(a, b) {
-  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
-}
-
-function resolveNodeCollisions(graph) {
-  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
-  if (nodes.length < 2) return graph;
-  const ordered = [...nodes].sort((a, b) => Number(a.position?.y || 0) - Number(b.position?.y || 0) || Number(a.position?.x || 0) - Number(b.position?.x || 0));
-  for (let pass = 0; pass < 5; pass += 1) {
-    let changed = false;
-    for (let index = 0; index < ordered.length; index += 1) {
-      const node = ordered[index];
-      for (let prevIndex = 0; prevIndex < index; prevIndex += 1) {
-        const previous = ordered[prevIndex];
-        if (!nodeRectsCollide(nodeCollisionRect(previous), nodeCollisionRect(node))) continue;
-        node.position = {
-          x: snapToGrid(Number(node.position?.x || 0)),
-          y: snapToGrid(Number(previous.position?.y || 0) + GRAPH_NODE_HEIGHT + GRAPH_NODE_COLLISION_GAP_Y),
-        };
-        changed = true;
-      }
-    }
-    ordered.sort((a, b) => Number(a.position?.y || 0) - Number(b.position?.y || 0) || Number(a.position?.x || 0) - Number(b.position?.x || 0));
-    if (!changed) break;
-  }
-  return graph;
 }
 
 function nodeStage(node) {
@@ -934,14 +892,7 @@ function statusFromSnapshot(snapshot) {
 }
 
 function formatRuntimeIdeCycleLabel(state = {}, isRunning = false) {
-  const mode = String(state.mode || "test").toLowerCase();
-  const stage = String(state.stage || "idle").toLowerCase();
-  const completed = Number(state.loop_count || 0);
-  const active = Boolean(isRunning && !["complete", "error", "idle"].includes(stage));
-  const current = Math.max(active ? completed + 1 : completed, 0);
-  if (mode === "test") return `C:${current}/5`;
-  if (mode === "live") return current > 0 ? `C:${current}` : "C:0";
-  return `C:${current}`;
+  return window.ATRRuntimeCycle.format(state, isRunning, { prefix: "C:" });
 }
 
 function renderRuntimeHeader(snapshot = latestStateSnapshot) {
@@ -3552,8 +3503,7 @@ function renderGraph(graph) {
   const moduleGraph = activeGraph.metadata?.ide_tab_kind === "module";
   const readiness = runtimeReadinessStatus(activeGraph);
   const nodeReadinessIssues = runtimeReadinessNodeIssueMap(readiness);
-  const edgeMarkup = edges
-    .map((edge, index) => {
+  const edgeViews = edges.map((edge, index) => {
       const activeClass = activeRuntimeEdge?.source === edge.sourceStage && activeRuntimeEdge?.target === edge.targetStage && (!activeRuntimeEdge.condition || activeRuntimeEdge.condition === edge.condition) ? " edge-active" : "";
       const defaultClass = edge.isDefault ? " edge-default" : " edge-candidate";
       const typeClass = ` edge-type-${classToken(edgeRuntimeType(edge))}`;
@@ -3564,12 +3514,68 @@ function renderGraph(graph) {
         ? `${stageDisplayLabel(edge.sourceStage)} → ${stageDisplayLabel(edge.targetStage)}`
         : edgeDisplayLabel(edge);
       const simpleDefaultLabel = edge.isDefault && ["", "default", "continue", "always"].includes(String(edge.condition || "").trim());
-      const showLabel = moduleGraph || !simpleDefaultLabel || Boolean(activeClass);
+      const conditionalRouteLabel = edgeRuntimeType(edge) === "logical_transition" && !simpleDefaultLabel;
+      const showLabel = moduleGraph || conditionalRouteLabel || Boolean(activeClass);
       const maxLabelChars = moduleGraph ? 42 : 28;
       const labelText = label.length > maxLabelChars ? `${label.slice(0, maxLabelChars - 1)}…` : label;
       const labelWidth = Math.max(moduleGraph ? 168 : 74, Math.min(moduleGraph ? 340 : 158, labelText.length * (moduleGraph ? 7.4 : 7.2) + 28));
       const labelHeight = moduleGraph ? 24 : 22;
       const edgeData = `data-edge-index="${index}" data-edge-source="${escapeHtml(edge.sourceStage)}" data-edge-target="${escapeHtml(edge.targetStage)}" data-edge-condition="${escapeHtml(edge.condition || "")}" data-edge-default="${edge.isDefault ? "true" : "false"}"`;
+      return {
+        edge,
+        index,
+        activeClass,
+        defaultClass,
+        typeClass,
+        moduleClass,
+        path,
+        labelPoint,
+        labelText,
+        labelWidth,
+        labelHeight,
+        edgeData,
+        showLabel,
+        simpleDefaultLabel,
+      };
+    });
+  const labelObstacles = nodes.map((node) => {
+    const x = Number(node.position?.x || 0);
+    const y = Number(node.position?.y || 0);
+    return {
+      left: Math.max(0, x - 8),
+      top: Math.max(0, y - 8),
+      right: x + GRAPH_NODE_WIDTH + 8,
+      bottom: y + GRAPH_NODE_HEIGHT + 8,
+    };
+  });
+  const resolvedLabelPoints = new Map(GRAPH_GEOMETRY.resolveLabelCollisions(
+    edgeViews.filter((view) => view.showLabel).map((view) => ({
+      key: String(view.index),
+      x: view.labelPoint.x,
+      y: view.labelPoint.y,
+      width: view.labelWidth,
+      height: view.labelHeight,
+    })),
+    { gap: 8, obstacles: labelObstacles, maxX: bounds.width, maxY: bounds.height },
+  ).map((label) => [label.key, label]));
+  const edgeMarkup = edgeViews
+    .map((view) => {
+      const {
+        edge,
+        index,
+        activeClass,
+        defaultClass,
+        typeClass,
+        moduleClass,
+        path,
+        labelText,
+        labelWidth,
+        labelHeight,
+        edgeData,
+        showLabel,
+        simpleDefaultLabel,
+      } = view;
+      const labelPoint = resolvedLabelPoints.get(String(index)) || view.labelPoint;
       return `
         <path class="runtime-ide-edge-hitbox" d="${path}" ${edgeData} />
         <path class="runtime-ide-edge${activeClass}${defaultClass}${typeClass}${moduleClass}${simpleDefaultLabel ? " edge-simple-default" : ""}" d="${path}" ${edgeData}>

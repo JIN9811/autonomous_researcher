@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
+from learning.bo_parameter_space import BOParameterSpace
 from orchestrator.state import Mode, OrchestratorState
 
 
@@ -63,13 +64,13 @@ class BOAgent(BaseAgent):
     )
     DEFAULT_PARAMETER_SPACE: dict[str, Any] = {
         "geometry_type": ["gyroid"],
+        "cell_size_mm": [5.0, 6.0, 7.5, 10.0],
         "relative_density": [0.20, 0.48],
-        "wall_thickness_mm": [1.2, 2.0],
-        "cell_size_mm": [5.0, 10.0],
-        "tpms_thickness": [0.28, 0.52],
-        "orientation_deg": [0, 15, 30, 45, 60, 90],
-        "anisotropy_ratio": [0.85, 1.0, 1.25],
-        "skin_thickness_mm": [0.0, 0.8],
+        "wall_thickness_mm": [1.2],
+        "tpms_thickness": [0.0],
+        "orientation_deg": [0.0],
+        "anisotropy_ratio": [1.0],
+        "skin_thickness_mm": [0.8],
         "bottom_cap_enabled": [True],
         "top_cap_enabled": [False],
         "skirt_enabled": [False],
@@ -103,8 +104,13 @@ class BOAgent(BaseAgent):
             "llm_preference_enabled": True,
             "llm_candidate_weight": "auto",
             "top_k": 5,
-            "bo_backend": "lightweight_pool",
-            "supported_bo_backends": ["lightweight_pool", "botorch_optional"],
+            "bo_backend": "botorch",
+            "supported_bo_backends": ["botorch", "lightweight_pool"],
+            "initial_sampler": "latin_hypercube",
+            "initial_design_size": 8,
+            "num_restarts": 12,
+            "raw_samples": 256,
+            "optimizer_timeout_s": 30.0,
             "parameter_space": dict(cls.DEFAULT_PARAMETER_SPACE),
             "supported_strategies": list(cls.SUPPORTED_STRATEGIES),
             "supported_acquisitions": list(cls.SUPPORTED_ACQUISITIONS),
@@ -137,11 +143,15 @@ class BOAgent(BaseAgent):
         parameter_space = raw.get("parameter_space") if isinstance(raw.get("parameter_space"), dict) else {}
         if not parameter_space:
             parameter_space = dict(defaults["parameter_space"])
+        else:
+            parameter_space = cls._two_variable_parameter_space(parameter_space)
         top_k = int(max(1, min(cls._float_setting(raw, "top_k", defaults["top_k"], warnings), 12)))
         bo_backend = str(raw.get("bo_backend") or raw.get("backend") or defaults["bo_backend"]).strip().lower()
+        if bo_backend == "botorch_optional":
+            bo_backend = "botorch"
         if bo_backend not in set(defaults["supported_bo_backends"]):
-            warnings.append(f"unknown bo_backend '{bo_backend}' fell back to lightweight_pool")
-            bo_backend = "lightweight_pool"
+            warnings.append(f"unknown bo_backend '{bo_backend}' fell back to botorch")
+            bo_backend = "botorch"
         return (
             {
                 "strategy": strategy,
@@ -167,10 +177,230 @@ class BOAgent(BaseAgent):
                 "llm_candidate_weight": raw.get("llm_candidate_weight", defaults["llm_candidate_weight"]),
                 "top_k": top_k,
                 "bo_backend": bo_backend,
+                "initial_sampler": "latin_hypercube",
+                "initial_design_size": raw.get("initial_design_size", defaults["initial_design_size"]),
+                "num_restarts": int(max(1, cls._float_setting(raw, "num_restarts", defaults["num_restarts"], warnings))),
+                "raw_samples": int(max(8, cls._float_setting(raw, "raw_samples", defaults["raw_samples"], warnings))),
+                "optimizer_timeout_s": max(1.0, cls._float_setting(raw, "optimizer_timeout_s", defaults["optimizer_timeout_s"], warnings)),
                 "parameter_space": parameter_space,
             },
             warnings,
         )
+
+    @classmethod
+    def _two_variable_parameter_space(cls, raw_space: dict[str, Any]) -> dict[str, Any]:
+        """Canonicalize the first Gyroid BO problem to two active dimensions."""
+        feasible_cells = [5.0, 6.0, 7.5, 10.0]
+        raw_cells = raw_space.get("cell_size_mm")
+        fixed_cell: list[float] | None = None
+        if isinstance(raw_cells, list) and len(raw_cells) == 1:
+            try:
+                requested = float(raw_cells[0])
+            except (TypeError, ValueError):
+                requested = float("nan")
+            if requested in feasible_cells:
+                fixed_cell = [requested]
+
+        density = raw_space.get("relative_density", [0.20, 0.48])
+        if not isinstance(density, list) or len(density) != 2:
+            density = [0.20, 0.48]
+        try:
+            low = max(0.20, float(density[0]))
+            high = min(0.48, float(density[1]))
+        except (TypeError, ValueError):
+            low, high = 0.20, 0.48
+        if low >= high:
+            low, high = 0.20, 0.48
+
+        canonical = dict(cls.DEFAULT_PARAMETER_SPACE)
+        canonical["cell_size_mm"] = fixed_cell or feasible_cells
+        canonical["relative_density"] = [low, high]
+        return canonical
+
+    @classmethod
+    def _fixed_surface_space_for_state(
+        cls,
+        parameter_space: dict[str, Any],
+        state: OrchestratorState,
+    ) -> dict[str, Any]:
+        """Keep non-optimized manufacturing settings aligned with the active specimen."""
+        resolved = dict(parameter_space)
+        current = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        nested = current.get("constraints") if isinstance(current.get("constraints"), dict) else {}
+        fixed_keys = set(cls.DEFAULT_PARAMETER_SPACE) - {"cell_size_mm", "relative_density"}
+        for key in fixed_keys:
+            for source in (current, nested):
+                if key in source and source[key] not in (None, "", []):
+                    resolved[key] = [source[key]]
+                    break
+        return resolved
+
+    @classmethod
+    def _initial_design_size_for_run(cls, configured: Any, state: OrchestratorState) -> int:
+        """Resolve the required LHS warm-up independently of short UI smoke-loop budgets."""
+        candidates: list[Any] = []
+        contract = state.run_metadata.get("orchestrator_design_contract")
+        contract = contract if isinstance(contract, dict) else {}
+        optimization = contract.get("optimization") if isinstance(contract.get("optimization"), dict) else {}
+        initial_design = optimization.get("initial_design") if isinstance(optimization.get("initial_design"), dict) else {}
+        candidates.append(initial_design.get("size"))
+
+        spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        optimization = spec.get("design_optimization") if isinstance(spec.get("design_optimization"), dict) else {}
+        initial_design = optimization.get("initial_design") if isinstance(optimization.get("initial_design"), dict) else {}
+        candidates.append(initial_design.get("size"))
+
+        bo_settings = state.run_metadata.get("bo_settings")
+        bo_settings = bo_settings if isinstance(bo_settings, dict) else {}
+        candidates.append(bo_settings.get("initial_design_size"))
+        if configured is not None and configured != "" and configured != "auto":
+            candidates.append(configured)
+        candidates.append(cls.defaults()["initial_design_size"])
+
+        for candidate in candidates:
+            try:
+                return max(2, int(candidate))
+            except (TypeError, ValueError):
+                continue
+        return int(cls.defaults()["initial_design_size"])
+
+    @classmethod
+    def initial_design_request(
+        cls,
+        state: OrchestratorState,
+        *,
+        seed: int = 7,
+        initial_design_size: Any = "auto",
+    ) -> dict[str, Any]:
+        """Return the next unobserved point from the configured canonical LHS."""
+        parameter_space = cls._fixed_surface_space_for_state(dict(cls.DEFAULT_PARAMETER_SPACE), state)
+        space = BOParameterSpace.from_mapping(parameter_space)
+        target = cls._initial_design_size_for_run(initial_design_size, state)
+        candidates = space.lhs_points(target, seed=seed)
+        observed: set[str] = set()
+        for prior in cls._prior_evaluations_from_state(state):
+            score = prior.get("score")
+            if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(float(score)):
+                continue
+            parameters = prior.get("parameters")
+            if not isinstance(parameters, dict):
+                continue
+            try:
+                observed.add(space.signature(cls._project_parameters_to_space(parameters, space)))
+            except (KeyError, TypeError, ValueError):
+                continue
+        next_index = next(
+            (index for index, candidate in enumerate(candidates, start=1) if space.signature(candidate) not in observed),
+            None,
+        )
+        points = [
+            {
+                "index": index,
+                "status": (
+                    "measured"
+                    if space.signature(candidate) in observed
+                    else ("next" if index == next_index else "planned")
+                ),
+                "parameters": candidate,
+            }
+            for index, candidate in enumerate(candidates, start=1)
+        ]
+        if next_index is not None:
+            candidate = candidates[next_index - 1]
+            return {
+                "schema": "bo_initial_design_request.v1",
+                "phase": "initial_design",
+                "sampler": "latin_hypercube",
+                "index": next_index,
+                "target": len(candidates),
+                "seed": int(seed),
+                "constraints": candidate,
+                "normalization": "unit_hypercube",
+                "points": points,
+            }
+        return {
+            "schema": "bo_initial_design_request.v1",
+            "phase": "acquisition_ready",
+            "sampler": "latin_hypercube",
+            "index": len(candidates),
+            "target": len(candidates),
+            "seed": int(seed),
+            "constraints": {},
+            "normalization": "unit_hypercube",
+            "points": points,
+        }
+
+    @staticmethod
+    def _project_parameters_to_space(parameters: dict[str, Any], space: BOParameterSpace) -> dict[str, Any]:
+        """Project a measured specimen onto the declared BO dimensions.
+
+        Geometry-derived values such as TPMS level can change with relative
+        density even though they are fixed BO dimensions. They must not make a
+        valid two-variable observation appear unobserved.
+        """
+        projected = dict(space.fixed_parameters)
+        for dimension in space.active_dimensions:
+            if dimension.name not in parameters:
+                raise KeyError(f"missing active BO parameter {dimension.name}")
+            value = parameters[dimension.name]
+            dimension.encode(value)
+            projected[dimension.name] = value
+        return {dimension.name: projected[dimension.name] for dimension in space.dimensions}
+
+    @classmethod
+    def _project_priors_to_space(
+        cls,
+        priors: list[dict[str, Any]],
+        parameter_space: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Normalize all prior records before LHS or BoTorch consumes them."""
+        space = BOParameterSpace.from_mapping(parameter_space)
+        normalized: list[dict[str, Any]] = []
+        for prior in priors:
+            parameters = prior.get("parameters") if isinstance(prior.get("parameters"), dict) else {}
+            try:
+                projected = cls._project_parameters_to_space(parameters, space)
+            except (KeyError, TypeError, ValueError):
+                continue
+            normalized.append({**prior, "parameters": projected})
+        return normalized
+
+    @staticmethod
+    def _fixed_cell_size_from_space(parameter_space: dict[str, Any]) -> float | None:
+        """Return an operator-fixed cell size without locking it from the current specimen."""
+        domain = parameter_space.get("cell_size_mm")
+        if isinstance(domain, list) and len(domain) == 1:
+            try:
+                return float(domain[0])
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    @staticmethod
+    def _sea_value(*sources: Any) -> float | None:
+        """Extract the authoritative measured SEA value in J/g from nested metric records."""
+        keys = (
+            "specific_energy_absorption_J_per_g",
+            "specific_energy_absorption_j_per_g",
+            "specific_energy",
+        )
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            nested_sources = [source]
+            for nested_key in ("metrics", "observed_metrics", "utm_metrics"):
+                nested = source.get(nested_key)
+                if isinstance(nested, dict):
+                    nested_sources.append(nested)
+            for candidate in nested_sources:
+                for key in keys:
+                    value = candidate.get(key)
+                    if isinstance(value, bool) or not isinstance(value, (int, float)):
+                        continue
+                    numeric = float(value)
+                    if math.isfinite(numeric) and numeric >= 0.0:
+                        return numeric
+        return None
 
     @staticmethod
     def _float_setting(raw: dict[str, Any], key: str, default: float, warnings: list[str]) -> float:
@@ -217,9 +447,23 @@ class BOAgent(BaseAgent):
         return None
 
     @staticmethod
-    def _lock_parameter_space(parameter_space: dict[str, Any], *, cell_size_mm: float | None) -> dict[str, Any]:
+    def _lock_parameter_space(
+        parameter_space: dict[str, Any],
+        *,
+        cell_size_mm: float | None,
+        current_spec: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Keep operator-defined non-BO dimensions fixed while preserving GUI schema."""
         locked = dict(parameter_space)
+        current_spec = current_spec if isinstance(current_spec, dict) else {}
+        constraints = current_spec.get("constraints") if isinstance(current_spec.get("constraints"), dict) else {}
+        for key in BOAgent.SHAPE_PARAMETER_KEYS:
+            domain = locked.get(key)
+            if not isinstance(domain, list) or len(domain) != 1:
+                continue
+            value = current_spec.get(key, constraints.get(key))
+            if value is not None:
+                locked[key] = [value]
         density_space = locked.get("relative_density")
         if isinstance(density_space, list) and len(density_space) == 2 and all(isinstance(item, (int, float)) for item in density_space):
             locked["relative_density"] = [max(0.20, float(density_space[0])), max(0.20, float(density_space[1]))]
@@ -400,7 +644,7 @@ class BOAgent(BaseAgent):
                 continue
             objective = item.get("objective") if isinstance(item.get("objective"), dict) else {}
             evaluation = item.get("objective_evaluation") if isinstance(item.get("objective_evaluation"), dict) else {}
-            score = evaluation.get("score", item.get("objective_score", objective.get("score")))
+            score = cls._sea_value(item, objective)
             ok_for_bo = item.get("ok_for_bo")
             if ok_for_bo is None:
                 ok_for_bo = item.get("ok", True) and str(item.get("status") or "ready") not in {"blocked", "failed"}
@@ -422,7 +666,6 @@ class BOAgent(BaseAgent):
                 "feasible": evaluation.get("feasible") if "feasible" in evaluation else item.get("feasible"),
                 "fidelity": str(evaluation.get("fidelity") or item.get("fidelity") or ""),
                 "provenance_refs": evaluation.get("provenance_refs") if isinstance(evaluation.get("provenance_refs"), list) else item.get("provenance_refs", []),
-                "uncertainty": cls._safe_float(item.get("uncertainty", objective.get("uncertainty")), 0.5),
                 "quality_score": cls._safe_float(quality_score_source, 0.7),
                 "ok_for_bo": bool(ok_for_bo),
                 "trust_score": dict(trust_score),
@@ -432,8 +675,21 @@ class BOAgent(BaseAgent):
                 "failure_tags": item.get("failure_tags") if isinstance(item.get("failure_tags"), list) else [],
                 "artifact_refs": item.get("artifact_refs") or item.get("artifacts") or {},
             }
+            # Generic `uncertainty` is a dimensionless Analysis trust estimate,
+            # not measurement noise in the objective's unit. Only an explicitly
+            # named observation standard error may become GP train_Yvar.
+            uncertainty = item.get("observation_standard_error")
+            if (
+                not isinstance(uncertainty, bool)
+                and isinstance(uncertainty, (int, float))
+                and math.isfinite(float(uncertainty))
+                and float(uncertainty) > 0
+            ):
+                record["uncertainty"] = float(uncertainty)
             if not isinstance(score, bool) and isinstance(score, (int, float)) and math.isfinite(float(score)):
                 record["score"] = float(score)
+                record["metric_name"] = "specific_energy_absorption_J_per_g"
+                record["unit"] = "J/g"
             records.append(record)
         return records
 
@@ -469,10 +725,16 @@ class BOAgent(BaseAgent):
         for item in state.experiment_evaluations:
             if not isinstance(item, dict):
                 continue
+            objective = item.get("objective") if isinstance(item.get("objective"), dict) else {}
+            constraints = objective.get("constraints") if isinstance(objective.get("constraints"), dict) else {}
+            explicit = item.get("parameters") if isinstance(item.get("parameters"), dict) else {}
             metrics = item.get("metrics") if isinstance(item.get("metrics"), dict) else {}
-            params = {key: metrics.get(key) for key in cls.SHAPE_PARAMETER_KEYS if key in metrics}
-            if not params and isinstance(item.get("parameters"), dict):
-                params = {key: item["parameters"].get(key) for key in cls.SHAPE_PARAMETER_KEYS if key in item["parameters"]}
+            params = {
+                key: source[key]
+                for source in (constraints, explicit, metrics)
+                for key in cls.SHAPE_PARAMETER_KEYS
+                if key in source
+            }
             if not params:
                 continue
             prior: dict[str, Any] = {
@@ -482,8 +744,18 @@ class BOAgent(BaseAgent):
                 "ok_for_bo": bool(item.get("ok", True)) and str(item.get("status") or "") != "analysis_blocked",
                 "failure_tags": item.get("failure_tags") if isinstance(item.get("failure_tags"), list) else [],
                 "quality_score": cls._safe_float(metrics.get("quality_score"), 0.7),
-                "uncertainty": cls._safe_float(item.get("uncertainty"), 0.5),
             }
+            # Keep the experiment-evaluation path consistent with the direct
+            # Analysis handoff path above. The common top-level `uncertainty`
+            # field is quality/trust metadata and would flatten the SEA GP.
+            uncertainty = item.get("observation_standard_error")
+            if (
+                not isinstance(uncertainty, bool)
+                and isinstance(uncertainty, (int, float))
+                and math.isfinite(float(uncertainty))
+                and float(uncertainty) > 0
+            ):
+                prior["uncertainty"] = float(uncertainty)
             evaluation = item.get("objective_evaluation") if isinstance(item.get("objective_evaluation"), dict) else {}
             prior.update(
                 {
@@ -496,10 +768,24 @@ class BOAgent(BaseAgent):
                     "provenance_refs": evaluation.get("provenance_refs") if isinstance(evaluation.get("provenance_refs"), list) else item.get("provenance_refs", []),
                 }
             )
-            score = evaluation.get("score", item.get("objective_score"))
+            score = cls._sea_value(metrics, item)
             if not isinstance(score, bool) and isinstance(score, (int, float)) and math.isfinite(float(score)):
                 prior["score"] = float(score)
+                prior["metric_name"] = "specific_energy_absorption_J_per_g"
+                prior["unit"] = "J/g"
             priors.append(prior)
+
+        # Design-stage proxy scores and measured Analysis outcomes do not share
+        # one objective scale. Once measured outcomes exist, design records are
+        # retained only as duplicate/failure context, not GP training targets.
+        has_measured_analysis = any(
+            item.get("source") == "analysis_experiment_evaluation" and isinstance(item.get("score"), (int, float))
+            for item in priors
+        )
+        if has_measured_analysis:
+            for item in priors:
+                if item.get("source") == "experiment_evaluation":
+                    item.pop("score", None)
         return priors
 
     @staticmethod
@@ -947,8 +1233,20 @@ class BOAgent(BaseAgent):
         return ranked
 
     def _recommendation(self, benchmark: dict[str, Any], strategy: str) -> dict[str, Any]:
-        best_name, best_payload = self._best_strategy(benchmark)
+        best_name, best_payload = self._strategy_payload(benchmark, strategy)
+        if not best_payload:
+            best_name, best_payload = self._best_strategy(benchmark)
         best_result = best_payload.get("best_result") if isinstance(best_payload.get("best_result"), dict) else {}
+        if not best_result:
+            results = best_payload.get("results") if isinstance(best_payload.get("results"), list) else []
+            best_result = next(
+                (
+                    item
+                    for item in results
+                    if isinstance(item, dict) and self._parameters_from_result(item)
+                ),
+                {},
+            )
         return {
             "candidate_id": str(best_result.get("candidate_id") or best_payload.get("best_candidate_id") or "candidate-default"),
             "parameters": self._parameters_from_result(best_result),
@@ -1027,12 +1325,11 @@ class BOAgent(BaseAgent):
     ) -> AgentResult:
         """Run BO Agent with GUI/API-supplied settings."""
         normalized, warnings = self.normalize_settings(settings)
-        locked_cell_size = self._locked_cell_size_from_state(state)
-        if locked_cell_size is not None:
-            normalized["parameter_space"] = self._lock_parameter_space(
-                normalized["parameter_space"],
-                cell_size_mm=locked_cell_size,
-            )
+        normalized["parameter_space"] = self._fixed_surface_space_for_state(
+            normalized["parameter_space"],
+            state,
+        )
+        locked_cell_size = self._fixed_cell_size_from_space(normalized["parameter_space"])
         strategy = normalized["strategy"]
         benchmark_strategy = normalized["benchmark_strategy"]
         benchmark_strategies = ["random", "grid", "bo"] if strategy == "mbo" else [benchmark_strategy]
@@ -1062,6 +1359,7 @@ class BOAgent(BaseAgent):
         else:
             priors = raw_priors
             rejected_observations = []
+        priors = self._project_priors_to_space(priors, normalized["parameter_space"])
         observation_integrity = {
             "objective_hash": objective_hash,
             "accepted_count": len(priors),
@@ -1099,6 +1397,7 @@ class BOAgent(BaseAgent):
         )
         benchmark_payload = {
             "budget": normalized["budget"],
+            "sequential_only": True,
             "strategies": benchmark_strategies,
             "seed": normalized["random_seed"],
             "parameter_space": normalized["parameter_space"],
@@ -1109,6 +1408,14 @@ class BOAgent(BaseAgent):
             "exploration_weight": normalized["exploration_weight"],
             "exploitation_weight": normalized["exploitation_weight"],
             "bo_backend": normalized["bo_backend"],
+            "initial_sampler": normalized["initial_sampler"],
+            "initial_design_size": self._initial_design_size_for_run(
+                normalized["initial_design_size"],
+                state,
+            ),
+            "num_restarts": normalized["num_restarts"],
+            "raw_samples": normalized["raw_samples"],
+            "optimizer_timeout_s": normalized["optimizer_timeout_s"],
             "request": {
                 "run_id": state.run_id,
                 "experiment_id": state.experiment_id,
@@ -1134,16 +1441,61 @@ class BOAgent(BaseAgent):
         benchmark = ctx.tools.call("experiment.benchmark", benchmark_payload)
         fallback_strategy = "bo" if strategy == "mbo" and warnings else benchmark_strategy
         fallback_recommendation = self._recommendation(benchmark, fallback_strategy)
-        candidate_ranking = self._rank_candidates(
-            benchmark=benchmark,
-            normalized=normalized,
-            reasoning=reasoning,
-            failure_model=failure_model,
-            locked_cell_size=locked_cell_size,
-            prior_count=len(priors),
-            loop_count=int(state.loop_count or 0),
-        )
-        recommendation = self._recommendation_from_ranking(candidate_ranking, fallback_recommendation, reasoning)
+        _active_strategy, active_payload = self._strategy_payload(benchmark, fallback_strategy)
+        active_trace = active_payload.get("surrogate_trace", []) if isinstance(active_payload, dict) else []
+        latest_trace = active_trace[-1] if active_trace and isinstance(active_trace[-1], dict) else {}
+        optimization_phase = str(latest_trace.get("phase") or "acquisition")
+        backend_active = str(latest_trace.get("backend_active") or active_payload.get("backend_active") or normalized["bo_backend"])
+        initial_design_trace = latest_trace.get("initial_design") if isinstance(latest_trace.get("initial_design"), dict) else {}
+        if optimization_phase == "initial_design":
+            candidate_ranking = []
+            recommendation = dict(fallback_recommendation)
+            completed = int(initial_design_trace.get("completed") or len(priors))
+            target = int(
+                initial_design_trace.get("target")
+                or self._initial_design_size_for_run(normalized["initial_design_size"], state)
+            )
+            next_index = min(completed + 1, target)
+            recommendation.update(
+                {
+                    "objective_score": None,
+                    "selection_method": "latin_hypercube",
+                    "reason": f"Latin Hypercube initial design point {next_index}/{target}.",
+                    "why_this_candidate": f"Latin Hypercube initial design point {next_index}/{target}; acquisition ranking is inactive until initialization completes.",
+                    "expected_information_gain": None,
+                    "risk_assessment": {"valid": True, "risk_score": 0.0, "warnings": [], "already_evaluated": False},
+                    "bo_hypothesis_ids": [],
+                    "why_not_chosen": [],
+                }
+            )
+            recommendation.pop("combined_score", None)
+            initial_design_status = {
+                "sampler": str(initial_design_trace.get("sampler") or "latin_hypercube"),
+                "completed": completed,
+                "target": target,
+                "next_index": next_index,
+            }
+        else:
+            candidate_ranking = self._rank_candidates(
+                benchmark=benchmark,
+                normalized=normalized,
+                reasoning=reasoning,
+                failure_model=failure_model,
+                locked_cell_size=locked_cell_size,
+                prior_count=len(priors),
+                loop_count=int(state.loop_count or 0),
+            )
+            if normalized["bo_backend"] == "botorch":
+                selected = latest_trace.get("selected", {}) if isinstance(latest_trace, dict) else {}
+                selected_id = str(selected.get("candidate_id") or "") if isinstance(selected, dict) else ""
+                selected_ranking = next(
+                    (item for item in candidate_ranking if str(item.get("candidate_id") or "") == selected_id),
+                    None,
+                )
+                if selected_ranking is not None:
+                    candidate_ranking = [selected_ranking]
+            recommendation = self._recommendation_from_ranking(candidate_ranking, fallback_recommendation, reasoning)
+            initial_design_status = {}
         recommendation["parameters"] = self._apply_locked_parameters(
             recommendation.get("parameters", {}),
             cell_size_mm=locked_cell_size,
@@ -1211,7 +1563,13 @@ class BOAgent(BaseAgent):
             for item in visualization_trace
             if isinstance(item, dict) and isinstance(item.get("visualization"), dict)
         ]
+        lhs_visualizations = [
+            item.get("lhs_visualization")
+            for item in visualization_trace
+            if isinstance(item, dict) and isinstance(item.get("lhs_visualization"), dict)
+        ]
         latest_visualization = visualizations[-1] if visualizations else {}
+        latest_lhs_visualization = lhs_visualizations[-1] if lhs_visualizations else {}
         bo_result = {
             "ok": bool(benchmark.get("ok", False)) and bool(recommendation.get("parameters")),
             "tool": "bo.agent",
@@ -1220,6 +1578,9 @@ class BOAgent(BaseAgent):
             "strategy": strategy,
             "benchmark_strategy": benchmark_strategy,
             "acquisition": normalized["acquisition"],
+            "optimization_phase": optimization_phase,
+            "backend_active": backend_active,
+            "initial_design": initial_design_status,
             "budget": normalized["budget"],
             "bo_backend": normalized["bo_backend"],
             "parameter_space": normalized["parameter_space"],
@@ -1235,12 +1596,17 @@ class BOAgent(BaseAgent):
             "observation_integrity": observation_integrity,
             "best_so_far": self._best_so_far(benchmark, recommendation["source_strategy"]),
             "visualization": latest_visualization,
+            "lhs_visualization": latest_lhs_visualization,
             "visualization_steps": [
                 {
                     "step": int(item.get("step") or 0),
                     "selected_parameter": str((item.get("view") or {}).get("selected_parameter") or ""),
                 }
                 for item in visualizations
+            ],
+            "lhs_visualization_steps": [
+                {"step": int(item.get("step") or 0)}
+                for item in lhs_visualizations
             ],
             "knowledge_context": knowledge_context,
             "warnings": warnings,
@@ -1266,6 +1632,10 @@ class BOAgent(BaseAgent):
             },
         }
         state.run_metadata["bo_agent"] = bo_result
+        if initial_design_status:
+            state.run_metadata["bo_initial_design"] = dict(initial_design_status)
+        else:
+            state.run_metadata.pop("bo_initial_design", None)
         state.run_metadata["bo_recommended_constraints"] = dict(recommendation.get("parameters") or {})
         state.run_metadata["next_design_request"] = next_design_request
         return AgentResult(

@@ -140,6 +140,7 @@ def build_mission_contract(
     objective = state.current_experiment_objective if isinstance(state.current_experiment_objective, dict) else {}
     metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
     safety_budget = metadata.get("safety_budget") if isinstance(metadata.get("safety_budget"), dict) else {}
+    planning_cycle = metadata.get("planning_cycle_contract") if isinstance(metadata.get("planning_cycle_contract"), dict) else {}
     contract_seed = {
         "run_id": state.run_id,
         "loop_id": state.loop_count,
@@ -162,7 +163,10 @@ def build_mission_contract(
         "objective_type": objective.get("objective_type") or spec.get("objective_type") or spec.get("objective") or "",
         "constraints": spec.get("constraints") if isinstance(spec.get("constraints"), dict) else {},
         "safety_budget": {
-            "max_loop_count": safety_budget.get("max_loop_count", safety_budget.get("loop_count", 5)),
+            "max_loop_count": safety_budget.get(
+                "max_loop_count",
+                safety_budget.get("loop_count", planning_cycle.get("total_cycles", 1)),
+            ),
             "max_print_time_min": safety_budget.get("max_print_time_min", safety_budget.get("print_time", 120)),
             "max_robot_live_rollouts": safety_budget.get("max_robot_live_rollouts", 2),
             "requires_guardian_gate": True,

@@ -385,4 +385,15 @@ async def test_guardian_test_loop_cap_overrides_recoverable_graph_gate_pressure(
 
     assert guardian["decision"] == "stop"
     assert guardian["action"] == "safe_stop"
-    assert "5-cycle loop cap" in guardian["reason"]
+    assert "20-cycle loop cap" in guardian["reason"]
+
+
+@pytest.mark.asyncio
+async def test_guardian_does_not_stop_at_old_five_cycle_cap() -> None:
+    agent = GuardianAgent()
+    ctx = _CtxStub()
+
+    result = await agent.run(_state(mode=Mode.TEST, loop_count=4), ctx)
+
+    assert result.data["guardian"]["decision"] == "continue"
+    assert result.data["guardian"]["action"] == "continue"

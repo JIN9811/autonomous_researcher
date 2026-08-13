@@ -31,6 +31,33 @@ supersedes: []
 
 # Windows PyAutoGUI Bridge Reference
 
+## Windows x64 Portable Deployment
+
+The default field-deployment unit is one portable folder. The Windows PC does
+not need a clone of the ATR repository or a system Python installation. After
+extracting the complete ZIP, `START_EQUIPMENT_BRIDGE.cmd` prepares a private
+folder-local runtime and starts the existing bridge API and operator Web GUI.
+
+```text
+ATR_Equipment_Agent_Bridge_Windows_x64_Portable/
+├─ START_EQUIPMENT_BRIDGE.cmd
+├─ STOP_EQUIPMENT_BRIDGE.cmd
+├─ bootstrap_portable.ps1
+├─ bridge/
+├─ demo/
+├─ scripts/
+├─ vendor/python/python-installer-amd64.exe
+├─ vendor/wheelhouse/*.whl
+├─ runtime/python/              # created on first launch
+├─ data/                        # token and mutable operator state
+└─ portable_manifest.json
+```
+
+The portable and installed editions expose the same endpoints, authentication
+header, program/skill schemas, and evidence contracts. Only runtime and mutable
+data locations differ. The bridge must run in an interactive Windows user
+session; it is not installed as a Windows service.
+
 ## Summary
 
 The Windows PyAutoGUI bridge lets ATR invoke exact registered desktop programs
@@ -133,6 +160,15 @@ timeout; normal calls use the token header. The Windows server controls
 PyAutoGUI/window/image/file operations. Exported files and proof may be
 reindexed on the Linux side, but identity must remain linked to the run.
 
+The reverse connection needed by Windows-side `/skills` is resolved separately.
+After token authentication, the Windows server treats the Linux request address
+as a candidate, verifies `GET /api/equipment/skills` on port 7860, and persists
+only the verified controller origin under its active data root. A saved origin
+is reused after restart. Bounded private `/24` discovery is the fallback; one
+verified result is selected, multiple results require operator selection, and
+an explicit `WINDOWS_PYAUTOGUI_ATR_API_URL` remains the highest-priority
+managed-deployment override.
+
 ## Configuration and Secrets
 
 `configs/devices.yaml` owns mode, provider, URL/token environment names,
@@ -141,6 +177,10 @@ limits, simulator, promotion policy, programs, and UTM defaults. Mutable
 connection/profile/locator records live under `memory/`. Secret names are
 `WINDOWS_PYAUTOGUI_BRIDGE_URL` and `WINDOWS_PYAUTOGUI_BRIDGE_TOKEN`; token
 values MUST be redacted.
+
+The Windows-side `controller_connection.json` is not a secret store. It contains
+the controller URL, discovery source, and verification timestamps, and MUST NOT
+contain the bridge token, API keys, cookies, or authorization headers.
 
 ## State, Events, Artifacts, and Evidence
 

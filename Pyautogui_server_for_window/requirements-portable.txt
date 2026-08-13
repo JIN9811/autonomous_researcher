@@ -1,0 +1,11 @@
+# Runtime-only dependencies for the offline Windows x64 portable release.
+# The portable builder downloads/builds matching wheels before distribution.
+PyAutoGUI==0.9.54
+Pillow>=10.0,<13
+opencv-python>=4.9,<5
+numpy>=2.0,<2.3
+pynput>=1.7.7,<2
+pywinauto>=0.6.9,<1
+pytesseract>=0.3.13,<1
+pywin32>=306
+comtypes>=1.4,<2

@@ -34,6 +34,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
+from urllib.parse import quote
 
 import yaml
 
@@ -62,6 +63,7 @@ from policies.guardian_gate import gate_blocks_execution, guardian_gate, tool_re
 from policies.retry_policy import bump_retry, should_retry
 from policies.safe_stop_policy import safe_stop_reason
 from policies.validation_policy import validate_agent_output
+from reporting.bo_visualization_artifacts import write_bo_visualization_artifacts
 from utils.active_cam_artifact import apply_active_cam_artifact_update
 from utils.utm_completion_artifact import apply_utm_completion_artifact_update
 from utils.ids import make_event_id
@@ -1455,9 +1457,24 @@ class LangGraphRunLoop:
             self._state.run_metadata["knowledge"] = compact_runtime_payload(data["knowledge"])
         if "bo_result" in data:
             self._state.run_metadata["bo_agent"] = compact_runtime_payload(data["bo_result"])
+            visualization = self._bo_visualization_from_result(data)
+            if visualization:
+                compact_visualization = compact_runtime_payload(visualization)
+                self._state.run_metadata["bo_visualization"] = compact_visualization
+                steps = self._state.run_metadata.get("bo_visualization_steps")
+                if not isinstance(steps, list):
+                    steps = []
+                step_summary = {
+                    "run_id": str(visualization.get("run_id") or self._state.run_id),
+                    "step": int(visualization.get("step") or 0),
+                    "selected_parameter": str((visualization.get("view") or {}).get("selected_parameter") or ""),
+                    "generated_at": str(visualization.get("generated_at") or ""),
+                }
+                if not steps or steps[-1] != step_summary:
+                    steps.append(step_summary)
+                self._state.run_metadata["bo_visualization_steps"] = steps[-80:]
         if "experiment_spec_update" in data and isinstance(data["experiment_spec_update"], dict):
-            update = {key: value for key, value in data["experiment_spec_update"].items() if key != "cell_size_mm"}
-            self._state.run_metadata["bo_recommended_constraints"] = update
+            self._state.run_metadata["bo_recommended_constraints"] = dict(data["experiment_spec_update"])
         if "guardian" in data:
             self._state.run_metadata["guardian"] = compact_runtime_payload(data["guardian"])
         self._state.run_metadata["last_stage_payload"] = {"stage": stage.value, "data": compact_data}
@@ -1953,6 +1970,55 @@ class LangGraphRunLoop:
             return benchmark["strategies"]
         return {}
 
+    @staticmethod
+    def _bo_visualization_from_result(result: dict[str, Any]) -> dict[str, Any]:
+        """Extract the latest shared BO visualization from closed-loop result shapes."""
+        direct = result.get("visualization")
+        if isinstance(direct, dict):
+            return direct
+        bo_result = result.get("bo_result") if isinstance(result.get("bo_result"), dict) else {}
+        if isinstance(bo_result.get("visualization"), dict):
+            return bo_result["visualization"]
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        bo_result = data.get("bo_result") if isinstance(data.get("bo_result"), dict) else {}
+        if isinstance(bo_result.get("visualization"), dict):
+            return bo_result["visualization"]
+        strategies = LangGraphRunLoop._bo_strategies_from_result(result)
+        bo_payload = strategies.get("bo") if isinstance(strategies.get("bo"), dict) else {}
+        trace = bo_payload.get("surrogate_trace") if isinstance(bo_payload.get("surrogate_trace"), list) else []
+        for item in reversed(trace):
+            if isinstance(item, dict) and isinstance(item.get("visualization"), dict):
+                return item["visualization"]
+        return {}
+
+    def _write_bo_visualization_artifacts(self, stage: Stage, data: dict[str, Any]) -> list[dict[str, Any]]:
+        """Publish the shared BO projection under the active closed-loop run."""
+        visualization = self._bo_visualization_from_result(data)
+        if not visualization:
+            return []
+        try:
+            records = write_bo_visualization_artifacts(visualization, self._runtime_artifact_dir(stage))
+            return [
+                {
+                    **record,
+                    "key": f"runtime.bo_posterior.{Path(str(record['path'])).suffix.lstrip('.')}",
+                    "path": self._runtime_artifact_relpath(Path(str(record["path"]))),
+                    "stage": stage.value,
+                }
+                for record in records
+            ]
+        except Exception as exc:
+            return [
+                {
+                    "key": "runtime.bo_posterior.warning",
+                    "path": "",
+                    "name": "",
+                    "source": "bo_visualization.v1",
+                    "stage": stage.value,
+                    "error": f"{exc.__class__.__name__}: {exc}",
+                }
+            ]
+
     def _write_bo_progress_artifact(self, stage: Stage, data: dict[str, Any]) -> dict[str, Any] | None:
         """Write a compact BO progress/acquisition SVG for live closed-loop evidence."""
         strategies = self._bo_strategies_from_result(data)
@@ -2066,9 +2132,27 @@ class LangGraphRunLoop:
         if result_record:
             records.append(result_record)
         if stage == Stage.BO:
-            bo_plot = self._write_bo_progress_artifact(stage, data)
-            if bo_plot:
-                records.append(bo_plot)
+            visualization_records = self._write_bo_visualization_artifacts(stage, data)
+            if visualization_records:
+                records.extend(visualization_records)
+                visualization = self._bo_visualization_from_result(data)
+                if visualization:
+                    artifact_urls = visualization.setdefault("artifacts", {})
+                    if isinstance(artifact_urls, dict):
+                        encoded_run_id = quote(str(self._state.run_id), safe="")
+                        for record in visualization_records:
+                            path = str(record.get("path") or "")
+                            suffix = Path(path).suffix.lower().lstrip(".")
+                            if path and suffix in {"png", "svg", "csv"}:
+                                encoded_path = quote(path, safe="/")
+                                artifact_urls[f"{suffix}_path"] = path
+                                artifact_urls[f"{suffix}_url"] = (
+                                    f"/api/runs/{encoded_run_id}/artifact-file/{encoded_path}"
+                                )
+            else:
+                bo_plot = self._write_bo_progress_artifact(stage, data)
+                if bo_plot:
+                    records.append(bo_plot)
         seen_sources: set[str] = set()
         for key, source_path in self._iter_runtime_file_candidates(data):
             if source_path in seen_sources:
@@ -2102,9 +2186,21 @@ class LangGraphRunLoop:
         _walk(data, "result")
         return artifacts
 
-    async def _emit_artifact_events(self, stage: Stage, agent_name: str, data: dict[str, Any]) -> None:
+    async def _emit_artifact_events(
+        self,
+        stage: Stage,
+        agent_name: str,
+        data: dict[str, Any],
+        *,
+        registered_artifacts: list[dict[str, Any]] | None = None,
+    ) -> None:
         """Emit artifact.created aliases without changing agent result payload shape."""
-        for artifact in self._register_runtime_artifacts(stage, agent_name, data):
+        artifacts = (
+            registered_artifacts
+            if registered_artifacts is not None
+            else self._register_runtime_artifacts(stage, agent_name, data)
+        )
+        for artifact in artifacts:
             if not artifact.get("path"):
                 continue
             await self._emit(
@@ -2743,6 +2839,7 @@ class LangGraphRunLoop:
                 result_data.setdefault("incident_records", []).extend(post_gate.get("incident_records", []))
             if post_gate.get("corrective_actions"):
                 result_data.setdefault("corrective_actions", []).extend(post_gate.get("corrective_actions", []))
+            runtime_artifacts = self._register_runtime_artifacts(stage, agent_name, result_data)
             self._merge_agent_data(stage, result_data)
             await self._record_guardian_gate_result(post_gate)
             status.state = "idle"
@@ -2765,7 +2862,12 @@ class LangGraphRunLoop:
                 payload={"agent": agent_name, "node_id": stage.value, "status": "done", "module_runtime": module_runtime, "result": compact_runtime_payload(result.data)},
             )
             await self._emit_module_graph_completed(stage, agent_name, module_runtime, compact_runtime_payload(result_data))
-            await self._emit_artifact_events(stage, agent_name, result_data)
+            await self._emit_artifact_events(
+                stage,
+                agent_name,
+                result_data,
+                registered_artifacts=runtime_artifacts,
+            )
 
             if await self._pause_for_vision_intervention(
                 stage=stage,

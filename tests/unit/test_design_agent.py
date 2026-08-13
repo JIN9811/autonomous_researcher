@@ -132,6 +132,51 @@ async def test_design_agent_respects_state_constraints() -> None:
 
 
 @pytest.mark.asyncio
+async def test_design_agent_uses_orchestrator_requested_parameters_as_authority() -> None:
+    agent = DesignAgent()
+    state = OrchestratorState(
+        run_id="run-orchestrator-contract",
+        experiment_id="exp-orchestrator-contract",
+        mode=Mode.TEST,
+        stage=Stage.DESIGN,
+        active_goal="maximize gyroid SEA",
+        current_experiment_spec={
+            "constraints": {
+                "geometry_type": "gyroid",
+                "cell_size_mm": 10.0,
+                "relative_density": 0.24,
+            }
+        },
+        run_metadata={
+            "bo_recommended_constraints": {
+                "cell_size_mm": 7.5,
+                "relative_density": 0.29,
+            },
+            "orchestrator_design_contract": {
+                "schema": "orchestrator_design_contract.v1",
+                "contract_id": "design-run-orchestrator-contract-c001",
+                "phase": "initial_design",
+                "requested_parameters": {
+                    "cell_size_mm": 6.0,
+                    "relative_density": 0.37,
+                },
+            },
+        },
+    )
+
+    result = await agent.run(state, _DeterministicCtxStub())
+    spec = result.data["experiment_spec"]
+
+    assert spec["cell_size_mm"] == 6.0
+    assert spec["relative_density"] == pytest.approx(0.37)
+    assert spec["requested_parameters"] == {
+        "cell_size_mm": 6.0,
+        "relative_density": pytest.approx(0.37),
+    }
+    assert spec["orchestrator_design_contract_ref"] == "design-run-orchestrator-contract-c001"
+
+
+@pytest.mark.asyncio
 async def test_design_agent_keeps_preferred_geometry_when_bo_candidate_is_invalid() -> None:
     agent = DesignAgent()
     state = OrchestratorState(
@@ -341,3 +386,29 @@ async def test_design_agent_records_bo_knowledge_and_failure_feedback_context() 
     assert "random_voronoi" in prior["failure_memory"]["failed_geometry_types"]
     assert result.data["experiment_spec"]["geometry_type"] == "gyroid"
     assert result.data["experiment_spec"]["relative_density"] == 0.34
+
+
+@pytest.mark.asyncio
+async def test_design_agent_applies_both_bo_design_variables_without_changing_fixed_orientation() -> None:
+    state = OrchestratorState(
+        run_id="run-two-variable",
+        experiment_id="exp-two-variable",
+        mode=Mode.TEST,
+        stage=Stage.DESIGN,
+        active_goal="maximize measured SEA",
+        run_metadata={
+            "bo_recommended_constraints": {
+                "geometry_type": "gyroid",
+                "cell_size_mm": 7.5,
+                "relative_density": 0.41,
+            }
+        },
+    )
+
+    result = await DesignAgent().run(state, _DeterministicCtxStub())
+    spec = result.data["experiment_spec"]
+
+    assert spec["cell_size_mm"] == 7.5
+    assert spec["relative_density"] == 0.41
+    assert spec["orientation_deg"] == 0.0
+    assert spec["anisotropy_ratio"] == 1.0

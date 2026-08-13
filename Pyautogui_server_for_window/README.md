@@ -3,6 +3,42 @@
 Windows PC에서 PyAutoGUI를 인증된 HTTP bridge로 노출하고 Linux ATR
 Equipment Agent가 내부망에서 제어하도록 만든 독립 배포 패키지입니다.
 
+## 포터블 배포: 권장
+
+새 Windows x64 PC에는 포터블 ZIP을 사용합니다. ZIP을 통째로 옮겨 압축을
+푼 뒤 `START_EQUIPMENT_BRIDGE.cmd`만 더블클릭하면 됩니다.
+
+- 별도 Python 설치와 인터넷 연결 불필요
+- 관리자 권한 불필요
+- 첫 실행에만 폴더 내부 `runtime\python` 구성
+- GUI, bridge server, 프로그램/스킬 관리 기능 동시 시작
+- 토큰, 프로그램, 녹화, locator, UTM CSV, 로그를 같은 폴더의 `data\`에 저장
+- 종료는 `STOP_EQUIPMENT_BRIDGE.cmd`
+- Linux ATR 주소 자동 학습 및 `data\controller_connection.json` 재사용
+
+포터블 릴리스 생성:
+
+```bash
+python3 Pyautogui_server_for_window/scripts/build_portable_release.py \
+  --output /path/to/ATR_Equipment_Agent_Bridge_Windows_x64_Portable \
+  --version YYYY.MM.DD
+```
+
+빌더는 공식 Python Windows x64 설치 파일의 SHA-256을 검증하고 Windows용
+wheelhouse를 미리 구성합니다. `portable_manifest.json`에는 포함 파일별
+SHA-256과 크기가 기록됩니다. 시스템 Python은 사용하거나 변경하지 않습니다.
+
+현재 생성된 배포본:
+
+```text
+/home/jin/다운로드/ATR_Equipment_Agent_Bridge_Windows_x64_Portable_20260812/
+/home/jin/다운로드/ATR_Equipment_Agent_Bridge_Windows_x64_Portable_20260812.zip
+```
+
+내부망에서 Linux ATR이 접속할 때 Windows Defender Firewall이 8765/TCP를
+막으면 관리자 PowerShell에서 `scripts\firewall_allow_private.ps1`를 명시적으로
+실행합니다. 로컬 GUI와 로컬 테스트에는 방화벽 변경이 필요 없습니다.
+
 ## 표준 설치
 
 release ZIP을 풀고 `INSTALL_WINDOWS_BRIDGE.cmd`를 더블클릭합니다. 압축을
@@ -89,6 +125,23 @@ Web GUI: http://127.0.0.1:8765/
 http://127.0.0.1:8765/
 ```
 
+### Linux ATR 자동 연결
+
+패키지에 Linux 호스트 IP를 고정하지 않습니다. ATR이 올바른 bridge token으로
+`/health` 또는 `/programs`를 호출하면 Windows bridge가 인증된 요청의 사설 IP에서
+`http://<peer-ip>:7860/api/equipment/skills`를 확인합니다. ATR 응답 형식이 검증되면
+`data\controller_connection.json`에 URL만 저장하고 다음 시작부터 재사용합니다.
+토큰, API key, cookie는 이 파일에 저장하지 않습니다.
+
+인증된 peer로 찾지 못하면 Web GUI의 `Discover ATR`이 현재 Windows 사설망의
+`/24`와 7860 포트만 제한적으로 탐색합니다. 한 대면 저장하고 여러 대면 사용자가
+선택합니다. `Controller URL`의 `Verify & Save`로 수동 검증할 수도 있습니다.
+관리형 배포에서만 다음 override를 사용하며, 설정 시 자동 후보보다 우선합니다.
+
+```powershell
+$env:WINDOWS_PYAUTOGUI_ATR_API_URL = "http://<linux-atr-host>:7860"
+```
+
 `Program Manager > RECORD`는 5초 카운트다운 후 녹화를 시작합니다. 녹화
 중에는 Windows 최상위에 빨간 점과 경과 시간이 있는 작은 배너가 표시되고,
 같은 `STOP RECORDING` 버튼을 누르면 녹화와 배너가 함께 종료됩니다.
@@ -170,6 +223,7 @@ curl -s -H "X-Bridge-Token: $WINDOWS_PYAUTOGUI_BRIDGE_TOKEN" \
 - `GET /locators`, `POST /locators/capture`: UTM 버튼/상태 이미지 locator calibration
 - `GET /artifacts`, `GET /artifacts/<artifact_id>`: CSV/screenshot artifact metadata 및 base64 회수
 - `GET /request-log`: 최근 100개 request audit event 조회
+- `GET /controller`, `POST /controller/discover`, `POST /controller/select`: ATR controller 검증·선택 상태
 
 감사 로그:
 

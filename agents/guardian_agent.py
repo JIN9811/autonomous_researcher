@@ -24,6 +24,7 @@ from typing import Any
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
 from knowledge.failure_memory import FailureRecord
+from orchestrator.runtime_defaults import TEST_MODE_LOOP_CYCLES
 from orchestrator.state import OrchestratorState
 
 
@@ -31,7 +32,7 @@ class GuardianAgent(BaseAgent):
     """Applies run safety and consistency checks."""
 
     name = "guardian_agent"
-    TEST_LOOP_CYCLE_LIMIT = 5
+    TEST_LOOP_CYCLE_LIMIT = TEST_MODE_LOOP_CYCLES
     _SUPPORTED_GEOMETRIES = {
         "lattice_bcc",
         "lattice_fcc",

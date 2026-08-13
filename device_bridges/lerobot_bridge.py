@@ -7716,6 +7716,7 @@ class LeRobotBridge:
             "log_path": "",
             "pid": None,
             "returncode": None,
+            "virtual_bridge_simulation": bool(request.virtual_bridge_simulation),
             "tts": self._tts_config_for_request(request) if workflow == "record" else {},
         }
         if mirror_preflight and request.isaac_mirror_enabled and workflow in {"teleoperate", "record"}:
@@ -8188,6 +8189,7 @@ class LeRobotBridge:
             "tts": session.get("tts", {}),
             "monitor": session.get("monitor", {}),
             "error": None,
+            "virtual_bridge_simulation": bool(session.get("virtual_bridge_simulation")),
         }
         payload.update(self._session_runtime_contract_blocks(session, runtime))
         if str(session.get("workflow") or "").lower() == "rollout":
@@ -8248,6 +8250,34 @@ class LeRobotBridge:
     def _rollout_joint_telemetry_contract(self, session: dict[str, Any]) -> dict[str, Any]:
         """Expose measured motion state and the post-place gate without opening robot ports."""
         session_id = self._safe_session_id(str(session.get("session_id") or "live"))
+        if bool(session.get("virtual_bridge_simulation")) and str(session.get("mode") or "") != "live":
+            return {
+                "joint_telemetry": {
+                    "schema": TELEMETRY_SCHEMA,
+                    "status": "simulated",
+                    "session_id": session_id,
+                    "log_path": "",
+                    "packet": {
+                        "sequence": 3,
+                        "measured_base_state": "home",
+                        "measured_gripper_state": "idle",
+                        "source": "virtual_bridge",
+                    },
+                },
+                "post_place_interlock": {
+                    "schema": "post_place_interlock.v1",
+                    "session_id": session_id,
+                    "ungrasping_seen": True,
+                    "ungrasping_sequence": 2,
+                    "measured_base_state": "home",
+                    "measured_gripper_state": "idle",
+                    "home_gate_passed": True,
+                    "home_after_ungrasping": True,
+                    "ready_for_utm_snapshot": True,
+                    "latest_sequence": 3,
+                    "source": "virtual_bridge",
+                },
+            }
         log_path = self._omx_action_log_path(session_id)
         with self._joint_telemetry_gate_lock:
             packets = self._joint_telemetry_observer.poll(log_path, session)
@@ -9776,6 +9806,21 @@ class LeRobotBridge:
 
     def _runtime_status_from_log(self, session: dict[str, Any], log_tail: str) -> dict[str, Any]:
         """Summarize live LeRobot process state from its persisted session log."""
+        if (
+            bool(session.get("virtual_bridge_simulation"))
+            and str(session.get("mode") or "") != "live"
+            and str(session.get("workflow") or "").lower() == "rollout"
+        ):
+            return {
+                "phase": "ACTION_ACTIVE",
+                "message": "Virtual bridge rollout completed with simulated action evidence.",
+                "action_count": 30,
+                "max_abs_delta": 0.0,
+                "warnings": [],
+                "log_path": "",
+                "pid": None,
+                "returncode": 0,
+            }
         status = str(session.get("status") or "").upper()
         returncode = session.get("returncode")
         text = str(log_tail or "")

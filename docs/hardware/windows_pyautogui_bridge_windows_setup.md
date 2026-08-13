@@ -1,5 +1,27 @@
 # Windows PyAutoGUI Bridge Setup Guide
 
+## Recommended Portable Deployment
+
+For a new Windows x64 equipment PC, transfer
+`ATR_Equipment_Agent_Bridge_Windows_x64_Portable.zip`, extract the complete
+folder, and double-click `START_EQUIPMENT_BRIDGE.cmd`. The package contains the
+official Python runtime installer and all Windows wheels, so first launch is
+offline and does not modify system Python. Mutable state stays under the local
+`data` directory. Use `STOP_EQUIPMENT_BRIDGE.cmd` before moving or replacing
+the folder.
+
+The release folder and ZIP are generated with:
+
+```bash
+python3 Pyautogui_server_for_window/scripts/build_portable_release.py \
+  --output /path/to/ATR_Equipment_Agent_Bridge_Windows_x64_Portable \
+  --version YYYY.MM.DD
+```
+
+Remote Linux access may require an explicit private-network firewall rule for
+TCP 8765. The portable launcher does not request elevation or alter the
+firewall automatically.
+
 ## Current Standalone Deployment
 
 The canonical deployment is the complete `Pyautogui_server_for_window`
@@ -129,9 +151,18 @@ and requires `pynput`; ordinary registered-program execution does not.
 ```powershell
 py -m pip install "pynput>=1.7.7,<2" Pillow opencv-python
 $env:WINDOWS_PYAUTOGUI_RECORDING_DIR = "C:\ATR\recordings"
-$env:WINDOWS_PYAUTOGUI_ATR_API_URL = "http://<linux-atr-host>:7860"
+# Optional managed-deployment override. Normal packages learn and verify the
+# authenticated Linux peer automatically.
+# $env:WINDOWS_PYAUTOGUI_ATR_API_URL = "http://<linux-atr-host>:7860"
 py windows_pyautogui_bridge_server.py --recording-dir "C:\ATR\recordings"
 ```
+
+After ATR calls an authenticated bridge endpoint, Windows verifies the peer's
+`/api/equipment/skills` response and stores the controller origin at
+`%WINDOWS_PYAUTOGUI_DATA_ROOT%\controller_connection.json`. If peer learning is
+not available, use `Discover ATR` in the Windows console. Discovery probes only
+private IPv4 `/24` candidates on port 7860; multiple verified controllers require
+manual selection. The saved record contains no token or API credential.
 
 Recording routes are authenticated with the existing bridge token:
 

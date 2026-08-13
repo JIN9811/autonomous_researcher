@@ -1303,6 +1303,59 @@ verification session from committed baseline `09bbe32`. Importing `app.main`
 may create an empty run directory; verification cleanup may remove only the
 directory proven to have been created by that import.
 
+## BoTorch Sequential Optimization (2026-08-10)
+
+- Production BO defaults to `botorch`; legacy `botorch_optional` settings are normalized to it.
+- `learning/bo_parameter_space.py` owns the stable mixed-space codec, schema hash, and deterministic Latin Hypercube design.
+- Closed-loop `BOAgent` calls evaluate exactly one next point per cycle. Initial cycles use LHS; subsequent cycles fit `SingleTaskGP` and call `optimize_acqf` or `optimize_acqf_mixed`.
+- BO Workspace can still run a full synthetic budget for random/grid/BO comparison.
+- BoTorch failures are typed and visible. No automatic lightweight backend substitution is allowed.
+- Live GUI, BO Workspace, and PNG/SVG/CSV artifacts consume the same `bo_visualization.v1` posterior arrays.
+- The visible BO posterior/EI figure is output-only: it shows score, uncertainty,
+  measured scores, EI, and an anonymous normalized search coordinate. The two
+  model inputs remain part of fitting and provenance but are not rendered as
+  axes, strata, labels, facets, or tooltips in this figure; input-space display
+  belongs to the separate LHS card.
+
+## Two-Variable Gyroid SEA Optimization (2026-08-11)
+
+- The canonical active space is `cell_size_mm x relative_density`. For a
+  30 mm Gyroid specimen, cell size is the feasible discrete set
+  `{5.0, 6.0, 7.5, 10.0}` mm from `a=L/N`, `N={6,5,4,3}`; relative density is
+  continuous on `[0.20,0.48]`.
+- `BOParameterSpace` normalizes both dimensions to `[0,1]^2`. The first eight
+  accepted observations use one deterministic balanced Latin Hypercube design.
+  The normal 20-cycle test run uses those eight initialization cycles followed
+  by twelve `SingleTaskGP` / Expected Improvement cycles when all observations
+  are accepted.
+- In initial-design mode, `BOAgent` preserves the numeric LHS proposal without
+  passing it through candidate/LLM reranking. The runtime exposes
+  `optimization_phase=initial_design`, `backend_active=lhs`, and the explicit
+  `completed/target/next_index` progress. Live GUI chat, report, and dashboard
+  cards consume this phase contract and do not show combined/acquisition scores
+  as if they selected the point.
+- After eight valid measured observations, BoTorch fits `SingleTaskGP` with an
+  ARD Matérn 5/2 covariance and Gaussian observation noise, then maximizes
+  `LogExpectedImprovement`. Discrete feasible cell sizes are enumerated as
+  fixed features while relative density is optimized continuously.
+- The authoritative objective is measured
+  `specific_energy_absorption_J_per_g` in J/g. Composite proxy scores,
+  rejected observations, and infeasible observations do not enter the GP.
+- Test-mode multi-cycle planning seeds its first Design request from BO Agent's
+  canonical LHS sequence through an explicit Orchestrator-owned
+  `orchestrator_design_contract.v1`. Each later `next_design_request.v1` is
+  republished through the same contract before Design Agent runs. Closed-loop
+  static constraint filtering releases both active variables while retaining
+  specimen envelope, material, process, cap, and orientation settings.
+- The deterministic LHS plan is generated once from the configured seed and
+  retained as eight two-dimensional points. Every initialization cycle selects
+  the next unobserved point from that plan; it does not regenerate a smaller
+  LHS from the remaining count.
+- Live and BO Workspace cards expose the same two-variable design-space,
+  initial-design, kernel, noise, acquisition, normalization, and objective
+  metadata. The selected-parameter graph is a one-dimensional marginal view of
+  the two-dimensional model, not a separate one-dimensional optimizer.
+
 ## Related Documents
 
 - [LangGraph Runtime](langgraph_runtime.md)

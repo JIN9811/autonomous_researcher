@@ -11,6 +11,7 @@ from typing import Any
 from objectives.compiler import compile_objective, validate_objective
 from objectives.evaluator import evaluate_objective
 from objectives.metric_registry import MetricRegistry
+from objectives.presets import get_objective_preset, list_objective_presets
 from objectives.schemas import (
     ALLOWED_OPERATORS,
     ObjectiveBinding,
@@ -65,6 +66,14 @@ class ObjectiveService:
             )
         )
         return parsed
+
+    def list_presets(self) -> list[ObjectiveSpec]:
+        """Return optional built-ins without writing to ObjectiveStore."""
+        return list_objective_presets(registry_version=self.registry.version_id)
+
+    def get_preset(self, preset_id: str) -> ObjectiveSpec:
+        """Resolve one optional built-in without changing runtime state."""
+        return get_objective_preset(preset_id, registry_version=self.registry.version_id)
 
     def create_manual_draft(
         self,

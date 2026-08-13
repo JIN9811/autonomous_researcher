@@ -36,14 +36,17 @@ from __future__ import annotations
 
 import argparse
 import base64
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from dataclasses import dataclass
 import hashlib
 import importlib.util
+import ipaddress
 import json
 import os
 import queue
 import re
+import socket
 import subprocess
 import sys
 import threading
@@ -54,7 +57,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, unquote, urlparse
-from urllib.request import Request as URLRequest, urlopen
+from urllib.request import HTTPRedirectHandler, Request as URLRequest, build_opener, urlopen
 from uuid import uuid4
 
 
@@ -125,7 +128,7 @@ def _default_demo_root() -> Path:
 
 
 DEMO_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_DEMO_DIR", str(_default_demo_root())))
-ATR_API_URL = os.getenv("WINDOWS_PYAUTOGUI_ATR_API_URL", "http://127.0.0.1:7860").rstrip("/")
+ATR_API_URL = os.getenv("WINDOWS_PYAUTOGUI_ATR_API_URL", "").rstrip("/")
 UTM_EXPORT_GLOB = os.getenv("WINDOWS_PYAUTOGUI_UTM_EXPORT_GLOB", "*.csv")
 UTM_FILE_STABLE_SEC = float(os.getenv("WINDOWS_PYAUTOGUI_UTM_FILE_STABLE_SEC", "2.0"))
 ALLOW_SIMULATED_UTM = os.getenv("WINDOWS_PYAUTOGUI_ALLOW_SIMULATED_UTM", "0").strip().lower() in {"1", "true", "yes", "on"}
@@ -900,15 +903,409 @@ class RecordingManager:
 RECORDING_MANAGER = RecordingManager(RECORDING_ROOT)
 
 
+class _NoControllerRedirects(HTTPRedirectHandler):
+    """Keep controller identity checks on the candidate origin."""
+
+    def redirect_request(self, req: URLRequest, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
+        return None
+
+
+def _normalize_controller_url(value: str) -> str:
+    raw = str(value or "").strip().rstrip("/")
+    if not raw:
+        raise ValueError("controller URL is empty")
+    parsed = urlparse(raw)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("controller URL must use http or https and include a host")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in {"", "/"}:
+        raise ValueError("controller URL must be an origin without credentials, query, fragment, or path")
+    try:
+        port = parsed.port or 7860
+    except ValueError as exc:
+        raise ValueError("controller URL port is invalid") from exc
+    host = parsed.hostname.lower()
+    try:
+        address = ipaddress.ip_address(host)
+        host = f"[{address.compressed}]" if address.version == 6 else address.compressed
+    except ValueError:
+        pass
+    return f"{parsed.scheme.lower()}://{host}:{port}"
+
+
+def _controller_url_is_private_ipv4(controller_url: str) -> bool:
+    try:
+        address = ipaddress.ip_address(urlparse(controller_url).hostname or "")
+    except ValueError:
+        return False
+    return address.version == 4 and (address.is_private or address.is_loopback)
+
+
+def _eligible_private_peer(value: str) -> ipaddress.IPv4Address | None:
+    try:
+        address = ipaddress.ip_address(str(value or "").strip())
+    except ValueError:
+        return None
+    if (
+        address.version != 4
+        or not address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_unspecified
+        or address.is_reserved
+    ):
+        return None
+    return address
+
+
+def _local_private_ipv4_addresses() -> list[str]:
+    addresses: set[str] = set()
+    try:
+        infos = socket.getaddrinfo(socket.gethostname(), None, family=socket.AF_INET, type=socket.SOCK_STREAM)
+    except OSError:
+        infos = []
+    for info in infos:
+        address = _eligible_private_peer(str(info[4][0]))
+        if address is not None:
+            addresses.add(address.compressed)
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe.connect(("192.0.2.1", 9))
+            address = _eligible_private_peer(str(probe.getsockname()[0]))
+            if address is not None:
+                addresses.add(address.compressed)
+        finally:
+            probe.close()
+    except OSError:
+        pass
+    return sorted(addresses, key=lambda value: int(ipaddress.ip_address(value)))
+
+
+def _private_ipv4_probe_candidates(local_addresses: list[str], *, max_candidates: int = 512) -> list[str]:
+    own = {
+        address.compressed
+        for value in local_addresses
+        if (address := _eligible_private_peer(value)) is not None
+    }
+    candidates: set[str] = set()
+    for own_address in sorted(own, key=lambda value: int(ipaddress.ip_address(value))):
+        network = ipaddress.ip_network(f"{own_address}/24", strict=False)
+        for candidate in network.hosts():
+            compressed = candidate.compressed
+            if compressed not in own:
+                candidates.add(compressed)
+            if len(candidates) >= max(1, int(max_candidates)):
+                break
+        if len(candidates) >= max(1, int(max_candidates)):
+            break
+    return sorted(candidates, key=lambda value: int(ipaddress.ip_address(value)))
+
+
+def _scan_private_network_for_atr(*, overall_timeout: float = 4.0, max_workers: int = 32) -> list[str]:
+    candidates = _private_ipv4_probe_candidates(_local_private_ipv4_addresses())
+    if not candidates:
+        return []
+    executor = ThreadPoolExecutor(max_workers=max(1, min(int(max_workers), 64)), thread_name_prefix="atr-discovery")
+    futures = {
+        executor.submit(_verify_atr_controller_identity, f"http://{address}:7860", timeout=0.4): address
+        for address in candidates
+    }
+    verified: list[str] = []
+    try:
+        for future in as_completed(futures, timeout=max(0.5, float(overall_timeout))):
+            address = futures[future]
+            try:
+                result = future.result()
+            except Exception:
+                continue
+            if isinstance(result, dict) and result.get("ok") is True:
+                verified.append(f"http://{address}:7860")
+    except TimeoutError:
+        pass
+    finally:
+        for future in futures:
+            future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
+    return sorted(set(verified), key=lambda value: int(ipaddress.ip_address(urlparse(value).hostname or "0.0.0.0")))
+
+
+def _verify_atr_controller_identity(controller_url: str, *, timeout: float = 1.0) -> dict[str, Any]:
+    """Accept a controller only when its public Skill registry has the ATR response shape."""
+    request = URLRequest(
+        f"{controller_url}/api/equipment/skills",
+        method="GET",
+        headers={"Accept": "application/json"},
+    )
+    try:
+        with build_opener(_NoControllerRedirects()).open(request, timeout=max(0.1, float(timeout))) as response:
+            if int(response.status) != 200:
+                return {"ok": False, "failure_code": "ATR_CONTROLLER_IDENTITY_HTTP_ERROR"}
+            raw = response.read(2 * 1024 * 1024 + 1)
+            if len(raw) > 2 * 1024 * 1024:
+                return {"ok": False, "failure_code": "ATR_CONTROLLER_IDENTITY_RESPONSE_TOO_LARGE"}
+            payload = json.loads(raw.decode("utf-8"))
+    except HTTPError as exc:
+        return {
+            "ok": False,
+            "failure_code": "ATR_CONTROLLER_REDIRECT_REJECTED" if 300 <= int(exc.code) < 400 else "ATR_CONTROLLER_IDENTITY_HTTP_ERROR",
+            "http_status": int(exc.code),
+        }
+    except (URLError, TimeoutError, OSError):
+        return {"ok": False, "failure_code": "ATR_CONTROLLER_UNREACHABLE"}
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {"ok": False, "failure_code": "ATR_CONTROLLER_IDENTITY_INVALID_JSON"}
+    if not isinstance(payload, dict) or payload.get("ok") is not True or not isinstance(payload.get("skills"), list):
+        return {"ok": False, "failure_code": "ATR_CONTROLLER_IDENTITY_MISMATCH"}
+    return {"ok": True, "status": "verified", "skill_count": len(payload["skills"])}
+
+
+class ATRControllerResolver:
+    """Resolve and persist a verified Linux ATR controller without storing credentials."""
+
+    schema = "atr.windows_controller_connection.v1"
+
+    def __init__(
+        self,
+        data_root: Path,
+        *,
+        explicit_url: str = "",
+        verifier: Callable[[str], dict[str, Any] | bool] | None = None,
+        scanner: Callable[[], list[str]] | None = None,
+    ) -> None:
+        self.data_root = Path(data_root)
+        self.record_path = self.data_root / "controller_connection.json"
+        self.explicit_url = str(explicit_url or "").strip()
+        self._verifier = verifier
+        self._scanner = scanner
+        self._lock = threading.RLock()
+        self._current: dict[str, Any] | None = None
+        self._saved_record_status = "missing"
+        self._negative_discovery_until = 0.0
+        self._last_discovery_failure: dict[str, Any] | None = None
+
+    @staticmethod
+    def _timestamp() -> str:
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    def _verify(self, value: str, *, source: str, allow_public: bool = False) -> dict[str, Any]:
+        try:
+            controller_url = _normalize_controller_url(value)
+        except ValueError:
+            return {"ok": False, "source": source, "failure_code": "ATR_CONTROLLER_URL_INVALID"}
+        if not allow_public and not _controller_url_is_private_ipv4(controller_url):
+            return {"ok": False, "source": source, "failure_code": "ATR_CONTROLLER_ADDRESS_NOT_PRIVATE"}
+        try:
+            verification = self._verifier(controller_url) if self._verifier else _verify_atr_controller_identity(controller_url)
+        except Exception:
+            verification = {"ok": False, "failure_code": "ATR_CONTROLLER_VERIFICATION_FAILED"}
+        if verification is True:
+            verification = {"ok": True}
+        if not isinstance(verification, dict) or verification.get("ok") is not True:
+            failure_code = str(verification.get("failure_code") or "ATR_CONTROLLER_IDENTITY_MISMATCH") if isinstance(verification, dict) else "ATR_CONTROLLER_IDENTITY_MISMATCH"
+            return {"ok": False, "source": source, "controller_url": controller_url, "failure_code": failure_code}
+        return {
+            "ok": True,
+            "status": "verified",
+            "source": source,
+            "controller_url": controller_url,
+            "verified_at": self._timestamp(),
+        }
+
+    def _load_saved(self) -> dict[str, Any] | None:
+        if not self.record_path.is_file():
+            self._saved_record_status = "missing"
+            return None
+        try:
+            payload = json.loads(self.record_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            self._saved_record_status = "invalid"
+            return None
+        if not isinstance(payload, dict) or payload.get("schema") != self.schema or not payload.get("controller_url"):
+            self._saved_record_status = "invalid"
+            return None
+        self._saved_record_status = "loaded"
+        return payload
+
+    def _persist(self, result: dict[str, Any], *, source: str) -> None:
+        self.data_root.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema": self.schema,
+            "controller_url": str(result["controller_url"]),
+            "source": source,
+            "verified_at": str(result.get("verified_at") or self._timestamp()),
+            "last_successful_verification_at": self._timestamp(),
+            "last_failure_code": "",
+            "last_failure_message": "",
+        }
+        temporary = self.record_path.with_name(f".{self.record_path.name}.{uuid4().hex}.tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(self.record_path)
+        self._saved_record_status = "loaded"
+
+    def resolve(self, *, allow_scan: bool = False) -> dict[str, Any]:
+        with self._lock:
+            if self._current and self._current.get("ok"):
+                return dict(self._current)
+            if self.explicit_url:
+                result = self._verify(self.explicit_url, source="environment", allow_public=True)
+                if not result.get("ok"):
+                    result["failure_code"] = "ATR_CONTROLLER_EXPLICIT_URL_INVALID"
+                self._current = result
+                return dict(result)
+            saved = self._load_saved()
+            if saved:
+                result = self._verify(str(saved.get("controller_url") or ""), source="saved")
+                if result.get("ok"):
+                    self._current = result
+                    return dict(result)
+            if allow_scan:
+                discovered = self.discover()
+                if discovered.get("ok"):
+                    return discovered
+            local = self._verify("http://127.0.0.1:7860", source="local_fallback")
+            if local.get("ok"):
+                self._current = local
+                return dict(local)
+            return {
+                "ok": False,
+                "status": "unresolved",
+                "source": "none",
+                "failure_code": "ATR_CONTROLLER_NOT_FOUND",
+                "saved_record_status": self._saved_record_status,
+            }
+
+    def select(self, candidate_url: str, *, source: str = "manual") -> dict[str, Any]:
+        with self._lock:
+            result = self._verify(candidate_url, source=source)
+            if not result.get("ok"):
+                return result
+            self._persist(result, source=source)
+            self._current = result
+            return dict(result)
+
+    def discover(self) -> dict[str, Any]:
+        with self._lock:
+            if self._current and self._current.get("ok"):
+                return dict(self._current)
+            if time.monotonic() < self._negative_discovery_until and self._last_discovery_failure:
+                return {**self._last_discovery_failure, "cached": True}
+            try:
+                scanned = self._scanner() if self._scanner else _scan_private_network_for_atr()
+            except Exception:
+                scanned = []
+            normalized: list[str] = []
+            for value in scanned if isinstance(scanned, list) else []:
+                try:
+                    candidate = _normalize_controller_url(str(value))
+                except ValueError:
+                    continue
+                if _controller_url_is_private_ipv4(candidate) and candidate not in normalized:
+                    normalized.append(candidate)
+            verified = [
+                result
+                for candidate in normalized
+                if (result := self._verify(candidate, source="subnet_scan")).get("ok") is True
+            ]
+            verified.sort(key=lambda item: int(ipaddress.ip_address(urlparse(str(item["controller_url"])).hostname or "0.0.0.0")))
+            if len(verified) == 1:
+                result = verified[0]
+                self._persist(result, source="subnet_scan")
+                self._current = result
+                self._negative_discovery_until = 0.0
+                self._last_discovery_failure = None
+                return dict(result)
+            if len(verified) > 1:
+                failure = {
+                    "ok": False,
+                    "status": "selection_required",
+                    "failure_code": "ATR_CONTROLLER_MULTIPLE_CANDIDATES",
+                    "candidates": [str(item["controller_url"]) for item in verified],
+                }
+            else:
+                failure = {
+                    "ok": False,
+                    "status": "unresolved",
+                    "failure_code": "ATR_CONTROLLER_NOT_FOUND",
+                    "candidates": [],
+                }
+            self._negative_discovery_until = time.monotonic() + 30.0
+            self._last_discovery_failure = failure
+            return dict(failure)
+
+    def observe_authenticated_peer(self, peer_ip: str) -> dict[str, Any]:
+        with self._lock:
+            if self._current and self._current.get("ok"):
+                return dict(self._current)
+            if self.explicit_url:
+                return self.resolve()
+            saved = self._load_saved()
+            if saved:
+                saved_result = self._verify(str(saved.get("controller_url") or ""), source="saved")
+                if saved_result.get("ok"):
+                    self._current = saved_result
+                    return dict(saved_result)
+            address = _eligible_private_peer(peer_ip)
+            if address is None or address.compressed in set(_local_private_ipv4_addresses()):
+                return {"ok": False, "status": "ignored", "failure_code": "ATR_CONTROLLER_PEER_NOT_ELIGIBLE"}
+            result = self._verify(f"http://{address.compressed}:7860", source="authenticated_peer")
+            if not result.get("ok"):
+                return result
+            self._persist(result, source="authenticated_peer")
+            self._current = result
+            self._negative_discovery_until = 0.0
+            self._last_discovery_failure = None
+            return dict(result)
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            if self._current:
+                return dict(self._current)
+            return {
+                "ok": False,
+                "status": "unresolved",
+                "source": "none",
+                "failure_code": "ATR_CONTROLLER_NOT_FOUND",
+                "saved_record_status": self._saved_record_status,
+            }
+
+
+def _controller_data_root() -> Path:
+    configured = str(os.getenv("WINDOWS_PYAUTOGUI_DATA_ROOT", "")).strip()
+    return Path(configured) if configured else ARTIFACT_ROOT.parent
+
+
+def _reset_controller_resolver(*, data_root: Path | None = None) -> ATRControllerResolver:
+    global CONTROLLER_RESOLVER
+    CONTROLLER_RESOLVER = ATRControllerResolver(
+        Path(data_root) if data_root is not None else _controller_data_root(),
+        explicit_url=ATR_API_URL,
+    )
+    return CONTROLLER_RESOLVER
+
+
+CONTROLLER_RESOLVER = ATRControllerResolver(_controller_data_root(), explicit_url=ATR_API_URL)
+
+
 def _atr_api_request(
     method: str,
     path: str,
     payload: dict[str, Any] | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """Proxy token-free Skill metadata to Linux; model credentials never cross the bridge."""
+    resolution = CONTROLLER_RESOLVER.resolve(allow_scan=True)
+    if resolution.get("ok") is not True:
+        return 503, {
+            "ok": False,
+            "status": "unreachable",
+            "failure_code": "EQUIPMENT_SKILL_REGISTRY_UNREACHABLE",
+            "controller": resolution,
+            "message": "No verified ATR controller is available. Use controller discovery or set WINDOWS_PYAUTOGUI_ATR_API_URL.",
+        }
+    controller_url = str(resolution.get("controller_url") or "").rstrip("/")
     data = json.dumps(payload, ensure_ascii=True).encode("utf-8") if payload is not None else None
     request = URLRequest(
-        f"{ATR_API_URL}{path}",
+        f"{controller_url}{path}",
         data=data,
         method=method,
         headers={"Content-Type": "application/json"},
@@ -1438,6 +1835,7 @@ def _health() -> dict[str, Any]:
         "available": (DEMO_ROOT / "pyautogui_capability_lab.html").is_file()
         and (DEMO_ROOT / "examples").is_dir(),
     }
+    controller_status = CONTROLLER_RESOLVER.status()
     if pyautogui is None:
         return {
             "ok": True,
@@ -1449,6 +1847,7 @@ def _health() -> dict[str, Any]:
             "dependencies": dependencies,
             "demo_assets": demo_assets,
             "platform": platform_status,
+            "atr_controller": controller_status,
             "server_version": "WindowsPyAutoGUIBridge/0.1",
             "script_version": "windows_pyautogui_bridge_server.py:utm_visual_control_v1",
             "artifacts": {"root": str(ARTIFACT_ROOT), "request_log": str(ARTIFACT_ROOT / "bridge_requests.jsonl"), "locator_root": str(LOCATOR_ROOT), "utm_export_root": str(UTM_EXPORT_ROOT)},
@@ -1465,6 +1864,7 @@ def _health() -> dict[str, Any]:
         "dependencies": dependencies,
         "demo_assets": demo_assets,
         "platform": platform_status,
+        "atr_controller": controller_status,
         "server_version": "WindowsPyAutoGUIBridge/0.1",
         "script_version": "windows_pyautogui_bridge_server.py:utm_visual_control_v1",
         "artifacts": {"root": str(ARTIFACT_ROOT), "request_log": str(ARTIFACT_ROOT / "bridge_requests.jsonl"), "locator_root": str(LOCATOR_ROOT), "utm_export_root": str(UTM_EXPORT_ROOT)},
@@ -4050,6 +4450,7 @@ class BridgeConfig:
     reference_dir: Path = LOCATOR_ROOT
     program_dir: Path = PROGRAM_ROOT
     demo_dir: Path = DEMO_ROOT
+    data_root: Path | None = None
 
 
 def _apply_bridge_config(config: BridgeConfig) -> None:
@@ -4065,6 +4466,7 @@ def _apply_bridge_config(config: BridgeConfig) -> None:
         PROGRAM_ROOT = Path(config.program_dir)
     if config.demo_dir:
         DEMO_ROOT = Path(config.demo_dir)
+    _reset_controller_resolver(data_root=Path(config.data_root) if config.data_root else ARTIFACT_ROOT.parent)
 
 
 def public_programs() -> list[dict[str, Any]]:
@@ -5991,6 +6393,16 @@ INDEX_HTML = r"""<!doctype html>
           <button class="secondary" id="refreshAll">Refresh</button>
           <button class="secondary" id="clearToken">Clear Token</button>
         </div>
+        <div class="connection-readout" style="margin-top:10px">
+          <span>ATR Controller</span>
+          <code id="controllerStatus">Not resolved</code>
+        </div>
+        <div class="essential-fields" style="margin-top:8px">
+          <label>Controller URL<input id="controllerUrl" type="url" placeholder="http://192.168.x.x:7860"></label>
+          <button class="secondary" id="discoverController">Discover ATR</button>
+          <button class="secondary" id="saveController">Verify &amp; Save</button>
+        </div>
+        <div id="controllerCandidates" class="hint" aria-live="polite">ATR will be learned from an authenticated Linux request or bounded private-network discovery.</div>
         <div class="essential-metrics" style="margin-top:10px">
           <div class="essential-metric"><strong>Bridge</strong><span id="essentialBridgeState">Not checked</span></div>
           <div class="essential-metric"><strong>PyAutoGUI</strong><span id="essentialPyAutoGUI">Unknown</span></div>
@@ -6485,6 +6897,9 @@ INDEX_HTML = r"""<!doctype html>
     const preflightText = document.getElementById("preflightText");
     const artifactPreview = document.getElementById("artifactPreview");
     const baseUrlLabel = document.getElementById("baseUrlLabel");
+    const controllerStatus = document.getElementById("controllerStatus");
+    const controllerUrl = document.getElementById("controllerUrl");
+    const controllerCandidates = document.getElementById("controllerCandidates");
     const commandBanner = document.getElementById("commandBanner");
     const commandTitle = document.getElementById("commandTitle");
     const commandDetail = document.getElementById("commandDetail");
@@ -7287,8 +7702,40 @@ INDEX_HTML = r"""<!doctype html>
         if (!quiet) setBusy(false);
       }
     }
+    function renderControllerStatus(data) {
+      const controller = data && data.atr_controller && typeof data.atr_controller === "object" ? data.atr_controller : (data || {});
+      const ok = controller.ok === true;
+      const source = String(controller.source || "none");
+      const resolvedUrl = String(controller.controller_url || "");
+      controllerStatus.textContent = ok ? `${resolvedUrl} · ${source}` : String(controller.failure_code || controller.status || "Not resolved");
+      if (resolvedUrl) controllerUrl.value = resolvedUrl;
+      const candidates = Array.isArray(controller.candidates) ? controller.candidates : [];
+      if (!candidates.length) {
+        controllerCandidates.textContent = ok ? `Verified controller (${source}).` : "No verified ATR candidate selected.";
+        return;
+      }
+      controllerCandidates.innerHTML = `<span>${candidates.length} verified ATR controllers found. Select one:</span> ${candidates.map((url) => `<button type="button" class="secondary" data-controller-url="${escapeHtml(url)}">${escapeHtml(url)}</button>`).join(" ")}`;
+      controllerCandidates.querySelectorAll("button[data-controller-url]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          controllerUrl.value = button.dataset.controllerUrl || "";
+          const selected = await call("/controller/select", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({controller_url: controllerUrl.value}), render: false});
+          renderControllerStatus(selected);
+        });
+      });
+    }
+    async function discoverAtrController() {
+      const result = await call("/controller/discover", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}", render: false});
+      renderControllerStatus(result);
+      return result;
+    }
+    async function saveAtrController() {
+      const result = await call("/controller/select", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({controller_url: controllerUrl.value.trim()}), render: false});
+      renderControllerStatus(result);
+      return result;
+    }
     async function runHealthCheck() {
       const data = await call("/health");
+      renderControllerStatus(data);
       if (data && data.ok === true) {
         const programs = await call("/programs", {quiet: true, render: false});
         if (programs && Array.isArray(programs.programs)) {
@@ -7476,6 +7923,8 @@ Invoke-RestMethod -Uri ${psDoubleQuote(window.location.origin + "/health")} -Hea
     }
 
     document.getElementById("health").addEventListener("click", runHealthCheck);
+    document.getElementById("discoverController").addEventListener("click", discoverAtrController);
+    document.getElementById("saveController").addEventListener("click", saveAtrController);
     document.getElementById("safePreflight").addEventListener("click", () => runSafePreflight(true));
     document.getElementById("preflightRefreshInline").addEventListener("click", () => runSafePreflight(true));
     document.getElementById("locators").addEventListener("click", () => call("/locators"));
@@ -8211,6 +8660,11 @@ class Handler(BaseHTTPRequestHandler):
     def _require_auth(self) -> bool:
         auth_ok = self._authorized()
         self._audit_request(auth_ok=auth_ok, status="authorized" if auth_ok else "auth_required")
+        if auth_ok and TOKEN:
+            try:
+                CONTROLLER_RESOLVER.observe_authenticated_peer(self.client_address[0] if self.client_address else "")
+            except Exception:
+                pass
         if auth_ok:
             return True
         self._send(401, {"ok": False, "status": "auth_required", "failure_code": "PYAUTOGUI_AUTH_FAILED", "token_header_present": bool(self.headers.get(TOKEN_HEADER, ""))})
@@ -8251,6 +8705,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/health":
             self._send(200, _health())
+            return
+        if path == "/controller":
+            self._send(200, CONTROLLER_RESOLVER.resolve(allow_scan=False))
             return
         if path == "/programs":
             self._send(200, _programs())
@@ -8318,6 +8775,7 @@ class Handler(BaseHTTPRequestHandler):
         if path not in {
             "/execute", "/screenshot", "/locators/capture", "/programs/validate", "/programs/register",
             "/recordings/start", "/recordings/checkpoint", "/recordings/stop",
+            "/controller/discover", "/controller/select",
         } and not recording_save and not skill_action:
             self._send(404, {"ok": False, "status": "not_found"})
             return
@@ -8328,6 +8786,14 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("payload must be object")
         except Exception:
             self._send(400, {"ok": False, "status": "bad_request", "failure_code": "PYAUTOGUI_BAD_JSON"})
+            return
+        if path == "/controller/discover":
+            result = CONTROLLER_RESOLVER.discover()
+            self._send(200 if result.get("ok") else 409, result)
+            return
+        if path == "/controller/select":
+            result = CONTROLLER_RESOLVER.select(str(payload.get("controller_url") or ""))
+            self._send(200 if result.get("ok") else 400, result)
             return
         if path == "/recordings/start":
             result = RECORDING_MANAGER.start(
@@ -8512,6 +8978,7 @@ def _parse_cli_args() -> argparse.Namespace:
         DEMO_ROOT = Path(args.demo_dir)
     if args.allow_no_token and args.token is None and not TOKEN:
         TOKEN = ""
+    _reset_controller_resolver()
     return args
 
 

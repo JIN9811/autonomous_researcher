@@ -135,7 +135,7 @@ def test_live_gui_js_renders_utm_runtime_device_card() -> None:
 
     html = (ROOT / "web/templates/planning.html").read_text(encoding="utf-8")
     assert "/static/styles.css?v=20260720-manipulation-grounded-1" in html
-    assert "/static/planning.js?v=20260722-utm-raw-single-source-1" in html
+    assert "/static/planning.js?v=20260813-bo-run-cache-2" in html
     assert "const detected = artifact.detected === true;" in js
     assert "artifact.detected === true || signal.detected === true" not in js
 

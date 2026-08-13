@@ -757,7 +757,7 @@ async def test_vision_agent_captures_one_utm_frame_after_measured_post_place_gat
             "schema": "vision_utm_specimen_presence.v1",
             "status": "confirmed",
             "detected": True,
-            "source": "utm_ros_frame",
+            "source": "virtual_utm_bridge",
             "frame_id": "utm-completion-1",
             "topic": "/image_utm",
             "confidence": 0.94,
@@ -772,6 +772,22 @@ async def test_vision_agent_captures_one_utm_frame_after_measured_post_place_gat
         },
     )
     state = _state()
+    state.mode = Mode.TEST
+    state.current_experiment_spec = {
+        **state.current_experiment_spec,
+        "test_mode_autofill": True,
+        "printer_test_path": "virtual_bridge",
+        "test_printer_transport": "virtual",
+    }
+    # A downstream slicer/printer profile may retain its physical backend name,
+    # but the explicit top-level virtual bridge choice remains authoritative.
+    state.run_metadata["specimen_result"]["printer_path"] = "bambulab_x2d"
+    state.run_metadata["fabrication_report"] = {
+        "fabrication_intent": {
+            "printer_path": "bambulab_x2d",
+            "physical_intent": True,
+        }
+    }
     gate = {
         "schema": "post_place_interlock.v1",
         "session_id": "lr-rollout-gate-ready",
@@ -801,12 +817,28 @@ async def test_vision_agent_captures_one_utm_frame_after_measured_post_place_gat
 
     assert len(utm_calls) == 1
     assert utm_calls[0]["session_id"] == "lr-rollout-gate-ready"
+    assert utm_calls[0]["runtime_mode"] == "test"
+    assert utm_calls[0]["prefer_virtual_bridge_in_test"] is True
     completion = result.data["observation"]["vision_manipulation_completion"]
     assert completion["detected"] is True
     assert completion["ready_to_stop_rollout"] is True
+    assert completion["blocking_reason"] == ""
     assert completion["run_id"] == "run-vision"
     assert completion["session_id"] == "lr-rollout-gate-ready"
     assert completion["specimen_id"] == "specimen-001"
+
+
+def test_live_gui_virtual_printer_path_uses_test_camera_runtime() -> None:
+    state = _state()
+    state.mode = Mode.LIVE
+    state.current_experiment_spec = {
+        **state.current_experiment_spec,
+        "test_mode_autofill": True,
+        "printer_test_path": "virtual_bridge",
+        "test_printer_transport": "virtual",
+    }
+
+    assert VisionAgent._camera_runtime_mode(state) == "test"
 
 
 @pytest.mark.asyncio

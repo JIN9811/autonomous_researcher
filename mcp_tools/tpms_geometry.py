@@ -10,6 +10,7 @@ from the same input payload variables.
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 from pathlib import Path
 from random import Random
 from typing import Any
@@ -90,13 +91,37 @@ def tpms_thickness_level(
     relative_density: float,
 ) -> float:
     """Return the dimensionless |F| threshold for gyroid shell thickness."""
-    physical_min = _clamp(0.50 * wall_thickness_mm * (2.0 * math.pi / max(cell_size_mm, 1e-6)), 0.18, 0.68)
     explicit = _safe_float(tpms_thickness, -1.0)
     if explicit > 0.0:
-        return _clamp(max(explicit, physical_min), 0.18, 0.75)
-    wall_ratio = wall_thickness_mm / max(cell_size_mm, 1e-6)
-    density_threshold = 0.10 + 0.40 * relative_density + min(0.06, 0.20 * wall_ratio)
-    return _clamp(max(density_threshold, physical_min), 0.18, 0.68)
+        return _clamp(explicit, 0.01, 1.50)
+    return tpms_level_for_relative_density(relative_density)
+
+
+@lru_cache(maxsize=256)
+def _gyroid_absolute_samples(samples_per_axis: int) -> tuple[float, ...]:
+    """Return one canonical unit-cell sample distribution for density inversion."""
+    count = max(16, min(64, int(samples_per_axis)))
+    values: list[float] = []
+    for ix in range(count):
+        x = 2.0 * math.pi * (ix + 0.5) / count
+        sin_x, cos_x = math.sin(x), math.cos(x)
+        for iy in range(count):
+            y = 2.0 * math.pi * (iy + 0.5) / count
+            sin_y, cos_y = math.sin(y), math.cos(y)
+            for iz in range(count):
+                z = 2.0 * math.pi * (iz + 0.5) / count
+                value = sin_x * cos_y + sin_y * math.cos(z) + math.sin(z) * cos_x
+                values.append(abs(value))
+    values.sort()
+    return tuple(values)
+
+
+def tpms_level_for_relative_density(relative_density: Any, *, samples_per_axis: int = 40) -> float:
+    """Invert the canonical Gyroid shell volume fraction into a level-set threshold."""
+    density = _clamp(_safe_float(relative_density, 0.32), 0.01, 0.95)
+    values = _gyroid_absolute_samples(int(samples_per_axis))
+    index = min(len(values) - 1, max(0, round(density * (len(values) - 1))))
+    return float(values[index])
 
 
 def _cap_skin_thickness(skin_thickness_mm: Any, top_bottom_cap: bool, z_dim: float) -> float:
@@ -418,6 +443,7 @@ def generate_gyroid_stl_text(
         cell_size_mm=cell,
         relative_density=rel_density,
     )
+    thickness_source = "explicit" if _safe_float(tpms_thickness, -1.0) > 0.0 else "relative_density_inverse"
     cell_counts_xyz = _cell_counts(size, cell, float(anisotropy_ratio))
     orientation_rad = math.radians(float(orientation_deg))
     defect = _clamp(float(defect_ratio), 0.0, 0.35)
@@ -604,6 +630,7 @@ def write_smooth_gyroid_stl(
         cell_size_mm=cell,
         relative_density=rel_density,
     )
+    thickness_source = "explicit" if _safe_float(tpms_thickness, -1.0) > 0.0 else "relative_density_inverse"
     cx, cy, cz = _cell_counts(size, cell, float(anisotropy_ratio))
     orientation_rad = math.radians(float(orientation_deg))
     xs = np.linspace(0.0, x_dim, n)
@@ -626,6 +653,7 @@ def write_smooth_gyroid_stl(
         + np.sin(kz * z_centered) * np.cos(kx * x_rot)
     )
     levelset = np.abs(field) - thickness_level
+    realized_density_without_caps = float(np.count_nonzero(levelset <= 0.0)) / float(levelset.size)
     cap_skin, top_cap, bottom_cap = _cap_skin_config(
         skin_thickness_mm=skin_thickness_mm,
         top_bottom_cap=top_bottom_cap,
@@ -679,6 +707,10 @@ def write_smooth_gyroid_stl(
         "tpms_surface": "gyroid",
         "tpms_equation": "canonical_gyroid: sin(xr)cos(yr)+sin(yr)cos(zc)+sin(zc)cos(xr)=0",
         "tpms_thickness": round(thickness_level, 5),
+        "tpms_thickness_source": thickness_source,
+        "target_relative_density": round(rel_density, 5),
+        "realized_relative_density_without_caps": round(realized_density_without_caps, 5),
+        "relative_density_absolute_error": round(abs(realized_density_without_caps - rel_density), 5),
         "tpms_resolution": [n, n, n],
         "cell_count_xyz": [cx, cy, cz],
         "vertex_count": int(len(mesh.vertices)),

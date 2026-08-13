@@ -82,6 +82,20 @@ def test_orchestration_plan_compiles_route_parallel_checks_and_contract() -> Non
     assert "analysis_bo_handoff.json" in plan["expected_artifacts"]
 
 
+def test_mission_contract_uses_runtime_planning_cycle_contract() -> None:
+    state = _state()
+    state.run_metadata["planning_cycle_contract"] = {
+        "schema": "planning_cycle_contract.v1",
+        "mode": "test",
+        "total_cycles": 20,
+        "source": "planning_runtime",
+    }
+
+    contract = build_mission_contract(state=state)
+
+    assert contract["safety_budget"]["max_loop_count"] == 20
+
+
 def test_orchestrator_control_plane_snapshot_covers_live_report_sections() -> None:
     state = _state()
     state.stage = Stage.DESIGN

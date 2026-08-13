@@ -22,6 +22,8 @@ const boStatusLabel = document.getElementById("bo-status-label");
 const boStatusDetail = document.getElementById("bo-status-detail");
 const strategyInput = document.getElementById("bo-strategy-input");
 const backendInput = document.getElementById("bo-backend-input");
+const initialSamplerInput = document.getElementById("bo-initial-sampler-input");
+const initialSizeInput = document.getElementById("bo-initial-size-input");
 const acquisitionInput = document.getElementById("bo-acquisition-input");
 const budgetInput = document.getElementById("bo-budget-input");
 const seedInput = document.getElementById("bo-seed-input");
@@ -32,6 +34,9 @@ const exploitationInput = document.getElementById("bo-exploitation-input");
 const llmPreferenceInput = document.getElementById("bo-llm-preference-input");
 const llmWeightInput = document.getElementById("bo-llm-weight-input");
 const topKInput = document.getElementById("bo-top-k-input");
+const restartsInput = document.getElementById("bo-restarts-input");
+const rawSamplesInput = document.getElementById("bo-raw-samples-input");
+const optimizerTimeoutInput = document.getElementById("bo-timeout-input");
 const objectiveInput = document.getElementById("bo-objective-input");
 const parameterSpaceInput = document.getElementById("bo-parameter-space-input");
 const btnBenchmark = document.getElementById("btn-bo-benchmark");
@@ -42,6 +47,9 @@ const recommendationLabel = document.getElementById("bo-recommendation-label");
 const bestScoreLabel = document.getElementById("bo-best-score-label");
 const curveTable = document.getElementById("bo-curve-table");
 const objectiveEquationCard = document.getElementById("bo-objective-equation-card");
+const lhsDesignPlot = document.getElementById("lhs-design-plot");
+const lhsDesignArtifacts = document.getElementById("lhs-design-artifacts");
+const lhsDesignStatus = document.getElementById("lhs-design-status");
 const posteriorPlot = document.getElementById("bo-posterior-plot");
 const posteriorView = document.getElementById("bo-posterior-view");
 const posteriorParameter = document.getElementById("bo-posterior-parameter");
@@ -58,6 +66,8 @@ const objectiveIntentInput = document.getElementById("objective-intent-input");
 const objectiveOperatorInput = document.getElementById("objective-operator-input");
 const objectiveRunIdInput = document.getElementById("objective-run-id-input");
 const objectiveVersionSelect = document.getElementById("objective-version-select");
+const objectivePresetSelect = document.getElementById("objective-preset-select");
+const btnObjectiveLoadPreset = document.getElementById("btn-objective-load-preset");
 const objectiveMetricBrowser = document.getElementById("objective-metric-browser");
 const objectiveEquationTree = document.getElementById("objective-equation-tree");
 const objectiveValidationPanel = document.getElementById("objective-validation-panel");
@@ -107,6 +117,7 @@ const objectiveManualMetadata = {
 
 let defaults = {};
 let objectiveMetrics = [];
+let objectivePresets = [];
 let objectiveRuntimeStatus = {};
 let selectedObjectiveState = null;
 let objectiveActionBusy = false;
@@ -117,6 +128,9 @@ let objectiveAuthoringMode = "ai";
 let currentVisualization = null;
 let currentVisualizationRunId = "";
 const visualizationByStep = new Map();
+let currentLhsVisualization = null;
+let currentLhsVisualizationRunId = "";
+const lhsVisualizationByStep = new Map();
 let boEventSource = null;
 
 function setDot(el, state) {
@@ -184,7 +198,9 @@ function parseJsonField(el, fallback) {
 function settingsPayload() {
   return {
     strategy: strategyInput.value,
-    bo_backend: backendInput ? backendInput.value : "lightweight_pool",
+    bo_backend: backendInput ? backendInput.value : "botorch",
+    initial_sampler: initialSamplerInput ? initialSamplerInput.value : "latin_hypercube",
+    initial_design_size: initialSizeInput && /^\d+$/.test(initialSizeInput.value.trim()) ? Number(initialSizeInput.value) : "auto",
     acquisition: acquisitionInput.value,
     budget: Number(budgetInput.value || 1),
     random_seed: Number(seedInput.value || 7),
@@ -195,6 +211,9 @@ function settingsPayload() {
     llm_preference_enabled: boolValue(llmPreferenceInput, true),
     llm_candidate_weight: (llmWeightInput.value || "auto").trim() || "auto",
     top_k: Number(topKInput.value || 5),
+    num_restarts: Number(restartsInput?.value || 12),
+    raw_samples: Number(rawSamplesInput?.value || 256),
+    optimizer_timeout_s: Number(optimizerTimeoutInput?.value || 30),
     objective: parseJsonField(objectiveInput, {}),
     parameter_space: parseJsonField(parameterSpaceInput, defaults.parameter_space || {}),
     mode: "test",
@@ -204,7 +223,9 @@ function settingsPayload() {
 function applyDefaults(data) {
   defaults = data.defaults || {};
   strategyInput.value = defaults.strategy || "bo";
-  if (backendInput) backendInput.value = defaults.bo_backend || "lightweight_pool";
+  if (backendInput) backendInput.value = defaults.bo_backend || "botorch";
+  if (initialSamplerInput) initialSamplerInput.value = defaults.initial_sampler || "latin_hypercube";
+  if (initialSizeInput) initialSizeInput.value = defaults.initial_design_size ?? "auto";
   acquisitionInput.value = defaults.acquisition || "expected_improvement";
   budgetInput.value = defaults.budget || 8;
   seedInput.value = defaults.random_seed || 7;
@@ -215,6 +236,9 @@ function applyDefaults(data) {
   if (llmPreferenceInput) llmPreferenceInput.value = String(defaults.llm_preference_enabled ?? true);
   if (llmWeightInput) llmWeightInput.value = defaults.llm_candidate_weight ?? "auto";
   if (topKInput) topKInput.value = defaults.top_k || 5;
+  if (restartsInput) restartsInput.value = defaults.num_restarts || 12;
+  if (rawSamplesInput) rawSamplesInput.value = defaults.raw_samples || 256;
+  if (optimizerTimeoutInput) optimizerTimeoutInput.value = defaults.optimizer_timeout_s || 30;
   parameterSpaceInput.value = pretty(defaults.parameter_space || {});
   objectiveInput.value = "{}";
 }
@@ -223,6 +247,8 @@ function applySettings(settings) {
   if (!settings || typeof settings !== "object") return;
   if (settings.strategy) strategyInput.value = settings.strategy;
   if (settings.bo_backend && backendInput) backendInput.value = settings.bo_backend;
+  if (settings.initial_sampler && initialSamplerInput) initialSamplerInput.value = settings.initial_sampler;
+  if (settings.initial_design_size !== undefined && initialSizeInput) initialSizeInput.value = settings.initial_design_size;
   if (settings.acquisition) acquisitionInput.value = settings.acquisition;
   if (settings.budget !== undefined) budgetInput.value = settings.budget;
   if (settings.random_seed !== undefined) seedInput.value = settings.random_seed;
@@ -233,6 +259,9 @@ function applySettings(settings) {
   if (settings.llm_preference_enabled !== undefined && llmPreferenceInput) llmPreferenceInput.value = String(settings.llm_preference_enabled);
   if (settings.llm_candidate_weight !== undefined && llmWeightInput) llmWeightInput.value = settings.llm_candidate_weight;
   if (settings.top_k !== undefined && topKInput) topKInput.value = settings.top_k;
+  if (settings.num_restarts !== undefined && restartsInput) restartsInput.value = settings.num_restarts;
+  if (settings.raw_samples !== undefined && rawSamplesInput) rawSamplesInput.value = settings.raw_samples;
+  if (settings.optimizer_timeout_s !== undefined && optimizerTimeoutInput) optimizerTimeoutInput.value = settings.optimizer_timeout_s;
   if (settings.parameter_space && typeof settings.parameter_space === "object") {
     parameterSpaceInput.value = pretty(settings.parameter_space);
   }
@@ -296,6 +325,38 @@ function renderVisualization() {
   }
 }
 
+function renderLhsVisualization() {
+  const renderer = window.LHSDesignVisualization;
+  if (!renderer || !currentLhsVisualization) {
+    if (lhsDesignPlot) lhsDesignPlot.innerHTML = '<div class="lhs-viz-empty">Waiting for initial-design points.</div>';
+    if (lhsDesignArtifacts) lhsDesignArtifacts.innerHTML = "";
+    if (lhsDesignStatus) lhsDesignStatus.textContent = "Waiting";
+    return;
+  }
+  if (lhsDesignPlot) lhsDesignPlot.innerHTML = renderer.renderPlot(currentLhsVisualization);
+  if (lhsDesignArtifacts) {
+    lhsDesignArtifacts.innerHTML = renderer.artifactLinks(currentLhsVisualization)
+      .map((item) => `<a class="btn compact" href="${escapeHtml(item.url)}" download>${escapeHtml(item.kind.toUpperCase())}</a>`)
+      .join("");
+  }
+  if (lhsDesignStatus) {
+    const initial = currentLhsVisualization.initial_design || {};
+    lhsDesignStatus.textContent = `${initial.completed || 0} / ${initial.target || 0} measured`;
+  }
+}
+
+function acceptLhsVisualization(payload) {
+  const renderer = window.LHSDesignVisualization;
+  if (!renderer || !renderer.isValid(payload)) return false;
+  const runId = String(payload.run_id || "");
+  if (currentLhsVisualizationRunId && runId && runId !== currentLhsVisualizationRunId) lhsVisualizationByStep.clear();
+  currentLhsVisualizationRunId = runId;
+  lhsVisualizationByStep.set(Number(payload.step || 0), payload);
+  currentLhsVisualization = payload;
+  renderLhsVisualization();
+  return true;
+}
+
 function refreshVisualizationSelectors() {
   const renderer = window.BOVisualization;
   if (!renderer || !currentVisualization) return;
@@ -334,7 +395,25 @@ function acceptVisualization(payload) {
 function acceptBenchmarkVisualizations(benchmark) {
   const strategyPayload = boStrategyFromBenchmark(benchmark);
   const trace = strategyPayload && Array.isArray(strategyPayload.surrogate_trace) ? strategyPayload.surrogate_trace : [];
-  trace.forEach((item) => acceptVisualization(item.visualization));
+  trace.forEach((item) => {
+    acceptLhsVisualization(item.lhs_visualization);
+    acceptVisualization(item.visualization);
+  });
+}
+
+function resetVisualizationRun() {
+  visualizationByStep.clear();
+  currentVisualization = null;
+  currentVisualizationRunId = "";
+  lhsVisualizationByStep.clear();
+  currentLhsVisualization = null;
+  currentLhsVisualizationRunId = "";
+  if (posteriorStep) posteriorStep.innerHTML = "";
+  if (posteriorParameter) posteriorParameter.innerHTML = "";
+  if (posteriorArtifacts) posteriorArtifacts.innerHTML = "";
+  if (selectedPoints) selectedPoints.innerHTML = "";
+  renderVisualization();
+  renderLhsVisualization();
 }
 
 function connectBoEventStream() {
@@ -344,6 +423,7 @@ function connectBoEventStream() {
   source.addEventListener("update", (message) => {
     try {
       const event = JSON.parse(message.data || "{}");
+      if (event.event_type === "lhs.visualization.updated") acceptLhsVisualization(event.payload?.visualization);
       if (event.event_type === "bo.visualization.updated") acceptVisualization(event.payload?.visualization);
     } catch (_error) {
       // The next valid event or config refresh restores the card.
@@ -478,7 +558,7 @@ function renderResult(data) {
   const benchmark = boResult ? boResult.benchmark : data.benchmark;
   const recommendation = boResult ? boResult.recommendation || {} : {};
   const strategyPayload = benchmark?.strategies ? Object.values(benchmark.strategies)[0] || {} : {};
-  const backendNote = boResult ? ` · backend=${boResult.bo_backend || "lightweight_pool"}/${strategyPayload.backend_active || "lightweight_pool"}` : "";
+  const backendNote = boResult ? ` · backend=${boResult.bo_backend || "botorch"}/${strategyPayload.backend_active || "botorch"}` : "";
   const score = recommendation.objective_score ?? (benchmark?.strategies ? strategyPayload.best_score : "n/a");
   recommendationLabel.textContent = recommendation.candidate_id || "benchmark only";
   bestScoreLabel.textContent = `${score ?? "n/a"}${backendNote}`;
@@ -488,6 +568,7 @@ function renderResult(data) {
   renderCandidateRanking(boResult ? boResult.candidate_ranking || boResult.candidate_pool : []);
   renderCurve(boResult ? boResult.best_so_far || [] : firstCurveFromBenchmark(benchmark));
   acceptBenchmarkVisualizations(benchmark);
+  if (boResult?.lhs_visualization) acceptLhsVisualization(boResult.lhs_visualization);
   if (boResult?.visualization) acceptVisualization(boResult.visualization);
   resultJson.textContent = pretty(data);
 }
@@ -668,6 +749,7 @@ function updateObjectiveButtons() {
   if (btnObjectiveActivate) btnObjectiveActivate.disabled = objectiveActionBusy || !approved || !String(objectiveRunIdInput?.value || "").trim();
   if (btnObjectiveManualSave) btnObjectiveManualSave.disabled = objectiveActionBusy || !objectiveBuilderState;
   if (btnObjectiveLoadRevision) btnObjectiveLoadRevision.disabled = objectiveActionBusy || !state || !objectiveBuilderState;
+  if (btnObjectiveLoadPreset) btnObjectiveLoadPreset.disabled = objectiveActionBusy || !objectiveBuilderState || !objectivePresetSelect?.value;
 }
 
 function renderSelectedObjective(state) {
@@ -720,21 +802,37 @@ function populateObjectiveVersions(preferredKey = "") {
   renderSelectedObjective(selected);
 }
 
+function renderObjectivePresets() {
+  if (!objectivePresetSelect) return;
+  const current = objectivePresetSelect.value;
+  objectivePresetSelect.innerHTML = [
+    '<option value="">No preset selected</option>',
+    ...objectivePresets.map((preset) => `<option value="${escapeHtml(preset.metadata?.preset_id || preset.objective_id)}">${escapeHtml(preset.name || preset.objective_id)}</option>`),
+  ].join("");
+  if (objectivePresets.some((preset) => (preset.metadata?.preset_id || preset.objective_id) === current)) {
+    objectivePresetSelect.value = current;
+  }
+  updateObjectiveButtons();
+}
+
 async function refreshObjectiveCompiler(preferredKey = "") {
   const runId = String(objectiveRunIdInput?.value || "").trim();
   const authoringRequest = objectiveAuthoringContract
     ? Promise.resolve(objectiveAuthoringContract)
     : getJson("/api/objectives/authoring-contract");
-  const [metrics, status, authoring] = await Promise.all([
+  const [metrics, status, authoring, presets] = await Promise.all([
     getJson("/api/objectives/metrics"),
     getJson(`/api/objectives/status${runId ? `?run_id=${encodeURIComponent(runId)}` : ""}`),
     authoringRequest,
+    getJson("/api/objectives/presets"),
   ]);
   objectiveMetrics = Array.isArray(metrics.metrics) ? metrics.metrics : [];
+  objectivePresets = Array.isArray(presets.presets) ? presets.presets : [];
   objectiveRuntimeStatus = status || {};
   objectiveAuthoringContract = authoring || null;
   initializeObjectiveBuilder();
   renderMetricRegistry();
+  renderObjectivePresets();
   populateObjectiveVersions(preferredKey);
 }
 
@@ -847,6 +945,25 @@ function loadSelectedObjectiveAsRevision() {
   return objectiveStateKey(selectedObjectiveState);
 }
 
+function loadSelectedObjectivePreset() {
+  if (!objectiveBuilderState) throw new Error("Manual Objective Builder is not ready.");
+  const presetId = String(objectivePresetSelect?.value || "");
+  const preset = objectivePresets.find((item) => (item.metadata?.preset_id || item.objective_id) === presetId);
+  if (!preset) throw new Error("Select an objective preset first.");
+  const snapshot = objectiveBuilderState.snapshot();
+  if (snapshot.dirty && !window.confirm("Replace the unsaved manual draft with this preset?")) {
+    return objectiveStateKey(selectedObjectiveState);
+  }
+  objectiveBuilderState.loadPreset(preset);
+  objectiveBuilderView?.render();
+  renderManualRevisionState();
+  setObjectiveAuthoringMode("visual");
+  if (objectiveManualStatus) {
+    objectiveManualStatus.textContent = `${preset.name || preset.objective_id} loaded as an unsaved draft. Review and save explicitly to use it.`;
+  }
+  return objectiveStateKey(selectedObjectiveState);
+}
+
 async function loadConfig() {
   setDot(boStatusDot, "idle");
   boStatusLabel.textContent = "Loading";
@@ -862,6 +979,7 @@ async function loadConfig() {
   if (data.recent && data.recent.recommendation) {
     renderResult({ data: { bo_result: data.recent } });
   }
+  if (data.recent_lhs_visualization) acceptLhsVisualization(data.recent_lhs_visualization);
   if (data.recent_visualization) acceptVisualization(data.recent_visualization);
   const recentRunId = data.state && data.state.run_id ? String(data.state.run_id) : "";
   if (objectiveRunIdInput && !objectiveRunIdInput.value && recentRunId) objectiveRunIdInput.value = recentRunId;
@@ -891,6 +1009,7 @@ async function runBenchmark() {
   try {
     setDot(boStatusDot, "busy");
     boStatusLabel.textContent = "Benchmarking";
+    resetVisualizationRun();
     const data = await postJson("/api/bo/benchmark", settingsPayload());
     renderResult(data);
     boStatusLabel.textContent = data.ok ? "Benchmark complete" : "Benchmark failed";
@@ -907,6 +1026,7 @@ async function runBOAgent() {
   try {
     setDot(boStatusDot, "busy");
     boStatusLabel.textContent = "Running BO Agent";
+    resetVisualizationRun();
     const data = await postJson("/api/bo/run", settingsPayload());
     renderResult(data);
     boStatusLabel.textContent = data.ok ? "BO Agent complete" : "BO Agent failed";
@@ -941,6 +1061,8 @@ if (btnObjectiveApprove) btnObjectiveApprove.addEventListener("click", () => run
 if (btnObjectiveActivate) btnObjectiveActivate.addEventListener("click", () => runObjectiveAction("Binding objective to run", activateObjective));
 if (btnObjectiveManualSave) btnObjectiveManualSave.addEventListener("click", () => runObjectiveAction("Saving operator-authored objective", saveManualObjective));
 if (btnObjectiveLoadRevision) btnObjectiveLoadRevision.addEventListener("click", () => runObjectiveAction("Loading selected objective for revision", async () => loadSelectedObjectiveAsRevision()));
+if (objectivePresetSelect) objectivePresetSelect.addEventListener("change", updateObjectiveButtons);
+if (btnObjectiveLoadPreset) btnObjectiveLoadPreset.addEventListener("click", () => runObjectiveAction("Loading optional objective preset", async () => loadSelectedObjectivePreset()));
 if (posteriorView) posteriorView.addEventListener("change", () => { refreshVisualizationSelectors(); renderVisualization(); });
 if (posteriorParameter) posteriorParameter.addEventListener("change", renderVisualization);
 if (posteriorStep) posteriorStep.addEventListener("change", () => {

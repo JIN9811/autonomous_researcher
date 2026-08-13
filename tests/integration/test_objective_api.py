@@ -111,6 +111,24 @@ def test_objective_api_exposes_metrics_and_full_lifecycle(tmp_path, monkeypatch)
     assert lifecycle["active"] is True
 
 
+def test_objective_api_lists_presets_without_persisting_or_activating_them(tmp_path, monkeypatch) -> None:
+    client, service = client_for(tmp_path, monkeypatch)
+    before = client.get("/api/objectives/status").json()
+
+    response = client.get("/api/objectives/presets")
+    after = client.get("/api/objectives/status").json()
+
+    assert response.status_code == 200
+    payload = response.json()
+    preset = payload["presets"][0]
+    assert preset["objective_id"] == "legacy-utm-composite"
+    assert preset["lifecycle"] == "draft"
+    assert preset["metadata"]["activation"] == "operator_required"
+    assert before["objective_count"] == after["objective_count"] == 0
+    assert after["active_binding"] is None
+    assert service.store.list_specs() == []
+
+
 def test_objective_api_exposes_server_owned_authoring_contract(tmp_path, monkeypatch) -> None:
     client, _ = client_for(tmp_path, monkeypatch)
 

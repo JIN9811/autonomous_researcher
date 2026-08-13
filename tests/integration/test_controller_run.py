@@ -63,7 +63,7 @@ async def test_controller_completes_test_run(monkeypatch: pytest.MonkeyPatch) ->
     log_records = [json.loads(line) for line in json_log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert any(record["event_type"] == "run.created" for record in log_records)
 
-    timeout_s = 240.0
+    timeout_s = 1200.0
     start = asyncio.get_running_loop().time()
     while True:
         snapshot = controller.snapshot()
@@ -75,7 +75,7 @@ async def test_controller_completes_test_run(monkeypatch: pytest.MonkeyPatch) ->
         await asyncio.sleep(0.1)
 
     assert snapshot["state"]["stage"] == Stage.COMPLETE.value
-    assert snapshot["state"]["loop_count"] == 5
+    assert snapshot["state"]["loop_count"] == 20
     assert snapshot["state"]["run_metadata"]["bo_agent"]["tool"] == "bo.agent"
     assert snapshot["state"]["run_metadata"]["bo_agent"]["knowledge_context"]
     assert snapshot["state"]["run_metadata"]["equipment_result"]["tool"] == "equipment.pyautogui.run"

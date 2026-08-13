@@ -1,4 +1,4 @@
-# Optional Bayesian Optimization backend for BO Workspace / BO Agent.
-# Install only when you want Numeric Backend = botorch_optional.
+# Production Bayesian Optimization backend for BO Workspace / BO Agent.
 botorch>=0.17.0
 gpytorch>=1.14.0
+scipy>=1.12.0

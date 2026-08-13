@@ -24,7 +24,7 @@ Modification guide:
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260811-botorch-paper-3" />
   </head>
   <body>
     <main class="page equipment-setup-page printer-page bo-page">
@@ -71,6 +71,12 @@ Modification guide:
           <label>Operator<input id="objective-operator-input" class="text-input" type="text" value="JIN" /></label>
           <label>Run ID<input id="objective-run-id-input" class="text-input" type="text" placeholder="run-..." /></label>
           <label>Objective Version<select id="objective-version-select" class="text-input"><option value="">No saved objective</option></select></label>
+        </div>
+
+        <div class="bo-objective-preset-row">
+          <label>Optional preset<select id="objective-preset-select" class="text-input"><option value="">No preset selected</option></select></label>
+          <button id="btn-objective-load-preset" class="btn" type="button" disabled>Load as Draft</button>
+          <span class="hint">Loading a preset does not save, approve, activate, or bind it to a run.</span>
         </div>
 
         <section id="objective-ai-compose-panel" class="bo-objective-author-panel" data-author-panel="ai">
@@ -214,9 +220,19 @@ Modification guide:
             <label>
               Numeric Backend
               <select id="bo-backend-input" class="text-input">
-                <option value="lightweight_pool">lightweight_pool</option>
-                <option value="botorch_optional">botorch_optional</option>
+                <option value="botorch">BoTorch</option>
+                <option value="lightweight_pool">Lightweight pool (comparison)</option>
               </select>
+            </label>
+            <label>
+              Initial Sampler
+              <select id="bo-initial-sampler-input" class="text-input">
+                <option value="latin_hypercube">Latin Hypercube</option>
+              </select>
+            </label>
+            <label>
+              Initial Design Size
+              <input id="bo-initial-size-input" class="text-input" type="text" value="auto" placeholder="auto or integer" />
             </label>
             <label>
               Acquisition Function
@@ -268,6 +284,18 @@ Modification guide:
               Top-K Candidates
               <input id="bo-top-k-input" class="text-input" type="number" min="1" max="12" step="1" value="5" />
             </label>
+            <label>
+              Optimizer Restarts
+              <input id="bo-restarts-input" class="text-input" type="number" min="1" max="128" step="1" value="12" />
+            </label>
+            <label>
+              Raw Samples
+              <input id="bo-raw-samples-input" class="text-input" type="number" min="8" max="4096" step="8" value="256" />
+            </label>
+            <label>
+              Optimizer Timeout (s)
+              <input id="bo-timeout-input" class="text-input" type="number" min="1" max="600" step="1" value="30" />
+            </label>
           </div>
           <textarea id="bo-objective-input" hidden>{}</textarea>
           <label class="planning-message-label">
@@ -317,6 +345,17 @@ Modification guide:
           <article id="bo-objective-equation-card" class="printer-subsection bo-viz-workspace-card">
             <div class="bo-viz-empty">Run BO to bind an objective equation.</div>
           </article>
+          <article id="lhs-design-card" class="printer-subsection bo-viz-workspace-card lhs-viz-workspace-card">
+            <header class="bo-viz-workspace-head">
+              <div>
+                <span class="bo-viz-kicker">INITIAL EXPERIMENTAL DESIGN</span>
+                <h3>Mixed-Space Latin Hypercube Design</h3>
+              </div>
+              <span id="lhs-design-status" class="bo-viz-stage-chip">Waiting</span>
+            </header>
+            <div id="lhs-design-plot" class="lhs-viz-plot-host"><div class="lhs-viz-empty">Waiting for initial-design points.</div></div>
+            <div id="lhs-design-artifacts" class="bo-viz-artifacts"></div>
+          </article>
           <article id="bo-posterior-card" class="printer-subsection bo-viz-workspace-card">
             <header class="bo-viz-workspace-head">
               <div>
@@ -342,7 +381,8 @@ Modification guide:
       </section>
     </main>
     <script src="/static/objective_builder.js"></script>
-    <script src="/static/bo_visualization.js"></script>
+    <script src="/static/lhs_design_visualization.js?v=20260812-lhs-paper-1"></script>
+  <script src="/static/bo_visualization.js?v=20260813-threshold-label-1"></script>
     <script src="/static/bo.js"></script>
   </body>
 </html>

@@ -1,5 +1,37 @@
 # Windows PyAutoGUI Bridge 사용법
 
+## 가장 간단한 배포: 폴더 복사 후 실행
+
+1. `ATR_Equipment_Agent_Bridge_Windows_x64_Portable.zip`을 Windows x64 PC로 옮깁니다.
+2. ZIP 전체를 원하는 폴더에 풉니다. 일부 파일만 꺼내면 안 됩니다.
+3. `START_EQUIPMENT_BRIDGE.cmd`를 더블클릭합니다.
+4. 최초 실행 시 폴더 내부 전용 Python과 의존성이 구성될 때까지 기다립니다.
+5. 열린 브라우저에서 PowerShell 창에 표시된 token을 입력합니다.
+6. `Health`로 연결을 확인하고 프로그램 또는 스킬을 실행합니다.
+7. 종료할 때 `STOP_EQUIPMENT_BRIDGE.cmd`를 더블클릭합니다.
+
+사용자 상태는 전부 배포 폴더의 `data`에 남습니다.
+
+```text
+data/
+├─ .bridge_token
+├─ artifacts/
+├─ locators/
+├─ logs/
+├─ programs/
+├─ recordings/
+└─ utm_exports/
+```
+
+다른 PC로 옮길 때는 bridge를 먼저 중지한 뒤 폴더 전체를 복사합니다. 기존
+토큰과 사용자 프로그램을 옮기지 않으려면 복사본의 `data`만 비운 뒤 다시
+시작합니다. 배포 원본에는 token과 실행 로그가 들어 있지 않습니다.
+
+첫 실행은 동봉 파일만 사용하므로 인터넷이 없어도 됩니다. 내부망 원격 연결은
+Windows 방화벽의 8765/TCP 허용이 별도로 필요할 수 있습니다. 구성 로그는
+`data\logs\portable-bootstrap.log`, 요청 감사 로그는
+`data\artifacts\bridge_requests.jsonl`에서 확인합니다.
+
 ## 0. 최초 설치
 
 release ZIP을 푼 다음 `INSTALL_WINDOWS_BRIDGE.cmd`를 더블클릭합니다. 설치
@@ -616,6 +648,27 @@ Web GUI의 Connection 패널에는 `Bridge Command Kit`이 있습니다. 같은 
 - `Copy curl Execute`: 현재 Payload Preview의 `/execute` 요청을 curl 명령으로 복사합니다. 실 UTM payload라면 safety/preflight 조건을 먼저 확인해야 합니다.
 
 토큰이 비어 있는 상태에서는 GUI가 자동으로 `/health`를 호출하지 않습니다. 이 동작은 첫 화면에서 불필요한 auth error를 없애기 위한 UI 개선이며, 실제 endpoint 인증은 기존과 동일하게 `X-Bridge-Token`으로 강제됩니다.
+
+## ATR Controller 자동 탐색
+
+Windows 패키지는 Linux ATR의 IP를 포함하지 않습니다. 인증된 Linux 요청이 도착하면
+요청자의 사설 IPv4에서 `:7860/api/equipment/skills`를 읽어 ATR identity를 검증하고,
+성공한 URL을 활성 data root의 `controller_connection.json`에 저장합니다. 다음 실행의
+`/skills`는 저장된 URL을 재검증한 뒤 사용합니다.
+
+Web GUI의 `Discover ATR`은 인증된 peer 학습이 불가능할 때만 사용합니다. 활성 사설
+인터페이스별 `/24`, 포트 7860만 제한적으로 확인하며, 복수 ATR이 응답하면 자동으로
+하나를 고르지 않습니다. `Controller URL`에 주소를 입력하고 `Verify & Save`를 눌러
+수동으로 검증할 수도 있습니다. 명시적인 환경변수는 항상 최우선입니다.
+
+```powershell
+# 선택 사항: 자동 탐색을 사용하지 않는 관리형 배포
+$env:WINDOWS_PYAUTOGUI_ATR_API_URL = "http://<linux-atr-host>:7860"
+```
+
+저장 파일에는 URL, 발견 출처, 검증 시각만 기록하며 bridge token이나 모델/API
+credential은 기록하지 않습니다. Controller를 찾지 못해도 `/health`, `/programs`,
+로컬 PyAutoGUI 프로그램은 유지되고 `/skills`만 명시적인 unreachable 상태를 반환합니다.
 
 상단 명령 배너의 `Recommended next action`은 Live Proof Checklist의 첫 미충족 gate를 보고 다음 조작을 제안합니다. 이 버튼은 토큰 입력, Health, Readiness, screenshot/evidence refresh, Live UTM 안전 확인처럼 현장 오퍼레이터가 다음에 수행할 작업으로 바로 이동합니다.
 

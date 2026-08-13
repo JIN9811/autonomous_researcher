@@ -272,6 +272,34 @@ class ManipulationAgent(BaseAgent):
         return True
 
     @staticmethod
+    def _virtual_printer_tail_requested(state: OrchestratorState) -> bool:
+        """Return true only when the run explicitly selected the virtual printer path."""
+        spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
+        specimen = metadata.get("specimen_result") if isinstance(metadata.get("specimen_result"), dict) else {}
+        fabricated = metadata.get("specimen_fabricated") if isinstance(metadata.get("specimen_fabricated"), dict) else {}
+        summary = fabricated.get("fabrication_summary") if isinstance(fabricated.get("fabrication_summary"), dict) else {}
+        report = metadata.get("fabrication_report") if isinstance(metadata.get("fabrication_report"), dict) else {}
+        intent = report.get("fabrication_intent") if isinstance(report.get("fabrication_intent"), dict) else {}
+        printer_runtime = report.get("printer_runtime") if isinstance(report.get("printer_runtime"), dict) else {}
+        path_values = {
+            str(value or "").strip().lower()
+            for value in (
+                spec.get("printer_test_path"),
+                spec.get("test_printer_path"),
+                spec.get("printer_bridge_mode"),
+                specimen.get("printer_path"),
+                summary.get("printer_path"),
+                intent.get("printer_path"),
+                printer_runtime.get("path"),
+            )
+            if str(value or "").strip()
+        }
+        virtual_paths = {"virtual", "virtual_bridge", "virtual_printer", "virtual_bambu_bridge"}
+        transport = str(spec.get("test_printer_transport") or "").strip().lower()
+        return bool(path_values & virtual_paths) or transport == "virtual"
+
+    @staticmethod
     def _canonical_policy_type(value: Any) -> str:
         return str(value or "").strip().lower().replace("_", "").replace("-", "").replace(".", "")
 
@@ -441,6 +469,7 @@ class ManipulationAgent(BaseAgent):
     def _lerobot_payload(self, state: OrchestratorState, protocol_note: str, strategy: str) -> dict[str, Any]:
         spec = self._spec(state)
         physical_printer_tail = self._physical_printer_tail_requested(state)
+        virtual_printer_tail = self._virtual_printer_tail_requested(state)
         task_id = self._task_id(state, spec)
         task_def = self._task_definition(task_id)
         specimen = self._specimen_result(state)
@@ -489,7 +518,7 @@ class ManipulationAgent(BaseAgent):
         if not any(spec.get(key) for key in ("manipulation_task", "task_instruction")):
             task_instruction = self._canonical_instruction(task_id=task_id, specimen_id=specimen_id, source=source, target=target)
         episode_s = self._safe_float(spec.get("lerobot_rollout_episode_s") or spec.get("rollout_episode_s"), 30.0 if is_pi05 else 5.0)
-        runtime_mode = "live" if state.mode == Mode.LIVE or physical_printer_tail else state.mode.value
+        runtime_mode = "test" if virtual_printer_tail else "live" if state.mode == Mode.LIVE or physical_printer_tail else state.mode.value
         return {
             "mode": state.mode.value,
             "runtime_mode": runtime_mode,
@@ -566,6 +595,7 @@ class ManipulationAgent(BaseAgent):
             "terminal_pose": str(task_def.get("terminal_pose") or "standby_clear_of_utm"),
             "dry_run": runtime_mode != "live",
             "physical_printer_tail": physical_printer_tail,
+            "virtual_bridge_simulation": virtual_printer_tail,
             "protocol_note": protocol_note,
         }
 

@@ -2601,7 +2601,7 @@ textarea {
 }
 
 .bo-viz-svg {
-  background: #fff;
+  background: #ffffff;
   border: 1px solid #cbd5e1;
   display: block;
   height: auto;
@@ -2609,7 +2609,48 @@ textarea {
   width: 100%;
 }
 
-.bo-viz-paper { fill: #fff; }
+.bo-viz-paper { fill: #ffffff; }
+.bo-viz-matplotlib-figure {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  margin: 0;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+.bo-viz-matplotlib-image {
+  background: #ffffff;
+  display: block;
+  height: auto;
+  max-width: 100%;
+  object-fit: contain;
+  width: 100%;
+}
+.bo-viz-data-link {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  font-size: 10px;
+  padding: 3px 7px;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+}
+.bo-viz-contract {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+.bo-viz-contract span {
+  background: rgba(15, 23, 42, 0.34);
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  border-radius: 3px;
+  color: #cbd5e1;
+  font-size: 10px;
+  padding: 4px 7px;
+}
+.bo-viz-contract b { color: #f8fafc; font-weight: 650; }
 .bo-viz-axis { stroke: #111827; stroke-width: 1.2; }
 .bo-viz-grid { stroke: #d8dee8; stroke-dasharray: 3 4; stroke-width: 0.8; }
 .bo-viz-title { fill: #111827; font-size: 16px; font-weight: 700; }
@@ -2619,14 +2660,30 @@ textarea {
 .bo-viz-acquisition-label,
 .bo-viz-legend text { fill: #334155; font-family: "IBM Plex Sans", sans-serif; font-size: 11px; }
 .bo-viz-axis-label { font-size: 12px; }
+
+body.planning-live-body .bo-viz-paper { fill: #ffffff; }
+body.planning-live-body .bo-viz-axis { stroke: #111827; }
+body.planning-live-body .bo-viz-grid { stroke: #d8dee8; }
+body.planning-live-body .bo-viz-title { fill: #111827; }
+body.planning-live-body .bo-viz-subtitle,
+body.planning-live-body .bo-viz-tick,
+body.planning-live-body .bo-viz-axis-label,
+body.planning-live-body .bo-viz-acquisition-label,
+body.planning-live-body .bo-viz-legend text { fill: #334155; }
+body.planning-live-body .bo-viz-mean-line { stroke: #111827; }
+body.planning-live-body .bo-viz-confidence-band { fill: #94a3b8; fill-opacity: 0.22; }
 .bo-viz-acquisition-label { fill: #9a3412; font-weight: 700; }
-.bo-viz-confidence-band { fill: #60a5fa; fill-opacity: 0.24; stroke: none; }
-.bo-viz-mean-line { fill: none; stroke: #2563eb; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.4; }
+.bo-viz-confidence-band { fill: #94a3b8; fill-opacity: 0.32; stroke: none; }
+.bo-viz-series-band { fill-opacity: 0.11; }
+.bo-viz-series-line { stroke-width: 2.2; }
+.bo-viz-series-acquisition { stroke-width: 1.8; }
+.bo-viz-mean-line { fill: none; stroke: #111827; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.4; }
 .bo-viz-acquisition-line { fill: none; stroke: #f97316; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
-.bo-viz-observation { fill: #111827; stroke: #fff; stroke-width: 1.5; }
+.bo-viz-observation { fill: #2563eb; stroke: #fff; stroke-width: 1.8; }
+.bo-viz-lhs-pending { fill: #cbd5e1; stroke: #64748b; stroke-width: 1.4; opacity: 1; }
 .bo-viz-best { fill: #16a34a; stroke: #fff; stroke-width: 2; }
-.bo-viz-next { fill: #dc2626; stroke: #fff; stroke-width: 2; }
-.bo-viz-next-guide { stroke: #dc2626; stroke-dasharray: 5 4; stroke-width: 1.2; }
+.bo-viz-next-cross line { stroke: #f97316; stroke-linecap: round; stroke-width: 3; }
+.bo-viz-next-guide { stroke: #f97316; stroke-dasharray: 5 4; stroke-width: 1.2; }
 .bo-viz-warning { fill: #92400e; font-size: 9px; }
 
 .bo-viz-empty {
@@ -2640,7 +2697,43 @@ textarea {
   text-align: center;
 }
 
+/* Dedicated LHS initial-design figure. Kept separate from BO posterior styles. */
+.lhs-viz-svg,
+.lhs-viz-matplotlib-figure {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  display: block;
+  margin: 0;
+  max-width: 100%;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+.lhs-viz-matplotlib-image { display: block; height: auto; object-fit: contain; width: 100%; }
+.lhs-viz-downloads { display: flex; gap: 5px; position: absolute; right: 8px; top: 8px; }
+.lhs-viz-data-link { background: #fff; border: 1px solid #cbd5e1; color: #334155; font-size: 10px; padding: 3px 6px; }
+.lhs-viz-paper { fill: #ffffff; }
+.lhs-viz-axis { stroke: #111827; stroke-width: 1.15; }
+.lhs-viz-grid { stroke: #d8dee8; stroke-dasharray: 3 4; stroke-width: 0.7; }
+.lhs-viz-stratum { stroke: #cbd5e1; stroke-width: 0.65; opacity: 0.78; }
+.lhs-viz-title { fill: #111827; font: 700 16px "IBM Plex Sans", sans-serif; }
+.lhs-viz-subtitle,
+.lhs-viz-tick,
+.lhs-viz-axis-label,
+.lhs-viz-strata-label,
+.lhs-viz-legend text { fill: #334155; font: 11px "IBM Plex Sans", sans-serif; }
+.lhs-viz-axis-label { font-size: 12px; }
+.lhs-viz-strata-label { fill: #64748b; font-size: 9px; }
+.lhs-viz-measured { fill: #2563eb; stroke: #ffffff; stroke-width: 1.5; }
+.lhs-viz-planned { fill: #94a3b8; stroke: #ffffff; stroke-width: 1.2; }
+.lhs-viz-next line { stroke: #f97316; stroke-linecap: round; stroke-width: 3; }
+.lhs-viz-empty { background: #fff; border: 1px dashed #cbd5e1; color: #475569; padding: 16px; }
+
 .bo-viz-stale { color: #f59e0b; }
+
+body.planning-live-body .bo-objective-summary-card {
+  align-self: start;
+}
 
 .bo-viz-workspace-card {
   border: 1px solid rgba(34, 211, 238, 0.22);
@@ -4156,6 +4249,27 @@ body.planning-live-body #live-objective-readiness.warning { color: #fb7185; }
   grid-column: auto;
 }
 
+.bo-objective-preset-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) auto minmax(320px, 1.2fr);
+  align-items: end;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(20, 54, 179, 0.16);
+  border-radius: 12px;
+  background: rgba(248, 251, 255, 0.66);
+}
+
+.bo-objective-preset-row label {
+  display: grid;
+  gap: 6px;
+}
+
+.bo-objective-preset-row .hint {
+  align-self: center;
+  margin: 0;
+}
+
 .bo-objective-author-panel {
   display: grid;
   gap: 12px;
@@ -4627,6 +4741,7 @@ body.planning-live-body #live-objective-readiness.warning { color: #fb7185; }
 @media (max-width: 720px) {
   .bo-objective-mode-switch,
   .bo-objective-common-binding,
+  .bo-objective-preset-row,
   .bo-manual-metadata,
   .bo-manual-editor {
     grid-template-columns: minmax(0, 1fr);

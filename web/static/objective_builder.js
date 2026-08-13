@@ -497,6 +497,27 @@
         dirty = true;
         persist();
       },
+      loadPreset(presetSpec) {
+        const errors = validateSpec(presetSpec, { manifest, metrics, allowIncomplete: false });
+        if (errors.length) throw new Error(errors[0].message);
+        lastValidSpec = clone(presetSpec);
+        const presetId = String(lastValidSpec.metadata?.preset_id || lastValidSpec.objective_id || "");
+        lastValidSpec.version = 1;
+        lastValidSpec.lifecycle = "draft";
+        lastValidSpec.created_by = "operator";
+        lastValidSpec.metadata = {
+          ...(lastValidSpec.metadata || {}),
+          authoring_mode: "manual",
+          source_preset_id: presetId,
+        };
+        delete lastValidSpec.metadata.parent_objective_id;
+        delete lastValidSpec.metadata.parent_version;
+        jsonBuffer = pretty(lastValidSpec);
+        selectedObjective = null;
+        jsonErrors = [];
+        dirty = true;
+        persist();
+      },
       markSaved(serverSpec) {
         const errors = validateSpec(serverSpec, { manifest, metrics, allowIncomplete: false });
         if (errors.length) throw new Error(errors[0].message);

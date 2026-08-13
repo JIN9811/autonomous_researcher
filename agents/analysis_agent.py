@@ -1478,7 +1478,14 @@ class AnalysisAgent(BaseAgent):
         analysis["fidelity_records"] = fidelity_records
         analysis["trust_score"] = trust_score
         trust_gate = str(trust_score.get("gate") or "").strip()
-        bo_ready = bool(analysis.get("ok") and (quality_gate.get("ok_for_bo", True) is True) and trust_gate in {"allow_bo", "allow_physical"})
+        sea_score = self._safe_float(metrics.get("specific_energy_absorption_J_per_g"), float("nan"))
+        sea_available = math.isfinite(sea_score)
+        bo_ready = bool(
+            analysis.get("ok")
+            and sea_available
+            and (quality_gate.get("ok_for_bo", True) is True)
+            and trust_gate in {"allow_bo", "allow_physical"}
+        )
         bo_observation = {
             "schema": "bo_observation.v1",
             "run_id": state.run_id,
@@ -1486,7 +1493,9 @@ class AnalysisAgent(BaseAgent):
             "producer_agent": self.name,
             "consumer_agent": "bo_agent",
             "status": "ready" if bo_ready else "blocked",
-            "objective_score": analysis.get("objective_score", 0.0),
+            "objective_score": sea_score if sea_available else None,
+            "metric_name": "specific_energy_absorption_J_per_g",
+            "unit": "J/g",
             "objective_evaluation": analysis.get("objective_evaluation", {}),
             "uncertainty": analysis.get("uncertainty", 1.0),
             "observed_metrics": metrics,
@@ -1512,16 +1521,17 @@ class AnalysisAgent(BaseAgent):
             "evaluation_id": f"eval-analysis-{state.experiment_id}",
             "objective": {
                 "objective_id": objective.get("objective_id") or "bo-specimen-objective",
-                "name": objective.get("name") or "Compression performance",
-                "metric_name": objective.get("metric_name") or "objective_score",
-                "direction": objective.get("direction") or "maximize",
+                "name": "Specific energy absorption",
+                "metric_name": "specific_energy_absorption_J_per_g",
+                "unit": "J/g",
+                "direction": "maximize",
                 "constraints": objective.get("constraints") if isinstance(objective.get("constraints"), dict) else {},
             },
             "candidate_id": parameters.get("candidate_id") or state.current_experiment_spec.get("specimen_id", state.experiment_id),
             "mode": state.mode.value,
             "bridge": "analysis",
             "status": "measured_analysis_complete" if analysis.get("ok") else "analysis_blocked",
-            "objective_score": analysis.get("objective_score", 0.0),
+            "objective_score": sea_score if sea_available else None,
             "uncertainty": analysis.get("uncertainty", 1.0),
             "metrics": {**parameters, **metrics, "quality_score": quality_gate.get("score"), "fem_utm_agreement_score": fem_comparison.get("agreement_score")},
             "fidelity_records": {
@@ -1551,9 +1561,10 @@ class AnalysisAgent(BaseAgent):
             "candidate_id": experiment_evaluation["candidate_id"],
             "parameters": parameters,
             "objective": {
-                "metric_name": "objective_score",
-                "direction": experiment_evaluation["objective"].get("direction", "maximize"),
-                "score": analysis.get("objective_score", 0.0),
+                "metric_name": "specific_energy_absorption_J_per_g",
+                "unit": "J/g",
+                "direction": "maximize",
+                "score": sea_score if sea_available else None,
                 "uncertainty": analysis.get("uncertainty", 1.0),
             },
             "objective_evaluation": analysis.get("objective_evaluation", {}),

@@ -28,9 +28,14 @@ from typing import Any
 
 from experiments.api import evaluate_experiment
 from experiments.bo_visualization import build_bo_visualization
+from experiments.lhs_design_visualization import build_lhs_design_visualization
 from experiments.schemas import ExperimentEvaluationRequest
-from learning.bo_engine import propose_next
-from learning.botorch_backend import BoTorchBackendUnavailable, score_candidate_pool as score_botorch_candidate_pool
+from learning.bo_engine import propose_next as propose_lightweight_next
+from learning.bo_parameter_space import BOParameterSpace
+from learning.botorch_backend import (
+    BoTorchBackendError,
+    propose_next as propose_botorch_next,
+)
 
 Evaluator = Callable[[dict[str, Any]], dict[str, Any]]
 
@@ -327,6 +332,298 @@ def _curve_summary(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _botorch_observations(payload: dict[str, Any], space: BOParameterSpace) -> list[dict[str, Any]]:
+    observations: list[dict[str, Any]] = []
+    raw = payload.get("prior_evaluations") if isinstance(payload.get("prior_evaluations"), list) else []
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict) or not isinstance(item.get("parameters"), dict):
+            continue
+        if item.get("ok_for_bo") is False or str(item.get("source") or "").startswith("failed:"):
+            continue
+        score = item.get("score", item.get("objective_score"))
+        if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(float(score)):
+            continue
+        try:
+            space.encode(item["parameters"])
+        except (TypeError, ValueError):
+            continue
+        observation = {
+            "candidate_id": str(item.get("candidate_id") or f"prior-{index + 1}"),
+            "source": str(item.get("source") or "prior"),
+            "parameters": dict(item["parameters"]),
+            "score": float(score),
+        }
+        uncertainty = item.get("uncertainty")
+        if isinstance(uncertainty, (int, float)) and not isinstance(uncertainty, bool) and float(uncertainty) > 0:
+            observation["uncertainty"] = float(uncertainty)
+        observations.append(observation)
+    return observations
+
+
+def _observation_trace(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "source": str(item.get("source") or "bo_evaluation"),
+            "candidate_id": str(item.get("candidate_id") or ""),
+            "score": round(float(item["score"]), 8),
+            "parameters": _compact_parameters(item.get("parameters", {})),
+        }
+        for item in observations
+        if isinstance(item.get("score"), (int, float)) and isinstance(item.get("parameters"), dict)
+    ]
+
+
+def _projection_landscape(proposal: dict[str, Any], *, candidate_id: str) -> list[dict[str, Any]]:
+    projection = proposal.get("projection") if isinstance(proposal.get("projection"), dict) else {}
+    parameter = str(projection.get("parameter") or "")
+    xs = projection.get("x") if isinstance(projection.get("x"), list) else []
+    means = projection.get("mean") if isinstance(projection.get("mean"), list) else []
+    stds = projection.get("std") if isinstance(projection.get("std"), list) else []
+    acquisitions = projection.get("acquisition") if isinstance(projection.get("acquisition"), list) else []
+    base = proposal.get("candidate") if isinstance(proposal.get("candidate"), dict) else {}
+    rows: list[dict[str, Any]] = []
+    for index, (x_value, mean, std, acq) in enumerate(zip(xs, means, stds, acquisitions, strict=False), start=1):
+        parameters = dict(base)
+        if parameter:
+            parameters[parameter] = x_value
+        rows.append(
+            {
+                "candidate_id": f"posterior-{index:03d}",
+                "x": index,
+                "surrogate_mean": float(mean),
+                "uncertainty": max(0.0, float(std)),
+                "acquisition_value": float(acq),
+                "already_evaluated": False,
+                "backend": "botorch",
+                "parameters": _compact_parameters(parameters),
+            }
+        )
+    if rows:
+        nearest = min(
+            rows,
+            key=lambda item: abs(float(item.get("parameters", {}).get(parameter, 0.0)) - float(base.get(parameter, 0.0))),
+        )
+        nearest["candidate_id"] = candidate_id
+    return rows
+
+
+def _run_botorch_strategy(
+    *,
+    payload: dict[str, Any],
+    parameter_space: dict[str, Any],
+    base_request: dict[str, Any],
+    budget: int,
+    seed: int,
+    acquisition: str,
+    kappa: float,
+    evaluator: Evaluator | None,
+) -> dict[str, Any]:
+    """Run a synthetic multi-step benchmark or one closed-loop BO proposal."""
+    space = BOParameterSpace.from_mapping(parameter_space)
+    observations = _botorch_observations(payload, space)
+    raw_initial_size = payload.get("initial_design_size", "auto")
+    try:
+        initial_target = space.initial_design_size if raw_initial_size in {None, "", "auto"} else max(2, int(raw_initial_size))
+    except (TypeError, ValueError):
+        initial_target = space.initial_design_size
+    iterations = 1 if bool(payload.get("sequential_only")) else budget
+    sequential_only = bool(payload.get("sequential_only"))
+    objective = payload.get("objective") if isinstance(payload.get("objective"), dict) else {}
+    direction = str(objective.get("direction") or "maximize").strip().lower()
+    results: list[dict[str, Any]] = []
+    traces: list[dict[str, Any]] = []
+    backend_active = "lhs"
+    failure: dict[str, Any] = {}
+    planned_lhs = space.lhs_points(initial_target, seed=seed)
+
+    for step in range(iterations):
+        observation_count_before = len(observations)
+        next_experiment_step = observation_count_before + 1
+        candidate_id = f"bo-candidate-{next_experiment_step:03d}"
+        if len(observations) < initial_target:
+            excluded = {space.signature(item["parameters"]) for item in observations}
+            lhs_candidates = [item for item in planned_lhs if space.signature(item) not in excluded]
+            if not lhs_candidates:
+                raise RuntimeError("canonical LHS plan has no unobserved point before initialization completed")
+            candidate = lhs_candidates[0]
+            phase = "initial_design"
+            backend_active = "lhs"
+            candidate_rows = []
+            for index, item in enumerate(lhs_candidates, start=1):
+                candidate_rows.append(
+                    {
+                        "candidate_id": candidate_id if index == 1 else f"lhs-candidate-{len(observations) + index:03d}",
+                        "x": index,
+                        "surrogate_mean": round(_candidate_proxy(item), 8),
+                        "uncertainty": 1.0,
+                        "acquisition_value": 1.0,
+                        "already_evaluated": False,
+                        "backend": "lhs",
+                        "parameters": _compact_parameters(item),
+                    }
+                )
+            selected = dict(candidate_rows[0])
+            model_payload: dict[str, Any] = {}
+            optimizer_payload: dict[str, Any] = {"function": "latin_hypercube"}
+            acquisition_class = "LatinHypercube"
+            projection_payload: dict[str, Any] = {}
+        else:
+            phase = "acquisition"
+            try:
+                proposal = propose_botorch_next(
+                    parameter_space=space,
+                    observations=observations,
+                    acquisition=acquisition,
+                    objective_direction=direction,
+                    random_seed=seed + step,
+                    kappa=kappa,
+                    num_restarts=int(payload.get("num_restarts", 12) or 12),
+                    raw_samples=int(payload.get("raw_samples", 256) or 256),
+                    optimizer_timeout_s=float(payload.get("optimizer_timeout_s", 30.0) or 30.0),
+                ).to_dict()
+            except BoTorchBackendError as exc:
+                failure = exc.to_dict()
+                break
+            candidate = dict(proposal["candidate"])
+            backend_active = "botorch"
+            posterior = proposal.get("posterior") if isinstance(proposal.get("posterior"), dict) else {}
+            selected = {
+                "candidate_id": candidate_id,
+                "parameters": _compact_parameters(candidate),
+                "surrogate_mean": posterior.get("mean"),
+                "uncertainty": posterior.get("std"),
+                "acquisition_value": (proposal.get("acquisition") or {}).get("value"),
+                "backend": "botorch",
+                "score": None,
+            }
+            # Conditional projection grids are visualization-only. The decision
+            # path must preserve the exact mixed-space point optimized by BoTorch.
+            candidate_rows = [selected]
+            model_payload = dict(proposal.get("model") or {})
+            optimizer_payload = dict(proposal.get("optimizer") or {})
+            acquisition_class = str((proposal.get("acquisition") or {}).get("class") or acquisition)
+            projection_payload = dict(proposal.get("projection") or {})
+
+        if sequential_only:
+            result = {
+                "ok": True,
+                "status": "proposed",
+                "candidate_id": candidate_id,
+                "parameters": dict(candidate),
+                "objective_score": None,
+                "evaluation_deferred": True,
+            }
+        else:
+            result = _evaluate_candidate(
+                base_request=base_request,
+                candidate_parameters=candidate,
+                index=step + 1,
+                evaluator=evaluator,
+            )
+            result["candidate_id"] = candidate_id
+        results.append(result)
+        score = result.get("objective_score")
+        if not sequential_only and isinstance(score, (int, float)) and not isinstance(score, bool) and math.isfinite(float(score)):
+            observation = {
+                "candidate_id": candidate_id,
+                "source": "bo_evaluation",
+                "parameters": dict(candidate),
+                "score": float(score),
+            }
+            uncertainty = result.get("uncertainty")
+            if (
+                isinstance(uncertainty, (int, float))
+                and not isinstance(uncertainty, bool)
+                and math.isfinite(float(uncertainty))
+                and float(uncertainty) > 0.0
+            ):
+                observation["uncertainty"] = float(uncertainty)
+            observations.append(observation)
+        selected["score"] = float(score) if not sequential_only and isinstance(score, (int, float)) else None
+        observed_signatures = {space.signature(item["parameters"]) for item in observations}
+        selected_signature = space.signature(candidate)
+        next_signature = selected_signature if selected_signature not in observed_signatures else next(
+            (space.signature(item) for item in planned_lhs if space.signature(item) not in observed_signatures),
+            "",
+        )
+        initial_points = []
+        for point_index, point in enumerate(planned_lhs, start=1):
+            signature = space.signature(point)
+            status = "measured" if signature in observed_signatures else ("next" if signature == next_signature else "planned")
+            initial_points.append(
+                {
+                    "index": point_index,
+                    "candidate_id": f"lhs-candidate-{point_index:03d}",
+                    "status": status,
+                    "parameters": _compact_parameters(point),
+                }
+            )
+        if sequential_only and phase == "acquisition":
+            model_step = observation_count_before
+        else:
+            model_step = next_experiment_step
+        trace = {
+            "step": model_step,
+            "next_experiment_step": next_experiment_step,
+            "phase": phase,
+            "acquisition": acquisition,
+            "acquisition_class": acquisition_class,
+            "x_axis": "parameter_slice" if phase == "acquisition" else "lhs_design_index",
+            "candidate_count": len(candidate_rows),
+            "selected": selected,
+            "backend_requested": "botorch",
+            "backend_active": backend_active,
+            "initial_design": {
+                "sampler": "latin_hypercube",
+                "target": initial_target,
+                "completed": min(len(observations), initial_target),
+                "seed": seed,
+                "points": initial_points,
+            },
+            "model": model_payload,
+            "optimizer": optimizer_payload,
+            "projection": projection_payload,
+            "evaluated_points": _observation_trace(observations),
+            "candidates": candidate_rows,
+        }
+        selected_parameter = ""
+        if phase == "acquisition" and proposal.get("projection"):
+            selected_parameter = str(proposal["projection"].get("parameter") or "")
+        if phase == "initial_design" and "cell_size_mm" in parameter_space and "relative_density" in parameter_space:
+            trace["lhs_visualization"] = build_lhs_design_visualization(
+                run_id=str(base_request.get("run_id") or ""),
+                parameter_space=parameter_space,
+                trace=trace,
+            )
+        else:
+            trace["visualization"] = build_bo_visualization(
+                run_id=str(base_request.get("run_id") or ""),
+                objective=objective,
+                parameter_space=parameter_space,
+                trace=trace,
+                selected_parameter=selected_parameter,
+            )
+        traces.append(trace)
+
+    summary = {"results": results, **_curve_summary(results)}
+    summary.update(
+        {
+            "ok": not bool(failure),
+            "surrogate_trace": traces,
+            "backend_requested": "botorch",
+            "backend_active": backend_active if not failure else "none",
+            "backend_warnings": [],
+            "failure": failure,
+            "initial_design": {
+                "sampler": "latin_hypercube",
+                "target": initial_target,
+                "completed": min(len(observations), initial_target),
+            },
+        }
+    )
+    return summary
+
+
 def run_benchmark(
     payload: dict[str, Any],
     *,
@@ -350,11 +647,24 @@ def run_benchmark(
         else {}
     )
     acquisition = str(payload.get("acquisition") or metadata.get("acquisition") or "expected_improvement").strip().lower()
-    bo_backend = str(payload.get("bo_backend") or payload.get("backend") or metadata.get("bo_backend") or "lightweight_pool").strip().lower()
+    bo_backend = str(payload.get("bo_backend") or payload.get("backend") or metadata.get("bo_backend") or "botorch").strip().lower()
     backend_warnings: list[str] = []
-    if bo_backend not in {"lightweight_pool", "botorch_optional"}:
-        backend_warnings.append(f"unknown bo_backend '{bo_backend}' fell back to lightweight_pool")
-        bo_backend = "lightweight_pool"
+    if bo_backend == "botorch_optional":
+        bo_backend = "botorch"
+    if bo_backend not in {"lightweight_pool", "botorch"}:
+        return {
+            "ok": False,
+            "tool": "experiment.benchmark",
+            "budget": budget,
+            "strategies": {},
+            "parameter_space": parameter_space,
+            "bo_backend_requested": bo_backend,
+            "backend_warnings": [],
+            "failure": {
+                "failure_code": "BO_BACKEND_UNSUPPORTED",
+                "message": f"unsupported BO backend: {bo_backend}",
+            },
+        }
     kappa = float(payload.get("kappa", metadata.get("kappa", 2.0)) or 2.0)
     xi = float(payload.get("xi", metadata.get("xi", 0.01)) or 0.01)
     exploration_weight = float(payload.get("exploration_weight", metadata.get("exploration_weight", 0.35)) or 0.35)
@@ -383,6 +693,22 @@ def run_benchmark(
             for idx, candidate in enumerate(candidates, start=1):
                 results.append(_evaluate_candidate(base_request=base_request, candidate_parameters=candidate, index=idx, evaluator=evaluator))
         elif name == "bo":
+            if bo_backend == "botorch":
+                botorch_payload = _run_botorch_strategy(
+                    payload=payload,
+                    parameter_space=parameter_space,
+                    base_request=base_request,
+                    budget=budget,
+                    seed=seed,
+                    acquisition=acquisition,
+                    kappa=kappa,
+                    evaluator=evaluator,
+                )
+                output["strategies"][name] = botorch_payload
+                if not botorch_payload.get("ok", False):
+                    output["ok"] = False
+                    output["failure"] = botorch_payload.get("failure", {})
+                continue
             candidates = list(grid_pool)
             vectors = [_numeric_vector(candidate, parameter_keys) for candidate in candidates]
             seen: set[int] = set()
@@ -390,7 +716,6 @@ def run_benchmark(
             evaluated_vectors: list[list[float]] = list(prior_vectors)
             evaluated_records: list[dict[str, Any]] = [dict(item) for item in prior_records]
             surrogate_trace: list[dict[str, Any]] = []
-            backend_warning_reported = False
             backend_used = "lightweight_pool"
             for idx in range(min(budget, len(candidates))):
                 available_indexes = [i for i in range(len(vectors)) if i not in seen]
@@ -398,25 +723,6 @@ def run_benchmark(
                     break
                 posterior_scores = None
                 active_backend = "lightweight_pool"
-                if bo_backend == "botorch_optional" and len(evaluated_vectors) >= 2 and len(scores) >= 2:
-                    try:
-                        posterior_scores = score_botorch_candidate_pool(
-                            candidates=candidates,
-                            vectors=vectors,
-                            evaluated_vectors=evaluated_vectors,
-                            scores=scores,
-                            acquisition=acquisition,
-                            kappa=kappa,
-                            xi=xi,
-                            exploration_weight=exploration_weight,
-                            exploitation_weight=exploitation_weight,
-                        )
-                        active_backend = "botorch_optional"
-                        backend_used = "botorch_optional"
-                    except (BoTorchBackendUnavailable, Exception) as exc:
-                        if not backend_warning_reported:
-                            backend_warnings.append(f"botorch_optional unavailable; lightweight_pool used: {exc.__class__.__name__}: {exc}")
-                            backend_warning_reported = True
                 landscape = _bo_landscape(
                     candidates=candidates,
                     vectors=vectors,
@@ -433,7 +739,7 @@ def run_benchmark(
                 if not scores:
                     pick = 0
                 else:
-                    _ = propose_next(evaluated_vectors, scores)
+                    _ = propose_lightweight_next(evaluated_vectors, scores)
                     pick = max(
                         available_indexes,
                         key=lambda item: _acquisition_value(

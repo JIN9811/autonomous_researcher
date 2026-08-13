@@ -615,6 +615,32 @@ async def test_manipulation_agent_defaults_to_smolvla_transfer_after_specimen(tm
 
 
 @pytest.mark.asyncio
+async def test_virtual_printer_path_simulates_completed_post_place_interlock(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """The virtual printer tail must reach UTM Vision without physical joint telemetry."""
+    _isolate_manipulation_profile(tmp_path, monkeypatch)
+    state = _post_specimen_state()
+    state.current_experiment_spec["printer_test_path"] = "virtual_bridge"
+    state.current_experiment_spec["test_printer_transport"] = "virtual"
+    state.run_metadata["specimen_result"]["printer_path"] = "virtual_bridge"
+
+    result = await ManipulationAgent().run(state, _CtxStub(_tools(tmp_path)))
+
+    manipulation = result.data["manipulation"]
+    assert result.success is True
+    assert manipulation["virtual_bridge_simulation"] is True
+    assert manipulation["runtime_phase"] == "ACTION_ACTIVE"
+    assert manipulation["action_count"] > 0
+    assert manipulation["post_place_interlock"]["ungrasping_seen"] is True
+    assert manipulation["post_place_interlock"]["home_after_ungrasping"] is True
+    assert manipulation["post_place_interlock"]["ready_for_utm_snapshot"] is True
+    assert manipulation["completion_status"] == "reported_complete"
+    assert result.data["requested_next_stage"] == "vision"
+
+
+@pytest.mark.asyncio
 async def test_manipulation_does_not_reenter_before_vision_handoff(tmp_path: Path, monkeypatch: Any) -> None:
     """The rollout launch hands the existing session to Vision exactly once."""
     _isolate_manipulation_profile(tmp_path, monkeypatch)

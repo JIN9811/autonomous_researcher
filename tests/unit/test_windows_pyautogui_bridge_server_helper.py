@@ -252,6 +252,340 @@ def _load_packaged_helper_module():
     return module
 
 
+def test_controller_resolver_prefers_verified_explicit_url_without_persisting_it(tmp_path: Path) -> None:
+    """Catches a regression where a saved/discovered address overrides the operator setting."""
+    module = _load_packaged_helper_module()
+    saved = {
+        "schema": "atr.windows_controller_connection.v1",
+        "controller_url": "http://192.168.50.10:7860",
+        "source": "authenticated_peer",
+        "verified_at": "2026-08-13T00:00:00Z",
+    }
+    (tmp_path / "controller_connection.json").write_text(json.dumps(saved), encoding="utf-8")
+    verified: list[str] = []
+
+    def verify(url: str) -> dict[str, object]:
+        verified.append(url)
+        return {"ok": True}
+
+    resolver = module.ATRControllerResolver(
+        tmp_path,
+        explicit_url="http://192.168.50.146:7860/",
+        verifier=verify,
+    )
+
+    result = resolver.resolve()
+
+    assert result["ok"] is True
+    assert result["source"] == "environment"
+    assert result["controller_url"] == "http://192.168.50.146:7860"
+    assert verified == ["http://192.168.50.146:7860"]
+    assert json.loads((tmp_path / "controller_connection.json").read_text(encoding="utf-8")) == saved
+
+
+def test_controller_resolver_does_not_fallback_from_invalid_explicit_override(tmp_path: Path) -> None:
+    """Catches silent fallback that would hide a broken managed-deployment setting."""
+    module = _load_packaged_helper_module()
+    (tmp_path / "controller_connection.json").write_text(
+        json.dumps(
+            {
+                "schema": "atr.windows_controller_connection.v1",
+                "controller_url": "http://192.168.50.10:7860",
+                "source": "saved",
+                "verified_at": "2026-08-13T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    resolver = module.ATRControllerResolver(
+        tmp_path,
+        explicit_url="http://127.0.0.1:1",
+        verifier=lambda _url: {"ok": False, "failure_code": "ATR_CONTROLLER_UNREACHABLE"},
+    )
+
+    result = resolver.resolve()
+
+    assert result["ok"] is False
+    assert result["source"] == "environment"
+    assert result["failure_code"] == "ATR_CONTROLLER_EXPLICIT_URL_INVALID"
+
+
+def test_controller_resolver_persists_verified_selection_without_secrets(tmp_path: Path) -> None:
+    """Catches non-atomic or secret-bearing controller records that fail across restart."""
+    module = _load_packaged_helper_module()
+    resolver = module.ATRControllerResolver(tmp_path, verifier=lambda _url: {"ok": True, "token": "must-not-save"})
+
+    selected = resolver.select("http://192.168.50.146:7860/")
+    restarted = module.ATRControllerResolver(tmp_path, verifier=lambda _url: {"ok": True}).resolve()
+
+    record_path = tmp_path / "controller_connection.json"
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert selected["ok"] is True
+    assert selected["source"] == "manual"
+    assert restarted["ok"] is True
+    assert restarted["source"] == "saved"
+    assert restarted["controller_url"] == "http://192.168.50.146:7860"
+    assert record["schema"] == "atr.windows_controller_connection.v1"
+    assert record["controller_url"] == "http://192.168.50.146:7860"
+    assert "token" not in json.dumps(record).lower()
+    assert not list(tmp_path.glob(".controller_connection.json.*.tmp"))
+
+
+def test_controller_resolver_tolerates_corrupt_saved_record(tmp_path: Path) -> None:
+    """Catches startup failure when an interrupted prior write leaves unreadable state."""
+    module = _load_packaged_helper_module()
+    (tmp_path / "controller_connection.json").write_text("{broken", encoding="utf-8")
+
+    result = module.ATRControllerResolver(
+        tmp_path,
+        verifier=lambda _url: {"ok": False},
+    ).resolve()
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "ATR_CONTROLLER_NOT_FOUND"
+    assert result["saved_record_status"] == "invalid"
+
+
+def test_controller_resolver_learns_and_persists_authenticated_private_peer(tmp_path: Path, monkeypatch) -> None:
+    """Catches a bridge that authenticates ATR but never learns its source address."""
+    module = _load_packaged_helper_module()
+    monkeypatch.setattr(module, "_local_private_ipv4_addresses", lambda: ["192.168.50.40"])
+    checked: list[str] = []
+
+    def verify(url: str) -> dict[str, object]:
+        checked.append(url)
+        return {"ok": True}
+
+    resolver = module.ATRControllerResolver(tmp_path, verifier=verify)
+
+    result = resolver.observe_authenticated_peer("192.168.50.146")
+
+    assert result["ok"] is True
+    assert result["source"] == "authenticated_peer"
+    assert result["controller_url"] == "http://192.168.50.146:7860"
+    assert checked == ["http://192.168.50.146:7860"]
+    record = json.loads((tmp_path / "controller_connection.json").read_text(encoding="utf-8"))
+    assert record["source"] == "authenticated_peer"
+
+
+@pytest.mark.parametrize("peer_ip", ["127.0.0.1", "169.254.1.2", "8.8.8.8", "not-an-ip"])
+def test_controller_resolver_rejects_unsafe_peer_candidates(tmp_path: Path, peer_ip: str) -> None:
+    """Catches SSRF-like persistence from loopback, link-local, public, or malformed peers."""
+    module = _load_packaged_helper_module()
+    verified: list[str] = []
+    resolver = module.ATRControllerResolver(tmp_path, verifier=lambda url: verified.append(url) or {"ok": True})
+
+    result = resolver.observe_authenticated_peer(peer_ip)
+
+    assert result["ok"] is False
+    assert result["status"] == "ignored"
+    assert verified == []
+    assert not (tmp_path / "controller_connection.json").exists()
+
+
+def test_private_ipv4_probe_candidates_are_bounded_to_each_interface_24() -> None:
+    """Catches accidental broad-network scans or probing of the Windows host itself."""
+    module = _load_packaged_helper_module()
+
+    candidates = module._private_ipv4_probe_candidates(["192.168.50.40", "10.0.5.7"])
+
+    assert len(candidates) == 506
+    assert "192.168.50.40" not in candidates
+    assert "10.0.5.7" not in candidates
+    assert "192.168.49.255" not in candidates
+    assert "10.0.6.1" not in candidates
+    assert candidates == sorted(set(candidates), key=lambda value: tuple(int(part) for part in value.split(".")))
+
+
+def test_controller_discovery_persists_only_verified_candidate(tmp_path: Path) -> None:
+    """Catches selection based on an open port without ATR identity verification."""
+    module = _load_packaged_helper_module()
+    resolver = module.ATRControllerResolver(
+        tmp_path,
+        scanner=lambda: ["http://192.168.50.20:7860", "http://192.168.50.146:7860"],
+        verifier=lambda url: {"ok": url == "http://192.168.50.146:7860"},
+    )
+
+    result = resolver.discover()
+
+    assert result["ok"] is True
+    assert result["source"] == "subnet_scan"
+    assert result["controller_url"] == "http://192.168.50.146:7860"
+    assert json.loads((tmp_path / "controller_connection.json").read_text(encoding="utf-8"))["controller_url"] == result["controller_url"]
+
+
+def test_controller_discovery_requires_selection_for_multiple_verified_candidates(tmp_path: Path) -> None:
+    """Catches nondeterministic controller choice based on whichever probe finishes first."""
+    module = _load_packaged_helper_module()
+    urls = ["http://192.168.50.20:7860", "http://192.168.50.146:7860"]
+    resolver = module.ATRControllerResolver(tmp_path, scanner=lambda: list(reversed(urls)), verifier=lambda _url: {"ok": True})
+
+    result = resolver.discover()
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "ATR_CONTROLLER_MULTIPLE_CANDIDATES"
+    assert result["candidates"] == urls
+    assert not (tmp_path / "controller_connection.json").exists()
+
+
+def test_controller_discovery_caches_negative_scan(tmp_path: Path) -> None:
+    """Catches a full subnet rescan on every unresolved Skill request."""
+    module = _load_packaged_helper_module()
+    scan_count = 0
+
+    def scan() -> list[str]:
+        nonlocal scan_count
+        scan_count += 1
+        return []
+
+    resolver = module.ATRControllerResolver(tmp_path, scanner=scan)
+
+    first = resolver.discover()
+    second = resolver.discover()
+
+    assert first["failure_code"] == "ATR_CONTROLLER_NOT_FOUND"
+    assert second["failure_code"] == "ATR_CONTROLLER_NOT_FOUND"
+    assert second["cached"] is True
+    assert scan_count == 1
+
+
+def test_skills_proxy_uses_verified_resolved_controller(tmp_path: Path) -> None:
+    """Catches Skill forwarding that remains hard-wired to Windows localhost."""
+    module = _load_packaged_helper_module()
+
+    class ATRIdentityHandler(module.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            body = json.dumps({"ok": True, "skills": [{"skill_id": "program1_skill", "version": "1.0.0"}]}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+    atr_server = module.ThreadingHTTPServer(("127.0.0.1", 0), ATRIdentityHandler)
+    atr_thread = threading.Thread(target=atr_server.serve_forever, daemon=True)
+    atr_thread.start()
+    atr_url = f"http://127.0.0.1:{atr_server.server_address[1]}"
+    module.CONTROLLER_RESOLVER = module.ATRControllerResolver(tmp_path, explicit_url=atr_url)
+    try:
+        status, payload = module._atr_api_request("GET", "/api/equipment/skills")
+    finally:
+        atr_server.shutdown()
+        atr_server.server_close()
+        atr_thread.join(timeout=5)
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["skills"][0]["skill_id"] == "program1_skill"
+    assert module.CONTROLLER_RESOLVER.status()["controller_url"] == atr_url
+
+
+def test_controller_http_routes_require_auth_and_expose_redacted_status(tmp_path: Path) -> None:
+    """Catches unauthenticated controller mutation or missing operator management APIs."""
+    module = _load_packaged_helper_module()
+    module.TOKEN = "controller-token"
+    module.ARTIFACT_ROOT = tmp_path / "artifacts"
+    module.CONTROLLER_RESOLVER = module.ATRControllerResolver(
+        tmp_path,
+        verifier=lambda _url: {"ok": True, "skills": [], "token": "must-not-leak"},
+        scanner=lambda: ["http://192.168.50.146:7860"],
+    )
+    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+
+    def request(path: str, *, method: str = "GET", payload: dict[str, Any] | None = None, authenticated: bool = True):
+        data = json.dumps(payload).encode("utf-8") if payload is not None else None
+        headers = {"Content-Type": "application/json"}
+        if authenticated:
+            headers["X-Bridge-Token"] = "controller-token"
+        return urllib.request.urlopen(
+            urllib.request.Request(base + path, data=data, method=method, headers=headers),
+            timeout=5,
+        )
+
+    try:
+        with pytest.raises(urllib.error.HTTPError) as unauthorized:
+            request("/controller/select", method="POST", payload={"controller_url": "http://192.168.50.10:7860"}, authenticated=False)
+        with request("/controller/discover", method="POST", payload={}) as response:
+            discovered = json.loads(response.read().decode("utf-8"))
+        with request("/controller") as response:
+            status = json.loads(response.read().decode("utf-8"))
+        with request("/health") as response:
+            health = json.loads(response.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        module.TOKEN = ""
+
+    assert unauthorized.value.code == 401
+    assert discovered["ok"] is True
+    assert status["controller_url"] == "http://192.168.50.146:7860"
+    assert health["atr_controller"]["controller_url"] == status["controller_url"]
+    serialized = json.dumps({"status": status, "health": health}).lower()
+    assert "must-not-leak" not in serialized
+    assert "controller-token" not in serialized
+
+
+def test_authenticated_peer_observation_runs_only_after_token_check(tmp_path: Path, monkeypatch) -> None:
+    """Catches controller learning from an unauthenticated source address."""
+    module = _load_packaged_helper_module()
+    module.TOKEN = "peer-token"
+    module.ARTIFACT_ROOT = tmp_path / "artifacts"
+    module.CONTROLLER_RESOLVER = module.ATRControllerResolver(tmp_path, verifier=lambda _url: {"ok": False})
+    observed: list[str] = []
+    monkeypatch.setattr(module.CONTROLLER_RESOLVER, "observe_authenticated_peer", observed.append)
+    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with pytest.raises(urllib.error.HTTPError) as unauthorized:
+            urllib.request.urlopen(base + "/health", timeout=5)
+        with urllib.request.urlopen(
+            urllib.request.Request(base + "/health", headers={"X-Bridge-Token": "peer-token"}),
+            timeout=5,
+        ) as response:
+            assert response.status == 200
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        module.TOKEN = ""
+
+    assert unauthorized.value.code == 401
+    assert observed == ["127.0.0.1"]
+
+
+def test_allow_no_token_mode_never_persists_request_peer(tmp_path: Path, monkeypatch) -> None:
+    """Catches controller learning when the bench server has no authentication boundary."""
+    module = _load_packaged_helper_module()
+    module.TOKEN = ""
+    module.ARTIFACT_ROOT = tmp_path / "artifacts"
+    module.CONTROLLER_RESOLVER = module.ATRControllerResolver(tmp_path, verifier=lambda _url: {"ok": True})
+    observed: list[str] = []
+    monkeypatch.setattr(module.CONTROLLER_RESOLVER, "observe_authenticated_peer", observed.append)
+    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{server.server_address[1]}/health", timeout=5) as response:
+            assert response.status == 200
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert observed == []
+    assert not (tmp_path / "controller_connection.json").exists()
+
+
 def test_bridge_platform_auto_resolves_linux() -> None:
     module = _load_packaged_helper_module()
 
@@ -3291,6 +3625,23 @@ def test_skill_manager_preserves_action_result_while_refreshing_registry() -> No
     assert "async function refreshSkills({showResult = true} = {})" in html
     assert "if (showResult) managerShowResult(result);" in html
     assert "await refreshSkills({showResult: false})" in html
+
+
+def test_controller_console_exposes_discovery_selection_and_manual_verification() -> None:
+    """Catches packages that support discovery in the API but leave operators unable to inspect or resolve it."""
+    for module in (_load_helper_module(), _load_packaged_helper_module()):
+        html = module.INDEX_HTML
+        for element_id in (
+            "controllerStatus",
+            "controllerUrl",
+            "discoverController",
+            "controllerCandidates",
+            "saveController",
+        ):
+            assert f'id="{element_id}"' in html
+        assert 'call("/controller/discover"' in html
+        assert 'call("/controller/select"' in html
+        assert "renderControllerStatus" in html
 
 
 def test_skill_proxy_creates_draft_from_saved_windows_recording(tmp_path: Path) -> None:

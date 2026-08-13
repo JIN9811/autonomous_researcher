@@ -223,6 +223,31 @@ test("loading a saved objective for revision keeps parent identity without overw
   assert.equal(snapshot.dirty, true);
 });
 
+test("loading a preset creates an unsaved standalone draft without a revision parent", () => {
+  const state = createState({ manifest: manifest(), metrics: metrics(), storage: memoryStorage() });
+  const preset = {
+    schema_version: "objective_spec.v1",
+    objective_id: "legacy-utm-composite",
+    version: 1,
+    name: "Legacy UTM composite",
+    direction: "maximize",
+    expression: { op: "metric", metric_id: "compressive_strength_mpa" },
+    constraints: [],
+    lifecycle: "draft",
+    created_by: "system:preset",
+    metadata: { preset_id: "legacy-utm-composite", activation: "operator_required" },
+  };
+
+  state.loadPreset(preset);
+  const snapshot = state.snapshot();
+
+  assert.equal(snapshot.lastValidSpec.objective_id, "legacy-utm-composite");
+  assert.equal(snapshot.lastValidSpec.metadata.source_preset_id, "legacy-utm-composite");
+  assert.equal(snapshot.lastValidSpec.created_by, "operator");
+  assert.equal(snapshot.selectedObjective, null);
+  assert.equal(snapshot.dirty, true);
+});
+
 test("reparenting moves a compatible subtree without copying it", () => {
   const state = createState({ manifest: manifest(), metrics: metrics(), storage: memoryStorage() });
   state.replaceNode("expression", {

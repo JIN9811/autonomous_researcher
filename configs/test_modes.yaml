@@ -19,7 +19,7 @@
 test_modes:
   dry_run:
     enabled: true
-    max_cycles: 6
+    max_cycles: 20
   replay:
     enabled: true
     speed_seconds: 0.15

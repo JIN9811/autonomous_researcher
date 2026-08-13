@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 import app.main as app_main
 from agents.registry import AgentRegistry
 from agents.base_agent import AgentResult
+from experiments.bo_visualization import build_bo_visualization
 from graphs import ATRLangGraphCompiler, GraphConfig, HandlerRegistry, ModuleConfig, load_graph_config, load_module_config
 from logging_system.structured_logger import StructuredLogger
 from orchestrator.langgraph_runtime import LangGraphRunLoop, compact_runtime_payload
@@ -23,6 +24,150 @@ from orchestrator.state import Mode, OrchestratorState, Stage
 from orchestrator.supervisor import build_orchestrator_followup
 from orchestrator.transitions import default_next_stage, ordered_stages
 from policies.guardian_gate import gate_blocks_execution, guardian_gate
+
+
+def _runtime_bo_visualization() -> dict[str, object]:
+    return build_bo_visualization(
+        run_id="run-runtime-bo-artifacts",
+        objective={
+            "objective_id": "sea",
+            "name": "Specific energy absorption",
+            "direction": "maximize",
+            "unit": "J/g",
+            "expression": {"op": "metric", "metric_id": "specific_energy_absorption"},
+        },
+        parameter_space={"relative_density": [0.2, 0.3, 0.4]},
+        trace={
+            "step": 2,
+            "acquisition": "expected_improvement",
+            "backend_requested": "botorch_optional",
+            "backend_active": "botorch_optional",
+            "candidates": [
+                {
+                    "candidate_id": f"candidate-{index}",
+                    "x": index,
+                    "surrogate_mean": mean,
+                    "uncertainty": std,
+                    "acquisition_value": acquisition,
+                    "parameters": {"relative_density": density},
+                }
+                for index, (density, mean, std, acquisition) in enumerate(
+                    [(0.2, 0.62, 0.08, 0.02), (0.3, 0.78, 0.05, 0.09), (0.4, 0.71, 0.06, 0.04)],
+                    start=1,
+                )
+            ],
+            "evaluated_points": [
+                {
+                    "candidate_id": "candidate-1",
+                    "score": 0.60,
+                    "parameters": {"relative_density": 0.2},
+                }
+            ],
+            "selected": {
+                "candidate_id": "candidate-2",
+                "surrogate_mean": 0.78,
+                "uncertainty": 0.05,
+                "acquisition_value": 0.09,
+                "parameters": {"relative_density": 0.3},
+            },
+        },
+        selected_parameter="relative_density",
+    )
+
+
+def test_langgraph_runtime_publishes_bo_posterior_artifacts_under_run_directory(tmp_path: Path) -> None:
+    state = OrchestratorState(
+        run_id="run-runtime-bo-artifacts",
+        experiment_id="exp-runtime-bo-artifacts",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+    )
+    runtime = LangGraphRunLoop(
+        state=state,
+        agent_registry=AgentRegistry(),
+        orchestrator_agent_name="orchestrator_agent",
+        ctx=object(),
+        logger=StructuredLogger(tmp_path / "structured.jsonl", tmp_path / "summary.log"),
+        graph_config_path="graphs/configs/atr_closed_loop.yaml",
+    )
+
+    data = {"bo_result": {"visualization": _runtime_bo_visualization()}}
+    records = runtime._register_runtime_artifacts(
+        Stage.BO,
+        "bo_agent",
+        data,
+    )
+
+    posterior_records = [record for record in records if str(record.get("key", "")).startswith("runtime.bo_posterior.")]
+    posterior_paths = {tmp_path / str(record["path"]) for record in posterior_records}
+    assert {path.suffix for path in posterior_paths} == {".png", ".svg", ".csv"}
+    assert all(path.is_file() and path.stat().st_size > 0 for path in posterior_paths)
+    assert posterior_records == state.run_metadata["runtime_artifacts"][1:4]
+    artifacts = data["bo_result"]["visualization"]["artifacts"]
+    assert artifacts["png_url"].startswith(
+        "/api/runs/run-runtime-bo-artifacts/artifact-file/runtime/bo/"
+    )
+    assert artifacts["png_url"].endswith("_posterior.png")
+
+
+def test_langgraph_runtime_preserves_latest_bo_visualization_for_live_gui(tmp_path: Path) -> None:
+    state = OrchestratorState(
+        run_id="run-runtime-bo-live-gui",
+        experiment_id="exp-runtime-bo-live-gui",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+    )
+    runtime = LangGraphRunLoop(
+        state=state,
+        agent_registry=AgentRegistry(),
+        orchestrator_agent_name="orchestrator_agent",
+        ctx=object(),
+        logger=StructuredLogger(tmp_path / "structured.jsonl", tmp_path / "summary.log"),
+        graph_config_path="graphs/configs/atr_closed_loop.yaml",
+    )
+    visualization = _runtime_bo_visualization()
+
+    runtime._merge_agent_data(
+        Stage.BO,
+        {
+            "bo_result": {
+                "benchmark": {
+                    "strategies": {
+                        "bo": {"surrogate_trace": [{"visualization": visualization}]},
+                    }
+                }
+            }
+        },
+    )
+
+    assert state.run_metadata["bo_visualization"] == visualization
+
+
+def test_langgraph_runtime_preserves_both_active_bo_design_variables(tmp_path: Path) -> None:
+    state = OrchestratorState(
+        run_id="run-runtime-bo-two-variable",
+        experiment_id="exp-runtime-bo-two-variable",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+    )
+    runtime = LangGraphRunLoop(
+        state=state,
+        agent_registry=AgentRegistry(),
+        orchestrator_agent_name="orchestrator_agent",
+        ctx=object(),
+        logger=StructuredLogger(tmp_path / "structured.jsonl", tmp_path / "summary.log"),
+        graph_config_path="graphs/configs/atr_closed_loop.yaml",
+    )
+
+    runtime._merge_agent_data(
+        Stage.BO,
+        {"experiment_spec_update": {"cell_size_mm": 7.5, "relative_density": 0.41}},
+    )
+
+    assert state.run_metadata["bo_recommended_constraints"] == {
+        "cell_size_mm": 7.5,
+        "relative_density": 0.41,
+    }
 
 
 class _CustomQualityAgent:

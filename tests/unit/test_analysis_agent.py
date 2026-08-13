@@ -701,6 +701,12 @@ async def test_analysis_agent_emits_improvement06_artifacts_bo_handoff_and_calcu
     assert analysis["fidelity_records"]["fea_mid"]["schema"] == "fea_result.v1"
     assert analysis["fidelity_records"]["pinn_low_or_surrogate"]["status"] == "unavailable"
     assert result.data["bo_handoff"]["schema_version"] == "analysis_bo_handoff_v2"
+    measured_sea = analysis["utm_metrics"]["specific_energy_absorption_J_per_g"]
+    assert result.data["bo_handoff"]["objective"]["metric_name"] == "specific_energy_absorption_J_per_g"
+    assert result.data["bo_handoff"]["objective"]["unit"] == "J/g"
+    assert result.data["bo_handoff"]["objective"]["score"] == measured_sea
+    assert result.data["experiment_evaluation"]["objective"]["metric_name"] == "specific_energy_absorption_J_per_g"
+    assert result.data["experiment_evaluation"]["objective_score"] == measured_sea
     assert result.data["bo_handoff"]["trust_score"]["schema"] == "trust_score.v1"
     assert result.data["bo_handoff"]["multifidelity_comparison"]["schema"] == "multifidelity_comparison.v1"
     assert result.data["bo_handoff"]["fidelity"]["utm_high"]["objective_source"] is True

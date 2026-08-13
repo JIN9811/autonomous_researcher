@@ -15,10 +15,17 @@ Web dashboard panels:
 Real-time updates are streamed via SSE endpoint `/api/events/stream`.
 
 BO visualization surfaces:
+- LHS is a separate Design Agent-owned card backed by `lhs_design_visualization.v1`. It uses a white publication figure with actual `cell_size_mm` and `relative_density` axes, density strata, measured blue points, the next orange cross, and planned gray points.
+- `/bo` preserves the completed initial-design card above a distinct posterior/acquisition card. LHS artifacts use `_lhs_design_step_NNN.{png,svg,csv,json}` and never reuse BO posterior filenames.
 - `/bo` shows the active objective equation and one current posterior/acquisition Figure before candidate audit details.
 - The Live GUI BO Agent report uses the same `bo_visualization.v1` values and shared SVG renderer; it does not maintain a second uncertainty formula.
-- A completed BO step emits `bo.visualization.updated`. The current SVG is replaced in place, while compact step metadata supports prior-step selection in `/bo`.
-- The default plot is a numeric parameter slice. `Candidate pool index` is an audit view of the finite candidate set, not a continuous GP posterior.
+- The BO contract strip shows the active two-dimensional Gyroid space (`cell_size_mm`, `relative_density`), feasible `a=L/N` cell sizes, density bounds, LHS progress, ARD Matérn 5/2 plus noise, `[0,1]^2` normalization, EI, and measured SEA objective.
+- While `optimization_phase=initial_design`, Live GUI labels the card `Latin Hypercube Initial Design`, shows `completed/8` and the next deterministic LHS point, and suppresses candidate ranking, combined score, and active acquisition claims. GP/EI cards become active only after eight accepted measured observations.
+- New LHS payloads plot the actual `cell_size_mm x relative_density` measured, next, and planned coordinates. Older run payloads without stored coordinates retain an empty labeled 2D design space with a missing-coordinate notice and are never backfilled with synthetic positions.
+- Plot and figure interiors use a white publication-style surface with explicit axes, grid, legend, uncertainty, observations, and next-point markers.
+- The BO posterior/EI figure is strictly output-space-only. It renders `Score` against an anonymous normalized search coordinate plus uncertainty, measured scores, EI, and the next query; it must not expose `cell_size_mm`, `relative_density`, any input value, strata/facet labels, parameter slices, or input tooltips. Those details remain in the separate LHS card and backend audit data.
+- An LHS step emits `lhs.visualization.updated`; an acquisition step emits `bo.visualization.updated`. Their latest payloads and compact step histories are stored independently.
+- The default BO plot is the scalar score posterior/EI view, not a numeric parameter slice. `Candidate pool index` remains an audit view of the finite candidate set, not a continuous GP posterior.
 - Missing, invalid, or stale data renders an explicit waiting/stale card. The frontend never fabricates posterior values.
 - Completed BO execution registers PNG, SVG, and CSV artifacts under the active run's BO artifact directory. PNG/SVG are publication-style Matplotlib outputs; CSV is the exact numeric source.
 
@@ -206,9 +213,9 @@ BO Workspace GUI route:
 - Route: `/bo`
 - API surface: `/api/bo/config`, `/api/bo/benchmark`, and `/api/bo/run`.
 - The workspace has a `Save Settings` control. Saved settings are persisted in `memory/bo_workspace_settings.json` and are reapplied when a new BO GUI window is opened.
-- Saved BO settings include mode, objective, strategy, numeric backend (`lightweight_pool` or `botorch_optional`), acquisition function, budget, seed, exploration/exploitation controls, LLM preference enable/weight, top-k, and parameter-space bounds.
-- Benchmark and BO Agent actions remain virtual optimization controls only; the BO GUI does not directly start printer or robot hardware. `/api/bo/run` shows evidence intake, LLM reasoning audit, candidate ranking, and `next_design_request.v1` handoff.
-- Live GUI BO Agent messages render surrogate/acquisition graphs in a collapsed state by default. The collapsed card shows only strategy/acquisition/budget/latest candidate/recommendation metadata; SVG trace graphs and selected-point rows are created only when the operator clicks `그래프 보기`, and removed again by `그래프 접기`.
+- Saved BO settings include mode, objective, strategy, numeric backend (`botorch` by default or explicit `lightweight_pool` comparison), Latin Hypercube initial-design size, acquisition function, optimizer restarts/raw samples/timeout, budget, seed, LLM preference audit controls, and parameter-space bounds. Legacy `botorch_optional` settings migrate to `botorch`.
+- Benchmark and BO Agent actions remain virtual optimization controls only; the BO GUI does not directly start printer or robot hardware. `/api/bo/run` shows LHS initialization state or, after initialization, evidence intake, LLM reasoning audit, candidate ranking, and `next_design_request.v1` handoff.
+- During acquisition, Live GUI BO Agent messages render surrogate/acquisition graphs in a collapsed state by default. During LHS initialization, the card instead shows deterministic sample progress and does not imply that a GP or acquisition function has selected the point.
 - Live GUI Analysis Agent messages with `fem_artifacts` render the FEM/CAE contour card directly in the agent chat bubble and in report/artifact views. If a saved session or browser audit injects an existing transcript, the transcript hydrates immediately; only new live updates after the surface is initialized use the staged reveal queue.
 - 2026-06-17 rendered GUI verification for the 12번 개선안 path passed on a local test server: Live runtime audit, planning artifact audit, and Module Management audit all passed through Firefox/geckodriver at 1440px-class desktop viewport. The same verification kept DSN/design window layout unchanged.
 

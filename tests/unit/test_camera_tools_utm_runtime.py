@@ -243,6 +243,28 @@ def test_test_utm_specimen_presence_virtualizes_only_when_explicitly_allowed(tmp
     assert result["source"] == "virtual_utm_bridge"
 
 
+def test_test_utm_specimen_presence_prefers_virtual_bridge_when_explicitly_requested(tmp_path: Path) -> None:
+    manager = FakeRuntimeManager(frame=_red_specimen_frame())
+    registry = ToolRegistry()
+    register_camera_tools(registry, utm_runtime_manager=manager)
+
+    result = registry.call(
+        "vision.utm_specimen_presence.capture",
+        {
+            "runtime_mode": "test",
+            "output_dir": str(tmp_path),
+            "allow_virtual_bridge_in_test": True,
+            "prefer_virtual_bridge_in_test": True,
+        },
+    )
+
+    assert manager.raw_frame_calls == 0
+    assert result["ok"] is True
+    assert result["detected"] is True
+    assert result["virtualized"] is True
+    assert result["source"] == "virtual_utm_bridge"
+
+
 def test_test_mode_falls_back_to_virtual_utm_bridge_with_visible_trace() -> None:
     def unavailable_observer(**kwargs: Any) -> dict[str, Any]:
         raise RuntimeError("ROS topic timeout")

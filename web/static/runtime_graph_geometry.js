@@ -21,6 +21,8 @@ Design rule:
   const DEFAULT_PARALLEL_SPACING = 26;
   const DEFAULT_HANDLE_PERCENT = 0.28;
   const DEFAULT_OUTWARD_OFFSET = 8;
+  const DEFAULT_COLLISION_GAP_X = 44;
+  const DEFAULT_COLLISION_GAP_Y = 34;
   const SIDES = ["top", "right", "bottom", "left"];
 
   function number(value, fallback = 0) {
@@ -36,6 +38,8 @@ Design rule:
       parallelSpacing: number(options.parallelSpacing, DEFAULT_PARALLEL_SPACING),
       handlePercent: Math.max(0.12, Math.min(0.45, number(options.handlePercent, DEFAULT_HANDLE_PERCENT))),
       outwardOffset: number(options.outwardOffset, DEFAULT_OUTWARD_OFFSET),
+      collisionGapX: Math.max(0, number(options.collisionGapX, DEFAULT_COLLISION_GAP_X)),
+      collisionGapY: Math.max(0, number(options.collisionGapY, DEFAULT_COLLISION_GAP_Y)),
     };
   }
 
@@ -204,6 +208,145 @@ Design rule:
     return { x: 36 + (index % columns) * 220, y: 36 + Math.floor(index / columns) * 156 };
   }
 
+  function snapUpToGrid(value, grid = 16) {
+    const cleanGrid = Math.max(1, number(grid, 16));
+    return Math.max(0, Math.ceil(number(value, 0) / cleanGrid) * cleanGrid);
+  }
+
+  function snapDownToGrid(value, grid = 16) {
+    const cleanGrid = Math.max(1, number(grid, 16));
+    return Math.max(0, Math.floor(number(value, 0) / cleanGrid) * cleanGrid);
+  }
+
+  function collisionRect(position = {}, options = {}) {
+    const opts = optionsWithDefaults(options);
+    const x = number(position.x, 0);
+    const y = number(position.y, 0);
+    return {
+      left: x,
+      top: y,
+      right: x + opts.nodeWidth + opts.collisionGapX,
+      bottom: y + opts.nodeHeight + opts.collisionGapY,
+    };
+  }
+
+  function rectsCollide(left, right) {
+    return left.left < right.right
+      && left.right > right.left
+      && left.top < right.bottom
+      && left.bottom > right.top;
+  }
+
+  function candidateAxisPositions(origin, placed, axis, span, grid) {
+    const values = new Set([snapToGrid(origin, grid)]);
+    for (const node of placed) {
+      const anchor = number(node.position?.[axis], 0);
+      values.add(snapUpToGrid(anchor + span, grid));
+      if (anchor >= span) values.add(snapDownToGrid(anchor - span, grid));
+    }
+    return Array.from(values);
+  }
+
+  function placementScore(position, origin) {
+    const dx = Math.abs(position.x - origin.x);
+    const dy = Math.abs(position.y - origin.y);
+    const changedAxes = Number(dx > 0) + Number(dy > 0);
+    // Prefer a one-axis correction so the authored graph rows and columns remain recognizable.
+    return dx * dx + dy * dy + Math.max(0, changedAxes - 1) * 1_000_000;
+  }
+
+  function resolveNodeCollisions(graph = {}, options = {}) {
+    const opts = optionsWithDefaults(options);
+    const grid = number(options.grid, 16);
+    const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+    if (nodes.length < 2) return graph;
+    // Graph configs list executable nodes in semantic route order. Resolve later
+    // nodes around earlier anchors so collision cleanup does not reorder the flow.
+    const ordered = [...nodes];
+    const placed = [];
+    const spanX = opts.nodeWidth + opts.collisionGapX;
+    const spanY = opts.nodeHeight + opts.collisionGapY;
+
+    for (const node of ordered) {
+      const origin = {
+        x: number(node.position?.x, 0),
+        y: number(node.position?.y, 0),
+      };
+      const xCandidates = candidateAxisPositions(origin.x, placed, "x", spanX, grid);
+      const yCandidates = candidateAxisPositions(origin.y, placed, "y", spanY, grid);
+      const candidates = [];
+      for (const x of xCandidates) {
+        for (const y of yCandidates) candidates.push({ x, y });
+      }
+      candidates.sort((left, right) => {
+        const scoreDelta = placementScore(left, origin) - placementScore(right, origin);
+        if (scoreDelta) return scoreDelta;
+        const yDelta = Math.abs(left.y - origin.y) - Math.abs(right.y - origin.y);
+        if (yDelta) return yDelta;
+        return Math.abs(left.x - origin.x) - Math.abs(right.x - origin.x);
+      });
+      const available = candidates.find((candidate) => {
+        const rect = collisionRect(candidate, opts);
+        return placed.every((other) => !rectsCollide(rect, collisionRect(other.position, opts)));
+      });
+      node.position = available || {
+        x: snapToGrid(origin.x, grid),
+        y: snapUpToGrid(placed.length * spanY, grid),
+      };
+      placed.push(node);
+    }
+    return graph;
+  }
+
+  function labelRect(label = {}, gap = 0) {
+    const halfGap = Math.max(0, number(gap, 0)) / 2;
+    const halfWidth = Math.max(1, number(label.width, 1)) / 2 + halfGap;
+    const halfHeight = Math.max(1, number(label.height, 1)) / 2 + halfGap;
+    const x = number(label.x, 0);
+    const y = number(label.y, 0);
+    return {
+      left: x - halfWidth,
+      top: y - halfHeight,
+      right: x + halfWidth,
+      bottom: y + halfHeight,
+    };
+  }
+
+  function resolveLabelCollisions(labels = [], options = {}) {
+    const gap = Math.max(0, number(options.gap, 8));
+    const obstacles = Array.isArray(options.obstacles) ? options.obstacles : [];
+    const placedRects = [];
+    return labels.map((label) => {
+      const origin = { x: number(label.x, 0), y: number(label.y, 0) };
+      const stepX = Math.max(24, number(label.width, 1) * 0.42 + gap);
+      const stepY = Math.max(18, number(label.height, 1) + gap);
+      const candidates = [];
+      for (let yLevel = 0; yLevel <= 16; yLevel += 1) {
+        const yOffsets = yLevel === 0 ? [0] : [-yLevel * stepY, yLevel * stepY];
+        for (let xLevel = 0; xLevel <= 4; xLevel += 1) {
+          const xOffsets = xLevel === 0 ? [0] : [-xLevel * stepX, xLevel * stepX];
+          for (const dy of yOffsets) {
+            for (const dx of xOffsets) {
+              candidates.push({ x: origin.x + dx, y: origin.y + dy, distance: dx * dx + dy * dy });
+            }
+          }
+        }
+      }
+      candidates.sort((left, right) => left.distance - right.distance || Math.abs(left.x - origin.x) - Math.abs(right.x - origin.x));
+      const available = candidates.find((candidate) => {
+        const rect = labelRect({ ...label, ...candidate }, gap);
+        if (rect.left < 0 || rect.top < 0) return false;
+        if (Number.isFinite(options.maxX) && rect.right > Number(options.maxX)) return false;
+        if (Number.isFinite(options.maxY) && rect.bottom > Number(options.maxY)) return false;
+        return obstacles.every((obstacle) => !rectsCollide(rect, obstacle))
+          && placedRects.every((placed) => !rectsCollide(rect, placed));
+      }) || origin;
+      const resolved = { ...label, x: available.x, y: available.y };
+      placedRects.push(labelRect(resolved, gap));
+      return resolved;
+    });
+  }
+
   function normalizeNodePositions(graph = {}, options = {}) {
     const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
     const grid = number(options.grid, 16);
@@ -216,7 +359,7 @@ Design rule:
         y: snapToGrid(source.y ?? fallback.y, grid),
       };
     });
-    return graph;
+    return resolveNodeCollisions(graph, { ...options, grid });
   }
 
   global.ATRRuntimeGraphGeometry = {
@@ -228,6 +371,8 @@ Design rule:
     path,
     labelPoint,
     snapToGrid,
+    resolveNodeCollisions,
+    resolveLabelCollisions,
     normalizeNodePositions,
   };
 })(window);

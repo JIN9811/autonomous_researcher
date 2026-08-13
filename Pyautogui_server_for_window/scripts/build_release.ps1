@@ -8,12 +8,13 @@ if (Test-Path $releaseRoot) { Remove-Item $releaseRoot -Recurse -Force }
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
 
-foreach ($directory in @("bridge", "demo", "docs", "examples", "scripts", "tests")) {
+foreach ($directory in @("bridge", "demo", "docs", "examples", "portable", "scripts", "tests")) {
     Copy-Item (Join-Path $projectRoot $directory) (Join-Path $releaseRoot $directory) -Recurse -Force
 }
 foreach ($file in @(
     "README.md",
     "requirements.txt",
+    "requirements-portable.txt",
     "requirements-windows.txt",
     "INSTALL_WINDOWS_BRIDGE.cmd",
     "START_WINDOWS_BRIDGE.cmd",

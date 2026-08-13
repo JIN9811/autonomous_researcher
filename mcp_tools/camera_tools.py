@@ -155,10 +155,17 @@ def _utm_specimen_presence_capture(
 ) -> dict[str, Any]:
     mode = str(payload.get("runtime_mode") or payload.get("mode") or "test").strip().lower()
     allow_virtual = mode == "test" and bool(payload.get("allow_virtual_bridge_in_test", False))
+    prefer_virtual = allow_virtual and bool(payload.get("prefer_virtual_bridge_in_test", False))
     runtime_status: dict[str, Any] = {}
     frame: dict[str, Any] = {}
     frame_attempt_count = 0
-    if utm_runtime_manager is not None:
+    if prefer_virtual:
+        runtime_status = {
+            "ok": True,
+            "status": "virtual_bridge_selected",
+            "observer_mode": "virtual_utm_bridge",
+        }
+    elif utm_runtime_manager is not None:
         runtime_status = dict(
             utm_runtime_manager.start()
             if bool(payload.get("auto_start_runtime", True))

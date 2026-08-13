@@ -85,13 +85,13 @@ Closed-loop position
 
 Core responsibilities
 1. Normalize objective and parameter space.
-2. Lock operator-controlled/test-option parameters, especially cell_size_mm.
+2. Keep exactly two Gyroid BO variables active: cell_size_mm and relative_density; lock unrelated geometry/process settings.
 3. Ingest Analysis bo_handoff / bo_observation / experiment_evaluation before generic priors.
 4. Separate failed priors into failure_model instead of successful BO observations.
 5. Ask the LLM for strict JSON reasoning when llm_preference_enabled=true.
 6. Sanitize LLM JSON into bo_reasoning_v1.
-7. Run experiment.benchmark with random/grid/bo-compatible strategy values.
-8. Build and rank candidate_pool using numeric acquisition + LLM preference - risk/constraint penalties.
+7. Use deterministic Latin Hypercube initial design until the configured observation target is complete.
+8. Fit SingleTaskGP and optimize one acquisition point with optimize_acqf or optimize_acqf_mixed.
 9. Write auditable artifacts.
 10. Emit next_design_request.v1 for Design Agent.
 
@@ -118,22 +118,37 @@ Benchmark backend mapping
 - The actual benchmark strategy is stored in bo_result.benchmark_strategy.
 
 Numeric backend options
+- botorch
+  - Default production backend. Installed through requirements.txt / pyproject default dependencies.
+  - Uses a normalized mixed parameter codec, BoTorch SingleTaskGP, and direct acquisition optimization.
+  - Uses optimize_acqf for continuous spaces and optimize_acqf_mixed for enumerated discrete choices.
+  - Uses Latin Hypercube initial design before enough accepted observations exist.
+  - A fit/import/optimizer failure is typed and blocks that BO result; it never silently changes the requested backend.
 - lightweight_pool
-  - Default. No heavy dependency.
+  - Explicit comparison/debug backend only.
   - Uses deterministic candidate-pool proxy mean, uncertainty, and acquisition formulas.
 - botorch_optional
-  - Default dependency. Installed through requirements.txt / pyproject default dependencies.
-  - Uses BoTorch SingleTaskGP posterior scoring over the existing candidate pool.
-  - Keeps categorical/boolean/fixed manufacturing variables inside the repository candidate-pool and validator contract.
-  - Does not run unconstrained continuous optimize_acqf by default.
-  - If torch/botorch/gpytorch import fails, data is insufficient, or GP fitting fails, it falls back to lightweight_pool and records backend_warnings.
+  - Legacy saved-setting alias only. It is normalized to botorch before execution.
+
+Initial design and optimizer defaults
+- initial_sampler: latin_hypercube
+- initial_design_size: 8 valid measured observations for the canonical two-variable Gyroid problem
+- The standard 20-cycle mission allocates cycles 1-8 to Latin Hypercube
+  initialization and cycles 9-20 to SingleTaskGP + Expected Improvement when
+  every observation is accepted. Rejected, infeasible, proxy-only, or
+  missing-SEA records do not advance the eight-observation initialization count.
+- acquisition: expected_improvement, implemented with LogExpectedImprovement
+- num_restarts: 12
+- raw_samples: 256
+- optimizer_timeout_s: 30
+- A closed-loop BO Agent call emits exactly one next point. A BO Workspace benchmark may evaluate its requested synthetic budget.
 
 Backend result fields
 - bo_result.bo_backend: requested numeric backend from operator/API.
 - bo_result.benchmark.bo_backend_requested: requested backend passed to experiment.benchmark.
-- bo_result.benchmark.backend_warnings: global backend fallback warnings.
+- bo_result.benchmark.backend_warnings: backend diagnostics; never evidence of a silent backend downgrade.
 - bo_result.benchmark.strategies.bo.backend_requested: requested backend for bo strategy.
-- bo_result.benchmark.strategies.bo.backend_active: actual backend used for at least one BO step, usually lightweight_pool or botorch_optional.
+- bo_result.benchmark.strategies.bo.backend_active: lhs during initial design, botorch after GP fitting, or lightweight_pool only when explicitly requested.
 - bo_result.benchmark.strategies.bo.surrogate_trace[*].backend_active: backend used for that specific step.
 
 Supported acquisition values
@@ -147,21 +162,21 @@ Supported acquisition values
 Default parameter space
 - geometry_type: ["gyroid"]
 - relative_density: [0.20, 0.48]
-- wall_thickness_mm: [1.2, 2.0]
-- cell_size_mm: [5.0, 10.0]
-- tpms_thickness: [0.28, 0.52]
-- orientation_deg: [0, 15, 30, 45, 60, 90]
-- anisotropy_ratio: [0.85, 1.0, 1.25]
-- skin_thickness_mm: [0.0, 0.8]
+- cell_size_mm: [5.0, 6.0, 7.5, 10.0], derived from a=L/N with L=30 mm and N={6,5,4,3}
+- wall_thickness_mm: [1.2]
+- tpms_thickness: [0.0], solved by the TPMS generator to realize relative_density
+- orientation_deg: [0.0]
+- anisotropy_ratio: [1.0]
+- skin_thickness_mm: [0.8]
 - bottom_cap_enabled: [true]
 - top_cap_enabled: [false]
 - skirt_enabled: [false]
 
 Loop-stable parameters
-- cell_size_mm is operator/test-option controlled.
-- If current_experiment_spec.cell_size_mm or current_experiment_spec.constraints.cell_size_mm exists, BO must lock benchmark and recommendation to that value.
-- BO may recommend relative_density, wall_thickness_mm, tpms_thickness, orientation_deg, anisotropy_ratio, cap flags, skirt flags, and preferred geometry.
-- BO must not silently change saved/test-selected cell size between cycles.
+- cell_size_mm and relative_density are the only active BO variables in the canonical Gyroid problem.
+- cell_size_mm must remain in the feasible discrete set derived from a=L/N; it is not treated as a static test-option lock during a multi-cycle BO run.
+- geometry_type, specimen envelope, orientation_deg, anisotropy_ratio, cap flags, skirt flag, and process settings remain fixed unless a different approved parameter-space contract is loaded.
+- The first design in a multi-cycle test workflow is seeded from the same deterministic eight-point LHS sequence used by BO Agent. Orchestrator publishes that point in `orchestrator_design_contract.v1` before Design Agent runs; later BO requests are republished through the same Orchestrator contract and consume the next unobserved point until the initial-design target is complete.
 - For gyroid TPMS, relative_density < 0.20 is invalid for FDM continuous-shell generation.
 
 Input evidence priority
@@ -353,7 +368,10 @@ Mode behavior
   - BO Agent itself still evaluates virtually unless a future explicit live experiment API is added.
   - Physical execution remains downstream through Design, Specimen Making, Vision, Manipulation, Equipment, Analysis, Guardian.
 - Live GUI:
-  - BO chat card displays strategy, acquisition, prior counts, recommendation, reasoning summary, and candidate ranking.
+  - During initial design, the BO chat/report cards display Latin Hypercube progress, next point, backend=lhs, and selected parameters.
+  - During initial design, candidate ranking, combined score, acquisition score, and LLM preference reranking are disabled.
+  - After eight accepted measured observations, the cards switch to GP posterior, acquisition, reasoning audit, recommendation, and candidate ranking.
+  - The posterior/EI figure is output-only: render scalar score, predictive uncertainty, measured scores, EI, and an anonymous normalized search coordinate. Never render cell_size_mm, relative_density, input values, parameter strata, parameter slices, or parameter tooltips in that figure. Input-space coordinates remain in the separate Design Agent LHS card and backend audit records.
   - Heavy surrogate plots remain collapsible to avoid DOM/memory growth.
 
 BO Workspace GUI requirements
@@ -411,14 +429,14 @@ Design Agent consumption rule
 - Design Agent may read run_metadata["bo_recommended_constraints"] or run_metadata["next_design_request"].
 - It must run its own manufacturability and schema validation again.
 - BO recommendation is a next experiment candidate, not fabrication approval.
-- cell_size_mm must remain operator/test-option authoritative.
+- Design Agent must preserve both BO-proposed cell_size_mm and relative_density after schema and manufacturability validation.
 
 Validation requirements
 - Unit tests:
   - BO Agent returns valid bo_result.
   - normalize_settings fallback works.
   - MBO without priors degrades safely.
-  - cell_size lock is preserved.
+  - both active variables are released from static closed-loop constraints and preserved from BO handoff.
   - prior/current specimen is penalized to avoid repeat recommendations.
   - bo_result emits reasoning, candidate ranking, next_design_request, and artifacts.
   - LLM preference regions affect ranking as a soft score.
@@ -435,5 +453,5 @@ Failure behavior
 - Missing prior evaluations in MBO degrades to BO with warning.
 - Non-JSON or failed LLM reasoning uses deterministic fallback and records a warning.
 - Invalid/failure-prone LLM preference regions only add risk/penalty; they do not force a candidate.
-- botorch_optional import/fit failure falls back to lightweight_pool and records backend_warnings.
+- BoTorch dependency, fit, or acquisition failure returns a BOTORCH_* failure and does not run lightweight_pool.
 - If no valid recommendation exists, next_design_request.status becomes blocked.

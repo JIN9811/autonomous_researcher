@@ -15,6 +15,22 @@ from app.main import app, controller, _package_runtime_event
 TINY_PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"atr-test-screen-evidence"
 
 
+def test_completed_test_run_keeps_its_final_live_gui_snapshot() -> None:
+    client = TestClient(app)
+
+    script_response = client.get("/static/planning.js")
+
+    assert script_response.status_code == 200
+    script = script_response.text
+    assert "function shouldFreezeCompletedTestRun" in script
+    assert 'String(cycleContract.mode || missionContract.mode || "").toLowerCase() === "test"' in script
+    assert 'String(state.stage || "").toLowerCase() === "complete"' in script
+    assert "completedCycles >= totalCycles" in script
+    assert "background && shouldFreezeCompletedTestRun(liveLastSession)" in script
+    assert "!shouldFreezeCompletedTestRun(liveLastSession)" in script
+    assert "sameCompletedRunEvent" in script
+
+
 def test_common_equipment_profiles_expose_token_safe_utm_profile() -> None:
     client = TestClient(app)
 
@@ -224,7 +240,7 @@ def test_live_gui_runtime_shell_contains_operational_panels() -> None:
     assert "/static/styles.css?v=20260527-live-focus" in html
     assert "/static/planning.js?v=20260613-clean-stl-render-1" in html
     assert 'href="/static/styles.css?v=20260720-manipulation-grounded-1&knowledge-activity-1"' in html
-    assert 'src="/static/planning.js?v=20260722-utm-raw-single-source-1&knowledge-activity-1&knowledge-relations-1"' in html
+    assert 'src="/static/planning.js?v=20260813-test-complete-freeze-1"' in html
     assert "Runtime Chat" in html
     assert "Safe Stop" in html
     assert "Pause Run" in html
@@ -3572,7 +3588,7 @@ def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundle
 
     assert '/static/styles.css?v=20260720-manipulation-grounded-1' in html
     assert '/static/omx_telemetry_viewer.bundle.js?v=20260720-manipulation-grounded-1' in html
-    assert '/static/planning.js?v=20260722-utm-raw-single-source-1' in html
+    assert '/static/planning.js?v=20260813-test-complete-freeze-1' in html
     assert bundle_response.status_code == 200
     bundle = bundle_response.text
     for required in [
@@ -3752,7 +3768,7 @@ def test_live_robot_pose_has_repeatable_zoom_to_fit_control() -> None:
     assert ".ar-man-pose-fit" in styles
     assert '/static/styles.css?v=20260720-manipulation-grounded-1' in html
     assert '/static/omx_telemetry_viewer.bundle.js?v=20260720-manipulation-grounded-1' in html
-    assert '/static/planning.js?v=20260722-utm-raw-single-source-1' in html
+    assert '/static/planning.js?v=20260813-test-complete-freeze-1' in html
 
 
 def test_live_gui_serves_repository_omx_model_assets() -> None:

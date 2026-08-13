@@ -256,6 +256,8 @@ class VisionAgent(BaseAgent):
         """Test-mode installed/physical printer paths must use real camera tools."""
         if state.mode != Mode.TEST or not isinstance(state.run_metadata, dict):
             return False
+        if cls._virtual_printer_tail_requested(state):
+            return False
         specimen = cls._specimen_result(state)
         report = cls._fabrication_report(state, specimen)
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
@@ -293,8 +295,21 @@ class VisionAgent(BaseAgent):
             )
         )
 
+    @staticmethod
+    def _virtual_printer_tail_requested(state: OrchestratorState) -> bool:
+        """Keep an explicit Live GUI virtual-printer handoff off physical cameras."""
+        spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        virtual_paths = {"virtual", "virtual_bridge", "virtual_printer", "virtual_bambu_bridge"}
+        for key in ("printer_test_path", "test_printer_path", "printer_bridge_mode", "printer_test_mode"):
+            value = str(spec.get(key) or "").strip().lower().replace("-", "_").replace(" ", "_")
+            if value in virtual_paths:
+                return True
+        return str(spec.get("test_printer_transport") or "").strip().lower() == "virtual"
+
     @classmethod
     def _camera_runtime_mode(cls, state: OrchestratorState) -> str:
+        if cls._virtual_printer_tail_requested(state):
+            return "test"
         return "live" if state.mode == Mode.LIVE or cls._physical_printer_tail_requested(state) else state.mode.value
 
     @staticmethod
@@ -822,6 +837,30 @@ class VisionAgent(BaseAgent):
                 "failure_code": "UTM_ROLLOUT_SESSION_MISSING",
                 "message": "Verified UTM completion did not include the active rollout session id.",
             }
+        if VisionAgent._virtual_printer_tail_requested(state):
+            response = {
+                "ok": True,
+                "tool": tool_name,
+                "status": "STOPPED",
+                "session_id": session_id,
+                "virtual_bridge_simulation": True,
+                "message": "Virtual rollout completion acknowledged after UTM evidence verification.",
+            }
+            for key in ("manipulation_result", "robot_task_result"):
+                current = metadata.get(key)
+                if not isinstance(current, dict):
+                    continue
+                updated = dict(current)
+                updated["handoff_status"] = "ready_for_equipment"
+                updated["completion_status"] = "verified_complete"
+                updated["rollout_stop"] = dict(response)
+                if key == "manipulation_result":
+                    updated["status"] = "STOPPED"
+                    updated["stop_confirmed"] = True
+                else:
+                    updated["status"] = "ready"
+                metadata[key] = updated
+            return response
         stop_payload = {
             "mode": state.mode.value,
             "runtime_mode": str(manipulation.get("runtime_mode") or manipulation.get("mode") or state.mode.value),
@@ -2475,6 +2514,10 @@ class VisionAgent(BaseAgent):
             else:
                 output_dir = self._artifact_dir(state, frame_id) / "utm_completion"
                 physical_camera_runtime = self._camera_runtime_mode(state) == "live"
+                virtual_test_bridge = bool(
+                    self._camera_runtime_mode(state) == "test"
+                    and not self._physical_printer_tail_requested(state)
+                )
                 tool_payload = {
                     "mode": self._camera_runtime_mode(state),
                     "runtime_mode": self._camera_runtime_mode(state),
@@ -2486,9 +2529,8 @@ class VisionAgent(BaseAgent):
                     "auto_start_runtime": not bool(utm_runtime_status.get("ok")),
                     "frame_attempts": 3 if physical_camera_runtime else 1,
                     "frame_retry_delay_sec": 0.2 if physical_camera_runtime else 0.0,
-                    "allow_virtual_bridge_in_test": bool(
-                        state.mode == Mode.TEST and not self._physical_printer_tail_requested(state)
-                    ),
+                    "allow_virtual_bridge_in_test": virtual_test_bridge,
+                    "prefer_virtual_bridge_in_test": virtual_test_bridge,
                     "min_area_px": self._as_float(
                         (state.current_experiment_spec or {}).get("utm_specimen_min_area_px")
                         if isinstance(state.current_experiment_spec, dict)

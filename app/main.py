@@ -86,12 +86,15 @@ from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
 from device_bridges.prusa_bridge import PrusaBridgeConfig, PrinterAgenticWorkflow
 from device_bridges.specimen_pose_tracker import SpecimenPoseTrackerBridge, get_specimen_pose_tracker_bridge
 from device_bridges.utm_runtime_bridge import UTMRuntimeProcessManager, get_utm_runtime_manager
+from experiments.bo_visualization import rebuild_legacy_continuous_objective_trace, validate_bo_visualization
+from experiments.lhs_design_visualization import validate_lhs_design_visualization
 from device_bridges.windows_pyautogui_bridge import (
     WindowsPyAutoGUIBridge,
     WindowsPyAutoGUIBridgeConfig,
     discover_windows_pyautogui_bridges,
 )
 from orchestrator.state import Mode, OrchestratorState, Stage
+from orchestrator.runtime_defaults import TEST_MODE_LOOP_CYCLES
 from objectives.authoring import objective_authoring_manifest
 from objectives.compiler import ObjectiveCompileError
 from objectives.service import ObjectiveConflict, ObjectiveNotFound, ObjectiveService
@@ -146,6 +149,7 @@ _LOCAL_PYAUTOGUI_BRIDGE_SUPERVISOR: LocalPyAutoGUIBridgeSupervisor | None = None
 _KNOWLEDGE_RECONCILIATION_SERVICE: KnowledgeReconciliationService | None = None
 _KNOWLEDGE_RECONCILIATION_WORKER: KnowledgeReconciliationWorker | None = None
 _KNOWLEDGE_RECONCILIATION_KNOWLEDGE_SERVICE: KnowledgeService | None = None
+_BO_VISUALIZATION_UPGRADE_CACHE: dict[tuple[str, int, str], dict[str, Any]] = {}
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -654,7 +658,12 @@ class BOAgentRequest(BaseModel):
     llm_preference_enabled: bool = True
     llm_candidate_weight: float | str = "auto"
     top_k: int = 5
-    bo_backend: str = "lightweight_pool"
+    bo_backend: str = "botorch"
+    initial_sampler: str = "latin_hypercube"
+    initial_design_size: int | Literal["auto"] = "auto"
+    num_restarts: int = 12
+    raw_samples: int = 256
+    optimizer_timeout_s: float = 30.0
     parameter_space: dict[str, object] = Field(default_factory=dict)
     objective: dict[str, object] = Field(default_factory=dict)
     mode: Literal["test", "live", "virtual", "replay"] = "test"
@@ -2588,7 +2597,7 @@ def _guardian_status_payload(run_id: str | None = None, *, snapshot: dict[str, o
         budget_config.get("max_loops"),
         objective.get("max_loop_count"),
         objective.get("max_loops"),
-        default=5 if str(state.get("mode") or "").lower() == "test" else 1,
+        default=TEST_MODE_LOOP_CYCLES if str(state.get("mode") or "").lower() == "test" else 1,
     )
     expected_print_time = first_number(
         current_spec.get("expected_print_time_min"),
@@ -5622,6 +5631,59 @@ def _artifact_items_for_run(run_id: str) -> tuple[Path, list[dict[str, object]]]
     return run_dir, artifacts
 
 
+def _attach_bo_artifact_urls(visualization: dict[str, Any], run_id: str) -> dict[str, Any]:
+    """Attach the current step's server-rendered Matplotlib artifacts."""
+    if not visualization or not run_id:
+        return visualization
+    step = int(visualization.get("step") or 0)
+    suffixes = {
+        ".png": "png_url",
+        ".svg": "svg_url",
+        ".csv": "csv_url",
+    }
+    expected = f"_bo_step_{step:03d}_posterior"
+    try:
+        _, items = _artifact_items_for_run(run_id)
+    except (HTTPException, OSError, ValueError):
+        return visualization
+    matched: dict[str, str] = {}
+    for item in reversed(items):
+        path = str(item.get("path") or "")
+        path_suffix = Path(path).suffix.lower()
+        key = suffixes.get(path_suffix)
+        if key and expected in Path(path).stem and key not in matched:
+            matched[key] = str(item.get("url") or "")
+    if not matched:
+        return visualization
+    enriched = dict(visualization)
+    enriched["artifacts"] = {**dict(visualization.get("artifacts") or {}), **matched}
+    return enriched
+
+
+def _attach_lhs_artifact_urls(visualization: dict[str, Any], run_id: str) -> dict[str, Any]:
+    """Attach the current LHS step's dedicated publication artifacts."""
+    if not visualization or not run_id:
+        return visualization
+    step = int(visualization.get("step") or 0)
+    suffixes = {".png": "png_url", ".svg": "svg_url", ".csv": "csv_url", ".json": "json_url"}
+    expected = f"_lhs_design_step_{step:03d}"
+    try:
+        _, items = _artifact_items_for_run(run_id)
+    except (HTTPException, OSError, ValueError):
+        return visualization
+    matched: dict[str, str] = {}
+    for item in reversed(items):
+        path = str(item.get("path") or "")
+        key = suffixes.get(Path(path).suffix.lower())
+        if key and expected in Path(path).stem and key not in matched:
+            matched[key] = str(item.get("url") or "")
+    if not matched:
+        return visualization
+    enriched = dict(visualization)
+    enriched["artifacts"] = {**dict(visualization.get("artifacts") or {}), **matched}
+    return enriched
+
+
 def _parse_artifact_id(artifact_id: str, run_id: str | None = None) -> tuple[str, str]:
     """Decode a package-compatibility artifact id into run id and artifact path."""
     raw = unquote(str(artifact_id or "").strip())
@@ -7400,6 +7462,17 @@ async def get_objective_authoring_contract() -> dict[str, object]:
     return {"ok": True, **objective_authoring_manifest()}
 
 
+@app.get("/api/objectives/presets")
+async def get_objective_presets() -> dict[str, object]:
+    """Return optional objective drafts without persisting or activating them."""
+    service = _objective_service()
+    return {
+        "ok": True,
+        "registry_version": service.registry.version_id,
+        "presets": [item.model_dump(mode="json") for item in service.list_presets()],
+    }
+
+
 @app.get("/api/objectives/metrics/{metric_id}")
 async def get_objective_metric(metric_id: str) -> dict[str, object]:
     try:
@@ -7531,13 +7604,77 @@ async def get_bo_config() -> dict[str, object]:
     state = snapshot.get("state", {}) if isinstance(snapshot.get("state"), dict) else {}
     metadata = state.get("run_metadata", {}) if isinstance(state.get("run_metadata"), dict) else {}
     saved = _read_workspace_settings(BO_WORKSPACE_SETTINGS_PATH)
+    recent_lhs_visualization = metadata.get("lhs_visualization", {})
+    try:
+        validate_lhs_design_visualization(recent_lhs_visualization)
+    except (TypeError, ValueError):
+        recent_lhs_visualization = {}
+    recent_visualization = metadata.get("bo_visualization", {})
+    try:
+        validate_bo_visualization(recent_visualization)
+    except (TypeError, ValueError):
+        recent_visualization = {}
+        run_dir_value = (snapshot.get("logs") or {}).get("run_dir") if isinstance(snapshot.get("logs"), dict) else ""
+        result_dir = Path(str(run_dir_value)) / "runtime" / "bo" if run_dir_value else None
+        if result_dir and result_dir.is_dir():
+            result_paths = sorted(result_dir.glob("*_bo_agent_result.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+            for result_path in result_paths[:20]:
+                try:
+                    result_payload = json.loads(result_path.read_text(encoding="utf-8"))
+                    bo_result = result_payload.get("bo_result", result_payload) if isinstance(result_payload, dict) else {}
+                    candidate = bo_result.get("visualization", {}) if isinstance(bo_result, dict) else {}
+                    validate_bo_visualization(candidate)
+                    if state.get("run_id") and candidate.get("run_id") != state.get("run_id"):
+                        continue
+                    recent_visualization = candidate
+                    break
+                except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                    continue
+    visualization = dict(recent_visualization) if isinstance(recent_visualization, dict) else {}
+    objective_trace = visualization.get("objective_trace") if isinstance(visualization.get("objective_trace"), dict) else {}
+    backend = visualization.get("backend") if isinstance(visualization.get("backend"), dict) else {}
+    bo_agent = metadata.get("bo_agent") if isinstance(metadata.get("bo_agent"), dict) else {}
+    parameter_space = bo_agent.get("parameter_space") if isinstance(bo_agent.get("parameter_space"), dict) else {}
+    if (
+        visualization
+        and backend.get("active") == "botorch"
+        and objective_trace.get("path_mode") != "continuous_2d_gp_path"
+        and parameter_space
+    ):
+        cache_key = (
+            str(visualization.get("run_id") or state.get("run_id") or ""),
+            int(visualization.get("step") or 0),
+            str(visualization.get("generated_at") or ""),
+        )
+        upgraded = _BO_VISUALIZATION_UPGRADE_CACHE.get(cache_key)
+        if upgraded is None:
+            bo_metadata = bo_agent.get("metadata") if isinstance(bo_agent.get("metadata"), dict) else {}
+            try:
+                upgraded = rebuild_legacy_continuous_objective_trace(
+                    visualization,
+                    parameter_space=parameter_space,
+                    random_seed=int(bo_metadata.get("random_seed") or 7),
+                )
+            except (RuntimeError, TypeError, ValueError):
+                upgraded = visualization
+            _BO_VISUALIZATION_UPGRADE_CACHE[cache_key] = upgraded
+            while len(_BO_VISUALIZATION_UPGRADE_CACHE) > 16:
+                _BO_VISUALIZATION_UPGRADE_CACHE.pop(next(iter(_BO_VISUALIZATION_UPGRADE_CACHE)))
+        visualization = dict(upgraded)
+    visualization_run_id = str(state.get("run_id") or visualization.get("run_id") or "")
+    recent_visualization = _attach_bo_artifact_urls(visualization, visualization_run_id)
+    lhs_visualization = dict(recent_lhs_visualization) if isinstance(recent_lhs_visualization, dict) else {}
+    lhs_run_id = str(state.get("run_id") or lhs_visualization.get("run_id") or "")
+    recent_lhs_visualization = _attach_lhs_artifact_urls(lhs_visualization, lhs_run_id)
     return {
         "ok": True,
         "defaults": BOAgent.defaults(),
         "saved": saved,
         "settings_path": str(BO_WORKSPACE_SETTINGS_PATH),
         "recent": metadata.get("bo_agent", {}),
-        "recent_visualization": metadata.get("bo_visualization", {}),
+        "recent_lhs_visualization": recent_lhs_visualization,
+        "lhs_visualization_steps": metadata.get("lhs_visualization_steps", []),
+        "recent_visualization": recent_visualization,
         "visualization_steps": metadata.get("bo_visualization_steps", []),
         "state": state,
     }
@@ -7587,6 +7724,11 @@ async def post_bo_benchmark(req: BOAgentRequest) -> dict[str, object]:
             "exploration_weight": settings["exploration_weight"],
             "exploitation_weight": settings["exploitation_weight"],
             "bo_backend": settings["bo_backend"],
+            "initial_sampler": settings["initial_sampler"],
+            "initial_design_size": settings["initial_design_size"],
+            "num_restarts": settings["num_restarts"],
+            "raw_samples": settings["raw_samples"],
+            "optimizer_timeout_s": settings["optimizer_timeout_s"],
             "prior_evaluations": BOAgent._prior_evaluations_from_state(controller._state),
             "request": {
                 "run_id": controller.snapshot()["state"]["run_id"],
@@ -7610,6 +7752,8 @@ async def post_bo_benchmark(req: BOAgentRequest) -> dict[str, object]:
         if not isinstance(strategy_payload, dict):
             continue
         for trace_item in strategy_payload.get("surrogate_trace", []):
+            if isinstance(trace_item, dict) and isinstance(trace_item.get("lhs_visualization"), dict):
+                await controller.emit_lhs_visualization(trace_item["lhs_visualization"], source="bo_workspace_benchmark")
             if isinstance(trace_item, dict) and isinstance(trace_item.get("visualization"), dict):
                 await controller.emit_bo_visualization(trace_item["visualization"], source="bo_workspace_benchmark")
     await controller.emit_workspace_result(
@@ -7634,6 +7778,8 @@ async def post_bo_run(req: BOAgentRequest) -> dict[str, object]:
     result = await agent.run_with_settings(state, controller._deps.agent_context, req.model_dump())
     workspace_result = {"ok": bool(result.success), "summary": result.summary, "data": result.data}
     bo_result = result.data.get("bo_result") if isinstance(result.data.get("bo_result"), dict) else {}
+    if isinstance(bo_result.get("lhs_visualization"), dict) and bo_result["lhs_visualization"]:
+        await controller.emit_lhs_visualization(bo_result["lhs_visualization"], source="bo_workspace_agent")
     if isinstance(bo_result.get("visualization"), dict) and bo_result["visualization"]:
         await controller.emit_bo_visualization(bo_result["visualization"], source="bo_workspace_agent")
     await controller.emit_workspace_result(

@@ -34,6 +34,396 @@ def test_planning_snapshot_preserves_latest_bo_visualization_projection() -> Non
     assert compact["bo_visualization"] == visualization
 
 
+def test_force_bo_visualization_event_republishes_current_step() -> None:
+    controller = load_runtime()
+    visualization = {
+        "schema": "bo_visualization.v1",
+        "run_id": controller._state.run_id,
+        "step": 3,
+        "posterior": {"x": [0.2], "mean": [0.7], "std": [0.1], "lower_95": [0.504], "upper_95": [0.896]},
+        "acquisition": {"x": [0.2], "value": [0.3]},
+        "candidate_index_view": {
+            "x": [1.0],
+            "mean": [0.7],
+            "std": [0.1],
+            "lower_95": [0.504],
+            "upper_95": [0.896],
+            "acquisition": [0.3],
+            "candidate_ids": ["bo-candidate-004"],
+        },
+        "parameter_slices": {},
+        "view": {"selected_parameter": "relative_density"},
+    }
+    controller._state.run_metadata["bo_visualization"] = copy.deepcopy(visualization)
+
+    result = asyncio.run(
+        controller.emit_bo_visualization(
+            visualization,
+            source="planning_langgraph",
+            force_event=True,
+        )
+    )
+
+    assert result["emitted"] is True
+    event = controller.recent_events()[-1]
+    assert event["event_type"] == "bo.visualization.updated"
+    assert event["payload"]["step"] == 3
+    assert event["payload"]["source"] == "planning_langgraph"
+
+
+def test_planning_cycle_contract_is_exposed_to_live_gui() -> None:
+    controller = load_runtime()
+
+    total_cycles = controller._bind_planning_cycle_contract(
+        {
+            "test_mode_llm_generated": True,
+            "printer_test_path": "virtual_bridge",
+        }
+    )
+    compact = controller.planning_snapshot()["state"]["run_metadata"]
+
+    assert total_cycles == 20
+    assert compact["planning_cycle_contract"] == {
+        "schema": "planning_cycle_contract.v1",
+        "mode": "test",
+        "total_cycles": 20,
+        "source": "planning_runtime",
+    }
+    assert compact["safety_budget"]["max_loop_count"] == 20
+
+
+def test_test_mode_json_declares_two_variable_lhs_then_gp_contract() -> None:
+    controller = load_runtime()
+
+    normalized = controller._normalize_test_mode_constraints(
+        controller._default_test_constraints({}),
+        {"cell_size_mm": 10.0, "relative_density": 0.35},
+    )
+
+    optimization = normalized["design_optimization"]
+    assert optimization["schema"] == "design_optimization_contract.v1"
+    assert optimization["objective"] == {
+        "metric": "specific_energy_absorption_J_per_g",
+        "direction": "maximize",
+        "unit": "J/g",
+    }
+    assert optimization["active_variables"]["cell_size_mm"]["feasible_values"] == [5.0, 6.0, 7.5, 10.0]
+    assert optimization["active_variables"]["relative_density"]["bounds"] == [0.20, 0.48]
+    assert optimization["initial_design"] == {
+        "sampler": "latin_hypercube",
+        "size": 8,
+        "seed": 7,
+    }
+    assert optimization["surrogate"]["kernel"] == "ard_matern_5_2_plus_noise"
+    assert optimization["acquisition"] == "expected_improvement"
+
+
+def test_test_mode_preserves_requested_lhs_count_in_design_contract() -> None:
+    controller = load_runtime()
+    normalized = controller._normalize_test_mode_constraints(
+        controller._default_test_constraints({}),
+        {
+            "design_optimization": {
+                "initial_design": {
+                    "sampler": "latin_hypercube",
+                    "size": 3,
+                    "seed": 11,
+                }
+            }
+        },
+    )
+
+    controller._publish_orchestrator_design_contract(
+        normalized,
+        cycle_index=1,
+        total_cycles=20,
+    )
+    contract = controller._state.run_metadata["orchestrator_design_contract"]
+
+    assert normalized["design_optimization"]["initial_design"]["size"] == 3
+    assert contract["initial_design"]["target"] == 3
+    assert len(contract["initial_design"]["points"]) == 3
+
+
+def test_test_mode_initial_design_is_published_as_orchestrator_json_contract() -> None:
+    controller = load_runtime()
+    constraints = controller._normalize_test_mode_constraints(
+        controller._default_test_constraints({}),
+        {},
+    )
+
+    seeded = controller._seed_initial_bo_design_constraints(constraints, total_cycles=20)
+
+    contract = controller._state.run_metadata["orchestrator_design_contract"]
+    assert contract["schema"] == "orchestrator_design_contract.v1"
+    assert contract["producer_agent"] == "orchestrator_agent"
+    assert contract["consumer_agent"] == "design_agent"
+    assert contract["phase"] == "initial_design"
+    assert contract["cycle_index"] == 1
+    assert contract["total_cycles"] == 20
+    assert contract["source"] == "test_mode_deterministic_lhs"
+    assert contract["requested_parameters"] == {
+        "cell_size_mm": seeded["cell_size_mm"],
+        "relative_density": seeded["relative_density"],
+    }
+    assert contract["initial_design"]["index"] == 1
+    assert contract["initial_design"]["target"] == 8
+    assert len(contract["initial_design"]["points"]) == 8
+    assert contract["initial_design"]["points"][0]["status"] == "next"
+    assert contract["initial_design"]["points"][1]["status"] == "planned"
+    compact = controller.planning_snapshot()["state"]["run_metadata"]
+    assert compact["orchestrator_design_contract"] == contract
+    assert {
+        key: compact["bo_initial_design"]["constraints"][key]
+        for key in ("cell_size_mm", "relative_density")
+    } == contract["requested_parameters"]
+
+
+def test_first_test_loop_lhs_specimen_has_no_generated_surface_caps() -> None:
+    controller = load_runtime()
+    constraints = controller._normalize_test_mode_constraints(
+        controller._default_test_constraints({}),
+        {},
+    )
+    seeded = controller._seed_initial_bo_design_constraints(constraints, total_cycles=20)
+    assert seeded["top_cap_enabled"] is False
+    assert seeded["bottom_cap_enabled"] is False
+    assert seeded["top_bottom_cap"] is False
+    assert seeded["skin_thickness_mm"] == 0.0
+    first_spec = controller._apply_test_cycle_surface_cap_policy(
+        {
+            **seeded,
+            "test_mode_autofill": True,
+            "top_cap_enabled": False,
+            "bottom_cap_enabled": True,
+            "top_bottom_cap": True,
+            "skin_thickness_mm": 0.8,
+            "constraints": {
+                **seeded,
+                "top_cap_enabled": False,
+                "bottom_cap_enabled": True,
+                "top_bottom_cap": True,
+                "skin_thickness_mm": 0.8,
+            },
+        },
+        cycle_index=1,
+    )
+
+    contract = controller._state.run_metadata["orchestrator_design_contract"]
+    assert first_spec["cell_size_mm"] == contract["requested_parameters"]["cell_size_mm"]
+    assert first_spec["relative_density"] == pytest.approx(
+        contract["requested_parameters"]["relative_density"]
+    )
+    assert first_spec["top_cap_enabled"] is False
+    assert first_spec["bottom_cap_enabled"] is False
+    assert first_spec["top_bottom_cap"] is False
+    assert first_spec["skin_thickness_mm"] == 0.0
+    assert first_spec["constraints"]["bottom_cap_enabled"] is False
+    assert first_spec["test_loop_surface_caps_disabled"] is True
+
+
+def test_design_constraints_use_orchestrator_contract_as_authority() -> None:
+    controller = load_runtime()
+    controller._state.run_metadata["bo_recommended_constraints"] = {
+        "cell_size_mm": 10.0,
+        "relative_density": 0.24,
+    }
+    controller._state.run_metadata["orchestrator_design_contract"] = {
+        "schema": "orchestrator_design_contract.v1",
+        "requested_parameters": {
+            "cell_size_mm": 6.0,
+            "relative_density": 0.37,
+        },
+    }
+
+    constraints = controller._design_constraints_for_cycle(
+        {
+            "geometry_type": "gyroid",
+            "cell_size_mm": 7.5,
+            "relative_density": 0.31,
+        }
+    )
+
+    assert constraints["cell_size_mm"] == 6.0
+    assert constraints["relative_density"] == pytest.approx(0.37)
+
+
+def test_next_cycle_contract_republishes_bo_next_design_request() -> None:
+    controller = load_runtime()
+    constraints = controller._normalize_test_mode_constraints(
+        controller._default_test_constraints({}),
+        {},
+    )
+    controller._state.run_metadata["next_design_request"] = {
+        "schema": "next_design_request.v1",
+        "status": "ready",
+        "constraints": {
+            "cell_size_mm": 7.5,
+            "relative_density": 0.413,
+        },
+    }
+    controller._state.run_metadata["bo_agent"] = {
+        "optimization_phase": "initial_design",
+        "initial_design": {
+            "sampler": "latin_hypercube",
+            "completed": 1,
+            "target": 8,
+            "next_index": 2,
+        },
+        "visualization": {
+            "initial_design": {
+                "sampler": "latin_hypercube",
+                "completed": 1,
+                "target": 8,
+                "points": [
+                    {
+                        "index": 1,
+                        "status": "measured",
+                        "parameters": {"cell_size_mm": 5.0, "relative_density": 0.28},
+                    },
+                    {
+                        "index": 2,
+                        "status": "next",
+                        "parameters": {"cell_size_mm": 7.5, "relative_density": 0.413},
+                    },
+                ],
+            }
+        },
+    }
+
+    updated = controller._publish_orchestrator_design_contract(
+        constraints,
+        cycle_index=2,
+        total_cycles=20,
+    )
+
+    contract = controller._state.run_metadata["orchestrator_design_contract"]
+    assert contract["contract_id"].endswith("-c002")
+    assert contract["phase"] == "initial_design"
+    assert contract["source"] == "bo_agent_next_design_request"
+    assert contract["requested_parameters"] == {
+        "cell_size_mm": 7.5,
+        "relative_density": pytest.approx(0.413),
+    }
+    assert contract["initial_design"]["completed"] == 1
+    assert contract["initial_design"]["next_index"] == 2
+    assert contract["initial_design"]["points"][1]["status"] == "next"
+    assert updated["cell_size_mm"] == 7.5
+    assert updated["relative_density"] == pytest.approx(0.413)
+
+
+def test_planning_bo_message_reports_lhs_without_acquisition_scores() -> None:
+    controller = load_runtime()
+    message = controller._format_planning_bo_message(
+        {
+            "bo_result": {
+                "strategy": "bo",
+                "benchmark_strategy": "bo",
+                "optimization_phase": "initial_design",
+                "backend_active": "lhs",
+                "initial_design": {
+                    "sampler": "latin_hypercube",
+                    "completed": 1,
+                    "target": 8,
+                    "next_index": 2,
+                },
+                "prior_summary": {"measured_count": 1, "failed_count": 0},
+                "recommendation": {
+                    "candidate_id": "bo-candidate-002",
+                    "selection_method": "latin_hypercube",
+                    "why_this_candidate": "Latin Hypercube initial design point 2/8.",
+                    "parameters": {"cell_size_mm": 5.0, "relative_density": 0.3436},
+                },
+            }
+        }
+    )
+
+    assert "Latin Hypercube initial design" in message
+    assert "LHS progress: 1/8" in message
+    assert "next LHS point: 2/8" in message
+    assert "acquisition: inactive until LHS 8/8" in message
+    assert "combined_score" not in message
+
+
+def test_planning_bo_result_recovers_latest_nested_visualization() -> None:
+    visualization = {
+        "schema": "bo_visualization.v1",
+        "run_id": "run-existing-bo",
+        "step": 8,
+        "view": {"selected_parameter": "relative_density"},
+    }
+
+    compact = load_runtime()._planning_display_bo_result(
+        {
+            "strategy": "bo",
+            "benchmark": {
+                "strategies": {
+                    "bo": {
+                        "surrogate_trace": [
+                            {"iteration": 7},
+                            {"iteration": 8, "visualization": visualization},
+                        ]
+                    }
+                }
+            },
+        }
+    )
+
+    assert compact["visualization"] == visualization
+
+
+def test_planning_bo_result_preserves_live_dashboard_phase_and_candidate_fields() -> None:
+    compact = load_runtime()._planning_display_bo_result(
+        {
+            "strategy": "bo",
+            "acquisition": "expected_improvement",
+            "optimization_phase": "acquisition",
+            "backend_active": "botorch",
+            "initial_design": {
+                "sampler": "latin_hypercube",
+                "completed": 3,
+                "target": 3,
+                "next_index": 4,
+            },
+            "recommendation": {
+                "candidate_id": "bo-candidate-004",
+                "parameters": {"cell_size_mm": 7.5, "relative_density": 0.36},
+                "combined_score": 0.91,
+                "selection_method": "expected_improvement",
+            },
+            "candidate_ranking": [
+                {
+                    "candidate_id": "bo-candidate-004",
+                    "parameters": {"cell_size_mm": 7.5, "relative_density": 0.36},
+                    "combined_score": 0.91,
+                    "acquisition_score": 0.14,
+                }
+            ],
+            "next_design_request": {
+                "schema": "next_design_request.v1",
+                "status": "ready",
+                "candidate_id": "bo-candidate-004",
+                "constraints": {"cell_size_mm": 7.5, "relative_density": 0.36},
+            },
+        }
+    )
+
+    assert compact["optimization_phase"] == "acquisition"
+    assert compact["backend_active"] == "botorch"
+    assert compact["initial_design"] == {
+        "sampler": "latin_hypercube",
+        "completed": 3,
+        "target": 3,
+        "next_index": 4,
+    }
+    assert compact["recommendation"]["parameters"] == {
+        "cell_size_mm": 7.5,
+        "relative_density": 0.36,
+    }
+    assert compact["candidate_ranking"][0]["acquisition_score"] == pytest.approx(0.14)
+    assert compact["next_design_request"]["constraints"]["relative_density"] == pytest.approx(0.36)
+
+
 def test_live_gui_test_mode_flags_survive_design_adaptation() -> None:
     controller = load_runtime()
     controller._state.mode = Mode.LIVE
@@ -1557,10 +1947,10 @@ async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
         assert constraints["ejection"]["use_ejection_only_project_file"] is False
         assert constraints["ejection"]["source"] == "physical_print_tail"
     assert constraints["top_cap_enabled"] is False
-    assert constraints["bottom_cap_enabled"] is True
-    assert constraints["top_bottom_cap"] is True
+    assert constraints["bottom_cap_enabled"] is False
+    assert constraints["top_bottom_cap"] is False
     assert constraints["require_flat_compression_faces"] is False
-    assert constraints["skin_thickness_mm"] == 0.8
+    assert constraints["skin_thickness_mm"] == 0.0
     assert not controller._state.run_metadata.get("pending_specimen_input")
 
 
@@ -2489,7 +2879,7 @@ async def test_live_gui_planning_tail_agent_messages_keep_cycle_metadata(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_live_gui_test_planning_series_runs_five_design_cycles(
+async def test_live_gui_test_planning_series_runs_twenty_design_cycles(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -2594,13 +2984,16 @@ async def test_live_gui_test_planning_series_runs_five_design_cycles(
     )
 
     assert result["ok"] is True
-    assert controller._state.loop_count == 5
+    assert controller._state.loop_count == 20
     design_messages = [message for message in controller.planning_snapshot()["messages"] if message["role"] == "design_ai"]
-    assert len(design_messages) == 4
+    # Completed loops are compacted in the session transcript; only the recent
+    # expanded Design messages remain even though loop_count is authoritative.
+    assert 1 <= len(design_messages) <= 19
     assert all(message.get("artifact_pair", {}).get("previous") for message in design_messages)
     assert all(message.get("artifact_pair", {}).get("next") for message in design_messages)
     signatures = {
         (
+            message["experiment_spec"].get("cell_size_mm"),
             message["experiment_spec"].get("relative_density"),
             message["experiment_spec"].get("wall_thickness_mm"),
             message["experiment_spec"].get("orientation_deg"),
@@ -2611,10 +3004,10 @@ async def test_live_gui_test_planning_series_runs_five_design_cycles(
     }
     assert len(signatures) > 1
     assert controller._state.run_metadata["bo_agent"]["knowledge_context"]
-    assert controller._state.current_experiment_spec["cell_size_mm"] == spec["cell_size_mm"]
+    assert controller._state.current_experiment_spec["cell_size_mm"] in {5.0, 6.0, 7.5, 10.0}
     assert controller._state.current_experiment_spec["top_bottom_cap"] is False
     assert controller._state.current_experiment_spec["test_loop_surface_caps_disabled"] is True
-    assert "cell_size_mm" not in controller._state.run_metadata["bo_recommended_constraints"]
+    assert controller._state.run_metadata["bo_recommended_constraints"]["cell_size_mm"] in {5.0, 6.0, 7.5, 10.0}
     bo_messages = [message for message in controller.planning_snapshot()["messages"] if message["role"] == "bo_ai"]
     assert bo_messages
     bo_trace = bo_messages[-1]["bo_result"]["benchmark"]["strategies"]["bo"]["surrogate_trace"]
@@ -2622,6 +3015,74 @@ async def test_live_gui_test_planning_series_runs_five_design_cycles(
     assert bo_trace[-1]["selected"]["candidate_id"]
     analysis_messages = [message for message in controller.planning_snapshot()["messages"] if message["role"] == "analysis_ai"]
     assert any(message.get("fem_artifacts", {}).get("contour_url") for message in analysis_messages)
+
+
+def test_design_constraints_for_cycle_preserves_both_bo_active_variables() -> None:
+    controller = load_runtime()
+    controller._state.run_metadata["bo_recommended_constraints"] = {
+        "cell_size_mm": 6.0,
+        "relative_density": 0.37,
+        "wall_thickness_mm": 1.2,
+    }
+
+    constraints = controller._design_constraints_for_cycle(
+        {
+            "geometry_type": "gyroid",
+            "cell_size_mm": 10.0,
+            "relative_density": 0.24,
+        }
+    )
+
+    assert constraints["cell_size_mm"] == 6.0
+    assert constraints["relative_density"] == pytest.approx(0.37)
+
+
+def test_closed_loop_static_constraints_release_both_bo_active_variables() -> None:
+    controller = load_runtime()
+    static = controller._closed_loop_static_design_constraints(
+        {
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+            "cell_size_mm": 10.0,
+            "relative_density": 0.28,
+            "material": "PLA",
+        }
+    )
+
+    assert "cell_size_mm" not in static
+    assert "relative_density" not in static
+    assert static["geometry_type"] == "gyroid"
+    assert static["specimen_size_mm"] == [30, 30, 30]
+    assert static["material"] == "PLA"
+
+
+def test_test_mode_initial_cycle_is_seeded_from_bo_lhs() -> None:
+    controller = load_runtime()
+    constraints = {
+        "geometry_type": "gyroid",
+        "specimen_size_mm": [30, 30, 30],
+        "test_mode_autofill": True,
+        "test_mode_llm_generated": True,
+    }
+
+    seeded = controller._seed_initial_bo_design_constraints(constraints, total_cycles=5)
+
+    assert seeded["cell_size_mm"] in {5.0, 6.0, 7.5, 10.0}
+    assert 0.20 <= seeded["relative_density"] <= 0.48
+    assert controller._state.run_metadata["bo_initial_design"]["index"] == 1
+    assert controller._state.run_metadata["bo_recommended_constraints"]["cell_size_mm"] == seeded["cell_size_mm"]
+
+
+@pytest.mark.parametrize("printer_path", ["virtual_bridge", "installed_printer"])
+def test_test_mode_printer_routes_use_twenty_cycle_bo_budget(printer_path: str) -> None:
+    controller = load_runtime()
+
+    assert controller._planning_cycle_limit(
+        {
+            "test_mode_llm_generated": True,
+            "printer_test_path": printer_path,
+        }
+    ) == 20
 
 
 @pytest.mark.asyncio
