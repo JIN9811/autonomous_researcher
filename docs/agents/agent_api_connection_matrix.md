@@ -28,6 +28,7 @@ last_verified: 2026-08-09
 verified_against: 0b7627b
 related_docs:
   - docs/agents/README.md
+  - docs/runtime/three_level_control_model.md
   - docs/paper/appendix_a_interfaces.md
   - docs/runtime/current_code_snapshot.md
 supersedes: []
@@ -74,6 +75,29 @@ functional families over the imported OpenAPI surface. They do not replace
 | Knowledge | `knowledge` | Accepted artifacts/reports/decisions/provenance | Durable knowledge, patterns, performance, BO/evolution context | BO, Design context, Evolution review | none; persistent local/graph state |
 | BO | `bo` | Analysis handoff, prior trials, constraints, Knowledge context | Numeric acquisition and validated next-candidate recommendation | Guardian and next Design cycle | none; proposal only |
 | Guardian | Safety/control plane | State, risk, failures, device health, approvals, tool records | Continue/review/stop/error safety decision | Orchestrator route translation | no direct action; can block/stop downstream action |
+
+## Three-Level Control Matrix
+
+The levels describe the runtime path of the automatic experiment loop, not
+three separate applications. Guardian safety and Knowledge/evidence cross all
+levels. Device Workspace APIs remain manual surfaces outside automatic stage
+progression.
+
+| Agent | High-Level Control | Middle-Level Control | Low-Level Control |
+|---|---|---|---|
+| Orchestrator | primary owner: mission, dispatch, handoff, cycle, route | intent/mission/context/follow-up/decision compilation | prohibited from direct device execution |
+| Design | governed Design stage and Specimen handoff | constrained candidate generation and authoritative experiment specification | local deterministic computation; no device authority |
+| Specimen Making | fabrication stage and Vision/Manipulation readiness | geometry-to-fabrication digital thread and completion conditions | geometry tools and selected printer provider bridge |
+| Vision | observation stage plus verification sidecars | source/freshness/quality arbitration and verification signals | camera, ROS/UTM, LeRobot camera, verified rollout stop |
+| Manipulation | governed transfer branch and post-place wait | task/policy/rollout supervision and transfer completion | LeRobot/robot/process/port/camera/Isaac boundaries |
+| Lab Equipment | measurement stage after verified placement | profile/skill/protocol execution and evidence handoff | Windows PyAutoGUI and UTM/equipment bridges |
+| Analysis | evaluation stage and Knowledge/BO handoff | parse, normalize, derive metrics/uncertainty/objective | bounded solver/computation bridge |
+| Knowledge | durable context stage before BO | provenance, typed records, patterns, relation review, context | ledger/outbox/ontology/graph adapters |
+| BO | next-candidate stage before Guardian/Design | LHS/GP/acquisition/constraints/recommendation | BoTorch and benchmark computation tools |
+| Guardian | cross-level route authority | policy/risk/evidence/health/approval evaluation | read-only health/queue plus block/stop; hard interlocks remain in bridges |
+
+See [Three-Level Control Model](../runtime/three_level_control_model.md) for
+state ownership, failure propagation, and the manual Device Workspace boundary.
 
 ## Contract Matrix
 

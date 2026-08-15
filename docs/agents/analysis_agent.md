@@ -56,6 +56,19 @@ and CAE APIs.
 | Optionally run validated CAE/CalculiX | Describe simulation as physical measurement |
 | Emit evaluation and BO handoff | Select the next physical experiment itself |
 
+## Three-Level Control Classification
+
+| Level | Analysis responsibility | Authority boundary |
+|---|---|---|
+| High-Level Control | Receives the identified Equipment handoff and returns accepted evaluation evidence to Knowledge/BO | Does not select or start the next physical experiment |
+| Middle-Level Control | Hash and parse input, resolve columns/units, construct canonical curves, compute metrics/objective/uncertainty, run quality gates, compare optional CAE, and emit evaluation contracts | Raw measurement identity and unit/quality gates remain authoritative over narrative interpretation |
+| Low-Level Control | Calls `cae.run_static_analysis` or other registered computation tools where configured | Solver subprocess, CalculiX/Gmsh files, resource limits, cancellation, and computation receipts remain computation-bridge authority; no direct physical actuator is owned |
+
+Solver/process recovery is Low-Level; reparsing or recomputing an evaluation is
+Middle-Level; routing to retry/review/Knowledge/BO/terminal state is
+High-Level. The CAE Workspace is a manual computation surface, not proof that
+the automatic Analysis stage completed.
+
 ## Closed-Loop Position and Handoffs
 
 ![Analysis closed-loop position and handoffs](assets/figures/analysis_01_closed_loop_handoffs.svg)
@@ -216,5 +229,6 @@ solver availability varies.
 - [Equipment](equipment_agent.md)
 - [Knowledge](knowledge_agent.md)
 - [BO](bo_agent.md)
+- [Three-Level Control Model](../runtime/three_level_control_model.md)
 - [Legacy UTM Analysis Guideline](analysis_utm_runtime_guideline.txt)
 - [Legacy CAE Guideline](cae_analysis_runtime_guideline.txt)

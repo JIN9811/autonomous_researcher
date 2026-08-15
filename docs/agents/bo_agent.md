@@ -141,6 +141,19 @@ Analysis/Knowledge/Design handoff state.
 | Select and explain one bounded recommendation | Start Design, printing, robot, or equipment directly |
 | Emit artifacts and Design constraints | Prove optimization benefit without comparison evidence |
 
+## Three-Level Control Classification
+
+| Level | BO responsibility | Authority boundary |
+|---|---|---|
+| High-Level Control | Receives accepted Analysis/Knowledge evidence and emits one governed next-candidate recommendation for Guardian/Orchestrator/Design | A recommendation is neither approval nor a started experiment |
+| Middle-Level Control | Filter compatible priors, maintain LHS/cold-start state, fit/update GP, optimize acquisition, apply constraints/failure penalties, rank candidates, record critique, and package Design constraints | Numeric backend and deterministic validators remain authoritative over LLM preference; measured observations and posterior state must retain provenance |
+| Low-Level Control | Calls `experiment.benchmark` and configured BoTorch/numeric computation services | Tensor/model fitting, acquisition optimization, benchmark execution, and artifact generation are bounded computation effects; no printer, robot, or equipment authority exists |
+
+Numeric backend recovery is Low-Level; rebuilding a valid posterior or
+recommendation is Middle-Level; accepting another cycle or stopping remains
+High-Level through Guardian and Orchestrator. The BO Workspace is manual
+authoring/inspection and does not itself execute the recommended experiment.
+
 ## Closed-Loop Position and Handoffs
 
 ![BO closed-loop position and handoffs](assets/figures/bo_01_closed_loop_handoffs.svg)
@@ -374,5 +387,6 @@ priors, selected backend, constraints, and model configuration.
 - [Analysis](analysis_agent.md)
 - [Knowledge](knowledge_agent.md)
 - [Design](design_agent.md)
+- [Three-Level Control Model](../runtime/three_level_control_model.md)
 - [Legacy BO Guideline](bo_agent_runtime_guideline.txt)
 - [Evaluation and Results](../paper/06_evaluation_and_results.md)

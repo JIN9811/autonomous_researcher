@@ -20,6 +20,7 @@ related_docs:
   - docs/README.md
   - docs/standards/paper_documentation_standard.md
   - docs/runtime/current_code_snapshot.md
+  - docs/runtime/three_level_control_model.md
   - CONTRIBUTING.md
   - SECURITY.md
 supersedes: []
@@ -117,6 +118,41 @@ generalized laboratory safety, or improved scientific outcomes.
 typed agents and sidecars operate behind Guardian, model, and device boundaries;
 artifacts flow to durable evidence and knowledge. Dashed platform paths are
 extension surfaces, not a separate primary thesis.
+
+### Three-Level Control Model
+
+ATR uses three control levels **during the automatic experiment loop**. These
+names describe existing runtime boundaries; they do not introduce a second
+scheduler or a separate device path.
+
+```mermaid
+flowchart LR
+    H[High-Level Control<br/>mission · agent · stage · cycle · route]
+    M[Middle-Level Control<br/>active agent procedure · typed handoff]
+    L[Low-Level Control<br/>registered tool · service · bridge · device]
+    H --> M --> L
+    L -. telemetry / effect evidence .-> M
+    M -. result / handoff .-> H
+    G[Guardian Safety Plane] -. gate · block · review · stop .-> H
+    G -. validate .-> M
+    G -. interlock status .-> L
+    K[Knowledge / Evidence Plane] -. provenance across all levels .-> H
+    W[Device Workspaces<br/>manual control outside automatic loop] -. explicit operator action .-> L
+```
+
+| Level or plane | Runtime responsibility | Main authority |
+|---|---|---|
+| High-Level Control | Select mission, active agent, stage, cycle, retry/review, and terminal route | Orchestrator, LangGraph runtime, controller |
+| Middle-Level Control | Execute the active agent's bounded internal procedure and emit typed results | Agent implementation and module contract |
+| Low-Level Control | Execute and observe one approved bounded action | ToolRegistry/MCP tool, service, queue/lease manager, device or computation bridge |
+| Guardian Safety Plane | Gate all levels and issue continue/review/stop/error decisions | Guardian, approval policy, bridge hard interlocks |
+| Knowledge/Evidence Plane | Preserve intent, decision, command, observation, result, and provenance | events, artifacts, reports, Knowledge ledger/outbox/graph |
+
+Device Workspaces remain explicit manual setup, commissioning, training, and
+control surfaces. Reusing a bridge does not make a workspace action an
+automatic agent handoff. See the
+[Three-Level Control Model](docs/runtime/three_level_control_model.md) and the
+[per-agent classifications](docs/agents/README.md#three-level-control-classification).
 
 The nominal research stages are:
 

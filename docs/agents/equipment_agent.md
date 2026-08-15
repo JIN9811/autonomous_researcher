@@ -56,6 +56,19 @@ bridges, API routes, and hardware/runtime Guides.
 | Capture request, screenshot, protocol and proof evidence | Treat request acceptance as completed measurement |
 | Handoff identifiable artifacts to Analysis | Compute the final scientific objective |
 
+## Three-Level Control Classification
+
+| Level | Lab Equipment responsibility | Authority boundary |
+|---|---|---|
+| High-Level Control | Receives verified placement plus an exact experiment protocol and owns the Equipment stage until an identifiable measurement/proof package is ready for Analysis | Does not choose the scientific objective or advance on request acceptance alone |
+| Middle-Level Control | Resolve profile/skill/version, validate readiness and locators, execute allowlisted segments, collect request/screen/protocol/export evidence, audit completion, and emit the Analysis handoff | LLM output may select or explain an allowlisted action but never becomes unrestricted desktop or shell authority |
+| Low-Level Control | Calls `equipment.pyautogui.health/list_programs/run` and `utm.run_protocol` through registered tools | Token-authenticated Windows worker, PyAutoGUI actions, desktop application state, UTM protocol/device state, file transfer, and stop acknowledgement remain bridge/worker authority |
+
+Worker reconnection, locator resolution, or uncertain desktop/instrument effect
+is Low-Level; bounded segment recovery is Middle-Level; retry/review/stop and
+stage routing are High-Level. The Equipment Workspace is a manual development
+and commissioning surface outside automatic-loop progression.
+
 ## Closed-Loop Position and Handoffs
 
 ![Equipment closed-loop position and handoffs](assets/figures/equipment_01_closed_loop_handoffs.svg)
@@ -217,6 +230,7 @@ ROS, cameras, and workers are optional/environment-specific.
 - [Agent Matrix](agent_api_connection_matrix.md)
 - [Manipulation](manipulation_agent.md)
 - [Analysis](analysis_agent.md)
+- [Three-Level Control Model](../runtime/three_level_control_model.md)
 - [Windows Equipment Guide](../hardware/windows_pyautogui_equipment_agent_guideline.md)
 - [UTM ROS Vision Guide](../hardware/utm_ros_vision_runtime_bridge.md)
 - [Completion Audit](../hardware/evidence/lab_equipment_utm_visual_control_completion_audit.md)

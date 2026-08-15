@@ -56,6 +56,18 @@ tracker routes, and current camera/UTM Guides.
 | Request/perform verified rollout stop | Treat an image alone as scientific measurement |
 | Package visual evidence and uncertainty | Override Guardian or equipment proof contracts |
 
+## Three-Level Control Classification
+
+| Level | Vision responsibility | Authority boundary |
+|---|---|---|
+| High-Level Control | Executes the Vision stage and verification sidecars, then supplies fresh evidence that can permit or block Specimen/Manipulation/Equipment handoffs | Does not choose the overall next cycle and does not mark a physical task complete without the required current observation contract |
+| Middle-Level Control | Select camera/runtime evidence, enforce source identity and freshness, evaluate active-camera ejection and UTM post-place observations, package report/signal/evidence, and request verified rollout stop when its completion contract is met | One detection decision must come from one authoritative raw-frame evaluation path; UI overlays are evidence views, not a second detector |
+| Low-Level Control | Calls `camera.capture`, LeRobot camera/active-camera tools, UTM runtime/capture tools, and bounded rollout status/stop tools | Camera ownership, ports, ROS/process lifecycle, frame capture, and robot-process stop acknowledgement remain bridge/tool authority |
+
+Capture or port recovery is Low-Level; rebuilding a stale/invalid Vision signal
+is Middle-Level; choosing retry, operator placement review, another agent, or a
+terminal route is High-Level. Vision Device Workspace controls remain manual.
+
 ## Closed-Loop Position and Handoffs
 
 ![Vision closed-loop position and handoffs](assets/figures/vision_01_closed_loop_handoffs.svg)
@@ -221,5 +233,6 @@ is environment-dependent.
 - [Specimen](specimen_agent.md)
 - [Manipulation](manipulation_agent.md)
 - [Equipment](equipment_agent.md)
+- [Three-Level Control Model](../runtime/three_level_control_model.md)
 - [Legacy Vision Guideline](vision_pickup_observation_runtime_guideline.txt)
 - [Vision Camera Bridge Guide](../tutorials/device_workspace_vision_camera_bridge_usage.ko.md)

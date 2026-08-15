@@ -54,6 +54,19 @@ primary graph/sidecar handoffs.
 | Score progress and precursor risk | Treat policy confidence as physical proof |
 | Require post-place Vision verification | Self-certify specimen placement |
 
+## Three-Level Control Classification
+
+| Level | Manipulation responsibility | Authority boundary |
+|---|---|---|
+| High-Level Control | Owns the governed transfer branch after fresh Vision readiness and remains active until bounded rollout termination plus required post-place Vision evidence | Does not advance to Equipment while rollout or post-place verification is incomplete |
+| Middle-Level Control | Resolve saved task/policy/profile settings, validate preflight, supervise rollout and motion-state evidence, track grasp/ungrasp/home conditions, request post-place verification, and emit the transfer result | The saved Manipulation Agent configuration is the single policy-path authority unless the current experiment explicitly overrides an allowed field |
+| Low-Level Control | Calls `lerobot.rollout.start/stop/status` and `robot.pick_place` where selected | LeRobot process/PID lifecycle, serial ports, camera leases, robot commands, action timing, and optional Isaac sidecars remain bridge authority |
+
+Port/process recovery is Low-Level; retrying or reconstructing the transfer
+procedure is Middle-Level; choosing another stage, cycle, review, or stop is
+High-Level. Direct rollout in the LeRobot Workspace is manual and does not
+substitute for the automatic agent completion contract.
+
 ## Closed-Loop Position and Handoffs
 
 ![Manipulation closed-loop position and handoffs](assets/figures/manipulation_01_closed_loop_handoffs.svg)
@@ -233,6 +246,7 @@ camera, and Isaac availability vary.
 - [Agent Matrix](agent_api_connection_matrix.md)
 - [Vision](vision_agent.md)
 - [Equipment](equipment_agent.md)
+- [Three-Level Control Model](../runtime/three_level_control_model.md)
 - [Legacy Pi0.5 Transfer Guideline](manipulation_pi05_transfer_runtime_guideline.txt)
 - [LeRobot Runtime Guide](../hardware/lerobot_robotis_manipulation_runtime_guideline.md)
 - [Isaac Mirror Guide](../hardware/isaac_sim_robotis_omx_mirror_mode.md)

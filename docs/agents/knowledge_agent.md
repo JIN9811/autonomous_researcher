@@ -58,6 +58,19 @@ reconciliation service/store, route handlers, and Knowledge operations Guide.
 | Propose relation/evolution changes with evidence | Auto-activate evolution variants |
 | Preserve degraded sync state and retryable outbox | Fabricate a graph receipt or discard failed records |
 
+## Three-Level Control Classification
+
+| Level | Knowledge responsibility | Authority boundary |
+|---|---|---|
+| High-Level Control | Supplies provenance-bounded context to BO, Design, Orchestrator, and Guardian and records accepted cycle outcomes | Does not choose the next physical action and does not auto-activate relation/evolution proposals |
+| Middle-Level Control | Collect accepted reports, validate provenance/schema/ontology, build typed experiment/pattern/performance records, reconcile relations, assemble BO/safety/retrieval context, and emit reviewable evolution evidence | Model synthesis and relation proposals remain bounded advice until validation and required operator decision |
+| Low-Level Control | Uses Knowledge service contracts for ledger, local repositories, durable outbox, ontology, and optional Neo4j/Graphify sync | Storage transaction, retry/dead-letter state, graph query plan, and write receipt remain repository/service authority; no physical actuator is owned |
+
+Graph reconnection or outbox retry is Low-Level; rebuilding a rejected record
+or relation proposal is Middle-Level; deciding whether the loop continues or a
+proposal is reviewed remains High-Level/operator authority. The Knowledge
+Workspace is a manual review/edit surface and every apply remains audited.
+
 ## Closed-Loop Position and Handoffs
 
 ![Knowledge closed-loop position and handoffs](assets/figures/knowledge_01_closed_loop_handoffs.svg)
@@ -244,6 +257,7 @@ LLM proposals remain model-dependent.
 - [Agent Matrix](agent_api_connection_matrix.md)
 - [Analysis](analysis_agent.md)
 - [BO](bo_agent.md)
+- [Three-Level Control Model](../runtime/three_level_control_model.md)
 - [Knowledge Operations](../knowledge/knowledge_graph_operations.ko.md)
 - [Knowledge/Self-Evolution Guideline](knowledge_agent_self_evolution_runtime_guideline.md)
 - [Knowledge/BO Feedback](../paper/03_closed_loop_method.md#knowledge-and-optimization-feedback)

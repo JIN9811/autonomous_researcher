@@ -53,6 +53,18 @@ and transitions in the primary graph, and controller merge/handoff behavior.
 | Select and report one authoritative candidate | Slice, print, move, or test a specimen |
 | Emit a Specimen handoff | Own graph/module authoring APIs |
 
+## Three-Level Control Classification
+
+| Level | Design responsibility | Authority boundary |
+|---|---|---|
+| High-Level Control | Receives the governed Design stage with mission, constraints, prior evidence, and cycle identity; returns one validated Specimen handoff | Does not select the next graph route or start downstream fabrication |
+| Middle-Level Control | Normalize objective/units, collect compatible BO/Knowledge/failure context, construct the design space, generate candidates, enforce/repair constraints, score, select, and emit `experiment_spec` | Deterministic constraints and score ledger remain authoritative over model rationale |
+| Low-Level Control | Uses deterministic in-process design computation and bounded `design_reasoning`; the module declares no tools | Has no printer, robot, camera, desktop, instrument, shell, or solver authority |
+
+Design recovery changes the bounded candidate or experiment specification at
+Middle-Level Control. Retry/review/stop remains High-Level, and physical
+realization begins only after Specimen Making enters its own low-level path.
+
 ## Closed-Loop Position and Handoffs
 
 ![Design closed-loop position and handoffs](assets/figures/design_01_closed_loop_handoffs.svg)
@@ -197,5 +209,6 @@ depends on the selected experiment and implementation.
 - [Agent Matrix](agent_api_connection_matrix.md)
 - [Orchestrator](orchestrator_agent.md)
 - [Specimen Making](specimen_agent.md)
+- [Three-Level Control Model](../runtime/three_level_control_model.md)
 - [Legacy Design/Specimen Guideline](specimen_design_existing_runtime_guideline.txt)
 - [Problem and Contributions](../paper/01_problem_and_contributions.md)

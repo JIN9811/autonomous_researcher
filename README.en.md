@@ -16,6 +16,7 @@ related_docs:
   - docs/README.md
   - docs/standards/documentation_standard.md
   - docs/runtime/current_code_snapshot.md
+  - docs/runtime/three_level_control_model.md
 supersedes: []
 ---
 
@@ -124,6 +125,35 @@ If the server is bound only to `127.0.0.1`, the GUI can load locally but Bambu
 fetch probe and the SPC Readiness transfer gate will fail.
 
 ## 3. Actual Closed Loop
+
+### Three-Level Control During a Run
+
+```mermaid
+flowchart LR
+    H[High-Level Control<br/>mission · agent · stage · cycle · route]
+    M[Middle-Level Control<br/>active agent procedure · typed handoff]
+    L[Low-Level Control<br/>tool · service · bridge · device]
+    H --> M --> L
+    L -. telemetry / evidence .-> M
+    M -. result / handoff .-> H
+    G[Guardian Safety Plane] -. gate all levels .-> M
+    E[Knowledge / Evidence Plane] -. provenance across all levels .-> M
+    W[Device Workspace<br/>manual and outside automatic loop] -. operator action .-> L
+```
+
+- **High-Level Control** selects the mission, active agent, stage, cycle, and
+  route through Orchestrator, LangGraph, and controller state.
+- **Middle-Level Control** is the bounded procedure owned by the active agent.
+- **Low-Level Control** is registered tool, service, bridge, process, and
+  physical/computation execution.
+- Guardian safety and Knowledge/evidence cross all three levels.
+- Device Workspaces reuse low-level services for explicit manual work but are
+  not part of automatic-loop progression.
+
+See [Three-Level Control Model](docs/runtime/three_level_control_model.md) for
+the complete contract and
+[Agent Reference Index](docs/agents/README.md#three-level-control-classification)
+for the per-agent classification.
 
 The default execution graph is [graphs/configs/atr_closed_loop.yaml](graphs/configs/atr_closed_loop.yaml).
 A run starts through `POST /api/run/start` or `POST /api/runtime/start`. The runtime then invokes `LangGraphRunLoop`, reads the current stage, executes the corresponding node, and records events.

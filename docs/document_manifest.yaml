@@ -52,6 +52,7 @@ documents:
   - docs/runtime/runtime_ide.md
   - docs/runtime/langgraph_runtime.md
   - docs/runtime/closed_loop_and_pages_reference.md
+  - docs/runtime/three_level_control_model.md
   - docs/knowledge/knowledge_graph_operations.ko.md
 legacy_scope:
   status: migration_debt

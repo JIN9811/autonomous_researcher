@@ -56,6 +56,19 @@ This Reference does not claim that control presence proves safety effectiveness.
 | Request or require operator approval | Resolve approval on behalf of the operator |
 | Enforce safety budgets and stop authority | Prove generalized laboratory safety |
 
+## Three-Level Control Classification
+
+| Level | Guardian responsibility | Authority boundary |
+|---|---|---|
+| High-Level Control | Cross-level authority that returns continue, review, stop, or error for Orchestrator route translation | May block progression but does not own normal mission planning or silently resume a stopped run |
+| Middle-Level Control | Evaluate stage evidence, policy, risk, failures, approvals, freshness, and safety budget; emit incidents, corrective actions, and decision contracts | Model review is advisory; unknown state never becomes allow through fallback |
+| Low-Level Control | Reads `device.health` and `experiment.queue.status` and can request/block/stop bounded work | Device-specific hard interlocks, emergency behavior, command acknowledgement, and physical stop effectiveness remain bridge/hardware authority |
+
+Guardian spans all three levels but does not collapse them. It may reject a
+High-Level route, invalidate a Middle-Level completion claim, or require fresh
+Low-Level status. It cannot replace hardware interlocks or treat a manual
+Device Workspace action as automatic-loop completion.
+
 ## Closed-Loop Position and Handoffs
 
 ![Guardian closed-loop position and handoffs](assets/figures/guardian_01_closed_loop_handoffs.svg)
@@ -194,6 +207,7 @@ remain external requirements.
 
 - [Agent Matrix](agent_api_connection_matrix.md)
 - [Orchestrator Agent](orchestrator_agent.md)
+- [Three-Level Control Model](../runtime/three_level_control_model.md)
 - [Safety, Ethics, and Limitations](../paper/08_safety_ethics_and_limitations.md)
 - [Guardian Graph-wide Safety](../runtime/guardian_graphwide_safety.md)
 - [Security Policy](../../SECURITY.md)

@@ -58,6 +58,18 @@ domain decisions, and Guardian policy are owned elsewhere.
 | Record ask/retry/continue/stop decisions | Override Guardian or operator safety decisions |
 | Translate Guardian output into a graph route | Treat a chat response as a completed experiment |
 
+## Three-Level Control Classification
+
+| Level | Orchestrator responsibility | Authority boundary |
+|---|---|---|
+| High-Level Control | Primary owner of accepted mission, active stage/agent, cycle identity, handoff, retry/review, terminal state, and Guardian route translation | May dispatch only graph/module-registered handlers and may not convert planning text into execution proof |
+| Middle-Level Control | Normalize intent, detect missing inputs, compile mission/context/handoff contracts, perform read-only checks, record follow-up decisions, and summarize cycle reflection | Produces coordination contracts; domain transformations remain authoritative in their owning agents |
+| Low-Level Control | No direct device role and no direct tools declared by the module | Printer, robot, camera, desktop, instrument, and solver actions must be requested through the selected domain agent and its registered tool/bridge path |
+
+Guardian decisions constrain Orchestrator routing, while Knowledge/evidence
+records preserve the reason for each route. Device Workspace actions are
+manual operations outside Orchestrator's automatic-loop dispatch.
+
 ## Closed-Loop Position and Handoffs
 
 ![Orchestrator closed-loop position and handoffs](assets/figures/orchestrator_01_closed_loop_handoffs.svg)
@@ -233,4 +245,5 @@ is concentrated in the large controller file.
 - [Design Agent](design_agent.md)
 - [Guardian Agent](guardian_agent.md)
 - [LangGraph Runtime](../runtime/langgraph_runtime.md)
+- [Three-Level Control Model](../runtime/three_level_control_model.md)
 - [Closed-Loop Method](../paper/03_closed_loop_method.md)

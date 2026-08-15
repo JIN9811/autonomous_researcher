@@ -19,6 +19,7 @@ related_docs:
   - docs/paper/README.md
   - docs/README.md
   - docs/standards/paper_documentation_standard.md
+  - docs/runtime/three_level_control_model.md
   - REQUIREMENTS.md
   - SECURITY.md
 supersedes: []
@@ -101,6 +102,42 @@ ATR은 도메인 단계, 사이드카, 제어 게이트, 증거 경로, 피드�
 **그림 2.** 연구 의도와 운영자 제어가 오케스트레이터로 들어가고, 타입 기반
 에이전트·Guardian·모델/장비 어댑터를 거쳐 증거와 지식에 연결됩니다.
 점선은 부차적인 플랫폼 확장 경로입니다.
+
+### 3계층 제어 모델
+
+ATR은 **자동 실험 루프가 진행되는 동안** 제어를 세 계층으로 구분합니다.
+이 명칭은 현재 코드에 이미 존재하는 책임 경계를 설명하며 별도 스케줄러나
+새 장비 경로를 추가하는 개념이 아닙니다.
+
+```mermaid
+flowchart LR
+    H[High-Level Control<br/>미션 · 에이전트 · 단계 · 사이클 · 경로]
+    M[Middle-Level Control<br/>에이전트 내부 절차 · 타입 기반 handoff]
+    L[Low-Level Control<br/>등록 tool · service · bridge · device]
+    H --> M --> L
+    L -. telemetry / 동작 증거 .-> M
+    M -. 결과 / handoff .-> H
+    G[Guardian Safety Plane] -. gate · block · review · stop .-> H
+    G -. 검증 .-> M
+    G -. interlock 상태 .-> L
+    K[Knowledge / Evidence Plane] -. 전 계층 provenance .-> H
+    W[Device Workspace<br/>자동 루프 외부 수동 제어] -. 명시적 운영자 동작 .-> L
+```
+
+| 계층 또는 횡단면 | 자동 실험 루프의 책임 | 주 권한 |
+|---|---|---|
+| High-Level Control | 미션, 활성 agent, stage, cycle, retry/review, 종료 경로 선택 | Orchestrator, LangGraph runtime, controller |
+| Middle-Level Control | 활성 agent 내부 절차 수행과 타입 기반 결과·handoff 생성 | agent 구현과 module contract |
+| Low-Level Control | 승인된 단일 동작의 실행과 상태 관측 | ToolRegistry/MCP tool, service, queue/lease manager, device·computation bridge |
+| Guardian Safety Plane | 모든 계층을 검토하고 continue/review/stop/error 결정 | Guardian, approval policy, bridge hard interlock |
+| Knowledge/Evidence Plane | 의도·결정·명령·관측·결과·출처 보존 | event, artifact, report, Knowledge ledger/outbox/graph |
+
+Device Workspace는 수동 설정·점검·학습·직접 제어를 위한 자동 루프 외부
+운영면입니다. 같은 bridge를 사용해도 자동 agent handoff가 수행됐다는 뜻은
+아닙니다. 자세한 정의는
+[3계층 제어 모델](docs/runtime/three_level_control_model.md)과
+[에이전트별 분류](docs/agents/README.md#three-level-control-classification)를
+참조하십시오.
 
 ```text
 design -> specimen -> vision/manipulation -> equipment -> analysis

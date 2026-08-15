@@ -56,6 +56,19 @@ geometry/artifact tools, and hardware Guides.
 | Monitor and package fabrication evidence | Self-certify bed clear or autoejection success |
 | Handoff specimen state to Vision/Manipulation | Move the specimen with a robot |
 
+## Three-Level Control Classification
+
+| Level | Specimen Making responsibility | Authority boundary |
+|---|---|---|
+| High-Level Control | Receives the selected Design contract and owns the fabrication stage until its declared print/ejection/Vision completion conditions support a handoff | Does not advance the graph merely because upload, publish acknowledgement, or an old printer job says `done` |
+| Middle-Level Control | Validate fabrication intent, initialize the digital thread, generate geometry, run mesh/dimensional/manufacturability QA, plan slicing, apply execution gates, monitor the selected job, and package Vision/Manipulation evidence | Must keep source, sliced, patched, published, started, completed, ejected, and Vision-confirmed states distinct |
+| Low-Level Control | Calls geometry/artifact/evaluation tools and `printer.prepare`; printer fleet selection routes to the explicitly selected Bambu or Prusa provider | Slicer invocation, transfer protocol, MQTT/HTTP/FTPS/PrusaLink details, printer state, autoejection motion, and hard interlocks remain bridge/provider authority |
+
+Printer reconnection or uncertain command effect is a Low-Level concern;
+regenerating a failed fabrication artifact is Middle-Level; selecting
+retry/review/stop or another cycle is High-Level. The 3DP Device Workspace is a
+manual surface and does not independently complete this agent stage.
+
 ## Closed-Loop Position and Handoffs
 
 ![Specimen closed-loop position and handoffs](assets/figures/specimen_01_closed_loop_handoffs.svg)
@@ -228,5 +241,6 @@ camera, and provider availability varies by environment.
 - [Design](design_agent.md)
 - [Vision](vision_agent.md)
 - [Manipulation](manipulation_agent.md)
+- [Three-Level Control Model](../runtime/three_level_control_model.md)
 - [Bambu Runtime Guide](../hardware/bambulab_x2d_device_bridge_runtime_guideline.md)
 - [3DP Usage Guide](../tutorials/device_workspace_3dp_usage.ko.md)

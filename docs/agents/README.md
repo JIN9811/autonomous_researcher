@@ -19,6 +19,7 @@ related_docs:
   - docs/paper/02_system_architecture.md
   - docs/paper/appendix_a_interfaces.md
   - docs/runtime/current_code_snapshot.md
+  - docs/runtime/three_level_control_model.md
   - docs/standards/documentation_standard.md
 supersedes: []
 ---
@@ -92,6 +93,33 @@ implementations remain authoritative.
 The [API and Connection Matrix](agent_api_connection_matrix.md) compares all ten
 agents without repeating full implementation prose.
 
+## Three-Level Control Classification
+
+This classification applies only to the **automatic experiment loop**. Device
+Workspaces are manual setup, commissioning, training, and direct-control
+surfaces outside that hierarchy, even when they reuse the same services and
+bridges. The complete contract and diagram are in the
+[Three-Level Control Model](../runtime/three_level_control_model.md).
+
+| Agent | High-Level Control relationship | Middle-Level Control ownership | Low-Level Control boundary |
+|---|---|---|---|
+| Orchestrator | Owns mission, dispatch, handoff, cycle, retry/review, and route translation | Normalizes intent and compiles mission, context, follow-up, decision, and reflection contracts | No direct device tools; delegates bounded work to graph-selected agents |
+| Design | Receives the governed Design stage and emits the Specimen handoff | Normalizes objectives, builds/validates candidate space, scores, selects, and emits the experiment specification | Deterministic local computation and bounded model advice; no device authority |
+| Specimen Making | Converts a selected design into a fabrication result requiring Vision verification | Owns geometry, QA, slicing plan, start/monitor/ejection evidence, and fabrication handoff | Geometry/artifact tools plus the selected printer fleet/provider bridge |
+| Vision | Supplies stage observations and verification sidecars used by High-Level routing | Owns source selection, freshness/quality, active-camera and UTM verification signals | Camera, LeRobot camera, ROS/UTM runtime, and verified rollout-stop tools |
+| Manipulation | Owns the governed physical-transfer branch and waits for post-place Vision evidence | Owns task/policy choice, preflight, rollout supervision, motion-state and completion contracts | LeRobot rollout/process, robot, serial/camera lease, and optional Isaac sidecars |
+| Lab Equipment | Runs after verified placement and hands measurement proof to Analysis | Owns profile/skill/protocol selection, preflight, execution proof, export, and handoff | Windows PyAutoGUI and UTM/equipment bridges |
+| Analysis | Converts identified measurement evidence into an accepted evaluation handoff | Owns parsing, units, curves, metrics, uncertainty, CAE comparison, and objective evaluation | Bounded CAE/CalculiX or computation bridge; no direct physical actuator |
+| Knowledge | Supplies durable evidence and bounded context for BO and later cycles | Owns provenance/schema validation, typed records, patterns, relation review, and context assembly | Ledger, outbox, ontology, and graph repository adapters; no physical actuator |
+| BO | Proposes the next governed candidate after accepted Analysis/Knowledge evidence | Owns prior filtering, LHS/GP/acquisition, constraints, recommendation, and Design handoff | BoTorch/benchmark computation tools; proposal only |
+| Guardian | Cross-level authority for continue, review, stop, or error | Owns risk/evidence/health/approval evaluation and corrective-action records | Read-only health/queue tools and stop/block authority; bridge hard interlocks remain authoritative |
+
+The control direction is `High-Level -> Middle-Level -> Low-Level`; telemetry
+and evidence return upward. Recovery stays with the owner of the failed
+invariant: device reconnection is Low-Level, rebuilding an agent output is
+Middle-Level, and choosing retry/review/another cycle/terminal state is
+High-Level.
+
 ## Closed-Loop Reading Map
 
 ```text
@@ -141,6 +169,10 @@ sidecars, and explicit `complete` and `error` nodes.
 | `operator` API | Supports configuration, review, evidence inspection, or manual invocation |
 | `shared` API | Serves multiple agents, such as run, event, approval, graph, module, or runtime APIs |
 | `physical_possible` | May produce a physical or desktop effect after mode, policy, approval, and bridge gates |
+| High-Level Control | Experiment mission, active agent, stage, cycle, retry/review, and terminal-route control |
+| Middle-Level Control | Bounded internal procedure owned by the active agent |
+| Low-Level Control | Registered tool, service, bridge, process, solver, or physical-device execution |
+| Device Workspace | Explicit manual control surface outside automatic-loop progression |
 
 ## API and Effect Rules
 
