@@ -2153,7 +2153,7 @@ async def local_windows_equipment_console() -> HTMLResponse:
 
 @app.api_route(
     "/equipment/windows/bridge-ui/{resource_path:path}",
-    methods=["GET", "POST"],
+    methods=["GET", "POST", "DELETE"],
     response_class=Response,
 )
 async def proxy_windows_equipment_bridge_ui(resource_path: str, request: Request) -> Response:

@@ -1820,8 +1820,12 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         """Proxy the selected Windows bridge UI without exposing its token to the browser."""
         normalized_method = str(method or "GET").upper()
         normalized_path = str(resource_path or "").strip().lstrip("/")
-        if normalized_method not in {"GET", "POST"}:
-            return self._proxy_ui_failure(405, "PYAUTOGUI_UI_METHOD_NOT_ALLOWED", "Only GET and POST are supported.")
+        if normalized_method not in {"GET", "POST", "DELETE"}:
+            return self._proxy_ui_failure(
+                405,
+                "PYAUTOGUI_UI_METHOD_NOT_ALLOWED",
+                "Only GET, POST, and DELETE are supported.",
+            )
         if ".." in normalized_path.split("/") or "://" in normalized_path or normalized_path.startswith("//"):
             return self._proxy_ui_failure(400, "PYAUTOGUI_UI_INVALID_PATH", "Bridge UI path is invalid.")
 

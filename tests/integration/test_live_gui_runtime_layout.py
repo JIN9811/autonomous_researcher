@@ -182,6 +182,39 @@ def test_windows_equipment_bridge_ui_proxy_offloads_bridge_request(monkeypatch) 
     assert offloaded == ["proxy_ui_request"]
 
 
+def test_windows_equipment_bridge_ui_proxy_forwards_delete(monkeypatch) -> None:
+    forwarded: list[dict[str, object]] = []
+
+    class FakeBridge:
+        def proxy_ui_request(self, **kwargs):
+            forwarded.append(dict(kwargs))
+            return {
+                "ok": True,
+                "status_code": 200,
+                "content_type": "application/json; charset=utf-8",
+                "content": b'{"ok":true,"status":"deleted"}',
+            }
+
+    monkeypatch.setattr("app.main._equipment_bridge", lambda: FakeBridge())
+    client = TestClient(app)
+
+    response = client.delete(
+        "/equipment/windows/bridge-ui/programs/custom-probe?source=atr",
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "status": "deleted"}
+    assert forwarded == [
+        {
+            "method": "DELETE",
+            "resource_path": "programs/custom-probe",
+            "query_string": "source=atr",
+            "body": b"",
+            "content_type": "",
+        }
+    ]
+
+
 def test_common_equipment_profile_test_generates_simulated_analysis_ready_evidence() -> None:
     client = TestClient(app)
 

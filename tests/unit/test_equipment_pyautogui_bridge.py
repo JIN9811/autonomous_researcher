@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 from pathlib import Path
 
 import httpx
@@ -375,6 +376,61 @@ def test_bridge_ui_proxy_injects_saved_token_without_accepting_browser_token(tmp
     assert response["ok"] is True
     assert response["status_code"] == 200
     assert response["content"] == b"<html>bridge</html>"
+
+
+def test_bridge_ui_proxy_forwards_delete_with_saved_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _bridge(tmp_path, mode="live")
+    monkeypatch.setenv("WINDOWS_PYAUTOGUI_BRIDGE_URL", "http://192.168.50.58:8765")
+    monkeypatch.setenv("WINDOWS_PYAUTOGUI_BRIDGE_TOKEN", "server-only-token")
+
+    class _Reply:
+        status_code = 200
+        headers = {"content-type": "application/json; charset=utf-8"}
+        content = b'{"ok":true,"status":"deleted"}'
+
+    class _Client:
+        def __init__(self, timeout: float, follow_redirects: bool) -> None:
+            assert timeout == bridge.config.request_timeout_sec
+            assert follow_redirects is False
+
+        def __enter__(self) -> "_Client":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def request(self, method: str, url: str, headers: dict[str, str], content: bytes) -> _Reply:
+            assert method == "DELETE"
+            assert url == "http://192.168.50.58:8765/programs/custom-probe?source=atr"
+            assert headers["X-Bridge-Token"] == "server-only-token"
+            assert content == b""
+            return _Reply()
+
+    monkeypatch.setattr("device_bridges.windows_pyautogui_bridge.httpx.Client", _Client)
+
+    response = bridge.proxy_ui_request(
+        method="DELETE",
+        resource_path="programs/custom-probe",
+        query_string="source=atr",
+    )
+
+    assert response["ok"] is True
+    assert response["status_code"] == 200
+    assert response["content"] == b'{"ok":true,"status":"deleted"}'
+
+
+def test_bridge_ui_proxy_still_rejects_methods_outside_allowlist(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path, mode="live")
+
+    response = bridge.proxy_ui_request(method="PATCH", resource_path="programs/custom-probe")
+    payload = json.loads(response["content"])
+
+    assert response["status_code"] == 405
+    assert payload["failure_code"] == "PYAUTOGUI_UI_METHOD_NOT_ALLOWED"
+    assert payload["message"] == "Only GET, POST, and DELETE are supported."
 
 
 def test_register_equipment_tools_exposes_pyautogui_tools(tmp_path: Path) -> None:
