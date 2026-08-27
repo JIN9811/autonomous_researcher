@@ -68,6 +68,19 @@ Required for the main GUI/API:
 Optional but commonly used:
 
 - `conda` or Miniconda for LeRobot-specific environments.
+- Mitsubishi PLC diagnostics use the validated Conda environment named `plc`
+  with `pymcprotocol 0.3.0`. The ATR server imports the compatible declared
+  `pymcprotocol` package in-process; it does not launch a Conda process for
+  each PLC poll. A missing package or transport failure is surfaced to the PLC
+  service as a typed error and never selects the virtual transport in Live mode.
+  Verify the non-connecting diagnostic environment with:
+  ```bash
+  conda run -n plc python -c 'import importlib.metadata as m, pymcprotocol; print(m.version("pymcprotocol")); print(pymcprotocol.__file__)'
+  ```
+  Connection, recovery, offline behavior, and the operator-gated physical
+  D100-D102 checklist are documented in
+  `docs/device_bridges/plc_safety_bridge.md`. PLC validation does not authorize
+  printer, robot, UTM, or other downstream motion.
 - `nvidia-smi` and NVIDIA driver stack for local GPU runtime checks.
 - Docker for PrusaSlicer, CalculiX, local Neo4j, or local vLLM/NemoClaw paths.
 - Local Ubuntu PyAutoGUI bridge development requires an X11 desktop session,

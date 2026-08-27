@@ -20,6 +20,7 @@ def test_knowledge_workspace_exposes_graph_ontology_memory_and_sync_surfaces() -
         'data-knowledge-tab="sync"',
         'data-knowledge-tab="project"',
         'data-knowledge-tab="relations"',
+        'data-knowledge-tab="manuals"',
         'id="knowledge-graph"',
         'id="knowledge-node-inspector"',
         'id="knowledge-edit-mode"',
@@ -36,11 +37,30 @@ def test_knowledge_workspace_exposes_graph_ontology_memory_and_sync_surfaces() -
         'id="knowledge-relation-context"',
         'id="knowledge-relation-decision"',
         'id="knowledge-relation-history"',
+        'id="knowledge-manual-status"',
+        'id="knowledge-manual-query"',
+        'id="knowledge-manual-results"',
+        'id="knowledge-manual-graph"',
+        'id="knowledge-manual-inspector"',
+        'id="knowledge-manual-show-evidence"',
         "/static/vendor/echarts.min.js",
         "/static/knowledge.js",
         "/static/knowledge.css",
     ]:
         assert required in html
+
+
+def test_manual_workspace_exposes_semantic_graph_and_inspector() -> None:
+    client = TestClient(app)
+
+    response = client.get("/knowledge#manuals")
+
+    assert response.status_code == 200
+    html = response.text
+    assert 'id="knowledge-manual-graph"' in html
+    assert 'id="knowledge-manual-results"' in html
+    assert 'id="knowledge-manual-inspector"' in html
+    assert 'id="knowledge-manual-show-evidence"' in html
 
 
 def test_main_dashboard_links_knowledge_workspace_and_reads_real_status() -> None:
@@ -75,6 +95,10 @@ def test_knowledge_workspace_uses_only_bounded_knowledge_apis() -> None:
         "/api/knowledge/relations/status",
         "/api/knowledge/relations/proposals",
         "/api/knowledge/relations/decisions",
+        "/api/knowledge/manuals/status",
+        "/api/knowledge/manuals/ingest",
+        "/api/knowledge/manuals/query",
+        "/api/knowledge/manuals/graph",
         "/api/knowledge/graph/edit/validate",
         "/api/knowledge/graph/edit/apply",
     ]:

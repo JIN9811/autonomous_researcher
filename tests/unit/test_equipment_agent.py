@@ -417,6 +417,34 @@ async def test_equipment_agent_legacy_utm_when_pyautogui_tools_missing() -> None
 
 
 @pytest.mark.asyncio
+async def test_equipment_agent_legacy_utm_includes_cited_manual_context_without_changing_tool_payload(monkeypatch) -> None:
+    tools = ToolRegistry()
+    register_mock_tools(tools)
+    ctx = _CtxStub(tools, "manual-grounded protocol note")
+    manual_context = {
+        "schema": "manual_context.v1",
+        "equipment_type": "utm",
+        "purpose": "procedure",
+        "context_hash": "ctx-procedure",
+        "insufficient_evidence": False,
+        "chunks": [
+            {
+                "chunk_id": "manual:procedure:p6",
+                "text": "시험 순서를 확인한다.",
+                "citation": {"source_id": "software", "title": "Software Manual", "page": 6, "section_path": ["시험순서"]},
+            }
+        ],
+    }
+    monkeypatch.setattr(LabEquipmentAgent, "_manual_context", staticmethod(lambda _query, *, purpose: {**manual_context, "purpose": purpose}))
+
+    result = await LabEquipmentAgent().run(_state(), ctx)
+
+    assert "manual:procedure:p6" in ctx.prompts[0][1]
+    assert result.data["manual_context"]["context_hash"] == "ctx-procedure"
+    assert result.data["tool_plan"][0]["payload"]["program_id"] == "utm_compression_start_v1"
+
+
+@pytest.mark.asyncio
 async def test_equipment_agent_legacy_utm_live_fails_closed_without_direct_backend() -> None:
     tools = ToolRegistry()
     register_mock_tools(tools)

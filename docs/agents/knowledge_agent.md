@@ -4,7 +4,7 @@ subtype: system
 status: active
 authority: descriptive
 audience: [researcher, reviewer, developer, operator, maintainer]
-scope: [agents, knowledge, provenance, graph, reconciliation, self_evolution]
+scope: [agents, knowledge, provenance, graph, reconciliation, self_evolution, manual_rag]
 summary: Current contract for durable research memory, provenance, patterns, BO context, graph synchronization, and evolution evidence recommendations.
 source_of_truth:
   - agents/knowledge_agent.py
@@ -13,15 +13,18 @@ source_of_truth:
   - knowledge/reconciliation_service.py
   - knowledge/relation_store.py
   - knowledge/ontology
+  - knowledge/manuals
+  - knowledge/ontology/manual_equipment.v1.yaml
   - app/main.py
-last_verified: 2026-08-09
-verified_against: 0b7627b
+last_verified: 2026-08-17
+verified_against: working-tree-2026-08-17
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
   - docs/agents/analysis_agent.md
   - docs/agents/bo_agent.md
   - docs/knowledge/knowledge_graph_operations.ko.md
+  - docs/knowledge/manual_rag_knowledge.ko.md
   - docs/agents/knowledge_agent_self_evolution_runtime_guideline.md
 supersedes: []
 ---
@@ -151,6 +154,23 @@ figure groups contract steps and grants no automatic variant activation.
 
 ## API Surface
 
+### Manual RAG Knowledge submodule
+
+`Knowledge Agent > Manual RAG Knowledge`는 일반 실험 memory와 분리된 UTM
+매뉴얼 source registry, page/section chunk corpus, evidence graph, cited semantic
+graph, bounded 2-hop query projection을 소유합니다. 고정 식별자는
+`equipment_type=utm`이며 장비
+모델명과 소프트웨어 버전은 provenance 및 soft-ranking metadata입니다. 검색
+context는 Lab Equipment Agent의 UTM profile LLM에 제공되지만 실행 action,
+program ID, 좌표, payload 또는 안전 gate를 변경하지 않습니다. 운영 계약과
+검증 절차는 [UTM Manual RAG Knowledge Guide](../knowledge/manual_rag_knowledge.ko.md)를
+따릅니다.
+
+Semantic graph의 node/edge는 모두 chunk ID와 page citation을 가져야 하며,
+`SUPPORTED_BY`가 원문 Evidence 계층을 연결합니다. Workspace/API 기본 view는
+semantic이고 Evidence chunk는 명시적으로 `view=evidence`를 요청할 때만 전체
+표시합니다. rebuild는 provenance 검증을 통과한 완성본만 atomic replace합니다.
+
 | Class | Method | Path/family | Effect | Notes |
 |---|---|---|---|---|
 | owned | GET | `/api/knowledge/evolution-packs`, `/agent-performance`, `/failure-patterns`, `/success-patterns` | read_only | typed Knowledge outputs |
@@ -159,6 +179,7 @@ figure groups contract steps and grants no automatic variant activation.
 | operator | POST | `/api/knowledge/graph/edit/validate`, `/graph/edit/apply` | local_state/external_service | existing-node bounded edits |
 | connected | GET/POST | `/api/knowledge/graph/health`, `/graph/stats`, `/graph/sync`, `/graph/query`, `/graph/import` | read_only/local_state/external_service | bounded graph operations |
 | connected | GET | `/api/knowledge/activity` | read_only | recent bounded Knowledge activity |
+| owned/connected | GET/POST | `/api/knowledge/manuals/status`, `/manuals/ingest`, `/manuals/query`, `/manuals/graph?view=semantic|evidence` | read_only/local_state | UTM-only corpus, cited semantic projection, explicit evidence view |
 | connected | GET/POST | `/api/knowledge/ontology*` | read_only/local_state | registry and validation |
 | operator | POST | `/api/knowledge/graphify/scan`, `/graphify/import` | local_state/external_service | controlled import path |
 | owned/connected | GET | `/api/knowledge/run-context`, `/bo-context`, `/safety-context` | read_only | bounded consumer context |
@@ -209,6 +230,8 @@ Typed Knowledge JSONL/local records, audit ledger, durable outbox, graph
 receipts, activity events, relation queue/proposal/decision files, graph edit
 drafts, reports, BO context, and evolution packs are distinct durable records.
 Graph UI layout state is presentation preference, not semantic evidence.
+Manual corpus/evidence/semantic indexes and rebuild receipts are generated under
+`memory/knowledge/manual_rag/` and remain outside Git.
 
 ## Modes and Fallbacks
 
@@ -236,21 +259,29 @@ decisions, not silently overwritten.
 ## Operator and GUI Surfaces
 
 Knowledge workspace exposes Graph Explorer, Memory, Ontology, Sync, Project
-Graph, activity, Relation Review, and existing-node Edit Mode. Review and apply
+Graph, Manual RAG Knowledge, activity, Relation Review, and existing-node Edit Mode. Manual
+RAG shows a cited semantic graph by default and uses the Semantic Inspector to
+trace a selected assertion back to bounded page evidence. Review and apply
 are server validated/audited. Evolution Lab consumes prefill/evidence without
 automatic activation.
 
 ## Current Verification
 
-Verified against all 12 internal steps, eight output contracts, transition
-conditions, 34 Knowledge API routes, service/ontology/ledger/outbox, relation
-reconciliation, and current workspace at baseline `0b7627b`.
+Core Knowledge behavior remains verified against the existing internal steps,
+output contracts, transition conditions, service/ontology/ledger/outbox, and
+relation reconciliation tests. The Manual RAG submodule was additionally
+verified on 2026-08-17 against two registered manuals, 506 chunks, 565 semantic
+nodes, 872 semantic edges, provenance coverage `1.0`, and representative
+procedure/recovery queries. The focused Knowledge/Equipment/API regression set
+completed with 77 passing tests, and the 1920-wide browser audit rendered the
+semantic graph without `ManualChunk` nodes or horizontal overflow.
 
 ## Limitations and Known Gaps
 
-No paper-scoped evidence establishes retrieval quality, graph completeness,
-relation accuracy, evolution benefit, or external graph availability. Background
-LLM proposals remain model-dependent.
+The representative queries and structural metrics do not constitute a broad
+retrieval benchmark or prove semantic relation accuracy. No paper-scoped
+evidence establishes graph completeness, evolution benefit, or external graph
+availability. Background LLM proposals remain model-dependent.
 
 ## Related Documents
 

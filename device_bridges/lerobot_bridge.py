@@ -13093,7 +13093,7 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             "ATR_ACTIVE_ROBOT_CAM_CAPTURE_WAIT_TOLERANCE_DEG": "2.0",
             "ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TIMEOUT_S": "4.0",
             "ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_POLL_S": "0.05",
-            "ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TOLERANCE_DEG": "3.0",
+            "ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TOLERANCE_DEG": "5.0",
             "ATR_ACTIVE_ROBOT_CAM_SETTLE_S": "1.0",
             "ATR_ACTIVE_ROBOT_CAM_HOLD_AFTER_CAPTURE_S": "1.0",
             "ATR_SPECIMEN_POSE_PENDING_PATH": "/tmp/atr_specimen_pose_pending/latest_specimen_pose_payload.json",

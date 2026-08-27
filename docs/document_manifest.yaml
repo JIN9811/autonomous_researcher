@@ -33,6 +33,8 @@ documents:
   - docs/device_bridges/utm_vision_bridge.md
   - docs/device_bridges/cae_computation_bridges.md
   - docs/device_bridges/base_simulator_bridges.md
+  - docs/device_bridges/plc_safety_bridge.md
+  - docs/superpowers/specs/2026-08-24-plc-safety-bridge-design.md
   - docs/paper/README.md
   - docs/paper/01_problem_and_contributions.md
   - docs/paper/02_system_architecture.md
@@ -54,6 +56,7 @@ documents:
   - docs/runtime/closed_loop_and_pages_reference.md
   - docs/runtime/three_level_control_model.md
   - docs/knowledge/knowledge_graph_operations.ko.md
+  - docs/knowledge/manual_rag_knowledge.ko.md
 legacy_scope:
   status: migration_debt
   note: >-

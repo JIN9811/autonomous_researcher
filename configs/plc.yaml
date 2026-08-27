@@ -1,0 +1,12 @@
+schema: plc_bridge_config.v1
+transport: pymcprotocol_type3e
+host: 192.168.50.90
+port: 4999
+poll_interval_s: 0.2
+stale_after_s: 1.0
+handshake_timeout_s: 5.0
+runtime_environment: plc
+registers:
+  command: D100
+  estop: D101
+  recovery_ack: D102

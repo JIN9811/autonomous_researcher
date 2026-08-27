@@ -206,6 +206,15 @@ Modification guide:
           </article>
           <article class="workspace-card">
             <div class="status-head">
+              <span class="status-title">PLC Safety Bridge</span>
+              <span id="plc-workspace-dot" class="status-dot idle"></span>
+            </div>
+            <strong id="plc-workspace-status">OFFLINE</strong>
+            <p id="plc-workspace-detail">PLC is optional. Manual setup and diagnostics remain available.</p>
+            <a id="btn-open-plc" class="btn primary" href="/plc" target="_blank" rel="noopener">Open PLC Workspace</a>
+          </article>
+          <article class="workspace-card">
+            <div class="status-head">
               <span class="status-title">Vision / UTM Camera Bridge</span>
               <span class="status-dot idle"></span>
             </div>
@@ -327,6 +336,6 @@ Modification guide:
 
     <script src="/static/runtime_graph_geometry.js?v=atr-ui-20260812-graph-layout-4"></script>
     <script src="/static/runtime_cycle.js?v=20260811-contract-2"></script>
-    <script src="/static/app.js?v=20260811-cycle-contract-1" defer></script>
+    <script src="/static/app.js?v=20260825-plc-stale-1" defer></script>
   </body>
 </html>

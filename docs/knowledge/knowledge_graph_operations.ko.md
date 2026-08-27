@@ -21,8 +21,8 @@ source_of_truth:
   - scripts/knowledge_graph_cli.py
   - app/main.py
   - web/static/knowledge.js
-last_verified: 2026-08-09
-verified_against: 4329853
+last_verified: 2026-08-17
+verified_against: working-tree-2026-08-17
 related_docs:
   - docs/runtime/current_code_snapshot.md
   - docs/runtime/langgraph_runtime.md
@@ -121,6 +121,10 @@ memory/knowledge/reconciliation/proposals.jsonl         변경 불가능한 LLM 
 memory/knowledge/reconciliation/decisions.jsonl         승인/반려/보류 결정 원장
 memory/knowledge/reconciliation/graph_edit_decisions.jsonl  Graph Edit 적용 원장
 memory/knowledge/reconciliation/drafts/                 검증 중인 graph edit 초안
+memory/knowledge/manual_rag/corpus.json                 UTM 매뉴얼 page/section corpus
+memory/knowledge/manual_rag/manual_graph.json           document/section/chunk evidence graph
+memory/knowledge/manual_rag/manual_semantic_graph.json  cited semantic assertion graph
+memory/knowledge/manual_rag/receipts/                   source hash와 atomic rebuild 영수증
 ```
 
 `memory/`는 Git에 포함되지 않습니다.
@@ -191,9 +195,16 @@ Main GUI의 `Device Workspaces > Knowledge Workspace` 또는 `/knowledge`에서 
 | Ontology | 활성 ontology 버전, class, relation domain/range |
 | Sync | durable outbox의 pending 이벤트를 제한된 batch로 Neo4j에 재전송 |
 | Project Graph | Graphify로 적재한 file/module/API/tool/concept 연결 조회 |
+| Manual RAG Knowledge | UTM 매뉴얼 source/chunk 상태, atomic 재수집, 목적별 페이지 인용 검색, 기본 semantic graph와 선택 Evidence inspector |
 | Relation Review | 관계 gap, LLM 제안, 근거, 승인/수정 승인/반려/보류/재평가와 결정 이력 |
 
 상단 상태 스트립은 `/api/knowledge/graph/stats`에서 backend, ontology, node/edge, pending/dead-letter 값을 직접 읽습니다. Graph Explorer와 Project Graph는 전체 그래프를 내려받지 않고 bounded subgraph만 렌더링합니다. 노드를 더블클릭하거나 `Expand provenance`를 누르면 해당 식별자를 대상으로 `provenance_trace` query plan을 실행합니다.
+
+Manual RAG는 일반 Knowledge graph와 별도 인덱스를 사용합니다. 기본
+`/api/knowledge/manuals/graph`는 cited semantic assertion만 반환하고,
+`view=evidence`를 명시해야 document/section/chunk Evidence graph를 반환합니다.
+Semantic node/relation은 모두 양의 page citation을 가져야 하며 검증 실패 시 기존
+완성 인덱스를 유지합니다.
 
 ### Relation Review
 

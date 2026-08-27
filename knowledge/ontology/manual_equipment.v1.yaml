@@ -1,0 +1,51 @@
+schema: atr_manual_ontology.v1
+version_id: atr-manual-1.0.0
+equipment_types:
+  - utm
+classes:
+  - ManualDocument
+  - ManualVersion
+  - ManualSection
+  - ManualChunk
+  - EquipmentType
+  - EquipmentModel
+  - SoftwareProduct
+  - SoftwareVersion
+  - Screen
+  - Menu
+  - Control
+  - IndicatorMode
+  - Procedure
+  - ProcedureStep
+  - TestMethod
+  - Parameter
+  - Unit
+  - CommunicationInterface
+  - Warning
+  - Interlock
+  - Fault
+  - Cause
+  - Remedy
+  - MaintenanceTask
+  - ConsumablePart
+relations:
+  APPLIES_TO: {domain: [ManualDocument], range: [EquipmentType, EquipmentModel, SoftwareProduct]}
+  HAS_VERSION: {domain: [ManualDocument, SoftwareProduct], range: [ManualVersion, SoftwareVersion]}
+  HAS_SECTION: {domain: [ManualDocument], range: [ManualSection]}
+  HAS_CHUNK: {domain: [ManualSection], range: [ManualChunk]}
+  HAS_STEP: {domain: [Procedure], range: [ProcedureStep]}
+  PRECEDES: {domain: [ProcedureStep], range: [ProcedureStep]}
+  DISPLAYED_ON: {domain: [Menu, Control, Parameter, IndicatorMode], range: [Screen]}
+  OPERATES_CONTROL: {domain: [ProcedureStep], range: [Control]}
+  SETS_PARAMETER: {domain: [ProcedureStep, Control], range: [Parameter]}
+  REQUIRES: {domain: [Procedure, ProcedureStep], range: [Interlock, Parameter, IndicatorMode, CommunicationInterface]}
+  PROHIBITS: {domain: [Warning, Interlock], range: [ProcedureStep, Control]}
+  HAS_WARNING: {domain: [ManualSection, ManualChunk, Procedure, ProcedureStep], range: [Warning]}
+  HAS_CAUSE: {domain: [Fault], range: [Cause]}
+  RESOLVED_BY: {domain: [Fault, Cause], range: [Remedy]}
+  CONNECTS_TO: {domain: [CommunicationInterface], range: [EquipmentType, EquipmentModel, SoftwareProduct]}
+  PRODUCES_RESULT: {domain: [Procedure, TestMethod], range: [Parameter, ManualChunk]}
+  SOURCED_FROM: {domain: [ManualChunk, Procedure, ProcedureStep, Warning, Fault, Cause, Remedy, Parameter], range: [ManualDocument, ManualChunk]}
+  SUPPORTED_BY:
+    domain: [Procedure, ProcedureStep, Warning, Interlock, Fault, Cause, Remedy, Parameter, Unit, CommunicationInterface]
+    range: [ManualSection, ManualChunk]

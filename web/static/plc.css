@@ -1,0 +1,193 @@
+.plc-workspace {
+  max-width: 1480px;
+}
+
+.plc-workspace-body {
+  min-width: 320px;
+}
+
+.plc-hero {
+  align-items: center;
+  display: grid;
+  gap: 24px;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.42fr);
+}
+
+.plc-hero h1 {
+  margin: 3px 0 8px;
+}
+
+.plc-hero-status {
+  align-self: stretch;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(20, 54, 179, 0.16);
+  border-radius: 16px;
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+}
+
+.plc-hero-status strong {
+  color: var(--primary);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 1.28rem;
+  letter-spacing: 0.04em;
+}
+
+.plc-hero-status p,
+.plc-panel-copy,
+.plc-note,
+.plc-action-status {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.plc-grid {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.plc-grid-control {
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+}
+
+.plc-grid-diagnostics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.plc-panel {
+  min-width: 0;
+}
+
+.plc-config-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 14px;
+}
+
+.plc-config-grid label:first-child {
+  grid-column: 1 / -1;
+}
+
+.plc-config-grid input {
+  min-width: 0;
+}
+
+.plc-note,
+.plc-action-status {
+  margin-top: 12px;
+}
+
+.plc-action-status.is-error {
+  color: var(--danger);
+}
+
+.plc-register-list,
+.plc-kv-list {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 0;
+}
+
+.plc-register-list > div,
+.plc-kv-list > div {
+  align-items: baseline;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(20, 54, 179, 0.12);
+  border-radius: 10px;
+  display: grid;
+  gap: 4px 10px;
+  grid-template-columns: minmax(90px, 0.7fr) minmax(0, 1.3fr);
+  padding: 10px;
+}
+
+.plc-register-list dt,
+.plc-kv-list dt {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.plc-register-list dd,
+.plc-kv-list dd {
+  color: var(--text);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.82rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.plc-register-list small {
+  color: var(--muted);
+  font-size: 0.74rem;
+  grid-column: 2;
+}
+
+.plc-events {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  max-height: 215px;
+  overflow: auto;
+}
+
+.plc-event {
+  background: rgba(255, 255, 255, 0.72);
+  border-left: 3px solid var(--secondary);
+  border-radius: 0 10px 10px 0;
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+}
+
+.plc-event strong {
+  color: var(--text);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.78rem;
+}
+
+.plc-event small {
+  color: var(--muted);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.7rem;
+}
+
+.plc-event-empty {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin: 0;
+}
+
+.plc-virtual-controls {
+  margin-top: 14px;
+}
+
+@media (max-width: 980px) {
+  .plc-hero,
+  .plc-grid-control,
+  .plc-grid-diagnostics {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .plc-config-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .plc-config-grid label:first-child {
+    grid-column: auto;
+  }
+
+  .plc-register-list > div,
+  .plc-kv-list > div {
+    grid-template-columns: 1fr;
+  }
+
+  .plc-register-list small {
+    grid-column: auto;
+  }
+}

@@ -718,6 +718,190 @@ body.knowledge-page {
   white-space: nowrap;
 }
 
+.knowledge-manual-status {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+  gap: 1px;
+  margin-bottom: 10px;
+  border: 1px solid var(--knw-line);
+  background: var(--knw-line);
+}
+
+.knowledge-manual-status article {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  background: #151f2b;
+}
+
+.knowledge-manual-status span,
+.knowledge-manual-status small {
+  color: var(--knw-muted);
+  font-size: 0.66rem;
+}
+
+.knowledge-manual-status strong {
+  color: #f5f8fb;
+  font: 700 1rem/1.2 "IBM Plex Mono", monospace;
+}
+
+.knowledge-manual-status .knowledge-button {
+  align-self: stretch;
+  margin: 8px;
+}
+
+.knowledge-manual-query-bar {
+  grid-template-columns: minmax(150px, 0.7fr) minmax(360px, 2.3fr) 90px auto;
+}
+
+.knowledge-manual-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 34fr) minmax(700px, 46fr) minmax(280px, 20fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.knowledge-manual-head-actions {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
+.knowledge-button.compact {
+  min-height: 27px;
+  padding: 5px 8px;
+  font-size: 0.61rem;
+}
+
+.knowledge-manual-results {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  height: 540px;
+  overflow: auto;
+  padding: 10px;
+}
+
+.knowledge-manual-results > p {
+  color: var(--knw-muted);
+  font-size: 0.75rem;
+}
+
+.knowledge-manual-result {
+  display: grid;
+  gap: 7px;
+  padding: 11px;
+  border: 1px solid #35495d;
+  border-left: 3px solid var(--knw-cyan);
+  background: #111b27;
+}
+
+.knowledge-manual-result header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--knw-cyan);
+  font: 700 0.69rem/1.35 "IBM Plex Mono", monospace;
+}
+
+.knowledge-manual-result header span:last-child {
+  flex: 0 0 auto;
+  color: var(--knw-amber);
+}
+
+.knowledge-manual-result p {
+  margin: 0;
+  color: #d8e2ec;
+  font-size: 0.72rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.knowledge-manual-result footer {
+  overflow-wrap: anywhere;
+  color: var(--knw-muted);
+  font: 0.62rem/1.4 "IBM Plex Mono", monospace;
+}
+
+.knowledge-manual-graph {
+  width: 100%;
+  height: 570px;
+  background: #ffffff;
+}
+
+.knowledge-manual-inspector-card {
+  min-width: 0;
+}
+
+.knowledge-manual-inspector {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  height: 540px;
+  overflow: auto;
+  padding: 12px;
+}
+
+.knowledge-manual-inspector > p {
+  margin: 0;
+  color: var(--knw-muted);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.knowledge-manual-inspector h3 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--knw-text);
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+.knowledge-manual-inspector dl {
+  display: grid;
+  grid-template-columns: minmax(72px, auto) minmax(0, 1fr);
+  gap: 7px 9px;
+  margin: 0;
+}
+
+.knowledge-manual-inspector dt {
+  color: var(--knw-muted);
+  font: 0.59rem/1.45 "IBM Plex Mono", monospace;
+  text-transform: uppercase;
+}
+
+.knowledge-manual-inspector dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #d8e2ec;
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.knowledge-manual-citations {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.knowledge-manual-citations li {
+  padding: 7px 8px;
+  border-left: 2px solid var(--knw-amber);
+  background: #111b27;
+  color: #d8e2ec;
+  font: 0.62rem/1.45 "IBM Plex Mono", monospace;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-manual-result.supporting {
+  border-color: var(--knw-amber);
+  border-left-color: var(--knw-amber);
+  background: #1d2530;
+}
+
 .knowledge-footer {
   display: flex;
   justify-content: space-between;
@@ -739,5 +923,18 @@ body.knowledge-page {
   .knowledge-relation-decision {
     grid-column: 1 / -1;
     min-height: auto;
+  }
+
+  .knowledge-manual-layout {
+    grid-template-columns: minmax(340px, 0.9fr) minmax(620px, 1.55fr);
+  }
+
+  .knowledge-manual-inspector-card {
+    grid-column: 1 / -1;
+  }
+
+  .knowledge-manual-inspector {
+    height: auto;
+    min-height: 180px;
   }
 }

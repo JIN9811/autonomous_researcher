@@ -952,6 +952,31 @@ graph:
       - utm.run_protocol
       config: memory/lerobot + equipment profiles
       live_boundary: visual verification and UTM result artifact handoff
+    - id: plc_bridge
+      label: Mitsubishi PLC Safety Bridge
+      workspace: /plc
+      tools: []
+      config: configs/plc.yaml
+      live_boundary: D100-D102 safety transport for command, E-STOP source, and
+        recovery acknowledgement; PLC control remains outside executable agent stages
+      health_endpoint: /api/plc/status
+      preflight_endpoint: /api/plc/preflight
+      evidence_contracts:
+      - plc_safety_state.v1
+      - plc_register_snapshot.v1
+      actions:
+      - id: open_workspace
+        label: Open Workspace
+        kind: navigation
+        method: GET
+        endpoint: /plc
+        read_only: true
+      - id: health_check
+        label: Cached Status
+        kind: api
+        method: GET
+        endpoint: /api/plc/status
+        read_only: true
     runtime_contract_map:
       actual_runtime_source:
       - graphs/configs/atr_closed_loop.yaml

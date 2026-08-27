@@ -78,6 +78,9 @@ const btnOpenWindowsBridge = document.getElementById("btn-open-windows-bridge");
 const btnOpenLerobot = document.getElementById("btn-open-lerobot");
 const btnOpenBo = document.getElementById("btn-open-bo");
 const btnOpenCae = document.getElementById("btn-open-cae");
+const plcWorkspaceDotEl = document.getElementById("plc-workspace-dot");
+const plcWorkspaceStatusEl = document.getElementById("plc-workspace-status");
+const plcWorkspaceDetailEl = document.getElementById("plc-workspace-detail");
 const printerWorkspaceDotEl = document.getElementById("printer-workspace-dot");
 const printerWorkspaceDetailEl = document.getElementById("printer-workspace-detail");
 const windowsWorkspaceDotEl = document.getElementById("windows-workspace-dot");
@@ -1010,6 +1013,45 @@ async function refreshState() {
   await refreshWindowsWorkspaceStatus();
   await refreshLerobotWorkspaceStatus();
   await refreshCaeWorkspaceStatus();
+  await refreshPlcWorkspaceStatus();
+}
+
+function plcWorkspaceState(status = {}) {
+  const sources = Array.isArray(status.active_estop_sources) ? status.active_estop_sources : [];
+  if (sources.length || String(status.safety_state || "").includes("estop")) return "E-STOP";
+  if (status.connection_state === "stale") return "STALE";
+  if (status.failure_code) return "FAULT";
+  return status.connection_state === "online" ? "ONLINE" : "OFFLINE";
+}
+
+async function refreshPlcWorkspaceStatus() {
+  if (!plcWorkspaceDetailEl && !plcWorkspaceDotEl && !plcWorkspaceStatusEl) return;
+  try {
+    const res = await fetch("/api/plc/status");
+    const status = await res.json();
+    const label = plcWorkspaceState(status);
+    const sources = Array.isArray(status.active_estop_sources) ? status.active_estop_sources : [];
+    setDotState(plcWorkspaceDotEl, label === "ONLINE" ? "active" : label === "OFFLINE" ? "idle" : label === "STALE" ? "warning" : "error");
+    if (plcWorkspaceStatusEl) plcWorkspaceStatusEl.textContent = label;
+    if (plcWorkspaceDetailEl) {
+      if (label === "OFFLINE") {
+        plcWorkspaceDetailEl.textContent = "PLC is optional and offline. Manual setup and diagnostics remain available.";
+      } else if (label === "STALE") {
+        plcWorkspaceDetailEl.textContent = "PLC monitor sample is stale. Open the workspace to inspect freshness and reconnect state.";
+      } else if (label === "FAULT") {
+        plcWorkspaceDetailEl.textContent = `PLC fault: ${status.failure_code}. Open the workspace for bounded diagnostics.`;
+      } else if (label === "E-STOP") {
+        plcWorkspaceDetailEl.textContent = `E-stop source: ${sources.join(", ") || "PLC"}. Open the workspace for bounded diagnostics.`;
+      } else {
+        plcWorkspaceDetailEl.textContent = `Monitor online · safety=${status.safety_state || "unknown"} · manual diagnostics available.`;
+      }
+    }
+  } catch (err) {
+    // PLC is optional: an unavailable status must not put the main runtime into an error state.
+    setDotState(plcWorkspaceDotEl, "idle");
+    if (plcWorkspaceStatusEl) plcWorkspaceStatusEl.textContent = "OFFLINE";
+    if (plcWorkspaceDetailEl) plcWorkspaceDetailEl.textContent = "PLC status unavailable. Manual setup and diagnostics remain available.";
+  }
 }
 
 async function refreshPrinterWorkspaceStatus() {

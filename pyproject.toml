@@ -33,6 +33,7 @@ dependencies = [
   "PyAutoGUI>=0.9.54",
   "python3-xlib>=0.15",
   "pynput>=1.7.7,<2",
+  "pymcprotocol>=0.3.0,<0.4.0",
 ]
 
 [project.optional-dependencies]

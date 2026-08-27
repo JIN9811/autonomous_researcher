@@ -24,10 +24,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import os
 import re
 import shutil
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,6 +63,7 @@ from orchestrator.supervisor import (
     normalize_operator_intent,
 )
 from policies.validation_policy import validate_agent_output
+from policies.guardian_gate import tool_requires_action_shield
 from utils.active_cam_artifact import apply_active_cam_artifact_update
 from utils.ids import make_event_id, make_experiment_id, make_run_id
 from utils.utm_completion_artifact import apply_utm_completion_artifact_update
@@ -84,6 +87,15 @@ PLANNING_TRANSCRIPT_MEMORY_LIMIT = 50
 PLANNING_TRANSCRIPT_PAGE_LIMIT = 160
 PLANNING_TRANSCRIPT_MAX_PAGE_LIMIT = 240
 PLANNING_RESUME_CONTEXT_KEY = "_planning_resume_context"
+EMERGENCY_STOP_INTERRUPTED_RUNTIME_KEY = "_emergency_stop_interrupted_runtime"
+ACTIVE_SAFETY_SOURCES_KEY = "active_safety_sources"
+PLC_SAFETY_SOURCE = "plc_pb2"
+RUNTIME_TERMINAL_SAFETY_SOURCE = "runtime_terminal_error"
+PLC_RECOVERY_SOURCES = frozenset({"plc", PLC_SAFETY_SOURCE})
+GUI_ESTOP_SAFETY_SOURCE = "gui_estop"
+PLC_RECOVERABLE_SAFETY_SOURCES = frozenset(
+    {PLC_SAFETY_SOURCE, RUNTIME_TERMINAL_SAFETY_SOURCE, GUI_ESTOP_SAFETY_SOURCE}
+)
 
 
 @dataclass(slots=True)
@@ -159,6 +171,8 @@ class MainController:
         self._vllm_transition_task: asyncio.Task[dict[str, Any]] | None = None
         self._vision_specimen_retry_locks: dict[str, asyncio.Lock] = {}
         self._vision_intervention_resume_event = asyncio.Event()
+        self._terminal_error_notifier: Callable[[dict[str, object]], Awaitable[object]] | None = None
+        self._plc_safety_status_provider: Callable[[], object] | None = None
         self._deps.agent_context.on_model_call = self._on_model_call
         self._deps.agent_context.on_tool_event = self._on_tool_event
 
@@ -891,6 +905,7 @@ class MainController:
             "attention_agent_id", "attention_node_id", "attention_trace_id", "attention_message",
             "operator_source",
             "module_runtime",
+            "retry_policy",
         }
         out: dict[str, Any] = {}
         for key, value in payload.items():
@@ -3143,6 +3158,7 @@ class MainController:
             "mesh_faces",
         }
         allow_keys = {
+            "active_safety_sources",
             "pending_specimen_input",
             "planning_cycle_contract",
             "mission_contract",
@@ -3752,9 +3768,183 @@ class MainController:
         )
         try:
             await loop.run()
+            terminal_error = self._qualifying_terminal_error_from_trace()
+            if terminal_error is not None:
+                await self._escalate_terminal_error(terminal_error)
             self._last_completed_trace = self._trace.snapshot()
+        except Exception as exc:
+            if not (
+                self._state.stop_requested
+                or self._state.safe_stop_requested
+                or self._state.emergency_stop_requested
+                or self._state.stage == Stage.COMPLETE
+            ):
+                await self._escalate_terminal_error(
+                    {
+                        "category": "unhandled_active_run_exception",
+                        "event_type": "unhandled_active_run_exception",
+                        "exception_type": exc.__class__.__name__,
+                        "message": str(exc),
+                    }
+                )
+            raise
         finally:
             self._schedule_post_run_vllm_transition()
+
+    def set_terminal_error_notifier(
+        self,
+        notifier: Callable[[dict[str, object]], Awaitable[object]] | None,
+    ) -> None:
+        """Register Task 5's optional PLC terminal-error synchronization hook."""
+        if notifier is not None and not callable(notifier):
+            raise TypeError("terminal error notifier must be callable")
+        self._terminal_error_notifier = notifier
+
+    def set_plc_safety_status_provider(self, provider: Callable[[], object] | None) -> None:
+        """Register the singleton PLC service status used as a new-run interlock."""
+        if provider is not None and not callable(provider):
+            raise TypeError("PLC safety status provider must be callable")
+        self._plc_safety_status_provider = provider
+
+    def plc_runtime_identity(self) -> dict[str, str]:
+        """Return non-secret run/session identity for PLC audit records."""
+        return {
+            "run_id": str(self._state.run_id or ""),
+            "session_id": str(self._state.active_session_id or ""),
+        }
+
+    async def _plc_service_start_rejection(self) -> dict[str, Any] | None:
+        provider = self._plc_safety_status_provider
+        if provider is None:
+            return None
+        try:
+            status = provider()
+            if inspect.isawaitable(status):
+                status = await status
+        except Exception as exc:
+            return {
+                "ok": False,
+                "status": "blocked",
+                "failure_code": "PLC_SERVICE_SAFETY_STATUS_UNAVAILABLE",
+                "message": f"PLC safety status is unavailable: {exc}",
+                "active_safety_sources": [],
+                "state": self._state.model_dump(mode="json"),
+            }
+        if not isinstance(status, dict):
+            return {
+                "ok": False,
+                "status": "blocked",
+                "failure_code": "PLC_SERVICE_SAFETY_STATUS_UNAVAILABLE",
+                "message": "PLC safety status provider returned invalid evidence.",
+                "active_safety_sources": [],
+                "state": self._state.model_dump(mode="json"),
+            }
+
+        sources = sorted(
+            str(source)
+            for source in status.get("active_estop_sources", [])
+            if str(source).strip()
+        )
+        transaction = status.get("transaction") if isinstance(status.get("transaction"), dict) else {}
+        phase = str(transaction.get("phase") or "")
+        safety_state = str(status.get("safety_state") or "")
+        service_latched = bool(sources) or safety_state in {
+            "estop_latched",
+            "handshake_asserted",
+            "release_observed",
+        } or phase in {
+            "validated",
+            "acknowledged",
+            "release_observed",
+            "release_observed_recovery_required",
+            "recovery_required",
+        }
+        if not service_latched:
+            return None
+        return {
+            "ok": False,
+            "status": "blocked",
+            "failure_code": "PLC_SERVICE_SAFETY_LATCH_ACTIVE",
+            "message": "A new run cannot start while the PLC service retains a safety latch.",
+            "active_safety_sources": sources,
+            "plc_failure_code": status.get("failure_code"),
+            "state": self._state.model_dump(mode="json"),
+        }
+
+    def _qualifying_terminal_error_from_trace(self) -> dict[str, object] | None:
+        """Classify only abnormal terminal run evidence that requires E-STOP."""
+        if self._state.stage not in {Stage.ERROR, Stage.COMPLETE}:
+            return None
+        for event in reversed(self._trace.snapshot()):
+            event_type = str(event.get("event_type") or event.get("type") or "").strip().lower()
+            severity = str(event.get("severity") or event.get("level") or "").strip().lower()
+            payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            hardware_alert = payload.get("hardware_alert") if isinstance(payload.get("hardware_alert"), dict) else {}
+            failure_code = str(
+                payload.get("failure_code") or hardware_alert.get("failure_code") or ""
+            ).strip().upper()
+            message = str(event.get("message") or payload.get("message") or "")
+            retry_policy = payload.get("retry_policy")
+
+            category = ""
+            if (
+                event_type == "fatal_error"
+                and isinstance(retry_policy, dict)
+                and "exceeded retry budget" in message.lower()
+            ):
+                category = "retry_exhausted_agent_exception"
+            elif event_type in {"hardware.alert", "hardware_alert"} and severity == "critical":
+                category = "critical_hardware_failure"
+            elif event_type in {"unknown_physical_device_state", "physical_device_state_unknown"} or failure_code in {
+                "UNKNOWN_PHYSICAL_DEVICE_STATE",
+                "PHYSICAL_DEVICE_STATE_UNKNOWN",
+            }:
+                category = "unknown_physical_device_state"
+            elif event_type in {"safety_violation", "safety_interlock_violation"} or (
+                "SAFETY" in failure_code and ("VIOLATION" in failure_code or "INTERLOCK" in failure_code)
+            ):
+                category = "safety_violation"
+            elif (
+                "process" in event_type
+                and ("exit" in event_type or "terminated" in event_type)
+                and (
+                    "unexpected" in event_type
+                    or str(payload.get("status") or "").strip().lower() in {"unexpected", "failed", "error"}
+                )
+            ):
+                category = "unexpected_physical_process_exit"
+
+            if category:
+                return {
+                    "category": category,
+                    "event_type": event_type,
+                    "failure_code": failure_code or None,
+                    "message": message,
+                    "event": dict(event),
+                }
+        return None
+
+    async def _escalate_terminal_error(self, details: dict[str, object]) -> None:
+        """Latch locally before best-effort synchronization to an optional PLC service."""
+        payload = {
+            **dict(details),
+            "run_id": self._state.run_id,
+            "stage": self._state.stage.value,
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._state.run_metadata["latest_terminal_error"] = payload
+        await self.emergency_stop(source="runtime_terminal_error", details=payload)
+        notifier = self._terminal_error_notifier
+        if notifier is None:
+            return
+        try:
+            await notifier(payload)
+        except Exception as exc:
+            self._state.run_metadata["terminal_error_notification_failure"] = {
+                "exception_type": exc.__class__.__name__,
+                "message": str(exc),
+                "occurred_at": datetime.now(timezone.utc).isoformat(),
+            }
 
     async def _run_replay(self) -> None:
         if not self._last_completed_trace:
@@ -3803,6 +3993,19 @@ class MainController:
         """Start a new run if idle."""
         if self._run_task and not self._run_task.done():
             return {"ok": False, "message": "Run already active."}
+        plc_rejection = await self._plc_service_start_rejection()
+        if plc_rejection is not None:
+            return plc_rejection
+        active_safety_sources = sorted(self._active_safety_sources())
+        if self._state.emergency_stop_requested or active_safety_sources:
+            return {
+                "ok": False,
+                "status": "blocked",
+                "failure_code": "SAFETY_LATCH_ACTIVE",
+                "message": "A new run cannot start while an emergency safety latch is active.",
+                "active_safety_sources": active_safety_sources,
+                "state": self._state.model_dump(mode="json"),
+            }
 
         try:
             self._apply_inference_backend(backend)
@@ -4075,11 +4278,12 @@ class MainController:
         if self._run_task and not self._run_task.done():
             if stage is not None:
                 self._state.stage = stage
-            self._run_task.cancel()
-            try:
-                await self._run_task
-            except asyncio.CancelledError:
-                pass
+            if self._run_task is not asyncio.current_task():
+                self._run_task.cancel()
+                try:
+                    await self._run_task
+                except asyncio.CancelledError:
+                    pass
         if self._planning_handoff_task and not self._planning_handoff_task.done():
             if stage is not None:
                 self._state.stage = stage
@@ -4090,12 +4294,206 @@ class MainController:
                 pass
             self._planning_handoff_task = None
 
-    async def emergency_stop(self) -> dict[str, Any]:
+    def _active_safety_sources(self) -> dict[str, dict[str, Any]]:
+        """Return the mutable, JSON-safe active E-STOP source register."""
+        sources = self._state.run_metadata.get(ACTIVE_SAFETY_SOURCES_KEY)
+        if not isinstance(sources, dict):
+            sources = {}
+            self._state.run_metadata[ACTIVE_SAFETY_SOURCES_KEY] = sources
+        return sources
+
+    def _record_safety_source(self, source: str, details: dict[str, object] | None) -> bool:
+        sources = self._active_safety_sources()
+        is_new = source not in sources
+        previous = sources.get(source)
+        first_latched_at = previous.get("latched_at") if isinstance(previous, dict) else None
+        sources[source] = {
+            "source": source,
+            "details": dict(details or {}),
+            "latched_at": first_latched_at or datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return is_new
+
+    def _emergency_recovery_rejection(self, failure_code: str, message: str) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "failure_code": failure_code,
+            "message": message,
+            "state": self._state.model_dump(mode="json"),
+        }
+
+    @staticmethod
+    def _valid_planning_resume_context(context: Any) -> bool:
+        if not isinstance(context, dict) or context.get("kind") != "planning_cycle_series":
+            return False
+        cycle_index = context.get("cycle_index")
+        total_cycles = context.get("total_cycles")
+        interrupted_stage = str(context.get("interrupted_stage") or "").strip()
+        return (
+            isinstance(cycle_index, int)
+            and not isinstance(cycle_index, bool)
+            and cycle_index >= 1
+            and isinstance(total_cycles, int)
+            and not isinstance(total_cycles, bool)
+            and total_cycles >= cycle_index
+            and interrupted_stage not in {"", Stage.IDLE.value, Stage.COMPLETE.value, Stage.ERROR.value}
+            and isinstance(context.get("current_spec"), dict)
+            and isinstance(context.get("design_constraints"), dict)
+        )
+
+    def _plc_idle_resume_without_context_allowed(self) -> bool:
+        """Allow a bounded PLC resume only when no runtime was interrupted."""
+        active_sources = set(self._active_safety_sources())
+        return (
+            PLC_SAFETY_SOURCE in active_sources
+            and active_sources <= {PLC_SAFETY_SOURCE, GUI_ESTOP_SAFETY_SOURCE}
+            and not bool(self._state.run_metadata.get(EMERGENCY_STOP_INTERRUPTED_RUNTIME_KEY))
+            and not (self._run_task and not self._run_task.done())
+            and not self._planning_handoff_active()
+        )
+
+    def _authorize_emergency_recovery(
+        self,
+        *,
+        source: str,
+        transaction_id: str | None,
+    ) -> dict[str, Any] | None:
+        active_sources = self._active_safety_sources()
+        plc_recovery = source in PLC_RECOVERY_SOURCES
+        if PLC_SAFETY_SOURCE in active_sources and not plc_recovery:
+            return self._emergency_recovery_rejection(
+                "PLC_PHYSICAL_RECOVERY_REQUIRED",
+                "PLC-originated E-STOP requires the physical PLC recovery handshake.",
+            )
+        if plc_recovery and not str(transaction_id or "").strip():
+            return self._emergency_recovery_rejection(
+                "PLC_TRANSACTION_REQUIRED",
+                "PLC recovery requires a transaction ID.",
+            )
+
+        if plc_recovery:
+            release_sources = set(active_sources) & set(PLC_RECOVERABLE_SAFETY_SOURCES)
+        elif set(active_sources) == {RUNTIME_TERMINAL_SAFETY_SOURCE}:
+            release_sources = {RUNTIME_TERMINAL_SAFETY_SOURCE}
+        else:
+            release_sources = {source}
+        remaining_sources = set(active_sources) - release_sources
+        if remaining_sources:
+            return self._emergency_recovery_rejection(
+                "ACTIVE_SAFETY_SOURCE_REMAINS",
+                f"E-STOP remains latched by: {', '.join(sorted(remaining_sources))}.",
+            )
+        for released_source in release_sources:
+            active_sources.pop(released_source, None)
+        return None
+
+    def _plc_physical_safety_evidence(self) -> dict[str, object]:
+        """Derive fail-closed recovery evidence from bounded runtime/device records."""
+        metadata = self._state.run_metadata if isinstance(self._state.run_metadata, dict) else {}
+        raw_records = metadata.get("tool_call_records")
+        records = raw_records if isinstance(raw_records, list) else []
+        latest_by_call: dict[str, dict[str, Any]] = {}
+        for index, item in enumerate(records[-200:]):
+            if not isinstance(item, dict):
+                continue
+            call_id = str(item.get("call_id") or item.get("record_id") or f"record-{index}")
+            latest_by_call[call_id] = item
+
+        active_statuses = {"requested", "started", "running", "active", "executing", "in_progress", "modified"}
+        active_command_ids: list[str] = []
+        uncertain_command_ids: list[str] = []
+        for call_id, record in latest_by_call.items():
+            tool = str(record.get("tool") or "")
+            if not tool_requires_action_shield(tool):
+                continue
+            statuses = {
+                str(record.get(field) or "").strip().lower()
+                for field in ("status", "result_status")
+            }
+            statuses.discard("")
+            failure_code = str(record.get("failure_code") or "").strip().upper()
+            if statuses & active_statuses:
+                active_command_ids.append(call_id)
+            elif statuses & {"failed", "error"} or any(
+                token in failure_code
+                for token in ("UNKNOWN", "UNCERTAIN", "TIMEOUT", "NO_ACK", "DISCONNECT")
+            ):
+                uncertain_command_ids.append(call_id)
+
+        unsafe_device_health: dict[str, str] = {}
+        unsafe_tokens = (
+            "critical",
+            "unknown",
+            "uncertain",
+            "unreachable",
+            "disconnected",
+            "offline",
+            "failed",
+            "error",
+        )
+        for device, raw_health in sorted((self._state.device_health or {}).items()):
+            health = str(raw_health or "unknown")
+            if any(token in health.lower() for token in unsafe_tokens):
+                unsafe_device_health[str(device)] = health
+
+        if active_command_ids:
+            return {
+                "ok": False,
+                "failure_code": "PLC_PHYSICAL_COMMAND_ACTIVE",
+                "active_command_ids": sorted(active_command_ids),
+                "uncertain_command_ids": sorted(uncertain_command_ids),
+                "unsafe_device_health": unsafe_device_health,
+            }
+        if unsafe_device_health:
+            return {
+                "ok": False,
+                "failure_code": "PLC_DEVICE_HEALTH_UNSAFE",
+                "active_command_ids": [],
+                "uncertain_command_ids": sorted(uncertain_command_ids),
+                "unsafe_device_health": unsafe_device_health,
+            }
+        if uncertain_command_ids:
+            return {
+                "ok": False,
+                "failure_code": "PLC_DEVICE_EFFECT_UNRESOLVED",
+                "active_command_ids": [],
+                "uncertain_command_ids": sorted(uncertain_command_ids),
+                "unsafe_device_health": {},
+            }
+        return {
+            "ok": True,
+            "failure_code": None,
+            "active_command_ids": [],
+            "uncertain_command_ids": [],
+            "unsafe_device_health": {},
+        }
+
+    async def emergency_stop(
+        self,
+        source: str = "gui",
+        details: dict[str, object] | None = None,
+    ) -> dict[str, Any]:
         """Immediately stop active runtime and latch E-STOP recovery controls."""
+        clean_source = str(source or "gui").strip() or "gui"
+        runtime_was_active = bool(
+            (self._run_task and not self._run_task.done())
+            or self._planning_handoff_active()
+        )
+        is_new_source = self._record_safety_source(clean_source, details)
+        already_latched = self._state.emergency_stop_requested
         self._state.emergency_stop_requested = True
         self._state.stop_requested = True
         self._state.safe_stop_requested = False
         self._state.is_paused = False
+        if already_latched:
+            return {
+                "ok": True,
+                "message": "Emergency stop already latched",
+                "idempotent": not is_new_source,
+                "state": self._state.model_dump(mode="json"),
+            }
+        self._state.run_metadata[EMERGENCY_STOP_INTERRUPTED_RUNTIME_KEY] = runtime_was_active
         resume_context = self._capture_planning_resume_context(reason="emergency_stop")
         await self._cancel_active_runtime_task(stage=Stage.COMPLETE)
         await self._emit_control_event(
@@ -4105,6 +4503,8 @@ class MainController:
                 "status": "emergency_stop_requested",
                 "control": "emergency_stop",
                 "operator_action": True,
+                "source": clean_source,
+                "details": dict(details or {}),
                 "resume_available": bool(resume_context),
                 "resume_context": {
                     "cycle_index": resume_context.get("cycle_index"),
@@ -4142,14 +4542,67 @@ class MainController:
             control_plane["decision_register"] = decision_register
         metadata["latest_orchestrator_control_plane"] = control_plane
 
-    async def emergency_resume(self) -> dict[str, Any]:
+    async def plc_recovery_readiness(self, command: str) -> dict[str, object]:
+        """Validate Controller state before the PLC acknowledges recovery."""
+        clean_command = str(command or "").strip().lower()
+        if clean_command not in {"resume", "reset"}:
+            return {"ok": False, "failure_code": "PLC_INVALID_RECOVERY_COMMAND"}
+        if not self._state.emergency_stop_requested:
+            return {"ok": False, "failure_code": "PLC_ESTOP_NOT_ACTIVE"}
+        active_sources = set(self._active_safety_sources())
+        if not active_sources & set(PLC_RECOVERABLE_SAFETY_SOURCES):
+            return {"ok": False, "failure_code": "PLC_PHYSICAL_RECOVERY_NOT_ACTIVE"}
+        if active_sources - set(PLC_RECOVERABLE_SAFETY_SOURCES):
+            return {"ok": False, "failure_code": "ACTIVE_SAFETY_SOURCE_REMAINS"}
+        if (self._run_task and not self._run_task.done()) or self._planning_handoff_active():
+            return {"ok": False, "failure_code": "PLC_RUNTIME_STILL_ACTIVE"}
+        physical_safety = self._plc_physical_safety_evidence()
+        if not physical_safety["ok"]:
+            return {
+                "ok": False,
+                "failure_code": physical_safety["failure_code"],
+                "physical_safety": physical_safety,
+            }
+        if (
+            clean_command == "resume"
+            and not self._valid_planning_resume_context(
+                self._state.run_metadata.get(PLANNING_RESUME_CONTEXT_KEY)
+            )
+            and not self._plc_idle_resume_without_context_allowed()
+        ):
+            return {"ok": False, "failure_code": "PLC_RESUME_CONTEXT_UNAVAILABLE"}
+        return {"ok": True, "failure_code": None, "physical_safety": physical_safety}
+
+    async def emergency_resume(
+        self,
+        source: str = "gui",
+        transaction_id: str | None = None,
+    ) -> dict[str, Any]:
         """Clear E-STOP latch while preserving the current session and transcript."""
+        clean_source = str(source or "gui").strip() or "gui"
+        resume_context = self._state.run_metadata.get(PLANNING_RESUME_CONTEXT_KEY)
+        if (
+            clean_source in PLC_RECOVERY_SOURCES
+            and str(transaction_id or "").strip()
+            and not self._valid_planning_resume_context(resume_context)
+            and not self._plc_idle_resume_without_context_allowed()
+        ):
+            return self._emergency_recovery_rejection(
+                "PLC_RESUME_CONTEXT_UNAVAILABLE",
+                "PLC Resume requires a saved valid planning checkpoint.",
+            )
+        rejection = self._authorize_emergency_recovery(
+            source=clean_source,
+            transaction_id=transaction_id,
+        )
+        if rejection is not None:
+            return rejection
         self._state.emergency_stop_requested = False
         self._state.stop_requested = False
         self._state.safe_stop_requested = False
         self._state.is_paused = False
+        self._state.run_metadata.pop(EMERGENCY_STOP_INTERRUPTED_RUNTIME_KEY, None)
         self._reset_orchestrator_decision_layer()
-        resume_context = self._state.run_metadata.get(PLANNING_RESUME_CONTEXT_KEY)
         resume_payload: dict[str, Any] = {"started": False, "reason": "no_resume_context"}
         if isinstance(resume_context, dict):
             if self._planning_handoff_active():
@@ -4166,13 +4619,31 @@ class MainController:
         await self._emit_control_event(
             "run_emergency_resume",
             "Emergency stop latch cleared; runtime can continue from the current session",
-            {"status": "resumed", "control": "emergency_resume", "operator_action": True, "resume": resume_payload},
+            {
+                "status": "resumed",
+                "control": "emergency_resume",
+                "operator_action": True,
+                "source": clean_source,
+                "transaction_id": transaction_id,
+                "resume": resume_payload,
+            },
             level="WARNING",
         )
         return {"ok": True, "message": "Emergency stop latch cleared", "resume": resume_payload, "state": self._state.model_dump(mode="json")}
 
-    async def emergency_reset(self) -> dict[str, Any]:
+    async def emergency_reset(
+        self,
+        source: str = "gui",
+        transaction_id: str | None = None,
+    ) -> dict[str, Any]:
         """Reset runtime/controller state to the same shape as a fresh server start."""
+        clean_source = str(source or "gui").strip() or "gui"
+        rejection = self._authorize_emergency_recovery(
+            source=clean_source,
+            transaction_id=transaction_id,
+        )
+        if rejection is not None:
+            return rejection
         await self._cancel_active_runtime_task(stage=None)
         self._reset_planning_transcript()
         self._trace = RunTrace(max_events=int(self._deps.system_config.get("event_buffer_size", 300)))
@@ -4186,7 +4657,13 @@ class MainController:
         await self._emit_control_event(
             "run_emergency_reset",
             "Emergency reset completed; runtime state returned to fresh-server defaults",
-            {"status": "reset", "control": "emergency_reset", "operator_action": True},
+            {
+                "status": "reset",
+                "control": "emergency_reset",
+                "operator_action": True,
+                "source": clean_source,
+                "transaction_id": transaction_id,
+            },
             level="WARNING",
         )
         return {"ok": True, "message": "Emergency reset complete", "state": self._state.model_dump(mode="json")}
@@ -6435,6 +6912,19 @@ class MainController:
         constraints: dict[str, Any],
     ) -> dict[str, Any]:
         """Call DesignAgent for planning-only candidate generation and emit handoff chat messages."""
+        plc_rejection = await self._plc_service_start_rejection()
+        if plc_rejection is not None:
+            return plc_rejection
+        active_safety_sources = sorted(self._active_safety_sources())
+        if self._state.emergency_stop_requested or active_safety_sources:
+            return {
+                "ok": False,
+                "status": "blocked",
+                "failure_code": "SAFETY_LATCH_ACTIVE",
+                "message": "Planning cannot start while an emergency safety latch is active.",
+                "active_safety_sources": active_safety_sources,
+                "state": self._state.model_dump(mode="json"),
+            }
         self._reset_planning_workflow_controls()
         self._state.active_goal = goal or self._state.active_goal
         total_cycles = self._bind_planning_cycle_contract(constraints)

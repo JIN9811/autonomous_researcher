@@ -52,11 +52,20 @@ from dotenv import dotenv_values
 from typing import Any, AsyncIterator, Literal
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response, StreamingResponse
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from mcp_tools.lerobot_schemas import IsaacLabSyntheticRequest
 
 from self_evolution import EvolutionTaskCreate, SelfEvolutionService
@@ -73,6 +82,8 @@ from knowledge.graph_importer import import_store_to_graph
 from knowledge.graphify_bridge import import_project_graph, scan_project_graph
 from knowledge.schemas import EvolutionOutcomeRecord
 from knowledge.service import KnowledgeService
+from knowledge.manuals.service import ManualKnowledgeService
+from knowledge.manuals.prompting import build_manual_grounded_prompt, manual_context_audit
 from knowledge.reconciliation_service import GraphRevisionConflict, KnowledgeReconciliationService, KnowledgeReconciliationWorker
 from knowledge.stores import JsonlKnowledgeStore
 from device_bridges.bambu_bridge import (
@@ -83,6 +94,7 @@ from device_bridges.bambu_bridge import (
     validate_bambu_project_file_local_artifact,
 )
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
+from device_bridges.plc_bridge import PLCBridge, PymcProtocolTransport
 from device_bridges.prusa_bridge import PrusaBridgeConfig, PrinterAgenticWorkflow
 from device_bridges.specimen_pose_tracker import SpecimenPoseTrackerBridge, get_specimen_pose_tracker_bridge
 from device_bridges.utm_runtime_bridge import UTMRuntimeProcessManager, get_utm_runtime_manager
@@ -135,6 +147,7 @@ from utils.printer_profile import (
     load_prusa_print_profile,
     save_prusa_print_profile,
 )
+from utils.plc_bridge_service import PLCBridgeService
 
 app = FastAPI(title="Autonomous Researcher")
 templates = Jinja2Templates(directory=str(resolve_path("web/templates")))
@@ -150,6 +163,7 @@ _KNOWLEDGE_RECONCILIATION_SERVICE: KnowledgeReconciliationService | None = None
 _KNOWLEDGE_RECONCILIATION_WORKER: KnowledgeReconciliationWorker | None = None
 _KNOWLEDGE_RECONCILIATION_KNOWLEDGE_SERVICE: KnowledgeService | None = None
 _BO_VISUALIZATION_UPGRADE_CACHE: dict[tuple[str, int, str], dict[str, Any]] = {}
+_PLC_BRIDGE_SERVICE: PLCBridgeService | None = None
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -159,6 +173,9 @@ async def favicon() -> FileResponse:
     return FileResponse(resolve_path("web/static/favicon.svg"), media_type="image/svg+xml")
 
 controller = load_runtime()
+PLC_CONFIG_PATH = resolve_path("configs/plc.yaml")
+PLC_CONFIG_MEMORY_PATH = resolve_path("memory/plc_bridge_config.json")
+PLC_TRANSACTION_STATE_PATH = resolve_path("memory/plc_bridge_state.json")
 AGENT_BASELINE_DOC_PATH = resolve_path("docs/runtime/agent_program_baseline.md")
 BO_WORKSPACE_SETTINGS_PATH = resolve_path("memory/bo_workspace_settings.json")
 EQUIPMENT_SKILL_ROOT = resolve_path("memory/equipment_skills")
@@ -190,6 +207,176 @@ _LEROBOT_BRIDGE: LeRobotBridge | None = None
 _LEROBOT_CONFIG_MTIME_NS: int = -1
 _utm_runtime_manager: UTMRuntimeProcessManager | None = None
 _specimen_pose_tracker: SpecimenPoseTrackerBridge | None = None
+
+
+class PLCConfigRequest(BaseModel):
+    """Editable, non-secret PLC connection settings."""
+
+    transport: Literal["pymcprotocol_type3e"] = "pymcprotocol_type3e"
+    host: str = Field(default="192.168.50.90", min_length=1, max_length=253)
+    port: int = Field(default=4999, ge=1, le=65535)
+    poll_interval_s: float = Field(default=0.2, ge=0.05, le=5.0)
+    stale_after_s: float = Field(default=1.0, ge=0.1, le=60.0)
+    handshake_timeout_s: float = Field(default=5.0, ge=1.0, le=60.0)
+    runtime_environment: Literal["plc"] = "plc"
+
+    @model_validator(mode="after")
+    def validate_runtime_contract(self) -> "PLCConfigRequest":
+        if self.stale_after_s < 2 * self.poll_interval_s:
+            raise ValueError("stale_after_s must be at least 2 * poll_interval_s")
+        return self
+
+
+class PLCVirtualInputRequest(BaseModel):
+    """Explicit test-transport input, never an arbitrary register write."""
+
+    action: Literal["estop", "resume", "reset"]
+
+
+def _plc_config() -> dict[str, object]:
+    tracked = yaml.safe_load(PLC_CONFIG_PATH.read_text(encoding="utf-8"))
+    if not isinstance(tracked, dict):
+        raise RuntimeError("PLC config must be a mapping")
+    saved = _read_workspace_settings(PLC_CONFIG_MEMORY_PATH)
+    editable = {
+        key: saved.get(key, tracked.get(key))
+        for key in PLCConfigRequest.model_fields
+    }
+    validated = PLCConfigRequest.model_validate(editable).model_dump()
+    return {
+        "schema": "plc_bridge_config.v1",
+        **validated,
+        "registers": {
+            "command": "D100",
+            "estop": "D101",
+            "recovery_ack": "D102",
+        },
+    }
+
+
+def _plc_bridge_service() -> PLCBridgeService:
+    """Return the sole process-owned PLC service, constructing it lazily."""
+    global _PLC_BRIDGE_SERVICE
+    if _PLC_BRIDGE_SERVICE is not None:
+        return _PLC_BRIDGE_SERVICE
+
+    config = _plc_config()
+    _PLC_BRIDGE_SERVICE = PLCBridgeService(
+        PLCBridge(PymcProtocolTransport()),
+        controller,
+        host=str(config["host"]),
+        port=int(config["port"]),
+        poll_interval_s=float(config["poll_interval_s"]),
+        stale_after_s=float(config["stale_after_s"]),
+        handshake_timeout_s=float(config["handshake_timeout_s"]),
+        state_path=PLC_TRANSACTION_STATE_PATH,
+    )
+    return _PLC_BRIDGE_SERVICE
+
+
+def _plc_status() -> dict[str, object]:
+    status = _plc_bridge_service().status()
+    status["legacy_controls_available"] = "plc_pb2" not in status["active_estop_sources"]
+    return status
+
+
+def _plc_mutation_payload(
+    *,
+    ok: bool,
+    message: str,
+    failure_code: str | None = None,
+    step_trace: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    snapshot = _plc_status()
+    transaction = snapshot.get("transaction")
+    transaction_id = transaction.get("transaction_id") if isinstance(transaction, dict) else None
+    return {
+        "ok": ok,
+        "status": snapshot["safety_state"],
+        "failure_code": failure_code if failure_code is not None else snapshot["failure_code"],
+        "message": message,
+        "transaction_id": transaction_id,
+        "register_snapshot": snapshot["register_snapshot"],
+        "connection_state": snapshot["connection_state"],
+        "step_trace": step_trace or [],
+    }
+
+
+def _plc_lifecycle_failure(operation: Literal["config", "disconnect"]) -> tuple[str, str] | None:
+    """Return the fail-closed lifecycle gate for a PLC service mutation."""
+    controller_snapshot = controller.snapshot()
+    if bool(controller_snapshot.get("is_running")):
+        return (
+            f"PLC_{operation.upper()}_ACTIVE_RUN",
+            "PLC lifecycle changes are blocked while a runtime is active.",
+        )
+
+    service_status = _plc_bridge_service().status()
+    if bool(service_status.get("active_handshake")):
+        return (
+            f"PLC_{operation.upper()}_HANDSHAKE_ACTIVE",
+            "PLC lifecycle changes are blocked during a recovery handshake.",
+        )
+    if operation == "config" and service_status.get("monitor_state") == "running":
+        return (
+            "PLC_CONFIG_MONITOR_RUNNING",
+            "Stop the PLC monitor before changing its configuration.",
+        )
+    if operation == "config" and service_status.get("connection_state") != "offline":
+        return (
+            "PLC_CONFIG_REQUIRES_DISCONNECT",
+            "Disconnect the PLC before changing its configuration.",
+        )
+    return None
+
+
+async def _gui_emergency_stop(route_family: str) -> dict[str, object]:
+    """Latch a mouse-originated E-STOP without asserting the physical PLC input."""
+    details: dict[str, object] = {"route_family": route_family}
+    result = await controller.emergency_stop(source="gui_estop", details=details)
+    if result.get("ok") is not True:
+        return result
+    return {
+        **result,
+        "plc_sync_ok": True,
+        "plc_sync_skipped": True,
+        "plc_sync_failure_code": None,
+        "plc_sync_message": "GUI E-STOP is controller-local; PLC D101 was not written.",
+    }
+
+
+async def _gui_emergency_recovery(
+    command: Literal["resume", "reset"],
+) -> dict[str, object] | JSONResponse:
+    """Use the single PLC service gate for every GUI recovery route."""
+    result = await _plc_bridge_service().request_gui_recovery(command)
+    if result.get("ok") is True:
+        return result
+    return JSONResponse(status_code=409, content=result)
+
+
+@app.exception_handler(RequestValidationError)
+async def plc_request_validation_error(
+    request: Request,
+    exc: RequestValidationError,
+) -> Response:
+    """Preserve the PLC mutation contract while leaving other validation unchanged."""
+    failure_codes = {
+        "/api/plc/config": "PLC_CONFIG_VALIDATION_FAILED",
+        "/api/plc/virtual/input": "PLC_VIRTUAL_INPUT_VALIDATION_FAILED",
+    }
+    failure_code = failure_codes.get(request.url.path) if request.method == "POST" else None
+    if failure_code is None:
+        return await request_validation_exception_handler(request, exc)
+    return JSONResponse(
+        status_code=422,
+        content=_plc_mutation_payload(
+            ok=False,
+            failure_code=failure_code,
+            message="Invalid PLC request payload.",
+            step_trace=[{"step": "REQUEST_VALIDATION", "status": "failed"}],
+        ),
+    )
 
 
 def _objective_service() -> ObjectiveService:
@@ -465,6 +652,10 @@ async def _apply_runtime_api_key_settings(settings: dict[str, Any], *, emit_even
 @app.on_event("startup")
 async def keep_startup_side_effect_free() -> None:
     """Keep GUI startup free of model prewarming while applying saved secrets."""
+    plc_service = _plc_bridge_service()
+    controller.set_terminal_error_notifier(plc_service.set_terminal_estop)
+    controller.set_plc_safety_status_provider(plc_service.status)
+    await plc_service.start()
     _cleanup_bambu_video_stream_processes(include_orphans=True)
     settings = _read_api_key_settings(import_env=True)
     await _apply_runtime_api_key_settings(settings, emit_event=False)
@@ -476,6 +667,10 @@ async def keep_startup_side_effect_free() -> None:
 @app.on_event("shutdown")
 async def shutdown_lerobot_subprocesses() -> None:
     """Release LeRobot live subprocesses so cameras/serial ports are not left busy."""
+    if _PLC_BRIDGE_SERVICE is not None:
+        await _PLC_BRIDGE_SERVICE.shutdown()
+    controller.set_terminal_error_notifier(None)
+    controller.set_plc_safety_status_provider(None)
     _cleanup_bambu_video_stream_processes(include_orphans=True)
     _lerobot_bridge().shutdown()
     _utm_runtime_bridge().shutdown()
@@ -1998,6 +2193,168 @@ async def lerobot_gui(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/plc", response_class=HTMLResponse)
+async def plc_gui(request: Request) -> HTMLResponse:
+    """Serve the dedicated PLC device workspace shell."""
+    return templates.TemplateResponse(
+        request=request,
+        name="plc.html",
+        context={"title": "PLC Device Workspace"},
+    )
+
+
+@app.get("/api/plc/config")
+async def plc_config() -> dict[str, object]:
+    """Return the editable PLC configuration without runtime history."""
+    return _plc_config()
+
+
+@app.post("/api/plc/config", response_model=None)
+async def save_plc_config(request: PLCConfigRequest) -> dict[str, object] | JSONResponse:
+    """Persist validated settings only while the physical connection is offline."""
+    service = _plc_bridge_service()
+    lifecycle_failure = _plc_lifecycle_failure("config")
+    if lifecycle_failure is not None:
+        failure_code, message = lifecycle_failure
+        return JSONResponse(
+            status_code=409,
+            content=_plc_mutation_payload(
+                ok=False,
+                failure_code=failure_code,
+                message=message,
+                step_trace=[{"step": "CONFIG_GATE", "status": "blocked"}],
+            ),
+        )
+
+    saved = request.model_dump()
+    _write_workspace_settings(PLC_CONFIG_MEMORY_PATH, saved)
+    service._host = request.host
+    service._port = request.port
+    service._poll_interval_s = request.poll_interval_s
+    service._stale_after_s = request.stale_after_s
+    service._handshake_timeout_s = request.handshake_timeout_s
+    return _plc_mutation_payload(
+        ok=True,
+        message="PLC configuration saved.",
+        step_trace=[{"step": "CONFIG_VALIDATE_AND_SAVE", "status": "ok"}],
+    )
+
+
+@app.get("/api/plc/status")
+async def plc_status() -> dict[str, object]:
+    """Return cached PLC state without waiting for physical I/O."""
+    return _plc_status()
+
+
+@app.post("/api/plc/connect")
+async def connect_plc() -> dict[str, object]:
+    """Start the sole background monitor without blocking on connection I/O."""
+    started = await _plc_bridge_service().start()
+    return _plc_mutation_payload(
+        ok=True,
+        message="PLC monitoring started." if started else "PLC monitoring is already running.",
+        step_trace=[{"step": "MONITOR_START", "status": "ok"}],
+    )
+
+
+@app.post("/api/plc/disconnect", response_model=None)
+async def disconnect_plc() -> dict[str, object] | JSONResponse:
+    """Stop monitoring and disconnect the configured transport."""
+    lifecycle_failure = _plc_lifecycle_failure("disconnect")
+    if lifecycle_failure is not None:
+        failure_code, message = lifecycle_failure
+        return JSONResponse(
+            status_code=409,
+            content=_plc_mutation_payload(
+                ok=False,
+                failure_code=failure_code,
+                message=message,
+                step_trace=[{"step": "DISCONNECT_GATE", "status": "blocked"}],
+            ),
+        )
+    await _plc_bridge_service().shutdown()
+    return _plc_mutation_payload(
+        ok=True,
+        message="PLC monitoring stopped.",
+        step_trace=[{"step": "MONITOR_SHUTDOWN", "status": "ok"}],
+    )
+
+
+@app.post("/api/plc/preflight", response_model=None)
+async def preflight_plc() -> dict[str, object] | JSONResponse:
+    """Read and validate the bounded register contract without actuation."""
+    service = _plc_bridge_service()
+    try:
+        result = await service.preflight()
+    except Exception as exc:
+        await service.mark_disconnected(str(exc))
+        return _plc_mutation_payload(
+            ok=False,
+            failure_code="PLC_CONNECT_FAILED",
+            message=str(exc),
+            step_trace=[{"step": "PREFLIGHT_CONNECT_AND_READ", "status": "failed"}],
+        )
+    payload = _plc_mutation_payload(
+        ok=bool(result["ok"]),
+        failure_code=str(result["failure_code"]) if result["failure_code"] else None,
+        message=(
+            "PLC preflight passed."
+            if result["ok"]
+            else str(result.get("message") or "PLC preflight failed.")
+        ),
+        step_trace=[
+            {
+                "step": (
+                    "PREFLIGHT_HANDSHAKE_GATE"
+                    if result.get("failure_code") == "PLC_PREFLIGHT_HANDSHAKE_ACTIVE"
+                    else "PREFLIGHT_CONNECT_AND_READ"
+                ),
+                "status": "ok" if result["ok"] else "blocked",
+            }
+        ],
+    )
+    if result.get("failure_code") == "PLC_PREFLIGHT_HANDSHAKE_ACTIVE":
+        return JSONResponse(status_code=409, content=payload)
+    return payload
+
+
+@app.get("/api/plc/events")
+async def plc_events() -> dict[str, object]:
+    """Return the service's bounded in-memory event history."""
+    events = _plc_bridge_service().events()
+    return {"events": events, "count": len(events)}
+
+
+@app.post("/api/plc/virtual/input", response_model=None)
+async def set_virtual_plc_input(
+    request: PLCVirtualInputRequest,
+) -> dict[str, object] | JSONResponse:
+    """Apply a named pushbutton action only to an explicit virtual transport."""
+    service = _plc_bridge_service()
+    action = {
+        "estop": service.virtual_estop,
+        "resume": service.virtual_resume,
+        "reset": service.virtual_reset,
+    }[request.action]
+    try:
+        await action()
+    except RuntimeError:
+        return JSONResponse(
+            status_code=409,
+            content=_plc_mutation_payload(
+                ok=False,
+                failure_code="PLC_VIRTUAL_INPUT_UNAVAILABLE",
+                message="Virtual PLC input is unavailable for the configured live transport.",
+                step_trace=[{"step": "VIRTUAL_TRANSPORT_GATE", "status": "blocked"}],
+            ),
+        )
+    return _plc_mutation_payload(
+        ok=True,
+        message=f"Virtual PLC {request.action} input applied.",
+        step_trace=[{"step": "VIRTUAL_INPUT", "status": "ok", "action": request.action}],
+    )
+
+
 @app.get("/printer", response_class=HTMLResponse)
 async def printer_gui(request: Request) -> HTMLResponse:
     """Serve Prusa MK4S 3DP profile and bridge control GUI."""
@@ -3266,6 +3623,50 @@ def _knowledge_graph_backend():
 def _knowledge_service() -> KnowledgeService:
     """Return the shared durable Knowledge service for API and CLI parity."""
     return KnowledgeService.from_env(resolve_path("."))
+
+
+def _manual_knowledge_service() -> ManualKnowledgeService:
+    """Return the source-separated UTM manual GraphRAG service."""
+    return ManualKnowledgeService(project_root=resolve_path("."))
+
+
+def _manual_knowledge_context(
+    query: str,
+    *,
+    purpose: str,
+    product_hint: str = "",
+    version_hint: str = "",
+    top_k: int = 6,
+) -> dict[str, Any]:
+    service = _manual_knowledge_service()
+    try:
+        return service.query(
+            {
+                "equipment_type": "utm",
+                "query": query,
+                "purpose": purpose,
+                "product_hint": product_hint,
+                "version_hint": version_hint,
+                "top_k": top_k,
+            }
+        )
+    except Exception as exc:
+        return {
+            "schema": "manual_context.v1",
+            "equipment_type": "utm",
+            "purpose": purpose,
+            "query": query,
+            "chunks": [],
+            "insufficient_evidence": True,
+            "error": f"{exc.__class__.__name__}: {exc}",
+            "source_separation": {
+                "manual_only": True,
+                "web_used": False,
+                "runtime_memory_used": False,
+            },
+        }
+    finally:
+        service.close()
 
 
 def _knowledge_reconciliation_worker() -> KnowledgeReconciliationWorker:
@@ -10762,18 +11163,42 @@ async def _annotate_equipment_skill_with_selected_model(package: dict[str, Any])
         await prepare_model(model)
     workflow = package.get("workflow") if isinstance(package.get("workflow"), dict) else {}
     annotations = package.get("annotations") if isinstance(package.get("annotations"), dict) else {}
+    manifest = package.get("manifest") if isinstance(package.get("manifest"), dict) else {}
+    manual_context = _manual_knowledge_context(
+        " ".join(
+            part
+            for part in (
+                "UTM Windows GUI skill authoring",
+                str(manifest.get("target_profile") or ""),
+                str(workflow.get("name") or ""),
+                json.dumps(workflow.get("steps", []), ensure_ascii=False, default=str)[:3000],
+            )
+            if part
+        ),
+        purpose="skill_authoring",
+        product_hint=str(manifest.get("product") or ""),
+        version_hint=str(manifest.get("software_version") or ""),
+    )
+    manual_audit = manual_context_audit(manual_context)
+    snapshot["manual_context"] = manual_audit
     response = await backend.complete(
         model=model,
-        system_prompt=(
+        system_prompt=build_manual_grounded_prompt(
             "You annotate an already recorded bounded Windows equipment workflow. Return one JSON object only. "
             "Preserve every step_id. For each step provide label, confidence from 0 to 1, review_required, "
-            "optional locator, and checkpoint_after. Do not add executable actions or credentials."
+            "optional locator, and checkpoint_after. Do not add executable actions or credentials.",
+            manual_context,
         ),
         user_prompt=json.dumps(
             {"workflow": workflow, "current_annotations": annotations},
             ensure_ascii=False,
         ),
-        metadata={"task_type": "equipment_skill_annotation", "role": snapshot["role"], "no_fallback": True},
+        metadata={
+            "task_type": "equipment_skill_annotation",
+            "role": snapshot["role"],
+            "no_fallback": True,
+            "manual_context_hash": manual_audit["context_hash"],
+        },
     )
     if not str(response.text or "").strip():
         raise RuntimeError("selected model returned an empty annotation")
@@ -14908,7 +15333,7 @@ async def post_lerobot_ports_baseline(req: LeRobotDevicePortAPIRequest) -> dict[
 @app.post("/api/lerobot/ports/detect")
 async def post_lerobot_ports_detect(req: LeRobotDevicePortAPIRequest) -> dict[str, object]:
     """Detect and save the target LeRobot device that appeared after the baseline."""
-    result = _lerobot_bridge().ports_detect(req.model_dump())
+    result = await asyncio.to_thread(_lerobot_bridge().ports_detect, req.model_dump())
     return await _publish_lerobot_result(result)
 
 
@@ -15599,6 +16024,51 @@ async def get_knowledge_graph_health() -> dict[str, object]:
         return backend.health()
     finally:
         backend.close()
+
+
+@app.get("/api/knowledge/manuals/status")
+async def get_manual_knowledge_status() -> dict[str, Any]:
+    service = _manual_knowledge_service()
+    try:
+        return service.status()
+    finally:
+        service.close()
+
+
+@app.post("/api/knowledge/manuals/ingest")
+async def post_manual_knowledge_ingest() -> dict[str, Any]:
+    service = _manual_knowledge_service()
+    try:
+        return service.ingest()
+    finally:
+        service.close()
+
+
+@app.post("/api/knowledge/manuals/query")
+async def post_manual_knowledge_query(payload: dict[str, Any]) -> dict[str, Any]:
+    service = _manual_knowledge_service()
+    try:
+        try:
+            return service.query(dict(payload))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        service.close()
+
+
+@app.get("/api/knowledge/manuals/graph")
+async def get_manual_knowledge_graph(limit: int = 100, view: str = "semantic") -> dict[str, Any]:
+    service = _manual_knowledge_service()
+    try:
+        try:
+            selected_view = str(view or "semantic").strip().lower()
+            if selected_view not in {"semantic", "evidence"}:
+                raise ValueError("manual graph view must be semantic or evidence")
+            return service.graph(limit=max(1, min(int(limit), 300)), view=selected_view)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        service.close()
 
 
 @app.get("/api/knowledge/ontology")
@@ -16297,19 +16767,19 @@ async def safe_stop_run() -> dict[str, object]:
 @app.post("/api/run/emergency-stop")
 async def emergency_stop_run() -> dict[str, object]:
     """Immediately stop runtime and latch E-STOP recovery controls."""
-    return await controller.emergency_stop()
+    return await _gui_emergency_stop("run")
 
 
-@app.post("/api/run/emergency-resume")
-async def emergency_resume_run() -> dict[str, object]:
+@app.post("/api/run/emergency-resume", response_model=None)
+async def emergency_resume_run() -> dict[str, object] | JSONResponse:
     """Clear E-STOP latch while preserving the current session."""
-    return await controller.emergency_resume()
+    return await _gui_emergency_recovery("resume")
 
 
-@app.post("/api/run/emergency-reset")
-async def emergency_reset_run() -> dict[str, object]:
+@app.post("/api/run/emergency-reset", response_model=None)
+async def emergency_reset_run() -> dict[str, object] | JSONResponse:
     """Reset runtime state to fresh-server defaults after E-STOP."""
-    return await controller.emergency_reset()
+    return await _gui_emergency_recovery("reset")
 
 
 @app.post("/api/runtime/start")
@@ -16345,19 +16815,19 @@ async def safe_stop_runtime_compat() -> dict[str, object]:
 @app.post("/api/runtime/emergency-stop")
 async def emergency_stop_runtime_compat() -> dict[str, object]:
     """Compatibility alias for package-specified runtime emergency-stop."""
-    return await controller.emergency_stop()
+    return await _gui_emergency_stop("runtime")
 
 
-@app.post("/api/runtime/emergency-resume")
-async def emergency_resume_runtime_compat() -> dict[str, object]:
+@app.post("/api/runtime/emergency-resume", response_model=None)
+async def emergency_resume_runtime_compat() -> dict[str, object] | JSONResponse:
     """Compatibility alias for package-specified runtime emergency resume."""
-    return await controller.emergency_resume()
+    return await _gui_emergency_recovery("resume")
 
 
-@app.post("/api/runtime/emergency-reset")
-async def emergency_reset_runtime_compat() -> dict[str, object]:
+@app.post("/api/runtime/emergency-reset", response_model=None)
+async def emergency_reset_runtime_compat() -> dict[str, object] | JSONResponse:
     """Compatibility alias for package-specified runtime emergency reset."""
-    return await controller.emergency_reset()
+    return await _gui_emergency_recovery("reset")
 
 
 @app.get("/api/runs/{run_id}")
@@ -16414,21 +16884,21 @@ async def stop_runtime_run(run_id: str) -> dict[str, object]:
 async def emergency_stop_runtime_run(run_id: str) -> dict[str, object]:
     """Emergency-stop the active run addressed by run_id."""
     _require_current_run(run_id)
-    return await controller.emergency_stop()
+    return await _gui_emergency_stop("runs")
 
 
-@app.post("/api/runs/{run_id}/emergency-resume")
-async def emergency_resume_runtime_run(run_id: str) -> dict[str, object]:
+@app.post("/api/runs/{run_id}/emergency-resume", response_model=None)
+async def emergency_resume_runtime_run(run_id: str) -> dict[str, object] | JSONResponse:
     """Clear E-STOP latch for the active run addressed by run_id."""
     _require_current_run(run_id)
-    return await controller.emergency_resume()
+    return await _gui_emergency_recovery("resume")
 
 
-@app.post("/api/runs/{run_id}/emergency-reset")
-async def emergency_reset_runtime_run(run_id: str) -> dict[str, object]:
+@app.post("/api/runs/{run_id}/emergency-reset", response_model=None)
+async def emergency_reset_runtime_run(run_id: str) -> dict[str, object] | JSONResponse:
     """Reset the active run addressed by run_id to fresh-server defaults."""
     _require_current_run(run_id)
-    return await controller.emergency_reset()
+    return await _gui_emergency_recovery("reset")
 
 
 @app.get("/api/runs/{run_id}/approvals")

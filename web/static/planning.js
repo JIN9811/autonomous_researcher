@@ -80,6 +80,7 @@ const btnLiveSafeStop = document.getElementById("btn-live-safe-stop");
 const liveEmergencyRecovery = document.getElementById("live-emergency-recovery");
 const btnLiveEmergencyResume = document.getElementById("btn-live-emergency-resume");
 const btnLiveEmergencyReset = document.getElementById("btn-live-emergency-reset");
+const livePLCEmergencyGuidance = document.getElementById("live-plc-emergency-guidance");
 const liveQuickActionButtons = Array.from(document.querySelectorAll(".live-quick-action"));
 const liveHoverTooltip = document.getElementById("live-hover-tooltip");
 const liveShortcutOverlay = document.getElementById("live-shortcut-overlay");
@@ -265,6 +266,20 @@ let liveObjectiveRefreshedAt = 0;
 const LIVE_AUTO_REFRESH_MS = 5000;
 const LIVE_SYNC_STALE_MS = 15000;
 const LIVE_SYNC_ERROR_MS = 60000;
+const LIVE_PLC_STATUS_REFRESH_MS = 3000;
+const LIVE_PLC_STATUS_FETCH_TIMEOUT_MS = 1000;
+let livePLCStatus = {
+  connection_state: "offline",
+  transport: "unknown",
+  safety_state: "disconnected",
+  active_estop_sources: [],
+  register_snapshot: null,
+  legacy_controls_available: true,
+};
+let livePLCStatusSignature = "";
+let livePLCStatusAuthoritative = false;
+let livePLCStatusRefreshedAt = 0;
+let livePLCStatusRefreshInFlight = null;
 let liveRuntimeRenderQueued = false;
 let liveRuntimeRenderQueuedSession = null;
 let liveMissionMarqueeFrame = null;
@@ -277,6 +292,7 @@ let liveOrcChartRenderFrame = null;
 let liveOrcEchartsLoadPromise = null;
 let liveOrcChartHydrationTimer = null;
 let liveBrowserCacheRestoredRunId = "";
+let liveAppliedAuthoritativeRunId = "";
 
 let queryGoal = "Design and validate a live-mode specimen plan before hardware execution.";
 let queryBackend = "vllm";
@@ -974,9 +990,22 @@ function restoreCachedPlanningState() {
   }
 }
 
-function discardStaleLivePlanningCache(serverSession = {}) {
+function resetLiveRunScopedStateForAuthoritativeSession(serverSession = {}) {
   const serverRunId = String((serverSession.state && serverSession.state.run_id) || "");
-  if (!liveBrowserCacheRestoredRunId || !serverRunId || liveBrowserCacheRestoredRunId === serverRunId) return false;
+  if (!serverRunId) return false;
+  const previousRunId = String(
+    liveAppliedAuthoritativeRunId
+    || liveBrowserCacheRestoredRunId
+    || (liveLastSession && liveLastSession.state && liveLastSession.state.run_id)
+    || (liveLastSnapshot && liveLastSnapshot.state && liveLastSnapshot.state.run_id)
+    || ""
+  );
+  liveAppliedAuthoritativeRunId = serverRunId;
+  if (!previousRunId || previousRunId === serverRunId) {
+    liveBrowserCacheRestoredRunId = serverRunId;
+    return false;
+  }
+
   const storage = liveSessionStorage();
   const key = planningSessionCacheKey(planningSessionId);
   if (storage && key) {
@@ -986,10 +1015,29 @@ function discardStaleLivePlanningCache(serverSession = {}) {
       // Browser storage cleanup is best-effort; server state remains authoritative.
     }
   }
+
+  liveRunEvents = [];
+  liveRecentEvents = [];
+  liveRunArtifacts = [];
+  liveApprovals = { approvals: [], pending: [], resolved: [] };
+  liveResolvedApprovalIds = new Set();
+  liveReadQuestionKeys = {};
+  liveReadFaultKeys = {};
+  liveReadMarkers = {};
+  liveReviewedAgents = {};
+  livePinnedFindings = [];
+  liveOperatorReportStateRunId = "";
+  liveSelectedEventKey = "";
+  liveGraphActionStatus = null;
+  liveGuardianStatus = null;
+  liveVisionSpecimenRetryCheckpoints.clear();
+  liveRuntimeStartedAt = Date.now();
   resetPlanningMessageDisplayState();
-  liveLastSession = {};
-  liveLastSnapshot = {};
-  liveBrowserCacheRestoredRunId = "";
+  liveLastSnapshot = {
+    state: serverSession.state || {},
+    runtime: serverSession.runtime || {},
+  };
+  liveBrowserCacheRestoredRunId = serverRunId;
   clearLiveBoVisualization();
   if (planningChatLog) planningChatLog.innerHTML = "";
   return true;
@@ -1213,23 +1261,6 @@ function ensurePlanningSessionId() {
     }
     return planningSessionId;
   }
-}
-
-function resetPlanningSessionIdForEmergencyReset() {
-  const key = "autonomousLivePlanningSessionId";
-  const storage = liveSessionStorage();
-  const oldCacheKey = planningSessionCacheKey(planningSessionId);
-  planningSessionId = `live-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  planningFreshSessionInitialized = true;
-  try {
-    if (storage) {
-      if (oldCacheKey) storage.removeItem(oldCacheKey);
-      storage.setItem(key, planningSessionId);
-    }
-  } catch (err) {
-    // Session reset must not fail because browser storage is unavailable.
-  }
-  return planningSessionId;
 }
 
 function applyQueryGoal() {
@@ -3930,7 +3961,7 @@ function eventStatusForAgent(agentId, state, running) {
   if (pendingInput) return running && activeAgent === agentId ? "running" : "waiting";
   const printerRuntime = agentId === "specimen" ? specimenPrinterRuntimeState() : "";
   if (printerRuntime === "running") return "running";
-  const hasError = agentEvents.some((event) => !eventRequiresOperatorInput(event) && (
+  const hasError = agentEvents.some((event) => !isResolvedEmergencyLifecycleEvent(event) && !eventRequiresOperatorInput(event) && (
     !isTransientPrinterCommunicationEvent(event) && (
     String(event.level || event.severity || "").toLowerCase() === "error"
     || String(event.status || "").toLowerCase() === "failed"
@@ -16314,7 +16345,26 @@ function currentRunEventSources() {
   return merged.filter((event) => eventMatchesCurrentRun(event) || !eventRunId(event));
 }
 
+function isResolvedEmergencyLifecycleEvent(event, session = liveLastSession) {
+  const eventType = String(event?.event_type || event?.type || "").toLowerCase();
+  const message = String(event?.message || "").toLowerCase();
+  if (eventType === "run_emergency_resume" || eventType === "run_emergency_reset") return true;
+  if (eventType === "run_complete" && message.includes("after emergency stop")) return true;
+  if (eventType !== "run_emergency_stop") return false;
+  if (!liveEmergencyStopLatched(session)) return true;
+
+  const eventKey = eventStableKey(event);
+  const events = currentRunEventSources();
+  const eventIndex = events.findIndex((candidate) => eventStableKey(candidate) === eventKey);
+  const hasLaterEmergencyRecovery = eventIndex >= 0 && events.slice(eventIndex + 1).some((candidate) => {
+    const candidateType = String(candidate?.event_type || candidate?.type || "").toLowerCase();
+    return candidateType === "run_emergency_resume" || candidateType === "run_emergency_reset";
+  });
+  return hasLaterEmergencyRecovery;
+}
+
 function isAgentNotificationEvent(event) {
+  if (isResolvedEmergencyLifecycleEvent(event)) return false;
   const kind = eventTimelineKind(event);
   if (kind === "error" || kind === "warning") return true;
   if (isAgentQuestionEvent(event)) return true;
@@ -17134,6 +17184,7 @@ function renderQuestionCard(event) {
 
 
 function isRuntimeFaultEvent(event) {
+  if (isResolvedEmergencyLifecycleEvent(event)) return false;
   if (isAgentQuestionEvent(event)) return false;
   const eventType = String(event?.event_type || event?.type || "").toLowerCase();
   if (eventType.startsWith("approval.") || eventType === "approval_requested") return false;
@@ -18225,6 +18276,8 @@ window.__liveGuiDebugSnapshot = function liveGuiDebugSnapshot() {
     token_usage: collectLiveTokenUsage(liveLastSession),
     fault_events: liveFaultEvents(12),
     read_fault_keys: liveReadFaultKeys,
+    plc_status: livePLCStatus,
+    plc_status_refresh_in_flight: Boolean(livePLCStatusRefreshInFlight),
   };
 };
 
@@ -18239,8 +18292,17 @@ window.__liveGuiDebugRestoreOperatorReportState = function liveGuiDebugRestoreOp
 };
 
 function applyPlanningSession(session) {
-  discardStaleLivePlanningCache(session || {});
-  liveLastSession = session || {};
+  const authoritativeSession = session || {};
+  const runTransitionReset = resetLiveRunScopedStateForAuthoritativeSession(authoritativeSession);
+  liveLastSession = runTransitionReset
+    ? {
+        ...authoritativeSession,
+        messages: [],
+        message_total: 0,
+        has_more_messages: false,
+        next_before: null,
+      }
+    : authoritativeSession;
   if (liveLastSession.planning_session_id) {
     persistPlanningSessionId(liveLastSession.planning_session_id);
   }
@@ -19789,13 +19851,126 @@ function liveEmergencyEndpoint(action, fallback) {
   return runId ? `/api/runs/${encodeURIComponent(runId)}/${action}` : fallback;
 }
 
+function liveEmergencySourceSet(session = liveLastSession, status = livePLCStatus) {
+  const sources = new Set(
+    Array.isArray(status?.active_estop_sources) ? status.active_estop_sources.map(String) : []
+  );
+  const state = (session && session.state) || (liveLastSnapshot && liveLastSnapshot.state) || {};
+  const metadata = state.run_metadata && typeof state.run_metadata === "object" ? state.run_metadata : {};
+  const controllerSources = metadata.active_safety_sources;
+  if (Array.isArray(controllerSources)) {
+    controllerSources.forEach((source) => sources.add(String(source)));
+  } else if (controllerSources && typeof controllerSources === "object") {
+    Object.keys(controllerSources).forEach((source) => sources.add(String(source)));
+  }
+  return sources;
+}
+
+function livePLCSourceLocked(status = livePLCStatus, session = liveLastSession) {
+  return liveEmergencySourceSet(session, status).has("plc_pb2");
+}
+
+function livePLCStatusProjection(status = livePLCStatus) {
+  const registers = status?.register_snapshot && typeof status.register_snapshot === "object" ? status.register_snapshot : {};
+  const sourceText = Array.isArray(status?.active_estop_sources) && status.active_estop_sources.length
+    ? status.active_estop_sources.join(",")
+    : "none";
+  const value = (input) => input === undefined || input === null || input === "" ? "-" : String(input);
+  return [
+    `connection=${value(status?.connection_state)}`,
+    `transport=${value(status?.transport)}`,
+    `safety=${value(status?.safety_state)}`,
+    `sources=${sourceText}`,
+    `D100=${value(registers.d100)}`,
+    `D101=${value(registers.d101)}`,
+    `D102=${value(registers.d102)}`,
+    `latency_ms=${value(status?.last_latency_ms)}`,
+    `sample_age_s=${value(status?.sample_age_s)}`,
+  ].join(" | ");
+}
+
 function updateLiveEmergencyStopControls(session = liveLastSession) {
-  const latched = liveEmergencyStopLatched(session);
+  const activeSources = liveEmergencySourceSet(session, livePLCStatus);
+  const plcSourceLocked = activeSources.has("plc_pb2");
+  const guiSourceLatched = activeSources.has("gui_estop") || activeSources.has("gui");
+  const latched = liveEmergencyStopLatched(session) || plcSourceLocked || guiSourceLatched;
+  const sourcePending = latched && !plcSourceLocked && !guiSourceLatched;
   const cell = btnLiveSafeStop ? btnLiveSafeStop.closest(".mission-status-stop") : null;
-  if (cell) cell.classList.toggle("is-emergency-latched", latched);
+  if (cell) {
+    cell.classList.toggle("is-emergency-latched", latched);
+    cell.classList.toggle("is-plc-source-locked", plcSourceLocked);
+    cell.title = plcSourceLocked ? livePLCStatusProjection(livePLCStatus) : "Emergency runtime control";
+  }
   if (btnLiveSafeStop) btnLiveSafeStop.hidden = latched;
   if (liveEmergencyRecovery) liveEmergencyRecovery.hidden = !latched;
+  if (btnLiveEmergencyResume) {
+    btnLiveEmergencyResume.hidden = plcSourceLocked || sourcePending;
+    btnLiveEmergencyResume.disabled = plcSourceLocked || sourcePending;
+  }
+  if (btnLiveEmergencyReset) {
+    btnLiveEmergencyReset.hidden = plcSourceLocked || sourcePending;
+    btnLiveEmergencyReset.disabled = plcSourceLocked || sourcePending;
+  }
+  if (livePLCEmergencyGuidance) {
+    livePLCEmergencyGuidance.hidden = !plcSourceLocked;
+    livePLCEmergencyGuidance.title = livePLCStatusProjection(livePLCStatus);
+  }
+  if (plcSourceLocked) resetLiveEmergencyStopArm();
   if (!latched) resetLiveEmergencyStopArm();
+}
+
+function livePLCStatusMaterialSignature(status = {}) {
+  const registers = status?.register_snapshot && typeof status.register_snapshot === "object" ? status.register_snapshot : {};
+  return JSON.stringify({
+    connection_state: status?.connection_state || "offline",
+    transport: status?.transport || "unknown",
+    safety_state: status?.safety_state || "unknown",
+    active_estop_sources: Array.isArray(status?.active_estop_sources) ? status.active_estop_sources : [],
+    failure_code: status?.failure_code || null,
+    registers: [registers.d100 ?? null, registers.d101 ?? null, registers.d102 ?? null, registers.sequence ?? null],
+    last_latency_ms: status?.last_latency_ms ?? null,
+    sample_age_bucket_s: Number.isFinite(Number(status?.sample_age_s)) ? Math.floor(Number(status.sample_age_s)) : null,
+  });
+}
+
+function applyLivePLCStatus(status = {}) {
+  if (!status || typeof status !== "object" || Array.isArray(status)) return false;
+  const signature = livePLCStatusMaterialSignature(status);
+  const changed = signature !== livePLCStatusSignature;
+  livePLCStatus = status;
+  livePLCStatusAuthoritative = true;
+  livePLCStatusRefreshedAt = Date.now();
+  if (changed) {
+    livePLCStatusSignature = signature;
+    updateLiveEmergencyStopControls(liveLastSession);
+  }
+  return changed;
+}
+
+window.applyLivePLCStatus = applyLivePLCStatus;
+
+async function refreshLivePLCStatus(options = {}) {
+  const force = Boolean(options.force);
+  if (livePLCStatusRefreshInFlight) return livePLCStatusRefreshInFlight;
+  if (!force && document.visibilityState === "hidden") return livePLCStatus;
+  if (!force && Date.now() - livePLCStatusRefreshedAt < LIVE_PLC_STATUS_REFRESH_MS) return livePLCStatus;
+  livePLCStatusRefreshedAt = Date.now();
+  livePLCStatusRefreshInFlight = (async () => {
+    try {
+      const status = await fetchJsonOrThrowWithTimeout(
+        "/api/plc/status",
+        { headers: { "Accept": "application/json" } },
+        LIVE_PLC_STATUS_FETCH_TIMEOUT_MS
+      );
+      applyLivePLCStatus(status);
+    } catch (_err) {
+      // Retain the last authoritative PLC snapshot; transport failure must not clear any latch.
+    } finally {
+      livePLCStatusRefreshInFlight = null;
+    }
+    return livePLCStatus;
+  })();
+  return livePLCStatusRefreshInFlight;
 }
 
 function armLiveEmergencyStop() {
@@ -19839,6 +20014,11 @@ async function confirmOrRequestLiveEmergencyStop() {
 }
 
 async function requestLiveEmergencyResume() {
+  if (livePLCSourceLocked()) {
+    updateLiveEmergencyStopControls(liveLastSession);
+    setChatStatus("USE PLC PB1", "warning", "PB1 short press resumes a PLC-originated E-STOP.");
+    return;
+  }
   try {
     setChatStatus("E-STOP RESUME", "warning");
     const endpoint = liveEmergencyEndpoint("emergency-resume", "/api/run/emergency-resume");
@@ -19860,14 +20040,17 @@ async function requestLiveEmergencyResume() {
 }
 
 async function requestLiveEmergencyReset() {
+  if (livePLCSourceLocked()) {
+    updateLiveEmergencyStopControls(liveLastSession);
+    setChatStatus("USE PLC PB1", "warning", "PB1 long press resets a PLC-originated E-STOP.");
+    return;
+  }
   try {
     setChatStatus("E-STOP RESET", "warning");
     const endpoint = liveEmergencyEndpoint("emergency-reset", "/api/run/emergency-reset");
     await recordLiveIntentEvent("runtime_command_requested", "emergency_reset", "Live GUI emergency reset requested.", { command: "emergency_reset", endpoint });
-    await fetchJsonOrThrow(endpoint, { method: "POST" });
-    clearLiveBoVisualization();
-    resetPlanningMessageDisplayState();
-    resetPlanningSessionIdForEmergencyReset();
+    const result = await fetchJsonOrThrow(endpoint, { method: "POST" });
+    if (result && result.state) applyPlanningSession({ ...(liveLastSession || {}), state: result.state });
     await refreshPlanningState({ force: true });
     setChatStatus("RESET", "ok");
   } catch (err) {
@@ -19907,6 +20090,7 @@ setInterval(() => {
   tickLiveRuntimeClock();
   updateLiveConnectionChips();
   updateVisionSpecimenCountdowns();
+  refreshLivePLCStatus().catch(() => {});
   if (!shouldFreezeCompletedTestRun(liveLastSession) && liveSyncIsStale() && !liveRefreshInFlight && planningThinkingCount === 0) {
     refreshPlanningState({ background: true }).catch(() => setChatStatus("SYNC ERROR", "warning"));
   }
@@ -19948,6 +20132,7 @@ if (planningMessageInput) {
 async function initializeLiveGuiRuntime() {
   applyQueryGoal();
   ensurePlanningSessionId();
+  refreshLivePLCStatus({ force: true }).catch(() => {});
   await refreshLiveAgentManifest({ silent: true, skipRender: true });
   restoreLiveUiState();
   restoreCachedPlanningState();

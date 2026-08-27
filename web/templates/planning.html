@@ -43,7 +43,7 @@ Modification guide:
       /static/planning.js?v=20260713-vision-pose-hidden-1
       /static/planning.js?v=20260714-motion-stability-1
     -->
-    <link rel="stylesheet" href="/static/styles.css?v=20260720-manipulation-grounded-1&knowledge-activity-1&bo-paper-3" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260825-plc-safety-lifecycle-5" />
   </head>
   <body class="planning-live-body">
     <main class="planning-runtime-shell" aria-label="ATR Live Runtime GUI">
@@ -80,8 +80,12 @@ Modification guide:
           <section class="mission-status-cell mission-status-stop" data-label="CONTROL" title="Emergency runtime control">
             <button id="btn-live-safe-stop" class="btn danger" title="Emergency Stop: force terminate the active runtime" aria-label="Emergency Stop">E-STOP</button>
             <div id="live-emergency-recovery" class="live-emergency-recovery" hidden aria-label="Emergency stop recovery controls">
-              <button id="btn-live-emergency-resume" class="btn live-emergency-resume" title="Resume from E-STOP latch">Resume</button>
-              <button id="btn-live-emergency-reset" class="btn live-emergency-reset" title="Reset runtime state to fresh-server defaults">Reset</button>
+              <button id="btn-live-emergency-resume" class="btn live-emergency-resume" hidden disabled title="Resume from E-STOP latch">Resume</button>
+              <button id="btn-live-emergency-reset" class="btn live-emergency-reset" hidden disabled title="Reset runtime state to fresh-server defaults">Reset</button>
+              <div id="live-plc-emergency-guidance" class="live-plc-emergency-guidance" role="status" aria-live="polite" hidden>
+                <span>PB1 short: Resume</span>
+                <span>PB1 long: Reset</span>
+              </div>
             </div>
           </section>
         </div>
@@ -251,6 +255,6 @@ Modification guide:
     <script src="/static/omx_telemetry_viewer.bundle.js?v=20260720-manipulation-grounded-1" defer></script>
     <script src="/static/lhs_design_visualization.js?v=20260812-lhs-paper-1"></script>
   <script src="/static/bo_visualization.js?v=20260813-threshold-label-1"></script>
-    <script src="/static/planning.js?v=20260813-test-complete-freeze-1" defer></script>
+    <script src="/static/planning.js?v=20260826-unified-reset-1" defer></script>
   </body>
 </html>

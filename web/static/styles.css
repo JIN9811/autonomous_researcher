@@ -25379,6 +25379,12 @@ body.planning-live-body #live-emergency-recovery[hidden] {
   display: none !important;
 }
 
+body.planning-live-body #btn-live-emergency-resume[hidden],
+body.planning-live-body #btn-live-emergency-reset[hidden],
+body.planning-live-body #live-plc-emergency-guidance[hidden] {
+  display: none !important;
+}
+
 body.planning-live-body .mission-status-stop #btn-live-safe-stop,
 body.planning-live-body .mission-status-stop #btn-live-safe-stop.is-armed {
   place-self: stretch !important;
@@ -25404,6 +25410,46 @@ body.planning-live-body #live-emergency-recovery {
   gap: 0 !important;
   padding: 0 !important;
   margin: 0 !important;
+}
+
+body.planning-live-body #live-plc-emergency-guidance {
+  grid-column: 1 / -1 !important;
+  grid-row: 1 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 3px 4px !important;
+  display: grid !important;
+  place-content: center stretch !important;
+  gap: 1px !important;
+  overflow: hidden !important;
+  border: 1px solid rgba(248, 113, 113, 0.72) !important;
+  background: #731f2a !important;
+  color: #ffffff !important;
+  text-align: center !important;
+  line-height: 1.05 !important;
+}
+
+body.planning-live-body #live-plc-emergency-guidance strong {
+  font-size: 0.62rem !important;
+  letter-spacing: 0.08em !important;
+}
+
+body.planning-live-body #live-plc-emergency-guidance span {
+  font-size: 0.54rem !important;
+  font-weight: 800 !important;
+}
+
+body.planning-live-body #live-plc-emergency-guidance small {
+  display: block !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  color: rgba(255, 255, 255, 0.78) !important;
+  font-size: 0.42rem !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
 }
 
 body.planning-live-body .mission-status-stop.is-emergency-latched #btn-live-safe-stop {

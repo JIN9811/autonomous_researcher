@@ -30,6 +30,7 @@ let runtimeChart = null;
 let projectChart = null;
 let activityChart = null;
 let relationChart = null;
+let manualChart = null;
 let selectedGraphNode = null;
 let selectedRelationProposal = null;
 let relationContextPayload = { nodes: [], edges: [] };
@@ -38,6 +39,17 @@ let ontologyPayload = { relations: {} };
 let graphEditMode = false;
 let relationStatusPayload = null;
 let resizeTimer = null;
+const manualWorkspaceState = {
+  query: "",
+  purpose: "procedure",
+  selectedId: "",
+  selectedType: "",
+  selectedItem: null,
+  showEvidence: false,
+  hasActiveQuery: false,
+  projection: { nodes: [], edges: [] },
+  chunks: [],
+};
 
 function emptyGraphEditDraft() {
   return { draft_id: `graph-edit-${Date.now()}`, graph_revision: "", changes: [], undo: [], redo: [], validated: false };
@@ -170,6 +182,146 @@ function graphOption(payload = {}, title = "Knowledge Graph", overlays = {}) {
       edgeSymbol: ["none", "arrow"],
       edgeSymbolSize: [0, 6],
       emphasis: { focus: "adjacency", lineStyle: { width: 2.4, opacity: 1 } },
+    }],
+  };
+}
+
+function manualSemanticSymbol(kind = "ManualSection") {
+  return ({
+    Procedure: "roundRect", ProcedureStep: "roundRect", Fault: "diamond", Cause: "circle",
+    Remedy: "roundRect", Warning: "triangle", Interlock: "diamond", Parameter: "rect",
+    Unit: "circle", CommunicationInterface: "rect",
+  })[kind] || "circle";
+}
+
+function manualSemanticPositions(nodes, edges, purpose) {
+  if (!nodes.length || !["procedure", "recovery", "safety", "skill_authoring"].includes(purpose)) return null;
+  const positions = new Map();
+  if (purpose === "recovery") {
+    const faults = nodes.filter((node) => String(node.kind) === "Fault").sort((left, right) => String(left.label).localeCompare(String(right.label)));
+    let row = 0;
+    faults.forEach((fault) => {
+      const faultId = String(fault.id);
+      const causes = edges.filter((edge) => String(edge.source) === faultId && String(edge.type) === "HAS_CAUSE").map((edge) => String(edge.target));
+      const remedies = edges.filter((edge) => String(edge.source) === faultId && String(edge.type) === "RESOLVED_BY").map((edge) => String(edge.target));
+      const rowCount = Math.max(1, causes.length, remedies.length);
+      const center = row + (rowCount - 1) / 2;
+      positions.set(faultId, { x: 100, y: 80 + center * 100 });
+      causes.forEach((id, index) => positions.set(id, { x: 500, y: 80 + (row + index) * 100 }));
+      remedies.forEach((id, index) => positions.set(id, { x: 900, y: 80 + (row + index) * 100 }));
+      row += rowCount + 1;
+    });
+    const remaining = nodes.filter((node) => !positions.has(String(node.id)));
+    remaining.forEach((node, index) => {
+      const kind = String(node.kind || "");
+      const x = kind === "Procedure" ? 100 : kind === "ProcedureStep" ? 500 : 900;
+      positions.set(String(node.id), { x, y: 80 + (row + index) * 100 });
+    });
+    return positions;
+  }
+  const nodeById = new Map(nodes.map((node) => [String(node.id), node]));
+  const sequenceEdges = edges.filter((edge) => ["HAS_STEP", "PRECEDES"].includes(String(edge.type || "")));
+  const incoming = new Map(nodes.map((node) => [String(node.id), 0]));
+  sequenceEdges.forEach((edge) => incoming.set(String(edge.target), (incoming.get(String(edge.target)) || 0) + 1));
+  const roots = nodes.filter((node) => ["Procedure", "ProcedureStep"].includes(String(node.kind)) && !(incoming.get(String(node.id)) || 0));
+  const depth = new Map(roots.map((node) => [String(node.id), 0]));
+  const queue = roots.map((node) => String(node.id));
+  while (queue.length) {
+    const current = queue.shift();
+    sequenceEdges.filter((edge) => String(edge.source) === current).forEach((edge) => {
+      const target = String(edge.target);
+      const nextDepth = (depth.get(current) || 0) + 1;
+      if (!depth.has(target) || nextDepth < depth.get(target)) depth.set(target, nextDepth);
+      if (nodeById.has(target) && !queue.includes(target)) queue.push(target);
+    });
+  }
+  const perDepth = new Map();
+  nodes.forEach((node, index) => {
+    const id = String(node.id);
+    const nodeDepth = depth.get(id) ?? (["Warning", "Interlock"].includes(String(node.kind)) ? 1 : index + 1);
+    const laneIndex = perDepth.get(nodeDepth) || 0;
+    perDepth.set(nodeDepth, laneIndex + 1);
+    positions.set(id, { x: 100 + nodeDepth * 190, y: 115 + laneIndex * 105 });
+  });
+  return positions;
+}
+
+function manualWrappedLabel(value) {
+  const text = String(value || "semantic node");
+  const words = text.split(/\s+/);
+  const lines = [];
+  let line = "";
+  words.forEach((word) => {
+    if (!line || `${line} ${word}`.length <= 22) line = line ? `${line} ${word}` : word;
+    else { lines.push(line); line = word; }
+  });
+  if (line) lines.push(line);
+  return lines.slice(0, 3).join("\n");
+}
+
+function manualSemanticGraphOption(payload = {}, purpose = "procedure") {
+  const purposeKinds = {
+    recovery: new Set(["Fault", "Cause", "Remedy", "Warning", "Interlock"]),
+    procedure: new Set(["Procedure", "ProcedureStep", "Warning", "Interlock", "Parameter", "Unit"]),
+    safety: new Set(["Warning", "Interlock", "Procedure", "ProcedureStep"]),
+    skill_authoring: new Set(["Procedure", "ProcedureStep", "Parameter", "Unit", "CommunicationInterface", "Warning"]),
+  };
+  const allSemanticNodes = (Array.isArray(payload.nodes) ? payload.nodes : []).filter((node) => String(node.kind || "") !== "ManualChunk");
+  const relevantNodes = purposeKinds[purpose] ? allSemanticNodes.filter((node) => purposeKinds[purpose].has(String(node.kind || ""))) : allSemanticNodes;
+  const sourceNodes = relevantNodes.length ? relevantNodes : allSemanticNodes;
+  const sourceEdges = Array.isArray(payload.edges) ? payload.edges : [];
+  const colors = {
+    Procedure: "#15803d", ProcedureStep: "#4ade80", Fault: "#dc2626", Cause: "#f97316",
+    Remedy: "#eab308", Warning: "#b91c1c", Interlock: "#7c3aed", Parameter: "#2563eb",
+    Unit: "#0f766e", CommunicationInterface: "#0891b2",
+  };
+  const categoryNames = [...new Set(sourceNodes.map((node) => String(node.kind || "Semantic")))];
+  const ids = new Set(sourceNodes.map((node) => String(node.id || "")));
+  const links = sourceEdges
+    .filter((edge) => String(edge.type || "") !== "SUPPORTED_BY" && ids.has(String(edge.source || "")) && ids.has(String(edge.target || "")))
+    .map((edge) => ({
+      ...edge,
+      id: String(edge.id || `${edge.source}:${edge.type}:${edge.target}`),
+      source: String(edge.source),
+      target: String(edge.target),
+      value: String(edge.type || "RELATED_TO"),
+      lineStyle: { color: "#7b8da1", width: 1.5, opacity: 0.78, curveness: 0.04 },
+      label: { show: sourceNodes.length <= 8, formatter: String(edge.type || ""), color: "#64748b", fontSize: 8 },
+    }));
+  const positions = manualSemanticPositions(sourceNodes, links, purpose);
+  const nodes = sourceNodes.map((node) => {
+    const kind = String(node.kind || "Semantic");
+    const position = positions?.get(String(node.id)) || {};
+    return {
+      ...node,
+      ...position,
+      id: String(node.id || ""),
+      name: String(node.label || node.id || kind),
+      semanticLabel: String(node.label || node.id || kind),
+      category: Math.max(0, categoryNames.indexOf(kind)),
+      symbol: manualSemanticSymbol(kind),
+      symbolSize: ["Fault", "Procedure", "Warning"].includes(kind) ? [108, 48] : [94, 42],
+      itemStyle: { color: colors[kind] || "#64748b", borderColor: "#ffffff", borderWidth: 1.8 },
+      label: { show: true, formatter: manualWrappedLabel(node.label || kind), color: "#1f2937", fontSize: 8.5, lineHeight: 11 },
+    };
+  });
+  const fixedLayout = Boolean(positions);
+  return {
+    animation: false,
+    backgroundColor: "#ffffff",
+    title: nodes.length ? undefined : { text: "No cited semantic assertions", left: "center", top: "middle", textStyle: { color: "#64748b", fontSize: 13 } },
+    tooltip: {
+      trigger: "item", confine: true,
+      formatter: (params) => params.dataType === "edge"
+        ? `${params.data.source}<br/><strong>${params.data.value}</strong><br/>${params.data.target}`
+        : `<strong>${params.data.name}</strong><br/>${params.data.kind || "Semantic"}`,
+    },
+    legend: { top: 8, left: 10, right: 10, type: "scroll", data: categoryNames, textStyle: { color: "#475569", fontSize: 9 } },
+    series: [{
+      type: "graph", layout: fixedLayout ? "none" : "force", roam: true, data: nodes, links,
+      categories: categoryNames.map((name) => ({ name, itemStyle: { color: colors[name] || "#64748b" } })),
+      force: fixedLayout ? undefined : { repulsion: 390, edgeLength: [100, 180], gravity: 0.045, layoutAnimation: nodes.length <= 60 },
+      edgeSymbol: ["none", "arrow"], edgeSymbolSize: [0, 7], emphasis: { focus: "adjacency", lineStyle: { width: 2.5, opacity: 1 } },
     }],
   };
 }
@@ -796,6 +948,213 @@ async function runReconciliation() {
   }
 }
 
+function manualItemProperties(item = {}) {
+  return item && item.properties && typeof item.properties === "object" ? item.properties : {};
+}
+
+function manualSupportingChunkIds(item = manualWorkspaceState.selectedItem) {
+  const value = manualItemProperties(item).supporting_chunk_ids;
+  return new Set(Array.isArray(value) ? value.map(String) : []);
+}
+
+function renderManualInspector(item = null, itemType = "") {
+  const root = document.getElementById("knowledge-manual-inspector");
+  const kind = document.getElementById("knowledge-manual-selection-kind");
+  const evidenceButton = document.getElementById("knowledge-manual-show-evidence");
+  root.replaceChildren();
+  if (!item) {
+    const empty = document.createElement("p");
+    empty.textContent = "Select a semantic node or relation to inspect confidence and page-level support.";
+    root.appendChild(empty);
+    kind.textContent = "none";
+    evidenceButton.disabled = true;
+    evidenceButton.setAttribute("aria-pressed", "false");
+    return;
+  }
+  const properties = manualItemProperties(item);
+  const relation = itemType === "edge" ? String(item.type || item.value || "RELATED_TO") : "";
+  const title = document.createElement("h3");
+  title.textContent = relation || String(item.semanticLabel || item.name || item.id || "Semantic assertion");
+  const details = document.createElement("dl");
+  const entries = [
+    ["Type", relation || String(item.kind || "Semantic")],
+    ["Confidence", Number(properties.confidence ?? 0).toFixed(3)],
+    ["Method", String(properties.extraction_method || "unknown")],
+    ["Aliases", Array.isArray(properties.aliases) && properties.aliases.length ? properties.aliases.join(" · ") : "none"],
+    ["Identifier", String(item.id || "-")],
+  ];
+  entries.forEach(([label, value]) => {
+    const term = document.createElement("dt");
+    const description = document.createElement("dd");
+    term.textContent = label;
+    description.textContent = value;
+    details.append(term, description);
+  });
+  const citations = Array.isArray(properties.citations) ? properties.citations : [];
+  const citationTitle = document.createElement("h3");
+  citationTitle.textContent = `Page support · ${citations.length}`;
+  const citationList = document.createElement("ul");
+  citationList.className = "knowledge-manual-citations";
+  citations.forEach((citation) => {
+    const entry = document.createElement("li");
+    const path = Array.isArray(citation.section_path) ? citation.section_path.join(" > ") : "";
+    entry.textContent = `${citation.source_id || "manual"} · p.${Number(citation.page || 0)}${path ? ` · ${path}` : ""}`;
+    citationList.appendChild(entry);
+  });
+  if (!citations.length) {
+    const entry = document.createElement("li");
+    entry.textContent = "No page citation attached.";
+    citationList.appendChild(entry);
+  }
+  root.append(title, details, citationTitle, citationList);
+  kind.textContent = relation || String(item.kind || "semantic");
+  evidenceButton.disabled = manualSupportingChunkIds(item).size === 0;
+  evidenceButton.setAttribute("aria-pressed", String(manualWorkspaceState.showEvidence));
+}
+
+function renderManualEvidence(payload = {}) {
+  const root = document.getElementById("knowledge-manual-results");
+  if (Array.isArray(payload.chunks)) manualWorkspaceState.chunks = payload.chunks;
+  const supportingIds = manualSupportingChunkIds();
+  const chunks = manualWorkspaceState.showEvidence && supportingIds.size
+    ? manualWorkspaceState.chunks.filter((chunk) => supportingIds.has(String(chunk.chunk_id || "")))
+    : manualWorkspaceState.chunks;
+  if (!chunks.length) {
+    const empty = document.createElement("p");
+    empty.textContent = manualWorkspaceState.showEvidence
+      ? "The selected assertion is not present in the current bounded evidence set. Page citations remain available in the inspector."
+      : payload.insufficient_evidence ? "No sufficient manual evidence was retrieved." : "No manual evidence was returned.";
+    root.replaceChildren(empty);
+    return;
+  }
+  root.replaceChildren(...chunks.map((chunk) => {
+    const citation = chunk.citation || {};
+    const card = document.createElement("article");
+    card.className = "knowledge-manual-result";
+    card.dataset.chunkId = String(chunk.chunk_id || "");
+    if (supportingIds.has(card.dataset.chunkId)) card.classList.add("supporting");
+    const header = document.createElement("header");
+    const title = document.createElement("span");
+    title.textContent = citation.title || citation.source_id || "Manual";
+    const page = document.createElement("span");
+    page.textContent = `p.${Number(citation.page || chunk.page || 0)}`;
+    header.append(title, page);
+    const body = document.createElement("p");
+    body.textContent = String(chunk.text || "");
+    const footer = document.createElement("footer");
+    const sections = Array.isArray(citation.section_path) ? citation.section_path.join(" > ") : "";
+    footer.textContent = `${chunk.chunk_id || "chunk"}${sections ? ` · ${sections}` : ""} · score ${Number(chunk.score || 0).toFixed(3)}`;
+    card.append(header, body, footer);
+    return card;
+  }));
+}
+
+function applyManualProjection(payload = {}, { activeQuery = false } = {}) {
+  const projection = payload.semantic_projection && typeof payload.semantic_projection === "object"
+    ? payload.semantic_projection
+    : payload;
+  manualWorkspaceState.projection = {
+    ...projection,
+    nodes: Array.isArray(projection.nodes) ? projection.nodes.filter((node) => String(node.kind || "") !== "ManualChunk") : [],
+    edges: Array.isArray(projection.edges) ? projection.edges.filter((edge) => String(edge.type || "") !== "SUPPORTED_BY") : [],
+  };
+  manualWorkspaceState.hasActiveQuery = activeQuery;
+  if (Array.isArray(payload.chunks)) renderManualEvidence(payload);
+  manualChart = ensureChart(document.getElementById("knowledge-manual-graph"), manualChart);
+  manualChart.setOption(manualSemanticGraphOption(manualWorkspaceState.projection, manualWorkspaceState.purpose), true);
+  manualChart.off("click");
+  manualChart.on("click", (params) => {
+    if (!params.data || !["node", "edge"].includes(params.dataType)) return;
+    const collection = params.dataType === "edge" ? manualWorkspaceState.projection.edges : manualWorkspaceState.projection.nodes;
+    const selected = collection.find((item) => String(item.id || "") === String(params.data.id || "")) || params.data;
+    manualWorkspaceState.selectedId = String(selected.id || "");
+    manualWorkspaceState.selectedType = params.dataType;
+    manualWorkspaceState.selectedItem = selected;
+    manualWorkspaceState.showEvidence = false;
+    renderManualInspector(selected, params.dataType);
+    renderManualEvidence();
+  });
+  const restored = [
+    ...manualWorkspaceState.projection.nodes.map((item) => ({ item, type: "node" })),
+    ...manualWorkspaceState.projection.edges.map((item) => ({ item, type: "edge" })),
+  ].find(({ item }) => String(item.id || "") === manualWorkspaceState.selectedId);
+  if (restored) {
+    manualWorkspaceState.selectedItem = restored.item;
+    manualWorkspaceState.selectedType = restored.type;
+    renderManualInspector(restored.item, restored.type);
+  } else {
+    manualWorkspaceState.selectedId = "";
+    manualWorkspaceState.selectedType = "";
+    manualWorkspaceState.selectedItem = null;
+    manualWorkspaceState.showEvidence = false;
+    renderManualInspector();
+  }
+}
+
+async function refreshManualStatus({ replaceGraph = false } = {}) {
+  const status = await fetchJson("/api/knowledge/manuals/status");
+  document.getElementById("knowledge-manual-sources").textContent = String(Number(status.source_count || 0));
+  document.getElementById("knowledge-manual-chunks").textContent = String(Number(status.chunk_count || 0));
+  document.getElementById("knowledge-manual-nodes").textContent = String(Number(status.semantic_node_count ?? status.node_count ?? 0));
+  document.getElementById("knowledge-manual-edges").textContent = String(Number(status.semantic_edge_count ?? status.edge_count ?? 0));
+  document.getElementById("knowledge-manual-scope").textContent = String(status.equipment_type || "utm").toUpperCase();
+  if (!manualWorkspaceState.hasActiveQuery || replaceGraph) {
+    const graph = await fetchJson("/api/knowledge/manuals/graph?view=semantic&limit=120");
+    applyManualProjection(graph, { activeQuery: false });
+  }
+  return status;
+}
+
+async function ingestManuals() {
+  const button = document.getElementById("knowledge-manual-ingest");
+  button.disabled = true;
+  setRuntimeMessage("Ingesting registered UTM manuals…", "busy");
+  try {
+    const payload = await fetchJson("/api/knowledge/manuals/ingest", { method: "POST" });
+    manualWorkspaceState.hasActiveQuery = false;
+    await refreshManualStatus({ replaceGraph: true });
+    setRuntimeMessage(`Manual ingestion complete: ${Number(payload.chunk_count || 0)} chunks.`, payload.ok ? "ready" : "error");
+  } catch (error) {
+    setRuntimeMessage(`Manual ingestion failed: ${error}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function queryManuals() {
+  const query = document.getElementById("knowledge-manual-query").value.trim();
+  if (!query) {
+    setRuntimeMessage("Enter one UTM manual question.", "error");
+    return;
+  }
+  const button = document.getElementById("knowledge-manual-run-query");
+  button.disabled = true;
+  setRuntimeMessage("Retrieving bounded UTM manual evidence…", "busy");
+  try {
+    manualWorkspaceState.query = query;
+    manualWorkspaceState.purpose = document.getElementById("knowledge-manual-purpose").value;
+    const payload = await fetchJson("/api/knowledge/manuals/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        equipment_type: "utm",
+        purpose: manualWorkspaceState.purpose,
+        query,
+        top_k: boundedInteger(document.getElementById("knowledge-manual-top-k").value, 1, 12, 6),
+      }),
+    });
+    renderManualEvidence(payload);
+    document.getElementById("knowledge-manual-query-summary").textContent = `${payload.chunks?.length || 0} citations · coverage ${Number(payload.coverage || 0).toFixed(3)}`;
+    applyManualProjection(payload, { activeQuery: true });
+    const insufficient = payload.insufficient_evidence || payload.insufficient_semantic_evidence;
+    setRuntimeMessage(insufficient ? "Manual evidence or semantic coverage is insufficient; operator review is required." : "Manual evidence and cited semantics retrieved.", insufficient ? "error" : "ready");
+  } catch (error) {
+    setRuntimeMessage(`Manual retrieval failed: ${error}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function activateTab(name) {
   document.querySelectorAll("[data-knowledge-tab]").forEach((button) => button.classList.toggle("active", button.dataset.knowledgeTab === name));
   document.querySelectorAll("[data-knowledge-panel]").forEach((panel) => panel.classList.toggle("active", panel.dataset.knowledgePanel === name));
@@ -804,8 +1163,10 @@ function activateTab(name) {
     projectChart?.resize();
     activityChart?.resize();
     relationChart?.resize();
+    manualChart?.resize();
   });
   if (name === "relations") refreshRelationWorkspace().catch((error) => setRuntimeMessage(`Relation workspace refresh failed: ${error}`, "error"));
+  if (name === "manuals") refreshManualStatus().catch((error) => setRuntimeMessage(`Manual workspace refresh failed: ${error}`, "error"));
   if (window.location.hash !== `#${name}`) window.history.replaceState(null, "", `#${name}`);
 }
 
@@ -813,7 +1174,7 @@ async function refreshWorkspace() {
   const button = document.getElementById("knowledge-refresh");
   button.disabled = true;
   setRuntimeMessage("Refreshing Knowledge Workspace…", "busy");
-  const results = await Promise.allSettled([refreshStatus(), refreshOntology(), refreshMemory(), refreshActivity(), refreshRelationWorkspace()]);
+  const results = await Promise.allSettled([refreshStatus(), refreshOntology(), refreshMemory(), refreshActivity(), refreshRelationWorkspace(), refreshManualStatus()]);
   const failed = results.filter((result) => result.status === "rejected");
   setRuntimeMessage(failed.length ? `${failed.length} Knowledge sections could not be refreshed.` : "Knowledge Workspace is current.", failed.length ? "error" : "ready");
   button.disabled = false;
@@ -821,6 +1182,18 @@ async function refreshWorkspace() {
 
 document.querySelectorAll("[data-knowledge-tab]").forEach((button) => button.addEventListener("click", () => activateTab(button.dataset.knowledgeTab)));
 document.getElementById("knowledge-refresh").addEventListener("click", refreshWorkspace);
+document.getElementById("knowledge-manual-ingest").addEventListener("click", ingestManuals);
+document.getElementById("knowledge-manual-run-query").addEventListener("click", queryManuals);
+document.getElementById("knowledge-manual-show-evidence").addEventListener("click", (event) => {
+  if (event.currentTarget.disabled) return;
+  manualWorkspaceState.showEvidence = !manualWorkspaceState.showEvidence;
+  event.currentTarget.setAttribute("aria-pressed", String(manualWorkspaceState.showEvidence));
+  event.currentTarget.textContent = manualWorkspaceState.showEvidence ? "All evidence" : "Selected support";
+  renderManualEvidence();
+});
+document.getElementById("knowledge-manual-query").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") queryManuals();
+});
 document.getElementById("knowledge-run-query").addEventListener("click", async () => {
   try {
     await runGraphQuery({
@@ -890,11 +1263,12 @@ window.addEventListener("resize", () => {
     projectChart?.resize();
     activityChart?.resize();
     relationChart?.resize();
+    manualChart?.resize();
   }, 100);
 });
 
 renderLegend();
 updateGraphEditControls();
-const initialTab = ["graph", "memory", "ontology", "sync", "project", "relations"].includes(window.location.hash.slice(1)) ? window.location.hash.slice(1) : "graph";
+const initialTab = ["graph", "memory", "ontology", "sync", "project", "manuals", "relations"].includes(window.location.hash.slice(1)) ? window.location.hash.slice(1) : "graph";
 activateTab(initialTab);
 refreshWorkspace().then(() => runGraphQuery({ kind: "run_context", limit: 60 })).catch((error) => setRuntimeMessage(`Workspace initialization failed: ${error}`, "error"));

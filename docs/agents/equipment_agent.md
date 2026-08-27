@@ -4,7 +4,7 @@ subtype: system
 status: active
 authority: descriptive
 audience: [researcher, operator, developer, maintainer]
-scope: [agents, equipment, pyautogui, utm, device_bridges]
+scope: [agents, equipment, pyautogui, utm, device_bridges, manual_rag]
 summary: Current contract for resolving validated equipment profiles and skills, executing bounded protocols, and handing evidence to Analysis.
 source_of_truth:
   - agents/equipment_agent.py
@@ -13,8 +13,9 @@ source_of_truth:
   - device_bridges/windows_pyautogui_bridge.py
   - device_bridges/utm_runtime_bridge.py
   - app/main.py
-last_verified: 2026-08-09
-verified_against: 0b7627b
+  - knowledge/manuals
+last_verified: 2026-08-17
+verified_against: working-tree-2026-08-17
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -22,6 +23,7 @@ related_docs:
   - docs/agents/analysis_agent.md
   - docs/hardware/windows_pyautogui_equipment_agent_guideline.md
   - docs/hardware/utm_ros_vision_runtime_bridge.md
+  - docs/knowledge/manual_rag_knowledge.ko.md
 supersedes: []
 ---
 
@@ -142,6 +144,23 @@ occur only after placement, preflight, policy, and approval gates. This
 
 ## Tools and Connections
 
+### UTM manual GraphRAG context
+
+Lab Equipment 계층에서 현재 장비 유형은 `utm`으로 고정합니다. 특정 모델명이나
+소프트웨어 버전을 실행 조건으로 고정하지 않습니다. UTM profile LLM은 Knowledge
+Agent의 분리된 Manual RAG module에서 Skill annotation, 절차/판단, bounded recovery
+근거를 조회합니다. 각 판단에는 context hash와 source/page/chunk citation이 남습니다.
+Retrieval 응답은 기존 `manual_context.v1.chunks`와 함께 최대 2-hop semantic
+projection을 제공하므로 Fault-Cause-Remedy 또는 Procedure-Step 관계를 설명에
+사용할 수 있습니다.
+이 context는 설명과 allowlisted 선택만 보조하며 등록 Skill, bridge payload,
+Guardian/operator gate를 새로 만들거나 우회할 수 없습니다.
+
+Manual RAG가 추가되어도 command construction, bridge dispatch, credential,
+Guardian policy, operator approval, safety interlock의 구현과 권한은 기존 경로를
+그대로 사용합니다. 매뉴얼 인덱스 또는 optional graph backend 장애는 근거 부족으로
+기록되며 임의 명령이나 silent fallback을 만들지 않습니다.
+
 | Tool/service | Boundary | Effect | Evidence |
 |---|---|---|---|
 | `equipment.pyautogui.health` | Windows bridge | read_only | health snapshot |
@@ -215,9 +234,12 @@ state, handoff, errors, and evidence.
 
 ## Current Verification
 
-Verified against all five internal IDs, four tools, 57 equipment/bridge prefix
-routes, skill/profile runtime, Windows bridge, and UTM runtime at baseline
-`0b7627b`. No new physical protocol was executed.
+The existing equipment IDs, registered tools, skill/profile runtime, Windows
+bridge, and UTM runtime contracts remain covered by the focused regression set.
+Manual context injection for decision, procedure formatting, skill annotation,
+and bounded recovery was verified in the 77-test Knowledge/Equipment/API run on
+2026-08-17. No new physical protocol or equipment command was executed for this
+documentation and semantic-graph change.
 
 ## Limitations and Known Gaps
 

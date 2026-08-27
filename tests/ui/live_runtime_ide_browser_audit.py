@@ -63,6 +63,21 @@ def rgb_distance(left: tuple[float, float, float], right: tuple[float, float, fl
     return round(sum((float(a) - float(b)) ** 2 for a, b in zip(left, right)) ** 0.5, 3)
 
 
+def execute_async_script(
+    audit: WebDriverAudit,
+    script: str,
+    args: list[Any] | None = None,
+    *,
+    timeout_s: float = 8.0,
+) -> Any:
+    audit.request("POST", f"/session/{audit.session_id}/timeouts", {"script": int(timeout_s * 1000)})
+    return audit.request(
+        "POST",
+        f"/session/{audit.session_id}/execute/async",
+        {"script": script, "args": args or []},
+    )
+
+
 def sample_payload(run_id: str = "run-ui-audit", approval_id: str = "approval-ui") -> dict[str, Any]:
     trace = {
         "step": 1,
@@ -136,7 +151,22 @@ def sample_payload(run_id: str = "run-ui-audit", approval_id: str = "approval-ui
             "system_resources": {
                 "gpu": {"status": "ready", "aggregate": {"memory_used_gb": 12, "memory_total_gb": 48, "utilization_percent": 21}},
                 "ram": {"status": "ready", "used_gb": 18, "total_gb": 128, "used_percent": 14},
-            }
+            },
+            "runtime_ide_contract": {
+                "device_bridges": [
+                    {
+                        "id": "plc_bridge",
+                        "label": "Mitsubishi PLC Safety Bridge",
+                        "workspace": "/plc",
+                        "config": "configs/plc.yaml",
+                        "live_boundary": "D100-D102 safety transport",
+                        "health_endpoint": "/api/plc/status",
+                        "preflight_endpoint": "/api/plc/preflight",
+                        "actions": [],
+                        "evidence_contracts": ["plc_safety_state.v1"],
+                    }
+                ]
+            },
         },
         "events": [
             {
@@ -861,6 +891,263 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
     )
     if not result.get("ok"):
         raise AssertionError(result)
+
+    plc_controls = audit.js(
+        r"""
+        const payload = arguments[0];
+        const latchedStatus = arguments[1];
+        const offlineStatus = arguments[2];
+        if (typeof window.applyLivePLCStatus !== 'function') {
+          return {ok: false, error: 'applyLivePLCStatus is not available'};
+        }
+        const rect = (selector) => {
+          const element = document.querySelector(selector);
+          if (!element) return null;
+          const bounds = element.getBoundingClientRect();
+          return {width: Math.round(bounds.width), height: Math.round(bounds.height)};
+        };
+        const visible = (selector) => {
+          const element = document.querySelector(selector);
+          if (!element) return false;
+          const bounds = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          return !element.hidden && bounds.width > 0 && bounds.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+        };
+
+        payload.session.state.emergency_stop_requested = true;
+        window.applyLivePLCStatus(latchedStatus);
+        window.__liveGuiDebugSetState(payload);
+        const slotRect = rect('.mission-status-stop');
+        const physical = {
+          resumeHidden: document.getElementById('btn-live-emergency-resume')?.hidden,
+          resetHidden: document.getElementById('btn-live-emergency-reset')?.hidden,
+          resumeDisabled: document.getElementById('btn-live-emergency-resume')?.disabled,
+          resetDisabled: document.getElementById('btn-live-emergency-reset')?.disabled,
+          guidanceVisible: visible('#live-plc-emergency-guidance'),
+          guidanceText: document.getElementById('live-plc-emergency-guidance')?.innerText || '',
+          guidanceTitle: document.getElementById('live-plc-emergency-guidance')?.getAttribute('title') || '',
+          guidanceRect: rect('#live-plc-emergency-guidance'),
+        };
+
+        window.applyLivePLCStatus(offlineStatus);
+        window.__liveGuiDebugSetState(payload);
+        const offline = {
+          resumeVisible: visible('#btn-live-emergency-resume'),
+          resetVisible: visible('#btn-live-emergency-reset'),
+          resumeDisabled: document.getElementById('btn-live-emergency-resume')?.disabled,
+          resetDisabled: document.getElementById('btn-live-emergency-reset')?.disabled,
+          guidanceVisible: visible('#live-plc-emergency-guidance'),
+          slotRect: rect('.mission-status-stop'),
+          recoveryRect: rect('#live-emergency-recovery'),
+        };
+        return {
+          ok: true,
+          slotRect,
+          physical,
+          offline,
+          plcBridgeCards: document.querySelectorAll('.bridge-contract-card[data-bridge-id="plc_bridge"]').length,
+          plcGraphNodes: document.querySelectorAll('.live-graph-mini-node[data-graph-node-id="plc_bridge"]').length,
+        };
+        """,
+        [
+            sample_payload(run_id=run_id, approval_id=approval_id),
+            {
+                "plc_layer_active": True,
+                "connection_state": "online",
+                "transport": "virtual",
+                "safety_state": "estop_latched",
+                "active_estop_sources": ["plc_pb2"],
+                "failure_code": None,
+                "last_error": None,
+                "register_snapshot": {"d100": 0, "d101": 1, "d102": 0, "sequence": 42},
+                "last_latency_ms": 18.0,
+                "sample_age_s": 0.032,
+                "legacy_controls_available": False,
+            },
+            {
+                "plc_layer_active": False,
+                "connection_state": "offline",
+                "transport": "pymcprotocol_type3e",
+                "safety_state": "disconnected",
+                "active_estop_sources": [],
+                "failure_code": None,
+                "last_error": "mock offline",
+                "register_snapshot": None,
+                "last_latency_ms": None,
+                "sample_age_s": None,
+                "legacy_controls_available": True,
+            },
+        ],
+    )
+    if not plc_controls.get("ok"):
+        raise AssertionError(f"Mocked PLC source audit could not run: {plc_controls}")
+    physical = plc_controls.get("physical") or {}
+    offline = plc_controls.get("offline") or {}
+    if not all(physical.get(key) for key in ("resumeHidden", "resetHidden", "resumeDisabled", "resetDisabled", "guidanceVisible")):
+        raise AssertionError(f"PLC PB2 source did not lock browser recovery controls: {plc_controls}")
+    if "PB1 short: Resume" not in str(physical.get("guidanceText")) or "PB1 long: Reset" not in str(physical.get("guidanceText")):
+        raise AssertionError(f"PLC PB2 source guidance is incomplete: {plc_controls}")
+    for token in ("virtual", "estop_latched", "D100=0", "D101=1", "D102=0", "18", "0.032"):
+        if token not in str(physical.get("guidanceTitle")):
+            raise AssertionError(f"PLC status projection is missing {token!r}: {plc_controls}")
+    if not offline.get("resumeVisible") or not offline.get("resetVisible") or offline.get("resumeDisabled") or offline.get("resetDisabled") or offline.get("guidanceVisible"):
+        raise AssertionError(f"Ordinary mocked PLC OFFLINE state removed legacy GUI recovery: {plc_controls}")
+    if physical.get("guidanceRect") != offline.get("recoveryRect") or offline.get("slotRect") != plc_controls.get("slotRect"):
+        raise AssertionError(f"PLC guidance changed the existing E-STOP content or outer slot dimensions: {plc_controls}")
+    if plc_controls.get("plcBridgeCards") != 1 or plc_controls.get("plcGraphNodes") != 0:
+        raise AssertionError(f"PLC is not projected exclusively as a Device Bridge: {plc_controls}")
+
+    plc_lifecycle = execute_async_script(
+        audit,
+        r"""
+        const latchedStatus = arguments[0];
+        const retryStatus = arguments[1];
+        const done = arguments[arguments.length - 1];
+        const originals = {
+          fetch: window.fetch,
+          refreshManifest: window.refreshLiveAgentManifest,
+          restoreCache: window.restoreCachedPlanningState,
+          connectStream: window.connectPlanningEventStream,
+          refreshState: window.refreshPlanningState,
+          hydrateBo: window.hydrateLiveBoVisualization,
+          bootstrap: window.bootstrapLiveOrchestrator,
+        };
+        const startedAt = performance.now();
+        let plcFetchCalls = 0;
+        let sawAbortSignal = false;
+        let abortAt = null;
+        let cacheRestoredAt = null;
+        let streamConnectedAt = null;
+        let stateRefreshedAt = null;
+        let fallbackTimer = null;
+
+        const restore = () => {
+          if (fallbackTimer) window.clearTimeout(fallbackTimer);
+          window.fetch = originals.fetch;
+          window.refreshLiveAgentManifest = originals.refreshManifest;
+          window.restoreCachedPlanningState = originals.restoreCache;
+          window.connectPlanningEventStream = originals.connectStream;
+          window.refreshPlanningState = originals.refreshState;
+          window.hydrateLiveBoVisualization = originals.hydrateBo;
+          window.bootstrapLiveOrchestrator = originals.bootstrap;
+        };
+
+        window.applyLivePLCStatus(latchedStatus);
+        window.refreshLiveAgentManifest = async () => true;
+        window.restoreCachedPlanningState = () => { cacheRestoredAt = performance.now(); };
+        window.connectPlanningEventStream = () => { streamConnectedAt = performance.now(); };
+        window.refreshPlanningState = async () => {
+          if (!Number.isFinite(stateRefreshedAt)) stateRefreshedAt = performance.now();
+          return window.__liveGuiDebugSnapshot().session;
+        };
+        window.hydrateLiveBoVisualization = async () => true;
+        window.bootstrapLiveOrchestrator = (session) => session;
+        window.fetch = (input, options = {}) => {
+          const requestUrl = String(input);
+          if (requestUrl.startsWith('/api/planning/session') && !Number.isFinite(stateRefreshedAt)) {
+            stateRefreshedAt = performance.now();
+          }
+          if (requestUrl !== '/api/plc/status') return originals.fetch(input, options);
+          plcFetchCalls += 1;
+          return new Promise((_resolve, reject) => {
+            const signal = options.signal;
+            sawAbortSignal = Boolean(signal);
+            if (signal) {
+              signal.addEventListener('abort', () => {
+                abortAt = performance.now();
+                reject(new DOMException('mock PLC fetch timed out', 'AbortError'));
+              }, {once: true});
+            } else {
+              fallbackTimer = window.setTimeout(() => {
+                abortAt = performance.now();
+                reject(new Error('mock unbounded PLC fetch released by audit'));
+              }, 1400);
+            }
+          });
+        };
+
+        const firstRefresh = window.refreshLivePLCStatus({force: true});
+        const secondRefresh = window.refreshLivePLCStatus({force: true});
+        const initialization = window.initializeLiveGuiRuntime();
+        Promise.allSettled([firstRefresh, secondRefresh, initialization])
+          .then(async () => {
+            const afterTimeout = window.__liveGuiDebugSnapshot();
+            const retainedLatch = (afterTimeout.plc_status?.active_estop_sources || []).includes('plc_pb2')
+              && !afterTimeout.plc_status_refresh_in_flight
+              && document.getElementById('live-plc-emergency-guidance')?.hidden === false;
+            window.fetch = (input, options = {}) => {
+              if (String(input) !== '/api/plc/status') return originals.fetch(input, options);
+              plcFetchCalls += 1;
+              return Promise.resolve(new Response(JSON.stringify(retryStatus), {
+                status: 200,
+                headers: {'Content-Type': 'application/json'},
+              }));
+            };
+            await window.refreshLivePLCStatus({force: true});
+            const afterRetry = window.__liveGuiDebugSnapshot();
+            return {
+              ok: true,
+              elapsedMs: Math.round(performance.now() - startedAt),
+              plcFetchCalls,
+              sawAbortSignal,
+              abortAt,
+              cacheRestoredAt,
+              streamConnectedAt,
+              stateRefreshedAt,
+              initializationContinuedBeforeTimeout: [cacheRestoredAt, streamConnectedAt, stateRefreshedAt]
+                .every((value) => Number.isFinite(value) && Number.isFinite(abortAt) && value < abortAt),
+              retainedLatch,
+              inFlightRecovered: afterTimeout.plc_status_refresh_in_flight === false,
+              retryApplied: afterRetry.plc_status?.connection_state === 'offline'
+                && !(afterRetry.plc_status?.active_estop_sources || []).includes('plc_pb2')
+                && afterRetry.plc_status_refresh_in_flight === false,
+            };
+          })
+          .then((result) => {
+            restore();
+            done(result);
+          })
+          .catch((error) => {
+            restore();
+            done({ok: false, error: String(error && error.stack ? error.stack : error)});
+          });
+        """,
+        [
+            {
+                "plc_layer_active": True,
+                "connection_state": "online",
+                "transport": "virtual",
+                "safety_state": "estop_latched",
+                "active_estop_sources": ["plc_pb2"],
+                "failure_code": None,
+                "register_snapshot": {"d100": 0, "d101": 1, "d102": 0, "sequence": 43},
+                "last_latency_ms": 19.0,
+                "sample_age_s": 0.02,
+                "legacy_controls_available": False,
+            },
+            {
+                "plc_layer_active": False,
+                "connection_state": "offline",
+                "transport": "pymcprotocol_type3e",
+                "safety_state": "disconnected",
+                "active_estop_sources": [],
+                "failure_code": None,
+                "register_snapshot": None,
+                "last_latency_ms": None,
+                "sample_age_s": None,
+                "legacy_controls_available": True,
+            },
+        ],
+    )
+    if not plc_lifecycle.get("ok"):
+        raise AssertionError(f"PLC refresh lifecycle audit could not run: {plc_lifecycle}")
+    if plc_lifecycle.get("plcFetchCalls") != 2:
+        raise AssertionError(f"PLC refresh was not single-flight before one later retry: {plc_lifecycle}")
+    if not plc_lifecycle.get("sawAbortSignal") or not plc_lifecycle.get("initializationContinuedBeforeTimeout"):
+        raise AssertionError(f"PLC timeout blocked Live GUI initialization: {plc_lifecycle}")
+    if not plc_lifecycle.get("retainedLatch") or not plc_lifecycle.get("inFlightRecovered") or not plc_lifecycle.get("retryApplied"):
+        raise AssertionError(f"PLC timeout lost latch state or prevented recovery: {plc_lifecycle}")
+
     before = result.get("before", {})
     visual = result.get("visual") or before.get("visual") or {}
     if not before.get("shell"):

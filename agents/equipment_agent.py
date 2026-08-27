@@ -34,6 +34,8 @@ from agents.base_agent import AgentContext, AgentResult, BaseAgent
 from orchestrator.state import Mode, OrchestratorState
 from utils.equipment_profiles import DEFAULT_UTM_PROFILE_ID, EquipmentProfile, EquipmentProfileRegistry, build_execution_contract
 from policies.guardian_gate import equipment_skill_recovery_gate, gate_blocks_execution
+from knowledge.manuals.prompting import build_manual_grounded_prompt, manual_context_audit
+from knowledge.manuals.service import ManualKnowledgeService
 from utils.equipment_skill_runtime import (
     EquipmentSkillRegistry,
     SkillContractError,
@@ -53,6 +55,47 @@ class LabEquipmentAgent(BaseAgent):
     }
     _UTM_DEFAULT_PROGRAM = "utm_compression_start_v1"
     _RESULT_FILE_KEYS = ("result_file", "result_path", "csv_path", "utm_result_file", "utm_csv_path", "artifact_path")
+
+    @staticmethod
+    def _manual_context(query: str, *, purpose: str) -> dict[str, Any]:
+        """Retrieve UTM-only evidence without making manuals an execution dependency."""
+        service = ManualKnowledgeService(project_root=Path(__file__).resolve().parents[1])
+        try:
+            return service.query(
+                {
+                    "equipment_type": "utm",
+                    "query": query,
+                    "purpose": purpose,
+                    "top_k": 6,
+                }
+            )
+        except Exception as exc:
+            return {
+                "schema": "manual_context.v1",
+                "equipment_type": "utm",
+                "purpose": purpose,
+                "query": query,
+                "chunks": [],
+                "insufficient_evidence": True,
+                "error": f"{exc.__class__.__name__}: {exc}",
+                "source_separation": {"manual_only": True, "web_used": False, "runtime_memory_used": False},
+            }
+        finally:
+            service.close()
+
+    def _manual_context_for_state(self, state: OrchestratorState, *, purpose: str) -> dict[str, Any]:
+        spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        query = " ".join(
+            part
+            for part in (
+                f"UTM {purpose}",
+                str(state.active_goal or ""),
+                str(self._program_hint(state) or ""),
+                json.dumps(spec, ensure_ascii=False, default=str)[:3000],
+            )
+            if part
+        )
+        return self._manual_context(query, purpose=purpose)
 
     @staticmethod
     def _is_live_gui_test_spec(state: OrchestratorState) -> bool:
@@ -160,7 +203,7 @@ class LabEquipmentAgent(BaseAgent):
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
         program_hint = self._program_hint(state)
         sequence_hint = self._sequence_hint(state)
-        return (
+        base_prompt = (
             "You are the Equipment Agent tool-call planner.\n"
             "Choose only from these tools: equipment.pyautogui.health, "
             "equipment.pyautogui.list_programs, equipment.pyautogui.run.\n"
@@ -175,6 +218,7 @@ class LabEquipmentAgent(BaseAgent):
             f"available_tools={json.dumps(tools, ensure_ascii=True)}\n"
             f"experiment_spec={json.dumps(spec, ensure_ascii=True, default=str)[:4000]}\n"
         )
+        return build_manual_grounded_prompt(base_prompt, self._manual_context_for_state(state, purpose="decision"))
 
     @staticmethod
     def _extract_json_object(text: str) -> dict[str, Any] | None:
@@ -1987,10 +2031,15 @@ class LabEquipmentAgent(BaseAgent):
         test_like = self._test_like_mode(state)
         profile = "test_profile" if test_like or state.mode.value != "live" else "live_profile"
         timeout_s = 30.0 if test_like else None
+        manual_context = self._manual_context_for_state(state, purpose="procedure")
+        manual_audit = manual_context_audit(manual_context)
         try:
             protocol = await ctx.complete(
                 "tool_formatting",
-                f"Format UTM run command profile={profile} with concise equipment-safe options.",
+                build_manual_grounded_prompt(
+                    f"Format UTM run command profile={profile} with concise equipment-safe options.",
+                    manual_context,
+                ),
                 timeout_s=timeout_s,
             )
             protocol_note = protocol.text[:220]
@@ -2029,6 +2078,7 @@ class LabEquipmentAgent(BaseAgent):
             data={
                 "equipment_result": package["equipment_result"],
                 "protocol_note": protocol_note,
+                "manual_context": manual_audit,
                 "equipment_bridge": bridge,
                 "tool_results": tool_results,
                 "tool_plan": [{"tool": "utm.run_protocol", "payload": payload}],
@@ -2110,18 +2160,22 @@ class LabEquipmentAgent(BaseAgent):
             backend = getattr(ctx, "primary_backend", None)
         if backend is None or not model:
             raise SkillContractError("snapshotted recovery model is unavailable")
+        manual_context = self._manual_context(json.dumps(exception, ensure_ascii=False, default=str), purpose="recovery")
+        manual_audit = manual_context_audit(manual_context)
         response = await backend.complete(
             model=model,
-            system_prompt=(
+            system_prompt=build_manual_grounded_prompt(
                 "Return one JSON object only for a bounded Windows GUI recovery. "
                 "Choose exactly one operation from allowed_recovery_operations. "
-                "Do not add shell, Python, clicks, credentials, or physical-equipment actions."
+                "Do not add shell, Python, clicks, credentials, or physical-equipment actions.",
+                manual_context,
             ),
             user_prompt=json.dumps(exception, ensure_ascii=True, sort_keys=True),
             metadata={
                 "task_type": "equipment_skill_recovery",
                 "role": "equipment_skill_recovery",
                 "no_fallback": True,
+                "manual_context_hash": manual_audit["context_hash"],
             },
         )
         raw = self._extract_json_object(str(response.text or ""))

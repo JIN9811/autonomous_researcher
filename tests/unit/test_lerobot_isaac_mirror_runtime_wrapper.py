@@ -1003,6 +1003,40 @@ def test_active_robot_cam_resume_motion_uses_slower_default_speed_scale(tmp_path
     assert sent[-1] == {"shoulder_pan.pos": 100.0}
 
 
+def test_active_robot_cam_default_resume_wait_accepts_four_degree_settling_error(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_RESULT_DIR", str(tmp_path / "active_cam_result"))
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TIMEOUT_S", "0")
+    monkeypatch.setenv("ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_POLL_S", "0")
+    monkeypatch.delenv("ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TOLERANCE_DEG", raising=False)
+    monkeypatch.delenv("ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_SOFT_TOLERANCE_DEG", raising=False)
+
+    class FakeSidecar:
+        camera_key = "wrist"
+        root = tmp_path
+
+    class FakeUpdater:
+        pass
+
+    class FakeBus:
+        def sync_read(self, register: str):
+            return {"shoulder_pan": 4.2}
+
+    class FakeRobot:
+        bus = FakeBus()
+
+    tracker = ActiveRobotCamTracker(FakeSidecar(), FakeUpdater())  # type: ignore[arg-type]
+
+    result = tracker.wait_until_action_reached(
+        FakeRobot(),
+        {"shoulder_pan.pos": 0.0},
+        reason="active_robot_cam_resume",
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "reached"
+    assert result["max_error_deg"] == pytest.approx(4.2)
+
+
 def test_active_robot_cam_resume_adds_home_wrist_flex_zero_waypoint(tmp_path: Path, monkeypatch) -> None:
     capture_pose = tmp_path / "capture.json"
     home_pose = tmp_path / "home.json"

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260622-utm-rqt-flow-1" />
+    <link rel="stylesheet" href="/static/plc.css?v=20260825-plc-workspace-1" />
+  </head>
+  <body class="plc-workspace-body">
+    <main id="plc-workspace" class="page plc-workspace" aria-live="polite">
+      <section class="panel plc-hero" data-plc-panel id="plc-overview">
+        <div>
+          <p class="eyebrow">Device Workspace / Manual Diagnostics</p>
+          <h1>PLC Safety Bridge</h1>
+          <p class="subhead">Bounded D100-D102 safety visibility and setup. This workspace is not an agent stage and does not provide arbitrary device control.</p>
+        </div>
+        <div class="plc-hero-status">
+          <span id="plc-status-dot" class="status-dot idle"></span>
+          <strong id="plc-status-label">OFFLINE</strong>
+          <p id="plc-status-detail">Loading cached PLC status.</p>
+        </div>
+      </section>
+
+      <section class="plc-grid plc-grid-control">
+        <article class="panel plc-panel" data-plc-panel id="plc-connection">
+          <div class="panel-title-row">
+            <h2>Connection</h2>
+            <span id="plc-connection-state" class="badge idle">OFFLINE</span>
+          </div>
+          <p class="plc-panel-copy">Configure the bounded PLC bridge only while it is disconnected.</p>
+          <form id="plc-config-form" class="plc-config-grid">
+            <label>Host<input id="plc-config-host" data-plc-config-input type="text" autocomplete="off" /></label>
+            <label>Port<input id="plc-config-port" data-plc-config-input type="number" min="1" max="65535" /></label>
+            <label>Poll interval (s)<input id="plc-config-poll-interval" data-plc-config-input type="number" min="0.05" max="5" step="0.05" /></label>
+            <label>Stale after (s)<input id="plc-config-stale-after" data-plc-config-input type="number" min="0.1" max="60" step="0.1" /></label>
+            <label>Handshake timeout (s)<input id="plc-config-handshake-timeout" data-plc-config-input type="number" min="1" max="60" step="0.5" /></label>
+          </form>
+          <p id="plc-config-note" class="plc-note">Connection settings load from the saved bridge configuration.</p>
+          <div class="button-row">
+            <button id="plc-save-config" class="btn" type="button">Save Offline Config</button>
+            <button id="plc-preflight" class="btn warning" type="button">Run Read-Only Preflight</button>
+            <button id="plc-connect" class="btn primary" type="button">Start Monitoring</button>
+            <button id="plc-disconnect" class="btn" type="button">Stop Monitoring</button>
+          </div>
+          <p id="plc-action-status" class="plc-action-status">No PLC action requested.</p>
+        </article>
+
+        <article class="panel plc-panel" data-plc-panel id="plc-register-state">
+          <div class="panel-title-row"><h2>Register State</h2><span id="plc-register-sequence" class="hint">sequence: --</span></div>
+          <p class="plc-panel-copy">Read-only raw words and decoded bounded register meanings.</p>
+          <dl class="plc-register-list">
+            <div><dt>D100 raw</dt><dd id="plc-d100-raw">--</dd><small id="plc-d100-decoded">Command unavailable</small></div>
+            <div><dt>D101 raw</dt><dd id="plc-d101-raw">--</dd><small id="plc-d101-decoded">E-stop state unavailable</small></div>
+            <div><dt>D102 raw</dt><dd id="plc-d102-raw">--</dd><small id="plc-d102-decoded">Recovery acknowledgment unavailable</small></div>
+          </dl>
+        </article>
+      </section>
+
+      <section class="plc-grid plc-grid-diagnostics">
+        <article class="panel plc-panel" data-plc-panel id="plc-safety-state">
+          <div class="panel-title-row"><h2>Safety State</h2><span id="plc-safety-badge" class="badge idle">UNKNOWN</span></div>
+          <dl class="plc-kv-list">
+            <div><dt>Source set</dt><dd id="plc-source-set">None reported</dd></div>
+            <div><dt>Transaction phase</dt><dd id="plc-transaction-phase">No transaction</dd></div>
+            <div><dt>Pending command</dt><dd id="plc-pending-command">None</dd></div>
+            <div><dt>Failure</dt><dd id="plc-failure-code">None</dd></div>
+          </dl>
+        </article>
+
+        <article class="panel plc-panel" data-plc-panel id="plc-transport-health">
+          <div class="panel-title-row"><h2>Transport Health</h2><span id="plc-transport-kind" class="hint">transport: --</span></div>
+          <dl class="plc-kv-list">
+            <div><dt>Latency</dt><dd id="plc-latency">--</dd></div>
+            <div><dt>Freshness</dt><dd id="plc-freshness">--</dd></div>
+            <div><dt>Reconnect attempt</dt><dd id="plc-reconnect-attempt">0</dd></div>
+            <div><dt>Last error</dt><dd id="plc-last-error">None</dd></div>
+          </dl>
+        </article>
+
+        <article class="panel plc-panel plc-events-panel" data-plc-panel id="plc-event-history">
+          <div class="panel-title-row"><h2>Event History</h2><span id="plc-event-count" class="hint">0 bounded events</span></div>
+          <p class="plc-panel-copy">Recent bridge events only. The API retains a bounded in-memory history.</p>
+          <div id="plc-events" class="plc-events" aria-label="PLC event history"></div>
+        </article>
+      </section>
+
+      <section id="plc-virtual-controls" class="panel plc-panel plc-virtual-controls" data-plc-panel hidden>
+        <div class="panel-title-row"><h2>Virtual Pushbuttons</h2><span class="badge warning">VIRTUAL ONLY</span></div>
+        <p class="plc-panel-copy">Test transport input only. These named controls are unavailable for a live PLC transport.</p>
+        <div class="button-row">
+          <button id="plc-virtual-estop" data-plc-virtual-control class="btn danger" type="button">Virtual E-Stop</button>
+          <button id="plc-virtual-resume" data-plc-virtual-control class="btn" type="button">Virtual Resume</button>
+          <button id="plc-virtual-reset" data-plc-virtual-control class="btn" type="button">Virtual Reset</button>
+        </div>
+      </section>
+    </main>
+    <script src="/static/plc.js?v=20260825-plc-workspace-2" defer></script>
+  </body>
+</html>

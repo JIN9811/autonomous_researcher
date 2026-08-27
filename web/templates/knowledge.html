@@ -14,7 +14,7 @@ Runtime contract:
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
     <link rel="stylesheet" href="/static/styles.css" />
-    <link rel="stylesheet" href="/static/knowledge.css?v=20260809-relation-review-1" />
+    <link rel="stylesheet" href="/static/knowledge.css?v=20260817-manual-semantic-1" />
   </head>
   <body class="knowledge-page">
     <main class="knowledge-shell">
@@ -44,6 +44,7 @@ Runtime contract:
         <button type="button" data-knowledge-tab="ontology">Ontology</button>
         <button type="button" data-knowledge-tab="sync">Sync</button>
         <button type="button" data-knowledge-tab="project">Project Graph</button>
+        <button type="button" data-knowledge-tab="manuals">Manual RAG Knowledge</button>
         <button type="button" data-knowledge-tab="relations">Relation Review</button>
       </nav>
 
@@ -156,6 +157,61 @@ Runtime contract:
         </article>
       </section>
 
+      <section class="knowledge-tab-panel" data-knowledge-panel="manuals">
+        <div class="knowledge-section-head">
+          <div><span>Knowledge Agent Module</span><h2>Manual RAG Knowledge</h2></div>
+          <small>UTM scope · source-separated · page citations</small>
+        </div>
+        <section id="knowledge-manual-status" class="knowledge-manual-status" aria-label="Manual RAG status">
+          <article><span>Sources</span><strong id="knowledge-manual-sources">0</strong><small>registered manuals</small></article>
+          <article><span>Chunks</span><strong id="knowledge-manual-chunks">0</strong><small>page-aware sections</small></article>
+          <article><span>Graph Nodes</span><strong id="knowledge-manual-nodes">0</strong><small>cited semantic assertions</small></article>
+          <article><span>Graph Edges</span><strong id="knowledge-manual-edges">0</strong><small>typed semantic relations</small></article>
+          <article><span>Scope</span><strong id="knowledge-manual-scope">UTM</strong><small>product/version are ranking hints</small></article>
+          <button id="knowledge-manual-ingest" class="knowledge-button primary" type="button">Ingest Manuals</button>
+        </section>
+        <div class="knowledge-query-bar knowledge-manual-query-bar">
+          <label>Purpose
+            <select id="knowledge-manual-purpose">
+              <option value="procedure">Procedure</option>
+              <option value="decision">Decision</option>
+              <option value="skill_authoring">Skill authoring</option>
+              <option value="safety">Safety</option>
+              <option value="recovery">Recovery</option>
+            </select>
+          </label>
+          <label>UTM manual question
+            <input id="knowledge-manual-query" type="text" placeholder="예: 시험 시작 실패 시 확인 절차" />
+          </label>
+          <label>Evidence
+            <input id="knowledge-manual-top-k" type="number" min="1" max="12" value="6" />
+          </label>
+          <button id="knowledge-manual-run-query" class="knowledge-button primary" type="button">Retrieve Evidence</button>
+        </div>
+        <div class="knowledge-manual-layout">
+          <article class="knowledge-card knowledge-manual-results-card">
+            <div class="knowledge-card-head">
+              <div><span>Grounded Context</span><h2>Manual Evidence</h2></div>
+              <div class="knowledge-manual-head-actions">
+                <small id="knowledge-manual-query-summary">waiting</small>
+                <button id="knowledge-manual-show-evidence" class="knowledge-button secondary compact" type="button" aria-pressed="false" disabled>Selected support</button>
+              </div>
+            </div>
+            <div id="knowledge-manual-results" class="knowledge-manual-results"><p>Query the UTM manuals to inspect bounded evidence.</p></div>
+          </article>
+          <article class="knowledge-card knowledge-graph-card">
+            <div class="knowledge-card-head"><div><span>Semantic Projection</span><h2>Manual Knowledge Graph</h2></div><small>cited assertions · 2-hop context</small></div>
+            <div id="knowledge-manual-graph" class="knowledge-manual-graph" role="img" aria-label="UTM manual knowledge graph"></div>
+          </article>
+          <aside class="knowledge-card knowledge-manual-inspector-card">
+            <div class="knowledge-card-head"><div><span>Selection</span><h2>Semantic Inspector</h2></div><small id="knowledge-manual-selection-kind">none</small></div>
+            <div id="knowledge-manual-inspector" class="knowledge-manual-inspector" aria-live="polite">
+              <p>Select a semantic node or relation to inspect confidence and page-level support.</p>
+            </div>
+          </aside>
+        </div>
+      </section>
+
       <section class="knowledge-tab-panel" data-knowledge-panel="relations">
         <div id="knowledge-relation-summary" class="knowledge-relation-summary" aria-label="Relation reconciliation summary">
           <article><span>Examined gaps</span><strong id="knowledge-relation-gaps">0</strong><small>bounded graph scan</small></article>
@@ -203,6 +259,6 @@ Runtime contract:
       <footer class="knowledge-footer"><span id="knowledge-runtime-message">Initializing Knowledge Workspace.</span><time id="knowledge-updated-at">-</time></footer>
     </main>
     <script src="/static/vendor/echarts.min.js?v=5.6.0"></script>
-    <script src="/static/knowledge.js?v=20260809-relation-review-1" defer></script>
+    <script src="/static/knowledge.js?v=20260817-manual-semantic-1" defer></script>
   </body>
 </html>

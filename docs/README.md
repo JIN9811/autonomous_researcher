@@ -246,6 +246,7 @@ API·프로토콜·효과·복구를 비교할 때는
 | UTM Vision | [UTM Vision](device_bridges/utm_vision_bridge.md) | ROS 2, camera, pose, UTM state | [UTM ROS Vision](hardware/utm_ros_vision_runtime_bridge.md) |
 | CAE Computation | [CAE/CalculiX/PINN](device_bridges/cae_computation_bridges.md) | solver subprocess and model registry | [Analysis Reference](agents/analysis_agent.md) |
 | Base and Simulators | [Base/Simulators](device_bridges/base_simulator_bridges.md) | in-process deterministic test substitutes | [Agent matrix](agents/agent_api_connection_matrix.md) |
+| PLC Safety | [PLC Safety Bridge](device_bridges/plc_safety_bridge.md) | Mitsubishi MC Protocol, D100-D102, Controller E-STOP | connection, recovery, diagnostics, and pending physical-validation checklist |
 
 ## 5. 폴더별 책임
 

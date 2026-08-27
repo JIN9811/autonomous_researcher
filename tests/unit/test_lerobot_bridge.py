@@ -1147,7 +1147,7 @@ def test_live_teleoperate_active_robot_cam_uses_wrapper_and_d405_direct_env(tmp_
     assert env["ATR_ACTIVE_ROBOT_CAM_CAPTURE_WAIT_TOLERANCE_DEG"] == "2.0"  # type: ignore[index]
     assert env["ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TIMEOUT_S"] == "4.0"  # type: ignore[index]
     assert env["ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_POLL_S"] == "0.05"  # type: ignore[index]
-    assert env["ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TOLERANCE_DEG"] == "3.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TOLERANCE_DEG"] == "5.0"  # type: ignore[index]
     assert env["ATR_ACTIVE_ROBOT_CAM_SETTLE_S"] == "1.0"  # type: ignore[index]
     assert env["ATR_ACTIVE_ROBOT_CAM_HOLD_AFTER_CAPTURE_S"] == "1.0"  # type: ignore[index]
     assert env["ATR_SPECIMEN_POSE_PENDING_PATH"] == "/tmp/atr_specimen_pose_pending/latest_specimen_pose_payload.json"  # type: ignore[index]

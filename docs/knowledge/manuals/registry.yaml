@@ -1,0 +1,18 @@
+schema: manual_source_registry.v1
+sources:
+  - source_id: qmesys-utm-indicator-manual
+    equipment_type: utm
+    source_kind: equipment_indicator
+    title: Universal Testing Machine Indicator Manual
+    product: QM100T
+    version: ""
+    language: ko
+    path: sources/Indicator Manual.pdf
+  - source_id: qmesys-utm-software-manual
+    equipment_type: utm
+    source_kind: equipment_software
+    title: Universal Testing Machine Software Manual
+    product: Qm_Tester
+    version: 17.7.0
+    language: ko
+    path: sources/Software Manual.pdf

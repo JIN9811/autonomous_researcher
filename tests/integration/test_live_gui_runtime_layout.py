@@ -272,8 +272,8 @@ def test_live_gui_runtime_shell_contains_operational_panels() -> None:
     assert "planning-live-body" in html
     assert "/static/styles.css?v=20260527-live-focus" in html
     assert "/static/planning.js?v=20260613-clean-stl-render-1" in html
-    assert 'href="/static/styles.css?v=20260720-manipulation-grounded-1&knowledge-activity-1"' in html
-    assert 'src="/static/planning.js?v=20260813-test-complete-freeze-1"' in html
+    assert 'href="/static/styles.css?v=20260825-plc-safety-lifecycle-5"' in html
+    assert 'src="/static/planning.js?v=20260826-unified-reset-1"' in html
     assert "Runtime Chat" in html
     assert "Safe Stop" in html
     assert "Pause Run" in html
@@ -426,6 +426,7 @@ def test_live_gui_static_script_exposes_runtime_ide_adapters() -> None:
         "renderArtifactPanel",
         "renderTimelinePanels",
         "eventTimelineKind",
+        "isResolvedEmergencyLifecycleEvent",
         "eventStableKey",
         "renderSelectedEventCard",
         "runSelectedEventAction",
@@ -559,6 +560,32 @@ def test_live_gui_analysis_report_exposes_multifidelity_contract() -> None:
         "analysis_bo_handoff_v2",
     ]:
         assert token in script
+
+    notification_source = script[
+        script.index("function isAgentNotificationEvent"):
+        script.index("function renderBackendRawSection")
+    ]
+    assert "isResolvedEmergencyLifecycleEvent(event)" in notification_source
+
+    emergency_source = script[
+        script.index("function isResolvedEmergencyLifecycleEvent"):
+        script.index("function isAgentNotificationEvent")
+    ]
+    assert 'eventType === "run_complete"' in emergency_source
+    assert "hasLaterEmergencyRecovery" in emergency_source
+    assert "currentRunEventSources()" in emergency_source
+
+    agent_status_source = script[
+        script.index("function eventStatusForAgent"):
+        script.index("function liveAgentIconHtml")
+    ]
+    assert "isResolvedEmergencyLifecycleEvent(event)" in agent_status_source
+
+    fault_source = script[
+        script.index("function isRuntimeFaultEvent"):
+        script.index("function liveFaultEvents")
+    ]
+    assert "isResolvedEmergencyLifecycleEvent(event)" in fault_source
 
     for token in [
         "trust_score",
@@ -3517,7 +3544,59 @@ def test_live_gui_emergency_stop_controls_are_distinct_from_safe_stop() -> None:
     assert "place-self: stretch !important;" in styles
 
 
-def test_emergency_stop_resume_reset_runtime_contract() -> None:
+def test_live_gui_recovery_controls_are_gated_by_estop_source_not_plc_connection() -> None:
+    client = TestClient(app)
+    html = client.get("/live").text
+    script = client.get("/static/planning.js").text
+
+    assert 'id="live-plc-emergency-guidance"' in html
+    assert '<strong>PLC E-STOP</strong>' not in html
+    assert "ONLINE · pymcprotocol" not in html
+    assert "PB1 short: Resume" in html
+    assert "PB1 long: Reset" in html
+    assert 'id="btn-live-emergency-resume" class="btn live-emergency-resume" hidden disabled' in html
+    assert 'id="btn-live-emergency-reset" class="btn live-emergency-reset" hidden disabled' in html
+    assert 'fetchJsonOrThrowWithTimeout(\n        "/api/plc/status"' in script
+    assert "function updateLiveEmergencyStopControls" in script
+    assert "function liveEmergencySourceSet" in script
+    assert 'activeSources.has("plc_pb2")' in script
+    assert 'activeSources.has("gui_estop") || activeSources.has("gui")' in script
+    assert "const sourcePending = latched && !plcSourceLocked && !guiSourceLatched;" in script
+    assert "btnLiveEmergencyResume.hidden = plcSourceLocked || sourcePending;" in script
+    assert "btnLiveEmergencyReset.hidden = plcSourceLocked || sourcePending;" in script
+    assert "btnLiveEmergencyResume.disabled = plcSourceLocked || sourcePending" in script
+    assert "btnLiveEmergencyReset.disabled = plcSourceLocked || sourcePending" in script
+    assert "const plcRecoveryLocked = plcSourceLocked || livePLCOnline;" not in script
+    assert "LIVE_PLC_STATUS_REFRESH_MS" in script
+    assert "LIVE_PLC_STATUS_FETCH_TIMEOUT_MS" in script
+    assert "refreshLivePLCStatus" in script
+    assert "refreshLivePLCStatus({ force: true }).catch(() => {});" in script
+    assert "plc_status_refresh_in_flight: Boolean(livePLCStatusRefreshInFlight)" in script
+
+
+def test_runtime_ide_projects_plc_as_device_bridge_not_executable_stage() -> None:
+    client = TestClient(app)
+
+    bridge_response = client.get("/api/bridges")
+    graph_response = client.get("/api/graphs/atr_closed_loop")
+
+    assert bridge_response.status_code == 200
+    assert graph_response.status_code == 200
+    bridges = bridge_response.json()["bridges"]
+    plc_bridge = next(bridge for bridge in bridges if bridge["id"] == "plc_bridge")
+    assert plc_bridge["workspace"] == "/plc"
+    assert plc_bridge["config"] == "configs/plc.yaml"
+    assert "D100-D102" in plc_bridge["live_boundary"]
+
+    graph = graph_response.json()["graph"]
+    assert all(node.get("id") != "plc_bridge" for node in graph["nodes"])
+    assert all(
+        edge.get("source") != "plc_bridge" and edge.get("target") != "plc_bridge"
+        for edge in graph["edges"]
+    )
+
+
+def test_mouse_emergency_stop_resume_reset_runtime_contract_remains_gui_controlled() -> None:
     client = TestClient(app)
 
     stop_response = client.post("/api/run/emergency-stop")
@@ -3528,25 +3607,31 @@ def test_emergency_stop_resume_reset_runtime_contract() -> None:
     assert stop_state["emergency_stop_requested"] is True
     assert stop_state["stop_requested"] is True
     assert stop_state["safe_stop_requested"] is False
+    planning_state = client.get("/api/planning/session").json()["state"]
+    assert set(planning_state["run_metadata"]["active_safety_sources"]) == {
+        "gui_estop"
+    }
 
     resume_response = client.post("/api/run/emergency-resume")
     assert resume_response.status_code == 200
-    resume_state = resume_response.json()["state"]
+    assert resume_response.json()["ok"] is True
+    resume_state = controller.snapshot()["state"]
     assert resume_state["emergency_stop_requested"] is False
     assert resume_state["stop_requested"] is False
     assert resume_state["safe_stop_requested"] is False
 
-    client.post("/api/run/emergency-stop")
+    stop_response = client.post("/api/run/emergency-stop")
+    assert stop_response.status_code == 200
     reset_response = client.post("/api/run/emergency-reset")
     assert reset_response.status_code == 200
-    reset_state = reset_response.json()["state"]
+    assert reset_response.json()["ok"] is True
+    reset_state = controller.snapshot()["state"]
     assert reset_state["emergency_stop_requested"] is False
     assert reset_state["stop_requested"] is False
     assert reset_state["safe_stop_requested"] is False
-    assert reset_state["stage"] == "idle"
 
 
-def test_run_scoped_emergency_resume_reset_runtime_contract() -> None:
+def test_run_scoped_mouse_emergency_resume_reset_remains_gui_controlled() -> None:
     client = TestClient(app)
     run_id = controller.snapshot()["state"]["run_id"]
 
@@ -3556,14 +3641,15 @@ def test_run_scoped_emergency_resume_reset_runtime_contract() -> None:
 
     resume_response = client.post(f"/api/runs/{run_id}/emergency-resume")
     assert resume_response.status_code == 200
-    assert resume_response.json()["state"]["emergency_stop_requested"] is False
+    assert resume_response.json()["ok"] is True
+    assert controller.snapshot()["state"]["emergency_stop_requested"] is False
 
-    client.post(f"/api/runs/{run_id}/emergency-stop")
+    stop_response = client.post(f"/api/runs/{run_id}/emergency-stop")
+    assert stop_response.status_code == 200
     reset_response = client.post(f"/api/runs/{run_id}/emergency-reset")
     assert reset_response.status_code == 200
-    reset_state = reset_response.json()["state"]
-    assert reset_state["emergency_stop_requested"] is False
-    assert reset_state["stage"] == "idle"
+    assert reset_response.json()["ok"] is True
+    assert controller.snapshot()["state"]["emergency_stop_requested"] is False
 
 
 def test_live_gui_emergency_controls_use_run_scoped_endpoints_and_clear_stale_cache() -> None:
@@ -3574,8 +3660,35 @@ def test_live_gui_emergency_controls_use_run_scoped_endpoints_and_clear_stale_ca
     assert 'liveEmergencyEndpoint("emergency-stop", "/api/run/emergency-stop")' in script
     assert 'liveEmergencyEndpoint("emergency-resume", "/api/run/emergency-resume")' in script
     assert 'liveEmergencyEndpoint("emergency-reset", "/api/run/emergency-reset")' in script
-    assert "discardStaleLivePlanningCache" in script
+    assert "resetLiveRunScopedStateForAuthoritativeSession" in script
+    assert "discardStaleLivePlanningCache" not in script
     assert "liveBrowserCacheRestoredRunId" in script
+
+
+def test_live_gui_emergency_reset_uses_one_authoritative_run_transition_path() -> None:
+    client = TestClient(app)
+    script = client.get("/static/planning.js").text
+
+    assert "function resetLiveRunScopedStateForAuthoritativeSession" in script
+    assert "resetLiveRunScopedStateForAuthoritativeSession(authoritativeSession)" in script
+    assert "liveAppliedAuthoritativeRunId" in script
+    assert "liveRunEvents = []" in script
+    assert "liveRecentEvents = []" in script
+    assert "liveRunArtifacts = []" in script
+    assert "liveApprovals = { approvals: [], pending: [], resolved: [] }" in script
+    assert "const runTransitionReset = resetLiveRunScopedStateForAuthoritativeSession" in script
+    assert "messages: []" in script
+    assert "message_total: 0" in script
+    assert "function resetPlanningSessionIdForEmergencyReset" not in script
+
+    reset_function = script.split("async function requestLiveEmergencyReset()", 1)[1].split(
+        "\ndocument.addEventListener", 1
+    )[0]
+    assert "const result = await fetchJsonOrThrow(endpoint" in reset_function
+    assert "applyPlanningSession({ ...(liveLastSession || {}), state: result.state })" in reset_function
+    assert "clearLiveBoVisualization()" not in reset_function
+    assert "resetPlanningMessageDisplayState()" not in reset_function
+    assert "resetPlanningSessionIdForEmergencyReset()" not in reset_function
 
 
 def test_live_gui_manipulation_agent_uses_current_supervisor_language() -> None:
@@ -3619,9 +3732,9 @@ def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundle
     styles = client.get("/static/styles.css").text
     bundle_response = client.get("/static/omx_telemetry_viewer.bundle.js")
 
-    assert '/static/styles.css?v=20260720-manipulation-grounded-1' in html
+    assert '/static/styles.css?v=20260825-plc-safety-lifecycle-5' in html
     assert '/static/omx_telemetry_viewer.bundle.js?v=20260720-manipulation-grounded-1' in html
-    assert '/static/planning.js?v=20260813-test-complete-freeze-1' in html
+    assert '/static/planning.js?v=20260826-unified-reset-1' in html
     assert bundle_response.status_code == 200
     bundle = bundle_response.text
     for required in [
@@ -3766,7 +3879,7 @@ def test_live_gui_knowledge_activity_uses_preserved_realtime_histogram() -> None
     script = client.get("/static/planning.js").text
     styles = client.get("/static/styles.css").text
 
-    assert "knowledge-activity-1" in html
+    assert "/static/styles.css?v=20260825-plc-safety-lifecycle-5" in html
     for required in [
         "Knowledge Activity",
         "data-atr-knowledge-activity",
@@ -3799,9 +3912,9 @@ def test_live_robot_pose_has_repeatable_zoom_to_fit_control() -> None:
     assert "zoomToFit" in bundle
     assert "bindPoseFitButtons" in bundle
     assert ".ar-man-pose-fit" in styles
-    assert '/static/styles.css?v=20260720-manipulation-grounded-1' in html
+    assert '/static/styles.css?v=20260825-plc-safety-lifecycle-5' in html
     assert '/static/omx_telemetry_viewer.bundle.js?v=20260720-manipulation-grounded-1' in html
-    assert '/static/planning.js?v=20260813-test-complete-freeze-1' in html
+    assert '/static/planning.js?v=20260826-unified-reset-1' in html
 
 
 def test_live_gui_serves_repository_omx_model_assets() -> None:
