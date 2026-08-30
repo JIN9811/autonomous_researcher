@@ -9,8 +9,8 @@ Windows PyAutoGUI bridge의 Skill 녹화를 5초 준비 카운트다운 뒤 시�
 1. Program Manager의 `Record` 버튼을 누른다.
 2. 같은 버튼에 `STARTING IN 5`부터 `STARTING IN 1`까지 표시된다.
 3. 카운트다운이 끝나면 기존 `/recordings/start` 경로로 마우스·키보드 녹화를 시작한다.
-4. 버튼은 `STOP RECORDING`으로 바뀌고 Windows 최상위 배너에 빨간 점, `RECORDING`, 경과 시간이 표시된다.
-5. 같은 버튼을 다시 누르면 기존 `/recordings/stop` 경로로 녹화를 종료하고 배너를 제거한다.
+4. 시작 버튼은 활성 중 숨겨지고 Windows 최상위 배너에 빨간 점, `RECORDING`, 경과 시간, 유일한 `STOP` 조작이 표시된다.
+5. 오버레이 `STOP`이 `RecordingManager.stop()`을 호출해 녹화를 종료하고 배너를 제거하며 Console은 상태 API로 idle을 자동 반영한다.
 6. 카운트다운 중 같은 버튼을 누르면 시작을 취소한다.
 
 ## Architecture
@@ -22,9 +22,9 @@ Windows PyAutoGUI bridge의 Skill 녹화를 5초 준비 카운트다운 뒤 시�
 
 ## UI Contract
 
-- 녹화 시작/정지는 `recordToggle` 버튼 하나만 사용한다.
+- Console의 `recordToggle`은 녹화 시작에만 사용하고 정지는 최상위 오버레이 `STOP` 하나만 사용한다.
 - 카운트다운 상태: `STARTING IN N`, 두 번째 클릭은 취소.
-- 녹화 상태: `STOP RECORDING`, 붉은 강조.
+- 녹화 상태: 시작 버튼 숨김, 상태 pill과 Checkpoint 유지, 최상위 오버레이 `STOP` 표시.
 - idle 상태: `RECORD`.
 - Checkpoint, Save Recording, Refresh, 기존 이미지 추적 옵션은 유지한다.
 - 새로고침 시 `/recordings/status`를 기준으로 토글 상태를 복원한다.

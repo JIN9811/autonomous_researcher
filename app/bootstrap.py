@@ -192,13 +192,27 @@ def _build_runtime_profile(
         "orchestrator": "orchestrator_plan",
         "e4b": "design_reasoning",
     }
-    selected_models: dict[str, dict[str, str | None]] = {}
+    selected_models: dict[str, dict[str, Any]] = {}
+    role_capabilities = (
+        models_cfg.get("role_capabilities")
+        if isinstance(models_cfg.get("role_capabilities"), dict)
+        else {}
+    )
     for role, task_type in role_routes.items():
         selection = router.select(task_type)
+        raw_capabilities = (
+            role_capabilities.get(role)
+            if isinstance(role_capabilities.get(role), dict)
+            else {}
+        )
         selected_models[role] = {
             "task_type": task_type,
             "primary": selection.primary,
             "fallback": selection.fallback,
+            "capabilities": {
+                "text": bool(raw_capabilities.get("text", True)),
+                "vision": bool(raw_capabilities.get("vision", False)),
+            },
         }
 
     return {

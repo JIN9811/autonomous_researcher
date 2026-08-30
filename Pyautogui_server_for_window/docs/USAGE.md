@@ -1,702 +1,261 @@
-# Windows PyAutoGUI Bridge 사용법
+# Windows PyAutoGUI Bridge 상세 사용법
 
-## 가장 간단한 배포: 폴더 복사 후 실행
+## 1. 설치 방식 선택
 
-1. `ATR_Equipment_Agent_Bridge_Windows_x64_Portable.zip`을 Windows x64 PC로 옮깁니다.
-2. ZIP 전체를 원하는 폴더에 풉니다. 일부 파일만 꺼내면 안 됩니다.
-3. `START_EQUIPMENT_BRIDGE.cmd`를 더블클릭합니다.
-4. 최초 실행 시 폴더 내부 전용 Python과 의존성이 구성될 때까지 기다립니다.
-5. 열린 브라우저에서 PowerShell 창에 표시된 token을 입력합니다.
-6. `Health`로 연결을 확인하고 프로그램 또는 스킬을 실행합니다.
-7. 종료할 때 `STOP_EQUIPMENT_BRIDGE.cmd`를 더블클릭합니다.
+### 포터블
 
-사용자 상태는 전부 배포 폴더의 `data`에 남습니다.
+배포받은 폴더에서 `START_PORTABLE_BRIDGE.cmd`를 실행합니다. 첫 실행은 포함된 Python 설치 파일과 wheelhouse로 폴더 내부 런타임을 구성합니다. 시스템 Python과 전역 PATH를 변경하지 않습니다.
+
+### 표준 설치
 
 ```text
-data/
-├─ .bridge_token
-├─ artifacts/
-├─ locators/
-├─ logs/
-├─ programs/
-├─ recordings/
-└─ utm_exports/
+INSTALL_WINDOWS_BRIDGE.cmd
 ```
 
-다른 PC로 옮길 때는 bridge를 먼저 중지한 뒤 폴더 전체를 복사합니다. 기존
-토큰과 사용자 프로그램을 옮기지 않으려면 복사본의 `data`만 비운 뒤 다시
-시작합니다. 배포 원본에는 token과 실행 로그가 들어 있지 않습니다.
+설치 스크립트는 현재 패키지 폴더 안에 `.venv`를 만들고 바로가기를 생성합니다. 다른 프로그램 폴더로 복사하지 않습니다. 이후 START 버튼, supervisor와 원격 updater는 모두 현재 패키지 폴더를 사용하며, 로그·녹화·아티팩트만 `%LOCALAPPDATA%\ATR\PyAutoGUIBridge`에 저장합니다.
 
-첫 실행은 동봉 파일만 사용하므로 인터넷이 없어도 됩니다. 내부망 원격 연결은
-Windows 방화벽의 8765/TCP 허용이 별도로 필요할 수 있습니다. 구성 로그는
-`data\logs\portable-bootstrap.log`, 요청 감사 로그는
-`data\artifacts\bridge_requests.jsonl`에서 확인합니다.
+START 버튼과 로그온 예약 작업은 릴리스 번호가 없는 현재 폴더의 `scripts\start_supervisor.ps1`을 실행합니다. supervisor는 같은 폴더의 Worker 상태를 5초마다 경량 평문 `/ping`으로 확인하며 이 요청은 화면 및 감사 로그에 누적하지 않습니다. 버전은 소스나 시작 명령이 아니라 `release_manifest.json`에서 읽습니다. 실제 후보 검색용 `/discovery`는 supervisor가 반복 호출하지 않습니다. 이전 인자로 이미 실행 중인 supervisor의 localhost `/discovery` 요청도 버전 확인용 최소 JSON만 반환하고 감사 로그에 남기지 않습니다. 업데이트 중에는 data root의 `updates\update_in_progress.json` 잠금으로 중복 시작을 막습니다.
 
-## 0. 최초 설치
-
-release ZIP을 푼 다음 `INSTALL_WINDOWS_BRIDGE.cmd`를 더블클릭합니다. 설치
-파일은 현재 폴더를 자동 감지하고 설치 후 브리지와 브라우저를 시작합니다.
-이후에는 바탕화면의 `ATR Windows Bridge`로 실행하고
-`Uninstall ATR Windows Bridge`로 제거할 수 있습니다.
-
-명령행 설치가 필요한 경우:
+### 소스 개발
 
 ```powershell
-cd "C:\path\to\Pyautogui_server_for_window"
+cd <package-root>
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_bridge.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_bridge.ps1 -OpenBrowser
 ```
 
-설치기는 `%LOCALAPPDATA%\Programs\ATR\PyAutoGUIBridge`에 프로그램을,
-`%LOCALAPPDATA%\ATR\PyAutoGUIBridge`에 변경 가능한 데이터와 토큰을 두고
-전용 `.venv`에 `requirements-windows.txt`를 설치합니다. 로그온 자동 시작은
-`-RegisterLogonTask`를 명시할 때만 등록됩니다.
-
-더블클릭 제거는 사용자 데이터와 토큰을 보존합니다. 데이터까지 제거하려면
-PowerShell에서 `scripts\uninstall_bridge.ps1 -RemoveData`를 실행합니다.
-
-## 1. 로컬 E2E 테스트
-
-먼저 Web GUI와 API가 뜨는지만 확인합니다.
+사용 포트를 바꾸려면 실행 전에 환경변수를 지정합니다.
 
 ```powershell
-cd "C:\ATR\Pyautogui_server_for_window"
-powershell -NoProfile -ExecutionPolicy Bypass -File .\local_e2e_test.ps1
+$env:WINDOWS_PYAUTOGUI_BRIDGE_PORT = "8765"
 ```
 
-성공 기준:
+## 2. 최초 페어링
+
+1. Windows Console의 Bridge Status에서 숫자 4자리를 확인합니다.
+2. Linux ATR Main GUI에서 Device Workspace를 엽니다.
+3. Lab Equipment Workspace > Windows Bridge에서 네트워크 Scan을 실행합니다.
+4. 검색된 candidate를 선택하고 4자리 코드를 입력합니다.
+5. `Pair & Save`를 누릅니다.
+6. 저장할 장치 alias를 지정합니다.
+7. Health 결과가 `paired/ready`인지 확인합니다.
+
+코드가 만료되면 Windows Console에서 `New Code`를 누릅니다. 5회 실패 후에는 30초 뒤 새 코드를 발급합니다.
+
+내부 인증키는 사용자가 볼 필요가 없습니다. Windows는 활성 data root의 `artifacts\pairing.json`, Linux는 기존 Windows Bridge connection memory의 보호 필드에 저장합니다. 두 파일은 Git에 포함하지 않습니다.
+
+## 3. 재접속
+
+페어링된 장치는 ATR Workspace의 saved devices에 나타납니다.
+
+1. 장치 Select
+2. Health
+3. Programs 또는 Test selected bridge
+
+IP가 변경되면 Scan으로 같은 Bridge를 다시 찾고 저장 설정을 갱신합니다. 내부키가 유효한 동안 새 코드는 요구하지 않습니다.
+
+## 4. Program Manager
+
+### 기본 데모 실행
+
+`program1`은 설치 검증용 내장 프로그램입니다. 삭제하거나 덮어쓸 수 없습니다.
+
+### 새 프로그램 작성
+
+1. Add
+2. Program ID, 이름, 대상 창, action 입력
+3. Validate
+4. Save
+5. Test
+
+### JSON 파일 불러오기
+
+1. Browse JSON
+2. 파일 선택
+3. Validate
+4. Save
+
+Browse는 파일을 읽는 동작이고 Add는 새 초안을 생성하는 동작입니다.
+
+### Template
+
+Template 버튼은 현재 지원되는 프로그램 형식의 JSON 예제를 저장합니다. 템플릿을 수정해 Browse JSON으로 다시 불러올 수 있습니다.
+
+### 프로그램 소유권
+
+- `builtin`: 설치 포함, 읽기 전용
+- `local_draft`: Windows에서 작성한 초안, 로컬 테스트만 가능
+- `deployed`: Linux ATR이 검증·해시 확인 후 배포, 읽기 전용
+- `retired`: 신규 실행 금지, 감사용 보존
+
+실험 루프는 Linux catalog가 허용한 builtin/deployed 프로그램만 실행합니다.
+
+## 5. Recording
+
+### 녹화 시작
+
+1. Name, Target app, Target window 입력
+2. Image tracking 여부 선택
+3. START RECORDING
+4. 5초 카운트다운 동안 대상 창으로 이동
+5. 상단 `REC` 오버레이가 나타난 뒤 작업 수행
+6. 필요한 지점에서 Checkpoint
+7. 최상위 녹화 오버레이의 `STOP` 클릭
+   - 사용자 중단 조작은 오버레이 버튼 하나만 사용합니다.
+   - Bounded Evidence에는 별도 Stop 버튼이 나타나지 않습니다.
+   - 오버레이 버튼은 UI thread를 막지 않고 종료 저장을 background에서 수행하며 Console 상태는 자동으로 idle에 동기화됩니다.
+
+### 저장 데이터
+
+각 recording 폴더는 다음 자료를 포함할 수 있습니다.
+
+- `recording.json`: 버전, 대상, 상태, timeline 정보
+- `events.jsonl`: 키보드/마우스 event와 monotonic timestamp
+- `frames/periodic/`: 녹화 전체 구간의 2 FPS JPEG 원본
+- `timeline.jsonl`: periodic/event/boundary frame의 append-only 시간순 인덱스
+- `keyframes/`, `timeline/event_keyframes/`: event/checkpoint 시점의 PNG 증거
+- locator/checkpoint metadata
+
+전체 periodic frame은 녹화 시작부터 종료까지 고정 2 FPS로 디스크에 즉시 저장됩니다. 메모리는 행동 직전 프레임 판정을 위한 작은 최근 프레임 캐시만 유지합니다. 정상 녹화 길이나 frame 수에 임의 상한을 두지 않으며, 디스크 임계 상태에서는 이미 저장한 자료를 삭제하지 않고 `evidence_complete=false`인 부분 패키지로 종료합니다.
+
+### 녹화 이후
+
+Preview에서 저장된 keyframe을 이전/다음으로 확인합니다. Linux Lab Equipment Workspace는 선택된 Worker의 Recording 목록을 직접 조회하며, 항목을 선택하면 Recording ID와 Worker ID를 채웁니다. 이후 `Import & Build Draft`가 인증된 package를 가져옵니다. Linux에서 다음을 수행합니다.
 
 ```text
-GET / Web GUI
-Web GUI HTML served with Run Timeline / Live Proof Checklist
-GET /health
-GET /programs
-GET /readiness
-GET /request-log
-POST /execute guarded sequence or install-required block
-GET /artifacts
-POST /execute program1
-Local E2E completed.
+transfer -> annotate -> build skill -> validate -> approve -> deploy
 ```
 
-PyAutoGUI 설치 전이면 `program1`은 아래처럼 막히는 게 정상입니다.
+전송 시 Linux는 인증된 `/recordings/{id}/package`를 호출하고 각 파일의 크기와
+SHA-256을 검증합니다. 검증된 파일만 Linux artifact root에 저장됩니다.
 
-```json
-{
-  "ok": false,
-  "status": "blocked",
-  "failure_code": "PYAUTOGUI_NOT_INSTALLED"
-}
-```
+선택된 Local/API LLM은 Linux에서만 사용됩니다. Windows에는 LLM과 API key가 필요하지 않습니다.
 
-## 1.1 현재 smoke test 검증 항목
+녹화 종료 시 오버레이를 먼저 숨기고 최종 화면을 시계열 evidence에 추가합니다. Linux는 16개 frame씩 4x4 스토리보드를 만들고 선택된 multimodal backend로 모든 청크를 순서대로 분석한 후, 청크 결과와 session overview를 한 번 최종 합성합니다. 완료된 청크 분석은 디스크에 보존되며 Stop 요청은 청크 경계에서 처리됩니다. Windows worker는 이 해석을 수행하거나 저장된 Skill 의미를 임의로 변경하지 않습니다.
 
-현재 `tests/smoke_test.py`는 packaged server의 compatibility API로 임시 서버를 띄워 다음을 확인합니다.
+## 6. Linux Equipment Runtime 연동
 
-- `/` Web GUI가 `Run Timeline`, `Live Proof Checklist`, `Operator runtime status`, `Live UTM situation matrix`, `Readiness locator shortcuts`, `Program registry`를 포함합니다.
-- 인증 없는 `/health`는 차단되고, 토큰이 있으면 bridge/artifact 경로가 반환됩니다.
-- `/programs`에는 `program1`, `utm_compression_start_v1`, `utm_export_csv_v1`, `utm_manual_save_csv_v1`, `utm_stop_or_abort_v1`가 포함됩니다.
-- `/readiness`, `/request-log`, `/artifacts`가 응답합니다.
-- PyAutoGUI가 설치되지 않은 PC에서도 실행 성공으로 위장하지 않고 명확한 block 결과를 반환합니다.
-
-## 2. Windows 런타임 설치 확인
-
-실제 GUI 제어가 필요하면 Windows PC에서 설치합니다.
-
-```powershell
-& "$env:LOCALAPPDATA\Programs\ATR\PyAutoGUIBridge\.venv\Scripts\python.exe" -m pip check
-```
-
-설치 확인:
-
-```powershell
-& "$env:LOCALAPPDATA\Programs\ATR\PyAutoGUIBridge\.venv\Scripts\python.exe" -c "import pyautogui, pynput, cv2; print(pyautogui.size()); print(pyautogui.FAILSAFE)"
-```
-
-`True`가 출력되어야 fail-safe가 켜진 상태입니다.
-
-## 3. Bridge 실행
-
-Linux에서 붙을 수 있게 LAN 바인딩으로 실행합니다.
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\run_bridge.ps1
-```
-
-옵션:
-
-```powershell
-# 브라우저도 같이 열기
-powershell -NoProfile -ExecutionPolicy Bypass -File .\run_bridge.ps1 -OpenBrowser
-
-# 로컬 PC에서만 테스트
-powershell -NoProfile -ExecutionPolicy Bypass -File .\run_bridge.ps1 -LocalOnly
-
-# 포트 변경
-$env:WINDOWS_PYAUTOGUI_BRIDGE_PORT = "8766"
-powershell -NoProfile -ExecutionPolicy Bypass -File .\run_bridge.ps1
-
-# 새 토큰을 화면에 한 번 표시, 기본 길이는 32
-powershell -NoProfile -ExecutionPolicy Bypass -File .\run_bridge.ps1 -ResetToken -ShowToken
-
-# Python 경로 직접 지정
-powershell -NoProfile -ExecutionPolicy Bypass -File .\run_bridge.ps1 -Python "C:\Path\To\python.exe"
-```
-
-실행 후 PowerShell 창은 닫지 마세요. 이 프로세스가 bridge 서버입니다.
-
-이미 백그라운드에서 떠 있는 bridge를 확인하려면:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\check_bridge.ps1
-```
-
-bridge만 골라서 중지하려면:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\stop_bridge.ps1
-```
-
-## 4. Web GUI 사용
-
-브라우저에서 엽니다.
+실험 루프 실행 경로:
 
 ```text
-http://127.0.0.1:8765/
+LabEquipmentAgent
+  -> EquipmentRuntimeService
+  -> selected Equipment Profile / Skill
+  -> Windows bridge /execute
+  -> raw evidence collection
+  -> one completion interpretation
+  -> Analysis handoff or explicit block
 ```
 
-순서:
+모든 화면은 같은 `execution_id`의 기록을 읽습니다. 표시 상태는 Profile, Skill, provider 계약에 따라 달라질 수 있으며 하나의 고정 상태 순서를 모든 장비에 강제하지 않습니다.
 
-1. `run_bridge.ps1 -ShowToken`으로 확인한 저장 토큰을 Token 칸에 입력
-2. `Health` 클릭 후 상단 `Auth`, `GUI Driver` 상태 확인
-3. `Programs` 또는 자동 로드된 `Program registry` 카드로 등록 macro/protocol 목록 확인
-4. `Program registry`에서 `Load`로 payload preview를 확인하거나 `Simulate`로 비구동 검증
-5. PyAutoGUI 설치 후 `Run program1`로 마우스 이동 데모 확인
-6. UTM은 먼저 `Run UTM Simulation` 또는 locator capture로 screen evidence 경로를 점검
-6. 실제 장비 제어는 `Live UTM setup is physically safe`를 체크한 뒤 `Run Live UTM` 실행
-7. 실행 후 `Last Run Summary`, `Step Trace`, `Artifacts`에서 CSV와 screenshot evidence 확인
-8. 통신 문제가 있으면 `Request Log`와 `Bridge Files`의 `bridge_requests.jsonl` 경로를 확인
+Windows Worker는 다음 판단을 하지 않습니다.
 
-Web GUI는 다음 운영자용 패널을 제공합니다.
+- 다음 Agent 선택
+- Guardian 승인
+- 실험 완료 판정
+- LLM 복구 전략
+- Analysis handoff
 
-- `Workflow`: Auth, GUI Driver, Program, Evidence, Artifact 단계별 상태
-- `Last Run Summary`: program/run id, CSV 또는 artifact reference, 다음 gate
-- `Step Trace`: macro step별 ok/warning/blocked 기록
-- `Artifacts`: screenshot, locator, UTM CSV artifact 조회 버튼
-- `Bridge Files`: artifact root, request audit log, locator root, UTM export root 표시
-- `Request Log`: 최근 API/auth 요청 audit event 조회
-- `Program Registry`: allowlisted macro/protocol 카드, Load, Simulate 바로가기
-- `Live UTM Situation Matrix`: Bridge, Locators, Request Audit, Export, Live Gate를 한 줄로 표시
-- `Readiness Locator Shortcuts`: Readiness 결과의 missing/captured locator를 클릭해 캡처 폼에 바로 반영
-- `Recent Live Execute Identity`: 최근 `/execute`의 run/specimen/program id와 timestamp 표시
-- `Operator Log`: 최근 버튼 실행과 HTTP 결과
+## 7. Vision Link
 
-Token 칸은 브라우저 `localStorage`에 저장됩니다. 토큰 없이 되는 것처럼 보이면
-이전에 저장된 토큰이 남아있는 상태일 수 있습니다. Web GUI의 `Clear Token`을
-누르면 저장된 토큰이 지워집니다.
+Vision Link는 Equipment Profile에서 선택적으로 활성화합니다.
 
-`program1`은 마우스를 짧게 움직였다가 되돌리는 연결 확인용 매크로입니다.
-클릭, 입력, 파일 변경은 하지 않습니다.
+- 비활성: 화면 locator, 실행 결과, 파일 증거만 사용
+- 활성: Linux Equipment Runtime이 Vision Agent Bridge에 관측 요청
+- 기존의 신선하고 identity가 일치하는 Vision evidence가 있으면 재사용 가능
+- 증거도 없고 Vision tool도 없으면 실행 전 명시적으로 차단
+- Vision Agent는 관측 결과만 반환하고 Windows 입력을 직접 제어하지 않음
 
-요청 감사 로그는 Windows bridge artifact root의 `bridge_requests.jsonl`에 저장됩니다.
-이 파일은 path/auth 성공 여부를 재구성하기 위한 용도이며 토큰 문자열은 저장하지 않습니다.
+## 8. Diagnostics
 
-## 5. Linux에서 확인
+기본 Console 아래의 Diagnostics는 필요할 때만 펼칩니다.
 
-Windows PC의 내부망 IP를 확인한 뒤 Linux에서:
-
-```bash
-export WINDOWS_PYAUTOGUI_BRIDGE_URL="http://<windows-private-ip>:8765"
-export WINDOWS_PYAUTOGUI_BRIDGE_TOKEN="<saved-token>"
-```
-
-Health:
-
-```bash
-curl -s \
-  -H "X-Bridge-Token: $WINDOWS_PYAUTOGUI_BRIDGE_TOKEN" \
-  "$WINDOWS_PYAUTOGUI_BRIDGE_URL/health"
-```
-
-Programs:
-
-```bash
-curl -s \
-  -H "X-Bridge-Token: $WINDOWS_PYAUTOGUI_BRIDGE_TOKEN" \
-  "$WINDOWS_PYAUTOGUI_BRIDGE_URL/programs"
-```
-
-program1:
-
-```bash
-curl -s \
-  -X POST \
-  -H "Content-Type: application/json" \
-  -H "X-Bridge-Token: $WINDOWS_PYAUTOGUI_BRIDGE_TOKEN" \
-  -d '{"sequence_id":"program1-check-001","program_id":"program1","command":"program1"}' \
-  "$WINDOWS_PYAUTOGUI_BRIDGE_URL/execute"
-```
-
-## 6. 방화벽
-
-Linux에서 Windows bridge에 접속이 안 되면 Windows 방화벽이 막고 있을 수 있습니다.
-관리자 PowerShell에서 Linux 서버 IP만 허용하는 식으로 여는 걸 권장합니다.
+### 로컬 상태 확인
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\firewall_allow_private.ps1 -Port 8765 -RemoteAddress "<linux-server-private-ip>"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check_bridge.ps1
 ```
 
-## 7. 패키징
-
-소스 ZIP:
+### 페어링 후 실행 확인
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -Version "0.1.0"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test_bridge.ps1
 ```
 
-데모 자산을 포함한 `.exe`로 묶을 때:
+### 확인 항목
+
+- server bind host/port
+- PyAutoGUI import와 failsafe
+- data root 쓰기 가능 여부
+- pairing status
+- program catalog
+- recording manager
+- request audit
+
+## 9. 방화벽
+
+내부망의 Linux ATR 한 대만 허용하는 구성이 권장됩니다.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\firewall_allow_private.ps1 -RemoteAddress <linux-private-ip>
+```
+
+사설망 전체 허용은 관리자가 명시적으로 선택한 경우에만 사용합니다.
+
+## 10. 장애 처리
+
+### Bridge가 검색되지 않음
+
+- Windows에서 서버가 실행 중인지 확인
+- `0.0.0.0:8765` bind 여부 확인
+- Windows 방화벽 inbound rule 확인
+- Linux와 Windows가 같은 내부망 경로를 사용하는지 확인
+
+### Pairing code invalid/expired
+
+- 숫자 4자리인지 확인
+- Windows Console에서 New Code
+- 5회 실패했다면 30초 대기
+
+### PyAutoGUI unavailable
+
+- 대화형 Windows desktop session인지 확인
+- 화면 잠금/RDP 종료 상태 확인
+- 의존성 설치 확인
+
+```powershell
+.\.venv\Scripts\python.exe -m pip check
+```
+
+### Program validation failed
+
+Latest Local Result의 failure code를 확인합니다. 허용되지 않은 action, 누락된 target window, locator 경로, timeout을 수정한 뒤 다시 Validate합니다.
+
+### Recording failed
+
+- `pynput`, Pillow, PyAutoGUI 설치 확인
+- 대상 desktop session 활성화
+- Recording 중인 기존 세션을 Stop
+- `recordings\` 쓰기 권한 확인
+
+## 11. 배포 검증
+
+릴리스 생성 전:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build_exe.ps1 -InstallBuildDeps
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\native_acceptance.ps1
 ```
 
-결과:
-
-```text
-dist\WindowsPyAutoGUIBridge.exe
-```
-
-실행:
-
-```powershell
-$env:WINDOWS_PYAUTOGUI_BRIDGE_TOKEN = "<saved-token>"
-$env:WINDOWS_PYAUTOGUI_BRIDGE_HOST = "0.0.0.0"
-$env:WINDOWS_PYAUTOGUI_BRIDGE_PORT = "8765"
-.\dist\WindowsPyAutoGUIBridge.exe
-```
-
-## 8. 주요 파일
-
-- `bridge/windows_pyautogui_bridge_server.py`: 서버와 내장 Web GUI
-- `scripts/run_bridge.ps1`: 실행 helper
-- `scripts/local_e2e_test.ps1`: 로컬 API/Web GUI 검증
-- `scripts/test_bridge.ps1`: 이미 실행 중인 bridge에 대한 수동 테스트
-- `scripts/build_exe.ps1`: PyInstaller 빌드
-- `scripts/build_release.ps1`: 전체 자산을 포함한 source ZIP 빌드
-- `scripts/native_acceptance.ps1`: 실제 Windows 데스크톱 수락 증거 생성
-- `scripts/firewall_allow_private.ps1`: Private profile 방화벽 룰 생성
-- `examples/windows_bridge.env.example.ps1`: Windows 환경변수 예시
-- `examples/linux_env.example.sh`: Linux 환경변수 예시
-
-
-## 9. UTM Visual-Control / Data Handoff
-
-`utm_compression_start_v1`은 UTM 소프트웨어 GUI를 제어하고, export folder에 생성된 CSV를 Linux 쪽으로 전달하기 위한 등록 프로그램입니다. `program1`은 연결 데모이고 분석 handoff용 데이터 생성 프로그램이 아닙니다.
-
-### 프로그램 확인
-
-```bash
-curl -s -H "X-Bridge-Token: $WINDOWS_PYAUTOGUI_BRIDGE_TOKEN" \
-  "$WINDOWS_PYAUTOGUI_BRIDGE_URL/programs"
-```
-
-목록에 다음이 있어야 합니다.
-
-- `utm_compression_start_v1`: UTM 압축시험 시작, 완료 대기, CSV export 감시
-- `utm_export_csv_v1`: 완료 후 CSV 저장 보조
-- `utm_manual_save_csv_v1`: 수동 저장 fallback
-- `utm_stop_or_abort_v1`: 중단/복구용 stop macro
-
-### 실 UTM export folder 설정
-
-Windows PowerShell에서 필요에 맞게 지정합니다.
-
-```powershell
-$env:WINDOWS_PYAUTOGUI_UTM_EXPORT_DIR = "C:\ATR\utm_exports"
-$env:WINDOWS_PYAUTOGUI_UTM_EXPORT_GLOB = "*.csv"
-$env:WINDOWS_PYAUTOGUI_UTM_FILE_STABLE_SEC = "2.0"
-```
-
-실 live mode에서는 이 폴더에 UTM 장비 소프트웨어가 만든 CSV가 있어야 성공합니다. 서버가 live 성공을 위해 임의 데이터를 생성하지 않습니다.
-
-### Locator calibration
-
-UTM UI가 이미지 기반으로 확인되어야 하면 다음 endpoint를 사용합니다.
-
-```bash
-# 현재 화면 캡처
-curl -s -X POST -H "Content-Type: application/json" \
-  -H "X-Bridge-Token: $WINDOWS_PYAUTOGUI_BRIDGE_TOKEN" \
-  -d '{"run_id":"locator-calibration","checkpoint":"manual"}' \
-  "$WINDOWS_PYAUTOGUI_BRIDGE_URL/screenshot"
-
-# locator 저장
-curl -s -X POST -H "Content-Type: application/json" \
-  -H "X-Bridge-Token: $WINDOWS_PYAUTOGUI_BRIDGE_TOKEN" \
-  -d '{"program_id":"utm_compression_start_v1","name":"start_button","region":[100,100,120,60],"confidence":0.8}' \
-  "$WINDOWS_PYAUTOGUI_BRIDGE_URL/locators/capture"
-```
-
-저장된 locator는 Linux `/equipment/windows` GUI의 UTM profile JSON에 반영해서 autonomous Equipment Agent가 같은 설정을 사용하게 해야 합니다.
-
-### Bench/demo simulated UTM
-
-Windows 서버 자체 API와 artifact pull 계약만 확인하려면 다음처럼 명시적으로 simulation을 요청합니다.
-
-```bash
-curl -s -X POST -H "Content-Type: application/json" \
-  -H "X-Bridge-Token: $WINDOWS_PYAUTOGUI_BRIDGE_TOKEN" \
-  -d '{"sequence_id":"utm-sim-check-001","program_id":"utm_compression_start_v1","run_id":"utm-sim-check-001","specimen_id":"specimen-demo-001","simulate_utm_protocol":true}' \
-  "$WINDOWS_PYAUTOGUI_BRIDGE_URL/execute"
-```
-
-반환값의 `output_artifacts[0].kind`가 `utm_csv`이고 `row_count_probe`, `columns_probe`, `sha256`가 있어야 합니다.
-
-### Manual save/export fallback
-
-When `utm_compression_start_v1` finishes its start/complete sequence, the server first watches the configured export folder. If no stable parseable CSV appears, it automatically executes `utm_manual_save_csv_v1` unless the request payload contains `manual_save_required_if_no_artifact: false`.
-
-Fallback sequence:
-
-1. create `WINDOWS_PYAUTOGUI_UTM_EXPORT_DIR\<run_id>` if needed;
-2. send `Ctrl+S`;
-3. type `<export_dir>\<run_id>\<specimen_id>.csv`;
-4. press Enter;
-5. wait again for the file to become stable;
-6. parse-probe `time_s`, `displacement_mm`, and `force_N`.
-
-If this path succeeds, `data_acquisition.save_method` is `manual_save_dialog`. If it fails, the response stays blocked with `UTM_EXPORT_FILE_MISSING`, `UTM_DATA_PARSE_FAILED`, `UTM_SAVE_DIALOG_TIMEOUT`, or `UTM_SAVE_CONFIRMATION_FAILED`; live mode still never fabricates data.
-
-
-### Linux pull ledger after export
-
-A valid Windows UTM response is not the final Analysis input by itself. The Linux bridge must pull the CSV through `GET /artifacts/<artifact_id>` and write a local file under `artifacts/equipment/<run_id>/utm/`.
-
-The final handoff ledger should contain:
-
-- `data_acquisition.status = pulled_to_linux`
-- `data_acquisition.windows_path` for provenance
-- `data_acquisition.linux_path` and `data_acquisition.local_path` for Analysis
-- `data_acquisition.sha256`, `row_count_probe`, and `columns_probe`
-- top-level `result_file` / `utm_csv_path` aliases pointing to the same Linux-local CSV
-
-If these Linux-local fields are absent, treat the run as incomplete even if the Windows export folder contains a file.
-
-### Required screen assertions
-
-If `WINDOWS_PYAUTOGUI_REQUIRE_UTM_SCREEN_ASSERTIONS=1` is enabled, the Windows server performs the locator checks itself during `utm_compression_start_v1`:
-
-- `assert_visible` for the ready state;
-- image-located click of the start button;
-- `wait_until` for running and complete states;
-- block with `UI_LOCATOR_NOT_FOUND` if a required locator is absent.
-
-The bridge also supports optional OCR/text primitives for UTM status labels and dialogs:
-
-- `assert_text`: one-shot text assertion against a screen region or full screenshot.
-- `wait_until_text`: wait-budget text assertion for delayed status/dialog changes.
-
-These actions use `pytesseract` when it is installed on the Windows PC. If OCR is unavailable and the action is required, the protocol blocks instead of treating the text check as successful.
-
-Do not use a separate caller flag as proof that the screen was checked. The bridge must observe the actual Windows screen before the protocol can move to export watching or manual save fallback.
-
-### Screen-state evidence artifacts
-
-During `utm_compression_start_v1`, the Windows server now links screen evidence to the state transition checks:
-
-- `before_start` screenshot before protocol execution;
-- `after_start` screenshot when `running_state` is observed;
-- `after_complete` screenshot when `complete_state` is observed.
-
-Check the response `screen_checks` and `output_artifacts` together. A valid report should show `screen_png` artifacts for the running and complete states in addition to the `utm_csv` data artifact.
-
-### Failure evidence retention
-
-When `utm_compression_start_v1` blocks, inspect `screen_checks` and `output_artifacts` before retrying. The server keeps the pre-start screenshot, captures a `failure` screenshot, and preserves any running/complete screenshots that were already observed before the data export failed.
-
-These artifacts are evidence for debugging and failure memory. They are not a substitute for the `utm_csv` artifact required by the Linux Analysis handoff.
-
-## 10. Operator Web GUI for UTM setup
-
-Open the packaged server GUI on the Windows workstation:
-
-```text
-http://127.0.0.1:8765/
-```
-
-The GUI is intended for local Windows-side setup before Linux autonomous execution:
-
-1. Enter the bridge token and run `Health`.
-2. Use `Programs` to confirm `utm_compression_start_v1` is registered.
-3. Use `Capture Screen` to create a full-screen evidence artifact when calibrating.
-4. Use `Locator Capture` to save `ready_state`, `start_button`, `running_state`, and `complete_state` image regions.
-5. Use `Run UTM Simulation` to verify the endpoint/artifact contract without touching real equipment.
-6. Use `Run Live UTM` only after the physical UTM setup is safe and the confirmation checkbox is enabled.
-
-The page shows the latest raw response, step trace, and artifact ledger. Artifact rows can be opened through `GET /artifacts/<artifact_id>` from the same panel.
-
-## 11. Target window focus contract
-
-The registered UTM sequence begins with `focus_window`. The Windows bridge now resolves real window selectors before running image assertions or clicks.
-
-Supported selector fields:
-
-- `target_window`
-- `target_window_regex`
-- `window_title`
-- `title`
-- `target_app`
-- `app_title`
-- action-level `title`, `window_title`, `target_window`, or `title_regex`
-
-Examples:
-
-```json
-{
-  "sequence_id": "utm-live-001",
-  "program_id": "utm_compression_start_v1",
-  "run_id": "utm-live-001",
-  "specimen_id": "specimen-001",
-  "target_window": "Instron UTM Software",
-  "require_window_focus": true
-}
-```
-
-```json
-{
-  "sequence_id": "utm-live-002",
-  "program_id": "utm_compression_start_v1",
-  "target_window_regex": "UTM Controller",
-  "require_window_focus": true
-}
-```
-
-If PyAutoGUI can enumerate and activate a matching window, the step trace records `SEQ_2_FOCUS_WINDOW: ok`. If no matching window is found and focus is required, the bridge blocks with `PYAUTOGUI_WINDOW_NOT_FOUND`. If focus is not required, it records a warning and continues for legacy/manual operator workflows.
-
-## 12. Linux handoff gate after Windows GUI execution
-
-The Windows page can prove that the UTM GUI ran and that a Windows-side artifact exists. The autonomous Linux workflow still requires the Linux bridge to pull the CSV before Analysis can run.
-
-For a live Windows UTM run, the Linux-side `equipment_report.v1.live_evidence_audit` must show:
-
-- `screen_evidence.ok=true` with `before_start`, `after_start`, and `after_complete` checkpoints;
-- `linux_artifact_pull.ok=true` with `data_acquisition.status=pulled_to_linux`;
-- `vision_evidence.ok=true` with Vision evidence frame IDs.
-
-`exported_on_windows` means the Windows workstation created or saw a file. It is not equivalent to Linux Analysis readiness.
-
-
-### 10.1 Safe Preflight UI update
-
-The Windows GUI now separates safe diagnostics from live execution.
-
-- `Safe Preflight` calls `GET /health`, `GET /readiness`, and `GET /request-log` only. It does not call `POST /execute` and must not move the UTM software.
-- `Preflight + Run Live UTM` first runs the same local preflight. If PyAutoGUI is unavailable, required locators are missing, or readiness has not been checked, the page blocks with `LOCAL_LIVE_PREFLIGHT_BLOCKED` and no live `/execute` request is sent.
-- `Safe Diagnostics` contains non-actuating checks: Health, Readiness, Request Log, Capture Screen, Locators, and Artifacts.
-- `Artifact Preview` can display image artifacts loaded from `GET /artifacts/<artifact_id>` after pressing `View` in the artifact table.
-- This local page helps the Windows operator avoid accidental live execution, but Linux-side Analysis handoff still requires request-log `/execute`, screen evidence, Linux CSV pull, parse probe, and Vision evidence.
-
-## 13. Windows Web GUI usability update
-
-The local Windows bridge page now includes an operator-focused layout:
-
-- Sticky navigation: `Overview`, `UTM Control`, `Evidence`, `Result JSON`, and `Operator Log`.
-- Sticky sidebar and command rail keep token/UTM settings plus Preflight, Evidence, Simulate, Live UTM, and Abort reachable while scrolling.
-- `Focus Mode` hides secondary diagnostics, locator capture, and raw Result JSON for live-operation monitoring; `Full View` restores every panel.
-- `Bridge URL` readout in the Connection card.
-- `Copy Linux Env` copies Linux controller variables:
-  - `WINDOWS_PYAUTOGUI_BRIDGE_URL`
-  - `WINDOWS_PYAUTOGUI_BRIDGE_TOKEN`
-- `Refresh All` runs Health, Readiness, Request Log, and Artifacts without calling `/execute`.
-- `Live interlock` shows why live UTM execution is currently blocked or allowed.
-- `Live Proof Checklist` shows a progress bar and the next missing proof item.
-- Operator Log is scrollable and appends new events at the bottom.
-- The workspace now places `Overview` and live proof status before the payload console/timeline, so the operator sees blockers and proof gates immediately after the command rail.
-- Overview cards use a two-column layout on wide monitors, while the proof and bridge-file cards stay full-width to avoid clipped evidence text.
-- Connection, Safe Diagnostics, UTM Protocol, Locator Capture, and Operator Log sections can be collapsed/expanded; the collapsed state is saved in browser local storage.
-
-These controls are only Windows-side usability gates. The Linux Equipment Agent and `/equipment/windows` GUI still enforce the hard handoff rules before Analysis can consume UTM data.
-
-## 2026-05-30 GUI Update: Command Banner and Proof Flow
-
-The Windows local bridge page now has a command banner above the main overview. It reports the active request, completion state, or blocker state for each GUI command. This is operator-facing status only; the detailed proof still comes from Result JSON, Step Trace, Artifacts, and Operator Log.
-
-The Linux `/equipment/windows` page now separates proof package creation from proof package verification:
-
-- `Build Proof Package` writes the current UTM proof JSON artifact.
-- `Verify Proof Package` checks the persisted proof artifact and local Linux-side UTM CSV parse probe before Analysis handoff.
-- If verification is blocked, resolve the listed blockers and rebuild the package.
-
-For live UTM evidence, the required order remains: Safe Preflight -> Live UTM run -> Evidence Audit -> Build Proof Package -> Verify Proof Package.
-
-## 10. Operator HUD GUI
-
-The Web GUI includes an `Operator runtime status` HUD above the Overview section. It is intended for the Windows PC operator during UTM control.
-
-- `Safety`: Safe Preflight/proof-gate status.
-- `Command`: last command state and whether it is running, complete, or blocked.
-- `Evidence`: required screen evidence status.
-- `Data`: UTM CSV/parse-probe status.
-- `Next`: the next required action before Linux analysis handoff.
-
-The `UTM Protocol` card shows the required order: Safe Preflight -> live execute -> screen evidence -> CSV artifact -> Linux audit. The Run ID and Specimen ID fields are copied into the `/execute` payload, so set them before a live UTM run if you need traceable evidence.
-
-## 11. Request-log Identity Audit
-
-Every `/execute` request is recorded with non-secret identity fields so Linux can prove which experiment command actually ran.
-
-Recorded fields include:
-
-- `run_id`
-- `sequence_id`
-- `specimen_id`
-- `program_id`
-- `payload_sha256` of a token-stripped payload
-- result status and failure code for the paired execute result event
-
-Do not put passwords or tokens inside execute payloads. The bridge strips token/password/secret/auth/credential-like keys before audit hashing, but connection secrets should still be supplied through the bridge token header or environment variables.
-
-After a live UTM run, use `Request Log` in the Web GUI or `GET /request-log` to confirm that the latest `/execute` identity matches the Linux run/specimen/program before relying on the CSV artifact. A matching proof must include the same `run_id`, `sequence_id`, `specimen_id`, and `program_id`.
-
-## Restart-Tolerant Artifact List
-
-`GET /artifacts` rebuilds the in-memory artifact list from the configured bridge artifact directory and UTM export directory. This means a bridge restart does not hide previously exported UTM CSV files or screenshot evidence from the operator page.
-
-The endpoint indexes `.csv`, `.json`, `.txt`, and `.png` files, adds checksum/size metadata, and probes CSV column/row information when possible. `GET /artifacts/{artifact_id}` also retries this rebuild before reporting that an artifact is missing.
-
-## 2026-05-30 GUI Proof Checklist Update
-
-The Windows bridge web GUI now treats UTM save/export responsibility as a visible live-proof gate.
-
-- `Live Proof Checklist` contains 7 checks, including `Save/Export Responsibility`.
-- A verified UTM run should return `cross_checks.save_export_responsibility_ok=true` and `data_acquisition.save_method` such as `windows_export_watch` or `manual_save_dialog`.
-- If export fails, the GUI keeps the proof item open and the Linux proof verifier will block Analysis handoff with `UTM_SAVE_EXPORT_RESPONSIBILITY_REQUIRED`.
-
-## 2026-05-30 Windows GUI Operator Console Update
-
-The Windows bridge Web GUI now exposes a compact operator console for live UTM work.
-
-- Header proof status: the top bar shows both bridge authentication and live proof completion, for example `proof 5/7`.
-- Critical command rail: `Preflight`, `Evidence`, `Simulate`, and `Live UTM` are grouped above the runtime HUD so the operator does not need to hunt through the sidebar during a run.
-- Persistent run fields: Run ID, Specimen ID, target window selector, export glob, artifact timeout, stable-file time, and expected export path are stored in browser local storage. Refreshing the Windows page keeps non-safety setup values, but physical safety confirmation is never persisted.
-- Payload export: `Copy Payload` copies the exact UTM `/execute` JSON that the Windows page would send. Use this for debugging Linux-to-Windows command parity.
-- The GUI remains a usability layer only. Linux Equipment Agent gates, proof package verification, screen evidence, CSV parse probe, and save/export responsibility checks remain authoritative.
-
-### Safety note for persisted GUI fields
-
-The GUI persists setup fields such as Run ID, Specimen ID, target window selector, export glob, and artifact timing values. It intentionally does not persist the `Live UTM setup is physically safe` checkbox. The operator must confirm physical safety for each browser session/run before the page can send a live UTM `/execute` request.
-
-The command rail buttons are proxies to the same underlying handlers as the sidebar controls. Unit tests execute those proxy buttons to confirm that Preflight remains non-actuating and Live UTM still performs local preflight before `/execute`.
-
-## 2026-05-30 Linux Operator Rail Compatibility
-
-The Linux `/equipment/windows` page now has a five-step operator rail: Scan, Readiness, Preflight, UTM Run, and Evidence. These buttons call the same Linux backend endpoints as the detailed controls, so Windows bridge behavior does not change.
-
-The Windows bridge `/programs` and Linux `equipment.pyautogui.list_programs` views should both show the registered UTM protocol contract: preconditions, expected screen states, save policy, output artifact patterns, and safe-abort metadata. If these differ, update the packaged Windows bridge and the Linux controller together before running live UTM automation.
-
-## 2026-05-30 UTM Stop/Abort Recovery Path
-
-The Linux Equipment workspace can dispatch `utm_stop_or_abort_v1` from its `Abort` rail card. This path is different from a normal UTM compression protocol:
-
-- It is for recovery and safe stopping only.
-- It does not require complete ready/running/complete locators before dispatch.
-- It still requires explicit confirmation and a configured bridge token.
-- The Linux side records it as `recovery_macro=true`, not as a successful UTM data run.
-
-After using it, open Request Log or Evidence Audit and confirm that the `/execute` request is present before deciding the UTM state is safe to continue.
-
-## Windows GUI Recovery Control
-
-The local bridge page includes `Stop / Abort` in the UTM protocol row and top command rail.
-
-- It dispatches `program_id=utm_stop_or_abort_v1` to `/execute`.
-- It intentionally skips normal live UTM preflight so recovery remains available when the UTM GUI is stuck.
-- It is not proof of a completed UTM test. After running it, use `Request Log` and `Refresh Evidence` before retrying a normal run.
-
-The Linux ATR Equipment workspace can open this page with `Open Windows GUI` after a bridge candidate is saved and selected.
-
-## 2026-05-30 Local Operator Console and Payload Preview
-
-The packaged Windows bridge Web GUI includes a `Local Operator Console` for UTM operation.
-
-What changed:
-- `Payload Preview` shows the exact payload envelope for simulation, live UTM execution, or stop/abort recovery.
-- `Preview Sim`, `Preview Live`, `Preview Abort`, and `Copy Preview` are available before sending commands.
-- Live UTM input fields are validated in the browser before non-actuating preflight starts.
-- Invalid `Run ID`, `Specimen ID`, `Artifact Timeout Sec`, or `Stable File Sec` returns `WINDOWS_GUI_INPUT_INVALID` locally and sends no bridge API request for that action.
-- `Stop / Abort` remains available as a recovery path and dispatches `utm_stop_or_abort_v1` directly.
-
-Use this page as the Windows-side operator console. The Linux ATR GUI remains the source of record for saved bridge candidates, autonomous workflow state, and final equipment handoff audit.
-
-## 2026-05-30 Health Version Metadata
-
-`GET /health` includes explicit bridge version metadata for Linux-side audit:
-
-- `server_version`: HTTP bridge server version.
-- `script_version`: Windows helper script/runtime contract label.
-- `pyautogui.available`: actual PyAutoGUI import status.
-- `pyautogui.failsafe`: actual fail-safe state.
-- `pyautogui.pause`: actual PyAutoGUI pause setting.
-
-The Linux client records this together with `bridge_url`, `bridge_host`, and `client_latency_ms` in the Lab Equipment report so operators can identify stale scripts, wrong Windows hosts, or PyAutoGUI import failures before trusting a live UTM handoff.
-
-## 10. Bridge Command Kit
-
-Web GUI의 Connection 패널에는 `Bridge Command Kit`이 있습니다. 같은 동작을 브라우저, Linux curl, Windows PowerShell에서 비교할 때 사용합니다.
-
-- `Copy curl Health`: Linux controller 또는 다른 내부망 Linux 터미널에서 bridge 인증과 health를 확인합니다.
-- `Copy PowerShell Health`: Windows 장비 PC에서 로컬 PowerShell로 같은 health endpoint를 확인합니다.
-- `Copy curl Execute`: 현재 Payload Preview의 `/execute` 요청을 curl 명령으로 복사합니다. 실 UTM payload라면 safety/preflight 조건을 먼저 확인해야 합니다.
-
-토큰이 비어 있는 상태에서는 GUI가 자동으로 `/health`를 호출하지 않습니다. 이 동작은 첫 화면에서 불필요한 auth error를 없애기 위한 UI 개선이며, 실제 endpoint 인증은 기존과 동일하게 `X-Bridge-Token`으로 강제됩니다.
-
-## ATR Controller 자동 탐색
-
-Windows 패키지는 Linux ATR의 IP를 포함하지 않습니다. 인증된 Linux 요청이 도착하면
-요청자의 사설 IPv4에서 `:7860/api/equipment/skills`를 읽어 ATR identity를 검증하고,
-성공한 URL을 활성 data root의 `controller_connection.json`에 저장합니다. 다음 실행의
-`/skills`는 저장된 URL을 재검증한 뒤 사용합니다.
-
-Web GUI의 `Discover ATR`은 인증된 peer 학습이 불가능할 때만 사용합니다. 활성 사설
-인터페이스별 `/24`, 포트 7860만 제한적으로 확인하며, 복수 ATR이 응답하면 자동으로
-하나를 고르지 않습니다. `Controller URL`에 주소를 입력하고 `Verify & Save`를 눌러
-수동으로 검증할 수도 있습니다. 명시적인 환경변수는 항상 최우선입니다.
-
-```powershell
-# 선택 사항: 자동 탐색을 사용하지 않는 관리형 배포
-$env:WINDOWS_PYAUTOGUI_ATR_API_URL = "http://<linux-atr-host>:7860"
-```
-
-저장 파일에는 URL, 발견 출처, 검증 시각만 기록하며 bridge token이나 모델/API
-credential은 기록하지 않습니다. Controller를 찾지 못해도 `/health`, `/programs`,
-로컬 PyAutoGUI 프로그램은 유지되고 `/skills`만 명시적인 unreachable 상태를 반환합니다.
-
-상단 명령 배너의 `Recommended next action`은 Live Proof Checklist의 첫 미충족 gate를 보고 다음 조작을 제안합니다. 이 버튼은 토큰 입력, Health, Readiness, screenshot/evidence refresh, Live UTM 안전 확인처럼 현장 오퍼레이터가 다음에 수행할 작업으로 바로 이동합니다.
-
-## 2026-05-30 Strict Linux handoff compatibility
-
-The Windows bridge and Linux Equipment Agent use the same strict proof model. After `/execute` returns `output_artifacts[]`, Linux pulls each artifact through `/artifacts/<artifact_id>`, writes the bytes under `artifacts/equipment/<run_id>/...`, and mirrors the resolved records into both `output_artifacts[]` and `artifact_records[]`. Any downstream proof verifier should resolve evidence from either field, but it must require existing Linux-local files.
-
-Required physical UTM proof before Analysis handoff:
-
-- request audit: `/request-log` must contain a live `/execute` with matching `run_id`, `sequence_id`, `specimen_id`, and `program_id`;
-- screen evidence: `screen_checks` must include unique, file-backed `before_start`, `after_start`, and `after_complete` screenshot refs;
-- save/export responsibility: `data_acquisition.save_method` must be one of `windows_export_watch`, `manual_save_dialog`, or `export_menu`, with save attempted/observed and confirmation evidence;
-- data artifact: the UTM CSV must be pulled to Linux and exposed as `result_file`, `utm_csv_path`, `data_acquisition.linux_path`, or `data_acquisition.local_path`;
-- data quality: Linux re-parses the actual CSV bytes and rejects missing columns, non-monotonic time, flat displacement, all-zero force, or flat force;
-- Vision evidence: Linux must attach matching pre-start, motion, and complete observations with distinct frame/observation ids.
-
-Do not treat `exported_on_windows`, a visible CSV filename, or `cross_checks.*=true` alone as sufficient. Those values are useful diagnostics, but the Linux proof package and completion audit remain authoritative.
-
-## Physical dispatch proof boundary
-
-The Windows operator page can prepare evidence, but Linux completion verification requires an explicit physical live dispatch record: `requested_physical_execute=true`, `execute_sent=true`, `non_actuating=false`, and `status=verified_complete`. If this record is absent, the proof verifier returns `UTM_PHYSICAL_LIVE_EXECUTE_REQUIRED` even when screen artifacts and CSV files exist.
-
-## Unique evidence requirement
-
-Linux-side verification requires distinct screen evidence files and a physical-validation source packet. Keep the original `last_windows_utm_physical_validation` packet, screen artifacts, and pulled CSV together in the run artifacts. The source packet and manifest must both carry matching `run_id`, `sequence_id`, `specimen_id`, and `program_id`. Each screenshot ref must resolve to a Linux-local image file with a recognized image signature. Do not reuse a single screenshot for multiple checkpoints, and do not substitute placeholder text files for screen evidence.
-
-## 2026-05-30 Windows-side screen artifact validity gate
-
-For `utm_compression_start_v1`, the Windows bridge now checks screenshot file signatures before it can return `status=verified_complete`. The bridge must capture distinct valid PNG/JPEG/GIF image artifacts for `before_start`, `after_start`, and `after_complete`. Placeholder text files, empty `.png` files, or metadata-only screenshot ids are rejected before Linux receives a physical-completion packet.
-
-`utm_export_csv_v1` remains an export/save macro and is not treated as physical compression proof by this gate. It can export a CSV from an already-completed UTM screen, but the full Analysis handoff still requires the physical compression run proof package and Linux completion audit.
+Linux 저장소에서는 packaging/unit/integration 테스트로 다음을 확인합니다.
+
+- source/install server parity
+- 긴 토큰 UI/문구 미포함
+- 4자리 pairing 규칙
+- Console 네 영역
+- recording delete와 bounded frame buffer
+- generic profile과 Vision Link
+- canonical Equipment runtime projection
+
+물리 장비 실행은 자동 검증에 포함하지 않으며 Profile별 승인된 현장 절차로 별도 수행합니다.

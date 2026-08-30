@@ -93,6 +93,9 @@ Optional but commonly used:
   reserved for the Isaac Sim OMX mirror receiver. Wayland sessions are reported
   as unsupported instead of silently running degraded control.
 - Recording Equipment Skills requires `pynput>=1.7.7,<2` on the bridge host.
+  Saved Worker updates also transfer `requirements-windows.txt`; script-based
+  Workers install it with the same Python interpreter before restart, while
+  frozen EXE Workers use their bundled modules.
   Browser-level validation of the Capability Lab and Program Manager examples
   uses Selenium, Firefox, and geckodriver. The Python packages are declared in
   `requirements.txt`; install Firefox/geckodriver through the host package or
@@ -1042,6 +1045,16 @@ Required when controlling Windows GUI/macros from the Equipment Agent:
 - Image-first demonstration recording uses Pillow through PyAutoGUI to capture
   bounded target crops. Install `opencv-python` to use confidence-based image
   matching during replay.
+- Full-session demonstration evidence is written at 2 FPS as periodic JPEG
+  frames plus event/boundary PNG files. This uses the existing Pillow
+  dependency and does not require a video codec. Keep sufficient free space in
+  `WINDOWS_PYAUTOGUI_RECORDING_DIR`; critical disk pressure finalizes an
+  incomplete package instead of discarding frames already written.
+- Linux Skill authoring uses Pillow to build 4x4 temporal storyboards. The
+  selected shared LLM backend must advertise vision support for recordings that
+  contain timeline frames. Chunk analyses cover every source frame; overview
+  images are retained for GUI/audit and are not resent during final synthesis.
+  Windows does not need an LLM runtime or API key.
 - Configure `WINDOWS_PYAUTOGUI_RECORDING_DIR` for persisted recordings and
   `WINDOWS_PYAUTOGUI_ATR_API_URL` for Linux-authoritative Skill lifecycle
   operations. Do not store ATR API/model credentials on Windows.
@@ -1088,11 +1101,14 @@ Source package:
 Pyautogui_server_for_window/
 ```
 
-Set the bridge token through an environment variable on Windows. Do not commit
-tokens or saved connection details:
+Pair a new Windows bridge from the ATR Lab Equipment Workspace with the
+temporary four-digit code shown in the local Windows Console. The code is not
+the runtime credential. After pairing, Windows and Linux persist a generated
+internal key in protected local connection memory. Do not commit pairing state
+or saved connection details:
 
 ```text
-WINDOWS_PYAUTOGUI_BRIDGE_TOKEN
+<windows-data-root>/artifacts/pairing.json
 memory/windows_pyautogui_connection.json
 ```
 

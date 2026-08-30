@@ -14,10 +14,13 @@ import shutil
 from typing import Any, Iterable
 from uuid import uuid4
 
+from utils.equipment_runtime_service import EquipmentRuntimeContractError, EquipmentRuntimeService
+from utils.equipment_skill_workflow import validate_editable_workflow
+
 
 SKILL_SCHEMA = "atr.equipment_skill.v1"
 RECORDING_SCHEMA = "atr.equipment_recording.v1"
-RECORDING_SCHEMAS = frozenset({RECORDING_SCHEMA, "atr.equipment_recording.v2"})
+RECORDING_SCHEMAS = frozenset({RECORDING_SCHEMA, "atr.equipment_recording.v2", "atr.equipment_recording.v3"})
 EXCEPTION_SCHEMA = "atr.equipment_skill_exception.v1"
 RECOVERY_SCHEMA = "atr.equipment_skill_recovery.v1"
 PROGRAM_SCHEMA = "atr.pyautogui_program.v1"
@@ -141,10 +144,14 @@ def recording_capability_coverage(events: Iterable[dict[str, Any]]) -> dict[str,
     actions: set[str] = set()
     families: set[str] = set()
     unsupported: set[str] = set()
-    event_count = hotkey_count = drag_count = scroll_count = 0
+    event_count = hotkey_count = drag_count = scroll_count = recording_control_event_count = 0
     for raw_event in events:
         event_count += 1
-        kind = str(dict(raw_event or {}).get("kind") or dict(raw_event or {}).get("type") or "").strip().lower()
+        event = dict(raw_event or {})
+        if str(event.get("recording_control") or "").strip():
+            recording_control_event_count += 1
+            continue
+        kind = str(event.get("kind") or event.get("type") or "").strip().lower()
         action = action_by_kind.get(kind)
         if action:
             actions.add(action)
@@ -154,7 +161,7 @@ def recording_capability_coverage(events: Iterable[dict[str, Any]]) -> dict[str,
             scroll_count += int(kind == "mouse_scroll")
         elif kind not in ignored:
             unsupported.add(kind)
-    return {
+    coverage = {
         "actions": sorted(actions),
         "families": sorted(families),
         "event_count": event_count,
@@ -163,6 +170,9 @@ def recording_capability_coverage(events: Iterable[dict[str, Any]]) -> dict[str,
         "scroll_count": scroll_count,
         "unsupported_event_kinds": sorted(unsupported),
     }
+    if recording_control_event_count:
+        coverage["recording_control_event_count"] = recording_control_event_count
+    return coverage
 
 
 def compile_recording_actions(
@@ -180,7 +190,11 @@ def compile_recording_actions(
     locator_required = image_first and policy.get("required_for_pointer_actions") is not False
     coordinate_fallback = bool(policy.get("coordinate_fallback", False))
     normalized_events = [dict(item or {}) for item in events]
-    if image_first and sum(item.get("kind") in {"mouse_click", "click", "mouse_drag"} for item in normalized_events) > 200:
+    if image_first and sum(
+        item.get("kind") in {"mouse_click", "click", "mouse_drag"}
+        and not str(item.get("recording_control") or "").strip()
+        for item in normalized_events
+    ) > 200:
         raise SkillContractError("image-first recordings support at most 200 pointer events")
     locator_payload_bytes = 0
 
@@ -238,6 +252,8 @@ def compile_recording_actions(
             text_buffer.clear()
 
     for event in normalized_events:
+        if str(event.get("recording_control") or "").strip():
+            continue
         kind = str(event.get("kind") or event.get("type") or "").strip().lower()
         if image_first and kind not in {"", "mouse_move", "key_release", "recording_started", "recording_stopped", "wait", "sleep"}:
             at_ms = int(event.get("at_ms", previous_executable_at_ms or 0))
@@ -502,6 +518,7 @@ class EquipmentSkillRegistry:
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root).expanduser().resolve()
         self.execution_root = self.root.parent / "equipment_skill_executions"
+        self.runtime = EquipmentRuntimeService(self.root.parent / "equipment_runtime")
 
     def _package_dir(self, skill_id: str, version: str) -> Path:
         return self.root / _safe_identity(skill_id, "skill_id") / _safe_version(version)
@@ -520,7 +537,7 @@ class EquipmentSkillRegistry:
         if str(recording.get("status") or "") not in {"saved", "completed"}:
             raise SkillContractError("recording must be saved before Skill creation")
         package_dir = self._package_dir(skill_id, version)
-        if package_dir.exists():
+        if package_dir.exists() and any(package_dir.iterdir()):
             raise SkillContractError("exact Skill version already exists")
         profile = _safe_identity(target_profile, "target_profile")
         actions = compile_recording_actions(
@@ -528,6 +545,16 @@ class EquipmentSkillRegistry:
             visual_locator_policy=recording.get("visual_locator_policy"),
         )
         capability_coverage = recording_capability_coverage(recording.get("events", []))
+        time_series = (
+            deepcopy(recording.get("time_series_evidence"))
+            if isinstance(recording.get("time_series_evidence"), dict)
+            else {}
+        )
+        recording_exceptions = [
+            deepcopy(item)
+            for item in recording.get("exceptions", [])
+            if isinstance(item, dict)
+        ]
         created_at = _now_iso()
         workflow = {
             "schema": SKILL_SCHEMA,
@@ -573,12 +600,15 @@ class EquipmentSkillRegistry:
             "lifecycle": "draft",
             "enabled": True,
             "recording_id": str(recording.get("recording_id") or ""),
+            "timeline_id": str(recording.get("timeline_id") or time_series.get("timeline_id") or ""),
             "recording_sha256": canonical_sha256(recording),
             "workflow_sha256": canonical_sha256(workflow),
             "annotations_sha256": canonical_sha256(annotations),
             "program_sha256": {},
             "model_snapshot": deepcopy(model_snapshot),
             "capability_coverage": deepcopy(capability_coverage),
+            "recording_evidence": time_series,
+            "recording_exceptions": recording_exceptions,
             "created_at": created_at,
             "updated_at": created_at,
         }
@@ -607,6 +637,13 @@ class EquipmentSkillRegistry:
             programs.append(_read_json(package_dir / "programs" / f"{program_id}.json"))
         return {"manifest": manifest, "workflow": workflow, "annotations": annotations, "programs": programs}
 
+    def get_recording(self, skill_id: str, version: str) -> dict[str, Any]:
+        """Read authoring evidence without exposing it through the normal Skill payload."""
+        package_dir = self._package_dir(skill_id, version)
+        if not package_dir.is_dir():
+            raise SkillContractError("Skill version not found")
+        return _read_json(package_dir / "recording.json")
+
     def list(self) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         if not self.root.exists():
@@ -618,6 +655,120 @@ class EquipmentSkillRegistry:
                 continue
         return items
 
+    def update_workflow(
+        self,
+        skill_id: str,
+        version: str,
+        workflow: dict[str, Any],
+        *,
+        expected_workflow_sha256: str,
+    ) -> dict[str, Any]:
+        """Atomically replace one editable workflow and invalidate stale builds."""
+        package_dir = self._package_dir(skill_id, version)
+        package = self.get(skill_id, version)
+        manifest = package["manifest"]
+        if str(manifest.get("lifecycle") or "") in {"deployed", "disabled"}:
+            raise SkillContractError("deployed Skill versions are immutable")
+        expected = str(expected_workflow_sha256 or "").strip().lower()
+        current_hash = str(manifest.get("workflow_sha256") or "").lower()
+        if expected != current_hash:
+            raise SkillContractError("workflow revision conflict")
+
+        checked = validate_editable_workflow(workflow, locator_root=package_dir)
+        if not checked["ok"]:
+            raise SkillContractError(
+                canonical_json(
+                    {
+                        "failure_code": "SKILL_WORKFLOW_INVALID",
+                        "issues": checked["issues"],
+                    }
+                )
+            )
+        normalized = checked["workflow"]
+        if normalized.get("skill_id") != manifest.get("skill_id") or normalized.get("version") != manifest.get("version"):
+            raise SkillContractError("workflow identity does not match exact Skill version")
+
+        previous_steps = {
+            str(item.get("step_id") or ""): item
+            for item in package["workflow"].get("steps", [])
+            if isinstance(item, dict)
+        }
+        annotations = deepcopy(package["annotations"])
+        previous_annotations = {
+            str(item.get("step_id") or ""): item
+            for item in annotations.get("steps", [])
+            if isinstance(item, dict)
+        }
+        annotation_steps: list[dict[str, Any]] = []
+        changed_step_ids: list[str] = []
+        for step in normalized["steps"]:
+            step_id = str(step["step_id"])
+            annotation = deepcopy(
+                previous_annotations.get(
+                    step_id,
+                    {
+                        "step_id": step_id,
+                        "confidence": 1.0,
+                        "review_required": False,
+                    },
+                )
+            )
+            annotation["label"] = str(step.get("label") or step_id)[:160]
+            annotation["checkpoint_after"] = bool(step.get("checkpoint_after", False))
+            action = step.get("action") if isinstance(step.get("action"), dict) else {}
+            if action.get("locator_origin") == "manual_crop" and isinstance(action.get("target_bbox_norm"), list):
+                locator = deepcopy(annotation.get("locator")) if isinstance(annotation.get("locator"), dict) else {}
+                previous_target = locator.get("target_bbox_norm")
+                requested_ai_target = action.get("ai_target_bbox_norm")
+                if isinstance(requested_ai_target, list):
+                    locator["ai_target_bbox_norm"] = deepcopy(requested_ai_target)
+                elif "ai_target_bbox_norm" not in locator and isinstance(previous_target, list):
+                    locator["ai_target_bbox_norm"] = deepcopy(previous_target)
+                locator.update(
+                    {
+                        "target_bbox_norm": deepcopy(action["target_bbox_norm"]),
+                        "image_candidates": deepcopy(action.get("image_candidates", [])),
+                        "locator_origin": "manual_crop",
+                    }
+                )
+                annotation["locator"] = locator
+            annotation_steps.append(annotation)
+            if previous_steps.get(step_id) != step:
+                changed_step_ids.append(step_id)
+        annotations["steps"] = annotation_steps
+        review_required = any(bool(item.get("review_required")) for item in annotation_steps)
+        annotations["status"] = "review_required" if review_required else "reviewed"
+        annotations["updated_at"] = _now_iso()
+
+        old_hash = current_hash
+        new_hash = canonical_sha256(normalized)
+        manifest = deepcopy(manifest)
+        manifest["lifecycle"] = "review_required" if review_required else "annotated"
+        manifest["workflow_sha256"] = new_hash
+        manifest["annotations_sha256"] = canonical_sha256(annotations)
+        manifest["program_sha256"] = {}
+        manifest.pop("validated_at", None)
+        manifest.pop("deployment", None)
+        manifest["updated_at"] = annotations["updated_at"]
+
+        # The manifest is the commit marker: interrupted writes leave a safe,
+        # hash-invalid package that cannot validate or deploy.
+        _atomic_write_json(package_dir / "workflow.json", normalized)
+        _atomic_write_json(package_dir / "annotations.json", annotations)
+        shutil.rmtree(package_dir / "programs", ignore_errors=True)
+        _atomic_write_json(package_dir / "manifest.json", manifest)
+        self._append_audit(
+            package_dir,
+            "workflow_edited",
+            {
+                "old_workflow_sha256": old_hash,
+                "new_workflow_sha256": new_hash,
+                "changed_step_ids": changed_step_ids,
+                "editor_source": "workflow_editor",
+            },
+        )
+        return self.get(skill_id, version)
+
     def compile(self, skill_id: str, version: str) -> dict[str, Any]:
         package_dir = self._package_dir(skill_id, version)
         package = self.get(skill_id, version)
@@ -626,14 +777,21 @@ class EquipmentSkillRegistry:
         version_slug = re.sub(r"[^A-Za-z0-9]+", "_", version).strip("_")
         programs = []
         for index, sequence in enumerate(segment_actions, start=1):
-            program_id = f"{skill_id}_{version_slug}_segment_{index:03d}"
+            raw_program_id = f"{skill_id}_{version_slug}_segment_{index:03d}"
+            if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", raw_program_id):
+                program_id = raw_program_id
+            else:
+                skill_slug = re.sub(r"[^A-Za-z0-9_-]+", "_", skill_id).strip("_") or "skill"
+                identity_hash = hashlib.sha256(f"{skill_id}@{version}".encode("utf-8")).hexdigest()[:12]
+                program_id = f"{skill_slug[:36]}_{version_slug[:8]}_{identity_hash}_s{index:03d}"
             program = {
                 "schema": PROGRAM_SCHEMA,
                 "program_id": program_id,
-                "name": f"{package['manifest'].get('name', skill_id)} segment {index}",
+                "name": f"{package['manifest'].get('name', skill_id)} segment {index}"[:160],
                 "description": f"Compiled Equipment Skill {skill_id}@{version}, segment {index}",
                 "enabled": True,
                 "program_type": "macro",
+                "requires_pyautogui": True,
                 "safe_test": False,
                 "sequence": sequence,
             }
@@ -672,6 +830,12 @@ class EquipmentSkillRegistry:
             if isinstance(item, dict)
         }
         update_steps = updates.get("steps") if isinstance(updates.get("steps"), list) else []
+        workflow_steps = {
+            str(item.get("step_id") or ""): item
+            for item in package["workflow"].get("steps", [])
+            if isinstance(item, dict)
+        }
+        workflow_updated = False
         for raw_item in update_steps:
             if not isinstance(raw_item, dict):
                 raise SkillContractError("annotation step must be an object")
@@ -689,11 +853,48 @@ class EquipmentSkillRegistry:
                 }
             )
             if isinstance(raw_item.get("locator"), dict):
-                current_by_id[step_id]["locator"] = deepcopy(raw_item["locator"])
+                locator = deepcopy(raw_item["locator"])
+                current_by_id[step_id]["locator"] = locator
+                workflow_step = workflow_steps.get(step_id)
+                action = workflow_step.get("action") if isinstance(workflow_step, dict) else None
+                if isinstance(action, dict):
+                    for key in (
+                        "image_candidates",
+                        "region",
+                        "region_normalized",
+                        "locator_backend",
+                        "window_title",
+                        "target_window",
+                        "target_window_regex",
+                    ):
+                        if key in locator:
+                            action[key] = deepcopy(locator[key])
+                            workflow_updated = True
             if raw_item.get("checkpoint_after") is not None:
                 current_by_id[step_id]["checkpoint_after"] = bool(raw_item["checkpoint_after"])
         annotations = package["annotations"]
         annotations["steps"] = [current_by_id[str(item.get("step_id"))] for item in annotations.get("steps", [])]
+        if isinstance(updates.get("workflow_summary"), dict):
+            annotations["workflow_summary"] = {
+                key: str(updates["workflow_summary"].get(key) or "")[:1000]
+                for key in ("intent", "initial_state", "completion_state", "failure_state")
+                if updates["workflow_summary"].get(key) not in (None, "")
+            }
+        if isinstance(updates.get("step_transitions"), list):
+            known_step_ids = set(workflow_steps)
+            transitions: list[dict[str, str]] = []
+            for item in updates["step_transitions"][:256]:
+                if not isinstance(item, dict):
+                    continue
+                step_id = str(item.get("step_id") or "").strip()
+                if step_id not in known_step_ids:
+                    continue
+                transition = {"step_id": step_id}
+                for key in ("before_state", "action_effect", "after_state", "success_evidence", "failure_evidence"):
+                    if item.get(key) not in (None, ""):
+                        transition[key] = str(item[key])[:1000]
+                transitions.append(transition)
+            annotations["step_transitions"] = transitions
         if model_snapshot is not None:
             annotations["model_snapshot"] = deepcopy(model_snapshot)
         review_required = any(bool(item.get("review_required")) for item in annotations["steps"])
@@ -708,7 +909,11 @@ class EquipmentSkillRegistry:
             else "annotated"
         )
         manifest["annotations_sha256"] = canonical_sha256(annotations)
+        if workflow_updated:
+            manifest["workflow_sha256"] = canonical_sha256(package["workflow"])
         manifest["updated_at"] = annotations["updated_at"]
+        if workflow_updated:
+            _atomic_write_json(package_dir / "workflow.json", package["workflow"])
         _atomic_write_json(package_dir / "annotations.json", annotations)
         _atomic_write_json(package_dir / "manifest.json", manifest)
         self._append_audit(
@@ -809,58 +1014,164 @@ class EquipmentSkillRegistry:
         target_profile: str,
         model_snapshot: dict[str, Any],
         allow_unvalidated: bool = False,
+        run_id: str = "",
+        experiment_id: str = "",
+        specimen_id: str = "",
+        mode: str = "test",
+        worker: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         safe_skill_id = _safe_identity(skill_id, "skill_id")
         safe_version = _safe_version(version)
         safe_sequence = _safe_identity(sequence_id, "sequence_id")
         safe_profile = _safe_identity(target_profile, "target_profile")
-        self.execution_root.mkdir(parents=True, exist_ok=True)
-        sequence_hash = canonical_sha256(
-            {"skill_id": safe_skill_id, "version": safe_version, "sequence_id": safe_sequence, "target_profile": safe_profile}
-        )
-        index_path = self.execution_root / "sequence_index.json"
-        index = _read_json(index_path) if index_path.exists() else {}
-        if sequence_hash in index:
-            state = _read_json(self.execution_root / str(index[sequence_hash]) / "state.json")
-            state["idempotent"] = True
-            return state
         if not allow_unvalidated:
             package = self.get(safe_skill_id, safe_version)
             if package["manifest"].get("lifecycle") not in {"validated", "deployed"}:
                 raise SkillContractError("Skill version is not validated")
             if package["manifest"].get("target_profile") != safe_profile:
                 raise SkillContractError("target profile mismatch")
-        execution_id = f"skill-{uuid4().hex}"
-        state = {
-            "schema": "atr.equipment_skill_execution.v1",
-            "execution_id": execution_id,
-            "skill_id": safe_skill_id,
-            "version": safe_version,
-            "sequence_id": safe_sequence,
-            "target_profile": safe_profile,
-            "state": "RUNNING",
-            "model_snapshot": deepcopy(model_snapshot),
-            "completed_segments": [],
-            "attempt": 0,
-            "idempotent": False,
-            "created_at": _now_iso(),
-            "updated_at": _now_iso(),
-        }
-        _atomic_write_json(self.execution_root / execution_id / "state.json", state)
-        index[sequence_hash] = execution_id
-        _atomic_write_json(index_path, index)
-        return state
+        try:
+            runtime = self.runtime.begin(
+                sequence_id=safe_sequence,
+                run_id=str(run_id or safe_sequence),
+                experiment_id=str(experiment_id or safe_sequence),
+                specimen_id=str(specimen_id or safe_sequence),
+                profile_id=safe_profile,
+                mode=mode,
+                worker=deepcopy(worker or {"worker_id": "equipment-worker", "kind": "windows_pyautogui"}),
+                execution_ref={"type": "skill", "skill_id": safe_skill_id, "version": safe_version},
+                model_snapshot=deepcopy(model_snapshot),
+                metadata={
+                    "skill_execution": {
+                        "state": "RUNNING",
+                        "completed_segments": [],
+                        "attempt": 0,
+                    }
+                },
+            )
+            if runtime.get("lifecycle") == "RESOLVING":
+                runtime = self.runtime.transition(runtime["execution_id"], "PREFLIGHT", status="preflight")
+                runtime = self.runtime.transition(runtime["execution_id"], "EXECUTING", status="running")
+        except EquipmentRuntimeContractError as exc:
+            raise SkillContractError(str(exc)) from exc
+        return self._skill_execution_view(runtime)
 
     def transition_execution(self, execution_id: str, state: str, **updates: Any) -> dict[str, Any]:
         safe_execution_id = _safe_identity(execution_id, "execution_id")
         clean_state = str(state or "").strip().upper()
         if clean_state not in EXECUTION_STATES:
             raise SkillContractError(f"invalid execution state: {state}")
-        state_path = self.execution_root / safe_execution_id / "state.json"
-        payload = _read_json(state_path)
-        payload.update(deepcopy(updates))
-        payload["state"] = clean_state
-        payload["updated_at"] = _now_iso()
-        payload["idempotent"] = False
-        _atomic_write_json(state_path, payload)
-        return payload
+        lifecycle_by_skill_state = {
+            "RUNNING": "EXECUTING",
+            "CHECKPOINT_VERIFY": "VERIFYING",
+            "EXCEPTION": "BLOCKED",
+            "RECOVERING": "RECOVERING",
+            "RECOVERY_VERIFY": "VERIFYING",
+            "RESUMED": "EXECUTING",
+            "COMPLETED": "VERIFYING",
+            "ESCALATED": "ESCALATED",
+            "ABORTED": "ABORTED",
+        }
+        try:
+            runtime = self.runtime.get(safe_execution_id)
+            metadata = deepcopy(runtime.get("metadata") or {})
+            skill_execution = deepcopy(metadata.get("skill_execution") or {})
+            skill_execution.update(deepcopy(updates))
+            skill_execution["state"] = clean_state
+            metadata["skill_execution"] = skill_execution
+            transition_updates: dict[str, Any] = {
+                "metadata": metadata,
+                "status": clean_state.lower(),
+                "detail": str(updates.get("message") or updates.get("current_segment") or clean_state.lower()),
+            }
+            if clean_state == "COMPLETED":
+                transition_updates.update(
+                    {
+                        "completion": {"ok": True, "status": "execution_complete"},
+                        "handoff": {
+                            "status": "execution_complete",
+                            "ready_for_analysis": False,
+                            "verification_owner": "equipment_profile",
+                        },
+                        "failure": {},
+                    }
+                )
+            elif clean_state in {"EXCEPTION", "ESCALATED", "ABORTED"}:
+                failure_code = str(updates.get("failure_code") or clean_state)
+                transition_updates["failure"] = {
+                    "failure_code": failure_code,
+                    "message": str(updates.get("message") or ""),
+                }
+            target_lifecycle = lifecycle_by_skill_state[clean_state]
+            runtime = self.runtime.transition(
+                safe_execution_id,
+                target_lifecycle,
+                **transition_updates,
+            )
+        except EquipmentRuntimeContractError as exc:
+            raise SkillContractError(str(exc)) from exc
+        return self._skill_execution_view(runtime)
+
+    def finalize_execution_verification(
+        self,
+        execution_id: str,
+        *,
+        verified: bool,
+        completion: dict[str, Any],
+        handoff: dict[str, Any],
+        evidence: list[dict[str, Any]] | None = None,
+        raw_result: dict[str, Any] | None = None,
+        failure: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Close a deterministic Skill only after its Equipment Profile interpreter runs."""
+        safe_execution_id = _safe_identity(execution_id, "execution_id")
+        target = "COMPLETED" if verified else "BLOCKED"
+        try:
+            runtime = self.runtime.transition(
+                safe_execution_id,
+                target,
+                status="verified_complete" if verified else "blocked",
+                detail=(
+                    "Equipment Profile completion verification passed"
+                    if verified
+                    else "Equipment Profile completion verification failed"
+                ),
+                completion=deepcopy(completion),
+                handoff=deepcopy(handoff),
+                evidence=deepcopy(evidence or []),
+                raw_result=deepcopy(raw_result or {}),
+                failure={} if verified else deepcopy(failure or {}),
+            )
+        except EquipmentRuntimeContractError as exc:
+            raise SkillContractError(str(exc)) from exc
+        return self._skill_execution_view(runtime)
+
+    @staticmethod
+    def _skill_execution_view(runtime: dict[str, Any]) -> dict[str, Any]:
+        metadata = runtime.get("metadata") if isinstance(runtime.get("metadata"), dict) else {}
+        skill_execution = metadata.get("skill_execution") if isinstance(metadata.get("skill_execution"), dict) else {}
+        identity = runtime.get("identity") if isinstance(runtime.get("identity"), dict) else {}
+        execution_ref = runtime.get("execution_ref") if isinstance(runtime.get("execution_ref"), dict) else {}
+        view = {
+            "schema": "atr.equipment_skill_execution.v1",
+            "execution_id": str(runtime.get("execution_id") or ""),
+            "skill_id": str(execution_ref.get("skill_id") or ""),
+            "version": str(execution_ref.get("version") or ""),
+            "sequence_id": str(identity.get("sequence_id") or ""),
+            "target_profile": str(runtime.get("profile_id") or ""),
+            "state": str(skill_execution.get("state") or "RUNNING"),
+            "model_snapshot": deepcopy(runtime.get("model_snapshot") or {}),
+            "completed_segments": deepcopy(skill_execution.get("completed_segments") or []),
+            "attempt": int(skill_execution.get("attempt") or 0),
+            "idempotent": bool(runtime.get("idempotent")),
+            "created_at": str(runtime.get("created_at") or ""),
+            "updated_at": str(runtime.get("updated_at") or ""),
+            "runtime_execution": deepcopy(runtime),
+            "runtime_projection": EquipmentRuntimeService.project(runtime),
+            "completion": deepcopy(runtime.get("completion") or {}),
+            "handoff": deepcopy(runtime.get("handoff") or {}),
+        }
+        for key, value in skill_execution.items():
+            if key not in view:
+                view[key] = deepcopy(value)
+        return view

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 from pathlib import Path
+import re
 
 import pytest
 
@@ -60,6 +62,27 @@ def test_recording_actions_compile_to_existing_program_actions() -> None:
         {"action": "click", "x": 320, "y": 240, "button": "left"},
         {"action": "press", "key": "enter"},
     ]
+
+
+def test_recording_control_click_is_not_compiled_as_equipment_action() -> None:
+    events = [
+        {"kind": "mouse_click", "at_ms": 100, "x": 320, "y": 240, "button": "left"},
+        {
+            "kind": "mouse_click",
+            "at_ms": 200,
+            "x": 984,
+            "y": 46,
+            "button": "left",
+            "recording_control": "overlay_stop",
+        },
+    ]
+
+    actions = compile_recording_actions(events)
+    coverage = recording_capability_coverage(events)
+
+    assert actions == [{"action": "click", "x": 320, "y": 240, "button": "left"}]
+    assert coverage["actions"] == ["click"]
+    assert coverage["recording_control_event_count"] == 1
 
 
 def _inline_locator(locator_id: str, coordinate: tuple[int, int]) -> dict:
@@ -244,6 +267,77 @@ def test_registry_creates_v2_image_first_draft(tmp_path: Path) -> None:
     assert "x" not in action
 
 
+def test_compiler_emits_windows_worker_compatible_program_identity(tmp_path: Path) -> None:
+    recording = _recording()
+    recording["name"] = "N" * 240
+    skill_id = "s" * 96
+    version = "1.0.0-" + ("a" * 58)
+    registry = EquipmentSkillRegistry(tmp_path)
+    registry.create_draft(
+        recording=recording,
+        skill_id=skill_id,
+        version=version,
+        target_profile="windows_desktop_v1",
+        model_snapshot=_model_snapshot(),
+    )
+
+    compiled = registry.compile(skill_id, version)
+
+    assert compiled["programs"]
+    for program in compiled["programs"]:
+        assert re.fullmatch(r"[A-Za-z0-9_-]{1,64}", program["program_id"])
+        assert len(program["name"]) <= 160
+
+
+def test_registry_accepts_v3_time_series_recording_and_preserves_evidence_refs(tmp_path: Path) -> None:
+    recording = _recording()
+    recording["schema"] = "atr.equipment_recording.v3"
+    recording["timeline_id"] = "timeline-buffered-program1"
+    recording["exceptions"] = [
+        {
+            "exception_id": "exception-001",
+            "timeline_id": "timeline-buffered-program1",
+            "at_ms": 700,
+            "failure_code": "LOCATOR_NOT_FOUND",
+            "detail": "completion locator was not found",
+        }
+    ]
+    recording["time_series_evidence"] = {
+        "schema": "atr.equipment_recording_frames.v1",
+        "timeline_id": "timeline-buffered-program1",
+        "sampled_frame_count": 40,
+        "persisted_frame_count": 2,
+        "capture_errors": 0,
+        "frames": [
+            {"frame_id": "frame-0001", "at_ms": 0, "artifact_path": "timeline/frame-0001.jpg"},
+            {"frame_id": "frame-0002", "at_ms": 1000, "artifact_path": "timeline/frame-0002.jpg"},
+        ],
+        "exception_window_count": 1,
+        "exception_windows": [
+            {
+                "exception_id": "exception-001",
+                "failure_code": "LOCATOR_NOT_FOUND",
+                "at_ms": 700,
+                "pre_window_ms": 5000,
+                "post_window_ms": 5000,
+                "frame_ids": ["frame-0001", "frame-0002"],
+            }
+        ],
+    }
+
+    created = EquipmentSkillRegistry(tmp_path).create_draft(
+        recording=recording,
+        skill_id="buffered_program1_skill",
+        version="1.0.0",
+        target_profile="local_program1",
+        model_snapshot=_model_snapshot(),
+    )
+
+    assert created["manifest"]["recording_evidence"] == recording["time_series_evidence"]
+    assert created["manifest"]["timeline_id"] == recording["timeline_id"]
+    assert created["manifest"]["recording_exceptions"] == recording["exceptions"]
+
+
 def test_mouse_move_recording_compiles_to_timed_move_to_actions() -> None:
     actions = compile_recording_actions(
         [
@@ -350,6 +444,22 @@ def test_registry_creates_reloadable_draft_and_exact_hashes(tmp_path: Path) -> N
     assert EquipmentSkillRegistry(tmp_path).get("program1_skill", "1.0.0") == created
 
 
+def test_registry_reuses_empty_version_directory_left_by_interrupted_authoring(tmp_path: Path) -> None:
+    stale = tmp_path / "program1_skill" / "1.0.0"
+    stale.mkdir(parents=True)
+
+    created = EquipmentSkillRegistry(tmp_path).create_draft(
+        recording=_recording(),
+        skill_id="program1_skill",
+        version="1.0.0",
+        target_profile="local_program1",
+        model_snapshot=_model_snapshot(),
+    )
+
+    assert created["manifest"]["skill_id"] == "program1_skill"
+    assert (stale / "manifest.json").is_file()
+
+
 def test_registry_rejects_unsafe_identity(tmp_path: Path) -> None:
     registry = EquipmentSkillRegistry(tmp_path)
 
@@ -378,6 +488,7 @@ def test_compile_emits_existing_schema_segments_and_validates(tmp_path: Path) ->
 
     assert [len(item["sequence"]) for item in compiled["programs"]] == [100, 1]
     assert all(item["schema"] == "atr.pyautogui_program.v1" for item in compiled["programs"])
+    assert all(item["requires_pyautogui"] is True for item in compiled["programs"])
     assert validated["ok"] is True
     assert validated["package"]["manifest"]["lifecycle"] == "validated"
 
@@ -420,6 +531,79 @@ def test_annotation_review_blocks_validation_until_resolved(tmp_path: Path) -> N
     assert registry.validate("program1_skill", "1.0.0")["ok"] is True
 
 
+def test_annotation_locator_is_persisted_into_executable_workflow(tmp_path: Path) -> None:
+    registry = EquipmentSkillRegistry(tmp_path)
+    registry.create_draft(
+        recording=_recording(),
+        skill_id="program1_skill",
+        version="1.0.0",
+        target_profile="local_program1",
+        model_snapshot=_model_snapshot(),
+    )
+
+    package = registry.annotate(
+        "program1_skill",
+        "1.0.0",
+        {
+            "steps": [
+                {
+                    "step_id": "step-001",
+                    "label": "Select target",
+                    "confidence": 0.95,
+                    "review_required": False,
+                    "locator": {
+                        "region_normalized": [0.1, 0.2, 0.3, 0.4],
+                        "locator_backend": "multimodal_roi_image",
+                    },
+                }
+            ]
+        },
+    )
+
+    assert package["workflow"]["steps"][0]["action"]["region_normalized"] == [0.1, 0.2, 0.3, 0.4]
+    assert package["workflow"]["steps"][0]["action"]["locator_backend"] == "multimodal_roi_image"
+
+
+def test_annotation_persists_bounded_workflow_semantics(tmp_path: Path) -> None:
+    registry = EquipmentSkillRegistry(tmp_path)
+    registry.create_draft(
+        recording=_recording(),
+        skill_id="program1_skill",
+        version="1.0.0",
+        target_profile="local_program1",
+        model_snapshot=_model_snapshot(),
+    )
+
+    package = registry.annotate(
+        "program1_skill",
+        "1.0.0",
+        {
+            "workflow_summary": {
+                "intent": "Open the test program and start one bounded run.",
+                "initial_state": "Program is idle.",
+                "completion_state": "Run result is visible.",
+            },
+            "step_transitions": [
+                {
+                    "step_id": "step-001",
+                    "before_state": "Program is idle.",
+                    "action_effect": "The start control is activated.",
+                    "after_state": "The run begins.",
+                    "success_evidence": "Running indicator appears.",
+                }
+            ],
+            "steps": [],
+        },
+    )
+
+    assert package["annotations"]["workflow_summary"]["intent"] == (
+        "Open the test program and start one bounded run."
+    )
+    assert package["annotations"]["step_transitions"][0]["step_id"] == "step-001"
+    assert package["annotations"]["step_transitions"][0]["success_evidence"] == (
+        "Running indicator appears."
+    )
+
 def test_deploy_lifecycle_requires_validation_and_exact_hash(tmp_path: Path) -> None:
     registry = EquipmentSkillRegistry(tmp_path)
     registry.create_draft(
@@ -444,6 +628,82 @@ def test_deploy_lifecycle_requires_validation_and_exact_hash(tmp_path: Path) -> 
 
     assert deployed["manifest"]["lifecycle"] == "deployed"
     assert deployed["manifest"]["deployment"]["sha256"] == "a" * 64
+
+
+def test_update_workflow_reorders_steps_and_invalidates_compiled_artifacts(tmp_path: Path) -> None:
+    registry = EquipmentSkillRegistry(tmp_path)
+    registry.create_draft(
+        recording=_recording(),
+        skill_id="program1_skill",
+        version="1.0.0",
+        target_profile="local_program1",
+        model_snapshot=_model_snapshot(),
+    )
+    before = registry.compile("program1_skill", "1.0.0")
+    edited = deepcopy(before["workflow"])
+    edited["steps"] = list(reversed(edited["steps"]))
+
+    updated = registry.update_workflow(
+        "program1_skill",
+        "1.0.0",
+        edited,
+        expected_workflow_sha256=before["manifest"]["workflow_sha256"],
+    )
+
+    assert [item["step_id"] for item in updated["workflow"]["steps"]] == ["step-002", "step-001"]
+    assert updated["workflow"]["program_ids"] == []
+    assert updated["programs"] == []
+    assert updated["manifest"]["program_sha256"] == {}
+    assert updated["manifest"]["lifecycle"] == "annotated"
+    assert "compiled_at" not in updated["workflow"]
+    audit = (tmp_path / "program1_skill" / "1.0.0" / "audit.jsonl").read_text(encoding="utf-8")
+    assert '"event":"workflow_edited"' in audit
+
+
+def test_update_workflow_rejects_stale_hash(tmp_path: Path) -> None:
+    registry = EquipmentSkillRegistry(tmp_path)
+    package = registry.create_draft(
+        recording=_recording(),
+        skill_id="program1_skill",
+        version="1.0.0",
+        target_profile="local_program1",
+        model_snapshot=_model_snapshot(),
+    )
+
+    with pytest.raises(SkillContractError, match="revision conflict"):
+        registry.update_workflow(
+            "program1_skill",
+            "1.0.0",
+            package["workflow"],
+            expected_workflow_sha256="0" * 64,
+        )
+
+
+def test_update_workflow_rejects_deployed_exact_version(tmp_path: Path) -> None:
+    registry = EquipmentSkillRegistry(tmp_path)
+    registry.create_draft(
+        recording=_recording(),
+        skill_id="program1_skill",
+        version="1.0.0",
+        target_profile="local_program1",
+        model_snapshot=_model_snapshot(),
+    )
+    registry.compile("program1_skill", "1.0.0")
+    registry.validate("program1_skill", "1.0.0")
+    deployed = registry.mark_deployed(
+        "program1_skill",
+        "1.0.0",
+        bridge_id="local",
+        deployment_sha256="a" * 64,
+    )
+
+    with pytest.raises(SkillContractError, match="immutable"):
+        registry.update_workflow(
+            "program1_skill",
+            "1.0.0",
+            deployed["workflow"],
+            expected_workflow_sha256=deployed["manifest"]["workflow_sha256"],
+        )
 
 
 def test_validate_skill_package_rejects_tampered_workflow(tmp_path: Path) -> None:
@@ -547,3 +807,34 @@ def test_execution_state_is_idempotent_for_same_sequence(tmp_path: Path) -> None
 
     assert second["execution_id"] == first["execution_id"]
     assert second["idempotent"] is True
+
+
+def test_skill_completion_does_not_claim_analysis_readiness_without_profile_verification(tmp_path: Path) -> None:
+    registry = EquipmentSkillRegistry(tmp_path)
+    execution = registry.begin_execution(
+        skill_id="program1_skill",
+        version="1.0.0",
+        sequence_id="sequence-complete",
+        target_profile="local_program1",
+        model_snapshot=_model_snapshot(),
+        allow_unvalidated=True,
+    )
+
+    completed = registry.transition_execution(execution["execution_id"], "COMPLETED")
+
+    assert completed["state"] == "COMPLETED"
+    assert completed["runtime_execution"]["lifecycle"] == "VERIFYING"
+    assert completed["handoff"]["status"] == "execution_complete"
+    assert completed["handoff"]["ready_for_analysis"] is False
+
+    verified = registry.finalize_execution_verification(
+        execution["execution_id"],
+        verified=True,
+        completion={"ok": True, "status": "verified_complete"},
+        handoff={"status": "ready_for_analysis", "ready_for_analysis": True},
+        evidence=[{"kind": "request_log", "artifact_id": "request-log-1"}],
+        raw_result={"ok": True, "status": "completed"},
+    )
+
+    assert verified["runtime_execution"]["lifecycle"] == "COMPLETED"
+    assert verified["handoff"]["status"] == "ready_for_analysis"

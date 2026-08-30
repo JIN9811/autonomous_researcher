@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
-from backends.llm_backend import BaseLLMBackend, LLMResponse
+from backends.llm_backend import BaseLLMBackend, LLMImageInput, LLMResponse
 from backends.llm_lease import GUARDIAN_PRIORITY, LLMLeaseCoordinator, WORKFLOW_PRIORITY
 from backends.model_router import ModelRouter
 from backends.prompt_registry import get_system_prompt
@@ -111,16 +111,17 @@ class AgentContext:
         priority: int | None = None,
         owner: str = "",
         lease_wait: bool = True,
+        images: list[LLMImageInput] | None = None,
     ) -> LLMResponse:
         """Call selected model with fallback backend on failure."""
         if self.llm_lease is None:
-            return await self._complete_unleased(task_type, user_prompt, timeout_s=timeout_s)
+            return await self._complete_unleased(task_type, user_prompt, timeout_s=timeout_s, images=images)
         resolved_priority = GUARDIAN_PRIORITY if task_type.startswith("guardian") else WORKFLOW_PRIORITY
         if priority is not None:
             resolved_priority = int(priority)
         lease_owner = owner or f"agent:{task_type}"
         async with self.llm_lease.acquire(priority=resolved_priority, owner=lease_owner, wait=lease_wait):
-            return await self._complete_unleased(task_type, user_prompt, timeout_s=timeout_s)
+            return await self._complete_unleased(task_type, user_prompt, timeout_s=timeout_s, images=images)
 
     async def _complete_unleased(
         self,
@@ -128,6 +129,7 @@ class AgentContext:
         user_prompt: str,
         *,
         timeout_s: float | None = None,
+        images: list[LLMImageInput] | None = None,
     ) -> LLMResponse:
         router = self.model_routers.get(self.active_backend, self.model_router)
         primary_backend = self.primary_backends.get(self.active_backend, self.primary_backend)
@@ -135,12 +137,15 @@ class AgentContext:
         system_prompt = get_system_prompt(task_type)
 
         async def _call_backend(backend: BaseLLMBackend, model: str, role: str) -> LLMResponse:
-            coro = backend.complete(
-                model=model,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                metadata={"task_type": task_type, "role": role},
-            )
+            call_kwargs: dict[str, Any] = {
+                "model": model,
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+                "metadata": {"task_type": task_type, "role": role},
+            }
+            if images:
+                call_kwargs["images"] = images
+            coro = backend.complete(**call_kwargs)
             if timeout_s is not None and timeout_s > 0:
                 return await asyncio.wait_for(coro, timeout=timeout_s)
             return await coro

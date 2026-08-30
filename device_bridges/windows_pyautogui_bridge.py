@@ -28,16 +28,18 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 import socket
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote, urljoin, urlparse
 
 import httpx
 
 from device_bridges.base_bridge import BaseBridge
+from utils.windows_bridge_release import build_release_package, load_release_manifest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -494,7 +496,7 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         if precheck:
             precheck["tool"] = "equipment.pyautogui.health"
             return precheck
-        return self._live_get("equipment.pyautogui.health", "/health")
+        return self._live_get("equipment.pyautogui.health", "/health", payload)
 
     def list_programs(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Return registered macro programs."""
@@ -512,10 +514,300 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         if precheck:
             precheck["tool"] = "equipment.pyautogui.list_programs"
             return precheck
-        response = self._live_get("equipment.pyautogui.list_programs", "/programs")
+        response = self._live_get("equipment.pyautogui.list_programs", "/programs", payload)
         if isinstance(response.get("programs"), dict):
             response["programs"] = self._program_metadata(response["programs"])
         return response
+
+    def list_recordings(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """List recordings owned by the explicitly selected live worker."""
+        payload = dict(payload or {})
+        if not self._should_use_live(payload, for_execution=False):
+            return self._failure(
+                tool="equipment.pyautogui.list_recordings",
+                status="blocked",
+                failure_code="PYAUTOGUI_RECORDING_WORKER_REQUIRED",
+                message="A selected live or local Bridge worker is required to list recordings.",
+            )
+        precheck = self._live_precheck(require_execute=False, payload=payload)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.list_recordings"
+            return precheck
+        return self._live_get("equipment.pyautogui.list_recordings", "/recordings", payload)
+
+    def get_recording(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Fetch and verify one saved recording from the selected live worker."""
+        payload = dict(payload or {})
+        recording_id = str(payload.get("recording_id") or "").strip()
+        if not recording_id:
+            return self._failure(
+                tool="equipment.pyautogui.get_recording",
+                status="invalid",
+                failure_code="PYAUTOGUI_RECORDING_ID_REQUIRED",
+                message="recording_id is required.",
+            )
+        if not self._should_use_live(payload, for_execution=False):
+            return self._failure(
+                tool="equipment.pyautogui.get_recording",
+                status="blocked",
+                failure_code="PYAUTOGUI_RECORDING_WORKER_REQUIRED",
+                message="A selected live or local Bridge worker is required to fetch recordings.",
+            )
+        precheck = self._live_precheck(require_execute=False, payload=payload)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.get_recording"
+            return precheck
+        encoded_id = quote(recording_id, safe="")
+        package = self._live_get("equipment.pyautogui.get_recording", f"/recordings/{encoded_id}/package", payload)
+        if package.get("ok") and package.get("schema") == "atr.equipment_recording_package.v1":
+            return self._import_recording_package(package)
+        if package.get("ok"):
+            return self._failure(
+                tool="equipment.pyautogui.get_recording",
+                status="blocked",
+                failure_code="PYAUTOGUI_RECORDING_PACKAGE_INVALID",
+                message="The selected worker returned recording metadata without a verified package.",
+            )
+        return package
+
+    @staticmethod
+    def _worker_update_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+        request = dict(payload or {})
+        candidate_alias = str(request.get("candidate_alias") or request.get("bridge_id") or "").strip()
+        request.update(
+            {
+                "candidate_alias": candidate_alias,
+                "bridge_id": candidate_alias,
+                "runtime_mode": "live",
+                "force_live_bridge": True,
+            }
+        )
+        return request
+
+    @staticmethod
+    def _version_key(value: Any) -> tuple[int, ...]:
+        return tuple(int(item) for item in re.findall(r"\d+", str(value or "")))
+
+    def worker_update_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Read one explicitly addressed Saved Worker's update state."""
+        request = self._worker_update_payload(payload)
+        if not request["bridge_id"]:
+            return self._failure(
+                tool="equipment.pyautogui.worker_update_status",
+                status="blocked",
+                failure_code="PYAUTOGUI_CANDIDATE_ALIAS_REQUIRED",
+                message="candidate_alias is required for Worker update operations.",
+            )
+        precheck = self._live_precheck(require_execute=False, payload=request)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.worker_update_status"
+            return precheck
+        result = self._live_get("equipment.pyautogui.worker_update_status", "/update/status", request)
+        latest_version = str(load_release_manifest().get("version") or "")
+        current_version = str(result.get("current_version") or "")
+        result.update(
+            {
+                "candidate_alias": request["candidate_alias"],
+                "latest_version": latest_version,
+                "update_available": bool(
+                    result.get("ok")
+                    and latest_version
+                    and self._version_key(latest_version) > self._version_key(current_version)
+                ),
+            }
+        )
+        return result
+
+    def update_worker(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Stage and apply the bounded repository release on one Saved Worker."""
+        request = self._worker_update_payload(payload)
+        if not request["bridge_id"]:
+            return self._failure(
+                tool="equipment.pyautogui.update_worker",
+                status="blocked",
+                failure_code="PYAUTOGUI_CANDIDATE_ALIAS_REQUIRED",
+                message="candidate_alias is required for Worker update operations.",
+            )
+        precheck = self._live_precheck(require_execute=False, payload=request)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.update_worker"
+            return precheck
+        try:
+            package = build_release_package()
+        except (OSError, TypeError, ValueError) as exc:
+            return self._failure(
+                tool="equipment.pyautogui.update_worker",
+                status="blocked",
+                failure_code="PYAUTOGUI_UPDATE_PACKAGE_BUILD_FAILED",
+                message=str(exc),
+            )
+        staged = self._live_post("equipment.pyautogui.update_worker", "/update/stage", package, request)
+        if not staged.get("ok"):
+            return staged
+        applied = self._live_post("equipment.pyautogui.update_worker", "/update/apply", {}, request)
+        applied["candidate_alias"] = request["candidate_alias"]
+        applied["staged"] = staged
+        applied["target_version"] = str(package.get("version") or "")
+        return applied
+
+    def rollback_worker(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Request the most recent verified Worker backup for one explicit candidate."""
+        request = self._worker_update_payload(payload)
+        if not request["bridge_id"]:
+            return self._failure(
+                tool="equipment.pyautogui.rollback_worker",
+                status="blocked",
+                failure_code="PYAUTOGUI_CANDIDATE_ALIAS_REQUIRED",
+                message="candidate_alias is required for Worker update operations.",
+            )
+        precheck = self._live_precheck(require_execute=False, payload=request)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.rollback_worker"
+            return precheck
+        result = self._live_post("equipment.pyautogui.rollback_worker", "/update/rollback", {}, request)
+        result["candidate_alias"] = request["candidate_alias"]
+        return result
+
+    def _import_recording_package(self, package: dict[str, Any]) -> dict[str, Any]:
+        recording = package.get("recording") if isinstance(package.get("recording"), dict) else {}
+        recording = dict(recording)
+        recording_id = str(recording.get("recording_id") or "").strip()
+        if not re.fullmatch(r"rec-[A-Za-z0-9_-]{3,80}", recording_id):
+            return self._failure(
+                tool="equipment.pyautogui.get_recording",
+                status="invalid",
+                failure_code="PYAUTOGUI_RECORDING_PACKAGE_INVALID",
+                message="Recording package contains an invalid recording_id.",
+            )
+        artifacts = package.get("artifacts")
+        if not isinstance(artifacts, list):
+            return self._failure(
+                tool="equipment.pyautogui.get_recording",
+                status="blocked",
+                failure_code="PYAUTOGUI_RECORDING_PACKAGE_INTEGRITY_FAILED",
+                message="Recording package artifact list is invalid.",
+            )
+        declared_count_raw = package.get("artifact_count")
+        declared_total_raw = package.get("total_bytes")
+        try:
+            declared_sizes = [int(item.get("size_bytes")) for item in artifacts if isinstance(item, dict)]
+            declared_count = int(declared_count_raw) if declared_count_raw is not None else len(artifacts)
+            declared_total = int(declared_total_raw) if declared_total_raw is not None else sum(declared_sizes)
+        except (TypeError, ValueError, OverflowError):
+            return self._failure(
+                tool="equipment.pyautogui.get_recording",
+                status="blocked",
+                failure_code="PYAUTOGUI_RECORDING_ARTIFACT_INTEGRITY_FAILED",
+                message="Recording package contains an invalid declared artifact size.",
+            )
+        if (
+            declared_count != len(artifacts)
+            or len(declared_sizes) != len(artifacts)
+            or any(size < 1 or size > 16 * 1024 * 1024 for size in declared_sizes)
+            or declared_total != sum(declared_sizes)
+        ):
+            return self._failure(
+                tool="equipment.pyautogui.get_recording",
+                status="blocked",
+                failure_code="PYAUTOGUI_RECORDING_PACKAGE_INTEGRITY_FAILED",
+                message="Recording package count or total byte declarations do not match its artifacts.",
+            )
+        import_root = (self.config.artifact_dir / "recording_imports" / recording_id).resolve()
+        import_root.mkdir(parents=True, exist_ok=True)
+        path_map: dict[str, str] = {}
+        imported_files: list[dict[str, Any]] = []
+        total_bytes = 0
+        for artifact in artifacts:
+            if not isinstance(artifact, dict):
+                continue
+            relative = Path(str(artifact.get("relative_path") or ""))
+            if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+                return self._failure(
+                    tool="equipment.pyautogui.get_recording",
+                    status="blocked",
+                    failure_code="PYAUTOGUI_RECORDING_ARTIFACT_PATH_INVALID",
+                    message="Recording package contains an unsafe artifact path.",
+                )
+            try:
+                raw = base64.b64decode(str(artifact.get("data_base64") or ""), validate=True)
+            except Exception:
+                raw = b""
+            digest = hashlib.sha256(raw).hexdigest()
+            declared_digest = str(artifact.get("sha256") or "").lower()
+            declared_size = int(artifact.get("size_bytes") or -1)
+            total_bytes += len(raw)
+            if (
+                not raw
+                or digest != declared_digest
+                or declared_size != len(raw)
+                or len(raw) > 16 * 1024 * 1024
+            ):
+                return self._failure(
+                    tool="equipment.pyautogui.get_recording",
+                    status="blocked",
+                    failure_code="PYAUTOGUI_RECORDING_ARTIFACT_INTEGRITY_FAILED",
+                    message="Recording artifact size or SHA-256 verification failed.",
+                )
+            destination = (import_root / relative).resolve()
+            try:
+                destination.relative_to(import_root)
+            except ValueError:
+                return self._failure(
+                    tool="equipment.pyautogui.get_recording",
+                    status="blocked",
+                    failure_code="PYAUTOGUI_RECORDING_ARTIFACT_PATH_INVALID",
+                    message="Recording artifact escaped the import root.",
+                )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            temporary = destination.with_suffix(destination.suffix + ".tmp")
+            temporary.write_bytes(raw)
+            temporary.replace(destination)
+            source_path = str(artifact.get("source_path") or "")
+            if source_path:
+                path_map[source_path] = str(destination)
+            imported_files.append(
+                {
+                    "relative_path": relative.as_posix(),
+                    "local_path": str(destination),
+                    "sha256": digest,
+                    "size_bytes": len(raw),
+                    "media_type": str(artifact.get("media_type") or "application/octet-stream"),
+                }
+            )
+
+        def rewrite(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {key: rewrite(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [rewrite(item) for item in value]
+            if isinstance(value, str) and value in path_map:
+                return path_map[value]
+            return value
+
+        imported = rewrite(recording)
+        if imported.get("content_sha256"):
+            imported["worker_content_sha256"] = imported.pop("content_sha256")
+        manifest = {
+            "schema": "atr.equipment_recording_import.v1",
+            "recording_id": recording_id,
+            "verified_count": len(imported_files),
+            "total_bytes": total_bytes,
+            "files": imported_files,
+        }
+        manifest_path = import_root / "import_manifest.json"
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        recording_path = import_root / "recording.imported.json"
+        recording_path.write_text(json.dumps(imported, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        return {
+            "ok": True,
+            "tool": "equipment.pyautogui.get_recording",
+            "mode": "live",
+            **imported,
+            "artifact_import": manifest,
+            "import_manifest_path": str(manifest_path),
+            "imported_recording_path": str(recording_path),
+            "failure_code": None,
+        }
 
     def register_program(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Register one exact existing-schema macro without actuating equipment."""
@@ -577,9 +869,19 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         if precheck:
             precheck["tool"] = "equipment.pyautogui.register_program"
             return precheck
-        result = self._live_post("equipment.pyautogui.register_program", "/programs/register", program)
-        if result.get("ok"):
-            result["program_sha256"] = digest
+        deployment_payload = {
+            "program": program,
+            "_atr_deployment": {
+                "managed_by": "atr_equipment_skill",
+                "program_sha256": digest,
+            },
+        }
+        result = self._live_post(
+            "equipment.pyautogui.register_program",
+            "/programs/register",
+            deployment_payload,
+            payload,
+        )
         return result
 
     def delete_program(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -610,7 +912,9 @@ class WindowsPyAutoGUIBridge(BaseBridge):
             return precheck
         try:
             with httpx.Client(timeout=self.config.request_timeout_sec) as client:
-                response = client.delete(self._url(f"/programs/{program_id}"), headers=self._headers())
+                response = client.delete(
+                    self._url(f"/programs/{program_id}?source=atr", payload), headers=self._headers(payload)
+                )
                 response.raise_for_status()
                 result = response.json()
                 return dict(result) if isinstance(result, dict) else {"ok": False, "status": "invalid_response"}
@@ -730,7 +1034,7 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         if precheck:
             precheck["tool"] = "equipment.pyautogui.request_log"
             return precheck
-        return self._live_get("equipment.pyautogui.request_log", "/request-log")
+        return self._live_get("equipment.pyautogui.request_log", "/request-log", payload)
 
     def screenshot(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Capture a Windows bridge screenshot for UTM UI calibration."""
@@ -750,7 +1054,7 @@ class WindowsPyAutoGUIBridge(BaseBridge):
             precheck["tool"] = "equipment.pyautogui.screenshot"
             return precheck
         public_payload = self._public_payload({**payload, "runtime_mode": "live"})
-        return self._live_post("equipment.pyautogui.screenshot", "/screenshot", public_payload)
+        return self._live_post("equipment.pyautogui.screenshot", "/screenshot", public_payload, payload)
 
     def list_locators(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """List saved Windows-side image locators for registered equipment protocols."""
@@ -769,7 +1073,7 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         if precheck:
             precheck["tool"] = "equipment.pyautogui.list_locators"
             return precheck
-        return self._live_get("equipment.pyautogui.list_locators", "/locators")
+        return self._live_get("equipment.pyautogui.list_locators", "/locators", payload)
 
     def capture_locator(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Capture a Windows screen region as an image locator for UTM protocol assertions."""
@@ -798,7 +1102,9 @@ class WindowsPyAutoGUIBridge(BaseBridge):
             precheck["tool"] = "equipment.pyautogui.capture_locator"
             return precheck
         public_payload = self._public_payload({**payload, "runtime_mode": "live"})
-        return self._live_post("equipment.pyautogui.capture_locator", "/locators/capture", public_payload)
+        return self._live_post(
+            "equipment.pyautogui.capture_locator", "/locators/capture", public_payload, payload
+        )
 
     def utm_profile_status(self) -> dict[str, Any]:
         """Return the active UTM protocol profile used by autonomous Equipment runs."""
@@ -873,7 +1179,8 @@ class WindowsPyAutoGUIBridge(BaseBridge):
                     "host": str(candidate.get("host", "")),
                     "port": candidate.get("port", self.config.discovery_port),
                     "selected": str(alias) == selected_alias,
-                    "token_configured": bool(candidate.get("token")),
+                    "token_configured": bool(candidate.get("internal_key") or candidate.get("token")),
+                    "paired": bool(candidate.get("internal_key") or candidate.get("token")),
                     "allow_live_execute": bool(candidate.get("allow_live_execute", False)),
                     "platform": str(candidate.get("platform") or "windows"),
                     "scope": str(candidate.get("scope") or "network"),
@@ -893,6 +1200,7 @@ class WindowsPyAutoGUIBridge(BaseBridge):
             "host": selected.get("host", memory.get("host", "")),
             "port": selected.get("port", memory.get("port", self.config.discovery_port)),
             "token_configured": bool(token),
+            "paired": bool(token),
             "selected": bool(url),
             "last_checked": selected.get("last_checked", memory.get("last_checked")),
             "last_status": selected.get("last_status", memory.get("last_status")),
@@ -901,6 +1209,77 @@ class WindowsPyAutoGUIBridge(BaseBridge):
             "managed_local": bool(selected.get("managed_local", memory.get("managed_local", False))),
             "candidates": candidates,
         }
+
+    def pair_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Exchange a four-digit one-time code and persist only the returned internal key."""
+        pairing_code = str(payload.get("pairing_code") or "").strip()
+        if len(pairing_code) != 4 or not pairing_code.isdigit():
+            return self._failure(
+                tool="equipment.pyautogui.pair_connection",
+                status="invalid",
+                failure_code="PYAUTOGUI_PAIRING_CODE_INVALID",
+                message="pairing_code must contain exactly four digits.",
+            )
+        host = str(payload.get("host") or "").strip()
+        port = int(payload.get("port") or self.config.discovery_port)
+        bridge_url = str(payload.get("bridge_url") or payload.get("url") or "").strip().rstrip("/")
+        if not bridge_url and host:
+            bridge_url = f"http://{host}:{port}"
+        if not bridge_url:
+            return self._failure(
+                tool="equipment.pyautogui.pair_connection",
+                status="invalid",
+                failure_code="PYAUTOGUI_BRIDGE_URL_REQUIRED",
+                message="bridge_url or host is required.",
+            )
+        validated_url, url_error = self._validate_private_bridge_url(bridge_url)
+        if url_error:
+            return self._failure(
+                tool="equipment.pyautogui.pair_connection",
+                mode="live",
+                status="invalid",
+                failure_code=str(url_error[0]),
+                message=str(url_error[1]),
+                step_trace=[{"step": "VALIDATE_BRIDGE_URL", "status": "blocked", "detail": bridge_url}],
+            )
+        bridge_url = validated_url
+        try:
+            with httpx.Client(timeout=self.config.request_timeout_sec) as client:
+                response = client.post(f"{bridge_url}/pairing/complete", json={"pairing_code": pairing_code})
+                response.raise_for_status()
+                result = response.json()
+        except httpx.HTTPStatusError as exc:
+            return self._failure(
+                tool="equipment.pyautogui.pair_connection",
+                mode="live",
+                status="blocked",
+                failure_code="PYAUTOGUI_PAIRING_REJECTED",
+                message=f"Windows bridge pairing rejected: HTTP {exc.response.status_code}",
+            )
+        except Exception as exc:
+            return self._failure(
+                tool="equipment.pyautogui.pair_connection",
+                mode="live",
+                status="unreachable",
+                failure_code="PYAUTOGUI_BRIDGE_UNREACHABLE",
+                message=f"Windows bridge pairing failed: {exc.__class__.__name__}",
+            )
+        internal_key = str(result.get("internal_key") or "").strip() if isinstance(result, dict) else ""
+        if not internal_key:
+            return self._failure(
+                tool="equipment.pyautogui.pair_connection",
+                mode="live",
+                status="invalid_response",
+                failure_code="PYAUTOGUI_PAIRING_KEY_MISSING",
+                message="Windows bridge pairing response did not include an internal key.",
+            )
+        connection = dict(payload)
+        connection.pop("pairing_code", None)
+        connection.update({"bridge_url": bridge_url, "host": host, "port": port, "internal_key": internal_key})
+        saved = self.save_connection(connection)
+        if saved.get("ok"):
+            saved["paired"] = True
+        return saved
 
     def save_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Persist a selected Windows bridge candidate for quick connection."""
@@ -932,13 +1311,13 @@ class WindowsPyAutoGUIBridge(BaseBridge):
                 message="bridge_url or host is required.",
                 step_trace=[{"step": "SAVE_CONNECTION", "status": "blocked", "detail": "missing url"}],
             )
-        token = str(payload.get("token") or "").strip()
+        internal_key = str(payload.get("internal_key") or payload.get("token") or "").strip()
         existing = self.load_connection_memory()
         candidates = self._candidate_map(existing)
         previous = candidates.get(alias) if isinstance(candidates.get(alias), dict) else {}
-        if not token and previous:
-            token = str(previous.get("token", "")).strip()
-        if not token:
+        if not internal_key and previous:
+            internal_key = str(previous.get("internal_key") or previous.get("token") or "").strip()
+        if not internal_key:
             return self._failure(
                 tool="equipment.pyautogui.save_connection",
                 status="blocked",
@@ -952,7 +1331,7 @@ class WindowsPyAutoGUIBridge(BaseBridge):
             "bridge_url": raw_url,
             "host": host or raw_url.split("//", 1)[-1].split(":", 1)[0],
             "port": port,
-            "token": token,
+            "internal_key": internal_key,
             "token_header": str(payload.get("token_header") or self.config.token_header),
             "allow_live_execute": bool(payload.get("allow_live_execute", True)),
             "platform": str(payload.get("platform") or previous.get("platform") or "windows"),
@@ -1038,7 +1417,9 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         validation = self._validate_sequence_payload(runtime_payload)
         if validation:
             return validation
-        result = self._live_post("equipment.pyautogui.run", "/execute", self._public_payload(runtime_payload))
+        result = self._live_post(
+            "equipment.pyautogui.run", "/execute", self._public_payload(runtime_payload), payload
+        )
         return self._attach_control_profile(result, runtime_payload)
 
     def _should_use_live(self, payload: dict[str, Any], *, for_execution: bool) -> bool:
@@ -1060,7 +1441,15 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         payload = payload or {}
         setup_gui_execute = bool(payload.get("confirm_setup_gui_execute"))
         memory = self.load_connection_memory()
-        _, selected = self._selected_candidate(memory)
+        requested_alias, selected = self._candidate_for_payload(memory, payload)
+        if self._requested_candidate_id(payload) and not requested_alias:
+            return self._failure(
+                tool="equipment.pyautogui",
+                mode="live",
+                status="blocked",
+                failure_code="PYAUTOGUI_CANDIDATE_NOT_FOUND",
+                message="The requested Windows Equipment worker is not registered.",
+            )
         profile_allows_execute = bool(selected.get("allow_live_execute", False))
         if require_execute and not self.config.allow_live_execute and not setup_gui_execute and not profile_allows_execute:
             return self._failure(
@@ -1071,7 +1460,7 @@ class WindowsPyAutoGUIBridge(BaseBridge):
                 message="Live Windows PyAutoGUI execution is disabled by config.",
                 step_trace=[{"step": "PRECHECK", "status": "blocked", "detail": "allow_live_execute=false"}],
             )
-        if not self._bridge_url():
+        if not self._bridge_url(payload):
             return self._failure(
                 tool="equipment.pyautogui",
                 mode="live",
@@ -1081,7 +1470,7 @@ class WindowsPyAutoGUIBridge(BaseBridge):
                 message=f"Set {self.config.bridge_url_env}=http://<windows-private-ip>:8765.",
                 step_trace=[{"step": "PRECHECK", "status": "blocked", "detail": "missing bridge URL"}],
             )
-        if self.config.token_env and not self._token():
+        if self.config.token_env and not self._token(payload):
             return self._failure(
                 tool="equipment.pyautogui",
                 mode="live",
@@ -1458,11 +1847,15 @@ class WindowsPyAutoGUIBridge(BaseBridge):
                 return [dict(item) for item in raw if isinstance(item, dict)]
         return [dict(item) for item in self.config.default_sequence]
 
-    def _live_get(self, tool: str, path: str) -> dict[str, Any]:
+    def _live_get(
+        self, tool: str, path: str, connection_payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         started = time.perf_counter()
         try:
             with httpx.Client(timeout=self.config.request_timeout_sec) as client:
-                response = client.get(self._url(path), headers=self._headers())
+                response = client.get(
+                    self._url(path, connection_payload), headers=self._headers(connection_payload)
+                )
                 response.raise_for_status()
                 data = response.json()
         except httpx.HTTPStatusError as exc:
@@ -1484,13 +1877,28 @@ class WindowsPyAutoGUIBridge(BaseBridge):
                 message=f"Windows PyAutoGUI bridge unreachable: {exc.__class__.__name__}",
                 step_trace=[{"step": "CONNECT", "status": "failed", "detail": exc.__class__.__name__}],
             )
-        return self._normalize_live_response(tool, data, latency_ms=(time.perf_counter() - started) * 1000.0)
+        return self._normalize_live_response(
+            tool,
+            data,
+            latency_ms=(time.perf_counter() - started) * 1000.0,
+            connection_payload=connection_payload,
+        )
 
-    def _live_post(self, tool: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _live_post(
+        self,
+        tool: str,
+        path: str,
+        payload: dict[str, Any],
+        connection_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         started = time.perf_counter()
         try:
             with httpx.Client(timeout=self.config.request_timeout_sec) as client:
-                response = client.post(self._url(path), headers=self._headers(), json=payload)
+                response = client.post(
+                    self._url(path, connection_payload),
+                    headers=self._headers(connection_payload),
+                    json=payload,
+                )
                 response.raise_for_status()
                 data = response.json()
         except httpx.HTTPStatusError as exc:
@@ -1503,6 +1911,32 @@ class WindowsPyAutoGUIBridge(BaseBridge):
                 message=f"Windows PyAutoGUI bridge returned HTTP {exc.response.status_code}.",
                 step_trace=[{"step": "CONNECT", "status": "blocked", "detail": str(exc.response.status_code)}],
             )
+        except httpx.ReadTimeout as exc:
+            if path == "/execute":
+                result = self._failure(
+                    tool=tool,
+                    mode="live",
+                    status="effect_unknown",
+                    failure_code="PYAUTOGUI_EFFECT_UNKNOWN",
+                    message="Windows worker did not confirm the result after execution was dispatched; do not retry automatically.",
+                    step_trace=[{"step": "EXECUTE_RESPONSE", "status": "effect_unknown", "detail": exc.__class__.__name__}],
+                )
+                result.update(
+                    {
+                        "attempted": True,
+                        "retryable": False,
+                        "operator_intervention_required": True,
+                    }
+                )
+                return result
+            return self._failure(
+                tool=tool,
+                mode="live",
+                status="unreachable",
+                failure_code="PYAUTOGUI_BRIDGE_UNREACHABLE",
+                message=f"Windows PyAutoGUI bridge response timed out: {exc.__class__.__name__}",
+                step_trace=[{"step": "CONNECT", "status": "failed", "detail": exc.__class__.__name__}],
+            )
         except Exception as exc:
             return self._failure(
                 tool=tool,
@@ -1512,7 +1946,12 @@ class WindowsPyAutoGUIBridge(BaseBridge):
                 message=f"Windows PyAutoGUI bridge unreachable: {exc.__class__.__name__}",
                 step_trace=[{"step": "CONNECT", "status": "failed", "detail": exc.__class__.__name__}],
             )
-        normalized = self._normalize_live_response(tool, data, latency_ms=(time.perf_counter() - started) * 1000.0)
+        normalized = self._normalize_live_response(
+            tool,
+            data,
+            latency_ms=(time.perf_counter() - started) * 1000.0,
+            connection_payload=connection_payload,
+        )
         if normalized.get("output_artifacts"):
             normalized = self._pull_live_artifacts(normalized)
         return normalized
@@ -1774,7 +2213,14 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         response["artifact_pull"] = ledger
         return response
 
-    def _normalize_live_response(self, tool: str, data: Any, *, latency_ms: float | None = None) -> dict[str, Any]:
+    def _normalize_live_response(
+        self,
+        tool: str,
+        data: Any,
+        *,
+        latency_ms: float | None = None,
+        connection_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         response = dict(data) if isinstance(data, dict) else {"raw_response": data}
         response.setdefault("ok", bool(response.get("status") in {"ready", "captured", "completed", "verified_complete", "data_ready", "exported_on_windows"}))
         response.setdefault("tool", tool)
@@ -1782,7 +2228,7 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         response.setdefault("bridge", "windows_pyautogui")
         response.setdefault("step_trace", [])
         response.setdefault("failure_code", None if response.get("ok") else "PYAUTOGUI_BRIDGE_ERROR")
-        bridge_url = self._bridge_url()
+        bridge_url = self._bridge_url(connection_payload)
         response.setdefault("bridge_url", bridge_url)
         response.setdefault("bridge_host", self._bridge_host(bridge_url))
         if latency_ms is not None:
@@ -1797,16 +2243,19 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         except Exception:
             return ""
 
-    def _bridge_url(self) -> str:
+    def _bridge_url(self, payload: dict[str, Any] | None = None) -> str:
+        memory = self.load_connection_memory()
+        requested = self._requested_candidate_id(payload)
+        _, selected = self._candidate_for_payload(memory, payload)
+        if requested:
+            return str(selected.get("bridge_url") or "").strip().rstrip("/")
         env_url = os.getenv(self.config.bridge_url_env, "").strip().rstrip("/")
         if env_url:
             return env_url
-        memory = self.load_connection_memory()
-        _, selected = self._selected_candidate(memory)
         return str(selected.get("bridge_url") or memory.get("bridge_url", "")).strip().rstrip("/")
 
-    def _url(self, path: str) -> str:
-        return urljoin(self._bridge_url() + "/", path.lstrip("/"))
+    def _url(self, path: str, payload: dict[str, Any] | None = None) -> str:
+        return urljoin(self._bridge_url(payload) + "/", path.lstrip("/"))
 
     def proxy_ui_request(
         self,
@@ -1875,20 +2324,59 @@ class WindowsPyAutoGUIBridge(BaseBridge):
             ).encode("utf-8"),
         }
 
-    def _headers(self) -> dict[str, str]:
-        token = self._token()
+    def _headers(self, payload: dict[str, Any] | None = None) -> dict[str, str]:
+        token = self._token(payload)
         headers = {"Accept": "application/json"}
         if token:
             headers[self.config.token_header] = token
         return headers
 
-    def _token(self) -> str:
-        env_token = os.getenv(self.config.token_env, "").strip() if self.config.token_env else ""
-        if env_token:
-            return env_token
+    def _token(self, payload: dict[str, Any] | None = None) -> str:
         memory = self.load_connection_memory()
-        _, selected = self._selected_candidate(memory)
-        return str(selected.get("token") or memory.get("token", "")).strip()
+        requested = self._requested_candidate_id(payload)
+        _, selected = self._candidate_for_payload(memory, payload)
+        paired_key = str(
+            selected.get("internal_key")
+            or selected.get("token")
+            or memory.get("internal_key")
+            or memory.get("token")
+            or ""
+        ).strip()
+        if paired_key:
+            return paired_key
+        if requested:
+            return ""
+        return os.getenv(self.config.token_env, "").strip() if self.config.token_env else ""
+
+    @staticmethod
+    def _validate_private_bridge_url(raw_url: str) -> tuple[str, tuple[str, str] | None]:
+        parsed = urlparse(str(raw_url or "").strip())
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or parsed.path not in {"", "/"}
+        ):
+            return "", (
+                "PYAUTOGUI_BRIDGE_URL_INVALID",
+                "Bridge URL must be an HTTP(S) origin without credentials, path, query, or fragment.",
+            )
+        try:
+            addresses = {
+                ipaddress.ip_address(item[4][0])
+                for item in socket.getaddrinfo(parsed.hostname, parsed.port or None, type=socket.SOCK_STREAM)
+            }
+        except (ValueError, OSError, socket.gaierror):
+            return "", ("PYAUTOGUI_BRIDGE_URL_NOT_PRIVATE", "Bridge host must resolve to a local or private address.")
+        if not addresses or any(not (item.is_private or item.is_loopback or item.is_link_local) for item in addresses):
+            return "", ("PYAUTOGUI_BRIDGE_URL_NOT_PRIVATE", "Bridge host must resolve only to local or private addresses.")
+        origin = f"{parsed.scheme}://{parsed.hostname}"
+        if parsed.port is not None:
+            origin += f":{parsed.port}"
+        return origin, None
 
     def load_connection_memory(self) -> dict[str, Any]:
         """Read persisted bridge selection, returning empty dict when absent/invalid."""
@@ -1941,6 +2429,31 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         # Legacy flat memory format.
         if memory.get("bridge_url"):
             return str(memory.get("candidate_alias") or memory.get("name") or "default"), dict(memory)
+        return "", {}
+
+    @staticmethod
+    def _requested_candidate_id(payload: dict[str, Any] | None) -> str:
+        source = payload if isinstance(payload, dict) else {}
+        return str(source.get("bridge_id") or source.get("candidate_alias") or "").strip()
+
+    @classmethod
+    def _candidate_for_payload(
+        cls, memory: dict[str, Any], payload: dict[str, Any] | None
+    ) -> tuple[str, dict[str, Any]]:
+        requested = cls._requested_candidate_id(payload)
+        if not requested:
+            return cls._selected_candidate(memory)
+        candidates = cls._candidate_map(memory)
+        direct = candidates.get(requested)
+        if isinstance(direct, dict):
+            return requested, dict(direct)
+        for alias, candidate in candidates.items():
+            identities = {
+                str(candidate.get(key) or "").strip()
+                for key in ("bridge_id", "candidate_id", "candidate_alias", "name")
+            }
+            if requested in identities:
+                return str(alias), dict(candidate)
         return "", {}
 
     def _runtime_program_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -2078,7 +2591,7 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         status: str,
         failure_code: str,
         message: str,
-        step_trace: list[dict[str, Any]],
+        step_trace: list[dict[str, Any]] | None = None,
         mode: str = "simulator",
         program_id: str = "",
         sequence_id: str = "",
@@ -2093,7 +2606,7 @@ class WindowsPyAutoGUIBridge(BaseBridge):
             "status": status,
             "failure_code": failure_code,
             "message": message,
-            "step_trace": step_trace,
+            "step_trace": step_trace or [],
         }
         if program_id:
             response["program_id"] = program_id
@@ -2158,25 +2671,11 @@ async def discover_windows_pyautogui_bridges(
     timeout_sec: float | None = None,
     max_hosts: int = 256,
 ) -> dict[str, Any]:
-    """Scan the current LAN for bridge hosts answering /health."""
-    header_token = token.strip()
-    if not header_token:
-        return {
-            "ok": False,
-            "tool": "equipment.pyautogui.discover",
-            "status": "token_required",
-            "failure_code": "PYAUTOGUI_TOKEN_REQUIRED",
-            "message": "Enter the Windows bridge token before scanning. Hosts are listed only when the token matches.",
-            "subnet": subnet,
-            "port": int(port or config.discovery_port),
-            "scanned": 0,
-            "candidates": [],
-        }
+    """Scan the current LAN through the public, non-actuating discovery contract."""
     scan_port = int(port or config.discovery_port)
     timeout = float(timeout_sec or config.discovery_timeout_sec)
     targets = local_ipv4_scan_targets(port=scan_port, subnet=subnet, max_hosts=max_hosts)
     headers = {"Accept": "application/json"}
-    headers[config.token_header] = header_token
 
     semaphore = asyncio.Semaphore(48)
 
@@ -2185,9 +2684,7 @@ async def discover_windows_pyautogui_bridges(
         async with semaphore:
             try:
                 async with httpx.AsyncClient(timeout=timeout) as client:
-                    response = await client.get(f"{url}/health", headers=headers)
-                if response.status_code in {401, 403}:
-                    return None
+                    response = await client.get(f"{url}/discovery", headers=headers)
                 if response.status_code != 200:
                     return None
                 data = response.json()
@@ -2196,27 +2693,19 @@ async def discover_windows_pyautogui_bridges(
                 bridge_name = str(data.get("bridge", "windows_pyautogui"))
                 if bridge_name and "pyautogui" not in bridge_name.lower():
                     return None
-                auth = data.get("auth") if isinstance(data.get("auth"), dict) else {}
-                token_verified = bool(auth.get("token_required")) and bool(auth.get("authenticated"))
-                if not token_verified and str(data.get("token_auth", "")).strip().lower() == "enabled":
-                    token_verified = True
-                if not token_verified:
-                    try:
-                        async with httpx.AsyncClient(timeout=timeout) as client:
-                            no_token = await client.get(f"{url}/health", headers={"Accept": "application/json"})
-                        token_verified = no_token.status_code in {401, 403}
-                    except Exception:
-                        token_verified = False
-                if not token_verified:
-                    # Do not list no-token bridge servers.
-                    return None
+                pairing = data.get("pairing") if isinstance(data.get("pairing"), dict) else {}
+                paired = bool(pairing.get("paired"))
                 return {
                     **target,
                     "ok": bool(data.get("ok", True)),
                     "reachable": True,
-                    "auth_required": False,
-                    "token_verified": True,
+                    "auth_required": paired,
+                    "token_verified": False,
+                    "pairing_required": not paired,
                     "status": str(data.get("status", "ready")),
+                    "server_version": str(data.get("server_version") or ""),
+                    "hostname": str(data.get("hostname") or ""),
+                    "platform": str(data.get("platform") or "windows"),
                     "screen": data.get("screen"),
                     "pyautogui": data.get("pyautogui", {}),
                     "raw": data,

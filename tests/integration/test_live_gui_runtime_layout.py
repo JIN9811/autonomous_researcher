@@ -15,6 +15,40 @@ from app.main import app, controller, _package_runtime_event
 TINY_PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"atr-test-screen-evidence"
 
 
+def test_skill_workflow_editor_preserves_step_rows_inside_scroll_viewport() -> None:
+    css = TestClient(app).get("/static/styles.css").text
+
+    step_list_rule = css.split(".skill-workflow-step-list {", 1)[1].split("}", 1)[0]
+    step_card_rule = css.split(".skill-workflow-step-card {", 1)[1].split("}", 1)[0]
+    assert "grid-auto-rows: max-content" in step_list_rule
+    assert "overflow-y: auto" in step_list_rule
+    assert "min-height: 54px" in step_card_rule
+
+
+def test_skill_workflow_editor_exposes_manual_target_crop_controls() -> None:
+    client = TestClient(app)
+    template = Path("web/templates/equipment_skill_workflow_editor.html").read_text(encoding="utf-8")
+    script = client.get("/static/equipment_skill_workflow_editor.js").text
+
+    for element_id in (
+        "workflow-crop-dialog",
+        "workflow-crop-source",
+        "workflow-crop-box",
+        "workflow-crop-preview",
+        "workflow-crop-reset",
+        "workflow-crop-apply",
+        "workflow-crop-cancel",
+    ):
+        assert f'id="{element_id}"' in template
+    assert "Edit Crop" in script
+    assert "/locator-source" in script
+    assert '"locator_origin"' in script
+    assert '"manual_crop"' in script
+    assert '"ai_target_bbox_norm"' in script
+    assert 'crop_origin' in script
+    assert 'confidence: 0.65' in script
+
+
 def test_completed_test_run_keeps_its_final_live_gui_snapshot() -> None:
     client = TestClient(app)
 
@@ -76,6 +110,97 @@ def test_windows_equipment_page_exposes_common_profile_workspace() -> None:
     assert "selectedEquipmentProfileId" in script
 
 
+def test_windows_equipment_page_uses_general_lab_equipment_bridge_structure() -> None:
+    client = TestClient(app)
+
+    response = client.get("/equipment/windows")
+
+    assert response.status_code == 200
+    html = response.text
+    for element_id in (
+        "equipment-runtime-overview",
+        "equipment-connection-workspace",
+        "equipment-skill-recording",
+        "equipment-skill-management",
+        "equipment-main-progress",
+        "equipment-vision-link",
+        "equipment-error-recovery",
+        "equipment-evidence-workspace",
+        "equipment-agentic-progress",
+        "equipment-agentic-progress-stages",
+        "equipment-skill-list",
+        "equipment-selected-skill",
+        "btn-equipment-skill-workflow-editor",
+        "equipment-worker-recordings",
+        "btn-equipment-refresh-recordings",
+        "equipment-vision-link-enabled",
+    ):
+        assert f'id="{element_id}"' in html
+    for text in (
+        "Skill Recording",
+        "Skill Management",
+        "Main Progress",
+        "Vision Link",
+        "Error Recovery",
+        "Evidence &amp; Data Transfer",
+    ):
+        assert text in html
+    assert "4. Test Selected Bridge" not in html
+    assert "UTM Proof Gates" not in html
+
+    script = client.get("/static/windows_equipment.js").text
+    for endpoint in (
+        "/api/equipment/runtime/current",
+        "/api/equipment/skills",
+        "/api/equipment/recordings/",
+        "/api/equipment/workers/",
+        "/recordings",
+        "/import-skill",
+    ):
+        assert endpoint in script
+    assert "renderEquipmentRuntimeOverview" in script
+    assert "renderEquipmentSkills" in script
+    assert "renderEquipmentAgenticProgress" in script
+    assert 'btnImportRecording.addEventListener("click", importEquipmentRecording)' in script
+    assert 'btnRefreshRecordings.addEventListener("click", refreshWorkerRecordings)' in script
+    assert 'btnSkillRefresh.addEventListener("click", refreshEquipmentSkills)' in script
+    assert 'id="btn-equipment-skill-compile"' not in html
+    assert 'id="btn-equipment-skill-validate"' not in html
+    assert "function openSelectedSkillWorkflowEditor()" in script
+    assert 'window.open(url, `atr-skill-${skillId}-${version}`' in script
+    assert 'id="equipment-recording-id"' not in html
+    assert 'let selectedRecordingId = "";' in script
+    assert "function escapeHtml(value)" in script
+    assert "equipment-skill-row equipment-skill-item" in script
+    assert 'const recordingId = String(selectedRecordingId || "").trim();' in script
+    assert "refreshWorkerRecordings({ silent: true })" in script
+    assert "RECORDING_LIST_REFRESH_MS" in script
+    assert 'id="equipment-skill-authoring-progress"' in html
+    assert 'id="equipment-skill-authoring-progress-bar"' in html
+    assert 'id="equipment-skill-authoring-status"' in html
+    assert 'id="btn-equipment-stop-skill-authoring"' in html
+    assert 'id="equipment-skill-storyboard-preview"' in html
+    assert 'id="equipment-skill-storyboard-image"' in html
+    assert 'id="btn-equipment-skill-storyboard-previous"' in html
+    assert 'id="btn-equipment-skill-storyboard-next"' in html
+    assert 'id="btn-equipment-skill-annotate"' not in html
+    assert 'id="equipment-skill-deployment-progress"' in html
+    assert 'id="equipment-skill-deployment-progress-bar"' in html
+    assert 'id="btn-equipment-stop-skill-deployment"' in html
+    assert "/import-skill/start" in script
+    assert "/api/equipment/skill-authoring/jobs/" in script
+    assert "/storyboards?cursor=" in script
+    assert "renderSkillStoryboardPage" in script
+    assert 'selectedSkillPath("deploy/start")' in script
+    assert "/api/equipment/skill-deployment/jobs/" in script
+    assert "/stop" in script
+    assert "btnImportRecording.disabled = !selectedRecordingId || Boolean(activeSkillAuthoringJobId);" in script
+    assert "runEquipmentSkillAction" not in script
+    assert "COMPILING" in Path("app/main.py").read_text(encoding="utf-8")
+    assert "VALIDATING" in Path("app/main.py").read_text(encoding="utf-8")
+    assert "refreshEquipmentSkills()" in script.split("Promise.all", 1)[-1]
+
+
 def test_windows_equipment_opens_the_saved_windows_bridge_console_in_a_separate_window() -> None:
     client = TestClient(app)
 
@@ -83,9 +208,26 @@ def test_windows_equipment_opens_the_saved_windows_bridge_console_in_a_separate_
 
     assert response.status_code == 200
     assert 'id="btn-equipment-open-bridge-gui"' in response.text
+    assert response.text.count("Open Windows GUI") == 1
+    assert 'data-equipment-proxy="btn-equipment-open-bridge-gui"' not in response.text
+    assert 'id="equipment-saved-candidates" class="equipment-candidates equipment-saved-candidates-scroll"' in response.text
     assert 'id="equipment-bridge-console-frame"' not in response.text
     script = client.get("/static/windows_equipment.js").text
     assert 'window.open("/equipment/windows/console", "_blank", "noopener,noreferrer")' in script
+
+
+def test_windows_equipment_saved_workers_expose_bounded_update_controls() -> None:
+    client = TestClient(app)
+
+    script = client.get("/static/windows_equipment.js").text
+
+    for label in ("Check Update", "Update", "Rollback"):
+        assert label in script
+    assert "/api/equipment/windows/workers/${encodeURIComponent(candidateAlias)}/update" in script
+    assert "/api/equipment/windows/workers/${encodeURIComponent(candidateAlias)}/rollback" in script
+    assert 'data-action="check-update"' in script
+    assert 'data-action="apply-update"' in script
+    assert 'data-action="rollback-update"' in script
 
 
 def test_windows_equipment_console_renders_locally_without_contacting_selected_bridge(monkeypatch) -> None:
@@ -113,7 +255,9 @@ def test_windows_equipment_keeps_bridge_controls_in_the_primary_dashboard() -> N
 
     assert response.status_code == 200
     html = response.text
-    assert 'class="equipment-workspace-actions"' in html
+    assert 'class="equipment-workspace-actions"' not in html
+    assert html.count('id="btn-equipment-open-bridge-gui"') == 1
+    assert html.index('id="equipment-connection-workspace"') < html.index('id="btn-equipment-open-bridge-gui"')
     assert 'id="equipment-inline-controls"' in html
     assert 'id="equipment-advanced-controls"' not in html
     assert "Advanced Bridge Setup &amp; Audit" not in html
@@ -220,15 +364,99 @@ def test_common_equipment_profile_test_generates_simulated_analysis_ready_eviden
 
     response = client.post(
         "/api/equipment/profiles/utm_windows_v1/test",
-        json={"confirm_execute": True},
+        json={"confirm_execute": True, "vision_link_enabled": True},
     )
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["ok"] is True
     assert payload["profile"]["simulate_utm_protocol"] is True
+    assert payload["vision_link_request"] == {
+        "requested": True,
+        "profile_enabled": True,
+        "required": False,
+        "effective": True,
+    }
     assert payload["analysis_handoff"]["status"] == "ready"
     assert all(payload["evidence"][key] for key in ("screenshot", "request_log", "csv"))
+
+
+def test_equipment_profile_preflight_preserves_frontend_vision_link_selection() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/equipment/profiles/utm_windows_v1/preflight",
+        json={"vision_link_enabled": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["vision_link_request"] == {
+        "requested": True,
+        "profile_enabled": True,
+        "required": False,
+        "effective": True,
+    }
+
+
+def test_equipment_profile_vision_link_selection_persists_per_profile(tmp_path: Path, monkeypatch) -> None:
+    settings_path = tmp_path / "equipment_workspace_settings.json"
+    monkeypatch.setattr("app.main.EQUIPMENT_WORKSPACE_SETTINGS_PATH", settings_path)
+    client = TestClient(app)
+
+    disabled = client.post(
+        "/api/equipment/profiles/utm_windows_v1/settings",
+        json={"vision_link_enabled": False},
+    )
+    reloaded = client.get("/api/equipment/profiles/utm_windows_v1/state")
+
+    assert disabled.status_code == 200
+    assert disabled.json()["workspace_settings"] == {
+        "vision_link_enabled": False,
+        "vision_link_source": "stored",
+    }
+    assert reloaded.status_code == 200
+    assert reloaded.json()["workspace_settings"] == {
+        "vision_link_enabled": False,
+        "vision_link_source": "stored",
+    }
+    assert json.loads(settings_path.read_text(encoding="utf-8"))["profiles"]["utm_windows_v1"] == {
+        "vision_link_enabled": False,
+    }
+
+
+def test_equipment_profile_preflight_uses_persisted_vision_link_selection(tmp_path: Path, monkeypatch) -> None:
+    settings_path = tmp_path / "equipment_workspace_settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "schema": "atr.equipment_workspace_settings.v1",
+                "profiles": {"utm_windows_v1": {"vision_link_enabled": False}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("app.main.EQUIPMENT_WORKSPACE_SETTINGS_PATH", settings_path)
+    client = TestClient(app)
+
+    response = client.post("/api/equipment/profiles/utm_windows_v1/preflight", json={})
+
+    assert response.status_code == 200
+    assert response.json()["vision_link_request"] == {
+        "requested": False,
+        "profile_enabled": True,
+        "required": False,
+        "effective": False,
+    }
+
+
+def test_windows_equipment_vision_link_checkbox_auto_saves_selection() -> None:
+    client = TestClient(app)
+
+    script = client.get("/static/windows_equipment.js").text
+
+    assert 'visionLinkEnabled.addEventListener("change", saveEquipmentVisionLinkSelection)' in script
+    assert "/settings" in script
+    assert "workspace_settings.vision_link_enabled" in script
 
 
 def test_live_gui_runtime_shell_contains_operational_panels() -> None:
@@ -1802,6 +2030,148 @@ def test_live_gui_equipment_actions_are_passive_and_reuse_existing_routes() -> N
     assert "/execute" not in script[action_start:action_end]
 
 
+def test_live_gui_equipment_progress_uses_canonical_runtime_projection() -> None:
+    client = TestClient(app)
+
+    script = client.get("/static/planning.js").text
+
+    assert '"/api/equipment/runtime/current"' in script
+    assert "run_id=${encodeURIComponent(activeRunId)}" in script
+    assert "canonicalExecution" in script
+    assert "canonicalProjection" in script
+    assert "equipmentCanonicalProgressSteps" in script
+    progress_start = script.index("function equipmentProgressSteps(")
+    progress_end = script.index("function renderEquipmentAgenticProgress", progress_start)
+    assert "equipmentCanonicalProgressSteps" in script[progress_start:progress_end]
+
+
+def test_equipment_runtime_projection_is_shared_by_state_workspace_and_runtime_ide(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    import app.main as main_module
+    from utils.equipment_runtime_service import EquipmentRuntimeService
+
+    runtime_root = tmp_path / "equipment_runtime"
+    monkeypatch.setattr(main_module, "EQUIPMENT_RUNTIME_ROOT", runtime_root)
+    runtime = EquipmentRuntimeService(runtime_root).begin(
+        sequence_id="projection-sequence",
+        run_id="projection-run",
+        experiment_id="projection-experiment",
+        specimen_id="projection-specimen",
+        profile_id="windows_desktop_v1",
+        mode="test",
+        worker={"worker_id": "local-bridge", "kind": "windows_pyautogui"},
+        execution_ref={"type": "program", "program_id": "program1"},
+        metadata={"agentic_progress": "TRANSFERRING"},
+    )
+    monkeypatch.setattr(
+        main_module.controller,
+        "snapshot",
+        lambda: {"state": {"run_id": "projection-run"}},
+    )
+    client = TestClient(app)
+
+    current = client.get("/api/equipment/runtime/current").json()
+    state = client.get("/api/state").json()
+    workspace_script = client.get("/static/windows_equipment.js").text
+    ide_script = client.get("/static/runtime_ide.js").text
+
+    assert state["equipment_runtime"]["execution"]["execution_id"] == runtime["execution_id"]
+    assert state["equipment_runtime"]["projection"] == current["projection"]
+    assert '"/api/equipment/runtime/current"' in workspace_script
+    assert "equipmentRuntime" in ide_script
+    assert "execution_id" in ide_script
+
+
+def test_runtime_state_scopes_equipment_projection_to_controller_run(tmp_path: Path, monkeypatch) -> None:
+    import app.main as main_module
+    from utils.equipment_runtime_service import EquipmentRuntimeService
+
+    runtime_root = tmp_path / "equipment_runtime"
+    monkeypatch.setattr(main_module, "EQUIPMENT_RUNTIME_ROOT", runtime_root)
+    service = EquipmentRuntimeService(runtime_root)
+    active = service.begin(
+        sequence_id="active-sequence",
+        run_id="active-run",
+        experiment_id="active-experiment",
+        specimen_id="active-specimen",
+        profile_id="windows_desktop_v1",
+        mode="test",
+        worker={"worker_id": "active-worker", "kind": "windows_pyautogui"},
+        execution_ref={"type": "program", "program_id": "program1"},
+    )
+    service.begin(
+        sequence_id="newer-other-sequence",
+        run_id="other-run",
+        experiment_id="other-experiment",
+        specimen_id="other-specimen",
+        profile_id="windows_desktop_v1",
+        mode="test",
+        worker={"worker_id": "other-worker", "kind": "windows_pyautogui"},
+        execution_ref={"type": "program", "program_id": "program1"},
+    )
+    monkeypatch.setattr(main_module.controller, "snapshot", lambda: {"state": {"run_id": "active-run"}})
+
+    state = TestClient(app).get("/api/state").json()
+
+    assert state["equipment_runtime"]["execution"]["execution_id"] == active["execution_id"]
+
+
+def test_windows_equipment_workspace_uses_four_digit_pairing_instead_of_token_entry() -> None:
+    root = Path(__file__).resolve().parents[2]
+    template = (root / "web" / "templates" / "windows_equipment.html").read_text(encoding="utf-8")
+    script = (root / "web" / "static" / "windows_equipment.js").read_text(encoding="utf-8")
+    app_source = (root / "app" / "main.py").read_text(encoding="utf-8")
+
+    discover_section = template[template.index("<h3>Discover Worker</h3>"):template.index("<h3>Candidates</h3>")]
+    assert "Pairing Code" not in discover_section
+    assert 'class="text-input equipment-pairing-code-input"' in script
+    assert 'inputmode="numeric"' in script
+    assert 'maxlength="4"' in script
+    assert 'id="equipment-token-input"' not in template
+    assert "/api/equipment/windows/pair" in script
+    assert "pairing_code" in script
+    assert '@app.post("/api/equipment/windows/pair")' in app_source
+
+
+def test_live_gui_skill_authoring_progress_uses_runtime_metadata_not_lifecycle_aliases() -> None:
+    client = TestClient(app)
+    script = client.get("/static/planning.js").text
+
+    start = script.index("function equipmentCanonicalProgressSteps")
+    end = script.index("function equipmentBridgeState", start)
+    progress_source = script[start:end]
+
+    assert "agentic_progress" in progress_source
+    for state in (
+        "RECORDING",
+        "TRANSFERRING",
+        "ANNOTATING",
+        "BUILDING_SKILL",
+        "VALIDATING",
+        "AWAITING_APPROVAL",
+        "DEPLOYING",
+        "READY",
+        "FAILED",
+    ):
+        assert state in progress_source
+
+
+def test_live_gui_equipment_runtime_progress_uses_backend_lifecycle_contract() -> None:
+    client = TestClient(app)
+    script = client.get("/static/planning.js").text
+    start = script.index("function equipmentCanonicalProgressSteps")
+    end = script.index("function equipmentBridgeState", start)
+    progress_source = script[start:end]
+
+    assert "execution.lifecycle_contract" in progress_source
+    assert 'label: "Resolve"' not in progress_source
+    assert 'label: "Preflight"' not in progress_source
+    assert 'label: "Execute"' not in progress_source
+    assert 'label: "Verify"' not in progress_source
+
+
 def test_windows_equipment_gui_exposes_utm_calibration_controls() -> None:
     client = TestClient(app)
     response = client.get("/equipment/windows")
@@ -1899,18 +2269,9 @@ def test_windows_equipment_gui_exposes_utm_calibration_controls() -> None:
         "btn-equipment-abort",
     ]:
         assert f'id="{element_id}"' in html
-    for proxy_target in [
-        "btn-equipment-scan",
-        "btn-equipment-readiness",
-        "btn-equipment-live-preflight",
-        "btn-equipment-live-validation",
-        "btn-equipment-utm",
-        "btn-equipment-evidence-audit",
-        "btn-equipment-abort",
-    ]:
-        assert f'data-equipment-proxy="{proxy_target}"' in html
+    assert 'data-equipment-proxy="btn-equipment-open-bridge-gui"' not in html
     for label in [
-        "UTM Proof Gates",
+        "Evidence &amp; Data Transfer",
     ]:
         assert label in html
     script = client.get("/static/windows_equipment.js").text

@@ -20,6 +20,11 @@ from orchestrator.state import Mode, OrchestratorState, Stage
 from utils.equipment_skill_runtime import EquipmentSkillRegistry, canonical_sha256
 
 
+@pytest.fixture(autouse=True)
+def _isolated_equipment_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(LabEquipmentAgent, "_RUNTIME_ROOT", tmp_path / "equipment_runtime")
+
+
 class _CtxStub:
     def __init__(self, tools: ToolRegistry, response_text: str) -> None:
         self.tools = tools
@@ -89,6 +94,23 @@ def _saved_recording() -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
+async def test_equipment_agent_does_not_silently_fallback_to_direct_utm() -> None:
+    tools = ToolRegistry()
+    direct_calls: list[dict[str, Any]] = []
+    tools.register(
+        "utm.run_protocol",
+        lambda payload: direct_calls.append(dict(payload)) or {"ok": True, "status": "completed"},
+    )
+    ctx = _CtxStub(tools, "{}")
+
+    result = await LabEquipmentAgent().run(_state(), ctx)
+
+    assert result.success is False
+    assert result.data["equipment_handoff"]["failure_code"] == "EQUIPMENT_WORKER_UNAVAILABLE"
+    assert direct_calls == []
+
+
+@pytest.mark.asyncio
 async def test_equipment_skill_executes_segments_without_llm_call(tmp_path: Path) -> None:
     tools = _tools(tmp_path)
     registry = EquipmentSkillRegistry(tmp_path / "skills")
@@ -96,7 +118,7 @@ async def test_equipment_skill_executes_segments_without_llm_call(tmp_path: Path
         recording=_saved_recording(),
         skill_id="program1_skill",
         version="1.0.0",
-        target_profile="local_program1",
+        target_profile="windows_desktop_v1",
         model_snapshot={"provider": "vllm", "model": "gemma4:e4b-it-nvfp4"},
     )
     package = registry.compile("program1_skill", "1.0.0")
@@ -109,13 +131,19 @@ async def test_equipment_skill_executes_segments_without_llm_call(tmp_path: Path
         bridge_id="simulator",
         deployment_sha256=canonical_sha256(package["programs"]),
     )
+    run_payloads: list[dict[str, Any]] = []
+    original_run = tools._tools["equipment.pyautogui.run"]
+    tools.register(
+        "equipment.pyautogui.run",
+        lambda payload: run_payloads.append(dict(payload)) or original_run(payload),
+    )
     ctx = _CtxStub(tools, "must not be used")
     state = _state(
         experiment_spec={
             "equipment_skill": {
                 "skill_id": "program1_skill",
                 "version": "1.0.0",
-                "target_profile": "local_program1",
+                "target_profile": "windows_desktop_v1",
                 "registry_root": str(tmp_path / "skills"),
             }
         }
@@ -126,7 +154,99 @@ async def test_equipment_skill_executes_segments_without_llm_call(tmp_path: Path
     assert result.success is True
     assert result.data["equipment_skill_execution"]["state"] == "COMPLETED"
     assert result.data["equipment_handoff"]["status"] == "ready_for_analysis"
+    assert result.data["equipment_skill_execution"]["runtime_execution"]["lifecycle"] == "COMPLETED"
+    assert run_payloads and all(item["bridge_id"] == "simulator" for item in run_payloads)
     assert ctx.prompts == []
+
+
+@pytest.mark.asyncio
+async def test_live_equipment_skill_blocks_before_worker_when_profile_vision_preflight_fails(
+    tmp_path: Path,
+) -> None:
+    tools = _tools(tmp_path)
+    registry = EquipmentSkillRegistry(tmp_path / "skills")
+    registry.create_draft(
+        recording=_saved_recording(),
+        skill_id="utm_skill",
+        version="1.0.0",
+        target_profile="utm_windows_v1",
+        model_snapshot={"provider": "vllm", "model": "gemma4:e4b-it-nvfp4"},
+    )
+    package = registry.compile("utm_skill", "1.0.0")
+    registry.validate("utm_skill", "1.0.0")
+    for program in package["programs"]:
+        assert tools.call("equipment.pyautogui.register_program", {"runtime_mode": "test", "program": program})["ok"]
+    registry.mark_deployed(
+        "utm_skill",
+        "1.0.0",
+        bridge_id="simulator",
+        deployment_sha256=canonical_sha256(package["programs"]),
+    )
+    run_calls: list[dict[str, Any]] = []
+    tools.register(
+        "equipment.pyautogui.run",
+        lambda payload: run_calls.append(dict(payload)) or {"ok": True, "status": "completed"},
+    )
+    state = _state(
+        mode=Mode.LIVE,
+        experiment_spec={
+            "equipment_skill": {
+                "skill_id": "utm_skill",
+                "version": "1.0.0",
+                "target_profile": "utm_windows_v1",
+                "registry_root": str(tmp_path / "skills"),
+            }
+        },
+    )
+
+    result = await LabEquipmentAgent().run(state, _CtxStub(tools, "must not be used"))
+
+    assert result.success is False
+    assert result.data["equipment_handoff"]["failure_code"] == "VISION_EQUIPMENT_CROSS_CHECK_REQUIRED"
+    assert result.data["equipment_skill_execution"]["runtime_execution"]["lifecycle"] == "BLOCKED"
+    assert run_calls == []
+
+
+@pytest.mark.asyncio
+async def test_equipment_skill_rejects_unknown_profile_before_worker(tmp_path: Path) -> None:
+    tools = _tools(tmp_path)
+    registry = EquipmentSkillRegistry(tmp_path / "skills")
+    registry.create_draft(
+        recording=_saved_recording(),
+        skill_id="unknown_profile_skill",
+        version="1.0.0",
+        target_profile="profile_typo",
+        model_snapshot={"provider": "vllm", "model": "gemma4:e4b-it-nvfp4"},
+    )
+    package = registry.compile("unknown_profile_skill", "1.0.0")
+    registry.validate("unknown_profile_skill", "1.0.0")
+    registry.mark_deployed(
+        "unknown_profile_skill",
+        "1.0.0",
+        bridge_id="simulator",
+        deployment_sha256=canonical_sha256(package["programs"]),
+    )
+    run_calls: list[dict[str, Any]] = []
+    tools.register(
+        "equipment.pyautogui.run",
+        lambda payload: run_calls.append(dict(payload)) or {"ok": True, "status": "completed"},
+    )
+    state = _state(
+        experiment_spec={
+            "equipment_skill": {
+                "skill_id": "unknown_profile_skill",
+                "version": "1.0.0",
+                "target_profile": "profile_typo",
+                "registry_root": str(tmp_path / "skills"),
+            }
+        }
+    )
+
+    result = await LabEquipmentAgent().run(state, _CtxStub(tools, "must not be used"))
+
+    assert result.success is False
+    assert result.data["equipment_handoff"]["failure_code"] == "SKILL_CONTRACT_INVALID"
+    assert run_calls == []
 
 
 @pytest.mark.asyncio
@@ -137,7 +257,7 @@ async def test_equipment_skill_uses_one_exact_model_recovery_then_resumes(tmp_pa
         recording=_saved_recording(),
         skill_id="program1_skill",
         version="1.0.0",
-        target_profile="local_program1",
+        target_profile="windows_desktop_v1",
         model_snapshot={"provider": "vllm", "model": "gemma4:e4b-it-nvfp4"},
     )
     package = registry.compile("program1_skill", "1.0.0")
@@ -196,7 +316,7 @@ async def test_equipment_skill_uses_one_exact_model_recovery_then_resumes(tmp_pa
             "equipment_skill": {
                 "skill_id": "program1_skill",
                 "version": "1.0.0",
-                "target_profile": "local_program1",
+                "target_profile": "windows_desktop_v1",
                 "registry_root": str(tmp_path / "skills"),
                 "auto_recover": True,
             }
@@ -217,7 +337,7 @@ async def test_equipment_skill_uses_one_exact_model_recovery_then_resumes(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_equipment_agent_executes_llm_selected_program(tmp_path: Path) -> None:
+async def test_equipment_agent_executes_generic_profile_without_hidden_utm_or_vision_dependency(tmp_path: Path) -> None:
     plan = {
         "note": "use registered program1",
         "calls": [
@@ -226,22 +346,39 @@ async def test_equipment_agent_executes_llm_selected_program(tmp_path: Path) -> 
             {"tool": "equipment.pyautogui.run", "payload": {"program_id": "program1"}},
         ],
     }
-    ctx = _CtxStub(_tools(tmp_path), json.dumps(plan))
+    tools = _tools(tmp_path)
+    run_payloads: list[dict[str, Any]] = []
+
+    def capture_run(payload: dict[str, Any]) -> dict[str, Any]:
+        run_payloads.append(dict(payload))
+        return {
+            "ok": True,
+            "tool": "equipment.pyautogui.run",
+            "status": "completed",
+            "program_id": str(payload.get("program_id") or ""),
+            "program_log": "program1 completed",
+        }
+
+    tools.register("equipment.pyautogui.run", capture_run)
+    ctx = _CtxStub(tools, json.dumps(plan))
 
     result = await LabEquipmentAgent().run(_state(), ctx)
 
-    assert result.success is False
+    assert result.success is True
     assert result.data["equipment_bridge"] == "windows_pyautogui"
     assert result.data["equipment_result"]["program_id"] == "program1"
-    assert result.data["equipment_result"]["failure_code"] == "UTM_PROTOCOL_REQUIRED"
+    assert result.data["equipment_result"]["status"] == "verified_complete"
+    assert result.data["equipment_profile"]["profile_id"] == "windows_desktop_v1"
+    assert result.data["equipment_report"]["completion_policy"]["interpreter"] == "program_result_v1"
     assert result.data["protocol_note"] == "use registered program1"
-    assert result.data["equipment_handoff"]["status"] == "blocked"
+    assert result.data["equipment_handoff"]["status"] == "ready_for_analysis"
     assert result.data["equipment_handoff"]["program_id"] == "program1"
-    assert result.data["equipment_report"]["decision"]["handoff_status"] == "blocked"
-    assert result.data["hardware_alerts"][0]["schema"] == "hardware_alert.v1"
-    assert result.data["hardware_alerts"][0]["failure_code"] == "UTM_PROTOCOL_REQUIRED"
-    assert result.data["hardware_alerts"][0]["blocks_workflow"] is True
-    assert result.data["incident_records"][0]["schema"] == "incident_record.v1"
+    assert result.data["equipment_report"]["decision"]["handoff_status"] == "ready_for_analysis"
+    assert result.data["hardware_alerts"] == []
+    assert result.data["incident_records"] == []
+    assert [item["tool"] for item in result.data["tool_results"] if item["tool"] == "vision.equipment_cross_check"] == []
+    assert run_payloads[0]["equipment_profile"]["profile_id"] == "windows_desktop_v1"
+    assert "simulate_utm_protocol" not in run_payloads[0]
     raw_run = next(item["result"] for item in result.data["tool_results"] if item["tool"] == "equipment.pyautogui.run")
     assert raw_run["program_log"] == "program1 completed"
     assert "program1" in result.data["program_catalog"]
@@ -250,6 +387,64 @@ async def test_equipment_agent_executes_llm_selected_program(tmp_path: Path) -> 
     assert result.data["source_stage_context"]["vision"]["observation_id"] == "obs-test"
     assert result.data["source_stage_context"]["manipulation"]["completion_status"] == "reported_complete"
     assert ctx.prompts and "equipment.pyautogui.list_programs" in ctx.prompts[0][1]
+
+
+@pytest.mark.asyncio
+async def test_equipment_agent_blocks_when_selected_profile_requires_unavailable_vision_link(tmp_path: Path) -> None:
+    tools = ToolRegistry()
+    register_equipment_tools(
+        tools,
+        {
+            "devices": {
+                "equipment": {
+                    "mode": "simulator",
+                    "windows_pyautogui": {"connection_memory_path": str(tmp_path / "conn.json")},
+                }
+            }
+        },
+        repo_root=tmp_path,
+    )
+    state = _state(
+        mode=Mode.LIVE,
+        active_goal="run UTM compression test",
+        experiment_spec={
+            "equipment_profile_id": "utm_windows_v1",
+            "equipment_program_id": "utm_compression_start_v1",
+        },
+    )
+
+    result = await LabEquipmentAgent().run(state, _CtxStub(tools, "{}"))
+
+    assert result.success is False
+    assert result.data["equipment_result"]["failure_code"] == "EQUIPMENT_VISION_LINK_UNAVAILABLE"
+    assert result.data["equipment_handoff"]["status"] == "blocked"
+    assert result.data["equipment_profile"]["profile_id"] == "utm_windows_v1"
+
+
+@pytest.mark.asyncio
+async def test_equipment_agent_blocks_program_outside_explicit_profile_before_worker_execution(tmp_path: Path) -> None:
+    plan = {
+        "note": "invalid profile/program combination",
+        "calls": [
+            {"tool": "equipment.pyautogui.list_programs", "payload": {}},
+            {"tool": "equipment.pyautogui.run", "payload": {"program_id": "program1"}},
+        ],
+    }
+    tools = _tools(tmp_path)
+    run_payloads: list[dict[str, Any]] = []
+    tools.register(
+        "equipment.pyautogui.run",
+        lambda payload: run_payloads.append(dict(payload))
+        or {"ok": True, "tool": "equipment.pyautogui.run", "status": "completed", "program_id": "program1"},
+    )
+    state = _state(experiment_spec={"equipment_profile_id": "utm_windows_v1", "equipment_program_id": "program1"})
+
+    result = await LabEquipmentAgent().run(state, _CtxStub(tools, json.dumps(plan)))
+
+    assert result.success is False
+    assert result.data["equipment_result"]["failure_code"] == "EQUIPMENT_PROFILE_PROGRAM_NOT_ALLOWED"
+    assert result.data["equipment_result"]["profile_id"] == "utm_windows_v1"
+    assert run_payloads == []
 
 
 @pytest.mark.asyncio
@@ -396,12 +591,55 @@ async def test_equipment_agent_stops_before_run_when_health_fails() -> None:
 
 
 @pytest.mark.asyncio
-async def test_equipment_agent_legacy_utm_when_pyautogui_tools_missing() -> None:
+async def test_equipment_agent_preserves_effect_unknown_without_retry_or_handoff(tmp_path: Path) -> None:
+    tools = _tools(tmp_path)
+    run_calls: list[dict[str, Any]] = []
+    tools.register("equipment.pyautogui.health", lambda payload: {"ok": True, "status": "ready"})
+    tools.register(
+        "equipment.pyautogui.list_programs",
+        lambda payload: {"ok": True, "programs": [{"program_id": "program1"}]},
+    )
+
+    def uncertain_run(payload: dict[str, Any]) -> dict[str, Any]:
+        run_calls.append(dict(payload))
+        return {
+            "ok": False,
+            "tool": "equipment.pyautogui.run",
+            "status": "effect_unknown",
+            "failure_code": "PYAUTOGUI_EFFECT_UNKNOWN",
+            "attempted": True,
+            "retryable": False,
+            "message": "worker response timed out after dispatch",
+        }
+
+    tools.register("equipment.pyautogui.run", uncertain_run)
+    tools.register("equipment.pyautogui.request_log", lambda payload: {"ok": True, "events": []})
+    plan = {
+        "note": "bounded execution",
+        "calls": [
+            {"tool": "equipment.pyautogui.health", "payload": {}},
+            {"tool": "equipment.pyautogui.list_programs", "payload": {}},
+            {"tool": "equipment.pyautogui.run", "payload": {"program_id": "program1"}},
+        ],
+    }
+
+    result = await LabEquipmentAgent().run(_state(mode=Mode.LIVE), _CtxStub(tools, json.dumps(plan)))
+
+    assert result.success is False
+    assert len(run_calls) == 1
+    assert result.data["equipment_result"]["status"] == "effect_unknown"
+    assert result.data["equipment_handoff"]["status"] == "effect_unknown"
+    assert result.data["equipment_runtime_execution"]["lifecycle"] == "EFFECT_UNKNOWN"
+    assert result.data["equipment_runtime_projection"]["failure_code"] == "PYAUTOGUI_EFFECT_UNKNOWN"
+
+
+@pytest.mark.asyncio
+async def test_legacy_utm_compatibility_path_remains_explicitly_callable() -> None:
     tools = ToolRegistry()
     register_mock_tools(tools)
     ctx = _CtxStub(tools, "legacy protocol note")
 
-    result = await LabEquipmentAgent().run(_state(), ctx)
+    result = await LabEquipmentAgent()._legacy_utm(_state(), ctx)
 
     assert result.success is True
     assert result.data["equipment_bridge"] == "utm_direct"
@@ -437,7 +675,7 @@ async def test_equipment_agent_legacy_utm_includes_cited_manual_context_without_
     }
     monkeypatch.setattr(LabEquipmentAgent, "_manual_context", staticmethod(lambda _query, *, purpose: {**manual_context, "purpose": purpose}))
 
-    result = await LabEquipmentAgent().run(_state(), ctx)
+    result = await LabEquipmentAgent()._legacy_utm(_state(), ctx)
 
     assert "manual:procedure:p6" in ctx.prompts[0][1]
     assert result.data["manual_context"]["context_hash"] == "ctx-procedure"
@@ -450,7 +688,7 @@ async def test_equipment_agent_legacy_utm_live_fails_closed_without_direct_backe
     register_mock_tools(tools)
     ctx = _CtxStub(tools, "legacy live protocol note")
 
-    result = await LabEquipmentAgent().run(_state(mode=Mode.LIVE), ctx)
+    result = await LabEquipmentAgent()._legacy_utm(_state(mode=Mode.LIVE), ctx)
 
     assert result.success is False
     assert result.data["equipment_bridge"] == "utm_direct"
@@ -480,7 +718,7 @@ async def test_equipment_agent_legacy_utm_live_allows_explicit_direct_backend_wi
     state.latest_observations["equipment_vision_check_results"] = _fresh_vision_checks()
     ctx = _CtxStub(tools, "legacy direct live protocol note")
 
-    result = await LabEquipmentAgent().run(state, ctx)
+    result = await LabEquipmentAgent()._legacy_utm(state, ctx)
 
     assert result.success is True
     assert result.data["equipment_bridge"] == "utm_direct"
@@ -512,6 +750,19 @@ def _fresh_vision_checks(*, ttl_minutes: int = 5) -> list[dict[str, Any]]:
         {"check_id": "utm_motion_confirm", "ok": True, "confidence": 0.88, "run_id": "run-test", "specimen_id": "specimen-test", "timestamp": now.isoformat(), "expires_at": expires_at, "freshness_ttl_ms": ttl_minutes * 60_000, "evidence": {"frame_ids": ["frame-motion"]}},
         {"check_id": "utm_test_complete", "ok": True, "confidence": 0.86, "run_id": "run-test", "specimen_id": "specimen-test", "timestamp": now.isoformat(), "expires_at": expires_at, "freshness_ttl_ms": ttl_minutes * 60_000, "evidence": {"frame_ids": ["frame-done"]}},
     ]
+
+
+def test_unrelated_agent_signals_do_not_satisfy_equipment_vision_preflight() -> None:
+    assert LabEquipmentAgent._has_equipment_vision_results(
+        {
+            "vision": {
+                "agent_signals": [
+                    {"signal": "printer_door_closed", "value": True},
+                    {"signal": "camera_online", "value": True},
+                ]
+            }
+        }
+    ) is False
 
 
 def _live_tools_with_verified_utm(
@@ -645,6 +896,71 @@ def _live_tools_with_verified_utm(
 
 
 @pytest.mark.asyncio
+async def test_live_equipment_skill_reuses_preflight_vision_evidence_for_completion(tmp_path: Path) -> None:
+    csv_path = _write_live_utm_csv(tmp_path)
+    tools = _live_tools_with_verified_utm(
+        csv_path,
+        request_log_events=[
+            {"path": "/health", "auth_ok": True},
+            {
+                "path": "/execute",
+                "auth_ok": True,
+                "audit_kind": "execute_payload",
+                "sequence_id": "run-test-utm_skill-1.0.0",
+                "run_id": "run-test",
+                "specimen_id": "specimen-test",
+                "program_id": "utm_compression_start_v1",
+            },
+            {"path": "/request-log", "auth_ok": True},
+        ],
+    )
+    tools.register(
+        "vision.equipment_cross_check",
+        lambda payload: {
+            "ok": True,
+            "tool": "vision.equipment_cross_check",
+            "runtime_mode": "live",
+            "results": _fresh_vision_checks(),
+            "failure_code": None,
+        },
+    )
+    registry = EquipmentSkillRegistry(tmp_path / "skills")
+    registry.create_draft(
+        recording=_saved_recording(),
+        skill_id="utm_skill",
+        version="1.0.0",
+        target_profile="utm_windows_v1",
+        model_snapshot={"provider": "vllm", "model": "gemma4:e4b-it-nvfp4"},
+    )
+    package = registry.compile("utm_skill", "1.0.0")
+    registry.validate("utm_skill", "1.0.0")
+    registry.mark_deployed(
+        "utm_skill",
+        "1.0.0",
+        bridge_id="worker-1",
+        deployment_sha256=canonical_sha256(package["programs"]),
+    )
+    state = _state(
+        mode=Mode.LIVE,
+        active_goal="run UTM compression Skill",
+        experiment_spec={
+            "equipment_skill": {
+                "skill_id": "utm_skill",
+                "version": "1.0.0",
+                "target_profile": "utm_windows_v1",
+                "registry_root": str(tmp_path / "skills"),
+            }
+        },
+    )
+
+    result = await LabEquipmentAgent().run(state, _CtxStub(tools, "must not be used"))
+
+    assert result.success is True
+    assert result.data["equipment_handoff"]["status"] == "ready_for_analysis"
+    assert result.data["equipment_report"]["vision_cross_checks"]["all_required_ok"] is True
+
+
+@pytest.mark.asyncio
 async def test_equipment_agent_live_blocks_without_vision_cross_checks(tmp_path: Path) -> None:
     csv_path = _write_live_utm_csv(tmp_path)
     plan = {
@@ -660,7 +976,18 @@ async def test_equipment_agent_live_blocks_without_vision_cross_checks(tmp_path:
         active_goal="run UTM compression test",
         experiment_spec={"equipment_program_id": "utm_compression_start_v1"},
     )
-    ctx = _CtxStub(_live_tools_with_verified_utm(csv_path), json.dumps(plan))
+    tools = _live_tools_with_verified_utm(csv_path)
+    tools.register(
+        "vision.equipment_cross_check",
+        lambda payload: {
+            "ok": False,
+            "tool": "vision.equipment_cross_check",
+            "runtime_mode": "live",
+            "results": [],
+            "failure_code": "VISION_EQUIPMENT_CROSS_CHECK_REQUIRED",
+        },
+    )
+    ctx = _CtxStub(tools, json.dumps(plan))
 
     result = await LabEquipmentAgent().run(state, ctx)
 
@@ -782,7 +1109,14 @@ async def test_equipment_agent_live_blocks_expired_explicit_vision_cross_check(t
         {"check_id": "utm_motion_confirm", "ok": True, "confidence": 0.9, "run_id": "run-test", "specimen_id": "specimen-test", "expires_at": future, "evidence": {"frame_ids": ["frame-motion"]}},
         {"check_id": "utm_test_complete", "ok": True, "confidence": 0.88, "run_id": "run-test", "specimen_id": "specimen-test", "expires_at": future, "evidence": {"frame_ids": ["frame-done"]}},
     ]
-    ctx = _CtxStub(_live_tools_with_verified_utm(csv_path), json.dumps(plan))
+    tools = _live_tools_with_verified_utm(csv_path)
+    run_calls: list[dict[str, Any]] = []
+    original_run = tools._tools["equipment.pyautogui.run"]
+    tools.register(
+        "equipment.pyautogui.run",
+        lambda payload: run_calls.append(dict(payload)) or original_run(payload),
+    )
+    ctx = _CtxStub(tools, json.dumps(plan))
 
     result = await LabEquipmentAgent().run(state, ctx)
 
@@ -795,6 +1129,7 @@ async def test_equipment_agent_live_blocks_expired_explicit_vision_cross_check(t
     assert result.data["equipment_report"]["physical_verification"]["blocking_reasons"] == ["VISION_UTM_PRE_START_STALE"]
     assert result.data["hardware_alerts"][0]["device_class"] == "vision"
     assert result.data["incident_records"][0]["failure_code"] == "VISION_UTM_PRE_START_STALE"
+    assert run_calls == []
 
 
 @pytest.mark.asyncio

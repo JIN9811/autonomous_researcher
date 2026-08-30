@@ -1,7 +1,7 @@
 # Windows Bridge / Lab Equipment Agent 일원화 보고서
 
 - 작성일: 2026-08-27
-- 상태: 구현 전 검토안
+- 상태: 구현 및 집중 자동 검증 완료, Windows/UTM 현장 검증 대기
 - 범위: Lab Equipment Agent, Windows PyAutoGUI Bridge, UTM 프로파일, Equipment Skill, 관련 GUI
 
 ## 1. 결론
@@ -39,14 +39,14 @@ PC 제어 장비를 범용적으로 수용하는 제어 에이전트이며, UTM�
 번째 장비 프로파일이다. 장비명, 프로그램명, 창 제목, 저장 절차는 에이전트 본체에
 하드코딩하지 않고 Equipment Profile과 Equipment Skill에 저장한다.
 
-## 3. 현재 구조
+## 3. 재구성 전 구조
 
 | 계층 | 현재 역할 |
 |---|---|
 | Lab Equipment Agent | 프로파일·Skill 선택, 실행 계획, 증거 검증, Analysis 전달 |
 | Equipment Profile | UTM 프로파일과 허용 프로그램 정의 |
 | Equipment Skill Runtime | 녹화, 컴파일, 검증, 배포, 실행, 복구 상태 관리 |
-| Linux Windows Bridge Client | 연결 대상, 토큰, 프로그램 실행, 화면·파일 회수 |
+| Linux Windows Bridge Client | 연결 대상, 장기 토큰, 프로그램 실행, 화면·파일 회수 |
 | Local Bridge | 같은 Bridge 서버를 Ubuntu에서 실행하여 매크로 개발 |
 | Windows Bridge Server | PyAutoGUI, UTM, 녹화, 프로그램, 증거, Skill 프록시, GUI |
 | ATR Equipment Workspace | 연결, UTM, Skill, 증거, 로컬 Bridge, 실행 관리 |
@@ -56,7 +56,7 @@ PC 제어 장비를 범용적으로 수용하는 제어 에이전트이며, UTM�
 핵심 문제는 Windows Console과 ATR Equipment Workspace가 비슷한 기능을 동시에
 소유한다는 점이다.
 
-## 4. 현재 문제점
+## 4. 재구성 전 문제점
 
 ### 4.1 실행 경로 이원화
 
@@ -454,6 +454,8 @@ Equipment Profile은 `vision_link.enabled`를 선택적으로 선언할 수 있�
 - 권장 보존 창: 최근 20~30초
 - 저장 기준 시각: monotonic clock
 - 입력 이벤트, checkpoint, locator 판정과 동일한 timeline ID 사용
+- mouse move를 제외한 실행 이벤트는 발생 시점의 nearest frame을 즉시 event keyframe으로
+  고정하여 20~30초 순환 버퍼에서 해당 시점이 밀려나도 증거가 사라지지 않음
 - 오래된 프레임은 메모리 순환 버퍼에서 자동 폐기
 - 정상 실행은 이벤트 전후 핵심 프레임과 명시적 checkpoint만 영구 저장
 - 오류 발생 시 오류 이전·발생·복구 이후 구간만 고정하여 보존
@@ -473,6 +475,8 @@ Skill 관리의 원본은 Linux ATR이다.
 - `draft`, `validated`, `deployed`, `retired` lifecycle 관리
 - 장비별 허용 Skill과 배포 Worker 관리
 - 녹화 원본과 생성 Skill의 provenance 연결
+- Windows 녹화 산출물은 인증된 package API로 전송하고 Linux가 파일별 크기와
+  SHA-256을 검증한 뒤 Linux-owned artifact 경로로 다시 기록
 - 수정 Skill은 새 버전으로 등록하고 기존 배포본을 덮어쓰지 않음
 - Live GUI, Equipment Workspace, CUI가 동일한 catalog와 배포 상태 사용
 
@@ -504,9 +508,11 @@ Skill 관리의 원본은 Linux ATR이다.
 브라우저 상태는 원본으로 사용하지 않는다. 새로고침하면 Linux 또는 Windows
 서버의 현재 상태를 다시 읽는다.
 
-## 12. 통합 실행 상태
+## 12. 통합 실행 기록과 상태 투영
 
-모든 화면은 하나의 실행 상태를 사용한다.
+모든 화면은 동일한 `EquipmentExecutionRecord`를 원본으로 사용한다. 아래 값은
+장비 실행에서 자주 나타나는 **대표 상태 예시**이며, 모든 에이전트와 Skill에
+동일한 순서로 적용하는 전역 수명주기가 아니다.
 
 ```text
 RESOLVING
@@ -518,18 +524,35 @@ RESOLVING
   -> COMPLETED | BLOCKED | EFFECT_UNKNOWN | STOPPED
 ```
 
+실제 상태 집합과 전이는 선택된 Equipment Profile, Skill, provider의 실행 계약이
+정한다. 예를 들어 녹화 전처리 상태, Windows 저수준 실행 상태, Vision 검증 상태는
+서로 다른 상태 집합을 가질 수 있다. GUI, CUI, Live GUI, Runtime IDE는 상태를 새로
+계산하지 않고 같은 실행 기록의 현재 상태와 agentic progress를 각 화면 형식으로만
+투영한다.
+
 - `COMPLETED`: 필수 증거까지 확인된 정상 완료
 - `BLOCKED`: 실행 전에 조건이 충족되지 않음
 - `EFFECT_UNKNOWN`: 요청 후 통신이 끊겨 실제 장비 효과를 알 수 없음
 - `STOPPED`: 정지 요청과 정지 확인이 완료됨
 
 필수 증거가 없는 상태에서는 Analysis로 넘기지 않는다.
+Skill segment가 모두 실행된 상태는 `execution_complete`이며 그 자체로
+`ready_for_analysis`가 아니다. 선택된 Equipment Profile의 completion interpreter가
+필수 장비 증거를 검증한 이후에만 Analysis handoff를 생성한다.
+
+`/api/equipment/runtime/current`는 선택적으로 `run_id`, `profile_id`, `execution_id`를
+받는다. Live GUI는 현재 run ID를 전달하여 다른 실험의 최신 Equipment 실행을 현재
+상태로 오인하지 않는다. Skill segment가 끝나면 canonical runtime은 먼저
+`VERIFYING`에 머물고, Profile completion/evidence 검증이 통과한 뒤에만
+`COMPLETED`로 전이한다.
 
 ## 13. 오류와 복구 원칙
 
 - provider 자동 fallback 금지
 - 4자리 코드를 상시 인증키로 사용하지 않음
 - 페어링 이후 원격 요청은 자동 생성된 내부 인증키로만 허용
+- paired worker는 과거 환경 token을 원격 인증 우회키로 허용하지 않음
+- 모든 mutating HTTP 요청은 `Content-Type: application/json`을 요구
 - Worker 미연결은 simulator 성공이 아니라 `BLOCKED`
 - 실행 요청 후 timeout은 즉시 재실행하지 않고 `EFFECT_UNKNOWN`
 - 읽기 작업 또는 동일 execution key의 멱등 요청만 자동 재시도
@@ -539,6 +562,8 @@ RESOLVING
 - LLM은 허용된 복구 프로그램만 선택
 - 복구 요청에는 전체 녹화가 아니라 오류 전후 고정 프레임, 관련 이벤트,
   checkpoint 차이, 장비 상태를 최소 증거 묶음으로 전달
+- 예외 pre/post 화면은 rolling retention과 별도로 예외 발생 시점에 즉시 고정
+- 녹화 계약의 민감영역 마스크를 frame, locator, checkpoint에 공통 적용
 - 복구 성공 후에는 복구 이후 checkpoint를 다시 검증하고 실행 기록에 연결
 - Guardian과 사용자 승인 판단은 Linux에서 수행
 - 부분 CSV와 스크린샷은 증거로 보존하지만 완료로 처리하지 않음
@@ -592,7 +617,8 @@ RESOLVING
 
 - 실험 루프의 Equipment 실행 진입점이 하나다.
 - Agent가 Tool 부재를 이유로 다른 UTM 경로로 전환하지 않는다.
-- 실행마다 하나의 ID와 하나의 완료 판정이 존재한다.
+- 실행마다 하나의 ID와 하나의 완료 판정 원본이 존재하되, 모든 모듈에 하나의
+  고정 상태 순서를 강제하지 않는다.
 - Windows 서버는 LLM, Guardian, Skill lifecycle, Analysis handoff를 소유하지 않는다.
 - Windows 기본 화면에는 Bridge Status, Program Manager, Recording, Latest Result만 있다.
 - 사용자가 긴 토큰을 입력·복사·저장하는 기능이 없다.
@@ -602,6 +628,8 @@ RESOLVING
   않고 UTM은 Equipment Profile/Skill의 첫 적용 사례로만 존재한다.
 - 녹화 결과가 Linux로 자동 전송되고 어노테이션, LLM Skill 생성, 검증, 버전 등록,
   Windows 재배포까지 하나의 Agentic Progress로 추적된다.
+- 배포 프로그램 hash는 Windows가 실제 저장한 정규화 프로그램 본문을 기준으로
+  계산하고 Linux가 동일 hash를 검증한다.
 - 정상 실행은 LLM 없이 결정론적으로 수행되고 선언된 예외에서만 LLM을 호출한다.
 - 입력 이벤트와 동기화된 시계열 순환 버퍼가 동작하며 정상 핵심 프레임과 오류
   전후 구간만 영구 보존된다.
@@ -614,7 +642,38 @@ RESOLVING
 - Test와 Live 모두 같은 실행 구조를 사용하고 provider만 명시적으로 다르다.
 - 기존 기능 회귀 테스트 후 실제 Windows 및 UTM 물리 검증을 통과한다.
 
-## 16. 구현 전 승인할 항목
+## 16. 구현 검증 결과
+
+2026-08-27 현재 다음 비물리 검증을 수행했다.
+
+- Windows source 서버와 설치 서버 파일 동등성: `cmp` 통과
+- 변경 Python 파일 구문 검사: `py_compile` 통과
+- Equipment Runtime, Agent, Profile, Skill, Bridge, API, Live GUI, Windows 패키징
+  집중 회귀 테스트: `323 passed`, 실패 0
+- 녹화 패키지 회수 검증: 인증된 package API, 파일별 크기/SHA-256 확인,
+  변조 아티팩트 차단 및 Linux artifact 경로 재작성 통과
+- Firefox Selenium 1920×1080 감사: 통과
+  - 4자리 임시 페어링 코드 표시
+  - `program1` 읽기 전용 유지
+  - JSON Browse, Validate, Save, Delete 실제 브라우저 조작
+  - Recording 기본값과 접힌 Diagnostics 확인
+  - 가로 오버플로와 가려진 라벨 없음
+- 별도 임시 서버 HTTP 페어링 E2E: 통과
+  - 발급 코드는 숫자 4자리
+  - 성공 후 코드는 즉시 숨김
+  - 내부 인증키 저장 파일 권한은 `0600`
+  - request audit에 페어링 코드와 내부 인증키가 남지 않음
+- 활성 Windows 배포 문서와 스크립트에서 이전 장기 토큰·Controller 프록시 문구가
+  남지 않았음을 정적 검사
+
+전체 저장소 테스트는 기존 ROS/카메라 통합 항목
+`test_controller_completes_test_run`이 실제 `/image_utm` 및 YOLO 프로세스를 시작한 뒤
+장시간 반환하지 않아 완료하지 않았다. 중단 전 확인된 fault-injection과 BO GUI 실패는
+이번 Equipment 집중 회귀 범위 밖의 기존 실패 항목이다. 따라서 이번 검증은 Windows
+실장비 또는 UTM 물리 동작 성공을 의미하지 않는다. 실제 Windows에서 설치, 4자리
+페어링, 녹화, 프로그램 실행, 파일 회수 및 UTM 동작은 현장 승인 절차로 별도 검증한다.
+
+## 17. 적용 항목
 
 1. Linux ATR 중심의 단일 제어 구조 적용
 2. Windows에서 Skill/UTM/proof 판단 기능 제거
@@ -628,5 +687,5 @@ RESOLVING
 10. 시계열 화면은 순환 버퍼로 수집하고 핵심 프레임과 오류 전후 구간만 영구 보존
 11. Vision Link는 Profile별 선택 사항으로 두고 Middle-Level API로 연동
 
-이 문서는 재구성 방향을 정리한 검토안이다. 코드 변경이나 물리 장비 실행을
-승인하는 문서는 아니다.
+이 문서는 재구성 방향과 현재 구현 계약을 함께 기록한다. 자동 검증은 물리 장비
+실행을 승인하지 않으며 실제 장비 검증은 별도 현장 절차를 따른다.

@@ -4,255 +4,159 @@ subtype: system
 status: active
 authority: descriptive
 audience: [researcher, operator, developer, maintainer]
-scope: [agents, equipment, pyautogui, utm, device_bridges, manual_rag]
-summary: Current contract for resolving validated equipment profiles and skills, executing bounded protocols, and handing evidence to Analysis.
+scope: [agents, equipment, pyautogui, equipment_runtime, vision_link]
+summary: Canonical Lab Equipment Agent contract using one Linux-owned Equipment Runtime and bounded local or Windows workers.
 source_of_truth:
   - agents/equipment_agent.py
-  - graphs/modules/equipment/module.yaml
+  - utils/equipment_runtime_service.py
+  - utils/equipment_profiles.py
   - utils/equipment_skill_runtime.py
   - device_bridges/windows_pyautogui_bridge.py
-  - device_bridges/utm_runtime_bridge.py
-  - app/main.py
-  - knowledge/manuals
-last_verified: 2026-08-17
-verified_against: working-tree-2026-08-17
+  - mcp_tools/equipment_tools.py
+last_verified: 2026-08-27
+verified_against: working-tree-2026-08-27
 related_docs:
-  - docs/agents/README.md
-  - docs/agents/agent_api_connection_matrix.md
-  - docs/agents/manipulation_agent.md
-  - docs/agents/analysis_agent.md
+  - docs/device_bridges/windows_pyautogui_bridge.md
   - docs/hardware/windows_pyautogui_equipment_agent_guideline.md
-  - docs/hardware/utm_ros_vision_runtime_bridge.md
-  - docs/knowledge/manual_rag_knowledge.ko.md
-supersedes: []
+  - docs/strategy/2026-08-27-windows-lab-equipment-consolidation-report.md
 ---
 
 # Lab Equipment Agent Reference
 
-## Summary
+## 역할
 
-`LabEquipmentAgent` resolves an exact equipment profile or recorded skill,
-validates its bridge contract, executes deterministic program segments through
-registered tools, bounds exception recovery through Guardian, and validates the
-measurement/evidence handoff to Analysis.
+`LabEquipmentAgent`는 저자동화·반자동화 PC 제어 장비의 실험 단계를 소유합니다. UTM은 현재 등록된 첫 Equipment Profile이며 Agent 본체의 고정 장비가 아닙니다.
 
-## Scope
+Agent는 정확한 Profile/Skill/program을 선택하고 Linux `EquipmentRuntimeService`에 실행을 등록합니다. Windows 또는 Local Bridge는 선택된 프로그램을 결정론적으로 실행하고 원시 증거만 반환합니다. 완료 판정과 Analysis handoff는 Linux에서 한 번만 수행합니다.
 
-Included are Windows/PyAutoGUI workers, recorded skills, equipment profiles,
-UTM protocol/runtime, locators/screenshots, preflight, proof, and completion
-audit. The agent does not generate arbitrary desktop commands or interpret the
-scientific result.
+## 세 단계 제어
 
-## Source of Truth
+| 제어 수준 | 책임 | 구현 경계 |
+|---|---|---|
+| High-Level | Equipment 단계 진입/종료, Profile/Skill 선택, 제한적 LLM 복구, 재시도·정지·handoff 결정 | `LabEquipmentAgent` |
+| Middle-Level | 실행 ID, worker, 모드, 증거, 완료 판정, 상태 저장과 projection | `EquipmentRuntimeService`, Profile/Skill runtime |
+| Low-Level | PyAutoGUI 입력, 창/locator 확인, 화면 캡처, 녹화, 파일과 원시 결과 반환 | Windows/Local Bridge |
 
-Equipment agent/module, equipment skill runtime, Windows/PyAutoGUI and UTM
-bridges, API routes, and hardware/runtime Guides.
+Device Workspace는 수동 개발·설정·검증 화면이며 자동 실험 루프의 별도 제어 원본이 아닙니다.
 
-## Actual Role
+## 유일한 자동 실행 경로
 
-| Does | Does not |
+```text
+LangGraph Equipment stage
+  -> LabEquipmentAgent.run()
+  -> EquipmentRuntimeService execution record
+  -> equipment.pyautogui.run
+  -> selected Windows or Local worker
+  -> raw evidence
+  -> one Linux completion interpretation
+  -> Analysis handoff or explicit block
+```
+
+PyAutoGUI tool 부재를 이유로 `utm.run_protocol`에 자동 fallback하지 않습니다. native UTM이 필요하면 별도 provider를 가진 명시적 Profile로 등록해야 합니다.
+
+## Profile과 Skill
+
+Profile은 다음을 선언합니다.
+
+- `profile_id`, label, provider
+- 허용 program ID와 기본 program
+- 모드별 worker payload
+- 필요한 locator/evidence
+- 선택적 `vision_link`
+- completion interpreter
+- manual knowledge scope
+
+Skill은 Linux `memory/equipment_skills/`가 원본입니다. Windows에는 검증된 배포 캐시 또는 로컬 초안만 존재합니다.
+
+```text
+record -> transfer -> annotate -> edit/save -> deploy[compile + validate + transfer] -> execute
+```
+
+`annotate`는 전체 2 FPS 원본을 한 요청에 적재하지 않습니다. Linux가 16 frame 4x4 스토리보드를 만들고 청크별 상태 변화를 순차 분석한 후 전체 workflow를 합성합니다. Overview 스토리보드는 GUI와 감사용으로 보존하고, 최종 합성에는 순서가 보존된 청크 분석과 아직 분석되지 않은 action locator 이미지만 전달해 동일한 고해상도 상태 프레임을 중복 전송하지 않습니다. 청크 진행 상태는 `ANALYZING_TIMELINE`, 최종 합성은 `SYNTHESIZING`으로 작업 기록과 GUI에 표시됩니다. 정상 실행에는 LLM을 사용하지 않습니다. 녹화 분석과 선언된 복구 상황에서만 현재 선택된 Local/API 모델을 Linux에서 사용합니다.
+
+Skill Workflow Editor는 정확한 `skill_id@version`의 `workflow.json`만 수정하는
+순차 편집기입니다. 일반 장비 macro의 실행 순서를 명확하게 유지하기 위해 IF,
+loop, 병렬 edge, 사용자 Python을 받지 않습니다. `Timer wait`는 고정 시간을,
+`Image/Text/File until wait`는 polling interval과 timeout을 갖는 bounded wait를
+표현합니다. 저장하면 이전 compiled program과 validation 결과를 무효화합니다.
+GUI의 단일 `Deploy`는 compile, validate, worker transfer/register를 순서대로 수행하며
+Skill을 실행하지 않습니다. 배포 또는 비활성화된 정확 버전은 불변이므로 수정하려면
+새 버전을 생성해야 합니다. 독립 compile/validate API는 CLI 호환용으로만 유지합니다.
+
+이미지 기반 action의 `Edit Crop`은 hash가 검증된 pre-action 원본 프레임에서
+Target ROI만 이동하거나 리사이즈합니다. AI가 만든 최초 ROI는 `Reset to AI` 기준으로
+보존되고 Context ROI와 두 번째 locator candidate는 변경하지 않습니다. `Apply Crop`은
+편집기 로컬 상태만 바꾸며 `Save` 시 workflow와 annotation을 함께 갱신하고 기존
+compiled/validated 산출물을 무효화합니다. `Replace Locator`는 원본 ROI를 조정하는
+기능이 아니라 locator PNG 자체를 외부 파일로 교체하는 별도 작업입니다.
+
+## Vision Link
+
+`vision_link.enabled=false`인 Profile은 화면·파일·장비 상태만으로 실행합니다. 활성 Profile은 다음 중 하나를 요구합니다.
+
+1. identity와 freshness가 유효한 기존 Vision evidence
+2. 호출 가능한 `vision.equipment_cross_check` tool
+
+둘 다 없으면 `EQUIPMENT_VISION_LINK_UNAVAILABLE`로 실행 전 차단합니다. Vision tool이 있으나 필수 관측 결과가 없으면 UTM 등 해당 Profile의 세부 evidence failure code를 반환합니다. Vision은 관측만 제공하며 장비 입력을 직접 제어하지 않습니다.
+
+## 통합 실행 기록
+
+`EquipmentExecutionRecord`는 다음 식별자를 보존합니다.
+
+- `execution_id`, `sequence_id`
+- `run_id`, `experiment_id`, `specimen_id`
+- Profile, Skill/program, worker, mode
+- event history, raw result, evidence
+- completion, failure, recovery, handoff
+
+상태 이름과 전이는 Profile/Skill/provider 계약에 따라 달라질 수 있습니다. `RESOLVING`, `PREFLIGHT`, `EXECUTING`, `VERIFYING`, `COMPLETED`, `BLOCKED` 등은 대표적인 Equipment 상태이지 모든 모듈에 강제되는 전역 수명주기가 아닙니다.
+
+Live GUI, Equipment Workspace, CUI, Runtime IDE는 이 기록의 같은 projection을 읽습니다. Live GUI는 현재 `run_id`로 `/api/equipment/runtime/current`를 조회하므로 다른 실험의 최신 Equipment 실행이 섞이지 않습니다. 브라우저 새로고침은 실행을 새로 만들지 않습니다.
+
+## 입력과 출력
+
+주요 입력:
+
+- `OrchestratorState`
+- exact Profile/Skill/program ID
+- run/experiment/specimen identity
+- mode, worker, preconditions
+- Vision/Guardian/operator evidence
+
+주요 출력:
+
+- `equipment_result`
+- `equipment_profile`
+- `equipment_report`
+- `equipment_runtime_execution`
+- `equipment_runtime_projection`
+- `equipment_handoff`
+- evidence/artifact references
+- hardware alert와 incident record
+
+## Tool 경계
+
+| Tool | 역할 |
 |---|---|
-| Resolve exact profile/skill/version | Accept approximate or arbitrary program identity |
-| Validate bridge and skill contract | Give an LLM unrestricted desktop/shell access |
-| Execute allowlisted deterministic segments | Bypass Guardian/operator/live preflight |
-| Capture request, screenshot, protocol and proof evidence | Treat request acceptance as completed measurement |
-| Handoff identifiable artifacts to Analysis | Compute the final scientific objective |
+| `equipment.pyautogui.health` | 선택 worker 상태 확인 |
+| `equipment.pyautogui.list_programs` | program catalog 확인 |
+| `equipment.pyautogui.run` | bounded program 실행 |
+| `equipment.pyautogui.request_log` | 실행 identity/audit 확인 |
+| `vision.equipment_cross_check` | Profile이 요청한 관측 증거 |
 
-## Three-Level Control Classification
+`utm.run_protocol`은 호환용 명시 호출 경로로만 남을 수 있으며 자동 선택되지 않습니다.
 
-| Level | Lab Equipment responsibility | Authority boundary |
-|---|---|---|
-| High-Level Control | Receives verified placement plus an exact experiment protocol and owns the Equipment stage until an identifiable measurement/proof package is ready for Analysis | Does not choose the scientific objective or advance on request acceptance alone |
-| Middle-Level Control | Resolve profile/skill/version, validate readiness and locators, execute allowlisted segments, collect request/screen/protocol/export evidence, audit completion, and emit the Analysis handoff | LLM output may select or explain an allowlisted action but never becomes unrestricted desktop or shell authority |
-| Low-Level Control | Calls `equipment.pyautogui.health/list_programs/run` and `utm.run_protocol` through registered tools | Token-authenticated Windows worker, PyAutoGUI actions, desktop application state, UTM protocol/device state, file transfer, and stop acknowledgement remain bridge/worker authority |
+## 실패와 복구
 
-Worker reconnection, locator resolution, or uncertain desktop/instrument effect
-is Low-Level; bounded segment recovery is Middle-Level; retry/review/stop and
-stage routing are High-Level. The Equipment Workspace is a manual development
-and commissioning surface outside automatic-loop progression.
+- Profile/program 불일치: 실행 전 차단
+- worker 없음/불건전: 실행 전 차단
+- Vision Link 없음: 실행 전 차단
+- locator/checkpoint 실패: Skill에 선언된 bounded recovery만 허용
+- invoke 이후 timeout: effect unknown으로 기록하고 상태/화면/파일 확인 전 재실행 금지
+- 불완전 파일: 증거로 보존하지만 완료로 승격하지 않음
 
-## Closed-Loop Position and Handoffs
+LLM 결과는 allowlisted 선택과 설명만 제공하며 임의 PyAutoGUI/shell 명령 권한을 만들 수 없습니다.
 
-![Equipment closed-loop position and handoffs](assets/figures/equipment_01_closed_loop_handoffs.svg)
+## 검증 범위
 
-**Figure Equipment-1.** Fresh placement evidence and an exact enabled
-profile/skill/protocol become bounded desktop and instrument segments; only a
-complete measurement/proof package reaches Analysis. This is an
-`inspection`-backed projection of baseline `0b7627b`, not evidence that a live
-protocol completed safely or correctly.
-
-| Direction | Component | Contract/state | Purpose | Gate |
-|---|---|---|---|---|
-| In | Vision/Manipulation | verified specimen/fixture state | permit protocol | fresh placement evidence |
-| In | Orchestrator/Guardian | action, approval, mode, constraints | governed execution | policy/approval/budget |
-| In | Profile/skill registry | exact configuration/version | deterministic action | validation/deployment/enabled state |
-| Out | Analysis | equipment artifact/handoff | parse and evaluate measurement | file identity/evidence completeness |
-| Out | Guardian/Knowledge | tool/proof/failure records | safety/provenance | persisted result |
-
-## Inputs and Outputs
-
-Input is `OrchestratorState` plus equipment profile, skill/program version,
-validated parameters, bridge target, placement evidence, approvals, and mode.
-Output merged into state includes equipment result/report/handoff, program and
-segment state, request log, screenshots/locators, UTM/runtime data, proof and
-completion audit, decisions, metrics, errors, and artifact references.
-
-## Internal Execution
-
-| Step ID | Work | Boundary/output |
-|---|---|---|
-| `01_resolve_equipment_profile` | exact profile/skill/version | unresolved identity blocks |
-| `02_validate_bridge_contract` | bridge/capability/skill schema | invalid/unavailable blocks |
-| `03_execute_registered_protocol` | deterministic segments | bounded tool result |
-| `04_exception_recovery_gate` | classify/recover through Guardian | no unrestricted recovery |
-| `05_validate_evidence_handoff` | artifact/proof completeness | Analysis handoff or review |
-
-![Equipment internal execution and effect boundary](assets/figures/equipment_02_execution_effect_boundary.svg)
-
-**Figure Equipment-2.** Five internal entries and four registered tools keep
-identity resolution, bridge/capability validation, deterministic segments,
-bounded recovery, and evidence handoff distinct. Desktop and instrument effects
-occur only after placement, preflight, policy, and approval gates. This
-`inspection` figure does not claim independently scheduled steps.
-
-### Execution trace details
-
-| Phase | State read | Gate/transformation | Evidence written | Recovery boundary |
-|---|---|---|---|---|
-| Resolve | equipment/profile/skill/program/version IDs | exact registry lookup and enabled-state check | resolved immutable identities | ambiguous or missing identity blocks |
-| Validate | bridge health, capability schema, placement, mode and approval | live preflight and allowlisted parameter validation | readiness snapshot and blockers | model formatting cannot create commands |
-| Execute | validated deterministic segment plan | invoke registered worker/UTM segment | request, segment transitions and command result | no unregistered recovery segment |
-| Observe | desktop screenshot/locator or instrument/runtime state | compare expected postcondition | image/status/measurement references | timeout with unknown effect requires inspection |
-| Recover | classified failure, current proof and safety state | continue bounded recovery, stop, or escalate | corrective action and Guardian result | retry only after known no-effect or resolved state |
-| Handoff | measurement identity and complete proof | validate Analysis package | artifact hash, report and completion audit | partial output remains evidence, not a complete result |
-
-## API Surface
-
-| Class | Method | Path/family | Effect | Notes |
-|---|---|---|---|---|
-| shared | GET/POST | `/api/bridges`, `/api/bridges/{bridge_id}/actions` | read_only/local_state | normalized registry and descriptors |
-| connected | GET/POST | `/api/equipment/utm-runtime/status`, `/start`, `/stop`, `/probe`, `/graph`, `/frame`, `/frame-stream.mjpeg` | external_service/read_only | ROS/runtime lifecycle and evidence |
-| operator | GET/POST | `/api/equipment/utm-runtime/camera-*` | read_only/local_state/external_service | devices, probe, apply, calibrate |
-| operator | POST | `/api/equipment/windows/live-preflight`, `/live-validation` | read_only/local_state | live gates/evidence |
-| operator | GET/POST/DELETE | `/api/equipment/skills*` | local_state | draft, annotate, compile, validate, deploy, enable, test, delete |
-| operator | GET/POST | `/api/equipment/profiles*` | read_only/local_state/physical_possible | state, preflight, test |
-| operator | GET/POST | `/api/equipment/windows/config`, `/readiness`, `/discover`, `/connect`, `/select`, `/delete`, `/test` | read_only/local_state/external_service | worker lifecycle |
-| operator | GET/POST | `/api/equipment/windows/local-bridge/*` | local_state/external_service | managed local bridge |
-| connected | POST | `/api/equipment/windows/run-program` | physical_possible | executes allowlisted program |
-| connected | GET/POST | `/api/equipment/windows/locators`, `/screenshot`, `/capture-locator` | read_only/local_state | visual automation evidence |
-| operator | GET/POST | `/api/equipment/windows/proof-package`, `/proof-package/verify`, `/evidence-audit`, `/completion-audit`, `/vision-proof-draft` | read_only/local_state | proof/release review |
-
-## Tools and Connections
-
-### UTM manual GraphRAG context
-
-Lab Equipment 계층에서 현재 장비 유형은 `utm`으로 고정합니다. 특정 모델명이나
-소프트웨어 버전을 실행 조건으로 고정하지 않습니다. UTM profile LLM은 Knowledge
-Agent의 분리된 Manual RAG module에서 Skill annotation, 절차/판단, bounded recovery
-근거를 조회합니다. 각 판단에는 context hash와 source/page/chunk citation이 남습니다.
-Retrieval 응답은 기존 `manual_context.v1.chunks`와 함께 최대 2-hop semantic
-projection을 제공하므로 Fault-Cause-Remedy 또는 Procedure-Step 관계를 설명에
-사용할 수 있습니다.
-이 context는 설명과 allowlisted 선택만 보조하며 등록 Skill, bridge payload,
-Guardian/operator gate를 새로 만들거나 우회할 수 없습니다.
-
-Manual RAG가 추가되어도 command construction, bridge dispatch, credential,
-Guardian policy, operator approval, safety interlock의 구현과 권한은 기존 경로를
-그대로 사용합니다. 매뉴얼 인덱스 또는 optional graph backend 장애는 근거 부족으로
-기록되며 임의 명령이나 silent fallback을 만들지 않습니다.
-
-| Tool/service | Boundary | Effect | Evidence |
-|---|---|---|---|
-| `equipment.pyautogui.health` | Windows bridge | read_only | health snapshot |
-| `equipment.pyautogui.list_programs` | worker registry | read_only | program/version list |
-| `equipment.pyautogui.run` | allowlisted worker program | physical_possible | request/segments/screenshots/result |
-| `utm.run_protocol` | UTM bridge/runtime | physical_possible | protocol/measurement/proof |
-| LLM `tool_formatting` | selected model | model | bounded formatting only |
-| Equipment skill runtime | versioned local packages | local_state/physical_possible | manifest/validation/deployment |
-| UTM ROS runtime | local/remote ROS and camera | external_service/physical_possible | graph/frame/status |
-
-![Equipment API and connection architecture](assets/figures/equipment_03_api_connection_architecture.svg)
-
-**Figure Equipment-3.** Registry, skill/profile, Windows worker, and UTM
-runtime/camera surfaces reach desktop and instrument effects only through exact
-identity, bridge, placement, Guardian, and operator gates; health, screenshots,
-frames, measurements, and audits return as evidence. This `inspection` figure
-is not live protocol validation.
-
-### Connection lifecycle
-
-| Connection | Resolve/preflight | Invoke/observe | Persist/recover |
-|---|---|---|---|
-| Skill runtime | draft/compile/validate/deploy/enable exact version | select registered program and parameters | retain manifest, validation and deployment identity |
-| Equipment profile | profile, capability and state/readiness | preflight or bounded test | explicit provider/profile selection; no silent fallback |
-| Windows worker | discover/connect/readiness/local bridge | run allowlisted program and inspect locators/screenshots | request log, segment state and proof package |
-| UTM ROS runtime | status/probe/graph/camera mapping | start/stop/frame/stream and protocol connection | graph/frame/status plus measurement identity |
-| Desktop/instrument | current precondition and stop procedure | bounded physical/desktop action | inspect postcondition before retry after uncertainty |
-| Audit/release | proof, evidence and completion packages | verify without rewriting source evidence | incomplete audit blocks Analysis completion claim |
-
-Neither the workspace, a model response, nor a module UI descriptor grants a
-bypass around the registered tool, worker/bridge, and Guardian/operator path.
-
-## State, Events, Artifacts, and Storage
-
-Profiles and worker connections are local configuration state. Skills are
-versioned packages with draft/annotation/compiled/validated/deployed/enabled
-states. Runs store action parameters, segment transitions, screenshots,
-locators, measurement files, tool records, Guardian results, proof packages,
-and completion audits. External desktop/instrument state is separate and must
-be observed.
-
-## Modes and Fallbacks
-
-Test uses virtual/fake bridges or validation-only execution. Replay consumes
-recorded evidence. Browser controls services but is not physical proof. Live
-requires exact worker/profile/skill, readiness, placement evidence, Guardian,
-operator scope, and stop procedure. Local bridge selection is explicit;
-fallback messages/events remain recorded.
-
-## Safety, Approval, and Effect Boundary
-
-Both desktop and instrument actions are `physical_possible`. Live requires
-preflight, validated enabled skill/profile, allowlisted parameters, current
-Vision/placement state, Guardian/operator approval where configured, bounded
-segments, and a stop path. LLM output cannot create arbitrary commands.
-
-## Errors and Recovery
-
-Unknown profile/skill or invalid bridge blocks before action. Locator/capture
-failure can use only compiled bounded recovery. Timeout with unknown desktop or
-instrument effect requires screenshot/status/instrument inspection and
-Guardian/operator review before repeating. Partial measurement files remain
-evidence and are not silently treated as complete.
-
-## Operator and GUI Surfaces
-
-Windows Equipment workspace manages worker discovery, connection, readiness,
-profiles, skills, locators, screenshots, program execution, and proof. Vision
-UTM workspace manages ROS graph/camera/runtime. Live GUI reports equipment
-state, handoff, errors, and evidence.
-
-## Current Verification
-
-The existing equipment IDs, registered tools, skill/profile runtime, Windows
-bridge, and UTM runtime contracts remain covered by the focused regression set.
-Manual context injection for decision, procedure formatting, skill annotation,
-and bounded recovery was verified in the 77-test Knowledge/Equipment/API run on
-2026-08-17. No new physical protocol or equipment command was executed for this
-documentation and semantic-graph change.
-
-## Limitations and Known Gaps
-
-No paper-scoped evidence establishes general desktop robustness, UTM accuracy,
-protocol completion, locator recovery, or live stop latency. Vendor software,
-ROS, cameras, and workers are optional/environment-specific.
-
-## Related Documents
-
-- [Agent Matrix](agent_api_connection_matrix.md)
-- [Manipulation](manipulation_agent.md)
-- [Analysis](analysis_agent.md)
-- [Three-Level Control Model](../runtime/three_level_control_model.md)
-- [Windows Equipment Guide](../hardware/windows_pyautogui_equipment_agent_guideline.md)
-- [UTM ROS Vision Guide](../hardware/utm_ros_vision_runtime_bridge.md)
-- [Completion Audit](../hardware/evidence/lab_equipment_utm_visual_control_completion_audit.md)
+2026-08-27 기준 단위/통합 검증은 generic profile, UTM profile, Skill 실행, Vision Link, canonical runtime projection, Windows pairing/packaging 경로를 포함합니다. 자동 테스트는 물리 UTM을 작동하지 않습니다.

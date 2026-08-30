@@ -1,0 +1,15 @@
+{
+  "schema": "atr.windows_bridge_release.v1",
+  "version": "2026.08.30.27",
+  "files": [
+    "release_manifest.json",
+    "START_WINDOWS_BRIDGE.cmd",
+    "bridge/windows_pyautogui_bridge_server.py",
+    "scripts/bridge_self_updater.py",
+    "scripts/bridge_supervisor.py",
+    "scripts/install_bridge.ps1",
+    "scripts/run_bridge.ps1",
+    "scripts/start_supervisor.ps1",
+    "requirements-windows.txt"
+  ]
+}

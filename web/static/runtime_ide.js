@@ -6854,6 +6854,8 @@ function renderDeviceStatusPanel(snapshot = latestStateSnapshot) {
   const backend = runtime.backend || state.run_metadata?.backend || {};
   const health = state.device_health || {};
   const resources = systemResources(snapshot);
+  const equipmentRuntime = snapshot?.equipment_runtime || {};
+  const equipmentProjection = equipmentRuntime.projection || {};
   const ram = resources.ram || {};
   const gpu = resources.gpu || {};
   const baseRows = Object.entries(health).map(([name, status]) => ({ name, status, detail: "device bridge" }));
@@ -6881,7 +6883,12 @@ function renderDeviceStatusPanel(snapshot = latestStateSnapshot) {
         detail: `${item.name || "NVIDIA"} · ${formatGb(item.memory_used_gb)} / ${formatGb(item.memory_total_gb)} · util ${formatResourcePercent(item.utilization_percent)}`,
       }))
     : [];
-  const rows = [...contractBridgeRows, ...baseRows, ...backendRows, ...gpuRows];
+  const equipmentRows = equipmentProjection.execution_id ? [{
+    name: "Equipment Runtime",
+    status: equipmentProjection.status || equipmentProjection.lifecycle || "unknown",
+    detail: `${equipmentProjection.execution_id} · ${equipmentProjection.profile_id || "profile n/a"}`,
+  }] : [];
+  const rows = [...equipmentRows, ...contractBridgeRows, ...baseRows, ...backendRows, ...gpuRows];
   deviceStatusOutput.innerHTML = rows.length
     ? rows.map((row) => `
         <div class="runtime-status-row ${statusBadgeClass(row.status)}">

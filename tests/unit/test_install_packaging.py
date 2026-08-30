@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 from pathlib import Path
 import os
 import subprocess
@@ -11,6 +12,21 @@ import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_windows_portable_zip_preserves_dotted_release_version(tmp_path: Path) -> None:
+    script = ROOT / "Pyautogui_server_for_window" / "scripts" / "build_portable_release.py"
+    spec = importlib.util.spec_from_file_location("atr_windows_portable_builder", script)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    output = tmp_path / "WindowsPyAutoGUIBridge-2026.08.30.25"
+    output.mkdir()
+    (output / "README.txt").write_text("release\n", encoding="utf-8")
+
+    archive = module.create_zip(output)
+
+    assert archive.name == "WindowsPyAutoGUIBridge-2026.08.30.25.zip"
 
 
 def test_doctor_core_only_json_runs() -> None:
@@ -66,6 +82,8 @@ def test_windows_bridge_release_contains_reproducible_installer_and_runtime_depe
         "scripts/uninstall_bridge.ps1",
         "scripts/build_release.ps1",
         "scripts/native_acceptance.ps1",
+        "scripts/bridge_supervisor.py",
+        "scripts/start_supervisor.ps1",
     ):
         assert (package / relative).is_file(), relative
 
@@ -85,6 +103,32 @@ def test_windows_bridge_scripts_use_one_data_root_and_bundle_demo_assets() -> No
     assert "WINDOWS_PYAUTOGUI_LOCATOR_ROOT" in env_example
     assert "WINDOWS_PYAUTOGUI_ARTIFACT_DIR" not in env_example
     assert "WINDOWS_PYAUTOGUI_REFERENCE_DIR" not in env_example
+    assert ".bridge_token" not in run_script
+    assert "ShowToken" not in run_script
+    assert "ResetToken" not in run_script
+    assert "New-BridgeToken" not in run_script
+    assert "ATR_WINDOWS_BRIDGE_PACKAGE_ROOT" in run_script
+    assert "ATR_WINDOWS_BRIDGE_INSTALL_ROOT" not in run_script
+    assert "UsePackageRoot" not in run_script
+    assert "canonicalRoot" not in run_script
+    assert "Programs\\ATR\\PyAutoGUIBridge" not in run_script
+
+    supervisor_script = (package / "scripts" / "start_supervisor.ps1").read_text(encoding="utf-8")
+    assert "--command-file" in supervisor_script
+    assert "--command-json" not in supervisor_script
+    assert "UsePackageRoot" not in supervisor_script
+    assert "canonicalRoot" not in supervisor_script
+    assert "Programs\\ATR\\PyAutoGUIBridge" not in supervisor_script
+    assert "ATR_WINDOWS_BRIDGE_PACKAGE_ROOT" in supervisor_script
+    assert "ATR_WINDOWS_BRIDGE_INSTALL_ROOT" not in supervisor_script
+    assert 'Join-Path $projectRoot ".venv\\Scripts\\python.exe"' in supervisor_script
+    assert 'if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }' in supervisor_script
+    assert 'Join-Path $tempRoot "ATR\\PyAutoGUIBridge\\supervisor"' in supervisor_script
+    assert '"worker-command-{0}.json" -f $PID' in supervisor_script
+    assert 'Join-Path $DataRoot "supervisor\\worker-command.json"' not in supervisor_script
+    assert '/ping"' in supervisor_script
+    assert '/discovery"' not in supervisor_script
+    assert '--interval-s 5.0' in supervisor_script
 
 
 def test_windows_bridge_install_lifecycle_is_interactive_secure_and_clean() -> None:
@@ -97,19 +141,27 @@ def test_windows_bridge_install_lifecycle_is_interactive_secure_and_clean() -> N
 
     assert "New-ScheduledTaskPrincipal" in installer
     assert "-LogonType Interactive" in installer
+    assert 'scripts\\start_supervisor.ps1' in installer
+    assert "if ($RegisterLogonTask)" not in installer
     assert "stop_bridge.ps1" in uninstaller
     assert "__pycache__" in release_builder
     assert "*.pyc" in release_builder
     assert "-RemoteAddress" in firewall
     assert "explicitly opt in" in firewall
     assert 'Write-Host "Using token: $Token"' not in checker
+    assert "robocopy.exe" not in installer
+    assert 'SetEnvironmentVariable("ATR_WINDOWS_BRIDGE_INSTALL_ROOT"' not in installer
+    assert 'Join-Path $sourceRoot ".venv\\Scripts\\python.exe"' in installer
+    assert "Programs\\ATR\\PyAutoGUIBridge" not in uninstaller
+    assert 'Join-Path $packageRoot ".venv"' in uninstaller
+    assert 'Remove-Item -LiteralPath $packageRoot -Recurse' not in uninstaller
 
 
 def test_windows_bridge_has_self_locating_click_install_start_and_uninstall_launchers() -> None:
     package = ROOT / "Pyautogui_server_for_window"
     launchers = {
         "INSTALL_WINDOWS_BRIDGE.cmd": "install_bridge.ps1",
-        "START_WINDOWS_BRIDGE.cmd": "run_bridge.ps1",
+        "START_WINDOWS_BRIDGE.cmd": "start_supervisor.ps1",
         "UNINSTALL_WINDOWS_BRIDGE.cmd": "uninstall_bridge.ps1",
     }
 
@@ -121,9 +173,15 @@ def test_windows_bridge_has_self_locating_click_install_start_and_uninstall_laun
         assert "pause" in content.lower()
 
     install_launcher = (package / "INSTALL_WINDOWS_BRIDGE.cmd").read_text(encoding="utf-8")
+    start_launcher = (package / "START_WINDOWS_BRIDGE.cmd").read_text(encoding="utf-8")
     assert "start" in install_launcher.lower()
     assert "-OpenBrowser" in install_launcher
-    assert "-ShowToken" in install_launcher
+    assert "-ShowToken" not in install_launcher
+    assert "%LOCALAPPDATA%\\Programs\\ATR\\PyAutoGUIBridge" not in install_launcher
+    assert 'set "RUN_SCRIPT=%PACKAGE_ROOT%scripts\\start_supervisor.ps1"' in install_launcher
+    assert 'set "RUN_SCRIPT=%PACKAGE_ROOT%scripts\\start_supervisor.ps1"' in start_launcher
+    assert "-UsePackageRoot" not in start_launcher
+    assert "%LOCALAPPDATA%\\Programs\\ATR\\PyAutoGUIBridge" not in start_launcher
 
 
 def test_windows_bridge_installer_creates_shortcuts_and_release_includes_launchers() -> None:
@@ -138,6 +196,7 @@ def test_windows_bridge_installer_creates_shortcuts_and_release_includes_launche
     assert "UNINSTALL_WINDOWS_BRIDGE.cmd" in installer
     for launcher in ("INSTALL_WINDOWS_BRIDGE.cmd", "START_WINDOWS_BRIDGE.cmd", "UNINSTALL_WINDOWS_BRIDGE.cmd"):
         assert launcher in release_builder
+    assert "release_manifest.json" in release_builder
 
 
 def test_basic_ci_has_windows_bridge_job() -> None:
@@ -156,10 +215,11 @@ def test_windows_bridge_portable_release_has_one_click_offline_contract() -> Non
 
     assert "%~dp0" in launcher
     assert "bootstrap_portable.ps1" in launcher
-    assert "scripts\\run_bridge.ps1" in bootstrap
+    assert "scripts\\start_supervisor.ps1" in bootstrap
     assert "-DataRoot" in bootstrap
     assert "data" in bootstrap.lower()
     assert "-OpenBrowser" in bootstrap
+    assert "-ShowToken" not in bootstrap
 
     assert "runtime\\python" in bootstrap
     assert '"python.exe"' in bootstrap
@@ -209,17 +269,21 @@ def test_windows_bridge_portable_builder_emits_clean_single_folder_manifest() ->
             "bootstrap_portable.ps1",
             "bridge/windows_pyautogui_bridge_server.py",
             "scripts/run_bridge.ps1",
+            "scripts/start_supervisor.ps1",
+            "scripts/bridge_supervisor.py",
+            "scripts/bridge_self_updater.py",
+            "release_manifest.json",
             "requirements-portable.txt",
             "PORTABLE_README_KO.txt",
         ):
             assert (output_root / relative).is_file(), relative
 
         env_example = (output_root / "examples" / "windows_bridge.env.example.ps1").read_text(encoding="utf-8")
-        assert "WINDOWS_PYAUTOGUI_ATR_API_URL" in env_example
-        assert "optional" in env_example.lower()
+        assert "WINDOWS_PYAUTOGUI_ATR_API_URL" not in env_example
         packaged_server = (output_root / "bridge" / "windows_pyautogui_bridge_server.py").read_text(encoding="utf-8")
-        assert "atr.windows_controller_connection.v1" in packaged_server
-        assert "ATR_CONTROLLER_MULTIPLE_CANDIDATES" in packaged_server
+        assert "atr.windows_controller_connection.v1" not in packaged_server
+        assert "ATR_CONTROLLER_MULTIPLE_CANDIDATES" not in packaged_server
+        assert "class PairingManager" in packaged_server
 
         forbidden_names = {".bridge_token", "bridge_requests.jsonl", "controller_connection.json", "__pycache__"}
         assert not any(path.name in forbidden_names for path in output_root.rglob("*"))

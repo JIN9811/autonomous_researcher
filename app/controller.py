@@ -8015,6 +8015,10 @@ class MainController:
         if "equipment_result" in data:
             equipment_result = data["equipment_result"] if isinstance(data["equipment_result"], dict) else {}
             self._state.run_metadata["equipment_result"] = equipment_result
+            if isinstance(data.get("equipment_runtime_execution"), dict):
+                self._state.run_metadata["equipment_runtime_execution"] = data["equipment_runtime_execution"]
+            if isinstance(data.get("equipment_runtime_projection"), dict):
+                self._state.run_metadata["equipment_runtime_projection"] = data["equipment_runtime_projection"]
             if isinstance(data.get("equipment_report"), dict):
                 self._state.run_metadata["equipment_report"] = data["equipment_report"]
             if isinstance(data.get("utm_data_ready"), dict):
@@ -8745,6 +8749,8 @@ class MainController:
                 equipment_result = data.get("equipment_result") if isinstance(data.get("equipment_result"), dict) else {}
                 utm_packet = data.get("utm_data_ready") if isinstance(data.get("utm_data_ready"), dict) else {}
                 handoff_packet = data.get("equipment_handoff") if isinstance(data.get("equipment_handoff"), dict) else {}
+                runtime_execution = data.get("equipment_runtime_execution") if isinstance(data.get("equipment_runtime_execution"), dict) else {}
+                runtime_projection = data.get("equipment_runtime_projection") if isinstance(data.get("equipment_runtime_projection"), dict) else {}
                 decision = equipment_report.get("decision") if isinstance(equipment_report.get("decision"), dict) else {}
                 bridge = equipment_report.get("bridge") if isinstance(equipment_report.get("bridge"), dict) else {}
                 data_ledger = equipment_report.get("data_ledger") if isinstance(equipment_report.get("data_ledger"), dict) else equipment_report.get("data_acquisition", {}) if isinstance(equipment_report.get("data_acquisition"), dict) else {}
@@ -8762,6 +8768,8 @@ class MainController:
                         "handoff_packet": utm_packet or handoff_packet,
                         "equipment_report": equipment_report,
                         "equipment_result": equipment_result,
+                        "equipment_runtime_execution": runtime_execution,
+                        "equipment_runtime_projection": runtime_projection,
                         "evidence_refs": utm_packet.get("evidence_refs", []) if isinstance(utm_packet.get("evidence_refs"), list) else [],
                     }
                 )

@@ -31,6 +31,13 @@ models:
   e4b:
     primary: gemma4:e4b-it-nvfp4
     fallback: gemma4:31b
+role_capabilities:
+  orchestrator:
+    text: true
+    vision: false
+  e4b:
+    text: true
+    vision: true
 backend_models:
   openai:
     orchestrator:

@@ -477,13 +477,17 @@ The reference video is a Skill-creation artifact and audit record. It is not str
 
 The annotation service derives checkpoint frames, target regions, OCR evidence, event timing, and visual fingerprints from the reference recording. The Windows deployment bundle receives only the references required for deterministic execution and local checkpoint verification.
 
+Skill creation sends one bounded chronological evidence set, not independent screenshot prompts. The set combines the ordered workflow, initial and final state observations, event-context frames, high-resolution pre-action frames, and post-action observations. The selected model must first reconstruct workflow intent and causal state transitions, then annotate each existing step and locator in the same response. The resulting `workflow_summary` and `step_transitions` are retained in `annotations.json`; they are semantic evidence for review and later exception recovery, not additional executable actions.
+
+The visual request is limited to 16 verified images and 32 MiB. SHA-256 and allowed-root checks are mandatory, duplicate frames are removed, and locator frames plus temporal boundaries take selection priority. Inline locator PNGs are omitted from the text prompt when their full frames are already attached. Recording stop captures one clean final observation after the recording overlay is hidden so the model can distinguish the last action from its completion state.
+
 At runtime, a successful checkpoint returns structured status and artifact references. An exception returns only the evidence associated with the failed step, such as expected and observed frames, target regions, OCR differences, recent events, and an optional bounded clip. Binary artifacts are referenced outside the JSON decision contract.
 
 ## Multimodal Capability Boundary
 
 The design must not assume that the currently selected Gemma4 endpoint accepts native video.
 
-- If the serving endpoint supports multimodal images, selected frames are supplied through the configured vision adapter.
+- If the serving endpoint supports multimodal images, the same chronological frame contract is converted by the shared backend adapter to OpenAI-compatible `image_url` content or Ollama-compatible image payloads. Local vLLM and a later API selection therefore receive the same semantic timeline.
 - If it supports video, a bounded exception clip may be supplied in addition to selected frames.
 - If it is text-only, local CV, OCR, UI Automation, and image-difference services produce structured evidence; Gemma4 receives only that structured evidence.
 - Capability negotiation is explicit and recorded in the annotation and recovery result. No silent modality fallback may report equivalent evidence.

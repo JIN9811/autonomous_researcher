@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="skill-workflow-editor-body">
+    <main
+      id="skill-workflow-editor"
+      class="skill-workflow-editor"
+      data-skill-id="{{ skill_id }}"
+      data-skill-version="{{ skill_version }}"
+      data-skill-lifecycle="{{ skill_lifecycle }}"
+    >
+      <header class="skill-workflow-editor-header">
+        <div class="skill-workflow-editor-heading">
+          <span class="eyebrow">Sequential Equipment Skill</span>
+          <h1 id="workflow-editor-title">{{ skill_id }} <small>@{{ skill_version }}</small></h1>
+          <div class="skill-workflow-editor-meta">
+            <span id="workflow-editor-lifecycle" class="badge idle">{{ skill_lifecycle }}</span>
+            <span id="workflow-editor-dirty" class="badge idle">Saved</span>
+            <span id="workflow-editor-duration">Duration pending</span>
+          </div>
+        </div>
+        <div class="skill-workflow-editor-actions">
+          <button id="workflow-editor-check" class="btn" type="button">Check Workflow</button>
+          <button id="workflow-editor-save" class="btn primary" type="button">Save</button>
+          <button id="workflow-editor-close" class="btn" type="button">Close</button>
+        </div>
+      </header>
+
+      <section class="skill-workflow-editor-content">
+        <aside class="skill-workflow-editor-palette" aria-label="Add workflow step">
+          <div>
+            <span class="eyebrow">Action Palette</span>
+            <h2>Add Step</h2>
+            <p>선택한 단계 다음에 실행 단계를 추가합니다. 조건 분기 없이 위에서 아래 순서로 실행됩니다.</p>
+          </div>
+          <label>
+            Action
+            <select id="workflow-editor-add-action" class="text-input">
+              <option value="click">Click</option>
+              <option value="double_click">Double click</option>
+              <option value="move_to">Move pointer</option>
+              <option value="drag_to">Drag</option>
+              <option value="write">Write text</option>
+              <option value="press">Press key</option>
+              <option value="hotkey">Hotkey</option>
+              <option value="scroll">Scroll</option>
+              <option value="hscroll">Horizontal scroll</option>
+              <option value="wait">Timer wait</option>
+              <option value="wait_until_image">Image until wait</option>
+              <option value="wait_until_text">Text until wait</option>
+              <option value="wait_for_file">File until wait</option>
+              <option value="screenshot">Screenshot</option>
+            </select>
+          </label>
+          <button id="workflow-editor-add-step" class="btn primary" type="button">Add after selected</button>
+          <div class="skill-workflow-editor-help">
+            <strong>Wait behavior</strong>
+            <span>Timer wait는 지정 시간만 대기합니다.</span>
+            <span>Until wait는 조건을 polling하고 timeout에서 종료합니다.</span>
+          </div>
+        </aside>
+
+        <section class="skill-workflow-editor-sequence" aria-label="Sequential workflow steps">
+          <div class="skill-workflow-sequence-head">
+            <div><span class="eyebrow">Execution Order</span><h2>Workflow Steps</h2></div>
+            <span id="workflow-editor-step-count" class="badge idle">0 steps</span>
+          </div>
+          <div id="workflow-editor-step-list" class="skill-workflow-step-list" aria-live="polite">
+            Loading workflow.
+          </div>
+        </section>
+      </section>
+
+      <footer class="skill-workflow-editor-footer">
+        <p id="workflow-editor-status" role="status">Loading exact Skill version.</p>
+        <span id="workflow-editor-worker">Worker: not selected</span>
+      </footer>
+    </main>
+    <dialog id="workflow-crop-dialog" class="workflow-crop-dialog" aria-labelledby="workflow-crop-title">
+      <form method="dialog" class="workflow-crop-shell">
+        <header class="workflow-crop-header">
+          <div>
+            <span class="eyebrow">Target Locator</span>
+            <h2 id="workflow-crop-title">Edit Crop</h2>
+            <p>원본 프레임에서 Target ROI만 조정합니다. Context ROI는 변경하지 않습니다.</p>
+          </div>
+          <button id="workflow-crop-cancel" class="btn" type="button">Cancel</button>
+        </header>
+        <div class="workflow-crop-content">
+          <section class="workflow-crop-source-panel">
+            <div class="workflow-crop-section-head">
+              <strong>Pre-action source frame</strong>
+              <span id="workflow-crop-coordinates">ROI pending</span>
+            </div>
+            <div class="workflow-crop-stage" id="workflow-crop-stage">
+              <img id="workflow-crop-source" alt="Verified pre-action source frame" draggable="false" />
+              <div id="workflow-crop-box" class="workflow-crop-box" aria-label="Adjustable target crop">
+                <i data-crop-handle="n"></i><i data-crop-handle="ne"></i>
+                <i data-crop-handle="e"></i><i data-crop-handle="se"></i>
+                <i data-crop-handle="s"></i><i data-crop-handle="sw"></i>
+                <i data-crop-handle="w"></i><i data-crop-handle="nw"></i>
+              </div>
+            </div>
+          </section>
+          <aside class="workflow-crop-preview-panel">
+            <div class="workflow-crop-section-head"><strong>Locator preview</strong><span>PNG · max 512 px</span></div>
+            <div class="workflow-crop-preview-wrap"><canvas id="workflow-crop-preview"></canvas></div>
+            <p>드래그하여 이동하고 모서리 또는 변 핸들로 크기를 조정합니다.</p>
+          </aside>
+        </div>
+        <footer class="workflow-crop-actions">
+          <button id="workflow-crop-reset" class="btn" type="button">Reset to AI</button>
+          <button id="workflow-crop-apply" class="btn primary" type="button">Apply Crop</button>
+        </footer>
+      </form>
+    </dialog>
+    <script src="/static/equipment_skill_workflow_model.js"></script>
+    <script src="/static/equipment_skill_workflow_editor.js"></script>
+  </body>
+</html>

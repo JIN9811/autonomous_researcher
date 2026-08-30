@@ -26,7 +26,7 @@ from typing import Any
 
 import httpx
 
-from backends.llm_backend import BaseLLMBackend, LLMResponse
+from backends.llm_backend import BaseLLMBackend, LLMImageInput, LLMResponse, openai_user_content
 OPENAI_MAX_COMPLETION_TOKENS_BY_TASK = {
     "orchestrator_plan": 1800,
     "design_reasoning": 1200,
@@ -96,6 +96,7 @@ class OpenAIBackend(BaseLLMBackend):
         system_prompt: str,
         user_prompt: str,
         metadata: dict[str, Any] | None = None,
+        images: list[LLMImageInput] | None = None,
     ) -> LLMResponse:
         if not self._api_key:
             raise RuntimeError("OPENAI_API_KEY is required for the openai backend.")
@@ -105,7 +106,7 @@ class OpenAIBackend(BaseLLMBackend):
             "stream": False,
             "messages": [
                 {"role": "developer", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {"role": "user", "content": openai_user_content(user_prompt, images)},
             ],
         }
         max_tokens = self._max_tokens_for_metadata(metadata)

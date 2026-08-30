@@ -1,7 +1,5 @@
 param(
     [string]$Url = "http://127.0.0.1:8765",
-    [string]$Token = "",
-    [string]$TokenFile = "",
     [string]$OutputPath = "",
     [switch]$RunProgram1
 )
@@ -9,23 +7,21 @@ param(
 $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = (Resolve-Path (Join-Path $scriptDir "..")).Path
-if (-not $TokenFile) {
-    $dataRoot = if ($env:WINDOWS_PYAUTOGUI_DATA_ROOT) { $env:WINDOWS_PYAUTOGUI_DATA_ROOT } else { "$env:LOCALAPPDATA\ATR\PyAutoGUIBridge" }
-    $TokenFile = Join-Path $dataRoot ".bridge_token"
-}
-if (-not $Token -and (Test-Path -LiteralPath $TokenFile)) { $Token = (Get-Content $TokenFile -Raw).Trim() }
-if (-not $Token) { throw "Bridge token is required for native acceptance." }
 if (-not $OutputPath) { $OutputPath = Join-Path $projectRoot "artifacts\native_acceptance.json" }
-$headers = @{ "X-Bridge-Token" = $Token }
 
-$health = Invoke-RestMethod -Uri "$Url/health" -Headers $headers -Method Get
-$examples = Invoke-RestMethod -Uri "$Url/examples" -Headers $headers -Method Get
+$health = Invoke-RestMethod -Uri "$Url/health" -Method Get
+$pairing = Invoke-RestMethod -Uri "$Url/pairing/status" -Method Get
+$examples = $null
 $programResult = $null
-if ($RunProgram1) {
-    $programResult = Invoke-RestMethod -Uri "$Url/execute" -Headers $headers -Method Post -ContentType "application/json" -Body '{"program_id":"program1","confirm_execute":true}'
+if ($pairing.paired) {
+    $examples = Invoke-RestMethod -Uri "$Url/examples" -Method Get
+    if ($RunProgram1) {
+        $programResult = Invoke-RestMethod -Uri "$Url/execute" -Method Post -ContentType "application/json" -Body '{"program_id":"program1","confirm_execute":true}'
+    }
 }
+
 $accepted = [bool]($health.status -eq "ready" -and $health.platform.desktop_control_ready -and $health.dependencies.core_ready -and $health.demo_assets.available)
-if ($RunProgram1) { $accepted = $accepted -and [bool]$programResult.ok }
+if ($RunProgram1) { $accepted = $accepted -and [bool]$pairing.paired -and [bool]$programResult.ok }
 $evidence = [ordered]@{
     schema = "atr.windows_pyautogui_native_acceptance.v1"
     accepted = $accepted
@@ -34,11 +30,13 @@ $evidence = [ordered]@{
     user_name = $env:USERNAME
     powershell_version = $PSVersionTable.PSVersion.ToString()
     health = $health
-    example_count = @($examples.examples).Count
+    pairing = @{ paired = [bool]$pairing.paired; status = $pairing.status }
+    example_count = if ($examples) { @($examples.examples).Count } else { 0 }
     program1 = $programResult
 }
 New-Item -ItemType Directory -Path (Split-Path -Parent $OutputPath) -Force | Out-Null
 $evidence | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $OutputPath -Encoding UTF8
 Write-Host "Native acceptance: $accepted"
+Write-Host "Pairing: $($pairing.status)"
 Write-Host "Evidence: $OutputPath"
 if (-not $accepted) { exit 1 }

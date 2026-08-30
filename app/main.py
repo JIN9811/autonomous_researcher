@@ -24,6 +24,7 @@ Modification guide:
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
 import csv
 import ctypes
@@ -49,7 +50,7 @@ from urllib.parse import quote, unquote, urlparse
 import yaml
 import httpx
 from dotenv import dotenv_values
-from typing import Any, AsyncIterator, Literal
+from typing import Any, AsyncIterator, Callable, Literal
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.exception_handlers import request_validation_exception_handler
@@ -137,8 +138,19 @@ from utils.manipulation_profile import (
 )
 from utils.recording_specimen_pose import load_recording_specimen_pose
 from utils.ids import make_event_id
-from utils.equipment_profiles import DEFAULT_UTM_PROFILE_ID, EquipmentProfileRegistry, build_execution_contract
+from utils.equipment_profiles import DEFAULT_UTM_PROFILE_ID, EquipmentProfile, EquipmentProfileRegistry, build_execution_contract
 from utils.equipment_skill_runtime import EquipmentSkillRegistry, SkillContractError, canonical_sha256
+from utils.equipment_skill_workflow import validate_editable_workflow
+from utils.equipment_skill_authoring_jobs import EquipmentSkillAuthoringJobManager, TERMINAL_STATUSES
+from utils.equipment_skill_vision import (
+    SkillVisionEvidence,
+    apply_visual_locator_annotations,
+    build_temporal_storyboards,
+    collect_visual_annotation_evidence,
+    resolve_visual_locator_source,
+    strip_inline_image_payloads,
+)
+from utils.equipment_runtime_service import EquipmentRuntimeContractError, EquipmentRuntimeService
 from utils.local_pyautogui_bridge import LocalPyAutoGUIBridgeSupervisor
 from utils.paths import resolve_path
 from utils.printer_profile import (
@@ -179,6 +191,9 @@ PLC_TRANSACTION_STATE_PATH = resolve_path("memory/plc_bridge_state.json")
 AGENT_BASELINE_DOC_PATH = resolve_path("docs/runtime/agent_program_baseline.md")
 BO_WORKSPACE_SETTINGS_PATH = resolve_path("memory/bo_workspace_settings.json")
 EQUIPMENT_SKILL_ROOT = resolve_path("memory/equipment_skills")
+EQUIPMENT_RUNTIME_ROOT = resolve_path("memory/equipment_runtime")
+EQUIPMENT_SKILL_AUTHORING_JOB_ROOT = resolve_path("memory/equipment_runtime/skill_authoring_jobs")
+EQUIPMENT_WORKSPACE_SETTINGS_PATH = resolve_path("memory/equipment_workspace_settings.json")
 CAE_WORKSPACE_SETTINGS_PATH = resolve_path("memory/cae_workspace_settings.json")
 SELF_EVOLUTION_ROOT = resolve_path("memory/evolution")
 KNOWLEDGE_MEMORY_ROOT = resolve_path("memory/knowledge")
@@ -1214,6 +1229,16 @@ class WindowsBridgeConnectRequest(BaseModel):
     token_header: str = "X-Bridge-Token"
 
 
+class WindowsBridgePairRequest(BaseModel):
+    """Request body for pairing a discovered bridge with its short-lived local code."""
+
+    candidate_alias: str = Field(..., min_length=1)
+    host: str = ""
+    bridge_url: str = ""
+    port: int = 8765
+    pairing_code: str = Field(..., pattern=r"^\d{4}$")
+
+
 class WindowsBridgeCandidateRequest(BaseModel):
     """Request body for selecting/deleting a saved Windows PyAutoGUI candidate."""
 
@@ -1246,6 +1271,13 @@ class EquipmentProfileActionRequest(BaseModel):
     confirm_execute: bool = False
     program_id: str = ""
     include_screenshot: bool = True
+    vision_link_enabled: bool | None = None
+
+
+class EquipmentProfileSettingsRequest(BaseModel):
+    """Persist operator preferences for one registered equipment Profile."""
+
+    vision_link_enabled: bool
 
 
 class EquipmentSkillDraftRequest(BaseModel):
@@ -1255,6 +1287,15 @@ class EquipmentSkillDraftRequest(BaseModel):
     skill_id: str = Field(..., min_length=1, max_length=96)
     version: str = Field(default="1.0.0", min_length=5, max_length=64)
     target_profile: str = Field(..., min_length=1, max_length=96)
+
+
+class EquipmentRecordingImportRequest(BaseModel):
+    """Pull one saved worker recording into the Linux-owned Skill registry."""
+
+    skill_id: str = Field(..., min_length=1, max_length=96)
+    version: str = Field(default="1.0.0", min_length=5, max_length=64)
+    target_profile: str = Field(..., min_length=1, max_length=96)
+    bridge_id: str = Field(..., min_length=1, max_length=96)
 
 
 class EquipmentSkillAnnotationRequest(BaseModel):
@@ -1269,6 +1310,26 @@ class EquipmentSkillDeploymentRequest(BaseModel):
 
     bridge_id: str = Field(..., min_length=1, max_length=96)
     deployment_sha256: str = Field(default="", min_length=0, max_length=64)
+
+
+class EquipmentSkillWorkflowUpdateRequest(BaseModel):
+    """Atomically replace one exact editable Skill workflow revision."""
+
+    expected_workflow_sha256: str = Field(..., min_length=64, max_length=64)
+    workflow: dict[str, Any]
+
+
+class EquipmentSkillWorkflowCheckRequest(BaseModel):
+    """Check a draft workflow without persisting or compiling it."""
+
+    workflow: dict[str, Any]
+
+
+class EquipmentSkillWorkflowStepTestRequest(BaseModel):
+    """Run exactly one selected workflow step against one worker."""
+
+    bridge_id: str = Field(..., min_length=1, max_length=96)
+    confirm_execute: bool = False
 
 
 class EquipmentSkillEnabledRequest(BaseModel):
@@ -2466,6 +2527,25 @@ async def windows_equipment_gui(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/equipment/skills/{skill_id}/{version}/workflow-editor", response_class=HTMLResponse)
+async def equipment_skill_workflow_editor(request: Request, skill_id: str, version: str) -> HTMLResponse:
+    """Serve the exact-version sequential Equipment Skill editor."""
+    try:
+        package = _equipment_skill_registry().get(skill_id, version)
+    except SkillContractError as exc:
+        raise _skill_contract_http_error(exc) from exc
+    return templates.TemplateResponse(
+        request=request,
+        name="equipment_skill_workflow_editor.html",
+        context={
+            "title": f"Skill Workflow · {skill_id}@{version}",
+            "skill_id": skill_id,
+            "skill_version": version,
+            "skill_lifecycle": str(package.get("manifest", {}).get("lifecycle") or "draft"),
+        },
+    )
+
+
 def _rewrite_windows_bridge_console_html(html: str) -> str:
     """Keep the Windows bridge's absolute API calls inside the ATR proxy namespace."""
     prefix = "/equipment/windows/bridge-ui"
@@ -3214,6 +3294,14 @@ def _guardian_status_payload(run_id: str | None = None, *, snapshot: dict[str, o
 async def get_state() -> dict[str, object]:
     """Return current controller state plus host/GPU resource telemetry."""
     snapshot = controller.snapshot()
+    controller_state = snapshot.get("state") if isinstance(snapshot.get("state"), dict) else {}
+    equipment_execution = _equipment_runtime_service().latest(
+        run_id=str(controller_state.get("run_id") or "")
+    )
+    snapshot["equipment_runtime"] = {
+        "execution": equipment_execution,
+        "projection": EquipmentRuntimeService.project(equipment_execution) if equipment_execution else None,
+    }
     snapshot["system_resources"] = _system_resource_snapshot()
     snapshot["guardian_status"] = _guardian_status_payload(snapshot=snapshot)
     snapshot["runtime_ide_contract"] = _runtime_ide_contract_payload(snapshot)
@@ -11121,6 +11209,377 @@ def _equipment_skill_registry() -> EquipmentSkillRegistry:
     return EquipmentSkillRegistry(EQUIPMENT_SKILL_ROOT)
 
 
+def _equipment_runtime_service() -> EquipmentRuntimeService:
+    return EquipmentRuntimeService(EQUIPMENT_RUNTIME_ROOT)
+
+
+def _equipment_skill_authoring_job_manager() -> EquipmentSkillAuthoringJobManager:
+    return EquipmentSkillAuthoringJobManager(EQUIPMENT_SKILL_AUTHORING_JOB_ROOT)
+
+
+_EQUIPMENT_SKILL_AUTHORING_THREADS: dict[str, threading.Thread] = {}
+_EQUIPMENT_SKILL_AUTHORING_THREADS_LOCK = threading.Lock()
+_EQUIPMENT_SKILL_DEPLOYMENT_THREADS: dict[str, threading.Thread] = {}
+_EQUIPMENT_SKILL_DEPLOYMENT_THREADS_LOCK = threading.Lock()
+
+
+class _EquipmentSkillDeploymentStopped(RuntimeError):
+    """Internal cooperative-stop signal raised only at deployment boundaries."""
+
+
+class _EquipmentSkillAuthoringStopped(RuntimeError):
+    """Internal cooperative-stop signal raised between persisted analysis chunks."""
+
+
+def _stop_equipment_skill_authoring_at_boundary(
+    manager: EquipmentSkillAuthoringJobManager,
+    job_id: str,
+    runtime_service: EquipmentRuntimeService,
+    runtime: dict[str, Any] | None,
+) -> bool:
+    job = manager.get(job_id)
+    if not job.get("stop_requested"):
+        return False
+    if runtime and str(runtime.get("lifecycle") or "").upper() not in TERMINAL_STATUSES | {"BLOCKED", "ABORTED"}:
+        runtime_service.transition(
+            runtime["execution_id"],
+            "ABORTED",
+            status="stopped",
+            detail="Skill authoring stopped at a safe stage boundary",
+            completion={"ok": False, "status": "stopped"},
+            metadata={"agentic_progress": "STOPPED", "recording_id": job["recording_id"]},
+        )
+    manager.mark_stopped(job_id, "Stopped at a safe stage boundary")
+    return True
+
+
+def _run_equipment_skill_authoring_job(job_id: str) -> None:
+    """Transfer, structure, annotate, and verify one Skill outside the request thread."""
+    manager = _equipment_skill_authoring_job_manager()
+    runtime_service = _equipment_runtime_service()
+    job = manager.get(job_id)
+    runtime: dict[str, Any] | None = None
+    try:
+        if _stop_equipment_skill_authoring_at_boundary(manager, job_id, runtime_service, runtime):
+            return
+        manager.update(
+            job_id,
+            stage="TRANSFERRING",
+            progress=25,
+            status_text="Transferring recording from selected Windows Worker",
+        )
+        sequence_id = f"recording-import-{job_id}"
+        runtime = runtime_service.begin(
+            sequence_id=sequence_id,
+            run_id=sequence_id,
+            experiment_id="equipment-skill-authoring",
+            specimen_id="skill-package",
+            profile_id=job["target_profile"],
+            mode="live",
+            worker={"worker_id": job["bridge_id"], "kind": "windows_pyautogui"},
+            execution_ref={
+                "type": "skill",
+                "skill_id": job["skill_id"],
+                "version": job["version"],
+                "operation": "recording_import",
+            },
+            model_snapshot=_equipment_skill_model_snapshot(),
+            metadata={"agentic_progress": "TRANSFERRING", "recording_id": job["recording_id"]},
+        )
+        runtime = runtime_service.transition(
+            runtime["execution_id"],
+            "PREFLIGHT",
+            status="transferring",
+            detail="selected worker recording accepted for transfer",
+        )
+        if _stop_equipment_skill_authoring_at_boundary(manager, job_id, runtime_service, runtime):
+            return
+        worker_result = _equipment_bridge().get_recording(
+            {
+                "recording_id": job["recording_id"],
+                "bridge_id": job["bridge_id"],
+                "force_live_bridge": True,
+            }
+        )
+        if not worker_result.get("ok"):
+            failure_code = str(worker_result.get("failure_code") or "PYAUTOGUI_RECORDING_TRANSFER_FAILED")
+            message = str(worker_result.get("message") or "Selected worker recording transfer failed.")
+            runtime_service.transition(
+                runtime["execution_id"],
+                "BLOCKED",
+                status="blocked",
+                detail=message,
+                failure={"failure_code": failure_code},
+                completion={"ok": False, "status": "blocked"},
+                metadata={"agentic_progress": "FAILED", "recording_id": job["recording_id"]},
+            )
+            manager.update(
+                job_id,
+                stage="FAILED",
+                progress=25,
+                status_text=message,
+                status="FAILED",
+                error={"failure_code": failure_code, "message": message},
+            )
+            return
+        recording = {key: value for key, value in worker_result.items() if key not in {"ok", "tool", "mode", "bridge"}}
+        if str(recording.get("recording_id") or "") != job["recording_id"]:
+            raise SkillContractError("Selected worker returned a different recording identity.")
+        if _stop_equipment_skill_authoring_at_boundary(manager, job_id, runtime_service, runtime):
+            return
+        manager.update(job_id, stage="STRUCTURING", progress=45, status_text="Structuring recorded actions into Skill steps")
+        runtime = runtime_service.transition(
+            runtime["execution_id"],
+            "EXECUTING",
+            status="building_skill",
+            detail="saved recording transferred; building Linux Skill draft",
+            evidence=[
+                {
+                    "kind": "equipment_recording",
+                    "recording_id": job["recording_id"],
+                    "sha256": canonical_sha256(recording),
+                    "timeline_id": str(recording.get("timeline_id") or ""),
+                }
+            ],
+            metadata={"agentic_progress": "STRUCTURING", "recording_id": job["recording_id"]},
+        )
+        registry = _equipment_skill_registry()
+        package = _equipment_skill_registry().create_draft(
+            recording=recording,
+            skill_id=job["skill_id"],
+            version=job["version"],
+            target_profile=job["target_profile"],
+            model_snapshot=_equipment_skill_model_snapshot(),
+        )
+        manager.update(job_id, stage="ANNOTATING", progress=70, status_text="Annotating Skill steps with the selected LLM")
+        try:
+            def update_annotation_progress(stage: str, completed: int, total: int) -> None:
+                if stage == "ANALYZING_TIMELINE":
+                    progress = 70 + int(15 * completed / max(1, total))
+                    status_text = f"Analyzing recording timeline chunk {completed}/{total}"
+                else:
+                    progress = 86
+                    status_text = "Synthesizing complete Skill annotation"
+                manager.update(job_id, stage=stage, progress=progress, status_text=status_text)
+
+            annotations, model_snapshot = asyncio.run(
+                _annotate_equipment_skill_with_selected_model(
+                    package,
+                    progress_callback=update_annotation_progress,
+                    stop_requested=lambda: bool(manager.get(job_id).get("stop_requested")),
+                )
+            )
+            package = registry.annotate(
+                job["skill_id"],
+                job["version"],
+                annotations,
+                model_snapshot=model_snapshot,
+            )
+        except _EquipmentSkillAuthoringStopped:
+            raise
+        except Exception:
+            try:
+                registry.delete(job["skill_id"], job["version"])
+            except SkillContractError:
+                pass
+            raise
+        if _stop_equipment_skill_authoring_at_boundary(manager, job_id, runtime_service, runtime):
+            return
+        manager.update(
+            job_id,
+            stage="VALIDATING",
+            progress=90,
+            status_text="Validating recording provenance and annotation coverage",
+        )
+        runtime = runtime_service.transition(
+            runtime["execution_id"],
+            "VERIFYING",
+            status="verifying",
+            detail="Skill identity, recording provenance, and annotation coverage verified",
+            metadata={"agentic_progress": "VALIDATING", "recording_id": job["recording_id"]},
+        )
+        if _stop_equipment_skill_authoring_at_boundary(manager, job_id, runtime_service, runtime):
+            return
+        runtime = runtime_service.transition(
+            runtime["execution_id"],
+            "COMPLETED",
+            status="verified_complete",
+            detail="recording transfer and annotated Skill creation completed",
+            completion={"ok": True, "status": "verified_complete"},
+            handoff={"status": "skill_ready_for_compile"},
+            metadata={"agentic_progress": "READY", "recording_id": job["recording_id"]},
+        )
+        result = _equipment_skill_success(
+            {
+                **package,
+                "transfer": {
+                    "recording_id": job["recording_id"],
+                    "source_worker": job["bridge_id"],
+                    "fallback_used": False,
+                },
+                "equipment_runtime_execution": runtime,
+                "equipment_runtime_projection": EquipmentRuntimeService.project(runtime),
+            }
+        )
+        manager.update(
+            job_id,
+            stage="COMPLETED",
+            progress=100,
+            status_text=f"Annotated Skill {job['skill_id']}@{job['version']} is ready",
+            status="COMPLETED",
+            result=result,
+        )
+    except Exception as exc:
+        current = manager.get(job_id)
+        if current.get("stop_requested"):
+            _stop_equipment_skill_authoring_at_boundary(manager, job_id, runtime_service, runtime)
+            return
+        message = str(exc) or exc.__class__.__name__
+        if runtime and str(runtime.get("lifecycle") or "").upper() not in {"COMPLETED", "BLOCKED", "ABORTED"}:
+            try:
+                runtime_service.transition(
+                    runtime["execution_id"],
+                    "BLOCKED",
+                    status="blocked",
+                    detail=message,
+                    failure={"failure_code": "SKILL_AUTHORING_FAILED"},
+                    completion={"ok": False, "status": "blocked"},
+                    metadata={"agentic_progress": "FAILED", "recording_id": job["recording_id"]},
+                )
+            except EquipmentRuntimeContractError:
+                pass
+        manager.update(
+            job_id,
+            stage="FAILED",
+            progress=int(current.get("progress") or 0),
+            status_text=message,
+            status="FAILED",
+            error={"failure_code": "SKILL_AUTHORING_FAILED", "message": message},
+        )
+
+
+def _launch_equipment_skill_authoring_job(job_id: str) -> None:
+    def run_and_release() -> None:
+        try:
+            _run_equipment_skill_authoring_job(job_id)
+        finally:
+            with _EQUIPMENT_SKILL_AUTHORING_THREADS_LOCK:
+                _EQUIPMENT_SKILL_AUTHORING_THREADS.pop(job_id, None)
+
+    thread = threading.Thread(target=run_and_release, name=f"skill-authoring-{job_id[-8:]}", daemon=True)
+    with _EQUIPMENT_SKILL_AUTHORING_THREADS_LOCK:
+        _EQUIPMENT_SKILL_AUTHORING_THREADS[job_id] = thread
+    thread.start()
+
+
+def _run_equipment_skill_deployment_job(job_id: str) -> None:
+    """Deploy one exact validated Skill while persisting stage progress."""
+    manager = _equipment_skill_authoring_job_manager()
+    job = manager.get(job_id)
+
+    def update_progress(stage: str, progress: int, status_text: str) -> None:
+        manager.update(job_id, stage=stage, progress=progress, status_text=status_text)
+
+    def stop_requested() -> bool:
+        return bool(manager.get(job_id).get("stop_requested"))
+
+    try:
+        if stop_requested():
+            manager.mark_stopped(job_id, "Deployment stopped before preflight")
+            return
+        result = _execute_equipment_skill_deployment(
+            job["skill_id"],
+            job["version"],
+            EquipmentSkillDeploymentRequest(bridge_id=job["bridge_id"]),
+            progress_callback=update_progress,
+            stop_requested=stop_requested,
+        )
+        manager.update(
+            job_id,
+            stage="DEPLOYED",
+            progress=100,
+            status_text=f"Skill {job['skill_id']}@{job['version']} deployed",
+            status="COMPLETED",
+            result=result,
+        )
+    except _EquipmentSkillDeploymentStopped as exc:
+        manager.mark_stopped(job_id, str(exc))
+    except Exception as exc:
+        current = manager.get(job_id)
+        detail = exc.detail if isinstance(exc, HTTPException) and isinstance(exc.detail, dict) else {}
+        message = str(detail.get("message") or str(exc) or exc.__class__.__name__)
+        manager.update(
+            job_id,
+            stage="FAILED",
+            progress=int(current.get("progress") or 0),
+            status_text=message,
+            status="FAILED",
+            error={
+                "failure_code": str(detail.get("failure_code") or "SKILL_DEPLOYMENT_FAILED"),
+                "message": message,
+            },
+        )
+
+
+def _launch_equipment_skill_deployment_job(job_id: str) -> None:
+    def run_and_release() -> None:
+        try:
+            _run_equipment_skill_deployment_job(job_id)
+        finally:
+            with _EQUIPMENT_SKILL_DEPLOYMENT_THREADS_LOCK:
+                _EQUIPMENT_SKILL_DEPLOYMENT_THREADS.pop(job_id, None)
+
+    thread = threading.Thread(target=run_and_release, name=f"skill-deployment-{job_id[-8:]}", daemon=True)
+    with _EQUIPMENT_SKILL_DEPLOYMENT_THREADS_LOCK:
+        _EQUIPMENT_SKILL_DEPLOYMENT_THREADS[job_id] = thread
+    thread.start()
+
+
+@app.get("/api/equipment/runtime/executions")
+async def get_equipment_runtime_executions(limit: int = 100) -> dict[str, Any]:
+    executions = _equipment_runtime_service().list(limit=limit)
+    return {
+        "ok": True,
+        "executions": executions,
+        "projections": [EquipmentRuntimeService.project(item) for item in executions],
+    }
+
+
+@app.get("/api/equipment/runtime/current")
+async def get_current_equipment_runtime_execution(
+    run_id: str = "",
+    profile_id: str = "",
+    execution_id: str = "",
+) -> dict[str, Any]:
+    """Return the latest Equipment execution scoped to the active run when supplied."""
+    execution = _equipment_runtime_service().latest(
+        run_id=run_id,
+        profile_id=profile_id,
+        execution_id=execution_id,
+    )
+    return {
+        "ok": True,
+        "execution": execution,
+        "projection": EquipmentRuntimeService.project(execution) if execution else None,
+    }
+
+
+@app.get("/api/equipment/runtime/executions/{execution_id}")
+async def get_equipment_runtime_execution(execution_id: str) -> dict[str, Any]:
+    try:
+        execution = _equipment_runtime_service().get(execution_id)
+    except EquipmentRuntimeContractError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"ok": False, "failure_code": "EQUIPMENT_EXECUTION_NOT_FOUND", "message": str(exc)},
+        ) from exc
+    return {
+        "ok": True,
+        "execution": execution,
+        "projection": EquipmentRuntimeService.project(execution),
+    }
+
+
 def _equipment_skill_success(package: dict[str, Any]) -> dict[str, Any]:
     """Return one lifecycle package with the success flag expected by both GUIs."""
     return {"ok": True, **package}
@@ -11135,22 +11594,76 @@ def _equipment_skill_model_snapshot() -> dict[str, Any]:
     selection = router.select("tool_formatting")
     runtime_profile = dict(ctx.runtime_profiles.get(provider, {}))
     backend_profile = runtime_profile.get("backend") if isinstance(runtime_profile.get("backend"), dict) else {}
+    model_profiles = runtime_profile.get("models") if isinstance(runtime_profile.get("models"), dict) else {}
+    selected_profile = (
+        model_profiles.get(selection.role)
+        if isinstance(model_profiles.get(selection.role), dict)
+        else {}
+    )
+    role_capabilities = (
+        selected_profile.get("capabilities")
+        if isinstance(selected_profile.get("capabilities"), dict)
+        else {}
+    )
     return {
         "provider": provider,
         "model": selection.primary,
         "role": selection.role,
         "endpoint_profile": str(backend_profile.get("label") or provider),
         "capabilities": {
-            "text": True,
-            "vision": bool(backend_profile.get("vision") or runtime_profile.get("vision")),
+            "text": bool(role_capabilities.get("text", True)),
+            "vision": bool(
+                role_capabilities.get("vision")
+                or backend_profile.get("vision")
+                or runtime_profile.get("vision")
+            ),
         },
         "snapshotted_at": datetime.now(timezone.utc).isoformat(),
         "fallback_allowed": False,
     }
 
 
-async def _annotate_equipment_skill_with_selected_model(package: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Call exactly one selected backend/model; never traverse the fallback chain."""
+def _equipment_skill_synthesis_evidence(
+    evidence: SkillVisionEvidence,
+    *,
+    timeline_chunk_count: int,
+) -> SkillVisionEvidence:
+    """Avoid resending state frames after their storyboard chunks were analyzed."""
+    if timeline_chunk_count < 1:
+        return evidence
+    retained_indexes = sorted(
+        {
+            int(step.get("image_index") or 0)
+            for step in evidence.steps
+            if isinstance(step, dict) and int(step.get("image_index") or 0) > 0
+        }
+    )
+    index_map = {old: new for new, old in enumerate(retained_indexes, start=1)}
+    images = [
+        evidence.images[index - 1]
+        for index in retained_indexes
+        if 0 < index <= len(evidence.images)
+    ]
+    steps = [
+        dict(step) | {"image_index": index_map[int(step["image_index"])]}
+        for step in evidence.steps
+        if isinstance(step, dict) and int(step.get("image_index") or 0) in index_map
+    ]
+    timeline = [
+        dict(item) | {"image_index": index_map[int(item["image_index"])]}
+        for item in evidence.timeline
+        if isinstance(item, dict) and int(item.get("image_index") or 0) in index_map
+    ]
+    return SkillVisionEvidence(images=images, steps=steps, timeline=timeline)
+
+
+async def _annotate_equipment_skill_with_selected_model(
+    package: dict[str, Any],
+    *,
+    progress_callback: Callable[[str, int, int], None] | None = None,
+    stop_requested: Callable[[], bool] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Analyze the complete timeline with exactly one selected backend/model."""
     ctx = controller._deps.agent_context
     snapshot = _equipment_skill_model_snapshot()
     provider = str(snapshot["provider"])
@@ -11164,6 +11677,20 @@ async def _annotate_equipment_skill_with_selected_model(package: dict[str, Any])
     workflow = package.get("workflow") if isinstance(package.get("workflow"), dict) else {}
     annotations = package.get("annotations") if isinstance(package.get("annotations"), dict) else {}
     manifest = package.get("manifest") if isinstance(package.get("manifest"), dict) else {}
+    vision_evidence = collect_visual_annotation_evidence(
+        package,
+        allowed_roots=[resolve_path("artifacts/equipment")],
+        max_images=16,
+    )
+    recording = package.get("recording") if isinstance(package.get("recording"), dict) else {}
+    recording_id = str(recording.get("recording_id") or manifest.get("timeline_id") or "recording").strip()
+    safe_recording_id = re.sub(r"[^A-Za-z0-9._-]+", "-", recording_id).strip("-.") or "recording"
+    storyboard_root = resolve_path("artifacts/equipment") / "skill_storyboards" / safe_recording_id
+    storyboards = build_temporal_storyboards(
+        package,
+        allowed_roots=[resolve_path("artifacts/equipment")],
+        output_dir=storyboard_root,
+    )
     manual_context = _manual_knowledge_context(
         " ".join(
             part
@@ -11181,16 +11708,112 @@ async def _annotate_equipment_skill_with_selected_model(package: dict[str, Any])
     )
     manual_audit = manual_context_audit(manual_context)
     snapshot["manual_context"] = manual_audit
+    timeline_chunk_analyses: list[dict[str, Any]] = []
+    if storyboards.chunks:
+        if not bool((snapshot.get("capabilities") or {}).get("vision")):
+            raise RuntimeError(f"selected model does not advertise visual capability: {provider}/{model}")
+        analysis_root = storyboard_root / "analyses"
+        analysis_root.mkdir(parents=True, exist_ok=True)
+        if progress_callback is not None:
+            progress_callback("ANALYZING_TIMELINE", 0, len(storyboards.chunks))
+        for chunk_index, chunk in enumerate(storyboards.chunks, start=1):
+            if stop_requested is not None and stop_requested():
+                raise _EquipmentSkillAuthoringStopped("Skill authoring stopped before the next timeline chunk")
+            chunk_payload = {
+                "chunk": {
+                    "chunk_id": chunk.chunk_id,
+                    "start_ms": chunk.start_ms,
+                    "end_ms": chunk.end_ms,
+                    "tiles": chunk.tiles,
+                }
+            }
+            chunk_response = await backend.complete(
+                model=model,
+                system_prompt=(
+                    "Analyze one chronological desktop-recording storyboard. Read every tile in order and return "
+                    "one JSON object only with chunk_id, summary, state_transitions, and source_frame_ids. "
+                    "source_frame_ids must contain every supplied tile frame_id exactly once and in tile order. "
+                    "Describe visible state changes and uncertainty; do not invent actions or credentials."
+                ),
+                user_prompt=json.dumps(chunk_payload, ensure_ascii=False),
+                metadata={
+                    "task_type": "equipment_skill_timeline_chunk",
+                    "role": snapshot["role"],
+                    "no_fallback": True,
+                    "chunk_index": chunk_index,
+                    "chunk_count": len(storyboards.chunks),
+                },
+                images=[chunk.image],
+            )
+            if not str(chunk_response.text or "").strip():
+                raise RuntimeError(f"selected model returned an empty timeline analysis: {chunk.chunk_id}")
+            chunk_analysis = _extract_json_object(chunk_response.text)
+            expected_frame_ids = [str(tile["frame_id"]) for tile in chunk.tiles]
+            returned_frame_ids = [str(item) for item in chunk_analysis.get("source_frame_ids", [])]
+            if returned_frame_ids != expected_frame_ids:
+                raise RuntimeError(f"timeline analysis omitted or reordered source frames: {chunk.chunk_id}")
+            chunk_analysis["chunk_id"] = chunk.chunk_id
+            chunk_analysis["start_ms"] = chunk.start_ms
+            chunk_analysis["end_ms"] = chunk.end_ms
+            chunk_analysis["storyboard_path"] = chunk.path
+            chunk_analysis["model"] = model
+            analysis_path = analysis_root / f"{chunk.chunk_id}.json"
+            temporary_path = analysis_path.with_suffix(".json.tmp")
+            temporary_path.write_text(
+                json.dumps(chunk_analysis, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            temporary_path.replace(analysis_path)
+            timeline_chunk_analyses.append(chunk_analysis)
+            if progress_callback is not None:
+                progress_callback("ANALYZING_TIMELINE", chunk_index, len(storyboards.chunks))
+            if stop_requested is not None and stop_requested():
+                raise _EquipmentSkillAuthoringStopped("Skill authoring stopped after the current timeline chunk")
+        if progress_callback is not None:
+            progress_callback("SYNTHESIZING", len(storyboards.chunks), len(storyboards.chunks))
+    synthesis_evidence = _equipment_skill_synthesis_evidence(
+        vision_evidence,
+        timeline_chunk_count=len(storyboards.chunks),
+    )
     response = await backend.complete(
         model=model,
         system_prompt=build_manual_grounded_prompt(
-            "You annotate an already recorded bounded Windows equipment workflow. Return one JSON object only. "
-            "Preserve every step_id. For each step provide label, confidence from 0 to 1, review_required, "
-            "optional locator, and checkpoint_after. Do not add executable actions or credentials.",
+            "You reconstruct and annotate one already recorded bounded Windows equipment workflow from its full "
+            "ordered action list and visual timeline. First infer the workflow intent, initial state, causal state "
+            "transitions, completion state, and visible success/failure evidence across the sequence; do not treat "
+            "images as unrelated screenshots. Return one JSON object only with workflow_summary, step_transitions, "
+            "and steps. workflow_summary may contain intent, initial_state, completion_state, and failure_state. "
+            "Each step_transition must preserve step_id and may contain before_state, action_effect, after_state, "
+            "success_evidence, and failure_evidence. Preserve every step_id in steps. For each step provide label, "
+            "confidence from 0 to 1, review_required, optional locator, and checkpoint_after. For every supplied "
+            "pre_action image return locator fields "
+            "search_roi_norm, target_bbox_norm, and context_bbox_norm as [x, y, width, height] values normalized "
+            "to that image. The search ROI may be broad; target_bbox must contain only the actionable control; "
+            "context_bbox must preserve nearby semantic context. Use action_context and state images to explain "
+            "what changed after each action. Do not add executable actions or credentials.",
             manual_context,
         ),
         user_prompt=json.dumps(
-            {"workflow": workflow, "current_annotations": annotations},
+            {
+                "workflow": strip_inline_image_payloads(workflow),
+                "current_annotations": annotations,
+                "recording_evidence": {
+                    "schema": str((manifest.get("recording_evidence") or {}).get("schema") or ""),
+                    "timeline_id": str(manifest.get("timeline_id") or ""),
+                    "sampled_frame_count": int(
+                        (manifest.get("recording_evidence") or {}).get("sampled_frame_count") or 0
+                    ),
+                    "persisted_frame_count": int(
+                        (manifest.get("recording_evidence") or {}).get("persisted_frame_count") or 0
+                    ),
+                    "event_frame_count": int(
+                        (manifest.get("recording_evidence") or {}).get("event_frame_count") or 0
+                    ),
+                },
+                "visual_evidence_index": synthesis_evidence.steps,
+                "visual_timeline": synthesis_evidence.timeline,
+                "timeline_chunk_analyses": timeline_chunk_analyses,
+            },
             ensure_ascii=False,
         ),
         metadata={
@@ -11199,21 +11822,63 @@ async def _annotate_equipment_skill_with_selected_model(package: dict[str, Any])
             "no_fallback": True,
             "manual_context_hash": manual_audit["context_hash"],
         },
+        images=synthesis_evidence.images,
     )
     if not str(response.text or "").strip():
         raise RuntimeError("selected model returned an empty annotation")
     payload = _extract_json_object(response.text)
     if not isinstance(payload.get("steps"), list):
         raise RuntimeError("selected model annotation did not contain steps")
+    if vision_evidence.images:
+        enriched = apply_visual_locator_annotations(
+            package,
+            payload,
+            allowed_roots=[resolve_path("artifacts/equipment")],
+        )
+        executable_by_step = {
+            str(step.get("step_id") or ""): step.get("action")
+            for step in enriched.get("workflow", {}).get("steps", [])
+            if isinstance(step, dict) and isinstance(step.get("action"), dict)
+        }
+        for annotation in payload["steps"]:
+            if not isinstance(annotation, dict) or not isinstance(annotation.get("locator"), dict):
+                continue
+            action = executable_by_step.get(str(annotation.get("step_id") or ""), {})
+            if action.get("locator_backend") != "multimodal_roi_image":
+                continue
+            annotation["locator"].update(
+                {
+                    "image_candidates": action["image_candidates"],
+                    "region_normalized": action["region_normalized"],
+                    "locator_backend": action["locator_backend"],
+                }
+            )
+        snapshot["capabilities"]["vision"] = True
+        snapshot["visual_evidence_count"] = len(vision_evidence.images)
+        snapshot["visual_timeline_count"] = len(vision_evidence.timeline)
+    snapshot["timeline_chunk_count"] = len(storyboards.chunks)
+    snapshot["timeline_source_frame_count"] = storyboards.source_frame_count
+    snapshot["timeline_overview_count"] = len(storyboards.overview_images)
+    snapshot["synthesis_visual_evidence_count"] = len(synthesis_evidence.images)
     return payload, snapshot
 
 
 def _skill_contract_http_error(exc: SkillContractError) -> HTTPException:
     message = str(exc)
-    status = 404 if "not found" in message.lower() else 409 if "already exists" in message.lower() else 400
+    lowered = message.lower()
+    status = 404 if "not found" in lowered else 409 if any(
+        marker in lowered for marker in ("already exists", "revision conflict", "immutable")
+    ) else 400
+    failure_code = (
+        "SKILL_WORKFLOW_REVISION_CONFLICT"
+        if "revision conflict" in lowered
+        else "SKILL_VERSION_IMMUTABLE"
+        if "immutable" in lowered
+        else "SKILL_CONTRACT_INVALID"
+    )
     return HTTPException(
         status_code=status,
-        detail={"ok": False, "failure_code": "SKILL_CONTRACT_INVALID", "message": message},
+        detail={"ok": False, "failure_code": failure_code, "message": message},
     )
 
 
@@ -11222,12 +11887,497 @@ async def get_equipment_skills() -> dict[str, Any]:
     return {"ok": True, "skills": _equipment_skill_registry().list(), "root": str(EQUIPMENT_SKILL_ROOT)}
 
 
+@app.get("/api/equipment/workers/{bridge_id}/recordings")
+async def get_equipment_worker_recordings(bridge_id: str) -> dict[str, Any]:
+    """List recordings from one explicitly selected Windows worker."""
+    worker_result = _equipment_bridge().list_recordings(
+        {"bridge_id": bridge_id, "force_live_bridge": True}
+    )
+    if not worker_result.get("ok"):
+        failure_code = str(worker_result.get("failure_code") or "PYAUTOGUI_RECORDING_LIST_FAILED")
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "ok": False,
+                "failure_code": failure_code,
+                "message": str(worker_result.get("message") or "Selected worker recording list failed."),
+                "fallback_used": False,
+            },
+        )
+    recordings = worker_result.get("recordings")
+    recording_summaries: list[dict[str, Any]] = []
+    if isinstance(recordings, list):
+        for item in recordings:
+            if not isinstance(item, dict):
+                continue
+            events = item.get("events")
+            recording_summaries.append(
+                {
+                    "recording_id": str(item.get("recording_id") or ""),
+                    "name": str(item.get("name") or item.get("recording_id") or "Unnamed recording"),
+                    "status": str(item.get("status") or "recorded"),
+                    "duration_ms": int(item.get("duration_ms") or 0),
+                    "event_count": len(events) if isinstance(events, list) else int(item.get("event_count") or 0),
+                    "created_at": str(item.get("created_at") or ""),
+                    "updated_at": str(item.get("updated_at") or ""),
+                }
+            )
+    return {
+        "ok": True,
+        "status": str(worker_result.get("status") or "ready"),
+        "bridge_id": bridge_id,
+        "recordings": recording_summaries,
+    }
+
+
+@app.post("/api/equipment/recordings/{recording_id}/import-skill/start", status_code=202)
+async def post_equipment_recording_import_start(
+    recording_id: str,
+    req: EquipmentRecordingImportRequest,
+) -> dict[str, Any]:
+    manager = _equipment_skill_authoring_job_manager()
+    job = manager.create(
+        recording_id=recording_id,
+        skill_id=req.skill_id,
+        version=req.version,
+        target_profile=req.target_profile,
+        bridge_id=req.bridge_id,
+    )
+    _launch_equipment_skill_authoring_job(job["job_id"])
+    return {"ok": True, "job": job}
+
+
+@app.get("/api/equipment/skill-authoring/jobs/{job_id}")
+async def get_equipment_skill_authoring_job(job_id: str) -> dict[str, Any]:
+    try:
+        job = _equipment_skill_authoring_job_manager().get(job_id)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"ok": False, "failure_code": "SKILL_AUTHORING_JOB_NOT_FOUND", "message": str(job_id)},
+        ) from exc
+    return {"ok": True, "job": job}
+
+
+@app.get("/api/equipment/skill-authoring/jobs/{job_id}/storyboards")
+async def get_equipment_skill_authoring_storyboards(
+    job_id: str,
+    cursor: int = 0,
+    limit: int = 2,
+) -> dict[str, Any]:
+    """Return a bounded storyboard page without exposing server filesystem paths."""
+    try:
+        job = _equipment_skill_authoring_job_manager().get(job_id)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"ok": False, "failure_code": "SKILL_AUTHORING_JOB_NOT_FOUND", "message": str(job_id)},
+        ) from exc
+    safe_recording_id = re.sub(r"[^A-Za-z0-9._-]+", "-", str(job.get("recording_id") or "")).strip("-.")
+    artifact_root = resolve_path("artifacts/equipment").resolve()
+    storyboard_root = (artifact_root / "skill_storyboards" / safe_recording_id).resolve()
+    try:
+        storyboard_root.relative_to(artifact_root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid recording identity") from exc
+    files = sorted(storyboard_root.glob("chunk-*.jpg")) if storyboard_root.is_dir() else []
+    safe_cursor = max(0, int(cursor))
+    safe_limit = max(1, min(8, int(limit)))
+    page = files[safe_cursor : safe_cursor + safe_limit]
+    items = [
+        {
+            "name": path.name,
+            "media_type": "image/jpeg",
+            "data_base64": base64.b64encode(path.read_bytes()).decode("ascii"),
+        }
+        for path in page
+    ]
+    next_cursor = safe_cursor + len(items)
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "recording_id": str(job.get("recording_id") or ""),
+        "cursor": safe_cursor,
+        "limit": safe_limit,
+        "next_cursor": next_cursor if next_cursor < len(files) else None,
+        "total_count": len(files),
+        "items": items,
+    }
+
+
+@app.post("/api/equipment/skill-authoring/jobs/{job_id}/stop")
+async def post_equipment_skill_authoring_stop(job_id: str) -> dict[str, Any]:
+    try:
+        job = _equipment_skill_authoring_job_manager().request_stop(job_id)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"ok": False, "failure_code": "SKILL_AUTHORING_JOB_NOT_FOUND", "message": str(job_id)},
+        ) from exc
+    return {"ok": True, "job": job}
+
+
+@app.post("/api/equipment/skills/{skill_id}/{version}/deploy/start", status_code=202)
+async def post_equipment_skill_deployment_start(
+    skill_id: str,
+    version: str,
+    req: EquipmentSkillDeploymentRequest,
+) -> dict[str, Any]:
+    try:
+        _equipment_skill_registry().get(skill_id, version)
+    except SkillContractError as exc:
+        raise _skill_contract_http_error(exc) from exc
+    manager = _equipment_skill_authoring_job_manager()
+    job = manager.create_deployment(skill_id=skill_id, version=version, bridge_id=req.bridge_id)
+    _launch_equipment_skill_deployment_job(job["job_id"])
+    return {"ok": True, "job": job}
+
+
+@app.get("/api/equipment/skill-deployment/jobs/{job_id}")
+async def get_equipment_skill_deployment_job(job_id: str) -> dict[str, Any]:
+    try:
+        job = _equipment_skill_authoring_job_manager().get(job_id)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"ok": False, "failure_code": "SKILL_DEPLOYMENT_JOB_NOT_FOUND", "message": str(job_id)},
+        ) from exc
+    if job.get("operation") != "deployment":
+        raise HTTPException(
+            status_code=404,
+            detail={"ok": False, "failure_code": "SKILL_DEPLOYMENT_JOB_NOT_FOUND", "message": str(job_id)},
+        )
+    return {"ok": True, "job": job}
+
+
+@app.post("/api/equipment/skill-deployment/jobs/{job_id}/stop")
+async def post_equipment_skill_deployment_stop(job_id: str) -> dict[str, Any]:
+    manager = _equipment_skill_authoring_job_manager()
+    try:
+        job = manager.get(job_id)
+        if job.get("operation") != "deployment":
+            raise KeyError(job_id)
+        job = manager.request_stop(job_id)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"ok": False, "failure_code": "SKILL_DEPLOYMENT_JOB_NOT_FOUND", "message": str(job_id)},
+        ) from exc
+    return {"ok": True, "job": job}
+
+
+@app.post("/api/equipment/recordings/{recording_id}/import-skill")
+async def post_equipment_recording_import(
+    recording_id: str,
+    req: EquipmentRecordingImportRequest,
+) -> dict[str, Any]:
+    """Pull a saved worker recording and create its authoritative Linux Skill draft."""
+    runtime_service = _equipment_runtime_service()
+    sequence_id = f"recording-import-{recording_id}-{req.skill_id}-{req.version}"
+    runtime = runtime_service.begin(
+        sequence_id=sequence_id,
+        run_id=sequence_id,
+        experiment_id="equipment-skill-authoring",
+        specimen_id="skill-package",
+        profile_id=req.target_profile,
+        mode="live",
+        worker={"worker_id": req.bridge_id, "kind": "windows_pyautogui"},
+        execution_ref={
+            "type": "skill",
+            "skill_id": req.skill_id,
+            "version": req.version,
+            "operation": "recording_import",
+        },
+        model_snapshot=_equipment_skill_model_snapshot(),
+        metadata={"agentic_progress": "TRANSFERRING", "recording_id": recording_id},
+    )
+    if runtime.get("lifecycle") == "RESOLVING":
+        runtime = runtime_service.transition(
+            runtime["execution_id"],
+            "PREFLIGHT",
+            status="transferring",
+            detail="selected worker recording accepted for transfer",
+        )
+    worker_result = _equipment_bridge().get_recording(
+        {"recording_id": recording_id, "bridge_id": req.bridge_id, "force_live_bridge": True}
+    )
+    if not worker_result.get("ok"):
+        failure_code = str(worker_result.get("failure_code") or "PYAUTOGUI_RECORDING_TRANSFER_FAILED")
+        runtime_service.transition(
+            runtime["execution_id"],
+            "BLOCKED",
+            status="blocked",
+            detail=str(worker_result.get("message") or "Selected worker recording transfer failed."),
+            failure={"failure_code": failure_code},
+            completion={"ok": False, "status": "blocked"},
+            metadata={"agentic_progress": "FAILED", "recording_id": recording_id},
+        )
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "ok": False,
+                "failure_code": failure_code,
+                "message": str(worker_result.get("message") or "Selected worker recording transfer failed."),
+                "fallback_used": False,
+            },
+        )
+    recording = {key: value for key, value in worker_result.items() if key not in {"ok", "tool", "mode", "bridge"}}
+    if str(recording.get("recording_id") or "") != recording_id:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "ok": False,
+                "failure_code": "PYAUTOGUI_RECORDING_ID_MISMATCH",
+                "message": "Selected worker returned a different recording identity.",
+                "fallback_used": False,
+            },
+        )
+    runtime = runtime_service.transition(
+        runtime["execution_id"],
+        "EXECUTING",
+        status="building_skill",
+        detail="saved recording transferred; building Linux Skill draft",
+        evidence=[
+            {
+                "kind": "equipment_recording",
+                "recording_id": recording_id,
+                "sha256": canonical_sha256(recording),
+                "timeline_id": str(recording.get("timeline_id") or ""),
+            }
+        ],
+        metadata={"agentic_progress": "BUILDING_SKILL", "recording_id": recording_id},
+    )
+    try:
+        package = _equipment_skill_registry().create_draft(
+            recording=recording,
+            skill_id=req.skill_id,
+            version=req.version,
+            target_profile=req.target_profile,
+            model_snapshot=_equipment_skill_model_snapshot(),
+        )
+    except SkillContractError as exc:
+        runtime_service.transition(
+            runtime["execution_id"],
+            "BLOCKED",
+            status="blocked",
+            detail=str(exc),
+            failure={"failure_code": "SKILL_CONTRACT_INVALID"},
+            completion={"ok": False, "status": "blocked"},
+            metadata={"agentic_progress": "FAILED", "recording_id": recording_id},
+        )
+        raise _skill_contract_http_error(exc) from exc
+    runtime = runtime_service.transition(
+        runtime["execution_id"],
+        "VERIFYING",
+        status="verifying",
+        detail="Linux Skill draft identity and recording provenance verified",
+        metadata={"agentic_progress": "VALIDATING", "recording_id": recording_id},
+    )
+    runtime = runtime_service.transition(
+        runtime["execution_id"],
+        "COMPLETED",
+        status="verified_complete",
+        detail="recording transfer and Linux Skill draft creation completed",
+        completion={"ok": True, "status": "verified_complete"},
+        handoff={"status": "skill_annotation_ready"},
+        metadata={"agentic_progress": "READY", "recording_id": recording_id},
+    )
+    return _equipment_skill_success(
+        {
+            **package,
+            "transfer": {
+                "recording_id": recording_id,
+                "source_worker": req.bridge_id,
+                "fallback_used": False,
+            },
+            "equipment_runtime_execution": runtime,
+            "equipment_runtime_projection": EquipmentRuntimeService.project(runtime),
+        }
+    )
+
+
 @app.get("/api/equipment/skills/{skill_id}/{version}")
 async def get_equipment_skill(skill_id: str, version: str) -> dict[str, Any]:
     try:
         return _equipment_skill_registry().get(skill_id, version)
     except SkillContractError as exc:
         raise _skill_contract_http_error(exc) from exc
+
+
+@app.get("/api/equipment/skills/{skill_id}/{version}/workflow")
+async def get_equipment_skill_workflow(skill_id: str, version: str) -> dict[str, Any]:
+    try:
+        package = _equipment_skill_registry().get(skill_id, version)
+    except SkillContractError as exc:
+        raise _skill_contract_http_error(exc) from exc
+    manifest = package["manifest"]
+    return {
+        "ok": True,
+        "manifest": manifest,
+        "workflow": package["workflow"],
+        "annotations": package["annotations"],
+        "workflow_sha256": str(manifest.get("workflow_sha256") or ""),
+        "editable": str(manifest.get("lifecycle") or "") not in {"deployed", "disabled"},
+    }
+
+
+@app.post("/api/equipment/skills/{skill_id}/{version}/workflow/check")
+async def post_equipment_skill_workflow_check(
+    skill_id: str,
+    version: str,
+    req: EquipmentSkillWorkflowCheckRequest,
+) -> dict[str, Any]:
+    try:
+        package = _equipment_skill_registry().get(skill_id, version)
+    except SkillContractError as exc:
+        raise _skill_contract_http_error(exc) from exc
+    workflow = dict(req.workflow)
+    if workflow.get("skill_id") != package["manifest"].get("skill_id") or workflow.get("version") != package["manifest"].get("version"):
+        raise _skill_contract_http_error(SkillContractError("workflow identity does not match exact Skill version"))
+    return validate_editable_workflow(workflow)
+
+
+@app.put("/api/equipment/skills/{skill_id}/{version}/workflow")
+async def put_equipment_skill_workflow(
+    skill_id: str,
+    version: str,
+    req: EquipmentSkillWorkflowUpdateRequest,
+) -> dict[str, Any]:
+    try:
+        package = _equipment_skill_registry().update_workflow(
+            skill_id,
+            version,
+            dict(req.workflow),
+            expected_workflow_sha256=req.expected_workflow_sha256,
+        )
+    except SkillContractError as exc:
+        raise _skill_contract_http_error(exc) from exc
+    return _equipment_skill_success(package)
+
+
+@app.post("/api/equipment/skills/{skill_id}/{version}/workflow/steps/{step_id}/test")
+async def post_equipment_skill_workflow_step_test(
+    skill_id: str,
+    version: str,
+    step_id: str,
+    req: EquipmentSkillWorkflowStepTestRequest,
+) -> dict[str, Any]:
+    if req.confirm_execute is not True:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "ok": False,
+                "failure_code": "SKILL_STEP_TEST_CONFIRMATION_REQUIRED",
+                "message": "Single-step live test requires explicit confirmation.",
+            },
+        )
+    try:
+        package = _equipment_skill_registry().get(skill_id, version)
+    except SkillContractError as exc:
+        raise _skill_contract_http_error(exc) from exc
+    step = next(
+        (
+            item
+            for item in package["workflow"].get("steps", [])
+            if isinstance(item, dict) and str(item.get("step_id") or "") == step_id
+        ),
+        None,
+    )
+    if not isinstance(step, dict) or not isinstance(step.get("action"), dict):
+        raise HTTPException(
+            status_code=404,
+            detail={"ok": False, "failure_code": "SKILL_STEP_NOT_FOUND", "message": step_id},
+        )
+    checked = validate_editable_workflow(
+        {**package["workflow"], "steps": [step], "program_ids": []},
+        locator_root=None,
+    )
+    if not checked["ok"]:
+        raise HTTPException(
+            status_code=400,
+            detail={"ok": False, "failure_code": "SKILL_STEP_INVALID", "issues": checked["issues"]},
+        )
+    result = _equipment_bridge().run(
+        {
+            "bridge_id": req.bridge_id,
+            "force_live_bridge": True,
+            "confirm_execute": True,
+            "run_id": f"skill-step-test-{skill_id}-{version}",
+            "specimen_id": step_id,
+            "sequence": [copy.deepcopy(step["action"])],
+        }
+    )
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "ok": False,
+                "failure_code": str(result.get("failure_code") or "SKILL_STEP_TEST_FAILED"),
+                "message": str(result.get("message") or "Single-step test failed."),
+                "result": result,
+            },
+        )
+    return {"ok": True, "step_id": step_id, "result": result}
+
+
+def _equipment_skill_locator_source(skill_id: str, version: str, step_id: str) -> dict[str, Any]:
+    registry = _equipment_skill_registry()
+    try:
+        package = registry.get(skill_id, version)
+        package["recording"] = registry.get_recording(skill_id, version)
+    except SkillContractError as exc:
+        raise _skill_contract_http_error(exc) from exc
+    source = resolve_visual_locator_source(
+        package,
+        step_id,
+        allowed_roots=[resolve_path("artifacts/equipment")],
+    )
+    if source is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "ok": False,
+                "failure_code": "SKILL_LOCATOR_SOURCE_UNAVAILABLE",
+                "message": "The verified pre-action source frame is unavailable for this step.",
+            },
+        )
+    return source
+
+
+@app.get("/api/equipment/skills/{skill_id}/{version}/workflow/steps/{step_id}/locator-source")
+async def get_equipment_skill_workflow_locator_source(
+    skill_id: str,
+    version: str,
+    step_id: str,
+) -> dict[str, Any]:
+    source = _equipment_skill_locator_source(skill_id, version, step_id)
+    return {
+        "ok": True,
+        "step_id": step_id,
+        "locator_id": source["locator_id"],
+        "source_size": source["source_size"],
+        "source_sha256": source["source_sha256"],
+        "target_bbox_norm": source["target_bbox_norm"],
+        "ai_target_bbox_norm": source["ai_target_bbox_norm"],
+        "image_url": (
+            f"/api/equipment/skills/{quote(skill_id, safe='')}/{quote(version, safe='')}"
+            f"/workflow/steps/{quote(step_id, safe='')}/locator-source/image"
+        ),
+    }
+
+
+@app.get("/api/equipment/skills/{skill_id}/{version}/workflow/steps/{step_id}/locator-source/image")
+async def get_equipment_skill_workflow_locator_source_image(
+    skill_id: str,
+    version: str,
+    step_id: str,
+) -> Response:
+    source = _equipment_skill_locator_source(skill_id, version, step_id)
+    return Response(
+        content=source["raw"],
+        media_type=source["media_type"],
+        headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @app.post("/api/equipment/skills/drafts")
@@ -11292,22 +12442,33 @@ async def post_equipment_skill_validate(skill_id: str, version: str) -> dict[str
         raise _skill_contract_http_error(exc) from exc
 
 
-@app.post("/api/equipment/skills/{skill_id}/{version}/deploy")
-async def post_equipment_skill_deploy(
+def _execute_equipment_skill_deployment(
     skill_id: str,
     version: str,
     req: EquipmentSkillDeploymentRequest,
+    *,
+    progress_callback: Any = None,
+    stop_requested: Any = None,
 ) -> dict[str, Any]:
     registry = _equipment_skill_registry()
     try:
-        package = registry.get(skill_id, version)
-        if package.get("manifest", {}).get("lifecycle") != "validated":
-            raise SkillContractError("Skill must be validated before deployment")
+        if callable(progress_callback):
+            progress_callback("COMPILING", 10, "Compiling saved Skill workflow")
+        package = registry.compile(skill_id, version)
+        if callable(stop_requested) and stop_requested():
+            raise _EquipmentSkillDeploymentStopped("Skill deployment stopped after compile")
+        if callable(progress_callback):
+            progress_callback("VALIDATING", 25, "Validating exact compiled Skill package")
+        package = registry.validate(skill_id, version)["package"]
+        if callable(stop_requested) and stop_requested():
+            raise _EquipmentSkillDeploymentStopped("Skill deployment stopped after validation")
         programs = [dict(item) for item in package.get("programs", []) if isinstance(item, dict)]
         if not programs:
             raise SkillContractError("Skill has no compiled programs to deploy")
         expected_hashes = {str(item.get("program_id") or ""): canonical_sha256(item) for item in programs}
         deployment_digest = canonical_sha256(expected_hashes)
+        if callable(progress_callback):
+            progress_callback("PACKAGING", 35, f"Prepared {len(programs)} exact program segment(s)")
         if req.deployment_sha256 and req.deployment_sha256.lower() != deployment_digest:
             raise HTTPException(
                 status_code=409,
@@ -11318,15 +12479,91 @@ async def post_equipment_skill_deploy(
                     "expected_sha256": deployment_digest,
                 },
             )
+        runtime_service = _equipment_runtime_service()
+        runtime_execution = runtime_service.begin(
+            sequence_id=f"skill-deploy-{skill_id}-{version}-{deployment_digest[:12]}",
+            run_id=f"skill-deploy-{skill_id}-{version}",
+            experiment_id="equipment-skill-deployment",
+            specimen_id="skill-package",
+            profile_id=str(package["manifest"].get("target_profile") or "generic_equipment"),
+            mode="live",
+            worker={"worker_id": req.bridge_id, "kind": "windows_pyautogui"},
+            execution_ref={"type": "skill", "skill_id": skill_id, "version": version, "operation": "deploy"},
+            metadata={
+                "operation": "deploy",
+                "deployment": {
+                    "bridge_id": req.bridge_id,
+                    "sha256": deployment_digest,
+                    "program_sha256": expected_hashes,
+                },
+            },
+        )
+        if runtime_execution.get("lifecycle") == "RESOLVING":
+            runtime_execution = runtime_service.transition(
+                runtime_execution["execution_id"],
+                "PREFLIGHT",
+                status="preflight",
+                detail="validated Skill package and exact deployment hashes accepted",
+            )
+            runtime_execution = runtime_service.transition(
+                runtime_execution["execution_id"],
+                "EXECUTING",
+                status="deploying",
+                detail=f"registering {len(programs)} deterministic program segment(s)",
+            )
         bridge = _equipment_bridge()
         registered: list[str] = []
-        for program in programs:
+        for index, program in enumerate(programs, start=1):
+            if callable(stop_requested) and stop_requested():
+                for registered_id in reversed(registered):
+                    bridge.delete_program(
+                        {
+                            "program_id": registered_id,
+                            "bridge_id": req.bridge_id,
+                            "force_live_bridge": True,
+                        }
+                    )
+                runtime_service.transition(
+                    runtime_execution["execution_id"],
+                    "ABORTED",
+                    status="stopped",
+                    detail="Skill deployment stopped at a program boundary",
+                    completion={"ok": False, "status": "stopped"},
+                )
+                raise _EquipmentSkillDeploymentStopped("Skill deployment stopped before the next program segment")
             program_id = str(program.get("program_id") or "")
-            result = bridge.register_program({"program": program, "force_live_bridge": True})
+            if callable(progress_callback):
+                progress_callback(
+                    "REGISTERING",
+                    35 + int((index - 1) * 50 / max(1, len(programs))),
+                    f"Registering program segment {index}/{len(programs)}",
+                )
+            result = bridge.register_program(
+                {"program": program, "bridge_id": req.bridge_id, "force_live_bridge": True}
+            )
             actual_hash = str(result.get("program_sha256") or "").lower()
             if not result.get("ok") or actual_hash != expected_hashes.get(program_id):
                 for registered_id in reversed(registered):
-                    bridge.delete_program({"program_id": registered_id, "force_live_bridge": True})
+                    bridge.delete_program(
+                        {
+                            "program_id": registered_id,
+                            "bridge_id": req.bridge_id,
+                            "force_live_bridge": True,
+                        }
+                    )
+                runtime_service.transition(
+                    runtime_execution["execution_id"],
+                    "BLOCKED",
+                    status="blocked",
+                    detail=str(result.get("message") or f"Bridge rejected exact program {program_id}."),
+                    failure={
+                        "failure_code": "SKILL_DEPLOYMENT_HASH_MISMATCH"
+                        if result.get("ok")
+                        else "SKILL_BRIDGE_REGISTRATION_FAILED",
+                        "program_id": program_id,
+                    },
+                    completion={"ok": False, "status": "blocked"},
+                )
                 raise HTTPException(
                     status_code=409,
                     detail={
@@ -11341,17 +12578,63 @@ async def post_equipment_skill_deploy(
                     },
                 )
             registered.append(program_id)
+            if callable(progress_callback):
+                progress_callback(
+                    "REGISTERING",
+                    35 + int(index * 50 / max(1, len(programs))),
+                    f"Registered program segment {index}/{len(programs)}",
+                )
+        if callable(progress_callback):
+            progress_callback("VERIFYING", 90, "Verifying Worker hashes against the validated Skill")
+        runtime_execution = runtime_service.transition(
+            runtime_execution["execution_id"],
+            "VERIFYING",
+            status="verifying",
+            detail="worker hashes match the validated Skill package",
+            evidence=[
+                {"kind": "deployed_program", "program_id": program_id, "sha256": expected_hashes[program_id]}
+                for program_id in registered
+            ],
+        )
+        deployed = registry.mark_deployed(
+            skill_id,
+            version,
+            bridge_id=req.bridge_id,
+            deployment_sha256=deployment_digest,
+            program_sha256=expected_hashes,
+        )
+        runtime_execution = runtime_service.transition(
+            runtime_execution["execution_id"],
+            "COMPLETED",
+            status="verified_complete",
+            detail="validated Skill programs deployed with exact hashes",
+            completion={"ok": True, "status": "verified_complete"},
+            handoff={"status": "deployment_ready", "worker_id": req.bridge_id},
+            metadata={
+                **dict(runtime_execution.get("metadata") or {}),
+                "deployment": dict(deployed["manifest"]["deployment"]),
+            },
+        )
+        if callable(progress_callback):
+            progress_callback("DEPLOYED", 100, "Validated Skill deployed with exact Worker hashes")
         return _equipment_skill_success(
-            registry.mark_deployed(
-                skill_id,
-                version,
-                bridge_id=req.bridge_id,
-                deployment_sha256=deployment_digest,
-                program_sha256=expected_hashes,
-            )
+            {
+                **deployed,
+                "equipment_runtime_execution": runtime_execution,
+                "equipment_runtime_projection": EquipmentRuntimeService.project(runtime_execution),
+            }
         )
     except SkillContractError as exc:
         raise _skill_contract_http_error(exc) from exc
+
+
+@app.post("/api/equipment/skills/{skill_id}/{version}/deploy")
+async def post_equipment_skill_deploy(
+    skill_id: str,
+    version: str,
+    req: EquipmentSkillDeploymentRequest,
+) -> dict[str, Any]:
+    return _execute_equipment_skill_deployment(skill_id, version, req)
 
 
 @app.post("/api/equipment/skills/{skill_id}/{version}/enabled")
@@ -11382,6 +12665,7 @@ async def post_equipment_skill_test(
         if runtime_mode == "live" and not req.confirm_execute:
             raise SkillContractError("live Skill test requires confirm_execute=true")
         bridge = _equipment_bridge()
+        bridge_id = str(package.get("manifest", {}).get("deployment", {}).get("bridge_id") or "")
         results: list[dict[str, Any]] = []
         for index, program_id in enumerate(package["workflow"].get("program_ids", []), start=1):
             result = bridge.run(
@@ -11389,6 +12673,7 @@ async def post_equipment_skill_test(
                     "program_id": str(program_id),
                     "runtime_mode": runtime_mode,
                     "confirm_execute": bool(req.confirm_execute),
+                    "bridge_id": bridge_id,
                     "force_live_bridge": True,
                     "sequence_id": f"skill-test-{skill_id}-{version}-{index:03d}",
                 }
@@ -11428,8 +12713,15 @@ async def delete_equipment_skill(skill_id: str, version: str) -> dict[str, Any]:
                 },
             )
         bridge = _equipment_bridge()
+        bridge_id = str(package.get("manifest", {}).get("deployment", {}).get("bridge_id") or "")
         for program_id in package["workflow"].get("program_ids", []):
-            result = bridge.delete_program({"program_id": str(program_id), "force_live_bridge": True})
+            result = bridge.delete_program(
+                {
+                    "program_id": str(program_id),
+                    "bridge_id": bridge_id,
+                    "force_live_bridge": True,
+                }
+            )
             if not result.get("ok") and result.get("failure_code") != "PYAUTOGUI_PROGRAM_NOT_FOUND":
                 raise HTTPException(
                     status_code=409,
@@ -11448,6 +12740,44 @@ async def delete_equipment_skill(skill_id: str, version: str) -> dict[str, Any]:
 def _equipment_profile_registry() -> EquipmentProfileRegistry:
     """Return the common equipment registry used by Workspace and Agent adapters."""
     return EquipmentProfileRegistry.default()
+
+
+def _equipment_profile_workspace_settings(profile: EquipmentProfile) -> dict[str, object]:
+    """Return the persisted Profile preferences, falling back to Profile defaults."""
+    stored = _read_workspace_settings(EQUIPMENT_WORKSPACE_SETTINGS_PATH)
+    profiles = stored.get("profiles") if isinstance(stored.get("profiles"), dict) else {}
+    profile_settings = profiles.get(profile.profile_id) if isinstance(profiles.get(profile.profile_id), dict) else {}
+    vision_link = profile.vision_link if isinstance(profile.vision_link, dict) else {}
+    has_stored_selection = "vision_link_enabled" in profile_settings
+    return {
+        "vision_link_enabled": (
+            bool(profile_settings.get("vision_link_enabled"))
+            if has_stored_selection
+            else bool(vision_link.get("enabled"))
+        ),
+        "vision_link_source": "stored" if has_stored_selection else "profile_default",
+    }
+
+
+def _write_equipment_profile_workspace_settings(
+    profile: EquipmentProfile,
+    *,
+    vision_link_enabled: bool,
+) -> dict[str, object]:
+    """Persist one Profile's operator preferences without changing its safety contract."""
+    stored = _read_workspace_settings(EQUIPMENT_WORKSPACE_SETTINGS_PATH)
+    profiles = stored.get("profiles") if isinstance(stored.get("profiles"), dict) else {}
+    profiles = dict(profiles)
+    profiles[profile.profile_id] = {"vision_link_enabled": bool(vision_link_enabled)}
+    _write_workspace_settings(
+        EQUIPMENT_WORKSPACE_SETTINGS_PATH,
+        {
+            "schema": "atr.equipment_workspace_settings.v1",
+            "profiles": profiles,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    return _equipment_profile_workspace_settings(profile)
 
 
 def _equipment_profile_state(profile_id: str) -> dict[str, object]:
@@ -11473,6 +12803,7 @@ def _equipment_profile_state(profile_id: str) -> dict[str, object]:
         "programs": bridge.list_programs({"runtime_mode": "test"}).get("programs", []),
         "utm_profile": profile_status,
         "evidence": controller._state.run_metadata.get("last_windows_utm_protocol_result", {}),
+        "workspace_settings": _equipment_profile_workspace_settings(profile),
     }
 
 
@@ -11493,13 +12824,70 @@ async def get_equipment_profile_state(profile_id: str) -> dict[str, object]:
     return _equipment_profile_state(profile_id)
 
 
+@app.post("/api/equipment/profiles/{profile_id}/settings")
+async def post_equipment_profile_settings(
+    profile_id: str,
+    req: EquipmentProfileSettingsRequest,
+) -> dict[str, object]:
+    """Persist operator preferences for a registered equipment Profile."""
+    try:
+        profile = _equipment_profile_registry().get(profile_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        "profile_id": profile.profile_id,
+        "workspace_settings": _write_equipment_profile_workspace_settings(
+            profile,
+            vision_link_enabled=req.vision_link_enabled,
+        ),
+    }
+
+
+def _equipment_vision_link_request(
+    profile: EquipmentProfile,
+    *,
+    runtime_mode: str,
+    requested: bool | None,
+) -> dict[str, bool]:
+    """Resolve one UI request without weakening a Profile-required Vision gate."""
+    vision_link = profile.vision_link if isinstance(profile.vision_link, dict) else {}
+    profile_enabled = bool(vision_link.get("enabled"))
+    required_modes = {
+        str(mode).strip().lower()
+        for mode in vision_link.get("required_modes", [])
+        if str(mode).strip()
+    }
+    required = str(runtime_mode or "").strip().lower() in required_modes
+    requested_value = profile_enabled if requested is None else bool(requested)
+    return {
+        "requested": requested_value,
+        "profile_enabled": profile_enabled,
+        "required": required,
+        "effective": profile_enabled and (required or requested_value),
+    }
+
+
 @app.post("/api/equipment/profiles/{profile_id}/preflight")
 async def post_equipment_profile_preflight(profile_id: str, req: EquipmentProfileActionRequest) -> dict[str, object]:
     """Run non-actuating profile readiness checks only."""
-    del req
+    try:
+        profile = _equipment_profile_registry().get(profile_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     state = _equipment_profile_state(profile_id)
+    workspace_settings = state["workspace_settings"] if isinstance(state.get("workspace_settings"), dict) else {}
     state["action"] = "preflight"
     state["non_actuating"] = True
+    state["vision_link_request"] = _equipment_vision_link_request(
+        profile,
+        runtime_mode="test",
+        requested=(
+            req.vision_link_enabled
+            if req.vision_link_enabled is not None
+            else bool(workspace_settings.get("vision_link_enabled"))
+        ),
+    )
     return state
 
 
@@ -11519,6 +12907,16 @@ async def post_equipment_profile_test(profile_id: str, req: EquipmentProfileActi
     except ValueError as exc:
         raise HTTPException(status_code=404 if profile_id != DEFAULT_UTM_PROFILE_ID else 400, detail=str(exc)) from exc
     bridge = _equipment_bridge()
+    workspace_settings = _equipment_profile_workspace_settings(profile)
+    vision_link_request = _equipment_vision_link_request(
+        profile,
+        runtime_mode="test",
+        requested=(
+            req.vision_link_enabled
+            if req.vision_link_enabled is not None
+            else bool(workspace_settings.get("vision_link_enabled"))
+        ),
+    )
     payload: dict[str, object] = {
         "runtime_mode": "test",
         "run_id": controller._state.run_id,
@@ -11528,6 +12926,8 @@ async def post_equipment_profile_test(profile_id: str, req: EquipmentProfileActi
         "simulate_utm_protocol": contract.simulate_utm_protocol,
         "confirm_setup_gui_execute": True,
         "command": f"{profile.label} simulated protocol test",
+        "vision_link_enabled": vision_link_request["effective"],
+        "vision_link_request": vision_link_request,
     }
     result = bridge.run(payload)
     screenshot_result = bridge.screenshot(
@@ -11562,6 +12962,7 @@ async def post_equipment_profile_test(profile_id: str, req: EquipmentProfileActi
         "result": result,
         "screenshot_result": screenshot_result,
         "evidence": evidence,
+        "vision_link_request": vision_link_request,
         "analysis_handoff": {"status": "ready" if bool(result.get("ok")) and not missing else "blocked", "missing_evidence": missing},
     }
     controller._state.run_metadata["last_windows_utm_protocol_result"] = response
@@ -14506,6 +15907,13 @@ async def post_windows_equipment_connect(req: WindowsBridgeConnectRequest) -> di
     return bridge.save_connection(req.model_dump())
 
 
+@app.post("/api/equipment/windows/pair")
+async def post_windows_equipment_pair(req: WindowsBridgePairRequest) -> dict[str, object]:
+    """Exchange a four-digit worker code and persist only the returned internal key."""
+    bridge = _equipment_bridge()
+    return bridge.pair_connection(req.model_dump())
+
+
 @app.post("/api/equipment/windows/select")
 async def post_windows_equipment_select(req: WindowsBridgeCandidateRequest) -> dict[str, object]:
     """Quick-select a saved Windows PyAutoGUI bridge candidate."""
@@ -14518,6 +15926,24 @@ async def post_windows_equipment_delete(req: WindowsBridgeCandidateRequest) -> d
     """Delete a saved Windows PyAutoGUI bridge candidate."""
     bridge = _equipment_bridge()
     return bridge.delete_candidate(req.model_dump())
+
+
+@app.get("/api/equipment/windows/workers/{candidate_alias}/update")
+async def get_windows_worker_update(candidate_alias: str) -> dict[str, object]:
+    """Return the version and update readiness of one Saved Worker."""
+    return _equipment_bridge().worker_update_status({"candidate_alias": candidate_alias})
+
+
+@app.post("/api/equipment/windows/workers/{candidate_alias}/update")
+async def post_windows_worker_update(candidate_alias: str) -> dict[str, object]:
+    """Stage, verify, and restart one explicitly selected Saved Worker."""
+    return _equipment_bridge().update_worker({"candidate_alias": candidate_alias})
+
+
+@app.post("/api/equipment/windows/workers/{candidate_alias}/rollback")
+async def post_windows_worker_rollback(candidate_alias: str) -> dict[str, object]:
+    """Restore the most recent verified backup on one Saved Worker."""
+    return _equipment_bridge().rollback_worker({"candidate_alias": candidate_alias})
 
 
 @app.post("/api/equipment/windows/test")

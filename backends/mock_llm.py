@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import hashlib
 
-from backends.llm_backend import BaseLLMBackend, LLMResponse
+from backends.llm_backend import BaseLLMBackend, LLMImageInput, LLMResponse
 
 
 class MockLLMBackend(BaseLLMBackend):
@@ -36,9 +36,11 @@ class MockLLMBackend(BaseLLMBackend):
         system_prompt: str,
         user_prompt: str,
         metadata: dict[str, object] | None = None,
+        images: list[LLMImageInput] | None = None,
     ) -> LLMResponse:
+        image_fingerprints = [hashlib.sha256(image.data).hexdigest() for image in images or []]
         digest = hashlib.sha1(
-            f"{model}|{system_prompt}|{user_prompt}|{metadata}".encode("utf-8")
+            f"{model}|{system_prompt}|{user_prompt}|{metadata}|{image_fingerprints}".encode("utf-8")
         ).hexdigest()[:10]
         text = (
             "MOCK_RESPONSE "

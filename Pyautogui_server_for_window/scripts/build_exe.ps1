@@ -73,7 +73,7 @@ Write-Host "Built executable:"
 Write-Host (Join-Path $projectRoot "dist\$Name.exe")
 Write-Host ""
 Write-Host "Example run:"
-Write-Host '$env:WINDOWS_PYAUTOGUI_BRIDGE_TOKEN = "<token>"'
 Write-Host '$env:WINDOWS_PYAUTOGUI_BRIDGE_HOST = "0.0.0.0"'
 Write-Host '$env:WINDOWS_PYAUTOGUI_BRIDGE_PORT = "8765"'
 Write-Host ".\dist\$Name.exe"
+Write-Host "Open the local console and pair Linux ATR with the temporary four-digit code."

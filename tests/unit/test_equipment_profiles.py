@@ -1,45 +1,49 @@
-"""Tests for common equipment profile contracts."""
-
 from __future__ import annotations
 
-from utils.equipment_profiles import (
-    DEFAULT_UTM_PROFILE_ID,
-    EquipmentProfileRegistry,
-    build_execution_contract,
-)
+from utils.equipment_profiles import EquipmentProfile, EquipmentProfileRegistry, build_execution_contract
 
 
-def test_default_registry_exposes_utm_as_first_profile() -> None:
-    profile = EquipmentProfileRegistry.default().get(DEFAULT_UTM_PROFILE_ID)
-
-    assert profile.label == "UTM"
-    assert profile.bridge_provider == "windows_pyautogui"
-    assert profile.allowed_program_ids == (
-        "utm_compression_start_v1",
-        "utm_export_csv_v1",
-        "utm_manual_save_csv_v1",
-        "utm_stop_or_abort_v1",
+def test_profile_contract_owns_bridge_payload_vision_and_completion_policy() -> None:
+    profile = EquipmentProfile(
+        profile_id="generic_desktop_v1",
+        label="Generic desktop equipment",
+        bridge_provider="windows_pyautogui",
+        default_program_id="program1",
+        allowed_program_ids=("program1",),
+        required_locators=(),
+        required_evidence=("request_log",),
+        mode_payloads={
+            "test": {"simulate_equipment": True},
+            "live": {"simulate_equipment": False},
+        },
+        vision_link={"enabled": False, "required_modes": []},
+        completion_policy={"interpreter": "program_result_v1"},
     )
 
+    contract = build_execution_contract(profile, runtime_mode="test")
 
-def test_test_contract_uses_same_utm_program_with_simulation_enabled() -> None:
-    profile = EquipmentProfileRegistry.default().get(DEFAULT_UTM_PROFILE_ID)
-
-    contract = build_execution_contract(
-        profile,
-        runtime_mode="test",
-        bridge_config={"selected_candidate": "utm-pc", "token": "secret"},
-    )
-
-    assert contract.program_id == "utm_compression_start_v1"
-    assert contract.simulate_utm_protocol is True
-    assert "secret" not in str(contract.to_safe_dict())
+    assert contract.provider == "windows_pyautogui"
+    assert contract.bridge_payload == {"simulate_equipment": True}
+    assert contract.vision_link == {"enabled": False, "required_modes": []}
+    assert contract.completion_policy == {"interpreter": "program_result_v1"}
+    assert "simulate_utm_protocol" not in contract.to_safe_dict()["bridge_payload"]
 
 
-def test_live_contract_disables_simulation_for_the_same_profile() -> None:
-    profile = EquipmentProfileRegistry.default().get(DEFAULT_UTM_PROFILE_ID)
+def test_default_registry_resolves_program_without_agent_prefix_logic() -> None:
+    registry = EquipmentProfileRegistry.default()
 
-    contract = build_execution_contract(profile, runtime_mode="live", bridge_config={})
+    assert registry.resolve(program_id="program1").profile_id == "windows_desktop_v1"
+    assert registry.resolve(program_id="utm_compression_start_v1").profile_id == "utm_windows_v1"
+    assert registry.resolve(profile_id="utm_windows_v1", program_id="program1").profile_id == "utm_windows_v1"
 
-    assert contract.program_id == "utm_compression_start_v1"
-    assert contract.simulate_utm_protocol is False
+
+def test_utm_compatibility_flag_is_declared_only_by_profile_payload() -> None:
+    profile = EquipmentProfileRegistry.default().get("utm_windows_v1")
+
+    test_contract = build_execution_contract(profile, runtime_mode="test")
+    live_contract = build_execution_contract(profile, runtime_mode="live")
+
+    assert test_contract.bridge_payload["simulate_utm_protocol"] is True
+    assert live_contract.bridge_payload["simulate_utm_protocol"] is False
+    assert test_contract.simulate_utm_protocol is True
+    assert live_contract.simulate_utm_protocol is False

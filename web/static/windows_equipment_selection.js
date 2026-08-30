@@ -41,9 +41,30 @@
     return payload.selected === true ? "selected" : "missing";
   }
 
+  function selectedCandidatesFirst(candidates) {
+    const list = Array.isArray(candidates) ? candidates : [];
+    return [
+      ...list.filter((candidate) => Boolean(candidate && candidate.selected)),
+      ...list.filter((candidate) => !Boolean(candidate && candidate.selected)),
+    ];
+  }
+
+  function skillIdFromRecordingName(name, recordingId) {
+    const source = String(name || recordingId || "recording_skill")
+      .normalize("NFKD")
+      .toLowerCase();
+    const slug = source
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 96);
+    return slug || "recording_skill";
+  }
+
   return {
     candidateSelectionView,
     confirmCandidateSelection,
     profileConnectionStatus,
+    selectedCandidatesFirst,
+    skillIdFromRecordingName,
   };
 }));

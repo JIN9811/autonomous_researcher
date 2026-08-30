@@ -13,6 +13,7 @@ foreach ($directory in @("bridge", "demo", "docs", "examples", "portable", "scri
 }
 foreach ($file in @(
     "README.md",
+    "release_manifest.json",
     "requirements.txt",
     "requirements-portable.txt",
     "requirements-windows.txt",

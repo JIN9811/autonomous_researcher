@@ -234,9 +234,10 @@ JSON 편집기에만 불러오며 등록하지 않는다. `Run Safe Test`는 안
 공개한 안전 코어 액션 전체를 확인할 수 있다.
 
 Windows 로컬 Program Manager의 `RECORD` 탭에서 대상 창을 지정하고
-`Record -> Checkpoint -> Stop -> Save` 순서로 데모를 저장한다. 저장된
-recording을 선택해 Skill ID, version, target profile을 입력하고 `Create
-Draft Skill`을 누른다.
+`Record -> Checkpoint -> Stop -> Save` 순서로 데모를 저장한다. Windows는
+recording package까지만 소유한다. `/equipment/windows`의 `Skill Recording`에서
+Recording ID, Skill ID, version, worker를 입력하고 `Import & Build Draft`를
+눌러 Linux Skill registry로 가져온다.
 
 녹화기는 클릭과 드래그를 구분하고 가로/세로 스크롤을 보존한다. 연속
 문자는 하나의 `write` 액션으로 정리되며 단축키와 특수키는 별도 액션으로
@@ -252,10 +253,23 @@ fallback`은 기본 해제 상태로 둔다. 이 옵션을 켜지 않은 상태�
 좌표를 임의로 클릭하지 않는다. 기존 v1 recording만 호환을 위해 좌표
 방식으로 읽을 수 있다.
 
-`SKILLS` 탭에서는 같은 정확 버전에 대해 `Annotate -> Compile -> Validate
--> Deploy -> Test`를 수행한다. 배포 버전을 지우려면 먼저 Disable 해야
-한다. Test는 물리 동작 없는 test mode가 기본이며 live 시험은 Linux API
-에서 명시적 실행 확인이 필요하다.
+`/equipment/windows`의 `Skill Management`에서는 정확한 버전을 선택한 뒤
+Workflow Editor 아이콘으로 순차 workflow를 확인하고 `Save -> Deploy`를 수행한다.
+Editor는 별도 창에서 열리며 단계 이동/복제/삭제, timer wait, image/text/file until
+wait, locator PNG 교체를 지원한다. 분기와 loop는 지원하지 않는다. Save하면 이전
+compiled 결과가 무효화되고, Deploy 한 번이 compile, validate, Windows transfer를
+자동으로 수행한다. Deploy 자체는 Skill을 실행하지 않는다. 배포된 정확 버전은
+읽기 전용이므로 수정하려면 새 version을 만든다. Windows
+Program Manager는 로컬 draft와 Linux에서 배포된 read-only program을 확인하는
+경량 화면으로 유지한다. Test는 물리 동작 없는 test mode가 기본이며 live
+시험은 Linux API에서 명시적 실행 확인이 필요하다.
+
+locator 대상이 너무 넓거나 빗나갔다면 해당 step을 펼쳐 `Edit Crop`을 누른다.
+원본 pre-action 화면 위 ROI를 드래그하고 8개 핸들로 크기를 조정한 뒤 오른쪽
+미리보기를 확인한다. `Reset to AI`는 자동 annotation 위치로 복원하고 `Apply Crop`은
+현재 편집 상태에만 반영한다. 이후 상단 `Save`를 눌러야 저장된다. 이 기능은 Target
+ROI만 수정하며 Context ROI는 유지한다. 별도 PNG를 직접 지정해야 할 때만
+`Replace Locator`를 사용한다.
 
 정상 Skill 실행은 LLM을 호출하지 않는다. 예외 복구가 필요한 경우에만
 Skill에 기록된 정확 provider/model을 한 번 호출하며 다른 모델로
@@ -273,18 +287,24 @@ Windows에서:
 ```powershell
 cd .\Pyautogui_server_for_window
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_bridge.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_bridge.ps1 -ShowToken
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_bridge.ps1 -OpenBrowser
 ```
 
 GUI에서:
 
-1. subnet과 token으로 scan한다.
-2. candidate가 뜨면 원하는 이름으로 저장한다.
-3. saved target을 select한다.
-4. `test` 또는 `program1` 실행으로 통신을 확인한다.
+1. subnet으로 scan한다.
+2. candidate가 뜨면 Windows Console의 임시 4자리 코드를 입력한다.
+3. Pair & Save로 원하는 이름과 내부 연결 설정을 저장한다.
+4. saved target을 select한다.
+5. `Agentic Progress`에서 recording부터 handoff까지 현재 canonical 상태를 확인한다.
+6. `Skill Recording`으로 recording package를 가져온다.
+7. `Skill Management`에서 정확한 Skill version을 편집/저장하고 Deploy 한 번으로 compile, validate, transfer한다.
+8. `Main Progress`의 Preflight 또는 Run Test Bridge로 프론트-백엔드-Worker 경로를 확인한다.
+9. 필요할 때만 `Vision Link`를 켠다. 체크/해제 값은 Profile별로 즉시 자동 저장되어 창 닫기, 새로고침, 서버 재시작 후에도 유지되며, Profile의 필수 mode 설정은 백엔드 gate가 유지한다.
+10. `Evidence & Data Transfer`에서 화면, 요청 로그, 결과 파일, Vision evidence와 Analysis handoff를 확인한다.
 
 현재 Ubuntu PC에서 먼저 실제 GUI macro를 개발하려면 같은 화면의
-`PyAutoGUI Bridge on This PC`에서 `Start -> Health -> Select`를 누른다.
+`Bridge on This PC`에서 `Start -> Health -> Select`를 누른다.
 로컬 브릿지는 `127.0.0.1:8767`, 후보명 `local_development`를 사용하며
 Windows 후보로 자동 전환하거나 자동 fallback하지 않는다. 최초 설치는
 `bash install/bootstrap_linux.sh --with-local-pyautogui`로 수행한다.

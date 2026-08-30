@@ -66,7 +66,7 @@ REQUIRED_WHEEL_PROJECTS = {
 }
 
 COPY_DIRECTORIES = ("bridge", "demo", "docs", "examples", "scripts", "tests")
-COPY_FILES = ("README.md", "requirements-portable.txt", "requirements-windows.txt")
+COPY_FILES = ("README.md", "release_manifest.json", "requirements-portable.txt", "requirements-windows.txt")
 
 
 def sha256(path: Path) -> str:
@@ -182,7 +182,7 @@ def write_manifest(output: Path, *, source_only: bool, version: str) -> Path:
 
 
 def create_zip(output: Path) -> Path:
-    zip_path = output.with_suffix(".zip")
+    zip_path = output.parent / f"{output.name}.zip"
     if zip_path.exists():
         raise FileExistsError(f"Refusing to replace existing ZIP: {zip_path}")
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:

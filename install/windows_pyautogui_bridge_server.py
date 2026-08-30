@@ -23,6 +23,7 @@ Endpoints:
   GET  /recordings
   GET  /recordings/status
   GET  /recordings/{recording_id}
+  GET  /recordings/{recording_id}/package
   POST /recordings/start
   POST /recordings/checkpoint
   POST /recordings/stop
@@ -43,9 +44,12 @@ import hashlib
 import importlib.util
 import ipaddress
 import json
+import locale
 import os
 import queue
 import re
+import secrets
+import shutil
 import socket
 import subprocess
 import sys
@@ -53,10 +57,10 @@ import threading
 import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 from urllib.request import HTTPRedirectHandler, Request as URLRequest, build_opener, urlopen
 from uuid import uuid4
 
@@ -102,6 +106,44 @@ def _desktop_platform_status() -> dict[str, Any]:
     }
 
 
+def _bridge_package_root() -> Path:
+    configured = str(os.getenv("ATR_WINDOWS_BRIDGE_PACKAGE_ROOT") or "").strip()
+    if configured:
+        return Path(configured)
+    script = Path(__file__).resolve()
+    return script.parents[1] if script.parent.name == "bridge" else script.parent
+
+
+def _bridge_release_manifest(package_root: Path | None = None) -> dict[str, Any]:
+    manifest_path = (package_root or _bridge_package_root()) / "release_manifest.json"
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+BRIDGE_CODE_RELEASE_FLOOR = "2026.08.29.17"
+
+
+def _release_version_key(value: str) -> tuple[int, ...]:
+    return tuple(int(item) for item in re.findall(r"\d+", str(value or "")))
+
+
+def _bridge_release_version(package_root: Path | None = None) -> str:
+    version = str(_bridge_release_manifest(package_root).get("version") or "").strip()
+    if _release_version_key(version) >= _release_version_key(BRIDGE_CODE_RELEASE_FLOOR):
+        return version
+    return BRIDGE_CODE_RELEASE_FLOOR
+
+
+def _bridge_update_allowed_paths(package_root: Path | None = None) -> set[str]:
+    files = _bridge_release_manifest(package_root).get("files")
+    if not isinstance(files, list):
+        return {"release_manifest.json"}
+    return {str(item).strip().replace("\\", "/") for item in files if str(item).strip()} | {"release_manifest.json"}
+
+
 HOST = os.getenv("WINDOWS_PYAUTOGUI_BRIDGE_HOST", "0.0.0.0")
 PORT = int(os.getenv("WINDOWS_PYAUTOGUI_BRIDGE_PORT", "8765"))
 TOKEN = os.getenv("WINDOWS_PYAUTOGUI_BRIDGE_TOKEN", "")
@@ -111,6 +153,10 @@ LOCATOR_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_LOCATOR_ROOT", r"C:\ATR\equipme
 UTM_EXPORT_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_UTM_EXPORT_DIR", r"C:\ATR\utm_exports"))
 PROGRAM_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_PROGRAM_DIR", r"C:\ATR\programs"))
 RECORDING_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_RECORDING_DIR", r"C:\ATR\recordings"))
+BRIDGE_RELEASE_VERSION = _bridge_release_version()
+UPDATE_ALLOWED_PATHS = _bridge_update_allowed_paths()
+MAX_UPDATE_FILE_BYTES = 12 * 1024 * 1024
+MAX_UPDATE_PACKAGE_BYTES = 24 * 1024 * 1024
 
 
 def _default_demo_root() -> Path:
@@ -128,7 +174,6 @@ def _default_demo_root() -> Path:
 
 
 DEMO_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_DEMO_DIR", str(_default_demo_root())))
-ATR_API_URL = os.getenv("WINDOWS_PYAUTOGUI_ATR_API_URL", "").rstrip("/")
 UTM_EXPORT_GLOB = os.getenv("WINDOWS_PYAUTOGUI_UTM_EXPORT_GLOB", "*.csv")
 UTM_FILE_STABLE_SEC = float(os.getenv("WINDOWS_PYAUTOGUI_UTM_FILE_STABLE_SEC", "2.0"))
 ALLOW_SIMULATED_UTM = os.getenv("WINDOWS_PYAUTOGUI_ALLOW_SIMULATED_UTM", "0").strip().lower() in {"1", "true", "yes", "on"}
@@ -149,6 +194,83 @@ def _recording_atomic_write(path: Path, payload: dict[str, Any]) -> None:
     temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     temporary.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)
+
+
+def _windows_input_language_state(
+    *,
+    user32: Any | None = None,
+    imm32: Any | None = None,
+    windows_locale: dict[int, str] | None = None,
+) -> dict[str, str]:
+    """Read the foreground Windows keyboard layout and Korean IME mode."""
+    injected_api = user32 is not None or imm32 is not None
+    if not injected_api and not sys.platform.startswith("win"):
+        return {
+            "status": "unavailable",
+            "layout_id": "",
+            "locale": "",
+            "language": "",
+            "ime_mode": "unknown",
+            "typing_mode": "unknown",
+        }
+    try:
+        import ctypes
+
+        if user32 is None or imm32 is None:
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            imm32 = ctypes.WinDLL("imm32", use_last_error=True)
+            user32.GetForegroundWindow.restype = ctypes.c_void_p
+            user32.GetKeyboardLayout.restype = ctypes.c_void_p
+            imm32.ImmGetContext.restype = ctypes.c_void_p
+
+        hwnd = user32.GetForegroundWindow()
+        thread_id = user32.GetWindowThreadProcessId(hwnd, None)
+        raw_layout = user32.GetKeyboardLayout(thread_id)
+        layout_value = int(raw_layout or 0) & 0xFFFFFFFF
+        language_id = layout_value & 0xFFFF
+        locale_name = str((windows_locale or locale.windows_locale).get(language_id) or f"lang_{language_id:04x}")
+        language = re.split(r"[-_]", locale_name, maxsplit=1)[0].lower()
+
+        ime_mode = "unknown"
+        typing_mode = "unknown" if language == "ko" else (language or "unknown")
+        context = imm32.ImmGetContext(hwnd)
+        if context:
+            conversion = ctypes.c_uint32(0)
+            sentence = ctypes.c_uint32(0)
+            try:
+                if imm32.ImmGetConversionStatus(context, ctypes.byref(conversion), ctypes.byref(sentence)):
+                    ime_mode = "native" if conversion.value & 0x0001 else "alphanumeric"
+                    typing_mode = language if ime_mode == "native" else "latin"
+            finally:
+                imm32.ImmReleaseContext(hwnd, context)
+        if ime_mode == "unknown":
+            get_default_ime_window = getattr(imm32, "ImmGetDefaultIMEWnd", None)
+            send_message = getattr(user32, "SendMessageW", None)
+            ime_window = get_default_ime_window(hwnd) if callable(get_default_ime_window) else 0
+            if ime_window and callable(send_message):
+                conversion_mode = int(send_message(ime_window, 0x0283, 0x0001, 0))
+                ime_mode = "native" if conversion_mode & 0x0001 else "alphanumeric"
+                typing_mode = language if ime_mode == "native" else "latin"
+        if ime_mode == "unknown" and language != "ko":
+            ime_mode = "alphanumeric"
+
+        return {
+            "status": "available",
+            "layout_id": f"{language_id:08X}",
+            "locale": locale_name,
+            "language": language,
+            "ime_mode": ime_mode,
+            "typing_mode": typing_mode,
+        }
+    except Exception:
+        return {
+            "status": "unavailable",
+            "layout_id": "",
+            "locale": "",
+            "language": "",
+            "ime_mode": "unknown",
+            "typing_mode": "unknown",
+        }
 
 
 class _RecordingKeyboardCapture:
@@ -191,16 +313,16 @@ class _RecordingKeyboardCapture:
         if self._pressed_modifiers:
             modifiers = [item for item in self._ORDER if item in self._pressed_modifiers]
             self._used_modifiers.update(modifiers)
-            self.manager.record_event({"kind": "hotkey", "keys": [*modifiers, name]})
+            self.manager.record_keyboard_event({"kind": "hotkey", "keys": [*modifiers, name]})
             return
-        self.manager.record_event({"kind": "key_press", "key": name})
+        self.manager.record_keyboard_event({"kind": "key_press", "key": name})
 
     def on_release(self, key: Any) -> None:
         modifier = self._MODIFIERS.get(self.key_name(key))
         if not modifier:
             return
         if modifier not in self._used_modifiers:
-            self.manager.record_event({"kind": "key_press", "key": modifier})
+            self.manager.record_keyboard_event({"kind": "key_press", "key": modifier})
         self._pressed_modifiers.discard(modifier)
         self._used_modifiers.discard(modifier)
 
@@ -310,7 +432,7 @@ def _pynput_recording_listeners(manager: "RecordingManager") -> list[Any]:
 class _TkRecordingOverlayWindow:
     """Small Windows desktop indicator owned entirely by one Tk thread."""
 
-    def __init__(self) -> None:
+    def __init__(self, on_stop: Callable[[], None] | None = None) -> None:
         import tkinter as tk
 
         self._root = tk.Tk()
@@ -320,7 +442,7 @@ class _TkRecordingOverlayWindow:
             self._root.attributes("-toolwindow", True)
         except Exception:
             pass
-        width, height = 260, 48
+        width, height = 340, 48
         screen_width = max(width, int(self._root.winfo_screenwidth()))
         x = max(0, (screen_width - width) // 2)
         self._root.geometry(f"{width}x{height}+{x}+18")
@@ -342,6 +464,29 @@ class _TkRecordingOverlayWindow:
             font=("Consolas", 11, "bold"),
         )
         self._elapsed_label.pack(side="right", padx=(8, 14))
+        def request_stop() -> None:
+            if not callable(on_stop):
+                return
+            on_stop(
+                {
+                    "control": "overlay_stop",
+                    "x": int(self._root.winfo_pointerx()),
+                    "y": int(self._root.winfo_pointery()),
+                }
+            )
+
+        tk.Button(
+            frame,
+            text="STOP",
+            command=request_stop,
+            fg="#ffffff",
+            bg="#b42318",
+            activeforeground="#ffffff",
+            activebackground="#8f1c14",
+            relief="flat",
+            font=("Segoe UI", 9, "bold"),
+            cursor="hand2",
+        ).pack(side="right", padx=(10, 2), pady=8)
         self.pump()
 
     def update_elapsed(self, elapsed_s: float) -> None:
@@ -368,20 +513,25 @@ class RecordingOverlayController:
         self,
         *,
         platform_name: str | None = None,
-        window_factory: Callable[[], Any] | None = None,
+        window_factory: Callable[[Callable[[], None]], Any] | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         poll_interval: float = 0.1,
+        on_stop: Callable[[], None] | None = None,
     ) -> None:
         self._enabled = str(platform_name or sys.platform).lower().startswith("win") or window_factory is not None
         self._window_factory = window_factory or _TkRecordingOverlayWindow
         self._monotonic = monotonic
         self._poll_interval = max(0.005, float(poll_interval))
+        self._stop_callback = on_stop
         self._commands: queue.Queue[tuple[str, str, float]] = queue.Queue()
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
         self._available = self._enabled
         self._visible = False
         self._error: str | None = None if self._enabled else "windows_only"
+        self._stop_requested = False
+        self._stop_request: dict[str, Any] | None = None
+        self._stop_thread: threading.Thread | None = None
 
     def _ensure_thread(self) -> None:
         with self._lock:
@@ -400,6 +550,48 @@ class RecordingOverlayController:
         if self._enabled and self._thread is not None:
             self._commands.put(("hide", "", 0.0))
 
+    def set_stop_callback(self, callback: Callable[[], None] | None) -> None:
+        self._stop_callback = callback
+
+    def request_stop(self, evidence: dict[str, Any] | None = None) -> None:
+        with self._lock:
+            if self._stop_requested:
+                return
+            callback = self._stop_callback
+            if not callable(callback):
+                return
+            self._stop_requested = True
+            value = dict(evidence or {})
+            self._stop_request = {
+                "control": str(value.get("control") or "overlay_stop")[:64],
+                "x": int(value.get("x", 0)),
+                "y": int(value.get("y", 0)),
+            }
+            self._commands.put(("hide", "", 0.0))
+            self._stop_thread = threading.Thread(
+                target=self._run_stop_callback,
+                args=(callback,),
+                name="atr-recording-stop",
+                daemon=True,
+            )
+            self._stop_thread.start()
+
+    def consume_stop_request(self) -> dict[str, Any]:
+        with self._lock:
+            value = dict(self._stop_request or {})
+            self._stop_request = None
+            return value
+
+    def _run_stop_callback(self, callback: Callable[[], None]) -> None:
+        try:
+            callback()
+        except Exception as exc:
+            with self._lock:
+                self._error = f"recording stop failed: {exc.__class__.__name__}: {str(exc)[:120]}"
+        finally:
+            with self._lock:
+                self._stop_requested = False
+
     def shutdown(self) -> None:
         thread = self._thread
         if thread is None:
@@ -410,6 +602,9 @@ class RecordingOverlayController:
         with self._lock:
             self._thread = None
             self._visible = False
+        stop_thread = self._stop_thread
+        if stop_thread is not None and stop_thread is not threading.current_thread():
+            stop_thread.join(timeout=2.0)
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -428,7 +623,7 @@ class RecordingOverlayController:
                 if command == "show":
                     if window is not None:
                         window.close()
-                    window = self._window_factory()
+                    window = self._window_factory(self.request_stop)
                     started_monotonic = command_started
                     with self._lock:
                         self._available = True
@@ -457,7 +652,757 @@ class RecordingOverlayController:
                     self._available = False
                     self._visible = False
                     self._error = f"{exc.__class__.__name__}: {str(exc)[:160]}"
+class RecordingFrameBuffer:
+    """Disk-backed low-rate recording timeline with a bounded recent-frame cache."""
 
+    SCHEMA = "atr.equipment_recording_frames.v1"
+    DISK_WARNING_BYTES = 2 * 1024 * 1024 * 1024
+    DISK_CRITICAL_BYTES = 512 * 1024 * 1024
+
+    def __init__(
+        self,
+        *,
+        screenshot_provider: Callable[[], Any],
+        fps: float = 2.0,
+        retention_sec: float = 20.0,
+        max_bytes: int = 64 * 1024 * 1024,
+    ) -> None:
+        self._screenshot_provider = screenshot_provider
+        self.fps = max(2.0, min(float(fps), 5.0))
+        self.retention_sec = max(20.0, min(float(retention_sec), 30.0))
+        self.max_bytes = max(4 * 1024 * 1024, min(int(max_bytes), 256 * 1024 * 1024))
+        self._lock = threading.RLock()
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._recording_id = ""
+        self._recording_dir: Path | None = None
+        self._timeline_path: Path | None = None
+        self._started_monotonic = 0.0
+        self._frames: list[dict[str, Any]] = []
+        self._supplemental_frames: list[dict[str, Any]] = []
+        self._pending_event_links: list[dict[str, Any]] = []
+        self._start_boundary_pending = False
+        self._total_bytes = 0
+        self._persisted_frame_count = 0
+        self._next_frame_number = 1
+        self._writer_status = "idle"
+        self._storage_state = "unknown"
+        self._disk_free_bytes = -1
+        self._capture_errors = 0
+        self._last_error = ""
+        self._pinned_exception_windows: dict[str, dict[str, Any]] = {}
+
+    def empty_manifest(self) -> dict[str, Any]:
+        return {
+            "schema": self.SCHEMA,
+            "fps": self.fps,
+            "retention_sec": self.retention_sec,
+            "max_bytes": self.max_bytes,
+            "storage_mode": "full_session_disk",
+            "sampled_frame_count": 0,
+            "persisted_frame_count": 0,
+            "periodic_frame_count": 0,
+            "timeline_path": "",
+            "writer_status": self._writer_status,
+            "storage_state": self._storage_state,
+            "disk_free_bytes": self._disk_free_bytes,
+            "evidence_complete": self._writer_status != "incomplete" and self._storage_state != "critical",
+            "frames": [],
+            "event_frame_count": 0,
+            "event_frames": [],
+            "exception_window_count": 0,
+            "exception_windows": [],
+            "capture_errors": 0,
+        }
+
+    def start(self, recording_id: str, started_monotonic: float, recording_dir: Path | None = None) -> None:
+        self.stop()
+        with self._lock:
+            self._recording_id = str(recording_id)
+            self._recording_dir = Path(recording_dir) if recording_dir is not None else None
+            self._timeline_path = self._recording_dir / "timeline.jsonl" if self._recording_dir is not None else None
+            self._started_monotonic = float(started_monotonic)
+            self._frames = []
+            self._supplemental_frames = []
+            self._pending_event_links = []
+            self._start_boundary_pending = True
+            self._total_bytes = 0
+            self._persisted_frame_count = 0
+            self._next_frame_number = 1
+            self._writer_status = "recording"
+            self._storage_state = "healthy"
+            self._disk_free_bytes = -1
+            self._capture_errors = 0
+            self._last_error = ""
+            self._pinned_exception_windows = {}
+            self._stop_event.clear()
+            if self._recording_dir is not None:
+                (self._recording_dir / "frames" / "periodic").mkdir(parents=True, exist_ok=True)
+                self._timeline_path.parent.mkdir(parents=True, exist_ok=True)
+                self._timeline_path.write_text("", encoding="utf-8")
+        self._thread = threading.Thread(
+            target=self._capture_loop,
+            name=f"atr-recording-frames-{recording_id[-8:]}",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=max(1.0, 2.0 / self.fps))
+        self._thread = None
+        with self._lock:
+            if self._writer_status == "recording":
+                self._writer_status = "stopped"
+
+    def capture_once(self) -> bool:
+        with self._lock:
+            started = self._started_monotonic
+            recording_dir = self._recording_dir
+        if not started:
+            return False
+        if recording_dir is not None and not self._check_storage_health(recording_dir):
+            return False
+        try:
+            image = self._screenshot_provider()
+            raw, media_type, suffix, width, height = self._encode_frame(image)
+        except Exception as exc:
+            with self._lock:
+                self._capture_errors += 1
+                self._last_error = f"{exc.__class__.__name__}: {str(exc)[:160]}"
+            return False
+        captured = time.monotonic()
+        with self._lock:
+            frame_number = self._next_frame_number
+            self._next_frame_number += 1
+            recording_dir = self._recording_dir
+            timeline_path = self._timeline_path
+        frame_id = f"frame-{frame_number:08d}"
+        artifact_path = ""
+        if recording_dir is not None and timeline_path is not None:
+            artifact = recording_dir / "frames" / "periodic" / f"{frame_id}{suffix}"
+            temporary = artifact.with_name(f".{artifact.name}.{uuid4().hex}.tmp")
+            try:
+                temporary.write_bytes(raw)
+                os.replace(temporary, artifact)
+                artifact_path = str(artifact)
+            except Exception as exc:
+                temporary.unlink(missing_ok=True)
+                with self._lock:
+                    self._capture_errors += 1
+                    self._last_error = f"{exc.__class__.__name__}: {str(exc)[:160]}"
+                    self._writer_status = "incomplete"
+                return False
+        frame = {
+            "frame_id": frame_id,
+            "at_ms": max(0, int((captured - started) * 1000)),
+            "captured_monotonic": captured,
+            "captured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "media_type": media_type,
+            "suffix": suffix,
+            "width": width,
+            "height": height,
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "artifact_path": artifact_path,
+            "reason": "periodic",
+            "bytes": raw,
+        }
+        if timeline_path is not None:
+            timeline_row = {key: value for key, value in frame.items() if key not in {"bytes", "suffix", "captured_monotonic"}}
+            try:
+                with timeline_path.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(timeline_row, ensure_ascii=True, separators=(",", ":")) + "\n")
+            except Exception as exc:
+                Path(artifact_path).unlink(missing_ok=True)
+                with self._lock:
+                    self._capture_errors += 1
+                    self._last_error = f"{exc.__class__.__name__}: {str(exc)[:160]}"
+                    self._writer_status = "incomplete"
+                return False
+        with self._lock:
+            self._frames.append(frame)
+            self._total_bytes += len(raw)
+            self._persisted_frame_count += 1
+            self._persist_pending_exception_frame_locked(frame)
+            cutoff = captured - self.retention_sec
+            while self._frames and (
+                float(self._frames[0]["captured_monotonic"]) < cutoff or self._total_bytes > self.max_bytes
+            ):
+                removed = self._frames.pop(0)
+                self._total_bytes -= len(removed["bytes"])
+            start_boundary_pending = self._start_boundary_pending
+            self._start_boundary_pending = False
+        if start_boundary_pending:
+            self._persist_boundary_image(image, "recording_start", at_ms=0)
+        self._persist_pending_event_posts(image, captured)
+        return True
+
+    def _check_storage_health(self, recording_dir: Path) -> bool:
+        try:
+            free_bytes = int(shutil.disk_usage(recording_dir).free)
+        except OSError as exc:
+            with self._lock:
+                self._writer_status = "incomplete"
+                self._storage_state = "critical"
+                self._last_error = f"disk usage unavailable: {exc}"
+            return False
+        with self._lock:
+            self._disk_free_bytes = free_bytes
+            if free_bytes < self.DISK_CRITICAL_BYTES:
+                self._writer_status = "incomplete"
+                self._storage_state = "critical"
+                self._last_error = f"recording stopped: only {free_bytes} disk bytes remain"
+                return False
+            if free_bytes < self.DISK_WARNING_BYTES:
+                if self._writer_status == "recording":
+                    self._writer_status = "warning"
+                self._storage_state = "warning"
+            else:
+                if self._writer_status == "warning":
+                    self._writer_status = "recording"
+                self._storage_state = "healthy"
+        return True
+
+    @staticmethod
+    def _encode_png(image: Any) -> tuple[bytes, int, int]:
+        frame = image.copy() if callable(getattr(image, "copy", None)) else image
+        size = getattr(frame, "size", (0, 0))
+        width, height = (int(size[0]), int(size[1])) if isinstance(size, tuple) and len(size) >= 2 else (0, 0)
+        buffer = BytesIO()
+        frame.save(buffer, format="PNG")
+        return buffer.getvalue(), width, height
+
+    def _append_supplemental_frame(self, frame: dict[str, Any]) -> None:
+        with self._lock:
+            timeline_path = self._timeline_path
+        if timeline_path is not None:
+            with timeline_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(frame, ensure_ascii=True, separators=(",", ":")) + "\n")
+        with self._lock:
+            self._supplemental_frames.append(frame)
+
+    def _persist_boundary_image(self, image: Any, reason: str, *, at_ms: int) -> dict[str, Any] | None:
+        if reason not in {"recording_start", "recording_stop"}:
+            raise ValueError("unsupported recording boundary")
+        with self._lock:
+            recording_dir = self._recording_dir
+        if recording_dir is None:
+            return None
+        try:
+            raw, width, height = self._encode_png(image)
+            frame_at_ms = max(0, int(at_ms))
+            frame_id = f"boundary-{'start' if reason == 'recording_start' else 'stop'}"
+            directory = recording_dir / "frames" / "boundaries"
+            directory.mkdir(parents=True, exist_ok=True)
+            path = directory / f"{frame_id}.png"
+            temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
+            temporary.write_bytes(raw)
+            os.replace(temporary, path)
+            frame = {
+                "frame_id": frame_id,
+                "at_ms": frame_at_ms,
+                "captured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "media_type": "image/png",
+                "width": width,
+                "height": height,
+                "sha256": hashlib.sha256(raw).hexdigest(),
+                "artifact_path": str(path),
+                "reason": reason,
+            }
+            self._append_supplemental_frame(frame)
+            return frame
+        except Exception as exc:
+            with self._lock:
+                self._capture_errors += 1
+                self._last_error = f"{exc.__class__.__name__}: {str(exc)[:160]}"
+                self._writer_status = "incomplete"
+            return None
+
+    def capture_boundary_frame(self, reason: str, *, at_ms: int | None = None) -> dict[str, Any] | None:
+        """Persist a clean PNG at a recording start or stop boundary."""
+        with self._lock:
+            started = self._started_monotonic
+        if not started:
+            return None
+        try:
+            image = self._screenshot_provider()
+        except Exception as exc:
+            with self._lock:
+                self._capture_errors += 1
+                self._last_error = f"{exc.__class__.__name__}: {str(exc)[:160]}"
+                self._writer_status = "incomplete"
+            return None
+        frame_at_ms = max(0, int(at_ms if at_ms is not None else (time.monotonic() - started) * 1000))
+        return self._persist_boundary_image(image, reason, at_ms=frame_at_ms)
+
+    def persist_event_frame(
+        self,
+        recording_dir: Path,
+        *,
+        event_number: int,
+        event_at_ms: int,
+        max_delta_ms: int = 1000,
+    ) -> dict[str, Any] | None:
+        """Persist an exact event PNG and link it to pre/post source frames."""
+        with self._lock:
+            frames = list(self._frames)
+        pre_candidates = [item for item in frames if int(item["at_ms"]) <= int(event_at_ms)]
+        nearest = max(pre_candidates, key=lambda item: int(item["at_ms"])) if pre_candidates else None
+        if nearest is None and frames:
+            nearest = min(frames, key=lambda item: abs(int(item["at_ms"]) - event_at_ms))
+        if nearest is None or abs(int(nearest["at_ms"]) - event_at_ms) > max(100, int(max_delta_ms)):
+            return None
+        try:
+            image = self._screenshot_provider()
+            raw, width, height = self._encode_png(image)
+        except Exception as exc:
+            with self._lock:
+                self._capture_errors += 1
+                self._last_error = f"{exc.__class__.__name__}: {str(exc)[:160]}"
+            return None
+        output_dir = recording_dir / "frames" / "events"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        event_frame_id = f"event-{event_number:04d}"
+        path = output_dir / f"{event_frame_id}-{event_at_ms:08d}ms.png"
+        path.write_bytes(raw)
+        event_frame = {
+            "frame_id": event_frame_id,
+            "at_ms": int(event_at_ms),
+            "captured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "artifact_path": str(path),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "media_type": "image/png",
+            "width": width,
+            "height": height,
+            "reason": "event",
+            "event_number": int(event_number),
+        }
+        self._append_supplemental_frame(event_frame)
+        linkage = {
+            "event_number": int(event_number),
+            "event_at_ms": int(event_at_ms),
+            "at_ms": int(event_at_ms),
+            "artifact_path": str(path),
+            "sha256": event_frame["sha256"],
+            "media_type": "image/png",
+            "width": width,
+            "height": height,
+            "reason": "event",
+            "pre_frame_id": str(nearest["frame_id"]),
+            "pre_frame_sha256": str(nearest["sha256"]),
+            "event_frame_id": event_frame_id,
+            "event_frame_sha256": event_frame["sha256"],
+            "event_artifact_path": str(path),
+            "post_frame_id": "",
+            "post_frame_sha256": "",
+            "post_artifact_path": "",
+        }
+        with self._lock:
+            self._pending_event_links.append(linkage)
+        return linkage
+
+    def _persist_pending_event_posts(self, image: Any, captured_monotonic: float) -> None:
+        with self._lock:
+            started = self._started_monotonic
+            recording_dir = self._recording_dir
+            pending = [item for item in self._pending_event_links if not item.get("post_frame_id")]
+        if not pending or not started or recording_dir is None:
+            return
+        frame_at_ms = max(0, int((captured_monotonic - started) * 1000))
+        due = [item for item in pending if frame_at_ms > int(item.get("event_at_ms", 0))]
+        if not due:
+            return
+        try:
+            raw, width, height = self._encode_png(image)
+        except Exception:
+            return
+        output_dir = recording_dir / "frames" / "events"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        for linkage in due:
+            event_number = int(linkage["event_number"])
+            frame_id = f"event-{event_number:04d}-post"
+            path = output_dir / f"{frame_id}-{frame_at_ms:08d}ms.png"
+            path.write_bytes(raw)
+            digest = hashlib.sha256(raw).hexdigest()
+            frame = {
+                "frame_id": frame_id,
+                "at_ms": frame_at_ms,
+                "captured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "artifact_path": str(path),
+                "sha256": digest,
+                "media_type": "image/png",
+                "width": width,
+                "height": height,
+                "reason": "post_action",
+                "event_number": event_number,
+            }
+            self._append_supplemental_frame(frame)
+            linkage["post_frame_id"] = frame_id
+            linkage["post_frame_sha256"] = digest
+            linkage["post_artifact_path"] = str(path)
+
+    def pin_exception_window(
+        self,
+        recording_dir: Path,
+        exception: dict[str, Any],
+        *,
+        pre_sec: float,
+        post_sec: float,
+    ) -> dict[str, Any]:
+        """Persist exception-adjacent frames immediately so rolling eviction cannot remove them."""
+        exception_id = str(exception.get("exception_id") or "exception-unknown")[:96]
+        exception_at_ms = max(0, int(exception.get("at_ms", 0)))
+        pre_window_ms = max(0, min(int(float(pre_sec) * 1000), int(self.retention_sec * 1000)))
+        post_window_ms = max(0, min(int(float(post_sec) * 1000), int(self.retention_sec * 1000)))
+        with self._lock:
+            output_dir = recording_dir / "timeline" / "exception_windows" / exception_id
+            output_dir.mkdir(parents=True, exist_ok=True)
+            window = {
+                "exception_id": exception_id,
+                "failure_code": str(exception.get("failure_code") or "RECORDING_EXCEPTION")[:96],
+                "at_ms": exception_at_ms,
+                "pre_window_ms": pre_window_ms,
+                "post_window_ms": post_window_ms,
+                "end_at_ms": exception_at_ms + post_window_ms,
+                "output_dir": output_dir,
+                "frames": [],
+                "seen_at_ms": set(),
+            }
+            candidates = [
+                frame
+                for frame in self._frames
+                if exception_at_ms - pre_window_ms <= int(frame["at_ms"]) <= exception_at_ms + post_window_ms
+            ]
+            if not candidates and self._frames:
+                candidates = [min(self._frames, key=lambda item: abs(int(item["at_ms"]) - exception_at_ms))]
+            self._pinned_exception_windows[exception_id] = window
+            for frame in candidates:
+                self._persist_exception_frame_locked(window, frame)
+            return {
+                "exception_id": exception_id,
+                "pre_window_ms": pre_window_ms,
+                "post_window_ms": post_window_ms,
+                "pinned_frame_count": len(window["frames"]),
+            }
+
+    def _persist_pending_exception_frame_locked(self, frame: dict[str, Any]) -> None:
+        frame_at_ms = int(frame["at_ms"])
+        for window in self._pinned_exception_windows.values():
+            lower = int(window["at_ms"]) - int(window["pre_window_ms"])
+            if lower <= frame_at_ms <= int(window["end_at_ms"]):
+                self._persist_exception_frame_locked(window, frame)
+
+    @staticmethod
+    def _persist_exception_frame_locked(window: dict[str, Any], frame: dict[str, Any]) -> None:
+        frame_at_ms = int(frame["at_ms"])
+        seen_at_ms = window["seen_at_ms"]
+        if frame_at_ms in seen_at_ms:
+            return
+        path = Path(window["output_dir"]) / f"frame-{frame_at_ms:08d}ms{frame['suffix']}"
+        path.write_bytes(frame["bytes"])
+        seen_at_ms.add(frame_at_ms)
+        window["frames"].append(
+            {
+                "at_ms": frame_at_ms,
+                "artifact_path": str(path),
+                "sha256": str(frame["sha256"]),
+                "media_type": str(frame["media_type"]),
+                "width": int(frame["width"]),
+                "height": int(frame["height"]),
+                "reason": "exception_window",
+                "exception_ids": [str(window["exception_id"])],
+            }
+        )
+
+    def _persisted_periodic_frames(self) -> list[dict[str, Any]]:
+        with self._lock:
+            timeline_path = self._timeline_path
+        if timeline_path is None or not timeline_path.is_file():
+            return []
+        frames: list[dict[str, Any]] = []
+        for raw_line in timeline_path.read_text(encoding="utf-8").splitlines():
+            if not raw_line.strip():
+                continue
+            try:
+                item = json.loads(raw_line)
+            except json.JSONDecodeError:
+                continue
+            if (
+                not isinstance(item, dict)
+                or not str(item.get("frame_id") or "")
+                or str(item.get("reason") or "") != "periodic"
+            ):
+                continue
+            frames.append(item)
+        return sorted(frames, key=lambda item: (int(item.get("at_ms", 0)), str(item.get("frame_id") or "")))
+
+    def _disk_timeline_manifest(
+        self,
+        *,
+        exceptions: Any,
+        timeline_id: str,
+        exception_pre_sec: float,
+        exception_post_sec: float,
+    ) -> dict[str, Any] | None:
+        frames = self._persisted_periodic_frames()
+        with self._lock:
+            timeline_path = self._timeline_path
+            capture_errors = self._capture_errors
+            last_error = self._last_error
+            writer_status = self._writer_status
+            supplemental_frames = [dict(item) for item in self._supplemental_frames]
+            storage_state = self._storage_state
+            disk_free_bytes = self._disk_free_bytes
+        if timeline_path is None:
+            return None
+        manifest = self.empty_manifest()
+        manifest.update(
+            {
+                "timeline_id": str(timeline_id or ""),
+                "timeline_path": str(timeline_path),
+                "sampled_frame_count": len(frames),
+                "persisted_frame_count": len(frames),
+                "periodic_frame_count": len(frames),
+                "frames": sorted(
+                    frames + supplemental_frames,
+                    key=lambda item: (int(item.get("at_ms", 0)), str(item.get("frame_id") or "")),
+                ),
+                "capture_errors": capture_errors,
+                "writer_status": writer_status,
+                "storage_state": storage_state,
+                "disk_free_bytes": disk_free_bytes,
+                "evidence_complete": writer_status != "incomplete" and storage_state != "critical",
+            }
+        )
+        event_frames = [
+            item for item in supplemental_frames if item.get("reason") in {"event", "post_action"}
+        ]
+        manifest["event_frame_count"] = len(event_frames)
+        manifest["event_frames"] = event_frames
+        if last_error:
+            manifest["last_capture_error"] = last_error
+        windows: list[dict[str, Any]] = []
+        pre_window_ms = max(0, int(float(exception_pre_sec) * 1000))
+        post_window_ms = max(0, int(float(exception_post_sec) * 1000))
+        for ordinal, exception in enumerate(exceptions or [], start=1):
+            if not isinstance(exception, dict):
+                continue
+            exception_at = max(0, int(exception.get("at_ms", 0)))
+            candidates = [
+                frame
+                for frame in frames
+                if exception_at - pre_window_ms <= int(frame.get("at_ms", 0)) <= exception_at + post_window_ms
+            ]
+            if not candidates and frames:
+                candidates = [min(frames, key=lambda item: abs(int(item.get("at_ms", 0)) - exception_at))]
+            windows.append(
+                {
+                    "exception_id": str(exception.get("exception_id") or f"exception-{ordinal:03d}")[:96],
+                    "failure_code": str(exception.get("failure_code") or "RECORDING_EXCEPTION")[:96],
+                    "at_ms": exception_at,
+                    "pre_window_ms": pre_window_ms,
+                    "post_window_ms": post_window_ms,
+                    "frame_ids": [str(item.get("frame_id") or "") for item in candidates],
+                }
+            )
+        manifest["exception_window_count"] = len(windows)
+        manifest["exception_windows"] = windows
+        return manifest
+
+    def persist_event_keyframes(
+        self,
+        recording_dir: Path,
+        events: Any,
+        *,
+        exceptions: Any = None,
+        timeline_id: str = "",
+        exception_pre_sec: float = 5.0,
+        exception_post_sec: float = 5.0,
+    ) -> dict[str, Any]:
+        disk_manifest = self._disk_timeline_manifest(
+            exceptions=exceptions,
+            timeline_id=timeline_id,
+            exception_pre_sec=exception_pre_sec,
+            exception_post_sec=exception_post_sec,
+        )
+        if disk_manifest is not None:
+            return disk_manifest
+        with self._lock:
+            frames = [dict(item) for item in self._frames]
+            pinned_windows = [
+                {
+                    key: ([dict(frame) for frame in value] if key == "frames" else value)
+                    for key, value in window.items()
+                    if key not in {"output_dir", "seen_at_ms", "end_at_ms"}
+                }
+                for window in self._pinned_exception_windows.values()
+            ]
+            capture_errors = self._capture_errors
+            last_error = self._last_error
+        manifest = self.empty_manifest()
+        manifest["timeline_id"] = str(timeline_id or "")
+        manifest["sampled_frame_count"] = len(frames)
+        manifest["capture_errors"] = capture_errors
+        if last_error:
+            manifest["last_capture_error"] = last_error
+        if not frames and not pinned_windows:
+            return manifest
+        event_times = [
+            max(0, int(item.get("at_ms", 0)))
+            for item in events
+            if isinstance(item, dict) and item.get("kind") != "mouse_move"
+        ]
+        selected_indices = ({0, len(frames) - 1} if frames else set())
+        exception_indices: dict[str, set[int]] = {}
+        for event_at in event_times[:200]:
+            selected_indices.add(min(range(len(frames)), key=lambda index: abs(int(frames[index]["at_ms"]) - event_at)))
+        pre_window_ms = max(0, min(int(float(exception_pre_sec) * 1000), int(self.retention_sec * 1000)))
+        post_window_ms = max(0, min(int(float(exception_post_sec) * 1000), int(self.retention_sec * 1000)))
+        pinned_exception_ids = {str(item["exception_id"]) for item in pinned_windows}
+        for ordinal, exception in enumerate(exceptions or [], start=1):
+            if not isinstance(exception, dict):
+                continue
+            exception_id = str(exception.get("exception_id") or f"exception-{ordinal:03d}")[:96]
+            if exception_id in pinned_exception_ids:
+                continue
+            exception_at = max(0, int(exception.get("at_ms", 0)))
+            indices = {
+                index
+                for index, frame in enumerate(frames)
+                if exception_at - pre_window_ms <= int(frame["at_ms"]) <= exception_at + post_window_ms
+            }
+            if not indices:
+                indices.add(min(range(len(frames)), key=lambda index: abs(int(frames[index]["at_ms"]) - exception_at)))
+            exception_indices[exception_id] = indices
+            selected_indices.update(indices)
+        output_dir = recording_dir / "timeline" / "keyframes"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        persisted: list[dict[str, Any]] = []
+        for ordinal, index in enumerate(sorted(selected_indices), start=1):
+            frame = frames[index]
+            path = output_dir / f"frame-{ordinal:04d}-{int(frame['at_ms']):08d}ms{frame['suffix']}"
+            path.write_bytes(frame["bytes"])
+            exception_reasons = sorted(
+                exception_id for exception_id, indices in exception_indices.items() if index in indices
+            )
+            persisted.append(
+                {
+                    "frame_id": f"frame-{ordinal:04d}",
+                    "at_ms": int(frame["at_ms"]),
+                    "artifact_path": str(path),
+                    "sha256": str(frame["sha256"]),
+                    "media_type": str(frame["media_type"]),
+                    "width": int(frame["width"]),
+                    "height": int(frame["height"]),
+                    "reason": (
+                        "exception_window"
+                        if exception_reasons
+                        else ("boundary" if index in {0, len(frames) - 1} else "event_nearest")
+                    ),
+                    "exception_ids": exception_reasons,
+                }
+            )
+        frame_id_by_index = {
+            index: f"frame-{ordinal:04d}"
+            for ordinal, index in enumerate(sorted(selected_indices), start=1)
+        }
+        windows: list[dict[str, Any]] = []
+        exception_lookup = {
+            str(item.get("exception_id") or f"exception-{ordinal:03d}")[:96]: item
+            for ordinal, item in enumerate(exceptions or [], start=1)
+            if isinstance(item, dict)
+        }
+        for exception_id, indices in exception_indices.items():
+            exception = exception_lookup.get(exception_id, {})
+            windows.append(
+                {
+                    "exception_id": exception_id,
+                    "failure_code": str(exception.get("failure_code") or "RECORDING_EXCEPTION")[:96],
+                    "at_ms": max(0, int(exception.get("at_ms", 0))),
+                    "pre_window_ms": pre_window_ms,
+                    "post_window_ms": post_window_ms,
+                    "frame_ids": [frame_id_by_index[index] for index in sorted(indices)],
+                }
+            )
+        for pinned_window in pinned_windows:
+            frame_ids: list[str] = []
+            for frame in sorted(pinned_window.get("frames", []), key=lambda item: int(item["at_ms"])):
+                frame_id = f"frame-{len(persisted) + 1:04d}"
+                persisted.append({"frame_id": frame_id, **frame})
+                frame_ids.append(frame_id)
+            windows.append(
+                {
+                    "exception_id": str(pinned_window["exception_id"]),
+                    "failure_code": str(pinned_window["failure_code"]),
+                    "at_ms": int(pinned_window["at_ms"]),
+                    "pre_window_ms": int(pinned_window["pre_window_ms"]),
+                    "post_window_ms": int(pinned_window["post_window_ms"]),
+                    "frame_ids": frame_ids,
+                }
+            )
+        manifest["persisted_frame_count"] = len(persisted)
+        manifest["frames"] = persisted
+        manifest["exception_window_count"] = len(windows)
+        manifest["exception_windows"] = windows
+        return manifest
+
+    def release(self) -> None:
+        """Release image bytes after the selected evidence has been persisted."""
+        with self._lock:
+            self._frames = []
+            self._supplemental_frames = []
+            self._pending_event_links = []
+            self._start_boundary_pending = False
+            self._total_bytes = 0
+            self._pinned_exception_windows = {}
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                **self.empty_manifest(),
+                "active": self._thread is not None and self._thread.is_alive(),
+                "sampled_frame_count": len(self._frames),
+                "persisted_frame_count": self._persisted_frame_count,
+                "periodic_frame_count": self._persisted_frame_count,
+                "timeline_path": str(self._timeline_path or ""),
+                "writer_status": self._writer_status,
+                "storage_state": self._storage_state,
+                "disk_free_bytes": self._disk_free_bytes,
+                "evidence_complete": self._writer_status != "incomplete" and self._storage_state != "critical",
+                "buffer_bytes": self._total_bytes,
+                "capture_errors": self._capture_errors,
+                "last_capture_error": self._last_error,
+            }
+
+    def _capture_loop(self) -> None:
+        interval = 1.0 / self.fps
+        next_capture = time.monotonic() + interval
+        while not self._stop_event.wait(max(0.0, next_capture - time.monotonic())):
+            self.capture_once()
+            next_capture += interval
+            now = time.monotonic()
+            if next_capture <= now:
+                missed_intervals = int((now - next_capture) // interval) + 1
+                next_capture += missed_intervals * interval
+
+    @staticmethod
+    def _encode_frame(image: Any) -> tuple[bytes, str, str, int, int]:
+        frame = image.copy() if callable(getattr(image, "copy", None)) else image
+        size = getattr(frame, "size", (0, 0))
+        width, height = (int(size[0]), int(size[1])) if isinstance(size, tuple) and len(size) >= 2 else (0, 0)
+        convert = getattr(frame, "convert", None)
+        if callable(convert):
+            frame = convert("RGB")
+        buffer = BytesIO()
+        try:
+            frame.save(buffer, format="JPEG", quality=82, optimize=True)
+            return buffer.getvalue(), "image/jpeg", ".jpg", width, height
+        except Exception:
+            buffer = BytesIO()
+            frame.save(buffer, format="PNG")
+            return buffer.getvalue(), "image/png", ".png", width, height
 
 
 class RecordingManager:
@@ -469,12 +1414,22 @@ class RecordingManager:
         *,
         listener_factory: Callable[["RecordingManager"], list[Any]] | None = None,
         screenshot_provider: Callable[[], Any] | None = None,
+        input_language_provider: Callable[[], dict[str, str]] | None = None,
         overlay_controller: Any | None = None,
+        frame_buffer_fps: float = 2.0,
+        frame_buffer_retention_sec: float = 20.0,
+        frame_buffer_max_bytes: int = 64 * 1024 * 1024,
+        exception_pre_sec: float = 5.0,
+        exception_post_sec: float = 5.0,
     ) -> None:
         self.root = Path(root)
         self._listener_factory = listener_factory or _pynput_recording_listeners
         self._screenshot_provider = screenshot_provider
-        self._overlay = overlay_controller or RecordingOverlayController()
+        self._input_language_provider = input_language_provider or _windows_input_language_state
+        self._overlay = overlay_controller or RecordingOverlayController(on_stop=self.stop)
+        set_stop_callback = getattr(self._overlay, "set_stop_callback", None)
+        if callable(set_stop_callback):
+            set_stop_callback(self.stop)
         self._lock = threading.RLock()
         self._active: dict[str, Any] | None = None
         self._listeners: list[Any] = []
@@ -487,18 +1442,108 @@ class RecordingManager:
         self._last_pointer_frame_position: tuple[int, int] | None = None
         self._pointer_frame_history: list[tuple[Any, float, tuple[int, int]]] = []
         self._visual_locator_bytes = 0
+        self._last_input_language: dict[str, str] | None = None
+        self._exception_pre_sec = max(0.0, min(float(exception_pre_sec), float(frame_buffer_retention_sec)))
+        self._exception_post_sec = max(0.0, min(float(exception_post_sec), float(frame_buffer_retention_sec)))
+        self._frame_buffer = RecordingFrameBuffer(
+            screenshot_provider=self._screenshot,
+            fps=frame_buffer_fps,
+            retention_sec=frame_buffer_retention_sec,
+            max_bytes=frame_buffer_max_bytes,
+        )
 
     def next_event_number(self) -> int:
         with self._lock:
             return len(self._active.get("events", [])) + 1 if self._active is not None else 1
 
+    def _input_language_state(self) -> dict[str, str]:
+        unavailable = {
+            "status": "unavailable",
+            "layout_id": "",
+            "locale": "",
+            "language": "",
+            "ime_mode": "unknown",
+            "typing_mode": "unknown",
+        }
+        try:
+            state = self._input_language_provider()
+        except Exception:
+            return unavailable
+        if not isinstance(state, dict):
+            return unavailable
+        return {
+            "status": str(state.get("status") or "unavailable")[:24],
+            "layout_id": str(state.get("layout_id") or "")[:32],
+            "locale": str(state.get("locale") or "")[:32],
+            "language": str(state.get("language") or "")[:16],
+            "ime_mode": str(state.get("ime_mode") or "unknown")[:24],
+            "typing_mode": str(state.get("typing_mode") or "unknown")[:24],
+        }
+
+    def record_keyboard_event(self, event: dict[str, Any]) -> bool:
+        state = self._input_language_state()
+        with self._lock:
+            if self._active is None:
+                return False
+            if self._last_input_language != state:
+                at_ms = max(0, int((time.monotonic() - self._started_monotonic) * 1000))
+                self._active["input_language_history"].append({"at_ms": at_ms, **state})
+                self.record_event({"kind": "input_language_changed", "input_language": state})
+                self._last_input_language = dict(state)
+            enriched = dict(event)
+            enriched["input_language"] = state
+            return self.record_event(enriched)
+
     def _screenshot(self) -> Any:
         if self._screenshot_provider is not None:
-            return self._screenshot_provider()
-        pyautogui, error = _load_pyautogui()
-        if pyautogui is None:
-            raise RuntimeError(error or "PyAutoGUI unavailable")
-        return pyautogui.screenshot()
+            image = self._screenshot_provider()
+        else:
+            pyautogui, error = _load_pyautogui()
+            if pyautogui is None:
+                raise RuntimeError(error or "PyAutoGUI unavailable")
+            image = pyautogui.screenshot()
+        return self._apply_mask_regions(image)
+
+    @staticmethod
+    def _normalize_mask_regions(regions: Any) -> list[dict[str, int]]:
+        normalized: list[dict[str, int]] = []
+        for item in regions if isinstance(regions, list) else []:
+            if not isinstance(item, dict):
+                continue
+            try:
+                region = {
+                    "x": max(0, int(item.get("x", 0))),
+                    "y": max(0, int(item.get("y", 0))),
+                    "width": max(1, min(16384, int(item.get("width", 0)))),
+                    "height": max(1, min(16384, int(item.get("height", 0)))),
+                }
+            except (TypeError, ValueError):
+                continue
+            normalized.append(region)
+            if len(normalized) >= 32:
+                break
+        return normalized
+
+    def _apply_mask_regions(self, image: Any) -> Any:
+        with self._lock:
+            regions = list(self._active.get("mask_regions", [])) if self._active is not None else []
+        if not regions:
+            return image
+        frame = image.copy() if callable(getattr(image, "copy", None)) else image
+        try:
+            from PIL import ImageDraw
+
+            draw = ImageDraw.Draw(frame)
+            for region in regions:
+                left = int(region["x"])
+                top = int(region["y"])
+                draw.rectangle(
+                    (left, top, left + int(region["width"]) - 1, top + int(region["height"]) - 1),
+                    fill=(0, 0, 0),
+                )
+            return frame
+        except Exception as exc:
+            raise RuntimeError(f"recording mask application failed: {exc}") from exc
 
     @staticmethod
     def _crop_box(x: int, y: int, width: int, height: int, image_size: tuple[int, int]) -> tuple[int, int, int, int]:
@@ -654,6 +1699,7 @@ class RecordingManager:
         target_window: str,
         image_tracking: bool = True,
         coordinate_fallback: bool = False,
+        mask_regions: Any = None,
     ) -> dict[str, Any]:
         with self._lock:
             if self._active is not None:
@@ -664,23 +1710,31 @@ class RecordingManager:
                     "recording_id": self._active["recording_id"],
                 }
             recording_id = f"rec-{time.strftime('%Y%m%dT%H%M%S')}-{uuid4().hex[:8]}"
+            timeline_id = f"timeline-{recording_id[4:]}"
             now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            input_language = self._input_language_state()
             self._active = {
-                "schema": "atr.equipment_recording.v2" if image_tracking else "atr.equipment_recording.v1",
+                "schema": "atr.equipment_recording.v3" if image_tracking else "atr.equipment_recording.v1",
                 "recording_id": recording_id,
+                "timeline_id": timeline_id,
                 "name": str(name or "Equipment demonstration")[:160],
                 "target_app": str(target_app or "")[:160],
                 "target_window": str(target_window or "")[:240],
                 "status": "recording",
                 "events": [],
                 "checkpoints": [],
+                "exceptions": [],
+                "mask_regions": self._normalize_mask_regions(mask_regions),
                 "created_at": now,
                 "updated_at": now,
+                "input_language": input_language,
+                "input_language_history": [{"at_ms": 0, **input_language}],
                 "visual_locator_policy": {
                     "mode": "image_first" if image_tracking else "coordinates",
                     "required_for_pointer_actions": bool(image_tracking),
                     "coordinate_fallback": bool(coordinate_fallback),
                 },
+                "time_series_evidence": self._frame_buffer.empty_manifest(),
             }
             self._started_monotonic = time.monotonic()
             self._last_mouse_move_monotonic = 0.0
@@ -690,6 +1744,12 @@ class RecordingManager:
             self._last_pointer_frame_position = None
             self._pointer_frame_history = []
             self._visual_locator_bytes = 0
+            self._last_input_language = dict(input_language)
+            self._frame_buffer.start(
+                recording_id,
+                self._started_monotonic,
+                self._path(recording_id).parent,
+            )
             try:
                 self._listeners = list(self._listener_factory(self) or [])
                 for listener in self._listeners:
@@ -712,6 +1772,7 @@ class RecordingManager:
                 self._active = None
                 self._listeners = []
                 self._started_monotonic = 0.0
+                self._frame_buffer.stop()
                 self._overlay.hide()
                 if dependency:
                     return {
@@ -739,6 +1800,8 @@ class RecordingManager:
             safe: dict[str, Any] = {"kind": kind, "at_ms": max(0, int((time.monotonic() - self._started_monotonic) * 1000))}
             if kind == "key_press":
                 safe["key"] = str(event.get("key") or "").strip().lower()[:32]
+                if isinstance(event.get("input_language"), dict):
+                    safe["input_language"] = dict(event["input_language"])
             elif kind == "mouse_click":
                 safe.update(
                     {
@@ -776,12 +1839,56 @@ class RecordingManager:
                 )
             elif kind == "hotkey":
                 safe["keys"] = [str(item).strip().lower()[:32] for item in event.get("keys", [])][:8]
+                if isinstance(event.get("input_language"), dict):
+                    safe["input_language"] = dict(event["input_language"])
+            elif kind == "input_language_changed":
+                if not isinstance(event.get("input_language"), dict):
+                    return False
+                safe["input_language"] = dict(event["input_language"])
             else:
                 return False
             self._active["events"].append(safe)
+            if kind not in {"mouse_move", "input_language_changed"}:
+                evidence = self._frame_buffer.persist_event_frame(
+                    self._path(str(self._active["recording_id"])).parent,
+                    event_number=len(self._active["events"]),
+                    event_at_ms=int(safe["at_ms"]),
+                )
+                if evidence:
+                    safe["frame_evidence"] = evidence
             self._active["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             self._persist(self._active)
             return True
+
+    def record_exception(self, *, failure_code: str, detail: str = "") -> dict[str, Any]:
+        """Mark an exception without persisting credentials or the complete desktop stream."""
+        with self._lock:
+            if self._active is None:
+                return {"ok": False, "status": "idle", "failure_code": "SKILL_RECORDING_NOT_ACTIVE"}
+            code = re.sub(r"[^A-Z0-9_]+", "_", str(failure_code or "RECORDING_EXCEPTION").upper()).strip("_")
+            code = (code or "RECORDING_EXCEPTION")[:96]
+            safe_detail = re.sub(
+                r"(?i)\b(token|password|secret|api[_-]?key|authorization)\s*[:=]\s*\S+",
+                r"\1=<redacted>",
+                str(detail or "")[:512],
+            )
+            marker = {
+                "exception_id": f"exception-{len(self._active['exceptions']) + 1:03d}",
+                "timeline_id": str(self._active["timeline_id"]),
+                "at_ms": max(0, int((time.monotonic() - self._started_monotonic) * 1000)),
+                "failure_code": code,
+                "detail": safe_detail,
+            }
+            marker["frame_window"] = self._frame_buffer.pin_exception_window(
+                self._path(str(self._active["recording_id"])).parent,
+                marker,
+                pre_sec=self._exception_pre_sec,
+                post_sec=self._exception_post_sec,
+            )
+            self._active["exceptions"].append(marker)
+            self._active["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            self._persist(self._active)
+            return {"ok": True, "status": "exception_marked", **marker}
 
     def record_mouse_move(self, x: int, y: int) -> bool:
         """Sample pointer motion without flooding a recording with raw OS events."""
@@ -811,7 +1918,7 @@ class RecordingManager:
             image_path = directory / f"{checkpoint_id}.png"
             if capture is None:
                 return {"ok": False, "status": "blocked", "failure_code": "PYAUTOGUI_UNAVAILABLE"}
-            capture.screenshot().save(image_path)
+            self._apply_mask_regions(capture.screenshot()).save(image_path)
             digest = hashlib.sha256(image_path.read_bytes()).hexdigest()
             checkpoint = {
                 "checkpoint_id": checkpoint_id,
@@ -840,12 +1947,50 @@ class RecordingManager:
                         stop()
                     except Exception as exc:
                         listener_stop_errors.append(f"{exc.__class__.__name__}: {str(exc)[:160]}")
+            consume_stop_request = getattr(self._overlay, "consume_stop_request", None)
+            stop_request = consume_stop_request() if callable(consume_stop_request) else {}
+            if isinstance(stop_request, dict) and stop_request.get("control"):
+                stop_x = int(stop_request.get("x", 0))
+                stop_y = int(stop_request.get("y", 0))
+                for event in reversed(self._active.get("events", [])):
+                    if not isinstance(event, dict) or event.get("kind") == "mouse_move":
+                        continue
+                    if (
+                        event.get("kind") == "mouse_click"
+                        and abs(int(event.get("x", -1000)) - stop_x) <= 8
+                        and abs(int(event.get("y", -1000)) - stop_y) <= 8
+                    ):
+                        event["recording_control"] = str(stop_request["control"])[:64]
+                    break
             self._overlay.hide()
             self._listeners = []
             self._active["status"] = "completed"
             if listener_stop_errors:
                 self._active["listener_stop_errors"] = listener_stop_errors
             self._active["duration_ms"] = max(0, int((time.monotonic() - self._started_monotonic) * 1000))
+            # Persist one clean post-action frame after the recording overlay is gone.
+            self._frame_buffer.capture_boundary_frame(
+                "recording_stop",
+                at_ms=int(self._active["duration_ms"]),
+            )
+            self._frame_buffer.capture_once()
+            self._frame_buffer.stop()
+            self._active["time_series_evidence"] = self._frame_buffer.persist_event_keyframes(
+                self._path(str(self._active["recording_id"])).parent,
+                self._active.get("events", []),
+                exceptions=self._active.get("exceptions", []),
+                timeline_id=str(self._active.get("timeline_id") or ""),
+                exception_pre_sec=self._exception_pre_sec,
+                exception_post_sec=self._exception_post_sec,
+            )
+            event_frames = [
+                dict(item["frame_evidence"])
+                for item in self._active.get("events", [])
+                if isinstance(item, dict) and isinstance(item.get("frame_evidence"), dict)
+            ]
+            self._active["time_series_evidence"]["event_frame_count"] = len(event_frames)
+            self._active["time_series_evidence"]["event_frames"] = event_frames
+            self._frame_buffer.release()
             self._active["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             self._persist(self._active)
             completed = dict(self._active)
@@ -863,6 +2008,8 @@ class RecordingManager:
             active = self._active is not None
         if active:
             self.stop()
+        else:
+            self._frame_buffer.stop()
         self._overlay.shutdown()
 
     def save(self, recording_id: str) -> dict[str, Any]:
@@ -876,12 +2023,188 @@ class RecordingManager:
             self._persist(payload)
             return {"ok": True, **payload}
 
+    def package(
+        self,
+        recording_id: str,
+        *,
+        max_total_bytes: int | None = None,
+        max_file_bytes: int | None = None,
+    ) -> dict[str, Any]:
+        """Return the complete hash-addressed recording package for Linux import."""
+        with self._lock:
+            recording = self.get(recording_id)
+            if not recording.get("ok"):
+                return recording
+            recording_dir = self._path(recording_id).parent.resolve()
+            artifacts: list[dict[str, Any]] = []
+            total_bytes = 0
+            for path in sorted(recording_dir.rglob("*")):
+                if not path.is_file() or path.is_symlink() or path.name == "recording.json":
+                    continue
+                resolved = path.resolve()
+                try:
+                    relative = resolved.relative_to(recording_dir)
+                except ValueError:
+                    continue
+                raw = resolved.read_bytes()
+                if (
+                    (max_file_bytes is not None and len(raw) > max(0, int(max_file_bytes)))
+                    or (
+                        max_total_bytes is not None
+                        and total_bytes + len(raw) > max(0, int(max_total_bytes))
+                    )
+                ):
+                    return {
+                        "ok": False,
+                        "status": "blocked",
+                        "failure_code": "SKILL_RECORDING_PACKAGE_TOO_LARGE",
+                        "message": "Recording evidence exceeds the explicitly configured transfer limit.",
+                    }
+                total_bytes += len(raw)
+                suffix = resolved.suffix.lower()
+                media_type = {
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".png": "image/png",
+                    ".json": "application/json",
+                    ".csv": "text/csv",
+                }.get(suffix, "application/octet-stream")
+                artifacts.append(
+                    {
+                        "relative_path": relative.as_posix(),
+                        "source_path": str(resolved),
+                        "sha256": hashlib.sha256(raw).hexdigest(),
+                        "size_bytes": len(raw),
+                        "media_type": media_type,
+                        "data_base64": base64.b64encode(raw).decode("ascii"),
+                    }
+                )
+            recording.pop("ok", None)
+            return {
+                "ok": True,
+                "schema": "atr.equipment_recording_package.v1",
+                "recording": recording,
+                "artifact_count": len(artifacts),
+                "total_bytes": total_bytes,
+                "artifacts": artifacts,
+            }
+
+    def preview(
+        self,
+        recording_id: str,
+        *,
+        cursor: int = 0,
+        limit: int | None = None,
+        max_frames: int = 48,
+        max_total_bytes: int = 24 * 1024 * 1024,
+    ) -> dict[str, Any]:
+        """Return one bounded visual page without exposing Windows filesystem paths."""
+        recording = self.get(recording_id)
+        if not recording.get("ok"):
+            return recording
+        recording_dir = self._path(recording_id).parent.resolve()
+        timeline = recording.get("time_series_evidence") if isinstance(recording.get("time_series_evidence"), dict) else {}
+        candidates: list[dict[str, Any]] = []
+        for item in timeline.get("frames", []):
+            if isinstance(item, dict):
+                candidates.append(dict(item))
+        for item in timeline.get("event_frames", []):
+            if isinstance(item, dict):
+                candidates.append(dict(item))
+        for item in recording.get("checkpoints", []):
+            if isinstance(item, dict):
+                candidates.append({**item, "reason": "checkpoint", "at_ms": int(item.get("at_ms", 0))})
+
+        available: list[tuple[dict[str, Any], Path, str]] = []
+        seen: set[str] = set()
+        for item in sorted(candidates, key=lambda value: int(value.get("at_ms", 0))):
+            raw_path = str(item.get("artifact_path") or "").strip()
+            if not raw_path or raw_path in seen:
+                continue
+            seen.add(raw_path)
+            path = Path(raw_path).resolve()
+            try:
+                path.relative_to(recording_dir)
+            except ValueError:
+                continue
+            if not path.is_file() or path.is_symlink():
+                continue
+            suffix = path.suffix.lower()
+            media_type = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}.get(suffix)
+            if not media_type:
+                continue
+            available.append((item, path, media_type))
+
+        page_cursor = max(0, int(cursor))
+        page_limit = max(1, min(int(limit if limit is not None else max_frames), 96))
+        frames: list[dict[str, Any]] = []
+        total_bytes = 0
+        for item, path, media_type in available[page_cursor : page_cursor + page_limit]:
+            raw = path.read_bytes()
+            if not raw or total_bytes + len(raw) > max_total_bytes:
+                break
+            total_bytes += len(raw)
+            frames.append(
+                {
+                    "frame_id": str(item.get("frame_id") or item.get("checkpoint_id") or f"frame-{len(frames) + 1:04d}"),
+                    "at_ms": max(0, int(item.get("at_ms", 0))),
+                    "reason": str(item.get("reason") or "recording_evidence"),
+                    "media_type": media_type,
+                    "width": max(0, int(item.get("width", 0))),
+                    "height": max(0, int(item.get("height", 0))),
+                    "sha256": hashlib.sha256(raw).hexdigest(),
+                    "data_base64": base64.b64encode(raw).decode("ascii"),
+                }
+            )
+        next_cursor = page_cursor + len(frames)
+        if next_cursor >= len(available):
+            next_cursor = None
+        return {
+            "ok": True,
+            "schema": "atr.equipment_recording_preview.v1",
+            "recording_id": recording_id,
+            "name": str(recording.get("name") or recording_id),
+            "status": str(recording.get("status") or "unknown"),
+            "duration_ms": max(0, int(recording.get("duration_ms", 0))),
+            "event_count": len(recording.get("events", [])),
+            "frame_count": len(frames),
+            "returned_frame_count": len(frames),
+            "total_frame_count": len(available),
+            "cursor": page_cursor,
+            "limit": page_limit,
+            "next_cursor": next_cursor,
+            "total_bytes": total_bytes,
+            "frames": frames,
+        }
+
     def get(self, recording_id: str) -> dict[str, Any]:
         path = self._path(recording_id)
         if not path.exists():
             return {"ok": False, "status": "not_found", "failure_code": "SKILL_RECORDING_NOT_FOUND", "recording_id": recording_id}
         payload = json.loads(path.read_text(encoding="utf-8"))
         return {"ok": True, **payload}
+
+    def delete(self, recording_id: str) -> dict[str, Any]:
+        with self._lock:
+            if self._active is not None and self._active.get("recording_id") == recording_id:
+                return {
+                    "ok": False,
+                    "status": "blocked",
+                    "failure_code": "SKILL_RECORDING_ACTIVE",
+                    "recording_id": recording_id,
+                }
+            path = self._path(recording_id)
+            if not path.exists():
+                return {
+                    "ok": False,
+                    "status": "not_found",
+                    "failure_code": "SKILL_RECORDING_NOT_FOUND",
+                    "recording_id": recording_id,
+                }
+            shutil.rmtree(path.parent)
+            if self._last_completed_id == recording_id:
+                self._last_completed_id = ""
+            return {"ok": True, "status": "deleted", "recording_id": recording_id}
 
     def list(self) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
@@ -896,437 +2219,444 @@ class RecordingManager:
     def status(self) -> dict[str, Any]:
         with self._lock:
             if self._active is not None:
-                return {"ok": True, **dict(self._active), "elapsed_ms": max(0, int((time.monotonic() - self._started_monotonic) * 1000)), "overlay": self._overlay.status()}
+                return {"ok": True, **dict(self._active), "elapsed_ms": max(0, int((time.monotonic() - self._started_monotonic) * 1000)), "overlay": self._overlay.status(), "frame_buffer": self._frame_buffer.status()}
             return {"ok": True, "status": "idle", "recording_id": None, "overlay": self._overlay.status()}
 
 
 RECORDING_MANAGER = RecordingManager(RECORDING_ROOT)
 
 
-class _NoControllerRedirects(HTTPRedirectHandler):
-    """Keep controller identity checks on the candidate origin."""
-
-    def redirect_request(self, req: URLRequest, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
-        return None
-
-
-def _normalize_controller_url(value: str) -> str:
-    raw = str(value or "").strip().rstrip("/")
-    if not raw:
-        raise ValueError("controller URL is empty")
-    parsed = urlparse(raw)
-    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
-        raise ValueError("controller URL must use http or https and include a host")
-    if parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in {"", "/"}:
-        raise ValueError("controller URL must be an origin without credentials, query, fragment, or path")
-    try:
-        port = parsed.port or 7860
-    except ValueError as exc:
-        raise ValueError("controller URL port is invalid") from exc
-    host = parsed.hostname.lower()
-    try:
-        address = ipaddress.ip_address(host)
-        host = f"[{address.compressed}]" if address.version == 6 else address.compressed
-    except ValueError:
-        pass
-    return f"{parsed.scheme.lower()}://{host}:{port}"
-
-
-def _controller_url_is_private_ipv4(controller_url: str) -> bool:
-    try:
-        address = ipaddress.ip_address(urlparse(controller_url).hostname or "")
-    except ValueError:
-        return False
-    return address.version == 4 and (address.is_private or address.is_loopback)
-
-
-def _eligible_private_peer(value: str) -> ipaddress.IPv4Address | None:
-    try:
-        address = ipaddress.ip_address(str(value or "").strip())
-    except ValueError:
-        return None
-    if (
-        address.version != 4
-        or not address.is_private
-        or address.is_loopback
-        or address.is_link_local
-        or address.is_multicast
-        or address.is_unspecified
-        or address.is_reserved
-    ):
-        return None
-    return address
-
-
-def _local_private_ipv4_addresses() -> list[str]:
-    addresses: set[str] = set()
-    try:
-        infos = socket.getaddrinfo(socket.gethostname(), None, family=socket.AF_INET, type=socket.SOCK_STREAM)
-    except OSError:
-        infos = []
-    for info in infos:
-        address = _eligible_private_peer(str(info[4][0]))
-        if address is not None:
-            addresses.add(address.compressed)
-    try:
-        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            probe.connect(("192.0.2.1", 9))
-            address = _eligible_private_peer(str(probe.getsockname()[0]))
-            if address is not None:
-                addresses.add(address.compressed)
-        finally:
-            probe.close()
-    except OSError:
-        pass
-    return sorted(addresses, key=lambda value: int(ipaddress.ip_address(value)))
-
-
-def _private_ipv4_probe_candidates(local_addresses: list[str], *, max_candidates: int = 512) -> list[str]:
-    own = {
-        address.compressed
-        for value in local_addresses
-        if (address := _eligible_private_peer(value)) is not None
-    }
-    candidates: set[str] = set()
-    for own_address in sorted(own, key=lambda value: int(ipaddress.ip_address(value))):
-        network = ipaddress.ip_network(f"{own_address}/24", strict=False)
-        for candidate in network.hosts():
-            compressed = candidate.compressed
-            if compressed not in own:
-                candidates.add(compressed)
-            if len(candidates) >= max(1, int(max_candidates)):
-                break
-        if len(candidates) >= max(1, int(max_candidates)):
-            break
-    return sorted(candidates, key=lambda value: int(ipaddress.ip_address(value)))
-
-
-def _scan_private_network_for_atr(*, overall_timeout: float = 4.0, max_workers: int = 32) -> list[str]:
-    candidates = _private_ipv4_probe_candidates(_local_private_ipv4_addresses())
-    if not candidates:
-        return []
-    executor = ThreadPoolExecutor(max_workers=max(1, min(int(max_workers), 64)), thread_name_prefix="atr-discovery")
-    futures = {
-        executor.submit(_verify_atr_controller_identity, f"http://{address}:7860", timeout=0.4): address
-        for address in candidates
-    }
-    verified: list[str] = []
-    try:
-        for future in as_completed(futures, timeout=max(0.5, float(overall_timeout))):
-            address = futures[future]
-            try:
-                result = future.result()
-            except Exception:
-                continue
-            if isinstance(result, dict) and result.get("ok") is True:
-                verified.append(f"http://{address}:7860")
-    except TimeoutError:
-        pass
-    finally:
-        for future in futures:
-            future.cancel()
-        executor.shutdown(wait=False, cancel_futures=True)
-    return sorted(set(verified), key=lambda value: int(ipaddress.ip_address(urlparse(value).hostname or "0.0.0.0")))
-
-
-def _verify_atr_controller_identity(controller_url: str, *, timeout: float = 1.0) -> dict[str, Any]:
-    """Accept a controller only when its public Skill registry has the ATR response shape."""
-    request = URLRequest(
-        f"{controller_url}/api/equipment/skills",
-        method="GET",
-        headers={"Accept": "application/json"},
-    )
-    try:
-        with build_opener(_NoControllerRedirects()).open(request, timeout=max(0.1, float(timeout))) as response:
-            if int(response.status) != 200:
-                return {"ok": False, "failure_code": "ATR_CONTROLLER_IDENTITY_HTTP_ERROR"}
-            raw = response.read(2 * 1024 * 1024 + 1)
-            if len(raw) > 2 * 1024 * 1024:
-                return {"ok": False, "failure_code": "ATR_CONTROLLER_IDENTITY_RESPONSE_TOO_LARGE"}
-            payload = json.loads(raw.decode("utf-8"))
-    except HTTPError as exc:
-        return {
-            "ok": False,
-            "failure_code": "ATR_CONTROLLER_REDIRECT_REJECTED" if 300 <= int(exc.code) < 400 else "ATR_CONTROLLER_IDENTITY_HTTP_ERROR",
-            "http_status": int(exc.code),
-        }
-    except (URLError, TimeoutError, OSError):
-        return {"ok": False, "failure_code": "ATR_CONTROLLER_UNREACHABLE"}
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return {"ok": False, "failure_code": "ATR_CONTROLLER_IDENTITY_INVALID_JSON"}
-    if not isinstance(payload, dict) or payload.get("ok") is not True or not isinstance(payload.get("skills"), list):
-        return {"ok": False, "failure_code": "ATR_CONTROLLER_IDENTITY_MISMATCH"}
-    return {"ok": True, "status": "verified", "skill_count": len(payload["skills"])}
-
-
-class ATRControllerResolver:
-    """Resolve and persist a verified Linux ATR controller without storing credentials."""
-
-    schema = "atr.windows_controller_connection.v1"
+class UpdateManager:
+    """Stage only verified Worker files and prepare bounded process replacement."""
 
     def __init__(
         self,
-        data_root: Path,
         *,
-        explicit_url: str = "",
-        verifier: Callable[[str], dict[str, Any] | bool] | None = None,
-        scanner: Callable[[], list[str]] | None = None,
+        package_root: str | Path,
+        update_root: str | Path,
+        allowed_paths: set[str],
+        recording_status_provider: Callable[[], dict[str, Any]],
     ) -> None:
-        self.data_root = Path(data_root)
-        self.record_path = self.data_root / "controller_connection.json"
-        self.explicit_url = str(explicit_url or "").strip()
-        self._verifier = verifier
-        self._scanner = scanner
+        self.package_root = Path(package_root).resolve()
+        self.update_root = Path(update_root).resolve()
+        self.allowed_paths = {self._safe_path(path) for path in allowed_paths}
+        self.recording_status_provider = recording_status_provider
         self._lock = threading.RLock()
-        self._current: dict[str, Any] | None = None
-        self._saved_record_status = "missing"
-        self._negative_discovery_until = 0.0
-        self._last_discovery_failure: dict[str, Any] | None = None
 
     @staticmethod
-    def _timestamp() -> str:
-        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    def _safe_path(value: Any) -> str:
+        raw = str(value or "").strip().replace("\\", "/")
+        path = PurePosixPath(raw)
+        if not raw or path.is_absolute() or ".." in path.parts or "." in path.parts:
+            raise ValueError(f"invalid update path: {raw!r}")
+        return path.as_posix()
 
-    def _verify(self, value: str, *, source: str, allow_public: bool = False) -> dict[str, Any]:
-        try:
-            controller_url = _normalize_controller_url(value)
-        except ValueError:
-            return {"ok": False, "source": source, "failure_code": "ATR_CONTROLLER_URL_INVALID"}
-        if not allow_public and not _controller_url_is_private_ipv4(controller_url):
-            return {"ok": False, "source": source, "failure_code": "ATR_CONTROLLER_ADDRESS_NOT_PRIVATE"}
-        try:
-            verification = self._verifier(controller_url) if self._verifier else _verify_atr_controller_identity(controller_url)
-        except Exception:
-            verification = {"ok": False, "failure_code": "ATR_CONTROLLER_VERIFICATION_FAILED"}
-        if verification is True:
-            verification = {"ok": True}
-        if not isinstance(verification, dict) or verification.get("ok") is not True:
-            failure_code = str(verification.get("failure_code") or "ATR_CONTROLLER_IDENTITY_MISMATCH") if isinstance(verification, dict) else "ATR_CONTROLLER_IDENTITY_MISMATCH"
-            return {"ok": False, "source": source, "controller_url": controller_url, "failure_code": failure_code}
-        return {
-            "ok": True,
-            "status": "verified",
-            "source": source,
-            "controller_url": controller_url,
-            "verified_at": self._timestamp(),
-        }
+    @property
+    def state_path(self) -> Path:
+        return self.update_root / "status.json"
 
-    def _load_saved(self) -> dict[str, Any] | None:
-        if not self.record_path.is_file():
-            self._saved_record_status = "missing"
-            return None
-        try:
-            payload = json.loads(self.record_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            self._saved_record_status = "invalid"
-            return None
-        if not isinstance(payload, dict) or payload.get("schema") != self.schema or not payload.get("controller_url"):
-            self._saved_record_status = "invalid"
-            return None
-        self._saved_record_status = "loaded"
-        return payload
+    @property
+    def staged_pointer_path(self) -> Path:
+        return self.update_root / "staged.json"
 
-    def _persist(self, result: dict[str, Any], *, source: str) -> None:
-        self.data_root.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "schema": self.schema,
-            "controller_url": str(result["controller_url"]),
-            "source": source,
-            "verified_at": str(result.get("verified_at") or self._timestamp()),
-            "last_successful_verification_at": self._timestamp(),
-            "last_failure_code": "",
-            "last_failure_message": "",
-        }
-        temporary = self.record_path.with_name(f".{self.record_path.name}.{uuid4().hex}.tmp")
-        temporary.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
-        temporary.replace(self.record_path)
-        self._saved_record_status = "loaded"
+    @staticmethod
+    def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
+        _recording_atomic_write(path, payload)
 
-    def resolve(self, *, allow_scan: bool = False) -> dict[str, Any]:
-        with self._lock:
-            if self._current and self._current.get("ok"):
-                return dict(self._current)
-            if self.explicit_url:
-                result = self._verify(self.explicit_url, source="environment", allow_public=True)
-                if not result.get("ok"):
-                    result["failure_code"] = "ATR_CONTROLLER_EXPLICIT_URL_INVALID"
-                self._current = result
-                return dict(result)
-            saved = self._load_saved()
-            if saved:
-                result = self._verify(str(saved.get("controller_url") or ""), source="saved")
-                if result.get("ok"):
-                    self._current = result
-                    return dict(result)
-            if allow_scan:
-                discovered = self.discover()
-                if discovered.get("ok"):
-                    return discovered
-            local = self._verify("http://127.0.0.1:7860", source="local_fallback")
-            if local.get("ok"):
-                self._current = local
-                return dict(local)
+    def _recording_gate(self) -> dict[str, Any] | None:
+        status = self.recording_status_provider()
+        if status.get("recording_id") or str(status.get("status") or "idle").lower() not in {"idle", "stopped", "completed"}:
             return {
                 "ok": False,
-                "status": "unresolved",
-                "source": "none",
-                "failure_code": "ATR_CONTROLLER_NOT_FOUND",
-                "saved_record_status": self._saved_record_status,
+                "status": "blocked",
+                "failure_code": "PYAUTOGUI_UPDATE_RECORDING_ACTIVE",
+                "message": "Stop and save the active recording before updating the Worker.",
+                "recording": status,
             }
+        return None
 
-    def select(self, candidate_url: str, *, source: str = "manual") -> dict[str, Any]:
+    def stage(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
-            result = self._verify(candidate_url, source=source)
-            if not result.get("ok"):
-                return result
-            self._persist(result, source=source)
-            self._current = result
-            return dict(result)
-
-    def discover(self) -> dict[str, Any]:
-        with self._lock:
-            if self._current and self._current.get("ok"):
-                return dict(self._current)
-            if time.monotonic() < self._negative_discovery_until and self._last_discovery_failure:
-                return {**self._last_discovery_failure, "cached": True}
             try:
-                scanned = self._scanner() if self._scanner else _scan_private_network_for_atr()
-            except Exception:
-                scanned = []
-            normalized: list[str] = []
-            for value in scanned if isinstance(scanned, list) else []:
-                try:
-                    candidate = _normalize_controller_url(str(value))
-                except ValueError:
-                    continue
-                if _controller_url_is_private_ipv4(candidate) and candidate not in normalized:
-                    normalized.append(candidate)
-            verified = [
-                result
-                for candidate in normalized
-                if (result := self._verify(candidate, source="subnet_scan")).get("ok") is True
-            ]
-            verified.sort(key=lambda item: int(ipaddress.ip_address(urlparse(str(item["controller_url"])).hostname or "0.0.0.0")))
-            if len(verified) == 1:
-                result = verified[0]
-                self._persist(result, source="subnet_scan")
-                self._current = result
-                self._negative_discovery_until = 0.0
-                self._last_discovery_failure = None
-                return dict(result)
-            if len(verified) > 1:
-                failure = {
-                    "ok": False,
-                    "status": "selection_required",
-                    "failure_code": "ATR_CONTROLLER_MULTIPLE_CANDIDATES",
-                    "candidates": [str(item["controller_url"]) for item in verified],
-                }
-            else:
-                failure = {
-                    "ok": False,
-                    "status": "unresolved",
-                    "failure_code": "ATR_CONTROLLER_NOT_FOUND",
-                    "candidates": [],
-                }
-            self._negative_discovery_until = time.monotonic() + 30.0
-            self._last_discovery_failure = failure
-            return dict(failure)
+                if payload.get("schema") != "atr.windows_bridge_update_package.v1":
+                    raise ValueError("unsupported update package schema")
+                version = str(payload.get("version") or "").strip()
+                files = payload.get("files")
+                if not version or not isinstance(files, list) or not files:
+                    raise ValueError("update package requires version and files")
+                decoded: list[tuple[str, bytes, str]] = []
+                metadata: list[dict[str, Any]] = []
+                total_bytes = 0
+                for item in files:
+                    if not isinstance(item, dict):
+                        raise ValueError("update file entry must be an object")
+                    try:
+                        relative = self._safe_path(item.get("path"))
+                    except ValueError as exc:
+                        return {"ok": False, "status": "blocked", "failure_code": "PYAUTOGUI_UPDATE_PATH_NOT_ALLOWED", "message": str(exc)}
+                    if relative not in self.allowed_paths:
+                        return {"ok": False, "status": "blocked", "failure_code": "PYAUTOGUI_UPDATE_PATH_NOT_ALLOWED", "message": relative}
+                    try:
+                        raw = base64.b64decode(str(item.get("data_base64") or ""), validate=True)
+                    except Exception:
+                        return {"ok": False, "status": "blocked", "failure_code": "PYAUTOGUI_UPDATE_BASE64_INVALID", "message": relative}
+                    expected_size = int(item.get("size_bytes", -1))
+                    if len(raw) != expected_size:
+                        return {"ok": False, "status": "blocked", "failure_code": "PYAUTOGUI_UPDATE_FILE_SIZE_MISMATCH", "message": relative}
+                    if len(raw) > MAX_UPDATE_FILE_BYTES:
+                        return {"ok": False, "status": "blocked", "failure_code": "PYAUTOGUI_UPDATE_FILE_TOO_LARGE", "message": relative}
+                    sha256 = hashlib.sha256(raw).hexdigest()
+                    if not secrets.compare_digest(sha256, str(item.get("sha256") or "")):
+                        return {"ok": False, "status": "blocked", "failure_code": "PYAUTOGUI_UPDATE_FILE_HASH_MISMATCH", "message": relative}
+                    total_bytes += len(raw)
+                    if total_bytes > MAX_UPDATE_PACKAGE_BYTES:
+                        return {"ok": False, "status": "blocked", "failure_code": "PYAUTOGUI_UPDATE_PACKAGE_TOO_LARGE"}
+                    metadata.append({"path": relative, "size_bytes": len(raw), "sha256": sha256})
+                    decoded.append((relative, raw, sha256))
+                if len({item["path"] for item in metadata}) != len(metadata):
+                    raise ValueError("duplicate update paths")
+                digest_payload = {"schema": payload["schema"], "version": version, "files": metadata}
+                canonical = json.dumps(digest_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+                package_sha256 = hashlib.sha256(canonical).hexdigest()
+                if not secrets.compare_digest(package_sha256, str(payload.get("package_sha256") or "")):
+                    return {"ok": False, "status": "blocked", "failure_code": "PYAUTOGUI_UPDATE_PACKAGE_HASH_MISMATCH"}
+                stage_dir = self.update_root / "staging" / re.sub(r"[^A-Za-z0-9_.-]+", "_", version)
+                if stage_dir.exists():
+                    shutil.rmtree(stage_dir)
+                for relative, raw, _sha256 in decoded:
+                    destination = stage_dir / relative
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_bytes(raw)
+                stage_manifest = {**digest_payload, "package_sha256": package_sha256, "total_bytes": total_bytes}
+                self._atomic_json(stage_dir / "manifest.json", stage_manifest)
+                self._atomic_json(self.staged_pointer_path, {"version": version, "stage_dir": str(stage_dir), "package_sha256": package_sha256})
+                return {"ok": True, "status": "staged", "version": version, "stage_dir": str(stage_dir), "package_sha256": package_sha256, "total_bytes": total_bytes}
+            except (OSError, TypeError, ValueError) as exc:
+                return {"ok": False, "status": "blocked", "failure_code": "PYAUTOGUI_UPDATE_PACKAGE_INVALID", "message": str(exc)}
 
-    def observe_authenticated_peer(self, peer_ip: str) -> dict[str, Any]:
+    def _staged(self) -> dict[str, Any]:
+        try:
+            payload = json.loads(self.staged_pointer_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        stage_dir = Path(str(payload.get("stage_dir") or ""))
+        if not stage_dir.is_dir() or not (stage_dir / "manifest.json").is_file():
+            return {}
+        return payload
+
+    def _latest_backup(self) -> Path | None:
+        backup_root = self.update_root / "backups"
+        candidates = sorted((path for path in backup_root.glob("*") if (path / "backup_manifest.json").is_file()), reverse=True)
+        return candidates[0] if candidates else None
+
+    def prepare_apply(self) -> dict[str, Any]:
+        blocked = self._recording_gate()
+        if blocked:
+            return blocked
+        staged = self._staged()
+        if not staged:
+            return {"ok": False, "status": "blocked", "failure_code": "PYAUTOGUI_UPDATE_NOT_STAGED"}
+        return {"ok": True, "status": "apply_ready", **staged}
+
+    def prepare_rollback(self) -> dict[str, Any]:
+        blocked = self._recording_gate()
+        if blocked:
+            return blocked
+        backup_dir = self._latest_backup()
+        if backup_dir is None:
+            return {"ok": False, "status": "blocked", "failure_code": "PYAUTOGUI_UPDATE_BACKUP_NOT_FOUND"}
+        return {"ok": True, "status": "rollback_ready", "backup_id": backup_dir.name, "backup_dir": str(backup_dir)}
+
+    def status(self) -> dict[str, Any]:
+        try:
+            persisted = json.loads(self.state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            persisted = {}
+        staged = self._staged()
+        backup = self._latest_backup()
+        return {
+            "ok": True,
+            "status": str(persisted.get("status") or "ready"),
+            "current_version": BRIDGE_RELEASE_VERSION,
+            "staged_version": str(staged.get("version") or ""),
+            "last_result": persisted,
+            "rollback_available": backup is not None,
+            "backup_id": backup.name if backup else "",
+            "recording_active": self._recording_gate() is not None,
+        }
+
+
+UPDATE_MANAGER = UpdateManager(
+    package_root=_bridge_package_root(),
+    update_root=ARTIFACT_ROOT.parent / "updates",
+    allowed_paths=UPDATE_ALLOWED_PATHS,
+    recording_status_provider=lambda: RECORDING_MANAGER.status(),
+)
+
+
+def _new_update_manager() -> UpdateManager:
+    return UpdateManager(
+        package_root=_bridge_package_root(),
+        update_root=ARTIFACT_ROOT.parent / "updates",
+        allowed_paths=UPDATE_ALLOWED_PATHS,
+        recording_status_provider=lambda: RECORDING_MANAGER.status(),
+    )
+
+
+def _restart_command() -> list[str]:
+    if bool(getattr(sys, "frozen", False)):
+        return [sys.executable, *sys.argv[1:]]
+    server_path = _bridge_package_root() / "bridge" / "windows_pyautogui_bridge_server.py"
+    return [sys.executable, str(server_path), *sys.argv[1:]]
+
+
+def _launch_self_updater(mode: str, prepared: dict[str, Any]) -> dict[str, Any]:
+    package_root = _bridge_package_root().resolve()
+    updater_root = Path(str(prepared.get("stage_dir") or "")).resolve() if mode == "apply" else package_root
+    updater_path = updater_root / "scripts" / "bridge_self_updater.py"
+    if mode == "apply" and not updater_path.resolve().is_relative_to(updater_root):
+        return {
+            "ok": False,
+            "status": "blocked",
+            "failure_code": "PYAUTOGUI_UPDATE_HELPER_INVALID",
+            "message": str(updater_path),
+        }
+    if not updater_path.is_file():
+        return {
+            "ok": False,
+            "status": "blocked",
+            "failure_code": "PYAUTOGUI_UPDATE_HELPER_MISSING",
+            "message": str(updater_path),
+        }
+    command = [
+        sys.executable,
+        str(updater_path),
+        "--mode",
+        mode,
+        "--pid",
+        str(os.getpid()),
+        "--package-root",
+        str(package_root),
+        "--update-root",
+        str(UPDATE_MANAGER.update_root),
+        "--command-json",
+        json.dumps(_restart_command(), ensure_ascii=True),
+        "--health-url",
+        f"http://127.0.0.1:{PORT}/ping",
+        "--health-timeout-s",
+        "30",
+    ]
+    if mode == "apply":
+        command.extend(("--stage-root", str(prepared["stage_dir"])))
+    else:
+        command.extend(("--backup-dir", str(prepared["backup_dir"])))
+    flags = 0
+    if os.name == "nt":
+        flags = (
+            subprocess.CREATE_NEW_PROCESS_GROUP
+            | subprocess.DETACHED_PROCESS
+            | getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0)
+        )  # type: ignore[attr-defined]
+    update_lock = UPDATE_MANAGER.update_root / "update_in_progress.json"
+    update_lock.parent.mkdir(parents=True, exist_ok=True)
+    lock_payload = {
+        "status": "starting_updater",
+        "mode": mode,
+        "worker_pid": os.getpid(),
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    lock_temporary = update_lock.with_name(f".{update_lock.name}.{os.getpid()}.tmp")
+    lock_temporary.write_text(json.dumps(lock_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    os.replace(lock_temporary, update_lock)
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=str(package_root),
+            creationflags=flags,
+            close_fds=os.name != "nt",
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        update_lock.unlink(missing_ok=True)
+        raise
+    return {
+        "ok": True,
+        "status": "update_restarting" if mode == "apply" else "rollback_restarting",
+        "updater_pid": process.pid,
+        "version": str(prepared.get("version") or ""),
+        "backup_id": str(prepared.get("backup_id") or ""),
+    }
+
+
+class PairingManager:
+    """Exchange one short-lived operator code for one persistent internal key."""
+
+    CODE_TTL_SEC = 300
+    MAX_ATTEMPTS = 5
+    LOCKOUT_SEC = 30
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        code_factory: Callable[[], str] | None = None,
+        key_factory: Callable[[], str] | None = None,
+    ) -> None:
+        self.path = Path(path)
+        self._clock = clock
+        self._code_factory = code_factory or (lambda: f"{secrets.randbelow(10000):04d}")
+        self._key_factory = key_factory or (lambda: secrets.token_urlsafe(32))
+        self._lock = threading.RLock()
+        self._code = ""
+        self._expires_at = 0.0
+        self._attempts = 0
+        self._locked_until = 0.0
+        self._internal_key = self._load_key()
+
+    def _load_key(self) -> str:
+        try:
+            payload = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return ""
+        return str(payload.get("internal_key") or "")
+
+    def _persist_key(self, internal_key: str) -> None:
+        payload = {
+            "schema": "atr.windows_bridge_pairing.v1",
+            "internal_key": internal_key,
+            "paired_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        _recording_atomic_write(self.path, payload)
+        try:
+            self.path.chmod(0o600)
+        except OSError:
+            pass
+
+    def issue_code(self) -> dict[str, Any]:
         with self._lock:
-            if self._current and self._current.get("ok"):
-                return dict(self._current)
-            if self.explicit_url:
-                return self.resolve()
-            saved = self._load_saved()
-            if saved:
-                saved_result = self._verify(str(saved.get("controller_url") or ""), source="saved")
-                if saved_result.get("ok"):
-                    self._current = saved_result
-                    return dict(saved_result)
-            address = _eligible_private_peer(peer_ip)
-            if address is None or address.compressed in set(_local_private_ipv4_addresses()):
-                return {"ok": False, "status": "ignored", "failure_code": "ATR_CONTROLLER_PEER_NOT_ELIGIBLE"}
-            result = self._verify(f"http://{address.compressed}:7860", source="authenticated_peer")
-            if not result.get("ok"):
-                return result
-            self._persist(result, source="authenticated_peer")
-            self._current = result
-            self._negative_discovery_until = 0.0
-            self._last_discovery_failure = None
-            return dict(result)
+            if self._internal_key:
+                return {"ok": False, "status": "paired", "paired": True, "failure_code": "PAIRING_ALREADY_COMPLETE"}
+            code = str(self._code_factory())
+            if not re.fullmatch(r"\d{4}", code):
+                raise ValueError("pairing code factory must return exactly four digits")
+            self._code = code
+            self._expires_at = self._clock() + self.CODE_TTL_SEC
+            self._attempts = 0
+            self._locked_until = 0.0
+            return {
+                "ok": True,
+                "status": "pairing_available",
+                "paired": False,
+                "pairing_code": code,
+                "expires_in_sec": self.CODE_TTL_SEC,
+            }
 
     def status(self) -> dict[str, Any]:
         with self._lock:
-            if self._current:
-                return dict(self._current)
-            return {
-                "ok": False,
-                "status": "unresolved",
-                "source": "none",
-                "failure_code": "ATR_CONTROLLER_NOT_FOUND",
-                "saved_record_status": self._saved_record_status,
-            }
+            if self._internal_key:
+                return {"ok": True, "status": "paired", "paired": True}
+            now = self._clock()
+            if self._locked_until > now:
+                return {
+                    "ok": True,
+                    "status": "locked",
+                    "paired": False,
+                    "retry_after_sec": max(1, int(self._locked_until - now + 0.999)),
+                }
+            if self._code and self._expires_at > now:
+                return {
+                    "ok": True,
+                    "status": "pairing_available",
+                    "paired": False,
+                    "pairing_code": self._code,
+                    "expires_in_sec": max(1, int(self._expires_at - now + 0.999)),
+                }
+            return {"ok": True, "status": "unpaired", "paired": False}
+
+    def complete(self, code: str) -> dict[str, Any]:
+        with self._lock:
+            if self._internal_key:
+                return {"ok": False, "status": "paired", "paired": True, "failure_code": "PAIRING_ALREADY_COMPLETE"}
+            now = self._clock()
+            if self._locked_until > now:
+                return {
+                    "ok": False,
+                    "status": "locked",
+                    "paired": False,
+                    "retry_after_sec": max(1, int(self._locked_until - now + 0.999)),
+                    "attempts_remaining": 0,
+                    "failure_code": "PAIRING_LOCKED",
+                }
+            if self._locked_until:
+                self._locked_until = 0.0
+                self._attempts = 0
+            if not self._code:
+                return {"ok": False, "status": "unpaired", "paired": False, "failure_code": "PAIRING_CODE_REQUIRED"}
+            if self._expires_at <= now:
+                self._code = ""
+                self._expires_at = 0.0
+                return {"ok": False, "status": "expired", "paired": False, "failure_code": "PAIRING_CODE_EXPIRED"}
+            if not secrets.compare_digest(str(code), self._code):
+                self._attempts += 1
+                remaining = max(0, self.MAX_ATTEMPTS - self._attempts)
+                if remaining == 0:
+                    self._locked_until = now + self.LOCKOUT_SEC
+                    self._code = ""
+                    self._expires_at = 0.0
+                return {
+                    "ok": False,
+                    "status": "locked" if remaining == 0 else "invalid_code",
+                    "paired": False,
+                    "attempts_remaining": remaining,
+                    "retry_after_sec": self.LOCKOUT_SEC if remaining == 0 else 0,
+                    "failure_code": "PAIRING_LOCKED" if remaining == 0 else "PAIRING_CODE_INVALID",
+                }
+            internal_key = str(self._key_factory())
+            self._persist_key(internal_key)
+            self._internal_key = internal_key
+            self._code = ""
+            self._expires_at = 0.0
+            self._attempts = 0
+            self._locked_until = 0.0
+            return {"ok": True, "status": "paired", "paired": True, "internal_key": internal_key}
+
+    def authorized(self, supplied_key: str) -> bool:
+        with self._lock:
+            return bool(self._internal_key) and secrets.compare_digest(str(supplied_key or ""), self._internal_key)
 
 
-def _controller_data_root() -> Path:
-    configured = str(os.getenv("WINDOWS_PYAUTOGUI_DATA_ROOT", "")).strip()
-    return Path(configured) if configured else ARTIFACT_ROOT.parent
+PAIRING_MANAGER = PairingManager(ARTIFACT_ROOT / "pairing.json")
+if not PAIRING_MANAGER.status().get("paired"):
+    PAIRING_MANAGER.issue_code()
 
 
-def _reset_controller_resolver(*, data_root: Path | None = None) -> ATRControllerResolver:
-    global CONTROLLER_RESOLVER
-    CONTROLLER_RESOLVER = ATRControllerResolver(
-        Path(data_root) if data_root is not None else _controller_data_root(),
-        explicit_url=ATR_API_URL,
-    )
-    return CONTROLLER_RESOLVER
 
 
-CONTROLLER_RESOLVER = ATRControllerResolver(_controller_data_root(), explicit_url=ATR_API_URL)
 
 
-def _atr_api_request(
-    method: str,
-    path: str,
-    payload: dict[str, Any] | None = None,
-) -> tuple[int, dict[str, Any]]:
-    """Proxy token-free Skill metadata to Linux; model credentials never cross the bridge."""
-    resolution = CONTROLLER_RESOLVER.resolve(allow_scan=True)
-    if resolution.get("ok") is not True:
-        return 503, {
-            "ok": False,
-            "status": "unreachable",
-            "failure_code": "EQUIPMENT_SKILL_REGISTRY_UNREACHABLE",
-            "controller": resolution,
-            "message": "No verified ATR controller is available. Use controller discovery or set WINDOWS_PYAUTOGUI_ATR_API_URL.",
-        }
-    controller_url = str(resolution.get("controller_url") or "").rstrip("/")
-    data = json.dumps(payload, ensure_ascii=True).encode("utf-8") if payload is not None else None
-    request = URLRequest(
-        f"{controller_url}{path}",
-        data=data,
-        method=method,
-        headers={"Content-Type": "application/json"},
-    )
-    try:
-        with urlopen(request, timeout=20) as response:
-            body = json.loads(response.read().decode("utf-8"))
-            return int(response.status), body if isinstance(body, dict) else {"ok": False, "status": "invalid_response"}
-    except HTTPError as exc:
-        try:
-            body = json.loads(exc.read().decode("utf-8"))
-        except Exception:
-            body = {"ok": False, "status": "atr_api_error", "message": str(exc)}
-        return int(exc.code), body if isinstance(body, dict) else {"ok": False, "status": "atr_api_error"}
-    except (URLError, TimeoutError, OSError) as exc:
-        return 503, {
-            "ok": False,
-            "status": "unreachable",
-            "failure_code": "EQUIPMENT_SKILL_REGISTRY_UNREACHABLE",
-            "message": str(exc),
-        }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 PROGRAMS = {
     "program1": {
@@ -1731,6 +3061,14 @@ def _load_custom_programs() -> dict[str, dict[str, Any]]:
         if not validation.get("ok"):
             continue
         program = dict(validation["program"])
+        deployment = definition.get("_atr_deployment") if isinstance(definition.get("_atr_deployment"), dict) else {}
+        actual_digest = _program_definition_sha256(program)
+        expected_digest = str(deployment.get("program_sha256") or "").strip().lower()
+        if str(deployment.get("managed_by") or "") == "atr_equipment_skill":
+            program["managed_by"] = "atr_equipment_skill"
+            program["deployment_sha256"] = expected_digest
+            program["program_sha256"] = actual_digest
+            program["integrity_ok"] = bool(expected_digest) and secrets.compare_digest(actual_digest, expected_digest)
         program["built_in"] = False
         program["source_file"] = str(path)
         programs[program["program_id"]] = program
@@ -1743,21 +3081,69 @@ def _all_programs() -> dict[str, dict[str, Any]]:
     return programs
 
 
-def _register_program_definition(definition: Any) -> dict[str, Any]:
+def _program_definition_sha256(program: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(program, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _register_program_definition(
+    definition: Any,
+    *,
+    managed: bool = False,
+    deployment_sha256: str = "",
+) -> dict[str, Any]:
     validation = _validate_program_definition(definition)
     if not validation.get("ok"):
         return validation
     program = dict(validation["program"])
     PROGRAM_ROOT.mkdir(parents=True, exist_ok=True)
     destination = PROGRAM_ROOT / f"{program['program_id']}.json"
+    if destination.exists():
+        try:
+            existing = json.loads(destination.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+        existing_deployment = existing.get("_atr_deployment") if isinstance(existing.get("_atr_deployment"), dict) else {}
+        if str(existing_deployment.get("managed_by") or "") == "atr_equipment_skill" and not managed:
+            return {
+                "ok": False,
+                "status": "blocked",
+                "failure_code": "PYAUTOGUI_PROGRAM_MANAGED_IMMUTABLE",
+                "message": "ATR-deployed Skill programs can only be replaced by the authenticated deployment path.",
+            }
+    digest = _program_definition_sha256(program)
+    persisted = dict(program)
+    if managed:
+        expected_digest = str(deployment_sha256 or "").strip().lower()
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_digest) or not secrets.compare_digest(digest, expected_digest):
+            return {
+                "ok": False,
+                "status": "blocked",
+                "failure_code": "PYAUTOGUI_PROGRAM_HASH_MISMATCH",
+                "message": "Managed program content does not match the deployment hash.",
+            }
+        persisted["_atr_deployment"] = {
+            "managed_by": "atr_equipment_skill",
+            "program_sha256": expected_digest,
+        }
     temporary = destination.with_suffix(".json.tmp")
-    temporary.write_text(json.dumps(program, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    temporary.write_text(json.dumps(persisted, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
     temporary.replace(destination)
     public = {**program, "built_in": False, "source_file": str(destination)}
-    return {"ok": True, "status": "registered", "program": public, "program_path": str(destination), "failure_code": None}
+    if managed:
+        public.update({"managed_by": "atr_equipment_skill", "deployment_sha256": digest, "program_sha256": digest, "integrity_ok": True})
+    return {
+        "ok": True,
+        "status": "registered",
+        "program": public,
+        "program_path": str(destination),
+        "program_sha256": digest,
+        "failure_code": None,
+    }
 
 
-def _delete_custom_program(program_id: str) -> dict[str, Any]:
+def _delete_custom_program(program_id: str, *, allow_managed: bool = False) -> dict[str, Any]:
     program_id = str(program_id or "").strip()
     if program_id in BUILTIN_PROGRAM_IDS:
         return {"ok": False, "status": "blocked", "failure_code": "PYAUTOGUI_PROGRAM_BUILTIN_IMMUTABLE", "message": f"Built-in program cannot be deleted: {program_id}"}
@@ -1766,6 +3152,18 @@ def _delete_custom_program(program_id: str) -> dict[str, Any]:
     path = PROGRAM_ROOT / f"{program_id}.json"
     if not path.exists():
         return {"ok": False, "status": "not_found", "failure_code": "PYAUTOGUI_PROGRAM_NOT_FOUND", "message": f"Unknown custom program: {program_id}"}
+    try:
+        persisted = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        persisted = {}
+    deployment = persisted.get("_atr_deployment") if isinstance(persisted.get("_atr_deployment"), dict) else {}
+    if str(deployment.get("managed_by") or "") == "atr_equipment_skill" and not allow_managed:
+        return {
+            "ok": False,
+            "status": "blocked",
+            "failure_code": "PYAUTOGUI_PROGRAM_MANAGED_IMMUTABLE",
+            "message": "ATR-deployed Skill programs can only be deleted by the authenticated deployment path.",
+        }
     path.unlink()
     return {"ok": True, "status": "deleted", "program_id": program_id, "failure_code": None}
 
@@ -1797,9 +3195,21 @@ def _load_pyautogui() -> tuple[Any | None, str]:
     return pyautogui, "" if error is None else str(error)
 
 
+def _runtime_module_available(name: str) -> bool:
+    if name in sys.modules or importlib.util.find_spec(name) is not None:
+        return True
+    if not bool(getattr(sys, "frozen", False)):
+        return False
+    try:
+        importlib.import_module(name)
+        return True
+    except Exception:
+        return False
+
+
 def _runtime_dependency_status(checker: Callable[[str], bool] | None = None) -> dict[str, Any]:
     """Return import readiness without importing GUI packages into the server process."""
-    available = checker or (lambda name: importlib.util.find_spec(name) is not None)
+    available = checker or _runtime_module_available
     required_imports = {
         "pyautogui": "pyautogui",
         "pillow": "PIL",
@@ -1826,6 +3236,11 @@ def _runtime_dependency_status(checker: Callable[[str], bool] | None = None) -> 
     }
 
 
+def _public_pairing_status() -> dict[str, Any]:
+    status = PAIRING_MANAGER.status()
+    return {"paired": bool(status.get("paired")), "status": str(status.get("status") or "unpaired")}
+
+
 def _health() -> dict[str, Any]:
     pyautogui, error = _load_pyautogui()
     platform_status = _desktop_platform_status()
@@ -1835,7 +3250,6 @@ def _health() -> dict[str, Any]:
         "available": (DEMO_ROOT / "pyautogui_capability_lab.html").is_file()
         and (DEMO_ROOT / "examples").is_dir(),
     }
-    controller_status = CONTROLLER_RESOLVER.status()
     if pyautogui is None:
         return {
             "ok": True,
@@ -1847,8 +3261,9 @@ def _health() -> dict[str, Any]:
             "dependencies": dependencies,
             "demo_assets": demo_assets,
             "platform": platform_status,
-            "atr_controller": controller_status,
-            "server_version": "WindowsPyAutoGUIBridge/0.1",
+            "pairing": _public_pairing_status(),
+            "server_version": f"WindowsPyAutoGUIBridge/{BRIDGE_RELEASE_VERSION}",
+            "release_version": BRIDGE_RELEASE_VERSION,
             "script_version": "windows_pyautogui_bridge_server.py:utm_visual_control_v1",
             "artifacts": {"root": str(ARTIFACT_ROOT), "request_log": str(ARTIFACT_ROOT / "bridge_requests.jsonl"), "locator_root": str(LOCATOR_ROOT), "utm_export_root": str(UTM_EXPORT_ROOT)},
             "message": "Install PyAutoGUI with: py -m pip install pyautogui",
@@ -1864,8 +3279,9 @@ def _health() -> dict[str, Any]:
         "dependencies": dependencies,
         "demo_assets": demo_assets,
         "platform": platform_status,
-        "atr_controller": controller_status,
-        "server_version": "WindowsPyAutoGUIBridge/0.1",
+        "pairing": _public_pairing_status(),
+        "server_version": f"WindowsPyAutoGUIBridge/{BRIDGE_RELEASE_VERSION}",
+        "release_version": BRIDGE_RELEASE_VERSION,
         "script_version": "windows_pyautogui_bridge_server.py:utm_visual_control_v1",
         "artifacts": {"root": str(ARTIFACT_ROOT), "request_log": str(ARTIFACT_ROOT / "bridge_requests.jsonl"), "locator_root": str(LOCATOR_ROOT), "utm_export_root": str(UTM_EXPORT_ROOT)},
     }
@@ -2345,6 +3761,7 @@ def _locator_for(action: dict[str, Any], payload: dict[str, Any]) -> dict[str, A
         "coordinate_fallback",
         "confidence",
         "region",
+        "region_normalized",
         "x",
         "y",
         "width",
@@ -2405,8 +3822,10 @@ def _best_inline_image_match(
         return False, None
 
     best_match: tuple[int, int, int, int] | None = None
+    anchored_match: tuple[int, int, int, int] | None = None
+    anchored_best_score = float("-inf")
     global_best_score = float("-inf")
-    for candidate_path, candidate, _information_score in candidates:
+    for candidate_path, candidate, information_score in candidates:
         template = cv2.imread(candidate_path, cv2.IMREAD_GRAYSCALE)
         if template is None:
             continue
@@ -2423,6 +3842,31 @@ def _best_inline_image_match(
         scores = cv2.matchTemplate(haystack, template, cv2.TM_CCOEFF_NORMED)
         _minimum, candidate_score, _minimum_location, best_location = cv2.minMaxLoc(scores)
         confidence = float(candidate.get("confidence", 0.999))
+        crop_origin = candidate.get("crop_origin")
+        if (
+            float(information_score) >= 12.0
+            and isinstance(crop_origin, (list, tuple))
+            and len(crop_origin) == 2
+        ):
+            origin_x, origin_y = (int(value) for value in crop_origin)
+            if (
+                origin_x >= 0
+                and origin_y >= 0
+                and origin_x + template_width <= screen.shape[1]
+                and origin_y + template_height <= screen.shape[0]
+            ):
+                recorded_region = screen[
+                    origin_y : origin_y + template_height,
+                    origin_x : origin_x + template_width,
+                ]
+                anchor_score = float(
+                    cv2.matchTemplate(recorded_region, template, cv2.TM_CCORR_NORMED)[0, 0]
+                )
+                # Hover/focus backgrounds can defeat zero-mean correlation while
+                # preserving the control structure at its recorded screen anchor.
+                if anchor_score >= 0.985 and anchor_score > anchored_best_score:
+                    anchored_best_score = anchor_score
+                    anchored_match = (origin_x, origin_y, template_width, template_height)
         if float(candidate_score) < confidence:
             continue
         candidate_score = float(candidate_score)
@@ -2435,10 +3879,33 @@ def _best_inline_image_match(
             int(template_width),
             int(template_height),
         )
-    return True, best_match
+    return True, best_match or anchored_match
+
+
+def _resolved_search_region(pyautogui: Any, locator: dict[str, Any]) -> tuple[int, int, int, int] | None:
+    region = locator.get("region")
+    if isinstance(region, (list, tuple)) and len(region) == 4:
+        return tuple(int(value) for value in region)  # type: ignore[return-value]
+    normalized = locator.get("region_normalized")
+    if not isinstance(normalized, (list, tuple)) or len(normalized) != 4:
+        return None
+    try:
+        x, y, width, height = (float(value) for value in normalized)
+        screen_width, screen_height = (int(value) for value in pyautogui.size())
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > 1 or y + height > 1:
+        return None
+    return (
+        round(x * screen_width),
+        round(y * screen_height),
+        max(1, round(width * screen_width)),
+        max(1, round(height * screen_height)),
+    )
 
 
 def _locate_on_screen(pyautogui: Any, locator: dict[str, Any], *, run_id: str, specimen_id: str) -> Any | None:
+    search_region = _resolved_search_region(pyautogui, locator)
     candidates: list[tuple[str, dict[str, Any]]] = []
     inline_candidates: list[tuple[str, dict[str, Any], float]] = []
     image_path = locator.get("image_path") or locator.get("target_image")
@@ -2448,6 +3915,8 @@ def _locate_on_screen(pyautogui: Any, locator: dict[str, Any], *, run_id: str, s
         if not isinstance(raw_candidate, dict):
             continue
         candidate = dict(raw_candidate)
+        if search_region is not None and "region" not in candidate:
+            candidate["region"] = list(search_region)
         encoded = str(candidate.get("png_base64") or "")
         expected_sha = str(candidate.get("sha256") or "").lower()
         if not encoded or not re.fullmatch(r"[0-9a-f]{64}", expected_sha):
@@ -2479,7 +3948,7 @@ def _locate_on_screen(pyautogui: Any, locator: dict[str, Any], *, run_id: str, s
         confidence = candidate.get("confidence", locator.get("confidence"))
         if confidence is not None:
             kwargs["confidence"] = float(confidence)
-        region = candidate.get("region", locator.get("region"))
+        region = candidate.get("region", search_region)
         if isinstance(region, (list, tuple)) and len(region) == 4:
             kwargs["region"] = tuple(int(v) for v in region)
         match = pyautogui.locateOnScreen(candidate_path, **kwargs)
@@ -2494,7 +3963,7 @@ def _locate_on_screen(pyautogui: Any, locator: dict[str, Any], *, run_id: str, s
         confidence = candidate.get("confidence", locator.get("confidence"))
         if confidence is not None:
             kwargs["confidence"] = float(confidence)
-        region = candidate.get("region", locator.get("region"))
+        region = candidate.get("region", search_region)
         if isinstance(region, (list, tuple)) and len(region) == 4:
             kwargs["region"] = tuple(int(v) for v in region)
         match = pyautogui.locateOnScreen(candidate_path, **kwargs)
@@ -4410,6 +5879,17 @@ def _execute(payload: dict[str, Any]) -> dict[str, Any]:
         if program_id == "program1":
             return _run_program1(sequence_id)
         program = programs[program_id]
+        if program.get("managed_by") == "atr_equipment_skill" and program.get("integrity_ok") is not True:
+            return {
+                "ok": False,
+                "status": "blocked",
+                "bridge": "windows_pyautogui",
+                "sequence_id": sequence_id,
+                "program_id": program_id,
+                "failure_code": "PYAUTOGUI_PROGRAM_HASH_MISMATCH",
+                "message": "ATR-deployed Skill program content changed after deployment.",
+                "step_trace": [{"step": "VERIFY_PROGRAM_HASH", "status": "blocked", "detail": program_id}],
+            }
         if program.get("enabled") is False:
             return {
                 "ok": False,
@@ -4454,7 +5934,7 @@ class BridgeConfig:
 
 
 def _apply_bridge_config(config: BridgeConfig) -> None:
-    global HOST, PORT, TOKEN, TOKEN_HEADER, ARTIFACT_ROOT, LOCATOR_ROOT, PROGRAM_ROOT, DEMO_ROOT
+    global HOST, PORT, TOKEN, TOKEN_HEADER, ARTIFACT_ROOT, LOCATOR_ROOT, PROGRAM_ROOT, DEMO_ROOT, PAIRING_MANAGER, UPDATE_MANAGER
     HOST = str(config.host)
     PORT = int(config.port)
     TOKEN = str(config.token or "")
@@ -4466,7 +5946,10 @@ def _apply_bridge_config(config: BridgeConfig) -> None:
         PROGRAM_ROOT = Path(config.program_dir)
     if config.demo_dir:
         DEMO_ROOT = Path(config.demo_dir)
-    _reset_controller_resolver(data_root=Path(config.data_root) if config.data_root else ARTIFACT_ROOT.parent)
+    PAIRING_MANAGER = PairingManager(ARTIFACT_ROOT / "pairing.json")
+    if not PAIRING_MANAGER.status().get("paired"):
+        PAIRING_MANAGER.issue_code()
+    UPDATE_MANAGER = _new_update_manager()
 
 
 def public_programs() -> list[dict[str, Any]]:
@@ -4479,4163 +5962,319 @@ def execute_payload(payload: dict[str, Any], config: BridgeConfig | None = None)
     return _execute(payload)
 
 
-INDEX_HTML = r"""<!doctype html>
+INDEX_HTML = r"""
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ATR Windows PyAutoGUI Bridge</title>
   <style>
-    :root {
-      color-scheme: light;
-      --bg: #eef2f5;
-      --panel: #ffffff;
-      --panel-soft: #f7f9fb;
-      --ink: #17202c;
-      --muted: #617083;
-      --line: #d6dde7;
-      --accent: #0d7661;
-      --accent-2: #164e63;
-      --danger: #b42318;
-      --warn: #9a6700;
-      --ok: #13795b;
-      --ok-bg: #e7f6ef;
-      --bad-bg: #fff0ed;
-      --warn-bg: #fff7df;
-      --code: #0f1720;
-      --shadow: 0 10px 30px rgba(15, 23, 42, .06);
-      --shadow-soft: 0 6px 18px rgba(15, 23, 42, .045);
-    }
-    * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      background: linear-gradient(135deg, #eef2f5 0%, #f9fbfc 48%, #e8eef2 100%);
-      color: var(--ink);
-      font-family: "Segoe UI", "Malgun Gothic", Arial, sans-serif;
-      letter-spacing: 0;
-    }
-    body.is-busy {
-      cursor: progress;
-    }
-    ::selection { background: rgba(13, 118, 97, .18); }
-    header {
-      background:
-        linear-gradient(90deg, rgba(255,255,255,.96), rgba(246,250,249,.94)),
-        rgba(255,255,255,.92);
-      border-bottom: 1px solid var(--line);
-      padding: 10px 22px;
-      box-shadow: var(--shadow-soft);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      position: sticky;
-      top: 0;
-      z-index: 10;
-      backdrop-filter: blur(10px);
-    }
-    h1 { font-size: 20px; line-height: 1.15; margin: 0; font-weight: 700; }
-    .sub { margin-top: 4px; color: var(--muted); font-size: 12px; }
-    .brandline { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-    .brandmark {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 28px;
-      height: 28px;
-      border-radius: 9px;
-      background: linear-gradient(135deg, #0d7661, #164e63);
-      color: #fff;
-      font-weight: 900;
-      font-size: 12px;
-      letter-spacing: .05em;
-    }
-    .header-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
-    .header-pill-stack {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 5px;
-      min-width: 168px;
-    }
-    .quick-nav {
-      position: sticky;
-      top: 55px;
-      z-index: 9;
-      width: min(1760px, calc(100vw - 28px));
-      margin: 8px auto 0;
-      display: grid;
-      grid-template-columns: repeat(7, minmax(0, 1fr));
-      gap: 8px;
-    }
-    .quick-nav a {
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: rgba(255,255,255,.92);
-      color: #263548;
-      text-decoration: none;
-      text-align: center;
-      padding: 7px 10px;
-      font-size: 11px;
-      font-weight: 800;
-      box-shadow: 0 6px 18px rgba(15, 23, 42, .04);
-      backdrop-filter: blur(8px);
-    }
-    .quick-nav a:hover { border-color: #9ccdc1; color: #0a604f; }
-    main {
-      width: min(1760px, calc(100vw - 28px));
-      margin: 12px auto 28px;
-      display: grid;
-      grid-template-columns: 360px minmax(0, 1fr);
-      gap: 14px;
-    }
-    section, .card {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      box-shadow: var(--shadow);
-    }
-    section { padding: 14px; }
-    h2 { font-size: 14px; margin: 0 0 10px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    h3 { font-size: 13px; margin: 0 0 8px; font-weight: 700; color: #263548; }
-    label { display: block; font-size: 12px; color: var(--muted); margin: 9px 0 5px; }
-    input, textarea, select {
-      width: 100%;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 8px 10px;
-      font: inherit;
-      background: #fff;
-      color: var(--ink);
-      outline: none;
-    }
-    input:focus, textarea:focus, select:focus { border-color: #70b8a8; box-shadow: 0 0 0 3px rgba(13,118,97,.12); }
-    textarea { min-height: 190px; resize: vertical; font-family: Consolas, "Courier New", monospace; font-size: 12px; }
-    button {
-      border: 1px solid #0a604f;
-      background: var(--accent);
-      color: white;
-      border-radius: 8px;
-      min-height: 36px;
-      padding: 8px 10px;
-      font: inherit;
-      font-weight: 700;
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    button.secondary { background: #fff; color: var(--ink); border-color: var(--line); }
-    button.blue { background: var(--accent-2); border-color: #123f50; }
-    button.danger { background: var(--danger); border-color: #8c1d12; }
-    button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(15, 23, 42, .08); }
-    button:active:not(:disabled) { transform: translateY(0); box-shadow: none; }
-    button:disabled { opacity: .55; cursor: wait; }
-    .row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-    .row3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-    .row4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-    .buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
-    .compact-tools { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .action-group {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: var(--panel-soft);
-      padding: 10px;
-      margin-top: 10px;
-    }
-    .action-group-title {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      color: #263548;
-      font-size: 12px;
-      font-weight: 800;
-      margin-bottom: 8px;
-    }
-    .danger-panel {
-      border: 1px solid #f5b4ad;
-      border-radius: 10px;
-      background: #fff6f4;
-      color: #5f1f19;
-      padding: 10px;
-      margin-top: 10px;
-      font-size: 12px;
-      line-height: 1.45;
-    }
-    .recovery-panel {
-      border: 1px solid #f0b8b0;
-      border-radius: 10px;
-      background: linear-gradient(135deg, #fff7f5, #fffdfb);
-      padding: 10px;
-      margin-top: 10px;
-      display: grid;
-      gap: 8px;
-    }
-    .recovery-panel strong { color: #5f1f19; font-size: 12px; }
-    .recovery-panel span { color: #6c3a32; font-size: 12px; line-height: 1.4; }
-    .sidebar {
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      position: sticky;
-      top: 112px;
-      max-height: calc(100vh - 126px);
-      overflow: auto;
-      padding-right: 4px;
-      scrollbar-width: thin;
-      scrollbar-color: #b9c6d2 transparent;
-    }
-    .sidebar::-webkit-scrollbar, #log::-webkit-scrollbar, pre::-webkit-scrollbar, .timeline-track::-webkit-scrollbar { width: 9px; height: 9px; }
-    .sidebar::-webkit-scrollbar-thumb, #log::-webkit-scrollbar-thumb, pre::-webkit-scrollbar-thumb, .timeline-track::-webkit-scrollbar-thumb { background: #b9c6d2; border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
-    .workspace { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-    .status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-    .tile {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 10px;
-      min-height: 72px;
-      background: var(--panel-soft);
-    }
-    .tile strong { display: block; font-size: 11px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .04em; }
-    .tile span { display: block; font-size: 16px; font-weight: 800; overflow-wrap: anywhere; }
-    .workflow-strip {
-      display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 8px;
-      margin-top: 10px;
-    }
-    .workflow-step {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 9px 10px;
-      background: var(--panel-soft);
-      min-height: 64px;
-    }
-    .workflow-step strong {
-      display: block;
-      font-size: 11px;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: .05em;
-      margin-bottom: 5px;
-    }
-    .workflow-step span {
-      display: block;
-      font-size: 13px;
-      font-weight: 800;
-      overflow-wrap: anywhere;
-    }
-    .ok { background: var(--ok-bg); border-color: #bce7d2; }
-    .bad { background: var(--bad-bg); border-color: #ffd1ca; }
-    .warn { background: var(--warn-bg); border-color: #f1daa0; }
-    .muted { color: var(--muted); font-size: 12px; }
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      border: 1px solid var(--line);
-      background: var(--panel-soft);
-      color: var(--muted);
-      border-radius: 999px;
-      padding: 5px 9px;
-      font-size: 12px;
-      font-weight: 700;
-    }
-    .dot { width: 9px; height: 9px; border-radius: 50%; background: #98a2b3; display: inline-block; }
-    .dot.ok { background: var(--ok); }
-    .dot.bad { background: var(--danger); }
-    .dot.warn { background: #f59e0b; }
-    .command-banner.busy .dot.warn,
-    body.is-busy #commandPill .dot {
-      animation: pulseDot 1s ease-in-out infinite;
-    }
-    @keyframes pulseDot {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, .26); }
-      50% { box-shadow: 0 0 0 7px rgba(245, 158, 11, 0); }
-    }
-    details { border: 1px solid var(--line); border-radius: 10px; background: var(--panel-soft); padding: 8px 10px; }
-    summary { cursor: pointer; font-weight: 700; font-size: 13px; color: #2c3848; }
-    pre {
-      margin: 0;
-      min-height: 260px;
-      max-height: 52vh;
-      overflow: auto;
-      background: var(--code);
-      color: #e6edf3;
-      border-radius: 10px;
-      padding: 12px;
-      font-size: 12px;
-      line-height: 1.45;
-    }
-    table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
-    th, td { border-bottom: 1px solid var(--line); text-align: left; padding: 7px 6px; vertical-align: top; overflow-wrap: anywhere; }
-    th { color: var(--muted); font-weight: 800; background: #f8fafc; }
-    tr.trace-row.ok td { background: #f4fbf7; }
-    tr.trace-row.warn td { background: #fffaf0; }
-    tr.trace-row.bad td { background: #fff6f4; }
-    .split { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); gap: 14px; }
-    .panel-body { padding: 12px; }
-    .result-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-    .logline { font-size: 12px; color: var(--muted); padding: 6px 0; border-bottom: 1px dashed var(--line); }
-    .hint { color: var(--muted); font-size: 12px; line-height: 1.45; margin-top: 7px; }
-    .operator-checklist {
-      border: 1px dashed #bed1cb;
-      background: #f6fbf9;
-      border-radius: 10px;
-      padding: 10px 12px;
-      margin-top: 10px;
-      color: #263548;
-      font-size: 12px;
-      line-height: 1.45;
-    }
-    .operator-checklist strong { display: block; margin-bottom: 6px; }
-    .operator-checklist ol { margin: 0; padding-left: 18px; }
-    .operator-runbook {
-      border: 1px solid #dce4ec;
-      border-radius: 12px;
-      background: linear-gradient(135deg, #ffffff, #f7fbf9);
-      padding: 10px;
-      margin-top: 10px;
-      display: grid;
-      gap: 8px;
-    }
-    .operator-runbook-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-    }
-    .operator-runbook-head strong {
-      color: #203040;
-      font-size: 12px;
-      font-weight: 900;
-    }
-    .operator-runbook-head span {
-      color: var(--muted);
-      font-size: 10px;
-      font-weight: 900;
-      text-transform: uppercase;
-      letter-spacing: .05em;
-    }
-    .runbook-step {
-      border: 1px solid #dce4ec;
-      border-radius: 10px;
-      background: #f8fafc;
-      padding: 8px;
-      display: grid;
-      grid-template-columns: 26px minmax(0, 1fr);
-      gap: 8px;
-      align-items: start;
-    }
-    .runbook-step.ok { border-color: #a9dbc2; background: #eefbf5; }
-    .runbook-step.warn { border-color: #f1daa0; background: #fffaf0; }
-    .runbook-step.bad { border-color: #ffc6bd; background: #fff5f3; }
-    .runbook-index {
-      width: 24px;
-      height: 24px;
-      border-radius: 999px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      background: #e7edf3;
-      color: #203040;
-      font-size: 11px;
-      font-weight: 900;
-    }
-    .runbook-step.ok .runbook-index { background: #bce7d2; color: #173e2e; }
-    .runbook-step.warn .runbook-index { background: #f1daa0; color: #4d3510; }
-    .runbook-step.bad .runbook-index { background: #ffc6bd; color: #5f1f19; }
-    .runbook-step strong {
-      display: block;
-      color: #203040;
-      font-size: 12px;
-      margin-bottom: 3px;
-    }
-    .runbook-step small {
-      display: block;
-      color: var(--muted);
-      font-size: 11px;
-      line-height: 1.35;
-      overflow-wrap: anywhere;
-    }
-    .runbook-actions {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 6px;
-    }
-    .runbook-actions button {
-      min-height: 30px;
-      padding: 5px 7px;
-      font-size: 11px;
-    }
-    .connection-readout {
-      border: 1px solid #dce4ec;
-      border-radius: 10px;
-      background: var(--panel-soft);
-      padding: 9px 10px;
-      margin-top: 10px;
-      display: grid;
-      gap: 4px;
-    }
-    .connection-readout span {
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: .05em;
-    }
-    .connection-readout code {
-      color: #223143;
-      font-family: Consolas, "Courier New", monospace;
-      font-size: 12px;
-      overflow-wrap: anywhere;
-    }
-    .command-kit {
-      border: 1px solid #dce4ec;
-      border-radius: 12px;
-      background: linear-gradient(135deg, #ffffff, #f6faf8);
-      padding: 10px;
-      margin-top: 10px;
-      display: grid;
-      gap: 8px;
-    }
-    .command-kit-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-    }
-    .command-kit-head strong {
-      color: #203040;
-      font-size: 12px;
-      font-weight: 900;
-    }
-    .command-kit-head span {
-      color: var(--muted);
-      font-size: 10px;
-      font-weight: 900;
-      text-transform: uppercase;
-      letter-spacing: .05em;
-    }
-    .summary-card {
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: linear-gradient(135deg, #f8fafc, #f2f7f5);
-      padding: 12px;
-      margin-top: 10px;
-    }
-    .summary-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 8px;
-      margin-top: 8px;
-    }
-    .summary-item {
-      border: 1px solid #dce4ec;
-      border-radius: 9px;
-      padding: 8px;
-      background: rgba(255,255,255,.72);
-      min-height: 54px;
-    }
-    .summary-item strong {
-      display: block;
-      color: var(--muted);
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: .05em;
-      margin-bottom: 4px;
-    }
-    .summary-item span {
-      display: block;
-      font-size: 12px;
-      font-weight: 800;
-      overflow-wrap: anywhere;
-    }
-    .proof-list {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
-      margin-top: 8px;
-    }
-    .proof-gate-strip {
-      display: grid;
-      grid-template-columns: repeat(7, minmax(0, 1fr));
-      gap: 7px;
-      margin-top: 9px;
-    }
-    .proof-gate {
-      border: 1px solid #dce4ec;
-      border-radius: 10px;
-      background: rgba(255,255,255,.78);
-      padding: 8px 7px;
-      min-height: 66px;
-      display: grid;
-      gap: 4px;
-      align-content: start;
-    }
-    .proof-gate strong {
-      color: #263548;
-      font-size: 10px;
-      font-weight: 900;
-      text-transform: uppercase;
-      letter-spacing: .04em;
-      line-height: 1.2;
-    }
-    .proof-gate span {
-      color: var(--muted);
-      font-size: 10px;
-      font-weight: 800;
-      line-height: 1.25;
-      overflow-wrap: anywhere;
-    }
-    .proof-gate.ok { border-color: #a9dbc2; background: #eefbf5; }
-    .proof-gate.warn { border-color: #f1daa0; background: #fffaf0; }
-    .proof-gate.bad { border-color: #ffc6bd; background: #fff5f3; }
-    .proof-item {
-      display: grid;
-      grid-template-columns: 16px minmax(0, 1fr);
-      gap: 8px;
-      align-items: start;
-      border: 1px solid #dce4ec;
-      border-radius: 9px;
-      padding: 8px;
-      background: rgba(255,255,255,.72);
-      min-height: 58px;
-    }
-    .proof-item strong {
-      display: block;
-      font-size: 11px;
-      color: #263548;
-      margin-bottom: 3px;
-    }
-    .proof-item small {
-      display: block;
-      color: var(--muted);
-      font-size: 11px;
-      line-height: 1.35;
-      overflow-wrap: anywhere;
-    }
-    .checkline { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--muted); }
-    .checkline input { width: auto; }
-
-    .file-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
-      margin-top: 8px;
-    }
-    .file-item {
-      border: 1px solid #dce4ec;
-      border-radius: 9px;
-      background: rgba(255,255,255,.78);
-      padding: 8px;
-      min-height: 56px;
-    }
-    .file-item strong {
-      display: block;
-      color: var(--muted);
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: .05em;
-      margin-bottom: 4px;
-    }
-    .file-item code {
-      display: block;
-      font-family: Consolas, "Courier New", monospace;
-      font-size: 11px;
-      color: #223143;
-      overflow-wrap: anywhere;
-      line-height: 1.35;
-    }
-    .preflight-banner {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 12px;
-      align-items: center;
-      border: 1px solid #c9d8e2;
-      border-radius: 12px;
-      background: linear-gradient(135deg, #f7fbff, #f2f8f5);
-      padding: 12px;
-      margin-top: 10px;
-    }
-    .preflight-banner strong {
-      display: block;
-      font-size: 13px;
-      color: #203040;
-      margin-bottom: 4px;
-    }
-    .preflight-banner span {
-      display: block;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.4;
-    }
-    .preflight-banner.ok { border-color: #a9dbc2; background: #eefbf5; }
-    .preflight-banner.bad { border-color: #ffc6bd; background: #fff5f3; }
-    .interlock-card {
-      border: 1px solid #f1daa0;
-      border-radius: 10px;
-      background: #fffaf0;
-      padding: 10px;
-      margin-top: 10px;
-      font-size: 12px;
-      line-height: 1.45;
-      color: #4d3510;
-    }
-    .interlock-card strong { display: block; margin-bottom: 4px; color: #2d2210; }
-    .interlock-card.ok { border-color: #a9dbc2; background: #eefbf5; color: #183d2d; }
-    .operator-console {
-      display: grid;
-      grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
-      gap: 12px;
-      align-items: stretch;
-      padding: 12px;
-      background:
-        linear-gradient(135deg, rgba(255,255,255,.98), rgba(247,251,249,.96)),
-        var(--panel);
-    }
-    .console-panel {
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: rgba(255,255,255,.76);
-      padding: 11px;
-      min-width: 0;
-    }
-    .intent-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
-      margin-top: 8px;
-    }
-    .intent-card {
-      border: 1px solid #dce4ec;
-      border-radius: 10px;
-      background: #f8fafc;
-      padding: 9px 10px;
-      min-height: 58px;
-    }
-    .intent-card strong {
-      display: block;
-      color: var(--muted);
-      font-size: 10px;
-      font-weight: 900;
-      text-transform: uppercase;
-      letter-spacing: .06em;
-      margin-bottom: 4px;
-    }
-    .intent-card span {
-      display: block;
-      color: #203040;
-      font-size: 12px;
-      font-weight: 800;
-      line-height: 1.3;
-      overflow-wrap: anywhere;
-    }
-    .intent-card.ok { border-color: #a9dbc2; background: #eefbf5; }
-    .intent-card.warn { border-color: #f1daa0; background: #fffaf0; }
-    .intent-card.bad { border-color: #ffc6bd; background: #fff5f3; }
-    .operator-mini-steps {
-      display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 6px;
-      margin-top: 9px;
-    }
-    .operator-mini-step {
-      border: 1px solid #dce4ec;
-      border-radius: 999px;
-      background: #f8fafc;
-      color: #3a4a5f;
-      padding: 6px 8px;
-      text-align: center;
-      font-size: 11px;
-      font-weight: 800;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .operator-timeline {
-      padding: 12px;
-      background:
-        linear-gradient(135deg, rgba(255,255,255,.98), rgba(247,251,249,.95)),
-        var(--panel);
-    }
-    .timeline-head {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 10px;
-      align-items: start;
-      margin-bottom: 8px;
-    }
-    .timeline-head h2 { margin-bottom: 4px; }
-    .timeline-track {
-      border: 1px solid #dce4ec;
-      border-radius: 12px;
-      background: #f8fafc;
-      padding: 10px;
-      max-height: 260px;
-      overflow: auto;
-      display: grid;
-      gap: 8px;
-    }
-    .timeline-empty {
-      color: var(--muted);
-      font-size: 12px;
-      padding: 14px;
-      text-align: center;
-    }
-    .timeline-item {
-      display: grid;
-      grid-template-columns: 88px 13px minmax(0, 1fr);
-      gap: 9px;
-      align-items: start;
-      color: #203040;
-      font-size: 12px;
-    }
-    .timeline-item .timeline-time {
-      color: var(--muted);
-      font-family: Consolas, "Courier New", monospace;
-      font-size: 11px;
-      padding-top: 2px;
-      white-space: nowrap;
-    }
-    .timeline-marker {
-      width: 11px;
-      height: 11px;
-      border-radius: 999px;
-      background: #98a2b3;
-      margin-top: 3px;
-      box-shadow: 0 0 0 4px rgba(152,162,179,.14);
-    }
-    .timeline-item.ok .timeline-marker { background: var(--ok); box-shadow: 0 0 0 4px rgba(19,121,91,.13); }
-    .timeline-item.warn .timeline-marker { background: #f59e0b; box-shadow: 0 0 0 4px rgba(245,158,11,.16); }
-    .timeline-item.bad .timeline-marker { background: var(--danger); box-shadow: 0 0 0 4px rgba(180,35,24,.13); }
-    .timeline-content {
-      border: 1px solid #dce4ec;
-      border-radius: 10px;
-      background: rgba(255,255,255,.82);
-      padding: 8px 9px;
-      min-width: 0;
-    }
-    .timeline-content strong {
-      display: block;
-      font-size: 12px;
-      margin-bottom: 3px;
-      overflow-wrap: anywhere;
-    }
-    .timeline-content small {
-      display: block;
-      color: var(--muted);
-      line-height: 1.35;
-      overflow-wrap: anywhere;
-    }
-    .console-actions {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 8px;
-      margin-top: 8px;
-    }
-    pre.payload-preview {
-      min-height: 160px;
-      max-height: 250px;
-      margin-top: 8px;
-      font-size: 11px;
-      background: #10202a;
-    }
-    .gate-meter {
-      border: 1px solid #dce4ec;
-      border-radius: 999px;
-      background: #eef2f5;
-      height: 14px;
-      overflow: hidden;
-      margin-top: 4px;
-    }
-    .gate-fill {
-      height: 100%;
-      width: 0%;
-      background: linear-gradient(90deg, #0d7661, #35b18d);
-      transition: width .18s ease;
-    }
-    .gate-caption {
-      display: flex;
-      justify-content: space-between;
-      gap: 8px;
-      color: var(--muted);
-      font-size: 11px;
-      margin-top: 5px;
-    }
-    .preview-box {
-      border: 1px dashed #c9d8e2;
-      border-radius: 10px;
-      background: #f8fafc;
-      min-height: 150px;
-      padding: 10px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.45;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
-      overflow: hidden;
-    }
-    .preview-box img {
-      max-width: 100%;
-      max-height: 360px;
-      object-fit: contain;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
-    }
-    .preview-meta {
-      margin-top: 6px;
-      color: var(--muted);
-      font-size: 11px;
-      overflow-wrap: anywhere;
-      text-align: left;
-    }
-    .command-shell {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(440px, 620px);
-      gap: 10px;
-      align-items: stretch;
-      position: sticky;
-      top: 104px;
-      z-index: 8;
-    }
-    .command-banner {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(168px, 220px);
-      gap: 10px;
-      align-items: center;
-      border: 1px solid #c9d8e2;
-      border-radius: 12px;
-      background: linear-gradient(135deg, #ffffff, #f2f8f5);
-      padding: 10px 12px;
-      box-shadow: 0 8px 22px rgba(15, 23, 42, .04);
-    }
-    .command-banner strong { display: block; color: #203040; font-size: 13px; margin-bottom: 3px; }
-    .command-banner span { display: block; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
-    .command-banner.ok { border-color: #a9dbc2; background: #eefbf5; }
-    .command-banner.bad { border-color: #ffc6bd; background: #fff5f3; }
-    .command-banner.warn { border-color: #f1daa0; background: #fffaf0; }
-    .command-banner.busy { border-color: #b8d5f2; background: #f2f8ff; }
-    .command-side {
-      display: grid;
-      gap: 6px;
-      justify-items: stretch;
-      align-content: center;
-      min-width: 0;
-    }
-    .command-side .pill {
-      justify-self: end;
-      max-width: 100%;
-    }
-    .next-action-button {
-      min-height: 40px;
-      border-color: #102f3b;
-      background: #102f3b;
-      display: grid;
-      gap: 1px;
-      justify-items: start;
-      text-align: left;
-      line-height: 1.12;
-    }
-    .next-action-button small {
-      color: rgba(255,255,255,.72);
-      font-size: 9px;
-      font-weight: 900;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-    }
-    .next-action-button span {
-      color: #fff;
-      font-size: 12px;
-      font-weight: 900;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 100%;
-    }
-    .next-action-button.ok { border-color: #0d7661; background: #0d7661; }
-    .next-action-button.warn { border-color: #9a6700; background: #9a6700; }
-    .next-action-button.bad { border-color: #b42318; background: #b42318; }
-    .attention-flash {
-      animation: attentionFlash 1.2s ease-in-out 1;
-    }
-    @keyframes attentionFlash {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(13, 118, 97, 0); }
-      40% { box-shadow: 0 0 0 5px rgba(13, 118, 97, .18); }
-    }
-    .control-rail {
-      display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 8px;
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: rgba(255,255,255,.92);
-      padding: 8px;
-      box-shadow: 0 8px 22px rgba(15, 23, 42, .04);
-    }
-    .control-rail button {
-      min-height: 52px;
-      display: grid;
-      align-content: center;
-      justify-items: center;
-      gap: 2px;
-      line-height: 1.1;
-      padding: 7px 8px;
-    }
-    .control-rail button small {
-      display: block;
-      max-width: 100%;
-      opacity: .78;
-      font-size: 10px;
-      font-weight: 700;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .control-rail .danger small { color: rgba(255,255,255,.84); }
-    .control-rail .secondary small { color: var(--muted); }
-    .control-rail .blue small { color: rgba(255,255,255,.84); }
-    .ops-hud {
-      display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 8px;
-      padding: 10px;
-      background:
-        linear-gradient(135deg, rgba(255,255,255,.98), rgba(242,248,245,.96)),
-        var(--panel);
-    }
-    .ops-card {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: rgba(255,255,255,.82);
-      padding: 9px 10px;
-      min-height: 62px;
-      display: grid;
-      align-content: start;
-      gap: 4px;
-    }
-    .ops-card strong {
-      color: var(--muted);
-      font-size: 10px;
-      font-weight: 900;
-      text-transform: uppercase;
-      letter-spacing: .06em;
-    }
-    .ops-card span {
-      color: #1f2f3f;
-      font-size: 12px;
-      line-height: 1.3;
-      font-weight: 800;
-      overflow-wrap: anywhere;
-    }
-    .ops-card.ok { border-color: #a9dbc2; background: #eefbf5; }
-    .ops-card.warn { border-color: #f1daa0; background: #fffaf0; }
-    .ops-card.bad { border-color: #ffc6bd; background: #fff5f3; }
-    .situation-board {
-      display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 8px;
-      padding: 10px;
-      background:
-        linear-gradient(135deg, rgba(255,255,255,.98), rgba(247,251,249,.95)),
-        var(--panel);
-    }
-    .situation-board-title {
-      grid-column: 1 / -1;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      color: #203040;
-      font-size: 12px;
-      font-weight: 900;
-      margin-bottom: -2px;
-    }
-    .situation-board-title span {
-      color: var(--muted);
-      font-size: 10px;
-      font-weight: 900;
-      text-transform: uppercase;
-      letter-spacing: .06em;
-    }
-    .situation-card {
-      border: 1px solid var(--line);
-      border-radius: 11px;
-      background: rgba(255,255,255,.84);
-      padding: 9px 10px;
-      min-height: 70px;
-      display: grid;
-      gap: 4px;
-      align-content: start;
-    }
-    .situation-card strong {
-      color: var(--muted);
-      font-size: 10px;
-      font-weight: 900;
-      text-transform: uppercase;
-      letter-spacing: .06em;
-    }
-    .situation-card span {
-      color: #1f2f3f;
-      font-size: 12px;
-      line-height: 1.35;
-      font-weight: 800;
-      overflow-wrap: anywhere;
-    }
-    .situation-card small {
-      color: var(--muted);
-      font-size: 10px;
-      line-height: 1.3;
-      overflow-wrap: anywhere;
-    }
-    .situation-card.ok { border-color: #a9dbc2; background: #eefbf5; }
-    .situation-card.warn { border-color: #f1daa0; background: #fffaf0; }
-    .situation-card.bad { border-color: #ffc6bd; background: #fff5f3; }
-    .locator-shortcuts {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      margin-top: 8px;
-    }
-    .locator-chip {
-      min-height: 28px;
-      padding: 5px 8px;
-      border-radius: 999px;
-      border-color: #dce4ec;
-      background: #fff;
-      color: #324055;
-      font-size: 11px;
-      box-shadow: none;
-    }
-    .locator-chip.missing { border-color: #f1daa0; background: #fffaf0; color: #694b10; }
-    .locator-chip.captured { border-color: #a9dbc2; background: #eefbf5; color: #173e2e; }
-    .audit-identity-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 8px;
-      margin-top: 8px;
-    }
-    .audit-identity-item {
-      border: 1px solid #dce4ec;
-      border-radius: 9px;
-      background: rgba(255,255,255,.74);
-      padding: 7px 8px;
-      min-height: 48px;
-    }
-    .audit-identity-item strong {
-      display: block;
-      color: var(--muted);
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: .05em;
-      margin-bottom: 3px;
-    }
-    .audit-identity-item span {
-      display: block;
-      color: #203040;
-      font-size: 11px;
-      font-weight: 800;
-      overflow-wrap: anywhere;
-    }
-    .identity-strip {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
-      margin: 8px 0 2px;
-    }
-    .identity-pill {
-      border: 1px solid #dce4ec;
-      border-radius: 10px;
-      background: #f8fafc;
-      padding: 8px 9px;
-      color: var(--muted);
-      font-size: 11px;
-      line-height: 1.35;
-    }
-    .identity-pill strong {
-      display: block;
-      color: #263548;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: .05em;
-      margin-bottom: 3px;
-    }
-
-    .program-registry {
-      display: grid;
-      gap: 8px;
-      margin-top: 10px;
-    }
-    .program-registry-title {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      margin-top: 10px;
-      padding: 8px 9px;
-      border: 1px solid #dce4ec;
-      border-radius: 11px;
-      background: #f8fafc;
-    }
-    .program-registry-title strong {
-      color: #203040;
-      font-size: 12px;
-    }
-    .program-registry-title span {
-      color: var(--muted);
-      font-size: 10px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: .04em;
-    }
-    .program-card {
-      border: 1px solid #dce4ec;
-      border-radius: 11px;
-      background: linear-gradient(135deg, #ffffff, #f7fbf9);
-      padding: 9px;
-      display: grid;
-      gap: 6px;
-      cursor: pointer;
-      transition: border-color .14s ease, box-shadow .14s ease, transform .14s ease;
-    }
-    .program-card:hover {
-      border-color: #9ccdc1;
-      box-shadow: 0 8px 18px rgba(15, 23, 42, .06);
-      transform: translateY(-1px);
-    }
-    .program-card.selected {
-      border-color: #0d7661;
-      box-shadow: 0 0 0 3px rgba(13, 118, 97, .12);
-    }
-    .program-card-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-    }
-    .program-card-head strong {
-      color: #203040;
-      font-size: 12px;
-      overflow-wrap: anywhere;
-    }
-    .program-kind {
-      border-radius: 999px;
-      border: 1px solid #dce4ec;
-      background: #f8fafc;
-      color: var(--muted);
-      padding: 3px 7px;
-      font-size: 10px;
-      font-weight: 900;
-      white-space: nowrap;
-      text-transform: uppercase;
-      letter-spacing: .04em;
-    }
-    .program-card p {
-      margin: 0;
-      color: var(--muted);
-      font-size: 11px;
-      line-height: 1.35;
-    }
-    .program-meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 5px;
-    }
-    .program-meta span {
-      border-radius: 999px;
-      background: #eef2f5;
-      color: #3a4a5f;
-      padding: 3px 7px;
-      font-size: 10px;
-      font-weight: 800;
-    }
-    .program-card-actions {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 6px;
-    }
-    .program-card-actions button {
-      min-height: 30px;
-      padding: 5px 7px;
-      font-size: 11px;
-    }
-
-    .section-intro {
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.45;
-      margin: -4px 0 8px;
-    }
-
-    #overview {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-      align-items: start;
-    }
-    #overview > .status-grid,
-    #overview > .preflight-banner,
-    #overview > .workflow-strip,
-    #overview > .wide-card {
-      grid-column: 1 / -1;
-    }
-    #overview > .summary-card { margin-top: 0; }
-    #overview .proof-gate-strip { grid-template-columns: repeat(7, minmax(78px, 1fr)); overflow-x: auto; padding-bottom: 2px; }
-    .panel-toggle {
-      border: 1px solid var(--line);
-      background: #fff;
-      color: #324055;
-      min-height: 26px;
-      padding: 4px 8px;
-      font-size: 10px;
-      border-radius: 999px;
-      box-shadow: none;
-    }
-    .panel-toggle:hover:not(:disabled) { transform: none; box-shadow: 0 4px 10px rgba(15, 23, 42, .06); }
-    section.is-collapsed { padding-bottom: 10px; }
-    section.is-collapsed > :not(h2) { display: none !important; }
-    .operator-compact-note {
-      border: 1px solid #c9d8e2;
-      border-radius: 10px;
-      background: #f8fafc;
-      color: var(--muted);
-      padding: 8px 10px;
-      font-size: 11px;
-      line-height: 1.35;
-      margin-top: 8px;
-    }
-
-    .wide { grid-column: 1 / -1; }
-    #log {
-      max-height: 260px;
-      overflow: auto;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: var(--panel-soft);
-      padding: 4px 10px;
-    }
-    body.focus-mode .quick-nav,
-    body.focus-mode #safeDiagnosticsPanel,
-    body.focus-mode #locatorPanel,
-    body.focus-mode #resultPanel {
-      display: none;
-    }
-    body.focus-mode main { grid-template-columns: 340px minmax(0, 1fr); }
-    body.focus-mode .split { grid-template-columns: 1fr; }
-    body.focus-mode #focusMode {
-      background: #102f3b;
-      border-color: #102f3b;
-      color: #fff;
-    }
-    @media (max-width: 980px) {
-      .quick-nav { top: 92px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      main, .split { grid-template-columns: 1fr; }
-      .sidebar, .command-shell { position: static; max-height: none; }
-      .status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .workflow-strip, .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .ops-hud, .identity-strip, .situation-board, .audit-identity-grid { grid-template-columns: 1fr; }
-      .operator-console, .intent-grid { grid-template-columns: 1fr; }
-      .operator-mini-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .proof-gate-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .timeline-head { grid-template-columns: 1fr; }
-      .timeline-item { grid-template-columns: 72px 13px minmax(0, 1fr); }
-      .command-shell { grid-template-columns: 1fr; }
-      .control-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .row4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .header-pill-stack { align-items: flex-start; width: 100%; }
-    }
-
-    /* Program Manager augments the full operator console; it never replaces controls. */
-    .manager-toolbar {
-      display: grid;
-      grid-template-columns: minmax(220px, 1fr) 150px repeat(4, auto);
-      gap: 8px;
-      align-items: end;
-    }
-    .manager-toolbar label { margin: 0; }
-    .manager-grid {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 12px;
-      margin-top: 12px;
-      align-items: start;
-    }
-    .manager-registry { display: grid; gap: 8px; min-width: 0; }
-    .manager-program-card {
-      display: grid;
-      grid-template-columns: minmax(260px, 1fr) auto;
-      gap: 12px;
-      align-items: center;
-    }
-    .manager-program-info { min-width: 0; display: grid; gap: 4px; }
-    .manager-program-info p { margin: 0; }
-    .manager-editor {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: var(--panel-soft);
-      overflow: hidden;
-    }
-    .manager-editor[hidden] { display: none; }
-    .manager-editor-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      padding: 10px;
-      border-bottom: 1px solid var(--line);
-      background: #fff;
-    }
-    .manager-editor-body { padding: 10px; }
-    .manager-stats { margin-top: 9px; color: var(--muted); font-size: 11px; }
-    .manager-badges { display: flex; flex-wrap: wrap; gap: 5px; }
-    .manager-badge {
-      display: inline-flex;
-      align-items: center;
-      min-height: 22px;
-      padding: 3px 7px;
-      border-radius: 999px;
-      background: #eef2f5;
-      color: #3a4a5f;
-      font-size: 10px;
-      font-weight: 800;
-    }
-    .manager-badge.ok { background: #e7f6ef; color: var(--ok); }
-    .manager-badge.warn { background: #fff7df; color: var(--warn); }
-    .manager-badge.bad { background: #fff0ed; color: var(--danger); }
-    .manager-actions {
-      display: grid;
-      grid-template-columns: repeat(5, minmax(76px, auto));
-      gap: 6px;
-      min-width: min(100%, 480px);
-    }
-    .manager-actions button { min-height: 30px; padding: 5px 7px; font-size: 11px; }
-    .manager-empty {
-      border: 1px dashed var(--line);
-      border-radius: 10px;
-      padding: 18px;
-      color: var(--muted);
-      text-align: center;
-      background: var(--panel-soft);
-    }
-    .manager-file-meta {
-      margin-top: 9px;
-      padding: 8px;
-      border: 1px dashed var(--line);
-      border-radius: 8px;
-      color: var(--muted);
-      font-size: 11px;
-      overflow-wrap: anywhere;
-    }
-    .manager-result { margin-top: 10px; }
-    .manager-result pre { min-height: 120px; max-height: 260px; }
-    .manager-hidden { display: none !important; }
-    .manager-tabs { display: flex; gap: 6px; margin: 10px 0; }
-    .manager-tabs button { min-height: 32px; padding: 6px 14px; }
-    .manager-tabs button.active { background: var(--accent); color: #fff; }
-    .manager-view[hidden] { display: none !important; }
-    .manager-record-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-    .recording-options { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
-    .recording-option { display:flex; align-items:center; gap:8px; min-height:38px; padding:0 12px; border:1px solid var(--line); border-radius:10px; background:var(--panel-soft); }
-    .recording-option input { width:auto; margin:0; }
-    .recording-locator-preview { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; margin-top:10px; }
-    .recording-locator-card { border:1px solid var(--line); border-radius:10px; padding:8px; display:grid; gap:6px; background:var(--panel-soft); }
-    .recording-locator-images { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
-    .recording-locator-images img { display:block; width:100%; height:76px; object-fit:contain; background:#0b1220; border:1px solid var(--line); border-radius:6px; }
-    #recordToggle[data-state="recording"] { background:var(--danger); border-color:#8c1d12; color:#fff; }
-    #recordToggle[data-state="countdown"] { background:#9b5c00; border-color:#6f4100; color:#fff; }
-    .manager-record-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
-    .manager-skill-card { border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: grid; gap: 7px; }
-    .manager-skill-card .manager-actions { grid-template-columns: repeat(7, minmax(0, 1fr)); }
-    #bridgeCommandKit .compact-tools { grid-template-columns: 1fr; }
-    @media (max-width: 1080px) {
-      .manager-toolbar, .manager-grid { grid-template-columns: 1fr; }
-      .manager-record-grid { grid-template-columns: 1fr; }
-      .manager-program-card { grid-template-columns: 1fr; }
-      .manager-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    }
-
-
-    .quick-nav { display: none; }
-    .essential-console {
-      width: min(1760px, calc(100vw - 28px));
-      margin: 12px auto 10px;
-      display: grid;
-      gap: 12px;
-    }
-    .essential-grid {
-      display: grid;
-      grid-template-columns: minmax(280px, .72fr) minmax(0, 1.28fr);
-      gap: 12px;
-    }
-    .essential-card {
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: var(--panel);
-      box-shadow: var(--shadow);
-      padding: 14px;
-      min-width: 0;
-    }
-    .essential-card h2 { margin-bottom: 4px; }
-    .essential-card .section-intro { margin: 0 0 10px; }
-    .essential-fields {
-      display: grid;
-      grid-template-columns: minmax(240px, 1fr) repeat(3, auto);
-      gap: 8px;
-      align-items: end;
-    }
-    .essential-fields label { margin: 0; }
-    .essential-metrics {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 8px;
-    }
-    .essential-metric {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: var(--panel-soft);
-      padding: 9px 10px;
-      min-width: 0;
-    }
-    .essential-metric strong {
-      display: block;
-      margin-bottom: 4px;
-      color: var(--muted);
-      font-size: 10px;
-      letter-spacing: .04em;
-      text-transform: uppercase;
-    }
-    .essential-metric span {
-      display: block;
-      color: var(--ink);
-      font-size: 14px;
-      font-weight: 800;
-      overflow-wrap: anywhere;
-    }
-    .essential-result {
-      border-left: 4px solid #9aa8b7;
-      border-radius: 8px;
-      background: var(--panel-soft);
-      padding: 10px 12px;
-      color: #263548;
-      font-size: 13px;
-      overflow-wrap: anywhere;
-    }
-    .essential-result[data-tone="ok"] { border-left-color: var(--ok); background: var(--ok-bg); }
-    .essential-result[data-tone="bad"] { border-left-color: var(--danger); background: var(--bad-bg); }
-    .essential-result[data-tone="warn"] { border-left-color: #f59e0b; background: var(--warn-bg); }
-    #essentialProgramManagerSlot > #programManagerPanel { margin: 0; }
-    #advancedToolsPanel {
-      --panel: #ffffff;
-      --panel-soft: #f4f7fc;
-      --ink: #17233d;
-      --muted: #60708d;
-      --line: #cdd9ee;
-      --accent: #2557d6;
-      --accent-2: #173f9f;
-      --ok-bg: #eaf8f1;
-      --bad-bg: #fff1ef;
-      --warn-bg: #fff8e8;
-      width: min(1760px, calc(100vw - 28px));
-      margin: 0 auto 28px;
-      padding: 0;
-      border: 1px solid #bdcce6;
-      border-radius: 16px;
-      background: #eaf0f9;
-      box-shadow: 0 12px 34px rgba(38, 72, 132, .10);
-      overflow: clip;
-    }
-    #advancedToolsPanel > summary {
-      padding: 15px 18px;
-      color: #173f9f;
-      font-size: 14px;
-      font-weight: 900;
-      line-height: 1.35;
-      list-style-position: inside;
-      background: linear-gradient(135deg, #ffffff 0%, #f1f6ff 100%);
-      cursor: pointer;
-      overflow-wrap: anywhere;
-    }
-    #advancedToolsPanel > summary::marker { color: #2557d6; }
-    #advancedToolsPanel[open] > summary { border-bottom: 1px solid #bdcce6; }
-    #advancedToolsPanel > main {
-      width: 100%;
-      margin: 0;
-      padding: 16px;
-      grid-template-columns: minmax(300px, 350px) minmax(0, 1fr);
-      gap: 16px;
-      align-items: start;
-    }
-    #advancedToolsPanel .sidebar,
-    #advancedToolsPanel .workspace {
-      gap: 16px;
-      min-width: 0;
-    }
-    #advancedToolsPanel .sidebar {
-      top: 112px;
-      max-height: calc(100vh - 128px);
-      padding-right: 5px;
-    }
-    #advancedToolsPanel section,
-    #advancedToolsPanel .card {
-      min-width: 0;
-      border-color: #cdd9ee;
-      border-radius: 14px;
-      background: #ffffff;
-      box-shadow: 0 8px 24px rgba(34, 68, 130, .07);
-    }
-    #advancedToolsPanel section { padding: 15px; }
-    #advancedToolsPanel h2 {
-      color: #173f9f;
-      font-size: 14px;
-      line-height: 1.35;
-      overflow-wrap: anywhere;
-    }
-    #advancedToolsPanel h3 { color: #294575; }
-    #advancedToolsPanel .section-intro,
-    #advancedToolsPanel .hint,
-    #advancedToolsPanel .operator-compact-note,
-    #advancedToolsPanel .identity-pill,
-    #advancedToolsPanel .runbook-step small,
-    #advancedToolsPanel .command-banner span,
-    #advancedToolsPanel .ops-card span,
-    #advancedToolsPanel .proof-gate span {
-      white-space: normal;
-      overflow: visible;
-      text-overflow: clip;
-      overflow-wrap: anywhere;
-    }
-    #advancedToolsPanel button {
-      min-width: 0;
-      height: auto;
-      min-height: 38px;
-      white-space: normal;
-      overflow: visible;
-      text-overflow: clip;
-      overflow-wrap: anywhere;
-      line-height: 1.2;
-      border-color: #1e48b5;
-      background: #2557d6;
-    }
-    #advancedToolsPanel button.secondary {
-      border-color: #c4d1e7;
-      background: #ffffff;
-      color: #294575;
-    }
-    #advancedToolsPanel button.blue {
-      border-color: #173f9f;
-      background: #173f9f;
-    }
-    #advancedToolsPanel button.danger {
-      border-color: #a52a22;
-      background: #bd352b;
-    }
-    #advancedToolsPanel input,
-    #advancedToolsPanel textarea,
-    #advancedToolsPanel select {
-      min-width: 0;
-      border-color: #c4d1e7;
-      border-radius: 9px;
-      background: #ffffff;
-    }
-    #advancedToolsPanel input:focus,
-    #advancedToolsPanel textarea:focus,
-    #advancedToolsPanel select:focus {
-      border-color: #5c83e7;
-      box-shadow: 0 0 0 3px rgba(37, 87, 214, .13);
-    }
-    #advancedToolsPanel .action-group,
-    #advancedToolsPanel .tile,
-    #advancedToolsPanel .workflow-step,
-    #advancedToolsPanel .ops-card,
-    #advancedToolsPanel .summary-card,
-    #advancedToolsPanel .proof-gate,
-    #advancedToolsPanel .connection-readout,
-    #advancedToolsPanel .command-kit,
-    #advancedToolsPanel .operator-runbook {
-      min-width: 0;
-      border-color: #d5dfef;
-      background: #f5f8fd;
-    }
-    #advancedToolsPanel .row3,
-    #advancedToolsPanel .row4,
-    #advancedToolsPanel .buttons,
-    #advancedToolsPanel .compact-tools,
-    #advancedToolsPanel .status-grid,
-    #advancedToolsPanel .workflow-strip,
-    #advancedToolsPanel .summary-grid,
-    #advancedToolsPanel .proof-list,
-    #advancedToolsPanel .proof-gate-strip,
-    #advancedToolsPanel .control-rail,
-    #advancedToolsPanel .ops-hud {
-      grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
-    }
-    #advancedToolsPanel .row {
-      grid-template-columns: repeat(auto-fit, minmax(138px, 1fr));
-    }
-    #advancedToolsPanel .next-action-button span,
-    #advancedToolsPanel .control-rail button small {
-      max-width: 100%;
-      white-space: normal;
-      overflow: visible;
-      text-overflow: clip;
-      overflow-wrap: anywhere;
-    }
-    #advancedToolsPanel pre,
-    #advancedToolsPanel code,
-    #advancedToolsPanel .mono {
-      max-width: 100%;
-      overflow-wrap: anywhere;
-      word-break: break-word;
-    }
-    #advancedToolsPanel pre {
-      overflow: auto;
-      white-space: pre-wrap;
-    }
-    #advancedToolsPanel .command-shell {
-      position: static;
-      top: auto;
-      z-index: auto;
-    }
-    @media (max-width: 1500px) {
-      #advancedToolsPanel .command-shell {
-        grid-template-columns: 1fr;
-      }
-    }
-    @media (max-width: 1100px) {
-      .essential-grid, .essential-fields { grid-template-columns: 1fr; }
-      .essential-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .essential-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      #advancedToolsPanel > main { grid-template-columns: 1fr; }
-      #advancedToolsPanel .sidebar {
-        position: static;
-        max-height: none;
-        overflow: visible;
-        padding-right: 0;
-      }
-    }
-    @media (max-width: 680px) {
-      #advancedToolsPanel {
-        width: calc(100vw - 16px);
-        border-radius: 12px;
-      }
-      #advancedToolsPanel > summary { padding: 13px 14px; }
-      #advancedToolsPanel > main { padding: 10px; gap: 10px; }
-      #advancedToolsPanel .sidebar,
-      #advancedToolsPanel .workspace { gap: 10px; }
-      #advancedToolsPanel .row,
-      #advancedToolsPanel .row3,
-      #advancedToolsPanel .row4,
-      #advancedToolsPanel .buttons,
-      #advancedToolsPanel .compact-tools,
-      #advancedToolsPanel .status-grid,
-      #advancedToolsPanel .workflow-strip,
-      #advancedToolsPanel .summary-grid,
-      #advancedToolsPanel .proof-list,
-      #advancedToolsPanel .proof-gate-strip,
-      #advancedToolsPanel .control-rail,
-      #advancedToolsPanel .ops-hud {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    /* Self-contained ATR Device Bridge theme for the complete Windows console. */
-    body.device-bridge-shell {
-      --bg: #f5f8ff;
-      --panel: #ffffff;
-      --panel-soft: #f1f6ff;
-      --ink: #091225;
-      --muted: #5a6883;
-      --line: rgba(26, 60, 160, .22);
-      --accent: #1436b3;
-      --accent-2: #2f72ff;
-      --danger: #c84c3b;
-      --warn: #d98c12;
-      --ok: #1d9150;
-      --ok-bg: #eaf8f1;
-      --bad-bg: #fff1ef;
-      --warn-bg: #fff8e8;
-      --shadow: 0 20px 52px rgba(28, 53, 112, .11);
-      --shadow-soft: 0 10px 28px rgba(28, 53, 112, .08);
-      background:
-        radial-gradient(circle at top left, rgba(47, 114, 255, .12), transparent 28%),
-        linear-gradient(180deg, #fbfcff 0%, #f5f8ff 35%, #eef4ff 100%);
-      color: var(--ink);
-    }
-    body.device-bridge-shell ::selection { background: rgba(47, 114, 255, .20); }
-    body.device-bridge-shell > header {
-      width: min(1760px, calc(100vw - 28px));
-      margin: 16px auto 0;
-      padding: 20px 22px;
-      position: relative;
-      top: auto;
-      border: 1.5px solid var(--line);
-      border-radius: 22px;
-      background: rgba(255, 255, 255, .94);
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(12px);
-    }
-    body.device-bridge-shell h1 {
-      color: var(--ink);
-      font-size: clamp(24px, 2vw, 32px);
-      line-height: 1.05;
-      letter-spacing: -.02em;
-    }
-    body.device-bridge-shell .sub {
-      max-width: 76ch;
-      margin-top: 7px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.45;
-    }
-    body.device-bridge-shell .brandline { gap: 12px; }
-    body.device-bridge-shell .brandmark {
-      width: 42px;
-      height: 42px;
-      border-radius: 14px;
-      background: linear-gradient(135deg, #1436b3, #2f72ff);
-      box-shadow: 0 10px 22px rgba(20, 54, 179, .24);
-      font-size: 13px;
-    }
-    body.device-bridge-shell .header-pill-stack {
-      flex-direction: row;
-      align-items: center;
-      justify-content: flex-end;
-      min-width: 0;
-    }
-    body.device-bridge-shell .pill {
-      border-color: rgba(20, 54, 179, .18);
-      background: linear-gradient(180deg, #ffffff, #f1f6ff);
-      color: #435271;
-      box-shadow: 0 7px 18px rgba(34, 58, 120, .06);
-    }
-    body.device-bridge-shell .essential-console {
-      margin-top: 18px;
-      margin-bottom: 16px;
-      gap: 18px;
-    }
-    body.device-bridge-shell .essential-grid { gap: 18px; }
-    body.device-bridge-shell section,
-    body.device-bridge-shell .card,
-    body.device-bridge-shell .essential-card,
-    body.device-bridge-shell #programManagerPanel {
-      border: 1.5px solid var(--line);
-      border-radius: 22px;
-      background: rgba(255, 255, 255, .94);
-      box-shadow: var(--shadow);
-    }
-    body.device-bridge-shell .essential-card { padding: 20px; }
-    body.device-bridge-shell h2 {
-      color: #1436b3;
-      font-size: 15px;
-      line-height: 1.35;
-    }
-    body.device-bridge-shell h3 { color: #27447c; }
-    body.device-bridge-shell label { color: var(--muted); }
-    body.device-bridge-shell input,
-    body.device-bridge-shell textarea,
-    body.device-bridge-shell select {
-      min-width: 0;
-      border: 1px solid rgba(20, 54, 179, .20);
-      border-radius: 12px;
-      background: rgba(255, 255, 255, .98);
-      color: var(--ink);
-    }
-    body.device-bridge-shell input:focus,
-    body.device-bridge-shell textarea:focus,
-    body.device-bridge-shell select:focus {
-      border-color: #2f72ff;
-      box-shadow: 0 0 0 3px rgba(47, 114, 255, .14);
-    }
-    body.device-bridge-shell button {
-      min-width: 0;
-      min-height: 40px;
-      border: 1px solid transparent;
-      border-radius: 12px;
-      background: linear-gradient(120deg, #1436b3, #2f72ff);
-      color: #ffffff;
-      box-shadow: 0 8px 18px rgba(20, 54, 179, .16);
-      white-space: normal;
-      overflow-wrap: anywhere;
-      line-height: 1.2;
-    }
-    body.device-bridge-shell button.secondary {
-      border-color: rgba(20, 54, 179, .18);
-      background: rgba(255, 255, 255, .96);
-      color: #1f3159;
-      box-shadow: 0 7px 16px rgba(34, 58, 120, .05);
-    }
-    body.device-bridge-shell button.blue {
-      border-color: transparent;
-      background: linear-gradient(120deg, #1436b3, #2f72ff);
-    }
-    body.device-bridge-shell button.danger {
-      border-color: rgba(200, 76, 59, .32);
-      background: rgba(255, 242, 239, .98);
-      color: #a43d31;
-      box-shadow: none;
-    }
-    body.device-bridge-shell button:hover:not(:disabled) {
-      transform: translateY(-1px);
-      box-shadow: 0 11px 24px rgba(20, 54, 179, .16);
-    }
-    body.device-bridge-shell .essential-metric,
-    body.device-bridge-shell .manager-editor,
-    body.device-bridge-shell .manager-empty,
-    body.device-bridge-shell .action-group,
-    body.device-bridge-shell .tile,
-    body.device-bridge-shell .workflow-step,
-    body.device-bridge-shell .status-card {
-      border-color: rgba(20, 54, 179, .16);
-      border-radius: 16px;
-      background: linear-gradient(180deg, #ffffff, #f1f6ff);
-      box-shadow: 0 9px 22px rgba(34, 58, 120, .06);
-    }
-    body.device-bridge-shell .essential-result {
-      border: 1px solid rgba(20, 54, 179, .16);
-      border-left: 5px solid #6d7f9f;
-      border-radius: 14px;
-      background: #f5f8ff;
-      color: #223252;
-    }
-    body.device-bridge-shell .essential-result[data-tone="ok"] { border-left-color: var(--ok); }
-    body.device-bridge-shell .essential-result[data-tone="bad"] { border-left-color: var(--danger); }
-    body.device-bridge-shell .essential-result[data-tone="warn"] { border-left-color: var(--warn); }
-    body.device-bridge-shell .manager-toolbar { gap: 10px; }
-    body.device-bridge-shell .manager-program-card {
-      border: 1px solid rgba(20, 54, 179, .16);
-      border-radius: 16px;
-      background: linear-gradient(180deg, #ffffff, #f6f9ff);
-      box-shadow: 0 8px 20px rgba(34, 58, 120, .05);
-      padding: 12px;
-    }
-    body.device-bridge-shell .manager-badge {
-      background: #eaf0ff;
-      color: #294b9d;
-    }
-    body.device-bridge-shell #advancedToolsPanel {
-      border-width: 1.5px;
-      border-radius: 22px;
-      background: rgba(235, 242, 255, .92);
-      box-shadow: var(--shadow);
-    }
-    body.device-bridge-shell #advancedToolsPanel > summary {
-      padding: 17px 20px;
-      color: #1436b3;
-      font-size: 15px;
-      background: rgba(255, 255, 255, .94);
-    }
-    body.device-bridge-shell #advancedToolsPanel section,
-    body.device-bridge-shell #advancedToolsPanel .card {
-      border-radius: 18px;
-      box-shadow: 0 10px 26px rgba(34, 68, 130, .07);
-    }
-    @media (max-width: 1500px) and (min-width: 761px) {
-      body.device-bridge-shell .essential-fields {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
-      body.device-bridge-shell .essential-fields > label {
-        grid-column: 1 / -1;
-      }
-    }
-    @media (max-width: 760px) {
-      body.device-bridge-shell > header {
-        width: calc(100vw - 16px);
-        margin-top: 8px;
-        padding: 16px;
-        border-radius: 16px;
-        align-items: flex-start;
-        flex-direction: column;
-      }
-      body.device-bridge-shell .header-pill-stack {
-        justify-content: flex-start;
-        flex-wrap: wrap;
-      }
-      body.device-bridge-shell .essential-console { width: calc(100vw - 16px); }
-      body.device-bridge-shell .essential-card { padding: 16px; }
-    }
-
+    :root { color-scheme: light; --bg:#edf2f6; --panel:#fff; --soft:#f5f8fb; --ink:#172331; --muted:#66778a; --line:#d4dee8; --accent:#147a68; --accent2:#18556c; --ok:#15805f; --warn:#a06700; --bad:#b42318; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink); font:14px/1.45 "Segoe UI","Malgun Gothic",sans-serif; }
+    header { position:sticky; top:0; z-index:5; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 22px; background:#f9fbfc; border-bottom:1px solid var(--line); }
+    h1,h2,h3,p { margin:0; }
+    h1 { font-size:20px; } h2 { font-size:16px; } h3 { font-size:14px; }
+    .eyebrow { color:var(--accent); font-size:11px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; }
+    .muted { color:var(--muted); }
+    .shell { width:min(1440px,100%); margin:auto; padding:18px; display:grid; gap:14px; grid-template-columns:repeat(12,1fr); }
+    .panel { grid-column:span 6; min-width:0; background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; box-shadow:0 7px 20px rgba(31,48,65,.05); }
+    .wide { grid-column:1/-1; }
+    .panel-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:13px 15px; border-bottom:1px solid var(--line); background:var(--soft); }
+    .panel-body { padding:15px; display:grid; gap:12px; }
+    .status-grid,.form-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; }
+    .status-tile { padding:11px; border:1px solid var(--line); border-radius:9px; background:#fff; }
+    .status-tile small { display:block; color:var(--muted); margin-bottom:4px; }
+    .status-tile strong { overflow-wrap:anywhere; }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    label { display:grid; gap:5px; color:var(--muted); font-size:12px; }
+    input,textarea,select,button { font:inherit; }
+    input,textarea,select { width:100%; border:1px solid var(--line); border-radius:8px; padding:9px 10px; color:var(--ink); background:#fff; }
+    textarea { min-height:190px; resize:vertical; font-family:Consolas,monospace; font-size:12px; }
+    button,.button-link { border:1px solid var(--accent); border-radius:8px; padding:8px 11px; background:var(--accent); color:#fff; font-weight:700; cursor:pointer; text-decoration:none; }
+    button.secondary,.button-link.secondary { color:var(--accent2); border-color:var(--line); background:#fff; }
+    button.danger { color:var(--bad); border-color:#efc4bf; background:#fff; }
+    button:disabled { cursor:not-allowed; opacity:.5; }
+    .pill { display:inline-flex; align-items:center; min-height:24px; padding:3px 9px; border-radius:999px; background:#e8eef3; color:var(--muted); font-size:12px; font-weight:800; }
+    .pill.ok { color:var(--ok); background:#e7f6ef; } .pill.warn { color:var(--warn); background:#fff3d6; } .pill.bad { color:var(--bad); background:#fff0ed; }
+    .registry,.recording-list { display:grid; gap:8px; max-height:330px; overflow:auto; }
+    .item { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:center; padding:10px; border:1px solid var(--line); border-radius:9px; background:#fff; }
+    .item strong,.item span { display:block; overflow-wrap:anywhere; }
+    .item span { color:var(--muted); font-size:12px; }
+    .editor[hidden] { display:none; }
+    .countdown { font-size:30px; font-weight:900; color:var(--bad); text-align:center; }
+    pre { margin:0; max-height:280px; overflow:auto; padding:12px; border-radius:9px; background:#111b25; color:#dce8f2; font:12px/1.5 Consolas,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .recording-preview { display:grid; gap:9px; padding:10px; border:1px solid var(--line); border-radius:9px; background:#111b25; color:#dce8f2; }
+    .recording-preview[hidden] { display:none; }
+    .recording-preview img { display:block; width:100%; max-height:430px; object-fit:contain; border-radius:7px; background:#080e14; }
+    .recording-preview .row { justify-content:space-between; }
+    .recording-preview-meta { color:#aebdca; font:12px/1.4 Consolas,monospace; }
+    details > summary { cursor:pointer; font-weight:800; }
+    #diagnosticsPanel { grid-column:1/-1; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:13px 15px; }
+    @media (max-width:900px) { .panel { grid-column:1/-1; } .status-grid,.form-grid { grid-template-columns:1fr; } }
   </style>
 </head>
-<body class="device-bridge-shell">
+<body>
   <header>
-    <div>
-      <div class="brandline"><span class="brandmark">ATR</span><h1>ATR Windows PyAutoGUI Bridge</h1></div>
-      <div class="sub">Windows-side bridge for UTM GUI control, locator calibration, screenshots, and artifact handoff.</div>
-    </div>
-    <div class="header-actions">
-      <div class="header-pill-stack">
-        <span class="pill" id="authPill"><span class="dot"></span><span>auth not checked</span></span>
-        <span class="pill" id="headerProofPill"><span class="dot warn"></span><span>proof 0/7</span></span>
-      </div>
-    </div>
+    <div><div class="eyebrow">Low-Level Worker</div><h1>ATR Windows PyAutoGUI Bridge</h1><p class="muted">Desktop execution, local programs, and bounded recording.</p></div>
+    <span id="headerStatus" class="pill warn">not checked</span>
   </header>
-  <nav class="quick-nav" aria-label="Windows bridge workspace navigation">
-    <a href="#overview">Overview</a>
-    <a href="#operatorConsolePanel">Console</a>
-    <a href="#timelinePanel">Timeline</a>
-    <a href="#utmProtocolPanel">UTM Control</a>
-    <a href="#evidencePanel">Evidence</a>
-    <a href="#resultPanel">Result JSON</a>
-    <a href="#programManagerPanel">Programs</a>
-    <a href="#operatorLogPanel">Operator Log</a>
-  </nav>
-
-  <div id="essentialConsole" class="essential-console">
-    <div class="essential-grid">
-      <section class="essential-card" aria-label="Essential bridge connection">
-        <h2>Bridge Connection</h2>
-        <div class="section-intro">Connect this Windows bridge, then create or manage bounded macro programs below.</div>
-        <div class="essential-fields">
-          <label>Bridge Token<input id="token" type="password" autocomplete="off" placeholder="X-Bridge-Token"></label>
-          <button id="health">Health</button>
-          <button class="secondary" id="refreshAll">Refresh</button>
-          <button class="secondary" id="clearToken">Clear Token</button>
-        </div>
-        <div class="connection-readout" style="margin-top:10px">
-          <span>ATR Controller</span>
-          <code id="controllerStatus">Not resolved</code>
-        </div>
-        <div class="essential-fields" style="margin-top:8px">
-          <label>Controller URL<input id="controllerUrl" type="url" placeholder="http://192.168.x.x:7860"></label>
-          <button class="secondary" id="discoverController">Discover ATR</button>
-          <button class="secondary" id="saveController">Verify &amp; Save</button>
-        </div>
-        <div id="controllerCandidates" class="hint" aria-live="polite">ATR will be learned from an authenticated Linux request or bounded private-network discovery.</div>
-        <div class="essential-metrics" style="margin-top:10px">
-          <div class="essential-metric"><strong>Bridge</strong><span id="essentialBridgeState">Not checked</span></div>
-          <div class="essential-metric"><strong>PyAutoGUI</strong><span id="essentialPyAutoGUI">Unknown</span></div>
-        </div>
-      </section>
-      <section class="essential-card" aria-label="Latest macro manager result">
-        <h2>Latest Test Result</h2>
-        <div class="section-intro">Validation, registration, deletion, and bounded test results appear here.</div>
-        <div id="essentialResult" class="essential-result" data-tone="warn">No bridge request yet.</div>
-      </section>
-    </div>
-
-    <div id="essentialProgramManagerSlot"></div>
-  </div>
-
-  <details id="advancedToolsPanel">
-    <summary>Advanced Tools · readiness, locators, screenshots, artifacts, timeline, and JSON execution</summary>
-
-  <main>
-    <div class="sidebar">
-      <section id="connectionPanel">
-        <h2>Deployment Details</h2>
-        <div class="connection-readout">
-          <span>Bridge URL</span>
-          <code id="baseUrlLabel">-</code>
-        </div>
-        <div class="row">
-          <button class="secondary" id="copyLinuxEnv">Copy Linux Env</button>
-          <button class="secondary" id="copyBase">Copy URL</button>
-        </div>
-        <div class="command-kit" id="bridgeCommandKit" aria-label="Bridge command copy kit">
-          <div class="command-kit-head"><strong>Bridge Command Kit</strong><span>Linux / Windows parity</span></div>
-          <div class="buttons compact-tools">
-            <button class="secondary" id="copyCurlHealth">Copy curl Health</button>
-            <button class="secondary" id="copyPowerShellHealth">Copy PowerShell Health</button>
-            <button class="secondary" id="copyCurlExecute">Copy curl Execute</button>
-          </div>
-          <div class="hint">Copy the exact health or execute command when Linux, Windows, and browser behavior need to be compared.</div>
-        </div>
-        <div class="operator-compact-note">This page is the Windows-side operator console. Keep Health, Readiness, Live interlock, and Evidence green before trusting a live UTM handoff.</div>
-        <div class="hint">Token is stored only in this browser. Copy Linux Env gives the Linux controller the matching bridge URL/token variables.</div>
-        <div class="operator-checklist">
-          <strong>Operator sequence</strong>
-          <ol>
-            <li>Confirm token and Health are valid.</li>
-            <li>Open the UTM software and keep the specimen setup safe.</li>
-            <li>Run simulation or locator checks before Live UTM.</li>
-            <li>After Live UTM, verify CSV artifact and screen evidence.</li>
-          </ol>
-        </div>
-        <div class="operator-runbook" id="fieldRunbookPanel" aria-label="Windows bridge field runbook">
-          <div class="operator-runbook-head"><strong>Field Runbook</strong><span id="runbookPill">4 gates</span></div>
-          <div class="runbook-step warn" id="runbookConnect"><span class="runbook-index">1</span><div><strong>Connect bridge</strong><small>Run Health and confirm PyAutoGUI is available.</small></div></div>
-          <div class="runbook-step warn" id="runbookCalibrate"><span class="runbook-index">2</span><div><strong>Calibrate UTM locators</strong><small>Run Readiness and capture missing screen locators.</small></div></div>
-          <div class="runbook-step warn" id="runbookExecute"><span class="runbook-index">3</span><div><strong>Execute registered protocol</strong><small>Send only an allowlisted /execute request after preflight.</small></div></div>
-          <div class="runbook-step warn" id="runbookVerify"><span class="runbook-index">4</span><div><strong>Verify handoff evidence</strong><small>Check screen evidence, save/export proof, and CSV parse probe.</small></div></div>
-        </div>
-      </section>
-
-      <section id="safeDiagnosticsPanel">
-        <h2>Safe Diagnostics <span class="pill"><span class="dot ok"></span><span>non-actuating</span></span></h2>
-        <div class="action-group">
-          <div class="action-group-title"><span>Before live control</span><span class="muted">no /execute</span></div>
-          <div class="buttons compact-tools">
-            <button class="blue" id="safePreflight">Safe Preflight</button>
-            <button id="readiness">Readiness</button>
-            <button id="requestLog">Request Log</button>
-            <button id="screenshot">Capture Screen</button>
-            <button id="locators">Locators</button>
-          </div>
-        </div>
-        <div class="action-group">
-          <div class="action-group-title"><span>Registry / demo</span><span class="muted">allowlisted</span></div>
-          <div class="buttons compact-tools">
-            <button id="artifacts">Artifacts</button>
-            <button class="secondary" id="fillUtmJson">Fill UTM JSON</button>
-          </div>
-        </div>
-      </section>
-
-      <section id="utmProtocolPanel">
-        <h2>UTM Protocol</h2>
-        <div class="section-intro">Use this panel only for Windows-side UTM GUI control. Safe Preflight is non-actuating; Live UTM sends /execute only after local gates pass.</div>
-        <div class="identity-strip">
-          <div class="identity-pill"><strong>Required order</strong>Preflight -> execute -> screen evidence -> CSV artifact -> Linux audit</div>
-          <div class="identity-pill"><strong>Current run identity</strong>Run ID and Specimen ID below are copied into the /execute payload and request audit context.</div>
-        </div>
-        <label for="runId">Run ID</label>
-        <input id="runId" value="utm-check-001">
-        <label for="specimenId">Specimen ID</label>
-        <input id="specimenId" value="specimen-demo-001">
-        <label for="targetWindow">Target Window Title / Regex</label>
-        <input id="targetWindow" placeholder="Example: UTM Controller or regex:.*UTM.*">
-        <div class="row">
-          <div><label for="exportGlob">Export Glob</label><input id="exportGlob" value="*.csv" placeholder="*.csv or specimen*.csv"></div>
-          <div><label for="artifactTimeout">Artifact Timeout Sec</label><input id="artifactTimeout" value="20"></div>
-        </div>
-        <div class="row">
-          <div><label for="stableForSec">Stable File Sec</label><input id="stableForSec" value="2.0"></div>
-          <div><label for="expectedExportPath">Expected Export Path</label><input id="expectedExportPath" placeholder="optional C:\ATR\utm_exports\run\specimen.csv"></div>
-        </div>
-        <div class="hint">These fields are sent to the bridge as export_glob, artifact_timeout_s, stable_for_sec, and expected_export_path.</div>
-        <div class="danger-panel">
-          Live UTM will first run a non-actuating preflight from this page. If Health or required locator readiness fails, the browser will not send /execute.
-        </div>
-        <div class="interlock-card" id="liveInterlockCard">
-          <strong>Live interlock</strong>
-          <span id="liveInterlockText">Live execution is blocked until Safe Preflight passes and the physical safety checkbox is enabled.</span>
-        </div>
-        <div class="checkline"><input id="requireFocus" type="checkbox" checked><span>Require target window focus before control</span></div>
-        <div class="checkline"><input id="requireAssertions" type="checkbox"><span>Require screen locator assertions</span></div>
-        <div class="checkline"><input id="manualSave" type="checkbox" checked><span>Manual Save As fallback if no CSV appears</span></div>
-        <div class="checkline"><input id="confirmLive" type="checkbox"><span>Live UTM setup is physically safe</span></div>
-        <div class="row4" style="margin-top:10px;">
-          <button id="utmSim">Run UTM Simulation</button>
-          <button class="danger" id="utmLive">Preflight + Run Live UTM</button>
-          <button class="danger" id="utmAbort">Stop / Abort</button>
-          <button class="secondary" id="copyUtmPayload">Copy Payload</button>
-        </div>
-        <div class="recovery-panel" aria-label="UTM stop abort recovery">
-          <strong>Recovery command</strong>
-          <span>Stop / Abort sends the registered <code>utm_stop_or_abort_v1</code> macro directly. Use it to stop/reset the UTM GUI when the protocol is stuck, then refresh Request Log and Evidence.</span>
-        </div>
-        <div class="hint">Simulation validates the bridge path. Live UTM is blocked unless preflight passes and the physical safety checkbox is set. Stop / Abort is intentionally available as a recovery path.</div>
-      </section>
-
-      <section id="locatorPanel">
-        <h2>Locator Capture</h2>
-        <label for="locatorName">Locator Name</label>
-        <select id="locatorName">
-          <option value="ready_state">ready_state</option>
-          <option value="start_button">start_button</option>
-          <option value="running_state">running_state</option>
-          <option value="complete_state">complete_state</option>
-        </select>
-        <div class="row">
-          <div><label for="regionX">X</label><input id="regionX" value="100"></div>
-          <div><label for="regionY">Y</label><input id="regionY" value="100"></div>
-        </div>
-        <div class="row">
-          <div><label for="regionW">Width</label><input id="regionW" value="160"></div>
-          <div><label for="regionH">Height</label><input id="regionH" value="70"></div>
-        </div>
-        <label for="confidence">Confidence</label>
-        <input id="confidence" value="0.80">
-        <div class="action-group">
-          <div class="action-group-title"><span>Readiness locator shortcuts</span><span class="muted">click to fill name</span></div>
-          <div id="missingLocatorShortcuts" class="locator-shortcuts" aria-label="Required UTM locator shortcuts">
-            <button class="locator-chip missing" type="button" data-locator-name="ready_state">ready_state</button>
-            <button class="locator-chip missing" type="button" data-locator-name="start_button">start_button</button>
-            <button class="locator-chip missing" type="button" data-locator-name="running_state">running_state</button>
-            <button class="locator-chip missing" type="button" data-locator-name="complete_state">complete_state</button>
-          </div>
-          <div class="hint">Run Readiness first. Missing locator chips stay amber; captured locator chips turn green.</div>
-        </div>
-        <button id="captureLocator">Capture Locator</button>
-      </section>
-    </div>
-
-    <div class="workspace">
-      <div class="command-shell">
-        <div class="command-banner" id="commandBanner" aria-live="polite">
-          <div>
-            <strong id="commandTitle">Ready for bridge operation</strong>
-            <span id="commandDetail">Use Safe Preflight before any live UTM action. Result JSON and Operator Log update after each command.</span>
-          </div>
-          <div class="command-side">
-            <span class="pill" id="commandPill"><span class="dot"></span><span>idle</span></span>
-            <button class="next-action-button warn" id="nextActionButton" type="button" data-next-action="health">
-              <small>Recommended next action</small>
-              <span id="nextActionLabel">Run Health</span>
-            </button>
-          </div>
-        </div>
-      </div>
-      <section class="ops-hud" id="operatorHud" aria-label="Operator runtime status">
-        <div class="ops-card warn" id="opsSafety"><strong>Safety</strong><span>Preflight not checked</span></div>
-        <div class="ops-card" id="opsCommand"><strong>Command</strong><span>Idle</span></div>
-        <div class="ops-card warn" id="opsEvidence"><strong>Evidence</strong><span>Waiting for screenshots</span></div>
-        <div class="ops-card warn" id="opsData"><strong>Data</strong><span>No CSV artifact yet</span></div>
-        <div class="ops-card warn" id="opsNext"><strong>Next</strong><span>Run Health / Safe Preflight</span></div>
-      </section>
-      <section class="situation-board" id="operatorSituationPanel" aria-label="Live UTM situation matrix">
-        <div class="situation-board-title"><strong>Live UTM situation matrix</strong><span>field readiness</span></div>
-        <div class="situation-card warn" id="situationBridge"><strong>Bridge</strong><span>Not checked</span><small>Health + token</small></div>
-        <div class="situation-card warn" id="situationLocators"><strong>Locators</strong><span>Readiness needed</span><small>ready/start/running/complete</small></div>
-        <div class="situation-card warn" id="situationAudit"><strong>Request Audit</strong><span>No /execute yet</span><small>Identity proof</small></div>
-        <div class="situation-card warn" id="situationExport"><strong>Export</strong><span>CSV not verified</span><small>Windows file + parse probe</small></div>
-        <div class="situation-card warn" id="situationLive"><strong>Live Gate</strong><span>Blocked</span><small>Preflight + safety checkbox</small></div>
-      </section>
-      <section id="operatorConsolePanel" class="operator-console" aria-label="Windows local operator console">
-        <div class="console-panel">
-          <h2>Local Operator Console <span class="pill" id="payloadPreviewPill"><span class="dot warn"></span><span>preview stale</span></span></h2>
-          <div class="section-intro">This panel shows the exact command intent before the browser sends a Windows /execute request.</div>
-          <div class="intent-grid">
-            <div class="intent-card warn" id="intentMode"><strong>Mode</strong><span>Live preview</span></div>
-            <div class="intent-card" id="intentRoute"><strong>Route</strong><span>POST /execute</span></div>
-            <div class="intent-card warn" id="intentPreflight"><strong>Preflight</strong><span>Required before live</span></div>
-            <div class="intent-card warn" id="intentPayload"><strong>Payload</strong><span>Waiting for validation</span></div>
-          </div>
-          <div class="operator-mini-steps" aria-label="UTM local control sequence">
-            <div class="operator-mini-step">Health</div>
-            <div class="operator-mini-step">Readiness</div>
-            <div class="operator-mini-step">Confirm Safety</div>
-            <div class="operator-mini-step">Execute</div>
-            <div class="operator-mini-step">Audit Evidence</div>
-          </div>
-        </div>
-        <div class="console-panel">
-          <h2>Payload Preview</h2>
-          <div class="console-actions">
-            <button class="secondary" id="previewSimPayload">Preview Sim</button>
-            <button class="secondary" id="previewLivePayload">Preview Live</button>
-            <button class="secondary" id="previewAbortPayload">Preview Abort</button>
-            <button class="secondary" id="copyPreviewPayload">Copy Preview</button>
-          </div>
-          <pre id="payloadPreview" class="payload-preview">{}</pre>
-        </div>
-      </section>
-      <section id="timelinePanel" class="operator-timeline" aria-label="Windows bridge command timeline">
-        <div class="timeline-head">
-          <div>
-            <h2>Run Timeline <span class="pill" id="timelinePill"><span class="dot"></span><span>idle</span></span></h2>
-            <div class="section-intro">Recent bridge steps, blockers, evidence captures, and CSV handoff status are accumulated here during operation.</div>
-          </div>
-          <button class="secondary" id="timelineClear">Clear Timeline</button>
-        </div>
-        <div id="timelineTrack" class="timeline-track">
-          <div class="timeline-empty">No command steps yet. Run Health, Safe Preflight, Simulation, or Live UTM.</div>
-        </div>
-      </section>
-      <section id="overview">
+  <main class="shell" id="essentialConsole">
+    <section class="panel wide" id="bridgeStatusPanel">
+      <div class="panel-head"><div><div class="eyebrow">Connection</div><h2>Bridge Status</h2></div><div class="row"><button id="health" type="button">Health</button><button id="refreshAll" class="secondary" type="button">Refresh</button></div></div>
+      <div class="panel-body">
         <div class="status-grid">
-          <div class="tile" id="tileStatus"><strong>Status</strong><span>Idle</span></div>
-          <div class="tile" id="tilePyAutoGUI"><strong>PyAutoGUI</strong><span>Unknown</span></div>
-          <div class="tile" id="tileFailure"><strong>Failure</strong><span>None</span></div>
-          <div class="tile" id="tileArtifact"><strong>Artifacts</strong><span>0</span></div>
+          <div class="status-tile"><small>Server</small><strong id="bridgeServerState">not checked</strong></div>
+          <div class="status-tile"><small>Linux ATR</small><strong id="bridgeAtrState">not paired</strong></div>
+          <div class="status-tile"><small>Desktop Control</small><strong id="bridgeDesktopState">unknown</strong></div>
+          <div class="status-tile"><small>PyAutoGUI</small><strong id="bridgePyAutoGuiState">unknown</strong></div>
+          <div class="status-tile"><small>Endpoint</small><strong id="bridgeEndpoint">local console</strong></div>
+          <div class="status-tile"><small>Data Root</small><strong id="bridgeDataRoot">-</strong></div>
         </div>
-        <div class="preflight-banner" id="preflightBanner">
-          <div>
-            <strong id="preflightTitle">Live UTM preflight not checked</strong>
-            <span id="preflightText">Run Safe Preflight before live control. This checks Health, UTM readiness, and request-log access without calling /execute.</span>
-          </div>
-          <button class="secondary" id="preflightRefreshInline">Safe Preflight</button>
-        </div>
-        <div class="workflow-strip" aria-label="Bridge run workflow">
-          <div class="workflow-step" id="stepAuth"><strong>Auth</strong><span>Not checked</span></div>
-          <div class="workflow-step" id="stepGui"><strong>GUI Driver</strong><span>Unknown</span></div>
-          <div class="workflow-step" id="stepProgram"><strong>Program</strong><span>Not selected</span></div>
-          <div class="workflow-step" id="stepEvidence"><strong>Evidence</strong><span>Waiting</span></div>
-          <div class="workflow-step" id="stepArtifact"><strong>Artifact</strong><span>Waiting</span></div>
-        </div>
-        <div class="summary-card">
-          <h2>Last Run Summary <span class="pill" id="runSummaryPill"><span class="dot"></span><span>idle</span></span></h2>
-          <div class="summary-grid">
-            <div class="summary-item"><strong>Program</strong><span id="summaryProgram">-</span></div>
-            <div class="summary-item"><strong>Run ID</strong><span id="summaryRun">-</span></div>
-            <div class="summary-item"><strong>CSV / Data</strong><span id="summaryData">-</span></div>
-            <div class="summary-item"><strong>Next Gate</strong><span id="summaryGate">Run Health</span></div>
-          </div>
-        </div>
-        <div class="summary-card">
-          <h2>UTM Readiness <span class="pill" id="readinessPill"><span class="dot"></span><span>not checked</span></span></h2>
-          <div class="summary-grid">
-            <div class="summary-item"><strong>Required</strong><span id="readinessRequired">-</span></div>
-            <div class="summary-item"><strong>Captured</strong><span id="readinessCaptured">-</span></div>
-            <div class="summary-item"><strong>Missing</strong><span id="readinessMissing">Run Readiness</span></div>
-            <div class="summary-item"><strong>Gate</strong><span id="readinessGate">Check before Live UTM</span></div>
-          </div>
-        </div>
-        <div class="summary-card">
-          <h2>Request Audit <span class="pill" id="requestAuditPill"><span class="dot warn"></span><span>not checked</span></span></h2>
-          <div class="summary-grid">
-            <div class="summary-item"><strong>Events</strong><span id="requestAuditEvents">-</span></div>
-            <div class="summary-item"><strong>Live Execute</strong><span id="requestAuditExecute">Run Request Log</span></div>
-            <div class="summary-item"><strong>Recent Paths</strong><span id="requestAuditRecent">-</span></div>
-            <div class="summary-item"><strong>Gate</strong><span id="requestAuditGate">Needs /execute for live handoff</span></div>
-          </div>
-          <div class="audit-identity-grid" aria-label="Recent live execute identity">
-            <div class="audit-identity-item"><strong>Run IDs</strong><span id="requestAuditRunIds">-</span></div>
-            <div class="audit-identity-item"><strong>Specimens</strong><span id="requestAuditSpecimenIds">-</span></div>
-            <div class="audit-identity-item"><strong>Programs</strong><span id="requestAuditProgramIds">-</span></div>
-            <div class="audit-identity-item"><strong>Last Execute</strong><span id="requestAuditLastAt">-</span></div>
-          </div>
-          <div class="hint">Recent live execute identity is summarized above. For live UTM handoff, Linux will require this log to show an actual /execute request with matching run/specimen/program identity.</div>
-        </div>
-        <div class="summary-card">
-          <h2>Live Proof Checklist <span class="pill" id="proofChecklistPill"><span class="dot warn"></span><span>not checked</span></span></h2>
-          <div class="proof-gate-strip" id="proofGateStrip" aria-label="Seven required UTM proof gates">
-            <div class="proof-gate warn" id="proofGateHealth"><strong>Bridge</strong><span>Health needed</span></div>
-            <div class="proof-gate warn" id="proofGateLocators"><strong>Locators</strong><span>Readiness needed</span></div>
-            <div class="proof-gate warn" id="proofGateSafety"><strong>Safety</strong><span>Confirm setup</span></div>
-            <div class="proof-gate warn" id="proofGateRequestLog"><strong>Request</strong><span>/execute missing</span></div>
-            <div class="proof-gate warn" id="proofGateScreen"><strong>Screen</strong><span>3 screenshots</span></div>
-            <div class="proof-gate warn" id="proofGateSave"><strong>Save</strong><span>Export proof</span></div>
-            <div class="proof-gate warn" id="proofGateCsv"><strong>CSV</strong><span>Parse probe</span></div>
-          </div>
-          <div class="gate-meter" aria-label="Live proof gate progress"><div class="gate-fill" id="gateMeterFill"></div></div>
-          <div class="gate-caption"><span id="gateMeterText">0 / 7 checks complete</span><span id="gateMeterNext">Run Health</span></div>
-          <div id="proofChecklist" class="proof-list">
-            <div class="proof-item warn"><span class="dot warn"></span><div><strong>Health</strong><small>Run Health to verify the bridge process and PyAutoGUI.</small></div></div>
-            <div class="proof-item warn"><span class="dot warn"></span><div><strong>Readiness</strong><small>Run Readiness to verify UTM locator setup.</small></div></div>
-            <div class="proof-item warn"><span class="dot warn"></span><div><strong>Save/Export Responsibility</strong><small>Run UTM simulation/live protocol and confirm CSV save/export evidence.</small></div></div>
-          </div>
-          <div class="row" style="margin-top:10px;">
-            <button class="secondary" id="refreshEvidence">Refresh Evidence</button>
-            <label class="checkline" style="margin:0;"><input id="autoAudit" type="checkbox"><span>Auto-refresh request audit</span></label>
-          </div>
-          <div class="hint" id="proofChecklistGate">Use this checklist before trusting a live UTM handoff.</div>
-        </div>
-        <div class="summary-card">
-          <h2>Bridge Files <span class="pill"><span class="dot warn"></span><span>Windows paths</span></span></h2>
-          <div class="file-grid">
-            <div class="file-item"><strong>Artifact Root</strong><code id="pathArtifactRoot">-</code></div>
-            <div class="file-item"><strong>Request Log</strong><code id="pathRequestLog">-</code></div>
-            <div class="file-item"><strong>Locator Root</strong><code id="pathLocatorRoot">-</code></div>
-            <div class="file-item"><strong>UTM Export Root</strong><code id="pathUtmExportRoot">-</code></div>
-          </div>
-          <div class="hint">Use Request Log for token/auth/API audit. Token values are never written to the log.</div>
-        </div>
-      </section>
-
-
-      <section id="programManagerPanel">
-        <h2>Program Manager <span class="pill"><span class="dot ok"></span><span id="programCount">0 programs</span></span></h2>
-        <div class="section-intro">Manage deterministic programs, record demonstrations, and deploy versioned Equipment Skills.</div>
-        <div class="manager-tabs" role="tablist" aria-label="Program Manager work areas">
-          <button class="active" type="button" data-manager-tab="programs">PROGRAMS</button>
-          <button class="secondary" type="button" data-manager-tab="examples">EXAMPLES</button>
-          <button class="secondary" type="button" data-manager-tab="record">RECORD</button>
-          <button class="secondary" type="button" data-manager-tab="skills">SKILLS</button>
-        </div>
-        <div class="manager-view" id="managerProgramsView">
-        <div class="manager-toolbar">
-          <label>Search<input id="managerSearch" type="search" placeholder="Name or program ID"></label>
-          <label>Status<select id="managerFilter"><option value="all">All</option><option value="builtin">Built-in</option><option value="custom">Custom</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select></label>
-          <button id="newProgram" type="button">New Program</button>
-          <button class="secondary" id="browseProgram" type="button">Browse JSON</button>
-          <button class="secondary" id="downloadProgramTemplate" type="button">Download Template</button>
-          <button class="secondary" id="refreshPrograms" type="button">Refresh Registry</button>
-          <input class="manager-hidden" id="programFile" type="file" accept=".json,application/json">
-        </div>
-        <div id="managerStats" class="manager-stats">0 built-in · 0 custom · 0 disabled</div>
-        <div class="manager-grid">
-          <div id="managerProgramRegistry" class="manager-registry"><div class="manager-empty">Run Health or Refresh to load registered programs.</div></div>
-          <aside class="manager-editor" id="programEditor" hidden>
-            <div class="manager-editor-head"><strong id="editorTitle">New Macro Program</strong><span id="editorState" class="manager-badge">DRAFT</span></div>
-            <form class="manager-editor-body" id="programForm">
-              <label>Macro Definition JSON<textarea id="programDefinition" spellcheck="false" style="min-height:280px"></textarea></label>
-              <div id="programFileMeta" class="manager-file-meta">New draft. Browse only loads a file; it does not register it.</div>
-              <div class="row3" style="margin-top:10px">
-                <button class="secondary" id="validateProgram" type="button">Validate</button>
-                <button id="registerProgram" type="submit">Add to Registry</button>
-                <button class="secondary" id="clearProgramForm" type="button">Cancel</button>
-              </div>
-              <div class="hint">Only atr.pyautogui_program.v1 JSON and bounded bridge actions are accepted. Browse and Download Template never register a program.</div>
-            </form>
-          </aside>
-        </div>
-        <details class="manager-result">
-          <summary>Program Manager Result</summary>
-          <pre id="managerLatestResult">No manager request yet.</pre>
-        </details>
-        </div>
-        <div class="manager-view" id="managerExamplesView" hidden>
-          <div class="manager-record-actions">
-            <button id="openCapabilityLab" type="button">Open Capability Lab</button>
-            <button class="secondary" id="refreshExamples" type="button">Refresh Examples</button>
-          </div>
-          <div class="manager-file-meta">Examples load into the JSON editor without registering or deploying anything. Safe Test executes only examples marked safe.</div>
-          <div id="exampleRegistry" class="manager-registry"><div class="manager-empty">Refresh to load capability examples.</div></div>
-        </div>
-        <div class="manager-view" id="managerRecordView" hidden>
-          <div class="manager-record-grid">
-            <label>Name<input id="recordingName" value="Program 1 demonstration"></label>
-            <label>Target App<input id="recordingTargetApp" value="Program 1"></label>
-            <label>Target Window<input id="recordingTargetWindow" value="Program 1"></label>
-          </div>
-          <div class="recording-options">
-            <label class="recording-option"><input id="recordImageTracking" type="checkbox" checked>Image tracking</label>
-            <label class="recording-option"><input id="recordCoordinateFallback" type="checkbox">Allow coordinate fallback</label>
-          </div>
-          <div class="manager-record-actions">
-            <button id="recordToggle" type="button" data-state="idle">Record</button>
-            <button class="secondary" id="recordCheckpoint" type="button">Checkpoint</button>
-            <button class="secondary" id="recordSave" type="button">Save Recording</button>
-            <button class="secondary" id="refreshRecordings" type="button">Refresh</button>
-          </div>
-          <div class="manager-record-grid">
-            <label>Skill ID<input id="recordSkillId" value="program1_skill"></label>
-            <label>Version<input id="recordSkillVersion" value="1.0.0"></label>
-            <label>Target Profile<input id="recordSkillProfile" value="local_program1"></label>
-          </div>
-          <div class="manager-record-actions">
-            <button id="recordSkill" type="button">Create Draft Skill</button>
-          </div>
-          <div id="recordingStatus" class="manager-file-meta">No recording is active.</div>
-          <div id="recordingCoverage" class="manager-file-meta">Coverage: no recording selected.</div>
-          <div id="recordingLocatorPreview" class="recording-locator-preview"><div class="manager-empty">No image locators captured.</div></div>
-          <div id="recordingRegistry" class="manager-registry"></div>
-        </div>
-        <div class="manager-view" id="managerSkillsView" hidden>
-          <div class="manager-record-actions">
-            <button id="refreshSkills" type="button">Refresh Skills</button>
-          </div>
-          <div id="skillRegistry" class="manager-registry"><div class="manager-empty">Refresh to load Linux-authoritative Skill versions.</div></div>
-        </div>
-      </section>
-
-
-      <div class="split">
-        <section id="resultPanel">
-          <div class="result-head">
-            <h2>Result</h2>
-            <button class="secondary" id="copyResult">Copy JSON</button>
-          </div>
-          <pre id="output">{}</pre>
-        </section>
-        <section id="evidencePanel">
-          <h2>Step Trace</h2>
-          <table>
-            <thead><tr><th>Step</th><th>Status</th><th>Detail</th></tr></thead>
-            <tbody id="trace"><tr><td colspan="3">No steps yet</td></tr></tbody>
-          </table>
-          <h2 style="margin-top:14px;">Artifacts</h2>
-          <table>
-            <thead><tr><th>Kind</th><th>Artifact</th><th>Size</th><th>Action</th></tr></thead>
-            <tbody id="artifactTable"><tr><td colspan="4">No artifacts yet</td></tr></tbody>
-          </table>
-          <h2 style="margin-top:14px;">Artifact Preview</h2>
-          <div id="artifactPreview" class="preview-box">Open an image artifact with View, or capture a screen to preview it here.</div>
-        </section>
+        <div id="pairingPanel" class="row"><span class="pill" id="pairingState">pairing status unavailable</span><strong id="pairingCode" aria-label="one-time pairing code">----</strong><button id="newPairingCode" class="secondary" type="button">New Code</button></div>
       </div>
+    </section>
 
-      <section>
-        <details>
-          <summary>Advanced JSON Execute</summary>
-          <label for="sequence">Sequence JSON</label>
-          <textarea id="sequence">{
-  "sequence_id": "manual-check-001",
-  "sequence": [
-    {"action": "health"},
-    {"action": "screenshot"}
-  ]
-}</textarea>
-          <div class="row3">
-            <button id="execute">Run JSON</button>
-            <button class="secondary" id="formatJson">Format JSON</button>
-            <button class="secondary" id="clearResult">Clear Result</button>
-          </div>
-        </details>
-      </section>
+    <section class="panel" id="programManagerPanel">
+      <div class="panel-head"><div><div class="eyebrow">Local Cache</div><h2>Program Manager</h2></div><div class="row"><button id="newProgram" type="button">Add</button><button id="browseProgram" class="secondary" type="button">Browse JSON</button><button id="downloadProgramTemplate" class="secondary" type="button">Template</button></div></div>
+      <div class="panel-body">
+        <div class="muted">Built-in program1 is available for local verification and cannot be modified or deleted.</div>
+        <input id="programFile" type="file" accept="application/json,.json" hidden>
+        <div class="row"><input id="managerSearch" placeholder="Filter programs" aria-label="Filter programs"><button id="refreshPrograms" class="secondary" type="button">Refresh</button></div>
+        <div id="managerStats" class="muted">No program catalog loaded.</div>
+        <div id="managerProgramRegistry" class="registry"></div>
+        <div id="programEditor" class="editor" hidden>
+          <label>Program JSON<textarea id="programDefinition" spellcheck="false"></textarea></label>
+          <div class="row"><button id="validateProgram" class="secondary" type="button">Validate</button><button id="registerProgram" type="button">Save</button><button id="closeProgramEditor" class="secondary" type="button">Close</button></div>
+        </div>
+      </div>
+    </section>
 
-      <section id="operatorLogPanel">
-        <h2>Operator Log</h2>
-        <div id="log" aria-live="polite"><div class="logline">Page loaded. Check health before live control.</div></div>
-      </section>
-    </div>
+    <section class="panel" id="recordingPanel">
+      <div class="panel-head"><div><div class="eyebrow">Bounded Evidence</div><h2>Recording</h2></div><span id="recordingStatus" class="pill">idle</span></div>
+      <div class="panel-body">
+        <div class="form-grid">
+          <label>Name<input id="recordingName" value="Equipment demonstration"></label>
+          <label>Target Program<input id="recordingTargetApp" placeholder="Program name"></label>
+          <label>Target Window<input id="recordingTargetWindow" placeholder="Window title"></label>
+        </div>
+        <div class="row"><label><input id="recordingImageTracking" type="checkbox" checked> Image tracking</label><label><input id="recordingCoordinateFallback" type="checkbox"> Coordinate fallback</label></div>
+        <div id="recordingCountdown" class="countdown" hidden></div>
+        <div class="row"><button id="recordToggle" type="button">START RECORDING</button><button id="recordCheckpoint" class="secondary" type="button" disabled>Checkpoint</button><button id="refreshRecordings" class="secondary" type="button">Refresh</button></div>
+        <div id="recordingList" class="recording-list"></div>
+        <div id="recordingPreview" class="recording-preview" hidden>
+          <img id="recordingPreviewImage" alt="Recording keyframe preview">
+          <div class="row"><button id="recordingPreviewPrevious" class="secondary" type="button">Previous</button><span id="recordingPreviewMeta" class="recording-preview-meta">No preview selected.</span><button id="recordingPreviewNext" class="secondary" type="button">Next</button><button id="recordingPreviewClose" class="secondary" type="button">Close</button></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel wide" id="latestLocalResultPanel">
+      <div class="panel-head"><div><div class="eyebrow">Worker Feedback</div><h2>Latest Local Result</h2></div><span id="latestResultStatus" class="pill">idle</span></div>
+      <div class="panel-body"><p id="latestResultSummary" class="muted">No local action result yet.</p><details><summary>Raw JSON</summary><pre id="managerLatestResult">{}</pre></details></div>
+    </section>
+
+    <details id="diagnosticsPanel">
+      <summary>Diagnostics</summary>
+      <div class="panel-body"><div class="row"><button id="diagnosticHealth" class="secondary" type="button">Health JSON</button><button id="diagnosticRequestLog" class="secondary" type="button">Request Log</button></div><pre id="diagnosticOutput">Diagnostics are loaded only on request.</pre></div>
+    </details>
   </main>
-  </details>
   <script>
-    const tokenInput = document.getElementById("token");
-    const output = document.getElementById("output");
-    const traceBody = document.getElementById("trace");
-    const artifactTable = document.getElementById("artifactTable");
-    const tileStatus = document.getElementById("tileStatus");
-    const tilePyAutoGUI = document.getElementById("tilePyAutoGUI");
-    const tileFailure = document.getElementById("tileFailure");
-    const tileArtifact = document.getElementById("tileArtifact");
-    const authPill = document.getElementById("authPill");
-    const headerProofPill = document.getElementById("headerProofPill");
-    const sequenceInput = document.getElementById("sequence");
-    const logBox = document.getElementById("log");
-    const workflow = {
-      auth: document.getElementById("stepAuth"),
-      gui: document.getElementById("stepGui"),
-      program: document.getElementById("stepProgram"),
-      evidence: document.getElementById("stepEvidence"),
-      artifact: document.getElementById("stepArtifact"),
-    };
-    const runSummaryPill = document.getElementById("runSummaryPill");
-    const summaryProgram = document.getElementById("summaryProgram");
-    const summaryRun = document.getElementById("summaryRun");
-    const summaryData = document.getElementById("summaryData");
-    const summaryGate = document.getElementById("summaryGate");
-    const pathArtifactRoot = document.getElementById("pathArtifactRoot");
-    const pathRequestLog = document.getElementById("pathRequestLog");
-    const pathLocatorRoot = document.getElementById("pathLocatorRoot");
-    const pathUtmExportRoot = document.getElementById("pathUtmExportRoot");
-    const preflightBanner = document.getElementById("preflightBanner");
-    const preflightTitle = document.getElementById("preflightTitle");
-    const preflightText = document.getElementById("preflightText");
-    const artifactPreview = document.getElementById("artifactPreview");
-    const baseUrlLabel = document.getElementById("baseUrlLabel");
-    const controllerStatus = document.getElementById("controllerStatus");
-    const controllerUrl = document.getElementById("controllerUrl");
-    const controllerCandidates = document.getElementById("controllerCandidates");
-    const commandBanner = document.getElementById("commandBanner");
-    const commandTitle = document.getElementById("commandTitle");
-    const commandDetail = document.getElementById("commandDetail");
-    const commandPill = document.getElementById("commandPill");
-    const nextActionButton = document.getElementById("nextActionButton");
-    const nextActionLabel = document.getElementById("nextActionLabel");
-    const opsCards = {
-      safety: document.getElementById("opsSafety"),
-      command: document.getElementById("opsCommand"),
-      evidence: document.getElementById("opsEvidence"),
-      data: document.getElementById("opsData"),
-      next: document.getElementById("opsNext"),
-    };
-    const situationCards = {
-      bridge: document.getElementById("situationBridge"),
-      locators: document.getElementById("situationLocators"),
-      audit: document.getElementById("situationAudit"),
-      export: document.getElementById("situationExport"),
-      live: document.getElementById("situationLive"),
-    };
-    const missingLocatorShortcuts = document.getElementById("missingLocatorShortcuts");
-    const requestAuditRunIds = document.getElementById("requestAuditRunIds");
-    const requestAuditSpecimenIds = document.getElementById("requestAuditSpecimenIds");
-    const requestAuditProgramIds = document.getElementById("requestAuditProgramIds");
-    const requestAuditLastAt = document.getElementById("requestAuditLastAt");
-    const intentCards = {
-      mode: document.getElementById("intentMode"),
-      route: document.getElementById("intentRoute"),
-      preflight: document.getElementById("intentPreflight"),
-      payload: document.getElementById("intentPayload"),
-    };
-    const payloadPreview = document.getElementById("payloadPreview");
-    const payloadPreviewPill = document.getElementById("payloadPreviewPill");
-    const gateMeterFill = document.getElementById("gateMeterFill");
-    const gateMeterText = document.getElementById("gateMeterText");
-    const gateMeterNext = document.getElementById("gateMeterNext");
-    const liveInterlockCard = document.getElementById("liveInterlockCard");
-    const liveInterlockText = document.getElementById("liveInterlockText");
-    const runbookPill = document.getElementById("runbookPill");
-    const runbookSteps = {
-      connect: document.getElementById("runbookConnect"),
-      calibrate: document.getElementById("runbookCalibrate"),
-      execute: document.getElementById("runbookExecute"),
-      verify: document.getElementById("runbookVerify"),
-    };
-    const timelineTrack = document.getElementById("timelineTrack");
-    const timelinePill = document.getElementById("timelinePill");
-    const focusModeButton = document.getElementById("focusMode");
-    let selectedProgramId = "utm_compression_start_v1";
-    let lastResult = {};
-    let previewMode = "live";
-    let previewPayloadEnvelope = null;
-    const bridgeState = {health: null, readiness: null, requestAudit: null};
-    let requestAuditTimer = null;
-    let timelineEntries = [];
+    const $ = (id) => document.getElementById(id);
+    const TEMPLATE = {schema:"atr.pyautogui_program.v1",program_id:"custom_program",name:"Custom Program",description:"Bounded local draft",enabled:true,program_type:"macro",safe_test:true,sequence:[{action:"log",message:"program started"}]};
+    let programs = [];
+    let recordings = [];
+    let activeRecordingId = "";
+    let countdownTimer = 0;
+    let recordingStatusTimer = 0;
+    let recordingPreviewFrames = [];
+    let recordingPreviewIndex = 0;
+    let recordingPreviewRecordingId = "";
+    let recordingPreviewCursor = 0;
+    let recordingPreviewNextCursor = null;
+    let recordingPreviewTotal = 0;
+    const recordingPreviewLimit = 16;
+    const RECORDING_COUNTDOWN_SECONDS = 5;
 
-    if (baseUrlLabel) baseUrlLabel.textContent = window.location.origin;
-    tokenInput.value = localStorage.getItem("bridgeToken") || "";
-    tokenInput.addEventListener("input", () => {
-      localStorage.setItem("bridgeToken", tokenInput.value);
-      if (!tokenInput.value.trim()) renderTokenPrompt();
-      else {
-        setAuth("token entered", "warn");
-        setCommandBanner("Token entered", "Click Health to verify the authenticated bridge session.", "warn");
-        setOpsCard("next", "Click Health", "warn");
-      }
-    });
-
-
-    function applyOperatorLayout() {
-      const workspace = typeof document.querySelector === "function" ? document.querySelector(".workspace") : null;
-      const overview = document.getElementById("overview");
-      const consolePanel = document.getElementById("operatorConsolePanel");
-      if (workspace && overview && consolePanel && overview.nextElementSibling !== consolePanel && typeof workspace.insertBefore === "function") {
-        workspace.insertBefore(overview, consolePanel);
-      }
-      const proofElement = document.getElementById("proofChecklist");
-      const filesElement = document.getElementById("pathArtifactRoot");
-      const proofCard = proofElement && typeof proofElement.closest === "function" ? proofElement.closest(".summary-card") : null;
-      const filesCard = filesElement && typeof filesElement.closest === "function" ? filesElement.closest(".summary-card") : null;
-      if (proofCard && proofCard.classList) proofCard.classList.add("wide-card");
-      if (filesCard && filesCard.classList) filesCard.classList.add("wide-card");
-    }
-    function installPanelToggles() {
-      const ids = ["connectionPanel", "safeDiagnosticsPanel", "utmProtocolPanel", "locatorPanel", "overview", "timelinePanel", "operatorLogPanel"];
-      ids.forEach((id) => {
-        const section = document.getElementById(id);
-        const heading = section ? section.querySelector(":scope > h2") : null;
-        if (!section || !heading || heading.querySelector(".panel-toggle")) return;
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "panel-toggle secondary";
-        button.textContent = "Collapse";
-        button.setAttribute("aria-label", `Toggle ${id}`);
-        const storageKey = `windowsBridge.panel.${id}.collapsed`;
-        const apply = (collapsed) => {
-          section.classList.toggle("is-collapsed", Boolean(collapsed));
-          button.textContent = collapsed ? "Expand" : "Collapse";
-        };
-        apply(localStorage.getItem(storageKey) === "true");
-        button.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          const collapsed = !section.classList.contains("is-collapsed");
-          localStorage.setItem(storageKey, collapsed ? "true" : "false");
-          apply(collapsed);
-        });
-        heading.appendChild(button);
-      });
-    }
-    function toggleBodyClass(name, enabled) {
-      const body = document.body;
-      if (!body) return;
-      if (body.classList && typeof body.classList.toggle === "function") {
-        body.classList.toggle(name, Boolean(enabled));
-        return;
-      }
-      const classes = new Set(String(body.className || "").split(/\s+/).filter(Boolean));
-      if (enabled) classes.add(name);
-      else classes.delete(name);
-      body.className = Array.from(classes).join(" ");
-    }
-    function hasBodyClass(name) {
-      const body = document.body;
-      if (!body) return false;
-      if (body.classList && typeof body.classList.contains === "function") return body.classList.contains(name);
-      return String(body.className || "").split(/\s+/).includes(name);
-    }
-    function setFocusMode(enabled) {
-      toggleBodyClass("focus-mode", Boolean(enabled));
-      localStorage.setItem("windowsBridge.focusMode", enabled ? "true" : "false");
-      if (focusModeButton) focusModeButton.textContent = enabled ? "Full View" : "Focus Mode";
-    }
-    setFocusMode(localStorage.getItem("windowsBridge.focusMode") === "true");
-    applyOperatorLayout();
-    installPanelToggles();
-
-    function bindPersistedInput(id) {
-      const element = document.getElementById(id);
-      if (!element) return;
-      const key = `windowsBridge.${id}`;
-      const saved = localStorage.getItem(key);
-      if (saved !== null) element.value = saved;
-      element.addEventListener("input", () => localStorage.setItem(key, element.value));
-    }
-    function bindPersistedCheck(id) {
-      const element = document.getElementById(id);
-      if (!element) return;
-      const key = `windowsBridge.${id}`;
-      const saved = localStorage.getItem(key);
-      if (saved !== null) element.checked = saved === "true";
-      element.addEventListener("change", () => localStorage.setItem(key, element.checked ? "true" : "false"));
-    }
-    ["runId", "specimenId", "targetWindow", "exportGlob", "artifactTimeout", "stableForSec", "expectedExportPath"].forEach(bindPersistedInput);
-    ["requireFocus", "requireAssertions", "manualSave", "autoAudit"].forEach(bindPersistedCheck);
-
-    function escapeHtml(value) {
-      return String(value ?? "").replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
-    }
-    function setBusy(isBusy) {
-      toggleBodyClass("is-busy", Boolean(isBusy));
-      document.querySelectorAll("button").forEach((button) => {
-        const isAbort = button.id === "utmAbort" || (button.dataset && button.dataset.proxyClick === "utmAbort");
-        button.disabled = isAbort ? false : isBusy;
-      });
-    }
-    function setTile(tile, value, klass) {
-      tile.className = "tile" + (klass ? " " + klass : "");
-      tile.querySelector("span").textContent = value;
-    }
-    function setAuth(label, klass) {
-      authPill.querySelector("span:last-child").textContent = label;
-      authPill.querySelector(".dot").className = "dot" + (klass ? " " + klass : "");
-    }
-    function setHeaderProof(label, klass) {
-      if (!headerProofPill) return;
-      headerProofPill.querySelector("span:last-child").textContent = label;
-      headerProofPill.querySelector(".dot").className = "dot" + (klass ? " " + klass : "");
-    }
-    function setWorkflowStep(key, label, klass) {
-      const step = workflow[key];
-      if (!step) return;
-      step.className = "workflow-step" + (klass ? " " + klass : "");
-      step.querySelector("span").textContent = label;
-    }
-    function setSummaryPill(label, klass) {
-      if (!runSummaryPill) return;
-      runSummaryPill.querySelector("span:last-child").textContent = label;
-      runSummaryPill.querySelector(".dot").className = "dot" + (klass ? " " + klass : "");
-    }
-    function setOpsCard(key, value, klass) {
-      const card = opsCards[key];
-      if (!card) return;
-      card.className = "ops-card" + (klass ? " " + klass : "");
-      const span = card.querySelector("span");
-      if (span) span.textContent = value || "-";
-    }
-    function setSituationCard(key, value, detail, klass) {
-      const card = situationCards[key];
-      if (!card) return;
-      card.className = "situation-card" + (klass ? " " + klass : "");
-      const span = card.querySelector("span");
-      const small = card.querySelector("small");
-      if (span) span.textContent = value || "-";
-      if (small) small.textContent = detail || "";
-    }
-    function formatList(values, fallback = "-") {
-      if (!Array.isArray(values) || !values.length) return fallback;
-      return values.slice(-4).join(", ");
-    }
-    function renderLocatorShortcuts(required, configured, missing) {
-      if (!missingLocatorShortcuts) return;
-      const requiredNames = Array.isArray(required) && required.length ? required : ["ready_state", "start_button", "running_state", "complete_state"];
-      const configuredSet = new Set(Array.isArray(configured) ? configured : []);
-      const missingSet = new Set(Array.isArray(missing) ? missing : []);
-      missingLocatorShortcuts.innerHTML = "";
-      for (const name of requiredNames) {
-        const button = document.createElement("button");
-        const captured = configuredSet.has(name) && !missingSet.has(name);
-        button.type = "button";
-        button.className = "locator-chip " + (captured ? "captured" : "missing");
-        button.dataset.locatorName = name;
-        button.textContent = captured ? `${name} captured` : `${name} missing`;
-        button.addEventListener("click", () => {
-          const select = document.getElementById("locatorName");
-          if (select) {
-            const hasOption = Array.from(select.options || []).some((option) => option.value === name);
-            if (!hasOption && typeof select.appendChild === "function") {
-              const option = document.createElement("option");
-              option.value = name;
-              option.textContent = name;
-              select.appendChild(option);
-            }
-            select.value = name;
-            if (typeof select.focus === "function") select.focus();
-          }
-          appendLog(`locator selected for capture: ${name}`);
-        });
-        missingLocatorShortcuts.appendChild(button);
-      }
-    }
-    function setIntentCard(key, value, klass) {
-      const card = intentCards[key];
-      if (!card) return;
-      card.className = "intent-card" + (klass ? " " + klass : "");
-      const span = card.querySelector("span");
-      if (span) span.textContent = value || "-";
-    }
-    function setRunbookStep(key, klass, detail) {
-      const step = runbookSteps[key];
-      if (!step) return;
-      const state = klass || "warn";
-      step.className = "runbook-step " + state;
-      const small = step.querySelector("small");
-      if (small) small.textContent = detail || "Waiting for evidence.";
-    }
-    function setRunbookProgress(states) {
-      if (!runbookPill || !states) return;
-      const ready = Object.values(states).filter(Boolean).length;
-      const total = Object.keys(states).length || 4;
-      runbookPill.textContent = `${ready}/${total} ready`;
-    }
-    function setPayloadPreviewPill(label, klass) {
-      if (!payloadPreviewPill) return;
-      payloadPreviewPill.querySelector("span:last-child").textContent = label || "preview";
-      payloadPreviewPill.querySelector(".dot").className = "dot" + (klass ? " " + klass : "");
-    }
-    function setTimelinePill(label, klass) {
-      if (!timelinePill) return;
-      timelinePill.querySelector("span:last-child").textContent = label || "idle";
-      timelinePill.querySelector(".dot").className = "dot" + (klass ? " " + klass : "");
-    }
-    function timelineStatusClass(status) {
-      const text = String(status || "").toLowerCase();
-      if (["ok", "ready", "active", "verified", "complete", "completed"].some((item) => text.includes(item))) return "ok";
-      if (["blocked", "failed", "error", "missing", "invalid"].some((item) => text.includes(item))) return "bad";
-      return "warn";
-    }
-    function renderTimelineEntries() {
-      if (!timelineTrack) return;
-      timelineTrack.innerHTML = "";
-      if (!timelineEntries.length) {
-        timelineTrack.innerHTML = '<div class="timeline-empty">No command steps yet. Run Health, Safe Preflight, Simulation, or Live UTM.</div>';
-        setTimelinePill("idle", "");
-        return;
-      }
-      for (const entry of timelineEntries.slice(-60)) {
-        const item = document.createElement("div");
-        item.className = "timeline-item " + timelineStatusClass(entry.status);
-        item.innerHTML = `<div class="timeline-time">${escapeHtml(entry.time)}</div><div class="timeline-marker"></div><div class="timeline-content"><strong>${escapeHtml(entry.step)}</strong><small>${escapeHtml(entry.detail)}</small></div>`;
-        timelineTrack.appendChild(item);
-      }
-      const latest = timelineEntries[timelineEntries.length - 1];
-      setTimelinePill(`${timelineEntries.length} step(s)`, timelineStatusClass(latest.status));
-      timelineTrack.scrollTop = timelineTrack.scrollHeight;
-    }
-    function appendTimelineFromResult(data) {
-      if (!data || typeof data !== "object") return;
-      let steps = Array.isArray(data.step_trace) ? data.step_trace : [];
-      if (!steps.length && (data.status || data.tool || data.failure_code)) {
-        steps = [{step: data.tool || "BRIDGE_RESULT", status: data.ok === true ? "ok" : (data.status || "failed"), detail: data.failure_code || data.status || ""}];
-      }
-      if (!steps.length) return;
-      const runLabel = data.run_id || data.sequence_id || "";
-      const at = new Date().toLocaleTimeString();
-      for (const step of steps) {
-        const name = step && typeof step === "object" ? (step.step || step.action || "STEP") : "STEP";
-        const status = step && typeof step === "object" ? (step.status || data.status || "") : data.status || "";
-        const detail = step && typeof step === "object"
-          ? (step.detail || step.message || step.artifact || step.failure_code || "")
-          : String(step || "");
-        timelineEntries.push({time: at, run: runLabel, step: runLabel ? `${name} · ${runLabel}` : name, status, detail});
-      }
-      while (timelineEntries.length > 120) timelineEntries.shift();
-      renderTimelineEntries();
-    }
-    function positiveNumberInput(id, fallback) {
-      const raw = document.getElementById(id).value.trim();
-      const value = Number(raw);
-      return Number.isFinite(value) && value > 0 ? value : fallback;
-    }
-    function validateUtmInputs() {
-      const errors = [];
-      for (const [id, label] of [["artifactTimeout", "Artifact Timeout Sec"], ["stableForSec", "Stable File Sec"]]) {
-        const raw = document.getElementById(id).value.trim();
-        const value = Number(raw);
-        if (!raw || !Number.isFinite(value) || value <= 0) errors.push(`${label} must be a positive number.`);
-      }
-      if (!document.getElementById("runId").value.trim()) errors.push("Run ID is required.");
-      if (!document.getElementById("specimenId").value.trim()) errors.push("Specimen ID is required.");
-      return errors;
-    }
-    function renderPayloadPreview(mode = previewMode) {
-      previewMode = mode || "live";
-      const errors = previewMode === "abort" ? [] : validateUtmInputs();
-      const payload = previewMode === "abort" ? currentAbortPayload() : currentUtmPayload(previewMode === "sim");
-      previewPayloadEnvelope = {
-        ok_to_send: errors.length === 0,
-        mode: previewMode,
-        route: "POST /execute",
-        preflight: previewMode === "live" ? "required before send" : previewMode === "sim" ? "not actuating" : "recovery path",
-        validation_errors: errors,
-        payload,
-      };
-      if (payloadPreview) payloadPreview.textContent = JSON.stringify(previewPayloadEnvelope, null, 2);
-      const label = errors.length ? `${errors.length} input issue(s)` : `${previewMode} payload ready`;
-      setPayloadPreviewPill(label, errors.length ? "bad" : "ok");
-      setIntentCard("mode", previewMode === "sim" ? "Simulation" : previewMode === "abort" ? "Stop / Abort" : "Live UTM", errors.length ? "bad" : previewMode === "live" ? "warn" : "ok");
-      setIntentCard("route", "POST /execute", "ok");
-      setIntentCard("preflight", previewPayloadEnvelope.preflight, previewMode === "live" ? "warn" : "ok");
-      setIntentCard("payload", errors.length ? errors[0] : `${payload.program_id || "program"} ready`, errors.length ? "bad" : "ok");
-      return errors.length === 0;
-    }
-    function renderProgramRegistry(data) {
-      if (!data || !Array.isArray(data.programs)) return;
-      const programs = data.programs.slice().sort((a, b) => String(a.program_id || "").localeCompare(String(b.program_id || "")));
-      managerAcceptPrograms(programs);
-    }
-    function buildProgramPayload(programId, simulate) {
-      if (programId === "program1") return {sequence_id: "program1-check-001", program_id: "program1", command: "program1"};
-      if (programId === "utm_stop_or_abort_v1") return currentAbortPayload();
-      const payload = currentUtmPayload(Boolean(simulate));
-      payload.program_id = programId || payload.program_id;
-      payload.sequence_id = `${payload.sequence_id}-${payload.program_id}`;
-      return payload;
-    }
-    function renderInputBlocker(mode) {
-      const errors = validateUtmInputs();
-      render({
-        ok: false,
-        status: "blocked",
-        failure_code: "WINDOWS_GUI_INPUT_INVALID",
-        message: `Fix payload inputs before ${mode === "sim" ? "simulation" : "live execution"}.`,
-        validation_errors: errors,
-        step_trace: errors.map((detail) => ({step: "VALIDATE_INPUT", status: "blocked", detail})),
-      });
-    }
-    function setCommandBanner(label, detail, klass) {
-      if (!commandBanner || !commandTitle || !commandDetail || !commandPill) return;
-      commandBanner.className = "command-banner" + (klass ? " " + klass : "");
-      commandTitle.textContent = label || "Ready for bridge operation";
-      commandDetail.textContent = detail || "Result JSON and Operator Log update after each command.";
-      commandPill.querySelector("span:last-child").textContent = klass || "idle";
-      const dotClass = klass === "ok" ? " ok" : klass === "bad" ? " bad" : (klass === "busy" || klass === "warn") ? " warn" : "";
-      commandPill.querySelector(".dot").className = "dot" + dotClass;
-      setOpsCard("command", label || "Idle", klass === "busy" ? "warn" : klass);
-    }
-    function setNextAction(label, targetId, klass) {
-      if (!nextActionButton || !nextActionLabel) return;
-      nextActionLabel.textContent = label || "Run Health";
-      nextActionButton.dataset.nextAction = targetId || "health";
-      nextActionButton.className = "next-action-button " + (klass || "warn");
-    }
-    function flashAttention(element) {
-      if (!element) return;
-      element.classList.remove("attention-flash");
-      void element.offsetWidth;
-      element.classList.add("attention-flash");
-    }
-    function activateRecommendedAction() {
-      if (!nextActionButton) return;
-      const targetId = nextActionButton.dataset.nextAction || "health";
-      if (targetId === "token") {
-        tokenInput.focus();
-        flashAttention(tokenInput);
-        return;
-      }
-      const target = document.getElementById(targetId);
-      if (!target) return;
-      target.scrollIntoView({behavior: "smooth", block: "center"});
-      flashAttention(target);
-      if (target.type === "checkbox") {
-        target.focus();
-        return;
-      }
-      if (typeof target.click === "function") target.click();
-    }
-    function recommendationForMissing(label) {
-      switch (label) {
-        case "Health + PyAutoGUI":
-          return {label: "Run Health", target: "health", klass: "warn"};
-        case "UTM Locators":
-          return {label: "Run Readiness", target: "readiness", klass: "warn"};
-        case "Live Safety Confirmed":
-          return {label: "Confirm Safety", target: "confirmLive", klass: "bad"};
-        case "Request Log /execute":
-          return {label: "Run Live UTM", target: "utmLive", klass: "bad"};
-        case "Screen Evidence":
-          return {label: "Capture Screen", target: "screenshot", klass: "warn"};
-        case "Save/Export Responsibility":
-        case "CSV + Parse Probe":
-          return {label: "Refresh Evidence", target: "refreshEvidence", klass: "warn"};
-        default:
-          return {label: "Refresh Evidence", target: "refreshEvidence", klass: "warn"};
-      }
-    }
-    function renderTokenPrompt() {
-      setAuth("token required", "warn");
-      setCommandBanner("Enter bridge token", "Authenticated endpoints are not called until a token is entered. Paste the token from PowerShell, then click Health.", "warn");
-      setWorkflowStep("auth", "Token required", "warn");
-      setWorkflowStep("gui", "Not checked", "warn");
-      setWorkflowStep("program", "Load after Health", "warn");
-      setOpsCard("safety", "Health not checked", "warn");
-      setOpsCard("next", "Paste token, then Health", "warn");
-      renderProofChecklist(lastResult || {});
-      setNextAction("Enter Token", "token", "warn");
-    }
-
-    function appendLog(message) {
-      const line = document.createElement("div");
-      line.className = "logline";
-      line.textContent = new Date().toLocaleTimeString() + "  " + message;
-      logBox.appendChild(line);
-      while (logBox.children.length > 80) logBox.removeChild(logBox.firstChild);
-      logBox.scrollTop = logBox.scrollHeight;
-    }
-    function artifactRows(data) {
-      const rows = [];
-      if (Array.isArray(data.output_artifacts)) rows.push(...data.output_artifacts);
-      if (Array.isArray(data.artifacts)) rows.push(...data.artifacts);
-      if (data.artifact) rows.push(data.artifact);
-      const seen = new Set();
-      return rows.filter((item) => {
-        if (!item || typeof item !== "object") return false;
-        const id = item.artifact_id || item.filename || JSON.stringify(item);
-        if (seen.has(id)) return false;
-        seen.add(id);
-        return true;
-      });
-    }
-    function renderArtifacts(data) {
-      const rows = artifactRows(data);
-      setTile(tileArtifact, String(rows.length), rows.length ? "ok" : "");
-      artifactTable.innerHTML = "";
-      if (!rows.length) {
-        artifactTable.innerHTML = '<tr><td colspan="4">No artifacts</td></tr>';
-        if (artifactPreview) artifactPreview.textContent = "Open an image artifact with View, or capture a screen to preview it here.";
-        return;
-      }
-      for (const item of rows) {
-        const id = item.artifact_id || "";
-        const tr = document.createElement("tr");
-        const pull = id ? `<button class="secondary" data-artifact="${escapeHtml(id)}">View</button>` : "";
-        tr.innerHTML = `<td>${escapeHtml(item.kind || "")}</td><td>${escapeHtml(id || item.filename || "")}</td><td>${escapeHtml(item.size_bytes || "")}</td><td>${pull}</td>`;
-        artifactTable.appendChild(tr);
-      }
-      artifactTable.querySelectorAll("button[data-artifact]").forEach((button) => {
-        button.addEventListener("click", () => call("/artifacts/" + encodeURIComponent(button.dataset.artifact || "")));
-      });
-      const imageArtifact = rows.find((item) => String(item.content_type || "").startsWith("image/") || ["screen_png", "screenshot", "locator_png"].includes(String(item.kind || "")));
-      if (imageArtifact && artifactPreview) {
-        artifactPreview.innerHTML = `<div>Image artifact captured.<div class="preview-meta">${escapeHtml(imageArtifact.artifact_id || imageArtifact.filename || "Use View to load preview")}</div></div>`;
-      }
-    }
-    function renderArtifactPreview(data) {
-      if (!artifactPreview || !data || typeof data !== "object") return;
-      const contentType = String(data.content_type || "");
-      if (data.content_base64 && contentType.startsWith("image/")) {
-        artifactPreview.innerHTML = `<div><img alt="artifact preview" src="data:${escapeHtml(contentType)};base64,${data.content_base64}"><div class="preview-meta">${escapeHtml(data.filename || data.artifact_id || "image artifact")}</div></div>`;
-      } else if (data.content_base64) {
-        artifactPreview.innerHTML = `<div>Artifact loaded.<div class="preview-meta">${escapeHtml(data.filename || data.artifact_id || "artifact")} · ${escapeHtml(contentType || "application/octet-stream")}</div></div>`;
-      }
-    }
-    function renderTrace(data) {
-      const steps = data.step_trace || [];
-      traceBody.innerHTML = "";
-      if (!steps.length) {
-        traceBody.innerHTML = '<tr><td colspan="3">No steps</td></tr>';
-        return;
-      }
-      for (const step of steps) {
-        const row = document.createElement("tr");
-        row.className = "trace-row " + timelineStatusClass(step.status || "");
-        row.innerHTML = `<td>${escapeHtml(step.step || "")}</td><td>${escapeHtml(step.status || "")}</td><td>${escapeHtml(step.detail || step.artifact || step.message || "")}</td>`;
-        traceBody.appendChild(row);
-      }
-    }
-    function dataReference(data) {
-      const acquisition = data.data_acquisition && typeof data.data_acquisition === "object" ? data.data_acquisition : {};
-      if (data.result_file) return data.result_file;
-      if (data.utm_csv_path) return data.utm_csv_path;
-      if (acquisition.linux_path || acquisition.local_path || acquisition.windows_path) {
-        return acquisition.linux_path || acquisition.local_path || acquisition.windows_path;
-      }
-      const csvArtifact = artifactRows(data).find((item) => item.kind === "utm_csv");
-      return csvArtifact ? (csvArtifact.local_path || csvArtifact.linux_path || csvArtifact.windows_path || csvArtifact.artifact_id || "utm_csv artifact") : "";
-    }
-    function screenEvidenceComplete(data) {
-      const checks = Array.isArray(data.screen_checks) ? data.screen_checks : [];
-      const required = ["before_start", "after_start", "after_complete"];
-      return required.every((checkpoint) => checks.some((item) => item && item.checkpoint === checkpoint && item.ok && item.screenshot_artifact));
-    }
-    function renderWorkflow(data) {
-      const ok = data.ok === true;
-      const py = data.pyautogui || (data.health && data.health.pyautogui);
-      setWorkflowStep("auth", ok ? "Reachable" : (data.failure_code === "PYAUTOGUI_AUTH_FAILED" ? "Token blocked" : "Check needed"), ok ? "ok" : "bad");
-      setWorkflowStep("gui", py ? (py.available ? "PyAutoGUI ready" : "Install PyAutoGUI") : "Driver unknown", py && py.available ? "ok" : "warn");
-      const programLabel = data.program_id || (Array.isArray(data.programs) ? `${data.programs.length} programs` : "Not selected");
-      setWorkflowStep("program", programLabel, data.program_id || Array.isArray(data.programs) ? "ok" : "");
-      const evidenceOk = screenEvidenceComplete(data);
-      const hasEvidence = Array.isArray(data.screen_checks) && data.screen_checks.length > 0;
-      setWorkflowStep("evidence", evidenceOk ? "3 screenshots" : (hasEvidence ? "Incomplete" : "Waiting"), evidenceOk ? "ok" : (hasEvidence ? "bad" : "warn"));
-      const dataRef = dataReference(data);
-      setWorkflowStep("artifact", dataRef ? "CSV/artifact found" : "Waiting", dataRef ? "ok" : "warn");
-      setSituationCard("bridge", py ? (py.available ? "PyAutoGUI ready" : "PyAutoGUI missing") : (ok ? "Bridge reachable" : "Check Health"), data.failure_code || data.status || "health/readiness", py && py.available ? "ok" : ok ? "warn" : "bad");
-      setSituationCard("export", dataRef ? "CSV/artifact found" : "CSV not verified", dataRef || "wait for UTM export artifact", dataRef ? "ok" : "warn");
-    }
-    function renderReadiness(data) {
-      const source = data && typeof data === "object" && ((data.gates && typeof data.gates === "object") || Array.isArray(data.required_locator_names) || Array.isArray(data.configured_locator_names))
-        ? data
-        : (bridgeState.readiness || data || {});
-      const gates = source.gates && typeof source.gates === "object" ? source.gates : source;
-      const required = Array.isArray(gates.required_locator_names) ? gates.required_locator_names : [];
-      const configured = Array.isArray(gates.configured_locator_names) ? gates.configured_locator_names : [];
-      const missing = Array.isArray(gates.missing_required_locators) ? gates.missing_required_locators : [];
-      if (!required.length && !configured.length && !missing.length) return;
-      document.getElementById("readinessRequired").textContent = required.length ? required.join(", ") : "-";
-      document.getElementById("readinessCaptured").textContent = configured.length ? configured.join(", ") : "none";
-      document.getElementById("readinessMissing").textContent = missing.length ? missing.join(", ") : "none";
-      document.getElementById("readinessGate").textContent = missing.length ? "Capture missing locators before Live UTM" : "Required locators complete";
-      const pill = document.getElementById("readinessPill");
-      pill.querySelector("span:last-child").textContent = missing.length ? "blocked" : "ready";
-      pill.querySelector(".dot").className = "dot " + (missing.length ? "bad" : "ok");
-      renderLocatorShortcuts(required, configured, missing);
-      setSituationCard("locators", missing.length ? `${missing.length} missing` : "Required locators ready", missing.length ? missing.join(", ") : (configured.length ? configured.join(", ") : "no required locators"), missing.length ? "bad" : "ok");
-    }
-
-    function renderBridgeFiles(data) {
-      const health = data.health && typeof data.health === "object" ? data.health : data;
-      const artifacts = health.artifacts && typeof health.artifacts === "object" && !Array.isArray(health.artifacts) ? health.artifacts : {};
-      pathArtifactRoot.textContent = artifacts.root || health.artifact_root || "-";
-      pathRequestLog.textContent = artifacts.request_log || (artifacts.root ? artifacts.root + "\\bridge_requests.jsonl" : "-");
-      pathLocatorRoot.textContent = artifacts.locator_root || health.locator_root || "-";
-      pathUtmExportRoot.textContent = artifacts.utm_export_root || health.utm_export_root || "-";
-      const exportRoot = artifacts.utm_export_root || health.utm_export_root || "";
-      if (exportRoot) setSituationCard("export", "Export root configured", exportRoot, "warn");
-    }
-
-    function renderRequestAudit(data) {
-      const source = data && typeof data === "object" && (Array.isArray(data.events) || Array.isArray(data.recent_paths) || "event_count" in data || "execute_event_seen" in data)
-        ? data
-        : (bridgeState.requestAudit || data || {});
-      if (!source || typeof source !== "object") return;
-      const events = Array.isArray(source.events) ? source.events : [];
-      const recentPaths = Array.isArray(source.recent_paths)
-        ? source.recent_paths.map((item) => String(item || "")).filter(Boolean)
-        : events.map((event) => event && typeof event === "object" ? String(event.path || "") : "").filter(Boolean);
-      if (!recentPaths.length && !("event_count" in source) && !("execute_event_seen" in source)) return;
-      const executeSeen = source.execute_event_seen === true || recentPaths.some((path) => path === "/execute" || path.endsWith("/execute"));
-      document.getElementById("requestAuditEvents").textContent = String(source.event_count ?? events.length ?? 0);
-      document.getElementById("requestAuditExecute").textContent = executeSeen ? `seen (${source.execute_event_count ?? 1})` : "missing";
-      document.getElementById("requestAuditRecent").textContent = recentPaths.length ? recentPaths.slice(-5).join(" -> ") : "-";
-      document.getElementById("requestAuditGate").textContent = executeSeen ? "Live /execute audit present" : "Blocked for live handoff until /execute appears";
-      const pill = document.getElementById("requestAuditPill");
-      pill.querySelector("span:last-child").textContent = executeSeen ? "execute-ok" : "missing /execute";
-      pill.querySelector(".dot").className = "dot " + (executeSeen ? "ok" : "warn");
-      if (requestAuditRunIds) requestAuditRunIds.textContent = formatList(source.execute_run_ids, "-");
-      if (requestAuditSpecimenIds) requestAuditSpecimenIds.textContent = formatList(source.execute_specimen_ids, "-");
-      if (requestAuditProgramIds) requestAuditProgramIds.textContent = formatList(source.execute_program_ids, "-");
-      if (requestAuditLastAt) requestAuditLastAt.textContent = source.last_execute_at || ((source.last_execute_context && source.last_execute_context.at) || "-");
-      setSituationCard("audit", executeSeen ? "Live /execute seen" : "No /execute yet", executeSeen ? formatList(source.execute_program_ids, "identity recorded") : "request log checked", executeSeen ? "ok" : "warn");
-      if (executeSeen) setOpsCard("next", "Build/audit Linux proof package", "ok");
-    }
-
-    function absorbBridgeState(data) {
-      if (!data || typeof data !== "object") return;
-      const tool = String(data.tool || "");
-      if (tool === "equipment.pyautogui.health" || (data.bridge === "windows_pyautogui" && data.pyautogui)) bridgeState.health = data;
-      if (tool === "equipment.pyautogui.windows_readiness" || (data.gates && Array.isArray((data.gates || {}).required_locator_names))) bridgeState.readiness = data;
-      if (tool === "equipment.pyautogui.request_log" || "execute_event_seen" in data || "event_count" in data || Array.isArray(data.recent_paths)) bridgeState.requestAudit = data;
-    }
-
-    function requestAuditExecuteSeen() {
-      const audit = bridgeState.requestAudit || {};
-      const events = Array.isArray(audit.events) ? audit.events : [];
-      const paths = Array.isArray(audit.recent_paths)
-        ? audit.recent_paths.map((item) => String(item || "")).filter(Boolean)
-        : events.map((event) => event && typeof event === "object" ? String(event.path || "") : "").filter(Boolean);
-      return audit.execute_event_seen === true || paths.some((path) => path === "/execute" || path.endsWith("/execute"));
-    }
-
-    function proofItemHtml(item) {
-      const klass = item.ok ? "ok" : (item.required === false ? "warn" : "bad");
-      const dot = item.ok ? "ok" : (item.required === false ? "warn" : "bad");
-      return `<div class="proof-item ${klass}"><span class="dot ${dot}"></span><div><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.detail)}</small></div></div>`;
-    }
-
-    function setProofGateCard(id, ok, label) {
-      const card = document.getElementById(id);
-      if (!card) return;
-      card.className = "proof-gate " + (ok ? "ok" : "warn");
-      const span = card.querySelector("span");
-      if (span) span.textContent = label || (ok ? "ready" : "open");
-    }
-
-    function renderProofGateStrip(items) {
-      const byLabel = new Map(items.map((item) => [item.label, item]));
-      const gateMap = [
-        ["proofGateHealth", "Health + PyAutoGUI", "ready", "Health needed"],
-        ["proofGateLocators", "UTM Locators", "captured", "Readiness needed"],
-        ["proofGateSafety", "Live Safety Confirmed", "confirmed", "Confirm setup"],
-        ["proofGateRequestLog", "Request Log /execute", "audit seen", "/execute missing"],
-        ["proofGateScreen", "Screen Evidence", "3 screenshots", "Need screenshots"],
-        ["proofGateSave", "Save/Export Responsibility", "export verified", "Need export proof"],
-        ["proofGateCsv", "CSV + Parse Probe", "parse ok", "Need CSV parse"],
-      ];
-      for (const [id, sourceLabel, okText, openText] of gateMap) {
-        const item = byLabel.get(sourceLabel);
-        setProofGateCard(id, Boolean(item && item.ok), item && item.ok ? okText : openText);
-      }
-    }
-
-    function renderProofChecklist(data) {
-      const list = document.getElementById("proofChecklist");
-      if (!list) return;
-      const health = bridgeState.health || data || {};
-      const py = health.pyautogui || (health.health && health.health.pyautogui) || {};
-      const readiness = bridgeState.readiness || {};
-      const gates = readiness.gates && typeof readiness.gates === "object" ? readiness.gates : readiness;
-      const missingLocators = Array.isArray(gates.missing_required_locators) ? gates.missing_required_locators : [];
-      const requiredLocators = Array.isArray(gates.required_locator_names) ? gates.required_locator_names : [];
-      const liveConfirmed = document.getElementById("confirmLive").checked === true;
-      const screenOk = screenEvidenceComplete(data || {});
-      const dataRefText = dataReference(data || {});
-      const acquisition = data && typeof data.data_acquisition === "object" ? data.data_acquisition : {};
-      const crossChecks = data && typeof data.cross_checks === "object" ? data.cross_checks : {};
-      const parseOk = crossChecks.data_parse_probe_ok === true || Number(acquisition.row_count_probe || 0) > 0;
-      const saveMethod = String(acquisition.save_method || "");
-      const recognizedSaveMethods = new Set(["windows_export_watch", "manual_save_dialog", "export_menu", "simulated_bridge_export", "simulated_auto_export", "synthetic_test_export"]);
-      const saveAttempted = acquisition.save_attempted_by_agent === true || ["windows_export_watch", "simulated_bridge_export", "simulated_auto_export"].includes(saveMethod);
-      const saveConfirmed = acquisition.save_confirmation_screen_ok === true || Boolean(acquisition.windows_path || dataRefText);
-      const saveGateOk = crossChecks.save_export_responsibility_ok === true || Boolean(dataRefText && parseOk && recognizedSaveMethods.has(saveMethod) && saveAttempted && saveConfirmed);
-      const saveDetail = saveGateOk
-        ? `Save/export verified by ${saveMethod || "recorded method"}.`
-        : `Need recognized save/export evidence. method=${saveMethod || "-"}; attempted=${saveAttempted}; confirmed=${saveConfirmed}.`;
-      const items = [
-        {label: "Health + PyAutoGUI", ok: Boolean(py.available), detail: py.available ? "PyAutoGUI driver is available." : "Run Health or install PyAutoGUI on Windows."},
-        {label: "UTM Locators", ok: requiredLocators.length > 0 && missingLocators.length === 0, detail: missingLocators.length ? `Missing: ${missingLocators.join(", ")}` : (requiredLocators.length ? "Required locators are captured." : "Run Readiness to verify required locators.")},
-        {label: "Live Safety Confirmed", ok: liveConfirmed, detail: liveConfirmed ? "Operator marked the physical setup as safe." : "Check the live safety box before Run Live UTM."},
-        {label: "Request Log /execute", ok: requestAuditExecuteSeen(), detail: requestAuditExecuteSeen() ? "A live /execute request is present in the bridge log." : "Run Request Log after a live command; Linux will block without this evidence."},
-        {label: "Screen Evidence", ok: screenOk, detail: screenOk ? "before/start/complete screenshots are present." : "Live UTM should capture before_start, after_start, and after_complete screens."},
-        {label: "Save/Export Responsibility", ok: saveGateOk, detail: saveDetail},
-        {label: "CSV + Parse Probe", ok: Boolean(dataRefText && parseOk), detail: dataRefText ? (parseOk ? `Data artifact verified: ${dataRefText}` : "CSV found, but parse probe is not verified yet.") : "No UTM CSV/data artifact has been verified yet."},
-      ];
-      const runbookState = {
-        connect: Boolean(py.available),
-        calibrate: requiredLocators.length > 0 && missingLocators.length === 0,
-        execute: requestAuditExecuteSeen(),
-        verify: Boolean(screenOk && saveGateOk && dataRefText && parseOk),
-      };
-      setRunbookStep("connect", runbookState.connect ? "ok" : "warn", runbookState.connect ? "Bridge driver ready. Continue to UTM locator readiness." : "Run Health and install/enable PyAutoGUI if missing.");
-      setRunbookStep("calibrate", runbookState.calibrate ? "ok" : (missingLocators.length ? "bad" : "warn"), runbookState.calibrate ? "Required UTM screen locators are captured." : (missingLocators.length ? `Capture missing locators: ${missingLocators.join(", ")}` : "Run Readiness to check required UTM locators."));
-      setRunbookStep("execute", runbookState.execute ? "ok" : (liveConfirmed ? "warn" : "bad"), runbookState.execute ? "Authenticated /execute is recorded for this bridge." : (liveConfirmed ? "Run Live UTM only after preflight passes." : "Confirm physical safety before any live /execute."));
-      setRunbookStep("verify", runbookState.verify ? "ok" : "warn", runbookState.verify ? "Screen, save/export, and CSV parse proof are available." : "Refresh Evidence until screenshots, export proof, and CSV parse probe are present.");
-      setRunbookProgress(runbookState);
-      const missing = items.filter((item) => !item.ok && item.required !== false);
-      const complete = items.length - missing.length;
-      renderProofGateStrip(items);
-      list.innerHTML = items.map(proofItemHtml).join("");
-      const pill = document.getElementById("proofChecklistPill");
-      pill.querySelector("span:last-child").textContent = missing.length ? `${missing.length} open` : "ready";
-      pill.querySelector(".dot").className = "dot " + (missing.length ? "warn" : "ok");
-      if (gateMeterFill) gateMeterFill.style.width = `${Math.round((complete / Math.max(items.length, 1)) * 100)}%`;
-      if (gateMeterText) gateMeterText.textContent = `${complete} / ${items.length} checks complete`;
-      if (gateMeterNext) gateMeterNext.textContent = missing.length ? `Next: ${missing[0].label}` : "Ready for Linux audit";
-      setHeaderProof(`proof ${complete}/${items.length}`, missing.length ? "warn" : "ok");
-      document.getElementById("proofChecklistGate").textContent = missing.length
-        ? `Next required proof: ${missing[0].label}`
-        : "Live handoff proof is complete for the current Windows bridge evidence.";
-      const recommendation = missing.length ? recommendationForMissing(missing[0].label) : {label: "Refresh Evidence", target: "refreshEvidence", klass: "ok"};
-      setNextAction(recommendation.label, recommendation.target, recommendation.klass);
-      setOpsCard("safety", missing.length ? `${complete}/${items.length} proof gates` : "Proof gates ready", missing.length ? "warn" : "ok");
-      setOpsCard("evidence", screenOk ? "Screen evidence complete" : "Need before/start/complete screenshots", screenOk ? "ok" : "warn");
-      setOpsCard("data", dataRefText ? (parseOk ? "CSV parse verified" : "CSV needs parse probe") : "No CSV artifact yet", dataRefText && parseOk ? "ok" : "warn");
-      setOpsCard("next", missing.length ? missing[0].label : "Ready for Linux audit", missing.length ? "warn" : "ok");
-      setSituationCard("export", dataRefText ? (parseOk ? "CSV parse verified" : "CSV found") : "CSV not verified", dataRefText || saveDetail, dataRefText && parseOk ? "ok" : "warn");
-      setSituationCard("live", liveConfirmed ? (missing.length ? "Proof incomplete" : "Proof gates ready") : "Live blocked", liveConfirmed ? (missing.length ? missing[0].label : "ready for Linux audit") : "physical safety not confirmed", liveConfirmed && !missing.length ? "ok" : "warn");
-    }
-
-    function renderSummary(data) {
-      const ok = data.ok === true;
-      const status = data.status || (ok ? "ok" : "failed");
-      const program = data.program_id || (Array.isArray(data.programs) ? "program registry" : "-");
-      const runId = data.run_id || data.sequence_id || "-";
-      const dataRef = dataReference(data) || "-";
-      let gate = "Run Health";
-      if (data.failure_code) gate = `Resolve ${data.failure_code}`;
-      else if (status === "verified_complete" && dataRef !== "-") gate = "Linux pull/audit then Analysis";
-      else if (ok && program === "-") gate = "Select program or capture evidence";
-      else if (ok) gate = "Ready for next bridge action";
-      summaryProgram.textContent = program;
-      summaryRun.textContent = runId;
-      summaryData.textContent = dataRef;
-      summaryGate.textContent = gate;
-      setSummaryPill(status, ok ? "ok" : "bad");
-    }
-    function render(data) {
-      lastResult = data || {};
-      absorbBridgeState(lastResult);
-      output.textContent = JSON.stringify(lastResult, null, 2);
-      const ok = lastResult.ok === true;
-      const status = lastResult.status || (ok ? "ok" : "failed");
-      setTile(tileStatus, status, ok ? "ok" : (status === "degraded" ? "warn" : "bad"));
-      const py = lastResult.pyautogui || (lastResult.health && lastResult.health.pyautogui);
-      setTile(tilePyAutoGUI, py ? (py.available ? "available" : "missing") : "unknown", py && py.available ? "ok" : "warn");
-      setTile(tileFailure, lastResult.failure_code || "None", lastResult.failure_code ? "bad" : "ok");
-      setAuth(ok ? "reachable" : "check failed", ok ? "ok" : "bad");
-      renderTrace(lastResult);
-      renderArtifacts(lastResult);
-      appendTimelineFromResult(lastResult);
-      renderWorkflow(lastResult);
-      renderSummary(lastResult);
-      renderBridgeFiles(lastResult);
-      renderReadiness(lastResult);
-      renderRequestAudit(lastResult);
-      if (Array.isArray(lastResult.programs)) renderProgramRegistry(lastResult);
-      renderProofChecklist(lastResult);
-      renderArtifactPreview(lastResult);
-      renderEssentialSummary(lastResult);
-    }
-    async function call(path, options = {}) {
-      const fetchOptions = {...options};
-      const quiet = fetchOptions.quiet === true;
-      const shouldRender = fetchOptions.render !== false;
-      delete fetchOptions.quiet;
-      delete fetchOptions.render;
-      if (!quiet) {
-        setBusy(true);
-        setCommandBanner("Command running", `${fetchOptions.method || "GET"} ${path}`, "busy");
-      }
-      try {
-        const headers = new Headers(fetchOptions.headers || {});
-        if (tokenInput.value) headers.set("X-Bridge-Token", tokenInput.value);
-        const response = await fetch(path, {...fetchOptions, headers});
-        const data = await response.json();
-        if (shouldRender) render(data);
-        else {
-          absorbBridgeState(data);
-          renderBridgeFiles(data);
-          renderReadiness(data);
-          renderRequestAudit(data);
-          if (Array.isArray(data.programs)) renderProgramRegistry(data);
-          renderProofChecklist(lastResult);
-        }
-        const ok = data && data.ok === true;
-        if (!quiet) {
-          setCommandBanner(ok ? "Command completed" : "Command returned a blocker", `${fetchOptions.method || "GET"} ${path} -> ${data.status || response.status}`, ok ? "ok" : "bad");
-          appendLog(`${fetchOptions.method || "GET"} ${path} -> ${data.status || response.status}`);
-        }
-        return data;
-      } catch (error) {
-        const failed = {ok: false, status: "failed", failure_code: "CLIENT_ERROR", message: String(error)};
-        if (shouldRender) render(failed);
-        if (!quiet) {
-          setCommandBanner("Command failed", String(error), "bad");
-          appendLog(`client error: ${String(error)}`);
-        }
-        return failed;
-      } finally {
-        if (!quiet) setBusy(false);
-      }
-    }
-    function renderControllerStatus(data) {
-      const controller = data && data.atr_controller && typeof data.atr_controller === "object" ? data.atr_controller : (data || {});
-      const ok = controller.ok === true;
-      const source = String(controller.source || "none");
-      const resolvedUrl = String(controller.controller_url || "");
-      controllerStatus.textContent = ok ? `${resolvedUrl} · ${source}` : String(controller.failure_code || controller.status || "Not resolved");
-      if (resolvedUrl) controllerUrl.value = resolvedUrl;
-      const candidates = Array.isArray(controller.candidates) ? controller.candidates : [];
-      if (!candidates.length) {
-        controllerCandidates.textContent = ok ? `Verified controller (${source}).` : "No verified ATR candidate selected.";
-        return;
-      }
-      controllerCandidates.innerHTML = `<span>${candidates.length} verified ATR controllers found. Select one:</span> ${candidates.map((url) => `<button type="button" class="secondary" data-controller-url="${escapeHtml(url)}">${escapeHtml(url)}</button>`).join(" ")}`;
-      controllerCandidates.querySelectorAll("button[data-controller-url]").forEach((button) => {
-        button.addEventListener("click", async () => {
-          controllerUrl.value = button.dataset.controllerUrl || "";
-          const selected = await call("/controller/select", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({controller_url: controllerUrl.value}), render: false});
-          renderControllerStatus(selected);
-        });
-      });
-    }
-    async function discoverAtrController() {
-      const result = await call("/controller/discover", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}", render: false});
-      renderControllerStatus(result);
-      return result;
-    }
-    async function saveAtrController() {
-      const result = await call("/controller/select", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({controller_url: controllerUrl.value.trim()}), render: false});
-      renderControllerStatus(result);
-      return result;
-    }
-    async function runHealthCheck() {
-      const data = await call("/health");
-      renderControllerStatus(data);
-      if (data && data.ok === true) {
-        const programs = await call("/programs", {quiet: true, render: false});
-        if (programs && Array.isArray(programs.programs)) {
-          bridgeState.programs = programs.programs;
-          renderProgramRegistry(programs);
-        }
-      }
+    function safe(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch])); }
+    async function call(path, options={}) {
+      const response = await fetch(path, options);
+      const data = await response.json().catch(() => ({ok:false,status:"invalid_response",message:`HTTP ${response.status}`}));
+      if (!response.ok && data.ok !== false) data.ok = false;
       return data;
     }
-    function livePreflightBlockers() {
-      const blockers = [];
-      const warnings = [];
-      const health = bridgeState.health || {};
-      const py = health.pyautogui || (health.health && health.health.pyautogui) || {};
-      const readiness = bridgeState.readiness || {};
-      const gates = readiness.gates && typeof readiness.gates === "object" ? readiness.gates : readiness;
-      const required = Array.isArray(gates.required_locator_names) ? gates.required_locator_names : [];
-      const missing = Array.isArray(gates.missing_required_locators) ? gates.missing_required_locators : [];
-      if (!py.available) blockers.push("PYAUTOGUI_NOT_READY");
-      if (!required.length) blockers.push("UTM_READINESS_NOT_CHECKED");
-      if (missing.length) blockers.push(`UTM_LOCATORS_MISSING: ${missing.join(", ")}`);
-      if (!bridgeState.requestAudit) warnings.push("REQUEST_LOG_NOT_CHECKED");
-      return {blockers, warnings};
+    function showResult(data, label="Local action") {
+      const ok = data && data.ok !== false;
+      const status = String(data && (data.status || data.failure_code) || (ok ? "ok" : "failed"));
+      $("latestResultStatus").textContent = status;
+      $("latestResultStatus").className = `pill ${ok ? "ok" : "bad"}`;
+      $("latestResultSummary").textContent = `${label}: ${data && (data.message || data.failure_code || data.status) || "completed"}`;
+      $("managerLatestResult").textContent = JSON.stringify(data || {}, null, 2);
+      return data;
     }
-    function updateLiveInterlock(ok, blockers, warnings) {
-      if (!liveInterlockCard || !liveInterlockText) return;
-      const confirmed = document.getElementById("confirmLive").checked === true;
-      const ready = ok && confirmed;
-      liveInterlockCard.className = "interlock-card" + (ready ? " ok" : "");
-      setSituationCard("live", ready ? "Live send enabled" : "Live blocked", ready ? "preflight + safety confirmed" : (confirmed ? (blockers && blockers[0]) || "run preflight" : "check physical safety box"), ready ? "ok" : (confirmed ? "bad" : "warn"));
-      if (ready) {
-        liveInterlockText.textContent = warnings && warnings.length
-          ? `Live control may run. Warnings: ${warnings.join(", ")}`
-          : "Live control may run. The bridge will still record /execute and evidence for Linux audit.";
-      } else if (!confirmed) {
-        liveInterlockText.textContent = "Physical safety confirmation is off. Live UTM /execute remains blocked from this page.";
-      } else if (blockers && blockers.length) {
-        liveInterlockText.textContent = `Safe Preflight is not ready: ${blockers.join(", ")}`;
-      } else {
-        liveInterlockText.textContent = "Run Safe Preflight before live UTM control.";
-      }
+    async function refreshHealth(renderRaw=false) {
+      const data = await call("/health");
+      $("bridgeServerState").textContent = data.status || (data.ok ? "ready" : "unreachable");
+      $("bridgeDesktopState").textContent = data.screen ? `${data.screen.width || "-"}x${data.screen.height || "-"}` : "unknown";
+      $("bridgePyAutoGuiState").textContent = data.pyautogui && data.pyautogui.available ? "available" : "unavailable";
+      $("bridgeEndpoint").textContent = location.host || "local console";
+      $("bridgeDataRoot").textContent = data.artifacts && data.artifacts.root || "-";
+      $("headerStatus").textContent = data.ok ? "ready" : "attention";
+      $("headerStatus").className = `pill ${data.ok ? "ok" : "warn"}`;
+      if (renderRaw) $("diagnosticOutput").textContent = JSON.stringify(data, null, 2);
+      return data;
     }
-    function setPreflightStatus(ok, blockers, warnings) {
-      if (!preflightBanner) return;
-      preflightBanner.className = "preflight-banner " + (ok ? "ok" : "bad");
-      preflightTitle.textContent = ok ? "Live UTM preflight passed" : "Live UTM preflight blocked";
-      preflightText.textContent = ok
-        ? (warnings.length ? `Warnings: ${warnings.join(", ")}` : "Health and required UTM readiness gates passed. Live control still requires operator confirmation.")
-        : `Resolve before live /execute: ${blockers.join(", ")}`;
-      updateLiveInterlock(ok, blockers, warnings);
-      setOpsCard("safety", ok ? "Preflight passed" : `Blocked: ${blockers[0] || "preflight"}`, ok ? "ok" : "bad");
-      setOpsCard("next", ok ? "Confirm safety, then Live UTM" : "Resolve preflight blocker", ok ? "ok" : "bad");
+    async function refreshPairing() {
+      const data = await call("/pairing/status");
+      $("bridgeAtrState").textContent = data.paired ? "connected" : "not paired";
+      $("pairingState").textContent = data.paired ? "paired" : data.status || "pairing available";
+      $("pairingState").className = `pill ${data.paired ? "ok" : "warn"}`;
+      $("pairingCode").textContent = data.pairing_code || "----";
+      $("pairingCode").hidden = Boolean(data.paired);
+      $("newPairingCode").hidden = Boolean(data.paired);
+      return data;
     }
-    async function runSafePreflight(renderResult = true) {
-      appendLog("safe preflight started: /health -> /readiness -> /request-log");
-      const health = await call("/health", {render: false});
-      const readiness = await call("/readiness", {render: false});
-      const audit = await call("/request-log", {render: false});
-      const {blockers, warnings} = livePreflightBlockers();
-      const ok = blockers.length === 0;
-      const result = {
-        ok,
-        status: ok ? "preflight_passed" : "blocked",
-        tool: "equipment.pyautogui.local_live_preflight",
-        bridge: "windows_pyautogui",
-        non_actuating: true,
-        blocks_execute: !ok,
-        blockers,
-        warnings,
-        health,
-        readiness,
-        request_audit: audit,
-        step_trace: [
-          {step: "HEALTH", status: health && health.ok ? "ok" : "blocked", detail: (health && health.status) || "unknown"},
-          {step: "READINESS", status: readiness && readiness.ok ? "ok" : "blocked", detail: blockers.join(", ") || "required setup gates passed"},
-          {step: "REQUEST_LOG", status: audit && audit.ok ? "ok" : "warning", detail: audit && audit.request_log ? audit.request_log : "request log unavailable"},
-        ],
-      };
-      setPreflightStatus(ok, blockers, warnings);
-      if (renderResult) render(result);
-      return result;
+    async function refreshPrograms() {
+      const data = await call("/programs");
+      programs = Array.isArray(data.programs) ? data.programs : [];
+      renderPrograms(); return data;
     }
-    function currentAbortPayload() {
-      const runId = document.getElementById("runId").value.trim() || `utm-abort-${Date.now()}`;
-      const specimenId = document.getElementById("specimenId").value.trim() || "specimen-001";
-      const targetWindow = document.getElementById("targetWindow").value.trim();
-      const payload = {
-        sequence_id: `${runId}-abort`,
-        program_id: "utm_stop_or_abort_v1",
-        run_id: runId,
-        specimen_id: specimenId,
-        command: "Dispatch UTM stop/abort recovery macro",
-        require_screen_assertions: false,
-        simulate_utm_protocol: false
-      };
-      if (targetWindow) {
-        if (targetWindow.startsWith("regex:")) payload.target_window_regex = targetWindow.slice(6).trim();
-        else payload.target_window = targetWindow;
-      }
-      return payload;
+    function renderPrograms() {
+      const query = $("managerSearch").value.trim().toLowerCase();
+      const rows = programs.filter((p) => !query || `${p.program_id} ${p.name || ""}`.toLowerCase().includes(query));
+      $("managerStats").textContent = `${rows.length}/${programs.length} programs · builtin read-only · local drafts editable`;
+      $("managerProgramRegistry").innerHTML = rows.map((p) => { const immutable=Boolean(p.built_in||p.managed_by==="atr_equipment_skill"); const source=p.built_in?"builtin":p.managed_by==="atr_equipment_skill"?"atr_skill":"local_draft"; return `<article class="item" data-program-id="${safe(p.program_id)}"><div><strong>${safe(p.name || p.program_id)}</strong><span>${safe(p.program_id)} · ${source} · ${p.enabled === false ? "disabled" : "enabled"}</span></div><div class="row"><button class="secondary" data-action="test">Test</button>${immutable ? "" : '<button class="secondary" data-action="edit">Edit</button><button class="danger" data-action="delete">Delete</button>'}</div></article>`; }).join("") || '<p class="muted">No matching programs.</p>';
     }
+    function openEditor(definition=TEMPLATE) { $("programDefinition").value = JSON.stringify(definition, null, 2); $("programEditor").hidden = false; }
+    function currentDefinition() { try { return JSON.parse($("programDefinition").value); } catch (error) { return {__parse_error__:String(error)}; } }
+    async function validateProgram() { const data = await call("/programs/validate", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(currentDefinition())}); showResult(data,"Program validation"); }
+    async function registerProgram() { const data = await call("/programs/register", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(currentDefinition())}); showResult(data,"Program save"); if (data.ok) { $("programEditor").hidden=true; await refreshPrograms(); } }
+    async function testProgram(programId) { const data = await call("/execute", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sequence_id:`console-${Date.now()}`,run_id:`console-${Date.now()}`,specimen_id:"local-test",program_id:programId,command:programId})}); showResult(data,"Program test"); }
+    async function deleteProgram(programId) { const data = await call(`/programs/${encodeURIComponent(programId)}`, {method:"DELETE"}); showResult(data,"Program delete"); await refreshPrograms(); }
+    function downloadJson(name, value) { const blob=new Blob([JSON.stringify(value,null,2)+"\n"],{type:"application/json"}); const link=document.createElement("a"); link.href=URL.createObjectURL(blob); link.download=name; link.click(); setTimeout(()=>URL.revokeObjectURL(link.href),0); }
 
-    function currentUtmPayload(simulate) {
-      const runId = document.getElementById("runId").value.trim() || `utm-${Date.now()}`;
-      const specimenId = document.getElementById("specimenId").value.trim() || "specimen-001";
-      const targetWindow = document.getElementById("targetWindow").value.trim();
-      const exportGlob = document.getElementById("exportGlob").value.trim() || "*.csv";
-      const artifactTimeout = positiveNumberInput("artifactTimeout", 20);
-      const stableForSec = positiveNumberInput("stableForSec", 2.0);
-      const expectedExportPath = document.getElementById("expectedExportPath").value.trim();
-      const payload = {
-        sequence_id: runId,
-        program_id: "utm_compression_start_v1",
-        run_id: runId,
-        specimen_id: specimenId,
-        export_glob: exportGlob,
-        artifact_timeout_s: artifactTimeout,
-        stable_for_sec: stableForSec,
-        require_window_focus: document.getElementById("requireFocus").checked,
-        require_screen_assertions: document.getElementById("requireAssertions").checked,
-        manual_save_required_if_no_artifact: document.getElementById("manualSave").checked,
-        simulate_utm_protocol: Boolean(simulate)
-      };
-      if (expectedExportPath) payload.expected_export_path = expectedExportPath;
-      if (targetWindow) {
-        if (targetWindow.startsWith("regex:")) payload.target_window_regex = targetWindow.slice(6).trim();
-        else payload.target_window = targetWindow;
-      }
-      return payload;
-    }
-    function shellSingleQuote(value) {
-      return "'" + String(value ?? "").replace(/'/g, "'\"'\"'") + "'";
-    }
-    function psDoubleQuote(value) {
-      return '"' + String(value ?? "").replace(/`/g, "``").replace(/"/g, '`"') + '"';
-    }
-    async function copyBridgeCommand(text, label) {
-      if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const area = document.createElement("textarea");
-        area.value = text;
-        area.style.position = "fixed";
-        area.style.left = "-9999px";
-        document.body.appendChild(area);
-        area.focus();
-        area.select();
-        document.execCommand("copy");
-        document.body.removeChild(area);
-      }
-      appendLog(`${label} copied to clipboard`);
-      setCommandBanner("Command copied", label, "ok");
-    }
-    function bridgeTokenForCommand() {
-      return tokenInput.value.trim() || "<bridge-token>";
-    }
-    function curlHealthCommand() {
-      const token = bridgeTokenForCommand();
-      return `curl -s -H ${shellSingleQuote("X-Bridge-Token: " + token)} ${shellSingleQuote(window.location.origin + "/health")}`;
-    }
-    function powerShellHealthCommand() {
-      const token = bridgeTokenForCommand();
-      return `$headers = @{"X-Bridge-Token"=${psDoubleQuote(token)}}
-Invoke-RestMethod -Uri ${psDoubleQuote(window.location.origin + "/health")} -Headers $headers`;
-    }
-    function curlExecuteCommand() {
-      if (!previewPayloadEnvelope) renderPayloadPreview(previewMode);
-      const payload = JSON.stringify((previewPayloadEnvelope && previewPayloadEnvelope.payload) || currentUtmPayload(false));
-      const token = bridgeTokenForCommand();
-      return [
-        "curl -s -X POST",
-        `-H ${shellSingleQuote("Content-Type: application/json")}`,
-        `-H ${shellSingleQuote("X-Bridge-Token: " + token)}`,
-        `-d ${shellSingleQuote(payload)}`,
-        shellSingleQuote(window.location.origin + "/execute"),
-      ].join(" ");
-    }
-    function locatorPayload() {
-      return {
-        program_id: "utm_compression_start_v1",
-        name: document.getElementById("locatorName").value,
-        region: ["regionX", "regionY", "regionW", "regionH"].map((id) => Number(document.getElementById(id).value)),
-        confidence: Number(document.getElementById("confidence").value || 0.8)
-      };
-    }
-
-    document.getElementById("health").addEventListener("click", runHealthCheck);
-    document.getElementById("discoverController").addEventListener("click", discoverAtrController);
-    document.getElementById("saveController").addEventListener("click", saveAtrController);
-    document.getElementById("safePreflight").addEventListener("click", () => runSafePreflight(true));
-    document.getElementById("preflightRefreshInline").addEventListener("click", () => runSafePreflight(true));
-    document.getElementById("locators").addEventListener("click", () => call("/locators"));
-    document.getElementById("readiness").addEventListener("click", () => call("/readiness"));
-    document.getElementById("utmSim").addEventListener("click", () => {
-      if (!renderPayloadPreview("sim")) {
-        renderInputBlocker("sim");
-        return;
-      }
-      call("/execute", {
-        method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(currentUtmPayload(true))
-      });
-    });
-    document.getElementById("utmLive").addEventListener("click", async () => {
-      if (!document.getElementById("confirmLive").checked) {
-        render({ok: false, status: "blocked", failure_code: "LIVE_CONFIRMATION_REQUIRED", message: "Check physical safety confirmation before live UTM control."});
-        return;
-      }
-      if (!renderPayloadPreview("live")) {
-        renderInputBlocker("live");
-        return;
-      }
-      const preflight = await runSafePreflight(false);
-      if (!preflight.ok) {
-        render({
-          ...preflight,
-          failure_code: "LOCAL_LIVE_PREFLIGHT_BLOCKED",
-          message: "Live /execute was not sent because local preflight failed.",
-        });
-        return;
-      }
-      call("/execute", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(currentUtmPayload(false))});
-    });
-    document.getElementById("utmAbort").addEventListener("click", () => {
-      renderPayloadPreview("abort");
-      setOpsCard("next", "Stop/Abort recovery requested", "bad");
-      call("/execute", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(currentAbortPayload())});
-    });
-    document.getElementById("screenshot").addEventListener("click", () => call("/screenshot", {
-      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({run_id: "manual-screenshot", checkpoint: "manual"})
-    }));
-    document.getElementById("artifacts").addEventListener("click", () => call("/artifacts"));
-    document.getElementById("requestLog").addEventListener("click", () => call("/request-log"));
-    async function refreshEvidenceBundle() {
-      await call("/health");
-      await call("/readiness");
-      await call("/request-log");
-      await call("/artifacts");
-    }
-    document.getElementById("refreshEvidence").addEventListener("click", refreshEvidenceBundle);
-    document.getElementById("refreshAll").addEventListener("click", refreshEvidenceBundle);
-    document.getElementById("autoAudit").addEventListener("change", (event) => {
-      if (requestAuditTimer) {
-        clearInterval(requestAuditTimer);
-        requestAuditTimer = null;
-      }
-      if (event.target.checked) {
-        requestAuditTimer = setInterval(() => {
-          if (!document.hidden) call("/request-log", {quiet: true, render: false});
-        }, 5000);
-      }
-    });
-    document.getElementById("confirmLive").addEventListener("change", () => {
-      renderProofChecklist(lastResult);
-      const {blockers, warnings} = livePreflightBlockers();
-      updateLiveInterlock(blockers.length === 0, blockers, warnings);
-    });
-    document.getElementById("captureLocator").addEventListener("click", () => call("/locators/capture", {
-      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(locatorPayload())
-    }));
-    document.getElementById("execute").addEventListener("click", () => {
-      try { call("/execute", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(JSON.parse(sequenceInput.value))}); }
-      catch (error) { render({ok: false, status: "failed", failure_code: "BAD_JSON", message: String(error)}); }
-    });
-    document.getElementById("fillUtmJson").addEventListener("click", () => { sequenceInput.value = JSON.stringify(currentUtmPayload(false), null, 2); });
-    document.getElementById("previewSimPayload").addEventListener("click", () => renderPayloadPreview("sim"));
-    document.getElementById("previewLivePayload").addEventListener("click", () => renderPayloadPreview("live"));
-    document.getElementById("previewAbortPayload").addEventListener("click", () => renderPayloadPreview("abort"));
-    document.getElementById("copyPreviewPayload").addEventListener("click", async () => {
-      if (!previewPayloadEnvelope) renderPayloadPreview(previewMode);
-      await navigator.clipboard.writeText(JSON.stringify(previewPayloadEnvelope || {}, null, 2));
-      appendLog("payload preview copied to clipboard");
-    });
-    document.getElementById("copyUtmPayload").addEventListener("click", async () => {
-      renderPayloadPreview("live");
-      await navigator.clipboard.writeText(JSON.stringify(currentUtmPayload(false), null, 2));
-      appendLog("current UTM payload copied to clipboard");
-    });
-    document.getElementById("formatJson").addEventListener("click", () => {
-      try { sequenceInput.value = JSON.stringify(JSON.parse(sequenceInput.value), null, 2); }
-      catch (error) { render({ok: false, status: "failed", failure_code: "BAD_JSON", message: String(error)}); }
-    });
-    document.getElementById("clearResult").addEventListener("click", () => render({}));
-    document.getElementById("timelineClear").addEventListener("click", () => {
-      timelineEntries = [];
-      renderTimelineEntries();
-      appendLog("run timeline cleared");
-    });
-    if (focusModeButton) {
-      focusModeButton.addEventListener("click", () => setFocusMode(!hasBodyClass("focus-mode")));
-    }
-    document.getElementById("copyResult").addEventListener("click", async () => navigator.clipboard.writeText(JSON.stringify(lastResult, null, 2)));
-    document.getElementById("copyBase").addEventListener("click", async () => navigator.clipboard.writeText(window.location.origin));
-    document.getElementById("copyLinuxEnv").addEventListener("click", async () => {
-      const token = tokenInput.value || "<bridge-token>";
-      const envText = `export WINDOWS_PYAUTOGUI_BRIDGE_URL="${window.location.origin}"
-export WINDOWS_PYAUTOGUI_BRIDGE_TOKEN="${token}"`;
-      await copyBridgeCommand(envText, "Linux bridge environment");
-    });
-    document.getElementById("copyCurlHealth").addEventListener("click", async () => copyBridgeCommand(curlHealthCommand(), "curl Health command"));
-    document.getElementById("copyPowerShellHealth").addEventListener("click", async () => copyBridgeCommand(powerShellHealthCommand(), "PowerShell Health command"));
-    document.getElementById("copyCurlExecute").addEventListener("click", async () => copyBridgeCommand(curlExecuteCommand(), "curl Execute command"));
-    if (nextActionButton) nextActionButton.addEventListener("click", activateRecommendedAction);
-    document.getElementById("clearToken").addEventListener("click", () => {
-      tokenInput.value = "";
-      localStorage.removeItem("bridgeToken");
-      render({ok: true, status: "token_cleared", message: "Stored browser token cleared."});
-      renderTokenPrompt();
-      appendLog("stored browser token cleared");
-    });
-    ["runId", "specimenId", "targetWindow", "exportGlob", "artifactTimeout", "stableForSec", "expectedExportPath"].forEach((id) => {
-      const element = document.getElementById(id);
-      if (element) element.addEventListener("input", () => renderPayloadPreview(previewMode));
-    });
-    ["requireFocus", "requireAssertions", "manualSave", "confirmLive"].forEach((id) => {
-      const element = document.getElementById(id);
-      if (element) element.addEventListener("change", () => renderPayloadPreview(previewMode));
-    });
-
-
-
-    const essentialProgramManagerSlot = document.getElementById("essentialProgramManagerSlot");
-    const programManagerPanel = document.getElementById("programManagerPanel");
-    if (essentialProgramManagerSlot && programManagerPanel) essentialProgramManagerSlot.appendChild(programManagerPanel);
-
-    function renderEssentialSummary(data) {
-      const payload = data && typeof data === "object" ? data : {};
-      const health = payload.health && typeof payload.health === "object" ? payload.health : payload;
-      const py = health.pyautogui || (bridgeState.health && bridgeState.health.pyautogui) || {};
-      const ok = payload.ok === true;
-      const status = String(payload.status || (ok ? "ready" : "idle"));
-      const resultText = payload.message || payload.failure_code || (payload.program_id ? `${payload.program_id}: ${status}` : status);
-      const resultTone = payload.failure_code || payload.ok === false ? "bad" : ok ? "ok" : "warn";
-
-      document.getElementById("essentialBridgeState").textContent = ok ? (status === "degraded" ? "Reachable / degraded" : "Reachable") : (payload.failure_code ? "Blocked" : "Not checked");
-      document.getElementById("essentialPyAutoGUI").textContent = py.available === true ? "Ready" : py.available === false ? "Unavailable" : "Unknown";
-      const result = document.getElementById("essentialResult");
-      result.textContent = resultText;
-      result.dataset.tone = resultTone;
-    }
-
-
-    const managerRegistry = document.getElementById("managerProgramRegistry");
-    const managerSearchInput = document.getElementById("managerSearch");
-    const managerFilterInput = document.getElementById("managerFilter");
-    const managerProgramFile = document.getElementById("programFile");
-    const managerDefinitionInput = document.getElementById("programDefinition");
-    const programEditor = document.getElementById("programEditor");
-    let managerBridgePrograms = [];
-    let managerEditingProgramId = "";
-    let managerEditingBuiltin = false;
-
-    function managerShowResult(payload) {
-      const element = document.getElementById("managerLatestResult");
-      if (element) element.textContent = JSON.stringify(payload, null, 2);
-      const summary = document.getElementById("essentialResult");
-      if (summary) {
-        summary.textContent = payload.message || payload.failure_code || payload.status || "Program Manager updated.";
-        summary.dataset.tone = payload.ok === false ? "bad" : payload.ok === true ? "ok" : "warn";
-      }
-    }
-    function managerBadge(text, tone = "") {
-      return `<span class="manager-badge ${tone}">${escapeHtml(text)}</span>`;
-    }
-    function managerVisiblePrograms() {
-      return managerBridgePrograms.slice().sort((left, right) => String(left.name || left.program_id).localeCompare(String(right.name || right.program_id)));
-    }
-    function managerFilteredPrograms() {
-      const query = managerSearchInput.value.trim().toLowerCase();
-      const filter = managerFilterInput.value;
-      return managerVisiblePrograms().filter((program) => {
-        const builtIn = program.built_in !== false;
-        const enabled = program.enabled !== false;
-        const searchable = `${program.name || ""} ${program.program_id || ""} ${program.description || ""}`.toLowerCase();
-        if (query && !searchable.includes(query)) return false;
-        if (filter === "builtin" && !builtIn) return false;
-        if (filter === "custom" && builtIn) return false;
-        if (filter === "enabled" && !enabled) return false;
-        if (filter === "disabled" && enabled) return false;
-        return true;
-      });
-    }
-    function managerRenderPrograms() {
-      const allPrograms = managerVisiblePrograms();
-      const programs = managerFilteredPrograms();
-      const builtInCount = allPrograms.filter((item) => item.built_in !== false).length;
-      const customCount = allPrograms.length - builtInCount;
-      const disabledCount = allPrograms.filter((item) => item.enabled === false).length;
-      document.getElementById("programCount").textContent = `${programs.length} / ${allPrograms.length}`;
-      document.getElementById("managerStats").textContent = `${builtInCount} built-in · ${customCount} custom · ${disabledCount} disabled`;
-      if (!programs.length) {
-        managerRegistry.innerHTML = '<div class="manager-empty">No programs match the current filter.</div>';
-        return;
-      }
-      managerRegistry.innerHTML = programs.map((program) => {
-        const builtIn = program.built_in !== false;
-        const enabled = program.enabled !== false;
-        return `<article class="program-card manager-program-card" data-manager-program-id="${escapeHtml(program.program_id)}">
-          <div class="manager-program-info">
-            <div class="program-card-head"><strong>${escapeHtml(program.name || program.program_id)}</strong><span class="program-kind">${escapeHtml(program.program_type || "bridge program")}</span></div>
-            <p><code>${escapeHtml(program.program_id)}</code> · ${escapeHtml(program.description || "No description")}</p>
-            <div class="manager-badges">${managerBadge(builtIn ? "BUILT-IN" : "CUSTOM")}${managerBadge(enabled ? "ENABLED" : "DISABLED", enabled ? "ok" : "warn")}</div>
-          </div>
-          <div class="manager-actions">
-            <button class="secondary" data-manager-action="edit">${builtIn ? "View" : "Edit"}</button>
-            <button class="secondary" data-manager-action="toggle" ${builtIn ? "disabled" : ""}>${builtIn ? "Built-in" : enabled ? "Disable" : "Enable"}</button>
-            <button class="secondary" data-manager-action="revalidate">${builtIn ? "Refresh" : "Validate"}</button>
-            <button data-manager-action="run" ${enabled ? "" : "disabled"}>Test</button>
-            <button class="secondary" data-manager-action="delete" ${builtIn ? "disabled" : ""}>${builtIn ? "Built-in" : "Delete"}</button>
-          </div>
-        </article>`;
-      }).join("");
-    }
-    function managerAcceptPrograms(programs) {
-      managerBridgePrograms = Array.isArray(programs) ? programs.slice() : [];
-      managerRenderPrograms();
-    }
-    async function managerRefreshPrograms() {
-      const payload = await call("/programs", {quiet: true, render: false});
-      managerAcceptPrograms(payload && Array.isArray(payload.programs) ? payload.programs : []);
-      managerShowResult(payload);
-      return payload;
-    }
-    function managerTemplate() {
-      return {
-        schema: "atr.pyautogui_program.v1",
-        program_id: "my_macro",
-        name: "My Macro",
-        description: "Bounded Windows GUI operation",
-        enabled: true,
-        program_type: "macro",
-        safe_test: false,
-        sequence: [
-          {action: "press", key: "esc"},
-          {action: "log", message: "macro completed"},
-        ],
-      };
-    }
-    function managerEditableDefinition(program) {
-      return {
-        schema: "atr.pyautogui_program.v1",
-        program_id: String(program.program_id || ""),
-        name: String(program.name || program.program_id || ""),
-        description: String(program.description || ""),
-        enabled: program.enabled !== false,
-        program_type: "macro",
-        safe_test: Boolean(program.safe_test),
-        sequence: Array.isArray(program.sequence) ? program.sequence : [],
-      };
-    }
-    function managerDefinition() {
-      let definition;
-      try { definition = JSON.parse(managerDefinitionInput.value); }
-      catch (error) { throw new Error(`Invalid JSON: ${error.message || error}`); }
-      if (!definition || typeof definition !== "object" || Array.isArray(definition)) throw new Error("Macro definition must be a JSON object.");
-      return definition;
-    }
-    function managerClearForm() {
-      document.getElementById("programForm").reset();
-      managerEditingProgramId = "";
-      managerEditingBuiltin = false;
-      managerDefinitionInput.readOnly = false;
-      document.getElementById("validateProgram").disabled = false;
-      document.getElementById("registerProgram").disabled = false;
-      document.getElementById("editorTitle").textContent = "New Macro Program";
-      document.getElementById("editorState").textContent = "DRAFT";
-      document.getElementById("programFileMeta").textContent = "New draft. Browse only loads a file; it does not register it.";
-      programEditor.hidden = true;
-    }
-    function managerOpenEditor(definition, title, state, meta, readOnly = false) {
-      programEditor.hidden = false;
-      managerDefinitionInput.value = JSON.stringify(definition, null, 2);
-      managerDefinitionInput.readOnly = readOnly;
-      document.getElementById("validateProgram").disabled = readOnly;
-      document.getElementById("registerProgram").disabled = readOnly;
-      document.getElementById("editorTitle").textContent = title;
-      document.getElementById("editorState").textContent = state;
-      document.getElementById("programFileMeta").textContent = meta;
-      programEditor.scrollIntoView({behavior: "smooth", block: "nearest"});
-    }
-    function managerEditProgram(program) {
-      const builtIn = program.built_in !== false;
-      managerEditingProgramId = program.program_id;
-      managerEditingBuiltin = builtIn;
-      managerOpenEditor(
-        managerEditableDefinition(program),
-        builtIn ? "Built-in Program" : "Edit Registered Macro",
-        builtIn ? "READ-ONLY" : "REGISTERED",
-        builtIn ? "Built-in programs are immutable and can only be tested." : String(program.source_file || "Registered macro definition."),
-        builtIn,
-      );
-    }
-    async function managerImportFile(file) {
-      if (!file.name.toLowerCase().endsWith(".json")) throw new Error("Browse accepts JSON macro definitions only.");
-      const definition = JSON.parse(await file.text());
-      managerEditingProgramId = "";
-      managerEditingBuiltin = false;
-      const fileMeta = {name: file.name, size: file.size, type: file.type || "application/json", last_modified: file.lastModified};
-      managerOpenEditor(definition, "Loaded JSON Macro", "FILE", `${file.name} · ${file.size} bytes · not registered`);
-      managerShowResult({ok: true, status: "file_loaded", file: fileMeta, registered: false, bridge_unchanged: true});
-    }
-
-    document.getElementById("programForm").addEventListener("submit", async (event) => {
-      event.preventDefault();
-      try {
-        if (managerEditingBuiltin) throw new Error("Built-in programs cannot be overwritten.");
-        const definition = managerDefinition();
-        const previousId = managerEditingProgramId;
-        const result = await call("/programs/register", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(definition), render: false});
-        managerShowResult(result);
-        if (!result.ok) return;
-        if (previousId && previousId !== definition.program_id) {
-          await call(`/programs/${encodeURIComponent(previousId)}`, {method: "DELETE", render: false, quiet: true});
-        }
-        await managerRefreshPrograms();
-        managerClearForm();
-      } catch (error) { managerShowResult({ok: false, error: String(error)}); }
-    });
-    managerRegistry.addEventListener("click", async (event) => {
-      const button = event.target.closest("button[data-manager-action]");
-      const card = event.target.closest("[data-manager-program-id]");
-      if (!button || !card) return;
-      const program = managerVisiblePrograms().find((item) => item.program_id === card.dataset.managerProgramId);
-      if (!program) return;
-      const action = button.dataset.managerAction;
-      if (action === "edit") { managerEditProgram(program); return; }
-      if (action === "toggle") {
-        if (program.built_in !== false) return;
-        const definition = managerEditableDefinition(program);
-        definition.enabled = program.enabled === false;
-        const result = await call("/programs/register", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(definition), render: false});
-        managerShowResult(result);
-        if (result.ok) await managerRefreshPrograms();
-        return;
-      }
-      if (action === "delete") {
-        if (program.built_in !== false) return;
-        const result = await call(`/programs/${encodeURIComponent(program.program_id)}`, {method: "DELETE", render: false});
-        managerShowResult(result);
-        if (result.ok) await managerRefreshPrograms();
-        return;
-      }
-      if (action === "revalidate") {
-        if (program.built_in !== false) { await managerRefreshPrograms(); return; }
-        const result = await call("/programs/validate", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(managerEditableDefinition(program)), render: false});
-        managerShowResult(result);
-        return;
-      }
-      if (action === "run") {
-        const payload = program.built_in === false
-          ? {sequence_id: `manager-${Date.now()}`, program_id: program.program_id}
-          : buildProgramPayload(program.program_id, true);
-        const result = await call("/execute", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
-        managerShowResult(result);
-      }
-    });
-    document.getElementById("refreshPrograms").addEventListener("click", managerRefreshPrograms);
-    document.getElementById("clearProgramForm").addEventListener("click", managerClearForm);
-    document.getElementById("newProgram").addEventListener("click", () => {
-      managerClearForm();
-      managerOpenEditor(managerTemplate(), "New Macro Program", "DRAFT", "Template loaded locally. Validate or add it when ready.");
-      managerDefinitionInput.focus();
-    });
-    document.getElementById("browseProgram").addEventListener("click", () => managerProgramFile.click());
-    document.getElementById("downloadProgramTemplate").addEventListener("click", () => {
-      const blob = new Blob([JSON.stringify(managerTemplate(), null, 2) + "\n"], {type: "application/json"});
-      const href = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = href;
-      anchor.download = "atr_pyautogui_program_template.json";
-      anchor.click();
-      URL.revokeObjectURL(href);
-      managerShowResult({ok: true, status: "template_downloaded", registered: false, file_name: anchor.download});
-    });
-    document.getElementById("validateProgram").addEventListener("click", async () => {
-      try {
-        const result = await call("/programs/validate", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(managerDefinition()), render: false});
-        managerShowResult(result);
-      } catch (error) { managerShowResult({ok: false, status: "validation_failed", error: String(error)}); }
-    });
-    managerProgramFile.addEventListener("change", async () => {
-      const file = managerProgramFile.files && managerProgramFile.files[0];
-      if (!file) return;
-      try { await managerImportFile(file); }
-      catch (error) { managerShowResult({ok: false, status: "file_import_failed", error: String(error)}); }
-      finally { managerProgramFile.value = ""; }
-    });
-    managerSearchInput.addEventListener("input", managerRenderPrograms);
-    managerFilterInput.addEventListener("change", managerRenderPrograms);
-    managerRenderPrograms();
-
-    const managerViews = {
-      programs: document.getElementById("managerProgramsView"),
-      examples: document.getElementById("managerExamplesView"),
-      record: document.getElementById("managerRecordView"),
-      skills: document.getElementById("managerSkillsView"),
-    };
-    document.querySelectorAll("[data-manager-tab]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const selected = button.dataset.managerTab;
-        Object.entries(managerViews).forEach(([name, view]) => { view.hidden = name !== selected; });
-        document.querySelectorAll("[data-manager-tab]").forEach((item) => {
-          item.classList.toggle("active", item === button);
-          item.classList.toggle("secondary", item !== button);
-        });
-        if (selected === "record") refreshRecordings();
-        if (selected === "examples") refreshExamples();
-        if (selected === "skills") refreshSkills();
-      });
-    });
-
-    let activeRecordingId = "";
-    let selectedRecordingId = "";
-    const RECORDING_COUNTDOWN_SECONDS = 5;
-    let recordingCountdownRemaining = 0;
-    let recordingCountdownTimer = null;
-    let recordingToggleBusy = false;
-    const recordToggle = document.getElementById("recordToggle");
-    function syncRecordingToggle() {
-      if (recordingCountdownTimer !== null) {
-        recordToggle.dataset.state = "countdown";
-        recordToggle.textContent = `STARTING IN ${recordingCountdownRemaining}`;
-        recordToggle.disabled = false;
-        return;
-      }
-      if (activeRecordingId) {
-        recordToggle.dataset.state = "recording";
-        recordToggle.textContent = "STOP RECORDING";
-      } else {
-        recordToggle.dataset.state = "idle";
-        recordToggle.textContent = "RECORD";
-      }
-      recordToggle.disabled = recordingToggleBusy;
-    }
-    function cancelRecordingCountdown() {
-      if (recordingCountdownTimer !== null) window.clearInterval(recordingCountdownTimer);
-      recordingCountdownTimer = null;
-      recordingCountdownRemaining = 0;
-      document.getElementById("recordingStatus").textContent = "Recording start cancelled.";
-      syncRecordingToggle();
-    }
-    async function startRecordingAfterCountdown() {
-      recordingToggleBusy = true;
-      syncRecordingToggle();
-      const result = await call("/recordings/start", {
-        method: "POST", headers: {"Content-Type": "application/json"}, render: false,
-        body: JSON.stringify({
-          name: document.getElementById("recordingName").value.trim(),
-          target_app: document.getElementById("recordingTargetApp").value.trim(),
-          target_window: document.getElementById("recordingTargetWindow").value.trim(),
-          image_tracking: document.getElementById("recordImageTracking").checked,
-          coordinate_fallback: document.getElementById("recordCoordinateFallback").checked,
-        }),
-      });
-      if (result.ok) activeRecordingId = selectedRecordingId = String(result.recording_id || "");
-      recordingToggleBusy = false;
-      managerShowResult(result);
-      await refreshRecordings();
-    }
+    function syncRecordingToggle() { const active=Boolean(activeRecordingId); $("recordToggle").textContent="START RECORDING"; $("recordToggle").className=""; $("recordToggle").hidden=active; $("recordCheckpoint").disabled=!active; $("recordingStatus").textContent=active?"recording":"idle"; $("recordingStatus").className=`pill ${active?"bad":""}`; }
+    function stopRecordingStatusWatch() { if(recordingStatusTimer){clearInterval(recordingStatusTimer);recordingStatusTimer=0;} }
+    function startRecordingStatusWatch() { if(recordingStatusTimer)return; recordingStatusTimer=setInterval(()=>refreshRecordingStatus().catch(()=>{}),500); }
+    async function refreshRecordingStatus() { const previous=activeRecordingId; const data=await call("/recordings/status"); activeRecordingId=data.status==="recording"?String(data.recording_id||activeRecordingId||""):""; syncRecordingToggle(); if(activeRecordingId)startRecordingStatusWatch();else stopRecordingStatusWatch(); if(previous&&!activeRecordingId)await refreshRecordings(); return data; }
     function beginRecordingCountdown() {
-      if (recordingToggleBusy || activeRecordingId || recordingCountdownTimer !== null) return;
-      recordingCountdownRemaining = RECORDING_COUNTDOWN_SECONDS;
-      document.getElementById("recordingStatus").textContent = "Recording starts after the safety countdown.";
-      recordingCountdownTimer = window.setInterval(async () => {
-        recordingCountdownRemaining -= 1;
-        if (recordingCountdownRemaining <= 0) {
-          window.clearInterval(recordingCountdownTimer);
-          recordingCountdownTimer = null;
-          recordingCountdownRemaining = 0;
-          syncRecordingToggle();
-          await startRecordingAfterCountdown();
-          return;
-        }
-        syncRecordingToggle();
-      }, 1000);
-      syncRecordingToggle();
+      let remaining=RECORDING_COUNTDOWN_SECONDS; $("recordingCountdown").hidden=false; $("recordingCountdown").textContent=remaining;
+      $("recordToggle").disabled=true;
+      countdownTimer=setInterval(async()=>{ remaining-=1; $("recordingCountdown").textContent=remaining; if(remaining<=0){ clearInterval(countdownTimer); countdownTimer=0; $("recordingCountdown").hidden=true; $("recordToggle").disabled=false; await startRecording(); } },1000);
     }
-    async function stopActiveRecording() {
-      if (!activeRecordingId || recordingToggleBusy) return;
-      recordingToggleBusy = true;
-      syncRecordingToggle();
-      const result = await call("/recordings/stop", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}", render: false});
-      if (result.ok) selectedRecordingId = String(result.recording_id || selectedRecordingId);
-      activeRecordingId = "";
-      recordingToggleBusy = false;
-      managerShowResult(result);
-      await refreshRecordings();
+    async function startRecording() { const data=await call("/recordings/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:$("recordingName").value,target_app:$("recordingTargetApp").value,target_window:$("recordingTargetWindow").value,image_tracking:$("recordingImageTracking").checked,coordinate_fallback:$("recordingCoordinateFallback").checked})}); showResult(data,"Recording start"); if(data.ok){activeRecordingId=data.recording_id;syncRecordingToggle();startRecordingStatusWatch();} }
+    async function toggleRecording() { if(!activeRecordingId)beginRecordingCountdown(); }
+    async function refreshRecordings() { const data=await call("/recordings"); recordings=Array.isArray(data.recordings)?data.recordings:[]; $("recordingList").innerHTML=recordings.map((r)=>`<article class="item" data-recording-id="${safe(r.recording_id)}"><div><strong>${safe(r.name||r.recording_id)}</strong><span>${safe(r.recording_id)} · ${safe(r.status||"recorded")} · ${Number(r.event_count||0)} events</span></div><div class="row"><button class="secondary" data-action="preview">Preview</button><button class="secondary" data-action="export">Export</button><button class="danger" data-action="delete">Delete</button></div></article>`).join("")||'<p class="muted">No recordings.</p>'; return data; }
+    async function recordingDetail(id) { return call(`/recordings/${encodeURIComponent(id)}`); }
+    function renderRecordingPreview() {
+      const preview = $("recordingPreview");
+      const frame = recordingPreviewFrames[recordingPreviewIndex];
+      preview.hidden = !frame;
+      if (!frame) return;
+      $("recordingPreviewImage").src = `data:${frame.media_type};base64,${frame.data_base64}`;
+      $("recordingPreviewMeta").textContent = `${recordingPreviewCursor + recordingPreviewIndex + 1}/${recordingPreviewTotal} · ${frame.frame_id || "frame"} · ${(Number(frame.at_ms || 0) / 1000).toFixed(2)}s · ${frame.reason || "evidence"}`;
+      $("recordingPreviewPrevious").disabled = recordingPreviewIndex <= 0 && recordingPreviewCursor <= 0;
+      $("recordingPreviewNext").disabled = recordingPreviewIndex >= recordingPreviewFrames.length - 1 && recordingPreviewNextCursor == null;
     }
-    function recordingCoverage(events) {
-      const actionByKind = {mouse_move:"move_to", mouse_click:"click", mouse_drag:"drag_to", mouse_scroll:"scroll", key_press:"press", hotkey:"hotkey", checkpoint:"screenshot", screenshot:"screenshot"};
-      const familyByAction = {move_to:"mouse", click:"mouse", drag_to:"mouse", scroll:"mouse", press:"keyboard", hotkey:"keyboard", screenshot:"screen"};
-      const actions = new Set(); const families = new Set();
-      (Array.isArray(events) ? events : []).forEach((event) => { const action = actionByKind[String(event.kind || "")]; if (action) { actions.add(action); families.add(familyByAction[action]); } });
-      return {actions:[...actions].sort(), families:[...families].sort()};
+    async function loadRecordingPreviewPage(id, cursor=0, initialIndex=0) {
+      recordingPreviewRecordingId = id;
+      recordingPreviewCursor = Math.max(0, Number(cursor || 0));
+      const data = await call(`/recordings/${encodeURIComponent(id)}/preview?cursor=${recordingPreviewCursor}&limit=${recordingPreviewLimit}`);
+      recordingPreviewFrames = Array.isArray(data.frames) ? data.frames : [];
+      recordingPreviewNextCursor = data.next_cursor == null ? null : Number(data.next_cursor);
+      recordingPreviewTotal = Number(data.total_frame_count || recordingPreviewFrames.length);
+      recordingPreviewIndex = Math.max(0, Math.min(Number(initialIndex || 0), recordingPreviewFrames.length - 1));
+      renderRecordingPreview();
+      showResult(data, recordingPreviewFrames.length ? "Recording preview" : "Recording preview has no visual frames");
     }
-    function renderRecordingCoverage(events) {
-      const coverage = recordingCoverage(events);
-      const pointerEvents = (Array.isArray(events) ? events : []).filter((event) => ["mouse_click", "mouse_drag"].includes(String(event.kind || "")));
-      const readyLocators = pointerEvents.reduce((count, event) => count + (event.kind === "mouse_drag"
-        ? Number(event.source_visual_locator && event.source_visual_locator.status === "ready") + Number(event.target_visual_locator && event.target_visual_locator.status === "ready")
-        : Number(event.visual_locator && event.visual_locator.status === "ready")), 0);
-      const expectedLocators = pointerEvents.reduce((count, event) => count + (event.kind === "mouse_drag" ? 2 : 1), 0);
-      document.getElementById("recordingCoverage").textContent = coverage.actions.length
-        ? `Coverage: ${coverage.families.join(", ")} | ${coverage.actions.join(", ")} | image locators ${readyLocators}/${expectedLocators}`
-        : "Coverage: no replayable actions captured.";
-    }
-    function recordingLocators(recording) {
-      const locators = [];
-      (Array.isArray(recording && recording.events) ? recording.events : []).forEach((event) => {
-        if (event && event.visual_locator) locators.push(event.visual_locator);
-        if (event && event.source_visual_locator) locators.push(event.source_visual_locator);
-        if (event && event.target_visual_locator) locators.push(event.target_visual_locator);
-      });
-      return locators;
-    }
-    function renderRecordingLocators(recording) {
-      const preview = document.getElementById("recordingLocatorPreview");
-      const locators = recordingLocators(recording);
-      preview.innerHTML = locators.length ? locators.map((locator) => {
-        const candidates = Array.isArray(locator.candidates) ? locator.candidates.slice(0, 2) : [];
-        const images = candidates.map((candidate) => `<img alt="${escapeHtml(candidate.kind || "locator")}" title="${escapeHtml(candidate.kind || "locator")}" src="data:image/png;base64,${escapeHtml(candidate.png_base64 || "")}">`).join("");
-        return `<article class="recording-locator-card"><strong>${escapeHtml(locator.locator_id || "locator")}</strong><span>${escapeHtml(locator.status || "unknown")} · ${escapeHtml((locator.recorded_coordinate || []).join(", "))}</span><div class="recording-locator-images">${images}</div></article>`;
-      }).join("") : '<div class="manager-empty">No image locators captured.</div>';
-    }
-    function renderRecordings(payload) {
-      const recordings = Array.isArray(payload && payload.recordings) ? payload.recordings : [];
-      const registry = document.getElementById("recordingRegistry");
-      registry.innerHTML = recordings.length ? recordings.map((item) => `
-        <article class="manager-skill-card" data-recording-id="${escapeHtml(item.recording_id || "")}">
-          <strong>${escapeHtml(item.name || item.recording_id || "Recording")}</strong>
-          <span><code>${escapeHtml(item.recording_id || "")}</code> · ${escapeHtml(item.status || "unknown")} · ${(item.events || []).length} events</span>
-          <button class="secondary" type="button" data-select-recording="${escapeHtml(item.recording_id || "")}">Select</button>
-        </article>`).join("") : '<div class="manager-empty">No saved recordings.</div>';
-    }
-    async function refreshRecordings() {
-      const status = await call("/recordings/status", {quiet: true, render: false});
-      activeRecordingId = status && status.status === "recording" ? String(status.recording_id || "") : "";
-      if (activeRecordingId && recordingCountdownTimer !== null) cancelRecordingCountdown();
-      document.getElementById("recordingStatus").textContent = activeRecordingId
-        ? `Recording ${activeRecordingId} · ${(status.events || []).length} events`
-        : selectedRecordingId ? `Selected ${selectedRecordingId}` : "No recording is active.";
-      syncRecordingToggle();
-      renderRecordingCoverage(status && Array.isArray(status.events) ? status.events : []);
-      if (activeRecordingId) renderRecordingLocators(status);
-      const listed = await call("/recordings", {quiet: true, render: false});
-      renderRecordings(listed);
-      return listed;
-    }
-    document.getElementById("recordingRegistry").addEventListener("click", async (event) => {
-      const button = event.target.closest("[data-select-recording]");
-      if (!button) return;
-      selectedRecordingId = String(button.dataset.selectRecording || "");
-      document.getElementById("recordingStatus").textContent = `Selected ${selectedRecordingId}`;
-      const selected = await call(`/recordings/${encodeURIComponent(selectedRecordingId)}`, {quiet:true, render:false});
-      renderRecordingCoverage(selected && selected.events);
-      renderRecordingLocators(selected);
-    });
-    recordToggle.addEventListener("click", async () => {
-      if (recordingCountdownTimer !== null) { cancelRecordingCountdown(); return; }
-      if (activeRecordingId) { await stopActiveRecording(); return; }
-      beginRecordingCountdown();
-    });
-    document.getElementById("recordCheckpoint").addEventListener("click", async () => {
-      const result = await call("/recordings/checkpoint", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({label: "operator checkpoint"}), render: false});
-      managerShowResult(result); await refreshRecordings();
-    });
-    document.getElementById("recordSave").addEventListener("click", async () => {
-      const recordingId = selectedRecordingId || activeRecordingId;
-      if (!recordingId) { managerShowResult({ok: false, failure_code: "SKILL_RECORDING_NOT_SELECTED"}); return; }
-      const result = await call(`/recordings/${encodeURIComponent(recordingId)}/save`, {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}", render: false});
-      managerShowResult(result); await refreshRecordings();
-    });
-    document.getElementById("refreshRecordings").addEventListener("click", refreshRecordings);
-    document.getElementById("recordSkill").addEventListener("click", async () => {
-      const recordingId = selectedRecordingId || activeRecordingId;
-      if (!recordingId) { managerShowResult({ok: false, failure_code: "SKILL_RECORDING_NOT_SELECTED"}); return; }
-      const result = await call("/skills/drafts", {
-        method: "POST", headers: {"Content-Type": "application/json"}, render: false,
-        body: JSON.stringify({
-          recording_id: recordingId,
-          skill_id: document.getElementById("recordSkillId").value.trim(),
-          version: document.getElementById("recordSkillVersion").value.trim(),
-          target_profile: document.getElementById("recordSkillProfile").value.trim(),
-        }),
-      });
-      managerShowResult(result); if (result.ok) await refreshSkills({showResult: false});
-    });
+    async function openRecordingPreview(id) { await loadRecordingPreviewPage(id, 0, 0); }
+    async function recordingAction(id,action) { if(action==="preview") await openRecordingPreview(id); if(action==="export"){const detail=await recordingDetail(id);downloadJson(`${id}.json`,detail);} if(action==="delete"){const data=await call(`/recordings/${encodeURIComponent(id)}`,{method:"DELETE"});showResult(data,"Recording delete");await refreshRecordings();} }
 
-    let managerExamples = [];
-    function renderExamples() {
-      const registry = document.getElementById("exampleRegistry");
-      registry.innerHTML = managerExamples.length ? managerExamples.map((example) => `
-        <article class="manager-skill-card" data-example-id="${escapeHtml(example.example_id || "")}">
-          <div class="program-card-head"><strong>${escapeHtml(example.name || example.example_id || "Example")}</strong>${managerBadge(example.family || "other")}</div>
-          <span>${escapeHtml(example.description || "")}</span>
-          <div class="manager-badges">${managerBadge(`${example.action_count || 0} ACTIONS`)}${managerBadge(example.safe_test ? "SAFE TEST" : "MANUAL", example.safe_test ? "ok" : "warn")}</div>
-          <div class="manager-actions">
-            <button class="secondary" type="button" data-load-example>Load Example</button>
-            <button type="button" data-run-example ${example.safe_test ? "" : "disabled"}>Run Safe Test</button>
-          </div>
-        </article>`).join("") : '<div class="manager-empty">No valid examples found.</div>';
-    }
-    async function refreshExamples() {
-      const result = await call("/examples", {quiet:true, render:false});
-      managerExamples = Array.isArray(result && result.examples) ? result.examples : [];
-      renderExamples(); managerShowResult(result); return result;
-    }
-    function loadExampleIntoEditor(example) {
-      const program = example && example.program ? example.program : {};
-      managerEditingProgramId = ""; managerEditingBuiltin = false;
-      managerOpenEditor(program, "Capability Example", "EXAMPLE", `${example.example_id || "example"} loaded locally; registry unchanged.`);
-      document.querySelector('[data-manager-tab="programs"]').click();
-    }
-    document.getElementById("openCapabilityLab").addEventListener("click", () => window.open("/capability-lab", "_blank", "noopener"));
-    document.getElementById("refreshExamples").addEventListener("click", refreshExamples);
-    document.getElementById("exampleRegistry").addEventListener("click", async (event) => {
-      const card = event.target.closest("[data-example-id]");
-      if (!card) return;
-      const example = managerExamples.find((item) => item.example_id === card.dataset.exampleId);
-      if (!example) return;
-      if (event.target.closest("[data-load-example]")) { loadExampleIntoEditor(example); return; }
-      if (event.target.closest("[data-run-example]") && example.safe_test) {
-        const result = await call("/execute", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({sequence_id:`example-${Date.now()}`, example_id:example.example_id, sequence:example.program.sequence, runtime_mode:"test", confirm_execute:false}), render:false});
-        managerShowResult(result);
-      }
-    });
-
-    let managerSkills = [];
-    function renderSkills() {
-      const registry = document.getElementById("skillRegistry");
-      registry.innerHTML = managerSkills.length ? managerSkills.map((item) => {
-        const manifest = item.manifest || item;
-        const skillId = manifest.skill_id || item.skill_id || "";
-        const version = manifest.version || item.version || "";
-        const lifecycle = manifest.lifecycle || item.lifecycle || "unknown";
-        const model = (manifest.model_snapshot || {}).model || "not used";
-        const enabled = manifest.enabled !== false;
-        return `<article class="manager-skill-card" data-skill-id="${escapeHtml(skillId)}" data-skill-version="${escapeHtml(version)}">
-          <div class="program-card-head"><strong>${escapeHtml(skillId)}@${escapeHtml(version)}</strong>${managerBadge(lifecycle, lifecycle === "deployed" ? "ok" : "warn")}</div>
-          <span>Profile <code>${escapeHtml(manifest.target_profile || "-")}</code> · Model ${escapeHtml(model)} · ${enabled ? "enabled" : "disabled"}</span>
-          <div class="manager-actions">
-            <button class="secondary" data-skill-action="annotate">Annotate</button>
-            <button class="secondary" data-skill-action="compile">Compile</button>
-            <button class="secondary" data-skill-action="validate">Validate</button>
-            <button data-skill-action="deploy">Deploy</button>
-            <button class="secondary" data-skill-action="enabled">${enabled ? "Disable" : "Enable"}</button>
-            <button class="secondary" data-skill-action="test">Test</button>
-            <button class="danger" data-skill-action="delete">Delete</button>
-          </div>
-        </article>`;
-      }).join("") : '<div class="manager-empty">No Equipment Skills registered.</div>';
-    }
-    async function refreshSkills({showResult = true} = {}) {
-      const result = await call("/skills", {quiet: true, render: false});
-      managerSkills = Array.isArray(result && result.skills) ? result.skills : [];
-      renderSkills(); if (showResult) managerShowResult(result); return result;
-    }
-    document.getElementById("refreshSkills").addEventListener("click", refreshSkills);
-    document.getElementById("skillRegistry").addEventListener("click", async (event) => {
-      const button = event.target.closest("[data-skill-action]");
-      const card = event.target.closest("[data-skill-id]");
-      if (!button || !card) return;
-      const action = String(button.dataset.skillAction || "");
-      const skill = managerSkills.find((item) => String(item.skill_id || (item.manifest || {}).skill_id) === card.dataset.skillId && String(item.version || (item.manifest || {}).version) === card.dataset.skillVersion);
-      const enabled = !skill || (skill.manifest || skill).enabled !== false;
-      const body = action === "annotate" ? {use_model: true, annotations: {}}
-        : action === "enabled" ? {enabled: !enabled}
-        : action === "test" ? {runtime_mode: "test", confirm_execute: false}
-        : {};
-      if (action === "delete") {
-        const result = await call(`/skills/${encodeURIComponent(card.dataset.skillId)}/${encodeURIComponent(card.dataset.skillVersion)}`, {
-          method: "DELETE", render: false,
-        });
-        managerShowResult(result); await refreshSkills({showResult: false}); return;
-      }
-      const result = await call(`/skills/${encodeURIComponent(card.dataset.skillId)}/${encodeURIComponent(card.dataset.skillVersion)}/${action}`, {
-        method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body), render: false,
-      });
-      managerShowResult(result); await refreshSkills({showResult: false});
-    });
-
-
-    renderPayloadPreview("live");
-    if (tokenInput.value.trim()) {
-      runHealthCheck();
-    } else {
-      renderTokenPrompt();
-      appendLog("waiting for bridge token before authenticated checks");
-      renderTimelineEntries();
-    }
+    $("health").addEventListener("click",()=>refreshHealth().then((d)=>showResult(d,"Health")));
+    $("refreshAll").addEventListener("click",()=>Promise.all([refreshHealth(),refreshPairing(),refreshPrograms(),refreshRecordings()]));
+    $("newPairingCode").addEventListener("click",async()=>{const d=await call("/pairing/new-code",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});showResult(d,"New pairing code");await refreshPairing();});
+    $("managerSearch").addEventListener("input",renderPrograms);
+    $("newProgram").addEventListener("click",()=>openEditor(TEMPLATE));
+    $("browseProgram").addEventListener("click",()=>$("programFile").click());
+    $("programFile").addEventListener("change",async()=>{const file=$("programFile").files&&$("programFile").files[0];if(file)openEditor(JSON.parse(await file.text()));});
+    $("downloadProgramTemplate").addEventListener("click",()=>downloadJson("atr_pyautogui_program_template.json",TEMPLATE));
+    $("validateProgram").addEventListener("click",validateProgram); $("registerProgram").addEventListener("click",registerProgram); $("closeProgramEditor").addEventListener("click",()=>$("programEditor").hidden=true); $("refreshPrograms").addEventListener("click",refreshPrograms);
+    $("managerProgramRegistry").addEventListener("click",(event)=>{const button=event.target.closest("[data-action]");const card=event.target.closest("[data-program-id]");if(!button||!card)return;const id=card.dataset.programId;const program=programs.find((p)=>p.program_id===id);if(button.dataset.action==="test")testProgram(id);if(button.dataset.action==="edit"&&program)openEditor(program);if(button.dataset.action==="delete")deleteProgram(id);});
+    $("recordToggle").addEventListener("click",toggleRecording); $("recordCheckpoint").addEventListener("click",async()=>showResult(await call("/recordings/checkpoint",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({label:"operator checkpoint"})}),"Recording checkpoint")); $("refreshRecordings").addEventListener("click",refreshRecordings); $("recordingList").addEventListener("click",(event)=>{const button=event.target.closest("[data-action]");const card=event.target.closest("[data-recording-id]");if(button&&card)recordingAction(card.dataset.recordingId,button.dataset.action);});
+    $("recordingPreviewPrevious").addEventListener("click",async()=>{if(recordingPreviewIndex>0){recordingPreviewIndex-=1;renderRecordingPreview();return;}if(recordingPreviewCursor>0)await loadRecordingPreviewPage(recordingPreviewRecordingId,Math.max(0,recordingPreviewCursor-recordingPreviewLimit),recordingPreviewLimit-1);});
+    $("recordingPreviewNext").addEventListener("click",async()=>{if(recordingPreviewIndex<recordingPreviewFrames.length-1){recordingPreviewIndex+=1;renderRecordingPreview();return;}if(recordingPreviewNextCursor!=null)await loadRecordingPreviewPage(recordingPreviewRecordingId,recordingPreviewNextCursor,0);});
+    $("recordingPreviewClose").addEventListener("click",()=>{$("recordingPreview").hidden=true;});
+    $("diagnosticHealth").addEventListener("click",()=>refreshHealth(true)); $("diagnosticRequestLog").addEventListener("click",async()=>$("diagnosticOutput").textContent=JSON.stringify(await call("/request-log"),null,2));
+    syncRecordingToggle(); Promise.all([refreshHealth(),refreshPairing(),refreshPrograms(),refreshRecordings(),refreshRecordingStatus()]).catch((error)=>showResult({ok:false,status:"startup_failed",message:String(error)},"Console startup"));
   </script>
 </body>
 </html>
+
 """
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "WindowsPyAutoGUIBridge/0.1"
+    server_version = f"WindowsPyAutoGUIBridge/{BRIDGE_RELEASE_VERSION}"
 
     def _authorized(self) -> bool:
-        return self.headers.get(TOKEN_HEADER, "") == TOKEN
+        supplied = self.headers.get(TOKEN_HEADER, "")
+        paired = PAIRING_MANAGER.authorized(supplied)
+        saved_connection = bool(TOKEN) and secrets.compare_digest(supplied, TOKEN)
+        return paired or saved_connection
+
+    def _is_local_request(self) -> bool:
+        peer = self.client_address[0] if self.client_address else ""
+        return peer in {"127.0.0.1", "::1", "localhost"}
+
+    @staticmethod
+    def _is_local_setup_path(path: str, method: str) -> bool:
+        if method == "GET":
+            return path in {"/health", "/programs", "/recordings", "/recordings/status", "/pairing/status", "/request-log"} or (
+                path.startswith("/recordings/") and not path.endswith("/package")
+            )
+        if method == "POST":
+            return path in {
+                "/pairing/new-code",
+                "/execute",
+                "/programs/validate",
+                "/programs/register",
+                "/recordings/start",
+                "/recordings/checkpoint",
+                "/recordings/stop",
+            } or (path.startswith("/recordings/") and path.endswith("/save"))
+        if method == "DELETE":
+            return path.startswith("/programs/") or path.startswith("/recordings/")
+        return False
+
+    @staticmethod
+    def _is_public_discovery_path(path: str, method: str) -> bool:
+        return method == "GET" and path == "/discovery"
+
+    @staticmethod
+    def _is_pairing_optional_recording_path(path: str, method: str) -> bool:
+        if method == "GET":
+            return path in {"/recordings", "/recordings/status"} or (
+                path.startswith("/recordings/") and not path.endswith("/package")
+            )
+        if method == "POST":
+            return path in {
+                "/recordings/start",
+                "/recordings/checkpoint",
+                "/recordings/stop",
+            } or (path.startswith("/recordings/") and path.endswith("/save"))
+        if method == "DELETE":
+            return path.startswith("/recordings/")
+        return False
+
+    def _has_route_access(self, path: str, method: str) -> bool:
+        if self._is_public_discovery_path(path, method):
+            return True
+        if self._is_pairing_optional_recording_path(path, method):
+            return True
+        if self._is_local_request() and self._is_local_setup_path(path, method):
+            return True
+        return self._authorized()
 
     def _write_audit_event(self, event: dict[str, Any]) -> None:
         try:
@@ -8657,14 +6296,9 @@ class Handler(BaseHTTPRequestHandler):
     def _audit_request(self, *, auth_ok: bool | None, status: str = "") -> None:
         self._write_audit_event({"auth_ok": auth_ok, "status": status})
 
-    def _require_auth(self) -> bool:
-        auth_ok = self._authorized()
+    def _require_auth(self, path: str, method: str) -> bool:
+        auth_ok = self._has_route_access(path, method)
         self._audit_request(auth_ok=auth_ok, status="authorized" if auth_ok else "auth_required")
-        if auth_ok and TOKEN:
-            try:
-                CONTROLLER_RESOLVER.observe_authenticated_peer(self.client_address[0] if self.client_address else "")
-            except Exception:
-                pass
         if auth_ok:
             return True
         self._send(401, {"ok": False, "status": "auth_required", "failure_code": "PYAUTOGUI_AUTH_FAILED", "token_header_present": bool(self.headers.get(TOKEN_HEADER, ""))})
@@ -8686,8 +6320,66 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _send_text(self, status: int, value: str) -> None:
+        data = value.encode("ascii")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/plain; charset=us-ascii")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _require_json_content_type(self) -> bool:
+        media_type = str(self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+        if media_type == "application/json":
+            return True
+        self._send(
+            415,
+            {
+                "ok": False,
+                "status": "unsupported_media_type",
+                "failure_code": "PYAUTOGUI_JSON_CONTENT_TYPE_REQUIRED",
+                "message": "Mutating Bridge requests require Content-Type: application/json.",
+            },
+        )
+        return False
+
+    def _read_json_body(self, *, max_bytes: int) -> tuple[bool, dict[str, Any]]:
+        try:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+        except (TypeError, ValueError):
+            length = -1
+        if length < 0 or length > max_bytes:
+            self._send(
+                413,
+                {
+                    "ok": False,
+                    "status": "request_too_large",
+                    "failure_code": "PYAUTOGUI_REQUEST_TOO_LARGE",
+                    "message": f"JSON request body must not exceed {max_bytes} bytes.",
+                },
+            )
+            return False, {}
+        try:
+            payload = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            if not isinstance(payload, dict):
+                raise ValueError("payload must be object")
+        except Exception:
+            self._send(400, {"ok": False, "status": "bad_request", "failure_code": "PYAUTOGUI_BAD_JSON"})
+            return False, {}
+        return True, payload
+
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed_url = urlparse(self.path)
+        path = parsed_url.path
+        query = parse_qs(parsed_url.query)
+        if path == "/ping":
+            # Supervisor probes must stay tiny and out of the operator audit stream.
+            self._send_text(200, f"ok {BRIDGE_RELEASE_VERSION}")
+            return
+        if path == "/discovery" and self._is_local_request():
+            # Compatibility for a supervisor launched before /ping existed.
+            self._send(200, {"ok": True, "server_version": self.server_version})
+            return
         if path in {"/", "/index.html"}:
             self._audit_request(auth_ok=None, status="served_gui")
             self._send_html(200, INDEX_HTML)
@@ -8701,13 +6393,30 @@ class Handler(BaseHTTPRequestHandler):
             self._audit_request(auth_ok=None, status="served_capability_lab")
             self._send_html(200, html)
             return
-        if not self._require_auth():
+        if not self._require_auth(path, "GET"):
+            return
+        if path == "/discovery":
+            self._send(
+                200,
+                {
+                    "ok": True,
+                    "status": "ready",
+                    "bridge": "windows_pyautogui",
+                    "server_version": self.server_version,
+                    "hostname": socket.gethostname(),
+                    "platform": "windows" if os.name == "nt" else sys.platform,
+                    "pairing": PAIRING_MANAGER.status(),
+                },
+            )
+            return
+        if path == "/pairing/status":
+            self._send(200, PAIRING_MANAGER.status())
             return
         if path == "/health":
             self._send(200, _health())
             return
-        if path == "/controller":
-            self._send(200, CONTROLLER_RESOLVER.resolve(allow_scan=False))
+        if path == "/update/status":
+            self._send(200, UPDATE_MANAGER.status())
             return
         if path == "/programs":
             self._send(200, _programs())
@@ -8741,19 +6450,22 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/recordings/status":
             self._send(200, RECORDING_MANAGER.status())
             return
-        if path == "/skills":
-            status, result = _atr_api_request("GET", "/api/equipment/skills")
+        if path.startswith("/recordings/") and path.endswith("/preview"):
+            recording_id = unquote(path.split("/recordings/", 1)[1].rsplit("/preview", 1)[0].strip("/"))
+            try:
+                cursor = int((query.get("cursor") or ["0"])[0])
+                limit = int((query.get("limit") or ["16"])[0])
+            except (TypeError, ValueError):
+                cursor, limit = 0, 16
+            payload = RECORDING_MANAGER.preview(recording_id, cursor=cursor, limit=limit)
+            self._send(200 if payload.get("ok") else 404, payload)
+            return
+        if path.startswith("/recordings/") and path.endswith("/package"):
+            recording_id = unquote(path.split("/recordings/", 1)[1].rsplit("/package", 1)[0].strip("/"))
+            result = RECORDING_MANAGER.package(recording_id)
+            status = 200 if result.get("ok") else 404 if result.get("status") == "not_found" else 413
             self._send(status, result)
             return
-        if path.startswith("/skills/"):
-            parts = [unquote(item) for item in path.split("/") if item]
-            if len(parts) == 3:
-                status, result = _atr_api_request(
-                    "GET",
-                    f"/api/equipment/skills/{quote(parts[1], safe='')}/{quote(parts[2], safe='')}",
-                )
-                self._send(status, result)
-                return
         if path.startswith("/recordings/"):
             recording_id = unquote(path.split("/recordings/", 1)[1].strip("/"))
             result = RECORDING_MANAGER.get(recording_id)
@@ -8767,33 +6479,54 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"ok": False, "status": "not_found"})
 
     def do_POST(self) -> None:
-        if not self._require_auth():
-            return
         path = urlparse(self.path).path
+        if path != "/pairing/complete" and not self._require_auth(path, "POST"):
+            return
+        if not self._require_json_content_type():
+            return
+        if path == "/update/stage":
+            body_ok, payload = self._read_json_body(max_bytes=36 * 1024 * 1024)
+            if not body_ok:
+                return
+            result = UPDATE_MANAGER.stage(payload)
+            self._write_audit_event({"auth_ok": True, "status": "update_stage", "result_ok": bool(result.get("ok")), "version": str(result.get("version") or ""), "failure_code": str(result.get("failure_code") or "")})
+            self._send(200 if result.get("ok") else 400, result)
+            return
+        if path in {"/update/apply", "/update/rollback"}:
+            body_ok, _payload = self._read_json_body(max_bytes=16 * 1024)
+            if not body_ok:
+                return
+            mode = "apply" if path.endswith("/apply") else "rollback"
+            prepared = UPDATE_MANAGER.prepare_apply() if mode == "apply" else UPDATE_MANAGER.prepare_rollback()
+            if not prepared.get("ok"):
+                self._send(409, prepared)
+                return
+            result = _launch_self_updater(mode, prepared)
+            self._write_audit_event({"auth_ok": True, "status": f"update_{mode}", "result_ok": bool(result.get("ok")), "version": str(result.get("version") or ""), "failure_code": str(result.get("failure_code") or "")})
+            self._send(202 if result.get("ok") else 500, result)
+            if result.get("ok"):
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+            return
+        if path in {"/pairing/new-code", "/pairing/complete"}:
+            body_ok, payload = self._read_json_body(max_bytes=16 * 1024)
+            if not body_ok:
+                return
+            if path == "/pairing/new-code":
+                result = PAIRING_MANAGER.issue_code()
+                self._send(200 if result.get("ok") else 409, result)
+                return
+            result = PAIRING_MANAGER.complete(str(payload.get("pairing_code") or ""))
+            self._send(200 if result.get("ok") else 429 if result.get("status") == "locked" else 400, result)
+            return
         recording_save = path.startswith("/recordings/") and path.endswith("/save")
-        skill_action = path.startswith("/skills/")
         if path not in {
             "/execute", "/screenshot", "/locators/capture", "/programs/validate", "/programs/register",
             "/recordings/start", "/recordings/checkpoint", "/recordings/stop",
-            "/controller/discover", "/controller/select",
-        } and not recording_save and not skill_action:
+        } and not recording_save:
             self._send(404, {"ok": False, "status": "not_found"})
             return
-        length = int(self.headers.get("Content-Length", "0") or "0")
-        try:
-            payload = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
-            if not isinstance(payload, dict):
-                raise ValueError("payload must be object")
-        except Exception:
-            self._send(400, {"ok": False, "status": "bad_request", "failure_code": "PYAUTOGUI_BAD_JSON"})
-            return
-        if path == "/controller/discover":
-            result = CONTROLLER_RESOLVER.discover()
-            self._send(200 if result.get("ok") else 409, result)
-            return
-        if path == "/controller/select":
-            result = CONTROLLER_RESOLVER.select(str(payload.get("controller_url") or ""))
-            self._send(200 if result.get("ok") else 400, result)
+        body_ok, payload = self._read_json_body(max_bytes=2 * 1024 * 1024)
+        if not body_ok:
             return
         if path == "/recordings/start":
             result = RECORDING_MANAGER.start(
@@ -8802,6 +6535,7 @@ class Handler(BaseHTTPRequestHandler):
                 target_window=str(payload.get("target_window") or ""),
                 image_tracking=payload.get("image_tracking") is not False,
                 coordinate_fallback=payload.get("coordinate_fallback") is True,
+                mask_regions=payload.get("mask_regions"),
             )
             self._send(200 if result.get("ok") else 409, result)
             return
@@ -8818,50 +6552,6 @@ class Handler(BaseHTTPRequestHandler):
             result = RECORDING_MANAGER.save(recording_id)
             self._send(200 if result.get("ok") else 409, result)
             return
-        if path == "/skills/drafts":
-            recording_id = str(payload.get("recording_id") or "").strip()
-            recording = RECORDING_MANAGER.get(recording_id)
-            if not recording.get("ok") or recording.get("status") != "saved":
-                self._send(409, {"ok": False, "status": "blocked", "failure_code": "SKILL_RECORDING_NOT_SAVED"})
-                return
-            recording.pop("ok", None)
-            status, result = _atr_api_request(
-                "POST",
-                "/api/equipment/skills/drafts",
-                {
-                    "recording": recording,
-                    "skill_id": str(payload.get("skill_id") or ""),
-                    "version": str(payload.get("version") or "1.0.0"),
-                    "target_profile": str(payload.get("target_profile") or "local_program1"),
-                },
-            )
-            self._send(status, result)
-            return
-        if skill_action:
-            parts = [unquote(item) for item in path.split("/") if item]
-            if len(parts) == 4 and parts[0] == "skills":
-                skill_id, version, action = parts[1], parts[2], parts[3]
-                if action in {"annotate", "compile", "validate", "deploy", "enabled", "test"}:
-                    forwarded = dict(payload)
-                    if action == "annotate":
-                        forwarded.setdefault("use_model", True)
-                        forwarded.setdefault("annotations", {})
-                    elif action == "deploy":
-                        forwarded.setdefault("bridge_id", f"windows-{HOST}-{PORT}")
-                    elif action == "enabled":
-                        forwarded["enabled"] = bool(forwarded.get("enabled", True))
-                    elif action == "test":
-                        forwarded["runtime_mode"] = str(forwarded.get("runtime_mode") or "test")
-                        forwarded["confirm_execute"] = bool(forwarded.get("confirm_execute", False))
-                    status, result = _atr_api_request(
-                        "POST",
-                        f"/api/equipment/skills/{quote(skill_id, safe='')}/{quote(version, safe='')}/{action}",
-                        forwarded,
-                    )
-                    self._send(status, result)
-                    return
-            self._send(404, {"ok": False, "status": "not_found"})
-            return
         if path == "/screenshot":
             self._send(200, _screenshot_response(payload))
             return
@@ -8874,7 +6564,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, result)
             return
         if path == "/programs/register":
-            result = _register_program_definition(payload)
+            deployment = payload.get("_atr_deployment") if isinstance(payload.get("_atr_deployment"), dict) else {}
+            managed = self._authorized() and str(deployment.get("managed_by") or "") == "atr_equipment_skill"
+            definition = payload.get("program") if managed and isinstance(payload.get("program"), dict) else payload
+            result = _register_program_definition(
+                definition,
+                managed=managed,
+                deployment_sha256=str(deployment.get("program_sha256") or "") if managed else "",
+            )
             self._write_audit_event({"auth_ok": True, "status": "program_register", "program_id": str(payload.get("program_id") or ""), "result_ok": bool(result.get("ok")), "failure_code": str(result.get("failure_code") or "")})
             self._send(200 if result.get("ok") else 400, result)
             return
@@ -8895,23 +6592,22 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, result)
 
     def do_DELETE(self) -> None:
-        if not self._require_auth():
-            return
         path = urlparse(self.path).path
-        if path.startswith("/skills/"):
-            parts = [unquote(item) for item in path.split("/") if item]
-            if len(parts) == 3 and parts[0] == "skills":
-                status, result = _atr_api_request(
-                    "DELETE",
-                    f"/api/equipment/skills/{quote(parts[1], safe='')}/{quote(parts[2], safe='')}",
-                )
-                self._send(status, result)
-                return
+        if not self._require_auth(path, "DELETE"):
+            return
+        if path.startswith("/recordings/"):
+            recording_id = unquote(path.split("/recordings/", 1)[1].strip("/"))
+            result = RECORDING_MANAGER.delete(recording_id)
+            status = 200 if result.get("ok") else 404 if result.get("status") == "not_found" else 409
+            self._send(status, result)
+            return
         if not path.startswith("/programs/"):
             self._send(404, {"ok": False, "status": "not_found"})
             return
         program_id = unquote(path.split("/programs/", 1)[1].strip("/"))
-        result = _delete_custom_program(program_id)
+        query = parse_qs(urlparse(self.path).query)
+        allow_managed = self._authorized() and str((query.get("source") or [""])[0]) == "atr"
+        result = _delete_custom_program(program_id, allow_managed=allow_managed)
         self._write_audit_event({"auth_ok": True, "status": "program_delete", "program_id": program_id, "result_ok": bool(result.get("ok")), "failure_code": str(result.get("failure_code") or "")})
         status = 200 if result.get("ok") else 404 if result.get("failure_code") == "PYAUTOGUI_PROGRAM_NOT_FOUND" else 400
         self._send(status, result)
@@ -8934,7 +6630,7 @@ BridgeRequestHandler = Handler
 
 def _parse_cli_args() -> argparse.Namespace:
     """Apply optional CLI overrides used by the Windows packaging scripts."""
-    global HOST, PORT, TOKEN, TOKEN_HEADER, ARTIFACT_ROOT, LOCATOR_ROOT, UTM_EXPORT_ROOT, PROGRAM_ROOT, RECORDING_ROOT, DEMO_ROOT, RECORDING_MANAGER, BRIDGE_PLATFORM
+    global HOST, PORT, TOKEN, TOKEN_HEADER, ARTIFACT_ROOT, LOCATOR_ROOT, UTM_EXPORT_ROOT, PROGRAM_ROOT, RECORDING_ROOT, DEMO_ROOT, RECORDING_MANAGER, BRIDGE_PLATFORM, PAIRING_MANAGER, UPDATE_MANAGER
     parser = argparse.ArgumentParser(description="ATR Windows PyAutoGUI bridge server")
     parser.add_argument("--host", default=None, help="Bind host. Overrides WINDOWS_PYAUTOGUI_BRIDGE_HOST.")
     parser.add_argument("--port", type=int, default=None, help="Bind port. Overrides WINDOWS_PYAUTOGUI_BRIDGE_PORT.")
@@ -8978,24 +6674,22 @@ def _parse_cli_args() -> argparse.Namespace:
         DEMO_ROOT = Path(args.demo_dir)
     if args.allow_no_token and args.token is None and not TOKEN:
         TOKEN = ""
-    _reset_controller_resolver()
+    PAIRING_MANAGER = PairingManager(ARTIFACT_ROOT / "pairing.json")
+    if not PAIRING_MANAGER.status().get("paired"):
+        PAIRING_MANAGER.issue_code()
+    UPDATE_MANAGER = _new_update_manager()
     return args
 
 
 def main() -> None:
     args = _parse_cli_args()
-    if not TOKEN and not args.allow_no_token:
-        raise SystemExit(
-            "WINDOWS_PYAUTOGUI_BRIDGE_TOKEN is required. "
-            "Set it before starting the bridge, pass --token, or use --allow-no-token for local bench tests."
-        )
     ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
     LOCATOR_ROOT.mkdir(parents=True, exist_ok=True)
     RECORDING_ROOT.mkdir(parents=True, exist_ok=True)
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     pyautogui, _ = _load_pyautogui()
     print(f"Windows PyAutoGUI bridge listening on {HOST}:{PORT}")
-    print(f"Token authentication: {'enabled' if TOKEN else 'disabled'}")
+    print(f"Pairing: {'paired' if PAIRING_MANAGER.status().get('paired') else 'required'}")
     print(f"Artifact root: {ARTIFACT_ROOT}")
     print(f"Locator root: {LOCATOR_ROOT}")
     print(f"UTM export root: {UTM_EXPORT_ROOT}")

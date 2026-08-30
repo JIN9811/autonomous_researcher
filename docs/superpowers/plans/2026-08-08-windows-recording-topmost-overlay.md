@@ -86,12 +86,12 @@ Expected: existing and new manager tests pass.
 - Modify: `Pyautogui_server_for_window/bridge/windows_pyautogui_bridge_server.py`
 
 **Interfaces:**
-- Produces: DOM element `recordToggle`, `RECORDING_COUNTDOWN_SECONDS = 5`, `beginRecordingCountdown()`, `stopActiveRecording()`, and `syncRecordingToggle()`.
+- Produces: DOM element `recordToggle`, `RECORDING_COUNTDOWN_SECONDS = 5`, `beginRecordingCountdown()`, active-only status polling, and `syncRecordingToggle()`.
 - Consumes: unchanged `/recordings/start`, `/recordings/status`, and `/recordings/stop` routes.
 
 - [ ] **Step 1: Write failing static and browser tests**
 
-Assert that only `recordToggle` exists, the countdown constant is five, a second click cancels countdown or stops active recording, and status refresh restores `STOP RECORDING` for an active server recording.
+Assert that `recordToggle` is start-only, the countdown constant is five, the control is hidden while active, and status refresh restores idle after the native overlay performs the only user-visible Stop action.
 
 - [ ] **Step 2: Verify RED**
 

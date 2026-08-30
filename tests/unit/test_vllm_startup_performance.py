@@ -279,7 +279,7 @@ def test_vllm_backend_bounds_common_task_tokens() -> None:
     assert VLLMBackend._max_tokens_for_metadata({"task_type": "tool_formatting", "max_tokens": 12}) == 12
 
 
-def test_nemoclaw_vllm_deployment_memory_profile_allows_three_resident_models() -> None:
+def test_nemoclaw_vllm_deployment_memory_profile_allows_resident_gemma4_models() -> None:
     deploy_path = Path(__file__).resolve().parents[2] / "deploy" / "nemoclaw-vllm.yaml"
     docs = [doc for doc in yaml.safe_load_all(deploy_path.read_text(encoding="utf-8")) if isinstance(doc, dict)]
 
@@ -294,6 +294,6 @@ def test_nemoclaw_vllm_deployment_memory_profile_allows_three_resident_models() 
             memory_profile[name] = args[args.index("--gpu-memory-utilization") + 1]
 
     assert memory_profile == {
-        "vllm-gemma4-31b": "0.37",
-        "vllm-gemma4-e4b": "0.20",
+        "vllm-gemma4-31b": "0.55",
+        "vllm-gemma4-e4b": "0.14",
     }

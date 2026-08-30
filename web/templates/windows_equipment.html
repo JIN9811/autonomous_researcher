@@ -46,9 +46,6 @@ Modification guide:
           <p class="subhead">
             공통 장비 프로파일을 선택해 연결, 테스트, 런타임, 증거를 같은 계약으로 관리합니다. 현재 UTM은 Windows PyAutoGUI bridge 패키지를 사용하는 첫 번째 장비 프로파일입니다.
           </p>
-          <div class="equipment-workspace-actions">
-            <button id="btn-equipment-open-bridge-gui" class="btn primary">Open Windows GUI</button>
-          </div>
         </div>
         <article class="status-card">
           <div class="status-head">
@@ -68,135 +65,40 @@ Modification guide:
         </article>
       </section>
 
-      <section id="equipment-local-bridge-panel" class="panel equipment-local-bridge-panel" aria-label="Local development PyAutoGUI bridge">
-        <div class="equipment-local-bridge-copy">
-          <span class="eyebrow">Local Development Target</span>
-          <h2>PyAutoGUI Bridge on This PC</h2>
-          <p>현재 Ubuntu 데스크톱에서 동일한 API, GUI, Program Manager, 매크로 계약을 실제로 검증합니다. Windows 배포 대상과 자동 전환되지 않습니다.</p>
-        </div>
-        <div class="equipment-local-bridge-state">
-          <span id="equipment-local-bridge-dot" class="status-dot idle"></span>
-          <div>
-            <strong id="equipment-local-bridge-status">Stopped</strong>
-            <p id="equipment-local-bridge-detail">localhost:8767 · not selected</p>
-          </div>
-        </div>
-        <div class="equipment-local-bridge-actions">
-          <button id="btn-equipment-local-start" class="btn primary">Start</button>
-          <button id="btn-equipment-local-stop" class="btn danger">Stop</button>
-          <button id="btn-equipment-local-health" class="btn">Health</button>
-          <button id="btn-equipment-local-select" class="btn">Select</button>
-        </div>
-      </section>
-
-      <section class="panel equipment-profile-overview" aria-label="Common equipment profile workspace">
+      <section id="equipment-runtime-overview" class="panel equipment-profile-overview" aria-label="Canonical Lab Equipment runtime overview">
         <article id="equipment-profile-list">
-          <h2>Equipment Profiles</h2>
+          <span class="eyebrow">Equipment Profile</span>
+          <h2>Profile &amp; Worker</h2>
           <div id="equipment-profile-items" class="equipment-candidates">Loading profiles.</div>
         </article>
         <article id="equipment-profile-connection">
-          <h2>Connection / Readiness</h2>
+          <span class="eyebrow">Connection</span>
+          <h2>Bridge Readiness</h2>
           <p id="equipment-profile-connection-status" class="hint">Loading selected profile state.</p>
         </article>
         <article id="equipment-profile-runtime">
-          <h2>Test / Runtime</h2>
-          <div class="button-row">
-            <button id="btn-equipment-profile-preflight" class="btn">Preflight</button>
-            <button id="btn-equipment-profile-test" class="btn primary">Run Test Bridge</button>
-          </div>
-          <p class="hint">Test uses the selected UTM profile and existing bridge contract with simulation enabled. Live execution remains available through the UTM controls below.</p>
+          <span class="eyebrow">Canonical Runtime</span>
+          <h2 id="equipment-runtime-execution-id">No active execution</h2>
+          <p id="equipment-profile-runtime-status" class="hint">No canonical Equipment execution yet.</p>
+          <p id="equipment-runtime-reference" class="hint">Profile, Skill/program, worker, and mode are resolved at stage entry.</p>
         </article>
         <article id="equipment-profile-evidence">
-          <h2>Evidence / Analysis Handoff</h2>
+          <span class="eyebrow">Handoff</span>
+          <h2>Evidence &amp; Analysis</h2>
           <p id="equipment-profile-evidence-status" class="hint">No profile test result yet.</p>
+          <p id="equipment-runtime-evidence-count" class="hint">0 evidence items</p>
         </article>
-      </section>
-
-      <section class="panel equipment-command-panel" aria-label="Windows bridge operator command rail">
-        <div class="equipment-command-banner" id="equipment-command-banner">
-          <div>
-            <span class="eyebrow">Operator Console</span>
-            <strong id="equipment-command-title">Ready for Windows bridge setup</strong>
-            <p id="equipment-command-detail">Scan and save a token-verified Windows PC, then run readiness, preflight, simulation, and evidence checks from left to right.</p>
-          </div>
-          <span id="equipment-command-pill" class="badge idle">idle</span>
-        </div>
-        <div class="equipment-command-rail">
-          <button class="equipment-command-card" data-equipment-proxy="btn-equipment-scan" title="Scan the selected subnet and show token-verified Windows bridge candidates.">
-            <span>01</span><strong>Scan</strong><small>find bridge PC</small>
-          </button>
-          <button class="equipment-command-card" data-equipment-proxy="btn-equipment-readiness" title="Check saved bridge, UTM profile, token, locators, and screen assertion readiness.">
-            <span>02</span><strong>Readiness</strong><small>passive gate</small>
-          </button>
-          <button class="equipment-command-card" data-equipment-proxy="btn-equipment-live-preflight" title="Run non-actuating live preflight against the selected Windows bridge.">
-            <span>03</span><strong>Preflight</strong><small>no motion</small>
-          </button>
-          <button class="equipment-command-card" data-equipment-proxy="btn-equipment-live-validation" title="Build the live UTM validation report without sending /execute.">
-            <span>04</span><strong>Validation</strong><small>report</small>
-          </button>
-          <button class="equipment-command-card" data-equipment-proxy="btn-equipment-utm" title="Run the configured UTM protocol. Use simulation mode unless the Windows PC and UTM fixture are physically ready.">
-            <span>05</span><strong>UTM Run</strong><small>protocol</small>
-          </button>
-          <button class="equipment-command-card" data-equipment-proxy="btn-equipment-evidence-audit" title="Audit latest screen evidence, CSV pull, request log, and proof checklist before Analysis handoff.">
-            <span>06</span><strong>Evidence</strong><small>handoff proof</small>
-          </button>
-          <button class="equipment-command-card equipment-command-danger" data-equipment-proxy="btn-equipment-abort" title="Dispatch the registered UTM stop/abort recovery macro. This bypasses locator readiness but still requires explicit confirmation.">
-            <span>07</span><strong>Abort</strong><small>safe recovery</small>
-          </button>
-        </div>
-      </section>
-
-      <section class="panel equipment-proof-dashboard-panel" aria-label="UTM visual-control proof dashboard">
-        <div class="equipment-proof-dashboard-head">
-          <div>
-            <span class="eyebrow">UTM Proof Gates</span>
-            <h2>Analysis handoff evidence dashboard</h2>
-          </div>
-          <p class="hint">Macro success alone is not enough. These gates must close before Lab Equipment hands UTM data to Analysis.</p>
-        </div>
-        <div id="equipment-proof-dashboard" class="equipment-proof-dashboard">
-          <article id="equipment-gate-windows-bridge" class="equipment-proof-gate idle">
-            <span>Windows Bridge</span>
-            <strong id="equipment-gate-windows-bridge-status">not checked</strong>
-            <p id="equipment-gate-windows-bridge-detail">Saved candidate, token, and request audit are not loaded yet.</p>
-          </article>
-          <article id="equipment-gate-utm-program" class="equipment-proof-gate idle">
-            <span>UTM Program</span>
-            <strong id="equipment-gate-utm-program-status">not checked</strong>
-            <p id="equipment-gate-utm-program-detail">Registered UTM protocol and locator readiness are not loaded yet.</p>
-          </article>
-          <article id="equipment-gate-vision-preconditions" class="equipment-proof-gate idle">
-            <span>Vision Preconditions</span>
-            <strong id="equipment-gate-vision-preconditions-status">waiting</strong>
-            <p id="equipment-gate-vision-preconditions-detail">Fixture occupancy, robot-clear, and motion frames are required.</p>
-          </article>
-          <article id="equipment-gate-screen-state" class="equipment-proof-gate idle">
-            <span>Screen State</span>
-            <strong id="equipment-gate-screen-state-status">waiting</strong>
-            <p id="equipment-gate-screen-state-detail">before_start, after_start, and after_complete screenshots are required.</p>
-          </article>
-          <article id="equipment-gate-physical-crosscheck" class="equipment-proof-gate idle">
-            <span>Physical Cross-check</span>
-            <strong id="equipment-gate-physical-crosscheck-status">waiting</strong>
-            <p id="equipment-gate-physical-crosscheck-detail">UTM motion must be confirmed by Vision or data-stream evidence.</p>
-          </article>
-          <article id="equipment-gate-data-artifact" class="equipment-proof-gate idle">
-            <span>Data Artifact</span>
-            <strong id="equipment-gate-data-artifact-status">waiting</strong>
-            <p id="equipment-gate-data-artifact-detail">Linux CSV pull, save/export responsibility, and parse probe must pass.</p>
-          </article>
-          <article id="equipment-gate-analysis-handoff" class="equipment-proof-gate idle">
-            <span>Analysis Handoff</span>
-            <strong id="equipment-gate-analysis-handoff-status">blocked</strong>
-            <p id="equipment-gate-analysis-handoff-detail">Proof package is not ready for Analysis.</p>
-          </article>
-        </div>
       </section>
 
       <div id="equipment-inline-controls" class="equipment-inline-controls">
-      <section class="panel equipment-inline-grid">
+      <section id="equipment-connection-workspace" class="panel equipment-connection-workspace" aria-label="Equipment worker connection workspace">
+        <div class="equipment-section-heading">
+          <div><span class="eyebrow">Low-Level Worker</span><h2>Connection &amp; Profile</h2></div>
+          <button id="btn-equipment-open-bridge-gui" class="btn">Open Windows GUI</button>
+        </div>
+        <div class="equipment-connection-grid">
         <article>
-          <h2>1. Scan Network</h2>
+          <h3>Discover Worker</h3>
           <label class="planning-message-label">
             Subnet
             <input id="equipment-subnet-input" class="text-input" placeholder="비우면 현재 네트워크 /24 자동 검색, 예: 192.168.0.0/24" />
@@ -205,34 +107,177 @@ Modification guide:
             Port
             <input id="equipment-port-input" class="text-input" value="8765" />
           </label>
-          <label class="planning-message-label">
-            Token
-            <input id="equipment-token-input" class="text-input" type="password" placeholder="Windows bridge token" />
-          </label>
           <div class="button-row">
             <button id="btn-equipment-scan" class="btn primary">Scan</button>
             <button id="btn-equipment-refresh" class="btn">Refresh Saved</button>
           </div>
         </article>
-
         <article>
-          <h2>2. Candidates</h2>
+          <h3>Candidates</h3>
           <div id="equipment-candidates" class="equipment-candidates">No scan yet.</div>
+        </article>
+        <article>
+          <h3>Saved Workers</h3>
+          <div id="equipment-saved-candidates" class="equipment-candidates equipment-saved-candidates-scroll">No saved candidate.</div>
+        </article>
+        <article id="equipment-local-bridge-panel" class="equipment-local-bridge-panel" aria-label="Local development PyAutoGUI bridge">
+          <div class="equipment-local-bridge-copy">
+            <h3>Bridge on This PC</h3>
+            <p>Windows 배포 전 동일 API와 매크로 계약을 로컬에서 검증합니다.</p>
+          </div>
+          <div class="equipment-local-bridge-state">
+            <span id="equipment-local-bridge-dot" class="status-dot idle"></span>
+            <div><strong id="equipment-local-bridge-status">Stopped</strong><p id="equipment-local-bridge-detail">localhost:8767 · not selected</p></div>
+          </div>
+          <div class="equipment-local-bridge-actions">
+            <button id="btn-equipment-local-start" class="btn primary">Start</button>
+            <button id="btn-equipment-local-stop" class="btn danger">Stop</button>
+            <button id="btn-equipment-local-health" class="btn">Health</button>
+            <button id="btn-equipment-local-select" class="btn">Select</button>
+          </div>
+        </article>
+        </div>
+      </section>
+
+      <section id="equipment-agentic-progress" class="panel equipment-agentic-progress-panel" aria-label="Lab Equipment agentic progress">
+        <div class="equipment-section-heading">
+          <div><span class="eyebrow">Agentic Progress</span><h2>Recording to verified equipment result</h2></div>
+          <span id="equipment-command-pill" class="badge idle">idle</span>
+        </div>
+        <div class="equipment-command-banner" id="equipment-command-banner">
+          <div><strong id="equipment-command-title">Ready for equipment setup</strong><p id="equipment-command-detail">Select a Profile and Worker, prepare a Skill, then execute and verify one canonical run.</p></div>
+        </div>
+        <div id="equipment-agentic-progress-stages" class="equipment-agentic-progress-stages">
+          <article data-equipment-stage="recording"><span>01</span><strong>Record</strong><small>time-series buffer</small></article>
+          <article data-equipment-stage="transfer"><span>02</span><strong>Transfer</strong><small>worker to Linux</small></article>
+          <article data-equipment-stage="annotation"><span>03</span><strong>Annotate</strong><small>selected LLM</small></article>
+          <article data-equipment-stage="skill"><span>04</span><strong>Build Skill</strong><small>validate &amp; deploy</small></article>
+          <article data-equipment-stage="preflight"><span>05</span><strong>Preflight</strong><small>profile gates</small></article>
+          <article data-equipment-stage="execute"><span>06</span><strong>Execute</strong><small>bounded macro</small></article>
+          <article data-equipment-stage="verify"><span>07</span><strong>Verify</strong><small>screen/data/vision</small></article>
+          <article data-equipment-stage="handoff"><span>08</span><strong>Handoff</strong><small>analysis evidence</small></article>
+        </div>
+      </section>
+
+      <section class="equipment-authoring-grid">
+        <article id="equipment-skill-recording" class="panel equipment-work-card">
+          <div class="equipment-section-heading">
+            <div><span class="eyebrow">Pre-processing</span><h2>Skill Recording</h2></div>
+            <button id="btn-equipment-refresh-recordings" class="btn mini" type="button">Refresh Recordings</button>
+          </div>
+          <p class="hint">Windows에서 저장한 녹화 패키지를 Linux로 가져와 선택된 Local/API LLM 어노테이션이 가능한 Skill 초안으로 만듭니다.</p>
+          <div id="equipment-worker-recordings" class="equipment-skill-list">Select a connected Worker to load its recordings.</div>
+          <div class="equipment-form-grid">
+            <label class="planning-message-label">Skill ID<input id="equipment-skill-id" class="text-input" placeholder="compression_test" /></label>
+            <label class="planning-message-label">Version<input id="equipment-skill-version" class="text-input" value="1.0.0" /></label>
+            <label class="planning-message-label">Selected Worker<input id="equipment-skill-worker-id" class="text-input" placeholder="selected worker" readonly /></label>
+          </div>
+          <div class="button-row"><button id="btn-equipment-import-recording" class="btn primary" disabled>Import Selected &amp; Build Draft</button></div>
+          <p id="equipment-recording-status" class="hint">No recording imported.</p>
+          <div id="equipment-skill-authoring-progress" class="equipment-skill-authoring-progress" data-status="IDLE">
+            <div class="equipment-skill-authoring-progress-head">
+              <strong id="equipment-skill-authoring-status">Idle</strong>
+              <button id="btn-equipment-stop-skill-authoring" class="btn mini danger" type="button" disabled>Stop</button>
+            </div>
+            <progress id="equipment-skill-authoring-progress-bar" max="100" value="0">0%</progress>
+            <small id="equipment-skill-authoring-detail">Select a recording to create a Skill draft.</small>
+          </div>
+          <figure id="equipment-skill-storyboard-preview" class="equipment-skill-storyboard-preview" hidden>
+            <img id="equipment-skill-storyboard-image" alt="Recorded workflow timeline storyboard" />
+            <figcaption>
+              <button id="btn-equipment-skill-storyboard-previous" class="btn mini" type="button">Previous</button>
+              <span id="equipment-skill-storyboard-meta">No timeline storyboard.</span>
+              <button id="btn-equipment-skill-storyboard-next" class="btn mini" type="button">Next</button>
+            </figcaption>
+          </figure>
+        </article>
+        <article id="equipment-skill-management" class="panel equipment-work-card">
+          <span class="eyebrow">Linux-owned Registry</span>
+          <h2>Skill Management</h2>
+          <div id="equipment-skill-list" class="equipment-skill-list">Loading Skills.</div>
+          <div id="equipment-selected-skill" class="equipment-selected-skill">Select an exact Skill version.</div>
+          <div class="button-row equipment-skill-actions">
+            <button id="btn-equipment-skill-refresh" class="btn">Refresh</button>
+            <button id="btn-equipment-skill-workflow-editor" class="btn icon-only" type="button" title="Edit selected Skill workflow" aria-label="Edit selected Skill workflow" disabled>
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 5.5h10M4 12h7M4 18.5h10M17.2 9.2l2.6 2.6M15.7 16.7l-1.2.3.3-1.2 4.7-4.7 1 1-4.8 4.6Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <button id="btn-equipment-skill-deploy" class="btn primary">Deploy</button>
+          </div>
+          <p id="equipment-skill-status" class="hint">No Skill selected.</p>
+          <div id="equipment-skill-deployment-progress" class="equipment-skill-authoring-progress" data-status="IDLE">
+            <div class="equipment-skill-authoring-progress-head">
+              <strong id="equipment-skill-deployment-status">Deployment idle</strong>
+              <button id="btn-equipment-stop-skill-deployment" class="btn mini danger" type="button" disabled>Stop</button>
+            </div>
+            <progress id="equipment-skill-deployment-progress-bar" max="100" value="0">0%</progress>
+            <small id="equipment-skill-deployment-detail">Select a Skill and Worker. Deploy builds, checks, and transfers without executing.</small>
+          </div>
         </article>
       </section>
 
-      <section class="panel equipment-inline-grid">
-        <article>
-          <h2>3. Saved Candidates</h2>
-          <p class="hint">저장된 candidate를 Quick Select하거나 삭제합니다. 선택된 candidate가 아래 테스트에 사용됩니다.</p>
-          <div id="equipment-saved-candidates" class="equipment-candidates">No saved candidate.</div>
+      <section class="equipment-runtime-grid">
+        <article id="equipment-main-progress" class="panel equipment-work-card">
+          <span class="eyebrow">Middle / Low-Level Control</span>
+          <h2>Main Progress</h2>
+          <p class="hint">선택된 Profile과 정확한 Skill/program 버전으로 결정론적 매크로를 실행합니다.</p>
+          <div class="button-row">
+            <button id="btn-equipment-profile-preflight" class="btn">Preflight</button>
+            <button id="btn-equipment-profile-test" class="btn primary">Run Test Bridge</button>
+            <button id="btn-equipment-test" class="btn">Worker Health</button>
+            <button id="btn-equipment-program1" class="btn">Run Selected Demo</button>
+            <button id="btn-equipment-utm" class="btn primary">Run Profile Action</button>
+          </div>
         </article>
-        <article>
-          <h2>4. Test Selected Bridge</h2>
-          <p class="hint">
-            Health와 program registry를 먼저 확인합니다. PyAutoGUI가 아직 없으면 bridge 통신은 성공해도
-            <code>PYAUTOGUI_NOT_INSTALLED</code>가 나올 수 있습니다. UTM Protocol Test는 screen assertion, save/export, artifact metadata까지 확인합니다.
-          </p>
+        <article id="equipment-vision-link" class="panel equipment-work-card">
+          <span class="eyebrow">Optional Middle-Level API</span>
+          <h2>Vision Link</h2>
+          <label class="planning-message-label inline-check"><input id="equipment-vision-link-enabled" type="checkbox" />Use Vision Agent verification for this Profile</label>
+          <p id="equipment-vision-link-status" class="hint">Loading Profile Vision contract.</p>
+        </article>
+        <article id="equipment-error-recovery" class="panel equipment-work-card">
+          <span class="eyebrow">Exception-only Reasoning</span>
+          <h2>Error Recovery</h2>
+          <p id="equipment-recovery-status" class="hint">Normal execution does not call an LLM. Exceptions use the selected Live GUI model for bounded recovery reasoning.</p>
+          <button id="btn-equipment-abort" class="btn danger">Stop / Abort Active Skill</button>
+        </article>
+      </section>
+
+      <section id="equipment-evidence-workspace" class="panel equipment-evidence-workspace">
+        <div class="equipment-section-heading">
+          <div><span class="eyebrow">Verified Output</span><h2>Evidence &amp; Data Transfer</h2></div>
+          <div class="button-row compact-row">
+            <button id="btn-equipment-evidence-audit" class="btn">Audit Evidence</button>
+            <button id="btn-equipment-proof-package" class="btn">Build Package</button>
+            <button id="btn-equipment-verify-proof-package" class="btn">Verify Package</button>
+            <button id="btn-equipment-completion-audit" class="btn primary">Completion Audit</button>
+          </div>
+        </div>
+        <div id="equipment-proof-dashboard" class="equipment-proof-dashboard equipment-proof-dashboard-neutral">
+          <article id="equipment-gate-windows-bridge" class="equipment-proof-gate idle"><span>Worker</span><strong id="equipment-gate-windows-bridge-status">not checked</strong><p id="equipment-gate-windows-bridge-detail">Connection evidence is not loaded.</p></article>
+          <article id="equipment-gate-utm-program" class="equipment-proof-gate idle"><span>Skill / Program</span><strong id="equipment-gate-utm-program-status">not checked</strong><p id="equipment-gate-utm-program-detail">Execution reference is not loaded.</p></article>
+          <article id="equipment-gate-vision-preconditions" class="equipment-proof-gate idle"><span>Vision</span><strong id="equipment-gate-vision-preconditions-status">optional</strong><p id="equipment-gate-vision-preconditions-detail">Profile Vision evidence is not loaded.</p></article>
+          <article id="equipment-gate-screen-state" class="equipment-proof-gate idle"><span>Screen</span><strong id="equipment-gate-screen-state-status">waiting</strong><p id="equipment-gate-screen-state-detail">Screen checkpoints are not loaded.</p></article>
+          <article id="equipment-gate-physical-crosscheck" class="equipment-proof-gate idle"><span>Equipment Effect</span><strong id="equipment-gate-physical-crosscheck-status">waiting</strong><p id="equipment-gate-physical-crosscheck-detail">Physical effect is not verified.</p></article>
+          <article id="equipment-gate-data-artifact" class="equipment-proof-gate idle"><span>Data Transfer</span><strong id="equipment-gate-data-artifact-status">waiting</strong><p id="equipment-gate-data-artifact-detail">Linux artifact transfer is not verified.</p></article>
+          <article id="equipment-gate-analysis-handoff" class="equipment-proof-gate idle"><span>Analysis Handoff</span><strong id="equipment-gate-analysis-handoff-status">blocked</strong><p id="equipment-gate-analysis-handoff-detail">Evidence package is not ready.</p></article>
+        </div>
+        <div id="equipment-utm-evidence-card" class="equipment-readiness-card equipment-evidence-summary">
+          <strong id="equipment-utm-evidence-status">Equipment evidence audit not checked.</strong>
+          <p id="equipment-utm-evidence-detail" class="hint">Screen, data transfer, optional Vision, and request audit are verified against the active execution.</p>
+          <div id="equipment-utm-proof-checklist" class="hint">Proof checklist not loaded.</div>
+        </div>
+        <details class="equipment-detail-drawer">
+          <summary>Evidence details and request audit</summary>
+          <div id="equipment-proof-verify-card" class="equipment-readiness-card compact-proof-card"><strong id="equipment-proof-verify-status">Proof package verification not run.</strong><p id="equipment-proof-verify-detail" class="hint">Build and verify the persisted package.</p></div>
+          <div id="equipment-completion-audit-card" class="equipment-readiness-card compact-proof-card"><strong id="equipment-completion-audit-status">Completion audit not run.</strong><p id="equipment-completion-audit-detail" class="hint">Completion requires the selected Profile evidence contract.</p></div>
+          <div id="equipment-request-audit-card" class="equipment-readiness-card"><strong id="equipment-request-audit-status">Bridge request audit not loaded.</strong><p id="equipment-request-audit-detail" class="hint">Recent authenticated Worker requests are shown without credentials.</p><button id="btn-equipment-request-log" class="btn">Load Request Log</button></div>
+          <pre id="equipment-result-log" class="equipment-result-log">{}</pre>
+        </details>
+      </section>
+
+      <details id="equipment-profile-specific-controls" class="panel equipment-detail-drawer equipment-profile-specific-controls">
+        <summary>Selected Profile settings and diagnostics</summary>
+        <div class="equipment-profile-specific-body">
           <div class="equipment-utm-options">
             <label class="planning-message-label">
               Export Glob
@@ -293,7 +338,7 @@ Modification guide:
             </div>
             <div id="equipment-utm-readiness-card" class="equipment-readiness-card">
               <strong id="equipment-utm-readiness-status">UTM readiness not checked.</strong>
-              <p id="equipment-utm-readiness-detail" class="hint">저장된 bridge, token, UTM program, export glob, locator, screen assertion 상태를 확인합니다.</p>
+              <p id="equipment-utm-readiness-detail" class="hint">저장된 bridge 페어링, Equipment Profile, program, export glob, locator, screen assertion 상태를 확인합니다.</p>
             </div>
             <div id="equipment-utm-live-validation-card" class="equipment-readiness-card">
               <strong id="equipment-utm-live-validation-status">UTM live validation report not built.</strong>
@@ -306,32 +351,6 @@ Modification guide:
               <div class="button-row compact-row">
                 <button id="btn-equipment-vision-proof-draft" class="btn">Load Vision Proof Draft</button>
                 <span class="hint">현재 runtime Vision evidence에서 물리 검증용 JSON 초안을 채웁니다. 장비는 호출하지 않습니다.</span>
-              </div>
-            </div>
-            <div id="equipment-utm-evidence-card" class="equipment-readiness-card">
-              <strong id="equipment-utm-evidence-status">UTM evidence audit not checked.</strong>
-              <p id="equipment-utm-evidence-detail" class="hint">마지막 Lab Equipment run의 screen evidence, Linux CSV pull, Vision frame evidence, bridge request audit를 확인합니다.</p>
-              <div id="equipment-utm-proof-checklist" class="hint">Proof checklist not loaded.</div>
-              <div class="button-row compact-row">
-                <button id="btn-equipment-evidence-audit" class="btn">Audit Last Run Evidence</button>
-                <button id="btn-equipment-proof-package" class="btn">Build Proof Package</button>
-                <button id="btn-equipment-verify-proof-package" class="btn">Verify Proof Package</button>
-                <button id="btn-equipment-completion-audit" class="btn primary">Completion Audit</button>
-              </div>
-              <div id="equipment-proof-verify-card" class="equipment-readiness-card compact-proof-card">
-                <strong id="equipment-proof-verify-status">Proof package verification not run.</strong>
-                <p id="equipment-proof-verify-detail" class="hint">Build a proof package, then verify that the persisted JSON, request audit, local CSV, and evidence references are still checkable.</p>
-              </div>
-              <div id="equipment-completion-audit-card" class="equipment-readiness-card compact-proof-card">
-                <strong id="equipment-completion-audit-status">Improvement 05 completion audit not run.</strong>
-                <p id="equipment-completion-audit-detail" class="hint">실제 UTM proof package가 완전 검증될 때만 완료 가능 상태가 됩니다. Preflight나 simulator 결과는 완료로 처리하지 않습니다.</p>
-              </div>
-            </div>
-            <div id="equipment-request-audit-card" class="equipment-readiness-card">
-              <strong id="equipment-request-audit-status">Bridge request audit not loaded.</strong>
-              <p id="equipment-request-audit-detail" class="hint">Windows bridge의 최근 API/auth 요청 로그를 확인합니다. 토큰 값은 표시하지 않습니다.</p>
-              <div class="button-row compact-row">
-                <button id="btn-equipment-request-log" class="btn">Load Bridge Request Log</button>
               </div>
             </div>
             <div class="equipment-locator-calibration">
@@ -366,18 +385,8 @@ Modification guide:
               </div>
             </div>
           </div>
-          <div class="button-row">
-            <button id="btn-equipment-test" class="btn">Test Health + Programs</button>
-            <button id="btn-equipment-program1" class="btn">Run program1 Demo</button>
-            <button id="btn-equipment-utm" class="btn primary">Run UTM Protocol Test</button>
-            <button id="btn-equipment-abort" class="btn danger">Run UTM Stop/Abort</button>
-          </div>
-        </article>
-        <article>
-          <h2>Result Log</h2>
-          <pre id="equipment-result-log" class="equipment-result-log">{}</pre>
-        </article>
-      </section>
+        </div>
+      </details>
       </div>
     </main>
 

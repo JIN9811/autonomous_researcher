@@ -1043,7 +1043,9 @@ textarea {
   display: grid;
   align-content: start;
   gap: 12px;
+  min-width: 0;
   min-height: 178px;
+  overflow: hidden;
   padding: 16px;
   border: 1.5px solid rgba(20, 54, 179, 0.13);
   border-radius: 18px;
@@ -1053,6 +1055,18 @@ textarea {
 .equipment-profile-overview > article h2 {
   margin: 0;
   font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.equipment-profile-overview > article p,
+.equipment-profile-overview > article .hint {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.equipment-profile-overview #equipment-runtime-execution-id {
+  font: 700 0.82rem/1.35 "IBM Plex Mono", monospace;
+  word-break: break-all;
 }
 
 .equipment-profile-overview .equipment-candidates {
@@ -1310,6 +1324,7 @@ textarea {
   color: var(--muted);
   font-size: 0.76rem;
   line-height: 1.42;
+  overflow-wrap: anywhere;
 }
 
 .equipment-proof-gate.ready {
@@ -1329,6 +1344,813 @@ textarea {
 
 .equipment-proof-gate.idle {
   border-style: dashed;
+}
+
+.equipment-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.equipment-section-heading h2,
+.equipment-work-card h2 {
+  margin: 4px 0 0;
+}
+
+.equipment-connection-workspace,
+.equipment-agentic-progress-panel,
+.equipment-evidence-workspace,
+.equipment-work-card {
+  min-width: 0;
+}
+
+.equipment-connection-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.equipment-connection-grid > article {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.equipment-connection-grid > .equipment-local-bridge-panel {
+  grid-column: 1 / -1;
+}
+
+.equipment-agentic-progress-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.equipment-agentic-progress-stages {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.equipment-agentic-progress-stages > article {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  min-width: 0;
+  min-height: 92px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.equipment-agentic-progress-stages > article:not(:last-child)::after {
+  position: absolute;
+  top: 50%;
+  right: -9px;
+  z-index: 2;
+  width: 10px;
+  height: 2px;
+  background: rgba(100, 116, 139, 0.42);
+  content: "";
+}
+
+.equipment-agentic-progress-stages span,
+.equipment-agentic-progress-stages small {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.equipment-agentic-progress-stages strong {
+  font-size: 0.84rem;
+}
+
+.equipment-agentic-progress-stages > article.done {
+  border-color: rgba(22, 163, 74, 0.48);
+  background: rgba(240, 253, 244, 0.88);
+}
+
+.equipment-agentic-progress-stages > article.active {
+  border-color: rgba(37, 99, 235, 0.62);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+.equipment-agentic-progress-stages > article.blocked {
+  border-color: rgba(220, 38, 38, 0.52);
+  background: rgba(254, 242, 242, 0.9);
+}
+
+.equipment-authoring-grid,
+.equipment-runtime-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.equipment-authoring-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.equipment-runtime-grid {
+  grid-template-columns: minmax(0, 1.65fr) repeat(2, minmax(260px, 0.7fr));
+}
+
+.equipment-work-card {
+  display: grid;
+  align-content: start;
+  gap: 11px;
+}
+
+.equipment-work-card > .hint,
+.equipment-work-card > p {
+  margin: 0;
+}
+
+.equipment-skill-authoring-progress {
+  display: grid;
+  gap: 8px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.78);
+}
+
+.equipment-skill-authoring-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.equipment-skill-authoring-progress progress {
+  width: 100%;
+  height: 10px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.2);
+  accent-color: #2563eb;
+}
+
+.equipment-skill-authoring-progress small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.equipment-skill-authoring-progress[data-status="COMPLETED"] progress {
+  accent-color: #16a34a;
+}
+
+.equipment-skill-authoring-progress[data-status="FAILED"] progress,
+.equipment-skill-authoring-progress[data-status="STOPPED"] progress {
+  accent-color: #dc2626;
+}
+
+.equipment-skill-storyboard-preview {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(248, 250, 252, 0.82);
+}
+
+.equipment-skill-storyboard-preview[hidden] {
+  display: none;
+}
+
+.equipment-skill-storyboard-preview img {
+  display: block;
+  width: 100%;
+  max-height: 330px;
+  object-fit: contain;
+  border-radius: 7px;
+  background: #0b1320;
+}
+
+.equipment-skill-storyboard-preview figcaption {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.equipment-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.equipment-form-grid .planning-message-label {
+  min-width: 0;
+  margin-top: 0;
+}
+
+.equipment-skill-list {
+  display: grid;
+  gap: 7px;
+  max-height: 230px;
+  overflow: auto;
+}
+
+.equipment-skill-row {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.76);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.equipment-skill-row span {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font: 0.7rem/1.35 "IBM Plex Mono", monospace;
+}
+
+.equipment-skill-row.selected {
+  border-color: rgba(37, 99, 235, 0.58);
+  background: rgba(239, 246, 255, 0.96);
+}
+
+.equipment-selected-skill {
+  min-height: 40px;
+  padding: 10px 12px;
+  border-left: 3px solid rgba(37, 99, 235, 0.62);
+  background: rgba(241, 245, 249, 0.82);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.equipment-skill-actions .btn {
+  flex: 1 1 112px;
+}
+
+.skill-workflow-editor-body {
+  min-width: 760px;
+  margin: 0;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.08), transparent 38%),
+    var(--bg);
+}
+
+.skill-workflow-editor {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100vh;
+  color: var(--text);
+}
+
+.skill-workflow-editor-header,
+.skill-workflow-editor-footer {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+  padding: 16px 22px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(248, 250, 252, 0.96);
+  backdrop-filter: blur(16px);
+}
+
+.skill-workflow-editor-footer {
+  min-height: 48px;
+  padding-block: 10px;
+  border-top: 1px solid var(--line);
+  border-bottom: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.skill-workflow-editor-footer p {
+  margin: 0;
+}
+
+.skill-workflow-editor-footer [data-tone="ok"] { color: var(--ok); }
+.skill-workflow-editor-footer [data-tone="warning"] { color: #b45309; }
+.skill-workflow-editor-footer [data-tone="error"] { color: var(--danger); }
+
+.skill-workflow-editor-heading h1 {
+  margin: 3px 0 7px;
+  font-size: clamp(1.35rem, 2vw, 1.85rem);
+}
+
+.skill-workflow-editor-heading h1 small {
+  color: var(--muted);
+  font: 0.62em/1 "IBM Plex Mono", monospace;
+}
+
+.skill-workflow-editor-meta,
+.skill-workflow-editor-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.skill-workflow-editor-meta > span:last-child {
+  color: var(--muted);
+  font: 0.72rem/1.3 "IBM Plex Mono", monospace;
+}
+
+.skill-workflow-editor-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 270px;
+  grid-template-areas: "sequence palette";
+  min-height: 0;
+  gap: 14px;
+  padding: 14px;
+}
+
+.skill-workflow-editor-palette,
+.skill-workflow-editor-sequence {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(248, 250, 252, 0.9);
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.08);
+}
+
+.skill-workflow-editor-palette {
+  grid-area: palette;
+  align-self: start;
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.skill-workflow-editor-palette h2,
+.skill-workflow-sequence-head h2 {
+  margin: 3px 0 0;
+  font-size: 1rem;
+}
+
+.skill-workflow-editor-palette p {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.skill-workflow-editor-palette label,
+.skill-workflow-fields label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.skill-workflow-editor-help {
+  display: grid;
+  gap: 5px;
+  padding: 11px;
+  border-left: 3px solid #2563eb;
+  background: rgba(219, 234, 254, 0.55);
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.skill-workflow-editor-help strong { color: var(--text); }
+
+.skill-workflow-editor-sequence {
+  grid-area: sequence;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.skill-workflow-sequence-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.skill-workflow-step-list {
+  display: grid;
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.skill-workflow-step-card {
+  min-width: 0;
+  min-height: 54px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fff;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.skill-workflow-step-card.selected {
+  border-color: rgba(37, 99, 235, 0.7);
+}
+
+.skill-workflow-step-card.expanded {
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+.skill-workflow-step-card.invalid {
+  border-color: rgba(220, 38, 38, 0.66);
+}
+
+.skill-workflow-step-summary {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 52px;
+  padding: 7px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.skill-workflow-step-summary > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.skill-workflow-step-summary strong,
+.skill-workflow-step-summary small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-workflow-step-summary small {
+  color: var(--muted);
+  font: 0.68rem/1.35 "IBM Plex Mono", monospace;
+}
+
+.skill-workflow-step-index {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid rgba(37, 99, 235, 0.25);
+  border-radius: 8px;
+  background: rgba(239, 246, 255, 0.9);
+  color: #1d4ed8;
+  font: 0.69rem/1 "IBM Plex Mono", monospace;
+}
+
+.skill-workflow-step-state {
+  color: var(--muted);
+  font-size: 0.66rem;
+}
+
+.skill-workflow-step-editor {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-top: 1px solid var(--line);
+  background: rgba(248, 250, 252, 0.66);
+}
+
+.skill-workflow-step-editor[hidden] { display: none; }
+
+.skill-workflow-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.skill-workflow-check {
+  grid-template-columns: auto 1fr !important;
+  align-items: center;
+  justify-content: start;
+}
+
+.skill-workflow-locator {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px;
+  border: 1px dashed rgba(37, 99, 235, 0.34);
+  background: rgba(239, 246, 255, 0.55);
+}
+
+.skill-workflow-locator > div {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+}
+
+.skill-workflow-locator img {
+  width: 72px;
+  height: 48px;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  background: #0b1320;
+}
+
+.skill-workflow-locator small,
+.skill-workflow-locator span { color: var(--muted); }
+
+.skill-workflow-locator input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+
+.skill-workflow-locator .disabled { opacity: 0.5; pointer-events: none; }
+
+.skill-workflow-locator-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 7px;
+}
+
+.workflow-crop-dialog {
+  width: min(1120px, calc(100vw - 36px));
+  max-width: none;
+  max-height: calc(100vh - 36px);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(37, 99, 235, 0.3);
+  border-radius: 16px;
+  background: #f8fafc;
+  color: var(--text);
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.32);
+}
+
+.workflow-crop-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.66);
+  backdrop-filter: blur(3px);
+}
+
+.workflow-crop-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: calc(100vh - 38px);
+  margin: 0;
+}
+
+.workflow-crop-header,
+.workflow-crop-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+
+.workflow-crop-header h2 { margin: 2px 0 3px; font-size: 1.2rem; }
+.workflow-crop-header p { margin: 0; color: var(--muted); font-size: 0.76rem; }
+.workflow-crop-actions { justify-content: flex-end; border-top: 1px solid var(--line); border-bottom: 0; }
+
+.workflow-crop-content {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(240px, 0.8fr);
+  min-height: 0;
+  gap: 14px;
+  padding: 14px;
+  overflow: auto;
+}
+
+.workflow-crop-source-panel,
+.workflow-crop-preview-panel {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  gap: 10px;
+}
+
+.workflow-crop-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text);
+  font-size: 0.76rem;
+}
+
+.workflow-crop-section-head span,
+.workflow-crop-preview-panel p {
+  color: var(--muted);
+  font: 0.68rem/1.45 "IBM Plex Mono", monospace;
+}
+
+.workflow-crop-stage {
+  position: relative;
+  display: inline-grid;
+  justify-self: center;
+  max-width: 100%;
+  max-height: min(66vh, 700px);
+  overflow: hidden;
+  border: 1px solid #334155;
+  background: #07111f;
+  user-select: none;
+  touch-action: none;
+}
+
+.workflow-crop-stage > img {
+  display: block;
+  max-width: 100%;
+  max-height: min(66vh, 700px);
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.workflow-crop-box {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid #22d3ee;
+  background: rgba(34, 211, 238, 0.12);
+  box-shadow: 0 0 0 9999px rgba(2, 6, 23, 0.42), 0 0 16px rgba(34, 211, 238, 0.6);
+  cursor: move;
+}
+
+.workflow-crop-box i {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 1px solid #0e7490;
+  border-radius: 50%;
+  background: #ecfeff;
+  transform: translate(-50%, -50%);
+}
+
+.workflow-crop-box i[data-crop-handle="n"] { left: 50%; top: 0; cursor: ns-resize; }
+.workflow-crop-box i[data-crop-handle="ne"] { left: 100%; top: 0; cursor: nesw-resize; }
+.workflow-crop-box i[data-crop-handle="e"] { left: 100%; top: 50%; cursor: ew-resize; }
+.workflow-crop-box i[data-crop-handle="se"] { left: 100%; top: 100%; cursor: nwse-resize; }
+.workflow-crop-box i[data-crop-handle="s"] { left: 50%; top: 100%; cursor: ns-resize; }
+.workflow-crop-box i[data-crop-handle="sw"] { left: 0; top: 100%; cursor: nesw-resize; }
+.workflow-crop-box i[data-crop-handle="w"] { left: 0; top: 50%; cursor: ew-resize; }
+.workflow-crop-box i[data-crop-handle="nw"] { left: 0; top: 0; cursor: nwse-resize; }
+
+.workflow-crop-preview-wrap {
+  display: grid;
+  min-height: 220px;
+  place-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: #07111f;
+}
+
+#workflow-crop-preview {
+  display: block;
+  max-width: 100%;
+  max-height: 390px;
+  image-rendering: auto;
+}
+
+.skill-workflow-step-issues {
+  display: grid;
+  gap: 4px;
+  padding: 9px 11px;
+  border-left: 3px solid #dc2626;
+  background: rgba(254, 226, 226, 0.66);
+  color: #991b1b;
+  font-size: 0.72rem;
+}
+
+.skill-workflow-step-actions .btn:last-child { margin-left: auto; }
+
+.equipment-skill-actions .btn.icon-only,
+.btn.icon-only {
+  flex: 0 0 42px;
+  width: 42px;
+  min-width: 42px;
+  padding-inline: 0;
+}
+
+@media (max-width: 1100px) {
+  .skill-workflow-editor-body { min-width: 620px; }
+  .skill-workflow-editor-content {
+    grid-template-columns: 1fr;
+    grid-template-areas: "palette" "sequence";
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .skill-workflow-editor-palette {
+    grid-template-columns: minmax(240px, 1fr) minmax(180px, 0.65fr) auto;
+    align-items: end;
+  }
+  .skill-workflow-editor-help { display: none; }
+  .skill-workflow-fields { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
+  .workflow-crop-content { grid-template-columns: 1fr; }
+  .workflow-crop-preview-wrap { min-height: 150px; }
+}
+
+.equipment-evidence-workspace {
+  display: grid;
+  gap: 14px;
+}
+
+.equipment-proof-dashboard-neutral {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.equipment-proof-dashboard-neutral .equipment-proof-gate {
+  min-height: 118px;
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.equipment-detail-drawer > summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.equipment-detail-drawer[open] > summary {
+  margin-bottom: 12px;
+}
+
+.equipment-profile-specific-controls {
+  overflow: hidden;
+}
+
+.equipment-profile-specific-body {
+  min-width: 0;
+}
+
+@media (max-width: 1500px) {
+  .equipment-agentic-progress-stages {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .equipment-agentic-progress-stages > article::after {
+    display: none;
+  }
+
+  .equipment-runtime-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .equipment-runtime-grid > :first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 980px) {
+  .equipment-connection-grid,
+  .equipment-authoring-grid,
+  .equipment-runtime-grid,
+  .equipment-proof-dashboard-neutral {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .equipment-runtime-grid > :first-child {
+    grid-column: auto;
+  }
+
+  .equipment-local-bridge-panel {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .equipment-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .equipment-connection-grid,
+  .equipment-agentic-progress-stages,
+  .equipment-authoring-grid,
+  .equipment-runtime-grid,
+  .equipment-proof-dashboard-neutral,
+  .equipment-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 1500px) {
@@ -1406,6 +2228,14 @@ textarea {
   color: var(--muted);
 }
 
+.equipment-saved-candidates-scroll {
+  max-height: 258px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  align-content: start;
+}
+
 .equipment-candidate-card {
   display: flex;
   align-items: center;
@@ -1419,6 +2249,36 @@ textarea {
 
 .equipment-candidate-card p {
   margin: 4px 0 0;
+}
+
+.equipment-candidate-identity {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.equipment-worker-actions {
+  display: grid;
+  justify-items: end;
+  gap: 7px;
+  flex: 0 0 auto;
+}
+
+.equipment-worker-update-state {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.equipment-worker-update-state.available {
+  color: #a86400;
+  font-weight: 700;
+}
+
+.equipment-worker-update-state.ready {
+  color: var(--success);
+}
+
+.equipment-worker-update-state.blocked {
+  color: var(--danger);
 }
 
 .equipment-candidate-save {

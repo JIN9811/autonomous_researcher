@@ -1,30 +1,23 @@
-ATR Equipment Agent Bridge - Windows x64 포터블판
-===================================================
+ATR Windows PyAutoGUI Bridge 포터블 실행법
 
-사용 순서
-1. ZIP 전체를 Windows PC의 원하는 폴더에 압축 해제합니다.
-2. START_EQUIPMENT_BRIDGE.cmd를 더블클릭합니다.
-3. 최초 실행만 로컬 runtime 구성 때문에 시간이 걸립니다.
-4. PowerShell 창과 브라우저 GUI가 열리면 Bridge token을 GUI에 입력합니다.
-5. Linux ATR에서 bridge Health를 실행하면 Windows가 인증된 ATR 주소를 검증하고 저장합니다.
-6. 자동 연결이 안 되면 GUI의 Discover ATR 또는 Controller URL의 Verify & Save를 사용합니다.
-7. 종료할 때 STOP_EQUIPMENT_BRIDGE.cmd를 더블클릭합니다.
+1. 이 폴더 전체를 Windows PC의 로컬 디스크에 복사합니다.
+2. START_PORTABLE_BRIDGE.cmd를 더블클릭합니다.
+3. 첫 실행은 폴더 안에 Python과 의존성을 자동 구성하므로 잠시 기다립니다.
+4. 브라우저에 Bridge Status, Program Manager, Recording, Latest Local Result가 표시됩니다.
+5. Bridge Status의 임시 4자리 숫자를 확인합니다.
+6. Linux ATR의 Lab Equipment Workspace에서 Scan 후 장치를 선택합니다.
+7. 4자리 코드를 Pair & Save에 입력하고 장치 alias를 저장합니다.
+8. 다음 실행부터는 저장된 내부 인증키를 사용하므로 코드를 다시 입력하지 않습니다.
 
-중요
-- 인터넷 연결이나 별도 Python 설치가 필요하지 않습니다.
-- 관리자 권한을 요구하지 않습니다.
-- 폴더를 이동할 때 bridge가 실행 중이면 먼저 중지하십시오.
-- 토큰, 프로그램, 녹화, locator, UTM export, 로그는 모두 data 폴더에 저장됩니다.
-- data 폴더를 유지하면 설정이 유지되고, 삭제하면 새 배포 상태로 초기화됩니다.
-- 검증된 Linux ATR 주소는 data\controller_connection.json에 저장되며 token/API key는 저장하지 않습니다.
-- Windows 서비스가 아니라 로그인한 사용자의 대화형 데스크톱에서 실행해야 합니다.
-- PyAutoGUI fail-safe가 활성화됩니다. 비상 중지는 마우스를 화면 왼쪽 위 모서리로 이동합니다.
+기본 데이터 위치
+- data\artifacts: 화면, 요청 로그, 실행 결과, 내부 페어링 파일
+- data\locators: 이미지 locator
+- data\programs: 로컬 초안과 ATR 배포 캐시
+- data\recordings: 입력 녹화와 제한된 시각 증거
+- data\utm_exports: UTM Profile 결과 폴더
 
-오프라인 OCR 제한
-- pytesseract Python 연동은 포함되지만 Tesseract OCR 실행 파일은 포함하지 않습니다.
-- OCR locator가 필요한 경우 Windows에 Tesseract를 별도로 설치하고 PATH를 설정하십시오.
-
-문제 확인
-- data\logs\portable-bootstrap.log: 최초 구성/시작 로그
-- data\artifacts\bridge_requests.jsonl: 브릿지 요청 감사 로그
-- 브라우저 GUI의 Health/Request Log: 연결 및 요청 상태
+주의
+- 폴더 내부 data와 runtime을 삭제하면 페어링 및 로컬 데이터가 초기화됩니다.
+- 장기 인증키를 사용자가 복사하거나 파일에 입력하지 않습니다.
+- Windows Bridge는 LLM, 실험 완료 판정, Analysis handoff를 수행하지 않습니다.
+- 물리 장비 실행 전 Linux ATR의 Profile/Guardian 절차를 확인하십시오.

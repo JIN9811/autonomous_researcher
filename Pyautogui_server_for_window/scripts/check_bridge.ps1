@@ -1,13 +1,6 @@
-param(
-    [string]$Url = "",
-    [string]$Token = ""
-)
+param([string]$Url = "")
 
 $ErrorActionPreference = "Stop"
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$projectRoot = (Resolve-Path (Join-Path $scriptDir "..")).Path
-$tokenPath = Join-Path $projectRoot ".bridge_token"
-
 if (-not $Url) {
     if ($env:WINDOWS_PYAUTOGUI_BRIDGE_URL) {
         $Url = $env:WINDOWS_PYAUTOGUI_BRIDGE_URL
@@ -17,20 +10,8 @@ if (-not $Url) {
     }
 }
 
-if (-not $Token) {
-    if ($env:WINDOWS_PYAUTOGUI_BRIDGE_TOKEN) {
-        $Token = $env:WINDOWS_PYAUTOGUI_BRIDGE_TOKEN
-    } elseif (Test-Path -LiteralPath $tokenPath) {
-        $Token = (Get-Content -LiteralPath $tokenPath -Raw).Trim()
-    }
-}
-
 Write-Host "Checking bridge: $Url"
-if ($Token) {
-    Write-Host "Using configured bridge token."
-    curl.exe -s -H "X-Bridge-Token: $Token" "$Url/health"
-} else {
-    Write-Host "No token found. Request may return auth_required."
-    curl.exe -s "$Url/health"
-}
-Write-Host ""
+$health = Invoke-RestMethod -Uri "$Url/health" -Method Get
+$pairing = Invoke-RestMethod -Uri "$Url/pairing/status" -Method Get
+$health | ConvertTo-Json -Depth 8
+Write-Host "Pairing: $($pairing.status)"

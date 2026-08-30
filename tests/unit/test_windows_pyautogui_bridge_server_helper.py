@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import importlib.util
+import inspect
 import json
 import subprocess
 import sys
@@ -252,338 +254,208 @@ def _load_packaged_helper_module():
     return module
 
 
-def test_controller_resolver_prefers_verified_explicit_url_without_persisting_it(tmp_path: Path) -> None:
-    """Catches a regression where a saved/discovered address overrides the operator setting."""
-    module = _load_packaged_helper_module()
-    saved = {
-        "schema": "atr.windows_controller_connection.v1",
-        "controller_url": "http://192.168.50.10:7860",
-        "source": "authenticated_peer",
-        "verified_at": "2026-08-13T00:00:00Z",
+def _update_package(files: dict[str, bytes], *, version: str = "2026.08.28.2") -> dict[str, Any]:
+    metadata = []
+    encoded = []
+    for path, raw in files.items():
+        sha256 = hashlib.sha256(raw).hexdigest()
+        metadata.append({"path": path, "size_bytes": len(raw), "sha256": sha256})
+        encoded.append(
+            {
+                "path": path,
+                "size_bytes": len(raw),
+                "sha256": sha256,
+                "data_base64": base64.b64encode(raw).decode("ascii"),
+            }
+        )
+    canonical = json.dumps(
+        {"schema": "atr.windows_bridge_update_package.v1", "version": version, "files": metadata},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return {
+        "schema": "atr.windows_bridge_update_package.v1",
+        "version": version,
+        "files": encoded,
+        "package_sha256": hashlib.sha256(canonical).hexdigest(),
+        "total_bytes": sum(len(raw) for raw in files.values()),
     }
-    (tmp_path / "controller_connection.json").write_text(json.dumps(saved), encoding="utf-8")
-    verified: list[str] = []
 
-    def verify(url: str) -> dict[str, object]:
-        verified.append(url)
-        return {"ok": True}
 
-    resolver = module.ATRControllerResolver(
-        tmp_path,
-        explicit_url="http://192.168.50.146:7860/",
-        verifier=verify,
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_update_routes_are_never_unauthenticated_local_setup_routes(loader) -> None:
+    module = loader()
+
+    assert module.Handler._is_local_setup_path("/update/status", "GET") is False
+    assert module.Handler._is_local_setup_path("/update/stage", "POST") is False
+    assert module.Handler._is_local_setup_path("/update/apply", "POST") is False
+    assert module.Handler._is_local_setup_path("/update/rollback", "POST") is False
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_update_package_root_prefers_active_package_environment(loader, monkeypatch, tmp_path: Path) -> None:
+    module = loader()
+    package_root = tmp_path / "active-package"
+    monkeypatch.setenv("ATR_WINDOWS_BRIDGE_INSTALL_ROOT", str(tmp_path / "stale-installed-worker"))
+    monkeypatch.setenv("ATR_WINDOWS_BRIDGE_PACKAGE_ROOT", str(package_root))
+
+    assert module._bridge_package_root() == package_root
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_update_restart_command_uses_active_package_server(loader, monkeypatch, tmp_path: Path) -> None:
+    module = loader()
+    package_root = tmp_path / "active-package"
+    monkeypatch.setenv("ATR_WINDOWS_BRIDGE_INSTALL_ROOT", str(tmp_path / "stale-installed-worker"))
+    monkeypatch.setenv("ATR_WINDOWS_BRIDGE_PACKAGE_ROOT", str(package_root))
+    monkeypatch.setattr(module.sys, "argv", ["old-server.py", "--port", "8765"])
+
+    command = module._restart_command()
+
+    assert command[1] == str(package_root / "bridge" / "windows_pyautogui_bridge_server.py")
+    assert command[2:] == ["--port", "8765"]
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_update_helper_detaches_standard_handles(loader, monkeypatch, tmp_path: Path) -> None:
+    module = loader()
+    installed_updater = tmp_path / "scripts" / "bridge_self_updater.py"
+    installed_updater.parent.mkdir(parents=True)
+    installed_updater.write_text("# installed helper\n", encoding="utf-8")
+    stage_dir = tmp_path / "stage"
+    staged_updater = stage_dir / "scripts" / "bridge_self_updater.py"
+    staged_updater.parent.mkdir(parents=True)
+    staged_updater.write_text("# staged helper\n", encoding="utf-8")
+    monkeypatch.setattr(module, "_bridge_package_root", lambda: tmp_path)
+    update_root = tmp_path / "updates"
+    monkeypatch.setattr(module, "UPDATE_MANAGER", SimpleNamespace(update_root=update_root))
+    observed: dict[str, object] = {}
+
+    def fake_popen(command, **kwargs):
+        observed.update({"command": command, **kwargs})
+        return SimpleNamespace(pid=42)
+
+    monkeypatch.setattr(module.subprocess, "Popen", fake_popen)
+
+    result = module._launch_self_updater(
+        "apply",
+        {"stage_dir": str(stage_dir), "version": "2026.08.29.7"},
     )
 
-    result = resolver.resolve()
-
     assert result["ok"] is True
-    assert result["source"] == "environment"
-    assert result["controller_url"] == "http://192.168.50.146:7860"
-    assert verified == ["http://192.168.50.146:7860"]
-    assert json.loads((tmp_path / "controller_connection.json").read_text(encoding="utf-8")) == saved
+    assert observed["command"][1] == str(staged_updater)
+    assert observed["stdin"] is module.subprocess.DEVNULL
+    assert observed["stdout"] is module.subprocess.DEVNULL
+    assert observed["stderr"] is module.subprocess.DEVNULL
+    assert (update_root / "update_in_progress.json").is_file()
 
 
-def test_controller_resolver_does_not_fallback_from_invalid_explicit_override(tmp_path: Path) -> None:
-    """Catches silent fallback that would hide a broken managed-deployment setting."""
+def test_packaged_worker_update_allowlist_matches_repository_release_manifest() -> None:
     module = _load_packaged_helper_module()
-    (tmp_path / "controller_connection.json").write_text(
-        json.dumps(
-            {
-                "schema": "atr.windows_controller_connection.v1",
-                "controller_url": "http://192.168.50.10:7860",
-                "source": "saved",
-                "verified_at": "2026-08-13T00:00:00Z",
-            }
-        ),
+    manifest_path = Path(__file__).resolve().parents[2] / "Pyautogui_server_for_window" / "release_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert module.UPDATE_ALLOWED_PATHS == set(manifest["files"]) | {"release_manifest.json"}
+
+
+def test_update_allowlist_bootstraps_release_manifest_for_future_updates(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+    (tmp_path / "release_manifest.json").write_text(
+        json.dumps({"version": "2026.08.29.15", "files": ["bridge/windows_pyautogui_bridge_server.py"]}),
         encoding="utf-8",
     )
 
-    resolver = module.ATRControllerResolver(
-        tmp_path,
-        explicit_url="http://127.0.0.1:1",
-        verifier=lambda _url: {"ok": False, "failure_code": "ATR_CONTROLLER_UNREACHABLE"},
+    assert "release_manifest.json" in module._bridge_update_allowed_paths(tmp_path)
+    assert module._bridge_release_version(tmp_path) == "2026.08.29.17"
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_update_manager_stages_only_allowlisted_verified_files(loader, tmp_path: Path) -> None:
+    module = loader()
+    package_root = tmp_path / "package"
+    update_root = tmp_path / "updates"
+    package_root.mkdir()
+    manager = module.UpdateManager(
+        package_root=package_root,
+        update_root=update_root,
+        allowed_paths={"bridge/windows_pyautogui_bridge_server.py"},
+        recording_status_provider=lambda: {"status": "idle"},
     )
+    raw = b"print('updated')\n"
 
-    result = resolver.resolve()
-
-    assert result["ok"] is False
-    assert result["source"] == "environment"
-    assert result["failure_code"] == "ATR_CONTROLLER_EXPLICIT_URL_INVALID"
-
-
-def test_controller_resolver_persists_verified_selection_without_secrets(tmp_path: Path) -> None:
-    """Catches non-atomic or secret-bearing controller records that fail across restart."""
-    module = _load_packaged_helper_module()
-    resolver = module.ATRControllerResolver(tmp_path, verifier=lambda _url: {"ok": True, "token": "must-not-save"})
-
-    selected = resolver.select("http://192.168.50.146:7860/")
-    restarted = module.ATRControllerResolver(tmp_path, verifier=lambda _url: {"ok": True}).resolve()
-
-    record_path = tmp_path / "controller_connection.json"
-    record = json.loads(record_path.read_text(encoding="utf-8"))
-    assert selected["ok"] is True
-    assert selected["source"] == "manual"
-    assert restarted["ok"] is True
-    assert restarted["source"] == "saved"
-    assert restarted["controller_url"] == "http://192.168.50.146:7860"
-    assert record["schema"] == "atr.windows_controller_connection.v1"
-    assert record["controller_url"] == "http://192.168.50.146:7860"
-    assert "token" not in json.dumps(record).lower()
-    assert not list(tmp_path.glob(".controller_connection.json.*.tmp"))
-
-
-def test_controller_resolver_tolerates_corrupt_saved_record(tmp_path: Path) -> None:
-    """Catches startup failure when an interrupted prior write leaves unreadable state."""
-    module = _load_packaged_helper_module()
-    (tmp_path / "controller_connection.json").write_text("{broken", encoding="utf-8")
-
-    result = module.ATRControllerResolver(
-        tmp_path,
-        verifier=lambda _url: {"ok": False},
-    ).resolve()
-
-    assert result["ok"] is False
-    assert result["failure_code"] == "ATR_CONTROLLER_NOT_FOUND"
-    assert result["saved_record_status"] == "invalid"
-
-
-def test_controller_resolver_learns_and_persists_authenticated_private_peer(tmp_path: Path, monkeypatch) -> None:
-    """Catches a bridge that authenticates ATR but never learns its source address."""
-    module = _load_packaged_helper_module()
-    monkeypatch.setattr(module, "_local_private_ipv4_addresses", lambda: ["192.168.50.40"])
-    checked: list[str] = []
-
-    def verify(url: str) -> dict[str, object]:
-        checked.append(url)
-        return {"ok": True}
-
-    resolver = module.ATRControllerResolver(tmp_path, verifier=verify)
-
-    result = resolver.observe_authenticated_peer("192.168.50.146")
+    result = manager.stage(_update_package({"bridge/windows_pyautogui_bridge_server.py": raw}))
 
     assert result["ok"] is True
-    assert result["source"] == "authenticated_peer"
-    assert result["controller_url"] == "http://192.168.50.146:7860"
-    assert checked == ["http://192.168.50.146:7860"]
-    record = json.loads((tmp_path / "controller_connection.json").read_text(encoding="utf-8"))
-    assert record["source"] == "authenticated_peer"
+    assert result["status"] == "staged"
+    assert result["version"] == "2026.08.28.2"
+    assert (Path(result["stage_dir"]) / "bridge" / "windows_pyautogui_bridge_server.py").read_bytes() == raw
+    assert manager.status()["staged_version"] == "2026.08.28.2"
 
 
-@pytest.mark.parametrize("peer_ip", ["127.0.0.1", "169.254.1.2", "8.8.8.8", "not-an-ip"])
-def test_controller_resolver_rejects_unsafe_peer_candidates(tmp_path: Path, peer_ip: str) -> None:
-    """Catches SSRF-like persistence from loopback, link-local, public, or malformed peers."""
-    module = _load_packaged_helper_module()
-    verified: list[str] = []
-    resolver = module.ATRControllerResolver(tmp_path, verifier=lambda url: verified.append(url) or {"ok": True})
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_update_manager_rejects_traversal_and_digest_mismatch(loader, tmp_path: Path) -> None:
+    module = loader()
+    manager = module.UpdateManager(
+        package_root=tmp_path / "package",
+        update_root=tmp_path / "updates",
+        allowed_paths={"bridge/windows_pyautogui_bridge_server.py"},
+        recording_status_provider=lambda: {"status": "idle"},
+    )
+    traversal = _update_package({"../outside.py": b"bad"})
+    mismatched = _update_package({"bridge/windows_pyautogui_bridge_server.py": b"good"})
+    mismatched["files"][0]["data_base64"] = base64.b64encode(b"changed").decode("ascii")
 
-    result = resolver.observe_authenticated_peer(peer_ip)
+    traversal_result = manager.stage(traversal)
+    mismatch_result = manager.stage(mismatched)
 
-    assert result["ok"] is False
-    assert result["status"] == "ignored"
-    assert verified == []
-    assert not (tmp_path / "controller_connection.json").exists()
-
-
-def test_private_ipv4_probe_candidates_are_bounded_to_each_interface_24() -> None:
-    """Catches accidental broad-network scans or probing of the Windows host itself."""
-    module = _load_packaged_helper_module()
-
-    candidates = module._private_ipv4_probe_candidates(["192.168.50.40", "10.0.5.7"])
-
-    assert len(candidates) == 506
-    assert "192.168.50.40" not in candidates
-    assert "10.0.5.7" not in candidates
-    assert "192.168.49.255" not in candidates
-    assert "10.0.6.1" not in candidates
-    assert candidates == sorted(set(candidates), key=lambda value: tuple(int(part) for part in value.split(".")))
+    assert traversal_result["failure_code"] == "PYAUTOGUI_UPDATE_PATH_NOT_ALLOWED"
+    assert mismatch_result["failure_code"] == "PYAUTOGUI_UPDATE_FILE_SIZE_MISMATCH"
 
 
-def test_controller_discovery_persists_only_verified_candidate(tmp_path: Path) -> None:
-    """Catches selection based on an open port without ATR identity verification."""
-    module = _load_packaged_helper_module()
-    resolver = module.ATRControllerResolver(
-        tmp_path,
-        scanner=lambda: ["http://192.168.50.20:7860", "http://192.168.50.146:7860"],
-        verifier=lambda url: {"ok": url == "http://192.168.50.146:7860"},
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_update_manager_blocks_apply_and_rollback_while_recording(loader, tmp_path: Path) -> None:
+    module = loader()
+    manager = module.UpdateManager(
+        package_root=tmp_path / "package",
+        update_root=tmp_path / "updates",
+        allowed_paths={"bridge/windows_pyautogui_bridge_server.py"},
+        recording_status_provider=lambda: {"status": "recording", "recording_id": "rec-1"},
     )
 
-    result = resolver.discover()
+    apply_result = manager.prepare_apply()
+    rollback_result = manager.prepare_rollback()
 
-    assert result["ok"] is True
-    assert result["source"] == "subnet_scan"
-    assert result["controller_url"] == "http://192.168.50.146:7860"
-    assert json.loads((tmp_path / "controller_connection.json").read_text(encoding="utf-8"))["controller_url"] == result["controller_url"]
-
-
-def test_controller_discovery_requires_selection_for_multiple_verified_candidates(tmp_path: Path) -> None:
-    """Catches nondeterministic controller choice based on whichever probe finishes first."""
-    module = _load_packaged_helper_module()
-    urls = ["http://192.168.50.20:7860", "http://192.168.50.146:7860"]
-    resolver = module.ATRControllerResolver(tmp_path, scanner=lambda: list(reversed(urls)), verifier=lambda _url: {"ok": True})
-
-    result = resolver.discover()
-
-    assert result["ok"] is False
-    assert result["failure_code"] == "ATR_CONTROLLER_MULTIPLE_CANDIDATES"
-    assert result["candidates"] == urls
-    assert not (tmp_path / "controller_connection.json").exists()
+    assert apply_result["failure_code"] == "PYAUTOGUI_UPDATE_RECORDING_ACTIVE"
+    assert rollback_result["failure_code"] == "PYAUTOGUI_UPDATE_RECORDING_ACTIVE"
 
 
-def test_controller_discovery_caches_negative_scan(tmp_path: Path) -> None:
-    """Catches a full subnet rescan on every unresolved Skill request."""
-    module = _load_packaged_helper_module()
-    scan_count = 0
-
-    def scan() -> list[str]:
-        nonlocal scan_count
-        scan_count += 1
-        return []
-
-    resolver = module.ATRControllerResolver(tmp_path, scanner=scan)
-
-    first = resolver.discover()
-    second = resolver.discover()
-
-    assert first["failure_code"] == "ATR_CONTROLLER_NOT_FOUND"
-    assert second["failure_code"] == "ATR_CONTROLLER_NOT_FOUND"
-    assert second["cached"] is True
-    assert scan_count == 1
 
 
-def test_skills_proxy_uses_verified_resolved_controller(tmp_path: Path) -> None:
-    """Catches Skill forwarding that remains hard-wired to Windows localhost."""
-    module = _load_packaged_helper_module()
-
-    class ATRIdentityHandler(module.BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            body = json.dumps({"ok": True, "skills": [{"skill_id": "program1_skill", "version": "1.0.0"}]}).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, _format: str, *_args: object) -> None:
-            return
-
-    atr_server = module.ThreadingHTTPServer(("127.0.0.1", 0), ATRIdentityHandler)
-    atr_thread = threading.Thread(target=atr_server.serve_forever, daemon=True)
-    atr_thread.start()
-    atr_url = f"http://127.0.0.1:{atr_server.server_address[1]}"
-    module.CONTROLLER_RESOLVER = module.ATRControllerResolver(tmp_path, explicit_url=atr_url)
-    try:
-        status, payload = module._atr_api_request("GET", "/api/equipment/skills")
-    finally:
-        atr_server.shutdown()
-        atr_server.server_close()
-        atr_thread.join(timeout=5)
-
-    assert status == 200
-    assert payload["ok"] is True
-    assert payload["skills"][0]["skill_id"] == "program1_skill"
-    assert module.CONTROLLER_RESOLVER.status()["controller_url"] == atr_url
 
 
-def test_controller_http_routes_require_auth_and_expose_redacted_status(tmp_path: Path) -> None:
-    """Catches unauthenticated controller mutation or missing operator management APIs."""
-    module = _load_packaged_helper_module()
-    module.TOKEN = "controller-token"
-    module.ARTIFACT_ROOT = tmp_path / "artifacts"
-    module.CONTROLLER_RESOLVER = module.ATRControllerResolver(
-        tmp_path,
-        verifier=lambda _url: {"ok": True, "skills": [], "token": "must-not-leak"},
-        scanner=lambda: ["http://192.168.50.146:7860"],
-    )
-    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    base = f"http://127.0.0.1:{server.server_address[1]}"
-
-    def request(path: str, *, method: str = "GET", payload: dict[str, Any] | None = None, authenticated: bool = True):
-        data = json.dumps(payload).encode("utf-8") if payload is not None else None
-        headers = {"Content-Type": "application/json"}
-        if authenticated:
-            headers["X-Bridge-Token"] = "controller-token"
-        return urllib.request.urlopen(
-            urllib.request.Request(base + path, data=data, method=method, headers=headers),
-            timeout=5,
-        )
-
-    try:
-        with pytest.raises(urllib.error.HTTPError) as unauthorized:
-            request("/controller/select", method="POST", payload={"controller_url": "http://192.168.50.10:7860"}, authenticated=False)
-        with request("/controller/discover", method="POST", payload={}) as response:
-            discovered = json.loads(response.read().decode("utf-8"))
-        with request("/controller") as response:
-            status = json.loads(response.read().decode("utf-8"))
-        with request("/health") as response:
-            health = json.loads(response.read().decode("utf-8"))
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-        module.TOKEN = ""
-
-    assert unauthorized.value.code == 401
-    assert discovered["ok"] is True
-    assert status["controller_url"] == "http://192.168.50.146:7860"
-    assert health["atr_controller"]["controller_url"] == status["controller_url"]
-    serialized = json.dumps({"status": status, "health": health}).lower()
-    assert "must-not-leak" not in serialized
-    assert "controller-token" not in serialized
 
 
-def test_authenticated_peer_observation_runs_only_after_token_check(tmp_path: Path, monkeypatch) -> None:
-    """Catches controller learning from an unauthenticated source address."""
-    module = _load_packaged_helper_module()
-    module.TOKEN = "peer-token"
-    module.ARTIFACT_ROOT = tmp_path / "artifacts"
-    module.CONTROLLER_RESOLVER = module.ATRControllerResolver(tmp_path, verifier=lambda _url: {"ok": False})
-    observed: list[str] = []
-    monkeypatch.setattr(module.CONTROLLER_RESOLVER, "observe_authenticated_peer", observed.append)
-    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    base = f"http://127.0.0.1:{server.server_address[1]}"
-    try:
-        with pytest.raises(urllib.error.HTTPError) as unauthorized:
-            urllib.request.urlopen(base + "/health", timeout=5)
-        with urllib.request.urlopen(
-            urllib.request.Request(base + "/health", headers={"X-Bridge-Token": "peer-token"}),
-            timeout=5,
-        ) as response:
-            assert response.status == 200
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-        module.TOKEN = ""
-
-    assert unauthorized.value.code == 401
-    assert observed == ["127.0.0.1"]
 
 
-def test_allow_no_token_mode_never_persists_request_peer(tmp_path: Path, monkeypatch) -> None:
-    """Catches controller learning when the bench server has no authentication boundary."""
-    module = _load_packaged_helper_module()
-    module.TOKEN = ""
-    module.ARTIFACT_ROOT = tmp_path / "artifacts"
-    module.CONTROLLER_RESOLVER = module.ATRControllerResolver(tmp_path, verifier=lambda _url: {"ok": True})
-    observed: list[str] = []
-    monkeypatch.setattr(module.CONTROLLER_RESOLVER, "observe_authenticated_peer", observed.append)
-    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{server.server_address[1]}/health", timeout=5) as response:
-            assert response.status == 200
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
 
-    assert observed == []
-    assert not (tmp_path / "controller_connection.json").exists()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def test_bridge_platform_auto_resolves_linux() -> None:
@@ -1773,117 +1645,307 @@ global.clearInterval = () => {};
     return json.loads(completed.stdout)
 
 
-def test_windows_bridge_index_html_combines_operator_console_and_program_manager() -> None:
-    for module in (_load_helper_module(), _load_packaged_helper_module()):
-        html = module.INDEX_HTML
-        for element_id in (
-            'id="connectionPanel"',
-            'id="token"',
-            'id="health"',
-            'id="programManagerPanel"',
-            'id="managerProgramRegistry"',
-            'id="refreshPrograms"',
-            'id="managerSearch"',
-            'id="managerFilter"',
-            'id="managerStats"',
-            'id="newProgram"',
-            'id="browseProgram"',
-            'id="downloadProgramTemplate"',
-            'id="programFile"',
-            'id="programEditor"',
-            'id="programForm"',
-            'id="programDefinition"',
-            'id="validateProgram"',
-            'id="registerProgram"',
-            'id="managerLatestResult"',
-        ):
-            assert element_id in html
-        assert "Bridge Connection" in html
-        assert "Program Manager" in html
-        assert "Browse JSON" in html
-        assert "Download Template" in html
-        assert "Add to Registry" in html
-        assert 'data-manager-action="edit"' in html
-        assert 'data-manager-action="toggle"' in html
-        assert 'data-manager-action="revalidate"' in html
-        assert "atr.windowsBridge.programShortcuts.v1" not in html
-        assert 'call("/programs"' in html
-        assert 'call("/execute"' in html
-        assert 'call("/programs/register"' in html
-        assert 'call("/programs/validate"' in html
-        assert "storage: \"browser_local_only\"" not in html
-        assert "UTM Protocol" in html
-        assert "Live Proof Checklist" in html
-        assert "Run Timeline" in html
 
 
-def test_windows_bridge_console_simplification_keeps_all_operator_functions() -> None:
-    """The Program Manager is additive; it must not replace the full console."""
-    legacy_control_ids = (
-        'id="safePreflight"',
-        'id="utmSim"',
-        'id="utmLive"',
-        'id="utmAbort"',
-        'id="screenshot"',
-        'id="captureLocator"',
-        'id="locators"',
-        'id="artifacts"',
-        'id="requestLog"',
-        'id="execute"',
-        'id="sequence"',
-        'id="trace"',
-        'id="artifactPreview"',
-        'id="timelineTrack"',
-    )
-    manager_control_ids = (
+
+
+def test_windows_bridge_console_matches_the_four_section_worker_scope() -> None:
+    required_sections = (
+        'id="bridgeStatusPanel"',
         'id="programManagerPanel"',
-        'id="managerSearch"',
-        'id="managerFilter"',
-        'id="newProgram"',
-        'id="browseProgram"',
-        'id="downloadProgramTemplate"',
-        'id="programEditor"',
+        'id="recordingPanel"',
+        'id="latestLocalResultPanel"',
+        'id="diagnosticsPanel"',
     )
-
-    for module in (_load_helper_module(), _load_packaged_helper_module()):
-        html = module.INDEX_HTML
-        for element_id in legacy_control_ids + manager_control_ids:
-            assert element_id in html
-        assert "UTM Protocol" in html
-        assert "Live Proof Checklist" in html
-        assert "Run Timeline" in html
-        assert "Program Manager" in html
-
-
-def test_windows_bridge_console_defaults_to_essential_operator_surface() -> None:
-    essential_ids = (
-        'id="essentialConsole"',
+    forbidden_ownership = (
+        "UTM Protocol",
+        "Live Proof Checklist",
+        "Analysis Handoff",
+        "Vision Proof",
+        "ATR Controller",
+        'data-manager-tab="skills"',
+        'id="managerSkillsView"',
         'id="token"',
-        'id="health"',
-        'id="refreshAll"',
-        'id="clearToken"',
-        'id="essentialBridgeState"',
-        'id="essentialPyAutoGUI"',
-        'id="essentialResult"',
-        'id="essentialProgramManagerSlot"',
-        'id="advancedToolsPanel"',
     )
+
     for module in (_load_helper_module(), _load_packaged_helper_module()):
         html = module.INDEX_HTML
-        for element_id in essential_ids:
-            assert element_id in html
-        assert 'data-proxy-click=' not in html
-        assert '<details id="advancedToolsPanel">' in html
-        assert 'essentialProgramManagerSlot.appendChild(programManagerPanel)' in html
-        assert "function renderEssentialSummary(data)" in html
+        for marker in required_sections:
+            assert marker in html
+        for marker in forbidden_ownership:
+            assert marker not in html
+        assert "Bridge Status" in html
+        assert "Program Manager" in html
+        assert "Recording" in html
+        assert "Latest Local Result" in html
+        assert "program1" in html
+        assert '<details id="diagnosticsPanel"' in html
+
+
+def test_windows_bridge_server_does_not_proxy_linux_skill_or_controller_ownership() -> None:
+    for module in (_load_helper_module(), _load_packaged_helper_module()):
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        assert 'path == "/skills"' not in source
+        assert 'path.startswith("/skills/")' not in source
+        assert '"/controller/discover"' not in source
+        assert '"/controller/select"' not in source
+        assert "class ATRControllerResolver" not in source
+        assert "CONTROLLER_RESOLVER" not in source
+        assert "_atr_api_request" not in source
+        assert '"atr_controller"' not in source
+
+
+def test_windows_bridge_recording_delete_removes_only_the_saved_local_recording(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    manager = module.RecordingManager(tmp_path / "recordings", listener_factory=lambda _manager: [])
+    started = manager.start(
+        name="delete fixture",
+        target_app="fixture",
+        target_window="fixture",
+    )
+    manager.stop()
+    manager.save(started["recording_id"])
+
+    deleted = manager.delete(started["recording_id"])
+
+    assert deleted == {
+        "ok": True,
+        "status": "deleted",
+        "recording_id": started["recording_id"],
+    }
+    assert manager.get(started["recording_id"])["status"] == "not_found"
+
+
+def test_windows_bridge_pairing_uses_one_time_four_digit_code_and_persists_internal_key(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    now = [1000.0]
+    manager = module.PairingManager(
+        tmp_path / "pairing.json",
+        clock=lambda: now[0],
+        code_factory=lambda: "0427",
+        key_factory=lambda: "internal-key-fixture",
+    )
+
+    issued = manager.issue_code()
+
+    assert issued["pairing_code"] == "0427"
+    assert issued["expires_in_sec"] == 300
+    completed = manager.complete("0427")
+    assert completed == {
+        "ok": True,
+        "status": "paired",
+        "paired": True,
+        "internal_key": "internal-key-fixture",
+    }
+    assert manager.status() == {"ok": True, "status": "paired", "paired": True}
+    assert "0427" not in (tmp_path / "pairing.json").read_text(encoding="utf-8")
+
+
+def test_windows_bridge_pairing_expires_codes_and_locks_after_five_failures(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    now = [1000.0]
+    manager = module.PairingManager(
+        tmp_path / "pairing.json",
+        clock=lambda: now[0],
+        code_factory=lambda: "1357",
+        key_factory=lambda: "internal-key-fixture",
+    )
+    manager.issue_code()
+
+    for attempt in range(5):
+        result = manager.complete("9999")
+        assert result["ok"] is False
+        assert result["attempts_remaining"] == max(0, 4 - attempt)
+
+    assert result["status"] == "locked"
+    assert result["retry_after_sec"] == 30
+    now[0] += 31
+    invalidated = manager.complete("1357")
+    assert invalidated["ok"] is False
+    assert invalidated["failure_code"] == "PAIRING_CODE_REQUIRED"
+    manager.issue_code()
+    assert manager.complete("1357")["ok"] is True
+
+    second = module.PairingManager(
+        tmp_path / "expired.json",
+        clock=lambda: now[0],
+        code_factory=lambda: "2468",
+        key_factory=lambda: "second-key",
+    )
+    second.issue_code()
+    now[0] += 301
+    expired = second.complete("2468")
+    assert expired["status"] == "expired"
+    assert expired["failure_code"] == "PAIRING_CODE_EXPIRED"
+
+
+def test_windows_bridge_pairing_routes_keep_execution_protected_while_local_setup_remains_available(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    module.TOKEN = ""
+    module.ARTIFACT_ROOT = tmp_path / "artifacts"
+    module.PROGRAM_ROOT = tmp_path / "programs"
+    module.RECORDING_MANAGER = module.RecordingManager(tmp_path / "recordings", listener_factory=lambda _manager: [])
+    module.PAIRING_MANAGER = module.PairingManager(
+        tmp_path / "pairing.json",
+        code_factory=lambda: "3141",
+        key_factory=lambda: "paired-internal-key",
+    )
+    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+
+    def request(path: str, *, method: str = "GET", payload: dict[str, Any] | None = None, key: str = ""):
+        data = json.dumps(payload).encode("utf-8") if payload is not None else None
+        headers = {"Content-Type": "application/json"}
+        if key:
+            headers[module.TOKEN_HEADER] = key
+        return urllib.request.urlopen(
+            urllib.request.Request(base + path, data=data, method=method, headers=headers),
+            timeout=5,
+        )
+
+    try:
+        for path in ("/health", "/programs", "/recordings", "/pairing/status", "/request-log"):
+            with request(path) as response:
+                assert response.status == 200
+        with request(
+            "/execute",
+            method="POST",
+            payload={"sequence_id": "local-console-test", "program_id": "program1"},
+        ) as response:
+            local_execute = json.loads(response.read())
+        assert local_execute.get("failure_code") != "PYAUTOGUI_AUTH_FAILED"
+        with pytest.raises(urllib.error.HTTPError) as protected:
+            request("/artifacts")
+        assert protected.value.code == 401
+
+        with request("/pairing/new-code", method="POST", payload={}) as response:
+            assert json.loads(response.read())["pairing_code"] == "3141"
+        with request("/pairing/complete", method="POST", payload={"pairing_code": "3141"}) as response:
+            paired = json.loads(response.read())
+        assert paired["internal_key"] == "paired-internal-key"
+        with pytest.raises(urllib.error.HTTPError) as paired_local_without_key:
+            request("/artifacts")
+        assert paired_local_without_key.value.code == 401
+        with request("/artifacts", key=paired["internal_key"]) as response:
+            assert response.status == 200
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_windows_bridge_keeps_saved_connection_secret_valid_after_pairing(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    module.TOKEN = "saved-connection-secret"
+    module.ARTIFACT_ROOT = tmp_path / "artifacts"
+    module.PAIRING_MANAGER = module.PairingManager(
+        tmp_path / "pairing.json",
+        code_factory=lambda: "3141",
+        key_factory=lambda: "paired-internal-key",
+    )
+    module.PAIRING_MANAGER.issue_code()
+    assert module.PAIRING_MANAGER.complete("3141")["ok"] is True
+    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{server.server_address[1]}/artifacts",
+        headers={module.TOKEN_HEADER: module.TOKEN},
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.status == 200
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_windows_bridge_pairing_complete_rejects_oversized_request_body(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    module.TOKEN = ""
+    module.PAIRING_MANAGER = module.PairingManager(tmp_path / "pairing.json", code_factory=lambda: "3141")
+    module.PAIRING_MANAGER.issue_code()
+    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{server.server_address[1]}/pairing/complete",
+        data=json.dumps({"pairing_code": "3141", "padding": "x" * 20000}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with pytest.raises(urllib.error.HTTPError) as rejected:
+            urllib.request.urlopen(request, timeout=5)
+        assert rejected.value.code == 413
+        assert json.loads(rejected.value.read())["failure_code"] == "PYAUTOGUI_REQUEST_TOO_LARGE"
+        assert module.PAIRING_MANAGER.status()["paired"] is False
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_windows_bridge_public_health_reports_pairing_state_without_exposing_code(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    module.PAIRING_MANAGER = module.PairingManager(
+        tmp_path / "pairing.json",
+        code_factory=lambda: "8080",
+    )
+    module.PAIRING_MANAGER.issue_code()
+    module.get_pyautogui = lambda: (None, "not installed")
+
+    health = module._health()
+
+    assert health["pairing"] == {"paired": False, "status": "pairing_available"}
+    assert "8080" not in json.dumps(health)
+
+
+def test_windows_bridge_main_starts_unpaired_without_legacy_token(monkeypatch, tmp_path: Path, capsys) -> None:
+    for module in (_load_helper_module(), _load_packaged_helper_module()):
+        module.TOKEN = ""
+        module.ARTIFACT_ROOT = tmp_path / module.__name__ / "artifacts"
+        module.LOCATOR_ROOT = tmp_path / module.__name__ / "locators"
+        module.RECORDING_ROOT = tmp_path / module.__name__ / "recordings"
+        module.PAIRING_MANAGER = module.PairingManager(module.ARTIFACT_ROOT / "pairing.json", code_factory=lambda: "2718")
+        module.PAIRING_MANAGER.issue_code()
+
+        class _Server:
+            def __init__(self, *_args, **_kwargs) -> None:
+                pass
+
+            def serve_forever(self) -> None:
+                return
+
+            def server_close(self) -> None:
+                return
+
+        monkeypatch.setattr(module, "_parse_cli_args", lambda: module.argparse.Namespace(allow_no_token=False, open_browser=False))
+        monkeypatch.setattr(module, "ThreadingHTTPServer", _Server)
+        monkeypatch.setattr(module, "_load_pyautogui", lambda: (None, "not installed"))
+        monkeypatch.setattr(module.RECORDING_MANAGER, "shutdown", lambda: None)
+
+        module.main()
+
+    output = capsys.readouterr().out
+    assert "Pairing: required" in output
+    assert "Token authentication:" not in output
+
+
 
 
 def test_windows_bridge_program_editor_opens_only_for_add_or_edit() -> None:
     for module in (_load_helper_module(), _load_packaged_helper_module()):
         html = module.INDEX_HTML
-        assert 'class="manager-editor" id="programEditor" hidden' in html
-        assert "programEditor.hidden = false" in html
-        assert "programEditor.hidden = true" in html
+        assert 'id="programEditor" class="editor" hidden' in html
+        assert "openEditor(" in html
+        assert '$("programEditor").hidden = false' in html
+        assert '$("programEditor").hidden=true' in html
 
 
 def test_windows_bridge_custom_macro_registry_persists_and_executes(tmp_path: Path) -> None:
@@ -1907,6 +1969,10 @@ def test_windows_bridge_custom_macro_registry_persists_and_executes(tmp_path: Pa
 
     registered = module._register_program_definition(definition)
     assert registered["ok"] is True
+    persisted = json.loads((module.PROGRAM_ROOT / "fixture_prepare.json").read_text(encoding="utf-8"))
+    assert registered["program_sha256"] == hashlib.sha256(
+        json.dumps(persisted, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
     assert (module.PROGRAM_ROOT / "fixture_prepare.json").exists()
     assert module._all_programs()["fixture_prepare"]["sequence"] == definition["sequence"]
 
@@ -1919,6 +1985,85 @@ def test_windows_bridge_custom_macro_registry_persists_and_executes(tmp_path: Pa
     deleted = module._delete_custom_program("fixture_prepare")
     assert deleted["ok"] is True
     assert "fixture_prepare" not in module._all_programs()
+
+
+def test_windows_bridge_managed_skill_program_is_immutable_and_hash_checked(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    module.PROGRAM_ROOT = tmp_path / "programs"
+    definition = {
+        "schema": "atr.pyautogui_program.v1",
+        "program_id": "managed_fixture_prepare",
+        "name": "Managed Fixture Prepare",
+        "description": "Linux-owned deployed Skill program",
+        "enabled": True,
+        "program_type": "macro",
+        "requires_pyautogui": True,
+        "safe_test": False,
+        "sequence": [{"action": "log", "message": "fixture ready"}],
+    }
+    digest = hashlib.sha256(
+        json.dumps(definition, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+    registered = module._register_program_definition(
+        definition,
+        managed=True,
+        deployment_sha256=digest,
+    )
+
+    assert registered["ok"] is True
+    assert registered["program"]["managed_by"] == "atr_equipment_skill"
+    assert module._delete_custom_program("managed_fixture_prepare")["failure_code"] == "PYAUTOGUI_PROGRAM_MANAGED_IMMUTABLE"
+    assert module._register_program_definition({**definition, "description": "local mutation"})["failure_code"] == "PYAUTOGUI_PROGRAM_MANAGED_IMMUTABLE"
+
+    persisted_path = module.PROGRAM_ROOT / "managed_fixture_prepare.json"
+    persisted = json.loads(persisted_path.read_text(encoding="utf-8"))
+    persisted["sequence"] = [{"action": "log", "message": "tampered"}]
+    persisted_path.write_text(json.dumps(persisted), encoding="utf-8")
+    module.get_pyautogui = lambda: (_FakePyAutoGUI(), None)
+
+    executed = module._execute({"sequence_id": "managed-hash-check", "program_id": "managed_fixture_prepare"})
+
+    assert executed["ok"] is False
+    assert executed["failure_code"] == "PYAUTOGUI_PROGRAM_HASH_MISMATCH"
+
+
+def test_windows_bridge_managed_skill_program_allows_explicit_atr_replace_and_delete(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    module.PROGRAM_ROOT = tmp_path / "programs"
+    definition = {
+        "schema": "atr.pyautogui_program.v1",
+        "program_id": "managed_fixture_replace",
+        "name": "Managed Fixture Replace",
+        "description": "Linux-owned replacement fixture",
+        "enabled": True,
+        "program_type": "macro",
+        "requires_pyautogui": True,
+        "safe_test": False,
+        "sequence": [{"action": "log", "message": "version one"}],
+    }
+    first_digest = hashlib.sha256(
+        json.dumps(definition, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    assert module._register_program_definition(
+        definition,
+        managed=True,
+        deployment_sha256=first_digest,
+    )["ok"] is True
+
+    replacement = {**definition, "sequence": [{"action": "log", "message": "version two"}]}
+    replacement_digest = hashlib.sha256(
+        json.dumps(replacement, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    replaced = module._register_program_definition(
+        replacement,
+        managed=True,
+        deployment_sha256=replacement_digest,
+    )
+
+    assert replaced["ok"] is True
+    assert replaced["program_sha256"] == replacement_digest
+    assert module._delete_custom_program("managed_fixture_replace", allow_managed=True)["ok"] is True
 
 
 def test_windows_bridge_custom_macro_registry_rejects_unsafe_or_builtin_definitions(tmp_path: Path) -> None:
@@ -1954,8 +2099,8 @@ def test_windows_bridge_setup_surface_separates_browse_template_and_registration
         assert 'id="validateProgram"' in html
         assert 'id="registerProgram"' in html
         assert 'Browse JSON' in html
-        assert 'Download Template' in html
-        assert 'Add to Registry' in html
+        assert '>Template<' in html
+        assert '>Save<' in html
         assert 'call("/programs/validate"' in html
         assert 'call("/programs/register"' in html
         assert 'atr.windowsBridge.programShortcuts.v1' not in html
@@ -1966,24 +2111,6 @@ def test_windows_bridge_setup_surface_separates_browse_template_and_registration
         assert 'id="program1"' not in html
 
 
-def test_program_manager_exposes_examples_without_implicit_registration() -> None:
-    for module in (_load_helper_module(), _load_packaged_helper_module()):
-        html = module.INDEX_HTML
-        assert 'data-manager-tab="examples"' in html
-        assert 'id="managerExamplesView"' in html
-        assert 'id="openCapabilityLab"' in html
-        assert 'id="refreshExamples"' in html
-        assert 'id="exampleRegistry"' in html
-        assert 'id="recordingCoverage"' in html
-        assert 'id="recordImageTracking"' in html
-        assert 'id="recordCoordinateFallback"' in html
-        assert 'id="recordingLocatorPreview"' in html
-        assert 'call("/examples"' in html
-        assert 'data-load-example' in html
-        assert 'data-run-example' in html
-        assert "loadExampleIntoEditor" in html
-        assert "registerProgramDefinition(example" not in html
-    assert "program_id:example.program.program_id" not in html
 
 
 def test_source_and_install_helpers_load_the_same_example_catalog() -> None:
@@ -2045,6 +2172,31 @@ def test_windows_bridge_program_registry_http_lifecycle(tmp_path: Path) -> None:
         thread.join(timeout=5)
 
 
+def test_windows_bridge_mutating_routes_require_json_content_type(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    module.TOKEN = "content-type-token"
+    module.PROGRAM_ROOT = tmp_path / "programs"
+    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    request = urllib.request.Request(
+        base + "/programs/validate",
+        data=b"{}",
+        headers={"X-Bridge-Token": "content-type-token", "Content-Type": "text/plain"},
+        method="POST",
+    )
+
+    try:
+        with pytest.raises(urllib.error.HTTPError) as rejected:
+            urllib.request.urlopen(request, timeout=5)
+        assert rejected.value.code == 415
+        payload = json.loads(rejected.value.read().decode("utf-8"))
+        assert payload["failure_code"] == "PYAUTOGUI_JSON_CONTENT_TYPE_REQUIRED"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 
@@ -2054,7 +2206,9 @@ def test_windows_bridge_program_registry_http_lifecycle(tmp_path: Path) -> None:
 
 
 
-def test_install_bridge_request_audit_log_records_auth_without_token_leak(tmp_path: Path) -> None:
+
+
+def test_install_bridge_request_audit_allows_local_health_without_secret_leak(tmp_path: Path) -> None:
     module = _load_helper_module()
     module.TOKEN = "audit-token"
     module.ARTIFACT_ROOT = tmp_path / "artifacts"
@@ -2113,7 +2267,7 @@ def test_install_bridge_request_audit_log_records_auth_without_token_leak(tmp_pa
     events = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert [event["path"] for event in events] == ["/", "/health", "/health", "/execute", "/execute", "/execute", "/request-log"]
     assert events[0]["auth_ok"] is None
-    assert events[1]["auth_ok"] is False
+    assert events[1]["auth_ok"] is True
     assert events[2]["auth_ok"] is True
     assert events[3]["status"] == "authorized"
     assert events[4]["audit_kind"] == "execute_payload"
@@ -2123,29 +2277,9 @@ def test_install_bridge_request_audit_log_records_auth_without_token_leak(tmp_pa
     assert "audit-token" not in log_path.read_text(encoding="utf-8")
     assert "wrong-token" not in log_path.read_text(encoding="utf-8")
 
-def test_install_bridge_root_serves_complete_program_console() -> None:
-    module = _load_helper_module()
-    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{server.server_address[1]}/", timeout=5) as response:
-            body = response.read().decode("utf-8")
-        assert response.status == 200
-        assert "ATR Windows PyAutoGUI Bridge" in body
-        assert 'id="connectionPanel"' in body
-        assert 'id="programManagerPanel"' in body
-        assert 'id="programEditor"' in body
-        assert 'id="utmLive"' in body
-        assert 'id="program1"' not in body
-        assert any(program["program_id"] == "program1" for program in module._programs()["programs"])
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
 
 
-def test_packaged_bridge_request_log_endpoint_records_auth_without_token_leak(tmp_path: Path) -> None:
+def test_packaged_bridge_request_log_allows_local_health_without_secret_leak(tmp_path: Path) -> None:
     module = _load_packaged_helper_module()
     config = module.BridgeConfig(
         host="127.0.0.1",
@@ -2197,7 +2331,7 @@ def test_packaged_bridge_request_log_endpoint_records_auth_without_token_leak(tm
     assert payload["execute_program_ids"] == ["program1"]
     assert payload["recent_paths"][-1] == "/request-log"
     assert [event["path"] for event in payload["events"]] == ["/health", "/execute", "/execute", "/execute", "/request-log"]
-    assert payload["events"][0]["auth_ok"] is False
+    assert payload["events"][0]["auth_ok"] is True
     assert payload["events"][1]["status"] == "authorized"
     assert payload["events"][2]["audit_kind"] == "execute_payload"
     assert payload["events"][3]["audit_kind"] == "execute_result"
@@ -2657,10 +2791,581 @@ def test_recording_manager_persists_redacted_events_and_checkpoint(tmp_path: Pat
     assert checkpoint["ok"] is True
     assert stopped["status"] == "completed"
     assert saved["status"] == "saved"
-    assert saved["events"][0] == {"kind": "key_press", "key": "a", "at_ms": saved["events"][0]["at_ms"]}
+    assert saved["events"][0]["kind"] == "key_press"
+    assert saved["events"][0]["key"] == "a"
+    assert isinstance(saved["events"][0]["at_ms"], int)
     assert "text" not in saved["events"][0]
     assert saved["checkpoints"][0]["sha256"]
     assert (tmp_path / started["recording_id"] / "recording.json").exists()
+
+
+def test_recording_manager_masks_sensitive_screen_regions_in_all_evidence(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+    pillow = pytest.importorskip("PIL.Image")
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        screenshot_provider=lambda: pillow.new("RGB", (100, 80), color=(255, 255, 255)),
+    )
+    fake = _FakePyAutoGUI()
+    fake.screenshot = lambda: pillow.new("RGB", (100, 80), color=(255, 255, 255))
+
+    started = manager.start(
+        name="masked demo",
+        target_app="Program 1",
+        target_window="Program 1",
+        mask_regions=[{"x": 10, "y": 12, "width": 30, "height": 20}],
+    )
+    assert started["mask_regions"] == [{"x": 10, "y": 12, "width": 30, "height": 20}]
+    assert manager._frame_buffer.capture_once() is True
+    checkpoint = manager.checkpoint(label="masked checkpoint", pyautogui=fake)
+    completed = manager.stop()
+
+    checkpoint_image = pillow.open(checkpoint["artifact_path"]).convert("RGB")
+    frame_image = pillow.open(completed["time_series_evidence"]["frames"][0]["artifact_path"]).convert("RGB")
+    assert checkpoint_image.getpixel((15, 15)) == (0, 0, 0)
+    assert frame_image.getpixel((15, 15)) == (0, 0, 0)
+    assert frame_image.getpixel((60, 60)) != (0, 0, 0)
+
+
+def test_recording_manager_persists_bounded_event_keyframes(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+    pillow = pytest.importorskip("PIL.Image")
+    frame_number = 0
+
+    def screenshot() -> object:
+        nonlocal frame_number
+        frame_number += 1
+        return pillow.new("RGB", (640, 480), color=(frame_number % 255, 40, 80))
+
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        screenshot_provider=screenshot,
+        frame_buffer_fps=2,
+        frame_buffer_retention_sec=20,
+    )
+    started = manager.start(name="Buffered demo", target_app="Program 1", target_window="Program 1")
+    assert started["schema"] == "atr.equipment_recording.v3"
+    assert manager._frame_buffer.capture_once() is True
+    manager.record_event({"kind": "key_press", "key": "enter"})
+    assert manager._frame_buffer.capture_once() is True
+
+    completed = manager.stop()
+    timeline = completed["time_series_evidence"]
+
+    assert timeline["schema"] == "atr.equipment_recording_frames.v1"
+    assert timeline["fps"] == 2.0
+    assert timeline["retention_sec"] == 20.0
+    assert timeline["sampled_frame_count"] >= 2
+    assert 1 <= timeline["persisted_frame_count"] <= timeline["sampled_frame_count"]
+    assert all(Path(item["artifact_path"]).is_file() for item in timeline["frames"])
+    assert manager._frame_buffer.status()["active"] is False
+
+
+def test_recording_manager_persists_complete_two_fps_fullscreen_timeline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_packaged_helper_module()
+    pillow = pytest.importorskip("PIL.Image")
+    clock = {"value": 100.0}
+    frame_number = {"value": 0}
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock["value"])
+
+    def screenshot() -> object:
+        frame_number["value"] += 1
+        return pillow.new("RGB", (1200, 600), color=(frame_number["value"] % 255, 40, 80))
+
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        screenshot_provider=screenshot,
+        frame_buffer_fps=2,
+        frame_buffer_retention_sec=20,
+    )
+    started = manager.start(name="full timeline", target_app="Program 1", target_window="Program 1")
+    for frame_index in range(1, 66):
+        clock["value"] = 100.0 + frame_index * 0.5
+        assert manager._frame_buffer.capture_once() is True
+
+    completed = manager.stop()
+    timeline = completed["time_series_evidence"]
+    periodic = [item for item in timeline["frames"] if item["reason"] == "periodic"]
+
+    assert timeline["fps"] == 2.0
+    assert timeline["sampled_frame_count"] == 66
+    assert timeline["persisted_frame_count"] == 66
+    assert len(periodic) == 66
+    assert periodic[0]["width"] == 1200
+    assert periodic[0]["height"] == 600
+    assert all(Path(item["artifact_path"]).is_file() for item in periodic)
+    assert Path(timeline["timeline_path"]).is_file()
+    timeline_rows = [json.loads(line) for line in Path(timeline["timeline_path"]).read_text().splitlines()]
+    periodic_rows = [row for row in timeline_rows if row["reason"] == "periodic"]
+    assert [row["frame_id"] for row in periodic_rows] == [item["frame_id"] for item in periodic]
+    assert {row["reason"] for row in timeline_rows} >= {"recording_start", "recording_stop"}
+    assert manager._frame_buffer.status()["buffer_bytes"] == 0
+    assert started["time_series_evidence"]["fps"] == 2.0
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_recording_frame_loop_compensates_for_capture_processing_time(loader) -> None:
+    module = loader()
+    clock = {"value": 0.0}
+    capture_times: list[float] = []
+
+    class FakeStopEvent:
+        def wait(self, timeout: float) -> bool:
+            if len(capture_times) >= 3:
+                return True
+            clock["value"] += timeout
+            return False
+
+    frame_buffer = module.RecordingFrameBuffer(screenshot_provider=lambda: None, fps=2)
+    frame_buffer._stop_event = FakeStopEvent()
+
+    def capture_once() -> bool:
+        capture_times.append(clock["value"])
+        clock["value"] += 0.1
+        return True
+
+    frame_buffer.capture_once = capture_once
+    original_monotonic = module.time.monotonic
+    module.time.monotonic = lambda: clock["value"]
+    try:
+        frame_buffer._capture_loop()
+    finally:
+        module.time.monotonic = original_monotonic
+
+    assert capture_times == pytest.approx([0.5, 1.0, 1.5])
+
+
+def test_recording_timeline_marks_incomplete_when_disk_is_critically_low(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_packaged_helper_module()
+    pillow = pytest.importorskip("PIL.Image")
+    usage = type("Usage", (), {"total": 2_000_000_000, "used": 1_950_000_000, "free": 50_000_000})()
+    monkeypatch.setattr(module.shutil, "disk_usage", lambda _path: usage)
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        screenshot_provider=lambda: pillow.new("RGB", (160, 120), color=(40, 50, 60)),
+    )
+    started = manager.start(name="low disk", target_app="Program 1", target_window="Program 1")
+
+    assert manager._frame_buffer.capture_once() is False
+    completed = manager.stop()
+
+    assert completed["time_series_evidence"]["writer_status"] == "incomplete"
+    assert completed["time_series_evidence"]["storage_state"] == "critical"
+    assert completed["time_series_evidence"]["evidence_complete"] is False
+    assert (tmp_path / started["recording_id"] / "recording.json").is_file()
+
+
+def test_recording_stop_captures_final_state_after_last_action(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_packaged_helper_module()
+    pillow = pytest.importorskip("PIL.Image")
+    clock = {"value": 100.0}
+    frame_number = {"value": 0}
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock["value"])
+
+    def screenshot() -> object:
+        frame_number["value"] += 1
+        return pillow.new("RGB", (320, 240), color=(frame_number["value"], 40, 80))
+
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        screenshot_provider=screenshot,
+        frame_buffer_fps=2,
+    )
+    manager.start(name="final-state", target_app="Program 1", target_window="Program 1")
+    clock["value"] = 101.0
+    assert manager._frame_buffer.capture_once() is True
+    clock["value"] = 102.0
+    assert manager.record_event({"kind": "key_press", "key": "enter"}) is True
+    clock["value"] = 103.0
+
+    completed = manager.stop()
+
+    frames = completed["time_series_evidence"]["frames"]
+    assert max(item["at_ms"] for item in frames) == 3000
+    assert max(item["at_ms"] for item in frames) > completed["events"][-1]["at_ms"]
+
+
+def test_recording_event_keyframe_survives_rolling_buffer_eviction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_packaged_helper_module()
+    pillow = pytest.importorskip("PIL.Image")
+    clock = {"value": 100.0}
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock["value"])
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        screenshot_provider=lambda: pillow.new("RGB", (320, 240), color=(10, 20, 30)),
+        frame_buffer_fps=2,
+        frame_buffer_retention_sec=20,
+    )
+    manager.start(name="long recording", target_app="Program 1", target_window="Program 1")
+    clock["value"] = 101.0
+    assert manager._frame_buffer.capture_once() is True
+    assert manager.record_event({"kind": "key_press", "key": "enter"}) is True
+    for elapsed in (10, 20, 25, 30):
+        clock["value"] = 100.0 + elapsed
+        assert manager._frame_buffer.capture_once() is True
+
+    completed = manager.stop()
+    evidence = completed["events"][0]["frame_evidence"]
+
+    assert evidence["at_ms"] == 1000
+    assert evidence["event_at_ms"] == 1000
+    assert Path(evidence["artifact_path"]).is_file()
+    assert evidence["sha256"] == hashlib.sha256(Path(evidence["artifact_path"]).read_bytes()).hexdigest()
+
+
+def test_recording_event_links_pre_exact_and_post_frames_with_png_boundaries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_packaged_helper_module()
+    pillow = pytest.importorskip("PIL.Image")
+    clock = {"value": 100.0}
+    frame_number = {"value": 0}
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock["value"])
+
+    def screenshot() -> object:
+        frame_number["value"] += 1
+        return pillow.new("RGB", (320, 180), color=(frame_number["value"] % 255, 30, 60))
+
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        screenshot_provider=screenshot,
+        frame_buffer_fps=2,
+    )
+    manager.start(name="linked evidence", target_app="Program 1", target_window="Program 1")
+    clock["value"] = 100.5
+    assert manager._frame_buffer.capture_once() is True
+    clock["value"] = 101.0
+    assert manager.record_event({"kind": "key_press", "key": "enter"}) is True
+    clock["value"] = 101.5
+    assert manager._frame_buffer.capture_once() is True
+    clock["value"] = 102.0
+
+    completed = manager.stop()
+    evidence = completed["events"][0]["frame_evidence"]
+    frames = completed["time_series_evidence"]["frames"]
+    frame_ids = {item["frame_id"] for item in frames}
+    boundary_frames = [item for item in frames if item["reason"] in {"recording_start", "recording_stop"}]
+
+    assert evidence["pre_frame_id"] in frame_ids
+    assert evidence["event_frame_id"] in frame_ids
+    assert evidence["post_frame_id"] in frame_ids
+    assert Path(evidence["event_artifact_path"]).suffix.lower() == ".png"
+    assert Path(evidence["post_artifact_path"]).suffix.lower() == ".png"
+    assert Path(evidence["event_artifact_path"]).is_file()
+    assert Path(evidence["post_artifact_path"]).is_file()
+    assert {item["reason"] for item in boundary_frames} == {"recording_start", "recording_stop"}
+    assert all(Path(item["artifact_path"]).suffix.lower() == ".png" for item in boundary_frames)
+
+
+def test_recording_package_contains_bounded_hash_verified_artifacts(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+    pillow = pytest.importorskip("PIL.Image")
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        screenshot_provider=lambda: pillow.new("RGB", (160, 120), color=(40, 50, 60)),
+    )
+    started = manager.start(name="portable recording", target_app="Program 1", target_window="Program 1")
+    manager.record_event({"kind": "key_press", "key": "enter"})
+    manager.stop()
+
+    package = manager.package(started["recording_id"])
+
+    assert package["ok"] is True
+    assert package["schema"] == "atr.equipment_recording_package.v1"
+    assert package["recording"]["recording_id"] == started["recording_id"]
+    assert package["artifacts"]
+    for artifact in package["artifacts"]:
+        raw = base64.b64decode(artifact["data_base64"], validate=True)
+        assert artifact["sha256"] == hashlib.sha256(raw).hexdigest()
+        assert ".." not in Path(artifact["relative_path"]).parts
+
+
+def test_recording_package_has_no_default_completed_evidence_byte_cap() -> None:
+    module = _load_packaged_helper_module()
+
+    parameter = inspect.signature(module.RecordingManager.package).parameters["max_total_bytes"]
+
+    assert parameter.default is None
+
+
+def test_recording_preview_returns_bounded_browser_ready_keyframes(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+    pillow = pytest.importorskip("PIL.Image")
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        screenshot_provider=lambda: pillow.new("RGB", (160, 120), color=(40, 50, 60)),
+    )
+    started = manager.start(name="preview recording", target_app="Program 1", target_window="Program 1")
+    assert manager._frame_buffer.capture_once() is True
+    manager.record_event({"kind": "key_press", "key": "enter"})
+    manager.stop()
+
+    preview = manager.preview(started["recording_id"])
+
+    assert preview["ok"] is True
+    assert preview["schema"] == "atr.equipment_recording_preview.v1"
+    assert preview["recording_id"] == started["recording_id"]
+    assert preview["frames"]
+    assert preview["frames"][0]["data_base64"]
+    assert preview["frames"][0]["media_type"] in {"image/jpeg", "image/png"}
+    assert "artifact_path" not in preview["frames"][0]
+
+
+def test_recording_preview_paginates_without_loading_complete_timeline(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+    pillow = pytest.importorskip("PIL.Image")
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        screenshot_provider=lambda: pillow.new("RGB", (160, 120), color=(40, 50, 60)),
+    )
+    started = manager.start(name="paginated preview", target_app="Program 1", target_window="Program 1")
+    for _ in range(5):
+        assert manager._frame_buffer.capture_once() is True
+    manager.stop()
+
+    preview = manager.preview(started["recording_id"], cursor=1, limit=2)
+
+    assert preview["ok"] is True
+    assert preview["cursor"] == 1
+    assert preview["limit"] == 2
+    assert preview["returned_frame_count"] == 2
+    assert preview["total_frame_count"] >= 5
+    assert preview["next_cursor"] == 3
+    assert len(preview["frames"]) == 2
+
+
+def test_embedded_recording_preview_fetches_paginated_pages() -> None:
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "Pyautogui_server_for_window"
+        / "bridge"
+        / "windows_pyautogui_bridge_server.py"
+    ).read_text(encoding="utf-8")
+
+    assert "cursor=${recordingPreviewCursor}" in source
+    assert "limit=${recordingPreviewLimit}" in source
+    assert "recordingPreviewNextCursor" in source
+
+
+def test_recording_package_route_is_not_an_unauthenticated_local_setup_route() -> None:
+    module = _load_packaged_helper_module()
+
+    assert module.Handler._is_local_setup_path("/recordings/rec-20260827T010203-12345678", "GET") is True
+    assert module.Handler._is_local_setup_path("/recordings/rec-20260827T010203-12345678/package", "GET") is False
+    assert module.Handler._is_local_setup_path("/recordings/rec-20260827T010203-12345678/preview", "GET") is True
+
+
+def test_recording_console_routes_do_not_require_pairing_from_a_saved_worker_connection(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    module.TOKEN = ""
+    module.PAIRING_MANAGER = module.PairingManager(tmp_path / "pairing.json")
+    handler = object.__new__(module.Handler)
+    handler.client_address = ("192.168.50.10", 54321)
+    handler.headers = {}
+
+    assert handler._has_route_access("/recordings", "GET") is True
+    assert handler._has_route_access("/recordings/status", "GET") is True
+    assert handler._has_route_access("/recordings/start", "POST") is True
+    assert handler._has_route_access("/recordings/checkpoint", "POST") is True
+    assert handler._has_route_access("/recordings/stop", "POST") is True
+    assert handler._has_route_access("/recordings/rec-20260827T010203-12345678/preview", "GET") is True
+    assert handler._has_route_access("/recordings/rec-20260827T010203-12345678/save", "POST") is True
+    assert handler._has_route_access("/recordings/rec-20260827T010203-12345678", "DELETE") is True
+    assert handler._has_route_access("/recordings/rec-20260827T010203-12345678/package", "GET") is False
+    assert handler._has_route_access("/update/status", "GET") is False
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_public_discovery_route_does_not_expose_protected_health(loader, tmp_path: Path) -> None:
+    module = loader()
+    module.TOKEN = "saved-connection-secret"
+    module.PAIRING_MANAGER = module.PairingManager(tmp_path / "pairing.json")
+    handler = object.__new__(module.Handler)
+    handler.client_address = ("192.168.50.146", 54321)
+    handler.headers = {}
+
+    assert handler._has_route_access("/discovery", "GET") is True
+    assert handler._has_route_access("/health", "GET") is False
+    assert handler._has_route_access("/update/status", "GET") is False
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_compact_ping_is_plaintext_public_and_not_written_to_request_audit(loader, tmp_path: Path) -> None:
+    module = loader()
+    module.TOKEN = "saved-connection-secret"
+    module.ARTIFACT_ROOT = tmp_path / "artifacts"
+    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with urllib.request.urlopen(base + "/ping", timeout=5) as response:
+            assert response.status == 200
+            assert response.headers.get_content_type() == "text/plain"
+            assert response.read().decode("ascii") == f"ok {module.BRIDGE_RELEASE_VERSION}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        module.TOKEN = ""
+
+    assert not (module.ARTIFACT_ROOT / "bridge_requests.jsonl").exists()
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_local_legacy_discovery_is_compact_and_not_written_to_request_audit(loader, tmp_path: Path) -> None:
+    module = loader()
+    module.TOKEN = "saved-connection-secret"
+    module.ARTIFACT_ROOT = tmp_path / "artifacts"
+    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with urllib.request.urlopen(base + "/discovery", timeout=5) as response:
+            payload = json.loads(response.read().decode("ascii"))
+        assert payload == {
+            "ok": True,
+            "server_version": f"WindowsPyAutoGUIBridge/{module.BRIDGE_RELEASE_VERSION}",
+        }
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        module.TOKEN = ""
+
+    assert not (module.ARTIFACT_ROOT / "bridge_requests.jsonl").exists()
+
+
+def test_recording_manager_persists_bounded_exception_window_on_same_timeline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_packaged_helper_module()
+    pillow = pytest.importorskip("PIL.Image")
+    clock = {"value": 100.0}
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock["value"])
+
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        screenshot_provider=lambda: pillow.new("RGB", (320, 240), color=(30, 80, 120)),
+        frame_buffer_fps=2,
+        frame_buffer_retention_sec=20,
+        exception_pre_sec=3,
+        exception_post_sec=2,
+    )
+    started = manager.start(name="exception evidence", target_app="Program 1", target_window="Program 1")
+    for elapsed in (1, 3, 5, 7, 9):
+        clock["value"] = 100.0 + elapsed
+        assert manager._frame_buffer.capture_once() is True
+    clock["value"] = 106.0
+    marked = manager.record_exception(
+        failure_code="LOCATOR_NOT_FOUND",
+        detail="expected completion image was not found",
+    )
+    clock["value"] = 110.0
+    completed = manager.stop()
+
+    assert marked["ok"] is True
+    assert marked["timeline_id"] == started["timeline_id"]
+    timeline = completed["time_series_evidence"]
+    assert timeline["timeline_id"] == started["timeline_id"]
+    assert timeline["exception_window_count"] == 1
+    window = timeline["exception_windows"][0]
+    assert window["failure_code"] == "LOCATOR_NOT_FOUND"
+    assert window["pre_window_ms"] == 3000
+    assert window["post_window_ms"] == 2000
+    assert [item["at_ms"] for item in timeline["frames"] if item["frame_id"] in window["frame_ids"]] == [
+        3000,
+        5000,
+        7000,
+    ]
+    assert all(Path(item["artifact_path"]).is_file() for item in timeline["frames"])
+    assert manager._frame_buffer.status()["sampled_frame_count"] == 0
+
+
+def test_recording_manager_pins_exception_window_before_rolling_history_eviction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_packaged_helper_module()
+    pillow = pytest.importorskip("PIL.Image")
+    clock = {"value": 100.0}
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock["value"])
+
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        screenshot_provider=lambda: pillow.new("RGB", (320, 240), color=(30, 80, 120)),
+        frame_buffer_fps=2,
+        frame_buffer_retention_sec=20,
+        exception_pre_sec=3,
+        exception_post_sec=2,
+    )
+    started = manager.start(name="eviction proof", target_app="Program 1", target_window="Program 1")
+    for elapsed in (1, 3, 5):
+        clock["value"] = 100.0 + elapsed
+        assert manager._frame_buffer.capture_once() is True
+    clock["value"] = 106.0
+    manager.record_exception(failure_code="LOCATOR_NOT_FOUND", detail="pin this window")
+    clock["value"] = 107.0
+    assert manager._frame_buffer.capture_once() is True
+
+    # Force the rolling history beyond retention before the recording is stopped.
+    clock["value"] = 140.0
+    assert manager._frame_buffer.capture_once() is True
+    completed = manager.stop()
+
+    timeline = completed["time_series_evidence"]
+    assert timeline["timeline_id"] == started["timeline_id"]
+    assert timeline["exception_window_count"] == 1
+    window = timeline["exception_windows"][0]
+    pinned_frames = [item for item in timeline["frames"] if item["frame_id"] in window["frame_ids"]]
+    assert [item["at_ms"] for item in pinned_frames] == [3000, 5000, 7000]
+    assert all(Path(item["artifact_path"]).is_file() for item in pinned_frames)
+
+
+def test_recording_exception_marker_is_redacted_and_requires_active_recording(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+    manager = module.RecordingManager(tmp_path, listener_factory=lambda _manager: [])
+
+    idle = manager.record_exception(failure_code="TOKEN_secret-value", detail="api_token=do-not-save")
+    assert idle["failure_code"] == "SKILL_RECORDING_NOT_ACTIVE"
+
+    manager.start(name="redacted exception", target_app="Program 1", target_window="Program 1")
+    marked = manager.record_exception(
+        failure_code="LOCATOR_NOT_FOUND",
+        detail="token=secret-value expected image missing",
+    )
+    completed = manager.stop()
+
+    serialized = json.dumps(completed["exceptions"])
+    assert marked["failure_code"] == "LOCATOR_NOT_FOUND"
+    assert "secret-value" not in serialized
 
 
 def test_recording_manager_fails_closed_when_listener_dependency_is_missing(tmp_path: Path) -> None:
@@ -2683,10 +3388,13 @@ def test_recording_overlay_controller_shows_updates_and_hides_banner() -> None:
     module = _load_packaged_helper_module()
     windows: list[Any] = []
 
+    stop_requests: list[str] = []
+
     class FakeOverlayWindow:
-        def __init__(self) -> None:
+        def __init__(self, on_stop) -> None:
             self.elapsed: list[float] = []
             self.closed = False
+            self.on_stop = on_stop
 
         def update_elapsed(self, elapsed_s: float) -> None:
             self.elapsed.append(elapsed_s)
@@ -2697,8 +3405,8 @@ def test_recording_overlay_controller_shows_updates_and_hides_banner() -> None:
         def close(self) -> None:
             self.closed = True
 
-    def create_window() -> FakeOverlayWindow:
-        window = FakeOverlayWindow()
+    def create_window(on_stop) -> FakeOverlayWindow:
+        window = FakeOverlayWindow(on_stop)
         windows.append(window)
         return window
 
@@ -2707,6 +3415,7 @@ def test_recording_overlay_controller_shows_updates_and_hides_banner() -> None:
         window_factory=create_window,
         monotonic=lambda: 12.5,
         poll_interval=0.005,
+        on_stop=lambda: stop_requests.append("stop"),
     )
     controller.show("rec-overlay-test", 10.0)
     deadline = time.monotonic() + 1.0
@@ -2715,6 +3424,11 @@ def test_recording_overlay_controller_shows_updates_and_hides_banner() -> None:
 
     assert controller.status() == {"available": True, "visible": True, "error": None}
     assert windows and windows[0].elapsed[-1] == pytest.approx(2.5)
+    windows[0].on_stop()
+    deadline = time.monotonic() + 1.0
+    while stop_requests != ["stop"] and time.monotonic() < deadline:
+        time.sleep(0.005)
+    assert stop_requests == ["stop"]
 
     controller.hide()
     deadline = time.monotonic() + 1.0
@@ -2724,6 +3438,62 @@ def test_recording_overlay_controller_shows_updates_and_hides_banner() -> None:
     assert windows[0].closed is True
     assert controller.status()["visible"] is False
     controller.shutdown()
+
+
+def test_recording_overlay_stop_returns_without_waiting_for_recording_finalization() -> None:
+    module = _load_packaged_helper_module()
+    windows: list[Any] = []
+    stop_started = threading.Event()
+    release_stop = threading.Event()
+
+    class FakeOverlayWindow:
+        def __init__(self, on_stop) -> None:
+            self.on_stop = on_stop
+
+        def update_elapsed(self, _elapsed_s: float) -> None:
+            return None
+
+        def pump(self) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    def create_window(on_stop) -> FakeOverlayWindow:
+        window = FakeOverlayWindow(on_stop)
+        windows.append(window)
+        return window
+
+    def slow_finalize() -> None:
+        stop_started.set()
+        release_stop.wait(timeout=2.0)
+
+    controller = module.RecordingOverlayController(
+        platform_name="win32",
+        window_factory=create_window,
+        poll_interval=0.005,
+        on_stop=slow_finalize,
+    )
+    controller.show("rec-overlay-async-stop", time.monotonic())
+    deadline = time.monotonic() + 1.0
+    while not controller.status()["visible"] and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    click_returned = threading.Event()
+
+    def click_stop() -> None:
+        windows[0].on_stop()
+        click_returned.set()
+
+    click_thread = threading.Thread(target=click_stop)
+    click_thread.start()
+    try:
+        assert stop_started.wait(timeout=1.0)
+        assert click_returned.wait(timeout=0.2), "overlay STOP blocked on recording finalization"
+    finally:
+        release_stop.set()
+        click_thread.join(timeout=1.0)
+        controller.shutdown()
 
 
 def test_recording_manager_owns_overlay_lifecycle(tmp_path: Path) -> None:
@@ -2746,6 +3516,27 @@ def test_recording_manager_owns_overlay_lifecycle(tmp_path: Path) -> None:
 
     manager.shutdown()
     assert overlay.shutdown_calls == 1
+
+
+def test_recording_manager_marks_overlay_stop_click_as_recording_control(tmp_path: Path) -> None:
+    module = _load_packaged_helper_module()
+
+    class OverlayWithStopEvidence(_FakeRecordingOverlay):
+        def consume_stop_request(self) -> dict[str, Any]:
+            return {"control": "overlay_stop", "x": 984, "y": 46}
+
+    overlay = OverlayWithStopEvidence()
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        overlay_controller=overlay,
+    )
+    manager.start(name="Program 1 demo", target_app="Program 1", target_window="Program 1")
+    manager.record_event({"kind": "mouse_click", "x": 984, "y": 46, "button": "left"})
+
+    stopped = manager.stop()
+
+    assert stopped["events"][-1]["recording_control"] == "overlay_stop"
 
 
 def test_recording_manager_keeps_overlay_hidden_when_listener_start_fails(tmp_path: Path) -> None:
@@ -2822,6 +3613,24 @@ def test_runtime_dependency_status_distinguishes_required_and_optional_packages(
     assert result["optional"]["pytesseract"]["available"] is False
 
 
+def test_frozen_runtime_dependency_probe_imports_bundled_lazy_module(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_packaged_helper_module()
+    imported: list[str] = []
+    monkeypatch.setattr(module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(module.importlib.util, "find_spec", lambda _name: None)
+    monkeypatch.setattr(module.importlib, "import_module", lambda name: imported.append(name) or object())
+
+    assert module._runtime_module_available("pynput") is True
+    assert imported == ["pynput"]
+
+
+def test_self_updater_verifies_restart_through_compact_ping_route() -> None:
+    module = _load_packaged_helper_module()
+    source = Path(module.__file__).read_text(encoding="utf-8")
+
+    assert 'f"http://127.0.0.1:{PORT}/ping"' in source
+
+
 def test_default_demo_root_supports_pyinstaller_bundle(monkeypatch, tmp_path: Path) -> None:
     module = _load_packaged_helper_module()
     bundled_demo = tmp_path / "demo"
@@ -2864,7 +3673,7 @@ def test_image_first_recording_captures_click_locator_crops(tmp_path: Path) -> N
 
     event = stopped["events"][0]
     locator = event["visual_locator"]
-    assert started["schema"] == "atr.equipment_recording.v2"
+    assert started["schema"] == "atr.equipment_recording.v3"
     assert started["visual_locator_policy"]["coordinate_fallback"] is False
     assert locator["status"] == "ready"
     assert locator["recorded_coordinate"] == [100, 120]
@@ -2984,7 +3793,9 @@ def test_recording_keyboard_capture_groups_modifier_chord_as_hotkey(tmp_path: Pa
     capture.on_release("Key.ctrl_l")
     stopped = manager.stop()
 
-    assert stopped["events"] == [{"kind": "hotkey", "at_ms": stopped["events"][0]["at_ms"], "keys": ["ctrl", "s"]}]
+    assert len(stopped["events"]) == 1
+    assert stopped["events"][0]["kind"] == "hotkey"
+    assert stopped["events"][0]["keys"] == ["ctrl", "s"]
 
 
 def test_recording_keyboard_capture_keeps_plain_key_press(tmp_path: Path) -> None:
@@ -2999,6 +3810,178 @@ def test_recording_keyboard_capture_keeps_plain_key_press(tmp_path: Path) -> Non
 
     assert stopped["events"][0]["kind"] == "key_press"
     assert stopped["events"][0]["key"] == "a"
+
+
+def test_recording_manager_captures_initial_typing_language(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    language = {
+        "status": "available",
+        "layout_id": "00000412",
+        "locale": "ko_KR",
+        "language": "ko",
+        "ime_mode": "native",
+        "typing_mode": "ko",
+    }
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        input_language_provider=lambda: dict(language),
+    )
+
+    started = manager.start(name="typing", target_app="editor", target_window="editor")
+
+    assert started["input_language"] == language
+    assert started["input_language_history"] == [{"at_ms": 0, **language}]
+
+
+def test_windows_input_language_state_reads_layout_and_ime_mode() -> None:
+    module = _load_helper_module()
+
+    class FakeUser32:
+        @staticmethod
+        def GetForegroundWindow() -> int:
+            return 100
+
+        @staticmethod
+        def GetWindowThreadProcessId(_hwnd: int, _process_id: object) -> int:
+            return 42
+
+        @staticmethod
+        def GetKeyboardLayout(_thread_id: int) -> int:
+            return 0x04120412
+
+    class FakeImm32:
+        @staticmethod
+        def ImmGetContext(_hwnd: int) -> int:
+            return 200
+
+        @staticmethod
+        def ImmGetConversionStatus(_context: int, conversion: object, sentence: object) -> int:
+            conversion._obj.value = 0x0001
+            sentence._obj.value = 0
+            return 1
+
+        @staticmethod
+        def ImmReleaseContext(_hwnd: int, _context: int) -> int:
+            return 1
+
+    state = module._windows_input_language_state(
+        user32=FakeUser32(),
+        imm32=FakeImm32(),
+        windows_locale={0x0412: "ko_KR"},
+    )
+
+    assert state == {
+        "status": "available",
+        "layout_id": "00000412",
+        "locale": "ko_KR",
+        "language": "ko",
+        "ime_mode": "native",
+        "typing_mode": "ko",
+    }
+
+
+def test_windows_input_language_state_uses_default_ime_window_fallback() -> None:
+    module = _load_helper_module()
+
+    class FakeUser32:
+        @staticmethod
+        def GetForegroundWindow() -> int:
+            return 100
+
+        @staticmethod
+        def GetWindowThreadProcessId(_hwnd: int, _process_id: object) -> int:
+            return 42
+
+        @staticmethod
+        def GetKeyboardLayout(_thread_id: int) -> int:
+            return 0x04120412
+
+        @staticmethod
+        def SendMessageW(_hwnd: int, message: int, command: int, _value: int) -> int:
+            assert message == 0x0283
+            assert command == 0x0001
+            return 0x0001
+
+    class FakeImm32:
+        @staticmethod
+        def ImmGetContext(_hwnd: int) -> int:
+            return 0
+
+        @staticmethod
+        def ImmGetDefaultIMEWnd(_hwnd: int) -> int:
+            return 300
+
+    state = module._windows_input_language_state(
+        user32=FakeUser32(),
+        imm32=FakeImm32(),
+        windows_locale={0x0412: "ko_KR"},
+    )
+
+    assert state["layout_id"] == "00000412"
+    assert state["ime_mode"] == "native"
+    assert state["typing_mode"] == "ko"
+
+
+def test_recording_keyboard_capture_records_typing_language_changes_once(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    korean = {
+        "status": "available",
+        "layout_id": "00000412",
+        "locale": "ko_KR",
+        "language": "ko",
+        "ime_mode": "native",
+        "typing_mode": "ko",
+    }
+    latin = {**korean, "ime_mode": "alphanumeric", "typing_mode": "latin"}
+    states = iter((korean, korean, latin, latin))
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        input_language_provider=lambda: dict(next(states)),
+    )
+    manager.start(name="typing", target_app="editor", target_window="editor")
+    capture = module._RecordingKeyboardCapture(manager)
+
+    capture.on_press("a")
+    capture.on_press("b")
+    capture.on_press("c")
+    stopped = manager.stop()
+
+    assert [event["kind"] for event in stopped["events"]] == [
+        "key_press",
+        "input_language_changed",
+        "key_press",
+        "key_press",
+    ]
+    assert stopped["events"][0]["input_language"]["typing_mode"] == "ko"
+    assert stopped["events"][1]["input_language"]["typing_mode"] == "latin"
+    assert stopped["events"][2]["input_language"]["typing_mode"] == "latin"
+    assert stopped["events"][3]["input_language"]["typing_mode"] == "latin"
+    assert len(stopped["input_language_history"]) == 2
+
+
+def test_recording_language_probe_failure_does_not_block_recording(tmp_path: Path) -> None:
+    module = _load_helper_module()
+
+    def unavailable() -> dict[str, str]:
+        raise OSError("input method unavailable")
+
+    manager = module.RecordingManager(
+        tmp_path,
+        listener_factory=lambda _manager: [],
+        input_language_provider=unavailable,
+    )
+
+    started = manager.start(name="typing", target_app="editor", target_window="editor")
+    capture = module._RecordingKeyboardCapture(manager)
+    capture.on_press("a")
+    stopped = manager.stop()
+
+    assert started["ok"] is True
+    assert started["input_language"]["status"] == "unavailable"
+    assert stopped["events"][0]["kind"] == "key_press"
+    assert stopped["events"][0]["input_language"]["status"] == "unavailable"
 
 
 def test_recording_keyboard_capture_preserves_unused_modifier(tmp_path: Path) -> None:
@@ -3093,6 +4076,24 @@ def test_windows_bridge_prefers_informative_context_over_uniform_tight(tmp_path:
         assert fake.locate_calls[0][0] == str(context_path)
 
 
+def test_windows_bridge_resolves_normalized_search_roi_against_current_screen(tmp_path: Path, monkeypatch) -> None:
+    for index, module in enumerate((_load_helper_module(), _load_packaged_helper_module())):
+        monkeypatch.setattr(module, "LOCATOR_ROOT", tmp_path / f"normalized-roi-{index}")
+        fake = _FakePyAutoGUI()
+
+        module._locate_on_screen(
+            fake,
+            {
+                "image_candidates": [_recorded_image_candidate("tight")],
+                "region_normalized": [0.1, 0.2, 0.5, 0.4],
+            },
+            run_id="run-normalized-roi",
+            specimen_id="specimen-normalized-roi",
+        )
+
+        assert fake.locate_calls[-1][1]["region"] == (192, 216, 960, 432)
+
+
 def test_windows_bridge_inline_locator_selects_best_match_not_first_threshold_match(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -3184,6 +4185,44 @@ def test_windows_bridge_inline_locator_selects_global_best_candidate(tmp_path: P
 
         assert attempted is True
         assert match == (280, 50, 100, 60)
+
+
+def test_windows_bridge_inline_locator_tolerates_hover_state_at_recorded_origin(tmp_path: Path) -> None:
+    """A recorded hover background must not hide an otherwise unchanged control."""
+    from PIL import Image, ImageDraw
+
+    candidate = Image.new("RGB", (64, 64), "#f4f4f4")
+    candidate_draw = ImageDraw.Draw(candidate)
+    candidate_draw.rounded_rectangle((4, 4, 43, 43), radius=10, fill="#d9d9d9")
+    candidate_draw.line((16, 23, 31, 23), fill="#222222", width=2)
+    candidate_draw.line((23, 16, 23, 31), fill="#222222", width=2)
+
+    screen = Image.new("RGB", (320, 180), "#ffffff")
+    screen_draw = ImageDraw.Draw(screen)
+    screen_draw.rectangle((120, 20, 183, 83), fill="#f4f4f4")
+    screen_draw.line((128, 45, 143, 45), fill="#222222", width=2)
+    screen_draw.line((135, 38, 135, 53), fill="#222222", width=2)
+
+    class _ScreenPyAutoGUI(_FakePyAutoGUI):
+        def screenshot(self, region: tuple[int, int, int, int] | None = None) -> Image.Image:
+            return screen.copy()
+
+    for index, module in enumerate((_load_helper_module(), _load_packaged_helper_module())):
+        path = tmp_path / f"hover-candidate-{index}.png"
+        candidate.save(path)
+        attempted, match = module._best_inline_image_match(
+            _ScreenPyAutoGUI(),
+            [
+                (
+                    str(path),
+                    {"confidence": 0.99, "crop_origin": [120, 20]},
+                    100.0,
+                )
+            ],
+        )
+
+        assert attempted is True
+        assert match == (120, 20, 64, 64)
 
 
 def test_windows_bridge_executes_image_resolved_move_and_drag(tmp_path: Path, monkeypatch) -> None:
@@ -3571,12 +4610,15 @@ def test_recording_http_routes_cover_start_status_stop_save_and_list(tmp_path: P
         status = request("/recordings/status")
         stopped = request("/recordings/stop", method="POST", payload={})
         saved = request(f"/recordings/{recording_id}/save", method="POST", payload={})
+        package = request(f"/recordings/{recording_id}/package")
         detail = request(f"/recordings/{recording_id}")
         listed = request("/recordings")
 
         assert status["status"] == "recording"
         assert stopped["status"] == "completed"
         assert saved["status"] == "saved"
+        assert package["schema"] == "atr.equipment_recording_package.v1"
+        assert package["recording"]["recording_id"] == recording_id
         assert detail["recording_id"] == recording_id
         assert [item["recording_id"] for item in listed["recordings"]] == [recording_id]
     finally:
@@ -3585,16 +4627,9 @@ def test_recording_http_routes_cover_start_status_stop_save_and_list(tmp_path: P
         thread.join(timeout=5)
 
 
-def test_program_manager_exposes_program_record_and_skill_tabs_without_model_secrets() -> None:
-    module = _load_helper_module()
-    html = module.INDEX_HTML
-
-    assert 'data-manager-tab="programs"' in html
-    assert 'data-manager-tab="record"' in html
-    assert 'data-manager-tab="skills"' in html
 
 
-def test_recording_console_uses_one_five_second_start_stop_toggle() -> None:
+def test_recording_console_uses_start_control_and_native_overlay_stop_only() -> None:
     for module in (_load_helper_module(), _load_packaged_helper_module()):
         html = module.INDEX_HTML
 
@@ -3603,136 +4638,20 @@ def test_recording_console_uses_one_five_second_start_stop_toggle() -> None:
         assert 'id="recordStop"' not in html
         assert "const RECORDING_COUNTDOWN_SECONDS = 5;" in html
         assert "function beginRecordingCountdown()" in html
-        assert "async function stopActiveRecording()" in html
         assert "function syncRecordingToggle()" in html
-        assert 'recordToggle.textContent = "STOP RECORDING"' in html
-        assert 'recordToggle.textContent = `STARTING IN ${recordingCountdownRemaining}`' in html
-    assert 'id="managerRecordView"' in html
-    assert 'id="managerSkillsView"' in html
-    assert 'id="recordSkill"' in html
-    assert 'id="skillRegistry"' in html
-    assert 'data-skill-action="test"' in html
-    assert 'data-skill-action="delete"' in html
-    manager_slice = html[html.index('id="programManagerPanel"') : html.index('id="resultPanel"')]
-    assert "api key" not in manager_slice.lower()
-    assert "base url" not in manager_slice.lower()
-
-
-def test_skill_manager_preserves_action_result_while_refreshing_registry() -> None:
-    module = _load_helper_module()
-    html = module.INDEX_HTML
-
-    assert "async function refreshSkills({showResult = true} = {})" in html
-    assert "if (showResult) managerShowResult(result);" in html
-    assert "await refreshSkills({showResult: false})" in html
-
-
-def test_controller_console_exposes_discovery_selection_and_manual_verification() -> None:
-    """Catches packages that support discovery in the API but leave operators unable to inspect or resolve it."""
-    for module in (_load_helper_module(), _load_packaged_helper_module()):
-        html = module.INDEX_HTML
-        for element_id in (
-            "controllerStatus",
-            "controllerUrl",
-            "discoverController",
-            "controllerCandidates",
-            "saveController",
-        ):
-            assert f'id="{element_id}"' in html
-        assert 'call("/controller/discover"' in html
-        assert 'call("/controller/select"' in html
-        assert "renderControllerStatus" in html
-
-
-def test_skill_proxy_creates_draft_from_saved_windows_recording(tmp_path: Path) -> None:
-    module = _load_helper_module()
-    module.TOKEN = "skill-token"
-    module.RECORDING_MANAGER = module.RecordingManager(tmp_path / "recordings", listener_factory=lambda _manager: [])
-    started = module.RECORDING_MANAGER.start(name="Program 1", target_app="Program 1", target_window="Program 1")
-    module.RECORDING_MANAGER.record_event({"kind": "key_press", "key": "enter"})
-    module.RECORDING_MANAGER.stop()
-    module.RECORDING_MANAGER.save(started["recording_id"])
-    forwarded: list[tuple[str, str, dict[str, Any]]] = []
-
-    def atr_request(method: str, path: str, payload: dict[str, Any] | None = None) -> tuple[int, dict[str, Any]]:
-        forwarded.append((method, path, dict(payload or {})))
-        return 200, {"ok": True, "manifest": {"skill_id": "program1_skill", "version": "1.0.0"}}
-
-    module._atr_api_request = atr_request
-    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    base = f"http://127.0.0.1:{server.server_address[1]}"
-    try:
-        req = urllib.request.Request(
-            base + "/skills/drafts",
-            data=json.dumps(
-                {
-                    "recording_id": started["recording_id"],
-                    "skill_id": "program1_skill",
-                    "version": "1.0.0",
-                    "target_profile": "local_program1",
-                }
-            ).encode("utf-8"),
-            method="POST",
-            headers={"X-Bridge-Token": "skill-token", "Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=5) as response:
-            result = json.loads(response.read().decode("utf-8"))
-
-        assert result["ok"] is True
-        assert forwarded[0][0:2] == ("POST", "/api/equipment/skills/drafts")
-        assert forwarded[0][2]["recording"]["recording_id"] == started["recording_id"]
-        assert "token" not in json.dumps(forwarded[0][2]).lower()
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-
-
-def test_skill_proxy_forwards_test_and_delete_to_exact_linux_version() -> None:
-    module = _load_helper_module()
-    module.TOKEN = "skill-token"
-    forwarded: list[tuple[str, str, dict[str, Any]]] = []
-
-    def atr_request(method: str, path: str, payload: dict[str, Any] | None = None) -> tuple[int, dict[str, Any]]:
-        forwarded.append((method, path, dict(payload or {})))
-        return 200, {"ok": True, "status": "passed" if method == "POST" else "deleted"}
-
-    module._atr_api_request = atr_request
-    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    base = f"http://127.0.0.1:{server.server_address[1]}"
-    headers = {"X-Bridge-Token": "skill-token", "Content-Type": "application/json"}
-    try:
-        test_req = urllib.request.Request(
-            base + "/skills/program1_skill/1.0.0/test",
-            data=json.dumps({"runtime_mode": "test", "confirm_execute": False}).encode("utf-8"),
-            method="POST",
-            headers=headers,
-        )
-        with urllib.request.urlopen(test_req, timeout=5) as response:
-            tested = json.loads(response.read().decode("utf-8"))
-        delete_req = urllib.request.Request(
-            base + "/skills/program1_skill/1.0.0",
-            method="DELETE",
-            headers=headers,
-        )
-        with urllib.request.urlopen(delete_req, timeout=5) as response:
-            deleted = json.loads(response.read().decode("utf-8"))
-
-        assert tested["status"] == "passed"
-        assert deleted["status"] == "deleted"
-        assert forwarded == [
-            (
-                "POST",
-                "/api/equipment/skills/program1_skill/1.0.0/test",
-                {"runtime_mode": "test", "confirm_execute": False},
-            ),
-            ("DELETE", "/api/equipment/skills/program1_skill/1.0.0", {}),
-        ]
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+        assert "STOP RECORDING" not in html
+        assert "stopActiveRecording" not in html
+        assert '$(' + '"recordToggle").hidden=active' in html
+        assert "async function refreshRecordingStatus()" in html
+        assert "function startRecordingStatusWatch()" in html
+        assert 'call("/recordings/status")' in html
+        assert 'id="recordingCountdown"' in html
+        assert '$("recordingCountdown").textContent=remaining' in html
+        assert 'id="recordingPreview"' in html
+        assert '/preview?cursor=${recordingPreviewCursor}&limit=${recordingPreviewLimit}`' in html
+        assert 'id="recordingPreviewPrevious"' in html
+        assert 'id="recordingPreviewNext"' in html
+        assert 'id="managerSkillsView"' not in html
+        assert 'id="recordSkill"' not in html
+        assert 'id="recordingOverlay"' not in html
+        assert 'class="record-banner"' not in html

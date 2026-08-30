@@ -85,8 +85,8 @@ if (-not $runtimeReady) {
 
 if (-not $StartBridge) { return }
 
-$runScript = Join-Path $packageRoot "scripts\run_bridge.ps1"
-if (-not (Test-Path -LiteralPath $runScript)) { throw "Bridge run script is missing: $runScript" }
+$runScript = Join-Path $packageRoot "scripts\start_supervisor.ps1"
+if (-not (Test-Path -LiteralPath $runScript)) { throw "Bridge supervisor script is missing: $runScript" }
 
 $arguments = @(
     "-NoProfile",
@@ -94,8 +94,7 @@ $arguments = @(
     "-File", ('"{0}"' -f $runScript),
     "-Python", ('"{0}"' -f $pythonExe),
     "-DataRoot", ('"{0}"' -f $dataRoot),
-    "-OpenBrowser",
-    "-ShowToken"
+    "-OpenBrowser"
 )
 Write-PortableLog "Starting the Equipment Agent Bridge and opening the operator GUI."
 Start-Process -FilePath "powershell.exe" -ArgumentList $arguments -WorkingDirectory $packageRoot

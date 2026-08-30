@@ -1,9 +1,9 @@
 @echo off
 setlocal
-title ATR Windows PyAutoGUI Bridge
+title ATR PyAutoGUI Bridge Supervisor
 
 set "PACKAGE_ROOT=%~dp0"
-set "RUN_SCRIPT=%PACKAGE_ROOT%scripts\run_bridge.ps1"
+set "RUN_SCRIPT=%PACKAGE_ROOT%scripts\start_supervisor.ps1"
 
 if not exist "%RUN_SCRIPT%" (
     echo [ERROR] Bridge start script is missing: %RUN_SCRIPT%

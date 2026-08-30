@@ -18,6 +18,7 @@ from device_bridges.windows_pyautogui_bridge import (
 )
 from mcp_tools.equipment_tools import register_equipment_tools
 from mcp_tools.tool_registry import ToolRegistry
+from utils.windows_bridge_release import load_release_manifest
 
 
 def _bridge(tmp_path: Path, *, mode: str = "simulator", allow_live: bool = False) -> WindowsPyAutoGUIBridge:
@@ -50,6 +51,373 @@ def test_simulator_program1_returns_completion_log(tmp_path: Path) -> None:
     assert any(step["step"] == "EXECUTE_PROGRAM" for step in response["step_trace"])
 
 
+def test_live_execute_response_timeout_is_effect_unknown_and_not_retryable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _bridge(tmp_path, mode="live", allow_live=True)
+
+    class _Client:
+        def __init__(self, timeout: float) -> None:
+            assert timeout == bridge.config.request_timeout_sec
+
+        def __enter__(self) -> "_Client":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def post(self, *args: object, **kwargs: object) -> None:
+            raise httpx.ReadTimeout("response timeout after request dispatch")
+
+    monkeypatch.setattr("device_bridges.windows_pyautogui_bridge.httpx.Client", _Client)
+
+    result = bridge._live_post("equipment.pyautogui.run", "/execute", {"program_id": "program1"})
+
+    assert result["ok"] is False
+    assert result["status"] == "effect_unknown"
+    assert result["failure_code"] == "PYAUTOGUI_EFFECT_UNKNOWN"
+    assert result["attempted"] is True
+    assert result["retryable"] is False
+
+
+def test_live_bridge_lists_and_fetches_saved_recordings_from_selected_worker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _bridge(tmp_path, mode="live")
+    calls: list[tuple[str, str]] = []
+
+    def fake_live_get(tool: str, path: str, _connection_payload: dict | None = None) -> dict:
+        calls.append((tool, path))
+        if path == "/recordings":
+            return {"ok": True, "recordings": [{"recording_id": "rec-001", "status": "saved"}]}
+        return {
+            "ok": True,
+            "schema": "atr.equipment_recording_package.v1",
+            "recording": {
+                "schema": "atr.equipment_recording.v3",
+                "recording_id": "rec-001",
+                "status": "saved",
+                "events": [],
+            },
+            "artifacts": [],
+        }
+
+    monkeypatch.setattr(bridge, "_live_precheck", lambda **_kwargs: None)
+    monkeypatch.setattr(bridge, "_live_get", fake_live_get)
+
+    listed = bridge.list_recordings({"force_live_bridge": True})
+    fetched = bridge.get_recording({"recording_id": "rec-001", "force_live_bridge": True})
+
+    assert listed["recordings"][0]["recording_id"] == "rec-001"
+    assert fetched["recording_id"] == "rec-001"
+    assert Path(fetched["import_manifest_path"]).is_file()
+    assert calls == [
+        ("equipment.pyautogui.list_recordings", "/recordings"),
+        ("equipment.pyautogui.get_recording", "/recordings/rec-001/package"),
+    ]
+
+
+def test_live_recording_package_is_imported_and_artifact_paths_are_rewritten(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _bridge(tmp_path, mode="live")
+    raw = b"event-frame"
+    source_path = "C:/ATR/recordings/rec-001/timeline/event_keyframes/event-0001.jpg"
+    package = {
+        "ok": True,
+        "schema": "atr.equipment_recording_package.v1",
+        "recording": {
+            "schema": "atr.equipment_recording.v3",
+            "recording_id": "rec-001",
+            "status": "saved",
+            "events": [{"frame_evidence": {"artifact_path": source_path, "sha256": hashlib.sha256(raw).hexdigest()}}],
+        },
+        "artifacts": [
+            {
+                "relative_path": "timeline/event_keyframes/event-0001.jpg",
+                "source_path": source_path,
+                "sha256": hashlib.sha256(raw).hexdigest(),
+                "size_bytes": len(raw),
+                "media_type": "image/jpeg",
+                "data_base64": base64.b64encode(raw).decode("ascii"),
+            }
+        ],
+    }
+    monkeypatch.setattr(bridge, "_live_precheck", lambda **_kwargs: None)
+    monkeypatch.setattr(bridge, "_live_get", lambda *_args, **_kwargs: package)
+
+    imported = bridge.get_recording({"recording_id": "rec-001", "force_live_bridge": True})
+    local_path = Path(imported["events"][0]["frame_evidence"]["artifact_path"])
+
+    assert imported["ok"] is True
+    assert local_path.is_file()
+    assert local_path.read_bytes() == raw
+    assert imported["artifact_import"]["verified_count"] == 1
+
+
+def test_live_recording_package_rejects_tampered_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _bridge(tmp_path, mode="live")
+    package = {
+        "ok": True,
+        "schema": "atr.equipment_recording_package.v1",
+        "recording": {"recording_id": "rec-001", "events": []},
+        "artifacts": [
+            {
+                "relative_path": "timeline/event.jpg",
+                "source_path": "C:/ATR/recordings/rec-001/timeline/event.jpg",
+                "sha256": "0" * 64,
+                "size_bytes": 8,
+                "data_base64": base64.b64encode(b"tampered").decode("ascii"),
+            }
+        ],
+    }
+    monkeypatch.setattr(bridge, "_live_precheck", lambda **_kwargs: None)
+    monkeypatch.setattr(bridge, "_live_get", lambda *_args, **_kwargs: package)
+
+    result = bridge.get_recording({"recording_id": "rec-001", "force_live_bridge": True})
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "PYAUTOGUI_RECORDING_ARTIFACT_INTEGRITY_FAILED"
+
+
+def test_live_recording_package_rejects_inconsistent_package_totals(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path, mode="live")
+    raw = b"frame"
+    package = {
+        "ok": True,
+        "schema": "atr.equipment_recording_package.v1",
+        "recording": {"recording_id": "rec-001", "events": []},
+        "artifact_count": 2,
+        "total_bytes": len(raw) + 1,
+        "artifacts": [{
+            "relative_path": "timeline/frame.jpg",
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "size_bytes": len(raw),
+            "data_base64": base64.b64encode(raw).decode("ascii"),
+        }],
+    }
+
+    result = bridge._import_recording_package(package)
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "PYAUTOGUI_RECORDING_PACKAGE_INTEGRITY_FAILED"
+
+
+def test_live_recording_package_rejects_malformed_declared_size_without_raising(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path, mode="live")
+    raw = b"frame"
+    package = {
+        "ok": True,
+        "schema": "atr.equipment_recording_package.v1",
+        "recording": {"recording_id": "rec-001", "events": []},
+        "artifact_count": 1,
+        "total_bytes": len(raw),
+        "artifacts": [{
+            "relative_path": "timeline/frame.jpg",
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "size_bytes": "not-an-integer",
+            "data_base64": base64.b64encode(raw).decode("ascii"),
+        }],
+    }
+
+    result = bridge._import_recording_package(package)
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "PYAUTOGUI_RECORDING_ARTIFACT_INTEGRITY_FAILED"
+
+
+def test_live_recording_import_accepts_complete_timeline_beyond_old_artifact_count_cap(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path, mode="live")
+    raw = b"x"
+    digest = hashlib.sha256(raw).hexdigest()
+    artifacts = [
+        {
+            "relative_path": f"frames/periodic/frame-{index:08d}.jpg",
+            "source_path": f"C:/ATR/recordings/rec-001/frames/periodic/frame-{index:08d}.jpg",
+            "sha256": digest,
+            "size_bytes": 1,
+            "data_base64": base64.b64encode(raw).decode("ascii"),
+        }
+        for index in range(4100)
+    ]
+    package = {
+        "ok": True,
+        "schema": "atr.equipment_recording_package.v1",
+        "recording": {"recording_id": "rec-001", "events": []},
+        "artifact_count": len(artifacts),
+        "total_bytes": len(artifacts),
+        "artifacts": artifacts,
+    }
+
+    result = bridge._import_recording_package(package)
+
+    assert result["ok"] is True
+    assert result["artifact_import"]["verified_count"] == 4100
+
+
+def test_live_recording_package_failure_does_not_fallback_to_unverified_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _bridge(tmp_path, mode="live")
+    calls: list[str] = []
+
+    def fake_get(
+        _tool: str, path: str, _connection_payload: dict | None = None, **_kwargs: object
+    ) -> dict[str, object]:
+        calls.append(path)
+        return {
+            "ok": False,
+            "status": "blocked",
+            "failure_code": "PYAUTOGUI_RECORDING_PACKAGE_INTEGRITY_FAILED",
+        }
+
+    monkeypatch.setattr(bridge, "_live_precheck", lambda **_kwargs: None)
+    monkeypatch.setattr(bridge, "_live_get", fake_get)
+
+    result = bridge.get_recording({"recording_id": "rec-001", "force_live_bridge": True})
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "PYAUTOGUI_RECORDING_PACKAGE_INTEGRITY_FAILED"
+    assert calls == ["/recordings/rec-001/package"]
+
+
+def test_requested_bridge_id_resolves_exact_candidate_without_changing_selection(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path, mode="live", allow_live=True)
+    memory = {
+        "selected_candidate": "worker-a",
+        "candidates": {
+            "worker-a": {
+                "bridge_id": "worker-a",
+                "bridge_url": "http://192.168.50.10:8765",
+                "internal_key": "1111",
+                "allow_live_execute": True,
+            },
+            "worker-b": {
+                "bridge_id": "worker-b",
+                "bridge_url": "http://192.168.50.11:8765",
+                "internal_key": "2222",
+                "allow_live_execute": True,
+            },
+        },
+    }
+    bridge.config.connection_memory_path.write_text(json.dumps(memory), encoding="utf-8")
+
+    requested = {"bridge_id": "worker-b", "runtime_mode": "live"}
+    assert bridge._bridge_url(requested) == "http://192.168.50.11:8765"
+    assert bridge._token(requested) == "2222"
+    assert bridge._live_precheck(require_execute=True, payload=requested) is None
+    assert bridge.load_connection_memory()["selected_candidate"] == "worker-a"
+
+
+def test_unknown_requested_bridge_id_is_blocked_instead_of_using_selected_candidate(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path, mode="live", allow_live=True)
+    bridge.config.connection_memory_path.write_text(
+        json.dumps(
+            {
+                "selected_candidate": "worker-a",
+                "candidates": {
+                    "worker-a": {
+                        "bridge_url": "http://192.168.50.10:8765",
+                        "internal_key": "1111",
+                        "allow_live_execute": True,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = bridge._live_precheck(
+        require_execute=True,
+        payload={"bridge_id": "missing-worker", "runtime_mode": "live"},
+    )
+
+    assert result is not None
+    assert result["failure_code"] == "PYAUTOGUI_CANDIDATE_NOT_FOUND"
+
+
+def test_worker_update_status_targets_exact_saved_candidate_and_compares_versions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bridge = _bridge(tmp_path, mode="live", allow_live=True)
+    bridge.config.connection_memory_path.write_text(
+        json.dumps(
+            {
+                "selected_candidate": "worker-a",
+                "candidates": {
+                    "worker-a": {"bridge_url": "http://192.168.50.10:8765", "internal_key": "a"},
+                    "worker-b": {"bridge_url": "http://192.168.50.11:8765", "internal_key": "b"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls: list[dict] = []
+    monkeypatch.setattr(bridge, "_live_precheck", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        bridge,
+        "_live_get",
+        lambda _tool, path, payload: calls.append({"path": path, "payload": dict(payload)})
+        or {"ok": True, "current_version": "2026.08.27.1", "status": "ready"},
+    )
+
+    result = bridge.worker_update_status({"candidate_alias": "worker-b"})
+
+    assert calls == [{"path": "/update/status", "payload": {"candidate_alias": "worker-b", "bridge_id": "worker-b", "runtime_mode": "live", "force_live_bridge": True}}]
+    assert result["latest_version"] == load_release_manifest()["version"]
+    assert result["update_available"] is True
+    assert bridge.load_connection_memory()["selected_candidate"] == "worker-a"
+
+
+def test_update_worker_stages_then_applies_same_release_to_exact_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bridge = _bridge(tmp_path, mode="live", allow_live=True)
+    calls: list[tuple[str, str, dict, dict]] = []
+    release = {"schema": "atr.windows_bridge_update_package.v1", "version": "2026.08.28.2", "files": [], "package_sha256": "a" * 64}
+    monkeypatch.setattr(bridge, "_live_precheck", lambda **_kwargs: None)
+    monkeypatch.setattr("device_bridges.windows_pyautogui_bridge.build_release_package", lambda: release)
+
+    def post(tool: str, path: str, payload: dict, connection: dict) -> dict:
+        calls.append((tool, path, payload, dict(connection)))
+        return {"ok": True, "status": "staged" if path.endswith("stage") else "update_restarting"}
+
+    monkeypatch.setattr(bridge, "_live_post", post)
+
+    result = bridge.update_worker({"candidate_alias": "worker-b"})
+
+    assert result["ok"] is True
+    assert [call[1] for call in calls] == ["/update/stage", "/update/apply"]
+    assert calls[0][2] is release
+    assert all(call[3]["bridge_id"] == "worker-b" for call in calls)
+
+
+def test_rollback_worker_calls_only_exact_worker_without_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bridge = _bridge(tmp_path, mode="live", allow_live=True)
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(bridge, "_live_precheck", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        bridge,
+        "_live_post",
+        lambda _tool, path, _payload, connection: calls.append((path, dict(connection)))
+        or {"ok": True, "status": "rollback_restarting"},
+    )
+
+    result = bridge.rollback_worker({"candidate_alias": "worker-b"})
+
+    assert result["ok"] is True
+    assert calls == [("/update/rollback", {"candidate_alias": "worker-b", "bridge_id": "worker-b", "runtime_mode": "live", "force_live_bridge": True})]
+
+
 def test_simulator_registers_and_executes_compiled_skill_program(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
     program = {
@@ -70,6 +438,42 @@ def test_simulator_registers_and_executes_compiled_skill_program(tmp_path: Path)
     assert registered["program_sha256"]
     assert result["ok"] is True
     assert result["program_id"] == program["program_id"]
+
+
+def test_live_program_registration_preserves_worker_computed_digest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _bridge(tmp_path, mode="live")
+    program = {
+        "schema": "atr.pyautogui_program.v1",
+        "program_id": "worker_digest_probe",
+        "name": "Worker digest probe",
+        "sequence": [{"action": "press", "key": "enter"}],
+    }
+    monkeypatch.setattr(bridge, "_live_precheck", lambda **kwargs: None)
+    sent: list[tuple[object, ...]] = []
+
+    def _live_post(*args, **kwargs):
+        sent.append(args)
+        return {
+            "ok": True,
+            "status": "registered",
+            "program_id": "worker_digest_probe",
+            "program_sha256": "a" * 64,
+        }
+
+    monkeypatch.setattr(bridge, "_live_post", _live_post)
+
+    result = bridge.register_program({"program": program, "force_live_bridge": True})
+
+    assert result["program_sha256"] == "a" * 64
+    deployment_payload = sent[0][2]
+    assert deployment_payload["program"] == program
+    assert deployment_payload["_atr_deployment"]["managed_by"] == "atr_equipment_skill"
+    assert deployment_payload["_atr_deployment"]["program_sha256"] == hashlib.sha256(
+        json.dumps(program, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def test_simulator_program1_reports_missing_pyautogui(tmp_path: Path) -> None:
@@ -225,6 +629,94 @@ def test_save_connection_requires_name_and_token(tmp_path: Path) -> None:
 
     assert missing_name["failure_code"] == "PYAUTOGUI_CANDIDATE_ALIAS_REQUIRED"
     assert missing_token["failure_code"] == "PYAUTOGUI_TOKEN_REQUIRED"
+
+
+def test_pair_connection_exchanges_four_digit_code_and_saves_internal_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _bridge(tmp_path, mode="live")
+
+    class _Reply:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"ok": True, "status": "paired", "internal_key": "worker-internal-key"}
+
+    class _Client:
+        def __init__(self, timeout: float) -> None:
+            assert timeout == bridge.config.request_timeout_sec
+
+        def __enter__(self) -> "_Client":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def post(self, url: str, json: dict[str, str]) -> _Reply:
+            assert url == "http://192.168.50.58:8765/pairing/complete"
+            assert json == {"pairing_code": "0427"}
+            return _Reply()
+
+    monkeypatch.setattr("device_bridges.windows_pyautogui_bridge.httpx.Client", _Client)
+
+    result = bridge.pair_connection(
+        {
+            "candidate_alias": "utm_worker",
+            "host": "192.168.50.58",
+            "port": 8765,
+            "pairing_code": "0427",
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["selected_candidate"] == "utm_worker"
+    memory = json.loads(bridge.config.connection_memory_path.read_text(encoding="utf-8"))
+    assert memory["candidates"]["utm_worker"]["internal_key"] == "worker-internal-key"
+    assert "token" not in memory["candidates"]["utm_worker"]
+    assert "0427" not in bridge.config.connection_memory_path.read_text(encoding="utf-8")
+    assert bridge.connection_status()["paired"] is True
+
+
+def test_paired_internal_key_takes_precedence_over_legacy_environment_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _bridge(tmp_path, mode="live")
+    bridge.save_connection(
+        {
+            "candidate_alias": "paired_worker",
+            "host": "192.168.50.58",
+            "port": 8765,
+            "internal_key": "paired-key",
+        }
+    )
+    monkeypatch.setenv("WINDOWS_PYAUTOGUI_BRIDGE_TOKEN", "legacy-env-token")
+
+    assert bridge._token() == "paired-key"
+
+
+def test_pair_connection_rejects_public_or_credentialed_bridge_urls(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path, mode="live")
+
+    public = bridge.pair_connection(
+        {
+            "candidate_alias": "public",
+            "bridge_url": "https://example.com",
+            "pairing_code": "0427",
+        }
+    )
+    credentialed = bridge.pair_connection(
+        {
+            "candidate_alias": "credentialed",
+            "bridge_url": "http://user:pass@127.0.0.1:8765",
+            "pairing_code": "0427",
+        }
+    )
+
+    assert public["failure_code"] == "PYAUTOGUI_BRIDGE_URL_NOT_PRIVATE"
+    assert credentialed["failure_code"] == "PYAUTOGUI_BRIDGE_URL_INVALID"
 
 
 def test_save_local_candidate_preserves_platform_metadata_without_selecting(tmp_path: Path) -> None:
@@ -456,7 +948,14 @@ def test_register_equipment_tools_exposes_pyautogui_tools(tmp_path: Path) -> Non
     assert "equipment.pyautogui.capture_locator" in tools.list_tools()
     assert "equipment.pyautogui.utm_profile" in tools.list_tools()
     assert "equipment.pyautogui.save_utm_profile" in tools.list_tools()
+    assert "equipment.runtime.current" in tools.list_tools()
+    assert "equipment.runtime.list" in tools.list_tools()
     assert tools.call("equipment.pyautogui.list_programs", {})["programs"][0]["program_id"] == "program1"
+    assert tools.call("equipment.runtime.current", {}) == {
+        "ok": True,
+        "execution": None,
+        "projection": None,
+    }
 
 
 def test_explicit_subnet_scan_targets_are_bounded() -> None:
@@ -466,14 +965,50 @@ def test_explicit_subnet_scan_targets_are_bounded() -> None:
 
 
 @pytest.mark.asyncio
-async def test_discovery_requires_token(tmp_path: Path) -> None:
+async def test_discovery_uses_public_discovery_endpoint_without_pairing_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     bridge = _bridge(tmp_path)
+
+    class _Reply:
+        status_code = 200
+
+        def json(self) -> dict[str, object]:
+            return {
+                "ok": True,
+                "status": "ready",
+                "bridge": "windows_pyautogui",
+                "server_version": "WindowsPyAutoGUIBridge/2026.08.29.1",
+                "pairing": {"paired": False},
+            }
+
+    class _Client:
+        def __init__(self, timeout: float) -> None:
+            self.timeout = timeout
+
+        async def __aenter__(self) -> "_Client":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+        async def get(self, url: str, headers: dict[str, str]) -> _Reply:
+            assert url == "http://192.0.2.1:8765/discovery"
+            assert "X-Bridge-Token" not in headers
+            return _Reply()
+
+    monkeypatch.setattr(
+        "device_bridges.windows_pyautogui_bridge.local_ipv4_scan_targets",
+        lambda **_kwargs: [{"host": "192.0.2.1", "port": 8765, "bridge_url": "http://192.0.2.1:8765"}],
+    )
+    monkeypatch.setattr("device_bridges.windows_pyautogui_bridge.httpx.AsyncClient", _Client)
 
     response = await discover_windows_pyautogui_bridges(bridge.config, subnet="192.0.2.0/30", token="")
 
-    assert response["ok"] is False
-    assert response["failure_code"] == "PYAUTOGUI_TOKEN_REQUIRED"
-    assert response["candidates"] == []
+    assert response["ok"] is True
+    assert response["candidates"][0]["bridge_url"] == "http://192.0.2.1:8765"
+    assert response["candidates"][0]["pairing_required"] is True
+    assert response["candidates"][0]["server_version"] == "WindowsPyAutoGUIBridge/2026.08.29.1"
 
 
 def test_simulator_utm_protocol_returns_csv_artifact(tmp_path: Path) -> None:

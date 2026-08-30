@@ -25,7 +25,7 @@ from typing import Any
 
 import httpx
 
-from backends.llm_backend import BaseLLMBackend, LLMResponse
+from backends.llm_backend import BaseLLMBackend, LLMImageInput, LLMResponse, openai_user_content
 from backends.nemoclaw_vllm_runtime import NemoClawVLLMRuntime
 
 
@@ -38,6 +38,8 @@ DEFAULT_MAX_TOKENS_BY_TASK = {
     "tool_formatting": 96,
     "gui_helper": 96,
     "module_designer": 1400,
+    "equipment_skill_timeline_chunk": 768,
+    "equipment_skill_annotation": 1536,
 }
 
 
@@ -134,6 +136,7 @@ class VLLMBackend(BaseLLMBackend):
         system_prompt: str,
         user_prompt: str,
         metadata: dict[str, Any] | None = None,
+        images: list[LLMImageInput] | None = None,
     ) -> LLMResponse:
         base_url = await self._base_url_for_model(model)
 
@@ -143,7 +146,7 @@ class VLLMBackend(BaseLLMBackend):
             "temperature": 0.2,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                {"role": "user", "content": openai_user_content(user_prompt, images)},
             ],
         }
         max_tokens = self._max_tokens_for_metadata(metadata)

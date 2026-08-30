@@ -7,6 +7,8 @@ const {
   candidateSelectionView,
   confirmCandidateSelection,
   profileConnectionStatus,
+  selectedCandidatesFirst,
+  skillIdFromRecordingName,
 } = require("../../web/static/windows_equipment_selection.js");
 
 test("selected candidate view is explicit, disabled, and accessible", () => {
@@ -69,4 +71,23 @@ test("profile connection display derives selected state when status is absent", 
   assert.equal(profileConnectionStatus({ selected: true, status: "unknown" }), "selected");
   assert.equal(profileConnectionStatus({ selected: false }), "missing");
   assert.equal(profileConnectionStatus({ selected: true, status: "ready" }), "ready");
+});
+
+test("saved candidates put the selected worker first without changing standby order", () => {
+  const candidates = [
+    { candidate_alias: "worker-a", selected: false },
+    { candidate_alias: "worker-b", selected: true },
+    { candidate_alias: "worker-c", selected: false },
+  ];
+
+  const ordered = selectedCandidatesFirst(candidates);
+
+  assert.deepEqual(ordered.map((candidate) => candidate.candidate_alias), ["worker-b", "worker-a", "worker-c"]);
+  assert.deepEqual(candidates.map((candidate) => candidate.candidate_alias), ["worker-a", "worker-b", "worker-c"]);
+});
+
+test("recording names become editable Linux Skill ID defaults", () => {
+  assert.equal(skillIdFromRecordingName("Equipment demonstration", "rec-unused"), "equipment_demonstration");
+  assert.equal(skillIdFromRecordingName("  UTM Test #2  ", "rec-unused"), "utm_test_2");
+  assert.equal(skillIdFromRecordingName("", "rec-2026-abc"), "rec_2026_abc");
 });

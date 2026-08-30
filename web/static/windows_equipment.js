@@ -33,7 +33,6 @@ const commandDetail = document.getElementById("equipment-command-detail");
 const commandPill = document.getElementById("equipment-command-pill");
 const subnetInput = document.getElementById("equipment-subnet-input");
 const portInput = document.getElementById("equipment-port-input");
-const tokenInput = document.getElementById("equipment-token-input");
 const candidatesEl = document.getElementById("equipment-candidates");
 const savedCandidatesEl = document.getElementById("equipment-saved-candidates");
 const resultLog = document.getElementById("equipment-result-log");
@@ -91,8 +90,44 @@ const requestAuditCard = document.getElementById("equipment-request-audit-card")
 const profileItems = document.getElementById("equipment-profile-items");
 const profileConnectionStatus = document.getElementById("equipment-profile-connection-status");
 const profileEvidenceStatus = document.getElementById("equipment-profile-evidence-status");
+const profileRuntimeStatus = document.getElementById("equipment-profile-runtime-status");
 const btnProfilePreflight = document.getElementById("btn-equipment-profile-preflight");
 const btnProfileTest = document.getElementById("btn-equipment-profile-test");
+const runtimeExecutionId = document.getElementById("equipment-runtime-execution-id");
+const runtimeReference = document.getElementById("equipment-runtime-reference");
+const runtimeEvidenceCount = document.getElementById("equipment-runtime-evidence-count");
+const agenticProgressStages = document.getElementById("equipment-agentic-progress-stages");
+const skillIdInput = document.getElementById("equipment-skill-id");
+const skillVersionInput = document.getElementById("equipment-skill-version");
+const skillWorkerIdInput = document.getElementById("equipment-skill-worker-id");
+const recordingStatus = document.getElementById("equipment-recording-status");
+const skillList = document.getElementById("equipment-skill-list");
+const selectedSkillEl = document.getElementById("equipment-selected-skill");
+const skillStatus = document.getElementById("equipment-skill-status");
+const visionLinkEnabled = document.getElementById("equipment-vision-link-enabled");
+const visionLinkStatus = document.getElementById("equipment-vision-link-status");
+const recoveryStatus = document.getElementById("equipment-recovery-status");
+const btnImportRecording = document.getElementById("btn-equipment-import-recording");
+const btnRefreshRecordings = document.getElementById("btn-equipment-refresh-recordings");
+const workerRecordingsEl = document.getElementById("equipment-worker-recordings");
+const skillAuthoringProgress = document.getElementById("equipment-skill-authoring-progress");
+const skillAuthoringProgressBar = document.getElementById("equipment-skill-authoring-progress-bar");
+const skillAuthoringStatus = document.getElementById("equipment-skill-authoring-status");
+const skillAuthoringDetail = document.getElementById("equipment-skill-authoring-detail");
+const btnStopSkillAuthoring = document.getElementById("btn-equipment-stop-skill-authoring");
+const skillStoryboardPreview = document.getElementById("equipment-skill-storyboard-preview");
+const skillStoryboardImage = document.getElementById("equipment-skill-storyboard-image");
+const skillStoryboardMeta = document.getElementById("equipment-skill-storyboard-meta");
+const btnSkillStoryboardPrevious = document.getElementById("btn-equipment-skill-storyboard-previous");
+const btnSkillStoryboardNext = document.getElementById("btn-equipment-skill-storyboard-next");
+const btnSkillRefresh = document.getElementById("btn-equipment-skill-refresh");
+const btnSkillWorkflowEditor = document.getElementById("btn-equipment-skill-workflow-editor");
+const btnSkillDeploy = document.getElementById("btn-equipment-skill-deploy");
+const skillDeploymentProgress = document.getElementById("equipment-skill-deployment-progress");
+const skillDeploymentProgressBar = document.getElementById("equipment-skill-deployment-progress-bar");
+const skillDeploymentStatus = document.getElementById("equipment-skill-deployment-status");
+const skillDeploymentDetail = document.getElementById("equipment-skill-deployment-detail");
+const btnStopSkillDeployment = document.getElementById("btn-equipment-stop-skill-deployment");
 const requestAuditStatus = document.getElementById("equipment-request-audit-status");
 const requestAuditDetail = document.getElementById("equipment-request-audit-detail");
 const utmExportGlobInput = document.getElementById("equipment-utm-export-glob");
@@ -116,6 +151,8 @@ const {
   candidateSelectionView,
   confirmCandidateSelection,
   profileConnectionStatus: profileConnectionStatusValue,
+  selectedCandidatesFirst,
+  skillIdFromRecordingName,
 } = window.atrWindowsEquipmentSelection;
 let latestProofPackagePath = "";
 let selectedBridgeUrl = "";
@@ -127,6 +164,469 @@ let latestProofVerification = {};
 let latestCompletionAudit = {};
 let latestVisionProofDraft = {};
 let selectedEquipmentProfileId = "utm_windows_v1";
+let equipmentRuntime = { execution: null, projection: null };
+let selectedBridgeId = "";
+let selectedRecordingId = "";
+let workerRecordings = [];
+let recordingListLoading = false;
+let selectedEquipmentSkill = null;
+let activeSkillAuthoringJobId = window.localStorage.getItem("atr.equipment.skillAuthoringJobId") || "";
+let skillAuthoringPollTimer = null;
+let finalizedSkillAuthoringJobId = "";
+let skillStoryboardJobId = window.localStorage.getItem("atr.equipment.lastSkillAuthoringJobId") || "";
+let skillStoryboardCursor = 0;
+let skillStoryboardNextCursor = null;
+let activeSkillDeploymentJobId = window.localStorage.getItem("atr.equipment.skillDeploymentJobId") || "";
+let skillDeploymentPollTimer = null;
+let finalizedSkillDeploymentJobId = "";
+
+const EQUIPMENT_PROGRESS_ORDER = ["recording", "transfer", "annotation", "skill", "preflight", "execute", "verify", "handoff"];
+const RECORDING_LIST_REFRESH_MS = 5000;
+const SKILL_AUTHORING_POLL_MS = 750;
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;",
+  })[character]);
+}
+
+function equipmentProgressStage(execution, projection) {
+  const metadata = execution && typeof execution.metadata === "object" ? execution.metadata : {};
+  const agentic = String(metadata.agentic_progress || "").toUpperCase();
+  const lifecycle = String((projection && projection.lifecycle) || (execution && execution.lifecycle) || "").toUpperCase();
+  if (agentic === "TRANSFERRING") return "transfer";
+  if (agentic === "BUILDING_SKILL") return "skill";
+  if (agentic === "ANNOTATING") return "annotation";
+  if (["VALIDATING", "DEPLOYING", "READY"].includes(agentic)) return "skill";
+  if (lifecycle === "RESOLVING") return "preflight";
+  if (lifecycle === "PREFLIGHT") return "preflight";
+  if (["EXECUTING", "RECOVERING"].includes(lifecycle)) return "execute";
+  if (lifecycle === "VERIFYING") return "verify";
+  if (lifecycle === "COMPLETED") return "handoff";
+  return "recording";
+}
+
+function renderEquipmentAgenticProgress(execution, projection) {
+  if (!agenticProgressStages) return;
+  const activeStage = equipmentProgressStage(execution, projection);
+  const activeIndex = EQUIPMENT_PROGRESS_ORDER.indexOf(activeStage);
+  const terminal = ["COMPLETED", "BLOCKED", "ABORTED", "ESCALATED", "EFFECT_UNKNOWN"].includes(
+    String((projection && projection.lifecycle) || "").toUpperCase()
+  );
+  agenticProgressStages.querySelectorAll("[data-equipment-stage]").forEach((card) => {
+    const stage = card.getAttribute("data-equipment-stage") || "";
+    const index = EQUIPMENT_PROGRESS_ORDER.indexOf(stage);
+    card.classList.remove("done", "active", "blocked");
+    if (index < activeIndex || (terminal && index === activeIndex && projection && projection.lifecycle === "COMPLETED")) card.classList.add("done");
+    else if (index === activeIndex) card.classList.add(terminal && projection && projection.lifecycle !== "COMPLETED" ? "blocked" : "active");
+  });
+}
+
+function renderEquipmentRuntimeOverview(payload) {
+  const execution = payload && payload.execution && typeof payload.execution === "object" ? payload.execution : null;
+  const projection = payload && payload.projection && typeof payload.projection === "object" ? payload.projection : null;
+  if (runtimeExecutionId) runtimeExecutionId.textContent = projection ? projection.execution_id : "No active execution";
+  if (profileRuntimeStatus) {
+    profileRuntimeStatus.textContent = projection
+      ? `${projection.lifecycle || "unknown"} · ${projection.status || "unknown"} · ${projection.mode || "-"}`
+      : "No canonical Equipment execution yet.";
+  }
+  if (runtimeReference) {
+    const ref = projection && projection.execution_ref && typeof projection.execution_ref === "object" ? projection.execution_ref : {};
+    const worker = projection && projection.worker && typeof projection.worker === "object" ? projection.worker : {};
+    runtimeReference.textContent = projection
+      ? `profile=${projection.profile_id || "-"} · ${ref.type || "execution"}=${ref.skill_id || ref.program_id || "-"}${ref.version ? `@${ref.version}` : ""} · worker=${worker.worker_id || "-"}`
+      : "Profile, Skill/program, worker, and mode are resolved at stage entry.";
+  }
+  if (runtimeEvidenceCount) runtimeEvidenceCount.textContent = `${Number((projection && projection.evidence_count) || 0)} evidence item(s)`;
+  if (recoveryStatus) {
+    const failureCode = String((projection && projection.failure_code) || "");
+    recoveryStatus.textContent = failureCode
+      ? `${failureCode} · bounded recovery or operator action required`
+      : "Normal execution is deterministic. The selected Live GUI model is reserved for exception recovery.";
+  }
+  renderEquipmentAgenticProgress(execution, projection);
+}
+
+async function refreshEquipmentRuntime() {
+  equipmentRuntime = await apiJson("/api/equipment/runtime/current");
+  renderEquipmentRuntimeOverview(equipmentRuntime);
+  return equipmentRuntime;
+}
+
+function skillIdentity(manifest) {
+  return `${String(manifest.skill_id || "")}@${String(manifest.version || "")}`;
+}
+
+function renderEquipmentSkills(payload) {
+  const skills = Array.isArray(payload && payload.skills) ? payload.skills : [];
+  if (!skillList) return;
+  skillList.innerHTML = "";
+  if (!skills.length) {
+    skillList.textContent = "No Equipment Skills registered.";
+    selectedEquipmentSkill = null;
+    if (btnSkillWorkflowEditor) btnSkillWorkflowEditor.disabled = true;
+    if (selectedSkillEl) selectedSkillEl.textContent = "Select an exact Skill version.";
+    return;
+  }
+  skills.forEach((manifest) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `equipment-skill-row${selectedEquipmentSkill && skillIdentity(selectedEquipmentSkill) === skillIdentity(manifest) ? " selected" : ""}`;
+    const title = document.createElement("strong");
+    title.textContent = manifest.name || manifest.skill_id || "Unnamed Skill";
+    const meta = document.createElement("span");
+    meta.textContent = `${skillIdentity(manifest)} · ${manifest.target_profile || "generic"} · ${manifest.lifecycle || "draft"}`;
+    button.append(title, meta);
+    button.addEventListener("click", () => {
+      selectedEquipmentSkill = manifest;
+      renderEquipmentSkills({ skills });
+      if (selectedSkillEl) selectedSkillEl.textContent = `${skillIdentity(manifest)} · ${manifest.lifecycle || "draft"} · ${manifest.enabled === false ? "disabled" : "enabled"}`;
+      if (skillIdInput) skillIdInput.value = String(manifest.skill_id || "");
+      if (skillVersionInput) skillVersionInput.value = String(manifest.version || "1.0.0");
+      if (skillStatus) skillStatus.textContent = "Exact Skill version selected.";
+      if (btnSkillWorkflowEditor) btnSkillWorkflowEditor.disabled = false;
+    });
+    skillList.appendChild(button);
+  });
+}
+
+async function refreshEquipmentSkills() {
+  const data = await apiJson("/api/equipment/skills");
+  renderEquipmentSkills(data);
+  return data;
+}
+
+function renderWorkerRecordings(items) {
+  workerRecordings = Array.isArray(items) ? items : [];
+  if (!workerRecordingsEl) return;
+  if (!workerRecordings.length) {
+    selectedRecordingId = "";
+    if (btnImportRecording) btnImportRecording.disabled = true;
+    workerRecordingsEl.textContent = "No recordings are available on the selected Worker.";
+    return;
+  }
+  if (selectedRecordingId && !workerRecordings.some((recording) => String(recording.recording_id || "") === selectedRecordingId)) {
+    selectedRecordingId = "";
+  }
+  if (btnImportRecording) btnImportRecording.disabled = !selectedRecordingId || Boolean(activeSkillAuthoringJobId);
+  workerRecordingsEl.innerHTML = "";
+  workerRecordings.forEach((recording) => {
+    const recordingId = String(recording.recording_id || "");
+    const events = Number(recording.event_count || 0);
+    const duration = Number(recording.duration_ms || 0) / 1000;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `equipment-skill-row equipment-skill-item${selectedRecordingId === recordingId ? " selected" : ""}`;
+    button.setAttribute("aria-pressed", selectedRecordingId === recordingId ? "true" : "false");
+    button.innerHTML = `<strong>${escapeHtml(recording.name || recordingId)}</strong><span>${escapeHtml(recordingId)} · ${escapeHtml(recording.status || "recorded")} · ${events} events · ${duration.toFixed(1)}s</span>`;
+    button.addEventListener("click", () => {
+      selectedRecordingId = recordingId;
+      if (skillWorkerIdInput) skillWorkerIdInput.value = selectedBridgeId;
+      if (skillIdInput) skillIdInput.value = skillIdFromRecordingName(recording.name, recordingId);
+      renderWorkerRecordings(workerRecordings);
+      if (recordingStatus) recordingStatus.textContent = `Selected ${recordingId} from ${selectedBridgeId}.`;
+    });
+    workerRecordingsEl.appendChild(button);
+  });
+}
+
+async function refreshWorkerRecordings(options = {}) {
+  const silent = options && options.silent === true;
+  const bridgeId = String(selectedBridgeId || "").trim();
+  if (!bridgeId) {
+    renderWorkerRecordings([]);
+    if (!silent && recordingStatus) recordingStatus.textContent = "Select a connected Worker before loading recordings.";
+    return { ok: false, status: "worker_required" };
+  }
+  if (recordingListLoading) return { ok: false, status: "refresh_in_progress" };
+  recordingListLoading = true;
+  if (!silent) setBusy(btnRefreshRecordings, true);
+  try {
+    const data = await apiJson(`/api/equipment/workers/${encodeURIComponent(bridgeId)}/recordings`);
+    renderWorkerRecordings(data.recordings || []);
+    if (!silent && recordingStatus) recordingStatus.textContent = `${workerRecordings.length} recording(s) loaded from ${bridgeId}.`;
+    return data;
+  } catch (err) {
+    if (!silent) {
+      renderWorkerRecordings([]);
+      if (recordingStatus) recordingStatus.textContent = `Recording list failed: ${err.message}`;
+    }
+    throw err;
+  } finally {
+    recordingListLoading = false;
+    if (!silent) setBusy(btnRefreshRecordings, false);
+  }
+}
+
+function selectedSkillPath(suffix) {
+  if (!selectedEquipmentSkill) throw new Error("Select an exact Skill version first.");
+  const skillId = encodeURIComponent(String(selectedEquipmentSkill.skill_id || ""));
+  const version = encodeURIComponent(String(selectedEquipmentSkill.version || ""));
+  return `/api/equipment/skills/${skillId}/${version}/${suffix}`;
+}
+
+function openSelectedSkillWorkflowEditor() {
+  if (!selectedEquipmentSkill) throw new Error("Select an exact Skill version first.");
+  const skillId = String(selectedEquipmentSkill.skill_id || "");
+  const version = String(selectedEquipmentSkill.version || "");
+  const worker = String(skillWorkerIdInput && skillWorkerIdInput.value || selectedBridgeId || "").trim();
+  const url = `/equipment/skills/${encodeURIComponent(skillId)}/${encodeURIComponent(version)}/workflow-editor?worker=${encodeURIComponent(worker)}`;
+  window.open(url, `atr-skill-${skillId}-${version}`, "popup=yes,width=1440,height=920,resizable=yes,scrollbars=yes");
+}
+
+async function importEquipmentRecording() {
+  const recordingId = String(selectedRecordingId || "").trim();
+  const skillId = String(skillIdInput && skillIdInput.value || "").trim();
+  const version = String(skillVersionInput && skillVersionInput.value || "1.0.0").trim();
+  const bridgeId = String(skillWorkerIdInput && skillWorkerIdInput.value || selectedBridgeId).trim();
+  if (!recordingId || !skillId || !version || !bridgeId) {
+    throw new Error("Select a recording and provide Skill ID, version, and Worker.");
+  }
+  setBusy(btnImportRecording, true);
+  try {
+    const data = await apiJson(`/api/equipment/recordings/${encodeURIComponent(recordingId)}/import-skill/start`, {
+      method: "POST",
+      body: JSON.stringify({ skill_id: skillId, version, target_profile: selectedEquipmentProfileId, bridge_id: bridgeId }),
+    });
+    activeSkillAuthoringJobId = String(data.job && data.job.job_id || "");
+    if (!activeSkillAuthoringJobId) throw new Error("Skill authoring start did not return a job ID.");
+    window.localStorage.setItem("atr.equipment.skillAuthoringJobId", activeSkillAuthoringJobId);
+    window.localStorage.setItem("atr.equipment.lastSkillAuthoringJobId", activeSkillAuthoringJobId);
+    skillStoryboardJobId = activeSkillAuthoringJobId;
+    skillStoryboardCursor = 0;
+    if (skillStoryboardPreview) skillStoryboardPreview.hidden = true;
+    renderSkillAuthoringJob(data.job);
+    scheduleSkillAuthoringPoll();
+  } catch (err) {
+    setBusy(btnImportRecording, false);
+    throw err;
+  }
+}
+
+function renderSkillStoryboardPage(payload) {
+  const items = Array.isArray(payload && payload.items) ? payload.items : [];
+  const item = items[0] || null;
+  const total = Number(payload && payload.total_count || 0);
+  skillStoryboardCursor = Number(payload && payload.cursor || 0);
+  skillStoryboardNextCursor = payload && payload.next_cursor !== null ? Number(payload.next_cursor) : null;
+  if (skillStoryboardPreview) skillStoryboardPreview.hidden = !item;
+  if (skillStoryboardImage) {
+    skillStoryboardImage.src = item ? `data:${item.media_type || "image/jpeg"};base64,${item.data_base64}` : "";
+  }
+  if (skillStoryboardMeta) {
+    skillStoryboardMeta.textContent = item ? `${item.name} · ${skillStoryboardCursor + 1}/${total}` : "No timeline storyboard.";
+  }
+  if (btnSkillStoryboardPrevious) btnSkillStoryboardPrevious.disabled = !item || skillStoryboardCursor <= 0;
+  if (btnSkillStoryboardNext) btnSkillStoryboardNext.disabled = !item || skillStoryboardNextCursor === null;
+}
+
+async function loadSkillStoryboardPage(jobId = skillStoryboardJobId, cursor = 0) {
+  const normalizedJobId = String(jobId || "").trim();
+  if (!normalizedJobId) return null;
+  const data = await apiJson(`/api/equipment/skill-authoring/jobs/${encodeURIComponent(normalizedJobId)}/storyboards?cursor=${Math.max(0, Number(cursor || 0))}&limit=1`);
+  skillStoryboardJobId = normalizedJobId;
+  renderSkillStoryboardPage(data);
+  return data;
+}
+
+function skillAuthoringIsActive(job) {
+  return ["QUEUED", "RUNNING", "STOPPING"].includes(String(job && job.status || "").toUpperCase());
+}
+
+function renderSkillAuthoringJob(job) {
+  const payload = job && typeof job === "object" ? job : {};
+  const status = String(payload.status || "IDLE").toUpperCase();
+  const stage = String(payload.stage || "IDLE").replaceAll("_", " ");
+  const progress = Math.max(0, Math.min(100, Number(payload.progress || 0)));
+  if (skillAuthoringProgress) skillAuthoringProgress.dataset.status = status;
+  if (skillAuthoringProgressBar) {
+    skillAuthoringProgressBar.value = progress;
+    skillAuthoringProgressBar.textContent = `${progress}%`;
+  }
+  if (skillAuthoringStatus) {
+    skillAuthoringStatus.textContent = status === "RUNNING" ? `Working · ${stage}` : `${status} · ${stage}`;
+  }
+  if (skillAuthoringDetail) skillAuthoringDetail.textContent = String(payload.status_text || "Waiting for Skill authoring.");
+  if (btnStopSkillAuthoring) btnStopSkillAuthoring.disabled = !skillAuthoringIsActive(payload) || status === "STOPPING";
+  if (skillAuthoringIsActive(payload)) {
+    setBusy(btnImportRecording, true);
+    return;
+  }
+  setBusy(btnImportRecording, false);
+  if (btnImportRecording) btnImportRecording.disabled = !selectedRecordingId;
+}
+
+function scheduleSkillAuthoringPoll(delay = SKILL_AUTHORING_POLL_MS) {
+  if (skillAuthoringPollTimer) window.clearTimeout(skillAuthoringPollTimer);
+  if (!activeSkillAuthoringJobId) return;
+  skillAuthoringPollTimer = window.setTimeout(() => {
+    pollSkillAuthoringJob().catch((err) => {
+      if (skillAuthoringDetail) skillAuthoringDetail.textContent = `Progress update failed: ${err.message}`;
+      scheduleSkillAuthoringPoll(1500);
+    });
+  }, delay);
+}
+
+async function pollSkillAuthoringJob() {
+  if (!activeSkillAuthoringJobId) return null;
+  const jobId = activeSkillAuthoringJobId;
+  const data = await apiJson(`/api/equipment/skill-authoring/jobs/${encodeURIComponent(jobId)}`);
+  const job = data.job || {};
+  renderSkillAuthoringJob(job);
+  if (skillAuthoringIsActive(job)) {
+    scheduleSkillAuthoringPoll();
+    return job;
+  }
+  activeSkillAuthoringJobId = "";
+  window.localStorage.removeItem("atr.equipment.skillAuthoringJobId");
+  if (String(job.status || "").toUpperCase() === "COMPLETED" && finalizedSkillAuthoringJobId !== jobId) {
+    finalizedSkillAuthoringJobId = jobId;
+    if (recordingStatus) recordingStatus.textContent = `Annotated Skill ${job.skill_id}@${job.version} is ready to compile.`;
+    writeLog(job.result || data);
+    await Promise.all([refreshEquipmentSkills(), refreshEquipmentRuntime()]);
+  }
+  if (["COMPLETED", "STOPPED"].includes(String(job.status || "").toUpperCase())) {
+    await loadSkillStoryboardPage(jobId, 0).catch(() => renderSkillStoryboardPage({ items: [], total_count: 0 }));
+  }
+  return job;
+}
+
+async function restoreSkillStoryboard() {
+  if (!skillStoryboardJobId) return null;
+  return loadSkillStoryboardPage(skillStoryboardJobId, 0).catch(() => null);
+}
+
+async function restoreSkillAuthoringJob() {
+  if (!activeSkillAuthoringJobId) return null;
+  try {
+    return await pollSkillAuthoringJob();
+  } catch (err) {
+    activeSkillAuthoringJobId = "";
+    window.localStorage.removeItem("atr.equipment.skillAuthoringJobId");
+    renderSkillAuthoringJob({ status: "FAILED", stage: "RESTORE", progress: 0, status_text: err.message });
+    return null;
+  }
+}
+
+async function stopSkillAuthoring() {
+  if (!activeSkillAuthoringJobId) return;
+  setBusy(btnStopSkillAuthoring, true);
+  try {
+    const data = await apiJson(`/api/equipment/skill-authoring/jobs/${encodeURIComponent(activeSkillAuthoringJobId)}/stop`, {
+      method: "POST",
+      body: "{}",
+    });
+    renderSkillAuthoringJob(data.job);
+    scheduleSkillAuthoringPoll(100);
+  } catch (err) {
+    setBusy(btnStopSkillAuthoring, false);
+    throw err;
+  }
+}
+
+function skillDeploymentIsActive(job) {
+  return ["QUEUED", "RUNNING", "STOPPING"].includes(String(job && job.status || "").toUpperCase());
+}
+
+function renderSkillDeploymentJob(job) {
+  const payload = job && typeof job === "object" ? job : {};
+  const status = String(payload.status || "IDLE").toUpperCase();
+  const stage = String(payload.stage || "IDLE").replaceAll("_", " ");
+  const progress = Math.max(0, Math.min(100, Number(payload.progress || 0)));
+  if (skillDeploymentProgress) skillDeploymentProgress.dataset.status = status;
+  if (skillDeploymentProgressBar) {
+    skillDeploymentProgressBar.value = progress;
+    skillDeploymentProgressBar.textContent = `${progress}%`;
+  }
+  if (skillDeploymentStatus) skillDeploymentStatus.textContent = `${status} · ${stage}`;
+  if (skillDeploymentDetail) skillDeploymentDetail.textContent = String(payload.status_text || "Waiting for Skill deployment.");
+  if (btnStopSkillDeployment) btnStopSkillDeployment.disabled = !skillDeploymentIsActive(payload) || status === "STOPPING";
+  setBusy(btnSkillDeploy, skillDeploymentIsActive(payload));
+}
+
+function scheduleSkillDeploymentPoll(delay = SKILL_AUTHORING_POLL_MS) {
+  if (skillDeploymentPollTimer) window.clearTimeout(skillDeploymentPollTimer);
+  if (!activeSkillDeploymentJobId) return;
+  skillDeploymentPollTimer = window.setTimeout(() => {
+    pollSkillDeploymentJob().catch((err) => {
+      if (skillDeploymentDetail) skillDeploymentDetail.textContent = `Progress update failed: ${err.message}`;
+      scheduleSkillDeploymentPoll(1500);
+    });
+  }, delay);
+}
+
+async function pollSkillDeploymentJob() {
+  if (!activeSkillDeploymentJobId) return null;
+  const jobId = activeSkillDeploymentJobId;
+  const data = await apiJson(`/api/equipment/skill-deployment/jobs/${encodeURIComponent(jobId)}`);
+  const job = data.job || {};
+  renderSkillDeploymentJob(job);
+  if (skillDeploymentIsActive(job)) {
+    scheduleSkillDeploymentPoll();
+    return job;
+  }
+  activeSkillDeploymentJobId = "";
+  window.localStorage.removeItem("atr.equipment.skillDeploymentJobId");
+  if (String(job.status || "").toUpperCase() === "COMPLETED" && finalizedSkillDeploymentJobId !== jobId) {
+    finalizedSkillDeploymentJobId = jobId;
+    writeLog(job.result || data);
+    await Promise.all([refreshEquipmentSkills(), refreshEquipmentRuntime()]);
+  }
+  return job;
+}
+
+async function restoreSkillDeploymentJob() {
+  if (!activeSkillDeploymentJobId) return null;
+  try {
+    return await pollSkillDeploymentJob();
+  } catch (err) {
+    activeSkillDeploymentJobId = "";
+    window.localStorage.removeItem("atr.equipment.skillDeploymentJobId");
+    renderSkillDeploymentJob({ status: "FAILED", stage: "RESTORE", progress: 0, status_text: err.message });
+    return null;
+  }
+}
+
+async function startSkillDeployment() {
+  if (!selectedEquipmentSkill) throw new Error("Select an exact Skill version first.");
+  const bridgeId = String(skillWorkerIdInput && skillWorkerIdInput.value || selectedBridgeId).trim();
+  if (!bridgeId) throw new Error("Select a Worker before deploying a Skill.");
+  setBusy(btnSkillDeploy, true);
+  try {
+    const data = await apiJson(selectedSkillPath("deploy/start"), {
+      method: "POST",
+      body: JSON.stringify({ bridge_id: bridgeId }),
+    });
+    activeSkillDeploymentJobId = String(data.job && data.job.job_id || "");
+    if (!activeSkillDeploymentJobId) throw new Error("Skill deployment start did not return a job ID.");
+    window.localStorage.setItem("atr.equipment.skillDeploymentJobId", activeSkillDeploymentJobId);
+    renderSkillDeploymentJob(data.job);
+    scheduleSkillDeploymentPoll();
+  } catch (err) {
+    setBusy(btnSkillDeploy, false);
+    throw err;
+  }
+}
+
+async function stopSkillDeployment() {
+  if (!activeSkillDeploymentJobId) return;
+  setBusy(btnStopSkillDeployment, true);
+  try {
+    const data = await apiJson(`/api/equipment/skill-deployment/jobs/${encodeURIComponent(activeSkillDeploymentJobId)}/stop`, {
+      method: "POST",
+      body: "{}",
+    });
+    renderSkillDeploymentJob(data.job);
+    scheduleSkillDeploymentPoll(100);
+  } finally {
+    setBusy(btnStopSkillDeployment, false);
+  }
+}
 
 function renderEquipmentProfiles(payload) {
   const profiles = Array.isArray(payload && payload.profiles) ? payload.profiles : [];
@@ -159,7 +659,44 @@ async function loadEquipmentProfileState() {
   if (profileEvidenceStatus) {
     profileEvidenceStatus.textContent = evidence.analysis_handoff?.status || evidence.status || "No profile test result yet.";
   }
+  const visionLink = state.profile && state.profile.vision_link && typeof state.profile.vision_link === "object" ? state.profile.vision_link : {};
+  const workspaceSettings = state.workspace_settings && typeof state.workspace_settings === "object" ? state.workspace_settings : {};
+  const persistedVisionSelection = Object.prototype.hasOwnProperty.call(workspaceSettings, "vision_link_enabled")
+    ? Boolean(state.workspace_settings.vision_link_enabled)
+    : Boolean(visionLink.enabled);
+  if (visionLinkEnabled) visionLinkEnabled.checked = persistedVisionSelection;
+  if (visionLinkStatus) {
+    const requiredModes = Array.isArray(visionLink.required_modes) ? visionLink.required_modes.join(", ") : "";
+    const source = workspaceSettings.vision_link_source === "stored" ? "saved selection" : "Profile default";
+    visionLinkStatus.textContent = persistedVisionSelection
+      ? `Enabled · ${source} · required modes: ${requiredModes || "none"} · ${visionLink.request_schema || "equipment vision request"}`
+      : `Disabled · ${source}; screen and data evidence remain available.`;
+  }
   return state;
+}
+
+async function saveEquipmentVisionLinkSelection() {
+  if (!visionLinkEnabled) return;
+  const selected = Boolean(visionLinkEnabled.checked);
+  visionLinkEnabled.disabled = true;
+  if (visionLinkStatus) visionLinkStatus.textContent = "Saving Vision Link selection.";
+  try {
+    const data = await apiJson(`/api/equipment/profiles/${encodeURIComponent(selectedEquipmentProfileId)}/settings`, {
+      method: "POST",
+      body: JSON.stringify({ vision_link_enabled: selected }),
+    });
+    const settings = data.workspace_settings || {};
+    visionLinkEnabled.checked = Boolean(settings.vision_link_enabled);
+    if (visionLinkStatus) {
+      visionLinkStatus.textContent = `${visionLinkEnabled.checked ? "Enabled" : "Disabled"} · saved automatically for this Profile.`;
+    }
+  } catch (err) {
+    visionLinkEnabled.checked = !selected;
+    if (visionLinkStatus) visionLinkStatus.textContent = `Save failed · ${err.message}`;
+    writeLog({ ok: false, action: "save_vision_link_selection", error: err.message });
+  } finally {
+    visionLinkEnabled.disabled = false;
+  }
 }
 
 async function runEquipmentProfileAction(action, button) {
@@ -167,7 +704,10 @@ async function runEquipmentProfileAction(action, button) {
   try {
     const data = await apiJson(`/api/equipment/profiles/${encodeURIComponent(selectedEquipmentProfileId)}/${action}`, {
       method: "POST",
-      body: JSON.stringify(action === "test" ? { confirm_execute: true } : {}),
+      body: JSON.stringify({
+        ...(action === "test" ? { confirm_execute: true } : {}),
+        vision_link_enabled: Boolean(visionLinkEnabled && visionLinkEnabled.checked),
+      }),
     });
     if (profileEvidenceStatus && action === "test") {
       profileEvidenceStatus.textContent = data.analysis_handoff?.status || data.status || "test completed";
@@ -239,7 +779,7 @@ function updateProofDashboard() {
   setProofGate(
     "windowsBridge",
     bridgeOk ? "ready" : readinessKnown || selectedBridgeUrl ? "blocked" : "not checked",
-    `candidate=${readinessGates.connection_saved ? "saved" : selectedBridgeUrl ? "selected" : "missing"} · token=${readinessGates.token_configured ? "set" : "missing"} · request=${requestIdentity}`,
+    `candidate=${readinessGates.connection_saved ? "saved" : selectedBridgeUrl ? "selected" : "missing"} · pairing=${readinessGates.token_configured ? "ready" : "required"} · request=${requestIdentity}`,
     bridgeOk ? "ready" : readinessKnown || selectedBridgeUrl ? "blocked" : "idle"
   );
 
@@ -327,7 +867,7 @@ function setActionStatus(label, detail = "", kind = "idle") {
     commandBanner.className = `equipment-command-banner ${normalizedKind === "ok" ? "ok" : normalizedKind === "blocked" ? "blocked" : normalizedKind === "working" ? "working" : ""}`.trim();
   }
   if (commandTitle) commandTitle.textContent = label || "Ready for Windows bridge setup";
-  if (commandDetail) commandDetail.textContent = detail || "Scan and save a token-verified Windows PC, then run readiness, preflight, simulation, and evidence checks.";
+  if (commandDetail) commandDetail.textContent = detail || "Scan, pair, and save a Windows worker, then run readiness, preflight, simulation, and evidence checks.";
   if (commandPill) {
     commandPill.className = `badge ${normalizedKind === "ok" ? "running" : normalizedKind === "blocked" ? "warning" : "idle"}`;
     commandPill.textContent = normalizedKind;
@@ -532,7 +1072,7 @@ function renderUtmReadiness(readiness) {
   const requiredLocators = Array.isArray(gates.required_locator_names) ? gates.required_locator_names.filter(Boolean) : [];
   const gateText = [
     `bridge=${gates.connection_saved ? "saved" : "missing"}`,
-    `token=${gates.token_configured ? "set" : "missing"}`,
+    `pairing=${gates.token_configured ? "ready" : "required"}`,
     `program=${gates.utm_program_registered ? "registered" : "missing"}`,
     `locators=${Number(gates.locator_count || 0)}/${requiredLocators.length || "?"}`,
     `required=${gates.required_locators_complete ? "complete" : missingLocators.length ? missingLocators.join("|") : "unknown"}`,
@@ -547,7 +1087,18 @@ function renderUtmReadiness(readiness) {
 
 function setConnectionStatus(connection) {
   const selected = Boolean(connection && connection.selected);
+  const previousBridgeId = selectedBridgeId;
   selectedBridgeUrl = selected && connection && connection.bridge_url ? String(connection.bridge_url) : "";
+  selectedBridgeId = selected && connection && connection.selected_candidate
+    ? String(connection.selected_candidate)
+    : "";
+  if (selectedBridgeId !== previousBridgeId) {
+    selectedRecordingId = "";
+    renderWorkerRecordings([]);
+  }
+  if (skillWorkerIdInput && selectedBridgeId) {
+    skillWorkerIdInput.value = selectedBridgeId;
+  }
   if (connectionDot) {
     connectionDot.className = `status-dot ${selected ? "running" : "idle"}`;
   }
@@ -556,7 +1107,7 @@ function setConnectionStatus(connection) {
     connectionLabel.textContent = selected ? `${alias}${connection.bridge_url}` : "No PyAutoGUI bridge candidate selected";
   }
   if (connectionDetail) {
-    const tokenText = connection && connection.token_configured ? "token configured" : "token missing";
+    const tokenText = connection && (connection.paired || connection.token_configured) ? "paired" : "pairing required";
     const memoryPath = connection && connection.connection_memory_path ? connection.connection_memory_path : "memory/windows_pyautogui_connection.json";
     const candidateCount = connection && Array.isArray(connection.candidates) ? `${connection.candidates.length} candidate(s)` : "0 candidates";
     connectionDetail.textContent = `${tokenText} · ${candidateCount} · ${memoryPath}`;
@@ -641,31 +1192,37 @@ async function refreshConfig(options = {}) {
 function renderCandidates(candidates) {
   if (!candidatesEl) return;
   if (!Array.isArray(candidates) || candidates.length === 0) {
-    candidatesEl.textContent = "No token-verified Windows bridge candidates found.";
+    candidatesEl.textContent = "No Windows bridge candidates found.";
     return;
   }
   candidatesEl.innerHTML = "";
   candidates.forEach((candidate) => {
     const card = document.createElement("div");
     card.className = "equipment-candidate-card";
-    const status = candidate.token_verified ? "token verified" : candidate.status || "ready";
+    const status = candidate.pairing_required ? "pairing required" : candidate.status || "ready";
     const pyautogui = candidate.pyautogui && candidate.pyautogui.available === false ? "PyAutoGUI missing" : "PyAutoGUI ready/unknown";
     card.innerHTML = `
       <div>
         <strong>${candidate.bridge_url}</strong>
-        <p class="hint">${status} · ${pyautogui}</p>
+        <p class="hint">${status} · ${candidate.hostname || "Windows worker"} · ${candidate.server_version || pyautogui}</p>
       </div>
       <div class="equipment-candidate-save">
         <input class="text-input equipment-alias-input" placeholder="candidate alias" />
-        <button class="btn mini">Save</button>
+        <input class="text-input equipment-pairing-code-input" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" placeholder="4-digit pairing code" />
+        <button class="btn mini">Pair & Save</button>
       </div>
     `;
     const button = card.querySelector("button");
-    const input = card.querySelector("input");
-    if (input && candidate.host) {
-      input.value = `windows_${String(candidate.host).replace(/[^a-zA-Z0-9_.-]/g, "_")}`;
+    const aliasInput = card.querySelector(".equipment-alias-input");
+    const pairingInput = card.querySelector(".equipment-pairing-code-input");
+    if (aliasInput && candidate.host) {
+      aliasInput.value = `windows_${String(candidate.host).replace(/[^a-zA-Z0-9_.-]/g, "_")}`;
     }
-    button.addEventListener("click", () => saveCandidate(candidate, input ? input.value : ""));
+    button.addEventListener("click", () => saveCandidate(
+      candidate,
+      aliasInput ? aliasInput.value : "",
+      pairingInput ? pairingInput.value : "",
+    ));
     candidatesEl.appendChild(card);
   });
 }
@@ -677,7 +1234,7 @@ function renderSavedCandidates(candidates) {
     return;
   }
   savedCandidatesEl.innerHTML = "";
-  candidates.forEach((candidate) => {
+  selectedCandidatesFirst(candidates).forEach((candidate) => {
     const card = document.createElement("div");
     const view = candidateSelectionView(candidate);
     card.className = view.cardClass;
@@ -685,13 +1242,21 @@ function renderSavedCandidates(candidates) {
     const selected = view.selected ? "selected" : "standby";
     const target = candidate.managed_local ? "local managed" : `${candidate.platform || "windows"} · ${candidate.scope || "network"}`;
     card.innerHTML = `
-      <div>
+      <div class="equipment-candidate-identity">
         <strong>${candidate.candidate_alias}</strong>
         <p class="hint">${candidate.bridge_url} · ${target} · ${selected} · ${candidate.allow_live_execute ? "live enabled" : "live blocked"}</p>
+        <p class="equipment-worker-update-state" data-update-state>Version not checked</p>
       </div>
-      <div class="button-row">
-        <button class="${view.buttonClass}" data-action="select" aria-pressed="${view.ariaPressed}">${view.buttonText}</button>
-        <button class="btn mini danger" data-action="delete">Delete</button>
+      <div class="equipment-worker-actions">
+        <div class="button-row compact">
+          <button class="btn mini" data-action="check-update">Check Update</button>
+          <button class="btn mini primary" data-action="apply-update">Update</button>
+          <button class="btn mini" data-action="rollback-update">Rollback</button>
+        </div>
+        <div class="button-row compact">
+          <button class="${view.buttonClass}" data-action="select" aria-pressed="${view.ariaPressed}">${view.buttonText}</button>
+          <button class="btn mini danger" data-action="delete">Delete</button>
+        </div>
       </div>
     `;
     const selectButton = card.querySelector('[data-action="select"]');
@@ -699,16 +1264,105 @@ function renderSavedCandidates(candidates) {
     selectButton.disabled = view.buttonDisabled;
     selectButton.addEventListener("click", () => selectSavedCandidate(candidate.candidate_alias, selectButton));
     deleteButton.addEventListener("click", () => deleteSavedCandidate(candidate.candidate_alias));
+    card.querySelector('[data-action="check-update"]').addEventListener("click", () => checkWorkerUpdate(candidate.candidate_alias, card));
+    card.querySelector('[data-action="apply-update"]').addEventListener("click", () => applyWorkerUpdate(candidate.candidate_alias, card));
+    card.querySelector('[data-action="rollback-update"]').addEventListener("click", () => rollbackWorkerUpdate(candidate.candidate_alias, card));
     savedCandidatesEl.appendChild(card);
   });
 }
 
-async function scanNetwork() {
-  const token = tokenInput ? tokenInput.value.trim() : "";
-  if (!token) {
-    writeLog({ ok: false, failure_code: "PYAUTOGUI_TOKEN_REQUIRED", message: "Enter token before scanning." });
-    return;
+function setWorkerUpdateBusy(card, busy, activeAction = "") {
+  if (!card) return;
+  card.querySelectorAll('[data-action="check-update"], [data-action="apply-update"], [data-action="rollback-update"]').forEach((button) => {
+    if (!button.dataset.originalText) button.dataset.originalText = button.textContent;
+    button.disabled = busy;
+    button.textContent = busy && button.dataset.action === activeAction ? "Working..." : button.dataset.originalText;
+  });
+}
+
+function renderWorkerUpdateState(card, data) {
+  const state = card ? card.querySelector("[data-update-state]") : null;
+  if (!state) return;
+  const current = String(data.current_version || data.version || "unknown");
+  const latest = String(data.latest_version || data.target_version || "unknown");
+  const status = String(data.status || "ready");
+  state.className = `equipment-worker-update-state ${data.ok === false ? "blocked" : data.update_available ? "available" : "ready"}`;
+  state.textContent = data.ok === false
+    ? `${status} · ${data.failure_code || data.message || "update unavailable"}`
+    : `Current ${current} · Latest ${latest} · ${data.update_available ? "update available" : status}`;
+}
+
+async function checkWorkerUpdate(candidateAlias, card, options = {}) {
+  const quiet = options.quiet === true;
+  if (!quiet) setWorkerUpdateBusy(card, true, "check-update");
+  try {
+    const data = await apiJson(`/api/equipment/windows/workers/${encodeURIComponent(candidateAlias)}/update`);
+    renderWorkerUpdateState(card, data);
+    if (!quiet) writeLog(data);
+    return data;
+  } catch (err) {
+    const failure = { ok: false, status: "unreachable", message: err.message };
+    renderWorkerUpdateState(card, failure);
+    if (!quiet) writeLog(failure);
+    return failure;
+  } finally {
+    if (!quiet) setWorkerUpdateBusy(card, false);
   }
+}
+
+async function pollWorkerUpdate(candidateAlias, card, expectedVersion = "") {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 2000));
+    const status = await checkWorkerUpdate(candidateAlias, card, { quiet: true });
+    if (status.ok && (!expectedVersion || status.current_version === expectedVersion || status.status === "rolled_back")) {
+      setWorkerUpdateBusy(card, false);
+      writeLog(status);
+      return;
+    }
+  }
+  setWorkerUpdateBusy(card, false);
+  writeLog({ ok: false, status: "waiting", message: `Worker ${candidateAlias} has not returned yet. Use Check Update to retry.` });
+}
+
+async function applyWorkerUpdate(candidateAlias, card) {
+  if (!window.confirm(`Update Saved Worker "${candidateAlias}"? Active recordings must be stopped first.`)) return;
+  setWorkerUpdateBusy(card, true, "apply-update");
+  try {
+    const data = await apiJson(`/api/equipment/windows/workers/${encodeURIComponent(candidateAlias)}/update`, { method: "POST", body: "{}" });
+    renderWorkerUpdateState(card, data);
+    writeLog(data);
+    if (!data.ok) {
+      setWorkerUpdateBusy(card, false);
+      return;
+    }
+    pollWorkerUpdate(candidateAlias, card, String(data.target_version || ""));
+  } catch (err) {
+    renderWorkerUpdateState(card, { ok: false, status: "failed", message: err.message });
+    writeLog({ ok: false, status: "failed", message: err.message });
+    setWorkerUpdateBusy(card, false);
+  }
+}
+
+async function rollbackWorkerUpdate(candidateAlias, card) {
+  if (!window.confirm(`Roll back Saved Worker "${candidateAlias}" to its latest verified backup?`)) return;
+  setWorkerUpdateBusy(card, true, "rollback-update");
+  try {
+    const data = await apiJson(`/api/equipment/windows/workers/${encodeURIComponent(candidateAlias)}/rollback`, { method: "POST", body: "{}" });
+    renderWorkerUpdateState(card, data);
+    writeLog(data);
+    if (!data.ok) {
+      setWorkerUpdateBusy(card, false);
+      return;
+    }
+    pollWorkerUpdate(candidateAlias, card);
+  } catch (err) {
+    renderWorkerUpdateState(card, { ok: false, status: "failed", message: err.message });
+    writeLog({ ok: false, status: "failed", message: err.message });
+    setWorkerUpdateBusy(card, false);
+  }
+}
+
+async function scanNetwork() {
   setBusy(btnScan, true);
   try {
     const data = await apiJson("/api/equipment/windows/discover", {
@@ -716,7 +1370,6 @@ async function scanNetwork() {
       body: JSON.stringify({
         subnet: subnetInput ? subnetInput.value.trim() : "",
         port: Number(portInput ? portInput.value : 8765) || 8765,
-        token,
       }),
     });
     renderCandidates(data.candidates || []);
@@ -728,10 +1381,10 @@ async function scanNetwork() {
   }
 }
 
-async function saveCandidate(candidate, aliasValue) {
-  const token = tokenInput ? tokenInput.value.trim() : "";
-  if (!token) {
-    writeLog({ ok: false, failure_code: "PYAUTOGUI_TOKEN_REQUIRED", message: "Enter token before saving a candidate." });
+async function saveCandidate(candidate, aliasValue, pairingCodeValue) {
+  const pairingCode = String(pairingCodeValue || "").trim();
+  if (!/^\d{4}$/.test(pairingCode)) {
+    writeLog({ ok: false, failure_code: "PYAUTOGUI_PAIRING_CODE_INVALID", message: "Enter the four-digit code shown on the Windows bridge." });
     return;
   }
   let candidateAlias = String(aliasValue || "").trim();
@@ -744,14 +1397,14 @@ async function saveCandidate(candidate, aliasValue) {
     writeLog({ ok: false, failure_code: "PYAUTOGUI_CANDIDATE_ALIAS_REQUIRED", message: "Candidate alias is required." });
     return;
   }
-  const data = await apiJson("/api/equipment/windows/connect", {
+  const data = await apiJson("/api/equipment/windows/pair", {
     method: "POST",
     body: JSON.stringify({
       candidate_alias: candidateAlias,
       host: candidate.host || "",
       bridge_url: candidate.bridge_url,
       port: candidate.port || Number(portInput ? portInput.value : 8765) || 8765,
-      token,
+      pairing_code: pairingCode,
       allow_live_execute: true,
     }),
   });
@@ -777,6 +1430,14 @@ async function selectSavedCandidate(candidateAlias, button = null) {
       refreshConfig({ logResult: false }),
       loadEquipmentProfileState(),
     ]);
+    await refreshWorkerRecordings().catch((err) => {
+      writeLog({
+        ok: false,
+        status: "recording_list_unavailable",
+        failure_code: "PYAUTOGUI_RECORDING_LIST_FAILED",
+        message: err.message,
+      });
+    });
   } catch (err) {
     writeLog({
       ok: false,
@@ -1343,4 +2004,34 @@ if (btnUtm) btnUtm.addEventListener("click", runUtmProtocol);
 if (btnAbort) btnAbort.addEventListener("click", runUtmAbort);
 if (btnProfilePreflight) btnProfilePreflight.addEventListener("click", () => runEquipmentProfileAction("preflight", btnProfilePreflight));
 if (btnProfileTest) btnProfileTest.addEventListener("click", () => runEquipmentProfileAction("test", btnProfileTest));
-Promise.all([refreshConfig(), refreshLocalBridgeStatus(), loadEquipmentProfileState()]).catch((err) => writeLog({ ok: false, error: err.message }));
+if (visionLinkEnabled) visionLinkEnabled.addEventListener("change", saveEquipmentVisionLinkSelection);
+if (btnImportRecording) btnImportRecording.addEventListener("click", importEquipmentRecording);
+if (btnRefreshRecordings) btnRefreshRecordings.addEventListener("click", refreshWorkerRecordings);
+if (btnStopSkillAuthoring) btnStopSkillAuthoring.addEventListener("click", stopSkillAuthoring);
+if (btnSkillStoryboardPrevious) btnSkillStoryboardPrevious.addEventListener("click", () => loadSkillStoryboardPage(skillStoryboardJobId, Math.max(0, skillStoryboardCursor - 1)));
+if (btnSkillStoryboardNext) btnSkillStoryboardNext.addEventListener("click", () => loadSkillStoryboardPage(skillStoryboardJobId, skillStoryboardNextCursor));
+if (btnSkillRefresh) btnSkillRefresh.addEventListener("click", refreshEquipmentSkills);
+if (btnSkillWorkflowEditor) btnSkillWorkflowEditor.addEventListener("click", openSelectedSkillWorkflowEditor);
+if (btnSkillDeploy) btnSkillDeploy.addEventListener("click", startSkillDeployment);
+if (btnStopSkillDeployment) btnStopSkillDeployment.addEventListener("click", stopSkillDeployment);
+
+Promise.all([
+  refreshConfig().then(() => selectedBridgeId ? refreshWorkerRecordings().catch(() => null) : null),
+  refreshLocalBridgeStatus(),
+  loadEquipmentProfileState(),
+  refreshEquipmentRuntime(),
+  refreshEquipmentSkills(),
+  restoreSkillAuthoringJob(),
+  restoreSkillStoryboard(),
+  restoreSkillDeploymentJob(),
+]).catch((err) => writeLog({ ok: false, error: err.message }));
+
+window.setInterval(() => {
+  if (document.hidden) return;
+  refreshEquipmentRuntime().catch(() => {});
+}, 3000);
+
+window.setInterval(() => {
+  if (document.hidden || !selectedBridgeId) return;
+  refreshWorkerRecordings({ silent: true }).catch(() => {});
+}, RECORDING_LIST_REFRESH_MS);

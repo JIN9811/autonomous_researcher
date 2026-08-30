@@ -25,7 +25,7 @@ from typing import Any
 
 import httpx
 
-from backends.llm_backend import BaseLLMBackend, LLMResponse
+from backends.llm_backend import BaseLLMBackend, LLMImageInput, LLMResponse, ollama_user_message
 
 
 class OllamaBackend(BaseLLMBackend):
@@ -48,13 +48,14 @@ class OllamaBackend(BaseLLMBackend):
         system_prompt: str,
         user_prompt: str,
         metadata: dict[str, Any] | None = None,
+        images: list[LLMImageInput] | None = None,
     ) -> LLMResponse:
         payload = {
             "model": model,
             "stream": False,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+                ollama_user_message(user_prompt, images),
             ],
             "options": {"temperature": 0.2},
         }

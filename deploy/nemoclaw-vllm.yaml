@@ -39,7 +39,7 @@ spec:
             - --max-num-batched-tokens
             - "4096"
             - --gpu-memory-utilization
-            - "0.37"
+            - "0.55"
             - --generation-config
             - vllm
             - --speculative-config

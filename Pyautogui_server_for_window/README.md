@@ -1,349 +1,208 @@
 # Windows PyAutoGUI Bridge
 
-Windows PC에서 PyAutoGUI를 인증된 HTTP bridge로 노출하고 Linux ATR
-Equipment Agent가 내부망에서 제어하도록 만든 독립 배포 패키지입니다.
+Windows PyAutoGUI Bridge는 Linux ATR의 `LabEquipmentAgent`가 Windows GUI 기반 장비를 제어할 때 사용하는 경량 실행기입니다. Windows에서는 판단이나 실험 완료 판정을 하지 않고, 검증된 프로그램 실행, 화면 증거 수집, 입력 녹화, 로컬 프로그램 관리만 수행합니다.
 
-## 포터블 배포: 권장
+## 책임 경계
 
-새 Windows x64 PC에는 포터블 ZIP을 사용합니다. ZIP을 통째로 옮겨 압축을
-푼 뒤 `START_EQUIPMENT_BRIDGE.cmd`만 더블클릭하면 됩니다.
+| 계층 | 소유 기능 |
+|---|---|
+| Linux ATR | Equipment Profile/Skill 선택, 실행 ID, 증거 검증, 복구 판단, Analysis handoff |
+| Equipment Runtime Service | 실행 계약, Worker 선택, 실행 기록, 완료 판정, 화면별 상태 projection |
+| Windows Bridge | PyAutoGUI 실행, 화면 캡처, locator, 프로그램 캐시, 녹화, 원시 결과 반환 |
+| 브라우저 | 서버 상태 표시. 상태 원본이 아니며 새로고침 시 서버에서 다시 조회 |
 
-- 별도 Python 설치와 인터넷 연결 불필요
-- 관리자 권한 불필요
-- 첫 실행에만 폴더 내부 `runtime\python` 구성
-- GUI, bridge server, 프로그램/스킬 관리 기능 동시 시작
-- 토큰, 프로그램, 녹화, locator, UTM CSV, 로그를 같은 폴더의 `data\`에 저장
-- 종료는 `STOP_EQUIPMENT_BRIDGE.cmd`
-- Linux ATR 주소 자동 학습 및 `data\controller_connection.json` 재사용
+UTM은 첫 번째 Equipment Profile일 뿐 Windows Bridge 자체가 UTM 전용은 아닙니다. 장비별 창 이름, 버튼 locator, 저장 절차는 Linux의 Profile/Skill과 배포 프로그램에 둡니다.
 
-포터블 릴리스 생성:
+## 권장 설치
 
-```bash
-python3 Pyautogui_server_for_window/scripts/build_portable_release.py \
-  --output /path/to/ATR_Equipment_Agent_Bridge_Windows_x64_Portable \
-  --version YYYY.MM.DD
-```
+### 폴더 복사형 포터블 패키지
 
-빌더는 공식 Python Windows x64 설치 파일의 SHA-256을 검증하고 Windows용
-wheelhouse를 미리 구성합니다. `portable_manifest.json`에는 포함 파일별
-SHA-256과 크기가 기록됩니다. 시스템 Python은 사용하거나 변경하지 않습니다.
+1. Windows PC에 패키지 폴더 전체를 복사합니다.
+2. `START_PORTABLE_BRIDGE.cmd`를 실행합니다.
+3. 최초 실행은 폴더 내부 Python과 오프라인 wheel을 준비한 뒤 브라우저를 엽니다.
+4. Windows Console의 임시 4자리 코드를 확인합니다.
+5. Linux ATR의 Device Workspace > Lab Equipment > Windows Bridge에서 Scan 후 해당 장치를 선택합니다.
+6. 4자리 코드를 입력해 Pair & Save를 실행합니다.
 
-현재 생성된 배포본:
+포터블 데이터는 패키지의 `data\` 아래에 저장됩니다. 관리자 권한이 없어도 설치할 수 있도록 설계되어 있습니다.
+
+### 표준 설치
+
+Python 3.10 이상이 설치된 Windows에서 다음 파일을 실행합니다.
 
 ```text
-/home/jin/다운로드/ATR_Equipment_Agent_Bridge_Windows_x64_Portable_20260812/
-/home/jin/다운로드/ATR_Equipment_Agent_Bridge_Windows_x64_Portable_20260812.zip
+INSTALL_WINDOWS_BRIDGE.cmd
 ```
 
-내부망에서 Linux ATR이 접속할 때 Windows Defender Firewall이 8765/TCP를
-막으면 관리자 PowerShell에서 `scripts\firewall_allow_private.ps1`를 명시적으로
-실행합니다. 로컬 GUI와 로컬 테스트에는 방화벽 변경이 필요 없습니다.
+설치 대상은 `INSTALL_WINDOWS_BRIDGE.cmd`가 들어 있는 현재 패키지 폴더입니다.
 
-## 표준 설치
+```text
+<copied-package-folder>\Pyautogui_server_for_window
+```
 
-release ZIP을 풀고 `INSTALL_WINDOWS_BRIDGE.cmd`를 더블클릭합니다. 압축을
-푼 위치가 어디든 런처가 자기 경로를 자동으로 인식하므로 `cd`나 폴더 경로
-입력이 필요 없습니다. 설치 완료 후 브리지가 별도 창에서 시작되고 Web GUI가
-열립니다. 오류가 발생하면 설치 창이 닫히지 않고 원인을 표시합니다.
+설치 후 Desktop/Start Menu 바로가기로 실행할 수 있습니다.
 
-PowerShell로 직접 설치해야 할 때만 아래 명령을 사용합니다.
+설치기는 다른 위치에 프로그램을 복사하지 않습니다. 패키지 폴더 안에 `.venv`를 구성하고 바로가기와 로그온 작업도 같은 폴더의 `scripts\start_supervisor.ps1`을 가리킵니다. 원격 updater는 현재 실행한 패키지 폴더에만 릴리스를 적용하고 같은 폴더에서 재시작합니다. 로그, 녹화, 프로그램과 아티팩트는 `%LOCALAPPDATA%\ATR\PyAutoGUIBridge`에 분리 저장합니다.
+
+일반 시작은 `scripts\start_supervisor.ps1`만 사용합니다. 시작 명령과 예약 작업에는 릴리스 번호를 넣지 않으며, supervisor가 현재 패키지 폴더의 Worker를 감시하고 비정상 종료 시 다시 실행합니다. 현재 버전과 원격 업데이트 파일 목록의 단일 원본은 `release_manifest.json`입니다. 설치 시 대화형 사용자 로그온 예약 작업이 기본 등록되며 Windows 서비스는 사용하지 않습니다.
+
+### 개발 실행
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_bridge.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_bridge.ps1 -OpenBrowser -ShowToken
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_bridge.ps1 -OpenBrowser
 ```
 
-- 프로그램: `%LOCALAPPDATA%\Programs\ATR\PyAutoGUIBridge`
-- 사용자 데이터: `%LOCALAPPDATA%\ATR\PyAutoGUIBridge`
-- Python: 패키지 전용 `.venv`와 `requirements-windows.txt`
-- 자동 시작: 설치 시 `-RegisterLogonTask`를 명시한 경우에만 대화형 사용자 로그온 작업으로 등록
-- 제거: `scripts\uninstall_bridge.ps1`; 데이터도 지우려면 `-RemoveData`
-- 클릭 시작: 바탕화면 `ATR Windows Bridge`
-- 클릭 제거: 바탕화면 `Uninstall ATR Windows Bridge`; 사용자 데이터는 기본 보존
+로컬 PC에서만 열려야 하는 개발 세션은 `-LocalOnly`를 사용합니다.
 
-Windows 서비스로 실행하면 대화형 데스크톱을 제어할 수 없으므로 지원하지
-않습니다. Linux/Xvfb 검증은 프로토콜 검증이며 실제 Windows 수락은
-`scripts\native_acceptance.ps1`로 별도 수행합니다.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_bridge.ps1 -LocalOnly -OpenBrowser
+```
 
-## 현재 구조
+기본 주소는 `http://127.0.0.1:8765/`입니다.
+
+## 4자리 페어링
+
+사용자가 장기 인증키를 입력하거나 복사하지 않습니다.
+
+- 코드는 숫자 4자리이며 5분 동안 유효합니다.
+- 최대 5회 입력할 수 있습니다.
+- 성공 즉시 폐기되고 재사용할 수 없습니다.
+- 5회 실패하면 30초 동안 잠깁니다.
+- 성공 후 양쪽은 내부 장기키를 보호된 설정 파일에 저장합니다.
+- 코드와 내부키는 URL, 브라우저 저장소, request audit에 기록하지 않습니다.
+- 이후 재시작은 저장된 내부키를 사용하므로 별도 질문 없이 연결됩니다.
+
+4자리 코드는 최초 연결 키 교환에만 사용합니다. 연결이 저장된 뒤에는 사용자가 코드를 다시 입력하지 않으며, 저장된 worker secret 또는 교환된 내부키로 자동 인증합니다. 녹화 시작·상태·미리보기·중지·저장·삭제는 pairing 상태와 무관하게 사용할 수 있지만, 녹화 package 반출과 원격 실행·업데이트는 저장된 연결 인증이 필요합니다.
+
+## Windows Console
+
+기본 화면은 네 영역으로 제한됩니다.
+
+### Bridge Status
+
+서버, PyAutoGUI, 데이터 경로, 페어링 상태를 표시합니다. `Health`, `Refresh`, `New Code`만 제공합니다.
+
+### Program Manager
+
+- `program1`: 삭제할 수 없는 기본 데모
+- Add: 빈 편집기에서 로컬 프로그램 작성
+- Browse JSON: 기존 프로그램 JSON 불러오기
+- Template: 프로그램 템플릿 다운로드
+- Validate: 실행 전 계약 검증
+- Save: 로컬 초안 저장
+- Test: 선택한 로컬 프로그램 실행
+- Delete: 삭제 가능한 로컬 초안 제거
+
+ATR이 배포한 프로그램은 읽기 전용 캐시이며 Windows에서 직접 수정하지 않습니다.
+
+### Recording
+
+`START RECORDING`을 누르면 5초 뒤 입력 녹화를 시작합니다. 녹화 중에는 최상위 오버레이에 경과 시간과 유일한 사용자 중단 조작인 `STOP` 버튼이 표시됩니다. Bounded Evidence 카드는 녹화 상태와 Checkpoint만 표시하고 별도 Stop 버튼을 만들지 않습니다. 오버레이 `STOP`은 즉시 UI를 닫고 백그라운드에서 `RecordingManager.stop()`을 한 번만 호출합니다. Console은 활성 녹화 중에만 `/recordings/status`를 확인하여 오버레이 종료 후 idle 상태와 목록을 자동 동기화합니다. STOP 클릭은 원시 시계열의 출처 증거로 보존하되 `recording_control=overlay_stop`으로 표시하며, Linux Skill 컴파일과 capability 집계에서는 장비 액션으로 취급하지 않습니다.
+
+- 키보드/마우스 입력은 monotonic timestamp로 기록됩니다.
+- 녹화 시작부터 종료까지 전체 화면을 고정 2 FPS로 즉시 디스크에 저장합니다.
+- 주기 프레임은 `frames/periodic/frame-XXXXXXXX.jpg`, 이벤트·경계 프레임은 PNG로 저장하고 `timeline.jsonl`에서 시간순으로 연결합니다.
+- RAM에는 행동 직전 증거를 찾기 위한 최근 프레임만 제한적으로 유지하며, 전체 세션 증거는 RAM 순환 버퍼가 아니라 디스크가 소유합니다.
+- 디스크 경고 임계값에서는 녹화를 유지하며 상태를 표시하고, 임계 임계값이나 쓰기 실패에서는 이미 기록한 증거를 보존한 불완전 패키지로 안전 종료합니다.
+- 오버레이 Stop과 Console의 Checkpoint, Preview, Export, Delete를 지원합니다. Preview는 저장된 프레임을 페이지 단위로 이전/다음 확인하며 Windows 절대경로를 브라우저에 노출하지 않습니다.
+
+Windows는 녹화 원본만 만듭니다. Linux ATR은 16개 프레임을 4x4 시간 스토리보드로 구성하고, 선택된 multimodal 모델로 모든 청크를 순서대로 분석한 뒤 전체 흐름을 합성합니다. LLM 어노테이션, Skill 컴파일·검증·버전·배포는 Linux ATR이 수행하며 정상 Skill 실행에는 LLM을 다시 호출하지 않습니다.
+
+### Latest Local Result
+
+최근 Health, 프로그램 검증/테스트, 녹화 결과와 오류 코드를 표시합니다. 원시 JSON과 request log는 접힌 `Diagnostics`에서 요청할 때만 읽습니다.
+
+## Saved Worker 원격 업데이트
+
+Linux `Lab Equipment Workspace > Connection & Profile > Saved Worker`에서 Worker별로 다음 작업을 수행할 수 있습니다.
+
+- `Check Update`: 현재 Worker 버전과 Linux package의 최신 버전을 비교합니다.
+- `Update`: bounded release manifest의 파일만 staging한 뒤 Worker를 재시작합니다.
+- `Rollback`: 가장 최근의 검증된 backup으로 복원하고 Worker를 재시작합니다.
+
+원격 업데이트 자체를 제공하지 않는 구버전 Worker는 최초 한 번 이 package로 수동 설치하거나 폴더를 교체해야 합니다. 그 이후 버전부터 Saved Worker에서 원격 업데이트할 수 있습니다.
+
+업데이트는 최초 연결 때 저장한 worker secret 또는 4자리 pairing으로 교환한 내부키를 자동 사용합니다. 별도 공개키 전자서명은 사용하지 않지만, 파일별 SHA-256과 package digest, 상대경로 allowlist, 크기 제한을 모두 검증합니다. 적용 대상은 canonical 설치 경로 하나이며 server, supervisor, updater, start/run launcher, installer, `requirements-windows.txt`를 함께 갱신합니다. 적용 중에는 `updates\update_in_progress.json` 잠금을 두어 supervisor가 교체 중인 Worker를 중복 실행하지 않으며, 기존 파일은 `updates\backups`에 보존합니다. 새 Worker의 경량 평문 `/ping`이 30초 안에 **manifest의 목표 릴리스 버전**을 반환하지 않으면 직전 backup을 복원합니다. updater 자체 복구가 실패해도 독립 supervisor가 잠금 해제 후 canonical Worker를 다시 실행합니다. 일반 Python 설치는 `requirements-windows.txt`가 직전 버전과 달라진 경우에만 같은 interpreter로 dependency를 동기화하고, frozen EXE 배포본은 빌드에 포함된 dependency를 사용합니다.
+
+다음 항목은 업데이트하지 않습니다.
+
+- pairing/internal key
+- recordings, programs, locators, artifacts, UTM export
+- 사용자별 data root와 runtime evidence
+
+녹화 세션이 활성 상태이면 Update와 Rollback은 차단됩니다. 먼저 녹화를 Stop/Save한 뒤 다시 실행하십시오.
+
+## 데이터 디렉터리
+
+표준 설치 기본값:
 
 ```text
-.
-├─ bridge/                  # 실제 Python bridge 서버
-├─ demo/                    # capability lab과 안전 예제
-├─ scripts/                 # 실행, 테스트, 빌드, 방화벽 helper
-├─ examples/                # Windows/Linux 환경변수 샘플
-├─ tests/                   # 로컬 smoke test
-├─ docs/                    # 자세한 사용법
-├─ artifacts/               # 실행 중 생성되는 로그/스크린샷/payload
-├─ reference_images/        # locate_image용 기준 이미지
-├─ run_bridge.ps1           # 루트 호환 wrapper
-├─ local_e2e_test.ps1       # 루트 호환 wrapper
-├─ requirements.txt
-├─ requirements-windows.txt # Windows 전용 고정 런타임
-└─ README.md
+%LOCALAPPDATA%\ATR\PyAutoGUIBridge
+  artifacts\     화면, 요청 로그, 실행 결과
+  locators\      이미지 locator
+  programs\      로컬 초안과 ATR 배포 캐시
+  recordings\    녹화 manifest, event, keyframe
+  utm_exports\   UTM Profile이 사용하는 결과 파일 영역
 ```
 
-## 빠른 확인
+Skill의 원본은 Linux `memory/equipment_skills/`입니다. Windows `programs\`는 로컬 초안 또는 검증된 배포 캐시입니다.
 
-PowerShell에서:
+## 운영 확인
+
+Windows에서:
 
 ```powershell
-cd "C:\ATR\Pyautogui_server_for_window"
-powershell -NoProfile -ExecutionPolicy Bypass -File .\local_e2e_test.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\check_bridge.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\test_bridge.ps1
 ```
 
-정상이면 다음 줄이 보입니다.
-
-```text
-GET / Web GUI
-Web GUI HTML served with Run Timeline / Live Proof Checklist
-```
-
-`PYAUTOGUI_NOT_INSTALLED`는 통신 실패가 아니라 PyAutoGUI 미설치 상태입니다.
-
-## 실행
-
-`run_bridge.ps1`는 artifact, locator, UTM export, program, recording을 단일
-사용자 데이터 루트에 연결하고 demo 자산 경로까지 서버에 전달합니다.
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\run_bridge.ps1
-```
-
-출력 예:
-
-```text
-Generated a saved bridge token.
-Windows PyAutoGUI bridge listening on 0.0.0.0:8765
-Web GUI: http://127.0.0.1:8765/
-```
-
-브라우저에서:
-
-```text
-http://127.0.0.1:8765/
-```
-
-### Linux ATR 자동 연결
-
-패키지에 Linux 호스트 IP를 고정하지 않습니다. ATR이 올바른 bridge token으로
-`/health` 또는 `/programs`를 호출하면 Windows bridge가 인증된 요청의 사설 IP에서
-`http://<peer-ip>:7860/api/equipment/skills`를 확인합니다. ATR 응답 형식이 검증되면
-`data\controller_connection.json`에 URL만 저장하고 다음 시작부터 재사용합니다.
-토큰, API key, cookie는 이 파일에 저장하지 않습니다.
-
-인증된 peer로 찾지 못하면 Web GUI의 `Discover ATR`이 현재 Windows 사설망의
-`/24`와 7860 포트만 제한적으로 탐색합니다. 한 대면 저장하고 여러 대면 사용자가
-선택합니다. `Controller URL`의 `Verify & Save`로 수동 검증할 수도 있습니다.
-관리형 배포에서만 다음 override를 사용하며, 설정 시 자동 후보보다 우선합니다.
-
-```powershell
-$env:WINDOWS_PYAUTOGUI_ATR_API_URL = "http://<linux-atr-host>:7860"
-```
-
-`Program Manager > RECORD`는 5초 카운트다운 후 녹화를 시작합니다. 녹화
-중에는 Windows 최상위에 빨간 점과 경과 시간이 있는 작은 배너가 표시되고,
-같은 `STOP RECORDING` 버튼을 누르면 녹화와 배너가 함께 종료됩니다.
-
-상태 확인:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\check_bridge.ps1
-```
-
-중지:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\stop_bridge.ps1
-```
-
-초기 연결 시 `-ShowToken`으로 한 번 확인한 토큰을 넣고 `Health`, `Programs`, `Run program1`을
-누르면 됩니다. Web GUI는 현장 운용용으로 다음 정보를 바로 보여줍니다.
-
-- Auth, GUI Driver, Program, Evidence, Artifact workflow 상태
-- Last Run Summary: program/run id, CSV artifact, 다음 gate
-- Step Trace와 Artifacts table: macro 진행 단계와 screenshot/CSV 회수 상태
-- Program Registry cards: allowlisted Windows macro/UTM protocol을 카드로 보여주고 `Load`/`Simulate`로 바로 검증
-- Live UTM situation matrix: Bridge, Locators, Request Audit, Export, Live Gate 상태를 한눈에 표시
-- Readiness locator shortcuts: missing/captured locator를 캡처 폼과 연결
-- UTM Simulation/Live UTM, locator capture, advanced JSON execute
-
-브라우저는 Token 칸 값을 로컬 저장소에 기억합니다. 토큰 없이 되는 것처럼
-보이면 저장된 값이 남아있는 경우이니 Web GUI의 `Clear Token`을 누르고 다시
-확인하세요.
-
-## 5번 개선안 smoke 검증 범위
-
-`tests/smoke_test.py`와 `local_e2e_test.ps1`은 Windows 서버 배포 폴더가 현재 Lab Equipment Agent 계약을 만족하는지 확인합니다. 최소 검증 범위는 다음입니다.
-
-- Web GUI가 `Run Timeline`, `Live Proof Checklist`, `Operator runtime status`, `Live UTM situation matrix`, `Readiness locator shortcuts`, `Program registry`를 렌더링합니다.
-- 토큰 없는 `/health`는 `PYAUTOGUI_AUTH_FAILED`로 막힙니다.
-- `/programs`에 `program1`과 UTM 프로토콜 4종이 표시됩니다.
-- `/readiness`, `/request-log`, `/artifacts`가 정상 응답합니다.
-- PyAutoGUI 미설치 환경에서는 실행 요청이 성공으로 위장되지 않고 `PYAUTOGUI_NOT_INSTALLED` 또는 allowlist 실패로 명확히 차단됩니다.
-
-## Windows 런타임 설치
-
-실제 마우스 제어까지 하려면:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_bridge.ps1
-```
-
-`py`가 없으면:
-
-```powershell
-python -m pip install pyautogui
-```
-
-## Linux에서 붙기
-
-```bash
-export WINDOWS_PYAUTOGUI_BRIDGE_URL="http://<windows-private-ip>:8765"
-export WINDOWS_PYAUTOGUI_BRIDGE_TOKEN="<saved-token>"
-
-curl -s -H "X-Bridge-Token: $WINDOWS_PYAUTOGUI_BRIDGE_TOKEN" \
-  "$WINDOWS_PYAUTOGUI_BRIDGE_URL/health"
-```
-
-자세한 사용법은 [docs/USAGE.md](docs/USAGE.md)를 보세요.
-
-
-## UTM 프로토콜 / 5번 개선안 대응
-
-이 배포 폴더의 Windows 서버는 Linux `LabEquipmentAgent`가 요구하는 UTM visual-control/data-loop API를 포함합니다.
-
-지원 endpoint:
-
-- `GET /health`: PyAutoGUI, 화면 크기, artifact/locator/export root readiness 확인
-- `GET /programs`: `program1`, `utm_compression_start_v1`, `utm_export_csv_v1`, `utm_manual_save_csv_v1`, `utm_stop_or_abort_v1` 목록
-- `POST /execute`: 등록 macro 또는 allowlisted sequence 실행
-- `POST /screenshot`: Windows 화면 evidence artifact 생성
-- `GET /locators`, `POST /locators/capture`: UTM 버튼/상태 이미지 locator calibration
-- `GET /artifacts`, `GET /artifacts/<artifact_id>`: CSV/screenshot artifact metadata 및 base64 회수
-- `GET /request-log`: 최근 100개 request audit event 조회
-- `GET /controller`, `POST /controller/discover`, `POST /controller/select`: ATR controller 검증·선택 상태
-
-감사 로그:
-
-- 모든 인증 대상 요청은 artifact root의 `bridge_requests.jsonl`에 append-only로 기록됩니다.
-- 로그에는 timestamp, client, method, path, token header 존재 여부, auth 성공/실패만 남깁니다.
-- Web GUI의 `Request Log` 버튼과 `Bridge Files` 패널에서 audit log 위치와 최근 요청을 바로 확인할 수 있습니다.
-- 토큰 값 자체는 기록하지 않습니다.
-- 기본 위치는 `C:\ATR\bridge_artifacts\bridge_requests.jsonl`입니다.
-
-실 UTM 실행 원칙:
-
-- `utm_compression_start_v1`은 UTM GUI를 클릭한 뒤 export folder에서 CSV가 생성되고 안정화될 때까지 감시합니다.
-- CSV에는 최소 `time_s`, `displacement_mm`, `force_N` 열이 있어야 합니다.
-- 실사용 live 성공은 synthetic CSV를 만들지 않습니다. 파일이 없거나 parse probe가 실패하면 `UTM_EXPORT_FILE_MISSING` 또는 `UTM_DATA_PARSE_FAILED`로 차단됩니다.
-- bench/demo 확인만 필요하면 요청 payload에 `simulate_utm_protocol: true`를 명시하거나 `WINDOWS_PYAUTOGUI_ALLOW_SIMULATED_UTM=1`을 설정합니다.
-
-주요 환경변수:
-
-```powershell
-$env:WINDOWS_PYAUTOGUI_UTM_EXPORT_DIR = "C:\ATR\utm_exports"
-$env:WINDOWS_PYAUTOGUI_UTM_EXPORT_GLOB = "*.csv"
-$env:WINDOWS_PYAUTOGUI_UTM_FILE_STABLE_SEC = "2.0"
-$env:WINDOWS_PYAUTOGUI_REQUIRE_UTM_SCREEN_ASSERTIONS = "0"
-$env:WINDOWS_PYAUTOGUI_ALLOW_SIMULATED_UTM = "0"
-```
-Manual save/export fallback:
-
-- If the first export-folder watch does not find a stable parseable CSV, `utm_compression_start_v1` now runs the `utm_manual_save_csv_v1` sequence automatically unless the request sets `manual_save_required_if_no_artifact: false`.
-- The fallback sends `Ctrl+S`, types `WINDOWS_PYAUTOGUI_UTM_EXPORT_DIR\<run_id>\<specimen_id>.csv`, presses Enter, then repeats the stable-file and parse-probe gate.
-- A fallback success is reported with `data_acquisition.save_method = manual_save_dialog`; a fallback failure remains blocked and is not converted to synthetic data.
-
-
-## Linux pull ledger contract
-
-After a real or explicitly simulated UTM run, the Windows server should expose the CSV through `output_artifacts` and `GET /artifacts/<artifact_id>`. The Linux autonomous researcher bridge pulls that artifact and writes a Linux-local CSV path into `data_acquisition.linux_path` and `data_acquisition.local_path` with `status=pulled_to_linux`.
-
-The Windows server only owns Windows-side execution, export watching, manual save fallback, and artifact serving. The Analysis stage must consume the Linux-local pulled CSV, not the Windows path.
-
-## Required screen assertions
-
-When `WINDOWS_PYAUTOGUI_REQUIRE_UTM_SCREEN_ASSERTIONS=1`, the packaged server now runs the registered locator sequence directly instead of requiring an external `screen_assertions_verified` flag. Valid locators allow the protocol to continue; missing locators block with `UI_LOCATOR_NOT_FOUND`.
-
-## Screen-state evidence artifacts
-
-The packaged server links `screen_png` artifacts to `screen_checks` for `before_start`, `after_start`, and `after_complete`. The running-state screenshot is captured when `wait_until running_state` succeeds, so the Linux Equipment report can show GUI state evidence instead of only a command-success string.
-
-## Failure evidence retention
-
-Blocked UTM runs now return `screen_checks` and `screen_png` artifacts as failure evidence. Sequence failures include `before_start` and `failure`; export failures also preserve any running/complete screenshots captured before the missing-data gate blocked the run.
-
-## Operator Web GUI update
-
-The packaged Windows server Web GUI is now an operator panel instead of a raw JSON-only test page.
-
-Main controls:
-
-- `Connection`: token entry, health check, and token clearing.
-- `Quick Actions`: program registry, program1 demo, screenshot, locator list, and artifact list.
-- `UTM Protocol`: run/specimen IDs, target window title or regex, required focus gate, screen-assertion option, manual-save fallback option, simulation run, and guarded live UTM run.
-- `Locator Capture`: capture `ready_state`, `start_button`, `running_state`, or `complete_state` regions from the Windows screen.
-- `Result`, `Step Trace`, and `Artifacts`: inspect the latest response, transition steps, screenshots, and CSV artifacts from the same browser page.
-- `Program Registry`: auto-loads `/programs` into operator cards. `Load` places the selected macro/protocol into the payload preview; `Simulate` runs the selected allowlisted path in non-live mode where supported.
-- `Focus Mode`: hides secondary diagnostics, locator capture, and raw Result JSON so the operator can keep the live command rail, timeline, proof checklist, evidence, and log visible during UTM operation.
-- Sticky sidebar and command rail: connection/UTM settings and the critical Preflight/Simulate/Live/Abort buttons stay reachable while reviewing evidence.
-
-`Run Live UTM` requires the `Live UTM setup is physically safe` checkbox. This is a UI-level operator confirmation only; the Linux Lab Equipment Agent and Guardian checks still own the autonomous workflow safety gates.
-
-## Target window focus
-
-`focus_window` now attempts to activate the actual UTM software window before clicking or locating images. The bridge checks request/program fields such as `target_window`, `target_window_regex`, `window_title`, `title`, and `target_app` and uses PyAutoGUI window APIs when available:
-
-```json
-{
-  "program_id": "utm_compression_start_v1",
-  "target_window": "Instron UTM Software",
-  "require_window_focus": true
-}
-```
-
-Regex selectors can be supplied with `target_window_regex` or `target_window: "regex:.*UTM.*"`. Generic placeholders such as `main` and `main_window_title_or_regex` are ignored as real titles. If `require_window_focus=true` or the action has `required=true`, a missing window blocks with `PYAUTOGUI_WINDOW_NOT_FOUND` instead of silently assuming focus.
-
-## 2026-05-30 GUI 개선 사항
-
-Windows 브릿지 Web GUI는 토큰이 없는 첫 접속에서 `/health`를 자동 호출하지 않고 `Enter bridge token` 상태로 대기합니다. PowerShell에 출력된 토큰을 넣은 뒤 `Health`를 눌러 인증 세션을 확인하세요.
-
-Connection 패널의 `Bridge Command Kit`에서 다음 명령을 바로 복사할 수 있습니다.
-
-- `Copy curl Health`: Linux 쪽에서 Windows bridge health를 확인하는 curl 명령
-- `Copy PowerShell Health`: Windows PowerShell에서 같은 health를 확인하는 명령
-- `Copy curl Execute`: 현재 Payload Preview 기준 `/execute` 명령
-
-상단 critical command rail은 1920x1080 현장 화면에서 버튼 폭이 좁아지지 않도록 조정했습니다. `Step Trace`는 상태별 색 배경으로 표시되어 blocked/warn/ok 단계를 빠르게 구분할 수 있습니다.
-
-`Recommended next action` 버튼은 현재 proof gate에서 가장 먼저 막힌 항목을 기준으로 다음 조작을 제안합니다. 토큰 미입력 시 토큰 칸으로 포커스하고, Health/Readiness/Evidence/Live UTM 단계에서는 해당 버튼을 바로 실행하거나 안전 체크박스로 이동합니다.
-
-## Strict proof handoff contract
-
-A Windows-side `verified_complete` response is only the first half of the Lab Equipment proof. The Linux bridge must still pull every referenced artifact through `GET /artifacts/<artifact_id>` and rewrite the response with Linux-local evidence paths. Current Linux versions mirror pulled records into both `output_artifacts[]` and `artifact_records[]` so the live validation runner, proof package verifier, Equipment report, and Analysis handoff resolve the same files.
-
-Physical UTM completion requires all of the following evidence before Analysis handoff:
-
-- request-log `/execute` identity matching `run_id`, `sequence_id`, `specimen_id`, and `program_id`;
-- three file-backed screen checkpoints: `before_start`, `after_start`, and `after_complete`;
-- explicit save/export responsibility using `windows_export_watch`, `manual_save_dialog`, or `export_menu`;
-- a Linux-local CSV pulled from the Windows artifact endpoint;
-- CSV signal quality with `time_s`, `displacement_mm`, and `force_N`, monotonic time, changing displacement, and nonzero changing force;
-- matching Vision proof for UTM pre-start, motion confirmation, and test-complete observations.
-
-Windows-only paths such as `C:\ATR\utm_exports\...` are provenance. They are not Analysis-ready paths by themselves.
-
-## Physical dispatch proof boundary
-
-Linux completion audit requires a physical live dispatch record. The Windows bridge may show healthy request logs, screenshots, and CSV artifacts, but the final proof package still needs `manifest.physical_execution.ok=true` from a guarded physical validation run. Non-actuating preflight, UTM simulation, and manually copied artifacts are intentionally blocked from completion.
-
-## Unique evidence requirement
-
-When Linux verifies a proof package, it expects three distinct screenshot files for before/start/complete states and a physical-validation source packet matching the manifest. The source packet and manifest must both carry matching `run_id`, `sequence_id`, `specimen_id`, and `program_id`. Screenshot refs must resolve to Linux-local files with a recognized image signature. Reusing one screenshot, editing only the manifest, omitting the original `last_windows_utm_physical_validation` source packet, or pointing to a non-image placeholder is not accepted as completion evidence.
-
-## 2026-05-30 UTM screenshot source-evidence gate
-
-`utm_compression_start_v1` now validates screenshot file signatures on the Windows bridge before returning `verified_complete`. A physical compression run needs distinct valid screen artifacts for `before_start`, `after_start`, and `after_complete`; placeholder `.png` files or metadata-only screenshot ids are rejected with `UTM_SCREEN_EVIDENCE_FILES_REQUIRED`.
-
-`utm_export_csv_v1` remains an export/save-only macro. It does not replace the physical compression-run proof package required by the Linux Completion Audit.
+`check_bridge.ps1`은 로컬 Health와 페어링 상태만 확인합니다. `test_bridge.ps1`은 페어링된 경우 `program1` 실행까지 확인합니다.
+
+Linux에서는 ATR Device Workspace에서 다음 순서로 확인합니다.
+
+1. Scan (코드 없이 후보 검색)
+2. Candidate 카드에 4자리 코드를 입력해 Pair & Save 또는 저장 장치 Select
+3. Health
+4. Programs
+5. Test selected bridge
+
+실험 루프는 Windows Console 버튼이 아니라 `LabEquipmentAgent -> EquipmentRuntimeService -> equipment.pyautogui.run` 경로를 사용합니다. `utm.run_protocol`로 자동 전환하지 않습니다.
+
+## 주요 API
+
+| 메서드 | 경로 | 역할 |
+|---|---|---|
+| GET | `/ping` | supervisor/updater 전용 경량 평문 생존 확인, 감사 로그 미기록 |
+| GET | `/discovery` | 인증 전 후보 검색용 최소 메타데이터 |
+| GET | `/health` | Bridge/PyAutoGUI/경로 상태 |
+| GET | `/pairing/status` | 로컬 페어링 상태 |
+| POST | `/pairing/new-code` | 로컬 새 4자리 코드 |
+| POST | `/pairing/complete` | Linux가 일회성 코드 교환 |
+| GET | `/programs` | 프로그램 목록 |
+| POST | `/programs/validate` | 프로그램 검증 |
+| POST | `/programs/register` | 로컬/배포 프로그램 등록 |
+| DELETE | `/programs/{id}` | 삭제 가능한 로컬 프로그램 제거 |
+| POST | `/execute` | 검증된 프로그램 실행 |
+| POST | `/screenshot` | 화면 증거 캡처 |
+| POST | `/locators/capture` | locator 기준 이미지 저장 |
+| GET/POST/DELETE | `/recordings/...` | 녹화 수명과 아티팩트 관리 |
+| GET | `/recordings/{id}/package` | 인증된 녹화 증거 package 전송 |
+| GET | `/artifacts` | 원시 아티팩트 목록 |
+| GET | `/request-log` | 요청 감사 로그 |
+| GET | `/update/status` | 현재/staging/rollback 가능 버전 상태 |
+| POST | `/update/stage` | allowlist와 SHA-256 검증 후 release staging |
+| POST | `/update/apply` | 별도 updater로 교체·재시작·Health 검증 |
+| POST | `/update/rollback` | 최근 backup 복원·재시작 |
+
+원격 실행·화면·아티팩트 경로는 페어링 이후 내부키 인증이 필요합니다.
+
+## 안전 경계
+
+- `pyautogui.FAILSAFE`를 유지합니다.
+- 실행 프로그램은 허용된 bounded action만 포함해야 합니다.
+- 비밀번호, API key, 페어링 코드, 내부키를 프로그램 payload에 넣지 않습니다.
+- Windows Bridge는 Guardian 판정, LLM 복구, 실험 단계 전환, Analysis handoff를 수행하지 않습니다.
+- 장비 물리 검증은 해당 Profile의 별도 승인 절차를 따릅니다.
+
+상세 절차는 [docs/USAGE.md](docs/USAGE.md)를 참고하십시오.

@@ -15477,9 +15477,21 @@ async function refreshEquipmentRuntimeSnapshot(options = {}) {
   if (!options.force && liveEquipmentRuntimeRefreshInFlight) return liveEquipmentRuntimeRefreshInFlight;
   liveEquipmentRuntimeRefreshInFlight = (async () => {
     try {
-      const payload = await fetchJsonOrThrow("/api/equipment/windows/config");
+      const activeRunId = liveCurrentRunId();
+      const runtimeUrl = activeRunId
+        ? `/api/equipment/runtime/current?run_id=${encodeURIComponent(activeRunId)}`
+        : "/api/equipment/runtime/current";
+      const [payload, runtime] = await Promise.all([
+        fetchJsonOrThrow("/api/equipment/windows/config"),
+        fetchJsonOrThrow(runtimeUrl),
+      ]);
       const lastTest = liveEquipmentRuntimeSnapshot && liveEquipmentRuntimeSnapshot.last_test;
-      liveEquipmentRuntimeSnapshot = lastTest ? { ...payload, last_test: lastTest } : payload;
+      liveEquipmentRuntimeSnapshot = {
+        ...payload,
+        canonicalExecution: runtime && runtime.execution ? runtime.execution : null,
+        canonicalProjection: runtime && runtime.projection ? runtime.projection : null,
+        ...(lastTest ? { last_test: lastTest } : {}),
+      };
       liveEquipmentRuntimeError = "";
       liveEquipmentRuntimeRefreshedAt = Date.now();
       return liveEquipmentRuntimeSnapshot;
@@ -15566,12 +15578,96 @@ function equipmentRuntimeContext(report) {
     skill,
     exception,
     snapshot,
+    canonicalExecution: snapshot.canonicalExecution || null,
+    canonicalProjection: snapshot.canonicalProjection || null,
     connection: snapshot.connection || {},
     readiness: snapshot.utm_readiness || {},
     evidenceAudit: snapshot.utm_evidence_audit || {},
     programs: Array.isArray(snapshot.programs) ? snapshot.programs : [],
     test: snapshot.last_test || {},
   };
+}
+
+function equipmentCanonicalProgressSteps(ctx) {
+  const projection = ctx.canonicalProjection || {};
+  const execution = ctx.canonicalExecution || {};
+  if (!projection.execution_id) return null;
+  const authoringState = String(execution?.metadata?.agentic_progress || "").toUpperCase();
+  const authoringStages = [
+    "RECORDING",
+    "TRANSFERRING",
+    "ANNOTATING",
+    "BUILDING_SKILL",
+    "VALIDATING",
+    "AWAITING_APPROVAL",
+    "DEPLOYING",
+    "READY",
+    "FAILED",
+  ];
+  if (authoringStages.includes(authoringState)) {
+    const currentIndex = authoringStages.indexOf(authoringState);
+    return authoringStages.map((stage, index) => ({
+      label: stage.replaceAll("_", " "),
+      status: stage === "FAILED" && authoringState === "FAILED"
+        ? "blocked"
+        : index < currentIndex || stage === "READY" && authoringState === "READY"
+          ? "complete"
+          : index === currentIndex
+            ? "active"
+            : "waiting",
+      detail: index === currentIndex ? `${projection.execution_id} · ${projection.status || authoringState}` : "",
+    }));
+  }
+  const lifecycle = String(projection.lifecycle || "RESOLVING").toUpperCase();
+  const events = Array.isArray(execution.events) ? execution.events : [];
+  const contract = execution.lifecycle_contract && typeof execution.lifecycle_contract === "object"
+    ? execution.lifecycle_contract
+    : {};
+  const reached = new Set(events.map((event) => String(event && event.lifecycle || "").toUpperCase()));
+  reached.add(lifecycle);
+  const lifecycleTargets = Array.isArray(contract[lifecycle]) ? contract[lifecycle].map((item) => String(item || "").toUpperCase()) : [];
+  const terminal = lifecycleTargets.length > 0 && lifecycleTargets.every((item) => item === lifecycle);
+  const failed = Boolean(projection.failure_code) || terminal && execution?.completion?.ok === false;
+  const statusFor = (stage) => {
+    if (stage === lifecycle) return failed ? "blocked" : terminal ? "complete" : "active";
+    if (reached.has(stage)) return "complete";
+    if (failed) return "blocked";
+    return "waiting";
+  };
+  const eventDetail = (stage, fallback) => {
+    const match = [...events].reverse().find((event) => String(event && event.lifecycle || "").toUpperCase() === stage);
+    return String(match && match.detail || fallback);
+  };
+  const roots = Object.keys(contract);
+  const firstObserved = String(events[0] && events[0].lifecycle || lifecycle).toUpperCase();
+  const root = roots.includes(firstObserved) ? firstObserved : roots[0] || lifecycle;
+  const ordered = [];
+  const queued = [root];
+  const seen = new Set();
+  while (queued.length) {
+    const stage = queued.shift();
+    if (!stage || seen.has(stage)) continue;
+    seen.add(stage);
+    ordered.push(stage);
+    const targets = Array.isArray(contract[stage]) ? contract[stage] : [];
+    targets
+      .map((item) => String(item || "").toUpperCase())
+      .filter((item) => item && item !== stage && !seen.has(item))
+      .forEach((item) => queued.push(item));
+  }
+  events.forEach((event) => {
+    const stage = String(event && event.lifecycle || "").toUpperCase();
+    if (stage && !seen.has(stage)) {
+      seen.add(stage);
+      ordered.push(stage);
+    }
+  });
+  if (!ordered.includes(lifecycle)) ordered.push(lifecycle);
+  return ordered.map((stage) => ({
+    label: stage.replaceAll("_", " ").toLowerCase().replace(/(^|\s)\S/g, (letter) => letter.toUpperCase()),
+    status: statusFor(stage),
+    detail: eventDetail(stage, stage === lifecycle ? `${projection.status || lifecycle.toLowerCase()} · ${projection.evidence_count || 0} evidence` : "pending"),
+  }));
 }
 
 function equipmentBridgeState(ctx) {
@@ -15610,6 +15706,8 @@ function equipmentEvidenceVerified(ctx) {
 }
 
 function equipmentProgressSteps(ctx) {
+  const canonical = equipmentCanonicalProgressSteps(ctx);
+  if (canonical) return canonical;
   const active = equipmentActiveProgram(ctx);
   const bridgeReady = /connected|ready|healthy|ok/i.test(equipmentBridgeState(ctx));
   const resolved = active.programId !== "-" || active.skillId !== "-";
