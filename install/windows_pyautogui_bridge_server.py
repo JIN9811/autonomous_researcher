@@ -5179,10 +5179,16 @@ def _execute_protocol_sequence_impl(
                     "message": "Clipboard access is unavailable; direct typing fallback is forbidden.",
                 }
             previous: str | None = None
+            pasted_value = ""
             try:
                 previous = str(clipboard.paste())
                 clipboard.copy(value)
                 pyautogui.hotkey("ctrl", "v")
+                time.sleep(0.05)
+                pyautogui.hotkey("ctrl", "a")
+                pyautogui.hotkey("ctrl", "c")
+                time.sleep(0.05)
+                pasted_value = str(clipboard.paste())
             except Exception as exc:
                 add(step_name, "blocked", exc.__class__.__name__)
                 return {
@@ -5196,7 +5202,14 @@ def _execute_protocol_sequence_impl(
                         clipboard.copy(previous)
                     except Exception:
                         pass
-            add(step_name, "ok", f"pasted runtime value: {key}")
+            if pasted_value != value:
+                add(step_name, "blocked", f"focused field round-trip mismatch: {key}")
+                return {
+                    "ok": False,
+                    "failure_code": "UTM_RAW_CSV_FIELD_VERIFY_FAILED",
+                    "message": f"Raw CSV {key} was not verified in the focused input field.",
+                }
+            add(step_name, "ok", f"pasted and verified runtime value: {key}")
             continue
         if action_name == "pixel":
             x, y = int(action["x"]), int(action["y"])

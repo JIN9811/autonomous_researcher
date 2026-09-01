@@ -423,8 +423,47 @@ def test_paste_runtime_value_preserves_clipboard_and_never_types(
     )
 
     assert result["ok"] is True
-    assert fake.hotkeys == [("ctrl", "v")]
+    assert fake.hotkeys == [("ctrl", "v"), ("ctrl", "a"), ("ctrl", "c")]
     assert fake.writes == []
+    assert clipboard.value == "operator value"
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_paste_runtime_value_blocks_when_focused_field_round_trip_differs(
+    loader: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = loader()
+    clipboard = _FakeClipboard("operator value")
+
+    class _CorruptingFieldPyAutoGUI(_FakePyAutoGUI):
+        def hotkey(self, *keys: str, interval: float = 0.0) -> None:
+            super().hotkey(*keys, interval=interval)
+            if keys == ("ctrl", "v"):
+                clipboard.value = "wrong-field-value"
+            elif keys == ("ctrl", "c"):
+                clipboard.value = "wrong-field-value"
+
+    fake = _CorruptingFieldPyAutoGUI()
+    monkeypatch.setattr(module, "_load_pyperclip", lambda: clipboard, raising=False)
+    expected = r"C:\worker\artifacts\raw_csv\test_s_x_loop-0001_rep-0001.csv"
+
+    result = module._execute_protocol_sequence(
+        fake,
+        program_id="utm_save_raw_data_1_0_9_segment_001",
+        payload={
+            "runtime_values": {"raw_csv_path": expected},
+            "sequence": [{"action": "paste_runtime_value", "key": "raw_csv_path"}],
+        },
+        run_id="run",
+        specimen_id="specimen",
+        trace=[],
+        screen_artifacts=[],
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "UTM_RAW_CSV_FIELD_VERIFY_FAILED"
+    assert fake.hotkeys == [("ctrl", "v"), ("ctrl", "a"), ("ctrl", "c")]
     assert clipboard.value == "operator value"
 
 
