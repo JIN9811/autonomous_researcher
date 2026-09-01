@@ -3319,7 +3319,7 @@ class LabEquipmentAgent(BaseAgent):
             if skill_id == "utm_validate_raw_data":
                 raw_csv_path = str(request.get("raw_csv_path") or "").strip()
                 if raw_csv_path:
-                    payload["raw_csv_path"] = raw_csv_path
+                    payload["runtime_values"] = {"raw_csv_path": raw_csv_path}
             result = await self._call_tool(ctx, "equipment.pyautogui.run", payload)
             tool_results.append({"tool": "equipment.pyautogui.run", "payload": payload, "result": result})
             if not result.get("ok"):

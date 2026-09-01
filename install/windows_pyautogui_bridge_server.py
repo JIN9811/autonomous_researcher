@@ -5933,6 +5933,10 @@ def _run_utm_protocol_impl(sequence_id: str, program_id: str, payload: dict[str,
         and action.get("target") == "save_raw_data_csv"
         for action in program_sequence
     )
+    runtime_values = payload.get("runtime_values") if isinstance(payload.get("runtime_values"), dict) else {}
+    validated_raw_csv_path = str(runtime_values.get("raw_csv_path") or "").strip()
+    if validated_raw_csv_path and not raw_csv_save_attempted:
+        payload = {**payload, "expected_export_path": validated_raw_csv_path}
     save_method = "raw_csv_button" if raw_csv_save_attempted else "windows_export_watch"
     export_path, probe = _resolve_utm_export(payload, run_id=run_id, specimen_id=specimen_id, trace=trace)
     if export_path is None or not probe.get("ok"):
