@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="/static/equipment_agent_manager.css" />
+</head>
+<body>
+  <main class="equipment-manager-shell">
+    <header class="equipment-manager-header">
+      <div>
+        <span class="equipment-manager-eyebrow">LAB EQUIPMENT · PROFILE CONTRACT</span>
+        <h1>Agent Manager</h1>
+        <p>Compose exact deployed Skills with bounded supervision and optional Vision verification.</p>
+      </div>
+      <div class="equipment-manager-header-actions">
+        <label>Equipment Profile<select id="equipment-manager-profile"></select></label>
+        <button id="equipment-manager-add-skill" class="manager-btn" type="button">+ Block</button>
+        <button id="equipment-manager-save" class="manager-btn primary" type="button">Save Flow</button>
+        <button id="equipment-manager-close" class="manager-btn" type="button">Close</button>
+      </div>
+    </header>
+
+    <section class="equipment-manager-status-strip">
+      <span id="equipment-manager-readiness" class="manager-badge">loading</span>
+      <strong id="equipment-manager-status">Loading the selected Profile flow.</strong>
+      <small id="equipment-manager-version">v-</small>
+    </section>
+
+    <section id="equipment-manager-agentic-task" class="equipment-manager-agentic-task">
+      <div>
+        <span class="equipment-manager-eyebrow">WORKFLOW-LEVEL AGENTIC TASK</span>
+        <h2 id="equipment-manager-agentic-task-name">No workflow task selected</h2>
+        <p id="equipment-manager-agentic-task-description">Load the recorded UTM cycle as an unsaved draft, then bind exact deployed Skills inside each block.</p>
+      </div>
+      <div class="equipment-manager-entry-gate" aria-label="required equipment entry gate">
+        <span>LOCKED</span>
+        <strong>Verified specimen / UTM handoff</strong>
+        <small>Required before equipment input. This gate has no ON/OFF option.</small>
+      </div>
+      <button id="equipment-manager-load-utm-cycle" class="manager-btn" type="button">Load UTM Compression Cycle</button>
+    </section>
+
+    <section id="equipment-manager-blocks" class="equipment-manager-block-list" aria-live="polite">
+      <article class="equipment-manager-block is-placeholder">
+        <div class="equipment-manager-block-main">
+          <section class="equipment-manager-skill-slot">Skill Slot</section>
+          <section class="equipment-manager-agentic-slot">Agentic Task</section>
+        </div>
+        <section class="equipment-manager-vision-slot">Vision Slot</section>
+      </article>
+    </section>
+  </main>
+  <script src="/static/equipment_skill_flow_model.js"></script>
+  <script src="/static/equipment_agent_manager.js"></script>
+</body>
+</html>

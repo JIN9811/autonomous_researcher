@@ -131,6 +131,8 @@ const trainWandbInput = $("lerobot-train-wandb-input");
 const trainWandbProjectInput = $("lerobot-train-wandb-project-input");
 const trainWandbModeInput = $("lerobot-train-wandb-mode-input");
 const trainWandbBaseUrlInput = $("lerobot-train-wandb-base-url-input");
+const trainWandbApiKeyInput = $("lerobot-train-wandb-api-key-input");
+const wandbApiKeyStatusEl = $("lerobot-wandb-api-key-status");
 const trainProgressEl = $("lerobot-train-progress");
 const trainProgressLabelEl = $("lerobot-train-progress-label");
 const trainProgressBarEl = $("lerobot-train-progress-bar");
@@ -217,6 +219,22 @@ const browserEl = $("lerobot-browser");
 const policyListEl = $("lerobot-policy-list");
 const visualizationEl = $("lerobot-visualization");
 const datasetHealthEl = $("lerobot-dataset-health");
+const datasetManageRootInput = $("dataset-manage-root");
+const datasetManageNamespaceInput = $("dataset-manage-namespace");
+const datasetManageDatePrefixInput = $("dataset-manage-date-prefix");
+const datasetManageOutputRepoInput = $("dataset-manage-output-repo");
+const datasetManageOverwriteInput = $("dataset-manage-overwrite");
+const datasetManageMergeSourceAInput = $("dataset-manage-merge-source-a");
+const datasetManageMergeSourceBInput = $("dataset-manage-merge-source-b");
+const datasetManageMergeRangeAInput = $("dataset-manage-merge-range-a");
+const datasetManageMergeRangeBInput = $("dataset-manage-merge-range-b");
+const datasetManageSplitSourceInput = $("dataset-manage-split-source");
+const datasetManageSplitSpecInput = $("dataset-manage-split-spec");
+const datasetManageDeleteSourceInput = $("dataset-manage-delete-source");
+const datasetManageDeleteRangeInput = $("dataset-manage-delete-range");
+const datasetManageDeleteOutputRepoInput = $("dataset-manage-delete-output-repo");
+const datasetManageListEl = $("dataset-manage-list");
+const datasetManageStatusEl = $("dataset-manage-status");
 const isaacAugmentationEl = $("lerobot-isaac-augmentation");
 const isaacAugmentationPreviewEl = $("lerobot-isaac-augmentation-preview");
 const isaacSyntheticOutputEl = $("isaac-synthetic-output");
@@ -1620,6 +1638,51 @@ function wandbLocalPayload(overrides = {}) {
   return payload;
 }
 
+function renderWandbLocalApiKeyStatus(data = {}) {
+  if (!wandbApiKeyStatusEl) return;
+  if (data.ok === false) {
+    wandbApiKeyStatusEl.textContent = `W&B local API key status failed: ${data.message || data.error || "unknown error"}`;
+    return;
+  }
+  wandbApiKeyStatusEl.textContent = data.has_key
+    ? `W&B local API key saved · source=${data.source || "memory"}`
+    : "W&B local API key is not saved.";
+}
+
+async function refreshWandbLocalApiKeyStatus() {
+  try {
+    const res = await fetch("/api/lerobot/wandb-local/api-key");
+    const data = await res.json();
+    renderWandbLocalApiKeyStatus(data);
+  } catch (err) {
+    renderWandbLocalApiKeyStatus({ ok: false, error: String(err) });
+  }
+}
+
+async function saveWandbLocalApiKey(statusTarget = null) {
+  const apiKey = trainWandbApiKeyInput ? trainWandbApiKeyInput.value.trim() : "";
+  if (!apiKey) {
+    renderWandbLocalApiKeyStatus({ ok: false, message: "enter an API key before saving" });
+    return;
+  }
+  renderWandbLocalApiKeyStatus({ ok: true, has_key: false, source: "saving" });
+  try {
+    const data = await postJson("/api/lerobot/wandb-local/api-key", { api_key: apiKey, enabled: true });
+    if (data.ok === false) {
+      renderWandbLocalApiKeyStatus(data);
+      if (statusTarget) setActionStatus(statusTarget, "error", "wandb local api key save", data);
+      return;
+    }
+    if (trainWandbApiKeyInput) trainWandbApiKeyInput.value = "";
+    renderWandbLocalApiKeyStatus(data);
+    if (statusTarget) setActionStatus(statusTarget, "ok", "wandb local api key save", data);
+  } catch (err) {
+    const data = { ok: false, error: String(err) };
+    renderWandbLocalApiKeyStatus(data);
+    if (statusTarget) setActionStatus(statusTarget, "error", "wandb local api key save", data);
+  }
+}
+
 function visualizationPayload(overrides = {}) {
   const payload = basePayload(overrides);
   const explicitPath = visualizationPathInput && visualizationPathInput.value.trim() ? visualizationPathInput.value.trim() : "";
@@ -1965,7 +2028,21 @@ function applyDefaultPaths(data) {
   const paths = data.paths || {};
   lastConfigPaths = paths;
   if (datasetRootInput && !datasetRootInput.value) datasetRootInput.value = paths.dataset_root || "";
+  syncDatasetManageRootFromLocalPaths();
   if (visualizationOutputDirInput && !visualizationOutputDirInput.value) visualizationOutputDirInput.value = paths.output_root ? `${paths.output_root}/visualize_dataset` : "";
+}
+
+function syncDatasetManageRootFromLocalPaths(force = false) {
+  if (!datasetManageRootInput) return;
+  const current = String(datasetManageRootInput.value || "").trim();
+  const localRoot = datasetRootInput && datasetRootInput.value.trim()
+    ? datasetRootInput.value.trim()
+    : String((lastConfigPaths && lastConfigPaths.dataset_root) || "").trim();
+  if (!localRoot) return;
+  const builtInDefaults = new Set(["", "/home/jin/.cache/huggingface/lerobot", "~/.cache/huggingface/lerobot"]);
+  if (force || (!datasetManageRootInput.dataset.userEdited && builtInDefaults.has(current))) {
+    datasetManageRootInput.value = localRoot;
+  }
 }
 
 function escapeHtml(value) {
@@ -4971,6 +5048,155 @@ async function previewDataset(statusTarget = null) {
   }
 }
 
+function datasetManageCommonPayload(overrides = {}) {
+  syncDatasetManageRootFromLocalPaths();
+  return {
+    mode: modeSelect ? modeSelect.value : "test",
+    runtime_mode: modeSelect ? modeSelect.value : "test",
+    profile_id: profileSelect ? profileSelect.value : "",
+    dataset_root: datasetManageRootInput && datasetManageRootInput.value.trim()
+      ? datasetManageRootInput.value.trim()
+      : (datasetRootInput ? datasetRootInput.value.trim() : ""),
+    namespace: datasetManageNamespaceInput ? datasetManageNamespaceInput.value.trim() || "jin" : "jin",
+    date_prefix: datasetManageDatePrefixInput ? datasetManageDatePrefixInput.value.trim() : "",
+    overwrite: boolValue(datasetManageOverwriteInput),
+    ...overrides,
+  };
+}
+
+function datasetManageSelectedRepo(selectEl) {
+  return selectEl ? String(selectEl.value || "").trim() : "";
+}
+
+function datasetManageSource(selectEl, rangeEl = null) {
+  return {
+    dataset_repo_id: datasetManageSelectedRepo(selectEl),
+    episode_range: rangeEl && rangeEl.value.trim() ? rangeEl.value.trim() : "all",
+  };
+}
+
+function datasetManageMergePayload() {
+  return datasetManageCommonPayload({
+    sources: [
+      datasetManageSource(datasetManageMergeSourceAInput, datasetManageMergeRangeAInput),
+      datasetManageSource(datasetManageMergeSourceBInput, datasetManageMergeRangeBInput),
+    ],
+    output_repo_id: datasetManageOutputRepoInput ? datasetManageOutputRepoInput.value.trim() : "",
+  });
+}
+
+function datasetManageSplitPayload() {
+  const raw = datasetManageSplitSpecInput ? String(datasetManageSplitSpecInput.value || "") : "";
+  const splits = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => {
+      const match = line.match(/^([^=]+)=(.+)$/);
+      if (!match) return { name: `split_${index}`, episode_range: line };
+      return { name: match[1].trim(), episode_range: match[2].trim() };
+    });
+  return datasetManageCommonPayload({
+    source: datasetManageSource(datasetManageSplitSourceInput),
+    splits,
+  });
+}
+
+function datasetManageDeletePayload() {
+  return datasetManageCommonPayload({
+    source: datasetManageSource(datasetManageDeleteSourceInput),
+    delete_episode_range: datasetManageDeleteRangeInput ? datasetManageDeleteRangeInput.value.trim() : "",
+    output_repo_id: datasetManageDeleteOutputRepoInput ? datasetManageDeleteOutputRepoInput.value.trim() : "",
+  });
+}
+
+function datasetManagePopulateSelect(selectEl, datasets, preferred = "") {
+  if (!selectEl) return;
+  const current = preferred || selectEl.value;
+  selectEl.innerHTML = "";
+  datasets.forEach((dataset) => {
+    const option = document.createElement("option");
+    option.value = dataset.repo_id || "";
+    option.textContent = `${dataset.repo_id || ""} (${dataset.total_episodes || 0} ep / ${dataset.total_frames || 0} frames)`;
+    selectEl.appendChild(option);
+  });
+  if (current && Array.from(selectEl.options).some((option) => option.value === current)) {
+    selectEl.value = current;
+  }
+}
+
+function datasetManageRenderList(data) {
+  const datasets = Array.isArray(data && data.datasets) ? data.datasets : [];
+  const suggested = data && data.suggested_repo_id ? String(data.suggested_repo_id) : "";
+  const previousMergeA = datasetManageMergeSourceAInput ? datasetManageMergeSourceAInput.value : "";
+  const previousMergeB = datasetManageMergeSourceBInput ? datasetManageMergeSourceBInput.value : "";
+  if (datasetManageOutputRepoInput && suggested && !datasetManageOutputRepoInput.value.trim()) {
+    datasetManageOutputRepoInput.value = suggested;
+  }
+  datasetManagePopulateSelect(datasetManageMergeSourceAInput, datasets, previousMergeA);
+  datasetManagePopulateSelect(datasetManageMergeSourceBInput, datasets, previousMergeB || (datasets.length >= 2 ? datasets[datasets.length - 1].repo_id : ""));
+  datasetManagePopulateSelect(datasetManageSplitSourceInput, datasets, datasetManageSplitSourceInput ? datasetManageSplitSourceInput.value : "");
+  datasetManagePopulateSelect(datasetManageDeleteSourceInput, datasets, datasetManageDeleteSourceInput ? datasetManageDeleteSourceInput.value : "");
+  if (datasetManageMergeSourceAInput && datasets.length >= 1 && !datasetManageMergeSourceAInput.value) datasetManageMergeSourceAInput.value = datasets[0].repo_id || "";
+  if (datasetManageMergeSourceBInput && datasets.length >= 2 && (!datasetManageMergeSourceBInput.value || datasetManageMergeSourceBInput.value === datasetManageMergeSourceAInput.value)) {
+    datasetManageMergeSourceBInput.value = datasets[datasets.length - 1].repo_id || "";
+  }
+  if (!datasetManageListEl) return;
+  if (!datasets.length) {
+    datasetManageListEl.innerHTML = `<div class="lerobot-report-empty">No local datasets found.</div>`;
+    return;
+  }
+  const rows = datasets.map((dataset) => `
+    <tr>
+      <td><code>${escapeHtml(dataset.repo_id || "")}</code></td>
+      <td>${escapeHtml(dataset.total_episodes ?? 0)}</td>
+      <td>${escapeHtml(dataset.total_frames ?? 0)}</td>
+      <td>${escapeHtml(dataset.codebase_version || "")}</td>
+      <td>${escapeHtml((dataset.sidecars || []).join(", "))}</td>
+    </tr>
+  `).join("");
+  datasetManageListEl.innerHTML = `
+    <div class="lerobot-card-note">next=${escapeHtml(suggested || "-")} · root=${escapeHtml((data && data.dataset_root) || "")}</div>
+    <div class="table-scroll"><table>
+      <thead><tr><th>repo</th><th>episodes</th><th>frames</th><th>version</th><th>sidecars</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+  `;
+}
+
+async function refreshDatasetManageList(statusTarget = null) {
+  setActionStatus(statusTarget || datasetManageStatusEl, "running", "dataset list", { status: "request sent" });
+  try {
+    const data = await postJson("/api/lerobot/dataset-manage/list", datasetManageCommonPayload(), 60000);
+    datasetManageRenderList(data);
+    renderResult("dataset manage list", data);
+    setActionStatus(statusTarget || datasetManageStatusEl, data && data.ok ? "ok" : "error", "dataset list", data);
+    return data;
+  } catch (err) {
+    const error = { ok: false, status: "request_failed", error: String(err) };
+    datasetManageRenderList(error);
+    renderResult("dataset manage list", error);
+    setActionStatus(statusTarget || datasetManageStatusEl, "error", "dataset list", error);
+    return error;
+  }
+}
+
+async function runDatasetManageAction(label, url, payload, statusTarget = null) {
+  setActionStatus(statusTarget || datasetManageStatusEl, "running", label, { status: "request sent" });
+  try {
+    const data = await postJson(url, payload, 300000);
+    renderResult(label, data);
+    setActionStatus(statusTarget || datasetManageStatusEl, data && data.ok ? "ok" : "error", label, data);
+    await refreshDatasetManageList(datasetManageStatusEl);
+    return data;
+  } catch (err) {
+    const error = { ok: false, status: "request_failed", error: String(err) };
+    renderResult(label, error);
+    setActionStatus(statusTarget || datasetManageStatusEl, "error", label, error);
+    return error;
+  }
+}
+
 function bind(id, handler) {
   const el = $(id);
   if (el) el.addEventListener("click", handler);
@@ -5106,6 +5332,7 @@ bind("btn-isaac-mirror-loop-stop", async (event) => {
 });
 
 bind("btn-browse-dataset-root", () => browsePath("dataset", datasetRootInput ? datasetRootInput.value : "", datasetRootInput));
+bind("btn-browse-dataset-manage-root", () => browsePath("dataset", datasetManageRootInput ? datasetManageRootInput.value : "", datasetManageRootInput));
 bind("btn-browse-dataset-repo", () => browsePath("dataset", datasetBrowseStartPath(), datasetInput, { include_files: false, valueTransform: datasetRepoValueFromPath }));
 bind("btn-browse-output-dir", () => browsePath("output", outputDirInput ? outputDirInput.value : "", outputDirInput));
 bind("btn-browse-policy", () => browsePath("policy", policyInput ? policyInput.value : "", policyInput, { select: "file", include_files: true }));
@@ -5189,6 +5416,7 @@ bind("btn-wandb-local-start", (event) => {
 });
 bind("btn-wandb-local-stop", (event) => runAction("wandb local stop", "/api/lerobot/wandb-local/stop", wandbLocalPayload(), actionStatusFromEvent(event), 120000));
 bind("btn-wandb-local-status", (event) => runAction("wandb local status", "/api/lerobot/wandb-local/status", wandbLocalPayload(), actionStatusFromEvent(event)));
+bind("btn-wandb-local-api-key-save", (event) => saveWandbLocalApiKey(actionStatusFromEvent(event)));
 bind("btn-wandb-local-open", (event) => {
   const statusTarget = actionStatusFromEvent(event);
   const url = trainWandbBaseUrlInput && trainWandbBaseUrlInput.value.trim() ? trainWandbBaseUrlInput.value.trim() : "http://127.0.0.1:8081";
@@ -5321,6 +5549,16 @@ bind("btn-dataset-visualize-stop", async (event) => {
   renderVisualizationSession(data);
 });
 bind("btn-dataset-preview", (event) => previewDataset(actionStatusFromEvent(event)));
+bind("btn-dataset-manage-refresh", (event) => refreshDatasetManageList(actionStatusFromEvent(event)));
+bind("btn-dataset-manage-merge", (event) => {
+  return runDatasetManageAction("dataset merge", "/api/lerobot/dataset-manage/merge", datasetManageMergePayload(), actionStatusFromEvent(event));
+});
+bind("btn-dataset-manage-split", (event) => {
+  return runDatasetManageAction("dataset split", "/api/lerobot/dataset-manage/split", datasetManageSplitPayload(), actionStatusFromEvent(event));
+});
+bind("btn-dataset-manage-delete", (event) => {
+  return runDatasetManageAction("dataset delete compact", "/api/lerobot/dataset-manage/delete", datasetManageDeletePayload(), actionStatusFromEvent(event));
+});
 
 if (profileSelect) profileSelect.addEventListener("change", refreshConfig);
 if (policyTypeInput) policyTypeInput.addEventListener("change", () => {
@@ -5335,6 +5573,11 @@ if (datasetInput) {
   });
   datasetInput.addEventListener("change", () => syncTrainNamingFromDataset());
 }
+if (datasetRootInput) {
+  datasetRootInput.addEventListener("input", () => syncDatasetManageRootFromLocalPaths());
+  datasetRootInput.addEventListener("change", () => syncDatasetManageRootFromLocalPaths());
+}
+if (datasetManageRootInput) datasetManageRootInput.addEventListener("input", () => markUserEdited(datasetManageRootInput));
 if (outputDirInput) {
   outputDirInput.addEventListener("input", () => {
     markUserEdited(outputDirInput);
@@ -5408,4 +5651,6 @@ applyPolicyTypeDefaults();
 syncRolloutPolicyOptions();
 syncManipulationPolicyOptions();
 refreshConfig();
+refreshDatasetManageList(datasetManageStatusEl);
+refreshWandbLocalApiKeyStatus();
 restoreIsaacDomainMimicPipelineStatus();

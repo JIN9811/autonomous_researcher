@@ -43,6 +43,16 @@ from utils.equipment_skill_runtime import (
     validate_recovery_decision,
 )
 from utils.equipment_runtime_service import EquipmentRuntimeService
+from utils.equipment_skill_flow import EquipmentSkillFlowError, EquipmentSkillFlowStore
+from utils.equipment_agentic_task import (
+    TASK_SCHEMA as EQUIPMENT_AGENTIC_TASK_SCHEMA,
+    UTM_COMPRESSION_BLOCKS,
+    UTM_COMPRESSION_TASK_ID,
+    evaluate_equipment_entry_gate,
+    project_equipment_cycle_evidence,
+    validate_equipment_agentic_flow,
+)
+from utils.equipment_vision_tasks import build_equipment_vision_check, get_equipment_vision_task
 
 
 class LabEquipmentAgent(BaseAgent):
@@ -56,6 +66,8 @@ class LabEquipmentAgent(BaseAgent):
     }
     _UTM_DEFAULT_PROGRAM = "utm_compression_start_v1"
     _RUNTIME_ROOT = Path(__file__).resolve().parents[1] / "memory" / "equipment_runtime"
+    _SKILL_FLOW_PATH = Path(__file__).resolve().parents[1] / "graphs" / "modules" / "equipment" / "equipment_skill_flows.json"
+    _WORKSPACE_SETTINGS_PATH = Path(__file__).resolve().parents[1] / "memory" / "equipment_workspace_settings.json"
 
     @classmethod
     def _runtime_service(cls) -> EquipmentRuntimeService:
@@ -348,6 +360,7 @@ class LabEquipmentAgent(BaseAgent):
                 "specimen": state.run_metadata.get("specimen_result", {}),
                 "vision": dict(state.latest_observations or {}),
                 "manipulation": state.run_metadata.get("manipulation_result", {}),
+                "robot_task": state.run_metadata.get("robot_task_result", {}),
                 "analysis": dict(state.latest_analysis or {}),
             },
         }
@@ -997,6 +1010,80 @@ class LabEquipmentAgent(BaseAgent):
                 "timeout_s": 10,
             },
         ]
+
+    def _equipment_vision_request(
+        self,
+        *,
+        task_id: str,
+        state: OrchestratorState,
+        source_stage_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Build the one Vision check selected by a Profile-bound Skill Flow slot."""
+        specimen = (
+            source_stage_context.get("specimen")
+            if isinstance(source_stage_context.get("specimen"), dict)
+            else {}
+        )
+        specimen_id = str(
+            specimen.get("specimen_id")
+            or state.current_experiment_spec.get("specimen_id")
+            or ""
+        )
+        return build_equipment_vision_check(
+            task_id,
+            run_id=str(state.run_id or ""),
+            loop_id=int(state.loop_count or 0),
+            specimen_id=specimen_id,
+        )
+
+    @staticmethod
+    def _equipment_vision_outcome(response: dict[str, Any]) -> str:
+        """Map one bounded Vision result to the Skill Flow outcome contract."""
+        results = response.get("results") if isinstance(response.get("results"), list) else []
+        if (
+            bool(response.get("ok"))
+            and len(results) == 1
+            and isinstance(results[0], dict)
+            and bool(results[0].get("ok"))
+        ):
+            return "detected"
+
+        failure_code = str(response.get("failure_code") or "").upper()
+        if "TIMEOUT" in failure_code:
+            return "timeout"
+        if failure_code in {
+            "UTM_MOTION_NOT_CONFIRMED",
+            "UTM_TEST_COMPLETE_EVIDENCE_REQUIRED",
+            "VISION_EQUIPMENT_CROSS_CHECK_REQUIRED",
+        }:
+            return "not_detected"
+        if (
+            not failure_code
+            and len(results) == 1
+            and isinstance(results[0], dict)
+            and results[0].get("ok") is False
+        ):
+            return "not_detected"
+        return "error"
+
+    @classmethod
+    def _equipment_vision_response_valid(
+        cls,
+        response: dict[str, Any],
+        request: dict[str, Any],
+    ) -> bool:
+        """Reject malformed, mismatched, or expired evidence for a selected task."""
+        results = response.get("results") if isinstance(response.get("results"), list) else []
+        if len(results) != 1 or not isinstance(results[0], dict):
+            return False
+        result = results[0]
+        for key in ("task_id", "check_id", "run_id", "specimen_id"):
+            expected = str(request.get(key) or "")
+            observed = str(result.get(key) or "")
+            if expected and observed != expected:
+                return False
+        expires_at = cls._parse_vision_time(result.get("expires_at"))
+        return expires_at is not None and datetime.now(timezone.utc) <= expires_at
 
     @staticmethod
     def _parse_vision_time(value: Any) -> datetime | None:
@@ -2301,6 +2388,649 @@ class LabEquipmentAgent(BaseAgent):
         version = str(value.get("version") or "").strip()
         return dict(value) if skill_id and version else {}
 
+    @classmethod
+    def _equipment_skill_flow(cls, state: OrchestratorState) -> dict[str, Any]:
+        """Resolve one non-empty Profile flow without weakening the legacy path."""
+        spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        profile_id = str(spec.get("equipment_profile_id") or "").strip()
+        if not profile_id:
+            return {}
+        flow = EquipmentSkillFlowStore(cls._SKILL_FLOW_PATH).get(profile_id)
+        return flow if flow.get("enabled") and flow.get("blocks") else {}
+
+    @classmethod
+    def _flow_vision_enabled(cls, profile_id: str) -> bool:
+        try:
+            payload = json.loads(cls._WORKSPACE_SETTINGS_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            payload = {}
+        profiles = payload.get("profiles") if isinstance(payload.get("profiles"), dict) else {}
+        selected = profiles.get(profile_id) if isinstance(profiles.get(profile_id), dict) else {}
+        if "vision_link_enabled" in selected:
+            return bool(selected.get("vision_link_enabled"))
+        try:
+            profile = EquipmentProfileRegistry.default().get(profile_id)
+        except ValueError:
+            return False
+        return bool(profile.vision_link.get("enabled"))
+
+    @classmethod
+    def _write_skill_flow_execution(cls, profile_id: str, execution: dict[str, Any]) -> None:
+        path = cls._RUNTIME_ROOT / "equipment_skill_flow_latest" / f"{profile_id}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(execution, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
+        tmp.replace(path)
+
+    @staticmethod
+    def _preflight_skill_flow_resources(
+        *,
+        profile_id: str,
+        blocks: list[dict[str, Any]],
+        registry_root: str,
+    ) -> dict[str, Any]:
+        """Validate every exact Skill and enabled Vision task before the first action."""
+        registry = EquipmentSkillRegistry(registry_root)
+        try:
+            EquipmentProfileRegistry.default().get(profile_id)
+        except ValueError as exc:
+            return {"ok": False, "block_id": "", "message": str(exc)}
+        for block in blocks:
+            block_id = str(block.get("id") or "")
+            skill = block.get("skill") if isinstance(block.get("skill"), dict) else {}
+            skill_id = str(skill.get("skill_id") or "").strip()
+            version = str(skill.get("skill_version") or "").strip()
+            try:
+                package = registry.get(skill_id, version)
+                manifest = package.get("manifest") if isinstance(package.get("manifest"), dict) else {}
+                if manifest.get("lifecycle") != "deployed" or manifest.get("enabled") is False:
+                    raise SkillContractError("exact Skill version is not deployed and enabled")
+                if str(manifest.get("target_profile") or "") != profile_id:
+                    raise SkillContractError("target profile mismatch")
+                vision = block.get("vision") if isinstance(block.get("vision"), dict) else {}
+                if bool(vision.get("enabled")):
+                    get_equipment_vision_task(str(vision.get("task_id") or ""))
+            except (SkillContractError, ValueError, OSError) as exc:
+                return {
+                    "ok": False,
+                    "block_id": block_id,
+                    "skill_id": skill_id,
+                    "skill_version": version,
+                    "message": str(exc),
+                }
+        return {"ok": True}
+
+    async def _run_equipment_skill_flow(
+        self,
+        state: OrchestratorState,
+        ctx: AgentContext,
+        flow: dict[str, Any],
+    ) -> AgentResult:
+        """Execute ordered composite Skill blocks and their bounded Vision phases."""
+        profile_id = str(flow.get("profile_id") or "")
+        agentic_task_id = str(flow.get("agentic_task_id") or "").strip()
+        store = EquipmentSkillFlowStore(self._SKILL_FLOW_PATH)
+        blocks = [block for block in flow.get("blocks", []) if isinstance(block, dict)]
+        registry_root = str(
+            state.current_experiment_spec.get("equipment_skill_registry_root")
+            or Path(__file__).resolve().parents[1] / "memory" / "equipment_skills"
+        )
+        transitions: list[dict[str, Any]] = []
+        last_result: AgentResult | None = None
+        terminal = "__blocked__"
+        task_contract = validate_equipment_agentic_flow(agentic_task_id, blocks)
+
+        source_stage_context = self._base_run_payload(state)["source_stage_context"]
+        specimen = source_stage_context.get("specimen") if isinstance(source_stage_context.get("specimen"), dict) else {}
+        specimen_id = str(specimen.get("specimen_id") or state.current_experiment_spec.get("specimen_id") or "").strip()
+        entry_gate = (
+            evaluate_equipment_entry_gate(
+                run_id=state.run_id,
+                specimen_id=specimen_id,
+                source_stage_context=source_stage_context,
+                test_like=self._test_like_mode(state),
+            )
+            if agentic_task_id == UTM_COMPRESSION_TASK_ID
+            else {}
+        )
+
+        def workflow_agentic_task(status: str) -> dict[str, Any]:
+            if not agentic_task_id:
+                return {}
+            return {
+                "schema": EQUIPMENT_AGENTIC_TASK_SCHEMA,
+                "task_id": agentic_task_id,
+                "profile_id": profile_id,
+                "flow_id": str(flow.get("flow_id") or ""),
+                "flow_version": flow.get("version"),
+                "run_id": state.run_id,
+                "specimen_id": specimen_id,
+                "entry_gate": entry_gate,
+                "block_order": [str(block.get("id") or "") for block in blocks],
+                "status": status,
+            }
+
+        def transition_evidence(result: AgentResult) -> dict[str, Any]:
+            result_data = result.data if isinstance(result.data, dict) else {}
+            equipment_result = result_data.get("equipment_result") if isinstance(result_data.get("equipment_result"), dict) else {}
+            report = result_data.get("equipment_report") if isinstance(result_data.get("equipment_report"), dict) else {}
+            acquisition = report.get("data_acquisition") if isinstance(report.get("data_acquisition"), dict) else {}
+            cross_checks = report.get("cross_checks") if isinstance(report.get("cross_checks"), dict) else {}
+            method_values = report.get("method_values") if isinstance(report.get("method_values"), dict) else {}
+            execution = result_data.get("equipment_skill_execution") if isinstance(result_data.get("equipment_skill_execution"), dict) else {}
+            evidence: dict[str, Any] = {}
+            for key in (
+                "result_file",
+                "csv_path",
+                "utm_csv_path",
+                "force",
+                "stroke",
+                "height",
+                "before_frame",
+                "after_frame",
+                "locator_id",
+                "locator_version",
+            ):
+                value = equipment_result.get(key, execution.get(key))
+                if value is not None and value != "":
+                    evidence[key] = value
+            if method_values:
+                evidence["method_values"] = dict(method_values)
+            artifacts = equipment_result.get("output_artifacts") if isinstance(equipment_result.get("output_artifacts"), list) else []
+            csv_artifacts = [
+                item
+                for item in artifacts
+                if isinstance(item, dict) and str(item.get("kind") or "") == "utm_csv"
+            ]
+            evidence["artifact_candidate_count"] = len(csv_artifacts)
+            if len(csv_artifacts) == 1:
+                csv_artifact = csv_artifacts[0]
+                evidence["artifact_kind"] = "utm_csv"
+                for key in (
+                    "artifact_id",
+                    "run_id",
+                    "specimen_id",
+                    "linux_path",
+                    "local_path",
+                    "row_count_probe",
+                    "columns_probe",
+                    "stable_for_sec",
+                ):
+                    value = csv_artifact.get(key)
+                    if value not in (None, "", []):
+                        evidence[key] = value
+                artifact_binding = {
+                    "artifact_id": str(csv_artifact.get("artifact_id") or "").strip(),
+                    "run_id": str(csv_artifact.get("run_id") or "").strip(),
+                    "specimen_id": str(csv_artifact.get("specimen_id") or "").strip(),
+                    "linux_path": str(csv_artifact.get("linux_path") or "").strip(),
+                }
+                acquisition_matches_artifact = bool(
+                    all(artifact_binding.values())
+                    and all(
+                        str(acquisition.get(key) or "").strip() == expected
+                        for key, expected in artifact_binding.items()
+                    )
+                )
+                evidence["acquisition_artifact_match"] = acquisition_matches_artifact
+                if acquisition_matches_artifact:
+                    for key in (
+                        "row_count_probe",
+                        "columns_probe",
+                        "stable_for_sec",
+                        "status",
+                    ):
+                        value = acquisition.get(key)
+                        if value not in (None, "", []):
+                            evidence.setdefault(key, value)
+                    if "data_parse_probe_ok" in cross_checks:
+                        evidence.setdefault(
+                            "data_parse_probe_ok",
+                            cross_checks.get("data_parse_probe_ok"),
+                        )
+                artifact_parse_ok = csv_artifact.get(
+                    "local_parse_ok",
+                    csv_artifact.get("parse_ok"),
+                )
+                if artifact_parse_ok is not None:
+                    evidence["data_parse_probe_ok"] = artifact_parse_ok
+            try:
+                evidence_row_count = int(evidence.get("row_count_probe") or 0)
+            except (TypeError, ValueError):
+                evidence_row_count = 0
+            if (
+                evidence.get("data_parse_probe_ok") is True
+                and evidence_row_count > 0
+                and (
+                    str(evidence.get("status") or "") in {"pulled_to_linux", "data_ready"}
+                    or (
+                        len(csv_artifacts) == 1
+                        and csv_artifacts[0].get("pulled_to_linux") is True
+                    )
+                )
+            ):
+                evidence["write_complete"] = True
+            screen_checks = report.get("screen_checks") if isinstance(report.get("screen_checks"), list) else []
+            if screen_checks:
+                evidence["postcondition"] = {"screen_checks": [dict(item) for item in screen_checks if isinstance(item, dict)]}
+            return evidence
+
+        def execution_payload(
+            *,
+            active_block: str = "",
+            active_phase: str = "",
+            terminal_value: str = "",
+            failure_code: str = "",
+        ) -> dict[str, Any]:
+            if terminal_value == "__complete__":
+                workflow_status = "completed"
+            elif terminal_value == "__blocked__":
+                workflow_status = "blocked"
+            elif active_block:
+                workflow_status = "running"
+            else:
+                workflow_status = "ready"
+            payload = {
+                "schema": "atr.equipment_skill_flow_execution.v1",
+                "flow_id": flow.get("flow_id"),
+                "profile_id": profile_id,
+                "run_id": state.run_id,
+                "active_block": active_block,
+                "active_phase": active_phase,
+                "active_node": f"{active_block}.{active_phase}" if active_block and active_phase else "",
+                "terminal": terminal_value,
+                "transitions": transitions,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            if failure_code:
+                payload["failure_code"] = failure_code
+            overlay = workflow_agentic_task(workflow_status)
+            if overlay:
+                payload["workflow_agentic_task"] = overlay
+            return payload
+
+        def write_execution(*, active_block: str = "", active_phase: str = "", terminal_value: str = "") -> None:
+            self._write_skill_flow_execution(
+                profile_id,
+                execution_payload(
+                    active_block=active_block,
+                    active_phase=active_phase,
+                    terminal_value=terminal_value,
+                ),
+            )
+
+        if not task_contract.get("ok"):
+            failure_code = str(task_contract.get("failure_code") or "EQUIPMENT_FLOW_REVISION_INVALID")
+            execution = execution_payload(
+                active_phase="contract_validation",
+                terminal_value="__blocked__",
+                failure_code=failure_code,
+            )
+            self._write_skill_flow_execution(profile_id, execution)
+            overlay = execution.get("workflow_agentic_task", {})
+            return AgentResult(
+                success=False,
+                summary="Equipment Agentic Task contract is invalid",
+                data={
+                    "workflow_agentic_task": overlay,
+                    "required_entry_gate": entry_gate,
+                    "equipment_report": {
+                        "schema": "equipment_report.v1",
+                        "status": "blocked",
+                        "workflow_agentic_task": overlay,
+                        "required_entry_gate": entry_gate,
+                        "blocking_reasons": list(task_contract.get("blocking_reasons") or [failure_code]),
+                    },
+                    "equipment_handoff": {
+                        "status": "blocked",
+                        "failure_code": failure_code,
+                        "message": "The workflow task ID and canonical block revision must match before equipment input.",
+                    },
+                    "equipment_skill_flow_execution": execution,
+                    "hardware_alerts": [],
+                },
+            )
+
+        if entry_gate and not entry_gate.get("ok"):
+            first_block = str(blocks[0].get("id") or "") if blocks else ""
+            execution = execution_payload(
+                active_block=first_block,
+                active_phase="entry_gate",
+                terminal_value="__blocked__",
+                failure_code="EQUIPMENT_HANDOFF_NOT_READY",
+            )
+            self._write_skill_flow_execution(profile_id, execution)
+            overlay = execution.get("workflow_agentic_task", {})
+            return AgentResult(
+                success=False,
+                summary="Equipment Agentic Task entry gate blocked",
+                data={
+                    "workflow_agentic_task": overlay,
+                    "required_entry_gate": entry_gate,
+                    "equipment_report": {
+                        "schema": "equipment_report.v1",
+                        "status": "blocked",
+                        "workflow_agentic_task": overlay,
+                        "required_entry_gate": entry_gate,
+                        "blocking_reasons": ["EQUIPMENT_HANDOFF_NOT_READY"],
+                    },
+                    "equipment_handoff": {
+                        "status": "blocked",
+                        "failure_code": "EQUIPMENT_HANDOFF_NOT_READY",
+                        "message": "Verified specimen / UTM handoff is required before equipment input.",
+                    },
+                    "equipment_skill_flow_execution": execution,
+                    "hardware_alerts": [],
+                },
+            )
+
+        unbound_blocks = [
+            str(block.get("id") or "")
+            for block in blocks
+            if not str((block.get("skill") or {}).get("skill_id") or "").strip()
+            or not str((block.get("skill") or {}).get("skill_version") or "").strip()
+        ]
+        if unbound_blocks:
+            execution = execution_payload(
+                active_block=unbound_blocks[0],
+                active_phase="skill",
+                terminal_value="__blocked__",
+                failure_code="EQUIPMENT_SKILL_FLOW_UNBOUND",
+            )
+            self._write_skill_flow_execution(profile_id, execution)
+            overlay = execution.get("workflow_agentic_task", {})
+            overlay_report = (
+                {
+                    "schema": "equipment_report.v1",
+                    "status": "blocked",
+                    "workflow_agentic_task": overlay,
+                    "required_entry_gate": entry_gate,
+                    "blocking_reasons": ["EQUIPMENT_SKILL_FLOW_UNBOUND"],
+                }
+                if overlay
+                else {}
+            )
+            return AgentResult(
+                success=False,
+                summary="Equipment Skill Flow has an unbound Skill Slot",
+                data={
+                    **({"workflow_agentic_task": overlay} if overlay else {}),
+                    **({"required_entry_gate": entry_gate} if entry_gate else {}),
+                    **({"equipment_report": overlay_report} if overlay_report else {}),
+                    "equipment_handoff": {
+                        "status": "blocked",
+                        "failure_code": "EQUIPMENT_SKILL_FLOW_UNBOUND",
+                        "message": "Bind a deployed Skill to every Skill Slot before execution.",
+                        "block_ids": unbound_blocks,
+                    },
+                    "equipment_skill_flow_execution": execution,
+                    "hardware_alerts": [],
+                },
+            )
+
+        enabled_vision_block = next(
+            (
+                block
+                for block in blocks
+                if isinstance(block.get("vision"), dict)
+                and bool(block["vision"].get("enabled"))
+            ),
+            None,
+        )
+        if (
+            enabled_vision_block is not None
+            and "vision.equipment_cross_check" not in set(ctx.tools.list_tools())
+        ):
+            resource_preflight = {
+                "ok": False,
+                "failure_code": "EQUIPMENT_VISION_LINK_UNAVAILABLE",
+                "block_id": str(enabled_vision_block.get("id") or ""),
+                "message": "Enabled Equipment Vision requires vision.equipment_cross_check before any Skill action.",
+            }
+        else:
+            resource_preflight = self._preflight_skill_flow_resources(
+                profile_id=profile_id,
+                blocks=blocks,
+                registry_root=registry_root,
+            )
+        if not resource_preflight.get("ok"):
+            failure_code = str(
+                resource_preflight.get("failure_code")
+                or "EQUIPMENT_SKILL_FLOW_PREFLIGHT_FAILED"
+            )
+            failed_block = str(resource_preflight.get("block_id") or "")
+            execution = execution_payload(
+                active_block=failed_block,
+                active_phase="resource_preflight",
+                terminal_value="__blocked__",
+                failure_code=failure_code,
+            )
+            self._write_skill_flow_execution(profile_id, execution)
+            overlay = execution.get("workflow_agentic_task", {})
+            return AgentResult(
+                success=False,
+                summary="Equipment Skill Flow resource preflight blocked execution",
+                data={
+                    **({"workflow_agentic_task": overlay} if overlay else {}),
+                    **({"required_entry_gate": entry_gate} if entry_gate else {}),
+                    "equipment_report": {
+                        "schema": "equipment_report.v1",
+                        "status": "blocked",
+                        **({"workflow_agentic_task": overlay} if overlay else {}),
+                        **({"required_entry_gate": entry_gate} if entry_gate else {}),
+                        "blocking_reasons": [failure_code],
+                    },
+                    "equipment_handoff": {
+                        "status": "blocked",
+                        "failure_code": failure_code,
+                        "block_id": failed_block,
+                        "message": str(resource_preflight.get("message") or "Exact Skill/Vision resource is unavailable."),
+                    },
+                    "equipment_skill_flow_execution": execution,
+                    "hardware_alerts": [],
+                },
+            )
+
+        for step, block in enumerate(blocks):
+            block_id = str(block.get("id") or "")
+            skill = block.get("skill") if isinstance(block.get("skill"), dict) else {}
+            agentic = block.get("agentic") if isinstance(block.get("agentic"), dict) else {}
+            task = str(agentic.get("task") or block.get("label") or block_id).strip()
+            vision = block.get("vision") if isinstance(block.get("vision"), dict) else {}
+            vision_enabled = bool(vision.get("enabled"))
+            write_execution(active_block=block_id, active_phase="skill")
+            request = {
+                "skill_id": skill.get("skill_id"),
+                "version": skill.get("skill_version"),
+                "target_profile": profile_id,
+                "registry_root": registry_root,
+                "sequence_id": f"{state.run_id}-{flow.get('flow_id')}-{block_id}-{step}",
+                "task": task,
+                "skip_profile_vision_preflight": True,
+            }
+            last_result = await self._run_equipment_skill(state, ctx, request)
+            skill_outcome = "completed" if last_result.success else "failed"
+            skill_target = (
+                f"{block_id}.vision"
+                if last_result.success and vision_enabled
+                else store.phase_target(flow, block_id, "agentic", skill_outcome)
+            )
+            transitions.append(
+                {
+                    "block_id": block_id,
+                    "node_id": f"{block_id}.skill",
+                    "phase": "skill",
+                    "kind": "skill",
+                    "skill_id": skill.get("skill_id"),
+                    "skill_version": skill.get("skill_version"),
+                    "task": task,
+                    "outcome": skill_outcome,
+                    "target": skill_target,
+                    "success": last_result.success,
+                    "summary": last_result.summary,
+                    "evidence": transition_evidence(last_result),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            if not last_result.success or skill_target == "__blocked__":
+                terminal = "__blocked__"
+                break
+
+            if not vision_enabled:
+                target = store.phase_target(flow, block_id, "agentic", "completed")
+                transitions.append(
+                    {
+                        "block_id": block_id,
+                        "node_id": f"{block_id}.vision",
+                        "phase": "vision",
+                        "kind": "vision_gate",
+                        "task": task,
+                        "outcome": "bypass",
+                        "target": target,
+                        "vision_link_enabled": False,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+            else:
+                write_execution(active_block=block_id, active_phase="vision")
+                vision_task = get_equipment_vision_task(str(vision.get("task_id") or ""))
+                request_check = self._equipment_vision_request(
+                    task_id=vision_task["task_id"],
+                    state=state,
+                    source_stage_context=self._base_run_payload(state)["source_stage_context"],
+                )
+                if "vision.equipment_cross_check" not in set(ctx.tools.list_tools()):
+                    vision_outcome = "error"
+                    detail: dict[str, Any] = {
+                        "failure_code": "EQUIPMENT_VISION_LINK_UNAVAILABLE",
+                        "observer_mode": "unavailable",
+                        "virtualized": False,
+                        "evidence": {},
+                    }
+                else:
+                    source_context = self._base_run_payload(state)["source_stage_context"]
+                    payload = {
+                        "run_id": state.run_id,
+                        "experiment_id": state.experiment_id,
+                        "runtime_mode": self._effective_runtime_mode(state),
+                        "checks": [request_check],
+                        "source_stage_context": source_context,
+                    }
+                    response = await self._call_tool(ctx, "vision.equipment_cross_check", payload)
+                    results = response.get("results") if isinstance(response.get("results"), list) else []
+                    result_item = results[0] if len(results) == 1 and isinstance(results[0], dict) else {}
+                    vision_outcome = self._equipment_vision_outcome(response)
+                    evidence_valid = self._equipment_vision_response_valid(response, request_check)
+                    if result_item and not evidence_valid:
+                        vision_outcome = "error"
+                    detail = {
+                        "observer_mode": response.get("observer_mode"),
+                        "virtualized": bool(response.get("virtualized")),
+                        "evidence": (
+                            dict(result_item.get("evidence"))
+                            if isinstance(result_item.get("evidence"), dict)
+                            else {}
+                        ),
+                        "confidence": result_item.get("confidence"),
+                        "evidence_timestamp": result_item.get("timestamp"),
+                        "evidence_expires_at": result_item.get("expires_at"),
+                        "evidence_source": result_item.get("source"),
+                        "failure_code": (
+                            response.get("failure_code")
+                            or ("EQUIPMENT_VISION_EVIDENCE_INVALID" if result_item and not evidence_valid else None)
+                        ),
+                        "operator_attention": response.get("operator_attention"),
+                        "fallback_trace": response.get("fallback_trace"),
+                        "vision_result": response,
+                    }
+                target = store.phase_target(flow, block_id, "vision", vision_outcome)
+                transitions.append(
+                    {
+                        "block_id": block_id,
+                        "node_id": f"{block_id}.vision",
+                        "phase": "vision",
+                        "kind": "vision_gate",
+                        "task": task,
+                        "vision_task_id": vision_task["task_id"],
+                        "check_id": vision_task["check_id"],
+                        "task_label": vision_task["label"],
+                        "vision_task_label": vision_task["label"],
+                        "runtime_mode": self._effective_runtime_mode(state),
+                        "outcome": vision_outcome,
+                        "target": target,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        **detail,
+                    }
+                )
+            if target == "__blocked__":
+                terminal = "__blocked__"
+                break
+            if target == "__complete__":
+                terminal = "__complete__"
+                break
+            write_execution(active_block=target, active_phase="skill")
+
+        execution = execution_payload(terminal_value=terminal)
+        self._write_skill_flow_execution(profile_id, execution)
+        success = terminal == "__complete__"
+        data = dict(last_result.data) if last_result is not None else {}
+        data["equipment_skill_flow_execution"] = execution
+        overlay = execution.get("workflow_agentic_task") if isinstance(execution.get("workflow_agentic_task"), dict) else {}
+        if overlay:
+            cycle_projection = project_equipment_cycle_evidence(
+                transitions=transitions,
+                result_data=data,
+            )
+            data.update(cycle_projection)
+            data["workflow_agentic_task"] = overlay
+            data["required_entry_gate"] = entry_gate
+            report = data.get("equipment_report") if isinstance(data.get("equipment_report"), dict) else {}
+            report = dict(report)
+            report["workflow_agentic_task"] = overlay
+            report["required_entry_gate"] = entry_gate
+            report["block_executions"] = [dict(item) for item in transitions]
+            report.update(cycle_projection)
+            data["equipment_report"] = report
+
+            if (
+                success
+                and agentic_task_id == UTM_COMPRESSION_TASK_ID
+                and not cycle_projection["handoff_eligibility"]["eligible"]
+            ):
+                success = False
+                terminal = "__blocked__"
+                failure_code = str(cycle_projection["handoff_eligibility"].get("failure_code") or "EQUIPMENT_STEP_POSTCONDITION_MISSING")
+                execution["terminal"] = terminal
+                execution["failure_code"] = failure_code
+                execution["workflow_agentic_task"]["status"] = "blocked"
+                overlay = execution["workflow_agentic_task"]
+                data["workflow_agentic_task"] = overlay
+                report["workflow_agentic_task"] = overlay
+                data["equipment_handoff"] = {
+                    "status": "blocked",
+                    "failure_code": failure_code,
+                    "message": "UTM cycle evidence is incomplete; no downstream handoff was emitted.",
+                }
+                self._write_skill_flow_execution(profile_id, execution)
+        if not success:
+            final_failure_code = str(
+                execution.get("failure_code") or "EQUIPMENT_SKILL_FLOW_BLOCKED"
+            )
+            data["equipment_handoff"] = {
+                "status": "blocked",
+                "failure_code": final_failure_code,
+                "message": (
+                    "UTM cycle evidence is incomplete; no downstream handoff was emitted."
+                    if final_failure_code != "EQUIPMENT_SKILL_FLOW_BLOCKED"
+                    else "Equipment Skill Flow reached the blocked terminal."
+                ),
+            }
+        return AgentResult(
+            success=success,
+            summary="Equipment Skill Flow completed" if success else "Equipment Skill Flow blocked",
+            data=data,
+        )
+
     @staticmethod
     def _skill_execution_model_snapshot(ctx: AgentContext, manifest: dict[str, Any]) -> dict[str, Any]:
         creation = manifest.get("model_snapshot") if isinstance(manifest.get("model_snapshot"), dict) else {}
@@ -2394,6 +3124,30 @@ class LabEquipmentAgent(BaseAgent):
             if target_profile and target_profile != expected_profile:
                 raise SkillContractError("target profile mismatch")
             target_profile = target_profile or expected_profile
+            annotations = package.get("annotations") if isinstance(package.get("annotations"), dict) else {}
+            workflow_summary = (
+                annotations.get("workflow_summary")
+                if isinstance(annotations.get("workflow_summary"), dict)
+                else {}
+            )
+            step_transitions = (
+                annotations.get("step_transitions")
+                if isinstance(annotations.get("step_transitions"), list)
+                else []
+            )
+            task = str(
+                request.get("task")
+                or workflow_summary.get("intent")
+                or manifest.get("name")
+                or skill_id
+            ).strip()[:160]
+            annotation_context = {
+                "annotations_sha256": str(manifest.get("annotations_sha256") or ""),
+                "workflow_summary": dict(workflow_summary),
+                "step_transitions": [
+                    dict(item) for item in step_transitions[:32] if isinstance(item, dict)
+                ],
+            }
             try:
                 skill_profile = EquipmentProfileRegistry.default().get(target_profile)
             except ValueError as exc:
@@ -2416,6 +3170,8 @@ class LabEquipmentAgent(BaseAgent):
                 ),
                 mode=self._effective_runtime_mode(state),
                 worker={"worker_id": bridge_id, "kind": "windows_pyautogui"},
+                agentic_task=task,
+                annotation_context=annotation_context,
             )
         except SkillContractError as exc:
             return AgentResult(
@@ -2454,7 +3210,11 @@ class LabEquipmentAgent(BaseAgent):
             for item in skill_profile.vision_link.get("required_modes", [])
             if str(item).strip()
         }
-        vision_required = bool(skill_profile.vision_link.get("enabled")) and runtime_mode in required_modes
+        vision_required = (
+            not bool(request.get("skip_profile_vision_preflight"))
+            and bool(skill_profile.vision_link.get("enabled"))
+            and runtime_mode in required_modes
+        )
 
         vision_failure_code = ""
         if vision_required and not self._has_equipment_vision_results(source_stage_context):
@@ -2558,6 +3318,8 @@ class LabEquipmentAgent(BaseAgent):
                     evidence=evidence,
                     allowed_recovery_operations=["focus_window", "screenshot", "wait", "press"],
                 )
+                exception["agentic_task"] = task
+                exception["annotation_context"] = annotation_context
                 execution = registry.transition_execution(
                     str(execution["execution_id"]),
                     "EXCEPTION",
@@ -2817,6 +3579,28 @@ class LabEquipmentAgent(BaseAgent):
                     "hardware_alerts": [],
                 },
             )
+
+        try:
+            skill_flow = self._equipment_skill_flow(state)
+        except EquipmentSkillFlowError as exc:
+            return AgentResult(
+                success=False,
+                summary="Equipment Skill Flow contract is invalid",
+                data={
+                    "equipment_handoff": {
+                        "status": "blocked",
+                        "failure_code": "EQUIPMENT_SKILL_FLOW_INVALID",
+                        "message": str(exc),
+                    },
+                    "equipment_skill_flow_execution": {
+                        "terminal": "__blocked__",
+                        "failure_code": "EQUIPMENT_SKILL_FLOW_INVALID",
+                    },
+                    "hardware_alerts": [],
+                },
+            )
+        if skill_flow:
+            return await self._run_equipment_skill_flow(state, ctx, skill_flow)
 
         skill_request = self._equipment_skill_request(state)
         if skill_request:

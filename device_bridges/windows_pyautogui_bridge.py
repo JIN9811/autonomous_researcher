@@ -72,6 +72,7 @@ DEFAULT_ALLOWED_ACTIONS = {
     "press",
     "key_down",
     "key_up",
+    "set_input_language",
     "hotkey",
     "write",
     "scroll",
@@ -105,7 +106,7 @@ DEFAULT_REGISTERED_PROGRAMS = {
         ],
     },
     "utm_compression_start_v1": {
-        "description": "UTM compression protocol: focus app, assert ready/running/complete, save/export CSV, and expose artifact metadata.",
+        "description": "UTM compression protocol through the completed-test screen; raw CSV export is a separate step.",
         "requires_pyautogui": True,
         "safe_test": True,
         "program_type": "utm_protocol",
@@ -122,20 +123,19 @@ DEFAULT_REGISTERED_PROGRAMS = {
             {"action": "click", "target": "start_button"},
             {"action": "wait_until", "target": "running_state", "timeout_s": 10},
             {"action": "wait_until", "target": "complete_state", "timeout_s": 300},
-            {"action": "wait_for_file", "pattern": "C:/ATR/utm_exports/{run_id}/{specimen_id}*.csv", "timeout_s": 20},
         ],
         "expected_screen_after": [{"name": "running_state", "required": True}, {"name": "complete_state", "required": True}],
         "save_policy": {
             "auto_save_expected": False,
-            "manual_save_required_if_no_artifact": True,
+            "manual_save_required_if_no_artifact": False,
             "windows_export_root": "C:/ATR/utm_exports",
-            "save_actions": ["wait_until_complete_state", "hotkey_ctrl_s", "type_standard_path", "press_enter", "wait_for_file"],
+            "save_actions": [],
         },
-        "output_artifacts": [{"kind": "utm_csv", "pattern": "C:/ATR/utm_exports/{run_id}/{specimen_id}*.csv"}],
+        "output_artifacts": [],
         "safe_abort": {"program_id": "utm_stop_or_abort_v1"},
     },
     "utm_export_csv_v1": {
-        "description": "UTM CSV export protocol after test completion.",
+        "description": "Save raw test data to CSV after a completed test.",
         "requires_pyautogui": True,
         "safe_test": True,
         "program_type": "utm_export",
@@ -147,46 +147,20 @@ DEFAULT_REGISTERED_PROGRAMS = {
         "expected_screen_before": [{"name": "complete_state", "required": True}],
         "sequence": [
             {"action": "assert_visible", "target": "complete_state"},
-            {"action": "hotkey", "keys": ["ctrl", "s"]},
-            {"action": "type_path", "value": "C:/ATR/utm_exports/{run_id}/{specimen_id}.csv"},
+            {"action": "click", "target": "save_raw_data_csv"},
+            {"action": "wait", "seconds": 1.0},
+            {"action": "hotkey", "keys": ["ctrl", "a"]},
+            {"action": "write", "text": "C:/ATR/utm_exports/{run_id}/{specimen_id}.csv", "interval_sec": 0.01},
             {"action": "press", "key": "enter"},
             {"action": "wait_for_file", "pattern": "C:/ATR/utm_exports/{run_id}/{specimen_id}*.csv", "timeout_s": 20},
         ],
         "expected_screen_after": [{"name": "complete_state", "required": True}],
         "save_policy": {
             "auto_save_expected": False,
-            "manual_save_required_if_no_artifact": True,
-            "windows_export_root": "C:/ATR/utm_exports",
-            "save_method": "export_menu",
-            "save_actions": ["assert_complete_state", "hotkey_ctrl_s", "type_standard_path", "press_enter", "wait_for_file"],
-        },
-        "output_artifacts": [{"kind": "utm_csv", "pattern": "C:/ATR/utm_exports/{run_id}/{specimen_id}*.csv"}],
-        "safe_abort": {"program_id": "utm_stop_or_abort_v1"},
-    },
-    "utm_manual_save_csv_v1": {
-        "description": "Manual Save As fallback for UTM CSV data.",
-        "requires_pyautogui": True,
-        "safe_test": True,
-        "program_type": "utm_export",
-        "target_app": "UTM software",
-        "target_window": "main_window_title_or_regex",
-        "locator_backend": "image",
-        "max_retries": 1,
-        "preconditions": ["windows_bridge_ready", "utm_app_visible"],
-        "expected_screen_before": [{"name": "complete_state", "required": False}],
-        "sequence": [
-            {"action": "hotkey", "keys": ["ctrl", "s"]},
-            {"action": "type_path", "value": "C:/ATR/utm_exports/{run_id}/{specimen_id}.csv"},
-            {"action": "press", "key": "enter"},
-            {"action": "wait_for_file", "pattern": "C:/ATR/utm_exports/{run_id}/{specimen_id}*.csv", "timeout_s": 20},
-        ],
-        "expected_screen_after": [{"name": "save_dialog_closed", "required": False}],
-        "save_policy": {
-            "auto_save_expected": False,
             "manual_save_required_if_no_artifact": False,
             "windows_export_root": "C:/ATR/utm_exports",
-            "save_method": "manual_save_dialog",
-            "save_actions": ["hotkey_ctrl_s", "type_standard_path", "press_enter", "wait_for_file"],
+            "save_method": "raw_csv_button",
+            "save_actions": ["assert_complete_state", "click_save_raw_data_csv", "type_standard_path", "press_enter", "wait_for_file"],
         },
         "output_artifacts": [{"kind": "utm_csv", "pattern": "C:/ATR/utm_exports/{run_id}/{specimen_id}*.csv"}],
         "safe_abort": {"program_id": "utm_stop_or_abort_v1"},
@@ -1245,9 +1219,16 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         bridge_url = validated_url
         try:
             with httpx.Client(timeout=self.config.request_timeout_sec) as client:
-                response = client.post(f"{bridge_url}/pairing/complete", json={"pairing_code": pairing_code})
-                response.raise_for_status()
-                result = response.json()
+                for attempt in range(2):
+                    try:
+                        response = client.post(f"{bridge_url}/pairing/complete", json={"pairing_code": pairing_code})
+                        response.raise_for_status()
+                        result = response.json()
+                        break
+                    except httpx.TransportError:
+                        if attempt == 0:
+                            continue
+                        raise
         except httpx.HTTPStatusError as exc:
             return self._failure(
                 tool="equipment.pyautogui.pair_connection",
@@ -1760,7 +1741,7 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         data = path.read_bytes()
         locator = {
             "image_path": str(path),
-            "confidence": float(payload.get("confidence", 0.8)),
+            "confidence": float(payload.get("confidence", 0.9)),
             "region": region,
             "target": name,
         }

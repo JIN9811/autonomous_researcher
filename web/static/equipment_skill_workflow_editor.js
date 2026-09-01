@@ -112,6 +112,13 @@
       parts.push(fieldInput(id, "Interval s", "action.interval", action.interval ?? 0, "number", 'min="0" step="0.01"'));
     }
     if (name === "hotkey") parts.push(fieldInput(id, "Keys", "action.keys", (action.keys || []).join("+"), "text", 'data-value-kind="keys"'));
+    if (name === "set_input_language") {
+      parts.push(fieldInput(id, "Layout ID", "action.layout_id", action.layout_id || "00000409", "text", 'maxlength="8" pattern="[0-9A-Fa-f]{8}"'));
+      parts.push(fieldInput(id, "Locale", "action.locale", action.locale || "en_US"));
+      parts.push(fieldInput(id, "Language", "action.language", action.language || "en"));
+      parts.push(selectInput(id, "IME mode", "action.ime_mode", action.ime_mode || "alphanumeric", [["alphanumeric", "Alphanumeric"], ["native", "Native"]]));
+      parts.push(fieldInput(id, "Typing mode", "action.typing_mode", action.typing_mode || "latin"));
+    }
     if (name === "wait") parts.push(fieldInput(id, "Seconds", "action.seconds", action.seconds ?? 1, "number", 'min="0" max="30" step="0.1"'));
     if (["wait_until", "wait_until_image", "wait_until_text"].includes(name)) parts.push(fieldInput(id, "Target", "action.target", action.target || ""));
     if (name === "wait_until_text") parts.push(fieldInput(id, "Expected text", "action.text", action.text || ""));
@@ -291,7 +298,7 @@
       image.src = `data:image/png;base64,${pngBase64}`;
     });
     if (dimensions.width > 512 || dimensions.height > 512) throw new Error("Locator dimensions must be 512x512 or smaller.");
-    return { kind, png_base64: pngBase64, sha256, ...dimensions, confidence: 0.65 };
+    return { kind, png_base64: pngBase64, sha256, ...dimensions, confidence: 0.9 };
   }
 
   function renderCrop() {

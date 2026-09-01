@@ -38,6 +38,9 @@ const moduleTabsOutput = document.getElementById("ide-module-tabs");
 const moduleJson = document.getElementById("ide-module-json");
 const moduleSummary = document.getElementById("ide-module-summary");
 const moduleGraphOutput = document.getElementById("ide-module-graph");
+const equipmentFlowWorkspace = document.getElementById("ide-equipment-flow-workspace");
+const equipmentFlowOutput = document.getElementById("ide-equipment-flow-editor");
+const openEquipmentAgentManagerBtn = document.getElementById("ide-open-equipment-agent-manager");
 const handlersOutput = document.getElementById("ide-handlers-output");
 const logOutput = document.getElementById("ide-log-output");
 const eventFilterButtons = Array.from(document.querySelectorAll("[data-event-filter]"));
@@ -171,6 +174,9 @@ let availableTools = [];
 let graphTabs = [];
 let activeGraphTabId = MAIN_GRAPH_TAB_ID;
 let modulePayloadCache = new Map();
+let runtimeEquipmentFlowPayload = null;
+let runtimeEquipmentFlowProfileId = "utm_windows_v1";
+let runtimeEquipmentProfiles = [];
 let modulePayloadFetches = new Set();
 let activeModuleId = "";
 let availableHandlers = [];
@@ -3129,6 +3135,12 @@ function renderGraphTabs() {
   });
 }
 
+function showRuntimeEquipmentFlowWorkspace(show) {
+  if (!equipmentFlowWorkspace) return;
+  equipmentFlowWorkspace.hidden = !show;
+  equipmentFlowWorkspace.setAttribute("aria-hidden", show ? "false" : "true");
+}
+
 function activateGraphTab(tabId) {
   rememberActiveGraphDraft();
   const targetTabId = normalizeGraphTabId(tabId);
@@ -3140,6 +3152,7 @@ function activateGraphTab(tabId) {
   activeRuntimeEdge = null;
   edgeConnectDraft = null;
   edgeConnectSource = "";
+  showRuntimeEquipmentFlowWorkspace(tab.kind === "module" && tab.moduleId === "equipment");
   if (tab.kind === "module" && tab.moduleId) {
     activeModuleId = tab.moduleId;
     if (moduleSelect) moduleSelect.value = tab.moduleId;
@@ -3150,7 +3163,8 @@ function activateGraphTab(tabId) {
       modulePayloadCache.set(tab.moduleId, normalized);
       setModuleJson(normalized);
       updateModuleSummary((normalized.module ? normalized.module : normalized) || {});
-      renderModuleGraph(normalized);
+      if (tab.moduleId === "equipment") renderRuntimeEquipmentSkillFlow();
+      else renderModuleGraph(normalized);
     }
   }
   renderGraph(tab.graph);
@@ -3167,6 +3181,7 @@ function closeGraphTab(tabId) {
   }
   renderGraphTabs();
   const next = activeGraphTab();
+  showRuntimeEquipmentFlowWorkspace(next?.kind === "module" && next?.moduleId === "equipment");
   if (next?.graph) renderGraph(next.graph);
 }
 
@@ -3380,6 +3395,29 @@ async function openModuleGraphTab(moduleId) {
   if (moduleSelect) moduleSelect.value = moduleId;
   setModuleJson(normalized);
   updateModuleSummary(module);
+  if (moduleId === "equipment") {
+    showRuntimeEquipmentFlowWorkspace(true);
+    await loadRuntimeEquipmentSkillFlow(runtimeEquipmentFlowProfileId);
+    const flowGraph = runtimeEquipmentFlowPayload.graph;
+    upsertGraphTab({
+      id: `${MODULE_TAB_PREFIX}${moduleId}`,
+      kind: "module",
+      title: module.label || moduleId,
+      subtitle: "shared Skill Flow",
+      moduleId,
+      modulePayload: cloneConfig(normalized),
+      baselineModulePayload: cloneConfig(normalized),
+      graph: flowGraph,
+      baselineGraph: cloneConfig(flowGraph),
+      fixed: false,
+      dirty: false,
+    });
+    activeGraphTabId = `${MODULE_TAB_PREFIX}${moduleId}`;
+    renderGraph(flowGraph);
+    log(`Opened ${moduleId} shared Skill Flow runtime projection.`, "ok");
+    return;
+  }
+  showRuntimeEquipmentFlowWorkspace(false);
   renderModuleGraph(normalized);
   const graph = modulePayloadToGraph(normalized);
   upsertGraphTab({
@@ -3398,6 +3436,69 @@ async function openModuleGraphTab(moduleId) {
   activeGraphTabId = `${MODULE_TAB_PREFIX}${moduleId}`;
   renderGraph(graph);
   log(`Opened ${moduleId} internal graph tab. Save Module Version to activate changes.`, "ok");
+}
+
+function renderRuntimeEquipmentSkillFlow() {
+  if (!equipmentFlowOutput) return;
+  const payload = runtimeEquipmentFlowPayload || {};
+  const flow = payload.flow || { blocks: [] };
+  const blocks = Array.isArray(flow.blocks) ? flow.blocks : [];
+  const execution = payload.execution && typeof payload.execution === "object" ? payload.execution : {};
+  const transitions = Array.isArray(execution.transitions) ? execution.transitions : [];
+  const completed = new Set(transitions.map((item) => String(item.node_id || "")));
+  const transitionByNode = new Map(transitions.map((item) => [String(item.node_id || ""), item]));
+  const visionTasks = Array.isArray(payload.vision_tasks) ? payload.vision_tasks : [];
+  const visionTaskById = new Map(visionTasks.map((item) => [String(item.task_id || ""), item]));
+  const activeNode = String(execution.active_node || "");
+  const profileOptions = runtimeEquipmentProfiles.map((profile) => `<option value="${escapeHtml(profile.profile_id)}" ${profile.profile_id === runtimeEquipmentFlowProfileId ? "selected" : ""}>${escapeHtml(profile.label || profile.profile_id)}</option>`).join("");
+  equipmentFlowOutput.innerHTML = `
+    <section class="runtime-equipment-skill-flow" data-runtime-projection="equipment-skill-flow">
+      <div class="panel-title-row runtime-ide-subtitle">
+        <div><h3>Canonical Equipment Flow</h3><span class="hint">Read-only projection · edit in Agent Manager</span></div>
+        <div class="button-row">
+          <select id="ide-equipment-flow-profile" class="text-input">${profileOptions}</select>
+        </div>
+      </div>
+      <div class="runtime-equipment-flow-list">
+        ${blocks.length ? blocks.map((block, index) => {
+          const skillNode = `${block.id}.skill`;
+          const visionNode = `${block.id}.vision`;
+          const visionTransition = transitionByNode.get(visionNode) || {};
+          const visionTaskId = String(visionTransition.vision_task_id || block.vision?.task_id || "");
+          const visionTask = visionTaskById.get(visionTaskId) || {};
+          const visionTaskLabel = String(visionTransition.vision_task_label || visionTransition.task_label || visionTask.label || visionTaskId || "Unbound Vision Task");
+          const skillState = completed.has(skillNode) ? "complete" : activeNode === skillNode ? "active" : "waiting";
+          const visionState = completed.has(visionNode) ? "complete" : activeNode === visionNode ? "active" : "waiting";
+          return `<article class="runtime-module-step" data-runtime-flow-block="${escapeHtml(block.id)}">
+            <strong>${String(index + 1).padStart(2, "0")} · ${escapeHtml(block.agentic?.task || block.label || block.id)}</strong>
+            <span>Skill ${escapeHtml(block.skill?.skill_id || "-")}@${escapeHtml(block.skill?.skill_version || "-")} · ${escapeHtml(skillState)}</span>
+            <span>Agentic Task · completed=${escapeHtml(block.agentic?.completed || "next")} · failed=${escapeHtml(block.agentic?.failed || "__blocked__")}</span>
+            <span>Vision ${block.vision?.enabled ? `${escapeHtml(visionTaskLabel)} · ${escapeHtml(visionTransition.outcome || visionState)}` : "disabled"}</span>
+          </article>`;
+        }).join("") : `<div class="runtime-module-empty">No bound flow. Open Agent Manager to add a Skill block.</div>`}
+      </div>
+      <p id="ide-equipment-flow-status" class="hint">${payload.readiness?.ready ? "Ready for Agent execution." : "Draft requires at least one exact deployed Skill."}</p>
+    </section>`;
+  document.getElementById("ide-equipment-flow-profile")?.addEventListener("change", (event) => loadRuntimeEquipmentSkillFlow(event.target.value).catch((err) => log(String(err), "error")));
+}
+
+async function loadRuntimeEquipmentSkillFlow(profileId = "utm_windows_v1") {
+  runtimeEquipmentFlowProfileId = profileId || "utm_windows_v1";
+  const [profilesPayload, flowPayload] = await Promise.all([
+    requestJson("/api/equipment/profiles"),
+    requestJson(`/api/modules/equipment/equipment-skill-flow?profile_id=${encodeURIComponent(runtimeEquipmentFlowProfileId)}`),
+  ]);
+  runtimeEquipmentProfiles = Array.isArray(profilesPayload.profiles) ? profilesPayload.profiles : [];
+  runtimeEquipmentFlowPayload = flowPayload;
+  renderRuntimeEquipmentSkillFlow();
+  const tab = graphTabs.find((item) => item.id === `${MODULE_TAB_PREFIX}equipment`);
+  if (tab) {
+    tab.graph = flowPayload.graph;
+    tab.baselineGraph = cloneConfig(flowPayload.graph);
+    tab.dirty = false;
+  }
+  if (activeGraphTabId === `${MODULE_TAB_PREFIX}equipment`) renderGraph(flowPayload.graph);
+  return flowPayload;
 }
 
 function focusModuleForNode(nodeId) {
@@ -7666,7 +7767,15 @@ eventFilterButtons.forEach((button) => {
   });
 });
 
+if (openEquipmentAgentManagerBtn) openEquipmentAgentManagerBtn.addEventListener("click", () => {
+  window.open(`/equipment/agent-manager?profile_id=${encodeURIComponent(runtimeEquipmentFlowProfileId)}`, "_blank", "noopener,noreferrer");
+});
+
 setInterval(() => renderRuntimeHeader(), 1000);
+setInterval(() => {
+  if (document.hidden || activeGraph?.metadata?.ide_tab_kind !== "equipment_skill_flow") return;
+  loadRuntimeEquipmentSkillFlow(runtimeEquipmentFlowProfileId).catch((err) => log(String(err), "error"));
+}, 3000);
 
 renderEventLog();
 boot();

@@ -27,9 +27,9 @@ def wait_for_workspace(driver: webdriver.Firefox) -> None:
     WebDriverWait(driver, 20).until(
         lambda item: item.execute_script(
             """
-            const status = document.getElementById('equipment-vision-link-status');
-            const checkbox = document.getElementById('equipment-vision-link-enabled');
-            return Boolean(status && checkbox && !status.textContent.startsWith('Loading') && !checkbox.disabled);
+            const status = document.getElementById('equipment-flow-readiness');
+            const manager = document.getElementById('btn-open-equipment-agent-manager');
+            return Boolean(status && manager && typeof loadEquipmentSkillFlow === 'function');
             """
         )
     )
@@ -44,51 +44,7 @@ def run_audit(base_url: str, out_dir: Path, *, width: int, height: int, geckodri
     try:
         driver.get(f"{base_url.rstrip('/')}/equipment/windows")
         wait_for_workspace(driver)
-        initial_vision_selection = bool(
-            driver.execute_script("return document.getElementById('equipment-vision-link-enabled').checked;")
-        )
-        driver.execute_script("document.getElementById('equipment-vision-link-enabled').click();")
-        WebDriverWait(driver, 20).until(
-            lambda item: "saved automatically" in item.find_element("id", "equipment-vision-link-status").text
-        )
-        driver.refresh()
-        wait_for_workspace(driver)
-        persisted_vision_selection = bool(
-            driver.execute_script("return document.getElementById('equipment-vision-link-enabled').checked;")
-        )
-        if persisted_vision_selection == initial_vision_selection:
-            raise AssertionError("Vision Link selection did not persist across a browser refresh")
-        driver.execute_script("document.getElementById('equipment-vision-link-enabled').click();")
-        WebDriverWait(driver, 20).until(
-            lambda item: "saved automatically" in item.find_element("id", "equipment-vision-link-status").text
-        )
-        driver.refresh()
-        wait_for_workspace(driver)
-        restored_vision_selection = bool(
-            driver.execute_script("return document.getElementById('equipment-vision-link-enabled').checked;")
-        )
-        if restored_vision_selection != initial_vision_selection:
-            raise AssertionError("Vision Link selection could not be restored after persistence audit")
-        driver.execute_script(
-            """
-            document.getElementById('equipment-vision-link-enabled').checked = true;
-            document.getElementById('btn-equipment-profile-preflight').click();
-            """
-        )
-        WebDriverWait(driver, 20).until(
-            lambda item: "vision_link_request" in item.find_element("id", "equipment-result-log").get_attribute("textContent")
-        )
-        frontend_backend = driver.execute_script(
-            "return JSON.parse(document.getElementById('equipment-result-log').textContent);"
-        )
-        expected_vision = {
-            "requested": True,
-            "profile_enabled": True,
-            "required": False,
-            "effective": True,
-        }
-        if frontend_backend.get("vision_link_request") != expected_vision:
-            raise AssertionError(f"Vision Link frontend/backend contract mismatch: {frontend_backend}")
+        driver.execute_script("return loadEquipmentSkillFlow();")
         result = driver.execute_script(
             r"""
             renderEquipmentRuntimeOverview({
@@ -187,6 +143,13 @@ def run_audit(base_url: str, out_dir: Path, *, width: int, height: int, geckodri
               execute_event_seen: true
             });
             renderProofPackageVerification(verification);
+            renderCandidates([{
+              bridge_url: "http://192.168.50.201:8765",
+              host: "192.168.50.201",
+              hostname: "DESKTOP-QBSICKH",
+              server_version: "2026.08.31.28",
+              pairing_required: true
+            }]);
             const storyboardCanvas = document.createElement("canvas");
             storyboardCanvas.width = 640;
             storyboardCanvas.height = 360;
@@ -228,8 +191,9 @@ def run_audit(base_url: str, out_dir: Path, *, width: int, height: int, geckodri
               "equipment-selected-skill",
               "btn-equipment-skill-workflow-editor",
               "equipment-main-progress",
-              "equipment-vision-link",
-              "equipment-vision-link-enabled",
+              "equipment-skill-flow-progress",
+              "equipment-flow-readiness",
+              "btn-open-equipment-agent-manager",
               "equipment-error-recovery",
               "equipment-evidence-workspace",
               "equipment-command-banner",
@@ -279,6 +243,20 @@ def run_audit(base_url: str, out_dir: Path, *, width: int, height: int, geckodri
             const savedWorkerCards = savedWorkers ? Array.from(savedWorkers.querySelectorAll(".equipment-candidate-card")) : [];
             const selectedWorkerIndex = savedWorkerCards.findIndex((card) => card.classList.contains("selected"));
             const savedWorkerStyle = savedWorkers ? getComputedStyle(savedWorkers) : null;
+            const candidateCard = document.querySelector("#equipment-candidates .equipment-candidate-card");
+            const candidateAlias = candidateCard?.querySelector(".equipment-alias-input");
+            const candidatePairingCode = candidateCard?.querySelector(".equipment-pairing-code-input");
+            const candidateSaveButton = candidateCard?.querySelector("button");
+            candidatePairingCode?.focus();
+            if (candidatePairingCode) {
+              candidatePairingCode.value = "0297";
+              candidatePairingCode.dispatchEvent(new Event("input", {bubbles: true}));
+            }
+            const rectOf = (item) => {
+              if (!item) return null;
+              const rect = item.getBoundingClientRect();
+              return {left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height};
+            };
             const storyboard = document.getElementById("equipment-skill-storyboard-preview");
             const storyboardRect = storyboard ? storyboard.getBoundingClientRect() : null;
             if (document.getElementById("btn-equipment-skill-workflow-editor")?.disabled) {
@@ -308,6 +286,13 @@ def run_audit(base_url: str, out_dir: Path, *, width: int, height: int, geckodri
                 selectedIndex: selectedWorkerIndex,
                 overflowY: savedWorkerStyle ? savedWorkerStyle.overflowY : "",
                 maxHeight: savedWorkerStyle ? savedWorkerStyle.maxHeight : "",
+              },
+              candidatePairing: {
+                card: rectOf(candidateCard),
+                alias: rectOf(candidateAlias),
+                code: rectOf(candidatePairingCode),
+                button: rectOf(candidateSaveButton),
+                codeValue: candidatePairingCode?.value || "",
               },
               storyboard: storyboardRect ? {
                 hidden: storyboard.hidden,
@@ -344,7 +329,7 @@ def run_audit(base_url: str, out_dir: Path, *, width: int, height: int, geckodri
             "Skill Recording",
             "Skill Management",
             "Main Progress",
-            "Vision Link",
+            "Open Agent Manager",
             "Error Recovery",
             "Evidence & Data Transfer",
             "Compression Test",
@@ -388,6 +373,18 @@ def run_audit(base_url: str, out_dir: Path, *, width: int, height: int, geckodri
             raise AssertionError(f"Selected saved worker is not first: {saved_workers}")
         if saved_workers.get("overflowY") != "auto" or saved_workers.get("maxHeight") != "258px":
             raise AssertionError(f"Saved worker list is not limited to the three-card scroll viewport: {saved_workers}")
+        candidate_pairing = result.get("candidatePairing", {})
+        candidate_card = candidate_pairing.get("card") or {}
+        candidate_code = candidate_pairing.get("code") or {}
+        candidate_button = candidate_pairing.get("button") or {}
+        if candidate_code.get("width", 0) < 112 or candidate_code.get("height", 0) < 36:
+            raise AssertionError(f"Candidate pairing-code input is hidden or too small: {candidate_pairing}")
+        if candidate_pairing.get("codeValue") != "0297":
+            raise AssertionError(f"Candidate pairing-code input does not accept four digits: {candidate_pairing}")
+        if candidate_code.get("right", 0) > candidate_card.get("right", 0) + 1:
+            raise AssertionError(f"Candidate pairing-code input overflows its card: {candidate_pairing}")
+        if candidate_button.get("width", 0) < 112 or candidate_button.get("right", 0) > candidate_card.get("right", 0) + 1:
+            raise AssertionError(f"Candidate Pair & Save button is clipped: {candidate_pairing}")
         storyboard = result.get("storyboard") or {}
         if storyboard.get("hidden") or storyboard.get("width", 0) < 240 or storyboard.get("height", 0) < 120:
             raise AssertionError(f"Timeline storyboard preview is hidden or clipped: {storyboard}")
@@ -413,12 +410,6 @@ def run_audit(base_url: str, out_dir: Path, *, width: int, height: int, geckodri
         driver.save_screenshot(str(storyboard_screenshot))
         result["screenshot"] = str(screenshot)
         result["storyboard_screenshot"] = str(storyboard_screenshot)
-        result["frontend_backend"] = frontend_backend.get("vision_link_request")
-        result["vision_link_persistence"] = {
-            "initial": initial_vision_selection,
-            "persisted_after_refresh": persisted_vision_selection,
-            "restored": restored_vision_selection,
-        }
         return result
     finally:
         time.sleep(0.1)

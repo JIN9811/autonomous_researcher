@@ -61,6 +61,8 @@ class OllamaBackend(BaseLLMBackend):
         }
         if self._keep_alive is not None:
             payload["keep_alive"] = self._keep_alive
+        if isinstance(metadata, dict) and metadata.get("response_format") == "json_object":
+            payload["format"] = "json"
         if metadata:
             payload["metadata"] = metadata
 

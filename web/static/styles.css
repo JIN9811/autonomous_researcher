@@ -1389,6 +1389,148 @@ textarea {
   gap: 12px;
 }
 
+.equipment-flow-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.equipment-flow-editor-card,
+.equipment-flow-progress-card,
+.equipment-flow-vision-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.equipment-flow-vision-card {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(300px, 1fr) minmax(320px, 1.4fr);
+  align-items: center;
+  gap: 16px;
+}
+
+.equipment-section-heading.compact {
+  margin-bottom: 9px;
+}
+
+.equipment-section-heading.compact h3,
+.equipment-flow-vision-card h3 {
+  margin: 3px 0 0;
+  font-size: 1rem;
+}
+
+.button-row.compact {
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.equipment-skill-flow-slots,
+.equipment-skill-flow-progress {
+  display: grid;
+  gap: 8px;
+  min-height: 128px;
+}
+
+.equipment-flow-slot {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-left: 3px solid #2563eb;
+  border-radius: 9px;
+  background: rgba(248, 250, 252, 0.92);
+}
+
+.equipment-flow-slot[data-kind="vision_gate"] {
+  border-left-color: #d97706;
+}
+
+.equipment-flow-slot-index {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.equipment-flow-slot-fields {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.8fr) minmax(150px, 1.2fr);
+  gap: 7px;
+}
+
+.equipment-flow-slot-fields .text-input {
+  min-width: 0;
+  padding: 7px 9px;
+  font-size: 0.76rem;
+}
+
+.equipment-flow-slot-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.equipment-flow-node-row {
+  display: flex;
+  align-items: stretch;
+  gap: 7px;
+  overflow-x: auto;
+  padding: 6px 2px 10px;
+}
+
+.equipment-flow-node {
+  position: relative;
+  display: grid;
+  align-content: center;
+  min-width: 128px;
+  min-height: 66px;
+  padding: 9px 11px;
+  border: 1px solid rgba(37, 99, 235, 0.34);
+  border-radius: 9px;
+  background: rgba(239, 246, 255, 0.86);
+}
+
+.equipment-flow-node:not(:last-child)::after {
+  position: absolute;
+  right: -8px;
+  top: calc(50% - 1px);
+  width: 8px;
+  height: 2px;
+  background: #64748b;
+  content: "";
+}
+
+.equipment-flow-node.vision {
+  border-color: rgba(217, 119, 6, 0.46);
+  background: rgba(255, 247, 237, 0.9);
+}
+
+.equipment-flow-node.active {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.18);
+}
+
+.equipment-flow-node.done {
+  border-color: #16a34a;
+  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.12);
+}
+
+.equipment-flow-node strong,
+.equipment-flow-node small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.equipment-flow-node small {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
 .equipment-agentic-progress-stages {
   display: grid;
   grid-template-columns: repeat(8, minmax(0, 1fr));
@@ -1455,7 +1597,7 @@ textarea {
 }
 
 .equipment-runtime-grid {
-  grid-template-columns: minmax(0, 1.65fr) repeat(2, minmax(260px, 0.7fr));
+  grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.7fr);
 }
 
 .equipment-work-card {
@@ -2132,6 +2274,15 @@ textarea {
     grid-column: auto;
   }
 
+  .equipment-flow-workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .equipment-flow-vision-card {
+    grid-column: auto;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .equipment-local-bridge-panel {
     grid-template-columns: 1fr;
   }
@@ -2247,6 +2398,11 @@ textarea {
   background: rgba(255, 255, 255, 0.72);
 }
 
+#equipment-candidates .equipment-candidate-card {
+  display: grid;
+  align-items: stretch;
+}
+
 .equipment-candidate-card p {
   margin: 4px 0 0;
 }
@@ -2283,15 +2439,26 @@ textarea {
 
 .equipment-candidate-save {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(112px, 0.65fr);
   gap: 8px;
   align-items: center;
+  min-width: 0;
+  width: 100%;
 }
 
 .equipment-alias-input {
-  min-width: 180px;
+  min-width: 0;
   padding: 9px 10px;
   border-radius: 11px;
+}
+
+.equipment-pairing-code-input {
+  min-width: 0;
+}
+
+.equipment-candidate-save .btn {
+  grid-column: 1 / -1;
+  width: 100%;
 }
 
 .btn.danger {
@@ -11954,6 +12121,120 @@ body.planning-live-body .planning-chat-item table {
 .equipment-readiness-card strong {
   display: block;
   margin-bottom: 0.25rem;
+}
+
+.ar-equipment-cycle-header {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 0.42fr);
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(14, 116, 144, 0.24);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(8, 145, 178, 0.12), rgba(15, 23, 42, 0.04));
+}
+
+.ar-equipment-cycle-header > div,
+.ar-equipment-cycle-gate {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ar-equipment-cycle-header small,
+.ar-equipment-method-grid small {
+  color: var(--muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.ar-equipment-cycle-header strong {
+  font-size: 1rem;
+}
+
+.ar-equipment-cycle-header span,
+.ar-equipment-transition-list small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.ar-equipment-cycle-gate {
+  padding: 10px 12px;
+  border: 1px solid rgba(245, 158, 11, 0.32);
+  border-radius: 12px;
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.ar-equipment-cycle-gate.is-ready {
+  border-color: rgba(34, 197, 94, 0.38);
+  background: rgba(34, 197, 94, 0.08);
+}
+
+.ar-equipment-method-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ar-equipment-method-grid article,
+.ar-equipment-transition-list article {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.ar-equipment-method-grid article > span {
+  display: grid;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+
+.ar-equipment-transition-list {
+  display: grid;
+  gap: 7px;
+  max-height: 270px;
+  overflow-y: auto;
+}
+
+.ar-equipment-transition-list article {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.ar-equipment-transition-list article small {
+  grid-column: 1 / -1;
+}
+
+.ar-equipment-raw-artifact {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.ar-equipment-raw-artifact small {
+  color: var(--muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.07em;
+}
+
+.ar-equipment-raw-artifact a,
+.ar-equipment-raw-artifact span {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .ar-equipment-cycle-header,
+  .ar-equipment-method-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .compact-proof-card {

@@ -19,7 +19,7 @@ def test_lerobot_camera_usb_link_badge_is_rendered_from_saved_device_metadata() 
     assert ".lerobot-camera-usb-link.warning" in styles
     assert ".lerobot-camera-usb-link.unknown" in styles
     assert "/static/styles.css?v=20260715-camera-usb-link-1" in template
-    assert "/static/lerobot.js?v=20260715-camera-usb-link-1" in template
+    assert "/static/lerobot.js?v=20260901-dataset-manage-1" in template
 
 
 def test_lerobot_active_robot_cam_controls_and_payload_are_wired() -> None:
@@ -232,7 +232,7 @@ def test_lerobot_isaac_lab_gui_tab_shell_is_wired() -> None:
 
     assert 'id="lerobot-main-tab"' in template
     assert 'id="isaac-lab-tab"' in template
-    assert "/static/lerobot.js?v=20260715-camera-usb-link-1" in template
+    assert "/static/lerobot.js?v=20260901-dataset-manage-1" in template
     assert "/static/styles.css?v=20260715-camera-usb-link-1" in template
     assert 'data-lerobot-tab-target="isaac-lab-tab"' in template
     assert "function activateLeRobotGuiTab" in script
@@ -673,6 +673,17 @@ def test_lerobot_train_source_policy_is_hidden_from_main_training_form() -> None
     assert "policy_pretrained_path: trainSourcePolicyInput ? trainSourcePolicyInput.value.trim() : \"\"," in script
 
 
+def test_lerobot_wandb_local_api_key_controls_are_wired() -> None:
+    template = Path("web/templates/lerobot.html").read_text(encoding="utf-8")
+    script = Path("web/static/lerobot.js").read_text(encoding="utf-8")
+
+    assert 'id="lerobot-train-wandb-api-key-input" type="password"' in template
+    assert 'id="btn-wandb-local-api-key-save"' in template
+    assert 'const trainWandbApiKeyInput = $("lerobot-train-wandb-api-key-input");' in script
+    assert 'fetch("/api/lerobot/wandb-local/api-key")' in script
+    assert 'postJson("/api/lerobot/wandb-local/api-key"' in script
+
+
 def test_lerobot_unified_progress_components_are_wired() -> None:
     template = Path("web/templates/lerobot.html").read_text(encoding="utf-8")
     script = Path("web/static/lerobot.js").read_text(encoding="utf-8")
@@ -873,6 +884,50 @@ def test_lerobot_dataset_mix_controls_are_wired() -> None:
     assert "fidelity_isaac_rgbd_weight: numberValue(fidelityIsaacRgbdWeightInput, 0.55)" in script
     assert "fidelity_isaac_augmentation_weight: numberValue(fidelityIsaacAugmentationWeightInput, 0)" in script
     assert "fidelity_isaac_lab_synthetic_weight: numberValue(fidelityIsaacLabSyntheticWeightInput, 0.25)" in script
+
+
+def test_lerobot_dataset_manage_tab_is_wired_for_merge_split_delete() -> None:
+    template = Path("web/templates/lerobot.html").read_text(encoding="utf-8")
+    script = Path("web/static/lerobot.js").read_text(encoding="utf-8")
+
+    for element_id in [
+        "dataset-manage-tab-button",
+        "dataset-manage-tab",
+    ]:
+        assert element_id in template
+
+    for element_id in [
+        "dataset-manage-merge-source-a",
+        "dataset-manage-merge-source-b",
+        "dataset-manage-merge-range-a",
+        "dataset-manage-merge-range-b",
+        "dataset-manage-output-repo",
+        "btn-browse-dataset-manage-root",
+        "dataset-manage-split-source",
+        "dataset-manage-split-spec",
+        "dataset-manage-delete-source",
+        "dataset-manage-delete-range",
+        "dataset-manage-delete-output-repo",
+        "dataset-manage-list",
+        "dataset-manage-status",
+    ]:
+        assert element_id in template
+        assert element_id in script
+    assert 'data-lerobot-tab-target="dataset-manage-tab"' in template
+    assert "Dataset Manage" in template
+    assert 'postJson("/api/lerobot/dataset-manage/list"' in script
+    assert '"/api/lerobot/dataset-manage/merge"' in script
+    assert '"/api/lerobot/dataset-manage/split"' in script
+    assert '"/api/lerobot/dataset-manage/delete"' in script
+    assert "function refreshDatasetManageList" in script
+    assert "function syncDatasetManageRootFromLocalPaths" in script
+    assert "function datasetManageMergePayload" in script
+    assert "function datasetManageSplitPayload" in script
+    assert "function datasetManageDeletePayload" in script
+    assert 'bind("btn-browse-dataset-manage-root"' in script
+    assert 'bind("btn-dataset-manage-merge"' in script
+    assert 'bind("btn-dataset-manage-split"' in script
+    assert 'bind("btn-dataset-manage-delete"' in script
     assert "dataset_mix_effective_counts" in script
     assert "fidelity_weights" in script
 

@@ -11,13 +11,16 @@ from typing import Any
 
 import pytest
 
+from agents.base_agent import AgentResult
 from agents.equipment_agent import LabEquipmentAgent
 from backends.llm_backend import LLMResponse
 from mcp_tools.equipment_tools import register_equipment_tools
 from mcp_tools.mock_tools import register_mock_tools
 from mcp_tools.tool_registry import ToolRegistry
 from orchestrator.state import Mode, OrchestratorState, Stage
-from utils.equipment_skill_runtime import EquipmentSkillRegistry, canonical_sha256
+from utils.equipment_skill_runtime import EquipmentSkillRegistry, SkillContractError, canonical_sha256
+from utils.equipment_skill_flow import EquipmentSkillFlowStore
+from utils.equipment_agentic_task import build_utm_compression_flow_template
 
 
 @pytest.fixture(autouse=True)
@@ -160,6 +163,661 @@ async def test_equipment_skill_executes_segments_without_llm_call(tmp_path: Path
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("vision_enabled", "vision_response", "expected_outcome", "expected_success"),
+    [
+        (False, None, "bypass", True),
+        (True, {"ok": True, "results": [{"ok": True}]}, "detected", True),
+        (True, {"ok": False, "results": [{"ok": False}]}, "not_detected", False),
+        (
+            True,
+            {
+                "ok": False,
+                "failure_code": "TOPIC_TIMEOUT",
+                "results": [{"ok": False}],
+            },
+            "timeout",
+            False,
+        ),
+        (
+            True,
+            {
+                "ok": False,
+                "failure_code": "UTM_MOTION_NOT_CONFIRMED",
+                "results": [{"ok": False}],
+            },
+            "not_detected",
+            False,
+        ),
+        (
+            True,
+            {
+                "ok": False,
+                "failure_code": "UTM_OBSERVER_NOT_CONFIGURED",
+                "results": [],
+            },
+            "error",
+            False,
+        ),
+    ],
+)
+async def test_equipment_skill_flow_executes_composite_block_and_vision_route(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    vision_enabled: bool,
+    vision_response: dict[str, Any] | None,
+    expected_outcome: str,
+    expected_success: bool,
+) -> None:
+    tools = _tools(tmp_path)
+    registry_root = tmp_path / "skills"
+    registry = EquipmentSkillRegistry(registry_root)
+    registry.create_draft(
+        recording=_saved_recording(),
+        skill_id="program1_skill",
+        version="1.0.0",
+        target_profile="windows_desktop_v1",
+        model_snapshot={"provider": "vllm", "model": "gemma4:e4b-it-nvfp4"},
+    )
+    package = registry.compile("program1_skill", "1.0.0")
+    registry.validate("program1_skill", "1.0.0")
+    for program in package["programs"]:
+        assert tools.call("equipment.pyautogui.register_program", {"runtime_mode": "test", "program": program})["ok"]
+    registry.mark_deployed(
+        "program1_skill",
+        "1.0.0",
+        bridge_id="simulator",
+        deployment_sha256=canonical_sha256(package["programs"]),
+    )
+    flow_path = tmp_path / "equipment_skill_flows.json"
+    EquipmentSkillFlowStore(flow_path).save(
+        "windows_desktop_v1",
+        {
+            "schema": "atr.equipment_skill_flow.v1",
+            "flow_id": "windows_desktop_v1",
+            "profile_id": "windows_desktop_v1",
+            "agentic_task_id": "",
+            "blocks": [
+                {
+                    "id": "run_program",
+                    "label": "Run program",
+                    "skill": {"skill_id": "program1_skill", "skill_version": "1.0.0"},
+                    "agentic": {
+                        "task": "Run bounded equipment demonstration",
+                        "completed": "__complete__",
+                        "failed": "__blocked__",
+                    },
+                    "vision": {
+                        "enabled": vision_enabled,
+                        "task_id": "utm_motion_confirm",
+                        "detected": "__complete__",
+                        "not_detected": "__blocked__",
+                        "timeout": "__blocked__",
+                        "error": "__blocked__",
+                    },
+                },
+            ],
+        },
+    )
+    settings_path = tmp_path / "equipment_workspace_settings.json"
+    settings_path.write_text(
+        json.dumps({"profiles": {"windows_desktop_v1": {"vision_link_enabled": False}}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(LabEquipmentAgent, "_SKILL_FLOW_PATH", flow_path, raising=False)
+    monkeypatch.setattr(LabEquipmentAgent, "_WORKSPACE_SETTINGS_PATH", settings_path, raising=False)
+    vision_payloads: list[dict[str, Any]] = []
+    if vision_response is not None:
+        vision_response = dict(vision_response)
+        raw_results = vision_response.get("results")
+        if isinstance(raw_results, list) and len(raw_results) == 1 and isinstance(raw_results[0], dict):
+            result_item = dict(raw_results[0])
+            result_item.update(
+                {
+                    "task_id": "utm_motion_confirm",
+                    "check_id": "utm_motion_confirm",
+                    "run_id": "run-test",
+                    "specimen_id": "specimen-test",
+                    "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat(),
+                }
+            )
+            vision_response["results"] = [result_item]
+        tools.register(
+            "vision.equipment_cross_check",
+            lambda payload: vision_payloads.append(dict(payload)) or vision_response,
+        )
+    ctx = _CtxStub(tools, "must not be used")
+    state = _state(
+        experiment_spec={
+            "equipment_profile_id": "windows_desktop_v1",
+            "equipment_skill_registry_root": str(registry_root),
+        }
+    )
+
+    result = await LabEquipmentAgent().run(state, ctx)
+
+    assert result.success is expected_success
+    execution = result.data["equipment_skill_flow_execution"]
+    assert [(item["block_id"], item["phase"]) for item in execution["transitions"]] == [
+        ("run_program", "skill"),
+        ("run_program", "vision"),
+    ]
+    assert execution["transitions"][1]["outcome"] == expected_outcome
+    if vision_enabled:
+        assert len(vision_payloads) == 1
+        assert [item["check_id"] for item in vision_payloads[0]["checks"]] == [
+            "utm_motion_confirm"
+        ]
+        assert vision_payloads[0]["checks"][0]["task_id"] == "utm_motion_confirm"
+        assert execution["transitions"][1]["vision_task_id"] == "utm_motion_confirm"
+        assert execution["transitions"][1]["check_id"] == "utm_motion_confirm"
+        assert execution["transitions"][1]["vision_task_label"] == (
+            "UTM Motion Confirmation"
+        )
+    else:
+        assert vision_payloads == []
+    assert all(
+        item["task"] == "Run bounded equipment demonstration"
+        for item in execution["transitions"]
+    )
+    assert result.data["equipment_skill_execution"]["agentic_task"] == (
+        "Run bounded equipment demonstration"
+    )
+    assert execution["terminal"] == ("__complete__" if expected_success else "__blocked__")
+    assert "workflow_agentic_task" not in execution
+    assert ctx.prompts == []
+
+
+@pytest.mark.asyncio
+async def test_equipment_agentic_task_blocks_before_skill_binding_without_verified_live_handoff(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catch the overlay sending equipment input before its locked upstream gate."""
+    flow_path = tmp_path / "equipment_skill_flows.json"
+    flow = build_utm_compression_flow_template("windows_desktop_v1")
+    EquipmentSkillFlowStore(flow_path).save(
+        "windows_desktop_v1",
+        flow,
+    )
+    monkeypatch.setattr(LabEquipmentAgent, "_SKILL_FLOW_PATH", flow_path, raising=False)
+    tools = _tools(tmp_path)
+    equipment_calls: list[dict[str, Any]] = []
+    tools.register(
+        "equipment.pyautogui.run",
+        lambda payload: equipment_calls.append(dict(payload)) or {"ok": True},
+    )
+    state = _state(
+        mode=Mode.LIVE,
+        experiment_spec={
+            "equipment_profile_id": "windows_desktop_v1",
+            "equipment_skill_registry_root": str(tmp_path / "skills"),
+        },
+    )
+    state.run_metadata["manipulation_result"] = {
+        "handoff_status": "reported_complete",
+        "run_id": "run-test",
+        "specimen_id": "specimen-test",
+    }
+
+    result = await LabEquipmentAgent().run(state, _CtxStub(tools, "must not be used"))
+
+    assert result.success is False
+    assert result.data["equipment_handoff"]["failure_code"] == "EQUIPMENT_HANDOFF_NOT_READY"
+    assert result.data["equipment_skill_flow_execution"]["workflow_agentic_task"]["entry_gate"]["locked"] is True
+    assert equipment_calls == []
+
+
+@pytest.mark.asyncio
+async def test_equipment_agentic_task_preserves_cycle_evidence_failure_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catch a specific Raw CSV failure being overwritten by the generic flow code."""
+    flow = build_utm_compression_flow_template("windows_desktop_v1")
+    for block in flow["blocks"]:
+        block["skill"] = {"skill_id": "fake", "skill_version": "1.0.0"}
+
+    agent = LabEquipmentAgent()
+
+    async def fake_skill(*_args: Any, **_kwargs: Any) -> AgentResult:
+        return AgentResult(
+            success=True,
+            summary="simulated step complete",
+            data={"equipment_result": {}, "equipment_report": {}},
+        )
+
+    monkeypatch.setattr(agent, "_run_equipment_skill", fake_skill)
+    monkeypatch.setattr(agent, "_preflight_skill_flow_resources", lambda **_kwargs: {"ok": True})
+    result = await agent._run_equipment_skill_flow(
+        _state(
+            experiment_spec={
+                "equipment_profile_id": "windows_desktop_v1",
+                "specimen_id": "specimen-test",
+            }
+        ),
+        _CtxStub(_tools(tmp_path), "must not be used"),
+        flow,
+    )
+
+    assert result.success is False
+    assert result.data["handoff_eligibility"]["failure_code"] == "RAW_CSV_VALIDATION_FAILED"
+    assert result.data["equipment_handoff"]["failure_code"] == "RAW_CSV_VALIDATION_FAILED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("artifact_case", "expected_success"),
+    [
+        ("valid", True),
+        ("missing_identity", False),
+        ("mismatched_acquisition", False),
+        ("multiple_candidates", False),
+    ],
+)
+async def test_canonical_agentic_task_completes_only_with_bound_csv_and_clearance_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    artifact_case: str,
+    expected_success: bool,
+) -> None:
+    flow = build_utm_compression_flow_template("windows_desktop_v1")
+    for block in flow["blocks"]:
+        block["skill"] = {"skill_id": "fake", "skill_version": "1.0.0"}
+
+    agent = LabEquipmentAgent()
+
+    async def fake_skill(_state: Any, _ctx: Any, request: dict[str, Any]) -> AgentResult:
+        task = str(request.get("task") or "")
+        equipment_result: dict[str, Any] = {}
+        equipment_report: dict[str, Any] = {}
+        if task == "Save Raw Data CSV":
+            artifact_identity = (
+                {"run_id": "run-test", "specimen_id": "specimen-test"}
+                if artifact_case != "missing_identity"
+                else {}
+            )
+            equipment_result["output_artifacts"] = [
+                {
+                    "kind": "utm_csv",
+                    "artifact_id": "raw-1",
+                    "linux_path": "/tmp/raw.csv",
+                    **artifact_identity,
+                }
+            ]
+            if artifact_case == "multiple_candidates":
+                equipment_result["output_artifacts"].append(
+                    {
+                        "kind": "utm_csv",
+                        "artifact_id": "raw-2",
+                        "linux_path": "/tmp/raw-2.csv",
+                        **artifact_identity,
+                    }
+                )
+            equipment_report["data_acquisition"] = {
+                "artifact_id": "raw-1",
+                "run_id": "run-test",
+                "specimen_id": "specimen-test",
+                "linux_path": "/tmp/stale.csv" if artifact_case == "mismatched_acquisition" else "/tmp/raw.csv",
+            }
+        elif task == "Validate Raw Data CSV":
+            artifact_identity = (
+                {"run_id": "run-test", "specimen_id": "specimen-test"}
+                if artifact_case != "missing_identity"
+                else {}
+            )
+            equipment_result["output_artifacts"] = [
+                {
+                    "kind": "utm_csv",
+                    "artifact_id": "raw-1",
+                    "linux_path": "/tmp/raw.csv",
+                    **artifact_identity,
+                }
+            ]
+            if artifact_case == "multiple_candidates":
+                equipment_result["output_artifacts"].append(
+                    {
+                        "kind": "utm_csv",
+                        "artifact_id": "raw-2",
+                        "linux_path": "/tmp/raw-2.csv",
+                        **artifact_identity,
+                    }
+                )
+            equipment_report["data_acquisition"] = {
+                "status": "pulled_to_linux",
+                "artifact_id": "raw-1",
+                "run_id": "run-test",
+                "specimen_id": "specimen-test",
+                "linux_path": "/tmp/stale.csv" if artifact_case == "mismatched_acquisition" else "/tmp/raw.csv",
+                "row_count_probe": 2,
+                "columns_probe": ["time_s", "displacement_mm", "force_N"],
+            }
+            equipment_report["cross_checks"] = {"data_parse_probe_ok": True}
+        elif task == "Restore configured robot-entry clearance":
+            equipment_result["height"] = {"observed": 1.0, "target": 1.0}
+        return AgentResult(
+            success=True,
+            summary="simulated step complete",
+            data={"equipment_result": equipment_result, "equipment_report": equipment_report},
+        )
+
+    monkeypatch.setattr(agent, "_run_equipment_skill", fake_skill)
+    monkeypatch.setattr(agent, "_preflight_skill_flow_resources", lambda **_kwargs: {"ok": True})
+    result = await agent._run_equipment_skill_flow(
+        _state(experiment_spec={"equipment_profile_id": "windows_desktop_v1", "specimen_id": "specimen-test"}),
+        _CtxStub(_tools(tmp_path), "must not be used"),
+        flow,
+    )
+
+    assert result.success is expected_success
+    assert result.data["raw_data_export"]["validated"] is expected_success
+    if expected_success:
+        assert result.data["next_specimen_readiness"]["clearance_restored"] is True
+        assert result.data["handoff_eligibility"]["eligible"] is True
+    else:
+        assert result.data["handoff_eligibility"]["failure_code"] == "RAW_CSV_VALIDATION_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_unbound_agentic_task_still_projects_locked_gate_for_live_gui(
+    tmp_path: Path,
+) -> None:
+    """Catch readiness blocks dropping the workflow contract from report projections."""
+    flow = build_utm_compression_flow_template("windows_desktop_v1")
+
+    result = await LabEquipmentAgent()._run_equipment_skill_flow(
+        _state(
+            experiment_spec={
+                "equipment_profile_id": "windows_desktop_v1",
+                "specimen_id": "specimen-test",
+            }
+        ),
+        _CtxStub(_tools(tmp_path), "must not be used"),
+        flow,
+    )
+
+    assert result.success is False
+    assert result.data["equipment_handoff"]["failure_code"] == "EQUIPMENT_SKILL_FLOW_UNBOUND"
+    assert result.data["workflow_agentic_task"]["task_id"] == "run_utm_compression_cycle"
+    assert result.data["required_entry_gate"]["locked"] is True
+    assert result.data["equipment_report"]["workflow_agentic_task"] == result.data["workflow_agentic_task"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("task_id", "shorten", "expected_code"),
+    [
+        ("unknown_task", False, "EQUIPMENT_AGENTIC_TASK_UNSUPPORTED"),
+        ("run_utm_compression_cycle", True, "EQUIPMENT_FLOW_REVISION_INVALID"),
+    ],
+)
+async def test_agentic_task_contract_blocks_unsupported_revision_before_any_skill(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    task_id: str,
+    shorten: bool,
+    expected_code: str,
+) -> None:
+    flow = build_utm_compression_flow_template("windows_desktop_v1")
+    flow["agentic_task_id"] = task_id
+    if shorten:
+        flow["blocks"] = flow["blocks"][:-1]
+    for block in flow["blocks"]:
+        block["skill"] = {"skill_id": "fake", "skill_version": "1.0.0"}
+
+    agent = LabEquipmentAgent()
+    skill_calls: list[str] = []
+
+    async def fake_skill(*_args: Any, **_kwargs: Any) -> AgentResult:
+        skill_calls.append("called")
+        return AgentResult(success=True, summary="unexpected", data={})
+
+    monkeypatch.setattr(agent, "_run_equipment_skill", fake_skill)
+    result = await agent._run_equipment_skill_flow(
+        _state(experiment_spec={"equipment_profile_id": "windows_desktop_v1", "specimen_id": "specimen-test"}),
+        _CtxStub(_tools(tmp_path), "must not be used"),
+        flow,
+    )
+
+    assert result.success is False
+    assert result.data["equipment_handoff"]["failure_code"] == expected_code
+    assert skill_calls == []
+
+
+@pytest.mark.asyncio
+async def test_skill_flow_preflights_every_exact_skill_before_first_device_step(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow = {
+        "schema": "atr.equipment_skill_flow.v1",
+        "flow_id": "windows_desktop_v1",
+        "profile_id": "windows_desktop_v1",
+        "agentic_task_id": "",
+        "blocks": [
+            {
+                "id": "first",
+                "skill": {"skill_id": "valid", "skill_version": "1.0.0"},
+                "agentic": {"task": "First", "completed": "next", "failed": "__blocked__"},
+                "vision": {"enabled": False, "detected": "next", "not_detected": "__blocked__", "timeout": "__blocked__", "error": "__blocked__"},
+            },
+            {
+                "id": "second",
+                "skill": {"skill_id": "missing", "skill_version": "1.0.0"},
+                "agentic": {"task": "Second", "completed": "__complete__", "failed": "__blocked__"},
+                "vision": {"enabled": False, "detected": "__complete__", "not_detected": "__blocked__", "timeout": "__blocked__", "error": "__blocked__"},
+            },
+        ],
+    }
+    package = {
+        "manifest": {
+            "lifecycle": "deployed",
+            "enabled": True,
+            "target_profile": "windows_desktop_v1",
+        },
+        "annotations": {},
+    }
+
+    def fake_get(_registry: EquipmentSkillRegistry, skill_id: str, _version: str) -> dict[str, Any]:
+        if skill_id == "missing":
+            raise SkillContractError("exact Skill version missing")
+        return package
+
+    monkeypatch.setattr(EquipmentSkillRegistry, "get", fake_get)
+    agent = LabEquipmentAgent()
+    skill_calls: list[str] = []
+
+    async def fake_skill(*_args: Any, **_kwargs: Any) -> AgentResult:
+        skill_calls.append("called")
+        return AgentResult(success=True, summary="unexpected", data={})
+
+    monkeypatch.setattr(agent, "_run_equipment_skill", fake_skill)
+    result = await agent._run_equipment_skill_flow(
+        _state(
+            experiment_spec={
+                "equipment_profile_id": "windows_desktop_v1",
+                "equipment_skill_registry_root": str(tmp_path / "skills"),
+            }
+        ),
+        _CtxStub(_tools(tmp_path), "must not be used"),
+        flow,
+    )
+
+    assert result.success is False
+    assert result.data["equipment_handoff"]["failure_code"] == "EQUIPMENT_SKILL_FLOW_PREFLIGHT_FAILED"
+    assert result.data["equipment_handoff"]["block_id"] == "second"
+    assert skill_calls == []
+
+
+@pytest.mark.asyncio
+async def test_skill_flow_preflights_enabled_vision_runtime_tool_before_first_skill(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow = {
+        "schema": "atr.equipment_skill_flow.v1",
+        "flow_id": "windows_desktop_v1",
+        "profile_id": "windows_desktop_v1",
+        "agentic_task_id": "",
+        "blocks": [
+            {
+                "id": "verify",
+                "skill": {"skill_id": "valid", "skill_version": "1.0.0"},
+                "agentic": {"task": "Verify", "completed": "__complete__", "failed": "__blocked__"},
+                "vision": {
+                    "enabled": True,
+                    "task_id": "utm_motion_confirm",
+                    "detected": "__complete__",
+                    "not_detected": "__blocked__",
+                    "timeout": "__blocked__",
+                    "error": "__blocked__",
+                },
+            }
+        ],
+    }
+    agent = LabEquipmentAgent()
+    skill_calls: list[str] = []
+
+    async def fake_skill(*_args: Any, **_kwargs: Any) -> AgentResult:
+        skill_calls.append("called")
+        return AgentResult(success=True, summary="unexpected", data={})
+
+    monkeypatch.setattr(agent, "_run_equipment_skill", fake_skill)
+    monkeypatch.setattr(agent, "_preflight_skill_flow_resources", lambda **_kwargs: {"ok": True})
+    result = await agent._run_equipment_skill_flow(
+        _state(experiment_spec={"equipment_profile_id": "windows_desktop_v1"}),
+        _CtxStub(ToolRegistry(), "must not be used"),
+        flow,
+    )
+
+    assert result.success is False
+    assert result.data["equipment_handoff"]["failure_code"] == "EQUIPMENT_VISION_LINK_UNAVAILABLE"
+    assert result.data["equipment_handoff"]["block_id"] == "verify"
+    assert skill_calls == []
+
+
+def test_equipment_vision_response_rejects_mismatched_or_stale_identity() -> None:
+    request = {
+        "task_id": "utm_motion_confirm",
+        "check_id": "utm_motion_confirm",
+        "run_id": "run-identity",
+        "specimen_id": "specimen-identity",
+    }
+    valid = {
+        "ok": True,
+        "results": [
+            {
+                "ok": True,
+                **request,
+                "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat(),
+            }
+        ],
+    }
+
+    assert LabEquipmentAgent._equipment_vision_response_valid(valid, request) is True
+
+    mismatched = {**valid, "results": [{**valid["results"][0], "run_id": "other-run"}]}
+    stale = {
+        **valid,
+        "results": [
+            {
+                **valid["results"][0],
+                "expires_at": (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),
+            }
+        ],
+    }
+    assert LabEquipmentAgent._equipment_vision_response_valid(mismatched, request) is False
+    assert LabEquipmentAgent._equipment_vision_response_valid(stale, request) is False
+
+
+@pytest.mark.asyncio
+async def test_invalid_equipment_skill_flow_blocks_instead_of_falling_back(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tools = _tools(tmp_path)
+    run_calls: list[dict[str, Any]] = []
+    tools.register("equipment.pyautogui.run", lambda payload: run_calls.append(dict(payload)) or {"ok": True})
+    flow_path = tmp_path / "equipment_skill_flows.json"
+    flow_path.write_text(
+        json.dumps(
+            {
+                "schema": "atr.equipment_skill_flows.v1",
+                "flows": {
+                    "windows_desktop_v1": {
+                        "schema": "atr.equipment_skill_flow.v1",
+                        "profile_id": "windows_desktop_v1",
+                        "flow_id": "windows_desktop_v1",
+                        "entry_node": "broken",
+                        "nodes": [
+                            {
+                                "id": "broken",
+                                "kind": "skill",
+                                "skill_id": "missing",
+                                "skill_version": "1.0.0",
+                                "routes": {"completed": "unknown", "failed": "__blocked__"},
+                            }
+                        ],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(LabEquipmentAgent, "_SKILL_FLOW_PATH", flow_path)
+    state = _state(experiment_spec={"equipment_profile_id": "windows_desktop_v1"})
+
+    result = await LabEquipmentAgent().run(state, _CtxStub(tools, "must not be used"))
+
+    assert result.success is False
+    assert result.data["equipment_handoff"]["failure_code"] == "EQUIPMENT_SKILL_FLOW_INVALID"
+    assert run_calls == []
+
+
+@pytest.mark.asyncio
+async def test_unbound_equipment_skill_flow_blocks_without_invoking_a_skill(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tools = _tools(tmp_path)
+    run_calls: list[dict[str, Any]] = []
+    tools.register("equipment.pyautogui.run", lambda payload: run_calls.append(dict(payload)) or {"ok": True})
+    flow_path = tmp_path / "equipment_skill_flows.json"
+    EquipmentSkillFlowStore(flow_path).save(
+        "windows_desktop_v1",
+        {
+            "schema": "atr.equipment_skill_flow.v1",
+            "profile_id": "windows_desktop_v1",
+            "flow_id": "windows_desktop_v1",
+            "blocks": [
+                {
+                    "id": "empty_block",
+                    "label": "Unbound block",
+                    "skill": {"skill_id": "", "skill_version": ""},
+                    "agentic": {"completed": "__complete__", "failed": "__blocked__"},
+                    "vision": {
+                        "enabled": False,
+                        "condition": "equipment_specimen_detected",
+                        "detected": "__complete__",
+                        "not_detected": "__blocked__",
+                        "timeout": "__blocked__",
+                        "error": "__blocked__",
+                    },
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(LabEquipmentAgent, "_SKILL_FLOW_PATH", flow_path)
+    state = _state(experiment_spec={"equipment_profile_id": "windows_desktop_v1"})
+
+    result = await LabEquipmentAgent().run(state, _CtxStub(tools, "must not be used"))
+
+    assert result.success is False
+    assert result.data["equipment_handoff"]["failure_code"] == "EQUIPMENT_SKILL_FLOW_UNBOUND"
+    assert run_calls == []
+
+
+@pytest.mark.asyncio
 async def test_live_equipment_skill_blocks_before_worker_when_profile_vision_preflight_fails(
     tmp_path: Path,
 ) -> None:
@@ -260,6 +918,17 @@ async def test_equipment_skill_uses_one_exact_model_recovery_then_resumes(tmp_pa
         target_profile="windows_desktop_v1",
         model_snapshot={"provider": "vllm", "model": "gemma4:e4b-it-nvfp4"},
     )
+    registry.annotate(
+        "program1_skill",
+        "1.0.0",
+        {
+            "workflow_summary": {
+                "intent": "Run the recorded equipment demonstration.",
+                "completion_state": "The result view is visible.",
+            },
+            "steps": [],
+        },
+    )
     package = registry.compile("program1_skill", "1.0.0")
     registry.validate("program1_skill", "1.0.0")
     registry.mark_deployed(
@@ -319,6 +988,7 @@ async def test_equipment_skill_uses_one_exact_model_recovery_then_resumes(tmp_pa
                 "target_profile": "windows_desktop_v1",
                 "registry_root": str(tmp_path / "skills"),
                 "auto_recover": True,
+                "task": "Run bounded equipment demonstration",
             }
         }
     )
@@ -331,6 +1001,14 @@ async def test_equipment_skill_uses_one_exact_model_recovery_then_resumes(tmp_pa
     assert len(backend.calls) == 1
     assert backend.calls[0]["model"] == "gemma4:e4b-it-nvfp4"
     assert backend.calls[0]["metadata"]["no_fallback"] is True
+    recovery_context = json.loads(backend.calls[0]["user_prompt"])
+    assert recovery_context["agentic_task"] == "Run bounded equipment demonstration"
+    assert recovery_context["annotation_context"]["workflow_summary"]["intent"] == (
+        "Run the recorded equipment demonstration."
+    )
+    assert result.data["equipment_skill_execution"]["agentic_task"] == (
+        "Run bounded equipment demonstration"
+    )
     assert ctx.prompts == []
     assert result.data["equipment_skill_execution"]["state"] == "COMPLETED"
     assert result.data["equipment_skill_execution"]["recovery_history"][0]["operation"] == "focus_window"

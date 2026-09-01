@@ -17,6 +17,7 @@
     press: "Press key",
     screenshot: "Screenshot",
     scroll: "Scroll",
+    set_input_language: "Input language",
     wait: "Wait",
     wait_for_file: "Wait for file",
     wait_until: "Wait until",
@@ -60,6 +61,14 @@
       press: { action: "press", key: "enter", presses: 1, interval: 0 },
       screenshot: { action: "screenshot", checkpoint: "checkpoint" },
       scroll: { action: "scroll", clicks: 1 },
+      set_input_language: {
+        action: "set_input_language",
+        layout_id: "00000409",
+        locale: "en_US",
+        language: "en",
+        ime_mode: "alphanumeric",
+        typing_mode: "latin",
+      },
       wait: { action: "wait", seconds: 1 },
       wait_for_file: { action: "wait_for_file", pattern: "", timeout_s: 30, poll_interval_s: 0.5 },
       wait_until: { action: "wait_until", target: "", timeout_s: 30, poll_interval_s: 0.5 },
@@ -214,6 +223,7 @@
     if (action.action === "write") return `${label} · ${String(action.text || "").slice(0, 40)}`;
     if (action.action === "press") return `${label} · ${action.key || "key"}`;
     if (action.action === "hotkey") return `${label} · ${(action.keys || []).join("+")}`;
+    if (action.action === "set_input_language") return `${label} · ${action.locale || action.layout_id || "layout"} / ${action.typing_mode || "mode"}`;
     return label;
   }
 

@@ -1,0 +1,185 @@
+{
+  "flows": {
+    "utm_windows_v1": {
+      "agentic_task_id": "run_utm_compression_cycle",
+      "blocks": [
+        {
+          "agentic": {
+            "completed": "next",
+            "failed": "__blocked__",
+            "task": "Move Jigs for Next Specimen"
+          },
+          "id": "prepare_next_specimen",
+          "label": "Move Jigs for Next Specimen",
+          "skill": {
+            "skill_id": "utm_prepare_next_specimen",
+            "skill_version": "1.0.6"
+          },
+          "vision": {
+            "detected": "next",
+            "enabled": false,
+            "error": "__blocked__",
+            "not_detected": "__blocked__",
+            "task_id": "",
+            "timeout": "__blocked__"
+          }
+        },
+        {
+          "agentic": {
+            "completed": "next",
+            "failed": "__blocked__",
+            "task": "Start Test"
+          },
+          "id": "start_test",
+          "label": "Start Test",
+          "skill": {
+            "skill_id": "utm_start_test",
+            "skill_version": "1.0.8"
+          },
+          "vision": {
+            "detected": "next",
+            "enabled": false,
+            "error": "__blocked__",
+            "not_detected": "__blocked__",
+            "task_id": "",
+            "timeout": "__blocked__"
+          }
+        },
+        {
+          "agentic": {
+            "completed": "next",
+            "failed": "__blocked__",
+            "task": "Monitor contact and method-driven compression"
+          },
+          "id": "monitor_contact_and_run",
+          "label": "Monitor contact and method-driven compression",
+          "skill": {
+            "skill_id": "utm_monitor_contact_and_run",
+            "skill_version": "1.0.6"
+          },
+          "vision": {
+            "detected": "next",
+            "enabled": false,
+            "error": "__blocked__",
+            "not_detected": "__blocked__",
+            "task_id": "",
+            "timeout": "__blocked__"
+          }
+        },
+        {
+          "agentic": {
+            "completed": "next",
+            "failed": "__blocked__",
+            "task": "Wait for automatic Height return"
+          },
+          "id": "await_auto_return",
+          "label": "Wait for automatic Height return",
+          "skill": {
+            "skill_id": "utm_await_auto_return",
+            "skill_version": "1.0.7"
+          },
+          "vision": {
+            "detected": "next",
+            "enabled": false,
+            "error": "__blocked__",
+            "not_detected": "__blocked__",
+            "task_id": "",
+            "timeout": "__blocked__"
+          }
+        },
+        {
+          "agentic": {
+            "completed": "next",
+            "failed": "__blocked__",
+            "task": "Save Raw Data CSV"
+          },
+          "id": "save_raw_data",
+          "label": "Save Raw Data CSV",
+          "skill": {
+            "skill_id": "utm_save_raw_data",
+            "skill_version": "1.0.6"
+          },
+          "vision": {
+            "detected": "next",
+            "enabled": false,
+            "error": "__blocked__",
+            "not_detected": "__blocked__",
+            "task_id": "",
+            "timeout": "__blocked__"
+          }
+        },
+        {
+          "agentic": {
+            "completed": "next",
+            "failed": "__blocked__",
+            "task": "Validate Raw Data CSV"
+          },
+          "id": "validate_raw_data",
+          "label": "Validate Raw Data CSV",
+          "skill": {
+            "skill_id": "utm_validate_raw_data",
+            "skill_version": "1.0.6"
+          },
+          "vision": {
+            "detected": "next",
+            "enabled": false,
+            "error": "__blocked__",
+            "not_detected": "__blocked__",
+            "task_id": "",
+            "timeout": "__blocked__"
+          }
+        },
+        {
+          "agentic": {
+            "completed": "next",
+            "failed": "__blocked__",
+            "task": "Next Test without saving current test"
+          },
+          "id": "advance_without_save",
+          "label": "Next Test without saving current test",
+          "skill": {
+            "skill_id": "utm_advance_without_save",
+            "skill_version": "1.0.6"
+          },
+          "vision": {
+            "detected": "next",
+            "enabled": false,
+            "error": "__blocked__",
+            "not_detected": "__blocked__",
+            "task_id": "",
+            "timeout": "__blocked__"
+          }
+        },
+        {
+          "agentic": {
+            "completed": "__complete__",
+            "failed": "__blocked__",
+            "task": "Restore configured robot-entry clearance"
+          },
+          "id": "restore_robot_clearance",
+          "label": "Restore configured robot-entry clearance",
+          "skill": {
+            "skill_id": "utm_restore_robot_clearance",
+            "skill_version": "1.0.6"
+          },
+          "vision": {
+            "detected": "__complete__",
+            "enabled": false,
+            "error": "__blocked__",
+            "not_detected": "__blocked__",
+            "task_id": "",
+            "timeout": "__blocked__"
+          }
+        }
+      ],
+      "enabled": true,
+      "flow_id": "utm_windows_v1",
+      "profile_id": "utm_windows_v1",
+      "schema": "atr.equipment_skill_flow.v1",
+      "updated_at": "2026-09-01T16:16:41.493061+00:00",
+      "version": 1
+    }
+  },
+  "schema": "atr.equipment_skill_flows.v1",
+  "updated_at": "2026-09-01T16:16:41.493061+00:00"
+}

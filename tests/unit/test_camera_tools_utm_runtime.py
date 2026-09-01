@@ -93,7 +93,18 @@ def test_live_utm_motion_check_uses_observer_and_runtime_manager() -> None:
         "vision.equipment_cross_check",
         {
             "runtime_mode": "live",
-            "checks": [{"check_id": "utm_motion_confirm", "device": "utm"}],
+            "checks": [
+                {
+                    "task_id": "utm_motion_confirm",
+                    "check_id": "utm_motion_confirm",
+                    "device": "utm",
+                    "run_id": "run-identity",
+                    "loop_id": 4,
+                    "specimen_id": "specimen-identity",
+                    "producer_agent": "equipment_agent",
+                    "consumer_agent": "vision_agent",
+                }
+            ],
             "duration_sec": 5.0,
             "sample_interval_sec": 0.2,
             "minimum_samples": 8,
@@ -108,6 +119,12 @@ def test_live_utm_motion_check_uses_observer_and_runtime_manager() -> None:
     assert result["runtime_status"]["status"] == "running"
     assert result["results"][0]["status"] == "verified"
     assert result["results"][0]["evidence"]["transition"] == "NOT_WORKING_TO_WORKING"
+    assert result["results"][0]["task_id"] == "utm_motion_confirm"
+    assert result["results"][0]["run_id"] == "run-identity"
+    assert result["results"][0]["loop_id"] == 4
+    assert result["results"][0]["specimen_id"] == "specimen-identity"
+    assert result["results"][0]["producer_agent"] == "vision_agent"
+    assert result["results"][0]["consumer_agent"] == "equipment_agent"
 
 
 def test_camera_tools_register_vision_utm_runtime_controls() -> None:

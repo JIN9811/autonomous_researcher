@@ -476,6 +476,31 @@ def test_live_program_registration_preserves_worker_computed_digest(
     ).hexdigest()
 
 
+def test_compiled_skill_registration_allows_recorded_input_language_action(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    program = {
+        "schema": "atr.pyautogui_program.v1",
+        "program_id": "recorded_input_language_probe",
+        "name": "Recorded input language probe",
+        "sequence": [
+            {
+                "action": "set_input_language",
+                "layout_id": "00000412",
+                "locale": "ko_KR",
+                "language": "ko",
+                "ime_mode": "alphanumeric",
+                "typing_mode": "latin",
+            },
+            {"action": "write", "text": "equipment"},
+        ],
+    }
+
+    result = bridge.register_program({"runtime_mode": "test", "program": program})
+
+    assert result["ok"] is True
+    assert result["status"] == "registered"
+
+
 def test_simulator_program1_reports_missing_pyautogui(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
 
@@ -677,6 +702,54 @@ def test_pair_connection_exchanges_four_digit_code_and_saves_internal_key(
     assert "token" not in memory["candidates"]["utm_worker"]
     assert "0427" not in bridge.config.connection_memory_path.read_text(encoding="utf-8")
     assert bridge.connection_status()["paired"] is True
+
+
+def test_pair_connection_retries_once_when_worker_consumes_code_before_transport_drops(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _bridge(tmp_path, mode="live")
+    calls = 0
+
+    class _Reply:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"ok": True, "status": "paired_retry", "internal_key": "recovered-internal-key"}
+
+    class _Client:
+        def __init__(self, timeout: float) -> None:
+            assert timeout == bridge.config.request_timeout_sec
+
+        def __enter__(self) -> "_Client":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def post(self, url: str, json: dict[str, str]) -> _Reply:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise httpx.ReadError("response dropped after worker committed pairing")
+            return _Reply()
+
+    monkeypatch.setattr("device_bridges.windows_pyautogui_bridge.httpx.Client", _Client)
+
+    result = bridge.pair_connection(
+        {
+            "candidate_alias": "utm_worker",
+            "host": "192.168.50.58",
+            "port": 8765,
+            "pairing_code": "0427",
+        }
+    )
+
+    assert calls == 2
+    assert result["ok"] is True
+    memory = json.loads(bridge.config.connection_memory_path.read_text(encoding="utf-8"))
+    assert memory["candidates"]["utm_worker"]["internal_key"] == "recovered-internal-key"
 
 
 def test_paired_internal_key_takes_precedence_over_legacy_environment_token(
@@ -1040,8 +1113,9 @@ def test_configured_programs_are_merged_with_default_utm_protocols(tmp_path: Pat
     program_by_id = {item["program_id"]: item for item in programs}
 
     assert "program1" in program_by_id
-    expected_protocols = {"utm_compression_start_v1", "utm_export_csv_v1", "utm_manual_save_csv_v1", "utm_stop_or_abort_v1"}
+    expected_protocols = {"utm_compression_start_v1", "utm_export_csv_v1", "utm_stop_or_abort_v1"}
     assert expected_protocols.issubset(program_by_id)
+    assert "utm_manual_save_csv_v1" not in program_by_id
 
     compression = program_by_id["utm_compression_start_v1"]
     assert compression["program_type"] == "utm_protocol"
@@ -1050,20 +1124,26 @@ def test_configured_programs_are_merged_with_default_utm_protocols(tmp_path: Pat
     assert compression["preconditions"] == ["windows_bridge_ready", "utm_app_visible", "specimen_verified_on_fixture", "robot_clear_of_utm"]
     assert compression["expected_screen_before"][0]["name"] == "ready_state"
     assert {item.get("target") for item in compression["sequence"] if isinstance(item, dict)} >= {"ready_state", "start_button", "running_state", "complete_state"}
-    assert compression["save_policy"]["manual_save_required_if_no_artifact"] is True
-    assert compression["output_artifacts"][0]["kind"] == "utm_csv"
+    assert compression["save_policy"]["manual_save_required_if_no_artifact"] is False
+    assert not any(item.get("action") == "wait_for_file" for item in compression["sequence"] if isinstance(item, dict))
+    assert compression["output_artifacts"] == []
     assert compression["safe_abort"]["program_id"] == "utm_stop_or_abort_v1"
 
     export = program_by_id["utm_export_csv_v1"]
     assert export["program_type"] == "utm_export"
     assert export["expected_screen_before"][0]["name"] == "complete_state"
-    assert export["save_policy"]["save_method"] == "export_menu"
+    assert export["save_policy"]["save_method"] == "raw_csv_button"
     assert export["safe_abort"]["program_id"] == "utm_stop_or_abort_v1"
-
-    manual = program_by_id["utm_manual_save_csv_v1"]
-    assert manual["program_type"] == "utm_export"
-    assert manual["save_policy"]["save_method"] == "manual_save_dialog"
-    assert manual["save_policy"]["manual_save_required_if_no_artifact"] is False
+    assert any(
+        item.get("action") == "click" and item.get("target") == "save_raw_data_csv"
+        for item in export["sequence"]
+        if isinstance(item, dict)
+    )
+    assert not any(
+        item.get("action") == "hotkey" and item.get("keys") == ["ctrl", "s"]
+        for item in export["sequence"]
+        if isinstance(item, dict)
+    )
 
     abort = program_by_id["utm_stop_or_abort_v1"]
     assert abort["program_type"] == "utm_abort"
@@ -1165,6 +1245,22 @@ def test_simulator_capture_locator_returns_locator_override(tmp_path: Path) -> N
     assert response["locator"]["confidence"] == 0.85
     assert response["locator"]["region"] == [10, 20, 120, 60]
     assert Path(response["locator"]["image_path"]).exists()
+
+
+def test_simulator_capture_locator_defaults_confidence_to_point_nine(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    response = bridge.capture_locator(
+        {
+            "runtime_mode": "test",
+            "program_id": "utm_compression_start_v1",
+            "name": "start_button",
+            "region": [10, 20, 120, 60],
+        }
+    )
+
+    assert response["ok"] is True
+    assert response["locator"]["confidence"] == 0.9
 
 def test_utm_profile_memory_merges_into_registered_program(tmp_path: Path) -> None:
     profile_path = tmp_path / "equipment_utm_profile.json"

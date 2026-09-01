@@ -200,10 +200,12 @@ let liveUtmRuntimeRefreshSeq = 0;
 let liveUtmRuntimeFrameInFlight = null;
 let liveUtmRuntimeActionInFlight = null;
 let liveEquipmentRuntimeSnapshot = null;
+let liveEquipmentSkillFlowSnapshot = null;
 let liveEquipmentRuntimeError = "";
 let liveEquipmentRuntimeActionInFlight = "";
 let liveEquipmentRuntimeRefreshInFlight = null;
 let liveEquipmentRuntimeRefreshedAt = 0;
+let liveEquipmentRuntimeRefreshSeq = 0;
 let liveKnowledgeActivitySnapshot = null;
 let liveKnowledgeActivityInFlight = null;
 let liveKnowledgeActivityRefreshedAt = 0;
@@ -1027,6 +1029,12 @@ function resetLiveRunScopedStateForAuthoritativeSession(serverSession = {}) {
   liveReviewedAgents = {};
   livePinnedFindings = [];
   liveOperatorReportStateRunId = "";
+  liveEquipmentRuntimeSnapshot = null;
+  liveEquipmentSkillFlowSnapshot = null;
+  liveEquipmentRuntimeRefreshedAt = 0;
+  liveEquipmentRuntimeError = "";
+  liveEquipmentRuntimeRefreshSeq += 1;
+  liveEquipmentRuntimeRefreshInFlight = null;
   liveSelectedEventKey = "";
   liveGraphActionStatus = null;
   liveGuardianStatus = null;
@@ -15473,38 +15481,78 @@ function renderBoGateState(report) {
   `;
 }
 
+function activeEquipmentProfileId() {
+  const session = liveLastSession || liveLastSnapshot || {};
+  const equipment = latestEquipmentReport(session) || {};
+  const state = session.state && typeof session.state === "object" ? session.state : {};
+  const spec = state.current_experiment_spec && typeof state.current_experiment_spec === "object"
+    ? state.current_experiment_spec
+    : {};
+  const candidates = [
+    equipment.workflow_agentic_task?.profile_id,
+    equipment.control_plan?.profile?.profile_id,
+    spec.equipment_profile_id,
+    liveEquipmentRuntimeSnapshot?.canonicalSkillFlowExecution?.profile_id,
+    liveEquipmentRuntimeSnapshot?.canonicalExecution?.profile_id,
+  ];
+  const selected = candidates.map((item) => String(item || "").trim()).find((item) => /^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/.test(item));
+  return selected || "utm_windows_v1";
+}
+
 async function refreshEquipmentRuntimeSnapshot(options = {}) {
   if (!options.force && liveEquipmentRuntimeRefreshInFlight) return liveEquipmentRuntimeRefreshInFlight;
-  liveEquipmentRuntimeRefreshInFlight = (async () => {
+  const refreshSeq = ++liveEquipmentRuntimeRefreshSeq;
+  const requestedRunId = liveCurrentRunId();
+  const refreshPromise = (async () => {
     try {
-      const activeRunId = liveCurrentRunId();
+      const activeRunId = requestedRunId;
       const runtimeUrl = activeRunId
         ? `/api/equipment/runtime/current?run_id=${encodeURIComponent(activeRunId)}`
         : "/api/equipment/runtime/current";
-      const [payload, runtime] = await Promise.all([
+      const profileId = activeEquipmentProfileId();
+      const skillFlowUrl = activeRunId
+        ? `/api/equipment/profiles/${encodeURIComponent(profileId)}/skill-flow?run_id=${encodeURIComponent(activeRunId)}`
+        : `/api/equipment/profiles/${encodeURIComponent(profileId)}/skill-flow`;
+      const [payload, runtime, skillFlow] = await Promise.all([
         fetchJsonOrThrow("/api/equipment/windows/config"),
         fetchJsonOrThrow(runtimeUrl),
+        fetchJsonOrThrow(skillFlowUrl),
       ]);
+      if (
+        refreshSeq !== liveEquipmentRuntimeRefreshSeq
+        || requestedRunId !== liveCurrentRunId()
+      ) return liveEquipmentRuntimeSnapshot;
+      liveEquipmentSkillFlowSnapshot = skillFlow;
       const lastTest = liveEquipmentRuntimeSnapshot && liveEquipmentRuntimeSnapshot.last_test;
       liveEquipmentRuntimeSnapshot = {
         ...payload,
         canonicalExecution: runtime && runtime.execution ? runtime.execution : null,
         canonicalProjection: runtime && runtime.projection ? runtime.projection : null,
+        canonicalSkillFlow: skillFlow && skillFlow.flow ? skillFlow.flow : null,
+        canonicalSkillFlowExecution: skillFlow && skillFlow.execution ? skillFlow.execution : null,
+        canonicalVisionTasks: skillFlow && Array.isArray(skillFlow.vision_tasks) ? skillFlow.vision_tasks : [],
         ...(lastTest ? { last_test: lastTest } : {}),
       };
       liveEquipmentRuntimeError = "";
       liveEquipmentRuntimeRefreshedAt = Date.now();
       return liveEquipmentRuntimeSnapshot;
     } catch (err) {
+      if (
+        refreshSeq !== liveEquipmentRuntimeRefreshSeq
+        || requestedRunId !== liveCurrentRunId()
+      ) return liveEquipmentRuntimeSnapshot;
       liveEquipmentRuntimeError = String(err);
       liveEquipmentRuntimeRefreshedAt = Date.now();
       return liveEquipmentRuntimeSnapshot;
     } finally {
-      liveEquipmentRuntimeRefreshInFlight = null;
-      if (options.render && liveLastSession) renderLiveRuntime(liveLastSession);
+      if (refreshSeq === liveEquipmentRuntimeRefreshSeq) {
+        liveEquipmentRuntimeRefreshInFlight = null;
+        if (options.render && liveLastSession) renderLiveRuntime(liveLastSession);
+      }
     }
   })();
-  return liveEquipmentRuntimeRefreshInFlight;
+  liveEquipmentRuntimeRefreshInFlight = refreshPromise;
+  return refreshPromise;
 }
 
 function ensureEquipmentRuntimeSnapshot() {
@@ -15569,6 +15617,13 @@ function equipmentRuntimeContext(report) {
   const skill = latestEquipmentSkillExecution(report) || {};
   const exception = latestEquipmentSkillException(report) || skill.exception || {};
   const snapshot = liveEquipmentRuntimeSnapshot || {};
+  const flowExecutionCandidate = snapshot.canonicalSkillFlowExecution || liveEquipmentSkillFlowSnapshot?.execution || null;
+  const currentRunId = String(liveCurrentRunId() || "");
+  const skillFlowExecution = flowExecutionCandidate
+    && currentRunId
+    && String(flowExecutionCandidate.run_id || "") === currentRunId
+    ? flowExecutionCandidate
+    : null;
   return {
     report,
     equipment,
@@ -15580,6 +15635,9 @@ function equipmentRuntimeContext(report) {
     snapshot,
     canonicalExecution: snapshot.canonicalExecution || null,
     canonicalProjection: snapshot.canonicalProjection || null,
+    skillFlow: snapshot.canonicalSkillFlow || liveEquipmentSkillFlowSnapshot?.flow || null,
+    skillFlowExecution,
+    visionTasks: snapshot.canonicalVisionTasks || liveEquipmentSkillFlowSnapshot?.vision_tasks || [],
     connection: snapshot.connection || {},
     readiness: snapshot.utm_readiness || {},
     evidenceAudit: snapshot.utm_evidence_audit || {},
@@ -15588,7 +15646,92 @@ function equipmentRuntimeContext(report) {
   };
 }
 
+function equipmentCycleContext(ctx) {
+  const model = window.ATREquipmentAgenticTaskModel;
+  if (!model || typeof model.cycleContext !== "function") return { available: false };
+  const equipment = ctx.equipment || {};
+  const result = ctx.result || {};
+  const canonical = ctx.canonicalExecution || {};
+  const flowExecution = ctx.skillFlowExecution || {};
+  const activeRunId = String(liveCurrentRunId() || "");
+  const flowExecutionMatchesRun = Boolean(
+    activeRunId
+    && flowExecution.run_id
+    && String(flowExecution.run_id) === activeRunId
+  );
+  const flowExecutionIsActive = flowExecutionMatchesRun
+    && !["__complete__", "__blocked__"].includes(String(flowExecution.terminal || ""));
+  const activeFlowExecution = flowExecutionIsActive ? flowExecution : {};
+  const workflow = [
+    activeFlowExecution.workflow_agentic_task,
+    equipment.workflow_agentic_task,
+    result.workflow_agentic_task,
+    canonical.workflow_agentic_task,
+  ].find((item) => item && typeof item === "object" && item.task_id) || {};
+  const workflowWithCheckpoint = {
+    ...workflow,
+    active_block: activeFlowExecution.active_block || workflow.active_block || "",
+  };
+  const blockExecutions = [
+    activeFlowExecution.transitions,
+    equipment.block_executions,
+    result.block_executions,
+    canonical.block_executions,
+  ].find((items) => Array.isArray(items) && items.length) || [];
+  return model.cycleContext({
+    ...equipment,
+    workflow_agentic_task: workflowWithCheckpoint,
+    required_entry_gate: activeFlowExecution.required_entry_gate || equipment.required_entry_gate || result.required_entry_gate || canonical.required_entry_gate,
+    block_executions: blockExecutions,
+    method_values: equipment.method_values || result.method_values || canonical.method_values,
+    screen_transition_evidence: equipment.screen_transition_evidence || result.screen_transition_evidence || canonical.screen_transition_evidence,
+    raw_data_export: equipment.raw_data_export || result.raw_data_export || canonical.raw_data_export,
+    next_specimen_readiness: equipment.next_specimen_readiness || result.next_specimen_readiness || canonical.next_specimen_readiness,
+    handoff_eligibility: equipment.handoff_eligibility || result.handoff_eligibility || canonical.handoff_eligibility,
+  });
+}
+
 function equipmentCanonicalProgressSteps(ctx) {
+  const flow = ctx.skillFlow || {};
+  const flowExecution = ctx.skillFlowExecution || {};
+  const blocks = Array.isArray(flow.blocks) ? flow.blocks : [];
+  if (blocks.length) {
+    const transitions = Array.isArray(flowExecution.transitions) ? flowExecution.transitions : [];
+    const transitionByNode = new Map(transitions.map((item) => [String(item?.node_id || ""), item]));
+    const visionTasks = Array.isArray(ctx.visionTasks) ? ctx.visionTasks : [];
+    const visionTaskById = new Map(visionTasks.map((item) => [String(item?.task_id || ""), item]));
+    const activeNode = String(flowExecution.active_node || "");
+    const terminal = String(flowExecution.terminal || "");
+    const statusFor = (nodeId) => {
+      const transition = transitionByNode.get(nodeId);
+      if (transition) return transition.target === "__blocked__" || transition.success === false ? "blocked" : "complete";
+      if (activeNode === nodeId) return "active";
+      return terminal === "__blocked__" ? "blocked" : "waiting";
+    };
+    const steps = [];
+    blocks.forEach((block) => {
+      const skillNode = `${block.id}.skill`;
+      const skillTransition = transitionByNode.get(skillNode) || {};
+      steps.push({
+        label: block.agentic?.task || block.label || block.id,
+        status: statusFor(skillNode),
+        detail: `${block.skill?.skill_id || "-"}@${block.skill?.skill_version || "-"} · ${skillTransition.outcome || "skill pending"}`,
+      });
+      if (block.vision?.enabled) {
+        const visionNode = `${block.id}.vision`;
+        const visionTransition = transitionByNode.get(visionNode) || {};
+        const visionTaskId = String(visionTransition.vision_task_id || block.vision?.task_id || "");
+        const visionTask = visionTaskById.get(visionTaskId) || {};
+        const visionTaskLabel = String(visionTransition.vision_task_label || visionTransition.task_label || visionTask.label || visionTaskId || "Unbound Vision Task");
+        steps.push({
+          label: visionTaskLabel,
+          status: statusFor(visionNode),
+          detail: `${visionTaskId || "unbound"} · ${visionTransition.outcome || "verification pending"}`,
+        });
+      }
+    });
+    return steps;
+  }
   const projection = ctx.canonicalProjection || {};
   const execution = ctx.canonicalExecution || {};
   if (!projection.execution_id) return null;
@@ -15706,6 +15849,15 @@ function equipmentEvidenceVerified(ctx) {
 }
 
 function equipmentProgressSteps(ctx) {
+  const cycle = equipmentCycleContext(ctx);
+  const cycleModel = window.ATREquipmentAgenticTaskModel;
+  if (cycle.available && cycleModel && typeof cycleModel.progressSteps === "function") {
+    return cycleModel.progressSteps(cycle).map((step) => ({
+      label: step.label,
+      status: step.status,
+      detail: `${step.skill} · Vision ${step.vision.enabled ? step.vision.outcome || "enabled" : "optional / off"}`,
+    }));
+  }
   const canonical = equipmentCanonicalProgressSteps(ctx);
   if (canonical) return canonical;
   const active = equipmentActiveProgram(ctx);
@@ -15833,15 +15985,148 @@ function renderEquipmentHandoff(ctx) {
   ]);
 }
 
+function renderEquipmentCycleHeader(ctx) {
+  const cycle = equipmentCycleContext(ctx);
+  if (!cycle.available) return "";
+  const task = cycle.task || {};
+  const gate = task.entry_gate || (ctx.equipment || {}).required_entry_gate || (ctx.result || {}).required_entry_gate || {};
+  const gateOk = gate.ok === true || gate.status === "ready_for_equipment";
+  return `
+    <section class="ar-equipment-cycle-header" aria-label="Lab Equipment Agent cycle">
+      <div>
+        <small>LAB EQUIPMENT AGENT · WORKFLOW TASK</small>
+        <strong>${escapeHtml(task.label || "UTM Compression Cycle")}</strong>
+        <span>${escapeHtml(task.task_id || "-")} · ${escapeHtml(task.status || "waiting")}</span>
+        <span>Profile ${escapeHtml(task.profile_id || "-")} · Flow ${escapeHtml(task.flow_id || "-")}@${escapeHtml(task.flow_version ?? "-")}</span>
+        <span>Run ${escapeHtml(task.run_id || "-")} · Specimen ${escapeHtml(task.specimen_id || "-")}</span>
+      </div>
+      <div class="ar-equipment-cycle-gate is-${gateOk ? "ready" : "locked"}">
+        <small>LOCKED ENTRY GATE</small>
+        <strong>${escapeHtml(gate.status || (gateOk ? "ready_for_equipment" : "waiting"))}</strong>
+        <span>${gate.locked === false ? "contract gate" : "mandatory upstream confirmation"}</span>
+      </div>
+    </section>
+  `;
+}
+
+function equipmentCycleDisplayValue(value) {
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "object") {
+    const numeric = value.value ?? value.observed ?? value.target;
+    const unit = value.unit || "";
+    if (numeric !== null && numeric !== undefined) return `${numeric}${unit ? ` ${unit}` : ""}`;
+    return compactText(JSON.stringify(value), 80);
+  }
+  return String(value);
+}
+
+function renderEquipmentMethodValues(ctx) {
+  const cycle = equipmentCycleContext(ctx);
+  const model = window.ATREquipmentAgenticTaskModel;
+  if (!cycle.available || !model || typeof model.methodRows !== "function") return renderDashboardRows([["status", "cycle evidence unavailable"]]);
+  const rows = model.methodRows(cycle);
+  return `
+    <div class="ar-equipment-method-grid">
+      ${rows.map((row) => `
+        <article>
+          <strong>${escapeHtml(row.label)}</strong>
+          <span><small>Observed</small>${escapeHtml(equipmentCycleDisplayValue(row.observed))}</span>
+          <span><small>Method target</small>${escapeHtml(equipmentCycleDisplayValue(row.target))}</span>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderEquipmentScreenTransitions(ctx) {
+  const cycle = equipmentCycleContext(ctx);
+  if (!cycle.available) return renderDashboardRows([["status", "cycle evidence unavailable"]]);
+  const evidence = Array.isArray(cycle.screenTransitions) ? cycle.screenTransitions : [];
+  if (!evidence.length) return renderDashboardRows([["status", "screen transition evidence pending"]]);
+  return `
+    <div class="ar-equipment-transition-list">
+      ${evidence.slice(-8).map((item) => {
+        const frames = [item.before_frame, item.after_frame].filter(Boolean).join(" → ") || "-";
+        const locator = [item.locator_id, item.locator_version].filter(Boolean).join("@") || "-";
+        const postcondition = item.postcondition && typeof item.postcondition === "object"
+          ? JSON.stringify(item.postcondition)
+          : item.postcondition || "-";
+        return `
+          <article>
+            <strong>${escapeHtml(item.block_id || item.step || item.label || "transition")}</strong>
+            <span>${escapeHtml(item.outcome || item.status || (item.ok === true ? "verified" : "recorded"))}</span>
+            <small>frames · ${escapeHtml(compactText(frames, 96))}</small>
+            <small>locator · ${escapeHtml(compactText(locator, 96))}</small>
+            <small>postcondition · ${escapeHtml(compactText(postcondition, 120))}</small>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function equipmentArtifactUrl(path) {
+  const targetPath = String(path || "").replace(/\\/g, "/");
+  if (!targetPath || !Array.isArray(liveRunArtifacts)) return "";
+  const artifact = liveRunArtifacts.find((item) => {
+    const candidates = [item?.path, item?.local_path, item?.name]
+      .map((value) => String(value || "").replace(/\\/g, "/"));
+    return candidates.includes(targetPath);
+  });
+  const url = String(artifact?.url || artifact?.download_url || artifact?.compat_url || "").trim();
+  return url.startsWith("/api/runs/") || url.startsWith("/api/artifacts/") ? url : "";
+}
+
+function renderEquipmentRawDataReadiness(ctx) {
+  const cycle = equipmentCycleContext(ctx);
+  const model = window.ATREquipmentAgenticTaskModel;
+  if (!cycle.available || !model) return renderDashboardRows([["status", "cycle evidence unavailable"]]);
+  const raw = typeof model.rawData === "function" ? model.rawData(cycle) : {};
+  const readiness = typeof model.readiness === "function" ? model.readiness(cycle) : {};
+  const eligible = cycle.handoffEligibility || {};
+  const artifactUrl = equipmentArtifactUrl(raw.path);
+  return `
+    <div class="ar-vis-summary-stack">
+      <div class="ar-report-metrics">
+        ${renderDashboardMetric("CSV", raw.validated === true ? "VALID" : raw.validated === false ? "INVALID" : "PENDING", raw.row_count === undefined ? "rows -" : `${raw.row_count} rows`, raw.validated === true ? "success" : "warning")}
+        ${renderDashboardMetric("Next Test", readiness.next_test_completed === true ? "DONE" : "WAIT", readiness.save_current_test === false ? "current test not saved" : "pending", readiness.next_test_completed === true ? "success" : "idle")}
+        ${renderDashboardMetric("Clearance", readiness.clearance_restored === true ? "READY" : "WAIT", "robot entry", readiness.clearance_restored === true ? "success" : "warning")}
+      </div>
+      <div class="ar-equipment-raw-artifact">
+        <small>RAW CSV</small>
+        ${artifactUrl
+          ? `<a href="${escapeHtml(artifactUrl)}" target="_blank" rel="noreferrer">${escapeHtml(raw.path || "Open CSV artifact")}</a>`
+          : `<span>${escapeHtml(raw.path || "artifact link pending")}</span>`}
+      </div>
+      ${renderDashboardRows([
+        ["parse", raw.parse_ok === undefined ? "-" : raw.parse_ok],
+        ["stable", raw.stable === undefined ? "-" : raw.stable],
+        ["columns", Array.isArray(raw.columns) ? raw.columns.join(", ") : "-"],
+        ["artifact identity", raw.same_artifact === true && raw.identity_ok === true ? "verified" : "pending"],
+        ["next specimen ready", readiness.ready === undefined ? "-" : readiness.ready],
+        ["handoff eligible", eligible.eligible === undefined ? "-" : eligible.eligible],
+        ["failure", eligible.failure_code || "none"],
+      ])}
+    </div>
+  `;
+}
+
 function renderEquipmentDashboardCards(report, status, agentLabel, profile) {
   ensureEquipmentRuntimeSnapshot();
   const ctx = equipmentRuntimeContext(report);
   const failed = Boolean(ctx.exception.failure_code || ctx.skill.failure_code || ctx.result.failure_code);
+  const cycleAvailable = equipmentCycleContext(ctx).available;
   return `
+    ${cycleAvailable ? renderEquipmentCycleHeader(ctx) : ""}
     ${renderDashboardCard("Bridge / Runtime", renderEquipmentBridgeRuntime(ctx), { span: 4, tone: /connected|ready|healthy|ok/i.test(equipmentBridgeState(ctx)) ? "success" : "equipment", eyebrow: "device bridge", action: renderEquipmentLiveHeaderActions() })}
     ${renderDashboardCard("Active Program / Skill", renderEquipmentActiveExecution(ctx), { span: 4, tone: "equipment", eyebrow: "Equipment Skill Execution" })}
     ${renderDashboardCard("Recovery Boundary", renderEquipmentRecoveryBoundary(ctx), { span: 4, tone: failed ? "warning" : "equipment", eyebrow: "exception only" })}
     ${renderDashboardCard("Agentic Progress", renderEquipmentAgenticProgress(ctx), { span: 12, tone: failed ? "warning" : "equipment", eyebrow: "resolve to handoff" })}
+    ${cycleAvailable ? `
+      ${renderDashboardCard("Method Values", renderEquipmentMethodValues(ctx), { span: 4, tone: "equipment", eyebrow: "observed / configured" })}
+      ${renderDashboardCard("Screen Transitions", renderEquipmentScreenTransitions(ctx), { span: 4, tone: "equipment", eyebrow: "step completion evidence" })}
+      ${renderDashboardCard("Raw Data / Next Specimen", renderEquipmentRawDataReadiness(ctx), { span: 4, tone: "equipment", eyebrow: "CSV + clearance" })}
+    ` : ""}
     ${renderDashboardCard("Execution Evidence", renderEquipmentExecutionEvidence(ctx), { span: 8, tone: equipmentEvidenceVerified(ctx) ? "success" : "equipment", eyebrow: "screen + data" })}
     ${renderDashboardCard("Handoff", renderEquipmentHandoff(ctx), { span: 4, tone: ctx.result.failure_code ? "warning" : "equipment", eyebrow: "analysis contract" })}
   `;

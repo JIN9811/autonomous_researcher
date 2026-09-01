@@ -28,11 +28,13 @@ source_of_truth:
   - graphs/registry.py
   - graphs/version_store.py
   - graphs/module_store.py
+  - utils/equipment_skill_flow.py
+  - graphs/modules/equipment/equipment_skill_flows.json
   - graphs/configs/atr_closed_loop.yaml
   - graphs/modules
   - orchestrator/langgraph_runtime.py
-last_verified: 2026-08-09
-verified_against: 541c93a
+last_verified: 2026-09-01
+verified_against: working-tree-2026-09-01
 related_docs:
   - docs/runtime/langgraph_runtime.md
   - docs/runtime/architecture.md
@@ -99,6 +101,7 @@ It does not replace:
 | Active graph and module configuration | `graphs/configs/*.yaml`, `graphs/modules/*/module.yaml`, optional `ui.yaml` |
 | Versioned configuration | `graphs/version_store.py`, `graphs/module_store.py` |
 | Runtime execution | `orchestrator/langgraph_runtime.py` |
+| Profile-bound Equipment Skill Flow | `utils/equipment_skill_flow.py`, `graphs/modules/equipment/equipment_skill_flows.json` |
 | Interaction and runtime regression evidence | `tests/ui/runtime_ide_browser_audit.py`, `tests/unit/test_langgraph_runtime.py` |
 
 Historical Codex packages under `docs/ATR_*_Package/` describe implementation
@@ -201,6 +204,79 @@ displayed activation evidence in the browser. The backend still revalidates
 every submitted payload; client state is never the execution authority.
 
 ## Module and Bridge Descriptor Editing
+
+### Equipment Agent Flow projection
+
+The Equipment module tab is a read-only projection of the Profile-bound flow in
+`graphs/modules/equipment/equipment_skill_flows.json`. It selects a Profile,
+refreshes the derived supervisor/Skill/Vision graph and latest phase state, and
+opens `/equipment/agent-manager` for any edit. Runtime IDE does not maintain or
+save a second Equipment flow draft.
+
+The code-owned `run_utm_compression_cycle` is a workflow-level supervisor above,
+not a replacement for, that editable Profile flow:
+
+```text
+workflow-level Agentic Task
+  -> Profile-bound Equipment Skill Flow
+    -> block Agentic Task + exact Skill + optional Vision
+      -> Equipment Skill Runtime / PyAutoGUI bridge
+```
+
+Its identity-bound `ready_for_equipment` entry handoff is mandatory and locked;
+Runtime IDE and Agent Manager expose no enable switch for it. Per-block Equipment
+Vision remains independently optional. Disabling one of those Vision slots only
+bypasses the concurrent Equipment observation for that block and does not bypass
+the upstream entry confirmation. The overlay does not alter Manipulation Agent
+source or policy.
+
+Agent Manager can load the canonical eight-block compression-cycle template as
+an unsaved draft. It never binds a Skill, enables Vision, saves, or executes the
+equipment automatically. Runtime values for Force, Stroke, Height, contact,
+relative travel, automatic return, and robot clearance come from the selected
+method/cell and observed evidence; the template contains no numeric defaults.
+Unsupported task IDs and noncanonical block revisions are rejected. Before the
+first device action, the Equipment Agent preflights every exact deployed Skill,
+target Profile, enabled catalog-backed Vision task, and the Vision runtime tool
+when any Vision slot is active. Final readiness requires same-artifact Raw CSV
+proof whose artifact directly carries the expected run/specimen identity, plus
+observed Height matching the configured clearance target.
+
+The dedicated Agent Manager is the sole authoring surface. Its `+ Block` action
+creates one composite block containing an initially unbound Low-Level Skill slot, a
+Middle-Level Agentic Task with bounded completion routes, and an optional embedded
+Vision slot. `agentic.task` is the canonical task name shown by every runtime
+projection; the legacy `label` field is only a migration-compatible alias.
+The Task does not introduce another LLM workflow. At execution time it references
+the selected Skill's existing annotation context and the existing bounded recovery
+decision path; deterministic Skill playback remains LLM-free.
+There is no standalone `+ Vision` action. Equipment Workspace and Live GUI also
+consume the same `/api/equipment/profiles/{profile_id}/skill-flow` payload as
+read-only execution projections.
+
+The Equipment Flow Supervisor is the High-Level projection. Skill and Vision
+phase transitions are recorded under
+`memory/equipment_runtime/equipment_skill_flow_latest/<profile_id>.json` and
+reflected on the graph. Only `LabEquipmentAgent` executes the flow; opening or
+saving Agent Manager never actuates equipment. Live reads this checkpoint with
+the current `run_id`; mismatched Profile-latest records are omitted and a run
+transition clears the browser's Equipment snapshot and invalidates older
+in-flight refresh generations before rendering.
+
+An enabled Vision node is bound to one catalog-backed `vision.task_id`, not a
+free-form condition. Runtime IDE resolves its label from the shared
+`vision_tasks` payload and projects the latest `vision_task_id`, `check_id`, and
+bounded outcome from the execution transition. It never infers a task from a
+display label, dispatches a Vision check, or edits the selection. Task changes
+are made only in Agent Manager and appear here on the next normal refresh.
+
+The existing `/live` Equipment dashboard is the read-only operational projection
+for this workflow task. When overlay evidence exists it adds the locked entry
+gate, eight block states, exact Skill version and optional Vision state, observed
+versus target Force/Stroke/Height, bounded screen transitions, Raw Data CSV
+validation, and next-specimen clearance/handoff readiness. It does not add direct
+`Start Test` or arbitrary equipment-click actions; existing bridge health actions
+remain diagnostic only.
 
 The module editor reads and writes `graphs/modules/<module_id>/module.yaml`
 through `ModuleConfigStore`. Supported configuration includes:

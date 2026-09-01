@@ -79,6 +79,7 @@ Modification guide:
 
       <div class="panel lerobot-tab-bar" role="tablist" aria-label="LeRobot workspace tabs">
         <button id="lerobot-main-tab-button" class="btn active" type="button" role="tab" aria-selected="true" aria-controls="lerobot-main-tab" data-lerobot-tab-target="lerobot-main-tab">LeRobot</button>
+        <button id="dataset-manage-tab-button" class="btn" type="button" role="tab" aria-selected="false" aria-controls="dataset-manage-tab" data-lerobot-tab-target="dataset-manage-tab">Dataset Manage</button>
         <button id="isaac-lab-tab-button" class="btn" type="button" role="tab" aria-selected="false" aria-controls="isaac-lab-tab" data-lerobot-tab-target="isaac-lab-tab">Isaac Lab</button>
       </div>
 
@@ -802,11 +803,14 @@ Modification guide:
               WandB Local Server
               <span class="input-action-row">
                 <input id="lerobot-train-wandb-base-url-input" type="text" value="http://127.0.0.1:8081" placeholder="http://127.0.0.1:8081" />
+                <input id="lerobot-train-wandb-api-key-input" type="password" autocomplete="off" placeholder="local API key" />
+                <button id="btn-wandb-local-api-key-save" class="btn mini" type="button">Save Key</button>
                 <button id="btn-wandb-local-start" class="btn mini" type="button">Start</button>
                 <button id="btn-wandb-local-status" class="btn mini" type="button">Status</button>
                 <button id="btn-wandb-local-stop" class="btn mini danger" type="button">Stop</button>
                 <button id="btn-wandb-local-open" class="btn mini" type="button">Open</button>
               </span>
+              <small id="lerobot-wandb-api-key-status">W&B local API key is not checked.</small>
             </label>
             <label class="planning-message-label train-extra-args">
               Additional Train CLI Args
@@ -1088,6 +1092,113 @@ Modification guide:
 
       </div>
 
+      <div id="dataset-manage-tab" class="lerobot-tab-panel" role="tabpanel" tabindex="-1" aria-labelledby="dataset-manage-tab-button">
+        <section class="panel lerobot-workflow-card">
+          <div class="panel-title-row">
+            <h2>Dataset Manage</h2>
+            <span class="hint">v2.1 core + ATR sidecars</span>
+          </div>
+          <div class="lerobot-form-grid train-form-grid">
+            <label>
+              Dataset Root
+              <span class="input-action-row">
+                <input id="dataset-manage-root" type="text" placeholder="same as Local Paths dataset root" />
+                <button id="btn-browse-dataset-manage-root" class="btn mini" type="button">Browse</button>
+              </span>
+            </label>
+            <label>
+              Namespace
+              <input id="dataset-manage-namespace" type="text" value="jin" />
+            </label>
+            <label>
+              Date Prefix
+              <input id="dataset-manage-date-prefix" type="text" value="20260901" />
+            </label>
+            <label>
+              Output Repo ID
+              <input id="dataset-manage-output-repo" type="text" placeholder="auto: jin/20260901_9" />
+            </label>
+          </div>
+          <label class="checkbox-line">
+            <input id="dataset-manage-overwrite" type="checkbox" />
+            Overwrite output dataset by moving the existing folder to backup first
+          </label>
+          <div class="button-row compact">
+            <button id="btn-dataset-manage-refresh" class="btn">Refresh Datasets</button>
+          </div>
+          <div id="dataset-manage-status" class="lerobot-action-status idle">Waiting for dataset action.</div>
+
+          <details class="lerobot-details" open>
+            <summary>Merge</summary>
+            <div class="lerobot-form-grid train-form-grid">
+              <label>
+                Source A
+                <select id="dataset-manage-merge-source-a"></select>
+              </label>
+              <label>
+                Source A Range
+                <input id="dataset-manage-merge-range-a" type="text" value="all" placeholder="all, 0-24, 0:25, 1,3,5" />
+              </label>
+              <label>
+                Source B
+                <select id="dataset-manage-merge-source-b"></select>
+              </label>
+              <label>
+                Source B Range
+                <input id="dataset-manage-merge-range-b" type="text" value="all" placeholder="all, 0-24, 0:25, 1,3,5" />
+              </label>
+            </div>
+            <div class="button-row compact">
+              <button id="btn-dataset-manage-merge" class="btn primary">Create Merged Dataset</button>
+            </div>
+          </details>
+
+          <details class="lerobot-details">
+            <summary>Split</summary>
+            <div class="lerobot-form-grid train-form-grid">
+              <label>
+                Source
+                <select id="dataset-manage-split-source"></select>
+              </label>
+              <label class="planning-message-label train-extra-args">
+                Split Spec
+                <textarea id="dataset-manage-split-spec" rows="4">train=0-47
+val=48-59</textarea>
+              </label>
+            </div>
+            <div class="button-row compact">
+              <button id="btn-dataset-manage-split" class="btn primary">Create Split Datasets</button>
+            </div>
+          </details>
+
+          <details class="lerobot-details">
+            <summary>Delete + Compact</summary>
+            <div class="lerobot-form-grid train-form-grid">
+              <label>
+                Source
+                <select id="dataset-manage-delete-source"></select>
+              </label>
+              <label>
+                Delete Range
+                <input id="dataset-manage-delete-range" type="text" placeholder="24, 1-3, 0:2" />
+              </label>
+              <label>
+                Delete Output Repo ID
+                <input id="dataset-manage-delete-output-repo" type="text" placeholder="auto: source_compact" />
+              </label>
+            </div>
+            <div class="button-row compact">
+              <button id="btn-dataset-manage-delete" class="btn danger">Create Compacted Dataset</button>
+            </div>
+          </details>
+
+          <details class="lerobot-details" open>
+            <summary>Local Datasets</summary>
+            <div id="dataset-manage-list" class="lerobot-visualization"></div>
+          </details>
+        </section>
+      </div>
+
       <div id="isaac-lab-tab" class="lerobot-tab-panel" role="tabpanel" tabindex="-1" aria-labelledby="isaac-lab-tab-button">
         <section class="panel lerobot-workflow-card lerobot-isaac-lab-panel">
           <div class="panel-title-row">
@@ -1348,6 +1459,6 @@ Modification guide:
         </article>
       </section>
     </main>
-    <script src="/static/lerobot.js?v=20260715-camera-usb-link-1" defer></script>
+    <script src="/static/lerobot.js?v=20260901-dataset-manage-1" defer></script>
   </body>
 </html>

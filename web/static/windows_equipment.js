@@ -104,8 +104,6 @@ const recordingStatus = document.getElementById("equipment-recording-status");
 const skillList = document.getElementById("equipment-skill-list");
 const selectedSkillEl = document.getElementById("equipment-selected-skill");
 const skillStatus = document.getElementById("equipment-skill-status");
-const visionLinkEnabled = document.getElementById("equipment-vision-link-enabled");
-const visionLinkStatus = document.getElementById("equipment-vision-link-status");
 const recoveryStatus = document.getElementById("equipment-recovery-status");
 const btnImportRecording = document.getElementById("btn-equipment-import-recording");
 const btnRefreshRecordings = document.getElementById("btn-equipment-refresh-recordings");
@@ -128,6 +126,9 @@ const skillDeploymentProgressBar = document.getElementById("equipment-skill-depl
 const skillDeploymentStatus = document.getElementById("equipment-skill-deployment-status");
 const skillDeploymentDetail = document.getElementById("equipment-skill-deployment-detail");
 const btnStopSkillDeployment = document.getElementById("btn-equipment-stop-skill-deployment");
+const equipmentSkillFlowProgress = document.getElementById("equipment-skill-flow-progress");
+const equipmentFlowReadiness = document.getElementById("equipment-flow-readiness");
+const btnOpenEquipmentAgentManager = document.getElementById("btn-open-equipment-agent-manager");
 const requestAuditStatus = document.getElementById("equipment-request-audit-status");
 const requestAuditDetail = document.getElementById("equipment-request-audit-detail");
 const utmExportGlobInput = document.getElementById("equipment-utm-export-glob");
@@ -179,6 +180,11 @@ let skillStoryboardNextCursor = null;
 let activeSkillDeploymentJobId = window.localStorage.getItem("atr.equipment.skillDeploymentJobId") || "";
 let skillDeploymentPollTimer = null;
 let finalizedSkillDeploymentJobId = "";
+let equipmentSkillFlow = null;
+let equipmentSkillFlowCatalog = [];
+let equipmentSkillFlowExecution = {};
+let equipmentVisionTasks = [];
+let equipmentSkillFlowReadiness = {};
 
 const EQUIPMENT_PROGRESS_ORDER = ["recording", "transfer", "annotation", "skill", "preflight", "execute", "verify", "handoff"];
 const RECORDING_LIST_REFRESH_MS = 5000;
@@ -192,6 +198,59 @@ function escapeHtml(value) {
     '"': "&quot;",
     "'": "&#039;",
   })[character]);
+}
+
+function renderEquipmentSkillFlow() {
+  if (!equipmentSkillFlow) return;
+  const blocks = Array.isArray(equipmentSkillFlow.blocks) ? equipmentSkillFlow.blocks : [];
+  const transitions = Array.isArray(equipmentSkillFlowExecution.transitions) ? equipmentSkillFlowExecution.transitions : [];
+  const transitionByNode = new Map(transitions.map((item) => [String(item.node_id || ""), item]));
+  const visionTaskById = new Map(equipmentVisionTasks.map((item) => [String(item.task_id || ""), item]));
+  const completed = new Set(transitions.map((item) => String(item.node_id || "")));
+  const activeNode = String(equipmentSkillFlowExecution.active_node || "");
+  if (equipmentSkillFlowProgress) {
+    const progressNodes = [`<span class="equipment-flow-node ${blocks.length ? "done" : ""}"><strong>High</strong><small>Supervisor</small></span>`];
+    blocks.forEach((block) => {
+      const skillNode = `${block.id}.skill`;
+      const visionNode = `${block.id}.vision`;
+      progressNodes.push(`<span class="equipment-flow-node ${completed.has(skillNode) ? "done" : ""} ${activeNode === skillNode ? "active" : ""}"><strong>${escapeHtml(block.agentic?.task || block.label || block.id)}</strong><small>Middle · Agentic Task</small></span>`);
+      if (block.vision?.enabled) {
+        const transition = transitionByNode.get(visionNode) || {};
+        const taskId = String(transition.vision_task_id || block.vision?.task_id || "");
+        const catalogTask = visionTaskById.get(taskId) || {};
+        const taskLabel = String(transition.vision_task_label || transition.task_label || catalogTask.label || taskId || "Unbound Vision Task");
+        progressNodes.push(`<span class="equipment-flow-node vision ${completed.has(visionNode) ? "done" : ""} ${activeNode === visionNode ? "active" : ""}"><strong>${escapeHtml(taskLabel)}</strong><small>Middle · ${escapeHtml(transition.outcome || "Vision Gate")}</small></span>`);
+      }
+    });
+    equipmentSkillFlowProgress.innerHTML = `<div class="equipment-flow-node-row">${progressNodes.join("")}</div>`;
+  }
+  if (equipmentFlowReadiness) {
+    const ready = Boolean(equipmentSkillFlowReadiness.ready);
+    equipmentFlowReadiness.textContent = ready ? "ready" : "draft";
+    equipmentFlowReadiness.className = `badge ${ready ? "ready" : "idle"}`;
+  }
+}
+
+async function loadEquipmentSkillFlow() {
+  const payload = await apiJson(`/api/equipment/profiles/${encodeURIComponent(selectedEquipmentProfileId)}/skill-flow`);
+  equipmentSkillFlow = payload.flow || window.ATREquipmentSkillFlow.empty(selectedEquipmentProfileId);
+  equipmentSkillFlowCatalog = Array.isArray(payload.skills) ? payload.skills : [];
+  equipmentVisionTasks = Array.isArray(payload.vision_tasks) ? payload.vision_tasks : [];
+  equipmentSkillFlowReadiness = payload.readiness && typeof payload.readiness === "object" ? payload.readiness : {};
+  equipmentSkillFlowExecution = payload.execution && typeof payload.execution === "object" ? payload.execution : {};
+  renderEquipmentSkillFlow();
+  return payload;
+}
+
+async function refreshEquipmentSkillFlowRuntime() {
+  const payload = await apiJson(`/api/equipment/profiles/${encodeURIComponent(selectedEquipmentProfileId)}/skill-flow`);
+  equipmentSkillFlowCatalog = Array.isArray(payload.skills) ? payload.skills : equipmentSkillFlowCatalog;
+  equipmentVisionTasks = Array.isArray(payload.vision_tasks) ? payload.vision_tasks : equipmentVisionTasks;
+  equipmentSkillFlowReadiness = payload.readiness && typeof payload.readiness === "object" ? payload.readiness : equipmentSkillFlowReadiness;
+  equipmentSkillFlowExecution = payload.execution && typeof payload.execution === "object" ? payload.execution : {};
+  equipmentSkillFlow = payload.flow;
+  renderEquipmentSkillFlow();
+  return payload;
 }
 
 function equipmentProgressStage(execution, projection) {
@@ -298,6 +357,8 @@ function renderEquipmentSkills(payload) {
 async function refreshEquipmentSkills() {
   const data = await apiJson("/api/equipment/skills");
   renderEquipmentSkills(data);
+  equipmentSkillFlowCatalog = Array.isArray(data.skills) ? data.skills : equipmentSkillFlowCatalog;
+  renderEquipmentSkillFlow();
   return data;
 }
 
@@ -630,18 +691,18 @@ async function stopSkillDeployment() {
 
 function renderEquipmentProfiles(payload) {
   const profiles = Array.isArray(payload && payload.profiles) ? payload.profiles : [];
-  selectedEquipmentProfileId = String((payload && payload.selected_profile_id) || selectedEquipmentProfileId || "utm_windows_v1");
+  if (!profiles.some((profile) => profile.profile_id === selectedEquipmentProfileId)) {
+    selectedEquipmentProfileId = String((payload && payload.selected_profile_id) || "utm_windows_v1");
+  }
   if (!profileItems) return;
   profileItems.innerHTML = profiles.map((profile) => {
-    const selected = profile.profile_id === selectedEquipmentProfileId;
-    return `<button class="btn ${selected ? "primary" : ""}" data-equipment-profile="${profile.profile_id}">${profile.label} · ${profile.bridge_provider}</button>`;
-  }).join("") || "No registered equipment profile.";
-  profileItems.querySelectorAll("[data-equipment-profile]").forEach((button) => {
-    button.addEventListener("click", () => {
-      selectedEquipmentProfileId = button.getAttribute("data-equipment-profile") || "utm_windows_v1";
-      loadEquipmentProfileState().catch((err) => writeLog({ ok: false, error: err.message }));
-    });
-  });
+    const selected = profile.profile_id === selectedEquipmentProfileId ? " selected" : "";
+    return `<option value="${profile.profile_id}"${selected}>${profile.label}</option>`;
+  }).join("") || '<option value="utm_windows_v1" selected>UTM</option>';
+  profileItems.onchange = () => {
+    selectedEquipmentProfileId = profileItems.value || "utm_windows_v1";
+    Promise.all([loadEquipmentProfileState(), loadEquipmentSkillFlow()]).catch((err) => writeLog({ ok: false, error: err.message }));
+  };
 }
 
 async function loadEquipmentProfileState() {
@@ -659,44 +720,7 @@ async function loadEquipmentProfileState() {
   if (profileEvidenceStatus) {
     profileEvidenceStatus.textContent = evidence.analysis_handoff?.status || evidence.status || "No profile test result yet.";
   }
-  const visionLink = state.profile && state.profile.vision_link && typeof state.profile.vision_link === "object" ? state.profile.vision_link : {};
-  const workspaceSettings = state.workspace_settings && typeof state.workspace_settings === "object" ? state.workspace_settings : {};
-  const persistedVisionSelection = Object.prototype.hasOwnProperty.call(workspaceSettings, "vision_link_enabled")
-    ? Boolean(state.workspace_settings.vision_link_enabled)
-    : Boolean(visionLink.enabled);
-  if (visionLinkEnabled) visionLinkEnabled.checked = persistedVisionSelection;
-  if (visionLinkStatus) {
-    const requiredModes = Array.isArray(visionLink.required_modes) ? visionLink.required_modes.join(", ") : "";
-    const source = workspaceSettings.vision_link_source === "stored" ? "saved selection" : "Profile default";
-    visionLinkStatus.textContent = persistedVisionSelection
-      ? `Enabled · ${source} · required modes: ${requiredModes || "none"} · ${visionLink.request_schema || "equipment vision request"}`
-      : `Disabled · ${source}; screen and data evidence remain available.`;
-  }
   return state;
-}
-
-async function saveEquipmentVisionLinkSelection() {
-  if (!visionLinkEnabled) return;
-  const selected = Boolean(visionLinkEnabled.checked);
-  visionLinkEnabled.disabled = true;
-  if (visionLinkStatus) visionLinkStatus.textContent = "Saving Vision Link selection.";
-  try {
-    const data = await apiJson(`/api/equipment/profiles/${encodeURIComponent(selectedEquipmentProfileId)}/settings`, {
-      method: "POST",
-      body: JSON.stringify({ vision_link_enabled: selected }),
-    });
-    const settings = data.workspace_settings || {};
-    visionLinkEnabled.checked = Boolean(settings.vision_link_enabled);
-    if (visionLinkStatus) {
-      visionLinkStatus.textContent = `${visionLinkEnabled.checked ? "Enabled" : "Disabled"} · saved automatically for this Profile.`;
-    }
-  } catch (err) {
-    visionLinkEnabled.checked = !selected;
-    if (visionLinkStatus) visionLinkStatus.textContent = `Save failed · ${err.message}`;
-    writeLog({ ok: false, action: "save_vision_link_selection", error: err.message });
-  } finally {
-    visionLinkEnabled.disabled = false;
-  }
 }
 
 async function runEquipmentProfileAction(action, button) {
@@ -706,7 +730,6 @@ async function runEquipmentProfileAction(action, button) {
       method: "POST",
       body: JSON.stringify({
         ...(action === "test" ? { confirm_execute: true } : {}),
-        vision_link_enabled: Boolean(visionLinkEnabled && visionLinkEnabled.checked),
       }),
     });
     if (profileEvidenceStatus && action === "test") {
@@ -1218,11 +1241,20 @@ function renderCandidates(candidates) {
     if (aliasInput && candidate.host) {
       aliasInput.value = `windows_${String(candidate.host).replace(/[^a-zA-Z0-9_.-]/g, "_")}`;
     }
-    button.addEventListener("click", () => saveCandidate(
-      candidate,
-      aliasInput ? aliasInput.value : "",
-      pairingInput ? pairingInput.value : "",
-    ));
+    button.addEventListener("click", async () => {
+      setBusy(button, true);
+      try {
+        await saveCandidate(
+          candidate,
+          aliasInput ? aliasInput.value : "",
+          pairingInput ? pairingInput.value : "",
+        );
+      } catch (err) {
+        writeLog({ ok: false, status: "pairing_failed", message: err.message });
+      } finally {
+        setBusy(button, false);
+      }
+    });
     candidatesEl.appendChild(card);
   });
 }
@@ -1408,8 +1440,14 @@ async function saveCandidate(candidate, aliasValue, pairingCodeValue) {
       allow_live_execute: true,
     }),
   });
+  if (!data.ok) {
+    writeLog(data);
+    return data;
+  }
   setConnectionStatus(data);
   writeLog(data);
+  renderCandidates([]);
+  return data;
 }
 
 async function selectSavedCandidate(candidateAlias, button = null) {
@@ -1893,7 +1931,7 @@ async function captureLocator() {
         program_id: programId || "utm_compression_start_v1",
         name,
         region,
-        confidence: Number(locatorConfidenceInput ? locatorConfidenceInput.value : 0.8) || 0.8,
+        confidence: Number(locatorConfidenceInput ? locatorConfidenceInput.value : 0.9) || 0.9,
         confirm_capture: true,
       }),
     });
@@ -2004,7 +2042,6 @@ if (btnUtm) btnUtm.addEventListener("click", runUtmProtocol);
 if (btnAbort) btnAbort.addEventListener("click", runUtmAbort);
 if (btnProfilePreflight) btnProfilePreflight.addEventListener("click", () => runEquipmentProfileAction("preflight", btnProfilePreflight));
 if (btnProfileTest) btnProfileTest.addEventListener("click", () => runEquipmentProfileAction("test", btnProfileTest));
-if (visionLinkEnabled) visionLinkEnabled.addEventListener("change", saveEquipmentVisionLinkSelection);
 if (btnImportRecording) btnImportRecording.addEventListener("click", importEquipmentRecording);
 if (btnRefreshRecordings) btnRefreshRecordings.addEventListener("click", refreshWorkerRecordings);
 if (btnStopSkillAuthoring) btnStopSkillAuthoring.addEventListener("click", stopSkillAuthoring);
@@ -2014,11 +2051,15 @@ if (btnSkillRefresh) btnSkillRefresh.addEventListener("click", refreshEquipmentS
 if (btnSkillWorkflowEditor) btnSkillWorkflowEditor.addEventListener("click", openSelectedSkillWorkflowEditor);
 if (btnSkillDeploy) btnSkillDeploy.addEventListener("click", startSkillDeployment);
 if (btnStopSkillDeployment) btnStopSkillDeployment.addEventListener("click", stopSkillDeployment);
+if (btnOpenEquipmentAgentManager) btnOpenEquipmentAgentManager.addEventListener("click", () => {
+  window.open(`/equipment/agent-manager?profile_id=${encodeURIComponent(selectedEquipmentProfileId)}`, "_blank", "noopener,noreferrer");
+});
 
 Promise.all([
   refreshConfig().then(() => selectedBridgeId ? refreshWorkerRecordings().catch(() => null) : null),
   refreshLocalBridgeStatus(),
   loadEquipmentProfileState(),
+  loadEquipmentSkillFlow(),
   refreshEquipmentRuntime(),
   refreshEquipmentSkills(),
   restoreSkillAuthoringJob(),
@@ -2029,6 +2070,7 @@ Promise.all([
 window.setInterval(() => {
   if (document.hidden) return;
   refreshEquipmentRuntime().catch(() => {});
+  refreshEquipmentSkillFlowRuntime().catch(() => {});
 }, 3000);
 
 window.setInterval(() => {

@@ -76,6 +76,12 @@ class OpenAIBackend(BaseLLMBackend):
         return OPENAI_MAX_COMPLETION_TOKENS_BY_TASK.get(task_type)
 
     @staticmethod
+    def _response_format_for_metadata(metadata: dict[str, Any] | None) -> dict[str, str] | None:
+        if isinstance(metadata, dict) and metadata.get("response_format") == "json_object":
+            return {"type": "json_object"}
+        return None
+
+    @staticmethod
     def _message_text(value: Any) -> str:
         if isinstance(value, str):
             return value
@@ -112,6 +118,9 @@ class OpenAIBackend(BaseLLMBackend):
         max_tokens = self._max_tokens_for_metadata(metadata)
         if max_tokens is not None:
             payload["max_completion_tokens"] = max_tokens
+        response_format = self._response_format_for_metadata(metadata)
+        if response_format is not None:
+            payload["response_format"] = response_format
         if self._reasoning_effort:
             payload["reasoning_effort"] = self._reasoning_effort
         if self._temperature:

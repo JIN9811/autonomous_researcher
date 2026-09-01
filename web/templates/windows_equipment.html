@@ -69,7 +69,9 @@ Modification guide:
         <article id="equipment-profile-list">
           <span class="eyebrow">Equipment Profile</span>
           <h2>Profile &amp; Worker</h2>
-          <div id="equipment-profile-items" class="equipment-candidates">Loading profiles.</div>
+          <select id="equipment-profile-items" class="text-input equipment-profile-select" aria-label="Equipment profile">
+            <option value="utm_windows_v1" selected>UTM</option>
+          </select>
         </article>
         <article id="equipment-profile-connection">
           <span class="eyebrow">Connection</span>
@@ -141,11 +143,23 @@ Modification guide:
 
       <section id="equipment-agentic-progress" class="panel equipment-agentic-progress-panel" aria-label="Lab Equipment agentic progress">
         <div class="equipment-section-heading">
-          <div><span class="eyebrow">Agentic Progress</span><h2>Recording to verified equipment result</h2></div>
-          <span id="equipment-command-pill" class="badge idle">idle</span>
+          <div><span class="eyebrow">Agentic Progress</span><h2>Equipment execution projection</h2></div>
+          <div class="button-row compact">
+            <span id="equipment-command-pill" class="badge idle">idle</span>
+            <button id="btn-open-equipment-agent-manager" class="btn mini primary" type="button">Open Agent Manager</button>
+          </div>
         </div>
-        <div class="equipment-command-banner" id="equipment-command-banner">
-          <div><strong id="equipment-command-title">Ready for equipment setup</strong><p id="equipment-command-detail">Select a Profile and Worker, prepare a Skill, then execute and verify one canonical run.</p></div>
+        <div class="equipment-flow-workbench">
+          <article class="equipment-flow-progress-card">
+            <div class="equipment-section-heading compact">
+              <div><span class="eyebrow">High / Middle / Low</span><h3>Agentic Progress</h3></div>
+              <span id="equipment-flow-readiness" class="badge idle">draft</span>
+            </div>
+            <div class="equipment-command-banner" id="equipment-command-banner">
+              <div><strong id="equipment-command-title">Ready for equipment setup</strong><p id="equipment-command-detail">Configure an exact Skill flow, then execute it through the Lab Equipment Agent.</p></div>
+            </div>
+            <div id="equipment-skill-flow-progress" class="equipment-skill-flow-progress">No bound Skill Flow.</div>
+          </article>
         </div>
         <div id="equipment-agentic-progress-stages" class="equipment-agentic-progress-stages">
           <article data-equipment-stage="recording"><span>01</span><strong>Record</strong><small>time-series buffer</small></article>
@@ -227,12 +241,6 @@ Modification guide:
             <button id="btn-equipment-program1" class="btn">Run Selected Demo</button>
             <button id="btn-equipment-utm" class="btn primary">Run Profile Action</button>
           </div>
-        </article>
-        <article id="equipment-vision-link" class="panel equipment-work-card">
-          <span class="eyebrow">Optional Middle-Level API</span>
-          <h2>Vision Link</h2>
-          <label class="planning-message-label inline-check"><input id="equipment-vision-link-enabled" type="checkbox" />Use Vision Agent verification for this Profile</label>
-          <p id="equipment-vision-link-status" class="hint">Loading Profile Vision contract.</p>
         </article>
         <article id="equipment-error-recovery" class="panel equipment-work-card">
           <span class="eyebrow">Exception-only Reasoning</span>
@@ -317,7 +325,7 @@ Modification guide:
             </label>
             <label class="planning-message-label">
               Locator JSON override
-              <textarea id="equipment-utm-locators" class="text-input equipment-json-input" rows="7" spellcheck="false" placeholder='{ "ready_state": {"locator_backend": "uia", "auto_id": "readyStatus", "control_type": "Text"}, "start_button": {"image_path": "C:/ATR/locators/start.png", "confidence": 0.8} }'></textarea>
+              <textarea id="equipment-utm-locators" class="text-input equipment-json-input" rows="7" spellcheck="false" placeholder='{ "ready_state": {"locator_backend": "uia", "auto_id": "readyStatus", "control_type": "Text"}, "start_button": {"image_path": "C:/ATR/locators/start.png", "confidence": 0.9} }'></textarea>
             </label>
             <div class="button-row">
               <button id="btn-equipment-load-utm-profile" class="btn">Load UTM Profile</button>
@@ -369,7 +377,7 @@ Modification guide:
                 </label>
                 <label class="planning-message-label">
                   Confidence
-                  <input id="equipment-locator-confidence" class="text-input" value="0.8" />
+                  <input id="equipment-locator-confidence" class="text-input" value="0.9" />
                 </label>
               </div>
               <div class="equipment-region-grid">
@@ -390,6 +398,7 @@ Modification guide:
       </div>
     </main>
 
+    <script src="/static/equipment_skill_flow_model.js" defer></script>
     <script src="/static/windows_equipment_selection.js" defer></script>
     <script src="/static/windows_equipment.js" defer></script>
   </body>

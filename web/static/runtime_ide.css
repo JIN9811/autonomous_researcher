@@ -6892,6 +6892,31 @@ body.runtime-ide-body .runtime-ide-compat-module-config[hidden] {
   display: none !important;
 }
 
+body.runtime-ide-body .runtime-equipment-flow-workspace {
+  margin: 0 16px 14px;
+  padding: 16px;
+  border-color: rgba(34, 211, 238, 0.32);
+}
+
+body.runtime-ide-body .runtime-equipment-flow-workspace[hidden] {
+  display: none !important;
+}
+
+body.runtime-ide-body .runtime-equipment-flow-editor .runtime-equipment-skill-flow {
+  display: grid;
+  gap: 14px;
+}
+
+body.runtime-ide-body .runtime-equipment-flow-editor .runtime-equipment-flow-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+body.runtime-ide-body .runtime-equipment-flow-editor .runtime-module-step {
+  min-width: 0;
+}
+
 body.module-management-body .module-management-page {
   max-width: min(1920px, calc(100vw - 20px));
 }

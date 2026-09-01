@@ -1577,6 +1577,141 @@ def test_selected_skill_annotation_backend_reads_every_temporal_storyboard_befor
     ]
 
 
+def test_equipment_json_completion_retries_malformed_selected_model_response() -> None:
+    calls: list[dict] = []
+
+    class Backend:
+        async def complete(self, **kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                return LLMResponse(text='{"chunk_id":"chunk-0001" "summary":"broken"}', model="vision-model")
+            return LLMResponse(
+                text=json.dumps({"chunk_id": "chunk-0001", "summary": "repaired"}),
+                model="vision-model",
+            )
+
+    payload, response = asyncio.run(
+        main_module._complete_equipment_json_with_retry(
+            Backend(),
+            model="vision-model",
+            system_prompt="Return one JSON object.",
+            user_prompt='{"chunk":1}',
+            metadata={"task_type": "equipment_skill_timeline_chunk", "no_fallback": True},
+            images=[],
+        )
+    )
+
+    assert payload == {"chunk_id": "chunk-0001", "summary": "repaired"}
+    assert response.model == "vision-model"
+    assert len(calls) == 2
+    assert calls[1]["metadata"]["task_type"] == "equipment_skill_timeline_chunk"
+    assert calls[1]["metadata"]["json_retry_attempt"] == 1
+    assert calls[1]["metadata"]["no_fallback"] is True
+    assert calls[0]["metadata"]["response_format"] == "json_object"
+    assert calls[1]["metadata"]["response_format"] == "json_object"
+    assert "strict RFC 8259 JSON" in calls[1]["system_prompt"]
+
+
+def test_equipment_json_completion_repairs_retry_syntax_without_model_fallback() -> None:
+    calls: list[dict] = []
+
+    class Backend:
+        async def complete(self, **kwargs):
+            calls.append(kwargs)
+            return LLMResponse(
+                text='{"chunk_id":"chunk-0001" "summary":"complete analysis", "source_frame_ids":[]}',
+                model="vision-model",
+            )
+
+    payload, response = asyncio.run(
+        main_module._complete_equipment_json_with_retry(
+            Backend(),
+            model="vision-model",
+            system_prompt="Return one JSON object.",
+            user_prompt='{"chunk":1}',
+            metadata={"task_type": "equipment_skill_timeline_chunk", "no_fallback": True},
+            images=[],
+        )
+    )
+
+    assert payload == {
+        "chunk_id": "chunk-0001",
+        "summary": "complete analysis",
+        "source_frame_ids": [],
+    }
+    assert response.model == "vision-model"
+    assert len(calls) == 2
+
+
+def test_equipment_skill_synthesis_workflow_omits_duplicate_image_candidates() -> None:
+    workflow = {
+        "schema": "equipment.skill.workflow.v1",
+        "name": "Recorded workflow",
+        "steps": [
+            {
+                "step_id": "step-001",
+                "action": {
+                    "action": "click",
+                    "target": "evt-0013-target",
+                    "image_candidates": [{"png_base64": "large-inline-image", "sha256": "abc"}],
+                },
+            },
+            {
+                "step_id": "step-002",
+                "action": {
+                    "action": "set_input_language",
+                    "layout_id": "00000412",
+                    "language": "ko",
+                },
+            },
+        ],
+    }
+
+    compact = main_module._equipment_skill_synthesis_workflow(workflow)
+
+    assert compact["steps"][0]["action"] == {"action": "click", "target": "evt-0013-target"}
+    assert compact["steps"][1]["action"]["action"] == "set_input_language"
+
+
+def test_equipment_skill_annotation_payload_backfills_missing_steps_without_changing_actions() -> None:
+    workflow = {
+        "steps": [
+            {
+                "step_id": "step-001",
+                "label": "set_input_language",
+                "action": {
+                    "action": "set_input_language",
+                    "layout_id": "00000412",
+                    "language": "ko",
+                },
+            },
+            {
+                "step_id": "step-002",
+                "label": "write",
+                "action": {"action": "write", "text": "test"},
+            },
+        ]
+    }
+    annotations = {
+        "steps": [
+            {"step_id": "step-001", "label": "set_input_language", "confidence": 0.75, "review_required": False},
+            {"step_id": "step-002", "label": "write", "confidence": 0.75, "review_required": False},
+        ]
+    }
+
+    completed, fallback_count = main_module._complete_equipment_annotation_payload(
+        {"workflow_summary": {"intent": "Replay the recording."}},
+        workflow=workflow,
+        current_annotations=annotations,
+    )
+
+    assert [item["step_id"] for item in completed["steps"]] == ["step-001", "step-002"]
+    assert completed["steps"][0]["label"] == "set_input_language"
+    assert completed["workflow_summary"]["intent"] == "Replay the recording."
+    assert fallback_count == 2
+    assert workflow["steps"][0]["action"]["layout_id"] == "00000412"
+
+
 def test_selected_skill_annotation_stops_after_persisting_the_current_timeline_chunk(
     monkeypatch,
     tmp_path: Path,

@@ -75,6 +75,15 @@ test("new action defaults use the canonical bridge field names", () => {
   assert.equal(actionDefaults("move_to").duration_sec, 0.2);
   assert.equal(actionDefaults("wait_for_file").pattern, "");
   assert.equal(actionDefaults("screenshot").checkpoint, "checkpoint");
+  assert.deepEqual(actionDefaults("set_input_language"), {
+    action: "set_input_language",
+    layout_id: "00000409",
+    locale: "en_US",
+    language: "en",
+    ime_mode: "alphanumeric",
+    typing_mode: "latin",
+  });
+  assert.equal(actionSummary({action: actionDefaults("set_input_language")}), "Input language · en_US / latin");
 });
 
 

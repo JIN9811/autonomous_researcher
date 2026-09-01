@@ -1,0 +1,303 @@
+{
+  "schema": "trapeziumx_v_equipment_agent_video_reference.v2",
+  "source_video": "../TRAPEZIUMX-V 2026-09-01 02-28-47.mp4",
+  "source_video_duration_s": 132.535566,
+  "source_frame_size": [1936, 1056],
+  "audio": "silent",
+  "purpose": "UI transition and control-state reference for the Lab Equipment Agent; Force, Stroke, and Height sensor values remain authoritative",
+  "method_value_policy": {
+    "fixed_in_agent": false,
+    "source": "currently selected TRAPEZIUMX-V test method and cell configuration",
+    "agent_behavior": "read and report the active values; do not embed them as equipment-wide constants",
+    "primary_validation_target": "expected UI and equipment state transitions",
+    "secondary_validation_target": "method-defined sensor conditions"
+  },
+  "current_method_values": {
+    "robot_entry_clearance": {
+      "value": 150.0,
+      "unit": "mm",
+      "fixed": false,
+      "intent": "Provide safe clearance for robot specimen placement and removal",
+      "owner": "cell configuration"
+    },
+    "contact_detection_load": {
+      "value": 5.0,
+      "unit": "N",
+      "fixed": false,
+      "intent": "Detect real platen-to-specimen contact and establish the relative Stroke origin",
+      "owner": "test method"
+    },
+    "specimen_reference_height": {
+      "value": 30.0,
+      "unit": "mm",
+      "fixed": false,
+      "intent": "Provide the current specimen dimension used by the test method",
+      "owner": "specimen recipe and test method"
+    },
+    "target_compression_ratio": {
+      "value": 0.7,
+      "unit": "ratio",
+      "fixed": false,
+      "intent": "Define the current desired deformation level",
+      "owner": "test method"
+    },
+    "derived_target_stroke": {
+      "value": 21.0,
+      "unit": "mm",
+      "fixed": false,
+      "intent": "Current relative travel derived from specimen height and target compression ratio",
+      "owner": "test method derived value"
+    },
+    "pretest_inter_jig_distance": {
+      "value": 30.5,
+      "unit": "mm",
+      "fixed": false,
+      "intent": "Move the platen to the current pre-test approach position",
+      "owner": "test method"
+    },
+    "test_speed": {
+      "value": 1.0,
+      "unit": "mm/s",
+      "fixed": false,
+      "intent": "Set the controlled loading speed for the current demonstration method",
+      "owner": "test method"
+    },
+    "height_semantics": "absolute",
+    "stroke_semantics": "relative from the method-defined contact point"
+  },
+  "frames": [
+    {
+      "file": "images/01_manual_entry_height_120mm.png",
+      "timestamp_s": 15.0,
+      "use": "Manual initial robot-entry height reference"
+    },
+    {
+      "file": "images/02_pretest_height_30_5mm.png",
+      "timestamp_s": 40.0,
+      "use": "Pre-test ready state near the configured inter-jig distance"
+    },
+    {
+      "file": "images/03_testing_early.png",
+      "timestamp_s": 50.0,
+      "use": "Testing state at an early motion point"
+    },
+    {
+      "file": "images/04_testing_progress.png",
+      "timestamp_s": 65.0,
+      "use": "Testing state with increasing Stroke and decreasing absolute Height"
+    },
+    {
+      "file": "images/05_tests_completed.png",
+      "timestamp_s": 70.0,
+      "use": "Tests Completed UI state; displayed values are non-normative manual-demo values"
+    },
+    {
+      "file": "images/06_auto_return_height_30_5mm.png",
+      "timestamp_s": 75.0,
+      "use": "Automatic return completed near Height 30.5 mm"
+    },
+    {
+      "file": "images/07_next_cycle_height_120mm.png",
+      "timestamp_s": 130.0,
+      "use": "Historical recorded robot-entry state at the former 120 mm setting"
+    },
+    {
+      "file": "images/08_live_entry_height_150mm.png",
+      "captured_at": "2026-09-02T00:28:48+09:00",
+      "use": "Current live robot-entry state at the applied 150 mm setting"
+    }
+  ],
+  "transitions": [
+    {
+      "id": "prepare_next_specimen",
+      "ordered_actions": [
+        "capture full screen",
+        "verify current Height is 150 mm",
+        "click Move jigs for the next specimen",
+        "wait for Confirm crosshead movement",
+        "accept OK",
+        "observe jig motion",
+        "wait for Position zero reset",
+        "accept OK",
+        "verify Start Test ready state"
+      ],
+      "before": {
+        "file": "images/transitions/01_prepare_before_robot_clearance.png",
+        "timestamp_s": 25.0
+      },
+      "during": {
+        "file": "images/transitions/02_prepare_jig_distance_moving.png",
+        "timestamp_s": 30.0,
+        "visual_cues": ["orange Jig distance state", "Height changing"]
+      },
+      "after": {
+        "file": "images/transitions/03_prepare_test_ready.png",
+        "timestamp_s": 35.0,
+        "visual_cues": ["jig motion stopped", "green Start Test enabled"]
+      },
+      "completion_evidence": ["Height stable", "Jig distance motion state cleared", "Start Test enabled"]
+    },
+    {
+      "id": "run_test_and_auto_return",
+      "before": {
+        "file": "images/02_pretest_height_30_5mm.png",
+        "timestamp_s": 40.0
+      },
+      "during": {
+        "file": "images/03_testing_early.png",
+        "timestamp_s": 50.0,
+        "visual_cues": ["cyan Testing state", "Pause and Stop enabled", "live sensor values changing"]
+      },
+      "method_progress": {
+        "file": "images/04_testing_progress.png",
+        "timestamp_s": 65.0,
+        "visual_cues": ["Stroke changing", "absolute Height changing"]
+      },
+      "test_complete": {
+        "file": "images/05_tests_completed.png",
+        "timestamp_s": 70.0,
+        "visual_cues": ["Tests Completed message", "Return enabled", "result controls available"]
+      },
+      "after_auto_return": {
+        "file": "images/06_auto_return_height_30_5mm.png",
+        "timestamp_s": 75.0,
+        "visual_cues": ["Height stable", "equipment motion stopped"]
+      },
+      "completion_evidence": ["Tests Completed shown", "automatic return finished", "Height stable"]
+    },
+    {
+      "id": "export_raw_csv",
+      "before": {
+        "file": "images/06_auto_return_height_30_5mm.png",
+        "timestamp_s": 75.0
+      },
+      "control": "images/locators/export_and_next_test_controls.png",
+      "visible_result_in_video": false,
+      "completion_evidence": ["CSV file created", "file size stable", "required columns present", "numeric rows present"]
+    },
+    {
+      "id": "next_test",
+      "before": {
+        "file": "images/transitions/04_next_test_before_completed.png",
+        "timestamp_s": 100.0
+      },
+      "during": {
+        "file": "images/transitions/05_next_test_loading_main_screen.png",
+        "timestamp_s": 105.0,
+        "visual_cues": ["Loading Main screen message", "toolbar controls temporarily disabled"]
+      },
+      "after": {
+        "file": "images/transitions/06_next_test_ready.png",
+        "timestamp_s": 110.0,
+        "visual_cues": ["Tests Completed message cleared", "green Start enabled"]
+      },
+      "completion_evidence": ["Loading message cleared", "new test Ready UI shown", "Start enabled"]
+    },
+    {
+      "id": "open_for_next_robot_placement",
+      "before": {
+        "file": "images/transitions/07_open_for_robot_before.png",
+        "timestamp_s": 115.0
+      },
+      "during": {
+        "file": "images/transitions/08_open_for_robot_moving.png",
+        "timestamp_s": 125.0,
+        "visual_cues": ["orange Jig distance state", "absolute Height increasing"]
+      },
+      "after": {
+        "file": "images/08_live_entry_height_150mm.png",
+        "captured_at": "2026-09-02T00:28:48+09:00",
+        "visual_cues": ["configured robot clearance reached", "motion stopped"]
+      },
+      "completion_evidence": ["Height stable at current cell-configured clearance", "Jig distance motion state cleared"]
+    }
+  ],
+  "locators": [
+    {
+      "file": "images/locators/confirm_crosshead_movement_dialog.png",
+      "source": "live Worker capture after recorded-flow reproduction",
+      "use": "Confirm crosshead movement dialog locator"
+    },
+    {
+      "file": "images/locators/confirm_crosshead_movement_ok.png",
+      "source": "live Worker capture after recorded-flow reproduction",
+      "use": "Unfocused OK control for Confirm crosshead movement dialog"
+    },
+    {
+      "file": "images/locators/confirm_crosshead_movement_ok_focused.png",
+      "source": "live Worker capture after opening Confirm crosshead movement",
+      "use": "Focused OK control for Confirm crosshead movement dialog"
+    },
+    {
+      "file": "images/locators/position_zero_reset_dialog.png",
+      "source": "live Worker capture after crosshead movement completed",
+      "use": "Localized Position Zero-Reset dialog locator"
+    },
+    {
+      "file": "images/locators/position_zero_reset_yes.png",
+      "source": "live Worker capture after crosshead movement completed",
+      "use": "Korean Yes control for Position Zero-Reset"
+    },
+    {
+      "file": "images/locators/entry_height_150mm.png",
+      "source": "live Worker capture at the current cell-configured clearance",
+      "use": "Current applied robot-entry Height 150.000 mm verification before preparation"
+    },
+    {
+      "file": "images/locators/start_test_ready.png",
+      "source_timestamp_s": 40.0,
+      "use": "Start Test control in the ready state"
+    },
+    {
+      "file": "images/locators/testing_state.png",
+      "source_timestamp_s": 50.0,
+      "use": "Testing state label"
+    },
+    {
+      "file": "images/locators/tests_completed_state.png",
+      "source_timestamp_s": 70.0,
+      "use": "Tests Completed state label"
+    },
+    {
+      "file": "images/locators/export_and_next_test_controls.png",
+      "source_timestamp_s": 75.0,
+      "use": "Raw CSV export and Next test controls"
+    },
+    {
+      "file": "images/locators/jig_motion_controls.png",
+      "source_timestamp_s": 130.0,
+      "use": "Move jigs for the next specimen and arbitrary inter-jig distance controls"
+    },
+    {
+      "file": "images/locators/sensor_readouts.png",
+      "source_timestamp_s": 65.0,
+      "use": "Force, Stroke, and absolute Height display region"
+    },
+    {
+      "file": "images/locators/jig_distance_moving_state.png",
+      "source_timestamp_s": 30.0,
+      "use": "Orange Jig distance state while a commanded jig motion is active"
+    },
+    {
+      "file": "images/locators/toolbar_testing_controls.png",
+      "source_timestamp_s": 50.0,
+      "use": "Testing toolbar with Start disabled and Pause/Stop enabled"
+    },
+    {
+      "file": "images/locators/toolbar_completed_controls.png",
+      "source_timestamp_s": 70.0,
+      "use": "Completed toolbar with Return enabled"
+    },
+    {
+      "file": "images/locators/loading_main_screen_state.png",
+      "source_timestamp_s": 105.0,
+      "use": "Temporary Loading Main screen state after Next test"
+    },
+    {
+      "file": "images/locators/toolbar_ready_after_next_test.png",
+      "source_timestamp_s": 110.0,
+      "use": "Ready toolbar after Next test with Start enabled"
+    }
+  ],
+  "warning": "The source is a hand-operated demonstration. All visible and documented numeric settings are current applied method values, not fixed equipment-wide constants. Prioritize UI text, color, button enablement, icon state, motion state, and artifact evidence."
+}

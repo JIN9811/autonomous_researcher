@@ -50,6 +50,7 @@ from urllib.parse import quote, unquote, urlparse
 import yaml
 import httpx
 from dotenv import dotenv_values
+from json_repair import repair_json
 from typing import Any, AsyncIterator, Callable, Literal
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -140,6 +141,9 @@ from utils.recording_specimen_pose import load_recording_specimen_pose
 from utils.ids import make_event_id
 from utils.equipment_profiles import DEFAULT_UTM_PROFILE_ID, EquipmentProfile, EquipmentProfileRegistry, build_execution_contract
 from utils.equipment_skill_runtime import EquipmentSkillRegistry, SkillContractError, canonical_sha256
+from utils.equipment_skill_flow import EquipmentSkillFlowError, EquipmentSkillFlowStore, normalize_equipment_skill_flow
+from utils.equipment_agentic_task import build_utm_compression_flow_template, list_equipment_agentic_tasks
+from utils.equipment_vision_tasks import get_equipment_vision_task, list_equipment_vision_tasks
 from utils.equipment_skill_workflow import validate_editable_workflow
 from utils.equipment_skill_authoring_jobs import EquipmentSkillAuthoringJobManager, TERMINAL_STATUSES
 from utils.equipment_skill_vision import (
@@ -191,6 +195,8 @@ PLC_TRANSACTION_STATE_PATH = resolve_path("memory/plc_bridge_state.json")
 AGENT_BASELINE_DOC_PATH = resolve_path("docs/runtime/agent_program_baseline.md")
 BO_WORKSPACE_SETTINGS_PATH = resolve_path("memory/bo_workspace_settings.json")
 EQUIPMENT_SKILL_ROOT = resolve_path("memory/equipment_skills")
+EQUIPMENT_SKILL_FLOW_PATH = resolve_path("graphs/modules/equipment/equipment_skill_flows.json")
+EQUIPMENT_SKILL_FLOW_RUNTIME_ROOT = resolve_path("memory/equipment_runtime/equipment_skill_flow_latest")
 EQUIPMENT_RUNTIME_ROOT = resolve_path("memory/equipment_runtime")
 EQUIPMENT_SKILL_AUTHORING_JOB_ROOT = resolve_path("memory/equipment_runtime/skill_authoring_jobs")
 EQUIPMENT_WORKSPACE_SETTINGS_PATH = resolve_path("memory/equipment_workspace_settings.json")
@@ -204,6 +210,7 @@ RUNTIME_GRAPH_VERSION_ROOT = resolve_path("memory/graph_versions")
 RUNTIME_MODULE_ROOT = resolve_path("graphs/modules")
 RUNTIME_MODULE_VERSION_ROOT = resolve_path("memory/module_versions")
 API_KEY_SETTINGS_PATH = resolve_path("memory/api_keys.json")
+WANDB_LOCAL_API_KEY_SETTINGS_PATH = resolve_path("memory/wandb_local_api_key.json")
 LEROBOT_ACTION_LOG_ROOT = resolve_path("runs/lerobot_action_logs")
 ACTIVE_ROBOT_CAM_LATEST_RESULT_PATH = resolve_path("runs/active_robot_cam/latest_active_robot_cam_result.json")
 BAMBU_HTTP_EXPORT_ROOT = resolve_path("artifacts/bambu_http_exports")
@@ -664,6 +671,50 @@ async def _apply_runtime_api_key_settings(settings: dict[str, Any], *, emit_even
     return public
 
 
+def _read_wandb_local_api_key_settings() -> dict[str, Any]:
+    """Read the gitignored W&B local API key store."""
+    settings = _read_workspace_settings(WANDB_LOCAL_API_KEY_SETTINGS_PATH)
+    api_key = str(settings.get("api_key") or "").strip()
+    return {
+        "schema": "wandb_local_api_key.v1",
+        "provider": "wandb_local",
+        "api_key": api_key,
+        "enabled": bool(settings.get("enabled", False)) and bool(api_key),
+        "source": str(settings.get("source") or ("memory" if api_key else "none")),
+        "updated_at": str(settings.get("updated_at") or ""),
+    }
+
+
+def _write_wandb_local_api_key_settings(api_key: str, *, enabled: bool, source: str = "user") -> dict[str, Any]:
+    """Persist the W&B local API key to a local gitignored file."""
+    clean_key = str(api_key or "").strip()
+    payload = {
+        "schema": "wandb_local_api_key.v1",
+        "provider": "wandb_local",
+        "api_key": clean_key,
+        "enabled": bool(enabled and clean_key),
+        "source": source,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    return _write_workspace_settings(WANDB_LOCAL_API_KEY_SETTINGS_PATH, payload)
+
+
+def _public_wandb_local_api_key_settings(settings: dict[str, Any]) -> dict[str, object]:
+    """Return W&B local API key status without exposing the secret value."""
+    api_key = str(settings.get("api_key") or "").strip()
+    enabled = bool(settings.get("enabled") and api_key)
+    return {
+        "ok": True,
+        "provider": "wandb_local",
+        "enabled": enabled,
+        "has_key": bool(api_key),
+        "key_status": "registered" if api_key else "not_registered",
+        "source": str(settings.get("source") or ("memory" if api_key else "none")),
+        "settings_path": str(WANDB_LOCAL_API_KEY_SETTINGS_PATH),
+        "updated_at": str(settings.get("updated_at") or ""),
+    }
+
+
 @app.on_event("startup")
 async def keep_startup_side_effect_free() -> None:
     """Keep GUI startup free of model prewarming while applying saved secrets."""
@@ -849,6 +900,13 @@ class RuntimeModelRequest(BaseModel):
 
 class RuntimeApiKeyRequest(BaseModel):
     """Request body for local API key storage controls."""
+
+    api_key: str = Field(..., min_length=1)
+    enabled: bool = True
+
+
+class LeRobotWandBLocalApiKeyRequest(BaseModel):
+    """Request body for local W&B API key storage controls."""
 
     api_key: str = Field(..., min_length=1)
     enabled: bool = True
@@ -1280,6 +1338,12 @@ class EquipmentProfileSettingsRequest(BaseModel):
     vision_link_enabled: bool
 
 
+class EquipmentSkillFlowSaveRequest(BaseModel):
+    """Save one Profile-bound middle/low-level Equipment Skill Flow."""
+
+    flow: dict[str, Any] = Field(default_factory=dict)
+
+
 class EquipmentSkillDraftRequest(BaseModel):
     """Create one exact Skill draft from a saved operator demonstration."""
 
@@ -1627,6 +1691,43 @@ class ManipulationAgentBridgeRequest(LeRobotAPIRequest):
     target_location: str = "utm_fixture"
     specimen_result: dict[str, object] = Field(default_factory=dict)
     task_profiles: dict[str, object] = Field(default_factory=dict)
+
+
+class LeRobotDatasetManageSourceRequest(BaseModel):
+    """One source dataset selection for local dataset management."""
+
+    dataset_repo_id: str = ""
+    repo_id: str = ""
+    dataset_path: str = ""
+    episode_range: str = "all"
+
+
+class LeRobotDatasetManageSplitRequest(BaseModel):
+    """One named split output selection for local dataset management."""
+
+    name: str = ""
+    episode_range: str = "all"
+    output_repo_id: str = ""
+    output_path: str = ""
+    overwrite: bool = False
+
+
+class LeRobotDatasetManageRequest(BaseModel):
+    """Request body for local LeRobot dataset merge/split/delete actions."""
+
+    mode: Literal["live", "test", "replay", "fault-injection"] = "test"
+    runtime_mode: Literal["live", "test", "replay", "fault-injection"] | None = None
+    profile_id: str = ""
+    dataset_root: str = ""
+    namespace: str = "jin"
+    date_prefix: str = ""
+    output_repo_id: str = ""
+    output_path: str = ""
+    overwrite: bool = False
+    sources: list[LeRobotDatasetManageSourceRequest] = Field(default_factory=list)
+    source: LeRobotDatasetManageSourceRequest | None = None
+    splits: list[LeRobotDatasetManageSplitRequest] = Field(default_factory=list)
+    delete_episode_range: str = ""
 
 
 class LeRobotRecordControlAPIRequest(BaseModel):
@@ -2524,6 +2625,16 @@ async def windows_equipment_gui(request: Request) -> HTMLResponse:
         request=request,
         name="windows_equipment.html",
         context={"title": "Windows Equipment Bridge"},
+    )
+
+
+@app.get("/equipment/agent-manager", response_class=HTMLResponse)
+async def equipment_agent_manager(request: Request) -> HTMLResponse:
+    """Serve the sole Profile-bound Lab Equipment flow authoring surface."""
+    return templates.TemplateResponse(
+        request=request,
+        name="equipment_agent_manager.html",
+        context={"title": "Lab Equipment Agent Manager"},
     )
 
 
@@ -11657,6 +11768,113 @@ def _equipment_skill_synthesis_evidence(
     return SkillVisionEvidence(images=images, steps=steps, timeline=timeline)
 
 
+async def _complete_equipment_json_with_retry(
+    backend: Any,
+    *,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    metadata: dict[str, Any],
+    images: list[Any],
+) -> tuple[dict[str, Any], Any]:
+    """Request strict JSON and retry the same selected model once on malformed syntax."""
+    structured_metadata = dict(metadata)
+    structured_metadata["response_format"] = "json_object"
+    response = await backend.complete(
+        model=model,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        metadata=structured_metadata,
+        images=images,
+    )
+    try:
+        return _extract_json_object(response.text), response
+    except (json.JSONDecodeError, ValueError):
+        retry_metadata = dict(structured_metadata)
+        retry_metadata["json_retry_attempt"] = 1
+        retry_response = await backend.complete(
+            model=model,
+            system_prompt=(
+                f"{system_prompt}\n\n"
+                "Your previous response was not valid JSON. Retry the same analysis and return exactly one "
+                "strict RFC 8259 JSON object. Use double-quoted keys and strings, include every required comma "
+                "and closing delimiter, and do not include Markdown fences or commentary."
+            ),
+            user_prompt=user_prompt,
+            metadata=retry_metadata,
+            images=images,
+        )
+        try:
+            payload = _extract_json_object(retry_response.text)
+        except (json.JSONDecodeError, ValueError):
+            payload = repair_json(retry_response.text, return_objects=True)
+            if not isinstance(payload, dict):
+                raise ValueError("repaired LLM response JSON must be an object")
+        return payload, retry_response
+
+
+def _equipment_skill_synthesis_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
+    """Keep executable semantics while omitting image data already sent as visual evidence."""
+    compact = strip_inline_image_payloads(workflow)
+    for step in compact.get("steps", []):
+        if not isinstance(step, dict):
+            continue
+        action = step.get("action")
+        if isinstance(action, dict):
+            action.pop("image_candidates", None)
+    return compact
+
+
+def _complete_equipment_annotation_payload(
+    payload: dict[str, Any],
+    *,
+    workflow: dict[str, Any],
+    current_annotations: dict[str, Any],
+) -> tuple[dict[str, Any], int]:
+    """Preserve every recorded step when the selected model omits annotation rows."""
+    completed = copy.deepcopy(payload)
+    model_steps = {
+        str(item.get("step_id") or ""): item
+        for item in payload.get("steps", [])
+        if isinstance(item, dict) and str(item.get("step_id") or "")
+    }
+    current_steps = {
+        str(item.get("step_id") or ""): item
+        for item in current_annotations.get("steps", [])
+        if isinstance(item, dict) and str(item.get("step_id") or "")
+    }
+    merged_steps: list[dict[str, Any]] = []
+    fallback_count = 0
+    for workflow_step in workflow.get("steps", []):
+        if not isinstance(workflow_step, dict):
+            continue
+        step_id = str(workflow_step.get("step_id") or "").strip()
+        if not step_id:
+            continue
+        base = copy.deepcopy(
+            current_steps.get(
+                step_id,
+                {
+                    "step_id": step_id,
+                    "label": str(workflow_step.get("label") or step_id),
+                    "confidence": 0.75,
+                    "review_required": False,
+                },
+            )
+        )
+        model_step = model_steps.get(step_id)
+        if model_step is None:
+            fallback_count += 1
+        else:
+            for key in ("label", "confidence", "review_required", "locator", "checkpoint_after"):
+                if key in model_step:
+                    base[key] = copy.deepcopy(model_step[key])
+        base["step_id"] = step_id
+        merged_steps.append(base)
+    completed["steps"] = merged_steps
+    return completed, fallback_count
+
+
 async def _annotate_equipment_skill_with_selected_model(
     package: dict[str, Any],
     *,
@@ -11727,7 +11945,8 @@ async def _annotate_equipment_skill_with_selected_model(
                     "tiles": chunk.tiles,
                 }
             }
-            chunk_response = await backend.complete(
+            chunk_analysis, chunk_response = await _complete_equipment_json_with_retry(
+                backend,
                 model=model,
                 system_prompt=(
                     "Analyze one chronological desktop-recording storyboard. Read every tile in order and return "
@@ -11747,7 +11966,6 @@ async def _annotate_equipment_skill_with_selected_model(
             )
             if not str(chunk_response.text or "").strip():
                 raise RuntimeError(f"selected model returned an empty timeline analysis: {chunk.chunk_id}")
-            chunk_analysis = _extract_json_object(chunk_response.text)
             expected_frame_ids = [str(tile["frame_id"]) for tile in chunk.tiles]
             returned_frame_ids = [str(item) for item in chunk_analysis.get("source_frame_ids", [])]
             if returned_frame_ids != expected_frame_ids:
@@ -11775,7 +11993,8 @@ async def _annotate_equipment_skill_with_selected_model(
         vision_evidence,
         timeline_chunk_count=len(storyboards.chunks),
     )
-    response = await backend.complete(
+    payload, response = await _complete_equipment_json_with_retry(
+        backend,
         model=model,
         system_prompt=build_manual_grounded_prompt(
             "You reconstruct and annotate one already recorded bounded Windows equipment workflow from its full "
@@ -11792,10 +12011,12 @@ async def _annotate_equipment_skill_with_selected_model(
             "context_bbox must preserve nearby semantic context. Use action_context and state images to explain "
             "what changed after each action. Do not add executable actions or credentials.",
             manual_context,
+            max_chunks=3,
+            max_chars=1800,
         ),
         user_prompt=json.dumps(
             {
-                "workflow": strip_inline_image_payloads(workflow),
+                "workflow": _equipment_skill_synthesis_workflow(workflow),
                 "current_annotations": annotations,
                 "recording_evidence": {
                     "schema": str((manifest.get("recording_evidence") or {}).get("schema") or ""),
@@ -11820,15 +12041,18 @@ async def _annotate_equipment_skill_with_selected_model(
             "task_type": "equipment_skill_annotation",
             "role": snapshot["role"],
             "no_fallback": True,
+            "max_tokens": 1400,
             "manual_context_hash": manual_audit["context_hash"],
         },
         images=synthesis_evidence.images,
     )
     if not str(response.text or "").strip():
         raise RuntimeError("selected model returned an empty annotation")
-    payload = _extract_json_object(response.text)
-    if not isinstance(payload.get("steps"), list):
-        raise RuntimeError("selected model annotation did not contain steps")
+    payload, annotation_step_fallback_count = _complete_equipment_annotation_payload(
+        payload,
+        workflow=workflow,
+        current_annotations=annotations,
+    )
     if vision_evidence.images:
         enriched = apply_visual_locator_annotations(
             package,
@@ -11860,6 +12084,7 @@ async def _annotate_equipment_skill_with_selected_model(
     snapshot["timeline_source_frame_count"] = storyboards.source_frame_count
     snapshot["timeline_overview_count"] = len(storyboards.overview_images)
     snapshot["synthesis_visual_evidence_count"] = len(synthesis_evidence.images)
+    snapshot["annotation_step_fallback_count"] = annotation_step_fallback_count
     return payload, snapshot
 
 
@@ -12742,6 +12967,119 @@ def _equipment_profile_registry() -> EquipmentProfileRegistry:
     return EquipmentProfileRegistry.default()
 
 
+def _equipment_skill_flow_store() -> EquipmentSkillFlowStore:
+    """Return the shared Profile-bound Skill Flow store used by both editors."""
+    return EquipmentSkillFlowStore(EQUIPMENT_SKILL_FLOW_PATH)
+
+
+def _equipment_skill_flow_payload(
+    profile_id: str,
+    *,
+    requested_run_id: str = "",
+    migration_notes_override: list[str] | None = None,
+) -> dict[str, object]:
+    """Return one flow, Runtime IDE projection, catalog, and exact-version readiness."""
+    try:
+        profile = _equipment_profile_registry().get(profile_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    store = _equipment_skill_flow_store()
+    try:
+        flow, migration_notes = store.get_with_migration(profile.profile_id)
+        graph = store.as_runtime_graph(profile.profile_id)
+    except EquipmentSkillFlowError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    skills = _equipment_skill_registry().list()
+    catalog = {
+        (str(item.get("skill_id") or ""), str(item.get("version") or "")): item
+        for item in skills
+        if isinstance(item, dict)
+    }
+    block_readiness: list[dict[str, object]] = []
+    ready = bool(flow.get("blocks"))
+    for block in flow.get("blocks", []):
+        if not isinstance(block, dict):
+            continue
+        skill = block.get("skill") if isinstance(block.get("skill"), dict) else {}
+        key = (str(skill.get("skill_id") or ""), str(skill.get("skill_version") or ""))
+        manifest = catalog.get(key)
+        skill_ok = bool(
+            manifest
+            and manifest.get("lifecycle") == "deployed"
+            and manifest.get("enabled") is not False
+            and str(manifest.get("target_profile") or "") == profile.profile_id
+        )
+        vision = block.get("vision") if isinstance(block.get("vision"), dict) else {}
+        vision_task_id = str(vision.get("task_id") or "")
+        vision_task: dict[str, object] = {}
+        if vision_task_id:
+            try:
+                vision_task = get_equipment_vision_task(vision_task_id)
+            except ValueError:
+                vision_task = {}
+        vision_ok = not bool(vision.get("enabled")) or bool(vision_task)
+        node_ok = skill_ok and vision_ok
+        ready = ready and node_ok
+        block_readiness.append(
+            {
+                "block_id": block.get("id", ""),
+                "task": str((block.get("agentic") or {}).get("task") or block.get("label") or ""),
+                "skill_id": key[0],
+                "skill_version": key[1],
+                "vision_task_id": vision_task_id,
+                "vision_task_label": str(vision_task.get("label") or ""),
+                "ready": node_ok,
+                "reason": (
+                    "deployed"
+                    if node_ok
+                    else "Skill Slot is unbound"
+                    if not key[0] and not key[1]
+                    else "Vision Task is unbound"
+                    if not vision_ok and not vision_task_id
+                    else "selected Vision Task is unavailable"
+                    if not vision_ok
+                    else "exact deployed Skill version is unavailable for this Profile"
+                ),
+            }
+        )
+    execution: dict[str, object] = {}
+    execution_path = EQUIPMENT_SKILL_FLOW_RUNTIME_ROOT / f"{profile.profile_id}.json"
+    if execution_path.exists():
+        try:
+            loaded_execution = json.loads(execution_path.read_text(encoding="utf-8"))
+            if isinstance(loaded_execution, dict):
+                execution_run_id = str(loaded_execution.get("run_id") or "")
+                if not requested_run_id or execution_run_id == requested_run_id:
+                    execution = loaded_execution
+        except (OSError, json.JSONDecodeError):
+            execution = {}
+    completed_nodes = {
+        str(item.get("node_id") or "")
+        for item in execution.get("transitions", [])
+        if isinstance(item, dict)
+    }
+    active_node = str(execution.get("active_node") or "")
+    for node in graph.get("nodes", []):
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("id") or "")
+        node["runtime_status"] = "active" if node_id == active_node else ("completed" if node_id in completed_nodes else "idle")
+    return {
+        "ok": True,
+        "profile_id": profile.profile_id,
+        "flow": flow,
+        "graph": graph,
+        "skills": skills,
+        "vision_tasks": list_equipment_vision_tasks(),
+        "agentic_tasks": list_equipment_agentic_tasks(),
+        "flow_templates": [build_utm_compression_flow_template(profile.profile_id)],
+        "migration_notes": list(migration_notes_override if migration_notes_override is not None else migration_notes),
+        "readiness": {"ready": ready, "blocks": block_readiness},
+        "execution": execution,
+        "workspace_settings": _equipment_profile_workspace_settings(profile),
+    }
+
+
 def _equipment_profile_workspace_settings(profile: EquipmentProfile) -> dict[str, object]:
     """Return the persisted Profile preferences, falling back to Profile defaults."""
     stored = _read_workspace_settings(EQUIPMENT_WORKSPACE_SETTINGS_PATH)
@@ -12842,6 +13180,75 @@ async def post_equipment_profile_settings(
             vision_link_enabled=req.vision_link_enabled,
         ),
     }
+
+
+@app.get("/api/equipment/profiles/{profile_id}/skill-flow")
+async def get_equipment_profile_skill_flow(
+    profile_id: str,
+    run_id: str = "",
+) -> dict[str, object]:
+    """Return the canonical Skill Flow shared by Equipment Workspace and Runtime IDE."""
+    return _equipment_skill_flow_payload(profile_id, requested_run_id=run_id)
+
+
+@app.put("/api/equipment/profiles/{profile_id}/skill-flow")
+async def put_equipment_profile_skill_flow(
+    profile_id: str,
+    req: EquipmentSkillFlowSaveRequest,
+) -> dict[str, object]:
+    """Validate and atomically save one Profile-bound Skill Flow."""
+    migration_notes: list[str] = []
+    try:
+        profile = _equipment_profile_registry().get(profile_id)
+        normalized = normalize_equipment_skill_flow(
+            profile.profile_id,
+            req.flow,
+            migration_notes=migration_notes,
+        )
+        catalog = {
+            (str(item.get("skill_id") or ""), str(item.get("version") or "")): item
+            for item in _equipment_skill_registry().list()
+            if isinstance(item, dict)
+        }
+        unavailable: list[str] = []
+        for block in normalized.get("blocks", []):
+            skill = block.get("skill") if isinstance(block.get("skill"), dict) else {}
+            key = (str(skill.get("skill_id") or ""), str(skill.get("skill_version") or ""))
+            if not key[0] and not key[1]:
+                continue
+            manifest = catalog.get(key)
+            if not (
+                manifest
+                and manifest.get("lifecycle") == "deployed"
+                and manifest.get("enabled") is not False
+                and str(manifest.get("target_profile") or "") == profile.profile_id
+            ):
+                unavailable.append(f"{key[0]}@{key[1]}")
+        if unavailable:
+            raise EquipmentSkillFlowError(
+                "exact deployed Skill version is unavailable for this Profile: " + ", ".join(unavailable)
+            )
+        _equipment_skill_flow_store().save(profile_id, normalized)
+    except EquipmentSkillFlowError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _equipment_skill_flow_payload(profile_id, migration_notes_override=migration_notes)
+
+
+@app.get("/api/modules/equipment/equipment-skill-flow")
+async def get_runtime_equipment_skill_flow(profile_id: str = DEFAULT_UTM_PROFILE_ID) -> dict[str, object]:
+    """Expose the same Equipment Skill Flow through the Runtime IDE module namespace."""
+    return _equipment_skill_flow_payload(profile_id)
+
+
+@app.put("/api/modules/equipment/equipment-skill-flow")
+async def put_runtime_equipment_skill_flow(
+    req: EquipmentSkillFlowSaveRequest,
+    profile_id: str = DEFAULT_UTM_PROFILE_ID,
+) -> dict[str, object]:
+    """Save the canonical flow from the Runtime IDE equipment-module editor."""
+    return await put_equipment_profile_skill_flow(profile_id, req)
 
 
 def _equipment_vision_link_request(
@@ -16933,6 +17340,19 @@ async def post_lerobot_wandb_local_status(req: LeRobotAPIRequest) -> dict[str, o
     return await _call_lerobot_backend_tool("lerobot.wandb_local.status", req.model_dump(), publish=False)
 
 
+@app.get("/api/lerobot/wandb-local/api-key")
+async def get_lerobot_wandb_local_api_key() -> dict[str, object]:
+    """Return W&B local API key status without exposing the secret."""
+    return _public_wandb_local_api_key_settings(_read_wandb_local_api_key_settings())
+
+
+@app.post("/api/lerobot/wandb-local/api-key")
+async def post_lerobot_wandb_local_api_key(req: LeRobotWandBLocalApiKeyRequest) -> dict[str, object]:
+    """Save the W&B local API key to the local gitignored single-file store."""
+    settings = _write_wandb_local_api_key_settings(req.api_key, enabled=req.enabled, source="user")
+    return _public_wandb_local_api_key_settings(settings)
+
+
 def _rollout_profile_from_request(req: LeRobotAPIRequest) -> dict[str, object]:
     """Convert a standalone rollout request to persisted GUI defaults."""
     policy_path = req.policy_path or req.policy_checkpoint_path
@@ -17203,6 +17623,34 @@ async def post_lerobot_rollout_status(req: LeRobotAPIRequest) -> dict[str, objec
 async def post_lerobot_dataset_inspect(req: LeRobotAPIRequest) -> dict[str, object]:
     """Inspect a LeRobot dataset path/repo."""
     result = _lerobot_bridge().dataset_inspect(req.model_dump())
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/dataset-manage/list")
+async def post_lerobot_dataset_manage_list(req: LeRobotDatasetManageRequest) -> dict[str, object]:
+    """List locally available LeRobot datasets for merge/split/delete workflows."""
+    result = _lerobot_bridge().dataset_manage_list(req.model_dump(mode="json", exclude_none=True))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/dataset-manage/merge")
+async def post_lerobot_dataset_manage_merge(req: LeRobotDatasetManageRequest) -> dict[str, object]:
+    """Merge selected local LeRobot datasets into a new reindexed dataset."""
+    result = _lerobot_bridge().dataset_manage_merge(req.model_dump(mode="json", exclude_none=True))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/dataset-manage/split")
+async def post_lerobot_dataset_manage_split(req: LeRobotDatasetManageRequest) -> dict[str, object]:
+    """Split one local LeRobot dataset into one or more reindexed datasets."""
+    result = _lerobot_bridge().dataset_manage_split(req.model_dump(mode="json", exclude_none=True))
+    return await _publish_lerobot_result(result)
+
+
+@app.post("/api/lerobot/dataset-manage/delete")
+async def post_lerobot_dataset_manage_delete(req: LeRobotDatasetManageRequest) -> dict[str, object]:
+    """Create a compacted local dataset after deleting selected episodes."""
+    result = _lerobot_bridge().dataset_manage_delete(req.model_dump(mode="json", exclude_none=True))
     return await _publish_lerobot_result(result)
 
 

@@ -113,6 +113,8 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert "10. Inference / Rollout" in page.text
     assert "Save Rollout Defaults" in page.text
     assert "11. Manipulation Agent Bridge" in page.text
+    assert "Dataset Manage" in page.text
+    assert "dataset-manage-tab" in page.text
     assert "12. Session Output" in page.text
 
     home = client.get("/")
@@ -450,6 +452,75 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert browse["ok"] is True
     assert "allowed_roots" in browse
 
+    dataset_manage = client.post(
+        "/api/lerobot/dataset-manage/list",
+        json={"mode": "test", "profile_id": "fake_omx_ai", "dataset_root": str(tmp_path / "datasets"), "namespace": "jin", "date_prefix": "20260901"},
+    ).json()
+    assert dataset_manage["ok"] is True
+    assert dataset_manage["tool"] == "lerobot.dataset_manage.list"
+    assert dataset_manage["suggested_repo_id"] == "jin/20260901_1"
+
+    monkeypatch.setattr(
+        bridge,
+        "dataset_manage_merge",
+        lambda payload: {"ok": True, "tool": "lerobot.dataset_manage.merge", "output_repo_id": payload.get("output_repo_id"), "sources": payload.get("sources")},
+    )
+    merged_dataset = client.post(
+        "/api/lerobot/dataset-manage/merge",
+        json={
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_root": str(tmp_path / "datasets"),
+            "sources": [
+                {"dataset_repo_id": "jin/source_a", "episode_range": "0-2"},
+                {"dataset_repo_id": "jin/source_b", "episode_range": "3,4"},
+            ],
+            "output_repo_id": "jin/merged",
+        },
+    ).json()
+    assert merged_dataset["ok"] is True
+    assert merged_dataset["tool"] == "lerobot.dataset_manage.merge"
+    assert merged_dataset["output_repo_id"] == "jin/merged"
+
+    monkeypatch.setattr(
+        bridge,
+        "dataset_manage_split",
+        lambda payload: {"ok": True, "tool": "lerobot.dataset_manage.split", "splits": payload.get("splits")},
+    )
+    split_dataset = client.post(
+        "/api/lerobot/dataset-manage/split",
+        json={
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_root": str(tmp_path / "datasets"),
+            "source": {"dataset_repo_id": "jin/source", "episode_range": "all"},
+            "splits": [{"name": "train", "episode_range": "0-9"}],
+        },
+    ).json()
+    assert split_dataset["ok"] is True
+    assert split_dataset["tool"] == "lerobot.dataset_manage.split"
+    assert split_dataset["splits"][0]["episode_range"] == "0-9"
+
+    monkeypatch.setattr(
+        bridge,
+        "dataset_manage_delete",
+        lambda payload: {"ok": True, "tool": "lerobot.dataset_manage.delete", "delete_episode_range": payload.get("delete_episode_range")},
+    )
+    compact_dataset = client.post(
+        "/api/lerobot/dataset-manage/delete",
+        json={
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "dataset_root": str(tmp_path / "datasets"),
+            "source": {"dataset_repo_id": "jin/source", "episode_range": "all"},
+            "delete_episode_range": "3,4",
+            "output_repo_id": "jin/source_compact",
+        },
+    ).json()
+    assert compact_dataset["ok"] is True
+    assert compact_dataset["tool"] == "lerobot.dataset_manage.delete"
+    assert compact_dataset["delete_episode_range"] == "3,4"
+
     visual = client.post(
         "/api/lerobot/visualize/dataset",
         json={"mode": "test", "profile_id": "fake_omx_ai", "dataset_repo_id": "local/fake_dataset"},
@@ -505,6 +576,34 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert wandb_local["ok"] is True
     assert wandb_local["tool"] == "lerobot.wandb_local.start"
     assert wandb_local["url"] == "http://127.0.0.1:8081"
+
+
+def test_lerobot_wandb_local_api_key_is_saved_locally_without_echoing_secret(tmp_path: Path, monkeypatch: Any) -> None:
+    settings_path = tmp_path / "memory" / "wandb_local_api_key.json"
+    monkeypatch.setattr(main_module, "WANDB_LOCAL_API_KEY_SETTINGS_PATH", settings_path)
+
+    client = TestClient(main_module.app)
+
+    saved = client.post(
+        "/api/lerobot/wandb-local/api-key",
+        json={"api_key": "local-wandb-test-key-123456", "enabled": True},
+    ).json()
+
+    assert saved["ok"] is True
+    assert saved["provider"] == "wandb_local"
+    assert saved["has_key"] is True
+    assert saved["enabled"] is True
+    assert "api_key" not in saved
+    assert "masked_key" not in saved
+    stored = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert stored["api_key"] == "local-wandb-test-key-123456"
+    assert stored["enabled"] is True
+
+    status = client.get("/api/lerobot/wandb-local/api-key").json()
+    assert status["ok"] is True
+    assert status["has_key"] is True
+    assert "api_key" not in status
+    assert "masked_key" not in status
 
 
 def test_lerobot_rollout_api_hardware_alert_is_guardian_ready(monkeypatch: Any) -> None:

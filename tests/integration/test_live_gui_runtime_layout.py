@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -46,7 +47,16 @@ def test_skill_workflow_editor_exposes_manual_target_crop_controls() -> None:
     assert '"manual_crop"' in script
     assert '"ai_target_bbox_norm"' in script
     assert 'crop_origin' in script
-    assert 'confidence: 0.65' in script
+    assert 'confidence: 0.9' in script
+
+
+def test_equipment_locator_confidence_defaults_to_point_nine() -> None:
+    template = Path("web/templates/windows_equipment.html").read_text(encoding="utf-8")
+    script = Path("web/static/windows_equipment.js").read_text(encoding="utf-8")
+
+    assert 'id="equipment-locator-confidence" class="text-input" value="0.9"' in template
+    assert "locatorConfidenceInput.value : 0.9" in script
+    assert "|| 0.9" in script
 
 
 def test_completed_test_run_keeps_its_final_live_gui_snapshot() -> None:
@@ -110,6 +120,299 @@ def test_windows_equipment_page_exposes_common_profile_workspace() -> None:
     assert "selectedEquipmentProfileId" in script
 
 
+def test_windows_equipment_profile_is_a_utm_default_select_without_provider_copy() -> None:
+    client = TestClient(app)
+
+    response = client.get("/equipment/windows")
+    script = client.get("/static/windows_equipment.js").text
+
+    assert response.status_code == 200
+    assert '<select id="equipment-profile-items"' in response.text
+    assert '<option value="utm_windows_v1" selected>UTM</option>' in response.text
+    assert "data-equipment-profile" not in script
+    assert "${profile.label} · ${profile.bridge_provider}" not in script
+
+
+def test_equipment_skill_flow_is_shared_by_workspace_and_runtime_ide(tmp_path: Path, monkeypatch) -> None:
+    from app import main as main_module
+
+    monkeypatch.setattr(main_module, "EQUIPMENT_SKILL_FLOW_PATH", tmp_path / "equipment_skill_flows.json")
+    monkeypatch.setattr(
+        main_module,
+        "_equipment_skill_registry",
+        lambda: SimpleNamespace(
+            list=lambda: [
+                {
+                    "skill_id": "utm_test",
+                    "version": "1.0.0",
+                    "name": "UTM Test",
+                    "lifecycle": "deployed",
+                    "enabled": True,
+                    "target_profile": "utm_windows_v1",
+                }
+            ]
+        ),
+    )
+    client = TestClient(app)
+    flow = {
+        "schema": "atr.equipment_skill_flow.v1",
+        "flow_id": "utm_windows_v1",
+        "profile_id": "utm_windows_v1",
+        "version": 1,
+        "blocks": [
+            {
+                "id": "run_test",
+                "label": "Run test",
+                "skill": {"skill_id": "utm_test", "skill_version": "1.0.0"},
+                "agentic": {"completed": "__complete__", "failed": "__blocked__"},
+                "vision": {
+                    "enabled": True,
+                    "task_id": "utm_motion_confirm",
+                    "detected": "__complete__",
+                    "not_detected": "__blocked__",
+                    "timeout": "__blocked__",
+                    "error": "__blocked__",
+                },
+            }
+        ],
+    }
+
+    saved = client.put("/api/equipment/profiles/utm_windows_v1/skill-flow", json={"flow": flow})
+    workspace = client.get("/api/equipment/profiles/utm_windows_v1/skill-flow")
+    runtime = client.get("/api/modules/equipment/equipment-skill-flow?profile_id=utm_windows_v1")
+
+    assert saved.status_code == 200
+    assert workspace.json()["flow"]["blocks"][0]["skill"]["skill_id"] == "utm_test"
+    assert [item["task_id"] for item in workspace.json()["vision_tasks"]] == [
+        "utm_pre_start",
+        "utm_motion_confirm",
+        "utm_test_complete",
+    ]
+    assert workspace.json()["readiness"]["blocks"][0]["vision_task_id"] == "utm_motion_confirm"
+    assert workspace.json()["readiness"]["blocks"][0]["vision_task_label"] == "UTM Motion Confirmation"
+    assert runtime.json()["flow"] == workspace.json()["flow"]
+    assert runtime.json()["graph"]["metadata"]["ide_tab_kind"] == "equipment_skill_flow"
+    assert workspace.json()["readiness"]["blocks"][0]["ready"] is True
+
+
+def test_equipment_skill_flow_exposes_the_code_owned_utm_cycle_template(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from app import main as main_module
+
+    monkeypatch.setattr(main_module, "EQUIPMENT_SKILL_FLOW_PATH", tmp_path / "equipment_skill_flows.json")
+    client = TestClient(main_module.app)
+
+    response = client.get("/api/equipment/profiles/utm_windows_v1/skill-flow")
+
+    assert response.status_code == 200
+    payload = response.json()
+    task = next(item for item in payload["agentic_tasks"] if item["task_id"] == "run_utm_compression_cycle")
+    template = next(item for item in payload["flow_templates"] if item["agentic_task_id"] == task["task_id"])
+    assert task["entry_gate"] == {
+        "id": "verified_specimen_utm_handoff",
+        "label": "Verified specimen / UTM handoff",
+        "locked": True,
+    }
+    assert [block["id"] for block in template["blocks"]] == [
+        "prepare_next_specimen",
+        "start_test",
+        "monitor_contact_and_run",
+        "await_auto_return",
+        "save_raw_data",
+        "validate_raw_data",
+        "advance_without_save",
+        "restore_robot_clearance",
+    ]
+    assert all(block["skill"] == {"skill_id": "", "skill_version": ""} for block in template["blocks"])
+    assert all(block["vision"]["enabled"] is False for block in template["blocks"])
+
+
+def test_equipment_skill_flow_execution_is_filtered_to_requested_run(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from app import main as main_module
+
+    runtime_root = tmp_path / "runtime"
+    runtime_root.mkdir()
+    (runtime_root / "utm_windows_v1.json").write_text(
+        json.dumps(
+            {
+                "schema": "atr.equipment_skill_flow_execution.v1",
+                "profile_id": "utm_windows_v1",
+                "run_id": "run-current",
+                "active_block": "start_test",
+                "terminal": "",
+                "transitions": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(main_module, "EQUIPMENT_SKILL_FLOW_PATH", tmp_path / "equipment_skill_flows.json")
+    monkeypatch.setattr(main_module, "EQUIPMENT_SKILL_FLOW_RUNTIME_ROOT", runtime_root)
+    client = TestClient(main_module.app)
+
+    matching = client.get(
+        "/api/equipment/profiles/utm_windows_v1/skill-flow?run_id=run-current"
+    )
+    mismatched = client.get(
+        "/api/equipment/profiles/utm_windows_v1/skill-flow?run_id=run-other"
+    )
+
+    assert matching.status_code == 200
+    assert matching.json()["execution"]["run_id"] == "run-current"
+    assert mismatched.status_code == 200
+    assert mismatched.json()["execution"] == {}
+
+
+def test_equipment_agent_manager_saved_status_distinguishes_ready_from_unbound() -> None:
+    client = TestClient(app)
+
+    script = client.get("/static/equipment_agent_manager.js").text
+
+    assert 'hasUnboundSlot ? "Profile flow is saved. Unbound Skill Slots remain non-executable."' in script
+    assert ': "Profile flow is saved and ready for Agent execution."' in script
+
+
+def test_equipment_skill_flow_accepts_an_unbound_draft_block(tmp_path: Path, monkeypatch) -> None:
+    from app import main as main_module
+
+    monkeypatch.setattr(main_module, "EQUIPMENT_SKILL_FLOW_PATH", tmp_path / "equipment_skill_flows.json")
+    monkeypatch.setattr(main_module, "_equipment_skill_registry", lambda: SimpleNamespace(list=lambda: []))
+    client = TestClient(app)
+    flow = {
+        "schema": "atr.equipment_skill_flow.v1",
+        "flow_id": "utm_windows_v1",
+        "profile_id": "utm_windows_v1",
+        "version": 1,
+        "blocks": [
+            {
+                "id": "empty_block",
+                "label": "Unbound block",
+                "skill": {"skill_id": "", "skill_version": ""},
+                "agentic": {"completed": "__complete__", "failed": "__blocked__"},
+                "vision": {
+                    "enabled": False,
+                    "task_id": "",
+                    "detected": "__complete__",
+                    "not_detected": "__blocked__",
+                    "timeout": "__blocked__",
+                    "error": "__blocked__",
+                },
+            }
+        ],
+    }
+
+    saved = client.put("/api/equipment/profiles/utm_windows_v1/skill-flow", json={"flow": flow})
+
+    assert saved.status_code == 200
+    payload = saved.json()
+    assert payload["flow"]["blocks"][0]["skill"] == {"skill_id": "", "skill_version": ""}
+    assert payload["readiness"]["ready"] is False
+    assert payload["readiness"]["blocks"][0]["reason"] == "Skill Slot is unbound"
+
+
+def test_equipment_skill_flow_rejects_unknown_vision_task_atomically(tmp_path: Path, monkeypatch) -> None:
+    from app import main as main_module
+
+    monkeypatch.setattr(main_module, "EQUIPMENT_SKILL_FLOW_PATH", tmp_path / "equipment_skill_flows.json")
+    monkeypatch.setattr(main_module, "_equipment_skill_registry", lambda: SimpleNamespace(list=lambda: []))
+    client = TestClient(app)
+    original = {
+        "schema": "atr.equipment_skill_flow.v1",
+        "flow_id": "utm_windows_v1",
+        "profile_id": "utm_windows_v1",
+        "version": 1,
+        "blocks": [],
+    }
+    assert client.put("/api/equipment/profiles/utm_windows_v1/skill-flow", json={"flow": original}).status_code == 200
+    invalid = {
+        **original,
+        "blocks": [
+            {
+                "id": "bad_vision",
+                "label": "Invalid Vision",
+                "skill": {"skill_id": "", "skill_version": ""},
+                "agentic": {"task": "Invalid Vision", "completed": "__complete__", "failed": "__blocked__"},
+                "vision": {
+                    "enabled": True,
+                    "task_id": "missing_task",
+                    "detected": "__complete__",
+                    "not_detected": "__blocked__",
+                    "timeout": "__blocked__",
+                    "error": "__blocked__",
+                },
+            }
+        ],
+    }
+
+    rejected = client.put("/api/equipment/profiles/utm_windows_v1/skill-flow", json={"flow": invalid})
+
+    assert rejected.status_code == 422
+    assert "unknown Equipment Vision task" in rejected.json()["detail"]
+    assert client.get("/api/equipment/profiles/utm_windows_v1/skill-flow").json()["flow"]["blocks"] == []
+
+
+def test_agent_manager_is_the_only_equipment_skill_flow_editor() -> None:
+    client = TestClient(app)
+    manager = client.get("/equipment/agent-manager?profile_id=utm_windows_v1")
+    workspace = client.get("/equipment/windows").text
+    runtime = client.get("/ide").text
+    workspace_script = client.get("/static/windows_equipment.js").text
+    runtime_script = client.get("/static/runtime_ide.js").text
+    live_script = client.get("/static/planning.js").text
+
+    assert manager.status_code == 200
+    for element_id in ("equipment-manager-add-skill", "equipment-manager-blocks", "equipment-manager-save"):
+        assert f'id="{element_id}"' in manager.text
+    assert "equipment-manager-add-vision" not in manager.text
+    assert "equipment-manager-skill-slot" in manager.text
+    assert "equipment-manager-agentic-slot" in manager.text
+    assert "equipment-manager-vision-slot" in manager.text
+    assert ">+ Block<" in manager.text
+    manager_script = client.get("/static/equipment_agent_manager.js").text
+    assert "addButton.disabled = !catalogReady" not in manager_script
+
+    assert 'id="equipment-skill-flow-progress"' in workspace
+    assert 'id="btn-open-equipment-agent-manager"' in workspace
+    assert "btn-equipment-flow-add-skill" not in workspace
+    assert "btn-equipment-flow-add-vision" not in workspace
+    assert "btn-equipment-flow-save" not in workspace
+    assert "/skill-flow" in workspace_script
+    assert "equipment-skill-flow" in runtime_script
+    assert 'id="ide-equipment-flow-workspace"' in runtime
+    assert runtime.index('id="ide-equipment-flow-workspace"') < runtime.index("runtime-ide-compat-module-config")
+    assert "showRuntimeEquipmentFlowWorkspace" in runtime_script
+    assert 'id="ide-open-equipment-agent-manager"' in runtime
+    assert "ide-equipment-flow-add-skill" not in runtime_script
+    assert "ide-equipment-flow-add-vision" not in runtime_script
+    assert "ide-equipment-flow-save" not in runtime_script
+    assert "block.vision.condition" not in runtime_script
+    assert "payload.vision_tasks" in runtime_script
+    assert "equipmentVisionTasks" in workspace_script
+    assert "block.vision.condition" not in live_script
+    assert "visionTasks" in live_script
+    for script in (workspace_script, runtime_script, live_script):
+        assert "vision_task_id" in script
+        assert "vision_task_label" in script
+
+
+def test_agent_manager_exposes_locked_entry_gate_and_utm_cycle_draft_action() -> None:
+    client = TestClient(app)
+
+    page = client.get("/equipment/agent-manager").text
+    script = client.get("/static/equipment_agent_manager.js").text
+
+    assert 'id="equipment-manager-agentic-task"' in page
+    assert 'id="equipment-manager-load-utm-cycle"' in page
+    assert "Verified specimen / UTM handoff" in page
+    assert "LOCKED" in page
+    assert "flowTemplates" in script
+    assert "applyTemplate" in script
+
+
 def test_windows_equipment_page_uses_general_lab_equipment_bridge_structure() -> None:
     client = TestClient(app)
 
@@ -123,7 +426,6 @@ def test_windows_equipment_page_uses_general_lab_equipment_bridge_structure() ->
         "equipment-skill-recording",
         "equipment-skill-management",
         "equipment-main-progress",
-        "equipment-vision-link",
         "equipment-error-recovery",
         "equipment-evidence-workspace",
         "equipment-agentic-progress",
@@ -133,14 +435,15 @@ def test_windows_equipment_page_uses_general_lab_equipment_bridge_structure() ->
         "btn-equipment-skill-workflow-editor",
         "equipment-worker-recordings",
         "btn-equipment-refresh-recordings",
-        "equipment-vision-link-enabled",
+        "btn-open-equipment-agent-manager",
+        "equipment-skill-flow-progress",
     ):
         assert f'id="{element_id}"' in html
     for text in (
         "Skill Recording",
         "Skill Management",
         "Main Progress",
-        "Vision Link",
+        "Equipment execution projection",
         "Error Recovery",
         "Evidence &amp; Data Transfer",
     ):
@@ -449,14 +752,21 @@ def test_equipment_profile_preflight_uses_persisted_vision_link_selection(tmp_pa
     }
 
 
-def test_windows_equipment_vision_link_checkbox_auto_saves_selection() -> None:
+def test_equipment_agent_manager_owns_vision_link_selection() -> None:
     client = TestClient(app)
+    manager = client.get("/equipment/agent-manager?profile_id=utm_windows_v1").text
+    bridge = client.get("/equipment/windows").text
 
-    script = client.get("/static/windows_equipment.js").text
-
-    assert 'visionLinkEnabled.addEventListener("change", saveEquipmentVisionLinkSelection)' in script
-    assert "/settings" in script
-    assert "workspace_settings.vision_link_enabled" in script
+    assert "equipment-manager-vision-slot" in manager
+    manager_script = client.get("/static/equipment_agent_manager.js").text
+    assert 'data-field="vision.enabled"' in manager_script
+    assert 'data-field="vision.task_id"' in manager_script
+    assert 'data-field="vision.condition"' not in manager_script
+    assert "payload.vision_tasks" in manager_script
+    assert "Agentic Task" in manager_script
+    assert 'data-field="agentic.task"' in manager_script
+    assert "Operator label" not in manager_script
+    assert "equipment-vision-link-enabled" not in bridge
 
 
 def test_live_gui_runtime_shell_contains_operational_panels() -> None:
@@ -501,7 +811,7 @@ def test_live_gui_runtime_shell_contains_operational_panels() -> None:
     assert "/static/styles.css?v=20260527-live-focus" in html
     assert "/static/planning.js?v=20260613-clean-stl-render-1" in html
     assert 'href="/static/styles.css?v=20260825-plc-safety-lifecycle-5"' in html
-    assert 'src="/static/planning.js?v=20260826-unified-reset-1"' in html
+    assert 'src="/static/planning.js?v=20260901-equipment-overlay-1"' in html
     assert "Runtime Chat" in html
     assert "Safe Stop" in html
     assert "Pause Run" in html
@@ -2009,6 +2319,135 @@ def test_live_gui_equipment_dashboard_uses_operational_card_layout() -> None:
         assert token in script
     assert 'renderEquipmentAgenticProgress(ctx), { span: 12' in script
     assert 'renderEquipmentExecutionEvidence(ctx), { span: 8' in script
+
+
+def test_live_gui_equipment_dashboard_projects_recorded_cycle_overlay() -> None:
+    client = TestClient(app)
+
+    script = client.get("/static/planning.js").text
+
+    for token in (
+        "ATREquipmentAgenticTaskModel",
+        "function equipmentCycleContext(",
+        "function renderEquipmentCycleHeader(",
+        "function renderEquipmentMethodValues(",
+        "function renderEquipmentScreenTransitions(",
+        "function renderEquipmentRawDataReadiness(",
+        'renderDashboardCard("Method Values", renderEquipmentMethodValues',
+        'renderDashboardCard("Screen Transitions", renderEquipmentScreenTransitions',
+        'renderDashboardCard("Raw Data / Next Specimen", renderEquipmentRawDataReadiness',
+        "workflow_agentic_task",
+        "required_entry_gate",
+    ):
+        assert token in script
+
+    html = client.get("/live").text
+    assert "/static/equipment_agentic_task_model.js" in html
+
+
+def test_live_gui_equipment_cycle_overlay_has_no_direct_test_execution_action() -> None:
+    client = TestClient(app)
+
+    script = client.get("/static/planning.js").text
+    overlay_start = script.index("function renderEquipmentCycleHeader(")
+    overlay_end = script.index("function renderEquipmentDashboardCards(", overlay_start)
+    overlay = script[overlay_start:overlay_end]
+
+    assert "Start Test" not in overlay
+    assert "runEquipmentLiveAction" not in overlay
+    assert 'data-equipment-live-action="execute"' not in overlay
+
+
+def test_live_gui_equipment_screen_transition_card_renders_bounded_evidence_fields() -> None:
+    client = TestClient(app)
+
+    script = client.get("/static/planning.js").text
+    start = script.index("function renderEquipmentScreenTransitions(")
+    end = script.index("function renderEquipmentRawDataReadiness(", start)
+    renderer = script[start:end]
+
+    for token in ("before_frame", "after_frame", "locator_id", "postcondition"):
+        assert token in renderer
+
+
+def test_live_gui_equipment_cycle_cards_are_additive_only_when_overlay_exists() -> None:
+    client = TestClient(app)
+
+    script = client.get("/static/planning.js").text
+    start = script.index("function renderEquipmentDashboardCards(")
+    end = script.index("function renderAnalysisDashboardCards(", start)
+    renderer = script[start:end]
+
+    assert "const cycleAvailable = equipmentCycleContext(ctx).available" in renderer
+    assert "cycleAvailable ?" in renderer
+
+
+def test_live_gui_equipment_cycle_uses_active_profile_and_inflight_flow_checkpoint() -> None:
+    client = TestClient(app)
+
+    script = client.get("/static/planning.js").text
+    refresh_start = script.index("async function refreshEquipmentRuntimeSnapshot(")
+    refresh_end = script.index("function ensureEquipmentRuntimeSnapshot(", refresh_start)
+    refresh = script[refresh_start:refresh_end]
+    context_start = script.index("function equipmentCycleContext(")
+    context_end = script.index("function equipmentCanonicalProgressSteps(", context_start)
+    context = script[context_start:context_end]
+
+    assert "activeEquipmentProfileId" in refresh
+    assert 'profiles/utm_windows_v1/skill-flow' not in refresh
+    assert "run_id=${encodeURIComponent(activeRunId)}" in refresh
+    for token in (
+        "skillFlowExecution",
+        "active_block",
+        "transitions",
+        "flowExecutionMatchesRun",
+        "flowExecutionIsActive",
+    ):
+        assert token in context
+    assert context.index("activeFlowExecution.workflow_agentic_task") < context.index("equipment.workflow_agentic_task")
+
+
+def test_live_gui_run_transition_clears_equipment_run_scoped_snapshots() -> None:
+    client = TestClient(app)
+
+    script = client.get("/static/planning.js").text
+    start = script.index("function resetLiveRunScopedStateForAuthoritativeSession(")
+    end = script.index("function restoreLiveUiState(", start)
+    reset = script[start:end]
+
+    for token in (
+        "liveEquipmentRuntimeSnapshot = null",
+        "liveEquipmentSkillFlowSnapshot = null",
+        "liveEquipmentRuntimeRefreshedAt = 0",
+        'liveEquipmentRuntimeError = ""',
+        "liveEquipmentRuntimeRefreshSeq += 1",
+        "liveEquipmentRuntimeRefreshInFlight = null",
+    ):
+        assert token in reset
+
+    refresh_start = script.index("async function refreshEquipmentRuntimeSnapshot(")
+    refresh_end = script.index("function ensureEquipmentRuntimeSnapshot(", refresh_start)
+    refresh = script[refresh_start:refresh_end]
+    assert "const refreshSeq = ++liveEquipmentRuntimeRefreshSeq" in refresh
+    assert "refreshSeq !== liveEquipmentRuntimeRefreshSeq" in refresh
+    assert "requestedRunId !== liveCurrentRunId()" in refresh
+
+
+def test_live_gui_equipment_cycle_header_renders_execution_identity_and_csv_artifact_link() -> None:
+    client = TestClient(app)
+
+    script = client.get("/static/planning.js").text
+    header_start = script.index("function renderEquipmentCycleHeader(")
+    header_end = script.index("function equipmentCycleDisplayValue(", header_start)
+    header = script[header_start:header_end]
+    raw_start = script.index("function renderEquipmentRawDataReadiness(")
+    raw_end = script.index("function renderEquipmentDashboardCards(", raw_start)
+    raw = script[raw_start:raw_end]
+
+    for token in ("profile_id", "flow_version", "run_id", "specimen_id"):
+        assert token in header
+    assert "equipmentArtifactUrl" in raw
+    assert 'target="_blank"' in raw
 
 
 def test_live_gui_equipment_actions_are_passive_and_reuse_existing_routes() -> None:
@@ -4095,7 +4534,7 @@ def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundle
 
     assert '/static/styles.css?v=20260825-plc-safety-lifecycle-5' in html
     assert '/static/omx_telemetry_viewer.bundle.js?v=20260720-manipulation-grounded-1' in html
-    assert '/static/planning.js?v=20260826-unified-reset-1' in html
+    assert '/static/planning.js?v=20260901-equipment-overlay-1' in html
     assert bundle_response.status_code == 200
     bundle = bundle_response.text
     for required in [
@@ -4275,7 +4714,7 @@ def test_live_robot_pose_has_repeatable_zoom_to_fit_control() -> None:
     assert ".ar-man-pose-fit" in styles
     assert '/static/styles.css?v=20260825-plc-safety-lifecycle-5' in html
     assert '/static/omx_telemetry_viewer.bundle.js?v=20260720-manipulation-grounded-1' in html
-    assert '/static/planning.js?v=20260826-unified-reset-1' in html
+    assert '/static/planning.js?v=20260901-equipment-overlay-1' in html
 
 
 def test_live_gui_serves_repository_omx_model_assets() -> None:

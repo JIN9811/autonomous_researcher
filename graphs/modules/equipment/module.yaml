@@ -12,7 +12,36 @@ module:
   - equipment.pyautogui.list_programs
   - equipment.pyautogui.run
   - utm.run_protocol
+  workflow_agentic_tasks:
+    - id: run_utm_compression_cycle
+      label: UTM Compression Cycle
+      scope: profile_bound_equipment_skill_flow
+      entry_gate:
+        id: verified_specimen_utm_handoff
+        required: true
+        locked: true
+        expected_status: ready_for_equipment
+      value_channels:
+        - Force
+        - Stroke
+        - Height
+      block_order:
+        - prepare_next_specimen
+        - start_test
+        - monitor_contact_and_run
+        - await_auto_return
+        - save_raw_data
+        - validate_raw_data
+        - advance_without_save
+        - restore_robot_clearance
+      vision_policy: optional_per_block
   internal_graph:
+    - id: 00_verify_equipment_entry_handoff
+      label: Verify Locked Specimen and UTM Entry Handoff
+      kind: workflow_agentic_task_gate
+    - id: 00_preflight_all_bound_resources
+      label: Preflight Every Exact Skill and Enabled Vision Task
+      kind: workflow_agentic_task_gate
     - id: 01_resolve_equipment_profile
       label: Resolve Exact Equipment Profile or Skill Version
       kind: internal_step
@@ -32,5 +61,11 @@ module:
     input: OrchestratorState
     output: AgentResult.data merged into OrchestratorState
   notes: >-
-    GUI/module editor may edit this module config, but execution remains bound to
-    allowlisted Python handlers. Python source is not modified by the GUI.
+    run_utm_compression_cycle is an additive workflow-level supervisor above the
+    existing Profile-bound Equipment Skill Flow. Its upstream ready_for_equipment
+    handoff is mandatory and has no enable switch. Each existing block retains its
+    exact Skill binding, bounded routes, and optional Vision switch. Method and cell
+    configuration supply Force, Stroke, Height, and clearance values at runtime;
+    this module declares no recorded numeric defaults. GUI/module editor may edit
+    this module config, but execution remains bound to allowlisted Python handlers.
+    Python source is not modified by the GUI.

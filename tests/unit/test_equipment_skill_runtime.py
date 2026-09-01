@@ -64,6 +64,47 @@ def test_recording_actions_compile_to_existing_program_actions() -> None:
     ]
 
 
+def test_recording_language_change_compiles_to_replayable_skill_action() -> None:
+    actions = compile_recording_actions(
+        [
+            {"kind": "key_press", "at_ms": 100, "key": "a"},
+            {
+                "kind": "input_language_changed",
+                "at_ms": 120,
+                "input_language": {
+                    "status": "available",
+                    "layout_id": "00000412",
+                    "locale": "ko_KR",
+                    "language": "ko",
+                    "ime_mode": "alphanumeric",
+                    "typing_mode": "latin",
+                },
+            },
+            {"kind": "key_press", "at_ms": 140, "key": "b"},
+        ]
+    )
+
+    assert actions == [
+        {"action": "write", "text": "a", "interval_sec": 0.02},
+        {
+            "action": "set_input_language",
+            "layout_id": "00000412",
+            "locale": "ko_KR",
+            "language": "ko",
+            "ime_mode": "alphanumeric",
+            "typing_mode": "latin",
+        },
+        {"action": "write", "text": "b", "interval_sec": 0.02},
+    ]
+
+    coverage = recording_capability_coverage(
+        [{"kind": "input_language_changed", "input_language": actions[1]}]
+    )
+    assert coverage["actions"] == ["set_input_language"]
+    assert coverage["families"] == ["keyboard"]
+    assert coverage["unsupported_event_kinds"] == []
+
+
 def test_recording_control_click_is_not_compiled_as_equipment_action() -> None:
     events = [
         {"kind": "mouse_click", "at_ms": 100, "x": 320, "y": 240, "button": "left"},
@@ -807,6 +848,34 @@ def test_execution_state_is_idempotent_for_same_sequence(tmp_path: Path) -> None
 
     assert second["execution_id"] == first["execution_id"]
     assert second["idempotent"] is True
+
+
+def test_execution_preserves_agentic_task_and_existing_skill_annotation(tmp_path: Path) -> None:
+    registry = EquipmentSkillRegistry(tmp_path)
+
+    execution = registry.begin_execution(
+        skill_id="program1_skill",
+        version="1.0.0",
+        sequence_id="sequence-agentic-task",
+        target_profile="local_program1",
+        model_snapshot=_model_snapshot(),
+        allow_unvalidated=True,
+        agentic_task="Run bounded compression test",
+        annotation_context={
+            "workflow_summary": {
+                "intent": "Run the recorded compression workflow.",
+                "completion_state": "The result view is visible.",
+            }
+        },
+    )
+
+    assert execution["agentic_task"] == "Run bounded compression test"
+    assert execution["annotation_context"]["workflow_summary"]["intent"] == (
+        "Run the recorded compression workflow."
+    )
+    assert execution["runtime_execution"]["metadata"]["agentic_task"] == (
+        "Run bounded compression test"
+    )
 
 
 def test_skill_completion_does_not_claim_analysis_readiness_without_profile_verification(tmp_path: Path) -> None:

@@ -3380,6 +3380,44 @@ def test_train_local_wandb_mode_maps_to_online_cli_mode(tmp_path: Path) -> None:
     assert started["training"]["wandb_base_url"] == "http://127.0.0.1:8081"
 
 
+def test_train_injects_saved_wandb_local_api_key_without_exposing_it(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    settings_path = tmp_path / "memory" / "wandb_local_api_key.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        json.dumps(
+            {
+                "schema": "wandb_local_api_key.v1",
+                "provider": "wandb_local",
+                "api_key": "local-wandb-secret-123456",
+                "enabled": True,
+                "source": "user",
+                "updated_at": "2026-09-01T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    bridge.config.wandb_local_api_key_path = settings_path
+
+    request = LeRobotSessionRequest.model_validate(
+        {
+            "mode": "live",
+            "profile_id": "fake_omx_ai",
+            "dataset_repo_id": "jin/record-test",
+            "policy_type": "smolvla",
+            "wandb_enable": True,
+            "wandb_mode": "online",
+            "wandb_base_url": "http://127.0.0.1:8081",
+        }
+    )
+
+    env = bridge._workflow_env_overrides("train", request, session_id="session-test")  # noqa: SLF001
+
+    assert env["WANDB_BASE_URL"] == "http://127.0.0.1:8081"
+    assert env["WANDB_API_KEY"] == "local-wandb-secret-123456"
+    assert "local-wandb-secret-123456" not in json.dumps(bridge.wandb_local_start({"mode": "test"}))
+
+
 def test_wandb_local_start_returns_conda_server_command_in_test_mode(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
 

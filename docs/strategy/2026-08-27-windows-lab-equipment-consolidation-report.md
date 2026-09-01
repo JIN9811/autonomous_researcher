@@ -184,6 +184,12 @@ Linux에 장비 실행의 단일 진입점을 둔다.
 Agent, Equipment Workspace, CUI, Live GUI, Runtime IDE는 모두 이 서비스의 상태를
 사용한다.
 
+Profile 내부의 여러 Skill과 Vision 판정 순서는
+`graphs/modules/equipment/equipment_skill_flows.json` 한 곳에 저장한다. Equipment
+Workspace와 Runtime IDE Equipment 탭은 같은 계약을 편집하며, 별도 GUI 전용 복사본을
+두지 않는다. 비어 있지 않은 활성 Flow는 기존 단일 Skill 실행보다 우선하고, Flow가
+없는 Profile은 기존 실행 경로를 유지한다.
+
 ### 6.3 Low-Level Control: Windows Bridge
 
 담당:
@@ -445,6 +451,12 @@ Equipment Profile은 `vision_link.enabled`를 선택적으로 선언할 수 있�
   결정한다.
 - 이 통신은 Middle-Level API 계약으로 구현하며 Windows 실행기와 직접 결합하지
   않는다.
+
+현재 구현에서 Vision 선택은 Equipment Workspace의 독립 체크박스가 아니다.
+`/equipment/agent-manager`에서 정확한 Skill에 속한 복합 block의 Vision Slot으로
+활성화한다. Equipment Workspace, Live GUI, Runtime IDE는 이 설정과 실행 결과를
+읽기 전용으로 투영한다. 따라서 Skill과 무관한 standalone Vision 경로와 화면별
+설정 이원화를 허용하지 않는다.
 
 ### 10.5 시계열 녹화 버퍼 보존 정책
 

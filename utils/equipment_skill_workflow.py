@@ -30,6 +30,7 @@ EDITABLE_ACTIONS = frozenset(
         "wait_until_text",
         "wait_for_file",
         "screenshot",
+        "set_input_language",
     }
 )
 UNTIL_ACTIONS = frozenset({"wait_until", "wait_until_image", "wait_until_text", "wait_for_file"})
@@ -141,6 +142,13 @@ def _validate_action(step_id: str, action: dict[str, Any]) -> list[dict[str, str
         issues.append(_issue(step_id, "action.key", "KEY_REQUIRED", "Key is required."))
     if name == "hotkey" and not [item for item in action.get("keys", []) if str(item).strip()]:
         issues.append(_issue(step_id, "action.keys", "HOTKEY_REQUIRED", "At least one hotkey key is required."))
+    if name == "set_input_language":
+        layout_id = str(action.get("layout_id") or "").strip()
+        typing_mode = str(action.get("typing_mode") or "").strip()
+        if not re.fullmatch(r"[0-9A-Fa-f]{8}", layout_id):
+            issues.append(_issue(step_id, "action.layout_id", "INPUT_LAYOUT_INVALID", "Layout ID must contain exactly 8 hexadecimal digits."))
+        if not typing_mode or typing_mode == "unknown":
+            issues.append(_issue(step_id, "action.typing_mode", "INPUT_TYPING_MODE_REQUIRED", "A known typing mode is required."))
     if name == "screenshot" and not str(action.get("checkpoint") or "").strip():
         issues.append(_issue(step_id, "action.checkpoint", "CHECKPOINT_REQUIRED", "Checkpoint label is required."))
     return issues

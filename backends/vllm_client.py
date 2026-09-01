@@ -79,6 +79,12 @@ class VLLMBackend(BaseLLMBackend):
                 return None
         return DEFAULT_MAX_TOKENS_BY_TASK.get(task_type)
 
+    @staticmethod
+    def _response_format_for_metadata(metadata: dict[str, Any] | None) -> dict[str, str] | None:
+        if isinstance(metadata, dict) and metadata.get("response_format") == "json_object":
+            return {"type": "json_object"}
+        return None
+
     async def _base_url_for_model(self, model: str) -> str:
         if self._nemoclaw_runtime is not None:
             runtime_url = await self._nemoclaw_runtime.base_url_for_model(model)
@@ -152,6 +158,9 @@ class VLLMBackend(BaseLLMBackend):
         max_tokens = self._max_tokens_for_metadata(metadata)
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
+        response_format = self._response_format_for_metadata(metadata)
+        if response_format is not None:
+            payload["response_format"] = response_format
         if metadata:
             payload["metadata"] = metadata
 

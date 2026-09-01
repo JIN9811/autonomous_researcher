@@ -818,26 +818,34 @@ def test_packaged_bridge_reindexes_existing_artifacts_after_restart(tmp_path: Pa
 
 def _assert_registered_utm_program_contract(programs: list[dict[str, object]]) -> None:
     by_id = {str(item.get("program_id")): item for item in programs}
-    expected = {"utm_compression_start_v1", "utm_export_csv_v1", "utm_manual_save_csv_v1", "utm_stop_or_abort_v1"}
+    expected = {"utm_compression_start_v1", "utm_export_csv_v1", "utm_stop_or_abort_v1"}
     assert expected.issubset(by_id)
+    assert "utm_manual_save_csv_v1" not in by_id
     compression = by_id["utm_compression_start_v1"]
     assert compression["program_type"] == "utm_protocol"
     assert compression["preconditions"] == ["windows_bridge_ready", "utm_app_visible", "specimen_verified_on_fixture", "robot_clear_of_utm"]
     assert compression["expected_screen_before"][0]["name"] == "ready_state"
     assert any(item.get("target") == "running_state" for item in compression["sequence"] if isinstance(item, dict))
     assert any(item.get("target") == "complete_state" for item in compression["sequence"] if isinstance(item, dict))
-    assert compression["save_policy"]["manual_save_required_if_no_artifact"] is True
-    assert compression["output_artifacts"][0]["kind"] == "utm_csv"
+    assert compression["save_policy"]["manual_save_required_if_no_artifact"] is False
+    assert not any(item.get("action") == "wait_for_file" for item in compression["sequence"] if isinstance(item, dict))
+    assert compression["output_artifacts"] == []
     assert compression["safe_abort"]["program_id"] == "utm_stop_or_abort_v1"
     export = by_id["utm_export_csv_v1"]
     assert export["program_type"] == "utm_export"
     assert export["target_window"] == "main_window_title_or_regex"
     assert export["expected_screen_before"][0]["name"] == "complete_state"
-    assert export["save_policy"]["save_method"] == "export_menu"
-    manual = by_id["utm_manual_save_csv_v1"]
-    assert manual["target_window"] == "main_window_title_or_regex"
-    assert manual["save_policy"]["save_method"] == "manual_save_dialog"
-    assert manual["save_policy"]["manual_save_required_if_no_artifact"] is False
+    assert export["save_policy"]["save_method"] == "raw_csv_button"
+    assert any(
+        item.get("action") == "click" and item.get("target") == "save_raw_data_csv"
+        for item in export["sequence"]
+        if isinstance(item, dict)
+    )
+    assert not any(
+        item.get("action") == "hotkey" and item.get("keys") == ["ctrl", "s"]
+        for item in export["sequence"]
+        if isinstance(item, dict)
+    )
     abort = by_id["utm_stop_or_abort_v1"]
     assert abort["program_type"] == "utm_abort"
     assert abort["target_window"] == "main_window_title_or_regex"
@@ -939,6 +947,7 @@ def _utm_locator_payload() -> dict[str, object]:
         "start_button": {"image_path": "C:/ATR/locators/start.png", "confidence": 0.8},
         "running_state": {"image_path": "C:/ATR/locators/running.png", "confidence": 0.8},
         "complete_state": {"image_path": "C:/ATR/locators/complete.png", "confidence": 0.8},
+        "save_raw_data_csv": {"image_path": "C:/ATR/locators/save_raw_data_csv.png", "confidence": 0.8},
     }
 
 
@@ -966,9 +975,11 @@ def test_install_bridge_required_screen_assertions_execute_locator_sequence(tmp_
     )
 
     assert result["ok"] is True
-    assert result["status"] == "verified_complete"
-    assert result["data_acquisition"]["save_method"] == "manual_save_dialog"
+    assert result["status"] == "completed"
+    assert result["data_acquisition"]["status"] == "not_applicable"
+    assert result["data_acquisition"]["save_attempted_by_agent"] is False
     assert result["cross_checks"]["save_export_responsibility_ok"] is True
+    assert ("ctrl", "s") not in fake.hotkeys
     assert fake.locate_calls
     assert any(item["step"].endswith("ASSERT_VISIBLE") and item["status"] == "ok" for item in result["step_trace"])
     assert any(item["step"].endswith("WAIT_UNTIL") and item["status"] == "ok" for item in result["step_trace"])
@@ -1015,9 +1026,11 @@ def test_packaged_bridge_required_screen_assertions_execute_locator_sequence(tmp
     )
 
     assert result["ok"] is True
-    assert result["status"] == "verified_complete"
-    assert result["data_acquisition"]["save_method"] == "manual_save_dialog"
+    assert result["status"] == "completed"
+    assert result["data_acquisition"]["status"] == "not_applicable"
+    assert result["data_acquisition"]["save_attempted_by_agent"] is False
     assert result["cross_checks"]["save_export_responsibility_ok"] is True
+    assert ("ctrl", "s") not in fake.hotkeys
     assert fake.locate_calls
     assert any(item["step"].endswith("ASSERT_VISIBLE") and item["status"] == "ok" for item in result["step_trace"])
     assert any(item["step"].endswith("WAIT_UNTIL") and item["status"] == "ok" for item in result["step_trace"])
@@ -1072,7 +1085,7 @@ def test_install_bridge_sequence_failure_preserves_screen_evidence(tmp_path: Pat
     _assert_failure_screen_evidence(result)
 
 
-def test_packaged_bridge_export_failure_preserves_transition_and_failure_evidence(tmp_path: Path) -> None:
+def test_packaged_bridge_raw_csv_export_failure_preserves_failure_evidence(tmp_path: Path) -> None:
     module = _load_packaged_helper_module()
     fake = _FakePyAutoGUI()
     fake.locate_matches = True
@@ -1093,7 +1106,7 @@ def test_packaged_bridge_export_failure_preserves_transition_and_failure_evidenc
     result = module.execute_payload(
         {
             "sequence_id": "seq-export-fails",
-            "program_id": "utm_compression_start_v1",
+            "program_id": "utm_export_csv_v1",
             "run_id": "run-export-fails",
             "specimen_id": "specimen-export-fails",
             "locators": _utm_locator_payload(),
@@ -1106,10 +1119,13 @@ def test_packaged_bridge_export_failure_preserves_transition_and_failure_evidenc
 
     assert result["failure_code"] == "UTM_EXPORT_FILE_MISSING"
     assert result["cross_checks"]["save_export_responsibility_ok"] is False
-    _assert_failure_screen_evidence(result, expect_running=True, expect_complete=True)
+    assert result["data_acquisition"]["save_method"] == "raw_csv_button"
+    assert result["data_acquisition"]["save_attempted_by_agent"] is True
+    assert ("ctrl", "s") not in fake.hotkeys
+    _assert_failure_screen_evidence(result)
 
 
-def test_install_bridge_manual_save_fallback_exports_parseable_csv(tmp_path: Path) -> None:
+def test_install_bridge_compression_never_falls_back_to_test_save(tmp_path: Path) -> None:
     module = _load_helper_module()
     fake = _FakePyAutoGUI()
     fake.save_csv_on_write = True
@@ -1131,20 +1147,73 @@ def test_install_bridge_manual_save_fallback_exports_parseable_csv(tmp_path: Pat
     )
 
     assert result["ok"] is True
-    assert result["status"] == "verified_complete"
-    assert result["data_acquisition"]["save_method"] == "manual_save_dialog"
-    assert result["data_acquisition"]["save_attempted_by_agent"] is True
+    assert result["status"] == "completed"
+    assert result["data_acquisition"]["status"] == "not_applicable"
+    assert result["data_acquisition"]["save_attempted_by_agent"] is False
     assert result["cross_checks"]["save_export_responsibility_ok"] is True
-    assert result["output_artifacts"][0]["kind"] == "utm_csv"
-    assert result["output_artifacts"][0]["artifact_id"] in module.ARTIFACT_INDEX
-    assert ("ctrl", "s") in fake.hotkeys
-    assert fake.writes and fake.writes[0].endswith("specimen-manual.csv")
+    assert not any(item.get("kind") == "utm_csv" for item in result["output_artifacts"])
+    assert ("ctrl", "s") not in fake.hotkeys
+    assert fake.writes == []
     steps = [item["step"] for item in result["step_trace"]]
-    assert "AUTO_SAVE_MISSING" in steps
-    assert "MANUAL_SAVE_EXPORT" in steps
+    assert "AUTO_SAVE_MISSING" not in steps
+    assert "MANUAL_SAVE_EXPORT" not in steps
 
 
-def test_packaged_bridge_manual_save_fallback_exports_parseable_csv(tmp_path: Path) -> None:
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_managed_equipment_skill_without_file_contract_never_triggers_manual_save(
+    loader: Any,
+    tmp_path: Path,
+) -> None:
+    """Catch hidden Ctrl+S/export side effects after non-export Equipment Skills."""
+    module = loader()
+    fake = _FakePyAutoGUI()
+    fake.save_csv_on_write = True
+    module.UTM_EXPORT_ROOT = tmp_path / "utm_exports"
+    module.ARTIFACT_ROOT = tmp_path / "artifacts"
+    module.ARTIFACT_INDEX.clear()
+    module.PROGRAMS["utm_prepare_next_specimen_test"] = {
+        "schema": "atr.pyautogui_program.v1",
+        "program_id": "utm_prepare_next_specimen_test",
+        "program_type": "macro",
+        "managed_by": "atr_equipment_skill",
+        "integrity_ok": True,
+        "sequence": [{"action": "screenshot", "checkpoint": "prepare_complete"}],
+    }
+    payload = {
+        "sequence_id": "seq-managed-no-save",
+        "program_id": "utm_prepare_next_specimen_test",
+        "run_id": "run-managed-no-save",
+        "specimen_id": "specimen-managed-no-save",
+        "artifact_timeout_s": 0.01,
+        "stable_for_sec": 0.01,
+    }
+    if loader is _load_packaged_helper_module:
+        module.get_pyautogui = lambda: (fake, None)
+        config = module.BridgeConfig(
+            host="127.0.0.1",
+            port=0,
+            token="",
+            token_header="X-Bridge-Token",
+            artifact_dir=module.ARTIFACT_ROOT,
+            reference_dir=tmp_path / "reference_images",
+        )
+        result = module.execute_payload(payload, config)
+    else:
+        module._load_pyautogui = lambda: (fake, "")
+        result = module._run_utm_protocol(payload["sequence_id"], payload["program_id"], payload)
+
+    assert result["ok"] is True
+    assert result["status"] == "completed"
+    assert result["program_type"] == "macro"
+    assert result["data_acquisition"]["status"] == "not_applicable"
+    assert fake.hotkeys == []
+    steps = [item["step"] for item in result["step_trace"]]
+    assert "WAIT_FOR_EXPORT" not in steps
+    assert "AUTO_SAVE_MISSING" not in steps
+    assert "MANUAL_SAVE_EXPORT" not in steps
+
+
+def test_packaged_bridge_compression_never_falls_back_to_test_save(tmp_path: Path) -> None:
     module = _load_packaged_helper_module()
     fake = _FakePyAutoGUI()
     fake.save_csv_on_write = True
@@ -1175,18 +1244,16 @@ def test_packaged_bridge_manual_save_fallback_exports_parseable_csv(tmp_path: Pa
     )
 
     assert result["ok"] is True
-    assert result["status"] == "verified_complete"
-    assert result["data_acquisition"]["save_method"] == "manual_save_dialog"
-    assert result["cross_checks"]["data_parse_probe_ok"] is True
+    assert result["status"] == "completed"
+    assert result["data_acquisition"]["status"] == "not_applicable"
+    assert result["data_acquisition"]["save_attempted_by_agent"] is False
     assert result["cross_checks"]["save_export_responsibility_ok"] is True
-    assert ("ctrl", "s") in fake.hotkeys
-    assert fake.writes and fake.writes[0].endswith("specimen-packaged-manual.csv")
-    status, pulled = module._get_artifact(result["output_artifacts"][0]["artifact_id"])
-    assert status == 200
-    assert pulled["content_base64"]
+    assert not any(item.get("kind") == "utm_csv" for item in result["output_artifacts"])
+    assert ("ctrl", "s") not in fake.hotkeys
+    assert fake.writes == []
 
 
-def test_windows_bridge_invalid_screenshot_blocks_verified_complete(tmp_path: Path) -> None:
+def test_windows_bridge_invalid_screenshot_is_not_reported_as_raw_csv_or_screen_evidence(tmp_path: Path) -> None:
     for loader, packaged in ((_load_helper_module, False), (_load_packaged_helper_module, True)):
         module = loader()
         fake = _FakeInvalidScreenshotPyAutoGUI()
@@ -1218,19 +1285,16 @@ def test_windows_bridge_invalid_screenshot_blocks_verified_complete(tmp_path: Pa
             module._load_pyautogui = lambda: (fake, "")
             result = module._run_utm_protocol(payload["sequence_id"], payload["program_id"], payload)
 
-        assert result["ok"] is False
-        assert result["status"] == "blocked"
-        assert result["failure_code"] == "UTM_SCREEN_EVIDENCE_FILES_REQUIRED"
-        assert result["output_artifacts"][0]["kind"] == "utm_csv"
-        checks = {item["checkpoint"]: item for item in result["screen_checks"]}
-        assert checks["before_start"]["ok"] is False
-        assert checks["after_start"]["ok"] is False
-        assert checks["after_complete"]["ok"] is False
-        assert any(item["step"] == "SCREEN_EVIDENCE" and item["status"] == "blocked" for item in result["step_trace"])
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert result["data_acquisition"]["status"] == "not_applicable"
+        assert result["output_artifacts"] == []
+        assert result["screen_checks"]
+        assert all(not item["ok"] and not item["screenshot_artifact"] for item in result["screen_checks"])
         assert any("invalid image signature" in str(item.get("detail", "")) for item in result["step_trace"])
 
 
-def test_install_bridge_export_program_uses_export_save_method(tmp_path: Path) -> None:
+def test_install_bridge_export_program_uses_raw_csv_button(tmp_path: Path) -> None:
     module = _load_helper_module()
     fake = _FakePyAutoGUI()
     fake.locate_matches = True
@@ -1243,15 +1307,24 @@ def test_install_bridge_export_program_uses_export_save_method(tmp_path: Path) -
     result = module._run_utm_protocol(
         "seq-export",
         "utm_export_csv_v1",
-        {"run_id": "run-export", "specimen_id": "specimen-export", "artifact_timeout_s": 1.0, "stable_for_sec": 0.01},
+        {
+            "run_id": "run-export",
+            "specimen_id": "specimen-export",
+            "locators": _utm_locator_payload(),
+            "artifact_timeout_s": 1.0,
+            "stable_for_sec": 0.01,
+        },
     )
 
-    assert result["ok"] is True
+    assert result["ok"] is True, result
     assert result["status"] == "verified_complete"
     assert result["program_id"] == "utm_export_csv_v1"
-    assert result["data_acquisition"]["save_method"] == "export_menu"
+    assert result["data_acquisition"]["save_method"] == "raw_csv_button"
+    assert result["data_acquisition"]["save_attempted_by_agent"] is True
     assert any(item["step"] == "EXECUTE_EXPORT_MACRO" for item in result["step_trace"])
-    assert ("ctrl", "s") in fake.hotkeys
+    assert ("ctrl", "s") not in fake.hotkeys
+    assert ("ctrl", "a") in fake.hotkeys
+    assert fake.writes and fake.writes[0].endswith("specimen-export.csv")
 
 
 def test_install_bridge_abort_program_does_not_wait_for_export(tmp_path: Path) -> None:
@@ -1740,6 +1813,35 @@ def test_windows_bridge_pairing_uses_one_time_four_digit_code_and_persists_inter
     assert manager.status() == {"ok": True, "status": "paired", "paired": True}
     assert "0427" not in (tmp_path / "pairing.json").read_text(encoding="utf-8")
 
+    retried = manager.complete("0427")
+    assert retried == {
+        "ok": True,
+        "status": "paired_retry",
+        "paired": True,
+        "internal_key": "internal-key-fixture",
+    }
+    assert manager.complete("9999")["failure_code"] == "PAIRING_ALREADY_COMPLETE"
+
+
+def test_windows_bridge_pairing_can_be_reset_locally_after_a_half_completed_exchange(tmp_path: Path) -> None:
+    module = _load_helper_module()
+    codes = iter(("0427", "1357"))
+    manager = module.PairingManager(
+        tmp_path / "pairing.json",
+        code_factory=lambda: next(codes),
+        key_factory=lambda: "internal-key-fixture",
+    )
+    manager.issue_code()
+    assert manager.complete("0427")["ok"] is True
+
+    reset = manager.reset()
+
+    assert reset["ok"] is True
+    assert reset["status"] == "pairing_available"
+    assert reset["pairing_code"] == "1357"
+    assert not (tmp_path / "pairing.json").exists()
+    assert manager.complete("1357")["ok"] is True
+
 
 def test_windows_bridge_pairing_expires_codes_and_locks_after_five_failures(tmp_path: Path) -> None:
     module = _load_helper_module()
@@ -1830,6 +1932,13 @@ def test_windows_bridge_pairing_routes_keep_execution_protected_while_local_setu
         assert paired_local_without_key.value.code == 401
         with request("/artifacts", key=paired["internal_key"]) as response:
             assert response.status == 200
+        with request("/pairing/reset", method="POST", payload={}) as response:
+            reset = json.loads(response.read())
+        assert reset["status"] == "pairing_available"
+        assert reset["pairing_code"] == "3141"
+        with pytest.raises(urllib.error.HTTPError) as old_key_after_reset:
+            request("/artifacts", key=paired["internal_key"])
+        assert old_key_after_reset.value.code == 401
     finally:
         server.shutdown()
         server.server_close()
@@ -2109,6 +2218,20 @@ def test_windows_bridge_setup_surface_separates_browse_template_and_registration
         assert 'data-proxy-click="utmLive"' not in html
         assert 'data-proxy-click="utmAbort"' not in html
         assert 'id="program1"' not in html
+
+
+def test_windows_bridge_locator_defaults_to_point_nine() -> None:
+    import inspect
+
+    for module in (_load_helper_module(), _load_packaged_helper_module()):
+        matcher_source = inspect.getsource(module._best_inline_image_match)
+        capture_source = inspect.getsource(module._capture_locator)
+        recording_source = inspect.getsource(module.RecordingManager.capture_visual_locator)
+
+        assert 'candidate.get("confidence", 0.9)' in matcher_source
+        assert 'payload.get("confidence", 0.9)' in capture_source
+        assert '("tight", 64, 64, 0.9)' in recording_source
+        assert '("context", 192, 128, 0.9)' in recording_source
 
 
 
@@ -3923,6 +4046,106 @@ def test_windows_input_language_state_uses_default_ime_window_fallback() -> None
     assert state["typing_mode"] == "ko"
 
 
+def test_protocol_sequence_replays_recorded_input_language(monkeypatch) -> None:
+    target = {
+        "layout_id": "00000412",
+        "locale": "ko_KR",
+        "language": "ko",
+        "ime_mode": "alphanumeric",
+        "typing_mode": "latin",
+    }
+    for loader in (_load_helper_module, _load_packaged_helper_module):
+        module = loader()
+        calls: list[dict[str, str]] = []
+        monkeypatch.setattr(
+            module,
+            "_set_windows_input_language",
+            lambda value, calls=calls: calls.append(dict(value)) or {"ok": True, "observed": dict(value)},
+        )
+        trace: list[dict[str, object]] = []
+
+        result = module._execute_protocol_sequence(
+            _FakePyAutoGUI(),
+            program_id="input_language_replay",
+            payload={"sequence": [{"action": "set_input_language", **target}]},
+            run_id="run-input-language",
+            specimen_id="specimen-input-language",
+            trace=trace,
+        )
+
+        assert result["ok"] is True
+        assert calls == [target]
+        assert trace[-1]["status"] == "ok"
+
+
+def test_set_windows_input_language_restores_layout_and_ime_mode() -> None:
+    module = _load_helper_module()
+
+    class FakeUser32:
+        def __init__(self) -> None:
+            self.loaded: list[tuple[str, int]] = []
+            self.activated: list[tuple[int, int]] = []
+            self.messages: list[tuple[int, int, int, int]] = []
+
+        @staticmethod
+        def GetForegroundWindow() -> int:
+            return 100
+
+        def LoadKeyboardLayoutW(self, layout_id: str, flags: int) -> int:
+            self.loaded.append((layout_id, flags))
+            return 0x04120412
+
+        def ActivateKeyboardLayout(self, layout: int, flags: int) -> int:
+            self.activated.append((layout, flags))
+            return layout
+
+        def PostMessageW(self, hwnd: int, message: int, wparam: int, lparam: int) -> int:
+            self.messages.append((hwnd, message, wparam, lparam))
+            return 1
+
+    class FakeImm32:
+        def __init__(self) -> None:
+            self.conversions: list[tuple[int, int, int]] = []
+
+        @staticmethod
+        def ImmGetContext(_hwnd: int) -> int:
+            return 200
+
+        @staticmethod
+        def ImmGetConversionStatus(_context: int, conversion: object, sentence: object) -> int:
+            conversion._obj.value = 0x0001
+            sentence._obj.value = 7
+            return 1
+
+        def ImmSetConversionStatus(self, context: int, conversion: int, sentence: int) -> int:
+            self.conversions.append((context, conversion, sentence))
+            return 1
+
+        @staticmethod
+        def ImmReleaseContext(_hwnd: int, _context: int) -> int:
+            return 1
+
+    user32 = FakeUser32()
+    imm32 = FakeImm32()
+    result = module._set_windows_input_language(
+        {
+            "layout_id": "00000412",
+            "locale": "ko_KR",
+            "language": "ko",
+            "ime_mode": "alphanumeric",
+            "typing_mode": "latin",
+        },
+        user32=user32,
+        imm32=imm32,
+    )
+
+    assert result["ok"] is True
+    assert user32.loaded == [("00000412", 0x00000001)]
+    assert user32.activated == [(0x04120412, 0x00000100)]
+    assert user32.messages == [(100, 0x0050, 0, 0x04120412)]
+    assert imm32.conversions == [(200, 0, 7)]
+
+
 def test_recording_keyboard_capture_records_typing_language_changes_once(tmp_path: Path) -> None:
     module = _load_helper_module()
     korean = {
@@ -4363,6 +4586,31 @@ def test_extended_pyautogui_actions_are_accepted_by_program_contract() -> None:
 
     assert result["ok"] is True
     assert result["portable_actions"] == sorted({item["action"] for item in actions})
+
+
+def test_input_language_action_is_advertised_and_accepted_by_program_contract() -> None:
+    module = _load_packaged_helper_module()
+    action = {
+        "action": "set_input_language",
+        "layout_id": "00000412",
+        "locale": "ko_KR",
+        "language": "ko",
+        "ime_mode": "alphanumeric",
+        "typing_mode": "latin",
+    }
+
+    result = module._validate_program_definition(
+        {
+            "schema": module.PROGRAM_SCHEMA,
+            "program_id": "input_language_contract_demo",
+            "name": "Input language contract demo",
+            "sequence": [action],
+        }
+    )
+    capabilities = module._capability_catalog()
+
+    assert result["ok"] is True
+    assert "set_input_language" in capabilities["families"]["keyboard"]
 
 
 def test_extended_action_validation_rejects_unbounded_parameters() -> None:

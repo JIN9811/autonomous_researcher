@@ -129,6 +129,7 @@ def recording_capability_coverage(events: Iterable[dict[str, Any]]) -> dict[str,
         "sleep": "wait",
         "checkpoint": "screenshot",
         "screenshot": "screenshot",
+        "input_language_changed": "set_input_language",
     }
     family_by_action = {
         "move_to": "mouse",
@@ -139,6 +140,7 @@ def recording_capability_coverage(events: Iterable[dict[str, Any]]) -> dict[str,
         "hotkey": "keyboard",
         "wait": "timing",
         "screenshot": "screen",
+        "set_input_language": "keyboard",
     }
     ignored = {"key_release", "recording_started", "recording_stopped", ""}
     actions: set[str] = set()
@@ -190,6 +192,10 @@ def compile_recording_actions(
     locator_required = image_first and policy.get("required_for_pointer_actions") is not False
     coordinate_fallback = bool(policy.get("coordinate_fallback", False))
     normalized_events = [dict(item or {}) for item in events]
+    has_input_language_events = any(
+        str(item.get("kind") or item.get("type") or "").strip().lower() == "input_language_changed"
+        for item in normalized_events
+    )
     if image_first and sum(
         item.get("kind") in {"mouse_click", "click", "mouse_drag"}
         and not str(item.get("recording_control") or "").strip()
@@ -248,7 +254,10 @@ def compile_recording_actions(
 
     def flush_text() -> None:
         if text_buffer:
-            actions.append({"action": "write", "text": "".join(text_buffer)})
+            action = {"action": "write", "text": "".join(text_buffer)}
+            if has_input_language_events:
+                action["interval_sec"] = 0.02
+            actions.append(action)
             text_buffer.clear()
 
     for event in normalized_events:
@@ -369,6 +378,27 @@ def compile_recording_actions(
             if not keys:
                 raise SkillContractError("hotkey requires keys")
             actions.append({"action": "hotkey", "keys": keys})
+        elif kind == "input_language_changed":
+            flush_text()
+            state = event.get("input_language")
+            if not isinstance(state, dict):
+                raise SkillContractError("input_language_changed requires input_language")
+            layout_id = str(state.get("layout_id") or "").strip().upper()
+            typing_mode = str(state.get("typing_mode") or "").strip().lower()
+            if state.get("status") != "available" or not re.fullmatch(r"[0-9A-F]{8}", layout_id):
+                raise SkillContractError("input_language_changed requires an available 8-digit layout_id")
+            if not typing_mode or typing_mode == "unknown":
+                raise SkillContractError("input_language_changed requires a known typing_mode")
+            actions.append(
+                {
+                    "action": "set_input_language",
+                    "layout_id": layout_id,
+                    "locale": str(state.get("locale") or "").strip(),
+                    "language": str(state.get("language") or "").strip().lower(),
+                    "ime_mode": str(state.get("ime_mode") or "unknown").strip().lower(),
+                    "typing_mode": typing_mode,
+                }
+            )
         elif kind in {"wait", "sleep"}:
             flush_text()
             seconds = max(0.0, min(float(event.get("seconds", 0.0)), 30.0))
@@ -1019,11 +1049,15 @@ class EquipmentSkillRegistry:
         specimen_id: str = "",
         mode: str = "test",
         worker: dict[str, Any] | None = None,
+        agentic_task: str = "",
+        annotation_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         safe_skill_id = _safe_identity(skill_id, "skill_id")
         safe_version = _safe_version(version)
         safe_sequence = _safe_identity(sequence_id, "sequence_id")
         safe_profile = _safe_identity(target_profile, "target_profile")
+        clean_agentic_task = str(agentic_task or skill_id).strip()[:160]
+        clean_annotation_context = deepcopy(annotation_context or {})
         if not allow_unvalidated:
             package = self.get(safe_skill_id, safe_version)
             if package["manifest"].get("lifecycle") not in {"validated", "deployed"}:
@@ -1042,6 +1076,8 @@ class EquipmentSkillRegistry:
                 execution_ref={"type": "skill", "skill_id": safe_skill_id, "version": safe_version},
                 model_snapshot=deepcopy(model_snapshot),
                 metadata={
+                    "agentic_task": clean_agentic_task,
+                    "annotation_context": clean_annotation_context,
                     "skill_execution": {
                         "state": "RUNNING",
                         "completed_segments": [],
@@ -1161,6 +1197,8 @@ class EquipmentSkillRegistry:
             "target_profile": str(runtime.get("profile_id") or ""),
             "state": str(skill_execution.get("state") or "RUNNING"),
             "model_snapshot": deepcopy(runtime.get("model_snapshot") or {}),
+            "agentic_task": str(metadata.get("agentic_task") or ""),
+            "annotation_context": deepcopy(metadata.get("annotation_context") or {}),
             "completed_segments": deepcopy(skill_execution.get("completed_segments") or []),
             "attempt": int(skill_execution.get("attempt") or 0),
             "idempotent": bool(runtime.get("idempotent")),

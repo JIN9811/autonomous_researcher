@@ -72,6 +72,12 @@ from utils.lerobot_joint_telemetry import (
     JointTelemetryFileObserver,
     PostPlaceInterlock,
 )
+from utils.lerobot_dataset_manager import (
+    delete_episodes as delete_lerobot_dataset_episodes,
+    list_datasets as list_lerobot_datasets,
+    merge_datasets as merge_lerobot_datasets,
+    split_dataset as split_lerobot_dataset,
+)
 
 
 EventCallback = Callable[[dict[str, Any]], None]
@@ -415,6 +421,7 @@ class LeRobotBridgeConfig:
     smolvla_base_policy: str = "lerobot/smolvla_base"
     wandb_local_port: int = 8081
     wandb_local_base_url: str = "http://127.0.0.1:8081"
+    wandb_local_api_key_path: Path = Path("memory/wandb_local_api_key.json")
     realsense_depth_align_to_color: bool = True
     realsense_depth_scale_m_per_unit: float = LEROBOT_DEFAULT_DEPTH_SCALE_M_PER_UNIT
     realsense_depth_clip_min_mm: float = LEROBOT_DEFAULT_DEPTH_CLIP_MIN_MM
@@ -452,6 +459,10 @@ class LeRobotBridgeConfig:
         pi05_repo_root = _resolve_path(repo, str(root.get("pi05_repo_root", "~/lerobot_pi05")))
         pi05_hf_home = _resolve_path(repo, str(root.get("pi05_hf_home", "~/.cache/huggingface_pi05")))
         hf_token_path = _resolve_path(repo, str(root.get("hf_token_path", "~/.cache/huggingface/token")))
+        wandb_local_api_key_path = _resolve_path(
+            repo,
+            str(root.get("wandb_local_api_key_path", "memory/wandb_local_api_key.json")),
+        )
         tts_piper_python = _resolve_path(repo, str(root.get("tts_piper_python", ".venv/bin/python")))
         tts_piper_script = _resolve_path(repo, str(root.get("tts_piper_script", "tools/tts/atr_piper_say.py")))
         tts_piper_bin = _resolve_path(repo, str(root.get("tts_piper_bin", ".venv/bin/piper")))
@@ -486,6 +497,7 @@ class LeRobotBridgeConfig:
             smolvla_base_policy=str(root.get("smolvla_base_policy", "lerobot/smolvla_base")),
             wandb_local_port=_safe_int(root.get("wandb_local_port", 8081), 8081, minimum=1, maximum=65535),
             wandb_local_base_url=str(root.get("wandb_local_base_url", "http://127.0.0.1:8081")),
+            wandb_local_api_key_path=wandb_local_api_key_path,
             realsense_depth_align_to_color=bool(root.get("realsense_depth_align_to_color", True)),
             realsense_depth_scale_m_per_unit=_safe_float(
                 root.get("realsense_depth_scale_m_per_unit", LEROBOT_DEFAULT_DEPTH_SCALE_M_PER_UNIT),
@@ -2796,6 +2808,52 @@ class LeRobotBridge:
             "step_trace": [{"step": "INSPECT_DATASET", "status": "ok", "detail": dataset_path}],
             "error": None,
         }
+
+    def dataset_manage_list(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """List locally managed LeRobot datasets and suggest the next repo id."""
+        data = self._dataset_manage_payload(payload)
+        try:
+            return list_lerobot_datasets(data)
+        except Exception as exc:
+            return self._dataset_manage_error("lerobot.dataset_manage.list", data, exc)
+
+    def dataset_manage_merge(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Merge selected v2.1 LeRobot datasets, including ATR sidecars, into a new dataset."""
+        data = self._dataset_manage_payload(payload)
+        try:
+            return merge_lerobot_datasets(data)
+        except Exception as exc:
+            return self._dataset_manage_error("lerobot.dataset_manage.merge", data, exc)
+
+    def dataset_manage_split(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Split one v2.1 LeRobot dataset into newly reindexed datasets."""
+        data = self._dataset_manage_payload(payload)
+        try:
+            return split_lerobot_dataset(data)
+        except Exception as exc:
+            return self._dataset_manage_error("lerobot.dataset_manage.split", data, exc)
+
+    def dataset_manage_delete(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Create a compacted dataset while deleting selected episodes from the source."""
+        data = self._dataset_manage_payload(payload)
+        try:
+            return delete_lerobot_dataset_episodes(data)
+        except Exception as exc:
+            return self._dataset_manage_error("lerobot.dataset_manage.delete", data, exc)
+
+    def _dataset_manage_payload(self, payload: dict[str, Any] | None) -> dict[str, Any]:
+        data = dict(payload or {})
+        if not str(data.get("dataset_root") or "").strip():
+            data["dataset_root"] = str(self.config.dataset_root)
+        return data
+
+    def _dataset_manage_error(self, tool: str, payload: dict[str, Any], exc: Exception) -> dict[str, Any]:
+        mode = str(payload.get("runtime_mode") or payload.get("mode") or "test")
+        profile_id = str(payload.get("profile_id") or self._selected_profile_id)
+        result = self._error(tool, mode, profile_id, "LEROBOT_DATASET_MANAGE_FAILED", str(exc))
+        result["exception_type"] = exc.__class__.__name__
+        result["dataset_root"] = str(payload.get("dataset_root") or self.config.dataset_root)
+        return result
 
     def _dataset_health_summary(
         self,
@@ -10698,6 +10756,10 @@ class LeRobotBridge:
                 wandb_base_url = self._wandb_local_url(request)
             if wandb_base_url:
                 env["WANDB_BASE_URL"] = wandb_base_url
+            if wandb_mode == "local" or self._is_local_wandb_url(wandb_base_url):
+                wandb_api_key = self._wandb_local_api_key()
+                if wandb_api_key:
+                    env["WANDB_API_KEY"] = wandb_api_key
         if workflow == "train" and request.wandb_enable and wandb_mode == "offline":
             env["WANDB_MODE"] = "offline"
         if workflow == "record":
@@ -11571,6 +11633,16 @@ class LeRobotBridge:
             if "api.wandb.ai" in text or "api_key" in text:
                 return True
         return False
+
+    def _wandb_local_api_key(self) -> str:
+        """Read the gitignored W&B local API key for subprocess env injection only."""
+        try:
+            payload = json.loads(self.config.wandb_local_api_key_path.expanduser().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return ""
+        if not isinstance(payload, dict) or not payload.get("enabled", False):
+            return ""
+        return str(payload.get("api_key") or "").strip()
 
     @staticmethod
     def _is_local_wandb_url(value: str) -> bool:

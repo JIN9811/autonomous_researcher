@@ -273,6 +273,88 @@ def _windows_input_language_state(
         }
 
 
+def _set_windows_input_language(
+    target: dict[str, Any],
+    *,
+    user32: Any | None = None,
+    imm32: Any | None = None,
+) -> dict[str, Any]:
+    """Restore a recorded Windows keyboard layout and foreground IME mode."""
+    layout_id = str(target.get("layout_id") or "").strip().upper()
+    typing_mode = str(target.get("typing_mode") or "").strip().lower()
+    ime_mode = str(target.get("ime_mode") or "unknown").strip().lower()
+    language = str(target.get("language") or "").strip().lower()
+    if not re.fullmatch(r"[0-9A-F]{8}", layout_id):
+        return {
+            "ok": False,
+            "failure_code": "WINDOWS_INPUT_LAYOUT_INVALID",
+            "message": "set_input_language requires an 8-digit hexadecimal layout_id.",
+        }
+    if not typing_mode or typing_mode == "unknown":
+        return {
+            "ok": False,
+            "failure_code": "WINDOWS_INPUT_MODE_INVALID",
+            "message": "set_input_language requires a known typing_mode.",
+        }
+    injected_api = user32 is not None or imm32 is not None
+    if not injected_api and not sys.platform.startswith("win"):
+        return {
+            "ok": False,
+            "failure_code": "WINDOWS_INPUT_LANGUAGE_UNAVAILABLE",
+            "message": "Windows input-language APIs are unavailable on this platform.",
+        }
+    try:
+        import ctypes
+
+        if user32 is None or imm32 is None:
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            imm32 = ctypes.WinDLL("imm32", use_last_error=True)
+            user32.GetForegroundWindow.restype = ctypes.c_void_p
+            user32.LoadKeyboardLayoutW.restype = ctypes.c_void_p
+            user32.ActivateKeyboardLayout.restype = ctypes.c_void_p
+            imm32.ImmGetContext.restype = ctypes.c_void_p
+
+        layout = user32.LoadKeyboardLayoutW(layout_id, 0x00000001)
+        layout_value = int(getattr(layout, "value", layout) or 0)
+        if not layout_value:
+            raise RuntimeError("LoadKeyboardLayoutW failed")
+        user32.ActivateKeyboardLayout(layout, 0x00000100)
+        hwnd = user32.GetForegroundWindow()
+        post_message = getattr(user32, "PostMessageW", None)
+        if hwnd and callable(post_message):
+            post_message(hwnd, 0x0050, 0, layout)
+
+        desired_native = ime_mode == "native" or (ime_mode == "unknown" and typing_mode not in {"latin", "en"})
+        ime_required = language == "ko" or ime_mode in {"native", "alphanumeric"}
+        ime_updated = not ime_required
+        context = imm32.ImmGetContext(hwnd) if hwnd else 0
+        if context:
+            conversion = ctypes.c_uint32(0)
+            sentence = ctypes.c_uint32(0)
+            try:
+                if imm32.ImmGetConversionStatus(context, ctypes.byref(conversion), ctypes.byref(sentence)):
+                    next_conversion = conversion.value | 0x0001 if desired_native else conversion.value & ~0x0001
+                    ime_updated = bool(imm32.ImmSetConversionStatus(context, next_conversion, sentence.value))
+            finally:
+                imm32.ImmReleaseContext(hwnd, context)
+        if ime_required and not ime_updated:
+            get_default_ime_window = getattr(imm32, "ImmGetDefaultIMEWnd", None)
+            send_message = getattr(user32, "SendMessageW", None)
+            ime_window = get_default_ime_window(hwnd) if hwnd and callable(get_default_ime_window) else 0
+            if ime_window and callable(send_message):
+                send_message(ime_window, 0x0283, 0x0002, 0x0001 if desired_native else 0)
+                ime_updated = True
+        if ime_required and not ime_updated:
+            raise RuntimeError("foreground IME mode could not be restored")
+        return {"ok": True, "target": dict(target), "layout_id": layout_id, "typing_mode": typing_mode}
+    except Exception as exc:
+        return {
+            "ok": False,
+            "failure_code": "WINDOWS_INPUT_LANGUAGE_SET_FAILED",
+            "message": f"Windows input language could not be restored: {exc}",
+        }
+
+
 class _RecordingKeyboardCapture:
     """Convert raw key transitions into replayable key and hotkey events."""
 
@@ -1642,8 +1724,8 @@ class RecordingManager:
                 candidates: list[dict[str, Any]] = []
                 capture_bytes = 0
                 for kind, crop_width, crop_height, confidence in (
-                    ("tight", 64, 64, 0.88),
-                    ("context", 192, 128, 0.82),
+                    ("tight", 64, 64, 0.9),
+                    ("context", 192, 128, 0.9),
                 ):
                     box = self._crop_box(int(x), int(y), crop_width, crop_height, size)
                     crop = frame.crop(box)
@@ -2496,6 +2578,7 @@ class PairingManager:
     CODE_TTL_SEC = 300
     MAX_ATTEMPTS = 5
     LOCKOUT_SEC = 30
+    RETRY_TTL_SEC = 30
 
     def __init__(
         self,
@@ -2515,6 +2598,12 @@ class PairingManager:
         self._attempts = 0
         self._locked_until = 0.0
         self._internal_key = self._load_key()
+        self._completed_code_digest = b""
+        self._completed_until = 0.0
+
+    @staticmethod
+    def _code_digest(code: str) -> bytes:
+        return hashlib.sha256(str(code).encode("utf-8")).digest()
 
     def _load_key(self) -> str:
         try:
@@ -2579,6 +2668,17 @@ class PairingManager:
     def complete(self, code: str) -> dict[str, Any]:
         with self._lock:
             if self._internal_key:
+                if (
+                    self._completed_code_digest
+                    and self._completed_until >= self._clock()
+                    and secrets.compare_digest(self._code_digest(code), self._completed_code_digest)
+                ):
+                    return {
+                        "ok": True,
+                        "status": "paired_retry",
+                        "paired": True,
+                        "internal_key": self._internal_key,
+                    }
                 return {"ok": False, "status": "paired", "paired": True, "failure_code": "PAIRING_ALREADY_COMPLETE"}
             now = self._clock()
             if self._locked_until > now:
@@ -2617,11 +2717,26 @@ class PairingManager:
             internal_key = str(self._key_factory())
             self._persist_key(internal_key)
             self._internal_key = internal_key
+            self._completed_code_digest = self._code_digest(code)
+            self._completed_until = now + self.RETRY_TTL_SEC
             self._code = ""
             self._expires_at = 0.0
             self._attempts = 0
             self._locked_until = 0.0
             return {"ok": True, "status": "paired", "paired": True, "internal_key": internal_key}
+
+    def reset(self) -> dict[str, Any]:
+        """Clear a half-completed pairing from the Windows-local console only."""
+        with self._lock:
+            self._internal_key = ""
+            self._completed_code_digest = b""
+            self._completed_until = 0.0
+            self._code = ""
+            self._expires_at = 0.0
+            self._attempts = 0
+            self._locked_until = 0.0
+            self.path.unlink(missing_ok=True)
+            return self.issue_code()
 
     def authorized(self, supplied_key: str) -> bool:
         with self._lock:
@@ -2667,7 +2782,7 @@ PROGRAMS = {
         "program_type": "connectivity_demo",
     },
     "utm_compression_start_v1": {
-        "description": "UTM compression test protocol with screen-state assertions and CSV artifact export.",
+        "description": "UTM compression test protocol through the completed-test screen; raw CSV export is a separate step.",
         "requires_pyautogui": True,
         "safe_test": True,
         "program_type": "utm_protocol",
@@ -2684,20 +2799,19 @@ PROGRAMS = {
             {"action": "click", "target": "start_button"},
             {"action": "wait_until", "target": "running_state", "timeout_s": 10},
             {"action": "wait_until", "target": "complete_state", "timeout_s": 300},
-            {"action": "wait_for_file", "pattern": "C:/ATR/utm_exports/{run_id}/{specimen_id}*.csv", "timeout_s": 20},
         ],
         "expected_screen_after": [{"name": "running_state", "required": True}, {"name": "complete_state", "required": True}],
         "save_policy": {
             "auto_save_expected": False,
-            "manual_save_required_if_no_artifact": True,
+            "manual_save_required_if_no_artifact": False,
             "windows_export_root": "C:/ATR/utm_exports",
-            "save_actions": ["wait_until_complete_state", "hotkey_ctrl_s", "type_standard_path", "press_enter", "wait_for_file"],
+            "save_actions": [],
         },
-        "output_artifacts": [{"kind": "utm_csv", "pattern": "C:/ATR/utm_exports/{run_id}/{specimen_id}*.csv"}],
+        "output_artifacts": [],
         "safe_abort": {"program_id": "utm_stop_or_abort_v1"},
     },
     "utm_export_csv_v1": {
-        "description": "Export/save UTM CSV after a completed test.",
+        "description": "Save raw test data to CSV after a completed test.",
         "requires_pyautogui": True,
         "safe_test": True,
         "program_type": "utm_export",
@@ -2709,46 +2823,20 @@ PROGRAMS = {
         "expected_screen_before": [{"name": "complete_state", "required": True}],
         "sequence": [
             {"action": "assert_visible", "target": "complete_state"},
-            {"action": "hotkey", "keys": ["ctrl", "s"]},
-            {"action": "type_path", "value": "C:/ATR/utm_exports/{run_id}/{specimen_id}.csv"},
+            {"action": "click", "target": "save_raw_data_csv"},
+            {"action": "wait", "seconds": 1.0},
+            {"action": "hotkey", "keys": ["ctrl", "a"]},
+            {"action": "write", "text": "C:/ATR/utm_exports/{run_id}/{specimen_id}.csv", "interval_sec": 0.01},
             {"action": "press", "key": "enter"},
             {"action": "wait_for_file", "pattern": "C:/ATR/utm_exports/{run_id}/{specimen_id}*.csv", "timeout_s": 20},
         ],
         "expected_screen_after": [{"name": "complete_state", "required": True}],
         "save_policy": {
             "auto_save_expected": False,
-            "manual_save_required_if_no_artifact": True,
-            "windows_export_root": "C:/ATR/utm_exports",
-            "save_method": "export_menu",
-            "save_actions": ["assert_complete_state", "hotkey_ctrl_s", "type_standard_path", "press_enter", "wait_for_file"],
-        },
-        "output_artifacts": [{"kind": "utm_csv", "pattern": "C:/ATR/utm_exports/{run_id}/{specimen_id}*.csv"}],
-        "safe_abort": {"program_id": "utm_stop_or_abort_v1"},
-    },
-    "utm_manual_save_csv_v1": {
-        "description": "Manual Save As fallback for UTM CSV data.",
-        "requires_pyautogui": True,
-        "safe_test": True,
-        "program_type": "utm_export",
-        "target_app": "UTM software",
-        "target_window": "main_window_title_or_regex",
-        "locator_backend": "image",
-        "max_retries": 1,
-        "preconditions": ["windows_bridge_ready", "utm_app_visible"],
-        "expected_screen_before": [{"name": "complete_state", "required": False}],
-        "sequence": [
-            {"action": "hotkey", "keys": ["ctrl", "s"]},
-            {"action": "type_path", "value": "C:/ATR/utm_exports/{run_id}/{specimen_id}.csv"},
-            {"action": "press", "key": "enter"},
-            {"action": "wait_for_file", "pattern": "C:/ATR/utm_exports/{run_id}/{specimen_id}*.csv", "timeout_s": 20},
-        ],
-        "expected_screen_after": [{"name": "save_dialog_closed", "required": False}],
-        "save_policy": {
-            "auto_save_expected": False,
             "manual_save_required_if_no_artifact": False,
             "windows_export_root": "C:/ATR/utm_exports",
-            "save_method": "manual_save_dialog",
-            "save_actions": ["hotkey_ctrl_s", "type_standard_path", "press_enter", "wait_for_file"],
+            "save_method": "raw_csv_button",
+            "save_actions": ["assert_complete_state", "click_save_raw_data_csv", "type_standard_path", "press_enter", "wait_for_file"],
         },
         "output_artifacts": [{"kind": "utm_csv", "pattern": "C:/ATR/utm_exports/{run_id}/{specimen_id}*.csv"}],
         "safe_abort": {"program_id": "utm_stop_or_abort_v1"},
@@ -2803,6 +2891,7 @@ ALLOWED_SEQUENCE_ACTIONS = frozenset({
     "press",
     "key_down",
     "key_up",
+    "set_input_language",
     "write",
     "type_path",
     "wait",
@@ -2893,6 +2982,11 @@ def _action_parameter_error(step: dict[str, Any]) -> str:
                 return "presses must be between 1 and 20"
         if action in {"key_down", "key_up"} and not str(step.get("key") or "").strip():
             return f"{action} requires key"
+        if action == "set_input_language":
+            if not re.fullmatch(r"[0-9A-Fa-f]{8}", str(step.get("layout_id") or "").strip()):
+                return "set_input_language layout_id must be 8 hexadecimal digits"
+            if str(step.get("typing_mode") or "").strip().lower() not in {"latin", "native"}:
+                return "set_input_language typing_mode must be latin or native"
         if action in {"pixel", "pixel_matches_color"}:
             if step.get("x") is None or step.get("y") is None:
                 return f"{action} requires x and y"
@@ -2999,7 +3093,7 @@ def _validate_program_definition(definition: Any) -> dict[str, Any]:
 def _capability_catalog() -> dict[str, Any]:
     families = {
         "mouse": ["query_pointer", "query_screen", "move_to", "move_rel", "click", "double_click", "triple_click", "mouse_down", "mouse_up", "drag_to", "drag_rel", "scroll", "hscroll", "vscroll"],
-        "keyboard": ["write", "press", "hotkey", "key_down", "key_up"],
+        "keyboard": ["write", "press", "hotkey", "key_down", "key_up", "set_input_language"],
         "screen": ["screenshot", "locate_image", "locate_all_images", "assert_visible", "wait_until_image", "pixel", "pixel_matches_color"],
         "window": ["focus_window", "window_activate", "window_minimize", "window_maximize", "window_restore", "window_move", "window_resize"],
         "dialog": ["alert", "confirm"],
@@ -3610,7 +3704,7 @@ def _capture_locator(payload: dict[str, Any]) -> dict[str, Any]:
         trace.append({"step": "CAPTURE_LOCATOR", "status": "ok", "detail": str(path)})
         locator = {
             "image_path": str(path),
-            "confidence": float(payload.get("confidence", 0.8)),
+            "confidence": float(payload.get("confidence", 0.9)),
             "region": [x, y, width, height],
             "target": name,
         }
@@ -3841,7 +3935,7 @@ def _best_inline_image_match(
             continue
         scores = cv2.matchTemplate(haystack, template, cv2.TM_CCOEFF_NORMED)
         _minimum, candidate_score, _minimum_location, best_location = cv2.minMaxLoc(scores)
-        confidence = float(candidate.get("confidence", 0.999))
+        confidence = float(candidate.get("confidence", 0.9))
         crop_origin = candidate.get("crop_origin")
         if (
             float(information_score) >= 12.0
@@ -4852,6 +4946,18 @@ def _execute_protocol_sequence_impl(
             getattr(pyautogui, action_name)(clicks)
             add(step_name, "ok", f"clicks={clicks}")
             continue
+        if action_name == "set_input_language":
+            target = {
+                key: str(action.get(key) or "").strip()
+                for key in ("layout_id", "locale", "language", "ime_mode", "typing_mode")
+            }
+            result = _set_windows_input_language(target)
+            if not result.get("ok"):
+                detail = str(result.get("message") or "input language restoration failed")
+                add(step_name, "blocked", detail)
+                return result
+            add(step_name, "ok", f"layout={target['layout_id']}; typing_mode={target['typing_mode']}")
+            continue
         if action_name == "hotkey":
             keys = action.get("keys") if isinstance(action.get("keys"), list) else []
             if not keys:
@@ -5221,14 +5327,18 @@ def _registered_export_payload(payload: dict[str, Any], *, program_id: str, run_
     sequence = [dict(item) for item in raw_sequence if isinstance(item, dict)]
     if not sequence:
         sequence = [
-            {"action": "hotkey", "keys": ["ctrl", "s"]},
-            {"action": "type_path", "value": str(target_path)},
+            {"action": "click", "target": "save_raw_data_csv"},
+            {"action": "wait", "seconds": 1.0},
+            {"action": "hotkey", "keys": ["ctrl", "a"]},
+            {"action": "write", "text": str(target_path), "interval_sec": 0.01},
             {"action": "press", "key": "enter"},
             {"action": "wait_for_file", "pattern": str(target_path), "timeout_s": 20},
         ]
     for action in sequence:
         if action.get("action") == "type_path":
             action["value"] = str(target_path)
+        elif action.get("action") == "write":
+            action["text"] = str(target_path)
         elif action.get("action") == "wait_for_file":
             action["pattern"] = str(target_path)
     export_payload = dict(payload)
@@ -5236,11 +5346,6 @@ def _registered_export_payload(payload: dict[str, Any], *, program_id: str, run_
     export_payload["sequence"] = sequence
     export_payload["expected_export_path"] = str(target_path)
     return export_payload, target_path
-
-
-def _manual_save_export_payload(payload: dict[str, Any], *, run_id: str, specimen_id: str) -> tuple[dict[str, Any], Path]:
-    """Build a runtime payload for the manual Save/Export fallback sequence."""
-    return _registered_export_payload(payload, program_id="utm_manual_save_csv_v1", run_id=run_id, specimen_id=specimen_id)
 
 
 def _utm_success_response(
@@ -5460,38 +5565,53 @@ def _run_utm_protocol(sequence_id: str, program_id: str, payload: dict[str, Any]
             "output_artifacts": list(screen_artifacts),
             "step_trace": trace,
         }
+    program_sequence = program.get("sequence") if isinstance(program.get("sequence"), list) else []
+    requires_export_artifact = program_type == "utm_export" or any(
+        isinstance(action, dict) and action.get("action") == "wait_for_file"
+        for action in program_sequence
+    )
+    if not requires_export_artifact:
+        managed_skill = program.get("managed_by") == "atr_equipment_skill"
+        step("EXECUTE_SKILL_MACRO" if managed_skill else "EXECUTE_TEST_MACRO", "ok", "registered non-export sequence dispatched")
+        step("DONE", "ok", "Program completed without export side effects")
+        return {
+            "ok": True,
+            "status": "completed",
+            "bridge": "windows_pyautogui",
+            "sequence_id": sequence_id,
+            "program_id": program_id,
+            "program_type": program_type or "macro",
+            "output_artifacts": list(screen_artifacts),
+            "data_acquisition": {
+                "status": "not_applicable",
+                "save_method": "not_applicable",
+                "save_attempted_by_agent": False,
+                "save_confirmation_screen_ok": False,
+            },
+            "cross_checks": {
+                "screen_started": True,
+                "physical_motion_started": False,
+                "save_completed": False,
+                "data_file_created": False,
+                "data_parse_probe_ok": False,
+                "save_export_responsibility_ok": True,
+            },
+            "screen_checks": _screen_checks_from_artifacts(screen_artifacts),
+            "step_trace": trace,
+            "failure_code": None,
+        }
     if program_type == "utm_export":
         step("EXECUTE_EXPORT_MACRO", "ok", "registered export/save sequence dispatched")
     else:
         step("EXECUTE_START_MACRO", "ok", "registered protocol sequence dispatched")
-    save_method = "manual_save_dialog" if program_id == "utm_manual_save_csv_v1" else "export_menu" if program_id == "utm_export_csv_v1" else "windows_export_watch"
-    manual_save_attempted = program_id == "utm_manual_save_csv_v1"
+    raw_csv_save_attempted = any(
+        isinstance(action, dict)
+        and action.get("action") == "click"
+        and action.get("target") == "save_raw_data_csv"
+        for action in program_sequence
+    )
+    save_method = "raw_csv_button" if raw_csv_save_attempted else "windows_export_watch"
     export_path, probe = _resolve_utm_export(payload, run_id=run_id, specimen_id=specimen_id, trace=trace)
-    manual_save_required = bool(payload.get("manual_save_required_if_no_artifact", True)) and program_id != "utm_manual_save_csv_v1"
-    if (export_path is None or not probe.get("ok")) and manual_save_required:
-        manual_save_attempted = True
-        step("AUTO_SAVE_MISSING", "warning", str(probe.get("failure_code") or "UTM_EXPORT_FILE_MISSING"))
-        manual_payload, manual_target = _manual_save_export_payload(payload, run_id=run_id, specimen_id=specimen_id)
-        step("MANUAL_SAVE_EXPORT", "ok", str(manual_target))
-        manual_sequence_result = _execute_protocol_sequence(
-            pyautogui,
-            program_id="utm_manual_save_csv_v1",
-            payload=manual_payload,
-            run_id=run_id,
-            specimen_id=specimen_id,
-            trace=trace,
-        )
-        if manual_sequence_result.get("ok"):
-            export_path, probe = _resolve_utm_export(manual_payload, run_id=run_id, specimen_id=specimen_id, trace=trace)
-            save_method = "manual_save_dialog"
-        else:
-            probe = {
-                "ok": False,
-                "failure_code": str(manual_sequence_result.get("failure_code") or "UTM_SAVE_CONFIRMATION_FAILED"),
-                "message": str(manual_sequence_result.get("message") or "Manual UTM save/export fallback failed."),
-            }
-            export_path = None
-            step("MANUAL_SAVE_EXPORT", "blocked", probe["failure_code"])
     if export_path is None or not probe.get("ok"):
         failure_code = str(probe.get("failure_code") or "UTM_EXPORT_FILE_MISSING")
         step("SAVE_EXPORT", "blocked", failure_code)
@@ -5510,7 +5630,7 @@ def _run_utm_protocol(sequence_id: str, program_id: str, payload: dict[str, Any]
             "data_acquisition": {
                 "status": "missing",
                 "save_method": save_method,
-                "save_attempted_by_agent": manual_save_attempted,
+                "save_attempted_by_agent": raw_csv_save_attempted,
                 "save_confirmation_screen_ok": False,
                 "windows_path": str(export_path or ""),
                 "row_count_probe": probe.get("row_count_probe", 0),
@@ -5554,7 +5674,7 @@ def _run_utm_protocol(sequence_id: str, program_id: str, payload: dict[str, Any]
             "data_acquisition": {
                 "status": "exported_on_windows",
                 "save_method": save_method,
-                "save_attempted_by_agent": manual_save_attempted,
+                "save_attempted_by_agent": raw_csv_save_attempted,
                 "save_confirmation_screen_ok": True,
                 "windows_path": str(export_path),
                 "sha256": artifact.get("sha256"),
@@ -5587,7 +5707,7 @@ def _run_utm_protocol(sequence_id: str, program_id: str, payload: dict[str, Any]
         save_method=save_method,
         simulated=False,
     )
-    response["data_acquisition"]["save_attempted_by_agent"] = manual_save_attempted or response["data_acquisition"].get("save_attempted_by_agent", True)
+    response["data_acquisition"]["save_attempted_by_agent"] = raw_csv_save_attempted
     response["output_artifacts"] = [artifact, *screen_artifacts]
     response["screen_checks"] = screen_gate.get("screen_checks", _screen_checks_from_artifacts(screen_artifacts))
     return response
@@ -6032,7 +6152,7 @@ INDEX_HTML = r"""
           <div class="status-tile"><small>Endpoint</small><strong id="bridgeEndpoint">local console</strong></div>
           <div class="status-tile"><small>Data Root</small><strong id="bridgeDataRoot">-</strong></div>
         </div>
-        <div id="pairingPanel" class="row"><span class="pill" id="pairingState">pairing status unavailable</span><strong id="pairingCode" aria-label="one-time pairing code">----</strong><button id="newPairingCode" class="secondary" type="button">New Code</button></div>
+        <div id="pairingPanel" class="row"><span class="pill" id="pairingState">pairing status unavailable</span><strong id="pairingCode" aria-label="one-time pairing code">----</strong><button id="newPairingCode" class="secondary" type="button">New Code</button><button id="resetPairing" class="danger" type="button">Reset Pairing</button></div>
       </div>
     </section>
 
@@ -6194,6 +6314,7 @@ INDEX_HTML = r"""
     $("health").addEventListener("click",()=>refreshHealth().then((d)=>showResult(d,"Health")));
     $("refreshAll").addEventListener("click",()=>Promise.all([refreshHealth(),refreshPairing(),refreshPrograms(),refreshRecordings()]));
     $("newPairingCode").addEventListener("click",async()=>{const d=await call("/pairing/new-code",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});showResult(d,"New pairing code");await refreshPairing();});
+    $("resetPairing").addEventListener("click",async()=>{if(!confirm("Reset this bridge pairing and issue a new code?"))return;const d=await call("/pairing/reset",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});showResult(d,"Pairing reset");await refreshPairing();});
     $("managerSearch").addEventListener("input",renderPrograms);
     $("newProgram").addEventListener("click",()=>openEditor(TEMPLATE));
     $("browseProgram").addEventListener("click",()=>$("programFile").click());
@@ -6236,6 +6357,7 @@ class Handler(BaseHTTPRequestHandler):
         if method == "POST":
             return path in {
                 "/pairing/new-code",
+                "/pairing/reset",
                 "/execute",
                 "/programs/validate",
                 "/programs/register",
@@ -6507,13 +6629,17 @@ class Handler(BaseHTTPRequestHandler):
             if result.get("ok"):
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
-        if path in {"/pairing/new-code", "/pairing/complete"}:
+        if path in {"/pairing/new-code", "/pairing/reset", "/pairing/complete"}:
             body_ok, payload = self._read_json_body(max_bytes=16 * 1024)
             if not body_ok:
                 return
             if path == "/pairing/new-code":
                 result = PAIRING_MANAGER.issue_code()
                 self._send(200 if result.get("ok") else 409, result)
+                return
+            if path == "/pairing/reset":
+                result = PAIRING_MANAGER.reset()
+                self._send(200, result)
                 return
             result = PAIRING_MANAGER.complete(str(payload.get("pairing_code") or ""))
             self._send(200 if result.get("ok") else 429 if result.get("status") == "locked" else 400, result)

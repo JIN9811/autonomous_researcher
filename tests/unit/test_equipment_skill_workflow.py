@@ -71,6 +71,27 @@ def test_validate_editable_workflow_rejects_unknown_actions() -> None:
     assert result["issues"][0]["code"] == "ACTION_UNSUPPORTED"
 
 
+def test_validate_editable_workflow_accepts_input_language_action() -> None:
+    result = validate_editable_workflow(
+        _workflow(
+            _step(
+                "step-001",
+                {
+                    "action": "set_input_language",
+                    "layout_id": "00000412",
+                    "locale": "ko_KR",
+                    "language": "ko",
+                    "ime_mode": "native",
+                    "typing_mode": "ko",
+                },
+            )
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["issues"] == []
+
+
 def test_validate_editable_workflow_rejects_polling_slower_than_timeout() -> None:
     result = validate_editable_workflow(
         _workflow(

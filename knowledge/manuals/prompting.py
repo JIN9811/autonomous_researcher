@@ -43,9 +43,15 @@ def compact_manual_context(context: dict[str, Any], *, max_chunks: int = 6, max_
     }
 
 
-def build_manual_grounded_prompt(base_prompt: str, context: dict[str, Any]) -> str:
+def build_manual_grounded_prompt(
+    base_prompt: str,
+    context: dict[str, Any],
+    *,
+    max_chunks: int = 6,
+    max_chars: int = 12000,
+) -> str:
     """Append source-separated manual evidence to an existing bounded task."""
-    compact = compact_manual_context(context)
+    compact = compact_manual_context(context, max_chunks=max_chunks, max_chars=max_chars)
     rules = (
         "Manual evidence rules: use only relevant evidence below; cite chunk_id and page for manual-derived claims; "
         "state when evidence is insufficient. Do not create or change executable actions, coordinates, program IDs, "

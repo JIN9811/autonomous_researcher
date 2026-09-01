@@ -14,9 +14,10 @@ import time
 from typing import Any
 
 from mcp_tools.tool_registry import ToolRegistry
+from utils.equipment_vision_tasks import EQUIPMENT_VISION_TASK_IDS
 from utils.utm_specimen_presence import inspect_specimen_presence, virtual_specimen_frame_data_url
 
-UTM_CHECK_IDS = {"utm_pre_start", "utm_motion_confirm", "utm_test_complete"}
+UTM_CHECK_IDS = set(EQUIPMENT_VISION_TASK_IDS)
 UTM_MOTION_TRANSITIONS = {"NOT_WORKING_TO_WORKING", "WORKING_TO_NOT_WORKING"}
 
 
@@ -30,10 +31,23 @@ def _is_utm_check(item: dict[str, Any]) -> bool:
     return check_id in UTM_CHECK_IDS or check_id.startswith("utm_") or device == "utm"
 
 
+def _equipment_result_identity(item: dict[str, Any]) -> dict[str, Any]:
+    """Mirror request identity while reversing producer/consumer for the result."""
+    return {
+        "task_id": str(item.get("task_id") or item.get("check_id") or ""),
+        "run_id": str(item.get("run_id") or ""),
+        "loop_id": int(item.get("loop_id") or 0),
+        "specimen_id": str(item.get("specimen_id") or ""),
+        "producer_agent": str(item.get("consumer_agent") or "vision_agent"),
+        "consumer_agent": str(item.get("producer_agent") or "equipment_agent"),
+    }
+
+
 def _simulated_result(item: dict[str, Any], *, mode: str, ok: bool, confidence: float, timestamp: datetime, expires_at: datetime, ttl_ms: int) -> dict[str, Any]:
     check_id = str(item.get("check_id") or "unknown_check")
     return {
         "agent_signal_type": "equipment_vision_check_result",
+        **_equipment_result_identity(item),
         "check_id": check_id,
         "status": "verified" if ok else "attention_required",
         "ok": ok,
@@ -108,6 +122,7 @@ def _utm_result_from_observation(
 
     result = {
         "agent_signal_type": "equipment_vision_check_result",
+        **_equipment_result_identity(item),
         "check_id": check_id,
         "status": "verified" if ok else "attention_required",
         "ok": ok,

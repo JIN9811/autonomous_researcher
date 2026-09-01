@@ -15,3 +15,10 @@ def test_openai_explicit_completion_budget_still_wins() -> None:
     """Explicit call metadata must override task defaults."""
 
     assert OpenAIBackend._max_tokens_for_metadata({"task_type": "orchestrator_plan", "max_completion_tokens": 512}) == 512
+
+
+def test_openai_backend_requests_json_object_for_structured_completion() -> None:
+    assert OpenAIBackend._response_format_for_metadata({"response_format": "json_object"}) == {
+        "type": "json_object"
+    }
+    assert OpenAIBackend._response_format_for_metadata(None) is None
