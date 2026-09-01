@@ -78,6 +78,20 @@ def run_audit(base_url: str, out_dir: Path, *, width: int, height: int, geckodri
         driver.get(manager_url)
         _wait(driver, "return document.getElementById('equipment-manager-readiness')?.textContent !== 'loading';")
         _wait(driver, "return !document.getElementById('equipment-manager-add-skill')?.disabled;")
+        raw_csv_controls = driver.execute_script(
+            """
+            const ids = [
+              'equipment-raw-csv-panel', 'equipment-raw-csv-mode',
+              'equipment-raw-csv-session', 'equipment-raw-csv-specimen',
+              'equipment-raw-csv-loop', 'equipment-raw-csv-repeat',
+              'equipment-raw-csv-preview', 'equipment-raw-csv-execute',
+              'equipment-raw-csv-status', 'equipment-raw-csv-path'
+            ];
+            return {present: ids.filter((id) => Boolean(document.getElementById(id))), expected: ids};
+            """
+        )
+        if raw_csv_controls["present"] != raw_csv_controls["expected"]:
+            raise AssertionError(f"Raw CSV runtime controls are incomplete: {raw_csv_controls}")
         driver.find_element("id", "equipment-manager-add-skill").click()
         _wait(driver, "return document.querySelectorAll('.equipment-manager-block:not(.is-placeholder)').length === 1;")
         blank_skill = driver.execute_script(
@@ -212,6 +226,7 @@ def run_audit(base_url: str, out_dir: Path, *, width: int, height: int, geckodri
             "ok": True,
             "skill": expected_skill,
             "manager": reopened,
+            "raw_csv_controls": raw_csv_controls,
             "bridge": bridge,
             "runtime_ide": ide,
             "screenshots": [str(manager_shot), str(bridge_shot), str(ide_shot)],

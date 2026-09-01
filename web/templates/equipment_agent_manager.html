@@ -51,6 +51,38 @@
         <section class="equipment-manager-vision-slot">Vision Slot</section>
       </article>
     </section>
+
+    <section id="equipment-raw-csv-panel" class="equipment-raw-csv-panel" hidden>
+      <header>
+        <div>
+          <span class="equipment-manager-eyebrow">RAW CSV · WORKER-OWNED PATH</span>
+          <h2>Save Raw Data runtime</h2>
+          <p>Preview collision status before a bounded test save. Live values come from the active experiment context.</p>
+        </div>
+        <span id="equipment-raw-csv-status" class="manager-badge">preview required</span>
+      </header>
+      <div class="equipment-raw-csv-grid">
+        <label>Mode
+          <select id="equipment-raw-csv-mode" class="manager-input">
+            <option value="test" selected>Test</option>
+            <option value="live">Live context (read-only)</option>
+          </select>
+        </label>
+        <label>Experiment session<input id="equipment-raw-csv-session" class="manager-input" value="session-20260902-A" maxlength="96" /></label>
+        <label>Specimen<input id="equipment-raw-csv-specimen" class="manager-input" value="specimen-001" maxlength="96" /></label>
+        <label>Loop<input id="equipment-raw-csv-loop" class="manager-input" type="number" min="1" max="9999" value="1" /></label>
+        <label>Repeat<input id="equipment-raw-csv-repeat" class="manager-input" type="number" min="1" max="9999" value="1" /></label>
+      </div>
+      <div class="equipment-raw-csv-actions">
+        <button id="equipment-raw-csv-preview" class="manager-btn" type="button">Preview path</button>
+        <button id="equipment-raw-csv-execute" class="manager-btn primary" type="button" disabled>Run test save</button>
+      </div>
+      <div class="equipment-raw-csv-result">
+        <strong>Resolved path</strong>
+        <code id="equipment-raw-csv-path">Not previewed</code>
+        <div id="equipment-raw-csv-metadata" class="equipment-raw-csv-metadata"></div>
+      </div>
+    </section>
   </main>
   <script src="/static/equipment_skill_flow_model.js"></script>
   <script src="/static/equipment_agent_manager.js"></script>

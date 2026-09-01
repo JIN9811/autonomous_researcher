@@ -413,6 +413,33 @@ def test_agent_manager_exposes_locked_entry_gate_and_utm_cycle_draft_action() ->
     assert "applyTemplate" in script
 
 
+def test_equipment_agent_manager_exposes_raw_csv_preview_and_test_contract() -> None:
+    client = TestClient(app)
+
+    page = client.get("/equipment/agent-manager").text
+    script = client.get("/static/equipment_agent_manager.js").text
+    for element_id in (
+        "equipment-raw-csv-panel",
+        "equipment-raw-csv-mode",
+        "equipment-raw-csv-session",
+        "equipment-raw-csv-specimen",
+        "equipment-raw-csv-loop",
+        "equipment-raw-csv-repeat",
+        "equipment-raw-csv-preview",
+        "equipment-raw-csv-execute",
+        "equipment-raw-csv-status",
+        "equipment-raw-csv-path",
+    ):
+        assert f'id="{element_id}"' in page
+    assert 'runtime_mode: "dry_run"' in script
+    assert "confirm_execute: false" in script
+    assert 'runtime_mode: "test"' in script
+    assert "confirm_execute: true" in script
+    assert "utm_save_raw_data" in script
+    assert "rawCsvPreview" in script
+    assert "window.confirm" in script
+
+
 def test_windows_equipment_page_uses_general_lab_equipment_bridge_structure() -> None:
     client = TestClient(app)
 

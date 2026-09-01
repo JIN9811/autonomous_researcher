@@ -12,12 +12,25 @@
   const taskName = document.getElementById("equipment-manager-agentic-task-name");
   const taskDescription = document.getElementById("equipment-manager-agentic-task-description");
   const loadUtmCycleButton = document.getElementById("equipment-manager-load-utm-cycle");
+  const rawCsvPanel = document.getElementById("equipment-raw-csv-panel");
+  const rawCsvMode = document.getElementById("equipment-raw-csv-mode");
+  const rawCsvSession = document.getElementById("equipment-raw-csv-session");
+  const rawCsvSpecimen = document.getElementById("equipment-raw-csv-specimen");
+  const rawCsvLoop = document.getElementById("equipment-raw-csv-loop");
+  const rawCsvRepeat = document.getElementById("equipment-raw-csv-repeat");
+  const rawCsvPreviewButton = document.getElementById("equipment-raw-csv-preview");
+  const rawCsvExecuteButton = document.getElementById("equipment-raw-csv-execute");
+  const rawCsvStatus = document.getElementById("equipment-raw-csv-status");
+  const rawCsvPath = document.getElementById("equipment-raw-csv-path");
+  const rawCsvMetadata = document.getElementById("equipment-raw-csv-metadata");
   let flow = null;
   let skills = [];
   let visionTasks = [];
   let agenticTasks = [];
   let flowTemplates = [];
   let flowReadiness = { ready: false, blocks: [] };
+  let flowExecution = {};
+  let rawCsvPreview = null;
   let dirty = false;
 
   function escapeHtml(value) {
@@ -27,8 +40,131 @@
   async function requestJson(url, options = {}) {
     const response = await fetch(url, { headers: { "Content-Type": "application/json", ...(options.headers || {}) }, ...options });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.detail || payload.message || `HTTP ${response.status}`);
+    if (!response.ok) {
+      const detail = typeof payload.detail === "string" ? payload.detail : payload.detail?.message || payload.message || `HTTP ${response.status}`;
+      const error = new Error(detail);
+      error.payload = payload;
+      throw error;
+    }
     return payload;
+  }
+
+  function rawCsvBlock() {
+    return (flow?.blocks || []).find((block) => block?.id === "save_raw_data" || block?.skill?.skill_id === "utm_save_raw_data");
+  }
+
+  function rawCsvInputContext(mode) {
+    return {
+      mode,
+      session_id: rawCsvSession.value.trim(),
+      specimen_id: rawCsvSpecimen.value.trim(),
+      loop_index: Number(rawCsvLoop.value),
+      repeat_index: Number(rawCsvRepeat.value),
+    };
+  }
+
+  function rawCsvSignature() {
+    return JSON.stringify({ ui_mode: rawCsvMode.value, ...rawCsvInputContext(rawCsvMode.value) });
+  }
+
+  function invalidateRawCsvPreview() {
+    rawCsvPreview = null;
+    rawCsvExecuteButton.disabled = true;
+    rawCsvStatus.textContent = "preview required";
+    rawCsvPath.textContent = "Not previewed";
+    rawCsvMetadata.textContent = "";
+  }
+
+  function applyRawCsvMode() {
+    const live = rawCsvMode.value === "live";
+    if (live) {
+      const context = flowExecution?.export_context || flowExecution?.raw_csv_export || flowExecution || {};
+      rawCsvSession.value = context.session_id || context.run_id || rawCsvSession.value;
+      rawCsvSpecimen.value = context.specimen_id || rawCsvSpecimen.value;
+      rawCsvLoop.value = context.loop_index || rawCsvLoop.value;
+      rawCsvRepeat.value = context.repeat_index || rawCsvRepeat.value;
+    }
+    for (const input of [rawCsvSession, rawCsvSpecimen, rawCsvLoop, rawCsvRepeat]) input.readOnly = live;
+    rawCsvExecuteButton.hidden = live;
+    invalidateRawCsvPreview();
+  }
+
+  function renderRawCsvPanel(blocks) {
+    const hasRawCsvBlock = blocks.some((block) => block?.id === "save_raw_data" || block?.skill?.skill_id === "utm_save_raw_data");
+    rawCsvPanel.hidden = !hasRawCsvBlock;
+    if (!hasRawCsvBlock) return;
+    const block = rawCsvBlock();
+    const bound = block?.skill?.skill_id === "utm_save_raw_data" && Boolean(block?.skill?.skill_version);
+    rawCsvPreviewButton.disabled = !bound;
+    if (!bound) {
+      rawCsvStatus.textContent = "bind skill first";
+      rawCsvExecuteButton.disabled = true;
+    }
+  }
+
+  async function previewRawCsv() {
+    const block = rawCsvBlock();
+    if (!block?.skill?.skill_id || !block?.skill?.skill_version) return;
+    rawCsvPreviewButton.disabled = true;
+    rawCsvStatus.textContent = "checking";
+    try {
+      const payload = await requestJson(`/api/equipment/skills/${encodeURIComponent(block.skill.skill_id)}/${encodeURIComponent(block.skill.skill_version)}/test`, {
+        method: "POST",
+        body: JSON.stringify({
+          runtime_mode: "dry_run",
+          confirm_execute: false,
+          export_context: rawCsvInputContext("dry_run"),
+        }),
+      });
+      const result = payload.program_results?.[0] || {};
+      const plan = result.raw_csv_export || {};
+      rawCsvPreview = { signature: rawCsvSignature(), available: plan.available === true };
+      rawCsvStatus.textContent = plan.available ? "available" : plan.exists ? "already exists" : plan.reserved ? "reserved" : "blocked";
+      rawCsvPath.textContent = plan.windows_path || plan.filename || "Path unavailable";
+      rawCsvMetadata.textContent = plan.filename || "";
+      rawCsvExecuteButton.disabled = !(rawCsvMode.value === "test" && rawCsvPreview.available);
+    } catch (error) {
+      rawCsvPreview = null;
+      rawCsvStatus.textContent = "blocked";
+      rawCsvPath.textContent = error.message;
+      rawCsvExecuteButton.disabled = true;
+    } finally {
+      rawCsvPreviewButton.disabled = false;
+    }
+  }
+
+  async function executeRawCsvTest() {
+    if (rawCsvMode.value !== "test" || !rawCsvPreview?.available || rawCsvPreview.signature !== rawCsvSignature()) return;
+    if (!window.confirm("Run the Save Raw Data test against the selected Windows worker?")) return;
+    const block = rawCsvBlock();
+    rawCsvExecuteButton.disabled = true;
+    rawCsvStatus.textContent = "saving";
+    try {
+      const payload = await requestJson(`/api/equipment/skills/${encodeURIComponent(block.skill.skill_id)}/${encodeURIComponent(block.skill.skill_version)}/test`, {
+        method: "POST",
+        body: JSON.stringify({
+          runtime_mode: "test",
+          confirm_execute: true,
+          export_context: rawCsvInputContext("test"),
+        }),
+      });
+      const result = payload.program_results?.[0] || {};
+      const plan = result.raw_csv_export || {};
+      const acquisition = result.data_acquisition || {};
+      const csvArtifact = (result.output_artifacts || []).find((item) => item.kind === "utm_csv") || {};
+      rawCsvStatus.textContent = "saved";
+      rawCsvPath.textContent = plan.windows_path || acquisition.windows_path || "Saved";
+      rawCsvMetadata.innerHTML = [
+        csvArtifact.local_path ? `Linux · ${escapeHtml(csvArtifact.local_path)}` : "",
+        acquisition.sha256 || csvArtifact.sha256 ? `SHA-256 · ${escapeHtml(acquisition.sha256 || csvArtifact.sha256)}` : "",
+        Number.isFinite(acquisition.row_count_probe) ? `Rows · ${escapeHtml(acquisition.row_count_probe)}` : "",
+        Array.isArray(acquisition.columns_probe) ? `Columns · ${escapeHtml(acquisition.columns_probe.join(", "))}` : "",
+      ].filter(Boolean).join("<br>");
+      rawCsvPreview = null;
+    } catch (error) {
+      rawCsvStatus.textContent = "blocked";
+      rawCsvPath.textContent = error.message;
+    }
   }
 
   function profileId() {
@@ -122,6 +258,7 @@
         </article>`;
       }).join("");
     }
+    renderRawCsvPanel(blocks);
     const hasUnboundSlot = (flowReadiness.blocks || []).some((item) => item.reason === "Skill Slot is unbound");
     readiness.textContent = blocks.length ? (dirty ? "draft" : hasUnboundSlot ? "unbound" : "saved") : "empty";
     status.textContent = dirty
@@ -151,6 +288,8 @@
     agenticTasks = Array.isArray(payload.agentic_tasks) ? payload.agentic_tasks : [];
     flowTemplates = Array.isArray(payload.flow_templates) ? payload.flow_templates : [];
     flowReadiness = payload.readiness || { ready: false, blocks: [] };
+    flowExecution = payload.execution || {};
+    rawCsvPreview = null;
     dirty = false;
     render();
   }
@@ -220,6 +359,12 @@
       mutate(window.ATREquipmentSkillFlow.updateBlock(flow, blockElement.dataset.blockId, field, value));
     }
   });
+  rawCsvMode.addEventListener("change", applyRawCsvMode);
+  for (const input of [rawCsvSession, rawCsvSpecimen, rawCsvLoop, rawCsvRepeat]) {
+    input.addEventListener("input", invalidateRawCsvPreview);
+  }
+  rawCsvPreviewButton.addEventListener("click", previewRawCsv);
+  rawCsvExecuteButton.addEventListener("click", executeRawCsvTest);
   window.addEventListener("beforeunload", (event) => {
     if (!dirty) return;
     event.preventDefault();
