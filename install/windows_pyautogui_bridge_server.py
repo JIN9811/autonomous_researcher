@@ -326,6 +326,18 @@ def _release_raw_csv_reservation(path: Path | None) -> None:
         Path(path).unlink()
     except FileNotFoundError:
         pass
+
+
+def _load_pyperclip() -> Any | None:
+    try:
+        import pyperclip  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    return pyperclip
+
+
+def _is_managed_raw_csv_save_program(program_id: str, program: dict[str, Any]) -> bool:
+    return program_id.startswith("utm_save_raw_data_") and program.get("managed_by") == "atr_equipment_skill"
 ARTIFACT_INDEX: dict[str, dict[str, Any]] = {}
 
 
@@ -3042,6 +3054,7 @@ ALLOWED_SEQUENCE_ACTIONS = frozenset({
     "set_input_language",
     "write",
     "type_path",
+    "paste_runtime_value",
     "wait",
     "log",
     "wait_for_file",
@@ -5143,6 +5156,45 @@ def _execute_protocol_sequence_impl(
             pyautogui.write(text_value, interval=float(action.get("interval_sec", 0.0)))
             add(step_name, "ok", "typed value")
             continue
+        if action_name == "paste_runtime_value":
+            key = str(action.get("key") or "").strip()
+            runtime_values = payload.get("runtime_values") if isinstance(payload.get("runtime_values"), dict) else {}
+            value = str(runtime_values.get(key) or "")
+            if key != "raw_csv_path" or not value or len(value) > 512:
+                add(step_name, "blocked", "invalid runtime value key or length")
+                return {
+                    "ok": False,
+                    "failure_code": "UTM_RAW_CSV_CLIPBOARD_FAILED",
+                    "message": "Raw CSV runtime path is missing or invalid.",
+                }
+            clipboard = _load_pyperclip()
+            if clipboard is None:
+                add(step_name, "blocked", "clipboard provider unavailable")
+                return {
+                    "ok": False,
+                    "failure_code": "UTM_RAW_CSV_CLIPBOARD_FAILED",
+                    "message": "Clipboard access is unavailable; direct typing fallback is forbidden.",
+                }
+            previous: str | None = None
+            try:
+                previous = str(clipboard.paste())
+                clipboard.copy(value)
+                pyautogui.hotkey("ctrl", "v")
+            except Exception as exc:
+                add(step_name, "blocked", exc.__class__.__name__)
+                return {
+                    "ok": False,
+                    "failure_code": "UTM_RAW_CSV_CLIPBOARD_FAILED",
+                    "message": "Raw CSV path clipboard paste failed; direct typing fallback was not used.",
+                }
+            finally:
+                if previous is not None:
+                    try:
+                        clipboard.copy(previous)
+                    except Exception:
+                        pass
+            add(step_name, "ok", "pasted runtime value: raw_csv_path")
+            continue
         if action_name == "pixel":
             x, y = int(action["x"]), int(action["y"])
             coordinate_failure = bounded_coordinate(x, y, step_name)
@@ -5204,6 +5256,8 @@ def _execute_protocol_sequence_impl(
             continue
         if action_name == "wait_for_file":
             pattern = _format_runtime_value(action.get("pattern") or UTM_EXPORT_GLOB, run_id=run_id, specimen_id=specimen_id)
+            runtime_values = payload.get("runtime_values") if isinstance(payload.get("runtime_values"), dict) else {}
+            pattern = pattern.replace("{raw_csv_path}", str(runtime_values.get("raw_csv_path") or ""))
             timeout_s = float(action.get("timeout_s") or payload.get("artifact_timeout_s") or payload.get("export_timeout_s") or 20.0)
             stable_for_sec = float(action.get("stable_for_sec") or payload.get("stable_for_sec") or UTM_FILE_STABLE_SEC)
             matched_file, detail = _wait_for_file_action(
@@ -5592,7 +5646,7 @@ def _simulated_utm_protocol(sequence_id: str, program_id: str, payload: dict[str
     )
 
 
-def _run_utm_protocol(sequence_id: str, program_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _run_utm_protocol_impl(sequence_id: str, program_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     trace: list[dict[str, Any]] = []
 
     def step(name: str, status: str, detail: str = "") -> None:
@@ -5861,6 +5915,76 @@ def _run_utm_protocol(sequence_id: str, program_id: str, payload: dict[str, Any]
     return response
 
 
+def _run_utm_protocol(sequence_id: str, program_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    program = _all_programs().get(program_id, {})
+    if not isinstance(program, dict) or not _is_managed_raw_csv_save_program(program_id, program):
+        return _run_utm_protocol_impl(sequence_id, program_id, payload)
+
+    plan = _raw_csv_export_plan(payload)
+    if not plan.get("ok"):
+        return {
+            "ok": False,
+            "status": "blocked",
+            "bridge": "windows_pyautogui",
+            "sequence_id": sequence_id,
+            "program_id": program_id,
+            "failure_code": plan.get("failure_code"),
+            "message": plan.get("message"),
+            "raw_csv_export": plan,
+            "step_trace": [{"step": "RAW_CSV_PREFLIGHT", "status": "blocked", "detail": str(plan.get("message") or "")}],
+        }
+    if plan.get("mode") == "dry_run":
+        return {
+            "ok": True,
+            "status": "dry_run_ready",
+            "bridge": "windows_pyautogui",
+            "sequence_id": sequence_id,
+            "program_id": program_id,
+            "failure_code": None,
+            "raw_csv_export": plan,
+            "step_trace": [{"step": "RAW_CSV_DRY_RUN", "status": "ok", "detail": str(plan["windows_path"])}],
+        }
+    if payload.get("confirm_execute") is not True:
+        return {
+            "ok": False,
+            "status": "blocked",
+            "bridge": "windows_pyautogui",
+            "sequence_id": sequence_id,
+            "program_id": program_id,
+            "failure_code": "PYAUTOGUI_MANUAL_CONFIRMATION_REQUIRED",
+            "message": "Raw CSV test/live execution requires explicit confirmation.",
+            "raw_csv_export": plan,
+            "step_trace": [{"step": "RAW_CSV_CONFIRM", "status": "blocked", "detail": "explicit confirmation required"}],
+        }
+
+    reservation: Path | None = None
+    try:
+        reservation = _reserve_raw_csv_export(plan)
+        execution_payload = dict(payload)
+        runtime_values = dict(payload.get("runtime_values") or {}) if isinstance(payload.get("runtime_values"), dict) else {}
+        runtime_values["raw_csv_path"] = str(plan["windows_path"])
+        execution_payload["runtime_values"] = runtime_values
+        execution_payload["expected_export_path"] = str(plan["windows_path"])
+        result = _run_utm_protocol_impl(sequence_id, program_id, execution_payload)
+        result["raw_csv_export"] = plan
+        return result
+    except RawCsvExportError as exc:
+        blocked_plan = {**plan, "ok": False, "available": False, "failure_code": exc.failure_code, "message": str(exc)}
+        return {
+            "ok": False,
+            "status": "blocked",
+            "bridge": "windows_pyautogui",
+            "sequence_id": sequence_id,
+            "program_id": program_id,
+            "failure_code": exc.failure_code,
+            "message": str(exc),
+            "raw_csv_export": blocked_plan,
+            "step_trace": [{"step": "RAW_CSV_RESERVE", "status": "blocked", "detail": str(exc)}],
+        }
+    finally:
+        _release_raw_csv_reservation(reservation)
+
+
 def _list_artifacts() -> dict[str, Any]:
     indexed_from_disk_count = _rebuild_artifact_index()
     artifacts = sorted(
@@ -6118,6 +6242,31 @@ def _run_custom_sequence(sequence_id: str, payload: dict[str, Any], *, program_i
 
 def _execute(payload: dict[str, Any]) -> dict[str, Any]:
     sequence_id = str(payload.get("sequence_id") or f"win-{int(time.time())}")
+    program_id = str(payload.get("program_id") or "").strip()
+    if program_id:
+        preview_program = _all_programs().get(program_id)
+        export_context = payload.get("export_context") if isinstance(payload.get("export_context"), dict) else {}
+        requested_mode = str(export_context.get("mode") or payload.get("runtime_mode") or "").strip().lower()
+        if isinstance(preview_program, dict) and _is_managed_raw_csv_save_program(program_id, preview_program) and requested_mode == "dry_run":
+            plan = _raw_csv_export_plan(payload)
+            return {
+                "ok": bool(plan.get("ok")),
+                "status": "dry_run_ready" if plan.get("ok") else "blocked",
+                "bridge": "windows_pyautogui",
+                "sequence_id": sequence_id,
+                "program_id": program_id,
+                "program_type": str(preview_program.get("program_type") or "macro"),
+                "raw_csv_export": plan,
+                "failure_code": plan.get("failure_code"),
+                "message": str(plan.get("message") or "Raw CSV export path is available."),
+                "step_trace": [
+                    {
+                        "step": "RAW_CSV_DRY_RUN",
+                        "status": "ok" if plan.get("ok") else "blocked",
+                        "detail": str(plan.get("windows_path") or plan.get("message") or ""),
+                    }
+                ],
+            }
     platform_status = _desktop_platform_status()
     if not platform_status.get("desktop_control_ready"):
         return {
@@ -6130,7 +6279,6 @@ def _execute(payload: dict[str, Any]) -> dict[str, Any]:
             "message": "Actual desktop control requires an active X11 display.",
             "step_trace": [{"step": "PLATFORM_PRECHECK", "status": "blocked", "detail": str(platform_status)}],
         }
-    program_id = str(payload.get("program_id") or "").strip()
     if program_id:
         programs = _all_programs()
         if program_id not in programs:

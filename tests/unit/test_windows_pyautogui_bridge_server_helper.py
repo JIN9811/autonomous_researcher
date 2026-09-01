@@ -233,6 +233,17 @@ class _FakeInvalidScreenshotPyAutoGUI(_FakePyAutoGUI):
         return _FakeInvalidImage()
 
 
+class _FakeClipboard:
+    def __init__(self, value: str = "") -> None:
+        self.value = value
+
+    def paste(self) -> str:
+        return self.value
+
+    def copy(self, value: str) -> None:
+        self.value = value
+
+
 def _load_helper_module():
     helper_path = Path(__file__).resolve().parents[2] / "install" / "windows_pyautogui_bridge_server.py"
     spec = importlib.util.spec_from_file_location("windows_pyautogui_bridge_server_under_test", helper_path)
@@ -347,6 +358,176 @@ def test_raw_csv_reservation_is_atomic_and_second_attempt_is_blocked(
     assert error.value.failure_code == "UTM_RAW_CSV_NAME_RESERVED"
     module._release_raw_csv_reservation(reservation)
     assert not reservation.exists()
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_save_raw_csv_dry_run_resolves_without_gui_or_reservation(
+    loader: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = loader()
+    raw_csv_root = tmp_path / "raw_csv"
+    monkeypatch.setattr(module, "RAW_CSV_ROOT", raw_csv_root)
+    monkeypatch.setattr(
+        module,
+        "_load_pyautogui",
+        lambda: (_ for _ in ()).throw(AssertionError("GUI touched")),
+    )
+    program_id = "utm_save_raw_data_1_0_7_segment_001"
+    module.PROGRAMS[program_id] = {
+        "program_id": program_id,
+        "program_type": "macro",
+        "managed_by": "atr_equipment_skill",
+        "integrity_ok": True,
+        "enabled": True,
+        "sequence": [{"action": "paste_runtime_value", "key": "raw_csv_path"}],
+    }
+    payload = {
+        **_valid_raw_csv_export_payload("dry_run"),
+        "sequence_id": "seq-raw-csv-preview",
+        "program_id": program_id,
+        "runtime_mode": "dry_run",
+    }
+
+    result = module._execute(payload)
+
+    assert result["ok"] is True
+    assert result["status"] == "dry_run_ready"
+    assert result["raw_csv_export"]["available"] is True
+    assert result["raw_csv_export"]["filename"].startswith("dry_run_")
+    assert not raw_csv_root.exists()
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_paste_runtime_value_preserves_clipboard_and_never_types(
+    loader: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = loader()
+    fake = _FakePyAutoGUI()
+    clipboard = _FakeClipboard("operator value")
+    monkeypatch.setattr(module, "_load_pyperclip", lambda: clipboard, raising=False)
+    result = module._execute_protocol_sequence(
+        fake,
+        program_id="utm_save_raw_data_1_0_7_segment_001",
+        payload={
+            "runtime_values": {"raw_csv_path": r"C:\worker\artifacts\raw_csv\test_s_x_loop-0001_rep-0001.csv"},
+            "sequence": [{"action": "paste_runtime_value", "key": "raw_csv_path"}],
+        },
+        run_id="run",
+        specimen_id="specimen",
+        trace=[],
+        screen_artifacts=[],
+    )
+
+    assert result["ok"] is True
+    assert fake.hotkeys == [("ctrl", "v")]
+    assert fake.writes == []
+    assert clipboard.value == "operator value"
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_clipboard_failure_has_no_write_fallback(
+    loader: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = loader()
+    fake = _FakePyAutoGUI()
+    monkeypatch.setattr(module, "_load_pyperclip", lambda: None, raising=False)
+    result = module._execute_protocol_sequence(
+        fake,
+        program_id="utm_save_raw_data_1_0_7_segment_001",
+        payload={
+            "runtime_values": {"raw_csv_path": r"C:\worker\artifacts\raw_csv\test_s_x_loop-0001_rep-0001.csv"},
+            "sequence": [{"action": "paste_runtime_value", "key": "raw_csv_path"}],
+        },
+        run_id="run",
+        specimen_id="specimen",
+        trace=[],
+        screen_artifacts=[],
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "UTM_RAW_CSV_CLIPBOARD_FAILED"
+    assert fake.writes == []
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_raw_csv_reservation_is_released_when_save_execution_fails(
+    loader: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = loader()
+    monkeypatch.setattr(module, "RAW_CSV_ROOT", tmp_path / "raw_csv")
+    program_id = "utm_save_raw_data_1_0_7_segment_001"
+    module.PROGRAMS[program_id] = {
+        "program_id": program_id,
+        "program_type": "macro",
+        "managed_by": "atr_equipment_skill",
+        "integrity_ok": True,
+        "enabled": True,
+        "sequence": [{"action": "paste_runtime_value", "key": "raw_csv_path"}],
+    }
+
+    def fail_after_reservation(sequence_id: str, selected_program_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        assert selected_program_id == program_id
+        assert payload["runtime_values"]["raw_csv_path"].endswith(".csv")
+        assert list((tmp_path / "raw_csv" / ".reservations").glob("*.lock"))
+        return {"ok": False, "status": "blocked", "failure_code": "UI_LOCATOR_NOT_FOUND"}
+
+    monkeypatch.setattr(module, "_run_utm_protocol_impl", fail_after_reservation, raising=False)
+    result = module._run_utm_protocol(
+        "seq-save-failure",
+        program_id,
+        {
+            **_valid_raw_csv_export_payload("test"),
+            "confirm_execute": True,
+        },
+    )
+
+    assert result["ok"] is False
+    assert result["raw_csv_export"]["filename"].startswith("test_")
+    assert not list((tmp_path / "raw_csv" / ".reservations").glob("*.lock"))
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_raw_csv_existing_file_blocks_before_save_execution(
+    loader: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = loader()
+    monkeypatch.setattr(module, "RAW_CSV_ROOT", tmp_path / "raw_csv")
+    program_id = "utm_save_raw_data_1_0_7_segment_001"
+    module.PROGRAMS[program_id] = {
+        "program_id": program_id,
+        "program_type": "macro",
+        "managed_by": "atr_equipment_skill",
+        "integrity_ok": True,
+        "enabled": True,
+        "sequence": [],
+    }
+    plan = module._raw_csv_export_plan(_valid_raw_csv_export_payload("live"))
+    target = Path(plan["windows_path"])
+    target.parent.mkdir(parents=True)
+    target.write_text("existing", encoding="utf-8")
+    monkeypatch.setattr(
+        module,
+        "_run_utm_protocol_impl",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("GUI execution touched")),
+        raising=False,
+    )
+
+    result = module._run_utm_protocol(
+        "seq-save-collision",
+        program_id,
+        {**_valid_raw_csv_export_payload("live"), "confirm_execute": True},
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "UTM_RAW_CSV_ALREADY_EXISTS"
 
 
 def _update_package(files: dict[str, bytes], *, version: str = "2026.08.28.2") -> dict[str, Any]:
