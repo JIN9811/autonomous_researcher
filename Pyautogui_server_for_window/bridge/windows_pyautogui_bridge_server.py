@@ -340,6 +340,12 @@ def _load_pyperclip() -> Any | None:
 
 def _is_managed_raw_csv_save_program(program_id: str, program: dict[str, Any]) -> bool:
     return program_id.startswith("utm_save_raw_data_") and program.get("managed_by") == "atr_equipment_skill"
+
+
+def _is_managed_raw_csv_validation_program(program_id: str, program: dict[str, Any]) -> bool:
+    return program_id.startswith("utm_validate_raw_data_") and program.get("managed_by") == "atr_equipment_skill"
+
+
 ARTIFACT_INDEX: dict[str, dict[str, Any]] = {}
 
 
@@ -3618,7 +3624,12 @@ def _artifact_payload(path: Path, *, artifact_id: str, kind: str, windows_path: 
         try:
             probe = _probe_utm_csv(path)
             payload["parse_ok"] = bool(probe.get("ok"))
+            payload["row_count_probe"] = int(probe.get("row_count_probe") or 0)
+            payload["columns_probe"] = list(probe.get("columns_probe") or [])
             payload["data_quality"] = probe.get("data_quality", {})
+            for key in ("source_format", "encoding", "source_columns", "units", "column_mapping", "missing_columns"):
+                if key in probe:
+                    payload[key] = probe[key]
             if probe.get("failure_code"):
                 payload["parse_failure_code"] = probe.get("failure_code")
                 payload["parse_failure_message"] = probe.get("message", "")
@@ -5796,6 +5807,7 @@ def _run_utm_protocol_impl(sequence_id: str, program_id: str, payload: dict[str,
     program = _all_programs().get(program_id, {})
     program_type = str(program.get("program_type") or "")
     managed_raw_csv_save = _is_managed_raw_csv_save_program(program_id, program)
+    managed_raw_csv_validation = _is_managed_raw_csv_validation_program(program_id, program)
     if bool(payload.get("simulate_utm_protocol")) or ALLOW_SIMULATED_UTM:
         step("HEALTH", "ok", "simulated UTM protocol explicitly enabled")
         return _simulated_utm_protocol(sequence_id, program_id, payload, trace)
@@ -5925,6 +5937,8 @@ def _run_utm_protocol_impl(sequence_id: str, program_id: str, payload: dict[str,
         }
     if program_type == "utm_export":
         step("EXECUTE_EXPORT_MACRO", "ok", "registered export/save sequence dispatched")
+    elif managed_raw_csv_validation:
+        step("EXECUTE_VALIDATION_MACRO", "ok", "registered raw CSV validation sequence dispatched")
     else:
         step("EXECUTE_START_MACRO", "ok", "registered protocol sequence dispatched")
     raw_csv_save_attempted = any(
@@ -5982,7 +5996,7 @@ def _run_utm_protocol_impl(sequence_id: str, program_id: str, payload: dict[str,
         complete_screen = _capture_screenshot_artifact(pyautogui, run_id=run_id, checkpoint="after_complete", trace=trace)
         if complete_screen:
             screen_artifacts.append(complete_screen)
-    if program_type == "utm_export" or managed_raw_csv_save:
+    if program_type == "utm_export" or managed_raw_csv_save or managed_raw_csv_validation:
         screen_gate = {"ok": True, "screen_checks": _screen_checks_from_artifacts(screen_artifacts), "blockers": []}
     else:
         screen_gate = _required_utm_screen_evidence_gate(screen_artifacts)

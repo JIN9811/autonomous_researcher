@@ -1579,6 +1579,57 @@ def test_dynamically_registered_managed_save_skill_is_classified_as_export(
 
 
 @pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_managed_raw_csv_validation_does_not_require_test_start_screen_evidence(
+    loader: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = loader()
+    fake = _FakePyAutoGUI()
+    module.ARTIFACT_ROOT = tmp_path / "artifacts"
+    module.ARTIFACT_INDEX.clear()
+    module._load_pyautogui = lambda: (fake, "")
+    program_id = "utm_validate_raw_data_1_0_7_segment_001"
+    program = {
+        "program_id": program_id,
+        "program_type": "macro",
+        "managed_by": "atr_equipment_skill",
+        "integrity_ok": True,
+        "sequence": [
+            {"action": "wait_for_file", "pattern": "{raw_csv_path}", "timeout_s": 1, "stable_for_sec": 0.01, "required": True},
+            {"action": "screenshot", "checkpoint": "raw_csv_validation_boundary"},
+        ],
+    }
+    monkeypatch.setattr(module, "_all_programs", lambda: {program_id: program})
+    target = tmp_path / "raw_csv" / "test_session_specimen_loop-0001_rep-0001.csv"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        "time_s,displacement_mm,force_N\n0,0.0,0.0\n1,0.1,2.5\n",
+        encoding="utf-8",
+    )
+
+    result = module._run_utm_protocol_impl(
+        "seq-dynamic-validation",
+        program_id,
+        {
+            "run_id": "run-dynamic-validation",
+            "specimen_id": "specimen",
+            "runtime_values": {"raw_csv_path": str(target)},
+            "stable_for_sec": 0.01,
+            "artifact_timeout_s": 1,
+        },
+    )
+
+    assert result["ok"] is True, result
+    assert result["status"] == "verified_complete"
+    assert result["data_acquisition"]["status"] == "exported_on_windows"
+    assert result["cross_checks"]["data_parse_probe_ok"] is True
+    steps = [item["step"] for item in result["step_trace"]]
+    assert "EXECUTE_VALIDATION_MACRO" in steps
+    assert "EXECUTE_START_MACRO" not in steps
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
 def test_trapezium_vendor_raw_csv_probe_accepts_multiline_equipment_export(loader: Any, tmp_path: Path) -> None:
     module = loader()
     path = tmp_path / "trapezium-raw.csv"
@@ -1597,6 +1648,35 @@ def test_trapezium_vendor_raw_csv_probe_accepts_multiline_equipment_export(loade
     assert result["ok"] is True
     assert result["data_quality"]["format"] == "trapeziumx_raw"
     assert result["row_count_probe"] == 5
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_trapezium_artifact_metadata_uses_parsed_rows_and_canonical_columns(loader: Any, tmp_path: Path) -> None:
+    module = loader()
+    module.ARTIFACT_INDEX.clear()
+    path = tmp_path / "trapezium-raw.csv"
+    path.write_bytes(
+        (
+            '"1 _ 1",,,,,,,,\n'
+            '"Time","Force","스트로크","Height","Stress","스트로크 (신율)","변위","변위 (신율)","Height (Strain)"\n'
+            '"sec","N","mm","mm","N/mm2","%","mm","%","%"\n'
+            '0,0.20,0.000,30.500,0,0,0,0,0\n'
+            '1,1.20,0.010,30.490,0,0,0,0,0\n'
+        ).encode("cp949")
+    )
+
+    artifact = module._artifact_payload(
+        path,
+        artifact_id="utm_csv_specimen_1",
+        kind="utm_csv",
+        windows_path=str(path),
+    )
+
+    assert artifact["parse_ok"] is True
+    assert artifact["row_count_probe"] == 2
+    assert artifact["columns_probe"] == ["time_s", "force_N", "displacement_mm", "height_mm"]
+    assert artifact["source_format"] == "trapeziumx_raw"
+    assert artifact["encoding"] == "cp949"
 
 
 def test_packaged_bridge_compression_never_falls_back_to_test_save(tmp_path: Path) -> None:
