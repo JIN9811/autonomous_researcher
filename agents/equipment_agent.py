@@ -28,7 +28,7 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
 from orchestrator.state import Mode, OrchestratorState
@@ -2471,6 +2471,8 @@ class LabEquipmentAgent(BaseAgent):
         state: OrchestratorState,
         ctx: AgentContext,
         flow: dict[str, Any],
+        *,
+        cancel_requested: Callable[[], bool] | None = None,
     ) -> AgentResult:
         """Execute ordered composite Skill blocks and their bounded Vision phases."""
         profile_id = str(flow.get("profile_id") or "")
@@ -2567,6 +2569,9 @@ class LabEquipmentAgent(BaseAgent):
                     value = csv_artifact.get(key)
                     if value not in (None, "", []):
                         evidence[key] = value
+                windows_path = str(csv_artifact.get("windows_path") or "").strip()
+                if windows_path:
+                    evidence["raw_csv_path"] = windows_path
                 artifact_binding = {
                     "artifact_id": str(csv_artifact.get("artifact_id") or "").strip(),
                     "run_id": str(csv_artifact.get("run_id") or "").strip(),
@@ -2839,9 +2844,26 @@ class LabEquipmentAgent(BaseAgent):
                 },
             )
 
-        previous_skill_evidence: dict[str, Any] = {}
+        run_context: dict[str, Any] = {}
+        cancelled = False
         for step, block in enumerate(blocks):
             block_id = str(block.get("id") or "")
+            if cancel_requested is not None and cancel_requested():
+                cancelled = True
+                transitions.append(
+                    {
+                        "block_id": block_id,
+                        "node_id": f"{block_id}.skill",
+                        "phase": "skill",
+                        "kind": "skill",
+                        "outcome": "cancelled",
+                        "target": "__blocked__",
+                        "success": False,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                terminal = "__blocked__"
+                break
             skill = block.get("skill") if isinstance(block.get("skill"), dict) else {}
             agentic = block.get("agentic") if isinstance(block.get("agentic"), dict) else {}
             task = str(agentic.get("task") or block.get("label") or block_id).strip()
@@ -2857,10 +2879,7 @@ class LabEquipmentAgent(BaseAgent):
                 "task": task,
                 "skip_profile_vision_preflight": True,
             }
-            if block_id == "validate_raw_data":
-                raw_csv_path = str(previous_skill_evidence.get("windows_path") or "").strip()
-                if raw_csv_path:
-                    request["raw_csv_path"] = raw_csv_path
+            request["runtime_context"] = dict(run_context)
             last_result = await self._run_equipment_skill(state, ctx, request)
             skill_outcome = "completed" if last_result.success else "failed"
             skill_target = (
@@ -2886,7 +2905,7 @@ class LabEquipmentAgent(BaseAgent):
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             )
-            previous_skill_evidence = current_skill_evidence
+            run_context.update(current_skill_evidence)
             if not last_result.success or skill_target == "__blocked__":
                 terminal = "__blocked__"
                 break
@@ -2985,7 +3004,10 @@ class LabEquipmentAgent(BaseAgent):
                 break
             write_execution(active_block=target, active_phase="skill")
 
-        execution = execution_payload(terminal_value=terminal)
+        execution = execution_payload(
+            terminal_value=terminal,
+            failure_code="EQUIPMENT_AGENTIC_RUN_CANCELLED" if cancelled else "",
+        )
         self._write_skill_flow_execution(profile_id, execution)
         success = terminal == "__complete__"
         data = dict(last_result.data) if last_result is not None else {}
@@ -3042,7 +3064,13 @@ class LabEquipmentAgent(BaseAgent):
             }
         return AgentResult(
             success=success,
-            summary="Equipment Skill Flow completed" if success else "Equipment Skill Flow blocked",
+            summary=(
+                "Equipment Skill Flow completed"
+                if success
+                else "Equipment Skill Flow cancelled"
+                if cancelled
+                else "Equipment Skill Flow blocked"
+            ),
             data=data,
         )
 
@@ -3316,10 +3344,15 @@ class LabEquipmentAgent(BaseAgent):
                 "equipment_skill_execution_id": execution["execution_id"],
                 "bridge_id": bridge_id,
             }
-            if skill_id == "utm_validate_raw_data":
-                raw_csv_path = str(request.get("raw_csv_path") or "").strip()
-                if raw_csv_path:
-                    payload["runtime_values"] = {"raw_csv_path": raw_csv_path}
+            runtime_context = request.get("runtime_context") if isinstance(request.get("runtime_context"), dict) else {}
+            placeholders = set(re.findall(r"\{([A-Za-z][A-Za-z0-9_]*)\}", json.dumps(package.get("workflow", {}), default=str)))
+            runtime_values = {
+                key: value
+                for key, value in runtime_context.items()
+                if key in placeholders and isinstance(value, (str, int, float, bool))
+            }
+            if runtime_values:
+                payload["runtime_values"] = runtime_values
             result = await self._call_tool(ctx, "equipment.pyautogui.run", payload)
             tool_results.append({"tool": "equipment.pyautogui.run", "payload": payload, "result": result})
             if not result.get("ok"):

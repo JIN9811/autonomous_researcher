@@ -129,6 +129,8 @@ const btnStopSkillDeployment = document.getElementById("btn-equipment-stop-skill
 const equipmentSkillFlowProgress = document.getElementById("equipment-skill-flow-progress");
 const equipmentFlowReadiness = document.getElementById("equipment-flow-readiness");
 const btnOpenEquipmentAgentManager = document.getElementById("btn-open-equipment-agent-manager");
+const btnAgenticRun = document.getElementById("btn-equipment-agentic-run");
+const agenticRunStatus = document.getElementById("equipment-agentic-run-status");
 const requestAuditStatus = document.getElementById("equipment-request-audit-status");
 const requestAuditDetail = document.getElementById("equipment-request-audit-detail");
 const utmExportGlobInput = document.getElementById("equipment-utm-export-glob");
@@ -186,6 +188,7 @@ let equipmentSkillFlowCatalog = [];
 let equipmentSkillFlowExecution = {};
 let equipmentVisionTasks = [];
 let equipmentSkillFlowReadiness = {};
+let agenticLiveRunActive = false;
 
 const EQUIPMENT_PROGRESS_ORDER = ["recording", "transfer", "annotation", "skill", "preflight", "execute", "verify", "handoff"];
 const RECORDING_LIST_REFRESH_MS = 5000;
@@ -251,7 +254,36 @@ async function refreshEquipmentSkillFlowRuntime() {
   equipmentSkillFlowExecution = payload.execution && typeof payload.execution === "object" ? payload.execution : {};
   equipmentSkillFlow = payload.flow;
   renderEquipmentSkillFlow();
+  if (agenticLiveRunActive) {
+    const transitions = Array.isArray(equipmentSkillFlowExecution.transitions) ? equipmentSkillFlowExecution.transitions : [];
+    const completed = transitions.filter((item) => item?.phase === "skill" && item?.success === true).length;
+    const total = Array.isArray(equipmentSkillFlow?.blocks) ? equipmentSkillFlow.blocks.length : 0;
+    setAgenticLiveRunStatus("running", `${completed}/${total}`);
+  }
   return payload;
+}
+
+function setAgenticLiveRunStatus(state, detail = "") {
+  const normalized = ["running", "completed", "blocked", "cancelled"].includes(state) ? state : "idle";
+  if (agenticRunStatus) {
+    agenticRunStatus.textContent = detail ? `${normalized} · ${detail}` : normalized;
+    agenticRunStatus.className = `badge ${normalized === "completed" ? "ready" : normalized === "running" ? "running" : normalized === "blocked" ? "warning" : "idle"}`;
+  }
+}
+
+async function refreshAgenticRunCapability() {
+  if (!btnAgenticRun) return false;
+  try {
+    const capability = await apiJson(`/api/equipment/profiles/${encodeURIComponent(selectedEquipmentProfileId)}/agentic-run`);
+    const available = capability.available === true;
+    btnAgenticRun.disabled = !available;
+    if (!available) setAgenticLiveRunStatus("blocked", "backend unavailable");
+    return available;
+  } catch (_error) {
+    btnAgenticRun.disabled = true;
+    setAgenticLiveRunStatus("idle", "backend update pending");
+    return false;
+  }
 }
 
 function equipmentProgressStage(execution, projection) {
@@ -702,7 +734,7 @@ function renderEquipmentProfiles(payload) {
   }).join("") || '<option value="utm_windows_v1" selected>UTM</option>';
   profileItems.onchange = () => {
     selectedEquipmentProfileId = profileItems.value || "utm_windows_v1";
-    Promise.all([loadEquipmentProfileState(), loadEquipmentSkillFlow()]).catch((err) => writeLog({ ok: false, error: err.message }));
+    Promise.all([loadEquipmentProfileState(), loadEquipmentSkillFlow(), refreshAgenticRunCapability()]).catch((err) => writeLog({ ok: false, error: err.message }));
   };
 }
 
@@ -727,6 +759,49 @@ async function loadEquipmentProfileState() {
 async function runEquipmentProfileAction(action, button) {
   setBusy(button, true);
   try {
+    if (action === "agentic-live") {
+      if (agenticLiveRunActive) return;
+      agenticLiveRunActive = true;
+      setAgenticLiveRunStatus("running", "preflight");
+      const flowPayload = await loadEquipmentSkillFlow();
+      const flow = flowPayload.flow || equipmentSkillFlow;
+      const readiness = flowPayload.readiness || {};
+      if (!readiness.ready) throw new Error("Agentic Skill Flow is not ready; bind every deployed Skill first.");
+      if (flow?.enabled === false) throw new Error("Registered Agentic Skill Flow is disabled.");
+      const blocks = Array.isArray(flow?.blocks) ? flow.blocks : [];
+      if (!blocks.length) throw new Error("Agentic Skill Flow has no executable blocks.");
+
+      const profilePreflight = await apiJson(`/api/equipment/profiles/${encodeURIComponent(selectedEquipmentProfileId)}/preflight`, {
+        method: "POST",
+        body: JSON.stringify({ vision_link_enabled: blocks.some((block) => block?.vision?.enabled) }),
+      });
+      const blockers = Array.isArray(profilePreflight?.readiness?.blockers) ? profilePreflight.readiness.blockers : [];
+      if (blockers.length) throw new Error(`Profile preflight blocked: ${blockers.join(", ")}`);
+
+      setAgenticLiveRunStatus("idle", "confirming");
+      const warning = [
+        "경고: Lab Equipment Agentic Progress를 LIVE로 실행합니다.",
+        `현재 등록된 프로세스의 ${blocks.length}개 Skill이 정식 Lab Equipment Agent와 실제 Windows Worker를 통해 실행되며 장비가 움직일 수 있습니다.`,
+        `Profile: ${selectedEquipmentProfileId}`,
+        "비상 정지 상태와 작업 영역을 확인했습니다. 계속하려면 확인을 누르세요.",
+      ].join("\n\n");
+      if (!window.confirm(warning)) {
+        setAgenticLiveRunStatus("cancelled", "operator cancelled");
+        return;
+      }
+
+      setAgenticLiveRunStatus("running", `0/${blocks.length}`);
+      const result = await apiJson(`/api/equipment/profiles/${encodeURIComponent(selectedEquipmentProfileId)}/agentic-run`, {
+        method: "POST",
+        body: JSON.stringify({ runtime_mode: "live", confirm_execute: true }),
+      });
+      await refreshEquipmentSkillFlowRuntime();
+      if (!result.ok) throw new Error(result.summary || result.message || "Registered Agentic Skill Flow blocked.");
+      setAgenticLiveRunStatus("completed", `${blocks.length}/${blocks.length}`);
+      setActionStatus("Agentic Progress completed", result.summary || "Registered Lab Equipment process completed.", "ok");
+      writeLog(result);
+      return;
+    }
     const data = await apiJson(`/api/equipment/profiles/${encodeURIComponent(selectedEquipmentProfileId)}/${action}`, {
       method: "POST",
       body: JSON.stringify({
@@ -739,8 +814,14 @@ async function runEquipmentProfileAction(action, button) {
     writeLog(data);
     await loadEquipmentProfileState();
   } catch (err) {
+    if (action === "agentic-live") {
+      await refreshEquipmentSkillFlowRuntime().catch(() => {});
+      setAgenticLiveRunStatus("blocked", err.message);
+      setActionStatus("Agentic Progress blocked", err.message, "blocked");
+    }
     writeLog({ ok: false, error: err.message });
   } finally {
+    if (action === "agentic-live") agenticLiveRunActive = false;
     setBusy(button, false);
   }
 }
@@ -909,7 +990,7 @@ function setBusy(button, busy) {
 }
 
 function rememberButtonLabels() {
-  [btnScan, btnRefresh, btnTest, btnProgram1, btnUtm, btnAbort, btnScreenshot, btnListLocators, btnCaptureLocator, btnLoadUtmProfile, btnSaveUtmProfile, btnOpenBridgeGui, btnLocalStart, btnLocalStop, btnLocalHealth, btnLocalSelect, btnReadiness, btnLivePreflight, btnLiveValidation, btnVisionProofDraft, btnLivePhysicalValidation, btnEvidenceAudit, btnProofPackage, btnVerifyProofPackage, btnCompletionAudit, btnRequestLog].forEach((button) => {
+  [btnScan, btnRefresh, btnTest, btnProgram1, btnUtm, btnAbort, btnScreenshot, btnListLocators, btnCaptureLocator, btnLoadUtmProfile, btnSaveUtmProfile, btnOpenBridgeGui, btnLocalStart, btnLocalStop, btnLocalHealth, btnLocalSelect, btnReadiness, btnLivePreflight, btnLiveValidation, btnVisionProofDraft, btnLivePhysicalValidation, btnEvidenceAudit, btnProofPackage, btnVerifyProofPackage, btnCompletionAudit, btnRequestLog, btnAgenticRun].forEach((button) => {
     if (button && !button.dataset.originalText) {
       button.dataset.originalText = button.textContent;
     }
@@ -1981,6 +2062,15 @@ async function runUtmAbort() {
   if (!confirmed) return;
   setBusy(btnAbort, true);
   try {
+    let cancellation = null;
+    try {
+      cancellation = await apiJson(`/api/equipment/profiles/${encodeURIComponent(selectedEquipmentProfileId)}/agentic-run/cancel`, {
+        method: "POST",
+        body: "{}",
+      });
+    } catch (cancelError) {
+      cancellation = { ok: false, error: cancelError.message };
+    }
     const targetWindow = utmTargetWindowInput ? utmTargetWindowInput.value.trim() : "";
     const payload = {
       program_id: "utm_stop_or_abort_v1",
@@ -2002,7 +2092,10 @@ async function runUtmAbort() {
       body: JSON.stringify({ runtime_mode: "live", confirm_live: true }),
     });
     renderRequestAudit(requestAudit);
-    writeLog({ abort_result: data, request_audit: requestAudit });
+    if (cancellation?.ok === false) {
+      setActionStatus("Recovery dispatched; Agentic cancellation unconfirmed", cancellation.error, "blocked");
+    }
+    writeLog({ agentic_cancellation: cancellation, abort_result: data, request_audit: requestAudit });
   } catch (err) {
     writeLog({ ok: false, error: err.message });
   } finally {
@@ -2047,6 +2140,7 @@ if (btnUtm) btnUtm.addEventListener("click", runUtmProtocol);
 if (btnAbort) btnAbort.addEventListener("click", runUtmAbort);
 if (btnProfilePreflight) btnProfilePreflight.addEventListener("click", () => runEquipmentProfileAction("preflight", btnProfilePreflight));
 if (btnProfileTest) btnProfileTest.addEventListener("click", () => runEquipmentProfileAction("test", btnProfileTest));
+if (btnAgenticRun) btnAgenticRun.addEventListener("click", () => runEquipmentProfileAction("agentic-live", btnAgenticRun));
 if (btnImportRecording) btnImportRecording.addEventListener("click", importEquipmentRecording);
 if (btnRefreshRecordings) btnRefreshRecordings.addEventListener("click", refreshWorkerRecordings);
 if (btnStopSkillAuthoring) btnStopSkillAuthoring.addEventListener("click", stopSkillAuthoring);
@@ -2065,6 +2159,7 @@ Promise.all([
   refreshLocalBridgeStatus(),
   loadEquipmentProfileState(),
   loadEquipmentSkillFlow(),
+  refreshAgenticRunCapability(),
   refreshEquipmentRuntime(),
   refreshEquipmentSkills(),
   restoreSkillAuthoringJob(),

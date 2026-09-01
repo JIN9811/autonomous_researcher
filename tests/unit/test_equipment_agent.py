@@ -445,7 +445,37 @@ async def test_equipment_flow_passes_saved_windows_csv_path_to_validation_skill(
     )
 
     validation = next(item for item in requests if item.get("task") == "Validate Raw Data CSV")
-    assert validation["raw_csv_path"] == "C:/worker/artifacts/raw_csv/test_run_specimen_loop-0001_rep-0001.csv"
+    assert validation["runtime_context"]["raw_csv_path"] == "C:/worker/artifacts/raw_csv/test_run_specimen_loop-0001_rep-0001.csv"
+
+
+@pytest.mark.asyncio
+async def test_equipment_flow_cancellation_prevents_the_next_registered_skill_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow = build_utm_compression_flow_template("windows_desktop_v1")
+    for block in flow["blocks"]:
+        block["skill"] = {"skill_id": "fake", "skill_version": "1.0.0"}
+    calls: list[dict[str, Any]] = []
+    agent = LabEquipmentAgent()
+
+    async def fake_skill(_state: Any, _ctx: Any, request: dict[str, Any]) -> AgentResult:
+        calls.append(dict(request))
+        return AgentResult(success=True, summary="unexpected", data={})
+
+    monkeypatch.setattr(agent, "_run_equipment_skill", fake_skill)
+    monkeypatch.setattr(agent, "_preflight_skill_flow_resources", lambda **_kwargs: {"ok": True})
+    result = await agent._run_equipment_skill_flow(
+        _state(experiment_spec={"equipment_profile_id": "windows_desktop_v1", "specimen_id": "specimen-test"}),
+        _CtxStub(_tools(tmp_path), "must not be used"),
+        flow,
+        cancel_requested=lambda: True,
+    )
+
+    assert result.success is False
+    assert result.summary == "Equipment Skill Flow cancelled"
+    assert result.data["equipment_skill_flow_execution"]["failure_code"] == "EQUIPMENT_AGENTIC_RUN_CANCELLED"
+    assert calls == []
 
 
 @pytest.mark.asyncio

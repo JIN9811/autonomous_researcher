@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +11,8 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+from agents.base_agent import AgentResult
+from agents.equipment_agent import LabEquipmentAgent
 from app.main import app, controller, _package_runtime_event
 
 
@@ -118,6 +121,65 @@ def test_windows_equipment_page_exposes_common_profile_workspace() -> None:
     script = client.get("/static/windows_equipment.js").text
     assert "/api/equipment/profiles" in script
     assert "selectedEquipmentProfileId" in script
+
+
+def test_windows_equipment_exposes_hot_loaded_live_agentic_progress_action() -> None:
+    client = TestClient(app)
+
+    page = client.get("/equipment/windows").text
+    script = client.get("/static/windows_equipment.js").text
+
+    assert 'id="btn-equipment-agentic-run"' in page
+    assert 'id="equipment-agentic-run-status"' in page
+    assert page.index("Equipment execution projection") < page.index('id="btn-equipment-agentic-run"')
+    assert 'runEquipmentProfileAction("agentic-live", btnAgenticRun)' in script
+    assert "window.confirm" in script
+    assert "실제 Windows Worker" in script
+    assert "/agentic-run" in script
+    assert "backend update pending" in script
+    assert "refreshAgenticRunCapability" in script
+    assert "/api/equipment/skills/" not in script[script.index('if (action === "agentic-live")'):script.index('const data = await apiJson', script.index('if (action === "agentic-live")'))]
+    assert "ATREquipmentAgenticRun" not in script
+    assert "현재 바인딩된 8개" not in script
+
+
+def test_equipment_agentic_run_uses_server_authoritative_registered_flow(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    source_state = copy.deepcopy(controller._state)
+    source_state.current_experiment_spec = {"test_mode_autofill": True, "printer_test_mode": True}
+    monkeypatch.setattr(controller, "_state", source_state)
+
+    async def fake_run(self, state, ctx, flow, *, cancel_requested=None):
+        captured.update(state=state, flow=flow, cancel_requested=cancel_requested)
+        return AgentResult(success=True, summary="canonical flow completed", data={"equipment_skill_flow_execution": {"terminal": "__complete__"}})
+
+    monkeypatch.setattr(LabEquipmentAgent, "_run_equipment_skill_flow", fake_run)
+    response = TestClient(app).post(
+        "/api/equipment/profiles/utm_windows_v1/agentic-run",
+        json={"runtime_mode": "live", "confirm_execute": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert captured["flow"]["profile_id"] == "utm_windows_v1"
+    assert captured["state"].mode.value == "live"
+    assert LabEquipmentAgent._effective_runtime_mode(captured["state"]) == "live"
+    assert callable(captured["cancel_requested"])
+
+
+def test_equipment_agentic_run_requires_explicit_live_confirmation() -> None:
+    response = TestClient(app).post(
+        "/api/equipment/profiles/utm_windows_v1/agentic-run",
+        json={"runtime_mode": "live", "confirm_execute": False},
+    )
+    assert response.status_code == 422
+
+
+def test_equipment_agentic_run_capability_is_discoverable_without_actuation() -> None:
+    response = TestClient(app).get("/api/equipment/profiles/utm_windows_v1/agentic-run")
+    assert response.status_code == 200
+    assert response.json()["available"] is True
+    assert response.json()["non_actuating"] is True
 
 
 def test_windows_equipment_profile_is_a_utm_default_select_without_provider_copy() -> None:

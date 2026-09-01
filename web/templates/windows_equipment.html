@@ -143,7 +143,14 @@ Modification guide:
 
       <section id="equipment-agentic-progress" class="panel equipment-agentic-progress-panel" aria-label="Lab Equipment agentic progress">
         <div class="equipment-section-heading">
-          <div><span class="eyebrow">Agentic Progress</span><h2>Equipment execution projection</h2></div>
+          <div>
+            <span class="eyebrow">Agentic Progress</span>
+            <div class="equipment-agentic-run-heading">
+              <h2>Equipment execution projection</h2>
+              <button id="btn-equipment-agentic-run" class="btn mini danger" type="button">Agentic Progress Run</button>
+              <span id="equipment-agentic-run-status" class="badge idle" role="status">idle</span>
+            </div>
+          </div>
           <div class="button-row compact">
             <span id="equipment-command-pill" class="badge idle">idle</span>
             <button id="btn-open-equipment-agent-manager" class="btn mini primary" type="button">Open Agent Manager</button>

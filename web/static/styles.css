@@ -1359,6 +1359,22 @@ textarea {
   margin: 4px 0 0;
 }
 
+.equipment-agentic-run-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.equipment-agentic-run-heading h2 {
+  margin-right: 4px;
+}
+
+#equipment-agentic-run-status {
+  padding-inline: 7px;
+  font-size: 0.66rem;
+}
+
 .equipment-connection-workspace,
 .equipment-agentic-progress-panel,
 .equipment-evidence-workspace,

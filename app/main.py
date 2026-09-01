@@ -178,6 +178,9 @@ _LOCAL_PYAUTOGUI_BRIDGE_SUPERVISOR: LocalPyAutoGUIBridgeSupervisor | None = None
 _KNOWLEDGE_RECONCILIATION_SERVICE: KnowledgeReconciliationService | None = None
 _KNOWLEDGE_RECONCILIATION_WORKER: KnowledgeReconciliationWorker | None = None
 _KNOWLEDGE_RECONCILIATION_KNOWLEDGE_SERVICE: KnowledgeService | None = None
+_EQUIPMENT_AGENTIC_RUN_GUARD = threading.Lock()
+_EQUIPMENT_AGENTIC_ACTIVE_PROFILES: set[str] = set()
+_EQUIPMENT_AGENTIC_CANCEL_EVENTS: dict[str, threading.Event] = {}
 _BO_VISUALIZATION_UPGRADE_CACHE: dict[tuple[str, int, str], dict[str, Any]] = {}
 _PLC_BRIDGE_SERVICE: PLCBridgeService | None = None
 
@@ -1330,6 +1333,13 @@ class EquipmentProfileActionRequest(BaseModel):
     program_id: str = ""
     include_screenshot: bool = True
     vision_link_enabled: bool | None = None
+
+
+class EquipmentAgenticRunRequest(BaseModel):
+    """Explicit operator confirmation for one server-authoritative live Skill Flow."""
+
+    runtime_mode: Literal["live"] = "live"
+    confirm_execute: bool = False
 
 
 class EquipmentProfileSettingsRequest(BaseModel):
@@ -13317,6 +13327,90 @@ async def post_equipment_profile_preflight(profile_id: str, req: EquipmentProfil
         ),
     )
     return state
+
+
+@app.get("/api/equipment/profiles/{profile_id}/agentic-run")
+async def get_equipment_profile_agentic_run(profile_id: str) -> dict[str, object]:
+    """Advertise the server-authoritative runner without executing equipment."""
+    try:
+        _equipment_profile_registry().get(profile_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True, "available": True, "non_actuating": True, "profile_id": profile_id}
+
+
+@app.post("/api/equipment/profiles/{profile_id}/agentic-run")
+async def post_equipment_profile_agentic_run(
+    profile_id: str,
+    req: EquipmentAgenticRunRequest,
+) -> dict[str, object]:
+    """Run only the enabled registered Skill Flow through the canonical Lab Equipment Agent."""
+    if not req.confirm_execute:
+        raise HTTPException(status_code=422, detail="confirm_execute=true is required for live Agentic Progress")
+    try:
+        _equipment_profile_registry().get(profile_id)
+        flow = _equipment_skill_flow_store().get(profile_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except EquipmentSkillFlowError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if flow.get("enabled") is False:
+        raise HTTPException(status_code=409, detail="registered Agentic Skill Flow is disabled")
+
+    with _EQUIPMENT_AGENTIC_RUN_GUARD:
+        if profile_id in _EQUIPMENT_AGENTIC_ACTIVE_PROFILES:
+            raise HTTPException(status_code=409, detail="an Agentic Progress run is already active for this profile")
+        cancel_event = threading.Event()
+        _EQUIPMENT_AGENTIC_ACTIVE_PROFILES.add(profile_id)
+        _EQUIPMENT_AGENTIC_CANCEL_EVENTS[profile_id] = cancel_event
+
+    try:
+        state = copy.deepcopy(controller._state)
+        state.mode = Mode.LIVE
+        state.stage = Stage.EQUIPMENT
+        state.current_experiment_spec = dict(state.current_experiment_spec or {})
+        for test_flag in (
+            "test_mode_autofill",
+            "test_mode_llm_generated",
+            "test_printer_path",
+            "printer_test_path",
+            "printer_bridge_mode",
+            "printer_test_mode",
+        ):
+            state.current_experiment_spec.pop(test_flag, None)
+        state.current_experiment_spec["equipment_profile_id"] = profile_id
+        result = await LabEquipmentAgent()._run_equipment_skill_flow(
+            state,
+            controller._deps.agent_context,
+            flow,
+            cancel_requested=cancel_event.is_set,
+        )
+        payload = {"ok": bool(result.success), "summary": result.summary, "data": result.data}
+        await controller.emit_workspace_result(
+            workspace="equipment",
+            tool="equipment_agent.run_registered_skill_flow",
+            result=payload,
+            stage=Stage.EQUIPMENT,
+            module_id="equipment",
+            agent="equipment_agent",
+            workflow="registered_agentic_progress_run",
+            node_event=True,
+        )
+        return payload
+    finally:
+        with _EQUIPMENT_AGENTIC_RUN_GUARD:
+            _EQUIPMENT_AGENTIC_ACTIVE_PROFILES.discard(profile_id)
+            _EQUIPMENT_AGENTIC_CANCEL_EVENTS.pop(profile_id, None)
+
+
+@app.post("/api/equipment/profiles/{profile_id}/agentic-run/cancel")
+async def post_equipment_profile_agentic_run_cancel(profile_id: str) -> dict[str, object]:
+    """Prevent an active registered flow from dispatching another Skill."""
+    with _EQUIPMENT_AGENTIC_RUN_GUARD:
+        event = _EQUIPMENT_AGENTIC_CANCEL_EVENTS.get(profile_id)
+        if event is not None:
+            event.set()
+    return {"ok": True, "profile_id": profile_id, "cancel_requested": event is not None}
 
 
 @app.post("/api/equipment/profiles/{profile_id}/test")
