@@ -24,6 +24,7 @@ EDITABLE_ACTIONS = frozenset(
         "press",
         "hotkey",
         "write",
+        "paste_runtime_value",
         "wait",
         "wait_until",
         "wait_until_image",
@@ -138,6 +139,25 @@ def _validate_action(step_id: str, action: dict[str, Any]) -> list[dict[str, str
             issues.append(_issue(step_id, "action.duration_sec", "POINTER_DURATION_INVALID", "Pointer duration must be within 0.05..5 seconds."))
     if name == "write" and len(str(action.get("text") or "")) > 512:
         issues.append(_issue(step_id, "action.text", "WRITE_TEXT_TOO_LONG", "Write text must not exceed 512 characters."))
+    if name == "paste_runtime_value":
+        if str(action.get("key") or "").strip() != "raw_csv_path":
+            issues.append(
+                _issue(
+                    step_id,
+                    "action.key",
+                    "RUNTIME_VALUE_KEY_INVALID",
+                    "Only the worker-owned raw_csv_path runtime value may be pasted.",
+                )
+            )
+        if any(key in action for key in ("text", "path", "value")):
+            issues.append(
+                _issue(
+                    step_id,
+                    "action",
+                    "RUNTIME_VALUE_LITERAL_FORBIDDEN",
+                    "Runtime paste actions cannot embed text, path, or value literals.",
+                )
+            )
     if name == "press" and not str(action.get("key") or "").strip():
         issues.append(_issue(step_id, "action.key", "KEY_REQUIRED", "Key is required."))
     if name == "hotkey" and not [item for item in action.get("keys", []) if str(item).strip()]:

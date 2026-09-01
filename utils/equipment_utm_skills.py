@@ -27,7 +27,7 @@ UTM_SKILL_BINDINGS: "OrderedDict[str, tuple[str, str]]" = OrderedDict(
         ("start_test", ("utm_start_test", UTM_SKILL_VERSION)),
         ("monitor_contact_and_run", ("utm_monitor_contact_and_run", "1.0.6")),
         ("await_auto_return", ("utm_await_auto_return", "1.0.7")),
-        ("save_raw_data", ("utm_save_raw_data", "1.0.6")),
+        ("save_raw_data", ("utm_save_raw_data", "1.0.7")),
         ("validate_raw_data", ("utm_validate_raw_data", "1.0.6")),
         ("advance_without_save", ("utm_advance_without_save", "1.0.6")),
         ("restore_robot_clearance", ("utm_restore_robot_clearance", "1.0.6")),
@@ -40,7 +40,6 @@ _MODEL_SNAPSHOT = {
     "endpoint_profile": "recorded_reference",
     "fallback_allowed": False,
 }
-_EXPORT_PATH = "C:/ATR/utm_exports/{run_id}/{specimen_id}.csv"
 _EXPORT_GLOB = "C:/ATR/utm_exports/{run_id}/{specimen_id}*.csv"
 _START_HEIGHT_30_5_PNG_BASE64 = (
     "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"
@@ -186,9 +185,9 @@ def _skill_workflows(reference_root: Path) -> dict[str, list[dict[str, Any]]]:
             _step(1, "Save Raw Data to CSV File", _visual_action("click", target="save_raw_data_csv", candidate=save_raw)),
             _step(2, "Wait for Save dialog", {"action": "wait", "seconds": 1.0}),
             _step(3, "Select file name field", {"action": "hotkey", "keys": ["ctrl", "a"]}),
-            _step(4, "Use run-scoped CSV path", {"action": "write", "text": _EXPORT_PATH, "interval_sec": 0.01}),
+            _step(4, "Paste worker-owned Raw CSV path", {"action": "paste_runtime_value", "key": "raw_csv_path"}),
             _step(5, "Confirm CSV save", {"action": "press", "key": "enter"}),
-            _step(6, "Wait for stable CSV", {"action": "wait_for_file", "pattern": _EXPORT_GLOB, "timeout_s": 30, "poll_interval_s": 0.25, "stable_for_sec": 2.0, "required": True}),
+            _step(6, "Wait for stable CSV", {"action": "wait_for_file", "pattern": "{raw_csv_path}", "timeout_s": 30, "poll_interval_s": 0.25, "stable_for_sec": 2.0, "required": True}),
             _step(7, "Capture CSV save result", {"action": "screenshot", "checkpoint": "raw_csv_saved"}, checkpoint=True),
         ],
         "validate_raw_data": [

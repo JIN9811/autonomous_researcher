@@ -92,6 +92,29 @@ def test_validate_editable_workflow_accepts_input_language_action() -> None:
     assert result["issues"] == []
 
 
+def test_validate_editable_workflow_accepts_only_bounded_paste_runtime_value() -> None:
+    accepted = validate_editable_workflow(
+        _workflow(_step("step-001", {"action": "paste_runtime_value", "key": "raw_csv_path"}))
+    )
+    unknown_key = validate_editable_workflow(
+        _workflow(_step("step-001", {"action": "paste_runtime_value", "key": "arbitrary"}))
+    )
+    embedded_value = validate_editable_workflow(
+        _workflow(
+            _step(
+                "step-001",
+                {"action": "paste_runtime_value", "key": "raw_csv_path", "path": "C:/forbidden.csv"},
+            )
+        )
+    )
+
+    assert accepted["ok"] is True
+    assert unknown_key["ok"] is False
+    assert embedded_value["ok"] is False
+    assert {issue["code"] for issue in unknown_key["issues"]} == {"RUNTIME_VALUE_KEY_INVALID"}
+    assert {issue["code"] for issue in embedded_value["issues"]} == {"RUNTIME_VALUE_LITERAL_FORBIDDEN"}
+
+
 def test_validate_editable_workflow_rejects_polling_slower_than_timeout() -> None:
     result = validate_editable_workflow(
         _workflow(

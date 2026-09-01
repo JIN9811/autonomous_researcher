@@ -184,18 +184,26 @@ def test_stages_eight_bounded_utm_skills_and_binds_exact_deployed_versions(tmp_p
     ]
     assert locator_candidates
     assert all(candidate["confidence"] == 0.9 for candidate in locator_candidates)
-    assert all(
-        action["action"] not in {"write", "type_path"}
-        for block_id, actions in actions_by_block.items()
-        if block_id != "save_raw_data"
-        for action in actions
-    )
-    save_text = [
-        action.get("text", "")
-        for action in actions_by_block["save_raw_data"]
-        if action["action"] == "write"
+    save_actions = actions_by_block["save_raw_data"]
+    assert [action["action"] for action in save_actions] == [
+        "click",
+        "wait",
+        "hotkey",
+        "paste_runtime_value",
+        "press",
+        "wait_for_file",
+        "screenshot",
     ]
-    assert save_text == ["C:/ATR/utm_exports/{run_id}/{specimen_id}.csv"]
+    paste_action = next(action for action in save_actions if action["action"] == "paste_runtime_value")
+    wait_action = next(action for action in save_actions if action["action"] == "wait_for_file")
+    assert paste_action == {"action": "paste_runtime_value", "key": "raw_csv_path"}
+    assert wait_action["pattern"] == "{raw_csv_path}"
+    assert all(action["action"] not in {"write", "type_path"} for action in save_actions)
+    assert not any(
+        token in str(action)
+        for action in save_actions
+        for token in ("C:/ATR", "{run_id}", "{specimen_id}")
+    )
 
     # Deployment is simulated by exact program hashes only; no Worker execution is invoked.
     registry = EquipmentSkillRegistry(registry_root)
@@ -231,8 +239,9 @@ def test_stages_eight_bounded_utm_skills_and_binds_exact_deployed_versions(tmp_p
 def test_visual_completion_upgrades_replace_only_changed_skill_versions() -> None:
     assert UTM_SKILL_BINDINGS["start_test"] == ("utm_start_test", "1.0.8")
     assert UTM_SKILL_BINDINGS["await_auto_return"] == ("utm_await_auto_return", "1.0.7")
+    assert UTM_SKILL_BINDINGS["save_raw_data"] == ("utm_save_raw_data", "1.0.7")
     assert {
         version
         for block_id, (_skill_id, version) in UTM_SKILL_BINDINGS.items()
-        if block_id not in {"start_test", "await_auto_return"}
+        if block_id not in {"start_test", "await_auto_return", "save_raw_data"}
     } == {"1.0.6"}
