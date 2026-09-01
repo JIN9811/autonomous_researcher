@@ -268,10 +268,11 @@ def test_visual_completion_upgrades_replace_only_changed_skill_versions() -> Non
     assert UTM_SKILL_BINDINGS["await_auto_return"] == ("utm_await_auto_return", "1.0.7")
     assert UTM_SKILL_BINDINGS["save_raw_data"] == ("utm_save_raw_data", "1.0.11")
     assert UTM_SKILL_BINDINGS["validate_raw_data"] == ("utm_validate_raw_data", "1.0.7")
+    assert UTM_SKILL_BINDINGS["advance_without_save"] == ("utm_advance_without_save", "1.0.8")
     assert {
         version
         for block_id, (_skill_id, version) in UTM_SKILL_BINDINGS.items()
-        if block_id not in {"start_test", "await_auto_return", "save_raw_data", "validate_raw_data"}
+        if block_id not in {"start_test", "await_auto_return", "save_raw_data", "validate_raw_data", "advance_without_save"}
     } == {"1.0.6"}
 
 
@@ -291,3 +292,43 @@ def test_validate_raw_data_uses_exact_path_from_save_runtime(tmp_path: Path) -> 
         "stable_for_sec": 2.0,
         "required": True,
     }
+
+
+def test_advance_without_save_declines_current_file_save_before_waiting_for_loading(tmp_path: Path) -> None:
+    packages = stage_utm_skill_packages(
+        registry_root=tmp_path / "skills",
+        reference_root=REFERENCE_ROOT,
+    )
+    package = next(item for item in packages if item["manifest"]["skill_id"] == "utm_advance_without_save")
+
+    actions = package["programs"][0]["sequence"]
+    assert [action["action"] for action in actions] == [
+        "click",
+        "wait_until_image",
+        "click",
+        "wait_until_image",
+        "wait_until_image",
+        "screenshot",
+    ]
+    assert [action.get("target") for action in actions[:5]] == [
+        "next_test_without_save",
+        "save_current_file_no",
+        "save_current_file_no",
+        "loading_main_screen",
+        "next_test_ready_loaded",
+    ]
+    no_button_actions = actions[1:3]
+    assert all(action["required"] is True for action in no_button_actions)
+    assert all(
+        [candidate["source"] for candidate in action["image_candidates"]] == ["save_current_file_no.png"]
+        for action in no_button_actions
+    )
+    assert all(
+        candidate["confidence"] == 0.9
+        for action in no_button_actions
+        for candidate in action["image_candidates"]
+    )
+    loaded_ready = actions[4]
+    assert [candidate["source"] for candidate in loaded_ready["image_candidates"]] == [
+        "next_test_ready_loaded.png"
+    ]

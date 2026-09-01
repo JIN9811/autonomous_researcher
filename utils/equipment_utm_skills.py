@@ -29,7 +29,7 @@ UTM_SKILL_BINDINGS: "OrderedDict[str, tuple[str, str]]" = OrderedDict(
         ("await_auto_return", ("utm_await_auto_return", "1.0.7")),
         ("save_raw_data", ("utm_save_raw_data", "1.0.11")),
         ("validate_raw_data", ("utm_validate_raw_data", "1.0.7")),
-        ("advance_without_save", ("utm_advance_without_save", "1.0.6")),
+        ("advance_without_save", ("utm_advance_without_save", "1.0.8")),
         ("restore_robot_clearance", ("utm_restore_robot_clearance", "1.0.6")),
     )
 )
@@ -141,6 +141,8 @@ def _skill_workflows(reference_root: Path) -> dict[str, list[dict[str, Any]]]:
     move_any_distance = _locator_candidate(jig_controls, (278, 4, 516, 46))
     save_raw = _locator_candidate(result_controls, (8, 8, 170, 43))
     next_without_save = _locator_candidate(result_controls, (8, 101, 170, 136))
+    save_current_file_no = _locator_candidate(locators / "save_current_file_no.png")
+    next_test_ready_loaded = _locator_candidate(locators / "next_test_ready_loaded.png")
     start_ready = _locator_candidate(locators / "start_test_ready.png")
     start_height_30_5 = _embedded_locator_candidate(
         png_base64=_START_HEIGHT_30_5_PNG_BASE64,
@@ -218,9 +220,11 @@ def _skill_workflows(reference_root: Path) -> dict[str, list[dict[str, Any]]]:
         ],
         "advance_without_save": [
             _step(1, "Next Test without saving current test", _visual_action("click", target="next_test_without_save", candidate=next_without_save)),
-            _step(2, "Observe Loading Main screen", _visual_action("wait_until_image", target="loading_main_screen", candidate=loading, timeout_s=15)),
-            _step(3, "Wait for the new Ready screen", _visual_action("wait_until_image", target="start_test_ready", candidate=start_ready, timeout_s=60)),
-            _step(4, "Capture next-test Ready state", {"action": "screenshot", "checkpoint": "next_test_ready"}, checkpoint=True),
+            _step(2, "Wait for Save current file confirmation", _visual_action("wait_until_image", target="save_current_file_no", candidate=save_current_file_no, timeout_s=10)),
+            _step(3, "Decline saving the current test file", _visual_action("click", target="save_current_file_no", candidate=save_current_file_no)),
+            _step(4, "Observe Loading Main screen", _visual_action("wait_until_image", target="loading_main_screen", candidate=loading, timeout_s=15)),
+            _step(5, "Wait until the next test is fully loaded", _visual_action("wait_until_image", target="next_test_ready_loaded", candidate=next_test_ready_loaded, timeout_s=60)),
+            _step(6, "Capture next-test Ready state", {"action": "screenshot", "checkpoint": "next_test_ready"}, checkpoint=True),
         ],
         "restore_robot_clearance": [
             _step(1, "Move to configured inter-jig distance", _visual_action("click", target="move_to_configured_inter_jig_distance", candidate=move_any_distance)),
