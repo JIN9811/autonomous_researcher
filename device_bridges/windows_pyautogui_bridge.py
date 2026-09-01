@@ -50,6 +50,7 @@ DEFAULT_ALLOWED_ACTIONS = {
     "screenshot",
     "locate_image",
     "type_path",
+    "paste_runtime_value",
     "wait_for_file",
     "wait_until",
     "wait_until_image",
@@ -1388,6 +1389,16 @@ class WindowsPyAutoGUIBridge(BaseBridge):
             )
 
         runtime_payload = self._runtime_program_payload(payload)
+        raw_csv_context_error = str(runtime_payload.get("_raw_csv_context_error") or "")
+        if raw_csv_context_error:
+            return self._failure(
+                tool="equipment.pyautogui.run",
+                mode=str(runtime_payload.get("runtime_mode") or "test"),
+                status="invalid",
+                failure_code="UTM_RAW_CSV_CONTEXT_INVALID",
+                message=raw_csv_context_error,
+                step_trace=[{"step": "VALIDATE_RAW_CSV_CONTEXT", "status": "blocked", "detail": raw_csv_context_error}],
+            )
         if not self._should_use_live(payload, for_execution=True):
             return self._attach_control_profile(self._run_simulator(runtime_payload), runtime_payload)
 
@@ -2440,6 +2451,38 @@ class WindowsPyAutoGUIBridge(BaseBridge):
     def _runtime_program_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         runtime = dict(payload or {})
         program_id = str(runtime.get("program_id") or "").strip()
+        if program_id.startswith("utm_save_raw_data_"):
+            for forbidden_key in ("output_csv_path", "export_root", "filename"):
+                runtime.pop(forbidden_key, None)
+            raw_context = runtime.get("export_context") if isinstance(runtime.get("export_context"), dict) else {}
+            approved_context = {
+                key: raw_context.get(key)
+                for key in ("mode", "session_id", "specimen_id", "loop_index", "repeat_index")
+            }
+            runtime["export_context"] = approved_context
+            context_mode = str(approved_context.get("mode") or "").strip().lower()
+            runtime_mode = str(runtime.get("runtime_mode") or "").strip().lower()
+            session_id = str(approved_context.get("session_id") or "").strip()
+            specimen_id = str(approved_context.get("specimen_id") or "").strip()
+            loop_index = approved_context.get("loop_index")
+            repeat_index = approved_context.get("repeat_index")
+            valid_indexes = all(
+                isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 9999
+                for value in (loop_index, repeat_index)
+            )
+            if (
+                context_mode not in {"dry_run", "test", "live"}
+                or runtime_mode != context_mode
+                or not session_id
+                or len(session_id) > 96
+                or not specimen_id
+                or len(specimen_id) > 96
+                or not valid_indexes
+            ):
+                runtime["_raw_csv_context_error"] = (
+                    "Raw CSV export_context must contain a matching mode, non-empty session/specimen IDs, "
+                    "and loop/repeat indexes from 1 to 9999."
+                )
         program = self.config.registered_programs.get(program_id, {}) if program_id else {}
         if isinstance(program, dict) and program:
             if "sequence" not in runtime and isinstance(program.get("sequence"), list):

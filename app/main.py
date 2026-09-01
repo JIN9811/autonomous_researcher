@@ -1402,11 +1402,22 @@ class EquipmentSkillEnabledRequest(BaseModel):
     enabled: bool
 
 
+class EquipmentRawCsvExportContext(BaseModel):
+    """Structured identifiers used by the Windows worker to derive one Raw CSV path."""
+
+    mode: Literal["dry_run", "test", "live"]
+    session_id: str = Field(..., min_length=1, max_length=96)
+    specimen_id: str = Field(..., min_length=1, max_length=96)
+    loop_index: int = Field(..., ge=1, le=9999)
+    repeat_index: int = Field(..., ge=1, le=9999)
+
+
 class EquipmentSkillTestRequest(BaseModel):
     """Execute an exact deployed Skill version through the configured bridge."""
 
-    runtime_mode: str = "test"
+    runtime_mode: Literal["dry_run", "test", "live"] = "dry_run"
     confirm_execute: bool = False
+    export_context: EquipmentRawCsvExportContext | None = None
 
 
 class WindowsBridgeScreenshotRequest(BaseModel):
@@ -12886,23 +12897,32 @@ async def post_equipment_skill_test(
         manifest = package["manifest"]
         if manifest.get("lifecycle") != "deployed" or manifest.get("enabled") is False:
             raise SkillContractError("exact Skill version must be deployed and enabled before test")
-        runtime_mode = str(req.runtime_mode or "test").strip().lower()
-        if runtime_mode == "live" and not req.confirm_execute:
+        runtime_mode = str(req.runtime_mode or "dry_run").strip().lower()
+        is_raw_csv_skill = skill_id == "utm_save_raw_data"
+        if is_raw_csv_skill:
+            if req.export_context is None:
+                raise HTTPException(status_code=422, detail="utm_save_raw_data requires export_context")
+            if req.export_context.mode != runtime_mode:
+                raise HTTPException(status_code=422, detail="export_context.mode must match runtime_mode")
+            if runtime_mode in {"test", "live"} and not req.confirm_execute:
+                raise HTTPException(status_code=422, detail=f"{runtime_mode} Raw CSV execution requires confirm_execute=true")
+        elif runtime_mode == "live" and not req.confirm_execute:
             raise SkillContractError("live Skill test requires confirm_execute=true")
         bridge = _equipment_bridge()
         bridge_id = str(package.get("manifest", {}).get("deployment", {}).get("bridge_id") or "")
         results: list[dict[str, Any]] = []
         for index, program_id in enumerate(package["workflow"].get("program_ids", []), start=1):
-            result = bridge.run(
-                {
-                    "program_id": str(program_id),
-                    "runtime_mode": runtime_mode,
-                    "confirm_execute": bool(req.confirm_execute),
-                    "bridge_id": bridge_id,
-                    "force_live_bridge": True,
-                    "sequence_id": f"skill-test-{skill_id}-{version}-{index:03d}",
-                }
-            )
+            execution_payload: dict[str, Any] = {
+                "program_id": str(program_id),
+                "runtime_mode": runtime_mode,
+                "confirm_execute": bool(req.confirm_execute),
+                "bridge_id": bridge_id,
+                "force_live_bridge": True,
+                "sequence_id": f"skill-test-{skill_id}-{version}-{index:03d}",
+            }
+            if is_raw_csv_skill and req.export_context is not None:
+                execution_payload["export_context"] = req.export_context.model_dump()
+            result = bridge.run(execution_payload)
             results.append(result)
             if not result.get("ok"):
                 break

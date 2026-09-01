@@ -130,6 +130,81 @@ def _client(monkeypatch, tmp_path: Path) -> TestClient:
     return TestClient(main_module.app)
 
 
+def test_raw_csv_skill_modes_require_context_and_confirmation(monkeypatch, tmp_path: Path) -> None:
+    calls: list[dict] = []
+
+    class Registry:
+        def get(self, skill_id: str, version: str) -> dict:
+            assert (skill_id, version) == ("utm_save_raw_data", "1.0.7")
+            return {
+                "manifest": {
+                    "lifecycle": "deployed",
+                    "enabled": True,
+                    "deployment": {"bridge_id": "windows-lab-1"},
+                },
+                "workflow": {"program_ids": ["utm_save_raw_data_1_0_7_segment_001"]},
+            }
+
+        def record_test(self, skill_id: str, version: str, summary: dict) -> None:
+            return None
+
+    class Bridge:
+        def run(self, payload: dict) -> dict:
+            calls.append(dict(payload))
+            return {
+                "ok": True,
+                "status": "dry_run_ready" if payload["runtime_mode"] == "dry_run" else "completed",
+                "raw_csv_export": {"available": True},
+            }
+
+    monkeypatch.setattr(main_module, "_equipment_skill_registry", lambda: Registry())
+    monkeypatch.setattr(main_module, "_equipment_bridge", lambda: Bridge())
+    client = _client(monkeypatch, tmp_path)
+    base_context = {
+        "session_id": "session-20260902-A",
+        "specimen_id": "cube-03",
+        "loop_index": 2,
+        "repeat_index": 4,
+    }
+
+    dry = client.post(
+        "/api/equipment/skills/utm_save_raw_data/1.0.7/test",
+        json={
+            "runtime_mode": "dry_run",
+            "confirm_execute": False,
+            "export_context": {"mode": "dry_run", **base_context},
+        },
+    )
+    blocked = client.post(
+        "/api/equipment/skills/utm_save_raw_data/1.0.7/test",
+        json={
+            "runtime_mode": "test",
+            "confirm_execute": False,
+            "export_context": {"mode": "test", **base_context},
+        },
+    )
+    live_defaults = client.post(
+        "/api/equipment/skills/utm_save_raw_data/1.0.7/test",
+        json={"runtime_mode": "live", "confirm_execute": True, "export_context": {"mode": "live"}},
+    )
+
+    assert dry.status_code == 200
+    assert dry.json()["program_results"][0]["status"] == "dry_run_ready"
+    assert blocked.status_code == 422
+    assert live_defaults.status_code == 422
+    assert calls == [
+        {
+            "program_id": "utm_save_raw_data_1_0_7_segment_001",
+            "runtime_mode": "dry_run",
+            "confirm_execute": False,
+            "bridge_id": "windows-lab-1",
+            "force_live_bridge": True,
+            "sequence_id": "skill-test-utm_save_raw_data-1.0.7-001",
+            "export_context": {"mode": "dry_run", **base_context},
+        }
+    ]
+
+
 def test_saved_worker_update_routes_address_path_candidate_without_changing_selection(
     monkeypatch, tmp_path: Path
 ) -> None:

@@ -51,6 +51,64 @@ def test_simulator_program1_returns_completion_log(tmp_path: Path) -> None:
     assert any(step["step"] == "EXECUTE_PROGRAM" for step in response["step_trace"])
 
 
+def test_raw_csv_export_context_is_filtered_and_passed_through(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    context = {
+        "mode": "test",
+        "session_id": "session-20260902-A",
+        "specimen_id": "cube-03",
+        "loop_index": 2,
+        "repeat_index": 4,
+        "output_csv_path": "C:/caller/forbidden.csv",
+        "export_root": "C:/caller",
+        "filename": "forbidden.csv",
+    }
+
+    runtime = bridge._runtime_program_payload(
+        {
+            "program_id": "utm_save_raw_data_1_0_7_segment_001",
+            "runtime_mode": "test",
+            "export_context": context,
+            "output_csv_path": "C:/caller/also-forbidden.csv",
+            "export_root": "C:/caller",
+            "filename": "forbidden.csv",
+        }
+    )
+    public = bridge._public_payload(runtime)
+
+    assert public["export_context"] == {
+        "mode": "test",
+        "session_id": "session-20260902-A",
+        "specimen_id": "cube-03",
+        "loop_index": 2,
+        "repeat_index": 4,
+    }
+    assert "output_csv_path" not in public
+    assert "export_root" not in public
+    assert "filename" not in public
+
+
+def test_raw_csv_export_context_invalid_is_blocked_before_dispatch(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    response = bridge.run(
+        {
+            "program_id": "utm_save_raw_data_1_0_7_segment_001",
+            "runtime_mode": "test",
+            "export_context": {
+                "mode": "live",
+                "session_id": "",
+                "specimen_id": "cube-03",
+                "loop_index": 0,
+                "repeat_index": 1,
+            },
+        }
+    )
+
+    assert response["ok"] is False
+    assert response["failure_code"] == "UTM_RAW_CSV_CONTEXT_INVALID"
+
+
 def test_live_execute_response_timeout_is_effect_unknown_and_not_retryable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
