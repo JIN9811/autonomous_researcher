@@ -55,6 +55,7 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
@@ -144,6 +145,7 @@ def _bridge_update_allowed_paths(package_root: Path | None = None) -> set[str]:
     return {str(item).strip().replace("\\", "/") for item in files if str(item).strip()} | {"release_manifest.json"}
 
 
+BRIDGE_PACKAGE_ROOT = _bridge_package_root()
 HOST = os.getenv("WINDOWS_PYAUTOGUI_BRIDGE_HOST", "0.0.0.0")
 PORT = int(os.getenv("WINDOWS_PYAUTOGUI_BRIDGE_PORT", "8765"))
 TOKEN = os.getenv("WINDOWS_PYAUTOGUI_BRIDGE_TOKEN", "")
@@ -151,6 +153,8 @@ TOKEN_HEADER = os.getenv("WINDOWS_PYAUTOGUI_BRIDGE_TOKEN_HEADER", "X-Bridge-Toke
 ARTIFACT_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_BRIDGE_ARTIFACT_ROOT", r"C:\ATR\bridge_artifacts"))
 LOCATOR_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_LOCATOR_ROOT", r"C:\ATR\equipment_locators"))
 UTM_EXPORT_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_UTM_EXPORT_DIR", r"C:\ATR\utm_exports"))
+# Kept overrideable for tests and worker deployments, but never accepted from a request.
+RAW_CSV_ROOT: Path | None = None
 PROGRAM_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_PROGRAM_DIR", r"C:\ATR\programs"))
 RECORDING_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_RECORDING_DIR", r"C:\ATR\recordings"))
 BRIDGE_RELEASE_VERSION = _bridge_release_version()
@@ -178,6 +182,150 @@ UTM_EXPORT_GLOB = os.getenv("WINDOWS_PYAUTOGUI_UTM_EXPORT_GLOB", "*.csv")
 UTM_FILE_STABLE_SEC = float(os.getenv("WINDOWS_PYAUTOGUI_UTM_FILE_STABLE_SEC", "2.0"))
 ALLOW_SIMULATED_UTM = os.getenv("WINDOWS_PYAUTOGUI_ALLOW_SIMULATED_UTM", "0").strip().lower() in {"1", "true", "yes", "on"}
 REQUIRE_UTM_SCREEN_ASSERTIONS = os.getenv("WINDOWS_PYAUTOGUI_REQUIRE_UTM_SCREEN_ASSERTIONS", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
+class RawCsvExportError(RuntimeError):
+    def __init__(self, failure_code: str, message: str) -> None:
+        super().__init__(message)
+        self.failure_code = failure_code
+
+
+def _active_raw_csv_root() -> Path:
+    return Path(RAW_CSV_ROOT) if RAW_CSV_ROOT is not None else Path(BRIDGE_PACKAGE_ROOT) / "artifacts" / "raw_csv"
+
+
+def _normalize_raw_csv_identifier(value: Any) -> str:
+    raw = unicodedata.normalize("NFKC", str(value or "")).strip()
+    if not raw or ".." in raw or "/" in raw or "\\" in raw:
+        return ""
+    normalized = re.sub(r'[<>:"/\\|?*\x00-\x1f\s_]+', "-", raw)
+    normalized = re.sub(r"-+", "-", normalized).strip("-. ")
+    return normalized if normalized and len(normalized) <= 80 else ""
+
+
+def _positive_raw_csv_index(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 1 else None
+
+
+def _raw_csv_failure(failure_code: str, message: str, **values: Any) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "available": False,
+        "failure_code": failure_code,
+        "message": message,
+        **values,
+    }
+
+
+def _raw_csv_export_plan(payload: dict[str, Any]) -> dict[str, Any]:
+    context = payload.get("export_context") if isinstance(payload.get("export_context"), dict) else {}
+    mode = str(context.get("mode") or payload.get("runtime_mode") or "").strip().lower()
+    session_id = _normalize_raw_csv_identifier(context.get("session_id"))
+    specimen_id = _normalize_raw_csv_identifier(context.get("specimen_id"))
+    loop_index = _positive_raw_csv_index(context.get("loop_index"))
+    repeat_index = _positive_raw_csv_index(context.get("repeat_index"))
+    common = {
+        "mode": mode,
+        "session_id": session_id,
+        "specimen_id": specimen_id,
+        "loop_index": loop_index,
+        "repeat_index": repeat_index,
+    }
+    if mode not in {"dry_run", "test", "live"} or not session_id or not specimen_id or loop_index is None or repeat_index is None:
+        return _raw_csv_failure(
+            "UTM_RAW_CSV_CONTEXT_INVALID",
+            "Raw CSV export context is incomplete or invalid.",
+            **common,
+        )
+
+    filename = f"{mode}_{session_id}_{specimen_id}_loop-{loop_index:04d}_rep-{repeat_index:04d}.csv"
+    if len(filename) > 240 or "__" in filename:
+        return _raw_csv_failure(
+            "UTM_RAW_CSV_CONTEXT_INVALID",
+            "Raw CSV export filename is invalid or too long.",
+            filename=filename,
+            **common,
+        )
+
+    root = _active_raw_csv_root()
+    target = root / filename
+    try:
+        root_resolved = root.resolve(strict=False)
+        target_resolved = target.resolve(strict=False)
+        target_resolved.relative_to(root_resolved)
+    except (OSError, ValueError):
+        return _raw_csv_failure(
+            "UTM_RAW_CSV_PATH_OUTSIDE_ROOT",
+            "Raw CSV export path is outside the fixed worker artifact root.",
+            filename=filename,
+            **common,
+        )
+
+    reservation = root / ".reservations" / f"{filename}.lock"
+    exists = target.exists()
+    reserved = reservation.exists()
+    plan = {
+        "ok": not exists and not reserved,
+        **common,
+        "filename": filename,
+        "windows_path": str(target),
+        "exists": exists,
+        "reserved": reserved,
+        "available": not exists and not reserved,
+    }
+    if exists:
+        plan.update(
+            failure_code="UTM_RAW_CSV_ALREADY_EXISTS",
+            message="The requested Raw CSV file already exists; overwrite is forbidden.",
+        )
+    elif reserved:
+        plan.update(
+            failure_code="UTM_RAW_CSV_NAME_RESERVED",
+            message="The requested Raw CSV filename is reserved by another execution.",
+        )
+    return plan
+
+
+def _reserve_raw_csv_export(plan: dict[str, Any]) -> Path:
+    if not plan.get("ok") or not plan.get("available"):
+        raise RawCsvExportError(
+            str(plan.get("failure_code") or "UTM_RAW_CSV_CONTEXT_INVALID"),
+            str(plan.get("message") or "Raw CSV export plan is unavailable."),
+        )
+    target = Path(str(plan.get("windows_path") or ""))
+    if target.exists():
+        raise RawCsvExportError("UTM_RAW_CSV_ALREADY_EXISTS", "The requested Raw CSV file already exists.")
+    reservation_dir = _active_raw_csv_root() / ".reservations"
+    reservation_dir.mkdir(parents=True, exist_ok=True)
+    reservation = reservation_dir / f"{plan['filename']}.lock"
+    try:
+        descriptor = os.open(reservation, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError as exc:
+        raise RawCsvExportError("UTM_RAW_CSV_NAME_RESERVED", "The requested Raw CSV filename is already reserved.") from exc
+    try:
+        public_identity = {
+            key: plan.get(key)
+            for key in ("mode", "session_id", "specimen_id", "loop_index", "repeat_index", "filename")
+        }
+        os.write(descriptor, json.dumps(public_identity, ensure_ascii=False).encode("utf-8"))
+    finally:
+        os.close(descriptor)
+    return reservation
+
+
+def _release_raw_csv_reservation(path: Path | None) -> None:
+    if path is None:
+        return
+    try:
+        Path(path).unlink()
+    except FileNotFoundError:
+        pass
 ARTIFACT_INDEX: dict[str, dict[str, Any]] = {}
 
 

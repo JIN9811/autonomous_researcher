@@ -254,6 +254,101 @@ def _load_packaged_helper_module():
     return module
 
 
+def _valid_raw_csv_export_payload(mode: str = "live") -> dict[str, Any]:
+    return {
+        "export_context": {
+            "mode": mode,
+            "session_id": "session-20260902-A",
+            "specimen_id": "cube-03",
+            "loop_index": 2,
+            "repeat_index": 4,
+        }
+    }
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_raw_csv_plan_uses_package_artifacts_root_and_single_underscore_separators(
+    loader: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = loader()
+    monkeypatch.setattr(module, "BRIDGE_PACKAGE_ROOT", tmp_path / "server")
+    plan = module._raw_csv_export_plan(
+        {
+            "export_context": {
+                "mode": "live",
+                "session_id": "session_ 20260902-A",
+                "specimen_id": "cube_03",
+                "loop_index": 2,
+                "repeat_index": 4,
+            }
+        }
+    )
+
+    assert plan["ok"] is True
+    assert plan["filename"] == "live_session-20260902-A_cube-03_loop-0002_rep-0004.csv"
+    assert Path(plan["windows_path"]) == tmp_path / "server" / "artifacts" / "raw_csv" / plan["filename"]
+    assert "__" not in plan["filename"]
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_raw_csv_plan_rejects_invalid_context(loader: Any) -> None:
+    module = loader()
+    plan = module._raw_csv_export_plan(
+        {
+            "export_context": {
+                "mode": "live",
+                "session_id": "..",
+                "specimen_id": "",
+                "loop_index": 0,
+                "repeat_index": -1,
+            }
+        }
+    )
+
+    assert plan["ok"] is False
+    assert plan["failure_code"] == "UTM_RAW_CSV_CONTEXT_INVALID"
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_raw_csv_plan_blocks_existing_file_before_reservation(
+    loader: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = loader()
+    monkeypatch.setattr(module, "RAW_CSV_ROOT", tmp_path)
+    first = module._raw_csv_export_plan(_valid_raw_csv_export_payload("test"))
+    target = Path(first["windows_path"])
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("existing", encoding="utf-8")
+
+    blocked = module._raw_csv_export_plan(_valid_raw_csv_export_payload("test"))
+
+    assert blocked["available"] is False
+    assert blocked["failure_code"] == "UTM_RAW_CSV_ALREADY_EXISTS"
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_raw_csv_reservation_is_atomic_and_second_attempt_is_blocked(
+    loader: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = loader()
+    monkeypatch.setattr(module, "RAW_CSV_ROOT", tmp_path)
+    plan = module._raw_csv_export_plan(_valid_raw_csv_export_payload("live"))
+
+    reservation = module._reserve_raw_csv_export(plan)
+    with pytest.raises(module.RawCsvExportError) as error:
+        module._reserve_raw_csv_export(plan)
+
+    assert error.value.failure_code == "UTM_RAW_CSV_NAME_RESERVED"
+    module._release_raw_csv_reservation(reservation)
+    assert not reservation.exists()
+
+
 def _update_package(files: dict[str, bytes], *, version: str = "2026.08.28.2") -> dict[str, Any]:
     metadata = []
     encoded = []
