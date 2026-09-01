@@ -96,6 +96,12 @@ def test_validate_editable_workflow_accepts_only_bounded_paste_runtime_value() -
     accepted = validate_editable_workflow(
         _workflow(_step("step-001", {"action": "paste_runtime_value", "key": "raw_csv_path"}))
     )
+    accepted_filename = validate_editable_workflow(
+        _workflow(_step("step-001", {"action": "paste_runtime_value", "key": "raw_csv_filename"}))
+    )
+    accepted_directory = validate_editable_workflow(
+        _workflow(_step("step-001", {"action": "paste_runtime_value", "key": "raw_csv_directory"}))
+    )
     unknown_key = validate_editable_workflow(
         _workflow(_step("step-001", {"action": "paste_runtime_value", "key": "arbitrary"}))
     )
@@ -109,6 +115,8 @@ def test_validate_editable_workflow_accepts_only_bounded_paste_runtime_value() -
     )
 
     assert accepted["ok"] is True
+    assert accepted_filename["ok"] is True
+    assert accepted_directory["ok"] is True
     assert unknown_key["ok"] is False
     assert embedded_value["ok"] is False
     assert {issue["code"] for issue in unknown_key["issues"]} == {"RUNTIME_VALUE_KEY_INVALID"}
