@@ -429,6 +429,43 @@ def test_paste_runtime_value_preserves_clipboard_and_never_types(
 
 
 @pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_paste_robot_entry_clearance_uses_first_popup_focus(
+    loader: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = loader()
+    fake = _FakePyAutoGUI()
+    clipboard = _FakeClipboard("operator value")
+    monkeypatch.setattr(module, "_load_pyperclip", lambda: clipboard, raising=False)
+
+    result = module._execute_protocol_sequence(
+        fake,
+        program_id="utm_restore_robot_clearance_1_0_8_segment_001",
+        payload={
+            "runtime_values": {"robot_entry_clearance_mm": "150"},
+            "sequence": [
+                {"action": "hotkey", "keys": ["ctrl", "a"]},
+                {"action": "paste_runtime_value", "key": "robot_entry_clearance_mm"},
+            ],
+        },
+        run_id="run",
+        specimen_id="specimen",
+        trace=[],
+        screen_artifacts=[],
+    )
+
+    assert result["ok"] is True
+    assert fake.hotkeys == [
+        ("ctrl", "a"),
+        ("ctrl", "v"),
+        ("ctrl", "a"),
+        ("ctrl", "c"),
+    ]
+    assert fake.writes == []
+    assert clipboard.value == "operator value"
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
 def test_paste_runtime_value_blocks_when_focused_field_round_trip_differs(
     loader: Any,
     monkeypatch: pytest.MonkeyPatch,

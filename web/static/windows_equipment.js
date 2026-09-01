@@ -132,6 +132,7 @@ const btnOpenEquipmentAgentManager = document.getElementById("btn-open-equipment
 const requestAuditStatus = document.getElementById("equipment-request-audit-status");
 const requestAuditDetail = document.getElementById("equipment-request-audit-detail");
 const utmExportGlobInput = document.getElementById("equipment-utm-export-glob");
+const utmRobotEntryClearanceInput = document.getElementById("equipment-utm-robot-entry-clearance-mm");
 const utmTimeoutInput = document.getElementById("equipment-utm-timeout");
 const utmStableInput = document.getElementById("equipment-utm-stable-sec");
 const utmExpectedExportPathInput = document.getElementById("equipment-utm-expected-export-path");
@@ -1562,6 +1563,7 @@ function collectUtmProfilePayload() {
     require_screen_assertions: Boolean(utmRequireScreenInput && utmRequireScreenInput.checked),
     simulate_utm_protocol: Boolean(utmSimulateInput && utmSimulateInput.checked),
     export_glob: utmExportGlobInput ? utmExportGlobInput.value.trim() || "*.csv" : "*.csv",
+    robot_entry_clearance_mm: Number(utmRobotEntryClearanceInput ? utmRobotEntryClearanceInput.value : 150) || 150,
     artifact_timeout_s: Number(utmTimeoutInput ? utmTimeoutInput.value : 60) || 60,
     stable_for_sec: Number(utmStableInput ? utmStableInput.value : 2.0) || 2.0,
     expected_export_path: utmExpectedExportPathInput ? utmExpectedExportPathInput.value.trim() : "",
@@ -1579,6 +1581,9 @@ function hydrateUtmProfile(data) {
   if (!profile || typeof profile !== "object") return;
   if (locatorProgramInput && profile.program_id) locatorProgramInput.value = profile.program_id;
   if (utmExportGlobInput && profile.export_glob) utmExportGlobInput.value = profile.export_glob;
+  if (utmRobotEntryClearanceInput && profile.robot_entry_clearance_mm) {
+    utmRobotEntryClearanceInput.value = profile.robot_entry_clearance_mm;
+  }
   if (utmTimeoutInput && profile.artifact_timeout_s) utmTimeoutInput.value = profile.artifact_timeout_s;
   if (utmStableInput && profile.stable_for_sec) utmStableInput.value = profile.stable_for_sec;
   if (utmExpectedExportPathInput && profile.expected_export_path) utmExpectedExportPathInput.value = profile.expected_export_path;

@@ -1393,10 +1393,17 @@ def test_save_utm_profile_persists_and_updates_runtime_payload(tmp_path: Path) -
             "manual_save_required_if_no_artifact": False,
             "target_window_regex": ".*UTM.*",
             "require_screen_assertions": True,
+            "robot_entry_clearance_mm": 150,
             "locators": {"start_button": {"image_path": "C:/ATR/locators/start.png", "confidence": 0.87}},
         }
     )
     payload = bridge._runtime_program_payload({"program_id": "utm_compression_start_v1", "runtime_mode": "live"})
+    restore_payload = bridge._runtime_program_payload(
+        {
+            "program_id": "utm_restore_robot_clearance_1_0_8_segment_001",
+            "runtime_mode": "live",
+        }
+    )
 
     assert saved["ok"] is True
     assert saved["status"] == "saved"
@@ -1408,6 +1415,8 @@ def test_save_utm_profile_persists_and_updates_runtime_payload(tmp_path: Path) -
     assert payload["target_window_regex"] == ".*UTM.*"
     assert payload["require_screen_assertions"] is True
     assert payload["locators"]["start_button"]["image_path"] == "C:/ATR/locators/start.png"
+    assert saved["profile"]["robot_entry_clearance_mm"] == 150.0
+    assert restore_payload["runtime_values"] == {"robot_entry_clearance_mm": "150"}
 
 
 def test_live_artifact_pull_updates_data_acquisition_linux_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

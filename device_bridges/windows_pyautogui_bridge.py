@@ -201,6 +201,7 @@ UTM_PROFILE_PROGRAM_KEYS = (
     "require_screen_assertions",
     "simulate_utm_protocol",
     "sequence",
+    "robot_entry_clearance_mm",
 )
 
 
@@ -240,6 +241,13 @@ def _sanitize_utm_profile(raw: dict[str, Any]) -> dict[str, Any]:
             continue
         if value > 0:
             profile[key] = value
+    if raw.get("robot_entry_clearance_mm") not in (None, ""):
+        try:
+            clearance_mm = float(raw["robot_entry_clearance_mm"])
+        except (TypeError, ValueError):
+            clearance_mm = 0.0
+        if 0 < clearance_mm <= 1000:
+            profile["robot_entry_clearance_mm"] = clearance_mm
     for key in ("require_window_focus", "manual_save_required_if_no_artifact", "require_screen_assertions", "simulate_utm_protocol"):
         if key in raw:
             profile[key] = bool(raw.get(key))
@@ -1400,6 +1408,16 @@ class WindowsPyAutoGUIBridge(BaseBridge):
                 message=raw_csv_context_error,
                 step_trace=[{"step": "VALIDATE_RAW_CSV_CONTEXT", "status": "blocked", "detail": raw_csv_context_error}],
             )
+        clearance_context_error = str(runtime_payload.get("_robot_clearance_context_error") or "")
+        if clearance_context_error:
+            return self._failure(
+                tool="equipment.pyautogui.run",
+                mode=str(runtime_payload.get("runtime_mode") or "test"),
+                status="invalid",
+                failure_code="UTM_ROBOT_CLEARANCE_CONTEXT_INVALID",
+                message=clearance_context_error,
+                step_trace=[{"step": "VALIDATE_ROBOT_CLEARANCE_CONTEXT", "status": "blocked", "detail": clearance_context_error}],
+            )
         if not self._should_use_live(payload, for_execution=True):
             return self._attach_control_profile(self._run_simulator(runtime_payload), runtime_payload)
 
@@ -2377,6 +2395,24 @@ class WindowsPyAutoGUIBridge(BaseBridge):
     def _runtime_program_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         runtime = dict(payload or {})
         program_id = str(runtime.get("program_id") or "").strip()
+        if program_id.startswith("utm_restore_robot_clearance_"):
+            profile = _sanitize_utm_profile(
+                _read_json_object(self.config.utm_profile_memory_path)
+            )
+            clearance = profile.get("robot_entry_clearance_mm")
+            if isinstance(clearance, (int, float)) and not isinstance(clearance, bool) and clearance > 0:
+                rendered = f"{float(clearance):g}"
+                runtime_values = (
+                    dict(runtime.get("runtime_values"))
+                    if isinstance(runtime.get("runtime_values"), dict)
+                    else {}
+                )
+                runtime_values["robot_entry_clearance_mm"] = rendered
+                runtime["runtime_values"] = runtime_values
+            else:
+                runtime["_robot_clearance_context_error"] = (
+                    "UTM profile robot_entry_clearance_mm is missing or invalid."
+                )
         if program_id.startswith("utm_save_raw_data_"):
             for forbidden_key in ("output_csv_path", "export_root", "filename"):
                 runtime.pop(forbidden_key, None)

@@ -1435,6 +1435,7 @@ class WindowsBridgeUtmProfileRequest(BaseModel):
     export_glob: str = "*.csv"
     artifact_timeout_s: float | None = None
     stable_for_sec: float | None = None
+    robot_entry_clearance_mm: float | None = Field(default=None, gt=0, le=1000)
     expected_export_path: str = ""
     require_window_focus: bool = False
     manual_save_required_if_no_artifact: bool = True

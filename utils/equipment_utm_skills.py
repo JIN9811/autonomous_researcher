@@ -30,7 +30,7 @@ UTM_SKILL_BINDINGS: "OrderedDict[str, tuple[str, str]]" = OrderedDict(
         ("save_raw_data", ("utm_save_raw_data", "1.0.11")),
         ("validate_raw_data", ("utm_validate_raw_data", "1.0.7")),
         ("advance_without_save", ("utm_advance_without_save", "1.0.8")),
-        ("restore_robot_clearance", ("utm_restore_robot_clearance", "1.0.6")),
+        ("restore_robot_clearance", ("utm_restore_robot_clearance", "1.0.12")),
     )
 )
 
@@ -130,6 +130,22 @@ def _skill_workflows(reference_root: Path) -> dict[str, list[dict[str, Any]]]:
     result_controls = locators / "export_and_next_test_controls.png"
 
     entry_height_150 = _locator_candidate(locators / "entry_height_150mm.png")
+    target_inter_jig_distance_150 = _locator_candidate(
+        locators / "target_inter_jig_distance_150mm.png"
+    )
+    target_inter_jig_distance_dialog = _locator_candidate(
+        locators / "target_inter_jig_distance_dialog.png"
+    )
+    target_inter_jig_distance_ok = [
+        _locator_candidate(locators / "target_inter_jig_distance_ok.png"),
+        _locator_candidate(locators / "target_inter_jig_distance_ok_focused.png"),
+    ]
+    restore_confirm_crosshead_dialog = _locator_candidate(
+        locators / "restore_confirm_crosshead_movement_dialog.png"
+    )
+    restore_confirm_crosshead_ok = _locator_candidate(
+        locators / "restore_confirm_crosshead_movement_ok.png"
+    )
     confirm_crosshead_dialog = _locator_candidate(locators / "confirm_crosshead_movement_dialog.png")
     confirm_crosshead_ok = [
         _locator_candidate(locators / "confirm_crosshead_movement_ok.png"),
@@ -227,10 +243,28 @@ def _skill_workflows(reference_root: Path) -> dict[str, list[dict[str, Any]]]:
             _step(6, "Capture next-test Ready state", {"action": "screenshot", "checkpoint": "next_test_ready"}, checkpoint=True),
         ],
         "restore_robot_clearance": [
-            _step(1, "Move to configured inter-jig distance", _visual_action("click", target="move_to_configured_inter_jig_distance", candidate=move_any_distance)),
-            _step(2, "Observe clearance motion", _visual_action("wait_until_image", target="jig_distance_moving", candidate=jig_moving, timeout_s=15)),
-            _step(3, "Wait for Ready state after configured clearance", _visual_action("wait_until_image", target="start_test_ready", candidate=start_ready, timeout_s=180)),
-            _step(4, "Capture robot-entry clearance", {"action": "screenshot", "checkpoint": "robot_clearance_restored"}, checkpoint=True),
+            _step(1, "Capture full screen before restoring robot clearance", {"action": "screenshot", "checkpoint": "restore_robot_clearance_initial_full_screen"}, checkpoint=True),
+            _step(2, "Open configured inter-jig distance dialog", _visual_action("click", target="move_to_configured_inter_jig_distance", candidate=move_any_distance)),
+            _step(3, "Allow the first toolbar click to settle", {"action": "wait", "seconds": 0.75}),
+            _step(4, "Retry opening the configured distance dialog", _visual_action("click", target="move_to_configured_inter_jig_distance", candidate=move_any_distance)),
+            _step(5, "Require the first inter-jig distance popup", _visual_action("wait_until_image", target="target_inter_jig_distance_dialog", candidate=target_inter_jig_distance_dialog, timeout_s=10)),
+            _step(6, "Select the first popup target field", {"action": "hotkey", "keys": ["ctrl", "a"]}),
+            _step(7, "Paste current robot-entry clearance", {"action": "paste_runtime_value", "key": "robot_entry_clearance_mm"}),
+            _step(8, "Commit popup field formatting", {"action": "press", "key": "tab"}),
+            _step(9, "Keep pasted target visible", {"action": "wait", "seconds": 1.5}),
+            _step(10, "Require current robot-entry target 150 mm", _visual_action("wait_until_image", target="target_inter_jig_distance_150_mm", candidate=target_inter_jig_distance_150, timeout_s=10)),
+            _step(11, "Capture configured 150 mm target", {"action": "screenshot", "checkpoint": "robot_clearance_target_ready", "required": True}, checkpoint=True),
+            _step(12, "Confirm configured inter-jig distance", _visual_action("click", target="target_inter_jig_distance_ok", candidate=target_inter_jig_distance_ok)),
+            _step(13, "Require robot-clearance movement confirmation", _visual_action("wait_until_image", target="confirm_robot_clearance_movement_dialog", candidate=restore_confirm_crosshead_dialog, timeout_s=10)),
+            _step(14, "Capture robot-clearance movement confirmation", {"action": "screenshot", "checkpoint": "robot_clearance_motion_confirmation_ready", "required": True}, checkpoint=True),
+            _step(15, "Confirm robot-clearance movement", _visual_action("click", target="confirm_robot_clearance_movement_ok", candidate=restore_confirm_crosshead_ok)),
+            _step(16, "Observe clearance motion", _visual_action("wait_until_image", target="jig_distance_moving", candidate=jig_moving, timeout_s=15)),
+            _step(17, "Wait for Position Zero-Reset dialog", _visual_action("wait_until_image", target="position_zero_reset_dialog", candidate=position_zero_reset_dialog, timeout_s=180)),
+            _step(18, "Capture Position Zero-Reset confirmation", {"action": "screenshot", "checkpoint": "robot_clearance_position_zero_reset_ready", "required": True}, checkpoint=True),
+            _step(19, "Accept Position Zero-Reset", _visual_action("click", target="position_zero_reset_yes", candidate=position_zero_reset_yes)),
+            _step(20, "Wait for robot-entry Height 150 mm", _visual_action("wait_until_image", target="entry_height_150_mm", candidate=entry_height_150, timeout_s=3600)),
+            _step(21, "Wait until the test screen is fully ready", _visual_action("wait_until_image", target="next_test_ready_loaded", candidate=next_test_ready_loaded, timeout_s=60)),
+            _step(22, "Capture restored robot-entry clearance", {"action": "screenshot", "checkpoint": "robot_clearance_restored"}, checkpoint=True),
         ],
     }
 

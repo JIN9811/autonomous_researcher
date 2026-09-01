@@ -5173,21 +5173,34 @@ def _execute_protocol_sequence_impl(
             key = str(action.get("key") or "").strip()
             runtime_values = payload.get("runtime_values") if isinstance(payload.get("runtime_values"), dict) else {}
             value = str(runtime_values.get(key) or "")
-            allowed_runtime_keys = {"raw_csv_path", "raw_csv_directory", "raw_csv_filename"}
-            max_length = 240 if key == "raw_csv_filename" else 512
+            allowed_runtime_keys = {
+                "raw_csv_path",
+                "raw_csv_directory",
+                "raw_csv_filename",
+                "robot_entry_clearance_mm",
+            }
+            max_length = 32 if key == "robot_entry_clearance_mm" else 240 if key == "raw_csv_filename" else 512
+            if key == "robot_entry_clearance_mm":
+                try:
+                    clearance_mm = float(value)
+                except (TypeError, ValueError):
+                    clearance_mm = 0.0
+                if not 0 < clearance_mm <= 1000:
+                    value = ""
+            failure_prefix = "UTM_ROBOT_CLEARANCE" if key == "robot_entry_clearance_mm" else "UTM_RAW_CSV"
             if key not in allowed_runtime_keys or not value or len(value) > max_length:
                 add(step_name, "blocked", "invalid runtime value key or length")
                 return {
                     "ok": False,
-                    "failure_code": "UTM_RAW_CSV_CLIPBOARD_FAILED",
-                    "message": "Raw CSV runtime path is missing or invalid.",
+                    "failure_code": f"{failure_prefix}_CLIPBOARD_FAILED",
+                    "message": "Approved runtime value is missing or invalid.",
                 }
             clipboard = _load_pyperclip()
             if clipboard is None:
                 add(step_name, "blocked", "clipboard provider unavailable")
                 return {
                     "ok": False,
-                    "failure_code": "UTM_RAW_CSV_CLIPBOARD_FAILED",
+                    "failure_code": f"{failure_prefix}_CLIPBOARD_FAILED",
                     "message": "Clipboard access is unavailable; direct typing fallback is forbidden.",
                 }
             previous: str | None = None
@@ -5205,8 +5218,8 @@ def _execute_protocol_sequence_impl(
                 add(step_name, "blocked", exc.__class__.__name__)
                 return {
                     "ok": False,
-                    "failure_code": "UTM_RAW_CSV_CLIPBOARD_FAILED",
-                    "message": "Raw CSV path clipboard paste failed; direct typing fallback was not used.",
+                    "failure_code": f"{failure_prefix}_CLIPBOARD_FAILED",
+                    "message": "Runtime clipboard paste failed; direct typing fallback was not used.",
                 }
             finally:
                 if previous is not None:
@@ -5218,8 +5231,8 @@ def _execute_protocol_sequence_impl(
                 add(step_name, "blocked", f"focused field round-trip mismatch: {key}")
                 return {
                     "ok": False,
-                    "failure_code": "UTM_RAW_CSV_FIELD_VERIFY_FAILED",
-                    "message": f"Raw CSV {key} was not verified in the focused input field.",
+                    "failure_code": f"{failure_prefix}_FIELD_VERIFY_FAILED",
+                    "message": f"Runtime value {key} was not verified in the focused input field.",
                 }
             add(step_name, "ok", f"pasted and verified runtime value: {key}")
             continue

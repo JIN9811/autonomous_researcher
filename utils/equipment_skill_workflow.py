@@ -140,13 +140,18 @@ def _validate_action(step_id: str, action: dict[str, Any]) -> list[dict[str, str
     if name == "write" and len(str(action.get("text") or "")) > 512:
         issues.append(_issue(step_id, "action.text", "WRITE_TEXT_TOO_LONG", "Write text must not exceed 512 characters."))
     if name == "paste_runtime_value":
-        if str(action.get("key") or "").strip() not in {"raw_csv_path", "raw_csv_directory", "raw_csv_filename"}:
+        if str(action.get("key") or "").strip() not in {
+            "raw_csv_path",
+            "raw_csv_directory",
+            "raw_csv_filename",
+            "robot_entry_clearance_mm",
+        }:
             issues.append(
                 _issue(
                     step_id,
                     "action.key",
                     "RUNTIME_VALUE_KEY_INVALID",
-                    "Only worker-owned Raw CSV path, directory, or filename runtime values may be pasted.",
+                    "Only approved worker-owned Raw CSV or robot-clearance runtime values may be pasted.",
                 )
             )
         if any(key in action for key in ("text", "path", "value")):

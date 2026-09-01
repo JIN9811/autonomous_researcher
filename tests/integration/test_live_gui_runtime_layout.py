@@ -2675,6 +2675,7 @@ def test_windows_equipment_gui_exposes_utm_calibration_controls() -> None:
         "equipment-gate-analysis-handoff-status",
         "equipment-gate-analysis-handoff-detail",
         "equipment-utm-export-glob",
+        "equipment-utm-robot-entry-clearance-mm",
         "equipment-utm-timeout",
         "equipment-utm-stable-sec",
         "equipment-utm-expected-export-path",
@@ -2745,6 +2746,7 @@ def test_windows_equipment_gui_exposes_utm_calibration_controls() -> None:
         "require_screen_assertions",
         "simulate_utm_protocol",
         "export_glob",
+        "robot_entry_clearance_mm",
         "artifact_timeout_s",
         "stable_for_sec",
         "expected_export_path",
@@ -3808,12 +3810,14 @@ def test_windows_equipment_locator_calibration_api_contracts(monkeypatch, tmp_pa
             "artifact_timeout_s": 33,
             "stable_for_sec": 1.5,
             "require_screen_assertions": True,
+            "robot_entry_clearance_mm": 150,
             "locators": {"ready_state": {"image_path": "C:/ATR/locators/ready.png", "confidence": 0.8}},
         },
     )
     assert saved_profile.status_code == 200
     assert saved_profile.json()["tool"] == "equipment.pyautogui.save_utm_profile"
     assert saved_profile.json()["profile"]["export_glob"] == "contract*.csv"
+    assert saved_profile.json()["profile"]["robot_entry_clearance_mm"] == 150.0
 
     readiness_blocked = client.get("/api/equipment/windows/readiness")
     assert readiness_blocked.status_code == 200

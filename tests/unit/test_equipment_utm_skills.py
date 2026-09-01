@@ -165,10 +165,103 @@ def test_stages_eight_bounded_utm_skills_and_binds_exact_deployed_versions(tmp_p
     ]
     assert all(candidate["confidence"] == 0.9 for candidate in auto_return_height["image_candidates"])
     assert [item["action"] for item in actions_by_block["restore_robot_clearance"]] == [
+        "screenshot",
+        "click",
+        "wait",
+        "click",
+        "wait_until_image",
+        "hotkey",
+        "paste_runtime_value",
+        "press",
+        "wait",
+        "wait_until_image",
+        "screenshot",
+        "click",
+        "wait_until_image",
+        "screenshot",
         "click",
         "wait_until_image",
         "wait_until_image",
         "screenshot",
+        "click",
+        "wait_until_image",
+        "wait_until_image",
+        "screenshot",
+    ]
+    assert [
+        item.get("target")
+        for item in actions_by_block["restore_robot_clearance"]
+        if item["action"] in {"wait_until_image", "click"}
+    ] == [
+        "move_to_configured_inter_jig_distance",
+        "move_to_configured_inter_jig_distance",
+        "target_inter_jig_distance_dialog",
+        "target_inter_jig_distance_150_mm",
+        "target_inter_jig_distance_ok",
+        "confirm_robot_clearance_movement_dialog",
+        "confirm_robot_clearance_movement_ok",
+        "jig_distance_moving",
+        "position_zero_reset_dialog",
+        "position_zero_reset_yes",
+        "entry_height_150_mm",
+        "next_test_ready_loaded",
+    ]
+    assert next(
+        item
+        for item in actions_by_block["restore_robot_clearance"]
+        if item["action"] == "paste_runtime_value"
+    ) == {"action": "paste_runtime_value", "key": "robot_entry_clearance_mm"}
+    target_distance = next(
+        item
+        for item in actions_by_block["restore_robot_clearance"]
+        if item.get("target") == "target_inter_jig_distance_150_mm"
+    )
+    assert target_distance["required"] is True
+    assert [candidate["source"] for candidate in target_distance["image_candidates"]] == [
+        "target_inter_jig_distance_150mm.png"
+    ]
+    target_ok = next(
+        item
+        for item in actions_by_block["restore_robot_clearance"]
+        if item.get("target") == "target_inter_jig_distance_ok"
+    )
+    assert [candidate["source"] for candidate in target_ok["image_candidates"]] == [
+        "target_inter_jig_distance_ok.png",
+        "target_inter_jig_distance_ok_focused.png",
+    ]
+    clearance_confirm = next(
+        item
+        for item in actions_by_block["restore_robot_clearance"]
+        if item.get("target") == "confirm_robot_clearance_movement_dialog"
+    )
+    assert [candidate["source"] for candidate in clearance_confirm["image_candidates"]] == [
+        "restore_confirm_crosshead_movement_dialog.png"
+    ]
+    zero_reset_dialog = next(
+        item
+        for item in actions_by_block["restore_robot_clearance"]
+        if item.get("target") == "position_zero_reset_dialog"
+    )
+    assert zero_reset_dialog["timeout_s"] == 180
+    assert [candidate["source"] for candidate in zero_reset_dialog["image_candidates"]] == [
+        "position_zero_reset_dialog.png"
+    ]
+    zero_reset_yes = next(
+        item
+        for item in actions_by_block["restore_robot_clearance"]
+        if item.get("target") == "position_zero_reset_yes"
+    )
+    assert [candidate["source"] for candidate in zero_reset_yes["image_candidates"]] == [
+        "position_zero_reset_yes.png"
+    ]
+    final_height = next(
+        item
+        for item in actions_by_block["restore_robot_clearance"]
+        if item.get("target") == "entry_height_150_mm"
+    )
+    assert final_height["timeout_s"] == 3600
+    assert [candidate["source"] for candidate in final_height["image_candidates"]] == [
+        "entry_height_150mm.png"
     ]
     assert all(
         key not in action
@@ -269,10 +362,11 @@ def test_visual_completion_upgrades_replace_only_changed_skill_versions() -> Non
     assert UTM_SKILL_BINDINGS["save_raw_data"] == ("utm_save_raw_data", "1.0.11")
     assert UTM_SKILL_BINDINGS["validate_raw_data"] == ("utm_validate_raw_data", "1.0.7")
     assert UTM_SKILL_BINDINGS["advance_without_save"] == ("utm_advance_without_save", "1.0.8")
+    assert UTM_SKILL_BINDINGS["restore_robot_clearance"] == ("utm_restore_robot_clearance", "1.0.12")
     assert {
         version
         for block_id, (_skill_id, version) in UTM_SKILL_BINDINGS.items()
-        if block_id not in {"start_test", "await_auto_return", "save_raw_data", "validate_raw_data", "advance_without_save"}
+        if block_id not in {"start_test", "await_auto_return", "save_raw_data", "validate_raw_data", "advance_without_save", "restore_robot_clearance"}
     } == {"1.0.6"}
 
 
