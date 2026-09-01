@@ -190,14 +190,17 @@ def test_stages_eight_bounded_utm_skills_and_binds_exact_deployed_versions(tmp_p
         "wait",
         "hotkey",
         "paste_runtime_value",
+        "wait",
         "press",
         "wait_for_file",
+        "wait",
         "screenshot",
     ]
     paste_action = next(action for action in save_actions if action["action"] == "paste_runtime_value")
     wait_action = next(action for action in save_actions if action["action"] == "wait_for_file")
     assert paste_action == {"action": "paste_runtime_value", "key": "raw_csv_path"}
     assert wait_action["pattern"] == "{raw_csv_path}"
+    assert [action["seconds"] for action in save_actions if action["action"] == "wait"] == [2.0, 1.5, 1.0]
     assert all(action["action"] not in {"write", "type_path"} for action in save_actions)
     assert not any(
         token in str(action)
@@ -239,7 +242,7 @@ def test_stages_eight_bounded_utm_skills_and_binds_exact_deployed_versions(tmp_p
 def test_visual_completion_upgrades_replace_only_changed_skill_versions() -> None:
     assert UTM_SKILL_BINDINGS["start_test"] == ("utm_start_test", "1.0.8")
     assert UTM_SKILL_BINDINGS["await_auto_return"] == ("utm_await_auto_return", "1.0.7")
-    assert UTM_SKILL_BINDINGS["save_raw_data"] == ("utm_save_raw_data", "1.0.7")
+    assert UTM_SKILL_BINDINGS["save_raw_data"] == ("utm_save_raw_data", "1.0.8")
     assert {
         version
         for block_id, (_skill_id, version) in UTM_SKILL_BINDINGS.items()
