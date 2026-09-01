@@ -1489,6 +1489,53 @@ def test_managed_equipment_skill_without_file_contract_never_triggers_manual_sav
     assert "MANUAL_SAVE_EXPORT" not in steps
 
 
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_dynamically_registered_managed_save_skill_is_classified_as_export(
+    loader: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = loader()
+    fake = _FakePyAutoGUI()
+    module.ARTIFACT_ROOT = tmp_path / "artifacts"
+    module.ARTIFACT_INDEX.clear()
+    module._load_pyautogui = lambda: (fake, "")
+    program_id = "utm_save_raw_data_1_0_7_segment_001"
+    program = {
+        "program_id": program_id,
+        "program_type": "macro",
+        "managed_by": "atr_equipment_skill",
+        "integrity_ok": True,
+        "sequence": [
+            {"action": "wait_for_file", "pattern": "{raw_csv_path}", "timeout_s": 1, "stable_for_sec": 0.01, "required": True},
+        ],
+    }
+    monkeypatch.setattr(module, "_all_programs", lambda: {program_id: program})
+    target = tmp_path / "raw_csv" / "test_session_specimen_loop-0001_rep-0001.csv"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        "time_s,displacement_mm,force_N\n0,0.0,0.0\n1,0.1,2.5\n",
+        encoding="utf-8",
+    )
+
+    result = module._run_utm_protocol_impl(
+        "seq-dynamic-save",
+        program_id,
+        {
+            "run_id": "run-dynamic-save",
+            "specimen_id": "specimen",
+            "runtime_values": {"raw_csv_path": str(target)},
+            "expected_export_path": str(target),
+            "stable_for_sec": 0.01,
+            "artifact_timeout_s": 1,
+        },
+    )
+
+    assert result["ok"] is True, result
+    assert result["data_acquisition"]["status"] == "exported_on_windows"
+    assert any(item.get("kind") == "utm_csv" for item in result["output_artifacts"])
+
+
 def test_packaged_bridge_compression_never_falls_back_to_test_save(tmp_path: Path) -> None:
     module = _load_packaged_helper_module()
     fake = _FakePyAutoGUI()

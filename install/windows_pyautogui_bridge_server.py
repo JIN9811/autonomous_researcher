@@ -5522,7 +5522,7 @@ def _registered_export_payload(payload: dict[str, Any], *, program_id: str, run_
     target_dir = UTM_EXPORT_ROOT / run_id
     target_dir.mkdir(parents=True, exist_ok=True)
     target_path = target_dir / f"{specimen_id}.csv"
-    program = PROGRAMS.get(program_id, {})
+    program = _all_programs().get(program_id, {})
     raw_sequence = program.get("sequence") if isinstance(program, dict) else []
     if not isinstance(raw_sequence, list):
         raw_sequence = []
@@ -5673,8 +5673,9 @@ def _run_utm_protocol_impl(sequence_id: str, program_id: str, payload: dict[str,
     experiment = payload.get("experiment_spec") if isinstance(payload.get("experiment_spec"), dict) else {}
     run_id = _safe_segment(payload.get("run_id") or sequence_id, "run-live")
     specimen_id = _safe_segment(payload.get("specimen_id") or experiment.get("specimen_id") or "specimen-live", "specimen-live")
-    program = PROGRAMS.get(program_id, {})
+    program = _all_programs().get(program_id, {})
     program_type = str(program.get("program_type") or "")
+    managed_raw_csv_save = _is_managed_raw_csv_save_program(program_id, program)
     if bool(payload.get("simulate_utm_protocol")) or ALLOW_SIMULATED_UTM:
         step("HEALTH", "ok", "simulated UTM protocol explicitly enabled")
         return _simulated_utm_protocol(sequence_id, program_id, payload, trace)
@@ -5857,7 +5858,7 @@ def _run_utm_protocol_impl(sequence_id: str, program_id: str, payload: dict[str,
         complete_screen = _capture_screenshot_artifact(pyautogui, run_id=run_id, checkpoint="after_complete", trace=trace)
         if complete_screen:
             screen_artifacts.append(complete_screen)
-    if program_type == "utm_export":
+    if program_type == "utm_export" or managed_raw_csv_save:
         screen_gate = {"ok": True, "screen_checks": _screen_checks_from_artifacts(screen_artifacts), "blockers": []}
     else:
         screen_gate = _required_utm_screen_evidence_gate(screen_artifacts)
