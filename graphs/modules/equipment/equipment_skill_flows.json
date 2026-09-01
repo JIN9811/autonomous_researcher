@@ -97,7 +97,7 @@
           "label": "Save Raw Data CSV",
           "skill": {
             "skill_id": "utm_save_raw_data",
-            "skill_version": "1.0.6"
+            "skill_version": "1.0.8"
           },
           "vision": {
             "detected": "next",
@@ -176,10 +176,10 @@
       "flow_id": "utm_windows_v1",
       "profile_id": "utm_windows_v1",
       "schema": "atr.equipment_skill_flow.v1",
-      "updated_at": "2026-09-01T16:16:41.493061+00:00",
+      "updated_at": "2026-09-01T16:55:32.414482+00:00",
       "version": 1
     }
   },
   "schema": "atr.equipment_skill_flows.v1",
-  "updated_at": "2026-09-01T16:16:41.493061+00:00"
+  "updated_at": "2026-09-01T16:55:32.414482+00:00"
 }
