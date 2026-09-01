@@ -198,7 +198,7 @@ def test_stages_eight_bounded_utm_skills_and_binds_exact_deployed_versions(tmp_p
         "paste_runtime_value",
         "wait",
         "screenshot",
-        "press",
+        "click",
         "wait_for_file",
         "wait",
         "screenshot",
@@ -210,7 +210,15 @@ def test_stages_eight_bounded_utm_skills_and_binds_exact_deployed_versions(tmp_p
         {"action": "paste_runtime_value", "key": "raw_csv_filename"},
     ]
     filename_focus = save_actions[7]
-    assert filename_focus == {"action": "click", "x": 700, "y": 704}
+    assert filename_focus["target"] == "raw_csv_filename_field"
+    assert [candidate["source"] for candidate in filename_focus["image_candidates"]] == [
+        "raw_csv_filename_field.png"
+    ]
+    save_button = save_actions[12]
+    assert save_button["target"] == "raw_csv_save_button"
+    assert [candidate["source"] for candidate in save_button["image_candidates"]] == [
+        "raw_csv_save_button.png"
+    ]
     assert wait_action["pattern"] == "{raw_csv_path}"
     assert [action["seconds"] for action in save_actions if action["action"] == "wait"] == [2.0, 1.5, 2.0, 1.5, 1.0]
     pre_save_screenshot = next(
@@ -258,7 +266,7 @@ def test_stages_eight_bounded_utm_skills_and_binds_exact_deployed_versions(tmp_p
 def test_visual_completion_upgrades_replace_only_changed_skill_versions() -> None:
     assert UTM_SKILL_BINDINGS["start_test"] == ("utm_start_test", "1.0.8")
     assert UTM_SKILL_BINDINGS["await_auto_return"] == ("utm_await_auto_return", "1.0.7")
-    assert UTM_SKILL_BINDINGS["save_raw_data"] == ("utm_save_raw_data", "1.0.10")
+    assert UTM_SKILL_BINDINGS["save_raw_data"] == ("utm_save_raw_data", "1.0.11")
     assert {
         version
         for block_id, (_skill_id, version) in UTM_SKILL_BINDINGS.items()

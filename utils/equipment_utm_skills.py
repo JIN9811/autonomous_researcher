@@ -27,7 +27,7 @@ UTM_SKILL_BINDINGS: "OrderedDict[str, tuple[str, str]]" = OrderedDict(
         ("start_test", ("utm_start_test", UTM_SKILL_VERSION)),
         ("monitor_contact_and_run", ("utm_monitor_contact_and_run", "1.0.6")),
         ("await_auto_return", ("utm_await_auto_return", "1.0.7")),
-        ("save_raw_data", ("utm_save_raw_data", "1.0.10")),
+        ("save_raw_data", ("utm_save_raw_data", "1.0.11")),
         ("validate_raw_data", ("utm_validate_raw_data", "1.0.6")),
         ("advance_without_save", ("utm_advance_without_save", "1.0.6")),
         ("restore_robot_clearance", ("utm_restore_robot_clearance", "1.0.6")),
@@ -46,6 +46,12 @@ _START_HEIGHT_30_5_PNG_BASE64 = (
 )
 _START_TEST_CONFIRM_BUTTON_PNG_BASE64 = (
     "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"
+)
+_RAW_CSV_FILENAME_FIELD_PNG_BASE64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAZEAAAAZCAIAAAB/14QBAAAC1ElEQVR42u3dv46iQBwH8J+XewCeYTQhobTwDYYtrCjsLaUxNBTE2pBoQ2ywtLewoljmDa6gJDFRnmEe4Qrx3zCou17uTvl+qs0yGVjJfvP7MRNsSSmpGWazGQHAi/vZqL92Op3ilgO8tB/4CAAAmQUAgMwCAGQWPgIAeLnMEp6hsuOCitj2xNXwi4GnI8Kz46Jm+iK2z9Ppx5+GqGcHAKjJLB5JVeoyTQANaF0ez8z53WARXnfjZFJKmTmbrhJ/R8xN1XOvh7rs88Qh365OWwag8Iya6QHgTXvDU/lT+/+/31I45seo+XBo83kztESSh8tD9DF3GeZzbcZp6qzBSh0y2voy4kREw6EVLCqXx6PMnCO1AJqUWfe1TTrHRfG5IeeD3Rhe7HKrcxrAOlbtyF6Y3aryxGLjnLKS+uMwH1Tjibk+laFYxDaaS4CGZtZqcH66xNw0M+dlLdTd+pr28Xt+Bd0bD7REQv7lmepqNt63DoUfc1P5x64NAP4r2n3wPbN9/HG4LnuyY16k0q30ZSnXzcI6Vr4riLNj1aW/At2USodpjis1lWUshBtxtQ5M9kQIKwD0hueG7wurfLxvBaNjuzYKLF+tfTTLlVfqH1DxaE2VBvFW+wkAb1RnCa987L0ygrIlNALqhWvnkapIePauLlmynd01AiLqhVm1GuORlNE3L5yPw/koLvzLPN3l1MEtBXj/Okuz1UFKmbrth+osdZVPjbi6rRMPVm5tk7Z77dRLZ7NILn6z35LZxi0FQG94bbh+YC/XUzNe7c9iH06eCH0g+rQ6B6ZI8sNCJtYNAd68N/ya1cBQK6temD2TW9UZe+H4KprsuOAuI+amkdpcXkbWmNX0rwDwJlqv8c4/4RlJX0b8xvG5eSc3Z7MZ3p8F0MA661/gkeTPHAeAN4H3OgAAMgsAAJkFANCs77CYTCa45QAvrdWc7woDAPSGAAB/1W9QapLv7af7DQAAAABJRU5ErkJggg=="
+)
+_RAW_CSV_SAVE_BUTTON_PNG_BASE64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAFoAAAAcCAIAAABuyz8kAAACJUlEQVR42u2YoW7jQBCGp6egotJD3gCrD+AHsBxgZGRYFC2JDpgU1SgKclGIwalkFRRoFLSgKz9AHsAy8A46GnT4wMbxOrZbVbq0brs/sSIP8Tf//JPdq8PhAEa1fhgEuibqcfP455uDODz8NO4YcIcS/rr+hgis339NdpgoNTg+GIeIrTPFAgAkC0MmVYlkYV+JiNXzS+HwEkREzJeOs8wRETHxzkoIzRARcXM3WNJwU4QayArq5dB92LDIqtjvnuXwe3ZfRph4IGIrtRU3xAieJYCX5HZ6ESCXwVGV+31ZNX11V/vOx67AgTaP7byeHADxtAsWnsLmBDNSu49SoiwWQcrk58AheOE4Wy704WknjLsL8izLotLVmny3OU2O4BAdP3wWwOqp6wTPv33JXOPBIVlaBOv1suhtn2Shldp5RomKGp9bYadO8MKeNlmT22njm1pTG8pq9DhE7JZRRgmh62Dndgec0AwVi1P46j97pdLX5y0mZHo79uxQsXfcFKqt4cCEn+9b7g9tGH1rbZrEkFUxdhznrSY06229ZKFbRqjL51rntUGQLG6ACr7V4hpOA/Xl/pW2e01mQcHFkegC7msLzWFT4xW8aBbOZU607yZCs5yFljUHfa1ow0JoBCGTHiUqOWjP8goW/50GXKnLQXX9M64DvoiHAkVF1KsJ/KYDvrr+mcBo5SXovfWNOdEaHAbHO2nSDRXjDqP2ojUy7ujRP17IKZgARIxhAAAAAElFTkSuQmCC"
 )
 
 
@@ -145,6 +151,14 @@ def _skill_workflows(reference_root: Path) -> dict[str, list[dict[str, Any]]]:
         png_base64=_START_TEST_CONFIRM_BUTTON_PNG_BASE64,
         source="start_test_confirm_button.png",
     )
+    raw_csv_filename_field = _embedded_locator_candidate(
+        png_base64=_RAW_CSV_FILENAME_FIELD_PNG_BASE64,
+        source="raw_csv_filename_field.png",
+    )
+    raw_csv_save_button = _embedded_locator_candidate(
+        png_base64=_RAW_CSV_SAVE_BUTTON_PNG_BASE64,
+        source="raw_csv_save_button.png",
+    )
     testing = _locator_candidate(locators / "testing_state.png")
     completed = _locator_candidate(locators / "tests_completed_state.png")
     jig_moving = _locator_candidate(locators / "jig_distance_moving_state.png")
@@ -189,12 +203,12 @@ def _skill_workflows(reference_root: Path) -> dict[str, list[dict[str, Any]]]:
             _step(5, "Keep pasted directory visible", {"action": "wait", "seconds": 1.5}),
             _step(6, "Open Raw CSV directory", {"action": "press", "key": "enter"}),
             _step(7, "Keep selected directory visible", {"action": "wait", "seconds": 2.0}),
-            _step(8, "Focus file name field", {"action": "click", "x": 700, "y": 704}),
+            _step(8, "Focus file name field", _visual_action("click", target="raw_csv_filename_field", candidate=raw_csv_filename_field)),
             _step(9, "Select existing file name", {"action": "hotkey", "keys": ["ctrl", "a"]}),
             _step(10, "Paste worker-owned Raw CSV filename", {"action": "paste_runtime_value", "key": "raw_csv_filename"}),
             _step(11, "Keep pasted filename visible", {"action": "wait", "seconds": 1.5}),
             _step(12, "Capture configured path and filename", {"action": "screenshot", "checkpoint": "raw_csv_path_and_filename_ready", "required": True}, checkpoint=True),
-            _step(13, "Confirm CSV save", {"action": "press", "key": "enter"}),
+            _step(13, "Confirm CSV save", _visual_action("click", target="raw_csv_save_button", candidate=raw_csv_save_button)),
             _step(14, "Wait for stable CSV", {"action": "wait_for_file", "pattern": "{raw_csv_path}", "timeout_s": 30, "poll_interval_s": 0.25, "stable_for_sec": 2.0, "required": True}),
             _step(15, "Keep saved result visible", {"action": "wait", "seconds": 1.0}),
             _step(16, "Capture CSV save result", {"action": "screenshot", "checkpoint": "raw_csv_saved"}, checkpoint=True),
