@@ -300,6 +300,7 @@ def test_raw_csv_plan_uses_package_artifacts_root_and_single_underscore_separato
     assert plan["ok"] is True
     assert plan["filename"] == "live_session-20260902-A_cube-03_loop-0002_rep-0004.csv"
     assert Path(plan["windows_path"]) == tmp_path / "server" / "artifacts" / "raw_csv" / plan["filename"]
+    assert Path(plan["windows_directory"]) == tmp_path / "server" / "artifacts" / "raw_csv"
     assert "__" not in plan["filename"]
 
 
@@ -474,6 +475,8 @@ def test_raw_csv_reservation_is_released_when_save_execution_fails(
     def fail_after_reservation(sequence_id: str, selected_program_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         assert selected_program_id == program_id
         assert payload["runtime_values"]["raw_csv_path"].endswith(".csv")
+        assert payload["runtime_values"]["raw_csv_filename"].endswith(".csv")
+        assert payload["runtime_values"]["raw_csv_directory"] == str(tmp_path / "raw_csv")
         assert list((tmp_path / "raw_csv" / ".reservations").glob("*.lock"))
         return {"ok": False, "status": "blocked", "failure_code": "UI_LOCATOR_NOT_FOUND"}
 
@@ -1534,6 +1537,27 @@ def test_dynamically_registered_managed_save_skill_is_classified_as_export(
     assert result["ok"] is True, result
     assert result["data_acquisition"]["status"] == "exported_on_windows"
     assert any(item.get("kind") == "utm_csv" for item in result["output_artifacts"])
+
+
+@pytest.mark.parametrize("loader", [_load_helper_module, _load_packaged_helper_module])
+def test_trapezium_vendor_raw_csv_probe_accepts_multiline_equipment_export(loader: Any, tmp_path: Path) -> None:
+    module = loader()
+    path = tmp_path / "trapezium-raw.csv"
+    path.write_text(
+        '"1 _ 1",,,,,,,,\n'
+        'Name,Force,Stroke,Height,,,,,\n'
+        'Unit,N,mm,mm,,,,,\n'
+        '0,0.20,0.000,30.500,,,,,\n'
+        '1,1.20,0.010,30.490,,,,,\n'
+        '2,2.20,0.020,30.480,,,,,\n',
+        encoding="utf-8",
+    )
+
+    result = module._probe_utm_csv(path)
+
+    assert result["ok"] is True
+    assert result["data_quality"]["format"] == "trapeziumx_raw"
+    assert result["row_count_probe"] == 5
 
 
 def test_packaged_bridge_compression_never_falls_back_to_test_save(tmp_path: Path) -> None:

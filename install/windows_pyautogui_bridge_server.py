@@ -274,6 +274,7 @@ def _raw_csv_export_plan(payload: dict[str, Any]) -> dict[str, Any]:
         "ok": not exists and not reserved,
         **common,
         "filename": filename,
+        "windows_directory": str(root),
         "windows_path": str(target),
         "exists": exists,
         "reserved": reserved,
@@ -5160,7 +5161,9 @@ def _execute_protocol_sequence_impl(
             key = str(action.get("key") or "").strip()
             runtime_values = payload.get("runtime_values") if isinstance(payload.get("runtime_values"), dict) else {}
             value = str(runtime_values.get(key) or "")
-            if key != "raw_csv_path" or not value or len(value) > 512:
+            allowed_runtime_keys = {"raw_csv_path", "raw_csv_directory", "raw_csv_filename"}
+            max_length = 240 if key == "raw_csv_filename" else 512
+            if key not in allowed_runtime_keys or not value or len(value) > max_length:
                 add(step_name, "blocked", "invalid runtime value key or length")
                 return {
                     "ok": False,
@@ -5193,7 +5196,7 @@ def _execute_protocol_sequence_impl(
                         clipboard.copy(previous)
                     except Exception:
                         pass
-            add(step_name, "ok", "pasted runtime value: raw_csv_path")
+            add(step_name, "ok", f"pasted runtime value: {key}")
             continue
         if action_name == "pixel":
             x, y = int(action["x"]), int(action["y"])
@@ -5349,6 +5352,25 @@ def _probe_utm_csv(path: Path) -> dict[str, Any]:
         return payload
 
     if missing:
+        vendor_marker = columns[0].strip('"\ufeff ') if columns else ""
+        numeric_cell_count = 0
+        for line in lines[1:]:
+            for cell in line.split(","):
+                try:
+                    float(cell.strip().strip('"'))
+                    numeric_cell_count += 1
+                except ValueError:
+                    continue
+        if re.fullmatch(r"\d+\s*_\s*\d+", vendor_marker) and row_count >= 2 and len(columns) >= 4 and numeric_cell_count >= 6:
+            return result(
+                True,
+                data_quality={
+                    "format": "trapeziumx_raw",
+                    "vendor_header": vendor_marker,
+                    "numeric_cell_count": numeric_cell_count,
+                    "raw_csv_preserved": True,
+                },
+            )
         return result(False, failure_code="UTM_DATA_PARSE_FAILED", message=f"Missing UTM columns: {', '.join(missing)}")
     if row_count < 2:
         return result(False, failure_code="UTM_DATA_PARSE_FAILED", message="UTM export must contain at least two data rows for signal validation.")
@@ -5964,6 +5986,8 @@ def _run_utm_protocol(sequence_id: str, program_id: str, payload: dict[str, Any]
         execution_payload = dict(payload)
         runtime_values = dict(payload.get("runtime_values") or {}) if isinstance(payload.get("runtime_values"), dict) else {}
         runtime_values["raw_csv_path"] = str(plan["windows_path"])
+        runtime_values["raw_csv_directory"] = str(plan["windows_directory"])
+        runtime_values["raw_csv_filename"] = str(plan["filename"])
         execution_payload["runtime_values"] = runtime_values
         execution_payload["expected_export_path"] = str(plan["windows_path"])
         result = _run_utm_protocol_impl(sequence_id, program_id, execution_payload)
