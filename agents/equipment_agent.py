@@ -43,6 +43,7 @@ from utils.equipment_skill_runtime import (
     validate_recovery_decision,
 )
 from utils.equipment_runtime_service import EquipmentRuntimeService
+from utils.utm_csv import probe_utm_csv
 from utils.equipment_skill_flow import EquipmentSkillFlowError, EquipmentSkillFlowStore
 from utils.equipment_agentic_task import (
     TASK_SCHEMA as EQUIPMENT_AGENTIC_TASK_SCHEMA,
@@ -513,6 +514,8 @@ class LabEquipmentAgent(BaseAgent):
                     "windows_path",
                     "linux_path",
                     "local_path",
+                    "windows_path",
+                    "sha256",
                     "sha256",
                     "size_bytes",
                     "row_count_probe",
@@ -832,6 +835,9 @@ class LabEquipmentAgent(BaseAgent):
         path = Path(path_value).expanduser()
         if not path.exists() or not path.is_file():
             return {"ok": False, "failure_code": "UTM_EXPORT_FILE_MISSING", "path": str(path)}
+        return probe_utm_csv(path)
+        # Legacy inline parser retained below temporarily for stable source history;
+        # all runtime calls return through the shared parser above.
         data = path.read_bytes()
         text = data.decode("utf-8", errors="replace")
         lines = [line for line in text.splitlines() if line.strip()]
@@ -2552,6 +2558,8 @@ class LabEquipmentAgent(BaseAgent):
                     "specimen_id",
                     "linux_path",
                     "local_path",
+                    "windows_path",
+                    "sha256",
                     "row_count_probe",
                     "columns_probe",
                     "stable_for_sec",
@@ -2831,6 +2839,7 @@ class LabEquipmentAgent(BaseAgent):
                 },
             )
 
+        previous_skill_evidence: dict[str, Any] = {}
         for step, block in enumerate(blocks):
             block_id = str(block.get("id") or "")
             skill = block.get("skill") if isinstance(block.get("skill"), dict) else {}
@@ -2848,6 +2857,10 @@ class LabEquipmentAgent(BaseAgent):
                 "task": task,
                 "skip_profile_vision_preflight": True,
             }
+            if block_id == "validate_raw_data":
+                raw_csv_path = str(previous_skill_evidence.get("windows_path") or "").strip()
+                if raw_csv_path:
+                    request["raw_csv_path"] = raw_csv_path
             last_result = await self._run_equipment_skill(state, ctx, request)
             skill_outcome = "completed" if last_result.success else "failed"
             skill_target = (
@@ -2855,6 +2868,7 @@ class LabEquipmentAgent(BaseAgent):
                 if last_result.success and vision_enabled
                 else store.phase_target(flow, block_id, "agentic", skill_outcome)
             )
+            current_skill_evidence = transition_evidence(last_result)
             transitions.append(
                 {
                     "block_id": block_id,
@@ -2868,10 +2882,11 @@ class LabEquipmentAgent(BaseAgent):
                     "target": skill_target,
                     "success": last_result.success,
                     "summary": last_result.summary,
-                    "evidence": transition_evidence(last_result),
+                    "evidence": current_skill_evidence,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
             )
+            previous_skill_evidence = current_skill_evidence
             if not last_result.success or skill_target == "__blocked__":
                 terminal = "__blocked__"
                 break
@@ -3301,6 +3316,10 @@ class LabEquipmentAgent(BaseAgent):
                 "equipment_skill_execution_id": execution["execution_id"],
                 "bridge_id": bridge_id,
             }
+            if skill_id == "utm_validate_raw_data":
+                raw_csv_path = str(request.get("raw_csv_path") or "").strip()
+                if raw_csv_path:
+                    payload["raw_csv_path"] = raw_csv_path
             result = await self._call_tool(ctx, "equipment.pyautogui.run", payload)
             tool_results.append({"tool": "equipment.pyautogui.run", "payload": payload, "result": result})
             if not result.get("ok"):

@@ -408,6 +408,11 @@ def data_file_path(execution: dict[str, Any]) -> tuple[Path | None, str, str]:
 
 
 def csv_signal_probe(path: Path) -> dict[str, Any]:
+    from utils.utm_csv import probe_utm_csv
+
+    return probe_utm_csv(path)
+    # Legacy inline parser retained below temporarily for stable source history;
+    # all runtime calls return through the shared parser above.
     required = ["time_s", "displacement_mm", "force_N"]
     try:
         with path.open("r", encoding="utf-8-sig", newline="") as handle:

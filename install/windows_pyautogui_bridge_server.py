@@ -37,8 +37,9 @@ from __future__ import annotations
 
 import argparse
 import base64
+import csv
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from io import BytesIO
+from io import BytesIO, StringIO
 from dataclasses import dataclass
 import hashlib
 import importlib.util
@@ -5338,10 +5339,94 @@ def _execute_protocol_sequence(
                 pass
 
 
+def _probe_trapezium_csv_bytes(data: bytes) -> dict[str, Any] | None:
+    try:
+        text = data.decode("utf-8-sig")
+        encoding = "utf-8"
+    except UnicodeDecodeError:
+        try:
+            text = data.decode("cp949")
+            encoding = "cp949"
+        except UnicodeDecodeError:
+            return None
+    rows = [[str(cell).strip().strip("\ufeff") for cell in row] for row in csv.reader(StringIO(text)) if any(str(cell).strip() for cell in row)]
+    header_index = next((idx for idx, row in enumerate(rows[:8]) if "Time" in row and "Force" in row and "스트로크" in row), -1)
+    if header_index < 0 or header_index + 1 >= len(rows):
+        return None
+    headers = rows[header_index]
+    units = rows[header_index + 1]
+    role_indexes = {
+        "time_s": headers.index("Time"),
+        "force_N": headers.index("Force"),
+        "displacement_mm": headers.index("스트로크"),
+    }
+    if "Height" in headers:
+        role_indexes["height_mm"] = headers.index("Height")
+    numeric_rows: list[dict[str, float]] = []
+    invalid_numeric_rows = 0
+    for row in rows[header_index + 2 :]:
+        try:
+            numeric_rows.append({role: float(row[index]) for role, index in role_indexes.items()})
+        except (IndexError, TypeError, ValueError):
+            invalid_numeric_rows += 1
+    times = [row["time_s"] for row in numeric_rows]
+    displacements = [row["displacement_mm"] for row in numeric_rows]
+    forces = [row["force_N"] for row in numeric_rows]
+    eps = 1e-9
+    time_monotonic = len(times) >= 2 and all((right - left) >= -eps for left, right in zip(times, times[1:]))
+    displacement_increasing = len(displacements) >= 2 and all((right - left) >= -eps for left, right in zip(displacements, displacements[1:]))
+    displacement_decreasing = len(displacements) >= 2 and all((right - left) <= eps for left, right in zip(displacements, displacements[1:]))
+    displacement_range = max(displacements) - min(displacements) if displacements else 0.0
+    force_range = max(forces) - min(forces) if forces else 0.0
+    force_nonzero = any(abs(value) > eps for value in forces)
+    quality = {
+        "numeric_row_count": len(numeric_rows),
+        "invalid_numeric_row_count": invalid_numeric_rows,
+        "raw_csv_preserved": True,
+        "required_columns_present": True,
+        "time_monotonic_non_decreasing": time_monotonic,
+        "displacement_changes": displacement_range > eps,
+        "displacement_monotonic": displacement_increasing or displacement_decreasing,
+        "force_nonzero": force_nonzero,
+        "force_changes": force_range > eps,
+    }
+    failure_code = None
+    message = ""
+    if len(numeric_rows) < 2:
+        failure_code, message = "UTM_DATA_PARSE_FAILED", "UTM export must contain at least two numeric data rows."
+    elif not time_monotonic:
+        failure_code, message = "UTM_DATA_NON_MONOTONIC_TIME", "UTM time_s values are not monotonic non-decreasing."
+    elif displacement_range <= eps:
+        failure_code, message = "UTM_DATA_NO_DISPLACEMENT_SIGNAL", "UTM displacement_mm does not change across samples."
+    elif not (displacement_increasing or displacement_decreasing):
+        failure_code, message = "UTM_DATA_NON_MONOTONIC_DISPLACEMENT", "UTM displacement_mm is not monotonic in either direction."
+    elif not force_nonzero or force_range <= eps:
+        failure_code, message = "UTM_DATA_NO_FORCE_SIGNAL", "UTM force_N has no nonzero changing load signal."
+    return {
+        "ok": failure_code is None,
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "size_bytes": len(data),
+        "source_format": "trapeziumx_raw",
+        "encoding": encoding,
+        "row_count_probe": len(numeric_rows),
+        "columns_probe": [role for role, _ in sorted(role_indexes.items(), key=lambda item: item[1])],
+        "source_columns": headers,
+        "units": units,
+        "column_mapping": {headers[index]: role for role, index in role_indexes.items()},
+        "missing_columns": [],
+        "data_quality": quality,
+        "failure_code": failure_code,
+        "message": message,
+    }
+
+
 def _probe_utm_csv(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {"ok": False, "failure_code": "UTM_EXPORT_FILE_MISSING"}
     data = path.read_bytes()
+    trapezium = _probe_trapezium_csv_bytes(data)
+    if trapezium is not None:
+        return trapezium
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     columns = [item.strip() for item in lines[0].split(",")] if lines else []
     required = {"time_s", "displacement_mm", "force_N"}

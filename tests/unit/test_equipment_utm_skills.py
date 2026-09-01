@@ -267,8 +267,27 @@ def test_visual_completion_upgrades_replace_only_changed_skill_versions() -> Non
     assert UTM_SKILL_BINDINGS["start_test"] == ("utm_start_test", "1.0.8")
     assert UTM_SKILL_BINDINGS["await_auto_return"] == ("utm_await_auto_return", "1.0.7")
     assert UTM_SKILL_BINDINGS["save_raw_data"] == ("utm_save_raw_data", "1.0.11")
+    assert UTM_SKILL_BINDINGS["validate_raw_data"] == ("utm_validate_raw_data", "1.0.7")
     assert {
         version
         for block_id, (_skill_id, version) in UTM_SKILL_BINDINGS.items()
-        if block_id not in {"start_test", "await_auto_return", "save_raw_data"}
+        if block_id not in {"start_test", "await_auto_return", "save_raw_data", "validate_raw_data"}
     } == {"1.0.6"}
+
+
+def test_validate_raw_data_uses_exact_path_from_save_runtime(tmp_path: Path) -> None:
+    packages = stage_utm_skill_packages(
+        registry_root=tmp_path / "skills",
+        reference_root=REFERENCE_ROOT,
+    )
+    package = next(item for item in packages if item["manifest"]["skill_id"] == "utm_validate_raw_data")
+
+    actions = package["programs"][0]["sequence"]
+    assert actions[0] == {
+        "action": "wait_for_file",
+        "pattern": "{raw_csv_path}",
+        "timeout_s": 10,
+        "poll_interval_s": 0.25,
+        "stable_for_sec": 2.0,
+        "required": True,
+    }

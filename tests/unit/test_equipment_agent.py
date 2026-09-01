@@ -406,6 +406,49 @@ async def test_equipment_agentic_task_preserves_cycle_evidence_failure_code(
 
 
 @pytest.mark.asyncio
+async def test_equipment_flow_passes_saved_windows_csv_path_to_validation_skill(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow = build_utm_compression_flow_template("windows_desktop_v1")
+    for block in flow["blocks"]:
+        block["skill"] = {"skill_id": "fake", "skill_version": "1.0.0"}
+    requests: list[dict[str, Any]] = []
+    agent = LabEquipmentAgent()
+
+    async def fake_skill(_state: Any, _ctx: Any, request: dict[str, Any]) -> AgentResult:
+        requests.append(dict(request))
+        equipment_result: dict[str, Any] = {}
+        if request.get("task") == "Save Raw Data CSV":
+            equipment_result["output_artifacts"] = [
+                {
+                    "kind": "utm_csv",
+                    "artifact_id": "raw-1",
+                    "run_id": "run-test",
+                    "specimen_id": "specimen-test",
+                    "windows_path": "C:/worker/artifacts/raw_csv/test_run_specimen_loop-0001_rep-0001.csv",
+                    "linux_path": "/tmp/raw.csv",
+                }
+            ]
+        return AgentResult(
+            success=True,
+            summary="simulated step complete",
+            data={"equipment_result": equipment_result, "equipment_report": {}},
+        )
+
+    monkeypatch.setattr(agent, "_run_equipment_skill", fake_skill)
+    monkeypatch.setattr(agent, "_preflight_skill_flow_resources", lambda **_kwargs: {"ok": True})
+    await agent._run_equipment_skill_flow(
+        _state(experiment_spec={"equipment_profile_id": "windows_desktop_v1", "specimen_id": "specimen-test"}),
+        _CtxStub(_tools(tmp_path), "must not be used"),
+        flow,
+    )
+
+    validation = next(item for item in requests if item.get("task") == "Validate Raw Data CSV")
+    assert validation["raw_csv_path"] == "C:/worker/artifacts/raw_csv/test_run_specimen_loop-0001_rep-0001.csv"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("artifact_case", "expected_success"),
     [

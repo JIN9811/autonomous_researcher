@@ -21,13 +21,13 @@ Modification guide:
 
 from __future__ import annotations
 
-import hashlib
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from mcp_tools.tool_registry import ToolRegistry
+from utils.utm_csv import probe_utm_csv
 
 
 def _safe_segment(value: Any, fallback: str) -> str:
@@ -36,97 +36,7 @@ def _safe_segment(value: Any, fallback: str) -> str:
 
 
 def _probe_csv(path: Path) -> dict[str, Any]:
-    if not path.exists() or not path.is_file():
-        return {"ok": False, "failure_code": "UTM_EXPORT_FILE_MISSING", "path": str(path)}
-    data = path.read_bytes()
-    text = data.decode("utf-8", errors="replace")
-    lines = [line for line in text.splitlines() if line.strip()]
-    columns = [item.strip() for item in lines[0].split(",")] if lines else []
-    required = {"time_s", "displacement_mm", "force_N"}
-    missing = sorted(required.difference(columns))
-    row_count = max(0, len(lines) - 1)
-
-    data_quality: dict[str, Any] = {
-        "required_columns_present": not missing,
-        "numeric_rows": 0,
-        "time_monotonic": False,
-        "displacement_signal_present": False,
-        "displacement_monotonic": False,
-        "force_signal_present": False,
-    }
-    failure_code = "UTM_DATA_PARSE_FAILED" if missing or row_count <= 0 else None
-    message = ""
-
-    numeric_rows: list[tuple[float, float, float]] = []
-    if not failure_code:
-        index = {name: idx for idx, name in enumerate(columns)}
-        for raw_line in lines[1:]:
-            cells = [item.strip() for item in raw_line.split(",")]
-            try:
-                t = float(cells[index["time_s"]])
-                d = float(cells[index["displacement_mm"]])
-                f = float(cells[index["force_N"]])
-            except (ValueError, IndexError, KeyError):
-                continue
-            numeric_rows.append((t, d, f))
-        data_quality["numeric_rows"] = len(numeric_rows)
-
-        if len(numeric_rows) < 2:
-            failure_code = "UTM_DATA_PARSE_FAILED"
-            message = "UTM CSV must include at least two numeric rows for signal validation."
-        else:
-            times = [row[0] for row in numeric_rows]
-            displacements = [row[1] for row in numeric_rows]
-            forces = [row[2] for row in numeric_rows]
-            time_monotonic = all(b >= a for a, b in zip(times, times[1:]))
-            displacement_range = max(displacements) - min(displacements)
-            displacement_non_decreasing = all(b >= a for a, b in zip(displacements, displacements[1:]))
-            displacement_non_increasing = all(b <= a for a, b in zip(displacements, displacements[1:]))
-            displacement_monotonic = displacement_non_decreasing or displacement_non_increasing
-            force_abs_max = max(abs(value) for value in forces)
-            force_range = max(forces) - min(forces)
-            force_signal_present = force_abs_max > 1e-9 and force_range > 1e-9
-
-            data_quality.update(
-                {
-                    "time_monotonic": time_monotonic,
-                    "displacement_signal_present": displacement_range > 1e-9,
-                    "displacement_monotonic": displacement_monotonic,
-                    "force_signal_present": force_signal_present,
-                    "time_start_s": times[0],
-                    "time_end_s": times[-1],
-                    "displacement_min_mm": min(displacements),
-                    "displacement_max_mm": max(displacements),
-                    "force_min_N": min(forces),
-                    "force_max_N": max(forces),
-                }
-            )
-
-            if not time_monotonic:
-                failure_code = "UTM_DATA_NON_MONOTONIC_TIME"
-                message = "UTM CSV time_s must be monotonic non-decreasing."
-            elif displacement_range <= 1e-9:
-                failure_code = "UTM_DATA_NO_DISPLACEMENT_SIGNAL"
-                message = "UTM CSV displacement_mm has no measurable motion signal."
-            elif not displacement_monotonic:
-                failure_code = "UTM_DATA_NON_MONOTONIC_DISPLACEMENT"
-                message = "UTM CSV displacement_mm must be monotonic for the current compression protocol."
-            elif not force_signal_present:
-                failure_code = "UTM_DATA_NO_FORCE_SIGNAL"
-                message = "UTM CSV force_N has no measurable force signal."
-
-    return {
-        "ok": failure_code is None,
-        "path": str(path),
-        "sha256": hashlib.sha256(data).hexdigest(),
-        "size_bytes": len(data),
-        "row_count_probe": row_count,
-        "columns_probe": columns,
-        "missing_columns": missing,
-        "data_quality": data_quality,
-        "failure_code": failure_code,
-        "message": message,
-    }
+    return probe_utm_csv(path)
 
 
 def _write_test_csv(*, root: Path, run_id: str, specimen_id: str, profile: str) -> dict[str, Any]:

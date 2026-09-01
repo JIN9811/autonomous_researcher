@@ -40,6 +40,7 @@ import httpx
 
 from device_bridges.base_bridge import BaseBridge
 from utils.windows_bridge_release import build_release_package, load_release_manifest
+from utils.utm_csv import probe_utm_csv_bytes
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -1950,82 +1951,7 @@ class WindowsPyAutoGUIBridge(BaseBridge):
 
     @staticmethod
     def _probe_utm_csv_bytes(data: bytes) -> dict[str, Any]:
-        text = data.decode("utf-8", errors="replace")
-        lines = [line for line in text.splitlines() if line.strip()]
-        columns = [item.strip() for item in lines[0].split(",")] if lines else []
-        row_count = max(0, len(lines) - 1)
-        required = {"time_s", "displacement_mm", "force_N"}
-        missing = sorted(required.difference(columns))
-
-        def result(ok: bool, *, failure_code: str | None = None, message: str = "", data_quality: dict[str, Any] | None = None) -> dict[str, Any]:
-            payload: dict[str, Any] = {
-                "ok": ok,
-                "row_count_probe": row_count,
-                "columns_probe": columns,
-                "missing_columns": missing,
-                "data_quality": data_quality or {},
-            }
-            if failure_code:
-                payload["failure_code"] = failure_code
-            if message:
-                payload["message"] = message
-            return payload
-
-        if missing:
-            return result(False, failure_code="UTM_DATA_PARSE_FAILED", message=f"Missing UTM columns: {', '.join(missing)}")
-        if row_count < 2:
-            return result(False, failure_code="UTM_DATA_PARSE_FAILED", message="UTM export must contain at least two data rows for signal validation.")
-        index = {name: columns.index(name) for name in required}
-        numeric_rows: list[dict[str, float]] = []
-        invalid_numeric_rows = 0
-        for line in lines[1:]:
-            parts = [item.strip() for item in line.split(",")]
-            try:
-                numeric_rows.append({"time_s": float(parts[index["time_s"]]), "displacement_mm": float(parts[index["displacement_mm"]]), "force_N": float(parts[index["force_N"]])})
-            except (IndexError, TypeError, ValueError):
-                invalid_numeric_rows += 1
-        if len(numeric_rows) < 2:
-            return result(False, failure_code="UTM_DATA_PARSE_FAILED", message="UTM export must contain at least two numeric data rows.")
-        eps = 1e-9
-        time_values = [row["time_s"] for row in numeric_rows]
-        displacement_values = [row["displacement_mm"] for row in numeric_rows]
-        force_values = [row["force_N"] for row in numeric_rows]
-        force_range = max(force_values) - min(force_values)
-        displacement_range = max(displacement_values) - min(displacement_values)
-        time_monotonic = all((b - a) >= -eps for a, b in zip(time_values, time_values[1:]))
-        displacement_increasing = all((b - a) >= -eps for a, b in zip(displacement_values, displacement_values[1:]))
-        displacement_decreasing = all((b - a) <= eps for a, b in zip(displacement_values, displacement_values[1:]))
-        displacement_monotonic = displacement_increasing or displacement_decreasing
-        force_nonzero = any(abs(value) > eps for value in force_values)
-        force_changes = force_range > eps
-        displacement_changes = displacement_range > eps
-        quality = {
-            "numeric_row_count": len(numeric_rows),
-            "invalid_numeric_row_count": invalid_numeric_rows,
-            "force_nonzero": force_nonzero,
-            "force_changes": force_changes,
-            "force_range_N": force_range,
-            "force_min_N": min(force_values),
-            "force_max_N": max(force_values),
-            "displacement_changes": displacement_changes,
-            "displacement_range_mm": displacement_range,
-            "displacement_min_mm": min(displacement_values),
-            "displacement_max_mm": max(displacement_values),
-            "displacement_monotonic": displacement_monotonic,
-            "displacement_direction": "increasing" if displacement_increasing else "decreasing" if displacement_decreasing else "mixed",
-            "time_monotonic_non_decreasing": time_monotonic,
-            "time_min_s": min(time_values),
-            "time_max_s": max(time_values),
-        }
-        if not time_monotonic:
-            return result(False, failure_code="UTM_DATA_NON_MONOTONIC_TIME", message="UTM time_s values are not monotonic non-decreasing.", data_quality=quality)
-        if not displacement_changes:
-            return result(False, failure_code="UTM_DATA_NO_DISPLACEMENT_SIGNAL", message="UTM displacement_mm does not change across samples.", data_quality=quality)
-        if not displacement_monotonic:
-            return result(False, failure_code="UTM_DATA_NON_MONOTONIC_DISPLACEMENT", message="UTM displacement_mm is not monotonic in either direction.", data_quality=quality)
-        if not force_nonzero or not force_changes:
-            return result(False, failure_code="UTM_DATA_NO_FORCE_SIGNAL", message="UTM force_N has no nonzero changing load signal.", data_quality=quality)
-        return result(True, data_quality=quality)
+        return probe_utm_csv_bytes(data)
 
 
     def _pull_live_artifacts(self, response: dict[str, Any]) -> dict[str, Any]:
