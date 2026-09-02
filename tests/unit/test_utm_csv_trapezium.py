@@ -8,6 +8,7 @@ from pathlib import Path
 
 from device_bridges.windows_pyautogui_bridge import WindowsPyAutoGUIBridge
 from mcp_tools.utm_tools import _probe_csv
+from utils.utm_csv import parse_utm_csv_bytes, probe_utm_csv_bytes
 
 
 def _trapezium_csv_bytes() -> bytes:
@@ -49,6 +50,21 @@ def test_linux_probes_parse_cp949_trapezium_three_row_header(tmp_path: Path) -> 
     assert path.read_bytes() == data
 
 
+def test_shared_parser_returns_canonical_rows_without_bloating_probe_payload() -> None:
+    data = _trapezium_csv_bytes()
+
+    rows, probe = parse_utm_csv_bytes(data)
+
+    assert probe["source_format"] == "trapeziumx_raw"
+    assert rows[1] == {
+        "time_s": 0.01,
+        "force_N": -0.201,
+        "displacement_mm": 0.001191667,
+        "height_mm": 30.49879,
+    }
+    assert "canonical_rows" not in probe_utm_csv_bytes(data)
+
+
 def test_standalone_worker_matches_trapezium_probe_contract(tmp_path: Path) -> None:
     helper_path = Path(__file__).resolve().parents[2] / "install" / "windows_pyautogui_bridge_server.py"
     spec = importlib.util.spec_from_file_location("trapezium_worker_probe_test", helper_path)
@@ -60,4 +76,3 @@ def test_standalone_worker_matches_trapezium_probe_contract(tmp_path: Path) -> N
     path.write_bytes(_trapezium_csv_bytes())
 
     _assert_trapezium_probe(module._probe_utm_csv(path))
-

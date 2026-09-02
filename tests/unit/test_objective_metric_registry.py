@@ -18,6 +18,9 @@ def test_registry_exposes_analysis_metrics_with_units() -> None:
     assert strength.source_path == "analysis.metrics.compressive_strength_MPa"
     assert strength.quality_requirements == ["curve_quality.ok"]
     assert registry.get("specific_energy_absorption_j_per_g").unit == "J/g"
+    energy_50pct = registry.get("energy_absorption_50pct_mj")
+    assert energy_50pct.unit == "mJ"
+    assert energy_50pct.source_path == "analysis.metrics.energy_absorption_50pct_mJ"
     assert registry.version_id.startswith("metric-registry-")
 
 

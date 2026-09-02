@@ -44,6 +44,13 @@ DEFAULT_METRICS = (
     _metric("apparent_modulus_mpa", "Apparent modulus", "apparent_modulus_MPa", "MPa", "stress"),
     _metric("strain_at_peak", "Strain at peak", "strain_at_peak", "1", "dimensionless"),
     _metric("energy_absorption_mj", "Energy absorption", "energy_absorption_mJ", "mJ", "energy"),
+    _metric(
+        "energy_absorption_50pct_mj",
+        "Energy absorption to 50% specimen height",
+        "energy_absorption_50pct_mJ",
+        "mJ",
+        "energy",
+    ),
     _metric("energy_density_mj_per_mm3", "Energy density", "energy_density_mJ_per_mm3", "mJ/mm3", "energy_density"),
     _metric(
         "specific_energy_absorption_j_per_g",

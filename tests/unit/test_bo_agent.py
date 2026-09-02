@@ -699,6 +699,94 @@ def test_bo_agent_uses_measured_sea_instead_of_composite_objective_score() -> No
     assert prior["metric_name"] == "specific_energy_absorption_J_per_g"
     assert prior["unit"] == "J/g"
 
+
+def test_bo_agent_uses_declared_50pct_energy_from_analysis_handoff() -> None:
+    state = OrchestratorState(
+        run_id="run-energy-50pct",
+        experiment_id="exp-energy-50pct",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+    )
+    state.latest_analysis = {
+        "bo_handoff": {
+            "schema_version": "analysis_bo_handoff_v2",
+            "ok_for_bo": True,
+            "candidate_id": "candidate-energy-50pct",
+            "parameters": {"cell_size_mm": 7.5, "relative_density": 0.34},
+            "objective": {
+                "metric_name": "energy_absorption_50pct_mJ",
+                "unit": "mJ",
+                "direction": "maximize",
+                "score": 1125.0,
+            },
+            "metrics": {"energy_absorption_50pct_mJ": 1125.0},
+        }
+    }
+
+    prior = next(
+        item
+        for item in BOAgent._prior_evaluations_from_state(state)
+        if item.get("candidate_id") == "candidate-energy-50pct"
+    )
+
+    assert prior["score"] == pytest.approx(1125.0)
+    assert prior["metric_name"] == "energy_absorption_50pct_mJ"
+    assert prior["unit"] == "mJ"
+
+
+def test_bo_agent_deduplicates_analysis_envelopes_for_one_50pct_observation() -> None:
+    state = OrchestratorState(
+        run_id="run-one-observation",
+        experiment_id="exp-one-observation",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+        current_experiment_spec={"cell_size_mm": 7.5, "relative_density": 0.34},
+    )
+    objective = {
+        "metric_name": "energy_absorption_50pct_mJ",
+        "unit": "mJ",
+        "score": 1125.0,
+    }
+    common = {
+        "observation_id": "run-one-observation:exp-one-observation:analysis",
+        "candidate_id": "candidate-one",
+        "parameters": {"cell_size_mm": 7.5, "relative_density": 0.34},
+    }
+    state.latest_analysis = {
+        "bo_handoff": {
+            **common,
+            "schema_version": "analysis_bo_handoff_v2",
+            "ok_for_bo": True,
+            "objective": objective,
+        },
+        "bo_observation": {
+            **common,
+            "schema": "bo_observation.v1",
+            "status": "ready",
+            "metric_name": "energy_absorption_50pct_mJ",
+            "unit": "mJ",
+            "objective_score": 1125.0,
+        },
+        "experiment_evaluation": {
+            **common,
+            "schema": "experiment_evaluation.v1",
+            "source": "analysis_agent",
+            "ok": True,
+            "objective": objective,
+            "objective_score": 1125.0,
+        },
+    }
+    state.experiment_evaluations.append(dict(state.latest_analysis["experiment_evaluation"]))
+
+    measured = [
+        item
+        for item in BOAgent._prior_evaluations_from_state(state)
+        if isinstance(item.get("score"), (int, float))
+    ]
+
+    assert len(measured) == 1
+    assert measured[0]["score"] == pytest.approx(1125.0)
+
 class _LLMResponse:
     def __init__(self, text: str) -> None:
         self.text = text

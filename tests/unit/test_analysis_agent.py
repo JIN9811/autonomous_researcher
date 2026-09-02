@@ -118,7 +118,8 @@ async def test_analysis_agent_extracts_inline_utm_metrics() -> None:
     assert analysis["utm_metrics"]["compressive_strength_MPa"] == 1.3
     assert analysis["utm_metrics"]["energy_absorption_mJ"] > 1500
     assert analysis["specimen_geometry"]["cross_section_area_mm2"] == 400.0
-    assert analysis["recommendation"] == "ready_for_knowledge_guardian"
+    assert analysis["recommendation"] == "review_utm_curve_quality_before_model_update"
+    assert analysis["utm_metrics"]["energy_absorption_limit_reached"] is False
 
 
 @pytest.mark.asyncio
@@ -176,12 +177,151 @@ async def test_analysis_agent_reads_utm_csv_file(tmp_path: Path) -> None:
     assert analysis["source"]["source"] == "equipment_result.result_file"
     assert analysis["utm_metrics"]["peak_force_N"] == 240.0
     assert result.data["bo_observation"]["schema"] == "bo_observation.v1"
-    assert result.data["bo_observation"]["observed_metrics"]["peak_force_N"] == 240.0
+    assert result.data["bo_observation"]["observed_metrics"] == {}
     assert result.data["experiment_evaluation"]["schema"] == "experiment_evaluation.v1"
     assert result.data["experiment_evaluation"]["metrics"]["peak_force_N"] == 240.0
     assert result.data["knowledge_payload"]["schema"] == "analysis_knowledge_payload.v1"
     assert result.data["knowledge_payload"]["raw_artifact_refs"][0]["path"] == str(csv_path)
     assert analysis["bo_observation"]["artifact_refs"][0]["kind"] == "utm_csv"
+
+
+@pytest.mark.asyncio
+async def test_analysis_agent_integrates_trapezium_curve_to_planned_50pct_height_for_bo(tmp_path: Path) -> None:
+    csv_path = tmp_path / "trapezium_30mm.csv"
+    rows = [
+        '"1 _ 1",,,,',
+        '"Time","Force","스트로크","Height"',
+        '"sec","N","mm","mm"',
+    ]
+    rows.extend(
+        f'"{displacement / 10:.1f}","{displacement * 10}","{displacement}","{30 - displacement}"'
+        for displacement in range(0, 21, 2)
+    )
+    csv_path.write_bytes(("\r\n".join(rows) + "\r\n").encode("cp949"))
+    state = _state(
+        equipment_result={
+            "ok": True,
+            "tool": "equipment.pyautogui.run",
+            "output_artifacts": [
+                {
+                    "kind": "utm_csv",
+                    "artifact_id": "real-trapezium-30mm",
+                    "local_path": str(csv_path),
+                    "pulled_to_linux": True,
+                    "local_parse_ok": True,
+                }
+            ],
+        }
+    )
+    state.current_experiment_spec["specimen_size_mm"] = [20.0, 20.0, 30.0]
+    tools = ToolRegistry()
+    register_cae_tools(
+        tools,
+        {"devices": {"cae": {"enabled": True, "mode": "test", "artifact_dir": str(tmp_path / "cae")}}},
+        repo_root=tmp_path,
+    )
+
+    result = await AnalysisAgent().run(state, _CtxStub(tools=tools))
+
+    analysis = result.data["analysis"]
+    metrics = analysis["utm_metrics"]
+    observation = result.data["bo_observation"]
+    assert result.success is True
+    assert analysis["source"]["parser_id"] == "analysis.parsers.lab_equipment_utm_csv"
+    assert analysis["source"]["source_format"] == "trapeziumx_raw"
+    assert metrics["peak_force_N"] == 200.0
+    assert metrics["energy_absorption_mJ"] == pytest.approx(2000.0)
+    assert metrics["energy_absorption_limit_mm"] == 15.0
+    assert metrics["measured_displacement_max_mm"] == 20.0
+    assert metrics["energy_absorption_limit_reached"] is True
+    assert metrics["energy_absorption_50pct_mJ"] == pytest.approx(1125.0)
+    assert observation["status"] == "ready"
+    assert observation["metric_name"] == "energy_absorption_50pct_mJ"
+    assert observation["unit"] == "mJ"
+    assert observation["objective_score"] == pytest.approx(1125.0)
+    assert observation["observed_metrics"] == {"energy_absorption_50pct_mJ": pytest.approx(1125.0)}
+    assert "peak_at_curve_boundary" in metrics["curve_quality"]["warnings"]
+    assert observation["candidate_id"] == "specimen-analysis"
+    assert observation["observation_id"] == result.data["bo_handoff"]["observation_id"]
+    assert observation["observation_id"] == result.data["experiment_evaluation"]["observation_id"]
+
+
+@pytest.mark.asyncio
+async def test_analysis_agent_blocks_bo_when_csv_ends_below_planned_50pct_height(tmp_path: Path) -> None:
+    csv_path = tmp_path / "short_curve.csv"
+    csv_path.write_text(
+        "time_s,displacement_mm,force_N\n"
+        "0,0,0\n"
+        "1,4,40\n"
+        "2,8,80\n"
+        "3,12,120\n",
+        encoding="utf-8",
+    )
+    state = _state(
+        equipment_result={
+            "ok": True,
+            "tool": "equipment.pyautogui.run",
+            "output_artifacts": [{"kind": "utm_csv", "local_path": str(csv_path)}],
+        }
+    )
+    state.current_experiment_spec["specimen_size_mm"] = [18.0, 18.0, 30.0]
+
+    result = await AnalysisAgent().run(state, _CtxStub())
+
+    metrics = result.data["analysis"]["utm_metrics"]
+    observation = result.data["bo_observation"]
+    assert result.success is True
+    assert metrics["energy_absorption_limit_mm"] == 15.0
+    assert metrics["measured_displacement_max_mm"] == 12.0
+    assert metrics["energy_absorption_limit_reached"] is False
+    assert metrics["energy_absorption_50pct_mJ"] is None
+    assert observation["status"] == "blocked"
+    assert observation["objective_score"] is None
+
+
+@pytest.mark.asyncio
+async def test_analysis_agent_does_not_replace_unreadable_equipment_csv_with_synthetic_data(tmp_path: Path) -> None:
+    csv_path = tmp_path / "broken_equipment.csv"
+    csv_path.write_text("not,a,utm,curve\n1,2,3,4\n", encoding="utf-8")
+    state = _state(
+        equipment_result={
+            "ok": True,
+            "tool": "equipment.pyautogui.run",
+            "output_artifacts": [{"kind": "utm_csv", "local_path": str(csv_path)}],
+        }
+    )
+
+    result = await AnalysisAgent().run(state, _CtxStub())
+
+    assert result.success is False
+    assert result.data["analysis"]["failure_code"] == "UTM_DATA_PARSE_FAILED"
+    assert result.data["analysis"]["source"]["source"] != "synthetic_test_utm_curve"
+
+
+def test_analysis_agent_builds_canonical_curve_with_linear_input_scans() -> None:
+    class CountingCurve(list[dict[str, float]]):
+        def __init__(self, rows: list[dict[str, float]]) -> None:
+            super().__init__(rows)
+            self.iteration_count = 0
+
+        def __iter__(self):
+            self.iteration_count += 1
+            return super().__iter__()
+
+    curve = CountingCurve(
+        [
+            {"time_s": index * 0.01, "displacement_mm": index * 0.001, "force_N": float(index)}
+            for index in range(200)
+        ]
+    )
+
+    canonical = AnalysisAgent._canonical_curve(
+        curve,
+        {"cross_section_area_mm2": 400.0, "gauge_length_mm": 30.0},
+    )
+
+    assert len(canonical) == 200
+    assert curve.iteration_count <= 2
 
 
 @pytest.mark.asyncio
@@ -216,8 +356,13 @@ async def test_analysis_agent_uses_cae_for_test_closed_loop(tmp_path: Path) -> N
     assert analysis["source"]["source"] == "synthetic_test_utm_curve"
     assert analysis["cae_result"]["ok"] is True
     assert analysis["cae_result"]["boundary_condition"] == "bottom_fixed_support"
-    assert analysis["cae_result"]["analysis_platens"]["bottom"] is True
-    assert analysis["cae_result"]["analysis_platens"]["top"] is True
+    assert analysis["cae_result"]["analysis_platens"]["bottom"] is False
+    assert analysis["cae_result"]["analysis_platens"]["top"] is False
+    assert analysis["cae_result"]["request"]["target_strain"] == 0.5
+    assert analysis["cae_result"]["request"]["boundary"] == {
+        "bottom": "frictionless_axial_support",
+        "top": "frictionless_displacement",
+    }
     assert analysis["cae_metrics"]["max_von_mises_MPa"] > 0
     assert analysis["cae_metrics"]["effective_modulus_MPa"] > 0
     assert "cae.run_static_analysis" in analysis["closed_loop_sources"]
@@ -674,6 +819,7 @@ async def test_analysis_agent_emits_improvement06_artifacts_bo_handoff_and_calcu
     state.run_id = "run-analysis-improvement06"
     state.experiment_id = "exp-analysis-improvement06"
     state.current_experiment_spec.update({"geometry_type": "gyroid", "cell_size_mm": 5.0, "tpms_thickness": 0.35})
+    state.current_experiment_spec["gauge_length_mm"] = 6.0
 
     result = await AnalysisAgent().run(state, _CtxStub(tools=tools))
 
@@ -701,12 +847,13 @@ async def test_analysis_agent_emits_improvement06_artifacts_bo_handoff_and_calcu
     assert analysis["fidelity_records"]["fea_mid"]["schema"] == "fea_result.v1"
     assert analysis["fidelity_records"]["pinn_low_or_surrogate"]["status"] == "unavailable"
     assert result.data["bo_handoff"]["schema_version"] == "analysis_bo_handoff_v2"
-    measured_sea = analysis["utm_metrics"]["specific_energy_absorption_J_per_g"]
-    assert result.data["bo_handoff"]["objective"]["metric_name"] == "specific_energy_absorption_J_per_g"
-    assert result.data["bo_handoff"]["objective"]["unit"] == "J/g"
-    assert result.data["bo_handoff"]["objective"]["score"] == measured_sea
-    assert result.data["experiment_evaluation"]["objective"]["metric_name"] == "specific_energy_absorption_J_per_g"
-    assert result.data["experiment_evaluation"]["objective_score"] == measured_sea
+    measured_energy_50pct = analysis["utm_metrics"]["energy_absorption_50pct_mJ"]
+    assert result.data["bo_handoff"]["objective"]["metric_name"] == "energy_absorption_50pct_mJ"
+    assert result.data["bo_handoff"]["objective"]["unit"] == "mJ"
+    assert result.data["bo_handoff"]["objective"]["score"] == measured_energy_50pct
+    assert result.data["bo_handoff"]["metrics"] == {"energy_absorption_50pct_mJ": measured_energy_50pct}
+    assert result.data["experiment_evaluation"]["objective"]["metric_name"] == "energy_absorption_50pct_mJ"
+    assert result.data["experiment_evaluation"]["objective_score"] == measured_energy_50pct
     assert result.data["bo_handoff"]["trust_score"]["schema"] == "trust_score.v1"
     assert result.data["bo_handoff"]["multifidelity_comparison"]["schema"] == "multifidelity_comparison.v1"
     assert result.data["bo_handoff"]["fidelity"]["utm_high"]["objective_source"] is True
@@ -775,3 +922,32 @@ async def test_analysis_agent_does_not_call_removed_python_fem_tools(tmp_path: P
     assert loop["tool_sequence"] == ["cae.health", "cae.run_static_analysis"]
     assert loop["selected_result"]["tool"] == "cae.run_static_analysis"
     assert Path(analysis["analysis_artifacts"]["fem_agentic_loop"]).exists()
+
+
+def test_cae_quasistatic_energy_is_included_in_utm_agreement() -> None:
+    comparison = AnalysisAgent()._fem_utm_comparison(
+        {
+            "peak_force_N": 1_000.0,
+            "initial_stiffness_N_per_mm": 100.0,
+            "energy_absorption_50pct_mJ": 10_000.0,
+            "energy_absorption_limit_reached": True,
+        },
+        None,
+        {
+            "ok": True,
+            "tool": "cae.run_static_analysis",
+            "cae_metrics": {
+                "peak_reaction_force_N": 800.0,
+                "initial_stiffness_N_per_mm": 120.0,
+                "energy_absorption_50pct_mJ": 12_000.0,
+                "endpoint_reached": True,
+            },
+        },
+    )
+
+    assert comparison["peak_force_error_pct"] == 20.0
+    assert comparison["stiffness_error_pct"] == 20.0
+    assert comparison["energy_absorption_50pct_error_pct"] == 20.0
+    assert comparison["utm_energy_absorption_50pct_mJ"] == 10_000.0
+    assert comparison["fea_energy_absorption_50pct_mJ"] == 12_000.0
+    assert comparison["agreement_score"] == pytest.approx(0.833333, abs=1e-6)

@@ -273,8 +273,9 @@ devices:
     provider: calculix
     solver: calculix
     mesher: gmsh
-    solver_path: ../.external_tools/bin/ccx.exe
-    mesher_path: ../.external_tools/gmsh-4.15.2/gmsh-4.15.2-Windows64/gmsh.exe
+    solver_path: /home/jin/.local/bin/atr-ccx
+    mesher_path: /home/jin/.local/bin/atr-gmsh
+    library_path: /home/jin/.local/opt/atr-cae/usr/lib/aarch64-linux-gnu
     require_solver_in_live: true
     artifact_dir: artifacts/cae
     default_material:
@@ -282,10 +283,16 @@ devices:
       poisson_ratio: 0.35
       yield_strength_mpa: 35.0
     default_boundary:
-      bottom: fixed_support
-      top: cyclic_loading
+      bottom: frictionless_axial_support
+      top: frictionless_displacement
     default_loading:
-      load_type: cyclic_compression
+      load_type: quasistatic_compression
+      loading_control: displacement
+      target_strain: 0.5
+      initial_increment: 0.01
+      minimum_increment: 1.0e-7
+      maximum_increment: 0.02
+      max_increments: 500
       load_max_n: 500.0
       load_min_ratio: 0.1
       cycles: 10

@@ -1,210 +1,210 @@
 # CAE Analysis Runtime Guideline
 
 Status: implementation guideline
-Last reviewed: 2026-05-24
-Scope: Open-source CAE bridge, GUI control surface, and Analysis Agent closed-loop use.
+Last reviewed: 2026-09-02
+Scope: Analysis Agent, CAE facade, Gmsh, CalculiX, and BO comparison handoff.
 
-## 1. Purpose
+## 1. Runtime role
 
-CAE Analysis provides a simulation-side mechanical check that can be used before
-or alongside physical UTM data.
+CAE Analysis estimates the compression response before or alongside a physical
+UTM run. Physical UTM data remains authoritative. The real solver path and the
+solver-free test path share curve and metric names, but always expose different
+`solver_mode` values so derived evidence cannot be mistaken for measurement.
 
-Default mechanical setup:
+```mermaid
+flowchart LR
+    P[Experiment plan<br/>height, size, material] --> A[Analysis Agent]
+    S[Generated specimen STL] --> A
+    A --> C{CAE mode}
+    C -->|test| E[Deterministic nonlinear<br/>cellular equivalent]
+    C -->|live + execution gate| G[Gmsh volume mesh]
+    G --> X[CalculiX nonlinear static step]
+    E --> M[Canonical force-displacement curve]
+    X --> M
+    U[Lab Equipment Agent<br/>UTM CSV] --> Q[UTM parser and metrics]
+    M --> K[Three-metric comparison]
+    Q --> K
+    K --> B[BO handoff]
+```
 
-- bottom face: fixed support
-- top face: cyclic compression loading
-- CAE-only platen: bottom and top plates are applied for load/boundary transfer
-- default solver family: CalculiX
-- default mesher family: Gmsh
-- postprocess path: CalculiX FRD/DAT artifacts, converted to VTU/PNG when the
-  local postprocessor is available
+## 2. Mechanical model
 
-The CAE result is not a replacement for live UTM data. It is an additional
-closed-loop signal for ranking and risk estimation.
+The production analysis is displacement-controlled quasi-static compression.
 
-## 2. Tool Contract
+| Item | Definition |
+|---|---|
+| Initial height | `specimen_size_mm[2]` from the experiment plan |
+| Target | `target_strain * initial_height`, default `0.5` |
+| Bottom face | `U3=0`; `U1/U2` free |
+| Top face | prescribed negative `U3`; `U1/U2` free |
+| Rigid-body stabilization | one bottom node fixes `U1/U2`, a separated node fixes `U2` |
+| Platens/contact | not modeled |
+| Procedure | `*STEP,NLGEOM` + `*STATIC`, automatic increments |
+| Load history | named linear displacement amplitude |
+| Material | isotropic elastic and optional multilinear plastic data |
 
-Registered MCP-style tools:
+“Frictionless” means the complete top and bottom node sets are constrained only
+in the compression axis. The three in-plane stabilizer DOFs belong to two
+individual bottom nodes and are recorded separately in the deck manifest.
+
+The current model deliberately omits platen solids, contact, friction,
+self-contact, and dynamics. At large strain this permits geometric
+interpenetration, so a completed calculation is a model result, not automatic
+experimental validation.
+
+## 3. Public tool contract
+
+Registered tools:
 
 - `cae.health`
 - `cae.run_static_analysis`
+- `calculix.health`
+- `calculix.prepare_input`
+- `calculix.solve`
+- `calculix.postprocess`
+- `calculix.run_job`
 
-Minimal payload for `cae.run_static_analysis`:
+Recommended `cae.run_static_analysis` payload:
 
 ```json
 {
   "runtime_mode": "test",
+  "runtime_solver_enabled": false,
   "specimen_id": "specimen-001",
   "stl_path": "/path/to/specimen.stl",
-  "specimen_size_mm": [20.0, 20.0, 20.0],
+  "specimen_size_mm": [30.0, 30.0, 30.0],
   "mesh_size_mm": 2.0,
   "material": {
     "elastic_modulus_mpa": 1800.0,
     "poisson_ratio": 0.35,
-    "yield_strength_mpa": 35.0
+    "yield_strength_mpa": 35.0,
+    "plastic_curve": [[35.0, 0.0], [42.0, 0.08]]
   },
   "loading": {
-    "load_type": "cyclic_compression",
-    "load_max_n": 500.0,
-    "load_min_ratio": 0.1,
-    "cycles": 10,
-    "frequency_hz": 1.0
+    "load_type": "quasistatic_compression",
+    "loading_control": "displacement",
+    "target_strain": 0.5,
+    "initial_increment": 0.01,
+    "minimum_increment": 1e-7,
+    "maximum_increment": 0.02,
+    "max_increments": 500
   },
   "boundary": {
-    "bottom": "fixed_support",
-    "top": "cyclic_loading"
-  },
-  "boundary_condition": "bottom_fixed_support",
-  "loading_mode": "top_cyclic_loading",
-  "analysis_platens": {
-    "bottom": true,
-    "top": true,
-    "thickness_mm": 1.0,
-    "applies_to": "cae_only_not_generated_stl"
+    "bottom": "frictionless_axial_support",
+    "top": "frictionless_displacement"
   }
 }
 ```
 
-Typical response keys:
+The legacy `boundary_condition=bottom_fixed_support` and
+`loading_mode=top_cyclic_loading` labels remain response aliases for older GUI
+and run records. The authoritative mechanical description is `boundary`, the
+deck manifest, and `analysis_platens.bottom/top=false`.
 
-- `ok`
-- `tool`
-- `mode`
-- `solver`
-- `mesher`
-- `solver_mode`
-- `boundary_condition`
-- `loading_mode`
-- `metrics`
-- `cae_metrics`
-- `artifacts`
-- `step_trace`
-- `closed_loop_source`
+Core response fields are:
 
-## 3. Test Mode
+- identity: `specimen_id`, `mode`, `solver_mode`, `analysis_type`;
+- target: `target_strain`, `target_displacement_mm`, `loading_control`;
+- curve: `reaction_force_displacement_curve` using positive compression signs;
+- metrics: peak reaction force, initial stiffness, 50%-height energy, endpoint
+  status, and converged increment count;
+- provenance: solver health/version, step trace, mesh/deck/DAT/FRD/curve paths;
+- status: `ok`, `status`, `failure_code`.
 
-Test mode must run without external solver installation.
+`N*mm` is numerically `mJ`, so trapezoidal curve integration directly produces
+`energy_absorption_50pct_mJ`.
 
-Behavior:
+## 4. Test mode
 
-- Use deterministic equivalent CAE calculation.
-- Keep the same physical interpretation as the real solver path:
-  bottom fixed support and top cyclic loading.
-- Normalize both label-style fields (`boundary_condition=bottom_fixed_support`,
-  `loading_mode=top_cyclic_loading`) and solver-style fields
-  (`boundary.bottom=fixed_support`, `boundary.top=cyclic_loading`) to the same
-  internal boundary condition.
-- Apply top/bottom platens inside CAE only. Do not modify the STL or printed
-  model to add these plates.
-- Generate `fem_contour.svg` / `*_cae.contour.svg` artifacts for Live GUI chat
-  display.
-- Write JSON input/report artifacts under `artifacts/cae`.
-- Return `cae_metrics` for Analysis Agent closed-loop scoring.
+Test mode never starts Gmsh or CalculiX. It produces a 101-point nonlinear
+cellular proxy with elastic, collapse-plateau, and densification regimes. The
+scaling uses material modulus/yield strength, relative density, wall-to-cell
+ratio, specimen area, and planned height. It is labelled
+`deterministic_quasistatic_equivalent`.
 
-Computed test metrics include:
+The temporary unmatched UTM CSV may be used only to check order of magnitude.
+Its energy, peak, or stiffness must not appear as fitted constants. Test-mode
+artifacts under `artifacts/cae` contain normalized input, report JSON, curve
+JSON, and an explanatory contour SVG.
 
-- `max_von_mises_MPa`
-- `max_displacement_mm`
-- `apparent_stiffness_N_per_mm`
-- `nominal_top_stress_MPa`
-- `stress_concentration_factor`
-- `load_max_N`
-- `load_min_N`
-- `fatigue_damage_proxy`
-- `safety_factor_yield`
-- `structural_score`
+## 5. Live mode
 
-Test-mode closed loop:
+Live mode delegates to `CalculiXBridge` only when all of these are true:
 
-- Analysis Agent still uses real/synthetic UTM data as the primary mechanical
-  curve source.
-- CAE `structural_score` is blended into `objective_score` as an additional
-  risk/performance term.
-- `analysis.closed_loop_sources` must include `cae.run_static_analysis` when
-  the CAE bridge succeeds.
+1. mode is `live`;
+2. CalculiX and Gmsh are available;
+3. the request explicitly sets `runtime_solver_enabled=true`;
+4. a readable STL is supplied.
 
-## 4. Live Mode
+Installation does not arm execution. `runtime_solver_enabled` remains a
+per-request operator gate.
 
-Live mode is solver-gated by default.
-
-Behavior:
-
-- If `require_solver_in_live=true` and no CalculiX/ccx executable is available,
-  return `ok=false` with `failure_code=CAE_SOLVER_REQUIRED`.
-- Do not block live UTM analysis only because CAE is unavailable unless the
-  experiment explicitly requires CAE.
-- Keep the CAE failure visible in `analysis.cae_result`.
-
-Current implementation status:
-
-- The live path performs solver availability preflight and uses the deterministic
-  equivalent result shape when permitted.
-- Full mesh generation and external solver execution can replace the equivalent
-  calculation behind the same `cae.run_static_analysis` contract later.
-
-## 5. Dedicated GUI
-
-Route:
+The real sequence is:
 
 ```text
-/cae
+STL -> direct discrete-surface volume mesh -> boundary node sets
+    -> nonlinear CalculiX deck -> ccx -> DAT/FRD
+    -> canonical curve -> peak/stiffness/energy
 ```
 
-Main dashboard launcher:
+The source STL is not modified. Direct discrete-surface meshing avoids the
+expensive `ClassifySurfaces/CreateGeometry` remeshing path, which is unsuitable
+for dense TPMS STL files and can introduce invalid overlaps after decimation.
+
+## 6. Installation and health
+
+This workstation uses user-local ARM64 package extraction because system
+package installation requires administrator credentials:
 
 ```text
-Device Workspaces -> CAE Analysis -> Open CAE Workspace
+CalculiX wrapper: /home/jin/.local/bin/atr-ccx
+Gmsh wrapper:     /home/jin/.local/bin/atr-gmsh
+Runtime library:  /home/jin/.local/opt/atr-cae/usr/lib/aarch64-linux-gnu
 ```
 
-GUI fields:
+The wrappers set `LD_LIBRARY_PATH` and execute CalculiX 2.21 and Gmsh 4.12.1.
+`calculix.health` reports resolved paths and version strings. Another host may
+instead configure `/usr/bin/ccx` and `/usr/bin/gmsh` or rely on `PATH`.
 
-- mode: test/live
-- solver
-- mesher
-- specimen ID
-- STL path
-- specimen size X/Y/Z
-- mesh size
-- elastic modulus
-- Poisson ratio
-- yield strength
-- top load max
-- load min ratio
-- cycles
-- frequency
-- live solver requirement checkbox
-- Save Settings button
+## 7. Failure and partial-result rules
 
-GUI output:
+| Condition | Required result |
+|---|---|
+| Missing STL | `CAE_STL_REQUIRED` |
+| Missing Gmsh | `CAE_GMSH_REQUIRED` |
+| Mesh error/empty volume | `CAE_MESH_FAILED` |
+| Runtime gate off | `CALCULIX_RUNTIME_SOLVER_DISABLED` |
+| Missing CalculiX | `CALCULIX_EXECUTABLE_REQUIRED` or facade `CAE_SOLVER_REQUIRED` |
+| Solver nonzero return | `CALCULIX_SOLVE_FAILED` |
+| Solver timeout | `CALCULIX_TIMEOUT`; retain available job artifacts |
+| Missing/malformed DAT history | `CALCULIX_RESULT_PARSE_FAILED` |
+| Last converged point below target | `CALCULIX_ENDPOINT_NOT_REACHED` |
 
-- bridge health and solver availability
-- max von Mises stress
-- max displacement
-- fatigue proxy
-- structural score
-- equivalent FEM contour SVG
-- step trace
-- raw JSON result
+A partial curve may report peak and initial stiffness over its converged range.
+It must set `endpoint_reached=false` and
+`energy_absorption_50pct_mJ=null`; the runtime never extrapolates to the target.
 
-Settings persistence:
+## 8. Analysis and BO handoff
 
-- `GET /api/cae/config` must return the current defaults, bridge health, supported options, and saved workspace settings under `saved`.
-- `POST /api/cae/config` must persist the current CAE Workspace settings to `memory/cae_workspace_settings.json`.
-- A newly opened CAE Workspace window must apply the saved solver, mesher, model, material, loading, and live-solver requirement values before the user runs analysis.
-- Saving CAE settings must not run a solver or move any hardware; it is configuration-only.
+Analysis compares real/test CAE against the parsed UTM curve using peak force,
+initial stiffness, and 50%-height absorbed energy. Energy is compared only when
+both sources reached the matching endpoint. The BO observation receives the
+experiment objective value from Analysis; raw solver fields remain provenance
+and diagnostics, not an independent fabricated experiment.
 
-## 6. Safety Rules
+## 9. Verification baseline
 
-- Do not claim real finite-element validation in test mode; label it as
-  deterministic equivalent CAE.
-- Do not fabricate live UTM data from CAE.
-- Keep bottom fixed/top cyclic defaults stable unless the operator or experiment
-  spec explicitly overrides them.
-- AnalysisAgent should send explicit `boundary_condition`, `loading_mode`, and
-  `boundary` fields so downstream GUI, Knowledge, Guardian, and BO traces can
-  verify the mechanical setup without inferring it from free text.
-- AnalysisAgent should also send `analysis_platens` and `generated_model_caps`
-  so operators can distinguish CAE-only fixtures from actual generated STL cap
-  skins.
-- Preserve `cae_metrics`, `objective_score`, and `uncertainty` because Knowledge,
-  Guardian, and BO can consume those keys.
+On 2026-09-02:
+
+- a 10 mm cube completed a real 50% nonlinear solve in 102 increments;
+- its curve reached 5.0 mm and produced DAT, FRD, deck, manifest, and curve JSON;
+- a dense 30 mm Gyroid STL (316,104 surface triangles) generated a valid
+  566,686-element tetrahedral volume mesh in about 23 seconds using the direct
+  discrete-surface route;
+- a 180-second 30 mm Gyroid nonlinear run converged its first increment at
+  0.015 mm and 101.0885 N, then timed out; DAT/FRD remained available, the
+  result was partial, and 50%-height energy remained `null`.
+
+Focused automated tests cover deck constraints, native DAT parsing, exact
+endpoint handling, subprocess wiring, live delegation, deterministic scaling,
+and the Analysis energy comparison.

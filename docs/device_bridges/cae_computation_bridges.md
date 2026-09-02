@@ -23,8 +23,8 @@ source_of_truth:
   - mcp_tools/pinn_tools.py
   - configs/devices.yaml
   - app/main.py
-last_verified: 2026-08-09
-verified_against: 188a1d6
+last_verified: 2026-09-02
+verified_against: working-tree quasi-static implementation
 related_docs:
   - docs/device_bridges/README.md
   - docs/agents/analysis_agent.md
@@ -37,18 +37,20 @@ supersedes: []
 ## Summary
 
 The CAE Computation boundary provides three related adapters: a deterministic/
-live-preflight CAE facade, a guarded real CalculiX job path, and a PINN
+real-solver CAE facade, a guarded CalculiX quasi-static job path, and a PINN
 dataset/model registry that reports unavailable models instead of inventing
 predictions. These are external-computation and filesystem effects, not
 physical laboratory device control.
 
 ## Scope
 
-Included: solver health/defaults, static-analysis facade, CalculiX input deck,
-solve/postprocess/job, PINN health/dataset/train/predict/registry, artifact
-paths, runtime gates, and API/tool integration. Excluded: validation of
-materials/models/meshes, solver numerical correctness, trained-model quality,
-and scientific equivalence between deterministic/test and real results.
+Included: solver health/defaults, displacement-controlled compression facade,
+STL volume meshing, frictionless-face CalculiX input deck, nonlinear
+solve/postprocess/job, force-displacement metrics, PINN
+health/dataset/train/predict/registry, artifact paths, runtime gates, and
+API/tool integration. Excluded: experimental material calibration, contact or
+self-contact, cyclic fatigue, trained-model quality, and scientific equivalence
+between deterministic/test and real results.
 
 ## Source of Truth
 
@@ -84,8 +86,8 @@ Optional paths are dashed inspection projections.
 
 | Adapter | Inputs | Outputs |
 |---|---|---|
-| CAE facade | geometry/material/loading/boundary/mesh | deterministic or live-preflight static/cyclic metrics and artifacts |
-| CalculiX | `.inp` path/text, run/specimen/job, runtime flag, timeout | request/deck, health, return code, DAT/FRD, postprocess status, trace |
+| CAE facade | planned size, STL, material, displacement target, boundary, mesh | deterministic or real quasi-static curve, metrics, and artifacts |
+| CalculiX | STL or `.inp`, run/specimen/job, material, increments, runtime flag, timeout | Gmsh mesh, deck/manifest, versioned health, DAT/FRD, curve, metrics, trace |
 | PINN | UTM/FEA records, dataset/model IDs, metrics/checkpoints, fixture prediction | dataset JSON, registry, registered/unavailable/predicted status |
 
 ## Internal Execution
@@ -100,10 +102,35 @@ physical-effect node because the current boundary controls computation only.
 | Phase | Gate/transformation | Effect/evidence |
 |---|---|---|
 | Configure | enabled/mode/executable/artifact roots/defaults | normalized config/health |
-| Prepare | identifiers and deck/dataset payload | request, `.inp`, or dataset JSON |
-| Execute | solver/training enabled and implementation available | bounded subprocess or registry write |
-| Postprocess | expected DAT/FRD/model/result exists | artifact paths/status |
+| Prepare | planned height, STL, material, target strain, increments | volume mesh, face sets, deck/manifest, or dataset JSON |
+| Execute | solver/training enabled and implementation available | bounded Gmsh/CalculiX subprocess or registry write |
+| Postprocess | DAT reaction/displacement history or model/result exists | canonical curve, metrics, artifact paths/status |
 | Return | preserve failure/unavailable semantics | Analysis comparison/handoff |
+
+## Quasi-Static Mechanical Contract
+
+```mermaid
+flowchart TB
+    H[Planned initial height H] --> D[Target displacement = target_strain × H]
+    STL[Closed specimen STL] --> GM[Gmsh direct discrete-surface volume mesh]
+    GM --> SETS[TOP and BOTTOM node sets]
+    SETS --> BC[Bottom U3=0<br/>Top U3=-D<br/>face U1/U2 free]
+    BC --> STAB[Two-node minimal in-plane stabilization]
+    STAB --> CCX[CalculiX NLGEOM static increments]
+    CCX --> DAT[DAT total RF + top U]
+    DAT --> CURVE[Positive compression curve and 50% energy]
+```
+
+No platen solid, contact pair, friction coefficient, self-contact, or dynamic
+mass scaling is created. The deck manifest identifies every top/bottom node,
+the two stabilizer nodes, mesh height, planned target, and constraint counts.
+The target derives from the experiment-planned height rather than a hard-coded
+21 mm endpoint or an observed CSV endpoint.
+
+The canonical curve contains finite nonnegative compression magnitudes and an
+explicit zero origin. A partial calculation is never extrapolated: peak and
+initial stiffness can describe the converged segment, while 50%-height energy
+is `null` until the exact target is reached.
 
 ## API Surface
 
@@ -134,31 +161,35 @@ subprocess boundaries return decks, logs, fields, metrics, and model records.
 No model/UI/graph descriptor bypasses execution gates.
 
 Current connections are local filesystem and subprocess/executable discovery.
-The CAE facade resolves CalculiX/Gmsh paths; the CalculiX adapter can run `ccx`
-and discover optional postprocessors; PINN currently records explicit dataset/
+The CAE facade resolves CalculiX/Gmsh paths and versions; the CalculiX adapter
+runs Gmsh volume meshing and `ccx` only behind the per-request execution gate,
+then parses native DAT total-force blocks. PINN currently records explicit dataset/
 model/prediction contracts and does not hide model unavailability.
 
 ## Configuration and Secrets
 
-`devices.cae` defines enabled/mode/provider/solver/mesher paths, live solver
-requirement, artifact directory, and material/loading/boundary/mesh defaults.
+`devices.cae` defines enabled/mode/provider/solver/mesher/library paths, live
+solver requirement, artifact directory, and material/loading/boundary/mesh defaults.
 CalculiX falls back to CAE config unless a dedicated section exists. PINN uses
 defaults unless `devices.pinn` is provided; runtime training defaults false and
-no active model is configured. Current adapters require executable paths, not
-network credentials.
+no active model is configured. The current host uses `/home/jin/.local/bin/atr-ccx`
+and `/home/jin/.local/bin/atr-gmsh` wrappers for CalculiX 2.21 and Gmsh 4.12.1.
+Current adapters require executable paths, not network credentials.
 
 ## State, Events, Artifacts, and Evidence
 
-Artifacts include facade requests/results, CalculiX request JSON and `.inp`,
-stdout/stderr tails, DAT/FRD and optional converted fields, PINN dataset JSON,
+Artifacts include facade requests/results, source STL reference, Gmsh `.geo`
+and mesh `.inp`, CalculiX deck and deck manifest, stdout/stderr tails, DAT/FRD,
+canonical curve JSON and optional converted fields, PINN dataset JSON,
 `model_registry.json`, metrics/checkpoint metadata, and step traces. Raw UTM
 measurement remains distinct from derived solver/PINN output.
 
 ## Runtime Modes and Fallbacks
 
-CAE test mode can return deterministic equivalent calculations. Live facade
-requires configured solver availability as declared. CalculiX real execution
-requires `runtime_solver_enabled`; missing executable blocks. PINN training
+CAE test mode returns a labelled 101-point nonlinear cellular compression
+equivalent through the same curve contract. Live facade delegates to real
+Gmsh/CalculiX and requires configured availability. CalculiX real execution
+requires `runtime_solver_enabled`; installation alone never starts a job. PINN training
 requires `runtime_training_enabled`; prediction without a registered model is
 `unavailable`, not a synthetic fallback. No adapter silently substitutes
 another fidelity.
@@ -173,10 +204,11 @@ timeout, and artifact checks guard the boundary.
 
 ## Errors, Timeouts, and Recovery
 
-Disabled bridge, missing executable/model, disabled runtime gate, invalid
-input, nonzero return, timeout, or missing result artifact remains explicit.
-On solver timeout retain request/deck and partial logs/artifacts, inspect the
-process and job directory, and avoid labeling partial output complete. PINN
+Disabled bridge, missing STL/executable/model, disabled runtime gate, invalid
+or empty volume mesh, nonzero return, timeout, malformed DAT history, and an
+incomplete endpoint remain distinct. On solver timeout retain request/deck and
+available partial logs/artifacts, inspect the process and job directory, and
+avoid labeling partial output complete. PINN
 unavailability should route Analysis without fabricating a curve.
 
 ## Operator and GUI Surfaces
@@ -188,17 +220,20 @@ and failure/unavailable distinction.
 
 ## Current Verification
 
-Inspection covered all three bridge and registrar implementations,
-configuration, CAE APIs, multifidelity schemas/tests, and focused CAE contracts
-at `188a1d6`. Numerical accuracy and live solver/PINN quality were not
-evaluated by documentation inspection.
+Verification covered all three bridge and registrar implementations,
+configuration, CAE APIs, multifidelity schemas/tests, native DAT parsing, a
+real 10 mm cube 50%-compression solve, and a 30 mm dense Gyroid volume mesh.
+The cube reached 5.0 mm in 102 increments. This is runtime verification, not
+material calibration or experimental validation.
 
 ## Limitations and Known Gaps
 
 The graph/API projection does not show CalculiX and PINN as separate bridge
-entries despite bootstrap registration. CAE facade and CalculiX job adapter
-overlap conceptually but expose different contracts. PINN training currently
-registers supplied metadata rather than proving a training backend ran.
+entries despite bootstrap registration. Large TPMS STL files retain their
+dense surface triangulation in the volume mesh, so real nonlinear runs can be
+expensive even when the interior mesh size is coarse. With no self-contact,
+50% deformation may interpenetrate. PINN training currently registers supplied
+metadata rather than proving a training backend ran.
 
 ## Related Documents
 

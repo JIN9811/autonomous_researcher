@@ -30,6 +30,8 @@ from pathlib import Path
 from typing import Any
 
 from device_bridges.base_bridge import BaseBridge
+from device_bridges.calculix_bridge import CalculiXBridge, CalculiXBridgeConfig
+from utils.calculix_quasistatic import curve_metrics
 from utils.paths import resolve_path
 
 
@@ -43,9 +45,10 @@ class CAEBridgeConfig:
     default_mesher: str = "gmsh"
     solver_path: str = ""
     mesher_path: str = ""
+    library_path: str = ""
     require_solver_in_live: bool = True
     artifact_dir: Path = field(default_factory=lambda: resolve_path("artifacts/cae"))
-    default_material: dict[str, float] = field(
+    default_material: dict[str, Any] = field(
         default_factory=lambda: {
             "elastic_modulus_mpa": 1800.0,
             "poisson_ratio": 0.35,
@@ -54,17 +57,19 @@ class CAEBridgeConfig:
     )
     default_loading: dict[str, float | int | str] = field(
         default_factory=lambda: {
-            "load_type": "cyclic_compression",
-            "load_max_n": 500.0,
-            "load_min_ratio": 0.1,
-            "cycles": 10,
-            "frequency_hz": 1.0,
+            "load_type": "quasistatic_compression",
+            "loading_control": "displacement",
+            "target_strain": 0.5,
+            "initial_increment": 0.01,
+            "minimum_increment": 1e-7,
+            "maximum_increment": 0.02,
+            "max_increments": 500,
         }
     )
     default_boundary: dict[str, str] = field(
         default_factory=lambda: {
-            "bottom": "fixed_support",
-            "top": "cyclic_loading",
+            "bottom": "frictionless_axial_support",
+            "top": "frictionless_displacement",
         }
     )
 
@@ -118,9 +123,17 @@ class CAEBridgeConfig:
             default_mesher=str(cae_raw.get("mesher", cae_raw.get("default_mesher", "gmsh"))),
             solver_path=_configured_path("solver_path", "calculix_path", "ccx_path"),
             mesher_path=_configured_path("mesher_path", "gmsh_path"),
+            library_path=_configured_path("library_path"),
             require_solver_in_live=bool(cae_raw.get("require_solver_in_live", True)),
             artifact_dir=artifact,
-            default_material={key: float(value) for key, value in material.items()},
+            default_material={
+                key: (
+                    value
+                    if key == "plastic_curve" and isinstance(value, list)
+                    else float(value)
+                )
+                for key, value in material.items()
+            },
             default_loading={**loading},
             default_boundary={key: str(value) for key, value in boundary.items()},
         )
@@ -129,8 +142,19 @@ class CAEBridgeConfig:
 class CAEBridge(BaseBridge):
     """CAE tool bridge using deterministic equivalent analysis plus live solver preflight."""
 
-    def __init__(self, config: CAEBridgeConfig) -> None:
+    def __init__(self, config: CAEBridgeConfig, *, calculix_bridge: Any | None = None) -> None:
         self.config = config
+        self.calculix_bridge = calculix_bridge or CalculiXBridge(
+            CalculiXBridgeConfig(
+                enabled=config.enabled,
+                mode=config.mode,
+                executable_path=config.solver_path,
+                gmsh_path=config.mesher_path,
+                library_path=config.library_path,
+                runtime_solver_enabled=False,
+                artifact_dir=config.artifact_dir / "calculix",
+            )
+        )
 
     @staticmethod
     def defaults() -> dict[str, Any]:
@@ -149,8 +173,9 @@ class CAEBridge(BaseBridge):
 
     def solver_status(self) -> dict[str, Any]:
         """Return local open-source CAE solver availability."""
-        ccx = self._existing_executable(self.config.solver_path) or shutil.which("ccx") or shutil.which("calculix")
-        gmsh = self._existing_executable(self.config.mesher_path) or shutil.which("gmsh")
+        backend_health = self.calculix_bridge.health()
+        ccx = str(backend_health.get("calculix", {}).get("path") or "")
+        gmsh = str(backend_health.get("gmsh", {}).get("path") or "")
         return {
             "ok": True,
             "tool": "cae.health",
@@ -158,6 +183,7 @@ class CAEBridge(BaseBridge):
             "default_mesher": self.config.default_mesher,
             "calculix": {"available": bool(ccx), "path": ccx or ""},
             "gmsh": {"available": bool(gmsh), "path": gmsh or ""},
+            "calculix_backend": backend_health,
             "artifact_dir": str(self.config.artifact_dir),
             "mode": self.config.mode,
             "require_solver_in_live": self.config.require_solver_in_live,
@@ -214,27 +240,42 @@ class CAEBridge(BaseBridge):
     @staticmethod
     def _bottom_boundary_from_label(value: Any) -> str:
         label = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
-        if label in {"bottom_fixed_support", "fixed_support", "fixed", "encastre"}:
-            return "fixed_support"
-        return str(value or "fixed_support")
+        if label in {
+            "bottom_fixed_support",
+            "fixed_support",
+            "fixed",
+            "encastre",
+            "bottom_frictionless_axial_support",
+            "frictionless_axial_support",
+        }:
+            return "frictionless_axial_support"
+        return str(value or "frictionless_axial_support")
 
     @staticmethod
     def _top_boundary_from_label(value: Any) -> str:
         label = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
-        if label in {"top_cyclic_loading", "cyclic_loading", "cyclic_compression", "top_cyclic_compression"}:
-            return "cyclic_loading"
-        return str(value or "cyclic_loading")
+        if label in {
+            "top_cyclic_loading",
+            "cyclic_loading",
+            "cyclic_compression",
+            "top_cyclic_compression",
+            "top_frictionless_displacement",
+            "frictionless_displacement",
+        }:
+            return "frictionless_displacement"
+        return str(value or "frictionless_displacement")
 
     @staticmethod
     def _boundary_condition_label(bottom_boundary: Any) -> str:
         bottom = str(bottom_boundary or "").strip().lower()
-        return "bottom_fixed_support" if bottom == "fixed_support" else bottom or "bottom_fixed_support"
+        if bottom in {"fixed_support", "frictionless_axial_support"}:
+            return "bottom_fixed_support"
+        return bottom or "bottom_fixed_support"
 
     @staticmethod
     def _loading_mode_label(top_boundary: Any, load_type: Any) -> str:
         top = str(top_boundary or "").strip().lower()
-        load = str(load_type or "").strip().lower()
-        if top == "cyclic_loading" and "cyclic" in load:
+        if top in {"cyclic_loading", "frictionless_displacement"}:
             return "top_cyclic_loading"
         return top or "top_cyclic_loading"
 
@@ -261,7 +302,19 @@ class CAEBridge(BaseBridge):
         loading = dict(self.config.default_loading)
         if isinstance(payload.get("loading"), dict):
             loading.update(payload["loading"])
-        for key in ("load_max_n", "load_max_N", "load_min_ratio", "cycles", "frequency_hz"):
+        for key in (
+            "load_max_n",
+            "load_max_N",
+            "load_min_ratio",
+            "cycles",
+            "frequency_hz",
+            "target_strain",
+            "initial_increment",
+            "minimum_increment",
+            "maximum_increment",
+            "max_increments",
+            "time_period",
+        ):
             if key in payload:
                 normalized_key = "load_max_n" if key == "load_max_N" else key
                 loading[normalized_key] = payload[key]
@@ -274,8 +327,7 @@ class CAEBridge(BaseBridge):
             boundary["bottom"] = self._bottom_boundary_from_label(boundary.get("bottom"))
         if payload.get("loading_mode") not in (None, "", []):
             boundary["top"] = self._top_boundary_from_label(payload.get("loading_mode"))
-            if boundary["top"] == "cyclic_loading" and not str(loading.get("load_type", "")).startswith("cyclic"):
-                loading["load_type"] = "cyclic_compression"
+            loading["load_type"] = "quasistatic_compression"
         else:
             boundary["top"] = self._top_boundary_from_label(boundary.get("top"))
         size = self._vector3(payload.get("specimen_size_mm") or payload.get("size_mm"), [20.0, 20.0, 20.0])
@@ -307,12 +359,19 @@ class CAEBridge(BaseBridge):
         except (TypeError, ValueError):
             platen_thickness_value = 1.0
         analysis_platens = {
-            "bottom": self._bool(platens_raw.get("bottom"), True),
-            "top": self._bool(platens_raw.get("top"), True),
+            "bottom": False,
+            "top": False,
             "thickness_mm": max(0.2, platen_thickness_value),
-            "applies_to": str(platens_raw.get("applies_to") or "cae_only_not_generated_stl"),
+            "applies_to": "not_modeled",
         }
         generated_caps = payload.get("generated_model_caps") if isinstance(payload.get("generated_model_caps"), dict) else {}
+        normalized_material: dict[str, Any] = {
+            "elastic_modulus_mpa": float(material.get("elastic_modulus_mpa", 1800.0)),
+            "poisson_ratio": float(material.get("poisson_ratio", 0.35)),
+            "yield_strength_mpa": float(material.get("yield_strength_mpa", 35.0)),
+        }
+        if isinstance(material.get("plastic_curve"), list):
+            normalized_material["plastic_curve"] = material["plastic_curve"]
         return {
             "mode": str(payload.get("runtime_mode") or payload.get("mode") or self.config.mode or "test"),
             "solver": str(payload.get("solver") or self.config.default_solver),
@@ -321,13 +380,11 @@ class CAEBridge(BaseBridge):
             "specimen_id": str(payload.get("specimen_id") or "manual-specimen"),
             "specimen_size_mm": size,
             "mesh_size_mm": self._float(payload, "mesh_size_mm", 2.0),
-            "material": {
-                "elastic_modulus_mpa": float(material.get("elastic_modulus_mpa", 1800.0)),
-                "poisson_ratio": float(material.get("poisson_ratio", 0.35)),
-                "yield_strength_mpa": float(material.get("yield_strength_mpa", 35.0)),
-            },
+            "material": normalized_material,
             "loading": {
-                "load_type": str(loading.get("load_type", "cyclic_compression")),
+                "load_type": "quasistatic_compression",
+                "loading_control": "displacement",
+                "target_strain": float(loading.get("target_strain", 0.5)),
                 "load_max_n": float(loading.get("load_max_n", 500.0)),
                 "load_min_ratio": float(loading.get("load_min_ratio", 0.1)),
                 "cycles": int(loading.get("cycles", 10)),
@@ -342,8 +399,96 @@ class CAEBridge(BaseBridge):
             "analysis_platens": analysis_platens,
             "generated_model_caps": dict(generated_caps),
             "design_parameters": design_parameters,
+            "analysis_type": "quasistatic_compression",
+            "loading_control": "displacement",
+            "target_strain": min(
+                max(self._float(payload, "target_strain", float(loading.get("target_strain", 0.5))), 1e-6),
+                0.8,
+            ),
+            "increments": {
+                "initial": float(loading.get("initial_increment", 0.01)),
+                "minimum": float(loading.get("minimum_increment", 1e-7)),
+                "maximum": float(loading.get("maximum_increment", 0.02)),
+                "max_increments": int(loading.get("max_increments", 500)),
+                "time_period": float(loading.get("time_period", 1.0)),
+            },
             "require_solver": bool(payload.get("require_solver", False)),
         }
+
+    def _equivalent_quasistatic_analysis(self, normalized: dict[str, Any]) -> tuple[list[dict[str, float]], dict[str, Any]]:
+        """Return a labelled cellular compression proxy for solver-free test mode."""
+        size = normalized["specimen_size_mm"]
+        area = max(float(size[0]) * float(size[1]), 1e-6)
+        height = max(float(size[2]), 1e-6)
+        target_strain = min(max(float(normalized.get("target_strain", 0.5)), 1e-6), 0.8)
+        target_displacement = height * target_strain
+        material = normalized["material"]
+        design = normalized.get("design_parameters") if isinstance(normalized.get("design_parameters"), dict) else {}
+        relative_density = min(max(float(design.get("relative_density", 0.32) or 0.32), 0.05), 0.85)
+        wall = max(float(design.get("wall_thickness_mm", 1.2) or 1.2), 0.05)
+        cell = max(float(design.get("cell_size_mm", 10.0) or 10.0), wall * 2.0)
+        wall_cell_ratio = wall / cell
+        modulus = max(float(material.get("elastic_modulus_mpa", 1800.0)), 1e-6)
+        yield_strength = max(float(material.get("yield_strength_mpa", 35.0)), 1e-6)
+
+        # A bending-dominated cellular stiffness and a yield-controlled collapse
+        # plateau. These are inspectable scaling laws, not fitted UTM constants.
+        effective_modulus = modulus * relative_density**2 * wall_cell_ratio**2
+        plateau_stress = 0.75 * yield_strength * relative_density**1.5 * (1.0 + 4.0 * wall_cell_ratio)
+        elastic_limit_strain = min(0.05, plateau_stress / max(effective_modulus, 1e-9))
+        elastic_limit_stress = effective_modulus * elastic_limit_strain
+        densification_strain = min(0.35, target_strain * 0.8)
+        curve: list[dict[str, float]] = []
+        for index in range(101):
+            strain = target_strain * index / 100.0
+            displacement = height * strain
+            if strain <= elastic_limit_strain:
+                stress = effective_modulus * strain
+            else:
+                collapse_progress = 1.0 - math.exp(-(strain - elastic_limit_strain) / 0.12)
+                stress = elastic_limit_stress + (plateau_stress - elastic_limit_stress) * collapse_progress
+                if strain > densification_strain:
+                    densification_progress = (strain - densification_strain) / max(target_strain - densification_strain, 1e-9)
+                    stress += yield_strength * relative_density * densification_progress**3
+            curve.append(
+                {
+                    "step_time": round(index / 100.0, 9),
+                    "displacement_mm": round(displacement, 9),
+                    "force_N": round(max(stress, 0.0) * area, 9),
+                }
+            )
+        derived = curve_metrics(
+            curve,
+            target_displacement_mm=target_displacement,
+            endpoint_tolerance_mm=max(height * 1e-8, 1e-9),
+        )
+        peak_force = float(derived["peak_reaction_force_N"])
+        nominal_stress = peak_force / area
+        metrics = {
+            **derived,
+            "predicted_peak_force_N": peak_force,
+            "predicted_initial_stiffness_N_per_mm": derived["initial_stiffness_N_per_mm"],
+            "max_von_mises_MPa": round(nominal_stress / max(relative_density, 0.08), 6),
+            "max_displacement_mm": round(target_displacement, 9),
+            "apparent_stiffness_N_per_mm": derived["initial_stiffness_N_per_mm"],
+            "nominal_top_stress_MPa": round(nominal_stress, 6),
+            "stress_concentration_factor": round(1.0 / max(relative_density, 0.08), 6),
+            "load_amplitude_N": 0.0,
+            "load_max_N": peak_force,
+            "load_min_N": 0.0,
+            "fatigue_damage_proxy": 0.0,
+            "safety_factor_yield": round(yield_strength / max(nominal_stress, 1e-9), 6),
+            "compliance_mm_per_N": round(target_displacement / max(peak_force, 1e-9), 12),
+            "structural_score": round(min(1.0, yield_strength / max(nominal_stress, 1e-9) / 2.0), 6),
+            "cycles": 1,
+            "relative_density_used": round(relative_density, 6),
+            "effective_modulus_MPa": round(effective_modulus, 6),
+            "effective_yield_strength_MPa": round(plateau_stress, 6),
+            "analysis_platens_applied": False,
+            "target_strain": target_strain,
+            "target_displacement_mm": target_displacement,
+        }
+        return curve, metrics
 
     def _equivalent_analysis(self, normalized: dict[str, Any]) -> dict[str, Any]:
         size = normalized["specimen_size_mm"]
@@ -431,8 +576,8 @@ class CAEBridge(BaseBridge):
                     f'<rect x="{x0 + col * cell_w}" y="{y0 + (rows - 1 - row) * cell_h}" '
                     f'width="{cell_w + 0.8:.1f}" height="{cell_h + 0.8:.1f}" fill="{self._contour_color(value)}" />'
                 )
-        platen_top = '<rect x="96" y="50" width="508" height="16" rx="3" fill="#475569" />'
-        platen_bottom = '<rect x="96" y="258" width="508" height="16" rx="3" fill="#475569" />'
+        top_face = '<line x1="96" y1="66" x2="604" y2="66" stroke="#475569" stroke-width="4" />'
+        bottom_face = '<line x1="96" y1="258" x2="604" y2="258" stroke="#475569" stroke-width="4" />'
         legend = []
         for idx in range(7):
             legend.append(
@@ -442,8 +587,8 @@ class CAEBridge(BaseBridge):
             '<svg xmlns="http://www.w3.org/2000/svg" width="760" height="340" viewBox="0 0 760 340">\n'
             '<rect width="760" height="340" fill="#ffffff"/>\n'
             '<text x="28" y="34" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#0f172a">Equivalent FEM contour</text>\n'
-            '<text x="28" y="58" font-family="Arial, sans-serif" font-size="13" fill="#475569">bottom fixed support, top cyclic loading, top/bottom platens are CAE-only</text>\n'
-            f"{platen_top}\n{''.join(rects)}\n{platen_bottom}\n"
+            '<text x="28" y="58" font-family="Arial, sans-serif" font-size="13" fill="#475569">frictionless top/bottom face constraints; displacement-controlled quasi-static compression</text>\n'
+            f"{top_face}\n{''.join(rects)}\n{bottom_face}\n"
             '<rect x="96" y="72" width="508" height="180" fill="none" stroke="#0f172a" stroke-width="1.2"/>\n'
             '<line x1="350" y1="42" x2="350" y2="66" stroke="#dc2626" stroke-width="3"/>\n'
             '<polygon points="350,70 342,58 358,58" fill="#dc2626"/>\n'
@@ -458,15 +603,26 @@ class CAEBridge(BaseBridge):
         )
         path.write_text(svg, encoding="utf-8")
 
-    def _write_artifacts(self, normalized: dict[str, Any], metrics: dict[str, Any], solver_status: dict[str, Any]) -> dict[str, str]:
+    def _write_artifacts(
+        self,
+        normalized: dict[str, Any],
+        metrics: dict[str, Any],
+        solver_status: dict[str, Any],
+        curve: list[dict[str, float]] | None = None,
+    ) -> dict[str, str]:
         self.config.artifact_dir.mkdir(parents=True, exist_ok=True)
         specimen_id = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in normalized["specimen_id"])[:120] or "specimen"
         base = self.config.artifact_dir / f"{specimen_id}_cae"
         input_path = base.with_suffix(".json")
         report_path = base.with_suffix(".report.json")
         contour_path = base.with_suffix(".contour.svg")
+        curve_path = base.with_suffix(".curve.json")
         input_path.write_text(json.dumps(normalized, indent=2, ensure_ascii=True), encoding="utf-8")
         self._write_contour_svg(contour_path, normalized, metrics)
+        curve_path.write_text(
+            json.dumps({"schema": "cae_force_displacement_curve.v1", "curve": curve or [], "metrics": metrics}, indent=2, ensure_ascii=True),
+            encoding="utf-8",
+        )
         report_path.write_text(
             json.dumps(
                 {
@@ -474,6 +630,7 @@ class CAEBridge(BaseBridge):
                     "tool": "cae.run_static_analysis",
                     "input": normalized,
                     "metrics": metrics,
+                    "reaction_force_displacement_curve": curve or [],
                     "solver_status": solver_status,
                 },
                 indent=2,
@@ -481,7 +638,12 @@ class CAEBridge(BaseBridge):
             ),
             encoding="utf-8",
         )
-        return {"input_path": str(input_path), "report_path": str(report_path), "contour_svg_path": str(contour_path)}
+        return {
+            "input_path": str(input_path),
+            "report_path": str(report_path),
+            "contour_svg_path": str(contour_path),
+            "curve_json_path": str(curve_path),
+        }
 
     def run_static_analysis(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Run static/cyclic CAE equivalent analysis, with live solver preflight."""
@@ -499,6 +661,7 @@ class CAEBridge(BaseBridge):
         solver = self.solver_status()
         live_mode = mode == "live"
         solver_available = bool(solver.get("calculix", {}).get("available"))
+        mesher_available = bool(solver.get("gmsh", {}).get("available"))
         require_solver = bool(raw_payload.get("require_solver")) if "require_solver" in raw_payload else self.config.require_solver_in_live
         if live_mode and require_solver and not solver_available:
             return {
@@ -518,8 +681,61 @@ class CAEBridge(BaseBridge):
                     {"step": "PRECHECK", "status": "blocked", "detail": "ccx/calculix not found"},
                 ],
             }
-        metrics = self._equivalent_analysis(normalized)
-        artifacts = self._write_artifacts(normalized, metrics, solver)
+        if live_mode and require_solver and not mesher_available:
+            return {
+                "ok": False,
+                "tool": "cae.run_static_analysis",
+                "mode": mode,
+                "status": "blocked",
+                "failure_code": "CAE_GMSH_REQUIRED",
+                "message": "Gmsh executable was not found. Install Gmsh or run in test mode.",
+                "solver_status": solver,
+                "boundary": normalized["boundary"],
+                "loading": normalized["loading"],
+                "boundary_condition": normalized["boundary_condition"],
+                "loading_mode": normalized["loading_mode"],
+                "analysis_platens": normalized["analysis_platens"],
+                "step_trace": [
+                    {"step": "PRECHECK", "status": "blocked", "detail": "gmsh not found"},
+                ],
+            }
+        if live_mode:
+            solver_payload = {
+                **raw_payload,
+                **normalized,
+                "analysis_type": "quasistatic_compression",
+                "runtime_solver_enabled": bool(raw_payload.get("runtime_solver_enabled", False)),
+                "target_strain": float(normalized.get("target_strain", 0.5)),
+            }
+            real_result = self.calculix_bridge.run_job(solver_payload)
+            real_metrics = real_result.get("metrics") if isinstance(real_result.get("metrics"), dict) else {}
+            return {
+                **real_result,
+                "tool": "cae.run_static_analysis",
+                "mode": mode,
+                "solver": normalized["solver"],
+                "mesher": normalized["mesher"],
+                "solver_status": solver,
+                "specimen_id": normalized["specimen_id"],
+                "stl_path": normalized["stl_path"],
+                "specimen_size_mm": normalized["specimen_size_mm"],
+                "boundary": normalized["boundary"],
+                "boundary_condition": normalized["boundary_condition"],
+                "loading": normalized["loading"],
+                "loading_mode": normalized["loading_mode"],
+                "analysis_platens": normalized["analysis_platens"],
+                "generated_model_caps": normalized["generated_model_caps"],
+                "design_parameters": normalized["design_parameters"],
+                "material": normalized["material"],
+                "request": normalized,
+                "metrics": real_metrics,
+                "cae_metrics": real_metrics,
+                "closed_loop_source": True,
+            }
+        curve, metrics = self._equivalent_quasistatic_analysis(normalized)
+        target_strain = float(normalized.get("target_strain", 0.5))
+        target_displacement = float(normalized["specimen_size_mm"][2]) * target_strain
+        artifacts = self._write_artifacts(normalized, metrics, solver, curve)
         return {
             "ok": True,
             "tool": "cae.run_static_analysis",
@@ -527,7 +743,12 @@ class CAEBridge(BaseBridge):
             "status": "completed",
             "solver": normalized["solver"],
             "mesher": normalized["mesher"],
-            "solver_mode": "deterministic_equivalent" if not live_mode else "solver_preflight_equivalent",
+            "solver_mode": "deterministic_quasistatic_equivalent" if not live_mode else "solver_preflight_equivalent",
+            "analysis_type": "quasistatic_compression",
+            "loading_control": "displacement",
+            "target_strain": target_strain,
+            "target_displacement_mm": target_displacement,
+            "reaction_force_displacement_curve": curve,
             "solver_status": solver,
             "specimen_id": normalized["specimen_id"],
             "stl_path": normalized["stl_path"],
@@ -549,8 +770,8 @@ class CAEBridge(BaseBridge):
             "step_trace": [
                 {"step": "PRECHECK", "status": "ok", "detail": f"mode={mode}"},
                 {"step": "BUILD_MODEL", "status": "ok", "detail": "specimen equivalent model"},
-                {"step": "APPLY_BC", "status": "ok", "detail": "bottom=fixed_support"},
-                {"step": "APPLY_CYCLIC_LOAD", "status": "ok", "detail": "top=cyclic_loading"},
+                {"step": "APPLY_BC", "status": "ok", "detail": "bottom=U3 only; minimal rigid-body stabilizers"},
+                {"step": "APPLY_DISPLACEMENT", "status": "ok", "detail": "top=U3 ramp; in-plane motion free"},
                 {"step": "SOLVE", "status": "ok", "detail": "deterministic equivalent CAE"},
                 {"step": "POSTPROCESS", "status": "ok", "detail": "metrics extracted"},
                 {"step": "DONE", "status": "ok", "detail": "ready for closed-loop analysis"},

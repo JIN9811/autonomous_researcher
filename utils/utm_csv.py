@@ -63,8 +63,8 @@ def _find_header(rows: list[list[str]]) -> tuple[int, list[str], list[str], dict
     return 0, [_clean(item) for item in rows[0]] if rows else [], [], {}, "unknown"
 
 
-def probe_utm_csv_bytes(data: bytes) -> dict[str, Any]:
-    """Parse canonical or TRAPEZIUM CSV bytes without modifying the source."""
+def parse_utm_csv_bytes(data: bytes) -> tuple[list[dict[str, float]], dict[str, Any]]:
+    """Return canonical numeric rows and metadata without modifying CSV bytes."""
     text, encoding = _decode_csv(data)
     rows = [[_clean(cell) for cell in row] for row in csv.reader(io.StringIO(text)) if any(_clean(cell) for cell in row)]
     data_start, source_columns, units, indexes, source_format = _find_header(rows)
@@ -155,13 +155,25 @@ def probe_utm_csv_bytes(data: bytes) -> dict[str, Any]:
         "failure_code": failure_code,
         "message": message,
     }
+    return numeric_rows, result
+
+
+def probe_utm_csv_bytes(data: bytes) -> dict[str, Any]:
+    """Probe canonical or TRAPEZIUM CSV bytes without returning the row payload."""
+    _rows, result = parse_utm_csv_bytes(data)
     return result
+
+
+def parse_utm_csv(path: Path) -> tuple[list[dict[str, float]], dict[str, Any]]:
+    """Parse a UTM CSV file and include its resolved path in the metadata."""
+    if not path.exists() or not path.is_file():
+        return [], {"ok": False, "failure_code": "UTM_EXPORT_FILE_MISSING", "path": str(path)}
+    rows, result = parse_utm_csv_bytes(path.read_bytes())
+    result["path"] = str(path)
+    return rows, result
 
 
 def probe_utm_csv(path: Path) -> dict[str, Any]:
     """Probe a UTM CSV file and include its resolved path in the result."""
-    if not path.exists() or not path.is_file():
-        return {"ok": False, "failure_code": "UTM_EXPORT_FILE_MISSING", "path": str(path)}
-    result = probe_utm_csv_bytes(path.read_bytes())
-    result["path"] = str(path)
+    _rows, result = parse_utm_csv(path)
     return result

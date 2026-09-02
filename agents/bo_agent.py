@@ -402,6 +402,30 @@ class BOAgent(BaseAgent):
                         return numeric
         return None
 
+    @classmethod
+    def _declared_objective_value(
+        cls,
+        item: dict[str, Any],
+        objective: dict[str, Any],
+    ) -> tuple[float, str, str] | None:
+        """Read an explicitly named measured objective before legacy SEA inference."""
+        metric_name = str(objective.get("metric_name") or item.get("metric_name") or "").strip()
+        if not metric_name:
+            return None
+        unit = str(objective.get("unit") or item.get("unit") or "").strip()
+        candidates: list[Any] = [objective.get("score")]
+        for source in (item.get("observed_metrics"), item.get("metrics")):
+            if isinstance(source, dict):
+                candidates.append(source.get(metric_name))
+        candidates.append(item.get("objective_score"))
+        for value in candidates:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+            numeric = float(value)
+            if math.isfinite(numeric) and numeric >= 0.0:
+                return numeric, metric_name, unit
+        return None
+
     @staticmethod
     def _float_setting(raw: dict[str, Any], key: str, default: float, warnings: list[str]) -> float:
         try:
@@ -644,7 +668,8 @@ class BOAgent(BaseAgent):
                 continue
             objective = item.get("objective") if isinstance(item.get("objective"), dict) else {}
             evaluation = item.get("objective_evaluation") if isinstance(item.get("objective_evaluation"), dict) else {}
-            score = cls._sea_value(item, objective)
+            declared_objective = cls._declared_objective_value(item, objective)
+            score = declared_objective[0] if declared_objective else cls._sea_value(item, objective)
             ok_for_bo = item.get("ok_for_bo")
             if ok_for_bo is None:
                 ok_for_bo = item.get("ok", True) and str(item.get("status") or "ready") not in {"blocked", "failed"}
@@ -688,8 +713,8 @@ class BOAgent(BaseAgent):
                 record["uncertainty"] = float(uncertainty)
             if not isinstance(score, bool) and isinstance(score, (int, float)) and math.isfinite(float(score)):
                 record["score"] = float(score)
-                record["metric_name"] = "specific_energy_absorption_J_per_g"
-                record["unit"] = "J/g"
+                record["metric_name"] = declared_objective[1] if declared_objective else "specific_energy_absorption_J_per_g"
+                record["unit"] = declared_objective[2] if declared_objective else "J/g"
             records.append(record)
         return records
 
@@ -737,6 +762,24 @@ class BOAgent(BaseAgent):
             }
             if not params:
                 continue
+            evaluation = item.get("objective_evaluation") if isinstance(item.get("objective_evaluation"), dict) else {}
+            observation_id = str(
+                evaluation.get("observation_id")
+                or item.get("observation_id")
+                or item.get("evaluation_id")
+                or ""
+            ).strip()
+            dedup_key = (
+                ("observation", observation_id)
+                if observation_id
+                else (
+                    str(item.get("candidate_id") or ""),
+                    json.dumps(params, sort_keys=True, ensure_ascii=True),
+                )
+            )
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
             prior: dict[str, Any] = {
                 "source": "analysis_experiment_evaluation" if item.get("source") == "analysis_agent" else "experiment_evaluation",
                 "candidate_id": str(item.get("candidate_id") or item.get("evaluation_id") or f"prior-{len(priors) + 1}"),
@@ -756,10 +799,9 @@ class BOAgent(BaseAgent):
                 and float(uncertainty) > 0
             ):
                 prior["uncertainty"] = float(uncertainty)
-            evaluation = item.get("objective_evaluation") if isinstance(item.get("objective_evaluation"), dict) else {}
             prior.update(
                 {
-                    "observation_id": str(evaluation.get("observation_id") or item.get("evaluation_id") or ""),
+                    "observation_id": observation_id,
                     "objective_id": str(evaluation.get("objective_id") or ""),
                     "objective_version": evaluation.get("objective_version"),
                     "objective_hash": str(evaluation.get("objective_hash") or item.get("objective_hash") or ""),
@@ -768,11 +810,12 @@ class BOAgent(BaseAgent):
                     "provenance_refs": evaluation.get("provenance_refs") if isinstance(evaluation.get("provenance_refs"), list) else item.get("provenance_refs", []),
                 }
             )
-            score = cls._sea_value(metrics, item)
+            declared_objective = cls._declared_objective_value(item, objective)
+            score = declared_objective[0] if declared_objective else cls._sea_value(metrics, item)
             if not isinstance(score, bool) and isinstance(score, (int, float)) and math.isfinite(float(score)):
                 prior["score"] = float(score)
-                prior["metric_name"] = "specific_energy_absorption_J_per_g"
-                prior["unit"] = "J/g"
+                prior["metric_name"] = declared_objective[1] if declared_objective else "specific_energy_absorption_J_per_g"
+                prior["unit"] = declared_objective[2] if declared_objective else "J/g"
             priors.append(prior)
 
         # Design-stage proxy scores and measured Analysis outcomes do not share
