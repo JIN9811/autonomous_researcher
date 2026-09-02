@@ -2473,6 +2473,7 @@ class LabEquipmentAgent(BaseAgent):
         flow: dict[str, Any],
         *,
         cancel_requested: Callable[[], bool] | None = None,
+        require_entry_handoff: bool = True,
     ) -> AgentResult:
         """Execute ordered composite Skill blocks and their bounded Vision phases."""
         profile_id = str(flow.get("profile_id") or "")
@@ -2491,16 +2492,23 @@ class LabEquipmentAgent(BaseAgent):
         source_stage_context = self._base_run_payload(state)["source_stage_context"]
         specimen = source_stage_context.get("specimen") if isinstance(source_stage_context.get("specimen"), dict) else {}
         specimen_id = str(specimen.get("specimen_id") or state.current_experiment_spec.get("specimen_id") or "").strip()
-        entry_gate = (
-            evaluate_equipment_entry_gate(
-                run_id=state.run_id,
-                specimen_id=specimen_id,
-                source_stage_context=source_stage_context,
-                test_like=self._test_like_mode(state),
+        entry_gate = {}
+        if agentic_task_id == UTM_COMPRESSION_TASK_ID:
+            entry_gate = (
+                evaluate_equipment_entry_gate(
+                    run_id=state.run_id,
+                    specimen_id=specimen_id,
+                    source_stage_context=source_stage_context,
+                    test_like=self._test_like_mode(state),
+                )
+                if require_entry_handoff
+                else {
+                    "ok": True,
+                    "status": "bypassed_for_device_bridge_standalone",
+                    "required": False,
+                    "source": "device_bridge",
+                }
             )
-            if agentic_task_id == UTM_COMPRESSION_TASK_ID
-            else {}
-        )
 
         def workflow_agentic_task(status: str) -> dict[str, Any]:
             if not agentic_task_id:

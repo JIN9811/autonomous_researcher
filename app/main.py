@@ -13384,6 +13384,7 @@ async def post_equipment_profile_agentic_run(
             controller._deps.agent_context,
             flow,
             cancel_requested=cancel_event.is_set,
+            require_entry_handoff=False,
         )
         payload = {"ok": bool(result.success), "summary": result.summary, "data": result.data}
         await controller.emit_workspace_result(

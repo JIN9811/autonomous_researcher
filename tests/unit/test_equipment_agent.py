@@ -479,6 +479,41 @@ async def test_equipment_flow_cancellation_prevents_the_next_registered_skill_di
 
 
 @pytest.mark.asyncio
+async def test_device_bridge_flow_starts_first_registered_block_without_orchestration_handoff(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow = build_utm_compression_flow_template("windows_desktop_v1")
+    for block in flow["blocks"]:
+        block["skill"] = {"skill_id": "fake", "skill_version": "1.0.0"}
+    calls: list[dict[str, Any]] = []
+    agent = LabEquipmentAgent()
+
+    async def fake_skill(_state: Any, _ctx: Any, request: dict[str, Any]) -> AgentResult:
+        calls.append(dict(request))
+        return AgentResult(success=True, summary="simulated", data={"equipment_result": {}, "equipment_report": {}})
+
+    monkeypatch.setattr(agent, "_run_equipment_skill", fake_skill)
+    monkeypatch.setattr(agent, "_preflight_skill_flow_resources", lambda **_kwargs: {"ok": True})
+    state = _state(experiment_spec={"equipment_profile_id": "windows_desktop_v1"})
+    state.mode = Mode.LIVE
+    state.run_metadata.pop("specimen_result", None)
+    state.run_metadata.pop("manipulation_result", None)
+
+    blocked = await agent._run_equipment_skill_flow(state, _CtxStub(_tools(tmp_path), "unused"), flow)
+    assert blocked.data["equipment_handoff"]["failure_code"] == "EQUIPMENT_HANDOFF_NOT_READY"
+    assert calls == []
+
+    await agent._run_equipment_skill_flow(
+        state,
+        _CtxStub(_tools(tmp_path), "unused"),
+        flow,
+        require_entry_handoff=False,
+    )
+    assert calls[0]["task"] == flow["blocks"][0]["agentic"]["task"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("artifact_case", "expected_success"),
     [

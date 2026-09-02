@@ -149,8 +149,13 @@ def test_equipment_agentic_run_uses_server_authoritative_registered_flow(monkeyp
     source_state.current_experiment_spec = {"test_mode_autofill": True, "printer_test_mode": True}
     monkeypatch.setattr(controller, "_state", source_state)
 
-    async def fake_run(self, state, ctx, flow, *, cancel_requested=None):
-        captured.update(state=state, flow=flow, cancel_requested=cancel_requested)
+    async def fake_run(self, state, ctx, flow, *, cancel_requested=None, require_entry_handoff=True):
+        captured.update(
+            state=state,
+            flow=flow,
+            cancel_requested=cancel_requested,
+            require_entry_handoff=require_entry_handoff,
+        )
         return AgentResult(success=True, summary="canonical flow completed", data={"equipment_skill_flow_execution": {"terminal": "__complete__"}})
 
     monkeypatch.setattr(LabEquipmentAgent, "_run_equipment_skill_flow", fake_run)
@@ -165,6 +170,7 @@ def test_equipment_agentic_run_uses_server_authoritative_registered_flow(monkeyp
     assert captured["state"].mode.value == "live"
     assert LabEquipmentAgent._effective_runtime_mode(captured["state"]) == "live"
     assert callable(captured["cancel_requested"])
+    assert captured["require_entry_handoff"] is False
 
 
 def test_equipment_agentic_run_requires_explicit_live_confirmation() -> None:
