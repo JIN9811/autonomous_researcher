@@ -52,6 +52,19 @@ MIMIC_REQUIRED_SUBTASKS = ["approach", "grasp", "lift", "place", "cube_lifted", 
 MIMIC_SUCCESS_CRITERIA = ["object_grasped", "object_lifted", "object_placed", "gripper_released"]
 RL_TEACHER_SUCCESS_CRITERIA = ["bounded_workspace", "grasp_stable", "place_success", "simulation_only"]
 GENERATED_TRAINING_MIN_FRAMES = 40
+ACTIVE_CAM_WORKSPACE_WIDTH_M = 0.170
+ACTIVE_CAM_WORKSPACE_FORWARD_M = 0.250
+ACTIVE_CAM_WORKSPACE_HALF_WIDTH_M = ACTIVE_CAM_WORKSPACE_WIDTH_M / 2.0
+ACTIVE_CAM_WORKSPACE_WORLD_MIN_X_M = 0.230
+ACTIVE_CAM_WORKSPACE_WORLD_MIN_Y_M = 0.120
+ACTIVE_CAM_WORKSPACE_WORLD_MAX_X_M = ACTIVE_CAM_WORKSPACE_WORLD_MIN_X_M + ACTIVE_CAM_WORKSPACE_WIDTH_M
+ACTIVE_CAM_WORKSPACE_WORLD_MAX_Y_M = ACTIVE_CAM_WORKSPACE_WORLD_MIN_Y_M + ACTIVE_CAM_WORKSPACE_FORWARD_M
+ACTIVE_CAM_WORKSPACE_WORLD_CENTER_X_M = (
+    ACTIVE_CAM_WORKSPACE_WORLD_MIN_X_M + ACTIVE_CAM_WORKSPACE_WORLD_MAX_X_M
+) / 2.0
+ACTIVE_CAM_WORKSPACE_WORLD_CENTER_Y_M = (
+    ACTIVE_CAM_WORKSPACE_WORLD_MIN_Y_M + ACTIVE_CAM_WORKSPACE_WORLD_MAX_Y_M
+) / 2.0
 ISAAC_LAB_OMX_ENV_HELPERS = [
     "get_robot_eef_pose",
     "target_eef_pose_to_action",
@@ -1522,8 +1535,12 @@ class IsaacLabSyntheticPipeline:
             "red_cube_lab_scene_default_root_pose": [0.4, 0.3, 0.0152, 0.0, 0.0, 0.0, 1.0],
             "red_cube_initial_pose_source": "isaac_rgbd_render_attempt_specimen_pose_or_lab_scene_default",
             "a4_sheet": {
-                "center_m": [0.315, 0.265, 0.00006],
-                "size_m": [0.297, 0.21, 0.00012],
+                "center_m": [
+                    ACTIVE_CAM_WORKSPACE_WORLD_CENTER_X_M,
+                    ACTIVE_CAM_WORKSPACE_WORLD_CENTER_Y_M,
+                    0.00006,
+                ],
+                "size_m": [ACTIVE_CAM_WORKSPACE_WIDTH_M, ACTIVE_CAM_WORKSPACE_FORWARD_M, 0.00012],
             },
             "static_prim_names": [
                 "TableTop",
@@ -3229,7 +3246,18 @@ class IsaacLabSyntheticPipeline:
                 "source": "active_robot_cam_when_available_else_stage_cube_pose",
                 "fields": ["x_m", "y_m", "z_m", "yaw_rad"],
                 "workspace": "a4_sheet",
-                "a4_size_m": {"x": 0.210, "y": 0.297},
+                "a4_size_m": {
+                    "x": ACTIVE_CAM_WORKSPACE_WIDTH_M,
+                    "y": ACTIVE_CAM_WORKSPACE_FORWARD_M,
+                },
+                "local_bounds_m": {
+                    "x": [-ACTIVE_CAM_WORKSPACE_HALF_WIDTH_M, ACTIVE_CAM_WORKSPACE_HALF_WIDTH_M],
+                    "y": [0.0, ACTIVE_CAM_WORKSPACE_FORWARD_M],
+                },
+                "world_bounds_m": {
+                    "x": [ACTIVE_CAM_WORKSPACE_WORLD_MIN_X_M, ACTIVE_CAM_WORKSPACE_WORLD_MAX_X_M],
+                    "y": [ACTIVE_CAM_WORKSPACE_WORLD_MIN_Y_M, ACTIVE_CAM_WORKSPACE_WORLD_MAX_Y_M],
+                },
             },
             "action_space": {
                 "control_mode": "eef_delta_pose_plus_gripper",
@@ -4072,8 +4100,6 @@ class IsaacLabSyntheticPipeline:
         import numpy as np
 
         pose_array = np.asarray(object_pose, dtype=np.float64)
-        workspace_x = 0.105
-        workspace_y = 0.1485
         yy, xx = np.indices((image_size, image_size))
         camera_palette = {
             "top": np.asarray([42, 54, 62], dtype=np.uint8),
@@ -4097,8 +4123,10 @@ class IsaacLabSyntheticPipeline:
                 x_m = float(pose_array[frame, 0, 3]) if frame < pose_array.shape[0] else 0.0
                 y_m = float(pose_array[frame, 1, 3]) if frame < pose_array.shape[0] else 0.0
                 yaw_rad = float(np.arctan2(pose_array[frame, 1, 0], pose_array[frame, 0, 0])) if frame < pose_array.shape[0] else yaw_hint
-                center_x = int(round(np.clip((x_m + workspace_x) / (2.0 * workspace_x), 0.0, 1.0) * (image_size - 1))) + offset_x
-                center_y = int(round(np.clip((y_m + workspace_y) / (2.0 * workspace_y), 0.0, 1.0) * (image_size - 1))) + offset_y
+                normalized_x = (x_m + ACTIVE_CAM_WORKSPACE_HALF_WIDTH_M) / ACTIVE_CAM_WORKSPACE_WIDTH_M
+                normalized_y = y_m / ACTIVE_CAM_WORKSPACE_FORWARD_M
+                center_x = int(round(np.clip(normalized_x, 0.0, 1.0) * (image_size - 1))) + offset_x
+                center_y = int(round(np.clip(normalized_y, 0.0, 1.0) * (image_size - 1))) + offset_y
                 center_x = int(np.clip(center_x, 8, image_size - 9))
                 center_y = int(np.clip(center_y, 8, image_size - 9))
                 rel_x = xx - center_x

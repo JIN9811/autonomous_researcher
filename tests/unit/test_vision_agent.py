@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -26,6 +27,11 @@ class _CtxStub:
         return SimpleNamespace(text="capture top camera and estimate pickup readiness", raw={}, model="mock-e4b")
 
 
+class _NoCaptureCtxStub(_CtxStub):
+    async def complete(self, task_type: str, prompt: str, timeout_s: float | None = None) -> Any:
+        raise AssertionError("Vision preflight must not invoke perception or LLM execution")
+
+
 def _state() -> OrchestratorState:
     return OrchestratorState(
         run_id="run-vision",
@@ -44,6 +50,102 @@ def _state() -> OrchestratorState:
             }
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_vision_preflight_after_printer_preflight_does_not_capture_or_start_runtime(tmp_path: Path) -> None:
+    tools = ToolRegistry()
+
+    def forbidden_hardware(_payload: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("Vision preflight must stop before camera/runtime hardware access")
+
+    tools.register("camera.capture", forbidden_hardware)
+    tools.register("lerobot.active_robot_cam.capture", forbidden_hardware)
+    tools.register("vision.utm_runtime.start", forbidden_hardware)
+    state = _state()
+    state.current_experiment_spec.update(
+        {
+            "printer_test_path": "physical_print",
+            "execution_policy": {
+                "printer": "preflight_only",
+                "manipulation": "preflight_only",
+            },
+        }
+    )
+    artifact = tmp_path / "specimen-001.autoeject.gcode.3mf"
+    artifact.write_bytes(b"immutable project artifact")
+    artifact_sha256 = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    state.run_metadata["printer_preflight"] = {
+        "schema": "printer_preflight.v1",
+        "run_id": state.run_id,
+        "status": "execution_ready_pending_approval",
+        "actuation_performed": False,
+        "upload_performed": False,
+        "print_started": False,
+        "specimen_id": "specimen-001",
+        "plate_index": 1,
+        "artifact_path": str(artifact),
+        "artifact_sha256": artifact_sha256,
+        "source_object_bounds_mm": {
+            "x": {"min": 40.0, "max": 60.0, "center": 50.0},
+            "y": {"min": 50.0, "max": 70.0, "center": 60.0},
+        },
+    }
+
+    result = await VisionAgent().run(state, _NoCaptureCtxStub(tools))
+
+    assert result.success is True
+    preflight = result.data["vision_preflight"]
+    assert preflight["schema"] == "vision_preflight.v1"
+    assert preflight["status"] == "execution_ready_pending_approval"
+    assert preflight["capture_performed"] is False
+    assert preflight["actuation_performed"] is False
+    assert preflight["run_id"] == state.run_id
+    assert preflight["printer_artifact_sha256"] == artifact_sha256
+    assert result.data["observation"]["transfer_readiness"]["ready"] is False
+    assert result.data["observation"]["transfer_readiness"]["status"] == "preflight_only"
+    assert result.data["requested_next_stage"] == "manipulation"
+
+
+def test_vision_rejects_stale_or_cross_specimen_printer_preflight(tmp_path: Path) -> None:
+    artifact = tmp_path / "stale.gcode.3mf"
+    artifact.write_bytes(b"stale artifact")
+    state = _state()
+    state.current_experiment_spec["execution_policy"] = {
+        "printer": "preflight_only",
+        "manipulation": "preflight_only",
+    }
+    base = {
+        "schema": "printer_preflight.v1",
+        "status": "execution_ready_pending_approval",
+        "actuation_performed": False,
+        "upload_performed": False,
+        "start_command_published": False,
+        "immutable_artifact_path": str(artifact),
+        "artifact_sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
+    }
+
+    state.run_metadata["printer_preflight"] = {
+        **base,
+        "run_id": "different-run",
+        "specimen_id": "specimen-001",
+    }
+    assert VisionAgent._no_actuation_transfer_preflight(state) == {}
+
+    state.run_metadata["printer_preflight"] = {
+        **base,
+        "run_id": state.run_id,
+        "specimen_id": "different-specimen",
+    }
+    assert VisionAgent._no_actuation_transfer_preflight(state) == {}
+
+    artifact.write_bytes(b"mutated after preflight")
+    state.run_metadata["printer_preflight"] = {
+        **base,
+        "run_id": state.run_id,
+        "specimen_id": "specimen-001",
+    }
+    assert VisionAgent._no_actuation_transfer_preflight(state) == {}
 
 
 def _write_active_cam_frame(path: Path, *, specimen: bool) -> None:

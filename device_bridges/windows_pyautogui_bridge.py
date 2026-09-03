@@ -1904,7 +1904,7 @@ class WindowsPyAutoGUIBridge(BaseBridge):
     ) -> dict[str, Any]:
         started = time.perf_counter()
         try:
-            with httpx.Client(timeout=self.config.request_timeout_sec) as client:
+            with httpx.Client(timeout=self._live_post_timeout(path, payload)) as client:
                 response = client.post(
                     self._url(path, connection_payload),
                     headers=self._headers(connection_payload),
@@ -1966,6 +1966,37 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         if normalized.get("output_artifacts"):
             normalized = self._pull_live_artifacts(normalized)
         return normalized
+
+    def _live_post_timeout(self, path: str, payload: dict[str, Any]) -> float | httpx.Timeout:
+        base_timeout = max(float(self.config.request_timeout_sec), 0.1)
+        if path != "/execute":
+            return base_timeout
+        sequence = payload.get("sequence") if isinstance(payload.get("sequence"), list) else []
+        declared_wait = 0.0
+        for action in sequence:
+            if not isinstance(action, dict):
+                continue
+            timeout_s = action.get("timeout_s")
+            if isinstance(timeout_s, (int, float)) and not isinstance(timeout_s, bool):
+                declared_wait += max(float(timeout_s), 0.0)
+            if str(action.get("action") or "") == "wait":
+                seconds = action.get("seconds", action.get("duration_sec"))
+                if isinstance(seconds, (int, float)) and not isinstance(seconds, bool):
+                    declared_wait += max(float(seconds), 0.0)
+        declared_execution_timeout = payload.get("declared_execution_timeout_s")
+        if isinstance(declared_execution_timeout, (int, float)) and not isinstance(
+            declared_execution_timeout, bool
+        ):
+            declared_wait = max(declared_wait, max(float(declared_execution_timeout), 0.0))
+        if declared_wait <= base_timeout:
+            return base_timeout
+        read_timeout = min(declared_wait + 30.0, 4 * 60 * 60.0)
+        return httpx.Timeout(
+            connect=min(base_timeout, 10.0),
+            read=read_timeout,
+            write=base_timeout,
+            pool=base_timeout,
+        )
 
     @staticmethod
     def _probe_utm_csv_bytes(data: bytes) -> dict[str, Any]:

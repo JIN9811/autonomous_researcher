@@ -49,7 +49,7 @@
       "owner": "test method derived value"
     },
     "pretest_inter_jig_distance": {
-      "value": 30.5,
+      "value": 32.0,
       "unit": "mm",
       "fixed": false,
       "intent": "Move the platen to the current pre-test approach position",
@@ -72,7 +72,7 @@
       "use": "Manual initial robot-entry height reference"
     },
     {
-      "file": "images/02_pretest_height_30_5mm.png",
+      "file": "images/02_pretest_height_32mm.png",
       "timestamp_s": 40.0,
       "use": "Pre-test ready state near the configured inter-jig distance"
     },
@@ -92,9 +92,9 @@
       "use": "Tests Completed UI state; displayed values are non-normative manual-demo values"
     },
     {
-      "file": "images/06_auto_return_height_30_5mm.png",
+      "file": "images/06_auto_return_height_32mm.png",
       "timestamp_s": 75.0,
-      "use": "Automatic return completed near Height 30.5 mm"
+      "use": "Automatic return completed at Height 32 mm"
     },
     {
       "file": "images/07_next_cycle_height_120mm.png",
@@ -140,7 +140,7 @@
     {
       "id": "run_test_and_auto_return",
       "before": {
-        "file": "images/02_pretest_height_30_5mm.png",
+        "file": "images/02_pretest_height_32mm.png",
         "timestamp_s": 40.0
       },
       "during": {
@@ -159,7 +159,7 @@
         "visual_cues": ["Tests Completed message", "Return enabled", "result controls available"]
       },
       "after_auto_return": {
-        "file": "images/06_auto_return_height_30_5mm.png",
+        "file": "images/06_auto_return_height_32mm.png",
         "timestamp_s": 75.0,
         "visual_cues": ["Height stable", "equipment motion stopped"]
       },
@@ -168,7 +168,7 @@
     {
       "id": "export_raw_csv",
       "before": {
-        "file": "images/06_auto_return_height_30_5mm.png",
+        "file": "images/06_auto_return_height_32mm.png",
         "timestamp_s": 75.0
       },
       "control": "images/locators/export_and_next_test_controls.png",

@@ -159,11 +159,11 @@ with zipfile.ZipFile(output_dir / export_name, "w") as archive:
     result = runner.slice(source_path=source, specimen_id="specimen")
 
     assert result["ok"] is True
-    assert "--load-settings" not in result["command"]
-    assert "--load-filaments" not in result["command"]
+    assert "--load-settings" in result["command"]
+    assert "--load-filaments" in result["command"]
     profile = result["slicer_profile"]
     assert profile["preserve_bambu_defaults"] is True
-    assert profile["auto_no_skirt_profile"] is False
+    assert profile["auto_no_skirt_profile"] is True
     assert result["front_test_line_removal"]["removed"] is True
     with zipfile.ZipFile(result["sliced_artifact_path"]) as archive:
         plate_gcode = archive.read("Metadata/plate_1.gcode").decode("utf-8")
@@ -2845,11 +2845,78 @@ def test_test_mode_installed_printer_autoejection_uses_actual_sliced_artifact_bo
     assert "; atr_print_body_omitted=true" in gcode
     assert "; atr_assumed_object_bounds_mm=" in gcode
     assert "G0 Z10.000 F3000" in gcode
-    assert gcode.index("G0 Z10.000 F3000") < gcode.index("G0 X50.000 Y245.000")
+    assert gcode.index("G0 Z20.000 F3000") < gcode.index("G0 X50.000 Y245.000")
+    assert gcode.index("G0 X50.000 Y245.000") < gcode.index("G0 Z10.000 F3000")
     assert "G0 Z2.000 F3000" not in gcode
     assert "G0 Z22.000 F3000" not in gcode
     assert "G0 X50.000 Y245.000" in gcode
     assert "G0 X128.000 Y245.000" not in gcode
+
+
+def test_printer_preflight_builds_position_aware_actual_print_artifact_without_network(tmp_path: Path) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+    manager.save_autoejection_config({"enabled": True, "provider": "bambu_gcode_patch", "push_direction": "center"})
+    sliced = tmp_path / "candidate-7.gcode.3mf"
+    _write_minimal_bambu_gcode_3mf(
+        sliced,
+        gcode="\n".join(
+            [
+                "G90",
+                "M82",
+                "G92 E0",
+                "G1 X30 Y40 Z0.2 E0.1 F1200",
+                "G1 X70 Y40 Z0.2 E0.2 F1200",
+                "G1 X70 Y80 Z6.0 E0.3 F1200",
+                "G1 X30 Y80 Z12.0 E0.4 F1200",
+                "M84",
+            ]
+        ),
+    )
+
+    class Tripwire:
+        def __getattr__(self, name):
+            raise AssertionError(f"printer preflight must not call network method: {name}")
+
+    manager.live_probe = Tripwire()
+    manager.mqtt_client = Tripwire()
+    manager.ftps_client = Tripwire()
+
+    result = manager.prepare(
+        {
+            "runtime_mode": "test",
+            "execution_policy_mode": "preflight_only",
+            "test_printer_path": "physical_print",
+            "bambu_artifact_path": str(sliced),
+            "specimen_id": "candidate-7",
+            "run_id": "run-safe",
+            "print": {
+                "start_immediately": True,
+                "physical_intent": True,
+                "confirm_physical_print": True,
+            },
+            "ejection": {"enabled": True, "allow_ejection": True, "position": "center"},
+        }
+    )
+
+    preflight = result["printer_preflight"]
+    patched = Path(preflight["immutable_artifact_path"])
+    assert result["ok"] is True
+    assert result["status"] == "execution_ready_pending_approval"
+    assert preflight["actuation_performed"] is False
+    assert preflight["upload_performed"] is False
+    assert preflight["start_command_published"] is False
+    assert preflight["specimen_id"] == "candidate-7"
+    assert preflight["plate_id"] == 1
+    assert preflight["source_object_bounds_mm"]["source"] == "extrusion_moves"
+    assert preflight["source_object_bounds_mm"]["center_x_mm"] == 50.0
+    assert preflight["source_object_bounds_mm"]["center_y_mm"] == 60.0
+    assert preflight["artifact_sha256"] == hashlib.sha256(patched.read_bytes()).hexdigest()
+    assert preflight["artifact_plate_validation"]["ok"] is True
+    with zipfile.ZipFile(patched) as archive:
+        gcode = archive.read("Metadata/plate_1.gcode").decode("utf-8")
+    assert "G1 X30 Y40 Z0.2 E0.1 F1200" in gcode
+    assert "; atr.bambu.autoejection.v1" in gcode
+    assert "G0 X50.000 Y245.000" in gcode
 
 
 def test_test_mode_physical_print_keeps_actual_print_body_when_autoejection_is_enabled(tmp_path: Path) -> None:
@@ -2905,16 +2972,8 @@ def test_test_mode_physical_print_keeps_actual_print_body_when_autoejection_is_e
         def probe_storage(self, *, host: str, username: str, access_code: str, timeout_sec: float, write_probe: bool = False) -> dict:
             return {"ok": True, "storage": "ftps", "selected_remote_dir": "cache"}
 
-        def upload_file(self, *, local_path: Path, remote_path: str, host: str, username: str, access_code: str, timeout_sec: float, delete_after: bool = False) -> dict:
-            return {
-                "ok": True,
-                "status": "uploaded",
-                "storage": "ftps",
-                "local_path": str(local_path),
-                "remote_path": remote_path,
-                "sha256": hashlib.sha256(Path(local_path).read_bytes()).hexdigest(),
-                "delete_after": delete_after,
-            }
+        def upload_file(self, **kwargs) -> dict:
+            raise AssertionError("physical_print must use the printer-fetchable HTTP artifact route")
 
     manager.live_probe = FakeProbe()
     manager.mqtt_client = FakeMqttClient()
@@ -2927,11 +2986,14 @@ def test_test_mode_physical_print_keeps_actual_print_body_when_autoejection_is_e
             "allow_test_printer_live": True,
             "test_printer_transport": "real",
             "bambu_artifact_path": str(sliced),
+            "prefer_http_artifact": True,
+            "public_base_url": "http://192.0.2.100:7860",
             "print": {
                 "start_immediately": True,
                 "physical_intent": True,
                 "confirm_physical_print": True,
                 "stop_after_start": False,
+                "prefer_http_artifact": True,
             },
             "ejection": {
                 "enabled": True,
@@ -2943,9 +3005,14 @@ def test_test_mode_physical_print_keeps_actual_print_body_when_autoejection_is_e
 
     assert result["ok"] is True
     assert result["ejection_only_project_file"] is False
-    assert result["upload"]["local_path"].endswith(".autoeject.gcode.3mf")
-    assert not result["upload"]["local_path"].endswith(".ejection-test.gcode.3mf")
-    with zipfile.ZipFile(result["upload"]["local_path"]) as archive:
+    assert result["upload"]["route"] == "http_artifact"
+    assert result["project_file_draft"]["payload"]["print"]["url"].startswith(
+        "http://192.0.2.100:7860/printer-artifacts/bambu/"
+    )
+    exported_path = result["upload"]["artifact"]["export_path"]
+    assert exported_path.endswith(".autoeject.gcode.3mf")
+    assert not exported_path.endswith(".ejection-test.gcode.3mf")
+    with zipfile.ZipFile(exported_path) as archive:
         gcode = archive.read("Metadata/plate_1.gcode").decode("utf-8")
     assert "E0.1" in gcode
     assert "E0.4" in gcode
@@ -2956,6 +3023,100 @@ def test_test_mode_physical_print_keeps_actual_print_body_when_autoejection_is_e
     assert "G0 Z10.000 F3000" not in gcode
     assert "M73 P100 R0" in gcode
     assert gcode.index("; atr.bambu.autoejection.end") < gcode.index("M73 P100 R0")
+
+
+def test_physical_print_blocks_upload_if_patched_artifact_sha_changes_before_transfer(tmp_path: Path) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+    profile = manager.config.default_profile
+    BambuConnectionMemory(profile.connection_memory_path).save_from_payload(
+        {
+            "host": "192.0.2.42",
+            "serial": "20PTEST000001",
+            "lan_mode_confirmed": True,
+            "developer_mode_confirmed": True,
+            "auth": {"mode": "lan_access_code", "username": "bblp", "access_code": "secret"},
+        }
+    )
+    manager.save_autoejection_config({"enabled": True, "provider": "bambu_gcode_patch"})
+    sliced = tmp_path / "specimen.gcode.3mf"
+    _write_minimal_bambu_gcode_3mf(
+        sliced,
+        gcode="G90\nM82\nG92 E0\nG1 X30 Y40 Z0.2 E0.1\nG1 X70 Y80 Z30 E0.4\nM84\n",
+    )
+
+    class FakeProbe:
+        def probe_tls_port(self, host: str, port: int, timeout_sec: float) -> dict:
+            return {"ok": True, "port": port}
+
+    class FakeMqttClient:
+        def read_snapshot(self, **kwargs) -> dict:
+            return {"ok": True, "received_at": "now", "report": {"print": {"gcode_state": "IDLE"}}}
+
+    class UploadTripwire:
+        def probe_storage(self, **kwargs) -> dict:
+            return {"ok": True, "storage": "ftps", "selected_remote_dir": "cache"}
+
+        def upload_file(self, **kwargs) -> dict:
+            raise AssertionError("SHA-mismatched artifact must be blocked before FTPS upload")
+
+    real_patch = manager._patch_bambu_native_autoejection_for_prepare
+
+    def tampering_patch(**kwargs) -> dict:
+        result = real_patch(**kwargs)
+        Path(result["patched_artifact_path"]).write_bytes(
+            Path(result["patched_artifact_path"]).read_bytes() + b"tampered-after-patch"
+        )
+        return result
+
+    manager.live_probe = FakeProbe()
+    manager.mqtt_client = FakeMqttClient()
+    manager.ftps_client = UploadTripwire()
+    manager._patch_bambu_native_autoejection_for_prepare = tampering_patch  # type: ignore[method-assign]
+
+    result = manager.prepare(
+        {
+            "runtime_mode": "test",
+            "test_printer_path": "physical_print",
+            "allow_test_printer_live": True,
+            "test_printer_transport": "real",
+            "bambu_artifact_path": str(sliced),
+            "print": {"start_immediately": True, "physical_intent": True, "confirm_physical_print": True},
+            "ejection": {"enabled": True, "allow_ejection": True, "position": "center"},
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "BAMBU_ARTIFACT_SHA256_MISMATCH"
+
+
+def test_physical_print_blocks_start_if_local_artifact_sha_changes_after_upload(tmp_path: Path) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+    artifact = tmp_path / "immutable.gcode.3mf"
+    _write_minimal_bambu_gcode_3mf(artifact)
+    expected_sha = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    artifact.write_bytes(artifact.read_bytes() + b"tampered-after-upload")
+
+    class PublishTripwire:
+        def publish_project_file_command(self, **kwargs) -> dict:
+            raise AssertionError("SHA-mismatched artifact must be blocked before MQTT start")
+
+    manager.mqtt_client = PublishTripwire()
+    result = manager._publish_bambu_project_file_start(
+        connection={"serial": "20PTEST000001", "username": "bblp"},
+        raw_connection={"host": "192.0.2.42"},
+        raw_auth={"access_code": "secret"},
+        payload={"runtime_mode": "test", "test_printer_path": "physical_print"},
+        project_file_draft={"ok": True, "topic": "device/20PTEST000001/request", "payload": {"print": {}}},
+        upload_result={"ok": True, "remote_path": "cache/immutable.gcode.3mf", "sha256": expected_sha},
+        gate_ready=True,
+        normalized_report={"state": "IDLE"},
+        local_artifact_path=artifact,
+        expected_artifact_sha256=expected_sha,
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "BAMBU_ARTIFACT_SHA256_MISMATCH"
+    assert result["published"] is False
 
 
 def test_prefer_http_artifact_skips_ftps_upload_for_installed_printer_ejection_project(tmp_path: Path) -> None:

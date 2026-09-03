@@ -53,6 +53,13 @@ DEFAULT_METRICS = (
     ),
     _metric("energy_density_mj_per_mm3", "Energy density", "energy_density_mJ_per_mm3", "mJ/mm3", "energy_density"),
     _metric(
+        "energy_density_50pct_mj_per_m3",
+        "Volumetric energy absorption to 50% compressive strain",
+        "energy_density_50pct_MJ_per_m3",
+        "MJ/m3",
+        "energy_density",
+    ),
+    _metric(
         "specific_energy_absorption_j_per_g",
         "Specific energy absorption",
         "specific_energy_absorption_J_per_g",

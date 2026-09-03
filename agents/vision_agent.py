@@ -2443,10 +2443,178 @@ class VisionAgent(BaseAgent):
                 "message": str(exc),
             }
 
+    @staticmethod
+    def _no_actuation_transfer_preflight(state: OrchestratorState) -> dict[str, Any]:
+        """Resolve a printer-to-VLA plan without pretending a specimen was observed."""
+        spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        policy = spec.get("execution_policy") if isinstance(spec.get("execution_policy"), dict) else {}
+        if str(policy.get("printer") or "").strip().lower() != "preflight_only":
+            return {}
+        if str(policy.get("manipulation") or "").strip().lower() != "preflight_only":
+            return {}
+        metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
+        printer = metadata.get("printer_preflight") if isinstance(metadata.get("printer_preflight"), dict) else {}
+        if printer.get("schema") != "printer_preflight.v1":
+            return {}
+        if printer.get("status") != "execution_ready_pending_approval":
+            return {}
+        if str(printer.get("run_id") or "").strip() != str(state.run_id or "").strip():
+            return {}
+        specimen = VisionAgent._specimen_result(state)
+        expected_specimen_id = str(specimen.get("specimen_id") or "").strip()
+        printer_specimen_id = str(printer.get("specimen_id") or "").strip()
+        if not expected_specimen_id or printer_specimen_id != expected_specimen_id:
+            return {}
+        expected_candidate_id = str(specimen.get("candidate_id") or "").strip()
+        printer_candidate_id = str(printer.get("candidate_id") or "").strip()
+        if printer_candidate_id and expected_candidate_id and printer_candidate_id != expected_candidate_id:
+            return {}
+        if any(
+            bool(printer.get(key))
+            for key in ("actuation_performed", "upload_performed", "start_command_published", "print_started")
+        ):
+            return {}
+        artifact_path = str(
+            printer.get("immutable_artifact_path")
+            or printer.get("artifact_path")
+            or ""
+        ).strip()
+        artifact_sha256 = str(printer.get("artifact_sha256") or "").strip()
+        if not artifact_path or not artifact_sha256:
+            return {}
+        if "://" not in artifact_path:
+            local_artifact = Path(artifact_path).expanduser()
+            if not local_artifact.is_file():
+                return {}
+            if hashlib.sha256(local_artifact.read_bytes()).hexdigest() != artifact_sha256:
+                return {}
+        return printer
+
+    def _planned_transfer_result(
+        self,
+        *,
+        state: OrchestratorState,
+        frame_id: str,
+        specimen: dict[str, Any],
+        printer_preflight: dict[str, Any],
+    ) -> AgentResult:
+        specimen_id = str(printer_preflight.get("specimen_id") or specimen.get("specimen_id") or "")
+        bounds = (
+            printer_preflight.get("source_object_bounds_mm")
+            if isinstance(printer_preflight.get("source_object_bounds_mm"), dict)
+            else {}
+        )
+        observation = {
+            "schema": "vision_preflight_observation.v1",
+            "frame_id": frame_id,
+            "observation_id": f"preflight-{frame_id}",
+            "source": "printer_artifact_geometry",
+            "camera": "not_captured",
+            "summary": "Printer artifact transfer geometry validated; physical perception deferred until execution.",
+            "anomaly": False,
+            "specimen_id": specimen_id,
+            "pose_estimate": {},
+            "pickup_target": {
+                "source_location": "3dp_output_area",
+                "target_location": "utm_fixture",
+                "object_bounds_mm": bounds,
+                "physical_pose_available": False,
+            },
+            "transfer_readiness": {
+                "ready": False,
+                "status": "preflight_only",
+                "blocking_reason": "physical_specimen_not_created",
+                "physical_observation_performed": False,
+            },
+            "agent_signals": [],
+            "vision_signal": {
+                "schema": "vision_signal.v1",
+                "status": "preflight_only",
+                "signals": [],
+            },
+            "utm_runtime_status": {
+                "ok": True,
+                "status": "not_started_preflight_only",
+                "actuation_performed": False,
+            },
+        }
+        preflight = {
+            "schema": "vision_preflight.v1",
+            "run_id": state.run_id,
+            "status": "execution_ready_pending_approval",
+            "capture_performed": False,
+            "actuation_performed": False,
+            "would_execute_tools": ["lerobot.active_robot_cam.capture", "camera.capture"],
+            "planned_task": "post_ejection_basket_check",
+            "consumer": "manipulation_agent",
+            "specimen_id": specimen_id,
+            "printer_artifact_path": str(
+                printer_preflight.get("immutable_artifact_path")
+                or printer_preflight.get("artifact_path")
+                or ""
+            ),
+            "printer_artifact_sha256": str(printer_preflight.get("artifact_sha256") or ""),
+            "source_object_bounds_mm": bounds,
+        }
+        vision_report = {
+            "schema": "vision_report.v1",
+            "status": "preflight_complete",
+            "observation_id": observation["observation_id"],
+            "signal_board": [],
+            "transfer_readiness": observation["transfer_readiness"],
+            "safety_anomaly": {"anomaly": False},
+        }
+        agent_report = {
+            "schema": "vision_agent_report.v1",
+            "status": "preflight_complete",
+            "camera_health": {"status": "not_started_preflight_only"},
+            "handoff_recommendations": {
+                "status": "execution_ready_pending_approval",
+                "recommended_next_agent": "manipulation_agent",
+            },
+        }
+        decision = {
+            "decision_id": "vision.transfer_preflight",
+            "status": "pass",
+            "rationale": "Transfer inputs are resolved from the immutable printer artifact; camera capture remains deferred.",
+        }
+        return AgentResult(
+            success=True,
+            summary="Vision transfer preflight complete without capture",
+            data={
+                "observation": observation,
+                "vision_preflight": preflight,
+                "vision_report": vision_report,
+                "vision_agent_report": agent_report,
+                "vision_signal": observation["vision_signal"],
+                "handoff_packet": preflight,
+                "decisions": [decision],
+                "metrics": {"capture_performed": 0, "physical_detection_claimed": 0},
+                "evidence_refs": [
+                    {
+                        "type": "printer_artifact",
+                        "path": preflight["printer_artifact_path"],
+                        "sha256": preflight["printer_artifact_sha256"],
+                    }
+                ],
+                "requested_next_stage": "manipulation",
+                "transition_decision": "vision_preflight_complete",
+            },
+            next_hint="manipulation",
+        )
+
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         frame_id = f"frame-{state.loop_count}-{state.stage.value}"
         timeout_s = 30.0 if state.mode == Mode.TEST else None
         specimen = self._specimen_result(state)
+        printer_preflight = self._no_actuation_transfer_preflight(state)
+        if printer_preflight:
+            return self._planned_transfer_result(
+                state=state,
+                frame_id=frame_id,
+                specimen=specimen,
+                printer_preflight=printer_preflight,
+            )
         utm_runtime_status = self._auto_start_utm_runtime(state, ctx)
         try:
             protocol = await ctx.complete(

@@ -32,8 +32,20 @@ def test_utm_template_builds_the_recorded_cycle_without_runtime_bindings() -> No
         block["skill"] == {"skill_id": "", "skill_version": ""}
         for block in flow["blocks"]
     )
-    assert all(block["vision"]["enabled"] is False for block in flow["blocks"])
-    assert all(block["vision"]["task_id"] == "" for block in flow["blocks"])
+    passive_vision = {
+        block["id"]: (
+            block["vision"]["task_id"],
+            block["vision"]["result_label"],
+        )
+        for block in flow["blocks"]
+        if block["vision"]["enabled"]
+    }
+    assert passive_vision == {
+        "prepare_next_specimen": ("utm_state_working", "WORKING"),
+        "start_test": ("utm_motion_down", "DOWN"),
+        "restore_robot_clearance": ("utm_state_not_working", "NOT WORKING"),
+    }
+    assert all(block["vision"]["blocking"] is False for block in flow["blocks"])
     assert all(block["agentic"]["failed"] == "__blocked__" for block in flow["blocks"])
     assert [block["agentic"]["completed"] for block in flow["blocks"]] == [
         "next",

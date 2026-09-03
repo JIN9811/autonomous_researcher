@@ -105,7 +105,7 @@ def test_stages_eight_bounded_utm_skills_and_binds_exact_deployed_versions(tmp_p
         for item in actions_by_block["start_test"]
         if item["action"] in {"wait_until_image", "click"}
     ] == [
-        "start_height_30_5_mm",
+        "start_height_32_mm",
         "start_test",
         "start_test_confirm_button",
         "start_test_confirm_button",
@@ -114,12 +114,15 @@ def test_stages_eight_bounded_utm_skills_and_binds_exact_deployed_versions(tmp_p
     height_interlock = next(
         item
         for item in actions_by_block["start_test"]
-        if item.get("target") == "start_height_30_5_mm"
+        if item.get("target") == "start_height_32_mm"
     )
     assert height_interlock["required"] is True
     assert height_interlock["timeout_s"] == 5
     assert [candidate["source"] for candidate in height_interlock["image_candidates"]] == [
-        "start_height_30_5mm.png"
+        "start_height_32mm.png"
+    ]
+    assert [candidate["sha256"] for candidate in height_interlock["image_candidates"]] == [
+        "90b06fe4be75f8203c28059e58444ca59fa7aac547927f045a60002d965f5aa0"
     ]
     assert all(candidate["confidence"] == 0.9 for candidate in height_interlock["image_candidates"])
     confirm_actions = [
@@ -139,6 +142,12 @@ def test_stages_eight_bounded_utm_skills_and_binds_exact_deployed_versions(tmp_p
         for item in confirm_actions
         for candidate in item["image_candidates"]
     )
+    testing_state = next(
+        item
+        for item in actions_by_block["start_test"]
+        if item.get("target") == "testing_state"
+    )
+    assert testing_state["timeout_s"] == 120
     assert all(
         item["action"] in {"wait_until_image", "screenshot"}
         for item in actions_by_block["monitor_contact_and_run"]
@@ -152,16 +161,19 @@ def test_stages_eight_bounded_utm_skills_and_binds_exact_deployed_versions(tmp_p
         item.get("target")
         for item in actions_by_block["await_auto_return"]
         if item["action"] == "wait_until_image"
-    ] == ["tests_completed", "auto_return_height_30_5_mm"]
+    ] == ["tests_completed", "auto_return_height_32_mm"]
     auto_return_height = next(
         item
         for item in actions_by_block["await_auto_return"]
-        if item.get("target") == "auto_return_height_30_5_mm"
+        if item.get("target") == "auto_return_height_32_mm"
     )
     assert auto_return_height["required"] is True
     assert auto_return_height["timeout_s"] == 3600
     assert [candidate["source"] for candidate in auto_return_height["image_candidates"]] == [
-        "start_height_30_5mm.png"
+        "start_height_32mm.png"
+    ]
+    assert [candidate["sha256"] for candidate in auto_return_height["image_candidates"]] == [
+        "90b06fe4be75f8203c28059e58444ca59fa7aac547927f045a60002d965f5aa0"
     ]
     assert all(candidate["confidence"] == 0.9 for candidate in auto_return_height["image_candidates"])
     assert [item["action"] for item in actions_by_block["restore_robot_clearance"]] == [
@@ -352,13 +364,22 @@ def test_stages_eight_bounded_utm_skills_and_binds_exact_deployed_versions(tmp_p
         (block["skill"]["skill_id"], block["skill"]["skill_version"])
         for block in flow["blocks"]
     ] == list(UTM_SKILL_BINDINGS.values())
-    assert all(block["vision"]["enabled"] is False for block in flow["blocks"])
+    assert {
+        block["id"]: block["vision"]["task_id"]
+        for block in flow["blocks"]
+        if block["vision"]["enabled"]
+    } == {
+        "prepare_next_specimen": "utm_state_working",
+        "start_test": "utm_motion_down",
+        "restore_robot_clearance": "utm_state_not_working",
+    }
+    assert all(block["vision"]["blocking"] is False for block in flow["blocks"])
     assert all(block["skill"]["skill_id"] != "equipment_demonstration" for block in flow["blocks"])
 
 
 def test_visual_completion_upgrades_replace_only_changed_skill_versions() -> None:
-    assert UTM_SKILL_BINDINGS["start_test"] == ("utm_start_test", "1.0.8")
-    assert UTM_SKILL_BINDINGS["await_auto_return"] == ("utm_await_auto_return", "1.0.7")
+    assert UTM_SKILL_BINDINGS["start_test"] == ("utm_start_test", "1.0.11")
+    assert UTM_SKILL_BINDINGS["await_auto_return"] == ("utm_await_auto_return", "1.0.9")
     assert UTM_SKILL_BINDINGS["save_raw_data"] == ("utm_save_raw_data", "1.0.11")
     assert UTM_SKILL_BINDINGS["validate_raw_data"] == ("utm_validate_raw_data", "1.0.7")
     assert UTM_SKILL_BINDINGS["advance_without_save"] == ("utm_advance_without_save", "1.0.8")

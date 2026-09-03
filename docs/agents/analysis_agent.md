@@ -12,8 +12,8 @@ source_of_truth:
   - device_bridges/cae_bridge.py
   - experiments/schemas.py
   - app/main.py
-last_verified: 2026-08-09
-verified_against: 0b7627b
+last_verified: 2026-09-02
+verified_against: working-tree-2026-09-02
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -30,7 +30,8 @@ supersedes: []
 ## Summary
 
 `AnalysisAgent` converts an identifiable equipment artifact into a canonical
-curve, quality record, UTM metrics, optional CAE/FEM comparison, objective and
+force-displacement record and specimen-normalized engineering stress-strain
+record, quality record, UTM metrics, optional CAE/FEM comparison, objective and
 uncertainty, versioned analysis artifacts, experiment evaluation, and BO
 handoff. It preserves the distinction between measured input and derived or
 simulated output.
@@ -53,6 +54,7 @@ and CAE APIs.
 | Hash and parse an equipment artifact | Assume an unidentifiable file is valid measurement |
 | Resolve columns/units and build canonical curve | Silently guess units needed for the result |
 | Compute bounded UTM metrics/objective/uncertainty | Replace raw evidence with derived values |
+| Normalize with initial apparent area and height | Relabel energy density as total energy |
 | Optionally run validated CAE/CalculiX | Describe simulation as physical measurement |
 | Emit evaluation and BO handoff | Select the next physical experiment itself |
 
@@ -91,9 +93,18 @@ measurement or solver-accuracy evidence.
 
 Input state includes equipment handoff/result, raw file path and hash context,
 format hints, units, experiment specification, previous experiments, and CAE
-configuration. Outputs include canonical curve, quality report, UTM metrics,
-CAE/FEM problem/results/comparison, objective score, uncertainty, decisions,
-analysis artifacts, experiment evaluation, and BO handoff.
+configuration. Outputs include canonical F-D and engineering S-S curves,
+quality report, UTM metrics, CAE/FEM problem/results/comparison, objective
+score, uncertainty, decisions, analysis artifacts, experiment evaluation, and
+BO handoff.
+
+Engineering stress is `F/A0` in MPa and engineering compressive strain is
+`delta/H0`, where `A0` and `H0` are the initial apparent area and height from
+the current experiment plan/specimen geometry. The default uncompiled BO
+objective is the S-S integral through 50% strain,
+`energy_density_50pct_MJ_per_m3`. Total F-D energy through the same boundary is
+retained as `energy_absorption_50pct_mJ`, with `W50 = V0 * U50` used as a
+dimensional cross-check.
 
 ## Internal Execution
 
@@ -101,7 +112,7 @@ analysis artifacts, experiment evaluation, and BO handoff.
 |---|---|---|
 | `01_receive_equipment_artifact`, `02_fingerprint_input_file` | receive/hash | missing/mismatch blocks |
 | `03_detect_format_and_parser`, `04_parse_raw_table`, `05_resolve_columns_and_units` | parse/normalize | unsupported format/unit blocks |
-| `06_build_canonical_curve`, `07_preprocess_curve`, `08_validate_curve_quality` | curve pipeline | quality pass/failure |
+| `06_build_canonical_curve`, `07_preprocess_curve`, `08_validate_curve_quality` | F-D preservation, S-S normalization, curve pipeline | quality pass/failure |
 | `09_compute_utm_metrics` | measured metrics | typed metrics |
 | `10_prepare_fem_problem`, `11_prepare_cae_calculix_payload`, `12_probe_cae_runtime` | optional CAE preparation | unavailable remains explicit |
 | `13_run_cae_calculix_analysis`, `14_compare_iteration_with_utm`, `15_accept_or_refine_fem` | iterative CAE path | compare/refine result |
@@ -208,20 +219,26 @@ unavailable/failed; do not substitute a synthetic physical value.
 ## Operator and GUI Surfaces
 
 CAE workspace configures and invokes bounded CAE runs. Live GUI Analysis report
-shows curves, UTM metrics, objective/uncertainty, FEM/CAE cards, comparisons,
-and artifacts. Report rendering is not numerical authority.
+shows a white-background publication-style engineering S-S figure with
+explicit percent-strain and MPa axes, UTM metrics, objective/uncertainty,
+FEM/CAE cards, comparisons, and artifacts. The line retains measured
+serrations without smoothing; report rendering is not numerical authority.
 
 ## Current Verification
 
 Verified against all 22 internal IDs, `cae.run_static_analysis`, three CAE API
-routes, schemas and handoff roles at baseline `0b7627b`. No new measurement or
-solver benchmark was executed.
+routes, engineering S-S normalization, the 50%-strain energy-density handoff,
+and the publication-style GUI contract on the 2026-09-02 working tree. No new
+physical measurement or solver benchmark was executed for this documentation
+update.
 
 ## Limitations and Known Gaps
 
-No paper-scoped evidence establishes parser coverage, unit inference accuracy,
-metric uncertainty calibration, CAE fidelity, or scientific validity. Optional
-solver availability varies.
+The cited compression literature supports the engineering normalization and
+energy-density dimensions, but it does not establish this implementation's
+parser coverage, unit inference accuracy, metric uncertainty calibration, CAE
+fidelity, or specimen-specific scientific validity. Optional solver
+availability varies.
 
 ## Related Documents
 
@@ -232,3 +249,4 @@ solver availability varies.
 - [Three-Level Control Model](../runtime/three_level_control_model.md)
 - [Legacy UTM Analysis Guideline](analysis_utm_runtime_guideline.txt)
 - [Legacy CAE Guideline](cae_analysis_runtime_guideline.txt)
+- [Stress-Strain and Energy-Density Design](../superpowers/specs/2026-09-02-analysis-stress-strain-energy-design.md)

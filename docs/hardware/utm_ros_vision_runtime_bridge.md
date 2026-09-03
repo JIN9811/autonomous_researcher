@@ -159,12 +159,13 @@ Saved operator override:
 memory/device_bridge/utm_camera_config.json
 ```
 
-Validated ATR runtime camera settings follow the cloned UTM `yuyv2rgb` camera
-flow with the local stable FPS:
+Validated ATR runtime camera settings use the fastest compatible BRIO profile
+measured through the complete ROS Vision stack:
 
 ```text
-640x480 @ 15fps
-pixel_format=yuyv2rgb
+640x480 @ 60fps
+pixel_format=mjpeg2rgb
+io_method=mmap
 brightness=128
 gain=-1
 ```
@@ -175,9 +176,9 @@ variables into the UTM runtime launch.
 
 Runtime FPS stability rule:
 
-- The cloned UTM README keeps `camera_rect` on `yuyv2rgb` by default and treats
-  `mjpeg2rgb` as an explicit test path. Keep ATR normal operation on
-  `pixel_format=yuyv2rgb`.
+- Keep ATR normal operation on `pixel_format=mjpeg2rgb` at 60 fps. On this
+  workstation, `yuyv2rgb` invokes an unaccelerated YUV422-to-RGB conversion and
+  produces substantially fewer frames through the complete Vision stack.
 - Before starting the UTM ROS process group, the bridge runs this best-effort
   V4L2 control against the saved camera device:
 
@@ -276,19 +277,22 @@ source /home/jin/external_repos/yolo_ros/install/setup.bash
 export YOLO_MODEL_PATH=/home/jin/external_repos/yolo_ros/models/yolov8m.pt
 v4l2-ctl --device=/dev/video0 --set-ctrl=exposure_dynamic_framerate=0
 export UTM_VISION_ROOT=/home/jin/external_repos/UTM
-export UTM_CAMERA_FPS=15.0
-export UTM_CAMERA_PIXEL_FORMAT=yuyv2rgb
+export UTM_CAMERA_FPS=60.0
+export UTM_CAMERA_PIXEL_FORMAT=mjpeg2rgb
 bash /home/jin/external_repos/UTM/scripts/start_utm_vision_stack.sh
 ```
 
 ## Low-Latency Image Transport Contract
 
-UTM camera streams are live evidence, not archival transport. Late frames are
-wrong frames. The runtime therefore uses sensor-style QoS wherever the active
-code path allows it:
+UTM camera streams are live evidence, not archival transport. The local FastDDS
+path requires RELIABLE delivery for the fragmented 640x480 RGB messages. All
+image endpoints use depth-one queues, and green-dot caps annotated image output
+at 30 fps. The UTM launcher also applies
+`config/fastdds_utm_shm.xml`: UDP remains available for discovery while local
+image payloads use a 16 MiB SHM segment instead of the default 512 KiB segment.
 
 ```text
-reliability: BEST_EFFORT
+reliability: RELIABLE
 history: KEEP_LAST
 depth: 1
 durability: VOLATILE
@@ -299,17 +303,20 @@ Applied locations:
 - ATR snapshot subscriber in `device_bridges/utm_runtime_bridge.py`.
 - ATR browser MJPEG subscriber worker in `device_bridges/utm_runtime_bridge.py`.
 - UTM `green_dot_monitor` image input subscriber and debug/output image publishers.
-- `yolo_ros` launch through `image_reliability:=2`, which maps to Best Effort
-  and already uses depth 1 inside the local `yolo_ros` nodes.
+- `yolo_ros` launch through `image_reliability:=1`, which maps to Reliable and
+  uses depth 1 inside the local `yolo_ros` nodes.
+- FastDDS transport profile in
+  `/home/jin/external_repos/UTM/config/fastdds_utm_shm.xml`, loaded automatically
+  by `scripts/start_utm_vision_stack.sh` with asynchronous publication.
 
-Current limitation:
+Measured reason:
 
-- The installed `ros-jazzy-usb-cam` publisher and `image_proc/rectify_node`
-  still report RELIABLE QoS on this workstation. `usb_cam` does not expose a
-  simple image publisher QoS override in the observed parameter list. If
-  `/camera/image_raw` itself drops below target FPS, the next fix should be a
-  source patch/custom camera publisher for `usb_cam -> image_raw`, not another
-  browser MJPEG change.
+- BEST_EFFORT delivered only 4.69 fps from a standalone `usb_cam` while the same
+  topic delivered 59.03 fps to a RELIABLE subscriber; V4L2 direct capture was
+  60.0 fps. With RELIABLE delivery, camera+rectifier+green-dot produced 50.78
+  fps, while the correctly typed `yolo_msgs/DetectionArray` output sustained
+  about 29.8 fps. Capping only the annotated image publisher at 30 fps preserves
+  the high-rate detector/state loop.
 
 Removed optimization:
 
@@ -455,6 +462,24 @@ root cause: active saved profile used mjpeg2rgb while the cloned UTM BRIO path e
 accepted profile: 640x480, 15 fps, yuyv2rgb, exposure_dynamic_framerate=0 before start
 verified route: /api/equipment/utm-runtime/frame-stream.mjpeg?topic=/image_utm&fps=15
 result: 457 frames / 30.1 s
+```
+
+2026-09-02 BRIO raw-input benchmark update (supersedes the active profile above):
+
+```text
+device link: USB 3, 5000M; V4L2 sustains YUYV 30 fps and MJPEG 60 fps directly
+usb_cam version: ROS Jazzy 0.8.1
+old full stack: yuyv2rgb 640x480 requested 15 fps -> raw 2.2 fps, image_utm 1.6 fps
+accepted full stack: mjpeg2rgb 640x480 requested 60 fps -> raw 9.1 fps, image_utm 8.4 fps
+60-second image_utm bins: 7.1, 9.3, 6.7, 8.7, 10.4, 8.3 fps; no monotonic slowdown
+rejected: userptr produced no frames; raw yuyv aborted; raw_mjpeg republish changed the topic/encoding contract
+required control: exposure_dynamic_framerate=0 before start
+follow-up root cause: BEST_EFFORT loses fragmented RGB samples, while uncapped all-RELIABLE fan-out eventually propagates slow-consumer backpressure
+accepted QoS: RELIABLE, KEEP_LAST, depth 1 for all image endpoints; `/image_utm` annotated output capped at 30 fps
+isolated rates: V4L2 60.0 fps; usb_cam BEST_EFFORT 4.69 fps vs RELIABLE 59.03 fps; RELIABLE green-dot output 50.78 fps; correctly typed YOLO detections about 29.8 fps
+root cause correction: the default FastDDS SHM segment was 512 KiB, smaller than one 640x480 BGR frame (921,600 bytes), while UDP socket receive buffers were only 212,992 bytes; the all-RELIABLE path therefore collapsed to about 4 fps after roughly two minutes
+accepted transport: custom UDPv4 discovery plus 16 MiB SHM segment and 1 MiB maximum SHM message; 180-second full-fanout test held JPEG and YOLO delivery at 26.5-29.1 fps without collapse
+GUI pacing: `/image_utm` is capped once in green-dot; the MJPEG worker does not apply a second frame filter, which keeps jittered input from being reduced to 18-22 fps
 ```
 
 ## D455F Specimen Pose Tracker Separation

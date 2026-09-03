@@ -205,6 +205,51 @@ def test_raw_csv_skill_modes_require_context_and_confirmation(monkeypatch, tmp_p
     ]
 
 
+def test_skill_test_passes_declared_runtime_context(monkeypatch, tmp_path: Path) -> None:
+    calls: list[dict] = []
+
+    class Registry:
+        def get(self, skill_id: str, version: str) -> dict:
+            assert (skill_id, version) == ("utm_validate_raw_data", "1.0.7")
+            return {
+                "manifest": {
+                    "lifecycle": "deployed",
+                    "enabled": True,
+                    "deployment": {"bridge_id": "windows-lab-1"},
+                },
+                "workflow": {
+                    "program_ids": ["utm_validate_raw_data_1_0_7_segment_001"],
+                    "steps": [{"action": "wait_for_file", "pattern": "{raw_csv_path}"}],
+                },
+            }
+
+        def record_test(self, skill_id: str, version: str, summary: dict) -> None:
+            return None
+
+    class Bridge:
+        def run(self, payload: dict) -> dict:
+            calls.append(dict(payload))
+            return {"ok": True, "status": "completed"}
+
+    monkeypatch.setattr(main_module, "_equipment_skill_registry", lambda: Registry())
+    monkeypatch.setattr(main_module, "_equipment_bridge", lambda: Bridge())
+    client = _client(monkeypatch, tmp_path)
+
+    response = client.post(
+        "/api/equipment/skills/utm_validate_raw_data/1.0.7/test",
+        json={
+            "runtime_mode": "dry_run",
+            "runtime_context": {
+                "raw_csv_path": r"C:\ATR\raw.csv",
+                "ignored": "not-declared",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert calls[0]["runtime_values"] == {"raw_csv_path": r"C:\ATR\raw.csv"}
+
+
 def test_saved_worker_update_routes_address_path_candidate_without_changing_selection(
     monkeypatch, tmp_path: Path
 ) -> None:

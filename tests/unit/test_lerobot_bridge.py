@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import shutil
 import socket
 import subprocess
@@ -1133,8 +1134,16 @@ def test_live_teleoperate_active_robot_cam_uses_wrapper_and_d405_direct_env(tmp_
     assert env["ATR_ACTIVE_ROBOT_CAM_CAMERA_PRIORITY"] == "d405,d455f"  # type: ignore[index]
     assert env["ATR_LEROBOT_SPECIMEN_CAMERA_KEY"] == "wrist"  # type: ignore[index]
     assert env["ATR_ACTIVE_ROBOT_CAM_D405_A4_CAMERA_TO_ISAAC_TRANSFORM"] == "direct"  # type: ignore[index]
-    assert env["ATR_ACTIVE_ROBOT_CAM_D405_A4_WIDTH_MM"] == "297.0"  # type: ignore[index]
-    assert env["ATR_ACTIVE_ROBOT_CAM_D405_A4_HEIGHT_MM"] == "210.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_D405_A4_WIDTH_MM"] == "170.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_D405_A4_HEIGHT_MM"] == "250.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_D405_A4_ISAAC_WIDTH_MM"] == "170.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_D405_A4_ISAAC_HEIGHT_MM"] == "250.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_D455F_A4_WIDTH_MM"] == "250.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_D455F_A4_HEIGHT_MM"] == "170.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_D455F_A4_ISAAC_WIDTH_MM"] == "170.0"  # type: ignore[index]
+    assert env["ATR_ACTIVE_ROBOT_CAM_D455F_A4_ISAAC_HEIGHT_MM"] == "250.0"  # type: ignore[index]
+    assert env["ATR_SPECIMEN_A4_WORLD_MIN_X_MM"] == "230.0"  # type: ignore[index]
+    assert env["ATR_SPECIMEN_A4_WORLD_MIN_Y_MM"] == "120.0"  # type: ignore[index]
     assert env["ATR_ACTIVE_ROBOT_CAM_D405_A4_WORLD_OFFSET_X_MM"] == "0.0"  # type: ignore[index]
     assert env["ATR_ACTIVE_ROBOT_CAM_D405_A4_WORLD_OFFSET_Y_MM"] == "0.0"  # type: ignore[index]
     assert env["ATR_ACTIVE_ROBOT_CAM_D455F_A4_WORLD_OFFSET_X_MM"] == "0.0"  # type: ignore[index]
@@ -3020,6 +3029,76 @@ def test_live_train_starts_passive_monitor_for_gui_training(tmp_path: Path) -> N
     assert result["workflow"] == "train"
     assert result["monitor"]["status"] == "running"
     assert result["monitor"]["pid"] == 456
+
+
+def test_train_background_defaults_enabled_in_request_schema() -> None:
+    request = LeRobotSessionRequest.model_validate({})
+
+    assert request.train_background is True
+
+
+def test_background_train_survives_bridge_shutdown_and_can_be_recovered_and_cancelled(
+    tmp_path: Path,
+) -> None:
+    bridge = _bridge(tmp_path)
+    dataset = tmp_path / "hf_datasets" / "jin" / "background-train"
+    _make_trainable_lerobot_dataset(dataset)
+    bridge._live_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._live_port_block_if_needed = lambda **_: None  # type: ignore[method-assign]
+    bridge._workflow_command = (  # type: ignore[method-assign]
+        lambda _profile, _workflow, _request, _args: [
+            sys.executable,
+            "-c",
+            "import time; time.sleep(120)",
+        ]
+    )
+    bridge._start_training_monitor = lambda _session, _request: {"status": "disabled"}  # type: ignore[method-assign]
+    pid = 0
+
+    try:
+        started = bridge.train_start(
+            {
+                "mode": "live",
+                "runtime_mode": "live",
+                "profile_id": "fake_omx_ai",
+                "dataset_repo_id": "jin/background-train",
+                "dataset_root": str(tmp_path / "hf_datasets"),
+                "policy_type": "act",
+                "steps": 100,
+                "confirm_live_execute": True,
+            }
+        )
+        pid = int(started["pid"])
+
+        assert started["ok"] is True
+        assert started["train_background"] is True
+        assert bridge.config.session_memory_path.is_file()
+
+        bridge.shutdown()
+        assert bridge._pid_alive(pid) is True
+
+        recovered_bridge = _bridge(tmp_path)
+        recovered = recovered_bridge.train_status(
+            {"mode": "live", "profile_id": "fake_omx_ai", "session_id": started["session_id"]}
+        )
+        assert recovered["status"] == "TRAINING"
+        assert recovered["pid"] == pid
+        assert recovered["train_background"] is True
+
+        cancelled = recovered_bridge.train_cancel(
+            {"mode": "live", "profile_id": "fake_omx_ai", "session_id": started["session_id"]}
+        )
+        assert cancelled["status"] == "CANCELLED"
+        deadline = time.time() + 5.0
+        while recovered_bridge._pid_alive(pid) and time.time() < deadline:
+            time.sleep(0.05)
+        assert recovered_bridge._pid_alive(pid) is False
+    finally:
+        if pid and bridge._pid_alive(pid):
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 def test_extra_camera_can_be_deleted_but_default_camera_is_protected(tmp_path: Path) -> None:
@@ -4985,6 +5064,94 @@ def test_rollout_stop_resets_all_tracked_rollout_sessions(tmp_path: Path) -> Non
     assert cleanup_called == ["rollout"]
     assert result["port_lease"]["reclaim_status"] == "attempted"
     assert any(item["step"] == "CLEANUP_LEROBOT_PROCESS_GROUPS" for item in result["step_trace"])
+
+
+def test_plc_rollout_stop_only_stops_opted_in_active_sessions(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    bridge._sessions["rollout-live-gui"] = {
+        "session_id": "rollout-live-gui",
+        "workflow": "rollout",
+        "profile_id": "fake_omx_ai",
+        "mode": "live",
+        "status": "POLICY_ACTIVE",
+        "returncode": None,
+        "pid": None,
+        "step_trace": [],
+        "created_at": "2026-09-03T00:00:00+00:00",
+        "plc_rollout_stop_enabled": True,
+    }
+    bridge._sessions["rollout-device"] = {
+        "session_id": "rollout-device",
+        "workflow": "rollout",
+        "profile_id": "fake_omx_ai",
+        "mode": "live",
+        "status": "POLICY_ACTIVE",
+        "returncode": None,
+        "pid": None,
+        "step_trace": [],
+        "created_at": "2026-09-03T00:00:01+00:00",
+        "plc_rollout_stop_enabled": False,
+    }
+
+    result = bridge.rollout_stop(
+        {
+            "mode": "live",
+            "reason": "plc_emergency_stop",
+            "emergency_source": "plc_pb2",
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "STOPPED"
+    assert result["stopped_session_ids"] == ["rollout-live-gui"]
+    assert bridge._sessions["rollout-live-gui"]["status"] == "STOPPED"
+    assert bridge._sessions["rollout-device"]["status"] == "POLICY_ACTIVE"
+
+
+def test_plc_rollout_stop_is_noop_when_active_session_did_not_opt_in(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    bridge._sessions["rollout-device"] = {
+        "session_id": "rollout-device",
+        "workflow": "rollout",
+        "profile_id": "fake_omx_ai",
+        "mode": "live",
+        "status": "POLICY_ACTIVE",
+        "returncode": None,
+        "pid": None,
+        "step_trace": [],
+        "created_at": "2026-09-03T00:00:00+00:00",
+        "plc_rollout_stop_enabled": False,
+    }
+
+    result = bridge.rollout_stop(
+        {
+            "mode": "live",
+            "reason": "plc_emergency_stop",
+            "emergency_source": "plc_pb2",
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "SKIPPED"
+    assert result["stopped_session_ids"] == []
+    assert bridge._sessions["rollout-device"]["status"] == "POLICY_ACTIVE"
+
+
+def test_rollout_start_exposes_plc_stop_session_setting(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+
+    result = bridge.rollout_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "policy_path": "fake://policy",
+            "plc_rollout_stop_enabled": True,
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["plc_rollout_stop_enabled"] is True
+    assert bridge._sessions[result["session_id"]]["plc_rollout_stop_enabled"] is True
 
 
 def test_rollout_action_clamp_defaults_to_disabled(tmp_path: Path) -> None:

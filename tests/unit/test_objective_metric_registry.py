@@ -21,6 +21,10 @@ def test_registry_exposes_analysis_metrics_with_units() -> None:
     energy_50pct = registry.get("energy_absorption_50pct_mj")
     assert energy_50pct.unit == "mJ"
     assert energy_50pct.source_path == "analysis.metrics.energy_absorption_50pct_mJ"
+    energy_density_50pct = registry.get("energy_density_50pct_mj_per_m3")
+    assert energy_density_50pct.unit == "MJ/m3"
+    assert energy_density_50pct.dimension == "energy_density"
+    assert energy_density_50pct.source_path == "analysis.metrics.energy_density_50pct_MJ_per_m3"
     assert registry.version_id.startswith("metric-registry-")
 
 

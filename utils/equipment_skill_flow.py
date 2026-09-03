@@ -200,6 +200,7 @@ def normalize_equipment_skill_flow(
         agentic = item.get("agentic") if isinstance(item.get("agentic"), dict) else {}
         vision = item.get("vision") if isinstance(item.get("vision"), dict) else {}
         vision_enabled = bool(vision.get("enabled", False))
+        vision_blocking = bool(vision.get("blocking", True))
         task_id = str(vision.get("task_id") or "").strip()
         legacy_condition_present = "condition" in vision
         legacy_condition = str(vision.get("condition") or "").strip()
@@ -215,6 +216,7 @@ def normalize_equipment_skill_flow(
             )
         if vision_enabled and not task_id:
             raise EquipmentSkillFlowError(f"{block_id}.vision.task_id is required")
+        vision_task = get_equipment_vision_task(task_id) if task_id else {}
         task = str(agentic.get("task") or item.get("label") or skill_id or "Equipment Task").strip()[:160]
         block = {
             "id": block_id,
@@ -227,7 +229,9 @@ def normalize_equipment_skill_flow(
             },
             "vision": {
                 "enabled": vision_enabled,
+                "blocking": vision_blocking,
                 "task_id": task_id,
+                "result_label": str(vision_task.get("result_label") or ""),
                 "detected": _route(vision.get("detected"), field=f"{block_id}.vision.detected", default=default_success),
                 "not_detected": _route(vision.get("not_detected"), field=f"{block_id}.vision.not_detected", default="__blocked__"),
                 "timeout": _route(vision.get("timeout"), field=f"{block_id}.vision.timeout", default="__blocked__"),
@@ -382,6 +386,7 @@ class EquipmentSkillFlowStore:
                         "position": {"x": 410 + index * 260, "y": 175},
                         "metadata": {
                             "control_level": "middle",
+                            "blocking": bool(block["vision"].get("blocking", True)),
                             "block_id": block["id"],
                             "task_id": vision_task["task_id"],
                             "check_id": vision_task["check_id"],
@@ -389,10 +394,11 @@ class EquipmentSkillFlowStore:
                         },
                     }
                 )
-                edges.append({"source": skill_node, "target": vision_node, "condition": "completed"})
-                edges.append({"source": vision_node, "target": success_target, "condition": "detected"})
-                for outcome in ("not_detected", "timeout", "error"):
-                    edges.append({"source": vision_node, "target": "__blocked__", "condition": outcome})
+                edges.append({"source": skill_node, "target": vision_node, "condition": "observe" if not block["vision"].get("blocking", True) else "completed"})
+                edges.append({"source": vision_node, "target": success_target, "condition": "observed" if not block["vision"].get("blocking", True) else "detected"})
+                if block["vision"].get("blocking", True):
+                    for outcome in ("not_detected", "timeout", "error"):
+                        edges.append({"source": vision_node, "target": "__blocked__", "condition": outcome})
             else:
                 edges.append({"source": skill_node, "target": success_target, "condition": "completed"})
         terminal_x = 420 + len(flow["blocks"]) * 260

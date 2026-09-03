@@ -68,6 +68,18 @@ class FakeUTMRuntimeManager:
         self.ros_frame_calls += 1
         return {"ok": True, "mode": "ros_image_topic", "topic": "/image_utm", "frame_available": True}
 
+    def frame_stream_status(self, *, topic="", fps=None, quality=82):
+        return {
+            "ok": True,
+            "status": "running",
+            "topic": topic or "/image_utm",
+            "requested_fps": float(fps or 30),
+            "measured_fps": 27.5,
+            "estimated_dropped_frames": 3,
+            "clients": 1,
+            "quality": quality,
+        }
+
     def camera_direct_frame(self):
         self.direct_frame_calls += 1
         return {"ok": True, "mode": "direct_v4l2_frame", "frame_available": False, "failure_code": "FAKE_FRAME"}
@@ -145,6 +157,22 @@ def test_utm_runtime_api_status_start_probe_graph_frame_stop(monkeypatch) -> Non
     assert cleanup["ok"] is True
     assert cleanup["tool"] == "utm.camera.cleanup"
     assert fake.cleanup_calls == 1
+
+
+def test_utm_runtime_stream_status_api_reports_actual_preview_rate(monkeypatch) -> None:
+    fake = FakeUTMRuntimeManager()
+    monkeypatch.setattr(app_main, "_utm_runtime_manager", fake, raising=False)
+    client = TestClient(app)
+
+    payload = client.get(
+        "/api/equipment/utm-runtime/frame-stream/status",
+        params={"topic": "/image_utm", "fps": 30, "quality": 82},
+    ).json()
+
+    assert payload["ok"] is True
+    assert payload["requested_fps"] == 30.0
+    assert payload["measured_fps"] == 27.5
+    assert payload["estimated_dropped_frames"] == 3
 
 
 def test_utm_camera_device_bridge_api(monkeypatch) -> None:

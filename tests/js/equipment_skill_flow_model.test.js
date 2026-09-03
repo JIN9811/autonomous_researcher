@@ -40,9 +40,11 @@ test("Vision is edited inside its owning Skill block", () => {
   let flow = model.addBlock(model.empty("utm_windows_v1"), { skill_id: "prepare", version: "1.0.0" });
   flow = model.updateBlock(flow, "block_01", "vision.enabled", true);
   flow = model.updateBlock(flow, "block_01", "vision.task_id", "utm_motion_confirm");
+  flow = model.updateBlock(flow, "block_01", "vision.blocking", false);
 
   assert.equal(flow.blocks[0].vision.enabled, true);
   assert.equal(flow.blocks[0].vision.task_id, "utm_motion_confirm");
+  assert.equal(flow.blocks[0].vision.blocking, false);
   assert.equal(flow.blocks[0].vision.condition, undefined);
 });
 

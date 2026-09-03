@@ -138,3 +138,176 @@ async def test_controller_completes_test_run(monkeypatch: pytest.MonkeyPatch) ->
         record["event_type"] == "node.completed" and record["payload"].get("workspace") == "unit_workspace"
         for record in log_records
     )
+
+
+@pytest.mark.asyncio
+async def test_safe_physical_printer_preflight_completes_twenty_redesign_cycles_without_actuation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exercise the real post-print agent chain while every physical boundary is a tripwire."""
+    controller = load_runtime()
+    controller.TEST_MODE_LOOP_CYCLES = 20
+    tools = controller._deps.agent_context.tools
+
+    def forbidden_actuation(_payload: dict[str, object]) -> dict[str, object]:
+        raise AssertionError("safe preflight cycle crossed a physical or camera execution boundary")
+
+    for tool_name in (
+        "camera.capture",
+        "lerobot.active_robot_cam.capture",
+        "vision.utm_runtime.start",
+        "lerobot.rollout.start",
+        "robot.pick_place",
+        "equipment.pyautogui.run",
+        "utm.run_protocol",
+    ):
+        tools.register(tool_name, forbidden_actuation)
+
+    first_spec = controller._apply_specimen_printer_choice_to_spec(
+        controller._default_test_constraints({}),
+        "physical_print",
+    )
+    first_spec.update(
+        {
+            "test_mode_llm_generated": True,
+            "candidate_id": "safe-cycle-01",
+            "specimen_id": "specimen-safe-cycle-01",
+            "execution_policy": {
+                "printer": "preflight_only",
+                "manipulation": "preflight_only",
+                "lab_equipment": "preflight_only",
+                "cae": "execute",
+                "analysis": "execute",
+                "bo": "execute",
+            },
+        }
+    )
+    controller._state.mode = Mode.TEST
+    controller._state.active_goal = "maximize exact 50 percent compression energy density"
+    controller._state.current_experiment_spec = dict(first_spec)
+    controller._bind_planning_cycle_contract(first_spec)
+
+    def install_specimen_contract(spec: dict[str, object]) -> None:
+        specimen_id = str(spec["specimen_id"])
+        for key in ("vision_preflight", "manipulation_preflight", "equipment_preflight"):
+            controller._state.run_metadata.pop(key, None)
+        controller._state.latest_observations = {}
+        controller._state.run_metadata["specimen_result"] = {
+            "ok": True,
+            "specimen_id": specimen_id,
+            "candidate_id": str(spec["candidate_id"]),
+            "handoff_status": "ready",
+            "stl_path": f"virtual://{specimen_id}.stl",
+            "fabrication_report": {
+                "schema": "fabrication_report.v1",
+                "fabrication_outcome": {"status": "preflight_complete", "location": "not_actuated"},
+            },
+        }
+        controller._state.run_metadata["printer_preflight"] = {
+            "schema": "printer_preflight.v1",
+            "run_id": controller._state.run_id,
+            "status": "execution_ready_pending_approval",
+            "actuation_performed": False,
+            "upload_performed": False,
+            "start_command_published": False,
+            "specimen_id": specimen_id,
+            "candidate_id": str(spec["candidate_id"]),
+            "plate_id": 1,
+            "immutable_artifact_path": f"virtual://{specimen_id}.autoeject.gcode.3mf",
+            "artifact_sha256": f"{int(str(spec['candidate_id']).rsplit('-', 1)[-1]):064x}",
+            "source_object_bounds_mm": {
+                "min_x": 120.0,
+                "max_x": 150.0,
+                "min_y": 110.0,
+                "max_y": 140.0,
+                "center_x_mm": 135.0,
+                "center_y_mm": 125.0,
+            },
+        }
+
+    install_specimen_contract(first_spec)
+    applied_recommendations: list[dict[str, float]] = []
+
+    async def fast_design_stage(
+        *,
+        previous_spec: dict[str, object] | None,
+        design_constraints: dict[str, object],
+        cycle_index: int,
+        total_cycles: int,
+        emit_handoff: bool,
+    ) -> dict[str, object]:
+        del total_cycles, emit_handoff
+        spec = dict(previous_spec or first_spec)
+        recommendation = controller._state.run_metadata.get("bo_recommended_constraints")
+        assert isinstance(recommendation, dict)
+        applied = {
+            "cell_size_mm": float(recommendation["cell_size_mm"]),
+            "relative_density": float(recommendation["relative_density"]),
+        }
+        applied_recommendations.append(applied)
+        spec.update(design_constraints)
+        spec.update(recommendation)
+        spec["candidate_id"] = f"safe-cycle-{cycle_index:02d}"
+        spec["specimen_id"] = f"specimen-safe-cycle-{cycle_index:02d}"
+        spec["execution_policy"] = dict(first_spec["execution_policy"])
+        return spec
+
+    async def fast_specimen_stage(spec: dict[str, object], *, emit_handoff: bool = True) -> dict[str, object]:
+        del emit_handoff
+        controller._state.current_experiment_spec = dict(spec)
+        install_specimen_contract(spec)
+        return {"pending": False, "specimen": controller._state.run_metadata["specimen_result"]}
+
+    original_tail = controller._run_planning_loop_tail
+    cycle_records: list[dict[str, object]] = []
+
+    async def audited_tail(
+        spec: dict[str, object],
+        *,
+        cycle_index: int = 1,
+        total_cycles: int = 1,
+    ) -> dict[str, object]:
+        result = await original_tail(spec, cycle_index=cycle_index, total_cycles=total_cycles)
+        observation = controller._state.latest_analysis.get("bo_observation", {})
+        assert observation["status"] == "ready"
+        assert observation["metric_name"] == "energy_density_50pct_MJ_per_m3"
+        assert observation["fidelity"] == "cae_mid"
+        assert observation["objective_score"] > 0.0
+        for key, schema in (
+            ("printer_preflight", "printer_preflight.v1"),
+            ("vision_preflight", "vision_preflight.v1"),
+            ("manipulation_preflight", "manipulation_preflight.v1"),
+            ("equipment_preflight", "equipment_preflight.v1"),
+        ):
+            record = controller._state.run_metadata[key]
+            assert record["schema"] == schema
+            assert record["status"] == "execution_ready_pending_approval"
+            assert record["actuation_performed"] is False
+        assert controller._state.current_experiment_spec["execution_policy"] == first_spec["execution_policy"]
+        cycle_records.append(
+            {
+                "cycle_index": cycle_index,
+                "cell_size_mm": float(spec["cell_size_mm"]),
+                "relative_density": float(spec["relative_density"]),
+                "objective_score": float(observation["objective_score"]),
+            }
+        )
+        return result
+
+    monkeypatch.setattr(controller, "_run_planning_design_stage", fast_design_stage)
+    monkeypatch.setattr(controller, "_run_planning_specimen_stage", fast_specimen_stage)
+    monkeypatch.setattr(controller, "_run_planning_loop_tail", audited_tail)
+
+    result = await controller._run_planning_cycle_series(
+        first_spec=first_spec,
+        design_constraints=first_spec,
+        start_cycle=1,
+    )
+
+    assert result["ok"] is True
+    assert len(cycle_records) == 20
+    assert controller._state.loop_count == 20
+    assert len(applied_recommendations) == 19
+    for applied, cycle in zip(applied_recommendations, cycle_records[1:], strict=True):
+        assert cycle["cell_size_mm"] == pytest.approx(applied["cell_size_mm"])
+        assert cycle["relative_density"] == pytest.approx(applied["relative_density"])

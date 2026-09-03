@@ -468,6 +468,10 @@ class ManipulationAgent(BaseAgent):
 
     def _lerobot_payload(self, state: OrchestratorState, protocol_note: str, strategy: str) -> dict[str, Any]:
         spec = self._spec(state)
+        device_workspace_bridge = (
+            isinstance(state.run_metadata, dict)
+            and str(state.run_metadata.get("source") or "") == "lerobot_gui_manipulation_bridge"
+        )
         physical_printer_tail = self._physical_printer_tail_requested(state)
         virtual_printer_tail = self._virtual_printer_tail_requested(state)
         task_id = self._task_id(state, spec)
@@ -548,6 +552,13 @@ class ManipulationAgent(BaseAgent):
             "max_duration_s": self._safe_float(spec.get("max_duration_s"), episode_s),
             "num_episodes": self._safe_int(spec.get("lerobot_rollout_num_episodes") or spec.get("rollout_num_episodes"), 1),
             "continuous_rollout": self._bool_spec(spec, "lerobot_continuous_rollout", "continuous_rollout", default=True),
+            "plc_rollout_stop_enabled": self._bool_spec(
+                spec,
+                "plc_rollout_stop_enabled",
+                default=False,
+            )
+            if device_workspace_bridge
+            else True,
             "rollout_action_clamp": self._bool_spec(spec, "lerobot_rollout_action_clamp", "rollout_action_clamp", default=False),
             "rollout_max_relative_target": self._safe_int(
                 spec.get("lerobot_rollout_max_relative_target") or spec.get("rollout_max_relative_target"),
@@ -728,11 +739,33 @@ class ManipulationAgent(BaseAgent):
     def _preflight(self, *, state: OrchestratorState, strategy: str, payload: dict[str, Any], freshness: dict[str, Any], vision_context: dict[str, Any]) -> dict[str, Any]:
         blocking: list[str] = []
         warnings: list[str] = []
+        metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
+        spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        execution_policy = spec.get("execution_policy") if isinstance(spec.get("execution_policy"), dict) else {}
+        preflight_only = str(execution_policy.get("manipulation") or "").strip().lower() == "preflight_only"
+        vision_preflight = metadata.get("vision_preflight") if isinstance(metadata.get("vision_preflight"), dict) else {}
+        readiness = vision_context.get("transfer_readiness") if isinstance(vision_context.get("transfer_readiness"), dict) else {}
+        vision_contract = ""
+        if preflight_only and str(readiness.get("status") or "").strip().lower() == "preflight_only":
+            specimen = self._specimen_result(state)
+            expected_specimen_id = str(specimen.get("specimen_id") or "").strip()
+            observed_specimen_id = str(vision_preflight.get("specimen_id") or "").strip()
+            valid_vision_plan = bool(
+                vision_preflight.get("schema") == "vision_preflight.v1"
+                and str(vision_preflight.get("run_id") or "") == str(state.run_id or "")
+                and vision_preflight.get("status") == "execution_ready_pending_approval"
+                and vision_preflight.get("capture_performed") is False
+                and vision_preflight.get("actuation_performed") is False
+                and (not expected_specimen_id or expected_specimen_id == observed_specimen_id)
+            )
+            if valid_vision_plan:
+                vision_contract = "vision_preflight.v1"
+            else:
+                blocking.append("valid_vision_preflight_required")
         policy_ref = payload.get("policy_path") or payload.get("policy_checkpoint_path") or payload.get("policy_repo_id")
         policy_type = self._canonical_policy_type(payload.get("policy_type"))
         if not freshness.get("fresh", False):
             blocking.append(str(freshness.get("reason") or "stale_vision_signal"))
-        readiness = vision_context.get("transfer_readiness") if isinstance(vision_context.get("transfer_readiness"), dict) else {}
         if strategy in {"lerobot_policy", "pi05_lerobot_policy"}:
             if readiness.get("camera_returned_to_vla") is False:
                 blocking.append("active_camera_not_returned_to_vla")
@@ -774,6 +807,7 @@ class ManipulationAgent(BaseAgent):
             "action_clamp_enabled": bool(payload.get("rollout_action_clamp")),
             "max_relative_target": payload.get("rollout_max_relative_target"),
             "shoulder_lift_backstop_enabled": bool(payload.get("rollout_shoulder_lift_backstop")),
+            "vision_contract": vision_contract,
         }
 
     async def _call_tool(self, ctx: AgentContext, tool: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1179,6 +1213,11 @@ class ManipulationAgent(BaseAgent):
             completion = "not_started"
             next_agent = "guardian_agent"
             reason = ", ".join(preflight.get("blocking_reasons") or []) or "preflight_failed"
+        elif response.get("execution_policy_mode") == "preflight_only":
+            handoff = "execution_ready_pending_approval"
+            completion = "preflight_complete"
+            next_agent = "equipment_agent"
+            reason = "VLA payload and safety preflight are ready; actuation was not performed."
         elif not response.get("ok"):
             handoff = "blocked"
             completion = "not_complete"
@@ -1242,6 +1281,7 @@ class ManipulationAgent(BaseAgent):
         status = "ready" if decision.get("completion_status") == "verified_complete" else "warning" if response.get("ok") else "blocked"
         requested_next_stage = {
             "vision_agent": "vision",
+            "equipment_agent": "equipment",
         }.get(str(decision.get("recommended_next_agent") or ""), "")
         return {
             "schema": "robot_task_result.v1",
@@ -1805,19 +1845,73 @@ class ManipulationAgent(BaseAgent):
         payload = self._lerobot_payload(state, protocol_note, strategy)
         freshness = self._vision_signal_freshness(state)
         vision_context = self._vision_context(state, freshness)
+        execution_policy = spec.get("execution_policy") if isinstance(spec.get("execution_policy"), dict) else {}
+        preflight_only = str(execution_policy.get("manipulation") or "").strip().lower() == "preflight_only"
+        existing_completion_response = None
+        if not preflight_only:
+            existing_completion_response = self._existing_rollout_response_for_completion(
+                state=state,
+                payload=payload,
+                strategy=strategy,
+                task_id=task_id,
+                vision_context=vision_context,
+            )
         preflight = self._preflight(state=state, strategy=strategy, payload=payload, freshness=freshness, vision_context=vision_context)
+        valid_completed_recovery = bool(
+            existing_completion_response
+            and existing_completion_response.get("completion_pass")
+            and isinstance(existing_completion_response.get("completion_signal_identity"), dict)
+            and existing_completion_response["completion_signal_identity"].get("valid")
+        )
+        if preflight.get("status") == "fail" and valid_completed_recovery:
+            remaining_blockers = [
+                reason
+                for reason in preflight.get("blocking_reasons", [])
+                if reason != "stale_vision_signal"
+            ]
+            if not remaining_blockers:
+                preflight = dict(preflight)
+                preflight["status"] = "warn"
+                preflight["blocking_reasons"] = []
+                preflight["warnings"] = [
+                    *preflight.get("warnings", []),
+                    "pickup_vision_ttl_not_rechecked_after_valid_post_place_completion",
+                ]
+                preflight["recovery_contract"] = "same_run_specimen_completion_identity"
         if preflight.get("status") == "fail":
             return self._blocked_result(state=state, strategy=strategy, payload=payload, preflight=preflight, vision_context=vision_context, protocol_note=protocol_note)
 
         available_tools = set(ctx.tools.list_tools())
-        existing_completion_response = self._existing_rollout_response_for_completion(
-            state=state,
-            payload=payload,
-            strategy=strategy,
-            task_id=task_id,
-            vision_context=vision_context,
+        would_execute_tool = (
+            "lerobot.rollout.start"
+            if strategy in {"lerobot_policy", "pi05_lerobot_policy"}
+            else "robot.pick_place"
         )
-        if existing_completion_response is not None:
+        if preflight_only:
+            response = {
+                "ok": True,
+                "tool": would_execute_tool,
+                "would_execute_tool": would_execute_tool,
+                "strategy": strategy,
+                "status": "execution_ready_pending_approval",
+                "execution_policy_mode": "preflight_only",
+                "actuation_performed": False,
+                "profile_id": payload.get("profile_id", ""),
+                "session_id": payload.get("session_id", ""),
+                "workflow": "rollout" if would_execute_tool == "lerobot.rollout.start" else "pick_place",
+                "transfer_task": {
+                    "task_id": task_id,
+                    "source": payload["source_location"],
+                    "target": payload["target_location"],
+                    "task_instruction": payload["task_instruction"],
+                    "policy_type": payload["policy_type"],
+                    "policy_backend": payload["policy_backend"],
+                    "specimen_id": payload.get("specimen", {}).get("specimen_id", ""),
+                    "terminal_pose": payload.get("terminal_pose", "standby_clear_of_utm"),
+                },
+                "grasp_score": 0.0,
+            }
+        if not preflight_only and existing_completion_response is not None:
             response = await self._refresh_existing_rollout_status(
                 state=state,
                 ctx=ctx,
@@ -1832,7 +1926,7 @@ class ManipulationAgent(BaseAgent):
                 vision_context=vision_context,
             )
             self._merge_completion_stop_result(response, stop_response)
-        elif strategy in {"lerobot_policy", "pi05_lerobot_policy"} and "lerobot.rollout.start" in available_tools:
+        elif not preflight_only and strategy in {"lerobot_policy", "pi05_lerobot_policy"} and "lerobot.rollout.start" in available_tools:
             callback = self._tool_event_callback(state, ctx)
             tool_payload = dict(payload)
             if callback:
@@ -1862,7 +1956,7 @@ class ManipulationAgent(BaseAgent):
                 vision_context=vision_context,
             )
             self._merge_completion_stop_result(response, stop_response)
-        else:
+        elif not preflight_only:
             response = ctx.tools.call("robot.pick_place", {"task": task_id, "source": payload.get("source_location"), "target": payload.get("target_location")})
             response = dict(response)
             response["strategy"] = "fixed_kinematic"
@@ -1930,6 +2024,17 @@ class ManipulationAgent(BaseAgent):
             decision=decision,
             evidence_refs=evidence_refs,
         )
+        manipulation_preflight = {
+            "schema": "manipulation_preflight.v1",
+            "run_id": state.run_id,
+            "specimen_id": str((payload.get("specimen") or {}).get("specimen_id") or ""),
+            "candidate_id": str((payload.get("specimen") or {}).get("candidate_id") or ""),
+            "status": "execution_ready_pending_approval",
+            "would_execute_tool": would_execute_tool,
+            "actuation_performed": False,
+            "preflight": preflight,
+            "payload": payload,
+        } if preflight_only else None
         return AgentResult(
             success=bool(response.get("ok")),
             summary="Manipulation bounded skill executed",
@@ -1945,6 +2050,7 @@ class ManipulationAgent(BaseAgent):
                 "evidence_refs": evidence_refs,
                 "protocol_note": protocol_note,
                 "requested_next_stage": requested_next_stage,
+                **({"manipulation_preflight": manipulation_preflight} if manipulation_preflight else {}),
             },
             next_hint=decision.get("recommended_next_agent", "guardian_review"),
         )

@@ -127,6 +127,76 @@ def test_live_utm_motion_check_uses_observer_and_runtime_manager() -> None:
     assert result["results"][0]["consumer_agent"] == "equipment_agent"
 
 
+def test_live_utm_passive_verification_matches_state_and_motion_direction() -> None:
+    observations = iter(
+        [
+            {
+                "ok": True,
+                "sample_count": 8,
+                "valid_sample_count": 8,
+                "final_state": "WORKING",
+                "stable_state": "WORKING",
+                "transition": "STABLE_WORKING",
+                "motion_direction": "STABLE",
+            },
+            {
+                "ok": True,
+                "sample_count": 8,
+                "valid_sample_count": 8,
+                "final_state": "NOT_WORKING",
+                "stable_state": "",
+                "transition": "WORKING_TO_NOT_WORKING",
+                "motion_direction": "DOWN",
+            },
+        ]
+    )
+    registry = ToolRegistry()
+    register_camera_tools(
+        registry,
+        utm_state_observer=lambda **_kwargs: next(observations),
+        utm_runtime_manager=FakeRuntimeManager(),
+    )
+
+    working = registry.call(
+        "vision.equipment_cross_check",
+        {"runtime_mode": "live", "checks": [{"task_id": "utm_state_working", "check_id": "utm_state_working", "device": "utm"}]},
+    )
+    down = registry.call(
+        "vision.equipment_cross_check",
+        {"runtime_mode": "live", "checks": [{"task_id": "utm_motion_down", "check_id": "utm_motion_down", "device": "utm"}]},
+    )
+
+    assert working["ok"] is True
+    assert working["results"][0]["verification_label"] == "WORKING"
+    assert down["ok"] is True
+    assert down["results"][0]["verification_label"] == "DOWN"
+
+
+def test_live_utm_passive_verification_reports_mismatch_without_relabeling_it() -> None:
+    registry = ToolRegistry()
+    register_camera_tools(
+        registry,
+        utm_state_observer=lambda **_kwargs: {
+            "ok": True,
+            "sample_count": 8,
+            "valid_sample_count": 8,
+            "final_state": "NOT_WORKING",
+            "transition": "WORKING_TO_NOT_WORKING",
+            "motion_direction": "UP",
+        },
+        utm_runtime_manager=FakeRuntimeManager(),
+    )
+
+    result = registry.call(
+        "vision.equipment_cross_check",
+        {"runtime_mode": "live", "checks": [{"task_id": "utm_motion_down", "check_id": "utm_motion_down", "device": "utm"}]},
+    )
+
+    assert result["ok"] is False
+    assert result["results"][0]["verification_label"] == "DOWN"
+    assert result["results"][0]["failure_code"] == "UTM_EXPECTED_VISION_RESULT_MISMATCH"
+
+
 def test_camera_tools_register_vision_utm_runtime_controls() -> None:
     manager = FakeRuntimeManager()
     registry = ToolRegistry()

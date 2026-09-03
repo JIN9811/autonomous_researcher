@@ -49,6 +49,13 @@
     ];
   }
 
+  function agenticRunTerminalBadgeView(_result) {
+    return {
+      state: "idle",
+      detail: "",
+    };
+  }
+
   function skillIdFromRecordingName(name, recordingId) {
     const source = String(name || recordingId || "recording_skill")
       .normalize("NFKD")
@@ -61,6 +68,7 @@
   }
 
   return {
+    agenticRunTerminalBadgeView,
     candidateSelectionView,
     confirmCandidateSelection,
     profileConnectionStatus,

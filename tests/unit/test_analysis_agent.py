@@ -138,6 +138,8 @@ async def test_analysis_agent_evaluates_active_compiled_objective(tmp_path: Path
     assert evaluation["objective_hash"] == binding["objective_hash"]
     assert evaluation["metrics"]["compressive_strength_mpa"] == 1.3
     assert evaluation["provenance_refs"]
+    assert result.data["bo_observation"]["metric_name"] == "objective_score"
+    assert result.data["bo_observation"]["unit"] == "1"
 
 
 @pytest.mark.asyncio
@@ -229,17 +231,30 @@ async def test_analysis_agent_integrates_trapezium_curve_to_planned_50pct_height
     assert result.success is True
     assert analysis["source"]["parser_id"] == "analysis.parsers.lab_equipment_utm_csv"
     assert analysis["source"]["source_format"] == "trapeziumx_raw"
-    assert metrics["peak_force_N"] == 200.0
+    assert metrics["peak_force_N"] == 150.0
+    assert metrics["displacement_at_peak_mm"] == 15.0
+    assert metrics["peak_force_limit_fraction"] == 0.5
+    assert metrics["peak_force_limit_mm"] == 15.0
+    assert metrics["peak_force_limit_reached"] is True
+    assert metrics["full_curve_peak_force_N"] == 200.0
+    assert metrics["full_curve_displacement_at_peak_mm"] == 20.0
+    assert metrics["compressive_strength_MPa"] == pytest.approx(0.375)
+    assert metrics["strain_at_peak"] == 0.5
     assert metrics["energy_absorption_mJ"] == pytest.approx(2000.0)
     assert metrics["energy_absorption_limit_mm"] == 15.0
     assert metrics["measured_displacement_max_mm"] == 20.0
     assert metrics["energy_absorption_limit_reached"] is True
     assert metrics["energy_absorption_50pct_mJ"] == pytest.approx(1125.0)
+    assert metrics["energy_density_50pct_MJ_per_m3"] == pytest.approx(0.09375)
+    assert metrics["energy_density_limit_strain"] == 0.5
+    assert metrics["energy_density_limit_reached"] is True
+    assert metrics["energy_identity_relative_error"] < 1e-8
+    assert analysis["stress_strain_curve"]["preview"][-1]["stress_MPa"] == pytest.approx(0.5)
     assert observation["status"] == "ready"
-    assert observation["metric_name"] == "energy_absorption_50pct_mJ"
-    assert observation["unit"] == "mJ"
-    assert observation["objective_score"] == pytest.approx(1125.0)
-    assert observation["observed_metrics"] == {"energy_absorption_50pct_mJ": pytest.approx(1125.0)}
+    assert observation["metric_name"] == "energy_density_50pct_MJ_per_m3"
+    assert observation["unit"] == "MJ/m3"
+    assert observation["objective_score"] == pytest.approx(0.09375)
+    assert observation["observed_metrics"] == {"energy_density_50pct_MJ_per_m3": pytest.approx(0.09375)}
     assert "peak_at_curve_boundary" in metrics["curve_quality"]["warnings"]
     assert observation["candidate_id"] == "specimen-analysis"
     assert observation["observation_id"] == result.data["bo_handoff"]["observation_id"]
@@ -275,8 +290,25 @@ async def test_analysis_agent_blocks_bo_when_csv_ends_below_planned_50pct_height
     assert metrics["measured_displacement_max_mm"] == 12.0
     assert metrics["energy_absorption_limit_reached"] is False
     assert metrics["energy_absorption_50pct_mJ"] is None
+    assert metrics["energy_density_50pct_MJ_per_m3"] is None
+    assert metrics["energy_density_limit_reached"] is False
     assert observation["status"] == "blocked"
     assert observation["objective_score"] is None
+
+
+@pytest.mark.asyncio
+async def test_analysis_agent_blocks_normalized_objective_for_explicit_invalid_geometry() -> None:
+    state = _state()
+    state.current_experiment_spec["cross_section_area_mm2"] = 0.0
+
+    result = await AnalysisAgent().run(state, _CtxStub())
+
+    assert result.success is False
+    assert result.data["analysis"]["failure_code"] == "INVALID_SPECIMEN_GEOMETRY"
+    assert result.data["analysis"]["specimen_geometry"]["normalization_valid"] is False
+    assert "cross_section_area_mm2" in result.data["analysis"]["specimen_geometry"]["normalization_errors"]
+    assert result.data["bo_observation"]["status"] == "blocked"
+    assert result.data["bo_observation"]["objective_score"] is None
 
 
 @pytest.mark.asyncio
@@ -324,6 +356,95 @@ def test_analysis_agent_builds_canonical_curve_with_linear_input_scans() -> None
     assert curve.iteration_count <= 2
 
 
+def test_analysis_agent_builds_engineering_stress_strain_runtime_curve() -> None:
+    payload = AnalysisAgent._stress_strain_curve(
+        [
+            {"time_s": 0.0, "displacement_mm": 0.0, "force_N": 0.0},
+            {"time_s": 1.0, "displacement_mm": 15.0, "force_N": 200.0},
+        ],
+        {"cross_section_area_mm2": 200.0, "gauge_length_mm": 30.0},
+    )
+
+    assert payload["schema"] == "engineering_stress_strain_curve.v1"
+    assert payload["convention"] == "positive_compression"
+    assert payload["stress_unit"] == "MPa"
+    assert payload["strain_unit"] == "1"
+    assert payload["normalization"] == {
+        "area_basis": "initial_apparent_cross_section",
+        "cross_section_area_mm2": 200.0,
+        "height_basis": "initial_gauge_length",
+        "gauge_length_mm": 30.0,
+        "initial_volume_mm3": 6000.0,
+    }
+    assert payload["preview"][-1]["stress_MPa"] == 1.0
+    assert payload["preview"][-1]["strain"] == 0.5
+    assert payload["preview"][-1]["strain_pct"] == 50.0
+
+
+def test_analysis_agent_stress_strain_preview_preserves_serration_extrema() -> None:
+    curve = [
+        {
+            "time_s": index * 0.01,
+            "displacement_mm": index * 0.03,
+            "force_N": float(index),
+        }
+        for index in range(1001)
+    ]
+    curve[500]["force_N"] = 10_000.0
+    curve[501]["force_N"] = 0.0
+
+    payload = AnalysisAgent._stress_strain_curve(
+        curve,
+        {"cross_section_area_mm2": 100.0, "gauge_length_mm": 30.0},
+    )
+
+    preview = payload["preview"]
+    source_indices = [point["source_row_index"] for point in preview]
+    assert payload["point_count"] == 1001
+    assert len(preview) <= 200
+    assert source_indices == sorted(source_indices)
+    assert source_indices[0] == 0
+    assert source_indices[-1] == 1000
+    assert 500 in source_indices
+    assert 501 in source_indices
+    assert next(point for point in preview if point["source_row_index"] == 500)["stress_MPa"] == 100.0
+    assert next(point for point in preview if point["source_row_index"] == 501)["stress_MPa"] == 0.0
+
+
+def test_analysis_agent_integrates_stress_strain_to_interpolated_50pct_without_extrapolation() -> None:
+    curve = [
+        {"strain": 0.0, "stress_MPa": 0.0},
+        {"strain": 0.4, "stress_MPa": 0.8},
+        {"strain": 0.6, "stress_MPa": 1.2},
+    ]
+
+    clipped, reached = AnalysisAgent._curve_through_strain(curve, 0.5)
+
+    assert reached is True
+    assert clipped[-1]["strain"] == 0.5
+    assert clipped[-1]["stress_MPa"] == pytest.approx(1.0)
+    assert AnalysisAgent._integrate_stress_strain(clipped) == pytest.approx(0.25)
+
+    missing, reached = AnalysisAgent._curve_through_strain(curve[:2], 0.5)
+    assert reached is False
+    assert missing == []
+
+
+def test_analysis_agent_peak_window_preserves_raw_force_channel_offset() -> None:
+    metrics = AnalysisAgent()._metrics(
+        [
+            {"time_s": 0.0, "displacement_mm": 0.0, "force_N": 5.0},
+            {"time_s": 1.0, "displacement_mm": 10.0, "force_N": 105.0},
+            {"time_s": 2.0, "displacement_mm": 20.0, "force_N": 305.0},
+        ],
+        {"cross_section_area_mm2": 400.0, "gauge_length_mm": 30.0},
+    )
+
+    assert metrics["peak_force_N"] == 205.0
+    assert metrics["displacement_at_peak_mm"] == 15.0
+    assert metrics["full_curve_peak_force_N"] == 305.0
+
+
 @pytest.mark.asyncio
 async def test_analysis_agent_uses_synthetic_curve_in_test_without_utm_data() -> None:
     equipment = {"ok": True, "tool": "equipment.pyautogui.run", "program_id": "program1"}
@@ -366,6 +487,81 @@ async def test_analysis_agent_uses_cae_for_test_closed_loop(tmp_path: Path) -> N
     assert analysis["cae_metrics"]["max_von_mises_MPa"] > 0
     assert analysis["cae_metrics"]["effective_modulus_MPa"] > 0
     assert "cae.run_static_analysis" in analysis["closed_loop_sources"]
+
+
+@pytest.mark.asyncio
+async def test_analysis_preflight_uses_only_calibrated_cae_as_mid_fidelity_observation(tmp_path: Path) -> None:
+    tools = ToolRegistry()
+    register_cae_tools(
+        tools,
+        {"devices": {"cae": {"enabled": True, "mode": "test", "artifact_dir": "artifacts/cae"}}},
+        repo_root=tmp_path,
+    )
+    state = _state(
+        equipment_result={
+            "ok": True,
+        }
+    )
+    state.run_metadata["equipment_preflight"] = {
+        "schema": "equipment_preflight.v1",
+        "status": "execution_ready_pending_approval",
+        "actuation_performed": False,
+        "resolved_program_id": "run_utm_compression_cycle",
+    }
+    state.current_experiment_spec["execution_policy"] = {
+        "lab_equipment": "preflight_only",
+        "cae": "execute",
+        "analysis": "execute",
+        "bo": "execute",
+    }
+    state.current_experiment_spec["cae_reference_calibration"] = {
+        "schema": "utm_reference_calibration.v1",
+        "status": "ready",
+        "metric_name": "energy_density_50pct_MJ_per_m3",
+        "unit": "MJ/m3",
+        "reference_value": 2.5,
+        "accepted_count": 2,
+        "reference_hashes": ["a" * 64, "b" * 64],
+        "calibration_method": "median_integrated_force_displacement_energy_density",
+        "limitations": ["historical_unmatched_specimen_reference"],
+    }
+
+    result = await AnalysisAgent().run(state, _CtxStub(tools=tools))
+
+    assert result.success is True
+    assert result.data["analysis"]["source"]["source"] == "cae_reference_calibrated_preflight"
+    assert result.data["analysis"]["source"]["observation_kind"] == "predicted"
+    assert result.data["analysis"]["cae_result"]["reference_calibration"]["applied"] is True
+    assert result.data["bo_observation"]["status"] == "ready"
+    assert result.data["bo_observation"]["fidelity"] == "cae_mid"
+    assert result.data["bo_observation"]["metric_name"] == "energy_density_50pct_MJ_per_m3"
+
+
+@pytest.mark.asyncio
+async def test_analysis_never_uses_cae_after_physical_utm_path_fails(tmp_path: Path) -> None:
+    tools = ToolRegistry()
+    register_cae_tools(
+        tools,
+        {"devices": {"cae": {"enabled": True, "mode": "test", "artifact_dir": "artifacts/cae"}}},
+        repo_root=tmp_path,
+    )
+    state = _state(mode=Mode.LIVE, equipment_result={"ok": False, "failure_code": "UTM_EXECUTION_FAILED"})
+    state.current_experiment_spec["execution_policy"] = {"lab_equipment": "execute", "cae": "execute"}
+    state.current_experiment_spec["cae_reference_calibration"] = {
+        "schema": "utm_reference_calibration.v1",
+        "status": "ready",
+        "metric_name": "energy_density_50pct_MJ_per_m3",
+        "unit": "MJ/m3",
+        "reference_value": 2.5,
+        "accepted_count": 1,
+        "reference_hashes": ["a" * 64],
+    }
+
+    result = await AnalysisAgent().run(state, _CtxStub(tools=tools, text="live summary"))
+
+    assert result.success is False
+    assert result.data["analysis"]["failure_code"] == "UTM_DATA_REQUIRED"
+    assert result.data["analysis"]["source"]["source"] != "cae_reference_calibrated_preflight"
 
 
 @pytest.mark.asyncio
@@ -847,13 +1043,13 @@ async def test_analysis_agent_emits_improvement06_artifacts_bo_handoff_and_calcu
     assert analysis["fidelity_records"]["fea_mid"]["schema"] == "fea_result.v1"
     assert analysis["fidelity_records"]["pinn_low_or_surrogate"]["status"] == "unavailable"
     assert result.data["bo_handoff"]["schema_version"] == "analysis_bo_handoff_v2"
-    measured_energy_50pct = analysis["utm_metrics"]["energy_absorption_50pct_mJ"]
-    assert result.data["bo_handoff"]["objective"]["metric_name"] == "energy_absorption_50pct_mJ"
-    assert result.data["bo_handoff"]["objective"]["unit"] == "mJ"
-    assert result.data["bo_handoff"]["objective"]["score"] == measured_energy_50pct
-    assert result.data["bo_handoff"]["metrics"] == {"energy_absorption_50pct_mJ": measured_energy_50pct}
-    assert result.data["experiment_evaluation"]["objective"]["metric_name"] == "energy_absorption_50pct_mJ"
-    assert result.data["experiment_evaluation"]["objective_score"] == measured_energy_50pct
+    measured_energy_density_50pct = analysis["utm_metrics"]["energy_density_50pct_MJ_per_m3"]
+    assert result.data["bo_handoff"]["objective"]["metric_name"] == "energy_density_50pct_MJ_per_m3"
+    assert result.data["bo_handoff"]["objective"]["unit"] == "MJ/m3"
+    assert result.data["bo_handoff"]["objective"]["score"] == measured_energy_density_50pct
+    assert result.data["bo_handoff"]["metrics"] == {"energy_density_50pct_MJ_per_m3": measured_energy_density_50pct}
+    assert result.data["experiment_evaluation"]["objective"]["metric_name"] == "energy_density_50pct_MJ_per_m3"
+    assert result.data["experiment_evaluation"]["objective_score"] == measured_energy_density_50pct
     assert result.data["bo_handoff"]["trust_score"]["schema"] == "trust_score.v1"
     assert result.data["bo_handoff"]["multifidelity_comparison"]["schema"] == "multifidelity_comparison.v1"
     assert result.data["bo_handoff"]["fidelity"]["utm_high"]["objective_source"] is True
@@ -951,3 +1147,28 @@ def test_cae_quasistatic_energy_is_included_in_utm_agreement() -> None:
     assert comparison["utm_energy_absorption_50pct_mJ"] == 10_000.0
     assert comparison["fea_energy_absorption_50pct_mJ"] == 12_000.0
     assert comparison["agreement_score"] == pytest.approx(0.833333, abs=1e-6)
+
+
+def test_cae_peak_is_not_compared_when_utm_curve_does_not_reach_50pct_height() -> None:
+    comparison = AnalysisAgent()._fem_utm_comparison(
+        {
+            "peak_force_N": 700.0,
+            "peak_force_limit_reached": False,
+            "initial_stiffness_N_per_mm": 100.0,
+            "energy_absorption_50pct_mJ": None,
+            "energy_absorption_limit_reached": False,
+        },
+        None,
+        {
+            "ok": True,
+            "tool": "cae.run_static_analysis",
+            "cae_metrics": {
+                "peak_reaction_force_N": 800.0,
+                "initial_stiffness_N_per_mm": 120.0,
+                "energy_absorption_50pct_mJ": 12_000.0,
+                "endpoint_reached": True,
+            },
+        },
+    )
+
+    assert comparison["peak_force_error_pct"] is None

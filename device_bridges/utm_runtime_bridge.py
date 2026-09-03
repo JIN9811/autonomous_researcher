@@ -10,6 +10,7 @@ contract.
 from __future__ import annotations
 
 import base64
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import hashlib
@@ -92,7 +93,7 @@ except Exception:
 
 def sensor_image_qos():
     return QoSProfile(
-        reliability=ReliabilityPolicy.BEST_EFFORT,
+        reliability=ReliabilityPolicy.RELIABLE,
         history=HistoryPolicy.KEEP_LAST,
         durability=DurabilityPolicy.VOLATILE,
         depth=1,
@@ -188,11 +189,6 @@ import time
 topic = sys.argv[1]
 fps = max(float(sys.argv[2]), 1.0)
 quality = max(min(int(sys.argv[3]), 95), 40)
-min_interval = 1.0 / fps
-# USB/ROS camera timers jitter by a few ms. The tolerance keeps 15fps sources
-# stable while still preventing 30fps sources from overfeeding a 15fps GUI.
-emit_interval_tolerance = 0.80
-rate_limit_enabled = True
 
 try:
     import cv2
@@ -213,7 +209,7 @@ except Exception:
 
 def sensor_image_qos():
     return QoSProfile(
-        reliability=ReliabilityPolicy.BEST_EFFORT,
+        reliability=ReliabilityPolicy.RELIABLE,
         history=HistoryPolicy.KEEP_LAST,
         durability=DurabilityPolicy.VOLATILE,
         depth=1,
@@ -283,14 +279,9 @@ def image_to_array(msg):
 class MjpegStreamSubscriber(Node):
     def __init__(self):
         super().__init__("atr_utm_frame_mjpeg_stream")
-        self.last_emit = 0.0
         self.subscription = self.create_subscription(Image, topic, self._callback, sensor_image_qos())
 
     def _callback(self, msg):
-        now = time.monotonic()
-        if rate_limit_enabled and self.last_emit > 0.0 and now - self.last_emit < min_interval * emit_interval_tolerance:
-            return
-        self.last_emit = now
         try:
             image = image_to_array(msg)
             ok, encoded = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
@@ -388,11 +379,17 @@ class SharedMjpegTopicStream:
         key: str,
         command: list[str],
         cwd: str,
+        topic: str = "/image_utm",
+        target_fps: float = 30.0,
+        jpeg_quality: int = 82,
         idle_timeout_sec: float = 8.0,
     ) -> None:
         self.key = key
         self.command = command
         self.cwd = cwd
+        self.topic = topic
+        self.target_fps = max(float(target_fps), 1.0)
+        self.jpeg_quality = int(jpeg_quality)
         self.idle_timeout_sec = max(float(idle_timeout_sec), 1.0)
         self._condition = threading.Condition()
         self._process: subprocess.Popen[bytes] | None = None
@@ -403,6 +400,43 @@ class SharedMjpegTopicStream:
         self._stop_requested = False
         self._last_client_left = time.monotonic()
         self._last_error = ""
+        self._frame_times: deque[float] = deque(maxlen=max(120, int(self.target_fps * 5)))
+        self._session_frames = 0
+        self._first_frame_monotonic = 0.0
+
+    def stats(self) -> dict[str, Any]:
+        with self._condition:
+            now = time.monotonic()
+            process_running = self._process is not None and self._process.poll() is None
+            measured_fps = 0.0
+            if len(self._frame_times) > 1:
+                elapsed = self._frame_times[-1] - self._frame_times[0]
+                if elapsed > 0.0:
+                    measured_fps = (len(self._frame_times) - 1) / elapsed
+            active_elapsed = max(now - self._first_frame_monotonic, 0.0) if self._first_frame_monotonic else 0.0
+            expected_frames = round(self.target_fps * active_elapsed) if active_elapsed else 0
+            return {
+                "ok": True,
+                "status": "running" if process_running else "idle",
+                "topic": self.topic,
+                "requested_fps": round(self.target_fps, 2),
+                "measured_fps": round(measured_fps, 2),
+                "frames": self._session_frames,
+                "estimated_dropped_frames": max(expected_frames - self._session_frames, 0),
+                "clients": self._clients,
+                "quality": self.jpeg_quality,
+                "last_error": self._last_error,
+            }
+
+    def _record_frames(self, count: int, *, observed_at: float | None = None) -> None:
+        if count <= 0:
+            return
+        timestamp = time.monotonic() if observed_at is None else float(observed_at)
+        with self._condition:
+            if not self._first_frame_monotonic:
+                self._first_frame_monotonic = timestamp
+            self._session_frames += count
+            self._frame_times.extend(timestamp for _ in range(count))
 
     def frames(self) -> Iterator[bytes]:
         self._add_client()
@@ -465,6 +499,9 @@ class SharedMjpegTopicStream:
         self._stop_requested = False
         self._latest_frame = None
         self._last_error = ""
+        self._frame_times.clear()
+        self._session_frames = 0
+        self._first_frame_monotonic = 0.0
         self._process = subprocess.Popen(
             self.command,
             cwd=self.cwd,
@@ -489,6 +526,7 @@ class SharedMjpegTopicStream:
                 buffer += chunk
                 frames, buffer = _extract_mjpeg_frames(buffer)
                 if frames:
+                    self._record_frames(len(frames))
                     with self._condition:
                         for frame in frames:
                             self._latest_frame = frame
@@ -645,8 +683,8 @@ class UTMCameraProfile:
     device_path: str = DEFAULT_UTM_CAMERA_DEVICE
     width: int = 640
     height: int = 480
-    fps: int = 15
-    pixel_format: str = "yuyv2rgb"
+    fps: int = 60
+    pixel_format: str = "mjpeg2rgb"
     brightness: int = 128
     gain: int = -1
     ros_camera_name: str = "camera"
@@ -1354,9 +1392,43 @@ class UTMRuntimeProcessManager:
                     key=hashlib.sha1(stream_key.encode("utf-8")).hexdigest()[:8],
                     command=command,
                     cwd=str(self.config.workspace_root),
+                    topic=selected_topic,
+                    target_fps=target_fps,
+                    jpeg_quality=jpeg_quality,
                 )
                 self._mjpeg_streams[stream_key] = stream
         yield from stream.frames()
+
+    def frame_stream_status(
+        self,
+        *,
+        topic: str = "",
+        fps: float | int | None = None,
+        quality: int = 82,
+    ) -> dict[str, Any]:
+        """Return rolling statistics for an existing GUI MJPEG worker."""
+        profile = self._active_camera_profile()
+        selected_topic = self._stream_topic_for_request(topic, profile)
+        target_fps = _coerce_float(fps, 30.0, minimum=1.0) if fps is not None else 30.0
+        target_fps = max(min(target_fps, 60.0), 1.0)
+        jpeg_quality = _coerce_int(quality, 82, minimum=40, maximum=95)
+        stream_key = f"{selected_topic}|{target_fps:.3f}|{jpeg_quality}"
+        with self._lock:
+            stream = self._mjpeg_streams.get(stream_key)
+        if stream is None:
+            return {
+                "ok": True,
+                "status": "idle",
+                "topic": selected_topic,
+                "requested_fps": round(target_fps, 2),
+                "measured_fps": 0.0,
+                "frames": 0,
+                "estimated_dropped_frames": 0,
+                "clients": 0,
+                "quality": jpeg_quality,
+                "last_error": "",
+            }
+        return stream.stats()
 
     def _stream_topic_for_request(self, topic: str = "", profile: UTMCameraProfile | None = None) -> str:
         """Normalize UI stream requests to the UTM ROI/overlay output topic."""

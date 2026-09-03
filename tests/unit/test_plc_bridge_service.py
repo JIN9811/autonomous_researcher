@@ -246,6 +246,49 @@ def service(
 
 
 @async_test
+async def test_fast_stop_monitor_runs_while_main_event_loop_is_blocked(
+    tmp_path: Path,
+) -> None:
+    transport = ServiceTransport()
+    callbacks = ControllerProbe()
+    fast_stop_seen = threading.Event()
+    fast_stop_payloads: list[dict[str, object]] = []
+
+    def fast_stop(payload: dict[str, object]) -> dict[str, object]:
+        fast_stop_payloads.append(payload)
+        fast_stop_seen.set()
+        return {"ok": True, "status": "STOPPED"}
+
+    service = PLCBridgeService(
+        PLCBridge(transport),
+        callbacks,
+        poll_interval_s=0.2,
+        fast_stop_poll_interval_s=0.01,
+        fast_stop_callback=fast_stop,
+        state_path=tmp_path / "memory" / "plc_bridge_state.json",
+    )
+
+    try:
+        await service.start()
+        deadline = time.monotonic() + 1.0
+        while service.status()["connection_state"] != "online" and time.monotonic() < deadline:
+            await asyncio.sleep(0.005)
+
+        assert service.status()["connection_state"] == "online"
+        transport.words = [0, 1, 0]
+        time.sleep(0.08)
+
+        assert fast_stop_seen.is_set()
+        assert len(fast_stop_payloads) == 1
+        assert fast_stop_payloads[0]["source"] == "plc_pb2"
+        snapshot = fast_stop_payloads[0]["snapshot"]
+        assert isinstance(snapshot, dict)
+        assert snapshot["d101"] == 1
+    finally:
+        await service.shutdown()
+
+
+@async_test
 async def test_normal_disconnect_preserves_legacy_controls(
     service: PLCBridgeService, controller_probe: ControllerProbe
 ) -> None:
@@ -256,6 +299,24 @@ async def test_normal_disconnect_preserves_legacy_controls(
     assert service.status()["plc_layer_active"] is False
     assert service.status()["safety_state"] == "disconnected"
     assert controller_probe.emergency_stop_calls == []
+
+
+@async_test
+async def test_disconnect_does_not_request_rollout_fast_stop(tmp_path: Path) -> None:
+    fast_stop_payloads: list[dict[str, object]] = []
+    service = PLCBridgeService(
+        PLCBridge(ServiceTransport()),
+        ControllerProbe(),
+        fast_stop_callback=lambda payload: fast_stop_payloads.append(dict(payload)),
+        state_path=tmp_path / "memory" / "plc_bridge_state.json",
+    )
+
+    await service.accept_snapshot(words=(0, 0, 0))
+    await service.mark_disconnected("socket closed")
+
+    assert service.status()["plc_layer_active"] is False
+    assert service.status()["connection_state"] == "offline"
+    assert fast_stop_payloads == []
 
 
 @async_test

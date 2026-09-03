@@ -27,9 +27,11 @@ def _add_completed_lhs_observations(state: OrchestratorState, *, count: int = 8)
             {
                 "evaluation_id": f"eval-complete-lhs-{index + 1:03d}",
                 "candidate_id": f"candidate-complete-lhs-{index + 1:03d}",
+                "source": "analysis_agent",
                 "objective_score": 0.35 + density,
-                "metrics": {"specific_energy_absorption_J_per_g": 0.35 + density},
+                "metrics": {"energy_density_50pct_MJ_per_m3": 0.35 + density},
                 "objective": {
+                    "metric_name": "energy_density_50pct_MJ_per_m3",
                     "constraints": {
                         "geometry_type": "gyroid",
                         "cell_size_mm": 10.0,
@@ -108,8 +110,12 @@ async def test_bo_agent_preserves_lhs_proposal_without_acquisition_reranking() -
         {
             "evaluation_id": "eval-lhs-001",
             "candidate_id": "candidate-lhs-001",
-            "metrics": {"specific_energy_absorption_J_per_g": 0.42},
-            "objective": {"constraints": lhs[0]},
+            "source": "analysis_agent",
+            "metrics": {"energy_density_50pct_MJ_per_m3": 0.42},
+            "objective": {
+                "metric_name": "energy_density_50pct_MJ_per_m3",
+                "constraints": lhs[0],
+            },
         }
     )
 
@@ -166,9 +172,10 @@ def test_initial_design_request_counts_prior_lhs_points_when_derived_fields_chan
                     # This is a derived geometry value and legitimately changes
                     # as relative density changes between LHS observations.
                     "tpms_thickness": 0.31 + index * 0.08,
-                    "specific_energy_absorption_J_per_g": 0.40 + index * 0.01,
+                    "energy_density_50pct_MJ_per_m3": 0.40 + index * 0.01,
                 },
                 "objective": {
+                    "metric_name": "energy_density_50pct_MJ_per_m3",
                     # The objective contract can still contain the preceding
                     # cycle's fixed manufacturing values.
                     "constraints": {
@@ -379,8 +386,11 @@ def test_bo_agent_uses_analysis_scores_without_inventing_observation_noise() -> 
                 "evaluation_id": "eval-analysis",
                 "candidate_id": "specimen-cand-001",
                 "objective_score": 0.27,
-                "metrics": {"specific_energy_absorption_J_per_g": 0.27},
-                "objective": {"constraints": parameters},
+                "metrics": {"energy_density_50pct_MJ_per_m3": 0.27},
+                "objective": {
+                    "metric_name": "energy_density_50pct_MJ_per_m3",
+                    "constraints": parameters,
+                },
             },
         ]
     )
@@ -410,8 +420,11 @@ def test_bo_agent_does_not_treat_generic_objective_uncertainty_as_sea_noise() ->
                     "cell_size_mm": 7.5,
                     "relative_density": 0.31,
                 },
-                "metrics": {"specific_energy_absorption_J_per_g": 0.0124},
-                "objective": {"uncertainty": 0.17},
+                "metrics": {"energy_density_50pct_MJ_per_m3": 0.0124},
+                "objective": {
+                    "metric_name": "energy_density_50pct_MJ_per_m3",
+                    "uncertainty": 0.17,
+                },
             }
         },
     )
@@ -437,8 +450,9 @@ def test_bo_agent_does_not_treat_top_level_analysis_uncertainty_as_sea_noise() -
             "candidate_id": "specimen-001",
             "objective_score": 0.0124,
             "uncertainty": 0.17,
+            "objective": {"metric_name": "energy_density_50pct_MJ_per_m3"},
             "metrics": {
-                "specific_energy_absorption_J_per_g": 0.0124,
+                "energy_density_50pct_MJ_per_m3": 0.0124,
                 "cell_size_mm": 7.5,
                 "relative_density": 0.31,
                 "geometry_type": "gyroid",
@@ -487,9 +501,11 @@ async def test_bo_agent_uses_current_fixed_surface_settings_for_botorch_history(
             {
                 "evaluation_id": f"eval-{index:03d}",
                 "candidate_id": f"candidate-{index:03d}",
+                "source": "analysis_agent",
                 "objective_score": 0.4 + density,
-                "metrics": {"specific_energy_absorption_J_per_g": 0.4 + density},
+                "metrics": {"energy_density_50pct_MJ_per_m3": 0.4 + density},
                 "objective": {
+                    "metric_name": "energy_density_50pct_MJ_per_m3",
                     "constraints": {
                         "geometry_type": "gyroid",
                         "relative_density": density,
@@ -615,8 +631,12 @@ def test_bo_agent_initial_design_request_advances_through_canonical_lhs() -> Non
     state.experiment_evaluations.append(
         {
             "candidate_id": "lhs-observation-001",
-            "metrics": {"specific_energy_absorption_J_per_g": 0.42},
-            "objective": {"constraints": first["constraints"]},
+            "source": "analysis_agent",
+            "metrics": {"energy_density_50pct_MJ_per_m3": 0.42},
+            "objective": {
+                "metric_name": "energy_density_50pct_MJ_per_m3",
+                "constraints": first["constraints"],
+            },
         }
     )
     second = BOAgent.initial_design_request(state, seed=7)
@@ -664,8 +684,12 @@ def test_eight_observations_complete_lhs_phase() -> None:
             {
                 "evaluation_id": f"eval-{cycle:03d}",
                 "candidate_id": f"candidate-{cycle:03d}",
-                "metrics": {"specific_energy_absorption_J_per_g": 0.4 + cycle * 0.01},
-                "objective": {"constraints": request["constraints"]},
+                "source": "analysis_agent",
+                "metrics": {"energy_density_50pct_MJ_per_m3": 0.4 + cycle * 0.01},
+                "objective": {
+                    "metric_name": "energy_density_50pct_MJ_per_m3",
+                    "constraints": request["constraints"],
+                },
             }
         )
 
@@ -675,7 +699,7 @@ def test_eight_observations_complete_lhs_phase() -> None:
     assert next_request["target"] == 8
 
 
-def test_bo_agent_uses_measured_sea_instead_of_composite_objective_score() -> None:
+def test_bo_agent_uses_declared_energy_density_instead_of_composite_objective_score() -> None:
     state = OrchestratorState(
         run_id="run-sea",
         experiment_id="exp-sea",
@@ -689,15 +713,19 @@ def test_bo_agent_uses_measured_sea_instead_of_composite_objective_score() -> No
             "candidate_id": "candidate-sea",
             "objective_score": 0.91,
             "parameters": {"cell_size_mm": 7.5, "relative_density": 0.34},
-            "metrics": {"specific_energy_absorption_J_per_g": 0.237},
+            "metrics": {"energy_density_50pct_MJ_per_m3": 0.237},
+            "objective": {
+                "metric_name": "energy_density_50pct_MJ_per_m3",
+                "unit": "MJ/m3",
+            },
         }
     )
 
     prior = next(item for item in BOAgent._prior_evaluations_from_state(state) if item.get("candidate_id") == "candidate-sea")
 
     assert prior["score"] == pytest.approx(0.237)
-    assert prior["metric_name"] == "specific_energy_absorption_J_per_g"
-    assert prior["unit"] == "J/g"
+    assert prior["metric_name"] == "energy_density_50pct_MJ_per_m3"
+    assert prior["unit"] == "MJ/m3"
 
 
 def test_bo_agent_uses_declared_50pct_energy_from_analysis_handoff() -> None:
@@ -787,6 +815,81 @@ def test_bo_agent_deduplicates_analysis_envelopes_for_one_50pct_observation() ->
     assert len(measured) == 1
     assert measured[0]["score"] == pytest.approx(1125.0)
 
+
+def test_bo_agent_never_promotes_design_proxy_when_analysis_observation_is_blocked() -> None:
+    state = OrchestratorState(
+        run_id="run-no-proxy-fallback",
+        experiment_id="exp-no-proxy-fallback",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+        current_experiment_spec={"cell_size_mm": 7.5, "relative_density": 0.34},
+        current_experiment_objective={
+            "metric_name": "energy_density_50pct_MJ_per_m3",
+            "direction": "maximize",
+        },
+    )
+    state.experiment_evaluations.append(
+        {
+            "source": "specimen_agent",
+            "evaluation_id": "printability-proxy",
+            "candidate_id": "candidate-proxy",
+            "objective_score": 0.91,
+            "parameters": {"cell_size_mm": 7.5, "relative_density": 0.34},
+            "metrics": {"printability_score": 0.91},
+            "objective": {
+                "metric_name": "printability_score",
+                "score": 0.91,
+            },
+        }
+    )
+    state.latest_analysis = {
+        "bo_observation": {
+            "schema": "bo_observation.v1",
+            "status": "blocked",
+            "ok_for_bo": False,
+            "candidate_id": "candidate-proxy",
+            "parameters": {"cell_size_mm": 7.5, "relative_density": 0.34},
+            "metric_name": "energy_density_50pct_MJ_per_m3",
+            "objective_score": None,
+        }
+    }
+
+    priors = BOAgent._prior_evaluations_from_state(state)
+
+    assert not any(isinstance(item.get("score"), (int, float)) for item in priors)
+
+
+@pytest.mark.asyncio
+async def test_bo_agent_blocks_after_analysis_when_exact_metric_observation_is_missing() -> None:
+    state = OrchestratorState(
+        run_id="run-exact-objective-required",
+        experiment_id="exp-exact-objective-required",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+        current_experiment_spec={"cell_size_mm": 7.5, "relative_density": 0.34},
+        current_experiment_objective={
+            "metric_name": "energy_density_50pct_MJ_per_m3",
+            "direction": "maximize",
+        },
+    )
+    state.latest_analysis = {
+        "bo_observation": {
+            "schema": "bo_observation.v1",
+            "status": "blocked",
+            "ok_for_bo": False,
+            "candidate_id": "candidate-blocked",
+            "parameters": {"cell_size_mm": 7.5, "relative_density": 0.34},
+            "metric_name": "energy_density_50pct_MJ_per_m3",
+            "objective_score": None,
+        }
+    }
+
+    result = await BOAgent().run_with_settings(state, _CtxStub(), {"strategy": "bo", "budget": 1})
+
+    assert result.success is False
+    assert result.data["bo_result"]["status"] == "blocked"
+    assert result.data["bo_result"]["failure_code"] == "BO_EXACT_OBJECTIVE_OBSERVATION_REQUIRED"
+
 class _LLMResponse:
     def __init__(self, text: str) -> None:
         self.text = text
@@ -830,8 +933,7 @@ async def test_bo_agent_emits_reasoning_ranking_handoff_and_artifacts() -> None:
                 "anisotropy_ratio": 1.0,
             },
             "objective": {
-                "metric_name": "specific_energy_absorption_J_per_g",
-                "specific_energy_absorption_J_per_g": 0.71,
+                "metric_name": "energy_density_50pct_MJ_per_m3",
                 "score": 0.71,
                 "uncertainty": 0.12,
             },
@@ -909,7 +1011,7 @@ def test_bo_agent_filters_live_observations_by_hash_fidelity_and_lineage() -> No
             "score": 0.7,
             "feasible": True,
             "fidelity": fidelity,
-            "parameters": {"relative_density": 0.32},
+            "parameters": {"cell_size_mm": 7.5, "relative_density": 0.32},
             "provenance_refs": [f"artifact:{observation_id}"],
             "ok_for_bo": True,
         }
@@ -978,7 +1080,9 @@ async def test_live_bo_blocks_without_hash_matched_measured_observation() -> Non
             "schema_version": "analysis_bo_handoff_v2",
             "ok_for_bo": True,
             "candidate_id": "wrong-objective",
-            "parameters": {"relative_density": 0.32},
+            "parameters": {"cell_size_mm": 7.5, "relative_density": 0.32},
+            "metric_name": "energy_density_50pct_MJ_per_m3",
+            "observed_metrics": {"energy_density_50pct_MJ_per_m3": 0.8},
             "objective_evaluation": {
                 "observation_id": "obs-wrong",
                 "objective_hash": "sha256:other",
@@ -993,7 +1097,7 @@ async def test_live_bo_blocks_without_hash_matched_measured_observation() -> Non
     result = await BOAgent().run_with_settings(state, _CtxStub(), {"strategy": "bo", "budget": 2})
 
     assert result.success is False
-    assert result.data["bo_result"]["failure_code"] == "BO_VALID_OBSERVATION_REQUIRED"
+    assert result.data["bo_result"]["failure_code"] == "BO_EXACT_OBJECTIVE_OBSERVATION_REQUIRED"
     assert result.data["bo_result"]["observation_integrity"]["rejected"][0]["reason"] == "objective_hash_mismatch"
 
 
@@ -1017,7 +1121,9 @@ async def test_next_design_request_carries_active_objective_identity() -> None:
             "schema_version": "analysis_bo_handoff_v2",
             "ok_for_bo": True,
             "candidate_id": "measured-a",
-            "parameters": {"relative_density": 0.32},
+            "parameters": {"cell_size_mm": 7.5, "relative_density": 0.32},
+            "metric_name": "energy_density_50pct_MJ_per_m3",
+            "observed_metrics": {"energy_density_50pct_MJ_per_m3": 0.8},
             "objective_evaluation": {
                 "observation_id": "obs-a",
                 "objective_id": "active-objective",

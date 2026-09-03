@@ -446,6 +446,7 @@ graph:
       default_transition: false
       auto_ports: true
       contracts:
+      - vision_preflight.v1
       - specimen_pose.v1
       - transfer_readiness.camera_returned_to_vla
   - source: vision
@@ -508,6 +509,20 @@ graph:
       contracts:
       - robot_task_result.v1
       - vision_manipulation_completion.v1
+  - source: manipulation
+    target: equipment
+    condition: next_stage:equipment
+    label: 'conditional transition: no-actuation manipulation preflight -> equipment'
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: manipulation
+      to_stage: equipment
+      condition: next_stage:equipment
+      transition_condition: next_stage:equipment
+      default_transition: false
+      auto_ports: true
+      contracts:
+      - manipulation_preflight.v1
   - source: vision_verify
     target: equipment
     condition: null

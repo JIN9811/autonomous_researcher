@@ -417,7 +417,6 @@ class BOAgent(BaseAgent):
         for source in (item.get("observed_metrics"), item.get("metrics")):
             if isinstance(source, dict):
                 candidates.append(source.get(metric_name))
-        candidates.append(item.get("objective_score"))
         for value in candidates:
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 continue
@@ -529,9 +528,9 @@ class BOAgent(BaseAgent):
             "objective_id": raw.get("objective_id") or current.get("objective_id") or "bo-specimen-objective",
             "objective_version": raw.get("objective_version") or raw.get("version") or current.get("objective_version") or current.get("version"),
             "objective_hash": raw.get("objective_hash") or current.get("objective_hash") or "",
-            "name": raw.get("name") or current.get("name") or "Specimen printability and performance proxy",
+            "name": raw.get("name") or current.get("name") or "50% compression energy density",
             "description": raw.get("description") or current.get("description") or state.active_goal,
-            "metric_name": raw.get("metric_name") or current.get("metric_name") or "objective_score",
+            "metric_name": raw.get("metric_name") or current.get("metric_name") or "energy_density_50pct_MJ_per_m3",
             "direction": raw.get("direction") or current.get("direction") or "maximize",
             "constraints": {**constraints, **(raw.get("constraints") if isinstance(raw.get("constraints"), dict) else {})},
             "tags": raw.get("tags") if isinstance(raw.get("tags"), list) else ["bo", "specimen", "tpms"],
@@ -579,10 +578,10 @@ class BOAgent(BaseAgent):
             if not fidelity:
                 reject("fidelity_required")
                 continue
-            if mode == Mode.LIVE and fidelity != "measured":
+            if mode == Mode.LIVE and fidelity not in {"measured", "utm_high"}:
                 reject("synthetic_live_proxy")
                 continue
-            if fidelity not in {"measured", "synthetic", "simulation"}:
+            if fidelity not in {"measured", "utm_high", "cae_mid", "synthetic", "simulation"}:
                 reject("unsupported_fidelity")
                 continue
             if not isinstance(record.get("parameters"), dict) or not record["parameters"]:
@@ -669,7 +668,7 @@ class BOAgent(BaseAgent):
             objective = item.get("objective") if isinstance(item.get("objective"), dict) else {}
             evaluation = item.get("objective_evaluation") if isinstance(item.get("objective_evaluation"), dict) else {}
             declared_objective = cls._declared_objective_value(item, objective)
-            score = declared_objective[0] if declared_objective else cls._sea_value(item, objective)
+            score = declared_objective[0] if declared_objective else None
             ok_for_bo = item.get("ok_for_bo")
             if ok_for_bo is None:
                 ok_for_bo = item.get("ok", True) and str(item.get("status") or "ready") not in {"blocked", "failed"}
@@ -711,10 +710,15 @@ class BOAgent(BaseAgent):
                 and float(uncertainty) > 0
             ):
                 record["uncertainty"] = float(uncertainty)
-            if not isinstance(score, bool) and isinstance(score, (int, float)) and math.isfinite(float(score)):
+            if (
+                bool(ok_for_bo)
+                and not isinstance(score, bool)
+                and isinstance(score, (int, float))
+                and math.isfinite(float(score))
+            ):
                 record["score"] = float(score)
-                record["metric_name"] = declared_objective[1] if declared_objective else "specific_energy_absorption_J_per_g"
-                record["unit"] = declared_objective[2] if declared_objective else "J/g"
+                record["metric_name"] = declared_objective[1]
+                record["unit"] = declared_objective[2]
             records.append(record)
         return records
 
@@ -780,11 +784,12 @@ class BOAgent(BaseAgent):
             if dedup_key in seen:
                 continue
             seen.add(dedup_key)
+            analysis_owned = item.get("source") == "analysis_agent"
             prior: dict[str, Any] = {
-                "source": "analysis_experiment_evaluation" if item.get("source") == "analysis_agent" else "experiment_evaluation",
+                "source": "analysis_experiment_evaluation" if analysis_owned else "experiment_evaluation",
                 "candidate_id": str(item.get("candidate_id") or item.get("evaluation_id") or f"prior-{len(priors) + 1}"),
                 "parameters": params,
-                "ok_for_bo": bool(item.get("ok", True)) and str(item.get("status") or "") != "analysis_blocked",
+                "ok_for_bo": analysis_owned and bool(item.get("ok", True)) and str(item.get("status") or "") != "analysis_blocked",
                 "failure_tags": item.get("failure_tags") if isinstance(item.get("failure_tags"), list) else [],
                 "quality_score": cls._safe_float(metrics.get("quality_score"), 0.7),
             }
@@ -811,24 +816,12 @@ class BOAgent(BaseAgent):
                 }
             )
             declared_objective = cls._declared_objective_value(item, objective)
-            score = declared_objective[0] if declared_objective else cls._sea_value(metrics, item)
+            score = declared_objective[0] if analysis_owned and declared_objective else None
             if not isinstance(score, bool) and isinstance(score, (int, float)) and math.isfinite(float(score)):
                 prior["score"] = float(score)
-                prior["metric_name"] = declared_objective[1] if declared_objective else "specific_energy_absorption_J_per_g"
-                prior["unit"] = declared_objective[2] if declared_objective else "J/g"
+                prior["metric_name"] = declared_objective[1]
+                prior["unit"] = declared_objective[2]
             priors.append(prior)
-
-        # Design-stage proxy scores and measured Analysis outcomes do not share
-        # one objective scale. Once measured outcomes exist, design records are
-        # retained only as duplicate/failure context, not GP training targets.
-        has_measured_analysis = any(
-            item.get("source") == "analysis_experiment_evaluation" and isinstance(item.get("score"), (int, float))
-            for item in priors
-        )
-        if has_measured_analysis:
-            for item in priors:
-                if item.get("source") == "experiment_evaluation":
-                    item.pop("score", None)
         return priors
 
     @staticmethod
@@ -1392,6 +1385,23 @@ class BOAgent(BaseAgent):
         execution_mode = "virtual" if state.mode in {Mode.TEST, Mode.LIVE} else state.mode.value
         knowledge_context = self._knowledge_context_from_state(state)
         raw_priors = self._prior_evaluations_from_state(state)
+        active_metric = str(objective.get("metric_name") or "").strip()
+        metric_rejections: list[dict[str, Any]] = []
+        for item in raw_priors:
+            if not isinstance(item.get("score"), (int, float)):
+                continue
+            if str(item.get("metric_name") or "").strip() == active_metric:
+                continue
+            metric_rejections.append(
+                {
+                    "observation_id": str(item.get("observation_id") or item.get("candidate_id") or ""),
+                    "reason": "metric_name_mismatch",
+                    "received_metric": str(item.get("metric_name") or ""),
+                    "expected_metric": active_metric,
+                }
+            )
+            item.pop("score", None)
+            item["ok_for_bo"] = False
         objective_hash = str(objective.get("objective_hash") or "")
         if objective_hash:
             priors, rejected_observations = self.objective_observations(
@@ -1401,8 +1411,17 @@ class BOAgent(BaseAgent):
             )
         else:
             priors = raw_priors
-            rejected_observations = []
+            rejected_observations = metric_rejections
+        if objective_hash:
+            rejected_observations = [*metric_rejections, *rejected_observations]
         priors = self._project_priors_to_space(priors, normalized["parameter_space"])
+        compatible_observations = [
+            item
+            for item in priors
+            if item.get("ok_for_bo") is True
+            and isinstance(item.get("score"), (int, float))
+            and str(item.get("metric_name") or "").strip() == active_metric
+        ]
         observation_integrity = {
             "objective_hash": objective_hash,
             "accepted_count": len(priors),
@@ -1410,7 +1429,29 @@ class BOAgent(BaseAgent):
             "accepted_observation_ids": [str(item.get("observation_id") or item.get("candidate_id") or "") for item in priors],
             "rejected": rejected_observations,
         }
-        if state.mode == Mode.LIVE and objective_hash and not priors:
+        latest_analysis = state.latest_analysis if isinstance(state.latest_analysis, dict) else {}
+        analysis_attempted = any(
+            isinstance(latest_analysis.get(key), dict)
+            for key in ("bo_handoff", "bo_observation", "experiment_evaluation")
+        )
+        if analysis_attempted and not compatible_observations:
+            blocked_result = {
+                "ok": False,
+                "tool": "bo.agent",
+                "run_id": state.run_id,
+                "experiment_id": state.experiment_id,
+                "status": "blocked",
+                "failure_code": "BO_EXACT_OBJECTIVE_OBSERVATION_REQUIRED",
+                "objective": objective,
+                "observation_integrity": observation_integrity,
+                "warnings": [f"BO requires a ready Analysis observation for {active_metric}."],
+            }
+            return AgentResult(
+                success=False,
+                summary="BO blocked: exact Analysis objective observation is unavailable",
+                data={"bo_result": blocked_result, "experiment_objective": objective},
+            )
+        if state.mode == Mode.LIVE and objective_hash and not compatible_observations:
             blocked_result = {
                 "ok": False,
                 "tool": "bo.agent",

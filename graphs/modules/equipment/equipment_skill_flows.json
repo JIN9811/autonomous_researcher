@@ -16,11 +16,13 @@
             "skill_version": "1.0.6"
           },
           "vision": {
+            "blocking": false,
             "detected": "next",
-            "enabled": false,
+            "enabled": true,
             "error": "__blocked__",
             "not_detected": "__blocked__",
-            "task_id": "",
+            "result_label": "WORKING",
+            "task_id": "utm_state_working",
             "timeout": "__blocked__"
           }
         },
@@ -34,14 +36,16 @@
           "label": "Start Test",
           "skill": {
             "skill_id": "utm_start_test",
-            "skill_version": "1.0.8"
+            "skill_version": "1.0.11"
           },
           "vision": {
+            "blocking": false,
             "detected": "next",
-            "enabled": false,
+            "enabled": true,
             "error": "__blocked__",
             "not_detected": "__blocked__",
-            "task_id": "",
+            "result_label": "DOWN",
+            "task_id": "utm_motion_down",
             "timeout": "__blocked__"
           }
         },
@@ -58,6 +62,7 @@
             "skill_version": "1.0.6"
           },
           "vision": {
+            "blocking": false,
             "detected": "next",
             "enabled": false,
             "error": "__blocked__",
@@ -76,13 +81,15 @@
           "label": "Wait for automatic Height return",
           "skill": {
             "skill_id": "utm_await_auto_return",
-            "skill_version": "1.0.7"
+            "skill_version": "1.0.9"
           },
           "vision": {
+            "blocking": false,
             "detected": "next",
             "enabled": false,
             "error": "__blocked__",
             "not_detected": "__blocked__",
+            "result_label": "",
             "task_id": "",
             "timeout": "__blocked__"
           }
@@ -100,6 +107,7 @@
             "skill_version": "1.0.11"
           },
           "vision": {
+            "blocking": false,
             "detected": "next",
             "enabled": false,
             "error": "__blocked__",
@@ -121,6 +129,7 @@
             "skill_version": "1.0.7"
           },
           "vision": {
+            "blocking": false,
             "detected": "next",
             "enabled": false,
             "error": "__blocked__",
@@ -142,6 +151,7 @@
             "skill_version": "1.0.8"
           },
           "vision": {
+            "blocking": false,
             "detected": "next",
             "enabled": false,
             "error": "__blocked__",
@@ -163,11 +173,13 @@
             "skill_version": "1.0.12"
           },
           "vision": {
+            "blocking": false,
             "detected": "__complete__",
-            "enabled": false,
+            "enabled": true,
             "error": "__blocked__",
             "not_detected": "__blocked__",
-            "task_id": "",
+            "result_label": "NOT WORKING",
+            "task_id": "utm_state_not_working",
             "timeout": "__blocked__"
           }
         }
@@ -176,10 +188,10 @@
       "flow_id": "utm_windows_v1",
       "profile_id": "utm_windows_v1",
       "schema": "atr.equipment_skill_flow.v1",
-      "updated_at": "2026-09-01T18:26:24.143504+00:00",
-      "version": 1
+      "updated_at": "2026-09-03T12:15:08+00:00",
+      "version": 3
     }
   },
   "schema": "atr.equipment_skill_flows.v1",
-  "updated_at": "2026-09-01T18:26:24.143504+00:00"
+  "updated_at": "2026-09-03T12:15:08+00:00"
 }

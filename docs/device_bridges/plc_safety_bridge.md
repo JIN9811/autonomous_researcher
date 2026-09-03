@@ -21,8 +21,8 @@ source_of_truth:
   - app/main.py
   - web/templates/plc.html
   - web/static/plc.js
-last_verified: 2026-08-25
-verified_against: 5191ee0
+last_verified: 2026-09-03
+verified_against: working-tree
 related_docs:
   - docs/superpowers/specs/2026-08-24-plc-safety-bridge-design.md
   - docs/superpowers/plans/2026-08-24-plc-safety-bridge.md
@@ -175,6 +175,15 @@ Controller emergency latch is false, and no PLC source is active.
 Expected snapshot: `(0,1,0)`. The service records `plc_pb2`, invokes the
 Controller emergency-stop path once, cancels active runtime/planning work, and
 keeps the local latch even if the connection is later lost.
+
+The connected service also runs a dedicated 50 ms D101 monitor thread. It uses
+the same MC Protocol connection and serializes every read/write with the normal
+state-machine I/O lock. On the first D101 assertion it calls the registered
+`lerobot.rollout.stop` tool and requests thread-safe cancellation of the active
+run and planning-handoff tasks. This fast path remains active when the main
+asyncio loop is busy. It does not perform Resume/Reset, change PLC latch rules,
+or replace the normal polling path; normal polling remains responsible for
+state projection, persistence, recovery, and audit events.
 
 ### PB1 Short Resume
 

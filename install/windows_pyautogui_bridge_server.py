@@ -6532,6 +6532,27 @@ def execute_payload(payload: dict[str, Any], config: BridgeConfig | None = None)
     return _execute(payload)
 
 
+def _execution_exception_result(payload: dict[str, Any], exc: Exception) -> dict[str, Any]:
+    detail = f"{exc.__class__.__name__}: {exc}"
+    failsafe = exc.__class__.__name__ == "FailSafeException"
+    return {
+        "ok": False,
+        "status": "blocked",
+        "bridge": "windows_pyautogui",
+        "sequence_id": str(payload.get("sequence_id") or ""),
+        "run_id": str(payload.get("run_id") or ""),
+        "specimen_id": str(payload.get("specimen_id") or ""),
+        "program_id": str(payload.get("program_id") or ""),
+        "failure_code": "PYAUTOGUI_FAILSAFE_TRIGGERED" if failsafe else "PYAUTOGUI_EXECUTION_EXCEPTION",
+        "message": (
+            "PyAutoGUI fail-safe stopped execution. Move the mouse pointer away from every screen corner and retry."
+            if failsafe
+            else f"Windows PyAutoGUI execution failed: {detail}"
+        ),
+        "step_trace": [{"step": "EXECUTE", "status": "failed", "detail": detail}],
+    }
+
+
 INDEX_HTML = r"""
 <!doctype html>
 <html lang="en">
@@ -7152,7 +7173,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200 if result.get("ok") else 400, result)
             return
         self._write_audit_event({"auth_ok": True, "status": "execute_payload", "audit_kind": "execute_payload", **_request_audit_event_from_payload(payload)})
-        result = _execute(payload)
+        try:
+            result = _execute(payload)
+        except Exception as exc:
+            result = _execution_exception_result(payload, exc)
         self._write_audit_event({
             "auth_ok": True,
             "status": "execute_result",

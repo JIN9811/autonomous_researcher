@@ -278,6 +278,12 @@ devices:
     library_path: /home/jin/.local/opt/atr-cae/usr/lib/aarch64-linux-gnu
     require_solver_in_live: true
     artifact_dir: artifacts/cae
+    # Historical UTM runs are calibration context only. Content hashes remove
+    # duplicate copies and the parser rejects curves that do not reach 50% strain.
+    reference_utm_globs:
+      - artifacts/equipment/**/utm/live_*.csv
+    reference_specimen_size_mm: [30.0, 30.0, 30.0]
+    reference_target_strain: 0.5
     default_material:
       elastic_modulus_mpa: 1800.0
       poisson_ratio: 0.35

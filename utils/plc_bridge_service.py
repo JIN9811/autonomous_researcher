@@ -12,8 +12,9 @@ import math
 import os
 from pathlib import Path
 import tempfile
+import threading
 import time
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 from uuid import uuid4
 
 from device_bridges.plc_bridge import PLCBridge, VirtualPLCTransport
@@ -82,6 +83,8 @@ class PLCBridgeService:
         poll_interval_s: float = 0.2,
         stale_after_s: float = 1.0,
         handshake_timeout_s: float = 5.0,
+        fast_stop_poll_interval_s: float = 0.05,
+        fast_stop_callback: Callable[[dict[str, object]], object] | None = None,
         state_path: Path | str = Path("memory/plc_bridge_state.json"),
         event_path: Path | str | None = None,
         event_limit: int = 100,
@@ -92,6 +95,10 @@ class PLCBridgeService:
             raise ValueError("stale_after_s must be positive")
         if handshake_timeout_s <= 0:
             raise ValueError("handshake_timeout_s must be positive")
+        if fast_stop_poll_interval_s <= 0:
+            raise ValueError("fast_stop_poll_interval_s must be positive")
+        if fast_stop_callback is not None and not callable(fast_stop_callback):
+            raise TypeError("fast_stop_callback must be callable")
         if event_limit <= 0:
             raise ValueError("event_limit must be positive")
 
@@ -102,6 +109,8 @@ class PLCBridgeService:
         self._poll_interval_s = poll_interval_s
         self._stale_after_s = stale_after_s
         self._handshake_timeout_s = handshake_timeout_s
+        self._fast_stop_poll_interval_s = fast_stop_poll_interval_s
+        self._fast_stop_callback = fast_stop_callback
         self._state_path = Path(state_path)
         self._event_path = (
             Path(event_path)
@@ -122,6 +131,13 @@ class PLCBridgeService:
             default=0,
         )
         self._io_executor: ThreadPoolExecutor | None = self._new_io_executor()
+        self._transport_io_lock = threading.Lock()
+        self._fast_stop_shutdown = threading.Event()
+        self._fast_stop_thread: threading.Thread | None = None
+        self._fast_stop_d101_latched = False
+        self._fast_stop_trigger_count = 0
+        self._fast_stop_last_error: str | None = None
+        self._fast_stop_last_result: object | None = None
         self._lifecycle_lock = asyncio.Lock()
         self._state_machine_lock = asyncio.Lock()
         self._poll_task: asyncio.Task[None] | None = None
@@ -153,6 +169,7 @@ class PLCBridgeService:
             self._ensure_io_executor()
             self._running = True
             self._poll_worker_starts += 1
+            self._start_fast_stop_monitor()
             self._poll_task = asyncio.create_task(
                 self._poll_loop(), name="plc-bridge-poller"
             )
@@ -184,6 +201,7 @@ class PLCBridgeService:
             except asyncio.CancelledError:
                 pass
         self._poll_task = None
+        await asyncio.to_thread(self._stop_fast_stop_monitor)
         if self._connected or self._transport_open:
             try:
                 await self._write_register("D102", 0)
@@ -473,6 +491,12 @@ class PLCBridgeService:
             "last_latency_ms": self._last_latency_ms,
             "sample_age_s": sample_age_s,
             "stale_after_s": self._stale_after_s,
+            "fast_stop_monitor": {
+                "running": self._fast_stop_thread is not None and self._fast_stop_thread.is_alive(),
+                "poll_interval_s": self._fast_stop_poll_interval_s,
+                "trigger_count": self._fast_stop_trigger_count,
+                "last_error": self._fast_stop_last_error,
+            },
             "event_revision": self._event_revision,
         }
 
@@ -531,6 +555,7 @@ class PLCBridgeService:
         self._connected = True
         self._stale = False
         self._last_error = None
+        self._start_fast_stop_monitor()
         self._emit("plc.bridge.connected", {"host": self._host, "port": self._port})
 
     async def _read_snapshot(self) -> PLCRegisterSnapshot:
@@ -550,7 +575,69 @@ class PLCBridgeService:
         if executor is None:
             raise RuntimeError("PLC I/O worker is shut down")
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(executor, partial(operation, *args))
+        return await loop.run_in_executor(
+            executor,
+            partial(self._run_serialized_io, operation, *args),
+        )
+
+    def _run_serialized_io(self, operation: Any, *args: object) -> Any:
+        with self._transport_io_lock:
+            return operation(*args)
+
+    def _start_fast_stop_monitor(self) -> None:
+        if self._fast_stop_callback is None or not self._running:
+            return
+        thread = self._fast_stop_thread
+        if thread is not None and thread.is_alive():
+            return
+        self._fast_stop_shutdown.clear()
+        self._fast_stop_d101_latched = False
+        self._fast_stop_thread = threading.Thread(
+            target=self._fast_stop_monitor_loop,
+            name="plc-fast-stop-monitor",
+            daemon=True,
+        )
+        self._fast_stop_thread.start()
+
+    def _stop_fast_stop_monitor(self) -> None:
+        self._fast_stop_shutdown.set()
+        thread = self._fast_stop_thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=max(self._fast_stop_poll_interval_s * 4, 1.0))
+        self._fast_stop_thread = None
+        self._fast_stop_d101_latched = False
+
+    def _fast_stop_monitor_loop(self) -> None:
+        while not self._fast_stop_shutdown.is_set():
+            if not self._running or not self._connected or not self._transport_open:
+                self._fast_stop_shutdown.wait(self._fast_stop_poll_interval_s)
+                continue
+            started_monotonic = time.monotonic()
+            try:
+                snapshot = self._run_serialized_io(self._bridge.read_snapshot)
+                self._last_latency_ms = max(
+                    0.0,
+                    (time.monotonic() - started_monotonic) * 1000,
+                )
+                if snapshot.d101 == 0:
+                    self._fast_stop_d101_latched = False
+                    self._fast_stop_last_error = None
+                elif snapshot.d101 == 1 and not self._fast_stop_d101_latched:
+                    self._fast_stop_d101_latched = True
+                    self._fast_stop_trigger_count += 1
+                    payload = {
+                        "source": PLC_PHYSICAL_SOURCE,
+                        "reason": "plc_d101_asserted",
+                        "snapshot": self._snapshot_payload(snapshot),
+                    }
+                    try:
+                        self._fast_stop_last_result = self._fast_stop_callback(payload)
+                        self._fast_stop_last_error = None
+                    except Exception as exc:
+                        self._fast_stop_last_error = str(exc)[:1000]
+            except Exception as exc:
+                self._fast_stop_last_error = str(exc)[:1000]
+            self._fast_stop_shutdown.wait(self._fast_stop_poll_interval_s)
 
     async def _close_io_executor(self) -> None:
         executor = self._io_executor

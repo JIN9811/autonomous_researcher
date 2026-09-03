@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -130,6 +131,8 @@ def test_windows_equipment_exposes_hot_loaded_live_agentic_progress_action() -> 
     script = client.get("/static/windows_equipment.js").text
 
     assert 'id="btn-equipment-agentic-run"' in page
+    assert 'id="btn-equipment-agentic-run" class="btn mini primary"' in page
+    assert 'id="btn-equipment-agentic-stop" class="btn mini danger"' in page
     assert 'id="equipment-agentic-run-status"' in page
     assert page.index("Equipment execution projection") < page.index('id="btn-equipment-agentic-run"')
     assert 'runEquipmentProfileAction("agentic-live", btnAgenticRun)' in script
@@ -138,9 +141,208 @@ def test_windows_equipment_exposes_hot_loaded_live_agentic_progress_action() -> 
     assert "/agentic-run" in script
     assert "backend update pending" in script
     assert "refreshAgenticRunCapability" in script
-    assert "/api/equipment/skills/" not in script[script.index('if (action === "agentic-live")'):script.index('const data = await apiJson', script.index('if (action === "agentic-live")'))]
+    assert "stopAgenticProgress" in script
+    assert "/agentic-run/cancel" in script
+    agentic_live_segment = script[
+        script.index('if (action === "agentic-live")') : script.index(
+            "const data = await apiJson",
+            script.index('if (action === "agentic-live")'),
+        )
+    ]
+    agentic_live_error_segment = script[
+        script.index('if (action === "agentic-live")', script.index("} catch (err) {")) : script.index(
+            "writeLog({ ok: false",
+            script.index("} catch (err) {"),
+        )
+    ]
+    assert "/api/equipment/skills/" not in agentic_live_segment
+    assert "agenticRunTerminalBadgeView" in script
+    assert 'setAgenticLiveRunStatus("completed"' not in agentic_live_segment
+    assert 'setAgenticLiveRunStatus("blocked", err.message)' not in agentic_live_error_segment
     assert "ATREquipmentAgenticRun" not in script
     assert "현재 바인딩된 8개" not in script
+
+
+def test_equipment_agentic_stop_cancels_active_run_and_resets_progress_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import main as main_module
+
+    runtime_root = tmp_path / "equipment_skill_flow_latest"
+    runtime_root.mkdir(parents=True)
+    state_path = runtime_root / "utm_windows_v1.json"
+    state_path.write_text(
+        json.dumps({"profile_id": "utm_windows_v1", "terminal": "__blocked__"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(main_module, "EQUIPMENT_SKILL_FLOW_RUNTIME_ROOT", runtime_root)
+    abort_calls: list[dict[str, object]] = []
+
+    class _AbortBridge:
+        def run(self, payload: dict[str, object]) -> dict[str, object]:
+            abort_calls.append(dict(payload))
+            return {
+                "ok": True,
+                "status": "recovery_macro_dispatched",
+                "program_id": "utm_stop_or_abort_v1",
+            }
+
+    monkeypatch.setattr(main_module, "_equipment_bridge", lambda: _AbortBridge())
+    cancel_event = threading.Event()
+    with main_module._EQUIPMENT_AGENTIC_RUN_GUARD:
+        main_module._EQUIPMENT_AGENTIC_ACTIVE_PROFILES.add("utm_windows_v1")
+        main_module._EQUIPMENT_AGENTIC_CANCEL_EVENTS["utm_windows_v1"] = cancel_event
+    try:
+        response = TestClient(app).post(
+            "/api/equipment/profiles/utm_windows_v1/agentic-run/cancel",
+            json={},
+        )
+    finally:
+        with main_module._EQUIPMENT_AGENTIC_RUN_GUARD:
+            main_module._EQUIPMENT_AGENTIC_ACTIVE_PROFILES.discard("utm_windows_v1")
+            main_module._EQUIPMENT_AGENTIC_CANCEL_EVENTS.pop("utm_windows_v1", None)
+
+    assert response.status_code == 200
+    assert response.json()["cancel_requested"] is True
+    assert response.json()["progress_reset"] is True
+    assert response.json()["reset_pending"] is True
+    assert response.json()["status"] == "idle"
+    assert response.json()["physical_stop"]["ok"] is True
+    assert cancel_event.is_set() is True
+    assert abort_calls == [
+        {
+            "runtime_mode": "live",
+            "force_live_bridge": True,
+            "confirm_setup_gui_execute": True,
+            "sequence_id": "agentic-stop-utm_windows_v1",
+            "run_id": main_module.controller._state.run_id,
+            "specimen_id": str(
+                main_module.controller._state.current_experiment_spec.get("specimen_id")
+                or "specimen-stop"
+            ),
+            "program_id": "utm_stop_or_abort_v1",
+            "command": "Stop active Agentic UTM run",
+            "require_screen_assertions": False,
+            "simulate_utm_protocol": False,
+        }
+    ]
+    assert state_path.exists() is False
+    archived = list((tmp_path / "equipment_skill_flow_archive").glob("utm_windows_v1.*.json"))
+    assert len(archived) == 1
+
+
+def test_equipment_agentic_stop_button_restores_its_label_after_busy_state() -> None:
+    script = TestClient(app).get("/static/windows_equipment.js").text
+    remember_start = script.index("function rememberButtonLabels()")
+    remember_end = script.index("function writeLog", remember_start)
+    stop_start = script.index("async function stopAgenticProgress()")
+    stop_end = script.index("function proofGateRef", stop_start)
+
+    assert "btnAgenticStop" in script[remember_start:remember_end]
+    assert "result?.ok !== true" in script[stop_start:stop_end]
+    assert "physical_stop" in script[stop_start:stop_end]
+
+
+@pytest.mark.asyncio
+async def test_equipment_agentic_stop_clears_progress_rewritten_by_finishing_skill(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import main as main_module
+
+    runtime_root = tmp_path / "equipment_skill_flow_latest"
+    runtime_root.mkdir(parents=True)
+    state_path = runtime_root / "utm_windows_v1.json"
+    monkeypatch.setattr(main_module, "EQUIPMENT_SKILL_FLOW_RUNTIME_ROOT", runtime_root)
+    started = asyncio.Event()
+
+    async def fake_run(self, state, ctx, flow, *, cancel_requested=None, require_entry_handoff=True):
+        started.set()
+        while cancel_requested is not None and not cancel_requested():
+            await asyncio.sleep(0.001)
+        state_path.write_text(
+            json.dumps({"profile_id": "utm_windows_v1", "terminal": "__blocked__"}),
+            encoding="utf-8",
+        )
+        return AgentResult(
+            success=False,
+            summary="cancelled",
+            data={"equipment_skill_flow_execution": {"terminal": "__blocked__"}},
+        )
+
+    async def ignore_workspace_result(**_kwargs):
+        return None
+
+    monkeypatch.setattr(LabEquipmentAgent, "_run_equipment_skill_flow", fake_run)
+    monkeypatch.setattr(controller, "emit_workspace_result", ignore_workspace_result)
+    monkeypatch.setattr(
+        main_module,
+        "_equipment_bridge",
+        lambda: type(
+            "_AbortBridge",
+            (),
+            {
+                "run": lambda self, payload: {
+                    "ok": True,
+                    "status": "recovery_macro_dispatched",
+                    "program_id": payload["program_id"],
+                }
+            },
+        )(),
+    )
+    run_task = asyncio.create_task(
+        main_module.post_equipment_profile_agentic_run(
+            "utm_windows_v1",
+            main_module.EquipmentAgenticRunRequest(runtime_mode="live", confirm_execute=True),
+        )
+    )
+    await started.wait()
+    stop_result = await main_module.post_equipment_profile_agentic_run_cancel("utm_windows_v1")
+    await run_task
+
+    assert stop_result["reset_pending"] is True
+    assert state_path.exists() is False
+
+
+@pytest.mark.asyncio
+async def test_equipment_agentic_run_resets_progress_state_when_standalone_run_finishes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import main as main_module
+
+    runtime_root = tmp_path / "equipment_skill_flow_latest"
+    runtime_root.mkdir(parents=True)
+    state_path = runtime_root / "utm_windows_v1.json"
+    monkeypatch.setattr(main_module, "EQUIPMENT_SKILL_FLOW_RUNTIME_ROOT", runtime_root)
+
+    async def fake_run(self, state, ctx, flow, *, cancel_requested=None, require_entry_handoff=True):
+        state_path.write_text(
+            json.dumps({"profile_id": "utm_windows_v1", "terminal": "__complete__"}),
+            encoding="utf-8",
+        )
+        return AgentResult(
+            success=True,
+            summary="canonical flow completed",
+            data={"equipment_skill_flow_execution": {"terminal": "__complete__"}},
+        )
+
+    async def ignore_workspace_result(**_kwargs):
+        return None
+
+    monkeypatch.setattr(LabEquipmentAgent, "_run_equipment_skill_flow", fake_run)
+    monkeypatch.setattr(controller, "emit_workspace_result", ignore_workspace_result)
+
+    response = await main_module.post_equipment_profile_agentic_run(
+        "utm_windows_v1",
+        main_module.EquipmentAgenticRunRequest(runtime_mode="live", confirm_execute=True),
+    )
+
+    assert response["ok"] is True
+    assert state_path.exists() is False
+    archived = list((tmp_path / "equipment_skill_flow_archive").glob("utm_windows_v1.*.json"))
+    assert len(archived) == 1
 
 
 def test_equipment_agentic_run_uses_server_authoritative_registered_flow(monkeypatch) -> None:
@@ -252,6 +454,9 @@ def test_equipment_skill_flow_is_shared_by_workspace_and_runtime_ide(tmp_path: P
     assert saved.status_code == 200
     assert workspace.json()["flow"]["blocks"][0]["skill"]["skill_id"] == "utm_test"
     assert [item["task_id"] for item in workspace.json()["vision_tasks"]] == [
+        "utm_state_working",
+        "utm_motion_down",
+        "utm_state_not_working",
         "utm_pre_start",
         "utm_motion_confirm",
         "utm_test_complete",
@@ -294,7 +499,15 @@ def test_equipment_skill_flow_exposes_the_code_owned_utm_cycle_template(
         "restore_robot_clearance",
     ]
     assert all(block["skill"] == {"skill_id": "", "skill_version": ""} for block in template["blocks"])
-    assert all(block["vision"]["enabled"] is False for block in template["blocks"])
+    assert {
+        block["id"]: block["vision"]["result_label"]
+        for block in template["blocks"]
+        if block["vision"]["enabled"]
+    } == {
+        "prepare_next_specimen": "WORKING",
+        "start_test": "DOWN",
+        "restore_robot_clearance": "NOT WORKING",
+    }
 
 
 def test_equipment_skill_flow_execution_is_filtered_to_requested_run(
@@ -905,8 +1118,8 @@ def test_live_gui_runtime_shell_contains_operational_panels() -> None:
     assert "planning-live-body" in html
     assert "/static/styles.css?v=20260527-live-focus" in html
     assert "/static/planning.js?v=20260613-clean-stl-render-1" in html
-    assert 'href="/static/styles.css?v=20260825-plc-safety-lifecycle-5"' in html
-    assert 'src="/static/planning.js?v=20260901-equipment-overlay-1"' in html
+    assert 'href="/static/styles.css?v=20260903-passive-vision-1"' in html
+    assert 'src="/static/planning.js?v=20260903-passive-vision-1"' in html
     assert "Runtime Chat" in html
     assert "Safe Stop" in html
     assert "Pause Run" in html
@@ -2400,6 +2613,7 @@ def test_live_gui_equipment_dashboard_uses_operational_card_layout() -> None:
     client = TestClient(app)
 
     script = client.get("/static/planning.js").text
+    css = client.get("/static/styles.css").text
 
     for token in (
         'renderDashboardCard("Bridge / Runtime", renderEquipmentBridgeRuntime',
@@ -2413,7 +2627,85 @@ def test_live_gui_equipment_dashboard_uses_operational_card_layout() -> None:
     ):
         assert token in script
     assert 'renderEquipmentAgenticProgress(ctx), { span: 12' in script
+    assert 'className: "ar-equipment-agentic-card"' in script
+    assert 'class="ar-vis-agentic-step-heading"' in script
+    assert 'class="ar-vis-agentic-port ar-vis-agentic-port-in"' in script
+    assert 'class="ar-vis-agentic-port ar-vis-agentic-port-out"' in script
     assert 'renderEquipmentExecutionEvidence(ctx), { span: 8' in script
+    assert "body.planning-live-body .ar-equipment-agentic-card" in css
+    assert "order: -1;" in css
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in css
+
+
+def test_live_gui_equipment_agentic_progress_draws_row_major_flow_connectors() -> None:
+    css = TestClient(app).get("/static/styles.css").text
+
+    assert ".ar-equipment-agentic-card .ar-vis-agentic-step:not(:nth-child(4n)):not(:last-child)::after" in css
+    assert ".ar-equipment-agentic-card .ar-vis-agentic-step:nth-child(4n):not(:last-child)::after" in css
+    assert ".ar-equipment-agentic-card .ar-vis-agentic-step:nth-child(4n + 1):not(:first-child)::before" in css
+    assert "border-right: 3px solid var(--ar-agentic-flow-line);" in css
+    assert "border-bottom: 3px solid var(--ar-agentic-flow-line);" in css
+    assert "left: calc(-250% - 3rem - 6px);" in css
+    assert "width: calc(300% + 3rem + 6px);" in css
+    assert "top: calc(100% + 0.5px);" in css
+    assert "height: calc(0.75rem + 3px);" in css
+    assert "height: calc(0.75rem - 2px);" in css
+    assert "right: calc(-1rem - 4px);" in css
+    assert "width: calc(1rem + 8px);" in css
+    assert "z-index: 3;" in css
+    assert "--ar-agentic-flow-line: rgba(112, 169, 214, 0.94);" in css
+    assert ".ar-equipment-agentic-card .ar-vis-agentic-step.is-complete" in css
+    assert ".ar-equipment-agentic-card .ar-vis-agentic-step.is-active" in css
+    assert "filter: drop-shadow(0 0 4px var(--ar-agentic-flow-glow));" in css
+    assert "body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-progress > .ar-vis-agentic-step:not(:last-child)::after" in css
+
+
+def test_live_gui_equipment_agentic_nodes_fit_content_and_align_number_with_title() -> None:
+    css = TestClient(app).get("/static/styles.css").text
+
+    assert ".ar-equipment-agentic-card .ar-vis-agentic-progress" in css
+    assert "column-gap: 1rem;" in css
+    assert "row-gap: 1.5rem;" in css
+    assert ".ar-equipment-agentic-card .ar-vis-agentic-step {" in css
+    assert "min-height: 0;" in css
+    assert ".ar-equipment-agentic-card .ar-vis-agentic-step-heading" in css
+    assert "grid-template-columns: auto minmax(0, 1fr);" in css
+    assert ".ar-equipment-agentic-card .ar-vis-agentic-port-in" in css
+    assert ".ar-equipment-agentic-card .ar-vis-agentic-port-out" in css
+    assert "border-color: rgba(100, 140, 178, 0.54);" in css
+    assert "background: rgba(12, 35, 66, 0.96);" in css
+
+    port_in_start = css.index(
+        "body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-port-in {"
+    )
+    port_in_end = css.index(
+        "body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-port-out {",
+        port_in_start,
+    )
+    port_in_rule = css[port_in_start:port_in_end]
+    assert "width: 7px;" in port_in_rule
+    assert "height: 7px;" in port_in_rule
+    assert "border-radius: 50%;" in port_in_rule
+    assert "border-left:" not in port_in_rule
+    assert "z-index: 4;" in css
+
+
+def test_live_gui_equipment_agentic_progress_reserves_passive_vision_slots() -> None:
+    client = TestClient(app)
+    script = client.get("/static/planning.js").text
+    css = client.get("/static/styles.css").text
+    manager = client.get("/static/equipment_agent_manager.js").text
+
+    assert 'class="ar-equipment-vision-slot' in script
+    assert "Vision verification:" in script
+    assert "step.vision.status" in script
+    assert "equipment-agentic-vision-slot" in css
+    assert "min-height: 1.75rem;" in css
+    assert ".is-success" in css
+    assert ".is-failed" in css
+    assert "rgba(134, 239, 172" in css
+    assert "rgba(252, 165, 165" in css
+    assert 'data-field="vision.blocking"' in manager
 
 
 def test_live_gui_equipment_dashboard_projects_recorded_cycle_overlay() -> None:
@@ -4631,9 +4923,9 @@ def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundle
     styles = client.get("/static/styles.css").text
     bundle_response = client.get("/static/omx_telemetry_viewer.bundle.js")
 
-    assert '/static/styles.css?v=20260825-plc-safety-lifecycle-5' in html
+    assert '/static/styles.css?v=20260903-passive-vision-1' in html
     assert '/static/omx_telemetry_viewer.bundle.js?v=20260720-manipulation-grounded-1' in html
-    assert '/static/planning.js?v=20260901-equipment-overlay-1' in html
+    assert '/static/planning.js?v=20260903-passive-vision-1' in html
     assert bundle_response.status_code == 200
     bundle = bundle_response.text
     for required in [
@@ -4778,7 +5070,7 @@ def test_live_gui_knowledge_activity_uses_preserved_realtime_histogram() -> None
     script = client.get("/static/planning.js").text
     styles = client.get("/static/styles.css").text
 
-    assert "/static/styles.css?v=20260825-plc-safety-lifecycle-5" in html
+    assert "/static/styles.css?v=20260903-passive-vision-1" in html
     for required in [
         "Knowledge Activity",
         "data-atr-knowledge-activity",
@@ -4811,9 +5103,9 @@ def test_live_robot_pose_has_repeatable_zoom_to_fit_control() -> None:
     assert "zoomToFit" in bundle
     assert "bindPoseFitButtons" in bundle
     assert ".ar-man-pose-fit" in styles
-    assert '/static/styles.css?v=20260825-plc-safety-lifecycle-5' in html
+    assert '/static/styles.css?v=20260903-passive-vision-1' in html
     assert '/static/omx_telemetry_viewer.bundle.js?v=20260720-manipulation-grounded-1' in html
-    assert '/static/planning.js?v=20260901-equipment-overlay-1' in html
+    assert '/static/planning.js?v=20260903-passive-vision-1' in html
 
 
 def test_live_gui_serves_repository_omx_model_assets() -> None:
@@ -4855,6 +5147,9 @@ def test_live_gui_serves_lightweight_omx_environment_manifest() -> None:
         "RedSpecimenBlock",
     }.issubset(names)
     assert "Robot" not in names
+    workspace = next(item for item in payload["objects"] if item["name"] == "A4Sheet")
+    assert workspace["position"] == [0.315, 0.245, 0.00006]
+    assert workspace["size"] == [0.17, 0.25, 0.00012]
 
 
 def test_live_gui_active_robot_cam_specimen_pose_endpoint(monkeypatch) -> None:

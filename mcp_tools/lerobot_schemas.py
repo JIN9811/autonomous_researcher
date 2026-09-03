@@ -279,6 +279,7 @@ class LeRobotBaseRequest(BaseModel):
     dry_run: bool = True
     confirm_live_execute: bool = False
     virtual_bridge_simulation: bool = False
+    plc_rollout_stop_enabled: bool = False
     isaac_mirror_enabled: bool = False
     isaac_mirror_endpoint: str = "http://127.0.0.1:8766/joints"
     isaac_mirror_sample_hz: float = 15.0
@@ -339,6 +340,7 @@ class LeRobotSessionRequest(LeRobotBaseRequest):
     log_freq: int = 200
     save_freq: int = 20000
     save_checkpoint: bool = True
+    train_background: bool = True
     eval_batch_size: int | None = None
     optimizer_type: str = ""
     optimizer_lr: float | None = None

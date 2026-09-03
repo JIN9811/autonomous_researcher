@@ -92,8 +92,10 @@ DEPTH_SENSOR_PROFILES: dict[str, dict[str, float]] = {
 FAMILY_ORDER = ["photometric", "sensor_noise", "depth_noise", "render_domain", "camera_pose"]
 QA_DEPTH_VALID_RATIO_MIN = 0.01
 ORIENTATION_CONFIDENCE_MIN = 0.5
-A4_WIDTH_MM = 210.0
-A4_HEIGHT_MM = 297.0
+# Legacy payload fields retain the ``a4_*`` names, but their calibrated domain
+# is the current Active Cam workspace: 170 mm lateral by 250 mm forward.
+A4_WIDTH_MM = 170.0
+A4_HEIGHT_MM = 250.0
 
 
 def _now_iso() -> str:

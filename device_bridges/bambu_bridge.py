@@ -258,6 +258,19 @@ class BambuStudioSlicerRunner:
         }
         effective_load_settings = load_settings
         effective_load_filaments = load_filaments
+        if not effective_load_settings and not effective_load_filaments:
+            no_skirt_profile = self._default_no_skirt_profile(output_dir)
+            if no_skirt_profile.get("ok"):
+                effective_load_settings = no_skirt_profile["load_settings"]
+                effective_load_filaments = no_skirt_profile["load_filaments"]
+                slicer_profile = {
+                    **slicer_profile,
+                    **no_skirt_profile,
+                    "preserve_bambu_defaults": True,
+                    "reason": "bambu_defaults_with_no_skirt_brim_raft_overrides",
+                }
+            else:
+                slicer_profile["no_skirt_profile_probe"] = no_skirt_profile
 
         before = {path.resolve() for path in self._candidate_outputs(output_dir)}
         command = [
@@ -3569,6 +3582,8 @@ class PrinterDeviceBridgeManager:
         result = self._base_result(profile, payload, selection_reason=selection_reason)
         result["autoejection"] = self.autoejection_status()
         result["physical_transport"] = bool(physical_transport)
+        if str(payload.get("execution_policy_mode") or "").strip().lower() == "preflight_only":
+            return self._prepare_bambu_no_actuation_preflight(profile, payload, result)
         if mode != "live" and not physical_transport:
             result.update(
                 {
@@ -3728,6 +3743,8 @@ class PrinterDeviceBridgeManager:
         plate_id = payload.get("plate_id") or print_payload.get("plate_id") or 1
         artifact_plate_validation: dict[str, Any] = {}
         autoejection_patch: dict[str, Any] = {}
+        artifact_integrity_validation: dict[str, Any] = {}
+        expected_artifact_sha256 = ""
         ejection_only_project_file = False
         wants_upload = self._wants_bambu_upload(payload)
         slicer_result: dict[str, Any] = {}
@@ -3763,6 +3780,7 @@ class PrinterDeviceBridgeManager:
             )
             if autoejection_patch.get("ok") and autoejection_patch.get("patched_artifact_path"):
                 artifact_path = Path(str(autoejection_patch.get("patched_artifact_path")))
+                expected_artifact_sha256 = str(autoejection_patch.get("patched_sha256") or "")
                 ejection_only_project_file = bool(autoejection_patch.get("schema") == "bambu_ejection_only_project_file.v1")
             else:
                 gate_ready = False
@@ -3774,6 +3792,8 @@ class PrinterDeviceBridgeManager:
                 gate_ready = False
                 gate_state = "blocked"
                 failure_code = str(artifact_plate_validation.get("failure_code") or "BAMBU_PROJECT_FILE_PARAM_MISMATCH")
+            if not expected_artifact_sha256 and artifact_path.is_file():
+                expected_artifact_sha256 = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
         if (
             artifact_path
             and not artifact_url
@@ -3786,6 +3806,7 @@ class PrinterDeviceBridgeManager:
                 connection=connection,
                 payload=payload,
                 plate_id=int(plate_id),
+                expected_artifact_sha256=expected_artifact_sha256,
             )
             if http_artifact_route.get("ok"):
                 artifact_url = str(http_artifact_route.get("artifact_url") or "")
@@ -3793,6 +3814,18 @@ class PrinterDeviceBridgeManager:
                 gate_ready = False
                 gate_state = "blocked"
                 failure_code = str(http_artifact_route.get("failure_code") or "BAMBU_HTTP_ARTIFACT_ROUTE_FAILED")
+        if gate_ready and artifact_path and not health_only and not (prefer_http_artifact and artifact_url):
+            artifact_integrity_validation = self._verify_local_artifact_sha256(
+                artifact_path,
+                expected_sha256=expected_artifact_sha256,
+                stage="before_upload",
+            )
+            if not artifact_integrity_validation.get("ok"):
+                gate_ready = False
+                gate_state = "blocked"
+                failure_code = str(
+                    artifact_integrity_validation.get("failure_code") or "BAMBU_ARTIFACT_SHA256_MISMATCH"
+                )
         if gate_ready and artifact_path and not health_only and not (prefer_http_artifact and artifact_url):
             upload_result = self.ftps_client.upload_file(
                 local_path=artifact_path,
@@ -3863,6 +3896,12 @@ class PrinterDeviceBridgeManager:
         print_result: dict[str, Any] = {}
         ejection_result: dict[str, Any] = {}
         if self._should_publish_bambu_start(payload) and not health_only:
+            uploaded_artifact = upload_result.get("artifact") if isinstance(upload_result.get("artifact"), dict) else {}
+            start_integrity_path = (
+                uploaded_artifact.get("export_path")
+                if str(upload_result.get("route") or "") == "http_artifact"
+                else artifact_path
+            )
             print_result = self._publish_bambu_project_file_start(
                 connection=connection,
                 raw_connection=raw_connection,
@@ -3872,6 +3911,8 @@ class PrinterDeviceBridgeManager:
                 upload_result=upload_result,
                 gate_ready=gate_ready,
                 normalized_report=normalized_report,
+                local_artifact_path=start_integrity_path,
+                expected_artifact_sha256=str(upload_result.get("sha256") or expected_artifact_sha256),
             )
             stop_after_start_requested = self._should_stop_after_bambu_start(payload) and not ejection_only_project_file
             post_publish_state = str(print_result.get("post_publish_status", {}).get("status") or "")
@@ -3943,6 +3984,7 @@ class PrinterDeviceBridgeManager:
                 "print_result": print_result,
                 "ejection_result": ejection_result,
                 "artifact_plate_validation": artifact_plate_validation,
+                "artifact_integrity_validation": artifact_integrity_validation,
                 "project_file_draft": project_file_draft,
                 "operator_actions": self._bambu_operator_actions(
                     connection=connection,
@@ -4040,6 +4082,149 @@ class PrinterDeviceBridgeManager:
             }
         )
         return result
+
+    def _prepare_bambu_no_actuation_preflight(
+        self,
+        profile: PrinterProfile,
+        payload: dict[str, Any],
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Build and validate the exact print artifact without touching the printer network."""
+        print_payload = payload.get("print") if isinstance(payload.get("print"), dict) else {}
+        plate_id = _as_int(payload.get("plate_id") or print_payload.get("plate_id"), 1)
+        artifact_path = self._bambu_sliced_artifact_path(payload)
+        slicer_result: dict[str, Any] = {}
+        if artifact_path is None:
+            source_path = self._bambu_source_path(payload)
+            if not source_path:
+                return {
+                    **result,
+                    "ok": False,
+                    "status": "blocked",
+                    "failure_code": "BAMBU_PREFLIGHT_SOURCE_REQUIRED",
+                    "printer_preflight": {
+                        "schema": "printer_preflight.v1",
+                        "status": "blocked",
+                        "actuation_performed": False,
+                        "upload_performed": False,
+                        "start_command_published": False,
+                    },
+                }
+            slicer_result = BambuStudioSlicerRunner(self.config.slicer, repo_root=self.repo_root).slice(
+                source_path=source_path,
+                specimen_id=str(payload.get("specimen_id") or "bambu-specimen"),
+                load_settings=print_payload.get("load_settings") or payload.get("load_settings") or None,
+                load_filaments=print_payload.get("load_filaments") or payload.get("load_filaments") or None,
+                extra_args=(
+                    payload.get("extra_args")
+                    if isinstance(payload.get("extra_args"), list)
+                    else print_payload.get("extra_args")
+                    if isinstance(print_payload.get("extra_args"), list)
+                    else None
+                ),
+                timeout_sec=payload.get("timeout_sec") or print_payload.get("timeout_sec") or None,
+            )
+            if not slicer_result.get("ok") or not slicer_result.get("sliced_artifact_path"):
+                return {
+                    **result,
+                    "ok": False,
+                    "status": "blocked",
+                    "failure_code": str(slicer_result.get("failure_code") or "BAMBU_STUDIO_SLICE_FAILED"),
+                    "slicer_result": slicer_result,
+                    "printer_preflight": {
+                        "schema": "printer_preflight.v1",
+                        "status": "blocked",
+                        "actuation_performed": False,
+                        "upload_performed": False,
+                        "start_command_published": False,
+                    },
+                }
+            artifact_path = Path(str(slicer_result["sliced_artifact_path"]))
+
+        patch_result = self._patch_bambu_native_autoejection_for_prepare(
+            artifact_path=artifact_path,
+            payload={
+                **payload,
+                "test_printer_path": "physical_print",
+                "ejection": {
+                    **(payload.get("ejection") if isinstance(payload.get("ejection"), dict) else {}),
+                    "enabled": True,
+                    "allow_ejection": True,
+                    "use_ejection_only_project_file": False,
+                },
+                "print": {**print_payload, "use_ejection_only_project_file": False},
+            },
+            plate_id=plate_id,
+        )
+        patched_path = Path(str(patch_result.get("patched_artifact_path") or ""))
+        validation = (
+            validate_bambu_project_file_local_artifact(patched_path, plate_id=plate_id)
+            if patch_result.get("ok") and patched_path.is_file()
+            else {"ok": False, "failure_code": str(patch_result.get("failure_code") or "BAMBU_NATIVE_AUTOEJECTION_PATCH_FAILED")}
+        )
+        ready = bool(patch_result.get("ok") and validation.get("ok") and patched_path.is_file())
+        digest = hashlib.sha256(patched_path.read_bytes()).hexdigest() if ready else ""
+        preflight = {
+            "schema": "printer_preflight.v1",
+            "run_id": str(payload.get("run_id") or payload.get("session_id") or ""),
+            "status": "execution_ready_pending_approval" if ready else "blocked",
+            "failure_code": "" if ready else str(validation.get("failure_code") or patch_result.get("failure_code") or "BAMBU_PREFLIGHT_FAILED"),
+            "actuation_performed": False,
+            "upload_performed": False,
+            "start_command_published": False,
+            "would_execute_tool": "printer.prepare",
+            "provider": profile.provider,
+            "specimen_id": str(payload.get("specimen_id") or ""),
+            "candidate_id": str(payload.get("candidate_id") or ""),
+            "plate_id": plate_id,
+            "source_artifact_path": str(artifact_path),
+            "immutable_artifact_path": str(patched_path) if ready else "",
+            "artifact_sha256": digest,
+            "artifact_plate_validation": validation,
+            "source_object_bounds_mm": (
+                patch_result.get("source_object_bounds_mm")
+                if isinstance(patch_result.get("source_object_bounds_mm"), dict)
+                else patch_result.get("object_bounds_mm", {})
+            ),
+            "autoejection_patch": patch_result,
+        }
+        return {
+            **result,
+            "ok": ready,
+            "status": preflight["status"],
+            "failure_code": preflight["failure_code"],
+            "printer_path": "physical_print",
+            "physical_transport": False,
+            "slicer_result": slicer_result,
+            "sliced_path": str(patched_path) if ready else str(artifact_path),
+            "gcode_validation": validation,
+            "artifact_plate_validation": validation,
+            "autoejection_patch": patch_result,
+            "print_result": {
+                "status": "preflight_only",
+                "published": False,
+                "upload_performed": False,
+                "start_command_published": False,
+            },
+            "ejection_result": {
+                "status": "embedded_not_executed" if ready else "blocked",
+                "actuation_performed": False,
+            },
+            "printer_preflight": preflight,
+            "step_trace": [
+                {"step": "SELECT_PRINTER_PROFILE", "status": "ok", "detail": profile.profile_id},
+                {"step": "SLICE_ARTIFACT", "status": "ok" if artifact_path else "blocked"},
+                {
+                    "step": "EXTRACT_EXTRUSION_BOUNDS",
+                    "status": "ok"
+                    if patch_result.get("source_object_bounds_mm") or patch_result.get("object_bounds_mm")
+                    else "blocked",
+                },
+                {"step": "PATCH_AUTOEJECTION_TAIL", "status": "ok" if patch_result.get("ok") else "blocked"},
+                {"step": "VALIDATE_IMMUTABLE_ARTIFACT", "status": "ok" if validation.get("ok") else "blocked"},
+                {"step": "STOP_BEFORE_UPLOAD_OR_START", "status": "ok"},
+            ],
+        }
 
     def _test_mode_installed_printer_check(self, payload: dict[str, Any]) -> bool:
         mode = str(payload.get("runtime_mode") or self.config.mode or "test").strip().lower()
@@ -4178,6 +4363,7 @@ class PrinterDeviceBridgeManager:
         connection: dict[str, Any],
         payload: dict[str, Any],
         plate_id: int,
+        expected_artifact_sha256: str = "",
     ) -> dict[str, Any]:
         source = Path(str(artifact_path)).expanduser()
         if not source.is_absolute():
@@ -4191,6 +4377,18 @@ class PrinterDeviceBridgeManager:
                 "ok": False,
                 "tool": "printer.bambu.http_artifact_route",
                 "failure_code": str(validation.get("failure_code") or "BAMBU_PROJECT_FILE_PARAM_MISMATCH"),
+            }
+        integrity_validation = self._verify_local_artifact_sha256(
+            source,
+            expected_sha256=expected_artifact_sha256,
+            stage="before_http_export",
+        )
+        if not integrity_validation.get("ok"):
+            return {
+                **integrity_validation,
+                "ok": False,
+                "tool": "printer.bambu.http_artifact_route",
+                "artifact_plate_validation": validation,
             }
         token = uuid.uuid4().hex
         filename = self._safe_bambu_http_filename(source)
@@ -4217,8 +4415,49 @@ class PrinterDeviceBridgeManager:
                 "sha256": hashlib.sha256(data).hexdigest(),
             },
             "artifact_plate_validation": validation,
+            "artifact_integrity_validation": integrity_validation,
             "printer_fetch_ready": True,
             "will_publish": False,
+        }
+
+    def _verify_local_artifact_sha256(
+        self,
+        local_path: str | Path,
+        *,
+        expected_sha256: str,
+        stage: str,
+    ) -> dict[str, Any]:
+        source = Path(str(local_path or "")).expanduser()
+        expected = str(expected_sha256 or "").strip().lower()
+        base = {
+            "schema": "bambu_artifact_integrity_validation.v1",
+            "stage": str(stage or "unspecified"),
+            "local_path": str(source),
+            "expected_sha256": expected,
+            "checked_at": _utc_now(),
+        }
+        if not source.exists() or not source.is_file():
+            return {
+                **base,
+                "ok": False,
+                "failure_code": "BAMBU_ARTIFACT_NOT_FOUND_BEFORE_USE",
+                "actual_sha256": "",
+            }
+        if not re.fullmatch(r"[0-9a-f]{64}", expected):
+            return {
+                **base,
+                "ok": False,
+                "failure_code": "BAMBU_ARTIFACT_EXPECTED_SHA256_REQUIRED",
+                "actual_sha256": "",
+            }
+        actual = hashlib.sha256(source.read_bytes()).hexdigest()
+        matches = actual == expected
+        return {
+            **base,
+            "ok": matches,
+            "failure_code": "" if matches else "BAMBU_ARTIFACT_SHA256_MISMATCH",
+            "actual_sha256": actual,
+            "matches_expected_sha256": matches,
         }
 
     def _bambu_http_public_base_url(self, payload: dict[str, Any], *, printer_host: str) -> str:
@@ -4279,6 +4518,8 @@ class PrinterDeviceBridgeManager:
         upload_result: dict[str, Any],
         gate_ready: bool,
         normalized_report: dict[str, Any],
+        local_artifact_path: str | Path | None = None,
+        expected_artifact_sha256: str = "",
     ) -> dict[str, Any]:
         if not gate_ready or not project_file_draft.get("ok") or not upload_result.get("ok"):
             return {
@@ -4297,6 +4538,23 @@ class PrinterDeviceBridgeManager:
                 "published": False,
                 "will_publish": False,
                 "remote_path": upload_result.get("remote_path", ""),
+            }
+        integrity_validation = self._verify_local_artifact_sha256(
+            local_artifact_path or "",
+            expected_sha256=expected_artifact_sha256 or str(upload_result.get("sha256") or ""),
+            stage="before_start_publish",
+        )
+        if not integrity_validation.get("ok"):
+            return {
+                "ok": False,
+                "status": "blocked",
+                "failure_code": str(
+                    integrity_validation.get("failure_code") or "BAMBU_ARTIFACT_SHA256_MISMATCH"
+                ),
+                "published": False,
+                "will_publish": False,
+                "remote_path": upload_result.get("remote_path", ""),
+                "artifact_integrity_validation": integrity_validation,
             }
         publish_result = self.mqtt_client.publish_project_file_command(
             host=str(raw_connection.get("host") or ""),
@@ -4333,6 +4591,7 @@ class PrinterDeviceBridgeManager:
             "will_publish": bool(publish_result.get("will_publish")),
             "published": bool(publish_result.get("published") or publish_result.get("ok")),
             "post_publish_status": post_publish_status,
+            "artifact_integrity_validation": integrity_validation,
         }
 
     def _bambu_printer_state_allows_project_start(self, *, normalized_report: dict[str, Any], payload: dict[str, Any]) -> bool:
@@ -4434,6 +4693,25 @@ class PrinterDeviceBridgeManager:
                 "artifact": artifact,
                 "artifact_plate_validation": artifact_plate_validation,
             }
+        artifact_integrity_validation = self._verify_local_artifact_sha256(
+            startable_path,
+            expected_sha256=str(artifact.get("startable_sha256") or ""),
+            stage="before_standalone_upload",
+        )
+        if not artifact_integrity_validation.get("ok"):
+            return {
+                "ok": False,
+                "tool": "printer.bambu.autoejection_standalone_publish",
+                "status": "blocked",
+                "failure_code": str(
+                    artifact_integrity_validation.get("failure_code") or "BAMBU_ARTIFACT_SHA256_MISMATCH"
+                ),
+                "published": False,
+                "transport": "project_file",
+                "artifact": artifact,
+                "artifact_plate_validation": artifact_plate_validation,
+                "artifact_integrity_validation": artifact_integrity_validation,
+            }
         upload_result = self.ftps_client.upload_file(
             local_path=startable_path,
             remote_path=self._bambu_remote_artifact_path(
@@ -4498,6 +4776,8 @@ class PrinterDeviceBridgeManager:
             upload_result=upload_result,
             gate_ready=True,
             normalized_report=normalized_report,
+            local_artifact_path=startable_path,
+            expected_artifact_sha256=str(artifact.get("startable_sha256") or upload_result.get("sha256") or ""),
         )
         started = bool(
             publish_result.get("ok")

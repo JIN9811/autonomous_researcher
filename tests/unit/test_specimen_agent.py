@@ -522,6 +522,30 @@ def test_virtual_bridge_marks_autoejected_workspace_for_active_cam_handoff() -> 
     assert handoff["physical_location"] == "a4_workspace"
 
 
+def test_preflight_complete_emits_logical_preflight_handoff_without_claiming_fabrication() -> None:
+    state = OrchestratorState(run_id="run-preflight", experiment_id="exp-preflight", mode=Mode.TEST, stage=Stage.SPECIMEN)
+    report = {
+        "schema": "fabrication_report.v1",
+        "fabrication_intent": {"physical_intent": True, "printer_path": "physical_print"},
+        "fabrication_outcome": {"status": "preflight_complete", "location": "not_actuated", "warnings": []},
+        "digital_thread": {"stl_path": "/tmp/specimen.stl", "gcode_path": "/tmp/specimen.gcode.3mf"},
+        "quality_gates": [],
+    }
+
+    packet = SpecimenMakingAgent()._build_specimen_fabricated_packet(
+        state=state,
+        candidate="candidate-preflight",
+        specimen_id="specimen-preflight",
+        report=report,
+        decisions=[],
+        evidence_refs=[],
+    )
+
+    assert packet["status"] == "preflight_ready"
+    assert packet["next_action"] == "physical_start_pending_approval"
+    assert packet["physical_location"] == "not_actuated"
+
+
 @pytest.mark.asyncio
 async def test_specimen_agent_installed_printer_uses_single_ejection_only_project_file(
     tmp_path: Path,
@@ -611,6 +635,8 @@ async def test_specimen_agent_installed_printer_uses_single_ejection_only_projec
     assert payload["ejection"]["use_ejection_only_project_file"] is True
     assert payload["ejection"]["source"] == "installed_printer_ejection_only_project_file"
     assert result.data["specimen_result"]["printer_path"] == "installed_printer"
+    assert "printer_preflight" not in result.data
+    assert "printer_preflight" not in result.data["specimen_result"]
 
 
 @pytest.mark.asyncio
@@ -973,8 +999,10 @@ async def test_specimen_agent_live_gui_test_mode_physical_print_enables_print_ta
     assert payload["test_printer_path"] == "physical_print"
     assert payload["allow_test_printer_live"] is True
     assert payload["test_printer_transport"] == "real"
+    assert payload["prefer_http_artifact"] is True
     assert payload["print"]["physical_intent"] is True
     assert payload["print"]["confirm_physical_print"] is True
+    assert payload["print"]["prefer_http_artifact"] is True
     assert payload["print"]["stop_after_start"] is False
     assert payload["ejection"]["enabled"] is True
     assert payload["ejection"]["allow_ejection"] is True

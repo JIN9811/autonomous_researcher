@@ -66,6 +66,81 @@ def test_equipment_stage_blocks_non_ready_handoff() -> None:
     assert "UTM_PROTOCOL_REQUIRED" in message
 
 
+def test_equipment_stage_accepts_typed_no_actuation_preflight_for_cae_analysis() -> None:
+    ok, message = validate_agent_output(
+        "equipment",
+        {
+            "protocol_note": "agentic UTM flow validated; execution deferred by policy",
+            "equipment_result": {
+                "ok": True,
+                "status": "execution_ready_pending_approval",
+                "actuation_performed": False,
+            },
+            "equipment_preflight": {
+                "schema": "equipment_preflight.v1",
+                "status": "execution_ready_pending_approval",
+                "actuation_performed": False,
+                "resolved_program_id": "run_utm_compression_cycle",
+            },
+            "equipment_handoff": {
+                "status": "execution_ready_pending_approval",
+                "ready_for_analysis": False,
+                "actuation_performed": False,
+            },
+        },
+    )
+
+    assert ok is True
+    assert message == "ok"
+
+
+def test_specimen_stage_accepts_only_consistent_typed_no_actuation_preflight() -> None:
+    payload = {
+        "printer_preflight": {
+            "schema": "printer_preflight.v1",
+            "status": "execution_ready_pending_approval",
+            "actuation_performed": False,
+            "upload_performed": False,
+            "start_command_published": False,
+        },
+        "specimen_fabricated": {
+            "schema": "specimen_fabricated.v1",
+            "status": "preflight_ready",
+            "physical_location": "not_actuated",
+        },
+    }
+
+    assert validate_agent_output("specimen", payload) == (True, "ok")
+
+    payload["specimen_fabricated"]["status"] = "blocked"
+    ok, message = validate_agent_output("specimen", payload)
+    assert ok is False
+    assert "specimen preflight handoff" in message.lower()
+
+
+def test_specimen_stage_rejects_preflight_that_claims_actuation() -> None:
+    ok, message = validate_agent_output(
+        "specimen",
+        {
+            "printer_preflight": {
+                "schema": "printer_preflight.v1",
+                "status": "execution_ready_pending_approval",
+                "actuation_performed": True,
+                "upload_performed": False,
+                "start_command_published": False,
+            },
+            "specimen_fabricated": {
+                "schema": "specimen_fabricated.v1",
+                "status": "preflight_ready",
+                "physical_location": "not_actuated",
+            },
+        },
+    )
+
+    assert ok is False
+    assert "printer_preflight" in message
+
+
 def test_analysis_stage_blocks_failed_utm_analysis() -> None:
     ok, message = validate_agent_output(
         "analysis",

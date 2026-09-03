@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from device_bridges.cae_bridge import CAEBridge, CAEBridgeConfig
 from mcp_tools.cae_tools import register_cae_tools
 from mcp_tools.tool_registry import ToolRegistry
@@ -133,6 +135,61 @@ def test_cae_test_mode_returns_quasistatic_curve_to_half_planned_height(tmp_path
     }
     assert result["analysis_platens"]["bottom"] is False
     assert result["analysis_platens"]["top"] is False
+
+
+def test_cae_reference_calibration_preserves_candidate_effect_and_provenance(tmp_path) -> None:
+    tools = ToolRegistry()
+    register_cae_tools(
+        tools,
+        {"devices": {"cae": {"enabled": True, "mode": "test", "artifact_dir": "artifacts/cae"}}},
+        repo_root=tmp_path,
+    )
+    calibration = {
+        "schema": "utm_reference_calibration.v1",
+        "status": "ready",
+        "metric_name": "energy_density_50pct_MJ_per_m3",
+        "unit": "MJ/m3",
+        "reference_value": 2.5,
+        "accepted_count": 3,
+        "reference_hashes": ["a" * 64, "b" * 64, "c" * 64],
+        "calibration_method": "median_integrated_force_displacement_energy_density",
+        "limitations": ["historical_unmatched_specimen_reference"],
+    }
+
+    def run(relative_density: float) -> dict:
+        return tools.call(
+            "cae.run_static_analysis",
+            {
+                "runtime_mode": "test",
+                "specimen_id": f"cae-calibrated-{relative_density}",
+                "specimen_size_mm": [30.0, 30.0, 30.0],
+                "reference_calibration": calibration,
+                "design_parameters": {
+                    "geometry_type": "gyroid",
+                    "relative_density": relative_density,
+                    "wall_thickness_mm": 1.2,
+                    "cell_size_mm": 10.0,
+                },
+            },
+        )
+
+    low = run(0.25)
+    high = run(0.45)
+
+    assert low["ok"] is True
+    assert low["reaction_force_displacement_curve"][-1]["displacement_mm"] == pytest.approx(15.0)
+    assert low["boundary"] == {
+        "bottom": "frictionless_axial_support",
+        "top": "frictionless_displacement",
+    }
+    assert low["analysis_platens"]["bottom"] is False
+    assert low["analysis_platens"]["top"] is False
+    assert low["reference_calibration"]["applied"] is True
+    assert low["reference_calibration"]["reference_hashes"] == calibration["reference_hashes"]
+    assert low["cae_metrics"]["energy_density_50pct_MJ_per_m3"] > 0.0
+    assert high["cae_metrics"]["energy_density_50pct_MJ_per_m3"] != pytest.approx(
+        low["cae_metrics"]["energy_density_50pct_MJ_per_m3"]
+    )
 
 
 def test_cae_uses_nested_quasistatic_loading_controls(tmp_path) -> None:

@@ -51,8 +51,9 @@ def test_closed_loop_graph_has_post_place_vision_verification() -> None:
     assert ("vision", "manipulation") in edge_pairs
     assert ("manipulation", "vision_verify") in sidecar_edges
     assert ("vision_verify", "equipment") in sidecar_edges
-    assert config.transitions["manipulation"] == "equipment"
+    assert config.transitions["manipulation"] == "vision"
     assert config.next_stage("manipulation", state_metadata={"agent_result": {"requested_next_stage": "vision"}}) == "vision"
+    assert config.next_stage("manipulation", state_metadata={"agent_result": {"requested_next_stage": "equipment"}}) == "equipment"
     assert config.next_stage("vision", state_metadata={"agent_result": {"requested_next_stage": "equipment"}}) == "equipment"
     assert [
         config.transitions[stage]

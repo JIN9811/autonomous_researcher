@@ -191,24 +191,46 @@ class AnalysisAgent(BaseAgent):
                 return parsed * multiplier if math.isfinite(parsed) else math.nan
         return None
 
-    def _specimen_geometry(self, state: OrchestratorState) -> dict[str, float | list[float]]:
+    def _specimen_geometry(self, state: OrchestratorState) -> dict[str, Any]:
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
         specimen = state.run_metadata.get("specimen_result") if isinstance(state.run_metadata, dict) else {}
         specimen = specimen if isinstance(specimen, dict) else {}
         candidate = specimen.get("candidate") if isinstance(specimen.get("candidate"), dict) else {}
         parameters = candidate.get("parameters") if isinstance(candidate.get("parameters"), dict) else {}
         source = {**parameters, **spec}
-        size = self._vector3(source.get("specimen_size_mm") or source.get("size_mm"), [20.0, 20.0, 20.0])
-        area = max(float(source.get("cross_section_area_mm2") or size[0] * size[1]), 1e-6)
-        gauge = max(float(source.get("gauge_length_mm") or source.get("height_mm") or size[2]), 1e-6)
-        volume = max(size[0] * size[1] * size[2], 1e-6)
+        raw_size = source.get("specimen_size_mm") if "specimen_size_mm" in source else source.get("size_mm")
+        if raw_size is None:
+            size = [20.0, 20.0, 20.0]
+        elif isinstance(raw_size, (list, tuple)) and len(raw_size) >= 3:
+            size = [self._safe_float(raw_size[index], math.nan) for index in range(3)]
+        else:
+            size = [math.nan, math.nan, math.nan]
+
+        explicit_area = source.get("cross_section_area_mm2") if "cross_section_area_mm2" in source else None
+        area = self._safe_float(explicit_area, math.nan) if explicit_area is not None else size[0] * size[1]
+        if "gauge_length_mm" in source:
+            gauge = self._safe_float(source.get("gauge_length_mm"), math.nan)
+        elif "height_mm" in source:
+            gauge = self._safe_float(source.get("height_mm"), math.nan)
+        else:
+            gauge = size[2]
+
+        normalization_errors: list[str] = []
+        if not math.isfinite(area) or area <= 0.0:
+            normalization_errors.append("cross_section_area_mm2")
+        if not math.isfinite(gauge) or gauge <= 0.0:
+            normalization_errors.append("gauge_length_mm")
+        valid_size = all(math.isfinite(value) and value > 0.0 for value in size)
+        volume = size[0] * size[1] * size[2] if valid_size else 0.0
         mass = self._safe_float(source.get("measured_mass_g") or source.get("expected_mass_g"), 0.0)
         return {
-            "specimen_size_mm": size,
-            "cross_section_area_mm2": round(area, 6),
-            "gauge_length_mm": round(gauge, 6),
+            "specimen_size_mm": [round(value, 6) if math.isfinite(value) else 0.0 for value in size],
+            "cross_section_area_mm2": round(area, 6) if math.isfinite(area) else 0.0,
+            "gauge_length_mm": round(gauge, 6) if math.isfinite(gauge) else 0.0,
             "volume_mm3": round(volume, 6),
             "mass_g": round(mass, 6),
+            "normalization_valid": not normalization_errors,
+            "normalization_errors": normalization_errors,
         }
 
     @staticmethod
@@ -292,6 +314,11 @@ class AnalysisAgent(BaseAgent):
             "mesh_size_mm": self._safe_float(spec.get("cae_mesh_size_mm") or spec.get("mesh_size_mm"), 2.0),
             "require_solver": bool(spec.get("require_cae_solver", False)),
             "runtime_solver_enabled": bool(spec.get("runtime_solver_enabled", False)),
+            "reference_calibration": (
+                dict(spec["cae_reference_calibration"])
+                if isinstance(spec.get("cae_reference_calibration"), dict)
+                else {}
+            ),
             "source": "analysis_agent",
         }
 
@@ -369,7 +396,7 @@ class AnalysisAgent(BaseAgent):
             result = source.get("equipment_result") if isinstance(source.get("equipment_result"), dict) else {}
             if result:
                 merged.update(dict(result))
-            for key in ("equipment_report", "utm_data_ready", "equipment_handoff"):
+            for key in ("equipment_report", "utm_data_ready", "equipment_handoff", "equipment_preflight"):
                 value = source.get(key) if isinstance(source.get(key), dict) else {}
                 if value and key not in merged:
                     merged[key] = dict(value)
@@ -710,6 +737,81 @@ class AnalysisAgent(BaseAgent):
                 first_meta = {"source": label, **meta}
         return [], first_meta or {"source": "none"}
 
+    @staticmethod
+    def _lab_equipment_preflight_requested(state: OrchestratorState) -> bool:
+        spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        policy = spec.get("execution_policy") if isinstance(spec.get("execution_policy"), dict) else {}
+        return str(policy.get("lab_equipment") or "").strip().lower() == "preflight_only"
+
+    def _curve_from_preflight_cae(
+        self,
+        equipment_result: dict[str, Any],
+        cae_result: dict[str, Any] | None,
+    ) -> tuple[list[dict[str, float]], dict[str, Any]]:
+        """Promote qualified CAE output only for an explicit no-actuation UTM policy."""
+        equipment_preflight = (
+            equipment_result.get("equipment_preflight")
+            if isinstance(equipment_result.get("equipment_preflight"), dict)
+            else {}
+        )
+        if (
+            equipment_preflight.get("status") != "execution_ready_pending_approval"
+            or equipment_preflight.get("actuation_performed") is not False
+            or equipment_preflight.get("resolved_program_id") != "run_utm_compression_cycle"
+        ):
+            return [], {
+                "source": "equipment_preflight",
+                "failure_code": "EQUIPMENT_PREFLIGHT_NOT_READY",
+                "error": "The complete UTM program must resolve and stop before PyAutoGUI execution.",
+            }
+        if not isinstance(cae_result, dict) or not cae_result.get("ok"):
+            return [], {
+                "source": "cae_reference_calibrated_preflight",
+                "failure_code": "CAE_PREFLIGHT_RESULT_REQUIRED",
+                "error": "A successful CAE result is required when UTM actuation is disabled.",
+            }
+        calibration = (
+            cae_result.get("reference_calibration")
+            if isinstance(cae_result.get("reference_calibration"), dict)
+            else {}
+        )
+        cae_metrics = (
+            cae_result.get("cae_metrics")
+            if isinstance(cae_result.get("cae_metrics"), dict)
+            else cae_result.get("metrics", {})
+        )
+        if calibration.get("applied") is not True or cae_metrics.get("endpoint_reached") is not True:
+            return [], {
+                "source": "cae_reference_calibrated_preflight",
+                "failure_code": "QUALIFIED_CAE_REFERENCE_REQUIRED",
+                "error": "CAE preflight must use qualified historical UTM calibration and reach the planned endpoint.",
+            }
+        raw_curve = cae_result.get("reaction_force_displacement_curve")
+        if not isinstance(raw_curve, list):
+            raw_curve = []
+        curve = self._curve_points_from_rows(raw_curve, sort_by_displacement=True)
+        hashes = [str(value) for value in calibration.get("reference_hashes", []) if str(value).strip()]
+        return curve, {
+            "source": "cae_reference_calibrated_preflight",
+            "observation_kind": "predicted",
+            "fidelity": "cae_mid",
+            "parser_id": "analysis.parsers.cae_force_displacement_curve",
+            "reference_hashes": hashes,
+            "reference_calibration": calibration,
+            "equipment_preflight": equipment_preflight,
+            "column_mapping": {
+                "schema": "analysis_column_mapping.v1",
+                "mappings": {
+                    "displacement_mm": {"canonical": "displacement_mm", "multiplier": 1.0, "unit": "mm"},
+                    "force_N": {"canonical": "force_N", "multiplier": 1.0, "unit": "N"},
+                },
+                "roles": {"displacement_mm": "displacement_mm", "force_N": "force_N"},
+                "column_mapping_confidence": 1.0,
+                "unit_mapping_confidence": 1.0,
+                "warnings": [],
+            },
+        }
+
     def _synthetic_curve(self, state: OrchestratorState, geometry: dict[str, Any]) -> tuple[list[dict[str, float]], dict[str, Any]]:
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
         density = self._safe_float(spec.get("relative_density"), 0.32)
@@ -797,6 +899,46 @@ class AnalysisAgent(BaseAgent):
                 return clipped, True
         return [], False
 
+    @staticmethod
+    def _curve_through_strain(
+        points: list[dict[str, Any]],
+        limit_strain: float,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Clip a stress-strain curve at a measured boundary without extrapolation."""
+        if not points or limit_strain < 0.0:
+            return [], False
+        ordered = sorted(points, key=lambda item: float(item["strain"]))
+        eps = 1e-12
+        if float(ordered[-1]["strain"]) + eps < limit_strain:
+            return [], False
+        clipped = [dict(point) for point in ordered if float(point["strain"]) <= limit_strain + eps]
+        if clipped and abs(float(clipped[-1]["strain"]) - limit_strain) <= eps:
+            clipped[-1]["strain"] = float(limit_strain)
+            clipped[-1]["strain_pct"] = float(limit_strain) * 100.0
+            return clipped, True
+        for left, right in zip(ordered, ordered[1:], strict=False):
+            left_x = float(left["strain"])
+            right_x = float(right["strain"])
+            if left_x < limit_strain < right_x and right_x - left_x > eps:
+                ratio = (limit_strain - left_x) / (right_x - left_x)
+                boundary: dict[str, Any] = dict(left)
+                boundary["strain"] = float(limit_strain)
+                boundary["strain_pct"] = float(limit_strain) * 100.0
+                for key in ("stress_MPa", "displacement_mm", "force_N", "time_s"):
+                    if key in left and key in right:
+                        boundary[key] = float(left[key]) + ratio * (float(right[key]) - float(left[key]))
+                clipped.append(boundary)
+                return clipped, True
+        return [], False
+
+    @staticmethod
+    def _integrate_stress_strain(points: list[dict[str, Any]]) -> float:
+        energy_density = 0.0
+        for left, right in zip(points, points[1:], strict=False):
+            strain_step = max(0.0, float(right["strain"]) - float(left["strain"]))
+            energy_density += 0.5 * (float(left["stress_MPa"]) + float(right["stress_MPa"])) * strain_step
+        return max(0.0, energy_density)
+
     def _curve_quality(self, curve: list[dict[str, float]], peak_index: int) -> dict[str, Any]:
         if not curve:
             return {"ok": False, "point_count": 0, "warnings": ["empty_curve"]}
@@ -825,31 +967,57 @@ class AnalysisAgent(BaseAgent):
     def _metrics(self, curve: list[dict[str, float]], geometry: dict[str, Any]) -> dict[str, Any]:
         if not curve:
             return {}
-        peak_index, peak = max(enumerate(curve), key=lambda item: item[1]["force_N"])
-        peak_force = peak["force_N"]
-        peak_disp = peak["displacement_mm"]
-        stiffness = self._linear_slope(curve, peak_force)
+        full_peak_index, full_peak = max(enumerate(curve), key=lambda item: item[1]["force_N"])
+        full_peak_force = full_peak["force_N"]
+        full_peak_disp = full_peak["displacement_mm"]
+        stiffness = self._linear_slope(curve, full_peak_force)
         energy = self._integrate_energy(curve)
         area = self._safe_float(geometry.get("cross_section_area_mm2"), 400.0)
         gauge = self._safe_float(geometry.get("gauge_length_mm"), 20.0)
-        volume = self._safe_float(geometry.get("volume_mm3"), area * gauge)
+        volume = area * gauge
         mass = self._safe_float(geometry.get("mass_g"), 0.0)
-        strength = peak_force / max(area, 1e-6)
         modulus = stiffness * gauge / max(area, 1e-6)
-        strain_at_peak = peak_disp / max(gauge, 1e-6)
-        quality = self._curve_quality(curve, peak_index)
+        quality = self._curve_quality(curve, full_peak_index)
         measured_displacement_min = min(float(point["displacement_mm"]) for point in curve)
         measured_displacement_max = max(float(point["displacement_mm"]) for point in curve)
         energy_limit_fraction = 0.5
         energy_limit_mm = max(gauge, 1e-6) * energy_limit_fraction
-        limited_curve, energy_limit_reached = self._curve_through_displacement(curve, energy_limit_mm)
+        canonical_curve = self._canonical_curve(curve, geometry)
+        limited_curve, energy_limit_reached = self._curve_through_displacement(canonical_curve, energy_limit_mm)
+        peak_limited_curve, peak_limit_reached = self._curve_through_displacement(curve, energy_limit_mm)
+        peak_curve = peak_limited_curve if peak_limit_reached else curve
+        peak = max(peak_curve, key=lambda point: float(point["force_N"]))
+        peak_force = float(peak["force_N"])
+        peak_disp = float(peak["displacement_mm"])
+        strength = peak_force / max(area, 1e-6)
+        strain_at_peak = peak_disp / max(gauge, 1e-6)
         energy_50pct = self._integrate_energy(limited_curve) if energy_limit_reached else None
+        limited_stress_strain, energy_density_limit_reached = self._curve_through_strain(
+            canonical_curve,
+            energy_limit_fraction,
+        )
+        energy_density_50pct = (
+            self._integrate_stress_strain(limited_stress_strain)
+            if energy_density_limit_reached
+            else None
+        )
+        normalized_total_energy = energy_50pct / max(volume, 1e-6) if energy_50pct is not None else None
+        if energy_density_50pct is not None and normalized_total_energy is not None:
+            identity_scale = max(abs(energy_density_50pct), abs(normalized_total_energy), 1e-12)
+            energy_identity_relative_error = abs(energy_density_50pct - normalized_total_energy) / identity_scale
+        else:
+            energy_identity_relative_error = None
         if not energy_limit_reached:
             quality["ok"] = False
             quality["warnings"] = sorted(set([*quality.get("warnings", []), "insufficient_displacement_for_50pct_energy"]))
         return {
             "peak_force_N": round(peak_force, 6),
             "displacement_at_peak_mm": round(peak_disp, 6),
+            "peak_force_limit_fraction": energy_limit_fraction,
+            "peak_force_limit_mm": round(energy_limit_mm, 6),
+            "peak_force_limit_reached": peak_limit_reached,
+            "full_curve_peak_force_N": round(full_peak_force, 6),
+            "full_curve_displacement_at_peak_mm": round(full_peak_disp, 6),
             "initial_stiffness_N_per_mm": round(stiffness, 6),
             "compressive_strength_MPa": round(strength, 6),
             "apparent_modulus_MPa": round(modulus, 6),
@@ -862,6 +1030,10 @@ class AnalysisAgent(BaseAgent):
             "energy_absorption_limit_strain": energy_limit_fraction,
             "energy_absorption_limit_mm": round(energy_limit_mm, 6),
             "energy_absorption_limit_reached": energy_limit_reached,
+            "energy_density_50pct_MJ_per_m3": round(energy_density_50pct, 9) if energy_density_50pct is not None else None,
+            "energy_density_limit_strain": energy_limit_fraction,
+            "energy_density_limit_reached": energy_density_limit_reached,
+            "energy_identity_relative_error": round(energy_identity_relative_error, 12) if energy_identity_relative_error is not None else None,
             "measured_displacement_min_mm": round(measured_displacement_min, 6),
             "measured_displacement_max_mm": round(measured_displacement_max, 6),
             "curve_quality": quality,
@@ -968,7 +1140,9 @@ class AnalysisAgent(BaseAgent):
         ]
         if not provenance_refs:
             provenance_refs = [str(source_meta.get("source") or "analysis_agent")]
-        fidelity = "synthetic" if str(source_meta.get("source") or "").startswith("synthetic") else "measured"
+        fidelity = str(source_meta.get("fidelity") or "").strip() or (
+            "synthetic" if str(source_meta.get("source") or "").startswith("synthetic") else "measured"
+        )
         evaluation = service.evaluate(
             run_id=state.run_id,
             metrics=self._registry_metric_values(service, metrics),
@@ -1018,6 +1192,30 @@ class AnalysisAgent(BaseAgent):
         return {"point_count": len(curve), "preview": preview}
 
     @staticmethod
+    def _curve_extrema_preview(rows: list[dict[str, Any]], limit: int = 200) -> list[dict[str, Any]]:
+        """Downsample an ordered curve without hiding bucket-local serrations."""
+
+        if not rows:
+            return []
+        point_limit = max(2, int(limit))
+        if len(rows) <= point_limit:
+            return [dict(row) for row in rows]
+
+        interior = rows[1:-1]
+        bucket_count = max(1, (point_limit - 2) // 2)
+        bucket_width = max(1, math.ceil(len(interior) / bucket_count))
+        selected: list[dict[str, Any]] = [dict(rows[0])]
+        for start in range(0, len(interior), bucket_width):
+            bucket = interior[start : start + bucket_width]
+            extrema = {
+                min(range(len(bucket)), key=lambda index: float(bucket[index].get("stress_MPa", 0.0))),
+                max(range(len(bucket)), key=lambda index: float(bucket[index].get("stress_MPa", 0.0))),
+            }
+            selected.extend(dict(bucket[index]) for index in sorted(extrema))
+        selected.append(dict(rows[-1]))
+        return selected[: point_limit - 1] + [selected[-1]] if len(selected) > point_limit else selected
+
+    @staticmethod
     def _safe_slug(value: Any, default: str = "item") -> str:
         text = str(value or default)
         slug = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in text).strip("_")
@@ -1060,6 +1258,39 @@ class AnalysisAgent(BaseAgent):
                 }
             )
         return canonical
+
+    @staticmethod
+    def _stress_strain_curve(curve: list[dict[str, float]], geometry: dict[str, Any]) -> dict[str, Any]:
+        area = AnalysisAgent._safe_float(geometry.get("cross_section_area_mm2"), math.nan)
+        gauge = AnalysisAgent._safe_float(geometry.get("gauge_length_mm"), math.nan)
+        if not math.isfinite(area) or area <= 0.0:
+            raise ValueError("INVALID_SPECIMEN_CROSS_SECTION")
+        if not math.isfinite(gauge) or gauge <= 0.0:
+            raise ValueError("INVALID_SPECIMEN_GAUGE_LENGTH")
+
+        canonical = AnalysisAgent._canonical_curve(curve, geometry)
+        normalized = [
+            {
+                **row,
+                "strain_pct": round(float(row.get("strain", 0.0)) * 100.0, 9),
+            }
+            for row in canonical
+        ]
+        return {
+            "schema": "engineering_stress_strain_curve.v1",
+            "convention": "positive_compression",
+            "stress_unit": "MPa",
+            "strain_unit": "1",
+            "normalization": {
+                "area_basis": "initial_apparent_cross_section",
+                "cross_section_area_mm2": round(area, 9),
+                "height_basis": "initial_gauge_length",
+                "gauge_length_mm": round(gauge, 9),
+                "initial_volume_mm3": round(area * gauge, 9),
+            },
+            "point_count": len(normalized),
+            "preview": AnalysisAgent._curve_extrema_preview(normalized, 200),
+        }
 
     @staticmethod
     def _write_canonical_csv(path: Path, canonical_curve: list[dict[str, Any]]) -> str:
@@ -1189,7 +1420,13 @@ class AnalysisAgent(BaseAgent):
             or sim_metrics.get("apparent_stiffness_N_per_mm"),
             0.0,
         )
-        peak_error = abs(pred_peak - utm_peak) / max(abs(utm_peak), 1e-9) * 100.0 if utm_peak > 0 and pred_peak > 0 else None
+        comparable_peak = bool(
+            metrics.get("peak_force_limit_reached", True) is True
+            and sim_metrics.get("endpoint_reached", True) is True
+            and utm_peak > 0.0
+            and pred_peak > 0.0
+        )
+        peak_error = abs(pred_peak - utm_peak) / max(abs(utm_peak), 1e-9) * 100.0 if comparable_peak else None
         stiffness_error = abs(pred_stiffness - utm_stiffness) / max(abs(utm_stiffness), 1e-9) * 100.0 if utm_stiffness > 0 and pred_stiffness > 0 else None
         utm_energy = self._safe_float(metrics.get("energy_absorption_50pct_mJ"), float("nan"))
         fea_energy = self._safe_float(sim_metrics.get("energy_absorption_50pct_mJ"), float("nan"))
@@ -1632,11 +1869,25 @@ class AnalysisAgent(BaseAgent):
             bo_metric_unit = "1"
             bo_score = compiled_score
         else:
-            bo_metric_name = "energy_absorption_50pct_mJ"
-            bo_metric_unit = "mJ"
+            bo_metric_name = "energy_density_50pct_MJ_per_m3"
+            bo_metric_unit = "MJ/m3"
             bo_score = self._safe_float(metrics.get(bo_metric_name), float("nan"))
         bo_score_available = math.isfinite(bo_score)
         bo_metrics = {bo_metric_name: bo_score} if bo_score_available else {}
+        observation_fidelity = str(source_meta.get("fidelity") or "").strip() or (
+            "synthetic" if str(source_meta.get("source") or "").startswith("synthetic") else "utm_high"
+        )
+        provenance_refs = [
+            str(item.get("path") or item.get("source") or "")
+            for item in artifact_refs
+            if str(item.get("path") or item.get("source") or "").strip()
+        ]
+        provenance_refs.extend(
+            f"sha256:{value}"
+            for value in source_meta.get("reference_hashes", [])
+            if str(value).strip()
+        )
+        provenance_refs = list(dict.fromkeys(provenance_refs))
         observation_id = str(
             objective_evaluation.get("observation_id")
             or f"{state.run_id}:{state.experiment_id}:analysis"
@@ -1672,6 +1923,10 @@ class AnalysisAgent(BaseAgent):
             "producer_agent": self.name,
             "consumer_agent": "bo_agent",
             "status": "ready" if bo_ready else "blocked",
+            "ok_for_bo": bo_ready,
+            "feasible": True,
+            "fidelity": observation_fidelity,
+            "provenance_refs": provenance_refs,
             "objective_score": bo_score if bo_score_available else None,
             "metric_name": bo_metric_name,
             "unit": bo_metric_unit,
@@ -1701,7 +1956,7 @@ class AnalysisAgent(BaseAgent):
             "observation_id": observation_id,
             "objective": {
                 "objective_id": objective.get("objective_id") or "bo-specimen-objective",
-                "name": "Compiled objective score" if compiled_objective_active else "Energy absorption to 50% specimen height",
+                "name": "Compiled objective score" if compiled_objective_active else "Volumetric energy absorption to 50% compressive strain",
                 "metric_name": bo_metric_name,
                 "unit": bo_metric_unit,
                 "direction": "maximize",
@@ -1710,7 +1965,16 @@ class AnalysisAgent(BaseAgent):
             "candidate_id": candidate_id,
             "mode": state.mode.value,
             "bridge": "analysis",
-            "status": "measured_analysis_complete" if analysis.get("ok") else "analysis_blocked",
+            "status": (
+                "predicted_analysis_complete"
+                if analysis.get("ok") and observation_fidelity == "cae_mid"
+                else "measured_analysis_complete"
+                if analysis.get("ok")
+                else "analysis_blocked"
+            ),
+            "fidelity": observation_fidelity,
+            "feasible": True,
+            "provenance_refs": provenance_refs,
             "objective_score": bo_score if bo_score_available else None,
             "uncertainty": analysis.get("uncertainty", 1.0),
             "metrics": {**parameters, **metrics, "quality_score": quality_gate.get("score"), "fem_utm_agreement_score": fem_comparison.get("agreement_score")},
@@ -1736,6 +2000,9 @@ class AnalysisAgent(BaseAgent):
         bo_handoff = {
             "schema_version": "analysis_bo_handoff_v2",
             "ok_for_bo": bo_ready,
+            "fidelity": observation_fidelity,
+            "feasible": True,
+            "provenance_refs": provenance_refs,
             "run_id": state.run_id,
             "experiment_id": state.experiment_id,
             "observation_id": observation_id,
@@ -1835,6 +2102,7 @@ class AnalysisAgent(BaseAgent):
         fallback = (
             f"UTM analysis: peak_force={metrics.get('peak_force_N')} N, "
             f"strength={metrics.get('compressive_strength_MPa')} MPa, "
+            f"energy_density_50pct={metrics.get('energy_density_50pct_MJ_per_m3')} MJ/m3, "
             f"CAE stress={cae_metrics.get('max_von_mises_MPa', 'n/a')} MPa, "
             f"objective={analysis.get('objective_score')}, uncertainty={analysis.get('uncertainty')}."
         )
@@ -1846,7 +2114,7 @@ class AnalysisAgent(BaseAgent):
                 "analysis_reasoning",
                 (
                     "Summarize this UTM compression analysis for the operator. "
-                    "Mention peak force, stiffness/strength, energy absorption, CAE bottom-fixed/top-cyclic result, data source, and whether the result is ready for Knowledge/Guardian. "
+                    "Mention peak force, stiffness/strength, total energy, 50%-strain volumetric energy absorption, CAE result, data source, and whether the result is ready for Knowledge/Guardian. "
                     f"analysis={json.dumps(analysis, ensure_ascii=True, default=str)[:3500]}"
                 ),
                 timeout_s=timeout_s,
@@ -1859,6 +2127,40 @@ class AnalysisAgent(BaseAgent):
 
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         geometry = self._specimen_geometry(state)
+        if geometry.get("normalization_valid") is False:
+            equipment_result = self._equipment_result(state)
+            source_meta = {
+                "source": "experiment_plan.specimen_geometry",
+                "failure_code": "INVALID_SPECIMEN_GEOMETRY",
+            }
+            analysis = {
+                "ok": False,
+                "failure_code": "INVALID_SPECIMEN_GEOMETRY",
+                "summary": "Engineering stress-strain normalization requires a positive finite initial area and gauge length.",
+                "objective_score": None,
+                "uncertainty": 1.0,
+                "source": source_meta,
+                "specimen_geometry": geometry,
+                "quality_gate": {
+                    "ok_for_metrics": False,
+                    "ok_for_bo": False,
+                    "failure_code": "INVALID_SPECIMEN_GEOMETRY",
+                },
+                "cae_result": {},
+                "cae_metrics": {},
+                "fem_result": {},
+                "fem_metrics": {},
+                "equipment_handoff_gate": {"ok": False, "status": "blocked"},
+            }
+            return self._blocked_result(
+                state=state,
+                summary="Analysis blocked: invalid specimen geometry",
+                analysis=analysis,
+                metrics={},
+                source_meta=source_meta,
+                equipment_result=equipment_result,
+                cae_result=None,
+            )
         cae_result = self._run_cae(state, ctx, geometry)
         fem_result: dict[str, Any] | None = None
         fem_agentic_loop: dict[str, Any] = self._cae_simulation_loop(cae_result)
@@ -1869,12 +2171,16 @@ class AnalysisAgent(BaseAgent):
         fem_metrics = {}
         equipment_result = self._equipment_result(state)
         curve, source_meta = self._curve_from_equipment(equipment_result)
+        equipment_preflight_requested = self._lab_equipment_preflight_requested(state)
         live_handoff_ok = True
         live_handoff_gate: dict[str, Any] = {"ok": True, "status": "not_required"}
         if state.mode == Mode.LIVE:
             live_handoff_ok, live_handoff_gate = self._live_equipment_handoff_gate(equipment_result)
         equipment_file_supplied = bool(source_meta.get("path") or source_meta.get("exists") or source_meta.get("source") not in {None, "", "none"})
-        if not curve and state.mode != Mode.LIVE and not equipment_file_supplied:
+        if not curve and equipment_preflight_requested:
+            curve, source_meta = self._curve_from_preflight_cae(equipment_result, cae_result)
+            equipment_file_supplied = True
+        if not curve and state.mode != Mode.LIVE and not equipment_file_supplied and not equipment_preflight_requested:
             curve, source_meta = self._synthetic_curve(state, geometry)
         if state.mode == Mode.LIVE and curve and not live_handoff_ok:
             signal_quality = self._curve_signal_quality(curve)
@@ -1975,6 +2281,7 @@ class AnalysisAgent(BaseAgent):
                 cae_result=cae_result,
             )
 
+        stress_strain_curve = self._stress_strain_curve(curve, geometry)
         metrics = self._metrics(curve, geometry)
         fem_agentic_loop = self._cae_simulation_loop(cae_result)
         fem_result = None
@@ -2041,6 +2348,7 @@ class AnalysisAgent(BaseAgent):
             "uncertainty": uncertainty,
             "utm_metrics": metrics,
             "utm_curve": self._curve_preview(curve),
+            "stress_strain_curve": stress_strain_curve,
             "data_quality_gate": signal_quality,
             "quality_gate": quality_gate,
             "comparison": comparison,

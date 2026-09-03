@@ -119,6 +119,8 @@ def test_live_gui_js_renders_utm_runtime_device_card() -> None:
     assert "profile.ros_output_topic || profile.ros_rect_topic || profile.ros_image_topic" in js
     assert "liveUtmRuntimeStreamUrlCache" in js
     assert "liveUtmRuntimeStreamUrlKey" in js
+    assert "LIVE_UTM_PREVIEW_FPS = 30" in js
+    assert "/api/equipment/utm-runtime/frame-stream/status" in js
     assert "function liveUtmRuntimeStreamVisible()" in js
     assert "if (liveUtmRuntimeStreamVisible()) return;" in js
     assert "const shouldFetchFrame = !liveUtmRuntimeStreamVisible()" in js
@@ -199,6 +201,9 @@ def test_vision_utm_device_bridge_page_wires_camera_api() -> None:
     assert "btn-vision-camera-frame-play" in html
     assert "btn-vision-camera-frame-stop" in html
     assert "vision-camera-frame-stream-status" in html
+    assert 'id="vision-camera-preview-fps"' in html
+    assert 'value="30"' in html
+    assert "Camera FPS" in html
     assert "btn-vision-camera-calibrate" in html
     assert "Specimen Pose Test" in html
     assert "btn-vision-pose-status" in html
@@ -230,7 +235,13 @@ def test_vision_utm_device_bridge_page_wires_camera_api() -> None:
     assert "frameStreamUrlCache" in js
     assert "frameStreamUrlKey" in js
     assert "Date.now()" not in js[js.index("function utmRuntimeFrameStreamUrl"):js.index("function frameStreamTopicLabel")]
-    assert "frameStreamTimer" in js
+    assert 'el("vision-camera-preview-fps")' in js
+    assert "/api/equipment/utm-runtime/frame-stream/status" in js
+    assert "measured_fps" in js
+    assert "estimated_dropped_frames" in js
+    assert "frameStreamTimer" not in js
+    assert "refreshFrameStreamFrame" not in js
+    assert "scheduleFrameStreamTick" not in js
     assert "green_dot_monitor" in js
     assert 'document.readyState === "loading"' in js
     assert "BRIO" not in html
@@ -245,7 +256,11 @@ def test_utm_runtime_api_offloads_slow_ros_calls_from_event_loop() -> None:
     assert "StreamingResponse(" in main_py
     assert "_utm_runtime_bridge().frame_stream(topic=topic, fps=fps)" in main_py
     assert "request.is_disconnected()" in main_py
-    assert "await asyncio.to_thread(next_chunk)" in main_py
+    assert "except asyncio.CancelledError:" in main_py
+    assert "next_task = asyncio.create_task(asyncio.to_thread(next_chunk))" in main_py
+    assert "chunk = await asyncio.shield(next_task)" in main_py
+    assert "await next_task" in main_py
+    assert '"/api/equipment/utm-runtime/frame-stream/status"' in main_py
     assert "close = getattr(source, \"close\", None)" in main_py
     assert '"X-Accel-Buffering": "no"' in main_py
     assert '"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"' in main_py

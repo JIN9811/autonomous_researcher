@@ -1344,9 +1344,13 @@ class LangGraphRunLoop:
                 self._state.run_metadata["latest_specimen_agent_report"] = compact_runtime_payload(data["specimen_agent_report"])
             if isinstance(data.get("specimen_fabricated"), dict):
                 self._state.run_metadata["specimen_fabricated"] = compact_runtime_payload(data["specimen_fabricated"])
+            if isinstance(data.get("printer_preflight"), dict):
+                self._state.run_metadata["printer_preflight"] = compact_runtime_payload(data["printer_preflight"])
             if isinstance(data.get("vision_report"), dict):
                 self._state.run_metadata["vision_report"] = compact_runtime_payload(data["vision_report"])
                 self._state.run_metadata[f"{stage.value}_vision_report"] = compact_runtime_payload(data["vision_report"])
+            if isinstance(data.get("vision_preflight"), dict):
+                self._state.run_metadata["vision_preflight"] = compact_runtime_payload(data["vision_preflight"])
             if isinstance(data.get("vision_agent_report"), dict):
                 self._state.run_metadata["latest_vision_agent_report"] = compact_runtime_payload(data["vision_agent_report"])
             if isinstance(data.get("vision_signal"), dict):
@@ -1370,6 +1374,8 @@ class LangGraphRunLoop:
                 self._state.run_metadata[f"{stage.value}_manipulation_report"] = compact_runtime_payload(data["manipulation_report"])
             if isinstance(data.get("manipulation_agent_report"), dict):
                 self._state.run_metadata["latest_manipulation_agent_report"] = compact_runtime_payload(data["manipulation_agent_report"])
+            if isinstance(data.get("manipulation_preflight"), dict):
+                self._state.run_metadata["manipulation_preflight"] = compact_runtime_payload(data["manipulation_preflight"])
             if isinstance(data.get("robot_task_result"), dict):
                 self._state.run_metadata["robot_task_result"] = compact_runtime_payload(data["robot_task_result"])
                 self._state.run_metadata[f"{stage.value}_robot_task_result"] = compact_runtime_payload(data["robot_task_result"])
@@ -1401,6 +1407,8 @@ class LangGraphRunLoop:
             self._state.latest_analysis["last_grasp_score"] = float(data["manipulation"].get("grasp_score", 0.0))
             if "sarm" in data:
                 self._state.latest_analysis["sarm"] = compact_runtime_payload(data["sarm"])
+        if isinstance(data.get("equipment_preflight"), dict):
+            self._state.run_metadata["equipment_preflight"] = compact_runtime_payload(data["equipment_preflight"])
         if "equipment_result" in data:
             equipment_result = data["equipment_result"] if isinstance(data["equipment_result"], dict) else {}
             self._state.run_metadata["equipment_result"] = compact_runtime_payload(equipment_result)
@@ -2445,6 +2453,38 @@ class LangGraphRunLoop:
             backoff_s = float(raw_backoff)
         return {"max_attempts": int(max_attempts), "backoff_s": backoff_s}
 
+    def _automatic_stage_retry_allowed(self, stage: Stage) -> bool:
+        """Prevent a generic stage retry from repeating a physical actuation."""
+        if stage not in {Stage.SPECIMEN, Stage.MANIPULATION, Stage.EQUIPMENT}:
+            return True
+        if self._state.mode == Mode.LIVE:
+            return False
+        spec = (
+            self._state.current_experiment_spec
+            if isinstance(self._state.current_experiment_spec, dict)
+            else {}
+        )
+        paths = {
+            str(spec.get(key) or "").strip().lower()
+            for key in (
+                "printer_test_path",
+                "test_printer_path",
+                "printer_bridge_mode",
+                "printer_test_mode",
+            )
+        }
+        paths.discard("")
+        physical_paths = {
+            "installed_printer",
+            "physical_print",
+            "actual_print",
+            "test_printer_physical_print",
+            "bambulab_x2d",
+            "live",
+        }
+        transport = str(spec.get("test_printer_transport") or "").strip().lower()
+        return not (transport == "real" and bool(paths & physical_paths))
+
 
     async def _module_approval_ready(
         self,
@@ -2988,7 +3028,8 @@ class LangGraphRunLoop:
             retry_policy = self._module_retry_policy(module_runtime)
             max_attempts = int(retry_policy["max_attempts"])
             backoff_s = float(retry_policy["backoff_s"])
-            if should_retry(self._state, stage.value, max_attempts):
+            automatic_retry_allowed = self._automatic_stage_retry_allowed(stage)
+            if automatic_retry_allowed and should_retry(self._state, stage.value, max_attempts):
                 retry_count = bump_retry(self._state, stage.value)
                 action = recovery_action(stage.value, str(exc))
                 await self._emit(
@@ -3003,6 +3044,7 @@ class LangGraphRunLoop:
                         "module_runtime": module_runtime,
                         "retry_policy": {"max_attempts": max_attempts, "backoff_s": backoff_s},
                         "retry_count": retry_count,
+                        "automatic_retry_allowed": automatic_retry_allowed,
                         "guardian_gate": exception_gate,
                     },
                     level="WARNING",
@@ -3029,6 +3071,8 @@ class LangGraphRunLoop:
                         "error": str(exc),
                         "module_runtime": module_runtime,
                         "retry_policy": {"max_attempts": max_attempts, "backoff_s": backoff_s},
+                        "automatic_retry_allowed": automatic_retry_allowed,
+                        "automatic_retry_suppressed": not automatic_retry_allowed,
                         "guardian_gate": exception_gate,
                     },
                     level="ERROR",

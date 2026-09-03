@@ -181,6 +181,7 @@ _KNOWLEDGE_RECONCILIATION_KNOWLEDGE_SERVICE: KnowledgeService | None = None
 _EQUIPMENT_AGENTIC_RUN_GUARD = threading.Lock()
 _EQUIPMENT_AGENTIC_ACTIVE_PROFILES: set[str] = set()
 _EQUIPMENT_AGENTIC_CANCEL_EVENTS: dict[str, threading.Event] = {}
+_EQUIPMENT_AGENTIC_RESET_PROFILES: set[str] = set()
 _BO_VISUALIZATION_UPGRADE_CACHE: dict[tuple[str, int, str], dict[str, Any]] = {}
 _PLC_BRIDGE_SERVICE: PLCBridgeService | None = None
 
@@ -294,6 +295,7 @@ def _plc_bridge_service() -> PLCBridgeService:
         poll_interval_s=float(config["poll_interval_s"]),
         stale_after_s=float(config["stale_after_s"]),
         handshake_timeout_s=float(config["handshake_timeout_s"]),
+        fast_stop_callback=controller.request_plc_fast_stop,
         state_path=PLC_TRANSACTION_STATE_PATH,
     )
     return _PLC_BRIDGE_SERVICE
@@ -1428,6 +1430,7 @@ class EquipmentSkillTestRequest(BaseModel):
     runtime_mode: Literal["dry_run", "test", "live"] = "dry_run"
     confirm_execute: bool = False
     export_context: EquipmentRawCsvExportContext | None = None
+    runtime_context: dict[str, str | int | float | bool] = Field(default_factory=dict)
 
 
 class WindowsBridgeScreenshotRequest(BaseModel):
@@ -1547,6 +1550,7 @@ class LeRobotAPIRequest(BaseModel):
     profile_id: str = ""
     observation_pipeline_id: str = ""
     session_id: str = ""
+    plc_rollout_stop_enabled: bool = False
     isaac_mirror_enabled: bool = False
     isaac_mirror_endpoint: str = "http://127.0.0.1:8766/joints"
     isaac_mirror_sample_hz: float = 15.0
@@ -3545,14 +3549,24 @@ async def get_utm_runtime_frame_stream(request: Request, topic: str = "", fps: f
             return sentinel
 
     async def iter_mjpeg() -> AsyncIterator[bytes]:
+        next_task: asyncio.Task[bytes | object] | None = None
         try:
             while not await request.is_disconnected():
-                chunk = await asyncio.to_thread(next_chunk)
+                next_task = asyncio.create_task(asyncio.to_thread(next_chunk))
+                chunk = await asyncio.shield(next_task)
+                next_task = None
                 if chunk is sentinel:
                     break
                 yield chunk  # type: ignore[misc]
                 await asyncio.sleep(0)
+        except asyncio.CancelledError:
+            return
         finally:
+            if next_task is not None and not next_task.done():
+                try:
+                    await next_task
+                except Exception:
+                    pass
             close = getattr(source, "close", None)
             if callable(close):
                 close()
@@ -3566,6 +3580,16 @@ async def get_utm_runtime_frame_stream(request: Request, topic: str = "", fps: f
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.get("/api/equipment/utm-runtime/frame-stream/status")
+async def get_utm_runtime_frame_stream_status(
+    topic: str = "",
+    fps: float | None = None,
+    quality: int = 82,
+) -> dict[str, object]:
+    """Return rolling delivery statistics for the shared GUI MJPEG worker."""
+    return _utm_runtime_bridge().frame_stream_status(topic=topic, fps=fps, quality=quality)
 
 
 @app.get("/api/equipment/utm-runtime/camera-config")
@@ -12933,6 +12957,14 @@ async def post_equipment_skill_test(
             }
             if is_raw_csv_skill and req.export_context is not None:
                 execution_payload["export_context"] = req.export_context.model_dump()
+            runtime_placeholders = set(re.findall(r"\{([A-Za-z][A-Za-z0-9_]*)\}", json.dumps(package.get("workflow", {}), default=str)))
+            runtime_values = {
+                key: value
+                for key, value in (req.runtime_context or {}).items()
+                if key in runtime_placeholders and isinstance(value, (str, int, float, bool))
+            }
+            if runtime_values:
+                execution_payload["runtime_values"] = runtime_values
             result = bridge.run(execution_payload)
             results.append(result)
             if not result.get("ok"):
@@ -13339,6 +13371,19 @@ async def get_equipment_profile_agentic_run(profile_id: str) -> dict[str, object
     return {"ok": True, "available": True, "non_actuating": True, "profile_id": profile_id}
 
 
+def _reset_equipment_agentic_progress(profile_id: str) -> bool:
+    """Archive the latest projection so the GUI returns to an empty progress state."""
+    execution_path = EQUIPMENT_SKILL_FLOW_RUNTIME_ROOT / f"{profile_id}.json"
+    if not execution_path.exists():
+        return True
+    archive_root = EQUIPMENT_SKILL_FLOW_RUNTIME_ROOT.parent / "equipment_skill_flow_archive"
+    archive_root.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    archive_path = archive_root / f"{profile_id}.{timestamp}.{uuid.uuid4().hex[:8]}.json"
+    execution_path.replace(archive_path)
+    return not execution_path.exists()
+
+
 @app.post("/api/equipment/profiles/{profile_id}/agentic-run")
 async def post_equipment_profile_agentic_run(
     profile_id: str,
@@ -13363,6 +13408,7 @@ async def post_equipment_profile_agentic_run(
         cancel_event = threading.Event()
         _EQUIPMENT_AGENTIC_ACTIVE_PROFILES.add(profile_id)
         _EQUIPMENT_AGENTIC_CANCEL_EVENTS[profile_id] = cancel_event
+        _EQUIPMENT_AGENTIC_RESET_PROFILES.discard(profile_id)
 
     try:
         state = copy.deepcopy(controller._state)
@@ -13379,6 +13425,7 @@ async def post_equipment_profile_agentic_run(
         ):
             state.current_experiment_spec.pop(test_flag, None)
         state.current_experiment_spec["equipment_profile_id"] = profile_id
+        state.current_experiment_spec["equipment_agentic_confirm_execute"] = True
         result = await LabEquipmentAgent()._run_equipment_skill_flow(
             state,
             controller._deps.agent_context,
@@ -13402,16 +13449,56 @@ async def post_equipment_profile_agentic_run(
         with _EQUIPMENT_AGENTIC_RUN_GUARD:
             _EQUIPMENT_AGENTIC_ACTIVE_PROFILES.discard(profile_id)
             _EQUIPMENT_AGENTIC_CANCEL_EVENTS.pop(profile_id, None)
+            _EQUIPMENT_AGENTIC_RESET_PROFILES.discard(profile_id)
+        _reset_equipment_agentic_progress(profile_id)
 
 
 @app.post("/api/equipment/profiles/{profile_id}/agentic-run/cancel")
 async def post_equipment_profile_agentic_run_cancel(profile_id: str) -> dict[str, object]:
-    """Prevent an active registered flow from dispatching another Skill."""
+    """Stop the active UTM action, cancel future Skill dispatch, and reset progress."""
+    try:
+        _equipment_profile_registry().get(profile_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     with _EQUIPMENT_AGENTIC_RUN_GUARD:
         event = _EQUIPMENT_AGENTIC_CANCEL_EVENTS.get(profile_id)
+        reset_pending = profile_id in _EQUIPMENT_AGENTIC_ACTIVE_PROFILES
         if event is not None:
             event.set()
-    return {"ok": True, "profile_id": profile_id, "cancel_requested": event is not None}
+        if reset_pending:
+            _EQUIPMENT_AGENTIC_RESET_PROFILES.add(profile_id)
+    physical_stop: dict[str, object] = {}
+    if reset_pending and profile_id == DEFAULT_UTM_PROFILE_ID:
+        specimen_id = str(
+            controller._state.current_experiment_spec.get("specimen_id")
+            or "specimen-stop"
+        )
+        physical_stop = await asyncio.to_thread(
+            _equipment_bridge().run,
+            {
+                "runtime_mode": "live",
+                "force_live_bridge": True,
+                "confirm_setup_gui_execute": True,
+                "sequence_id": f"agentic-stop-{profile_id}",
+                "run_id": controller._state.run_id,
+                "specimen_id": specimen_id,
+                "program_id": "utm_stop_or_abort_v1",
+                "command": "Stop active Agentic UTM run",
+                "require_screen_assertions": False,
+                "simulate_utm_protocol": False,
+            },
+        )
+    progress_reset = _reset_equipment_agentic_progress(profile_id)
+    stop_failed = bool(physical_stop) and physical_stop.get("ok") is not True
+    return {
+        "ok": not stop_failed,
+        "profile_id": profile_id,
+        "cancel_requested": event is not None,
+        "progress_reset": progress_reset,
+        "reset_pending": reset_pending,
+        "physical_stop": physical_stop,
+        "status": "stop_failed" if stop_failed else "idle",
+    }
 
 
 @app.post("/api/equipment/profiles/{profile_id}/test")
@@ -17612,6 +17699,7 @@ def _manipulation_spec_from_request(req: ManipulationAgentBridgeRequest) -> dict
         "camera_enabled": profile.get("camera_enabled"),
         "display_data": profile.get("display_data"),
         "confirm_live_execute": req.confirm_live_execute,
+        "plc_rollout_stop_enabled": req.plc_rollout_stop_enabled,
         "rollout_episode_s": req.episode_s,
         "rollout_num_episodes": req.num_episodes,
         "continuous_rollout": profile.get("continuous_rollout"),

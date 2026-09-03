@@ -65,6 +65,37 @@ test("projects observed equipment values separately from method targets", () => 
 });
 
 
+test("projects passive Vision verification without changing the equipment step status", () => {
+  const ctx = model.cycleContext({
+    workflow_agentic_task: {
+      task_id: "run_utm_compression_cycle",
+      block_order: ["start_test"],
+      active_block: "start_test",
+    },
+    block_executions: [
+      { block_id: "start_test", phase: "skill", outcome: "completed" },
+      {
+        block_id: "start_test",
+        phase: "vision",
+        kind: "vision_observation",
+        vision_link_enabled: true,
+        blocking: false,
+        outcome: "not_detected",
+        verification_label: "DOWN",
+      },
+    ],
+  });
+
+  const [step] = model.progressSteps(ctx);
+
+  assert.equal(step.status, "complete");
+  assert.equal(step.vision.enabled, true);
+  assert.equal(step.vision.blocking, false);
+  assert.equal(step.vision.status, "failed");
+  assert.equal(step.vision.label, "DOWN");
+});
+
+
 test("projects Raw Data and next-specimen readiness without inventing defaults", () => {
   const ctx = model.cycleContext({
     workflow_agentic_task: { task_id: "run_utm_compression_cycle", block_order: [] },

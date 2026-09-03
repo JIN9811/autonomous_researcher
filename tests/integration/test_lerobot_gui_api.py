@@ -679,13 +679,32 @@ def test_lerobot_rollout_api_uses_backend_tool_registry(monkeypatch: Any) -> Non
 
     result = client.post(
         "/api/lerobot/rollout/start",
-        json={"mode": "test", "profile_id": "fake_omx_ai", "policy_path": "fake://policy"},
+        json={
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "policy_path": "fake://policy",
+            "plc_rollout_stop_enabled": True,
+        },
     ).json()
 
     assert result["ok"] is True
     assert result["command_preview"] == ["backend-tool-registry"]
     assert calls and calls[0][0] == "lerobot.rollout.start"
     assert calls[0][1]["policy_path"] == "fake://policy"
+    assert calls[0][1]["plc_rollout_stop_enabled"] is True
+
+
+def test_device_workspace_manipulation_request_preserves_plc_stop_checkbox() -> None:
+    request = main_module.ManipulationAgentBridgeRequest(
+        mode="test",
+        profile_id="fake_omx_ai",
+        policy_path="fake://policy",
+        plc_rollout_stop_enabled=True,
+    )
+
+    spec = main_module._manipulation_spec_from_request(request)
+
+    assert spec["plc_rollout_stop_enabled"] is True
 
 
 def test_lerobot_resume_checkboxes_pin_auto_generated_names() -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -747,6 +748,194 @@ def test_test_mode_physical_print_uploads_and_starts_when_explicitly_selected(tm
     assert result["print_result"]["status"] == "started"
 
 
+def test_physical_print_preflight_builds_position_aware_gcode_without_prusalink_calls(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    cfg = _config(
+        tmp_path,
+        ejection={
+            "enabled": False,
+            "method": "bed_sweep",
+            "mode": "append_end_gcode",
+            "calibration_id": "cal-preflight",
+            "max_bed_temp_c": 40.0,
+            "max_feedrate_mm_min": 25000,
+            "bed_sweep": {
+                "use_object_bounds": True,
+                "object_x_offset_mm": 0.0,
+                "object_z_offset_mm": 10.0,
+            },
+        },
+    )
+    cfg.live.update(
+        {
+            "transport": "real",
+            "allow_upload": True,
+            "allow_start_print": True,
+            "allow_ejection": True,
+        }
+    )
+    stl = tmp_path / "candidate-7.stl"
+    stl.write_text("solid candidate\nendsolid candidate\n", encoding="utf-8")
+    workflow = PrinterAgenticWorkflow(cfg, repo_root=tmp_path)
+
+    def fake_slice(self, stl_path, *, specimen_id, simulate, printer_profile="", material="", slicer_profile_hint="", experiment_spec=None):
+        assert simulate is False
+        output = tmp_path / "gcode" / f"{specimen_id}.gcode"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            "\n".join(
+                [
+                    "G90",
+                    "M82",
+                    "G92 E0",
+                    "G1 X30 Y40 Z0.2 E0.1 F1200",
+                    "G1 X70 Y40 Z0.2 E0.2 F1200",
+                    "G1 X70 Y80 Z6 E0.3 F1200",
+                    "G1 X30 Y80 Z12 E0.4 F1200",
+                    "M84",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return {
+            "ok": True,
+            "sliced_path": str(output),
+            "stdout": "fake real slicer",
+            "stderr": "",
+            "elapsed_sec": 0.01,
+            "failure_code": None,
+            "simulated": False,
+            "slicer_settings": {"simulated": False, "output_gcode_path": str(output)},
+        }
+
+    def forbidden_prusalink_call(self, *args, **kwargs):
+        raise AssertionError("preflight_only must not call PrusaLink")
+
+    monkeypatch.setattr(PrusaSlicerRunner, "slice", fake_slice)
+    for method_name in (
+        "get_status",
+        "get_storage",
+        "get_job",
+        "get_transfer",
+        "get_file_metadata",
+        "upload_file",
+        "start_file",
+    ):
+        monkeypatch.setattr(PrusaLinkClient, method_name, forbidden_prusalink_call)
+
+    result = workflow.prepare(
+        {
+            "runtime_mode": "test",
+            "execution_policy_mode": "preflight_only",
+            "test_printer_path": "physical_print",
+            "run_id": "run-safe-prusa",
+            "candidate_id": "candidate-7",
+            "specimen_id": "candidate-7",
+            "stl_path": str(stl),
+            "connection_info": {
+                "host": "192.0.2.77",
+                "scheme": "http",
+                "port": 80,
+                "storage": "usb",
+                "auth": {"mode": "none"},
+            },
+            "print": {
+                "start_immediately": True,
+                "physical_intent": True,
+                "confirm_physical_print": True,
+            },
+            "ejection": {"enabled": True, "allow_ejection": True},
+        }
+    )
+
+    preflight = result["printer_preflight"]
+    immutable_artifact = Path(preflight["immutable_artifact_path"])
+    assert result["ok"] is True
+    assert result["status"] == "execution_ready_pending_approval"
+    assert result["printer_path"] == "physical_print"
+    assert result["physical_transport"] is False
+    assert preflight["schema"] == "printer_preflight.v1"
+    assert preflight["provider"] == "prusa_mk4s"
+    assert preflight["run_id"] == "run-safe-prusa"
+    assert preflight["candidate_id"] == "candidate-7"
+    assert preflight["actuation_performed"] is False
+    assert preflight["status_probe_performed"] is False
+    assert preflight["upload_performed"] is False
+    assert preflight["start_command_published"] is False
+    assert preflight["source_object_bounds_mm"]["center_x_mm"] == 50.0
+    assert preflight["source_object_bounds_mm"]["center_y_mm"] == 60.0
+    assert preflight["autoejection_patch"]["resolved"]["head_x_mm"] == 50.0
+    assert preflight["artifact_sha256"] == hashlib.sha256(immutable_artifact.read_bytes()).hexdigest()
+    assert preflight["artifact_validation"]["ok"] is True
+    gcode = immutable_artifact.read_text(encoding="utf-8")
+    assert "G1 X30 Y40 Z0.2 E0.1 F1200" in gcode
+    assert "; object_bounds_source=gcode_object_bounds" in gcode
+    assert "; resolved_head_x_mm=50" in gcode
+    assert "G0 X50 F6000" in gcode
+    assert result["print_result"]["status"] == "preflight_only"
+    assert result["ejection_result"]["status"] == "embedded_not_executed"
+    assert result["ejection_result"]["attempts"] == 0
+    assert result["step_trace"][-1]["step"] == "STOP_BEFORE_PRUSALINK"
+
+
+def test_preflight_policy_dominates_real_prusalink_test_promotion(tmp_path: Path, monkeypatch) -> None:
+    cfg = _config(
+        tmp_path,
+        ejection={
+            "enabled": False,
+            "method": "bed_sweep",
+            "mode": "append_end_gcode",
+            "calibration_id": "cal-preflight",
+            "max_bed_temp_c": 40.0,
+            "max_feedrate_mm_min": 25000,
+        },
+    )
+    cfg.test_printer_live_promotion.update(
+        {"enabled": True, "transport": "real", "allow_real_network_in_test": True}
+    )
+    stl = tmp_path / "candidate-policy.stl"
+    stl.write_text("solid candidate\nendsolid candidate\n", encoding="utf-8")
+    workflow = PrinterAgenticWorkflow(cfg, repo_root=tmp_path)
+
+    def fake_slice(self, stl_path, *, specimen_id, simulate, **kwargs):
+        output = tmp_path / "gcode" / f"{specimen_id}.gcode"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            "G90\nM82\nG92 E0\nG1 X40 Y50 Z0.2 E0.1 F1200\nG1 X60 Y70 Z12 E0.2 F1200\n",
+            encoding="utf-8",
+        )
+        return {
+            "ok": True,
+            "sliced_path": str(output),
+            "simulated": simulate,
+            "slicer_settings": {"output_gcode_path": str(output)},
+        }
+
+    monkeypatch.setattr(PrusaSlicerRunner, "slice", fake_slice)
+    monkeypatch.setattr(
+        PrusaLinkClient,
+        "get_status",
+        lambda self: (_ for _ in ()).throw(AssertionError("preflight policy must dominate real promotion")),
+    )
+
+    result = workflow.prepare(
+        {
+            "runtime_mode": "test",
+            "execution_policy_mode": "preflight_only",
+            "specimen_id": "candidate-policy",
+            "stl_path": str(stl),
+            "ejection": {"enabled": True},
+        }
+    )
+
+    assert result["status"] == "execution_ready_pending_approval"
+    assert result["printer_preflight"]["status_probe_performed"] is False
+    assert result["prusalink"]["transport"] == "not_contacted"
+
+
 def test_physical_print_waits_for_transfer_idle_and_retries_start(tmp_path: Path, monkeypatch) -> None:
     cfg = _config(tmp_path, mode="live")
     cfg.live["transport"] = "real"
@@ -847,7 +1036,7 @@ def test_physical_print_waits_for_transfer_idle_and_retries_start(tmp_path: Path
     assert any(step["step"] == "WAIT_UPLOAD_READY" and step["status"] == "ok" for step in result["step_trace"])
 
 
-def test_start_retries_every_second_until_printing_is_confirmed(tmp_path: Path, monkeypatch) -> None:
+def test_accepted_start_is_not_published_twice_when_confirmation_lags(tmp_path: Path, monkeypatch) -> None:
     cfg = _config(tmp_path, mode="live")
     cfg.live["transport"] = "real"
     cfg.live["allow_start_print"] = True
@@ -870,27 +1059,27 @@ def test_start_retries_every_second_until_printing_is_confirmed(tmp_path: Path, 
     monkeypatch.setattr(
         PrusaLinkClient,
         "get_status",
-        lambda self: {"ok": True, "payload": {"printer": {"state": "PRINTING" if len(start_calls) >= 2 else "IDLE"}}},
+        lambda self: {"ok": True, "payload": {"printer": {"state": "IDLE"}}},
     )
     monkeypatch.setattr(
         PrusaLinkClient,
         "get_job",
         lambda self: (
-            {"ok": True, "payload": {"id": 207, "state": "PRINTING", "progress": 0.0, "time_remaining": 120}}
-            if len(start_calls) >= 2
-            else {"ok": True, "status_code": 204}
+            {"ok": True, "status_code": 204}
         ),
     )
 
     result = workflow._start_file_with_retry(client, "usb", "sp-confirm.gcode")
 
-    assert result["ok"] is True
-    assert result["status"] == "started"
-    assert result["attempts"] == 2
-    assert len(start_calls) == 2
-    assert sleep_calls == [1.0]
+    assert result["ok"] is False
+    assert result["status"] == "effect_unknown"
+    assert result["failure_code"] == "START_PRINT_EFFECT_UNKNOWN"
+    assert result["retryable"] is False
+    assert result["operator_intervention_required"] is True
+    assert result["attempts"] == 1
+    assert len(start_calls) == 1
+    assert sleep_calls == []
     assert result["retry_history"][0]["confirm_status"] == "not_started"
-    assert result["retry_history"][1]["confirm_status"] == "started"
 
 
 def test_start_uses_prusalink_short_filename_from_metadata(tmp_path: Path, monkeypatch) -> None:

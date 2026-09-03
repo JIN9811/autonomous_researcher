@@ -233,6 +233,40 @@ def test_existing_rollout_is_not_reused_for_a_different_specimen() -> None:
     assert reused is None
 
 
+def test_agentic_manipulation_rollout_always_enables_plc_stop() -> None:
+    state = _state()
+    state.current_experiment_spec["plc_rollout_stop_enabled"] = False
+
+    payload = ManipulationAgent()._lerobot_payload(
+        state,
+        protocol_note="test",
+        strategy="lerobot_policy",
+    )
+
+    assert payload["plc_rollout_stop_enabled"] is True
+
+
+def test_device_workspace_manipulation_rollout_preserves_plc_stop_opt_in() -> None:
+    state = _state()
+    state.run_metadata["source"] = "lerobot_gui_manipulation_bridge"
+    state.current_experiment_spec["plc_rollout_stop_enabled"] = False
+
+    disabled = ManipulationAgent()._lerobot_payload(
+        state,
+        protocol_note="test",
+        strategy="lerobot_policy",
+    )
+    state.current_experiment_spec["plc_rollout_stop_enabled"] = True
+    enabled = ManipulationAgent()._lerobot_payload(
+        state,
+        protocol_note="test",
+        strategy="lerobot_policy",
+    )
+
+    assert disabled["plc_rollout_stop_enabled"] is False
+    assert enabled["plc_rollout_stop_enabled"] is True
+
+
 def test_manipulation_profile_persists_task_specific_rollout_settings() -> None:
     profile = normalize_manipulation_agent_profile(
         {
@@ -587,6 +621,74 @@ async def test_manipulation_agent_calls_lerobot_rollout(tmp_path: Path, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_manipulation_preflight_only_stops_before_vla_actuation(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """Catch a safe-validation cycle crossing the VLA actuation boundary."""
+    _isolate_manipulation_profile(tmp_path, monkeypatch)
+    tools = _tools(tmp_path)
+
+    def forbidden_actuation(_payload: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("VLA actuation must not be called in preflight_only mode")
+
+    tools.register("lerobot.rollout.start", forbidden_actuation)
+    tools.register("robot.pick_place", forbidden_actuation)
+    state = _post_specimen_state()
+    state.current_experiment_spec["execution_policy"] = {
+        "manipulation": "preflight_only",
+    }
+
+    result = await ManipulationAgent().run(state, _CtxStub(tools))
+
+    assert result.success is True
+    preflight = result.data["manipulation_preflight"]
+    assert preflight["schema"] == "manipulation_preflight.v1"
+    assert preflight["status"] == "execution_ready_pending_approval"
+    assert preflight["would_execute_tool"] == "lerobot.rollout.start"
+    assert preflight["actuation_performed"] is False
+    assert preflight["run_id"] == state.run_id
+    assert preflight["specimen_id"] == "specimen-transfer-001"
+    assert result.data["manipulation"]["status"] == "execution_ready_pending_approval"
+    assert result.data["requested_next_stage"] == "equipment"
+
+
+@pytest.mark.asyncio
+async def test_manipulation_preflight_accepts_typed_vision_plan_without_fake_pickup_detection(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    _isolate_manipulation_profile(tmp_path, monkeypatch)
+    tools = _tools(tmp_path)
+
+    def forbidden_actuation(_payload: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("VLA actuation must not be called in preflight_only mode")
+
+    tools.register("lerobot.rollout.start", forbidden_actuation)
+    state = _post_specimen_state()
+    state.current_experiment_spec["execution_policy"] = {"manipulation": "preflight_only"}
+    state.latest_observations = {
+        "frame_id": "vision-preflight-run-pi05-transfer",
+        "anomaly": False,
+        "transfer_readiness": {"ready": False, "status": "preflight_only"},
+    }
+    state.run_metadata["vision_preflight"] = {
+        "schema": "vision_preflight.v1",
+        "run_id": state.run_id,
+        "status": "execution_ready_pending_approval",
+        "capture_performed": False,
+        "actuation_performed": False,
+        "specimen_id": "specimen-transfer-001",
+    }
+
+    result = await ManipulationAgent().run(state, _CtxStub(tools))
+
+    assert result.success is True
+    assert result.data["manipulation_preflight"]["preflight"]["vision_contract"] == "vision_preflight.v1"
+    assert result.data["manipulation_preflight"]["actuation_performed"] is False
+
+
+@pytest.mark.asyncio
 async def test_manipulation_agent_defaults_to_smolvla_transfer_after_specimen(tmp_path: Path, monkeypatch: Any) -> None:
     _isolate_manipulation_profile(tmp_path, monkeypatch)
     ctx = _CtxStub(_tools(tmp_path))
@@ -896,6 +998,49 @@ async def test_manipulation_agent_completion_pass_does_not_restart_rollout(tmp_p
     assert result.data["manipulation"]["tool"] == "lerobot.rollout.stop"
     assert result.data["manipulation"]["status"] == "STOPPED"
     assert result.data["manipulation"]["completion_status"] == "verified_complete"
+    assert result.data["robot_task_result"]["handoff_status"] == "ready_for_equipment"
+
+
+@pytest.mark.asyncio
+async def test_completed_rollout_recovery_does_not_recheck_expired_pickup_signal(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """Post-place recovery is bound to completion identity, not old printer pickup TTL."""
+    _isolate_manipulation_profile(tmp_path, monkeypatch)
+    tools = _tools(tmp_path)
+    _register_action_active_rollout_status(tools)
+    start_calls: list[dict[str, Any]] = []
+    stop_calls: list[dict[str, Any]] = []
+    tools.register(
+        "lerobot.rollout.start",
+        lambda payload: start_calls.append(dict(payload)) or (_ for _ in ()).throw(
+            AssertionError("completed recovery must not restart rollout")
+        ),
+    )
+    tools.register(
+        "lerobot.rollout.stop",
+        lambda payload: stop_calls.append(dict(payload))
+        or {"ok": True, "tool": "lerobot.rollout.stop", "status": "STOPPED"},
+    )
+    state = _post_specimen_completion_state()
+    state.latest_observations["transfer_readiness"] = {
+        "ready": True,
+        "pose_confidence": 0.82,
+        "expires_at": "2000-01-01T00:00:00+00:00",
+    }
+    state.latest_observations["vision_signal"] = {
+        "schema": "vision_signal.v1",
+        "signal_id": "expired-printer-pickup",
+        "expires_at": "2000-01-01T00:00:00+00:00",
+    }
+
+    result = await ManipulationAgent().run(state, _CtxStub(tools))
+
+    assert result.success is True
+    assert start_calls == []
+    assert len(stop_calls) == 1
+    assert result.data["manipulation"].get("failure_code") != "STALE_VISION_SIGNAL"
     assert result.data["robot_task_result"]["handoff_status"] == "ready_for_equipment"
 
 

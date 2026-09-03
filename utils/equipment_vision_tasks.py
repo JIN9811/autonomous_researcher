@@ -8,6 +8,36 @@ from typing import Any
 
 _TASKS: tuple[dict[str, Any], ...] = (
     {
+        "task_id": "utm_state_working",
+        "check_id": "utm_state_working",
+        "label": "UTM Working State",
+        "result_label": "WORKING",
+        "description": "Observe that the UTM marker geometry is in the working state.",
+        "timeout_s": 3,
+        "runtime_modes": ["test", "live"],
+        "expected": {"utm_state": "WORKING"},
+    },
+    {
+        "task_id": "utm_motion_down",
+        "check_id": "utm_motion_down",
+        "label": "UTM Downward Motion",
+        "result_label": "DOWN",
+        "description": "Observe decreasing marker span while the UTM crosshead moves down.",
+        "timeout_s": 10,
+        "runtime_modes": ["test", "live"],
+        "expected": {"utm_motion_direction": "DOWN"},
+    },
+    {
+        "task_id": "utm_state_not_working",
+        "check_id": "utm_state_not_working",
+        "label": "UTM Not Working State",
+        "result_label": "NOT WORKING",
+        "description": "Observe that the UTM marker geometry is in the non-working state.",
+        "timeout_s": 3,
+        "runtime_modes": ["test", "live"],
+        "expected": {"utm_state": "NOT_WORKING"},
+    },
+    {
         "task_id": "utm_pre_start",
         "check_id": "utm_pre_start",
         "label": "Pre-UTM Fixture Check",
@@ -85,5 +115,6 @@ def build_equipment_vision_check(
         "producer_agent": "equipment_agent",
         "consumer_agent": "vision_agent",
         "expected": deepcopy(task["expected"]),
+        "result_label": str(task.get("result_label") or task["label"]),
         "timeout_s": int(task["timeout_s"]),
     }

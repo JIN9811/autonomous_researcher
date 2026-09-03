@@ -424,6 +424,11 @@ class SpecimenMakingAgent(BaseAgent):
         operator_actions = [item for item in tool_result.get("operator_actions", []) if isinstance(item, dict)]
         print_request = self._dict_value(printer_payload.get("print"))
         ejection_request = self._dict_value(printer_payload.get("ejection"))
+        printer_preflight = self._dict_value(tool_result.get("printer_preflight"))
+        printer_preflight_only = printer_preflight.get("status") in {
+            "execution_ready_pending_approval",
+            "blocked",
+        }
         graph = state.run_metadata.get("runtime_graph") if isinstance(state.run_metadata, dict) else {}
         graph_version = ""
         if isinstance(graph, dict):
@@ -561,6 +566,9 @@ class SpecimenMakingAgent(BaseAgent):
         elif not tool_result.get("ok", False):
             outcome_status = "failed"
             location = "unknown"
+        elif printer_preflight_only:
+            outcome_status = "preflight_complete"
+            location = "not_actuated"
         elif virtual_bridge_ejection_complete:
             outcome_status = "ready_for_vision"
             location = "a4_workspace"
@@ -598,6 +606,7 @@ class SpecimenMakingAgent(BaseAgent):
                 "specimen_purpose": str(spec.get("specimen_purpose") or spec.get("purpose") or "mechanical_test"),
                 "live_gui_test_spec": live_gui_test_spec,
                 "printer_test_path": printer_test_path,
+                "execution_policy_mode": printer_payload.get("execution_policy_mode", "execute"),
             },
             "digital_thread": digital_thread,
             "process_plan": process_plan,
@@ -631,6 +640,7 @@ class SpecimenMakingAgent(BaseAgent):
                 "transfer_wait": print_result.get("transfer_wait", {}),
                 "start": print_result.get("start", {}),
                 "ejection": ejection_result,
+                "printer_preflight": printer_preflight,
             },
             "fabrication_outcome": {
                 "status": outcome_status,
@@ -638,7 +648,7 @@ class SpecimenMakingAgent(BaseAgent):
                 "autoejection_status": "complete" if standalone_ejection_started or virtual_bridge_ejection_complete else ejection_status or "not_requested",
                 "warnings": warnings,
                 "failure_code": failure_code,
-                "requires_after_print_confirmation": bool(physical_intent),
+                "requires_after_print_confirmation": bool(physical_intent and not printer_preflight_only),
             },
             "feedback_to_design": {
                 "do_not_repeat": [str(gate.get("gate")) for gate in blocked_or_failed],
@@ -672,8 +682,8 @@ class SpecimenMakingAgent(BaseAgent):
             },
             {
                 "decision_id": "specimen.handoff.prepared",
-                "status": "ok" if outcome.get("status") in {"ready_for_vision", "virtual_finished", "printed"} else "blocked",
-                "rationale": "Stage completion means a specimen fabrication record is ready for Vision/Manipulation inspection, not merely an STL exists.",
+                "status": "ok" if outcome.get("status") in {"ready_for_vision", "virtual_finished", "printed", "preflight_complete"} else "blocked",
+                "rationale": "Stage completion records either a physical specimen handoff or a no-actuation fabrication preflight.",
             },
         ]
 
@@ -988,7 +998,11 @@ class SpecimenMakingAgent(BaseAgent):
         intent = report.get("fabrication_intent", {}) if isinstance(report.get("fabrication_intent"), dict) else {}
         thread = report.get("digital_thread", {}) if isinstance(report.get("digital_thread"), dict) else {}
         gates = [gate for gate in report.get("quality_gates", []) if isinstance(gate, dict)]
-        status = "ready" if outcome.get("status") in {"ready_for_vision", "virtual_finished", "printed"} else "blocked"
+        outcome_status = str(outcome.get("status") or "")
+        if outcome_status == "preflight_complete":
+            status = "preflight_ready"
+        else:
+            status = "ready" if outcome_status in {"ready_for_vision", "virtual_finished", "printed"} else "blocked"
         return {
             "schema": "specimen_fabricated.v1",
             "run_id": state.run_id,
@@ -1003,7 +1017,13 @@ class SpecimenMakingAgent(BaseAgent):
             "guardian_status": "not_checked",
             "decisions": decisions,
             "warnings": outcome.get("warnings", []),
-            "next_action": "vision_after_print_inspection" if status == "ready" else "operator_or_guardian_review",
+            "next_action": (
+                "vision_after_print_inspection"
+                if status == "ready"
+                else "physical_start_pending_approval"
+                if status == "preflight_ready"
+                else "operator_or_guardian_review"
+            ),
             "fabrication_report_ref": "run_metadata.fabrication_report",
             "fabrication_summary": {
                 "schema": report.get("schema"),
@@ -1101,6 +1121,8 @@ class SpecimenMakingAgent(BaseAgent):
             raise RuntimeError(f"specimen_agent missing required experiment_spec fields: {', '.join(missing)}")
         live_gui_test_spec = self._is_live_gui_test_spec(state, spec)
         printer_test_path = self._printer_test_path(spec)
+        execution_policy = spec.get("execution_policy") if isinstance(spec.get("execution_policy"), dict) else {}
+        printer_preflight_only = str(execution_policy.get("printer") or "").strip().lower() == "preflight_only"
         if live_gui_test_spec and not printer_test_path:
             return self._printer_path_choice_result(state, spec, candidate, specimen_id)
         if self._should_disable_test_surface_caps(state, spec, live_gui_test_spec=live_gui_test_spec):
@@ -1242,6 +1264,7 @@ class SpecimenMakingAgent(BaseAgent):
             "experiment_id": state.experiment_id,
             "runtime_mode": printer_runtime_mode,
             "specimen_id": specimen_id,
+            "candidate_id": candidate,
             "stl_path": geometry_result.get("stl_path"),
             "handoff_package_path": handoff_result.get("handoff_package_path"),
             "printer_profile": str(spec.get("printer_profile")),
@@ -1253,12 +1276,13 @@ class SpecimenMakingAgent(BaseAgent):
             "connection_info": spec.get("printer_connection") if isinstance(spec.get("printer_connection"), dict) else {},
             "stop_requested": bool(state.stop_requested),
             "safe_stop_requested": bool(state.safe_stop_requested),
+            "execution_policy_mode": "preflight_only" if printer_preflight_only else "execute",
         }
         if live_gui_test_spec:
             printer_payload["test_printer_path"] = printer_test_path
             printer_payload["allow_test_printer_live"] = printer_test_path in {"installed_printer", "physical_print"}
             printer_payload["test_printer_transport"] = "real" if printer_test_path in {"installed_printer", "physical_print"} else "virtual"
-            if printer_test_path == "installed_printer":
+            if printer_test_path in {"installed_printer", "physical_print"}:
                 printer_payload["prefer_http_artifact"] = True
             if printer_test_path in {"installed_printer", "physical_print"}:
                 print_request = dict(printer_payload["print"]) if isinstance(printer_payload.get("print"), dict) else {}
@@ -1269,7 +1293,7 @@ class SpecimenMakingAgent(BaseAgent):
                         "confirm_physical_print": True,
                         "stop_after_start": False,
                         "use_ejection_only_project_file": printer_test_path == "installed_printer",
-                        "prefer_http_artifact": printer_test_path == "installed_printer",
+                        "prefer_http_artifact": True,
                     }
                 )
                 printer_payload["print"] = print_request
@@ -1338,8 +1362,11 @@ class SpecimenMakingAgent(BaseAgent):
                 "mode": printer_runtime_mode,
                 "bridge": "printer",
                 "requested_tool": "printer.prepare",
-                "dry_run": not bool((printer_payload.get("print") or {}).get("start_immediately", False)),
-                "allow_physical": printer_runtime_mode == "live" or bool(printer_payload.get("allow_test_printer_live")),
+                "dry_run": printer_preflight_only or not bool((printer_payload.get("print") or {}).get("start_immediately", False)),
+                "allow_physical": bool(
+                    not printer_preflight_only
+                    and (printer_runtime_mode == "live" or bool(printer_payload.get("allow_test_printer_live")))
+                ),
             },
             "metadata": {
                 "stage": state.stage.value,
@@ -1410,6 +1437,9 @@ class SpecimenMakingAgent(BaseAgent):
         )
         fabrication_intent = fabrication_report.get("fabrication_intent", {}) if isinstance(fabrication_report.get("fabrication_intent"), dict) else {}
         printer_runtime = fabrication_report.get("printer_runtime", {}) if isinstance(fabrication_report.get("printer_runtime"), dict) else {}
+        printer_preflight = response.get("printer_preflight")
+        if not isinstance(printer_preflight, dict) or not printer_preflight:
+            printer_preflight = None
 
         specimen_result = {
             "ok": True,
@@ -1470,6 +1500,8 @@ class SpecimenMakingAgent(BaseAgent):
             "metrics": metrics,
             "evidence_refs": evidence_refs,
         }
+        if printer_preflight is not None:
+            specimen_result["printer_preflight"] = printer_preflight
         if response.get("requires_connection_info"):
             prompt = (
                 "Specimen Making Agent가 설치 프린터 통신 테스트에 필요한 active printer 연결정보를 기다립니다.\n\n"
@@ -1504,18 +1536,21 @@ class SpecimenMakingAgent(BaseAgent):
             raise RuntimeError(f"printer.prepare failed: {response}")
         operator_messages = [str(item) for item in response.get("operator_messages", []) if str(item).strip()]
         summary_suffix = f" ({operator_messages[-1]})" if operator_messages else ""
+        result_data = {
+            "specimen_result": specimen_result,
+            "fabrication_report": fabrication_report,
+            "specimen_agent_report": specimen_agent_report,
+            "handoff_packet": handoff_packet,
+            "specimen_fabricated": handoff_packet,
+            "decisions": decisions,
+            "metrics": metrics,
+            "evidence_refs": evidence_refs,
+            "protocol_note": protocol_note,
+        }
+        if printer_preflight is not None:
+            result_data["printer_preflight"] = printer_preflight
         return AgentResult(
             success=True,
             summary=f"Specimen preparation executed{summary_suffix}",
-            data={
-                "specimen_result": specimen_result,
-                "fabrication_report": fabrication_report,
-                "specimen_agent_report": specimen_agent_report,
-                "handoff_packet": handoff_packet,
-                "specimen_fabricated": handoff_packet,
-                "decisions": decisions,
-                "metrics": metrics,
-                "evidence_refs": evidence_refs,
-                "protocol_note": protocol_note,
-            },
+            data=result_data,
         )

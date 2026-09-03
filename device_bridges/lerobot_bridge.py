@@ -610,17 +610,29 @@ class LeRobotBridge:
         self._latest_joint_telemetry_packets: dict[str, dict[str, Any]] = {}
         self._joint_telemetry_gate_lock = threading.Lock()
         self._realsense_sysfs_root = Path("/sys/bus/usb/devices")
+        self._session_memory_lock = threading.Lock()
+        self._load_background_train_sessions()
 
     def shutdown(self) -> dict[str, Any]:
         """Stop tracked and stale LeRobot live subprocesses before the GUI server exits."""
         mirror_trace = self._stop_all_mirror_loops()
-        step_trace = self.cleanup_all_lerobot_processes()
+        background_session_ids = {
+            str(session.get("session_id") or "")
+            for session in self._sessions.values()
+            if self._is_background_train_session(session) and self._background_train_process_alive(session)
+        }
+        step_trace = self.cleanup_all_lerobot_processes(
+            exclude_workflows={"train"} if background_session_ids else None
+        )
         for session_id in list(self._monitor_processes):
+            if session_id in background_session_ids:
+                continue
             self._stop_training_monitor({"session_id": session_id})
         for session_id in list(self._log_handles):
             self._close_log_handle(session_id)
         for endpoint in list(self._receiver_processes):
             self._stop_receiver_process(endpoint)
+        self._persist_background_train_sessions()
         step_trace = mirror_trace + step_trace
         return {"ok": True, "tool": "lerobot.shutdown", "step_trace": step_trace, "events": step_trace}
 
@@ -2493,7 +2505,10 @@ class LeRobotBridge:
 
     def rollout_stop(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Stop all rollout/inference sessions and stale rollout subprocesses idempotently."""
-        return self._stop_all_workflow_sessions("lerobot.rollout.stop", payload or {}, "rollout")
+        stop_payload = payload or {}
+        if str(stop_payload.get("emergency_source") or "").strip().lower() == "plc_pb2":
+            return self._stop_plc_enabled_rollout_sessions("lerobot.rollout.stop", stop_payload)
+        return self._stop_all_workflow_sessions("lerobot.rollout.stop", stop_payload, "rollout")
 
     def rollout_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Return rollout status."""
@@ -7180,6 +7195,133 @@ class LeRobotBridge:
             self._refresh_process_status(session)
         return [self._public_session(session) for session in sorted(self._sessions.values(), key=lambda item: item.get("created_at", ""))[-20:]]
 
+    @staticmethod
+    def _is_background_train_session(session: dict[str, Any]) -> bool:
+        return (
+            str(session.get("workflow") or "").lower() == "train"
+            and str(session.get("mode") or "").lower() == "live"
+            and bool(session.get("train_background"))
+        )
+
+    def _persist_background_train_sessions(self) -> None:
+        sessions = [
+            copy.deepcopy(session)
+            for session in self._sessions.values()
+            if self._is_background_train_session(session)
+        ][-20:]
+        if not sessions and not self.config.session_memory_path.exists():
+            return
+        payload = {
+            "schema": "atr.lerobot.background_train_sessions.v1",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "sessions": sessions,
+        }
+        path = self.config.session_memory_path
+        with self._session_memory_lock:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_suffix(f"{path.suffix}.tmp")
+            temporary.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str), encoding="utf-8")
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, path)
+
+    def _load_background_train_sessions(self) -> None:
+        path = self.config.session_memory_path
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return
+        records = payload.get("sessions", []) if isinstance(payload, dict) else []
+        if not isinstance(records, list):
+            return
+        for record in records[-20:]:
+            if not isinstance(record, dict) or not self._is_background_train_session(record):
+                continue
+            session_id = str(record.get("session_id") or "").strip()
+            if not session_id:
+                continue
+            session = copy.deepcopy(record)
+            session["background_recovered"] = True
+            self._refresh_background_train_session(session)
+            self._sessions[session_id] = session
+
+    @staticmethod
+    def _read_json_file(path_value: str) -> dict[str, Any]:
+        if not str(path_value or "").strip():
+            return {}
+        try:
+            value = json.loads(Path(path_value).read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return {}
+        return dict(value) if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _process_start_ticks(pid: int) -> int | None:
+        try:
+            stat = Path(f"/proc/{int(pid)}/stat").read_text(encoding="utf-8", errors="replace")
+            return int(stat.rsplit(")", 1)[1].strip().split()[19])
+        except (FileNotFoundError, IndexError, OSError, TypeError, ValueError):
+            return None
+
+    def _background_train_process_alive(self, session: dict[str, Any]) -> bool:
+        return self._saved_process_identity_matches(session, "lerobot_background_train_runner.py")
+
+    def _saved_process_identity_matches(self, metadata: dict[str, Any], marker: str) -> bool:
+        try:
+            pid = int(metadata.get("pid") or 0)
+            expected_ticks = int(metadata.get("pid_start_ticks") or 0)
+        except (TypeError, ValueError):
+            return False
+        if pid <= 0 or not self._pid_alive(pid):
+            return False
+        actual_ticks = self._process_start_ticks(pid)
+        if expected_ticks <= 0 or actual_ticks != expected_ticks:
+            return False
+        try:
+            parts = Path(f"/proc/{pid}/cmdline").read_bytes().decode("utf-8", errors="replace").split("\0")
+        except OSError:
+            return False
+        return any(Path(part).name == marker for part in parts if part)
+
+    def _terminate_saved_process_group(self, metadata: dict[str, Any], marker: str) -> bool:
+        if not self._saved_process_identity_matches(metadata, marker):
+            return False
+        pid = int(metadata["pid"])
+        expected_pgid = int(metadata.get("process_group_id") or pid)
+        try:
+            pgid = os.getpgid(pid)
+        except ProcessLookupError:
+            return True
+        if pgid != expected_pgid or pgid != pid:
+            return False
+        os.killpg(pgid, signal.SIGTERM)
+        deadline = time.time() + 5.0
+        while self._pid_alive(pid) and time.time() < deadline:
+            time.sleep(0.05)
+        if self._pid_alive(pid):
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        return True
+
+    def _refresh_background_train_session(self, session: dict[str, Any]) -> None:
+        state = self._read_json_file(str(session.get("background_state_path") or ""))
+        state_status = str(state.get("status") or "").upper()
+        terminal = {"COMPLETED", "FAILED", "CANCELLED"}
+        if state:
+            session["background_state"] = state
+        if state_status in terminal:
+            session["status"] = state_status
+            session["returncode"] = state.get("returncode")
+            return
+        if self._background_train_process_alive(session):
+            session["status"] = "TRAINING"
+            session["returncode"] = None
+            return
+        if session.get("returncode") is None:
+            session["returncode"] = -999
+        session["status"] = "FAILED"
+
     def _attach_isaac_mirror_loop_if_requested(self, response: dict[str, Any], payload: dict[str, Any], *, workflow: str) -> dict[str, Any]:
         """Start a follower-state Isaac mirror loop alongside teleop/record when requested."""
         request = LeRobotSessionRequest.model_validate(payload or {})
@@ -7765,10 +7907,12 @@ class LeRobotBridge:
             or request.policy_path
             or str(self.config.fake_checkpoint_root / "policy.ckpt"),
             "policy_type": request.policy_type,
+            "train_background": bool(request.train_background) if workflow == "train" else False,
             "policy_path": request.policy_path,
             "policy_checkpoint_path": request.policy_checkpoint_path,
             "policy_repo_id": request.policy_repo_id,
             "rollout_inference_type": request.rollout_inference_type,
+            "plc_rollout_stop_enabled": bool(request.plc_rollout_stop_enabled),
             "active_robot_cam_home_pose_path": self._active_robot_cam_home_pose_path(request),
             "active_robot_cam_capture_pose_path": self._active_robot_cam_capture_pose_path(request),
             "log_path": "",
@@ -7827,6 +7971,7 @@ class LeRobotBridge:
                 session_id=session_id,
                 command=command_preview,
                 env_overrides=self._workflow_env_overrides(workflow, request, session_id=session_id),
+                background=workflow == "train" and bool(request.train_background),
             )
             if live_start.get("session_updates"):
                 session.update(dict(live_start["session_updates"]))
@@ -7840,6 +7985,7 @@ class LeRobotBridge:
                 step_trace.append(failure_trace)
                 session["step_trace"] = step_trace
                 self._sessions[session_id] = session
+                self._persist_background_train_sessions()
                 return self._session_response(
                     tool,
                     mode,
@@ -7859,6 +8005,7 @@ class LeRobotBridge:
                 if workflow == "train":
                     session["monitor"] = self._start_training_monitor(session, request)
         self._sessions[session_id] = session
+        self._persist_background_train_sessions()
         self._emit_trace(event_payload or request.model_dump(), tool, step_trace, profile.profile_id, mode, session_id)
         return self._session_response(tool, mode, session, step_trace)
 
@@ -7899,6 +8046,10 @@ class LeRobotBridge:
                 self._terminate_live_process(process, signal.SIGKILL)
                 process.wait(timeout=5)
             session["returncode"] = process.returncode
+        elif self._is_background_train_session(session):
+            self._terminate_saved_process_group(session, "lerobot_background_train_runner.py")
+            state = self._read_json_file(str(session.get("background_state_path") or ""))
+            session["returncode"] = state.get("returncode", -int(signal.SIGTERM))
         self._stop_training_monitor(session)
         cleanup_trace = self._cleanup_lerobot_processes(workflow)
         self._close_log_handle(str(session.get("session_id", "")))
@@ -7909,6 +8060,7 @@ class LeRobotBridge:
             {"step": stopped_status, "status": "ok", "detail": "session stopped"},
         ] + cleanup_trace
         session.setdefault("step_trace", []).extend(step_trace)
+        self._persist_background_train_sessions()
         self._emit_trace(payload, tool, step_trace, profile_id, mode, session["session_id"])
         return self._session_response(tool, mode, session, step_trace, idempotent=True)
 
@@ -7986,6 +8138,89 @@ class LeRobotBridge:
         selected.setdefault("step_trace", []).extend(step_trace)
         self._emit_trace(payload, tool, step_trace, profile_id, mode, str(selected.get("session_id", "")))
         return self._session_response(tool, mode, selected, step_trace, idempotent=True, stopped_session_ids=stopped_session_ids)
+
+    def _stop_plc_enabled_rollout_sessions(self, tool: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Stop only active rollout sessions that opted into the PLC fast-stop path."""
+        request = LeRobotBaseRequest.model_validate(payload or {})
+        mode = request.runtime_mode or request.mode
+        sessions = [
+            session
+            for session in self._sessions.values()
+            if session.get("workflow") == "rollout"
+            and bool(session.get("plc_rollout_stop_enabled"))
+            and self._session_is_active(session)
+        ]
+        if not sessions:
+            step_trace = [
+                {
+                    "step": "PLC_ROLLOUT_STOP_SKIPPED",
+                    "status": "ok",
+                    "detail": "no active PLC-enabled rollout session",
+                }
+            ]
+            return {
+                "ok": True,
+                "tool": tool,
+                "mode": mode,
+                "profile_id": request.profile_id or self._selected_profile_id,
+                "session_id": request.session_id,
+                "workflow": "rollout",
+                "status": "SKIPPED",
+                "idempotent": True,
+                "stopped_session_ids": [],
+                "command_preview": [],
+                "step_trace": step_trace,
+                "events": step_trace,
+                "error": None,
+            }
+
+        step_trace: list[dict[str, Any]] = []
+        stopped_session_ids: list[str] = []
+        for session in sessions:
+            session_id = str(session.get("session_id") or "")
+            process = self._processes.get(session_id)
+            if process and process.poll() is None:
+                self._terminate_live_process(process, signal.SIGTERM)
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self._terminate_live_process(process, signal.SIGKILL)
+                    process.wait(timeout=5)
+                session["returncode"] = process.returncode
+                self._processes.pop(session_id, None)
+                step_trace.append(
+                    {
+                        "step": "STOP_TRACKED_PROCESS",
+                        "status": "ok",
+                        "detail": f"session={session_id} pid={process.pid}",
+                    }
+                )
+            elif process:
+                session["returncode"] = process.returncode
+                self._processes.pop(session_id, None)
+            self._stop_training_monitor(session)
+            self._close_log_handle(session_id)
+            session["status"] = "STOPPED"
+            session["port_reclaim_status"] = "not_required"
+            session_trace = [
+                {"step": "PLC_ROLLOUT_STOP", "status": "ok", "detail": "plc_pb2"},
+                {"step": "STOPPED", "status": "ok", "detail": "PLC-enabled rollout stopped"},
+            ]
+            session.setdefault("step_trace", []).extend(session_trace)
+            step_trace.extend(session_trace)
+            if session_id:
+                stopped_session_ids.append(session_id)
+
+        selected = sessions[-1]
+        self._emit_trace(payload, tool, step_trace, str(selected.get("profile_id") or ""), mode, str(selected.get("session_id") or ""))
+        return self._session_response(
+            tool,
+            mode,
+            selected,
+            step_trace,
+            idempotent=True,
+            stopped_session_ids=stopped_session_ids,
+        )
 
     def _session_status(self, tool: str, payload: dict[str, Any], workflow: str, *, prefer_active: bool = False) -> dict[str, Any]:
         request = LeRobotBaseRequest.model_validate(payload or {})
@@ -8244,10 +8479,13 @@ class LeRobotBridge:
             "log_tail": log_tail,
             "pid": session.get("pid"),
             "returncode": session.get("returncode"),
+            "train_background": bool(session.get("train_background")),
+            "background_recovered": bool(session.get("background_recovered")),
             "tts": session.get("tts", {}),
             "monitor": session.get("monitor", {}),
             "error": None,
             "virtual_bridge_simulation": bool(session.get("virtual_bridge_simulation")),
+            "plc_rollout_stop_enabled": bool(session.get("plc_rollout_stop_enabled")),
         }
         payload.update(self._session_runtime_contract_blocks(session, runtime))
         if str(session.get("workflow") or "").lower() == "rollout":
@@ -10232,6 +10470,8 @@ class LeRobotBridge:
             "log_tail": log_tail,
             "pid": session.get("pid"),
             "returncode": session.get("returncode"),
+            "train_background": bool(session.get("train_background")),
+            "background_recovered": bool(session.get("background_recovered")),
             "training": {**dict(session.get("train_config", {})), **dict(training or {})},
             "monitor": session.get("monitor", {}),
             "visualization": session.get("visualization", {}),
@@ -11232,6 +11472,8 @@ class LeRobotBridge:
         return {
             "status": "running",
             "pid": process.pid,
+            "pid_start_ticks": self._process_start_ticks(process.pid),
+            "process_group_id": process.pid,
             "output_dir": str(output_dir),
             "train_log": log_path,
             "checkpoint_dir": checkpoint_dir,
@@ -11253,6 +11495,11 @@ class LeRobotBridge:
         session_id = str(session.get("session_id") or "")
         process = self._monitor_processes.pop(session_id, None)
         if process is None:
+            monitor = dict(session.get("monitor") or {})
+            if self._terminate_saved_process_group(monitor, "training_stability_monitor.py"):
+                monitor["status"] = "stopped"
+                monitor["returncode"] = -int(signal.SIGTERM)
+                session["monitor"] = monitor
             return
         if process.poll() is None:
             self._terminate_live_process(process, signal.SIGTERM)
@@ -13128,18 +13375,22 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             "pending_pose_path": "/tmp/atr_specimen_pose_pending/latest_specimen_pose_payload.json",
             "d405_mapping": {
                 "a4_camera_to_isaac_transform": "direct",
-                "a4_width_mm": 297.0,
-                "a4_height_mm": 210.0,
-                "a4_isaac_width_mm": 297.0,
-                "a4_isaac_height_mm": 210.0,
+                "a4_width_mm": 170.0,
+                "a4_height_mm": 250.0,
+                "a4_isaac_width_mm": 170.0,
+                "a4_isaac_height_mm": 250.0,
+                "a4_world_min_x_mm": 230.0,
+                "a4_world_min_y_mm": 120.0,
                 "depth_scale_m_per_unit": LEROBOT_D405_DEPTH_SCALE_M_PER_UNIT,
             },
             "d455f_fallback_mapping": {
                 "a4_camera_to_isaac_transform": "robot_right_plane",
-                "a4_width_mm": 210.0,
-                "a4_height_mm": 297.0,
-                "a4_isaac_width_mm": 297.0,
-                "a4_isaac_height_mm": 210.0,
+                "a4_width_mm": 250.0,
+                "a4_height_mm": 170.0,
+                "a4_isaac_width_mm": 170.0,
+                "a4_isaac_height_mm": 250.0,
+                "a4_world_min_x_mm": 230.0,
+                "a4_world_min_y_mm": 120.0,
             },
         }
 
@@ -13175,20 +13426,22 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             "ATR_ACTIVE_ROBOT_CAM_PRIMARY_CAMERA_KEY": primary_key,
             "ATR_ACTIVE_ROBOT_CAM_FALLBACK_CAMERA_KEY": fallback_key,
             "ATR_ACTIVE_ROBOT_CAM_D405_A4_CAMERA_TO_ISAAC_TRANSFORM": "direct",
-            "ATR_ACTIVE_ROBOT_CAM_D405_A4_WIDTH_MM": "297.0",
-            "ATR_ACTIVE_ROBOT_CAM_D405_A4_HEIGHT_MM": "210.0",
-            "ATR_ACTIVE_ROBOT_CAM_D405_A4_ISAAC_WIDTH_MM": "297.0",
-            "ATR_ACTIVE_ROBOT_CAM_D405_A4_ISAAC_HEIGHT_MM": "210.0",
+            "ATR_ACTIVE_ROBOT_CAM_D405_A4_WIDTH_MM": "170.0",
+            "ATR_ACTIVE_ROBOT_CAM_D405_A4_HEIGHT_MM": "250.0",
+            "ATR_ACTIVE_ROBOT_CAM_D405_A4_ISAAC_WIDTH_MM": "170.0",
+            "ATR_ACTIVE_ROBOT_CAM_D405_A4_ISAAC_HEIGHT_MM": "250.0",
             "ATR_ACTIVE_ROBOT_CAM_D405_A4_WORLD_OFFSET_X_MM": "0.0",
             "ATR_ACTIVE_ROBOT_CAM_D405_A4_WORLD_OFFSET_Y_MM": "0.0",
             "ATR_ACTIVE_ROBOT_CAM_D405_DEPTH_SCALE_M_PER_UNIT": str(LEROBOT_D405_DEPTH_SCALE_M_PER_UNIT),
             "ATR_ACTIVE_ROBOT_CAM_D455F_A4_CAMERA_TO_ISAAC_TRANSFORM": "robot_right_plane",
-            "ATR_ACTIVE_ROBOT_CAM_D455F_A4_WIDTH_MM": "210.0",
-            "ATR_ACTIVE_ROBOT_CAM_D455F_A4_HEIGHT_MM": "297.0",
-            "ATR_ACTIVE_ROBOT_CAM_D455F_A4_ISAAC_WIDTH_MM": "297.0",
-            "ATR_ACTIVE_ROBOT_CAM_D455F_A4_ISAAC_HEIGHT_MM": "210.0",
+            "ATR_ACTIVE_ROBOT_CAM_D455F_A4_WIDTH_MM": "250.0",
+            "ATR_ACTIVE_ROBOT_CAM_D455F_A4_HEIGHT_MM": "170.0",
+            "ATR_ACTIVE_ROBOT_CAM_D455F_A4_ISAAC_WIDTH_MM": "170.0",
+            "ATR_ACTIVE_ROBOT_CAM_D455F_A4_ISAAC_HEIGHT_MM": "250.0",
             "ATR_ACTIVE_ROBOT_CAM_D455F_A4_WORLD_OFFSET_X_MM": "0.0",
             "ATR_ACTIVE_ROBOT_CAM_D455F_A4_WORLD_OFFSET_Y_MM": "0.0",
+            "ATR_SPECIMEN_A4_WORLD_MIN_X_MM": "230.0",
+            "ATR_SPECIMEN_A4_WORLD_MIN_Y_MM": "120.0",
         }
 
     @staticmethod
@@ -13266,15 +13519,30 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         session_id: str,
         command: list[str],
         env_overrides: dict[str, str] | None = None,
+        background: bool = False,
     ) -> dict[str, Any]:
         try:
             self.config.session_log_root.mkdir(parents=True, exist_ok=True)
             log_path = self.config.session_log_root / f"{session_id}.log"
+            runtime_state_path = self.config.session_log_root / f"{session_id}.state.json"
+            launch_command = list(command)
+            if background:
+                runner = Path(__file__).resolve().parents[1] / "scripts" / "lerobot_background_train_runner.py"
+                launch_command = [
+                    sys.executable or "python3",
+                    str(runner),
+                    "--state-path",
+                    str(runtime_state_path),
+                    "--cwd",
+                    str(self.config.repo_root),
+                    "--",
+                    *command,
+                ]
             log_handle = log_path.open("w", encoding="utf-8")
             log_handle.write(f"\n[{datetime.now(timezone.utc).isoformat()}] starting: {' '.join(command)}\n")
             log_handle.flush()
             process = subprocess.Popen(
-                command,
+                launch_command,
                 cwd=str(self.config.repo_root),
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
@@ -13286,6 +13554,15 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
             self._log_handles[session_id] = log_handle
             time.sleep(3.0)
             returncode = process.poll()
+            process_updates = {
+                "pid": process.pid,
+                "pid_start_ticks": self._process_start_ticks(process.pid),
+                "process_group_id": process.pid,
+                "log_path": str(log_path),
+                "returncode": returncode,
+            }
+            if background:
+                process_updates["background_state_path"] = str(runtime_state_path)
             if returncode is not None:
                 log_handle.flush()
                 log_tail = self._tail_file(str(log_path))
@@ -13294,7 +13571,7 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
                     return {
                         "ok": True,
                         "completed_during_startup": True,
-                        "session_updates": {"pid": process.pid, "log_path": str(log_path), "returncode": returncode},
+                        "session_updates": process_updates,
                     }
                 failure_code = "LEROBOT_PROCESS_EXITED_DURING_STARTUP"
                 message = f"Live LeRobot process exited during startup with returncode={returncode}."
@@ -13305,11 +13582,11 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
                     "ok": False,
                     "failure_code": failure_code,
                     "message": message,
-                    "session_updates": {"pid": process.pid, "log_path": str(log_path), "returncode": returncode},
+                    "session_updates": process_updates,
                 }
             return {
                 "ok": True,
-                "session_updates": {"pid": process.pid, "log_path": str(log_path), "returncode": None},
+                "session_updates": process_updates,
             }
         except Exception as exc:
             return {
@@ -13322,6 +13599,12 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         session_id = str(session.get("session_id", ""))
         process = self._processes.get(session_id)
         if not process:
+            if self._is_background_train_session(session):
+                previous = (session.get("status"), session.get("returncode"))
+                self._refresh_background_train_session(session)
+                if previous != (session.get("status"), session.get("returncode")):
+                    self._persist_background_train_sessions()
+                return
             pid = session.get("pid")
             if pid is not None:
                 try:
@@ -13353,6 +13636,7 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         self._close_log_handle(session_id)
         if str(session.get("status", "")).upper() in {"CANCELLED", "STOPPED"}:
             self._stop_training_monitor(session)
+            self._persist_background_train_sessions()
             return
         if int(returncode) == 0:
             session["status"] = "COMPLETED"
@@ -13361,6 +13645,7 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
         self._mark_visualization_stale(session, f"process_returncode_{returncode}")
         if str(session.get("workflow") or "").lower() == "train":
             self._stop_training_monitor(session)
+            self._persist_background_train_sessions()
         if int(returncode) == 0 and str(session.get("workflow") or "").lower() == "record":
             self._start_isaac_rgbd_post_render_after_record(session)
 
@@ -13667,8 +13952,12 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
     def _pid_alive(pid: int) -> bool:
         try:
             os.kill(pid, 0)
-            return True
+            stat = Path(f"/proc/{int(pid)}/stat").read_text(encoding="utf-8", errors="replace")
+            state = stat.rsplit(")", 1)[1].strip().split()[0]
+            return state != "Z"
         except ProcessLookupError:
+            return False
+        except (FileNotFoundError, IndexError):
             return False
         except PermissionError:
             return True

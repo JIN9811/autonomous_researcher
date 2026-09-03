@@ -13,6 +13,8 @@ from collections import Counter
 from collections.abc import Callable
 from datetime import datetime, timezone
 import json
+import shlex
+from statistics import median
 import subprocess
 import time
 from typing import Any
@@ -94,6 +96,19 @@ def summarize_utm_state_sequence(
         if isinstance(sample.get("span_y"), (int, float))
     ]
     span_y_delta = max(span_values) - min(span_values) if span_values else 0.0
+    motion_direction = "UNKNOWN"
+    span_y_start = None
+    span_y_end = None
+    if len(span_values) >= 6:
+        span_y_start = float(median(span_values[:3]))
+        span_y_end = float(median(span_values[-3:]))
+        directed_delta = span_y_end - span_y_start
+        if directed_delta >= 4.0:
+            motion_direction = "UP"
+        elif directed_delta <= -4.0:
+            motion_direction = "DOWN"
+        else:
+            motion_direction = "STABLE"
 
     return {
         "ok": True,
@@ -107,13 +122,18 @@ def summarize_utm_state_sequence(
         "transition": transition,
         "stable_state": stable_state,
         "span_y_delta": span_y_delta,
+        "span_y_start": span_y_start,
+        "span_y_end": span_y_end,
+        "motion_direction": motion_direction,
         "samples": samples,
     }
 
 
 def _decode_ros_string_payload(text: str) -> Any:
     """Decode ros2 echo output that may be raw, JSON-quoted, or repr-quoted."""
-    stripped = text.strip()
+    stripped = "\n".join(
+        line for line in text.strip().splitlines() if line.strip() != "---"
+    ).strip()
     if stripped.startswith("---"):
         stripped = stripped.removeprefix("---").strip()
     if stripped.startswith("data:"):
@@ -146,19 +166,66 @@ def _parse_ros2_string_data(stdout: str) -> dict[str, Any]:
     return payload
 
 
+def _parse_ros2_string_stream(stdout: str) -> list[dict[str, Any]]:
+    """Parse every message emitted by a bounded ros2 topic echo stream."""
+    samples: list[dict[str, Any]] = []
+    for line in str(stdout or "").splitlines():
+        record = line.strip()
+        if not record.startswith(("data:", "{", '"{', "'{")):
+            continue
+        try:
+            samples.append(_parse_ros2_string_data(record))
+        except (json.JSONDecodeError, SyntaxError, ValueError):
+            continue
+    return samples
+
+
 def read_compression_tester_summary_once(
     *,
     topic: str = "/compression_tester/summary",
     timeout_sec: float = 1.0,
 ) -> dict[str, Any]:
+    command = (
+        "source /opt/ros/jazzy/setup.bash; "
+        f"exec ros2 topic echo {shlex.quote(topic)} --once --field data"
+    )
     completed = subprocess.run(
-        ["ros2", "topic", "echo", topic, "--once", "--field", "data"],
+        ["bash", "-lc", command],
         capture_output=True,
         check=True,
         text=True,
         timeout=timeout_sec + 0.5,
     )
     return _parse_ros2_string_data(completed.stdout)
+
+
+def read_compression_tester_summary_window(
+    *,
+    duration_sec: float,
+    topic: str = "/compression_tester/summary",
+) -> list[dict[str, Any]]:
+    """Collect a bounded ROS echo stream without restarting ros2 per sample."""
+    bounded_duration = max(float(duration_sec), 0.5)
+    command = (
+        "source /opt/ros/jazzy/setup.bash; "
+        f"exec timeout --signal=TERM {bounded_duration:.3f}s "
+        f"ros2 topic echo {shlex.quote(topic)} --field data"
+    )
+    completed = subprocess.run(
+        ["bash", "-lc", command],
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=bounded_duration + 2.0,
+    )
+    if completed.returncode not in {0, 124}:
+        raise subprocess.CalledProcessError(
+            completed.returncode,
+            ["bash", "-lc", command],
+            output=completed.stdout,
+            stderr=completed.stderr,
+        )
+    return _parse_ros2_string_stream(completed.stdout)
 
 
 def observe_utm_state_window(
@@ -170,6 +237,29 @@ def observe_utm_state_window(
 ) -> dict[str, Any]:
     """Collect UTM state samples for a bounded time window."""
     reader = read_sample or read_compression_tester_summary_once
+    if read_sample is None:
+        try:
+            samples = read_compression_tester_summary_window(duration_sec=duration_sec)
+        except (
+            json.JSONDecodeError,
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            FileNotFoundError,
+            OSError,
+        ) as exc:
+            samples = [
+                {
+                    "timestamp": _now_iso(),
+                    "state": "UNKNOWN",
+                    "point_count": 0,
+                    "summary_fresh": False,
+                    "error": type(exc).__name__,
+                }
+            ]
+        result = summarize_utm_state_sequence(samples, minimum_samples=minimum_samples)
+        result["duration_sec"] = duration_sec
+        return result
+
     deadline = time.monotonic() + max(duration_sec, 0.0)
     samples: list[dict[str, Any]] = []
 

@@ -192,6 +192,7 @@ let liveGraphPayload = null;
 let liveUtmRuntimeStatus = null;
 let liveUtmRuntimeGraph = null;
 let liveUtmRuntimeFrame = null;
+let liveUtmRuntimeStreamStats = null;
 let liveUtmCameraConfig = null;
 let liveUtmRuntimeGraphHash = "";
 let liveUtmRuntimeGraphFetchedAt = 0;
@@ -233,6 +234,7 @@ let livePrinterMonitorOverride = null;
 let livePrinterVideoOverride = null;
 let liveUtmRuntimeStreamUrlCache = "";
 let liveUtmRuntimeStreamUrlKey = "";
+const LIVE_UTM_PREVIEW_FPS = 30;
 const LIVE_UTM_GRAPH_REFRESH_INTERVAL_MS = 15000;
 const LIVE_UTM_FRAME_FETCH_TIMEOUT_MS = 3000;
 let liveGraphActionStatus = null;
@@ -7171,18 +7173,46 @@ function renderMissingInputsCard(report) {
   `;
 }
 
+function isBlockedDecisionEvent(event) {
+  if (!event || typeof event !== "object") return false;
+  const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
+  const guardianDecision = payload.guardian_decision && typeof payload.guardian_decision === "object"
+    ? payload.guardian_decision
+    : {};
+  const gate = payload.gate && typeof payload.gate === "object" ? payload.gate : {};
+  return [
+    event.decision,
+    event.status,
+    payload.decision,
+    payload.status,
+    guardianDecision.decision,
+    gate.decision,
+  ].some((value) => /^(block|blocked|blocking|reject|rejected|deny|denied)$/i.test(String(value || "").trim()));
+}
+
 function decisionRegisterCounts(report) {
   const approvals = liveApprovals || { pending: [], resolved: [], approvals: [] };
   const resolved = Array.isArray(approvals.resolved) ? approvals.resolved.length : 0;
   const pending = Array.isArray(approvals.pending) ? approvals.pending.length : 0;
-  const warnings = (report.warnings || []).length;
+  const state = report.state && typeof report.state === "object" ? report.state : {};
+  const metadata = state.run_metadata && typeof state.run_metadata === "object" ? state.run_metadata : {};
+  const controlPlane = metadata.latest_orchestrator_control_plane && typeof metadata.latest_orchestrator_control_plane === "object"
+    ? metadata.latest_orchestrator_control_plane
+    : {};
+  const controlRegister = controlPlane.decision_register && typeof controlPlane.decision_register === "object"
+    ? controlPlane.decision_register
+    : {};
+  const activeDecisions = Array.isArray(metadata.orchestrator_decision_register)
+    ? metadata.orchestrator_decision_register
+    : Array.isArray(controlRegister.items) ? controlRegister.items : [];
+  const blocked = activeDecisions.filter((decision) => isBlockedDecisionEvent(decision)).length;
   const decisions = (report.decisionItems || []).length;
   const events = (report.events || []).length;
   return {
     approved: Math.max(decisions, resolved),
     pending,
-    blocked: warnings,
-    info: Math.max(0, events - warnings),
+    blocked,
+    info: Math.max(0, events - blocked),
   };
 }
 
@@ -8893,9 +8923,11 @@ function orchestratorArrayValue(value) {
 
 function orchestratorLatestObject(...values) {
   for (const value of values) {
-    if (Array.isArray(value) && value.length) {
-      const latest = value[value.length - 1];
-      if (latest && typeof latest === "object") return latest;
+    if (Array.isArray(value)) {
+      if (value.length) {
+        const latest = value[value.length - 1];
+        if (latest && typeof latest === "object") return latest;
+      }
     } else if (value && typeof value === "object") {
       return value;
     }
@@ -8910,19 +8942,17 @@ function orchestratorReadableStage(stage) {
 
 function orchestratorPrimaryDecision(ctx, report) {
   const metadata = ctx.metadata || {};
-  const reflections = Array.isArray(metadata.loop_reflections) ? metadata.loop_reflections : [];
   const latestReflection = orchestratorLatestObject(
     metadata.latest_loop_reflection,
     ctx.controlPlane.latest_loop_reflection,
-    reflections,
   );
   const latestDecision = orchestratorLatestObject(
-    latestReportPayload(report, ["latest_guardian_decision", "guardian_decision", "data.guardian_decision"]),
+    metadata.latest_guardian_decision,
     metadata.latest_guardian_gate_decision,
     metadata.latest_orchestrator_decision,
     ctx.decisions,
   );
-  const latestHandoff = orchestratorLatestObject(metadata.latest_orchestrator_handoff, ctx.handoffs);
+  const latestHandoff = orchestratorLatestObject(metadata.latest_orchestrator_handoff);
   const decision = latestReflection.guardian_decision
     || latestDecision.guardian_decision
     || latestDecision.decision
@@ -13798,20 +13828,37 @@ function utmRuntimeLiveStreamTopic(frame = {}, profile = {}) {
 }
 
 function utmRuntimeFrameStreamUrl(frame = {}, profile = {}) {
-  const fps = Number(profile.fps || frame.fps || 15);
-  const selectedFps = Number.isFinite(fps) && fps > 0 ? Math.min(Math.max(fps, 1), 60) : 15;
   const topic = utmRuntimeLiveStreamTopic(frame, profile);
   const runtimeKey = [
     liveUtmRuntimeStatus?.status || "",
     liveUtmRuntimeStatus?.pid || "",
     liveUtmRuntimeStatus?.started_at || "",
   ].join(":");
-  const streamKey = `${topic}|${selectedFps}|${runtimeKey}`;
+  const streamKey = `${topic}|${LIVE_UTM_PREVIEW_FPS}|${runtimeKey}`;
   if (streamKey !== liveUtmRuntimeStreamUrlKey || !liveUtmRuntimeStreamUrlCache) {
     liveUtmRuntimeStreamUrlKey = streamKey;
-    liveUtmRuntimeStreamUrlCache = `/api/equipment/utm-runtime/frame-stream.mjpeg?topic=${encodeURIComponent(topic)}&fps=${encodeURIComponent(String(selectedFps))}&runtime=${encodeURIComponent(runtimeKey || "active")}`;
+    liveUtmRuntimeStreamUrlCache = `/api/equipment/utm-runtime/frame-stream.mjpeg?topic=${encodeURIComponent(topic)}&fps=${encodeURIComponent(String(LIVE_UTM_PREVIEW_FPS))}&runtime=${encodeURIComponent(runtimeKey || "active")}`;
   }
   return liveUtmRuntimeStreamUrlCache;
+}
+
+function utmRuntimeFrameStreamStatsUrl(frame = {}, profile = {}) {
+  const topic = utmRuntimeLiveStreamTopic(frame, profile);
+  return `/api/equipment/utm-runtime/frame-stream/status?topic=${encodeURIComponent(topic)}&fps=${encodeURIComponent(String(LIVE_UTM_PREVIEW_FPS))}&quality=82`;
+}
+
+function liveUtmRuntimeStreamRateLabel() {
+  const actual = Number(liveUtmRuntimeStreamStats?.measured_fps || 0);
+  const dropped = Number(liveUtmRuntimeStreamStats?.estimated_dropped_frames || 0);
+  return actual > 0
+    ? `${actual.toFixed(1)}fps actual · ${Math.max(Math.round(dropped), 0)} drop est`
+    : `${LIVE_UTM_PREVIEW_FPS}fps preview`;
+}
+
+function updateLiveUtmRuntimeStreamStats() {
+  const meta = document.querySelector(".ar-vis-live-frame-meta em[data-utm-preview-size]");
+  if (!meta) return;
+  meta.textContent = `${meta.dataset.utmPreviewSize || "-"} · ${liveUtmRuntimeStreamRateLabel()}`;
 }
 
 function renderVisionLiveFrameEvidence(frame, profile) {
@@ -13820,14 +13867,13 @@ function renderVisionLiveFrameEvidence(frame, profile) {
   const runtimeRunning = liveUtmRuntimeStatus?.status === "running";
   const streamUrl = runtimeRunning ? utmRuntimeFrameStreamUrl(frame, profile) : "";
   if (streamUrl) {
-    const fps = Number(profile.fps || frame.fps || 15);
     return `
       <div class="ar-vis-live-frame">
         <img src="${escapeHtml(streamUrl)}" alt="Vision live frame evidence stream">
         <div class="ar-vis-live-frame-meta">
           <span>live_mjpeg_stream</span>
           <strong>${escapeHtml(utmRuntimeLiveStreamTopic(frame, profile))}</strong>
-          <em>${escapeHtml(size)} · ${escapeHtml(`${Number.isFinite(fps) ? fps : 15}fps`)}</em>
+          <em data-utm-preview-size="${escapeHtml(size)}">${escapeHtml(size)} · ${escapeHtml(liveUtmRuntimeStreamRateLabel())}</em>
         </div>
       </div>
     `;
@@ -14957,41 +15003,100 @@ function renderEquipmentEventLog(report) {
   `;
 }
 
-function analysisCurvePoints(analysis) {
-  const curve = analysis.utm_curve || {};
-  return Array.isArray(curve.preview) ? curve.preview : Array.isArray(curve.points) ? curve.points : [];
+function analysisStressStrainPoints(analysis) {
+  const normalizedCurve = analysis.stress_strain_curve || {};
+  const normalizedRows = Array.isArray(normalizedCurve.preview)
+    ? normalizedCurve.preview
+    : Array.isArray(normalizedCurve.points) ? normalizedCurve.points : [];
+  const normalized = normalizedRows
+    .map((point) => {
+      const strainPct = dashboardFiniteNumber(point.strain_pct);
+      const strain = dashboardFiniteNumber(point.strain);
+      const stress = dashboardFiniteNumber(point.stress_MPa ?? point.stress_mpa ?? point.stress);
+      return {
+        strain_pct: strainPct === null && strain !== null ? strain * 100 : strainPct,
+        stress_MPa: stress,
+      };
+    })
+    .filter((point) => point.strain_pct !== null && point.stress_MPa !== null);
+  if (normalized.length) return normalized;
+
+  const geometry = analysis.specimen_geometry || {};
+  const area = dashboardFiniteNumber(geometry.cross_section_area_mm2);
+  const gauge = dashboardFiniteNumber(geometry.gauge_length_mm);
+  if (area === null || area <= 0 || gauge === null || gauge <= 0) return [];
+  const forceDisplacement = analysis.utm_curve || {};
+  const legacyRows = Array.isArray(forceDisplacement.preview)
+    ? forceDisplacement.preview
+    : Array.isArray(forceDisplacement.points) ? forceDisplacement.points : [];
+  return legacyRows
+    .map((point) => {
+      const displacement = dashboardFiniteNumber(point.displacement_mm ?? point.displacement ?? point.x);
+      const force = dashboardFiniteNumber(point.force_N ?? point.force ?? point.y);
+      return {
+        strain_pct: displacement === null ? null : (displacement / gauge) * 100,
+        stress_MPa: force === null ? null : force / area,
+      };
+    })
+    .filter((point) => point.strain_pct !== null && point.stress_MPa !== null);
+}
+
+function analysisScientificTicks(maxValue, targetIntervals = 5) {
+  const finiteMax = dashboardFiniteNumber(maxValue);
+  if (finiteMax === null || finiteMax <= 0) return [0, 1];
+  const rawStep = finiteMax / Math.max(1, targetIntervals);
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+  const normalized = rawStep / magnitude;
+  const niceFactor = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10;
+  const step = niceFactor * magnitude;
+  const axisMax = step * Math.ceil(finiteMax / step);
+  const ticks = [];
+  for (let value = 0; value <= axisMax + step * 1e-9; value += step) {
+    ticks.push(Number(value.toPrecision(12)));
+  }
+  return ticks;
 }
 
 function renderAnalysisCurve(analysis) {
-  const points = analysisCurvePoints(analysis)
-    .map((point) => ({
-      x: dashboardFiniteNumber(point.displacement_mm ?? point.displacement ?? point.x),
-      y: dashboardFiniteNumber(point.force_N ?? point.force ?? point.y),
-      t: dashboardFiniteNumber(point.time_s ?? point.t),
-    }))
-    .filter((point) => point.x !== null && point.y !== null);
-  if (points.length < 2) return renderVizEmpty("No UTM curve preview recorded.");
-  const width = 420;
-  const height = 190;
-  const pad = { left: 38, right: 14, top: 18, bottom: 30 };
-  const minX = Math.min(...points.map((point) => point.x));
-  const maxX = Math.max(...points.map((point) => point.x), minX + 1);
-  const minY = Math.min(0, ...points.map((point) => point.y));
-  const maxY = Math.max(...points.map((point) => point.y), minY + 1);
-  const x = (value) => pad.left + ((value - minX) / (maxX - minX)) * (width - pad.left - pad.right);
-  const y = (value) => height - pad.bottom - ((value - minY) / (maxY - minY)) * (height - pad.top - pad.bottom);
-  const line = points.map((point) => [x(point.x), y(point.y)]);
-  const peak = points.reduce((best, point) => point.y > best.y ? point : best, points[0]);
+  const points = analysisStressStrainPoints(analysis);
+  if (points.length < 2) return renderVizEmpty("No engineering stress-strain preview recorded.");
+  const width = 520;
+  const height = 260;
+  const pad = { left: 72, right: 18, top: 22, bottom: 58 };
+  const xTicks = analysisScientificTicks(Math.max(0, ...points.map((point) => point.strain_pct)), 5);
+  const yTicks = analysisScientificTicks(Math.max(0, ...points.map((point) => point.stress_MPa)), 5);
+  const maxX = xTicks[xTicks.length - 1];
+  const maxY = yTicks[yTicks.length - 1];
+  const plotWidth = width - pad.left - pad.right;
+  const plotHeight = height - pad.top - pad.bottom;
+  const x = (value) => pad.left + (Math.max(0, value) / maxX) * plotWidth;
+  const y = (value) => height - pad.bottom - (Math.max(0, value) / maxY) * plotHeight;
+  const line = points.map((point) => [x(point.strain_pct), y(point.stress_MPa)]);
+  const xGrid = xTicks.map((value) => `
+    <line x1="${numberText(x(value), 3)}" y1="${pad.top}" x2="${numberText(x(value), 3)}" y2="${height - pad.bottom}" class="grid"></line>
+    <line x1="${numberText(x(value), 3)}" y1="${height - pad.bottom}" x2="${numberText(x(value), 3)}" y2="${height - pad.bottom + 5}" class="tick"></line>
+    <text x="${numberText(x(value), 3)}" y="${height - pad.bottom + 19}" text-anchor="middle" class="tick-label x-tick">${escapeHtml(numberText(value, value < 1 ? 2 : 1))}</text>
+  `).join("");
+  const yGrid = yTicks.map((value) => `
+    <line x1="${pad.left}" y1="${numberText(y(value), 3)}" x2="${width - pad.right}" y2="${numberText(y(value), 3)}" class="grid"></line>
+    <line x1="${pad.left - 5}" y1="${numberText(y(value), 3)}" x2="${pad.left}" y2="${numberText(y(value), 3)}" class="tick"></line>
+    <text x="${pad.left - 9}" y="${numberText(y(value) + 3.5, 3)}" text-anchor="end" class="tick-label y-tick">${escapeHtml(numberText(value, maxY < 1 ? 3 : 2))}</text>
+  `).join("");
+  const limitReference = maxX >= 50
+    ? `<line x1="${numberText(x(50), 3)}" y1="${pad.top}" x2="${numberText(x(50), 3)}" y2="${height - pad.bottom}" class="limit-reference"></line>
+       <text x="${numberText(x(50) - 5, 3)}" y="${pad.top + 12}" text-anchor="end" class="limit-label">50% strain</text>`
+    : "";
   return `
     <div class="ar-analysis-curve">
-      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="UTM force displacement curve preview">
-        <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" class="axis"></line>
-        <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" class="axis"></line>
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Engineering compressive stress strain curve">
+        ${xGrid}
+        ${yGrid}
+        ${limitReference}
+        <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" class="axis spine"></line>
+        <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" class="axis spine"></line>
         <polyline points="${polyline(line)}" class="curve"></polyline>
-        <circle class="peak" cx="${numberText(x(peak.x), 2)}" cy="${numberText(y(peak.y), 2)}" r="4.4"><title>peak ${numberText(peak.y, 3)} N at ${numberText(peak.x, 3)} mm</title></circle>
-        <text x="${pad.left}" y="14">force-displacement</text>
-        <text x="${x(peak.x) + 8}" y="${Math.max(22, y(peak.y) - 8)}">peak ${escapeHtml(numberText(peak.y, 2))} N</text>
-        <text x="${width - 92}" y="${height - 8}">disp mm</text>
+        <text x="${pad.left + plotWidth / 2}" y="${height - 14}" text-anchor="middle" class="axis-label">Engineering compressive strain, ε (%)</text>
+        <text x="18" y="${pad.top + plotHeight / 2}" text-anchor="middle" transform="rotate(-90 18 ${pad.top + plotHeight / 2})" class="axis-label">Engineering stress, σ (MPa)</text>
       </svg>
     </div>
   `;
@@ -15073,8 +15178,8 @@ function renderAnalysisMetricBars(analysis) {
     ["peak_force_N", metrics.peak_force_N, "N", "info"],
     ["strength_MPa", metrics.compressive_strength_MPa, "MPa", "success"],
     ["stiffness", metrics.initial_stiffness_N_per_mm, "N/mm", "running"],
-    ["energy", metrics.energy_absorption_mJ, "mJ", "warning"],
-    ["objective", analysis.objective_score, "score", "success"],
+    ["energy_density_50pct", metrics.energy_density_50pct_MJ_per_m3, "MJ/m³", "success"],
+    ["total_energy_50pct", metrics.energy_absorption_50pct_mJ, "mJ", "warning"],
     ["uncertainty", analysis.uncertainty, "model", "warning"],
   ].map(([label, value, unit, tone]) => {
     const number = dashboardFiniteNumber(value);
@@ -15712,23 +15817,31 @@ function equipmentCanonicalProgressSteps(ctx) {
     blocks.forEach((block) => {
       const skillNode = `${block.id}.skill`;
       const skillTransition = transitionByNode.get(skillNode) || {};
+      const visionNode = `${block.id}.vision`;
+      const visionTransition = transitionByNode.get(visionNode) || {};
+      const visionTaskId = String(visionTransition.vision_task_id || block.vision?.task_id || "");
+      const visionTask = visionTaskById.get(visionTaskId) || {};
+      const visionEnabled = block.vision?.enabled === true;
+      const visionOutcome = String(visionTransition.outcome || "waiting").toLowerCase();
+      const visionStatus = !visionEnabled || !visionTransition.outcome
+        ? "waiting"
+        : ["detected", "completed", "complete", "success", "passed", "verified"].includes(visionOutcome)
+          ? "success"
+          : "failed";
       steps.push({
+        blockId: String(block.id || ""),
         label: block.agentic?.task || block.label || block.id,
         status: statusFor(skillNode),
         detail: `${block.skill?.skill_id || "-"}@${block.skill?.skill_version || "-"} · ${skillTransition.outcome || "skill pending"}`,
+        vision: {
+          enabled: visionEnabled,
+          blocking: block.vision?.blocking !== false,
+          taskId: visionTaskId,
+          label: String(visionTransition.verification_label || visionTransition.vision_task_label || block.vision?.result_label || visionTask.result_label || ""),
+          status: visionStatus,
+          outcome: String(visionTransition.outcome || "waiting"),
+        },
       });
-      if (block.vision?.enabled) {
-        const visionNode = `${block.id}.vision`;
-        const visionTransition = transitionByNode.get(visionNode) || {};
-        const visionTaskId = String(visionTransition.vision_task_id || block.vision?.task_id || "");
-        const visionTask = visionTaskById.get(visionTaskId) || {};
-        const visionTaskLabel = String(visionTransition.vision_task_label || visionTransition.task_label || visionTask.label || visionTaskId || "Unbound Vision Task");
-        steps.push({
-          label: visionTaskLabel,
-          status: statusFor(visionNode),
-          detail: `${visionTaskId || "unbound"} · ${visionTransition.outcome || "verification pending"}`,
-        });
-      }
     });
     return steps;
   }
@@ -15852,11 +15965,30 @@ function equipmentProgressSteps(ctx) {
   const cycle = equipmentCycleContext(ctx);
   const cycleModel = window.ATREquipmentAgenticTaskModel;
   if (cycle.available && cycleModel && typeof cycleModel.progressSteps === "function") {
-    return cycleModel.progressSteps(cycle).map((step) => ({
-      label: step.label,
-      status: step.status,
-      detail: `${step.skill} · Vision ${step.vision.enabled ? step.vision.outcome || "enabled" : "optional / off"}`,
-    }));
+    const blocks = Array.isArray(ctx.skillFlow?.blocks) ? ctx.skillFlow.blocks : [];
+    const blockById = new Map(blocks.map((block) => [String(block?.id || ""), block]));
+    const visionTasks = Array.isArray(ctx.visionTasks) ? ctx.visionTasks : [];
+    const visionTaskById = new Map(visionTasks.map((task) => [String(task?.task_id || ""), task]));
+    return cycleModel.progressSteps(cycle).map((step) => {
+      const config = blockById.get(String(step.blockId || ""))?.vision || {};
+      const enabled = config.enabled === true || step.vision.enabled === true;
+      const taskId = String(step.vision.taskId || config.task_id || "");
+      const task = visionTaskById.get(taskId) || {};
+      return {
+        blockId: step.blockId,
+        label: step.label,
+        status: step.status,
+        detail: `${step.skill} · Vision ${enabled ? step.vision.outcome || "waiting" : "optional / off"}`,
+        vision: {
+          enabled,
+          blocking: config.blocking !== false && step.vision.blocking !== false,
+          taskId,
+          label: String(step.vision.label || config.result_label || task.result_label || ""),
+          status: enabled ? step.vision.status || "waiting" : "waiting",
+          outcome: step.vision.outcome,
+        },
+      };
+    });
   }
   const canonical = equipmentCanonicalProgressSteps(ctx);
   if (canonical) return canonical;
@@ -15886,10 +16018,19 @@ function renderEquipmentAgenticProgress(ctx) {
     <div class="ar-vis-agentic-progress">
       ${equipmentProgressSteps(ctx).map((step, index) => `
         <div class="ar-vis-agentic-step is-${visionProgressTone(step.status)}">
-          <span class="ar-vis-agentic-step-index">${String(index + 1).padStart(2, "0")}</span>
-          <strong>${escapeHtml(step.label)}</strong>
+          <div class="ar-vis-agentic-step-heading">
+            <span class="ar-vis-agentic-step-index">${String(index + 1).padStart(2, "0")}</span>
+            <strong>${escapeHtml(step.label)}</strong>
+          </div>
           <em>${escapeHtml(step.status)}</em>
           <small>${escapeHtml(compactText(step.detail, 80))}</small>
+          <div class="ar-equipment-vision-slot ar-equipment-agentic-vision-slot ${step.vision?.enabled ? `is-${escapeHtml(step.vision.status || "waiting")}` : "is-empty"}">
+            ${step.vision?.enabled
+              ? `<span>Vision verification:</span><strong>${escapeHtml(step.vision.label || "WAITING")}</strong>`
+              : '<span aria-hidden="true">&nbsp;</span>'}
+          </div>
+          <span class="ar-vis-agentic-port ar-vis-agentic-port-in" aria-hidden="true"></span>
+          <span class="ar-vis-agentic-port ar-vis-agentic-port-out" aria-hidden="true"></span>
         </div>
       `).join("")}
     </div>
@@ -16121,7 +16262,7 @@ function renderEquipmentDashboardCards(report, status, agentLabel, profile) {
     ${renderDashboardCard("Bridge / Runtime", renderEquipmentBridgeRuntime(ctx), { span: 4, tone: /connected|ready|healthy|ok/i.test(equipmentBridgeState(ctx)) ? "success" : "equipment", eyebrow: "device bridge", action: renderEquipmentLiveHeaderActions() })}
     ${renderDashboardCard("Active Program / Skill", renderEquipmentActiveExecution(ctx), { span: 4, tone: "equipment", eyebrow: "Equipment Skill Execution" })}
     ${renderDashboardCard("Recovery Boundary", renderEquipmentRecoveryBoundary(ctx), { span: 4, tone: failed ? "warning" : "equipment", eyebrow: "exception only" })}
-    ${renderDashboardCard("Agentic Progress", renderEquipmentAgenticProgress(ctx), { span: 12, tone: failed ? "warning" : "equipment", eyebrow: "resolve to handoff" })}
+    ${renderDashboardCard("Agentic Progress", renderEquipmentAgenticProgress(ctx), { span: 12, tone: failed ? "warning" : "equipment", eyebrow: "resolve to handoff", className: "ar-equipment-agentic-card" })}
     ${cycleAvailable ? `
       ${renderDashboardCard("Method Values", renderEquipmentMethodValues(ctx), { span: 4, tone: "equipment", eyebrow: "observed / configured" })}
       ${renderDashboardCard("Screen Transitions", renderEquipmentScreenTransitions(ctx), { span: 4, tone: "equipment", eyebrow: "step completion evidence" })}
@@ -16141,7 +16282,7 @@ function renderAnalysisDashboardCards(report, status, agentLabel, profile) {
   const femLoop = analysis.fem_agentic_loop || {};
   const boHandoff = latestAnalysisBoHandoff(report) || {};
   return `
-    ${renderDashboardCard("Force-Displacement Curve", renderAnalysisCurveOverlay(analysis), { span: 8, tone: "analysis", eyebrow: "utm / fea overlay" })}
+    ${renderDashboardCard("Engineering Stress-Strain Curve", renderAnalysisCurveOverlay(analysis), { span: 8, tone: "analysis", eyebrow: "normalized UTM response" })}
     ${renderDashboardCard("Result Summary", `<div class="ar-report-metrics">
       ${renderDashboardMetric("Peak", metrics.peak_force_N ?? "-", "N", "info")}
       ${renderDashboardMetric("Strength", metrics.compressive_strength_MPa ?? "-", "MPa", "success")}
@@ -18064,9 +18205,12 @@ async function refreshLiveUtmRuntimeStatus(options = {}) {
   const refreshSeq = ++liveUtmRuntimeRefreshSeq;
   liveUtmRuntimeRefreshInFlight = (async () => {
     try {
-      const [statusResult, cameraConfigResult] = await Promise.allSettled([
+      const streamFrame = liveUtmRuntimeFrame && typeof liveUtmRuntimeFrame === "object" ? liveUtmRuntimeFrame : {};
+      const streamProfile = visionLiveCameraProfile();
+      const [statusResult, cameraConfigResult, streamStatsResult] = await Promise.allSettled([
         fetch("/api/equipment/utm-runtime/status"),
         fetch("/api/equipment/utm-runtime/camera-config"),
+        fetch(utmRuntimeFrameStreamStatsUrl(streamFrame, streamProfile)),
       ]);
       const isLatestRefresh = refreshSeq === liveUtmRuntimeRefreshSeq;
       if (isLatestRefresh && statusResult.status === "fulfilled" && statusResult.value.ok) {
@@ -18074,6 +18218,10 @@ async function refreshLiveUtmRuntimeStatus(options = {}) {
       }
       if (isLatestRefresh && cameraConfigResult.status === "fulfilled" && cameraConfigResult.value.ok) {
         liveUtmCameraConfig = await cameraConfigResult.value.json();
+      }
+      if (isLatestRefresh && streamStatsResult.status === "fulfilled" && streamStatsResult.value.ok) {
+        liveUtmRuntimeStreamStats = await streamStatsResult.value.json();
+        updateLiveUtmRuntimeStreamStats();
       }
       refreshLiveUtmRuntimeGraphSnapshot()
         .then(() => {
@@ -18124,6 +18272,7 @@ async function runLiveUtmRuntimeAction(action, button = null) {
     liveUtmRuntimeGraphFetchedAt = 0;
     if (normalized === "stop") {
       liveUtmRuntimeFrame = null;
+      liveUtmRuntimeStreamStats = null;
       liveUtmRuntimeStreamUrlCache = "";
       liveUtmRuntimeStreamUrlKey = "";
     }

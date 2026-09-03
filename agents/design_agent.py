@@ -787,7 +787,7 @@ class DesignAgent(BaseAgent):
             return "explore_design_space"
         if "mass" in lowered or "질량" in lowered or "specific" in lowered:
             return "maximize_energy_absorption_per_mass"
-        return "maximize_energy_absorption_per_mass"
+        return "maximize_energy_density_50pct"
 
     @staticmethod
     def _objective_direction(goal: str) -> str:
@@ -877,8 +877,9 @@ class DesignAgent(BaseAgent):
             "control_failure_mode": "failure_mode_score",
             "explore_design_space": "information_gain_score",
             "maximize_energy_absorption_per_mass": "energy_absorption_per_mass",
+            "maximize_energy_density_50pct": "energy_density_50pct_MJ_per_m3",
         }
-        primary_metric = metric_map.get(objective_type, "energy_absorption_per_mass")
+        primary_metric = metric_map.get(objective_type, "energy_density_50pct_MJ_per_m3")
         return {
             "schema": "experiment_objective.v1",
             "objective_id": f"obj-{state.experiment_id or state.run_id or 'design'}",

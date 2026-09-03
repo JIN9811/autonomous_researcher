@@ -33,6 +33,7 @@ from device_bridges.base_bridge import BaseBridge
 from device_bridges.calculix_bridge import CalculiXBridge, CalculiXBridgeConfig
 from utils.calculix_quasistatic import curve_metrics
 from utils.paths import resolve_path
+from utils.utm_reference_calibration import build_reference_calibration
 
 
 @dataclass(slots=True)
@@ -47,7 +48,11 @@ class CAEBridgeConfig:
     mesher_path: str = ""
     library_path: str = ""
     require_solver_in_live: bool = True
+    repo_root: Path = field(default_factory=lambda: resolve_path("."))
     artifact_dir: Path = field(default_factory=lambda: resolve_path("artifacts/cae"))
+    reference_utm_globs: list[str] = field(default_factory=list)
+    reference_specimen_size_mm: list[float] = field(default_factory=lambda: [30.0, 30.0, 30.0])
+    reference_target_strain: float = 0.5
     default_material: dict[str, Any] = field(
         default_factory=lambda: {
             "elastic_modulus_mpa": 1800.0,
@@ -104,6 +109,14 @@ class CAEBridgeConfig:
         if isinstance(cae_raw.get("default_loading"), dict) and cae_raw["default_loading"].get("mode"):
             boundary["top"] = str(cae_raw["default_loading"]["mode"])
         base_root = repo_root or resolve_path(".")
+        raw_reference_size = cae_raw.get("reference_specimen_size_mm", [30.0, 30.0, 30.0])
+        if not isinstance(raw_reference_size, (list, tuple)) or len(raw_reference_size) < 3:
+            raw_reference_size = [30.0, 30.0, 30.0]
+        raw_reference_globs = cae_raw.get("reference_utm_globs", [])
+        if isinstance(raw_reference_globs, str):
+            raw_reference_globs = [raw_reference_globs]
+        if not isinstance(raw_reference_globs, list):
+            raw_reference_globs = []
 
         def _configured_path(*keys: str) -> str:
             for key in keys:
@@ -125,7 +138,11 @@ class CAEBridgeConfig:
             mesher_path=_configured_path("mesher_path", "gmsh_path"),
             library_path=_configured_path("library_path"),
             require_solver_in_live=bool(cae_raw.get("require_solver_in_live", True)),
+            repo_root=base_root.resolve(),
             artifact_dir=artifact,
+            reference_utm_globs=[str(value) for value in raw_reference_globs if str(value).strip()],
+            reference_specimen_size_mm=[float(raw_reference_size[index]) for index in range(3)],
+            reference_target_strain=float(cae_raw.get("reference_target_strain", 0.5)),
             default_material={
                 key: (
                     value
@@ -144,6 +161,7 @@ class CAEBridge(BaseBridge):
 
     def __init__(self, config: CAEBridgeConfig, *, calculix_bridge: Any | None = None) -> None:
         self.config = config
+        self._reference_calibration_cache: dict[str, Any] | None = None
         self.calculix_bridge = calculix_bridge or CalculiXBridge(
             CalculiXBridgeConfig(
                 enabled=config.enabled,
@@ -155,6 +173,28 @@ class CAEBridge(BaseBridge):
                 artifact_dir=config.artifact_dir / "calculix",
             )
         )
+
+    def _configured_reference_calibration(self) -> dict[str, Any]:
+        if self._reference_calibration_cache is not None:
+            return dict(self._reference_calibration_cache)
+        paths: list[Path] = []
+        for pattern in self.config.reference_utm_globs:
+            candidate = Path(pattern).expanduser()
+            if candidate.is_absolute():
+                anchor = Path(candidate.anchor)
+                relative_pattern = str(candidate).removeprefix(candidate.anchor)
+                paths.extend(path for path in anchor.glob(relative_pattern) if path.is_file())
+            else:
+                paths.extend(path for path in self.config.repo_root.glob(pattern) if path.is_file())
+        unique_paths = sorted(set(path.resolve() for path in paths))
+        calibration = build_reference_calibration(
+            unique_paths,
+            target_strain=self.config.reference_target_strain,
+            specimen_size_mm=self.config.reference_specimen_size_mm,
+        )
+        calibration["configured_globs"] = list(self.config.reference_utm_globs)
+        self._reference_calibration_cache = calibration
+        return dict(calibration)
 
     @staticmethod
     def defaults() -> dict[str, Any]:
@@ -413,6 +453,11 @@ class CAEBridge(BaseBridge):
                 "time_period": float(loading.get("time_period", 1.0)),
             },
             "require_solver": bool(payload.get("require_solver", False)),
+            "reference_calibration": (
+                dict(payload["reference_calibration"])
+                if isinstance(payload.get("reference_calibration"), dict)
+                else {}
+            ),
         }
 
     def _equivalent_quasistatic_analysis(self, normalized: dict[str, Any]) -> tuple[list[dict[str, float]], dict[str, Any]]:
@@ -488,7 +533,105 @@ class CAEBridge(BaseBridge):
             "target_strain": target_strain,
             "target_displacement_mm": target_displacement,
         }
+        volume_mm3 = area * height
+        metrics["energy_density_50pct_MJ_per_m3"] = round(
+            float(derived["energy_absorption_50pct_mJ"]) / max(volume_mm3, 1e-9),
+            9,
+        )
         return curve, metrics
+
+    @staticmethod
+    def _calibrate_quasistatic_curve(
+        normalized: dict[str, Any],
+        curve: list[dict[str, float]],
+        metrics: dict[str, Any],
+    ) -> tuple[list[dict[str, float]], dict[str, Any], dict[str, Any]]:
+        """Scale a proxy curve toward qualified UTM energy without erasing design effects."""
+        requested = normalized.get("reference_calibration")
+        evidence: dict[str, Any] = {
+            "schema": "cae_reference_calibration.v1",
+            "applied": False,
+            "method": "bounded_sqrt_energy_density_scaling",
+            "reference_hashes": [],
+            "limitations": ["no_qualified_historical_utm_reference"],
+        }
+        if not isinstance(requested, dict):
+            return curve, metrics, evidence
+        hashes = [str(value) for value in requested.get("reference_hashes", []) if str(value).strip()]
+        try:
+            reference_value = float(requested.get("reference_value"))
+            accepted_count = int(requested.get("accepted_count", 0))
+        except (TypeError, ValueError):
+            return curve, metrics, evidence
+        if (
+            requested.get("status") != "ready"
+            or requested.get("metric_name") != "energy_density_50pct_MJ_per_m3"
+            or requested.get("unit") != "MJ/m3"
+            or not math.isfinite(reference_value)
+            or reference_value <= 0.0
+            or accepted_count <= 0
+            or not hashes
+        ):
+            evidence.update(
+                {
+                    "reference_hashes": hashes,
+                    "accepted_count": max(accepted_count, 0),
+                    "rejection_reason": "reference_contract_invalid",
+                }
+            )
+            return curve, metrics, evidence
+
+        base_density = float(metrics.get("energy_density_50pct_MJ_per_m3") or 0.0)
+        if not math.isfinite(base_density) or base_density <= 0.0:
+            evidence["rejection_reason"] = "base_energy_density_invalid"
+            return curve, metrics, evidence
+        force_scale = min(max(math.sqrt(reference_value / base_density), 0.25), 4.0)
+        calibrated_curve = [
+            {**point, "force_N": round(float(point["force_N"]) * force_scale, 9)}
+            for point in curve
+        ]
+        target_displacement = float(metrics["target_displacement_mm"])
+        derived = curve_metrics(
+            calibrated_curve,
+            target_displacement_mm=target_displacement,
+            endpoint_tolerance_mm=max(target_displacement * 1e-8, 1e-9),
+        )
+        size = normalized["specimen_size_mm"]
+        area = max(float(size[0]) * float(size[1]), 1e-9)
+        volume_mm3 = max(area * float(size[2]), 1e-9)
+        calibrated_metrics = dict(metrics)
+        calibrated_metrics.update(derived)
+        calibrated_metrics.update(
+            {
+                "predicted_peak_force_N": float(derived["peak_reaction_force_N"]),
+                "predicted_initial_stiffness_N_per_mm": float(derived["initial_stiffness_N_per_mm"]),
+                "apparent_stiffness_N_per_mm": float(derived["initial_stiffness_N_per_mm"]),
+                "load_max_N": float(derived["peak_reaction_force_N"]),
+                "nominal_top_stress_MPa": round(float(derived["peak_reaction_force_N"]) / area, 6),
+                "compliance_mm_per_N": round(
+                    target_displacement / max(float(derived["peak_reaction_force_N"]), 1e-9),
+                    12,
+                ),
+                "energy_density_50pct_MJ_per_m3": round(
+                    float(derived["energy_absorption_50pct_mJ"]) / volume_mm3,
+                    9,
+                ),
+            }
+        )
+        evidence = {
+            "schema": "cae_reference_calibration.v1",
+            "applied": True,
+            "method": "bounded_sqrt_energy_density_scaling",
+            "source_method": str(requested.get("calibration_method") or ""),
+            "accepted_count": accepted_count,
+            "reference_hashes": hashes,
+            "reference_value_MJ_per_m3": reference_value,
+            "base_value_MJ_per_m3": base_density,
+            "force_scale": round(force_scale, 9),
+            "result_value_MJ_per_m3": calibrated_metrics["energy_density_50pct_MJ_per_m3"],
+            "limitations": list(requested.get("limitations") or []),
+        }
+        return calibrated_curve, calibrated_metrics, evidence
 
     def _equivalent_analysis(self, normalized: dict[str, Any]) -> dict[str, Any]:
         size = normalized["specimen_size_mm"]
@@ -657,6 +800,8 @@ class CAEBridge(BaseBridge):
             }
         raw_payload = dict(payload or {})
         normalized = self._normalized_payload(raw_payload)
+        if not normalized.get("reference_calibration") and self.config.reference_utm_globs:
+            normalized["reference_calibration"] = self._configured_reference_calibration()
         mode = normalized["mode"]
         solver = self.solver_status()
         live_mode = mode == "live"
@@ -733,6 +878,7 @@ class CAEBridge(BaseBridge):
                 "closed_loop_source": True,
             }
         curve, metrics = self._equivalent_quasistatic_analysis(normalized)
+        curve, metrics, reference_calibration = self._calibrate_quasistatic_curve(normalized, curve, metrics)
         target_strain = float(normalized.get("target_strain", 0.5))
         target_displacement = float(normalized["specimen_size_mm"][2]) * target_strain
         artifacts = self._write_artifacts(normalized, metrics, solver, curve)
@@ -765,6 +911,7 @@ class CAEBridge(BaseBridge):
             "mesh": {"mesh_size_mm": normalized["mesh_size_mm"], "source": "equivalent_block"},
             "metrics": metrics,
             "cae_metrics": metrics,
+            "reference_calibration": reference_calibration,
             "artifacts": artifacts,
             "closed_loop_source": True,
             "step_trace": [

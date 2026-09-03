@@ -66,8 +66,8 @@
       "name": "A4Sheet",
       "source_prim": "/World/Workspace/A4Sheet",
       "primitive": "box",
-      "position": [0.315, 0.265, 0.00006],
-      "size": [0.297, 0.21, 0.00012],
+      "position": [0.315, 0.245, 0.00006],
+      "size": [0.17, 0.25, 0.00012],
       "color": "#dbeafe",
       "opacity": 0.72,
       "surface_grid": false
@@ -76,7 +76,7 @@
       "name": "A4CornerMarker_1",
       "source_prim": "/World/Workspace/A4CornerMarker_1",
       "primitive": "circle",
-      "position": [0.1665, 0.16, 0.00014],
+      "position": [0.23, 0.12, 0.00014],
       "radius": 0.004,
       "color": "#38bdf8",
       "opacity": 0.9
@@ -85,7 +85,7 @@
       "name": "A4CornerMarker_2",
       "source_prim": "/World/Workspace/A4CornerMarker_2",
       "primitive": "circle",
-      "position": [0.4635, 0.16, 0.00014],
+      "position": [0.4, 0.12, 0.00014],
       "radius": 0.004,
       "color": "#38bdf8",
       "opacity": 0.9
@@ -94,7 +94,7 @@
       "name": "A4CornerMarker_3",
       "source_prim": "/World/Workspace/A4CornerMarker_3",
       "primitive": "circle",
-      "position": [0.1665, 0.37, 0.00014],
+      "position": [0.23, 0.37, 0.00014],
       "radius": 0.004,
       "color": "#38bdf8",
       "opacity": 0.9
@@ -103,7 +103,7 @@
       "name": "A4CornerMarker_4",
       "source_prim": "/World/Workspace/A4CornerMarker_4",
       "primitive": "circle",
-      "position": [0.4635, 0.37, 0.00014],
+      "position": [0.4, 0.37, 0.00014],
       "radius": 0.004,
       "color": "#38bdf8",
       "opacity": 0.9
@@ -112,7 +112,7 @@
       "name": "A4CenterMarker",
       "source_prim": "/World/Workspace/A4CenterMarker",
       "primitive": "circle",
-      "position": [0.315, 0.265, 0.00014],
+      "position": [0.315, 0.245, 0.00014],
       "radius": 0.004,
       "color": "#38bdf8",
       "opacity": 0.9

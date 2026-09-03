@@ -109,6 +109,59 @@ async def test_no_argument_emergency_controls_keep_gui_compatibility(controller)
 
 
 @pytest.mark.asyncio
+async def test_emergency_resume_clears_active_decisions_but_preserves_audit_history(controller) -> None:
+    await controller.emergency_stop()
+    metadata = controller._state.run_metadata
+    guardian_decision = {"decision": "block", "reason_code": "PLC_ESTOP"}
+    loop_reflection = {"loop_id": 2, "guardian_decision": "block"}
+    metadata.update(
+        {
+            "latest_guardian_decision": dict(guardian_decision),
+            "latest_guardian_gate_decision": dict(guardian_decision),
+            "latest_guardian_gate": {"guardian_decision": dict(guardian_decision)},
+            "guardian_gates": [{"guardian_decision": dict(guardian_decision)}],
+            "latest_loop_reflection": dict(loop_reflection),
+            "loop_reflections": [dict(loop_reflection)],
+            "latest_orchestrator_decision": {"decision": "block"},
+            "latest_orchestrator_handoff": {"next_action": "block"},
+            "orchestrator_handoff_packets": [{"next_action": "block"}],
+            "orchestrator_decision_register": [{"decision": "block"}],
+            "latest_orchestrator_control_plane": {
+                "decision_register": {
+                    "decision_count": 1,
+                    "blocked_count": 1,
+                    "latest_decision": {"decision": "block"},
+                    "items": [{"decision": "block"}],
+                },
+                "latest_loop_reflection": dict(loop_reflection),
+            },
+        }
+    )
+
+    resumed = await controller.emergency_resume()
+    resumed_metadata = resumed["state"]["run_metadata"]
+
+    assert resumed["ok"] is True
+    assert "latest_guardian_decision" not in resumed_metadata
+    assert "latest_guardian_gate_decision" not in resumed_metadata
+    assert "latest_guardian_gate" not in resumed_metadata
+    assert "latest_loop_reflection" not in resumed_metadata
+    assert "latest_orchestrator_decision" not in resumed_metadata
+    assert "latest_orchestrator_handoff" not in resumed_metadata
+    assert resumed_metadata["orchestrator_decision_register"] == []
+    assert resumed_metadata["latest_orchestrator_control_plane"]["decision_register"] == {
+        "decision_count": 0,
+        "blocked_count": 0,
+        "latest_decision": {},
+        "items": [],
+    }
+    assert resumed_metadata["latest_orchestrator_control_plane"]["latest_loop_reflection"] == {}
+    assert resumed_metadata["guardian_gates"] == [{"guardian_decision": guardian_decision}]
+    assert resumed_metadata["loop_reflections"] == [loop_reflection]
+    assert resumed_metadata["orchestrator_handoff_packets"] == [{"next_action": "block"}]
+
+
+@pytest.mark.asyncio
 async def test_repeated_source_does_not_duplicate_estop_lifecycle(controller) -> None:
     await controller.emergency_stop(source="plc_pb2", details={"sequence": 10})
     await controller.emergency_stop(source="plc_pb2", details={"sequence": 11})
@@ -120,6 +173,35 @@ async def test_repeated_source_does_not_duplicate_estop_lifecycle(controller) ->
     source = controller.snapshot()["state"]["run_metadata"]["active_safety_sources"]["plc_pb2"]
     assert len(estop_events) == 1
     assert source["details"] == {"sequence": 11}
+
+
+@pytest.mark.asyncio
+async def test_plc_fast_stop_uses_rollout_stop_path_and_cancels_runtime_tasks(
+    controller,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tool_calls: list[tuple[str, dict[str, object]]] = []
+
+    def call_tool(name: str, payload: dict[str, object]) -> dict[str, object]:
+        tool_calls.append((name, dict(payload)))
+        return {"ok": True, "tool": name, "status": "STOPPED"}
+
+    monkeypatch.setattr(controller._deps.agent_context.tools, "call", call_tool)
+    controller._run_task = asyncio.create_task(asyncio.sleep(60))
+    controller._planning_handoff_task = asyncio.create_task(asyncio.sleep(60))
+
+    result = await asyncio.to_thread(
+        controller.request_plc_fast_stop,
+        {"snapshot": {"d100": 0, "d101": 1, "d102": 0, "sequence": 7}},
+    )
+    await asyncio.sleep(0)
+
+    assert result["ok"] is True
+    assert result["rollout_stop"]["status"] == "STOPPED"
+    assert [name for name, _payload in tool_calls] == ["lerobot.rollout.stop"]
+    assert tool_calls[0][1]["reason"] == "plc_emergency_stop"
+    assert controller._run_task.cancelled()
+    assert controller._planning_handoff_task.cancelled()
 
 
 @pytest.mark.asyncio

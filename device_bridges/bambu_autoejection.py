@@ -55,6 +55,37 @@ def _extract_axis_positions(line: str) -> dict[str, float]:
     return {axis.upper(): float(value) for axis, value in _AXIS_RE.findall(line)}
 
 
+def _last_extrusion_line_index(lines: list[str]) -> int | None:
+    absolute_e = True
+    last_absolute_e = 0.0
+    last_extrusion: int | None = None
+    for index, raw_line in enumerate(lines):
+        line = str(raw_line or "").split(";", 1)[0].strip()
+        if not line:
+            continue
+        command = line.split()[0].upper()
+        if command == "M82":
+            absolute_e = True
+            continue
+        if command == "M83":
+            absolute_e = False
+            continue
+        e_match = re.search(rf"\bE\s*({_GCODE_NUMBER})", line, flags=re.IGNORECASE)
+        if command == "G92":
+            if e_match:
+                last_absolute_e = float(e_match.group(1))
+            continue
+        if command not in {"G0", "G1"} or not e_match:
+            continue
+        e_value = float(e_match.group(1))
+        extruding = e_value > last_absolute_e + 1e-7 if absolute_e else e_value > 1e-7
+        if absolute_e:
+            last_absolute_e = e_value
+        if extruding:
+            last_extrusion = index
+    return last_extrusion
+
+
 def _bounds_payload(
     *,
     min_x: float | None,
@@ -278,12 +309,21 @@ class BambuGcodeAutoejectionValidator:
     def validate(self, gcode_text: str, *, source_plate_path: str = "plain_gcode") -> dict[str, Any]:
         blockers: list[str] = []
         marker_count = gcode_text.count(SCHEMA_MARKER)
+        lines = str(gcode_text or "").splitlines()
+        marker_line_index = next((index for index, line in enumerate(lines) if SCHEMA_MARKER in line), None)
+        last_extrusion_line_index = _last_extrusion_line_index(lines)
+        tail_after_last_extrusion = bool(
+            marker_line_index is not None
+            and (last_extrusion_line_index is None or marker_line_index > last_extrusion_line_index)
+        )
         print_body = self._print_body_before_tail(gcode_text)
         object_bounds = extract_object_bounds_mm(print_body)
         if marker_count == 0:
             blockers.append("BAMBU_AUTOEJECTION_TAIL_MISSING")
         if marker_count > 1:
             blockers.append("BAMBU_AUTOEJECTION_TAIL_DUPLICATED")
+        if marker_count > 0 and not tail_after_last_extrusion:
+            blockers.append("BAMBU_AUTOEJECTION_TAIL_BEFORE_LAST_EXTRUSION")
         if marker_count > 0 and not self._has_cooldown_wait(gcode_text):
             blockers.append("BAMBU_AUTOEJECTION_COOLDOWN_WAIT_MISSING")
         if self._contains_unexpected_home(gcode_text):
@@ -305,6 +345,9 @@ class BambuGcodeAutoejectionValidator:
             "schema": "bambu_autoejection_validation.v1",
             "source_plate_path": source_plate_path,
             "marker_count": marker_count,
+            "marker_line_index": marker_line_index,
+            "last_extrusion_line_index": last_extrusion_line_index,
+            "tail_after_last_extrusion": tail_after_last_extrusion,
             "blockers": blockers,
             "object_bounds_mm": object_bounds,
             "build_envelope_mm": list(self.build_envelope_mm),
@@ -557,13 +600,26 @@ class BambuGcodeAutoejectionPatcher:
         startable_plate_path = "Metadata/plate_1.gcode"
         with zipfile.ZipFile(startable_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr(startable_plate_path, patched)
+            archive.writestr(
+                f"{startable_plate_path}.md5",
+                hashlib.md5(patched.encode("utf-8")).hexdigest(),
+            )
             archive.writestr("3D/3dmodel.model", "<model />")
-        validation = self.validator.validate(patched, source_plate_path="standalone_gcode_job")
+        post_write_validation = self._validate_written_artifact(
+            out_path,
+            source_plate_path="standalone_gcode_job",
+        )
+        startable_post_write_validation = self._validate_written_artifact(
+            startable_path,
+            source_plate_path=startable_plate_path,
+        )
+        validation = startable_post_write_validation.get("tail_validation", {})
+        post_write_ok = bool(post_write_validation.get("ok") and startable_post_write_validation.get("ok"))
         result = {
-            "ok": bool(validation.get("ok")),
+            "ok": bool(validation.get("ok") and post_write_ok),
             "tool": "printer.bambu.autoejection_standalone",
             "schema": "bambu_autoejection_standalone.v1",
-            "status": "standalone_validated" if validation.get("ok") else "blocked",
+            "status": "standalone_validated" if validation.get("ok") and post_write_ok else "blocked",
             "patched_artifact_path": str(out_path),
             "startable_artifact_path": str(startable_path),
             "startable_plate_path": startable_plate_path,
@@ -575,12 +631,17 @@ class BambuGcodeAutoejectionPatcher:
             "object_size_mm": [float(item) for item in size],
             "object_bounds_mm": extract_object_bounds_mm(body),
             "source_object_bounds_mm": source_bounds,
-            "patched_sha256": _sha256_bytes(out_path.read_bytes()),
-            "startable_sha256": _sha256_bytes(startable_path.read_bytes()),
+            "patched_sha256": str(post_write_validation.get("artifact_sha256") or ""),
+            "startable_sha256": str(startable_post_write_validation.get("artifact_sha256") or ""),
             "size_bytes": out_path.stat().st_size,
             "startable_size_bytes": startable_path.stat().st_size,
             "validation": validation,
-            "blockers": validation.get("blockers", []),
+            "post_write_validation": post_write_validation,
+            "startable_post_write_validation": startable_post_write_validation,
+            "blockers": [
+                *list(validation.get("blockers", [])),
+                *([] if post_write_ok else ["BAMBU_AUTOEJECTION_POST_WRITE_VALIDATION_FAILED"]),
+            ],
             "created_at": _utc_now(),
             "will_publish": False,
             "start_enabled": False,
@@ -673,12 +734,17 @@ class BambuGcodeAutoejectionPatcher:
             out_path = self.output_dir / f"{_safe_stem_for_autoeject(source)}.ejection-test.gcode"
             out_path.write_text(patched, encoding="utf-8")
 
-        validation = self.validator.validate(patched, source_plate_path=source_plate_path)
+        post_write_validation = self._validate_written_artifact(
+            out_path,
+            source_plate_path=source_plate_path,
+        )
+        validation = post_write_validation.get("tail_validation", {})
+        post_write_ok = bool(post_write_validation.get("ok"))
         result = {
-            "ok": bool(validation.get("ok")),
+            "ok": bool(validation.get("ok") and post_write_ok),
             "tool": "printer.bambu.ejection_only_patch",
             "schema": "bambu_ejection_only_project_file.v1",
-            "status": "ejection_only_validated" if validation.get("ok") else "blocked",
+            "status": "ejection_only_validated" if validation.get("ok") and post_write_ok else "blocked",
             "source_path": str(source),
             "patched_artifact_path": str(out_path),
             "source_plate_path": source_plate_path,
@@ -687,13 +753,17 @@ class BambuGcodeAutoejectionPatcher:
             "specimen_id": specimen_id,
             "position": position,
             "source_sha256": _sha256_bytes(source_bytes),
-            "patched_sha256": _sha256_bytes(out_path.read_bytes()),
+            "patched_sha256": str(post_write_validation.get("artifact_sha256") or ""),
             "size_bytes": out_path.stat().st_size,
             "object_bounds_mm": source_bounds,
             "source_object_bounds_mm": source_bounds,
             "print_body_policy": "removed_for_installed_printer_test",
             "validation": validation,
-            "blockers": validation.get("blockers", []),
+            "post_write_validation": post_write_validation,
+            "blockers": [
+                *list(validation.get("blockers", [])),
+                *([] if post_write_ok else ["BAMBU_AUTOEJECTION_POST_WRITE_VALIDATION_FAILED"]),
+            ],
             "created_at": _utc_now(),
             "will_publish": False,
             "start_enabled": False,
@@ -1041,6 +1111,7 @@ class BambuGcodeAutoejectionPatcher:
         sweep_x = self._sweep_x_for_position(position, object_bounds)
         center = self._object_center_from_bounds(object_bounds)
         sweep_heights = self._sweep_heights(object_bounds)
+        safe_approach_z = self._safe_approach_z(object_bounds)
         tail_lines = [
             f"; {SCHEMA_MARKER}",
             f"; atr_source_sha256={source_sha256}",
@@ -1058,6 +1129,7 @@ class BambuGcodeAutoejectionPatcher:
             "; atr_cooldown_wait_policy=M190",
             "; atr_purge_parking_strategy=preserve_slicer_end_gcode_then_eject",
             "; atr_home_initialization=preserve_print_job_coordinates",
+            f"; atr_safe_approach_z_mm={safe_approach_z:.3f}",
             f"; atr_min_absolute_push_z_mm={float(self.min_absolute_push_z_mm):.1f}",
             f"; atr_z_push_offset_mm={float(self.z_push_offset_mm):.1f}",
             f"; atr_push_lane_offset_mm={float(self.push_lane_offset_mm):.1f}",
@@ -1072,13 +1144,14 @@ class BambuGcodeAutoejectionPatcher:
             "M400",
             f"M190 R{int(self.bed_cooldown_c)}",
             "G90",
+            f"G0 Z{safe_approach_z:.3f} F{int(self.z_feedrate_mm_min)}",
+            f"G0 X{sweep_x:.3f} Y{self.rear_y_mm:.3f} F{int(self.sweep_feedrate_mm_min)}",
         ]
         for fraction, sweep_z in sweep_heights:
             tail_lines.extend(
                 [
                     f"; atr_sweep_height_fraction={fraction:.2f}",
                     f"G0 Z{sweep_z:.3f} F{int(self.z_feedrate_mm_min)}",
-                    f"G0 X{sweep_x:.3f} Y{self.rear_y_mm:.3f} F{int(self.sweep_feedrate_mm_min)}",
                     f"G0 X{sweep_x:.3f} Y{self.front_y_mm:.3f} F{int(self.sweep_feedrate_mm_min)}",
                     f"G0 Y{self.rear_y_mm:.3f} F{int(self.sweep_feedrate_mm_min)}",
                 ]
@@ -1092,17 +1165,24 @@ class BambuGcodeAutoejectionPatcher:
     def _insert_before_end_commands(self, gcode_text: str, tail: str) -> str:
         lines = gcode_text.splitlines()
         insert_at = len(lines)
-        for index, line in enumerate(lines):
+        last_extrusion = _last_extrusion_line_index(lines)
+        search_start = last_extrusion + 1 if last_extrusion is not None else 0
+        for index, line in enumerate(lines[search_start:], start=search_start):
             if re.search(r"^\s*M84\b", line, re.IGNORECASE):
                 insert_at = index
                 break
         else:
-            for index, line in enumerate(lines):
+            for index, line in enumerate(lines[search_start:], start=search_start):
                 if _END_COMMAND_RE.search(line):
                     insert_at = index
                     break
         patched_lines = [*lines[:insert_at], tail, *lines[insert_at:]]
         return "\n".join(patched_lines).rstrip() + "\n"
+
+    def _safe_approach_z(self, object_bounds: dict[str, float | None]) -> float:
+        object_top = object_bounds.get("max_z")
+        collision_clear_z = float(object_top) + 2.0 if isinstance(object_top, (int, float)) else 0.0
+        return min(float(self.validator.build_envelope_mm[2]), max(float(self.safe_z_mm), collision_clear_z))
 
     def _sweep_x_for_position(self, position: str, object_bounds: dict[str, float | None]) -> float:
         clean = str(position or "center").strip().lower()
@@ -1201,12 +1281,17 @@ class BambuGcodeAutoejectionPatcher:
         specimen_id: str,
         position: str,
     ) -> dict[str, Any]:
-        validation = self.validator.validate(patched_gcode, source_plate_path=source_plate_path)
+        post_write_validation = self._validate_written_artifact(
+            patched_path,
+            source_plate_path=source_plate_path,
+        )
+        validation = post_write_validation.get("tail_validation", {})
+        post_write_ok = bool(post_write_validation.get("ok"))
         result = {
-            "ok": bool(validation.get("ok")),
+            "ok": bool(validation.get("ok") and post_write_ok),
             "tool": "printer.bambu.autoejection_patch",
             "schema": "bambu_autoejection_patch.v1",
-            "status": "patched_validated" if validation.get("ok") else "blocked",
+            "status": "patched_validated" if validation.get("ok") and post_write_ok else "blocked",
             "source_path": str(source_path),
             "patched_artifact_path": str(patched_path),
             "source_plate_path": source_plate_path,
@@ -1215,17 +1300,78 @@ class BambuGcodeAutoejectionPatcher:
             "specimen_id": specimen_id,
             "position": position,
             "source_sha256": _sha256_bytes(source_path.read_bytes()),
-            "patched_sha256": _sha256_bytes(patched_path.read_bytes()),
+            "patched_sha256": str(post_write_validation.get("artifact_sha256") or ""),
             "size_bytes": patched_path.stat().st_size,
             "object_bounds_mm": extract_object_bounds_mm(original_gcode),
             "validation": validation,
-            "blockers": validation.get("blockers", []),
+            "post_write_validation": post_write_validation,
+            "blockers": [
+                *list(validation.get("blockers", [])),
+                *([] if post_write_ok else [str(post_write_validation.get("failure_code") or "BAMBU_AUTOEJECTION_POST_WRITE_VALIDATION_FAILED")]),
+            ],
             "created_at": _utc_now(),
             "will_publish": False,
             "start_enabled": False,
         }
         result["manifest_path"] = str(self._write_manifest(patched_path, result))
         return result
+
+    def _validate_written_artifact(self, artifact_path: Path, *, source_plate_path: str) -> dict[str, Any]:
+        base: dict[str, Any] = {
+            "schema": "bambu_autoejection_post_write_validation.v1",
+            "artifact_path": str(artifact_path),
+            "source_plate_path": source_plate_path,
+            "reopened": False,
+            "plate_path_matches": False,
+            "md5_matches": None,
+            "artifact_sha256": "",
+        }
+        try:
+            artifact_bytes = artifact_path.read_bytes()
+            if source_plate_path.startswith("Metadata/plate_"):
+                md5_path = f"{source_plate_path}.md5"
+                with zipfile.ZipFile(artifact_path) as archive:
+                    names = set(archive.namelist())
+                    if source_plate_path not in names:
+                        return {
+                            **base,
+                            "failure_code": "BAMBU_AUTOEJECTION_POST_WRITE_PLATE_MISSING",
+                            "available_plate_paths": sorted(
+                                name for name in names if re.fullmatch(r"Metadata/plate_\d+\.gcode", name)
+                            ),
+                        }
+                    written_gcode_bytes = archive.read(source_plate_path)
+                    written_gcode = written_gcode_bytes.decode("utf-8")
+                    md5_matches = bool(
+                        md5_path in names
+                        and archive.read(md5_path).decode("utf-8", errors="replace").strip().lower()
+                        == hashlib.md5(written_gcode_bytes).hexdigest()
+                    )
+                plate_path_matches = True
+            else:
+                written_gcode = artifact_bytes.decode("utf-8")
+                md5_matches = None
+                plate_path_matches = True
+            tail_validation = self.validator.validate(written_gcode, source_plate_path=source_plate_path)
+            md5_ok = md5_matches is not False
+            ok = bool(plate_path_matches and md5_ok and tail_validation.get("ok"))
+            return {
+                **base,
+                "ok": ok,
+                "failure_code": "" if ok else "BAMBU_AUTOEJECTION_POST_WRITE_VALIDATION_FAILED",
+                "reopened": True,
+                "plate_path_matches": plate_path_matches,
+                "md5_matches": md5_matches,
+                "artifact_sha256": _sha256_bytes(artifact_bytes),
+                "tail_validation": tail_validation,
+            }
+        except (OSError, UnicodeDecodeError, zipfile.BadZipFile, KeyError) as exc:
+            return {
+                **base,
+                "ok": False,
+                "failure_code": "BAMBU_AUTOEJECTION_POST_WRITE_READ_FAILED",
+                "message": str(exc),
+            }
 
     def _write_manifest(self, artifact_path: Path, payload: dict[str, Any]) -> Path:
         manifest_path = Path(f"{artifact_path}.manifest.json")

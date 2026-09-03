@@ -56,6 +56,7 @@
       agentic: { task: "Equipment Task", completed: "__complete__", failed: "__blocked__" },
       vision: {
         enabled: false,
+        blocking: true,
         task_id: "",
         detected: "__complete__",
         not_detected: "__blocked__",

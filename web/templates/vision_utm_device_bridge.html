@@ -85,7 +85,7 @@
             <label>Device path<input id="vision-camera-device-path" class="text-input" /></label>
             <label>Width<input id="vision-camera-width" class="text-input" type="number" min="160" /></label>
             <label>Height<input id="vision-camera-height" class="text-input" type="number" min="120" /></label>
-            <label>FPS<input id="vision-camera-fps" class="text-input" type="number" min="1" /></label>
+            <label>Camera FPS<input id="vision-camera-fps" class="text-input" type="number" min="1" /></label>
             <label>Pixel format<input id="vision-camera-pixel-format" class="text-input" /></label>
             <label>Brightness<input id="vision-camera-brightness" class="text-input" type="number" min="-1" max="255" /></label>
             <label>Gain<input id="vision-camera-gain" class="text-input" type="number" min="-1" max="255" /></label>
@@ -112,6 +112,7 @@
               <span id="vision-camera-frame-meta" class="hint">No frame captured.</span>
             </div>
             <div class="vision-camera-frame-controls" aria-label="Live frame stream controls">
+              <label class="vision-camera-preview-fps">Preview FPS<input id="vision-camera-preview-fps" class="text-input" type="number" min="1" max="60" value="30" /></label>
               <span id="vision-camera-frame-stream-status" class="badge idle">stopped</span>
               <button id="btn-vision-camera-frame-play" class="btn primary" type="button">Play Live</button>
               <button id="btn-vision-camera-frame-stop" class="btn" type="button" disabled>Stop Live</button>

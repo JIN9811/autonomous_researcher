@@ -30,8 +30,8 @@ def test_runtime_command_injects_default_camera_env(tmp_path: Path) -> None:
 
     assert "UTM_CAMERA_WIDTH=640" in command
     assert "UTM_CAMERA_HEIGHT=480" in command
-    assert "UTM_CAMERA_FPS=15.0" in command
-    assert "UTM_CAMERA_PIXEL_FORMAT=yuyv2rgb" in command
+    assert "UTM_CAMERA_FPS=60.0" in command
+    assert "UTM_CAMERA_PIXEL_FORMAT=mjpeg2rgb" in command
     assert "UTM_CAMERA_BRIGHTNESS=128" in command
     assert "UTM_CAMERA_GAIN=-1" in command
     assert "UTM_CAMERA_INFO_URL=" in command
@@ -117,7 +117,7 @@ def test_runtime_command_formats_fps_as_ros_double(tmp_path: Path) -> None:
     script_path = tmp_path / "start_utm_vision_stack.sh"
     _script(script_path)
     camera_config = UTMCameraConfig.load(repo_root=tmp_path)
-    camera_config.save_update({"profiles": {"camera_utm_primary": {"fps": 15}}})
+    camera_config.save_update({"profiles": {"camera_utm_primary": {"fps": 60}}})
     manager = UTMRuntimeProcessManager(
         UTMRuntimeConfig(
             workspace_root=tmp_path,
@@ -130,5 +130,5 @@ def test_runtime_command_formats_fps_as_ros_double(tmp_path: Path) -> None:
 
     command = " ".join(manager._command_preview())
 
-    assert "UTM_CAMERA_FPS=15.0" in command
-    assert "UTM_CAMERA_FPS=15;" not in command
+    assert "UTM_CAMERA_FPS=60.0" in command
+    assert "UTM_CAMERA_FPS=60;" not in command

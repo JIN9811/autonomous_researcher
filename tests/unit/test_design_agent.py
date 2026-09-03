@@ -239,7 +239,7 @@ async def test_design_agent_returns_structured_design_report_and_handoff_packet(
     assert report["candidate_evaluation"]["selected_candidate_id"] == spec["candidate_id"]
     assert report["candidate_evaluation"]["selected_candidate_fingerprint"] == spec["candidate_fingerprint"]
     assert report["hypothesis"]["statement"]
-    assert report["objective"]["primary_metric"] == "energy_absorption_per_mass"
+    assert report["objective"]["primary_metric"] == "energy_density_50pct_MJ_per_m3"
     assert report["candidate_generation"]["candidate_count"] == 12
     assert report["candidate_generation"]["valid_count"] >= 1
     assert len(report["candidate_generation"]["candidate_ledger"]) >= 12

@@ -21,6 +21,12 @@ UTM_COMPRESSION_BLOCKS: tuple[tuple[str, str], ...] = (
     ("restore_robot_clearance", "Restore configured robot-entry clearance"),
 )
 
+UTM_PASSIVE_VISION_SLOTS: dict[str, tuple[str, str]] = {
+    "prepare_next_specimen": ("utm_state_working", "WORKING"),
+    "start_test": ("utm_motion_down", "DOWN"),
+    "restore_robot_clearance": ("utm_state_not_working", "NOT WORKING"),
+}
+
 _TASK_CATALOG: tuple[dict[str, Any], ...] = (
     {
         "schema": TASK_SCHEMA,
@@ -53,6 +59,7 @@ def build_utm_compression_flow_template(profile_id: str) -> dict[str, Any]:
     blocks: list[dict[str, Any]] = []
     for index, (block_id, task) in enumerate(UTM_COMPRESSION_BLOCKS):
         success = "__complete__" if index == len(UTM_COMPRESSION_BLOCKS) - 1 else "next"
+        passive_vision = UTM_PASSIVE_VISION_SLOTS.get(block_id)
         blocks.append(
             {
                 "id": block_id,
@@ -64,8 +71,10 @@ def build_utm_compression_flow_template(profile_id: str) -> dict[str, Any]:
                     "failed": "__blocked__",
                 },
                 "vision": {
-                    "enabled": False,
-                    "task_id": "",
+                    "enabled": passive_vision is not None,
+                    "blocking": False,
+                    "task_id": passive_vision[0] if passive_vision else "",
+                    "result_label": passive_vision[1] if passive_vision else "",
                     "detected": success,
                     "not_detected": "__blocked__",
                     "timeout": "__blocked__",

@@ -58,6 +58,8 @@ const rolloutPolicyInput = $("lerobot-rollout-policy-input");
 const rolloutInstructionInput = $("lerobot-rollout-instruction-input");
 const rolloutDurationInput = $("lerobot-rollout-duration-input");
 const rolloutActionClampInput = $("lerobot-rollout-action-clamp-input");
+const plcRolloutStopInput = $("lerobot-plc-rollout-stop-input");
+const plcRolloutStopStatusEl = $("lerobot-plc-rollout-stop-status");
 const rolloutMaxRelativeTargetInput = $("lerobot-rollout-max-relative-target-input");
 const rolloutShoulderLiftBackstopInput = $("lerobot-rollout-shoulder-lift-backstop-input");
 const rolloutTemporalEnsembleInput = $("lerobot-rollout-temporal-ensemble-input");
@@ -126,6 +128,7 @@ const fidelityIsaacRgbdWeightInput = $("lerobot-fidelity-isaac-rgbd-weight-input
 const fidelityIsaacAugmentationWeightInput = $("lerobot-fidelity-isaac-augmentation-weight-input");
 const fidelityIsaacLabSyntheticWeightInput = $("lerobot-fidelity-isaac-lab-synthetic-weight-input");
 const trainSaveCheckpointInput = $("lerobot-train-save-checkpoint-input");
+const trainBackgroundInput = $("lerobot-train-background-input");
 const trainUseAmpInput = $("lerobot-train-use-amp-input");
 const trainWandbInput = $("lerobot-train-wandb-input");
 const trainWandbProjectInput = $("lerobot-train-wandb-project-input");
@@ -1123,6 +1126,7 @@ function basePayload(overrides = {}) {
     log_freq: trainNumberValue(trainLogFreqInput, "log_freq", 200),
     save_freq: trainNumberValue(trainSaveFreqInput, "save_freq", 20000),
     save_checkpoint: boolValue(trainSaveCheckpointInput),
+    train_background: trainBackgroundInput ? boolValue(trainBackgroundInput) : true,
     eval_batch_size: numberValue(trainEvalBatchInput, null),
     optimizer_type: trainOptimizerInput ? trainOptimizerInput.value || "" : "",
     optimizer_lr: numberValue(trainLrInput, null),
@@ -1252,6 +1256,7 @@ function rolloutPayload(overrides = {}) {
     payload.continuous_rollout = true;
   }
   payload.rollout_action_clamp = rolloutActionClampInput ? boolValue(rolloutActionClampInput) : false;
+  payload.plc_rollout_stop_enabled = boolValue(plcRolloutStopInput);
   payload.rollout_max_relative_target = numberValue(rolloutMaxRelativeTargetInput, 5);
   payload.rollout_shoulder_lift_backstop = rolloutShoulderLiftBackstopInput ? boolValue(rolloutShoulderLiftBackstopInput) : true;
   payload.rollout_temporal_ensemble = rolloutPolicyTypeKey === "act" && (rolloutTemporalEnsembleInput ? boolValue(rolloutTemporalEnsembleInput) : true);
@@ -1522,6 +1527,7 @@ function manipulationRolloutPayload(overrides = {}) {
     payload.num_episodes = 1;
   }
   payload.rollout_action_clamp = taskProfile.rollout_action_clamp;
+  payload.plc_rollout_stop_enabled = boolValue(plcRolloutStopInput);
   payload.rollout_max_relative_target = taskProfile.rollout_max_relative_target;
   payload.rollout_shoulder_lift_backstop = taskProfile.rollout_shoulder_lift_backstop;
   payload.rollout_temporal_ensemble = taskProfile.rollout_temporal_ensemble;
@@ -1544,6 +1550,30 @@ function manipulationRolloutPayload(overrides = {}) {
 
 function manipulationAgentPayload(overrides = {}) {
   return manipulationRolloutPayload(overrides);
+}
+
+function applyDevicePLCStopAvailability(status = {}) {
+  if (!plcRolloutStopInput) return false;
+  const available = status.connection_state === "online"
+    && status.plc_layer_active === true
+    && status.fast_stop_monitor?.running === true;
+  plcRolloutStopInput.disabled = !available;
+  if (!available) plcRolloutStopInput.checked = false;
+  if (plcRolloutStopStatusEl) {
+    plcRolloutStopStatusEl.textContent = available ? "online" : "offline";
+  }
+  return available;
+}
+
+async function refreshDevicePLCStopAvailability() {
+  try {
+    const response = await fetch("/api/plc/status", { headers: { Accept: "application/json" } });
+    if (!response.ok) throw new Error(`PLC status HTTP ${response.status}`);
+    const status = await response.json();
+    return applyDevicePLCStopAvailability(status);
+  } catch (_err) {
+    return applyDevicePLCStopAvailability({});
+  }
 }
 
 async function persistManipulationTaskProfile({ statusTarget = null, render = false, refresh = false } = {}) {
@@ -5654,3 +5684,5 @@ refreshConfig();
 refreshDatasetManageList(datasetManageStatusEl);
 refreshWandbLocalApiKeyStatus();
 restoreIsaacDomainMimicPipelineStatus();
+refreshDevicePLCStopAvailability();
+window.setInterval(refreshDevicePLCStopAvailability, 1000);

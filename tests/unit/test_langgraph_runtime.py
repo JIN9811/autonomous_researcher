@@ -170,6 +170,40 @@ def test_langgraph_runtime_preserves_both_active_bo_design_variables(tmp_path: P
     }
 
 
+def test_langgraph_runtime_persists_typed_no_actuation_preflights_between_agents(tmp_path: Path) -> None:
+    state = OrchestratorState(
+        run_id="run-runtime-preflights",
+        experiment_id="exp-runtime-preflights",
+        mode=Mode.TEST,
+        stage=Stage.SPECIMEN,
+    )
+    runtime = LangGraphRunLoop(
+        state=state,
+        agent_registry=AgentRegistry(),
+        orchestrator_agent_name="orchestrator_agent",
+        ctx=object(),
+        logger=StructuredLogger(tmp_path / "structured.jsonl", tmp_path / "summary.log"),
+        graph_config_path="graphs/configs/atr_closed_loop.yaml",
+    )
+    records = {
+        "printer_preflight": {"schema": "printer_preflight.v1", "status": "execution_ready_pending_approval"},
+        "vision_preflight": {"schema": "vision_preflight.v1", "status": "execution_ready_pending_approval"},
+        "manipulation_preflight": {"schema": "manipulation_preflight.v1", "status": "execution_ready_pending_approval"},
+        "equipment_preflight": {"schema": "equipment_preflight.v1", "status": "execution_ready_pending_approval"},
+    }
+
+    for stage, key in (
+        (Stage.SPECIMEN, "printer_preflight"),
+        (Stage.VISION, "vision_preflight"),
+        (Stage.MANIPULATION, "manipulation_preflight"),
+        (Stage.EQUIPMENT, "equipment_preflight"),
+    ):
+        runtime._merge_agent_data(stage, {key: records[key]})
+
+    for key, record in records.items():
+        assert state.run_metadata[key] == record
+
+
 class _CustomQualityAgent:
     name = "custom_quality_agent"
 
@@ -1044,10 +1078,14 @@ def test_vision_monitoring_reenters_vision_without_restarting_manipulation() -> 
 
 
 def test_manipulation_routes_to_vision_before_equipment() -> None:
-    """Manipulation always enters Vision; only Vision may release Equipment."""
+    """Physical manipulation needs Vision; no-actuation preflight may release Equipment."""
     config = load_graph_config("graphs/configs/atr_closed_loop.yaml")
 
     assert config.next_stage("manipulation") == "vision"
+    assert config.next_stage(
+        "manipulation",
+        state_metadata={"agent_result": {"requested_next_stage": "equipment"}},
+    ) == "equipment"
     assert config.next_stage(
         "vision",
         state_metadata={"agent_result": {"requested_next_stage": "manipulation"}},
@@ -3189,6 +3227,91 @@ async def test_module_retry_policy_zero_attempts_fails_without_retry(tmp_path) -
     assert exception_gates
     assert exception_gates[-1]["schema"] == "guardian_gate_result.v1"
     assert exception_gates[-1]["reason_code"] == "RUNTIMEERROR"
+
+
+def test_physical_actuation_stages_never_use_automatic_stage_retry(tmp_path) -> None:
+    loop, state, _design, _events = _retry_test_loop(
+        tmp_path,
+        module_retry={"max_attempts": 3, "backoff_s": 0},
+        global_max_retry=3,
+    )
+    state.current_experiment_spec = {
+        "printer_test_path": "installed_printer",
+        "test_printer_transport": "real",
+        "allow_test_printer_live": True,
+        "allow_test_equipment_live": True,
+    }
+
+    assert loop._automatic_stage_retry_allowed(Stage.SPECIMEN) is False
+    assert loop._automatic_stage_retry_allowed(Stage.MANIPULATION) is False
+    assert loop._automatic_stage_retry_allowed(Stage.EQUIPMENT) is False
+    assert loop._automatic_stage_retry_allowed(Stage.VISION) is True
+
+
+def test_virtual_test_route_keeps_automatic_stage_retry(tmp_path) -> None:
+    loop, state, _design, _events = _retry_test_loop(
+        tmp_path,
+        module_retry={"max_attempts": 1, "backoff_s": 0},
+        global_max_retry=1,
+    )
+    state.current_experiment_spec = {
+        "printer_test_path": "virtual_bridge",
+        "test_printer_transport": "virtual",
+    }
+
+    assert loop._automatic_stage_retry_allowed(Stage.SPECIMEN) is True
+    assert loop._automatic_stage_retry_allowed(Stage.MANIPULATION) is True
+    assert loop._automatic_stage_retry_allowed(Stage.EQUIPMENT) is True
+
+
+@pytest.mark.asyncio
+async def test_physical_specimen_exception_stops_without_repeating_agent(tmp_path) -> None:
+    registry = AgentRegistry()
+    registry.register(_StaticAgent("orchestrator_agent", {}))
+    specimen = _FailingAgent("specimen_agent")
+    registry.register(specimen)
+    bundle = build_logger_bundle(
+        run_id="run-physical-no-auto-retry",
+        run_root=tmp_path / "runs",
+        logging_config={},
+    )
+    state = OrchestratorState(
+        run_id=bundle.run_dir.name,
+        experiment_id="exp-physical-no-auto-retry",
+        mode=Mode.TEST,
+        stage=Stage.SPECIMEN,
+        current_experiment_spec={
+            "printer_test_path": "physical_print",
+            "test_printer_transport": "real",
+            "allow_test_printer_live": True,
+        },
+    )
+    events: list[dict[str, object]] = []
+    loop = RunLoop(
+        state=state,
+        agent_registry=registry,
+        orchestrator_agent_name="orchestrator_agent",
+        ctx=object(),
+        logger=bundle.logger,
+        max_retry_per_stage=3,
+        interval_seconds=0,
+        on_event=events.append,
+    )
+    loop._module_configs["specimen"] = {  # type: ignore[attr-defined]
+        "id": "specimen",
+        "handler": "agent.specimen_agent",
+        "retry": {"max_attempts": 3, "backoff_s": 0},
+        "tools": [],
+    }
+
+    await loop.step()
+
+    assert specimen.run_count == 1
+    assert state.stage == Stage.ERROR
+    assert state.retry_counters.get("specimen", 0) == 0
+    assert not [event for event in events if event["type"] == "node.retrying"]
+    failed = [event for event in events if event["type"] == "node.failed"]
+    assert failed[-1]["payload"]["automatic_retry_suppressed"] is True
 
 
 def _approval_test_loop(tmp_path: Path) -> tuple[RunLoop, OrchestratorState, _StaticAgent, list[dict[str, object]]]:

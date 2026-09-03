@@ -11,6 +11,7 @@ from pathlib import Path
 from device_bridges.utm_runtime_bridge import (
     ROS_IMAGE_CAPTURE_SCRIPT,
     ROS_IMAGE_MJPEG_STREAM_SCRIPT,
+    SharedMjpegTopicStream,
     UTMCameraConfig,
     UTMCameraProfile,
     UTMGraphSnapshotBuilder,
@@ -639,9 +640,9 @@ def test_frame_stream_normalizes_raw_camera_topics_to_utm_output(tmp_path: Path)
     assert manager._stream_topic_for_request("/custom/debug", profile) == "/custom/debug"
 
 
-def test_ros_image_subscribers_use_sensor_qos_depth_one() -> None:
+def test_ros_image_subscribers_use_reliable_qos_depth_one() -> None:
     for script in (ROS_IMAGE_CAPTURE_SCRIPT, ROS_IMAGE_MJPEG_STREAM_SCRIPT):
-        assert "ReliabilityPolicy.BEST_EFFORT" in script
+        assert "ReliabilityPolicy.RELIABLE" in script
         assert "HistoryPolicy.KEEP_LAST" in script
         assert "DurabilityPolicy.VOLATILE" in script
         assert "depth=1" in script
@@ -653,6 +654,13 @@ def test_mjpeg_stream_does_not_keep_ineffective_cuda_color_path() -> None:
     assert "ATR_UTM_COLOR_BACKEND" not in ROS_IMAGE_MJPEG_STREAM_SCRIPT
     assert "COLOR_YUV2BGR_YUY2" in ROS_IMAGE_MJPEG_STREAM_SCRIPT
     assert "return cv2.cvtColor(array, code)" in ROS_IMAGE_MJPEG_STREAM_SCRIPT
+
+
+def test_mjpeg_stream_does_not_drop_already_capped_source_frames() -> None:
+    assert "should_emit" not in ROS_IMAGE_MJPEG_STREAM_SCRIPT
+    assert "emit_tokens" not in ROS_IMAGE_MJPEG_STREAM_SCRIPT
+    assert "emit_interval_tolerance" not in ROS_IMAGE_MJPEG_STREAM_SCRIPT
+    assert "now - self.last_emit" not in ROS_IMAGE_MJPEG_STREAM_SCRIPT
 
 
 def test_frame_stream_skips_worker_when_runtime_is_stopped(tmp_path: Path) -> None:
@@ -684,3 +692,27 @@ def test_mjpeg_parser_extracts_complete_frames_and_keeps_tail() -> None:
 
     assert frames2 == [b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: 6\r\n\r\nefghij\r\n"]
     assert tail2 == b""
+
+
+def test_shared_mjpeg_stream_reports_rolling_delivery_stats(monkeypatch) -> None:
+    stream = SharedMjpegTopicStream(
+        key="preview",
+        command=["true"],
+        cwd=".",
+        topic="/image_utm",
+        target_fps=30.0,
+        jpeg_quality=82,
+    )
+    stream._record_frames(1, observed_at=10.0)
+    stream._record_frames(1, observed_at=10.04)
+    stream._record_frames(1, observed_at=10.08)
+    stream._record_frames(1, observed_at=10.12)
+    monkeypatch.setattr("device_bridges.utm_runtime_bridge.time.monotonic", lambda: 10.12)
+
+    stats = stream.stats()
+
+    assert stats["topic"] == "/image_utm"
+    assert stats["requested_fps"] == 30.0
+    assert stats["measured_fps"] == 25.0
+    assert stats["frames"] == 4
+    assert stats["estimated_dropped_frames"] == 0

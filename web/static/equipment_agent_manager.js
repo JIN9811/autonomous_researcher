@@ -251,6 +251,7 @@
             <div class="equipment-manager-slot-title"><span>Vision Slot</span><small>OPTIONAL VERIFICATION</small></div>
             <div class="equipment-manager-form-grid">
               <label class="manager-toggle"><input type="checkbox" data-field="vision.enabled"${block.vision?.enabled ? " checked" : ""} />Enable Vision verification</label>
+              <label class="manager-toggle"><input type="checkbox" data-field="vision.blocking"${block.vision?.blocking !== false ? " checked" : ""} />Block Agentic Progress on failure</label>
               <label>Vision Task<select class="manager-input" data-field="vision.task_id">${visionTaskOptions(block.vision?.task_id || "")}</select></label>
               <div class="span-2">${visionTaskDetail(block.vision?.task_id || "")}</div>
             </div>

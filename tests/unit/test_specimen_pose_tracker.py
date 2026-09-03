@@ -356,22 +356,22 @@ def test_snapshot_wrapper_maps_redcube_xy_inside_a4_from_lerobot_frame(tmp_path:
     assert pose["a4_detected"] is True
     assert pose["depth_source"] == "raw_uint16_mm"
     assert pose["depth_mm"] == 777.0
-    assert pose["a4_width_mm"] == pytest.approx(210.0)
-    assert pose["a4_height_mm"] == pytest.approx(297.0)
+    assert pose["a4_width_mm"] == pytest.approx(250.0)
+    assert pose["a4_height_mm"] == pytest.approx(170.0)
     assert pose["a4_camera_to_isaac_transform"] == "robot_right_plane"
-    assert pose["a4_isaac_width_mm"] == pytest.approx(297.0)
-    assert pose["a4_isaac_height_mm"] == pytest.approx(210.0)
+    assert pose["a4_isaac_width_mm"] == pytest.approx(170.0)
+    assert pose["a4_isaac_height_mm"] == pytest.approx(250.0)
     assert pose["specimen_depth_stats_mm"]["median"] == pytest.approx(777.0)
     assert pose["a4_local_plane_depth_stats_mm"]["median"] == pytest.approx(777.0)
     assert pose["depth_alignment"]["source"] == "raw_uint16_mm"
     assert pose["depth_alignment"]["specimen_above_a4_plane_mm"] == pytest.approx(0.0)
     assert pose["confidence"] >= 0.05
-    assert pose["position_camera_a4_mm"]["lateral_x"] == pytest.approx(53.0, abs=2.0)
-    assert pose["position_camera_a4_mm"]["forward_y"] == pytest.approx(222.75, abs=2.0)
-    assert pose["position_a4_mm"]["x"] == pytest.approx(74.25, abs=2.0)
-    assert pose["position_a4_mm"]["y"] == pytest.approx(53.0, abs=2.0)
-    assert pose["position_isaac_world_mm"]["x"] == pytest.approx(240.75, abs=2.0)
-    assert pose["position_isaac_world_mm"]["y"] == pytest.approx(213.0, abs=2.0)
+    assert pose["position_camera_a4_mm"]["lateral_x"] == pytest.approx(63.13, abs=2.0)
+    assert pose["position_camera_a4_mm"]["forward_y"] == pytest.approx(127.5, abs=2.0)
+    assert pose["position_a4_mm"]["x"] == pytest.approx(42.5, abs=2.0)
+    assert pose["position_a4_mm"]["y"] == pytest.approx(63.13, abs=2.0)
+    assert pose["position_isaac_world_mm"]["x"] == pytest.approx(272.5, abs=2.0)
+    assert pose["position_isaac_world_mm"]["y"] == pytest.approx(183.13, abs=2.0)
     assert pose["position_isaac_world_mm"]["z"] == pytest.approx(15.2, abs=0.01)
     assert pose["position_robot_base_mm"]["z"] == pytest.approx(15.2, abs=0.01)
 
@@ -429,8 +429,8 @@ def test_snapshot_wrapper_prefers_redcube_inside_a4_over_larger_red_distractor(t
     pose = payload["pose"]
     assert pose["center_source"] == "contour_moments"
     assert pose["center_px"] == [90, 64]
-    assert pose["position_camera_a4_mm"]["lateral_x"] == pytest.approx(53.0, abs=2.0)
-    assert pose["position_camera_a4_mm"]["forward_y"] == pytest.approx(222.75, abs=2.0)
+    assert pose["position_camera_a4_mm"]["lateral_x"] == pytest.approx(63.45, abs=2.0)
+    assert pose["position_camera_a4_mm"]["forward_y"] == pytest.approx(128.71, abs=2.0)
 
 
 def test_snapshot_wrapper_uses_contour_moment_center_for_asymmetric_redcube(tmp_path: Path) -> None:
@@ -640,8 +640,8 @@ def test_snapshot_wrapper_applies_a4_world_offset_after_direct_mapping(tmp_path:
     assert completed.returncode == 0, completed.stderr
     pose = payload["pose"]
     assert pose["a4_world_offset_mm"] == {"x": 10.0, "y": -5.0}
-    assert pose["position_isaac_world_mm"]["x"] == pytest.approx(166.5 + pose["position_a4_mm"]["x"] + 10.0)
-    assert pose["position_isaac_world_mm"]["y"] == pytest.approx(160.0 + pose["position_a4_mm"]["y"] - 5.0)
+    assert pose["position_isaac_world_mm"]["x"] == pytest.approx(230.0 + pose["position_a4_mm"]["x"] + 10.0)
+    assert pose["position_isaac_world_mm"]["y"] == pytest.approx(120.0 + pose["position_a4_mm"]["y"] - 5.0)
 
 
 def test_snapshot_wrapper_estimates_specimen_yaw_in_isaac_a4_frame(tmp_path: Path) -> None:

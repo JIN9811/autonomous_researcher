@@ -2904,6 +2904,91 @@ def test_install_bridge_request_audit_allows_local_health_without_secret_leak(tm
     assert "wrong-token" not in log_path.read_text(encoding="utf-8")
 
 
+def test_install_bridge_execute_returns_structured_failure_when_worker_raises(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_helper_module()
+    module.TOKEN = "execution-error-token"
+    module.ARTIFACT_ROOT = tmp_path / "artifacts"
+
+    def raise_execution_error(_payload: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError("diagnostic worker failure")
+
+    monkeypatch.setattr(module, "_execute", raise_execution_error)
+    server = module.ThreadingHTTPServer(("127.0.0.1", 0), module.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    payload = {
+        "sequence_id": "seq-error",
+        "run_id": "run-error",
+        "specimen_id": "specimen-error",
+        "program_id": "program-error",
+        "command": "program-error",
+    }
+    request = urllib.request.Request(
+        base + "/execute",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"X-Bridge-Token": "execution-error-token", "Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.status == 200
+            result = json.loads(response.read().decode("utf-8"))
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        module.TOKEN = ""
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert result["failure_code"] == "PYAUTOGUI_EXECUTION_EXCEPTION"
+    assert result["sequence_id"] == "seq-error"
+    assert result["run_id"] == "run-error"
+    assert result["specimen_id"] == "specimen-error"
+    assert result["program_id"] == "program-error"
+    assert result["step_trace"][-1] == {
+        "step": "EXECUTE",
+        "status": "failed",
+        "detail": "RuntimeError: diagnostic worker failure",
+    }
+
+    events = [
+        json.loads(line)
+        for line in (module.ARTIFACT_ROOT / "bridge_requests.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert events[-1]["audit_kind"] == "execute_result"
+    assert events[-1]["failure_code"] == "PYAUTOGUI_EXECUTION_EXCEPTION"
+
+
+def test_install_bridge_execution_exception_identifies_pyautogui_failsafe() -> None:
+    module = _load_helper_module()
+
+    class FailSafeException(Exception):
+        pass
+
+    result = module._execution_exception_result(
+        {
+            "sequence_id": "seq-failsafe",
+            "run_id": "run-failsafe",
+            "specimen_id": "specimen-failsafe",
+            "program_id": "program-failsafe",
+        },
+        FailSafeException("mouse is in a screen corner"),
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert result["failure_code"] == "PYAUTOGUI_FAILSAFE_TRIGGERED"
+    assert "Move the mouse pointer away from every screen corner" in result["message"]
+    assert result["step_trace"][-1]["detail"].startswith("FailSafeException:")
+
+
 
 def test_packaged_bridge_request_log_allows_local_health_without_secret_leak(tmp_path: Path) -> None:
     module = _load_packaged_helper_module()

@@ -130,6 +130,7 @@ const equipmentSkillFlowProgress = document.getElementById("equipment-skill-flow
 const equipmentFlowReadiness = document.getElementById("equipment-flow-readiness");
 const btnOpenEquipmentAgentManager = document.getElementById("btn-open-equipment-agent-manager");
 const btnAgenticRun = document.getElementById("btn-equipment-agentic-run");
+const btnAgenticStop = document.getElementById("btn-equipment-agentic-stop");
 const agenticRunStatus = document.getElementById("equipment-agentic-run-status");
 const requestAuditStatus = document.getElementById("equipment-request-audit-status");
 const requestAuditDetail = document.getElementById("equipment-request-audit-detail");
@@ -152,6 +153,7 @@ const locatorYInput = document.getElementById("equipment-locator-y");
 const locatorWidthInput = document.getElementById("equipment-locator-width");
 const locatorHeightInput = document.getElementById("equipment-locator-height");
 const {
+  agenticRunTerminalBadgeView,
   candidateSelectionView,
   confirmCandidateSelection,
   profileConnectionStatus: profileConnectionStatusValue,
@@ -189,6 +191,7 @@ let equipmentSkillFlowExecution = {};
 let equipmentVisionTasks = [];
 let equipmentSkillFlowReadiness = {};
 let agenticLiveRunActive = false;
+let agenticLiveResetRequested = false;
 
 const EQUIPMENT_PROGRESS_ORDER = ["recording", "transfer", "annotation", "skill", "preflight", "execute", "verify", "handoff"];
 const RECORDING_LIST_REFRESH_MS = 5000;
@@ -241,7 +244,11 @@ async function loadEquipmentSkillFlow() {
   equipmentSkillFlowCatalog = Array.isArray(payload.skills) ? payload.skills : [];
   equipmentVisionTasks = Array.isArray(payload.vision_tasks) ? payload.vision_tasks : [];
   equipmentSkillFlowReadiness = payload.readiness && typeof payload.readiness === "object" ? payload.readiness : {};
-  equipmentSkillFlowExecution = payload.execution && typeof payload.execution === "object" ? payload.execution : {};
+  equipmentSkillFlowExecution = agenticLiveResetRequested
+    ? {}
+    : payload.execution && typeof payload.execution === "object"
+      ? payload.execution
+      : {};
   renderEquipmentSkillFlow();
   return payload;
 }
@@ -251,7 +258,11 @@ async function refreshEquipmentSkillFlowRuntime() {
   equipmentSkillFlowCatalog = Array.isArray(payload.skills) ? payload.skills : equipmentSkillFlowCatalog;
   equipmentVisionTasks = Array.isArray(payload.vision_tasks) ? payload.vision_tasks : equipmentVisionTasks;
   equipmentSkillFlowReadiness = payload.readiness && typeof payload.readiness === "object" ? payload.readiness : equipmentSkillFlowReadiness;
-  equipmentSkillFlowExecution = payload.execution && typeof payload.execution === "object" ? payload.execution : {};
+  equipmentSkillFlowExecution = agenticLiveResetRequested
+    ? {}
+    : payload.execution && typeof payload.execution === "object"
+      ? payload.execution
+      : {};
   equipmentSkillFlow = payload.flow;
   renderEquipmentSkillFlow();
   if (agenticLiveRunActive) {
@@ -762,6 +773,7 @@ async function runEquipmentProfileAction(action, button) {
     if (action === "agentic-live") {
       if (agenticLiveRunActive) return;
       agenticLiveRunActive = true;
+      agenticLiveResetRequested = false;
       setAgenticLiveRunStatus("running", "preflight");
       const flowPayload = await loadEquipmentSkillFlow();
       const flow = flowPayload.flow || equipmentSkillFlow;
@@ -795,9 +807,11 @@ async function runEquipmentProfileAction(action, button) {
         method: "POST",
         body: JSON.stringify({ runtime_mode: "live", confirm_execute: true }),
       });
+      if (agenticLiveResetRequested) return;
       await refreshEquipmentSkillFlowRuntime();
       if (!result.ok) throw new Error(result.summary || result.message || "Registered Agentic Skill Flow blocked.");
-      setAgenticLiveRunStatus("completed", `${blocks.length}/${blocks.length}`);
+      const terminalBadge = agenticRunTerminalBadgeView(result);
+      setAgenticLiveRunStatus(terminalBadge.state, terminalBadge.detail);
       setActionStatus("Agentic Progress completed", result.summary || "Registered Lab Equipment process completed.", "ok");
       writeLog(result);
       return;
@@ -815,14 +829,42 @@ async function runEquipmentProfileAction(action, button) {
     await loadEquipmentProfileState();
   } catch (err) {
     if (action === "agentic-live") {
+      if (agenticLiveResetRequested) return;
       await refreshEquipmentSkillFlowRuntime().catch(() => {});
-      setAgenticLiveRunStatus("blocked", err.message);
+      const terminalBadge = agenticRunTerminalBadgeView({ ok: false, message: err.message });
+      setAgenticLiveRunStatus(terminalBadge.state, terminalBadge.detail);
       setActionStatus("Agentic Progress blocked", err.message, "blocked");
     }
     writeLog({ ok: false, error: err.message });
   } finally {
     if (action === "agentic-live") agenticLiveRunActive = false;
     setBusy(button, false);
+  }
+}
+
+async function stopAgenticProgress() {
+  if (!btnAgenticStop) return;
+  agenticLiveResetRequested = true;
+  setBusy(btnAgenticStop, true);
+  try {
+    const result = await apiJson(`/api/equipment/profiles/${encodeURIComponent(selectedEquipmentProfileId)}/agentic-run/cancel`, {
+      method: "POST",
+      body: "{}",
+    });
+    if (result?.ok !== true) {
+      const physicalStop = result?.physical_stop || {};
+      throw new Error(physicalStop.message || physicalStop.failure_code || "UTM stop command failed.");
+    }
+    agenticLiveRunActive = false;
+    equipmentSkillFlowExecution = {};
+    renderEquipmentSkillFlow();
+    setAgenticLiveRunStatus("idle", "reset");
+    writeLog(result);
+  } catch (err) {
+    setAgenticLiveRunStatus("blocked", err.message);
+    writeLog({ ok: false, error: err.message });
+  } finally {
+    setBusy(btnAgenticStop, false);
   }
 }
 
@@ -990,7 +1032,7 @@ function setBusy(button, busy) {
 }
 
 function rememberButtonLabels() {
-  [btnScan, btnRefresh, btnTest, btnProgram1, btnUtm, btnAbort, btnScreenshot, btnListLocators, btnCaptureLocator, btnLoadUtmProfile, btnSaveUtmProfile, btnOpenBridgeGui, btnLocalStart, btnLocalStop, btnLocalHealth, btnLocalSelect, btnReadiness, btnLivePreflight, btnLiveValidation, btnVisionProofDraft, btnLivePhysicalValidation, btnEvidenceAudit, btnProofPackage, btnVerifyProofPackage, btnCompletionAudit, btnRequestLog, btnAgenticRun].forEach((button) => {
+  [btnScan, btnRefresh, btnTest, btnProgram1, btnUtm, btnAbort, btnScreenshot, btnListLocators, btnCaptureLocator, btnLoadUtmProfile, btnSaveUtmProfile, btnOpenBridgeGui, btnLocalStart, btnLocalStop, btnLocalHealth, btnLocalSelect, btnReadiness, btnLivePreflight, btnLiveValidation, btnVisionProofDraft, btnLivePhysicalValidation, btnEvidenceAudit, btnProofPackage, btnVerifyProofPackage, btnCompletionAudit, btnRequestLog, btnAgenticRun, btnAgenticStop].forEach((button) => {
     if (button && !button.dataset.originalText) {
       button.dataset.originalText = button.textContent;
     }
@@ -2141,6 +2183,7 @@ if (btnAbort) btnAbort.addEventListener("click", runUtmAbort);
 if (btnProfilePreflight) btnProfilePreflight.addEventListener("click", () => runEquipmentProfileAction("preflight", btnProfilePreflight));
 if (btnProfileTest) btnProfileTest.addEventListener("click", () => runEquipmentProfileAction("test", btnProfileTest));
 if (btnAgenticRun) btnAgenticRun.addEventListener("click", () => runEquipmentProfileAction("agentic-live", btnAgenticRun));
+if (btnAgenticStop) btnAgenticStop.addEventListener("click", stopAgenticProgress);
 if (btnImportRecording) btnImportRecording.addEventListener("click", importEquipmentRecording);
 if (btnRefreshRecordings) btnRefreshRecordings.addEventListener("click", refreshWorkerRecordings);
 if (btnStopSkillAuthoring) btnStopSkillAuthoring.addEventListener("click", stopSkillAuthoring);

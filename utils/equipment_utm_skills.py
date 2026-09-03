@@ -20,13 +20,13 @@ from utils.equipment_skill_runtime import EquipmentSkillRegistry, SkillContractE
 
 
 UTM_PROFILE_ID = "utm_windows_v1"
-UTM_SKILL_VERSION = "1.0.8"
+UTM_SKILL_VERSION = "1.0.11"
 UTM_SKILL_BINDINGS: "OrderedDict[str, tuple[str, str]]" = OrderedDict(
     (
         ("prepare_next_specimen", ("utm_prepare_next_specimen", "1.0.6")),
         ("start_test", ("utm_start_test", UTM_SKILL_VERSION)),
         ("monitor_contact_and_run", ("utm_monitor_contact_and_run", "1.0.6")),
-        ("await_auto_return", ("utm_await_auto_return", "1.0.7")),
+        ("await_auto_return", ("utm_await_auto_return", "1.0.9")),
         ("save_raw_data", ("utm_save_raw_data", "1.0.11")),
         ("validate_raw_data", ("utm_validate_raw_data", "1.0.7")),
         ("advance_without_save", ("utm_advance_without_save", "1.0.8")),
@@ -40,9 +40,6 @@ _MODEL_SNAPSHOT = {
     "endpoint_profile": "recorded_reference",
     "fallback_allowed": False,
 }
-_START_HEIGHT_30_5_PNG_BASE64 = (
-    "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"
-)
 _START_TEST_CONFIRM_BUTTON_PNG_BASE64 = (
     "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"
 )
@@ -160,10 +157,7 @@ def _skill_workflows(reference_root: Path) -> dict[str, list[dict[str, Any]]]:
     save_current_file_no = _locator_candidate(locators / "save_current_file_no.png")
     next_test_ready_loaded = _locator_candidate(locators / "next_test_ready_loaded.png")
     start_ready = _locator_candidate(locators / "start_test_ready.png")
-    start_height_30_5 = _embedded_locator_candidate(
-        png_base64=_START_HEIGHT_30_5_PNG_BASE64,
-        source="start_height_30_5mm.png",
-    )
+    start_height_32 = _locator_candidate(locators / "start_height_32mm.png")
     start_confirm = _embedded_locator_candidate(
         png_base64=_START_TEST_CONFIRM_BUTTON_PNG_BASE64,
         source="start_test_confirm_button.png",
@@ -196,11 +190,11 @@ def _skill_workflows(reference_root: Path) -> dict[str, list[dict[str, Any]]]:
         ],
         "start_test": [
             _step(1, "Capture full screen before Start Test", {"action": "screenshot", "checkpoint": "start_test_initial_full_screen"}, checkpoint=True),
-            _step(2, "Require Start Height 30.5 mm", _visual_action("wait_until_image", target="start_height_30_5_mm", candidate=start_height_30_5, timeout_s=5)),
+            _step(2, "Require Start Height 32 mm", _visual_action("wait_until_image", target="start_height_32_mm", candidate=start_height_32, timeout_s=5)),
             _step(3, "Start Test", _visual_action("click", target="start_test", candidate=start_ready)),
             _step(4, "Wait for Start Test confirmation", _visual_action("wait_until_image", target="start_test_confirm_button", candidate=start_confirm, timeout_s=10)),
             _step(5, "Confirm Start Test", _visual_action("click", target="start_test_confirm_button", candidate=start_confirm)),
-            _step(6, "Confirm Testing state", _visual_action("wait_until_image", target="testing_state", candidate=testing, timeout_s=15)),
+            _step(6, "Confirm Testing state", _visual_action("wait_until_image", target="testing_state", candidate=testing, timeout_s=120)),
             _step(7, "Capture test start", {"action": "screenshot", "checkpoint": "start_test_complete"}, checkpoint=True),
         ],
         "monitor_contact_and_run": [
@@ -209,7 +203,7 @@ def _skill_workflows(reference_root: Path) -> dict[str, list[dict[str, Any]]]:
         ],
         "await_auto_return": [
             _step(1, "Keep completed state visible", _visual_action("wait_until_image", target="tests_completed", candidate=completed, timeout_s=30)),
-            _step(2, "Wait for automatic Height return to 30.5 mm", _visual_action("wait_until_image", target="auto_return_height_30_5_mm", candidate=start_height_30_5, timeout_s=3600)),
+            _step(2, "Wait for automatic Height return to 32 mm", _visual_action("wait_until_image", target="auto_return_height_32_mm", candidate=start_height_32, timeout_s=3600)),
             _step(3, "Capture automatic return state", {"action": "screenshot", "checkpoint": "auto_return_observed"}, checkpoint=True),
         ],
         "save_raw_data": [

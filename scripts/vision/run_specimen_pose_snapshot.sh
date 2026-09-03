@@ -208,7 +208,7 @@ def _order_quad_points(points):
     return rect
 
 
-def _detect_a4_quad(color_bgr, center_x=None, center_y=None):
+def _detect_a4_quad(color_bgr, center_x=None, center_y=None, *, workspace_width_mm=250.0, workspace_height_mm=170.0):
     import cv2
     import numpy as np
 
@@ -220,7 +220,10 @@ def _detect_a4_quad(color_bgr, center_x=None, center_y=None):
     contours, _ = cv2.findContours(white_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None, white_mask, "no_white_contour"
-    target_aspect = 297.0 / 210.0
+    target_aspect = max(workspace_width_mm, workspace_height_mm) / max(
+        1.0,
+        min(workspace_width_mm, workspace_height_mm),
+    )
     best = None
     best_score = -1.0
     containing_best = None
@@ -274,16 +277,22 @@ def _map_point_to_a4_mm(color_bgr, center_x, center_y):
         or payload.get("a4_lateral_mm")
         or os.environ.get("ATR_SPECIMEN_A4_WIDTH_MM")
         or os.environ.get("ATR_SPECIMEN_A4_LATERAL_MM"),
-        210.0,
+        250.0,
     )
     a4_height_mm = _safe_float(
         payload.get("a4_height_mm")
         or payload.get("a4_forward_mm")
         or os.environ.get("ATR_SPECIMEN_A4_HEIGHT_MM")
         or os.environ.get("ATR_SPECIMEN_A4_FORWARD_MM"),
-        297.0,
+        170.0,
     )
-    quad, white_mask, error = _detect_a4_quad(color_bgr, center_x=center_x, center_y=center_y)
+    quad, white_mask, error = _detect_a4_quad(
+        color_bgr,
+        center_x=center_x,
+        center_y=center_y,
+        workspace_width_mm=a4_width_mm,
+        workspace_height_mm=a4_height_mm,
+    )
     if quad is None:
         return None, white_mask, {"a4_detected": False, "a4_failure_code": error}
     dst = np.array(
@@ -356,12 +365,12 @@ def _camera_a4_to_isaac_a4_mm(camera_lateral_mm, camera_forward_mm):
     isaac_width_mm = _safe_float(
         payload.get("a4_isaac_width_mm")
         or os.environ.get("ATR_SPECIMEN_A4_ISAAC_WIDTH_MM"),
-        297.0,
+        170.0,
     )
     isaac_height_mm = _safe_float(
         payload.get("a4_isaac_height_mm")
         or os.environ.get("ATR_SPECIMEN_A4_ISAAC_HEIGHT_MM"),
-        210.0,
+        250.0,
     )
     transform = str(
         payload.get("a4_camera_to_isaac_transform")
@@ -564,8 +573,8 @@ def _estimate_pose_from_lerobot_frame(manifest_path):
     robot_x_mm = camera_x_mm + _safe_float(offset_x, 0.0)
     robot_y_mm = camera_y_mm + _safe_float(offset_y, 0.0)
     robot_z_mm = depth_mm + _safe_float(offset_z, 0.0)
-    a4_world_min_x_mm = _safe_float(payload.get("a4_world_min_x_mm") or os.environ.get("ATR_SPECIMEN_A4_WORLD_MIN_X_MM"), 166.5)
-    a4_world_min_y_mm = _safe_float(payload.get("a4_world_min_y_mm") or os.environ.get("ATR_SPECIMEN_A4_WORLD_MIN_Y_MM"), 160.0)
+    a4_world_min_x_mm = _safe_float(payload.get("a4_world_min_x_mm") or os.environ.get("ATR_SPECIMEN_A4_WORLD_MIN_X_MM"), 230.0)
+    a4_world_min_y_mm = _safe_float(payload.get("a4_world_min_y_mm") or os.environ.get("ATR_SPECIMEN_A4_WORLD_MIN_Y_MM"), 120.0)
     a4_world_offset_x_mm = _safe_float(payload.get("a4_world_offset_x_mm") or os.environ.get("ATR_SPECIMEN_A4_WORLD_OFFSET_X_MM"), 0.0)
     a4_world_offset_y_mm = _safe_float(payload.get("a4_world_offset_y_mm") or os.environ.get("ATR_SPECIMEN_A4_WORLD_OFFSET_Y_MM"), 0.0)
     isaac_world_z_mm = _safe_float(payload.get("isaac_world_z_mm") or os.environ.get("ATR_SPECIMEN_ISAAC_WORLD_Z_MM"), 15.2)

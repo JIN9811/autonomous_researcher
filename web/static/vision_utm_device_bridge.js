@@ -5,9 +5,8 @@ const state = {
   busy: false,
   buttons: [],
   frameStreamActive: false,
-  frameStreamFetching: false,
-  frameStreamTimer: null,
-  frameStreamIntervalMs: 1000,
+  frameStreamStatsFetching: false,
+  frameStreamStatsTimer: null,
   frameStreamUrlCache: "",
   frameStreamUrlKey: "",
   activeProfile: {},
@@ -71,8 +70,8 @@ function setBusy(busy, label = "working") {
 function updateFrameStreamControls() {
   const play = el("btn-vision-camera-frame-play");
   const stop = el("btn-vision-camera-frame-stop");
-  if (play) play.disabled = state.busy || state.frameStreamActive || state.frameStreamFetching;
-  if (stop) stop.disabled = state.busy || (!state.frameStreamActive && !state.frameStreamTimer);
+  if (play) play.disabled = state.busy || state.frameStreamActive;
+  if (stop) stop.disabled = state.busy || !state.frameStreamActive;
 }
 
 function setFrameStreamStatus(status, detail = "") {
@@ -87,15 +86,15 @@ function setFrameStreamStatus(status, detail = "") {
   }`;
 }
 
-function clearFrameStreamTimer() {
-  if (!state.frameStreamTimer) return;
-  clearTimeout(state.frameStreamTimer);
-  state.frameStreamTimer = null;
+function clearFrameStreamStatsTimer() {
+  if (!state.frameStreamStatsTimer) return;
+  clearTimeout(state.frameStreamStatsTimer);
+  state.frameStreamStatsTimer = null;
 }
 
 function frameStreamFps() {
-  const value = Number(el("vision-camera-fps")?.value || 15);
-  return Number.isFinite(value) && value > 0 ? value : 15;
+  const value = Number(el("vision-camera-preview-fps")?.value || 30);
+  return Number.isFinite(value) && value > 0 ? Math.min(Math.max(value, 1), 60) : 30;
 }
 
 function utmRuntimeFrameStreamUrl() {
@@ -107,6 +106,12 @@ function utmRuntimeFrameStreamUrl() {
     state.frameStreamUrlCache = `/api/equipment/utm-runtime/frame-stream.mjpeg?topic=${encodeURIComponent(topic)}&fps=${encodeURIComponent(String(fps))}`;
   }
   return state.frameStreamUrlCache;
+}
+
+function utmRuntimeFrameStreamStatsUrl() {
+  const topic = frameStreamTopicLabel();
+  const fps = frameStreamFps();
+  return `/api/equipment/utm-runtime/frame-stream/status?topic=${encodeURIComponent(topic)}&fps=${encodeURIComponent(String(fps))}&quality=82`;
 }
 
 function frameStreamTopicLabel() {
@@ -524,50 +529,43 @@ async function loadRuntimeFrame(options = {}) {
   return payload;
 }
 
-async function refreshFrameStreamFrame() {
-  if (!state.frameStreamActive || state.frameStreamFetching) return null;
-  state.frameStreamFetching = true;
-  updateFrameStreamControls();
-  setFrameStreamStatus("updating", "frame");
+async function refreshFrameStreamStats() {
+  if (!state.frameStreamActive || state.frameStreamStatsFetching) return null;
+  state.frameStreamStatsFetching = true;
   try {
-    const payload = await loadRuntimeFrame({ timeoutMs: 6000 });
-    logResult(payload);
-    if (!state.frameStreamActive) {
-      setFrameStreamStatus("stopped");
-      return payload;
-    }
+    const payload = await fetchJson(utmRuntimeFrameStreamStatsUrl(), { timeoutMs: 3000 });
     if (payload?.ok) {
-      const frame = payload.frame || payload;
-      const age = Number.isFinite(Number(frame.frame_age_ms)) ? `${Math.round(Number(frame.frame_age_ms))}ms` : "";
-      setFrameStreamStatus("live", age || "streaming");
+      const actual = Number(payload.measured_fps || 0);
+      const dropped = Number(payload.estimated_dropped_frames || 0);
+      const fpsLabel = actual > 0 ? `${actual.toFixed(1)}fps` : "starting";
+      setFrameStreamStatus("live", fpsLabel);
+      const meta = el("vision-camera-frame-meta");
+      if (meta) meta.textContent = `${payload.topic || frameStreamTopicLabel()} · ${fpsLabel} actual · ${dropped} drop est`;
     } else {
-      setFrameStreamStatus("error", payload?.failure_code || "frame");
+      setFrameStreamStatus("error", payload?.failure_code || "stats");
     }
     return payload;
   } catch (err) {
-    const payload = { ok: false, failure_code: "FRAME_STREAM_FAILED", message: String(err) };
-    logResult(payload);
-    setFrameStreamStatus(state.frameStreamActive ? "error" : "stopped", state.frameStreamActive ? "stream" : "");
-    return payload;
+    setFrameStreamStatus(state.frameStreamActive ? "error" : "stopped", state.frameStreamActive ? "stats" : "");
+    return { ok: false, failure_code: "FRAME_STREAM_STATS_FAILED", message: String(err) };
   } finally {
-    state.frameStreamFetching = false;
-    updateFrameStreamControls();
+    state.frameStreamStatsFetching = false;
   }
 }
 
-function scheduleFrameStreamTick() {
-  clearFrameStreamTimer();
+function scheduleFrameStreamStats() {
+  clearFrameStreamStatsTimer();
   if (!state.frameStreamActive) return;
-  state.frameStreamTimer = setTimeout(async () => {
-    await refreshFrameStreamFrame();
-    scheduleFrameStreamTick();
-  }, state.frameStreamIntervalMs);
+  state.frameStreamStatsTimer = setTimeout(async () => {
+    await refreshFrameStreamStats();
+    scheduleFrameStreamStats();
+  }, 1000);
 }
 
 async function startFrameStream() {
   if (state.frameStreamActive) return;
   state.frameStreamActive = true;
-  clearFrameStreamTimer();
+  clearFrameStreamStatsTimer();
   const fps = frameStreamFps();
   const container = el("vision-camera-frame");
   const meta = el("vision-camera-frame-meta");
@@ -577,13 +575,14 @@ async function startFrameStream() {
   if (meta) meta.textContent = `${frameStreamTopicLabel()} · live MJPEG · ${fps}fps`;
   setFrameStreamStatus("live", `${fps}fps`);
   updateFrameStreamControls();
+  scheduleFrameStreamStats();
   updateBanner("Live frame stream started", `Device Bridge is receiving Camera frame evidence at ${fps}fps.`, "ok");
 }
 
 function stopFrameStream(options = {}) {
   state.frameStreamActive = false;
-  clearFrameStreamTimer();
-  state.frameStreamFetching = false;
+  clearFrameStreamStatsTimer();
+  state.frameStreamStatsFetching = false;
   state.frameStreamUrlCache = "";
   state.frameStreamUrlKey = "";
   const image = el("vision-camera-frame")?.querySelector("img");

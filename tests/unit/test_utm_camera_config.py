@@ -14,8 +14,8 @@ def test_default_camera_config_matches_cloned_utm_launch_defaults(tmp_path: Path
     assert profile.label.startswith("Camera")
     assert profile.width == 640
     assert profile.height == 480
-    assert profile.fps == 15
-    assert profile.pixel_format == "yuyv2rgb"
+    assert profile.fps == 60
+    assert profile.pixel_format == "mjpeg2rgb"
     assert profile.brightness == 128
     assert profile.gain == -1
     assert profile.ros_image_topic == "/camera/image_raw"

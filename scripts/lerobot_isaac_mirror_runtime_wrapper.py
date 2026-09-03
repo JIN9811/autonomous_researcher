@@ -1313,18 +1313,22 @@ class ActiveRobotCamTracker:
     D405_DIRECT_OVERRIDES = {
         "camera_id": "active_robot_cam_d405",
         "a4_camera_to_isaac_transform": "direct",
-        "a4_width_mm": 297.0,
-        "a4_height_mm": 210.0,
-        "a4_isaac_width_mm": 297.0,
-        "a4_isaac_height_mm": 210.0,
+        "a4_width_mm": 170.0,
+        "a4_height_mm": 250.0,
+        "a4_isaac_width_mm": 170.0,
+        "a4_isaac_height_mm": 250.0,
+        "a4_world_min_x_mm": 230.0,
+        "a4_world_min_y_mm": 120.0,
     }
     D455F_RIGHT_PLANE_OVERRIDES = {
         "camera_id": "d455f_global",
         "a4_camera_to_isaac_transform": "robot_right_plane",
-        "a4_width_mm": 210.0,
-        "a4_height_mm": 297.0,
-        "a4_isaac_width_mm": 297.0,
-        "a4_isaac_height_mm": 210.0,
+        "a4_width_mm": 250.0,
+        "a4_height_mm": 170.0,
+        "a4_isaac_width_mm": 170.0,
+        "a4_isaac_height_mm": 250.0,
+        "a4_world_min_x_mm": 230.0,
+        "a4_world_min_y_mm": 120.0,
     }
 
     @staticmethod

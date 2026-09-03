@@ -21,10 +21,12 @@ flowchart LR
     G --> X[CalculiX nonlinear static step]
     E --> M[Canonical force-displacement curve]
     X --> M
-    U[Lab Equipment Agent<br/>UTM CSV] --> Q[UTM parser and metrics]
+    U[Lab Equipment Agent<br/>UTM CSV] --> Q[UTM parser and engineering<br/>stress-strain normalization]
     M --> K[Three-metric comparison]
     Q --> K
+    Q --> D[50%-strain energy density]
     K --> B[BO handoff]
+    D --> B
 ```
 
 ## 2. Mechanical model
@@ -188,9 +190,13 @@ It must set `endpoint_reached=false` and
 
 Analysis compares real/test CAE against the parsed UTM curve using peak force,
 initial stiffness, and 50%-height absorbed energy. Energy is compared only when
-both sources reached the matching endpoint. The BO observation receives the
-experiment objective value from Analysis; raw solver fields remain provenance
-and diagnostics, not an independent fabricated experiment.
+both sources reached the matching endpoint. Separately, measured UTM force and
+displacement are normalized by initial apparent area and height. With no active
+compiled objective, BO receives the measured stress-strain integral through
+50% strain as `energy_density_50pct_MJ_per_m3` (`MJ/m3`, maximize). The
+dimensionally equivalent total `energy_absorption_50pct_mJ` remains provenance
+and validation evidence. Raw solver fields remain diagnostics, not an
+independent fabricated experiment.
 
 ## 9. Verification baseline
 

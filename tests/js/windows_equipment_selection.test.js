@@ -4,6 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  agenticRunTerminalBadgeView,
   candidateSelectionView,
   confirmCandidateSelection,
   profileConnectionStatus,
@@ -90,4 +91,15 @@ test("recording names become editable Linux Skill ID defaults", () => {
   assert.equal(skillIdFromRecordingName("Equipment demonstration", "rec-unused"), "equipment_demonstration");
   assert.equal(skillIdFromRecordingName("  UTM Test #2  ", "rec-unused"), "utm_test_2");
   assert.equal(skillIdFromRecordingName("", "rec-2026-abc"), "rec_2026_abc");
+});
+
+test("finished agentic progress runs return the live badge to idle", () => {
+  assert.deepEqual(agenticRunTerminalBadgeView({ ok: true, summary: "done" }), {
+    state: "idle",
+    detail: "",
+  });
+  assert.deepEqual(agenticRunTerminalBadgeView({ ok: false, message: "blocked" }), {
+    state: "idle",
+    detail: "",
+  });
 });

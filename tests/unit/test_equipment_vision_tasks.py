@@ -14,6 +14,9 @@ def test_catalog_exposes_existing_utm_tasks_once() -> None:
     tasks = list_equipment_vision_tasks()
 
     assert [item["task_id"] for item in tasks] == [
+        "utm_state_working",
+        "utm_motion_down",
+        "utm_state_not_working",
         "utm_pre_start",
         "utm_motion_confirm",
         "utm_test_complete",
@@ -32,6 +35,8 @@ def test_catalog_returns_defensive_copies() -> None:
 def test_unknown_task_is_rejected() -> None:
     with pytest.raises(ValueError, match="unknown Equipment Vision task"):
         get_equipment_vision_task("missing")
+    with pytest.raises(ValueError, match="unknown Equipment Vision task"):
+        get_equipment_vision_task("utm_motion_up")
 
 
 def test_build_check_preserves_runtime_identity_and_selected_task_only() -> None:

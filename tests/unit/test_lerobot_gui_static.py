@@ -19,7 +19,7 @@ def test_lerobot_camera_usb_link_badge_is_rendered_from_saved_device_metadata() 
     assert ".lerobot-camera-usb-link.warning" in styles
     assert ".lerobot-camera-usb-link.unknown" in styles
     assert "/static/styles.css?v=20260715-camera-usb-link-1" in template
-    assert "/static/lerobot.js?v=20260901-dataset-manage-1" in template
+    assert "/static/lerobot.js?v=20260903-background-train-1" in template
 
 
 def test_lerobot_active_robot_cam_controls_and_payload_are_wired() -> None:
@@ -60,6 +60,22 @@ def test_lerobot_rollout_shoulder_lift_backstop_defaults_on_in_gui() -> None:
     ) in script
 
 
+def test_lerobot_plc_rollout_stop_checkbox_requires_live_plc_status() -> None:
+    template = Path("web/templates/lerobot.html").read_text(encoding="utf-8")
+    script = Path("web/static/lerobot.js").read_text(encoding="utf-8")
+
+    assert 'id="lerobot-plc-rollout-stop-input" type="checkbox" disabled' in template
+    assert 'id="lerobot-plc-rollout-stop-status"' in template
+    assert 'const plcRolloutStopInput = $("lerobot-plc-rollout-stop-input");' in script
+    assert 'fetch("/api/plc/status"' in script
+    assert 'status.connection_state === "online"' in script
+    assert "status.plc_layer_active === true" in script
+    assert "status.fast_stop_monitor?.running === true" in script
+    assert "plcRolloutStopInput.disabled = !available;" in script
+    assert "if (!available) plcRolloutStopInput.checked = false;" in script
+    assert "payload.plc_rollout_stop_enabled = boolValue(plcRolloutStopInput);" in script
+
+
 def test_lerobot_rollout_restores_saved_profile_instead_of_selecting_latest() -> None:
     template = Path("web/templates/lerobot.html").read_text(encoding="utf-8")
     script = Path("web/static/lerobot.js").read_text(encoding="utf-8")
@@ -81,6 +97,15 @@ def test_lerobot_training_progress_uses_sample_count_when_step_is_abbreviated() 
     assert "(?:smpl|samples|sample)" in script
     assert "parseTrainingEffectiveBatchSize(log, training)" in script
     assert "sampleStep > current" in script
+
+
+def test_lerobot_background_training_checkbox_defaults_on_and_is_submitted() -> None:
+    template = Path("web/templates/lerobot.html").read_text(encoding="utf-8")
+    script = Path("web/static/lerobot.js").read_text(encoding="utf-8")
+
+    assert 'id="lerobot-train-background-input" type="checkbox" checked' in template
+    assert 'const trainBackgroundInput = $("lerobot-train-background-input");' in script
+    assert "train_background: trainBackgroundInput ? boolValue(trainBackgroundInput) : true" in script
 
 
 def test_lerobot_isaac_augmentation_recipe_controls_and_payload_are_wired() -> None:
@@ -232,7 +257,7 @@ def test_lerobot_isaac_lab_gui_tab_shell_is_wired() -> None:
 
     assert 'id="lerobot-main-tab"' in template
     assert 'id="isaac-lab-tab"' in template
-    assert "/static/lerobot.js?v=20260901-dataset-manage-1" in template
+    assert "/static/lerobot.js?v=20260903-background-train-1" in template
     assert "/static/styles.css?v=20260715-camera-usb-link-1" in template
     assert 'data-lerobot-tab-target="isaac-lab-tab"' in template
     assert "function activateLeRobotGuiTab" in script

@@ -175,6 +175,11 @@ def test_red_specimen_block_is_dynamic_rigid_body() -> None:
     assert "physics:approximation" not in block
 
 
+def test_active_cam_workspace_matches_robot_centered_170_by_250_mm_contract() -> None:
+    assert _workspace_scale("A4Sheet") == (0.17, 0.25, 0.00012)
+    assert _workspace_translate("A4Sheet") == (0.315, 0.245, 0.00006)
+
+
 def test_red_specimen_collision_skin_is_derived_from_object_size() -> None:
     script = (REPO_ROOT / "sim" / "robotis_omx" / "tools" / "build_table_layout_scene.py").read_text(encoding="utf-8")
 

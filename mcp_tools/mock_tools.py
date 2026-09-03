@@ -185,6 +185,26 @@ def _vision_equipment_cross_check(payload: dict[str, Any]) -> dict[str, Any]:
                 "expires_at": expires_at.isoformat(),
                 "freshness_ttl_ms": ttl_ms,
                 "source": "simulator" if mode != "live" else "live_required_external_vision",
+                **(
+                    {
+                        "verification_label": {
+                            "utm_state_working": "WORKING",
+                            "utm_motion_down": "DOWN",
+                            "utm_state_not_working": "NOT WORKING",
+                        }[check_id],
+                        "observed_result": {
+                            "utm_state_working": "WORKING",
+                            "utm_motion_down": "DOWN",
+                            "utm_state_not_working": "NOT WORKING",
+                        }[check_id],
+                    }
+                    if check_id in {
+                        "utm_state_working",
+                        "utm_motion_down",
+                        "utm_state_not_working",
+                    }
+                    else {}
+                ),
             }
         )
     return {

@@ -64,6 +64,12 @@
       const skill = entries.find((item) => item && item.phase === "skill") || object(grouped.skill);
       const vision = entries.find((item) => item && item.phase === "vision") || object(grouped.vision);
       const visionEnabled = vision.enabled === true || vision.vision_link_enabled === true;
+      const visionOutcome = String(vision.outcome || (visionEnabled ? "waiting" : "bypass"));
+      const visionStatus = !visionEnabled || ["bypass", "waiting", "pending"].includes(visionOutcome.toLowerCase())
+        ? "waiting"
+        : ["detected", "completed", "complete", "success", "passed", "verified"].includes(visionOutcome.toLowerCase())
+          ? "success"
+          : "failed";
       const skillId = String(skill.skill_id || grouped.skill_id || "");
       const skillVersion = String(skill.skill_version || grouped.skill_version || "");
       return {
@@ -74,7 +80,10 @@
         vision: {
           optional: true,
           enabled: visionEnabled,
-          outcome: String(vision.outcome || (visionEnabled ? "waiting" : "bypass")),
+          blocking: vision.blocking !== false,
+          outcome: visionOutcome,
+          status: visionStatus,
+          label: String(vision.verification_label || vision.result_label || ""),
           taskId: String(vision.vision_task_id || vision.task_id || ""),
         },
       };

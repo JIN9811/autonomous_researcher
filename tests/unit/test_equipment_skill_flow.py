@@ -30,6 +30,7 @@ def _flow() -> dict:
                 "agentic": {"completed": "next", "failed": "__blocked__"},
                 "vision": {
                     "enabled": True,
+                    "blocking": False,
                     "task_id": "utm_pre_start",
                     "detected": "next",
                     "not_detected": "__blocked__",
@@ -66,6 +67,7 @@ def test_flow_store_round_trips_composite_blocks(tmp_path: Path) -> None:
     assert loaded["blocks"][0]["skill"]["skill_id"] == "utm_prepare"
     assert loaded["blocks"][0]["agentic"]["task"] == "Prepare UTM"
     assert loaded["blocks"][0]["vision"]["enabled"] is True
+    assert loaded["blocks"][0]["vision"]["blocking"] is False
     assert loaded["blocks"][0]["vision"]["task_id"] == "utm_pre_start"
     assert "condition" not in loaded["blocks"][0]["vision"]
     assert "nodes" not in loaded
@@ -90,7 +92,8 @@ def test_workflow_agentic_task_binding_round_trips_without_affecting_block_visio
     )
 
     assert flow["agentic_task_id"] == "run_utm_compression_cycle"
-    assert flow["blocks"][0]["vision"]["enabled"] is False
+    assert flow["blocks"][0]["vision"]["enabled"] is True
+    assert flow["blocks"][0]["vision"]["blocking"] is False
 
 
 def test_flow_rejects_unknown_workflow_agentic_task_id() -> None:
@@ -278,5 +281,9 @@ def test_runtime_graph_exposes_composite_control_lanes(tmp_path: Path) -> None:
     assert prepare_vision["metadata"]["timeout_s"] == 5
     assert any(edge["source"] == "prepare.skill" and edge["target"] == "prepare.vision" for edge in graph["edges"])
     identities = [(edge["source"], edge["target"], edge["condition"]) for edge in graph["edges"]]
-    assert identities.count(("prepare.vision", "test.skill", "detected")) == 1
+    assert identities.count(("prepare.vision", "test.skill", "observed")) == 1
+    assert not any(
+        source == "prepare.vision" and target == "__blocked__"
+        for source, target, _condition in identities
+    )
     assert ("prepare.vision", "test.skill", "next") not in identities

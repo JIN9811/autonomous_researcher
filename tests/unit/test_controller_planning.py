@@ -34,6 +34,37 @@ def test_planning_snapshot_preserves_latest_bo_visualization_projection() -> Non
     assert compact["bo_visualization"] == visualization
 
 
+def test_live_gui_analysis_message_preserves_normalized_curve_contract() -> None:
+    controller = load_runtime()
+    preview = [
+        {"strain_pct": float(index) * 70.0 / 199.0, "stress_MPa": float(index) / 10.0}
+        for index in range(200)
+    ]
+    analysis = {
+        "ok": True,
+        "specimen_geometry": {
+            "cross_section_area_mm2": 900.0,
+            "gauge_length_mm": 30.0,
+        },
+        "stress_strain_curve": {
+            "schema": "engineering_stress_strain_curve.v1",
+            "preview": preview,
+        },
+    }
+
+    stored = controller._compact_planning_message_for_storage(
+        {"role": "analysis_ai", "content": "dry-run analysis", "analysis": analysis}
+    )
+    displayed = controller._compact_planning_message_for_display(stored)
+
+    assert displayed["analysis"]["specimen_geometry"] == analysis["specimen_geometry"]
+    displayed_curve = displayed["analysis"]["stress_strain_curve"]
+    assert displayed_curve["schema"] == "engineering_stress_strain_curve.v1"
+    assert len(displayed_curve["preview"]) <= 80
+    assert displayed_curve["preview"][0] == preview[0]
+    assert displayed_curve["preview"][-1] == preview[-1]
+
+
 def test_force_bo_visualization_event_republishes_current_step() -> None:
     controller = load_runtime()
     visualization = {
@@ -92,6 +123,43 @@ def test_planning_cycle_contract_is_exposed_to_live_gui() -> None:
     assert compact["safety_budget"]["max_loop_count"] == 20
 
 
+def test_safe_preflight_execution_policy_is_validated_and_preserved_for_redesign() -> None:
+    controller = load_runtime()
+    requested = {
+        "printer": "preflight_only",
+        "manipulation": "preflight_only",
+        "lab_equipment": "preflight_only",
+        "cae": "execute",
+        "analysis": "execute",
+        "bo": "execute",
+    }
+
+    normalized = controller._normalize_execution_policy(requested)
+    constraints = controller._design_constraints_for_cycle(
+        {
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30.0, 30.0, 30.0],
+            "execution_policy": normalized,
+        }
+    )
+
+    assert normalized == requested
+    assert constraints["execution_policy"] == requested
+    assert controller._default_test_constraints({})["equipment_profile_id"] == "utm_windows_v1"
+
+    with pytest.raises(ValueError, match="unsupported execution policy"):
+        controller._normalize_execution_policy({"lab_equipment": "pretend_complete"})
+
+    assert controller._normalize_execution_policy({"printer": "execute"}) == {
+        "printer": "execute",
+        "manipulation": "preflight_only",
+        "lab_equipment": "preflight_only",
+        "cae": "execute",
+        "analysis": "execute",
+        "bo": "execute",
+    }
+
+
 def test_test_mode_json_declares_two_variable_lhs_then_gp_contract() -> None:
     controller = load_runtime()
 
@@ -103,9 +171,9 @@ def test_test_mode_json_declares_two_variable_lhs_then_gp_contract() -> None:
     optimization = normalized["design_optimization"]
     assert optimization["schema"] == "design_optimization_contract.v1"
     assert optimization["objective"] == {
-        "metric": "specific_energy_absorption_J_per_g",
+        "metric": "energy_density_50pct_MJ_per_m3",
         "direction": "maximize",
-        "unit": "J/g",
+        "unit": "MJ/m3",
     }
     assert optimization["active_variables"]["cell_size_mm"]["feasible_values"] == [5.0, 6.0, 7.5, 10.0]
     assert optimization["active_variables"]["relative_density"]["bounds"] == [0.20, 0.48]
@@ -116,6 +184,85 @@ def test_test_mode_json_declares_two_variable_lhs_then_gp_contract() -> None:
     }
     assert optimization["surrogate"]["kernel"] == "ard_matern_5_2_plus_noise"
     assert optimization["acquisition"] == "expected_improvement"
+
+
+def test_test_mode_partial_execution_policy_cannot_drop_safe_stage_defaults() -> None:
+    controller = load_runtime()
+    defaults = controller._default_test_constraints({})
+
+    normalized = controller._normalize_test_mode_constraints(
+        defaults,
+        {"execution_policy": {"cae": "execute"}},
+    )
+
+    assert normalized["execution_policy"] == {
+        "printer": "preflight_only",
+        "manipulation": "preflight_only",
+        "lab_equipment": "preflight_only",
+        "cae": "execute",
+        "analysis": "execute",
+        "bo": "execute",
+    }
+
+
+def test_hardware_free_preflight_policy_is_not_a_live_gui_test_default() -> None:
+    controller = load_runtime()
+
+    constraints = controller._normalize_test_mode_constraints(
+        controller._default_test_constraints({}),
+        {"cell_size_mm": 10.0, "relative_density": 0.35},
+    )
+
+    assert "execution_policy" not in constraints
+
+
+@pytest.mark.parametrize("choice", ["installed_printer", "physical_print"])
+def test_real_printer_choice_overrides_validation_only_policy_with_full_execution(choice: str) -> None:
+    controller = load_runtime()
+    validation_only = {
+        "printer": "preflight_only",
+        "manipulation": "preflight_only",
+        "lab_equipment": "preflight_only",
+        "cae": "execute",
+        "analysis": "execute",
+        "bo": "execute",
+    }
+
+    selected = controller._apply_specimen_printer_choice_to_spec(
+        {"test_mode_llm_generated": True, "execution_policy": validation_only},
+        choice,
+    )
+
+    assert selected["execution_policy"] == {
+        "printer": "execute",
+        "manipulation": "execute",
+        "lab_equipment": "execute",
+        "cae": "execute",
+        "analysis": "execute",
+        "bo": "execute",
+    }
+
+
+def test_planning_spec_without_explicit_policy_keeps_legacy_full_execution() -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+
+    spec = controller._build_planning_spec(
+        base_spec={
+            "candidate_id": "cand-live-physical",
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+        },
+        constraints={
+            "material": "PLA",
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+            "printer_test_path": "physical_print",
+            "test_mode_llm_generated": True,
+        },
+    )
+
+    assert "execution_policy" not in spec
 
 
 def test_test_mode_preserves_requested_lhs_count_in_design_contract() -> None:
@@ -1923,7 +2070,9 @@ async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
     assert constraints["printer_test_path"] == choice
     assert constraints["test_printer_transport"] == transport
     assert constraints["allow_test_printer_live"] is (choice != "virtual_bridge")
-    assert constraints["prefer_http_artifact"] is (choice == "installed_printer")
+    assert constraints["allow_test_equipment_live"] is (choice != "virtual_bridge")
+    assert constraints["equipment_agentic_confirm_execute"] is (choice != "virtual_bridge")
+    assert constraints["prefer_http_artifact"] is (choice in {"installed_printer", "physical_print"})
     print_request = constraints["print"]
     assert isinstance(print_request, dict)
     assert print_request["start_immediately"] is physical
@@ -1942,6 +2091,7 @@ async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
         assert constraints["ejection"]["source"] == "installed_printer_ejection_only_project_file"
     elif choice == "physical_print":
         assert print_request["use_ejection_only_project_file"] is False
+        assert print_request["prefer_http_artifact"] is True
         assert constraints["ejection"]["enabled"] is True
         assert constraints["ejection"]["allow_ejection"] is True
         assert constraints["ejection"]["use_ejection_only_project_file"] is False

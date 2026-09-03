@@ -23,6 +23,7 @@ Modification guide:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -1290,9 +1291,227 @@ class PrinterAgenticWorkflow:
 
     def prepare(self, payload: dict[str, Any]) -> dict[str, Any]:
         runtime_mode = str(payload.get("runtime_mode") or self.config.mode or "test").strip().lower()
+        if self._printer_preflight_only(payload):
+            return self._prepare_no_actuation_physical_preflight(payload, runtime_mode=runtime_mode)
         if runtime_mode in {"live", "production"}:
             return self._prepare_live(payload)
         return self._prepare_test(payload)
+
+    @staticmethod
+    def _printer_preflight_only(payload: dict[str, Any]) -> bool:
+        return str(payload.get("execution_policy_mode") or "").strip().lower() == "preflight_only"
+
+    def _prepare_no_actuation_physical_preflight(
+        self,
+        payload: dict[str, Any],
+        *,
+        runtime_mode: str,
+    ) -> dict[str, Any]:
+        """Prepare the exact Prusa artifact while stopping before every PrusaLink call."""
+        specimen_id = self._specimen_id(payload)
+        stl_path = payload.get("stl_path")
+        trace = [
+            self._step("PRECHECK", "ok", "execution_policy_mode=preflight_only"),
+            self._step("RESOLVE_STL", "ok" if stl_path else "blocked", None if stl_path else "missing stl_path"),
+        ]
+        experiment_spec = payload.get("experiment_spec") if isinstance(payload.get("experiment_spec"), dict) else {}
+        slice_result = self.slicer.slice(
+            stl_path,
+            specimen_id=specimen_id,
+            simulate=False,
+            printer_profile=payload.get("printer_profile"),
+            material=payload.get("material"),
+            slicer_profile_hint=payload.get("slicer_profile_hint"),
+            experiment_spec=experiment_spec,
+        )
+        trace.append(self._step("SLICE_ARTIFACT", "ok" if slice_result.get("ok") else "blocked", slice_result.get("failure_code")))
+        if not slice_result.get("ok") or not slice_result.get("sliced_path"):
+            return self._preflight_result(
+                payload=payload,
+                runtime_mode=runtime_mode,
+                specimen_id=specimen_id,
+                stl_path=stl_path,
+                slice_result=slice_result,
+                trace=trace,
+                failure_code=str(slice_result.get("failure_code") or "PRUSA_PREFLIGHT_SLICE_FAILED"),
+            )
+
+        source_validation = GCodeSafetyValidator.validate_print_gcode(slice_result.get("sliced_path"))
+        trace.append(
+            self._step(
+                "VALIDATE_SOURCE_GCODE",
+                "ok" if source_validation.get("ok") else "blocked",
+                source_validation.get("failure_code"),
+            )
+        )
+        if not source_validation.get("ok"):
+            return self._preflight_result(
+                payload=payload,
+                runtime_mode=runtime_mode,
+                specimen_id=specimen_id,
+                stl_path=stl_path,
+                slice_result=slice_result,
+                trace=trace,
+                failure_code=str(source_validation.get("failure_code") or "PRUSA_PREFLIGHT_GCODE_INVALID"),
+                artifact_validation=source_validation,
+            )
+
+        ejection_request = payload.get("ejection") if isinstance(payload.get("ejection"), dict) else {}
+        ejection_requested = bool(ejection_request.get("enabled", self.config.ejection.enabled))
+        if not ejection_requested:
+            trace.append(self._step("PATCH_AUTOEJECTION_TAIL", "blocked", "PRUSA_PREFLIGHT_AUTOEJECTION_REQUIRED"))
+            return self._preflight_result(
+                payload=payload,
+                runtime_mode=runtime_mode,
+                specimen_id=specimen_id,
+                stl_path=stl_path,
+                slice_result=slice_result,
+                trace=trace,
+                failure_code="PRUSA_PREFLIGHT_AUTOEJECTION_REQUIRED",
+                artifact_validation=source_validation,
+            )
+        if str(self.config.ejection.mode).strip().lower() != "append_end_gcode":
+            trace.append(self._step("PATCH_AUTOEJECTION_TAIL", "blocked", "PRUSA_PREFLIGHT_INLINE_AUTOEJECTION_REQUIRED"))
+            return self._preflight_result(
+                payload=payload,
+                runtime_mode=runtime_mode,
+                specimen_id=specimen_id,
+                stl_path=stl_path,
+                slice_result=slice_result,
+                trace=trace,
+                failure_code="PRUSA_PREFLIGHT_INLINE_AUTOEJECTION_REQUIRED",
+                artifact_validation=source_validation,
+            )
+
+        ejection_result = self._append_ejection_to_sliced_artifact(
+            slice_result,
+            require_object_bounds=True,
+        )
+        trace.append(
+            self._step(
+                "PATCH_AUTOEJECTION_TAIL",
+                "ok" if ejection_result.get("status") == "appended_to_print_gcode" else "blocked",
+                ejection_result.get("failure_code"),
+            )
+        )
+        appended_path = Path(str(ejection_result.get("appended_gcode_path") or ""))
+        artifact_validation = (
+            GCodeSafetyValidator.validate_print_gcode(appended_path)
+            if appended_path.is_file()
+            else {
+                "ok": False,
+                "failure_code": str(ejection_result.get("failure_code") or "PRUSA_PREFLIGHT_AUTOEJECTION_PATCH_FAILED"),
+            }
+        )
+        trace.append(
+            self._step(
+                "VALIDATE_IMMUTABLE_ARTIFACT",
+                "ok" if artifact_validation.get("ok") else "blocked",
+                artifact_validation.get("failure_code"),
+            )
+        )
+        ready = bool(
+            ejection_result.get("status") == "appended_to_print_gcode"
+            and artifact_validation.get("ok")
+            and appended_path.is_file()
+        )
+        trace.append(self._step("STOP_BEFORE_PRUSALINK", "ok"))
+        return self._preflight_result(
+            payload=payload,
+            runtime_mode=runtime_mode,
+            specimen_id=specimen_id,
+            stl_path=stl_path,
+            slice_result=slice_result,
+            trace=trace,
+            failure_code="" if ready else str(
+                artifact_validation.get("failure_code")
+                or ejection_result.get("failure_code")
+                or "PRUSA_PREFLIGHT_FAILED"
+            ),
+            artifact_validation=artifact_validation,
+            ejection_result=ejection_result,
+            immutable_artifact_path=appended_path if ready else None,
+        )
+
+    def _preflight_result(
+        self,
+        *,
+        payload: dict[str, Any],
+        runtime_mode: str,
+        specimen_id: str,
+        stl_path: Any,
+        slice_result: dict[str, Any],
+        trace: list[dict[str, Any]],
+        failure_code: str,
+        artifact_validation: dict[str, Any] | None = None,
+        ejection_result: dict[str, Any] | None = None,
+        immutable_artifact_path: Path | None = None,
+    ) -> dict[str, Any]:
+        ready = not failure_code and immutable_artifact_path is not None and immutable_artifact_path.is_file()
+        ejection_result = ejection_result or {}
+        immutable_path = str(immutable_artifact_path) if ready else ""
+        digest = hashlib.sha256(immutable_artifact_path.read_bytes()).hexdigest() if ready else ""
+        preflight = {
+            "schema": "printer_preflight.v1",
+            "status": "execution_ready_pending_approval" if ready else "blocked",
+            "failure_code": failure_code,
+            "actuation_performed": False,
+            "status_probe_performed": False,
+            "upload_performed": False,
+            "start_command_published": False,
+            "would_execute_tool": "printer.prepare",
+            "provider": self.config.provider,
+            "run_id": str(payload.get("run_id") or ""),
+            "candidate_id": str(payload.get("candidate_id") or ""),
+            "specimen_id": specimen_id,
+            "source_artifact_path": str(slice_result.get("sliced_path") or ""),
+            "immutable_artifact_path": immutable_path,
+            "artifact_sha256": digest,
+            "artifact_validation": artifact_validation or {},
+            "source_object_bounds_mm": ejection_result.get("object_bounds") or {},
+            "autoejection_patch": ejection_result,
+        }
+        return {
+            "ok": ready,
+            "tool": "printer.prepare",
+            "mode": runtime_mode,
+            "provider": self.config.provider,
+            "printer_path": "physical_print",
+            "physical_transport": False,
+            "status": preflight["status"],
+            "failure_code": failure_code,
+            "specimen_id": specimen_id,
+            "stl_path": stl_path,
+            "sliced_path": immutable_path or str(slice_result.get("sliced_path") or ""),
+            "slicer_settings": slice_result.get("slicer_settings", {}),
+            "slicer_result": slice_result,
+            "gcode_validation": artifact_validation or {},
+            "printer": {
+                "provider": self.config.provider,
+                "state": "not_probed_preflight_only",
+                "status": {},
+            },
+            "prusalink": {"transport": "not_contacted", "status_probe_performed": False},
+            "print_result": {
+                "status": "preflight_only" if ready else "blocked",
+                "published": False,
+                "upload_performed": False,
+                "start_command_published": False,
+            },
+            "ejection_result": {
+                **ejection_result,
+                "status": "embedded_not_executed" if ready else "blocked",
+                "attempts": 0,
+                "actuation_performed": False,
+            },
+            "printer_preflight": preflight,
+            "step_trace": trace,
+            "artifacts": {
+                "stl_path": stl_path,
+                "sliced_path": immutable_path or str(slice_result.get("sliced_path") or ""),
+                "ejection_gcode_path": immutable_path,
+            },
+        }
 
     def health(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
@@ -1825,10 +2044,30 @@ class PrinterAgenticWorkflow:
                     "failure_code": "PHYSICAL_WRITE_DISABLED_IN_TEST",
                     "mode": "append_end_gcode",
                 }
+        return self._append_ejection_to_sliced_artifact(
+            slice_result,
+            printer_status=printer_status,
+        )
+
+    def _append_ejection_to_sliced_artifact(
+        self,
+        slice_result: dict[str, Any],
+        *,
+        printer_status: dict[str, Any] | None = None,
+        require_object_bounds: bool = False,
+    ) -> dict[str, Any]:
+        """Append and validate auto-ejection locally, without any transport operation."""
         source = Path(str(slice_result.get("sliced_path") or ""))
-        if not source.exists():
+        if not source.is_file():
             return {"status": "failed", "attempts": 0, "failure_code": "GCODE_INPUT_MISSING", "mode": "append_end_gcode"}
         object_bounds = GCodeObjectBoundsExtractor.from_path(source)
+        if require_object_bounds and object_bounds is None:
+            return {
+                "status": "failed",
+                "attempts": 0,
+                "failure_code": "PRUSA_PREFLIGHT_EXTRUSION_BOUNDS_REQUIRED",
+                "mode": "append_end_gcode",
+            }
         built = self.ejection_builder.build(object_bounds=object_bounds)
         if not built.get("ok"):
             return {
@@ -2586,11 +2825,24 @@ class PrinterAgenticWorkflow:
                 result["attempts"] = attempt
                 result["retry_history"] = history
                 return result
+            if result.get("ok"):
+                # The printer accepted the start command, so a lagging status
+                # probe cannot prove that resending it is safe.
+                result["ok"] = False
+                result["status"] = "effect_unknown"
+                result["failure_code"] = "START_PRINT_EFFECT_UNKNOWN"
+                result["retryable"] = False
+                result["operator_intervention_required"] = True
+                result["attempts"] = attempt
+                result["retry_history"] = history
+                return result
             if attempt >= attempts:
-                if result.get("ok") and not confirm.get("ok"):
-                    result["ok"] = False
-                    result["status"] = "not_started"
-                    result["failure_code"] = "START_PRINT_NOT_CONFIRMED"
+                result["attempts"] = attempt
+                result["retry_history"] = history
+                return result
+            if int(result.get("status_code") or 0) != 409:
+                result["retryable"] = False
+                result["operator_intervention_required"] = True
                 result["attempts"] = attempt
                 result["retry_history"] = history
                 return result

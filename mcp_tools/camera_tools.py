@@ -19,6 +19,11 @@ from utils.utm_specimen_presence import inspect_specimen_presence, virtual_speci
 
 UTM_CHECK_IDS = set(EQUIPMENT_VISION_TASK_IDS)
 UTM_MOTION_TRANSITIONS = {"NOT_WORKING_TO_WORKING", "WORKING_TO_NOT_WORKING"}
+UTM_PASSIVE_VERIFICATIONS = {
+    "utm_state_working": ("WORKING", "state"),
+    "utm_motion_down": ("DOWN", "motion_direction"),
+    "utm_state_not_working": ("NOT WORKING", "state"),
+}
 
 
 def _now() -> datetime:
@@ -62,16 +67,18 @@ def _simulated_result(item: dict[str, Any], *, mode: str, ok: bool, confidence: 
 
 
 def _virtual_utm_observation(check_id: str) -> dict[str, Any]:
-    if check_id == "utm_test_complete":
+    if check_id in {"utm_test_complete", "utm_state_not_working"}:
         transition = "WORKING_TO_NOT_WORKING"
         final = "NOT_WORKING"
         working = 5
         not_working = 15
+        motion_direction = "UP"
     else:
         transition = "NOT_WORKING_TO_WORKING"
         final = "WORKING"
         working = 15
         not_working = 5
+        motion_direction = "DOWN"
     return {
         "ok": True,
         "duration_sec": 5.0,
@@ -84,6 +91,7 @@ def _virtual_utm_observation(check_id: str) -> dict[str, Any]:
         "final_state": final,
         "transition": transition,
         "stable_state": "",
+        "motion_direction": motion_direction,
         "span_y_delta": 90.0,
         "source": "virtual_utm_bridge",
         "virtual_frame_id": f"virtual-frame-{check_id}",
@@ -109,6 +117,18 @@ def _utm_result_from_observation(
     if not ok:
         failure_code = str(observation.get("failure_code") or "UTM_EVIDENCE_UNAVAILABLE")
         message = "UTM ROS topic evidence is not yet sufficient."
+    elif check_id in UTM_PASSIVE_VERIFICATIONS:
+        verification_label, observation_kind = UTM_PASSIVE_VERIFICATIONS[check_id]
+        if observation_kind == "state":
+            expected = verification_label.replace(" ", "_")
+            observed = str(observation.get("stable_state") or observation.get("final_state") or "UNKNOWN").upper()
+        else:
+            expected = verification_label
+            observed = str(observation.get("motion_direction") or "UNKNOWN").upper()
+        if observed != expected:
+            ok = False
+            failure_code = "UTM_EXPECTED_VISION_RESULT_MISMATCH"
+            message = f"Expected UTM Vision result {verification_label}, observed {observed}."
     elif check_id == "utm_motion_confirm" and transition not in UTM_MOTION_TRANSITIONS:
         ok = False
         failure_code = "UTM_MOTION_NOT_CONFIRMED"
@@ -139,6 +159,16 @@ def _utm_result_from_observation(
         "freshness_ttl_ms": ttl_ms,
         "source": source,
     }
+    if check_id in UTM_PASSIVE_VERIFICATIONS:
+        verification_label, observation_kind = UTM_PASSIVE_VERIFICATIONS[check_id]
+        result["verification_label"] = verification_label
+        result["observed_result"] = (
+            str(observation.get("stable_state") or observation.get("final_state") or "UNKNOWN").upper().replace("_", " ")
+            if observation_kind == "state"
+            else str(observation.get("motion_direction") or "UNKNOWN").upper()
+        )
+    if failure_code:
+        result["failure_code"] = failure_code
     return result, failure_code
 
 

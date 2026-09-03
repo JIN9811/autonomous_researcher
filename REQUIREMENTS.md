@@ -123,15 +123,14 @@ Optional but commonly used:
   `개선안/16_utm_ros_runtime_bridge_live_gui_plan.md`. Camera bridge setup,
   V4L2 device mapping, frame probe, and checkerboard calibration are tracked in
   `개선안/17_vision_agent_camera_device_bridge_live_gui_plan.md`. The stable
-  BRIO-class UVC profile on this workstation is `640x480 @ 15fps`,
-  `pixel_format=yuyv2rgb`; ATR pins
+  BRIO-class UVC profile on this workstation is `640x480 @ 60fps`,
+  `pixel_format=mjpeg2rgb`, `io_method=mmap`; ATR pins
   `exposure_dynamic_framerate=0` with `v4l2-ctl` before runtime start and
   records the result in `startup_camera_controls`. ATR image snapshot/MJPEG,
-  UTM green-dot image input/output, and YOLO image subscribers are configured as live
-  evidence streams with Best Effort, Keep Last, depth 1. The system ROS
-  `usb_cam` publisher may still report RELIABLE QoS; if raw ROS camera FPS drops
-  below target, patch or replace the camera publisher rather than increasing GUI
-  queues. OpenCV CUDA color conversion was tested and removed because the ROS
+  UTM green-dot image input/output, and YOLO image subscribers use RELIABLE,
+  Keep Last, depth 1. This matches the system `usb_cam` and `image_proc`
+  publishers and avoids the severe large-image loss measured with mixed
+  Best Effort subscribers. OpenCV CUDA color conversion was tested and removed because the ROS
   Python OpenCV runtime on this workstation reports zero CUDA devices; keep the
   MJPEG worker on the CPU path unless a real CUDA-enabled OpenCV runtime is
   installed and re-benchmarked.
@@ -193,7 +192,8 @@ Optional but commonly used:
   debugging helpers, not the primary GUI rendering path.
   Live camera FPS troubleshooting should start at `/camera/image_raw`. If
   `/camera/image_raw` is already below target, the problem is camera/V4L2/USB
-  input, not browser rendering. The accepted local fix is `yuyv2rgb` plus
+  input, not browser rendering. The accepted local profile is `mjpeg2rgb` at
+  `60fps` via `mmap`, plus
   `v4l2-ctl --device=<camera> --set-ctrl=exposure_dynamic_framerate=0`.
   Local disk note: `/home/jin/external_repos/yolo_ros` is about 5 GB after
   `uv sync` because it contains PyTorch/CUDA wheels.

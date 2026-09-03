@@ -3070,6 +3070,57 @@ def test_isaac_lab_export_hdf5_blocks_invalid_episode_parquet(tmp_path: Path) ->
     assert status["hdf5"]["canonical_frame_count"] == 3
 
 
+def test_isaac_lab_workspace_contract_matches_active_cam_bounds(tmp_path: Path) -> None:
+    bridge = _bridge(tmp_path)
+    pipeline = bridge._isaac_lab_synthetic_pipeline()  # noqa: SLF001
+    request = IsaacLabSyntheticRequest(stage_path=str(tmp_path / "omx_table_layout.usda"))
+
+    scene_contract = pipeline._robotis_mimic_scene_contract(request)  # noqa: SLF001
+    env_manifest = pipeline._omx_lab_env_wrapper_manifest(  # noqa: SLF001
+        request,
+        tmp_path / "dataset",
+        tmp_path / "output",
+        tmp_path / "manifest.jsonl",
+        tmp_path / "events.json",
+    )
+
+    assert scene_contract["a4_sheet"] == {
+        "center_m": [0.315, 0.245, 0.00006],
+        "size_m": [0.17, 0.25, 0.00012],
+    }
+    assert env_manifest["object_pose_contract"]["a4_size_m"] == {"x": 0.17, "y": 0.25}
+    assert env_manifest["object_pose_contract"]["local_bounds_m"] == {
+        "x": [-0.085, 0.085],
+        "y": [0.0, 0.25],
+    }
+    assert env_manifest["object_pose_contract"]["world_bounds_m"] == {
+        "x": [0.23, 0.4],
+        "y": [0.12, 0.37],
+    }
+
+
+def test_generated_pose_raster_uses_lateral_plus_forward_workspace() -> None:
+    poses = np.repeat(np.eye(4, dtype=np.float64)[None, :, :], 2, axis=0)
+    poses[0, 0, 3] = -0.085
+    poses[0, 1, 3] = 0.0
+    poses[1, 0, 3] = 0.085
+    poses[1, 1, 3] = 0.25
+
+    observations = isaac_lab_synthetic.IsaacLabSyntheticPipeline._generated_pose_raster_observations(  # noqa: SLF001
+        {},
+        object_pose=poses,
+        frame_count=2,
+    )
+    rgb = observations["top_rgb"]
+    first_y, first_x = np.where(np.all(rgb[0] == [202, 63, 48], axis=-1))
+    last_y, last_x = np.where(np.all(rgb[1] == [202, 63, 48], axis=-1))
+
+    assert float(first_x.mean()) <= 10.0
+    assert float(first_y.mean()) <= 10.0
+    assert float(last_x.mean()) >= 73.0
+    assert float(last_y.mean()) >= 73.0
+
+
 def test_isaac_lab_mimic_and_rl_hooks_track_hdf5_readiness(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
     dataset = tmp_path / "hf_datasets" / "local" / "demo"

@@ -495,11 +495,11 @@ def main():
         desk_edge_mat,
     )
 
-    # A4 sheet from drawing: 297 x 210 mm, 40 mm behind the robot base and symmetric to robot center.
-    a4_w = 0.297
-    a4_h = 0.210
+    # Active-Cam workspace: 170 mm lateral (robot center +/-85 mm) x 250 mm forward.
+    a4_w = 0.170
+    a4_h = 0.250
     a4_center_x = robot_center_x
-    a4_bottom_y = 0.120 + 0.040
+    a4_bottom_y = robot_slot_y_max
     paper_th = 0.00012
     apply_static_collider(
         cube(

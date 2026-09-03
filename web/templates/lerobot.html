@@ -835,6 +835,9 @@ Modification guide:
             <button id="btn-train-cancel" class="btn danger">Cancel Train</button>
             <button id="btn-train-status" class="btn">Status</button>
             <button id="btn-policy-refresh" class="btn">Refresh Policies</button>
+            <label class="checkbox-line inline-check" title="Keep training running when the ATR GUI server stops.">
+              <input id="lerobot-train-background-input" type="checkbox" checked /> Background Train
+            </label>
           </div>
           <div id="lerobot-train-action-status" class="lerobot-action-status idle">Waiting for training action.</div>
           <div id="lerobot-policy-list" class="lerobot-policy-list"></div>
@@ -926,6 +929,11 @@ Modification guide:
           <div class="button-row compact">
             <button id="btn-rollout-save" class="btn">Save Rollout Defaults</button>
             <button id="btn-rollout-start" class="btn primary">Start Rollout</button>
+            <label class="checkbox-inline" title="Use PLC PB2 to stop rollouts started from this workspace when the PLC fast-stop monitor is online.">
+              <input id="lerobot-plc-rollout-stop-input" type="checkbox" disabled />
+              PLC Stop
+              <span id="lerobot-plc-rollout-stop-status" class="hint">offline</span>
+            </label>
             <button id="btn-rollout-stop" class="btn danger">Stop Rollout</button>
             <button id="btn-rollout-status" class="btn">Status</button>
             <button id="btn-dataset-inspect" class="btn">Inspect Dataset</button>
@@ -1459,6 +1467,6 @@ val=48-59</textarea>
         </article>
       </section>
     </main>
-    <script src="/static/lerobot.js?v=20260901-dataset-manage-1" defer></script>
+    <script src="/static/lerobot.js?v=20260903-background-train-1" defer></script>
   </body>
 </html>

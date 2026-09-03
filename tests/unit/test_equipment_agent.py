@@ -18,6 +18,7 @@ from mcp_tools.equipment_tools import register_equipment_tools
 from mcp_tools.mock_tools import register_mock_tools
 from mcp_tools.tool_registry import ToolRegistry
 from orchestrator.state import Mode, OrchestratorState, Stage
+from policies.guardian_gate import gate_blocks_execution, guardian_gate
 from utils.equipment_skill_runtime import EquipmentSkillRegistry, SkillContractError, canonical_sha256
 from utils.equipment_skill_flow import EquipmentSkillFlowStore
 from utils.equipment_agentic_task import build_utm_compression_flow_template
@@ -26,6 +27,11 @@ from utils.equipment_agentic_task import build_utm_compression_flow_template
 @pytest.fixture(autouse=True)
 def _isolated_equipment_runtime(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(LabEquipmentAgent, "_RUNTIME_ROOT", tmp_path / "equipment_runtime")
+    monkeypatch.setattr(
+        LabEquipmentAgent,
+        "_SKILL_FLOW_PATH",
+        tmp_path / "equipment_skill_flows.json",
+    )
 
 
 class _CtxStub:
@@ -151,7 +157,6 @@ async def test_equipment_skill_executes_segments_without_llm_call(tmp_path: Path
             }
         }
     )
-
     result = await LabEquipmentAgent().run(state, ctx)
 
     assert result.success is True
@@ -163,13 +168,212 @@ async def test_equipment_skill_executes_segments_without_llm_call(tmp_path: Path
 
 
 @pytest.mark.asyncio
+async def test_equipment_skill_sends_declared_program_timeout_to_bridge(tmp_path: Path) -> None:
+    tools = _tools(tmp_path)
+    registry_root = tmp_path / "skills"
+    registry = EquipmentSkillRegistry(registry_root)
+    recording = _saved_recording()
+    recording["events"] = [
+        {"kind": "wait", "at_ms": 0, "seconds": 30},
+        {"kind": "wait", "at_ms": 30_000, "seconds": 30},
+        {"kind": "wait", "at_ms": 60_000, "seconds": 30},
+    ]
+    registry.create_draft(
+        recording=recording,
+        skill_id="long_wait_skill",
+        version="1.0.0",
+        target_profile="windows_desktop_v1",
+        model_snapshot={"provider": "vllm", "model": "gemma4:e4b-it-nvfp4"},
+    )
+    package = registry.compile("long_wait_skill", "1.0.0")
+    registry.validate("long_wait_skill", "1.0.0")
+    registry.mark_deployed(
+        "long_wait_skill",
+        "1.0.0",
+        bridge_id="equipment-worker",
+        deployment_sha256=canonical_sha256(package["programs"]),
+    )
+    run_payloads: list[dict[str, Any]] = []
+    tools.register(
+        "equipment.pyautogui.run",
+        lambda payload: run_payloads.append(dict(payload))
+        or {
+            "ok": True,
+            "status": "completed",
+            "program_id": payload["program_id"],
+            "sequence_id": payload["sequence_id"],
+        },
+    )
+    request = {
+        "skill_id": "long_wait_skill",
+        "version": "1.0.0",
+        "target_profile": "windows_desktop_v1",
+        "registry_root": str(registry_root),
+        "sequence_id": "run-test-long-wait",
+        "skip_profile_vision_preflight": True,
+        "completion_scope": "skill_step",
+    }
+
+    result = await LabEquipmentAgent()._run_equipment_skill(
+        _state(mode=Mode.LIVE),
+        _CtxStub(tools, "must not be used"),
+        request,
+    )
+
+    assert result.success is True
+    assert run_payloads[0]["declared_execution_timeout_s"] == 90.0
+
+
+@pytest.mark.asyncio
+async def test_physical_test_loop_runs_every_equipment_segment_live_with_explicit_approval(
+    tmp_path: Path,
+) -> None:
+    """A GUI test loop with real hardware must keep the Guardian approval contract."""
+    tools = ToolRegistry()
+    registry_root = tmp_path / "skills"
+    registry = EquipmentSkillRegistry(registry_root)
+    registry.create_draft(
+        recording=_saved_recording(),
+        skill_id="utm_prepare_next_specimen",
+        version="1.0.0",
+        target_profile="windows_desktop_v1",
+        model_snapshot={"provider": "vllm", "model": "gemma4:e4b-it-nvfp4"},
+    )
+    package = registry.compile("utm_prepare_next_specimen", "1.0.0")
+    registry.validate("utm_prepare_next_specimen", "1.0.0")
+    registry.mark_deployed(
+        "utm_prepare_next_specimen",
+        "1.0.0",
+        bridge_id="windows_192.168.50.201",
+        deployment_sha256=canonical_sha256(package["programs"]),
+    )
+    run_payloads: list[dict[str, Any]] = []
+    tools.register(
+        "equipment.pyautogui.run",
+        lambda payload: run_payloads.append(dict(payload))
+        or {"ok": True, "status": "completed", "program_id": payload["program_id"]},
+    )
+    state = _state(
+        mode=Mode.TEST,
+        experiment_spec={
+            "test_mode_autofill": True,
+            "printer_test_path": "installed_printer",
+            "test_printer_transport": "real",
+            "allow_test_equipment_live": True,
+            "equipment_agentic_confirm_execute": True,
+        },
+    )
+
+    result = await LabEquipmentAgent()._run_equipment_skill(
+        state,
+        _CtxStub(tools, "must not be used"),
+        {
+            "skill_id": "utm_prepare_next_specimen",
+            "version": "1.0.0",
+            "target_profile": "windows_desktop_v1",
+            "registry_root": str(registry_root),
+            "skip_profile_vision_preflight": True,
+            "completion_scope": "skill_step",
+        },
+    )
+
+    assert result.success is True
+    assert run_payloads
+    assert all(payload["runtime_mode"] == "live" for payload in run_payloads)
+    assert all(payload["confirm_execute"] is True for payload in run_payloads)
+    assert all(payload["confirm_live_execute"] is True for payload in run_payloads)
+    gate = guardian_gate(
+        state=state,
+        stage="equipment",
+        phase="action",
+        agent="equipment_agent",
+        tool="equipment.pyautogui.run",
+        action="pre_tool_call",
+        payload=run_payloads[0],
+    )
+    assert gate_blocks_execution(gate) is False
+    assert not any(alarm["reason_code"] == "HUMAN_APPROVAL_REQUIRED" for alarm in gate["alarms"])
+
+
+@pytest.mark.asyncio
+async def test_agentic_flow_skill_step_does_not_require_whole_utm_cycle_evidence(
+    tmp_path: Path,
+) -> None:
+    """A successful Move Jigs step must not be judged as the final UTM handoff."""
+    tools = _tools(tmp_path)
+    registry_root = tmp_path / "skills"
+    registry = EquipmentSkillRegistry(registry_root)
+    registry.create_draft(
+        recording=_saved_recording(),
+        skill_id="utm_prepare_step",
+        version="1.0.0",
+        target_profile="utm_windows_v1",
+        model_snapshot={"provider": "vllm", "model": "gemma4:e4b-it-nvfp4"},
+    )
+    package = registry.compile("utm_prepare_step", "1.0.0")
+    registry.validate("utm_prepare_step", "1.0.0")
+    for program in package["programs"]:
+        assert tools.call(
+            "equipment.pyautogui.register_program",
+            {"runtime_mode": "test", "program": program},
+        )["ok"]
+    registry.mark_deployed(
+        "utm_prepare_step",
+        "1.0.0",
+        bridge_id="simulator",
+        deployment_sha256=canonical_sha256(package["programs"]),
+    )
+    tools.register(
+        "equipment.pyautogui.run",
+        lambda payload: {
+            "ok": True,
+            "status": "completed",
+            "program_id": payload["program_id"],
+            "sequence_id": payload["sequence_id"],
+            "screen_checks": [{"checkpoint": "move_jigs_complete", "ok": True}],
+        },
+    )
+    request_log_calls: list[dict[str, Any]] = []
+    tools.register(
+        "equipment.pyautogui.request_log",
+        lambda payload: request_log_calls.append(dict(payload)) or {"ok": True},
+    )
+    request = {
+        "skill_id": "utm_prepare_step",
+        "version": "1.0.0",
+        "target_profile": "utm_windows_v1",
+        "registry_root": str(registry_root),
+        "sequence_id": "run-test-flow-prepare-0",
+        "task": "Move Jigs for Next Specimen",
+        "skip_profile_vision_preflight": True,
+        "completion_scope": "skill_step",
+    }
+    agent = LabEquipmentAgent()
+    ctx = _CtxStub(tools, "must not be used")
+
+    state = _state(mode=Mode.LIVE)
+    first = await agent._run_equipment_skill(state, ctx, request)
+    resumed = await agent._run_equipment_skill(state, ctx, request)
+
+    assert first.success is True
+    assert first.data["equipment_handoff"]["status"] == "execution_complete"
+    assert first.data["equipment_handoff"]["ready_for_analysis"] is False
+    assert first.data["equipment_skill_execution"]["runtime_execution"]["lifecycle"] == "COMPLETED"
+    assert resumed.success is True
+    assert resumed.data["equipment_skill_execution"]["idempotent"] is True
+    assert request_log_calls == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("vision_enabled", "vision_response", "expected_outcome", "expected_success"),
+    ("vision_enabled", "vision_blocking", "vision_response", "expected_outcome", "expected_success"),
     [
-        (False, None, "bypass", True),
-        (True, {"ok": True, "results": [{"ok": True}]}, "detected", True),
-        (True, {"ok": False, "results": [{"ok": False}]}, "not_detected", False),
+        (False, True, None, "bypass", True),
+        (True, True, {"ok": True, "results": [{"ok": True}]}, "detected", True),
+        (True, True, {"ok": False, "results": [{"ok": False}]}, "not_detected", False),
+        (True, False, {"ok": False, "results": [{"ok": False}]}, "not_detected", True),
         (
+            True,
             True,
             {
                 "ok": False,
@@ -181,6 +385,7 @@ async def test_equipment_skill_executes_segments_without_llm_call(tmp_path: Path
         ),
         (
             True,
+            True,
             {
                 "ok": False,
                 "failure_code": "UTM_MOTION_NOT_CONFIRMED",
@@ -190,6 +395,7 @@ async def test_equipment_skill_executes_segments_without_llm_call(tmp_path: Path
             False,
         ),
         (
+            True,
             True,
             {
                 "ok": False,
@@ -205,6 +411,7 @@ async def test_equipment_skill_flow_executes_composite_block_and_vision_route(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     vision_enabled: bool,
+    vision_blocking: bool,
     vision_response: dict[str, Any] | None,
     expected_outcome: str,
     expected_success: bool,
@@ -249,6 +456,7 @@ async def test_equipment_skill_flow_executes_composite_block_and_vision_route(
                     },
                     "vision": {
                         "enabled": vision_enabled,
+                        "blocking": vision_blocking,
                         "task_id": "utm_motion_confirm",
                         "detected": "__complete__",
                         "not_detected": "__blocked__",
@@ -313,6 +521,10 @@ async def test_equipment_skill_flow_executes_composite_block_and_vision_route(
         assert execution["transitions"][1]["check_id"] == "utm_motion_confirm"
         assert execution["transitions"][1]["vision_task_label"] == (
             "UTM Motion Confirmation"
+        )
+        assert execution["transitions"][1]["blocking"] is vision_blocking
+        assert execution["transitions"][1]["kind"] == (
+            "vision_gate" if vision_blocking else "vision_observation"
         )
     else:
         assert vision_payloads == []
@@ -403,6 +615,67 @@ async def test_equipment_agentic_task_preserves_cycle_evidence_failure_code(
     assert result.success is False
     assert result.data["handoff_eligibility"]["failure_code"] == "RAW_CSV_VALIDATION_FAILED"
     assert result.data["equipment_handoff"]["failure_code"] == "RAW_CSV_VALIDATION_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_raw_csv_skill_payload_gets_context_from_agentic_state(tmp_path: Path) -> None:
+    """Catch agentic Raw CSV saves dispatching without the required export_context."""
+    tools = ToolRegistry()
+    run_calls: list[dict[str, Any]] = []
+    tools.register(
+        "equipment.pyautogui.run",
+        lambda payload: run_calls.append(dict(payload)) or {"ok": True, "status": "completed"},
+    )
+    registry_root = tmp_path / "skills"
+    registry = EquipmentSkillRegistry(registry_root)
+    registry.create_draft(
+        recording=_saved_recording(),
+        skill_id="utm_save_raw_data",
+        version="1.0.11",
+        target_profile="utm_windows_v1",
+        model_snapshot={"provider": "vllm", "model": "gemma4:e4b-it-nvfp4"},
+    )
+    package = registry.compile("utm_save_raw_data", "1.0.11")
+    registry.validate("utm_save_raw_data", "1.0.11")
+    registry.mark_deployed(
+        "utm_save_raw_data",
+        "1.0.11",
+        bridge_id="windows_192.168.50.201",
+        deployment_sha256=canonical_sha256(package["programs"]),
+    )
+    state = _state(
+        mode=Mode.LIVE,
+        experiment_spec={
+            "specimen_id": "cube-03",
+            "equipment_profile_id": "utm_windows_v1",
+            "equipment_agentic_confirm_execute": True,
+        },
+    )
+    state.active_session_id = "session-20260902-A"
+    state.loop_count = 1
+
+    await LabEquipmentAgent()._run_equipment_skill(
+        state,
+        _CtxStub(tools, "must not be used"),
+        {
+            "skill_id": "utm_save_raw_data",
+            "version": "1.0.11",
+            "target_profile": "utm_windows_v1",
+            "registry_root": str(registry_root),
+            "skip_profile_vision_preflight": True,
+            "completion_scope": "skill_step",
+        },
+    )
+
+    assert len(run_calls) == 1
+    assert run_calls[0]["confirm_execute"] is True
+    assert run_calls[0]["export_context"] == {
+        "mode": "live",
+        "session_id": "session-20260902-A",
+        "specimen_id": "cube-03",
+        "loop_index": 2,
+        "repeat_index": 1,
+    }
 
 
 @pytest.mark.asyncio
@@ -504,13 +777,294 @@ async def test_device_bridge_flow_starts_first_registered_block_without_orchestr
     assert blocked.data["equipment_handoff"]["failure_code"] == "EQUIPMENT_HANDOFF_NOT_READY"
     assert calls == []
 
-    await agent._run_equipment_skill_flow(
+    standalone = await agent._run_equipment_skill_flow(
         state,
         _CtxStub(_tools(tmp_path), "unused"),
         flow,
         require_entry_handoff=False,
     )
     assert calls[0]["task"] == flow["blocks"][0]["agentic"]["task"]
+    assert calls[0]["completion_scope"] == "skill_step"
+    assert standalone.success is True
+    assert standalone.data["equipment_skill_flow_execution"]["terminal"] == "__complete__"
+    assert standalone.data["workflow_agentic_task"]["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_each_agent_start_condition_creates_a_new_idle_equipment_flow_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fresh agent call must not inherit completed/failed blocks from an earlier call."""
+    flow = build_utm_compression_flow_template("windows_desktop_v1")
+    for block in flow["blocks"]:
+        block["skill"] = {"skill_id": "fake", "skill_version": "1.0.0"}
+    requests: list[dict[str, Any]] = []
+    projections: list[dict[str, Any]] = []
+    agent = LabEquipmentAgent()
+
+    async def fake_skill(_state: Any, _ctx: Any, request: dict[str, Any]) -> AgentResult:
+        requests.append(dict(request))
+        return AgentResult(
+            success=True,
+            summary="simulated",
+            data={"equipment_result": {}, "equipment_report": {}},
+        )
+
+    monkeypatch.setattr(agent, "_run_equipment_skill", fake_skill)
+    monkeypatch.setattr(agent, "_preflight_skill_flow_resources", lambda **_kwargs: {"ok": True})
+    monkeypatch.setattr(
+        agent,
+        "_write_skill_flow_execution",
+        lambda _profile_id, execution: projections.append(dict(execution)),
+    )
+    state = _state(experiment_spec={"equipment_profile_id": "windows_desktop_v1"})
+    ctx = _CtxStub(_tools(tmp_path), "must not be used")
+
+    first = await agent._run_equipment_skill_flow(
+        state,
+        ctx,
+        flow,
+        require_entry_handoff=False,
+    )
+    first_request_count = len(requests)
+    second = await agent._run_equipment_skill_flow(
+        state,
+        ctx,
+        flow,
+        require_entry_handoff=False,
+    )
+
+    first_execution = first.data["equipment_skill_flow_execution"]
+    second_execution = second.data["equipment_skill_flow_execution"]
+    assert first.data["protocol_note"] == "agentic UTM equipment skill flow"
+    assert second.data["protocol_note"] == "agentic UTM equipment skill flow"
+    assert first_execution["flow_execution_id"] != second_execution["flow_execution_id"]
+    assert requests[0]["sequence_id"] != requests[first_request_count]["sequence_id"]
+    idle = [item for item in projections if item.get("status") == "idle"]
+    assert [item["flow_execution_id"] for item in idle] == [
+        first_execution["flow_execution_id"],
+        second_execution["flow_execution_id"],
+    ]
+    assert all(item["terminal"] == "" and item["transitions"] == [] for item in idle)
+
+
+@pytest.mark.asyncio
+async def test_equipment_preflight_only_resolves_agentic_flow_without_worker_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catch a safe-validation cycle crossing the Windows/UTM actuation boundary."""
+    flow = build_utm_compression_flow_template("windows_desktop_v1")
+    for block in flow["blocks"]:
+        block["skill"] = {"skill_id": f"skill-{block['id']}", "skill_version": "1.0.0"}
+    calls: list[dict[str, Any]] = []
+    tools = _tools(tmp_path)
+    tools.register(
+        "equipment.pyautogui.run",
+        lambda payload: calls.append(dict(payload))
+        or (_ for _ in ()).throw(AssertionError("equipment execution is forbidden in preflight_only mode")),
+    )
+    agent = LabEquipmentAgent()
+    monkeypatch.setattr(agent, "_equipment_skill_flow", lambda _state: flow)
+    monkeypatch.setattr(agent, "_preflight_skill_flow_resources", lambda **_kwargs: {"ok": True})
+    state = _state(
+        experiment_spec={
+            "equipment_profile_id": "windows_desktop_v1",
+            "specimen_id": "specimen-test",
+            "execution_policy": {"lab_equipment": "preflight_only"},
+        }
+    )
+    state.run_metadata["manipulation_preflight"] = {
+        "schema": "manipulation_preflight.v1",
+        "run_id": "run-test",
+        "specimen_id": "specimen-test",
+        "status": "execution_ready_pending_approval",
+        "actuation_performed": False,
+    }
+
+    result = await agent.run(state, _CtxStub(tools, "must not be used"))
+
+    assert result.success is True
+    assert calls == []
+    preflight = result.data["equipment_preflight"]
+    assert preflight["schema"] == "equipment_preflight.v1"
+    assert preflight["status"] == "execution_ready_pending_approval"
+    assert preflight["actuation_performed"] is False
+    assert preflight["resolved_program_id"] == "run_utm_compression_cycle"
+    assert [step["block_id"] for step in preflight["planned_steps"]] == [
+        block["id"] for block in flow["blocks"]
+    ]
+    assert all(step["would_execute"]["skill_id"] for step in preflight["planned_steps"])
+    assert result.data["equipment_handoff"]["ready_for_analysis"] is False
+    assert result.data["protocol_note"] == "agentic UTM flow validated; execution deferred by policy"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("changed_field", "changed_value"),
+    [
+        ("schema", "manipulation_preflight.v0"),
+        ("run_id", "run-other"),
+        ("specimen_id", "specimen-other"),
+    ],
+)
+async def test_equipment_preflight_rejects_mismatched_manipulation_lineage_without_actuation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    changed_field: str,
+    changed_value: str,
+) -> None:
+    """Catch stale or cross-specimen Manipulation readiness authorizing Equipment."""
+    flow = build_utm_compression_flow_template("windows_desktop_v1")
+    for block in flow["blocks"]:
+        block["skill"] = {"skill_id": f"skill-{block['id']}", "skill_version": "1.0.0"}
+    calls: list[str] = []
+    tools = ToolRegistry()
+    for tool_name in (
+        "equipment.pyautogui.run",
+        "vision.equipment_cross_check",
+        "utm.run_protocol",
+    ):
+        tools.register(
+            tool_name,
+            lambda _payload, name=tool_name: calls.append(name)
+            or (_ for _ in ()).throw(AssertionError(f"{name} is forbidden in preflight_only mode")),
+        )
+    agent = LabEquipmentAgent()
+    monkeypatch.setattr(agent, "_equipment_skill_flow", lambda _state: flow)
+    monkeypatch.setattr(agent, "_preflight_skill_flow_resources", lambda **_kwargs: {"ok": True})
+    state = _state(
+        mode=Mode.LIVE,
+        experiment_spec={
+            "equipment_profile_id": "windows_desktop_v1",
+            "specimen_id": "specimen-test",
+            "execution_policy": {"lab_equipment": "preflight_only"},
+        },
+    )
+    state.run_metadata["manipulation_preflight"] = {
+        "schema": "manipulation_preflight.v1",
+        "run_id": "run-test",
+        "specimen_id": "specimen-test",
+        "status": "execution_ready_pending_approval",
+        "actuation_performed": False,
+    }
+    state.run_metadata["manipulation_preflight"][changed_field] = changed_value
+
+    result = await agent.run(state, _CtxStub(tools, "must not be used"))
+
+    assert result.success is False
+    assert calls == []
+    assert result.data["equipment_preflight"]["status"] == "preflight_not_ready"
+    assert result.data["equipment_preflight"]["failure_code"] == "MANIPULATION_PREFLIGHT_REQUIRED"
+    assert result.data["equipment_handoff"]["ready_for_analysis"] is False
+
+
+@pytest.mark.asyncio
+async def test_equipment_preflight_only_blocks_explicit_skill_when_saved_flow_is_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catch an explicit Equipment Skill bypassing the no-actuation entry policy."""
+    calls: list[str] = []
+    tools = ToolRegistry()
+    for tool_name in (
+        "equipment.pyautogui.run",
+        "vision.equipment_cross_check",
+        "utm.run_protocol",
+    ):
+        tools.register(
+            tool_name,
+            lambda _payload, name=tool_name: calls.append(name)
+            or (_ for _ in ()).throw(AssertionError(f"{name} is forbidden in preflight_only mode")),
+        )
+    agent = LabEquipmentAgent()
+
+    async def forbidden_skill(*_args: Any, **_kwargs: Any) -> AgentResult:
+        raise AssertionError("explicit Equipment Skill execution is forbidden in preflight_only mode")
+
+    monkeypatch.setattr(agent, "_run_equipment_skill", forbidden_skill)
+    state = _state(
+        mode=Mode.LIVE,
+        experiment_spec={
+            "equipment_skill": {"skill_id": "utm_start", "version": "1.0.0"},
+            "execution_policy": {"lab_equipment": "preflight_only"},
+        },
+    )
+    ctx = _CtxStub(tools, "must not be used")
+
+    result = await agent.run(state, ctx)
+
+    assert result.success is False
+    assert calls == []
+    assert ctx.prompts == []
+    assert result.data["equipment_preflight"] == {
+        "schema": "equipment_preflight.v1",
+        "status": "preflight_not_ready",
+        "actuation_performed": False,
+        "run_id": "run-test",
+        "profile_id": "",
+        "failure_code": "EQUIPMENT_PREFLIGHT_FLOW_REQUIRED",
+        "message": "A saved, enabled Equipment Skill Flow is required by preflight_only policy.",
+        "requested_branch": "explicit_skill",
+    }
+    assert result.data["equipment_result"]["status"] == "preflight_not_ready"
+    assert result.data["equipment_handoff"]["ready_for_analysis"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("experiment_spec", "requested_branch"),
+    [
+        (
+            {
+                "equipment_profile_id": "utm_windows_v1",
+                "equipment_program_id": "utm_compression_start_v1",
+                "execution_policy": {"lab_equipment": "preflight_only"},
+            },
+            "profile",
+        ),
+        (
+            {
+                "utm": {"direct_backend_configured": True, "profile": "vendor_direct_profile"},
+                "execution_policy": {"lab_equipment": "preflight_only"},
+            },
+            "legacy",
+        ),
+    ],
+)
+async def test_equipment_preflight_only_blocks_profile_or_legacy_path_when_saved_flow_is_missing(
+    experiment_spec: dict[str, Any],
+    requested_branch: str,
+) -> None:
+    """Catch profile and legacy fallbacks crossing any hardware boundary without a saved flow."""
+    calls: list[str] = []
+    tools = ToolRegistry()
+    for tool_name in (
+        "equipment.pyautogui.run",
+        "vision.equipment_cross_check",
+        "utm.run_protocol",
+    ):
+        tools.register(
+            tool_name,
+            lambda _payload, name=tool_name: calls.append(name)
+            or (_ for _ in ()).throw(AssertionError(f"{name} is forbidden in preflight_only mode")),
+        )
+    ctx = _CtxStub(tools, "must not be used")
+
+    result = await LabEquipmentAgent().run(
+        _state(mode=Mode.LIVE, experiment_spec=experiment_spec),
+        ctx,
+    )
+
+    assert result.success is False
+    assert calls == []
+    assert ctx.prompts == []
+    assert result.data["equipment_preflight"]["status"] == "preflight_not_ready"
+    assert result.data["equipment_preflight"]["actuation_performed"] is False
+    assert result.data["equipment_preflight"]["requested_branch"] == requested_branch
+    assert result.data["equipment_preflight"]["failure_code"] == "EQUIPMENT_PREFLIGHT_FLOW_REQUIRED"
+    assert result.data["equipment_handoff"]["ready_for_analysis"] is False
 
 
 @pytest.mark.asyncio
@@ -805,6 +1359,7 @@ async def test_skill_flow_preflights_enabled_vision_runtime_tool_before_first_sk
 
 
 def test_equipment_vision_response_rejects_mismatched_or_stale_identity() -> None:
+    now = datetime.now(timezone.utc)
     request = {
         "task_id": "utm_motion_confirm",
         "check_id": "utm_motion_confirm",
@@ -817,7 +1372,7 @@ def test_equipment_vision_response_rejects_mismatched_or_stale_identity() -> Non
             {
                 "ok": True,
                 **request,
-                "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat(),
+                "expires_at": (now + timedelta(minutes=1)).isoformat(),
             }
         ],
     }
@@ -830,12 +1385,17 @@ def test_equipment_vision_response_rejects_mismatched_or_stale_identity() -> Non
         "results": [
             {
                 **valid["results"][0],
-                "expires_at": (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),
+                "expires_at": (now - timedelta(seconds=1)).isoformat(),
             }
         ],
     }
     assert LabEquipmentAgent._equipment_vision_response_valid(mismatched, request) is False
     assert LabEquipmentAgent._equipment_vision_response_valid(stale, request) is False
+    assert LabEquipmentAgent._equipment_vision_response_valid(
+        stale,
+        request,
+        evaluated_at=now - timedelta(seconds=2),
+    ) is True
 
 
 @pytest.mark.asyncio

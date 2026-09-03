@@ -1480,8 +1480,12 @@ def test_active_robot_cam_uses_d405_direct_then_resumes_to_current_teleop_action
     assert updater.calls[0]["reason"] == "active_robot_cam_d405"
     overrides = updater.calls[0]["overrides"]
     assert overrides["a4_camera_to_isaac_transform"] == "direct"  # type: ignore[index]
-    assert overrides["a4_width_mm"] == 297.0  # type: ignore[index]
-    assert overrides["a4_height_mm"] == 210.0  # type: ignore[index]
+    assert overrides["a4_width_mm"] == 170.0  # type: ignore[index]
+    assert overrides["a4_height_mm"] == 250.0  # type: ignore[index]
+    assert overrides["a4_isaac_width_mm"] == 170.0  # type: ignore[index]
+    assert overrides["a4_isaac_height_mm"] == 250.0  # type: ignore[index]
+    assert overrides["a4_world_min_x_mm"] == 230.0  # type: ignore[index]
+    assert overrides["a4_world_min_y_mm"] == 120.0  # type: ignore[index]
     assert any(action["shoulder_pan.pos"] == 10.0 for action in sent)
     assert sent[-1] == current_action
 
@@ -2090,8 +2094,12 @@ def test_active_robot_cam_falls_back_to_d455f_right_plane_when_d405_fails(tmp_pa
     assert updater.calls[1]["manifest_path"] == fallback_manifest
     overrides = updater.calls[1]["overrides"]
     assert overrides["a4_camera_to_isaac_transform"] == "robot_right_plane"  # type: ignore[index]
-    assert overrides["a4_width_mm"] == 210.0  # type: ignore[index]
-    assert overrides["a4_height_mm"] == 297.0  # type: ignore[index]
+    assert overrides["a4_width_mm"] == 250.0  # type: ignore[index]
+    assert overrides["a4_height_mm"] == 170.0  # type: ignore[index]
+    assert overrides["a4_isaac_width_mm"] == 170.0  # type: ignore[index]
+    assert overrides["a4_isaac_height_mm"] == 250.0  # type: ignore[index]
+    assert overrides["a4_world_min_x_mm"] == 230.0  # type: ignore[index]
+    assert overrides["a4_world_min_y_mm"] == 120.0  # type: ignore[index]
 
 
 def test_record_loop_patch_captures_one_frame_before_dataset_episode(tmp_path: Path, monkeypatch) -> None:

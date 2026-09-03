@@ -139,6 +139,96 @@ def test_live_execute_response_timeout_is_effect_unknown_and_not_retryable(
     assert result["retryable"] is False
 
 
+def test_live_execute_extends_only_read_timeout_for_declared_long_wait(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _bridge(tmp_path, mode="live", allow_live=True)
+
+    class _Reply:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"ok": True, "status": "completed"}
+
+    class _Client:
+        def __init__(self, timeout: float | httpx.Timeout) -> None:
+            assert isinstance(timeout, httpx.Timeout)
+            assert timeout.connect == min(bridge.config.request_timeout_sec, 10.0)
+            assert timeout.read == 3630.0
+            assert timeout.write == bridge.config.request_timeout_sec
+            assert timeout.pool == bridge.config.request_timeout_sec
+
+        def __enter__(self) -> "_Client":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def post(self, *args: object, **kwargs: object) -> _Reply:
+            return _Reply()
+
+    monkeypatch.setattr("device_bridges.windows_pyautogui_bridge.httpx.Client", _Client)
+
+    result = bridge._live_post(
+        "equipment.pyautogui.run",
+        "/execute",
+        {
+            "sequence": [
+                {
+                    "action": "wait_until_image",
+                    "target": "tests_completed",
+                    "timeout_s": 3600,
+                }
+            ]
+        },
+    )
+
+    assert result["ok"] is True
+
+
+def test_live_execute_extends_read_timeout_from_registered_program_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bridge = _bridge(tmp_path, mode="live", allow_live=True)
+
+    class _Reply:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {"ok": True, "status": "completed"}
+
+    class _Client:
+        def __init__(self, timeout: float | httpx.Timeout) -> None:
+            assert isinstance(timeout, httpx.Timeout)
+            assert timeout.read == 3630.0
+
+        def __enter__(self) -> "_Client":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def post(self, *args: object, **kwargs: object) -> _Reply:
+            return _Reply()
+
+    monkeypatch.setattr("device_bridges.windows_pyautogui_bridge.httpx.Client", _Client)
+
+    result = bridge._live_post(
+        "equipment.pyautogui.run",
+        "/execute",
+        {
+            "program_id": "utm_monitor_contact_and_run_1_0_6_segment_001",
+            "declared_execution_timeout_s": 3600,
+        },
+    )
+
+    assert result["ok"] is True
+
+
 def test_live_bridge_lists_and_fetches_saved_recordings_from_selected_worker(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

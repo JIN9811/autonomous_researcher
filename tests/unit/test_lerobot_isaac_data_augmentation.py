@@ -446,7 +446,7 @@ def test_build_augmentation_sidecar_clips_object_jitter_inside_a4_bounds(tmp_pat
             {"camera": "top", "kind": "depth", "path": str(depth_path), "encoding": "png16", "unit": "mm"},
         ],
         specimen_pose={
-            "a4_xy_mm": [210.0, 297.0],
+            "a4_xy_mm": [170.0, 250.0],
             "yaw_deg": 5.0,
             "confidence": 0.95,
             "orientation_confidence": 0.95,
@@ -474,8 +474,8 @@ def test_build_augmentation_sidecar_clips_object_jitter_inside_a4_bounds(tmp_pat
     assert row["qa_ok"] is True
     assert row["source_pose_confidence"] == 0.95
     assert row["orientation_source"] == "active_robot_cam"
-    assert 0.0 <= x_mm <= 210.0
-    assert 0.0 <= y_mm <= 297.0
+    assert 0.0 <= x_mm <= 170.0
+    assert 0.0 <= y_mm <= 250.0
     assert render_domain["object_xy_jitter_mm"][0] <= 0.0
     assert render_domain["object_xy_jitter_mm"][1] <= 0.0
 
@@ -697,7 +697,7 @@ def test_build_augmentation_sidecar_marks_out_of_a4_source_pose_as_failed(tmp_pa
             {"camera": "top", "kind": "rgb", "path": str(rgb_path), "encoding": "png"},
             {"camera": "top", "kind": "depth", "path": str(depth_path), "encoding": "png16", "unit": "mm"},
         ],
-        specimen_pose={"a4_xy_mm": [240.0, 120.0], "yaw_deg": 0.0, "confidence": 0.95},
+        specimen_pose={"a4_xy_mm": [180.0, 120.0], "yaw_deg": 0.0, "confidence": 0.95},
     )
     output_dir = dataset / "sidecar" / "isaac_augmentation" / "latest"
 
@@ -722,7 +722,7 @@ def test_build_augmentation_sidecar_marks_out_of_a4_source_pose_as_failed(tmp_pa
     assert qa_summary["failure_counts"] == {"SOURCE_POSE_OUT_OF_A4_BOUNDS": 1}
     assert row["qa_ok"] is False
     assert row["qa_failure_code"] == "SOURCE_POSE_OUT_OF_A4_BOUNDS"
-    assert row["source_pose"]["a4_xy_mm"] == [240.0, 120.0]
+    assert row["source_pose"]["a4_xy_mm"] == [180.0, 120.0]
 
 
 def test_build_augmentation_sidecar_can_disable_each_augmentation_family(tmp_path: Path) -> None:

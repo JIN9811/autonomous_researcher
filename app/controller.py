@@ -2116,6 +2116,46 @@ class MainController:
         return {key: compact_runtime_payload(source.get(key)) for key in keys if key in source and source.get(key) is not None}
 
     @classmethod
+    def _planning_display_analysis(cls, analysis: Any) -> dict[str, Any]:
+        """Keep the normalized curve usable after Live GUI payload compaction."""
+        compact = cls._select_runtime_fields(
+            analysis,
+            (
+                "ok",
+                "objective_score",
+                "uncertainty",
+                "recommendation",
+                "summary",
+                "utm_metrics",
+                "utm_curve",
+                "stress_strain_curve",
+                "specimen_geometry",
+                "data_quality_gate",
+                "fem_metrics",
+                "cae_metrics",
+                "quality_gate",
+                "fem_utm_comparison",
+                "multifidelity_comparison",
+                "trust_score",
+                "fidelity_records",
+                "analysis_artifacts",
+                "bo_handoff",
+            ),
+        )
+        source = analysis if isinstance(analysis, dict) else {}
+        curve = source.get("stress_strain_curve") if isinstance(source.get("stress_strain_curve"), dict) else {}
+        rows = curve.get("preview") if isinstance(curve.get("preview"), list) else curve.get("points") if isinstance(curve.get("points"), list) else []
+        if rows:
+            limit = 80
+            if len(rows) > limit:
+                indices = [round(index * (len(rows) - 1) / (limit - 1)) for index in range(limit)]
+                rows = [rows[index] for index in indices]
+            curve_payload = compact_runtime_payload({key: value for key, value in curve.items() if key not in {"preview", "points"}})
+            curve_payload["preview"] = [compact_runtime_payload(row) for row in rows]
+            compact["stress_strain_curve"] = curve_payload
+        return compact
+
+    @classmethod
     def _planning_display_slicer_settings(cls, settings: Any) -> dict[str, Any]:
         return cls._select_runtime_fields(
             settings,
@@ -2560,28 +2600,7 @@ class MainController:
             compact.update(self._planning_display_equipment_fields(entry))
         if "analysis" in entry:
             analysis = entry.get("analysis") if isinstance(entry.get("analysis"), dict) else {}
-            compact["analysis"] = self._select_runtime_fields(
-                analysis,
-                (
-                    "ok",
-                    "objective_score",
-                    "uncertainty",
-                    "recommendation",
-                    "summary",
-                    "utm_metrics",
-                    "utm_curve",
-                    "data_quality_gate",
-                    "fem_metrics",
-                    "cae_metrics",
-                    "quality_gate",
-                    "fem_utm_comparison",
-                    "multifidelity_comparison",
-                    "trust_score",
-                    "fidelity_records",
-                    "analysis_artifacts",
-                    "bo_handoff",
-                ),
-            )
+            compact["analysis"] = self._planning_display_analysis(analysis)
         if "vision_signal" in entry:
             compact["vision_signal"] = compact_runtime_payload(entry.get("vision_signal"))
         if "knowledge" in entry:
@@ -2938,28 +2957,7 @@ class MainController:
             compact["bo_result"] = cls._planning_display_bo_result(entry.get("bo_result"))
         if "analysis" in entry:
             analysis = entry.get("analysis") if isinstance(entry.get("analysis"), dict) else {}
-            compact["analysis"] = cls._select_runtime_fields(
-                analysis,
-                (
-                    "ok",
-                    "objective_score",
-                    "uncertainty",
-                    "recommendation",
-                    "summary",
-                    "utm_metrics",
-                    "utm_curve",
-                    "data_quality_gate",
-                    "fem_metrics",
-                    "cae_metrics",
-                    "quality_gate",
-                    "fem_utm_comparison",
-                    "multifidelity_comparison",
-                    "trust_score",
-                    "fidelity_records",
-                    "analysis_artifacts",
-                    "bo_handoff",
-                ),
-            )
+            compact["analysis"] = cls._planning_display_analysis(analysis)
         # Agent reports can use state.run_metadata; avoid shipping bulky per-message internals every poll.
         for key in (
             "module_runtime",
@@ -4469,6 +4467,50 @@ class MainController:
             "unsafe_device_health": {},
         }
 
+    def request_plc_fast_stop(self, details: dict[str, object]) -> dict[str, object]:
+        """Stop rollout work and request task cancellation from the PLC monitor thread."""
+        cancelled_tasks: list[str] = []
+        seen_tasks: set[int] = set()
+        for task_name, task in (
+            ("run", self._run_task),
+            ("planning_handoff", self._planning_handoff_task),
+        ):
+            if task is None or task.done() or id(task) in seen_tasks:
+                continue
+            seen_tasks.add(id(task))
+            try:
+                task.get_loop().call_soon_threadsafe(task.cancel)
+                cancelled_tasks.append(task_name)
+            except RuntimeError:
+                continue
+
+        payload = {
+            "mode": self._state.mode.value,
+            "runtime_mode": self._state.mode.value,
+            "reason": "plc_emergency_stop",
+            "emergency_source": PLC_SAFETY_SOURCE,
+            "plc_details": dict(details),
+        }
+        try:
+            rollout_stop = self._deps.agent_context.tools.call(
+                "lerobot.rollout.stop",
+                payload,
+            )
+        except Exception as exc:
+            rollout_stop = {
+                "ok": False,
+                "tool": "lerobot.rollout.stop",
+                "status": "FAILED",
+                "failure_code": "PLC_ROLLOUT_STOP_FAILED",
+                "message": str(exc),
+            }
+        return {
+            "ok": bool(rollout_stop.get("ok")),
+            "source": PLC_SAFETY_SOURCE,
+            "cancel_requested": cancelled_tasks,
+            "rollout_stop": rollout_stop,
+        }
+
     async def emergency_stop(
         self,
         source: str = "gui",
@@ -4522,7 +4564,15 @@ class MainController:
         """Start E-STOP recovery with an empty active decision layer."""
         metadata = self._state.run_metadata
         metadata["orchestrator_decision_register"] = []
-        metadata.pop("latest_orchestrator_decision", None)
+        for key in (
+            "latest_guardian_decision",
+            "latest_guardian_gate_decision",
+            "latest_guardian_gate",
+            "latest_loop_reflection",
+            "latest_orchestrator_decision",
+            "latest_orchestrator_handoff",
+        ):
+            metadata.pop(key, None)
 
         control_plane = metadata.get("latest_orchestrator_control_plane")
         if not isinstance(control_plane, dict):
@@ -4540,6 +4590,7 @@ class MainController:
                 }
             )
             control_plane["decision_register"] = decision_register
+            control_plane["latest_loop_reflection"] = {}
         metadata["latest_orchestrator_control_plane"] = control_plane
 
     async def plc_recovery_readiness(self, command: str) -> dict[str, object]:
@@ -5314,7 +5365,7 @@ class MainController:
             "    \"preferred_geometry_type\": \"gyroid\",\n"
             "    \"max_specimen_size_mm\": [30, 30, 30],\n"
             "    \"specimen_size_mm\": [30, 30, 30],\n"
-            "    \"objective_type\": \"specific_energy_absorption\",\n"
+            "    \"objective_type\": \"energy_density_50pct\",\n"
             "    \"objective_direction\": \"maximize\",\n"
             "    \"cell_size_mm\": 10.0,\n"
             "    \"wall_thickness_mm\": 1.2,\n"
@@ -5632,7 +5683,7 @@ class MainController:
         objective = ""
         direction = "maximize"
         if any(token in lowered for token in ("energy absorption", "specific energy", "sea", "에너지 흡수", "흡수량")):
-            objective = "specific_energy_absorption"
+            objective = "energy_density_50pct"
         elif any(token in lowered for token in ("stiffness", "강성")):
             objective = "stiffness"
         elif any(token in lowered for token in ("mass", "질량", "무게")):
@@ -6008,7 +6059,7 @@ class MainController:
             "geometry_type": MainController.TEST_MODE_FIXED_GEOMETRY,
             "preferred_geometry_type": MainController.TEST_MODE_FIXED_GEOMETRY,
             "specimen_size_mm": printer_defaults.get("test_specimen_size_mm", [30, 30, 30]),
-            "objective_type": "specific_energy_absorption",
+            "objective_type": "energy_density_50pct",
             "objective_direction": "maximize",
             "infill_pattern": MainController.TEST_MODE_FIXED_GEOMETRY,
             "infill_density_percent": 35,
@@ -6037,6 +6088,7 @@ class MainController:
             "fdm_max_gyroid_wall_cell_ratio": 0.28,
             "printer_model": printer_defaults.get("printer_model", "Bambu Lab X2D"),
             "printer_profile": printer_defaults.get("printer_profile", "bambulab_x2d_pla_0p4_nozzle"),
+            "equipment_profile_id": "utm_windows_v1",
             "slicer_profile_hint": printer_defaults.get("slicer_profile_hint", "0.2mm_quality"),
             "nozzle_diameter_mm": printer_defaults.get("nozzle_diameter_mm", 0.4),
             "storage": printer_defaults.get("storage", "ftps"),
@@ -6078,6 +6130,20 @@ class MainController:
         """Merge LLM-selected test values with safe defaults and normalize equivalent size keys."""
         merged = dict(defaults)
         merged.update({key: value for key, value in llm_constraints.items() if value not in (None, "", [])})
+        if "execution_policy" in defaults or "execution_policy" in llm_constraints:
+            default_policy = defaults.get("execution_policy", {})
+            requested_policy = llm_constraints.get("execution_policy", {})
+            if not isinstance(default_policy, dict) or not isinstance(requested_policy, dict):
+                raise ValueError("unsupported execution policy: expected a mapping")
+            normalized_policy = MainController._normalize_execution_policy(
+                {**default_policy, **requested_policy}
+            )
+            if normalized_policy:
+                merged["execution_policy"] = normalized_policy
+            else:
+                merged.pop("execution_policy", None)
+        else:
+            merged.pop("execution_policy", None)
         if "specimen_size_mm" in merged and "max_specimen_size_mm" not in llm_constraints:
             merged["max_specimen_size_mm"] = merged["specimen_size_mm"]
         if "max_specimen_size_mm" in merged and "specimen_size_mm" not in llm_constraints:
@@ -6160,9 +6226,9 @@ class MainController:
         merged["design_optimization"] = {
             "schema": "design_optimization_contract.v1",
             "objective": {
-                "metric": "specific_energy_absorption_J_per_g",
+                "metric": "energy_density_50pct_MJ_per_m3",
                 "direction": "maximize",
-                "unit": "J/g",
+                "unit": "MJ/m3",
             },
             "active_variables": {
                 "cell_size_mm": {
@@ -6223,6 +6289,31 @@ class MainController:
     def _planning_cycle_limit(self, payload: dict[str, Any]) -> int:
         """Return planned Live GUI cycle count for test-mode handoffs."""
         return self.TEST_MODE_LOOP_CYCLES if self._is_planning_test_spec(payload) else 1
+
+    @staticmethod
+    def _normalize_execution_policy(value: Any) -> dict[str, str]:
+        """Validate the additive per-stage execution boundary contract."""
+        if value in (None, "", {}):
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("unsupported execution policy: expected a mapping")
+        allowed_stages = {"printer", "manipulation", "lab_equipment", "cae", "analysis", "bo"}
+        allowed_modes = {"execute", "preflight_only"}
+        normalized: dict[str, str] = {
+            "printer": "preflight_only",
+            "manipulation": "preflight_only",
+            "lab_equipment": "preflight_only",
+            "cae": "execute",
+            "analysis": "execute",
+            "bo": "execute",
+        }
+        for raw_stage, raw_mode in value.items():
+            stage = str(raw_stage or "").strip()
+            mode = str(raw_mode or "").strip().lower()
+            if stage not in allowed_stages or mode not in allowed_modes:
+                raise ValueError(f"unsupported execution policy: {stage}={mode}")
+            normalized[stage] = mode
+        return normalized
 
     def _bind_planning_cycle_contract(self, payload: dict[str, Any]) -> int:
         """Publish the resolved loop budget as the only GUI cycle denominator."""
@@ -7336,7 +7427,18 @@ class MainController:
         updated["printer_test_path"] = normalized
         updated["test_printer_transport"] = "real" if normalized in {"installed_printer", "physical_print"} else "virtual"
         updated["allow_test_printer_live"] = normalized in {"installed_printer", "physical_print"}
-        updated["prefer_http_artifact"] = normalized == "installed_printer"
+        updated["allow_test_equipment_live"] = normalized in {"installed_printer", "physical_print"}
+        updated["equipment_agentic_confirm_execute"] = normalized in {"installed_printer", "physical_print"}
+        updated["prefer_http_artifact"] = normalized in {"installed_printer", "physical_print"}
+        if normalized in {"installed_printer", "physical_print"}:
+            updated["execution_policy"] = {
+                "printer": "execute",
+                "manipulation": "execute",
+                "lab_equipment": "execute",
+                "cae": "execute",
+                "analysis": "execute",
+                "bo": "execute",
+            }
 
         print_request = dict(updated.get("print", {})) if isinstance(updated.get("print"), dict) else {}
         if normalized in {"installed_printer", "physical_print"}:
@@ -7347,7 +7449,7 @@ class MainController:
                     "confirm_physical_print": True,
                     "stop_after_start": False,
                     "use_ejection_only_project_file": normalized == "installed_printer",
-                    "prefer_http_artifact": normalized == "installed_printer",
+                    "prefer_http_artifact": True,
                     "post_publish_observation_timeout_sec": 180 if normalized == "physical_print" else 120,
                 }
             )
@@ -7403,6 +7505,8 @@ class MainController:
             "printer_test_mode",
             "test_printer_transport",
             "allow_test_printer_live",
+            "allow_test_equipment_live",
+            "equipment_agentic_confirm_execute",
         ):
             updated.pop(key, None)
         print_request = dict(updated.get("print", {})) if isinstance(updated.get("print"), dict) else {}
@@ -7956,9 +8060,13 @@ class MainController:
                 self._state.run_metadata["latest_specimen_agent_report"] = data["specimen_agent_report"]
             if isinstance(data.get("specimen_fabricated"), dict):
                 self._state.run_metadata["specimen_fabricated"] = data["specimen_fabricated"]
+            if isinstance(data.get("printer_preflight"), dict):
+                self._state.run_metadata["printer_preflight"] = data["printer_preflight"]
             if isinstance(data.get("vision_report"), dict):
                 self._state.run_metadata["vision_report"] = data["vision_report"]
                 self._state.run_metadata[f"{stage.value}_vision_report"] = data["vision_report"]
+            if isinstance(data.get("vision_preflight"), dict):
+                self._state.run_metadata["vision_preflight"] = data["vision_preflight"]
             if isinstance(data.get("vision_agent_report"), dict):
                 self._state.run_metadata["latest_vision_agent_report"] = data["vision_agent_report"]
             if isinstance(data.get("vision_signal"), dict):
@@ -7980,6 +8088,8 @@ class MainController:
                 self._state.run_metadata[f"{stage.value}_manipulation_report"] = data["manipulation_report"]
             if isinstance(data.get("manipulation_agent_report"), dict):
                 self._state.run_metadata["latest_manipulation_agent_report"] = data["manipulation_agent_report"]
+            if isinstance(data.get("manipulation_preflight"), dict):
+                self._state.run_metadata["manipulation_preflight"] = data["manipulation_preflight"]
             if isinstance(data.get("robot_task_result"), dict):
                 self._state.run_metadata["robot_task_result"] = data["robot_task_result"]
                 self._state.run_metadata[f"{stage.value}_robot_task_result"] = data["robot_task_result"]
@@ -8023,6 +8133,9 @@ class MainController:
                 self._state.run_metadata["equipment_report"] = data["equipment_report"]
             if isinstance(data.get("utm_data_ready"), dict):
                 self._state.run_metadata["utm_data_ready"] = data["utm_data_ready"]
+            if isinstance(data.get("equipment_preflight"), dict):
+                self._state.run_metadata["equipment_preflight"] = data["equipment_preflight"]
+                equipment_result["equipment_preflight"] = data["equipment_preflight"]
             if "equipment_handoff" in data:
                 self._state.run_metadata["equipment_handoff"] = data["equipment_handoff"]
             self._state.latest_analysis["equipment_ok"] = bool(equipment_result.get("ok", False))
@@ -9070,7 +9183,12 @@ class MainController:
                 **(constraints.get("ejection") if isinstance(constraints.get("ejection"), dict) else {}),
                 "enabled": bool(validated_defaults.get("allow_ejection", False)),
             },
+            "equipment_profile_id": str(pick("equipment_profile_id", "utm_windows_v1")),
         }
+        raw_execution_policy = pick("execution_policy", None)
+        normalized_execution_policy = self._normalize_execution_policy(raw_execution_policy)
+        if normalized_execution_policy:
+            planning_spec["execution_policy"] = normalized_execution_policy
         explicit_top_cap = "top_cap_enabled" in constraints or "top_cap_enabled" in base_spec
         explicit_bottom_cap = "bottom_cap_enabled" in constraints or "bottom_cap_enabled" in base_spec
         explicit_legacy_cap = "top_bottom_cap" in constraints or "top_bottom_cap" in base_spec
@@ -9124,6 +9242,9 @@ class MainController:
             "printer_test_mode",
             "test_printer_transport",
             "allow_test_printer_live",
+            "allow_test_equipment_live",
+            "equipment_agentic_confirm_execute",
+            "equipment_profile_id",
         )
         for key in passthrough_keys:
             if key in constraints:

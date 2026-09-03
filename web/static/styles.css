@@ -10849,36 +10849,70 @@ body.planning-live-body .ar-eqp-event-log small {
   white-space: nowrap;
 }
 
+body.planning-live-body .ar-analysis-curve {
+  overflow: hidden;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #ffffff;
+}
+
 body.planning-live-body .ar-analysis-curve svg {
   width: 100%;
-  min-height: 190px;
+  min-height: 260px;
   display: block;
+  background: #ffffff;
 }
 
 body.planning-live-body .ar-analysis-curve .axis {
-  stroke: rgba(148, 163, 184, 0.34);
+  stroke: #111827;
+  stroke-width: 1;
+}
+
+body.planning-live-body .ar-analysis-curve .grid {
+  stroke: #d1d5db;
+  stroke-width: 0.7;
+  shape-rendering: crispEdges;
+}
+
+body.planning-live-body .ar-analysis-curve .tick {
+  stroke: #111827;
   stroke-width: 1;
 }
 
 body.planning-live-body .ar-analysis-curve .curve {
   fill: none;
-  stroke: #2dd4bf;
-  stroke-width: 3;
-  stroke-linecap: round;
+  stroke: #1f77b4;
+  stroke-width: 2;
+  stroke-linecap: butt;
   stroke-linejoin: round;
-  filter: drop-shadow(0 0 8px rgba(45, 212, 191, 0.24));
+  filter: none;
 }
 
-body.planning-live-body .ar-analysis-curve .peak {
-  fill: #f59e0b;
-  stroke: #0f172a;
-  stroke-width: 2;
+body.planning-live-body .ar-analysis-curve .limit-reference {
+  stroke: #6b7280;
+  stroke-width: 1;
+  stroke-dasharray: 5 4;
 }
 
 body.planning-live-body .ar-analysis-curve text {
-  fill: rgba(226, 232, 240, 0.72);
-  font-family: "IBM Plex Mono", monospace;
+  fill: #111827;
+  font-family: "DejaVu Sans", "Arial", sans-serif;
   font-size: 10px;
+}
+
+body.planning-live-body .ar-analysis-curve .axis-label {
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+body.planning-live-body .ar-analysis-curve .tick-label {
+  fill: #374151;
+  font-size: 9.5px;
+}
+
+body.planning-live-body .ar-analysis-curve .limit-label {
+  fill: #4b5563;
+  font-size: 9px;
 }
 
 body.planning-live-body .ar-analysis-quality {
@@ -26074,6 +26108,21 @@ body .bambu-printer-page .printer-evidence-details pre {
   text-align: center;
 }
 
+.vision-camera-preview-fps {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted, #8da0bd);
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.vision-camera-preview-fps .text-input {
+  width: 64px;
+  min-height: 32px;
+  padding: 0.3rem 0.45rem;
+}
+
 .vision-camera-frame-placeholder {
   min-height: 280px;
   display: grid;
@@ -26465,11 +26514,18 @@ body.planning-live-body .vision-specimen-placement-action:disabled {
 
 body.planning-live-body .ar-vis-agentic-progress {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
+body.planning-live-body .ar-equipment-agentic-card {
+  grid-column: 1 / -1;
+  order: -1;
+}
+
 body.planning-live-body .ar-vis-agentic-step {
+  position: relative;
+  z-index: 1;
   min-height: 6.2rem;
   display: grid;
   align-content: start;
@@ -26477,6 +26533,243 @@ body.planning-live-body .ar-vis-agentic-step {
   padding: 0.75rem;
   border: 1px solid rgba(148, 163, 184, 0.2);
   background: rgba(15, 23, 42, 0.42);
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-progress {
+  --ar-agentic-flow-line: rgba(112, 169, 214, 0.94);
+  --ar-agentic-flow-glow: rgba(56, 189, 248, 0.34);
+  column-gap: 1rem;
+  row-gap: 1.5rem;
+  align-items: stretch;
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step {
+  min-height: 0;
+  height: 100%;
+  grid-template-rows: auto auto minmax(1rem, 1fr) 1.75rem;
+  padding: 0.68rem 0.75rem;
+  border-color: rgba(100, 140, 178, 0.54);
+  background: rgba(9, 18, 38, 0.9);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    0 0 0 1px rgba(100, 140, 178, 0.08),
+    0 8px 18px rgba(2, 6, 23, 0.22);
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-equipment-agentic-vision-slot {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 1.75rem;
+  max-height: 1.75rem;
+  margin-top: 0.25rem;
+  padding: 0.26rem 0.5rem;
+  overflow: hidden;
+  border: 1px solid rgba(100, 140, 178, 0.42);
+  background: rgba(12, 35, 66, 0.72);
+  color: rgba(203, 213, 225, 0.82);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  gap: 0.28rem;
+  white-space: nowrap;
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-equipment-agentic-vision-slot span,
+body.planning-live-body .ar-equipment-agentic-card .ar-equipment-agentic-vision-slot strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.69rem;
+  line-height: 1;
+  text-overflow: ellipsis;
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-equipment-agentic-vision-slot strong {
+  color: inherit;
+  font-weight: 850;
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-equipment-agentic-vision-slot.is-empty {
+  visibility: hidden;
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-equipment-agentic-vision-slot.is-success {
+  border-color: rgba(134, 239, 172, 0.88);
+  background: rgba(35, 78, 62, 0.74);
+  color: rgba(187, 247, 208, 0.98);
+  box-shadow:
+    inset 0 1px 0 rgba(220, 252, 231, 0.12),
+    0 0 12px rgba(134, 239, 172, 0.26);
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-equipment-agentic-vision-slot.is-failed {
+  border-color: rgba(252, 165, 165, 0.88);
+  background: rgba(92, 43, 52, 0.72);
+  color: rgba(254, 202, 202, 0.98);
+  box-shadow:
+    inset 0 1px 0 rgba(254, 226, 226, 0.1),
+    0 0 12px rgba(252, 165, 165, 0.28);
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step-heading strong {
+  min-width: 0;
+  line-height: 1.28;
+  overflow-wrap: anywhere;
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step-index {
+  display: inline-grid;
+  place-items: center;
+  width: 1.55rem;
+  min-height: 1.25rem;
+  border-right: 1px solid rgba(125, 211, 252, 0.3);
+  color: rgba(125, 211, 252, 0.92);
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step > em,
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step > small {
+  margin-left: 2.1rem;
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step.is-complete {
+  --ar-agentic-flow-line: rgba(52, 211, 153, 0.84);
+  --ar-agentic-flow-glow: rgba(52, 211, 153, 0.34);
+  border-color: rgba(52, 211, 153, 0.78);
+  background: rgba(8, 35, 31, 0.92);
+  box-shadow:
+    inset 0 1px 0 rgba(167, 243, 208, 0.08),
+    0 0 0 1px rgba(52, 211, 153, 0.1),
+    0 0 18px rgba(52, 211, 153, 0.16);
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step.is-active {
+  --ar-agentic-flow-line: rgba(56, 189, 248, 0.98);
+  --ar-agentic-flow-glow: rgba(56, 189, 248, 0.68);
+  border-color: rgba(56, 189, 248, 0.96);
+  background: rgba(12, 35, 66, 0.96);
+  box-shadow:
+    inset 0 1px 0 rgba(186, 230, 253, 0.12),
+    0 0 0 1px rgba(56, 189, 248, 0.18),
+    0 0 24px rgba(56, 189, 248, 0.34),
+    0 10px 22px rgba(2, 6, 23, 0.3);
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step.is-blocked {
+  --ar-agentic-flow-line: rgba(248, 113, 113, 0.88);
+  --ar-agentic-flow-glow: rgba(248, 113, 113, 0.42);
+  border-color: rgba(248, 113, 113, 0.82);
+  background: rgba(48, 16, 26, 0.92);
+  box-shadow:
+    inset 0 1px 0 rgba(254, 202, 202, 0.08),
+    0 0 0 1px rgba(248, 113, 113, 0.12),
+    0 0 20px rgba(248, 113, 113, 0.2);
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step:not(:nth-child(4n)):not(:last-child)::after {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  right: calc(-1rem - 4px);
+  width: calc(1rem + 8px);
+  height: 3px;
+  background: var(--ar-agentic-flow-line);
+  content: "";
+  filter: drop-shadow(0 0 4px var(--ar-agentic-flow-glow));
+  pointer-events: none;
+  transform: translateY(-1.5px);
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step:nth-child(4n):not(:last-child)::after {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 0.5px);
+  left: calc(-250% - 3rem - 6px);
+  width: calc(300% + 3rem + 6px);
+  height: calc(0.75rem + 3px);
+  border-right: 3px solid var(--ar-agentic-flow-line);
+  border-bottom: 3px solid var(--ar-agentic-flow-line);
+  content: "";
+  filter: drop-shadow(0 0 4px var(--ar-agentic-flow-glow));
+  pointer-events: none;
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step:nth-child(4n + 1):not(:first-child)::before {
+  position: absolute;
+  z-index: 3;
+  bottom: calc(100% - 1.5px);
+  left: 50%;
+  width: 3px;
+  height: calc(0.75rem - 2px);
+  background: var(--ar-agentic-flow-line);
+  content: "";
+  filter: drop-shadow(0 0 4px var(--ar-agentic-flow-glow));
+  pointer-events: none;
+  transform: translateX(-1.5px);
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step.is-active::after,
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step.is-active::before {
+  animation: ar-agentic-flow-pulse 1.15s ease-in-out infinite;
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-port {
+  position: absolute;
+  z-index: 4;
+  display: block;
+  pointer-events: none;
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-port-in {
+  top: 50%;
+  left: -3.5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ar-agentic-flow-line);
+  box-shadow: 0 0 7px var(--ar-agentic-flow-glow);
+  transform: translateY(-50%);
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-port-out {
+  top: 50%;
+  right: -3.5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ar-agentic-flow-line);
+  box-shadow: 0 0 7px var(--ar-agentic-flow-glow);
+  transform: translateY(-50%);
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step:first-child .ar-vis-agentic-port-in,
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step:last-child .ar-vis-agentic-port-out {
+  display: none;
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step:nth-child(4n + 1):not(:first-child) .ar-vis-agentic-port-in {
+  top: -3.5px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step:nth-child(4n):not(:last-child) .ar-vis-agentic-port-out {
+  top: auto;
+  right: auto;
+  bottom: -3.5px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+@keyframes ar-agentic-flow-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.46; }
 }
 
 body.planning-live-body .ar-vis-agentic-step.is-complete {
@@ -26517,6 +26810,35 @@ body.planning-live-body .ar-vis-agentic-step small {
 @media (max-width: 980px) {
   body.planning-live-body .ar-vis-agentic-progress {
     grid-template-columns: 1fr;
+  }
+
+  body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-progress > .ar-vis-agentic-step:not(:last-child)::after {
+    top: calc(100% - 1.5px);
+    right: auto;
+    left: 50%;
+    width: 3px;
+    height: calc(1.5rem + 3px);
+    border: 0;
+    background: var(--ar-agentic-flow-line);
+    transform: translateX(-1.5px);
+  }
+
+  body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-progress > .ar-vis-agentic-step:nth-child(4n + 1):not(:first-child)::before {
+    content: none;
+  }
+
+  body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step:not(:first-child) .ar-vis-agentic-port-in {
+    top: -3.5px;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  body.planning-live-body .ar-equipment-agentic-card .ar-vis-agentic-step:not(:last-child) .ar-vis-agentic-port-out {
+    top: auto;
+    right: auto;
+    bottom: -3.5px;
+    left: 50%;
+    transform: translateX(-50%);
   }
 }
 
