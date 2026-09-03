@@ -1119,7 +1119,7 @@ def test_live_gui_runtime_shell_contains_operational_panels() -> None:
     assert "/static/styles.css?v=20260527-live-focus" in html
     assert "/static/planning.js?v=20260613-clean-stl-render-1" in html
     assert 'href="/static/styles.css?v=20260903-passive-vision-1"' in html
-    assert 'src="/static/planning.js?v=20260903-passive-vision-1"' in html
+    assert 'src="/static/planning.js?v=20260904-bo-lhs-1"' in html
     assert "Runtime Chat" in html
     assert "Safe Stop" in html
     assert "Pause Run" in html

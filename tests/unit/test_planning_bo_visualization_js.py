@@ -36,9 +36,6 @@ const hydrateBody = source.slice(hydrateStart, hydrateEnd);
 const applyStart = source.indexOf("function applyPlanningSession");
 const applyEnd = source.indexOf("async function refreshLiveGraphPayload", applyStart);
 const applyBody = source.slice(applyStart, applyEnd);
-const resetStart = source.indexOf("async function requestLiveEmergencyReset");
-const resetEnd = source.indexOf('document.addEventListener("click"', resetStart);
-const resetBody = source.slice(resetStart, resetEnd);
 const chatStart = source.indexOf("function renderBoExpandedBody");
 const chatEnd = source.indexOf("function renderBoCollapsedBody", chatStart);
 const chatBody = source.slice(chatStart, chatEnd);
@@ -85,9 +82,8 @@ console.log(JSON.stringify({{
 	  rehydratesNewerCompactVisualization: source.includes("function scheduleLiveBoVisualizationHydration")
 	    && source.includes("incomingStep > cachedStep")
 	    && source.includes("scheduleLiveBoVisualizationHydration()"),
-	  clearsVisualizationOnEmergencyReset: resetBody.includes("clearLiveBoVisualization()"),
-	  lhsRemovedFromBoDashboard: !body.includes("Latin Hypercube Initial Design")
-	    && !body.includes("renderBoInitialDesignBoard(boResult)"),
+	  lhsFixedInBoDashboard: body.includes('renderDashboardCard("Initial Design / LHS", renderBoInitialDesignBoard(report)')
+	    && body.indexOf('renderDashboardCard("Initial Design / LHS"') < body.indexOf("if (!ranking.length && !Object.keys(boResult).length)"),
 	  keepsOriginalBoCards: body.includes("Candidate Ranking")
 	    && body.includes("Recommendation")
 	    && body.includes("Selected Parameters")
@@ -97,13 +93,15 @@ console.log(JSON.stringify({{
 	    && body.includes("Next Design Request"),
 	  noInitialDesignGateCard: !body.includes("BO Initialization Gate")
 	    && !body.includes("Waiting for initial design data"),
-	  lhsOwnedByDesignDashboard: designBody.includes("Initial Design / LHS")
-	    && designBody.includes("renderDesignInitialDesignBoard")
+	  lhsRemovedFromDesignDashboard: !designBody.includes("Initial Design / LHS")
+	    && !designBody.includes("renderDesignInitialDesignBoard"),
+	  designDashboardAlwaysShowsDesignSpace: designBody.includes('renderDashboardCard("DOE Map / Design Space", renderDesignParameterSweep(screenReport)')
+	    && !designBody.includes("const initialDesign")
+	    && !designBody.includes("initialDesign ?"),
+	  lhsUsesDedicatedRenderer: source.includes("function renderBoInitialDesignBoard(report)")
+	    && source.includes("function latestBoInitialDesign(report)")
 	    && source.includes("LHSDesignVisualization"),
-	  lhsMatchesEvaluationCardWidth: designBody.includes('renderDashboardCard("Initial Design / LHS", renderDesignInitialDesignBoard(report), {{ span: 4')
-	    && designBody.includes('renderDashboardCard("Evaluation Matrix"')
-	    && designBody.includes('renderDashboardCard("Buildability Gate"')
-	    && designBody.includes('className: "ar-design-reference-card ar-design-sweep-card ar-design-lhs-card"'),
+	  lhsRendererHasSingleOwner: source.split("function renderBoInitialDesignBoard(").length - 1 === 1,
 	  lhsRestoresLegacyTrace: source.includes("function boLatestTrace")
 	    && source.includes("boLatestTrace(boResult)")
 	    && source.includes("trace.initial_design")
@@ -144,12 +142,13 @@ def test_live_gui_bo_dashboard_uses_shared_equation_and_posterior_renderer() -> 
 	        "preservesVisualizationForCompactSameRunState": True,
 	        "ignoresCompactSameRunVisualizationEvent": True,
 	        "rehydratesNewerCompactVisualization": True,
-	        "clearsVisualizationOnEmergencyReset": True,
-	        "lhsRemovedFromBoDashboard": True,
+	        "lhsFixedInBoDashboard": True,
 	        "keepsOriginalBoCards": True,
 	        "noInitialDesignGateCard": True,
-	        "lhsOwnedByDesignDashboard": True,
-	        "lhsMatchesEvaluationCardWidth": True,
+	        "lhsRemovedFromDesignDashboard": True,
+	        "designDashboardAlwaysShowsDesignSpace": True,
+	        "lhsUsesDedicatedRenderer": True,
+	        "lhsRendererHasSingleOwner": True,
 	        "lhsRestoresLegacyTrace": True,
 	        "lhsChatCard": True,
 	        "lhsReportDetails": True,

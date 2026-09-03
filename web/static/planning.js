@@ -4597,7 +4597,7 @@ function latestDesignAgentReport(report) {
   return latestReportPayload(report, ["latest_design_agent_report", "design_agent_report", "data.design_agent_report", "role_specific.design_agent_report", "sections.design_agent_report"]);
 }
 
-function latestDesignInitialDesign(report) {
+function latestBoInitialDesign(report) {
   const state = report && report.state ? report.state : {};
   const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
   const lhsVisualization = metadata.lhs_visualization && typeof metadata.lhs_visualization === "object"
@@ -12479,34 +12479,6 @@ function renderDesignEvidenceCard(artifactLedger, rejected) {
   `;
 }
 
-function renderDesignInitialDesignBoard(report) {
-  const initial = latestDesignInitialDesign(report);
-  if (!initial) return renderDesignEmpty("Waiting for initial design data.");
-  const renderer = window.LHSDesignVisualization;
-  if (renderer && typeof renderer.renderPlot === "function") {
-    const legacyPoints = Array.isArray(initial.points) ? initial.points : [];
-    const legacyPayload = {
-      schema: "lhs_design_visualization.v1",
-      run_id: "legacy-live-state",
-      step: initial.index || Math.min(initial.completed + 1, initial.target),
-      initial_design: initial,
-      design_space: {
-        x: { name: "cell_size_mm", label: "Cell size", unit: "mm", kind: "discrete", values: [5.0, 6.0, 7.5, 10.0] },
-        y: { name: "relative_density", label: "Relative density", unit: "1", kind: "continuous", bounds: [0.20, 0.48] },
-      },
-      diagnostics: { coverage_fraction: initial.target ? initial.completed / initial.target : 0, duplicate_count: 0 },
-      status: "active",
-    };
-    return renderer.renderPlot(initial.visualization || { ...legacyPayload, initial_design: { ...initial, points: legacyPoints } });
-  }
-  return renderDashboardRows([
-    ["sampler", initial.sampler],
-    ["progress", `${initial.completed}/${initial.target}`],
-    ["next_index", initial.index],
-    ["variables", "cell_size_mm x relative_density"],
-  ]);
-}
-
 function renderDesignDashboardCards(report, status, agentLabel, profile) {
   const spec = report.spec || {};
   const screenReport = latestDesignAgentReport(report) || {};
@@ -12532,13 +12504,10 @@ function renderDesignDashboardCards(report, status, agentLabel, profile) {
   const generatedCount = specimenRows.length;
   const validCount = specimenRows.filter((item) => !/reject|fail|block|invalid/i.test(String(item.status || item.candidate_status || ""))).length;
   const previewCount = specimenRows.filter((item) => designImageUrlFromSource(item)).length;
-  const initialDesign = latestDesignInitialDesign(report);
   return `
     ${renderDashboardCard("Experiment Contract", renderDesignBriefCard(brief, objective, hypothesis, spec, prior, material, manufacturability, selected), { span: 3, tone: "design", eyebrow: "mission input", className: "ar-design-reference-card ar-design-brief-card" })}
     ${renderDashboardCard("Generated Specimens", renderDesignCandidateCards(screenReport, designReport, report), { span: 9, tone: "design", eyebrow: "built specimen log", className: "ar-design-reference-card ar-design-candidates-card", meta: `${renderRuntimeValue(generatedCount)} built / ${renderRuntimeValue(validCount)} usable / ${renderRuntimeValue(previewCount)} previews` })}
-    ${initialDesign
-      ? renderDashboardCard("Initial Design / LHS", renderDesignInitialDesignBoard(report), { span: 4, tone: "metrics", eyebrow: "mixed-space experimental design", className: "ar-design-reference-card ar-design-sweep-card ar-design-lhs-card" })
-      : renderDashboardCard("DOE Map / Design Space", renderDesignParameterSweep(screenReport), { span: 4, tone: "metrics", eyebrow: "parameter sweep", className: "ar-design-reference-card ar-design-sweep-card" })}
+    ${renderDashboardCard("DOE Map / Design Space", renderDesignParameterSweep(screenReport), { span: 4, tone: "metrics", eyebrow: "parameter sweep", className: "ar-design-reference-card ar-design-sweep-card" })}
     ${renderDashboardCard("Evaluation Matrix", renderDesignExpectedPerformance(screenReport, designReport, selected), { span: 4, tone: "metrics", eyebrow: "objective vs mass", className: "ar-design-reference-card ar-design-performance-card" })}
     ${renderDashboardCard("Buildability Gate", renderDesignManufacturabilityCard(screenReport, designReport, selected, spec, material, specimenRows.length ? specimenRows : candidateRows), { span: 4, tone: handoff.required_fields_present === false || (manufacturability.warnings || []).length ? "warning" : "success", eyebrow: "print path", className: "ar-design-reference-card ar-design-manufacturing-card" })}
     ${renderDashboardCard("Active Handoff", renderDesignHandoffCard(handoff, selected, material, spec, artifactLedger), { span: 12, tone: handoff.required_fields_present === false || rejected.length ? "warning" : "success", eyebrow: "dsn -> spc", className: "ar-design-reference-card ar-design-handoff-card" })}
@@ -15495,20 +15464,32 @@ function boInitialDesignStatus(boResult) {
   };
 }
 
-function renderBoInitialDesignBoard(boResult) {
-  const initial = boInitialDesignStatus(boResult);
-  const recommendation = boResult.recommendation || boResult.selected || {};
-  const pct = dashboardPercent((initial.completed / initial.target) * 100);
-  return `
-    <div class="ar-bo-ranking-board ar-bo-initial-design-board">
-      <article class="selected" style="--score:${numberText(pct, 2)}%;">
-        <div><strong>Latin Hypercube Initial Design</strong><span>${escapeHtml(`${initial.completed}/${initial.target}`)}</span></div>
-        <div class="bar"><i></i></div>
-        <small>next LHS point ${escapeHtml(`${initial.nextIndex}/${initial.target}`)} · normalized 2D design space</small>
-      </article>
-      <div class="ar-bo-lhs-parameters">${renderBoParameterChips(recommendation)}</div>
-    </div>
-  `;
+function renderBoInitialDesignBoard(report) {
+  const initial = latestBoInitialDesign(report);
+  if (!initial) return renderVizEmpty("Waiting for initial design data.");
+  const renderer = window.LHSDesignVisualization;
+  if (renderer && typeof renderer.renderPlot === "function") {
+    const legacyPoints = Array.isArray(initial.points) ? initial.points : [];
+    const legacyPayload = {
+      schema: "lhs_design_visualization.v1",
+      run_id: "legacy-live-state",
+      step: initial.index || Math.min(initial.completed + 1, initial.target),
+      initial_design: initial,
+      design_space: {
+        x: { name: "cell_size_mm", label: "Cell size", unit: "mm", kind: "discrete", values: [5.0, 6.0, 7.5, 10.0] },
+        y: { name: "relative_density", label: "Relative density", unit: "1", kind: "continuous", bounds: [0.20, 0.48] },
+      },
+      diagnostics: { coverage_fraction: initial.target ? initial.completed / initial.target : 0, duplicate_count: 0 },
+      status: "active",
+    };
+    return renderer.renderPlot(initial.visualization || { ...legacyPayload, initial_design: { ...initial, points: legacyPoints } });
+  }
+  return renderDashboardRows([
+    ["sampler", initial.sampler],
+    ["progress", `${initial.completed}/${initial.target}`],
+    ["next_index", initial.index],
+    ["variables", "cell_size_mm x relative_density"],
+  ]);
 }
 
 function renderBoParameterChips(candidate) {
@@ -16389,6 +16370,7 @@ function renderBoDashboardCards(report, status, agentLabel, profile) {
   const visualizationCards = `
     ${renderDashboardCard("BO Objective Equation", `<div data-live-bo-equation>${equationBody}</div>`, { span: 4, tone: "bo", eyebrow: "active objective", className: "bo-objective-summary-card" })}
     ${renderDashboardCard("Live Posterior", `<div data-live-bo-posterior>${posteriorBody}</div>`, { span: 8, tone: "bo", eyebrow: "uncertainty + acquisition" })}
+    ${renderDashboardCard("Initial Design / LHS", renderBoInitialDesignBoard(report), { span: 12, tone: "bo", eyebrow: "mixed-space experimental design", className: "ar-bo-lhs-card" })}
   `;
   const recommendation = boResult.recommendation || boResult.selected || {};
   const reasoning = boResult.reasoning || {};

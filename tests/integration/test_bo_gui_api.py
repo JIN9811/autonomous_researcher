@@ -93,8 +93,7 @@ def test_bo_workspace_contains_shared_live_visualization_cards() -> None:
     live_html = TestClient(app).get("/live").text
     assert '/static/lhs_design_visualization.js?v=20260812-lhs-paper-1' in live_html
     assert '/static/bo_visualization.js?v=20260813-threshold-label-1' in live_html
-    assert 'bo-paper-3' in live_html
-    assert 'planning.js?v=20260813-test-complete-freeze-1' in live_html
+    assert '/static/planning.js?v=20260904-bo-lhs-1' in live_html
 
 
 def test_bo_workspace_resets_visualization_state_before_each_new_run() -> None:
