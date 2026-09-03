@@ -1,4 +1,4 @@
-# Test-Mode Execution Profiles and Manual Handoff Design
+# Test-Mode Execution Profiles and Operator-Teleop Handoff Design
 
 ## Goal
 
@@ -40,6 +40,9 @@ The stored document uses this logical shape:
         "print_body": "execute",
         "cooling_wait": "execute",
         "auto_ejection": true
+      },
+      "handoff": {
+        "strategy": "operator_teleop"
       }
     }
   }
@@ -129,16 +132,20 @@ Only new test-mode runs consume newly saved settings. Live mode, replay, fault i
 
 The controller derives whether a physical specimen exists at every material handoff. A downstream real device cannot consume a handoff whose upstream device performed no physical actuation.
 
-### Manual handoff rule
+### Operator-teleop handoff rule
 
-When a virtual upstream stage is followed by a real downstream stage, the controller inserts a mandatory manual handoff gate before the first downstream actuation. It does not relabel the virtual result as a physical completion.
+When virtual autonomous Manipulation is followed by real Lab Equipment, the controller inserts a mandatory operator-teleop handoff gate before the first downstream actuation. It does not relabel the virtual VLA result as a physical completion. `manipulation.device_mode=virtual` disables autonomous policy actuation; it does not prevent a separately confirmed operator from controlling the same robot through the existing LeRobot leader/follower teleoperation boundary.
+
+The initial supported `handoff.strategy` is `operator_teleop`. The settings page stores and displays it explicitly so a future strategy cannot silently replace it. It is not an autonomous fallback: the runtime must pause and wait for the operator to start and finish the teleop session.
 
 The primary supported case is:
 
 ```text
 Manipulation virtual/preflight
-  -> manual specimen placement required
-  -> operator places the identified specimen in the UTM
+  -> operator teleop transfer required
+  -> existing LeRobot live teleop starts with explicit confirmation
+  -> operator moves the identified specimen into the UTM
+  -> teleop stops and returns robot/camera ownership
   -> equipment-owned UTM vision performs a fresh placement check
   -> Lab Equipment real execution may start
 ```
@@ -147,7 +154,7 @@ The gate records a typed payload:
 
 ```json
 {
-  "schema": "manual_specimen_handoff.v1",
+  "schema": "operator_teleop_handoff.v1",
   "status": "confirmed",
   "run_id": "...",
   "specimen_id": "...",
@@ -156,23 +163,34 @@ The gate records a typed payload:
   "target_stage": "lab_equipment",
   "source_actuation_performed": false,
   "target_device": "utm",
+  "handoff_strategy": "operator_teleop",
+  "teleop_session_id": "...",
+  "teleop_started_at": "...",
+  "teleop_stopped_at": "...",
+  "teleop_stop_verified": true,
+  "robot_port_released": true,
+  "camera_returned_to_vision": true,
   "confirmed_by": "local_operator",
   "confirmed_at": "...",
   "vision_verification": {}
 }
 ```
 
-The run pauses with `pending_manual_specimen_handoff` until the operator confirms placement. Confirmation must match the active run, specimen, candidate, source, and target. Confirmation then triggers a fresh target-side placement observation. Only a successful, non-stale observation releases the Lab Equipment execution gate. Cancel, timeout, identity mismatch, stale signal, missing image evidence, or negative detection stops the cycle with a stable failure code.
+The run pauses with `pending_operator_teleop_handoff` and provides a direct link to the existing `/lerobot#teleoperation-card` workspace. Starting the session calls the existing `lerobot.teleoperate.start` boundary in live mode with its normal explicit execution confirmation and selected robot profile. The operator ends the transfer through the existing stop boundary; the controller then requires `TELEOP_STOPPED`, the matching session ID, follower/leader port release, and active-camera ownership return before it requests a fresh target-side placement observation.
 
-Settings remain in the main-GUI popup. The runtime-only manual placement confirmation is presented through the existing Live GUI approval/operator-intervention surface and recorded in the normal runtime event stream.
+Only a successful, non-stale UTM placement observation releases the Lab Equipment execution gate. The final confirmation must match the active run, specimen, candidate, source, target, and teleop session. Cancel, timeout, identity mismatch, mismatched or still-active session, unverified stop, unreleased port, camera ownership failure, stale signal, missing image evidence, or negative detection stops the cycle with a stable failure code.
+
+Settings remain in the main-GUI popup. The runtime-only teleop transfer action is presented through the existing Live GUI approval/operator-intervention surface and recorded in the normal runtime event stream. The settings page never starts teleoperation.
+
+If the printer was virtual or its print body was skipped, the system cannot assume that a physical specimen exists for teleoperation. Before teleop starts, the operator must confirm that the matching external specimen has been placed in the configured robot pickup area; a fresh pickup-side Vision observation must then confirm it. This materialization gate is distinct from the subsequent robot teleop transfer.
 
 ### Other combinations
 
 | Combination | Resolution |
 |---|---|
-| Printer virtual or print body skipped, then any real specimen-consuming stage | Require an external specimen/manual-materialization confirmation before the first real consumer. |
+| Printer virtual or print body skipped, then any real specimen-consuming stage | Require matching external-specimen materialization plus pickup-side Vision evidence before teleop or the first real consumer. |
 | Vision virtual, Manipulation real | Block robot actuation unless another existing validated pose provider is explicitly selected; an operator click alone cannot replace robot pose evidence. |
-| Manipulation virtual, Lab Equipment real | Require manual UTM placement plus fresh equipment-owned Vision verification. |
+| Manipulation virtual, Lab Equipment real | Require a separately confirmed live LeRobot teleop session, verified stop/port return, and fresh equipment-owned UTM Vision verification. |
 | Manipulation real, Lab Equipment virtual | Allow with a warning; robot actuation occurs, UTM stops at preflight. |
 | All physical stages virtual | Run the existing safe preflight closed loop without device actuation. |
 | All physical stages real | Run the normal guarded physical chain. |
@@ -198,7 +216,7 @@ Each profile tab contains:
 
 1. four agent/device cards with a `Preflight only / Real device` segmented control;
 2. a printer-flow card for print body, cooling wait, and auto-ejection;
-3. a derived-flow summary showing physical stages, preflight stages, required manual handoffs, warnings, and blockers;
+3. a handoff-strategy control fixed initially to `Operator teleop`, plus a derived-flow summary showing physical stages, preflight stages, required teleop/materialization gates, warnings, and blockers;
 4. Save, Reload, and Restore controls.
 
 The UI disables the cooling-skip choice while print body is enabled and explains why. It does not hide invalid dependencies conditionally: every setting stays visible, with disabled state and an inline reason where appropriate. Save success reflects the server-returned revision; local browser state alone is never treated as saved configuration.
@@ -210,8 +228,8 @@ The UI disables the cooling-skip choice while print body is enabled and explains
 - A missing path selection keeps the existing printer-path selection request; no profile is guessed.
 - A saved `real` device mode is authorization to reach that device's existing confirmation gate, not authorization to bypass it.
 - An active run reports the resolved profile ID, revision, and hash in state and artifacts for reproducibility.
-- Manual handoff confirmation is single-use and cycle-bound. It cannot be replayed for another specimen or BO iteration.
-- Emergency stop, stop, or reset invalidates every pending handoff token.
+- Teleop handoff confirmation is single-use and cycle-bound. Neither its confirmation nor its session ID can be replayed for another specimen or BO iteration.
+- Emergency stop, stop, or reset stops the associated teleop session when possible and invalidates every pending handoff token.
 
 ## Verification
 
@@ -219,11 +237,11 @@ Implementation follows test-driven development and does not contact hardware.
 
 1. Store tests cover missing-file defaults, round-trip persistence, atomic replacement, stale revision conflicts, unknown fields, unsafe print/cooling combinations, and reset behavior.
 2. API tests cover the popup route plus GET, PUT, and reset responses.
-3. Frontend tests cover the Run Control button, popup opening, all visible controls, per-tab independence, server save/reload, dependency messages, and derived manual-handoff previews.
+3. Frontend tests cover the Run Control button, popup opening, all visible controls, per-tab independence, server save/reload, dependency messages, and derived operator-teleop handoff previews.
 4. Controller tests prove each path resolves the correct saved profile, explicit one-shot overrides obey precedence, selection no longer forces unrelated devices real, and the snapshot survives BO redesign.
 5. Printer tests prove print-body/cooling skip affects only the resolved ejection-only path and that full printing retains cooldown.
 6. Agent tests install tripwires at printer, Vision, VLA, and UTM physical calls and verify every virtual row stops before its own device boundary.
-7. Hybrid tests prove virtual Manipulation plus real Lab Equipment pauses before UTM, rejects wrong identity and stale evidence, accepts one matching operator confirmation plus fresh Vision evidence, and cannot reuse it in the next cycle.
+7. Hybrid tests prove virtual Manipulation plus real Lab Equipment pauses before UTM; starts no teleop without explicit operator confirmation; rejects wrong identity, wrong session, active/unreleased sessions, and stale evidence; accepts one matching stopped teleop session plus fresh UTM Vision evidence; and cannot reuse it in the next cycle.
 8. A hardware-free closed-loop matrix test covers the default three profiles and representative hybrid combinations.
 
 ## Compatibility and non-goals
@@ -231,6 +249,6 @@ Implementation follows test-driven development and does not contact hardware.
 - No agent is removed from the graph by these switches.
 - This design does not add arbitrary graph editing to the settings window.
 - This design does not weaken live-mode safety or confirmation requirements.
-- This design does not claim that an operator confirmation alone establishes a robot-safe pose.
+- This design does not claim that an operator confirmation or teleop session alone establishes a robot-safe pose or valid UTM placement.
 - Existing configuration files and legacy test callers remain valid; saved profiles are additive and test-mode-only.
 - The current uncommitted installed-printer cooldown change is preserved and becomes the implementation basis for the stored skip policy.
