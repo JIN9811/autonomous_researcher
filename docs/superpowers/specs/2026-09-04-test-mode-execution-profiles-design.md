@@ -4,7 +4,7 @@
 
 Provide a persistent, operator-editable test-mode settings surface from the main GUI. The settings select, per test path, which agent-owned devices execute physically and which stop at validated preflight. They also control printer-body, cooldown, and auto-ejection behavior without changing the closed-loop agent sequence.
 
-The settings UI belongs to the main GUI, not the Live GUI. Runtime approvals that arise from a hybrid physical/virtual chain remain visible through the existing runtime approval and event surfaces.
+The settings UI belongs to the main GUI, not the Live GUI. Runtime approvals that arise from a hybrid physical/virtual chain remain visible through the runtime event surfaces, while teleop completion is confirmed in a handoff-specific Manipulation Bridge popup.
 
 ## Entry point and settings window
 
@@ -136,7 +136,7 @@ The controller derives whether a physical specimen exists at every material hand
 
 When virtual autonomous Manipulation is followed by real Lab Equipment, the controller inserts a mandatory operator-teleop handoff gate before the first downstream actuation. It does not relabel the virtual VLA result as a physical completion. `manipulation.device_mode=virtual` disables autonomous policy actuation; it does not prevent a separately confirmed operator from controlling the same robot through the existing LeRobot leader/follower teleoperation boundary.
 
-The initial supported `handoff.strategy` is `operator_teleop`. The settings page stores and displays it explicitly so a future strategy cannot silently replace it. It is not an autonomous fallback: the runtime must pause and wait for the operator to start and finish the teleop session and then confirm completion in the runtime GUI.
+The initial supported `handoff.strategy` is `operator_teleop`. The settings page stores and displays it explicitly so a future strategy cannot silently replace it. It is not an autonomous fallback: the runtime must pause and wait for the operator to start and finish the teleop session and then confirm completion in the Manipulation Bridge popup.
 
 The primary supported case is:
 
@@ -146,7 +146,7 @@ Manipulation virtual/preflight
   -> existing LeRobot live teleop starts with explicit confirmation
   -> operator moves the identified specimen into the UTM
   -> teleop stops and returns robot/camera ownership
-  -> operator clicks Teleop Complete in the Live GUI
+  -> operator clicks Teleop Complete in the Manipulation Bridge popup
   -> equipment-owned UTM vision performs a fresh placement check
   -> Lab Equipment real execution may start
 ```
@@ -177,15 +177,15 @@ The gate records a typed payload:
 }
 ```
 
-The run pauses with `pending_operator_teleop_handoff` and provides a direct link to the existing `/lerobot#teleoperation-card` workspace. Starting the session calls the existing `lerobot.teleoperate.start` boundary in live mode with its normal explicit execution confirmation and selected robot profile. The operator ends the transfer through the existing stop boundary. Stopping teleop alone does not resume the agent loop.
+The run pauses with `pending_operator_teleop_handoff` and opens or links to a handoff-scoped Manipulation Bridge popup at `/lerobot?handoff_token=<token>&run_id=<run_id>#teleoperation-card`. The existing LeRobot page validates the token against the server-held pending handoff and renders the teleop controls plus a dedicated completion panel. Starting the session calls the existing `lerobot.teleoperate.start` boundary in live mode with its normal explicit execution confirmation and selected robot profile. The operator ends the transfer through the existing stop boundary. Stopping teleop alone does not resume the agent loop.
 
-The Live GUI keeps the current runtime approval card visible with a `Teleop Complete` confirmation action. The action is disabled while no matching session exists or while that session remains active. When clicked, it calls the bounded teleop-handoff confirmation API. The controller requires `TELEOP_STOPPED`, the matching session ID, follower/leader port release, active-camera ownership return, and the current handoff token before it requests a fresh target-side placement observation.
+The Manipulation Bridge popup keeps a `Teleop Handoff` panel visible with the active run, cycle, specimen, candidate, source, and target. Its `Teleop Complete` action is disabled while no matching session exists or while that session remains active. When clicked, it calls the bounded teleop-handoff confirmation API. The controller requires `TELEOP_STOPPED`, the matching session ID, follower/leader port release, active-camera ownership return, and the current handoff token before it requests a fresh target-side placement observation. The popup displays the confirmation result and may close after the controller accepts it.
 
 Only the explicit GUI confirmation followed by a successful, non-stale UTM placement observation releases the Lab Equipment execution gate. The confirmation must match the active run, cycle index, specimen, candidate, source, target, handoff token, and teleop session. Cancel, timeout, identity mismatch, mismatched or still-active session, unverified stop, unreleased port, camera ownership failure, stale signal, missing image evidence, or negative detection stops the cycle with a stable failure code.
 
 The confirmation resumes the same paused coroutine and preserves the existing `run_id`, `cycle_index`, `specimen_id`, `candidate_id`, and accumulated agent state. It does not start a new run, repeat Design/Specimen, or create a one-off execution route. Refreshing or temporarily closing the Live GUI does not discard the server-held pending handoff.
 
-Settings remain in the main-GUI popup. The runtime-only teleop transfer and completion confirmation are presented through the existing Live GUI approval/operator-intervention surface and recorded in the normal runtime event stream. The settings page never starts teleoperation or confirms completion.
+Settings remain in the main-GUI popup. The runtime-only teleop transfer and completion confirmation are presented in the Manipulation Bridge popup and recorded in the normal runtime event stream. The Live GUI remains a read-only status mirror for this handoff and does not own its confirmation button. The settings page never starts teleoperation or confirms completion.
 
 If the printer was virtual or its print body was skipped, the system cannot assume that a physical specimen exists for teleoperation. Before teleop starts, the operator must confirm that the matching external specimen has been placed in the configured robot pickup area; a fresh pickup-side Vision observation must then confirm it. This materialization gate is distinct from the subsequent robot teleop transfer.
 
@@ -210,6 +210,7 @@ The main application exposes:
 - `PUT /api/test-mode-execution-profiles/{profile_id}`: validate and atomically save one complete profile with optimistic `expected_revision`.
 - `POST /api/test-mode-execution-profiles/reset`: restore one or all built-in profiles.
 - `GET /test-mode-settings`: serve the popup settings page.
+- `GET /api/planning/runs/{run_id}/teleop-handoff?handoff_token=...`: return the bounded handoff context consumed by the Manipulation Bridge popup.
 - `POST /api/planning/runs/{run_id}/teleop-handoff/confirm`: validate the current handoff token and stopped teleop session, run target-side Vision verification, and release the same paused cycle.
 
 The API never accepts arbitrary paths, unknown agents, unknown modes, unknown printer-flow values, or extra execution commands. A stale `expected_revision` returns a conflict instead of overwriting another settings window.
@@ -244,7 +245,7 @@ Implementation follows test-driven development and does not contact hardware.
 
 1. Store tests cover missing-file defaults, round-trip persistence, atomic replacement, stale revision conflicts, unknown fields, unsafe print/cooling combinations, and reset behavior.
 2. API tests cover the popup route plus GET, PUT, and reset responses.
-3. Frontend tests cover the Run Control button, popup opening, all visible controls, per-tab independence, server save/reload, dependency messages, and derived operator-teleop handoff previews.
+3. Frontend tests cover the Run Control button, settings popup opening, all visible controls, per-tab independence, server save/reload, dependency messages, derived operator-teleop handoff previews, handoff-scoped Manipulation Bridge popup state, and the disabled/enabled Teleop Complete action.
 4. Controller tests prove each path resolves the correct saved profile, explicit one-shot overrides obey precedence, selection no longer forces unrelated devices real, and the snapshot survives BO redesign.
 5. Printer tests prove print-body/cooling skip affects only the resolved ejection-only path and that full printing retains cooldown.
 6. Agent tests install tripwires at printer, Vision, VLA, and UTM physical calls and verify every virtual row stops before its own device boundary.
