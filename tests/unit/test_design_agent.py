@@ -219,7 +219,7 @@ async def test_design_agent_returns_structured_design_report_and_handoff_packet(
         experiment_id="exp-report",
         mode=Mode.TEST,
         stage=Stage.DESIGN,
-        active_goal="maximize compression energy absorption per unit mass",
+        active_goal="maximize volumetric energy absorption to 50% compression",
     )
 
     result = await agent.run(state, _DeterministicCtxStub())
