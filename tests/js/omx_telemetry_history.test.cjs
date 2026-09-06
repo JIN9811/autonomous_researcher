@@ -14,7 +14,6 @@ function viewer() {
   vm.runInContext(source + `
     const originalApplyMotionState = applyMotionState;
     scheduleChartRender = () => {};
-    applyMotionState = () => {};
     globalThis.api = { runtime, appendSample, consumePacket, chartOption, loadSnapshot,
       applyMotionState: originalApplyMotionState, applyArtifacts };
   `, context);
@@ -26,6 +25,109 @@ const sample = (sequence, elapsed_s = sequence - 1) => ({
   actual_source: { Joint1: sequence, Gripper: sequence % 100 },
   target_source: { Joint1: sequence + 1, Gripper: sequence % 100 + 1 },
 });
+
+test("a compact batch preserves every curve point and applies its latest pose and grasp once", () => {
+  const context = viewer();
+  const { api } = context;
+  const status = { textContent: "idle" };
+  const container = { dataset: {}, querySelector: s => s === "[data-atr-grasp-status]" ? status : null };
+  let graspUpdates = 0;
+  context.document.querySelectorAll = selector => {
+    if (selector === "[data-atr-grasp-outcome]") { graspUpdates++; return [container]; }
+    return [];
+  };
+  api.appendSample(sample(1));
+  graspUpdates = 0;
+  const samples = Array.from({ length: 128 }, (_, i) => sample(i + 2));
+  const latest = { ...samples.at(-1), actual_rad: { Joint1: 0.4 }, target_rad: { Joint1: 0.5 },
+    motion_state: { grasp_outcome: { status: "failed", attempt_index: 2 },
+      grasp_achievement: { achieved: true, first_success: { status: "success", attempt_index: 1 } } } };
+  api.consumePacket({ type: "joint_samples", sample_format: "compact-v1", samples, latest_sample: latest });
+  assert.equal(api.runtime.history.length, 129);
+  assert.equal(api.runtime.latestSequence, 129);
+  assert.equal(api.runtime.latestActualRad.Joint1, 0.4);
+  assert.equal(api.runtime.latestTargetRad.Joint1, 0.5);
+  assert.equal(status.textContent, "success");
+  assert.equal(graspUpdates, 1);
+  assert.equal(api.runtime.latestMotionState.grasp_outcome.attempt_index, 2);
+  api.runtime.selectedJoint = "Gripper";
+  assert.equal(api.chartOption().series[0].data.length, 129);
+  assert.deepEqual(Array.from(api.chartOption().series[0].data.at(-1)), [128, 29]);
+  // Re-delivery must neither duplicate chart points nor reapply an older pose.
+  api.consumePacket({ type: "joint_samples", samples: [sample(128)],
+    latest_sample: { ...sample(128), actual_rad: { Joint1: 99 } } });
+  assert.equal(api.runtime.history.length, 129);
+  assert.equal(api.runtime.latestActualRad.Joint1, 0.4);
+  assert.equal(graspUpdates, 1);
+});
+
+test("legacy full-sample history also updates status only once per batch", () => {
+  const context = viewer();
+  context.api.appendSample(sample(1));
+  let updates = 0;
+  context.document.querySelectorAll = selector => {
+    if (selector === "[data-atr-grasp-outcome]") updates++;
+    return [];
+  };
+  context.api.consumePacket({ type: "joint_history", samples: [sample(1), sample(2), sample(3)] });
+  assert.equal(context.api.runtime.history.length, 3);
+  assert.equal(updates, 1);
+});
+
+test("compact execution rollover keeps the new pose and runtime view without old curve points", () => {
+  const { api } = viewer();
+  api.appendSample({ ...sample(100), execution_index: 1 });
+  const point = { ...sample(1, 0), execution_index: 2 };
+  api.consumePacket({ type: "joint_samples", samples: [point],
+    latest_sample: { ...point, actual_rad: { Gripper: 0.2 } },
+    runtime_view: { execution: { status: "running" } } });
+  assert.equal(api.runtime.executionIndex, 2);
+  assert.deepEqual(Array.from(api.runtime.history, p => p.sequence), [1]);
+  assert.equal(api.runtime.latestActualRad.Gripper, 0.2);
+  assert.equal(api.runtime.runtimeView.execution.status, "running");
+  const nextSession = { ...sample(1, 0), session_id: "next-rollout", execution_index: 1 };
+  api.consumePacket({ type: "joint_history", session: { session_id: "next-rollout" },
+    samples: [nextSession], latest_sample: { ...nextSession, actual_rad: { Gripper: 0.3 } } });
+  assert.equal(api.runtime.sessionId, "next-rollout");
+  assert.equal(api.runtime.history.length, 1);
+  assert.equal(api.runtime.latestActualRad.Gripper, 0.3);
+});
+
+test("detail for a different sample cannot advance a compact batch's pose", () => {
+  const { api } = viewer();
+  api.consumePacket({ type: "joint_history", samples: [sample(1), sample(2)],
+    latest_sample: { ...sample(100), actual_rad: { Joint1: 99 } } });
+  assert.equal(api.runtime.latestSequence, 2);
+  assert.notEqual(api.runtime.latestActualRad.Joint1, 99);
+  assert.equal(api.runtime.history.length, 2);
+});
+
+for (const compact of [false, true]) {
+  test(`release followed by idle in one ${compact ? "compact" : "legacy"} batch stays released`, () => {
+    const context = viewer();
+    const { api } = context;
+    api.appendSample(sample(1));
+    // Only replace geometry calculations; exercise the actual grasp/release latch.
+    vm.runInContext(`
+      specimenObject = () => ({});
+      syncHeldSpecimenPose = () => true;
+      settleSpecimenOnSupport = () => true;
+      runtime.viewer = { environmentGroup: {},
+        specimenGraspState: { held: true, attemptIndex: 1, releasedAttemptIndex: null } };
+    `, context);
+    const points = ["ungrasping", "idle"].map((gripper_state, index) => ({
+      ...sample(index + 2),
+      ...(compact ? { grasp_visual: { status: "success", attempt_index: 1, gripper_state } }
+        : { motion_state: { grasp_outcome: { status: "success", attempt_index: 1 }, measured: { gripper_state } } }),
+    }));
+    api.consumePacket({ type: "joint_samples", samples: points,
+      latest_sample: { ...sample(3), motion_state: {
+        grasp_outcome: { status: "success", attempt_index: 1 }, measured: { gripper_state: "idle" } } } });
+    assert.equal(api.runtime.viewer.specimenGraspState.held, false);
+    assert.equal(api.runtime.viewer.specimenGraspState.releasedAttemptIndex, 1);
+    assert.equal(api.runtime.history.length, 3);
+  });
+}
 
 test("all recorded samples survive live updates and reconnect history replacement", () => {
   const { api } = viewer();

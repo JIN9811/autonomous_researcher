@@ -20,6 +20,10 @@ Modification guide:
 
 from __future__ import annotations
 
+from utils.specimen_placement import normalize_placement, placement_area, placement_from_payload, preflight_placement, requested_center, validate_sliced_placement
+from utils.bambu_material_priority import load_priority, priority_path, select_material, bind_artifact, material_artifact_path
+from utils.printer_profile import load_prusa_print_profile
+
 import copy
 import html
 import json
@@ -223,6 +227,7 @@ class BambuStudioSlicerRunner:
         load_filaments: str | Path | None = None,
         extra_args: list[str] | None = None,
         timeout_sec: float | None = None,
+        specimen_placement: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Slice an STL/3MF into a Bambu artifact and return manifest evidence."""
         source = Path(str(source_path or "")).expanduser()
@@ -273,12 +278,28 @@ class BambuStudioSlicerRunner:
                 slicer_profile["no_skirt_profile_probe"] = no_skirt_profile
 
         before = {path.resolve() for path in self._candidate_outputs(output_dir)}
+        try:
+            placement = normalize_placement(specimen_placement)
+            if placement["mode"] != "auto" and effective_load_settings:
+                effective_load_settings = ";".join(str(self._resolve_existing_optional(name))
+                    for name in str(effective_load_settings).split(";"))
+            area = placement_area(effective_load_settings) if placement["mode"] != "auto" else {}
+            placement_preflight = preflight_placement(source, placement, area)
+            if not placement_preflight["ok"]:
+                return self._blocked(placement_preflight["failure_code"], placement_validation=placement_preflight)
+            center = requested_center(placement, area)
+            if center is not None and any(str(arg).split("=")[0] in {
+                "--arrange", "--center", "--align-xy", "--rotate", "--rotate-x", "--rotate-y", "--scale", "--orient", "--load-assemble-list",
+            } for arg in (extra_args or [])):
+                return self._blocked("SPECIMEN_PLACEMENT_CONFLICTING_ARGS")
+        except (ValueError, OSError, TypeError, KeyError) as exc:
+            return self._blocked("SPECIMEN_PLACEMENT_INVALID", error=str(exc))
         command = [
             executable,
             "--slice",
             "0",
             "--arrange",
-            "1",
+            "0" if center is not None else "1",
             "--ensure-on-bed",
             "--outputdir",
             str(output_dir),
@@ -293,7 +314,16 @@ class BambuStudioSlicerRunner:
             command.extend(["--load-filaments", str(self._resolve_existing_optional(effective_load_filaments))])
         if extra_args:
             command.extend(str(item) for item in extra_args)
-        command.append(str(source))
+        if center is not None:
+            # Bambu exposes assembly placement, but its CLI disables --center.
+            dx, dy, dz = placement_preflight["translation_mm"]
+            assembly_path = output_dir / "specimen-placement.json"
+            assembly_path.write_text(json.dumps({"plates": [{"plate_name": safe_id,
+                "need_arrange": False, "objects": [{"path": str(source), "count": 1,
+                    "filaments": [1], "pos_x": [dx], "pos_y": [dy], "pos_z": [dz]}]}]}, indent=2), encoding="utf-8")
+            command.extend(["--load-assemble-list", str(assembly_path)])
+        else:
+            command.append(str(source))
 
         started_at = _utc_now()
         try:
@@ -362,6 +392,10 @@ class BambuStudioSlicerRunner:
             }
 
         front_test_line_removal = self._postprocess_front_test_line_artifact(selected)
+        placement_validation = validate_sliced_placement(selected, placement, area=area)
+        if not placement_validation["ok"]:
+            return self._blocked(placement_validation["failure_code"], placement_validation=placement_validation,
+                                 command=command, output_dir=str(output_dir))
         data = selected.read_bytes()
         return {
             "ok": True,
@@ -380,6 +414,9 @@ class BambuStudioSlicerRunner:
             "slicer_profile": slicer_profile,
             "fallback_packaging": fallback_packaging,
             "front_test_line_removal": front_test_line_removal,
+            "specimen_placement": placement,
+            "placement_preflight": placement_preflight,
+            "placement_validation": placement_validation,
             "created_at": _utc_now(),
             "started_at": started_at,
             "will_publish": False,
@@ -1872,7 +1909,8 @@ def build_bambu_project_file_command_draft(
             normalized_mapping = [int(item) for item in ams_mapping]
         except Exception:
             normalized_mapping = []
-        if len(normalized_mapping) != 5 or any(item < -1 or item > 3 for item in normalized_mapping):
+        # One entry per sliced filament preset, not a fixed five-slot layout.
+        if not 1 <= len(normalized_mapping) <= 64 or any(item < -1 or item > 15 for item in normalized_mapping):
             return {
                 "ok": False,
                 "failure_code": "BAMBU_AMS_MAPPING_INVALID",
@@ -3176,6 +3214,7 @@ class PrinterDeviceBridgeManager:
         plate_id: int = 1,
         loop_index: int = 1,
         run_id: str = "",
+        include_cooldown_wait: bool = False,
     ) -> dict[str, Any]:
         """Create an ejection-only project file from a real Bambu sliced artifact."""
         profile, reason = self.fleet_selection()
@@ -3231,6 +3270,7 @@ class PrinterDeviceBridgeManager:
             position=effective_position,
             plate_id=plate_id,
             loop_index=loop_index,
+            include_cooldown_wait=include_cooldown_wait,
         )
         payload = {
             **result,
@@ -3401,9 +3441,46 @@ class PrinterDeviceBridgeManager:
             "start_enabled": False,
         }
 
+    def resolve_material_selection(self, payload: dict[str, Any], *, normalized_report=None) -> dict[str, Any]:
+        print_payload = payload.get("print") if isinstance(payload.get("print"), dict) else {}
+        if _as_bool(payload.get("health_only"), False) or self._should_use_bambu_ejection_only_project_file(payload):
+            return {"ok": True, "enabled": False}
+        try:
+            policy = load_priority(path=priority_path(self.repo_root))
+            if not policy["enabled"]:
+                return {"ok": True, "enabled": False}
+            experiment = payload.get("experiment_spec") if isinstance(payload.get("experiment_spec"), dict) else {}
+            material = experiment.get("material") or payload.get("material") or print_payload.get("material")
+            if not material:
+                material = load_prusa_print_profile(self.repo_root / "memory/prusa_print_profile.json")["material"]
+            if normalized_report is None:
+                profile, _reason = self._select_profile(payload)
+                raw = BambuConnectionMemory(profile.connection_memory_path).load()
+                auth = raw.get("auth") or {}
+                snapshot = self.mqtt_client.read_snapshot(host=str(raw.get("host") or ""), serial=str(raw.get("serial") or ""),
+                    username=str(auth.get("username") or "bblp"), access_code=str(auth.get("access_code") or ""),
+                    timeout_sec=self.config.mqtt.timeout_sec, force_refresh=True)
+                normalized_report = normalize_bambu_report(snapshot.get("report", {}), received_at=str(snapshot.get("received_at") or "")) if snapshot.get("ok") else {}
+            return select_material(policy, normalized_report, material)
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            return {"ok": False, "enabled": True, "failure_code": "BAMBU_MATERIAL_PRIORITY_INVALID", "message": type(exc).__name__}
+
     def prepare(self, payload: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(payload or {})
         profile, reason = self._select_profile(normalized)
+        try:
+            placement = placement_from_payload(normalized)
+        except ValueError as exc:
+            return {"ok": False, "status": "blocked", "failure_code": "SPECIMEN_PLACEMENT_INVALID", "message": str(exc)}
+        if placement["mode"] != "auto":
+            if profile.provider != "bambulab_x2d":
+                return {"ok": False, "status": "blocked", "failure_code": "SPECIMEN_PLACEMENT_PROVIDER_UNSUPPORTED"}
+            existing_artifact = self._bambu_sliced_artifact_path(normalized)
+            if existing_artifact is not None:
+                check = validate_sliced_placement(existing_artifact, placement)
+                if not check["ok"]:
+                    return {"ok": False, "status": "blocked", "failure_code": check["failure_code"],
+                            "placement_validation": check, "will_publish": False, "start_enabled": False}
         if profile.provider == "bambulab_x2d":
             return self._prepare_bambu(profile, normalized, selection_reason=reason)
         return self._prepare_non_bambu(profile, normalized, selection_reason=reason)
@@ -3667,6 +3744,16 @@ class PrinterDeviceBridgeManager:
             if mqtt_snapshot.get("ok")
             else {}
         )
+        material_selection = self.resolve_material_selection(payload, normalized_report=normalized_report)
+        if not material_selection["ok"]:
+            known_artifact = self._bambu_sliced_artifact_path(payload) or self._bambu_artifact_url(payload)
+            if known_artifact:
+                material_selection = bind_artifact(material_selection, material_artifact_path(known_artifact, self.repo_root),
+                    payload.get("plate_id") or (payload.get("print") or {}).get("plate_id") or 1)
+        result["material_selection"] = material_selection
+        if not material_selection["ok"]:
+            return {**result, "ok": False, "status": "blocked", "failure_code": material_selection["failure_code"],
+                    "published": False, "will_publish": False, "start_enabled": False}
         if mqtt_snapshot.get("ok"):
             if skip_ftps_probe:
                 ftps_probe = {
@@ -3754,6 +3841,7 @@ class PrinterDeviceBridgeManager:
             if source_path:
                 slicer_result = BambuStudioSlicerRunner(self.config.slicer, repo_root=self.repo_root).slice(
                     source_path=source_path,
+                    specimen_placement=placement_from_payload(payload),
                     specimen_id=str(payload.get("specimen_id") or "bambu-specimen"),
                     load_settings=print_payload.get("load_settings") or payload.get("load_settings") or None,
                     load_filaments=print_payload.get("load_filaments") or payload.get("load_filaments") or None,
@@ -3848,6 +3936,16 @@ class PrinterDeviceBridgeManager:
             gate_ready = False
             gate_state = "blocked"
             failure_code = "BAMBU_SLICED_ARTIFACT_REQUIRED"
+        if material_selection.get("enabled"):
+            # Slicing can outlive a telemetry snapshot. Recheck before building a start draft.
+            material_selection = self.resolve_material_selection(payload)
+            material_selection = bind_artifact(material_selection, material_artifact_path(artifact_path or artifact_url, self.repo_root), plate_id)
+            result["material_selection"] = material_selection
+            if not material_selection["ok"]:
+                return {**result, "ok": False, "status": "blocked", "failure_code": material_selection["failure_code"],
+                        "published": False, "will_publish": False, "start_enabled": False}
+            if material_selection.get("enabled"):
+                payload = {**payload, "use_ams": True, "ams_mapping": material_selection["ams_mapping"]}
         if artifact_plate_validation and not artifact_plate_validation.get("ok"):
             project_file_draft = {
                 **artifact_plate_validation,
@@ -4112,6 +4210,7 @@ class PrinterDeviceBridgeManager:
                 }
             slicer_result = BambuStudioSlicerRunner(self.config.slicer, repo_root=self.repo_root).slice(
                 source_path=source_path,
+                specimen_placement=placement_from_payload(payload),
                 specimen_id=str(payload.get("specimen_id") or "bambu-specimen"),
                 load_settings=print_payload.get("load_settings") or payload.get("load_settings") or None,
                 load_filaments=print_payload.get("load_filaments") or payload.get("load_filaments") or None,
@@ -4333,6 +4432,10 @@ class PrinterDeviceBridgeManager:
                 plate_id=int(plate_id),
                 loop_index=_as_int(payload.get("loop_index") or ejection_payload.get("loop_index"), 1),
                 run_id=str(payload.get("run_id") or ""),
+                include_cooldown_wait=not _as_bool(
+                    ejection_payload.get("skip_cooldown_wait"),
+                    self._test_mode_installed_printer_check(payload),
+                ),
             )
         return self.patch_bambu_autoejection_artifact(
             source_path=artifact_path,
@@ -5396,13 +5499,16 @@ class PrinterDeviceBridgeManager:
         material_slots = [
             {
                 "label": f"AMS {slot.get('ams_id', '')}-{slot.get('tray_id', '')}".strip("-"),
+                "slot_id": f"{slot.get('ams_id', '')}:{slot.get('tray_id', '')}",
+                "ams_id": slot.get("ams_id", ""),
+                "tray_id": slot.get("tray_id", ""),
                 "tray_type": slot.get("tray_type", ""),
                 "tray_sub_brands": slot.get("tray_sub_brands", ""),
                 "tray_color": slot.get("tray_color", ""),
                 "remain_percent": slot.get("remain_percent"),
                 "state": slot.get("state"),
             }
-            for slot in report_materials.get("slots", [])[:8]
+            for slot in report_materials.get("slots", [])
             if isinstance(slot, dict)
         ]
         evidence_cards = [

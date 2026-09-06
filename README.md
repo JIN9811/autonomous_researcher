@@ -272,7 +272,7 @@ and [Security Policy](SECURITY.md).
 |---|---|---|
 | Route and graph architecture counts | `supported` within inspection scope | `E-INSPECT-ARCH-001` |
 | Paper claim-evidence/document contracts | `partially_supported` | `E-TEST-DOC-001` |
-| Full stage-contract run | `not_evaluated` | No qualifying paper record |
+| Supervised closed-loop integration, one iteration | `supported` within mixed-mode scope | [E-LIVE-LOOP-001](docs/paper/evidence/2026-09-07-supervised-closed-loop.md) |
 | Checkpoint/resume effectiveness | `not_evaluated` | No qualifying paper record |
 | Guardian/live safety effectiveness | `not_evaluated` | No qualifying paper record |
 | Knowledge/BO scientific benefit | `not_evaluated` | No comparative study |
@@ -286,6 +286,13 @@ results, not scientific efficacy metrics.
 
 See [Evaluation and Results](docs/paper/06_evaluation_and_results.md) and the
 [artifact manifest](docs/paper/artifact_manifest.yaml).
+
+The 2026-09-07 run reached live UTM clearance, Analysis, BO-managed LHS point
+2/8, and the next Design/Specimen entry. Printer deposition was skipped and
+the operator substituted a specimen. This verifies feedback integration, not
+full manufacturing, material validity, or acquisition-based optimization.
+The linked report includes an archive hash index; raw operational artifacts
+remain local and are not included in the public repository.
 
 ## Platform Contribution
 

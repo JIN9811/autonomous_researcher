@@ -66,6 +66,8 @@ from policies.validation_policy import validate_agent_output
 from policies.guardian_gate import tool_requires_action_shield
 from utils.active_cam_artifact import apply_active_cam_artifact_update
 from utils.ids import make_event_id, make_experiment_id, make_run_id
+from utils.manipulation_execution import sync_manipulation_execution_status
+from utils.specimen_execution import sync_specimen_execution_status
 from utils.utm_completion_artifact import apply_utm_completion_artifact_update
 from utils.vision_operator_intervention import (
     INTERVENTION_SCHEMA,
@@ -80,6 +82,11 @@ from reporting.lhs_design_visualization_artifacts import write_lhs_design_visual
 from utils.config_loader import load_all_configs
 from utils.paths import resolve_path
 from utils.printer_profile import adapt_print_profile_for_provider, load_prusa_print_profile
+from utils.test_mode_execution_profiles import TestModeExecutionProfileStore
+from utils.operator_teleop_handoff import (
+    OperatorTeleopHandoffError,
+    OperatorTeleopHandoffRegistry,
+)
 
 
 WORKSPACE_ARTIFACT_COPY_LIMIT_BYTES = 50 * 1024 * 1024
@@ -153,6 +160,8 @@ class MainController:
 
     def __init__(self, deps: ControllerDeps) -> None:
         self._deps = deps
+        self._test_mode_execution_profiles_path = deps.run_root.parent / "memory" / "test_mode_execution_profiles.json"
+        self._operator_teleop_handoffs = OperatorTeleopHandoffRegistry()
         self._trace = RunTrace(max_events=int(deps.system_config.get("event_buffer_size", 300)))
         self._event_queues: set[asyncio.Queue[dict[str, Any]]] = set()
         self._run_task: asyncio.Task[None] | None = None
@@ -3176,6 +3185,7 @@ class MainController:
             "fabrication_report",
             "latest_specimen_agent_report",
             "specimen_result",
+            "specimen_execution",
             "specimen_fabricated",
             "vision_report",
             "latest_vision_agent_report",
@@ -3183,9 +3193,18 @@ class MainController:
             "latest_utm_completion_artifact",
             "vision_signal",
             "vision_operator_intervention",
+            "pending_operator_teleop_handoff",
+            "operator_teleop_handoff",
             "manipulation_report",
             "latest_manipulation_agent_report",
             "manipulation_result",
+            "manipulation_execution",
+            "initial_manipulation_execution",
+            "utm_verifications",
+            "utm_clear_execution",
+            "utm_clear_requirement",
+            "utm_clear_next_stage",
+            "guardian_recovery_wait",
             "robot_task_result",
             "equipment_report",
             "equipment_result",
@@ -4223,13 +4242,20 @@ class MainController:
             )
 
     async def _wait_for_vision_intervention_resume(self) -> bool:
-        """Keep the current Live tail alive while Vision waits for operator placement."""
+        """Keep the current Live tail alive during Vision placement or Guardian review."""
         record = self._state.run_metadata.get("vision_operator_intervention")
-        if not (
+        vision_wait = self._state.stage == Stage.VISION and (
             isinstance(record, dict)
             and record.get("schema") == INTERVENTION_SCHEMA
             and record.get("status") == "waiting_for_specimen"
-        ):
+        )
+        recovery = self._state.run_metadata.get("guardian_recovery_wait")
+        guardian_wait = self._state.stage == Stage.GUARDIAN and (
+            isinstance(recovery, dict) and recovery.get("status") == "waiting"
+            and recovery.get("run_id") == self._state.run_id
+            and recovery.get("loop_id") == self._state.loop_count
+        )
+        if not (vision_wait or guardian_wait):
             return False
         if not self._state.is_paused:
             return True
@@ -4245,9 +4271,261 @@ class MainController:
             self._vision_intervention_resume_event.clear()
         return True
 
+    def teleop_handoff_status(self, *, run_id: str, handoff_token: str) -> dict[str, Any]:
+        """Return one bounded operator-teleop handoff for the Manipulation Bridge popup."""
+        return self._operator_teleop_handoffs.status(run_id, handoff_token)
+
+    def confirm_teleop_handoff(
+        self,
+        *,
+        run_id: str,
+        handoff_token: str,
+        teleop_session_id: str,
+        teleop_evidence: dict[str, Any],
+        confirmed_by: str,
+    ) -> dict[str, Any]:
+        """Record explicit operator completion after LeRobot proves the session stopped."""
+        return self._operator_teleop_handoffs.confirm(
+            run_id=run_id,
+            handoff_token=handoff_token,
+            teleop_session_id=teleop_session_id,
+            teleop_evidence=teleop_evidence,
+            confirmed_by=confirmed_by,
+        )
+
+    def bind_teleop_handoff_session(
+        self,
+        *,
+        run_id: str,
+        handoff_token: str,
+        teleop_session_id: str,
+    ) -> dict[str, Any]:
+        """Bind a LeRobot session started by the handoff-scoped popup."""
+        return self._operator_teleop_handoffs.bind_session(
+            run_id=run_id,
+            handoff_token=handoff_token,
+            teleop_session_id=teleop_session_id,
+        )
+
+    def _cancel_operator_teleop_handoffs(self, *, reason: str) -> list[dict[str, Any]]:
+        run_id = str(self._state.run_id or "")
+        cancelled = self._operator_teleop_handoffs.cancel_run(run_id, reason=reason) if run_id else []
+        for record in cancelled:
+            session_id = str(record.get("teleop_session_id") or "")
+            if not session_id:
+                continue
+            try:
+                record["teleop_stop"] = self._deps.agent_context.tools.call(
+                    "lerobot.teleoperate.stop",
+                    {
+                        "mode": self._state.mode.value,
+                        "runtime_mode": self._state.mode.value,
+                        "session_id": session_id,
+                        "reason": reason,
+                    },
+                )
+            except Exception as exc:
+                record["teleop_stop"] = {
+                    "ok": False,
+                    "status": "FAILED",
+                    "failure_code": "TELEOP_STOP_DURING_CANCEL_FAILED",
+                    "message": str(exc),
+                }
+        return cancelled
+
+    @staticmethod
+    def _hybrid_operator_teleop_required(experiment_spec: dict[str, Any]) -> bool:
+        policy = experiment_spec.get("execution_policy") if isinstance(experiment_spec.get("execution_policy"), dict) else {}
+        return bool(
+            policy.get("manipulation") == "preflight_only"
+            and policy.get("lab_equipment") == "execute"
+        )
+
+    def _external_specimen_materialization_evidence(
+        self,
+        experiment_spec: dict[str, Any],
+    ) -> tuple[bool, dict[str, Any]]:
+        profile = experiment_spec.get("test_mode_profile") if isinstance(experiment_spec.get("test_mode_profile"), dict) else {}
+        derived = profile.get("derived") if isinstance(profile.get("derived"), dict) else {}
+        required = bool(derived.get("external_specimen_materialization_required"))
+        if not required:
+            return False, {"status": "not_required", "fresh": True}
+        observation = (
+            self._state.run_metadata.get("latest_vision_observation")
+            if isinstance(self._state.run_metadata.get("latest_vision_observation"), dict)
+            else {}
+        )
+        active_check = (
+            observation.get("active_cam_ejection_check")
+            if isinstance(observation.get("active_cam_ejection_check"), dict)
+            else {}
+        )
+        readiness = (
+            observation.get("transfer_readiness")
+            if isinstance(observation.get("transfer_readiness"), dict)
+            else {}
+        )
+        confirmed = bool(
+            active_check.get("status") == "confirmed"
+            and active_check.get("spc_autoejection_confirmed") is True
+        ) or bool(readiness.get("ready") is True and readiness.get("status") != "preflight_only")
+        evidence = {
+            "status": "confirmed" if confirmed else "not_checked",
+            "fresh": confirmed and not bool(active_check.get("stale") or readiness.get("stale")),
+            "specimen_id": experiment_spec.get("specimen_id"),
+            "active_cam_ejection_check": dict(active_check),
+            "transfer_readiness": dict(readiness),
+        }
+        return required, evidence
+
+    def _bind_operator_teleop_completion_for_utm_vision(self, handoff: dict[str, Any]) -> None:
+        """Project a confirmed operator transfer into the existing post-place Vision contract."""
+        session_id = str(handoff.get("teleop_session_id") or "")
+        common = {
+            "run_id": handoff.get("run_id"),
+            "specimen_id": handoff.get("specimen_id"),
+            "candidate_id": handoff.get("candidate_id"),
+            "handoff_status": "needs_post_place_vision",
+            "completion_status": "reported_complete",
+            "session_id": session_id,
+            "handoff_strategy": "operator_teleop",
+            "teleop_stop_verified": True,
+            "robot_port_released": bool(handoff.get("robot_port_released")),
+            "camera_returned_to_vision": bool(handoff.get("camera_returned_to_vision")),
+            "post_place_interlock": {
+                "schema": "post_place_interlock.v1",
+                "session_id": session_id,
+                "ungrasping_seen": True,
+                "home_after_ungrasping": True,
+                "ready_for_utm_snapshot": True,
+                "source": "operator_teleop_confirmation",
+            },
+        }
+        manipulation = self._state.run_metadata.get("manipulation_result")
+        manipulation = dict(manipulation) if isinstance(manipulation, dict) else {}
+        manipulation.update(common)
+        self._state.run_metadata["manipulation_result"] = manipulation
+        robot_task = self._state.run_metadata.get("robot_task_result")
+        robot_task = dict(robot_task) if isinstance(robot_task, dict) else {}
+        robot_task.update(common)
+        robot_task["rollout_session_id"] = session_id
+        self._state.run_metadata["robot_task_result"] = robot_task
+
+    async def _wait_for_operator_teleop_handoff(
+        self,
+        experiment_spec: dict[str, Any],
+        *,
+        cycle_index: int,
+        total_cycles: int,
+    ) -> dict[str, Any]:
+        required, materialization = self._external_specimen_materialization_evidence(experiment_spec)
+        try:
+            pending = self._operator_teleop_handoffs.create(
+                run_id=str(self._state.run_id or ""),
+                cycle_index=cycle_index,
+                specimen_id=str(experiment_spec.get("specimen_id") or ""),
+                candidate_id=str(experiment_spec.get("candidate_id") or ""),
+                materialization_evidence=materialization,
+                require_materialization=required,
+            )
+        except OperatorTeleopHandoffError as exc:
+            blocked = {
+                "schema": "operator_teleop_handoff.v1",
+                "status": "blocked",
+                "failure_code": str(exc),
+                "run_id": self._state.run_id,
+                "cycle_index": cycle_index,
+                "specimen_id": experiment_spec.get("specimen_id"),
+                "candidate_id": experiment_spec.get("candidate_id"),
+                "materialization_evidence": materialization,
+            }
+            self._state.run_metadata["pending_operator_teleop_handoff"] = blocked
+            return blocked
+        self._state.run_metadata["pending_operator_teleop_handoff"] = pending
+        self._state.is_paused = True
+        await self._append_planning_message(
+            {
+                "role": "system",
+                "content": (
+                    "SYSTEM_EVENT: OPERATOR_TELEOP_HANDOFF_REQUIRED\n"
+                    f"cycle={cycle_index}/{total_cycles}\n"
+                    f"specimen_id={pending['specimen_id']}\n"
+                    f"popup_url={pending['popup_url']}"
+                ),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "ok": True,
+                "pending_operator_input": True,
+                "requires_response": True,
+                "operator_teleop_handoff": pending,
+                "cycle_index": cycle_index,
+                "total_cycles": total_cycles,
+            },
+            event_type="pending_operator_teleop_handoff",
+            level="WARNING",
+            message="Manipulation preflight is waiting for operator teleop transfer.",
+        )
+        event = self._operator_teleop_handoffs.event(str(self._state.run_id or ""), pending["handoff_token"])
+        while True:
+            if self._state.emergency_stop_requested or self._state.safe_stop_requested or self._state.stop_requested:
+                self._cancel_operator_teleop_handoffs(reason="run_control_stop")
+                break
+            try:
+                await asyncio.wait_for(event.wait(), timeout=0.25)
+                break
+            except TimeoutError:
+                continue
+        current = self._operator_teleop_handoffs.status(
+            str(self._state.run_id or ""), pending["handoff_token"]
+        )
+        self._state.is_paused = False
+        self._state.run_metadata["pending_operator_teleop_handoff"] = current
+        if current.get("status") == "operator_confirmed":
+            self._bind_operator_teleop_completion_for_utm_vision(current)
+        return current
+
+    @staticmethod
+    def _utm_vision_verification_from_observation(
+        observation: dict[str, Any],
+        *,
+        specimen_id: str,
+    ) -> dict[str, Any]:
+        completion = (
+            observation.get("vision_manipulation_completion")
+            if isinstance(observation.get("vision_manipulation_completion"), dict)
+            else {}
+        )
+        timestamp = str(completion.get("timestamp") or "")
+        fresh = False
+        if timestamp:
+            try:
+                observed_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                fresh = 0 <= (datetime.now(timezone.utc) - observed_at).total_seconds() <= 120
+            except ValueError:
+                fresh = False
+        evidence_path = str(completion.get("evidence_path") or "")
+        evidence_exists = bool(
+            evidence_path
+            and (
+                "://" in evidence_path
+                or Path(evidence_path).expanduser().is_file()
+            )
+        )
+        identity_matches = str(completion.get("specimen_id") or "") == str(specimen_id or "")
+        detected = completion.get("detected") is True
+        return {
+            **dict(completion),
+            "fresh": fresh,
+            "evidence_exists": evidence_exists,
+            "identity_matches": identity_matches,
+            "detected": detected,
+            "status": "confirmed" if fresh and evidence_exists and identity_matches and detected else "blocked",
+        }
+
     async def stop(self) -> dict[str, Any]:
         """Request stop for active run."""
         self._state.stop_requested = True
+        replay_stop = await asyncio.to_thread(self._stop_managed_replay, reason="operator_stop")
+        self._cancel_operator_teleop_handoffs(reason="operator_stop")
         if self._run_task and not self._run_task.done():
             self._state.stage = Stage.COMPLETE
             self._run_task.cancel()
@@ -4258,18 +4536,31 @@ class MainController:
             await self._emit_control_event("run_stop", "Stop requested by operator (forced cancel)")
             await self._emit_control_event("run_complete", "Run finished in stage=complete")
             self._last_completed_trace = self._trace.snapshot()
-        return {"ok": True, "message": "Stop requested"}
+        return {"ok": bool(replay_stop.get("ok")), "message": "Stop requested", "replay_stop": replay_stop}
 
     async def safe_stop(self) -> dict[str, Any]:
         """Request safe stop for active run."""
         self._state.safe_stop_requested = True
+        replay_stop = await asyncio.to_thread(self._stop_managed_replay, reason="operator_safe_stop")
+        self._cancel_operator_teleop_handoffs(reason="operator_safe_stop")
         await self._emit_control_event(
             "run_safe_stop",
             "Safe stop requested by operator",
             {"status": "safe_stop_requested", "control": "safe_stop", "operator_action": True},
             level="WARNING",
         )
-        return {"ok": True, "message": "Safe stop requested", "state": self._state.model_dump(mode="json")}
+        return {"ok": bool(replay_stop.get("ok")), "message": "Safe stop requested", "state": self._state.model_dump(mode="json"), "replay_stop": replay_stop}
+
+    def _stop_managed_replay(self, *, reason: str, **details: Any) -> dict[str, Any]:
+        """Stop replay only; no fallback to a recording or policy session."""
+        try:
+            return self._deps.agent_context.tools.call("lerobot.replay.stop", {
+                "mode": self._state.mode.value, "runtime_mode": self._state.mode.value,
+                "reason": reason, **details,
+            })
+        except Exception as exc:
+            return {"ok": False, "tool": "lerobot.replay.stop", "status": "FAILED",
+                    "failure_code": "LEROBOT_REPLAY_STOP_FAILED", "message": str(exc)}
 
     async def _cancel_active_runtime_task(self, *, stage: Stage | None = Stage.COMPLETE) -> None:
         """Cancel active run/planning tasks without changing non-control state."""
@@ -4469,6 +4760,7 @@ class MainController:
 
     def request_plc_fast_stop(self, details: dict[str, object]) -> dict[str, object]:
         """Stop rollout work and request task cancellation from the PLC monitor thread."""
+        replay_stop = self._stop_managed_replay(reason="plc_emergency_stop", emergency_source=PLC_SAFETY_SOURCE)
         cancelled_tasks: list[str] = []
         seen_tasks: set[int] = set()
         for task_name, task in (
@@ -4505,10 +4797,11 @@ class MainController:
                 "message": str(exc),
             }
         return {
-            "ok": bool(rollout_stop.get("ok")),
+            "ok": bool(rollout_stop.get("ok")) and bool(replay_stop.get("ok")),
             "source": PLC_SAFETY_SOURCE,
             "cancel_requested": cancelled_tasks,
             "rollout_stop": rollout_stop,
+            "replay_stop": replay_stop,
         }
 
     async def emergency_stop(
@@ -4525,13 +4818,16 @@ class MainController:
         is_new_source = self._record_safety_source(clean_source, details)
         already_latched = self._state.emergency_stop_requested
         self._state.emergency_stop_requested = True
+        replay_stop = await asyncio.to_thread(self._stop_managed_replay, reason=f"emergency_stop:{clean_source}")
         self._state.stop_requested = True
         self._state.safe_stop_requested = False
         self._state.is_paused = False
+        self._cancel_operator_teleop_handoffs(reason=f"emergency_stop:{clean_source}")
         if already_latched:
             return {
                 "ok": True,
                 "message": "Emergency stop already latched",
+                "replay_stop": replay_stop,
                 "idempotent": not is_new_source,
                 "state": self._state.model_dump(mode="json"),
             }
@@ -4558,7 +4854,7 @@ class MainController:
         )
         await self._emit_control_event("run_complete", "Run finished in stage=complete after emergency stop", level="WARNING")
         self._last_completed_trace = self._trace.snapshot()
-        return {"ok": True, "message": "Emergency stop requested", "state": self._state.model_dump(mode="json")}
+        return {"ok": bool(replay_stop.get("ok")), "message": "Emergency stop requested", "state": self._state.model_dump(mode="json"), "replay_stop": replay_stop}
 
     def _reset_orchestrator_decision_layer(self) -> None:
         """Start E-STOP recovery with an empty active decision layer."""
@@ -4695,6 +4991,7 @@ class MainController:
         )
         if rejection is not None:
             return rejection
+        self._cancel_operator_teleop_handoffs(reason="emergency_reset")
         await self._cancel_active_runtime_task(stage=None)
         self._reset_planning_transcript()
         self._trace = RunTrace(max_events=int(self._deps.system_config.get("event_buffer_size", 300)))
@@ -5824,6 +6121,7 @@ class MainController:
             pass
         allowed = (
             "material",
+            "specimen_placement",
             "printer_model",
             "printer_profile",
             "slicer_profile_hint",
@@ -6054,6 +6352,7 @@ class MainController:
         test_unit_cell_size_mm = float(printer_defaults.get("test_unit_cell_size_mm", 10.0))
         defaults: dict[str, Any] = {
             "material": printer_defaults.get("material", "PLA"),
+            "specimen_placement": printer_defaults.get("specimen_placement", {"mode": "auto"}),
             "max_specimen_size_mm": printer_defaults.get("test_specimen_size_mm", [30, 30, 30]),
             "max_print_time_min": printer_defaults.get("max_print_time_min", 120),
             "geometry_type": MainController.TEST_MODE_FIXED_GEOMETRY,
@@ -6297,10 +6596,11 @@ class MainController:
             return {}
         if not isinstance(value, dict):
             raise ValueError("unsupported execution policy: expected a mapping")
-        allowed_stages = {"printer", "manipulation", "lab_equipment", "cae", "analysis", "bo"}
+        allowed_stages = {"printer", "vision", "manipulation", "lab_equipment", "cae", "analysis", "bo"}
         allowed_modes = {"execute", "preflight_only"}
         normalized: dict[str, str] = {
             "printer": "preflight_only",
+            "vision": "preflight_only",
             "manipulation": "preflight_only",
             "lab_equipment": "preflight_only",
             "cae": "execute",
@@ -6333,6 +6633,7 @@ class MainController:
 
     def _reset_planning_workflow_controls(self) -> None:
         """Clear stale operator-control flags before a newly requested Live GUI workflow."""
+        self._cancel_operator_teleop_handoffs(reason="new_workflow_reset")
         self._state.safe_stop_requested = False
         self._state.stop_requested = False
         self._state.emergency_stop_requested = False
@@ -7416,41 +7717,71 @@ class MainController:
             return ""
         return MainController._parse_specimen_printer_choice(message)
 
-    @staticmethod
-    def _apply_specimen_printer_choice_to_spec(spec: dict[str, Any], choice: str) -> dict[str, Any]:
+    def _apply_specimen_printer_choice_to_spec(self, spec: dict[str, Any], choice: str) -> dict[str, Any]:
         """Apply the SpecimenMakingAgent printer path choice to a spec/constraint payload."""
         normalized = str(choice or "").strip()
         if normalized not in {"virtual_bridge", "installed_printer", "physical_print"}:
             return dict(spec)
 
         updated = dict(spec)
+        explicit_policy = (
+            self._normalize_execution_policy(updated.get("execution_policy"))
+            if isinstance(updated.get("execution_policy"), dict)
+            else {}
+        )
+        existing_profile = updated.get("test_mode_profile")
+        if (
+            isinstance(existing_profile, dict)
+            and existing_profile.get("schema") == "resolved_test_mode_execution_profile.v1"
+            and existing_profile.get("profile_id") == normalized
+        ):
+            resolved_profile = dict(existing_profile)
+        else:
+            resolved_profile = TestModeExecutionProfileStore(
+                self._test_mode_execution_profiles_path
+            ).resolve(normalized)
+        saved_policy = dict(resolved_profile.get("execution_policy", {}))
+        final_policy = self._normalize_execution_policy({**saved_policy, **explicit_policy})
+        resolved_profile["execution_policy"] = dict(final_policy)
+        printer_flow = (
+            dict(resolved_profile.get("printer_flow", {}))
+            if isinstance(resolved_profile.get("printer_flow"), dict)
+            else {}
+        )
+        print_body_skipped = printer_flow.get("print_body") == "skip"
+        physical_specimen_created = final_policy.get("printer") == "execute" and not print_body_skipped
+        resolved_profile["derived"] = {
+            "operator_teleop_required": (
+                final_policy.get("manipulation") == "preflight_only"
+                and final_policy.get("lab_equipment") == "execute"
+            ),
+            "external_specimen_materialization_required": (
+                not physical_specimen_created and final_policy.get("lab_equipment") == "execute"
+            ),
+            "physical_specimen_created_by_printer": physical_specimen_created,
+        }
         updated["printer_test_path"] = normalized
-        updated["test_printer_transport"] = "real" if normalized in {"installed_printer", "physical_print"} else "virtual"
-        updated["allow_test_printer_live"] = normalized in {"installed_printer", "physical_print"}
-        updated["allow_test_equipment_live"] = normalized in {"installed_printer", "physical_print"}
-        updated["equipment_agentic_confirm_execute"] = normalized in {"installed_printer", "physical_print"}
-        updated["prefer_http_artifact"] = normalized in {"installed_printer", "physical_print"}
-        if normalized in {"installed_printer", "physical_print"}:
-            updated["execution_policy"] = {
-                "printer": "execute",
-                "manipulation": "execute",
-                "lab_equipment": "execute",
-                "cae": "execute",
-                "analysis": "execute",
-                "bo": "execute",
-            }
+        updated["test_mode_profile"] = resolved_profile
+        updated["execution_policy"] = final_policy
+        printer_live = final_policy.get("printer") == "execute"
+        equipment_live = final_policy.get("lab_equipment") == "execute"
+        updated["test_printer_transport"] = "real" if printer_live else "virtual"
+        updated["allow_test_printer_live"] = printer_live
+        updated["allow_test_equipment_live"] = equipment_live
+        updated["equipment_agentic_confirm_execute"] = equipment_live
+        updated["prefer_http_artifact"] = printer_live
 
         print_request = dict(updated.get("print", {})) if isinstance(updated.get("print"), dict) else {}
-        if normalized in {"installed_printer", "physical_print"}:
+        if printer_live:
             print_request.update(
                 {
                     "start_immediately": True,
                     "physical_intent": True,
                     "confirm_physical_print": True,
                     "stop_after_start": False,
-                    "use_ejection_only_project_file": normalized == "installed_printer",
+                    "use_ejection_only_project_file": print_body_skipped,
                     "prefer_http_artifact": True,
-                    "post_publish_observation_timeout_sec": 180 if normalized == "physical_print" else 120,
+                    "post_publish_observation_timeout_sec": 180 if not print_body_skipped else 120,
                 }
             )
         else:
@@ -7466,22 +7797,25 @@ class MainController:
             )
         updated["print"] = print_request
         ejection_request = dict(updated.get("ejection", {})) if isinstance(updated.get("ejection"), dict) else {}
-        if normalized == "installed_printer":
+        auto_ejection = bool(printer_flow.get("auto_ejection", True))
+        if printer_live and print_body_skipped:
             ejection_request.update(
                 {
-                    "enabled": True,
-                    "allow_ejection": True,
+                    "enabled": auto_ejection,
+                    "allow_ejection": auto_ejection,
                     "use_ejection_only_project_file": True,
-                    "source": "installed_printer_ejection_only_project_file",
+                    "skip_cooldown_wait": printer_flow.get("cooling_wait") == "skip",
+                    "source": f"{normalized}_ejection_only_project_file",
                 }
             )
-        elif normalized == "physical_print":
+        elif printer_live:
             ejection_request.update(
                 {
-                    "enabled": True,
-                    "allow_ejection": True,
+                    "enabled": auto_ejection,
+                    "allow_ejection": auto_ejection,
                     "use_ejection_only_project_file": False,
-                    "source": "physical_print_tail",
+                    "skip_cooldown_wait": False,
+                    "source": "physical_print_tail" if normalized == "physical_print" else f"{normalized}_print_tail",
                 }
             )
         elif ejection_request:
@@ -8108,7 +8442,10 @@ class MainController:
         if isinstance(specimen_result.get("experiment_evaluation"), dict):
             self._state.experiment_evaluations.append(specimen_result["experiment_evaluation"])
         if "observation" in data:
-            self._state.latest_observations = data["observation"]
+            if "utm_clear_execution" in data:
+                self._state.latest_observations.update(data["observation"])
+            else:
+                self._state.latest_observations = data["observation"]
             if isinstance(data["observation"], dict):
                 self._state.run_metadata["latest_vision_observation"] = data["observation"]
                 self._merge_vision_completion_into_specimen_result(data["observation"], data)
@@ -8191,6 +8528,10 @@ class MainController:
         if "guardian" in data:
             self._state.run_metadata["guardian"] = data["guardian"]
         self._state.run_metadata["last_stage_payload"] = {"stage": stage.value, "data": data}
+        sync_manipulation_execution_status(self._state, stage)
+        from utils.utm_clear_cycle import merge_utm_clear_cycle
+        merge_utm_clear_cycle(self._state, stage, data)
+        sync_specimen_execution_status(self._state, stage, data)
         self._compact_planning_runtime_state()
 
     def _merge_vision_completion_into_specimen_result(
@@ -8374,7 +8715,7 @@ class MainController:
         config = self._active_graph_config()
         if config is not None:
             try:
-                return Stage(config.next_stage(stage.value))
+                return Stage(config.next_stage(stage.value, state_metadata=self._state.run_metadata))
             except ValueError:
                 return fallback
         return fallback
@@ -8649,6 +8990,7 @@ class MainController:
         original_mode = self._state.mode
         effective_mode = Mode.TEST if self._is_planning_test_spec(experiment_spec) else original_mode
         guardian_payload: dict[str, Any] = {}
+        active_teleop_handoff_token = ""
         previous_label = self._planning_stage_label(Stage.SPECIMEN)
         tail_start = self._planning_tail_start_stage()
         if tail_start is None or tail_start in {Stage.COMPLETE, Stage.ERROR}:
@@ -8664,6 +9006,8 @@ class MainController:
         cycle_context = {"cycle_index": cycle_index, "total_cycles": total_cycles}
 
         async def halt_for_control_flag() -> dict[str, Any]:
+            from utils.utm_clear_cycle import stop_pending_clear
+            await stop_pending_clear(self._state, self._deps.agent_context, reason="UTM_CLEAR_OPERATOR_STOPPED")
             if self._state.emergency_stop_requested:
                 reason = "emergency_stop_requested"
             elif self._state.safe_stop_requested:
@@ -8920,11 +9264,79 @@ class MainController:
                 on_event=planning_runtime_event,
             )
             max_steps = max(16, len(planning_stages) * 4)
-            for _ in range(max_steps):
+            ordinary_steps = 0
+            while ordinary_steps < max_steps:
                 before_stage = self._state.stage
+                from utils.utm_clear_cycle import clear_poll_pending
+                was_clear_poll = before_stage == Stage.VISION and clear_poll_pending(self._state)
                 await loop.step()
+                if not was_clear_poll:
+                    ordinary_steps += 1
                 if self._state.emergency_stop_requested or self._state.safe_stop_requested or self._state.stop_requested:
                     return await halt_for_control_flag()
+                if (
+                    before_stage == Stage.MANIPULATION
+                    and self._state.stage not in {Stage.ERROR, Stage.COMPLETE}
+                    and self._hybrid_operator_teleop_required(experiment_spec)
+                ):
+                    handoff = await self._wait_for_operator_teleop_handoff(
+                        experiment_spec,
+                        cycle_index=cycle_index,
+                        total_cycles=total_cycles,
+                    )
+                    if handoff.get("status") != "operator_confirmed":
+                        self._state.stage = Stage.ERROR
+                        return {
+                            "ok": False,
+                            "decision": "error",
+                            "failure_code": handoff.get("failure_code") or "OPERATOR_TELEOP_HANDOFF_NOT_CONFIRMED",
+                            "message": "Operator teleop handoff did not complete.",
+                        }
+                    active_teleop_handoff_token = str(handoff.get("handoff_token") or "")
+                    # A hybrid profile may be loaded on a graph revision whose
+                    # manipulation edge points directly to Equipment. The
+                    # operator confirmation never substitutes for UTM evidence:
+                    # always route the same cycle through Vision first.
+                    if self._state.stage != Stage.VISION:
+                        self._state.run_metadata["operator_teleop_forced_next_stage"] = {
+                            "from": self._state.stage.value,
+                            "to": Stage.VISION.value,
+                            "reason": "utm_vision_required_after_operator_teleop",
+                            "handoff_token": active_teleop_handoff_token,
+                        }
+                        self._state.stage = Stage.VISION
+                    continue
+                if before_stage == Stage.VISION and active_teleop_handoff_token:
+                    handoff_status = self._operator_teleop_handoffs.status(
+                        str(self._state.run_id or ""), active_teleop_handoff_token
+                    )
+                    if handoff_status.get("status") == "operator_confirmed":
+                        observation = (
+                            self._state.run_metadata.get("latest_vision_observation")
+                            if isinstance(self._state.run_metadata.get("latest_vision_observation"), dict)
+                            else self._state.latest_observations
+                            if isinstance(self._state.latest_observations, dict)
+                            else {}
+                        )
+                        verification = self._utm_vision_verification_from_observation(
+                            observation,
+                            specimen_id=str(experiment_spec.get("specimen_id") or ""),
+                        )
+                        completed_handoff = self._operator_teleop_handoffs.attach_vision_verification(
+                            run_id=str(self._state.run_id or ""),
+                            handoff_token=active_teleop_handoff_token,
+                            vision_verification=verification,
+                        )
+                        self._state.run_metadata["operator_teleop_handoff"] = completed_handoff
+                        self._state.run_metadata["pending_operator_teleop_handoff"] = completed_handoff
+                        if completed_handoff.get("status") != "confirmed":
+                            self._state.stage = Stage.ERROR
+                            return {
+                                "ok": False,
+                                "decision": "error",
+                                "failure_code": completed_handoff.get("failure_code") or "UTM_VISION_VERIFICATION_FAILED",
+                                "message": "Fresh UTM Vision verification failed after teleop handoff.",
+                            }
                 if self._state.is_paused:
                     if await self._wait_for_vision_intervention_resume():
                         continue
@@ -9114,6 +9526,7 @@ class MainController:
             specimen_id = f"specimen-{candidate_id}-{geometry_type}-{digest}"
         planning_spec = {
             **base_spec,
+            "specimen_placement": pick("specimen_placement", validated_defaults.get("specimen_placement", {"mode": "auto"})),
             "candidate_id": candidate_id,
             "specimen_id": specimen_id,
             "objective_type": str(pick("objective_type", "maximize_energy_absorption_per_mass")),
@@ -9189,6 +9602,9 @@ class MainController:
         normalized_execution_policy = self._normalize_execution_policy(raw_execution_policy)
         if normalized_execution_policy:
             planning_spec["execution_policy"] = normalized_execution_policy
+        raw_test_mode_profile = pick("test_mode_profile", None)
+        if isinstance(raw_test_mode_profile, dict):
+            planning_spec["test_mode_profile"] = dict(raw_test_mode_profile)
         explicit_top_cap = "top_cap_enabled" in constraints or "top_cap_enabled" in base_spec
         explicit_bottom_cap = "bottom_cap_enabled" in constraints or "bottom_cap_enabled" in base_spec
         explicit_legacy_cap = "top_bottom_cap" in constraints or "top_bottom_cap" in base_spec
@@ -9251,6 +9667,15 @@ class MainController:
                 planning_spec[key] = constraints[key]
             elif key in base_spec:
                 planning_spec[key] = base_spec[key]
+        # Design adaptation intentionally rebuilds conservative print defaults.
+        # Re-apply a selected test-mode profile afterwards so its executable
+        # printer/ejection contract is not silently downgraded to preflight.
+        selected_test_path = self._specimen_printer_path(planning_spec)
+        if test_handoff and selected_test_path and isinstance(planning_spec.get("test_mode_profile"), dict):
+            planning_spec = self._apply_specimen_printer_choice_to_spec(
+                planning_spec,
+                selected_test_path,
+            )
         return planning_spec
 
     def _write_planning_artifacts(

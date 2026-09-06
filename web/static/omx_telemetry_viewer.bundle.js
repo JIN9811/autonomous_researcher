@@ -28307,7 +28307,7 @@ void main() {
     applyRobotMotionLabel(null);
     scheduleChartRender();
   }
-  function appendSample(sample) {
+  function appendSample(sample, updateDisplay = true) {
     if (!sample || sample.type !== "joint_sample") return;
     const sessionId = String(sample.session_id || "");
     if (sessionId && sessionId !== runtime.sessionId) resetSession(sessionId);
@@ -28317,32 +28317,50 @@ void main() {
     const sequence = Number(sample.sequence);
     if (Number.isFinite(sequence) && sequence <= runtime.latestSequence) return;
     if (Number.isFinite(sequence)) runtime.latestSequence = sequence;
+    runtime.history.push(sample);
+    if (updateDisplay) applySampleDisplay(sample);
+    else if (sample.grasp_visual) {
+      applySpecimenGraspVisualization(sample.grasp_visual, sample.grasp_visual);
+    } else if (sample.motion_state) {
+      applySpecimenGraspVisualization(sample.motion_state.grasp_outcome, sample.motion_state.measured);
+    }
+    return sample;
+  }
+  function applySampleDisplay(sample) {
     runtime.latestActualRad = sample.actual_rad || {};
     runtime.latestTargetRad = sample.target_rad || {};
-    runtime.history.push(sample);
     applyMotionState(sample.motion_state || {});
     runtime.status = sample.status || "live";
     setPoseStatus("live follower telemetry", "live");
     setTrackingStatus(`${runtime.history.length} samples`, "live");
     scheduleChartRender();
   }
-  function replaceJointHistory(samples) {
+  function appendJointSamples(samples, latestSample) {
+    let latest = null;
+    for (const sample of Array.isArray(samples) ? samples : []) {
+      if (appendSample(sample, false)) latest = sample;
+    }
+    if (!latest) return;
+    const matchingDetail = latestSample && latestSample.session_id === latest.session_id && latestSample.execution_index === latest.execution_index && latestSample.sequence === latest.sequence;
+    applySampleDisplay(matchingDetail ? latestSample : latest);
+  }
+  function replaceJointHistory(samples, latestSample) {
     runtime.history = [];
     runtime.latestSequence = -1;
     runtime.latestActualRad = {};
     runtime.latestTargetRad = {};
-    (Array.isArray(samples) ? samples : []).slice().sort((left, right) => Number(left.execution_index || 0) - Number(right.execution_index || 0) || Number(left.sequence || 0) - Number(right.sequence || 0)).forEach(appendSample);
+    const ordered = (Array.isArray(samples) ? samples : []).slice().sort((left, right) => Number(left.execution_index || 0) - Number(right.execution_index || 0) || Number(left.sequence || 0) - Number(right.sequence || 0));
+    appendJointSamples(ordered, latestSample);
   }
   function consumePacket(packet) {
     if (!packet || typeof packet !== "object") return;
     const sessionId = String(packet.session && packet.session.session_id || packet.session_id || "");
     if (sessionId && sessionId !== runtime.sessionId) resetSession(sessionId);
     runtime.status = String(packet.status || runtime.status || "idle");
-    if (packet.runtime_view) applyRuntimeView(packet.runtime_view);
     if (packet.type === "joint_history") {
-      replaceJointHistory(packet.samples);
+      replaceJointHistory(packet.samples, packet.latest_sample);
     } else if (packet.type === "joint_samples") {
-      (Array.isArray(packet.samples) ? packet.samples : []).forEach(appendSample);
+      appendJointSamples(packet.samples, packet.latest_sample);
     } else if (packet.type === "joint_sample") {
       appendSample(packet);
     } else if (packet.type === "telemetry_artifacts") {
@@ -28352,13 +28370,14 @@ void main() {
       setPoseStatus(runtime.status, runtime.status);
       setTrackingStatus(runtime.status, runtime.status);
     }
+    if (packet.runtime_view) applyRuntimeView(packet.runtime_view);
   }
   function telemetryMountsPresent() {
     return Boolean(document.querySelector("[data-atr-robot-pose]") || document.querySelector("[data-atr-policy-tracking]"));
   }
   function websocketUrl() {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    return `${protocol}//${window.location.host}${TELEMETRY_WS_PATH}`;
+    return `${protocol}//${window.location.host}${TELEMETRY_WS_PATH}?sample_format=compact-v1`;
   }
   function closeTelemetrySocket() {
     if (runtime.reconnectTimer) window.clearTimeout(runtime.reconnectTimer);

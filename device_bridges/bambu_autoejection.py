@@ -657,6 +657,7 @@ class BambuGcodeAutoejectionPatcher:
         position: str = "center",
         plate_id: int = 1,
         loop_index: int = 1,
+        include_cooldown_wait: bool = False,
     ) -> dict[str, Any]:
         """Build a project-file ejection test derived from the real sliced artifact.
 
@@ -700,6 +701,7 @@ class BambuGcodeAutoejectionPatcher:
             source_plate_path=source_plate_path,
             plate_id=plate_id if source_plate_path.startswith("Metadata/plate_") else None,
             loop_index=loop_index,
+            include_cooldown_wait=include_cooldown_wait,
         )
         if lower_name.endswith(".gcode.3mf"):
             out_path = self.output_dir / f"{_safe_stem_for_autoeject(source)}.ejection-test.gcode.3mf"
@@ -1103,6 +1105,7 @@ class BambuGcodeAutoejectionPatcher:
         source_plate_path: str,
         plate_id: int | None,
         loop_index: int,
+        include_cooldown_wait: bool = True,
     ) -> str:
         if SCHEMA_MARKER in gcode_text:
             return gcode_text
@@ -1112,6 +1115,15 @@ class BambuGcodeAutoejectionPatcher:
         center = self._object_center_from_bounds(object_bounds)
         sweep_heights = self._sweep_heights(object_bounds)
         safe_approach_z = self._safe_approach_z(object_bounds)
+        cooldown_policy_lines = (
+            [
+                f"; atr_bed_cooldown_c={int(self.bed_cooldown_c)}",
+                "; atr_cooldown_wait_policy=M190",
+            ]
+            if include_cooldown_wait
+            else ["; atr_cooldown_wait_policy=not_required_no_print_body"]
+        )
+        cooldown_command_lines = [f"M190 R{int(self.bed_cooldown_c)}"] if include_cooldown_wait else []
         tail_lines = [
             f"; {SCHEMA_MARKER}",
             f"; atr_source_sha256={source_sha256}",
@@ -1125,8 +1137,7 @@ class BambuGcodeAutoejectionPatcher:
             f"; atr_object_height_mm={float(object_height):.3f}" if isinstance(object_height, (int, float)) else "; atr_object_height_mm=unknown",
             "; atr_material_type=unknown",
             "; atr_bed_surface=unknown",
-            f"; atr_bed_cooldown_c={int(self.bed_cooldown_c)}",
-            "; atr_cooldown_wait_policy=M190",
+            *cooldown_policy_lines,
             "; atr_purge_parking_strategy=preserve_slicer_end_gcode_then_eject",
             "; atr_home_initialization=preserve_print_job_coordinates",
             f"; atr_safe_approach_z_mm={safe_approach_z:.3f}",
@@ -1142,7 +1153,7 @@ class BambuGcodeAutoejectionPatcher:
             "; atr_validation_result=stored_in_manifest",
             "; atr_patched_artifact_sha256=stored_in_manifest",
             "M400",
-            f"M190 R{int(self.bed_cooldown_c)}",
+            *cooldown_command_lines,
             "G90",
             f"G0 Z{safe_approach_z:.3f} F{int(self.z_feedrate_mm_min)}",
             f"G0 X{sweep_x:.3f} Y{self.rear_y_mm:.3f} F{int(self.sweep_feedrate_mm_min)}",

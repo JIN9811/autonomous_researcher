@@ -3126,6 +3126,13 @@ def test_teleoperate_start_stop_session(tmp_path: Path) -> None:
     assert started["status"] == "TELEOP_ACTIVE"
     assert stopped["ok"] is True
     assert stopped["status"] == "STOPPED"
+    assert stopped["port_released"] is True
+    assert stopped["camera_returned_to_vision"] is True
+    assert stopped["teleop_stopped_at"]
+    status = bridge.teleoperate_status({"mode": "test", "session_id": started["session_id"]})
+    assert status["status"] == "STOPPED"
+    assert status["port_released"] is True
+    assert status["camera_returned_to_vision"] is True
     assert bridge.sessions_recent()[0]["session_id"] == started["session_id"]
 
 

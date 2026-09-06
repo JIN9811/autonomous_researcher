@@ -12,7 +12,7 @@ scope:
   - evaluation
   - results_status
 summary: Reports the current evidence state for each ATR evaluation dimension without promoting unevaluated results.
-evidence_date: 2026-08-09
+evidence_date: 2026-09-07
 method: Evidence-status synthesis from the artifact manifest and recorded repository checks.
 paper_section: evaluation_and_results
 research_questions:
@@ -21,6 +21,7 @@ research_questions:
   - RQ3
   - RQ4
 claim_ids:
+  - C-SYS-LOOP-01
   - C-SYS-ARCH-01
   - C-TRACE-DOC-01
   - C-SAFE-LIVE-01
@@ -37,7 +38,8 @@ supersedes: []
 ## Summary
 
 The current evidence establishes bounded architecture and documentation
-contracts. It does not establish end-to-end scientific efficacy, generalized
+contracts, plus one supervised mixed-mode closed-loop integration iteration.
+It does not establish end-to-end scientific efficacy, generalized
 safety effectiveness, live-hardware robustness, or superiority to another
 system. This chapter reports that boundary as a result rather than hiding it
 behind incomplete tables.
@@ -51,6 +53,7 @@ into this paper's evaluated result set.
 ## Evidence Basis
 
 - `E-INSPECT-ARCH-001`: inspected FastAPI and graph structure.
+- `E-LIVE-LOOP-001`: [one supervised mixed-mode iteration](evidence/2026-09-07-supervised-closed-loop.md), with raw archives retained locally and a public result/hash index.
 - `E-TEST-DOC-001`: automated documentation-governance and publication
   contract tests.
 
@@ -61,10 +64,10 @@ Each record names its environment, commit, command, inputs, outputs, and hash.
 | Dimension | RQ | Required environment | Current status | Current evidence | Interpretation |
 |---|---|---|---|---|---|
 | Declared closed-loop architecture | RQ1 | Inspection | `supported` | `E-INSPECT-ARCH-001` | The configured graph and route surface exist at the recorded baseline. |
-| Stage-contract integrity through a complete run | RQ1 | Test/replay or higher | `not_evaluated` | No qualifying record | Architecture inspection does not execute all stage contracts. |
+| Stage-contract integrity through a complete run | RQ1 | Test/replay or higher | `partially_supported` | `E-LIVE-LOOP-001` | One supervised mixed-mode feedback iteration reached the next Design; whole-run completion, full fabrication, and failure matrices remain unverified. |
 | Checkpoint and resume behavior by failure class | RQ1 | Replay/simulation/live | `not_evaluated` | No qualifying record | Recovery effectiveness remains open. |
 | Claim-evidence schema integrity | RQ2 | Test | `partially_supported` | `E-TEST-DOC-001` | Structural references and hashes are checked; complete scientific lineage is not. |
-| Full run artifact lineage | RQ2 | Replay/simulation/live | `not_evaluated` | No qualifying record | No paper-scoped end-to-end run record is included. |
+| Full run artifact lineage | RQ2 | Replay/simulation/live | `partially_supported` | `E-LIVE-LOOP-001` | Loop/attempt results and hashes are indexed; raw data are not publicly bundled and specimen substitution prevents scientific lineage validation. |
 | Guardian/operator decision behavior | RQ3 | Test/replay/simulation | `not_evaluated` | No qualifying paper record | Implemented control points are described, not behaviorally scored here. |
 | Live consequential-action containment | RQ3 | Live | `not_evaluated` | No qualifying record | No live safety-effectiveness claim is made. |
 | Knowledge/BO feedback benefit | RQ1, RQ2 | Controlled comparative study | `not_evaluated` | No qualifying record | The feedback path exists; scientific benefit is unknown. |
@@ -80,6 +83,7 @@ Each record names its environment, commit, command, inputs, outputs, and hash.
 | R-ARCH-01 | 19 configured graph nodes, 68 declared graph edges, and 12 stage-dispatch entries | Configuration entries at one commit | Inspection | `supported` | `E-INSPECT-ARCH-001` |
 | R-API-01 | 346 FastAPI `APIRoute` entries and 353 total application routes | Route entries at one import baseline | Inspection | `supported` | `E-INSPECT-ARCH-001` |
 | R-DOC-01 | 23 focused documentation tests passed in the initial validator cycle | 23 selected tests, 0 failures | Test | `supported` for the tested contracts | `E-TEST-DOC-001` |
+| R-LOOP-01 | UTM clearance → Analysis → BO-managed LHS → next Design/Specimen entry | One observed feedback iteration, no repeated-run reliability estimate | Supervised mixed-mode / live equipment | `supported` within integration scope | `E-LIVE-LOOP-001` |
 | R-LIVE-01 | End-to-end physical campaign completion | No campaign denominator | Live | `not_evaluated` | No qualifying evidence |
 | R-SCI-01 | Scientific improvement over a baseline | No study denominator | Comparative | `not_evaluated` | No qualifying evidence |
 | R-SAFE-01 | Reduction in unsafe or unintended physical actions | No scenario denominator | Simulation/live | `not_evaluated` | No qualifying evidence |
@@ -89,6 +93,11 @@ stability metrics. The third row validates documentation tooling, not system
 or scientific behavior.
 
 ## RQ1 Assessment
+
+`C-SYS-LOOP-01` adds one observed execution of the feedback boundary. The BO
+agent selected initial-design point 2/8, not an acquisition-ranked optimum.
+The next Design retained the requested parameters. See the evidence report
+for timestamps, printer skips, specimen substitution, and the archive index.
 
 The declared graph supports `C-SYS-ARCH-01` within inspection scope. The graph
 connects the research stages and contains explicit terminal and feedback paths.
@@ -132,14 +141,16 @@ and cross-environment behavior.
 
 ## Limitations and Known Gaps
 
-The results package intentionally exposes substantial unevaluated scope. It
-lacks paper-scoped replay, simulation, browser, live, baseline, and statistical
-evidence. These gaps are release and study-planning inputs, not zero-valued
-results.
+The results package intentionally exposes substantial unevaluated scope.
+The single supervised live-equipment integration record does not supply a
+complete raw public dataset, validated material identity, full manufacturing
+campaign, comparative baseline, recovery matrix, or statistical evidence.
+These gaps are release and study-planning inputs, not zero-valued results.
 
 ## Verification
 
-Synthesized on 2026-08-09 from the initial artifact manifest. Run
+Initial synthesis: 2026-08-09. Updated on 2026-09-07 with bounded working-tree
+live integration evidence; the older architecture/test baselines are unchanged. Run
 `scripts/validate_paper_publication.py` to verify the machine-readable status
 and evidence hashes.
 

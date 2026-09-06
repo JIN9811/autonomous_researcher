@@ -434,6 +434,24 @@ graph:
       default_transition: true
       auto_ports: true
   - source: vision
+    target: analysis
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: vision
+      to_stage: analysis
+      condition_key: utm_clear_next_stage
+      condition_value: analysis
+      default_transition: false
+  - source: vision
+    target: vision
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: vision
+      to_stage: vision
+      condition_key: utm_clear_next_stage
+      condition_value: vision
+      default_transition: false
+  - source: vision
     target: manipulation
     condition: next_stage:manipulation
     label: 'conditional transition: active-cam-approved vision -> manipulation'
@@ -479,6 +497,16 @@ graph:
       contracts:
       - robot_task_result.v1
       - post_place_interlock.v1
+  - source: manipulation
+    target: vision
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: manipulation
+      to_stage: vision
+      condition_key: utm_clear_next_stage
+      condition: utm_clear_scoped
+      condition_value: vision
+      default_transition: false
   - source: manipulation
     target: vision_verify
     condition: null
@@ -537,6 +565,24 @@ graph:
       auto_ports: true
       contracts:
       - placement_verification.v1
+  - source: equipment
+    target: manipulation
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: equipment
+      to_stage: manipulation
+      condition_key: utm_clear_next_stage
+      condition_value: manipulation
+      default_transition: false
+  - source: equipment
+    target: vision
+    metadata:
+      runtime_edge: logical_transition
+      from_stage: equipment
+      to_stage: vision
+      condition_key: utm_clear_next_stage
+      condition_value: vision
+      default_transition: false
   - source: equipment
     target: analysis
     condition: null

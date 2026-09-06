@@ -6,9 +6,11 @@ digraph manipulation_closed_loop_handoffs {
   vision [label="Fresh Vision signal +\ncamera return", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
   manipulation [label="MANIPULATION\nbounded transfer", penwidth=2.2];
   robot [label="Robot motion", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
-  verify [label="Post-place Vision\nverified?", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  verify [label="Verification 1\nplacement + stopped?", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
   equipment [label="Equipment\nspecimen on UTM"];
-  knowledge [label="Knowledge\ndisposal / rollout evidence"];
+  clear [label="MANIPULATION\nUTM-clear recorded sweep", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  verify2 [label="Verification 2\nreplay + measured return\n+ fresh empty platen?", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  analysis [label="Analysis\nexisting CSV processing"];
   review [label="Stop / recover / review", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
   evidence [label="Session · events · SARM · images\nresult · dataset · checkpoint", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
   specimen -> manipulation;
@@ -16,7 +18,11 @@ digraph manipulation_closed_loop_handoffs {
   manipulation -> robot [label="gated rollout"];
   robot -> verify;
   verify -> equipment [label="transfer_to_utm"];
-  verify -> knowledge [label="clear_utm_to_disposal"];
+  equipment -> clear [label="verified CSV + robot clearance\nsame run / loop / specimen"];
+  clear -> verify2 [label="managed replay evidence"];
+  verify2 -> analysis [label="confirmed clear"];
+  verify2 -> review [label="occupied / unknown / failure"];
+  clear -> evidence [label="scoped replay + Verification 2", color="#2E7D59"];
   verify -> review [label="failed / uncertain"];
   manipulation -> evidence [label="evidence", color="#2E7D59"];
   robot -> evidence [label="evidence", color="#2E7D59"];

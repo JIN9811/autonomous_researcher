@@ -240,19 +240,19 @@ Run: `pytest -q tests/unit/test_operator_teleop_handoff.py tests/integration/tes
 - Consumes new: teleop-handoff GET/confirm endpoints
 - Produces: `Teleop Handoff` panel and `Teleop Complete` action
 
-- [ ] **Step 1: Write failing static/browser-contract tests**
+- [x] **Step 1: Write failing static/browser-contract tests**
 
-Assert the handoff panel is in `#teleoperation-card`, shows bounded identity, and keeps `Teleop Complete` disabled until a matching started session has stopped with resources released. Assert ordinary `/lerobot` use remains unchanged.
+Assert the handoff panel is in `#teleoperation-card`, shows bounded identity, and keeps `Teleop Complete` disabled until a matching session exists. Assert the completion action invokes the ordinary Teleop Stop endpoint before the bounded confirmation endpoint, and ordinary `/lerobot` use remains unchanged.
 
-- [ ] **Step 2: Run tests and confirm the panel is absent**
+- [x] **Step 2: Run tests and confirm the panel is absent**
 
 Run: `pytest -q tests/unit/test_lerobot_gui_static.py tests/integration/test_lerobot_gui_browser_smoke.py -k teleop`
 
-- [ ] **Step 3: Add handoff-scoped UI behavior**
+- [x] **Step 3: Add handoff-scoped UI behavior**
 
-Load pending context from the query token, bind the started teleop session ID, poll its existing status endpoint, and enable confirmation only after stopped/released status. Stopping updates the panel but never calls confirm. A successful explicit confirm reports that UTM Vision verification is next.
+Load pending context from the query token, bind the started teleop session ID, and enable completion once that matching session exists. `Teleop Complete` must call the same idempotent stop endpoint as Teleop Stop, verify stopped/released status, and only then call confirm. Stopping by itself updates the panel but never calls confirm. A successful explicit confirm reports that UTM Vision verification is next.
 
-- [ ] **Step 4: Run focused GUI tests**
+- [x] **Step 4: Run focused GUI tests**
 
 Run: `pytest -q tests/unit/test_lerobot_gui_static.py tests/integration/test_lerobot_gui_browser_smoke.py -k teleop`
 

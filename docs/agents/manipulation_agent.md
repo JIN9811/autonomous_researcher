@@ -5,14 +5,15 @@ status: active
 authority: descriptive
 audience: [researcher, operator, developer, maintainer]
 scope: [agents, manipulation, robotics, lerobot]
-summary: Current contract for bounded LeRobot or Pi0.5 policy execution, progress monitoring, Vision verification, and robot evidence.
+summary: Current contract for bounded transfer policies, post-test UTM-clear replay, Vision verification, and robot evidence.
 source_of_truth:
   - agents/manipulation_agent.py
   - graphs/modules/manipulation/module.yaml
   - device_bridges/lerobot_bridge.py
   - app/main.py
-last_verified: 2026-08-09
-verified_against: 0b7627b
+  - utils/utm_clear_cycle.py
+last_verified: 2026-09-06
+verified_against: working-tree
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -32,6 +33,11 @@ specimen transfer. It validates task, profile, policy, fresh Vision context and
 live gates; starts and monitors a rollout; scores SARM-lite progress; requests
 post-place Vision verification; and packages result/evidence. Pi0.5 is a policy
 executor, not a planner, and direct shell generation is prohibited.
+
+After the UTM test, the same agent owns the separately scoped recorded sweep
+`clear_utm_to_disposal`. This uses managed LeRobot replay, not a second VLA
+pickup, and requires measured return plus fresh empty-fixture Vision evidence
+before Analysis. The initial transfer path and its evidence remain unchanged.
 
 ## Scope
 
@@ -71,11 +77,10 @@ substitute for the automatic agent completion contract.
 
 ![Manipulation closed-loop position and handoffs](assets/figures/manipulation_01_closed_loop_handoffs.svg)
 
-**Figure Manipulation-1.** A specimen result and unexpired Vision readiness
-enter one of two bounded transfer tasks; robot motion is followed by post-place
-Vision verification before Equipment or Knowledge handoff. This is an
-`inspection`-backed projection of baseline `0b7627b`, not evidence of motion
-accuracy or live transfer reliability.
+**Figure Manipulation-1.** Initial transfer and Verification 1 precede Equipment;
+the post-test sweep and Verification 2 precede Analysis. This working-tree
+`inspection` projection distinguishes control from retained evidence; it is
+not evidence of motion accuracy or live transfer reliability.
 
 | Direction | Component | Contract/state | Purpose | Gate |
 |---|---|---|---|---|
@@ -116,21 +121,52 @@ Supported task contracts:
 - `transfer_to_utm`: `3dp_output_area` → `utm_fixture`, verified by
   `specimen_on_utm_platen`, next agent Lab Equipment.
 - `clear_utm_to_disposal`: `utm_fixture` → `discard_bin`, verified by
-  `utm_home_restored`, next agent Knowledge.
+  `utm_fixture_clear_verified`, next agent Vision for Verification 2, then Analysis.
+
+### Post-test UTM clearance
+
+The current graph arms one deterministic child session per run/loop/specimen
+only after Equipment supplies verified completion, stable validated CSV,
+eligible handoff, `next_test_completed`, and `clearance_restored`. An explicit
+identity conflict blocks; restarting the same stage does not rearm motion.
+
+| Phase | Owner and completion evidence |
+| --- | --- |
+| Verification 1 | Vision: original confirmed placement image and stopped transfer |
+| UTM test | Equipment: existing agentic cycle, CSV export and robot-entry clearance |
+| Recorded sweep | Manipulation: `jin/utm_clear`, episode `0`, managed replay through the saved robot profile; no grasp/contact requirement |
+| Verification 2 | Vision: successful replay, measured return, then a fresh registered UTM image confirming absence |
+| Analysis | Existing CSV processing, released only after the current clearance contract succeeds |
+
+The runner's measured return target comes from the final recorded
+`observation.state`, not its final action command. A pending replay has one
+fixed deadline derived from the bridge duration bound; repeated polls do not
+restart it or exhaust the ordinary graph-step budget. Failed/stopped replay,
+missing return, stale image, residual specimen, or unknown camera registration
+blocks Analysis. There is no automatic effectful replay retry.
+
+`run_metadata.utm_clear_requirement` retains the gate even if its execution
+record is missing. `utm_clear_execution` carries the child lifecycle;
+`initial_manipulation_execution` preserves the earlier transfer evidence.
+The scoped `utm_verifications` map keeps two independent records and images
+in the existing loop archive. See [Vision](vision_agent.md#post-test-compressed-specimen-verification)
+and the [managed replay API](../device_bridges/lerobot_bridge.md#managed-utm-clear-replay).
 
 ![Manipulation internal execution and effect boundary](assets/figures/manipulation_02_execution_effect_boundary.svg)
 
-**Figure Manipulation-2.** Two supported tasks, eleven internal entries, and
-four registered tools preserve task resolution, fresh context, live gates,
-backend selection, bounded rollout, monitoring, SARM progress, Vision
-verification, decision, reporting, and evidence. This `inspection` figure does
-not imply independent graph scheduling or validated physical performance.
+**Figure Manipulation-2.** The initial `transfer_to_utm` policy path has eleven
+internal entries and four registered tools covering task resolution, fresh
+context, live gates, backend selection, bounded rollout, monitoring, SARM
+progress, Vision verification, decision, reporting, and evidence. The managed
+post-test clear replay described above is intentionally outside this retained
+initial-transfer figure. This `inspection` figure does not imply independent
+graph scheduling or validated physical performance.
 
-### Execution trace details
+### Initial-transfer execution trace details
 
 | Phase | Required identity/state | Operation/gate | Evidence/output | Unknown-effect rule |
 |---|---|---|---|---|
-| Task resolution | allowlisted task, source and target | bind `transfer_to_utm` or `clear_utm_to_disposal` | task/skill/terminal pose | unsupported task blocks before motion |
+| Task resolution | allowlisted initial transfer, source and target | bind `transfer_to_utm` | task/skill/terminal pose | unsupported task blocks before motion |
 | Context | specimen ID and unexpired Vision signal | merge pose/readiness and camera-return state | bounded transfer context | stale or mismatched signal blocks |
 | Preflight | robot profile, policy/checkpoint, camera, approval and mode | validate profile/policy/live gates | preflight result and blockers | no shell or arbitrary model motion fallback |
 | Rollout | task, policy and session configuration | start bounded bridge session | session ID, start result and action budget | start response alone does not prove final pose |
@@ -145,6 +181,7 @@ not imply independent graph scheduling or validated physical performance.
 | owned | GET/POST | `/api/lerobot/manipulation-agent/config` | read_only/local_state | agent profile/config |
 | owned | POST | `/api/lerobot/manipulation-agent/test`, `/run` | local_state/physical_possible | bounded agent workflow |
 | connected | GET/POST | `/api/lerobot/rollout/config`, `/rollout/start`, `/rollout/stop`, `/rollout/status` | physical_possible | primary policy session |
+| connected | POST | `/api/lerobot/replay/start`, `/replay/status`, `/replay/stop` | physical_possible/read_only | managed recorded sweep; status is read-only |
 | operator | POST | `/api/lerobot/teleoperate/start`, `/teleoperate/stop`, `/teleoperate/status` | physical_possible | manual teleoperation |
 | operator | POST | `/api/lerobot/record/*`, `/train/*`, `/wandb-local/*` | local_state/model | dataset/training lifecycle |
 | operator | GET/POST | `/api/lerobot/config`, `/sessions`, `/ports/*`, `/camera/test`, `/profiles/validate` | read_only/local_state | readiness/configuration |
@@ -153,7 +190,7 @@ not imply independent graph scheduling or validated physical performance.
 | operator | POST | `/api/lerobot/mirror/*` | read_only/local_state/external_service | Isaac mirror process/loop |
 | operator | POST/GET | `/api/lerobot/visualize/*` | local_state/read_only | visualization process/files |
 
-The 87-route family is exhaustive in OpenAPI; categories above cover its
+The 87-route count is historical (`0b7627b`); current OpenAPI is exhaustive. Categories above cover
 configuration, execution, stop/status, validation, data, simulation, and
 evidence responsibilities.
 
@@ -162,6 +199,7 @@ evidence responsibilities.
 | Tool/service | Boundary | Effect | Evidence |
 |---|---|---|---|
 | `lerobot.rollout.start` | LeRobot bridge | physical_possible | session/log/status |
+| `lerobot.replay.start/status/stop` | LeRobot bridge | physical_possible; status read_only | scoped session/log/return evidence |
 | `lerobot.rollout.stop` | LeRobot bridge | physical_possible | stop result |
 | `lerobot.rollout.status` | LeRobot bridge | read_only | current session |
 | `robot.pick_place` | compatibility bounded bridge | physical_possible | task result |
@@ -199,10 +237,50 @@ runtime phase, SARM/stage-machine state, post-place interlock, verification,
 decision, result, and evidence refs. Logs, datasets, checkpoints, images, and
 events require run/session/specimen identity.
 
+### Live GUI telemetry delivery
+
+The Live GUI opts into `/ws/lerobot/joint-telemetry?sample_format=compact-v1`.
+History is replayed from the saved log origin in batches of at most 128 points,
+followed by new points only. Each point retains session/execution identity,
+sequence, elapsed time, native measured/requested/applied joint values (including
+the gripper), and units. No curve points are downsampled. Reconnecting replays
+history; the viewer replaces its history and rejects duplicate sequences within
+an execution. A new logger execution starts a separate displayed curve.
+
+Each batch carries one `latest_sample` detail for the current pose and motion/grasp
+state instead of repeating this detail on every historical point. The viewer
+ingests all points, then updates pose and status once per batch; chart redraws
+remain coalesced through `requestAnimationFrame`. Each numeric point also retains
+a minimal `grasp_visual` (outcome status, attempt index, measured gripper state).
+The 3D grasp latch processes these in order so a release followed by idle within
+one batch cannot leave the specimen attached. First-contact achievement and
+latest-attempt state retain their separate meanings. Annotation still processes
+every sample on the server; this is a display projection, not a change to grasp
+judgment, rollout control, recording, or loop-scoped artifact storage. Snapshot
+and artifact APIs retain full evidence; clients without the query parameter
+continue receiving full historical samples.
+
+Offline replay of the 810 action samples in `run-20260906T113555Z-8b3e30`
+reduced serialized sample payloads from 4,573,289 to 821,075 bytes (82.0%).
+Sending the same log one sample per frame still reduced sample payloads by 10.8%
+because latest display detail does not repeat native values or degree maps.
+This comparison includes batch sample/detail fields, excludes common message
+headers/runtime summaries and network compression, and is not a browser FPS
+measurement. Source log hash and every numeric point were unchanged.
+
+Validation: `tests/integration/test_joint_telemetry_history.py` covers late-open,
+initially empty logs, appended live points, reconnects, bounded compact batches,
+and legacy delivery. `tests/js/omx_telemetry_history.test.cjs` covers batch display,
+curve preservation, execution changes, stale detail, release transitions, and
+first-grasp display.
+Deploy the rebuilt viewer bundle together with the backend; restart the GUI
+server and reload the page when no device operation is running.
+
 ## Modes and Fallbacks
 
-Test uses fake/virtual policy paths and cannot establish motion. Replay uses
-recorded events. Isaac is simulation/mirror evidence. Browser invokes APIs but
+Test uses fake/virtual policy paths and cannot establish motion. Offline event replay uses
+recorded events; managed robot replay is physical when its effective runtime mode is Live.
+Isaac is simulation/mirror evidence. Browser invokes APIs but
 does not change evidence class. Live requires a visible robot/camera profile,
 valid policy checkpoint, fresh Vision, approvals, and bridge readiness.
 Compatibility `robot.pick_place` is explicit, not silent equivalence.
@@ -212,7 +290,12 @@ Compatibility `robot.pick_place` is explicit, not silent equivalence.
 `execution_boundary` is `lerobot_bridge_only`; Guardian has stop authority;
 direct shell is false. Live motion requires validated profile/policy, camera
 return, fresh Vision, bounded task, approval/policy gates, and a stop path.
-Post-place Vision verification blocks Equipment handoff.
+These policy/camera prerequisites describe the initial transfer. The recorded
+clearance sweep uses its own profile/live/approval and Equipment-clearance
+gates, without a VLA checkpoint or a reused printer ActiveCam signal.
+Post-place Vision verification blocks Equipment handoff; post-clear Vision
+verification blocks Analysis. A virtual or preflight Manipulation profile
+cannot fabricate clearance after a real Equipment test.
 
 ## Errors and Recovery
 
@@ -224,16 +307,58 @@ is prohibited.
 
 ## Operator and GUI Surfaces
 
+The 2026-09-06 working-tree lifecycle update separates an agent call returning
+from its asynchronous transfer finishing. `run_metadata.manipulation_execution`
+is scoped by run, loop, specimen, and rollout session. Launching a policy leaves
+the Live GUI running; verification/stop still pending is waiting. Done requires
+matching UTM completion, post-place readiness, and confirmed `STOPPED` evidence.
+An interrupted unverified transfer is not success, and current errors override
+older successful display state. Both normal runtime merges and operator Vision
+retry merges update this lifecycle. Virtual/no-session workflows retain their
+existing status semantics. This record is display bookkeeping, not a new gate
+or permission to execute equipment; Vision still monitors concurrently.
+
+A new Manipulation result cannot consume a previously stored completion
+observation, even when the rollout session is reused. Completion is evaluated
+on the subsequent Vision merge. Previous-run/loop/specimen execution records
+cannot supply a Done badge; paused, stopped, or approval-pending new calls stay
+Waiting instead of reusing older success.
+
+An offline replay of `run-20260906T122533Z-c0effd` kept Manipulation Running
+through UTM observations 2–11 and marked it Done only at observation 12, after
+verified placement/readiness and confirmed rollout stop. No device was run.
+
 The LeRobot workspace manages ports, cameras, profiles, teleoperation,
 recording, training, rollout, datasets/policies, Isaac, visualization, mirror,
 and agent test/run. Live GUI shows agent report, progress, handoff, and evidence.
 Workspace actions remain server/bridge gated.
 
+The UTM image card exposes persistent `Verification 1` / `Verification 2`
+selectors. An unavailable selected image stays Pending, never borrowing the
+other image. Explicit virtual evidence is labeled simulated, not a physical
+snapshot. Completion Verification adds one final `UTM Clear & Verification 2`
+row; sidebar status follows the current clear child once armed, rather than
+reusing the earlier transfer's Done state.
+
 ## Current Verification
+
+The [2026-09-07 supervised integration record](../paper/evidence/2026-09-07-supervised-closed-loop.md)
+observed transfer/placement, rollout stop, post-UTM managed disposal, fresh
+Vision clearance, and Analysis entry. The disposal invocation and final
+clearance remain separate archived results; this is one supervised observation,
+not an unattended-success or generalized safety claim.
 
 Verified against two supported tasks, all 11 internal steps, four tools, and the
 87-route LeRobot family at baseline `0b7627b`. This is interface/architecture
 verification, not a live transfer result.
+
+The post-test clearance update was verified against the uncommitted working
+tree on 2026-09-06 using non-actuating tests in
+`tests/unit/test_lerobot_replay.py`, `tests/unit/test_utm_clear_cycle.py`,
+`tests/unit/test_utm_clear_presence.py`, and
+`tests/js/utm_verification_tabs.test.cjs`. Tests cover scoped handoffs,
+the actual controller/graph route with fake devices, stop/timeout handling,
+image separation and UI lifecycle. They do not commission physical clearing.
 
 ## Limitations and Known Gaps
 

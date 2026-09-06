@@ -108,19 +108,14 @@ class ManipulationAgent(BaseAgent):
             "target_location": "discard_bin",
             "terminal_pose": "standby_clear_of_utm",
             "verified_handoff": "completed_disposal",
-            "verification_signal": "utm_home_restored",
+            "verification_signal": "utm_fixture_clear_verified",
             "recommended_next_if_unverified": "vision_agent",
-            "recommended_next_if_verified": "knowledge_agent",
+            "recommended_next_if_verified": "analysis_agent",
             "stages": [
                 "preflight",
                 "wait_for_utm_safe",
-                "approach_fixture",
-                "pre_grasp_align_tested_specimen",
-                "grasp_tested_specimen",
-                "lift_clear_fixture",
-                "transfer_to_discard_bin",
-                "release_into_bin",
-                "retreat",
+                "replay_jin_utm_clear_episode_0_sweep",
+                "measured_return_to_recorded_end",
                 "verify_fixture_clear_and_discarded",
             ],
         },
@@ -380,8 +375,8 @@ class ManipulationAgent(BaseAgent):
         if task_id == "clear_utm_to_disposal":
             return (
                 "After the UTM test is complete and the fixture is safe to access, "
-                f"pick up {label} from the UTM fixture datum, move it to the discard bin at {target}, "
-                "release it fully into the bin, retreat to standby pose, and stop."
+                f"clear {label} toward {target} using the managed jin/utm_clear episode 0 recorded sweep, "
+                "verify measured return to the recorded end, then request fresh UTM empty-fixture verification."
             )
         return (
             f"Move {label} from the 3D printer output basket at {source} to the UTM fixture datum at {target}. "
@@ -597,7 +592,10 @@ class ManipulationAgent(BaseAgent):
             "fps": spec.get("fps") if isinstance(spec.get("fps"), int) else None,
             "camera_fps": spec.get("camera_fps") if isinstance(spec.get("camera_fps"), int) else None,
             "camera_enabled": self._bool_spec(spec, "camera_enabled", "lerobot_camera_enabled", default=is_pi05),
-            "display_data": self._bool_spec(spec, "display_data", "lerobot_display_data", default=False),
+            # Workspace runs own their viewer preference; closed-loop runs use Live GUI telemetry.
+            "display_data": self._bool_spec(spec, "display_data", "lerobot_display_data", default=False)
+            if device_workspace_bridge
+            else False,
             "confirm_live_execute": self._bool_spec(
                 spec,
                 "confirm_live_execute",
@@ -1829,10 +1827,16 @@ class ManipulationAgent(BaseAgent):
 
     @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
+        from utils.utm_clear_cycle import current_clear, run_clear_manipulation
+        if current_clear(state):
+            return await run_clear_manipulation(state, ctx, spec=self._spec(state))
         timeout_s = 30.0 if state.mode == Mode.TEST else None
         strategy = self._strategy(state)
         spec = self._spec(state)
         task_id = self._task_id(state, spec)
+        if task_id == "clear_utm_to_disposal":
+            return AgentResult(success=False, summary="Same-cycle verified Equipment handoff is required for UTM disposal",
+                data={"failure_code": "UTM_CLEAR_HANDOFF_REQUIRED", "requested_next_stage": "vision"}, next_hint="vision")
         try:
             protocol = await ctx.complete(
                 "tool_formatting",

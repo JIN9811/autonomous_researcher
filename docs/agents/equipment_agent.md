@@ -15,8 +15,8 @@ source_of_truth:
   - graphs/modules/equipment/equipment_skill_flows.json
   - device_bridges/windows_pyautogui_bridge.py
   - mcp_tools/equipment_tools.py
-last_verified: 2026-09-01
-verified_against: working-tree-2026-09-01
+last_verified: 2026-09-07
+verified_against: working-tree
 related_docs:
   - docs/device_bridges/windows_pyautogui_bridge.md
   - docs/hardware/windows_pyautogui_equipment_agent_guideline.md
@@ -52,6 +52,8 @@ LangGraph Equipment stage
   -> selected Windows or Local worker
   -> raw evidence
   -> one Linux completion interpretation
+  -> Manipulation UTM-clear replay
+  -> Vision Verification 2
   -> Analysis handoff or explicit block
 ```
 
@@ -158,6 +160,20 @@ block 하나를 추가합니다. Skill은 block 생성 조건이 아니라 생�
 Workspace와 Live GUI의 Agentic Progress, Runtime IDE 그래프가 이 동일 기록을
 투영합니다. Agent Manager 저장은 장비를 실행하지 않습니다.
 
+Live GUI 진행률은 탭 클릭이나 report render가 아닌 authoritative planning
+session 갱신에 맞춰 현재 run의 Skill Flow를 다시 조회합니다. 같은 Agent call
+내 실행 중에는 별도의 2초 간격 GET 관측으로 큰 planning 응답 지연과 무관하게
+진행 기록을 읽습니다. 페이지 선택 여부와는 무관합니다. 같은 call
+내에서도 저장 checkpoint가 바뀌면 표시를 갱신하며, 동일 응답은 추가 repaint를
+하지 않습니다. 최초 config/runtime 조회 이후 자동 동기화는 Skill Flow만 읽고,
+진행 중 중복 조회는 합친 뒤 필요하면 후속 조회합니다. 완료/차단된 같은 run의
+최종 조회가 실패하면 완료 후에도 자동 재조회하며, 각 GET은 3초 timeout으로
+조회 잠금이 계속 남는 것을 막습니다. 완료/차단된 같은 run의
+단계 증거도 유지하고, 다른 run의 늦은 응답은 버립니다. 표시 대상은 해당 run의
+최신 Equipment invocation이며 이전 loop의 전체 기록은 loop archive에서 확인합니다.
+Vision verification은 대기/성공 시 시안색, 실패 시 기존 붉은색입니다.
+색 변경은 판정이나 인터록을 바꾸지 않습니다.
+
 Vision 전이는 추가로 `vision_task_id`, `check_id`, task label, runtime/observer mode,
 confidence, evidence timestamp/expiry/source, failure code와 bounded evidence reference를
 보존합니다. 결과의 run/loop/specimen identity가 요청과 다르거나 evidence가 만료됐으면
@@ -241,6 +257,52 @@ Live GUI, Equipment Workspace, CUI, Runtime IDE는 이 기록의 같은 projecti
 - evidence/artifact references
 - hardware alert와 incident record
 
+### Cycle-level verification
+
+The final `equipment_report.cross_checks` and `equipment_result.cross_checks`
+describe the complete agentic cycle, not the last registered Skill. In
+particular, `restore_robot_clearance` does not save or parse CSV data; its
+per-step `false` flags must not replace completed export evidence.
+
+| Cycle check | Evidence source |
+| --- | --- |
+| `screen_started` | Completed `start_test` Skill |
+| `physical_motion_started` | Completed `start_test` and `monitor_contact_and_run` Skills |
+| Save, file creation, parse, export responsibility | Stable, parsed CSV bound to this run/specimen and matched across save/validation |
+
+Per-Skill runtime results remain unchanged. Missing or mismatched CSV evidence,
+incomplete Skills, and missing clearance still block downstream handoff. CSV
+parsing, header discovery, and minimum-data requirements are unchanged.
+
+The 2026-09-06 non-actuating regression replay used archived run
+`run-20260906T122533Z-c0effd`: the original report reproduced the four failed
+checks; the corrected cycle projection passed stage validation and the Analysis
+handoff gate. Analysis parsed all 2,113 recorded points with the CSV hash
+unchanged. This is an archived-data check, not another equipment execution.
+
+### Post-test clearance handoff
+
+In the 2026-09-06 working tree, `ready_for_analysis` still describes Equipment's
+data readiness, not permission to skip physical fixture clearance. The graph
+first requires verified completion, stable validated CSV, eligible handoff,
+`next_test_completed`, `clearance_restored`, and confirmed Verification 1.
+It then arms one current-run/loop/specimen `clear_utm_to_disposal` child.
+Explicitly conflicting run, specimen, or loop identity blocks; a legacy packet
+without a loop field is bound to its current merge invocation.
+
+Equipment retains ownership of the UTM test and clearance restoration. The
+[Manipulation Agent](manipulation_agent.md#post-test-utm-clearance) owns the
+recorded sweep; [Vision](vision_agent.md#post-test-compressed-specimen-verification)
+owns the subsequent fresh empty-fixture snapshot. Only their verified result
+releases Analysis. This is not another UTM test, a new CSV parser, or an
+Equipment-owned robot motion. A real Equipment test cannot continue using a
+fabricated virtual clear result when Manipulation is disabled or preflight-only.
+
+Non-actuating coverage is in `tests/unit/test_utm_clear_cycle.py` and
+`tests/unit/test_equipment_agentic_task.py`; the former exercises actual
+controller/graph routing with fake device responses. No live replay or
+equipment execution was performed for this update.
+
 ## Tool 경계
 
 | Tool | 역할 |
@@ -273,4 +335,9 @@ LLM 결과는 allowlisted 선택과 설명만 제공하며 임의 PyAutoGUI/shel
 
 ## 검증 범위
 
+2026-09-07 working-tree에서 자동 조회, 조회 병합/후속 갱신, 실패 후 재조회,
+완료·차단 증거 유지와 브라우저 색상을 비구동 테스트로 확인했습니다.
+실제 8단계 Equipment → UTM clear → Analysis → BO 관리 LHS → 다음 Design
+연결은 [감독하 폐루프 실증](../paper/evidence/2026-09-07-supervised-closed-loop.md)에
+별도로 기록합니다. GUI 수정 검증과 앞선 물리 실행 증거를 혼동하지 않습니다.
 2026-09-01 기준 단위/통합 검증은 generic profile, UTM profile, Skill 실행, workflow-level compression cycle, locked entry gate, 선택적 step Vision, Raw CSV/readiness projection, Live GUI projection, Windows pairing/packaging 경로를 포함합니다. 자동 테스트는 물리 UTM을 작동하지 않습니다.

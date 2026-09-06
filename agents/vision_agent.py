@@ -396,15 +396,34 @@ class VisionAgent(BaseAgent):
     ) -> dict[str, Any]:
         """Read the active rollout session just before UTM completion evaluation."""
         tool_name = "lerobot.rollout.status"
+        metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
+        manipulation = metadata.get("manipulation_result") if isinstance(metadata.get("manipulation_result"), dict) else {}
+        robot_task = metadata.get("robot_task_result") if isinstance(metadata.get("robot_task_result"), dict) else {}
+        operator_session_id = str(manipulation.get("session_id") or "").strip()
+        requested_session_id = str(post_place_context.get("session_id") or "").strip()
+        operator_teleop_stopped = bool(
+            manipulation.get("handoff_strategy") == "operator_teleop"
+            and manipulation.get("teleop_stop_verified") is True
+            and manipulation.get("robot_port_released") is True
+            and manipulation.get("camera_returned_to_vision") is True
+            and operator_session_id
+            and operator_session_id == requested_session_id
+        )
+        if operator_teleop_stopped:
+            return {
+                "ok": True,
+                "tool": "lerobot.teleoperate.stop",
+                "status": "STOPPED",
+                "session_id": operator_session_id,
+                "source": "operator_teleop_confirmation",
+                "post_place_interlock": dict(post_place_context.get("post_place_interlock") or {}),
+            }
         if tool_name not in set(ctx.tools.list_tools()):
             return {
                 "ok": False,
                 "tool": tool_name,
                 "failure_code": "ROLLOUT_STATUS_TOOL_NOT_REGISTERED",
             }
-        metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
-        manipulation = metadata.get("manipulation_result") if isinstance(metadata.get("manipulation_result"), dict) else {}
-        robot_task = metadata.get("robot_task_result") if isinstance(metadata.get("robot_task_result"), dict) else {}
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
         session_id = str(
             post_place_context.get("session_id")
@@ -811,6 +830,35 @@ class VisionAgent(BaseAgent):
         completion: dict[str, Any],
     ) -> dict[str, Any]:
         """Stop the active rollout after UTM evidence verifies task completion."""
+        metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
+        manipulation = metadata.get("manipulation_result") if isinstance(metadata.get("manipulation_result"), dict) else {}
+        operator_teleop_stopped = bool(
+            manipulation.get("handoff_strategy") == "operator_teleop"
+            and manipulation.get("teleop_stop_verified") is True
+            and manipulation.get("robot_port_released") is True
+            and manipulation.get("camera_returned_to_vision") is True
+        )
+        if operator_teleop_stopped:
+            response = {
+                "ok": True,
+                "tool": "lerobot.teleoperate.stop",
+                "status": "STOPPED",
+                "session_id": str(completion.get("session_id") or manipulation.get("session_id") or ""),
+                "source": "operator_teleop_confirmation",
+                "rollout_stop_called": False,
+                "port_released": True,
+                "camera_returned_to_vision": True,
+            }
+            for key in ("manipulation_result", "robot_task_result"):
+                current = metadata.get(key)
+                if not isinstance(current, dict):
+                    continue
+                updated = dict(current)
+                updated["handoff_status"] = "ready_for_equipment"
+                updated["completion_status"] = "verified_complete"
+                updated["rollout_stop"] = dict(response)
+                metadata[key] = updated
+            return response
         tool_name = "lerobot.rollout.stop"
         if tool_name not in set(ctx.tools.list_tools()):
             return {
@@ -820,8 +868,6 @@ class VisionAgent(BaseAgent):
                 "failure_code": "UTM_ROLLOUT_STOP_TOOL_NOT_REGISTERED",
                 "message": "lerobot.rollout.stop tool is not registered.",
             }
-        metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
-        manipulation = metadata.get("manipulation_result") if isinstance(metadata.get("manipulation_result"), dict) else {}
         robot_task = metadata.get("robot_task_result") if isinstance(metadata.get("robot_task_result"), dict) else {}
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
         session_id = str(
@@ -2606,10 +2652,59 @@ class VisionAgent(BaseAgent):
 
     @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
+        from utils.utm_clear_cycle import current_clear, run_clear_vision
+        if current_clear(state):
+            return await run_clear_vision(state, ctx, artifact_dir=self._artifact_dir(state, f"clear-{state.loop_count}"))
         frame_id = f"frame-{state.loop_count}-{state.stage.value}"
         timeout_s = 30.0 if state.mode == Mode.TEST else None
         specimen = self._specimen_result(state)
-        printer_preflight = self._no_actuation_transfer_preflight(state)
+        spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        policy = spec.get("execution_policy") if isinstance(spec.get("execution_policy"), dict) else {}
+        equipment_owned_utm_verification = bool(
+            self._post_manipulation_handoff_requested(state)
+            and str(policy.get("lab_equipment") or "").strip().lower() == "execute"
+        )
+        if (
+            str(policy.get("vision") or "").strip().lower() == "preflight_only"
+            and not equipment_owned_utm_verification
+        ):
+            specimen_id = str(specimen.get("specimen_id") or spec.get("specimen_id") or "")
+            candidate_id = str(specimen.get("candidate_id") or spec.get("candidate_id") or "")
+            preflight = {
+                "schema": "vision_preflight.v1",
+                "status": "execution_ready_pending_approval",
+                "policy_source": "execution_policy.vision",
+                "run_id": state.run_id,
+                "specimen_id": specimen_id,
+                "candidate_id": candidate_id,
+                "capture_performed": False,
+                "actuation_performed": False,
+                "physical_detection_claimed": False,
+            }
+            return AgentResult(
+                success=True,
+                summary="Vision device boundary validated without camera capture",
+                data={
+                    "observation": {
+                        "frame_id": frame_id,
+                        "specimen_id": specimen_id,
+                        "candidate_id": candidate_id,
+                        "transfer_readiness": {"ready": False, "status": "preflight_only"},
+                        "vision_signal": {"status": "preflight_only", "fresh": False},
+                    },
+                    "vision_preflight": preflight,
+                    "handoff_packet": preflight,
+                    "metrics": {"capture_performed": 0, "physical_detection_claimed": 0},
+                    "requested_next_stage": "manipulation",
+                    "transition_decision": "vision_policy_preflight_complete",
+                },
+                next_hint="manipulation",
+            )
+        printer_preflight = (
+            {}
+            if equipment_owned_utm_verification
+            else self._no_actuation_transfer_preflight(state)
+        )
         if printer_preflight:
             return self._planned_transfer_result(
                 state=state,

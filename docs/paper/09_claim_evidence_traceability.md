@@ -11,7 +11,7 @@ scope:
   - paper
   - claim_evidence_traceability
 summary: Maps ATR paper claims to research questions, evidence environments, records, and explicit gaps.
-evidence_date: 2026-08-09
+evidence_date: 2026-09-07
 method: Cross-check of paper claim identifiers against docs/paper/artifact_manifest.yaml.
 paper_section: claim_evidence_traceability
 research_questions:
@@ -20,6 +20,7 @@ research_questions:
   - RQ3
   - RQ4
 claim_ids:
+  - C-SYS-LOOP-01
   - C-SYS-ARCH-01
   - C-TRACE-DOC-01
   - C-SAFE-LIVE-01
@@ -57,20 +58,22 @@ digests.
 
 | Claim ID | Proposition | RQ | Status | Evidence | Boundary / next evidence |
 |---|---|---|---|---|---|
+| `C-SYS-LOOP-01` | One supervised mixed-mode iteration reached live UTM clearance, Analysis, BO-managed LHS feedback, and the next Design/Specimen entry. | RQ1, RQ2 | `supported` within integration scope | `E-LIVE-LOOP-001` | Deposition skipped, specimen substituted; no material-validity, acquisition-optimization, or campaign-completion claim. |
 | `C-SYS-ARCH-01` | ATR declares a closed-loop graph spanning research stages with explicit dispatch, feedback, and terminal structure. | RQ1 | `supported` | `E-INSPECT-ARCH-001` | Execution and recovery across a complete run require Tier 1–4 evidence. |
 | `C-TRACE-DOC-01` | The paper package enforces machine-readable links from supported claims to bounded evidence outputs. | RQ2 | `partially_supported` | `E-TEST-DOC-001` | Runtime scientific lineage is not established by document tests. |
 | `C-SAFE-LIVE-01` | Guardian and operator gates prevent or safely contain consequential live actions. | RQ3 | `not_evaluated` | No qualifying record | Requires scenario matrix and supervised live evidence. |
 | `C-PLAT-EXT-01` | ATR exposes contract-oriented module, graph, backend, bridge, and workspace extension surfaces. | RQ4 | `supported` | `E-INSPECT-ARCH-001` | General compatibility and containment require representative extension tests. |
-| `C-LIMIT-EVAL-01` | The current paper package does not establish end-to-end physical or scientific efficacy. | RQ1–RQ3 | `supported` | Absence of Tier 2–4 records in the manifest | This limitation changes only when qualifying evidence is added and reviewed. |
+| `C-LIMIT-EVAL-01` | The current paper package does not establish end-to-end physical or scientific efficacy. | RQ1–RQ3 | `partially_supported` | `E-TEST-DOC-001`; bounded integration evidence does not validate efficacy | One mixed-mode iteration is not a full physical/scientific campaign. |
 
-`C-LIMIT-EVAL-01` is represented in the human map as a release limitation. The
-machine manifest tracks claims that reference executable evidence; the release
-review confirms the absence of higher-tier records.
+`C-LIMIT-EVAL-01` remains a release limitation. The added supervised live record
+changes integration evidence, not the absence of a full physical/scientific
+campaign or statistical evaluation.
 
 ## Evidence Map
 
 | Evidence ID | Environment | Verified scope | Does not establish |
 |---|---|---|---|
+| `E-LIVE-LOOP-001` | Supervised mixed-mode / live equipment | One feedback iteration, eight Equipment blocks, fresh UTM clearance, Analysis, BO-managed LHS, and next Design parameters | Full manufacturing, specimen scientific identity, acquisition improvement, safety effectiveness, independent replay from the public summary |
 | `E-INSPECT-ARCH-001` | Inspection | Route counts, graph node/edge/dispatch counts, inspected extension categories | Runtime correctness, safety effectiveness, scientific outcome |
 | `E-TEST-DOC-001` | Test | Front-matter, manifest, paper structure, claim-reference, path, hash, and privacy contracts selected by the focused test command | System tests, browser workflows, physical execution, scientific validity |
 

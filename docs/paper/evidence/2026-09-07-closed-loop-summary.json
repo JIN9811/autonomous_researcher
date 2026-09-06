@@ -1,0 +1,107 @@
+{
+  "schema": "atr.public_run_evidence_summary.v1",
+  "run_id": "run-20260906T154601Z-95cb07",
+  "evidence_date": "2026-09-07",
+  "baseline_scope": "uncommitted working tree; raw archives retained locally, not bundled",
+  "records": [
+    {
+      "loop": 1,
+      "agent": "specimen",
+      "attempt": 1,
+      "source_path": "runs/run-20260906T154601Z-95cb07/runtime/loops/loop-000001/specimen_agent/attempt-000001/result.json",
+      "sha256": "7169876b90db08111165de37709e4629ef0153b9d213b6b2c534bdee31c52923",
+      "status": "completed",
+      "summary": "Specimen preparation executed"
+    },
+    {
+      "loop": 1,
+      "agent": "manipulation",
+      "attempt": 1,
+      "source_path": "runs/run-20260906T154601Z-95cb07/runtime/loops/loop-000001/manipulation_agent/attempt-000001/result.json",
+      "sha256": "14c17c2828626369c8bfad9046239ff71e3246cc901f227e693676d8513dbfe7",
+      "status": "completed",
+      "summary": "Manipulation bounded skill executed"
+    },
+    {
+      "loop": 1,
+      "agent": "equipment",
+      "attempt": 1,
+      "source_path": "runs/run-20260906T154601Z-95cb07/runtime/loops/loop-000001/equipment_agent/attempt-000001/result.json",
+      "sha256": "c5f63ba1184d57bbf9044854cfe04f70bea73698e68b050f95d417a136b2a4b7",
+      "status": "completed",
+      "summary": "Equipment Skill Flow completed"
+    },
+    {
+      "loop": 1,
+      "agent": "manipulation",
+      "attempt": 2,
+      "source_path": "runs/run-20260906T154601Z-95cb07/runtime/loops/loop-000001/manipulation_agent/attempt-000002/result.json",
+      "sha256": "078983104a70c61eaa4d4b08889ad863e9d9840f8f5d826fd6e9a1f0543d2be4",
+      "status": "completed",
+      "summary": "UTM clear verification pending"
+    },
+    {
+      "loop": 1,
+      "agent": "vision",
+      "attempt": 23,
+      "source_path": "runs/run-20260906T154601Z-95cb07/runtime/loops/loop-000001/vision_agent/attempt-000023/result.json",
+      "sha256": "b08b7a148efb300262f88ae6260d0ace73dbcc3c355b718eb119e7d3226f5635",
+      "status": "completed",
+      "summary": "UTM clearance verified"
+    },
+    {
+      "loop": 1,
+      "agent": "analysis",
+      "attempt": 1,
+      "source_path": "runs/run-20260906T154601Z-95cb07/runtime/loops/loop-000001/analysis_agent/attempt-000001/result.json",
+      "sha256": "2738fc84b210b70869656b639596b6bcb47ee106b0e8bd22cc560dad990d854e",
+      "status": "completed",
+      "summary": "UTM analysis complete"
+    },
+    {
+      "loop": 1,
+      "agent": "knowledge",
+      "attempt": 1,
+      "source_path": "runs/run-20260906T154601Z-95cb07/runtime/loops/loop-000001/knowledge_agent/attempt-000001/result.json",
+      "sha256": "793ff481fdaaef70b61da31570061c737a04d91ccb348511031aad199219772d",
+      "status": "completed",
+      "summary": "Knowledge memory, pattern ledger, and self-evolution evidence update complete"
+    },
+    {
+      "loop": 1,
+      "agent": "bo",
+      "attempt": 1,
+      "source_path": "runs/run-20260906T154601Z-95cb07/runtime/loops/loop-000001/bo_agent/attempt-000001/result.json",
+      "sha256": "e8a7a0b56bee5535f566717a841fe220703cbcebb17f9e7442123191459484b7",
+      "status": "completed",
+      "summary": "BO Agent selected bo-candidate-002 via bo"
+    },
+    {
+      "loop": 1,
+      "agent": "guardian",
+      "attempt": 1,
+      "source_path": "runs/run-20260906T154601Z-95cb07/runtime/loops/loop-000001/guardian_agent/attempt-000001/result.json",
+      "sha256": "c431fcc006b3f9b635bc22a2b4efb7abc969910b8378f8865cf160d236d8bff0",
+      "status": "completed",
+      "summary": "Guardian decision: continue (continue)"
+    },
+    {
+      "loop": 2,
+      "agent": "design",
+      "attempt": 1,
+      "source_path": "runs/run-20260906T154601Z-95cb07/runtime/loops/loop-000002/design_agent/attempt-000001/result.json",
+      "sha256": "ea12d8d1ec3d3f8a614a71aa40114cde2c2023454da84a7825c7d8bd0d0c497c",
+      "status": "completed",
+      "summary": "Specimen experiment design selected"
+    },
+    {
+      "loop": 2,
+      "agent": "specimen",
+      "attempt": 1,
+      "source_path": "runs/run-20260906T154601Z-95cb07/runtime/loops/loop-000002/specimen_agent/attempt-000001/result.json",
+      "sha256": "bb850e9ecc5fc08a9538aa85cea2f6f7aeb2fb7a7121c220f861b5e34dbc01be",
+      "status": "completed",
+      "summary": "Specimen preparation executed"
+    }
+  ]
+}

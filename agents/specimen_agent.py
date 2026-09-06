@@ -1263,6 +1263,7 @@ class SpecimenMakingAgent(BaseAgent):
         printer_runtime_mode = "test" if live_gui_test_spec else state.mode.value
         printer_payload = {
             "run_id": state.run_id,
+            "specimen_placement": spec.get("specimen_placement"),
             "experiment_id": state.experiment_id,
             "runtime_mode": printer_runtime_mode,
             "specimen_id": specimen_id,
@@ -1282,11 +1283,13 @@ class SpecimenMakingAgent(BaseAgent):
         }
         if live_gui_test_spec:
             printer_payload["test_printer_path"] = printer_test_path
-            printer_payload["allow_test_printer_live"] = printer_test_path in {"installed_printer", "physical_print"}
-            printer_payload["test_printer_transport"] = "real" if printer_test_path in {"installed_printer", "physical_print"} else "virtual"
-            if printer_test_path in {"installed_printer", "physical_print"}:
+            profile_driven = isinstance(spec.get("test_mode_profile"), dict)
+            printer_live = not printer_preflight_only and printer_test_path in {"installed_printer", "physical_print"}
+            printer_payload["allow_test_printer_live"] = printer_live
+            printer_payload["test_printer_transport"] = "real" if printer_live else "virtual"
+            if printer_live:
                 printer_payload["prefer_http_artifact"] = True
-            if printer_test_path in {"installed_printer", "physical_print"}:
+            if printer_live and not profile_driven:
                 print_request = dict(printer_payload["print"]) if isinstance(printer_payload.get("print"), dict) else {}
                 print_request.update(
                     {
@@ -1320,6 +1323,13 @@ class SpecimenMakingAgent(BaseAgent):
                     )
                 else:
                     ejection_request.setdefault("source", "physical_print_tail")
+                printer_payload["ejection"] = ejection_request
+            elif printer_live:
+                ejection_request = dict(printer_payload["ejection"]) if isinstance(printer_payload.get("ejection"), dict) else {}
+                ejection_request.setdefault(
+                    "object_size_mm",
+                    self._first_value(spec.get("object_size_mm"), spec.get("specimen_size_mm")),
+                )
                 printer_payload["ejection"] = ejection_request
 
         tool_event_callback = getattr(ctx, "on_tool_event", None)

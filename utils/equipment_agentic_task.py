@@ -3,12 +3,100 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
+from pathlib import Path, PureWindowsPath
+import re
+import unicodedata
 from typing import Any
 
 
 TASK_SCHEMA = "atr.equipment_agentic_task.v1"
 ENTRY_GATE_SCHEMA = "atr.equipment_entry_gate.v1"
 UTM_COMPRESSION_TASK_ID = "run_utm_compression_cycle"
+
+
+def bind_cycle_csv_artifact(result: dict[str, Any], *, run_id: str, export_context: dict[str, Any]) -> dict[str, Any]:
+    """Bind a downloaded managed export using its exact filename and local content.
+
+    Worker artifact IDs identify downloads, not experiments. Preserve those IDs;
+    never fill identity on an arbitrary CSV merely because it is the latest file.
+    """
+    artifacts = result.get("output_artifacts") or []
+    candidates = [a for a in artifacts if isinstance(a, dict) and a.get("kind") == "utm_csv"]
+    if len(candidates) != 1:
+        return result
+    artifact = candidates[0]
+    def identifier(value: Any) -> str:
+        raw = unicodedata.normalize("NFKC", str(value or "")).strip()
+        if not raw or ".." in raw or "/" in raw or "\\" in raw:
+            return ""
+        clean = re.sub(r'[<>:"/\\|?*\x00-\x1f\s_]+', "-", raw)
+        clean = re.sub(r"-+", "-", clean).strip("-. ")
+        return clean if len(clean) <= 80 else ""
+    session = identifier(export_context.get("session_id"))
+    specimen = identifier(export_context.get("specimen_id"))
+    mode = str(export_context.get("mode") or "")
+    try:
+        loop = int(export_context["loop_index"])
+        repeat = int(export_context["repeat_index"])
+    except (KeyError, ValueError, TypeError):
+        return result
+    if not run_id or not session or not specimen or mode not in {"live", "test", "dry_run"} or min(loop, repeat) < 1:
+        return result
+    expected_name = f"{mode}_{session}_{specimen}_loop-{loop:04d}_rep-{repeat:04d}.csv"
+    origin = str(artifact.get("windows_path") or "")
+    local = str(artifact.get("local_path") or artifact.get("linux_path") or "")
+    if not local or PureWindowsPath(origin).name != expected_name or Path(local).name != expected_name:
+        return result
+    acquisition = result.get("data_acquisition") or {}
+    identity = {"run_id": run_id, "specimen_id": str(export_context["specimen_id"]), "linux_path": local}
+    if any(source.get(key) not in (None, "", value) for source in (result, artifact, acquisition) for key, value in identity.items()):
+        return result
+    if acquisition.get("artifact_id") not in (None, "", artifact.get("artifact_id")):
+        return result
+    try:
+        digest = hashlib.sha256(Path(local).read_bytes()).hexdigest()
+    except OSError:
+        return result
+    if artifact.get("pulled_to_linux") is not True or digest != artifact.get("sha256"):
+        return result
+    bound = deepcopy(result)
+    for item in bound["output_artifacts"]:
+        if item.get("kind") == "utm_csv":
+            item.update(identity)
+            item["identity_source"] = "managed_export_filename_and_local_sha256"
+    bound["data_acquisition"] = {**acquisition, **identity, "artifact_id": artifact.get("artifact_id")}
+    bound.update(run_id=run_id, specimen_id=identity["specimen_id"], result_file=local, utm_csv_path=local)
+    return bound
+
+
+def clearance_screen_evidence(result: dict[str, Any]) -> dict[str, Any]:
+    """Read the registered target/arrival image checks, without inventing sensor values."""
+    traces = [t for t in result.get("step_trace", []) if isinstance(t, dict) and t.get("status") == "ok"]
+    target = observed = None
+    ready = False
+    screenshot_path = ""
+    for trace in traces:
+        step, detail = str(trace.get("step") or ""), str(trace.get("detail") or "")
+        if step.endswith("_WAIT_UNTIL_IMAGE"):
+            for pattern, field in ((r"target_inter_jig_distance_(\d+(?:\.\d+)?)_mm via image", "target"),
+                                   (r"entry_height_(\d+(?:\.\d+)?)_mm via image", "observed")):
+                match = re.fullmatch(pattern, detail)
+                if match:
+                    if field == "target":
+                        target = float(match.group(1))
+                    else:
+                        observed = float(match.group(1))
+            ready = ready or detail == "next_test_ready_loaded via image"
+        if step == "SCREENSHOT_ROBOT_CLEARANCE_RESTORED":
+            screenshot_path = detail
+    screenshots = [a for a in result.get("output_artifacts", []) if isinstance(a, dict)
+                   and a.get("kind") == "screen_png" and a.get("pulled_to_linux") is True
+                   and screenshot_path and a.get("windows_path") == screenshot_path]
+    if target is None or observed is None or not ready or not screenshots:
+        return {}
+    return {"observed": observed, "target": target, "source": "registered_image_check",
+            "evidence_ref": screenshots[0].get("local_path")}
 
 UTM_COMPRESSION_BLOCKS: tuple[tuple[str, str], ...] = (
     ("prepare_next_specimen", "Move Jigs for Next Specimen"),
@@ -130,6 +218,7 @@ def validate_equipment_agentic_flow(
 
 
 def _handoff_candidate(source_stage_context: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    fallback: tuple[dict[str, Any], str] | None = None
     for key, source in (("manipulation", "manipulation_handoff"), ("robot_task", "robot_task_result")):
         candidate = source_stage_context.get(key)
         if not isinstance(candidate, dict):
@@ -140,7 +229,12 @@ def _handoff_candidate(source_stage_context: dict[str, Any]) -> tuple[dict[str, 
         else:
             merged = candidate
         if merged:
-            return merged, source
+            if fallback is None:
+                fallback = (merged, source)
+            if str(merged.get("run_id") or "").strip() and str(merged.get("specimen_id") or "").strip():
+                return merged, source
+    if fallback is not None:
+        return fallback
     return {}, "unavailable"
 
 
@@ -339,7 +433,7 @@ def project_equipment_cycle_evidence(
     columns_ok = required_columns.issubset({str(item) for item in columns})
     artifact_id = str(save_evidence.get("artifact_id") or "").strip()
     validation_artifact_id = str(validation_evidence.get("artifact_id") or "").strip()
-    same_artifact = bool(
+    same_download = bool(
         csv_path
         and validation_path == csv_path
         and artifact_id
@@ -347,6 +441,15 @@ def project_equipment_cycle_evidence(
         and save_evidence.get("artifact_kind") == "utm_csv"
         and validation_evidence.get("artifact_kind") == "utm_csv"
     )
+    same_export = bool(
+        csv_path and validation_path and save_evidence.get("artifact_kind") == "utm_csv"
+        and validation_evidence.get("artifact_kind") == "utm_csv"
+        and save_evidence.get("windows_path")
+        and save_evidence.get("windows_path") == validation_evidence.get("windows_path")
+        and re.fullmatch(r"[0-9a-f]{64}", str(save_evidence.get("sha256") or ""))
+        and save_evidence.get("sha256") == validation_evidence.get("sha256")
+    )
+    same_artifact = same_download or same_export
     overlay = result_data.get("workflow_agentic_task") if isinstance(result_data.get("workflow_agentic_task"), dict) else {}
     if not overlay:
         execution = result_data.get("equipment_skill_flow_execution") if isinstance(result_data.get("equipment_skill_flow_execution"), dict) else {}
@@ -373,6 +476,10 @@ def project_equipment_cycle_evidence(
     raw_data_export = {
         "path": csv_path,
         "artifact_id": artifact_id,
+        "validation_artifact_id": validation_artifact_id,
+        "sha256": save_evidence.get("sha256"),
+        "run_id": expected_run_id,
+        "specimen_id": expected_specimen_id,
         "artifact_kind": str(save_evidence.get("artifact_kind") or ""),
         "parse_ok": parse_ok is True,
         "row_count": int(row_count or 0) if rows_ok else 0,
@@ -417,6 +524,17 @@ def project_equipment_cycle_evidence(
     )
     ready = not missing
     return {
+        # These flags describe the cycle, not the final clearance-only skill.
+        # Completed start/monitor skills supply execution evidence; CSV checks
+        # require the identity-bound, stable, parsed save/validation artifact.
+        "cross_checks": {
+            "screen_started": "start_test" in completed_blocks,
+            "physical_motion_started": {"start_test", "monitor_contact_and_run"}.issubset(completed_blocks),
+            "save_completed": csv_validated,
+            "data_file_created": csv_validated,
+            "data_parse_probe_ok": csv_validated,
+            "save_export_responsibility_ok": csv_validated,
+        },
         "method_values": method_values,
         "screen_transition_evidence": screen_transitions,
         "raw_data_export": raw_data_export,

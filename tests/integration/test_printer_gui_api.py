@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi.testclient import TestClient
+import pytest
 
 from app import main as app_main
 from app.main import app
@@ -15,6 +16,18 @@ def _write_minimal_bambu_gcode_3mf(path: Path, *, plate_id: int = 1, gcode: str 
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr(f"Metadata/plate_{int(plate_id)}.gcode", gcode)
         archive.writestr("3D/3dmodel.model", "<model />")
+
+
+@pytest.fixture(autouse=True)
+def _isolated_operator_print_settings(tmp_path, monkeypatch):
+    from utils import printer_profile
+    from device_bridges import bambu_bridge
+    profile_path = tmp_path / "memory/prusa_print_profile.json"
+    priority_file = tmp_path / "operator-material-priority.json"
+    monkeypatch.setattr(printer_profile, "PRUSA_PRINT_PROFILE_PATH", profile_path)
+    monkeypatch.setattr(app_main, "PRUSA_PRINT_PROFILE_PATH", profile_path)
+    monkeypatch.setattr(app_main, "priority_path", lambda *args: priority_file)
+    monkeypatch.setattr(bambu_bridge, "priority_path", lambda *args: priority_file)
 
 
 def _save_ready_manipulation_consumer(tmp_path: Path, monkeypatch) -> Path:
@@ -79,7 +92,7 @@ def test_printer_gui_route_loads() -> None:
     assert "printer-bambu-source-path-input" in response.text
     assert "printer-autoejection-status-summary" in response.text
     assert "Bambu G-code Autoejection" in response.text
-    assert "Run Standalone Eject: Left" in response.text
+    assert "Run Standalone Eject: Left" not in response.text
     assert "Save Autoejection Config" in response.text
     assert "Native Provider" in response.text
     assert "printer-autoejection-push-direction-input" in response.text
@@ -104,15 +117,15 @@ def test_printer_gui_route_loads() -> None:
     assert "supervised first ejection" not in response.text
     assert "Reading native G-code patch evidence." in response.text
     assert "Validate G-code Preview" in response.text
-    assert "Validate Left" in response.text
-    assert "Validate Center" in response.text
-    assert "Validate Right" in response.text
+    assert "Validate Left" not in response.text
+    assert "Validate Center" not in response.text
+    assert "Validate Right" not in response.text
     assert "Generate Ejection Test Artifact" in response.text
     assert "Generate Sweep Test Artifact" in response.text
     assert "btn-printer-autoejection-validate-preview" in response.text
-    assert "btn-printer-autoejection-validate-left" in response.text
-    assert "btn-printer-autoejection-validate-center" in response.text
-    assert "btn-printer-autoejection-validate-right" in response.text
+    assert "btn-printer-autoejection-validate-left" not in response.text
+    assert "btn-printer-autoejection-validate-center" not in response.text
+    assert "btn-printer-autoejection-validate-right" not in response.text
     assert "btn-printer-autoejection-test-artifact" in response.text
     assert "btn-printer-autoejection-sweep-test-artifact" in response.text
     assert "btn-printer-autoejection-fill-native" in response.text
@@ -167,7 +180,7 @@ def test_printer_gui_does_not_treat_profile_ejection_checkbox_as_bambu_ejection_
     assert "runBambuCompletionAudit" in script
     assert "markBedClear" in script
     assert "renderBedClearStatus" in script
-    assert "updateAutoejectionButtonLabels" in script
+    assert "updateAutoejectionButtonLabels" not in script
     assert "fillNativeGcodeAutoejectionDefaults" in script
     assert 'autoejectionProviderInput.value = data.provider || data.method || "none";' in script
     assert "autoejectionPushDirectionInput" in script
@@ -188,15 +201,15 @@ def test_printer_gui_does_not_treat_profile_ejection_checkbox_as_bambu_ejection_
     assert "Save Autoejection Gate" not in script
     assert "btnAutoejectionValidatePreview" in script
     assert "Validate G-code Preview" in script
-    assert "btnAutoejectionValidateLeft" in script
-    assert "btnAutoejectionValidateCenter" in script
-    assert "btnAutoejectionValidateRight" in script
-    assert "Validate Left" in script
-    assert "Validate Center" in script
-    assert "Validate Right" in script
-    assert 'positionOverride: "left"' in script
-    assert 'positionOverride: "center"' in script
-    assert 'positionOverride: "right"' in script
+    assert "btnAutoejectionValidateLeft" not in script
+    assert "btnAutoejectionValidateCenter" not in script
+    assert "btnAutoejectionValidateRight" not in script
+    assert "Validate Left" not in script
+    assert "Validate Center" not in script
+    assert "Validate Right" not in script
+    assert 'positionOverride: "left"' not in script
+    assert 'positionOverride: "center"' not in script
+    assert 'positionOverride: "right"' not in script
     assert "validateOnly: true" in script
     assert "validate_only: Boolean(options.validateOnly)" in script
     assert "btnAutoejectionTestArtifact" in script
@@ -219,7 +232,7 @@ def test_printer_gui_does_not_treat_profile_ejection_checkbox_as_bambu_ejection_
     assert "blockersText" in script
     assert "consumer_readiness" in script
     assert "Native G-code patcher" in script
-    assert "Run Standalone Eject: Center" in script
+    assert "Run Standalone Eject: Center" not in script
     assert "Generate Patched Artifact" in script
     assert 'await refreshStatus("live");\n    await refreshAutoejectionStatus();' in script
     assert "verify_fetch: true" in script
@@ -521,12 +534,12 @@ def test_printer_prestart_check_refreshes_camera_and_locks_command_buttons() -> 
     assert "button.disabled = Boolean(printerOperationDisabledSnapshot.get(button));" in lock_body
     assert "applyStartPublishBedClearGate" in lock_body
     operation_buttons_body = script.split("function printerOperationButtons()", 1)[1].split("function setOperationButtonsLocked", 1)[0]
-    assert "btnAutoejectionValidateLeft" in operation_buttons_body
-    assert "btnAutoejectionValidateCenter" in operation_buttons_body
-    assert "btnAutoejectionValidateRight" in operation_buttons_body
-    assert "btnEjectLeft" in operation_buttons_body
-    assert "btnEjectCenter" in operation_buttons_body
-    assert "btnEjectRight" in operation_buttons_body
+    assert "btnAutoejectionValidateLeft" not in operation_buttons_body
+    assert "btnAutoejectionValidateCenter" not in operation_buttons_body
+    assert "btnAutoejectionValidateRight" not in operation_buttons_body
+    assert "btnEjectLeft" not in operation_buttons_body
+    assert "btnEjectCenter" not in operation_buttons_body
+    assert "btnEjectRight" not in operation_buttons_body
     for function_name in [
         "runVideoStatus",
         "runBambuPrestartCheck",
@@ -2390,6 +2403,7 @@ PY
     assert [step["id"] for step in payload["steps"]] == [
         "camera_status",
         "slice_artifact",
+        "specimen_placement",
         "http_artifact_route",
         "start_gate",
         "spc_readiness",
@@ -3084,6 +3098,7 @@ def test_printer_bambu_prestart_check_uses_native_autoejection_patched_artifact(
     assert [step["id"] for step in payload["steps"]] == [
         "camera_status",
         "slice_artifact",
+        "specimen_placement",
         "autoejection_patch",
         "http_artifact_route",
         "start_gate",

@@ -186,12 +186,44 @@ missing evidence, stale health, or unknown effect routes to review/stop/error.
 
 ## Operator and GUI Surfaces
 
+In the 2026-09-06 working-tree update, `decision=continue` with `action=recover`
+or `action=retry` is a review hold, not a completed experiment. The runtime stays
+at Guardian, preserves the specimen and loop number, sets `is_paused`, and
+publishes `guardian_recovery_wait` plus an `operator_input_required` event. The
+Live planning tail remains alive while waiting and honors stop controls.
+Normal continuation still follows the configured next-cycle route; safe stop
+still terminates. Resume only re-evaluates Guardian: it does not clear alarms,
+waive physical interlocks, restart fabrication, or implement a recovery action.
+Unresolved pressure causes another hold. Operators must reconcile the cause
+and evidence before proceeding; this is not an automatic stage-retry workflow.
+
 Live GUI exposes Guardian report, risk, incidents, approvals, tool records,
 hardware alerts, corrective actions, and budget state. Approval panels resolve
 server-side requests. Incident-note APIs append operator context without
 rewriting the original incident.
 
 ## Current Verification
+
+The 2026-09-07 working-tree correction preserves unavailable-link diagnostics
+from Equipment transitions explicitly marked `phase: vision`,
+`kind: vision_observation`, and `blocking: false` as warnings. It does not
+downgrade required vision gates, explicit blocking severity, physical failures,
+or stop requests. Unit regressions cover both the optional observation and
+mandatory/safety cases. Read-only re-evaluation of the Equipment result from
+`run-20260906T151117Z-8690f9` allows progression with warnings; this is a policy
+re-evaluation, not proof that the paused live run resumed. Original gate records
+remain historical evidence and must not be rewritten as successful execution.
+
+The UTM2 correction also applies same-capture recovery handling to both
+`observation.utm_clear_verification` and `utm_verification_2.record.evidence`,
+in addition to the existing UTM1 `observation.raw_capture` path. Only earlier
+`ROS_IMAGE_TIMEOUT` attempts are superseded, and only when that capture and its
+final, matching-topic frame read succeed. Failed final reads, unrelated captures,
+and non-timeout safety failures remain blocking; source evidence is unchanged.
+Read-only re-evaluation of the complete Vision result from
+`run-20260906T152525Z-11e1ae` returns `allow` after this correction. The original
+live run paused at Guardian and was not resumed; this is not an Analysis/BO or
+full-cycle success claim.
 
 Verified against `GuardianAgent`, all three module internal steps, two declared
 tools, policy gate, status aggregation, incident and approval endpoints at

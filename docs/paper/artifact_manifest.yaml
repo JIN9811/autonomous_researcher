@@ -2,6 +2,14 @@ version: 1
 release_status: development
 verified_commit: 0b7627b
 claims:
+  - id: C-SYS-LOOP-01
+    proposition: >-
+      One supervised mixed-mode iteration reached live UTM clearance,
+      Analysis, BO-managed LHS feedback, and the next Design/Specimen entry;
+      full fabrication and scientific specimen identity were not validated.
+    research_questions: [RQ1, RQ2]
+    status: supported
+    evidence_ids: [E-LIVE-LOOP-001]
   - id: C-SYS-ARCH-01
     proposition: >-
       ATR declares a closed-loop graph spanning research stages with explicit
@@ -49,6 +57,31 @@ claims:
     evidence_ids:
       - E-TEST-DOC-001
 evidence:
+  - id: E-LIVE-LOOP-001
+    environment: live
+    verified_commit: "working-tree on c4005ca; not a clean-commit baseline"
+    command: >-
+      Observe the operator-started run run-20260906T154601Z-95cb07 through
+      read-only planning, events, and equipment-flow endpoints; inspect the
+      loop-scoped archived agent results and verify their SHA-256 digests
+      using the non-actuating protocol in the evidence report.
+    inputs:
+      - graphs/configs/atr_closed_loop.yaml
+      - agents/equipment_agent.py
+      - agents/analysis_agent.py
+      - agents/bo_agent.py
+      - agents/design_agent.py
+    outputs:
+      - path: docs/paper/evidence/2026-09-07-supervised-closed-loop.md
+        sha256: 86d93656e194ee6aa1d99861d759ccfac1003402f6be055aa6757d9554c3ab97
+      - path: docs/paper/evidence/2026-09-07-closed-loop-summary.json
+        sha256: d1d8818db22d9a19f23d00cee933c1237b066ab14749e9403a61c4e64f29d37b
+    result: >-
+      One observed integration iteration closed and entered the next design.
+      Printer deposition was skipped; specimen substitution prevents a
+      material-validity claim. BO selected LHS point 2/8, not acquisition
+      optimization. Public outputs summarize locally retained raw evidence;
+      they do not bundle a replayable dataset or establish safety efficacy.
   - id: E-INSPECT-ARCH-001
     environment: inspection
     verified_commit: 0b7627b

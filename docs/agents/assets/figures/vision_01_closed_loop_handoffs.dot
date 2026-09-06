@@ -10,6 +10,9 @@ digraph vision_closed_loop_handoffs {
   stop [label="Verified rollout stop", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
   reject [label="Reject / degrade / review", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
   evidence [label="vision_report.v1 · vision_signal.v1\nframe · pose · timestamp · expiry", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  clear [label="Post-UTM managed replay\nsuccess + measured return", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  verify2 [label="Verification 2\nfresh registered empty platen?", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  analysis [label="Analysis\ncurrent-scope clearance gate"];
   context -> vision;
   cameras -> vision;
   vision -> fresh;
@@ -18,4 +21,9 @@ digraph vision_closed_loop_handoffs {
   fresh -> reject [label="stale / conflict / low quality"];
   vision -> evidence [label="evidence", color="#2E7D59"];
   evidence -> consumers [label="provenance", color="#2E7D59"];
+  clear -> verify2 [label="current child evidence", color="#2E7D59"];
+  cameras -> verify2 [label="new rectified UTM snapshot", color="#2E7D59"];
+  verify2 -> analysis [label="clear + verified replay"];
+  verify2 -> reject [label="occupied / unknown / stale"];
+  verify2 -> evidence [label="separate Verification 2 artifact", color="#2E7D59"];
 }

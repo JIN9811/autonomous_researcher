@@ -26,6 +26,7 @@ import copy
 import glob
 import inspect
 import json
+import math
 import os
 import re
 import select
@@ -541,6 +542,7 @@ class LeRobotBridge:
     def __init__(self, config: LeRobotBridgeConfig) -> None:
         self.config = config
         self._sessions: dict[str, dict[str, Any]] = {}
+        self._replay_start_lock = threading.RLock()
         self._processes: dict[str, subprocess.Popen[str]] = {}
         self._monitor_processes: dict[str, subprocess.Popen[str]] = {}
         self._receiver_processes: dict[str, subprocess.Popen[str]] = {}
@@ -642,6 +644,8 @@ class LeRobotBridge:
         """Stop any live LeRobot workflow process group tied to this checkout."""
         excluded = exclude_workflows or set()
         step_trace: list[dict[str, Any]] = []
+        if "replay" not in excluded:
+            step_trace.extend(self.replay_stop({}).get("step_trace", []))
         for workflow in ("teleoperate", "record", "train", "rollout", "visualize"):
             if workflow in excluded:
                 continue
@@ -2154,11 +2158,51 @@ class LeRobotBridge:
                     "isaac_mirror_attached_to_session_id": stopped.get("session_id", ""),
                 }
             )
-        return stopped
+        return self._teleoperate_release_contract(stopped, stopped_now=True)
 
     def teleoperate_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Return teleoperation session status."""
-        return self._session_status("lerobot.teleoperate.status", payload or {}, "teleoperate")
+        return self._teleoperate_release_contract(
+            self._session_status("lerobot.teleoperate.status", payload or {}, "teleoperate")
+        )
+
+    @staticmethod
+    def _teleoperate_release_contract(
+        result: dict[str, Any],
+        *,
+        stopped_now: bool = False,
+    ) -> dict[str, Any]:
+        """Expose trustworthy resource-release evidence for operator handoff confirmation."""
+        normalized = dict(result)
+        terminal = str(normalized.get("status") or "").upper() in {
+            "STOPPED",
+            "TELEOP_STOPPED",
+            "COMPLETED",
+        }
+        port_lease = normalized.get("port_lease") if isinstance(normalized.get("port_lease"), dict) else {}
+        camera_lease = (
+            normalized.get("active_camera_lease")
+            if isinstance(normalized.get("active_camera_lease"), dict)
+            else {}
+        )
+        normalized["port_released"] = bool(
+            terminal and port_lease.get("current_availability") == "available"
+        )
+        normalized["camera_returned_to_vision"] = bool(
+            terminal
+            and camera_lease.get("returned_to_vla") is True
+            and not str(camera_lease.get("conflict_reason") or "").strip()
+        )
+        if terminal:
+            normalized["teleop_stopped_at"] = str(
+                normalized.get("teleop_stopped_at")
+                or datetime.now(timezone.utc).isoformat()
+            )
+        if stopped_now:
+            normalized["teleop_stop_verified"] = bool(
+                normalized["port_released"] and normalized["camera_returned_to_vision"]
+            )
+        return normalized
 
     def record_start(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Start a LeRobot recording session."""
@@ -2515,6 +2559,114 @@ class LeRobotBridge:
     def rollout_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Return rollout status."""
         return self._session_status("lerobot.rollout.status", payload or {}, "rollout")
+
+    def replay_start(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Start one local recorded episode under the normal process/stop boundary."""
+        with self._replay_start_lock:
+            return self._replay_start_locked(dict(payload or {}))
+
+    def _replay_start_locked(self, payload: dict[str, Any]) -> dict[str, Any]:
+        tool = "lerobot.replay.start"
+        mode = str(payload.get("runtime_mode") or payload.get("mode") or "test")
+        profile_id = str(payload.get("profile_id") or "")
+        try:
+            request = LeRobotSessionRequest.model_validate(payload)
+            if not request.dataset_repo_id.strip() or not request.dataset_path.strip():
+                raise ValueError("Replay requires dataset_repo_id and an existing local dataset_path.")
+            if request.session_id and not re.fullmatch(r"[A-Za-z0-9_.-]+", request.session_id):
+                raise ValueError("Invalid replay session ID.")
+            request = request.model_copy(update={"dataset_path": str(Path(request.dataset_path).expanduser().resolve()),
+                "camera_enabled": False, "active_robot_cam_enabled": False, "isaac_mirror_enabled": False})
+            existing = self._sessions.get(request.session_id)
+            identity = {key: getattr(request, key) for key in
+                ("dataset_repo_id", "dataset_path", "replay_episode", "run_id", "loop_id", "specimen_id")}
+            if existing:
+                if (existing.get("workflow") != "replay" or existing.get("mode") != mode
+                        or existing.get("profile_id") != (request.profile_id or self._selected_profile_id)
+                        or any(existing.get(k) != v for k, v in identity.items())):
+                    raise ValueError("Session ID already belongs to a different replay identity.")
+                self._refresh_process_status(existing)
+                return {**self.replay_status({"session_id": request.session_id}), "tool": tool, "idempotent": True}
+            profile = self._profile(request.profile_id)
+            if profile is None or profile.robot_type != "omx_follower":
+                raise ValueError("Managed replay requires an OMX follower profile.")
+            from scripts.lerobot_managed_replay import load_episode
+            episode = load_episode(Path(request.dataset_path), request.replay_episode)
+            if episode["robot_type"] not in ("", profile.robot_type):
+                raise ValueError("Replay dataset robot type differs from the selected follower.")
+        except (ValueError, OSError, KeyError, TypeError, ZeroDivisionError) as exc:
+            return self._error(tool, mode, profile_id, "LEROBOT_REPLAY_INVALID", str(exc))
+        session_id = request.session_id or self._new_session_id("replay")
+        token = uuid.uuid4().hex
+        result_path = self.config.session_log_root / f"{session_id}.{token}.replay.json"
+        request = request.model_copy(update={"session_id": session_id})
+        duration = request.max_duration_s if request.max_duration_s is not None else episode["num_frames"] / episode["fps"] + 30.0
+        if not 0 < duration < float("inf"):
+            return self._error(tool, mode, profile_id, "LEROBOT_REPLAY_INVALID", "Replay duration must be finite and positive.")
+        result = self._start_session(tool=tool, workflow="replay", request=request, status="REPLAY_ACTIVE",
+            trace=[("PRECHECK", "ok", "local episode validated; no dataset or motor configuration writes")],
+            allow_key="allow_policy_rollout", extra_args=[f"--dataset.root={request.dataset_path}",
+                f"--dataset.repo_id={request.dataset_repo_id}", f"--dataset.episode={request.replay_episode}",
+                f"--session_id={session_id}", f"--evidence_token={token}",
+                f"--result_path={result_path}", f"--max_duration_s={duration}"], event_payload=payload)
+        session = self._sessions.get(session_id)
+        if session:
+            session.update(identity, replay_result_path=str(result_path), replay_evidence_token=token,
+                replay_max_duration_s=duration, replay_num_frames=episode["num_frames"], replay_fps=episode["fps"],
+                replay_target_state=episode["target_state"])
+            result.update(self._replay_evidence(session))
+        return result
+
+    def _replay_evidence(self, session: dict[str, Any]) -> dict[str, Any]:
+        evidence = self._read_json_file(str(session.get("replay_result_path") or ""))
+        keys = ("session_id", "dataset_repo_id", "dataset_path", "replay_episode")
+        matches = bool(evidence) and all(evidence.get(k) == session.get(k) for k in keys)
+        matches = matches and evidence.get("evidence_token") == session.get("replay_evidence_token")
+        home = evidence.get("home_evidence") if isinstance(evidence.get("home_evidence"), dict) else {}
+        target = session.get("replay_target_state", {})
+        measured = home.get("measured_state") if isinstance(home.get("measured_state"), dict) else {}
+        try:
+            tolerance = float(os.environ.get("ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TOLERANCE_DEG", "5.0"))
+            measured_ok = (bool(target) and home.get("target_state") == target and set(measured) == set(target)
+                and math.isfinite(tolerance) and tolerance >= 0
+                and all(math.isfinite(float(measured[k])) and abs(float(measured[k]) - v) <= tolerance for k, v in target.items()))
+        except (ValueError, TypeError):
+            measured_ok = False
+        completed = session.get("status") == "COMPLETED" and session.get("returncode") == 0
+        verified = bool(completed and matches and measured_ok and evidence.get("ok") is True
+                        and evidence.get("follower_closed") is True and evidence.get("replay_home_verified") is True)
+        return {**{key: session.get(key, "") for key in ("run_id", "loop_id", "specimen_id", "replay_episode")},
+            "exit_code": session.get("returncode"), "replay_home_verified": verified,
+            "replay_max_duration_s": session.get("replay_max_duration_s"),
+            "replay_result_path": session.get("replay_result_path", ""),
+            "replay_evidence": evidence if matches else {},
+            "ok": session.get("status") != "FAILED"}
+
+    def replay_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = dict(payload or {})
+        session_id = str(payload.get("session_id") or "")
+        if session_id and self._sessions.get(session_id, {}).get("workflow") != "replay":
+            return self._error("lerobot.replay.status", str(payload.get("mode") or "test"), "",
+                               "LEROBOT_REPLAY_SESSION_NOT_FOUND", "Replay session not found.")
+        result = self._session_status("lerobot.replay.status", payload, "replay")
+        session = self._sessions.get(str(result.get("session_id") or ""))
+        result.update(self._replay_evidence(session) if session else {"exit_code": None, "replay_home_verified": False})
+        return result
+
+    def replay_stop(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = dict(payload or {})
+        session_id = str(payload.get("session_id") or "")
+        with self._replay_start_lock:
+            # A child can already own the port while its start call is still
+            # polling, before the session is published. Wait for that same
+            # start critical section before deciding whether this ID exists.
+            if session_id and self._sessions.get(session_id, {}).get("workflow") != "replay":
+                return self._error("lerobot.replay.stop", str(payload.get("mode") or "test"), "",
+                                   "LEROBOT_REPLAY_SESSION_NOT_FOUND", "Replay session not found.")
+            result = (self._stop_session("lerobot.replay.stop", payload, "replay", strict_session=True) if session_id else
+                      self._stop_all_workflow_sessions("lerobot.replay.stop", payload, "replay"))
+        result.update(exit_code=result.get("returncode"), replay_home_verified=False)
+        return result
 
     def visualize_start(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Start LeRobot's dataset visualizer."""
@@ -4141,7 +4293,7 @@ class LeRobotBridge:
         active: list[dict[str, Any]] = []
         for session in self._sessions.values():
             workflow = str(session.get("workflow") or "").lower()
-            if workflow not in {"teleoperate", "record", "rollout"}:
+            if workflow not in {"teleoperate", "record", "rollout", "replay"}:
                 continue
             if not self._session_is_active(session):
                 continue
@@ -4154,7 +4306,7 @@ class LeRobotBridge:
             )
         if str(mode or "").lower() == "live":
             known = {(item["workflow"], item.get("session_id", "")) for item in active}
-            for workflow in ("teleoperate", "record", "rollout"):
+            for workflow in ("teleoperate", "record", "rollout", "replay"):
                 for pid in self._project_lerobot_pids(workflow):
                     key = (workflow, "")
                     if key in known:
@@ -7800,7 +7952,13 @@ class LeRobotBridge:
         )
         return self.mirror_receiver_process_start(payload)
 
-    def _start_session(
+    def _start_session(self, **kwargs: Any) -> dict[str, Any]:
+        # Keep replay and other motor workflow starts mutually exclusive through
+        # the ownership check and subprocess registration.
+        with self._replay_start_lock:
+            return self._start_session_locked(**kwargs)
+
+    def _start_session_locked(
         self,
         *,
         tool: str,
@@ -8018,10 +8176,12 @@ class LeRobotBridge:
         workflow: str,
         *,
         stopped_status: str = "STOPPED",
+        strict_session: bool = False,
     ) -> dict[str, Any]:
         request = LeRobotBaseRequest.model_validate(payload or {})
         mode = request.runtime_mode or request.mode
-        session = self._resolve_session(request.session_id, workflow, prefer_active=True)
+        session = (self._sessions.get(request.session_id) if strict_session else
+                   self._resolve_session(request.session_id, workflow, prefer_active=True))
         profile_id = str(session.get("profile_id") if session else request.profile_id or self._selected_profile_id)
         if session is None:
             cleanup_trace = self._cleanup_lerobot_processes(workflow)
@@ -8053,7 +8213,7 @@ class LeRobotBridge:
             state = self._read_json_file(str(session.get("background_state_path") or ""))
             session["returncode"] = state.get("returncode", -int(signal.SIGTERM))
         self._stop_training_monitor(session)
-        cleanup_trace = self._cleanup_lerobot_processes(workflow)
+        cleanup_trace = [] if strict_session else self._cleanup_lerobot_processes(workflow)
         self._close_log_handle(str(session.get("session_id", "")))
         session["status"] = stopped_status
         session["port_reclaim_status"] = "attempted"
@@ -10534,8 +10694,25 @@ class LeRobotBridge:
         return None
 
     def _live_port_block_if_needed(self, *, tool: str, mode: str, profile: RobotProfile, workflow: str) -> dict[str, Any] | None:
-        if mode != "live" or workflow not in {"teleoperate", "record", "rollout"}:
+        if mode != "live" or workflow not in {"teleoperate", "record", "rollout", "replay"}:
             return None
+        for active in self._sessions.values():
+            if active.get("mode") != "live" or active.get("workflow") not in {"teleoperate", "record", "rollout", "replay"}:
+                continue
+            if workflow != "replay" and active.get("workflow") != "replay":
+                continue
+            if self._session_is_active(active):
+                blocked = self._blocked(tool, mode, profile.profile_id, "LEROBOT_REPLAY_PORT_BUSY",
+                    f"Live motor session {active.get('session_id')} must stop before {workflow}.", workflow)
+                blocked["blocked_by_session_id"] = active.get("session_id")
+                return blocked
+        if workflow == "replay":
+            occupants = self._device_port_occupants(self._device_port(profile, "follower", allow_fake=False))
+            if occupants:
+                blocked = self._blocked(tool, mode, profile.profile_id, "LEROBOT_REPLAY_PORT_BUSY",
+                    "The saved follower port is occupied by another process.", workflow)
+                blocked["port_occupants"] = occupants
+                return blocked
         missing: list[str] = []
         unavailable: list[str] = []
         required_roles = ["follower"]
@@ -10886,7 +11063,9 @@ class LeRobotBridge:
     def _workflow_command(self, profile: RobotProfile, workflow: str, request: LeRobotSessionRequest, args: list[str]) -> list[str]:
         mode = request.runtime_mode or request.mode
         command = [self.config.conda_executable, "run", "--no-capture-output", "-n", self._workflow_conda_env_name(workflow, request)]
-        if self._uses_in_process_lerobot_wrapper(workflow, request):
+        if workflow == "replay":
+            command.extend(["python", str(Path(__file__).resolve().parents[1] / "scripts" / "lerobot_managed_replay.py")])
+        elif self._uses_in_process_lerobot_wrapper(workflow, request):
             command.extend(["python", str(self.config.repo_root / "scripts" / "lerobot_isaac_mirror_runtime_wrapper.py"), workflow])
         elif workflow == "rollout" and self._is_pi05_policy(request.policy_type):
             command.extend(["python", str(self.config.repo_root / "scripts" / "lerobot_pi05_rollout_wrapper.py")])
@@ -10894,7 +11073,7 @@ class LeRobotBridge:
             command.extend(["python", str(self.config.repo_root / "scripts" / "lerobot_live_rollout_wrapper.py")])
         else:
             command.extend(self._workflow_entrypoint(profile, workflow))
-        if workflow in {"teleoperate", "record", "rollout"}:
+        if workflow in {"teleoperate", "record", "rollout", "replay"}:
             command.extend(self._robot_args(profile, request=request, allow_fake=mode != "live", workflow=workflow))
         if workflow in {"teleoperate", "record"}:
             command.extend(self._teleop_args(profile, request=request, allow_fake=mode != "live"))
@@ -13816,6 +13995,7 @@ print("Updated Pi0.5 quantile stats for " + ", ".join(updated))
 
     def _project_lerobot_pids(self, workflow: str) -> list[int]:
         markers_by_workflow = {
+            "replay": ("lerobot_managed_replay.py",),
             "teleoperate": (
                 "lerobot-teleoperate",
                 "lerobot.teleoperate",

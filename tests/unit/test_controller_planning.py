@@ -4,6 +4,7 @@ Unit tests for Live GUI planning handoff adaptation.
 
 import asyncio
 import copy
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -32,6 +33,26 @@ def test_planning_snapshot_preserves_latest_bo_visualization_projection() -> Non
     compact = controller.planning_snapshot()["state"]["run_metadata"]
 
     assert compact["bo_visualization"] == visualization
+
+
+def test_new_workflow_reset_invalidates_a_prior_pending_teleop_handoff() -> None:
+    controller = load_runtime()
+    controller._state.run_id = "run-prior-handoff"
+    pending = controller._operator_teleop_handoffs.create(
+        run_id=controller._state.run_id,
+        cycle_index=1,
+        specimen_id="specimen-prior",
+        candidate_id="candidate-prior",
+        materialization_evidence={"status": "confirmed", "fresh": True},
+    )
+
+    controller._reset_planning_workflow_controls()
+
+    current = controller._operator_teleop_handoffs.status(
+        controller._state.run_id, pending["handoff_token"]
+    )
+    assert current["status"] == "cancelled"
+    assert current["cancel_reason"] == "new_workflow_reset"
 
 
 def test_live_gui_analysis_message_preserves_normalized_curve_contract() -> None:
@@ -127,6 +148,7 @@ def test_safe_preflight_execution_policy_is_validated_and_preserved_for_redesign
     controller = load_runtime()
     requested = {
         "printer": "preflight_only",
+        "vision": "preflight_only",
         "manipulation": "preflight_only",
         "lab_equipment": "preflight_only",
         "cae": "execute",
@@ -152,6 +174,7 @@ def test_safe_preflight_execution_policy_is_validated_and_preserved_for_redesign
 
     assert controller._normalize_execution_policy({"printer": "execute"}) == {
         "printer": "execute",
+        "vision": "preflight_only",
         "manipulation": "preflight_only",
         "lab_equipment": "preflight_only",
         "cae": "execute",
@@ -197,6 +220,7 @@ def test_test_mode_partial_execution_policy_cannot_drop_safe_stage_defaults() ->
 
     assert normalized["execution_policy"] == {
         "printer": "preflight_only",
+        "vision": "preflight_only",
         "manipulation": "preflight_only",
         "lab_equipment": "preflight_only",
         "cae": "execute",
@@ -217,10 +241,11 @@ def test_hardware_free_preflight_policy_is_not_a_live_gui_test_default() -> None
 
 
 @pytest.mark.parametrize("choice", ["installed_printer", "physical_print"])
-def test_real_printer_choice_overrides_validation_only_policy_with_full_execution(choice: str) -> None:
+def test_real_printer_choice_preserves_explicit_per_device_policy(choice: str) -> None:
     controller = load_runtime()
     validation_only = {
         "printer": "preflight_only",
+        "vision": "preflight_only",
         "manipulation": "preflight_only",
         "lab_equipment": "preflight_only",
         "cae": "execute",
@@ -234,13 +259,182 @@ def test_real_printer_choice_overrides_validation_only_policy_with_full_executio
     )
 
     assert selected["execution_policy"] == {
+        "printer": "preflight_only",
+        "vision": "preflight_only",
+        "manipulation": "preflight_only",
+        "lab_equipment": "preflight_only",
+        "cae": "execute",
+        "analysis": "execute",
+        "bo": "execute",
+    }
+
+
+def test_printer_choice_snapshots_saved_hybrid_profile_and_preserves_it_for_redesign(tmp_path) -> None:
+    from utils.test_mode_execution_profiles import TestModeExecutionProfileStore
+
+    controller = load_runtime()
+    controller._test_mode_execution_profiles_path = tmp_path / "profiles.json"
+    profile = {
+        "agents": {
+            "specimen": {"device_mode": "real"},
+            "vision": {"device_mode": "real"},
+            "manipulation": {"device_mode": "virtual"},
+            "lab_equipment": {"device_mode": "real"},
+        },
+        "printer_flow": {"print_body": "skip", "cooling_wait": "skip", "auto_ejection": True},
+        "handoff": {"strategy": "operator_teleop"},
+    }
+    stored = TestModeExecutionProfileStore(controller._test_mode_execution_profiles_path).save_profile(
+        "installed_printer", profile, expected_revision=0
+    )
+
+    selected = controller._apply_specimen_printer_choice_to_spec(
+        {"test_mode_llm_generated": True}, "installed_printer"
+    )
+    frozen = controller._closed_loop_static_design_constraints(selected)
+
+    assert selected["execution_policy"] == {
         "printer": "execute",
-        "manipulation": "execute",
+        "vision": "execute",
+        "manipulation": "preflight_only",
         "lab_equipment": "execute",
         "cae": "execute",
         "analysis": "execute",
         "bo": "execute",
     }
+    assert selected["test_mode_profile"]["source_revision"] == 1
+    assert selected["test_mode_profile"]["source_sha256"] == stored["sha256"]
+    assert selected["test_mode_profile"]["printer_flow"]["cooling_wait"] == "skip"
+    assert frozen["test_mode_profile"] == selected["test_mode_profile"]
+    assert frozen["execution_policy"] == selected["execution_policy"]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_teleop_confirmation_resumes_same_cycle_through_utm_vision(monkeypatch, tmp_path) -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    controller._state.run_id = "run-hybrid"
+    spec = {
+        "test_mode_llm_generated": True,
+        "candidate_id": "candidate-hybrid",
+        "specimen_id": "specimen-hybrid",
+        "execution_policy": {
+            "printer": "execute",
+            "vision": "execute",
+            "manipulation": "preflight_only",
+            "lab_equipment": "execute",
+            "cae": "execute",
+            "analysis": "execute",
+            "bo": "execute",
+        },
+        "test_mode_profile": {
+            "schema": "resolved_test_mode_execution_profile.v1",
+            "profile_id": "physical_print",
+            "derived": {
+                "operator_teleop_required": True,
+                "external_specimen_materialization_required": False,
+            },
+        },
+    }
+    order: list[str] = []
+    utm_frame = tmp_path / "utm-hybrid.png"
+    utm_frame.write_bytes(b"utm evidence")
+    stages = [
+        Stage.VISION,
+        Stage.MANIPULATION,
+        Stage.VISION,
+        Stage.EQUIPMENT,
+        Stage.ANALYSIS,
+        Stage.KNOWLEDGE,
+        Stage.BO,
+        Stage.GUARDIAN,
+    ]
+
+    class FakeRunLoop:
+        def __init__(self, *, state, on_event=None, **_kwargs):
+            self.state = state
+            self.on_event = on_event
+            self.index = 0
+
+        async def step(self):
+            stage = stages[self.index]
+            if self.index == 2:
+                assert self.state.stage == Stage.VISION, "hybrid teleop must force UTM Vision before Equipment"
+            order.append(stage.value)
+            data = {stage.value: {"ok": True}}
+            if stage == Stage.MANIPULATION:
+                data = {
+                    "manipulation_preflight": {
+                        "schema": "manipulation_preflight.v1",
+                        "status": "execution_ready_pending_approval",
+                        "actuation_performed": False,
+                    }
+                }
+            elif stage == Stage.VISION and self.index == 2:
+                data = {
+                    "observation": {
+                        "vision_manipulation_completion": {
+                            "status": "confirmed",
+                            "detected": True,
+                            "fresh": True,
+                            "specimen_id": "specimen-hybrid",
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "evidence_path": str(utm_frame),
+                        }
+                    },
+                    "transition_decision": "vision_equipment_handoff",
+                }
+            elif stage == Stage.GUARDIAN:
+                data = {"guardian": {"decision": "continue"}}
+            controller._merge_planning_agent_data(stage, data)
+            if self.on_event:
+                await self.on_event({"type": "node.completed", "payload": {"node_id": stage.value, "result": data}})
+            self.index += 1
+            if stage == Stage.MANIPULATION:
+                self.state.stage = Stage.EQUIPMENT
+            else:
+                self.state.stage = stages[self.index] if self.index < len(stages) else Stage.COMPLETE
+
+    monkeypatch.setattr("app.controller.RunLoop", FakeRunLoop)
+    monkeypatch.setattr(controller, "_write_planning_fem_artifacts", lambda *_args, **_kwargs: {})
+    task = asyncio.create_task(controller._run_planning_loop_tail(spec, cycle_index=4, total_cycles=4))
+    for _ in range(100):
+        pending = controller._state.run_metadata.get("pending_operator_teleop_handoff")
+        if isinstance(pending, dict):
+            break
+        await asyncio.sleep(0.01)
+    else:
+        pytest.fail("controller did not pause for operator teleop")
+
+    assert order == ["vision", "manipulation"]
+    controller.bind_teleop_handoff_session(
+        run_id="run-hybrid",
+        handoff_token=pending["handoff_token"],
+        teleop_session_id="teleop-hybrid",
+    )
+    controller.confirm_teleop_handoff(
+        run_id="run-hybrid",
+        handoff_token=pending["handoff_token"],
+        teleop_session_id="teleop-hybrid",
+        teleop_evidence={
+            "session_id": "teleop-hybrid",
+            "status": "STOPPED",
+            "port_released": True,
+            "camera_returned_to_vision": True,
+        },
+        confirmed_by="operator",
+    )
+    result = await asyncio.wait_for(task, timeout=2)
+
+    assert result["ok"] is True, {
+        "result": result,
+        "latest": controller._state.run_metadata.get("latest_vision_observation"),
+        "handoff": controller._state.run_metadata.get("operator_teleop_handoff"),
+    }
+    assert order[:4] == ["vision", "manipulation", "vision", "equipment"]
+    completed = controller._state.run_metadata["operator_teleop_handoff"]
+    assert completed["status"] == "confirmed"
+    assert completed["vision_verification"]["detected"] is True
 
 
 def test_planning_spec_without_explicit_policy_keeps_legacy_full_execution() -> None:
@@ -1180,6 +1374,34 @@ def test_live_gui_test_spec_uses_saved_auto_ejection_toggle(monkeypatch: pytest.
 
     assert spec["test_mode_llm_generated"] is True
     assert spec["ejection"]["enabled"] is False
+
+
+def test_installed_printer_profile_survives_design_spec_adaptation() -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    selected = controller._apply_specimen_printer_choice_to_spec(
+        controller._default_test_constraints({}),
+        "installed_printer",
+    )
+
+    spec = controller._build_planning_spec(
+        base_spec={
+            "candidate_id": "cand-installed-ejection",
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [30, 30, 30],
+        },
+        constraints=selected,
+    )
+
+    assert spec["printer_test_path"] == "installed_printer"
+    assert spec["execution_policy"]["printer"] == "execute"
+    assert spec["print"]["start_immediately"] is True
+    assert spec["print"]["physical_intent"] is True
+    assert spec["print"]["confirm_physical_print"] is True
+    assert spec["print"]["use_ejection_only_project_file"] is True
+    assert spec["ejection"]["enabled"] is True
+    assert spec["ejection"]["allow_ejection"] is True
+    assert spec["ejection"]["skip_cooldown_wait"] is True
 
 
 def test_specimen_runtime_message_focuses_on_slicer_and_printer_bridge() -> None:

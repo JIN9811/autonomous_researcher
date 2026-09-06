@@ -226,6 +226,12 @@ serrations without smoothing; report rendering is not numerical authority.
 
 ## Current Verification
 
+The [2026-09-07 supervised integration record](../paper/evidence/2026-09-07-supervised-closed-loop.md)
+observed Equipment CSV → Analysis → BO handoff in one live-equipment loop.
+The operator substituted a specimen and the quality report retained
+`peak_at_curve_boundary`; the transported objective is not validated material
+performance or evidence of CAE agreement.
+
 Verified against all 22 internal IDs, `cae.run_static_analysis`, three CAE API
 routes, engineering S-S normalization, the 50%-strain energy-density handoff,
 and the publication-style GUI contract on the 2026-09-02 working tree. No new

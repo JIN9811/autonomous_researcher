@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{ title }}</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260904-test-mode-settings-1" />
+  </head>
+  <body>
+    <main class="page test-mode-settings-page">
+      <section class="hero panel">
+        <div class="hero-copy">
+          <p class="eyebrow">Run Control</p>
+          <h1>Test Mode Settings</h1>
+          <p class="subhead">Persist device execution boundaries by test path. Saved changes apply to the next run only.</p>
+        </div>
+        <div class="hero-stack">
+          <article class="status-card">
+            <span class="status-title">Stored revision</span>
+            <strong id="test-mode-profile-revision">Loading</strong>
+            <p id="test-mode-profile-updated">Reading server configuration.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="test-mode-tabs" role="tablist" aria-label="Test path profiles">
+          <button class="btn active" type="button" data-profile-id="virtual_bridge">Virtual Bridge</button>
+          <button class="btn" type="button" data-profile-id="installed_printer">Installed Printer</button>
+          <button class="btn" type="button" data-profile-id="physical_print">Physical Print</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title-row">
+          <div>
+            <p class="eyebrow">Physical boundaries</p>
+            <h2 id="test-mode-active-profile">Virtual Bridge</h2>
+          </div>
+          <span class="hint">Agents always remain in the graph</span>
+        </div>
+        <div class="test-mode-agent-grid">
+          <article class="status-card" data-agent-id="specimen">
+            <strong>SpecimenMakingAgent</strong>
+            <p>Selected 3D printer</p>
+            <select aria-label="Specimen device mode"><option value="virtual">Preflight only</option><option value="real">Real device</option></select>
+          </article>
+          <article class="status-card" data-agent-id="vision">
+            <strong>VisionAgent</strong>
+            <p>Active robot camera</p>
+            <select aria-label="Vision device mode"><option value="virtual">Preflight only</option><option value="real">Real device</option></select>
+          </article>
+          <article class="status-card" data-agent-id="manipulation">
+            <strong>ManipulationAgent</strong>
+            <p>VLA / robot actuation</p>
+            <select aria-label="Manipulation device mode"><option value="virtual">Preflight only</option><option value="real">Real device</option></select>
+          </article>
+          <article class="status-card" data-agent-id="lab_equipment">
+            <strong>LabEquipmentAgent</strong>
+            <p>UTM, Windows bridge, UTM vision</p>
+            <select aria-label="Lab Equipment device mode"><option value="virtual">Preflight only</option><option value="real">Real device</option></select>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel test-mode-flow-grid">
+        <article>
+          <p class="eyebrow">Printer flow</p>
+          <h2>Artifact execution</h2>
+          <label>Print body
+            <select id="test-mode-print-body"><option value="execute">Execute</option><option value="skip">Skip</option></select>
+          </label>
+          <label>Cooling wait
+            <select id="test-mode-cooling-wait"><option value="execute">Execute</option><option value="skip">Skip</option></select>
+          </label>
+          <p id="test-mode-cooling-reason" class="hint">Cooling can be skipped only when print body is skipped.</p>
+          <label class="checkbox-row"><input id="test-mode-auto-ejection" type="checkbox" /> Auto-ejection</label>
+        </article>
+        <article>
+          <p class="eyebrow">Hybrid handoff</p>
+          <h2>Operator control</h2>
+          <label>Strategy
+            <select id="test-mode-handoff-strategy" disabled><option value="operator_teleop">Operator teleop</option></select>
+          </label>
+          <div id="test-mode-derived-flow" class="test-mode-derived-flow">Select a profile to preview the flow.</div>
+          <div id="test-mode-validation" class="test-mode-validation" role="status"></div>
+        </article>
+      </section>
+
+      <section class="panel button-row test-mode-actions">
+        <button id="btn-test-mode-save" class="btn primary" type="button">Save profile</button>
+        <button id="btn-test-mode-reload" class="btn" type="button">Reload</button>
+        <button id="btn-test-mode-restore" class="btn warning" type="button">Restore this profile</button>
+        <button id="btn-test-mode-restore-all" class="btn danger" type="button">Restore all profiles</button>
+      </section>
+    </main>
+    <script src="/static/test_mode_settings.js?v=20260904-test-mode-settings-1"></script>
+  </body>
+</html>

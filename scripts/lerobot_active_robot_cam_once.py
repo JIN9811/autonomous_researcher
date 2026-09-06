@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import sys
+import time
+from collections import deque
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -63,7 +65,10 @@ def _realsense_camera_config(data: dict[str, Any]) -> Any:
         depth_scale_m_per_unit=float(data.get("depth_scale_m_per_unit") or 0.001),
         depth_clip_min_mm=float(data.get("depth_clip_min_mm") or 0.0),
         depth_clip_max_mm=float(data.get("depth_clip_max_mm") or 2000.0),
-        warmup_s=int(float(data.get("warmup_s") or 1)),
+        # One-shot ActiveCam only: retain SDK bootstrap/retry, then check RGB-D
+        # readiness explicitly before any capture-pose command. Shared recording
+        # and rollout camera settings remain unchanged.
+        warmup_s=1,
     )
 
 
@@ -126,7 +131,62 @@ def _accept_soft_resume_tolerance(wait_result: dict[str, Any], *, soft_tolerance
     return recovered
 
 
-def _connect_robot(payload: dict[str, Any]) -> Any:
+def _wait_for_camera_ready(camera: Any, *, timeout_s: float = 20.0) -> dict[str, Any]:
+    """Require a stable window of fresh, synchronous RGB-D reads; never pass on timeout."""
+    import numpy as np
+
+    started = time.monotonic()
+    deadline = started + timeout_s
+    # Leave room for the duration condition at 15+ FPS: eight frames alone
+    # span less than 0.5 s. The 50 ms polling pause bounds the sampling rate.
+    window: deque = deque(maxlen=16)
+    last_error = "insufficient_stable_frames"
+    while time.monotonic() < deadline:
+        timeout_ms = max(1, min(500, int((deadline - time.monotonic()) * 1000)))
+        try:
+            if camera.use_depth:
+                color, depth = camera.read_color_depth(timeout_ms=timeout_ms)
+            else:
+                color, depth = camera.read(timeout_ms=timeout_ms), None
+            color = np.asarray(color)
+            if color.ndim != 3 or color.shape[2] != 3 or not color.size or not np.isfinite(color).all():
+                raise ValueError("invalid_color_frame")
+            mean = color.mean(axis=(0, 1))
+            if not 2.0 < float(mean.mean()) < 253.0:
+                raise ValueError("color_frame_under_or_overexposed")
+            depth_fraction, depth_median = 1.0, 0.0
+            if camera.use_depth:
+                depth = np.asarray(depth)
+                if depth.shape != color.shape[:2]:
+                    raise ValueError("rgb_depth_shape_mismatch")
+                valid = np.isfinite(depth) & (depth > 0)
+                depth_fraction = float(valid.mean())
+                if depth_fraction < 0.05:
+                    raise ValueError("insufficient_valid_depth")
+                depth_median = float(np.median(depth[valid]))
+            now = time.monotonic()
+            if now >= deadline:
+                break
+            window.append((now, mean, depth_fraction, depth_median))
+            if len(window) >= 8 and now - window[0][0] >= 0.5:
+                colors = np.stack([entry[1] for entry in window])
+                fractions = [entry[2] for entry in window]
+                medians = [entry[3] for entry in window]
+                exposure_stable = bool(np.all(np.ptp(colors, axis=0) <= np.maximum(3.0, colors.mean(axis=0) * 0.03)))
+                depth_stable = max(fractions) - min(fractions) <= 0.05 and max(medians) - min(medians) <= max(1.0, float(np.mean(medians)) * 0.05)
+                if exposure_stable and depth_stable:
+                    return {"ok": True, "status": "stable_frames", "elapsed_s": round(now - started, 3),
+                            "stable_frames": len(window), "valid_depth_fraction": depth_fraction,
+                            "depth_required": bool(camera.use_depth)}
+                last_error = "exposure_or_depth_unstable"
+        except (RuntimeError, TimeoutError, ValueError, TypeError) as exc:
+            window.clear()
+            last_error = str(exc)
+        time.sleep(max(0.0, min(0.05, deadline - time.monotonic())))
+    raise RuntimeError(f"ACTIVE_ROBOT_CAM_CAMERA_NOT_READY: {last_error}; elapsed_s={time.monotonic() - started:.3f}")
+
+
+def _connect_robot(payload: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
     from lerobot.robots.omx_follower.config_omx_follower import OmxFollowerConfig
     from lerobot.robots.omx_follower.omx_follower import OmxFollower
 
@@ -140,11 +200,23 @@ def _connect_robot(payload: dict[str, Any]) -> Any:
         disable_torque_on_disconnect=False,
     )
     robot = OmxFollower(config)
+    started = time.monotonic()
     try:
-        robot.connect(calibrate=False)
-    except TypeError:
-        robot.connect()
-    return robot
+        try:
+            robot.connect(calibrate=False)
+        except TypeError:
+            robot.connect()
+        readiness = {}
+        for key, data in dict(payload.get("cameras") or {}).items():
+            if str(data.get("type") or "opencv").strip().lower() in {"intelrealsense", "realsense", "intel_realsense", "realsense_sdk"}:
+                readiness[key] = _wait_for_camera_ready(robot.cameras[key])
+        return robot, {"elapsed_s": round(time.monotonic() - started, 3), "cameras": readiness}
+    except Exception:
+        try:
+            robot.disconnect()
+        except Exception:
+            pass  # Child exit also releases handles if connection was partial.
+        raise
 
 
 def main() -> None:
@@ -159,7 +231,7 @@ def main() -> None:
             SpecimenPoseFrameUpdater,
         )
 
-        robot = _connect_robot(payload)
+        robot, camera_readiness = _connect_robot(payload)
     except Exception as exc:
         _print_json({"ok": False, "failure_code": "ACTIVE_ROBOT_CAM_CONNECT_FAILED", "message": f"{exc.__class__.__name__}: {exc}"}, 3)
 
@@ -175,6 +247,7 @@ def main() -> None:
             reason=str(payload.get("reason") or "spc_autoejection_verification"),
             force=True,
         )
+        result["camera_readiness"] = camera_readiness
         sidecar.flush(timeout_s=2.0)
         capture = _load_latest_frame_capture(sidecar.manifest_path)
         if not result.get("ok"):

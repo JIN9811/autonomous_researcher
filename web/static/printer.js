@@ -28,6 +28,9 @@ const materialInput = document.getElementById("printer-material-input");
 const modelInput = document.getElementById("printer-model-input");
 const profileInput = document.getElementById("printer-profile-input");
 const slicerProfileInput = document.getElementById("printer-slicer-profile-input");
+const placementModeInput = document.getElementById("printer-placement-mode");
+const placementXInput = document.getElementById("printer-placement-x");
+const placementYInput = document.getElementById("printer-placement-y");
 const nozzleInput = document.getElementById("printer-nozzle-input");
 const layerInput = document.getElementById("printer-layer-input");
 const firstLayerHeightInput = document.getElementById("printer-first-layer-height-input");
@@ -121,6 +124,11 @@ const controlUpload = document.getElementById("printer-control-upload");
 const controlStart = document.getElementById("printer-control-start");
 const materialSlotSummary = document.getElementById("printer-material-slot-summary");
 const materialSlotList = document.getElementById("printer-material-slot-list");
+const materialPriorityEnabled = document.getElementById("printer-material-priority-enabled");
+const btnMaterialPrioritySave = document.getElementById("btn-printer-material-priority-save");
+const materialPriorityState = document.getElementById("printer-material-priority-state");
+let materialPriorityOrder = [];
+let lastMaterialPanel = {};
 const evidenceSummary = document.getElementById("printer-evidence-summary");
 const evidenceCards = document.getElementById("printer-evidence-cards");
 const mqttPill = document.getElementById("printer-mqtt-pill");
@@ -165,9 +173,6 @@ const btnFleetSave = document.getElementById("btn-printer-fleet-save");
 const btnAutoejectionFillNative = document.getElementById("btn-printer-autoejection-fill-native");
 const btnAutoejectionConfigSave = document.getElementById("btn-printer-autoejection-config-save");
 const btnAutoejectionValidatePreview = document.getElementById("btn-printer-autoejection-validate-preview");
-const btnAutoejectionValidateLeft = document.getElementById("btn-printer-autoejection-validate-left");
-const btnAutoejectionValidateCenter = document.getElementById("btn-printer-autoejection-validate-center");
-const btnAutoejectionValidateRight = document.getElementById("btn-printer-autoejection-validate-right");
 const btnAutoejectionTestArtifact = document.getElementById("btn-printer-autoejection-test-artifact");
 const btnAutoejectionSweepTestArtifact = document.getElementById("btn-printer-autoejection-sweep-test-artifact");
 const btnAutoejectionPatchArtifact = document.getElementById("btn-printer-autoejection-patch-artifact");
@@ -175,9 +180,6 @@ const btnAutoejectionProofTemplate = document.getElementById("btn-printer-autoej
 const btnAutoejectionCompletionAudit = document.getElementById("btn-printer-autoejection-completion-audit");
 const btnBedClearMark = document.getElementById("btn-printer-bed-clear-mark");
 const btnBedClearNotClear = document.getElementById("btn-printer-bed-clear-not-clear");
-const btnEjectLeft = document.getElementById("btn-printer-eject-left");
-const btnEjectCenter = document.getElementById("btn-printer-eject-center");
-const btnEjectRight = document.getElementById("btn-printer-eject-right");
 const btnEjectionApplyTestSize = document.getElementById("btn-printer-ejection-apply-test-size");
 
 let lastProfile = null;
@@ -194,6 +196,7 @@ const printerOperationDisabledSnapshot = new Map();
 function printerOperationButtons() {
   return [
     btnSave,
+    btnMaterialPrioritySave,
     btnReset,
     btnStatusTest,
     btnStatusLive,
@@ -212,9 +215,6 @@ function printerOperationButtons() {
     btnAutoejectionFillNative,
     btnAutoejectionConfigSave,
     btnAutoejectionValidatePreview,
-    btnAutoejectionValidateLeft,
-    btnAutoejectionValidateCenter,
-    btnAutoejectionValidateRight,
     btnAutoejectionTestArtifact,
     btnAutoejectionSweepTestArtifact,
     btnAutoejectionPatchArtifact,
@@ -222,9 +222,6 @@ function printerOperationButtons() {
     btnAutoejectionCompletionAudit,
     btnBedClearMark,
     btnBedClearNotClear,
-    btnEjectLeft,
-    btnEjectCenter,
-    btnEjectRight,
   ].filter(Boolean);
 }
 
@@ -340,9 +337,29 @@ function readStartGateOptions() {
   return options;
 }
 
+function syncPlacementFields() {
+  const custom = placementModeInput?.value === "custom";
+  if (placementXInput) placementXInput.disabled = !custom;
+  if (placementYInput) placementYInput.disabled = !custom;
+}
+
+function readPlacement() {
+  const mode = placementModeInput?.value || "auto";
+  const center_x_mm = Number(placementXInput?.value ?? 128);
+  const center_y_mm = Number(placementYInput?.value ?? 128);
+  if (mode === "custom" && [placementXInput, placementYInput].some((input) => !input || input.value.trim() === "" || !input.checkValidity())) {
+    throw new Error("Specimen center X/Y must be finite coordinates between 0 and 256 mm.");
+  }
+  return { mode, center_x_mm: mode === "custom" ? center_x_mm : 128, center_y_mm: mode === "custom" ? center_y_mm : 128 };
+}
+
 function fillProfile(profile) {
   const data = profile || {};
   lastProfile = { ...data };
+  if (placementModeInput) placementModeInput.value = data.specimen_placement?.mode || "auto";
+  if (placementXInput) placementXInput.value = data.specimen_placement?.center_x_mm ?? 128;
+  if (placementYInput) placementYInput.value = data.specimen_placement?.center_y_mm ?? 128;
+  syncPlacementFields();
   if (materialInput) materialInput.value = data.material || "PLA";
   if (modelInput) modelInput.value = data.printer_model || "Bambu Lab X2D";
   if (profileInput) profileInput.value = data.printer_profile || "bambulab_x2d_pla_0p4_nozzle";
@@ -468,6 +485,7 @@ function readProfile() {
     printer_model: modelInput ? modelInput.value.trim() : "Bambu Lab X2D",
     printer_profile: profileInput ? profileInput.value.trim() : "bambulab_x2d_pla_0p4_nozzle",
     slicer_profile_hint: slicerProfileInput ? slicerProfileInput.value.trim() : "0.2mm_quality",
+    specimen_placement: readPlacement(),
     nozzle_diameter_mm: Number(nozzleInput ? nozzleInput.value : 0.4) || 0.4,
     layer_height_mm: Number(layerInput ? layerInput.value : 0.2) || 0.2,
     first_layer_height_mm: Number(firstLayerHeightInput ? firstLayerHeightInput.value : 0.2) || 0.2,
@@ -559,7 +577,7 @@ function renderConfig(data) {
   const gates = data.live_gates || {};
   const autoEjection = data.auto_ejection || {};
   const slicer = data.slicer || {};
-  updateAutoejectionButtonLabels(data.provider || lastPrinterProvider);
+  lastPrinterProvider = data.provider || lastPrinterProvider;
   if (statusDetail) {
     const layer = `${profile.layer_height_mm || 0.2} mm layer`;
     const testSize = Array.isArray(profile.test_specimen_size_mm) ? `${profile.test_specimen_size_mm.join("x")} mm test` : "30x30x30 mm test";
@@ -586,29 +604,6 @@ function renderConfig(data) {
     const source = slicer.source || "configured";
     slicerDetail.textContent = `enabled=${Boolean(slicer.enabled)} · ${availability} via ${source} · output=${slicer.output_dir || "artifacts/gcode"}`;
   }
-}
-
-function setAutoejectionButtonsEnabled(enabled) {
-  [btnEjectLeft, btnEjectCenter, btnEjectRight].forEach((button) => {
-    if (button) button.disabled = !enabled;
-  });
-}
-
-function updateAutoejectionButtonLabels(provider) {
-  lastPrinterProvider = provider || lastPrinterProvider || "";
-  const isPrusa = String(lastPrinterProvider).toLowerCase().includes("prusa");
-  const labels = isPrusa
-    ? ["Autoeject Left", "Autoeject Center", "Autoeject Right"]
-    : ["Run Standalone Eject: Left", "Run Standalone Eject: Center", "Run Standalone Eject: Right"];
-  [
-    [btnEjectLeft, labels[0]],
-    [btnEjectCenter, labels[1]],
-    [btnEjectRight, labels[2]],
-  ].forEach(([button, label]) => {
-    if (!button) return;
-    button.textContent = label;
-    button.dataset.originalText = label;
-  });
 }
 
 function autoejectionCanRun(data, status) {
@@ -709,7 +704,7 @@ function renderAutoejectionStatus(data) {
   const status = data.autoejection || data.auto_ejection || {};
   const handoff = data.handoff || status.handoff || {};
   const consumerText = renderManipulationConsumerReadiness(data, handoff);
-  if (data.provider) updateAutoejectionButtonLabels(data.provider);
+  if (data.provider) lastPrinterProvider = data.provider;
   const blockers = Array.isArray(data.blockers) && data.blockers.length ? data.blockers : status.blockers || [];
   const canRun = autoejectionCanRun(data, status);
   const mode = status.status || status.mode || "not_configured";
@@ -766,7 +761,6 @@ function renderAutoejectionStatus(data) {
     fillAutoejectionConfig(status);
   }
   renderBambuAutoejectionValidationEvidence(data);
-  setAutoejectionButtonsEnabled(canRun);
 }
 
 function renderBedClearStatus(data) {
@@ -1063,8 +1057,56 @@ function statusTone(value) {
   return "neutral";
 }
 
-function renderMaterialSlots(panel) {
+function orderedMaterialSlots(panel) {
   const slots = Array.isArray(panel.slots) ? panel.slots : [];
+  const byId = new Map(slots.map((slot) => [slot.slot_id || `${slot.ams_id}:${slot.tray_id}`, slot]));
+  for (const id of byId.keys()) {
+    if (/^[0-3]:[0-3]$/.test(id) && !materialPriorityOrder.includes(id)) materialPriorityOrder.push(id);
+  }
+  return [...materialPriorityOrder.map((id) => ({...(byId.get(id) || {label: id, tray_type: "Disconnected"}), slot_id: id})),
+    ...slots.filter((slot) => !/^[0-3]:[0-3]$/.test(slot.slot_id || `${slot.ams_id}:${slot.tray_id}`)).map((slot) => ({...slot, slot_id: ""}))];
+}
+
+function moveMaterialPriority(id, step) {
+  const index = materialPriorityOrder.indexOf(id);
+  const target = index + step;
+  if (index < 0 || target < 0 || target >= materialPriorityOrder.length) return;
+  [materialPriorityOrder[index], materialPriorityOrder[target]] = [materialPriorityOrder[target], materialPriorityOrder[index]];
+  if (materialPriorityEnabled) materialPriorityEnabled.checked = true;
+  if (materialPriorityState) materialPriorityState.textContent = "Unsaved";
+  renderMaterialSlots(lastMaterialPanel);
+}
+
+async function refreshMaterialPriority() {
+  try {
+    const data = await apiJson("/api/printer/material-priority");
+    materialPriorityOrder = [...(data.priority?.slots || [])];
+    if (materialPriorityEnabled) materialPriorityEnabled.checked = Boolean(data.priority?.enabled);
+    renderMaterialSlots(lastMaterialPanel);
+  } catch (error) {
+    if (materialPriorityState) materialPriorityState.textContent = "Load failed · Check server";
+  }
+}
+
+async function saveMaterialPriority() {
+  setBusy(btnMaterialPrioritySave, true);
+  try {
+    const data = await apiJson("/api/printer/material-priority", {method: "POST", body: JSON.stringify({
+      enabled: Boolean(materialPriorityEnabled?.checked), slots: materialPriorityOrder,
+    })});
+    materialPriorityOrder = [...data.priority.slots];
+    if (materialPriorityEnabled) materialPriorityEnabled.checked = data.priority.enabled;
+    if (materialPriorityState) materialPriorityState.textContent = "Saved";
+    renderMaterialSlots(lastMaterialPanel);
+  } catch (error) {
+    if (materialPriorityState) materialPriorityState.textContent = "Save failed";
+    writeLog({ok: false, error: error.message});
+  } finally { setBusy(btnMaterialPrioritySave, false); }
+}
+
+function renderMaterialSlots(panel) {
+  lastMaterialPanel = panel;
+  const slots = orderedMaterialSlots(panel);
   if (materialSlotSummary) {
     materialSlotSummary.textContent = slots.length
       ? `${slots.length} slot${slots.length === 1 ? "" : "s"} · AMS ${formatMaybe(panel.ams_unit_count)}`
@@ -1073,14 +1115,17 @@ function renderMaterialSlots(panel) {
   if (!materialSlotList) return;
   materialSlotList.innerHTML = slots.length
     ? slots
-        .map((slot) => {
+        .map((slot, index) => {
           const color = String(slot.tray_color || "").replace(/[^0-9a-fA-F]/g, "").slice(0, 6);
           const swatch = color ? `#${color}` : "#94a3b8";
           return `<div class="bambu-material-slot">
             <i style="background:${escapeHtml(swatch)}"></i>
-            <strong>${escapeHtml(slot.tray_type || "Unknown")}</strong>
-            <span>${escapeHtml(slot.tray_sub_brands || slot.label || "AMS slot")}</span>
-            <small>${escapeHtml(formatMaybe(slot.remain_percent, "%"))}</small>
+            ${slot.slot_id ? `<span class="bambu-material-priority">Priority ${index + 1}</span>` : ""}
+            <strong>${escapeHtml(slot.tray_type || "Empty")}</strong>
+            <span>${escapeHtml([slot.label || slot.slot_id || "AMS slot", slot.tray_sub_brands].filter(Boolean).join(" · "))}</span>
+            <small>Remaining: ${escapeHtml(formatMaybe(slot.remain_percent, "%"))}</small>
+            ${slot.slot_id ? `<span class="bambu-material-priority-controls"><button type="button" class="btn" aria-label="Increase priority" data-priority-slot="${escapeHtml(slot.slot_id)}" data-priority-step="-1" ${index === 0 ? "disabled" : ""}>▲</button>
+            <button type="button" class="btn" aria-label="Decrease priority" data-priority-slot="${escapeHtml(slot.slot_id)}" data-priority-step="1" ${index === materialPriorityOrder.length - 1 ? "disabled" : ""}>▼</button></span>` : ""}
           </div>`;
         })
         .join("")
@@ -1449,22 +1494,19 @@ function openLiveGui() {
   }
 }
 
-async function runAutoejectionTest(position, button, options = {}) {
+async function generateEjectionTestArtifact(position, button) {
   setBusy(button, true);
   setDotState(statusDot, "busy");
-  const mode = options.mode || "live";
-  const startImmediately = options.startImmediately !== false;
   try {
     const data = await apiJson("/api/printer/autoejection-test", {
       method: "POST",
       body: JSON.stringify({
         position,
-        mode,
+        mode: "test",
         object_size_mm: parseVector3(ejectionObjectSizeInput ? ejectionObjectSizeInput.value : "", currentTestSpecimenSize()),
-        start_immediately: startImmediately,
+        start_immediately: false,
         public_base_url: bambuPublicBaseUrlInput ? bambuPublicBaseUrlInput.value.trim() : "",
         verify_fetch: true,
-        ...(startImmediately ? readStartGateOptions() : {}),
       }),
     });
     setDotState(statusDot, data.ok ? "idle" : "warn");
@@ -1666,6 +1708,7 @@ async function runBambuSliceArtifact() {
       body: JSON.stringify({
         source_path: sourcePath,
         specimen_id: specimenId,
+        specimen_placement: readPlacement(),
       }),
     });
     const slicedPath = data.sliced_artifact_path || (data.artifact && data.artifact.sliced_artifact_path) || "";
@@ -1675,8 +1718,10 @@ async function runBambuSliceArtifact() {
     setDotState(statusDot, data.ok ? "idle" : "warn");
     if (gateDetail) {
       const digest = data.sha256 ? String(data.sha256).slice(0, 12) : "";
+      const center = data.placement_validation?.actual_center_mm;
+      const centerText = Array.isArray(center) ? ` · center X${Number(center[0]).toFixed(2)} / Y${Number(center[1]).toFixed(2)} mm` : "";
       gateDetail.textContent = data.ok
-        ? `Bambu sliced artifact ready: ${slicedPath}${digest ? ` · sha256=${digest}` : ""} · no upload or MQTT publish`
+        ? `Bambu sliced artifact ready: ${slicedPath}${centerText}${digest ? ` · sha256=${digest}` : ""} · no upload or MQTT publish`
         : `Bambu slicing blocked: ${data.failure_code || data.message || "unknown"}`;
     }
     writeLog(data);
@@ -1748,7 +1793,7 @@ async function runHttpArtifactRoute() {
         public_base_url: bambuPublicBaseUrlInput ? bambuPublicBaseUrlInput.value.trim() : "",
         subtask_name: "atr-specimen-http-artifact",
         plate_id: 1,
-        use_ams: false,
+        material: materialInput ? materialInput.value.trim() : "PLA",
         verify_fetch: true,
       }),
     });
@@ -1795,11 +1840,12 @@ async function runBambuPrestartCheck() {
       body: JSON.stringify({
         source_path: sourcePath,
         artifact_path: artifactPath,
+        specimen_placement: readPlacement(),
         specimen_id: sourceName || artifactName || "bambu-specimen",
         public_base_url: bambuPublicBaseUrlInput ? bambuPublicBaseUrlInput.value.trim() : "",
         subtask_name: "atr-bambu-prestart",
         plate_id: 1,
-        use_ams: false,
+        material: materialInput ? materialInput.value.trim() : "PLA",
         verify_fetch: true,
         ...readStartGateOptions(),
       }),
@@ -1853,7 +1899,7 @@ async function runStartCommandDraft() {
         remote_path: defaultRemote,
         subtask_name: "atr-specimen-draft",
         plate_id: 1,
-        use_ams: false,
+        material: materialInput ? materialInput.value.trim() : "PLA",
       }),
     });
     setDotState(statusDot, data.ok ? "idle" : "warn");
@@ -1883,7 +1929,7 @@ async function runStartGateCheck() {
         remote_path: defaultRemote,
         subtask_name: "atr-specimen-start-gate",
         plate_id: 1,
-        use_ams: false,
+        material: materialInput ? materialInput.value.trim() : "PLA",
         ...readStartGateOptions(),
       }),
     });
@@ -1916,7 +1962,7 @@ async function runStartPublish() {
         remote_path: defaultRemote,
         subtask_name: "atr-specimen-start",
         plate_id: 1,
-        use_ams: false,
+        material: materialInput ? materialInput.value.trim() : "PLA",
         ...readStartGateOptions(),
       }),
     });
@@ -1948,7 +1994,7 @@ async function runSpcReadiness() {
         remote_path: defaultRemote,
         subtask_name: "atr-spc-readiness",
         plate_id: 1,
-        use_ams: false,
+        material: materialInput ? materialInput.value.trim() : "PLA",
         ...readStartGateOptions(),
       }),
     });
@@ -1980,33 +2026,6 @@ if (btnAutoejectionValidatePreview) {
     validateOnly: true,
   }));
 }
-if (btnAutoejectionValidateLeft) {
-  btnAutoejectionValidateLeft.addEventListener("click", () => runBambuAutoejectionPatchArtifact({
-    actionLabel: "Validate Left",
-    button: btnAutoejectionValidateLeft,
-    updateArtifactInput: false,
-    positionOverride: "left",
-    validateOnly: true,
-  }));
-}
-if (btnAutoejectionValidateCenter) {
-  btnAutoejectionValidateCenter.addEventListener("click", () => runBambuAutoejectionPatchArtifact({
-    actionLabel: "Validate Center",
-    button: btnAutoejectionValidateCenter,
-    updateArtifactInput: false,
-    positionOverride: "center",
-    validateOnly: true,
-  }));
-}
-if (btnAutoejectionValidateRight) {
-  btnAutoejectionValidateRight.addEventListener("click", () => runBambuAutoejectionPatchArtifact({
-    actionLabel: "Validate Right",
-    button: btnAutoejectionValidateRight,
-    updateArtifactInput: false,
-    positionOverride: "right",
-    validateOnly: true,
-  }));
-}
 if (btnBedClearMark) btnBedClearMark.addEventListener("click", () => markBedClear(true, btnBedClearMark));
 if (btnBedClearNotClear) btnBedClearNotClear.addEventListener("click", () => markBedClear(false, btnBedClearNotClear));
 if (btnStatusTest) btnStatusTest.addEventListener("click", () => refreshStatus("test", { manual: true, emit: true }).catch((err) => writeLog({ ok: false, error: err.message })));
@@ -2018,7 +2037,7 @@ if (btnAutoejectionPatchArtifact) btnAutoejectionPatchArtifact.addEventListener(
 if (btnAutoejectionTestArtifact) {
   btnAutoejectionTestArtifact.addEventListener("click", () => {
     const position = autoejectionPushDirectionInput ? autoejectionPushDirectionInput.value : "center";
-    runAutoejectionTest(position, btnAutoejectionTestArtifact, { mode: "test", startImmediately: false });
+    generateEjectionTestArtifact(position, btnAutoejectionTestArtifact);
   });
 }
 if (btnAutoejectionSweepTestArtifact) btnAutoejectionSweepTestArtifact.addEventListener("click", () => runBambuSweepTestArtifact());
@@ -2031,9 +2050,15 @@ if (btnStartGate) btnStartGate.addEventListener("click", () => runStartGateCheck
 if (btnStartPublish) btnStartPublish.addEventListener("click", () => runStartPublish());
 if (btnSpcReadiness) btnSpcReadiness.addEventListener("click", () => runSpcReadiness());
 if (btnOpenLive) btnOpenLive.addEventListener("click", openLiveGui);
-if (btnEjectLeft) btnEjectLeft.addEventListener("click", () => runAutoejectionTest("left", btnEjectLeft));
-if (btnEjectCenter) btnEjectCenter.addEventListener("click", () => runAutoejectionTest("center", btnEjectCenter));
-if (btnEjectRight) btnEjectRight.addEventListener("click", () => runAutoejectionTest("right", btnEjectRight));
+if (placementModeInput) placementModeInput.addEventListener("change", syncPlacementFields);
+if (btnMaterialPrioritySave) btnMaterialPrioritySave.addEventListener("click", saveMaterialPriority);
+if (materialPriorityEnabled) materialPriorityEnabled.addEventListener("change", () => {
+  if (materialPriorityState) materialPriorityState.textContent = "Unsaved";
+});
+if (materialSlotList) materialSlotList.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-priority-slot]");
+  if (button && !button.disabled) moveMaterialPriority(button.dataset.prioritySlot, Number(button.dataset.priorityStep));
+});
 if (testSizeInput) {
   testSizeInput.addEventListener("input", () => syncEjectionObjectSizeFromTestOptions(false));
 }
@@ -2077,6 +2102,7 @@ if (slowFirstLayerInput) {
 refreshFleet()
   .then(() => refreshConnection())
   .then(() => refreshProfile())
+  .then(() => refreshMaterialPriority())
   .then(() => refreshStatus("live", { initial: true }))
   .then(() => refreshAutoejectionStatus())
   .then(() => refreshBedClearStatus())

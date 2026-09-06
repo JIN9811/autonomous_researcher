@@ -73,6 +73,7 @@ const btnResume = document.getElementById("btn-resume");
 const btnStop = document.getElementById("btn-stop");
 const btnSafeStop = document.getElementById("btn-safe-stop");
 const btnGpuClear = document.getElementById("btn-gpu-clear");
+const btnTestModeSettings = document.getElementById("btn-test-mode-settings");
 const btnOpenPrinter = document.getElementById("btn-open-printer");
 const btnOpenWindowsBridge = document.getElementById("btn-open-windows-bridge");
 const btnOpenLerobot = document.getElementById("btn-open-lerobot");
@@ -483,6 +484,14 @@ function openLiveGuiWindow() {
 
 function openLerobotWindow() {
   window.open(new URL("/lerobot", window.location.origin).toString(), "_blank", "width=1440,height=960,popup=yes");
+}
+
+function openTestModeSettingsWindow() {
+  const url = new URL("/test-mode-settings", window.location.origin).toString();
+  const opened = window.open(url, "atr-test-mode-settings", "width=1180,height=900,popup=yes");
+  if (!opened) {
+    window.location.href = url;
+  }
 }
 
 function openPrinterWindow() {
@@ -1276,6 +1285,10 @@ btnGpuClear.addEventListener("click", async () => {
   await refreshState();
   await refreshModelStatuses();
 });
+
+if (btnTestModeSettings) {
+  btnTestModeSettings.addEventListener("click", openTestModeSettingsWindow);
+}
 
 if (btnOpenLerobot) {
   btnOpenLerobot.addEventListener("click", openLerobotWindow);

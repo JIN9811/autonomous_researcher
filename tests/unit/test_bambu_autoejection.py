@@ -432,11 +432,26 @@ def test_gcode_3mf_ejection_only_patch_uses_source_bounds_without_print_body(tmp
     assert "; FEATURE: Outer wall" not in patched_gcode
     assert "; atr_print_body_omitted=true" in patched_gcode
     assert "; atr_actual_object_bounds_mm=" in patched_gcode
+    assert "; atr_cooldown_wait_policy=not_required_no_print_body" in patched_gcode
+    assert "M190 R40" not in patched_gcode
     assert "G0 Z10.000 F3000" in patched_gcode
     assert "G0 X50.000 Y245.000 F6000" in patched_gcode
     tail = patched_gcode[patched_gcode.index("atr.bambu.autoejection.v1") :]
     assert "G28" not in tail
     assert tail.index("atr.bambu.autoejection.end") < tail.index("M73 P100 R0")
+
+    retained = patcher.build_ejection_only_from_sliced_artifact(
+        source,
+        specimen_id="actual-specimen-with-cooling",
+        position="center",
+        plate_id=1,
+        loop_index=3,
+        include_cooldown_wait=True,
+    )
+    with zipfile.ZipFile(retained["patched_artifact_path"]) as archive:
+        retained_gcode = archive.read("Metadata/plate_1.gcode").decode("utf-8")
+    assert "; atr_cooldown_wait_policy=M190" in retained_gcode
+    assert "M190 R40" in retained_gcode
 
 
 def test_gcode_3mf_patch_blocks_missing_requested_plate_instead_of_falling_back(tmp_path: Path) -> None:

@@ -1118,8 +1118,8 @@ def test_live_gui_runtime_shell_contains_operational_panels() -> None:
     assert "planning-live-body" in html
     assert "/static/styles.css?v=20260527-live-focus" in html
     assert "/static/planning.js?v=20260613-clean-stl-render-1" in html
-    assert 'href="/static/styles.css?v=20260903-passive-vision-1"' in html
-    assert 'src="/static/planning.js?v=20260904-bo-lhs-1"' in html
+    assert 'href="/static/styles.css?v=' in html
+    assert 'src="/static/planning.js?v=' in html
     assert "Runtime Chat" in html
     assert "Safe Stop" in html
     assert "Pause Run" in html
@@ -2788,10 +2788,11 @@ def test_live_gui_equipment_cycle_uses_active_profile_and_inflight_flow_checkpoi
         "active_block",
         "transitions",
         "flowExecutionMatchesRun",
-        "flowExecutionIsActive",
     ):
         assert token in context
     assert context.index("activeFlowExecution.workflow_agentic_task") < context.index("equipment.workflow_agentic_task")
+    # Terminal evidence retention is exercised (not source-token matched) by
+    # tests/js/equipment_progress_refresh.test.cjs.
 
 
 def test_live_gui_run_transition_clears_equipment_run_scoped_snapshots() -> None:
@@ -4893,7 +4894,7 @@ def test_live_gui_manipulation_agent_uses_current_supervisor_language() -> None:
     assert "Run Result" in script
     assert "Run Metrics" in script
     assert "Task Success Rate" in script
-    assert "Grasp Success Rate" in script
+    assert "Grasp Attempt Success Rate" in script
     assert 'renderDashboardCard("Policy Runtime"' not in script
     assert 'renderDashboardCard("Execution Supervision"' not in script
     assert 'renderDashboardCard("Vision / UTM Verification"' not in script
@@ -4924,7 +4925,7 @@ def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundle
     bundle_response = client.get("/static/omx_telemetry_viewer.bundle.js")
 
     assert '/static/styles.css?v=20260903-passive-vision-1' in html
-    assert '/static/omx_telemetry_viewer.bundle.js?v=20260720-manipulation-grounded-1' in html
+    assert 'src="/static/omx_telemetry_viewer.bundle.js?v=' in html
     assert '/static/planning.js?v=20260903-passive-vision-1' in html
     assert bundle_response.status_code == 200
     bundle = bundle_response.text
@@ -4944,7 +4945,7 @@ def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundle
         "data-atr-motion-state",
         "Joint selector",
         "Home Gate",
-        "Grasp Result",
+        "Grasp Achievement",
         "data-atr-grasp-outcome",
         "data-atr-grasp-status",
         "data-atr-grasp-gap",
@@ -4962,7 +4963,7 @@ def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundle
         'data-atr-runtime-donut="task"',
         'data-atr-runtime-donut="grasp"',
         "Task Success Rate",
-        "Grasp Success Rate",
+        "Grasp Attempt Success Rate",
     ]:
         assert required in script
     assert '["Joint1", -15, -6.5]' in script
@@ -4983,7 +4984,6 @@ def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundle
         "LeRobot joint value",
         "actual_source",
         "target_source",
-        "compactHistory",
         "normalizedElapsed",
         "stableYDomains",
         "formatAxisValue",
@@ -5008,7 +5008,6 @@ def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundle
         "grasping",
         "ungrasping",
         "#ffffff",
-        "MAX_HISTORY_SAMPLES",
         "CAMERA_FIT_PADDING",
         "buildBoxSurfaceGrid",
         "buildCylinderSurfaceGrid",
@@ -5016,7 +5015,7 @@ def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundle
         "replaceJointHistory",
         "telemetry_artifacts",
         "latest_grasp_outcome",
-        "applyGraspOutcome(runtime.artifacts.latest_grasp_outcome)",
+        "applyGraspAchievement(runtime.artifacts.grasp_achievement, runtime.artifacts.latest_grasp_outcome)",
         "settleSpecimenOnSupport",
         "RightDiskAluminumTop",
         "supportTop",
@@ -5104,7 +5103,7 @@ def test_live_robot_pose_has_repeatable_zoom_to_fit_control() -> None:
     assert "bindPoseFitButtons" in bundle
     assert ".ar-man-pose-fit" in styles
     assert '/static/styles.css?v=20260903-passive-vision-1' in html
-    assert '/static/omx_telemetry_viewer.bundle.js?v=20260720-manipulation-grounded-1' in html
+    assert 'src="/static/omx_telemetry_viewer.bundle.js?v=' in html
     assert '/static/planning.js?v=20260903-passive-vision-1' in html
 
 

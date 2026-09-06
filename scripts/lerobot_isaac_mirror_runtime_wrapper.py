@@ -1175,7 +1175,9 @@ class SpecimenPoseFrameUpdater:
             os.getenv("ATR_SPECIMEN_POSE_FRAME_SCRIPT", str(REPO_ROOT / "scripts" / "vision" / "run_specimen_pose_snapshot.sh"))
         ).expanduser()
         self.output_dir = Path(os.getenv("ATR_SPECIMEN_POSE_FRAME_OUTPUT_DIR", "/tmp/atr_specimen_pose_from_lerobot")).expanduser()
-        self.timeout_s = _env_float("ATR_SPECIMEN_POSE_FRAME_TIMEOUT_S", 5.0, minimum=0.5)
+        # Allow detector process startup/CPU contention without changing pose,
+        # freshness, motor movement, or return-to-home acceptance thresholds.
+        self.timeout_s = _env_float("ATR_SPECIMEN_POSE_FRAME_TIMEOUT_S", 15.0, minimum=0.5)
         self.endpoint = self._specimen_endpoint(os.getenv("ATR_ISAAC_MIRROR_ENDPOINT", "http://127.0.0.1:8766/joints"))
         self.specimen_id = os.getenv("ATR_SPECIMEN_POSE_RECORD_SPECIMEN_ID", "redcube-record-start").strip() or "redcube-record-start"
         self.pending_path = Path(

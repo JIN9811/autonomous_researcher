@@ -370,6 +370,12 @@ browser state.
 
 ## Current Verification
 
+The [2026-09-07 supervised integration record](../paper/evidence/2026-09-07-supervised-closed-loop.md)
+observed BO-managed LHS point 2/8 (`bo-candidate-002`) reaching the next Design,
+which preserved the requested geometry parameters. The summary's `via bo`
+label does not mean acquisition optimization was active: initialization was
+still in progress. No optimization-gain claim follows from this observation.
+
 Verified against all 15 internal steps, `experiment.benchmark`, BO and Objective
 Compiler APIs, manual Visual/JSON browser authoring at desktop/mobile widths,
 and Analysis/Knowledge/Design handoffs at baseline `4cccb05`. No comparative

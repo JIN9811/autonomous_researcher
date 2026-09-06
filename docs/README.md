@@ -48,6 +48,7 @@ Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 
 
 ## Evidence Basis
 
+- 감독하 폐루프 1회 실증: [2026-09-07 report](paper/evidence/2026-09-07-supervised-closed-loop.md) — ejection-only 프린터 경로, 실장비 UTM, Analysis, BO 관리 LHS, 다음 Design 연결; 재료 성능 검증과 구분.
 - 문서 유형과 권한: [standards/documentation_standard.md](standards/documentation_standard.md)
 - 이관 완료 집합: [document_manifest.yaml](document_manifest.yaml)
 - 현재 구현 수치: [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md)

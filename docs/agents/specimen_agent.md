@@ -8,13 +8,15 @@ scope: [agents, specimen, manufacturing, printer_connection]
 summary: Current contract for geometry, manufacturing QA, printer preparation, fabrication evidence, and specimen handoff.
 source_of_truth:
   - agents/specimen_agent.py
+  - utils/specimen_execution.py
   - graphs/modules/specimen/module.yaml
   - device_bridges/bambu_bridge.py
   - device_bridges/bambu_autoejection.py
   - device_bridges/prusa_bridge.py
   - app/main.py
-last_verified: 2026-08-09
-verified_against: 0b7627b
+  - web/static/planning.js
+last_verified: 2026-09-07
+verified_against: working-tree
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -223,11 +225,67 @@ prestart, start, autoejection, bed-clear, and proof/audit functions. Live GUI
 shows the agent's manufacturing report and evidence. UI confirmation does not
 bypass server/provider gates.
 
+For executions requiring after-print confirmation, the Live GUI separates an
+SPC call returning from the fabrication task completing. The shared runtime and
+operator-retry merge paths preserve `run_metadata.specimen_execution`, scoped by
+run, loop, and specimen. Submission and printer completion alone remain
+`running` while ActiveCam verification is pending. Paused/interrupted work is
+shown as `waiting`; errors override prior success. Only the matching ActiveCam
+confirmation changes the task to `done`. A new SPC invocation clears that
+execution's previous confirmation; the later UTM observation does not replace
+fabrication verification. Virtual and preflight-only results retain their
+existing completion semantics.
+
+This lifecycle is display bookkeeping, not a new motion gate or graph route.
+Historical completion does not expire when a short-lived pickup signal expires.
+Non-actuating regression coverage:
+`tests/unit/test_specimen_execution_status.py` and
+`tests/js/specimen_lifecycle.test.cjs`.
+
+The 2026-09-07 GUI update separates report ownership from execution completion.
+`planning_bootstrap` belongs to the Orchestrator even when its guidance mentions
+printers or specimens. Diagnostic events and chat messages may appear in an
+SPC report, but their presence cannot mark SPC Done. Scoped execution evidence
+remains authoritative; virtual/legacy paths without that record require
+explicit `agent_status.specimen_agent.state = "done"` and `success = true`.
+Running, waiting, approval and error displays retain their existing precedence.
+This is a frontend-only change: reload the Live GUI to load the updated script;
+it does not require a Python restart or any equipment action.
+
 ## Current Verification
+
+On 2026-09-07 the uncommitted GUI change reproduced an idle session with one
+orchestrator bootstrap event incorrectly displaying SPC Done. Re-evaluating
+the same read-only session/event data with the corrected functions displays
+SPC Idle and attributes the bootstrap to the Orchestrator. Behavioral Node
+tests cover this classification, message-only diagnostics, explicit completion,
+nonterminal success flags, ActiveCam pending state, and existing lifecycle
+isolation. This is function-level verification, not a browser or hardware run.
+
+The archived `run-20260906T122533Z-c0effd` was also replayed without actuation:
+SPC remained Running after submission, became Done on the matching ActiveCam
+confirmation, and stayed Done throughout the later UTM observations. The
+combined EQP and SPC/Manipulation regression selection passed 147 Python tests
+and 14 JavaScript tests on 2026-09-06 (five existing Python schema warnings).
+Backend lifecycle changes require restarting the running server; refreshing a
+browser alone does not load updated Python code.
 
 Verified against the class, 11 internal IDs, six tools, 27 primary printer API
 entries plus artifact routes, and current Bambu/Prusa provider sources at
 baseline `0b7627b`.
+
+The 2026-09-06 display-lifecycle update was checked without device execution:
+archived results from `run-20260906T113555Z-8b3e30` produced `running` after SPC
+submission and `done` after matching ActiveCam confirmation, with stage and loop
+unchanged. The SPC/manipulation lifecycle suites passed 47 Python and 13 JS
+tests. This is not a new physical-cycle validation.
+
+A broader controller/runtime selection passed 27 tests and failed two existing
+cases: `test_controller_merge_vision_confirmation_marks_specimen_completion`
+(expects an untagged later `not_checked` result to retain confirmation) and
+`test_planning_tail_continues_original_loop_after_specimen` (its fixture stops
+after the second Vision pass). Both failures also reproduce with the new SPC
+lifecycle helper disabled; they were not changed as part of this display fix.
 
 ## Limitations and Known Gaps
 

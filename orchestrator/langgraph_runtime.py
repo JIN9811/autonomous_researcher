@@ -69,6 +69,8 @@ from reporting.bo_visualization_artifacts import write_bo_visualization_artifact
 from utils.active_cam_artifact import apply_active_cam_artifact_update
 from utils.utm_completion_artifact import apply_utm_completion_artifact_update
 from utils.ids import make_event_id
+from utils.manipulation_execution import sync_manipulation_execution_status
+from utils.specimen_execution import sync_specimen_execution_status
 
 EventCallback = Callable[[dict[str, Any]], Awaitable[None] | None]
 RUNTIME_ARTIFACT_COPY_LIMIT_BYTES = 50 * 1024 * 1024
@@ -1397,7 +1399,10 @@ class LangGraphRunLoop:
         if isinstance(specimen_result.get("experiment_evaluation"), dict):
             self._state.experiment_evaluations.append(compact_runtime_payload(specimen_result["experiment_evaluation"]))
         if "observation" in data:
-            self._state.latest_observations = compact_runtime_payload(data["observation"])
+            if "utm_clear_execution" in data:
+                self._state.latest_observations.update(compact_runtime_payload(data["observation"]))
+            else:
+                self._state.latest_observations = compact_runtime_payload(data["observation"])
             if isinstance(data["observation"], dict):
                 self._state.run_metadata["latest_vision_observation"] = compact_runtime_payload(data["observation"])
                 self._merge_vision_completion_into_specimen_result(data["observation"], data)
@@ -1491,6 +1496,43 @@ class LangGraphRunLoop:
         if "guardian" in data:
             self._state.run_metadata["guardian"] = compact_runtime_payload(data["guardian"])
         self._state.run_metadata["last_stage_payload"] = {"stage": stage.value, "data": compact_data}
+        sync_manipulation_execution_status(self._state, stage)
+        sync_specimen_execution_status(self._state, stage, data)
+        from utils.utm_clear_cycle import merge_utm_clear_cycle
+        merge_utm_clear_cycle(self._state, stage, data)
+
+    async def _pause_for_guardian_recovery(
+        self, *, stage: Stage, status: AgentRuntimeStatus, result_data: dict[str, Any],
+    ) -> bool:
+        """A recovery recommendation is not completion of the current experiment."""
+        guardian = result_data.get("guardian")
+        if stage != Stage.GUARDIAN or not isinstance(guardian, dict):
+            return False
+        if guardian.get("decision") != "continue" or guardian.get("action") not in {"recover", "retry"}:
+            previous = self._state.run_metadata.get("guardian_recovery_wait")
+            if isinstance(previous, dict) and previous.get("run_id") == self._state.run_id and previous.get("loop_id") == self._state.loop_count:
+                previous["status"] = "resolved" if guardian.get("decision") == "continue" else "stopped"
+            return False
+        record = {
+            "schema": "guardian_recovery_wait.v1", "status": "waiting",
+            "run_id": self._state.run_id, "loop_id": self._state.loop_count,
+            "specimen_id": self._state.current_experiment_spec.get("specimen_id", ""),
+            "action": guardian["action"], "reason": guardian.get("reason", "Recovery review required"),
+            "graph_gate_pressure": compact_runtime_payload(guardian.get("graph_gate_pressure", {})),
+        }
+        self._state.run_metadata["guardian_recovery_wait"] = record
+        self._state.stage = Stage.GUARDIAN
+        self._state.is_paused = True
+        status.state, status.success = "waiting", None
+        status.last_result = str(record["reason"])
+        await self._emit(
+            event_type="operator_input_required",
+            message="Guardian recovery requires review; retaining the current specimen and cycle. No new fabrication started.",
+            payload={"agent": "guardian_agent", "node_id": "guardian", "status": "waiting",
+                     "guardian_recovery_wait": record, "pending_operator_input": True, "requires_response": True},
+            level="WARNING",
+        )
+        return True
 
     async def _pause_for_vision_intervention(
         self,
@@ -2892,12 +2934,18 @@ class LangGraphRunLoop:
             if post_gate.get("corrective_actions"):
                 result_data.setdefault("corrective_actions", []).extend(post_gate.get("corrective_actions", []))
             runtime_artifacts = self._register_runtime_artifacts(stage, agent_name, result_data)
-            self._merge_agent_data(stage, result_data)
-            await self._record_guardian_gate_result(post_gate)
             status.state = "idle"
             status.last_result = result.summary
             status.last_run_time = self._agent_now_iso(agent)
             status.success = result.success
+            self._merge_agent_data(stage, result_data)
+            if stage == Stage.MANIPULATION and (not result.success or gate_blocks_execution(post_gate)):
+                sync_manipulation_execution_status(self._state, stage, failed=True)
+                status.state, status.success = "error", False
+            if stage == Stage.SPECIMEN and (not result.success or gate_blocks_execution(post_gate)):
+                sync_specimen_execution_status(self._state, stage, failed=True)
+                status.state, status.success = "error", False
+            await self._record_guardian_gate_result(post_gate)
 
             log_agent_event(
                 self._logger,
@@ -2911,7 +2959,7 @@ class LangGraphRunLoop:
             await self._emit(
                 event_type="agent_result",
                 message=f"{agent_name}: {result.summary}",
-                payload={"agent": agent_name, "node_id": stage.value, "status": "done", "module_runtime": module_runtime, "result": compact_runtime_payload(result.data)},
+                payload={"agent": agent_name, "node_id": stage.value, "status": status.state if status.state in {"running", "waiting", "error"} else "done", "module_runtime": module_runtime, "result": compact_runtime_payload(result.data)},
             )
             await self._emit_module_graph_completed(stage, agent_name, module_runtime, compact_runtime_payload(result_data))
             await self._emit_artifact_events(
@@ -2957,6 +3005,8 @@ class LangGraphRunLoop:
 
             guardian_decision = "continue"
             if stage == Stage.GUARDIAN:
+                if await self._pause_for_guardian_recovery(stage=stage, status=status, result_data=result_data):
+                    return
                 guardian_decision = str(result.data.get("guardian", {}).get("decision", "continue"))
                 self._state.loop_count += 1
             transition_context = {**self._state.run_metadata, "agent_result": compact_runtime_payload(result.data)}
@@ -3010,6 +3060,10 @@ class LangGraphRunLoop:
                 },
             )
         except Exception as exc:
+            if stage == Stage.MANIPULATION:
+                sync_manipulation_execution_status(self._state, stage, failed=True)
+            if stage == Stage.SPECIMEN:
+                sync_specimen_execution_status(self._state, stage, failed=True)
             exception_gate = guardian_gate(
                 state=self._state,
                 stage=stage.value,

@@ -553,6 +553,8 @@ async def test_specimen_agent_installed_printer_uses_single_ejection_only_projec
 ) -> None:
     agent = SpecimenMakingAgent()
     spec = _valid_spec()
+    placement = {"mode": "custom", "center_x_mm": 110, "center_y_mm": 145}
+    spec["specimen_placement"] = placement
     spec["test_mode_autofill"] = True
     spec["printer_test_path"] = "설치 프린터"
     spec["printer_profile"] = "bambulab_x2d_pla_0p4_nozzle"
@@ -619,6 +621,7 @@ async def test_specimen_agent_installed_printer_uses_single_ejection_only_projec
     assert result.success is True
     assert captured_payloads, "SpecimenAgent must call printer.prepare for installed printer path"
     payload = captured_payloads[0]
+    assert payload["specimen_placement"] == placement
     assert payload["test_printer_path"] == "installed_printer"
     assert payload["allow_test_printer_live"] is True
     assert payload["test_printer_transport"] == "real"

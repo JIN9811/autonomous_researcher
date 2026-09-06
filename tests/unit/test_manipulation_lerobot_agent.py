@@ -472,7 +472,7 @@ def test_live_workflow_saved_task_profile_overrides_stale_experiment_policy(monk
     assert payload["task_instruction"] == "Use the saved transfer policy."
     assert payload["fps"] == 15
     assert payload["camera_fps"] == 15
-    assert payload["display_data"] is True
+    assert payload["display_data"] is False
     assert payload["rollout_temporal_ensemble"] is False
 
 
@@ -484,6 +484,7 @@ def test_direct_manipulation_bridge_run_uses_saved_task_profile_policy(monkeypat
                 "task_id": "transfer_to_utm",
                 "policy_type": "smolvla",
                 "policy_path": "/tmp/policies/saved/pretrained_model",
+                "display_data": True,
             }
         ),
     )
@@ -505,6 +506,7 @@ def test_direct_manipulation_bridge_run_uses_saved_task_profile_policy(monkeypat
     assert payload["policy_type"] == "smolvla"
     assert payload["policy_path"] == "/tmp/policies/saved/pretrained_model"
     assert payload["policy_checkpoint_path"] == "/tmp/policies/saved/pretrained_model"
+    assert payload["display_data"] is True
 
 
 def test_live_workflow_selects_clear_task_after_equipment_completion(monkeypatch: Any) -> None:

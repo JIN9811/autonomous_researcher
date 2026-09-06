@@ -174,6 +174,7 @@ try:
         "encoding": str(msg.encoding),
         "format": "jpeg",
         "frame_age_ms": frame_age_ms,
+        "frame_timestamp": stamp if stamp > 0 else None,
         "data_url": "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii"),
     }))
 finally:
@@ -1337,6 +1338,7 @@ class UTMRuntimeProcessManager:
             if code == 0 and parsed and parsed.get("ok") and parsed.get("data_url"):
                 parsed.update({
                     "mode": mode,
+                    "camera_profile_id": self._active_camera_profile().profile_id,
                     "frame_available": True,
                     "runtime_status": status.get("status"),
                     "runtime_pid": status.get("pid"),

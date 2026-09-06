@@ -54,6 +54,8 @@ from utils.equipment_agentic_task import (
     evaluate_equipment_entry_gate,
     project_equipment_cycle_evidence,
     validate_equipment_agentic_flow,
+    bind_cycle_csv_artifact,
+    clearance_screen_evidence,
 )
 from utils.equipment_vision_tasks import build_equipment_vision_check, get_equipment_vision_task
 
@@ -2891,6 +2893,7 @@ class LabEquipmentAgent(BaseAgent):
         )
         transitions: list[dict[str, Any]] = []
         last_result: AgentResult | None = None
+        saved_csv_result: dict[str, Any] = {}
         terminal = "__blocked__"
         task_contract = validate_equipment_agentic_flow(agentic_task_id, blocks)
 
@@ -3140,6 +3143,13 @@ class LabEquipmentAgent(BaseAgent):
                 success=False,
                 summary="Equipment Agentic Task entry gate blocked",
                 data={
+                    "equipment_result": {
+                        "ok": False,
+                        "status": "blocked",
+                        "failure_code": "EQUIPMENT_HANDOFF_NOT_READY",
+                        "message": "Verified specimen / UTM handoff is required before equipment input.",
+                    },
+                    "protocol_note": "equipment agentic task blocked at the verified specimen / UTM handoff gate",
                     "workflow_agentic_task": overlay,
                     "required_entry_gate": entry_gate,
                     "equipment_report": {
@@ -3333,6 +3343,22 @@ class LabEquipmentAgent(BaseAgent):
             }
             request["runtime_context"] = dict(run_context)
             last_result = await self._run_equipment_skill(state, ctx, request)
+            if agentic_task_id == UTM_COMPRESSION_TASK_ID:
+                raw = last_result.data.get("equipment_result") or {}
+                if block_id in {"save_raw_data", "validate_raw_data"}:
+                    raw = bind_cycle_csv_artifact(
+                        raw, run_id=state.run_id,
+                        export_context=self._raw_csv_export_context(state, source_stage_context),
+                    )
+                    last_result.data["equipment_result"] = raw
+                    if isinstance(raw.get("data_acquisition"), dict):
+                        last_result.data.setdefault("equipment_report", {})["data_acquisition"] = dict(raw["data_acquisition"])
+                    if block_id == "save_raw_data":
+                        saved_csv_result = dict(raw)
+                elif block_id == "restore_robot_clearance":
+                    height = clearance_screen_evidence(raw)
+                    if height:
+                        raw["height"] = height
             skill_outcome = "completed" if last_result.success else "failed"
             skill_target = (
                 f"{block_id}.vision"
@@ -3498,6 +3524,32 @@ class LabEquipmentAgent(BaseAgent):
             report.update(cycle_projection)
             data["equipment_report"] = report
 
+            if success and cycle_projection["handoff_eligibility"]["eligible"]:
+                export = cycle_projection["raw_data_export"]
+                packet = {
+                    "schema": "utm_data_ready.v1", "status": "ready",
+                    "run_id": state.run_id, "specimen_id": specimen_id,
+                    "result_file": export["path"], "linux_path": export["path"],
+                    "artifact_id": export["artifact_id"], "sha256": export.get("sha256"),
+                    "row_count_probe": export["row_count"], "columns_probe": export["columns"],
+                    "evidence_refs": [export["path"]],
+                }
+                data["equipment_result"] = {
+                    **saved_csv_result, "ok": True, "status": "verified_complete", "failure_code": None,
+                    "cross_checks": dict(cycle_projection["cross_checks"]),
+                    "program_id": UTM_COMPRESSION_TASK_ID,
+                    "run_id": state.run_id, "specimen_id": specimen_id,
+                    "result_file": export["path"], "utm_csv_path": export["path"],
+                }
+                data["equipment_handoff"] = {**packet, "status": "ready_for_analysis", "ready_for_analysis": True}
+                data["utm_data_ready"] = packet
+                data["handoff_packet"] = packet
+                report.update(
+                    status="verified_complete", completion_scope="agentic_cycle",
+                    data_acquisition=packet,
+                    decision={"handoff_status": "ready_for_analysis", "blocking_reasons": []},
+                )
+
             if (
                 success
                 and require_entry_handoff
@@ -3508,6 +3560,8 @@ class LabEquipmentAgent(BaseAgent):
                 terminal = "__blocked__"
                 failure_code = str(cycle_projection["handoff_eligibility"].get("failure_code") or "EQUIPMENT_STEP_POSTCONDITION_MISSING")
                 execution["terminal"] = terminal
+                execution["status"] = "blocked"
+                execution["state"] = "BLOCKED"
                 execution["failure_code"] = failure_code
                 execution["workflow_agentic_task"]["status"] = "blocked"
                 overlay = execution["workflow_agentic_task"]
@@ -3520,6 +3574,9 @@ class LabEquipmentAgent(BaseAgent):
                 }
                 self._write_skill_flow_execution(profile_id, execution)
         if not success:
+            data["verified"] = False
+            if isinstance(data.get("equipment_result"), dict):
+                data["equipment_result"]["ok"] = False
             final_failure_code = str(
                 execution.get("failure_code") or "EQUIPMENT_SKILL_FLOW_BLOCKED"
             )

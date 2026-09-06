@@ -877,6 +877,46 @@ class _TailState:
     motion_annotator: MotionStateAnnotator = field(default_factory=MotionStateAnnotator)
 
 
+def build_joint_telemetry_batch(
+    packets: list[dict[str, Any]], *, compact: bool = False,
+) -> dict[str, Any]:
+    """Project browser chart history without changing recorded evidence or annotation.
+
+    Opt-in clients receive native numeric history plus one latest display detail.
+    Legacy clients retain the original full-sample wire contract.
+    """
+    if not compact:
+        return {"samples": packets}
+    fields = (
+        "type", "session_id", "execution_index", "sequence", "timestamp",
+        "elapsed_s", "actual_source", "target_source", "applied_target_source",
+        "source_units",
+    )
+    samples = []
+    for packet in packets:
+        sample = {key: packet[key] for key in fields if key in packet}
+        motion = packet.get("motion_state") or {}
+        outcome = motion.get("grasp_outcome") or {}
+        measured = motion.get("measured") or {}
+        # The 3D held/released latch needs intervening release/regrasp evidence,
+        # even when both transitions happen inside one displayed batch.
+        sample["grasp_visual"] = {
+            "status": outcome.get("status", "idle"),
+            "attempt_index": outcome.get("attempt_index"),
+            "gripper_state": measured.get("gripper_state", "idle"),
+        }
+        samples.append(sample)
+    detail_fields = (
+        "type", "session_id", "execution_index", "sequence", "status",
+        "actual_rad", "target_rad", "motion_state",
+    )
+    return {
+        "sample_format": "compact-v1",
+        "samples": samples,
+        "latest_sample": {key: packets[-1][key] for key in detail_fields if key in packets[-1]} if packets else None,
+    }
+
+
 @dataclass
 class JointTelemetryFileObserver:
     """Incrementally tail action logs without touching the robot process."""

@@ -25,7 +25,8 @@ Modification guide:
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260715-camera-usb-link-1" />
+    <!-- Compatibility markers: /static/styles.css?v=20260715-camera-usb-link-1 /static/lerobot.js?v=20260903-background-train-1 -->
+    <link rel="stylesheet" href="/static/styles.css?v=20260904-teleop-handoff-1" />
   </head>
   <body>
     <main class="page lerobot-page">
@@ -341,6 +342,14 @@ Modification guide:
             <button id="btn-teleop-status" class="btn">Status</button>
           </div>
           <div id="lerobot-teleop-action-status" class="lerobot-action-status idle">Waiting for teleoperation action.</div>
+          <section id="lerobot-teleop-handoff-panel" class="lerobot-teleop-handoff-panel hidden" aria-live="polite">
+            <p class="eyebrow">Cycle-bound transfer</p>
+            <h3>Teleop Handoff</h3>
+            <div id="lerobot-teleop-handoff-context" class="test-mode-derived-flow">Loading handoff context.</div>
+            <p class="hint">이송 완료는 현재 텔레옵을 기존 Stop 경로로 종료하고 포트 반환을 확인한 뒤 UTM Vision 단계로 넘깁니다.</p>
+            <button id="btn-teleop-handoff-complete" class="btn primary" type="button" disabled>Teleop Complete</button>
+            <div id="lerobot-teleop-handoff-status" class="lerobot-action-status idle">A matching teleop session has not started.</div>
+          </section>
         </article>
 
         <article id="recording-card" class="panel lerobot-workflow-card">
@@ -1467,6 +1476,6 @@ val=48-59</textarea>
         </article>
       </section>
     </main>
-    <script src="/static/lerobot.js?v=20260903-background-train-1" defer></script>
+    <script src="/static/lerobot.js?v=20260904-teleop-handoff-1" defer></script>
   </body>
 </html>

@@ -62,6 +62,8 @@ The resolver maps device modes to the internal execution policy:
 
 `virtual` maps to `preflight_only`; `real` maps to `execute`. CAE, Analysis, Knowledge, BO, Design, and Guardian remain enabled because they do not own the physical boundaries configured here. Existing per-device confirmation, Guardian, PLC, freshness, connection, and safety gates still apply when a row is set to `real`.
 
+The Vision row controls pickup/active-camera perception. A post-teleop UTM placement capture is equipment-owned: when Lab Equipment is real, that mandatory UTM capture still executes even if pickup Vision is set to preflight-only. This exception applies only to the bounded post-manipulation verification and cannot enable robot actuation.
+
 The internal execution policy accepts the new `vision` key. Legacy specifications without a saved-profile snapshot retain current behavior.
 
 ## Built-in defaults
@@ -177,9 +179,9 @@ The gate records a typed payload:
 }
 ```
 
-The run pauses with `pending_operator_teleop_handoff` and opens or links to a handoff-scoped Manipulation Bridge popup at `/lerobot?handoff_token=<token>&run_id=<run_id>#teleoperation-card`. The existing LeRobot page validates the token against the server-held pending handoff and renders the teleop controls plus a dedicated completion panel. Starting the session calls the existing `lerobot.teleoperate.start` boundary in live mode with its normal explicit execution confirmation and selected robot profile. The operator ends the transfer through the existing stop boundary. Stopping teleop alone does not resume the agent loop.
+The run pauses with `pending_operator_teleop_handoff` and opens or links to a handoff-scoped Manipulation Bridge popup at `/lerobot?handoff_token=<token>&run_id=<run_id>#teleoperation-card`. The existing LeRobot page validates the token against the server-held pending handoff and renders the teleop controls plus a dedicated completion panel. Starting the session calls the existing `lerobot.teleoperate.start` boundary in live mode with its normal explicit execution confirmation and selected robot profile. The operator may stop teleop explicitly, but stopping teleop alone does not resume the agent loop.
 
-The Manipulation Bridge popup keeps a `Teleop Handoff` panel visible with the active run, cycle, specimen, candidate, source, and target. Its `Teleop Complete` action is disabled while no matching session exists or while that session remains active. When clicked, it calls the bounded teleop-handoff confirmation API. The controller requires `TELEOP_STOPPED`, the matching session ID, follower/leader port release, active-camera ownership return, and the current handoff token before it requests a fresh target-side placement observation. The popup displays the confirmation result and may close after the controller accepts it.
+The Manipulation Bridge popup keeps a `Teleop Handoff` panel visible with the active run, cycle, specimen, candidate, source, and target. Its `Teleop Complete` action is disabled until a matching session exists. When clicked, it first calls the same existing `lerobot.teleoperate.stop` endpoint used by the normal Teleop Stop control, even if the session was already stopped. Only after that idempotent stop response proves the matching session is `STOPPED`, the robot port is released, and camera ownership has returned does it call the bounded teleop-handoff confirmation API. The controller independently re-reads the bridge status and requires the same evidence plus the current handoff token before it requests a fresh target-side placement observation. The popup displays the confirmation result and may close after the controller accepts it.
 
 Only the explicit GUI confirmation followed by a successful, non-stale UTM placement observation releases the Lab Equipment execution gate. The confirmation must match the active run, cycle index, specimen, candidate, source, target, handoff token, and teleop session. Cancel, timeout, identity mismatch, mismatched or still-active session, unverified stop, unreleased port, camera ownership failure, stale signal, missing image evidence, or negative detection stops the cycle with a stable failure code.
 
@@ -211,7 +213,7 @@ The main application exposes:
 - `POST /api/test-mode-execution-profiles/reset`: restore one or all built-in profiles.
 - `GET /test-mode-settings`: serve the popup settings page.
 - `GET /api/planning/runs/{run_id}/teleop-handoff?handoff_token=...`: return the bounded handoff context consumed by the Manipulation Bridge popup.
-- `POST /api/planning/runs/{run_id}/teleop-handoff/confirm`: validate the current handoff token and stopped teleop session, run target-side Vision verification, and release the same paused cycle.
+- `POST /api/planning/runs/{run_id}/teleop-handoff/confirm`: validate the current handoff token and stopped teleop session, release the same paused coroutine specifically to its mandatory target-side Vision verification, and keep Lab Equipment blocked until that verification succeeds.
 
 The API never accepts arbitrary paths, unknown agents, unknown modes, unknown printer-flow values, or extra execution commands. A stale `expected_revision` returns a conflict instead of overwriting another settings window.
 
@@ -237,6 +239,7 @@ The UI disables the cooling-skip choice while print body is enabled and explains
 - An active run reports the resolved profile ID, revision, and hash in state and artifacts for reproducibility.
 - Teleop handoff confirmation is single-use and cycle-bound. Neither its confirmation nor its session ID can be replayed for another specimen or BO iteration.
 - A stopped teleop session never advances the cycle until the operator clicks the GUI confirmation action.
+- `Teleop Complete` always terminates teleoperation through the ordinary Teleop Stop endpoint before it attempts confirmation; it does not implement a second stop path.
 - Emergency stop, stop, or reset stops the associated teleop session when possible and invalidates every pending handoff token.
 
 ## Verification

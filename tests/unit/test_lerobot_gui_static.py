@@ -108,6 +108,23 @@ def test_lerobot_background_training_checkbox_defaults_on_and_is_submitted() -> 
     assert "train_background: trainBackgroundInput ? boolValue(trainBackgroundInput) : true" in script
 
 
+def test_lerobot_handoff_complete_stops_matching_teleop_then_confirms_transfer() -> None:
+    template = Path("web/templates/lerobot.html").read_text(encoding="utf-8")
+    script = Path("web/static/lerobot.js").read_text(encoding="utf-8")
+
+    assert 'id="lerobot-teleop-handoff-panel"' in template
+    assert 'id="btn-teleop-handoff-complete"' in template
+    assert 'id="lerobot-teleop-handoff-context"' in template
+    assert "handoff_token" in script
+    assert "run_id" in script
+    assert 'postJson("/api/lerobot/teleoperate/stop"' in script
+    assert "teleop-handoff/confirm" in script
+    assert script.index('postJson("/api/lerobot/teleoperate/stop"') < script.index("teleop-handoff/confirm")
+    assert "UTM Vision verification is next" in script
+    assert '/static/lerobot.js?v=20260904-teleop-handoff-1' in template
+    assert '/static/styles.css?v=20260904-teleop-handoff-1' in template
+
+
 def test_lerobot_isaac_augmentation_recipe_controls_and_payload_are_wired() -> None:
     template = Path("web/templates/lerobot.html").read_text(encoding="utf-8")
     script = Path("web/static/lerobot.js").read_text(encoding="utf-8")

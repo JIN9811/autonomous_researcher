@@ -27,6 +27,7 @@ from typing import Any
 from device_bridges.bambu_bridge import PrinterDeviceBridgeManager
 from device_bridges.prusa_bridge import PrinterAgenticWorkflow, PrusaBridgeConfig
 from mcp_tools.tool_registry import ToolRegistry
+from utils.specimen_placement import placement_from_payload
 
 
 def register_printer_tools(
@@ -47,6 +48,12 @@ def register_printer_tools(
     def printer_prepare(payload: dict[str, Any]) -> dict[str, Any]:
         normalized = dict(payload or {})
         if selected_provider(normalized) == "prusa_mk4s":
+            try:
+                placement = placement_from_payload(normalized)
+            except ValueError as exc:
+                return {"ok": False, "status": "blocked", "failure_code": "SPECIMEN_PLACEMENT_INVALID", "message": str(exc)}
+            if placement["mode"] != "auto":
+                return {"ok": False, "status": "blocked", "failure_code": "SPECIMEN_PLACEMENT_PROVIDER_UNSUPPORTED"}
             result = prusa_workflow.prepare(normalized)
             profile, reason = bridge_manager._select_profile(normalized)  # noqa: SLF001 - local routing boundary.
             result.setdefault("provider", "prusa_mk4s")

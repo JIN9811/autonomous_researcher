@@ -199,7 +199,8 @@ def _utm_specimen_presence_capture(
     utm_runtime_manager: Any | None,
 ) -> dict[str, Any]:
     mode = str(payload.get("runtime_mode") or payload.get("mode") or "test").strip().lower()
-    allow_virtual = mode == "test" and bool(payload.get("allow_virtual_bridge_in_test", False))
+    clear_verification = payload.get("purpose") == "utm_clear_verification"
+    allow_virtual = not clear_verification and mode == "test" and bool(payload.get("allow_virtual_bridge_in_test", False))
     prefer_virtual = allow_virtual and bool(payload.get("prefer_virtual_bridge_in_test", False))
     runtime_status: dict[str, Any] = {}
     frame: dict[str, Any] = {}
@@ -213,7 +214,7 @@ def _utm_specimen_presence_capture(
     elif utm_runtime_manager is not None:
         runtime_status = dict(
             utm_runtime_manager.start()
-            if bool(payload.get("auto_start_runtime", True))
+            if not clear_verification and bool(payload.get("auto_start_runtime", True))
             else utm_runtime_manager.status()
         )
         try:
@@ -286,6 +287,9 @@ def _utm_specimen_presence_capture(
 
     output_dir = Path(str(payload.get("output_dir") or "runs/utm_specimen_presence")).expanduser()
     frame_id = str(frame.get("frame_id") or f"utm-frame-{int(_now().timestamp() * 1000)}")
+    if clear_verification:
+        from uuid import uuid4
+        frame_id = f"utm-clear-{uuid4().hex}"
     try:
         result = inspect_specimen_presence(
             str(frame.get("data_url") or ""),
@@ -293,6 +297,11 @@ def _utm_specimen_presence_capture(
             specimen_id=str(payload.get("specimen_id") or ""),
             frame_id=frame_id,
             min_area_px=float(payload.get("min_area_px") or 300.0),
+            roi_normalized=payload.get("roi_normalized"),
+            purpose=str(payload.get("purpose") or ""),
+            capture_evidence={"topic": frame.get("topic"), "camera_profile_id": frame.get("camera_profile_id"),
+                "frame_timestamp": frame.get("frame_timestamp"), "frame_age_ms": frame.get("frame_age_ms"),
+                "material": payload.get("material"), "after_timestamp": payload.get("after_timestamp")},
         )
     except Exception as exc:
         return {
@@ -327,6 +336,8 @@ def _utm_specimen_presence_capture(
             "session_id": str(payload.get("session_id") or ""),
         }
     )
+    if clear_verification:
+        result["loop_id"] = payload.get("loop_id")
     return result
 
 

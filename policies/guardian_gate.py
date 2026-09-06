@@ -83,10 +83,15 @@ def guardian_gate(
     alarms.extend(_vision_operator_intervention_alarms(payload=payload, stage=stage, phase=phase))
     alarms.extend(_tool_action_alarm_signals(payload=payload, state=state, stage=stage, phase=phase, tool=tool, action=action))
     alarms.extend(_state_alarm_signals(state=state, stage=stage, phase=phase))
+    if stage == "analysis":
+        from utils.utm_clear_cycle import clearance_missing
+        if clearance_missing(state):
+            alarms.append(_alarm("UTM_CLEARANCE_REQUIRED", "critical", "Same-cycle UTM clearance is not verified.", "utm_clear_execution"))
     alarms = _filter_expected_non_actuating_print_alarms(alarms, payload=payload, state=state)
     alarms = _filter_compensated_bambu_transport_alarms(alarms, payload=payload)
     alarms = _filter_completed_printer_wait_handoff_alarms(alarms, payload=payload)
     alarms = _filter_compensated_active_cam_pose_snapshot_alarms(alarms, payload=payload, stage=stage, phase=phase)
+    alarms = _filter_recovered_utm_frame_attempt_alarms(alarms, payload=payload, stage=stage, phase=phase)
     alarms = _filter_utm_retry_with_valid_frame_alarms(alarms, payload=payload, stage=stage, phase=phase)
     alarms = _dedupe_alarms(alarms)
 
@@ -259,8 +264,10 @@ def equipment_skill_recovery_gate(
 def tool_requires_action_shield(tool: str) -> bool:
     """Return True when a tool has physical, persistent, or runtime-mutating side effects."""
     name = str(tool or "").strip()
-    if name in {"lerobot.rollout.stop", "lerobot.rollout.status"}:
+    if name in {"lerobot.rollout.stop", "lerobot.rollout.status", "lerobot.replay.stop", "lerobot.replay.status"}:
         return False
+    if name == "lerobot.replay.start":
+        return True
     if name in ACTION_SHIELDED_TOOLS:
         return True
     return name.startswith(("lerobot.rollout.", "printer.", "self_evolution.", "graph.active_config."))
@@ -289,13 +296,23 @@ def _collect_alarm_signals(payload: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
 
-    def walk(value: Any, path: str) -> None:
+    def walk(value: Any, path: str, *, passive_vision: bool = False) -> None:
         if isinstance(value, dict):
+            # Optional Equipment observers are diagnostic, not mandatory gates.
+            # Keep their unavailable-link evidence, without masking safety signals.
+            if value.get("phase") == "vision":
+                passive_vision = (
+                    value.get("kind") == "vision_observation"
+                    and value.get("blocking") is False
+                )
             status = str(value.get("status") or value.get("handoff_status") or value.get("guardian_status") or "").strip().lower()
             failure = value.get("failure_code") or value.get("error_code") or value.get("incident_code")
             message = str(value.get("message") or value.get("error") or failure or status or "")
             if failure:
-                add(str(failure), str(value.get("severity") or "blocking"), message, path)
+                severity = str(value.get("severity") or "blocking")
+                if passive_vision and failure == "EQUIPMENT_VISION_LINK_UNAVAILABLE" and not value.get("severity"):
+                    severity = "warning"
+                add(str(failure), severity, message, path)
             elif status in TERMINAL_FAILURE_STATUSES:
                 default_severity = "blocking" if _is_top_level_status_path(path) else "warning"
                 add(status, str(value.get("severity") or default_severity), message or status, path)
@@ -340,10 +357,11 @@ def _collect_alarm_signals(payload: dict[str, Any]) -> list[dict[str, Any]]:
             for key, child in value.items():
                 if key in {"raw", "raw_output", "prompt"}:
                     continue
-                walk(child, f"{path}.{key}" if path else str(key))
+                walk(child, f"{path}.{key}" if path else str(key),
+                     passive_vision=passive_vision and key == "vision_result")
         elif isinstance(value, list):
             for index, child in enumerate(value):
-                walk(child, f"{path}[{index}]")
+                walk(child, f"{path}[{index}]", passive_vision=passive_vision)
 
     walk(payload, "payload")
     return alarms
@@ -471,6 +489,13 @@ def _tool_action_alarm_signals(
 
     mode = _runtime_mode(payload=payload, state=state)
     if mode != "live":
+        return alarms
+
+    if name == "lerobot.replay.start":
+        if not _bool_any(payload, ("confirm_live_execute",)):
+            add("HUMAN_APPROVAL_REQUIRED", "warning", "live replay requires explicit operator confirmation", "payload.confirm_live_execute")
+        if not _has_any(payload, ("dataset_repo_id",)) or not _has_any(payload, ("dataset_path",)):
+            add("MISSING_REQUIRED_INPUT", "blocking", "live replay requires a local recorded dataset identity", "payload.dataset_path")
         return alarms
 
     if _is_non_actuating(payload):
@@ -688,6 +713,53 @@ def _filter_compensated_active_cam_pose_snapshot_alarms(
             continue
         filtered.append(alarm)
     return filtered
+
+
+def _filter_recovered_utm_frame_attempt_alarms(
+    alarms: list[dict[str, Any]],
+    *,
+    payload: dict[str, Any],
+    stage: str,
+    phase: str,
+) -> list[dict[str, Any]]:
+    """Discard only superseded topic timeouts within the same successful frame read."""
+    if stage != "vision" or phase != "post":
+        return alarms
+    observation = payload.get("observation")
+    observation = observation if isinstance(observation, dict) else {}
+    verification = payload.get("utm_verification_2")
+    record = verification.get("record") if isinstance(verification, dict) else None
+    recovered_paths: set[str] = set()
+    # Placement (V1) and post-clearance (V2) own separate capture histories.
+    # A successful read can supersede only timeouts in that exact history.
+    captures = [
+        ("payload.observation.raw_capture", observation.get("raw_capture")),
+        ("payload.observation.utm_clear_verification", observation.get("utm_clear_verification")),
+        ("payload.utm_verification_2.record.evidence", record.get("evidence") if isinstance(record, dict) else None),
+    ]
+    for capture_path, capture in captures:
+        frame = capture.get("frame_capture") if isinstance(capture, dict) else None
+        if not isinstance(frame, dict) or not (
+            capture.get("ok") is True and frame.get("ok") is True and frame.get("frame_available") is True
+        ):
+            continue
+        attempts = frame.get("attempts")
+        if not isinstance(attempts, list) or not attempts:
+            continue
+        final = attempts[-1]
+        if not isinstance(final, dict) or not (
+            final.get("ok") is True and not final.get("failure_code")
+            and frame.get("topic") and final.get("topic") == frame["topic"]
+        ):
+            continue
+        recovered_paths.update(
+            f"{capture_path}.frame_capture.attempts[{index}]"
+            for index, attempt in enumerate(attempts[:-1])
+            if isinstance(attempt, dict) and attempt.get("failure_code") == "ROS_IMAGE_TIMEOUT"
+        )
+    return [alarm for alarm in alarms if not (
+        alarm.get("source_path") in recovered_paths and alarm.get("reason_code") == "ROS_IMAGE_TIMEOUT"
+    )]
 
 
 def _filter_utm_retry_with_valid_frame_alarms(

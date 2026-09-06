@@ -185,6 +185,7 @@ let liveReportPage = "agent";
 let liveLastSession = {};
 let liveLastSnapshot = {};
 const liveVisionSpecimenRetryCheckpoints = new Set();
+const openedOperatorTeleopHandoffTokens = new Set();
 let liveRecentEvents = [];
 let liveRunEvents = [];
 let liveRunArtifacts = [];
@@ -206,6 +207,7 @@ let liveEquipmentRuntimeError = "";
 let liveEquipmentRuntimeActionInFlight = "";
 let liveEquipmentRuntimeRefreshInFlight = null;
 let liveEquipmentRuntimeRefreshedAt = 0;
+let liveEquipmentRuntimeRefreshPending = false;
 let liveEquipmentRuntimeRefreshSeq = 0;
 let liveKnowledgeActivitySnapshot = null;
 let liveKnowledgeActivityInFlight = null;
@@ -240,6 +242,7 @@ const LIVE_UTM_FRAME_FETCH_TIMEOUT_MS = 3000;
 let liveGraphActionStatus = null;
 let liveSelectedGraphNodeId = "";
 let liveSelectedEventKey = "";
+let liveUtmVerificationSelection = { scopeKey: "", index: 1 };
 let liveGraphSelectionCleared = false;
 let liveGraphFocusPending = false;
 let liveGraphLastFocusKey = "";
@@ -1035,6 +1038,7 @@ function resetLiveRunScopedStateForAuthoritativeSession(serverSession = {}) {
   liveEquipmentRuntimeSnapshot = null;
   liveEquipmentSkillFlowSnapshot = null;
   liveEquipmentRuntimeRefreshedAt = 0;
+  liveEquipmentRuntimeRefreshPending = false;
   liveEquipmentRuntimeError = "";
   liveEquipmentRuntimeRefreshSeq += 1;
   liveEquipmentRuntimeRefreshInFlight = null;
@@ -3655,6 +3659,8 @@ function agentIdFromMessage(msg) {
 }
 
 function agentIdFromEvent(event) {
+  // Bootstrap is orchestrator guidance, even when its proposal mentions devices.
+  if ((event.event_type || event.type) === "planning_bootstrap") return "orchestrator";
   const payload = event && typeof event.payload === "object" ? event.payload : {};
   const candidates = [
     payload.agent_id,
@@ -3990,7 +3996,60 @@ function specimenPrinterRuntimeState() {
   return "";
 }
 
+function manipulationExecutionDisplayState(state, running) {
+  const clearExecution = state.run_metadata?.utm_clear_execution;
+  if (clearExecution
+      && clearExecution.run_id === state.run_id
+      && clearExecution.loop_id === state.loop_count
+      && clearExecution.specimen_id === state.current_experiment_spec?.specimen_id) {
+    if (clearExecution.state === "done" && clearExecution.success === true) return "done";
+    if (clearExecution.state === "error" || clearExecution.state === "blocked") return "error";
+    if (["starting", "running"].includes(clearExecution.state)) {
+      return running && !state.is_paused ? "running" : "waiting";
+    }
+    return "waiting";
+  }
+  const execution = state.run_metadata?.manipulation_execution;
+  if (!execution) return "";
+  if (execution.run_id !== state.run_id
+      || execution.loop_id !== state.loop_count
+      || execution.specimen_id !== state.current_experiment_spec?.specimen_id) return "idle";
+  if (execution.state === "done" && execution.success === true) return "done";
+  if (execution.state === "error" || execution.state === "blocked") return "error";
+  return running && !state.is_paused && execution.state === "running" ? "running" : "waiting";
+}
+
+function specimenExecutionDisplayState(state, running) {
+  const runtime = state.agent_status?.specimen_agent;
+  if (["error", "blocked", "failed"].includes(runtime?.state)) return "error";
+  if (state.stage === "specimen") {
+    if (["running", "waiting", "waiting_approval"].includes(runtime?.state)) {
+      return runtime.state === "running" && running && !state.is_paused ? "running" : "waiting";
+    }
+  }
+  const execution = state.run_metadata?.specimen_execution;
+  if (execution && (execution.run_id !== state.run_id || execution.loop_id !== state.loop_count
+      || execution.specimen_id !== state.current_experiment_spec?.specimen_id)) return "idle";
+  if (!execution) return "";
+  if (execution.state === "error" || execution.state === "blocked") return "error";
+  if (execution.state === "done" && execution.success === true) return "done";
+  return running && !state.is_paused && execution.state === "running" ? "running" : "waiting";
+}
+
 function eventStatusForAgent(agentId, state, running) {
+  if (agentId === "specimen") {
+    const executionState = specimenExecutionDisplayState(state, running);
+    if (executionState) return executionState;
+  }
+  if (agentId === "manipulation") {
+    const runtime = state.agent_status?.manipulation_agent;
+    if (runtime?.success === false && ["error", "blocked", "failed"].includes(runtime.state)) return "error";
+    if (state.stage === "manipulation" && ["running", "waiting", "waiting_approval"].includes(runtime?.state)) {
+      return running && !state.is_paused && runtime.state === "running" ? "running" : "waiting";
+    }
+    const executionState = manipulationExecutionDisplayState(state, running);
+    if (executionState) return executionState;
+  }
   const events = currentRunEventSources();
   const agentEvents = events.filter((event) => agentIdFromEvent(event) === agentId);
   const activeAgent = agentIdFromStage(state.stage || "");
@@ -4002,6 +4061,7 @@ function eventStatusForAgent(agentId, state, running) {
     && String(state.stage || "").toLowerCase() === "complete"
     && runtimeStatus
     && runtimeStatus.success === true
+    && (agentId !== "specimen" || runtimeStatus.state === "done")
   ) return "done";
   const pendingInput = agentEvents.some(eventRequiresOperatorInput)
     || planningMessagesCache.some((msg) => agentIdFromMessage(msg) === agentId && Boolean(msg.pending_operator_input));
@@ -4018,6 +4078,16 @@ function eventStatusForAgent(agentId, state, running) {
   const pendingApproval = (liveApprovals.pending || []).some((item) => agentIdFromFreeText(`${item.stage || ""} ${item.title || ""} ${item.reason || ""}`) === agentId);
   if (pendingApproval) return "waiting";
   if (running && activeAgent === agentId) return "running";
+  if (agentId === "specimen") {
+    // Diagnostics/chat are report content, not fabrication completion evidence.
+    // Scoped physical execution was handled above; retain explicit virtual/legacy
+    // runtime completion when that path has no separate execution record.
+    if (runtimeStatus?.state === "done" && runtimeStatus.success === true) return "done";
+    if (["running", "waiting", "waiting_approval"].includes(runtimeStatus?.state)) {
+      return running && !state.is_paused && runtimeStatus.state === "running" ? "running" : "waiting";
+    }
+    return "idle";
+  }
   const agentMessages = planningMessagesCache.filter((msg) => agentIdFromMessage(msg) === agentId);
   if (agentEvents.length || agentMessages.length) return "done";
   return "idle";
@@ -9318,9 +9388,16 @@ function renderOrcRiskFlow(model) {
 function orcRuntimeGraphSource() {
   const graph = (liveGraphPayload && liveGraphPayload.graph) || liveGraphPayload || {};
   if (!graph || !Array.isArray(graph.nodes) || !graph.nodes.length) return null;
-  return LIVE_RUNTIME_MAP_GEOMETRY
+  const normalized = LIVE_RUNTIME_MAP_GEOMETRY
     ? LIVE_RUNTIME_MAP_GEOMETRY.normalizeNodePositions(graph, { grid: 16 })
     : graph;
+  // Compact-card spacing only; keep runtime coordinates and edge topology intact.
+  return {
+    ...normalized,
+    nodes: normalized.nodes.map((node) => node.id === "equipment"
+      ? { ...node, position: { ...node.position, y: Number(node.position?.y || 0) + 48 } }
+      : node),
+  };
 }
 
 function orcGraphNodeShort(node = {}) {
@@ -14247,6 +14324,154 @@ function renderVisionActiveCamEjectionCheck(screenReport, persistedArtifact = {}
   `;
 }
 
+function utmVerificationScope(report) {
+  const state = report && report.state && typeof report.state === "object" ? report.state : report || {};
+  const loopId = state.loop_count;
+  const specimenId = String(state.current_experiment_spec?.specimen_id || "");
+  const scope = {
+    run_id: String(state.run_id || ""),
+    loop_id: Number.isInteger(loopId) ? loopId : Number.NaN,
+    specimen_id: specimenId,
+  };
+  const verifications = state.run_metadata?.utm_verifications;
+  const established = Boolean(verifications
+    && verifications.run_id === scope.run_id
+    && verifications.loop_id === scope.loop_id
+    && verifications.specimen_id === scope.specimen_id);
+  return established ? { ...scope, ...verifications, scope_established: true } : { ...scope, scope_established: false };
+}
+
+function utmVerificationScopeKey(scope) {
+  return JSON.stringify([String(scope?.run_id || ""), scope?.loop_id, String(scope?.specimen_id || "")]);
+}
+
+function updateUtmVerificationSelection(scope, requestedIndex = null) {
+  const scopeKey = utmVerificationScopeKey(scope);
+  if (liveUtmVerificationSelection.scopeKey !== scopeKey) {
+    liveUtmVerificationSelection = { scopeKey, index: 1 };
+  }
+  if (requestedIndex === 1 || requestedIndex === 2) {
+    liveUtmVerificationSelection = { scopeKey, index: requestedIndex };
+  }
+  return liveUtmVerificationSelection;
+}
+
+function handleUtmVerificationSelectionClick(button) {
+  const index = Number(button?.dataset?.utmVerificationSelect);
+  const scopeKey = String(button?.dataset?.utmVerificationScope || "");
+  if (!scopeKey || ![1, 2].includes(index)) return false;
+  liveUtmVerificationSelection = { scopeKey, index };
+  return true;
+}
+
+function selectVerification(scope, index = 1) {
+  const selectedIndex = index === 2 ? 2 : 1;
+  const title = selectedIndex === 1 ? "Verification 1 — UTM placement" : "Verification 2 — UTM clear";
+  const recordKey = `verification_${selectedIndex}`;
+  const rawRecord = scope?.scope_established === true && scope[recordKey] && typeof scope[recordKey] === "object"
+    ? scope[recordKey]
+    : null;
+  const artifact = rawRecord?.artifact && typeof rawRecord.artifact === "object" ? rawRecord.artifact : {};
+  const evidence = rawRecord?.evidence && typeof rawRecord.evidence === "object" ? rawRecord.evidence : {};
+  const allowedStatuses = selectedIndex === 1 ? new Set(["confirmed", "pending"]) : new Set(["clear", "occupied", "unknown"]);
+  const rawStatus = String(rawRecord?.status || "").toLowerCase();
+  const status = rawRecord && allowedStatuses.has(rawStatus) ? rawStatus : "pending";
+  const imagePath = String(artifact.path || artifact.annotated_frame_path || artifact.raw_frame_path || "");
+  const imageUrl = String(artifact.url || (imagePath ? `/api/lerobot/visualization/file?path=${encodeURIComponent(imagePath)}` : ""));
+  return {
+    index: selectedIndex,
+    title,
+    status,
+    confirmed: rawRecord?.confirmed === true,
+    capturedAt: String(rawRecord?.captured_at || ""),
+    artifact,
+    evidence,
+    imagePath,
+    imageUrl,
+    simulated: evidence.simulated === true,
+  };
+}
+
+function renderVisionUtmVerificationTabs(scope, selectedIndex = 1) {
+  const scopeKey = utmVerificationScopeKey(scope);
+  return `
+    <div class="ar-vis-utm-tabs" role="tablist" aria-label="UTM verification snapshots">
+      ${[1, 2].map((index) => `<button type="button" class="ar-vis-utm-tab${selectedIndex === index ? " is-selected" : ""}" role="tab" aria-selected="${selectedIndex === index ? "true" : "false"}" data-utm-verification-select="${index}" data-utm-verification-scope="${escapeHtml(scopeKey)}">Verification ${index}</button>`).join("")}
+    </div>
+  `;
+}
+
+function renderVisionUtmVerification(selected) {
+  const frameWidth = selected.artifact.frame_width || selected.evidence.frame_width;
+  const frameHeight = selected.artifact.frame_height || selected.evidence.frame_height;
+  const resolution = frameWidth && frameHeight ? `${frameWidth}x${frameHeight}` : "-";
+  const result = selected.index === 1
+    ? selected.confirmed ? "specimen present" : "awaiting placement"
+    : selected.status === "clear" ? "fixture clear" : selected.status === "occupied" ? "fixture occupied" : "clearance unknown";
+  const placeholder = selected.simulated
+    ? "Explicit simulation — no physical photograph was captured."
+    : "No image — Pending";
+  return `
+    <div class="ar-vis-active-cam-card ar-vis-utm-confirmation-card" data-utm-verification-panel="${selected.index}">
+      <div class="ar-vis-utm-selected-title"><strong>${escapeHtml(selected.title)}</strong><span>${escapeHtml(selected.capturedAt || "Pending")}</span></div>
+      <div class="ar-vis-active-cam-frame ${selected.imageUrl ? "has-frame" : "is-empty"}">
+        ${selected.imageUrl
+          ? `<img src="${escapeHtml(selected.imageUrl)}" alt="${escapeHtml(selected.title)} evidence frame" loading="lazy">`
+          : `<div><strong>${selected.simulated ? "Explicit simulation" : "UTM Observation"}</strong><span>${escapeHtml(placeholder)}</span></div>`}
+      </div>
+      <div class="ar-report-metrics ar-vis-active-cam-metrics">
+        ${renderDashboardMetric("Status", selected.status, `Verification ${selected.index}`, selected.confirmed ? "success" : "warning")}
+        ${renderDashboardMetric("Result", result, "UTM", selected.confirmed ? "success" : "warning")}
+        ${renderDashboardMetric("Frame", resolution, selected.simulated ? "simulated / no photograph" : selected.imageUrl ? "captured" : "pending", selected.imageUrl ? "success" : "warning")}
+      </div>
+      ${renderVisionCardDetails("Inspection details", renderDashboardRows([
+        ["status", selected.status],
+        ["verification", selected.index],
+        ["captured_at", selected.capturedAt || "-"],
+        ["artifact_path", selected.imagePath || "-"],
+        ["evidence_path", selected.artifact.evidence_path || "-"],
+        ["simulated", selected.simulated],
+      ]))}
+    </div>
+  `;
+}
+
+function utmClearCompletionView(state) {
+  const scope = utmVerificationScope(state);
+  const clearExecution = state?.run_metadata?.utm_clear_execution;
+  const matchesScope = Boolean(clearExecution
+    && clearExecution.run_id === scope.run_id
+    && clearExecution.loop_id === scope.loop_id
+    && clearExecution.specimen_id === scope.specimen_id);
+  if (!matchesScope) return { status: "waiting", detail: "Awaiting scoped UTM clearance" };
+  const second = selectVerification(scope, 2);
+  if (["error", "blocked"].includes(clearExecution.state)) {
+    return { status: "error", detail: clearExecution.failure_code || "UTM clearance failed" };
+  }
+  if (clearExecution.state === "done" && clearExecution.success === true
+      && second.confirmed && second.status === "clear") {
+    return {
+      status: "done",
+      detail: second.simulated ? "Explicit simulation / no physical photograph" : second.imagePath || second.capturedAt || "Verification 2 clear",
+    };
+  }
+  if (["starting", "running"].includes(clearExecution.state)) {
+    return { status: "active", detail: `Clear replay ${clearExecution.state}` };
+  }
+  return { status: "waiting", detail: second.status === "pending" ? "Verification 2 pending" : `Verification 2 ${second.status}` };
+}
+
+function applyUtmClearCompletionVerification(state) {
+  const view = utmClearCompletionView(state);
+  document.querySelectorAll("[data-utm-clear-verification-step]").forEach((row) => {
+    row.dataset.status = view.status;
+    const statusNode = row.querySelector("strong");
+    const detailNode = row.querySelector("small");
+    if (statusNode && statusNode.textContent !== view.status) statusNode.textContent = view.status;
+    if (detailNode && detailNode.textContent !== view.detail) detailNode.textContent = view.detail;
+  });
+}
+
 function renderVisionUtmPlacementConfirmation(screenReport, completion = {}, persistedArtifact = {}, intervention = {}) {
   const reportCompletion = screenReport.utm_completion_confirmation || {};
   const signal = Object.keys(completion || {}).length ? completion : reportCompletion;
@@ -14302,10 +14527,17 @@ function renderVisionDashboardCards(report, status, agentLabel, profile) {
   const activeCamConfirmed = activeCamCheck.status === "confirmed"
     && activeCamCheck.spc_autoejection_confirmed === true
     && activeCamCheck.specimen_detected === true;
-  const utmCompletionArtifact = latestUtmCompletionArtifact(report);
-  const utmCompletion = latestVisionManipulationCompletion(report);
-  const utmCompletionConfirmed = utmCompletion.detected === true
-    && utmCompletion.ready_to_stop_rollout === true;
+  const utmScope = utmVerificationScope(report);
+  const utmSelection = updateUtmVerificationSelection(utmScope);
+  const selectedUtmVerification = selectVerification(utmScope, utmSelection.index);
+  const utmVerificationBody = selectedUtmVerification.index === 1
+    ? `<div class="ar-vis-utm-selected-title"><strong>${escapeHtml(selectedUtmVerification.title)}</strong><span>${escapeHtml(selectedUtmVerification.capturedAt || "Pending")}</span></div>${renderVisionUtmPlacementConfirmation(
+      screenReport,
+      { ...selectedUtmVerification.evidence, status: selectedUtmVerification.status, detected: selectedUtmVerification.confirmed },
+      { ...selectedUtmVerification.artifact, detected: selectedUtmVerification.confirmed },
+      {},
+    )}${renderVisionSpecimenIntervention(utmIntervention, "utm_post_place")}`
+    : renderVisionUtmVerification(selectedUtmVerification);
   const visionReport = latestVisionReport(report) || {};
   const packet = latestVisionSignalPacket(report) || {};
   const liveProfile = visionLiveCameraProfile();
@@ -14338,7 +14570,7 @@ function renderVisionDashboardCards(report, status, agentLabel, profile) {
       `)}
     `, { span: 4, tone: liveFrameReady ? "success" : "warning", eyebrow: "camera frame", action: renderVisionRuntimeHeaderActions() })}
     ${renderDashboardCard("Active Cam Ejection", renderVisionActiveCamEjectionCheck(screenReport, latestActiveCamArtifact(report), activeCamIntervention), { span: 4, tone: activeCamConfirmed ? "success" : "warning", eyebrow: "SPC confirmation" })}
-    ${renderDashboardCard("UTM Placement Confirmation", renderVisionUtmPlacementConfirmation(screenReport, utmCompletion, utmCompletionArtifact, utmIntervention), { span: 4, tone: utmCompletionConfirmed ? "success" : "warning", eyebrow: "post-place evidence" })}
+    ${renderDashboardCard("UTM Verification", utmVerificationBody, { span: 4, tone: selectedUtmVerification.confirmed ? "success" : "warning", eyebrow: selectedUtmVerification.title, action: renderVisionUtmVerificationTabs(utmScope, selectedUtmVerification.index), className: "ar-vis-utm-verification-card" })}
     ${renderDashboardCard("Camera / Runtime", `
       ${renderVisionCameraRuntimeSummary(screenReport, visionReport, liveFrame, liveProfile)}
       ${renderVisionCardDetails("Runtime graph details", `${renderVisionCameraHealthBoard(screenReport, visionReport, liveFrame, liveProfile)}${renderVisionRuntimeNodeFlow()}`)}
@@ -14868,6 +15100,7 @@ function renderManipulationGroundedRuntimeCards() {
     ${renderDashboardCard("Completion Verification", `
       <div class="ar-man-runtime-completion" data-atr-runtime-completion>
         ${completionSteps.map(([id, label], index) => `<div data-atr-runtime-step="${id}" data-status="waiting"><b>${String(index + 1).padStart(2, "0")}</b><span>${label}</span><strong>waiting</strong><small></small></div>`).join("")}
+        <div data-utm-clear-verification-step data-status="waiting"><b>08</b><span>UTM Clear &amp; Verification 2</span><strong>waiting</strong><small></small></div>
       </div>
     `, { span: 6, tone: "artifact", eyebrow: "release -> vision -> stop -> handoff", data: { "live-preserve": "manipulation-completion" } })}
     ${renderDashboardCard("Run Result", `
@@ -15628,6 +15861,7 @@ async function refreshEquipmentRuntimeSnapshot(options = {}) {
   if (!options.force && liveEquipmentRuntimeRefreshInFlight) return liveEquipmentRuntimeRefreshInFlight;
   const refreshSeq = ++liveEquipmentRuntimeRefreshSeq;
   const requestedRunId = liveCurrentRunId();
+  let changed = false;
   const refreshPromise = (async () => {
     try {
       const activeRunId = requestedRunId;
@@ -15638,15 +15872,19 @@ async function refreshEquipmentRuntimeSnapshot(options = {}) {
       const skillFlowUrl = activeRunId
         ? `/api/equipment/profiles/${encodeURIComponent(profileId)}/skill-flow?run_id=${encodeURIComponent(activeRunId)}`
         : `/api/equipment/profiles/${encodeURIComponent(profileId)}/skill-flow`;
+      const previous = liveEquipmentRuntimeSnapshot;
+      const progressOnly = options.progressOnly && previous;
       const [payload, runtime, skillFlow] = await Promise.all([
-        fetchJsonOrThrow("/api/equipment/windows/config"),
-        fetchJsonOrThrow(runtimeUrl),
-        fetchJsonOrThrow(skillFlowUrl),
+        progressOnly ? previous : fetchJsonOrThrowWithTimeout("/api/equipment/windows/config"),
+        progressOnly ? { execution: previous.canonicalExecution, projection: previous.canonicalProjection } : fetchJsonOrThrowWithTimeout(runtimeUrl),
+        fetchJsonOrThrowWithTimeout(skillFlowUrl),
       ]);
       if (
         refreshSeq !== liveEquipmentRuntimeRefreshSeq
         || requestedRunId !== liveCurrentRunId()
       ) return liveEquipmentRuntimeSnapshot;
+      changed = !previous || !options.progressOnly || Boolean(liveEquipmentRuntimeError)
+        || JSON.stringify(liveEquipmentSkillFlowSnapshot) !== JSON.stringify(skillFlow);
       liveEquipmentSkillFlowSnapshot = skillFlow;
       const lastTest = liveEquipmentRuntimeSnapshot && liveEquipmentRuntimeSnapshot.last_test;
       liveEquipmentRuntimeSnapshot = {
@@ -15666,13 +15904,21 @@ async function refreshEquipmentRuntimeSnapshot(options = {}) {
         refreshSeq !== liveEquipmentRuntimeRefreshSeq
         || requestedRunId !== liveCurrentRunId()
       ) return liveEquipmentRuntimeSnapshot;
+      changed = liveEquipmentRuntimeError !== String(err);
       liveEquipmentRuntimeError = String(err);
       liveEquipmentRuntimeRefreshedAt = Date.now();
       return liveEquipmentRuntimeSnapshot;
     } finally {
       if (refreshSeq === liveEquipmentRuntimeRefreshSeq) {
         liveEquipmentRuntimeRefreshInFlight = null;
-        if (options.render && liveLastSession) renderLiveRuntime(liveLastSession);
+        if (changed && options.render && liveLastSession) {
+          invalidateLiveCenterRender("report");
+          renderLiveRuntime(liveLastSession);
+        }
+        if (liveEquipmentRuntimeRefreshPending) {
+          liveEquipmentRuntimeRefreshPending = false;
+          ensureEquipmentRuntimeSnapshot();
+        }
       }
     }
   })();
@@ -15681,8 +15927,24 @@ async function refreshEquipmentRuntimeSnapshot(options = {}) {
 }
 
 function ensureEquipmentRuntimeSnapshot() {
-  if (liveEquipmentRuntimeRefreshedAt || liveEquipmentRuntimeRefreshInFlight) return;
-  refreshEquipmentRuntimeSnapshot({ render: true }).catch(() => {});
+  if (!liveCurrentRunId()) return;
+  if (liveEquipmentRuntimeRefreshInFlight) {
+    liveEquipmentRuntimeRefreshPending = true;
+    return;
+  }
+  // Authoritative session updates drive this read, never report rendering or
+  // agent selection. Persisted flow checkpoints also advance inside one call.
+  refreshEquipmentRuntimeSnapshot({ progressOnly: true, render: true }).catch(() => {});
+}
+
+function refreshActiveEquipmentProcess() {
+  const state = liveLastSession?.state || {};
+  const status = String(state.agent_status?.equipment_agent?.state || "").toLowerCase();
+  if ((status !== "running" && !liveEquipmentRuntimeError) || liveEquipmentRuntimeRefreshInFlight) return;
+  if (Date.now() - liveEquipmentRuntimeRefreshedAt < 2000) return;
+  // Keep intra-call checkpoints moving even when the larger planning read is
+  // slow. This GET-only observer never depends on which page is selected.
+  ensureEquipmentRuntimeSnapshot();
 }
 
 async function runEquipmentLiveAction(action, button = null) {
@@ -15784,9 +16046,9 @@ function equipmentCycleContext(ctx) {
     && flowExecution.run_id
     && String(flowExecution.run_id) === activeRunId
   );
-  const flowExecutionIsActive = flowExecutionMatchesRun
-    && !["__complete__", "__blocked__"].includes(String(flowExecution.terminal || ""));
-  const activeFlowExecution = flowExecutionIsActive ? flowExecution : {};
+  // Terminal checkpoints contain the final per-block evidence; compact session
+  // reports intentionally omit it. Keep the latest same-run execution visible.
+  const activeFlowExecution = flowExecutionMatchesRun ? flowExecution : {};
   const workflow = [
     activeFlowExecution.workflow_agentic_task,
     equipment.workflow_agentic_task,
@@ -16273,7 +16535,6 @@ function renderEquipmentRawDataReadiness(ctx) {
 }
 
 function renderEquipmentDashboardCards(report, status, agentLabel, profile) {
-  ensureEquipmentRuntimeSnapshot();
   const ctx = equipmentRuntimeContext(report);
   const failed = Boolean(ctx.exception.failure_code || ctx.skill.failure_code || ctx.result.failure_code);
   const cycleAvailable = equipmentCycleContext(ctx).available;
@@ -16751,6 +17012,7 @@ function renderReportPanel(session) {
     </div>
   `;
   const patchResult = updateLiveReportPanel(reportHtml, reportContextKey);
+  applyUtmClearCompletionVerification(report.state);
   if (patchResult.fullRender || patchResult.structureChanged || patchResult.chartChanged) scheduleOrcEchartsRender();
   hydrateDesignCaptureCanvases();
   renderDesignCaptureViewerOverlay();
@@ -18844,6 +19106,23 @@ window.__liveGuiDebugRestoreOperatorReportState = function liveGuiDebugRestoreOp
   return window.__liveGuiDebugSnapshot();
 };
 
+function openPendingOperatorTeleopHandoff(metadata = {}) {
+  const handoff = metadata && typeof metadata.pending_operator_teleop_handoff === "object"
+    ? metadata.pending_operator_teleop_handoff
+    : null;
+  if (!handoff || handoff.status !== "pending_operator_teleop_handoff") return false;
+  const token = String(handoff.handoff_token || "").trim();
+  if (!token || !handoff.popup_url || openedOperatorTeleopHandoffTokens.has(token)) return false;
+  openedOperatorTeleopHandoffTokens.add(token);
+  const popup = window.open(handoff.popup_url, "atr-operator-teleop-handoff", "popup=yes,width=1380,height=940");
+  if (!popup) {
+    setChatStatus("TELEOP POPUP BLOCKED", "warning", `Open ${handoff.popup_url}`);
+    return false;
+  }
+  setChatStatus("TELEOP HANDOFF", "warning", "Complete the transfer in the Manipulation Bridge popup.");
+  return true;
+}
+
 function applyPlanningSession(session) {
   const authoritativeSession = session || {};
   const runTransitionReset = resetLiveRunScopedStateForAuthoritativeSession(authoritativeSession);
@@ -18862,6 +19141,8 @@ function applyPlanningSession(session) {
   const snapshot = liveLastSnapshot || {};
   const state = liveLastSession.state || snapshot.state || {};
   const metadata = state.run_metadata || {};
+  openPendingOperatorTeleopHandoff(metadata);
+  ensureEquipmentRuntimeSnapshot();
   syncLiveBoVisualizationFromState(state);
   planningPendingSpecimenInput = metadata.pending_specimen_input || null;
   const running = liveRunningFlag(liveLastSession, snapshot, state);
@@ -19520,7 +19801,6 @@ if (liveAgentBinderList) {
     const button = event.target.closest("[data-agent-id]");
     if (!button) return;
     liveSelectedAgent = button.dataset.agentId || "orchestrator";
-    if (liveSelectedAgent === "equipment") ensureEquipmentRuntimeSnapshot();
     liveReportPage = "agent";
     invalidateLiveCenterRender("report");
     requestLiveGraphFocusForAgent(liveSelectedAgent);
@@ -19547,7 +19827,6 @@ if (liveAgentBinderList) {
     const button = event.target.closest("[data-agent-id]");
     if (!button) return;
     liveSelectedAgent = button.dataset.agentId || "orchestrator";
-    if (liveSelectedAgent === "equipment") ensureEquipmentRuntimeSnapshot();
     liveReportPage = "agent";
     invalidateLiveCenterRender("report");
     requestLiveGraphFocusForAgent(liveSelectedAgent);
@@ -19563,7 +19842,6 @@ if (liveChatTarget) {
     const target = liveChatTarget.value || "selected_agent";
     if (knownLiveAgent(target)) {
       liveSelectedAgent = target;
-      if (liveSelectedAgent === "equipment") ensureEquipmentRuntimeSnapshot();
       liveReportPage = "agent";
       invalidateLiveCenterRender("report");
       requestLiveGraphFocusForAgent(liveSelectedAgent);
@@ -19967,6 +20245,14 @@ document.addEventListener("keydown", (event) => {
       return;
     }
   }
+  const utmVerificationButton = event.target.closest && event.target.closest("[data-utm-verification-select]");
+  if (utmVerificationButton && liveReportPanel && liveReportPanel.contains(utmVerificationButton)
+      && (event.key === "Enter" || event.key === " ")) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (handleUtmVerificationSelectionClick(utmVerificationButton) && liveLastSession) renderLiveRuntime(liveLastSession);
+    return;
+  }
   const section = event.target.closest && event.target.closest(".live-report-section[data-report-section-title]");
   if (section && (event.key === "Enter" || event.key === " ")) {
     event.preventDefault();
@@ -20052,6 +20338,13 @@ function updateVisionSpecimenCountdowns() {
 }
 
 document.addEventListener("click", (event) => {
+  const utmVerificationButton = event.target.closest("[data-utm-verification-select]");
+  if (utmVerificationButton && liveReportPanel && liveReportPanel.contains(utmVerificationButton)) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (handleUtmVerificationSelectionClick(utmVerificationButton) && liveLastSession) renderLiveRuntime(liveLastSession);
+    return;
+  }
   const visionSpecimenRetry = event.target.closest("[data-vision-specimen-retry]");
   if (visionSpecimenRetry && liveReportPanel && liveReportPanel.contains(visionSpecimenRetry)) {
     event.preventDefault();
@@ -20643,6 +20936,7 @@ setInterval(() => {
   tickLiveRuntimeClock();
   updateLiveConnectionChips();
   updateVisionSpecimenCountdowns();
+  refreshActiveEquipmentProcess();
   refreshLivePLCStatus().catch(() => {});
   if (!shouldFreezeCompletedTestRun(liveLastSession) && liveSyncIsStale() && !liveRefreshInFlight && planningThinkingCount === 0) {
     refreshPlanningState({ background: true }).catch(() => setChatStatus("SYNC ERROR", "warning"));

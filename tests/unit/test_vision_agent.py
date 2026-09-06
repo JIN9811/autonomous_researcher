@@ -107,6 +107,155 @@ async def test_vision_preflight_after_printer_preflight_does_not_capture_or_star
     assert result.data["requested_next_stage"] == "manipulation"
 
 
+@pytest.mark.asyncio
+async def test_vision_policy_preflights_its_own_camera_boundary_independently() -> None:
+    tools = ToolRegistry()
+
+    def forbidden_hardware(_payload: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("vision=preflight_only must stop before every camera runtime")
+
+    tools.register("camera.capture", forbidden_hardware)
+    tools.register("lerobot.active_robot_cam.capture", forbidden_hardware)
+    tools.register("vision.utm_runtime.start", forbidden_hardware)
+    state = _state()
+    state.current_experiment_spec["execution_policy"] = {
+        "printer": "execute",
+        "vision": "preflight_only",
+        "manipulation": "execute",
+        "lab_equipment": "execute",
+    }
+
+    result = await VisionAgent().run(state, _NoCaptureCtxStub(tools))
+
+    assert result.success is True
+    assert result.data["vision_preflight"]["schema"] == "vision_preflight.v1"
+    assert result.data["vision_preflight"]["capture_performed"] is False
+    assert result.data["vision_preflight"]["policy_source"] == "execution_policy.vision"
+    assert result.data["requested_next_stage"] == "manipulation"
+
+
+@pytest.mark.asyncio
+async def test_virtual_pickup_vision_still_allows_equipment_owned_utm_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(VisionAgent, "_repo_root", staticmethod(lambda: tmp_path))
+    evidence = tmp_path / "utm-operator-teleop.png"
+    evidence.write_bytes(b"utm evidence")
+    state = _state()
+    state.current_experiment_spec["execution_policy"] = {
+        "printer": "preflight_only",
+        "vision": "preflight_only",
+        "manipulation": "preflight_only",
+        "lab_equipment": "execute",
+    }
+    interlock = {
+        "schema": "post_place_interlock.v1",
+        "session_id": "teleop-utm",
+        "ungrasping_seen": True,
+        "home_after_ungrasping": True,
+        "ready_for_utm_snapshot": True,
+        "source": "operator_teleop_confirmation",
+    }
+    state.run_metadata["manipulation_result"] = {
+        "run_id": state.run_id,
+        "specimen_id": "specimen-001",
+        "session_id": "teleop-utm",
+        "handoff_status": "needs_post_place_vision",
+        "completion_status": "reported_complete",
+        "handoff_strategy": "operator_teleop",
+        "teleop_stop_verified": True,
+        "robot_port_released": True,
+        "camera_returned_to_vision": True,
+        "post_place_interlock": interlock,
+    }
+    tools = ToolRegistry()
+    calls: list[dict[str, Any]] = []
+    tools.register(
+        "vision.utm_specimen_presence.capture",
+        lambda payload: calls.append(dict(payload)) or {
+            "ok": True,
+            "status": "confirmed",
+            "detected": True,
+            "source": "utm_ros_frame",
+            "frame_id": payload["frame_id"],
+            "session_id": payload["session_id"],
+            "specimen_id": payload["specimen_id"],
+            "confidence": 0.98,
+            "annotated_frame_path": str(evidence),
+            "raw_frame_path": str(evidence),
+            "width": 160,
+            "height": 120,
+        },
+    )
+
+    result = await VisionAgent().run(state, _CtxStub(tools))
+
+    assert result.success is True
+    assert len(calls) == 1
+    assert result.data["observation"]["vision_manipulation_completion"]["detected"] is True
+    assert result.data["observation"]["vision_manipulation_completion"]["rollout_stopped"] is True
+
+
+def test_utm_vision_does_not_stop_rollout_again_after_confirmed_operator_teleop() -> None:
+    state = _state()
+    state.run_metadata["manipulation_result"] = {
+        "run_id": state.run_id,
+        "specimen_id": "specimen-001",
+        "session_id": "teleop-confirmed",
+        "handoff_strategy": "operator_teleop",
+        "teleop_stop_verified": True,
+        "robot_port_released": True,
+        "camera_returned_to_vision": True,
+    }
+    tools = ToolRegistry()
+
+    result = VisionAgent._stop_verified_rollout(
+        state=state,
+        ctx=_CtxStub(tools),
+        completion={"session_id": "teleop-confirmed", "detected": True},
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "STOPPED"
+    assert result["source"] == "operator_teleop_confirmation"
+    assert result["rollout_stop_called"] is False
+
+
+def test_utm_vision_does_not_query_rollout_status_after_confirmed_operator_teleop() -> None:
+    state = _state()
+    interlock = {
+        "schema": "post_place_interlock.v1",
+        "session_id": "teleop-confirmed",
+        "ungrasping_seen": True,
+        "home_after_ungrasping": True,
+        "ready_for_utm_snapshot": True,
+        "source": "operator_teleop_confirmation",
+    }
+    state.run_metadata["manipulation_result"] = {
+        "run_id": state.run_id,
+        "specimen_id": "specimen-001",
+        "session_id": "teleop-confirmed",
+        "handoff_strategy": "operator_teleop",
+        "teleop_stop_verified": True,
+        "robot_port_released": True,
+        "camera_returned_to_vision": True,
+        "post_place_interlock": interlock,
+    }
+    tools = ToolRegistry()
+
+    result = VisionAgent._refresh_rollout_status_for_utm_completion(
+        state=state,
+        ctx=_CtxStub(tools),
+        post_place_context={"session_id": "teleop-confirmed", "post_place_interlock": interlock},
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "STOPPED"
+    assert result["source"] == "operator_teleop_confirmation"
+    assert result["post_place_interlock"] == interlock
+
+
 def test_vision_rejects_stale_or_cross_specimen_printer_preflight(tmp_path: Path) -> None:
     artifact = tmp_path / "stale.gcode.3mf"
     artifact.write_bytes(b"stale artifact")

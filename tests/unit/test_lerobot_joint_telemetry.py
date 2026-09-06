@@ -9,9 +9,23 @@ from utils import lerobot_joint_telemetry as joint_telemetry
 from utils.lerobot_joint_telemetry import (
     JointTelemetryFileObserver,
     annotate_motion_packets,
+    build_joint_telemetry_batch,
     finalize_policy_tracking_artifacts,
     normalize_action_event,
 )
+
+
+def test_compact_single_live_sample_is_smaller_without_changing_source_evidence():
+    """Even low-rate live polling must not resend native/degree maps in detail."""
+    packets = annotate_motion_packets([normalize_action_event(_action_event(1, 100))])
+    original = json.dumps(packets, sort_keys=True)
+    compact = build_joint_telemetry_batch(packets, compact=True)
+    legacy = build_joint_telemetry_batch(packets)
+    assert len(json.dumps(compact)) < len(json.dumps(legacy))
+    assert compact["samples"][0]["actual_source"]["Gripper"] == 50
+    assert compact["latest_sample"]["actual_rad"]["Joint1"] == pytest.approx(0.1745329252)
+    assert compact["latest_sample"]["motion_state"] == packets[0]["motion_state"]
+    assert json.dumps(packets, sort_keys=True) == original
 
 
 def _action_event(

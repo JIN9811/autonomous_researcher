@@ -47,6 +47,10 @@ const ttsHelpButton = $("btn-tts-help");
 const ttsHelpPopover = $("lerobot-tts-help-popover");
 const teleopTimeInput = $("lerobot-teleop-time-input");
 const displayDataInput = $("lerobot-display-data-input");
+const teleopHandoffPanel = $("lerobot-teleop-handoff-panel");
+const teleopHandoffContextEl = $("lerobot-teleop-handoff-context");
+const teleopHandoffStatusEl = $("lerobot-teleop-handoff-status");
+const teleopHandoffCompleteButton = $("btn-teleop-handoff-complete");
 const resumeInput = $("lerobot-resume-input");
 const trainResumeInput = $("lerobot-train-resume-input");
 const pushHubInput = $("lerobot-push-hub-input");
@@ -286,6 +290,11 @@ const activeRobotCamRecordStartInput = $("lerobot-active-robot-cam-record-start-
 
 let lastSessions = [];
 let lastSessionByWorkflow = {};
+const teleopHandoffQuery = new URLSearchParams(window.location.search);
+const teleopHandoffToken = teleopHandoffQuery.get("handoff_token") || "";
+const teleopHandoffRunId = teleopHandoffQuery.get("run_id") || "";
+let teleopHandoffContext = null;
+let teleopHandoffSessionId = "";
 let lastConfigPaths = {};
 let lastWorkflowDefaults = {};
 let lastAutoDatasetRepo = "";
@@ -3180,6 +3189,100 @@ async function runAction(label, url, payload = null, statusTarget = null, timeou
   }
 }
 
+function renderTeleopHandoff(message = "") {
+  if (!teleopHandoffPanel || !teleopHandoffToken || !teleopHandoffRunId) return;
+  teleopHandoffPanel.classList.remove("hidden");
+  const context = teleopHandoffContext || {};
+  teleopHandoffContextEl.innerHTML = [
+    `<strong>Run:</strong> ${escapeHtml(context.run_id || teleopHandoffRunId)}`,
+    `<strong>Cycle:</strong> ${escapeHtml(String(context.cycle_index || "-"))}`,
+    `<strong>Specimen:</strong> ${escapeHtml(context.specimen_id || "-")}`,
+    `<strong>Candidate:</strong> ${escapeHtml(context.candidate_id || "-")}`,
+    "<strong>Route:</strong> Manipulation → UTM Vision → Lab Equipment",
+  ].join("<br>");
+  teleopHandoffCompleteButton.disabled = !teleopHandoffSessionId || ["operator_confirmed", "confirmed"].includes(context.status);
+  if (message) {
+    teleopHandoffStatusEl.textContent = message;
+    teleopHandoffStatusEl.className = "lerobot-action-status ok";
+  }
+}
+
+async function loadTeleopHandoff() {
+  if (!teleopHandoffToken || !teleopHandoffRunId) return;
+  if (modeSelect) modeSelect.value = "live";
+  try {
+    const response = await fetch(`/api/planning/runs/${encodeURIComponent(teleopHandoffRunId)}/teleop-handoff?handoff_token=${encodeURIComponent(teleopHandoffToken)}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || `handoff lookup failed (${response.status})`);
+    teleopHandoffContext = data;
+    if (data.teleop_session_id) teleopHandoffSessionId = String(data.teleop_session_id);
+    renderTeleopHandoff("Start teleop, move the specimen, then click Teleop Complete.");
+  } catch (error) {
+    teleopHandoffPanel.classList.remove("hidden");
+    teleopHandoffStatusEl.textContent = String(error);
+    teleopHandoffStatusEl.className = "lerobot-action-status error";
+  }
+}
+
+async function startTeleopForHandoff(event) {
+  const data = await runAction(
+    "teleoperate start",
+    "/api/lerobot/teleoperate/start",
+    basePayload({
+      teleop_time_s: numberValue(teleopTimeInput, null),
+      handoff_token: teleopHandoffToken,
+      handoff_run_id: teleopHandoffRunId,
+    }),
+    actionStatusFromEvent(event),
+  );
+  if (data && data.ok && data.session_id) {
+    teleopHandoffSessionId = String(data.session_id);
+    lastSessionByWorkflow.teleoperate = teleopHandoffSessionId;
+    renderTeleopHandoff("Teleop is active. Move the specimen, then click Teleop Complete.");
+  }
+  return data;
+}
+
+async function stopTeleopForHandoff(event) {
+  const data = await runAction(
+    "teleoperate stop",
+    "/api/lerobot/teleoperate/stop",
+    sessionPayload("teleoperate", teleopHandoffSessionId ? { session_id: teleopHandoffSessionId } : {}),
+    actionStatusFromEvent(event),
+  );
+  if (teleopHandoffToken && data && data.ok) {
+    renderTeleopHandoff("Teleop stopped. Click Teleop Complete to confirm the transfer.");
+  }
+  return data;
+}
+
+async function completeTeleopHandoff() {
+  if (!teleopHandoffSessionId || !teleopHandoffContext) return;
+  teleopHandoffCompleteButton.disabled = true;
+  teleopHandoffStatusEl.textContent = "Stopping teleop through the standard Stop path.";
+  teleopHandoffStatusEl.className = "lerobot-action-status running";
+  try {
+    const stopped = await postJson("/api/lerobot/teleoperate/stop", sessionPayload("teleoperate", { session_id: teleopHandoffSessionId }));
+    if (!stopped.ok || stopped.status !== "STOPPED" || !stopped.port_released || !stopped.camera_returned_to_vision) {
+      throw new Error(stopped.failure_code || "TELEOP_RESOURCES_NOT_RELEASED");
+    }
+    const confirmed = await postJson(
+      `/api/planning/runs/${encodeURIComponent(teleopHandoffRunId)}/teleop-handoff/confirm`,
+      {
+        handoff_token: teleopHandoffToken,
+        teleop_session_id: teleopHandoffSessionId,
+        confirmed_by: "local_operator",
+      },
+    );
+    teleopHandoffContext = confirmed;
+    renderTeleopHandoff("Transfer confirmed. UTM Vision verification is next.");
+  } catch (error) {
+    teleopHandoffStatusEl.textContent = String(error);
+    teleopHandoffStatusEl.className = "lerobot-action-status error";
+    teleopHandoffCompleteButton.disabled = false;
+  }
+}
+
 function recordIsActive(data) {
   if (!data || data.workflow !== "record") return false;
   const status = String(data.status || "").toUpperCase();
@@ -5384,9 +5487,10 @@ bind("btn-browse-visualization", () => browsePath("dataset", visualizationPathIn
 bind("btn-browse-visualization-output", () => browsePath("output", visualizationOutputDirInput ? visualizationOutputDirInput.value : "", visualizationOutputDirInput));
 bind("btn-browse-isaac-augment-output", () => browsePath("output", isaacAugmentOutputDirInput ? isaacAugmentOutputDirInput.value : "", isaacAugmentOutputDirInput));
 
-bind("btn-teleop-start", (event) => runAction("teleoperate start", "/api/lerobot/teleoperate/start", basePayload({ teleop_time_s: numberValue(teleopTimeInput, null) }), actionStatusFromEvent(event)));
-bind("btn-teleop-stop", (event) => runAction("teleoperate stop", "/api/lerobot/teleoperate/stop", sessionPayload("teleoperate"), actionStatusFromEvent(event)));
+bind("btn-teleop-start", startTeleopForHandoff);
+bind("btn-teleop-stop", stopTeleopForHandoff);
 bind("btn-teleop-status", (event) => runAction("teleoperate status", "/api/lerobot/teleoperate/status", sessionPayload("teleoperate"), actionStatusFromEvent(event)));
+bind("btn-teleop-handoff-complete", completeTeleopHandoff);
 
 if (ttsEngineInput) ttsEngineInput.addEventListener("change", () => { ttsEngineInput.dataset.userEdited = "1"; });
 if (confirmLiveInput) confirmLiveInput.addEventListener("change", () => { confirmLiveInput.dataset.userEdited = "1"; });
@@ -5685,4 +5789,5 @@ refreshDatasetManageList(datasetManageStatusEl);
 refreshWandbLocalApiKeyStatus();
 restoreIsaacDomainMimicPipelineStatus();
 refreshDevicePLCStopAvailability();
+loadTeleopHandoff();
 window.setInterval(refreshDevicePLCStopAvailability, 1000);

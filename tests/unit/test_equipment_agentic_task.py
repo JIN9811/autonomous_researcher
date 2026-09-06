@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import pytest
+
 from utils.equipment_agentic_task import (
     UTM_COMPRESSION_TASK_ID,
     build_utm_compression_flow_template,
@@ -11,6 +13,28 @@ from utils.equipment_agentic_task import (
     project_equipment_cycle_evidence,
     validate_equipment_agentic_flow,
 )
+
+
+@pytest.mark.parametrize("missing", ["", "start_test", "monitor_contact_and_run"])
+def test_cycle_checks_require_the_responsible_steps_not_last_step_flags(missing):
+    transitions = [
+        {"block_id": block, "phase": "skill", "outcome": "completed"}
+        for block in ("start_test", "monitor_contact_and_run", "restore_robot_clearance")
+        if block != missing
+    ]
+    projection = project_equipment_cycle_evidence(
+        transitions=transitions,
+        result_data={"equipment_report": {"cross_checks": {
+            "screen_started": True, "physical_motion_started": True,
+            "save_completed": True, "data_file_created": True, "data_parse_probe_ok": True,
+        }}},
+    )
+    checks = projection["cross_checks"]
+    assert checks["screen_started"] is (missing != "start_test")
+    assert checks["physical_motion_started"] is (missing == "")
+    assert checks["save_completed"] is False
+    assert checks["data_file_created"] is False
+    assert checks["data_parse_probe_ok"] is False
 
 
 def test_utm_template_builds_the_recorded_cycle_without_runtime_bindings() -> None:

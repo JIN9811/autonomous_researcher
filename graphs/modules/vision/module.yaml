@@ -9,6 +9,8 @@ module:
     dry_run_supported: true
     stale_signal_blocks_downstream: true
   tools:
+  - lerobot.replay.status
+  - lerobot.replay.stop
   - camera.capture
   - lerobot.camera.test
   - lerobot.active_robot_cam.capture

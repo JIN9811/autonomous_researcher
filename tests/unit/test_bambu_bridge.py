@@ -1345,7 +1345,7 @@ def test_build_bambu_project_file_command_draft_blocks_invalid_ams_mapping_lengt
         subtask_name="specimen-loop-1",
         plate_id=1,
         use_ams=True,
-        ams_mapping=[0, -1, -1, -1],
+        ams_mapping=[],
     )
 
     assert draft["ok"] is False
@@ -2718,6 +2718,8 @@ def test_test_mode_installed_printer_uploads_ejection_only_project_file_from_act
     assert "G0 X128.000 Y245.000" in patched_gcode
     assert "E0.1" not in patched_gcode
     assert "; atr_print_body_omitted=true" in patched_gcode
+    assert "; atr_cooldown_wait_policy=not_required_no_print_body" in patched_gcode
+    assert "M190 R40" not in patched_gcode
     assert "G28 ; atr_autoejection_home_all_axes" not in patched_gcode
     assert result["ejection_result"] == {}
     assert any(item["step"] == "BAMBU_NATIVE_AUTOEJECTION_PATCH" and item["status"] == "ok" for item in result["step_trace"])
@@ -3018,6 +3020,7 @@ def test_test_mode_physical_print_keeps_actual_print_body_when_autoejection_is_e
     assert "E0.4" in gcode
     assert "; atr_print_body_omitted=true" not in gcode
     assert "; atr.bambu.autoejection.v1" in gcode
+    assert "M190 R40" in gcode
     assert "; atr_z_push_offset_mm=15.0" in gcode
     assert "G0 Z15.000 F3000" in gcode
     assert "G0 Z10.000 F3000" not in gcode

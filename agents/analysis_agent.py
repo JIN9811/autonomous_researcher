@@ -32,6 +32,11 @@ from typing import Any
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
 from utils.agent_artifact_archive import archive_agent_run
 from orchestrator.state import Mode, OrchestratorState
+from utils.equipment_agentic_task import (
+    UTM_COMPRESSION_BLOCKS,
+    UTM_COMPRESSION_TASK_ID,
+    project_equipment_cycle_evidence,
+)
 from utils.paths import resolve_path
 from utils.utm_csv import parse_utm_csv
 
@@ -654,6 +659,54 @@ class AnalysisAgent(BaseAgent):
         equipment_report = equipment_result.get("equipment_report") if isinstance(equipment_result.get("equipment_report"), dict) else {}
         equipment_handoff = equipment_result.get("equipment_handoff") if isinstance(equipment_result.get("equipment_handoff"), dict) else {}
         utm_packet = equipment_result.get("utm_data_ready") if isinstance(equipment_result.get("utm_data_ready"), dict) else {}
+        if equipment_report.get("completion_scope") == "agentic_cycle":
+            # Registered eight-block cycles have their own evidence contract;
+            # do not mistake a ready packet alone for a verified cycle.
+            overlay = equipment_report.get("workflow_agentic_task") or {}
+            transitions = equipment_report.get("block_executions") or []
+            gate = equipment_report.get("required_entry_gate") or {}
+            expected = {key: str(overlay.get(key) or "") for key in ("run_id", "specimen_id")}
+            skills = [item for item in transitions if isinstance(item, dict) and item.get("phase") == "skill"]
+            projection = project_equipment_cycle_evidence(
+                transitions=transitions, result_data={"workflow_agentic_task": overlay},
+            )
+            export = projection["raw_data_export"]
+            checks = {
+                "canonical_task": overlay.get("task_id") == UTM_COMPRESSION_TASK_ID,
+                "workflow_completed": overlay.get("status") == "completed",
+                "no_blocked_transition": all(
+                    item.get("target") != "__blocked__"
+                    for item in transitions if isinstance(item, dict)
+                ),
+                "completed_blocks": (
+                    [item.get("block_id") for item in skills] == [key for key, _ in UTM_COMPRESSION_BLOCKS]
+                    and all(item.get("outcome") == "completed" and item.get("success") is True for item in skills)
+                ),
+                "entry_identity": (
+                    all(expected.values()) and gate.get("ok") is True
+                    and gate.get("expected_identity") == expected
+                    and gate.get("observed_identity") == expected
+                    and all(equipment_result.get(key) == value for key, value in expected.items())
+                ),
+                "cycle_evidence": projection["handoff_eligibility"]["eligible"],
+                "handoff_ready": equipment_handoff.get("status") == "ready_for_analysis",
+                "packet_ready": utm_packet.get("status") == "ready",
+                "packet_binding": all(
+                    packet.get("linux_path") == export["path"]
+                    and packet.get("artifact_id") == export["artifact_id"]
+                    and packet.get("sha256") == export["sha256"]
+                    and all(packet.get(key) == value for key, value in expected.items())
+                    for packet in (utm_packet, equipment_handoff)
+                ),
+                "result_binding": equipment_result.get("result_file") == export["path"] and equipment_result.get("ok") is True,
+            }
+            missing = [name for name, ok in checks.items() if not ok]
+            return not missing, {
+                "ok": not missing, "status": "blocked" if missing else "ready_for_analysis",
+                "failure_code": "EQUIPMENT_AGENTIC_CYCLE_EVIDENCE_INCOMPLETE" if missing else None,
+                "blockers": missing, "required_for_handoff": True,
+                "completion_scope": "agentic_cycle",
+            }
         live_audit = equipment_report.get("live_evidence_audit") if isinstance(equipment_report.get("live_evidence_audit"), dict) else {}
         decision = equipment_report.get("decision") if isinstance(equipment_report.get("decision"), dict) else {}
         cross_checks = equipment_report.get("cross_checks") if isinstance(equipment_report.get("cross_checks"), dict) else {}

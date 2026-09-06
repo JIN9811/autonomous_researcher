@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -13,15 +15,113 @@ import pytest
 
 from agents.base_agent import AgentResult
 from agents.equipment_agent import LabEquipmentAgent
+from agents.analysis_agent import AnalysisAgent
 from backends.llm_backend import LLMResponse
 from mcp_tools.equipment_tools import register_equipment_tools
 from mcp_tools.mock_tools import register_mock_tools
 from mcp_tools.tool_registry import ToolRegistry
 from orchestrator.state import Mode, OrchestratorState, Stage
 from policies.guardian_gate import gate_blocks_execution, guardian_gate
+from policies.validation_policy import validate_agent_output
 from utils.equipment_skill_runtime import EquipmentSkillRegistry, SkillContractError, canonical_sha256
 from utils.equipment_skill_flow import EquipmentSkillFlowStore
 from utils.equipment_agentic_task import build_utm_compression_flow_template
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["", "wrong_specimen", "changed_csv", "missing_clearance", "missing_snapshot", "wrong_identity"])
+async def test_live_cycle_binds_worker_csv_copies_and_emits_analysis_handoff(tmp_path, monkeypatch, fault):
+    """Replay the live worker shape: per-call IDs/paths, no artifact identity fields."""
+    flow = build_utm_compression_flow_template("windows_desktop_v1")
+    for block in flow["blocks"]:
+        block["skill"] = {"skill_id": block["id"], "skill_version": "1.0.0"}
+        block["vision"]["enabled"] = False
+    state = _state(mode=Mode.LIVE, experiment_spec={
+        "equipment_profile_id": "windows_desktop_v1", "specimen_id": "specimen-test",
+    })
+    state.run_metadata["robot_task_result"] = {
+        "run_id": "run-test", "specimen_id": "specimen-test", "handoff_status": "ready_for_equipment",
+    }
+    state.active_session_id = "session-test"
+    filename = "live_session-test_specimen-test_loop-0001_rep-0001.csv"
+    csv_bytes = b"time_s,force_N,displacement_mm\n0,0,0\n1,100,15\n"
+    windows_path = "C:/exports/" + filename
+    agent = LabEquipmentAgent()
+
+    async def replay_skill(_state, _ctx, request):
+        block = request["skill_id"]
+        raw = {"ok": True, "status": "completed", "bridge": "windows_pyautogui", "program_id": "utm_" + block,
+               "output_artifacts": [], "step_trace": []}
+        # Worker flags describe this skill, not the entire compression cycle.
+        raw["cross_checks"] = {
+            "screen_started": True,
+            "physical_motion_started": block in {"monitor_contact_and_run", "save_raw_data"},
+            "save_completed": block == "save_raw_data",
+            "data_file_created": block in {"save_raw_data", "validate_raw_data"},
+            "data_parse_probe_ok": block in {"save_raw_data", "validate_raw_data"},
+            "save_export_responsibility_ok": True,
+        }
+        if block in {"save_raw_data", "validate_raw_data"}:
+            local = tmp_path / block / filename
+            local.parent.mkdir()
+            content = csv_bytes + (b"2,120,16\n" if fault == "changed_csv" and block == "validate_raw_data" else b"")
+            local.write_bytes(content)
+            artifact = {"kind": "utm_csv", "artifact_id": block + "-timestamp", "local_path": str(local),
+                        "windows_path": windows_path.replace("specimen-test", "specimen-other") if fault == "wrong_specimen" else windows_path,
+                        "sha256": hashlib.sha256(content).hexdigest(), "pulled_to_linux": True,
+                        "local_parse_ok": True, "row_count_probe": 2,
+                        "columns_probe": ["time_s", "force_N", "displacement_mm"], "stable_for_sec": 2}
+            if fault == "wrong_identity":
+                artifact["run_id"] = "another-run"
+            raw.update(result_file=str(local), utm_csv_path=str(local), output_artifacts=[artifact],
+                       data_acquisition={"artifact_id": artifact["artifact_id"], "linux_path": str(local),
+                                         "status": "pulled_to_linux"})
+        if block == "restore_robot_clearance":
+            raw["step_trace"] = [
+                {"step": "SEQ_10_WAIT_UNTIL_IMAGE", "status": "ok", "detail": "target_inter_jig_distance_150_mm via image"},
+                {"step": "SEQ_20_WAIT_UNTIL_IMAGE", "status": "failed" if fault == "missing_clearance" else "ok", "detail": "entry_height_150_mm via image"},
+                {"step": "SEQ_21_WAIT_UNTIL_IMAGE", "status": "ok", "detail": "next_test_ready_loaded via image"},
+                {"step": "SCREENSHOT_ROBOT_CLEARANCE_RESTORED", "status": "ok", "detail": "C:/screens/clearance.png"},
+            ]
+            if fault != "missing_snapshot":
+                raw["output_artifacts"] = [{"kind": "screen_png", "windows_path": "C:/screens/clearance.png",
+                                             "local_path": str(tmp_path / "clearance.png"), "pulled_to_linux": True}]
+        return AgentResult(success=True, summary="registered skill complete", data=agent._build_skill_step_result_package(raw))
+
+    monkeypatch.setattr(agent, "_run_equipment_skill", replay_skill)
+    monkeypatch.setattr(agent, "_preflight_skill_flow_resources", lambda **_: {"ok": True})
+    result = await agent._run_equipment_skill_flow(state, _CtxStub(_tools(tmp_path), "unused"), flow)
+    if fault:
+        assert result.success is False
+        assert result.data["equipment_handoff"]["status"] == "blocked"
+        return
+    assert result.success is True
+    assert validate_agent_output("equipment", result.data) == (True, "ok")
+    for name in ("screen_started", "physical_motion_started", "save_completed", "data_file_created", "data_parse_probe_ok"):
+        assert result.data["equipment_report"]["cross_checks"][name] is True
+        assert result.data["equipment_result"]["cross_checks"][name] is True
+    assert result.data["equipment_handoff"]["status"] == "ready_for_analysis"
+    assert result.data["utm_data_ready"]["status"] == "ready"
+    assert result.data["equipment_result"]["result_file"] == str(tmp_path / "save_raw_data" / filename)
+    combined = {**result.data["equipment_result"], **{key: result.data[key] for key in ("equipment_report", "equipment_handoff", "utm_data_ready")}}
+    assert AnalysisAgent._live_equipment_handoff_gate(combined)[0] is True
+    curve, _ = AnalysisAgent()._curve_from_equipment(combined)
+    assert len(curve) == 2
+    for fault in ("missing_blocks", "blocked_workflow", "packet_path", "packet_identity", "blocking_vision"):
+        invalid = deepcopy(combined)
+        if fault == "missing_blocks":
+            invalid["equipment_report"]["block_executions"] = []
+        elif fault == "blocked_workflow":
+            invalid["equipment_report"]["workflow_agentic_task"]["status"] = "blocked"
+        elif fault == "packet_path":
+            invalid["utm_data_ready"]["linux_path"] = "/wrong.csv"
+        elif fault == "packet_identity":
+            invalid["utm_data_ready"]["specimen_id"] = "another-specimen"
+        else:
+            invalid["equipment_report"]["block_executions"].append({
+                "phase": "vision", "blocking": True, "outcome": "error", "target": "__blocked__",
+            })
+        assert AnalysisAgent._live_equipment_handoff_gate(invalid)[0] is False, fault
 
 
 @pytest.fixture(autouse=True)
@@ -577,7 +677,46 @@ async def test_equipment_agentic_task_blocks_before_skill_binding_without_verifi
     assert result.success is False
     assert result.data["equipment_handoff"]["failure_code"] == "EQUIPMENT_HANDOFF_NOT_READY"
     assert result.data["equipment_skill_flow_execution"]["workflow_agentic_task"]["entry_gate"]["locked"] is True
+    valid, message = validate_agent_output("equipment", result.data)
+    assert valid is False
+    assert "EQUIPMENT_HANDOFF_NOT_READY" in message
+    assert "Missing required keys" not in message
     assert equipment_calls == []
+
+
+@pytest.mark.asyncio
+async def test_equipment_entry_gate_uses_complete_robot_handoff_when_execution_result_lacks_identity(
+    tmp_path: Path,
+) -> None:
+    """Catch an identity-less execution result masking the canonical robot handoff."""
+    flow = build_utm_compression_flow_template("windows_desktop_v1")
+    state = _state(
+        mode=Mode.LIVE,
+        experiment_spec={
+            "equipment_profile_id": "windows_desktop_v1",
+            "specimen_id": "specimen-test",
+        },
+    )
+    state.run_metadata["manipulation_result"] = {
+        "handoff_status": "ready_for_equipment",
+        "completion_status": "verified_complete",
+    }
+    state.run_metadata["robot_task_result"] = {
+        "run_id": "run-test",
+        "specimen_id": "specimen-test",
+        "handoff_status": "ready_for_equipment",
+        "completion_status": "verified_complete",
+    }
+
+    result = await LabEquipmentAgent()._run_equipment_skill_flow(
+        state,
+        _CtxStub(_tools(tmp_path), "must not be used"),
+        flow,
+    )
+
+    assert result.data["equipment_handoff"]["failure_code"] == "EQUIPMENT_SKILL_FLOW_UNBOUND"
+    assert result.data["required_entry_gate"]["ok"] is True
+    assert result.data["required_entry_gate"]["source"] == "robot_task_result"
 
 
 @pytest.mark.asyncio

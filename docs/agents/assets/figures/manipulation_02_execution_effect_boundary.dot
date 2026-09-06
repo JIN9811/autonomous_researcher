@@ -1,8 +1,8 @@
 digraph manipulation_execution_effect_boundary {
-  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.30", ranksep="0.43", fontname="DejaVu Sans", label="Manipulation internal execution and effect boundary", labelloc="t", fontsize=18];
+  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.30", ranksep="0.43", fontname="DejaVu Sans", label="Manipulation initial-transfer execution and effect boundary", labelloc="t", fontsize=18];
   node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=8.1, margin="0.09,0.06"];
   edge [color="#52667A", fontname="DejaVu Sans", fontsize=7.1, arrowsize=0.65];
-  resolve [label="01 task resolve\ntransfer_to_utm / clear_utm_to_disposal"];
+  resolve [label="01 initial-transfer task resolve\ntransfer_to_utm"];
   context [label="02 Vision + specimen context"];
   gate [label="03 profile · policy · fresh Vision\ncamera return · live approval", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
   backend [label="04 select LeRobot / Pi0.5\nno direct shell"];

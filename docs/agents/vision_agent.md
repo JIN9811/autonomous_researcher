@@ -12,8 +12,11 @@ source_of_truth:
   - device_bridges/utm_runtime_bridge.py
   - device_bridges/lerobot_bridge.py
   - app/main.py
-last_verified: 2026-08-09
-verified_against: 0b7627b
+  - utils/utm_clear_cycle.py
+  - utils/utm_specimen_presence.py
+  - mcp_tools/camera_tools.py
+last_verified: 2026-09-06
+verified_against: working-tree
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -34,6 +37,10 @@ detects temporal events, arbitrates signals, and packages `vision_report.v1`
 and `vision_signal.v1`. It may stop an active robot rollout after verified UTM
 placement; it cannot start robot motion or command printer, UTM, or PyAutoGUI
 actions.
+
+For post-test UTM clearance it monitors the scoped managed replay and confirms
+absence only after successful replay and measured robot return. It may stop
+that pending replay on cancellation or timeout, but cannot start the sweep.
 
 ## Scope
 
@@ -188,6 +195,50 @@ expiry, run/session/specimen identity, and annotated/raw artifacts support the
 handoff. Stream frames are external observations, not durable evidence until
 captured and referenced.
 
+### Post-test compressed specimen verification
+
+Verification 1 remains the original specimen-placement check. Verification 2
+uses a separate post-clear detector, so the thresholds for initial placement
+are not relaxed. The current profile recognizes red material, including the
+approximately 30 × 10 mm compressed specimen; it does not infer dimensions
+from pixels or require an upright aspect ratio.
+
+| Evidence check | Current post-clear contract |
+| --- | --- |
+| Camera | Shared UTM1/UTM2 `raw_frame()` path: `/camera/image_raw` or `/camera/image_rect`, profile `camera_utm_primary`, 640 × 480; source header time must be fresh and after replay completion |
+| Registration | Both lower-platen green anchors must match their configured windows, area, separation and vertical alignment |
+| Inspection region | Registered lower-platen ROI `[210,270,390,363]`; discarded material outside the platen is excluded |
+| Residual | Red components of at least 8 pixels are aggregated; 150 pixels blocks clearance, including sufficient thin/fragmented pre-opening red evidence |
+| Material | Same-cycle Verification 1 must provide the known-red specimen evidence; unsupported material is not silently treated as absent |
+
+UTM2 keeps UTM1's existing unannotated-frame acquisition and topic order. It
+does not open a separate camera path or require the raw topic to time out before
+accepting a frame. Both accepted topics must pass the same fixed-profile
+registration and region checks; display/overlay topics such as `/image_utm`
+remain invalid. The detector and downstream clearance gate share the accepted
+topic set. No upright-shape or aspect-ratio limit is imposed on compressed
+residuals, and absence is never inferred from failed capture or registration.
+
+| Result | Meaning | Analysis |
+| --- | --- | --- |
+| `occupied` | Residual specimen evidence remains on the platen | Blocked |
+| `clear` | Valid, fresh, registered image supports absence | Allowed only with successful replay and measured return |
+| `unknown` | Capture, registration, identity, freshness or material evidence is insufficient | Blocked |
+
+A physical clearance capture does not auto-start the camera runtime or fall
+back to a virtual image. Failed capture is never evidence of absence.
+`run_metadata.utm_verifications` is bound to run, zero-based loop, and specimen;
+each record owns its raw/annotated image and evidence references. Unique
+capture files preserve attempts in the existing loop archive. Verification 2
+does not overwrite the original placement observation.
+
+The Live GUI's two header selectors read that scoped map directly. Missing
+Verification 2 stays Pending even if Verification 1 has an image; virtual
+confirmation is explicitly distinguished from a real photograph.
+Both selectors display the complete frame in a 4:3, contained-image panel;
+the title uses a content-sized row rather than consuming unused card height.
+The browser layout regression checks both tab layouts at narrow and wide widths.
+
 ## Modes and Fallbacks
 
 Test may use virtual frames/signals; simulation degrade is labeled. Replay uses
@@ -198,7 +249,8 @@ calibration. A fallback source creates a different evidence environment.
 ## Safety, Approval, and Effect Boundary
 
 Observation is read-only. The exceptional effect is stopping a verified active
-rollout; it requires matching session and UTM placement evidence. Vision never
+rollout; it requires matching session and UTM placement evidence. A pending
+managed-clear replay can also be stopped on cancellation/timeout. Vision never
 starts motion. Stale signals block downstream physical handoff. Camera
 availability is not proof of safe equipment state.
 
@@ -209,6 +261,22 @@ inventing pose. Conflicting or expired signals are rejected. Unknown robot
 state requires rollout status and operator/Guardian review. Failed stop remains
 an explicit error; do not claim the robot stopped from a request alone.
 
+For UTM topic reads, a successful final frame may supersede a timeout from an
+earlier topic attempt within that same capture. The 2026-09-06 Guardian update
+requires a successful capture, an available successful frame, and a final
+successful attempt matching the selected topic before excluding those exact
+historical `ROS_IMAGE_TIMEOUT` alarms. Attempt history remains in the artifact.
+Current frame errors, other cameras, stop failures, and all other interlocks
+remain authoritative. Both detected-specimen success and existing non-detection
+retry behavior are covered; a successful frame is not by itself transfer proof.
+
+Offline replay of `run-20260906T113555Z-8b3e30`, loop 1, Vision attempt 12,
+retained the low-confidence warning but removed the superseded timeout block,
+routing to Equipment without incrementing the loop. Equipment was not executed
+in this replay. The original first-topic timeout's physical/transport cause
+and any timing sensitivity to ActiveCam startup remain unverified; neither
+camera timeout budgets nor shared recording/rollout warmup were relaxed.
+
 ## Operator and GUI Surfaces
 
 Vision/UTM workspace exposes runtime graph, frame, stream, device mapping,
@@ -217,9 +285,70 @@ pose. Live GUI displays report/signal/evidence and freshness state.
 
 ## Current Verification
 
+ActiveCam's shared frame-detector subprocess response budget defaults to
+15 seconds (previously 5), configurable through
+`ATR_SPECIMEN_POSE_FRAME_TIMEOUT_S`. This working-tree headroom adjustment
+does not change robot capture/return waits, pose validity, detection thresholds,
+or signal freshness. `test_active_cam_response_budget.py` verifies acceptance
+of an 8-second simulated detector response, bounded timeout of a 20-second
+response, and preservation of an explicit shorter override, without actuation.
+The reported intermittent timeout was not localized in this run's retained
+results, so this is a response-budget adjustment, not a confirmed root-cause
+claim. New ActiveCam subprocesses load the change; existing rollout processes
+are not restarted automatically.
+
+The [2026-09-07 supervised integration record](../paper/evidence/2026-09-07-supervised-closed-loop.md)
+observed distinct Verification 1 placement and Verification 2 empty-fixture
+confirmation, followed by Analysis, BO-managed LHS feedback, and the next
+Design. Earlier blocked runs below remain historical failures; they are not
+reclassified as successful by this later run.
+
 Verified against all 11 manifest entries (including both `03_*` IDs), seven
 tools, five direct Vision/LeRobot-camera routes, connected UTM runtime/camera
 families, and bridge implementations at baseline `0b7627b`.
+
+The post-clear update was inspected and tested against the uncommitted working
+tree on 2026-09-06. `tests/unit/test_utm_clear_presence.py` uses exact copies of
+actual upright and compressed-specimen images, with provenance under
+[UTM clear fixtures](../../tests/fixtures/utm_clear/PROVENANCE.md).
+The compressed positive was also visually checked on the current UTM camera.
+Fragmented-residual and registration-negative cases are synthetic tests.
+`tests/unit/test_utm_clear_cycle.py` checks replay/return/image
+ordering and blocked Analysis without issuing device commands.
+
+On 2026-09-07 KST, run `run-20260906T152525Z-11e1ae` completed managed UTM-clear
+replay, verified the measured return, and captured a registered `clear` frame
+at `2026-09-06T15:33:18.618067Z`. The operator reported swapping the specimen;
+this run is workflow evidence, not a matched compression/material experiment.
+Guardian then blocked on an earlier, recovered raw-topic timeout, so Analysis
+and BO were not validated. At that revision, raw-topic captures returned
+`unknown` because the detector required the rectified topic. The subsequent
+shared-frame correction accepts either registered source; historical unknown
+observations are not relabelled as successful clearance.
+
+A separate camera-only check at `2026-09-06T15:36:55.959961Z` used the existing
+detector on `/camera/image_rect` with an operator-placed compressed specimen.
+It returned `occupied`, `clear_confirmed=false`, and valid registration. The
+detected bounding box was 81 by 36 pixels (aspect ratio 2.25), with 2,043 red-mask
+pixels against the existing 150-pixel threshold. This confirms one elongated
+positive example, not robustness to arbitrary shape, position, or material.
+No robot, press, loop state, or BO observation was changed by the check.
+Local evidence is retained under
+`artifacts/validation/utm_clear_compressed_20260906T153656Z/` (runtime artifacts,
+not a bundled GitHub fixture).
+
+The shared-frame correction was then checked through the real
+`vision.utm_specimen_presence.capture` implementation and an external-runtime
+manager using its unchanged `raw_frame()` method (camera reads only, no runtime
+start/stop). The raw-topic observation under
+`artifacts/validation/utm_shared_capture_fixed_20260906T154422Z/` returned
+`occupied`, valid registration, 2,054 red-mask pixels and an 81 × 36 pixel box.
+The preceding rectified-topic observation under
+`artifacts/validation/utm_shared_capture_fixed_20260906T154400Z/` also returned
+`occupied`. These are live positive detector/capture checks, not a resumed loop.
+Synthetic tests cover empty frames on both topics, elongated residuals,
+fragment aggregation, missing anchors, capture provenance, and the downstream
+clearance-to-Analysis transition without device actuation.
 
 ## Limitations and Known Gaps
 

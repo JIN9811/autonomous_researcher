@@ -160,6 +160,7 @@ class DesignAgent(BaseAgent):
                 "material": str(constraints["material"]),
                 "printer_profile": self._printer_profile(constraints),
                 "slicer_profile_hint": self._slicer_profile_hint(constraints),
+                "specimen_placement": dict(constraints["specimen_placement"]),
                 "layer_height_mm": round(float(constraints["layer_height_mm"]), 4),
                 "bed_temperature_c": round(float(constraints["bed_temperature_c"]), 2),
                 "first_layer_bed_temperature_c": round(float(constraints["first_layer_bed_temperature_c"]), 2),
@@ -247,6 +248,7 @@ class DesignAgent(BaseAgent):
     def _resolve_constraints(self, state: OrchestratorState) -> dict[str, Any]:
         """Merge runtime defaults with any constraint-like fields already present in state."""
         constraints = dict(self.DEFAULT_CONSTRAINTS)
+        constraints["specimen_placement"] = {"mode": "auto", "center_x_mm": 128.0, "center_y_mm": 128.0}
         source = state.current_experiment_spec or {}
         nested = source.get("constraints") if isinstance(source.get("constraints"), dict) else {}
         explicit_cell_size = any(

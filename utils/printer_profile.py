@@ -27,11 +27,13 @@ from pathlib import Path
 from typing import Any
 
 from utils.paths import resolve_path
+from utils.specimen_placement import normalize_placement
 
 
 PRUSA_PRINT_PROFILE_PATH = resolve_path("memory/prusa_print_profile.json")
 
 DEFAULT_PRUSA_PRINT_PROFILE: dict[str, Any] = {
+    "specimen_placement": {"mode": "auto", "center_x_mm": 128.0, "center_y_mm": 128.0},
     "material": "PLA",
     "printer_model": "Prusa MK4S",
     "printer_profile": "prusa_mk4s_pla_0p4_nozzle",
@@ -114,6 +116,7 @@ def normalize_prusa_print_profile(raw: dict[str, Any] | None) -> dict[str, Any]:
     source = raw if isinstance(raw, dict) else {}
     profile = dict(DEFAULT_PRUSA_PRINT_PROFILE)
     profile.update({key: value for key, value in source.items() if key in DEFAULT_PRUSA_PRINT_PROFILE})
+    profile["specimen_placement"] = normalize_placement(profile.get("specimen_placement"))
 
     for key, max_len in _STRING_LIMITS.items():
         profile[key] = _clean_string(

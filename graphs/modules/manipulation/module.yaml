@@ -10,6 +10,9 @@ module:
     execution_boundary: lerobot_bridge_only
     guardian_stop_authority: true
   tools:
+  - lerobot.replay.start
+  - lerobot.replay.status
+  - lerobot.replay.stop
   - lerobot.rollout.start
   - lerobot.rollout.stop
   - lerobot.rollout.status
@@ -34,8 +37,8 @@ module:
     source_location: utm_fixture
     target_location: discard_bin
     terminal_pose: standby_clear_of_utm
-    verification_signal: utm_home_restored
-    verified_next_agent: knowledge_agent
+    verification_signal: utm_fixture_clear_verified
+    verified_next_agent: analysis_agent
   internal_graph:
     - id: 01_resolve_transfer_task
       label: Resolve bounded manipulation task

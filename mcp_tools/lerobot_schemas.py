@@ -321,6 +321,10 @@ class LeRobotSessionRequest(LeRobotBaseRequest):
     """Payload for LeRobot session start/status/stop tools."""
 
     task_instruction: str = "pick and place specimen"
+    replay_episode: int = Field(default=0, ge=0)
+    run_id: str = ""
+    loop_id: str | int = ""
+    specimen_id: str = ""
     dataset_path: str = ""
     dataset_root: str = ""
     dataset_repo_id: str = ""

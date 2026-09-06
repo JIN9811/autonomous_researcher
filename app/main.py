@@ -125,6 +125,7 @@ from utils.lerobot_joint_telemetry import (
     JointTelemetryFileObserver,
     TELEMETRY_SCHEMA,
     TERMINAL_SESSION_STATUSES,
+    build_joint_telemetry_batch,
     empty_grasp_outcome_summary,
     finalize_grasp_outcome_artifact,
     finalize_policy_tracking_artifacts,
@@ -164,6 +165,14 @@ from utils.printer_profile import (
     save_prusa_print_profile,
 )
 from utils.plc_bridge_service import PLCBridgeService
+from utils.specimen_placement import SpecimenPlacement, validate_sliced_placement
+from utils.bambu_material_priority import MaterialPriority, load_priority, save_priority, priority_path, bind_artifact, material_artifact_path
+from utils.test_mode_execution_profiles import (
+    TestModeExecutionProfileConflictError,
+    TestModeExecutionProfileStore,
+    TestModeExecutionProfileValidationError,
+)
+from utils.operator_teleop_handoff import OperatorTeleopHandoffError
 
 app = FastAPI(title="Autonomous Researcher")
 templates = Jinja2Templates(directory=str(resolve_path("web/templates")))
@@ -215,6 +224,7 @@ RUNTIME_MODULE_ROOT = resolve_path("graphs/modules")
 RUNTIME_MODULE_VERSION_ROOT = resolve_path("memory/module_versions")
 API_KEY_SETTINGS_PATH = resolve_path("memory/api_keys.json")
 WANDB_LOCAL_API_KEY_SETTINGS_PATH = resolve_path("memory/wandb_local_api_key.json")
+TEST_MODE_EXECUTION_PROFILES_PATH = resolve_path("memory/test_mode_execution_profiles.json")
 LEROBOT_ACTION_LOG_ROOT = resolve_path("runs/lerobot_action_logs")
 ACTIVE_ROBOT_CAM_LATEST_RESULT_PATH = resolve_path("runs/active_robot_cam/latest_active_robot_cam_result.json")
 BAMBU_HTTP_EXPORT_ROOT = resolve_path("artifacts/bambu_http_exports")
@@ -763,6 +773,34 @@ class StartRunRequest(BaseModel):
     fault_stage: str = Field(default="", description="Stage where fault is injected")
 
 
+class TestModeExecutionProfileSaveRequest(BaseModel):
+    """Revision-bounded replacement of one complete execution profile."""
+
+    model_config = {"extra": "forbid"}
+
+    expected_revision: int = Field(..., ge=0)
+    profile: dict[str, Any]
+
+
+class TestModeExecutionProfileResetRequest(BaseModel):
+    """Revision-bounded reset of one profile or all profiles."""
+
+    model_config = {"extra": "forbid"}
+
+    expected_revision: int = Field(..., ge=0)
+    profile_id: Literal["virtual_bridge", "installed_printer", "physical_print"] | None = None
+
+
+class OperatorTeleopHandoffConfirmRequest(BaseModel):
+    """Cycle-bound operator confirmation after a matching teleop stop."""
+
+    model_config = {"extra": "forbid"}
+
+    handoff_token: str = Field(..., min_length=20, max_length=256)
+    teleop_session_id: str = Field(..., min_length=1, max_length=256)
+    confirmed_by: str = Field(default="local_operator", min_length=1, max_length=120)
+
+
 class PlanningMessageRequest(BaseModel):
     """Request body for planning-workspace orchestrator messages."""
 
@@ -1018,6 +1056,7 @@ class PrinterProfileRequest(BaseModel):
     printer_model: str = "Prusa MK4S"
     printer_profile: str = "prusa_mk4s_pla_0p4_nozzle"
     slicer_profile_hint: str = "0.2mm_quality"
+    specimen_placement: SpecimenPlacement = Field(default_factory=SpecimenPlacement)
     nozzle_diameter_mm: float = 0.4
     layer_height_mm: float = 0.2
     first_layer_height_mm: float = 0.2
@@ -1175,6 +1214,7 @@ class PrinterStartCommandDraftRequest(BaseModel):
     """Request body for draft-only Bambu project_file command inspection."""
 
     remote_path: str = ""
+    material: str = ""
     subtask_name: str = ""
     plate_id: int = Field(default=1, ge=1, le=32)
     use_ams: bool = False
@@ -1210,6 +1250,7 @@ class PrinterBambuSliceArtifactRequest(BaseModel):
     """Request body for creating a real Bambu sliced artifact from an STL/3MF source."""
 
     source_path: str = ""
+    specimen_placement: SpecimenPlacement | None = None
     specimen_id: str = ""
     load_settings: str = ""
     load_filaments: str = ""
@@ -1221,6 +1262,7 @@ class PrinterHttpArtifactRouteRequest(BaseModel):
     """Request body for exposing a sliced Bambu artifact over a printer-reachable HTTP route."""
 
     artifact_path: str = ""
+    material: str = ""
     public_base_url: str = ""
     subtask_name: str = ""
     plate_id: int = Field(default=1, ge=1, le=32)
@@ -1239,6 +1281,8 @@ class PrinterBambuPrestartCheckRequest(BaseModel):
     """Request body for the user-facing Bambu pre-start checklist."""
 
     source_path: str = ""
+    material: str = ""
+    specimen_placement: SpecimenPlacement | None = None
     artifact_path: str = ""
     specimen_id: str = ""
     run_id: str = ""
@@ -1550,6 +1594,12 @@ class LeRobotAPIRequest(BaseModel):
     profile_id: str = ""
     observation_pipeline_id: str = ""
     session_id: str = ""
+    replay_episode: int = Field(default=0, ge=0)
+    run_id: str = ""
+    loop_id: str | int = ""
+    specimen_id: str = ""
+    handoff_token: str = ""
+    handoff_run_id: str = ""
     plc_rollout_stop_enabled: bool = False
     isaac_mirror_enabled: bool = False
     isaac_mirror_endpoint: str = "http://127.0.0.1:8766/joints"
@@ -2368,6 +2418,11 @@ async def _call_lerobot_backend_tool(tool_name: str, payload: dict[str, object],
     return result
 
 
+def _test_mode_execution_profile_store() -> TestModeExecutionProfileStore:
+    """Build the profile store from the current configured path for test isolation."""
+    return TestModeExecutionProfileStore(TEST_MODE_EXECUTION_PROFILES_PATH)
+
+
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request) -> HTMLResponse:
     """Serve main web dashboard."""
@@ -2376,6 +2431,116 @@ async def home(request: Request) -> HTMLResponse:
         name="index.html",
         context={"title": "Autonomous Researcher Dashboard"},
     )
+
+
+@app.get("/test-mode-settings", response_class=HTMLResponse)
+async def test_mode_settings_gui(request: Request) -> HTMLResponse:
+    """Serve the persistent test-mode execution-profile editor."""
+    return templates.TemplateResponse(
+        request=request,
+        name="test_mode_settings.html",
+        context={"title": "Test Mode Settings"},
+    )
+
+
+@app.get("/api/test-mode-execution-profiles")
+async def get_test_mode_execution_profiles() -> dict[str, Any]:
+    """Return the complete revisioned test-mode profile document."""
+    return _test_mode_execution_profile_store().snapshot()
+
+
+@app.put("/api/test-mode-execution-profiles/{profile_id}")
+async def put_test_mode_execution_profile(
+    profile_id: str,
+    request: TestModeExecutionProfileSaveRequest,
+) -> dict[str, Any]:
+    """Validate and atomically replace one complete test-mode profile."""
+    try:
+        return _test_mode_execution_profile_store().save_profile(
+            profile_id,
+            request.profile,
+            expected_revision=request.expected_revision,
+        )
+    except TestModeExecutionProfileConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except TestModeExecutionProfileValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/test-mode-execution-profiles/reset")
+async def reset_test_mode_execution_profiles(
+    request: TestModeExecutionProfileResetRequest,
+) -> dict[str, Any]:
+    """Restore one or all built-in test-mode profiles."""
+    try:
+        return _test_mode_execution_profile_store().reset(
+            request.profile_id,
+            expected_revision=request.expected_revision,
+        )
+    except TestModeExecutionProfileConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except TestModeExecutionProfileValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/planning/runs/{run_id}/teleop-handoff")
+async def get_operator_teleop_handoff(run_id: str, handoff_token: str) -> dict[str, Any]:
+    """Return a token-bounded pending handoff to the Manipulation Bridge popup."""
+    try:
+        return controller.teleop_handoff_status(run_id=run_id, handoff_token=handoff_token)
+    except OperatorTeleopHandoffError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/planning/runs/{run_id}/teleop-handoff/confirm")
+async def confirm_operator_teleop_handoff(
+    run_id: str,
+    request: OperatorTeleopHandoffConfirmRequest,
+) -> dict[str, Any]:
+    """Confirm transfer only after the existing LeRobot status proves resource release."""
+    try:
+        handoff = controller.teleop_handoff_status(
+            run_id=run_id,
+            handoff_token=request.handoff_token,
+        )
+    except OperatorTeleopHandoffError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if str(handoff.get("teleop_session_id") or "") != request.teleop_session_id:
+        raise HTTPException(status_code=409, detail="TELEOP_SESSION_MISMATCH")
+    status = _lerobot_bridge().teleoperate_status(
+        {
+            "mode": "live",
+            "runtime_mode": "live",
+            "session_id": request.teleop_session_id,
+        }
+    )
+    if str(status.get("session_id") or "") != request.teleop_session_id:
+        raise HTTPException(status_code=409, detail="TELEOP_SESSION_MISMATCH")
+    try:
+        result = controller.confirm_teleop_handoff(
+            run_id=run_id,
+            handoff_token=request.handoff_token,
+            teleop_session_id=request.teleop_session_id,
+            teleop_evidence=status,
+            confirmed_by=request.confirmed_by,
+        )
+    except OperatorTeleopHandoffError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await controller.emit_runtime_event(
+        event_type="operator_teleop_handoff_confirmed",
+        message="Operator teleop transfer confirmed; UTM Vision verification is next.",
+        payload={
+            "run_id": run_id,
+            "cycle_index": result.get("cycle_index"),
+            "specimen_id": result.get("specimen_id"),
+            "candidate_id": result.get("candidate_id"),
+            "teleop_session_id": request.teleop_session_id,
+            "status": result.get("status"),
+        },
+        level="INFO",
+        run_id=run_id,
+    )
+    return result
 
 
 @app.get("/lerobot", response_class=HTMLResponse)
@@ -14187,6 +14352,28 @@ async def post_printer_upload_path_probe(req: PrinterUploadPathProbeRequest) -> 
     }
 
 
+def _priority_project_file_draft(manager, req, **kwargs):
+    root = getattr(manager, "repo_root", resolve_path("."))
+    try:
+        policy = load_priority(path=priority_path(root))
+    except (OSError, ValueError):
+        return {"ok": False, "failure_code": "BAMBU_MATERIAL_PRIORITY_INVALID", "will_publish": False, "start_enabled": False}
+    selection = {"ok": True, "enabled": False}
+    if policy["enabled"] and getattr(req, "mode", "live") == "test":
+        return {**build_bambu_project_file_command_draft(**kwargs),
+                "material_selection": {"ok": True, "enabled": False, "status": "deferred_virtual"}}
+    if policy["enabled"]:
+        selection = manager.resolve_material_selection(req.model_dump())
+        path = material_artifact_path(getattr(req, "artifact_path", "") or kwargs.get("remote_path"), root)
+        selection = bind_artifact(selection, path, kwargs.get("plate_id", 1))
+        if not selection["ok"]:
+            return {"ok": False, "failure_code": selection["failure_code"], "material_selection": selection,
+                    "will_publish": False, "start_enabled": False}
+        kwargs["use_ams"] = bool(selection.get("enabled"))
+        kwargs["ams_mapping"] = selection.get("ams_mapping")
+    return {**build_bambu_project_file_command_draft(**kwargs), "material_selection": selection}
+
+
 @app.post("/api/printer/start-command-draft")
 async def post_printer_start_command_draft(req: PrinterStartCommandDraftRequest) -> dict[str, object]:
     """Build a Bambu MQTT project_file command draft without publishing or starting a print."""
@@ -14203,7 +14390,7 @@ async def post_printer_start_command_draft(req: PrinterStartCommandDraftRequest)
         }
     memory = BambuConnectionMemory(selected_profile.connection_memory_path)
     connection = memory.redacted()
-    draft = build_bambu_project_file_command_draft(
+    draft = _priority_project_file_draft(manager, req,
         serial=str(connection.get("serial") or ""),
         remote_path=req.remote_path,
         subtask_name=req.subtask_name,
@@ -14246,6 +14433,15 @@ def _bambu_start_gate_blockers(
 
     if not draft.get("ok"):
         add(str(draft.get("failure_code") or "BAMBU_START_DRAFT_INVALID"))
+    requested_material = draft.get("material_selection") or {}
+    prepared_material = prepare_result.get("material_selection") or {}
+    if requested_material.get("enabled") or prepared_material.get("enabled"):
+        if (not requested_material.get("ok") or not prepared_material.get("ok")
+                or requested_material.get("ams_mapping") != prepared_material.get("ams_mapping")
+                or requested_material.get("slot_id") != prepared_material.get("slot_id")
+                or not requested_material.get("artifact_material_verified")
+                or not prepared_material.get("artifact_material_verified")):
+            add("BAMBU_MATERIAL_SELECTION_CHANGED")
     for code in preprint_gate.get("blockers", []) if isinstance(preprint_gate.get("blockers"), list) else []:
         add(str(code))
     if dry_run:
@@ -14634,7 +14830,7 @@ async def post_printer_start_gate(req: PrinterStartGateRequest) -> dict[str, obj
         }
     memory = BambuConnectionMemory(selected_profile.connection_memory_path)
     connection = memory.redacted()
-    draft = build_bambu_project_file_command_draft(
+    draft = _priority_project_file_draft(manager, req,
         serial=str(connection.get("serial") or ""),
         remote_path=req.remote_path,
         subtask_name=req.subtask_name,
@@ -14649,6 +14845,7 @@ async def post_printer_start_gate(req: PrinterStartGateRequest) -> dict[str, obj
     )
     prepare_payload = {
         "runtime_mode": "live",
+        **({"material": req.material} if req.material else {}),
         "health_only": False,
         "bambu_artifact_url": req.remote_path,
         "subtask_name": req.subtask_name,
@@ -14729,7 +14926,7 @@ async def post_printer_start_publish(req: PrinterStartGateRequest) -> dict[str, 
     raw_connection = memory.load()
     raw_auth = raw_connection.get("auth") if isinstance(raw_connection.get("auth"), dict) else {}
     connection = memory.redacted()
-    draft = build_bambu_project_file_command_draft(
+    draft = _priority_project_file_draft(manager, req,
         serial=str(connection.get("serial") or ""),
         remote_path=req.remote_path,
         subtask_name=req.subtask_name,
@@ -14744,6 +14941,7 @@ async def post_printer_start_publish(req: PrinterStartGateRequest) -> dict[str, 
     )
     prepare_payload = {
         "runtime_mode": "live",
+        **({"material": req.material} if req.material else {}),
         "health_only": False,
         "bambu_artifact_url": req.remote_path,
         "subtask_name": req.subtask_name,
@@ -15139,7 +15337,7 @@ async def post_printer_spc_readiness(req: PrinterSpcReadinessRequest) -> dict[st
 
     memory = BambuConnectionMemory(selected_profile.connection_memory_path)
     connection = memory.redacted()
-    draft = build_bambu_project_file_command_draft(
+    draft = _priority_project_file_draft(manager, req,
         serial=str(connection.get("serial") or ""),
         remote_path=req.remote_path,
         subtask_name=req.subtask_name,
@@ -15156,6 +15354,7 @@ async def post_printer_spc_readiness(req: PrinterSpcReadinessRequest) -> dict[st
         {
             "runtime_mode": req.mode,
             "health_only": False,
+            **({"material": req.material} if req.material else {}),
             "bambu_artifact_url": req.remote_path,
             "subtask_name": req.subtask_name,
             "plate_id": req.plate_id,
@@ -15461,8 +15660,10 @@ async def post_printer_bambu_slice_artifact(req: PrinterBambuSliceArtifactReques
             "start_enabled": False,
         }
     runner = BambuStudioSlicerRunner(manager.config.slicer, repo_root=resolve_path("."))
+    placement = req.specimen_placement.model_dump() if req.specimen_placement is not None else load_prusa_print_profile().get("specimen_placement")
     result = runner.slice(
         source_path=req.source_path,
+        specimen_placement=placement,
         specimen_id=req.specimen_id,
         load_settings=req.load_settings or None,
         load_filaments=req.load_filaments or None,
@@ -15540,7 +15741,7 @@ async def post_printer_http_artifact_route(req: PrinterHttpArtifactRouteRequest,
     )
     url_path = f"/printer-artifacts/bambu/{token}/{quote(filename, safe='')}"
     artifact_url = f"{public_base}{url_path}"
-    draft = build_bambu_project_file_command_draft(
+    draft = _priority_project_file_draft(manager, req,
         serial=str(connection.get("serial") or ""),
         remote_path=artifact_url,
         subtask_name=req.subtask_name or source.stem,
@@ -15681,6 +15882,7 @@ async def post_printer_bambu_prestart_check(req: PrinterBambuPrestartCheckReques
         slice_result = await post_printer_bambu_slice_artifact(
             PrinterBambuSliceArtifactRequest(
                 source_path=source_path,
+                specimen_placement=req.specimen_placement,
                 specimen_id=req.specimen_id,
                 load_settings=req.load_settings,
                 load_filaments=req.load_filaments,
@@ -15735,6 +15937,19 @@ async def post_printer_bambu_prestart_check(req: PrinterBambuPrestartCheckReques
                 "message": "Provide a source STL/3MF or an existing sliced artifact path.",
             }
 
+    placement = req.specimen_placement.model_dump() if req.specimen_placement is not None else load_prusa_print_profile().get("specimen_placement")
+    # Retain the effective machine area proven by this slice, rather than
+    # reinterpreting a custom profile against the default X2D region.
+    sliced_placement_check = slice_result.get("placement_validation") or {}
+    slice_area = {key: sliced_placement_check[key] for key in ("bed_bounds_xy_mm", "allowed_bounds_xy_mm")
+                  if key in sliced_placement_check}
+    placement_check = validate_sliced_placement(Path(artifact_path), placement, area=slice_area or None)
+    steps.append(_bambu_prestart_step("specimen_placement", "Specimen center validation", placement_check))
+    if not placement_check["ok"]:
+        return {"ok": False, "status": "blocked", "failure_code": placement_check["failure_code"],
+                "steps": steps, "placement_validation": placement_check, "will_publish": False,
+                "published": False, "start_enabled": False}
+
     autoejection_patch: dict[str, object] = {}
     autoejection_status = manager.autoejection_status()
     if autoejection_status.get("can_run_test") and autoejection_status.get("native_gcode_patch"):
@@ -15769,6 +15984,7 @@ async def post_printer_bambu_prestart_check(req: PrinterBambuPrestartCheckReques
     try:
         http_route = await post_printer_http_artifact_route(
             PrinterHttpArtifactRouteRequest(
+                material=req.material,
                 artifact_path=artifact_path,
                 public_base_url=req.public_base_url,
                 subtask_name=req.subtask_name or req.specimen_id or "atr-bambu-prestart",
@@ -15823,6 +16039,7 @@ async def post_printer_bambu_prestart_check(req: PrinterBambuPrestartCheckReques
 
     artifact_url = str(http_route.get("artifact_url") or "")
     start_req = PrinterStartGateRequest(
+        material=req.material,
         remote_path=artifact_url,
         subtask_name=req.subtask_name or req.specimen_id or "atr-bambu-prestart",
         plate_id=req.plate_id,
@@ -15909,6 +16126,24 @@ async def get_bambu_http_artifact(token: str, filename: str) -> FileResponse:
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="Bambu HTTP artifact not found")
     return FileResponse(path, media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream", filename=path.name)
+
+
+@app.get("/api/printer/material-priority")
+async def get_printer_material_priority() -> dict[str, object]:
+    manager = _printer_bridge_manager()
+    try:
+        return {"ok": True, "priority": load_priority(path=priority_path(manager.repo_root))}
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=409, detail="BAMBU_MATERIAL_PRIORITY_INVALID") from exc
+
+
+@app.post("/api/printer/material-priority")
+async def post_printer_material_priority(req: MaterialPriority) -> dict[str, object]:
+    manager = _printer_bridge_manager()
+    profile, _reason = manager.fleet_selection()
+    if profile.provider != "bambulab_x2d":
+        raise HTTPException(status_code=400, detail="BAMBU_MATERIAL_PRIORITY_NOT_APPLICABLE")
+    return {"ok": True, "priority": save_priority(req.model_dump(), path=priority_path(manager.repo_root)), "will_publish": False}
 
 
 @app.get("/api/printer/profile")
@@ -16998,6 +17233,7 @@ async def stream_lerobot_joint_telemetry(websocket: WebSocket) -> None:
 
     await websocket.accept()
     observer = JointTelemetryFileObserver(preserve_history=True)
+    compact = websocket.query_params.get("sample_format") == "compact-v1"
     active_session_id = ""
     history_sent = False
     last_state_signature = ""
@@ -17041,31 +17277,23 @@ async def stream_lerobot_joint_telemetry(websocket: WebSocket) -> None:
             if status == "idle":
                 status = "live" if packets else "waiting"
 
-            if not history_sent:
-                await websocket.send_json(
-                    {
-                        "ok": True,
-                        "schema": TELEMETRY_SCHEMA,
-                        "type": "joint_history",
-                        "status": status,
-                        "session": public_session,
-                        "samples": packets,
-                        "runtime_view": _manipulation_runtime_view(session, latest_packet),
-                    }
-                )
-                history_sent = True
-            elif packets:
-                # Preserve every sample for charts; the pose renderer uses the last.
-                await websocket.send_json(
-                    {
-                        "schema": TELEMETRY_SCHEMA,
-                        "type": "joint_samples",
-                        "status": status,
-                        "samples": packets,
-                        "session": public_session,
-                        "runtime_view": _manipulation_runtime_view(session, latest_packet),
-                    }
-                )
+            if packets or not history_sent:
+                # Bounded messages retain every point; only display detail is shared.
+                batches = ([packets[i:i + 128] for i in range(0, len(packets), 128)] or [[]]) if compact else [packets]
+                for batch in batches:
+                    batch_latest = batch[-1] if batch else latest_packet
+                    await websocket.send_json(
+                        {
+                            "ok": True,
+                            "schema": TELEMETRY_SCHEMA,
+                            "type": "joint_samples" if history_sent else "joint_history",
+                            "status": status,
+                            "session": public_session,
+                            **build_joint_telemetry_batch(batch, compact=compact),
+                            "runtime_view": _manipulation_runtime_view(session, batch_latest),
+                        }
+                    )
+                    history_sent = True
             else:
                 signature = f"{session_id}:{status}:{session.get('status', '')}"
                 if signature != last_state_signature:
@@ -17502,7 +17730,23 @@ async def post_lerobot_mirror_loop_status(req: LeRobotAPIRequest) -> dict[str, o
 @app.post("/api/lerobot/teleoperate/start")
 async def post_lerobot_teleoperate_start(req: LeRobotAPIRequest) -> dict[str, object]:
     """Start LeRobot teleoperation."""
-    return await _call_lerobot_backend_tool("lerobot.teleoperate.start", req.model_dump())
+    result = await _call_lerobot_backend_tool("lerobot.teleoperate.start", req.model_dump())
+    if (req.handoff_token or req.handoff_run_id) and result.get("ok"):
+        if not req.handoff_token or not req.handoff_run_id or not result.get("session_id"):
+            raise HTTPException(status_code=409, detail="TELEOP_HANDOFF_BINDING_INVALID")
+        try:
+            controller.bind_teleop_handoff_session(
+                run_id=req.handoff_run_id,
+                handoff_token=req.handoff_token,
+                teleop_session_id=str(result["session_id"]),
+            )
+        except OperatorTeleopHandoffError as exc:
+            await _call_lerobot_backend_tool(
+                "lerobot.teleoperate.stop",
+                {"mode": req.mode, "runtime_mode": req.runtime_mode, "session_id": result.get("session_id")},
+            )
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return result
 
 
 @app.post("/api/lerobot/teleoperate/stop")
@@ -17521,6 +17765,22 @@ async def post_lerobot_teleoperate_status(req: LeRobotAPIRequest) -> dict[str, o
 async def post_lerobot_record_start(req: LeRobotAPIRequest) -> dict[str, object]:
     """Start LeRobot dataset recording."""
     return await _call_lerobot_backend_tool("lerobot.record.start", req.model_dump())
+
+
+@app.post("/api/lerobot/replay/start")
+async def post_lerobot_replay_start(req: LeRobotAPIRequest) -> dict[str, object]:
+    """Start a managed local episode replay, never a policy fallback."""
+    return await _call_lerobot_backend_tool("lerobot.replay.start", req.model_dump())
+
+
+@app.post("/api/lerobot/replay/status")
+async def post_lerobot_replay_status(req: LeRobotAPIRequest) -> dict[str, object]:
+    return await _call_lerobot_backend_tool("lerobot.replay.status", req.model_dump(), publish=False)
+
+
+@app.post("/api/lerobot/replay/stop")
+async def post_lerobot_replay_stop(req: LeRobotAPIRequest) -> dict[str, object]:
+    return await _call_lerobot_backend_tool("lerobot.replay.stop", req.model_dump())
 
 
 @app.post("/api/lerobot/record/control")

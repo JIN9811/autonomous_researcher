@@ -21,8 +21,10 @@ source_of_truth:
   - mcp_tools/lerobot_tools.py
   - configs/lerobot.yaml
   - app/main.py
-last_verified: 2026-08-09
-verified_against: 188a1d6
+  - scripts/lerobot_managed_replay.py
+  - utils/utm_clear_cycle.py
+last_verified: 2026-09-06
+verified_against: working-tree
 related_docs:
   - docs/device_bridges/README.md
   - docs/agents/manipulation_agent.md
@@ -38,7 +40,7 @@ supersedes: []
 
 `LeRobotBridge` is the robot/process boundary for profile and port management,
 camera capture, teleoperation, recording, training, policy rollout, dataset
-inspection, visualization, and Isaac-based synthetic/Mimic/RL/mirror
+inspection, managed recorded-motion replay, visualization, and Isaac-based synthetic/Mimic/RL/mirror
 workflows. It owns process/session evidence and stop/status operations; agents
 own scientific intent and Guardian/operator policy remains authoritative.
 
@@ -109,12 +111,83 @@ artifacts define recovery. Internal helper stages are not separate graph nodes.
 
 ## API Surface
 
+### Standalone ActiveCam camera preparation
+
+The one-shot driver, `scripts/lerobot_active_robot_cam_once.py`, uses a short
+RealSense SDK bootstrap (`warmup_s=1`, in addition to the SDK's initial delay)
+followed by a readiness gate before commanding the capture pose. The shared
+bridge camera warmup of 20 seconds for recording and rollout is unchanged.
+The SDK's existing pipeline-start retry remains in place.
+
+Readiness requires at least eight fresh synchronous frames spanning at least
+0.5 seconds, evaluated in a rolling window of up to 16 frames:
+
+| Signal | Acceptance condition |
+|---|---|
+| Color | Finite three-channel image; overall mean between 2 and 253 on the 8-bit scale |
+| Exposure stability | Per-channel mean range within the larger of 3 levels or 3% of its window mean |
+| Depth, when enabled | Matching color dimensions; at least 5% finite positive pixels |
+| Depth stability | Valid-pixel fraction range at most 5 percentage points; median range within the larger of 1 raw unit or 5% of its window mean |
+
+Depth is read with color from the same SDK frameset. Invalid frames clear the
+window. Stable frames allow early completion; a 20-second readiness deadline
+raises `ACTIVE_ROBOT_CAM_CAMERA_NOT_READY` inside the existing
+`ACTIVE_ROBOT_CAM_CONNECT_FAILED` response. It never authorizes capture-pose
+movement on timeout. This deadline excludes SDK connection/bootstrap time.
+Connection still opens the robot bus and configures hardware; this is not a
+hardware-free preflight or a new emergency-stop mechanism.
+
+The driver result includes `camera_readiness.elapsed_s` for connection plus
+readiness, and per-camera `elapsed_s`, `stable_frames`, `depth_required`, and
+`valid_depth_fraction`. Capture, pose validation, and return motion are unchanged.
+These readiness thresholds are software-tested heuristics, not a physical
+image-quality certification or a measured startup-time guarantee. The next
+standalone invocation reads the updated script without a GUI server restart.
+
+### HTTP endpoints
+
 `/api/lerobot/*` includes config/profiles/ports, camera and specimen-pose,
-teleoperate, record, train, rollout, policies/download, datasets/files,
+teleoperate, record, train, rollout, replay, policies/download, datasets/files,
 visualization and local W&B, joint telemetry, sessions, augmentation, Isaac
 RGB-D, Isaac Lab validation/prepare/synthetic/Mimic/RL/e2e, and mirror
 receiver/loop families. Start, status, stop, and artifact retrieval are distinct
 operations. OpenAPI remains exhaustive.
+
+### Managed UTM-clear replay
+
+Managed replay is physical playback of a recorded robot episode when the
+effective runtime mode is Live. It is not offline event replay or a new VLA
+rollout. The current implementation supports local LeRobot v2 parquet data
+and the OMX follower profile used by the approved `jin/utm_clear`, episode `0`.
+
+| HTTP (POST) | Registered tool | Contract |
+| --- | --- | --- |
+| `/api/lerobot/replay/start` | `lerobot.replay.start` | Validate profile/live confirmation, dataset/episode and scoped session; reserve process/ports and launch |
+| `/api/lerobot/replay/status` | `lerobot.replay.status` | Read process state, duration bound, logs and validated measured-return evidence |
+| `/api/lerobot/replay/stop` | `lerobot.replay.stop` | Stop the matching managed process, including a concurrent pending start |
+
+Requests carry profile, dataset repository/path, `replay_episode`, mode,
+confirmation and run/loop/specimen/session identity. Responses retain session,
+status, log/evidence paths and `replay_max_duration_s`; completion requires
+validated evidence identity and `replay_home_verified`, not exit code alone.
+The runner uses the existing saved calibration and native robot action path
+without rewriting the dataset, calibration or motor limits. Return is checked
+against the final recorded `observation.state`, not the commanded action.
+No VLA checkpoint, grasp detector or camera lease is needed for this sweep.
+
+Start is idempotent for an already registered child within the current bridge
+process; this is not durable exactly-once execution across server restarts.
+The cycle layer prevents automatic effectful rearming. A fixed pending deadline
+is derived from the actual replay duration bound, with a bounded observation
+budget. Global Stop, Safe Stop, E-stop and PLC stop include managed replay.
+Termination first requests graceful cleanup, then escalates if necessary.
+Best-effort per-motor torque disable continues after an individual failure,
+but a cleanup failure remains unverified and SIGKILL cannot guarantee torque
+disable. Reconcile the actual robot before any restart after an unknown effect.
+
+The two-stage image display is described in
+[Manipulation](../agents/manipulation_agent.md#post-test-utm-clearance).
+An image-card selection never grants motion authority.
 
 ## Tools and Registry Integration
 
@@ -223,6 +296,21 @@ Inspection covered bridge/config/tool/API paths and focused tests for core
 bridge behavior, GUI API contracts, camera, telemetry, profiles, rollout,
 Isaac synthetic/Mimic, and mirror functions at `188a1d6`. No complete physical
 robot campaign across every profile/policy was evaluated.
+
+Managed-replay update (2026-09-06, uncommitted working tree):
+`tests/unit/test_lerobot_replay.py` covers session identity, duplicate start,
+stop/start races, port ownership, partial cleanup failure and measured return;
+`tests/unit/test_utm_clear_cycle.py` covers downstream gates and cancellation.
+These are non-actuating tests. The new managed wrapper and post-sweep Vision
+confirmation have not been commissioned on hardware. Broader pre-existing
+bridge failures were not hidden or treated as passing by this focused check.
+
+Standalone readiness update (2026-09-06, working tree): 23 focused driver,
+ActiveCam-loop, and artifact tests plus nine selected bridge ActiveCam tests
+passed without hardware actuation. Broader checks still reported three Isaac
+timeout-expectation failures (0.15 versus 0.5 seconds) and one missing-camera
+teleop lease-metadata failure. Those paths were not changed by this update;
+this is not a clean full-suite or physical-performance verification.
 
 ## Limitations and Known Gaps
 

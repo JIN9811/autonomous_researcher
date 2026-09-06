@@ -4,12 +4,78 @@ Unit tests for graph-wide Guardian gate alarm normalization.
 
 from __future__ import annotations
 
+import pytest
+
 from orchestrator.state import Mode, OrchestratorState, Stage
 from policies.guardian_gate import equipment_skill_recovery_gate, gate_blocks_execution, guardian_gate, tool_requires_action_shield
 
 
 def _state(stage: Stage = Stage.MANIPULATION) -> OrchestratorState:
     return OrchestratorState(run_id="run-gate-test", experiment_id="exp-gate-test", mode=Mode.LIVE, stage=stage)
+
+
+@pytest.mark.parametrize("blocking,kind,expected_block", [
+    (False, "vision_observation", False),
+    (True, "vision_gate", True),
+    (None, "vision_observation", True),
+    (False, "vision_gate", True),
+])
+def test_equipment_passive_link_unavailable_respects_gate_contract(blocking, kind, expected_block):
+    transition = {
+        "phase": "vision", "kind": kind, "blocking": blocking,
+        "failure_code": "EQUIPMENT_VISION_LINK_UNAVAILABLE", "outcome": "error",
+        "vision_result": {"failure_code": "EQUIPMENT_VISION_LINK_UNAVAILABLE"},
+    }
+    gate = guardian_gate(
+        state=_state(Stage.EQUIPMENT), stage="equipment", phase="post",
+        payload={"equipment_skill_flow_execution": {"transitions": [transition]}},
+    )
+    assert gate_blocks_execution(gate) is expected_block
+    if not expected_block:
+        assert gate["decision"] == "allow_with_warning"
+        assert any(a["reason_code"] == "EQUIPMENT_VISION_LINK_UNAVAILABLE"
+                   and a["severity"] == "warning" for a in gate["alarms"])
+
+
+def test_passive_vision_link_warning_does_not_hide_independent_safety_failure():
+    gate = guardian_gate(
+        state=_state(Stage.EQUIPMENT), stage="equipment", phase="post",
+        payload={"equipment_report": {"block_executions": [{
+            "phase": "vision", "kind": "vision_observation", "blocking": False,
+            "failure_code": "EQUIPMENT_VISION_LINK_UNAVAILABLE",
+            "vision_result": {"safe_stop_recommended": True},
+        }]}, "equipment_result": {"failure_code": "UTM_MOTION_FAILED"}},
+    )
+    assert gate_blocks_execution(gate) is True
+    assert any(a["reason_code"] == "UTM_MACRO_MISMATCH" and a["severity"] == "blocking"
+               for a in gate["alarms"])
+    assert any(a["reason_code"] == "OPERATOR_STOP_REQUESTED" and a["severity"] == "critical"
+               for a in gate["alarms"])
+
+
+def test_passive_observer_does_not_downgrade_explicit_blocking_severity():
+    gate = guardian_gate(
+        state=_state(Stage.EQUIPMENT), stage="equipment", phase="post",
+        payload={"equipment_report": {"block_executions": [{
+            "phase": "vision", "kind": "vision_observation", "blocking": False,
+            "failure_code": "EQUIPMENT_VISION_LINK_UNAVAILABLE", "severity": "blocking",
+        }]}},
+    )
+    assert gate_blocks_execution(gate) is True
+
+
+def test_nested_required_vision_gate_is_not_downgraded_by_passive_parent():
+    gate = guardian_gate(
+        state=_state(Stage.EQUIPMENT), stage="equipment", phase="post",
+        payload={"equipment_report": {"block_executions": [{
+            "phase": "vision", "kind": "vision_observation", "blocking": False,
+            "vision_result": {
+                "phase": "vision", "kind": "vision_gate", "blocking": True,
+                "failure_code": "EQUIPMENT_VISION_LINK_UNAVAILABLE",
+            },
+        }]}},
+    )
+    assert gate_blocks_execution(gate) is True
 
 
 def test_rollout_stop_and_status_are_not_action_shielded() -> None:
