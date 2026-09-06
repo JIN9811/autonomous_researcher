@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from experiments.job_queue import DeviceJobQueue
+from utils.agent_artifact_archive import record_tool_artifact
 
 ToolHandler = Callable[[dict[str, Any]], dict[str, Any]]
 
@@ -57,14 +58,22 @@ class ToolRegistry:
         if name not in self._tools:
             raise KeyError(f"Tool not found: {name}")
         normalized = payload or {}
-        if name in self._tool_devices:
-            return self._job_queue.submit_sync(
-                device=self._tool_devices[name],
-                tool_name=name,
-                handler=self._tools[name],
-                payload=normalized,
-            )
-        return self._tools[name](normalized)
+        record_tool_artifact("tool_started", name, normalized)
+        try:
+            if name in self._tool_devices:
+                result = self._job_queue.submit_sync(
+                    device=self._tool_devices[name],
+                    tool_name=name,
+                    handler=self._tools[name],
+                    payload=normalized,
+                )
+            else:
+                result = self._tools[name](normalized)
+        except Exception as exc:
+            record_tool_artifact("tool_failed", name, {"error_type": type(exc).__name__})
+            raise
+        record_tool_artifact("tool_result", name, result)
+        return result
 
     def list_tools(self) -> list[str]:
         """Return sorted list of registered tool names."""

@@ -5,6 +5,22 @@ import pytest
 from utils.manipulation_runtime_view import build_manipulation_runtime_view
 
 
+def test_first_grasp_achievement_does_not_replace_attempt_rate_or_verify_transfer():
+    achievement = {"achieved": True, "status": "achieved", "first_success": {"attempt_index": 1, "status": "success"}}
+    view = build_manipulation_runtime_view(
+        session={"session_id": "transfer-1", "status": "POLICY_ACTIVE"}, state={}, artifacts={},
+        packet={"motion_state": {
+            "grasp_achievement": achievement,
+            "grasp_attempt_summary": {"total_attempts": 2, "completed_attempts": 2, "success_count": 1, "failed_count": 1, "pending_count": 0, "success_rate": 0.5},
+            "task_cycle": {"state": "not_started"},
+        }},
+    )
+    assert view["metrics"]["grasp_achievement"] == achievement
+    assert view["metrics"]["grasp"]["attempt_count"] == 2
+    assert view["metrics"]["grasp"]["success_rate"] == 0.5
+    assert view["result"]["vision_verification_status"] == "waiting"
+
+
 def test_idle_runtime_view_keeps_fixed_schema_without_inventing_metrics() -> None:
     view = build_manipulation_runtime_view(session={}, state={}, packet=None, artifacts={})
 

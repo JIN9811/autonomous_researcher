@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
+from utils.agent_artifact_archive import archive_agent_run
 from orchestrator.state import Mode, OrchestratorState
 
 
@@ -1112,6 +1113,7 @@ class SpecimenMakingAgent(BaseAgent):
             next_hint="operator_input_required",
         )
 
+    @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         spec = dict(state.current_experiment_spec or {})
         candidate = str(spec.get("candidate_id", "cand-unknown"))

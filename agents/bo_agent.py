@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
+from utils.agent_artifact_archive import archive_agent_run
 from learning.bo_parameter_space import BOParameterSpace
 from orchestrator.state import Mode, OrchestratorState
 
@@ -1353,6 +1354,7 @@ class BOAgent(BaseAgent):
             "bo_next_candidate": self._write_json(base / "bo_next_candidate.json", next_candidate),
         }
 
+    @archive_agent_run
     async def run_with_settings(
         self,
         state: OrchestratorState,
@@ -1733,6 +1735,7 @@ class BOAgent(BaseAgent):
             },
         )
 
+    @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         """Run with defaults when invoked directly by registry/future orchestrator paths."""
         return await self.run_with_settings(state, ctx, {})

@@ -29,6 +29,7 @@ from typing import Any
 from urllib.parse import quote
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
+from utils.agent_artifact_archive import archive_agent_run
 from mcp_tools.tpms_geometry import tpms_level_for_relative_density
 from orchestrator.state import Mode, OrchestratorState
 from utils.paths import resolve_path
@@ -1607,6 +1608,7 @@ class DesignAgent(BaseAgent):
             "next_action": "handoff_to_specimen_agent" if handoff.get("required_fields_present", False) else "complete_missing_design_fields",
         }
 
+    @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         use_llm = state.mode != Mode.TEST or ctx.force_real_llm_in_test
         payload = self._deterministic_design_payload(state, ctx)

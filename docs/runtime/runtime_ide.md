@@ -436,6 +436,11 @@ to environment/config keys rather than values.
 
 ## Runtime Events, Timeline, and Artifact Evidence
 
+For the newer loop/agent/attempt partitioning, saved-loop filters, and archive
+status semantics, see [Loop Artifact Archiving](loop_artifact_archiving.md).
+That Reference declares its own working-tree verification baseline; the
+remaining sections below retain this document's original baseline.
+
 Graph configuration operations emit `graph.compiled` on successful compile
 checks and `graph.validation_failed` on failure. Runs, nodes, tools, approvals,
 operator actions, workspaces, and artifacts emit structured events through the

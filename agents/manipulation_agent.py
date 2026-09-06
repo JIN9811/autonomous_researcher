@@ -27,6 +27,7 @@ import inspect
 from typing import Any
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
+from utils.agent_artifact_archive import archive_agent_run, current_execution
 from orchestrator.state import Mode, OrchestratorState
 from submodules.sarm.failure_predictor import predict_failure_precursor
 from submodules.sarm.progress_scorer import score_progress
@@ -523,11 +524,17 @@ class ManipulationAgent(BaseAgent):
             task_instruction = self._canonical_instruction(task_id=task_id, specimen_id=specimen_id, source=source, target=target)
         episode_s = self._safe_float(spec.get("lerobot_rollout_episode_s") or spec.get("rollout_episode_s"), 30.0 if is_pi05 else 5.0)
         runtime_mode = "test" if virtual_printer_tail else "live" if state.mode == Mode.LIVE or physical_printer_tail else state.mode.value
+        archive = current_execution()
+        session_id = str(spec.get("lerobot_session_id") or f"rollout-{state.run_id}-{task_id}")
+        if archive is not None:
+            # Actual active-session recovery below still uses its previous session ID.
+            # Only a new start gets a new log identity, even with a configured base ID.
+            session_id = f"{session_id[:120]}-l{archive.manifest['loop_number']}-a{archive.manifest['attempt_index']}-{archive.manifest['execution_id'][:12]}"
         return {
             "mode": state.mode.value,
             "runtime_mode": runtime_mode,
             "profile_id": profile_id,
-            "session_id": str(spec.get("lerobot_session_id") or f"rollout-{state.run_id}-{task_id}"),
+            "session_id": session_id,
             "task_id": task_id,
             "skill_id": task_id,
             "task_instruction": task_instruction,
@@ -1820,6 +1827,7 @@ class ManipulationAgent(BaseAgent):
             "handoff_status": report.get("decision", {}).get("handoff_status", "") if isinstance(report.get("decision"), dict) else "",
         }
 
+    @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         timeout_s = 30.0 if state.mode == Mode.TEST else None
         strategy = self._strategy(state)

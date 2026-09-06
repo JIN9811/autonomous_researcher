@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import Any
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
+from utils.agent_artifact_archive import archive_agent_run
 from knowledge.failure_memory import FailureRecord
 from orchestrator.runtime_defaults import TEST_MODE_LOOP_CYCLES
 from orchestrator.state import OrchestratorState
@@ -56,6 +57,7 @@ class GuardianAgent(BaseAgent):
         "critical",
     }
 
+    @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         spec_payload = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
         sarm = state.latest_analysis.get("sarm", {}) if isinstance(state.latest_analysis.get("sarm"), dict) else {}

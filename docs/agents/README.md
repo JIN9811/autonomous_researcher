@@ -35,9 +35,10 @@ internal steps, APIs, tools and external connections, state and evidence,
 runtime modes, safety gates, error recovery, operator surfaces, and current
 verification boundary.
 
-The implementation baseline is `0b7627b`. Later commits through the agent
-documentation work change documents and document validators, not the agent
-runtime described here.
+The individual agent References retain their declared verification baselines.
+The shared [Loop Artifact Archiving](../runtime/loop_artifact_archiving.md)
+Reference describes the newer run/loop/agent/invocation storage contract,
+including failed/cancelled calls, file snapshots, and saved-loop GUI access.
 
 ## 한국어 안내
 

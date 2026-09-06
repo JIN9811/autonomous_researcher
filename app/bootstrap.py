@@ -310,7 +310,8 @@ def load_runtime() -> MainController:
     )
     register_printer_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
     register_equipment_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
-    register_lerobot_tools(tools, cfg.get("lerobot", {}), repo_root=resolve_path("."))
+    lerobot_bridge = register_lerobot_tools(tools, cfg.get("lerobot", {}), repo_root=resolve_path("."))
+    lerobot_bridge.config.artifact_run_root = resolve_path(system_cfg.get("run_root", "./runs"))
     register_cae_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
     register_calculix_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
     register_pinn_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
@@ -333,6 +334,7 @@ def load_runtime() -> MainController:
         backend_fallbacks=backend_fallbacks,
         runtime_profiles=runtime_profiles,
         llm_lease=LLMLeaseCoordinator(),
+        artifact_run_root=str(resolve_path(system_cfg.get("run_root", "./runs"))),
     )
 
     objective_service = ObjectiveService(

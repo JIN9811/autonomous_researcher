@@ -405,6 +405,7 @@ class LeRobotBridgeConfig:
     output_root: Path = Path("outputs/train")
     policy_root: Path = Path("outputs/train")
     session_log_root: Path = Path("runs/lerobot_sessions")
+    artifact_run_root: Path | None = None
     conda_env_name: str = "lerobot"
     conda_executable: str = "conda"
     pi05_conda_env_name: str = "lerobot-pi05-torch211"
@@ -481,6 +482,7 @@ class LeRobotBridgeConfig:
             output_root=output_root,
             policy_root=policy_root,
             session_log_root=session_log_root,
+            artifact_run_root=_resolve_path(repo, str(root.get("artifact_run_root", "runs"))),
             conda_env_name=str(root.get("conda_env_name", "lerobot")),
             conda_executable=_resolve_conda_executable(str(root.get("conda_executable", "conda"))),
             pi05_conda_env_name=str(root.get("pi05_conda_env_name", "lerobot-pi05-torch211")),
@@ -8575,6 +8577,8 @@ class LeRobotBridge:
                 },
             }
         log_path = self._omx_action_log_path(session_id)
+        from utils.rollout_artifact_stream import update_rollout_artifact
+        update_rollout_artifact(log_path.parent, session)
         with self._joint_telemetry_gate_lock:
             packets = self._joint_telemetry_observer.poll(log_path, session)
             interlock = self._post_place_interlocks.setdefault(
@@ -11008,8 +11012,10 @@ class LeRobotBridge:
         return env
 
     def _omx_action_log_env_overrides(self, session_id: str) -> dict[str, str]:
+        from utils.rollout_artifact_stream import bind_rollout_log
+
         clean_session_id = self._safe_session_id(session_id or "live")
-        log_dir = self._omx_action_log_dir(clean_session_id)
+        log_dir = bind_rollout_log(self._omx_action_log_dir(clean_session_id))
         return {
             "ATR_LEROBOT_OMX_ACTION_LOG": "1",
             "ATR_LEROBOT_OMX_ACTION_LOG_SESSION_ID": clean_session_id,
@@ -11018,8 +11024,11 @@ class LeRobotBridge:
         }
 
     def _omx_action_log_dir(self, session_id: str) -> Path:
+        from utils.rollout_artifact_stream import resolve_rollout_log
+
         clean_session_id = self._safe_session_id(session_id or "live")
-        return self.config.session_log_root.parent / "lerobot_action_logs" / clean_session_id
+        return resolve_rollout_log(self.config.session_log_root.parent / "lerobot_action_logs" / clean_session_id,
+                                   run_root=self.config.artifact_run_root)
 
     def _omx_action_log_path(self, session_id: str) -> Path:
         return self._omx_action_log_dir(session_id) / "motor_events.jsonl"

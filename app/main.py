@@ -2206,6 +2206,7 @@ def _lerobot_bridge() -> LeRobotBridge:
     if _LEROBOT_BRIDGE is None or config_mtime_ns != _LEROBOT_CONFIG_MTIME_NS:
         cfg = load_all_configs(resolve_path("configs"))
         config = LeRobotBridgeConfig.from_config(cfg.get("lerobot", {}), repo_root=resolve_path("."))
+        config.artifact_run_root = resolve_path(cfg.get("system", {}).get("system", {}).get("run_root", "./runs"))
         _LEROBOT_BRIDGE = LeRobotBridge(config)
         _LEROBOT_CONFIG_MTIME_NS = config_mtime_ns
     return _LEROBOT_BRIDGE
@@ -2215,6 +2216,7 @@ def _joint_telemetry_session_context() -> dict[str, Any] | None:
     """Select the current rollout log without opening robot or camera devices."""
 
     sessions: list[dict[str, Any]] = []
+    session_log_paths: dict[str, Path] = {}
     seen_sessions: set[str] = set()
     seen_bridges: set[int] = set()
     for bridge in (_lerobot_bridge(), _registered_lerobot_bridge()):
@@ -2233,6 +2235,10 @@ def _joint_telemetry_session_context() -> dict[str, Any] | None:
                 continue
             seen_sessions.add(session_id)
             sessions.append(dict(raw_session))
+            if re.fullmatch(r"[A-Za-z0-9_.-]+", session_id):
+                log_directory = getattr(bridge, "_omx_action_log_dir", None)
+                if callable(log_directory):
+                    session_log_paths[session_id] = log_directory(session_id) / "motor_events.jsonl"
     if not sessions:
         return None
 
@@ -2251,9 +2257,10 @@ def _joint_telemetry_session_context() -> dict[str, Any] | None:
     session_id = str(selected.get("session_id") or "").strip()
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", session_id):
         return None
+    from utils.rollout_artifact_stream import resolve_rollout_log
     return {
         "session": selected,
-        "log_path": LEROBOT_ACTION_LOG_ROOT / session_id / "motor_events.jsonl",
+        "log_path": session_log_paths.get(session_id) or resolve_rollout_log(LEROBOT_ACTION_LOG_ROOT / session_id) / "motor_events.jsonl",
     }
 
 
@@ -6251,10 +6258,20 @@ def _artifact_items_for_run(run_id: str) -> tuple[Path, list[dict[str, object]]]
     if not run_dir.exists():
         raise HTTPException(status_code=404, detail=f"Unknown run_id={run_id}")
     artifacts: list[dict[str, object]] = []
+    from utils.agent_artifact_archive import list_executions
+    executions = {
+        str(Path(entry["manifest_path"]).parent): entry for entry in list_executions(run_dir)
+    }
     for item in sorted(run_dir.rglob("*")):
-        if not item.is_file():
+        if not item.is_file() or not item.resolve().is_relative_to(run_dir.resolve()):
+            continue
+        if item.name.startswith(".") and item.name.endswith(".tmp"):
             continue
         rel = item.relative_to(run_dir).as_posix()
+        parts = Path(rel).parts
+        owner = executions.get(Path(*parts[:5]).as_posix(), {}) if len(parts) >= 6 else {}
+        if not owner and len(parts) == 4 and parts[:2] == ("runtime", "loops") and re.fullmatch(r"loop-\d+", parts[2]):
+            owner = {"loop_index": int(parts[2][5:]) - 1, "loop_number": int(parts[2][5:]), "agent": "orchestrator_agent"}
         encoded_rel = quote(rel, safe="/")
         artifact_id = f"{run_id}::{quote(rel, safe='')}"
         preview_kind = _artifact_preview_kind(item)
@@ -6272,6 +6289,13 @@ def _artifact_items_for_run(run_id: str) -> tuple[Path, list[dict[str, object]]]
                 "url": f"/api/runs/{run_id}/artifact-file/{encoded_rel}",
                 "download_url": f"/api/runs/{run_id}/artifact-file/{encoded_rel}?download=1",
                 "compat_url": f"/api/artifacts/{quote(artifact_id, safe='')}",
+                "loop_index": owner.get("loop_index"),
+                "loop_number": owner.get("loop_number"),
+                "agent": owner.get("agent"),
+                "attempt_index": owner.get("attempt_index"),
+                "execution_id": owner.get("execution_id"),
+                "specimen_id": owner.get("specimen_id"),
+                "archive_status": owner.get("archive_status", "legacy"),
             }
         )
     return run_dir, artifacts
@@ -16946,6 +16970,7 @@ async def get_lerobot_grasp_outcomes() -> dict[str, object]:
         "status": session_status_label(session.get("status")),
         "session": _joint_telemetry_public_session(session),
         "attempts": list(result.get("attempts") or []),
+        "grasp_achievement": dict(result.get("grasp_achievement") or {}),
         "summary": dict(result.get("summary") or empty_grasp_outcome_summary()),
         "artifact_path": artifact_path,
         "artifact_url": artifact_url,
@@ -16972,7 +16997,7 @@ async def stream_lerobot_joint_telemetry(websocket: WebSocket) -> None:
     """Stream existing rollout action logs without touching the control process."""
 
     await websocket.accept()
-    observer = JointTelemetryFileObserver(max_initial_samples=300, max_batch_samples=128)
+    observer = JointTelemetryFileObserver(preserve_history=True)
     active_session_id = ""
     history_sent = False
     last_state_signature = ""
@@ -17030,10 +17055,13 @@ async def stream_lerobot_joint_telemetry(websocket: WebSocket) -> None:
                 )
                 history_sent = True
             elif packets:
-                # Browser rendering needs only the newest complete control-loop sample.
+                # Preserve every sample for charts; the pose renderer uses the last.
                 await websocket.send_json(
                     {
-                        **packets[-1],
+                        "schema": TELEMETRY_SCHEMA,
+                        "type": "joint_samples",
+                        "status": status,
+                        "samples": packets,
                         "session": public_session,
                         "runtime_view": _manipulation_runtime_view(session, latest_packet),
                     }
@@ -19088,10 +19116,23 @@ async def get_runtime_run_events(run_id: str) -> dict[str, object]:
 
 
 @app.get("/api/runs/{run_id}/artifacts")
-async def get_runtime_run_artifacts(run_id: str) -> dict[str, object]:
+async def get_runtime_run_artifacts(
+    run_id: str, loop_index: int | None = None, agent: str | None = None,
+    attempt_index: int | None = None,
+) -> dict[str, object]:
     """List artifact files created under one run directory."""
+    from utils.agent_artifact_archive import list_executions
+    if loop_index is not None and loop_index < 0:
+        raise HTTPException(status_code=400, detail="loop_index must be zero or greater")
+    if attempt_index is not None and attempt_index < 1:
+        raise HTTPException(status_code=400, detail="attempt_index starts at one")
     run_dir, artifacts = _artifact_items_for_run(run_id)
-    return {"ok": True, "run_id": run_id, "run_dir": str(run_dir), "artifacts": artifacts}
+    executions = list_executions(run_dir, loop_index=loop_index, agent=agent)
+    for key, selected in (("loop_index", loop_index), ("agent", agent), ("attempt_index", attempt_index)):
+        if selected is not None:
+            artifacts = [item for item in artifacts if item.get(key) == selected]
+            executions = [item for item in executions if item.get(key) == selected]
+    return {"ok": True, "run_id": run_id, "run_dir": str(run_dir), "artifacts": artifacts, "executions": executions}
 
 
 @app.get("/api/runs/{run_id}/artifact-file/{artifact_path:path}")
@@ -19108,11 +19149,13 @@ async def get_runtime_run_artifact_file(run_id: str, artifact_path: str, downloa
 
 
 @app.get("/api/artifacts")
-async def get_artifacts_compat(run_id: str | None = None) -> dict[str, object]:
+async def get_artifacts_compat(
+    run_id: str | None = None, loop_index: int | None = None, agent: str | None = None,
+    attempt_index: int | None = None,
+) -> dict[str, object]:
     """Compatibility endpoint listing artifacts for a run or the active run."""
     selected_run_id = run_id or _current_run_id()
-    run_dir, artifacts = _artifact_items_for_run(selected_run_id)
-    return {"ok": True, "run_id": selected_run_id, "run_dir": str(run_dir), "artifacts": artifacts}
+    return await get_runtime_run_artifacts(selected_run_id, loop_index, agent, attempt_index)
 
 
 @app.get("/api/artifacts/{artifact_id:path}")

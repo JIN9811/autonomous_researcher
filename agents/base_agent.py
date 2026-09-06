@@ -75,6 +75,7 @@ class AgentContext:
     backend_fallbacks: dict[str, str] = field(default_factory=dict)
     runtime_profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
     llm_lease: LLMLeaseCoordinator | None = None
+    artifact_run_root: str | None = None
 
     def set_active_backend(self, backend_name: str) -> dict[str, Any]:
         """Switch the shared inference backend for all agents."""

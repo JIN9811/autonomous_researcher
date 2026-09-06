@@ -16,6 +16,7 @@ from utils.isaac_omx_mirror_mapping import ISAAC_OMX_JOINT_MAP, action_to_joint_
 TELEMETRY_SCHEMA = "atr.robot_joint_telemetry.v1"
 ARTIFACT_SCHEMA = "atr.policy_tracking_artifact.v1"
 GRASP_OUTCOME_SCHEMA = "atr.grasp_outcomes.v1"
+GRASP_ACHIEVEMENT_SCHEMA = "atr.grasp_achievement.v1"
 GRASP_OUTCOME_RULE_VERSION = "absolute_contact_gap_v3"
 GRASP_CONTACT_GAP_THRESHOLD = 2.0
 JOINT_NAMES = tuple(str(item["isaac_joint_name"]) for item in ISAAC_OMX_JOINT_MAP)
@@ -708,6 +709,10 @@ class MotionStateAnnotator:
     _policy_latch: _ChannelMotionLatch = field(default_factory=_ChannelMotionLatch, init=False)
     _grasp_latch: _GraspOutcomeLatch = field(default_factory=_GraspOutcomeLatch, init=False)
     _task_cycle: TaskCycleAnnotator = field(default_factory=TaskCycleAnnotator, init=False)
+    _session_id: str = field(default="", init=False)
+    _last_sequence: int = field(default=-1, init=False)
+    _execution_index: int = field(default=0, init=False)
+    _execution_origin_s: float | None = field(default=None, init=False)
 
     @property
     def grasp_attempts(self) -> list[dict[str, Any]]:
@@ -715,8 +720,24 @@ class MotionStateAnnotator:
 
     def annotate(self, packet: Mapping[str, Any]) -> dict[str, Any]:
         annotated = dict(packet)
-        self._history.append(annotated)
+        session_id = str(packet.get("session_id") or "")
+        sequence = _safe_int(packet.get("sequence"), self._last_sequence + 1)
         current_time = _safe_float(annotated.get("monotonic_s"), 0.0)
+        if (self._execution_index == 0 or session_id != self._session_id or sequence < self._last_sequence):
+            # A reused session name can contain a fresh logger invocation.
+            # Window reconnects replay the same records, not a new execution.
+            self._history.clear()
+            self._measured_latch = _ChannelMotionLatch()
+            self._policy_latch = _ChannelMotionLatch()
+            self._grasp_latch.reset()
+            self._task_cycle.reset(session_id)
+            self._execution_index += 1
+            self._execution_origin_s = current_time - _safe_float(packet.get("elapsed_s"), 0.0) if self._last_sequence < 0 else current_time
+        self._session_id = session_id
+        self._last_sequence = sequence
+        annotated["execution_index"] = self._execution_index
+        annotated["elapsed_s"] = max(0.0, current_time - self._execution_origin_s)
+        self._history.append(annotated)
         retain_after = current_time - max(self.window_s * 2.0, 1.0)
         self._history = [
             item for item in self._history if _safe_float(item.get("monotonic_s"), 0.0) >= retain_after
@@ -745,6 +766,8 @@ class MotionStateAnnotator:
             ),
         }
         annotated["motion_state"]["task_cycle"] = self._task_cycle.observe(annotated)
+        annotated["motion_state"]["grasp_achievement"] = grasp_achievement(self.grasp_attempts, session_id)
+        annotated["motion_state"]["grasp_attempt_summary"] = _summarize_grasp_attempts(self.grasp_attempts)
         self._history[-1] = annotated
         return annotated
 
@@ -862,6 +885,7 @@ class JointTelemetryFileObserver:
     max_batch_samples: int = 128
     max_initial_bytes: int = 2 * 1024 * 1024
     max_batch_bytes: int = 1024 * 1024
+    preserve_history: bool = False
     _states: dict[str, _TailState] = field(default_factory=dict, init=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
 
@@ -882,7 +906,12 @@ class JointTelemetryFileObserver:
             read_start = state.offset
             available = max(0, stat.st_size - read_start)
             truncated = byte_limit > 0 and available > byte_limit
-            if truncated:
+            if truncated and self.preserve_history:
+                # GUI backfill advances from the beginning in bounded chunks.
+                # Keep partial lines for the next poll instead of seeking to tail.
+                available = byte_limit
+                truncated = False
+            elif truncated:
                 read_start = stat.st_size - byte_limit
                 available = byte_limit
             if available > 0:
@@ -926,7 +955,7 @@ class JointTelemetryFileObserver:
             ]
             # Replay the bounded initial chunk through the state machines, then
             # retain only the display-sized tail for the browser.
-            if limit > 0 and len(annotated) > limit:
+            if not self.preserve_history and limit > 0 and len(annotated) > limit:
                 return annotated[-limit:]
             return annotated
 
@@ -1020,6 +1049,20 @@ def _summarize_grasp_attempts(attempts: list[dict[str, Any]]) -> dict[str, int |
     return summary
 
 
+def grasp_achievement(attempts: list[dict[str, Any]], session_id: str) -> dict[str, Any]:
+    """Preserve first contact success as historical evidence, not object custody."""
+    first = next((item for item in attempts if item.get("status") == "success"), None)
+    return {
+        "schema": GRASP_ACHIEVEMENT_SCHEMA,
+        "scope": "rollout_execution",
+        "session_id": session_id,
+        "achieved": first is not None,
+        "status": "achieved" if first is not None else "not_observed",
+        "observation_only": True,
+        "first_success": dict(first) if first is not None else None,
+    }
+
+
 def _grasp_artifact_response(payload: Mapping[str, Any], *, cached: bool) -> dict[str, Any]:
     attempts = [dict(item) for item in payload.get("attempts", []) if isinstance(item, Mapping)]
     return {
@@ -1029,6 +1072,7 @@ def _grasp_artifact_response(payload: Mapping[str, Any], *, cached: bool) -> dic
         "rule_version": str(payload.get("rule_version") or ""),
         "attempts": attempts,
         "latest_grasp_outcome": dict(attempts[-1]) if attempts else _grasp_outcome_state(),
+        "grasp_achievement": dict(payload.get("grasp_achievement") or {}),
         "summary": dict(payload.get("summary") or empty_grasp_outcome_summary()),
         "artifact_path": str(payload.get("artifact_path") or ""),
         "source_size": _safe_int(payload.get("source_size"), 0),
@@ -1058,6 +1102,7 @@ def _write_grasp_outcome_artifact(
         "artifact_path": str(artifact_path),
         "attempts": attempts,
         "summary": _summarize_grasp_attempts(attempts),
+        "grasp_achievement": grasp_achievement(attempts, str(session.get("session_id") or log_path.parent.name)),
     }
     artifact_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     return _grasp_artifact_response(payload, cached=False)
@@ -1075,6 +1120,7 @@ def finalize_grasp_outcome_artifact(path: Path | str, session: Mapping[str, Any]
     if (
         cached.get("schema") == GRASP_OUTCOME_SCHEMA
         and cached.get("rule_version") == GRASP_OUTCOME_RULE_VERSION
+        and cached.get("grasp_achievement", {}).get("schema") == GRASP_ACHIEVEMENT_SCHEMA
         and cached.get("source_size") == stat.st_size
         and cached.get("source_mtime_ns") == stat.st_mtime_ns
     ):
@@ -1104,6 +1150,7 @@ def finalize_policy_tracking_artifacts(path: Path | str, session: Mapping[str, A
         and cached_summary.get("value_space") == "lerobot_native"
         and cached_summary.get("grasp_outcome_schema") == GRASP_OUTCOME_SCHEMA
         and cached_summary.get("grasp_outcome_rule_version") == GRASP_OUTCOME_RULE_VERSION
+        and cached_summary.get("grasp_achievement", {}).get("schema") == GRASP_ACHIEVEMENT_SCHEMA
         and png_path.is_file()
         and grasp_path.is_file()
     ):
@@ -1138,6 +1185,7 @@ def finalize_policy_tracking_artifacts(path: Path | str, session: Mapping[str, A
         "grasp_outcome_rule_version": GRASP_OUTCOME_RULE_VERSION,
         "grasp_outcomes": dict(grasp_artifact.get("summary") or empty_grasp_outcome_summary()),
         "latest_grasp_outcome": dict(grasp_artifact.get("latest_grasp_outcome") or _grasp_outcome_state()),
+        "grasp_achievement": dict(grasp_artifact["grasp_achievement"]),
         "metrics": metrics,
         "source_metrics": source_metrics,
     }
@@ -1169,6 +1217,7 @@ def _artifact_response(summary: Mapping[str, Any], *, cached: bool) -> dict[str,
         "grasp_outcomes_path": str(summary.get("grasp_outcomes_path") or ""),
         "grasp_outcomes": dict(summary.get("grasp_outcomes") or empty_grasp_outcome_summary()),
         "latest_grasp_outcome": dict(summary.get("latest_grasp_outcome") or _grasp_outcome_state()),
+        "grasp_achievement": dict(summary.get("grasp_achievement") or {}),
         "metrics": dict(summary.get("metrics") or {}),
         "source_metrics": dict(summary.get("source_metrics") or {}),
         "value_space": str(summary.get("value_space") or ""),

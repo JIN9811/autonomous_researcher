@@ -772,6 +772,50 @@ def test_grasp_outcome_finalizes_when_grasp_transitions_directly_to_ungrasping()
     assert outcome["completed_s"] == pytest.approx(2.0)
 
 
+@pytest.mark.parametrize("measured", [(53.5, 50.1), (50.1, 53.5), (53.5, 54.0), (50.1, 50.2)])
+def test_first_success_achievement_preserves_attempts_and_artifact_replay(tmp_path, measured):
+    samples = []
+    for i, value in enumerate(measured):
+        samples.extend(_grasp_attempt_samples(start_s=100 + i * 5, measured_gripper=value))
+        if i == 0:
+            _append_release_samples(samples, start_s=103.25)
+    rows = [_pose_event(i, t, actual=a, target=b) for i, (t, a, b) in enumerate(samples, 1)]
+    packets = _annotated_sequence(samples)
+    expected_index = next((i for i, v in enumerate(measured, 1) if abs(v - 50) >= 2), None)
+    achievement = packets[-1]["motion_state"]["grasp_achievement"]
+    assert achievement["achieved"] is (expected_index is not None)
+    if expected_index:
+        assert achievement["first_success"]["attempt_index"] == expected_index
+        assert achievement["first_success"]["contact_gap"] == pytest.approx(abs(measured[expected_index - 1] - 50))
+    else:
+        assert achievement["first_success"] is None
+    assert packets[-1]["motion_state"]["grasp_outcome"]["attempt_index"] == 2
+    path = tmp_path / "motor_events.jsonl"
+    _write_jsonl(path, rows)
+    for _ in range(2):
+        result = joint_telemetry.finalize_grasp_outcome_artifact(path, {"session_id": "motion-state-test"})
+        assert result["grasp_achievement"] == achievement
+        assert len(result["attempts"]) == 2
+        assert result["summary"]["success_rate"] == sum(abs(v - 50) >= 2 for v in measured) / 2
+
+
+@pytest.mark.parametrize("restart", ["session", "sequence"])
+def test_grasp_achievement_resets_for_new_execution_not_later_attempt(restart):
+    annotator = joint_telemetry.MotionStateAnnotator()
+    for i, (t, actual, target) in enumerate(_grasp_attempt_samples(), 1):
+        packet = normalize_action_event(_pose_event(i, t, actual=actual, target=target), origin_monotonic_s=30)
+        result = annotator.annotate(packet)
+    assert result["motion_state"]["grasp_achievement"]["achieved"] is True
+    new = normalize_action_event(_pose_event(1 if restart == "sequence" else 100, 50, actual=HOME_POSE), origin_monotonic_s=50)
+    if restart == "session":
+        new["session_id"] = "next-transfer"
+    result = annotator.annotate(new)
+    assert result["motion_state"]["grasp_achievement"]["achieved"] is False
+    assert result["motion_state"]["grasp_achievement"]["first_success"] is None
+    assert result["elapsed_s"] == 0
+    assert result["execution_index"] == 2
+
+
 def test_normalize_action_event_rejects_non_action_and_incomplete_rows() -> None:
     assert normalize_action_event({"event": "observation"}) is None
     assert normalize_action_event({"event": "action", "latest_observation": {}}) is None
@@ -966,6 +1010,8 @@ def test_finalize_policy_tracking_artifacts_persists_grasp_attempts_and_aggregat
         "success_rate": pytest.approx(0.75),
     }
     assert artifacts["latest_grasp_outcome"]["attempt_index"] == 4
+    assert artifacts["grasp_achievement"]["first_success"]["attempt_index"] == 1
+    assert artifacts["grasp_achievement"] == payload["grasp_achievement"]
     assert artifacts["latest_grasp_outcome"]["status"] == "success"
     summary = json.loads(Path(artifacts["summary_json_path"]).read_text(encoding="utf-8"))
     assert summary["grasp_outcomes"] == payload["summary"]

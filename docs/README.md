@@ -71,6 +71,7 @@ Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 
 | 현재 코드/API 스냅샷 | [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md) |
 | LangGraph 실행 계약 | [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md) |
 | Runtime IDE 편집·검증·활성화·실행·관측·복구 | [runtime/runtime_ide.md](runtime/runtime_ide.md) |
+| 전체 에이전트의 루프·호출별 산출물 보관 및 과거 결과 조회 | [runtime/loop_artifact_archiving.md](runtime/loop_artifact_archiving.md) |
 | Guardian safety/alarm 계약 | [runtime/guardian_graphwide_safety.md](runtime/guardian_graphwide_safety.md) |
 | Experiment API 계약 | [runtime/autonomous_experiment_runtime.md](runtime/autonomous_experiment_runtime.md) |
 | API key / OpenAI fallback | [runtime/api_keys.md](runtime/api_keys.md) |

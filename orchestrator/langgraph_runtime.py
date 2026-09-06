@@ -22,6 +22,8 @@ Modification guide:
 
 from __future__ import annotations
 
+from utils.agent_artifact_archive import archive_runtime_stage
+
 import asyncio
 import ctypes
 import gc
@@ -1051,6 +1053,9 @@ class LangGraphRunLoop:
             "agent": payload.get("agent", ""),
             "status": payload.get("status", "failed" if level == "ERROR" else "ok"),
         }
+        if getattr(self._ctx, "artifact_run_root", None):
+            from utils.agent_artifact_archive import append_loop_event
+            append_loop_event(self._run_dir(), self._state, event)
         await self._dispatch_event(event)
 
     def _append_metadata_record(self, key: str, record: dict[str, Any], *, limit: int = 200) -> None:
@@ -1820,6 +1825,11 @@ class LangGraphRunLoop:
     def _runtime_artifact_dir(self, stage: Stage) -> Path:
         """Return the run-local directory used for materialized runtime evidence."""
         output_dir = self._run_dir() / "runtime" / self._safe_artifact_segment(stage.value, "stage")
+        owner = getattr(self, "_runtime_evidence_execution", {})
+        if owner.get("stage") == stage.value and owner.get("run_id") == self._state.run_id:
+            manifest = (self._run_dir() / str(owner.get("manifest_path", ""))).resolve()
+            if manifest.is_relative_to(self._run_dir()) and manifest.is_file():
+                output_dir = manifest.parent / "derived"
         output_dir.mkdir(parents=True, exist_ok=True)
         return output_dir
 
@@ -2133,6 +2143,7 @@ class LangGraphRunLoop:
 
     def _register_runtime_artifacts(self, stage: Stage, agent_name: str, data: dict[str, Any]) -> list[dict[str, Any]]:
         """Materialize closed-loop BO/CAE evidence under the active run directory."""
+        self._runtime_evidence_execution = data.get("artifact_execution") or {}
         if stage not in {Stage.BO, Stage.ANALYSIS}:
             return []
         records: list[dict[str, Any]] = []
@@ -2715,6 +2726,7 @@ class LangGraphRunLoop:
                     payload={**completed_payload, "node_id": str(step.get("id") or stage.value)},
                 )
 
+    @archive_runtime_stage
     async def _execute_agent_stage(self, stage: Stage) -> None:
         """Execute one configured agent stage and update state for the next step."""
         if self._state.stage != stage:

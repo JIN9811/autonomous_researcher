@@ -292,11 +292,19 @@ def build_manipulation_runtime_view(
     task_metrics["current_task_index"] = int(task_cycle_raw.get("current_task_index") or 0)
     task_metrics["milestones"] = _dict(task_cycle_raw.get("milestones"))
     grasp_metrics = _metric_counts(_dict(task_cycle_raw.get("grasp")))
+    attempt_summary = _dict(motion.get("grasp_attempt_summary")) or _dict(artifact_data.get("grasp_outcomes"))
+    if attempt_summary:
+        grasp_metrics = _metric_counts({
+            **attempt_summary,
+            "attempt_count": attempt_summary.get("total_attempts", 0),
+            "completed_count": attempt_summary.get("completed_attempts", 0),
+        })
     sample_count = int(_first(artifact_data.get("sample_count"), packet_data.get("sequence"), default=0) or 0)
     duration_s = float(_first(artifact_data.get("duration_s"), packet_data.get("elapsed_s"), rollout.get("duration_s"), default=0.0) or 0.0)
     metrics = {
         "task_cycle": task_metrics,
         "grasp": grasp_metrics,
+        "grasp_achievement": _dict(motion.get("grasp_achievement")) or _dict(artifact_data.get("grasp_achievement")),
         "sample_count": sample_count,
         "duration_s": duration_s,
         "effective_action_rate_hz": sample_count / duration_s if sample_count and duration_s > 0 else None,

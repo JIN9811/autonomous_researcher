@@ -28,6 +28,7 @@ import inspect
 from typing import Any
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
+from utils.agent_artifact_archive import archive_agent_run
 from knowledge.evolution_bridge import build_evidence_packs, build_outcomes_for_active_variants, map_pack_to_evolution_task
 from knowledge.graph_backend import graph_backend_from_env
 from knowledge.graph_importer import mirror_knowledge_records
@@ -45,6 +46,7 @@ class KnowledgeAgent(BaseAgent):
 
     name = "knowledge_agent"
 
+    @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         query = (
             f"{state.active_goal}. "

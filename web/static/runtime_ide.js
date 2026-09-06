@@ -193,6 +193,7 @@ let runtimeIdeRenderQueued = false;
 let runtimeIdeGraphRenderQueued = false;
 let currentRunId = "";
 let currentArtifacts = [];
+let artifactLoopFilter = "";
 let currentApprovals = { approvals: [], pending: [], resolved: [] };
 let selectedTimelineEventIndex = -1;
 let graphZoom = 1;
@@ -6657,6 +6658,7 @@ async function inspectTimelineEvent(index) {
 function artifactStageFromPath(path = "") {
   const parts = String(path || "").split("/").filter(Boolean);
   if (!parts.length) return "artifact";
+  if (parts[0] === "runtime" && parts[1] === "loops") return (parts[3] || "runtime").replace(/_agent$/, "");
   if (parts[0] === "workspace") {
     const workspace = parts[1] || "workspace";
     const workspaceStages = {
@@ -6738,33 +6740,44 @@ function artifactProvenanceMarkup(artifact = {}, related = null, kind = "downloa
 }
 
 function renderArtifactLineage() {
+  if (artifactLoopFilter !== "" && !currentArtifacts.some(a => String(a.loop_index) === artifactLoopFilter)) {
+    artifactLoopFilter = "";
+  }
   if (!currentArtifacts.length) {
     artifactLineageOutput.innerHTML = currentRunId ? "<div>No artifacts found for current run.</div>" : "<div>No active run loaded.</div>";
     artifactPreviewOutput.innerHTML = "<div>No artifact selected.</div>";
     return;
   }
-  const artifacts = currentArtifacts.slice(0, 80).map((artifact, index) => {
+  const artifacts = currentArtifacts.map((artifact, index) => {
     const related = artifactRelatedEvent(artifact);
     const stage = related ? eventStage(related) : artifactStageFromPath(artifact.path);
     return { artifact, index, related, stage };
-  });
+  }).filter(({ artifact }) => artifactLoopFilter === "" || String(artifact.loop_index) === artifactLoopFilter);
   const groups = artifacts.reduce((acc, item) => {
-    const stage = item.stage || "artifact";
+    const a = item.artifact;
+    const stage = a.loop_index != null
+      ? `Loop ${Number(a.loop_index) + 1} / ${a.agent || item.stage} / Attempt ${a.attempt_index || "—"}`
+      : `Legacy / ${item.stage || "artifact"}`;
     if (!acc.has(stage)) acc.set(stage, []);
     acc.get(stage).push(item);
     return acc;
   }, new Map());
   artifactLineageOutput.innerHTML = `
+    <label>Loop <select data-artifact-loop-filter>
+      <option value="">All / Legacy included</option>
+      ${Array.from(new Set(currentArtifacts.filter(a => a.loop_index != null).map(a => a.loop_index))).sort((a, b) => a - b)
+        .map(index => `<option value="${Number(index)}" ${String(index) === artifactLoopFilter ? "selected" : ""}>Loop ${Number(index) + 1}</option>`).join("")}
+    </select></label>
     <div class="runtime-artifact-summary">
-      <span><strong>${escapeHtml(currentArtifacts.length)}</strong><small>files</small></span>
+      <span><strong>${escapeHtml(artifacts.length)}</strong><small>files</small></span>
       <span><strong>${escapeHtml(groups.size)}</strong><small>groups</small></span>
       <span><strong>${escapeHtml(currentRunId || "n/a")}</strong><small>run</small></span>
     </div>
     <div class="runtime-artifact-lineage-groups">
       ${Array.from(groups.entries())
         .map(([stage, items]) => `
-          <section class="runtime-artifact-group">
-            <div class="runtime-artifact-group-title"><strong>${escapeHtml(stage)}</strong><small>${escapeHtml(items.length)} artifact(s)</small></div>
+          <details class="runtime-artifact-group">
+            <summary class="runtime-artifact-group-title"><strong>${escapeHtml(stage)}</strong><small>${escapeHtml(items.length)} artifact(s)</small></summary>
             ${items
               .map(({ artifact, index, related }) => {
                 const sizeKb = Number(artifact.size_bytes || 0) / 1024;
@@ -6783,11 +6796,15 @@ function renderArtifactLineage() {
                 `;
               })
               .join("")}
-          </section>
+          </details>
         `)
         .join("")}
     </div>
   `;
+  artifactLineageOutput.querySelector("[data-artifact-loop-filter]")?.addEventListener("change", (event) => {
+    artifactLoopFilter = event.target.value;
+    renderArtifactLineage();
+  });
   artifactLineageOutput.querySelectorAll("[data-artifact-preview-index]").forEach((el) => {
     el.addEventListener("click", () => previewArtifact(Number(el.getAttribute("data-artifact-preview-index"))));
   });
@@ -6872,6 +6889,10 @@ async function loadRunContext(options = {}) {
   const preservedEventId = options.preserveSelectedEventId || selectedTimelineEvent()?.event_id || "";
   const state = await requestJson("/api/state");
   latestStateSnapshot = state;
+  if (currentRunId !== (state?.state?.run_id || "")) {
+    artifactLoopFilter = "";
+    currentArtifacts = [];
+  }
   currentRunId = state?.state?.run_id || "";
   renderRuntimeHeader(state);
   renderInfraList(state);

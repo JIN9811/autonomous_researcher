@@ -27149,7 +27149,6 @@ void main() {
   var SNAPSHOT_URL = "/api/lerobot/joint-telemetry/snapshot";
   var SPECIMEN_POSE_URL = "/api/lerobot/active-robot-cam/specimen-pose";
   var SPECIMEN_POSE_POLL_MS = 1e3;
-  var MAX_HISTORY_SAMPLES = 1200;
   var CAMERA_FIT_PADDING = 1;
   var CAMERA_FIT_DISTANCE_SCALE = 1.34;
   var CAMERA_FIT_VERTICAL_OFFSET_M = -0.115;
@@ -27178,6 +27177,7 @@ void main() {
     status: "idle",
     history: [],
     latestSequence: -1,
+    executionIndex: null,
     latestActualRad: {},
     latestTargetRad: {},
     latestMotionState: {},
@@ -27958,7 +27958,7 @@ void main() {
   }
   function chartOption() {
     const joint = runtime.selectedJoint;
-    const originElapsed = Number(runtime.history[0] && runtime.history[0].elapsed_s) || 0;
+    const originElapsed = 0;
     const actual = runtime.history.map((sample) => [normalizedElapsed(sample, originElapsed), sample.actual_source && sample.actual_source[joint]]);
     const target = runtime.history.map((sample) => [normalizedElapsed(sample, originElapsed), sample.target_source && sample.target_source[joint]]);
     const unit = sourceUnit(joint);
@@ -28009,22 +28009,6 @@ void main() {
   }
   function normalizedElapsed(sample, originElapsed) {
     return Math.max(0, (Number(sample && sample.elapsed_s) || 0) - originElapsed);
-  }
-  function compactHistory(samples, maximum = MAX_HISTORY_SAMPLES) {
-    const clean = Array.isArray(samples) ? samples : [];
-    if (clean.length <= maximum) return clean;
-    const targetSize = Math.max(3, Math.floor(maximum * 0.75));
-    const lastIndex = clean.length - 1;
-    const compacted = [];
-    let previousIndex = -1;
-    for (let index = 0; index < targetSize; index += 1) {
-      const sourceIndex = Math.round(index * lastIndex / (targetSize - 1));
-      if (sourceIndex === previousIndex) continue;
-      compacted.push(clean[sourceIndex]);
-      previousIndex = sourceIndex;
-    }
-    if (compacted[compacted.length - 1] !== clean[lastIndex]) compacted.push(clean[lastIndex]);
-    return compacted;
   }
   function sourceUnit(joint) {
     const latest = runtime.history[runtime.history.length - 1] || {};
@@ -28241,6 +28225,16 @@ void main() {
       setNodeTextIfChanged(overlapNode, value.transport_overlap ? "yes" : "no");
     });
   }
+  function applyGraspAchievement(achievement, latest) {
+    const first = achievement && achievement.achieved === true && achievement.first_success;
+    applyGraspOutcome(first || latest || null);
+    document.querySelectorAll("[data-atr-grasp-result-scope]").forEach((node) => {
+      setNodeTextIfChanged(node, first ? `First contact success \xB7 attempt ${first.attempt_index} \xB7 ${formatNativeValue(first.completed_s)} s. Final transfer requires vision verification.` : "No contact success recorded yet. Final transfer requires vision verification.");
+    });
+    document.querySelectorAll("[data-atr-grasp-latest-attempt]").forEach((node) => {
+      setNodeTextIfChanged(node, latest && latest.attempt_index ? `#${latest.attempt_index}: ${latest.status}` : "\u2014");
+    });
+  }
   function applyMotionState(motionState) {
     const state = motionState && typeof motionState === "object" ? motionState : {};
     runtime.latestMotionState = state;
@@ -28248,7 +28242,7 @@ void main() {
     applyMotionChannel("measured", state.measured || null);
     applyMotionChannel("policy", state.policy || null);
     applyHomeGate(state.measured || null);
-    applyGraspOutcome(state.grasp_outcome || null);
+    applyGraspAchievement(state.grasp_achievement, state.grasp_outcome);
     applySpecimenGraspVisualization(state.grasp_outcome || null, state.measured || null);
   }
   function scheduleChartRender() {
@@ -28274,7 +28268,7 @@ void main() {
   function applyArtifacts(artifacts) {
     runtime.artifacts = artifacts && typeof artifacts === "object" ? artifacts : {};
     if (runtime.artifacts.latest_grasp_outcome) {
-      applyGraspOutcome(runtime.artifacts.latest_grasp_outcome);
+      applyGraspAchievement(runtime.artifacts.grasp_achievement, runtime.artifacts.latest_grasp_outcome);
     }
     const linkKeys = {
       png: "plot_png_url",
@@ -28300,6 +28294,7 @@ void main() {
     runtime.sessionId = sessionId;
     runtime.history = [];
     runtime.latestSequence = -1;
+    runtime.executionIndex = null;
     runtime.latestActualRad = {};
     runtime.latestTargetRad = {};
     runtime.latestMotionState = {};
@@ -28316,12 +28311,15 @@ void main() {
     if (!sample || sample.type !== "joint_sample") return;
     const sessionId = String(sample.session_id || "");
     if (sessionId && sessionId !== runtime.sessionId) resetSession(sessionId);
+    const executionIndex = sample.execution_index ?? null;
+    if (executionIndex !== null && runtime.executionIndex !== null && executionIndex !== runtime.executionIndex) resetSession(sessionId);
+    runtime.executionIndex = executionIndex;
     const sequence = Number(sample.sequence);
     if (Number.isFinite(sequence) && sequence <= runtime.latestSequence) return;
     if (Number.isFinite(sequence)) runtime.latestSequence = sequence;
     runtime.latestActualRad = sample.actual_rad || {};
     runtime.latestTargetRad = sample.target_rad || {};
-    runtime.history = compactHistory([...runtime.history, sample]);
+    runtime.history.push(sample);
     applyMotionState(sample.motion_state || {});
     runtime.status = sample.status || "live";
     setPoseStatus("live follower telemetry", "live");
@@ -28333,7 +28331,7 @@ void main() {
     runtime.latestSequence = -1;
     runtime.latestActualRad = {};
     runtime.latestTargetRad = {};
-    (Array.isArray(samples) ? samples : []).slice().sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0)).forEach(appendSample);
+    (Array.isArray(samples) ? samples : []).slice().sort((left, right) => Number(left.execution_index || 0) - Number(right.execution_index || 0) || Number(left.sequence || 0) - Number(right.sequence || 0)).forEach(appendSample);
   }
   function consumePacket(packet) {
     if (!packet || typeof packet !== "object") return;
@@ -28343,6 +28341,8 @@ void main() {
     if (packet.runtime_view) applyRuntimeView(packet.runtime_view);
     if (packet.type === "joint_history") {
       replaceJointHistory(packet.samples);
+    } else if (packet.type === "joint_samples") {
+      (Array.isArray(packet.samples) ? packet.samples : []).forEach(appendSample);
     } else if (packet.type === "joint_sample") {
       appendSample(packet);
     } else if (packet.type === "telemetry_artifacts") {
@@ -28400,7 +28400,8 @@ void main() {
       const response = await fetch(SNAPSHOT_URL, { cache: "no-store" });
       if (!response.ok) return;
       const payload = await response.json();
-      if (payload.packet) consumePacket(payload.packet);
+      const sessionId = String(payload.session && payload.session.session_id || "");
+      if (runtime.sessionId && sessionId && runtime.sessionId !== sessionId) return;
       if (payload.artifacts) applyArtifacts(payload.artifacts);
       if (payload.runtime_view) applyRuntimeView(payload.runtime_view);
       runtime.status = payload.status || runtime.status;

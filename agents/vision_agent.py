@@ -30,6 +30,7 @@ from typing import Any
 from urllib.parse import quote
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
+from utils.agent_artifact_archive import archive_agent_run
 from orchestrator.state import Mode, OrchestratorState
 from utils.utm_specimen_presence import inspect_specimen_presence_path
 from utils.vision_operator_intervention import (
@@ -2603,6 +2604,7 @@ class VisionAgent(BaseAgent):
             next_hint="manipulation",
         )
 
+    @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         frame_id = f"frame-{state.loop_count}-{state.stage.value}"
         timeout_s = 30.0 if state.mode == Mode.TEST else None

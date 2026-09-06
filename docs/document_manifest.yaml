@@ -52,6 +52,8 @@ documents:
   - docs/paper/assets/tables/README.md
   - docs/runtime/current_code_snapshot.md
   - docs/runtime/runtime_ide.md
+  - docs/runtime/loop_artifact_archiving.md
+  - docs/runtime/evidence/2026-09-06-loop-artifact-archiving-tests.md
   - docs/runtime/langgraph_runtime.md
   - docs/runtime/closed_loop_and_pages_reference.md
   - docs/runtime/three_level_control_model.md

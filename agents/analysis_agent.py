@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
+from utils.agent_artifact_archive import archive_agent_run
 from orchestrator.state import Mode, OrchestratorState
 from utils.paths import resolve_path
 from utils.utm_csv import parse_utm_csv
@@ -2125,6 +2126,7 @@ class AnalysisAgent(BaseAgent):
                 return f"{fallback} (analysis LLM degraded: {exc.__class__.__name__})"
             raise
 
+    @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         geometry = self._specimen_geometry(state)
         if geometry.get("normalization_valid") is False:

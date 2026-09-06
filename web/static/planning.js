@@ -308,6 +308,7 @@ let planningMessageRevealQueue = [];
 let planningMessageRevealTimer = null;
 let planningDisplayInitialized = false;
 const planningExpandedChatGroups = new Set();
+const planningLoopArtifactCache = new Map();
 const PLANNING_RENDER_CACHE_LIMIT = 240;
 const PLANNING_PERSIST_CACHE_MESSAGE_LIMIT = 80;
 const PLANNING_STORAGE_CACHE_MAX_CHARS = 1200000;
@@ -2124,12 +2125,28 @@ function renderOperatorPlanningMessage(msg, messageIndex) {
   `;
 }
 
+function renderLoopArtifactHistory(payload) {
+  const executions = Array.isArray(payload.executions) ? payload.executions : [];
+  const files = Array.isArray(payload.artifacts) ? payload.artifacts : [];
+  if (!executions.length) return "<p>이 루프의 구조화된 보관 기록이 없습니다. 기존 파일은 Runtime IDE Artifacts에서 확인할 수 있습니다.</p>";
+  return executions.map(entry => {
+    const owned = files.filter(file => file.execution_id === entry.execution_id);
+    return `<details><summary>${escapeHtml(entry.agent)} · Attempt ${Number(entry.attempt_index)} · ${escapeHtml(entry.status)} · archive: ${escapeHtml(entry.archive_status)}</summary>
+      <ul>${owned.map(file => `<li><a href="${escapeHtml(file.url)}" target="_blank" rel="noopener">${escapeHtml(file.name)}</a>
+        ${file.preview_kind === "image" ? `<details><summary>Preview</summary><img src="${escapeHtml(file.url)}" loading="lazy" style="max-width:100%" alt="${escapeHtml(file.name)}" /></details>` : ""}</li>`).join("")}</ul>
+      </details>`;
+  }).join("");
+}
+
 function renderPlanningChatGroup(group, groupIndex) {
   const latest = group.latest || group.messages[group.messages.length - 1] || {};
   const role = group.role || latest.role || group.key || "orchestrator";
   const baseKey = group.baseKey || group.key;
   const isSystem = baseKey === "system" || String(role || "").toLowerCase() === "system";
   const isLoopSummary = group.kind === "loop_summary" || baseKey === "loop_summary";
+  const archiveRunId = String(latest.run_id || liveLastSession?.state?.run_id || "");
+  const archiveLoopIndex = Math.max(0, Number(group.loopCycle || 1) - 1);
+  const archiveKey = `${archiveRunId}:${archiveLoopIndex}`;
   const expanded = !isSystem && planningExpandedChatGroups.has(group.key);
   const loopLabel = isLoopSummary ? `${planningLoopOrdinal(group.loopCycle)} Loop Complete` : "";
   const loopAgents = isLoopSummary ? planningLoopSummaryAgentNames(group.messages) : "";
@@ -2163,6 +2180,8 @@ function renderPlanningChatGroup(group, groupIndex) {
           <button class="planning-agent-chat-hide" type="button" data-chat-group-key="${escapeHtml(group.key)}">hide</button>
         </div>
         ${messageHtml}
+        ${isLoopSummary ? `<button type="button" class="btn tiny" data-loop-artifacts-run="${escapeHtml(archiveRunId)}" data-loop-artifacts-index="${archiveLoopIndex}">Loop Artifacts · 조회/새로고침</button>
+          <div data-loop-artifacts-output>${planningLoopArtifactCache.get(archiveKey) || ""}</div>` : ""}
       </div>
     </article>
   `;
@@ -2203,6 +2222,24 @@ function bindPlanningChatHeightTriggers() {
 
 function bindPlanningChatGroupToggles() {
   if (!planningChatLog) return;
+  planningChatLog.querySelectorAll("[data-loop-artifacts-run]").forEach(button => {
+    button.addEventListener("click", async () => {
+      const run = button.dataset.loopArtifactsRun;
+      const loop = button.dataset.loopArtifactsIndex;
+      const output = button.nextElementSibling;
+      if (!run || !output) return;
+      output.textContent = "보관 기록을 읽는 중…";
+      try {
+        const response = await fetch(`/api/runs/${encodeURIComponent(run)}/artifacts?loop_index=${encodeURIComponent(loop)}`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const html = renderLoopArtifactHistory(await response.json());
+        planningLoopArtifactCache.set(`${run}:${loop}`, html);
+        if (output.isConnected) output.innerHTML = html;
+      } catch (error) {
+        if (output.isConnected) output.textContent = `보관 기록 조회 실패: ${error.message}`;
+      }
+    });
+  });
   planningChatLog.querySelectorAll(".planning-agent-chat-open[data-chat-group-key]").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.preventDefault();
@@ -14723,16 +14760,18 @@ function renderManipulationTelemetryCards() {
         <section class="ar-man-grasp-outcome" data-atr-grasp-outcome data-status="idle">
           <header>
             <div>
-              <small>Grasp Result</small>
+              <small>Grasp Achievement · This Transfer</small>
               <strong data-atr-grasp-status>idle</strong>
             </div>
             <p data-atr-grasp-reason>Waiting for a measured grasp attempt.</p>
           </header>
-          <div class="ar-man-grasp-evidence" role="list" aria-label="Latest grasp attempt evidence">
+          <p data-atr-grasp-result-scope>No contact success recorded yet. Final transfer requires vision verification.</p>
+          <div class="ar-man-grasp-evidence" role="list" aria-label="First successful grasp evidence, or latest attempt before success">
             <div role="listitem"><small>Measured</small><strong data-atr-grasp-measured>-</strong></div>
             <div role="listitem"><small>Policy target</small><strong data-atr-grasp-target>-</strong></div>
             <div role="listitem"><small>Contact gap</small><strong data-atr-grasp-gap>- / 2.00</strong></div>
             <div role="listitem"><small>Transport overlap</small><strong data-atr-grasp-overlap>no</strong></div>
+            <div role="listitem"><small>Latest closing diagnostic</small><strong data-atr-grasp-latest-attempt>—</strong></div>
           </div>
         </section>
         <section class="ar-man-home-gate" data-atr-home-gate>
@@ -14844,7 +14883,7 @@ function renderManipulationGroundedRuntimeCards() {
           <div class="ar-man-runtime-counts">${metricCounts("task")}</div>
         </section>
         <section>
-          <div class="ar-man-runtime-donut" data-atr-runtime-donut="grasp" style="--rate:0%;"><div><strong data-atr-grasp-success-rate>—</strong><span>Grasp Success Rate</span></div></div>
+          <div class="ar-man-runtime-donut" data-atr-runtime-donut="grasp" style="--rate:0%;"><div><strong data-atr-grasp-success-rate>—</strong><span>Grasp Attempt Success Rate</span></div></div>
           <div class="ar-man-runtime-counts">${metricCounts("grasp")}</div>
         </section>
         <div class="ar-man-runtime-measures">

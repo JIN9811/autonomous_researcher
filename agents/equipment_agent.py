@@ -32,6 +32,7 @@ from typing import Any, Callable
 from uuid import uuid4
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
+from utils.agent_artifact_archive import archive_agent_run
 from orchestrator.state import Mode, OrchestratorState
 from utils.equipment_profiles import EquipmentExecutionContract, EquipmentProfile, EquipmentProfileRegistry, build_execution_contract
 from policies.guardian_gate import equipment_skill_recovery_gate, gate_blocks_execution
@@ -2828,6 +2829,8 @@ class LabEquipmentAgent(BaseAgent):
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(execution, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
         tmp.replace(path)
+        from utils.agent_artifact_archive import record_tool_artifact
+        record_tool_artifact("evidence_result", "equipment.skill_flow", {"execution_path": str(path)})
 
     @staticmethod
     def _preflight_skill_flow_resources(
@@ -4175,6 +4178,7 @@ class LabEquipmentAgent(BaseAgent):
             },
         )
 
+    @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         if self._preflight_only_requested(state):
             try:

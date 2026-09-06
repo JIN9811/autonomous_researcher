@@ -21,6 +21,7 @@ Modification guide:
 from __future__ import annotations
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
+from utils.agent_artifact_archive import archive_agent_run
 from orchestrator.state import Mode, OrchestratorState
 from orchestrator.supervisor import (
     build_orchestrator_control_plane_snapshot,
@@ -36,6 +37,7 @@ class OrchestratorAgent(BaseAgent):
 
     name = "orchestrator_agent"
 
+    @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         prompt = (
             f"run_id={state.run_id}\n"

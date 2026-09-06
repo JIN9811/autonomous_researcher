@@ -191,6 +191,32 @@ rollout, policies, sessions, visualization, augmentation, Isaac, and mirror
 operations. The live manipulation workspace can call a bounded agent run, but
 the GUI is not an authority boundary and cannot waive bridge or Guardian gates.
 
+Live joint charts replay the selected rollout's saved `motor_events.jsonl`
+from its first action sample on every connection, then append all new samples.
+The time origin remains the first logged action, not the time the window opens.
+Closing the GUI does not stop the in-process motor logger; measured and target
+values for all six joints, including the gripper, remain in the saved log.
+History is streamed in bounded file chunks without discarding earlier samples;
+the GUI retains the complete selected-session history. Read-only bridge safety
+observers keep their separate bounded-tail behavior.
+
+Agent-owned streams now support run/loop/agent/attempt directories with a
+compatibility locator at the legacy session path. Terminal bridge observations
+finalize tracking evidence without an open GUI. See
+[Loop Artifact Archiving](../runtime/loop_artifact_archiving.md) for the newer
+working-tree storage contract, configured-root resolution, and verification.
+
+`motion_state.grasp_achievement` preserves the first threshold-qualified contact
+success in the current rollout execution. The Live GUI's Grasp Achievement card
+and saved artifacts use that result; `grasp_outcome`, `latest_grasp_outcome`,
+and the complete attempt list retain the latest/raw diagnostic semantics.
+The attempt success rate continues to include failed attempts, independently
+of the binary achievement. Session changes and logger sequence restarts clear
+the achievement; reconnecting and replaying the same log reconstructs it.
+This is historical contact evidence, not proof that the specimen is still held.
+Final transfer verification, measured-home/stop interlocks, and 3D motion
+visualization continue to consume their existing evidence, not this latch.
+
 ## Current Verification
 
 Inspection covered bridge/config/tool/API paths and focused tests for core
