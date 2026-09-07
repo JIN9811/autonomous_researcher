@@ -58,7 +58,7 @@ digests.
 
 | Claim ID | Proposition | RQ | Status | Evidence | Boundary / next evidence |
 |---|---|---|---|---|---|
-| `C-SYS-LOOP-01` | One supervised mixed-mode iteration reached live UTM clearance, Analysis, BO-managed LHS feedback, and the next Design/Specimen entry. | RQ1, RQ2 | `supported` within integration scope | `E-LIVE-LOOP-001` | Deposition skipped, specimen substituted; no material-validity, acquisition-optimization, or campaign-completion claim. |
+| `C-SYS-LOOP-01` | One supervised mixed-mode iteration reached live UTM clearance, Analysis, BO-managed LHS feedback, and the next Design/Specimen entry. | RQ1, RQ2 | `supported` within integration scope | `E-LIVE-LOOP-001`, `E-LIVE-LOOP-002` | Latest run independently completed one measured-data feedback cycle; deposition skipped in both records, substitution reported only in the earlier record. No material-validity, acquisition-optimization, or campaign-completion claim. |
 | `C-SYS-ARCH-01` | ATR declares a closed-loop graph spanning research stages with explicit dispatch, feedback, and terminal structure. | RQ1 | `supported` | `E-INSPECT-ARCH-001` | Execution and recovery across a complete run require Tier 1–4 evidence. |
 | `C-TRACE-DOC-01` | The paper package enforces machine-readable links from supported claims to bounded evidence outputs. | RQ2 | `partially_supported` | `E-TEST-DOC-001` | Runtime scientific lineage is not established by document tests. |
 | `C-SAFE-LIVE-01` | Guardian and operator gates prevent or safely contain consequential live actions. | RQ3 | `not_evaluated` | No qualifying record | Requires scenario matrix and supervised live evidence. |
@@ -74,6 +74,7 @@ campaign or statistical evaluation.
 | Evidence ID | Environment | Verified scope | Does not establish |
 |---|---|---|---|
 | `E-LIVE-LOOP-001` | Supervised mixed-mode / live equipment | One feedback iteration, eight Equipment blocks, fresh UTM clearance, Analysis, BO-managed LHS, and next Design parameters | Full manufacturing, specimen scientific identity, acquisition improvement, safety effectiveness, independent replay from the public summary |
+| `E-LIVE-LOOP-002` | Supervised mixed-mode / live equipment | Latest one-cycle demonstration: placement, eight Equipment blocks, 2,113 measured samples, clearance, Analysis-to-BO handoff, next Design/Specimen | Full fabrication, warning-free operation, scientific efficacy, acquisition improvement, campaign completion, clean-commit reproduction |
 | `E-INSPECT-ARCH-001` | Inspection | Route counts, graph node/edge/dispatch counts, inspected extension categories | Runtime correctness, safety effectiveness, scientific outcome |
 | `E-TEST-DOC-001` | Test | Front-matter, manifest, paper structure, claim-reference, path, hash, and privacy contracts selected by the focused test command | System tests, browser workflows, physical execution, scientific validity |
 
@@ -102,8 +103,8 @@ it weakens the paper narrative.
 
 ## Limitations and Known Gaps
 
-The initial map is deliberately sparse. It has no replay, simulation, browser,
-or live evidence records. It does not replace a manuscript bibliography,
+The map remains deliberately sparse. It contains bounded live integration
+records, but no replay, simulation, or browser evidence records. It does not replace a manuscript bibliography,
 statistical analysis, or domain data repository.
 
 ## Verification

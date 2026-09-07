@@ -1,0 +1,156 @@
+{
+  "schema": "atr.public_run_evidence_summary.v1",
+  "evidence_id": "E-LIVE-LOOP-002",
+  "run_id": "run-20260907T043145Z-f6152b",
+  "evidence_date": "2026-09-07",
+  "baseline_scope": "Repository HEAD at audit: 39958d823caf48d35f449aceef2e6b54918df82c; running process and working-tree code were not immutably fingerprinted. Not a clean-commit reproduction.",
+  "result": "One supervised mixed-mode feedback cycle completed and entered the next Design/Specimen stage.",
+  "records": [
+    {
+      "loop": 1,
+      "agent": "design",
+      "attempt": 1,
+      "source_path": "runs/run-20260907T043145Z-f6152b/runtime/loops/loop-000001/design_agent/attempt-000001/result.json",
+      "sha256": "b65db1196385896101bddd00c08074bcdd6f358b619a8c2ccdd5c4827bffa710",
+      "status": "completed",
+      "summary": "Specimen experiment design selected"
+    },
+    {
+      "loop": 1,
+      "agent": "specimen",
+      "attempt": 1,
+      "source_path": "runs/run-20260907T043145Z-f6152b/runtime/loops/loop-000001/specimen_agent/attempt-000001/result.json",
+      "sha256": "8146ae829475c7afc9ccb7e317ff7e38de7bf19f3f5142660ef52c49831b6f30",
+      "status": "completed",
+      "summary": "Specimen preparation executed"
+    },
+    {
+      "loop": 1,
+      "agent": "vision",
+      "attempt": 1,
+      "source_path": "runs/run-20260907T043145Z-f6152b/runtime/loops/loop-000001/vision_agent/attempt-000001/result.json",
+      "sha256": "c0c3dfc458a5dbae955f53e4662c76040c4abdf11638b265b9f5cdea75b155cb",
+      "status": "completed",
+      "summary": "Vision lab perception signal complete"
+    },
+    {
+      "loop": 1,
+      "agent": "manipulation",
+      "attempt": 1,
+      "source_path": "runs/run-20260907T043145Z-f6152b/runtime/loops/loop-000001/manipulation_agent/attempt-000001/result.json",
+      "sha256": "aeb23cc21caf5afa1a069ad6d3aa00a7068d155e1f6bcdfd39237c37c30ea570",
+      "status": "completed",
+      "summary": "Manipulation bounded skill executed"
+    },
+    {
+      "loop": 1,
+      "agent": "vision",
+      "attempt": 12,
+      "source_path": "runs/run-20260907T043145Z-f6152b/runtime/loops/loop-000001/vision_agent/attempt-000012/result.json",
+      "sha256": "7453d511e98f5a210edf36fdc5b07723a9ec2bbe51dd4b6c545daa7adbd8d318",
+      "status": "completed",
+      "summary": "Vision lab perception signal complete"
+    },
+    {
+      "loop": 1,
+      "agent": "equipment",
+      "attempt": 1,
+      "source_path": "runs/run-20260907T043145Z-f6152b/runtime/loops/loop-000001/equipment_agent/attempt-000001/result.json",
+      "sha256": "5df9f63959acbb7c46e27733a31d3c15808ee5e6e972d4b3fef557feeba862a2",
+      "status": "completed",
+      "summary": "Equipment Skill Flow completed"
+    },
+    {
+      "loop": 1,
+      "agent": "manipulation",
+      "attempt": 2,
+      "source_path": "runs/run-20260907T043145Z-f6152b/runtime/loops/loop-000001/manipulation_agent/attempt-000002/result.json",
+      "sha256": "2e6ecbbd69e956ea48de41d580d6ca69ae89945429b21a3e56b8f8fbbe000272",
+      "status": "completed",
+      "summary": "UTM clear verification pending"
+    },
+    {
+      "loop": 1,
+      "agent": "vision",
+      "attempt": 22,
+      "source_path": "runs/run-20260907T043145Z-f6152b/runtime/loops/loop-000001/vision_agent/attempt-000022/result.json",
+      "sha256": "6ba84f08f2bc361ebd4f8d6f6b59b07cd17df8b696f8a722cb9ca2a8ec8455f0",
+      "status": "completed",
+      "summary": "UTM clearance verified"
+    },
+    {
+      "loop": 1,
+      "agent": "analysis",
+      "attempt": 1,
+      "source_path": "runs/run-20260907T043145Z-f6152b/runtime/loops/loop-000001/analysis_agent/attempt-000001/result.json",
+      "sha256": "906bdac3085209710055f63fe2d5cdc8934dac834a3a3227e32489c831b2b847",
+      "status": "completed",
+      "summary": "UTM analysis complete"
+    },
+    {
+      "loop": 1,
+      "agent": "knowledge",
+      "attempt": 1,
+      "source_path": "runs/run-20260907T043145Z-f6152b/runtime/loops/loop-000001/knowledge_agent/attempt-000001/result.json",
+      "sha256": "d4dc5240ebce023d038b971b7d33f424655da8b23369285acfafbc7ddca4e337",
+      "status": "completed",
+      "summary": "Knowledge memory, pattern ledger, and self-evolution evidence update complete"
+    },
+    {
+      "loop": 1,
+      "agent": "bo",
+      "attempt": 1,
+      "source_path": "runs/run-20260907T043145Z-f6152b/runtime/loops/loop-000001/bo_agent/attempt-000001/result.json",
+      "sha256": "1d850177ed642a576f4ad41788ee1b99932f52aeb44f3da42791b0e6e17b43f7",
+      "status": "completed",
+      "summary": "BO Agent selected bo-candidate-002 via bo"
+    },
+    {
+      "loop": 1,
+      "agent": "guardian",
+      "attempt": 1,
+      "source_path": "runs/run-20260907T043145Z-f6152b/runtime/loops/loop-000001/guardian_agent/attempt-000001/result.json",
+      "sha256": "375d5f13abb74157ed5cb0df51255e200ba394bb6784a028a18b2d5c3b1ffcd6",
+      "status": "completed",
+      "summary": "Guardian decision: continue (continue)"
+    },
+    {
+      "loop": 2,
+      "agent": "design",
+      "attempt": 1,
+      "source_path": "runs/run-20260907T043145Z-f6152b/runtime/loops/loop-000002/design_agent/attempt-000001/result.json",
+      "sha256": "7ef30a49a4ddb99991575435a3710fe6912d6ca7fcffd24813acaa60bdb04a84",
+      "status": "completed",
+      "summary": "Specimen experiment design selected"
+    },
+    {
+      "loop": 2,
+      "agent": "specimen",
+      "attempt": 1,
+      "source_path": "runs/run-20260907T043145Z-f6152b/runtime/loops/loop-000002/specimen_agent/attempt-000001/result.json",
+      "sha256": "6734dedcae5f4d0ea27ae8f21e2385f8c19a7cff08fc1ff1cfe36dd3d062ebeb",
+      "status": "completed",
+      "summary": "Specimen preparation executed"
+    },
+    {
+      "source_path": "runs/run-20260907T043145Z-f6152b/analysis/specimen-cand-1-01-gyroid-bce35e6a/metrics.json",
+      "sha256": "990eac793bf9b51772749db8fabc249e0e29af0d5b9b484de244298a6b84eb70"
+    },
+    {
+      "source_path": "runs/run-20260907T043145Z-f6152b/analysis/specimen-cand-1-01-gyroid-bce35e6a/quality_report.json",
+      "sha256": "aec0eb036d913907adc3d101c283fd9fa9fa308ee68f2edc23b4be33145e62f3"
+    },
+    {
+      "source_path": "runs/run-20260907T043145Z-f6152b/analysis/specimen-cand-1-01-gyroid-bce35e6a/parse_report.json",
+      "sha256": "dc8bf7373896a3d8b348697f02fc5862f180e739869526b61bea9761e169919e"
+    },
+    {
+      "source_path": "runs/run-20260907T043145Z-f6152b/analysis/specimen-cand-1-01-gyroid-bce35e6a/canonical_curve.csv",
+      "sha256": "6abdd5c3e64f7de24fd5a27f0d176e65d4575fad75a5925c6ef19fd33d3c2cae"
+    },
+    {
+      "source_path": "artifacts/equipment/equipment-9f72370ba826471b8f2487a225d14a51-segment-001/utm/live_run-20260907T043145Z-f6152b_specimen-cand-1-01-gyroid-bce35e6a_loop-0001_rep-0001.csv",
+      "sha256": "c0305780455d1ba2af0ce734ffce1fa904c5a4e8434bc73fe37ecd27e415e17e"
+    }
+  ]
+}

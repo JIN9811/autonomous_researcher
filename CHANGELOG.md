@@ -30,6 +30,12 @@ changes. Detailed implementation history remains in Git.
 
 ### Added
 
+- Latest one-cycle integration demonstration (`E-LIVE-LOOP-002`) for
+  `run-20260907T043145Z-f6152b`: measured compression CSV, placement/clearance
+  verification, Analysis-to-BO feedback, and next-design entry. Includes a
+  public artifact hash index, explicit mixed-mode limitations, and synchronized
+  evaluation/README navigation. Documentation only; no runtime changes.
+
 - Paper-first dual documentation structure under `docs/paper/`, with the
   closed-loop system contribution primary and the platform contribution
   secondary.

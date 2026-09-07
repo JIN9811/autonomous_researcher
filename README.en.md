@@ -27,6 +27,11 @@ It connects experiment design, specimen manufacturing, equipment control, analys
 
 ## 1. Quick Start
 
+Latest evidence: [one-cycle integration demonstration completed](docs/paper/evidence/2026-09-07-latest-cycle-demonstration.md)
+with live compression data, Analysis-to-BO feedback, and next-design entry.
+Scope: supervised mixed mode; printer deposition skipped, not a full physical
+campaign or scientific-efficacy result.
+
 New users should start with the [Complete User Manual](docs/tutorials/user_manual.en.md). It covers installation, first run, GUI usage, device setup, advanced APIs, graph/module contracts, troubleshooting, and extension rules.
 
 If code and documentation appear to disagree, check the

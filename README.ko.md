@@ -170,6 +170,7 @@ dry-run 실패, 알 수 없는 외부 상태는 검토·중지·오류 경로로
 | route·그래프 아키텍처 수치 | 조사 범위에서 `supported` | `E-INSPECT-ARCH-001` |
 | 논문 주장-증거/문서 계약 | `partially_supported` | `E-TEST-DOC-001` |
 | 감독하 혼합 모드 폐루프 연결 1회 | 제한된 연결 범위에서 `supported` | [E-LIVE-LOOP-001](docs/paper/evidence/2026-09-07-supervised-closed-loop.md) |
+| 최신 런: 1사이클 통합 실증 완료 | 실측 데이터 피드백 범위에서 `supported` | [E-LIVE-LOOP-002](docs/paper/evidence/2026-09-07-latest-cycle-demonstration.md) |
 | 체크포인트/재개 효과 | `not_evaluated` | 적합한 논문 증거 없음 |
 | Guardian/실장비 안전 효과 | `not_evaluated` | 적합한 논문 증거 없음 |
 | Knowledge/BO의 과학적 효과 | `not_evaluated` | 비교 연구 없음 |
@@ -180,7 +181,13 @@ dry-run 실패, 알 수 없는 외부 상태는 검토·중지·오류 경로로
 집중 문서 검증은 선택된 시험 23개 통과를 기록했습니다. 이는 아키텍처·문서
 결과이지 과학 성능 지표가 아닙니다.
 
-2026-09-07 실행은 실장비 UTM 비움 확인, Analysis, BO 관리 LHS 초기점
+최신 확인 런 `run-20260907T043145Z-f6152b`는 **1사이클 통합 실증을 완료**했습니다.
+실제 압축 데이터 2,113행이 Analysis를 통과하고 BO 목적값 전달과 다음
+Design/Specimen 진입까지 이어졌으며, 배치 및 시험 후 비움 확인도 완료했습니다.
+프린터 적층은 생략한 경로이고 선택적 관측 오류는 비차단으로 남았습니다.
+이는 시스템 연결 실증이며 전체 제조·과학적 성능 검증을 의미하지 않습니다.
+
+이전 2026-09-07 기록(`E-LIVE-LOOP-001`)은 실장비 UTM 비움 확인, Analysis, BO 관리 LHS 초기점
 2/8 선정, 다음 Design/Specimen 진입까지 이어졌습니다. 프린터 적층은
 생략했고 운영자가 시편을 교체했으므로 전체 제조·재료 유효성·acquisition
 최적화 성능이 아닌 피드백 연결 실증입니다. 보고서에는 아카이브 해시

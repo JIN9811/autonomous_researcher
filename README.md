@@ -273,6 +273,7 @@ and [Security Policy](SECURITY.md).
 | Route and graph architecture counts | `supported` within inspection scope | `E-INSPECT-ARCH-001` |
 | Paper claim-evidence/document contracts | `partially_supported` | `E-TEST-DOC-001` |
 | Supervised closed-loop integration, one iteration | `supported` within mixed-mode scope | [E-LIVE-LOOP-001](docs/paper/evidence/2026-09-07-supervised-closed-loop.md) |
+| Latest run: one-cycle integration demonstration completed | `supported` with measured-data feedback | [E-LIVE-LOOP-002](docs/paper/evidence/2026-09-07-latest-cycle-demonstration.md) |
 | Checkpoint/resume effectiveness | `not_evaluated` | No qualifying paper record |
 | Guardian/live safety effectiveness | `not_evaluated` | No qualifying paper record |
 | Knowledge/BO scientific benefit | `not_evaluated` | No comparative study |
@@ -287,7 +288,14 @@ results, not scientific efficacy metrics.
 See [Evaluation and Results](docs/paper/06_evaluation_and_results.md) and the
 [artifact manifest](docs/paper/artifact_manifest.yaml).
 
-The 2026-09-07 run reached live UTM clearance, Analysis, BO-managed LHS point
+The latest audited run, `run-20260907T043145Z-f6152b`, completed one integration
+cycle: live compression data (2,113 samples) passed Analysis, the BO objective
+was handed off, and the next Design/Specimen stage was reached. Placement and
+post-test clearance were verified. Printer deposition was skipped; optional
+observer errors remained non-blocking. This is a completed one-cycle system
+demonstration, not a full-manufacturing or scientific-efficacy claim.
+
+The earlier 2026-09-07 record (`E-LIVE-LOOP-001`) reached live UTM clearance, Analysis, BO-managed LHS point
 2/8, and the next Design/Specimen entry. Printer deposition was skipped and
 the operator substituted a specimen. This verifies feedback integration, not
 full manufacturing, material validity, or acquisition-based optimization.

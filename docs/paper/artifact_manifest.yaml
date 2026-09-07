@@ -9,7 +9,7 @@ claims:
       full fabrication and scientific specimen identity were not validated.
     research_questions: [RQ1, RQ2]
     status: supported
-    evidence_ids: [E-LIVE-LOOP-001]
+    evidence_ids: [E-LIVE-LOOP-001, E-LIVE-LOOP-002]
   - id: C-SYS-ARCH-01
     proposition: >-
       ATR declares a closed-loop graph spanning research stages with explicit
@@ -57,6 +57,33 @@ claims:
     evidence_ids:
       - E-TEST-DOC-001
 evidence:
+  - id: E-LIVE-LOOP-002
+    environment: live
+    verified_commit: "39958d8 at audit; executed process/working-tree revision not immutably fingerprinted"
+    command: >-
+      Read the operator-started run run-20260907T043145Z-f6152b loop-scoped
+      agent results and events; cross-check raw CSV provenance, quality,
+      placement/clearance, BO handoff, and next Design parameters; verify
+      local artifact SHA-256 digests with the read-only protocol in the report.
+    inputs:
+      - graphs/configs/atr_closed_loop.yaml
+      - agents/equipment_agent.py
+      - agents/analysis_agent.py
+      - agents/bo_agent.py
+      - agents/design_agent.py
+    outputs:
+      - path: docs/paper/evidence/2026-09-07-latest-cycle-demonstration.md
+        sha256: 0823fcef423f1bd2d0cb239411261ec26099b41f2c4a538f45b0824639c5a9a1
+      - path: docs/paper/evidence/2026-09-07-latest-cycle-summary.json
+        sha256: 63b3738a36e4d993c126ab7305d2ee630075cd69640c67d6f47aaffe3eeb79e7
+    result: >-
+      One supervised mixed-mode integration cycle completed with 2113
+      measured compression samples, Analysis acceptance, BO objective
+      1.941513759 MJ/m3, LHS point 2/8, and next Design/Specimen entry.
+      Printer deposition was skipped. Optional observer errors remained
+      non-blocking. No full fabrication, scientific efficacy, acquisition
+      improvement, whole-campaign completion, or clean-commit reproduction
+      claim. Raw archives remain local; public outputs are an audit index.
   - id: E-LIVE-LOOP-001
     environment: live
     verified_commit: "working-tree on c4005ca; not a clean-commit baseline"

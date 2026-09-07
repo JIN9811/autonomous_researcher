@@ -38,7 +38,9 @@ supersedes: []
 ## Summary
 
 The current evidence establishes bounded architecture and documentation
-contracts, plus one supervised mixed-mode closed-loop integration iteration.
+contracts, plus supervised mixed-mode closed-loop integration evidence.
+The latest audited run completed one cycle with measured compression data
+and entry into the next Design/Specimen stage (`E-LIVE-LOOP-002`).
 It does not establish end-to-end scientific efficacy, generalized
 safety effectiveness, live-hardware robustness, or superiority to another
 system. This chapter reports that boundary as a result rather than hiding it
@@ -54,6 +56,7 @@ into this paper's evaluated result set.
 
 - `E-INSPECT-ARCH-001`: inspected FastAPI and graph structure.
 - `E-LIVE-LOOP-001`: [one supervised mixed-mode iteration](evidence/2026-09-07-supervised-closed-loop.md), with raw archives retained locally and a public result/hash index.
+- `E-LIVE-LOOP-002`: [latest one-cycle demonstration](evidence/2026-09-07-latest-cycle-demonstration.md), with measured-data quality, Analysis-to-BO feedback, and next-design continuity.
 - `E-TEST-DOC-001`: automated documentation-governance and publication
   contract tests.
 
@@ -65,6 +68,7 @@ Each record names its environment, commit, command, inputs, outputs, and hash.
 |---|---|---|---|---|---|
 | Declared closed-loop architecture | RQ1 | Inspection | `supported` | `E-INSPECT-ARCH-001` | The configured graph and route surface exist at the recorded baseline. |
 | Stage-contract integrity through a complete run | RQ1 | Test/replay or higher | `partially_supported` | `E-LIVE-LOOP-001` | One supervised mixed-mode feedback iteration reached the next Design; whole-run completion, full fabrication, and failure matrices remain unverified. |
+| Latest one-cycle integration demonstration | RQ1, RQ2 | Live / mixed mode | `supported` within one-cycle scope | `E-LIVE-LOOP-002` | Live compression CSV, placement and clearance verification, Analysis, BO-managed LHS, and next-design entry completed; no full-manufacturing claim. |
 | Checkpoint and resume behavior by failure class | RQ1 | Replay/simulation/live | `not_evaluated` | No qualifying record | Recovery effectiveness remains open. |
 | Claim-evidence schema integrity | RQ2 | Test | `partially_supported` | `E-TEST-DOC-001` | Structural references and hashes are checked; complete scientific lineage is not. |
 | Full run artifact lineage | RQ2 | Replay/simulation/live | `partially_supported` | `E-LIVE-LOOP-001` | Loop/attempt results and hashes are indexed; raw data are not publicly bundled and specimen substitution prevents scientific lineage validation. |
@@ -84,6 +88,7 @@ Each record names its environment, commit, command, inputs, outputs, and hash.
 | R-API-01 | 346 FastAPI `APIRoute` entries and 353 total application routes | Route entries at one import baseline | Inspection | `supported` | `E-INSPECT-ARCH-001` |
 | R-DOC-01 | 23 focused documentation tests passed in the initial validator cycle | 23 selected tests, 0 failures | Test | `supported` for the tested contracts | `E-TEST-DOC-001` |
 | R-LOOP-01 | UTM clearance → Analysis → BO-managed LHS → next Design/Specimen entry | One observed feedback iteration, no repeated-run reliability estimate | Supervised mixed-mode / live equipment | `supported` within integration scope | `E-LIVE-LOOP-001` |
+| R-LOOP-02 | One-cycle demonstration completed with 2,113 measured CSV samples; BO objective 1.941513759 MJ/m³; next Design/Specimen reached | One selected cycle; no repeated-run reliability estimate | Supervised mixed-mode / live equipment | `supported` within integration scope | `E-LIVE-LOOP-002` |
 | R-LIVE-01 | End-to-end physical campaign completion | No campaign denominator | Live | `not_evaluated` | No qualifying evidence |
 | R-SCI-01 | Scientific improvement over a baseline | No study denominator | Comparative | `not_evaluated` | No qualifying evidence |
 | R-SAFE-01 | Reduction in unsafe or unintended physical actions | No scenario denominator | Simulation/live | `not_evaluated` | No qualifying evidence |
@@ -98,6 +103,14 @@ or scientific behavior.
 agent selected initial-design point 2/8, not an acquisition-ranked optimum.
 The next Design retained the requested parameters. See the evidence report
 for timestamps, printer skips, specimen substitution, and the archive index.
+
+The latest record `E-LIVE-LOOP-002` independently documents one completed
+feedback cycle using a nonzero measured compression curve. All eight Equipment
+Skill blocks completed, both required placement/clearance verification
+boundaries were satisfied, Analysis accepted the data, and BO's next LHS point
+reached Design. The earlier record's specimen substitution and near-zero score
+are not carried over to this run. Optional observer errors and reasoning
+warnings remain explicitly recorded; completion does not mean an error-free log.
 
 The declared graph supports `C-SYS-ARCH-01` within inspection scope. The graph
 connects the research stages and contains explicit terminal and feedback paths.
@@ -142,7 +155,7 @@ and cross-environment behavior.
 ## Limitations and Known Gaps
 
 The results package intentionally exposes substantial unevaluated scope.
-The single supervised live-equipment integration record does not supply a
+The supervised live-equipment integration records do not supply a
 complete raw public dataset, validated material identity, full manufacturing
 campaign, comparative baseline, recovery matrix, or statistical evidence.
 These gaps are release and study-planning inputs, not zero-valued results.
@@ -150,7 +163,7 @@ These gaps are release and study-planning inputs, not zero-valued results.
 ## Verification
 
 Initial synthesis: 2026-08-09. Updated on 2026-09-07 with bounded working-tree
-live integration evidence; the older architecture/test baselines are unchanged. Run
+live integration evidence, including the latest completed cycle; the older architecture/test baselines are unchanged. Run
 `scripts/validate_paper_publication.py` to verify the machine-readable status
 and evidence hashes.
 
