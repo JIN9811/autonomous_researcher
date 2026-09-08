@@ -177,7 +177,10 @@ async def test_mixed_policy_cannot_actuate_or_simulate_real_clear(policy):
     state.current_experiment_spec["execution_policy"] = {"manipulation": policy, "lab_equipment": "execute"}
     cycle.merge_utm_clear_cycle(state, Stage.EQUIPMENT, equipment_data(state))
     tools = ReplayTools(state)
-    result = await ManipulationAgent().run(state, SimpleNamespace(tools=tools))
+    from tests.unit.test_manipulation_decision import Model
+    ctx = Model()
+    ctx.tools = tools
+    result = await ManipulationAgent().run(state, ctx)
     assert not result.success
     assert not tools.calls
     assert result.data["utm_clear_execution"]["success"] is False
@@ -197,7 +200,10 @@ async def test_existing_execution_mode_maps_to_live_transport_and_local_dataset(
             "fabrication_report": {"fabrication_outcome": {"status": "ready_for_vision"}}}
     cycle.merge_utm_clear_cycle(state, Stage.EQUIPMENT, equipment_data(state))
     tools = ReplayTools(state)
-    result = await ManipulationAgent().run(state, SimpleNamespace(tools=tools))
+    from tests.unit.test_manipulation_decision import Model
+    ctx = Model()
+    ctx.tools = tools
+    result = await ManipulationAgent().run(state, ctx)
     assert result.success
     request = tools.calls[0][1]
     assert request["runtime_mode"] == "live"

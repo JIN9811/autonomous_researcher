@@ -139,7 +139,7 @@ def _result(execution, *, capture=None, summary="UTM clear verification pending"
         artifact["url"] = capture.get("artifact_url", "")
         data["utm_verification_2"] = {**{k: execution[k] for k in ("run_id", "loop_id", "specimen_id", "session_id")},
             "record": {"verification_index": 2, "status": capture.get("status", "unknown"),
-                       "confirmed": done, "captured_at": capture.get("captured_at", ""),
+                       "confirmed": execution.get("visual_clearance_confirmed", done), "captured_at": capture.get("captured_at", ""),
                        "artifact": artifact, "evidence": deepcopy(capture)}}
     if execution.get("state") == "error":
         data["failure_code"] = execution.get("failure_code") or "UTM_CLEARANCE_REQUIRED"
@@ -217,6 +217,20 @@ async def run_clear_manipulation(state, ctx, *, spec):
         return _result(execution)
     policy = state.current_experiment_spec.get("execution_policy") or {}
     if _explicit_virtual(state):
+        from agents.manipulation_decision import select_manipulation_tool, allows
+        execution["state"] = "deciding"
+        try:
+            decision = await select_manipulation_tool(state, ctx, "lerobot.replay.start", {
+                **scope(state), "session_id": execution["session_id"], "task_id": "clear_utm_to_disposal",
+                "dataset_repo_id": "jin/utm_clear", "replay_episode": 0, "simulated": True,
+                "actuation_performed": False})
+        except asyncio.CancelledError:
+            execution.update(state="error", success=False, failure_code="MANIPULATION_DECISION_CANCELLED")
+            raise
+        if not allows(decision) or current_clear(state) is not execution or execution.get("state") != "deciding":
+            execution.update(state="error", success=False, failure_code="MANIPULATION_REVIEW_REQUIRED")
+            return _result(execution)
+        execution["manipulation_decision"] = decision
         execution.update(state="waiting", simulated=True, success=None, replay_completed_at=time.time(),
                          replay_home_verified=True, replay_evidence={"simulated": True, "actuation_performed": False})
         return _result(execution, summary="Explicitly simulated clearance; no replay actuation")
@@ -232,10 +246,26 @@ async def run_clear_manipulation(state, ctx, *, spec):
         "profile_id": spec.get("lerobot_profile_id") or spec.get("robot_profile_id") or spec.get("profile_id") or "",
         "confirm_live_execute": confirmation is True}
     execution["runtime_mode"] = runtime_mode
+    from agents.manipulation_decision import select_manipulation_tool, allows
+    execution["state"] = "deciding"
+    try:
+        decision = await select_manipulation_tool(state, ctx, "lerobot.replay.start", payload,
+            task_context={"task_id": "clear_utm_to_disposal", "source_location": "utm_fixture", "target_location": "discard_bin"})
+    except asyncio.CancelledError:
+        execution.update(state="error", success=False, failure_code="MANIPULATION_DECISION_CANCELLED")
+        raise
+    if current_clear(state) is not execution or execution.get("state") != "deciding":
+        from agents.base_agent import AgentResult
+        return AgentResult(success=False, summary="Clearance scope changed", data={
+            "failure_code": "MANIPULATION_DECISION_SCOPE_CHANGED", "manipulation_decision": decision})
+    execution["manipulation_decision"] = decision
+    if not allows(decision):
+        execution.update(state="error", success=False, failure_code="MANIPULATION_REVIEW_REQUIRED")
+        return _result(execution)
     # Persist attempted ownership before crossing the effectful boundary, including exceptions.
     execution.update(state="starting", success=None, started_at=datetime.now(timezone.utc).isoformat(), pending_started_at=time.time())
     try:
-        response = await asyncio.to_thread(ctx.tools.call, "lerobot.replay.start", payload)
+        response = await asyncio.to_thread(ctx.tools.call, decision["request"]["tool"], payload)
     except Exception as exc:
         response = {"ok": False, "failure_code": "UTM_CLEAR_REPLAY_START_FAILED", "message": str(exc)}
     valid = matches(state, response) and response.get("session_id") == execution["session_id"]
@@ -252,7 +282,7 @@ async def run_clear_vision(state, ctx, *, artifact_dir):
     if any(getattr(state, flag, False) for flag in ("stop_requested", "safe_stop_requested", "emergency_stop_requested")):
         await stop_pending_clear(state, ctx, reason="UTM_CLEAR_OPERATOR_STOPPED")
         return _result(execution)
-    if execution.get("state") in {"error", "requested", "done"}:
+    if execution.get("state") in {"error", "requested", "deciding", "done"}:
         return _result(execution)
     if clear_poll_pending(state):
         remaining = execution["pending_deadline_at"] - time.time()
@@ -272,6 +302,13 @@ async def run_clear_vision(state, ctx, *, artifact_dir):
             return _result(execution)
         capture = {"ok": True, "status": "clear", "detected": False, "clear_confirmed": True,
                    "simulated": True, "actuation_performed": False, "captured_at": datetime.now(timezone.utc).isoformat()}
+        from agents.manipulation_decision import review_manipulation_result, allows
+        decision = await review_manipulation_result(state, ctx, "clear_utm_to_disposal", execution, capture,
+            execution_ended=True, vision_accepted=True)
+        if not allows(decision):
+            execution.update(state="error", success=False, failure_code="MANIPULATION_REVIEW_REQUIRED")
+            return _result(execution, capture=capture)
+        execution["manipulation_result_decision"] = decision
         execution.update(state="done", success=True)
         return _result(execution, capture=capture, summary="Simulated empty fixture verified (not physical evidence)")
     policy = state.current_experiment_spec.get("execution_policy") or {}
@@ -341,6 +378,21 @@ async def run_clear_vision(state, ctx, *, artifact_dir):
         result = _result(execution, capture=capture, summary="Clearance image evidence requires review")
         result.data.update(vision_decision=decision, safe_stop_recommended=True)
         return result
+    if confirmed:
+        from agents.manipulation_decision import review_manipulation_result, allows
+        execution["visual_clearance_confirmed"] = True
+        task_decision = await review_manipulation_result(state, ctx, "clear_utm_to_disposal", replay, capture,
+            execution_ended=True, vision_accepted=True)
+        if task_decision.get("scope_valid") is False or current_clear(state) is not execution or execution.get("state") != "waiting":
+            from agents.base_agent import AgentResult
+            return AgentResult(success=False, summary="Clearance task scope changed", data={
+                "failure_code": "MANIPULATION_DECISION_SCOPE_CHANGED", "manipulation_result_decision": task_decision})
+        execution["manipulation_result_decision"] = task_decision
+        if not allows(task_decision) or (execution.get("pending_deadline_at") is not None and time.time() >= execution["pending_deadline_at"]):
+            execution.update(state="error", success=False, failure_code="MANIPULATION_REVIEW_REQUIRED")
+            result = _result(execution, capture=capture, summary="Manipulation clearance result requires review")
+            result.data.update(manipulation_result_decision=task_decision, safe_stop_recommended=True)
+            return result
     execution.update(state="done" if confirmed else "waiting", success=True if confirmed else None)
     path = capture.get("annotated_frame_path") or capture.get("raw_frame_path")
     if path:

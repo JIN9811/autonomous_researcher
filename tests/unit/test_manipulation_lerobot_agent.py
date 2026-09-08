@@ -34,6 +34,50 @@ class _CtxStub:
         self.events.append(event)
 
 
+@pytest.mark.asyncio
+async def test_llm_rejects_skill_before_any_robot_call():
+    class NoHardware:
+        def list_tools(self):
+            return ["lerobot.rollout.start"]
+        def call(self, *args, **kwargs):
+            pytest.fail("Rejected model decision reached device boundary")
+    ctx = _CtxStub(NoHardware())
+    ctx.force_real_llm_in_test = True
+    result = await ManipulationAgent().run(_state(), ctx)
+    assert result.success is False
+    assert result.data["manipulation_decision"]["status"] == "review_required"
+
+
+@pytest.mark.asyncio
+async def test_llm_tool_selection_preserves_rollout_payload():
+    class Recorder:
+        def __init__(self): self.calls = []
+        def list_tools(self): return ["lerobot.rollout.start"]
+        def call(self, tool, payload):
+            self.calls.append((tool, dict(payload)))
+            return {"ok": True, "tool": tool, "status": "POLICY_ACTIVE", "workflow": "rollout", "session_id": payload["session_id"]}
+    registry = Recorder()
+    class DecisionContext(_CtxStub):
+        force_real_llm_in_test = True
+        async def complete(self, task_type, prompt, **kwargs):
+            context = json.loads(prompt.split("\nCONTEXT:\n")[1])
+            return SimpleNamespace(model="fixture", raw={}, text=json.dumps({"tool": "lerobot.rollout.start",
+                "arguments": {"proposal_id": context["proposal_id"]}, "reason": "Configured transfer skill fits.",
+                "evidence_refs": context["evidence_refs"]}))
+    state = _state()
+    state.current_experiment_spec["manipulation_task"] = "pick up the cube"
+    result = await ManipulationAgent().run(state, DecisionContext(registry))
+    assert result.success
+    assert [call[0] for call in registry.calls] == ["lerobot.rollout.start"]
+    assert registry.calls[0][1]["task_instruction"] == "pick up the cube"
+    assert registry.calls[0][1]["policy_path"] == "fake://policy"
+    assert result.data["manipulation_decision"]["llm_used"] is True
+    repeated = await ManipulationAgent().run(state, DecisionContext(registry))
+    assert not repeated.success
+    assert repeated.data["failure_code"] == "MANIPULATION_START_ALREADY_ATTEMPTED"
+    assert len(registry.calls) == 1
+
+
 def _state() -> OrchestratorState:
     return OrchestratorState(
         run_id="run-lerobot",

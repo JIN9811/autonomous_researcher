@@ -76,6 +76,12 @@ The five areas are responsibility boundaries, not five sequential model calls.
 
 ## Closed-Loop Position and Handoffs
 
+After accepted placement/clearance evidence and confirmed robot termination, the
+existing sidecar invokes [Manipulation's task-result judgment](manipulation_agent.md#bounded-decision-contract)
+using the Manipulation module's model binding. Vision retains its visual facts;
+Manipulation acceptance is additionally required for task handoff. Robot stop does
+not wait for that judgment.
+
 ![Vision closed-loop position and handoffs](assets/figures/vision_01_closed_loop_handoffs.svg)
 
 **Figure Vision-1.** Implementation-inspection projection of the bounded Vision

@@ -5,14 +5,15 @@ status: active
 authority: descriptive
 audience: [researcher, operator, developer, maintainer]
 scope: [agents, manipulation, robotics, lerobot]
-summary: Current contract for bounded transfer policies, post-test UTM-clear replay, Vision verification, and robot evidence.
+summary: Manipulation-owned bounded LLM skill selection and post-Vision result judgment over existing robot executors.
 source_of_truth:
   - agents/manipulation_agent.py
+  - agents/manipulation_decision.py
   - graphs/modules/manipulation/module.yaml
   - device_bridges/lerobot_bridge.py
   - app/main.py
   - utils/utm_clear_cycle.py
-last_verified: 2026-09-06
+last_verified: 2026-09-09
 verified_against: working-tree
 related_docs:
   - docs/agents/README.md
@@ -26,18 +27,29 @@ supersedes: []
 
 # Manipulation Agent Reference
 
+## Status at a Glance
+
+- Runtime status: Implemented on the existing transfer and post-test clearance paths
+- LLM decision layer: Implemented; registered API and local vLLM each matched 4/4 non-actuating development cases
+- Physical effect: Possible only through existing rollout, fixed-skill and managed-replay executors
+- Primary handoff: `robot_task_result.v1` → Vision → Equipment; verified clearance → Analysis
+- Live hardware validation: Not performed for this reconstruction
+- Known gap: No new pose-to-policy routing; LIVE pickup freshness can expire during model inference
+
 ## Summary
 
-`ManipulationAgent` supervises short, bounded LeRobot/Pi0.5 policies for
-specimen transfer. It validates task, profile, policy, fresh Vision context and
-live gates; starts and monitors a rollout; scores SARM-lite progress; requests
-post-place Vision verification; and packages result/evidence. Pi0.5 is a policy
-executor, not a planner, and direct shell generation is prohibited.
+`ManipulationAgent` supervises existing LeRobot VLA policies, including SmolVLA,
+and fixed skills. The LLM judges whether the configured skill fits the delegated
+task and selects its bounded tool call. Existing code validates profile, policy,
+fresh Vision context and live gates, executes the selected call, monitors progress,
+and stops the robot. After accepted Vision verification and confirmed termination,
+a second Manipulation-owned LLM decision judges whether the evidence supports handoff.
 
 After the UTM test, the same agent owns the separately scoped recorded sweep
 `clear_utm_to_disposal`. This uses managed LeRobot replay, not a second VLA
 pickup, and requires measured return plus fresh empty-fixture Vision evidence
-before Analysis. The initial transfer path and its evidence remain unchanged.
+before Analysis. Neither LLM call changes the saved policy, trained instruction,
+calibration, replay dataset/episode, or motion commands.
 
 ## Scope
 
@@ -55,18 +67,65 @@ primary graph/sidecar handoffs.
 | Does | Does not |
 |---|---|
 | Resolve one allowlisted transfer task | Generate arbitrary robot/shell commands |
-| Select validated LeRobot/Pi0.5 policy/profile | Train a policy as part of every graph step |
+| Judge task suitability of the configured policy/profile and select its tool | Invent a new policy or alter its trained instruction |
 | Start/monitor/stop bounded rollout through bridge | Bypass LeRobot bridge or Guardian |
 | Score progress and precursor risk | Treat policy confidence as physical proof |
 | Require post-place Vision verification | Self-certify specimen placement |
 
-## Three-Level Control Classification
+## Five-Area Responsibility Map
 
 | Level | Manipulation responsibility | Authority boundary |
 |---|---|---|
-| High-Level Control | Owns the governed transfer branch after fresh Vision readiness and remains active until bounded rollout termination plus required post-place Vision evidence | Does not advance to Equipment while rollout or post-place verification is incomplete |
-| Middle-Level Control | Resolve saved task/policy/profile settings, validate preflight, supervise rollout and motion-state evidence, track grasp/ungrasp/home conditions, request post-place verification, and emit the transfer result | The saved Manipulation Agent configuration is the single policy-path authority unless the current experiment explicitly overrides an allowed field |
+| High-Level Control | LLM judges configured-skill suitability and, after Vision and termination, task-result consistency | Orchestrator owns the mission; Vision owns visual facts; model cannot grant physical safety |
+| Middle-Level Control | Bind saved task/profile, expose bounded tools, validate request, supervise motion-state evidence and completion, and package handoff | Model selects a listed tool with an immutable proposal reference; code supplies all driver arguments |
 | Low-Level Control | Calls `lerobot.rollout.start/stop/status` and `robot.pick_place` where selected | LeRobot process/PID lifecycle, serial ports, camera leases, robot commands, action timing, and optional Isaac sidecars remain bridge authority |
+| Guardian / Safety | Existing approvals, identity, freshness, camera return, stop, interlock and deadline gates; post-inference scope checks | No model override; uncertain start effects never trigger an automatic repeat |
+| Knowledge / Evidence | Run/loop-scoped model request, decision, execution and Vision evidence | Legacy progress/grasp scores are heuristic, not measured success probabilities |
+
+These are responsibility areas, not five sequential LLM calls. The two LLM
+checkpoints belong to one Manipulation agent, using its registered
+`manipulation_plan` model binding even when the existing Vision sidecar invokes
+result review. No new graph stage is introduced.
+
+### Bounded decision contract
+
+| Checkpoint | Listed choices | Required evidence | Effect |
+|---|---|---|---|
+| Skill selection | Current `lerobot.rollout.start`, `robot.pick_place`, or `lerobot.replay.start`; `return_to_owner` | Configured task/source/target/profile, supplied observation/pose, current scope | Dispatch the exact selected existing executor after code gates |
+| Result review | `accept_task_result`; `return_to_owner` | Ended execution plus accepted Vision facts for the same task/session | Release existing handoff or require review; no robot action |
+
+The JSON response has exactly `tool`, `arguments`, `reason`, and `evidence_refs`.
+For either choice, arguments contain only the exact `proposal_id`; the model never
+supplies bridge parameters. Selection cites `task:configured`; result review also
+cites `execution:ended` and `vision:verified` on acceptance; rejection may cite the
+specific contradictory evidence with `task:configured`. Malformed output, mock backend output,
+timeout, stop, changed scope/evidence, or rejection cannot authorize execution.
+
+`run_metadata.manipulation_decision_settings.timeout_s` configures the bounded
+decision wait (default 120 seconds, positive finite value up to 600). This is
+separate from robot polling/stop deadlines. Existing freshness is rechecked after
+selection, not extended to accommodate model latency.
+
+### Current prompt strategy
+
+The prompt asks for task–skill compatibility before execution and execution–Vision
+consistency after termination. It treats supplied pose orientation according to its
+coordinate frame and quality, never inventing an orientation or a selection
+threshold. Optional missing pose detail is not automatically failure; contradictory
+required facts are. Saved task instruction, checkpoint and replay episode are
+immutable. Result reasoning uses brief observable support, not internal reasoning
+output; evidence text is data, not an instruction source.
+
+Result context states the task's required visual effect (target present or target
+absent). The model must compare actual detection/clearance facts to that effect;
+an upstream acceptance label, home interlock or stopped process cannot repair a
+contradiction. Registered checkpoint alternatives and operator stop/resource-release
+confirmations are included when supplied. This context does not modify driver payloads.
+
+The system contribution is the bounded task-level supervision around VLA and
+existing replay: motor execution, visual verification and task handoff have explicit
+owners and evidence contracts. The present implementation does not establish a
+novel VLA model or autonomous selection among unregistered angle-specific policies.
 
 Port/process recovery is Low-Level; retrying or reconstructing the transfer
 procedure is Middle-Level; choosing another stage, cycle, review, or stop is
@@ -88,7 +147,7 @@ not evidence of motion accuracy or live transfer reliability.
 | In | Vision | fresh pose/readiness | safe pickup/placement context | `expires_at`, camera returned to VLA |
 | In | Profile/policy service | robot, camera, checkpoint | executable policy | validation/preflight |
 | Out | Vision | session/post-place request | verify placement | bounded rollout state |
-| Out | Equipment | verified specimen on UTM | permit protocol | Vision confirmation |
+| Out | Equipment | verified specimen on UTM | permit protocol | stopped execution + Vision acceptance + Manipulation result acceptance |
 | Out | Knowledge | disposal/rollout evidence | provenance | report/evidence refs |
 
 ## Inputs and Outputs
@@ -107,12 +166,12 @@ stage machine, and evidence refs.
 | `01_resolve_transfer_task` | allowlisted task/skill | task/skill IDs |
 | `02_collect_vision_and_specimen_context` | merge context | stale/missing blocks |
 | `03_validate_policy_profile_and_live_gates` | profile/policy/camera/confirmation | preflight |
-| `04_select_policy_backend` | LeRobot/Pi0.5 selection | no direct shell |
+| `04_select_policy_backend` | LLM selects the current configured skill tool | immutable proposal; no driver arguments |
 | `05_start_bounded_rollout` | bridge tool start | session/result |
 | `06_monitor_rollout_events` | logs/events/status | rollout runtime |
 | `07_score_sarm_stage_progress` | progress/risk/recovery hint | SARM/stage machine |
 | `08_request_post_place_vision_verification` | handoff gate | verification pending/result |
-| `09_decide_recover_stop_or_handoff` | bounded decision | recover/stop/verify/handoff |
+| `09_decide_recover_stop_or_handoff` | LLM result review after existing Vision and stop | accepted handoff or owner review; no motion retry |
 | `10_package_manipulation_report` | typed reports | report/result schemas |
 | `11_store_rollout_evidence` | attach logs/data/checkpoint | evidence refs |
 
@@ -136,7 +195,8 @@ identity conflict blocks; restarting the same stage does not rearm motion.
 | UTM test | Equipment: existing agentic cycle, CSV export and robot-entry clearance |
 | Recorded sweep | Manipulation: `jin/utm_clear`, episode `0`, managed replay through the saved robot profile; no grasp/contact requirement |
 | Verification 2 | Vision: successful replay, measured return, then a fresh registered UTM image confirming absence |
-| Analysis | Existing CSV processing, released only after the current clearance contract succeeds |
+| Task-result review | Manipulation: judge completed replay and accepted clearance facts; retain visual confirmation even if task handoff is rejected |
+| Analysis | Existing CSV processing, released only after the clearance contract and task-result judgment succeed |
 
 The runner's measured return target comes from the final recorded
 `observation.state`, not its final action command. A pending replay has one
@@ -154,13 +214,10 @@ and the [managed replay API](../device_bridges/lerobot_bridge.md#managed-utm-cle
 
 ![Manipulation internal execution and effect boundary](assets/figures/manipulation_02_execution_effect_boundary.svg)
 
-**Figure Manipulation-2.** The initial `transfer_to_utm` policy path has eleven
-internal entries and four registered tools covering task resolution, fresh
-context, live gates, backend selection, bounded rollout, monitoring, SARM
-progress, Vision verification, decision, reporting, and evidence. The managed
-post-test clear replay described above is intentionally outside this retained
-initial-transfer figure. This `inspection` figure does not imply independent
-graph scheduling or validated physical performance.
+**Figure Manipulation-2.** Two bounded LLM checkpoints surround existing execution,
+monitoring, Vision and stop. Mandatory stop precedes model result review. The same
+ownership applies to the separately scoped clearance replay; this is an architecture
+figure, not measured robot performance.
 
 ### Initial-transfer execution trace details
 
@@ -203,7 +260,7 @@ evidence responsibilities.
 | `lerobot.rollout.stop` | LeRobot bridge | physical_possible | stop result |
 | `lerobot.rollout.status` | LeRobot bridge | read_only | current session |
 | `robot.pick_place` | compatibility bounded bridge | physical_possible | task result |
-| Pi0.5/LeRobot policy | policy executor | model/physical_possible | policy/checkpoint/config |
+| SmolVLA / configured LeRobot policy | policy executor | model/physical_possible | policy/checkpoint/config |
 | SARM-lite | in-process progress monitor | read_only/local_state | progress/risk trace |
 | Vision | camera/signal handoff | read_only | pose/verification evidence |
 | Isaac | optional simulation/mirror services | external_service/model | scenario/output artifacts |
@@ -236,6 +293,14 @@ State includes task, skill, profile, policy ref, session ID, action count,
 runtime phase, SARM/stage-machine state, post-place interlock, verification,
 decision, result, and evidence refs. Logs, datasets, checkpoints, images, and
 events require run/session/specimen identity.
+
+`manipulation_decision.v1` records checkpoint, owner, proposal ID, bounded evidence,
+model request/response, decision and scope validity through the existing artifact
+archive. Result review invoked from a Vision sidecar remains labeled
+`owner=manipulation_agent`; the enclosing archive is the actual calling invocation.
+`manipulation_decision_cache` reuses accepted identical result evidence;
+`manipulation_skill_attempts` prevents repeated start attempts for one delegated
+task in a loop. A different loop has separate identity and existing archive storage.
 
 ### Live GUI telemetry delivery
 
@@ -284,6 +349,12 @@ Isaac is simulation/mirror evidence. Browser invokes APIs but
 does not change evidence class. Live requires a visible robot/camera profile,
 valid policy checkpoint, fresh Vision, approvals, and bridge readiness.
 Compatibility `robot.pick_place` is explicit, not silent equivalence.
+
+Explicit non-LLM TEST records `deterministic_test` and `llm_used=false`. With real
+LLM enabled, virtual execution still receives the decision layer but carries
+simulated evidence. Preflight-only does not start a skill. Status polling and
+mandatory stop do not wait for selection or result reasoning. Manual teleoperation
+approval and the existing stop/confirmation route remain unchanged.
 
 ## Safety, Approval, and Effect Boundary
 
@@ -342,6 +413,24 @@ reusing the earlier transfer's Done state.
 
 ## Current Verification
 
+The 2026-09-09 reconstruction is validated without devices: strict tool dispatch,
+unchanged payloads, rejection/malformed/mock responses, scope changes, cancellation,
+duplicate-start prevention, owner model binding, simulated mode, placement and
+clearance handoff gating. See the [implementation and validation ledger](../superpowers/plans/2026-09-09-manipulation-decision-layer.md).
+Historical evidence below predates the new decision layer and is not commissioning
+proof for it.
+
+| Validation | Result | Interpretation |
+|---|---|---|
+| Final focused Python regression | 268 passed | Agent boundaries, completion, mode matrix, teleop, archive and lease contracts |
+| GUI lifecycle/verification | 16 passed | Existing UI state and verification record behavior |
+| Registered API (`gpt-5.5`) | 4/4 case expectations; 2.378–4.284 s | Correct tool selection, historical acceptance and contradictory-evidence rejection |
+| Registered local vLLM (`gemma4:31b`) | 4/4 case expectations; 8.296–11.239 s | Same small development cases, not generalized model accuracy |
+
+The model probe used an empty device-tool registry. Source JSON hashes were unchanged;
+the negative case is a labeled in-memory perturbation. No robot, camera, printer or
+test equipment was actuated, and no saved model or bridge configuration was changed.
+
 The [2026-09-07 supervised integration record](../paper/evidence/2026-09-07-supervised-closed-loop.md)
 observed transfer/placement, rollout stop, post-UTM managed disposal, fresh
 Vision clearance, and Analysis entry. The disposal invocation and final
@@ -361,6 +450,11 @@ the actual controller/graph route with fake devices, stop/timeout handling,
 image separation and UI lifecycle. They do not commission physical clearing.
 
 ## Limitations and Known Gaps
+
+The existing LIVE pickup freshness window is preserved. A slow selection must
+request fresh evidence rather than execute using an expired pose; the historical
+result-review probes do not validate that timing budget. No physical commissioning
+of this added decision layer has been performed.
 
 No paper-scoped result establishes grasp success, collision avoidance, policy
 generalization, recovery success, or live timing. Hardware, dataset, policy,

@@ -1830,30 +1830,16 @@ class ManipulationAgent(BaseAgent):
         from utils.utm_clear_cycle import current_clear, run_clear_manipulation
         if current_clear(state):
             return await run_clear_manipulation(state, ctx, spec=self._spec(state))
-        timeout_s = 30.0 if state.mode == Mode.TEST else None
+        from agents.manipulation_decision import select_manipulation_tool, review_manipulation_result, allows, claim_skill_execution
+        skill_decision = None
+        result_decision = None
         strategy = self._strategy(state)
         spec = self._spec(state)
         task_id = self._task_id(state, spec)
         if task_id == "clear_utm_to_disposal":
             return AgentResult(success=False, summary="Same-cycle verified Equipment handoff is required for UTM disposal",
                 data={"failure_code": "UTM_CLEAR_HANDOFF_REQUIRED", "requested_next_stage": "vision"}, next_hint="vision")
-        try:
-            protocol = await ctx.complete(
-                "tool_formatting",
-                (
-                    "Format a bounded robot manipulation skill command. "
-                    "Pi0.5 is only a low-level policy executor; Manipulation supervises task stage, SARM risk, and Guardian handoff. "
-                    f"strategy={strategy} task_id={task_id} mode={state.mode.value}"
-                ),
-                timeout_s=timeout_s,
-            )
-            protocol_note = protocol.text[:220]
-        except Exception as exc:
-            if state.mode == Mode.TEST:
-                protocol_note = f"E4B degraded in test mode: {exc.__class__.__name__}"
-            else:
-                raise
-
+        protocol_note = "Existing configured manipulation skill; bounded decision before execution."
         payload = self._lerobot_payload(state, protocol_note, strategy)
         freshness = self._vision_signal_freshness(state)
         vision_context = self._vision_context(state, freshness)
@@ -1899,6 +1885,23 @@ class ManipulationAgent(BaseAgent):
             if strategy in {"lerobot_policy", "pi05_lerobot_policy"}
             else "robot.pick_place"
         )
+        if not preflight_only and existing_completion_response is None:
+            skill_decision = await select_manipulation_tool(state, ctx, would_execute_tool, payload)
+            # Recheck consumer freshness and configuration after model latency.
+            fresh_now = self._vision_signal_freshness(state)
+            recheck = self._preflight(state=state, strategy=strategy, payload=payload,
+                freshness=fresh_now, vision_context=self._vision_context(state, fresh_now))
+            unchanged = payload == self._lerobot_payload(state, protocol_note, self._strategy(state))
+            if not allows(skill_decision) or recheck.get("status") == "fail" or not unchanged or would_execute_tool not in available_tools:
+                blocked = self._blocked_result(state=state, strategy=strategy, payload=payload,
+                    preflight={**recheck, "status": "fail", "blocking_reasons": ["manipulation_decision_required"]},
+                    vision_context=vision_context, protocol_note=protocol_note)
+                blocked.data.update(manipulation_decision=skill_decision, failure_code="MANIPULATION_REVIEW_REQUIRED")
+                return blocked
+            if not claim_skill_execution(state, task_id, payload):
+                return AgentResult(success=False, summary="Existing skill attempt requires status review; no duplicate start",
+                    data={"failure_code": "MANIPULATION_START_ALREADY_ATTEMPTED", "safe_stop_recommended": True,
+                          "manipulation_decision": skill_decision})
         if preflight_only:
             response = {
                 "ok": True,
@@ -1943,7 +1946,7 @@ class ManipulationAgent(BaseAgent):
             tool_payload = dict(payload)
             if callback:
                 tool_payload["_event_callback"] = callback
-            response = await self._call_tool(ctx, "lerobot.rollout.start", tool_payload)
+            response = await self._call_tool(ctx, skill_decision["request"]["tool"], tool_payload)
             if callback:
                 await asyncio.sleep(0)
             response = dict(response)
@@ -1969,7 +1972,7 @@ class ManipulationAgent(BaseAgent):
             )
             self._merge_completion_stop_result(response, stop_response)
         elif not preflight_only:
-            response = ctx.tools.call("robot.pick_place", {"task": task_id, "source": payload.get("source_location"), "target": payload.get("target_location")})
+            response = ctx.tools.call(skill_decision["request"]["tool"], {"task": task_id, "source": payload.get("source_location"), "target": payload.get("target_location")})
             response = dict(response)
             response["strategy"] = "fixed_kinematic"
             response.setdefault("grasp_score", 0.78 if response.get("ok") else 0.2)
@@ -1987,6 +1990,20 @@ class ManipulationAgent(BaseAgent):
             retry_count=state.retry_counters.get("manipulation", 0),
         )
         decision = self._decision(task_id=task_id, response=response, preflight=preflight, verification=verification, sarm=sarm)
+        if decision.get("completion_status") == "verified_complete":
+            completion_evidence = state.latest_observations.get("vision_manipulation_completion") or {}
+            visual_review = completion_evidence.get("vision_decision") or {}
+            explicit_test = state.mode == Mode.TEST and not bool(getattr(ctx, "force_real_llm_in_test", False))
+            result_decision = await review_manipulation_result(state, ctx, task_id, response,
+                completion_evidence,
+                execution_ended=(strategy == "fixed_kinematic" and response.get("ok") is True or
+                    response.get("stop_confirmed") is True),
+                vision_accepted=verification.get("status") == "verified" and
+                    (explicit_test or visual_review.get("status") == "accepted"))
+            if not allows(result_decision):
+                decision.update(handoff_status="review_required", completion_status="stopped_pending_task_review",
+                    recommended_next_agent="guardian_review")
+                response.update(ok=False, failure_code="MANIPULATION_REVIEW_REQUIRED")
         response["preflight"] = preflight
         response["observation"] = payload.get("observation", {})
         response["pickup_pose"] = payload.get("pickup_pose", {})
@@ -2061,6 +2078,8 @@ class ManipulationAgent(BaseAgent):
                 "metrics": self._metrics(report),
                 "evidence_refs": evidence_refs,
                 "protocol_note": protocol_note,
+                **({"manipulation_decision": skill_decision} if skill_decision else {}),
+                **({"manipulation_result_decision": result_decision} if result_decision else {}),
                 "requested_next_stage": requested_next_stage,
                 **({"manipulation_preflight": manipulation_preflight} if manipulation_preflight else {}),
             },

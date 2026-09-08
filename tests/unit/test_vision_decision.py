@@ -249,7 +249,7 @@ async def test_vision_run_selects_capture_then_reviews_and_blocks_conflicting_fr
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("outcome", ["reject", "cancel", "scope", "lowercase_stop", "accept_lowercase"])
+@pytest.mark.parametrize("outcome", ["reject", "cancel", "scope", "lowercase_stop", "accept_lowercase", "task_reject"])
 async def test_placement_stop_precedes_multimodal_review_and_rejection_blocks_handoff(state, capture, tmp_path, monkeypatch, outcome):
     import asyncio
     from agents.vision_agent import VisionAgent
@@ -275,7 +275,10 @@ async def test_placement_stop_precedes_multimodal_review_and_rejection_blocks_ha
             raise asyncio.CancelledError()
         if outcome == "scope":
             state.run_metadata["manipulation_result"] = {"session_id": "replacement", "status": "RUNNING"}
-    model = Model("accept_visual_evidence" if outcome == "accept_lowercase" else "return_to_owner", change=during_review)
+    model = Model("accept_visual_evidence" if outcome in {"accept_lowercase", "task_reject"} else "return_to_owner", change=during_review)
+    # Manipulation has its own response schema and model role after Vision accepts.
+    from tests.unit.test_manipulation_decision import Model as ManipulationModel
+    model.for_agent_decision = lambda owner: ManipulationModel("return_to_owner" if outcome == "task_reject" else None)
     model.tools = tools
     if outcome == "cancel":
         with pytest.raises(asyncio.CancelledError):
@@ -285,6 +288,13 @@ async def test_placement_stop_precedes_multimodal_review_and_rejection_blocks_ha
         return
     result = await VisionAgent().run(state, model)
     assert order == ["stop", "review"]
+    if outcome == "task_reject":
+        assert not result.success
+        assert result.data["vision_decision"]["status"] == "accepted"
+        assert result.data["observation"]["vision_manipulation_completion"]["detected"] is True
+        assert result.data.get("requested_next_stage") != "equipment"
+        assert state.run_metadata["manipulation_result"]["completion_status"] == "stopped_pending_task_review"
+        return
     if outcome == "accept_lowercase":
         from utils.utm_clear_cycle import merge_utm_clear_cycle
         assert result.success

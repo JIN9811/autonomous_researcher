@@ -1,14 +1,16 @@
 digraph manipulation_closed_loop_handoffs {
   graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.34", ranksep="0.55", fontname="DejaVu Sans", label="Manipulation closed-loop position and handoffs", labelloc="t", fontsize=18];
-  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07"];
-  edge [color="#52667A", fontname="DejaVu Sans", fontsize=8, arrowsize=0.7];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=12, margin="0.10,0.07"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=10, arrowsize=0.7];
   specimen [label="Specimen result +\nsource/target identity"];
   vision [label="Fresh Vision signal +\ncamera return", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
-  manipulation [label="MANIPULATION\nbounded transfer", penwidth=2.2];
+  manipulation [label="MANIPULATION LLM\nconfigured skill + tool selection", penwidth=2.2];
   robot [label="Robot motion", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
   verify [label="Verification 1\nplacement + stopped?", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
   equipment [label="Equipment\nspecimen on UTM"];
-  clear [label="MANIPULATION\nUTM-clear recorded sweep", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  clear [label="MANIPULATION LLM tool call\nexisting clearance replay", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  task1 [label="MANIPULATION LLM\ntransfer result review", fillcolor="#E8E2FF"];
+  task2 [label="MANIPULATION LLM\nclearance result review", fillcolor="#E8E2FF"];
   verify2 [label="Verification 2\nreplay + measured return\n+ fresh empty platen?", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
   analysis [label="Analysis\nexisting CSV processing"];
   review [label="Stop / recover / review", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
@@ -17,10 +19,14 @@ digraph manipulation_closed_loop_handoffs {
   vision -> manipulation [label="unexpired readiness"];
   manipulation -> robot [label="gated rollout"];
   robot -> verify;
-  verify -> equipment [label="transfer_to_utm"];
+  verify -> task1 [label="accepted facts + stopped"];
+  task1 -> equipment [label="accept task result"];
+  task1 -> review [label="return to owner"];
   equipment -> clear [label="verified CSV + robot clearance\nsame run / loop / specimen"];
   clear -> verify2 [label="managed replay evidence"];
-  verify2 -> analysis [label="confirmed clear"];
+  verify2 -> task2 [label="confirmed clear"];
+  task2 -> analysis [label="accept task result"];
+  task2 -> review [label="return to owner"];
   verify2 -> review [label="occupied / unknown / failure"];
   clear -> evidence [label="scoped replay + Verification 2", color="#2E7D59"];
   verify -> review [label="failed / uncertain"];

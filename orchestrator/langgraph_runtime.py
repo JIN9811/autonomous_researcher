@@ -468,8 +468,10 @@ class ModuleRuntimeContext:
         state: OrchestratorState | None = None,
         gate_recorder: Callable[[dict[str, Any]], None] | None = None,
         tool_call_recorder: Callable[[dict[str, Any]], None] | None = None,
+        decision_context_factory: Callable[[Stage], Any] | None = None,
     ) -> None:
         self._base = base
+        self._decision_context_factory = decision_context_factory
         self._module = module_config
         self._stage = stage
         self._state = state
@@ -541,6 +543,15 @@ class ModuleRuntimeContext:
         if self._active_internal_step:
             payload["active_internal_step"] = dict(self._active_internal_step)
         return payload
+
+    def for_agent_decision(self, agent: str):
+        """Resolve an owner's model binding without changing the running graph stage."""
+        stage = Stage(agent)
+        if stage == self._stage:
+            return self
+        if self._decision_context_factory is None:
+            raise ValueError("Owner decision context is unavailable")
+        return self._decision_context_factory(stage)
 
     def _system_prompt(self, task_type: str) -> str:
         configured = str(self._prompt.get("system") or "").strip()
@@ -825,6 +836,7 @@ class LangGraphRunLoop:
             state=self._state,
             gate_recorder=self._record_guardian_gate_snapshot,
             tool_call_recorder=self._record_tool_call_snapshot,
+            decision_context_factory=self._context_for_stage,
         )
 
     def _module_runtime_payload(self, stage: Stage) -> dict[str, Any]:

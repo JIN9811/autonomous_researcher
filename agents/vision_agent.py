@@ -827,6 +827,7 @@ class VisionAgent(BaseAgent):
         session_matches = not (session_id and interlock_session_id and session_id != interlock_session_id)
         return bool(context.get("requested")) and completion in {
             "stopped_pending_visual_review",
+            "stopped_pending_task_review",
             "reported_complete",
             "complete",
             "completed",
@@ -895,7 +896,7 @@ class VisionAgent(BaseAgent):
                 "message": "Verified UTM completion did not include the active rollout session id.",
             }
         previous_stop = manipulation.get("rollout_stop") or {}
-        if (manipulation.get("completion_status") == "stopped_pending_visual_review"
+        if (manipulation.get("completion_status") in {"stopped_pending_visual_review", "stopped_pending_task_review"}
             and previous_stop.get("ok") is True and str(previous_stop.get("status") or "").strip().upper() == "STOPPED"
             and previous_stop.get("session_id") == session_id):
             return {**previous_stop, "status": "STOPPED"}
@@ -3005,6 +3006,7 @@ class VisionAgent(BaseAgent):
                         now=now,
                     )
 
+        manipulation_result_decision = None
         # Monitoring and the verified stop above must never wait for the LLM.
         if placement_verification and rollout_stop.get("ok") and str(rollout_stop.get("status") or "").strip().upper() == "STOPPED":
             for key in ("manipulation_result", "robot_task_result"):
@@ -3023,6 +3025,25 @@ class VisionAgent(BaseAgent):
                 completion.update(rollout_stopped=True, rollout_stop_status="STOPPED")
                 monitoring_ok = False
             else:
+                from agents.manipulation_decision import review_manipulation_result, allows
+                completion["vision_decision"] = visual_decision
+                response["vision_decision"] = visual_decision
+                for key in ("manipulation_result", "robot_task_result"):
+                    if isinstance(state.run_metadata.get(key), dict):
+                        state.run_metadata[key]["completion_status"] = "stopped_pending_task_review"
+                manipulation_result_decision = await review_manipulation_result(
+                    state, ctx, "transfer_to_utm", {**(state.run_metadata.get("manipulation_result") or {}),
+                        "status": "STOPPED", "rollout_stopped": True}, response,
+                    execution_ended=True, vision_accepted=True)
+                if not allows(manipulation_result_decision):
+                    # Preserve accepted Vision facts; withhold task handoff separately.
+                    return AgentResult(success=False, summary="Manipulation task result requires review", data={
+                        "observation": observation, "vision_decision": visual_decision,
+                        "utm_completion_artifact_update": payload.get("utm_completion_artifact_update", {}),
+                        "manipulation_result_decision": manipulation_result_decision,
+                        "rollout_stop": rollout_stop, "safe_stop_recommended": True,
+                        "failure_code": "MANIPULATION_REVIEW_REQUIRED"})
+                completion["manipulation_result_decision"] = manipulation_result_decision
                 for key in ("manipulation_result", "robot_task_result"):
                     if isinstance(state.run_metadata.get(key), dict):
                         state.run_metadata[key].update(handoff_status="ready_for_equipment",
@@ -3050,6 +3071,7 @@ class VisionAgent(BaseAgent):
             "protocol_note": protocol_note,
             **({"vision_tool_decision": tool_decision} if tool_decision else {}),
             **({"vision_decision": visual_decision} if visual_decision else {}),
+            **({"manipulation_result_decision": manipulation_result_decision} if manipulation_result_decision else {}),
             **({"rollout_stop": rollout_stop} if rollout_stop else {}),
             **(
                 {

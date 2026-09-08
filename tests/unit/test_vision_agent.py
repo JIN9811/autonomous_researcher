@@ -27,6 +27,11 @@ class _CtxStub:
     async def complete(self, task_type: str, prompt: str, timeout_s: float | None = None, *, images=None) -> Any:
         if "\nCONTEXT:\n" in prompt:
             context = json.loads(prompt.split("\nCONTEXT:\n")[1])
+            if task_type == "manipulation_plan":
+                return SimpleNamespace(text=json.dumps({"tool": "accept_task_result",
+                    "arguments": {"proposal_id": context["proposal_id"]},
+                    "reason": "Execution and accepted Vision evidence agree.",
+                    "evidence_refs": context["evidence_refs"]}), raw={}, model="fixture-manipulation")
             return SimpleNamespace(text=json.dumps({
                 "tool": "accept_visual_evidence" if images else "execute_verification",
                 "arguments": {"contract_id": context["contract_id"]},

@@ -211,7 +211,7 @@ This design figure is not evidence of implemented or live-validated behavior.
 | Design | Middle | 목표·상위 요청·설계 검증·실험 근거를 종합한 설계 채택/추가 확인/허용된 수정/상위 반환 | BO/LHS 지정점·사용자 조건, 후보 생성·형상·제약·점수 계산, 기존 인계 | [Design](../../agents/design_agent.md) |
 | Specimen Making | Middle | 제작 준비·작업 선택·완료 근거 검토 | 슬라이싱·전송·프린터·이젝션 | [Specimen](../../agents/specimen_agent.md) |
 | Vision | Middle | 관측/검증 요청·해석·재관측 | 카메라·검출·좌표·freshness 검증 | [Vision](../../agents/vision_agent.md) |
-| Manipulation | Middle | 작업/Skill 선택·감독·완료 판단 | LeRobot/VLA·녹화 모션·종료 경로 | [Manipulation](../../agents/manipulation_agent.md) |
+| Manipulation | Middle 중심, High 판단 | LLM의 기존 Skill 적합성·툴 선택과 Vision 이후 결과 판단 | 기존 LeRobot/VLA·고정 replay·종료 경로 유지 | [Manipulation](../../agents/manipulation_agent.md) |
 | Lab Equipment | Middle | 저장 Skill/Flow 선택·결과 확인·제한된 복구 | 기존 장비 Skill·worker·통신 | [Equipment](../../agents/equipment_agent.md) |
 | Analysis | Middle | 분석/검증/해석 툴 선택·결과 채택 | 파서·단위·지표 계산·solver | [Analysis](../../agents/analysis_agent.md) |
 | BO | Middle | 최적화 요청·전략·후보 검토 | 수치 최적화·LHS·관측 품질 검사 | [BO](../../agents/bo_agent.md) |
@@ -663,6 +663,38 @@ unknown/실패 사유를 전달한다. 수락/반려 예시는 같은 필수 인
 본 문서·상대 링크·설계 SVG의 형식 검증과 의미 검토는 런타임/실장비 검증과 구분한다.
 동일 날짜의 사용자 보정에 따라 모든 에이전트의 정상 경로에 역할 적합한 국소
 의사결정층을 두는 기준으로 본문·문서 계약·피겨·완료 조건을 함께 갱신했다.
+
+## Manipulation 적용 계약 — 2026-09-09
+
+하나의 Manipulation Agent가 실행 전과 실행 결과의 두 국소 의사결정을 소유한다.
+기존 동작·검증·종료 경로를 유지하며, 새 오케스트레이션 노드를 만들지 않는다.
+
+| 구간 | LLM 책임 | 기존 코드 책임 |
+|---|---|---|
+| 실행 전 | 현재 등록된 Skill이 작업·출발/도착 위치·제공된 자세 정보와 맞는지 판단하고 해당 툴 선택 | 저장된 정책/지시문/캘리브레이션, profile, freshness, 승인과 실행 파라미터 |
+| 실행 중 | 별도의 주기적 판단을 요구하지 않음 | 기존 인퍼런스·고정 replay, 상태 관측, 인터록, 종료·안전 경로 |
+| Vision 검증 및 종료 후 | 실행 증거와 Vision 사실을 종합하여 작업 인계 수락 또는 담당자 검토 선택 | Vision의 검측 사실, 종료 확인, 세션/루프 동일성, downstream gate |
+
+High는 적합성·완료 의미 판단, Middle은 context/툴 dispatch와 감독, Low는 기존
+LeRobot/로봇 실행기, Guardian/Safety는 기존 강제 조건과 stop, Knowledge/Evidence는
+판단·동작·Vision 증거 보존으로 나눈다. 5영역은 순차적인 5회 LLM 호출을 뜻하지 않는다.
+
+모델이 반환할 수 있는 인자는 코드가 묶은 `proposal_id`뿐이다. 정책, 훈련 시
+지시문, 각도 기준, replay 데이터셋/episode, 장비 명령은 생성하거나 변경하지 않는다.
+자세의 각도·좌표계·품질은 제공된 경우에만 근거로 활용한다. 등록되지 않은
+각도별 정책 자동 전환은 이번 구현에 포함하지 않는다.
+
+Vision sidecar에서 결과 판단을 호출하더라도 모델 경로는 Manipulation 모듈의
+`manipulation_plan`을 사용한다. Vision 수락과 Manipulation 인계 수락은 별개이며,
+후자 거절로 검측 사실 자체를 실패로 덮어쓰지 않는다. 필수 종료는 LLM 대기보다 먼저다.
+
+테스트는 실제 장비를 호출하지 않는 도구/아티팩트 기반으로 수행한다. 명시적인
+non-LLM TEST는 별도로 표시하고, real-LLM 가상 모드는 판단층을 통과하되 물리 실증으로
+표시하지 않는다. 과거의 실증 아티팩트는 이번 재구성의 장비 실증으로 승격하지 않는다.
+에이전트 문서는 Design/Vision과 같은 Status at a Glance, 5영역 표, 판단 계약,
+기존 API/연결 상세, 크게 읽히는 SVG, 검증 범위와 한계를 포함한다.
+
+구현·검증 기록: [Manipulation implementation plan](../plans/2026-09-09-manipulation-decision-layer.md).
 
 ## Related Documents
 
