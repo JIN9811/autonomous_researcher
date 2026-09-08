@@ -1,7 +1,7 @@
 digraph vision_execution_effect_boundary {
   graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.30", ranksep="0.43", fontname="DejaVu Sans", label="Vision decision checkpoints and effect boundary", labelloc="t", fontsize=18];
-  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=8.0, margin="0.09,0.06"];
-  edge [color="#52667A", fontname="DejaVu Sans", fontsize=7.0, arrowsize=0.64];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=12, margin="0.09,0.06"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=10, arrowsize=0.64];
 
   scope [label="Code resolves current\nrun · loop · specimen · session · task"];
   select [label="LLM JSON selection\nexecute_verification or return", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];

@@ -1,7 +1,7 @@
 digraph vision_api_connection_architecture {
   graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.30", ranksep="0.54", fontname="DejaVu Sans", label="Vision multimodal decision and existing service connections", labelloc="t", fontsize=18];
-  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=8.0, margin="0.09,0.06"];
-  edge [color="#52667A", fontname="DejaVu Sans", fontsize=7.0, arrowsize=0.64];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=12, margin="0.09,0.06"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=10, arrowsize=0.64];
 
   runtime [label="AgentContext / ModuleRuntimeContext\nlease + configured fallbacks"];
   helper [label="agents/vision_decision.py\nstrict JSON + full scope recheck", penwidth=2.1];
