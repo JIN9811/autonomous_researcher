@@ -26,7 +26,7 @@ module:
       label: Zone Registry Load
       kind: internal_step
     - id: 03_capture_scene
-      label: Capture Scene
+      label: Bounded LLM tool selection / Capture Scene
       kind: internal_step
     - id: 03_active_robot_cam_ejection_check
       label: Active robot camera ejection check
@@ -48,7 +48,7 @@ module:
       label: Arbitrate Agent Signals
       kind: internal_step
     - id: 08_package_visual_evidence
-      label: Package Visual Evidence
+      label: Same-frame multimodal review / Package Visual Evidence
       kind: internal_step
     - id: 09_handoff_signal_bus
       label: Handoff vision_signal.v1
@@ -69,12 +69,16 @@ module:
     produces:
     - vision_report.v1
     - vision_signal.v1
+    - vision_decision.v1
     - decisions
     - metrics
     - evidence_refs
   notes: >-
     Vision Agent observes and emits freshness-bounded lab perception signals. It
-    may stop the active robot rollout only after UTM placement is verified; it
-    does not start robot motion or command printer, UTM, or PyAutoGUI actions.
+    selects bounded observation contracts and reviews detector facts with ordered
+    raw/annotated images through the shared LLM image protocol. It may invoke the
+    existing ActiveCam move/capture/return routine and stop an active rollout
+    after deterministic placement checks. Placement model review follows that
+    stop. It cannot start replay or command printer, UTM, or PyAutoGUI actions.
     Downstream agents must reject stale `vision_signal.v1` signals whose
     `expires_at` has passed.

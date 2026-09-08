@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -23,7 +24,15 @@ class _CtxStub:
     def __init__(self, tools: ToolRegistry) -> None:
         self.tools = tools
 
-    async def complete(self, task_type: str, prompt: str, timeout_s: float | None = None) -> Any:
+    async def complete(self, task_type: str, prompt: str, timeout_s: float | None = None, *, images=None) -> Any:
+        if "\nCONTEXT:\n" in prompt:
+            context = json.loads(prompt.split("\nCONTEXT:\n")[1])
+            return SimpleNamespace(text=json.dumps({
+                "tool": "accept_visual_evidence" if images else "execute_verification",
+                "arguments": {"contract_id": context["contract_id"]},
+                "reason": "Fixture decision over the supplied evidence.",
+                "evidence_refs": ["frame:current"] if images else ["context:task"],
+            }), raw={}, model="fixture-vision")
         return SimpleNamespace(text="capture top camera and estimate pickup readiness", raw={}, model="mock-e4b")
 
 
@@ -651,7 +660,7 @@ async def test_vision_agent_verifies_utm_placement_after_manipulation(
     monkeypatch.setattr(VisionAgent, "_repo_root", staticmethod(lambda: tmp_path))
     annotated_frame = tmp_path / "incoming" / "utm-confirmed.png"
     annotated_frame.parent.mkdir(parents=True)
-    annotated_frame.write_bytes(b"utm-confirmed")
+    Image.new("RGB", (160, 120), "red").save(annotated_frame)
     tools.register(
         "camera.capture",
         lambda payload: capture_calls.append(dict(payload or {})) or {
@@ -745,7 +754,7 @@ async def test_vision_agent_verifies_utm_placement_after_manipulation(
     assert artifact["run_id"] == state.run_id
     assert artifact["session_id"] == "lr-rollout-utm-001"
     assert artifact["specimen_id"] == state.run_metadata["specimen_result"]["specimen_id"]
-    assert Path(artifact["path"]).read_bytes() == b"utm-confirmed"
+    assert Path(artifact["path"]).read_bytes() == annotated_frame.read_bytes()
     assert completion["evidence_path"] == artifact["path"]
     screen_report = result.data["vision_agent_report"]
     assert screen_report["utm_completion_confirmation"]["detected"] is True
@@ -1101,7 +1110,7 @@ async def test_vision_agent_stops_rollout_when_fresh_session_telemetry_confirms_
     tools = ToolRegistry()
     monkeypatch.setattr(VisionAgent, "_repo_root", staticmethod(lambda: tmp_path))
     evidence = tmp_path / "utm-confirmed.png"
-    evidence.write_bytes(b"utm-confirmed")
+    Image.new("RGB", (160, 120), "red").save(evidence)
     session_id = "lr-rollout-telemetry-refresh"
     gate = {
         "schema": "post_place_interlock.v1",

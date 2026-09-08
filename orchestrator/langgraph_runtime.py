@@ -42,6 +42,7 @@ import yaml
 
 from agents.base_agent import AgentContext, AgentResult
 from agents.registry import AgentRegistry
+from backends.llm_backend import LLMImageInput
 from backends.prompt_registry import get_system_prompt
 from graphs import ATRLangGraphCompiler, GraphConfig, HandlerRegistry, load_graph_config
 from graphs.generated_adapter import GENERATED_MODULE_HANDLER_ID, generated_adapter_enabled, load_generated_adapter_run
@@ -572,7 +573,7 @@ class ModuleRuntimeContext:
             return
         fallback_notify = getattr(self._base, "_notify_model_call", None)
         if fallback_notify is not None:
-            result = fallback_notify(task_type=task_type, model=model, role=role)
+            result = fallback_notify(task_type=task_type, model=model, role=role, backend=resolved_backend)
             if inspect.isawaitable(result):
                 await result
 
@@ -585,17 +586,18 @@ class ModuleRuntimeContext:
         priority: int | None = None,
         owner: str = "",
         lease_wait: bool = True,
+        images: list[LLMImageInput] | None = None,
     ):
         """Call the module-selected LLM route without changing Python agent code."""
         lease = getattr(self._base, "llm_lease", None)
         if lease is None:
-            return await self._complete_unleased(task_type, user_prompt, timeout_s=timeout_s)
+            return await self._complete_unleased(task_type, user_prompt, timeout_s=timeout_s, images=images)
         resolved_priority = 0 if task_type.startswith("guardian") else 10
         if priority is not None:
             resolved_priority = int(priority)
         lease_owner = owner or f"module:{self._module.get('id', self._stage.value)}:{task_type}"
         async with lease.acquire(priority=resolved_priority, owner=lease_owner, wait=lease_wait):
-            return await self._complete_unleased(task_type, user_prompt, timeout_s=timeout_s)
+            return await self._complete_unleased(task_type, user_prompt, timeout_s=timeout_s, images=images)
 
     async def _complete_unleased(
         self,
@@ -603,6 +605,7 @@ class ModuleRuntimeContext:
         user_prompt: str,
         *,
         timeout_s: float | None = None,
+        images: list[LLMImageInput] | None = None,
     ):
         effective_task = self._task_type or task_type
         effective_timeout = timeout_s
@@ -629,12 +632,15 @@ class ModuleRuntimeContext:
             if self._active_internal_step:
                 metadata["module_step_id"] = self._active_internal_step.get("id", "")
                 metadata["module_step_kind"] = self._active_internal_step.get("kind", "")
-            coro = backend.complete(
-                model=model,
-                system_prompt=system_prompt,
-                user_prompt=routed_prompt,
-                metadata=metadata,
-            )
+            call_kwargs: dict[str, Any] = {
+                "model": model,
+                "system_prompt": system_prompt,
+                "user_prompt": routed_prompt,
+                "metadata": metadata,
+            }
+            if images:
+                call_kwargs["images"] = images
+            coro = backend.complete(**call_kwargs)
             if effective_timeout is not None and effective_timeout > 0:
                 return await asyncio.wait_for(coro, timeout=effective_timeout)
             return await coro
@@ -688,6 +694,8 @@ class ModuleRuntimeContext:
             seen.add(key)
             try:
                 response = await _call_backend(backend, model, role)
+                if images and response.raw.get("mock"):
+                    raise RuntimeError("mock response cannot satisfy a multimodal request")
                 await self._notify_model_call(
                     task_type=effective_task,
                     model=model,

@@ -30,6 +30,10 @@ from typing import Any
 from urllib.parse import quote
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
+from agents.vision_decision import (
+    blocked_decision_result, capture_timestamp, decision_allows_existing_gate,
+    review_visual_evidence, select_vision_tool,
+)
 from utils.agent_artifact_archive import archive_agent_run
 from orchestrator.state import Mode, OrchestratorState
 from utils.utm_specimen_presence import inspect_specimen_presence_path
@@ -720,6 +724,11 @@ class VisionAgent(BaseAgent):
             enriched["frame_width"] = capture_result.get("width")
             enriched["frame_height"] = capture_result.get("height")
             enriched["synthetic_frame"] = capture_result.get("synthetic")
+            try:
+                enriched["timestamp"] = capture_timestamp(capture_result) or datetime.fromtimestamp(
+                    Path(capture_result["path"]).stat().st_mtime, timezone.utc).isoformat()
+            except (OSError, ValueError):
+                enriched["timestamp"] = ""
         return enriched
 
     def _should_request_active_cam_ejection_check(self, state: OrchestratorState) -> bool:
@@ -817,6 +826,7 @@ class VisionAgent(BaseAgent):
         interlock_session_id = str(interlock.get("session_id") or "")
         session_matches = not (session_id and interlock_session_id and session_id != interlock_session_id)
         return bool(context.get("requested")) and completion in {
+            "stopped_pending_visual_review",
             "reported_complete",
             "complete",
             "completed",
@@ -884,6 +894,11 @@ class VisionAgent(BaseAgent):
                 "failure_code": "UTM_ROLLOUT_SESSION_MISSING",
                 "message": "Verified UTM completion did not include the active rollout session id.",
             }
+        previous_stop = manipulation.get("rollout_stop") or {}
+        if (manipulation.get("completion_status") == "stopped_pending_visual_review"
+            and previous_stop.get("ok") is True and str(previous_stop.get("status") or "").strip().upper() == "STOPPED"
+            and previous_stop.get("session_id") == session_id):
+            return {**previous_stop, "status": "STOPPED"}
         if VisionAgent._virtual_printer_tail_requested(state):
             response = {
                 "ok": True,
@@ -941,7 +956,7 @@ class VisionAgent(BaseAgent):
             response.setdefault("failure_code", "UTM_ROLLOUT_STOP_NOT_CONFIRMED")
             response.setdefault("message", "Rollout stop was not confirmed after UTM placement verification.")
             return response
-
+        response["status"] = "STOPPED"
         for key in ("manipulation_result", "robot_task_result"):
             current = metadata.get(key)
             if not isinstance(current, dict):
@@ -2124,7 +2139,7 @@ class VisionAgent(BaseAgent):
         ready = bool(capture_ok and specimen_ready and not anomaly)
         if not placement_verification:
             ready = bool(ready and pose_confidence >= 0.6)
-        completion_blocking_reason = ""
+        completion_blocking_reason = str(capture.get("completion_blocking_reason") or "")
         if placement_verification and not specimen_detected:
             ready = False
             completion_blocking_reason = str(
@@ -2655,8 +2670,11 @@ class VisionAgent(BaseAgent):
         from utils.utm_clear_cycle import current_clear, run_clear_vision
         if current_clear(state):
             return await run_clear_vision(state, ctx, artifact_dir=self._artifact_dir(state, f"clear-{state.loop_count}"))
+        if any(getattr(state, flag, False) for flag in ("stop_requested", "safe_stop_requested", "emergency_stop_requested")):
+            return blocked_decision_result({"schema": "vision_decision.v1", "status": "review_required",
+                "llm_used": False, "failure_code": "VISION_STOP_REQUESTED", "run_id": state.run_id,
+                "loop_id": state.loop_count})
         frame_id = f"frame-{state.loop_count}-{state.stage.value}"
-        timeout_s = 30.0 if state.mode == Mode.TEST else None
         specimen = self._specimen_result(state)
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
         policy = spec.get("execution_policy") if isinstance(spec.get("execution_policy"), dict) else {}
@@ -2713,22 +2731,9 @@ class VisionAgent(BaseAgent):
                 printer_preflight=printer_preflight,
             )
         utm_runtime_status = self._auto_start_utm_runtime(state, ctx)
-        try:
-            protocol = await ctx.complete(
-                "tool_formatting",
-                (
-                    "Format a concise lab perception task before robot transfer. "
-                    "Preserve Vision as observer/signal bus only; do not command hardware. "
-                    f"frame_id={frame_id} specimen_id={specimen.get('specimen_id', '')}"
-                ),
-                timeout_s=timeout_s,
-            )
-            protocol_note = protocol.text[:220]
-        except Exception as exc:
-            if state.mode == Mode.TEST:
-                protocol_note = f"Vision LLM degraded in test mode: {exc.__class__.__name__}"
-            else:
-                raise
+        protocol_note = "Existing capture, interlock and stop contracts retained."
+        tool_decision: dict[str, Any] = {}
+        visual_decision: dict[str, Any] = {}
         placement_handoff = self._post_manipulation_handoff_requested(state)
         post_place_context = self._post_manipulation_context(state)
         rollout_status = (
@@ -2761,6 +2766,11 @@ class VisionAgent(BaseAgent):
                 and session_matches
                 and status_interlock.get("ready_for_utm_snapshot")
             )
+        contract_id = "active_cam" if self._should_request_active_cam_ejection_check(state) else "pickup"
+        if not placement_handoff:
+            tool_decision = await select_vision_tool(state, ctx, contract_id)
+            if not decision_allows_existing_gate(tool_decision):
+                return blocked_decision_result(tool_decision)
         if placement_verification:
             tool_name = "vision.utm_specimen_presence.capture"
             if tool_name not in set(ctx.tools.list_tools()):
@@ -2857,6 +2867,20 @@ class VisionAgent(BaseAgent):
             response = self._attach_lerobot_camera_evidence(state, ctx, response)
         response = dict(response)
         response["utm_runtime_status"] = utm_runtime_status
+        # Freeze evidence time before reasoning; never renew it after model latency.
+        response["timestamp"] = capture_timestamp(response)
+        if not placement_handoff:
+            visual_decision = await review_visual_evidence(state, ctx, response, contract_id)
+            if visual_decision.get("scope_valid") is False:
+                return blocked_decision_result(visual_decision, "Vision evidence belongs to a changed scope")
+            if not decision_allows_existing_gate(visual_decision):
+                response["anomaly"] = True
+                response["completion_blocking_reason"] = visual_decision.get("failure_code", "VISION_REVIEW_REQUIRED")
+                for key in ("active_cam_ejection_check", "spc_autoejection_confirmation"):
+                    if isinstance(response.get(key), dict):
+                        response[key] = {**response[key], "status": "blocked", "confirmed": False,
+                            "spc_autoejection_confirmed": False,
+                            "blocking_reason": response[key].get("blocking_reason") or response["completion_blocking_reason"]}
         payload = self._transfer_observation(
             state,
             dict(response),
@@ -2981,6 +3005,29 @@ class VisionAgent(BaseAgent):
                         now=now,
                     )
 
+        # Monitoring and the verified stop above must never wait for the LLM.
+        if placement_verification and rollout_stop.get("ok") and str(rollout_stop.get("status") or "").strip().upper() == "STOPPED":
+            for key in ("manipulation_result", "robot_task_result"):
+                if isinstance(state.run_metadata.get(key), dict):
+                    state.run_metadata[key].update(handoff_status="needs_post_place_vision",
+                                                  completion_status="stopped_pending_visual_review")
+            visual_decision = await review_visual_evidence(state, ctx, response, "placement")
+            if visual_decision.get("scope_valid") is False:
+                return blocked_decision_result(visual_decision, "Placement evidence belongs to a changed scope")
+            if not decision_allows_existing_gate(visual_decision):
+                response["anomaly"] = True
+                response["completion_blocking_reason"] = visual_decision.get("failure_code", "VISION_REVIEW_REQUIRED")
+                payload = self._transfer_observation(state, dict(response), rollout_status=rollout_status)
+                observation = payload["observation"]
+                completion = observation["vision_manipulation_completion"]
+                completion.update(rollout_stopped=True, rollout_stop_status="STOPPED")
+                monitoring_ok = False
+            else:
+                for key in ("manipulation_result", "robot_task_result"):
+                    if isinstance(state.run_metadata.get(key), dict):
+                        state.run_metadata[key].update(handoff_status="ready_for_equipment",
+                                                      completion_status="verified_complete")
+        review_blocked = bool(visual_decision and not decision_allows_existing_gate(visual_decision))
         operator_wait = intervention.get("status") == "waiting_for_specimen"
         active_cam_operator_wait = bool(
             intervention.get("checkpoint") == "active_cam_ejection" and operator_wait
@@ -3001,6 +3048,8 @@ class VisionAgent(BaseAgent):
             "metrics": payload["metrics"],
             "evidence_refs": payload["evidence_refs"],
             "protocol_note": protocol_note,
+            **({"vision_tool_decision": tool_decision} if tool_decision else {}),
+            **({"vision_decision": visual_decision} if visual_decision else {}),
             **({"rollout_stop": rollout_stop} if rollout_stop else {}),
             **(
                 {
@@ -3070,9 +3119,16 @@ class VisionAgent(BaseAgent):
                     "safe_stop_recommended": True,
                 }
             )
+        if review_blocked:
+            result_data.pop("requested_next_stage", None)
+            result_data.pop("transition_decision", None)
+            result_data.update(failure_code=result_data.get("failure_code") or visual_decision.get("failure_code", "VISION_REVIEW_REQUIRED"),
+                               safe_stop_recommended=True)
         return AgentResult(
             success=(
-                True
+                False
+                if review_blocked
+                else True
                 if operator_wait
                 else False
                 if utm_rollout_stop_failure or completion_stop_failed

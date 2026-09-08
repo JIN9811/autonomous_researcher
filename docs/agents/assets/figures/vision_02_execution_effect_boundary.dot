@@ -1,26 +1,51 @@
 digraph vision_execution_effect_boundary {
-  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.30", ranksep="0.44", fontname="DejaVu Sans", label="Vision internal execution and effect boundary", labelloc="t", fontsize=18];
-  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=8.2, margin="0.09,0.06"];
-  edge [color="#52667A", fontname="DejaVu Sans", fontsize=7.2, arrowsize=0.65];
-  resolve [label="01 task resolve\n02 zone registry"];
-  capture [label="03 capture scene\n03 active-camera ejection check"];
-  perception [label="04 perception backend\n05 scene state"];
-  temporal [label="06 temporal events"];
-  arbitrate [label="07 signal arbitration\nquality · conflict · freshness", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
-  package [label="08 visual evidence\n09 signal bus handoff"];
-  stopgate [label="Matching rollout +\nUTM placement?", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
-  stop [label="10 stop verified rollout", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
-  evidence [label="Raw/annotated frame · camera/zone ID\nconfidence · timestamp · expires_at", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
-  reject [label="Degrade / reject / review", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
-  no_start [label="No robot / printer / UTM start", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
-  resolve -> capture -> perception -> temporal -> arbitrate;
-  arbitrate -> package [label="accepted"];
-  arbitrate -> reject [label="stale / conflict / low quality"];
-  package -> stopgate [style=dashed, label="stop task only"];
-  stopgate -> stop [label="verified"];
-  stopgate -> reject [label="mismatch"];
-  capture -> evidence [label="evidence", color="#2E7D59"];
-  package -> evidence [label="evidence", color="#2E7D59"];
-  stop -> evidence [label="evidence", color="#2E7D59"];
-  package -> no_start [style=dashed, arrowhead=tee, label="prohibited bypass"];
+  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.30", ranksep="0.43", fontname="DejaVu Sans", label="Vision decision checkpoints and effect boundary", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=8.0, margin="0.09,0.06"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=7.0, arrowsize=0.64];
+
+  scope [label="Code resolves current\nrun · loop · specimen · session · task"];
+  select [label="LLM JSON selection\nexecute_verification or return", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  owner [label="Owner review\nno ready handoff", fillcolor="#FFE9E7", color="#A33A32"];
+
+  pickup [label="Pickup capture\nexisting routine", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  activecam [label="ActiveCam composite routine\nROBOT MOVE → CAPTURE → RETURN", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2.1];
+  detector [label="Existing detector + artifacts\nraw + annotated · facts"];
+  review [label="LLM evidence review\naccept_visual_evidence or return", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  fresh [label="Identity + hard gates +\nLIVE 5 s / existing TEST grace", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+
+  polling [label="Placement polling / interlock\nNO LLM AWAIT", style="rounded,filled,bold", fillcolor="#E9F7EF", color="#2E7D59"];
+  stop [label="Canonical same-session STOPPED\nstored and reused", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  placement_review [label="Placement image review after stop\npending-review state preserved", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+
+  replay [label="Managed replay monitor / cancel / timeout\nNO LLM AWAIT · replay.start not exposed", style="rounded,filled,bold", fillcolor="#E9F7EF", color="#2E7D59"];
+  home [label="Replay completed +\nmeasured home return", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  clearance_review [label="Fresh clearance pair review\nbefore done", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
+  done [label="Existing report / signal /\nverification handoff", fillcolor="#E9F7EF", color="#2E7D59"];
+
+  scope -> select;
+  select -> owner [label="return"];
+  select -> pickup [label="pickup"];
+  select -> activecam [label="active_cam"];
+  pickup -> detector;
+  activecam -> detector;
+  detector -> review;
+  review -> fresh [label="accept"];
+  review -> owner [label="return / invalid"];
+  fresh -> done [label="pass"];
+  fresh -> owner [label="expired / failed"];
+
+  scope -> polling [label="placement"];
+  polling -> polling [label="pending", color="#2E7D59"];
+  polling -> stop [label="placement verified"];
+  stop -> placement_review [label="STOPPED"];
+  stop -> owner [label="unverified"];
+  placement_review -> done [label="accept + hard gates"];
+  placement_review -> owner [label="return"];
+
+  scope -> replay [label="clearance"];
+  replay -> home [label="normal completion"];
+  replay -> owner [label="cancel / timeout / error"];
+  home -> clearance_review [label="fresh pair"];
+  clearance_review -> done [label="accept + detector clear"];
+  clearance_review -> owner [label="occupied / unknown / return"];
 }

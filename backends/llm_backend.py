@@ -62,7 +62,11 @@ def openai_user_content(user_prompt: str, images: list[LLMImageInput] | None = N
     """Build one OpenAI-compatible user content value for API and vLLM."""
     if not images:
         return user_prompt
-    content: list[dict[str, Any]] = [{"type": "text", "text": user_prompt}]
+    labels = "\n".join(
+        f"Image {index}: {image.label or 'visual evidence'}"
+        for index, image in enumerate(images, start=1)
+    )
+    content: list[dict[str, Any]] = [{"type": "text", "text": f"{user_prompt}\n\n{labels}"}]
     content.extend(
         {
             "type": "image_url",

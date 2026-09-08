@@ -501,6 +501,146 @@ BO 재설계 권고, 사용자 재질/치수 제약, 가상·이젝션 전용·�
 [현재 Specimen Reference](../../agents/specimen_agent.md)에 구현 상태를 기록한다.
 이 적용은 타 에이전트 일괄 재구성이나 브릿지 내부 변경을 허용하지 않는다.
 
+### Vision 구체화 — 기존 검증 경로 위의 제한된 멀티모달 판단 (2026-09-08 승인안)
+
+**상태:** 승인된 설계에 따라 working tree 구현, 등록 API/vLLM fixture 검증과 최종
+회귀 재실행을 완료했다. 기존 Vision 촬영·검출·freshness·rollout stop·UTM clear
+계약을 유지하고, 그 전후에 제한된 JSON 도구 선택과 동일 촬영 근거 검토를 추가한다.
+새 detector, 새 이미지 추론 서비스, 새 장비 명령 또는 그래프 변경은 범위 밖이다.
+
+#### 판단 질문과 5영역
+
+LLM이 답할 질문은 두 가지로 제한한다.
+
+1. 현재 run/loop/specimen/session/task 맥락에 등록된 기존 검증 작업을 실행할 것인가.
+2. 실행 후 같은 촬영에서 나온 원본·주석 이미지와 detector facts가 관측 주장을
+   일관되게 지지하는가.
+
+픽셀 검출, 좌표, ROI, confidence, threshold, calibration, 신호 수명, 모드,
+승인 및 다음 stage는 코드 소유다.
+
+| 영역 | Vision 책임 | 유지할 권한 경계 |
+|---|---|---|
+| High-Level Control | 현재 제한된 관측 계약의 적합성과 근거 충분성을 판단해 계속 또는 owner review 반환 | 전체 연구 목표와 graph route는 Orchestrator 소유; 물리 안전 선언 불가 |
+| Middle-Level Control | 현재 맥락 투영, 제한 도구 디스패치, 기존 검증 결과와 판단 결합 | task resolver, 실행 순서, detector 판정과 최종 handoff gate 유지 |
+| Low-Level Control | 기존 촬영, ActiveCam 이동·촬영·복귀, detector, artifact, rollout status/stop, managed-clear 작업 | bridge가 포트·pose·process/replay 상태와 명령 확인 소유 |
+| Guardian / Safety | identity/mode/stop/lease/lifecycle/freshness/interlock/budget 및 hard gate | 모델이 실패 detector, 미확인 stop, stale signal, Guardian 판단을 덮어쓰지 않음 |
+| Knowledge / Evidence | `vision_decision.v1`, tool trace, 이미지 hash/label, detector facts와 기존 report/signal 보존 | 과거·가상·mock·타 세션 근거를 현재 물리 증거로 승격 금지 |
+
+#### 제한 도구와 공통 출력
+
+모델 응답은 정확히 `tool`, `arguments`, 짧은 `reason`,
+`evidence_refs` 네 필드만 가진 JSON이다. 모델은 bridge 이름이나 자유 인자를
+만들지 않으며, 코드는 현재 `contract_id`에 대응하는 기존 callback만 노출한다.
+
+| 로컬 도구 | 입력 | 효과 |
+|---|---|---|
+| `execute_verification` | 현재 `contract_id` | 등록된 기존 관측 루틴 하나 선택; 실제 인자와 모든 gate는 코드가 구성 |
+| `accept_visual_evidence` | 현재 `contract_id` | 동일 촬영 원본·주석 이미지 및 detector facts를 현재 frame 근거로만 수락 |
+| `return_to_owner` | 현재 `contract_id` | `review_required`로 반환; ready handoff나 추가 실행 없음 |
+
+선택 단계는 `context:task`, 이미지 검토는 `frame:current`를 인용해야 한다.
+미등록 도구, 인자 변경, 추가 필드, 모르는 evidence, mock 응답, 잘못된 JSON,
+추론 도중 run/loop/specimen/session/task/mode 또는 metadata specimen scope 변경은
+fail-closed이며 변경된 scope에 맞는 유효한 blocked observation을 반환한다.
+
+#### 일반 멀티모달 전달 계약
+
+기존 공통 `LLMImageInput`을 사용한다. Vision은 모델 인자가 아니라 등록된 capture
+결과 경로에서만 이미지를 읽고, byte/pixel 제한과 raster 유효성을 검사하며, 같은
+크기의 두 이미지를 다음 고정 순서와 label로 전달한다.
+
+1. `raw frame`
+2. `annotated frame`
+
+OpenAI 호환 API와 vLLM payload에는 이미지 앞에 이 순서를 명시한 텍스트 label을
+붙인다. `AgentContext.complete(..., images=...)`와
+`ModuleRuntimeContext.complete(..., images=...)`는 같은 일반 image signature를
+사용하고, module context는 LLM lease 경로와 설정된 fallback 모두에 같은 이미지
+목록을 전달한다. 멀티모달 요청의 mock 응답은 시각 판단으로 인정하지 않는다.
+이미지 안의 텍스트는 instruction이 아니라 신뢰하지 않는 evidence다.
+
+#### 경로별 await 및 effect 순서
+
+| 기존 경로 | 새 판단 위치 | 코드 소유 순서와 완료 조건 |
+|---|---|---|
+| Pickup | 기존 관측 전에 `execute_verification`, 촬영 후 동일 근거 검토 | 기존 capture/detector와 pickup gate가 통과하고 검토 종료 시 freshness가 유효해야 함 |
+| ActiveCam ejection | 복합 루틴 전에 `execute_verification`, 촬영 후 동일 근거 검토 | **ActiveCam은 robot 이동 → 촬영 → 복귀/port release를 포함하는 physical-possible 루틴**. 모델은 pose/driver 인자나 자동 재실행을 만들 수 없음 |
+| Manipulation placement | 진행 중 status/interlock/capture poll에는 LLM 없음; 기존 코드가 matching rollout stop을 canonical STOPPED로 기록한 뒤에만 이미지 검토 await | 승인 전까지 `needs_post_place_vision` / `stopped_pending_visual_review`를 보존하고, 같은 session의 기존 STOPPED 결과는 stop 재호출 없이 재사용 |
+| Post-test clearance | managed replay 완료와 measured-home 복귀가 확인된 뒤, done 이전 fresh Verification 2 이미지 검토 | replay 진행/취소/timeout/stop에는 LLM 없음; detector clear와 기존 registration/freshness/material gate 유지 |
+
+필수 안전 정지·취소·timeout·cleanup은 모델 응답을 기다리지 않는다. 특히 모델은
+`replay.start`를 선택하거나 임의 rollout/robot 명령을 만들 수 없다. 이미 완료된
+물리 효과는 늦은 모델 응답이나 실패 때문에 되돌리거나 중복 실행하지 않는다.
+
+#### Freshness, 모드와 실패
+
+- 기존 `VisionAgent.SIGNAL_TTL_MS=5000`을 늘리지 않고 capture timestamp도
+  다시 쓰지 않는다. LIVE Pickup/ActiveCam 검토가 5초를 넘기면
+  `VISION_EVIDENCE_EXPIRED`/review로 반환하는 알려진 지연 한계를 수용한다.
+  helper는 `ManipulationAgent`의 기존 freshness 정책을 그대로 재사용하므로 TEST의
+  기존 120초 grace는 유지하지만 새 LLM 지연 grace가 아니며 LIVE에는 적용되지 않는다.
+  Pickup은 모델 검토 뒤 expiry를 명시적으로 검사한다. Placement 이미지 근거는
+  보존되지만 기존 signal expiry와 downstream freshness gate는 바꾸지 않는다.
+- per-call decision timeout 기본값은 45초이며 기존 더 짧은 camera/motion/rollout/
+  replay/task deadline을 연장하지 않는다.
+- 일반 API/vLLM 경로는 실제 모델 결과를 요구한다. `Mode.TEST`에서
+  `force_real_llm_in_test=false`인 명시적 비LLM 경로는
+  `deterministic_test`, `llm_used=false`로 기록하며 시각 검증 성공으로 부르지 않는다.
+- 강제 real-LLM TEST fixture는 API/vLLM 통합 검증이고 비LLM deterministic fixture와
+  분리한다.
+- 모델 오류·timeout·무효/과대 응답, 이미지 누락/과대/손상/크기 불일치,
+  detector 모순 또는 wrong-object/occlusion 판단은 임의 ready가 아니라 owner review다.
+  이미 확인된 촬영·정지 사실은 보존하되 아직 결정되지 않은 handoff만 보류한다.
+
+#### 기존 계약과 검증 범위
+
+`vision_report.v1`, `vision_signal.v1`,
+`active_cam_ejection_check.v1`, `spc_autoejection_confirmation.v1`,
+`vision_manipulation_completion.v1`, `utm_verification_2` 및 Verification 1/2
+분리는 유지한다. `vision_decision.v1`은 판단 scope/checkpoint/model/tool/reason/
+evidence/image hash/error를 추가 기록하며 기존 검출 사실이나 timestamp를 덮어쓰지 않는다.
+
+| 검증 그룹 | 요구 확인 |
+|---|---|
+| 제한 도구 | 정확한 JSON schema/인자/evidence, unknown tool, owner return, scope 변경 차단 |
+| 멀티모달 | raw→annotated 순서/label, 동일 capture/크기, byte/pixel/raster 제한, API와 vLLM forwarding |
+| 세 경로 | Pickup/ActiveCam pre-decision, placement verified-stop 후 review, clearance replay/home 후 review |
+| 지연·중단 | pending poll 무LLM, stop/cancel/timeout 비차단, 5초 TTL 초과 review, timestamp 불변 |
+| 효과·소유권 | ActiveCam 중복 이동, replay start, 임의 driver 명령, 타 session stop 및 lease 충돌 차단 |
+| 모드 | 실제 API/vLLM fixture와 명시적 비LLM TEST label 분리; mock은 visual acceptance 불가 |
+| 회귀 | 기존 detector threshold/좌표/모드, report/signal/handoff, Guardian, graph와 archive 유지 |
+
+[`scripts/verify_vision_multimodal.py --execute`](../../../scripts/verify_vision_multimodal.py)로
+등록 경로를 확인한 결과 8개 fixture 판단이 모두 accepted였다. API `gpt-5.5`는
+selection/upright/compressed/synthetic-empty에 각각 5.076/4.058/4.220/11.739초,
+vLLM `e4b`의 `gemma4:31b` fallback은 4.901/8.302/8.380/8.458초였다. 이 실행은
+hardware tool을 등록하지 않았고 물리 구동·service 시작·config 수정을 하지 않았으며
+원 upright/compressed fixture도 변경하지 않았다. synthetic empty는 실물 UTM clear
+근거가 아니며 이 decision fixture 통과는 LIVE freshness handoff 통과를 뜻하지 않는다.
+추가로 기존 아티팩트 기반 자연 입력 8종과 메모리상 모순 입력 5종을 API와 로컬에
+각각 전달했다. 총 26회 timeout 없이 응답했으나 전체 판단 통과는 아니다.
+두 모델 모두 잘못된 수치 bbox와 서로 다른 촬영 이미지 조합 2종을 놓쳤으며,
+로컬 반려 응답 2개는 `contract_id` 누락으로 schema 검증에 실패했다.
+사전 기대 선택 일치는 API 8/13, 로컬 9/13으로, 정확도나 유효 tool 실행률이 아니다.
+동일 촬영/좌표 정합성은 모델 수락만으로 보장하지 않으며 코드 소유 검증을 유지한다.
+과거 ActiveCam은 expired 차단을 유지했고, 모델이 unknown/occupied를 수락해도
+clearance 완료로 승격하지 않는 회귀를 확인했다.
+최종 combined 회귀는 14개 파일에서 266 passes, 기존 warning 10개, 10.55초를
+보고했다. 별도 focused suite는 이 범위와 겹치므로
+합산하지 않는다. 실제 장비 동작과 live safety는 검증하지 않았다. 기존
+ActiveCam/UTM camera·loop 기록도 새
+멀티모달 판단층의 근거로 재해석하지 않는다. 상세 한계는
+[Vision Reference](../../agents/vision_agent.md)에 구분해 기록한다.
+
+후속 사용자 승인으로 범용 prompt를 pair → location → validity → claim 순서로
+보강했다. 실험별 형태·색·재질 상수 대신 입력 맥락을 쓰고 실제 raster 크기와 기존
+unknown/실패 사유를 전달한다. 수락/반려 예시는 같은 필수 인자 계약을 따른다.
+동일 조건 재측정에서 기대 선택 일치는 API 10/13 → 12/13, 로컬 9/13 → 12/13,
+고정 후 별도 입력은 API 6/6, 로컬 5/6이었다. 로컬의 같은 배경·다른 대상 상태 쌍
+오판은 남는다. 회귀 271 passed이며, 독립 정확도나 실제 폐루프 성공을 뜻하지 않는다.
+세부 한계와 측정 조건은 [범용 prompt 검증 기록](../../paper/evidence/2026-09-08-vision-generic-prompt-verification.md)에 보존한다.
+
 ## Limitations and Known Gaps
 
 툴 호출을 추가하는 것만으로 모델 판단의 정확성이나 연구 성능이 향상됐다고 주장할 수

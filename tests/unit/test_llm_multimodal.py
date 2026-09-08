@@ -20,13 +20,34 @@ def test_shared_image_input_builds_openai_compatible_content() -> None:
 
     content = openai_user_content("Locate the control", [image])
 
-    assert content[0] == {"type": "text", "text": "Locate the control"}
+    assert content[0] == {"type": "text", "text": "Locate the control\n\nImage 1: pre-click frame"}
     assert content[1]["type"] == "image_url"
     assert content[1]["image_url"]["url"] == (
         "data:image/png;base64," + base64.b64encode(PNG).decode("ascii")
     )
     assert content[1]["image_url"]["detail"] == "high"
     assert set(content[1]["image_url"]) == {"url", "detail"}
+
+
+def test_openai_image_labels_identify_ordered_raw_and_annotated_evidence() -> None:
+    content = openai_user_content(
+        "Compare views",
+        [
+            LLMImageInput(b"raw", "image/png", "raw frame"),
+            LLMImageInput(b"annotated", "image/png", "annotated frame"),
+            LLMImageInput(b"extra", "image/png"),
+        ],
+    )
+
+    assert content[0] == {
+        "type": "text",
+        "text": "Compare views\n\nImage 1: raw frame\nImage 2: annotated frame\nImage 3: visual evidence",
+    }
+    assert [part["image_url"]["url"] for part in content[1:]] == [
+        "data:image/png;base64,cmF3",
+        "data:image/png;base64,YW5ub3RhdGVk",
+        "data:image/png;base64,ZXh0cmE=",
+    ]
 
 
 def test_shared_image_input_builds_ollama_message_without_data_url_prefix() -> None:
@@ -100,7 +121,7 @@ def test_openai_compatible_backends_use_shared_multimodal_content(
     )
 
     user_content = captured[0]["json"]["messages"][1]["content"]
-    assert user_content[0] == {"type": "text", "text": "inspect"}
+    assert user_content[0] == {"type": "text", "text": "inspect\n\nImage 1: pre-click"}
     assert user_content[1]["image_url"]["url"].startswith("data:image/png;base64,")
 
 

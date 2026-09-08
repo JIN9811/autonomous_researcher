@@ -323,6 +323,24 @@ async def run_clear_vision(state, ctx, *, artifact_dir):
         and not capture.get("virtualized"))
     if not confirmed and capture.get("status") == "clear":
         capture = {**capture, "status": "unknown", "clear_confirmed": False}
+    # Replay supervision and measured return above remain independent of model latency.
+    from agents.vision_decision import review_visual_evidence, decision_allows_existing_gate, blocked_decision_result
+    review_deadline = execution.get("pending_deadline_at")
+    decision = await review_visual_evidence(state, ctx, capture, "clearance")
+    capture["vision_decision"] = decision
+    if decision.get("scope_valid") is False:
+        return blocked_decision_result(decision, "Clearance evidence belongs to a changed scope")
+    if current_clear(state) is not execution or execution.get("state") != "waiting":
+        return blocked_decision_result({**decision, "status": "review_required",
+            "failure_code": "VISION_DECISION_SCOPE_CHANGED"}, "Clearance execution changed during review")
+    deadline = execution.get("pending_deadline_at", review_deadline)
+    if deadline is not None and time.time() >= deadline:
+        decision.update(status="review_required", failure_code="UTM_CLEAR_PENDING_TIMEOUT")
+    if not decision_allows_existing_gate(decision):
+        execution.update(state="error", success=False, failure_code=decision.get("failure_code", "VISION_REVIEW_REQUIRED"))
+        result = _result(execution, capture=capture, summary="Clearance image evidence requires review")
+        result.data.update(vision_decision=decision, safe_stop_recommended=True)
+        return result
     execution.update(state="done" if confirmed else "waiting", success=True if confirmed else None)
     path = capture.get("annotated_frame_path") or capture.get("raw_frame_path")
     if path:
@@ -331,4 +349,6 @@ async def run_clear_vision(state, ctx, *, artifact_dir):
             capture["artifact_url"] = f"/api/runs/{quote(state.run_id, safe='')}/artifact-file/{quote(relative, safe='/')}"
         except ValueError:
             pass
-    return _result(execution, capture=capture, summary="UTM clearance verified" if confirmed else "UTM clearance remains unverified")
+    result = _result(execution, capture=capture, summary="UTM clearance verified" if confirmed else "UTM clearance remains unverified")
+    result.data["vision_decision"] = decision
+    return result
