@@ -34,8 +34,8 @@ Guardian Agent =
 
 - `current_experiment_spec`의 제조 가능성, geometry, 크기, fixture limit, wall/cell 제약을 검사한다.
 - `device.health`를 호출해 printer/camera/robot/utm/simulator 상태를 확인한다.
-- SARM의 `failure_precursor`, `recovery_suggested`, vision anomaly, analysis uncertainty, retry pressure를 모아 `continue/recover/retry/safe_stop`을 결정한다.
-- `FailureMemory`에 design validation 실패, device unhealthy, high precursor를 기록한다.
+- 측정된 interlock, vision anomaly, analysis uncertainty, retry pressure를 모아 `continue/recover/retry/safe_stop`을 결정한다.
+- `FailureMemory`에 design validation 실패, device unhealthy, graph-wide gate의 safe-stop 요청을 기록한다.
 - graph config에는 `safety.guardian_required: true`, `live_device_dry_run_required_before_execution: true`가 있다.
 
 하지만 지금 Guardian은 좁다.
@@ -346,7 +346,6 @@ Manipulation:
 - Pi0.5/OpenPI/LeRobot policy checkpoint 승인 상태
 - target pose가 workspace/fixture/robot envelope 안에 있는지
 - Vision precondition: object present, fixture free, human/unknown object absent
-- SARM failure precursor와 progress score
 - live rollout action clamp, retreat pose, timeout, stop channel
 - VLA output은 action shield를 통과해야 실행
 
@@ -534,7 +533,7 @@ SAFE_STOP_UNVERIFIED
 
 ## 7. Risk score 설계
 
-Guardian은 단일 precursor 대신 다축 risk vector를 유지한다.
+Guardian의 고도화안은 다축 risk vector를 유지한다.
 
 ```json
 {

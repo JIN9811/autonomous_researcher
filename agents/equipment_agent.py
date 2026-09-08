@@ -385,6 +385,7 @@ class LabEquipmentAgent(BaseAgent):
             "sequence_id": f"equipment-{state.run_id}",
             "runtime_mode": self._effective_runtime_mode(state),
             "run_id": state.run_id,
+            **({"loop_id": int(state.loop_count)} if self._effective_runtime_mode(state) == "test" else {}),
             "experiment_id": state.experiment_id,
             "active_goal": state.active_goal,
             "experiment_spec": dict(state.current_experiment_spec or {}),
@@ -2413,6 +2414,51 @@ class LabEquipmentAgent(BaseAgent):
             packet["guardian_status"] = "block"
             packet["warnings"] = sorted(set([*packet.get("warnings", []), hardware_alert["failure_code"]]))
             equipment_result["hardware_alert"] = hardware_alert
+        simulated_handoff: dict[str, Any] = {}
+        if test_like and not runtime_live and is_utm and final_result.get("mode") == "simulator":
+            identity = {"run_id": state.run_id, "loop_id": int(state.loop_count),
+                        "specimen_id": expected_request_specimen_id}
+            readiness = final_result.get("next_specimen_readiness")
+            readiness = dict(readiness) if isinstance(readiness, dict) else {}
+            identity_ok = bool(identity["specimen_id"]) and all(
+                key not in record or record[key] == value
+                for record in (final_result, readiness)
+                for key, value in identity.items()
+            )
+            export = {
+                **identity, "path": data_path,
+                "artifact_id": (equipment_result.get("data_integrity") or {}).get("artifact_id", ""),
+                "sha256": probe.get("sha256", ""),
+                "row_count": probe.get("row_count_probe", 0),
+                "columns": probe.get("columns_probe", []),
+                "validated": bool(probe.get("ok")) and identity_ok,
+                "simulated": True, "actuation_performed": False,
+            }
+            eligible = bool(
+                verified and export["validated"] and identity_ok
+                and final_result.get("status") == "verified_complete"
+                and final_result.get("simulated") is True
+                and final_result.get("actuation_performed") is False
+                and not final_result.get("failure_code")
+                and readiness.get("simulated") is True
+                and readiness.get("actuation_performed") is False
+                and readiness.get("clearance_restored") is True
+                and readiness.get("next_test_completed") is True
+                and readiness.get("ready") is True
+            )
+            for key, value in identity.items():
+                equipment_result.setdefault(key, value)
+                readiness.setdefault(key, value)
+            simulated_handoff = {
+                "raw_data_export": export,
+                "next_specimen_readiness": readiness,
+                "handoff_eligibility": {
+                    **identity, "eligible": eligible, "simulated": True,
+                    "actuation_performed": False,
+                    "failure_code": None if eligible else "UTM_CLEAR_HANDOFF_PREREQUISITES_MISSING",
+                },
+            }
+            report.update(simulated_handoff)
         return {
             "equipment_result": equipment_result,
             "equipment_report": report,
@@ -2422,6 +2468,7 @@ class LabEquipmentAgent(BaseAgent):
             "hardware_alerts": hardware_alerts,
             "incident_records": [hardware_alert["incident_record"]] if hardware_alert else [],
             "verified": verified,
+            **simulated_handoff,
         }
 
     @staticmethod
@@ -4801,5 +4848,6 @@ class LabEquipmentAgent(BaseAgent):
                 "equipment_handoff": package["equipment_handoff"],
                 "equipment_runtime_execution": runtime_execution,
                 "equipment_runtime_projection": runtime_service.project(runtime_execution),
+                **{key: package[key] for key in ("raw_data_export", "next_specimen_readiness", "handoff_eligibility") if key in package},
             },
         )

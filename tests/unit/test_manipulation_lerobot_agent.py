@@ -641,10 +641,11 @@ async def test_manipulation_agent_calls_lerobot_rollout(tmp_path: Path, monkeypa
     assert "--policy.temporal_ensemble_coeff=0.01" in result.data["manipulation"]["command_preview"]
     assert "--policy.n_action_steps=1" in result.data["manipulation"]["command_preview"]
     assert all(not item.startswith("--robot.max_relative_target=") for item in result.data["manipulation"]["command_preview"])
-    assert result.data["sarm"]["stage_name"] == "post_place_verify"
-    assert result.data["sarm"]["failure_precursor"] >= 0
+    assert result.data["manipulation_report"]["stage_machine"]["current_stage"] == "post_place_verify"
     assert result.data["manipulation_report"]["schema"] == "manipulation_report.v1"
-    assert result.data["manipulation_report"]["execution_safety"] == result.data["manipulation_report"]["sarm"]
+    assert set(result.data["metrics"]) == {"preflight_blocker_count", "preflight_warning_count", "completed_stage_count", "handoff_status"}
+    assert set(result.data) == {"manipulation", "manipulation_report", "manipulation_agent_report", "robot_task_result",
+        "handoff_packet", "decisions", "metrics", "evidence_refs", "protocol_note", "requested_next_stage", "manipulation_decision"}
     report = result.data["manipulation_report"]
     assert report["port_lease"]["status"] in {"ready", "unknown"}
     assert report["port_lease"]["profile_id"] == "fake_omx_ai"
@@ -875,7 +876,7 @@ async def test_manipulation_agent_blocks_expired_vision_signal(tmp_path: Path, m
     assert result.success is False
     assert result.data["manipulation"]["failure_code"] == "STALE_VISION_SIGNAL"
     assert result.data["manipulation"]["freshness"]["reason"] == "stale_vision_signal"
-    assert result.data["sarm"]["stage_name"] == "vision_signal_gate"
+    assert result.data["manipulation_report"]["stage_machine"]["current_stage"] == "vision_signal_gate"
     assert result.data["manipulation_report"]["preflight"]["status"] == "fail"
     assert result.data["robot_task_result"]["handoff_status"] == "blocked"
 

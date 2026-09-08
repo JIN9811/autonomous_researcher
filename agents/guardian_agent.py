@@ -6,7 +6,7 @@ Key classes/functions:
 - GuardianAgent
 
 Inputs/outputs:
-- Input: device health, SARM risk signals, retry counters
+- Input: device health, observation anomalies, retry counters
 - Output: guardian decision and safety summary
 
 Dependencies:
@@ -60,9 +60,6 @@ class GuardianAgent(BaseAgent):
     @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         spec_payload = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
-        sarm = state.latest_analysis.get("sarm", {}) if isinstance(state.latest_analysis.get("sarm"), dict) else {}
-        precursor = self._safe_float(sarm.get("failure_precursor"), 0.0)
-        recovery = bool(sarm.get("recovery_suggested", False))
         anomaly_detected = bool(state.latest_observations.get("anomaly", False))
         uncertainty = self._safe_float(state.latest_analysis.get("uncertainty"), 0.0)
         retry_pressure = int(sum(max(0, int(v)) for v in state.retry_counters.values()))
@@ -74,15 +71,10 @@ class GuardianAgent(BaseAgent):
             spec=spec_payload,
             latest_analysis=state.latest_analysis,
             latest_observations=state.latest_observations,
-            precursor=precursor,
             uncertainty=uncertainty,
             retry_pressure=retry_pressure,
         )
         graph_gate_pressure = self._resolve_graph_gate_pressure(state)
-
-        live_mode = state.mode.value == "live"
-        stop_threshold = 0.85 if live_mode else 0.92
-        recover_threshold = 0.62 if live_mode else 0.72
 
         timeout_s = 45.0 if state.mode.value == "test" else None
         try:
@@ -92,8 +84,6 @@ class GuardianAgent(BaseAgent):
                     "Evaluate continue/recover/retry/safe-stop policy.\n"
                     f"stage={state.stage.value}\n"
                     f"loop={state.loop_count}\n"
-                    f"precursor={precursor}\n"
-                    f"recovery_suggested={recovery}\n"
                     f"anomaly_detected={anomaly_detected}\n"
                     f"uncertainty={uncertainty}\n"
                     f"retry_pressure={retry_pressure}\n"
@@ -173,22 +163,11 @@ class GuardianAgent(BaseAgent):
             decision = "continue"
             action = "recover"
             reason = f"Guardian graph-wide gate blocked progression: {graph_gate_pressure.get('primary_reason') or 'gate_blocked'}"
-        elif precursor > stop_threshold or (anomaly_detected and precursor >= max(recover_threshold, 0.7)):
-            decision = "stop"
-            action = "safe_stop"
-            reason = "High failure precursor detected."
-            ctx.failure_memory.add(
-                FailureRecord(
-                    stage="guardian",
-                    failure_type="high_precursor",
-                    context={"precursor": precursor, "loop_count": state.loop_count},
-                )
-            )
         elif consistency["status"] == "fail":
             decision = "continue"
             action = "recover"
             reason = f"Consistency risk detected: {consistency['issues'][0]}"
-        elif recovery or precursor >= recover_threshold or anomaly_detected:
+        elif anomaly_detected:
             decision = "continue"
             action = "recover"
             reason = "Recovery suggested; continue with caution."
@@ -204,7 +183,6 @@ class GuardianAgent(BaseAgent):
                 "guardian": {
                     "decision": decision,
                     "reason": reason,
-                    "precursor": precursor,
                     "policy_note": policy_note,
                     "action": action,
                     "retry_pressure": retry_pressure,
@@ -453,7 +431,7 @@ class GuardianAgent(BaseAgent):
             if specimen_id and str(context.get("specimen_id", "")).strip() == specimen_id:
                 return "specimen_id matches known failure memory pattern."
             if geometry_type and str(context.get("geometry_type", "")).strip() == geometry_type:
-                if str(record.failure_type).strip() in {"high_precursor", "guardian_design_validation"}:
+                if str(record.failure_type).strip() == "guardian_design_validation":
                     same_geometry_high_risk += 1
         if same_geometry_high_risk >= 2:
             return "geometry_type repeatedly triggered high-risk failures."
@@ -465,7 +443,6 @@ class GuardianAgent(BaseAgent):
         spec: dict[str, Any],
         latest_analysis: dict[str, Any],
         latest_observations: dict[str, Any],
-        precursor: float,
         uncertainty: float,
         retry_pressure: int,
     ) -> dict[str, Any]:
@@ -480,10 +457,6 @@ class GuardianAgent(BaseAgent):
         trust_score = latest_analysis.get("trust_score") if isinstance(latest_analysis.get("trust_score"), dict) else {}
         trust_gate = str(trust_score.get("gate") or "").strip().lower()
         multifidelity_comparison = latest_analysis.get("multifidelity_comparison") if isinstance(latest_analysis.get("multifidelity_comparison"), dict) else {}
-        progress = GuardianAgent._safe_float(
-            latest_analysis.get("sarm", {}).get("progress_score") if isinstance(latest_analysis.get("sarm"), dict) else None,
-            -1.0,
-        )
         anomaly = bool(latest_observations.get("anomaly", False))
         expected_proxy = GuardianAgent._safe_float(spec.get("expected_objective_proxy_score"), -1.0) if isinstance(spec, dict) else -1.0
         if isinstance(spec, dict) and spec.get("score_semantics") == "legacy_heuristic_compatibility_only":
@@ -504,10 +477,6 @@ class GuardianAgent(BaseAgent):
             warnings.append("multi-fidelity trust gate requests calibration before BO/physical continuation.")
         if any(str(item).startswith(("UTM_DATA_", "EQUIPMENT_LIVE_EVIDENCE_INCOMPLETE", "UTM_SAVE_EXPORT_")) for item in failure_tags):
             warnings.append("analysis failure tags contain UTM data/evidence gate failures.")
-        if progress >= 0.85 and precursor >= 0.85:
-            issues.append("high progress but also high failure precursor.")
-        if objective >= 0.0 and objective < 0.45 and precursor >= 0.7:
-            issues.append("low objective with high failure precursor.")
         if objective >= 0.0 and expected_proxy >= 0.0 and objective < expected_proxy * 0.55:
             warnings.append("observed objective is far below expected proxy score.")
         if anomaly and objective >= 0.8:

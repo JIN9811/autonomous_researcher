@@ -7,11 +7,11 @@ digraph manipulation_execution_effect_boundary {
   gate [label="03 profile · policy · fresh Vision\ncamera return · live approval", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
   backend [label="04 Manipulation LLM\nskill suitability + bounded tool choice", fillcolor="#E8E2FF"];
   rollout [label="05 bounded rollout start", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
-  monitor [label="06 events/status\n07 SARM progress"];
+  monitor [label="06 events/status\n07 observed task stage"];
   verify [label="08 existing Vision + confirmed stop\nthen Vision evidence acceptance", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
   decide [label="09 Manipulation LLM\naccept task result / return to owner", shape=diamond, fillcolor="#E8E2FF", color="#B26A00"];
   report [label="10 report/result\n11 rollout evidence"];
-  evidence [label="Session · logs · status · SARM\nimage · result · dataset/checkpoint", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  evidence [label="Session · logs · status\nimage · result · dataset/checkpoint", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
   stop [label="Stop + status + visual review", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
   resolve -> context -> gate;
   gate -> backend [label="pass"];

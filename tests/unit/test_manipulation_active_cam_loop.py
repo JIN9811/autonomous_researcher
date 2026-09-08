@@ -322,7 +322,6 @@ def test_rollout_start_hands_off_to_vision_without_graph_reentry() -> None:
         response=response,
         preflight={"status": "pass"},
         verification=verification,
-        sarm={"recovery_suggested": False},
     )
 
     assert stage_machine["current_stage"] == "post_place_verify"

@@ -47,7 +47,7 @@ def claim_skill_execution(state, task, payload):
 
 
 def _evidence(value):
-    # Historical grasp_score/SARM scores are heuristics, not measured probabilities.
+    # Historical grasp_score values are heuristics, not measured probabilities.
     fields = {"session_id", "run_id", "loop_id", "specimen_id", "task", "task_id", "source", "target",
         "source_location", "target_location", "task_instruction", "profile_id", "policy_type", "policy_path",
         "policy_checkpoint_path", "policy_repo_id", "policy_pretrained_path", "required_visual_effect",

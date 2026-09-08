@@ -68,7 +68,8 @@ text { font-family: Noto Sans CJK KR, Noto Sans, DejaVu Sans, Arial, sans-serif;
 <tspan x="1502" dy="0">Manipulation</tspan>
 </text>
 <text x="1502" y="418" class="small" font-size="24" fill="#4b5563">
-<tspan x="1502" dy="0">robot / SARM</tspan>
+<tspan x="1502" dy="0">robot / task</tspan>
+<tspan x="1502" dy="30">stage</tspan>
 </text>
 <line x1="380" y1="415" x2="430" y2="415" stroke="#1f3a5f" stroke-width="4" marker-end="url(#arrow)"/>
 <line x1="730" y1="415" x2="780" y2="415" stroke="#1f3a5f" stroke-width="4" marker-end="url(#arrow)"/>

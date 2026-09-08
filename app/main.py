@@ -505,13 +505,13 @@ LIVE_AGENT_REPORT_PROFILES: dict[str, dict[str, object]] = {
     },
     "manipulation": {
         "title": "Manipulation Agent / Runtime Supervision",
-        "summary": "Supervises bounded LeRobot policy skills, preflight readiness, execution safety, Vision verification dependency, and robot_task_result handoff.",
+        "summary": "Supervises bounded LeRobot policy skills, preflight readiness, task stages, Vision verification dependency, and robot_task_result handoff.",
         "focus_rows": [
             {"label": "Task", "value": "transfer_to_utm or clear_utm_to_disposal with source/target/terminal pose"},
             {"label": "Policy boundary", "value": "LeRobot bridge executes; Manipulation Agent supervises stage, safety, and handoff"},
-            {"label": "Execution safety", "value": "stage progress, failure precursor, recovery hint, and post-place verification"},
+            {"label": "Task stages", "value": "current stage, completed stages, and post-place verification"},
         ],
-        "checklist": ["Confirm Vision freshness", "Validate robot/profile/policy preflight", "Run bounded rollout", "Check execution safety", "Require post-place Vision verification"],
+        "checklist": ["Confirm Vision freshness", "Validate robot/profile/policy preflight", "Run bounded rollout", "Check task stages", "Require post-place Vision verification"],
     },
     "equipment": {
         "title": "Lab Equipment / UTM Visual Control",
@@ -6977,7 +6977,6 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
             role_specific["vision_context"] = manipulation_report.get("vision_context", {})
             role_specific["rollout_runtime"] = manipulation_report.get("rollout_runtime", {})
             role_specific["stage_machine"] = manipulation_report.get("stage_machine", {})
-            role_specific["sarm"] = manipulation_report.get("sarm", {})
             role_specific["decision"] = manipulation_report.get("decision", {})
             role_specific["knowledge_payload"] = manipulation_report.get("knowledge_payload", {})
             role_specific["handoff_packet"] = robot_task_result if isinstance(robot_task_result, dict) else manipulation_report.get("handoff_packet", {})
@@ -18041,7 +18040,6 @@ async def _run_manipulation_agent_bridge(req: ManipulationAgentBridgeRequest, *,
         "summary": result.summary,
         "data": result.data,
         "manipulation": manipulation,
-        "sarm": result.data.get("sarm", {}),
         "manipulation_report": result.data.get("manipulation_report", {}),
         "manipulation_agent_report": result.data.get("manipulation_agent_report", {}),
         "robot_task_result": result.data.get("robot_task_result", {}),

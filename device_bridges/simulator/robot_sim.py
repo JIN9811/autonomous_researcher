@@ -14,7 +14,7 @@ Dependencies:
 
 Modification guide:
 - Safe places to edit: mock grasp scoring
-- Risky places to edit: fields used by SARM calculations
+- Risky places to edit: response fields consumed by manipulation reports
 - Related files: mcp_tools/mock_tools.py, agents/manipulation_agent.py
 """
 

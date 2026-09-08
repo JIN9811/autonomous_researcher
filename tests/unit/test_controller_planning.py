@@ -57,6 +57,20 @@ def test_planning_snapshot_preserves_latest_bo_visualization_projection() -> Non
     assert compact["bo_visualization"] == visualization
 
 
+def test_manipulation_message_contains_result_without_removed_reward_fields() -> None:
+    controller = load_runtime()
+    message = controller._format_planning_stage_message(
+        Stage.MANIPULATION,
+        {"manipulation": {"status": "running", "completion_status": "pending"}},
+        "bounded rollout",
+    )
+
+    assert "running" in message
+    assert "pending" in message
+    assert "sarm" not in message.lower()
+    assert "recovery_hint" not in message
+
+
 def test_new_workflow_reset_invalidates_a_prior_pending_teleop_handoff() -> None:
     controller = load_runtime()
     controller._state.run_id = "run-prior-handoff"
@@ -3297,7 +3311,7 @@ async def test_live_gui_planning_tail_agent_messages_keep_cycle_metadata(monkeyp
         if stage == Stage.VISION:
             return {"observation": {"anomaly": False}, "vision_report": {"camera_source": {"camera_key": "top"}}, "vision_signal": {"signal_id": "sig-1"}}
         if stage == Stage.MANIPULATION:
-            return {"manipulation": {"strategy": "pi0.5", "status": "done"}, "sarm": {"progress_score": 0.4}}
+            return {"manipulation": {"strategy": "pi0.5", "status": "done"}}
         if stage == Stage.EQUIPMENT:
             return {
                 "equipment_result": {"ok": True, "status": "done", "program_id": "utm"},

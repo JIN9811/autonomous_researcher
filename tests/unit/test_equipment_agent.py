@@ -189,6 +189,73 @@ def _tools(tmp_path: Path) -> ToolRegistry:
     return tools
 
 
+@pytest.mark.parametrize("fault", ["", "bad_csv", "missing_readiness", "not_ready", "wrong_run", "wrong_loop", "live_result", "physical_test", "effect_unknown", "unmarked_simulation"])
+def test_simulated_equipment_projects_only_valid_scoped_clearance_handoff(tmp_path, fault):
+    from utils.utm_clear_cycle import merge_utm_clear_cycle
+
+    state = _state(experiment_spec={"specimen_id": "specimen-test"})
+    identity = {"run_id": state.run_id, "loop_id": state.loop_count, "specimen_id": "specimen-test"}
+    tools = _tools(tmp_path)
+    raw = tools.call("equipment.pyautogui.run", {
+        **identity, "runtime_mode": "test", "program_id": "utm_compression_start_v1",
+    })
+    assert raw["ok"]
+    if fault == "bad_csv":
+        Path(raw["result_file"]).write_text("invalid,data\nnot,a_curve\n")
+    elif fault == "missing_readiness":
+        raw.pop("next_specimen_readiness")
+    elif fault == "not_ready":
+        raw["next_specimen_readiness"]["next_test_completed"] = False
+    elif fault == "wrong_run":
+        raw["run_id"] = "previous-run"
+    elif fault == "wrong_loop":
+        raw["next_specimen_readiness"]["loop_id"] = state.loop_count + 1
+    elif fault == "live_result":
+        raw["mode"] = "live"
+    elif fault == "physical_test":
+        state.current_experiment_spec.update(printer_test_path="installed_printer", test_printer_transport="real", allow_test_equipment_live=True)
+    elif fault == "effect_unknown":
+        raw.update(status="effect_unknown", failure_code="PYAUTOGUI_EFFECT_UNKNOWN")
+    elif fault == "unmarked_simulation":
+        raw.pop("simulated")
+    agent = LabEquipmentAgent()
+    package = agent._build_equipment_package(
+        state=state, final_result=raw, run_payload=raw,
+        tool_results=[{"tool": "equipment.pyautogui.run", "result": raw}],
+        program_catalog={"utm_compression_start_v1"},
+        source_stage_context=agent._base_run_payload(state)["source_stage_context"],
+    )
+    state.run_metadata["utm_verifications"] = {
+        **identity, "verification_1": {"confirmed": True},
+    }
+    merge_utm_clear_cycle(state, Stage.EQUIPMENT, package)
+    if fault:
+        assert not (package.get("handoff_eligibility") or {}).get("eligible")
+        assert state.run_metadata.get("utm_clear_execution", {}).get("state") != "requested"
+    else:
+        export = package["raw_data_export"]
+        assert export["validated"] is True
+        assert export["sha256"] == hashlib.sha256(Path(export["path"]).read_bytes()).hexdigest()
+        assert export["row_count"] == 80
+        assert all(export[key] == value for key, value in identity.items())
+        assert package["next_specimen_readiness"]["simulated"] is True
+        assert package["equipment_result"]["actuation_performed"] is False
+        assert state.run_metadata["utm_clear_execution"]["state"] == "requested"
+
+
+@pytest.mark.asyncio
+async def test_simulated_equipment_run_exposes_clearance_handoff(tmp_path):
+    state = _state(active_goal="run UTM compression test", experiment_spec={
+        "specimen_id": "specimen-test", "equipment_profile_id": "utm_windows_v1",
+        "equipment_program_id": "utm_compression_start_v1",
+    })
+    result = await LabEquipmentAgent().run(state, _CtxStub(_tools(tmp_path), "{}"))
+    assert result.success
+    assert result.data["raw_data_export"]["validated"] is True
+    assert result.data["handoff_eligibility"]["eligible"] is True
+    assert result.data["next_specimen_readiness"]["next_test_completed"] is True
+
+
 def _saved_recording() -> dict[str, Any]:
     return {
         "schema": "atr.equipment_recording.v1",

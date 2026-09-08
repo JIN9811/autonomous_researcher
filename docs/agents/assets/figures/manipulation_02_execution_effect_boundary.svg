@@ -71,14 +71,14 @@
 <!-- rollout -->
 <g id="node5" class="node">
 <title>rollout</title>
-<path fill="#ffe9e7" stroke="#a33a32" stroke-width="2" d="M375.72,-464.51C375.72,-464.51 375.72,-469.49 375.72,-469.49 375.72,-471.97 373.27,-474.88 370.82,-475.3 370.82,-475.3 319.28,-484.16 319.28,-484.16 316.83,-484.58 311.89,-485 309.41,-485 309.41,-485 232.59,-485 232.59,-485 230.11,-485 225.17,-484.58 222.72,-484.16 222.72,-484.16 171.18,-475.3 171.18,-475.3 168.73,-474.88 166.28,-471.97 166.28,-469.49 166.28,-469.49 166.28,-464.51 166.28,-464.51 166.28,-462.03 168.73,-459.12 171.18,-458.7 171.18,-458.7 222.72,-449.84 222.72,-449.84 225.17,-449.42 230.11,-449 232.59,-449 232.59,-449 309.41,-449 309.41,-449 311.89,-449 316.83,-449.42 319.28,-449.84 319.28,-449.84 370.82,-458.7 370.82,-458.7 373.27,-459.12 375.72,-462.03 375.72,-464.51"/>
-<text text-anchor="middle" x="271" y="-463.9" font-family="DejaVu Sans" font-size="12.00">05 bounded rollout start</text>
+<path fill="#ffe9e7" stroke="#a33a32" stroke-width="2" d="M322.72,-464.51C322.72,-464.51 322.72,-469.49 322.72,-469.49 322.72,-471.97 320.27,-474.88 317.82,-475.3 317.82,-475.3 266.28,-484.16 266.28,-484.16 263.83,-484.58 258.89,-485 256.41,-485 256.41,-485 179.59,-485 179.59,-485 177.11,-485 172.17,-484.58 169.72,-484.16 169.72,-484.16 118.18,-475.3 118.18,-475.3 115.73,-474.88 113.28,-471.97 113.28,-469.49 113.28,-469.49 113.28,-464.51 113.28,-464.51 113.28,-462.03 115.73,-459.12 118.18,-458.7 118.18,-458.7 169.72,-449.84 169.72,-449.84 172.17,-449.42 177.11,-449 179.59,-449 179.59,-449 256.41,-449 256.41,-449 258.89,-449 263.83,-449.42 266.28,-449.84 266.28,-449.84 317.82,-458.7 317.82,-458.7 320.27,-459.12 322.72,-462.03 322.72,-464.51"/>
+<text text-anchor="middle" x="218" y="-463.9" font-family="DejaVu Sans" font-size="12.00">05 bounded rollout start</text>
 </g>
 <!-- backend&#45;&gt;rollout -->
 <g id="edge5" class="edge">
 <title>backend&#45;&gt;rollout</title>
-<path fill="none" stroke="#52667a" d="M645.33,-519.08C556.78,-507 437.02,-490.65 357.05,-479.74"/>
-<polygon fill="#52667a" stroke="#52667a" points="357.15,-477.46 350.4,-478.84 356.54,-481.97 357.15,-477.46"/>
+<path fill="none" stroke="#52667a" d="M645.3,-520.63C544.23,-508.18 400.14,-490.43 307.84,-479.07"/>
+<polygon fill="#52667a" stroke="#52667a" points="308.02,-476.79 301.29,-478.26 307.46,-481.31 308.02,-476.79"/>
 </g>
 <!-- backend&#45;&gt;stop -->
 <g id="edge8" class="edge">
@@ -90,15 +90,15 @@
 <!-- monitor -->
 <g id="node6" class="node">
 <title>monitor</title>
-<path fill="#eef4ff" stroke="#315c9b" d="M319.5,-416C319.5,-416 222.5,-416 222.5,-416 216.5,-416 210.5,-410 210.5,-404 210.5,-404 210.5,-392 210.5,-392 210.5,-386 216.5,-380 222.5,-380 222.5,-380 319.5,-380 319.5,-380 325.5,-380 331.5,-386 331.5,-392 331.5,-392 331.5,-404 331.5,-404 331.5,-410 325.5,-416 319.5,-416"/>
-<text text-anchor="middle" x="271" y="-401.4" font-family="DejaVu Sans" font-size="12.00">06 events/status</text>
-<text text-anchor="middle" x="271" y="-388.4" font-family="DejaVu Sans" font-size="12.00">07 SARM progress</text>
+<path fill="#eef4ff" stroke="#315c9b" d="M282,-416C282,-416 154,-416 154,-416 148,-416 142,-410 142,-404 142,-404 142,-392 142,-392 142,-386 148,-380 154,-380 154,-380 282,-380 282,-380 288,-380 294,-386 294,-392 294,-392 294,-404 294,-404 294,-410 288,-416 282,-416"/>
+<text text-anchor="middle" x="218" y="-401.4" font-family="DejaVu Sans" font-size="12.00">06 events/status</text>
+<text text-anchor="middle" x="218" y="-388.4" font-family="DejaVu Sans" font-size="12.00">07 observed task stage</text>
 </g>
 <!-- rollout&#45;&gt;monitor -->
 <g id="edge6" class="edge">
 <title>rollout&#45;&gt;monitor</title>
-<path fill="none" stroke="#52667a" d="M271,-448.75C271,-440.91 271,-431.52 271,-423.01"/>
-<polygon fill="#52667a" stroke="#52667a" points="273.28,-422.93 271,-416.43 268.73,-422.93 273.28,-422.93"/>
+<path fill="none" stroke="#52667a" d="M218,-448.75C218,-440.91 218,-431.52 218,-423.01"/>
+<polygon fill="#52667a" stroke="#52667a" points="220.28,-422.93 218,-416.43 215.73,-422.93 220.28,-422.93"/>
 </g>
 <!-- evidence -->
 <g id="node10" class="node">
@@ -106,13 +106,13 @@
 <polygon fill="#e9f7ef" stroke="#2e7d59" points="214,-36 0,-36 0,0 220,0 220,-30 214,-36"/>
 <polyline fill="none" stroke="#2e7d59" points="214,-36 214,-30 "/>
 <polyline fill="none" stroke="#2e7d59" points="220,-30 214,-30 "/>
-<text text-anchor="middle" x="110" y="-21.4" font-family="DejaVu Sans" font-size="12.00">Session · logs · status · SARM</text>
+<text text-anchor="middle" x="110" y="-21.4" font-family="DejaVu Sans" font-size="12.00">Session · logs · status</text>
 <text text-anchor="middle" x="110" y="-8.4" font-family="DejaVu Sans" font-size="12.00">image · result · dataset/checkpoint</text>
 </g>
 <!-- rollout&#45;&gt;evidence -->
 <g id="edge13" class="edge">
 <title>rollout&#45;&gt;evidence</title>
-<path fill="none" stroke="#2e7d59" d="M185.1,-456.21C122.28,-446.57 48,-428.86 48,-399 48,-399 48,-399 48,-96 48,-73.8 63.83,-54.37 79.5,-40.58"/>
+<path fill="none" stroke="#2e7d59" d="M114.21,-459.3C78.82,-450.86 48,-433.58 48,-399 48,-399 48,-399 48,-96 48,-73.8 63.83,-54.37 79.5,-40.58"/>
 <polygon fill="#2e7d59" stroke="#2e7d59" points="81.28,-42.06 84.78,-36.13 78.35,-38.58 81.28,-42.06"/>
 <text text-anchor="middle" x="70.5" y="-245" font-family="DejaVu Sans" font-size="10.00">evidence</text>
 </g>
@@ -126,13 +126,13 @@
 <!-- monitor&#45;&gt;verify -->
 <g id="edge7" class="edge">
 <title>monitor&#45;&gt;verify</title>
-<path fill="none" stroke="#52667a" d="M294.66,-379.94C311.95,-367.48 335.9,-350.21 356.59,-335.29"/>
-<polygon fill="#52667a" stroke="#52667a" points="358.11,-337 362.06,-331.35 355.45,-333.31 358.11,-337"/>
+<path fill="none" stroke="#52667a" d="M251.38,-379.94C277.26,-366.72 313.7,-348.1 344.02,-332.6"/>
+<polygon fill="#52667a" stroke="#52667a" points="345.25,-334.53 350,-329.55 343.18,-330.48 345.25,-334.53"/>
 </g>
 <!-- monitor&#45;&gt;evidence -->
 <g id="edge14" class="edge">
 <title>monitor&#45;&gt;evidence</title>
-<path fill="none" stroke="#2e7d59" d="M210.13,-387.05C164.54,-375.71 110,-352.1 110,-304 110,-304 110,-304 110,-96 110,-78.15 110,-57.97 110,-42.74"/>
+<path fill="none" stroke="#2e7d59" d="M174.69,-379.94C144.65,-364.95 110,-339.88 110,-304 110,-304 110,-304 110,-96 110,-78.15 110,-57.97 110,-42.74"/>
 <polygon fill="#2e7d59" stroke="#2e7d59" points="112.28,-42.63 110,-36.13 107.73,-42.63 112.28,-42.63"/>
 <text text-anchor="middle" x="132.5" y="-189.5" font-family="DejaVu Sans" font-size="10.00">evidence</text>
 </g>

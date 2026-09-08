@@ -2224,13 +2224,6 @@ function manipulationResponseFromData(data) {
   return data;
 }
 
-function executionSafetyFromReport(report) {
-  if (!report || typeof report !== "object") return {};
-  if (report.execution_safety && typeof report.execution_safety === "object") return report.execution_safety;
-  if (report.runtime_safety_monitor && typeof report.runtime_safety_monitor === "object") return report.runtime_safety_monitor;
-  return report.sarm && typeof report.sarm === "object" ? report.sarm : {};
-}
-
 function rerunTelemetryFromReport(report, data = {}) {
   const runtime = report && typeof report.rollout_runtime === "object" ? report.rollout_runtime : {};
   const response = manipulationResponseFromData(data);
@@ -2285,7 +2278,6 @@ function renderManipulationAgentReport(data) {
   const preflight = report.preflight || {};
   const vision = report.vision_context || {};
   const stage = report.stage_machine || {};
-  const safety = executionSafetyFromReport(report);
   const decision = report.decision || {};
   const runtime = report.rollout_runtime || {};
   const telemetry = rerunTelemetryFromReport(report, data);
@@ -2386,13 +2378,9 @@ function renderManipulationAgentReport(data) {
         ["Freshness", vision.freshness && vision.freshness.reason],
         ["Stop On Detection", decision.stop_rollout_on_completion ?? packet.stop_rollout_on_completion ?? "-"],
       ])}
-    ${runtimeCardHtml("Execution Safety", safety.status || boolStatus(!safety.recovery_suggested, "nominal", "recovery"), [
+    ${runtimeCardHtml("Task Stages", stage.current_stage || "waiting", [
         ["Current Stage", stage.current_stage],
-        ["Next Expected", stage.next_expected_stage],
         ["Completed", (stage.completed_stages || []).length],
-        ["Progress", safety.progress_score],
-        ["Failure Precursor", safety.failure_precursor],
-        ["Recovery", safety.recovery_suggested],
       ])}
     <article class="lerobot-report-card wide">
       <div class="lerobot-report-card-title"><strong>Decision / Handoff</strong></div>

@@ -455,7 +455,7 @@ MUST document:
 - bounded `transfer_to_utm` and `clear_utm_to_disposal` tasks;
 - LeRobot/Pi0.5 policy selection and direct-shell prohibition;
 - Vision/specimen context, camera-return requirement, preflight, rollout,
-  SARM-lite progress, post-place verification, recovery/stop/handoff;
+  observed task stage, post-place verification, recovery/stop/handoff;
 - rollout, teleoperation, recording, training, policy/dataset, port/camera,
   Isaac, mirror, and manipulation-agent API categories;
 - physical effect, session identity, proof, and uncertain-timeout handling.

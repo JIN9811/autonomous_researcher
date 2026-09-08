@@ -4916,6 +4916,22 @@ def test_live_gui_manipulation_agent_uses_current_supervisor_language() -> None:
         assert stale_label not in json.dumps(report, ensure_ascii=False)
 
 
+def test_manipulation_report_projects_preflight_and_stages_without_reward_fields(monkeypatch) -> None:
+    monkeypatch.setitem(controller._state.run_metadata, "manipulation_report", {
+        "task": {"task_id": "transfer"},
+        "preflight": {"status": "blocked", "robot_ready": False},
+        "stage_machine": {"current_stage": "approach", "completed_stages": []},
+        "decision": {"completion_status": "pending"},
+    })
+
+    report = TestClient(app).get("/api/agents/manipulation/report").json()["report"]
+    serialized = json.dumps(report)
+    assert '"current_stage": "approach"' in serialized
+    assert '"robot_ready": false' in serialized
+    assert '"sarm"' not in serialized
+    assert '"execution_safety"' not in serialized
+
+
 def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundled() -> None:
     client = TestClient(app)
 

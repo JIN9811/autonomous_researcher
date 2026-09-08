@@ -1,4 +1,4 @@
-# Manipulation Pi0.5 / SARM Runtime Guideline
+# Manipulation Pi0.5 Runtime Guideline
 
 Status: implemented runtime guideline
 Last reviewed: 2026-07-14
@@ -22,7 +22,7 @@ Manipulation Agent -> MCP tool robot.pick_place
 ```
 
 Pi0.5 is treated as a bounded low-level VLA executor. Manipulation Agent owns
-preflight, task selection, SARM-lite progress/risk scoring, recovery hints,
+preflight, task selection, observed task stages, measured interlocks,
 post-place Vision dependency, and downstream handoff packaging.
 
 ## 2. Bounded Manipulation Tasks
@@ -251,27 +251,12 @@ Rules:
   recognized model file is resolved to the executable `pretrained_model`
   directory before policy rollout starts.
 
-## 6. SARM-lite Stage Supervision
+## 6. Observed Task Stages
 
-SARM is a progress/risk supervisor, not an actuator controller.
-
-Current implementation is deterministic SARM-lite:
-
-- stage index from task taxonomy
-- stage confidence from rollout/grasp proxy score
-- progress score from stage progress plus rollout result
-- failure precursor from progress/retry/anomaly state
-- recovery hint when precursor crosses threshold
-
-Output keys:
-
-- `source=deterministic_stage_scorer`
-- `stage_name`
-- `stage_tau`
-- `progress_score`
-- `failure_precursor`
-- `recovery_suggested`
-- `rabc_weight_hint`
+The stage machine records execution events and verification evidence. It does
+not predict progress, reward, or failure probability. Preflight and measured
+interlocks gate execution; stopped-rollout evidence, Vision verification, and
+LLM task judgment determine handoff or owner review.
 
 ## 7. Post-place Vision Verification
 
@@ -300,7 +285,6 @@ Manipulation Agent returns legacy keys plus structured reports:
 ```json
 {
   "manipulation": {},
-  "sarm": {},
   "manipulation_report": {"schema": "manipulation_report.v1"},
   "robot_task_result": {"schema": "robot_task_result.v1"},
   "handoff_packet": {"schema": "robot_task_result.v1"},
@@ -319,7 +303,6 @@ Manipulation Agent returns legacy keys plus structured reports:
 - `vision_context`
 - `rollout_runtime`
 - `stage_machine`
-- `sarm`
 - `decision`
 - `knowledge_payload`
 - `handoff_packet`
@@ -424,4 +407,4 @@ Live mode:
 - requires saved robot/camera identities
 - requires live confirmation and profile gates
 - executes only through LeRobotBridge
-- surfaces action status, log tail, SARM state, and handoff decision in GUI
+- surfaces action status, log tail, stage machine, and handoff decision in GUI

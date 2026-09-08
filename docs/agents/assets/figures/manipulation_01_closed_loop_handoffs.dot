@@ -13,8 +13,8 @@ digraph manipulation_closed_loop_handoffs {
   task2 [label="MANIPULATION LLM\nclearance result review", fillcolor="#E8E2FF"];
   verify2 [label="Verification 2\nreplay + measured return\n+ fresh empty platen?", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
   analysis [label="Analysis\nexisting CSV processing"];
-  review [label="Stop / recover / review", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
-  evidence [label="Session · events · SARM · images\nresult · dataset · checkpoint", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  review [label="Stop / owner review", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+  evidence [label="Session · events · images\nresult · dataset · checkpoint", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
   specimen -> manipulation;
   vision -> manipulation [label="unexpired readiness"];
   manipulation -> robot [label="gated rollout"];

@@ -17,8 +17,7 @@ Build a modular, maintainable, local-first autonomous research framework that ru
 
 Core Design Principles
 1. Orchestrator-centric architecture
-   - The top-level system is centered on the Autonomous Researcher Architecture, not on SARM alone.
-   - SARM is included only as a submodule inside the Manipulation Agent.
+   - The top-level system is centered on the Autonomous Researcher Architecture.
    - The primary control flow is driven by the config-driven LangGraph runtime.
 
 2. Local-first execution
@@ -91,13 +90,6 @@ Top-Level Architecture
         |
         v
 [Experiment DB / Failure Memory / Logs / File Storage]
-
-Important rule
-- SARM is not a top-level agent.
-- SARM belongs inside Manipulation Agent as:
-  - progress scoring
-  - failure precursor detection
-  - recovery triggering support
 
 Autonomous Experiment Runtime rule
 - The runtime layer improves the current system rather than replacing it.
@@ -286,22 +278,16 @@ Modes
 Purpose
 - Execute pick / place / alignment / transfer tasks
 - Use VLA policy as execution logic
-- Include SARM submodule
 - Support two bounded short skills: `transfer_to_utm` (`3dp_output_area -> utm_fixture`) and `clear_utm_to_disposal` (`utm_fixture -> discard_bin`).
 - After a ready 3DP specimen and Vision observation, default to Pi0.5 LeRobot rollout for `transfer_to_utm`.
 - Keep X-VLA and SmolVLA as operator-selectable VLA backends for training/rollout experiments; they must not replace the Pi0.5 default transfer path until real rollout success rates justify that change.
 - Keep `fixed_kinematic` available as an explicit compatibility strategy.
 - Use `lerobot.rollout.start`; do not construct LeRobot shell commands inside the agent.
-- Treat Pi0.5 as the low-level VLA executor only. Manipulation Agent owns preflight, task stage, SARM-lite progress/risk state, Vision verification dependency, and Guardian/next-agent handoff.
-- Emit `manipulation_report.v1` and `robot_task_result.v1` while preserving legacy `manipulation`, `sarm`, and `protocol_note` keys.
+- Treat Pi0.5 as the low-level VLA executor only. Manipulation Agent owns preflight, task stage, Vision verification dependency, and Guardian/next-agent handoff.
+- Emit `manipulation_report.v1` and `robot_task_result.v1` while preserving legacy `manipulation` and `protocol_note` keys.
 - The `/lerobot` GUI is the Manipulation Agent management surface. Its bridge panel may run the actual Manipulation Agent with selected task, policy/profile/specimen/observation/RTC options.
 - The bridge panel must provide `Save Agent Defaults` and `Test Agent Bridge`. Saved defaults live in `memory/manipulation_agent_bridge.json` and are read by the live/test loop before each Manipulation Agent run; explicit experiment spec fields override saved defaults.
 - Successful rollout without Vision verification must be surfaced as `needs_post_place_vision` or `needs_post_disposal_vision`, not silently treated as final verified handoff.
-
-SARM submodule responsibilities
-- progress scoring
-- failure precursor estimation
-- recovery trigger suggestion
 
 Modes
 - live robot mode with saved LeRobot profile, camera identities, policy path/repo, and `confirm_live_execute=true`
@@ -578,10 +564,6 @@ autonomous_researcher/
 │   ├── manipulation_agent.py
 │   └── equipment_agent.py
 ├── submodules/
-│   ├── sarm/
-│   │   ├── progress_scorer.py
-│   │   ├── failure_predictor.py
-│   │   └── recovery_trigger.py
 │   └── vla/
 ├── backends/
 │   ├── llm_backend.py
@@ -774,7 +756,6 @@ Phase 3
 
 Phase 4
 - VLA integration
-- SARM submodule
 - BO / AL integration
 - richer experiment memory
 - multi-run dashboard

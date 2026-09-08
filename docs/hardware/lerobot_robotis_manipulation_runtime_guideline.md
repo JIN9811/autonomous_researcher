@@ -8,7 +8,7 @@ Scope: ROBOTIS OMX-AI + Hugging Face LeRobot integration for GUI, MCP tools, Man
 
 This document converts the LeRobot/ROBOTIS research prompt into an implementation guideline that matches the current `autonomous_researcher` runtime.
 
-The goal is not to replace the existing robot path immediately. The goal is to add a LeRobot-capable bridge and tool group that can be selected by the Manipulation Agent when the workflow requires teleoperation, dataset recording, policy training, rollout, or SARM-assisted manipulation.
+The goal is not to replace the existing robot path immediately. The goal is to add a LeRobot-capable bridge and tool group that can be selected by the Manipulation Agent when the workflow requires teleoperation, dataset recording, policy training, rollout, or bounded manipulation.
 
 Primary live hardware target:
 
@@ -138,7 +138,6 @@ Manipulation Agent owns:
 - pick/place/alignment/transfer execution decisions
 - selection of manipulation strategy
 - robot policy adapter invocation
-- SARM scoring and recovery hint generation
 - robot-related protocol notes for GUI/logging
 - Pi0.5 policy transfer from `3dp_output_area` to `utm_fixture` after a ready Specimen Making result and Vision observation
 
@@ -149,7 +148,6 @@ Manipulation Agent output keys must remain stable:
 ```json
 {
   "manipulation": {},
-  "sarm": {},
   "protocol_note": ""
 }
 ```
@@ -188,22 +186,6 @@ Pi0.5 3DP-to-UTM transfer payload extension:
 }
 ```
 
-Recommended extended SARM payload:
-
-```json
-{
-  "progress_score": 0.0,
-  "stage_index": 0,
-  "stage_name": "pre_grasp",
-  "stage_confidence": 0.0,
-  "progress_delta": 0.0,
-  "failure_precursor_score": 0.0,
-  "recovery_hint": "none",
-  "reward_model_path": "",
-  "source": "deterministic_test_scorer"
-}
-```
-
 ### Equipment Agent
 
 Equipment Agent remains responsible for UTM and Windows PyAutoGUI bridge workflows.
@@ -219,7 +201,6 @@ Guardian may consume:
 - `latest_observations`
 - `latest_analysis`
 - `manipulation`
-- `sarm`
 - device health
 - fault-injection status
 - retry counters
@@ -322,7 +303,7 @@ Rules:
 - Treat ROBOTIS OMX-AI as the first profile, not as a global assumption.
 - SO-101 must be test-mode compatible but live-disabled until verified on real hardware.
 - Do not assume policies trained on OMX-AI transfer to SO-101.
-- Dataset, policy, calibration, replay, and SARM records must include `profile_id`.
+- Dataset, policy, calibration, and replay records must include `profile_id`.
 - Hardware-specific joint names, camera keys, gripper assumptions, and action-space mapping belong in profile/adapter code, not global state.
 
 ## 5. Recommended Files
@@ -353,7 +334,6 @@ Existing files likely to modify:
 - `docs/runtime/agent_program_baseline.md`
 - `docs/runtime/test_mode.md`
 
-Do not create a top-level `sarm_agent.py`.
 
 Do not create a top-level `lerobot_agent.py` unless the project later explicitly changes the stage model. For now, LeRobot is a bridge/tool/backend used by Manipulation Agent.
 
@@ -579,7 +559,7 @@ Recommended GUI sections:
 - Dataset / Visualization
 - Training
 - Inference / Rollout
-- Manipulation Agent + SARM
+- Manipulation Agent
 - Logs / Replay / Fault Injection
 
 Rules:
@@ -801,35 +781,13 @@ Example:
 }
 ```
 
-## 14. SARM Runtime Plan
+## 14. Runtime Safety and Task Judgment
 
-SARM remains inside Manipulation Agent.
-
-Minimum required runtime behavior:
-
-- deterministic test-mode scorer
-- no live SARM model required
-- no SARM training required
-- output visible in GUI/logs
-
-Optional extension behavior:
-
-- optional configured SARM reward model
-- optional dataset subtask annotations
-- optional `sarm_progress.parquet`
-- optional RA-BC weighting if supported by the selected policy
-
-Runtime recovery examples:
-
-- no progress for N frames
-- negative progress delta
-- low stage confidence after grasp
-- anomaly from Vision Agent
-- unsafe workspace estimate
-- policy timeout
-- repeated stop/start failures
-
-SARM decisions are advisory unless Guardian policy escalates them.
+Preflight checks and measured interlocks gate execution. The stage machine
+records execution events and verification evidence, not predicted reward,
+progress, or failure probability. After rollout stops, Vision evidence and LLM
+task judgment determine accepted handoff or owner review. Missing evidence must
+not authorize another motion attempt.
 
 ## 15. Dataset / Training / Rollout Rules
 
@@ -888,7 +846,6 @@ Fault-injection support must include:
 - stop during recording
 - stop during rollout
 - safe-stop timeout
-- SARM timeout
 - model timeout
 
 Every injected fault must produce:
@@ -968,7 +925,7 @@ GUI/API implementation checklist:
 - training parameter controls and progress/ETA display
 - rollout controls
 - dataset inspection panel
-- Manipulation Agent + SARM status panel
+- Manipulation Agent runtime status panel
 - SSE events
 - Live GUI event cards
 - GUI/API tests
@@ -980,9 +937,7 @@ Manipulation Agent integration checklist:
 - `fixed_kinematic`
 - `vision_pose_correction`
 - `lerobot_policy`
-- deterministic SARM scorer
-- optional live SARM adapter
-- Guardian-visible recovery hints
+- Guardian-visible measured interlocks and stop status
 
 Live command checklist:
 
@@ -1054,13 +1009,11 @@ Live gate acceptance:
 - Safe-stop and emergency-stop behavior are tested.
 - SO-101 live mode remains disabled unless verified on hardware.
 
-Manipulation/SARM acceptance:
+Manipulation acceptance:
 
 - Manipulation Agent can use `robot.pick_place` baseline.
 - Manipulation Agent can use `lerobot_policy` in test mode.
 - VisionObservation is consumed without raw camera ownership transfer.
-- SARM remains inside Manipulation Agent.
-- Guardian can see SARM recovery hints.
 
 ## 20. Documentation Updates Required With Implementation
 
@@ -1098,7 +1051,6 @@ Sources checked for this guideline:
 - Hugging Face LeRobot OMX documentation: https://huggingface.co/docs/lerobot/en/omx
 - Hugging Face LeRobot SO-101 documentation: https://huggingface.co/docs/lerobot/main/en/so101
 - Hugging Face LeRobot inference / rollout documentation: https://huggingface.co/docs/lerobot/main/inference
-- Hugging Face LeRobot SARM documentation: https://huggingface.co/docs/lerobot/sarm
 - ROBOTIS OMX-AI hardware documentation: https://ai.robotis.com/omx/hardware_omx.html
 - ROBOTIS OMX-AI software documentation: https://ai.robotis.com/omx/software_omx.html
 - ROBOTIS OMX-AI recording workflow documentation: https://ai.robotis.com/omx/dataset_preparation_recording_omx.html
@@ -1108,7 +1060,6 @@ Verified assumptions:
 - LeRobot supports OMX with `omx_follower` / `omx_leader` profile naming in official docs.
 - LeRobot supports SO-101 with `so101_follower` / `so101_leader` profile naming in official docs.
 - LeRobot provides teleoperation, recording, training, and rollout/inference workflows.
-- SARM is Stage-Aware Reward Modeling and belongs inside Manipulation Agent for this project.
 - ROBOTIS OMX-AI is a leader/follower manipulation kit suitable as the first robot profile.
 
 Unverified until local installation/hardware test:
@@ -1122,7 +1073,6 @@ Unverified until local installation/hardware test:
 
 ## 22. Do Not Do
 
-- Do not create a top-level SARM agent.
 - Do not create a top-level LeRobot stage.
 - Do not replace the existing stage enum.
 - Do not remove `robot.pick_place`.
@@ -1132,9 +1082,8 @@ Unverified until local installation/hardware test:
 - Do not build shell command strings with unsanitized user input.
 - Do not log tokens or secrets.
 - Do not allow policy rollout while teleoperation is active unless a verified workflow explicitly permits it.
-- Do not treat SARM recovery hints as final decisions unless Guardian policy escalates them.
 
-## 2026-05-29 Manipulation Agent Pi0.5/SARM Update
+## 2026-05-29 Manipulation Agent Pi0.5 Update
 
 The current implementation treats LeRobot/Pi0.5 as an execution backend inside
 Manipulation Agent, not as a standalone planner.
@@ -1151,17 +1100,17 @@ Runtime rules now implemented:
 - `memory/manipulation_agent_bridge.json` stores task, policy backend, RTC,
   timeout, profile, policy, route, and UI defaults.
 - The agent emits `manipulation_report.v1` and `robot_task_result.v1` while
-  preserving legacy `manipulation`, `sarm`, and `protocol_note` keys.
+  preserving legacy `manipulation` and `protocol_note` keys.
 - Rollout success without Vision confirmation is reported as
   `needs_post_place_vision` or `needs_post_disposal_vision`, not as a final
   verified physical handoff.
-- Guardian remains the recovery/stop authority and may consume SARM precursor
-  scores, preflight blockers, and robot_task_result warnings.
+- Guardian remains the stop/review authority and consumes preflight blockers,
+  measured interlocks, and robot_task_result warnings.
 
 LeRobot GUI `/lerobot` now includes a Manipulation Agent Bridge management panel
 with task selector, policy backend, RTC settings, max duration, and a structured
 runtime report board for skill episode, preflight, Pi0.5 policy runtime, Vision
-dependency, SARM progress, decision, handoff, and evidence.
+dependency, observed task stage, decision, handoff, and evidence.
 
 
 ## 2026-05-29 Rollout Queue And Pi0.5 RTC Execution Update

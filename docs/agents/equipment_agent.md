@@ -15,7 +15,7 @@ source_of_truth:
   - graphs/modules/equipment/equipment_skill_flows.json
   - device_bridges/windows_pyautogui_bridge.py
   - mcp_tools/equipment_tools.py
-last_verified: 2026-09-07
+last_verified: 2026-09-09
 verified_against: working-tree
 related_docs:
   - docs/device_bridges/windows_pyautogui_bridge.md
@@ -258,6 +258,23 @@ Live GUI, Equipment Workspace, CUI, Runtime IDE는 이 기록의 같은 projecti
 - hardware alert와 incident record
 
 ### Cycle-level verification
+
+For non-physical simulator protocols, the Agent also emits the same scoped
+`raw_data_export`, `next_specimen_readiness` and `handoff_eligibility` contracts.
+CSV validation, hash and row count come from the local parser; readiness comes
+from explicitly simulated completion, next-test reset and clearance evidence.
+These records carry `simulated: true` and `actuation_performed: false` and cannot
+qualify an effective live/physical execution. Identity mismatch, incomplete
+readiness or an invalid CSV keeps disposal handoff ineligible.
+
+The synthetic curve spans the experiment's initial height multiplied by
+`target_strain`. Height follows `gauge_length_mm`, `height_mm`, then the third
+`specimen_size_mm`/`size_mm` dimension, with experiment fields overriding
+candidate parameters. Missing values use the existing test defaults; explicit
+invalid values fail. Gauge length uses the same six-decimal normalization as
+Analysis, and CSV output preserves the endpoint. The force samples remain synthetic, not performance
+predictions. Export-only, abort and generic programs do not claim whole-cycle
+readiness. Downstream disposal and fresh Vision verification remain required.
 
 The final `equipment_report.cross_checks` and `equipment_result.cross_checks`
 describe the complete agentic cycle, not the last registered Skill. In

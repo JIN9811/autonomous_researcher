@@ -1464,7 +1464,6 @@ Modify `graphs/modules/manipulation/module.yaml`:
   runtime_contract:
     policy_executor: pi05_or_lerobot_policy
     supervisor: manipulation_agent
-    progress_monitor: sarm_lite
     live_bridge_boundary: LeRobotBridge
     direct_shell_generation_allowed: false
     requires_camera_return_to_vla: true

@@ -258,7 +258,7 @@ Manipulation은 VLA action 로그만 보여주면 부족하다.
 - precondition checklist
 - operator approval 필요 여부
 - continuous rollout status
-- SARM/Guardian stop condition
+- Guardian stop condition
 
 필요 메시지:
 

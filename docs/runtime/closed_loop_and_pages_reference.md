@@ -259,7 +259,7 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 ### Manipulation Agent (`modules/manipulation`, `agent.manipulation_agent`)
 - **목적**: 로봇 조작 계획/실행, 시편 이동 연동
 - **핵심 툴**: `lerobot.rollout.start`, `robot.pick_place`
-- **주요 결과**: `manipulation`, `sarm`, `protocol_note`
+- **주요 결과**: `manipulation`, `protocol_note`
 - **연계**: `/api/lerobot/manipulation-agent/*` 및 직접 레로봇 워크스페이스 동작과 연동
 
 ### Lab Equipment Agent (`modules/equipment`, `agent.equipment_agent`)

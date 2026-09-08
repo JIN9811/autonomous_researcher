@@ -50,7 +50,7 @@ Codex Goal은 구현 전에 아래 순서대로 읽어야 한다.
 - `개선안/01_design_agent_agentic_loop_research.md`
 - `개선안/02_specimen_making_agent_autonomous_fabrication_loop_research.md`
 - `개선안/03_vision_agent_lab_perception_signal_loop_research.md`
-- `개선안/04_manipulation_agent_pi05_vla_sarm_loop_research.md`
+- `개선안/04_manipulation_agent_pi05_vla_loop_research.md`
 - `개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md`
 - `개선안/06_analysis_agent_data_pipeline_bo_handoff_research.md`
 - `개선안/07_bo_agent_reasoning_augmented_optimizer_research.md`
@@ -320,7 +320,7 @@ Frontend는 아래를 만족해야 한다.
 | Design | candidate board, manufacturability, BO/Knowledge context, decision register |
 | Specimen | digital thread, slicer/printer/ejection status, artifact ledger |
 | Vision | scene map, signal board, evidence timeline, dataset ledger |
-| Manipulation | skill episode board, VLA/SARM panel, trajectory evidence, risk/recovery |
+| Manipulation | skill episode board, VLA runtime panel, trajectory evidence, risk/recovery |
 | Equipment | control trace, visual assertion, physical verification, data ledger |
 | Analysis | raw/preprocessed/FEM/BO payload panels, UTM curves, comparison |
 | BO | observation table, surrogate/acquisition graph, candidate ranking, reasoning memo |

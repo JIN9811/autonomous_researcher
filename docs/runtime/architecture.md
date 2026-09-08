@@ -84,7 +84,6 @@ returns to first priority.
 - `device_bridges/bambu_bridge.py`: BambuLab X2D printer bridge for the default 3DP provider. It keeps printer fleet selection, Bambu Studio/Orca slicing, MQTT status/control, FTPS/HTTP artifact transfer, camera/video evidence, guarded `project_file` publish, and native G-code autoejection gates as separate runtime planes. Native Bambu autoejection is represented as `bambu_gcode_patch`: the bridge patches a sliced `.gcode.3mf` plate G-code, records tail metadata and a manifest, and only then exposes it to start-gate approval. The operating contract is documented in `hardware/bambulab_x2d_device_bridge_runtime_guideline.md`.
 - `/lerobot`: dedicated Manipulation Agent / LeRobot GUI opened from the main dashboard. It contains device setup, teleoperation, recording, training, direct rollout, and an agent-mediated `Manipulation Agent Bridge` panel.
 
-SARM logic is embedded inside `manipulation_agent` under `submodules/sarm`.
 
 LeRobot naming and rollout-duration rules are centralized in `runtime/lerobot_dataset_policy_naming.md`. Manipulation Agent passes intent fields such as `rollout_dataset_repo_id`, `continuous_rollout`, and `policy_type`; the bridge enforces `eval_` rollout dataset names for legacy rollout datasets, manual-stop conversion, and Pi0.5 runtime selection.
 
@@ -128,7 +127,6 @@ The runtime exposes graph/module configuration endpoints for the `/ide` Runtime 
 Graph edits are validated, compiled, versioned, and only then activated. Module edits are limited to `graphs/modules/*/module.yaml` and must keep handlers inside the registered allowlist, which is generated from runtime control handlers plus all currently registered `AgentRegistry` entries.
 
 Runtime IDE is required to reflect the actual runtime contract, not an approximate concept map. The active graph `graphs/configs/atr_closed_loop.yaml` now includes non-executable control-plane nodes for `orchestrator_supervisor`, `safety_gate_plane`, `device_bridge_plane`, and `memory_evidence_plane`. `graphs.validator` and `graphs.compiler` exclude those nodes and their `control_overlay`, `device_bridge`, `evidence_flow`, and `runtime_sidecar` edges from executable LangGraph compilation, while `/ide` renders them as runtime overlays. `/api/state` also returns `runtime_ide_contract`, built from the active graph metadata plus every `graphs/modules/*/module.yaml`, so the IDE can show declared runtime planes, output contracts, module contracts, and device bridge boundaries from the same files used by the backend.
-
 
 
 ### Module Runtime Binding

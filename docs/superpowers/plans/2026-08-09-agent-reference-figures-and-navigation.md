@@ -417,7 +417,7 @@ Knowledge, and Guardian/operator stop/review alternatives.
 
 Figure 2 names both supported task IDs, all 11 internal IDs, and four tools.
 Show profile/policy/freshness/live gates, backend selection, bounded rollout,
-monitoring/SARM, post-place verification, decision, report, result, and stored
+monitoring, post-place verification, decision, report, result, and stored
 evidence. The robot is an octagon reached only after all gates.
 
 Figure 3 groups configuration/session, camera/port/profile, policy/file/dataset,
@@ -429,8 +429,7 @@ dataset/checkpoint evidence.
 - [x] **Step 2: Expand Manipulation lifecycle and uncertain-effect detail**
 
 Add trace/lifecycle rows for task resolution, camera return, profile/policy
-preflight, rollout session identity, bounded motion, event monitoring, SARM
-progress, stop/status, visual verification, post-place signal, and downstream
+preflight, rollout session identity, bounded motion, event monitoring, observed task stage, stop/status, visual verification, post-place signal, and downstream
 handoff. Explicitly prohibit replay until status and visual proof resolve an
 unknown rollout effect.
 

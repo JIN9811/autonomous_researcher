@@ -227,14 +227,14 @@ remains an observer/signal agent and does not execute hardware actions.
 
 ### 2026-05-29 Manipulation Report and Robot Task Result Contract
 
-`ManipulationAgent` now preserves the legacy `manipulation` and `sarm` keys but
+`ManipulationAgent` now preserves the `manipulation` output but
 also emits:
 
 - `manipulation_report.v1`: bounded task, policy plan, preflight, Vision context,
-  rollout runtime, stage machine, SARM-lite state, decision, Knowledge payload,
+  rollout runtime, stage machine, decision, Knowledge payload,
   and handoff packet.
 - `robot_task_result.v1`: compact downstream packet with task/skill/episode IDs,
-  terminal pose, handoff status, completion status, preflight, SARM, decisions,
+  terminal pose, handoff status, completion status, preflight, decisions,
   warnings, and evidence refs.
 
 The runtime merge layer stores these under:

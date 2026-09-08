@@ -1,19 +1,23 @@
-# 04. Manipulation Agent 고도화안 - Pi0.5 VLA + SARM Agentic Loop
+# 04. Manipulation Agent 고도화안 - Pi0.5 VLA Agentic Loop
 
 작성일: 2026-05-28
-대상: `agents/manipulation_agent.py`, `device_bridges/lerobot_bridge.py`, `submodules/sarm/*`, LeRobot GUI, LangGraph orchestration
+대상: `agents/manipulation_agent.py`, `device_bridges/lerobot_bridge.py`, LeRobot GUI, LangGraph orchestration
+
+아래 조사와 고도화 순서는 최초 작성 당시의 제안이다. 현재 실행 계약은 preflight,
+측정된 interlock, 명시적인 stage machine, 중지된 rollout과 Vision 증거를 읽는
+LLM task judgment를 따른다. 불확실한 결과는 owner review로 넘기며 자동 motion
+retry를 생성하지 않는다. 실제 기준은 `docs/agents/manipulation_agent.md`를 따른다.
 
 ## 1. 결론
 
-현재 방향인 "Pi0.5 기반 inference + SARM으로 작업 단계 관리"는 큰 방향은 맞다. 다만 설계 경계는 조금 바꾸는 것이 좋다.
+Pi0.5 기반 bounded inference와 Manipulation Agent의 명시적인 작업 단계 관리를 분리한다.
 
 권장 구조는 다음과 같다.
 
 1. Pi0.5는 agentic planner가 아니라 bounded low-level VLA policy executor로 둔다.
 2. Manipulation Agent와 LangGraph가 작업 단계, 안전 게이트, 재시도, 장비 handoff를 관리한다.
-3. SARM은 로봇을 직접 제어하는 controller가 아니라 progress/risk/reward supervisor로 둔다.
-4. Guardian Agent가 SARM의 failure precursor와 Vision anomaly를 보고 recover/stop 권한을 가진다.
-5. LeRobot bridge는 계속 단일 실행 경계로 둔다. Manipulation Agent가 shell command를 직접 만들면 안 된다.
+3. Guardian Agent는 측정된 안전 상태와 Vision anomaly를 보고 stop/review 여부를 판단한다.
+4. LeRobot bridge는 계속 단일 실행 경계로 둔다. Manipulation Agent가 shell command를 직접 만들면 안 된다.
 
 즉 최종 형태는 다음이다.
 
@@ -21,7 +25,6 @@
 LangGraph/Manipulation Agent = supervisor
 Pi0.5/LeRobot rollout        = bounded motor policy
 Vision Agent                 = perception signal bus
-SARM                         = stage-aware progress/risk/reward model
 Guardian                     = stop/recover authority
 Knowledge                    = rollout evidence + failure/success memory
 ```
@@ -46,7 +49,7 @@ VLA 모델은 보통 다음 방식으로 실사용된다.
 - 자연어 task + 카메라 관측 + robot state를 입력으로 받고, robot action 또는 action chunk를 출력한다.
 - long-horizon 전체 계획을 VLA 하나에 맡기기보다, 상위 planner가 하위 skill/policy를 호출하는 구조가 안정적이다.
 - target robot, camera view, action schema, control frequency가 맞지 않으면 base model만으로는 성공률을 기대하기 어렵다.
-- 실제 현장에서는 target domain demonstration을 수집하고, 그 데이터로 fine-tuning하거나 LoRA/RA-BC 같은 방식으로 적응시킨다.
+- 실제 현장에서는 target domain demonstration을 수집하고, 그 데이터로 fine-tuning하거나 LoRA 같은 방식으로 적응시킨다.
 
 근거:
 
@@ -84,37 +87,13 @@ Pi0.5류 flow-matching VLA는 단일 action이 아니라 action chunk를 만든�
 
 - Pi0.5 rollout 기본값은 `inference.type=rtc`로 둔다.
 - 초기 live rollout은 `rollout_action_clamp=true`, `rollout_max_relative_target=5`를 유지한다.
-- continuous rollout은 operator stop 또는 SARM/Guardian stop signal과 결합한다.
+- continuous rollout은 operator stop 또는 Guardian stop signal과 결합한다.
 - Vision Agent가 물체 이탈, 충돌 위험, 목표 위치 도달을 감지하면 Manipulation Agent가 rollout을 중단하거나 다음 stage로 넘긴다.
 
 근거:
 
 - LeRobot RTC 문서는 Pi0, Pi0.5, SmolVLA 같은 large flow-matching policy가 chunk를 생성하며, RTC가 다음 chunk를 비동기 생성하고 이전 chunk와 부드럽게 맞춘다고 설명한다. 출처: [LeRobot RTC docs](https://huggingface.co/docs/lerobot/en/rtc)
 - LeRobot rollout 문서는 `lerobot-rollout`이 trained policy를 실제 로봇에 deploy하는 단일 CLI이며, base/sentry/highlight/dagger 전략과 RTC backend를 제공한다고 설명한다. 출처: [LeRobot Policy Deployment docs](https://huggingface.co/docs/lerobot/main/inference)
-
-### 2.4 SARM의 올바른 역할
-
-SARM은 Stage-Aware Reward Modeling이다. long-horizon manipulation에서 task stage와 stage 내부 progress를 예측하고, demonstration 품질이 섞여 있을 때 좋은 구간에 높은 weight를 주는 데 쓴다.
-
-따라서 "SARM으로 가중치를 받아서 작업 단계를 관리"한다는 방향은 다음처럼 바꾸면 좋다.
-
-좋은 해석:
-
-- SARM이 `pre_grasp -> grasp -> lift -> transfer -> place -> release -> retreat -> verify` 단계별 progress를 예측한다.
-- SARM이 `failure_precursor`, `recovery_suggested`, `progress_delta`를 Manipulation Agent와 Guardian에 제공한다.
-- SARM progress를 offline에서 RA-BC weight로 써서 Pi0.5/ACT policy fine-tuning 품질을 올린다.
-- live에서는 SARM을 "advisory signal"로 시작하고, 충분히 검증된 뒤에 stop/retry gate에 반영한다.
-
-피해야 할 해석:
-
-- SARM weight가 직접 robot actuator command를 조절한다.
-- SARM이 live 고주파 control loop에서 매 step command를 덮어쓴다.
-- SARM이 Guardian 없이 recovery motion을 자동 실행한다.
-
-근거:
-
-- LeRobot SARM 문서는 SARM이 video-based reward model이며 progress signal을 예측하고 RA-BC나 RL에 쓸 수 있다고 설명한다. 출처: [LeRobot SARM docs](https://huggingface.co/docs/lerobot/sarm)
-- SARM 논문은 long-horizon/contact-rich task에서 stage와 fine-grained progress를 함께 예측하고, RA-BC로 demonstration을 filtering/reweighting한다고 설명한다. 출처: [SARM arXiv](https://arxiv.org/abs/2509.25358)
 
 ## 3. 현재 로컬 코드 진단
 
@@ -127,7 +106,7 @@ SARM은 Stage-Aware Reward Modeling이다. long-horizon manipulation에서 task 
   - specimen이 ready이면 기본적으로 Pi0.5 rollout을 선택한다.
   - `lerobot.rollout.start`를 통해 LeRobot bridge를 호출한다.
   - `policy_type=pi05`, `device=cuda`, `camera_enabled=true`, `continuous_rollout`, `rollout_action_clamp`, `rollout_temporal_ensemble`, `rollout_inference_type`, RTC field를 payload로 전달한다.
-  - `manipulation`, `sarm`, `protocol_note` output contract가 이미 있다.
+  - `manipulation`, `protocol_note` output contract가 이미 있다.
 
 - `device_bridges/lerobot_bridge.py`
   - live/test 모드 gate가 있다.
@@ -147,7 +126,7 @@ SARM은 Stage-Aware Reward Modeling이다. long-horizon manipulation에서 task 
   - Pi0.5 dataset v3.0 변환 규칙, rollout dataset naming, continuous rollout, action clamp 정책이 정리되어 있다.
 
 - `agents/guardian_agent.py`
-  - `latest_analysis["sarm"]`의 failure precursor와 recovery signal을 읽어 stop/recover/retry 결정을 내린다.
+  - preflight blocker, 측정된 interlock, Vision 검증, stop 상태를 읽어 stop/review 여부를 판단한다.
 
 ### 3.2 현재 한계
 
@@ -155,25 +134,21 @@ SARM은 Stage-Aware Reward Modeling이다. long-horizon manipulation에서 task 
 
 주요 한계:
 
-1. SARM이 실제 learned reward model이 아니다.
-   - 현재 `submodules/sarm`은 `grasp_score`, `anomaly`, `retry_count` 기반 deterministic scorer다.
-   - stage-aware progress, subtask annotation, RA-BC weight 계산이 아직 없다.
-
-2. policy rollout이 stage machine으로 쪼개져 있지 않다.
+1. policy rollout이 stage machine으로 쪼개져 있지 않다.
    - 지금 stage는 거의 `policy_rollout` 하나다.
    - 실제 조작은 `preflight -> approach -> grasp -> lift -> transfer -> place -> release -> verify`로 나뉘어야 한다.
 
-3. closed-loop monitoring이 약하다.
-   - `lerobot.rollout.start` 결과를 받는 구조는 있으나, 중간 상태를 Vision/SARM/Guardian이 구조적으로 평가하는 loop가 부족하다.
+2. closed-loop monitoring이 약하다.
+   - `lerobot.rollout.start` 결과를 받는 구조는 있으나, 중간 상태를 Vision/Guardian이 구조적으로 평가하는 loop가 부족하다.
 
-4. 성공 판정이 약하다.
+3. 성공 판정이 약하다.
    - `response.ok`와 fake `grasp_score=0.86`만으로는 UTM fixture에 정확히 놓였는지 알 수 없다.
    - Vision Agent의 post-place verification이 필요하다.
 
-5. dataset/evidence loop가 약하다.
-   - 성공/실패 video, step trace, SARM score, Vision signal을 Knowledge Agent가 재학습 자산으로 저장해야 한다.
+4. dataset/evidence loop가 약하다.
+   - 성공/실패 video, step trace, Vision signal을 Knowledge Agent가 재학습 자산으로 저장해야 한다.
 
-6. live readiness report가 부족하다.
+5. live readiness report가 부족하다.
    - 실제 live 실행 전 policy checkpoint, camera map, robot profile, dataset schema, operator confirm, action clamp, RTC 상태가 한눈에 보여야 한다.
 
 ## 4. 우리 환경 기준 가능 범위
@@ -187,15 +162,9 @@ SARM은 Stage-Aware Reward Modeling이다. long-horizon manipulation에서 task 
   - preflight result
   - rollout runtime
   - stage machine
-  - SARM state
   - Vision signal input
   - Guardian handoff
   - dataset/evidence payload
-
-- SARM-lite 확장
-  - 현재 deterministic scorer를 stage-aware wrapper로 감싼다.
-  - learned SARM이 없더라도 stage별 progress/risk field를 먼저 만든다.
-  - GUI와 Guardian이 같은 field를 보게 만든다.
 
 - Pi0.5 preflight gate 강화
   - `profile_id`, `policy_type=pi05`, `policy_path/repo/checkpoint`, `camera_enabled`, `device`, `runtime_mode`, `confirm_live_execute`, `rollout_action_clamp`, `RTC` 상태를 검사한다.
@@ -205,7 +174,7 @@ SARM은 Stage-Aware Reward Modeling이다. long-horizon manipulation에서 task 
   - shell command 생성/검증은 bridge에서만 한다.
 
 - GUI live report 개선
-  - 현재 실행 중인 task instruction, policy, robot profile, stage, SARM risk, Vision anomaly, stop/recover hint를 표시한다.
+  - 현재 실행 중인 task instruction, policy, robot profile, stage, measured interlock, Vision anomaly, stop/review status를 표시한다.
 
 - test mode loop 강화
   - fake `lerobot.rollout.start`를 계속 쓰되, fake step trace를 stage별로 풍부하게 만든다.
@@ -221,14 +190,10 @@ SARM은 Stage-Aware Reward Modeling이다. long-horizon manipulation에서 task 
 - real camera observation 기반 rollout
 - Pi0.5 v3.0 dataset 변환 및 fine-tuning
 - rollout/eval dataset 저장
-- SARM training dataset 구성
-- SARM progress를 RA-BC weight로 계산한 뒤 Pi0.5/ACT policy training에 반영
 
 ### 4.3 지금 바로 하면 안 되는 것
 
 - Pi0.5 base만으로 `3DP output -> UTM fixture` transfer가 바로 안정적으로 될 것이라고 가정하는 것
-- SARM learned weight가 있다고 가정하는 것
-- SARM이 직접 actuator-level controller가 되는 것
 - Vision Agent 검증 없이 `handoff_status=ready_for_equipment_agent`를 확정하는 것
 - Guardian/operator gate 없이 live recovery motion을 자동 실행하는 것
 - LangGraph가 고주파 servo loop처럼 로봇 action을 매 프레임 수정하는 것
@@ -249,27 +214,22 @@ flowchart TD
     E -->|live policy| G["Pi0.5 rollout: 3DP/basket -> UTM fixture"]
     G --> H["Runtime monitor: bridge events, Vision signals, robot status"]
     F --> H
-    H --> I["SARM stage/progress/failure scoring"]
-    I --> J{"Decision"}
-    J -->|continue| H
-    J -->|verify| K["Vision verification: specimen on UTM fixture"]
-    J -->|recover| L["Recovery plan proposal"]
-    J -->|stop| M["Guardian safe stop"]
-    K --> N{"Fixture placement ok?"}
+    H -->|still running| H
+    H -->|completed or stop requested| M["Stop rollout and confirm stopped status"]
+    M --> K["Vision verification: specimen on UTM fixture"]
+    K --> N{"LLM task judgment: fixture placement verified?"}
     N -->|yes| O["Handoff to Lab Equipment Agent"]
-    N -->|no| L
+    N -->|no or uncertain| L["Owner review; no automatic motion retry"]
     O --> R["UTM compression/test"]
     R --> S["Equipment/Vision signal: test complete, fixture safe"]
     S --> T["Manipulation Agent: canonicalize Task B clear_utm_to_disposal"]
     T --> U["Pi0.5 rollout: UTM fixture -> discard bin"]
-    U --> V["Vision verification: fixture clear, specimen discarded"]
-    V --> W{"Disposal ok?"}
+    U --> X["Stop rollout and confirm stopped status"]
+    X --> V["Vision verification: fixture clear, specimen discarded"]
+    V --> W{"LLM task judgment: disposal verified?"}
     W -->|yes| Q["Knowledge: rollout evidence, success/failure memory"]
     W -->|no| L
-    L --> P["Guardian/operator gate"]
-    P -->|approved| D
-    P -->|blocked| M
-    M --> Q
+    L --> Q
 ```
 
 ### 5.2 Manipulation Agent 내부 subgraph
@@ -283,14 +243,14 @@ flowchart TD
 4. select_policy_backend
 5. start_bounded_rollout
 6. monitor_rollout_events
-7. score_sarm_stage_progress
+7. observe_task_stage
 8. request_post_place_vision_verification
 9. decide_recover_stop_or_handoff
 10. package_manipulation_report
 11. store_rollout_evidence
 ```
 
-핵심은 `start_bounded_rollout` 이후에 바로 성공 처리하지 않는 것이다. Task A는 Vision/SARM/Guardian 검증 후 Lab Equipment Agent로 넘기고, Task B는 UTM 완료 신호를 받은 뒤 별도 rollout으로 실행해야 한다.
+핵심은 `start_bounded_rollout` 이후에 바로 성공 처리하지 않는 것이다. Task A는 Vision/Guardian 검증 후 Lab Equipment Agent로 넘기고, Task B는 UTM 완료 신호를 받은 뒤 별도 rollout으로 실행해야 한다.
 
 ## 6. Pi0.5 적용 설계
 
@@ -391,12 +351,11 @@ Pi0.5 rollout은 무제한 자유 실행이 아니라 bounded execution이어야
 - `continuous_rollout`: GUI/manual stop이 있을 때만 true
 - `stage_timeout_s`: stage별 timeout
 - `vision_stop_conditions`: object lost, human/hand intrusion, fixture occupied unexpectedly, robot out of safe zone
-- `sarm_stop_conditions`: failure precursor >= live stop threshold
 - `guardian_stop_conditions`: device unhealthy, operator stop, repeated recovery
 
 현재 bridge는 continuous rollout을 지원하지만, agent loop에서는 stage/verification gate를 더해야 한다.
 
-## 7. SARM 적용 설계
+## 7. 작업 단계 기록
 
 ### 7.1 Stage taxonomy
 
@@ -432,95 +391,6 @@ Task B: `clear_utm_to_disposal`
 9. verify_fixture_clear_and_discarded
 ```
 
-SARM-lite는 처음에는 이 stage list를 `task_id`별로 고정하고, Vision/bridge event 기반으로 progress를 추정한다.
-
-나중에 learned SARM을 붙이면 각 stage 내부 tau를 예측한다.
-
-```json
-{
-  "stage_index": 5,
-  "stage_name": "transfer_to_fixture",
-  "stage_confidence": 0.82,
-  "stage_tau": 0.54,
-  "global_progress": 0.61,
-  "progress_delta": 0.08,
-  "failure_precursor": 0.27,
-  "recovery_suggested": false
-}
-```
-
-### 7.2 SARM input
-
-SARM이 받아야 할 input은 다음이다.
-
-```json
-{
-  "task_id": "transfer_to_utm",
-  "task": "move specimen from 3DP output basket to UTM fixture",
-  "video_keys": ["observation.images.top", "observation.images.wrist"],
-  "state_key": "observation.state",
-  "robot_events": [],
-  "vision_signals": {
-    "object_present": true,
-    "object_in_gripper": true,
-    "object_on_fixture": false,
-    "anomaly": false
-  },
-  "bridge_status": {
-    "ok": true,
-    "status": "POLICY_ACTIVE",
-    "step_trace": []
-  },
-  "retry_count": 0
-}
-```
-
-### 7.3 SARM output
-
-SARM output은 기존 `sarm` key를 유지하되, 아래 field를 확장한다.
-
-```json
-{
-  "source": "deterministic_stage_scorer | learned_sarm",
-  "reward_model_path": "",
-  "stage_index": 5,
-  "stage_name": "transfer_to_fixture",
-  "stage_confidence": 0.82,
-  "stage_tau": 0.54,
-  "progress_score": 0.61,
-  "progress_delta": 0.08,
-  "failure_precursor": 0.27,
-  "failure_precursor_score": 0.27,
-  "recovery_suggested": false,
-  "recovery_hint": "none",
-  "recovery_type": "",
-  "rabc_weight_hint": 0.91,
-  "evidence": {
-    "frame_ids": [],
-    "episode_index": null,
-    "dataset_repo_id": ""
-  }
-}
-```
-
-### 7.4 SARM을 가중치로 쓰는 단계
-
-SARM weight는 세 곳에 써야 한다.
-
-1. Live advisory weight
-   - stage progress가 낮고 anomaly가 있으면 recovery suggestion을 높인다.
-   - 단, 바로 actuator command를 바꾸지 않는다.
-
-2. Dataset curation weight
-   - 실패/성공 episode에서 좋은 progress 구간과 나쁜 구간을 표시한다.
-   - Knowledge Agent가 rollout evidence와 함께 저장한다.
-
-3. Policy training weight
-   - SARM progress delta를 RA-BC weight로 계산한다.
-   - Pi0.5/ACT fine-tuning에서 좋은 demonstration 구간을 더 크게 반영한다.
-
-이 방식이 사용자의 "SARM으로 가중치를 받아서 작업 단계를 관리"하려던 의도와 가장 잘 맞는다.
-
 ## 8. Manipulation Report 스키마
 
 현재 output contract는 유지한다.
@@ -528,7 +398,6 @@ SARM weight는 세 곳에 써야 한다.
 ```json
 {
   "manipulation": {},
-  "sarm": {},
   "protocol_note": ""
 }
 ```
@@ -538,7 +407,7 @@ SARM weight는 세 곳에 써야 한다.
 ```json
 {
   "manipulation_report": {
-    "report_version": "manipulation_pi05_sarm_v1",
+    "schema": "manipulation_report.v1",
     "run_id": "",
     "session_id": "",
     "mode": "test | live",
@@ -597,16 +466,6 @@ SARM weight는 세 곳에 써야 한다.
       "blocked_stage": "",
       "next_expected_stage": "post_place_verify"
     },
-    "sarm": {
-      "source": "deterministic_stage_scorer",
-      "progress_score": 0.0,
-      "failure_precursor": 0.0,
-      "recovery_suggested": false,
-      "stage_index": 0,
-      "stage_name": "",
-      "stage_tau": 0.0,
-      "stage_confidence": 0.0
-    },
     "decision": {
       "handoff_status": "blocked | ready_for_equipment_agent | ready_for_disposal_task | completed_disposal",
       "completion_status": "not_complete | reported_complete | verified_complete",
@@ -660,12 +519,10 @@ Manipulation Agent GUI에는 다음 블록이 필요하다.
    - command preview
    - stop button
 
-5. SARM Stage Progress
+5. Observed Task Stage
    - current stage
-   - progress bar
-   - failure precursor
-   - recovery hint
-   - confidence
+   - completed stages from execution and verification evidence
+   - blocked stage and next expected stage
 
 6. Decision/Handoff
    - `blocked`
@@ -673,7 +530,7 @@ Manipulation Agent GUI에는 다음 블록이 필요하다.
    - `ready_for_equipment_agent`
    - `ready_for_disposal_task`
    - `completed_disposal`
-   - `recover_requested`
+   - `owner_review_required`
    - `safe_stop_requested`
 
 7. Evidence
@@ -699,7 +556,7 @@ Specimen Making -> Vision -> Manipulation -> Lab Equipment
 ```text
 manipulation.preflight
 manipulation.policy_rollout
-manipulation.sarm_monitor
+manipulation.observe_task_stage
 manipulation.post_place_verify
 manipulation.handoff
 ```
@@ -743,18 +600,6 @@ Manipulation Agent -> Lab Equipment Agent:
 }
 ```
 
-Manipulation Agent -> Guardian Agent:
-
-```json
-{
-  "agent_signal_type": "sarm_risk",
-  "failure_precursor": 0.27,
-  "recovery_suggested": false,
-  "safe_stop_requested": false,
-  "blocking_reasons": []
-}
-```
-
 Manipulation Agent -> Knowledge Agent:
 
 ```json
@@ -763,7 +608,6 @@ Manipulation Agent -> Knowledge Agent:
   "session_id": "",
   "task": "",
   "policy_ref": "",
-  "sarm_progress": {},
   "vision_verification": {},
   "outcome": "success | failure | recovered | stopped"
 }
@@ -778,33 +622,16 @@ Manipulation Agent -> Knowledge Agent:
 작업:
 
 - `manipulation_report` 추가
-- policy/preflight/vision/sarm/decision/evidence field 생성
+- policy/preflight/vision/decision/evidence field 생성
 - GUI에 report panel 추가
 - test mode fake rollout에서 stage trace 생성
-- Guardian이 기존 `sarm` key는 그대로 읽도록 backward compatibility 유지
 
 성공 기준:
 
 - live 하드웨어 없이도 전체 manipulation report가 GUI에 표시된다.
 - Pi0.5 policy 준비 여부와 blocking reason이 명확히 보인다.
 
-### Phase 2. SARM-lite stage machine
-
-목표: learned SARM 없이도 stage-aware progress 구조를 만든다.
-
-작업:
-
-- deterministic stage scorer 추가
-- stage taxonomy 고정
-- Vision signal과 bridge event로 stage 추정
-- `failure_precursor`, `recovery_hint`, `stage_confidence`를 stage별로 계산
-
-성공 기준:
-
-- `policy_rollout` 하나가 아니라 현재 조작 단계가 표시된다.
-- anomaly/retry/object lost가 risk에 반영된다.
-
-### Phase 3. Pi0.5 preflight/readiness gate
+### Phase 2. Pi0.5 preflight/readiness gate
 
 목표: live 실행 전 실패할 조건을 먼저 막는다.
 
@@ -822,23 +649,22 @@ Manipulation Agent -> Knowledge Agent:
 - live mode에서 준비 안 된 항목은 `blocked`로 보고된다.
 - command preview와 blocking reason이 GUI에 뜬다.
 
-### Phase 4. Rollout monitor + stop/recover hook
+### Phase 3. Rollout monitor + stop/review hook
 
-목표: rollout 도중 Vision/SARM/Guardian feedback을 받아 중단/복구 판단을 한다.
+목표: rollout 도중 Vision/Guardian feedback을 받아 필요한 중단을 요청하고, 중지 후 작업 결과를 검토한다.
 
 작업:
 
 - bridge event callback을 report event로 누적
 - Vision Agent의 anomaly/object state signal 연결
-- SARM risk threshold에 따른 `recover_requested` 생성
 - Guardian safe stop 연동
 
 성공 기준:
 
-- object lost/anomaly/high precursor 상황에서 handoff가 막힌다.
-- recovery proposal은 생성되지만 live motion은 Guardian/operator gate를 거친다.
+- object lost/anomaly 또는 측정된 interlock 위반 상황에서 handoff가 막힌다.
+- 중지 상태와 Vision 증거가 확인되지 않으면 handoff를 막고 owner review를 요청한다.
 
-### Phase 5. Post-place Vision verification
+### Phase 4. Post-place Vision verification
 
 목표: Lab Equipment Agent로 넘기기 전 fixture placement를 검증한다.
 
@@ -852,13 +678,13 @@ Manipulation Agent -> Knowledge Agent:
 
 - 단순 `response.ok`가 아니라 fixture 확인 후 handoff된다.
 
-### Phase 6. Dataset/evidence loop
+### Phase 5. Dataset/evidence loop
 
 목표: 성공/실패 조작 데이터를 지식으로 축적한다.
 
 작업:
 
-- rollout dataset id, video path, frame ids, SARM score 저장
+- rollout dataset id, video path, frame ids, verification evidence 저장
 - Knowledge Agent가 success/failure memory에 기록
 - 실패 유형 taxonomy: object lost, bad grasp, collision risk, misplace, fixture occupied, policy timeout
 
@@ -866,24 +692,7 @@ Manipulation Agent -> Knowledge Agent:
 
 - 실패한 조작을 다음 실험 설계/시편 제작/vision calibration에 반영할 수 있다.
 
-### Phase 7. Learned SARM + RA-BC
-
-목표: deterministic SARM-lite를 실제 reward model로 전환한다.
-
-작업:
-
-- manipulation rollout dataset에 subtask annotation 추가
-- SARM single_stage 또는 dual mode training
-- progress visualization 검증
-- `sarm_progress.parquet` 생성
-- Pi0.5/ACT fine-tuning에 RA-BC weight 적용
-
-성공 기준:
-
-- SARM이 stage/progress를 영상 기반으로 예측한다.
-- low-quality demonstration이 policy training에서 down-weight된다.
-
-### Phase 8. Pi0.5 live policy deployment
+### Phase 6. Pi0.5 live policy deployment
 
 목표: fine-tuned Pi0.5로 실제 `3DP output -> UTM fixture` transfer를 수행한다.
 
@@ -894,57 +703,25 @@ Manipulation Agent -> Knowledge Agent:
 - Pi0.5 fine-tuning
 - test rollout
 - operator-gated live rollout
-- Vision/SARM/Guardian closed-loop 검증
+- Vision/Guardian closed-loop 검증
 
 성공 기준:
 
 - 최소 반복 조건에서 specimen transfer 성공률과 실패 유형이 수치로 기록된다.
 - fixed_kinematic/ACT/Pi0.5 baseline 비교가 가능하다.
 
-## 12. 설계 방향 수정 제안
+## 12. 실행과 작업 판정의 경계
 
-사용자의 원래 방향:
-
-```text
-Pi0.5 inference를 실행하고, SARM으로 가중치를 받아 작업 단계를 관리한다.
-```
-
-추천 수정:
-
-```text
-Manipulation Agent가 작업 단계를 관리하고,
-Pi0.5는 각 bounded transfer skill을 실행하며,
-SARM은 stage-aware progress/risk/reward weight를 제공한다.
-```
-
-이 수정이 필요한 이유:
-
-- VLA는 generalization 능력이 있지만, target lab setup에서는 fine-tuning과 safety gate가 필요하다.
-- SARM은 reward/progress model이지 actuator controller가 아니다.
-- 완전 자율 실험실에서는 "실행 policy"보다 "실패를 감지하고 다음 agent에 정확히 넘기는 loop"가 더 중요하다.
-- LangGraph가 supervisor 역할을 하고, Vision/SARM/Guardian이 서로 cross-check해야 자율성이 올라간다.
-
-추천 architecture:
-
-```text
-Pi0.5 = 손
-Vision Agent = 눈
-SARM = 진행도/위험 감각
-Manipulation Agent = 조작 감독자
-Guardian = 안전 권한자
-Knowledge = 경험 기억
-```
+Manipulation Agent는 bounded task와 stage machine을 관리하고 Pi0.5/LeRobot은 해당 policy를 실행한다. Preflight와 측정된 interlock은 실행 허용 여부를 결정한다. 작업 성공 여부는 rollout이 중지된 뒤 Vision 증거와 LLM task review를 통해 판단하며, 불명확한 결과는 owner review로 넘긴다. 추정 progress나 reward 값으로 recovery motion을 시작하지 않는다.
 
 ## 13. 우선순위
 
 1. `manipulation_report`와 GUI live report부터 만든다.
-2. deterministic SARM-lite를 stage-aware로 확장한다.
-3. `transfer_to_utm`과 `clear_utm_to_disposal`을 별도 bounded task로 분리한다.
-4. Pi0.5 preflight gate를 강화한다.
-5. post-place Vision verification과 post-disposal verification을 handoff 조건으로 만든다.
-6. rollout evidence 저장을 Knowledge와 연결한다.
-7. 이후 Linux runtime에서 Pi0.5 fine-tuning/live rollout을 붙인다.
-8. 충분한 rollout dataset이 쌓이면 learned SARM과 RA-BC를 붙인다.
+2. `transfer_to_utm`과 `clear_utm_to_disposal`을 별도 bounded task로 분리한다.
+3. Pi0.5 preflight gate를 강화한다.
+4. post-place Vision verification과 post-disposal verification을 handoff 조건으로 만든다.
+5. rollout evidence 저장을 Knowledge와 연결한다.
+6. 이후 Linux runtime에서 Pi0.5 fine-tuning/live rollout을 붙인다.
 
 즉, 지금 당장 코드를 설계한다면 "Pi0.5 inference 자체"보다 "Pi0.5를 안전하게 감싸는 agentic loop"가 먼저다.
 
@@ -957,8 +734,6 @@ Knowledge = 경험 기억
 - Hugging Face LeRobot Pi0.5 docs: https://huggingface.co/docs/lerobot/pi05
 - Hugging Face LeRobot policy deployment docs: https://huggingface.co/docs/lerobot/main/inference
 - Hugging Face LeRobot RTC docs: https://huggingface.co/docs/lerobot/en/rtc
-- Hugging Face LeRobot SARM docs: https://huggingface.co/docs/lerobot/sarm
-- SARM arXiv: https://arxiv.org/abs/2509.25358
 - OpenVLA arXiv: https://arxiv.org/abs/2406.09246
 - OpenVLA GitHub: https://github.com/openvla/openvla
 - RT-2 arXiv: https://arxiv.org/abs/2307.15818
@@ -972,15 +747,15 @@ Manipulation Agent의 Live GUI는 VLA inference가 낸 action을 그대로 보�
 
 - task 선택: `place_specimen_to_utm` 또는 `remove_specimen_to_discard` 중 어떤 short task가 실행되는지 표시한다.
 - precondition check: Vision signal, robot home pose, gripper state, UTM/flatten occupancy, Guardian gate 결과를 한 줄로 보여준다.
-- policy profile: pi0.5/OpenVLA/LeRobot policy checkpoint, camera set, action horizon, SARM rollout mode를 표시한다.
-- progress: approach, grasp, lift, transfer, place, retreat 같은 phase와 현재 confidence/risk를 표시한다.
+- policy profile: pi0.5/OpenVLA/LeRobot policy checkpoint, camera set, action horizon, rollout mode를 표시한다.
+- progress: approach, grasp, lift, transfer, place, retreat 같은 관측 phase와 측정된 interlock 상태를 표시한다.
 - intervention: grip 실패, pose drift, occlusion, collision risk, UTM not-ready가 감지되면 stop/retry/manual-confirm 선택지를 올린다.
 - episode handoff: task 종료 pose, 다음 task 준비 여부, Vision evidence 저장 여부를 남긴다.
 
 ### Manipulation Agent 특화 보고서 페이지
 
 - Skill episode board: short task별 start/end state, success flag, terminal pose, next precondition.
-- VLA/SARM panel: policy version, prompt/task instruction, checkpoint, action latency, retry count.
+- VLA runtime panel: policy version, prompt/task instruction, checkpoint, action latency, retry count.
 - Perception dependency: 사용한 Vision signal과 confidence, stale frame 여부.
 - Trajectory evidence: keyframe video, gripper state, phase timeline, failure frame.
 - Risk and recovery: collision margin, workspace violation, fallback action, Guardian approval 기록.

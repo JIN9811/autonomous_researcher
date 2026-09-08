@@ -1,20 +1,19 @@
 """
 File purpose:
-- Execute bounded manipulation skills and integrate Pi0.5/LeRobot plus SARM-lite risk signals.
+- Execute bounded manipulation skills through existing LeRobot and robot executors.
 
 Key classes/functions:
 - ManipulationAgent
 
 Inputs/outputs:
 - Input: latest Vision observation, specimen result, and experiment/manipulation spec
-- Output: legacy manipulation/sarm keys plus manipulation_report.v1 and robot_task_result.v1
+- Output: manipulation result plus manipulation_report.v1 and robot_task_result.v1
 
 Dependencies:
 - mcp tools: lerobot.rollout.start, robot.pick_place
-- submodules.sarm.* deterministic scorer helpers
 
 Modification guide:
-- Safe places to edit: task taxonomy, preflight checks, report fields, SARM-lite thresholds
+- Safe places to edit: task taxonomy, preflight checks, report fields
 - Risky places to edit: legacy output keys consumed by Guardian, runtime merge, and LeRobot GUI
 - Related files: agents/guardian_agent.py, device_bridges/lerobot_bridge.py, web/templates/lerobot.html
 """
@@ -29,9 +28,6 @@ from typing import Any
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
 from utils.agent_artifact_archive import archive_agent_run, current_execution
 from orchestrator.state import Mode, OrchestratorState
-from submodules.sarm.failure_predictor import predict_failure_precursor
-from submodules.sarm.progress_scorer import score_progress
-from submodules.sarm.recovery_trigger import should_trigger_recovery
 from utils.manipulation_profile import load_manipulation_agent_profile
 
 
@@ -1175,43 +1171,7 @@ class ManipulationAgent(BaseAgent):
             "stage_taxonomy": stages,
         }
 
-    def _sarm_state(self, *, task_id: str, response: dict[str, Any], stage_machine: dict[str, Any], vision_context: dict[str, Any], retry_count: int) -> dict[str, Any]:
-        stages = list(stage_machine.get("stage_taxonomy") or [])
-        stage_name = str(stage_machine.get("current_stage") or "preflight")
-        stage_index = stages.index(stage_name) if stage_name in stages else 0
-        grasp_score = float(response.get("grasp_score", 0.0 if not response.get("ok") else 0.78))
-        anomaly = bool(vision_context.get("anomaly", False)) or not bool(response.get("ok"))
-        base_progress = score_progress(grasp_score=grasp_score, anomaly=anomaly)
-        stage_progress = stage_index / max(1, len(stages) - 1) if stages else 0.0
-        progress = max(0.0, min(1.0, (base_progress * 0.55) + (stage_progress * 0.45)))
-        precursor = predict_failure_precursor(progress_score=progress, retry_count=retry_count)
-        if stage_machine.get("blocked_stage") and response.get("ok"):
-            precursor = max(precursor, 0.35)
-        recovery = should_trigger_recovery(precursor_probability=precursor)
-        return {
-            "source": "deterministic_stage_scorer",
-            "reward_model_path": "",
-            "task_id": task_id,
-            "stage_index": stage_index,
-            "stage_name": stage_name,
-            "stage_confidence": round(grasp_score if response.get("ok") else min(grasp_score, 0.25), 3),
-            "stage_tau": round(stage_progress, 3),
-            "progress_score": round(progress, 3),
-            "progress_delta": round(progress - 0.5, 3),
-            "failure_precursor": round(precursor, 3),
-            "failure_precursor_score": round(precursor, 3),
-            "recovery_suggested": recovery,
-            "recovery_hint": "review_or_safe_stop" if recovery else "none",
-            "recovery_type": "guardian_review" if recovery else "",
-            "rabc_weight_hint": round(max(0.0, min(1.0, 1.0 - precursor)), 3),
-            "evidence": {
-                "frame_ids": [vision_context.get("observation_id", "")] if vision_context.get("observation_id") else [],
-                "episode_index": None,
-                "dataset_repo_id": response.get("dataset_repo_id", ""),
-            },
-        }
-
-    def _decision(self, *, task_id: str, response: dict[str, Any], preflight: dict[str, Any], verification: dict[str, Any], sarm: dict[str, Any]) -> dict[str, Any]:
+    def _decision(self, *, task_id: str, response: dict[str, Any], preflight: dict[str, Any], verification: dict[str, Any]) -> dict[str, Any]:
         task_def = self._task_definition(task_id)
         if preflight.get("status") == "fail":
             handoff = "blocked"
@@ -1228,11 +1188,6 @@ class ManipulationAgent(BaseAgent):
             completion = "not_complete"
             next_agent = "guardian_agent"
             reason = str(response.get("failure_code") or response.get("status") or "rollout_failed")
-        elif sarm.get("recovery_suggested"):
-            handoff = "recover_requested"
-            completion = "reported_complete"
-            next_agent = "guardian_agent"
-            reason = "SARM failure precursor crossed recovery threshold."
         elif verification.get("verified"):
             handoff = str(task_def.get("verified_handoff") or "ready")
             completion = "verified_complete"
@@ -1278,7 +1233,6 @@ class ManipulationAgent(BaseAgent):
         response: dict[str, Any],
         preflight: dict[str, Any],
         stage_machine: dict[str, Any],
-        sarm: dict[str, Any],
         decision: dict[str, Any],
         evidence_refs: list[dict[str, Any]],
         decisions: list[dict[str, Any]],
@@ -1306,7 +1260,6 @@ class ManipulationAgent(BaseAgent):
             "handoff_status": decision.get("handoff_status", ""),
             "completion_status": decision.get("completion_status", ""),
             "stage_machine": stage_machine,
-            "sarm": sarm,
             "preflight": preflight,
             "evidence_refs": evidence_refs,
             "pickup_pose": payload.get("pickup_pose", {}),
@@ -1439,7 +1392,6 @@ class ManipulationAgent(BaseAgent):
         preflight: dict[str, Any],
         vision_context: dict[str, Any],
         stage_machine: dict[str, Any],
-        sarm: dict[str, Any],
         decision: dict[str, Any],
         evidence_refs: list[dict[str, Any]],
         robot_task_result: dict[str, Any],
@@ -1449,7 +1401,7 @@ class ManipulationAgent(BaseAgent):
         runtime_contract = self._runtime_contract_blocks(payload=payload, response=response, preflight=preflight, vision_context=vision_context)
         return {
             "schema": "manipulation_report.v1",
-            "report_version": "manipulation_pi05_sarm_v1",
+            "report_version": "manipulation_runtime_v1",
             "run_id": state.run_id,
             "session_id": response.get("session_id", payload.get("session_id", "")),
             "mode": state.mode.value,
@@ -1502,8 +1454,6 @@ class ManipulationAgent(BaseAgent):
             "policy_runtime": runtime_contract["policy_runtime"],
             "rerun_telemetry": runtime_contract["rerun_telemetry"],
             "stage_machine": stage_machine,
-            "execution_safety": sarm,
-            "sarm": sarm,
             "decision": decision,
             "knowledge_payload": {
                 "rollout_dataset_repo_id": response.get("dataset_repo_id", payload.get("dataset_repo_id", "")),
@@ -1526,7 +1476,6 @@ class ManipulationAgent(BaseAgent):
         preflight: dict[str, Any],
         vision_context: dict[str, Any],
         stage_machine: dict[str, Any],
-        sarm: dict[str, Any],
         decision: dict[str, Any],
         evidence_refs: list[dict[str, Any]],
     ) -> dict[str, Any]:
@@ -1538,17 +1487,14 @@ class ManipulationAgent(BaseAgent):
         duration_s = self._safe_float(runtime.get("duration_s") or payload.get("max_duration_s"), 0.0)
         if duration_s <= 0:
             duration_s = 21.4 if response.get("ok") else 0.0
-        progress = self._safe_float(sarm.get("progress_score"), 1.0 if response.get("ok") else 0.0)
-        grasp_score = self._safe_float(response.get("grasp_score"), self._safe_float(sarm.get("stage_confidence"), 0.0))
+        grasp_score = self._safe_float(response.get("grasp_score"), 0.0)
         blocker_count = len(preflight.get("blocking_reasons") or [])
         warning_count = len(preflight.get("warnings") or [])
         response_ok = bool(response.get("ok"))
-        recovery = bool(sarm.get("recovery_suggested"))
         manipulation_success = 100 if response_ok and blocker_count == 0 else 0
         grasp_success = int(round(max(0.0, min(1.0, grasp_score)) * 100))
-        path_efficiency = int(round(max(0.0, min(1.0, 0.72 + progress * 0.22 - (0.08 if recovery else 0.0))) * 100))
         joint_velocity = int(round(max(0.0, min(1.0, 0.62 + (0.06 if policy.get("action_clamp_enabled") else 0.18))) * 100))
-        safety_score = max(0, 100 - (blocker_count * 28) - (warning_count * 8) - (20 if recovery else 0))
+        safety_score = max(0, 100 - (blocker_count * 28) - (warning_count * 8))
         waypoint_rows: list[dict[str, Any]] = []
         for index, name in enumerate(taxonomy or ["preflight", "policy_rollout", "post_place_verify"], start=1):
             waypoint_rows.append(
@@ -1589,7 +1535,6 @@ class ManipulationAgent(BaseAgent):
         artifact_rows = [
             {"name": "manipulation_report.json", "type": "JSON", "size": "runtime", "path": "run_metadata.manipulation_report"},
             {"name": "robot_task_result.json", "type": "JSON", "size": "runtime", "path": "run_metadata.robot_task_result"},
-            {"name": "sarm_stage_state.json", "type": "JSON", "size": "runtime", "path": "run_metadata.sarm"},
         ]
         for ref in evidence_refs[:6]:
             artifact_rows.append(
@@ -1617,7 +1562,6 @@ class ManipulationAgent(BaseAgent):
                 "manipulation_success_pct": manipulation_success,
                 "grasp_success_pct": grasp_success,
                 "avg_execution_time_s": round(duration_s, 2),
-                "path_efficiency_pct": path_efficiency,
                 "max_joint_velocity_pct": joint_velocity,
                 "safety_score_pct": safety_score,
             },
@@ -1652,11 +1596,6 @@ class ManipulationAgent(BaseAgent):
             },
             "reachability_map": {
                 "status": "within_workspace" if preflight.get("robot_ready", True) else "blocked",
-                "hotspots": [
-                    {"x": -0.18, "y": 0.12, "score": 0.72},
-                    {"x": 0.05, "y": -0.02, "score": round(max(0.0, min(1.0, progress)), 3)},
-                    {"x": 0.28, "y": 0.16, "score": 0.84 if response_ok else 0.32},
-                ],
             },
             "collision_safety_status": {
                 "overall": "safe" if safety_score >= 80 else "review",
@@ -1674,7 +1613,6 @@ class ManipulationAgent(BaseAgent):
                     {"frame": "grasp_tcp", "x_m": trajectory_points[3]["x_m"], "y_m": trajectory_points[3]["y_m"], "z_m": trajectory_points[3]["z_m"], "rx_deg": 180.0, "ry_deg": 0.0, "rz_deg": 90.0},
                     {"frame": "place_target", "x_m": trajectory_points[-1]["x_m"], "y_m": trajectory_points[-1]["y_m"], "z_m": trajectory_points[-1]["z_m"], "rx_deg": 180.0, "ry_deg": 0.0, "rz_deg": 0.0},
                 ],
-                "pose_error_mm": round((1.0 - progress) * 2.4, 2),
                 "rotation_error_deg": round((1.0 - max(0.0, min(1.0, grasp_score))) * 1.6, 2),
             },
             "motion_trajectory": {
@@ -1744,12 +1682,11 @@ class ManipulationAgent(BaseAgent):
             response["failure_code"] = "STALE_VISION_SIGNAL"
         verification = self._verification_status(task_id, vision_context, response)
         stage_machine = self._stage_machine(task_id=task_id, response=response, preflight=preflight, verification=verification)
-        sarm = self._sarm_state(task_id=task_id, response=response, stage_machine=stage_machine, vision_context=vision_context, retry_count=state.retry_counters.get("manipulation", 0))
-        decision = self._decision(task_id=task_id, response=response, preflight=preflight, verification=verification, sarm=sarm)
+        decision = self._decision(task_id=task_id, response=response, preflight=preflight, verification=verification)
         decisions = self._decisions(task_id=task_id, response=response, preflight=preflight, decision=decision, verification=verification)
         evidence_refs: list[dict[str, Any]] = []
-        packet = self._robot_task_result(state=state, task_id=task_id, payload=payload, response=response, preflight=preflight, stage_machine=stage_machine, sarm=sarm, decision=decision, evidence_refs=evidence_refs, decisions=decisions)
-        report = self._manipulation_report(state=state, task_id=task_id, payload=payload, response=response, preflight=preflight, vision_context=vision_context, stage_machine=stage_machine, sarm=sarm, decision=decision, evidence_refs=evidence_refs, robot_task_result=packet)
+        packet = self._robot_task_result(state=state, task_id=task_id, payload=payload, response=response, preflight=preflight, stage_machine=stage_machine, decision=decision, evidence_refs=evidence_refs, decisions=decisions)
+        report = self._manipulation_report(state=state, task_id=task_id, payload=payload, response=response, preflight=preflight, vision_context=vision_context, stage_machine=stage_machine, decision=decision, evidence_refs=evidence_refs, robot_task_result=packet)
         screen_report = self._manipulation_agent_report_snapshot(
             state=state,
             manipulation_report=report,
@@ -1759,7 +1696,6 @@ class ManipulationAgent(BaseAgent):
             preflight=preflight,
             vision_context=vision_context,
             stage_machine=stage_machine,
-            sarm=sarm,
             decision=decision,
             evidence_refs=evidence_refs,
         )
@@ -1768,7 +1704,6 @@ class ManipulationAgent(BaseAgent):
             summary="Manipulation blocked by preflight gate",
             data={
                 "manipulation": response,
-                "sarm": sarm,
                 "manipulation_report": report,
                 "manipulation_agent_report": screen_report,
                 "robot_task_result": packet,
@@ -1813,14 +1748,11 @@ class ManipulationAgent(BaseAgent):
 
     @staticmethod
     def _metrics(report: dict[str, Any]) -> dict[str, Any]:
-        sarm = report.get("sarm") if isinstance(report.get("sarm"), dict) else {}
         preflight = report.get("preflight") if isinstance(report.get("preflight"), dict) else {}
         stage_machine = report.get("stage_machine") if isinstance(report.get("stage_machine"), dict) else {}
         return {
             "preflight_blocker_count": len(preflight.get("blocking_reasons") or []),
             "preflight_warning_count": len(preflight.get("warnings") or []),
-            "sarm_progress_score": sarm.get("progress_score", 0.0),
-            "sarm_failure_precursor": sarm.get("failure_precursor", 0.0),
             "completed_stage_count": len(stage_machine.get("completed_stages") or []),
             "handoff_status": report.get("decision", {}).get("handoff_status", "") if isinstance(report.get("decision"), dict) else "",
         }
@@ -1982,14 +1914,7 @@ class ManipulationAgent(BaseAgent):
             response["post_place_interlock"] = self._post_place_interlock(response)
         verification = self._verification_status(task_id, vision_context, response)
         stage_machine = self._stage_machine(task_id=task_id, response=response, preflight=preflight, verification=verification)
-        sarm = self._sarm_state(
-            task_id=task_id,
-            response=response,
-            stage_machine=stage_machine,
-            vision_context=vision_context,
-            retry_count=state.retry_counters.get("manipulation", 0),
-        )
-        decision = self._decision(task_id=task_id, response=response, preflight=preflight, verification=verification, sarm=sarm)
+        decision = self._decision(task_id=task_id, response=response, preflight=preflight, verification=verification)
         if decision.get("completion_status") == "verified_complete":
             completion_evidence = state.latest_observations.get("vision_manipulation_completion") or {}
             visual_review = completion_evidence.get("vision_decision") or {}
@@ -2021,7 +1946,6 @@ class ManipulationAgent(BaseAgent):
             response=response,
             preflight=preflight,
             stage_machine=stage_machine,
-            sarm=sarm,
             decision=decision,
             evidence_refs=evidence_refs,
             decisions=decisions,
@@ -2034,7 +1958,6 @@ class ManipulationAgent(BaseAgent):
             preflight=preflight,
             vision_context=vision_context,
             stage_machine=stage_machine,
-            sarm=sarm,
             decision=decision,
             evidence_refs=evidence_refs,
             robot_task_result=packet,
@@ -2049,7 +1972,6 @@ class ManipulationAgent(BaseAgent):
             preflight=preflight,
             vision_context=vision_context,
             stage_machine=stage_machine,
-            sarm=sarm,
             decision=decision,
             evidence_refs=evidence_refs,
         )
@@ -2069,7 +1991,6 @@ class ManipulationAgent(BaseAgent):
             summary="Manipulation bounded skill executed",
             data={
                 "manipulation": response,
-                "sarm": sarm,
                 "manipulation_report": report,
                 "manipulation_agent_report": screen_report,
                 "robot_task_result": packet,

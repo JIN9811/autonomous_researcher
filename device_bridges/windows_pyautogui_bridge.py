@@ -27,6 +27,7 @@ import base64
 import hashlib
 import ipaddress
 import json
+import math
 import os
 import re
 import socket
@@ -1625,6 +1626,37 @@ class WindowsPyAutoGUIBridge(BaseBridge):
             or experiment.get("candidate_id")
             or "specimen-simulated"
         )
+        context = payload.get("source_stage_context")
+        specimen = context.get("specimen") if isinstance(context, dict) else None
+        candidate = specimen.get("candidate") if isinstance(specimen, dict) else None
+        parameters = candidate.get("parameters") if isinstance(candidate, dict) else None
+        geometry = {**(parameters if isinstance(parameters, dict) else {}), **experiment}
+        size = geometry.get("specimen_size_mm", geometry.get("size_mm", [20, 20, 20]))
+        raw_height = geometry.get("gauge_length_mm", geometry.get("height_mm",
+            size[2] if isinstance(size, (list, tuple)) and len(size) >= 3 else None))
+        raw_strain = experiment.get("target_strain", 0.5)
+        try:
+            # Match Analysis' published gauge-length normalization exactly.
+            height, target_strain = round(float(raw_height), 6), float(raw_strain)
+            valid_extent = (
+                not isinstance(raw_height, bool) and not isinstance(raw_strain, bool)
+                and math.isfinite(height) and height > 0
+                and math.isfinite(target_strain) and 0 < target_strain <= 1
+                and math.isfinite(height * target_strain)
+            )
+        except (TypeError, ValueError, OverflowError):
+            valid_extent = False
+        if not valid_extent:
+            return {
+                **self._failure(
+                    tool="equipment.pyautogui.run", status="blocked",
+                    failure_code="SIMULATED_UTM_CURVE_CONFIG_INVALID",
+                    message="Simulated UTM requires positive finite specimen height and target_strain in (0, 1].",
+                    program_id=program_id, sequence_id=sequence_id,
+                    step_trace=trace + [{"step": "VALIDATE_SIMULATED_CURVE", "status": "blocked"}],
+                ),
+                "simulated": True, "synthetic": True, "actuation_performed": False,
+            }
         safe_specimen = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in specimen_id)[:96]
         artifact_dir = self.config.artifact_dir / run_id / "utm"
         artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -1635,14 +1667,18 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         rows: list[str] = [",".join(columns)]
         for idx in range(80):
             t = idx * 0.25
-            displacement = idx * 0.05
-            force = max(0.0, 18.0 * displacement - 1.1 * displacement * displacement + (idx % 5) * 0.45)
-            rows.append(f"{t:.3f},{displacement:.4f},{force:.4f}")
+            displacement = height * target_strain * (idx / 79)
+            # Retain the synthetic sample shape; scaling extent is not a physical prediction.
+            sample_coordinate = idx * 0.05
+            force = max(0.0, 18.0 * sample_coordinate - 1.1 * sample_coordinate * sample_coordinate + (idx % 5) * 0.45)
+            rows.append(f"{t:.3f},{displacement:.17g},{force:.4f}")
         local_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
         data = local_path.read_bytes()
+        parse_probe = self._probe_utm_csv_bytes(data)
+        parse_ok = parse_probe.get("ok") is True
         digest = hashlib.sha256(data).hexdigest()
         size_bytes = len(data)
-        row_count = len(rows) - 1
+        row_count = int(parse_probe.get("row_count_probe") or 0)
         windows_path = f"C:/ATR/utm_exports/{run_id}/{local_path.name}"
 
         def step(name: str, status: str, detail: str = "") -> None:
@@ -1661,11 +1697,11 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         step("SCREEN_ASSERT_COMPLETE", "ok", "complete_state")
         step("SAVE_EXPORT", "ok", windows_path)
         step("PULL_ARTIFACT", "ok", str(local_path))
-        step("PARSE_PROBE", "ok", f"rows={row_count}; columns={','.join(columns)}")
-        step("DONE", "ok", "UTM protocol verified complete")
+        step("PARSE_PROBE", "ok" if parse_ok else "blocked", f"rows={row_count}; columns={','.join(columns)}")
 
         artifact = {
             "kind": "utm_csv",
+            "synthetic": True,
             "artifact_id": artifact_id,
             "windows_path": windows_path,
             "local_path": str(local_path),
@@ -1701,16 +1737,54 @@ class WindowsPyAutoGUIBridge(BaseBridge):
             "row_count_probe": row_count,
             "columns_probe": columns,
         }
-        return {
-            "ok": True,
+        scope: dict[str, Any] = {"run_id": run_id, "specimen_id": specimen_id}
+        if "loop_id" in payload:
+            scope["loop_id"] = payload["loop_id"]
+        readiness: dict[str, Any] | None = None
+        program = self.config.registered_programs.get(program_id, {})
+        if program.get("program_type") == "utm_protocol":
+            # These are simulator state transitions, never physical clearance proof.
+            complete = parse_ok and any(
+                check.get("checkpoint") == "after_complete" and check.get("ok") is True
+                for check in screen_checks
+            )
+            next_test_completed = complete
+            clearance_restored = next_test_completed and physical_checks.get("fixture_safe_to_access") is True
+            step("SIMULATED_NEXT_TEST_RESET", "ok" if next_test_completed else "blocked",
+                 "simulated next-test/reset transition; no actuation performed")
+            step("SIMULATED_RESTORE_CLEARANCE", "ok" if clearance_restored else "blocked",
+                 "simulated fixture clearance restored; not physical clearance evidence")
+            readiness = {
+                **scope,
+                "ready": next_test_completed and clearance_restored,
+                "next_test_completed": next_test_completed,
+                "save_current_test": False,
+                "clearance_restored": clearance_restored,
+                "simulated": True,
+                "actuation_performed": False,
+                "terminal_checks": {
+                    "complete_state": complete,
+                    "next_test_reset": next_test_completed,
+                    "fixture_clearance": clearance_restored,
+                },
+                "failure_code": "" if clearance_restored else str(parse_probe.get("failure_code") or "SIMULATED_UTM_TERMINAL_CHECK_FAILED"),
+            }
+        step("DONE", "ok" if parse_ok else "blocked",
+             "UTM protocol verified complete in simulator" if parse_ok else "Simulated UTM CSV validation failed")
+        response = {
+            **scope,
+            "ok": parse_ok,
             "tool": "equipment.pyautogui.run",
             "mode": "simulator",
+            "simulated": True,
+            "synthetic": True,
+            "actuation_performed": False,
             "bridge": "windows_pyautogui",
-            "status": "verified_complete",
+            "status": "verified_complete" if parse_ok else "blocked",
             "sequence_id": sequence_id,
             "program_id": program_id,
             "program_type": "utm_protocol",
-            "program_log": "UTM protocol verified complete in simulator.",
+            "program_log": "UTM protocol verified complete in simulator." if parse_ok else "Simulated UTM CSV validation failed.",
             "result_file": str(local_path),
             "utm_csv_path": str(local_path),
             "output_artifacts": [artifact],
@@ -1723,11 +1797,14 @@ class WindowsPyAutoGUIBridge(BaseBridge):
                 "physical_motion_started": True,
                 "save_completed": True,
                 "data_file_created": True,
-                "data_parse_probe_ok": True,
+                "data_parse_probe_ok": parse_ok,
             },
             "step_trace": trace,
-            "failure_code": None,
+            "failure_code": parse_probe.get("failure_code"),
         }
+        if readiness is not None:
+            response["next_specimen_readiness"] = readiness
+        return response
 
     def _simulated_screenshot(self, payload: dict[str, Any]) -> dict[str, Any]:
         checkpoint = str(payload.get("checkpoint") or "manual")

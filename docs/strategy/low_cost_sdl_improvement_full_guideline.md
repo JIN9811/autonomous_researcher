@@ -81,10 +81,6 @@ Tool names to preserve:
 - `utm.run_protocol`
 - `device.health`
 
-SARM rule:
-- Do not turn SARM into a top-level agent.
-- Keep SARM inside `manipulation_agent` or `submodules/sarm`.
-
 Hardware-facing rule:
 - Every hardware-facing component must remain executable in:
   - test mode
@@ -700,7 +696,6 @@ Constraints:
 - Do not rename `Stage` enum values.
 - Do not change required `AgentResult.data` keys.
 - Do not rename ToolRegistry tool names.
-- Do not make SARM a top-level agent.
 - Preserve full test-mode execution.
 - Preserve replay/fault-injection behavior for affected hardware paths.
 - Add or update tests in the same change.

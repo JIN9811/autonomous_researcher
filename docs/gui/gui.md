@@ -326,8 +326,8 @@ Vision chat card requirement:
 - Task selection updates the default source, target, task instruction, and Vision observation template; operators may still override those fields.
 - The panel includes Policy Backend, Policy Type (`pi05`, `xvla`, `smolvla`, or `act`), Pi0.5 RTC Execution Horizon, Pi0.5 RTC Max Guidance Weight, Max Duration Seconds, Safe Action Clamp, camera/display, and continuous-rollout controls. X-VLA and SmolVLA use the generic LeRobot rollout path unless a future policy-specific runtime adapter is added, and the bridge does not attach ACT temporal-ensemble flags to VLA rollout commands.
 - `Save Agent Defaults` persists these values to `memory/manipulation_agent_bridge.json`; `Test Agent Bridge` runs the same Manipulation Agent path in forced test mode; `Run Manipulation Agent` runs the actual agent-mediated path for the selected GUI mode.
-- The Manipulation runtime report panel summarizes Skill Episode Board, Preflight, Pi0.5/Policy Runtime, Vision Dependency, SARM Stage Progress, Decision/Handoff, and Evidence. It is a human-readable report surface; raw JSON remains in backend trace/output.
-- Live GUI selected-agent report for Manipulation Agent reads `state.run_metadata.manipulation_report` and `state.run_metadata.robot_task_result`, then renders the same task, policy, preflight, Vision, SARM, rollout, decision, and evidence sections.
+- The Manipulation runtime report panel summarizes Skill Episode Board, Preflight, Pi0.5/Policy Runtime, Vision Dependency, Observed Task Stage, Decision/Handoff, and Evidence. It is a human-readable report surface; raw JSON remains in backend trace/output.
+- Live GUI selected-agent report for Manipulation Agent reads `state.run_metadata.manipulation_report` and `state.run_metadata.robot_task_result`, then renders the same task, policy, preflight, Vision, stage machine, rollout, decision, and evidence sections.
 
 GUI browser inspection requirement:
 - Use Selenium from the main `.venv` when GUI layout, report rendering, route wiring, Runtime IDE canvas behavior, or Live GUI chat/report surfaces are changed.
@@ -340,7 +340,6 @@ GUI browser inspection requirement:
   4. Save screenshots to `runs/` or `artifacts/` for audit evidence.
   5. Stop the temporary server and any headless browser/geckodriver process.
 - For quick route-specific checks, a one-off Selenium script is acceptable. For repeatable UI contracts, add or update a script under `tests/ui/` and reference it from the relevant test notes.
-
 
 
 2026-05-29 LeRobot rollout queue / Pi0.5 note:

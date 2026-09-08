@@ -4,7 +4,7 @@
 
 현재 제공된 프로젝트 문서 기준으로 런타임은 `FastAPI Controller -> LangGraphRunLoop -> Stage Agent -> MCP Tool -> State Update -> Event Stream -> Web GUI` 구조를 유지해야 한다. 단계 순서는 active `graphs/configs/*.yaml` 전이에 의해 결정되며, 기본 closed-loop는 `design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian`이다. 기본 guardian=continue는 다시 design으로, stop/error는 complete/error로 라우팅된다.
 
-SARM은 최상위 agent가 아니라 Manipulation Agent 내부의 submodule로 유지해야 한다. 기존 agent contract는 `BaseAgent.run(state, ctx) -> AgentResult`이고, tool access는 `ToolRegistry.call(name, payload)` 형태의 MCP-style contract를 따른다.
+기존 agent contract는 `BaseAgent.run(state, ctx) -> AgentResult`이고, tool access는 `ToolRegistry.call(name, payload)` 형태의 MCP-style contract를 따른다.
 
 현재 GUI 기준선은 웹 대시보드, Live GUI chat/handoff, SSE `/api/events/stream`, run controls, model status, agent status, device health, structured log viewer를 포함한다. test/replay/fault-injection 모드는 모든 hardware-facing component에 적용되어야 한다.
 
@@ -18,7 +18,6 @@ OMX 문서에는 `lerobot-find-port`, `robot.type=omx_follower`, `teleop.type=om
 
 일반 LeRobot real robot imitation workflow는 teleoperate -> record dataset -> train policy -> inference/evaluation이다. `lerobot-record`는 dataset recording과 policy checkpoint를 넣은 evaluation/inference recording에도 사용된다. 최신 main 문서에서는 policy deployment용 `lerobot-rollout` CLI도 제공되며, base/sentry/highlight/dagger strategy와 sync/RTC inference backend를 지원한다고 문서화되어 있다.
 
-SARM은 Stage-Aware Reward Modeling으로, task stage와 within-stage progress를 예측한다. LeRobot docs는 single_stage/dense_only/dual annotation mode, `sarm_progress.parquet`, RA-BC weighting workflow를 설명한다.
 
 SO-101/SO101 호환성 측면에서는 LeRobot 공식 문서가 SO101 teleoperation 예시를 `robot.type=so101_follower`, `teleop.type=so101_leader`로 제시한다. 또한 LeRobot은 hardware-agnostic Robot interface와 Bring Your Own Hardware 통합 경로를 제공하므로, OMX-AI를 하드코딩하지 말고 robot profile / adapter registry로 분리하는 것이 장기 호환성에 맞다.
 
@@ -36,7 +35,6 @@ ROBOTIS software page는 OMX가 ROS 2 Jazzy, ros2_control, 100 Hz joint control,
 4. GUI는 기존 web dashboard와 Live GUI contract를 깨지 않고 LeRobot-specific tabs를 추가한다.
 5. 모든 start/stop/safe-stop 신호는 typed signal로 관리하고 session_id/run_id/experiment_id를 로그와 SSE에 포함한다.
 6. Vision Agent는 camera ownership을 유지하고 Manipulation Agent는 typed VisionObservation을 소비한다.
-7. SARM은 Manipulation Agent 내부 advisory module로 먼저 연결한다. live SARM model이 없으면 deterministic test-mode scorer를 사용한다.
 8. 각 GUI surface마다 test-mode state machine, API tests, SSE tests, fault-injection tests를 둔다.
 
 ## 4. Canonical implementation guideline

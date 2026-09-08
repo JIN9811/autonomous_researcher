@@ -204,7 +204,7 @@ The API table covers specimen-pose status/snapshot/release, LeRobot active-camer
 
 - [x] **Step 2: Document Manipulation**
 
-Name both supported tasks and all 11 internal steps. Document Pi0.5/LeRobot policy selection, direct-shell prohibition, specimen/Vision context, camera-return gate, profile/policy preflight, rollout session, SARM-lite, post-place Vision verification, decision, report, result, and evidence.
+Name both supported tasks and all 11 internal steps. Document Pi0.5/LeRobot policy selection, direct-shell prohibition, specimen/Vision context, camera-return gate, profile/policy preflight, rollout session, observed task stage, post-place Vision verification, decision, report, result, and evidence.
 
 Group all 87 LeRobot routes into configuration/session, files/policies/datasets, ports/camera/profiles, teleoperation, recording, training/W&B, rollout, manipulation-agent, Isaac synthetic/IL/RL/Mimic/RGBD, visualization, and mirror categories. Include start/stop/status/validate/evidence endpoints for each applicable category.
 

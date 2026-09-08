@@ -138,7 +138,7 @@ Do not change these unless a separate full-runtime migration is explicitly reque
    - DesignAgent returns experiment_spec and rationale
    - SpecimenMakingAgent returns specimen_result and protocol_note
    - VisionAgent returns observation and protocol_note
-   - ManipulationAgent returns manipulation, sarm, and protocol_note
+   - ManipulationAgent returns manipulation and protocol_note
    - LabEquipmentAgent returns equipment_result and protocol_note
    - AnalysisAgent returns analysis
    - KnowledgeAgent returns knowledge
@@ -174,7 +174,7 @@ DesignAgent:
 GuardianAgent:
 - Owns safety and feasibility judgment.
 - Must validate design candidate fields before hardware-facing execution.
-- Should read state.current_experiment_spec and latest SARM/anomaly signals.
+- Should read state.current_experiment_spec and latest Vision/anomaly signals.
 - Must return AgentResult.data["guardian"].
 
 SpecimenMakingAgent:
@@ -399,7 +399,6 @@ AgentResult.data = {
   "guardian": {
     "decision": "continue" | "stop" | "error",
     "reason": "...",
-    "precursor": float,
     "policy_note": "...",
     "design_validation": {
       "status": "pass" | "fail" | "warning",

@@ -989,14 +989,13 @@ def test_manipulation_bridge_runtime_supervisor_cards_are_wired() -> None:
         "Action Stream",
         "Viewer Evidence",
         "Vision Completion Gate",
-        "Execution Safety",
+        "Task Stages",
     ]:
         assert label in template
     assert "Home Pose / Interlock" not in script
     assert "Pi0.5/SARM state" not in template
     assert "Pi0.5 / Policy Runtime" not in script
     assert "SARM Stage Progress" not in script
-    assert "function executionSafetyFromReport" in script
     assert "function rerunTelemetryFromReport" in script
     assert "telemetry.latest_frame_artifact" in script
     assert "telemetry.joint_state" in script

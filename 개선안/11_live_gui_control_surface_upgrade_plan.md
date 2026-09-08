@@ -195,7 +195,7 @@ Manipulation은 VLA action 로그만 보여주면 부족하다.
 - precondition checklist
 - operator approval 필요 여부
 - continuous rollout status
-- SARM/Guardian stop condition
+- Guardian stop condition
 
 필요 메시지:
 
@@ -1244,4 +1244,3 @@ Live GUI는 이미 기능적으로는 출발점이 충분하다.
 Live GUI의 최종 역할은 다음이다.
 
 > Orchestrator와 모든 agent의 판단, handoff, evidence, approval, incident를 한 화면에서 사람이 이해하고 개입할 수 있게 하는 실험 실행 콘솔.
-

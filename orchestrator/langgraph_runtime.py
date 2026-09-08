@@ -1430,13 +1430,9 @@ class LangGraphRunLoop:
             analysis_payload = compact_runtime_payload(data["analysis"])
             if isinstance(analysis_payload, dict):
                 self._state.latest_analysis.update(analysis_payload)
-        if "sarm" in data:
-            self._state.latest_analysis["sarm"] = compact_runtime_payload(data["sarm"])
         if "manipulation" in data:
             self._state.run_metadata["manipulation_result"] = compact_runtime_payload(data["manipulation"])
             self._state.latest_analysis["last_grasp_score"] = float(data["manipulation"].get("grasp_score", 0.0))
-            if "sarm" in data:
-                self._state.latest_analysis["sarm"] = compact_runtime_payload(data["sarm"])
         if isinstance(data.get("equipment_preflight"), dict):
             self._state.run_metadata["equipment_preflight"] = compact_runtime_payload(data["equipment_preflight"])
         if "equipment_result" in data:

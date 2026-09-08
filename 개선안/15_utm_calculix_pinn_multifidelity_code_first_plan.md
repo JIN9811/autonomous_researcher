@@ -206,7 +206,7 @@ web/static/planning.js
 5. PINN/Neural Operator는 아직 코드 상의 worker/tool로 존재하지 않는다.
 6. heavy solver/train job은 DeviceJobQueue와 분리된 background worker 정책이 필요하다.
 7. Live GUI는 FEM contour/BO plot은 있지만 multi-fidelity evidence table, trust badge, provenance drawer가 부족하다.
-8. Guardian은 uncertainty/precursor 기반 판단은 있으나 multi-fidelity trust score gate로는 아직 약하다.
+8. Guardian은 uncertainty, device health, design validation, graph-wide gate 기반 판단은 있으나 multi-fidelity trust score gate로는 아직 약하다.
 ```
 
 ---

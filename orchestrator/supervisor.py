@@ -1025,7 +1025,7 @@ def build_orchestrator_followup(
     elif stage_text == Stage.MANIPULATION.value:
         robot = _first_dict(data.get("robot_task_result"), data.get("manipulation"))
         opinion = f"Manipulation short-task 결과를 확인했습니다. completion={robot.get('completion_status') or status}."
-        recommendation = "Vision verification과 SARM/recovery hint를 확인한 뒤 Equipment Agent로 넘깁니다."
+        recommendation = "Vision verification과 handoff readiness를 확인한 뒤 Equipment Agent로 넘깁니다."
         if str(robot.get("handoff_status") or "").lower() in {"blocked", "warning"}:
             concerns.append(str(robot.get("reason") or "manipulation_handoff_not_clean"))
     elif stage_text == Stage.EQUIPMENT.value:

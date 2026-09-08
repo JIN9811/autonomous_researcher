@@ -5152,7 +5152,6 @@ function agentSpecificReportProfile(report, status, agentLabel) {
   const manipulationPreflight = manipulationReport.preflight || {};
   const manipulationVision = manipulationReport.vision_context || {};
   const manipulationStage = manipulationReport.stage_machine || {};
-  const manipulationSarm = manipulationReport.sarm || {};
   const manipulationDecision = manipulationReport.decision || {};
   const equipmentReport = latestEquipmentReport(report) || {};
   const equipmentResult = latestEquipmentResult(report) || {};
@@ -5292,7 +5291,7 @@ function agentSpecificReportProfile(report, status, agentLabel) {
     },
     manipulation: {
       title: "Manipulation Agent / Runtime Supervision",
-      summary: "Shows bounded manipulation task selection, LeRobot execution boundary, preflight gates, execution safety state, Vision dependency, and robot_task_result handoff.",
+      summary: "Shows bounded manipulation task selection, LeRobot execution boundary, preflight gates, task stages, Vision dependency, and robot_task_result handoff.",
       rows: [
         ["task", manipulationTask.task_id || robotTaskResult.task_id || "-"],
         ["route", `${manipulationTask.source_location || "-"} -> ${manipulationTask.target_location || "-"}`],
@@ -5301,8 +5300,6 @@ function agentSpecificReportProfile(report, status, agentLabel) {
         ["policy_ref", manipulationPolicy.policy_ref || latestReportPayload(report, ["policy_path", "checkpoint_path", "policy_repo_id"]) || "-"],
         ["preflight", manipulationPreflight.status || "-"],
         ["current_stage", manipulationStage.current_stage || "-"],
-        ["execution_safety_progress", manipulationSarm.progress_score === undefined ? "-" : manipulationSarm.progress_score],
-        ["failure_precursor", manipulationSarm.failure_precursor === undefined ? "-" : manipulationSarm.failure_precursor],
         ["handoff_status", robotTaskResult.handoff_status || manipulationDecision.handoff_status || "-"],
         ["next_agent", robotTaskResult.next_action || manipulationDecision.recommended_next_agent || "-"],
       ],
@@ -5726,7 +5723,6 @@ function renderManipulationReportDetails(report) {
   const vision = manipulationReport.vision_context || {};
   const runtime = manipulationReport.rollout_runtime || {};
   const stage = manipulationReport.stage_machine || {};
-  const sarm = manipulationReport.sarm || {};
   const decision = manipulationReport.decision || {};
   const knowledge = manipulationReport.knowledge_payload || {};
   const blockers = [...(preflight.blocking_reasons || []), ...(preflight.warnings || [])];
@@ -5770,14 +5766,10 @@ function renderManipulationReportDetails(report) {
       ])}
       <h5>Blocking / Warning Signals</h5>
       ${renderReportList(blockers, "No Manipulation preflight blockers recorded.", 16)}
-      <h5>Execution Supervision</h5>
+      <h5>Task Stages</h5>
       ${runtimeRows([
         ["current_stage", stage.current_stage || "-"],
         ["completed", `${completedStages.length}/${taxonomy.length || "?"}`],
-        ["next_expected", stage.next_expected_stage || "-"],
-        ["progress_score", sarm.progress_score === undefined ? "-" : sarm.progress_score],
-        ["failure_precursor", sarm.failure_precursor === undefined ? "-" : sarm.failure_precursor],
-        ["recovery", sarm.recovery_suggested === undefined ? "-" : sarm.recovery_suggested],
       ])}
       <h5>Rollout Runtime / Evidence</h5>
       ${runtimeRows([
@@ -8096,7 +8088,7 @@ function agentDataChannels(report, agentId) {
       dashboardChannel("Policy", manipulation.policy_plan || latestReportPayload(report, ["policy_path", "checkpoint_path", "policy_repo_id"])),
       dashboardChannel("Preflight", manipulation.preflight),
       dashboardChannel("Vision Context", manipulation.vision_context),
-      dashboardChannel("Execution Supervision", manipulation.execution_safety || manipulation.sarm),
+      dashboardChannel("Task Stages", manipulation.stage_machine),
       dashboardChannel("Robot Result", robot),
       ...baseChannels,
     ];
@@ -8701,25 +8693,16 @@ function renderAgentVisualizationCard(report, status, agentLabel) {
       ? renderMiniBarChart(rows, { label: histRows.length ? "vision confidence histogram" : "vision signal confidence", emptyText: "No confidence-bearing vision signals are present yet." })
       : renderAgentEvidenceBoard(report, status, agentLabel, { title: "Vision Evidence Board" });
   } else if (agentId === "manipulation") {
-    title = "Execution Supervision";
+    title = "Preflight Readiness";
     const manipulation = latestManipulationReport(report) || {};
-    const supervision = manipulation.execution_safety || manipulation.sarm || {};
     const preflight = manipulation.preflight || {};
-    const numericRows = [
-      ["progress_score", supervision.progress_score, "running"],
-      ["risk_score", supervision.risk_score, "warning"],
-      ["failure_precursor", supervision.failure_precursor, "danger"],
-    ].map(([label, value, tone]) => {
-      const number = dashboardFiniteNumber(value);
-      return number === null ? null : { label, value: number, max: number <= 1 ? 1 : 100, meta: numberText(number, 3), tone };
-    }).filter(Boolean);
     const gates = [
       { label: "robot_ready", status: preflight.robot_ready },
-      { label: "vision_ready", status: preflight.vision_ready },
-      { label: "workspace_clear", status: preflight.workspace_clear },
+      { label: "camera_ready", status: preflight.camera_ready },
+      { label: "policy_ready", status: preflight.policy_ready },
+      { label: "operator_confirmed", status: preflight.operator_confirmed },
     ].filter((item) => item.status !== undefined);
     const sections = [];
-    if (dashboardMiniBarItemCount(numericRows)) sections.push(renderMiniBarChart(numericRows, { label: "manipulation supervision scores", emptyText: "No manipulation supervision scores are present yet." }));
     if (dashboardGateItemCount(gates)) sections.push(renderGateStatusBars(gates, { label: "manipulation preflight gates", compact: true, emptyText: "No manipulation preflight booleans are present yet." }));
     body = sections.length ? sections.join("") : renderAgentEvidenceBoard(report, status, agentLabel, { title: "Manipulation Evidence Board" });
   } else if (agentId === "equipment") {
@@ -14685,7 +14668,6 @@ function renderManipulationKpis(kpis = {}) {
     ["Manipulation Success", "manipulation_success_pct", "%", "closed loop"],
     ["Grasp Success", "grasp_success_pct", "%", "grasp planner"],
     ["Avg Execution Time", "avg_execution_time_s", "s", "rollout"],
-    ["Path Efficiency", "path_efficiency_pct", "%", "motion plan"],
     ["Max Joint Velocity", "max_joint_velocity_pct", "%", "limit usage"],
     ["Safety Score", "safety_score_pct", "%", "guardian"],
   ];
@@ -14782,15 +14764,14 @@ function renderManipulationChecks(execution = {}) {
   `;
 }
 
-function renderManipulationWorkspace(workspace = {}, reachability = {}) {
+function renderManipulationWorkspace(workspace = {}) {
   const trajectory = Array.isArray(workspace.trajectory) ? workspace.trajectory : [];
-  const hotspots = Array.isArray(reachability.hotspots) ? reachability.hotspots : [];
-  if (!trajectory.length && !hotspots.length) return renderVizEmpty("No robot workspace trajectory is available.");
+  if (!trajectory.length) return renderVizEmpty("No robot workspace trajectory is available.");
   const width = 360;
   const height = 180;
   const pad = { left: 26, right: 18, top: 16, bottom: 26 };
-  const xs = [...trajectory.map((point) => point.x_m), ...hotspots.map((point) => point.x)].map(Number).filter(Number.isFinite);
-  const ys = [...trajectory.map((point) => point.y_m), ...hotspots.map((point) => point.y)].map(Number).filter(Number.isFinite);
+  const xs = trajectory.map((point) => point.x_m).map(Number).filter(Number.isFinite);
+  const ys = trajectory.map((point) => point.y_m).map(Number).filter(Number.isFinite);
   const xDomain = finiteRange(xs, [-0.3, 0.35]);
   const yDomain = finiteRange(ys, [-0.2, 0.25]);
   const x = (value) => scaleLinear(value, xDomain, [pad.left, width - pad.right]);
@@ -14798,14 +14779,10 @@ function renderManipulationWorkspace(workspace = {}, reachability = {}) {
   const path = trajectory.map((point) => [x(point.x_m), y(point.y_m)]);
   return `
     <div class="ar-man-workspace">
-      <svg class="ar-man-workspace-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="robot workspace trajectory and reachability hotspots">
+      <svg class="ar-man-workspace-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="robot workspace trajectory">
         <rect x="${pad.left}" y="${pad.top}" width="${width - pad.left - pad.right}" height="${height - pad.top - pad.bottom}" rx="8"></rect>
         <line x1="${pad.left}" y1="${y(0)}" x2="${width - pad.right}" y2="${y(0)}" class="axis"></line>
         <line x1="${x(0)}" y1="${pad.top}" x2="${x(0)}" y2="${height - pad.bottom}" class="axis"></line>
-        ${hotspots.map((point, index) => {
-          const score = dashboardFiniteNumber(point.score) ?? 0.5;
-          return `<circle class="hotspot" cx="${numberText(x(point.x), 2)}" cy="${numberText(y(point.y), 2)}" r="${numberText(5 + score * 8, 2)}"><title>hotspot ${index + 1}: ${numberText(score * 100, 0)}%</title></circle>`;
-        }).join("")}
         ${path.length ? `<polyline points="${polyline(path)}" class="path"></polyline>` : ""}
         ${path.map(([px, py], index) => `<circle class="path-point" cx="${numberText(px, 2)}" cy="${numberText(py, 2)}" r="${index === 0 || index === path.length - 1 ? 4 : 2.6}"><title>step ${index + 1}</title></circle>`).join("")}
         <text x="${pad.left}" y="${height - 7}">x/y workspace</text>
@@ -14821,23 +14798,7 @@ function renderManipulationWorkspace(workspace = {}, reachability = {}) {
 }
 
 function renderManipulationReachabilityMap(reachability = {}) {
-  const hotspots = Array.isArray(reachability.hotspots) ? reachability.hotspots : [];
-  if (!hotspots.length) return renderVizEmpty("No reachability map hotspots are available.");
-  return `
-    <div class="ar-man-reach-grid" role="list" aria-label="reachability hotspots">
-      ${hotspots.slice(0, 9).map((point) => {
-        const score = dashboardPercent((dashboardFiniteNumber(point.score) ?? 0) * 100);
-        return `
-          <article role="listitem" style="--heat:${numberText(score, 2)}%;">
-            <strong>${escapeHtml(numberText(score, 0))}%</strong>
-            <span>x=${escapeHtml(numberText(point.x, 2))}</span>
-            <small>y=${escapeHtml(numberText(point.y, 2))}</small>
-          </article>
-        `;
-      }).join("")}
-    </div>
-    ${renderDashboardRows([["status", reachability.status || "-"]])}
-  `;
+  return renderDashboardRows([["status", reachability.status || "-"]]);
 }
 
 function renderManipulationSafety(safety = {}) {
@@ -14872,7 +14833,7 @@ function renderManipulationPoseTable(pose = {}) {
         </div>
       `).join("")}
     </div>
-    ${renderDashboardRows([["pose_error_mm", pose.pose_error_mm ?? "-"], ["rotation_error_deg", pose.rotation_error_deg ?? "-"]])}
+    ${renderDashboardRows([["rotation_error_deg", pose.rotation_error_deg ?? "-"]])}
   `;
 }
 

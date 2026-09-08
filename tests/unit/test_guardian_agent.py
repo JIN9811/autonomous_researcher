@@ -74,8 +74,6 @@ def _state(
     mode: Mode = Mode.TEST,
     loop_count: int = 0,
     spec: dict[str, object] | None = None,
-    precursor: float = 0.2,
-    recovery_suggested: bool = False,
     uncertainty: float = 0.1,
     objective_score: float = 0.7,
     anomaly: bool = False,
@@ -90,11 +88,6 @@ def _state(
         latest_analysis={
             "objective_score": objective_score,
             "uncertainty": uncertainty,
-            "sarm": {
-                "failure_precursor": precursor,
-                "recovery_suggested": recovery_suggested,
-                "progress_score": 0.8,
-            },
         },
         loop_count=loop_count,
     )
@@ -156,24 +149,24 @@ async def test_guardian_stops_on_design_validation_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_guardian_stops_on_high_precursor() -> None:
+async def test_guardian_reports_only_existing_safety_evidence() -> None:
     agent = GuardianAgent()
     ctx = _CtxStub()
 
-    result = await agent.run(_state(mode=Mode.LIVE, precursor=0.95), ctx)
+    result = await agent.run(_state(mode=Mode.LIVE), ctx)
     guardian = result.data["guardian"]
 
-    assert guardian["decision"] == "stop"
-    assert guardian["action"] == "safe_stop"
-    assert any(item.failure_type == "high_precursor" for item in ctx.failure_memory.recent(10))
+    assert guardian["decision"] == "continue"
+    assert set(guardian) == {"decision", "action", "reason", "policy_note", "retry_pressure",
+        "design_validation", "health_validation", "graph_gate_pressure", "consistency"}
 
 
 @pytest.mark.asyncio
-async def test_guardian_uses_recover_action_when_recovery_signal_present() -> None:
+async def test_guardian_uses_recover_action_when_camera_anomaly_present() -> None:
     agent = GuardianAgent()
     ctx = _CtxStub()
 
-    result = await agent.run(_state(mode=Mode.LIVE, precursor=0.68, recovery_suggested=True), ctx)
+    result = await agent.run(_state(mode=Mode.LIVE, anomaly=True), ctx)
     guardian = result.data["guardian"]
 
     assert guardian["decision"] == "continue"
@@ -185,7 +178,7 @@ async def test_guardian_uses_retry_action_on_high_uncertainty() -> None:
     agent = GuardianAgent()
     ctx = _CtxStub()
 
-    result = await agent.run(_state(uncertainty=0.36, precursor=0.2), ctx)
+    result = await agent.run(_state(uncertainty=0.36), ctx)
     guardian = result.data["guardian"]
 
     assert guardian["decision"] == "continue"
@@ -232,7 +225,7 @@ async def test_guardian_stops_on_blocking_hardware_alert_metadata() -> None:
 async def test_guardian_recovers_when_analysis_blocks_utm_data_quality() -> None:
     agent = GuardianAgent()
     ctx = _CtxStub()
-    state = _state(mode=Mode.LIVE, objective_score=0.0, uncertainty=0.2, precursor=0.2)
+    state = _state(mode=Mode.LIVE, objective_score=0.0, uncertainty=0.2)
     state.latest_analysis.update(
         {
             "ok": False,
@@ -256,7 +249,7 @@ async def test_guardian_recovers_when_analysis_blocks_utm_data_quality() -> None
 async def test_guardian_recovers_when_equipment_handoff_gate_blocked() -> None:
     agent = GuardianAgent()
     ctx = _CtxStub()
-    state = _state(mode=Mode.LIVE, objective_score=0.0, uncertainty=0.2, precursor=0.2)
+    state = _state(mode=Mode.LIVE, objective_score=0.0, uncertainty=0.2)
     state.latest_analysis.update(
         {
             "ok": False,
@@ -283,7 +276,7 @@ async def test_guardian_recovers_when_equipment_handoff_gate_blocked() -> None:
 async def test_guardian_recovers_when_multifidelity_trust_gate_blocks_bo() -> None:
     agent = GuardianAgent()
     ctx = _CtxStub()
-    state = _state(mode=Mode.LIVE, objective_score=0.7, uncertainty=0.18, precursor=0.2)
+    state = _state(mode=Mode.LIVE, objective_score=0.7, uncertainty=0.18)
     state.latest_analysis.update(
         {
             "ok": True,
@@ -314,7 +307,7 @@ async def test_guardian_recovers_when_multifidelity_trust_gate_blocks_bo() -> No
 async def test_guardian_recovers_on_blocking_graph_gate_metadata() -> None:
     agent = GuardianAgent()
     ctx = _CtxStub()
-    state = _state(mode=Mode.LIVE, precursor=0.2, uncertainty=0.1)
+    state = _state(mode=Mode.LIVE, uncertainty=0.1)
     state.run_metadata["guardian_gates"] = [
         {
             "schema": "guardian_gate_result.v1",
@@ -341,7 +334,7 @@ async def test_guardian_recovers_on_blocking_graph_gate_metadata() -> None:
 async def test_guardian_safe_stops_on_graph_gate_safe_stop() -> None:
     agent = GuardianAgent()
     ctx = _CtxStub()
-    state = _state(mode=Mode.LIVE, precursor=0.2, uncertainty=0.1)
+    state = _state(mode=Mode.LIVE, uncertainty=0.1)
     state.run_metadata["guardian_gates"] = [
         {
             "schema": "guardian_gate_result.v1",
@@ -366,7 +359,7 @@ async def test_guardian_safe_stops_on_graph_gate_safe_stop() -> None:
 async def test_guardian_test_loop_cap_overrides_recoverable_graph_gate_pressure() -> None:
     agent = GuardianAgent()
     ctx = _CtxStub()
-    state = _state(mode=Mode.TEST, loop_count=GuardianAgent.TEST_LOOP_CYCLE_LIMIT - 1, precursor=0.2, uncertainty=0.1)
+    state = _state(mode=Mode.TEST, loop_count=GuardianAgent.TEST_LOOP_CYCLE_LIMIT - 1, uncertainty=0.1)
     state.run_metadata["guardian_gates"] = [
         {
             "schema": "guardian_gate_result.v1",

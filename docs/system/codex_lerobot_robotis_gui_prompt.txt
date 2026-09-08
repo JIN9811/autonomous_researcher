@@ -13,7 +13,7 @@ Canonical project guideline:
 
 ## Truthfulness And Source Rules
 
-- Do not invent facts about LeRobot, ROBOTIS OMX-AI, ROS 2, Physical AI Tools, SARM, model names, CLI flags, API contracts, hardware limits, or repository structure.
+- Do not invent facts about LeRobot, ROBOTIS OMX-AI, ROS 2, Physical AI Tools, model names, CLI flags, API contracts, hardware limits, or repository structure.
 - Before using an external fact, verify it from official sources or the current local repository.
 - Prefer official sources: Hugging Face LeRobot docs/GitHub, ROBOTIS AI / e-Manual docs/GitHub, ROS 2 docs when needed, and current repository files.
 - In the final implementation summary, list files changed, tests run, external sources checked, verified facts, assumptions, and remaining risks before real robot motion.
@@ -40,7 +40,7 @@ Stage order is graph-configured in `graphs/configs/*.yaml`. Default closed-loop 
 design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian
 ```
 
-Do not create new top-level stages for LeRobot or SARM.
+Do not create new top-level stages for LeRobot.
 
 Agent contract:
 
@@ -73,8 +73,6 @@ Rules:
 - Do not rename existing tools.
 - Do not remove `robot.pick_place`.
 - Add `lerobot.*` tools as a new MCP-style tool group.
-- Keep SARM inside `ManipulationAgent` / `submodules/sarm`.
-- Do not create a top-level `sarm_agent.py`.
 - Do not create a top-level `lerobot_agent.py`.
 - Do not let LeRobot bypass Vision Agent camera ownership.
 - Do not let Guardian directly run robot commands.
@@ -93,7 +91,6 @@ Implement one coherent LeRobot/ROBOTIS path across:
 - SSE / Live GUI progress
 - Manipulation Agent strategy selection
 - VisionObservation handoff
-- SARM advisory output
 - structured logging / replay data shape
 - test mode
 - live-mode gates
@@ -145,7 +142,7 @@ Dedicated LeRobot GUI sections:
 - Dataset / Visualization
 - Training
 - Inference / Rollout
-- Manipulation Agent + SARM
+- Manipulation Agent
 - Logs / Replay / Fault Injection
 
 ## Robot Profile Requirement
@@ -168,7 +165,7 @@ Rules:
 - ROBOTIS OMX-AI is the first live hardware target.
 - SO-101 must remain test-mode compatible and live-disabled until real hardware verification exists.
 - Robot-specific constants belong in profile/adapter config, not global state.
-- Dataset, calibration, training, rollout, replay, and SARM records must include `profile_id`.
+- Dataset, calibration, training, rollout, and replay records must include `profile_id`.
 - Do not assume a policy trained on ROBOTIS OMX-AI transfers to SO-101.
 
 Minimum profile fields:
@@ -386,7 +383,6 @@ Rules:
 Manipulation output should keep:
 
 - `manipulation`
-- `sarm`
 - `protocol_note`
 
 Add optional fields inside `manipulation`:
@@ -434,36 +430,6 @@ Allowed `source` values:
 - `replay`
 - `simulator`
 
-## SARM Requirement
-
-SARM remains advisory inside Manipulation Agent.
-
-Required SARM output:
-
-- `progress_score`
-- `stage_index`
-- `stage_name`
-- `stage_confidence`
-- `progress_delta`
-- `failure_precursor_score`
-- `recovery_hint`
-- `reward_model_path`
-- `source`
-
-Minimum implementation:
-
-- deterministic test-mode scorer
-- no live SARM model required
-- output visible in GUI/logs
-- Guardian can consume recovery hints
-
-Optional extension:
-
-- configured SARM reward model
-- dataset subtask annotations
-- `sarm_progress.parquet`
-- RA-BC weighting if selected policy supports it
-
 ## Test Mode Requirements
 
 The end-to-end test mode must exercise:
@@ -480,7 +446,6 @@ The end-to-end test mode must exercise:
 - fake rollout
 - Manipulation Agent `lerobot_policy`
 - VisionObservation handoff
-- SARM deterministic output
 - SSE events
 - Live GUI progress messages
 - blocked live gate responses
@@ -530,7 +495,6 @@ Implement deterministic faults for:
 - stop during recording
 - stop during rollout
 - safe-stop timeout
-- SARM timeout
 - model timeout
 
 Each fault must produce:
@@ -607,7 +571,6 @@ Use official sources and cite what was checked:
 - https://huggingface.co/docs/lerobot/en/omx
 - https://huggingface.co/docs/lerobot/main/en/so101
 - https://huggingface.co/docs/lerobot/main/inference
-- https://huggingface.co/docs/lerobot/sarm
 - https://huggingface.co/docs/lerobot/dataset_subtask
 - https://github.com/huggingface/lerobot
 - https://ai.robotis.com/omx/introduction_omx.html

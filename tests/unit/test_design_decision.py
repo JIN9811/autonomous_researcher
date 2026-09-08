@@ -177,7 +177,7 @@ async def test_cancellation_keeps_completed_tool_evidence(tmp_path):
 def test_guardian_does_not_compare_measured_objective_to_marked_legacy_proxy():
     from agents.guardian_agent import GuardianAgent
     args = dict(latest_analysis={"objective_score":0.1}, latest_observations={},
-                precursor=0, uncertainty=0, retry_pressure=0)
+                uncertainty=0, retry_pressure=0)
     legacy = GuardianAgent._consistency_check(spec={"expected_objective_proxy_score":0.9}, **args)
     assert any("proxy" in w for w in legacy["warnings"])
     current = GuardianAgent._consistency_check(spec={"expected_objective_proxy_score":0.9,

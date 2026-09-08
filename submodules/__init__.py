@@ -1,1 +1,1 @@
-"""Submodules package for SARM and VLA integrations."""
+"""Submodules package for VLA integrations."""

@@ -45,7 +45,7 @@ LeRobot / ROBOTIS behavior in test mode:
 - `/api/lerobot/ports` returns deterministic fake robot/teleop ports from `configs/lerobot.yaml`.
 - `lerobot.teleoperate.*`, `lerobot.record.*`, `lerobot.train.*`, and `lerobot.rollout.*` create deterministic in-process fake sessions with command previews and step traces.
 - `ManipulationAgent` can call `lerobot.rollout.start` in test mode when the experiment spec requests `manipulation_strategy: lerobot_policy`.
-- Test mode must not move a robot. It validates profile selection, payload shape, command preview, event trace, and SARM integration only.
+- Test mode must not move a robot. It validates profile selection, payload shape, command preview, event trace, and stage-machine integration only.
 - Live mode remains gated by the selected LeRobot profile and must fail closed unless explicit live gates are enabled.
 - The LeRobot GUI path browser, policy list, and dataset visualization endpoints are usable in test mode.
 - Dataset visualization in test mode reads local metadata/media if present and otherwise returns an empty but valid visualization payload.

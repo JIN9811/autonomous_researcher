@@ -6686,7 +6686,6 @@ class MainController:
         ):
             metadata.pop(key, None)
         self._state.latest_observations = {}
-        self._state.latest_analysis.pop("sarm", None)
 
     def _design_constraints_for_cycle(self, base_constraints: dict[str, Any]) -> dict[str, Any]:
         """Merge BO recommendation into DesignAgent constraints for the next cycle."""
@@ -8486,14 +8485,10 @@ class MainController:
                 self._merge_vision_completion_into_specimen_result(data["observation"], data)
         if "analysis" in data:
             self._state.latest_analysis.update(data["analysis"])
-        if "sarm" in data:
-            self._state.latest_analysis["sarm"] = data["sarm"]
         if "manipulation" in data:
             manipulation = data["manipulation"] if isinstance(data["manipulation"], dict) else {}
             self._state.run_metadata["manipulation_result"] = manipulation
             self._state.latest_analysis["last_grasp_score"] = float(manipulation.get("grasp_score", 0.0))
-            if "sarm" in data:
-                self._state.latest_analysis["sarm"] = data["sarm"]
         if "equipment_result" in data:
             equipment_result = data["equipment_result"] if isinstance(data["equipment_result"], dict) else {}
             self._state.run_metadata["equipment_result"] = equipment_result
@@ -8885,7 +8880,6 @@ class MainController:
             )
         if stage == Stage.MANIPULATION:
             manipulation = data.get("manipulation") if isinstance(data.get("manipulation"), dict) else {}
-            sarm = data.get("sarm") if isinstance(data.get("sarm"), dict) else {}
             transfer = manipulation.get("transfer_task") if isinstance(manipulation.get("transfer_task"), dict) else {}
             return (
                 "Manipulation Agent가 3DP 출력물 이송 단계를 실행했습니다.\n\n"
@@ -8893,9 +8887,7 @@ class MainController:
                 f"- status: {self._runtime_value(manipulation.get('status'))}\n"
                 f"- completion_status: {self._runtime_value(manipulation.get('completion_status'))}\n"
                 f"- source -> target: {self._runtime_value(transfer.get('source'))} -> {self._runtime_value(transfer.get('target'))}\n"
-                f"- grasp_score: {self._runtime_value(manipulation.get('grasp_score'))}\n"
-                f"- sarm_progress: {self._runtime_value(sarm.get('progress_score'))}\n"
-                f"- recovery_hint: {self._runtime_value(sarm.get('recovery_hint'))}"
+                f"- grasp_score: {self._runtime_value(manipulation.get('grasp_score'))}"
             )
         if stage == Stage.EQUIPMENT:
             equipment = data.get("equipment_result") if isinstance(data.get("equipment_result"), dict) else {}
@@ -8972,7 +8964,6 @@ class MainController:
                 f"- decision: {decision}\n"
                 f"- action: {action or 'continue'}\n"
                 f"- reason: {reason or 'n/a'}\n"
-                f"- precursor: {self._runtime_value(guardian.get('precursor'))}\n"
                 f"- design_validation: {json.dumps(guardian.get('design_validation', {}), ensure_ascii=False)}\n"
                 f"- health_validation: {json.dumps(guardian.get('health_validation', {}), ensure_ascii=False)}\n"
                 f"- consistency: {json.dumps(guardian.get('consistency', {}), ensure_ascii=False)}"

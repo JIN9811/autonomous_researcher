@@ -2,16 +2,16 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Refresh the LeRobot GUI Manipulation Agent Bridge so it matches the current Manipulation runtime supervisor contract without policy-name or SARM-first presentation.
+**Goal:** Refresh the LeRobot GUI Manipulation Agent Bridge so it matches the current Manipulation runtime supervisor contract with policy-neutral runtime presentation.
 
-**Architecture:** Keep existing backend endpoints and payload wiring. Update the bridge panel shell, report renderer, and static tests so the GUI presents runtime cards for bridge state, port/camera lease, policy runtime, Rerun telemetry, Vision gate, home pose/interlock, and execution safety. Preserve existing run/test/preview/stop/status behavior.
+**Architecture:** Keep existing backend endpoints and payload wiring. Update the bridge panel shell, report renderer, and static tests so the GUI presents runtime cards for bridge state, port/camera lease, policy runtime, Rerun telemetry, Vision gate, home pose/interlock, and Task Stages. Preserve existing run/test/preview/stop/status behavior.
 
 **Tech Stack:** FastAPI templates, vanilla JavaScript, pytest static tests.
 
 ## Global Constraints
 
-- Do not remove legacy `sarm` backend fields in this pass; GUI must use `Execution Safety`.
-- Do not title cards with SmolVLA, Pi0.5, or SARM.
+- GUI uses preflight and measured interlocks; no compatibility score aliases.
+- Do not title cards with individual policies.
 - Do not change LeRobot rollout execution commands in this pass.
 - Preserve existing Manipulation Agent bridge buttons and endpoint contracts.
 - Write tests before production code.
@@ -41,11 +41,9 @@ def test_manipulation_bridge_runtime_supervisor_cards_are_wired() -> None:
     assert "Rerun Telemetry" in template
     assert "Vision Completion Gate" in template
     assert "Home Pose / Interlock" in template
-    assert "Execution Safety" in template
-    assert "Pi0.5/SARM state" not in template
+    assert "Task Stages" in template
     assert "Pi0.5 / Policy Runtime" not in script
-    assert "SARM Stage Progress" not in script
-    assert "executionSafetyFromReport" in script
+    assert "preflight" in script
     assert "rerunTelemetryFromReport" in script
 ```
 
@@ -57,7 +55,7 @@ Expected: FAIL because the current template and renderer still use old labels.
 
 - [ ] **Step 3: Implement minimal GUI update**
 
-Modify `web/templates/lerobot.html` bridge copy and static card shell. Modify `web/static/lerobot.js` renderer to use `Execution Safety`, `Robot Policy Runtime`, and `Rerun Telemetry`.
+Modify `web/templates/lerobot.html` bridge copy and static card shell. Modify `web/static/lerobot.js` renderer to use `Task Stages`, `Robot Policy Runtime`, and `Rerun Telemetry`.
 
 - [ ] **Step 4: Run test to verify it passes**
 

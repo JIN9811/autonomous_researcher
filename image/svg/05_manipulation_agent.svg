@@ -29,8 +29,8 @@ text { font-family: Noto Sans CJK KR, Noto Sans, DejaVu Sans, Arial, sans-serif;
 <tspan x="610" dy="0">Role</tspan>
 </text>
 <text x="610" y="415" class="body" font-size="26">
-<tspan x="610" dy="0">LeRobot workflow와 SARM submodule을 통해 물리</tspan>
-<tspan x="610" dy="33">robot manipulation을 관리한다.</tspan>
+<tspan x="610" dy="0">LeRobot workflow를 통해 bounded robot</tspan>
+<tspan x="610" dy="33">manipulation을 관리한다.</tspan>
 </text>
 <text x="610" y="510" class="section" font-size="32" fill="#1e3a8a">
 <tspan x="610" dy="0">Core Actions</tspan>
@@ -120,15 +120,15 @@ text { font-family: Noto Sans CJK KR, Noto Sans, DejaVu Sans, Arial, sans-serif;
 </text>
 <text x="120" y="937" class="body" font-size="24" fill="#111827">
 <tspan x="120" dy="0">conda env lerobot · LeRobot CLI/API bridge ·</tspan>
-<tspan x="120" dy="30">top/wrist cameras · robot process registry · SARM</tspan>
-<tspan x="120" dy="30">submodule</tspan>
+<tspan x="120" dy="30">top/wrist cameras · robot process registry ·</tspan>
+<tspan x="120" dy="30">Observed task stage</tspan>
 </text>
 <rect x="980" y="850" width="860" height="195" rx="18" fill="#fff8f8" stroke="#b91c1c" stroke-width="2"/>
 <text x="1015" y="895" class="section" font-size="30" fill="#b91c1c">
 <tspan x="1015" dy="0">Safety / Contract</tspan>
 </text>
 <text x="1020" y="937" class="body" font-size="24" fill="#111827">
-<tspan x="1020" dy="0">SARM is internal only · Live gate required · Re-</tspan>
+<tspan x="1020" dy="0">Measured interlocks · Live gate required · Re-</tspan>
 <tspan x="1020" dy="30">resolve by-id after reconnect · Stop before motion ·</tspan>
 <tspan x="1020" dy="30">Force-stop clears processes</tspan>
 </text>

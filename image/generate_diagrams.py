@@ -173,7 +173,7 @@ def generate_system(diagram: dict, width: int, height: int) -> str:
     y1 = 330
     x_positions = [80, 430, 780, 1130, 1480]
     row1 = ["Orchestrator", "Design", "Specimen Making", "Vision", "Manipulation"]
-    subtitles1 = ["route + state", "experiment_spec", "STL + printer.prepare", "observation", "robot / SARM"]
+    subtitles1 = ["route + state", "experiment_spec", "STL + printer.prepare", "observation", "robot / task stage"]
     for x, title, sub in zip(x_positions, row1, subtitles1):
         fill = COLORS["soft_blue"] if title in {"Orchestrator", "Design"} else COLORS["soft_green"]
         accent = COLORS["blue"] if title in {"Orchestrator", "Design"} else COLORS["green"]

@@ -670,7 +670,7 @@ Live GUI planning single-step execution preserves the same payload through `Main
 `graphs/modules/manipulation/module.yaml` now describes the internal Manipulation
 Agent flow as bounded task resolution, Vision/specimen context collection,
 policy/profile/live-gate preflight, backend selection, bounded LeRobot rollout,
-rollout-event capture, SARM-lite stage scoring, post-place Vision verification
+rollout-event capture, observed task-stage tracking, post-place Vision verification
 request, recover/stop/handoff decision, report packaging, and evidence storage.
 
 The executable handler remains `agent.manipulation_agent`; Runtime IDE/module

@@ -11,7 +11,6 @@ The GUI must not present the current policy name, such as SmolVLA or Pi0.5, as t
 - The existing LeRobot bridge already owns teleoperation, recording, rollout, status, stale process cleanup, camera preflight, saved port profiles, and Rerun viewer PID/URL detection.
 - The Manipulation Agent already delegates LeRobot policies through `lerobot.rollout.start`.
 - The Vision Agent already produces readiness fields such as `camera_returned_to_vla`.
-- Guardian and existing tests still consume SARM-shaped fields. Removing SARM outright would break compatibility.
 - Rerun viewer embedding alone is not sufficient. The operator needs Rerun-derived runtime elements as native cards in the Live GUI and LeRobot GUI.
 
 ## Scope
@@ -24,13 +23,12 @@ In scope:
 - Manipulation Agent bridge panel aligned with actual runtime state.
 - Vision Agent completion signal stops inference/rollout.
 - Home pose and interlock status for standby/inference readiness.
-- SARM UI removal with backend compatibility alias.
+- Execution readiness based on preflight and measured interlocks.
 
 Out of scope for this pass:
 
 - Replacing LeRobot internals.
 - Replacing Rerun with a custom viewer.
-- Removing the legacy `sarm` key from Guardian and historical test contracts.
 - Training-policy-specific GUI branding.
 
 ## Runtime Model
@@ -118,20 +116,12 @@ Implementation status:
 
 ### Manipulation Agent Report
 
-Canonical output:
-
-- `execution_safety`
-  - progress score
-  - risk stage
-  - precursor flag
-  - recovery suggestion
-  - interlock state
-
-Compatibility output:
-
-- `sarm`
-  - alias to `execution_safety`
-  - preserved until Guardian and tests are migrated
+Canonical report fields include `preflight`, `stage_machine`, `vision_context`,
+and the task `decision`, with verification under `decision.verification`.
+Measured post-place interlock evidence is carried in
+`handoff_packet.post_place_interlock` and the execution response, not as a
+top-level report field. Task judgment uses stopped-rollout evidence and
+Vision/LLM review. No predicted progress or recovery score is emitted.
 
 Policy naming rule:
 
@@ -233,7 +223,7 @@ Replace policy-specific wording with a compact bridge dashboard:
 - `Rerun Telemetry`
 - `Vision Completion Gate`
 - `Home Pose / Interlock`
-- `Execution Safety`
+- `Task Stages`
 
 Each card shows one-line status first. Details expand on click.
 
@@ -254,7 +244,8 @@ Policy Runtime    IDLE/RUNNING/FAILED
 Vision Gate       WAITING/DETECTED/TIMEOUT
 ```
 
-No `SARM` label appears in GUI. `Execution Safety` is used instead.
+Task Stages displays the current and completed stages from `stage_machine`.
+Execution readiness remains governed by preflight and measured interlocks.
 
 ### Rerun Telemetry Cards
 
@@ -304,7 +295,7 @@ Implementation status:
 
 Unit tests:
 
-- Manipulation Agent emits `execution_safety` and legacy `sarm` alias.
+- Manipulation Agent emits preflight, stage machine, interlock, and task-decision evidence.
 - Manipulation Agent blocks when active camera lease is not returned.
 - Manipulation Agent stops rollout when Vision completion signal is present.
 - Manipulation Agent requests graph routing back to Vision after initial rollout completion.
@@ -327,29 +318,26 @@ Browser/UI tests:
 
 - Manipulation cards expand/collapse without losing runtime state.
 - Rerun telemetry card displays viewer URL/PID when available.
-- Execution Safety appears, and `SARM` does not appear in visible GUI text.
+- Task Stages displays observed current/completed stages without predicted reward or risk.
 
 ## Migration Plan
 
-1. Add backend status fields without removing old keys.
-2. Add `execution_safety` while preserving `sarm` alias.
-3. Update LeRobot GUI bridge panel labels and card layout.
-4. Update Live GUI Manipulation Agent report cards.
-5. Add tests around aliases, camera lease blocking, Vision completion stop, and Rerun telemetry.
-6. After Guardian migration is complete in a later pass, remove direct `sarm` dependency.
+1. Expose backend status fields for preflight, stage machine, and measured interlocks.
+2. Update LeRobot GUI bridge panel labels and card layout.
+3. Update Live GUI Manipulation Agent report cards.
+4. Add tests around camera lease blocking, Vision completion stop, measured interlocks, and Rerun telemetry.
 
 ## Acceptance Criteria
 
-- The operator can see port lease, active camera, policy runtime, Vision gate, Rerun telemetry, home pose, and execution safety in Manipulation Agent cards.
+- The operator can see port lease, active camera, policy runtime, Vision gate, Rerun telemetry, home pose, and Task Stages in Manipulation Agent cards.
 - The Manipulation Agent Bridge configuration matches the Inference / Rollout configuration pattern, with only a Manipulation Task selector added.
 - Each Manipulation Task can persist its own policy, instruction, duration, safety, RTC, and observation settings.
-- The GUI no longer names the card after SmolVLA, Pi0.5, or SARM.
+- The GUI no longer names the card after individual policies.
 - Current policy type remains visible as metadata.
 - Rerun viewer remains openable, but its important runtime elements are represented as native cards.
 - Vision Agent completion can stop active inference.
 - The graph can route from Manipulation back to Vision for UTM verification and then forward to Lab Equipment after verification.
 - A verified UTM placement stops the existing rollout session without launching a duplicate rollout.
-- Existing Guardian compatibility is preserved through the `sarm` alias.
 
 ## Implemented Joint Pose And Policy Tracking Extension (2026-07-13)
 

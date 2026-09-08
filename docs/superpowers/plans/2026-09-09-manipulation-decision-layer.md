@@ -8,7 +8,7 @@ governing_design: docs/superpowers/specs/2026-09-07-five-area-agent-restructurin
 audience: [developer, maintainer]
 scope: [manipulation, decision-layer]
 summary: Bounded skill selection and post-Vision task-result judgment on the existing cycle.
-source_of_truth: [agents/manipulation_agent.py, agents/manipulation_decision.py, utils/utm_clear_cycle.py]
+source_of_truth: [agents/manipulation_agent.py, agents/manipulation_decision.py, utils/utm_clear_cycle.py, agents/equipment_agent.py, device_bridges/windows_pyautogui_bridge.py]
 last_verified: 2026-09-09
 verified_against: working-tree
 related_docs: [docs/agents/manipulation_agent.md]
@@ -78,3 +78,72 @@ Remaining limits: small development cases, not a benchmark; no new physical comm
 Existing LIVE pickup freshness can expire during inference and remains fail-closed.
 No new policy/task-instruction changes or pose-specific policy routing were added.
 No full-repository pytest claim; only the named suites were run for this reconstruction.
+
+## Runtime cleanup verification
+
+The unused scoring subsystem, derived report fields, runtime consumers and UI
+cards were removed. Observed task stages, bridge execution, preflight, stop,
+Vision verification and the two Manipulation decisions retain their existing
+paths. Historical experiment artifacts remain unchanged.
+
+| Check | Result | Scope |
+|---|---|---|
+| Agent regression | 304 passed | The 14-file command above plus `test_guardian_agent.py` and `test_design_decision.py` |
+| Graph/runtime regression | 70 passed | `tests/unit/test_langgraph_runtime.py` |
+| Equipment/simulator/clearance regression | 259 passed | Equipment Agent, Windows bridge, simulator readiness and disposal-cycle tests |
+| Full virtual closed loop | 2 consecutive cycles completed; integration test passed | Production graph/agents, virtual device boundaries, disposal, both verifications, Analysis/BO and per-loop artifacts; deterministic TEST, not LLM/hardware validation |
+| Non-actuating redesign series | 20 cycles passed | Existing preflight-only integration: design/fabrication fixtures, production downstream agents, 19 BO-to-next-design parameter updates; physical tool tripwires |
+| Report/API/UI regression | 50 passed | LeRobot static tests, Manipulation controller-message test and Live GUI layout tests selected with `-k 'manipulation or lerobot'` |
+| JavaScript regression | 21 passed | Manipulation lifecycle, report consumers and verification tabs |
+| Documentation checks | 29 tests passed; changed governed documents validated | Updated text, links and four SVGs |
+| Independent review | No material code findings | Documentation findings corrected; physical execution paths unchanged |
+
+Virtual Equipment now emits the existing identity-scoped export/readiness
+contract, using the actual local CSV probe and explicitly simulated terminal
+evidence. The synthetic displacement span follows configured height and target
+strain; the existing Analysis/BO objective and clearance gates are unchanged.
+Full-loop fixtures select virtual disposal explicitly and inspect current
+per-loop artifact directories. No physical operation is implied.
+
+Loop evidence: `runs/run-20260908T162911Z-326f74/` (two complete virtual cycles)
+and `runs/run-20260908T161247Z-356a61/` (20 preflight-only redesign cycles).
+Reproduce with
+`pytest -q 'tests/integration/test_controller_run.py::test_controller_completes_test_run[2]'`
+and
+`pytest -q tests/integration/test_controller_run.py::test_safe_physical_printer_preflight_completes_twenty_redesign_cycles_without_actuation`.
+The optional full virtual 20-cycle parametrization was not run in this cleanup.
+
+One broader controller test also retains a baseline fixture mismatch:
+`test_live_gui_planning_tail_agent_messages_keep_cycle_metadata` expects a
+Manipulation message from a static tail that excludes that stage. Original
+baseline methods and fixture reproduce the same assertion failure. Full
+objective-compiler restart testing separately fails at `next_design_request`
+in `test_objective_compiler_analysis_knowledge_bo_survives_restart`; that test
+and its Analysis/Knowledge/BO implementation were unchanged by this work. Full
+documentation validation reports existing format issues in two unchanged files:
+`docs/device_bridges/windows_pyautogui_bridge.md` and
+`docs/superpowers/specs/2026-08-24-plc-safety-bridge-design.md`.
+These checks do not constitute a clean full-repository test run or new hardware
+validation.
+
+## Virtual Equipment handoff follow-up
+
+The operator approved correcting the virtual-result contract exposed by the
+full-loop check. Keep live/physical execution and all clearance gates unchanged.
+
+- [x] In `device_bridges/windows_pyautogui_bridge.py`, make a complete simulated
+  protocol emit identity-scoped `next_specimen_readiness` from explicit simulated
+  completion/reset/clearance steps. Mark evidence simulated and non-actuating;
+  generic programs, abort and export are not whole-cycle readiness.
+- [x] In `agents/equipment_agent.py`, project `raw_data_export` from the existing
+  local CSV probe and project the simulator's readiness into the existing
+  handoff contract. Only non-live simulator results qualify; missing, failed or
+  mismatched evidence must not become eligible. Bind run/loop/specimen identity.
+- [x] Add positive and malformed/missing/wrong-identity/live-result tests;
+  reproduce the missing-field failure before implementing the projection.
+  Re-run `tests/unit/test_equipment_agent.py`, simulator tests and
+  `tests/unit/test_utm_clear_cycle.py` after implementation.
+- [x] Update the full-loop test fixture to explicitly request virtual execution
+  for disposal/verification too, rather than relying on an unspecified policy.
+  Run `tests/integration/test_controller_run.py` without device actuation; record
+  full-cycle and preflight-only results separately before commit/tag update.

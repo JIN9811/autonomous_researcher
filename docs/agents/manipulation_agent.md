@@ -69,7 +69,7 @@ primary graph/sidecar handoffs.
 | Resolve one allowlisted transfer task | Generate arbitrary robot/shell commands |
 | Judge task suitability of the configured policy/profile and select its tool | Invent a new policy or alter its trained instruction |
 | Start/monitor/stop bounded rollout through bridge | Bypass LeRobot bridge or Guardian |
-| Score progress and precursor risk | Treat policy confidence as physical proof |
+| Record observed task stages and measured interlocks | Treat policy confidence as physical proof |
 | Require post-place Vision verification | Self-certify specimen placement |
 
 ## Five-Area Responsibility Map
@@ -80,7 +80,7 @@ primary graph/sidecar handoffs.
 | Middle-Level Control | Bind saved task/profile, expose bounded tools, validate request, supervise motion-state evidence and completion, and package handoff | Model selects a listed tool with an immutable proposal reference; code supplies all driver arguments |
 | Low-Level Control | Calls `lerobot.rollout.start/stop/status` and `robot.pick_place` where selected | LeRobot process/PID lifecycle, serial ports, camera leases, robot commands, action timing, and optional Isaac sidecars remain bridge authority |
 | Guardian / Safety | Existing approvals, identity, freshness, camera return, stop, interlock and deadline gates; post-inference scope checks | No model override; uncertain start effects never trigger an automatic repeat |
-| Knowledge / Evidence | Run/loop-scoped model request, decision, execution and Vision evidence | Legacy progress/grasp scores are heuristic, not measured success probabilities |
+| Knowledge / Evidence | Run/loop-scoped model request, decision, execution and Vision evidence | Task success requires stopped execution and verified evidence, not a model confidence score |
 
 These are responsibility areas, not five sequential LLM calls. The two LLM
 checkpoints belong to one Manipulation agent, using its registered
@@ -155,7 +155,7 @@ not evidence of motion accuracy or live transfer reliability.
 Inputs include `OrchestratorState`, `specimen_result`, latest Vision signal,
 manipulation profile, `transfer_readiness.camera_returned_to_vla`, task ID,
 policy/profile references, and mode/approval state. Outputs include
-`manipulation`, SARM data, `manipulation_report.v1`,
+`manipulation`, `manipulation_report.v1`,
 `robot_task_result.v1`, handoff packet, decisions, metrics, rollout runtime,
 stage machine, and evidence refs.
 
@@ -169,7 +169,7 @@ stage machine, and evidence refs.
 | `04_select_policy_backend` | LLM selects the current configured skill tool | immutable proposal; no driver arguments |
 | `05_start_bounded_rollout` | bridge tool start | session/result |
 | `06_monitor_rollout_events` | logs/events/status | rollout runtime |
-| `07_score_sarm_stage_progress` | progress/risk/recovery hint | SARM/stage machine |
+| `07_observe_task_stage` | observe execution and verification evidence | stage_machine |
 | `08_request_post_place_vision_verification` | handoff gate | verification pending/result |
 | `09_decide_recover_stop_or_handoff` | LLM result review after existing Vision and stop | accepted handoff or owner review; no motion retry |
 | `10_package_manipulation_report` | typed reports | report/result schemas |
@@ -227,9 +227,9 @@ figure, not measured robot performance.
 | Context | specimen ID and unexpired Vision signal | merge pose/readiness and camera-return state | bounded transfer context | stale or mismatched signal blocks |
 | Preflight | robot profile, policy/checkpoint, camera, approval and mode | validate profile/policy/live gates | preflight result and blockers | no shell or arbitrary model motion fallback |
 | Rollout | task, policy and session configuration | start bounded bridge session | session ID, start result and action budget | start response alone does not prove final pose |
-| Monitor | session events/status | track phase, SARM risk and recovery hint | event log, stage machine, progress | missing status triggers stop/status review |
+| Monitor | session events/status | track execution phase and verification evidence | event log and observed stage machine | missing status triggers stop/status review |
 | Post-place | matching session and camera observation | request fresh Vision verification | placement result and evidence refs | failed verification blocks downstream handoff |
-| Decide/store | verified result or explicit failure | handoff, bounded recover, or stop | typed report/result, logs, dataset/checkpoint refs | unknown state requires stop, status and visual proof before restart |
+| Decide/store | stopped rollout and Vision evidence | LLM task judgment: accepted handoff or owner review; no motion retry | typed report/result, logs, dataset/checkpoint refs | unknown state requires stop, status and visual proof before restart |
 
 ## API Surface
 
@@ -261,7 +261,6 @@ evidence responsibilities.
 | `lerobot.rollout.status` | LeRobot bridge | read_only | current session |
 | `robot.pick_place` | compatibility bounded bridge | physical_possible | task result |
 | SmolVLA / configured LeRobot policy | policy executor | model/physical_possible | policy/checkpoint/config |
-| SARM-lite | in-process progress monitor | read_only/local_state | progress/risk trace |
 | Vision | camera/signal handoff | read_only | pose/verification evidence |
 | Isaac | optional simulation/mirror services | external_service/model | scenario/output artifacts |
 
@@ -290,7 +289,7 @@ bypass the LeRobot bridge or establish direct-shell authority.
 ## State, Events, Artifacts, and Storage
 
 State includes task, skill, profile, policy ref, session ID, action count,
-runtime phase, SARM/stage-machine state, post-place interlock, verification,
+runtime phase, stage-machine state, post-place interlock, verification,
 decision, result, and evidence refs. Logs, datasets, checkpoints, images, and
 events require run/session/specimen identity.
 
@@ -422,14 +421,21 @@ proof for it.
 
 | Validation | Result | Interpretation |
 |---|---|---|
-| Final focused Python regression | 268 passed | Agent boundaries, completion, mode matrix, teleop, archive and lease contracts |
-| GUI lifecycle/verification | 16 passed | Existing UI state and verification record behavior |
+| Current focused Python regression | 304 passed; graph/runtime 70 passed | Agent boundaries, completion, mode matrix, teleop, archive, lease and routing contracts |
+| Report/API and GUI regression | Python 50 passed; JavaScript 21 passed | Current report fields, task stages, lifecycle and verification records |
+| Virtual closed loop | 2 consecutive full cycles; integration passed | Disposal, both Vision verifications, Analysis/BO and loop-scoped archives; deterministic simulation |
+| Preflight-only redesign series | 20 cycles passed | Non-actuating downstream chain and 19 BO-to-design updates; design/fabrication fixtures |
 | Registered API (`gpt-5.5`) | 4/4 case expectations; 2.378–4.284 s | Correct tool selection, historical acceptance and contradictory-evidence rejection |
 | Registered local vLLM (`gemma4:31b`) | 4/4 case expectations; 8.296–11.239 s | Same small development cases, not generalized model accuracy |
 
 The model probe used an empty device-tool registry. Source JSON hashes were unchanged;
 the negative case is a labeled in-memory perturbation. No robot, camera, printer or
 test equipment was actuated, and no saved model or bridge configuration was changed.
+
+Virtual Equipment supplies scoped CSV and readiness evidence to the existing
+disposal handoff. The simulator's curve follows configured geometry and target
+strain; disposal and fresh verification still precede Analysis. Full-loop and
+preflight-only results are listed separately in the validation ledger above.
 
 The [2026-09-07 supervised integration record](../paper/evidence/2026-09-07-supervised-closed-loop.md)
 observed transfer/placement, rollout stop, post-UTM managed disposal, fresh

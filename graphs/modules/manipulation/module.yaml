@@ -20,7 +20,6 @@ module:
   runtime_contract:
     policy_executor: pi05_or_lerobot_policy
     supervisor: manipulation_agent
-    progress_monitor: sarm_lite
     live_bridge_boundary: LeRobotBridge
     direct_shell_generation_allowed: false
     requires_camera_return_to_vla: true
@@ -71,11 +70,10 @@ module:
       kind: internal_step
       emits:
       - rollout_runtime
-    - id: 07_score_sarm_stage_progress
-      label: Score SARM-lite stage progress, precursor risk, and recovery hint
+    - id: 07_observe_task_stage
+      label: Observe task stage from execution and verification evidence
       kind: internal_step
       emits:
-      - sarm
       - stage_machine
     - id: 08_request_post_place_vision_verification
       label: Request Vision verification before downstream physical handoff
@@ -104,7 +102,6 @@ module:
     - transfer_readiness.camera_returned_to_vla
     output:
     - manipulation
-    - sarm
     - manipulation_report.v1
     - robot_task_result.v1
     - handoff_packet

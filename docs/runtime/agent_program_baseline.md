@@ -93,7 +93,7 @@ When replacing internals with real programs, keep these output keys stable.
 | `design` | `experiment_spec` | `experiment_spec`, `rationale` | protocol/candidate generation service |
 | `specimen` | none | `specimen_result`, `protocol_note` | geometry handoff + provider-neutral printer bridge; Bambu Lab X2D is the default provider and PrusaLink is an explicit profile |
 | `vision` | `observation` | `observation`, `protocol_note` | 3DP output pickup observation via `camera.capture` |
-| `manipulation` | none | `manipulation`, `sarm`, `manipulation_report`, `robot_task_result`, `handoff_packet`, `protocol_note` | bounded robot skills through `robot.pick_place` or Pi0.5/LeRobot rollout |
+| `manipulation` | none | `manipulation`, `manipulation_report`, `robot_task_result`, `handoff_packet`, `protocol_note` | bounded robot skills through `robot.pick_place` or Pi0.5/LeRobot rollout |
 | `equipment` | `equipment_result`, `protocol_note` | `equipment_result`, `protocol_note`, `equipment_handoff` | Windows PyAutoGUI bridge macro runner or legacy UTM runner |
 | `analysis` | `analysis` | `analysis` | UTM curve feature extraction + CAE closed-loop objective/uncertainty post-processor |
 | `knowledge` | none | `knowledge` | local+web RAG and memory writer |
@@ -101,7 +101,6 @@ When replacing internals with real programs, keep these output keys stable.
 
 Notes:
 
-- SARM remains a submodule under `manipulation_agent` (not top-level stage).
 - Manipulation emits `manipulation_report.v1` and `robot_task_result.v1`; downstream agents and GUI reports must consume those structured packets rather than scraping raw rollout logs.
 - Design-stage orchestrator planning is declared as `module.pre_execution` in `graphs/modules/design/module.yaml` (`orchestrator_plan -> agent.orchestrator_agent`) and writes plan metadata to `state.run_metadata.orchestrator_plan`; it must not be reintroduced as a hard-coded run-loop special case.
 - Live GUI planning may skip that pre-execution step only after the chat orchestrator has already approved the same Design handoff, to avoid duplicate model calls.
@@ -363,7 +362,7 @@ Frequently written by run loop merge:
 
 - `current_experiment_spec` from `experiment_spec`
 - `latest_observations` from `observation`
-- `latest_analysis` from `analysis`, `sarm`, `manipulation`
+- `latest_analysis` from `analysis`, `manipulation`
 - `run_metadata["guardian"]` from `guardian`
 
 ## Retry, Pause, Stop, and Safe-Stop Baseline

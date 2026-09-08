@@ -9,12 +9,29 @@ from pathlib import Path
 import pytest
 
 from app.bootstrap import load_runtime
+from agents.design_agent import DesignAgent
+from agents.guardian_agent import GuardianAgent
 from device_bridges.lerobot_bridge import LeRobotBridge
 from orchestrator.state import Mode, Stage
+from utils.agent_artifact_archive import list_executions
 
 
 @pytest.mark.asyncio
-async def test_controller_completes_test_run(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("cycle_count", [2, 20])
+async def test_controller_completes_test_run(monkeypatch: pytest.MonkeyPatch, cycle_count: int) -> None:
+    # Exercise the production graph and agents with explicit virtual boundaries.
+    # An absent disposal policy intentionally requires operator clearance.
+    original_design_payload = DesignAgent._finalize_design_payload
+
+    def virtual_design_payload(self, *args, **kwargs):
+        payload = original_design_payload(self, *args, **kwargs)
+        payload["experiment_spec"]["execution_policy"] = {
+            "manipulation": "virtual", "vision": "virtual", "lab_equipment": "virtual",
+        }
+        return payload
+
+    monkeypatch.setattr(DesignAgent, "_finalize_design_payload", virtual_design_payload)
+    monkeypatch.setattr(GuardianAgent, "TEST_LOOP_CYCLE_LIMIT", cycle_count)
     def virtual_post_place_telemetry(_bridge: LeRobotBridge, session: dict[str, object]) -> dict[str, object]:
         session_id = str(session.get("session_id") or "test-rollout")
         packet = {
@@ -53,6 +70,11 @@ async def test_controller_completes_test_run(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(LeRobotBridge, "_rollout_joint_telemetry_contract", virtual_post_place_telemetry)
     controller = load_runtime()
+
+    def forbidden_replay(_payload):
+        raise AssertionError("explicit virtual clearance must not start a robot replay")
+
+    controller._deps.agent_context.tools.register("lerobot.replay.start", forbidden_replay)
     result = await controller.start(mode=Mode.TEST, goal="integration test run")
     assert result["ok"] is True
     created_events = [event for event in controller.recent_events() if event.get("type") == "run.created"]
@@ -70,12 +92,20 @@ async def test_controller_completes_test_run(monkeypatch: pytest.MonkeyPatch) ->
         stage = snapshot["state"]["stage"]
         if stage in {Stage.COMPLETE.value, Stage.ERROR.value}:
             break
+        if snapshot["state"]["is_paused"]:
+            controller._run_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await controller._run_task
+            pytest.fail(f"virtual loop paused: {snapshot['state']['run_metadata'].get('guardian', {})}")
         if asyncio.get_running_loop().time() - start > timeout_s:
             raise TimeoutError(f"run did not finish within {timeout_s}s; stage={stage}")
         await asyncio.sleep(0.1)
 
     assert snapshot["state"]["stage"] == Stage.COMPLETE.value
-    assert snapshot["state"]["loop_count"] == 20
+    assert snapshot["state"]["loop_count"] == cycle_count
+    assert snapshot["state"]["run_metadata"]["utm_clear_execution"]["success"] is True
+    assert snapshot["state"]["run_metadata"]["utm_clear_execution"]["simulated"] is True
+    assert snapshot["state"]["run_metadata"]["utm_verifications"]["verification_2"]["confirmed"] is True
     assert snapshot["state"]["run_metadata"]["bo_agent"]["tool"] == "bo.agent"
     assert snapshot["state"]["run_metadata"]["bo_agent"]["knowledge_context"]
     assert snapshot["state"]["run_metadata"]["equipment_result"]["tool"] == "equipment.pyautogui.run"
@@ -104,21 +134,23 @@ async def test_controller_completes_test_run(monkeypatch: pytest.MonkeyPatch) ->
 
     run_dir = json_log_path.parent
     artifact_paths = {item.relative_to(run_dir).as_posix() for item in run_dir.rglob("*") if item.is_file()}
-    runtime_artifacts = snapshot["state"]["run_metadata"].get("runtime_artifacts", [])
-    runtime_artifact_paths = {str(item.get("path") or "") for item in runtime_artifacts if isinstance(item, dict)}
-    posterior_artifacts = {
-        path for path in artifact_paths if path.startswith("runtime/bo/") and "_posterior." in path
-    }
-    assert {path.rsplit(".", 1)[-1] for path in posterior_artifacts} == {"png", "svg", "csv"}
-    assert any(path.startswith("runtime/analysis/") and path.endswith(".contour.svg") for path in artifact_paths)
-    assert any(path.startswith("runtime/analysis/") and path.endswith(".report.json") for path in artifact_paths)
+    # Current storage is per-loop/per-agent, not the retired runtime/analysis root.
+    for loop_index in range(cycle_count):
+        executions = list_executions(run_dir, loop_index=loop_index)
+        completed_agents = {item["agent"] for item in executions if item["status"] == "completed"}
+        assert {"design_agent", "specimen_agent", "vision_agent", "manipulation_agent",
+                "equipment_agent", "analysis_agent", "knowledge_agent", "bo_agent", "guardian_agent"} <= completed_agents
+        assert all((run_dir / item["result_path"]).is_file() for item in executions)
+        loop_prefix = f"runtime/loops/loop-{loop_index + 1:06d}/"
+        assert any(path.startswith(loop_prefix + "analysis_agent/") and path.endswith(".contour.svg") for path in artifact_paths)
+        assert any(path.startswith(loop_prefix + "analysis_agent/") and path.endswith(".report.json") for path in artifact_paths)
+        assert any(path.startswith(loop_prefix + "bo_agent/") and path.endswith("_bo_agent_result.json") for path in artifact_paths)
+    if cycle_count == 20:
+        # Two-cycle smoke remains in LHS warmup; the long case exercises posterior output.
+        posterior_artifacts = {path for path in artifact_paths if "_posterior." in path}
+        assert {path.rsplit(".", 1)[-1] for path in posterior_artifacts} == {"png", "svg", "csv"}
     assert any(path.startswith("vision/") and path.endswith("detection.json") for path in artifact_paths)
     assert any(path.startswith("vision/") and path.endswith("scene_map.svg") for path in artifact_paths)
-    runtime_posterior_artifacts = {
-        path for path in runtime_artifact_paths if path.startswith("runtime/bo/") and "_posterior." in path
-    }
-    assert {path.rsplit(".", 1)[-1] for path in runtime_posterior_artifacts} == {"png", "svg", "csv"}
-    assert any(path.startswith("runtime/analysis/") and path.endswith(".contour.svg") for path in runtime_artifact_paths)
 
     await controller.emit_workspace_result(
         workspace="unit_workspace",

@@ -61,17 +61,17 @@
 <!-- evidence -->
 <g id="node13" class="node">
 <title>evidence</title>
-<polygon fill="#e9f7ef" stroke="#2e7d59" points="2545.35,-75 2340.35,-75 2340.35,-39 2551.35,-39 2551.35,-69 2545.35,-75"/>
-<polyline fill="none" stroke="#2e7d59" points="2545.35,-75 2545.35,-69 "/>
-<polyline fill="none" stroke="#2e7d59" points="2551.35,-69 2545.35,-69 "/>
-<text text-anchor="middle" x="2445.85" y="-60.4" font-family="DejaVu Sans" font-size="12.00">Session · events · SARM · images</text>
+<polygon fill="#e9f7ef" stroke="#2e7d59" points="2529.85,-75 2355.85,-75 2355.85,-39 2535.85,-39 2535.85,-69 2529.85,-75"/>
+<polyline fill="none" stroke="#2e7d59" points="2529.85,-75 2529.85,-69 "/>
+<polyline fill="none" stroke="#2e7d59" points="2535.85,-69 2529.85,-69 "/>
+<text text-anchor="middle" x="2445.85" y="-60.4" font-family="DejaVu Sans" font-size="12.00">Session · events · images</text>
 <text text-anchor="middle" x="2445.85" y="-47.4" font-family="DejaVu Sans" font-size="12.00">result · dataset · checkpoint</text>
 </g>
 <!-- manipulation&#45;&gt;evidence -->
 <g id="edge16" class="edge">
 <title>manipulation&#45;&gt;evidence</title>
-<path fill="none" stroke="#2e7d59" d="M483.07,-36.49C533.55,-31.6 595.88,-27 651.83,-27 651.83,-27 651.83,-27 1950.26,-27 2081.94,-27 2232.98,-37.73 2333.15,-46.35"/>
-<polygon fill="#2e7d59" stroke="#2e7d59" points="2333.09,-48.81 2340.27,-46.97 2333.51,-43.92 2333.09,-48.81"/>
+<path fill="none" stroke="#2e7d59" d="M483.07,-36.49C533.55,-31.6 595.88,-27 651.83,-27 651.83,-27 651.83,-27 1950.26,-27 2088.87,-27 2248.94,-38.89 2348.53,-47.69"/>
+<polygon fill="#2e7d59" stroke="#2e7d59" points="2348.41,-50.14 2355.6,-48.32 2348.84,-45.26 2348.41,-50.14"/>
 <text text-anchor="middle" x="1296.66" y="-30" font-family="DejaVu Sans" font-size="10.00">evidence</text>
 </g>
 <!-- verify -->
@@ -90,8 +90,8 @@
 <!-- robot&#45;&gt;evidence -->
 <g id="edge17" class="edge">
 <title>robot&#45;&gt;evidence</title>
-<path fill="none" stroke="#2e7d59" d="M719.55,-80.01C771.22,-78.62 845.03,-77 909.66,-77 909.66,-77 909.66,-77 1950.26,-77 2081.81,-77 2232.88,-69.85 2333.09,-64.1"/>
-<polygon fill="#2e7d59" stroke="#2e7d59" points="2333.36,-66.54 2340.21,-63.69 2333.08,-61.65 2333.36,-66.54"/>
+<path fill="none" stroke="#2e7d59" d="M719.55,-80.01C771.22,-78.62 845.03,-77 909.66,-77 909.66,-77 909.66,-77 1950.26,-77 2088.73,-77 2248.83,-69.08 2348.48,-63.2"/>
+<polygon fill="#2e7d59" stroke="#2e7d59" points="2348.7,-65.64 2355.54,-62.78 2348.41,-60.75 2348.7,-65.64"/>
 <text text-anchor="middle" x="1431.66" y="-80" font-family="DejaVu Sans" font-size="10.00">evidence</text>
 </g>
 <!-- task1 -->
@@ -111,8 +111,8 @@
 <!-- review -->
 <g id="node12" class="node">
 <title>review</title>
-<path fill="#ffe9e7" stroke="#a33a32" stroke-width="2" d="M3151.35,-228C3151.35,-228 3026.35,-228 3026.35,-228 3020.35,-228 3014.35,-222 3014.35,-216 3014.35,-216 3014.35,-204 3014.35,-204 3014.35,-198 3020.35,-192 3026.35,-192 3026.35,-192 3151.35,-192 3151.35,-192 3157.35,-192 3163.35,-198 3163.35,-204 3163.35,-204 3163.35,-216 3163.35,-216 3163.35,-222 3157.35,-228 3151.35,-228"/>
-<text text-anchor="middle" x="3088.85" y="-206.9" font-family="DejaVu Sans" font-size="12.00">Stop / recover / review</text>
+<path fill="#ffe9e7" stroke="#a33a32" stroke-width="2" d="M3143.35,-228C3143.35,-228 3034.35,-228 3034.35,-228 3028.35,-228 3022.35,-222 3022.35,-216 3022.35,-216 3022.35,-204 3022.35,-204 3022.35,-198 3028.35,-192 3034.35,-192 3034.35,-192 3143.35,-192 3143.35,-192 3149.35,-192 3155.35,-198 3155.35,-204 3155.35,-204 3155.35,-216 3155.35,-216 3155.35,-222 3149.35,-228 3143.35,-228"/>
+<text text-anchor="middle" x="3088.85" y="-206.9" font-family="DejaVu Sans" font-size="12.00">Stop / owner review</text>
 </g>
 <!-- verify&#45;&gt;review -->
 <g id="edge15" class="edge">
@@ -161,8 +161,8 @@
 <!-- clear&#45;&gt;evidence -->
 <g id="edge14" class="edge">
 <title>clear&#45;&gt;evidence</title>
-<path fill="none" stroke="#2e7d59" d="M2041.84,-137.88C2107.42,-123 2197.9,-102.96 2277.85,-87 2295.99,-83.38 2315.27,-79.73 2334.06,-76.28"/>
-<polygon fill="#2e7d59" stroke="#2e7d59" points="2334.5,-78.69 2340.95,-75.02 2333.62,-73.87 2334.5,-78.69"/>
+<path fill="none" stroke="#2e7d59" d="M2041.84,-137.88C2107.42,-123 2197.9,-102.96 2277.85,-87 2300.63,-82.45 2325.21,-77.86 2348.33,-73.68"/>
+<polygon fill="#2e7d59" stroke="#2e7d59" points="2349,-76.05 2355.46,-72.4 2348.14,-71.23 2349,-76.05"/>
 <text text-anchor="middle" x="2184.35" y="-124" font-family="DejaVu Sans" font-size="10.00">scoped replay + Verification 2</text>
 </g>
 <!-- task1&#45;&gt;equipment -->
@@ -175,8 +175,8 @@
 <!-- task1&#45;&gt;review -->
 <g id="edge7" class="edge">
 <title>task1&#45;&gt;review</title>
-<path fill="none" stroke="#52667a" d="M1367.69,-225.86C1419.55,-229.69 1491.97,-234 1555.66,-234 1555.66,-234 1555.66,-234 2807.35,-234 2874.84,-234 2951.14,-227.02 3007.11,-220.58"/>
-<polygon fill="#52667a" stroke="#52667a" points="3007.5,-223 3014.17,-219.76 3006.94,-218.14 3007.5,-223"/>
+<path fill="none" stroke="#52667a" d="M1367.69,-225.86C1419.55,-229.69 1491.97,-234 1555.66,-234 1555.66,-234 1555.66,-234 2807.35,-234 2878.12,-234 2958.58,-226.32 3015.12,-219.65"/>
+<polygon fill="#52667a" stroke="#52667a" points="3015.58,-222.06 3022.24,-218.8 3015,-217.2 3015.58,-222.06"/>
 <text text-anchor="middle" x="2184.35" y="-237" font-family="DejaVu Sans" font-size="10.00">return to owner</text>
 </g>
 <!-- task2 -->
@@ -217,8 +217,8 @@
 <!-- verify2&#45;&gt;review -->
 <g id="edge13" class="edge">
 <title>verify2&#45;&gt;review</title>
-<path fill="none" stroke="#52667a" d="M2572.34,-160.14C2701.09,-172.59 2897.57,-191.6 3007.03,-202.18"/>
-<polygon fill="#52667a" stroke="#52667a" points="3006.91,-204.63 3014.12,-202.87 3007.38,-199.76 3006.91,-204.63"/>
+<path fill="none" stroke="#52667a" d="M2572.34,-160.14C2704.17,-172.89 2907,-192.51 3014.73,-202.93"/>
+<polygon fill="#52667a" stroke="#52667a" points="3014.8,-205.4 3022.01,-203.63 3015.27,-200.52 3014.8,-205.4"/>
 <text text-anchor="middle" x="2806.35" y="-193" font-family="DejaVu Sans" font-size="10.00">occupied / unknown / failure</text>
 </g>
 </g>

@@ -334,7 +334,6 @@ Decision Register + Loop Reflection + Knowledge Memory
   "required_outputs": [
     "task_status",
     "final_pose",
-    "sarm_progress",
     "risk_flags",
     "evidence_refs"
   ],
@@ -458,7 +457,7 @@ Vision 후:
 Manipulation 후:
 
 ```text
-현재 판단: 시편은 UTM fixture에 올라간 것으로 보이지만 SARM recovery hint가 약하게 떴습니다.
+현재 판단: 시편은 UTM fixture에 올라간 것으로 보이지만 Vision 검증 증거가 충분하지 않습니다.
 추천: Equipment Agent로 넘기기 전에 Vision이 fixture 정렬을 한 번 더 확인하는 쪽이 낫습니다.
 ```
 

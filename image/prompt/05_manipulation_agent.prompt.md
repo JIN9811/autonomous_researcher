@@ -16,10 +16,10 @@
 업데이트 원칙: 시스템이 바뀌면 이 프롬프트와 image/diagram_manifest.json의 동일 항목을 함께 수정한 뒤 generate_diagrams.py를 다시 실행한다.
 
 핵심 표현:
-- Manipulation Agent를 LeRobot 기반 robot runtime 담당자로 표현한다. teleoperation, recording, local dataset visualization, training, inference/rollout, by-id port resolution, top/wrist multi-camera, safe rollout clamp, ACT temporal ensemble, SARM 내부 submodule을 강조한다.
+- Manipulation Agent를 LeRobot 기반 robot runtime 담당자로 표현한다. teleoperation, recording, local dataset visualization, training, inference/rollout, by-id port resolution, top/wrist multi-camera, safe rollout clamp, ACT temporal ensemble, preflight와 측정된 interlock을 강조한다.
 
 ## Role
-- LeRobot workflow와 SARM submodule을 통해 물리 robot manipulation을 관리한다.
+- LeRobot workflow를 통해 bounded robot manipulation을 관리한다.
 
 ## Inputs
 - follower and leader IDs
@@ -47,10 +47,10 @@
 - LeRobot CLI/API bridge
 - top/wrist cameras
 - robot process registry
-- SARM submodule
+- Observed task stage
 
 ## Safety/Contract
-- SARM is internal only
+- Measured interlocks
 - Live gate required
 - Re-resolve by-id after reconnect
 - Stop before motion

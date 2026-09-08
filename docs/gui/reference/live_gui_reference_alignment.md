@@ -82,7 +82,7 @@ Required Live GUI content model:
 - Design: objective, TPMS/metamaterial design values, candidate board, previous-vs-next shape when looped, manufacturability, Design to Specimen handoff.
 - Specimen Making: slicer settings, PrusaLink readiness, upload/start/ejection status, G-code path, manufacturing digital thread, quality gates.
 - Vision: camera/source health, zone state, confidence, detection/pose/defect evidence, signal freshness, handoff recommendations.
-- Manipulation: Pi0.5/LeRobot profile, task episode, preflight, policy path, action clamp/safety, rollout status, SARM handoff.
+- Manipulation: Pi0.5/LeRobot profile, task episode, preflight, policy path, action clamp/safety, rollout status, verified task handoff.
 - Lab Equipment: Windows PyAutoGUI bridge target, UTM program command, visual assertion, data export path, equipment readiness/failure.
 - Analysis: UTM/FEM data quality, preprocessing, extracted metrics, contour/graph evidence, BO objective payload.
 - BO: objective, surrogate/acquisition trace, candidate queue, selected next design, uncertainty/regret/convergence plots.
@@ -752,7 +752,6 @@ Implementation rules from this pass:
 - Static asset version for this pass: `20260601-live-layout-geometry-52`.
 
 
-
 ## 2026-06-01 Design Bottom Evidence Band Pass
 
 The Orchestrator-only chat policy pass was kept as the current functional baseline. A new scoped layout candidate was then tested only for Design Agent because its generated reference image places the final evidence cards lower than the prior browser capture.
@@ -1386,7 +1385,6 @@ Validation:
 - `tests/ui/planning_browser_audit.py --out-dir artifacts/live_gui_upgrade/planning_browser_audit_v78_recheck` PASS
 
 Operational rule: right evidence panels remain evidence surfaces only. Styling may be tuned by screenshot audit, but no non-Orchestrator message composer or chat target may be reintroduced.
-
 
 
 ## 2026-06-01 BO/Vision Width Retune Pass v79
