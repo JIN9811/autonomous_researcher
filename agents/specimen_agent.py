@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
+from agents.specimen_decision import decide_specimen, fabrication_evidence
 from utils.agent_artifact_archive import archive_agent_run
 from orchestrator.state import Mode, OrchestratorState
 
@@ -1139,28 +1140,6 @@ class SpecimenMakingAgent(BaseAgent):
         wall = float(spec.get("wall_thickness_mm", 1.2))
         cell = float(spec.get("cell_size_mm", 7.5))
 
-        timeout_s = 30.0 if state.mode == Mode.TEST else None
-        try:
-            protocol = await ctx.complete(
-                "tool_formatting",
-                (
-                    "Format specimen fabrication handoff intent. Return concise command intent.\n"
-                    f"candidate={candidate}\n"
-                    f"specimen_id={specimen_id}\n"
-                    f"geometry_type={spec.get('geometry_type')}\n"
-                    f"specimen_size_mm={specimen_size}\n"
-                    f"cell_size_mm={cell}\n"
-                    f"wall_thickness_mm={wall}"
-                ),
-                timeout_s=timeout_s,
-            )
-            protocol_note = protocol.text[:220]
-        except Exception as exc:
-            if state.mode == Mode.TEST:
-                protocol_note = f"E2B degraded in test mode: {exc.__class__.__name__}"
-            else:
-                raise
-
         legacy_cap = bool(spec.get("top_bottom_cap", False))
         top_cap_enabled = bool(spec.get("top_cap_enabled", legacy_cap))
         bottom_cap_enabled = bool(spec.get("bottom_cap_enabled", legacy_cap))
@@ -1386,24 +1365,31 @@ class SpecimenMakingAgent(BaseAgent):
                 "printer_test_path": printer_test_path,
             },
         }
-        try:
-            experiment_response = await asyncio.to_thread(
-                ctx.tools.call,
-                "experiment.evaluate",
-                evaluation_payload,
-            )
-        except OSError as exc:
-            if not (live_gui_test_spec and printer_test_path == "virtual_bridge"):
-                raise
-            experiment_response = self._degraded_virtual_bridge_experiment_response(
-                state=state,
-                spec=spec,
-                candidate=candidate,
-                specimen_id=specimen_id,
-                printer_payload=printer_payload,
-                printer_runtime_mode=printer_runtime_mode,
-                printer_test_path=printer_test_path,
-                exc=exc,
+        async def execute_fabrication():
+            try:
+                return await asyncio.to_thread(ctx.tools.call, "experiment.evaluate", evaluation_payload)
+            except OSError as exc:
+                if not (live_gui_test_spec and printer_test_path == "virtual_bridge"):
+                    raise
+                return self._degraded_virtual_bridge_experiment_response(
+                    state=state, spec=spec, candidate=candidate, specimen_id=specimen_id,
+                    printer_payload=printer_payload, printer_runtime_mode=printer_runtime_mode,
+                    printer_test_path=printer_test_path, exc=exc,
+                )
+
+        specimen_decision, experiment_response = await decide_specimen(
+            state, ctx, specimen_id,
+            fabrication_evidence(spec, geometry_result, mesh_result, manufacturability_result,
+                                 evaluation_payload["execution"], printer_payload), execute_fabrication,
+        )
+        protocol_note = str(specimen_decision.get("reason") or specimen_decision.get("failure_code", ""))[:220]
+        if experiment_response is None:
+            return AgentResult(
+                success=False, summary="Specimen fabrication decision requires review",
+                data={"specimen_decision": specimen_decision,
+                      "failure_code": specimen_decision.get("failure_code"),
+                      "specimen_result": {"ok": False, "status": "blocked", "candidate_id": candidate,
+                                          "specimen_id": specimen_id, "specimen_decision": specimen_decision}},
             )
         response = experiment_response.get("bridge_result") if isinstance(experiment_response.get("bridge_result"), dict) else experiment_response
 
@@ -1427,6 +1413,7 @@ class SpecimenMakingAgent(BaseAgent):
             geometry_payload=geometry_payload,
         )
         decisions = self._fabrication_decisions(fabrication_report)
+        fabrication_report["specimen_decision"] = specimen_decision
         metrics = self._fabrication_metrics(fabrication_report)
         evidence_refs = self._fabrication_evidence_refs(fabrication_report)
         handoff_packet = self._build_specimen_fabricated_packet(
@@ -1454,6 +1441,7 @@ class SpecimenMakingAgent(BaseAgent):
             printer_preflight = None
 
         specimen_result = {
+            "specimen_decision": specimen_decision,
             "ok": True,
             "tool": "printer.prepare",
             "experiment_evaluation": experiment_response,
@@ -1532,6 +1520,7 @@ class SpecimenMakingAgent(BaseAgent):
                 success=True,
                 summary="Specimen Making Agent waiting for active printer connection info",
                 data={
+                    "specimen_decision": specimen_decision,
                     "specimen_result": specimen_result,
                     "fabrication_report": fabrication_report,
                     "specimen_agent_report": specimen_agent_report,
@@ -1549,6 +1538,7 @@ class SpecimenMakingAgent(BaseAgent):
         operator_messages = [str(item) for item in response.get("operator_messages", []) if str(item).strip()]
         summary_suffix = f" ({operator_messages[-1]})" if operator_messages else ""
         result_data = {
+            "specimen_decision": specimen_decision,
             "specimen_result": specimen_result,
             "fabrication_report": fabrication_report,
             "specimen_agent_report": specimen_agent_report,

@@ -212,6 +212,18 @@ verification information.
 
 ### Restructured Agent Reference Layout
 
+Immediately below the title, restructured Agent References MUST include a
+`Status at a Glance` section with 5–7 short `Label: Value` lines. The default
+six labels are `Runtime status`, `LLM decision layer`, `Physical effect`,
+`Primary handoff`, `Live hardware validation`, and `Known gap`.
+Values MUST reflect that agent's current implementation and recorded verification;
+the Design Reference is a format example, not a source of other agents' status.
+An explanation-only model call MUST NOT be labeled a verified decision layer.
+Physical effects describe runtime capability, not merely the test mode used.
+Agents without hardware authority SHOULD distinguish their own applicability
+from downstream validation. Timing details and test conditions belong in the
+Verification section or linked Evidence, not the status summary.
+
 Agent References following the five-area restructuring contract MUST use a
 reader-oriented order: Overview and Responsibilities; Closed-Loop Position and
 Handoffs; Internal Workflow; Decision and Evaluation; Tools, APIs and Connections;
@@ -225,6 +237,8 @@ presented as five sequential runtime stages or forced top-level chapters.
 Detailed contracts SHOULD have one explanatory home with links from other
 sections. Tables SHOULD compare contracts/settings/results; figures SHOULD show
 flow and connections; short prose SHOULD explain decisions and limitations.
+Repeated defensive wording SHOULD be consolidated into Safety and Verification
+without removing substantive constraints or unverified-scope disclosures.
 
 References MUST describe current behavior. Design documents own intended
 contracts, plans own work status, and Evidence owns detailed test conditions and

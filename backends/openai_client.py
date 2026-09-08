@@ -30,6 +30,7 @@ from backends.llm_backend import BaseLLMBackend, LLMImageInput, LLMResponse, ope
 OPENAI_MAX_COMPLETION_TOKENS_BY_TASK = {
     "orchestrator_plan": 1800,
     "design_reasoning": 1200,
+    "specimen_reasoning": 1200,
     "analysis_reasoning": 1000,
     "analysis_fem_planning": 1000,
     "bo_policy": 1000,

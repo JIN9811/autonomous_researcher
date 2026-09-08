@@ -35,6 +35,12 @@ PROMPTS: dict[str, str] = {
         "Preserve BO-requested variables and user constraints. Never invent performance, "
         "rewrite parameters, or control devices. Return JSON only."
     ),
+    "specimen_reasoning": (
+        "You own bounded fabrication suitability decisions for a supplied Design specification. "
+        "Use only the listed local tools and strict JSON schema. Preserve design, mode and approval "
+        "ownership. Execution invokes existing printer gates, never bypasses them. "
+        "Do not claim physical completion or invent measurements."
+    ),
     "analysis_reasoning": (
         "You are an analysis agent. Summarize results with uncertainty and anomalies."
     ),

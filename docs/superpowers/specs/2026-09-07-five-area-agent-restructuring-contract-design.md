@@ -273,6 +273,8 @@ Agent Reference는 **역할 → 실행 흐름 → 판단 → 인터페이스 →
 
 ```text
 # <Agent Name> Reference
+## Status at a Glance
+5~7줄의 짧은 상태 항목: 구현 / LLM 검증 / 물리 효과 / 주 인계 / 장비 검증 / 핵심 미구현 사항
 ## Overview and Responsibilities
 짧은 요약 / 하는 일·하지 않는 일 / 5영역 책임·상세 절 대응표
 ## Closed-Loop Position and Handoffs
@@ -290,6 +292,29 @@ LLM 판단 문제·선택권 / 평가 항목 / 근거·이력의 해석
 ## Artifacts and Verification
 산출물·저장 / 검증 상태 요약 / 한계 / 출처·관련 문서
 ```
+
+상단 `Status at a Glance`는 제목 바로 아래에 두고, 다음 여섯 항목을 기본으로 한다.
+각 항목은 한 줄의 `Label: Value` 형태로 작성한다. 독자는 본문을 내려가기 전에
+현재 구현·검증 범위와 주요 인계를 파악할 수 있어야 한다.
+
+```text
+Runtime status: <Implemented / Partially implemented / Planned>
+LLM decision layer: <implementation state / verified scope>
+Physical effect: <None / actual effect through the owning executor>
+Primary handoff: <actual contract → consuming agent or runtime>
+Live hardware validation: <Verified scope / Pending / Not applicable>
+Known gap: <most important current gap, or None identified within the verified scope>
+```
+
+- [Design Reference](../../agents/design_agent.md)를 작성 형식의 기준으로 삼되,
+  Design의 상태값·모델 검증·무장비 특성을 다른 에이전트에 복사하지 않는다.
+- 장비 에이전트는 실제 동작 가능성을 명시한다. 가상 테스트만 했다는 이유로
+  `Physical effect: None`이라고 쓰지 않는다. 비장비 에이전트는 자체 장비 검증과 downstream 검증을 구분한다.
+- 구현 상태와 검증 상태는 구분한다. 설명용 LLM 호출만 있으면 실제 의사결정층이
+  구현·검증된 것으로 표시하지 않는다. `locally verified` 등의 범위는 하단 검증 근거와 일치해야 한다.
+- 지연 수치·상세 시험 조건·긴 한계 설명은 하단 Verification/Evidence에 둔다.
+  상태 요약에는 핵심만 남기고, 문서 전체에서 같은 방어 문구를 반복하지 않는다.
+  중요한 안전 조건은 Safety, 미검증 범위는 Verification에 상세히 유지한다.
 
 - 같은 계약의 상세 설명은 한 절에만 둔다. 다른 절과 책임표는 링크로 연결한다.
 - 표는 책임·인계·스키마·설정·검증 상태의 비교에, SVG는 실행·연결 관계에 사용한다.
@@ -446,6 +471,35 @@ Design의 기본 모델을 검증했다고 표현하지 않는다. 실행 조건
 Design에 한해 [구현 계획](../plans/2026-09-07-design-decision-layer.md)과
 [5영역 Reference](../../agents/design_agent.md)를 적용한다. 타 에이전트의 일괄
 재구성이나 장비 브릿지 변경은 이 작업에 포함하지 않는다.
+
+### Specimen 추가 적용: 제작 적합성 판단과 기존 제작 도구 실행
+
+2026-09-08 사용자 승인 범위는 **Design JSON 수신 → 코드 소유 형상/제작성 검사 →
+국소 LLM 적합성 판단 → 툴 호출을 통한 기존 제작 실행**이다. 실제 장비 구동 없이
+구현·검증하며, 기존 출력·이젝션·프리플라이트·완료 판정 경로를 보존한다.
+
+| 영역 | 적용 계약 |
+|---|---|
+| High | 선택된 설계가 요청된 제작 의도에 적합한지 판단; 실행/근거 조회/상위 반환 |
+| Middle | 기존 geometry/mesh/manufacturability 준비 뒤 제한된 판단 루프와 인계 생성 |
+| Low | `execute_fabrication`은 기존 `experiment.evaluate → printer.prepare → provider` 호출 |
+| Guardian / Safety | 엄격한 도구 인자, 현재 사양·모드·정지 재검사, 기존 장비 게이트; 모델 승인 우회 금지 |
+| Knowledge / Evidence | 현재 제작 근거, 추정치와 측정치 구분, `specimen_decision.v1` 및 루프별 아티팩트 |
+
+LLM 도구는 `inspect_fabrication_evidence`, `execute_fabrication`, `return_to_owner`로
+제한한다. 실행 도구는 현재 시편 ID만 받으며 모델이 설계 변수, 프린터 모드,
+연결 정보, 승인 또는 G-code를 고칠 수 없다. 등록 역할은 `specimen_reasoning`이다.
+`executed`는 기존 콜백 반환을 뜻하고 물리 제작 완료를 뜻하지 않는다.
+
+사용자가 추가 요청한 다중 흐름 검증은 LHS에서 인계되는 상위 요청 계약,
+BO 재설계 권고, 사용자 재질/치수 제약, 가상·이젝션 전용·실제 출력·프로필 지정·
+프리플라이트 경로를 포함한다. Specimen 내부에서 새 분기 파이프라인을 만들지 않고
+기존 사양과 실행 설정으로 흡수한다. 미지원/결손 입력은 기존 소유자/실패 경로로
+반환하며, 임의의 새로운 실험 종류를 자동 지원한다고 주장하지 않는다.
+
+[구현 계획과 검증 기록](../plans/2026-09-08-specimen-decision-layer.md),
+[현재 Specimen Reference](../../agents/specimen_agent.md)에 구현 상태를 기록한다.
+이 적용은 타 에이전트 일괄 재구성이나 브릿지 내부 변경을 허용하지 않는다.
 
 ## Limitations and Known Gaps
 

@@ -1,9 +1,12 @@
 digraph specimen_api_connection_architecture {
-  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.30", ranksep="0.52", fontname="DejaVu Sans", label="Specimen API and connection architecture", labelloc="t", fontsize=18];
+  graph [rankdir=TB, bgcolor="white", pad="0.25", nodesep="0.30", ranksep="0.52", fontname="DejaVu Sans", label="Specimen API and connection architecture", labelloc="t", fontsize=18];
   node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=8.3, margin="0.09,0.06"];
   edge [color="#52667A", fontname="DejaVu Sans", fontsize=7.3, arrowsize=0.65];
   api [label="/api/printer/*\nstatus · configure · slice\ngate · publish · proof"];
   agent [label="Specimen handler +\nregistered tools", penwidth=2];
+  model [label="Registered API / vLLM\nspecimen_reasoning", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  dispatch [label="Strict local dispatcher\ninspect / execute / return"];
+  runtime [label="experiment.evaluate\nexisting tool registry"];
   manager [label="Printer manager\nprofile · fleet · status", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
   gates [label="Artifact hash · prestart\napproval · bed-clear", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
   bambu [label="Bambu provider\nslicer · patch · artifact route · MQTT", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
@@ -12,7 +15,10 @@ digraph specimen_api_connection_architecture {
   proof [label="Ack + fresh status · camera\nhashes · bed-clear · audit", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
   blocked [label="No UI/model/module bypass", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
   api -> manager;
-  agent -> manager [label="printer.prepare"];
+  agent -> model [label="projected evidence"];
+  model -> dispatch [label="JSON tool request"];
+  dispatch -> runtime [label="execute callback"];
+  runtime -> manager [label="printer.prepare"];
   manager -> gates;
   gates -> bambu [label="active selected config"];
   gates -> prusa [style=dashed, label="explicit operator selection"];

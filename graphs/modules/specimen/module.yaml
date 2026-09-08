@@ -2,7 +2,7 @@ module:
   id: specimen
   label: Specimen Making Module
   handler: agent.specimen_agent
-  llm_role: tool_formatting
+  llm_role: specimen_reasoning
   editable: true
   safety:
     live_requires_validation: true
@@ -31,7 +31,7 @@ module:
       label: Mesh and Dimensional QA
       kind: internal_step
     - id: 06_printability_process_plan
-      label: Printability and Process Planning
+      label: Printability and Fabrication Suitability
       kind: internal_step
     - id: 07_slice_gcode_qa
       label: Slicing and G-code QA
@@ -54,3 +54,6 @@ module:
   notes: >-
     GUI/module editor may edit this module config, but execution remains bound to
     allowlisted Python handlers. Python source is not modified by the GUI.
+    Specimen reasoning selects bounded local inspect/execute/return tools after
+    hard geometry/manufacturing checks; execution retains experiment.evaluate and
+    printer.prepare. Internal entries are display steps, not separate LLM calls.

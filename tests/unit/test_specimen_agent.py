@@ -5,6 +5,7 @@ Unit tests for SpecimenMakingAgent tool-chain behavior.
 from __future__ import annotations
 
 import math
+import json
 from pathlib import Path
 import struct
 from types import SimpleNamespace
@@ -75,7 +76,135 @@ class _CtxStub:
         self.tools = tools
 
     async def complete(self, task_type: str, prompt: str, timeout_s: float | None = None) -> Any:
+        if task_type == "specimen_reasoning":
+            context = json.loads(prompt.split("\n", 1)[1])["context"]
+            return SimpleNamespace(text=json.dumps({
+                "tool": "execute_fabrication", "arguments": {"specimen_id": context["specimen_id"]},
+                "reason": "Checked manufacturing evidence supports the requested intent.",
+                "evidence_refs": ["context:request", "manufacturability:checks"],
+            }))
         return SimpleNamespace(text=f"{task_type}: {prompt[:80]}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reply", ["invalid JSON", json.dumps({"tool": "return_to_owner", "arguments": {},
+    "reason": "Manufacturing constraints need owner review.", "evidence_refs": ["context:request"]})])
+async def test_specimen_failed_decision_never_reaches_printer_or_ready_handoff(tmp_path, monkeypatch, reply):
+    ctx = _CtxStub()
+    ctx.force_real_llm_in_test = True
+    ctx.artifact_run_root = tmp_path / "runs"
+    async def complete(*args, **kwargs):
+        return SimpleNamespace(text=reply, raw={})
+    ctx.complete = complete
+    def forbidden(payload):
+        pytest.fail("failed decision reached physical boundary")
+    ctx.tools.register("printer.prepare", forbidden)
+    monkeypatch.setattr(SpecimenMakingAgent, "_artifact_dir", lambda *args: tmp_path / "geometry")
+    spec = {**_valid_spec(), "tpms_resolution": 18}
+    state = OrchestratorState(run_id="spc-denied", experiment_id="offline", mode=Mode.TEST,
+                               stage=Stage.SPECIMEN, current_experiment_spec=spec)
+    result = await SpecimenMakingAgent().run(state, ctx)
+    assert result.success is False
+    assert result.data["specimen_result"]["ok"] is False
+    assert "specimen_fabricated" not in result.data and "handoff_packet" not in result.data
+    assert result.data["artifact_execution"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("origin", ["lhs_contract", "bo_redesign", "operator_constraints"])
+async def test_design_json_handoff_reaches_specimen_selected_tool_without_hardware(tmp_path, monkeypatch, origin):
+    from agents.design_agent import DesignAgent
+    state = OrchestratorState(run_id="design-spc-contract", experiment_id="offline", mode=Mode.TEST,
+                               stage=Stage.DESIGN, active_goal="prepare the requested compression specimen")
+    requested = {"cell_size_mm": 6.0, "relative_density": .37}
+    if origin == "lhs_contract":
+        state.run_metadata["orchestrator_design_contract"] = {
+            "schema": "orchestrator_design_contract.v1", "contract_id": "fixture-lhs-point",
+            "phase": "initial_design", "requested_parameters": requested}
+    elif origin == "bo_redesign":
+        state.run_metadata["bo_recommended_constraints"] = requested
+        state.loop_count = 1
+    else:
+        state.current_experiment_spec = {"constraints": {**requested, "material": "PETG",
+                                                         "max_specimen_size_mm": [20., 22., 24.]}}
+    design_ctx = SimpleNamespace(force_real_llm_in_test=False, artifact_run_root=tmp_path / "runs",
+                                failure_memory=SimpleNamespace(recent=lambda **kwargs: []))
+    design = await DesignAgent().run(state, design_ctx)
+    assert design.success
+    spec = json.loads(json.dumps(design.data["experiment_spec"]))
+    assert spec["cell_size_mm"] == requested["cell_size_mm"]
+    assert spec["relative_density"] == pytest.approx(requested["relative_density"])
+    if origin == "operator_constraints":
+        assert spec["material"] == "PETG"
+        assert spec["specimen_size_mm"] == [20., 22., 24.]
+    state.current_experiment_spec = spec
+    state.stage = Stage.SPECIMEN
+    ctx = _CtxStub()
+    ctx.force_real_llm_in_test = True
+    ctx.artifact_run_root = tmp_path / "runs"
+    received = []
+    from mcp_tools.mock_tools import _printer_prepare
+    def non_actuating_boundary(payload):
+        received.append(payload)
+        return _printer_prepare(payload)
+    ctx.tools.register("printer.prepare", non_actuating_boundary)
+    monkeypatch.setattr(SpecimenMakingAgent, "_artifact_dir", lambda *args: tmp_path / "geometry")
+    result = await SpecimenMakingAgent().run(state, ctx)
+    assert result.success and len(received) == 1
+    assert received[0]["candidate_id"] == spec["candidate_id"]
+    assert received[0]["specimen_id"] == spec["specimen_id"]
+    assert received[0]["experiment_spec"]["cell_size_mm"] == spec["cell_size_mm"]
+    assert received[0]["experiment_spec"]["relative_density"] == spec["relative_density"]
+    if origin == "operator_constraints":
+        assert received[0]["material"] == "PETG"
+        assert received[0]["experiment_spec"]["specimen_size_mm"] == [20., 22., 24.]
+    assert result.data["specimen_decision"]["status"] == "executed"
+    assert result.data["specimen_fabricated"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path,profile_driven,preflight", [
+    ("virtual_bridge", False, False), ("installed_printer", False, False),
+    ("physical_print", False, False), ("installed_printer", True, False),
+    ("physical_print", True, False), ("physical_print", False, True),
+])
+async def test_model_dispatch_absorbs_existing_execution_profiles(tmp_path, monkeypatch, path, profile_driven, preflight):
+    ctx = _CtxStub()
+    ctx.force_real_llm_in_test = True
+    ctx.artifact_run_root = tmp_path / "runs"
+    spec = {**_valid_spec(), "tpms_resolution": 18, "test_mode_llm_generated": True,
+            "printer_profile": "bambulab_x2d_pla_0p4_nozzle",
+            "printer_test_path": path, "specimen_placement": {"mode": "manual", "center_x_mm": 128., "center_y_mm": 110.}}
+    if profile_driven:
+        spec.update(test_mode_profile={"profile_id": "operator-mode"},
+                    print={"start_immediately": False, "physical_intent": False},
+                    ejection={"enabled": False, "allow_ejection": False})
+    if preflight:
+        spec["execution_policy"] = {"printer": "preflight_only"}
+    state = OrchestratorState(run_id="profile-" + path, experiment_id="offline", mode=Mode.LIVE,
+                               stage=Stage.SPECIMEN, current_experiment_spec=spec)
+    received = []
+    from mcp_tools.mock_tools import _printer_prepare
+    def non_actuating_boundary(payload):
+        received.append(payload)
+        return _printer_prepare(payload)
+    ctx.tools.register("printer.prepare", non_actuating_boundary)
+    monkeypatch.setattr(SpecimenMakingAgent, "_artifact_dir", lambda *args: tmp_path / "geometry")
+    result = await SpecimenMakingAgent().run(state, ctx)
+    assert result.success and len(received) == 1
+    payload = received[0]
+    assert payload["test_printer_path"] == path
+    assert payload["specimen_placement"] == spec["specimen_placement"]
+    assert payload["allow_test_printer_live"] is (path != "virtual_bridge" and not preflight)
+    assert payload["execution_policy_mode"] == ("preflight_only" if preflight else "execute")
+    if profile_driven:
+        assert payload["print"] == spec["print"]
+        assert payload["ejection"]["enabled"] is False
+    elif path != "virtual_bridge" and not preflight:
+        assert payload["print"]["start_immediately"] is True
+        assert payload["print"]["use_ejection_only_project_file"] is (path == "installed_printer")
+        assert payload["ejection"]["enabled"] is True
+    assert result.data["specimen_decision"]["status"] == "executed"
 
 
 def _fake_slice(tmp_path: Path):

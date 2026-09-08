@@ -32,6 +32,7 @@ from backends.nemoclaw_vllm_runtime import NemoClawVLLMRuntime
 DEFAULT_MAX_TOKENS_BY_TASK = {
     "orchestrator_plan": 320,
     "design_reasoning": 256,
+    "specimen_reasoning": 256,
     "analysis_reasoning": 192,
     "knowledge_query": 256,
     "guardian_reasoning": 256,

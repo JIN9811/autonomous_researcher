@@ -70,7 +70,7 @@ Design rows were updated on 2026-09-07 for the bounded decision layer; see its
 |---|---|---|---|---|---|
 | Orchestrator | Control plane and Design pre-stage | Operator intent, session, graph/run state, prior decisions | Mission/plan/context/handoff/decision compilation | Active agent, Guardian route, next cycle or terminal | none; direct device execution prohibited |
 | Design | `design` | Objective, constraints, prior BO/Knowledge/failure context | Code-owned checks and bounded LLM suitability decision; accepted experiment specification | Specimen Making | none |
-| Specimen Making | `specimen` | Approved experiment specification and fabrication intent | Manufacturing digital thread, geometry/QA/process/print handoff | Vision and Manipulation readiness | `physical_possible` through printer service |
+| Specimen Making | `specimen` | Approved experiment specification and fabrication intent | Bounded LLM suitability/tool decision, manufacturing digital thread and print handoff | Vision and Manipulation readiness | `physical_possible` through printer service |
 | Vision | `vision` plus verification sidecars | Specimen/manipulation context, camera and scene state | Freshness-bounded observation and verification signals | Manipulation, Equipment, Specimen completion, Guardian | observation is read-only; verified rollout stop can affect robot process |
 | Manipulation | physical transfer branch | Specimen result, fresh Vision signal, robot/profile/policy context | Bounded policy rollout, progress, verification request, transfer result | Vision verification, Equipment or Knowledge | `physical_possible` robot motion |
 | Lab Equipment | `equipment` | Verified placement/specimen, protocol/profile/skill, approvals | Registered deterministic instrument/desktop protocol execution | Analysis | `physical_possible` desktop and instrument action |
@@ -138,7 +138,7 @@ state ownership, failure propagation, and the manual Device Workspace boundary.
 |---|---|---|---|---|---|
 | Orchestrator | `orchestrator_supervisor` | controller, run loop, checkpoint/event/planning services | model backend when selected | none | model/local_state |
 | Design | `design_reasoning` | deterministic candidate/constraint logic | selected model backend for rationale | none | model/local_state |
-| Specimen Making | `tool_formatting` | geometry, artifact, evaluation, printer manager | slicer/provider, Bambu MQTT/HTTP artifact path, Prusa bridge where selected | 3D printer | physical_possible |
+| Specimen Making | `specimen_reasoning` | bounded suitability tools, geometry, artifact, evaluation, printer manager | slicer/provider, Bambu MQTT/HTTP artifact path, Prusa bridge where selected | 3D printer | physical_possible through existing gates |
 | Vision | `vision_observation` | pose tracker, signal arbitration, evidence packaging | camera, LeRobot camera, ROS/UTM runtime | cameras; rollout stop process | physical_possible only for verified stop |
 | Manipulation | `manipulation_plan` | policy/profile/session/SARM logic | LeRobot processes, serial/camera, Isaac services | robot/manipulator | physical_possible |
 | Lab Equipment | `tool_formatting` | equipment skill runtime, profile/bridge registry | PyAutoGUI HTTP worker, desktop application, ROS/UTM runtime | UTM and registered equipment | physical_possible |
