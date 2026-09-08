@@ -59,7 +59,7 @@ supersedes: []
 - 각 에이전트의 정상 유효 작업 경로에 역할 적합성이 설명되는 LLM 의사결정층과 의미 있는 툴 호출을 둔다.
 - 맥락·상충 근거·불확실성을 종합하는 판단과 정형 계산·필수 실행을 분리한다. LLM의 선택은 실제 후속 작업에 반영한다.
 - 기존 함수·등록 툴·Skill·브릿지·런타임·아카이브를 우선 사용한다.
-- 기존 `docs/agents/*_agent.md`를 같은 다섯 영역으로 재구성한다.
+- 기존 `docs/agents/*_agent.md`는 역할·흐름 중심 목차로 정리하고, 같은 다섯 영역의 책임을 대응표로 연결한다.
 - 구현, 표, 피겨, 검증의 대응 관계를 에이전트별로 확인한다.
 - 미변경 에이전트와 변경된 에이전트가 기존 계약으로 함께 동작하게 한다.
 
@@ -265,43 +265,40 @@ LLM 적합성은 단순 수치 크기 비교가 아니라 **서로 다른 근거
 추가하고 기존 Reference를 낡은 상태로 남기면 미완료다. 현재/제안/검증 완료 상태를
 분리하며, 미구현 내용을 active Reference의 현재 기능으로 쓰지 않는다.
 
-Agent Reference의 본문은 짧은 개요와 아래 **다섯 H2 영역**을 중심으로 구성한다.
-기존 세부 API·연결·설정·오류·근거 정보는 삭제하지 않고 해당 영역의 H3로 이동한다.
-메타데이터는 기존 front matter 규칙을 유지한다. 별도 여섯 번째 제어 계층을 만들지 않는다.
+Agent Reference는 **역할 → 실행 흐름 → 판단 → 인터페이스 → 운영 → 안전 → 근거**의
+독자 중심 순서로 구성한다. 다섯 영역은 책임 분류이며 H2 목차나 실행 순서로 강제하지
+않는다. Overview에 다섯 영역의 책임·외부 소유권·상세 절 링크를 담은 대응표를 둔다.
+기존 세부 API·연결·설정·오류·근거 정보는 해당 주제의 독립 절에 보존한다.
+메타데이터는 기존 front matter 규칙을 유지하며 별도 제어 계층을 추가하지 않는다.
 
 ```text
-# <Agent Name>
-짧은 개요: 목적 / 주 소유 영역 / 입력 → 작업 → 출력
-
-## 1. High-Level Control
-### Mission and Responsibility
-### Inputs and Handoffs
-### Closed-Loop Position
-
-## 2. Middle-Level Control
-### Internal Workflow
-### LLM Reasoning and Decision Authority
-### Decision Inputs, Allowed Choices, and LLM Fit
-### Tool-Calling Loop
-### Completion and Escalation
-
-## 3. Low-Level Control
-### Tool Catalog
-### APIs and Connections
-### Execution, Configuration, and Modes
-
-## 4. Guardian / Safety
-### Decision Boundaries
-### Validation and Approval
-### Failure, Retry, and Stop
-
-## 5. Knowledge / Evidence
-### Knowledge Inputs
-### Decisions, Artifacts, and Storage
-### Knowledge Outputs
-### Verification and Known Gaps
-### Source of Truth and Related Documents
+# <Agent Name> Reference
+## Overview and Responsibilities
+짧은 요약 / 하는 일·하지 않는 일 / 5영역 책임·상세 절 대응표
+## Closed-Loop Position and Handoffs
+SVG 1 / 입력·출력·호출·인계 계약
+## Internal Workflow
+기존 실행 순서 / 구현 함수 / SVG 2 / 완료·상위 반환
+## Decision and Evaluation
+LLM 판단 문제·선택권 / 평가 항목 / 근거·이력의 해석
+## Tools, APIs and Connections
+툴 인자·결과·효과 / 요청 스키마 / SVG 3 / API·연결 대상
+## Configuration and Operation
+설정 소유자·출처·적용 시점 / 모드 차이 / GUI
+## Safety and Recovery
+검증·승인 / 오류·재시도·취소 / 기존 안전 경계
+## Artifacts and Verification
+산출물·저장 / 검증 상태 요약 / 한계 / 출처·관련 문서
 ```
+
+- 같은 계약의 상세 설명은 한 절에만 둔다. 다른 절과 책임표는 링크로 연결한다.
+- 표는 책임·인계·스키마·설정·검증 상태의 비교에, SVG는 실행·연결 관계에 사용한다.
+  판단 이유·LLM 적합성·한계는 짧은 문장으로 설명하며 모든 문장을 표로 만들지 않는다.
+- Reference는 현재 동작을 설명한다. 설계안은 목표 계약, 구현 계획은 작업·진행 상태,
+  Evidence는 실제 검증 조건·결과·한계를 소유한다. 긴 실행 로그나 개발 과정은 Reference에 복제하지 않는다.
+- 동일한 세 SVG와 편집 원본·stem을 재사용하고 해당 주제 절에 배치한다.
+- 이번 적용은 Design Reference와 공통 작성 계약에 한정한다. 다른 에이전트는 자체 재구성 시
+  적용하며, 문서 목차 변경을 근거로 런타임·모델·장비 경로를 바꾸지 않는다.
 
 소유하지 않는 기능은 `Not owned`와 실제 담당자를 적는다. 비장비 에이전트의 Low는
 계산·검색·저장 실행을 설명한다. 에이전트 Reference와 피겨는 영어로 작성하고,
@@ -327,9 +324,9 @@ Agent Reference의 본문은 짧은 개요와 아래 **다섯 H2 영역**을 중
 
 | 피겨 | 필수 내용 | 배치 |
 |---|---|---|
-| 1. Closed-loop position and handoffs | 해당 에이전트의 위치, 호출/인계, High/Middle/Low 및 공통 영역과의 관계 | High |
-| 2. Reasoning and execution loop | 기존 전처리 → 국소 LLM 판단층 ↔ 필요한 툴/관측 → 기존 실행·완료의 경계. LLM 소유 영역, 정상 경로 참여, 조건부 반복, 안전·기록을 명시 | Middle; 실제 소유 영역 및 Safety/Evidence에서 참조 |
-| 3. Tool/API/connection architecture | 실제 툴·함수·서비스·브릿지/계산기, 요청/결과 방향, 부작용 발생 지점 | Low |
+| 1. Closed-loop position and handoffs | 해당 에이전트의 위치, 호출/인계, High/Middle/Low 및 공통 영역과의 관계 | Closed-Loop Position and Handoffs |
+| 2. Reasoning and execution loop | 기존 전처리 → 국소 LLM 판단층 ↔ 필요한 툴/관측 → 기존 실행·완료의 경계. LLM 소유 영역, 정상 경로 참여, 조건부 반복, 안전·기록을 명시 | Internal Workflow; 판단·안전·근거 절에서 참조 |
+| 3. Tool/API/connection architecture | 실제 툴·함수·서비스·브릿지/계산기, 요청/결과 방향, 부작용 발생 지점 | Tools, APIs and Connections |
 
 - 재구성된 모든 Agent Reference는 최소 세 개의 실제 역할에 맞는 SVG를 갖는다.
 - 기존 `.dot`/`.svg` 자산·stem·링크를 우선 재사용한다. 비장비 에이전트에 가짜 장비 연결을 그리지 않는다.
@@ -388,7 +385,7 @@ Agent Reference의 본문은 짧은 개요와 아래 **다섯 H2 영역**을 중
 | AC-05 | 필수 증거 없이는 완료·인계되지 않음 | 완료 조건 테스트 |
 | AC-06 | timeout·취소·예산·불명 효과·재시도를 명시적으로 처리함 | 실패 시나리오 테스트 |
 | AC-07 | 기존 입출력·모드·인접 에이전트·루프 경로가 유지됨 | 기존 회귀 + 인접 계약 + 비구동 루프 연결 검사 |
-| AC-08 | 해당 기존 Reference가 다섯 영역으로 갱신됨 | 필수 표, 설정/API/툴 소유권, 출처·기준 커밋 |
+| AC-08 | 해당 기존 Reference가 역할·흐름 중심 목차와 5영역 책임 대응표로 갱신됨 | 필수 표, 설정/API/툴 소유권, 출처·기준 커밋; 중복 설명 대신 상세 절 링크 |
 | AC-09 | 최소 세 개의 피겨와 원본이 실제 구현에 맞음 | 임베딩/캡션/링크 검사, Graphviz 재렌더링 비교 |
 | AC-10 | 결정·툴·결과·아티팩트가 기존 loop/attempt 기록에 연결됨 | 재조회·식별자·실패 기록 검사 |
 | AC-11 | 관련 문서·검증 규칙과 링크가 동기화됨 | 해당 범위 문서/피겨 검사, 표↔코드 추적 확인 |

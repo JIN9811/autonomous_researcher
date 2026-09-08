@@ -72,7 +72,8 @@ assert spec["design_evaluation"]["performance"]["status"] == "unassessed"
 
 **Files:** existing `docs/agents/design_agent.md`, its three DOT/SVG pairs, relevant index/matrix/standard and validator inventory, this plan.
 
-- [x] Replace existing Reference with five-area content, tool/API tables, authority boundaries and source-linked verification.
+- [x] Retain the existing Reference with role/workflow-oriented sections, a five-area responsibility map, tool/API tables, authority boundaries and source-linked verification.
+- [x] Align the governing Design, documentation Standard and agent index with the reader-oriented layout; retain the three figure/source pairs and existing runtime behavior.
 - [x] Render three figures and validate source/render consistency, links and manifest.
 - [x] Run focused Python/Node tests and non-actuating integration with a controlled model; attempt actual model verification only through an available inference endpoint without equipment access.
 - [x] Record actual-model and hardware verification separately; do not claim prior physical evidence validates this change.

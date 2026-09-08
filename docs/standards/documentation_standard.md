@@ -210,6 +210,28 @@ MUST follow `docs/templates/document_types.md` unless a concise document does
 not need a section; omitted sections MUST NOT hide safety, compatibility, or
 verification information.
 
+### Restructured Agent Reference Layout
+
+Agent References following the five-area restructuring contract MUST use a
+reader-oriented order: Overview and Responsibilities; Closed-Loop Position and
+Handoffs; Internal Workflow; Decision and Evaluation; Tools, APIs and Connections;
+Configuration and Operation; Safety and Recovery; Artifacts and Verification.
+The opening overview and closing source/verification material fulfill the body
+structure guidance above; separate duplicate sections are not required.
+
+The overview MUST map High, Middle, Low, Guardian/Safety and Knowledge/Evidence
+responsibilities to the relevant detailed sections. These areas MUST NOT be
+presented as five sequential runtime stages or forced top-level chapters.
+Detailed contracts SHOULD have one explanatory home with links from other
+sections. Tables SHOULD compare contracts/settings/results; figures SHOULD show
+flow and connections; short prose SHOULD explain decisions and limitations.
+
+References MUST describe current behavior. Design documents own intended
+contracts, plans own work status, and Evidence owns detailed test conditions and
+results. References SHOULD summarize verification and link to those records,
+not duplicate development history or full test logs. Apply this layout first
+to Design and to other agents only when their own restructuring is undertaken.
+
 ## Verification and Freshness
 
 `last_verified` MUST be an ISO date. `verified_against` MUST be a Git commit for

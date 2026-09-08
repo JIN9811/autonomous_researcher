@@ -66,6 +66,12 @@ Excluded:
 
 ## Visual Contract
 
+The restructured [Design Reference](design_agent.md) follows a role/workflow
+reading order, with a five-area responsibility map linking to its detailed
+sections. APIs, configuration, safety and artifacts remain directly accessible;
+the five areas are responsibility categories, not forced chapters or runtime
+stages. Other agents adopt this layout during their own restructuring.
+
 Every Reference includes `Flow` and `Execution` figures. Design, Specimen, Vision,
 Manipulation, Equipment, Analysis, and Knowledge also include a `Connections`
 figure because their bridge, external-service, device, or persistence boundary
