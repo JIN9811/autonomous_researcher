@@ -486,6 +486,9 @@ class GuardianAgent(BaseAgent):
         )
         anomaly = bool(latest_observations.get("anomaly", False))
         expected_proxy = GuardianAgent._safe_float(spec.get("expected_objective_proxy_score"), -1.0) if isinstance(spec, dict) else -1.0
+        if isinstance(spec, dict) and spec.get("score_semantics") == "legacy_heuristic_compatibility_only":
+            # Compatibility values are not measured/predicted scientific objectives.
+            expected_proxy = -1.0
 
         if analysis_ok is False:
             issues.append(f"analysis blocked: {analysis_failure_code or 'unknown_failure'}.")

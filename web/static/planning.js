@@ -5229,7 +5229,7 @@ function agentSpecificReportProfile(report, status, agentLabel) {
     },
     design: {
       title: "Design Geometry / Manufacturability",
-      summary: "Shows objective contract, hypothesis, candidate pool, deterministic selection rationale, rejected/repair log, and Specimen Agent handoff readiness.",
+      summary: "Shows objective contract, candidate validity, evidence-based selection rationale, rejected/repair log, and Specimen Agent handoff readiness.",
       rows: [
         ["objective", designObjective.primary_metric || spec.objective_type || "-"],
         ["direction", designObjective.direction || spec.objective_direction || "-"],
@@ -5239,10 +5239,16 @@ function agentSpecificReportProfile(report, status, agentLabel) {
         ["relative_density", spec.relative_density || "-"],
         ["candidate_count", designGeneration.candidate_count || (spec.candidate_pool_summary && spec.candidate_pool_summary.generated_count) || "-"],
         ["valid/rejected", `${designGeneration.valid_count || 0}/${designGeneration.rejected_count || 0}`],
-        ["selected_score", designEvaluation.selected_score || spec.expected_objective_proxy_score || "-"],
-        ["uncertainty", designEvaluation.uncertainty || spec.uncertainty || "-"],
-        ["info_gain", designEvaluation.information_gain_score || spec.information_gain_score || "-"],
-        ["risk", designEvaluation.risk_score || spec.risk_score || "-"],
+        ...(spec.design_evaluation ? [
+          ["validity", spec.design_evaluation.validity?.status || "unknown"],
+          ["performance", spec.design_evaluation.performance?.status || "unassessed"],
+          ["mass_estimate_g", spec.design_evaluation.cost?.mass?.value ?? "-"],
+        ] : [
+          ["selected_score", designEvaluation.selected_score || spec.expected_objective_proxy_score || "-"],
+          ["uncertainty", designEvaluation.uncertainty || spec.uncertainty || "-"],
+          ["info_gain", designEvaluation.information_gain_score || spec.information_gain_score || "-"],
+          ["risk", designEvaluation.risk_score || spec.risk_score || "-"],
+        ]),
         ["prior_count", designPrior.prior_count || 0],
         ["handoff_ready", designHandoff.required_fields_present === undefined ? "-" : designHandoff.required_fields_present],
       ],
@@ -5497,7 +5503,10 @@ function renderDesignReportDetails(report) {
   const topCandidates = Array.isArray(generation.top_candidates) ? generation.top_candidates.slice(0, 5) : [];
   const rejected = Array.isArray(designReport.rejected_candidates) ? designReport.rejected_candidates.slice(0, 6) : [];
   const decisions = Array.isArray(designReport.decision_register) ? designReport.decision_register.slice(0, 6) : [];
-  const topList = topCandidates.map((item) => `${item.candidate_id || "candidate"} · ${item.geometry_type || "-"} · score=${renderRuntimeValue(item.expected_objective_proxy_score || item.predicted_objective)} · risk=${renderRuntimeValue(item.risk_score)}`);
+  const evidenceBased = designReport.evaluation_semantics === "evidence_based_v1";
+  const topList = topCandidates.map((item) => evidenceBased
+    ? `${item.candidate_id || "candidate"} · ${item.geometry_type || "-"} · validity=${item.design_evaluation?.validity?.status || "unknown"} · performance=${item.design_evaluation?.performance?.status || "unassessed"}`
+    : `${item.candidate_id || "candidate"} · ${item.geometry_type || "-"} · score=${renderRuntimeValue(item.expected_objective_proxy_score || item.predicted_objective)} · risk=${renderRuntimeValue(item.risk_score)}`);
   const rejectedList = rejected.map((item) => `${item.candidate_id || "candidate"} · ${item.reason || "rejected"}`);
   const decisionList = decisions.map((item) => `${item.decision_id || item.decision || "decision"} · ${item.status || "-"} · ${item.rationale || ""}`);
   return `
@@ -5508,7 +5517,7 @@ function renderDesignReportDetails(report) {
         ["direction", objective.direction || "-"],
         ["variables", hypothesis.variables_under_test || "-"],
         ["selected_candidate", evaluation.selected_candidate_id || "-"],
-        ["manufacturability", evaluation.manufacturability_score || "-"],
+        evidenceBased ? ["validity", designReport.design_evaluation?.validity?.status || "unknown"] : ["manufacturability", evaluation.manufacturability_score || "-"],
         ["knowledge_prior", prior.knowledge_summary || "-"],
         ["bo_recommendation", prior.bo_recommendation || "-"],
         ["handoff_missing", handoff.missing_required_fields || []],
@@ -11559,6 +11568,7 @@ function designCandidateRows(screenReport, designReport, report) {
 }
 
 function designCandidateScore(item) {
+  if (item && item.score_semantics === "legacy_heuristic_compatibility_only") return null;
   return dashboardFirstNumber(item, ["score", "selected_score", "expected_objective_proxy_score", "predicted_objective", "y_predicted_objective", "value", "manufacturability_score", "information_gain_score"]);
 }
 
@@ -11616,6 +11626,7 @@ function renderDesignSpecimenMetric(label, value, options = {}) {
 }
 
 function renderDesignSpecimenMetricStrip(item) {
+  if (item && item.design_evaluation) return renderDesignEvidence(item.design_evaluation);
   if (item && item.__actual_specimen) {
     const maxLoop = dashboardFiniteNumber(item.__max_loop) || Math.max(dashboardFiniteNumber(item.loop_index) || 1, 1);
     const hasStl = Boolean(item.stl_url || item.stl_path);
@@ -11794,6 +11805,14 @@ function designActualSpecimenRows(screenReport, designReport, report) {
       loop_index: loopIndex || (prior && prior.loop_index) || null,
       status: seed.status || seed.outcome_status || seed.queue_status || (prior && prior.status) || "generated",
     });
+    const currentSpec = report.spec || {};
+    if (id === currentSpec.specimen_id && currentSpec.design_evaluation) {
+      row.design_evaluation = currentSpec.design_evaluation;
+      row.candidate_fingerprint = currentSpec.candidate_fingerprint;
+    } else if (!seed.design_evaluation && candidate.design_evaluation) {
+      row.design_evaluation = {validity:{status:"unassessed", reasons:["No evaluation linked to this actual specimen artifact."]},
+        performance:{status:"unassessed"}, cost:{}, constraint_margins:[]};
+    }
     rows.set(id, row);
     return row;
   };
@@ -12365,6 +12384,9 @@ function renderDesignCandidateCards(screenReport, designReport, report) {
 }
 
 function renderDesignRankingChart(screenReport, designReport) {
+  if (screenReport && screenReport.evaluation_semantics === "evidence_based_v1") {
+    return renderDesignParameterSweep(screenReport);
+  }
   const rows = designCandidateRows(screenReport, designReport).slice(0, 8).map((item, index) => {
     const value = designCandidateScore(item);
     if (value === null) return null;
@@ -12383,6 +12405,10 @@ function renderDesignRankingChart(screenReport, designReport) {
 }
 
 function renderDesignParameterSweep(screenReport) {
+  if (screenReport && screenReport.evaluation_semantics === "evidence_based_v1") {
+    const rows = Array.isArray(screenReport.candidate_evaluations) ? screenReport.candidate_evaluations : [];
+    return `<div class="ar-design-note-list">${rows.map(e => `<span><b>${escapeHtml(e.candidate_id)}</b> · ${escapeHtml(e.validity.status)} · ${escapeHtml(e.cost.mass.value)} g estimated · performance ${escapeHtml(e.performance.status)}</span>`).join("")}</div>`;
+  }
   const sweep = screenReport && screenReport.parameter_sweep ? screenReport.parameter_sweep : {};
   const cells = Array.isArray(sweep.heatmap_cells) ? sweep.heatmap_cells : [];
   const clean = cells.map((cell) => ({
@@ -12460,7 +12486,28 @@ function designRadarRows(source, fallbackMetrics = {}) {
     .filter((item) => item.value !== null);
 }
 
+function renderDesignEvidence(evaluation, details = false) {
+  const e = evaluation || {};
+  const validity = e.validity || {};
+  const performance = e.performance || {};
+  const cost = e.cost || {};
+  const quantity = q => q && q.value != null ? `${renderRuntimeValue(q.value)} ${q.unit || ""}` : "unavailable";
+  const rows = [
+    ["Validity", validity.status || "unknown"],
+    ["Performance", performance.status === "unassessed" ? "unassessed" : quantity(performance)],
+    ["Mass (estimated)", quantity(cost.mass)],
+    ["Time (rough estimate)", quantity(cost.duration)],
+  ];
+  const margins = details && Array.isArray(e.constraint_margins) ? e.constraint_margins : [];
+  const reasons = Array.isArray(validity.reasons) ? validity.reasons : [];
+  return `<div class="ar-design-metric-strip">${rows.map(([label,value]) => `<span><b>${escapeHtml(label)}</b>${escapeHtml(value)}</span>`).join("")}</div>
+    ${margins.length ? `<div class="ar-design-note-list">${margins.map(m => `<span>${escapeHtml(m.constraint)}: ${escapeHtml(m.margin)} ${escapeHtml(m.unit)} margin · ${escapeHtml(m.status)}</span>`).join("")}</div>` : ""}
+    ${reasons.length ? `<div class="ar-design-note-list">${reasons.map(r => `<span>${escapeHtml(r)}</span>`).join("")}</div>` : ""}`;
+}
+
 function renderDesignExpectedPerformance(screenReport, designReport, selected = {}) {
+  const evidence = (designReport && designReport.design_evaluation) || (screenReport && screenReport.design_evaluation) || selected.design_evaluation;
+  if (evidence) return renderDesignEvidence(evidence);
   const expected = screenReport && screenReport.expected_performance ? screenReport.expected_performance : {};
   const evaluation = designReport && designReport.candidate_evaluation ? designReport.candidate_evaluation : {};
   const scatterRows = designScatterRows(Array.isArray(expected.scatter_points) ? expected.scatter_points : []);
@@ -12511,6 +12558,8 @@ function renderDesignBriefCard(brief, objective, hypothesis, spec, prior, materi
 }
 
 function renderDesignManufacturabilityCard(screenReport, designReport, selected, spec, material = {}, candidateRows = []) {
+  const evidence = (designReport && designReport.design_evaluation) || (screenReport && screenReport.design_evaluation) || spec.design_evaluation;
+  if (evidence) return renderDesignEvidence(evidence, true);
   const expected = screenReport && screenReport.expected_performance ? screenReport.expected_performance : {};
   const evaluation = designReport && designReport.candidate_evaluation ? designReport.candidate_evaluation : {};
   const manufacturability = (screenReport && screenReport.manufacturability) || (designReport && designReport.manufacturability) || {};
@@ -12597,6 +12646,13 @@ function renderDesignDashboardCards(report, status, agentLabel, profile) {
   const spec = report.spec || {};
   const screenReport = latestDesignAgentReport(report) || {};
   const designReport = latestDesignReport(report) || {};
+  const decision = designReport.design_decision;
+  if (decision && ["returned", "failed"].includes(decision.status)) {
+    return renderDashboardCard("Design Decision — Review Required", runtimeRows([
+      ["status", decision.status], ["reason", decision.reason || decision.failure_code || "No accepted candidate"],
+      ["handoff", "blocked — no specification emitted"],
+    ]), {span:12, tone:"warning", eyebrow:"dsn decision"});
+  }
   const brief = screenReport.design_brief || {};
   const board = screenReport.candidate_board || {};
   const material = screenReport.material_notes || {};

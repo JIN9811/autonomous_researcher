@@ -39,6 +39,7 @@ import httpx
 
 from agents.base_agent import AgentContext
 from agents.bo_agent import BOAgent
+from agents.design_agent import DesignAgent
 from agents.registry import AgentRegistry
 from logging_system.event_logger import log_system_event
 from logging_system.logger_factory import LoggerBundle, build_logger_bundle
@@ -63,7 +64,7 @@ from orchestrator.supervisor import (
     normalize_operator_intent,
 )
 from policies.validation_policy import validate_agent_output
-from policies.guardian_gate import tool_requires_action_shield
+from policies.guardian_gate import gate_blocks_execution, tool_requires_action_shield
 from utils.active_cam_artifact import apply_active_cam_artifact_update
 from utils.ids import make_event_id, make_experiment_id, make_run_id
 from utils.manipulation_execution import sync_manipulation_execution_status
@@ -2741,6 +2742,8 @@ class MainController:
         if not isinstance(spec, dict):
             return {}
         keys = (
+            "score_semantics",
+            "design_evaluation",
             "candidate_id",
             "specimen_id",
             "geometry_type",
@@ -3269,6 +3272,14 @@ class MainController:
                 continue
             if key_text in list_limits and isinstance(value, list):
                 compact[key_text] = cls._planning_list_summary(value, limit=list_limits[key_text])
+                continue
+            if key_text == "design_report" and isinstance(value, dict) and value.get("evaluation_semantics") == "evidence_based_v1":
+                compact[key_text] = {**cls._planning_scalar_summary(value),
+                    **{key: compact_runtime_payload(value[key]) for key in
+                       ("design_evaluation", "handoff_to_specimen", "objective") if key in value}}
+                if isinstance(value.get("design_decision"), dict):
+                    compact[key_text]["design_decision"] = {key: item for key, item in value["design_decision"].items()
+                                                            if key != "trace"}
                 continue
             if key_text in {
                 "design_report", "fabrication_report", "vision_report", "manipulation_report",
@@ -7018,15 +7029,30 @@ class MainController:
             **{key: value for key, value in effective_constraints.items() if key in {"geometry_type", "specimen_size_mm"}},
             "constraints": {**previous_constraints, **effective_constraints},
         }
+        design_status_times = {name: status.last_run_time for name, status in self._state.agent_status.items()}
         await self._run_planning_langgraph_stage(
             Stage.DESIGN,
             run_orchestrator_before_design=False,
         )
+        module_runtime = self._state.run_metadata.get("module_runtime", {}).get(Stage.DESIGN.value, {})
+        design_agent_name = self._planning_stage_role(Stage.DESIGN, module_runtime)
+        design_status = self._state.agent_status.get(design_agent_name)
+        if (design_status is None or design_status.success is not True
+                or not design_status.last_run_time
+                or design_status.last_run_time == design_status_times.get(design_agent_name)):
+            raise RuntimeError("No successful current Design invocation; previous acceptance cannot be reused.")
+        if self._state.stage == Stage.DESIGN:
+            raise RuntimeError("Design has not completed; no planning specification can be emitted.")
         design_stage_payload = self._state.run_metadata.get("design_agent_payload")
         if not isinstance(design_stage_payload, dict):
             last_stage_payload = self._state.run_metadata.get("last_stage_payload")
             last_stage_data = last_stage_payload.get("data") if isinstance(last_stage_payload, dict) else {}
             design_stage_payload = last_stage_data if isinstance(last_stage_data, dict) else {}
+        design_decision = design_stage_payload.get("design_decision")
+        if gate_blocks_execution(design_stage_payload.get("guardian_gate") or {}):
+            raise RuntimeError("Guardian blocked the Design handoff; planning cannot continue to Specimen.")
+        if isinstance(design_decision, dict) and design_decision.get("status") not in {"accepted", "deterministic_test"}:
+            raise RuntimeError("Design decision was not accepted; review its evidence before continuing.")
         base_spec = dict(self._state.current_experiment_spec or {})
         if not base_spec:
             raise RuntimeError("DesignAgent did not return experiment_spec.")
@@ -7036,9 +7062,12 @@ class MainController:
             experiment_spec,
             cycle_index=cycle_index,
         )
+        experiment_spec = DesignAgent.reconcile_planning_evidence(base_spec, experiment_spec)
         self._state.current_experiment_spec = experiment_spec
         design_report = dict(design_stage_payload.get("design_report") or {}) if isinstance(design_stage_payload.get("design_report"), dict) else {}
         if design_report:
+            if isinstance(experiment_spec.get("design_evaluation"), dict):
+                design_report["design_evaluation"] = experiment_spec["design_evaluation"]
             handoff_to_specimen = dict(design_report.get("handoff_to_specimen") or {}) if isinstance(design_report.get("handoff_to_specimen"), dict) else {}
             required = [
                 "candidate_id",
@@ -7069,10 +7098,16 @@ class MainController:
             design_candidate.update({
                 "experiment_spec": experiment_spec,
                 "candidate_id": experiment_spec.get("candidate_id"),
+                "candidate_fingerprint": experiment_spec.get("candidate_fingerprint"),
                 "specimen_id": experiment_spec.get("specimen_id"),
                 "status": "ready" if not (design_report.get("handoff_to_specimen", {}) or {}).get("missing_required_fields") else "blocked",
             })
         merge_payload = {"experiment_spec": experiment_spec}
+        if isinstance(design_stage_payload.get("design_agent_report"), dict):
+            merge_payload["design_agent_report"] = {**design_stage_payload["design_agent_report"],
+                                                     "design_evaluation": experiment_spec.get("design_evaluation")}
+        if isinstance(design_decision, dict):
+            merge_payload["design_decision"] = design_decision
         if design_report:
             merge_payload["design_report"] = design_report
         if design_candidate:

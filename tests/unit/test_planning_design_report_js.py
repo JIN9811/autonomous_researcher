@@ -49,6 +49,79 @@ def _node_eval(script: str) -> str:
     return result.stdout.strip()
 
 
+def test_evidence_cards_show_units_and_unassessed_performance_without_proxy_scores():
+    source = PLANNING_JS.read_text(encoding="utf-8")
+    functions = "\n".join(_extract_function(source, name) for name in (
+        "renderDesignEvidence", "renderDesignExpectedPerformance", "renderDesignSpecimenMetricStrip"))
+    evaluation = {"schema":"design_evaluation.v1", "validity":{"status":"pass", "reasons":[]},
+                  "performance":{"status":"unassessed", "value":None},
+                  "cost":{"mass":{"value":0,"unit":"g","status":"estimated"},
+                          "duration":{"value":32,"unit":"min","status":"rough_heuristic"}},
+                  "constraint_margins":[{"constraint":"minimum_wall", "margin":0.2,"unit":"mm","status":"pass"}]}
+    script = f"""
+const escapeHtml = s => String(s).replaceAll('<','&lt;').replaceAll('>','&gt;');
+const renderRuntimeValue = v => v == null ? '-' : String(v);
+{functions}
+const e = {json.dumps(evaluation)};
+const report = {{design_evaluation:e, candidate_evaluation:{{selected_score:0.9988}}}};
+console.log(JSON.stringify([
+ renderDesignExpectedPerformance({{}}, report, {{expected_objective_proxy_score:0.9988}}),
+ renderDesignSpecimenMetricStrip({{design_evaluation:e, expected_objective_proxy_score:0.9988}}),
+ renderDesignEvidence(e, true)
+]));
+"""
+    html = " ".join(json.loads(_node_eval(script)))
+    assert "unassessed" in html
+    assert "0 g" in html
+    assert "32 min" in html
+    assert "0.2 mm" in html
+    assert "0.9988" not in html
+
+
+def test_blocked_decision_dashboard_does_not_render_previous_ready_spec():
+    function = _extract_function(PLANNING_JS.read_text(), "renderDesignDashboardCards")
+    script = f"""
+const latestDesignAgentReport = () => ({{}});
+const latestDesignReport = () => ({{design_decision:{{status:'returned', reason:'Review evidence'}}}});
+const runtimeRows = rows => JSON.stringify(rows);
+const renderDashboardCard = (title, body) => title + body;
+{function}
+console.log(renderDesignDashboardCards({{spec:{{candidate_id:'previous',expected_objective_proxy_score:0.9988}}}}));
+"""
+    html = _node_eval(script)
+    assert "blocked" in html
+    assert "Review evidence" in html
+    assert "previous" not in html
+    assert "0.9988" not in html
+
+
+def test_actual_specimen_card_prefers_exact_specimen_evidence_not_candidate_ledger():
+    source = PLANNING_JS.read_text()
+    helpers = "\n".join(_extract_function(source, name) for name in (
+        "designActualSpecimenRows", "mergeDesignActualSpecimenRecord"))
+    script = f"""
+const designCandidateRows = () => [{{candidate_id:'c1', design_evaluation:{{validity:{{status:'pass'}}}}}}];
+const liveRunArtifacts = [{{path:'current/specimen.stl'}}, {{path:'old/specimen.stl'}}];
+const designSpecimenIdFromPath = path => path.split('/')[0];
+const designCandidateIdFromSpecimenId = () => 'c1';
+const designLoopIndexFromIds = () => 1;
+const dashboardFiniteNumber = Number;
+const latestSpecimenAgentReport = () => ({{}});
+const latestSpecimenFabricationReport = () => ({{}});
+const latestSpecimenFabricatedPacket = () => ({{}});
+{helpers}
+console.log(JSON.stringify(designActualSpecimenRows({{}}, {{}}, {{spec:{{specimen_id:'current',
+ candidate_fingerprint:'adapted', design_evaluation:{{scope:'adapted_spec_unassessed',validity:{{status:'unassessed'}}}}}}}})));
+"""
+    rows = json.loads(_node_eval(script))
+    current = next(row for row in rows if row["specimen_id"] == "current")
+    old = next(row for row in rows if row["specimen_id"] == "old")
+    assert current["candidate_fingerprint"] == "adapted"
+    assert current["design_evaluation"]["scope"] == "adapted_spec_unassessed"
+    assert old["design_evaluation"]["validity"]["status"] == "unassessed"
+    assert "scope" not in old["design_evaluation"]
+
+
 def test_design_heatmap_groups_duplicate_coordinates_and_keeps_selected_cell() -> None:
     source = PLANNING_JS.read_text(encoding="utf-8")
     helper = _extract_function(source, "groupDesignHeatmapCells")

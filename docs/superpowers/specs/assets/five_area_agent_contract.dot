@@ -1,0 +1,38 @@
+digraph AgentContract {
+  graph [rankdir=TB, bgcolor="white", pad="0.25", nodesep="0.35", ranksep="0.5", fontname="DejaVu Sans", fontsize=16, label="PROPOSED: Five-area agent restructuring contract", labelloc=t];
+  node [shape=box, style="rounded,filled", fillcolor="#f5f7fa", color="#475569", fontname="DejaVu Sans", fontsize=11, margin="0.16,0.12"];
+  edge [color="#475569", fontname="DejaVu Sans", fontsize=10];
+  high [label="HIGH\nMission / delegation / handoff", fillcolor="#e0f2fe"];
+  preparation [label="EXISTING PREPARATION (code)\nNormalize inputs / compute / mandatory checks"];
+  middle [label="ROLE-OWNED LLM DECISION LAYER\nRequired on the normal task path\nChoose meaningful action + tool arguments\nInterpret evidence / not every internal step", fillcolor="#dbeafe"];
+  validate [shape=diamond, label="Request + existing\nsafety checks", fillcolor="#fff7ed"];
+  low [label="LOW\nExisting tools / Skills / bridges\nComputation or device execution", fillcolor="#e2e8f0"];
+  observation [label="Observation\nResult / running / failure / unknown effect"];
+  completion [shape=diamond, label="Completion evidence\n+ output contract", fillcolor="#fff7ed"];
+  handoff [label="Existing AgentResult / handoff\nReturn to High / runtime"];
+  safety [label="GUARDIAN / SAFETY\nEvidence-based review\nHard limits cannot be overridden", fillcolor="#fee2e2"];
+  knowledge [label="KNOWLEDGE / EVIDENCE\nRetrieve context / interpret memory\nPreserve decisions, results and artifacts", fillcolor="#dcfce7"];
+  blocked [label="Hold / fail / request review\nNo blind retry of unknown effects", fillcolor="#fee2e2"];
+  high -> preparation [label="bounded task"];
+  preparation -> middle [label="inputs + computed evidence"];
+  middle -> validate [label="selected action / tool"];
+  validate -> low [label="valid + authorized"];
+  validate -> blocked [label="reject"];
+  low -> observation [label="existing execution path"];
+  observation -> middle [label="if further judgment is needed", constraint=false];
+  observation -> completion [label="terminal result of chosen action"];
+  middle -> completion [label="completion proposal"];
+  completion -> handoff [label="required evidence present"];
+  completion -> blocked [label="missing / invalid"];
+  safety -> validate [style=dashed, label="constraints / review"];
+  safety -> low [style=dashed, label="existing stop / interlocks"];
+  knowledge -> middle [style=dashed, label="context / provenance"];
+  middle -> knowledge [style=dashed, label="decision + tool request", constraint=false];
+  observation -> knowledge [style=dashed, label="results / artifacts"];
+  blocked -> high [style=dashed, label="escalation", constraint=false];
+  {rank=same; safety; middle; knowledge;}
+  acceptance [shape=note, label="DEVELOPMENT ACCEPTANCE (not a runtime stage)\nOne agent: role/LLM fit + bounded authority + compatible handoff\nFive-area Reference + tables + at least 3 SVG/source pairs + evidence", fillcolor="#fef9c3"];
+  handoff -> acceptance [style=invis];
+  legend [shape=plaintext, style="", label="Solid: proposed flow   Dashed: safety, context, evidence or escalation\nDecision owner: High, Middle, Guardian or Knowledge, according to the agent.\nDesign only. Five responsibility areas, not five sequential stages or an extra LLM tier."];
+  acceptance -> legend [style=invis];
+}

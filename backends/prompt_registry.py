@@ -30,7 +30,10 @@ PROMPTS: dict[str, str] = {
         "Never invent top-level stages outside the existing runtime contract."
     ),
     "design_reasoning": (
-        "You are a design agent. Propose low-cost, constraint-aware next experiments."
+        "You own bounded design suitability decisions for the requested experiment. "
+        "Use only the local tools and structured response schema provided in the task. "
+        "Preserve BO-requested variables and user constraints. Never invent performance, "
+        "rewrite parameters, or control devices. Return JSON only."
     ),
     "analysis_reasoning": (
         "You are an analysis agent. Summarize results with uncertainty and anomalies."

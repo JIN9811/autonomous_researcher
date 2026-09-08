@@ -19,7 +19,7 @@ class _CtxStub:
     force_real_llm_in_test = True
     failure_memory = _FailureMemoryStub()
 
-    async def complete(self, task_type: str, user_prompt: str):
+    async def complete(self, task_type: str, user_prompt: str, **kwargs):
         raise TimeoutError("simulated model timeout")
 
 
@@ -28,7 +28,7 @@ class _DeterministicCtxStub(_CtxStub):
 
 
 @pytest.mark.asyncio
-async def test_design_agent_degrades_gracefully_on_test_timeout() -> None:
+async def test_design_agent_reports_forced_llm_timeout_without_silent_selection() -> None:
     agent = DesignAgent()
     state = OrchestratorState(
         run_id="run-test",
@@ -38,9 +38,9 @@ async def test_design_agent_degrades_gracefully_on_test_timeout() -> None:
         active_goal="test",
     )
     result = await agent.run(state, _CtxStub())
-    assert result.success is True
-    assert "experiment_spec" in result.data
-    assert "degraded" in str(result.data["rationale"]).lower()
+    assert result.success is False
+    assert "experiment_spec" not in result.data
+    assert result.data["failure_code"] == "DESIGN_DECISION_TIMEOUT"
 
 
 @pytest.mark.asyncio

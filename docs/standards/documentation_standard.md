@@ -288,10 +288,15 @@ Every canonical agent Reference MUST include:
 1. a closed-loop position and handoff figure;
 2. an internal execution and effect-boundary figure.
 
-Specimen, Vision, Manipulation, Equipment, Analysis, and Knowledge MUST also
-include an API and connection architecture figure. These six agents have
-bridge, external-service, device, or persistence boundaries that would be
+Design, Specimen, Vision, Manipulation, Equipment, Analysis, and Knowledge MUST also
+include an API and connection architecture figure. These agents have
+decision-tool, bridge, external-service, device, or persistence boundaries that would be
 ambiguous if compressed into the execution figure.
+
+Design additionally follows the [five-area restructuring contract](../superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md):
+its existing Reference covers High, Middle, Low, Guardian/Safety and
+Knowledge/Evidence, with a role-fit/decision-authority table. This does not
+require rewriting the remaining agents before their own restructuring.
 
 All agent figure assets MUST:
 

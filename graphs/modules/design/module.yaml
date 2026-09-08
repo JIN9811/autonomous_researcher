@@ -45,7 +45,7 @@ module:
       label: Score Objective Uncertainty Information Risk
       kind: internal_step
     - id: 10_select_authoritative_candidate
-      label: Select Authoritative Candidate
+      label: LLM Suitability Decision and Checked Candidate Selection
       kind: internal_step
     - id: 11_emit_design_report
       label: Emit Design Report and Decision Register
@@ -58,6 +58,8 @@ module:
     output: AgentResult.data with experiment_spec, design_report, design_candidate, candidate_ledger, decisions, metrics, and handoff_packet
   notes: >-
     GUI/module editor may edit this module config, but execution remains bound to
-    allowlisted Python handlers. The LLM reviews rationale only; deterministic
-    candidate ranking and hard constraints remain the source of the selected
-    experiment_spec.
+    allowlisted Python handlers. The Design-owned LLM decision layer selects
+    inspect_candidate, inspect_history, accept_candidate, or return_to_owner
+    through a local schema-validated dispatcher (not global device tools).
+    Existing computation, locked parameters, hard checks and handoff remain
+    code-owned. Legacy proxy scores are compatibility fields, not model evidence.

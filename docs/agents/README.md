@@ -66,7 +66,7 @@ Excluded:
 
 ## Visual Contract
 
-Every Reference includes `Flow` and `Execution` figures. Specimen, Vision,
+Every Reference includes `Flow` and `Execution` figures. Design, Specimen, Vision,
 Manipulation, Equipment, Analysis, and Knowledge also include a `Connections`
 figure because their bridge, external-service, device, or persistence boundary
 needs a separate view. Each checked-in SVG has an editable same-stem Graphviz
@@ -81,7 +81,7 @@ implementations remain authoritative.
 | Plane/order | Agent | Python implementation | Module manifest | Canonical Reference | Figures |
 |---|---|---|---|---|---|
 | Control plane | Orchestrator | `agents/orchestrator_agent.py` | `graphs/modules/orchestrator/module.yaml` | [Orchestrator](orchestrator_agent.md) | [Flow](assets/figures/orchestrator_01_closed_loop_handoffs.svg) · [Execution](assets/figures/orchestrator_02_execution_effect_boundary.svg) |
-| 1 | Design | `agents/design_agent.py` | `graphs/modules/design/module.yaml` | [Design](design_agent.md) | [Flow](assets/figures/design_01_closed_loop_handoffs.svg) · [Execution](assets/figures/design_02_execution_effect_boundary.svg) |
+| 1 | Design | `agents/design_agent.py` | `graphs/modules/design/module.yaml` | [Design](design_agent.md) | [Flow](assets/figures/design_01_closed_loop_handoffs.svg) · [Execution](assets/figures/design_02_execution_effect_boundary.svg) · [Connections](assets/figures/design_03_api_connection_architecture.svg) |
 | 2 | Specimen Making | `agents/specimen_agent.py` | `graphs/modules/specimen/module.yaml` | [Specimen Making](specimen_agent.md) | [Flow](assets/figures/specimen_01_closed_loop_handoffs.svg) · [Execution](assets/figures/specimen_02_execution_effect_boundary.svg) · [Connections](assets/figures/specimen_03_api_connection_architecture.svg) |
 | 3 + verification sidecars | Vision | `agents/vision_agent.py` | `graphs/modules/vision/module.yaml` | [Vision](vision_agent.md) | [Flow](assets/figures/vision_01_closed_loop_handoffs.svg) · [Execution](assets/figures/vision_02_execution_effect_boundary.svg) · [Connections](assets/figures/vision_03_api_connection_architecture.svg) |
 | Physical transfer branch | Manipulation | `agents/manipulation_agent.py` | `graphs/modules/manipulation/module.yaml` | [Manipulation](manipulation_agent.md) | [Flow](assets/figures/manipulation_01_closed_loop_handoffs.svg) · [Execution](assets/figures/manipulation_02_execution_effect_boundary.svg) · [Connections](assets/figures/manipulation_03_api_connection_architecture.svg) |
@@ -105,7 +105,7 @@ bridges. The complete contract and diagram are in the
 | Agent | High-Level Control relationship | Middle-Level Control ownership | Low-Level Control boundary |
 |---|---|---|---|
 | Orchestrator | Owns mission, dispatch, handoff, cycle, retry/review, and route translation | Normalizes intent and compiles mission, context, follow-up, decision, and reflection contracts | No direct device tools; delegates bounded work to graph-selected agents |
-| Design | Receives the governed Design stage and emits the Specimen handoff | Normalizes objectives, builds/validates candidate space, scores, selects, and emits the experiment specification | Deterministic local computation and bounded model advice; no device authority |
+| Design | Receives the governed Design stage; LLM accepts, inspects, or returns the candidate decision | Builds/checks candidates, enforces locked inputs, and emits the approved specification | Deterministic checks and agent-local evidence tools; no device authority |
 | Specimen Making | Converts a selected design into a fabrication result requiring Vision verification | Owns geometry, QA, slicing plan, start/monitor/ejection evidence, and fabrication handoff | Geometry/artifact tools plus the selected printer fleet/provider bridge |
 | Vision | Supplies stage observations and verification sidecars used by High-Level routing | Owns source selection, freshness/quality, active-camera and UTM verification signals | Camera, LeRobot camera, ROS/UTM runtime, and verified rollout-stop tools |
 | Manipulation | Owns the governed physical-transfer branch and waits for post-place Vision evidence | Owns task/policy choice, preflight, rollout supervision, motion-state and completion contracts | LeRobot rollout/process, robot, serial/camera lease, and optional Isaac sidecars |

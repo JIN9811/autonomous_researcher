@@ -42,7 +42,7 @@ This Reference compares all ten ATR agents across responsibility, contracts,
 API classification, connections, effects, safety, and recovery. It is the
 cross-agent source; individual References own detailed behavior.
 
-The [Agent Reference Index](README.md#visual-contract) links all 26 editable
+The [Agent Reference Index](README.md#visual-contract) links the editable
 and rendered agent figures. This matrix owns cross-agent comparison; each
 figure explains one agent's position, execution, effect, and—where required—
 connection boundary without duplicating the tables below.
@@ -52,6 +52,9 @@ connection boundary without duplicating the tables below.
 The matrix covers current code baseline `0b7627b`. API entries are curated
 functional families over the imported OpenAPI surface. They do not replace
 `/openapi.json` and do not assign exclusive ownership where services overlap.
+
+Design rows were updated on 2026-09-07 for the bounded decision layer; see its
+[five-area Reference](design_agent.md). Other rows retain the baseline above.
 
 ## Source of Truth
 
@@ -66,7 +69,7 @@ functional families over the imported OpenAPI surface. They do not replace
 | Agent | Plane/stage | Preceding inputs | Authoritative work | Following handoff | Physical effect |
 |---|---|---|---|---|---|
 | Orchestrator | Control plane and Design pre-stage | Operator intent, session, graph/run state, prior decisions | Mission/plan/context/handoff/decision compilation | Active agent, Guardian route, next cycle or terminal | none; direct device execution prohibited |
-| Design | `design` | Objective, constraints, prior BO/Knowledge/failure context | Deterministic constrained candidate selection and experiment specification | Specimen Making | none |
+| Design | `design` | Objective, constraints, prior BO/Knowledge/failure context | Code-owned checks and bounded LLM suitability decision; accepted experiment specification | Specimen Making | none |
 | Specimen Making | `specimen` | Approved experiment specification and fabrication intent | Manufacturing digital thread, geometry/QA/process/print handoff | Vision and Manipulation readiness | `physical_possible` through printer service |
 | Vision | `vision` plus verification sidecars | Specimen/manipulation context, camera and scene state | Freshness-bounded observation and verification signals | Manipulation, Equipment, Specimen completion, Guardian | observation is read-only; verified rollout stop can affect robot process |
 | Manipulation | physical transfer branch | Specimen result, fresh Vision signal, robot/profile/policy context | Bounded policy rollout, progress, verification request, transfer result | Vision verification, Equipment or Knowledge | `physical_possible` robot motion |
@@ -86,7 +89,7 @@ progression.
 | Agent | High-Level Control | Middle-Level Control | Low-Level Control |
 |---|---|---|---|
 | Orchestrator | primary owner: mission, dispatch, handoff, cycle, route | intent/mission/context/follow-up/decision compilation | prohibited from direct device execution |
-| Design | governed Design stage and Specimen handoff | constrained candidate generation and authoritative experiment specification | local deterministic computation; no device authority |
+| Design | LLM accept / inspect / return decision in the governed Design stage | constrained candidate preparation and checked specification finalization | local evidence/check tools; no device authority |
 | Specimen Making | fabrication stage and Vision/Manipulation readiness | geometry-to-fabrication digital thread and completion conditions | geometry tools and selected printer provider bridge |
 | Vision | observation stage plus verification sidecars | source/freshness/quality arbitration and verification signals | camera, ROS/UTM, LeRobot camera, verified rollout stop |
 | Manipulation | governed transfer branch and post-place wait | task/policy/rollout supervision and transfer completion | LeRobot/robot/process/port/camera/Isaac boundaries |

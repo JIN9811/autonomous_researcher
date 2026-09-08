@@ -80,6 +80,7 @@ AGENT_REFERENCE_FIGURES = {
     "design": (
         "design_01_closed_loop_handoffs",
         "design_02_execution_effect_boundary",
+        "design_03_api_connection_architecture",
     ),
     "specimen": (
         "specimen_01_closed_loop_handoffs",

@@ -6,7 +6,7 @@ Key classes/functions:
 - DesignAgent
 
 Inputs/outputs:
-- Input: orchestrator state, prior experiment memory, failure memory, optional LLM note
+- Input: orchestrator state, prior experiment memory, failure memory, bounded LLM decision
 - Output: AgentResult.data["experiment_spec"] with specimen-design parameters
 
 Dependencies:
@@ -14,9 +14,9 @@ Dependencies:
 - orchestrator.state.OrchestratorState
 
 Modification guide:
-- Safe places to edit: scoring weights, design-space defaults, constraint defaults
+- Evaluation/decision boundary: agents/design_decision.py; legacy scores are compatibility only
 - Risky places to edit: top-level AgentResult keys consumed by RunLoop/downstream agents
-- Related files: docs/agents/specimen_design_existing_runtime_guideline.txt, agents/specimen_agent.py
+- Related files: docs/agents/design_agent.md, agents/specimen_agent.py
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from typing import Any
 from urllib.parse import quote
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
+from agents.design_decision import PARAMETERS, candidate_evaluation, decide_design
 from utils.agent_artifact_archive import archive_agent_run
 from mcp_tools.tpms_geometry import tpms_level_for_relative_density
 from orchestrator.state import Mode, OrchestratorState
@@ -115,7 +116,12 @@ class DesignAgent(BaseAgent):
         return self._deterministic_design_payload(state, ctx)["experiment_spec"]
 
     def _deterministic_design_payload(self, state: OrchestratorState, ctx: AgentContext | Any) -> dict[str, Any]:
-        """Build a traceable design decision packet without letting an LLM optimize."""
+        """Explicit non-LLM test compatibility path; not an LLM decision."""
+        prepared = self._prepare_design_payload(state, ctx)
+        return self._finalize_design_payload(state, ctx, prepared, prepared["ranked"][0])
+
+    def _prepare_design_payload(self, state: OrchestratorState, ctx: AgentContext | Any) -> dict[str, Any]:
+        """Prepare existing candidates and evidence without committing a winner."""
         constraints = self._resolve_constraints(state)
         objective = self._objective_contract(state, constraints)
         prior_summary = self._prior_results_summary(ctx)
@@ -149,7 +155,23 @@ class DesignAgent(BaseAgent):
                 repaired_candidates.append(fallback)
                 valid_pool = [fallback]
         ranked = sorted(valid_pool, key=lambda item: item["expected_objective_proxy_score"], reverse=True)
-        selected = dict(ranked[0])
+        return {"constraints": constraints, "objective": objective, "prior_summary": prior_summary,
+                "failure_summary": failure_summary, "bo_recommendation": bo_recommendation,
+                "knowledge_summary": knowledge_summary, "strategy": strategy, "pool": pool,
+                "ranked": ranked, "rejected": rejected, "repaired_candidates": repaired_candidates,
+                "hard_valid_count": hard_valid_count, "valid_pool": valid_pool}
+
+    def _finalize_design_payload(self, state, ctx, prepared, candidate, decision=None):
+        """Use the existing report/handoff builders only after selection."""
+        constraints, objective = prepared["constraints"], prepared["objective"]
+        prior_summary, failure_summary = prepared["prior_summary"], prepared["failure_summary"]
+        bo_recommendation, knowledge_summary = prepared["bo_recommendation"], prepared["knowledge_summary"]
+        strategy, pool, ranked = prepared["strategy"], prepared["pool"], prepared["ranked"]
+        rejected, repaired_candidates = prepared["rejected"], prepared["repaired_candidates"]
+        hard_valid_count, valid_pool = prepared["hard_valid_count"], prepared["valid_pool"]
+        selected = dict(candidate)
+        selected["score_semantics"] = "legacy_heuristic_compatibility_only"
+        selected["design_evaluation"] = candidate_evaluation(self, state, prepared, selected)
         selected["candidate_status"] = "selected"
         selected.update(self._legacy_compat_fields(state.loop_count))
         selected.update(
@@ -195,6 +217,8 @@ class DesignAgent(BaseAgent):
             candidate=selected,
             constraints=constraints,
         )
+        for item in [*pool, *ranked]:
+            item["design_evaluation"] = candidate_evaluation(self, state, prepared, item)
         self._attach_candidate_preview_artifacts(state=state, ctx=ctx, pool=pool, constraints=constraints)
         design_report = self._design_report(
             state=state,
@@ -211,6 +235,16 @@ class DesignAgent(BaseAgent):
             bo_recommendation=bo_recommendation,
             knowledge_summary=knowledge_summary,
         )
+        design_report["evaluation_semantics"] = "evidence_based_v1"
+        design_report["design_evaluation"] = selected["design_evaluation"]
+        design_report["candidate_evaluation"]["score_semantics"] = selected["score_semantics"]
+        if decision is not None:
+            design_report["design_decision"] = decision
+            design_report["candidate_evaluation"]["ranked_position"] = next(
+                (i for i, item in enumerate(ranked, 1) if item["candidate_id"] == selected["candidate_id"]), None)
+            selected_decision = design_report["decision_register"][2]
+            selected_decision.update({"decision": "llm_selected_candidate_for_specimen_agent",
+                                      "rationale": decision["reason"], "evidence_refs": decision["evidence_refs"]})
         design_agent_report = self._design_agent_report_snapshot(
             state=state,
             selected=selected,
@@ -234,7 +268,7 @@ class DesignAgent(BaseAgent):
             "selected_candidate_id": selected["candidate_id"],
         }
         handoff_packet = self._design_handoff_packet(state=state, selected=selected, design_report=design_report)
-        return {
+        result = {
             "experiment_spec": selected,
             "design_report": design_report,
             "design_agent_report": design_agent_report,
@@ -244,6 +278,9 @@ class DesignAgent(BaseAgent):
             "decisions": design_report["decision_register"],
             "metrics": design_report["candidate_evaluation"],
         }
+        if decision is not None:
+            result["design_decision"] = decision
+        return result
 
     def _resolve_constraints(self, state: OrchestratorState) -> dict[str, Any]:
         """Merge runtime defaults with any constraint-like fields already present in state."""
@@ -951,7 +988,8 @@ class DesignAgent(BaseAgent):
             "source": "run_metadata.knowledge + experiment_db" if entries else "none",
         }
 
-    def _candidate_fingerprint(self, candidate: dict[str, Any]) -> str:
+    @staticmethod
+    def _candidate_fingerprint(candidate: dict[str, Any]) -> str:
         payload = {
             "geometry_type": candidate.get("geometry_type"),
             "specimen_size_mm": candidate.get("specimen_size_mm"),
@@ -966,6 +1004,29 @@ class DesignAgent(BaseAgent):
             "tpms_thickness": candidate.get("tpms_thickness"),
         }
         return hashlib.sha1(json.dumps(payload, ensure_ascii=True, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+
+    @classmethod
+    def reconcile_planning_evidence(cls, source_spec, adapted_spec):
+        """Retain existing mode adaptation without claiming its geometry was checked."""
+        evaluation = source_spec.get("design_evaluation")
+        if not isinstance(evaluation, dict):
+            return adapted_spec
+        changed = [key for key in (*PARAMETERS, "material") if source_spec.get(key) != adapted_spec.get(key)]
+        if not changed:
+            return adapted_spec
+        fingerprint = cls._candidate_fingerprint(adapted_spec)
+        reason = "Existing controller mode/constraint adaptation changed the selected design; selection evidence is retained separately."
+        return {**adapted_spec, "candidate_fingerprint": fingerprint,
+                "design_evaluation": {
+                    "schema": "design_evaluation.v1", "scope": "adapted_spec_unassessed",
+                    "candidate_id": adapted_spec.get("candidate_id"), "candidate_fingerprint": fingerprint,
+                    "validity": {"status": "unassessed", "reasons": [reason]},
+                    "constraint_margins": [], "adapted_fields": changed,
+                    "performance": {**evaluation["performance"], "status": "unassessed", "value": None},
+                    "cost": {key: {**value, "value": None, "status": "unassessed"}
+                             for key, value in evaluation["cost"].items()},
+                    "selection_evaluation": evaluation,
+                }}
 
     @staticmethod
     def _safe_artifact_segment(value: Any, fallback: str) -> str:
@@ -1099,6 +1160,8 @@ class DesignAgent(BaseAgent):
             "candidate_id": candidate.get("candidate_id"),
             "candidate_fingerprint": candidate.get("candidate_fingerprint"),
             "status": status,
+            "score_semantics": "legacy_heuristic_compatibility_only",
+            "design_evaluation": candidate.get("design_evaluation"),
             "geometry_type": candidate.get("geometry_type"),
             "specimen_size_mm": candidate.get("specimen_size_mm"),
             "cell_size_mm": candidate.get("cell_size_mm"),
@@ -1301,6 +1364,9 @@ class DesignAgent(BaseAgent):
 
         return {
             "schema": "design_agent_report.v1",
+            "evaluation_semantics": "evidence_based_v1",
+            "design_evaluation": selected.get("design_evaluation"),
+            "candidate_evaluations": [item.get("design_evaluation") for item in pool if item.get("design_evaluation")],
             "source_report_schema": design_report.get("schema"),
             "report_id": f"design-agent-report-{state.run_id or 'run'}-{state.loop_count + 1}",
             "source_report_id": design_report.get("report_id"),
@@ -1613,30 +1679,30 @@ class DesignAgent(BaseAgent):
     @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         use_llm = state.mode != Mode.TEST or ctx.force_real_llm_in_test
-        payload = self._deterministic_design_payload(state, ctx)
-        spec = payload["experiment_spec"]
         if not use_llm:
+            payload = self._deterministic_design_payload(state, ctx)
+            payload["design_decision"] = {"status": "deterministic_test", "trace": [], "llm_used": False}
             rationale = "Deterministic test-mode specimen candidate generated from docs algorithm."
         else:
-            prompt = (
-                "Review this selected metamaterial compression specimen candidate. "
-                "Do not generate STL vertices or G-code. Return concise risk/strategy notes only.\n"
-                f"goal={state.active_goal}\n"
-                f"candidate={json.dumps(spec, ensure_ascii=False, sort_keys=True)}\n"
-            )
-            timeout_s = 45.0 if state.mode == Mode.TEST else None
-            try:
-                response = await ctx.complete("design_reasoning", prompt, timeout_s=timeout_s)
-                spec["model_note"] = response.text[:500]
-                payload["design_report"]["llm_protocol_note"] = response.text[:500]
-                rationale = "E4B protocol reasoning reviewed a constraint-filtered specimen candidate."
-            except Exception as exc:
-                if state.mode == Mode.TEST:
-                    spec["model_note"] = f"E4B degraded in test mode: {exc.__class__.__name__}"
-                    payload["design_report"]["llm_protocol_note"] = spec["model_note"]
-                    rationale = "E4B timeout degraded to deterministic specimen design in test mode."
-                else:
-                    raise
+            prepared = self._prepare_design_payload(state, ctx)
+            decision = await decide_design(self, state, ctx, prepared)
+            if decision["status"] != "accepted":
+                blocked_report = {
+                    "schema": "design_report.v1", "run_id": state.run_id,
+                    "report_id": f"design-report-{state.run_id or 'run'}-{state.loop_count + 1}",
+                    "loop_index": state.loop_count + 1, "status": decision["status"],
+                    "evaluation_semantics": "evidence_based_v1", "design_decision": decision,
+                    "handoff_to_specimen": {"required_fields_present": False, "status": "blocked"},
+                    "next_action": "review_design_decision", "candidate_evaluation": {},
+                }
+                return AgentResult(success=False, summary="Design decision requires owner review",
+                                   data={"design_decision": decision, "failure_code": decision.get("failure_code"),
+                                         "design_report": blocked_report,
+                                         "design_agent_report": {**blocked_report, "schema": "design_agent_report.v1"}},
+                                   next_hint="Review Design decision evidence; no candidate was committed.")
+            candidate = next(item for item in prepared["ranked"] if item["candidate_id"] == decision["candidate_id"])
+            payload = self._finalize_design_payload(state, ctx, prepared, candidate, decision)
+            rationale = decision["reason"]
         return AgentResult(
             success=True,
             summary="Specimen experiment design selected",

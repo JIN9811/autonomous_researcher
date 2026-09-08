@@ -1,0 +1,19 @@
+digraph DesignConnections {
+ graph [rankdir=LR,bgcolor="white",pad=0.25,nodesep=0.4,ranksep=0.55,label="Design: tool, model, API and persistence boundaries",labelloc=t,fontname="DejaVu Sans"];
+ node [shape=box,style="rounded,filled",fillcolor="#f1f5f9",fontname="DejaVu Sans",fontsize=11];
+ edge [fontname="DejaVu Sans",fontsize=10,color="#475569"];
+ api [label="Shared planning / graph APIs\nController -> existing runtime"];
+ agent [label="DesignAgent.run\nPrepare -> decide -> finalize",fillcolor="#e0f2fe"];
+ context [label="AgentContext.complete\nExisting model router + backend"];
+ model [label="LLM provider\nSchema-validated JSON requests",fillcolor="#dbeafe"];
+ dispatcher [label="AGENT-LOCAL dispatcher\ninspect_candidate / inspect_history\naccept_candidate / return_to_owner",fillcolor="#dbeafe"];
+ compute [label="LOW: in-process functions\nCandidate / constraint / estimate / packet"];
+ preview [label="Existing ToolRegistry preview call\ngeometry.generate_metamaterial_stl\nLocal files, not device actuation"];
+ storage [label="Existing archives + GUI reports\nNew evidence; legacy fields labelled",fillcolor="#dcfce7"];
+ safety [label="SAFETY\nAllowlisted arguments + locked inputs\nNo shell / printer / robot / equipment tools",fillcolor="#fee2e2"];
+ api -> agent; agent -> context [label="bounded prompt"]; context -> model;
+ model -> dispatcher [label="validated request"]; dispatcher -> compute [label="local only"];
+ compute -> agent [label="results"]; agent -> preview [label="code-owned finalization"];
+ agent -> storage [label="result / decision trace"]; preview -> storage [style=dashed,label="artifacts"];
+ safety -> dispatcher [style=dashed,label="hard boundary"];
+}

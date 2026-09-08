@@ -73,6 +73,7 @@ TEST_AGENT_FIGURES = {
     "design": (
         "design_01_closed_loop_handoffs",
         "design_02_execution_effect_boundary",
+        "design_03_api_connection_architecture",
     ),
     "specimen": (
         "specimen_01_closed_loop_handoffs",
@@ -553,6 +554,12 @@ def test_agent_reference_rejects_missing_rendering_link_and_caption(
     assert any("missing agent figure rendering" in error for error in errors)
     assert any("missing agent figure link" in error for error in errors)
     assert any("missing agent figure caption" in error for error in errors)
+
+
+def test_restructured_design_requires_connection_figure(tmp_path: Path) -> None:
+    module = _load_validator()
+    document = _write_agent_reference(tmp_path, "design", figure_count=2)
+    assert any("design_03_api_connection_architecture" in e for e in module.validate_document(document, tmp_path))
 
 
 def test_manifest_requires_root_readme_links_for_all_canonical_agents(

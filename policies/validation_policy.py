@@ -32,6 +32,17 @@ _REQUIRED_KEYS: dict[str, tuple[str, ...]] = {
 
 def validate_agent_output(stage: str, payload: dict[str, object]) -> tuple[bool, str]:
     """Validate required payload keys for selected stages."""
+    if stage == "design" and "design_decision" in payload:
+        decision = payload["design_decision"]
+        if isinstance(decision, dict) and decision.get("status") in {"returned", "failed"}:
+            # A blocked decision is a valid failure report, never a ready spec.
+            valid_failure = (decision.get("schema") == "design_decision.v1"
+                             and isinstance(decision.get("trace"), list)
+                             and decision.get("failure_code") in {"DESIGN_OWNER_REVIEW", "DESIGN_DECISION_INVALID",
+                                 "DESIGN_DECISION_TIMEOUT", "DESIGN_DECISION_BUDGET_EXHAUSTED"}
+                             and payload.get("failure_code") == decision.get("failure_code")
+                             and "experiment_spec" not in payload)
+            return (True, "ok") if valid_failure else (False, "Invalid blocked Design decision contract.")
     required = _REQUIRED_KEYS.get(stage, ())
     missing = [key for key in required if key not in payload]
     if missing:

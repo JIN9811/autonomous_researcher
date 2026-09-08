@@ -4,6 +4,7 @@ Unit tests for Live GUI planning handoff adaptation.
 
 import asyncio
 import copy
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,6 +18,27 @@ from agents.specimen_agent import SpecimenMakingAgent
 from app.bootstrap import load_runtime
 from graphs import load_graph_config
 from orchestrator.state import AgentRuntimeStatus, Mode, Stage
+
+
+def _controlled_design_model(monkeypatch):
+    """Keep the configured graph/context route; replace only its model response."""
+    from orchestrator.langgraph_runtime import ModuleRuntimeContext
+    original = ModuleRuntimeContext.complete
+    selected_ids = []
+
+    async def complete(self, task_type, prompt, **kwargs):
+        if task_type != "design_reasoning":
+            return await original(self, task_type, prompt, **kwargs)
+        context = json.loads(prompt[prompt.index('{"context"'):])["context"]
+        candidate = next(c for c in context["candidates"] if c["evaluation"]["validity"]["status"] == "pass")
+        cid = candidate["candidate_id"]
+        selected_ids.append(cid)
+        return SimpleNamespace(text=json.dumps({"tool":"accept_candidate", "arguments":{"candidate_id":cid},
+            "reason":"Requested variables and validity checks are satisfied", "evidence_refs":[f"candidate:{cid}"]}),
+            model="controlled-controller-test", raw={})
+
+    monkeypatch.setattr(ModuleRuntimeContext, "complete", complete)
+    return selected_ids
 
 
 def test_planning_snapshot_preserves_latest_bo_visualization_projection() -> None:
@@ -2597,6 +2619,7 @@ async def test_planning_tail_continues_original_loop_after_specimen(tmp_path: Pa
 
 @pytest.mark.asyncio
 async def test_specimen_retry_merges_result_before_loop_tail(monkeypatch: pytest.MonkeyPatch) -> None:
+    _controlled_design_model(monkeypatch)
     controller = load_runtime()
     controller._state.mode = Mode.LIVE
     spec = controller._build_planning_spec(
@@ -2805,10 +2828,71 @@ async def test_live_gui_test_prompt_uses_active_graph_config_route(tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_first_live_gui_test_design_cycle_uses_single_artifact() -> None:
+async def test_design_postgate_block_cannot_be_overridden_by_acceptance(monkeypatch):
+    controller = load_runtime()
+
+    async def blocked_stage(*args, **kwargs):
+        controller._state.stage = Stage.GUARDIAN
+        controller._state.agent_status["design_agent"] = AgentRuntimeStatus(success=True, last_run_time="new")
+        controller._state.run_metadata["design_agent_payload"] = {
+            "design_decision":{"status":"accepted"},
+            "guardian_gate":{"decision":"block", "reason_code":"TEST_BLOCK"}}
+
+    monkeypatch.setattr(controller, "_run_planning_langgraph_stage", blocked_stage)
+    with pytest.raises(RuntimeError, match="Guardian blocked"):
+        await controller._run_planning_design_stage(previous_spec={"candidate_id":"previous"},
+            design_constraints={}, cycle_index=2, total_cycles=3, emit_handoff=False)
+
+
+@pytest.mark.asyncio
+async def test_design_pregate_block_cannot_reuse_previous_acceptance(monkeypatch):
+    controller = load_runtime()
+    controller._state.run_metadata["design_agent_payload"] = {"design_decision":{"status":"accepted"}}
+    controller._state.agent_status["design_agent"] = AgentRuntimeStatus(success=True, last_run_time="old")
+
+    async def blocked_stage(*args, **kwargs):
+        controller._state.stage = Stage.GUARDIAN
+        controller._state.agent_status["design_agent"] = AgentRuntimeStatus(success=False, last_run_time="new")
+
+    monkeypatch.setattr(controller, "_run_planning_langgraph_stage", blocked_stage)
+    with pytest.raises(RuntimeError, match="successful current Design"):
+        await controller._run_planning_design_stage(previous_spec={"candidate_id":"previous"},
+            design_constraints={}, cycle_index=2, total_cycles=3, emit_handoff=False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response", ["return", "timeout", "invalid"])
+async def test_planning_design_failure_does_not_adapt_previous_spec(monkeypatch, response):
+    from orchestrator.langgraph_runtime import ModuleRuntimeContext
+
+    async def failed_complete(self, task_type, prompt, **kwargs):
+        if response == "timeout":
+            raise TimeoutError()
+        return SimpleNamespace(text="invalid" if response == "invalid" else json.dumps({
+            "tool":"return_to_owner", "arguments":{}, "reason":"Evidence needs review",
+            "evidence_refs":["context:request"]}), model="controlled-failure", raw={})
+
+    monkeypatch.setattr(ModuleRuntimeContext, "complete", failed_complete)
     controller = load_runtime()
     controller._state.mode = Mode.LIVE
+    adapted = []
+    monkeypatch.setattr(controller, "_build_planning_spec", lambda **kwargs: adapted.append(kwargs) or {})
+    with pytest.raises(RuntimeError):
+        await controller._run_planning_design_stage(previous_spec={"candidate_id":"previous"},
+            design_constraints={"geometry_type":"gyroid", "test_mode_autofill":True},
+            cycle_index=2, total_cycles=3, emit_handoff=False)
+    assert adapted == []
+    payload = controller._state.run_metadata["design_agent_payload"]
+    assert payload["design_decision"]["status"] in {"returned", "failed"}
+    assert controller._state.run_metadata["design_report"]["handoff_to_specimen"]["required_fields_present"] is False
 
+
+@pytest.mark.asyncio
+async def test_first_live_gui_test_design_cycle_uses_single_artifact(monkeypatch) -> None:
+    selected_ids = _controlled_design_model(monkeypatch)
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    controller._deps.agent_context.force_real_llm_in_test = True
     spec = await controller._run_planning_design_stage(
         previous_spec={},
         design_constraints={
@@ -2826,6 +2910,17 @@ async def test_first_live_gui_test_design_cycle_uses_single_artifact() -> None:
     design_message = [message for message in controller.planning_snapshot()["messages"] if message["role"] == "design_ai"][-1]
 
     assert spec["specimen_id"]
+    assert spec["candidate_id"] == selected_ids[-1]
+    assert spec["score_semantics"] == "legacy_heuristic_compatibility_only"
+    evaluation = spec["design_evaluation"]
+    assert evaluation["validity"]["status"] == "unassessed"
+    assert evaluation["selection_evaluation"]["validity"]["status"] == "pass"
+    assert evaluation["adapted_fields"]
+    assert controller._state.run_metadata["design_report"]["design_evaluation"] == evaluation
+    assert controller._state.run_metadata["latest_design_agent_report"]["design_evaluation"] == evaluation
+    # Preserve the existing generator's serialized precision, not raw LHS floats.
+    for key, tolerance in (("cell_size_mm", 0.00051), ("relative_density", 0.000051)):
+        assert spec["realized_parameters"][key] == pytest.approx(spec["requested_parameters"][key], abs=tolerance)
     assert "artifact_pair" not in design_message
     assert design_message.get("artifacts", {}).get("stl_url")
     assert "생성된 형상" in design_message["content"]
