@@ -2,7 +2,7 @@ module:
   id: equipment
   label: Lab Equipment Agent Module
   handler: agent.equipment_agent
-  llm_role: tool_formatting
+  llm_role: equipment_workflow_decision
   editable: true
   safety:
     live_requires_validation: true
@@ -11,6 +11,8 @@ module:
   - equipment.pyautogui.health
   - equipment.pyautogui.list_programs
   - equipment.pyautogui.run
+  - equipment.pyautogui.screenshot
+  - equipment.pyautogui.request_log
   - utm.run_protocol
   workflow_agentic_tasks:
     - id: run_utm_compression_cycle
@@ -49,10 +51,10 @@ module:
       label: Validate Bridge and Skill Contract
       kind: internal_step
     - id: 03_execute_registered_protocol
-      label: Execute Deterministic Program Segments
+      label: Select and Execute Stacked Workflow
       kind: internal_step
     - id: 04_exception_recovery_gate
-      label: Bound Exception Recovery Through Guardian
+      label: Review Terminal Screens and Bound Recovery Through Guardian
       kind: internal_step
     - id: 05_validate_evidence_handoff
       label: Validate Evidence and Handoff
@@ -69,3 +71,6 @@ module:
     this module declares no recorded numeric defaults. GUI/module editor may edit
     this module config, but execution remains bound to allowlisted Python handlers.
     Python source is not modified by the GUI.
+    The Equipment-owned decision boundary selects the configured stacked Flow and
+    reviews screenshots and evidence after terminal completion or failure. It does
+    not interrupt running blocks; existing Vision and safety gates remain active.

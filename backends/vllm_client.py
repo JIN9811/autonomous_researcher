@@ -37,6 +37,7 @@ DEFAULT_MAX_TOKENS_BY_TASK = {
     "knowledge_query": 256,
     "guardian_reasoning": 256,
     "tool_formatting": 96,
+    "equipment_workflow_decision": 768,
     "gui_helper": 96,
     "module_designer": 1400,
     "equipment_skill_timeline_chunk": 768,

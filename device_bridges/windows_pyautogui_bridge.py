@@ -1812,7 +1812,7 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         artifact_id = f"sim_screen_{checkpoint}_{int(time.time())}"
         path = self.config.artifact_dir / run_id / "screenshots" / f"{artifact_id}.png"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="))
+        path.write_bytes(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNoaGgAAAMEAYFL09IQAAAAAElFTkSuQmCC"))
         data = path.read_bytes()
         artifact = {
             "kind": "screen_png",

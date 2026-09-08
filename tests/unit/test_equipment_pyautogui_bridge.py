@@ -1373,6 +1373,9 @@ def test_simulator_screenshot_returns_png_artifact(tmp_path: Path) -> None:
     artifact = response["output_artifacts"][0]
     assert artifact["kind"] == "screen_png"
     assert Path(artifact["local_path"]).exists()
+    from PIL import Image
+    with Image.open(artifact["local_path"]) as raster:
+        raster.verify()
 
 
 def test_simulator_capture_locator_returns_locator_override(tmp_path: Path) -> None:

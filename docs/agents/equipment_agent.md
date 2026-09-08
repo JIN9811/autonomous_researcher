@@ -5,9 +5,12 @@ status: active
 authority: descriptive
 audience: [researcher, operator, developer, maintainer]
 scope: [agents, equipment, pyautogui, equipment_runtime, vision_link]
-summary: Canonical Lab Equipment Agent contract using one Linux-owned Equipment Runtime and bounded local or Windows workers.
+summary: Equipment-owned bounded Flow selection and terminal multimodal review over the existing Linux Runtime and local or Windows workers.
 source_of_truth:
   - agents/equipment_agent.py
+  - agents/equipment_workflow.py
+  - agents/equipment_decision.py
+  - scripts/verify_equipment_decisions.py
   - utils/equipment_runtime_service.py
   - utils/equipment_profiles.py
   - utils/equipment_skill_runtime.py
@@ -21,75 +24,106 @@ related_docs:
   - docs/device_bridges/windows_pyautogui_bridge.md
   - docs/hardware/windows_pyautogui_equipment_agent_guideline.md
   - docs/strategy/2026-08-27-windows-lab-equipment-consolidation-report.md
+  - docs/superpowers/plans/2026-09-09-equipment-workflow-decision-layer.md
 supersedes: []
 ---
 
 # Lab Equipment Agent Reference
 
-## 역할
+## Status at a Glance
 
-`LabEquipmentAgent`는 저자동화·반자동화 PC 제어 장비의 실험 단계를 소유합니다. UTM은 현재 등록된 첫 Equipment Profile이며 Agent 본체의 고정 장비가 아닙니다.
+- Runtime status: Managed stacked Flow decision boundary implemented in the working tree
+- LLM decision layer: Implemented; archived terminal evidence checked through registered API/local models
+- Physical effect: Existing gated Skills and Windows/Local workers only
+- Primary handoff: Verified CSV/readiness → Manipulation clearance → fresh Vision → Analysis
+- Live hardware validation: Not performed for this reconstruction
+- Known limit: Offline recovery decisions verified; live recovery not exercised; no crash-resume
 
-Agent는 정확한 Profile/Skill/program을 선택하고 Linux `EquipmentRuntimeService`에 실행을 등록합니다. Windows 또는 Local Bridge는 선택된 프로그램을 결정론적으로 실행하고 원시 증거만 반환합니다. 완료 판정과 Analysis handoff는 Linux에서 한 번만 수행합니다.
+## Summary and Actual Role
 
-## 세 단계 제어
+`LabEquipmentAgent` owns the experiment stage for PC-controlled laboratory
+equipment. UTM is a registered Equipment Profile, not a hard-coded agent identity.
+For a configured stacked Skill Flow, an Equipment-owned LLM judges task fit and
+selects the exact server-owned execution proposal. The existing Flow runs through
+its Skills without intermediate Equipment LLM calls. After normal or error
+termination, the model compares the current screenshot, execution logs and required
+outputs before accepting the result, requesting observation, selecting eligible
+bounded recovery, or returning to the operator.
 
-| 제어 수준 | 책임 | 구현 경계 |
+The agent preserves the current Profile, exact deployed Skills, Flow routes,
+Linux `EquipmentRuntimeService`, and Windows/Local worker. Code owns mandatory
+checks and completion facts; a model acceptance never replaces them. Device
+Workspaces are manual development/configuration surfaces, not independent owners
+of the automatic experiment loop. Standalone/direct Skill and legacy program
+paths retain their existing behavior; this decision boundary manages stacked Flows.
+
+## Five-Area Responsibility Map
+
+| Area | Equipment responsibility | Authority boundary |
 |---|---|---|
-| High-Level | Equipment 단계 진입/종료, Profile/Skill 선택, 제한적 LLM 복구, 재시도·정지·handoff 결정 | `LabEquipmentAgent` |
-| Middle-Level | 실행 ID, worker, 모드, 증거, 완료 판정, 상태 저장과 projection | `EquipmentRuntimeService`, Profile/Skill runtime |
-| Low-Level | PyAutoGUI 입력, 창/locator 확인, 화면 캡처, 녹화, 파일과 원시 결과 반환 | Windows/Local Bridge |
+| High-Level Control | Consume the delegated Equipment task and return completion or review | Orchestrator retains mission and graph routing; Manipulation and Vision own downstream clearance |
+| Middle-Level Control | LLM Flow suitability, terminal evidence judgment and bounded recovery choice; code validates proposals, invocation ownership and handoff | Existing Flow order, exact Skills, method settings and worker payloads are immutable to the model |
+| Low-Level Control | Deterministic Skill segments, window/locator checks, screenshots, files and raw execution results | Existing Runtime/tools and Windows/Local worker own desktop and instrument input |
+| Guardian / Safety | Enforce placement, identity, freshness, live approval, stop, recovery budget and unknown-effect gates | No model or GUI bypass; no retry without proven zero actions and a safe checkpoint |
+| Knowledge / Evidence | Retain decision, image provenance, logs, transitions, CSV and readiness evidence | Observations are data, not instructions; model confidence is not measurement or completion proof |
 
-Device Workspace는 수동 개발·설정·검증 화면이며 자동 실험 루프의 별도 제어 원본이 아닙니다.
+These are responsibility areas, not five stages or five model calls. The decision
+layer belongs to Middle-Level Equipment supervision, not a new graph agent.
 
-## 유일한 자동 실행 경로
+## Closed-Loop Position and Handoffs
 
 ```text
 LangGraph Equipment stage
   -> LabEquipmentAgent.run()
-  -> EquipmentRuntimeService execution record
-  -> equipment.pyautogui.run
-  -> selected Windows or Local worker
-  -> raw evidence
-  -> one Linux completion interpretation
+  -> durable invocation claim + existing preflight + bounded LLM Flow selection
+  -> existing Flow / exact Skills / EquipmentRuntimeService
+  -> equipment.pyautogui.run -> selected Windows or Local worker
+  -> terminal screenshot + logs + code-owned CSV/readiness checks
+  -> Equipment LLM result review or bounded recovery/review
   -> Manipulation UTM-clear replay
   -> Vision Verification 2
   -> Analysis handoff or explicit block
 ```
 
-PyAutoGUI tool 부재를 이유로 `utm.run_protocol`에 자동 fallback하지 않습니다. native UTM이 필요하면 별도 provider를 가진 명시적 Profile로 등록해야 합니다.
+Missing PyAutoGUI tools do not trigger automatic fallback to `utm.run_protocol`.
+Native UTM requires an explicitly registered Profile with its own provider.
 
 ![Equipment closed-loop position and handoffs](assets/figures/equipment_01_closed_loop_handoffs.svg)
 
-**Figure Equipment-1.** Lab Equipment 단계는 상위 orchestration 결정과 Profile-bound
-실행 계약을 받아 worker에 제한된 명령을 전달하고, 검증된 장비 증거만 Analysis 단계로
-handoff합니다. 도표는 구성 경계를 설명하며 물리 장비 성능을 입증하지 않습니다.
+**Figure Equipment-1.** Working-tree `inspection` projection: the managed Flow has
+selection and terminal-review boundaries; post-test Manipulation and fresh Vision
+still precede Analysis. This architecture figure is not live equipment evidence.
 
-## Profile과 Skill
+## Profiles, Skills and Stored Flows
 
-Profile은 다음을 선언합니다.
+A Profile declares:
 
 - `profile_id`, label, provider
-- 허용 program ID와 기본 program
-- 모드별 worker payload
-- 필요한 locator/evidence
-- 선택적 `vision_link`
+- allowed and default program IDs
+- mode-specific worker payloads
+- required locators/evidence
+- optional `vision_link`
 - completion interpreter
 - manual knowledge scope
 
-Skill은 Linux `memory/equipment_skills/`가 원본입니다. Windows에는 검증된 배포 캐시 또는 로컬 초안만 존재합니다.
+Linux `memory/equipment_skills/` is the Skill source of truth. Windows holds
+validated deployment caches or local drafts.
 
 ```text
 record -> transfer -> annotate -> edit/save -> deploy[compile + validate + transfer] -> execute
 ```
 
-`annotate`는 전체 2 FPS 원본을 한 요청에 적재하지 않습니다. Linux가 16 frame 4x4 스토리보드를 만들고 청크별 상태 변화를 순차 분석한 후 전체 workflow를 합성합니다. Overview 스토리보드는 GUI와 감사용으로 보존하고, 최종 합성에는 순서가 보존된 청크 분석과 아직 분석되지 않은 action locator 이미지만 전달해 동일한 고해상도 상태 프레임을 중복 전송하지 않습니다. 청크 진행 상태는 `ANALYZING_TIMELINE`, 최종 합성은 `SYNTHESIZING`으로 작업 기록과 GUI에 표시됩니다. 정상 실행에는 LLM을 사용하지 않습니다. 녹화 분석과 선언된 복구 상황에서만 현재 선택된 Local/API 모델을 Linux에서 사용합니다.
+Annotation uses sequential 16-frame 4×4 storyboards, not the entire 2 FPS recording
+in one request. Overview images remain available for GUI/audit; final synthesis
+receives ordered chunk analyses and previously unanalyzed action-locator images
+without resending the same high-resolution state frames. Jobs expose
+`ANALYZING_TIMELINE` and `SYNTHESIZING`. Recording analysis is separate from the
+managed Flow decisions below; normal Skill execution does not regenerate annotations.
 
 ### Profile Skill Flow
 
-실제 TRAPEZIUMX-V 녹화 흐름은 기존 Profile Skill Flow 위에
-`run_utm_compression_cycle` workflow-level Agentic Task로 투영됩니다. 계층은 다음과
-같습니다.
+The recorded TRAPEZIUMX-V procedure is projected as the workflow-level Agentic
+Task `run_utm_compression_cycle` over the existing Profile Skill Flow:
 
 ```text
 run_utm_compression_cycle
@@ -98,133 +132,104 @@ run_utm_compression_cycle
       -> Equipment Skill Runtime / PyAutoGUI bridge
 ```
 
-이 오버레이는 Lab Equipment Agent에만 추가됩니다. Manipulation Agent 구현과 정책은
-변경하지 않으며, Equipment 단계는 상위 단계가 만든 identity-bound
-`ready_for_equipment` handoff를 소비합니다. 이 handoff는 실제 실행의 필수 진입 조건이고
-ON/OFF 선택지가 없습니다. test/replay 계열 모드만 명시적인 simulated gate evidence를
-기록할 수 있습니다.
+This Equipment-only overlay does not modify Manipulation policy. Identity-bound
+upstream `ready_for_equipment` is mandatory for real execution and cannot be
+switched off. Only explicit test/replay modes can record simulated gate evidence.
 
-현재 canonical cycle의 block 순서는 다음과 같습니다.
+The canonical cycle keeps this block order:
 
 1. Move Jigs for Next Specimen
 2. Start Test
-3. contact 감지 후 method가 정한 상대 Stroke 수행
-4. method target 도달과 자동 Height return 확인
-5. Raw Data CSV 저장
-6. Raw Data CSV 경로·parse·row/stability evidence 검증
-7. 현재 시험을 저장하지 않는 Next Test 전이
-8. 설정된 robot-entry clearance Height 복원
+3. Detect contact and execute the method-defined relative Stroke
+4. Confirm method target and automatic Height return
+5. Save Raw Data CSV
+6. Validate Raw CSV path, parse, row and stability evidence
+7. Transition to Next Test without saving the current test
+8. Restore configured robot-entry clearance Height
 
-Force, Stroke, Height의 관측값과 method target은 서로 다른 evidence 필드로 저장합니다.
-contact threshold, 상대 Stroke, 자동 return Height, robot-entry clearance 같은 수치는
-코드의 고정 상수가 아니라 현재 method/cell 설정과 실제 장비 결과에서 가져옵니다.
-각 단계가 끝날 때의 화면, locator, 버튼/아이콘/상태 변화는 bounded transition
-evidence로 남깁니다. Raw CSV 검증과 clearance 복원이 모두 확인되어야 다음 시편
-readiness와 최종 handoff가 승인됩니다.
+Observed Force, Stroke and Height are distinct from method targets. Contact,
+Stroke, return Height and clearance values come from current method/cell settings
+and actual results, not fixed constants. Screens, locators and UI-state changes
+remain bounded transition evidence. Both validated CSV and restored clearance are
+required for next-specimen readiness and handoff.
 
-Raw CSV 승격은 저장/검증 block이 같은 Linux-side `utm_csv` artifact ID와 경로를
-가리키고, 그 artifact가 직접 기록한 run/specimen identity, write 완료, 필수 column, parse와 row evidence가 모두
-일치할 때만 허용합니다. 후보 artifact는 단계당 하나여야 하며 acquisition probe는
-artifact ID/path/run/specimen이 모두 일치할 때만 결합합니다. Clearance는 block 완료만으로 승인하지 않고 실제 관측 Height가
-그 실행의 configured target과 일치해야 합니다.
+CSV promotion requires the save/validation blocks to identify the same Linux-side
+`utm_csv` artifact ID/path, with matching artifact-authored run/specimen identity,
+completed write, required columns, parse and row evidence. Only one candidate per
+stage is allowed. Acquisition probes join only on matching ID/path/run/specimen.
+Clearance requires observed Height to match this execution's configured target;
+a completed block label is insufficient.
 
-workflow-level task를 Agent Manager에서 불러와도 각 block의 Skill Slot은 자동으로
-바인딩되지 않습니다. 실제 배포된 정확한 Skill 버전을 운영자가 연결해야 하며, 기존
-step별 Vision 스위치는 그대로 선택 사항입니다. Vision을 끄면 Equipment 실행과 동시에
-수행하는 해당 block 관측만 bypass됩니다. 필수 upstream handoff 확인은 꺼지지 않습니다.
-지원하지 않는 workflow task ID나 canonical 8-block 순서 변경은 저장/실행 전에
-거부됩니다. 실행 시에는 모든 block의 exact Skill 버전이 배포·활성 상태이고 동일
-Profile을 대상으로 하는지, 활성화된 Vision task가 카탈로그에 존재하는지를 첫 장비
-입력 전에 일괄 검증합니다.
+Loading the workflow task does not bind Skill Slots automatically. Operators bind
+exact deployed versions. Per-block Vision remains optional; disabling it bypasses
+only that block's observation, never upstream readiness. Unsupported task IDs or
+changes to the canonical eight-block order fail before save/execution. Before the
+first equipment input, code validates all exact versions as deployed, enabled,
+same-Profile resources and all enabled Vision tasks against the catalog.
 
-Profile에 여러 Skill과 선택적 Vision 판정을 묶을 때는
-`graphs/modules/equipment/equipment_skill_flows.json`을 단일 원본으로 사용합니다.
-작성 권한은 `/equipment/agent-manager` 한 곳에만 있습니다. Equipment Workspace,
-Live GUI, Runtime IDE는 동일 API에서 저장 계약과 실행 projection을 읽지만 수정하지
-않습니다.
+`graphs/modules/equipment/equipment_skill_flows.json` is the single Flow source;
+`/equipment/agent-manager` owns authoring. Equipment Workspace, Live GUI and Runtime
+IDE read the same API contract and execution projection. `+ Block` creates an empty
+composite block independently of Skill availability:
 
-Agent Manager의 `+ Block`은 Skill 존재 여부와 무관하게 다음 세 슬롯을 가진 빈 복합
-block 하나를 추가합니다. Skill은 block 생성 조건이 아니라 생성 후 Skill Slot에
-바인딩하는 실행 자원입니다.
+- Skill Slot binds only an enabled, deployed `skill_id@version`; selecting it does not rename the task. Empty drafts may be saved but execution is `unbound`, without fallback.
+- Agentic Task stores `agentic.task` and saved `next`, `__complete__`, `__blocked__` routes. Legacy `label` migrates to the task as a compatibility alias; existing workflow summaries and transition annotations supply context.
+- Vision Slot selects one optional `vision.task_id` inside the block. `vision.equipment_cross_check` observes only that task and never supplies equipment input.
+- Cycles, standalone Vision, unknown destinations, final-block `next`, and missing required routes fail save validation.
+- A nonempty active Flow takes precedence over a single Skill. An empty Flow retains the existing single-Skill/Profile-program path.
 
-- **Skill Slot:** 비어 있는 초안 상태를 저장할 수 있으며, 배포·활성 상태인 정확한 `skill_id@version` 실행 자원만 바인딩합니다. Skill 선택은 Task 이름을 변경하지 않습니다.
-- **Agentic Task:** 실제 수행할 작업 이름을 `agentic.task`에 저장하고 성공/실패 후 `next`, `__complete__`, `__blocked__` 경로를 Middle-Level로 제한합니다. 과거 `label` 값은 로드시 Task로 자동 이관되며 호환 별칭으로만 유지됩니다. 별도 LLM 체계를 만들지 않고, 선택된 Skill을 제작할 때 이미 생성한 `workflow_summary`/step transition annotation과 실행 중 이미 사용하던 bounded recovery 경로를 동일 Task 실행 컨텍스트로 묶습니다.
-- **Vision Slot:** 같은 block 내부에서만 선택적으로 활성화되며 공유 Equipment Vision Task 카탈로그의 정확한 `vision.task_id` 하나를 선택합니다. Equipment Agent는 `vision.equipment_cross_check`에 해당 task 하나만 전달하고, 관측 결과를 Middle-Level gate로 반환합니다. 장비 입력은 만들지 않습니다.
-- 순환, standalone Vision, 알 수 없는 목적지, 마지막 block 이후 `next`, 필수 route 누락은 저장 단계에서 거부합니다.
-- 비어 있지 않은 활성 Profile Skill Flow가 있으면 기존 단일 Skill보다 먼저 실행합니다.
-- Flow가 비어 있으면 기존 단일 Skill 또는 Profile program 경로를 그대로 사용합니다.
-- block이 있지만 Skill Slot이 비어 있으면 저장과 projection은 허용하되 실행 readiness는 `unbound`로 차단합니다. 기존 경로로 fallback하지 않습니다.
+Transitions retain `block_id`, task, `skill|vision` phase, outcome and target in
+`memory/equipment_runtime/equipment_skill_flow_latest/<profile_id>.json`. Saving
+does not execute equipment. Vision records also retain task/check identity, mode,
+confidence, timestamp/expiry/source, failure code and bounded references. Stale or
+mismatched run/loop/specimen evidence follows the `error` route; outcomes never
+select an unconfigured Vision task. Current catalog tasks are `utm_pre_start`,
+`utm_motion_confirm`, and `utm_test_complete`, defined in
+`utils/equipment_vision_tasks.py`.
 
-각 전이는 `memory/equipment_runtime/equipment_skill_flow_latest/<profile_id>.json`에
-`block_id`, `task`, `skill|vision` phase, outcome, target과 함께 기록됩니다. Equipment
-Workspace와 Live GUI의 Agentic Progress, Runtime IDE 그래프가 이 동일 기록을
-투영합니다. Agent Manager 저장은 장비를 실행하지 않습니다.
-
-Live GUI 진행률은 탭 클릭이나 report render가 아닌 authoritative planning
-session 갱신에 맞춰 현재 run의 Skill Flow를 다시 조회합니다. 같은 Agent call
-내 실행 중에는 별도의 2초 간격 GET 관측으로 큰 planning 응답 지연과 무관하게
-진행 기록을 읽습니다. 페이지 선택 여부와는 무관합니다. 같은 call
-내에서도 저장 checkpoint가 바뀌면 표시를 갱신하며, 동일 응답은 추가 repaint를
-하지 않습니다. 최초 config/runtime 조회 이후 자동 동기화는 Skill Flow만 읽고,
-진행 중 중복 조회는 합친 뒤 필요하면 후속 조회합니다. 완료/차단된 같은 run의
-최종 조회가 실패하면 완료 후에도 자동 재조회하며, 각 GET은 3초 timeout으로
-조회 잠금이 계속 남는 것을 막습니다. 완료/차단된 같은 run의
-단계 증거도 유지하고, 다른 run의 늦은 응답은 버립니다. 표시 대상은 해당 run의
-최신 Equipment invocation이며 이전 loop의 전체 기록은 loop archive에서 확인합니다.
-Vision verification은 대기/성공 시 시안색, 실패 시 기존 붉은색입니다.
-색 변경은 판정이나 인터록을 바꾸지 않습니다.
-
-Vision 전이는 추가로 `vision_task_id`, `check_id`, task label, runtime/observer mode,
-confidence, evidence timestamp/expiry/source, failure code와 bounded evidence reference를
-보존합니다. 결과의 run/loop/specimen identity가 요청과 다르거나 evidence가 만료됐으면
-다음 Skill로 진행하지 않고 `error` route로 차단합니다. `detected`, `not_detected`,
-`timeout`, `error`는 저장된 block route만 따르며, 선택되지 않은 다른 UTM Vision
-task를 자동 실행하지 않습니다.
-
-현재 Equipment 호환 task는 `utm_pre_start`, `utm_motion_confirm`,
-`utm_test_complete`입니다. 정의 원본은 `utils/equipment_vision_tasks.py`이고 Agent
-Manager는 API가 반환한 카탈로그만 선택지로 사용합니다. Equipment Workspace, Live
-GUI, Runtime IDE는 실행 레코드의 같은 task와 outcome을 읽는 read-only projection입니다.
-
-Skill 실행 레코드는 `agentic_task`와 해당 Skill의 기존 annotation 참조를 함께
-보존합니다. 정상 실행에서는 annotation을 다시 생성하거나 LLM을 호출하지 않습니다.
-실행 전 actuation이 없었다고 증명된 locator/window 실패에 한해서만 기존
-`equipment_skill_recovery` 호출에 동일 Task와 annotation 문맥이 전달됩니다.
+Live GUI reads current-run Flow progress on authoritative planning refresh and
+through independent two-second GET observation during an Agent call. Reads are
+coalesced, have three-second timeouts, retry failed terminal fetches, and repaint
+only changed checkpoints. Late other-run responses are discarded; completed/blocked
+evidence is retained. The latest invocation is shown; earlier loops remain archived.
+Cyan pending/success Vision styling does not change gates. These UI reads are not
+intermediate LLM decisions.
 
 ![Equipment internal execution and effect boundary](assets/figures/equipment_02_execution_effect_boundary.svg)
 
-**Figure Equipment-2.** Agent Manager가 저장한 복합 block은 Skill 실행과 선택적 Vision
-판정을 순차 처리하지만 실제 장비 입력은 Low-Level worker 경계를 통해서만 발생합니다.
-저장과 projection은 비작동 경로입니다.
+**Figure Equipment-2.** Working-tree `inspection` projection: only the selected
+existing Flow produces instrument actions. Terminal recovery is limited to one
+wait/focus attempt, followed by fresh observation and a separate safe-resume
+decision. Saving and projections are non-actuating; no live reliability is claimed.
 
-Skill Workflow Editor는 정확한 `skill_id@version`의 `workflow.json`만 수정하는
-순차 편집기입니다. 일반 장비 macro의 실행 순서를 명확하게 유지하기 위해 IF,
-loop, 병렬 edge, 사용자 Python을 받지 않습니다. `Timer wait`는 고정 시간을,
-`Image/Text/File until wait`는 polling interval과 timeout을 갖는 bounded wait를
-표현합니다. 저장하면 이전 compiled program과 validation 결과를 무효화합니다.
-GUI의 단일 `Deploy`는 compile, validate, worker transfer/register를 순서대로 수행하며
-Skill을 실행하지 않습니다. 배포 또는 비활성화된 정확 버전은 불변이므로 수정하려면
-새 버전을 생성해야 합니다. 독립 compile/validate API는 CLI 호환용으로만 유지합니다.
+The Skill Workflow Editor edits one exact version's sequential `workflow.json`,
+without IF, loops, parallel edges or user Python. Timer waits are fixed; image/text/
+file waits have bounded polling and timeout. Save invalidates compilation and
+validation. `Deploy` compiles, validates and transfers/registers without executing.
+Deployed or disabled versions are immutable; edits require a new version. Separate
+compile/validate APIs remain for CLI compatibility.
 
-이미지 기반 action의 `Edit Crop`은 hash가 검증된 pre-action 원본 프레임에서
-Target ROI만 이동하거나 리사이즈합니다. AI가 만든 최초 ROI는 `Reset to AI` 기준으로
-보존되고 Context ROI와 두 번째 locator candidate는 변경하지 않습니다. `Apply Crop`은
-편집기 로컬 상태만 바꾸며 `Save` 시 workflow와 annotation을 함께 갱신하고 기존
-compiled/validated 산출물을 무효화합니다. `Replace Locator`는 원본 ROI를 조정하는
-기능이 아니라 locator PNG 자체를 외부 파일로 교체하는 별도 작업입니다.
+`Edit Crop` changes only Target ROI on a hash-verified pre-action frame. Original
+AI ROI remains the reset reference; Context ROI and the second locator candidate
+are unchanged. `Apply Crop` is local; Save updates workflow/annotations and
+invalidates compiled/validated outputs. `Replace Locator` instead replaces the
+locator PNG with an external file.
 
 ## Vision Link
 
-`vision_link.enabled=false`인 Profile은 화면·파일·장비 상태만으로 실행합니다. 활성 Profile은 다음 중 하나를 요구합니다.
+Profiles with `vision_link.enabled=false` use screen/file/equipment state.
+Enabled profiles require one of:
 
-1. identity와 freshness가 유효한 기존 Vision evidence
-2. 호출 가능한 `vision.equipment_cross_check` tool
+1. Existing identity- and freshness-valid Vision evidence
+2. A callable `vision.equipment_cross_check` tool
 
-둘 다 없으면 `EQUIPMENT_VISION_LINK_UNAVAILABLE`로 실행 전 차단합니다. Vision tool이 있으나 필수 관측 결과가 없으면 UTM 등 해당 Profile의 세부 evidence failure code를 반환합니다. Vision은 관측만 제공하며 장비 입력을 직접 제어하지 않습니다.
+Neither available means `EQUIPMENT_VISION_LINK_UNAVAILABLE` before execution.
+Missing required observations from an available tool return Profile-specific
+evidence failures. Vision observes; it does not directly control equipment input.
 
-## 통합 실행 기록
+## Execution Records and Projections
 
-`EquipmentExecutionRecord`는 다음 식별자를 보존합니다.
+`EquipmentExecutionRecord` retains:
 
 - `execution_id`, `sequence_id`
 - `run_id`, `experiment_id`, `specimen_id`
@@ -232,13 +237,19 @@ compiled/validated 산출물을 무효화합니다. `Replace Locator`는 원본 
 - event history, raw result, evidence
 - completion, failure, recovery, handoff
 
-상태 이름과 전이는 Profile/Skill/provider 계약에 따라 달라질 수 있습니다. `RESOLVING`, `PREFLIGHT`, `EXECUTING`, `VERIFYING`, `COMPLETED`, `BLOCKED` 등은 대표적인 Equipment 상태이지 모든 모듈에 강제되는 전역 수명주기가 아닙니다.
+States such as `RESOLVING`, `PREFLIGHT`, `EXECUTING`, `VERIFYING`, `COMPLETED` and
+`BLOCKED` depend on Profile/Skill/provider contracts, not a universal module lifecycle.
 
-Live GUI, Equipment Workspace, CUI, Runtime IDE는 이 기록의 같은 projection을 읽습니다. Live GUI는 현재 `run_id`로 `/api/equipment/runtime/current`와 Profile-bound Skill Flow 실행을 조회하고, run이 바뀌면 Equipment snapshot을 비우므로 다른 실험의 최신 Equipment 실행이 섞이지 않습니다. workflow overlay가 있으면 잠긴 진입 gate, 8단계 Skill/Vision 진행, 관측값과 method target, 화면 전이, Raw CSV 검증, 다음 시편 readiness를 기존 Equipment dashboard에 추가로 표시합니다. 별도의 장비 실행 버튼은 만들지 않습니다. 브라우저 새로고침은 실행을 새로 만들지 않습니다.
+Live GUI, Equipment Workspace, CUI and Runtime IDE read the same projection.
+Current-run `/api/equipment/runtime/current` and Flow queries clear snapshots on
+run changes. The workflow overlay adds the locked entry gate, eight-block
+Skill/Vision progress, measurements versus targets, screen transitions, CSV
+validation and next-specimen readiness. It adds no independent execution button;
+browser refresh does not create an execution.
 
-## 입력과 출력
+## Inputs and Outputs
 
-주요 입력:
+Primary inputs:
 
 - `OrchestratorState`
 - exact Profile/Skill/program ID
@@ -246,7 +257,7 @@ Live GUI, Equipment Workspace, CUI, Runtime IDE는 이 기록의 같은 projecti
 - mode, worker, preconditions
 - Vision/Guardian/operator evidence
 
-주요 출력:
+Primary outputs:
 
 - `equipment_result`
 - `equipment_profile`
@@ -255,9 +266,117 @@ Live GUI, Equipment Workspace, CUI, Runtime IDE는 이 기록의 같은 projecti
 - `equipment_runtime_projection`
 - `equipment_handoff`
 - evidence/artifact references
-- hardware alert와 incident record
+- hardware alerts and incident records
+- `equipment_decisions`, `equipment_workflow_execution_id`, `equipment_workflow_recovery`
+- `equipment_workflow_cached` on recorded-result reuse
 
-### Cycle-level verification
+## LLM Reasoning and Decision Authority
+
+| Question | Evidence and actual choice | Fixed boundary |
+|---|---|---|
+| Does the stored Flow fit this delegated task? | Goal, exact Flow/Skill deployment and annotations; execute the bound proposal or request operator review | No new Flow, Skill version, route, method setting or worker command |
+| Do terminal results support completion? | Current screenshot, execution logs, completion facts and required outputs; accept, observe or request review | CSV/readiness/identity/safety checks must already pass |
+| Is a failed block eligible for bounded recovery and resume? | Proven zero actions, no completed segments, checkpoint and post-recovery screen; eligible wait/focus, then a separate resume decision | Never repeat completed work or infer safety from missing evidence |
+
+Contextual suitability and conflicting screen/log evidence are model judgments;
+schema checks, measurements, gate enforcement and fixed Skill sequencing remain
+deterministic. All decisions route through the registered Equipment owner context
+and `equipment_workflow_decision`, using the shared API/local-model interface and
+`LLMImageInput` for actual image bytes. No independent provider or fallback model
+is introduced. Missing valid images prevents real terminal acceptance or recovery.
+
+### Bounded tool contract
+
+These are agent-local structured decision requests, not new public MCP endpoints.
+Only eligible choices are offered at a given checkpoint.
+Existing Flow preflight runs before model selection: missing readiness or an
+unbound Skill retains its original hard-gate failure without model or hardware
+execution. The model is not called to reconsider a deterministic preflight block.
+
+| Choice | Effect |
+|---|---|
+| `execute_stacked_workflow` | Run the exact configured Flow through existing code after gates |
+| `accept_workflow_result` | Accept already successful code-owned results; no equipment input |
+| `observe_workflow` | Read the request log when available and obtain another terminal screen; no execution restart |
+| `recover_wait` | One bounded wait (one second outside effective TEST) |
+| `recover_focus` | Focus only the exact window already named by the failed deployed Skill's program |
+| `resume_failed_block` | Resume this invocation's safe checkpoint after recovery observation and renewed checks |
+| `request_operator` | Block downstream handoff and return review responsibility |
+
+Responses contain exactly `tool`, `arguments`, `reason`, `evidence_refs`. Arguments
+copy an immutable server-owned proposal reference; the model cannot supply
+coordinates, commands, paths, arbitrary window names, clicks or keystrokes. All
+provided references must be cited for an action; operator review cites at least one
+supplied reference. Duplicate/unknown JSON fields, changed arguments, missing
+references, mock output, timeout, stop or changed scope invalidate the request.
+`accepted` is protocol validity, not workflow completion. Explicit TEST mode may
+return `deterministic_test` with `llm_used: false`; it is neither model nor visual
+or physical validation.
+
+The decision timeout is
+`run_metadata.equipment_decision_settings.timeout_s` (default 120 seconds; positive,
+finite and at most 600). The managed invocation permits at most five terminal/
+recovery decision rounds, one request-log observation choice and one recovery
+attempt. Screenshot capture accompanies terminal review rounds. Per-Skill nested
+automatic LLM recovery is disabled only for this managed Flow; existing in-flow
+Vision and safety checks still run, with no intermediate Equipment model polling.
+
+### Current prompt strategy
+
+Selection asks for task–Flow fit using saved Skills and annotations. Terminal
+review independently compares actual screen content with logs, goals and required
+outputs: a success label or plausible screen is not proof. Recovery review requires
+post-recovery observation and a separate explicit resume decision. The prompt
+forbids duplicated completed actions/blocks/segments and directs uncertainty or
+contradiction to operator review without inventing requirements. Logs, labels and
+image text are untrusted evidence, never instructions. Reasons are brief observable
+support, not internal reasoning. Model approval cannot override any hard gate.
+
+Each request includes guidance for its current decision phase only. Phase labels
+are explicitly non-callable. Server-built `response_options` show the exact tool,
+arguments and evidence references for every currently offered choice; the model
+selects one and supplies its own evidence-grounded reason. These options are built
+from the current proposals, not from logs or model output. They do not rank choices,
+force recovery, or relax the exact-request validator. No equipment-specific error
+string or experimental condition is embedded to make a probe pass.
+
+### Duplicate prevention and recovery limits
+
+Before any awaited decision, the existing Runtime creates a durable claim in its
+isolated `workflow_decisions` namespace for run/loop/specimen. Repeated invocation
+with unchanged scope reuses its recorded terminal result; an active, interrupted,
+cancelled or changed-scope claim blocks rather than starting again. This is not a
+crash-resume queue or permission to create a fresh invocation for failed work.
+
+Only the current invocation owner can resume. The checkpoint retains prior blocks,
+transitions, results and runtime context. Retry eligibility requires an execution
+record, exactly one failed worker run, explicit integer `executed_action_count=0`,
+no completed segments in the failed block, and the existing safe-retry predicate.
+Unknown effects, running/cancelled results, missing counters, partial work or a
+completed Flow never permit automatic replay. A checkpoint is not authority to
+repeat already completed segments within a failed block.
+
+Eligible recovery is nonphysical wait or exact configured-window focus only—no
+press, dismissal, new click, test start, method change or instrument motion.
+Guardian and scope checks apply before recovery; actual before/after screenshots
+are supplied together for the post-recovery review and explicit resume decision.
+Resume rechecks safety and preserves
+all earlier successful blocks. Failure, exhaustion or rejection retains raw
+evidence while revoking consumable handoff aliases. A screenshot never repairs
+unknown action effects or missing no-action proof.
+
+Screenshot review loads a local capture artifact, verifies its SHA-256, size and
+image decoding/dimensions, checks returned identity fields and records agent-bound
+requested capture identity. Missing bridge identity fields are not independently
+attested; LIVE rejects non-live or explicitly simulated screenshot results.
+Decisions archive image hashes/labels and bounded references,
+not inline image bytes. Scope, stop state and configured Flow/Skill content are
+rechecked around decisions and before every managed Skill segment. Snapshots bind
+session, objective, device health and operator approval; a mode change cannot
+create another execution under the same invocation claim. Image provenance remains supporting evidence, not a
+substitute for the existing execution and handoff gates.
+
+## Cycle-Level Verification and Clearance
 
 For non-physical simulator protocols, the Agent also emits the same scoped
 `raw_data_export`, `next_specimen_readiness` and `handoff_eligibility` contracts.
@@ -320,41 +439,106 @@ Non-actuating coverage is in `tests/unit/test_utm_clear_cycle.py` and
 controller/graph routing with fake device responses. No live replay or
 equipment execution was performed for this update.
 
-## Tool 경계
+## Tools, APIs and Connections
 
-| Tool | 역할 |
+| Registered tool | Role |
 |---|---|
-| `equipment.pyautogui.health` | 선택 worker 상태 확인 |
-| `equipment.pyautogui.list_programs` | program catalog 확인 |
-| `equipment.pyautogui.run` | bounded program 실행 |
-| `equipment.pyautogui.request_log` | 실행 identity/audit 확인 |
-| `vision.equipment_cross_check` | Profile이 요청한 관측 증거 |
+| `equipment.pyautogui.health` | Selected-worker health |
+| `equipment.pyautogui.list_programs` | Registered program catalog |
+| `equipment.pyautogui.run` | Existing bounded program; eligible exact-window focus recovery |
+| `equipment.pyautogui.screenshot` | Terminal screen capture for shared multimodal review |
+| `equipment.pyautogui.request_log` | Read-only execution identity/audit observation |
+| `vision.equipment_cross_check` | Configured Profile/block observation; no equipment input |
 
 ![Equipment API and connection architecture](assets/figures/equipment_03_api_connection_architecture.svg)
 
-**Figure Equipment-3.** Linux runtime, Profile/Skill registry, Windows 또는 Local worker,
-Vision, Analysis 사이의 API 및 증거 경계를 나타냅니다. Runtime IDE와 GUI는 같은
-projection을 읽으며 별도 실행 원본을 만들지 않습니다.
+**Figure Equipment-3.** Working-tree `inspection` projection: registered model
+routing selects server-owned proposals; the existing Runtime and worker remain
+the actuation boundary. GUI projections, screenshot/log evidence and optional
+Vision are distinct from execution authority. No live validation is implied.
 
-`utm.run_protocol`은 호환용 명시 호출 경로로만 남을 수 있으며 자동 선택되지 않습니다.
+Connected `/api/equipment/*` and `/api/bridges*` expose existing worker, Skill,
+Profile and runtime services. Agent-local decision names are not new public APIs.
+`utm.run_protocol` remains an explicit compatibility path, never automatic fallback.
 
-## 실패와 복구
+## Safety and Failure Boundaries
 
-- Profile/program 불일치: 실행 전 차단
-- worker 없음/불건전: 실행 전 차단
-- Vision Link 없음: 실행 전 차단
-- locator/checkpoint 실패: Skill에 선언된 bounded recovery만 허용
-- recovery 판단: 실행 시작 시 고정한 모델과 기존 Skill annotation, 현재 `agentic_task`를 사용하며 별도 fallback LLM 경로를 만들지 않음
-- invoke 이후 timeout: effect unknown으로 기록하고 상태/화면/파일 확인 전 재실행 금지
-- 불완전 파일: 증거로 보존하지만 완료로 승격하지 않음
+- Profile/program mismatch, unavailable/unhealthy worker, or missing required Vision Link blocks before input.
+- Placement, Guardian/operator approval, mode, identity, freshness and live preflight remain mandatory.
+- Managed Flow recovery follows the stricter terminal-only contract above; direct/standalone legacy Skill recovery remains unchanged.
+- A timeout after invocation is unknown effect, not evidence of failure before action; no automatic replay.
+- Incomplete files and rejected terminal results remain evidence but cannot authorize handoff.
 
-LLM 결과는 allowlisted 선택과 설명만 제공하며 임의 PyAutoGUI/shell 명령 권한을 만들 수 없습니다.
+Model output grants no arbitrary PyAutoGUI/shell authority. Existing bridge and
+Guardian/operator stop paths remain authoritative.
 
-## 검증 범위
+## Current Verification and Known Limits
 
-2026-09-07 working-tree에서 자동 조회, 조회 병합/후속 갱신, 실패 후 재조회,
-완료·차단 증거 유지와 브라우저 색상을 비구동 테스트로 확인했습니다.
-실제 8단계 Equipment → UTM clear → Analysis → BO 관리 LHS → 다음 Design
-연결은 [감독하 폐루프 실증](../paper/evidence/2026-09-07-supervised-closed-loop.md)에
-별도로 기록합니다. GUI 수정 검증과 앞선 물리 실행 증거를 혼동하지 않습니다.
-2026-09-01 기준 단위/통합 검증은 generic profile, UTM profile, Skill 실행, workflow-level compression cycle, locked entry gate, 선택적 step Vision, Raw CSV/readiness projection, Live GUI projection, Windows pairing/packaging 경로를 포함합니다. 자동 테스트는 물리 UTM을 작동하지 않습니다.
+### Non-actuating verification (2026-09-09)
+
+| Evidence | Observed result | Scope |
+|---|---|---|
+| Equipment decision/Flow/Skill/Runtime, bridge simulation, Guardian, clearance and documentation regression suite | 505 passed; 5 warnings | Controlled model/worker boundaries; no hardware |
+| LangGraph runtime suite | 70 passed; 10 warnings | Existing graph/module compatibility |
+| Production-graph virtual two-cycle controller test | Passed; 85.36 s | `run-20260908T172240Z-763676`; graph compatibility, not live-model Flow execution |
+| Archived actual Equipment result, screen and CSV validation log | API and local model both accepted completion | Read-only historical evidence review, not a new physical run |
+
+The archived case is Equipment attempt 1, loop 1 of
+`run-20260906T154601Z-95cb07`: eight Skill blocks and their eight Vision transitions,
+validated 2,114-row CSV evidence, and next-specimen readiness. The screenshot hash
+is matched to the archived result, and source files are checked for modification
+after inference. Models receive the image through `LLMImageInput` plus compact
+block outcomes, logs, failure/action evidence and required-output gates. This
+reviews the archived CSV validation evidence; it does not rerun CSV parsing.
+
+`scripts/verify_equipment_decisions.py --execute --image <archived-screen>` uses
+registered API/local providers and an empty tool registry. It separates the actual
+historical case from synthetic zero-action, partial-action, unknown-effect,
+post-recovery and contradictory-output cases. Synthetic success is unscored;
+recovery expectations do not authorize equipment retry.
+
+| Registered provider | Scored expectations met | Historical terminal review | Remaining gap |
+|---|---|---|---|
+| API (`gpt-5.5`) | 7 / 7 | Accepted; 3.437 s | No mismatch in this small probe |
+| Local vLLM (`gemma4:31b`) | 7 / 7 | Accepted; 25.539 s | Live recovery effectiveness not exercised |
+
+The local zero-action UI recovery case selected `recover_wait` with exact proposal
+arguments and all required evidence references. Five additional local calls also
+passed (5/5), including two with reversed proposal order. Phase-specific guidance
+and server-built response options separate reasoning-stage labels from callable
+tools without changing eligibility or repairing invalid model requests into actions.
+Partial-action, unknown-effect and contradictory-output cases selected operator
+review on both providers. Synthetic cases reuse historical imagery and do not
+establish recovery effectiveness on a current desktop.
+
+The final read-only probe report is
+`/tmp/atr-equipment-decisions-jb9vuvkl/results.json`; recovery repetition results are
+in `/tmp/atr-equipment-decisions-dx3d0vk6/results.json`. All three source hashes were
+unchanged in both probes. These limited checks are not a statistical reliability claim.
+
+The dedicated `equipment_workflow_decision` route retains the existing `e4b` role
+and allows 768 local response tokens; generic `tool_formatting` remains at 96.
+Repeated artifact trees are omitted from terminal prompts. A single whole-response
+JSON code fence may be unwrapped, but prose, multiple objects, duplicate keys,
+foreign arguments and invalid references remain rejected. Backend deployment and
+thinking settings are unchanged.
+
+The managed Flow tests cover successful work exactly once, bounded failed-block
+recovery, repeated/concurrent calls, loop isolation, partial/unknown effects,
+approval or scope mutation, cancellation between segments, screenshot provenance
+and handoff rejection. These are distinct from the virtual production-graph test;
+no registered-model, full managed Flow hardware run is claimed.
+
+An additional startup test, `test_agent_context_uses_openai_backend_as_last_fallback`,
+fails on a local-first expectation against unchanged API-first fallback behavior.
+It is outside the passing suite above; provider precedence was not changed.
+
+Earlier non-actuating checks covered generic/UTM profiles, Skills, compression
+workflow, locked entry gate, optional Vision, CSV/readiness and GUI projections,
+and Windows pairing/packaging. The 2026-09-07 GUI checks covered coalesced polling,
+retry and terminal evidence retention. The earlier physical eight-block Equipment
+→ UTM clear → Analysis → BO-managed LHS → Design run is documented separately in
+the [supervised closed-loop demonstration](../paper/evidence/2026-09-07-supervised-closed-loop.md).
+That historical execution does not validate this new decision layer. Automated
+tests do not actuate the physical UTM; no hardware execution, deployment or service
+restart is part of this reconstruction.

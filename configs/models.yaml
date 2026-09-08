@@ -77,5 +77,6 @@ task_routes:
   knowledge_relation: e4b
   guardian_reasoning: e4b
   tool_formatting: e4b
+  equipment_workflow_decision: e4b
   gui_helper: e4b
   module_designer: orchestrator

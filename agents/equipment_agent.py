@@ -26,6 +26,7 @@ import hashlib
 import inspect
 import json
 import re
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -2927,20 +2928,24 @@ class LabEquipmentAgent(BaseAgent):
         *,
         cancel_requested: Callable[[], bool] | None = None,
         require_entry_handoff: bool = True,
+        checkpoint: dict[str, Any] | None = None,
+        validate_only: bool = False,
     ) -> AgentResult:
         """Execute ordered composite Skill blocks and their bounded Vision phases."""
         profile_id = str(flow.get("profile_id") or "")
         agentic_task_id = str(flow.get("agentic_task_id") or "").strip()
-        flow_execution_id = f"equipment-flow-{uuid4().hex}"
+        flow_execution_id = (checkpoint or {}).get("flow_execution_id") or f"equipment-flow-{uuid4().hex}"
+        if checkpoint is not None:
+            checkpoint["flow_execution_id"] = flow_execution_id
         store = EquipmentSkillFlowStore(self._SKILL_FLOW_PATH)
         blocks = [block for block in flow.get("blocks", []) if isinstance(block, dict)]
         registry_root = str(
             state.current_experiment_spec.get("equipment_skill_registry_root")
             or Path(__file__).resolve().parents[1] / "memory" / "equipment_skills"
         )
-        transitions: list[dict[str, Any]] = []
+        transitions: list[dict[str, Any]] = deepcopy((checkpoint or {}).get("transitions", []))
         last_result: AgentResult | None = None
-        saved_csv_result: dict[str, Any] = {}
+        saved_csv_result: dict[str, Any] = deepcopy((checkpoint or {}).get("saved_csv_result", {}))
         terminal = "__blocked__"
         task_contract = validate_equipment_agentic_flow(agentic_task_id, blocks)
 
@@ -3324,9 +3329,14 @@ class LabEquipmentAgent(BaseAgent):
                 },
             )
 
-        run_context: dict[str, Any] = {}
+        if validate_only:
+            return AgentResult(success=True, summary="Equipment Flow preconditions verified", data={})
+
+        run_context: dict[str, Any] = deepcopy((checkpoint or {}).get("run_context", {}))
         cancelled = False
         for step, block in enumerate(blocks):
+            if step < int((checkpoint or {}).get("next_index", 0)):
+                continue
             block_id = str(block.get("id") or "")
             if cancel_requested is not None and cancel_requested():
                 cancelled = True
@@ -3389,6 +3399,10 @@ class LabEquipmentAgent(BaseAgent):
                 "completion_scope": "skill_step",
             }
             request["runtime_context"] = dict(run_context)
+            if checkpoint is not None:
+                # The enclosing workflow owns terminal recovery, not individual Skills.
+                request["auto_recover"] = False
+                request["_cancel_requested"] = cancel_requested
             last_result = await self._run_equipment_skill(state, ctx, request)
             if agentic_task_id == UTM_COMPRESSION_TASK_ID:
                 raw = last_result.data.get("equipment_result") or {}
@@ -3540,6 +3554,9 @@ class LabEquipmentAgent(BaseAgent):
             if target == "__blocked__":
                 terminal = "__blocked__"
                 break
+            if checkpoint is not None:
+                checkpoint.update(next_index=step + 1, transitions=deepcopy(transitions),
+                    run_context=deepcopy(run_context), saved_csv_result=deepcopy(saved_csv_result))
             if target == "__complete__":
                 terminal = "__complete__"
                 break
@@ -3997,6 +4014,13 @@ class LabEquipmentAgent(BaseAgent):
             }
             if runtime_values:
                 payload["runtime_values"] = runtime_values
+            cancelled = request.get("_cancel_requested")
+            if callable(cancelled) and cancelled():
+                execution = registry.transition_execution(str(execution["execution_id"]), "ABORTED",
+                    failure_code="EQUIPMENT_WORKFLOW_SCOPE_CHANGED")
+                return AgentResult(success=False, summary="Equipment Skill cancelled before next segment",
+                    data={"equipment_skill_execution": execution, "tool_results": tool_results,
+                          "equipment_handoff": {"status": "blocked", "failure_code": "EQUIPMENT_WORKFLOW_SCOPE_CHANGED"}})
             result = await self._call_tool(ctx, "equipment.pyautogui.run", payload)
             tool_results.append({"tool": "equipment.pyautogui.run", "payload": payload, "result": result})
             if not result.get("ok"):
@@ -4361,7 +4385,8 @@ class LabEquipmentAgent(BaseAgent):
                 },
             )
         if skill_flow:
-            return await self._run_equipment_skill_flow(state, ctx, skill_flow)
+            from agents.equipment_workflow import run_decided_workflow
+            return await run_decided_workflow(self, state, ctx, skill_flow)
 
         skill_request = self._equipment_skill_request(state)
         if skill_request:
