@@ -26,12 +26,20 @@ supersedes: []
 
 # Design Agent Reference
 
+## Status at a Glance
+
+- Implementation: bounded LLM suitability decisions are integrated into the existing Design workflow.
+- Decisions: inspect candidate/history, accept a checked candidate, or return the task to its owner.
+- API verification: `gpt-5.5` completed candidate acceptance and handoff in 6.34 seconds.
+- Local verification: registered vLLM `gemma4:31b` completed the same path in 12.11 seconds via model fallback.
+- Outputs: authoritative specification, matching handoff, evaluation and loop-scoped decision artifacts.
+- Pending: E4B-primary, full HTTP closed-loop and physical validation for this change; see [verification scope](#current-verification).
+
 ## Overview and Responsibilities
 
 Design converts a requested experiment into a checked specimen specification.
 Existing code prepares candidates; a role-specific LLM layer decides acceptance,
-additional inspection, or return to the owner. It does not optimize BO variables
-again, control devices, or replace numeric computations with generated prose.
+additional inspection, or return to the owner.
 
 | Owned by Design | Not owned |
 |---|---|
@@ -42,9 +50,8 @@ again, control devices, or replace numeric computations with generated prose.
 
 ### Five-Area Responsibility Map
 
-The five areas classify responsibility; they are not five sequential runtime stages
-or a required chapter hierarchy. Design owns a bounded suitability decision,
-while the existing runtime owns global routing and physical execution.
+The five areas map responsibilities across the workflow, rather than defining
+sequential runtime stages.
 
 | Area | Design responsibility and boundary | Detail |
 |---|---|---|
@@ -60,8 +67,8 @@ while the existing runtime owns global routing and physical execution.
 
 **Figure Design-1.** Current code-inspection projection: the normal Design path
 contains a bounded suitability decision before the existing Specimen handoff.
-BO and user inputs remain authoritative. Dashed history and deterministic-test
-paths are not extra mandatory stages. This is not physical validation.
+BO and user inputs remain authoritative. Dashed lines identify history and
+deterministic-test paths.
 
 | Boundary | Contract | Authority |
 |---|---|---|
@@ -95,8 +102,7 @@ handoff. The non-LLM test branch is explicitly separate.
 
 `accepted` is a checked candidate decision, not fabrication success.
 `returned` or `failed` produces `success=False`, a decision trace and no new
-`experiment_spec`. Existing runtime error/retry behavior remains responsible
-for the next step; this change introduces no new global approval gate.
+`experiment_spec`. The existing runtime handles the next step and retries.
 
 ## Decision and Evaluation
 
@@ -111,11 +117,10 @@ or owner review necessary?
 | Goal, constraints and history | Decide whether evidence is sufficient | Cited evidence IDs must exist; hard failures cannot be approved |
 | Unresolved conflict | Return to owner | No ready spec/handoff emitted |
 
-The LLM interprets relevance, sufficiency and tradeoffs across evidence; it does
-not calculate geometry, margins, performance or uncertainty. A normal task may
-be accepted immediately from supplied evidence, or require tool observations
-before another decision. Missing performance evidence alone is normal before a
-new experiment and is not an automatic rejection.
+The LLM interprets relevance, sufficiency and tradeoffs across code-computed
+evidence. It can accept the supplied evidence or request additional observations.
+Unassessed performance is normal before an experiment and alone does not
+require rejection.
 
 No tools currently expose parameter modification/re-generation. Such tools would
 need an explicit owner-approved variable set; absence of a fixed input is not
@@ -135,7 +140,7 @@ automatic permission to redesign a BO-requested experiment.
 Prior experiment count, failure summaries and existing Knowledge entries provide
 context. Historical scalar scores with unknown compatibility/units are not
 current-candidate predictions. External text is evidence, not authority to alter
-tools or constraints. No new knowledge store is introduced.
+tools or constraints.
 
 ## Tools, APIs and Connections
 
@@ -169,9 +174,8 @@ Requests use schema-validated JSON, not native provider-specific function calls:
 }
 ```
 
-Exactly these fields are accepted. Evidence references identify context or
-candidate records; they do not prove that the model's interpretation is correct.
-Evaluation and controlled-response tests are still required.
+Exactly these fields are accepted. Evidence references must identify supplied
+context or candidate records.
 
 ### API and Connection Map
 
@@ -179,8 +183,7 @@ Evaluation and controlled-response tests are still required.
 
 **Figure Design-3.** Implementation-inspection view of the bounded local
 dispatcher, shared model backend, existing computation/preview tool, controller
-and storage. No model-to-device connection exists. API paths are shared platform
-surfaces, not direct Design-owned actuation endpoints.
+and storage. API paths are shared platform surfaces.
 
 | Surface | Method/path or implementation | Effect/owner |
 |---|---|---|
@@ -214,7 +217,7 @@ normal model decisions.
 
 Live GUI exposes candidate previews, the Design report, evidence-based evaluation
 and the current decision/review state. Model and API selection remain shared
-platform settings; Design adds no separate inference service.
+platform settings.
 
 Legacy proxy/risk/information/uncertainty fields are retained for compatibility,
 not redefined as meaningful measurements. Existing virtual experiment and degraded
@@ -248,21 +251,18 @@ reports, and the Design dashboard shows the review requirement.
 ### Post-Selection Adaptation
 
 Controller planning still adapts the output through `_build_planning_spec` and
-existing mode policies. Class-level acceptance must not be confused with
-downstream fabrication or a completed experiment.
+existing mode policies.
 
 If those existing policies change geometry/material after selection, Design's
 `reconcile_planning_evidence` refreshes the final fingerprint and marks current
 evaluation `unassessed`, retaining the original checks as `selection_evaluation`.
-It does not change cap policy, add a device gate, or reuse earlier estimates as
-proof for the adapted geometry. Current report/GUI evidence follows this distinction.
+The report and GUI distinguish the selected design from the adapted geometry.
 
 ### Failure, Retry and Stop
 
-The legacy generator can supply a conservative repair seed. In the LLM path that
-seed must pass the same acceptance checks; being generated does not prove
-validity. The explicit non-LLM test path retains its existing fallback behavior
-and must not be presented as new hard-gate or physical validation.
+The legacy generator can supply a conservative repair seed. In the LLM path it
+must pass the same acceptance checks. The explicit non-LLM test path retains
+its existing fallback behavior.
 
 Design's stop responsiveness during inference is bounded/cancellable. Existing
 synchronous preview generation and runtime/device stop behavior are not replaced
@@ -281,9 +281,8 @@ by this decision layer.
 | Legacy numeric fields | Compatibility only, marked `score_semantics=legacy_heuristic_compatibility_only` | Retained for historical/virtual consumers; excluded from model context |
 
 The result records which candidate was accepted or why none was committed.
-Existing run/loop/agent/attempt storage separates repeated invocations. Decision
-evidence is an input to later knowledge work, not proof that the selected design
-is optimal.
+Run/loop/agent/attempt storage separates repeated invocations and supplies
+decision evidence for later knowledge work.
 
 ### Current Verification
 
@@ -304,11 +303,11 @@ regressions, baseline failures, and the limits of that evidence.
 
 ### Limitations and Known Gaps
 
-no automatic candidate-matched CAE/BO performance adapter is
-added; performance stays unassessed. Historical evidence lookup is a summary,
-not a new RAG workflow. No parameter repair tool is exposed. Model interpretation
-may still be wrong even with valid evidence IDs. Existing model/preview latency
-and unrelated baseline GUI/controller test failures require separate attribution.
+Candidate-matched CAE/BO performance integration and parameter-repair tools are
+not implemented; performance remains unassessed. History lookup provides
+summaries. Valid evidence IDs do not establish correct interpretation or design
+optimality. Model/preview latency and baseline GUI/controller test findings are
+tracked in the linked verification records.
 
 ### Source of Truth and Related Documents
 
