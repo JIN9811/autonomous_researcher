@@ -28,12 +28,12 @@ supersedes: []
 
 ## Status at a Glance
 
-- Implementation: bounded LLM suitability decisions are integrated into the existing Design workflow.
-- Decisions: inspect candidate/history, accept a checked candidate, or return the task to its owner.
-- API verification: `gpt-5.5` completed candidate acceptance and handoff in 6.34 seconds.
-- Local verification: registered vLLM `gemma4:31b` completed the same path in 12.11 seconds via model fallback.
-- Outputs: authoritative specification, matching handoff, evaluation and loop-scoped decision artifacts.
-- Pending: E4B-primary, full HTTP closed-loop and physical validation for this change; see [verification scope](#current-verification).
+- Runtime status: Implemented
+- LLM decision layer: Implemented / locally verified
+- Physical effect: None
+- Primary handoff: `design_candidate.v1` → Specimen
+- Live hardware validation: Not applicable to Design / downstream pending
+- Known gap: Candidate-matched performance prediction unavailable
 
 ## Overview and Responsibilities
 
