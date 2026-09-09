@@ -236,9 +236,20 @@ async def run_fem_study(evidence, choose, call_tool, emit):
                           if isinstance(value, str) and value.lower().endswith(('.png', '.jpg', '.jpeg')))
         # The owner validates allowed roots before loading these artifact images.
         info['image_paths'] = list(dict.fromkeys(images))[-2:]
-        choice = await choose(phase, deepcopy(info), dict(options))
+        decision_failed = False
+        try:
+            choice = await choose(phase, deepcopy(info), dict(options))
+        except Exception as exc:
+            # A failed optional review must not discard or repeat successful
+            # native work. Cancellation (BaseException) still reaches the owner.
+            decision_failed = True
+            choice = {'option_id': 'hold', 'source': 'decision_error',
+                      'error_type': type(exc).__name__,
+                      'reason': 'Decision review failed; retained numerical evidence requires review.'}
+            summary.update(review_status='failed', review_failure_phase=phase)
         selected = choice.get('option_id') if isinstance(choice, dict) else None
-        accepted = isinstance(selected, str) and selected in options and choice.get('tool', options.get(selected)) == options.get(selected)
+        accepted = (not decision_failed and isinstance(selected, str) and selected in options
+                    and choice.get('tool', options.get(selected)) == options.get(selected))
         record = {**(choice if isinstance(choice, dict) else {}), 'phase': phase,
                   'option_id': selected if accepted else 'hold', 'accepted': accepted}
         decisions.append(record)

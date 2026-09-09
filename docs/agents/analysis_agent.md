@@ -24,7 +24,7 @@ source_of_truth:
   - app/cae_fields_routes.py
   - orchestrator/langgraph_runtime.py
 last_verified: 2026-09-09
-verified_against: 499afd3-mechanism-first-fem-improvement
+verified_against: 20260909-sparse-postyield-03-and-245-targeted-tests
 related_docs:
   - docs/agents/README.md
   - docs/agents/equipment_agent.md
@@ -46,7 +46,7 @@ supersedes: []
 - Physical effect: None; registered solver computation only
 - Primary handoff: Measured objective and evidence → Knowledge / BO
 - Live hardware validation: Prior complete cycle preserved; no new hardware execution
-- Known gap: Full-range FE completed; agreement and mesh convergence remain unvalidated (work error +26.9% in the case below)
+- Known gap: New full-range FE improves peak/shape error; work remains +21.1%, with mesh convergence and independent prediction unvalidated
 
 ## Overview and Responsibilities
 
@@ -411,6 +411,20 @@ experiment setup already accepts the corresponding `cae_elastic_modulus_mpa`,
 `cae_poisson_ratio`, `cae_yield_strength_mpa` and `cae_plastic_curve` fields;
 this study does not change those live settings.
 
+For a declared forward sensitivity study, the same runner accepts
+`--material-hypothesis <JSON>` with exactly `label`, `basis` and `material`.
+It freezes and hashes the configuration, checks the actual supported material
+range and prevents archived material aliases from overriding the hypothesis.
+This does not run the inverse-calibration search or relax its admission gate.
+The report retains `material_hypothesis` separately from `calibration`.
+
+`--mesh-size-mm` sets the isolated surface/volume target size;
+`--surface-distance-mm` can tighten the remesher's local-operation deviation.
+Final geometry acceptance and element-quality gates remain unchanged. Increasing
+the nominal size alone does not guarantee fewer valid elements in a thin-walled
+geometry. The [sparse native execution plan](../superpowers/plans/2026-09-09-sparse-native-fem-improvement.md)
+records rejected meshes and the accepted study settings.
+
 See the [calibration evidence record](../paper/evidence/2026-09-09-feature-informed-fem-calibration.md)
 for the retained same-STL study, assumptions and measured error status.
 
@@ -460,28 +474,29 @@ the entry remains visible even when an old result has no field file.
 
 ## Artifacts and Verification
 
-### Latest verification — mechanism-first improvement
+### Latest verification — completed sparse post-yield FEM
 
-The latest implementation is `499afd3`. Its targeted non-actuating regression
-passed **196 Python tests**; the commit-time rerun took 22.51 s with 26 dependency
-warnings. The earlier, differently scoped counts below are historical results,
-not additional tests to sum into this total.
+A fresh native solve completed the entire requested domain; the earlier baseline
+is preserved below for comparison. Targeted non-actuating regression passed
+**245 Python tests** in 30.47 s, with 26 dependency warnings. Historical test
+counts below describe different runs and must not be summed into this total.
 
 | Verification | Latest result | Evidence boundary |
 |---|---|---|
-| Registered API — `gpt-5.5` | **10/10 scenarios**, 19 real decisions; 79.69 s | Fallback disabled; archived receipts and controlled forward fixtures |
-| Registered local vLLM — `gemma4:31b` | **10/10 scenarios**, 19 real decisions; 186.18 s | Fallback disabled; existing managed model endpoint |
+| Registered API — `gpt-5.5` | **10/10 scenarios**, 19 real decisions; 77.67 s | Fallback disabled; archived receipts and controlled forward fixtures |
+| Registered local vLLM — `gemma4:31b` | **10/10 scenarios**, 19 real decisions; 192.09 s | Fallback disabled; existing managed model endpoint |
 | Unsupported softening on the retained experiment | Both backends returned `held`; **zero solver calls** | Missing material characterization is requested, not fabricated |
-| Runtime and software closed loop | Included in the 196-test regression | Input freezing, partial-result gates, measured BO handoff and parallel software path |
+| Runtime and software closed loop | Included in the 245-test regression; two loops completed in 28.22 s during the new native solve | Hardware boundaries are fixtures; native PID/start identity remained unchanged and CPU ticks increased |
 | New physical validation | Not performed | Prior physical-cycle evidence remains separate |
-| New full-domain calibrated FEM | Not established | The softening pilot was cancelled; the completed baseline below is unchanged |
+| New full-domain forward FEM | **Completed: 182 increments, 183 curve points, 100% requested coverage** | Explicit research hypothesis, not an identified or promoted material law |
+| New full-domain calibrated FEM | Not established | Independent material/deformation evidence and mesh convergence remain unavailable |
 
 The ten scenarios comprise seven bounded decision cases, archived native-tool
 receipt replay, the actual retained acquisition's unsupported-calibration gate,
 and a two-candidate analytic-fixture calibration loop. Full inputs, decisions,
 timings and per-case results are in
-`artifacts/analysis_validation/20260909-mechanism-dual-backend-02/`.
-See the [feature-informed FEM evidence record](../paper/evidence/2026-09-09-feature-informed-fem-calibration.md#mechanism-first-revision)
+`artifacts/analysis_validation/20260909-sparse-dual-backend-01/`.
+See the [completed native evidence record](../paper/evidence/2026-09-09-feature-informed-fem-calibration.md#completed-sparse-post-yield-forward-study)
 for methodology and results available in the repository. Large runtime artifacts
 are retained locally and are not bundled into Git.
 
@@ -495,8 +510,9 @@ are retained locally and are not bundled into Git.
 | Next evidence request | Result `summary.next_evidence_action` and progress receipt; non-actuating research request |
 | Frozen research references | Run improvement `inputs/`; hash-addressed coupon/literature/deformation references and rewritten policy paths |
 | Calibration research | `calibration.records`, individual errors, best eligible candidate, review and retention status; no automatic promotion |
+| Explicit forward hypothesis | Frozen `inputs/material_hypothesis.json`; `evidence.material_hypothesis` and `report/metrics.json.material_hypothesis` retain declared basis separately from calibrated candidates |
 | Forward material candidate | `frozen_material_candidate.json` only after completed, explicitly retained, evidence-admissible calibration; **not produced by the cancelled pilot** |
-| API/local verification | `20260909-mechanism-dual-backend-02/{openai,vllm}/`: `decisions.json`, `result.json`, archived/controlled workflow receipts and unsupported-acquisition review |
+| API/local verification | `20260909-sparse-dual-backend-01/{openai,vllm}/`: `decisions.json`, `result.json`, archived/controlled workflow receipts and unsupported-acquisition review |
 | Solver evidence | INP, DAT, FRD, request and process logs |
 | Reusable native model | `artifacts.model_package_path` and `model_package_manifest_path`; standalone deck, optional mesh/source/preparation copies, relative-file hashes and conditions |
 | Field evidence | `<frd-stem>.fields/manifest.fields.json`, geometry/frames, source hashes and mesh diagnostics |
@@ -541,7 +557,79 @@ solver remains blocked, one-acquisition execution, aligned full-curve comparison
 and unchanged foreground values/artifact bytes. This is non-actuating software
 evidence, not a native solver or physical calibration run.
 
-### Retained completed native baseline — 2026-09-09
+### New completed native result — sparse post-yield study
+
+Run `artifacts/runs/validation-fem-20260909-sparse-postyield-03/` recomputed the
+preserved same-STL acquisition without device operation. The comparison keeps
+the same contact convention and full 0–15 mm domain for all three columns.
+These dimensions and conditions belong to this acquisition, not framework defaults.
+
+| Quantity | Paired experiment | Previous completed baseline | New completed forward study |
+|---|---:|---:|---:|
+| Peak force | 6,383.900 N | 5,674.165 N (−11.12%) | **6,234.689 N (−2.34%)** |
+| Peak displacement | 1.820075 mm | 8.109375 mm | **2.090625 mm** |
+| Integrated work | 60.108284 J | 76.279680 J (+26.90%) | **72.780144 J (+21.08%)** |
+| Curve RMSE | — | 1,585.82 N | **986.01 N** |
+| RMSE / measured peak | — | 24.84% | **15.45%** |
+| Nodes / C3D4 elements | — | 55,026 / 159,772 | **51,385 / 148,427** |
+| Study elapsed time | — | 32.58 min | **70.68 min** |
+| Peak sampled process-tree RSS | — | 1.12 GiB | **2.18 GiB** |
+
+The new mesh has **7.10% fewer elements**, using a 0.8 mm target and a tighter
+0.0275 mm remesh-operation distance. Existing acceptance thresholds were not
+relaxed: sampled bidirectional deviation is 0.095762 mm, volume error +0.046817%,
+and 3.7406% of elements have corner scaled Jacobian below 0.2 (limit 5%). The
+minimum / fifth-percentile Jacobian is 0.001145 / 0.209861; no inverted or
+degenerate elements were reported. This is one resolution, not convergence proof.
+
+The declared forward hypothesis uses E = 1,800 MPa, ν = 0.35 and the earlier
+manually specified flow-stress/plastic-strain pairs
+`(55, 0), (55, 0.02), (30, 0.15), (25, 0.4), (30, 1.0)` in MPa and dimensionless
+plastic strain. It tests post-yield softening; these are **not measured PLA
+properties or a table copied from the specimen force curve**. The full-domain
+RMSE improves by 37.82%, but excessive post-peak force leaves work +21.08% high.
+No calibration acceptance, independent prediction or material promotion is claimed.
+
+![New completed post-yield FEM compared with the paired measured curves](assets/figures/analysis_07_postyield_comparison.png)
+
+**Figure Analysis-7.** Fresh native force–displacement and engineering stress–strain
+results over the full requested domain. The contact offset (1.94855 mm), force
+baseline (1.3636 N) and original raw-coordinate BO work (52.420871 J) are unchanged.
+
+![New final-frame von Mises stress](assets/figures/analysis_08_postyield_stress.png)
+
+**Figure Analysis-8.** Actual final completed native stress field at 15 mm,
+physical deformation scale 1×; solver-extrapolated/nodally averaged stress.
+
+![New final-frame displacement magnitude](assets/figures/analysis_09_postyield_displacement.png)
+
+**Figure Analysis-9.** Actual final displacement magnitude, same frame and scale.
+Field manifests and report provenance retain source hashes and frame selection.
+
+Native execution took 4,143.96 s; total study time was 4,240.95 s. Sampled peak
+process-tree RSS was 2,339,438,592 bytes and observed cumulative CPU time
+4,560.21 CPU-s (4,189 one-second samples; assembly threads 4, equation threads 1).
+External LLM servers are excluded; summed RSS can double-count shared pages and
+sampled CPU can miss short-lived children. Coarsening did **not** reduce total
+cost here: the changed nonlinear material model required more increments and
+cutbacks, so this is not an isolated mesh-speed benchmark.
+
+After native completion, the initial API review returned an empty response.
+An 8.06 s review of saved evidence concluded the numerical job without another
+solve. Original `result.json` and corrected `result-review/result.json` remain
+separate. The runtime now retains completed numerical evidence on review failure,
+records `review_status: failed`, and holds further action rather than repeating
+successful work. Cancellation still propagates to the compute owner.
+
+The run retains numbered tool receipts, frozen inputs, the reusable native model
+package, INP/DAT/FRD, full curve and fields, `report/metrics.json`,
+`report/provenance.json`, `resources_summary.json` and source-hash audit. During
+this same solve, two software closed-loop iterations completed in 28.22 s;
+`parallel-proof/` records the unchanged native process identity and CPU progress.
+Only hardware boundaries and model responses in that concurrency test were
+fixtures. The registered API/local checks above are separate real-inference tests.
+
+### Retained completed native baseline — historical comparison
 
 The preserved same-STL acquisition was replayed computationally in
 `artifacts/runs/validation-fem-20260909-long-cycle-03`. No physical device was

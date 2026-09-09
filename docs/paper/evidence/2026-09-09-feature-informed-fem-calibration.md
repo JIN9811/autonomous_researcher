@@ -5,13 +5,14 @@ status: active
 authority: evidentiary
 audience: [researcher, developer, reviewer]
 scope: [analysis, fem, calibration, independent_validation]
-summary: Feature-informed inverse FEM implementation and same-acquisition numerical study; independent prediction remains separate.
+summary: Feature-informed FEM workflow and a new completed sparse post-yield forward study; independent prediction remains separate.
 evidence_date: 2026-09-09
 method: Test-driven numerical and orchestration checks, independent code review, registered LLM decisions and isolated native FEM.
 related_docs:
   - docs/agents/analysis_agent.md
   - docs/paper/evidence/2026-09-09-analysis-improvement-validation.md
   - docs/superpowers/plans/2026-09-09-feature-informed-fem-calibration.md
+  - docs/superpowers/plans/2026-09-09-sparse-native-fem-improvement.md
 supersedes: []
 ---
 
@@ -209,3 +210,124 @@ motivates energy/rate checks before considering a future explicit method;
 [damage evolution guidance](https://docs.software.vt.edu/abaqusv2025/English/SIMACAEMATRefMap/simamat-c-damageevolductile.htm)
 motivates characteristic-length/energy regularization, not transplanting a
 metal-specific damage model into PLA.
+
+## Completed sparse post-yield forward study
+
+The new native run `validation-fem-20260909-sparse-postyield-03` completed on
+2026-09-09, separately from the cancelled exponential-law pilot and retained
+yield-35 baseline. It tests the earlier manually specified post-yield hypothesis
+over the **entire requested 0–15 mm domain**, not only the initial peak.
+No physical device operated and the original STL/CSV hashes above remained unchanged.
+
+### Declared model and discretization
+
+The material fixture is
+`scripts/validation/fixtures/analysis_postyield_forward_hypothesis.json`, SHA-256
+`6f1191c1f9a37ebc39236b3a566f192ebd861a33dde31f214f2ea66b8b78f0e6`.
+It supplies E = 1,800 MPa, ν = 0.35 and flow-stress/plastic-strain pairs
+`(55, 0), (55, 0.02), (30, 0.15), (25, 0.4), (30, 1.0)`.
+These values are an explicit research hypothesis, not independently measured
+properties, identified calibration parameters or the experimental force curve
+re-expressed as material input. Published compression work on printed PLA
+supports considering processing-dependent post-yield softening, **not these
+numerical values** ([PLA compression study](https://doi.org/10.1007/s00170-023-11985-y)).
+Unregularized local softening remains mesh dependent. Calibration admission and
+automatic-promotion gates are unchanged.
+
+| Mesh quantity | New result |
+|---|---:|
+| Surface / volume nominal target | 0.8 mm |
+| Local remesh-operation distance | 0.0275 mm |
+| Nodes / C3D4 elements | 51,385 / 148,427; 7.10% fewer elements than baseline |
+| Sampled bidirectional surface deviation | 0.095762 mm; unchanged limit 0.1 mm |
+| Volume error | +0.046817% |
+| Minimum / P1 / P5 corner scaled Jacobian | 0.001145 / 0.159268 / 0.209861 |
+| Fraction below Jacobian 0.2 | 3.7406%; unchanged limit 5% |
+| Validity | Watertight; topology preserved; no inverted/degenerate elements |
+
+Coarser attempts with the original 0.05 mm local-operation distance were rejected
+by the existing final geometry gate before solving. A 0.025 mm attempt passed
+geometry but failed mesh quality. Their receipts remain in `sparse-reference-01`
+through `03` and `sparse-postyield-01` through `02` under `artifacts/runs/`.
+No acceptance threshold was relaxed to admit the final case. Local operation
+distance is not a global final-distance guarantee
+([MeshLab filter contract](https://pymeshlab.readthedocs.io/en/latest/filter_list.html#meshing-isotropic-explicit-remeshing)).
+
+### Full-domain measured comparison
+
+The same contact convention, planned dimensions and comparison domain apply
+to both FEM runs. No extrapolation, force multiplier or fitted horizontal shift
+is used. Native convergence reached 182 increments / 183 curve points.
+
+| Quantity | Experiment | Retained completed baseline | New completed study |
+|---|---:|---:|---:|
+| Peak force (N) | 6,383.9004 | 5,674.165 | 6,234.689 |
+| Peak location (mm) | 1.820075 | 8.109375 | 2.090625 |
+| Peak error | — | −11.12% | **−2.34%** |
+| Work (J) | 60.1082839245 | 76.2796795884 | 72.7801440121 |
+| Work error | — | +26.90% | **+21.08%** |
+| Curve RMSE (N) | — | 1,585.82 | **986.01** |
+| RMSE / measured peak | — | 24.84% | **15.45%** |
+
+Peak magnitude and location improve; full-domain RMSE decreases by 37.82%.
+The post-peak response remains too stiff/high, with work overprediction of 21.08%.
+This is improved same-acquisition forward agreement, **not completed physical
+calibration or independent prediction**. Only one resolution was solved.
+The new [comparison and final-frame contours](../../agents/analysis_agent.md#new-completed-native-result--sparse-post-yield-study)
+are checked into Git; earlier baseline figures remain separately labeled.
+
+### Execution, recovery and concurrency evidence
+
+| Observation | Measured result |
+|---|---:|
+| Native start / finish (UTC) | 09:35:40 / 10:44:44, 2026-09-09 |
+| Native elapsed | 4,143.96 s (69.07 min) |
+| Study elapsed | 4,240.95 s (70.68 min) |
+| Peak sampled process-tree RSS | 2,339,438,592 bytes (2.18 GiB) |
+| Observed cumulative CPU | 4,560.21 CPU-s |
+| Resource sampling | 4,189 samples at 1 s; six observed processes |
+| Assembly / equation-solver threads | 4 / 1 |
+| Saved-result API review | 8.06 s; no native rerun |
+| Two concurrent software loops | 28.22 s; native CPU ticks 2,072 → 5,076 |
+
+Despite fewer elements, the nonlinear hypothesis took more increments/cutbacks
+than the retained baseline and increased total time/memory. Neither speedup nor
+an isolated mesh-cost effect is established. Resource scope excludes external
+LLM servers; summed RSS may duplicate shared pages and sampled CPU is a lower bound.
+
+The first final API review returned an empty response **after successful native
+completion**. Its failed `result.json` remains intact. The existing saved-result
+review path produced `result-review/result.json` with numerical completion and
+no promotion; it did not rerun FEM. A regression-tested runtime change now
+preserves completed numerical evidence on review exceptions, marks the review
+failed, and holds further action. Initial decision failure calls no solver;
+cancellation is not swallowed.
+
+While this exact native process was computing, the production software graph
+completed two loops with non-actuating hardware/model fixtures. Native PID
+3239654 and start identity 46702614 were unchanged while CPU ticks increased.
+Design, Analysis, Knowledge, BO and graph transitions used production code;
+this demonstrates computation/foreground overlap, not concurrent physical operation.
+
+Final scoped regression: **245 passed**, 26 dependency warnings, 30.47 s.
+Registered real inference, with fallback disabled, separately passed **10/10
+scenarios and 19 decisions per backend**: `gpt-5.5` API in 77.67 s and managed
+vLLM `gemma4:31b` in 192.09 s. These use controlled/archived evidence and do not
+constitute a second native run or physical validation. The unsupported actual
+calibration case still held with zero solver calls on both backends.
+
+### Artifact inventory
+
+Large files remain local under
+`artifacts/runs/validation-fem-20260909-sparse-postyield-03/`:
+
+- `001-cae-prepare_static_analysis.result.json`, `002-cae-run_static_analysis.result.json`: actual accepted preparation and completed native execution.
+- `inputs/`, `evidence.json`, `run_metadata.json`: frozen acquisition and declared hypothesis, input provenance and source-hash audit.
+- `cae/calculix/`: native deck/mesh, DAT/STA/FRD, full curve, fields and reusable model package.
+- `result.json`, `result-review/result.json`: original review failure and successful saved-evidence review, retained separately.
+- `report/metrics.json`, `report/provenance.json`, `report/shared_points.csv`: full-domain calculations and source/frame provenance; PNG/PDF exports alongside.
+- `resources_summary.json`, `parallel-proof/`: process measurements and actual native/software-loop overlap receipt.
+- Real-model receipts: `artifacts/analysis_validation/20260909-sparse-dual-backend-01/`.
+
+The published figures are actual recomputed output, not renamed retained-baseline
+images. Source data, original BO observations and historical reports are unchanged.

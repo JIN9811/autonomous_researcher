@@ -132,9 +132,16 @@ class ProcessTreeSampler:
                 'limitation': 'Sampled CPU is a lower bound; short-lived children may escape 1-second sampling. Summed RSS may double-count shared pages.'}
 
 
-def prepare_evidence(archive_request, output, *, max_fem_jobs, max_mesh_actions):
+def prepare_evidence(archive_request, output, *, max_fem_jobs, max_mesh_actions, mesh_size_mm=.6,
+                     surface_distance_mm=.05):
     from agents.analysis_agent import AnalysisAgent
 
+    mesh_size_mm = float(mesh_size_mm)
+    if not math.isfinite(mesh_size_mm) or not .05 <= mesh_size_mm <= 5:
+        raise ValueError('Mesh size must be finite and between 0.05 and 5 mm')
+    surface_distance_mm = float(surface_distance_mm)
+    if not math.isfinite(surface_distance_mm) or not 0 < surface_distance_mm <= .05:
+        raise ValueError('Surface operation distance must be positive and at most 0.05 mm')
     archive_request = Path(archive_request).resolve()
     archive = json.loads(archive_request.read_text())
     source_analysis = Path(archive['source_analysis_result']).resolve()
@@ -168,11 +175,11 @@ def prepare_evidence(archive_request, output, *, max_fem_jobs, max_mesh_actions)
     payload = {**original, 'run_id': run_id, 'loop_key': f'{run_id}:loop-1',
                'job_id': f'{run_id}-fem', 'runtime_mode': 'live', 'mode': 'live',
                'runtime_solver_enabled': True, 'require_solver': True,
-               'stl_path': copied['specimen'], 'mesh_size_mm': .6,
+               'stl_path': copied['specimen'], 'mesh_size_mm': mesh_size_mm,
                'material': {'elastic_modulus_mpa': 1800, 'poisson_ratio': .35, 'yield_strength_mpa': 35},
                'boundary_tolerance_mm': .005 * float(geometry['gauge_length_mm']),
-               'surface_remesh': {'method': 'isotropic', 'edge_length_mm': .6,
-                                  'iterations': 8, 'max_surface_distance_mm': .05},
+               'surface_remesh': {'method': 'isotropic', 'edge_length_mm': mesh_size_mm,
+                                  'iterations': 8, 'max_surface_distance_mm': surface_distance_mm},
                'computation_limits': {'timeout_s': None, 'threads': 4, 'equation_solver_threads': 1,
                                       'max_mesh_elements': 500000}}
     payload.pop('reference_calibration', None)
@@ -192,9 +199,50 @@ def prepare_evidence(archive_request, output, *, max_fem_jobs, max_mesh_actions)
                 'source_parser': source_receipt, 'physical_devices_used': False,
                 'calibration_applied': False, 'material_promoted': False,
                 'baseline': 'retained isotropic-remesh yield-35 reference, not a validated material model',
-                'native_timeout_s': None, 'worker_timeout_s': None,
+                'native_timeout_s': None, 'worker_timeout_s': None, 'mesh_size_mm': mesh_size_mm,
                 'maximum_fem_jobs': max_fem_jobs, 'maximum_mesh_actions': max_mesh_actions}
     return evidence, metadata
+
+
+def configure_material_hypothesis(evidence, metadata, configuration):
+    """Run a declared forward hypothesis, never a fitted/promoted material."""
+    from utils.calculix_quasistatic import validate_plastic_curve
+    allowed = {'label', 'basis', 'material'}
+    if not isinstance(configuration, dict) or set(configuration) != allowed:
+        raise ValueError('Material hypothesis requires only label, basis and material')
+    if not all(isinstance(configuration[key], str) and configuration[key].strip()
+               for key in ('label', 'basis')):
+        raise ValueError('Material hypothesis label and basis are required')
+    material = deepcopy(configuration['material'])
+    keys = {'elastic_modulus_mpa', 'poisson_ratio', 'yield_strength_mpa', 'plastic_curve'}
+    if not isinstance(material, dict) or set(material) - keys:
+        raise ValueError('Unsupported material hypothesis fields')
+    try:
+        if any(isinstance(material.get(key), bool) for key in keys - {'plastic_curve'}):
+            raise ValueError('Boolean material constants are invalid')
+        modulus = float(material['elastic_modulus_mpa'])
+        poisson = float(material['poisson_ratio'])
+        if not (math.isfinite(modulus) and modulus >= 1e-9 and math.isfinite(poisson) and -.99 <= poisson <= .499):
+            raise ValueError('Invalid elastic constants')
+        if ('plastic_curve' in material) == ('yield_strength_mpa' in material):
+            raise ValueError('Provide exactly one plastic law')
+        if 'plastic_curve' in material:
+            material['plastic_curve'] = validate_plastic_curve(material['plastic_curve'])
+            if not material['plastic_curve']:
+                raise ValueError('An explicit plastic curve cannot be empty')
+        else:
+            value = float(material['yield_strength_mpa'])
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError('Invalid yield strength')
+    except (KeyError, TypeError, OverflowError) as exc:
+        raise ValueError('Invalid material hypothesis') from exc
+    evidence['payload']['material'] = material
+    for key in ('elastic_modulus_mpa', 'poisson_ratio', 'yield_strength_mpa'):
+        evidence['payload'].pop(key, None)
+    evidence['material_hypothesis'] = deepcopy(configuration)
+    metadata.update(material_hypothesis=deepcopy(configuration),
+                    independent_validation='not_performed', material_promoted=False,
+                    calibration_applied=False)
 
 
 def configure_calibration(evidence, metadata, configuration):
@@ -327,7 +375,19 @@ async def execute(args, output):
     tool_counter = 0
     try:
         evidence, metadata = prepare_evidence(args.archive_request, output,
-            max_fem_jobs=args.max_fem_jobs, max_mesh_actions=args.max_mesh_actions)
+            max_fem_jobs=args.max_fem_jobs, max_mesh_actions=args.max_mesh_actions,
+            mesh_size_mm=getattr(args, 'mesh_size_mm', .6),
+            surface_distance_mm=getattr(args, 'surface_distance_mm', .05))
+        if getattr(args, 'material_hypothesis', None):
+            configuration_path = args.material_hypothesis.resolve()
+            source_hash = sha256(configuration_path)
+            frozen = output / 'inputs' / 'material_hypothesis.json'
+            shutil.copyfile(configuration_path, frozen)
+            if sha256(frozen) != source_hash:
+                raise ValueError('Material hypothesis changed while copying')
+            configure_material_hypothesis(evidence, metadata, json.loads(frozen.read_text()))
+            evidence['input_hashes'][str(frozen)] = source_hash
+            metadata['source_hashes_before'][str(configuration_path)] = source_hash
         if getattr(args, 'calibration_config', None):
             configure_calibration(evidence, metadata, json.loads(args.calibration_config.read_text()))
         from agents.analysis_mechanisms import freeze_mechanism_references
@@ -406,6 +466,12 @@ def main(argv=None):
     parser.add_argument('--output-dir', type=Path, help='New, non-existing isolated output directory (default artifacts/runs/validation-fem-...)')
     parser.add_argument('--max-fem-jobs', type=int, choices=range(1, 4), default=1, help='Finite solver-action bound, not a wall-clock cutoff')
     parser.add_argument('--max-mesh-actions', type=int, choices=range(1, 4), default=3)
+    parser.add_argument('--mesh-size-mm', type=float, default=.6,
+                        help='Isolated volume/surface mesh size; source geometry checks remain unchanged')
+    parser.add_argument('--surface-distance-mm', type=float, default=.05,
+                        help='Remesh operation deviation bound (only tightening below 0.05 mm allowed)')
+    parser.add_argument('--material-hypothesis', type=Path,
+                        help='Explicit research-only forward material JSON (label, basis, material)')
     parser.add_argument('--calibration-config', type=Path,
                         help='Explicit initial parameters, bounds and max_evaluations JSON for a calibration-only study')
     parser.add_argument('--validation-backend', choices=('openai', 'vllm'),
@@ -416,6 +482,8 @@ def main(argv=None):
         parser.error('--execute is required; use --help for safe inspection without any computation')
     if args.validation_model and not args.validation_backend:
         parser.error('--validation-model requires --validation-backend')
+    if args.material_hypothesis and args.calibration_config:
+        parser.error('--material-hypothesis and --calibration-config are mutually exclusive')
     output = (args.output_dir or ROOT / 'artifacts/runs' /
               f'validation-fem-{datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")}-{uuid4().hex[:8]}').resolve()
     output.mkdir(parents=True, exist_ok=False)

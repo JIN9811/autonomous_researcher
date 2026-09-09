@@ -306,6 +306,7 @@ def export_report(run, *, attempt_index=None, overwrite=False, reviewed_result=N
                      'comparison': comparison, 'comparison_crosscheck': comparisons,
                      'coordinate_convention': convention, 'material': material or payload.get('material'),
                      'calibration': calibration,
+                     'material_hypothesis': evidence.get('material_hypothesis'),
                      'mesh_size_mm': attempt.get('mesh_size_mm'), 'mesh_quality': attempt.get('mesh_quality'),
                      'convergence': result.get('convergence'), 'resources': resources, 'contours': contours,
                      'raw_bo_objective_changed': False, 'material_promoted': False,

@@ -90,6 +90,36 @@ async def test_one_acquisition_can_solve_without_material_promotion(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_failed_final_llm_review_preserves_completed_native_result_without_rerun(tmp_path):
+    io = Boundaries(['prepare_mesh', 'solve_mesh'])
+    async def choose(phase, data, options):
+        if phase == 'fem_result':
+            raise RuntimeError('empty LLM response')
+        return await io.choose(phase, data, options)
+    result = await study()(evidence(tmp_path), choose, io.call, io.events.append)
+    assert result['status'] == 'completed'
+    assert result['attempts'][0]['endpoint_reached'] is True
+    assert result['attempts'][0]['field_asset_path'] == '/saved/fields.json'
+    assert result['attempts'][0]['curve'] == solved()['reaction_force_displacement_curve']
+    assert [name for name, _ in io.calls] == ['cae.prepare_static_analysis', 'cae.run_static_analysis']
+    assert result['summary']['review_status'] == 'failed'
+    assert result['decisions'][-1]['accepted'] is False
+    assert result['decisions'][-1]['error_type'] == 'RuntimeError'
+    assert result['summary']['material_promoted'] is False
+
+
+@pytest.mark.asyncio
+async def test_failed_mesh_llm_review_holds_without_native_execution(tmp_path):
+    io = Boundaries([])
+    async def choose(*args):
+        raise ValueError('invalid decision response')
+    result = await study()(evidence(tmp_path), choose, io.call, io.events.append)
+    assert result['status'] == 'held'
+    assert not io.calls
+    assert result['summary']['review_status'] == 'failed'
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('quality', [
     {'validity': 'invalid', 'quality': 'good'},
     {'validity': 'valid', 'quality': 'poor'},

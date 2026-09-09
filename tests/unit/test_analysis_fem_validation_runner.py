@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -64,6 +65,19 @@ def test_frozen_evidence_preserves_sources_and_declares_reference_profile(tmp_pa
     assert metadata['source_hashes_before'][str(csv)] == runner.sha256(csv)
     assert stl.read_text() == 'fixture surface'
 
+    sparse_out = tmp_path / 'sparse'
+    sparse_out.mkdir()
+    sparse, receipt = runner.prepare_evidence(archive, sparse_out, max_fem_jobs=1,
+        max_mesh_actions=3, mesh_size_mm=.8, surface_distance_mm=.03)
+    assert sparse['payload']['mesh_size_mm'] == .8
+    assert sparse['payload']['surface_remesh']['edge_length_mm'] == .8
+    assert sparse['payload']['surface_remesh']['max_surface_distance_mm'] == .03
+    assert sparse['payload']['loading'] == evidence['payload']['loading']
+    assert sparse['payload']['material'] == evidence['payload']['material']
+    assert sparse['payload']['boundary_tolerance_mm'] == .15
+    assert sparse['experiment_curve'] == evidence['experiment_curve']
+    assert receipt['mesh_size_mm'] == .8
+
 
 def test_native_start_is_announced_once_with_pid_phase_and_utc(tmp_path, capsys):
     runner = load_runner()
@@ -79,3 +93,62 @@ def test_native_start_is_announced_once_with_pid_phase_and_utc(tmp_path, capsys)
     assert notice['phase'] == 'solve'
     assert notice['at'].endswith('+00:00')
     assert len((tmp_path / 'progress.jsonl').read_text().splitlines()) == 2
+
+
+def test_material_hypothesis_changes_only_material_and_retains_provenance():
+    runner = load_runner()
+    evidence = {'payload': {'material': {'yield_strength_mpa': 35},
+                           'loading': {'target_strain': .5}, 'stl_path': 'frozen.stl'},
+                'policy': {}, 'experiment_curve': [{'displacement_mm': 0, 'force_N': 0}]}
+    metadata = {}
+    configuration = {'label': 'postyield hypothesis', 'basis': 'explicit numerical sensitivity study',
+        'material': {'elastic_modulus_mpa': 1800, 'poisson_ratio': .35,
+                     'plastic_curve': [[55, 0], [30, .15], [30, 1]]}}
+    runner.configure_material_hypothesis(evidence, metadata, configuration)
+    assert evidence['payload']['material']['plastic_curve'] == [[55, 0], [30, .15], [30, 1]]
+    assert evidence['payload']['loading'] == {'target_strain': .5}
+    assert evidence['payload']['stl_path'] == 'frozen.stl'
+    assert evidence['policy'] == {}
+    assert metadata['material_promoted'] is False
+    assert metadata['independent_validation'] == 'not_performed'
+    assert metadata['material_hypothesis']['basis'] == configuration['basis']
+    configuration['material']['plastic_curve'][0][0] = 999
+    assert evidence['payload']['material']['plastic_curve'][0][0] == 55
+
+
+@pytest.mark.parametrize('extra', [{'loading': {'target_strain': .1}}, {'stl_path': 'other.stl'}])
+def test_material_hypothesis_rejects_nonmaterial_overrides(extra):
+    runner = load_runner()
+    with pytest.raises(ValueError):
+        runner.configure_material_hypothesis({'payload': {}}, {}, {
+            'label': 'test', 'basis': 'test', 'material': {'elastic_modulus_mpa': 1800}, **extra})
+
+
+@pytest.mark.parametrize('material', [
+    {'elastic_modulus_mpa': float('nan'), 'poisson_ratio': .35, 'yield_strength_mpa': 35},
+    {'elastic_modulus_mpa': 1800, 'poisson_ratio': .5, 'yield_strength_mpa': 35},
+    {'elastic_modulus_mpa': 1800, 'poisson_ratio': .35, 'plastic_curve': [[55, .1], [30, .2]]},
+    {'elastic_modulus_mpa': 1800, 'poisson_ratio': .35, 'plastic_curve': []},
+    {'elastic_modulus_mpa': 1800, 'poisson_ratio': .4999, 'yield_strength_mpa': 35},
+    {'elastic_modulus_mpa': 1e-10, 'poisson_ratio': .35, 'yield_strength_mpa': 35},
+    {'elastic_modulus_mpa': True, 'poisson_ratio': .35, 'yield_strength_mpa': 35},
+])
+def test_material_hypothesis_rejects_invalid_laws(material):
+    runner = load_runner()
+    with pytest.raises(ValueError):
+        runner.configure_material_hypothesis({'payload': {}}, {}, {
+            'label': 'test', 'basis': 'test', 'material': material})
+
+
+def test_material_hypothesis_cannot_be_shadowed_by_archive_material_aliases():
+    from device_bridges.cae_bridge import CAEBridge, CAEBridgeConfig
+    runner = load_runner()
+    evidence = {'payload': {'material': {}, 'elastic_modulus_mpa': 999,
+                           'poisson_ratio': .2, 'yield_strength_mpa': 35}}
+    runner.configure_material_hypothesis(evidence, {}, {'label': 'test', 'basis': 'research',
+        'material': {'elastic_modulus_mpa': 1800, 'poisson_ratio': .35, 'yield_strength_mpa': 55}})
+    bridge = CAEBridge(CAEBridgeConfig(mode='test'))
+    normalized = bridge._normalized_payload(evidence['payload'])
+    assert normalized['material']['elastic_modulus_mpa'] == 1800
+    assert normalized['material']['poisson_ratio'] == .35
+    assert normalized['material']['yield_strength_mpa'] == 55

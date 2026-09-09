@@ -1,0 +1,9 @@
+{
+  "label": "Post-yield softening and rehardening sensitivity hypothesis",
+  "basis": "Frozen manual hypothesis from the earlier short remeshed FE study, extended to the full requested domain without copying specimen force-displacement data. PLA post-yield softening is qualitatively reported by Scipioni and Lambiase (2023), https://doi.org/10.1007/s00170-023-11985-y ; this citation does not identify these parameters or establish their validity for this printed specimen. The descending local plastic law is mesh-dependent and unregularized; no independent validation or automatic promotion is claimed.",
+  "material": {
+    "elastic_modulus_mpa": 1800,
+    "poisson_ratio": 0.35,
+    "plastic_curve": [[55, 0], [55, 0.02], [30, 0.15], [25, 0.4], [30, 1.0]]
+  }
+}

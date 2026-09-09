@@ -105,6 +105,24 @@ def test_export_uses_last_complete_actual_frame_and_preserves_sources(tmp_path):
     assert metrics['raw_bo_objective_changed'] is False
 
 
+def test_forward_hypothesis_provenance_is_not_reported_as_calibration(tmp_path, monkeypatch):
+    report = reporter()
+    saved_case(tmp_path)
+    evidence_path = tmp_path / 'evidence.json'
+    evidence = json.loads(evidence_path.read_text())
+    evidence['material_hypothesis'] = {'label': 'explicit numerical trial',
+        'basis': 'unvalidated sensitivity hypothesis', 'material': {'yield_strength_mpa': 55}}
+    evidence['payload']['material'] = {'yield_strength_mpa': 55}
+    evidence_path.write_text(json.dumps(evidence))
+    monkeypatch.setattr(report, '_plot_comparison', lambda *args, **kwargs: {})
+    monkeypatch.setattr(report, '_actual_contours', lambda *args, **kwargs: ({}, {}))
+    output = report.export_report(tmp_path)
+    assert output['material'] == {'yield_strength_mpa': 55}
+    assert output['material_hypothesis']['basis'] == 'unvalidated sensitivity hypothesis'
+    assert not output['calibration']
+    assert output['material_promoted'] is False
+
+
 def test_calibration_report_uses_declared_selected_candidate_material(tmp_path, monkeypatch):
     from copy import deepcopy
     report = reporter()
