@@ -103,3 +103,31 @@ def test_export_uses_last_complete_actual_frame_and_preserves_sources(tmp_path):
     assert metrics['comparison']['coverage_pct'] == 50
     assert metrics['resources']['elapsed_s'] == 10
     assert metrics['raw_bo_objective_changed'] is False
+
+
+def test_calibration_report_uses_declared_selected_candidate_material(tmp_path, monkeypatch):
+    from copy import deepcopy
+    report = reporter()
+    saved_case(tmp_path)
+    result = json.loads((tmp_path / 'result.json').read_text())
+    first = result['attempts'][0]
+    first['material'] = {'elastic_modulus_mpa': 1800, 'plastic_curve': [[60, 0], [25, 1]]}
+    second = deepcopy(first)
+    second['attempt_id'] = 'attempt-2'
+    second['material'] = {'elastic_modulus_mpa': 1800, 'plastic_curve': [[60, 0], [30, 1]]}
+    result['attempts'].append(second)
+    result['calibration'] = {'best_attempt_ids': ['attempt-1'], 'independent_validation': 'not_performed'}
+    (tmp_path / 'result.json').write_text(json.dumps(result))
+    # Rendering is separately exercised above; this test targets evidence selection.
+    labels = []
+    def render(*args, **kwargs):
+        labels.append(kwargs.get('solver_label'))
+        return {}
+    monkeypatch.setattr(report, '_plot_comparison', render)
+    monkeypatch.setattr(report, '_actual_contours', lambda *args: ({}, {}))
+    output = report.export_report(tmp_path)
+    assert output['selected_attempt_id'] == 'attempt-1'
+    assert output['material']['plastic_curve'][-1][0] == 25
+    assert output['calibration']['independent_validation'] == 'not_performed'
+    assert 'calibration' in output['attempt_selection']
+    assert labels == ['CalculiX, calibration candidate (same acquisition)']

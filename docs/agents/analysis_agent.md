@@ -13,6 +13,8 @@ source_of_truth:
   - agents/analysis_refinement.py
   - agents/analysis_runtime.py
   - agents/analysis_fem.py
+  - agents/analysis_calibration.py
+  - agents/analysis_mechanisms.py
   - app/analysis_fem_routes.py
   - utils/cae_model_package.py
   - web/static/analysis_fem_live.js
@@ -31,6 +33,7 @@ related_docs:
   - docs/device_bridges/cae_computation_bridges.md
   - docs/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md
   - docs/paper/evidence/2026-09-09-analysis-improvement-validation.md
+  - docs/paper/evidence/2026-09-09-feature-informed-fem-calibration.md
 supersedes: []
 ---
 
@@ -39,7 +42,7 @@ supersedes: []
 ## Status at a Glance
 
 - Runtime status: Measured handoff and independent background FEM implemented / non-actuating regression verified
-- LLM decision layer: Bounded roles / real API mesh preparation, quality assessment and saved-result review verified
+- LLM decision layer: Bounded roles / API and local vLLM improvement-loop decisions verified
 - Physical effect: None; registered solver computation only
 - Primary handoff: Measured objective and evidence → Knowledge / BO
 - Live hardware validation: Prior complete cycle preserved; no new hardware execution
@@ -167,8 +170,8 @@ three-resolution mesh study. It does not autonomously invent constitutive
 equations, add contact models, train a PINN, or write solver code.
 
 This refinement path remains available for admissible candidate/holdout studies.
-The background FEM job does not calibrate or promote material, even if its
-comparison improves. CPU/memory contention is still possible despite dependency
+The default background FEM job does not calibrate material; calibration requires
+the explicit policy below and never promotes material. CPU/memory contention is still possible despite dependency
 separation; concurrency control does not promise zero resource contention.
 
 ## Decision and Evaluation
@@ -317,8 +320,119 @@ Curve candidates additionally require explicit `flow_stress_mpa` and
 curve takes precedence over the single-value perfect-plastic yield model.
 The measured lattice S-S response is a calibration target, not a solid-material
 input curve: copying it into an explicit lattice mesh would count the structural
-compliance twice. A single paired test can support an isolated calibration study,
-but cannot satisfy the background worker's independent-validation promotion gate.
+compliance twice. A single paired test may be a calibration target, but cannot
+establish the material mechanism or satisfy independent-validation promotion.
+
+### Feature-informed inverse FEM studies
+
+An opt-in `analysis_improvement.calibration` policy runs through the existing
+background FEM entry, preparation tools and native-compute owner. It does not
+change the measured objective or automatically select a material for later loops.
+The policy supplies `initial`, explicit parameter `bounds`, `max_evaluations`
+and `step_fraction`. Missing bounds do not trigger guessed identification.
+The current softening family additionally requires the mechanism evidence below.
+
+| Stage | Numerical responsibility | LLM responsibility |
+|---|---|---|
+| Admit evidence | Verify paired identity, hashes, full domain, material-source support and referenced deformation comparison | Authorize an admissible hypothesis or request missing evidence |
+| Identify a candidate | Coordinate-pattern search over declared constitutive parameters; actual forward FE for every evaluated candidate | Authorize existing mesh/solve tools; distinguish material behavior from geometric collapse |
+| Compare responses | Full-domain force residual, peak force/location, early secant, middle mean force, late secant and work | Interpret the separate errors and identify missing evidence |
+| Retain a candidate | Keep the best eligible native result and immutable material export after explicit retention | Retain for research or hold; neither action promotes a material |
+| Establish prediction | Freeze the material before testing a different, unused acquisition | Assess independent evidence through the existing validation/promotion path |
+
+The initial model family is the interpretable local law
+`q(p) = q_res + (q_peak - q_res) exp(-p / p_decay)`, where `q` is true flow
+stress and `p` is equivalent plastic strain. Its parameters are
+`peak_flow_mpa`, `residual_flow_mpa` and `decay_plastic_strain`; equal peak and
+residual values recover constant flow. The table sent to CalculiX is sampled
+from this analytic law, **not from specimen engineering stress–strain points**.
+Initial values and search bounds are study assumptions, not measured PLA
+properties. The family tests a hypothesis; it is not a complete polymer model.
+In particular, local softening has no nonlocal/fracture-energy regularization,
+so mesh sensitivity must be assessed before transfer claims.
+
+### Mechanism-first improvement contract
+
+The retained remeshed baseline is preserved. Every ordinary FEM result receives
+`analysis_mechanism_assessment.v1`, distinguishing numerical completion, declared
+material evidence and deformation agreement. A falling lattice force curve alone
+does not establish material softening. The LLM can request material
+characterization, deformation review or solver diagnostics without issuing any
+device command. It can still select an available bounded mesh study through the
+existing tool path. No new solver is silently selected.
+
+| Evidence / capability | Current handling |
+|---|---|
+| Printed-material coupon | Separate acquisition identity, same-process declaration and hash-verified local references |
+| Literature prior | Citation, applicability review, referenced source and explicit softening observation; still a prior, not measured material truth |
+| Deformation comparison | Referenced `consistent` / `mismatch` declaration; absent evidence remains `not_assessed` |
+| Partial solve | Stop material search and request numerical diagnostics, even if the LLM concludes the individual job |
+| Mesh sensitivity | Existing bounded multi-resolution study; different materials do not establish mesh convergence |
+| Explicit quasi-static / regularized damage / self-contact | Not registered in this workflow; research recommendations only |
+
+Supply `analysis_improvement.mechanism_evidence.material_basis` with `kind`,
+`refs` and `post_yield_softening_observed`. Coupon evidence additionally needs
+`acquisition_ids` and `same_print_process: true`; a `literature_prior` needs
+`citation` and `applicability_reviewed: true`.
+`mechanism_evidence.deformation_comparison` supplies `status` and `refs`.
+These are upstream evidence declarations, not automatic certification by the LLM.
+The runtime freezes the explicitly supplied reference files beside other job
+inputs, rewrites their paths and preserves their hashes. Referenced deformation
+images use the existing trusted-image protocol. Missing references or a deformation
+mismatch prevent constitutive search; ordinary baseline FEM and measured BO
+handoff continue unchanged. The isolated calibration JSON can carry the same
+`mechanism_evidence` object alongside its search settings.
+
+Neither a declared comparison nor a good numerical fit promotes a material.
+Unregularized local softening remains a research hypothesis. Self-contact between
+lattice walls is distinct from platen contact; neither is added by this change.
+
+The objective is a weighted sum of squared dimensionless errors. Weighting is
+0.35 for axis-integrated force RMSE, 0.15 each for peak force, peak position and
+work, 0.10 for middle-window mean force, and 0.05 each for early and late secants.
+The secants cover 2–8% and 80–100% of the declared displacement domain; the
+middle window covers 40–80%. They are reproducible descriptors, not automatic
+claims of elastic, plateau or densification regimes. Detailed errors remain
+visible: a matching integral cannot conceal a wrong curve shape.
+
+All candidates use the same frozen contact convention and comparison endpoint.
+Incomplete native curves remain diagnostic artifacts and cannot win the search.
+Different material candidates do not count as a mesh-convergence sequence.
+`calibrated` requires the declared numerical fit criteria; `fit_incomplete`
+retains explicit errors. Both remain distinct from independent validation.
+An LLM hold or evidence request stops subsequent candidates; held results retain evidence but are
+not exported as forward-usable material candidates.
+
+The isolated runner accepts `--calibration-config <study-policy.json>`. A retained
+study exports `frozen_material_candidate.json` alongside the actual portable
+solver package. A later forward CAE request can use its `material` with a new
+geometry/loading request, without that target specimen's measurement. The
+experiment setup already accepts the corresponding `cae_elastic_modulus_mpa`,
+`cae_poisson_ratio`, `cae_yield_strength_mpa` and `cae_plastic_curve` fields;
+this study does not change those live settings.
+
+See the [calibration evidence record](../paper/evidence/2026-09-09-feature-informed-fem-calibration.md)
+for the retained same-STL study, assumptions and measured error status.
+
+### API and local LLM execution
+
+Both backends use the existing `analysis_reasoning` route and the same bounded
+decision schema. The prompt separates calibration, numerical completion,
+physical agreement and independent validation. Short-context evidence retains
+mesh quality, immutable hashes, domain coverage, individual errors, the best
+candidate and three recent candidates; duplicate preparation payloads and raw
+field arrays remain in the source artifacts instead of repeated prompt text.
+
+The isolated validator pins one registered backend/model at a time, with fallback
+disabled. It resolves the registered managed vLLM address without starting,
+reconfiguring or replacing the model server. API `gpt-5.5` and local
+`gemma4:31b` are checked on mechanism-sensitive decisions, archived native-evidence
+tool dispatch, rejection of unsupported calibration on the actual retained
+acquisition, and a two-candidate analytic-fixture calibration loop. Exact results
+are in the linked evidence record. This verifies LLM orchestration, not a fresh
+native solve or independent physical prediction. Reproduce with
+`scripts/validation/check_analysis_calibration_backends.py --execute --output <new-directory>`;
+`--archive` and `--cases` select the preserved source evidence.
 
 Studies reuse the configured CAE mode and existing `runtime_solver_enabled`
 gate; this change does not enable a real solver through a proxy/test-mode request.

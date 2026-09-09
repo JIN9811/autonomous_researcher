@@ -2,7 +2,8 @@
 """Run one isolated, real Analysis FEM study against the retained same-STL CSV.
 
 No application/controller bootstrap, hardware tools, model lifecycle management,
-global config writes, calibration, or material promotion. Native computation has
+global config writes or material promotion. Calibration requires an explicit
+bounded study configuration; the ordinary baseline path is unchanged. Computation has
 no wall deadline. Existing configured LLM HTTP timeouts remain transport limits.
 """
 from __future__ import annotations
@@ -178,6 +179,7 @@ def prepare_evidence(archive_request, output, *, max_fem_jobs, max_mesh_actions)
     evidence = {'schema': 'analysis_improvement_evidence.v1', 'job_kind': 'fem',
                 'run_id': run_id, 'job_id': payload['job_id'], 'loop_key': payload['loop_key'],
                 'specimen_id': original['specimen_id'], 'source_kind': 'measured',
+                'raw_sha256': hashes[str(csv)], 'acquisition_id': 'sha256:' + hashes[str(csv)],
                 'paired_identity_verified': True, 'virtual_decisions': False,
                 'input_hashes': frozen_hashes, 'payload': payload, 'experiment_curve': curve,
                 'specimen_geometry': geometry,
@@ -195,11 +197,28 @@ def prepare_evidence(archive_request, output, *, max_fem_jobs, max_mesh_actions)
     return evidence, metadata
 
 
+def configure_calibration(evidence, metadata, configuration):
+    """Opt in to calibration without changing the measured or physical inputs."""
+    from agents.analysis_calibration import _search_policy
+    configuration = deepcopy(configuration)
+    mechanism = configuration.pop('mechanism_evidence', None)
+    candidate = {**evidence, 'policy': {**evidence['policy'], 'calibration': configuration}}
+    if mechanism is not None:
+        candidate['policy']['mechanism_evidence'] = mechanism
+    _search_policy(candidate)
+    evidence['policy'] = candidate['policy']
+    metadata.update(calibration_applied=False, calibration_requested=True,
+                    calibration_method='feature_informed_inverse_FE',
+                    calibration_policy=deepcopy(configuration),
+                    independent_validation='not_performed', material_promoted=False)
+
+
 def build_context(config_dir, output, journal):
     """Construct only CAE and current configured inference; never bootstrap the app."""
     from agents.base_agent import AgentContext
     from backends.llm_lease import LLMLeaseCoordinator
     from backends.model_router import ModelRouter
+    from backends.nemoclaw_vllm_runtime import NemoClawVLLMRuntime
     from backends.openai_client import OpenAIBackend
     from backends.vllm_client import VLLMBackend
     from dotenv import load_dotenv
@@ -230,7 +249,8 @@ def build_context(config_dir, output, journal):
         'vllm': VLLMBackend(base_url=os.getenv('VLLM_BASE_URL', vllm.get('base_url', 'http://127.0.0.1:8001/v1')),
             timeout_s=float(os.getenv('VLLM_TIMEOUT_S', vllm.get('timeout_seconds', 300))),
             api_key=os.getenv('VLLM_API_KEY', vllm.get('api_key', 'EMPTY')),
-            model_base_urls=dict(vllm.get('model_base_urls', {})), nemoclaw_runtime=None),
+            model_base_urls=dict(vllm.get('model_base_urls', {})),
+            nemoclaw_runtime=NemoClawVLLMRuntime.from_config(vllm.get('nemoclaw_k8s', {}))),
         'openai': OpenAIBackend(base_url=os.getenv('OPENAI_BASE_URL', cloud.get('base_url', 'https://api.openai.com/v1')),
             timeout_s=float(os.getenv('OPENAI_TIMEOUT_S', cloud.get('timeout_seconds', 300))),
             api_key=os.getenv('OPENAI_API_KEY') or saved_key or cloud.get('api_key', ''),
@@ -270,6 +290,24 @@ def build_context(config_dir, output, journal):
     return ctx, profile
 
 
+def pin_validation_backend(ctx, backend, *, model=None):
+    """Pin only this isolated client; never edit GUI/runtime model selection."""
+    from dataclasses import replace
+    from backends.model_router import ModelRouter
+    if backend not in {'openai', 'vllm'} or backend not in ctx.primary_backends:
+        raise ValueError('Select a registered validation backend')
+    selection = ctx.model_routers[backend].select('analysis_reasoning')
+    selected = model or selection.primary
+    if selected not in {selection.primary, selection.fallback}:
+        raise ValueError('Validation model must already be registered for Analysis')
+    router = ModelRouter({'models': {selection.role: {'primary': selected}},
+                          'task_routes': {'analysis_reasoning': selection.role}})
+    service = ctx.primary_backends[backend]
+    return replace(ctx, active_backend=backend, model_router=router, model_routers={backend: router},
+                   primary_backend=service, primary_backends={backend: service},
+                   fallback_backend=service, fallback_backends={backend: service}, backend_fallbacks={})
+
+
 async def execute(args, output):
     from agents.analysis_decisions import decide
     from agents.analysis_fem import run_fem_study
@@ -290,9 +328,19 @@ async def execute(args, output):
     try:
         evidence, metadata = prepare_evidence(args.archive_request, output,
             max_fem_jobs=args.max_fem_jobs, max_mesh_actions=args.max_mesh_actions)
+        if getattr(args, 'calibration_config', None):
+            configure_calibration(evidence, metadata, json.loads(args.calibration_config.read_text()))
+        from agents.analysis_mechanisms import freeze_mechanism_references
+        extra_hashes = freeze_mechanism_references(evidence, output / 'inputs')
+        metadata['source_hashes_before'].update(extra_hashes)
         write_json(output / 'evidence.json', evidence)
         write_json(output / 'request.json', metadata)
         ctx, profile = build_context(args.config_dir, output, journal)
+        if getattr(args, 'validation_backend', None):
+            ctx = pin_validation_backend(ctx, args.validation_backend, model=args.validation_model)
+            profile.update(active_backend=ctx.active_backend,
+                           analysis_primary_model=ctx.model_router.select('analysis_reasoning').primary,
+                           validation_backend_fallback_disabled=True)
         admission = AnalysisRuntimeService(ROOT / 'runs', ctx)
         write_json(output / 'backend_profile.json', profile)
 
@@ -322,6 +370,9 @@ async def execute(args, output):
             return response
 
         result = await run_fem_study(evidence, choose, call_tool, journal.emit)
+        if result.get('status') == 'completed' and (result.get('calibration') or {}).get('retention_status') == 'retained_for_research':
+            from agents.analysis_calibration import freeze_candidate
+            write_json(output / 'frozen_material_candidate.json', freeze_candidate(result, evidence))
     except asyncio.CancelledError:
         cancel.set()
         result = {'status': 'cancelled', 'reason': 'operator_requested_cancel',
@@ -355,9 +406,16 @@ def main(argv=None):
     parser.add_argument('--output-dir', type=Path, help='New, non-existing isolated output directory (default artifacts/runs/validation-fem-...)')
     parser.add_argument('--max-fem-jobs', type=int, choices=range(1, 4), default=1, help='Finite solver-action bound, not a wall-clock cutoff')
     parser.add_argument('--max-mesh-actions', type=int, choices=range(1, 4), default=3)
+    parser.add_argument('--calibration-config', type=Path,
+                        help='Explicit initial parameters, bounds and max_evaluations JSON for a calibration-only study')
+    parser.add_argument('--validation-backend', choices=('openai', 'vllm'),
+                        help='Pin the isolated validation client; disables cross-backend fallback')
+    parser.add_argument('--validation-model', help='Optional model already registered for the selected Analysis backend')
     args = parser.parse_args(argv)
     if not args.execute:
         parser.error('--execute is required; use --help for safe inspection without any computation')
+    if args.validation_model and not args.validation_backend:
+        parser.error('--validation-model requires --validation-backend')
     output = (args.output_dir or ROOT / 'artifacts/runs' /
               f'validation-fem-{datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")}-{uuid4().hex[:8]}').resolve()
     output.mkdir(parents=True, exist_ok=False)

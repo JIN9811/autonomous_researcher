@@ -107,7 +107,8 @@ def compare_curves(observed, simulated, *, target, height, area):
     return metric, table
 
 
-def _plot_comparison(directory, observed, simulated, metrics, *, specimen, status, convention):
+def _plot_comparison(directory, observed, simulated, metrics, *, specimen, status, convention,
+                     solver_label='CalculiX, declared material model'):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -131,7 +132,7 @@ def _plot_comparison(directory, observed, simulated, metrics, *, specimen, statu
                     [f'{coordinate} (mm)', 'Engineering strain (mm/mm)'], ['Force (kN)', 'Engineering stress (MPa)'])):
                 # Clip each source independently; interpolation stays inside its observed domain.
                 for data, label, color, style in ((exp, 'Paired physical experiment', '#292929', '-'),
-                                                   (sim, 'CalculiX, retained yield-35 baseline', '#2563A6', '--')):
+                                                   (sim, solver_label, '#2563A6', '--')):
                     lower, upper = max(domain[0], data[0, 0]), min(domain[1], data[-1, 0])
                     x = np.unique(np.r_[lower, data[(data[:, 0] > lower) & (data[:, 0] < upper), 0], upper])
                     y = np.interp(x, data[:, 0], data[:, 1])
@@ -251,9 +252,19 @@ def export_report(run, *, attempt_index=None, overwrite=False, reviewed_result=N
     attempts = result.get('attempts', [])
     eligible = [index for index, attempt in enumerate(attempts) if len(attempt.get('curve', [])) >= 2]
     selected = eligible[-1] if attempt_index is None and eligible else attempt_index
+    calibration = result.get('calibration') or {}
+    best_ids = calibration.get('best_attempt_ids', [])
+    selection = 'last attempt with an actual curve, unless explicitly requested; not best-fit selection'
+    if attempt_index is None and best_ids:
+        selected = next((i for i in eligible if attempts[i]['attempt_id'] == best_ids[-1]), None)
+        selection = 'declared best calibration candidate; selection on this acquisition, not independent validation'
     if selected not in eligible:
         raise ValueError('Select an existing attempt with an actual computed curve')
     attempt = attempts[selected]
+    material = attempt.get('material')
+    if material is None:
+        material = next((record['material'] for record in calibration.get('records', [])
+                         if attempt['attempt_id'] in record.get('attempt_ids', [])), None)
     payload, geometry = evidence['payload'], evidence.get('specimen_geometry', {})
     size = geometry.get('specimen_size_mm') or payload.get('specimen_size_mm')
     height = float(geometry.get('gauge_length_mm') or size[2])
@@ -272,7 +283,9 @@ def export_report(run, *, attempt_index=None, overwrite=False, reviewed_result=N
     directory.mkdir(exist_ok=overwrite)
     specimen = str(payload.get('specimen_id') or evidence.get('specimen_id') or 'Specimen')
     artifacts = _plot_comparison(directory, observed, attempt['curve'], comparison,
-                                 specimen=specimen, status=status, convention=convention)
+                                 specimen=specimen, status=status, convention=convention,
+                                 solver_label='CalculiX, calibration candidate (same acquisition)' if calibration
+                                 else 'CalculiX, declared material model')
     for row in table:
         row['experimental_raw_stroke_mm'] = row['displacement_mm'] + float(convention.get('displacement_offset_mm', 0))
     with (directory / 'shared_points.csv').open('w', newline='') as stream:
@@ -289,9 +302,10 @@ def export_report(run, *, attempt_index=None, overwrite=False, reviewed_result=N
                    if isinstance(stored.get(key), (int, float)) and comparison.get(key) is not None}
     result_report = {'schema': 'analysis_fem_validation_report.v1', 'status': status,
                      'selected_attempt_id': attempt['attempt_id'], 'selected_attempt_index': selected,
-                     'attempt_selection': 'last attempt with an actual curve, unless explicitly requested; not best-fit selection',
+                     'attempt_selection': selection,
                      'comparison': comparison, 'comparison_crosscheck': comparisons,
-                     'coordinate_convention': convention, 'material': payload.get('material'),
+                     'coordinate_convention': convention, 'material': material or payload.get('material'),
+                     'calibration': calibration,
                      'mesh_size_mm': attempt.get('mesh_size_mm'), 'mesh_quality': attempt.get('mesh_quality'),
                      'convergence': result.get('convergence'), 'resources': resources, 'contours': contours,
                      'raw_bo_objective_changed': False, 'material_promoted': False,

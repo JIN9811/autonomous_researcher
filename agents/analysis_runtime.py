@@ -331,6 +331,8 @@ class AnalysisRuntimeService:
                 evidence['payload']['mesh_size_mm'] = float(policy.get('mesh_size_mm', .6))
             evidence['payload']['boundary_tolerance_mm'] = float(policy.get('boundary_tolerance_mm',
                 .005 * float(analysis['specimen_geometry']['gauge_length_mm'])))
+        from agents.analysis_mechanisms import freeze_mechanism_references
+        freeze_mechanism_references(evidence, store.root / 'inputs')
         owned = self.resume(state.run_id, virtual=evidence['virtual_decisions'])
         stored = store.submit(evidence)
         job = {key: stored[key] for key in ('job_id', 'status')}

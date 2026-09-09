@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 
 from agents.analysis_improvement import curve_error
+from agents.analysis_mechanisms import assess_mechanisms, evidence_options
 
 
 PREPARE = 'cae.prepare_static_analysis'
@@ -177,6 +178,9 @@ async def run_fem_study(evidence, choose, call_tool, emit):
     Decisions receive trusted numerical summaries and existing image paths only.
     Cancellation intentionally propagates to the owner and its native boundary.
     """
+    if (evidence.get('policy') or {}).get('calibration') is not None:
+        from agents.analysis_calibration import calibrate
+        return await calibrate(evidence, choose, call_tool, emit)
     evidence = deepcopy(evidence)
     attempts, decisions = [], []
     summary = {'convergence': {'status': 'not_assessed'}, 'material_promoted': False}
@@ -333,6 +337,7 @@ async def run_fem_study(evidence, choose, call_tool, emit):
         attempt['endpoint_reached'] = complete
         attempt['solver_status'] = 'complete' if complete else 'partial' if curve else 'failed'
         attempt['solver_reported_status'] = solved.get('status')
+        attempt['solver_mode'] = solved.get('solver_mode')
         attempt['comparison'] = _comparison(observed, curve, target)
         attempt['artifacts'].update(deepcopy(solved.get('artifacts') or {}))
         attempt['field_asset_path'] = str(attempt['artifacts'].get('field_asset_path') or solved.get('field_asset_path') or '')
@@ -345,12 +350,20 @@ async def run_fem_study(evidence, choose, call_tool, emit):
             result['status'] = 'cancelled'
             break
         options = {'conclude': None, 'hold': None}
+        report = assess_mechanisms(evidence, attempts, summary['convergence'])
+        result['mechanism_assessment'] = report
+        options.update(evidence_options(report))
         if index + 1 < max_mesh and jobs < max_jobs:
             options['convergence'] = PREPARE
-        next_action = await decision('fem_result', options)
+        next_action = await decision('fem_result', options, mechanism_assessment=report)
+        if next_action in evidence_options(report):
+            summary['next_evidence_action'] = next_action
+            progress('fem_evidence_requested', 'Research evidence requested; no equipment or model changes',
+                     next_evidence_action=next_action)
         requested = requested or next_action == 'convergence'
     summary['convergence'] = _convergence(attempts, target, policy, requested)
     result['convergence'] = summary['convergence']
+    result['mechanism_assessment'] = assess_mechanisms(evidence, attempts, result['convergence'])
     summary['attempt_count'], summary['solve_count'] = len(attempts), jobs
     summary['full_target_solve_count'] = sum(a['endpoint_reached'] for a in attempts)
     if result['status'] not in {'failed', 'cancelled'}:

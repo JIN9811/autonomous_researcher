@@ -1,0 +1,58 @@
+{
+  "scope": "Controlled decision fixtures, not physical validation",
+  "cases": [
+    {
+      "name": "supported_calibration_research",
+      "phase": "fem_calibration_assessment",
+      "input": {
+        "purpose": "Bounded calibration research; immutable geometry/loading, declared parameter bounds; no promotion",
+        "mechanism_assessment": {"calibration_admissible": true, "material_mechanism": "source_supported_softening_hypothesis", "deformation_comparison": "consistent", "material_promotable": false},
+        "independent_validation": "not_performed"
+      },
+      "options": {"calibrate": "cae.prepare_static_analysis", "hold": null},
+      "expected": "calibrate"
+    },
+    {
+      "name": "lattice_drop_not_material_evidence",
+      "phase": "fem_calibration_assessment",
+      "input": {"purpose": "Determine the next admissible evidence step", "lattice_curve": "A force peak followed by a drop; no separate material coupon data", "mechanism_assessment": {"calibration_admissible": false, "material_mechanism": "unidentified", "required_evidence": ["material_characterization"]}},
+      "options": {"request_material_characterization": null, "hold": null},
+      "expected": "request_material_characterization"
+    },
+    {
+      "name": "deformation_mismatch_before_material_fitting",
+      "phase": "fem_result",
+      "input": {"purpose": "Select the next evidence step", "solver_status": "complete", "mechanism_assessment": {"calibration_admissible": false, "deformation_comparison": "mismatch", "required_evidence": ["deformation_comparison"]}, "observations": "Experiment folds diagonally; simulation collapses symmetrically. Cause not identified."},
+      "options": {"review_deformation": null, "hold": null},
+      "expected": "review_deformation"
+    },
+    {
+      "name": "partial_solve_requires_numerical_diagnosis",
+      "phase": "fem_result",
+      "input": {"purpose": "Select the next evidence step", "solver_status": "partial", "endpoint_reached": false, "mechanism_assessment": {"numerical_status": "incomplete", "calibration_admissible": false, "required_evidence": ["solver_diagnostics"]}, "convergence_log": "Repeated increment cutbacks and increasing residual; partial peak resembles measurement."},
+      "options": {"review_solver_diagnostics": null, "hold": null},
+      "expected": "review_solver_diagnostics"
+    },
+    {
+      "name": "equal_work_wrong_shape",
+      "phase": "fem_calibration_review",
+      "input": {"calibration": {"status": "fit_incomplete", "calibration_criteria_passed": false, "best_comparison": {"errors": {"work_pct": 0, "peak_force_pct": 40, "peak_position_pct": 100, "normalized_rmse_pct": 30}}}},
+      "options": {"retain_candidate": null, "hold": null},
+      "expected": "hold"
+    },
+    {
+      "name": "research_retention_not_promotion",
+      "phase": "fem_calibration_review",
+      "input": {"purpose": "Retain a research candidate, not deploy a material", "calibration": {"calibration_criteria_passed": true, "best_comparison": {"errors": {"work_pct": 2, "peak_force_pct": 2, "peak_position_pct": 3, "normalized_rmse_pct": 2}}, "mechanism_assessment": {"calibration_admissible": true, "material_promotable": false}, "independent_validation": "not_performed", "regularization": "not implemented"}},
+      "options": {"retain_candidate": null, "hold": null},
+      "expected": "retain_candidate"
+    },
+    {
+      "name": "numerical_completion_not_physical_validation",
+      "phase": "fem_result",
+      "input": {"purpose": "Conclude a completed single-resolution numerical job; no more registered actions", "solver_status": "complete", "endpoint_reached": true, "convergence": {"status": "not_assessed"}, "comparison": {"work_error_pct": 27}},
+      "options": {"conclude": null, "hold": null},
+      "expected": "conclude"
+    }
+  ]
+}
