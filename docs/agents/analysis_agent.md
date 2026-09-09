@@ -24,7 +24,7 @@ source_of_truth:
   - app/cae_fields_routes.py
   - orchestrator/langgraph_runtime.py
 last_verified: 2026-09-09
-verified_against: working-tree-2026-09-09-nonblocking-fem-live-cards
+verified_against: 499afd3-mechanism-first-fem-improvement
 related_docs:
   - docs/agents/README.md
   - docs/agents/equipment_agent.md
@@ -460,12 +460,43 @@ the entry remains visible even when an old result has no field file.
 
 ## Artifacts and Verification
 
+### Latest verification — mechanism-first improvement
+
+The latest implementation is `499afd3`. Its targeted non-actuating regression
+passed **196 Python tests**; the commit-time rerun took 22.51 s with 26 dependency
+warnings. The earlier, differently scoped counts below are historical results,
+not additional tests to sum into this total.
+
+| Verification | Latest result | Evidence boundary |
+|---|---|---|
+| Registered API — `gpt-5.5` | **10/10 scenarios**, 19 real decisions; 79.69 s | Fallback disabled; archived receipts and controlled forward fixtures |
+| Registered local vLLM — `gemma4:31b` | **10/10 scenarios**, 19 real decisions; 186.18 s | Fallback disabled; existing managed model endpoint |
+| Unsupported softening on the retained experiment | Both backends returned `held`; **zero solver calls** | Missing material characterization is requested, not fabricated |
+| Runtime and software closed loop | Included in the 196-test regression | Input freezing, partial-result gates, measured BO handoff and parallel software path |
+| New physical validation | Not performed | Prior physical-cycle evidence remains separate |
+| New full-domain calibrated FEM | Not established | The softening pilot was cancelled; the completed baseline below is unchanged |
+
+The ten scenarios comprise seven bounded decision cases, archived native-tool
+receipt replay, the actual retained acquisition's unsupported-calibration gate,
+and a two-candidate analytic-fixture calibration loop. Full inputs, decisions,
+timings and per-case results are in
+`artifacts/analysis_validation/20260909-mechanism-dual-backend-02/`.
+See the [feature-informed FEM evidence record](../paper/evidence/2026-09-09-feature-informed-fem-calibration.md#mechanism-first-revision)
+for methodology and results available in the repository. Large runtime artifacts
+are retained locally and are not bundled into Git.
+
 | Record | Location / content |
 |---|---|
 | Existing Analysis artifacts | Run Analysis directory plus existing per-loop/attempt archive |
 | Foreground decision evidence | Analysis report: decisions, model pin, source, metrics, handoff |
 | Background evidence/jobs/models | Run-owned improvement store; frozen inputs, job receipts, candidate/validation versions |
 | Background FEM attempts | Unique job/attempt IDs, mesh size/quality, real curve, overlap comparison, field path, solver status and endpoint flag |
+| Mechanism assessment | FEM result `mechanism_assessment`; material provenance, deformation comparison, numerical status, required evidence and actual solver capabilities |
+| Next evidence request | Result `summary.next_evidence_action` and progress receipt; non-actuating research request |
+| Frozen research references | Run improvement `inputs/`; hash-addressed coupon/literature/deformation references and rewritten policy paths |
+| Calibration research | `calibration.records`, individual errors, best eligible candidate, review and retention status; no automatic promotion |
+| Forward material candidate | `frozen_material_candidate.json` only after completed, explicitly retained, evidence-admissible calibration; **not produced by the cancelled pilot** |
+| API/local verification | `20260909-mechanism-dual-backend-02/{openai,vllm}/`: `decisions.json`, `result.json`, archived/controlled workflow receipts and unsupported-acquisition review |
 | Solver evidence | INP, DAT, FRD, request and process logs |
 | Reusable native model | `artifacts.model_package_path` and `model_package_manifest_path`; standalone deck, optional mesh/source/preparation copies, relative-file hashes and conditions |
 | Field evidence | `<frd-stem>.fields/manifest.fields.json`, geometry/frames, source hashes and mesh diagnostics |
@@ -489,11 +520,12 @@ results, fields and experiment comparisons belong to its owning FEM job. Solver
 version/thread settings still matter for reproducibility; another FE package's
 element/material/boundary compatibility requires separate checking.
 
-The earlier combined non-actuating baseline recorded 188 passing tests. The
+The earlier combined non-actuating baseline recorded 188 passing tests. That
 [validation record](../paper/evidence/2026-09-09-analysis-improvement-validation.md)
 separates injected decision tests, numerical fixtures, an archived real FRD and
-the preserved same-STL experiment. Fresh registered API/local-model calls and a
-new physical cycle were not performed in this change.
+the preserved same-STL experiment. It predates the registered API/local
+mechanism-first verification summarized above; neither validation added a new
+physical cycle.
 
 The [preserved complete cycle](../paper/evidence/2026-09-07-latest-cycle-demonstration.md)
 uses the same STL path for fabrication and CAE; the operator additionally
@@ -509,7 +541,7 @@ solver remains blocked, one-acquisition execution, aligned full-curve comparison
 and unchanged foreground values/artifact bytes. This is non-actuating software
 evidence, not a native solver or physical calibration run.
 
-### Completed native FEM case — 2026-09-09
+### Retained completed native baseline — 2026-09-09
 
 The preserved same-STL acquisition was replayed computationally in
 `artifacts/runs/validation-fem-20260909-long-cycle-03`. No physical device was
@@ -564,9 +596,25 @@ instructions. Copy that directory and run `ccx -i model`; model portability is
 separate from predictive validation. Machine-readable calculations and image
 provenance are in the run's `report/metrics.json` and `report/provenance.json`.
 
-### Parallel closed-loop verification
+### Cancelled softening pilot — diagnostic artifacts only
 
-Final focused regression verification: **230 Python tests passed**, **11 JavaScript
+`artifacts/runs/validation-fem-20260909-feature-calibration-01/` contains one
+cancelled candidate, with **65 converged increments to 4.408996 mm**, short of
+the requested 15 mm. Its partial peak was 6,121.831 N at 2.273438 mm. Elapsed time
+was **2,164.29 s (36.07 min)** and sampled peak process-tree RSS was **3.07 GiB**.
+These values describe the cancelled research computation, not a replacement for
+the completed baseline or evidence of full-domain agreement.
+
+Cancellation used the existing compute owner. The numbered preparation/solve
+receipts, partial curve, INP/DAT/FRD, field manifest, prepared model package,
+`result.json`, `resources_summary.json` and `run_metadata.json` remain preserved.
+Original source hashes were unchanged. No second candidate, full-domain work
+estimate, forward-material export or material promotion was produced.
+
+### Prior parallel closed-loop verification
+
+The earlier background-FEM implementation's focused verification recorded
+**230 Python tests passed**, **11 JavaScript
 tests passed**, and all four updated reference/design/evidence documents passed
 scoped documentation validation. Existing schema/dependency deprecation warnings
 remain. This is targeted regression coverage, not the entire repository suite.
@@ -588,6 +636,12 @@ completed long-run solution above was not modified. Evidence is retained under
 and `native_result.json`. Measured objectives remain independent of late FEM output.
 
 ### Limitations and known gaps
+
+The retained experiment has no supplied independent material characterization
+and referenced deformation comparison sufficient to admit the current softening
+search. Explicit quasi-static integration, regularized damage and lattice
+self-contact are not implemented in this workflow. Real API/local decision
+success does not establish those physical capabilities or identify PLA properties.
 
 Independent specimen-matched FE validation needs additional held-out evidence
 and explicit admissible parameter bounds. One complete cycle is not an
