@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -738,13 +739,20 @@ class DesignAgent(BaseAgent):
             except Exception:
                 records = []
         best = None
-        if records:
-            best_record = max(records, key=lambda item: float(getattr(item, "score", 0.0)))
+        def finite_value(value):
+            try:
+                number = float(value)
+                return number if math.isfinite(number) else None
+            except (TypeError, ValueError):
+                return None
+        scored = [record for record in records if finite_value(getattr(record, 'score', None)) is not None]
+        if scored:
+            best_record = max(scored, key=lambda item: float(item.score))
             best = {
                 "run_id": getattr(best_record, "run_id", ""),
                 "experiment_id": getattr(best_record, "experiment_id", ""),
                 "score": float(getattr(best_record, "score", 0.0)),
-                "uncertainty": float(getattr(best_record, "uncertainty", 0.0)),
+                "uncertainty": finite_value(getattr(best_record, "uncertainty", None)),
                 "summary": str(getattr(best_record, "summary", ""))[:240],
             }
         return {"count": len(records), "best": best}

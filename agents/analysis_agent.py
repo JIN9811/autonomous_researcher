@@ -30,6 +30,9 @@ from pathlib import Path
 from typing import Any
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
+from agents.analysis_decisions import decide
+from agents.analysis_runtime import resolve_loop_model, service_for
+import sqlite3
 from utils.agent_artifact_archive import archive_agent_run
 from orchestrator.state import Mode, OrchestratorState
 from utils.equipment_agentic_task import (
@@ -328,7 +331,7 @@ class AnalysisAgent(BaseAgent):
             "source": "analysis_agent",
         }
 
-    def _run_cae(self, state: OrchestratorState, ctx: AgentContext, geometry: dict[str, Any]) -> dict[str, Any] | None:
+    async def _run_cae(self, state: OrchestratorState, ctx: AgentContext, geometry: dict[str, Any]) -> dict[str, Any] | None:
         tools = getattr(ctx, "tools", None)
         if tools is None:
             return None
@@ -336,7 +339,15 @@ class AnalysisAgent(BaseAgent):
             available = tools.list_tools() if hasattr(tools, "list_tools") else []
             if available and "cae.run_static_analysis" not in available:
                 return None
-            return tools.call("cae.run_static_analysis", self._cae_payload(state, geometry))
+            payload = self._cae_payload(state, geometry)
+            pin = state.run_metadata.get("analysis_model_pin", {})
+            if pin.get("loop_key") == f"{state.run_id}:loop-{state.loop_count}":
+                payload.update(pin["model"]["parameters"])
+                payload["model_version"] = pin["model"]["version"]
+            service = service_for(ctx)
+            if service is not None:
+                return await service.compute(lambda: tools.call("cae.run_static_analysis", payload))
+            return tools.call("cae.run_static_analysis", payload)
         except KeyError:
             return None
         except Exception as exc:
@@ -1093,46 +1104,6 @@ class AnalysisAgent(BaseAgent):
             "curve_quality": quality,
         }
 
-    def _cae_score(self, cae_result: dict[str, Any] | None) -> float | None:
-        if not isinstance(cae_result, dict) or not cae_result.get("ok"):
-            return None
-        metrics = cae_result.get("cae_metrics") if isinstance(cae_result.get("cae_metrics"), dict) else cae_result.get("metrics")
-        if not isinstance(metrics, dict):
-            return None
-        if "structural_score" in metrics:
-            return round(max(0.0, min(self._safe_float(metrics.get("structural_score"), 0.0), 1.0)), 4)
-        fatigue = max(0.0, min(self._safe_float(metrics.get("fatigue_damage_proxy"), 0.0), 1.0))
-        safety = self._safe_float(metrics.get("safety_factor_yield"), 1.0)
-        displacement = self._safe_float(metrics.get("max_displacement_mm"), 0.0)
-        score = (1.0 - fatigue) * min(safety / 2.0, 1.0) * (1.0 / (1.0 + displacement / 5.0))
-        return round(max(0.0, min(score, 1.0)), 4)
-
-    def _objective_score(self, metrics: dict[str, Any], state: OrchestratorState, cae_result: dict[str, Any] | None = None) -> float:
-        metric_name = ""
-        objective = state.current_experiment_objective if isinstance(state.current_experiment_objective, dict) else {}
-        metric_name = str(objective.get("metric_name") or objective.get("name") or "").lower()
-        strength = self._safe_float(metrics.get("compressive_strength_MPa"), 0.0)
-        modulus = self._safe_float(metrics.get("apparent_modulus_MPa"), 0.0)
-        sea = self._safe_float(metrics.get("specific_energy_absorption_J_per_g"), 0.0)
-        energy_density = self._safe_float(metrics.get("energy_density_mJ_per_mm3"), 0.0)
-        if "strength" in metric_name or "peak" in metric_name:
-            score = min(strength / 5.0, 1.0)
-        elif "stiff" in metric_name or "modulus" in metric_name:
-            score = min(modulus / 80.0, 1.0)
-        elif "energy" in metric_name or "absor" in metric_name:
-            score = min(max(sea / 0.25, energy_density / 0.08), 1.0)
-        else:
-            score = 0.45 * min(strength / 5.0, 1.0) + 0.25 * min(modulus / 80.0, 1.0) + 0.30 * min(
-                max(sea / 0.25, energy_density / 0.08),
-                1.0,
-            )
-        quality = metrics.get("curve_quality") if isinstance(metrics.get("curve_quality"), dict) else {}
-        if quality.get("warnings"):
-            score *= 0.9
-        cae_score = self._cae_score(cae_result)
-        if cae_score is not None:
-            score = 0.75 * score + 0.25 * cae_score
-        return round(max(0.0, min(score, 1.0)), 4)
 
     @staticmethod
     def _compiled_objective_requested(state: OrchestratorState) -> bool:
@@ -1200,42 +1171,13 @@ class AnalysisAgent(BaseAgent):
         evaluation = service.evaluate(
             run_id=state.run_id,
             metrics=self._registry_metric_values(service, metrics),
-            observation_id=f"{state.run_id}:{state.experiment_id}:analysis",
+            observation_id=f"{state.run_id}:{state.experiment_id}:loop-{state.loop_count}:analysis",
             uncertainty=uncertainty,
             provenance_refs=provenance_refs,
             fidelity=fidelity,
         )
         return evaluation.model_dump(mode="json")
 
-    def _uncertainty(
-        self,
-        source_meta: dict[str, Any],
-        metrics: dict[str, Any],
-        state: OrchestratorState,
-        cae_result: dict[str, Any] | None = None,
-    ) -> float:
-        source = str(source_meta.get("source") or "")
-        if source.startswith("synthetic"):
-            base = 0.28
-        elif state.mode == Mode.LIVE:
-            base = 0.10
-        else:
-            base = 0.16
-        quality = metrics.get("curve_quality") if isinstance(metrics.get("curve_quality"), dict) else {}
-        point_count = int(quality.get("point_count") or 0)
-        if point_count < 10:
-            base += 0.18
-        elif point_count < 30:
-            base += 0.07
-        base += 0.04 * len(quality.get("warnings") or [])
-        if isinstance(cae_result, dict):
-            if cae_result.get("ok"):
-                base -= 0.03
-            elif state.mode == Mode.TEST:
-                base += 0.05
-            elif cae_result.get("failure_code"):
-                base += 0.03
-        return round(min(max(base, 0.03), 0.85), 4)
 
     def _curve_preview(self, curve: list[dict[str, float]]) -> dict[str, Any]:
         if len(curve) <= 12:
@@ -1420,6 +1362,8 @@ class AnalysisAgent(BaseAgent):
         }
 
     def _comparison(self, state: OrchestratorState, objective_score: float, metrics: dict[str, Any]) -> dict[str, Any]:
+        if objective_score is None:
+            return {"schema": "analysis_comparison.v1", "mode": "unavailable", "reason": "objective_domain_not_measured"}
         prior = [item for item in state.experiment_evaluations if isinstance(item, dict) and item.get("objective_score") is not None]
         if not prior:
             return {
@@ -1604,69 +1548,6 @@ class AnalysisAgent(BaseAgent):
             },
         }
 
-    def _trust_score(
-        self,
-        *,
-        quality_gate: dict[str, Any],
-        multifidelity_comparison: dict[str, Any],
-        uncertainty: float,
-        source_meta: dict[str, Any],
-        cae_result: dict[str, Any] | None,
-        analysis_ok: bool,
-    ) -> dict[str, Any]:
-        curve = multifidelity_comparison.get("curve") if isinstance(multifidelity_comparison.get("curve"), dict) else {}
-        raw_agreement = self._safe_float(curve.get("agreement_score"), 0.0)
-        q_data = self._safe_float(quality_gate.get("score"), 0.0)
-        # FEA/CAE is an advisory mid-fidelity source here; UTM remains the
-        # high-fidelity objective source, so one uncalibrated mismatch should
-        # reduce trust but not automatically block BO updates.
-        q_agreement = max(raw_agreement, 0.65) if multifidelity_comparison.get("available") and q_data >= 0.75 else raw_agreement
-        if isinstance(cae_result, dict) and cae_result.get("ok"):
-            cae_metrics = cae_result.get("cae_metrics") if isinstance(cae_result.get("cae_metrics"), dict) else cae_result.get("metrics", {})
-            q_physics = self._safe_float(cae_metrics.get("structural_score"), 0.72)
-        else:
-            q_physics = 0.35
-        q_uq = max(0.0, min(1.0, 1.0 - self._safe_float(uncertainty, 1.0)))
-        fingerprint = source_meta.get("fingerprint") if isinstance(source_meta.get("fingerprint"), dict) else {}
-        column_mapping = source_meta.get("column_mapping") if isinstance(source_meta.get("column_mapping"), dict) else {}
-        q_provenance = 0.55
-        if source_meta.get("path") or fingerprint.get("sha256"):
-            q_provenance += 0.20
-        q_provenance += 0.15 * self._safe_float(column_mapping.get("column_mapping_confidence"), 0.8 if not column_mapping else 0.0)
-        q_provenance = max(0.0, min(1.0, q_provenance))
-        components = {
-            "q_data": round(max(0.0, min(q_data, 1.0)), 4),
-            "q_agreement": round(max(0.0, min(q_agreement, 1.0)), 4),
-            "q_physics": round(max(0.0, min(q_physics, 1.0)), 4),
-            "q_uq": round(q_uq, 4),
-            "q_provenance": round(q_provenance, 4),
-        }
-        weights = {"q_data": 0.30, "q_agreement": 0.25, "q_physics": 0.15, "q_uq": 0.15, "q_provenance": 0.15}
-        score = sum(components[key] * weight for key, weight in weights.items())
-        reasons: list[str] = []
-        if raw_agreement < 0.45 and multifidelity_comparison.get("available"):
-            reasons.append("fea_requires_calibration")
-        if not analysis_ok:
-            reasons.append("analysis_not_ok")
-            gate = "block"
-        elif components["q_data"] < 0.55:
-            reasons.append("data_quality_low")
-            gate = "block"
-        elif score < 0.62:
-            reasons.append("calibration_recommended_before_physical_update")
-            gate = "calibrate_only"
-        elif score >= 0.85 and components["q_agreement"] >= 0.75 and components["q_data"] >= 0.75:
-            gate = "allow_physical"
-        else:
-            gate = "allow_bo"
-        return {
-            "schema": "trust_score.v1",
-            "score": round(max(0.0, min(score, 1.0)), 4),
-            "gate": gate,
-            "components": components,
-            "weights": weights,
-            "reasons": reasons,
-        }
 
     def _write_analysis_artifacts(
         self,
@@ -1897,14 +1778,15 @@ class AnalysisAgent(BaseAgent):
             fem_result=fem_result,
             analysis_artifacts=analysis_artifacts,
         )
-        trust_score = analysis.get("trust_score") if isinstance(analysis.get("trust_score"), dict) else self._trust_score(
-            quality_gate=quality_gate,
-            multifidelity_comparison=multifidelity_comparison,
-            uncertainty=self._safe_float(analysis.get("uncertainty"), 1.0),
-            source_meta=source_meta,
-            cae_result=cae_result,
-            analysis_ok=bool(analysis.get("ok")),
-        )
+        # Compatibility slot, now an explicit admissibility decision, not a
+        # weighted trust score. Optional model calibration never blocks data.
+        trust_score = {
+            "schema": "analysis_admissibility.v1", "score": None,
+            "gate": "allow_bo" if analysis.get("ok") and quality_gate.get("ok_for_metrics") else "block",
+            "components": {}, "weights": {},
+            "checks": {"analysis_ok": bool(analysis.get("ok")), "data_valid": bool(quality_gate.get("ok_for_metrics"))},
+            "reasons": [] if analysis.get("ok") and quality_gate.get("ok_for_metrics") else ["analysis_or_data_invalid"],
+        }
         analysis["multifidelity_comparison"] = multifidelity_comparison
         analysis["fidelity_records"] = fidelity_records
         analysis["trust_score"] = trust_score
@@ -1944,7 +1826,7 @@ class AnalysisAgent(BaseAgent):
         provenance_refs = list(dict.fromkeys(provenance_refs))
         observation_id = str(
             objective_evaluation.get("observation_id")
-            or f"{state.run_id}:{state.experiment_id}:analysis"
+            or f"{state.run_id}:{state.experiment_id}:loop-{state.loop_count}:analysis"
         )
         candidate_id = str(
             state.current_experiment_spec.get("specimen_id")
@@ -2006,7 +1888,7 @@ class AnalysisAgent(BaseAgent):
             "run_id": state.run_id,
             "experiment_id": state.experiment_id,
             "session_id": state.active_session_id or state.run_id,
-            "evaluation_id": f"eval-analysis-{state.experiment_id}",
+            "evaluation_id": f"eval-analysis-{state.experiment_id}-loop-{state.loop_count}",
             "observation_id": observation_id,
             "objective": {
                 "objective_id": objective.get("objective_id") or "bo-specimen-objective",
@@ -2123,6 +2005,15 @@ class AnalysisAgent(BaseAgent):
         equipment_result: dict[str, Any],
         cae_result: dict[str, Any] | None,
     ) -> AgentResult:
+        # Runtime merges Analysis dictionaries across loops. Explicitly replace
+        # every consumable result, rather than leaving a previous ready handoff.
+        analysis.update({"ok": False, "objective_score": None, "objective_evaluation": {},
+            "uncertainty": None, "uncertainty_status": {"status": "not_estimated", "reason": "analysis_blocked"},
+            "utm_metrics": {}, "utm_curve": {}, "stress_strain_curve": [],
+            "analysis_artifacts": {}, "model_pin": {}, "decisions": analysis.get("decisions", []),
+            "improvement": {"status": "held", "reason": "analysis_blocked"},
+            "quality_gate": {**analysis.get("quality_gate", {}), "ok_for_metrics": False, "ok_for_bo": False}})
+        metrics = {}
         handoff = self._handoff_payloads(
             state=state,
             analysis=analysis,
@@ -2134,6 +2025,7 @@ class AnalysisAgent(BaseAgent):
         analysis["artifact_refs"] = handoff["artifact_refs"]
         analysis["failure_tags"] = handoff["failure_tags"]
         analysis["bo_observation"] = handoff["bo_observation"]
+        analysis["bo_handoff"] = handoff["bo_handoff"]
         analysis["knowledge_payload"] = handoff["knowledge_payload"]
         return AgentResult(
             success=False,
@@ -2193,7 +2085,7 @@ class AnalysisAgent(BaseAgent):
                 "failure_code": "INVALID_SPECIMEN_GEOMETRY",
                 "summary": "Engineering stress-strain normalization requires a positive finite initial area and gauge length.",
                 "objective_score": None,
-                "uncertainty": 1.0,
+                "uncertainty": None,
                 "source": source_meta,
                 "specimen_geometry": geometry,
                 "quality_gate": {
@@ -2216,7 +2108,40 @@ class AnalysisAgent(BaseAgent):
                 equipment_result=equipment_result,
                 cae_result=None,
             )
-        cae_result = self._run_cae(state, ctx, geometry)
+        decisions = []
+        virtual = state.mode != Mode.LIVE and not getattr(ctx, "force_real_llm_in_test", True)
+        try:
+            pin = resolve_loop_model(state, ctx)
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            pin = {}
+            state.run_metadata["analysis_improvement_error"] = type(exc).__name__
+        tools = getattr(ctx, "tools", None)
+        simulation_options = {"run_cae": "cae.run_static_analysis", "hold": None} if tools and "cae.run_static_analysis" in tools.list_tools() else {"unavailable": None}
+        equipment_result = self._equipment_result(state)
+        curve, source_meta = self._curve_from_equipment(equipment_result)
+        live_handoff_ok, live_handoff_gate = (True, {"ok": True, "status": "not_required"})
+        if state.mode == Mode.LIVE:
+            live_handoff_ok, live_handoff_gate = self._live_equipment_handoff_gate(equipment_result)
+        live_data_valid = bool(curve and live_handoff_ok and self._curve_signal_quality(curve).get("ok"))
+        # Measured objectives are authoritative independently of optional FEM.
+        # Only simulation/preflight data-generation paths still await their source.
+        background_fem = live_data_valid
+        selected = {"tool": None}
+        def blocked_decision(summary, code, reason="", cae=None):
+            return self._blocked_result(state=state, summary=summary,
+                analysis={"ok": False, "failure_code": code, "reason": reason, "decisions": decisions,
+                          "source": source_meta, "specimen_geometry": geometry},
+                metrics={}, source_meta=source_meta, equipment_result=equipment_result, cae_result=cae)
+        try:
+            if not background_fem and (state.mode != Mode.LIVE or live_data_valid):
+                selected = await decide(ctx, "simulation", {"geometry": geometry, "model": pin.get("model", {}),
+                    "require_solver": bool(state.current_experiment_spec.get("require_cae_solver"))}, simulation_options, virtual=virtual)
+                decisions.append(selected)
+        except Exception as exc:
+            return blocked_decision("Analysis decision invalid", "ANALYSIS_DECISION_INVALID", str(exc))
+        cae_result = await self._run_cae(state, ctx, geometry) if selected["tool"] else None
+        if not background_fem and (state.mode != Mode.LIVE or live_data_valid) and not (isinstance(cae_result, dict) and cae_result.get("ok")) and state.current_experiment_spec.get("require_cae_solver"):
+            return blocked_decision("Required simulation held", "ANALYSIS_SIMULATION_REQUIRED")
         fem_result: dict[str, Any] | None = None
         fem_agentic_loop: dict[str, Any] = self._cae_simulation_loop(cae_result)
         cae_metrics = {}
@@ -2224,13 +2149,7 @@ class AnalysisAgent(BaseAgent):
             raw_cae_metrics = cae_result.get("cae_metrics") if isinstance(cae_result.get("cae_metrics"), dict) else cae_result.get("metrics")
             cae_metrics = dict(raw_cae_metrics) if isinstance(raw_cae_metrics, dict) else {}
         fem_metrics = {}
-        equipment_result = self._equipment_result(state)
-        curve, source_meta = self._curve_from_equipment(equipment_result)
         equipment_preflight_requested = self._lab_equipment_preflight_requested(state)
-        live_handoff_ok = True
-        live_handoff_gate: dict[str, Any] = {"ok": True, "status": "not_required"}
-        if state.mode == Mode.LIVE:
-            live_handoff_ok, live_handoff_gate = self._live_equipment_handoff_gate(equipment_result)
         equipment_file_supplied = bool(source_meta.get("path") or source_meta.get("exists") or source_meta.get("source") not in {None, "", "none"})
         if not curve and equipment_preflight_requested:
             curve, source_meta = self._curve_from_preflight_cae(equipment_result, cae_result)
@@ -2246,7 +2165,7 @@ class AnalysisAgent(BaseAgent):
                 "failure_code": live_handoff_gate.get("failure_code") or "EQUIPMENT_HANDOFF_NOT_READY",
                 "summary": "Live UTM data was present, but Equipment proof/handoff gates were not ready for Analysis.",
                 "objective_score": 0.0,
-                "uncertainty": 0.9,
+                "uncertainty": None,
                 "source": source_meta,
                 "specimen_geometry": geometry,
                 "cae_result": cae_result or {},
@@ -2278,7 +2197,7 @@ class AnalysisAgent(BaseAgent):
                     or "UTM data is required but no inline curve or readable result file was provided."
                 ),
                 "objective_score": 0.0,
-                "uncertainty": 0.85,
+                "uncertainty": None,
                 "source": source_meta,
                 "specimen_geometry": geometry,
                 "cae_result": cae_result or {},
@@ -2311,7 +2230,7 @@ class AnalysisAgent(BaseAgent):
                 "failure_code": failure_code,
                 "summary": str(signal_quality.get("message") or "UTM curve failed signal-quality validation before Analysis."),
                 "objective_score": 0.0,
-                "uncertainty": 0.9,
+                "uncertainty": None,
                 "source": source_meta,
                 "specimen_geometry": geometry,
                 "cae_result": cae_result or {},
@@ -2336,6 +2255,15 @@ class AnalysisAgent(BaseAgent):
                 cae_result=cae_result,
             )
 
+        try:
+            selected = await decide(ctx, "data_processing", {"source": source_meta, "geometry": geometry,
+                "point_count": len(curve), "objective": state.current_experiment_objective},
+                {"analyze": "analysis.process_curve", "hold": None}, virtual=virtual)
+            decisions.append(selected)
+        except Exception as exc:
+            return blocked_decision("Analysis decision invalid", "ANALYSIS_DECISION_INVALID", str(exc), cae_result)
+        if selected["tool"] is None:
+            return blocked_decision("Analysis data processing held", "ANALYSIS_DATA_HELD", cae=cae_result)
         stress_strain_curve = self._stress_strain_curve(curve, geometry)
         metrics = self._metrics(curve, geometry)
         fem_agentic_loop = self._cae_simulation_loop(cae_result)
@@ -2343,9 +2271,16 @@ class AnalysisAgent(BaseAgent):
         if isinstance(fem_result, dict):
             raw_fem_metrics = fem_result.get("fem_metrics") if isinstance(fem_result.get("fem_metrics"), dict) else fem_result.get("metrics")
             fem_metrics = dict(raw_fem_metrics) if isinstance(raw_fem_metrics, dict) else {}
-        objective_simulation = cae_result if isinstance(cae_result, dict) and cae_result.get("ok") else fem_result
-        uncertainty = self._uncertainty(source_meta, metrics, state, objective_simulation)
+        uncertainty = None  # No validated observation-error estimator is configured.
         quality_gate = self._quality_gate(signal_quality, metrics, source_meta, True)
+        try:
+            selected = await decide(ctx, "data_validation", {"metrics": metrics, "quality_gate": quality_gate},
+                {"accept": "analysis.accept_metrics", "hold": None} if quality_gate.get("ok_for_metrics") else {"hold": None}, virtual=virtual)
+            decisions.append(selected)
+        except Exception as exc:
+            return blocked_decision("Analysis decision invalid", "ANALYSIS_DECISION_INVALID", str(exc), cae_result)
+        if selected["tool"] is None:
+            return blocked_decision("Analysis validation held", "ANALYSIS_VALIDATION_HELD", cae=cae_result)
         try:
             objective_evaluation = self._evaluate_compiled_objective(
                 state=state,
@@ -2389,14 +2324,19 @@ class AnalysisAgent(BaseAgent):
         objective = (
             self._safe_float(objective_evaluation.get("score"), 0.0)
             if isinstance(objective_evaluation, dict)
-            else self._objective_score(metrics, state, objective_simulation)
+            else metrics.get("energy_density_50pct_MJ_per_m3")
         )
         comparison = self._comparison(state, objective, metrics)
         fem_utm_comparison = self._fem_utm_comparison(metrics, fem_result, cae_result)
         closed_loop_sources = [source_meta.get("source", "utm")]
-        closed_loop_sources.append("cae.run_static_analysis" if isinstance(cae_result, dict) and cae_result.get("ok") else "cae.unavailable")
+        closed_loop_sources.append("cae.background" if background_fem else
+            "cae.run_static_analysis" if isinstance(cae_result, dict) and cae_result.get("ok") else "cae.unavailable")
         analysis = {
             "ok": True,
+            "decisions": decisions,
+            "model_pin": pin,
+            "objective_semantics": "compiled_or_physical_observation",
+            "uncertainty_status": {"status": "not_estimated", "kind": "observation", "reason": "no_validated_measurement_error_model"},
             "source": source_meta,
             "objective_score": objective,
             "objective_evaluation": objective_evaluation or {},
@@ -2424,10 +2364,10 @@ class AnalysisAgent(BaseAgent):
             },
             "equipment_handoff_gate": live_handoff_gate,
             "recommendation": "ready_for_knowledge_guardian"
-            if uncertainty <= 0.35 and quality_gate.get("ok_for_bo")
+            if quality_gate.get("ok_for_bo")
             else "review_utm_curve_quality_before_model_update",
         }
-        analysis["summary"] = await self._summary(state, ctx, analysis)
+        analysis["summary"] = " ".join(item["reason"] for item in decisions)
         handoff = self._handoff_payloads(
             state=state,
             analysis=analysis,
@@ -2473,6 +2413,33 @@ class AnalysisAgent(BaseAgent):
             self._write_json(Path(str(final_artifacts["trust_score"])), analysis["trust_score"])
         if final_artifacts.get("analysis_report"):
             self._write_json(Path(str(final_artifacts["analysis_report"])), analysis)
+        try:
+            service = service_for(ctx)
+            if service is not None:
+                payload = self._cae_payload(state, geometry)
+                if pin:
+                    payload.update(pin["model"]["parameters"])
+                analysis["improvement"] = service.submit(state, analysis, curve, payload,
+                    job_kind='fem' if background_fem else 'refinement')
+                if background_fem:
+                    analysis['fem_job'] = dict(analysis['improvement'])
+                    analysis['fem_agentic_loop'] = {'status': analysis['fem_job']['status'],
+                        'execution': 'background', 'job_id': analysis['fem_job']['job_id']}
+                if final_artifacts.get("analysis_report"):
+                    self._write_json(Path(str(final_artifacts["analysis_report"])), analysis)
+            else:
+                analysis["improvement"] = {"status": "unavailable", "reason": "artifact_runtime_not_configured"}
+        except Exception as exc:
+            analysis["improvement"] = {"status": "failed", "reason": type(exc).__name__}
+        if background_fem:
+            analysis['fem_job'] = {**analysis['improvement'], 'run_id': state.run_id,
+                'loop_key': f'{state.run_id}:loop-{state.loop_count}',
+                'specimen_id': state.current_experiment_spec.get('specimen_id')}
+            analysis['fem_agentic_loop'] = {'schema': 'analysis_cae_simulation_loop.v1',
+                'execution': 'background', **analysis['fem_job']}
+            for artifact, value in (('analysis_report', analysis), ('fem_agentic_loop', analysis['fem_agentic_loop'])):
+                if final_artifacts.get(artifact):
+                    self._write_json(Path(str(final_artifacts[artifact])), value)
         return AgentResult(
             success=True,
             summary="UTM analysis complete",

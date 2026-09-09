@@ -249,9 +249,10 @@ async def test_objective_compiler_analysis_knowledge_bo_survives_restart(tmp_pat
 
     state.stage = Stage.BO
     bo_result = await BOAgent().run_with_settings(state, _BOContext(tools), {"strategy": "bo", "budget": 2})
+    assert bo_result.success is True, bo_result.data
+    assert bo_result.data['experiment_objective']['metric_name'] == 'objective_score'
     request = bo_result.data["next_design_request"]
 
-    assert bo_result.success is True
     integrity = bo_result.data["bo_result"]["observation_integrity"]
     assert integrity["accepted_observation_ids"] == [evaluation["observation_id"]], integrity
     assert request["objective_hash"] == binding.objective_hash

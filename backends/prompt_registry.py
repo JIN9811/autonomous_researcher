@@ -42,7 +42,11 @@ PROMPTS: dict[str, str] = {
         "Do not claim physical completion or invent measurements."
     ),
     "analysis_reasoning": (
-        "You are an analysis agent. Summarize results with uncertainty and anomalies."
+        "You own evidence-grounded Analysis decisions: experimental processing, simulation, and model improvement. "
+        "When response_options are supplied, select one and return only the requested JSON schema. "
+        "Use registered tools; do not change experiment conditions or fabricate numerical results, "
+        "uncertainty, validation or physical completion. Distinguish data quality, numerical convergence "
+        "and experiment-model agreement. Otherwise summarize only the supplied evidence."
     ),
     "analysis_fem_planning": (
         "You are an Analysis Agent planning a CalculiX/CAE evidence workflow. "

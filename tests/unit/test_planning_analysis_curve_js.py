@@ -49,6 +49,20 @@ def _node_eval(script: str) -> str:
     return result.stdout.strip()
 
 
+def test_analysis_field_viewer_link_remains_available_without_fields():
+    helper = _extract_function(PLANNING_JS.read_text(), 'renderAnalysisFieldLink')
+    html = _node_eval('const escapeHtml = x => String(x);\n' + helper + '''
+console.log(JSON.stringify([
+  renderAnalysisFieldLink({}),
+  renderAnalysisFieldLink({cae_result:{artifacts:{field_asset_path:'runs/a b/manifest.fields.json'}}})
+]));
+''')
+    empty, linked = json.loads(html)
+    assert 'href="/cae/results"' in empty
+    assert 'not recorded' in empty
+    assert '/cae/results?path=runs%2Fa%20b%2Fmanifest.fields.json' in linked
+
+
 def test_analysis_stress_strain_points_prefer_server_contract_and_normalize_legacy_reports() -> None:
     source = PLANNING_JS.read_text(encoding="utf-8")
     helper = _extract_function(source, "analysisStressStrainPoints")

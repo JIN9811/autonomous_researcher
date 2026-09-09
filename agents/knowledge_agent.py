@@ -73,8 +73,10 @@ class KnowledgeAgent(BaseAgent):
                 else:
                     raise
 
-        objective = float(state.latest_analysis.get("objective_score", 0.0))
-        uncertainty = float(state.latest_analysis.get("uncertainty", 1.0))
+        objective_value = state.latest_analysis.get("objective_score")
+        objective = float(objective_value) if objective_value is not None else None
+        uncertainty_value = state.latest_analysis.get("uncertainty")
+        uncertainty = float(uncertainty_value) if uncertainty_value is not None else None
         knowledge_payload = state.latest_analysis.get("knowledge_payload") if isinstance(state.latest_analysis.get("knowledge_payload"), dict) else {}
         artifact_refs = _list_of_dicts(knowledge_payload.get("raw_artifact_refs")) or _list_of_dicts(state.latest_analysis.get("artifact_refs"))
         metrics = knowledge_payload.get("metrics") if isinstance(knowledge_payload.get("metrics"), dict) else state.latest_analysis.get("utm_metrics", {})

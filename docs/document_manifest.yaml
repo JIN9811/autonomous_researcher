@@ -37,10 +37,12 @@ documents:
   - docs/device_bridges/plc_safety_bridge.md
   - docs/superpowers/specs/2026-08-24-plc-safety-bridge-design.md
   - docs/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md
+  - docs/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md
   - docs/superpowers/plans/2026-09-07-design-decision-layer.md
   - docs/paper/README.md
   - docs/paper/evidence/2026-09-07-supervised-closed-loop.md
   - docs/paper/evidence/2026-09-07-latest-cycle-demonstration.md
+  - docs/paper/evidence/2026-09-09-analysis-improvement-validation.md
   - docs/paper/01_problem_and_contributions.md
   - docs/paper/02_system_architecture.md
   - docs/paper/03_closed_loop_method.md

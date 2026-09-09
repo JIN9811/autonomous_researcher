@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analysis · Field Results</title><link rel="stylesheet" href="/static/cae_fields.css"></head>
+<body><header><div><small>ATR / ANALYSIS</small><h1>Field Results</h1><p>Actual solver fields · read-only postprocessing</p></div><a href="/cae">CAE workspace ↗</a></header>
+<main>
+<form id="load-fields"><label class="wide">Result artifact<input id="field-path" placeholder="runs/…/specimen.fields.json" required></label><label class="wide">Comparison artifact <span>(optional)</span><input id="compare-path" placeholder="runs/…/candidate.fields.json"></label><button>Load results</button></form>
+<div id="field-status" role="status">Select a saved solver field artifact. No simulation will be started.</div>
+<section class="controls">
+<label>Field<select id="field-name"></select></label><label>Component<select id="field-component"><option value="-1">Magnitude</option></select></label>
+<label>Frame<input id="field-frame" type="range" min="0" max="0" value="0"><output id="frame-label">—</output></label>
+<button id="field-play" type="button">Play</button><label>Deformation scale<input id="field-scale" type="number" min="0" max="1000" value="1" step="0.1"></label>
+<label class="check"><input id="field-edges" type="checkbox">Element edges</label><label class="check"><input id="field-overlay" type="checkbox">Undeformed outline</label>
+<label>View<select id="field-view"><option value="iso">Isometric</option><option value="x">X normal</option><option value="y">Y normal</option><option value="z">Z normal</option></select></label>
+<button id="field-fit" type="button">Fit view</button>
+</section>
+<section class="controls secondary">
+<label>Color range<select id="range-mode"><option value="shared">Shared / all frames</option><option value="frame">Current frame</option><option value="manual">Manual</option></select></label>
+<label>Minimum<input id="field-min" type="number" step="any"></label><label>Maximum<input id="field-max" type="number" step="any"></label>
+<label>Volume section<select id="section-axis"><option value="none">Off</option><option value="x">X plane</option><option value="y">Y plane</option><option value="z">Z plane</option></select></label><label>Position [mm]<input id="section-position" type="number" value="0" step="0.5"></label>
+<button id="section-apply" type="button">Apply section</button><button id="field-export" type="button">Export 4K PNG</button><button id="field-recipe" type="button">Save view recipe</button>
+</section>
+<div id="view-grid"><article class="view-card"><div class="view-heading"><strong>Baseline</strong><span id="baseline-meta"></span></div><div id="field-viewer" class="viewport"></div></article><article id="compare-card" class="view-card" hidden><div class="view-heading"><strong>Candidate</strong><span id="compare-meta"></span></div><div id="compare-viewer" class="viewport"></div></article></div>
+<div class="results-strip"><div><small>FIELD SEMANTICS</small><p id="field-semantics">—</p></div><div><small>PROBE · CLICK A NODE</small><p id="field-probe">Original node ID, coordinate and value. Section values are interpolated.</p></div></div>
+<details><summary>Mesh quality and source provenance</summary><pre id="field-provenance"></pre></details>
+</main><script src="/static/vendor/vtk-34.15.4.js"></script><script src="/static/cae_fields.js"></script></body></html>

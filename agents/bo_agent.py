@@ -1382,6 +1382,9 @@ class BOAgent(BaseAgent):
                     "objective_id": active_binding.get("objective_id"),
                     "objective_version": active_binding.get("version"),
                     "objective_hash": active_binding.get("objective_hash"),
+                    # Activated compiled objectives consume Analysis' evaluated
+                    # scalar, not the uncompiled profile's default metric.
+                    "metric_name": "objective_score",
                 }
             )
         execution_mode = "virtual" if state.mode in {Mode.TEST, Mode.LIVE} else state.mode.value

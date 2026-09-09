@@ -13,7 +13,7 @@ scope:
   - calculix
   - pinn
   - external_computation
-summary: Current computation-bridge contract for deterministic CAE, guarded CalculiX jobs, and explicit-availability PINN dataset/model operations.
+summary: Staged, cancellable CAE/CalculiX computation independent of measured BO, saved solver-field access, and explicit-availability PINN operations.
 source_of_truth:
   - device_bridges/cae_bridge.py
   - device_bridges/calculix_bridge.py
@@ -23,8 +23,15 @@ source_of_truth:
   - mcp_tools/pinn_tools.py
   - configs/devices.yaml
   - app/main.py
-last_verified: 2026-09-02
-verified_against: working-tree quasi-static implementation
+  - utils/calculix_fields.py
+  - utils/cae_field_view.py
+  - app/cae_fields_routes.py
+  - app/analysis_fem_routes.py
+  - agents/analysis_fem.py
+  - agents/analysis_runtime.py
+  - utils/cae_model_package.py
+last_verified: 2026-09-09
+verified_against: working-tree-2026-09-09-nonblocking-fem-live-cards
 related_docs:
   - docs/device_bridges/README.md
   - docs/agents/analysis_agent.md
@@ -41,6 +48,11 @@ real-solver CAE facade, a guarded CalculiX quasi-static job path, and a PINN
 dataset/model registry that reports unavailable models instead of inventing
 predictions. These are external-computation and filesystem effects, not
 physical laboratory device control.
+
+Measured CSV analysis returns its BO observation and permits the next loop
+without waiting for optional FEM preparation or solving. An Analysis-owned job
+retains the frozen input and separately reports computational progress/results.
+Simulation-only/preflight requests still depend on their required simulation.
 
 ## Scope
 
@@ -80,7 +92,7 @@ Optional paths are dashed inspection projections.
 | Analysis Agent | geometry/material/loading, measurement/FEA evidence | metrics/comparison/uncertainty context |
 | Operator `/cae` | configuration and run request | health, blockers, artifacts, result |
 | Knowledge/BO | accepted Analysis handoff | derived evidence only; no direct bridge call implied |
-| Guardian | process/risk/budget context | allow/block/timeout evidence |
+| Guardian | process/risk/numerical/resource context | allow/block/cancel and explicitly configured timeout evidence |
 
 ## Inputs, Commands, and Outputs
 
@@ -107,6 +119,31 @@ physical-effect node because the current boundary controls computation only.
 | Postprocess | DAT reaction/displacement history or model/result exists | canonical curve, metrics, artifact paths/status |
 | Return | preserve failure/unavailable semantics | Analysis comparison/handoff |
 
+### Staged preparation and unchanged-mesh solving
+
+`cae.prepare_static_analysis(payload)` returns `ok`, status, normalized request,
+`prepared_input`, deterministic `mesh_quality` and artifact paths. The receipt
+binds the prepared deck/mesh and source hashes. The Analysis study presents that
+evidence to its bounded LLM decision before requesting
+`cae.run_static_analysis({...payload, prepared_input})`. Solving validates and
+reuses the receipt; it does not silently remesh. Invalid mesh evidence cannot
+authorize a solve. Missing/poor quality leads to remesh or hold, not an LLM waiver.
+
+Optional explicit `surface_remesh` uses the supported isotropic profile before
+volume meshing. Its edge length, iteration count and maximum allowed surface
+distance are recorded; source STL bytes remain unchanged. The retained background
+profile uses 0.6 mm edges, eight iterations and 0.05 mm maximum surface distance.
+During a declared mesh study, Analysis scales surface and volume resolutions
+together. Without the profile, direct discrete-surface meshing preserves its
+existing behavior. Neither path changes supplied material/loading or adds contact.
+
+Mesh validity and corner-scaled-Jacobian quality diagnostics are distinct from
+response convergence. The current Analysis check compares peak, work and
+normalized force RMSE at three complete, distinct resolutions over the same
+full target. A valid or attractive mesh alone is not a converged result; partial
+solver histories cannot establish full-target convergence. The remeshed yield-35
+MPa FE reference is retained for comparison, not promoted as validated material.
+
 ## Quasi-Static Mechanical Contract
 
 ```mermaid
@@ -124,6 +161,10 @@ flowchart TB
 No platen solid, contact pair, friction coefficient, self-contact, or dynamic
 mass scaling is created. The deck manifest identifies every top/bottom node,
 the two stabilizer nodes, mesh height, planned target, and constraint counts.
+The displacement ramp spans `increments.time_period`; changing the duration
+does not impose the full displacement at time 1 and then hold it. The manifest
+also records the nominal displacement per time unit. For rate-independent
+static material models this is a load parameter, not evidence of rate effects.
 The target derives from the experiment-planned height rather than a hard-coded
 21 mm endpoint or an observed CSV endpoint.
 
@@ -134,15 +175,58 @@ is `null` until the exact target is reached.
 
 ## API Surface
 
+### Actual solver fields and read-only postprocessing
+
+CalculiX postprocessing now emits `cae_fields.v1` from matching INP/ASCII FRD
+files. Supported topology is C3D4; original IDs/connectivity and input hashes are
+preserved. Whole-mesh U is requested while existing TOP reaction history remains
+in DAT. S is labeled solver-extrapolated/nodally averaged; derived Mises uses
+the full averaged tensor. Missing fields and unsupported topology remain explicit.
+
+The converter checks serialized-coordinate precision, connectivity, duplicate
+cells, orientation, degeneracy and shared faces. Quality reports expose signed
+volume, Jacobian and declared corner-scaled-Jacobian facts, not a combined score.
+Field failure is independent of a successful/partial reaction-curve result.
+Input, node, element and field-array budgets bound conversion; nested
+`computation_limits` controls explicitly configured timeout, threads and generated
+mesh size. `timeout_s: null` removes the native wall-clock deadline. Background
+FEM uses that explicit unlimited-duration setting, finite candidate/job counts,
+and unchanged solver increment/numerical termination limits.
+Optional `equation_solver_threads` controls CalculiX's equation-solver thread
+count independently of assembly/results threads, within the requested thread
+budget. It is recorded with the job and does not modify the process environment
+or the next request. This permits isolated diagnosis of native parallel-solver
+failures; it is not an automatic retry or a global backend change.
+
+Oversized FRD handling may preserve the original file and select its last
+complete displacement-bearing frame into a bounded derived artifact.
+`field_selection` records that selection; it is not evidence that the complete
+history was converted or that the loading target was reached. Missing/incomplete
+fields remain unavailable and never alter the actual DAT reaction history.
+
+`GET /cae/results` and `GET /api/cae/fields`, `/metadata`, `/section`, `/render` expose saved
+arrays, volume sections and 4K PNG output. Paths are restricted to artifact roots;
+native postprocessing is admitted one request at a time. These routes cannot
+invoke a solver. See the [Analysis Reference](../agents/analysis_agent.md#tools-apis-and-connections)
+for interaction and field semantics and the [validation record](../paper/evidence/2026-09-09-analysis-improvement-validation.md)
+for numerical/browser evidence. High-order topology, raw integration-point stress
+and commercial-postprocessor equivalence remain unverified.
+
 `GET/POST /api/cae/config` reads or writes facade workspace settings;
 `POST /api/cae/run` executes its bounded run contract. CalculiX and PINN do not
 own dedicated HTTP families at this baseline; their exhaustive callable
 surface is the Tool Registry. The Runtime IDE may display graph bridge/action
 descriptors but those do not grant solver execution.
 
+The separate Analysis-owned lifecycle API is
+`GET /api/analysis/fem/jobs?run_id=…&loop_key=…&specimen_id=…`. It reads matching
+durable jobs without creating/resuming a worker. Explicit
+`POST /api/analysis/fem/jobs/{job_id}/cancel?run_id=…` cancels only the addressed
+computation; it does not stop a physical experiment or issue equipment commands.
+
 ## Tools and Registry Integration
 
-- `cae.health`, `cae.run_static_analysis` (`cae:calculix` device label);
+- `cae.health`, `cae.prepare_static_analysis`, `cae.run_static_analysis` (`cae:calculix` device label);
 - `calculix.health`, `prepare_input`, `solve`, `postprocess`, `run_job` plus
   resource `calculix_bridge`;
 - `pinn.health`, `dataset.build`, `train`, `predict`, `registry` plus resource
@@ -184,6 +268,35 @@ canonical curve JSON and optional converted fields, PINN dataset JSON,
 `model_registry.json`, metrics/checkpoint metadata, and step traces. Raw UTM
 measurement remains distinct from derived solver/PINN output.
 
+Background job ownership includes run, loop, original specimen and job IDs;
+job-derived attempt specimen IDs isolate native outputs across loops. Immutable
+CSV/STL copies and hashes belong to the run's Analysis store. Each attempt exposes
+`attempt_id`, `mesh_size_mm`, `mesh_quality`, the actual `curve`, overlap
+`comparison`, `field_asset_path`, `solver_status` and `endpoint_reached`.
+Native success status is `complete`; completed study/store status is `completed`.
+Raw foreground observations and BO artifacts are not overwritten by those results.
+
+### Reusable prepared model package
+
+The CAE prepare hook exports `artifacts.model_package_path` and
+`artifacts.model_package_manifest_path`. The folder contains the actual standalone
+`model.inp`, plus `mesh.inp`, `source.stl` and `preparation.json` when available.
+`model.json` uses `cae_reusable_model.v1`, with mm/N/MPa units, supplied ownership
+and physical parameters, and a relative-file SHA-256/byte-size inventory.
+The deck and preparation receipt are authoritative for solver conditions.
+
+Copy the entire directory, install compatible CalculiX, and run `ccx -i model`
+as described in the included README. No ATR server or original absolute source
+path is needed; unresolved external `*INCLUDE` dependencies are rejected during
+export. This documentation is an offline reuse instruction, not an execution
+request. Export failure is reported separately by `model_package_error`.
+
+The package is marked `validation_status: not_promoted`. It does not claim solver
+completion, material calibration, mesh convergence or predictive validity.
+Results/contours and experiment comparisons remain associated with the owning
+FEM job. Solver versions/thread settings affect reproducibility; importing into
+another solver requires checking element/material and boundary support.
+
 ## Runtime Modes and Fallbacks
 
 CAE test mode returns a labelled 101-point nonlinear cellular compression
@@ -200,7 +313,14 @@ Effects are local filesystem writes and optional CPU/GPU/external solver
 processes. They can consume time/resources and overwrite job-named artifacts
 within bounded directories but do not command laboratory mechanics. Schema,
 identifier, enabled/mode, executable/model availability, runtime permission,
-timeout, and artifact checks guard the boundary.
+optional timeout, numerical/resource limits, and artifact checks guard the boundary.
+
+Analysis admits one native FEM computation at a time and does not hold an LLM
+lease during native execution. `_cancel_event` and `_progress_callback` are
+in-process controls supplied by the owner, never serialized model parameters or
+accepted HTTP controls. Cancellation terminates the owned subprocess group and
+retains receipts/logs and any usable partial reaction curve. It is not a
+laboratory emergency-stop mechanism.
 
 ## Errors, Timeouts, and Recovery
 
@@ -211,12 +331,32 @@ available partial logs/artifacts, inspect the process and job directory, and
 avoid labeling partial output complete. PINN
 unavailability should route Analysis without fabricating a curve.
 
+There is no background FEM worker wall-clock cutoff. A null native timeout must
+not fall back to a configured default timeout. Operator/application cancellation
+and numerical solver termination remain effective. Interrupted jobs retain their
+state and are not silently restarted on read-only GUI access.
+
+Native observations include phase/PID, phase elapsed time, and Linux `/proc`
+samples of the owned subprocess's CPU time and resident memory when available.
+They are not whole-machine utilization, child-process aggregate memory, GPU
+usage or statistical performance estimates. Missing samples remain unknown;
+CPU percentage is not fabricated from CPU time. Progress callbacks cannot orphan
+the process if telemetry persistence fails.
+
 ## Operator and GUI Surfaces
 
 The `/cae` workspace exposes facade configuration and runs. Tool/Runtime IDE
 surfaces may expose CalculiX/PINN health and actions. Operator output must show
 mode, executable/model availability, runtime gate, input identity, artifacts,
 and failure/unavailable distinction.
+
+Live Analysis has four consolidated cards: Experiment vs FEM, FEM Response,
+Solver Contour and Agentic Progress. Previous/Next navigates attempts and available
+contour frames inside those cards; field controls choose actual stress or
+displacement without duplicating cards. F-D/S-S and contact-aligned comparison
+use declared geometry/coordinates. Pending/partial/failed states stay visible,
+and field navigation or rendering never starts a solve. The full `/cae/results`
+viewer remains available for detailed saved-field inspection.
 
 ## Current Verification
 
@@ -226,12 +366,30 @@ real 10 mm cube 50%-compression solve, and a 30 mm dense Gyroid volume mesh.
 The cube reached 5.0 mm in 102 increments. This is runtime verification, not
 material calibration or experimental validation.
 
+The non-actuating background-cycle integration test uses the actual Analysis
+agent/runtime/study/store with fixture registered prepare/solve handlers. It
+verifies a measured handoff while the fixture solve remains blocked, durable
+completion and unchanged BO artifacts. Native cancellation and prepared-receipt
+tests are separate from experimental validation.
+
+### Completed long-cycle evidence
+
+The 2026-09-09 native case reached its requested endpoint (79 increments,
+159,772 C3D4 elements), with a 32.58-minute initial study and 1.12 GiB peak
+sampled process-tree RSS. A separate copied-deck replay overlapped two software
+loops completing in 12.72 s; it was explicitly cancelled after verification.
+See [Analysis case and actual figures](../agents/analysis_agent.md#completed-native-fem-case--2026-09-09)
+for comparison data, resource scope, reusable model artifacts and LLM-review
+limitations. Completion is not mesh convergence or independent material validation.
+
 ## Limitations and Known Gaps
 
 The graph/API projection does not show CalculiX and PINN as separate bridge
-entries despite bootstrap registration. Large TPMS STL files retain their
-dense surface triangulation in the volume mesh, so real nonlinear runs can be
-expensive even when the interior mesh size is coarse. With no self-contact,
+entries despite bootstrap registration. Without explicit surface remeshing,
+large TPMS STL files retain their dense surface triangulation in the volume mesh,
+so real nonlinear runs can be expensive even when the interior mesh size is
+coarse. Surface remeshing adds its own geometry-preservation checks and is not a
+guarantee of nonlinear convergence or lower total cost. With no self-contact,
 50% deformation may interpenetrate. PINN training currently registers supplied
 metadata rather than proving a training backend ran.
 

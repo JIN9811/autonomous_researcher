@@ -6,6 +6,17 @@ from __future__ import annotations
 
 import pytest
 
+
+def test_prior_results_preserve_unestimated_uncertainty():
+    from types import SimpleNamespace
+    from agents.design_agent import DesignAgent
+    records = [SimpleNamespace(score=None, uncertainty=None), SimpleNamespace(score=1.5, uncertainty=None)]
+    ctx = SimpleNamespace(experiment_db=SimpleNamespace(list_recent=lambda _: records))
+    prior = DesignAgent()._prior_results_summary(ctx)
+    assert prior['count'] == 2
+    assert prior['best']['score'] == 1.5
+    assert prior['best']['uncertainty'] is None
+
 from agents.design_agent import DesignAgent
 from orchestrator.state import Mode, OrchestratorState, Stage
 

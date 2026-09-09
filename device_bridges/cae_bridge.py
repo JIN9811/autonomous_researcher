@@ -31,7 +31,7 @@ from typing import Any
 
 from device_bridges.base_bridge import BaseBridge
 from device_bridges.calculix_bridge import CalculiXBridge, CalculiXBridgeConfig
-from utils.calculix_quasistatic import curve_metrics
+from utils.calculix_quasistatic import curve_metrics, validate_plastic_curve
 from utils.paths import resolve_path
 from utils.utm_reference_calibration import build_reference_calibration
 
@@ -358,6 +358,15 @@ class CAEBridge(BaseBridge):
             if key in payload:
                 normalized_key = "load_max_n" if key == "load_max_N" else key
                 loading[normalized_key] = payload[key]
+        explicit_increments = payload.get("increments")
+        if isinstance(explicit_increments, dict):
+            for canonical, legacy in (
+                ("initial", "initial_increment"), ("minimum", "minimum_increment"),
+                ("maximum", "maximum_increment"), ("max_increments", "max_increments"),
+                ("time_period", "time_period"),
+            ):
+                if canonical in explicit_increments:
+                    loading[legacy] = explicit_increments[canonical]
         boundary = dict(self.config.default_boundary)
         if isinstance(payload.get("boundary"), dict):
             boundary.update(payload["boundary"])
@@ -410,8 +419,8 @@ class CAEBridge(BaseBridge):
             "poisson_ratio": float(material.get("poisson_ratio", 0.35)),
             "yield_strength_mpa": float(material.get("yield_strength_mpa", 35.0)),
         }
-        if isinstance(material.get("plastic_curve"), list):
-            normalized_material["plastic_curve"] = material["plastic_curve"]
+        if "plastic_curve" in material:
+            normalized_material["plastic_curve"] = validate_plastic_curve(material["plastic_curve"])
         return {
             "mode": str(payload.get("runtime_mode") or payload.get("mode") or self.config.mode or "test"),
             "solver": str(payload.get("solver") or self.config.default_solver),
@@ -788,6 +797,26 @@ class CAEBridge(BaseBridge):
             "curve_json_path": str(curve_path),
         }
 
+    def prepare_static_analysis(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Freeze a native mesh/deck and expose deterministic evidence before solve."""
+        raw = dict(payload or {})
+        if not self.config.enabled:
+            return {"ok": False, "tool": "cae.prepare_static_analysis", "status": "blocked",
+                    "failure_code": "CAE_BRIDGE_DISABLED"}
+        normalized = self._normalized_payload(raw)
+        if normalized["mode"] != "live":
+            return {"ok": False, "tool": "cae.prepare_static_analysis", "status": "blocked",
+                    "failure_code": "CAE_NATIVE_PREPARATION_REQUIRES_LIVE_MODE"}
+        result = self.calculix_bridge.prepare_quasistatic_input({**raw, **normalized})
+        paths = {key: result.get(key, "") for key in ("inp_path", "mesh_inp_path", "geo_path", "manifest_path")}
+        if result.get('ok') and paths.get('inp_path'):
+            from utils.cae_model_package import export_model_package
+            try:
+                paths.update(export_model_package({**raw, **normalized}, paths))
+            except (OSError, ValueError) as exc:
+                result['model_package_error'] = type(exc).__name__
+        return {**result, "tool": "cae.prepare_static_analysis", "request": normalized, "artifacts": paths}
+
     def run_static_analysis(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Run static/cyclic CAE equivalent analysis, with live solver preflight."""
         if not self.config.enabled:
@@ -803,6 +832,9 @@ class CAEBridge(BaseBridge):
         if not normalized.get("reference_calibration") and self.config.reference_utm_globs:
             normalized["reference_calibration"] = self._configured_reference_calibration()
         mode = normalized["mode"]
+        if "prepared_input" in raw_payload and mode != "live":
+            return {"ok": False, "tool": "cae.run_static_analysis", "status": "blocked",
+                    "failure_code": "CAE_NATIVE_PREPARATION_REQUIRES_LIVE_MODE"}
         solver = self.solver_status()
         live_mode = mode == "live"
         solver_available = bool(solver.get("calculix", {}).get("available"))
@@ -826,7 +858,7 @@ class CAEBridge(BaseBridge):
                     {"step": "PRECHECK", "status": "blocked", "detail": "ccx/calculix not found"},
                 ],
             }
-        if live_mode and require_solver and not mesher_available:
+        if live_mode and require_solver and not mesher_available and "prepared_input" not in raw_payload:
             return {
                 "ok": False,
                 "tool": "cae.run_static_analysis",
@@ -930,6 +962,8 @@ class CAEBridge(BaseBridge):
         """Execute a CAE bridge command through the common bridge interface."""
         if command in {"run_static_analysis", "cae.run_static_analysis"}:
             return self.run_static_analysis(payload)
+        if command in {"prepare_static_analysis", "cae.prepare_static_analysis"}:
+            return self.prepare_static_analysis(payload)
         if command in {"health", "solver_status", "cae.health"}:
             return self.solver_status()
         return {

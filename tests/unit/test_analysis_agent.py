@@ -34,6 +34,10 @@ class _CtxStub:
 
     async def complete(self, task_type: str, user_prompt: str, *, timeout_s: float | None = None) -> Any:
         self.prompts.append((task_type, user_prompt))
+        if user_prompt.startswith('{'):
+            request = json.loads(user_prompt)
+            if request.get('schema') == 'analysis_decision_request.v1':
+                return SimpleNamespace(text=json.dumps({'option_id': request['response_options'][0]['option_id'], 'reason': 'Fixture evidence supports this registered operation.'}))
         return SimpleNamespace(text=self.text)
 
 
@@ -456,7 +460,8 @@ async def test_analysis_agent_uses_synthetic_curve_in_test_without_utm_data() ->
     assert analysis["ok"] is True
     assert analysis["source"]["source"] == "synthetic_test_utm_curve"
     assert analysis["utm_curve"]["point_count"] == 80
-    assert analysis["uncertainty"] >= 0.28
+    assert analysis["uncertainty"] is None
+    assert analysis["uncertainty_status"]["status"] == "not_estimated"
     assert "synthetic_utm_curve" in result.data["bo_observation"]["failure_tags"]
 
 
@@ -1025,20 +1030,18 @@ async def test_analysis_agent_emits_improvement06_artifacts_bo_handoff_and_calcu
     assert analysis["source"]["parser_id"] == "analysis.parsers.csv_header"
     assert analysis["source"]["column_mapping"]["mappings"]["Load (kN)"]["multiplier"] == 1000.0
     assert analysis["quality_gate"]["ok_for_metrics"] is True
-    assert "cae.run_static_analysis" in analysis["closed_loop_sources"]
+    assert "cae.background" in analysis["closed_loop_sources"]
     removed_solver_token = "fe" + "nics"
     assert not any(removed_solver_token in str(item).lower() for item in analysis["closed_loop_sources"])
-    assert analysis["cae_result"]["ok"] is True
-    assert analysis["cae_result"]["tool"] == "cae.run_static_analysis"
-    assert analysis["fem_result"]["schema"] == "fem_result.v1"
+    assert analysis["cae_result"] == {}
     assert analysis["fem_agentic_loop"]["schema"] == "analysis_cae_simulation_loop.v1"
-    assert analysis["fem_agentic_loop"]["status"] == "completed"
-    assert analysis["fem_agentic_loop"]["selected_result"]["tool"] == "cae.run_static_analysis"
+    assert analysis["fem_agentic_loop"]["status"] == "unavailable"  # Stub has no application worker.
+    assert analysis["fem_agentic_loop"]["execution"] == "background"
     assert analysis["fem_utm_comparison"]["schema"] == "fem_utm_comparison.v1"
-    assert analysis["trust_score"]["schema"] == "trust_score.v1"
+    assert analysis["trust_score"]["schema"] == "analysis_admissibility.v1"
     assert analysis["trust_score"]["gate"] in {"allow_bo", "allow_physical"}
     assert analysis["multifidelity_comparison"]["schema"] == "multifidelity_comparison.v1"
-    assert analysis["multifidelity_comparison"]["curve"]["peak_force_error_pct"] is not None
+    assert analysis["multifidelity_comparison"]["curve"]["peak_force_error_pct"] is None
     assert analysis["fidelity_records"]["utm_high"]["schema"] == "utm_record.v1"
     assert analysis["fidelity_records"]["fea_mid"]["schema"] == "fea_result.v1"
     assert analysis["fidelity_records"]["pinn_low_or_surrogate"]["status"] == "unavailable"
@@ -1050,7 +1053,7 @@ async def test_analysis_agent_emits_improvement06_artifacts_bo_handoff_and_calcu
     assert result.data["bo_handoff"]["metrics"] == {"energy_density_50pct_MJ_per_m3": measured_energy_density_50pct}
     assert result.data["experiment_evaluation"]["objective"]["metric_name"] == "energy_density_50pct_MJ_per_m3"
     assert result.data["experiment_evaluation"]["objective_score"] == measured_energy_density_50pct
-    assert result.data["bo_handoff"]["trust_score"]["schema"] == "trust_score.v1"
+    assert result.data["bo_handoff"]["trust_score"]["schema"] == "analysis_admissibility.v1"
     assert result.data["bo_handoff"]["multifidelity_comparison"]["schema"] == "multifidelity_comparison.v1"
     assert result.data["bo_handoff"]["fidelity"]["utm_high"]["objective_source"] is True
     artifacts = analysis["analysis_artifacts"]
@@ -1061,8 +1064,6 @@ async def test_analysis_agent_emits_improvement06_artifacts_bo_handoff_and_calcu
         "preprocessing_report",
         "quality_report",
         "metrics",
-        "fem_result",
-        "fem_request",
         "fem_agentic_loop",
         "fem_utm_comparison",
         "multifidelity_comparison",
@@ -1075,7 +1076,8 @@ async def test_analysis_agent_emits_improvement06_artifacts_bo_handoff_and_calcu
     ):
         assert Path(artifacts[key]).exists(), key
     assert result.data["experiment_evaluation"]["fidelity_records"]["utm_high"] == "metrics"
-    assert result.data["experiment_evaluation"]["trust_score"]["schema"] == "trust_score.v1"
+    assert "fem_result" not in artifacts  # Native result belongs to the background job.
+    assert result.data["experiment_evaluation"]["trust_score"]["schema"] == "analysis_admissibility.v1"
 
 
 @pytest.mark.asyncio
@@ -1115,8 +1117,8 @@ async def test_analysis_agent_does_not_call_removed_python_fem_tools(tmp_path: P
     removed_solver_token = "fe" + "nics"
     assert removed_solver_token not in json.dumps(analysis, ensure_ascii=True).lower()
     assert loop["schema"] == "analysis_cae_simulation_loop.v1"
-    assert loop["tool_sequence"] == ["cae.health", "cae.run_static_analysis"]
-    assert loop["selected_result"]["tool"] == "cae.run_static_analysis"
+    assert loop["execution"] == "background"
+    assert analysis["cae_result"] == {}
     assert Path(analysis["analysis_artifacts"]["fem_agentic_loop"]).exists()
 
 

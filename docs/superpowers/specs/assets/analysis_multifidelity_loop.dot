@@ -1,0 +1,28 @@
+digraph analysis_multifidelity {
+  graph [rankdir=TB, bgcolor="white", fontname="DejaVu Sans", fontsize=20, label="Analysis: foreground experiment and background model improvement", labelloc=t, pad=0.3, nodesep=0.4, ranksep=0.55];
+  node [shape=box, style="rounded,filled", fillcolor="#edf4ff", color="#315c9b", fontname="DejaVu Sans", fontsize=14, margin="0.18,0.12"];
+  edge [fontname="DejaVu Sans", fontsize=12, color="#52667a"];
+  bind [label="Loop boundary: freeze registry availability\nAnalysis: resolve finalized experiment scope"];
+  data [label="LLM: Measurement analyst\nprocessing + evidence decision", fillcolor="#eee7ff"];
+  sim [label="LLM: Simulation analyst\nexisting configured CAE action", fillcolor="#eee7ff"];
+  measured [label="Existing parser + numerical metrics\nvalidated measured observation", fillcolor="#e8f6ee"];
+  solved [label="Existing CAE / Gmsh / CalculiX\ncurrent-loop result + actual fields", fillcolor="#e8f6ee"];
+  bo [label="Existing Knowledge / BO handoff\nforeground returns without study completion", fillcolor="#e8f6ee"];
+  queue [label="Immutable acquisition evidence queue\nraw hashes + geometry + scope",shape=note];
+  update [label="LLM: Model / method improvement\nselect bounded candidate study", fillcolor="#eee7ff"];
+  study [label="Finite training + mesh-convergence study\nregistered computation tools only"];
+  validation [label="Separate experimental validation\nidentity + numeric gates + applicability", fillcolor="#fff1d6"];
+  model [label="LLM recommendation + deterministic promotion\nnew immutable model; next-loop snapshot only", fillcolor="#e8f6ee"];
+  review [label="Insufficient / incompatible / exhausted\nrecord reason; retain baseline", fillcolor="#ffe9e7"];
+  {rank=same; data; sim;}
+  {rank=same; measured; solved;}
+  bind -> data -> measured -> bo;
+  queue -> sim -> solved;
+  sim [label="LLM: prepare / assess mesh / solve\nbackground, no wall deadline", fillcolor="#eee7ff"];
+  measured -> queue [style=dashed,label="conditional background enqueue"];
+  solved -> study [style=dashed,label="actual curves + fields; response convergence"];
+  queue -> update -> study -> validation -> model;
+  update -> review [label="missing evidence / bounds"];
+  validation -> review [label="not validated"];
+  model -> bind [style=dashed,label="future loop only",constraint=false];
+}

@@ -1,0 +1,14 @@
+.analysis-fem-live { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; color: #233445; }
+.fem-live-card { min-width: 0; border: 1px solid #d4dce3; border-radius: 7px; background: #fff; padding: 16px; }
+.fem-live-card h3 { margin: 0 0 14px; font: 600 15px/1.4 system-ui, sans-serif; letter-spacing: .025em; }
+.fem-chart { display: block; width: 100%; max-height: 340px; font: 11px system-ui, sans-serif; fill: #344454; }
+.fem-plot-background { fill: #fff; }.fem-grid { stroke: #e3e7eb; stroke-width: .7; fill: none; }.fem-axis { stroke: #344454; fill: none; }
+.fem-line { fill: none; stroke-width: 2.2; stroke-linejoin: round; }.fem-line-experiment { stroke: #185b88; }.fem-line-fem { stroke: #b95b29; stroke-dasharray: 6 3; }
+.fem-navigation, .fem-mode, .fem-legend { display: flex; align-items: center; justify-content: center; gap: 9px; flex-wrap: wrap; margin: 8px 0; font-size: 12px; }
+.analysis-fem-live button { border: 1px solid #c9d3dc; background: #f7f9fb; border-radius: 4px; padding: 5px 9px; color: #233445; cursor: pointer; font-size: 12px; }
+.analysis-fem-live button[aria-pressed="true"] { border-color: #185b88; color: #185b88; background: #edf5fa; }.analysis-fem-live button:disabled { opacity: .4; cursor: default; }
+.fem-legend span::before { content: ''; display: inline-block; width: 22px; border-top: 2px solid #185b88; margin: 0 6px 3px 0; }.fem-legend .simulation::before { border-color: #b95b29; border-top-style: dashed; }
+.fem-evidence { font: 12px/1.5 system-ui, sans-serif; margin: 12px 0 0; }.fem-evidence > div { display: grid; grid-template-columns: minmax(90px, 40%) minmax(0, 1fr); gap: 10px; padding: 4px 0; border-bottom: 1px solid #edf0f3; }.fem-evidence dt { color: #596878; }.fem-evidence dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.fem-empty { min-height: 130px; display: grid; align-content: center; color: #687783; font: 13px/1.6 system-ui, sans-serif; }.fem-note, .fem-error, .fem-image-error { font: 12px/1.5 system-ui, sans-serif; color: #61717e; }.fem-error, .fem-image-error { color: #a04425; }
+.fem-contour-image { display: block; width: 100%; height: 285px; object-fit: contain; background: #fff; }.fem-events { max-height: 220px; overflow: auto; padding-left: 20px; font: 12px/1.6 system-ui, sans-serif; }.fem-events li { margin: 5px 0; overflow-wrap: anywhere; }.analysis-fem-live a { font-size: 12px; color: #185b88; }.fem-retry { margin-left: 10px; }
+@media (max-width: 1000px) { .analysis-fem-live { grid-template-columns: minmax(0, 1fr); } }

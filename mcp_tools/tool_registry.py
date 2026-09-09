@@ -58,7 +58,10 @@ class ToolRegistry:
         if name not in self._tools:
             raise KeyError(f"Tool not found: {name}")
         normalized = payload or {}
-        record_tool_artifact("tool_started", name, normalized)
+        archived = ({key: value for key, value in normalized.items()
+                     if key not in {'_cancel_event', '_progress_callback'}}
+                    if name in {'cae.prepare_static_analysis', 'cae.run_static_analysis'} else normalized)
+        record_tool_artifact("tool_started", name, archived)
         try:
             if name in self._tool_devices:
                 result = self._job_queue.submit_sync(

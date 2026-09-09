@@ -61,7 +61,8 @@ class GuardianAgent(BaseAgent):
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         spec_payload = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
         anomaly_detected = bool(state.latest_observations.get("anomaly", False))
-        uncertainty = self._safe_float(state.latest_analysis.get("uncertainty"), 0.0)
+        uncertainty = (None if state.latest_analysis.get("uncertainty_status", {}).get("status") == "not_estimated"
+                       else self._safe_float(state.latest_analysis.get("uncertainty"), 0.0))
         retry_pressure = int(sum(max(0, int(v)) for v in state.retry_counters.values()))
 
         recent_failures = ctx.failure_memory.recent(limit=30)
@@ -171,7 +172,7 @@ class GuardianAgent(BaseAgent):
             decision = "continue"
             action = "recover"
             reason = "Recovery suggested; continue with caution."
-        elif retry_pressure >= 3 or uncertainty >= 0.3 or consistency["status"] == "warning":
+        elif retry_pressure >= 3 or (uncertainty is not None and uncertainty >= 0.3) or consistency["status"] == "warning":
             decision = "continue"
             action = "retry"
             reason = "Retry recommended due uncertainty/retry pressure."
@@ -477,11 +478,12 @@ class GuardianAgent(BaseAgent):
             warnings.append("multi-fidelity trust gate requests calibration before BO/physical continuation.")
         if any(str(item).startswith(("UTM_DATA_", "EQUIPMENT_LIVE_EVIDENCE_INCOMPLETE", "UTM_SAVE_EXPORT_")) for item in failure_tags):
             warnings.append("analysis failure tags contain UTM data/evidence gate failures.")
-        if objective >= 0.0 and expected_proxy >= 0.0 and objective < expected_proxy * 0.55:
+        legacy_score = latest_analysis.get("objective_semantics") != "compiled_or_physical_observation"
+        if legacy_score and objective >= 0.0 and expected_proxy >= 0.0 and objective < expected_proxy * 0.55:
             warnings.append("observed objective is far below expected proxy score.")
-        if anomaly and objective >= 0.8:
+        if legacy_score and anomaly and objective >= 0.8:
             warnings.append("camera anomaly conflicts with high objective score.")
-        if uncertainty >= 0.3:
+        if uncertainty is not None and uncertainty >= 0.3:
             warnings.append("analysis uncertainty is high.")
         if retry_pressure >= 3:
             warnings.append("retry pressure is high.")

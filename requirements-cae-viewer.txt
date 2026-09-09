@@ -1,0 +1,6 @@
+# Optional postprocessing and browser QA; does not change solver/device settings.
+pyvista==0.46.5
+vtk==9.5.2
+playwright==1.62.0
+# Optional long-cycle resource audit (does not monitor external model servers).
+psutil==7.2.2

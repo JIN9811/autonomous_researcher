@@ -77,10 +77,38 @@ def test_compression_deck_uses_nlgeom_ramp_and_frictionless_face_sets() -> None:
     assert "TOP,1,2,0" not in deck
     assert "*NODE PRINT,NSET=TOP,TOTALS=ONLY,FREQUENCY=1" in deck
     assert "\nRF\n" in deck
+    assert "*NODE FILE,FREQUENCY=1\nU" in deck
+    assert "*NODE FILE,NSET=TOP" not in deck
     assert manifest["target_displacement_mm"] == pytest.approx(5.0)
     assert manifest["frictionless_faces"] is True
     assert manifest["top_in_plane_constrained_dofs"] == 0
     assert manifest["bottom_in_plane_stabilizer_dofs"] == 3
+
+
+def test_compression_ramp_spans_the_requested_test_duration() -> None:
+    # A ramp fixed at one second would impose the entire displacement too soon.
+    deck, manifest = build_compression_deck(
+        CUBE_MESH, material={"elastic_modulus_mpa": 1800, "poisson_ratio": 0.35},
+        target_displacement_mm=5, increments={"time_period": 5},
+        boundary_tolerance_mm=1e-6,
+    )
+    ramp = deck.split("*AMPLITUDE,NAME=QS_RAMP\n", 1)[1].splitlines()[0]
+    assert [float(v) for v in ramp.split(",")] == [0, 0, 5, 1]
+    assert manifest["time_period"] == 5
+    assert manifest["nominal_loading_speed_mm_per_time"] == 1
+
+
+@pytest.mark.parametrize("curve", [
+    [[35, 0], [float("nan"), 0.1]], [[35, 0], [0, 0.1]],
+    [[35, 0], [40, -0.1]], [[35, 0.01]], [[35, 0], [40, 0]],
+    [[35, 0], [40]], "35,0",
+])
+def test_invalid_plastic_data_is_rejected_before_solver(curve) -> None:
+    with pytest.raises(ValueError, match="CALCULIX_PLASTIC_CURVE_INVALID"):
+        build_compression_deck(
+            CUBE_MESH, material={"plastic_curve": curve}, target_displacement_mm=5,
+            increments={}, boundary_tolerance_mm=1e-6,
+        )
 
 
 CONVERGED_DAT = """

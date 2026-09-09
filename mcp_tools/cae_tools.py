@@ -40,6 +40,11 @@ def register_cae_tools(
 
     registry.register("cae.health", lambda payload: bridge.solver_status())
     registry.register(
+        "cae.prepare_static_analysis",
+        lambda payload: bridge.prepare_static_analysis(dict(payload or {})),
+        device="cae:calculix",
+    )
+    registry.register(
         "cae.run_static_analysis",
         lambda payload: bridge.run_static_analysis(dict(payload or {})),
         device="cae:calculix",

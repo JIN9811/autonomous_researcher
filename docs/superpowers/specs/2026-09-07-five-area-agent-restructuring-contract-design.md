@@ -15,6 +15,7 @@ related_docs:
   - docs/standards/paper_documentation_standard.md
   - docs/templates/document_types.md
   - docs/runtime/loop_artifact_archiving.md
+  - docs/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md
   - docs/paper/evidence/2026-09-07-latest-cycle-demonstration.md
 supersedes: []
 ---
@@ -217,6 +218,11 @@ This design figure is not evidence of implemented or live-validated behavior.
 | BO | Middle | 최적화 요청·전략·후보 검토 | 수치 최적화·LHS·관측 품질 검사 | [BO](../../agents/bo_agent.md) |
 | Guardian | Guardian/Safety | 근거 조회·위험 판단·허용/보류/정지 요청 | 기존 코드 gate·하드 인터록 | [Guardian](../../agents/guardian_agent.md) |
 | Knowledge | Knowledge/Evidence | 검색·관계 판단·기억 갱신 | 저장·출처·스키마 검증·원본 보존 | [Knowledge](../../agents/knowledge_agent.md) |
+
+Analysis의 세 LLM 역할, 지표 유지·제거, 실험 기반 모델/방법 개선, 메쉬 평가와
+실제 필드 컨투어에 관한 후속 제안은
+[Analysis 멀티피델리티 상세 설계](2026-09-09-analysis-multifidelity-decision-design.md)에 정리한다.
+이는 미구현 검토안이며 외부 Analysis stage나 기존 장비 실행 경로 변경을 의미하지 않는다.
 
 #### Design 우선 재검토 — 구현 전 검토안
 

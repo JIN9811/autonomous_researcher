@@ -19,6 +19,26 @@ def _fmt(value: float) -> str:
     return f"{float(value):g}"
 
 
+def validate_plastic_curve(value: Any) -> list[list[float]]:
+    """Validate true flow stress versus equivalent plastic strain (not lattice S-S)."""
+    error = "CALCULIX_PLASTIC_CURVE_INVALID: positive finite stress and increasing plastic strain from zero required"
+    if not isinstance(value, list):
+        raise ValueError(error)
+    result: list[list[float]] = []
+    for row in value:
+        if not isinstance(row, (list, tuple)) or len(row) != 2 or any(isinstance(v, bool) for v in row):
+            raise ValueError(error)
+        try:
+            stress, strain = map(float, row)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(error) from exc
+        if (not math.isfinite(stress) or not math.isfinite(strain) or stress <= 0
+                or (strain <= result[-1][1] if result else strain != 0)):
+            raise ValueError(error)
+        result.append([stress, strain])
+    return result
+
+
 def parse_gmsh_inp_mesh(text: str) -> tuple[dict[int, tuple[float, float, float]], list[str]]:
     """Return node coordinates and original mesh lines from a Gmsh Abaqus deck."""
     lines = str(text or "").replace("\r\n", "\n").replace("\r", "\n").splitlines()
@@ -126,7 +146,7 @@ def build_compression_deck(
     element_set = _first_element_set(mesh_lines)
     modulus = max(_number(material.get("elastic_modulus_mpa"), 1800.0), 1e-9)
     poisson = min(max(_number(material.get("poisson_ratio"), 0.35), -0.99), 0.499)
-    plastic_curve = material.get("plastic_curve") if isinstance(material.get("plastic_curve"), list) else []
+    plastic_curve = validate_plastic_curve(material["plastic_curve"]) if "plastic_curve" in material else []
     if not plastic_curve and material.get("yield_strength_mpa") is not None:
         plastic_curve = [[_number(material.get("yield_strength_mpa"), 35.0), 0.0]]
 
@@ -150,14 +170,13 @@ def build_compression_deck(
     )
     if plastic_curve:
         deck.append("*PLASTIC")
-        for row in plastic_curve:
-            if isinstance(row, (list, tuple)) and len(row) >= 2:
-                deck.append(f"{_fmt(_number(row[0], 0.0))},{_fmt(_number(row[1], 0.0))}")
+        for stress, strain in plastic_curve:
+            deck.append(f"{_fmt(stress)},{_fmt(strain)}")
     deck.extend(
         [
             f"*SOLID SECTION,ELSET={element_set},MATERIAL=SPECIMEN_MATERIAL",
             "*AMPLITUDE,NAME=QS_RAMP",
-            "0,0,1,1",
+            f"0,0,{_fmt(period)},1",
             f"*STEP,NLGEOM,INC={max_increments}",
             "*STATIC",
             f"{_fmt(initial)},{_fmt(period)},{_fmt(minimum)},{_fmt(maximum)}",
@@ -171,8 +190,8 @@ def build_compression_deck(
             "RF",
             "*NODE PRINT,NSET=TOP,FREQUENCY=1",
             "U",
-            "*NODE FILE,NSET=TOP,FREQUENCY=1",
-            "U,RF",
+            "*NODE FILE,FREQUENCY=1",
+            "U",
             "*EL FILE,FREQUENCY=1",
             "S,E,PEEQ",
             "*END STEP",
@@ -187,6 +206,8 @@ def build_compression_deck(
         "top_in_plane_constrained_dofs": 0,
         "bottom_in_plane_stabilizer_dofs": 3,
         "max_increments": max_increments,
+        "time_period": period,
+        "nominal_loading_speed_mm_per_time": target / period,
     }
     return "\n".join(deck).rstrip() + "\n", manifest
 

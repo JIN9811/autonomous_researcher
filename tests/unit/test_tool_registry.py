@@ -16,6 +16,22 @@ def service(tmp_path) -> ObjectiveService:
     )
 
 
+def test_cae_in_process_controls_not_serialized_in_tool_archive(monkeypatch):
+    import threading
+    from mcp_tools import tool_registry
+    events = []
+    monkeypatch.setattr(tool_registry, 'record_tool_artifact', lambda *args: events.append(args))
+    cancel, progress = threading.Event(), lambda event: None
+    registry = ToolRegistry()
+    def prepare(payload):
+        assert payload['_cancel_event'] is cancel
+        assert payload['_progress_callback'] is progress
+        return {'ok': True}
+    registry.register('cae.prepare_static_analysis', prepare)
+    registry.call('cae.prepare_static_analysis', {'job_id':'j','_cancel_event':cancel,'_progress_callback':progress})
+    assert events[0][2] == {'job_id':'j'}
+
+
 def test_objective_tools_register_complete_bounded_surface(tmp_path) -> None:
     registry = ToolRegistry()
     objective_service = service(tmp_path)

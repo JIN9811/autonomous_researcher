@@ -170,6 +170,15 @@ function renderResult(data) {
   scoreLabel.textContent = metricText(metrics.structural_score);
   renderTrace(result.step_trace || []);
   resultJsonEl.textContent = pretty(result);
+  const fieldPath = result.artifacts?.field_asset_path || result.field_asset_path;
+  let fieldLink = document.getElementById("cae-field-results-link");
+  if (!fieldLink) {
+    fieldLink = document.createElement("a"); fieldLink.id = "cae-field-results-link";
+    fieldLink.target = "_blank"; fieldLink.rel = "noopener";
+    resultJsonEl.parentElement.prepend(fieldLink);
+  }
+  fieldLink.textContent = fieldPath ? "Open actual solver field results ↗" : "";
+  fieldLink.href = fieldPath ? `/cae/results?path=${encodeURIComponent(fieldPath)}` : "/cae/results";
 }
 
 async function loadConfig() {

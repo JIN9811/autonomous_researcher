@@ -1,26 +1,26 @@
 digraph analysis_execution_effect_boundary {
-  graph [rankdir=TB, bgcolor="transparent", pad="0.25", nodesep="0.28", ranksep="0.41", fontname="DejaVu Sans", label="Analysis internal execution and effect boundary", labelloc="t", fontsize=18];
-  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=8.0, margin="0.08,0.06"];
-  edge [color="#52667A", fontname="DejaVu Sans", fontsize=7.0, arrowsize=0.62];
-  input [label="01 receive artifact\n02 fingerprint input"];
-  parse [label="03 format/parser · 04 raw table\n05 columns/units"];
-  curve [label="06 canonical curve · 07 preprocess\n08 quality gate", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
-  metrics [label="09 UTM metrics"];
-  cae [label="10–12 FEM/CAE prepare + probe\n13–17 run · compare · refine", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
-  evaluate [label="18 objective + uncertainty\n19 prior comparison"];
-  output [label="20 artifacts · 21 evaluation\n22 BO handoff"];
-  evidence [label="Raw hash · parser · units · curves\nmetrics · solver config/log/result", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
-  reject [label="Missing/corrupt/ambiguous input\nno fabricated measurement", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
-  effect [label="Effect ceiling:\nlocal state + optional external process", shape=octagon, fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
-  input -> parse -> curve;
-  curve -> metrics [label="pass"];
-  curve -> reject [label="fail"];
-  metrics -> evaluate;
-  metrics -> cae [style=dashed, label="configured CAE"];
-  cae -> evaluate [style=dashed, label="FEM comparison"];
-  evaluate -> output -> effect;
-  input -> evidence [label="evidence", color="#2E7D59"];
-  curve -> evidence [label="evidence", color="#2E7D59"];
-  cae -> evidence [label="evidence", color="#2E7D59"];
-  output -> evidence [label="evidence", color="#2E7D59"];
+  graph [rankdir=TB, bgcolor="white", pad="0.3", nodesep="0.4", ranksep="0.5", fontname="DejaVu Sans", label="Analysis: decisions, execution and effect boundaries", labelloc=t, fontsize=20];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=14, margin="0.17,0.1"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=12];
+  subgraph cluster_fg {
+    label="Foreground — existing external Analysis node";color="#315C9B";fontsize=16;
+    intake [label="Receive + parse + identify\nresolve finalized Design against frozen registry"];
+    data [label="LLM processing decision\nexisting numeric curve + metrics"];
+    assess [label="LLM evidence assessment\ncode-owned quality gates",fillcolor="#FFF1D6"];
+    handoff [label="Persist + return Knowledge / BO\nno background completion dependency"];
+    intake -> data -> assess -> handoff;
+  }
+  subgraph cluster_bg {
+    label="Background — no wall deadline; finite numerical/action limits";color="#6B4C9A";fontsize=16;
+    queue [label="Frozen evidence queue\nunique acquisition + scope",shape=note];
+    select [label="LLM: prepare mesh / hold\nassess quality; remesh / solve",fillcolor="#F2ECFA"];
+    study [label="Registered native tools\nhash-bound prepared mesh + solve\nCPU/RSS/elapsed observations"];
+    validate [label="LLM: analyze actual result\nconclude / mesh convergence\nnumeric matching-interval comparisons",fillcolor="#FFF1D6"];
+    outputs [label="Actual fields + curves + model package\nread-only Live cards and archive"];
+    queue -> select -> study -> validate -> outputs;
+    validate -> select [style=dashed,label="bounded resolution study"];
+  }
+  handoff -> queue [style=dashed,label="eligible evidence"];
+  limits [label="Shared limits\nsource hashes / registered tools / cancellation\nno physical actuation; no automatic promotion",shape=octagon,fillcolor="#FFE9E7",color="#A33A32"];
+  limits -> study [style=dashed,label="hard bounds",arrowhead=tee];
 }

@@ -45,6 +45,7 @@ class ExperimentDB:
 
     def best(self) -> MemoryRecord | None:
         """Return best score record or None when empty."""
-        if not self._records:
+        scored = [record for record in self._records if record.score is not None]
+        if not scored:
             return None
-        return max(self._records, key=lambda item: item.score)
+        return max(scored, key=lambda item: item.score)

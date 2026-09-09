@@ -183,6 +183,8 @@ def test_calculix_job_returns_parsed_partial_curve_after_timeout(tmp_path: Path)
     assert result["metrics"]["last_converged_displacement_mm"] == 2.5
     assert result["metrics"]["energy_absorption_50pct_mJ"] is None
     assert Path(result["artifacts"]["curve_json_path"]).exists()
+    assert result["field_status"] == "unavailable"
+    assert result["field_failure_code"] == "CALCULIX_FIELD_INPUTS_UNAVAILABLE"
 
 
 def test_calculix_job_rejects_malformed_reaction_history(tmp_path: Path) -> None:
@@ -311,6 +313,9 @@ def test_calculix_bridge_runs_quasistatic_mesh_solve_and_postprocess(tmp_path: P
     assert result["target_displacement_mm"] == 5.0
     assert result["metrics"]["endpoint_reached"] is True
     assert result["metrics"]["energy_absorption_50pct_mJ"] == 625.0
+    assert result["field_status"] == "failed"
+    assert result["field_failure_code"] == "CALCULIX_FIELD_FRD_MESH_REQUIRED"
+    assert result["ok"] is True
     assert Path(result["artifacts"]["mesh_inp_path"]).exists()
     assert Path(result["artifacts"]["curve_json_path"]).exists()
     geo_text = Path(result["artifacts"]["geo_path"]).read_text(encoding="utf-8")

@@ -5998,10 +5998,12 @@ function renderAnalysisReportDetails(report) {
   const artifactRows = Object.entries(artifacts).map(([key, value]) => `${key} · ${renderRuntimeValue(value)}`);
   return `
     <div class="live-agent-specific-report-detail">
-      <h5>Trust Score / Gate</h5>
+      <h5>Analysis Admissibility / Gate</h5>
       ${renderAnalysisTrustScore(analysis)}
-      <h5>UTM-FEA Agreement / PINN Prediction</h5>
+      <h5>Measurement / Simulation Comparison</h5>
       ${renderAnalysisCurveOverlay(analysis)}
+      <h5>Solver Field Results</h5>
+      ${renderAnalysisFieldLink(analysis)}
       ${renderAnalysisProvenance(analysis)}
       <h5>Raw Data Ledger</h5>
       ${runtimeRows([
@@ -15360,8 +15362,23 @@ function renderAnalysisCurve(analysis) {
   `;
 }
 
+function renderAnalysisFieldLink(analysis) {
+  const result = analysis.cae_result || analysis.fem_result || {};
+  const path = (result.artifacts || {}).field_asset_path || result.field_asset_path || '';
+  const url = path ? `/cae/results?path=${encodeURIComponent(path)}` : '/cae/results';
+  return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Open solver field results ↗</a><p>${path ? 'Saved nodal fields · read-only viewer' : 'Actual solver fields not recorded for this result.'}</p>`;
+}
+
 function renderAnalysisTrustScore(analysis) {
   const trust = analysis.trust_score || {};
+  if (trust.schema === 'analysis_admissibility.v1') {
+    return renderDashboardRows([
+      ['gate', trust.gate || 'not_recorded'],
+      ['reasons', trust.reasons || []],
+      ['uncertainty', analysis.uncertainty_status || 'not_estimated'],
+      ['schema', trust.schema],
+    ]);
+  }
   const components = trust.components || {};
   const score = dashboardFiniteNumber(trust.score);
   const gate = trust.gate || "not_recorded";
@@ -16571,23 +16588,30 @@ function renderEquipmentDashboardCards(report, status, agentLabel, profile) {
   `;
 }
 
+let liveAnalysisFemController = null;
+
+function refreshLiveAnalysisFemEvidence() {
+  if (liveSelectedAgent !== "analysis" || liveCurrentView !== "report" || liveReportPage !== "agent" || document.hidden) return Promise.resolve();
+  return liveAnalysisFemController ? liveAnalysisFemController.poll() : Promise.resolve();
+}
+
 function renderAnalysisDashboardCards(report, status, agentLabel, profile) {
   const analysis = latestAnalysisPayload(report) || {};
   const metrics = analysis.utm_metrics || {};
   const quality = analysis.quality_gate || analysis.data_quality_gate || {};
-  const comparison = analysis.fem_utm_comparison || {};
   const artifacts = analysis.analysis_artifacts || {};
-  const femLoop = analysis.fem_agentic_loop || {};
   const boHandoff = latestAnalysisBoHandoff(report) || {};
+  if (!liveAnalysisFemController && window.AnalysisFemLive) liveAnalysisFemController = window.AnalysisFemLive.createController();
+  if (liveAnalysisFemController) liveAnalysisFemController.setContext(analysis);
   return `
-    ${renderDashboardCard("Engineering Stress-Strain Curve", renderAnalysisCurveOverlay(analysis), { span: 8, tone: "analysis", eyebrow: "normalized UTM response" })}
+    ${liveAnalysisFemController ? liveAnalysisFemController.html() : ""}
     ${renderDashboardCard("Result Summary", `<div class="ar-report-metrics">
       ${renderDashboardMetric("Peak", metrics.peak_force_N ?? "-", "N", "info")}
       ${renderDashboardMetric("Strength", metrics.compressive_strength_MPa ?? "-", "MPa", "success")}
       ${renderDashboardMetric("Score", analysis.objective_score ?? "-", "objective", "running")}
       ${renderDashboardMetric("Unc.", analysis.uncertainty ?? "-", "model", "warning")}
     </div>`, { span: 4, tone: "analysis", eyebrow: "result" })}
-    ${renderDashboardCard("Trust Score / Gate", renderAnalysisTrustScore(analysis), { span: 4, tone: (analysis.trust_score || {}).gate === "block" ? "danger" : "analysis", eyebrow: "multi-fidelity" })}
+    ${renderDashboardCard("Analysis Admissibility / Gate", renderAnalysisTrustScore(analysis), { span: 4, tone: (analysis.trust_score || {}).gate === "block" ? "danger" : "analysis", eyebrow: "evidence" })}
     ${renderDashboardCard("Metric Bars", renderAnalysisMetricBars(analysis), { span: 4, tone: "metrics", eyebrow: "features" })}
     ${renderDashboardCard("Data Quality", renderAnalysisQualityDonut(quality), { span: 4, tone: quality.ok_for_bo === false ? "warning" : "analysis", eyebrow: "qa" })}
     ${renderDashboardCard("Provenance", renderAnalysisProvenance(analysis), { span: 4, tone: "analysis", eyebrow: "artifacts" })}
@@ -16598,13 +16622,6 @@ function renderAnalysisDashboardCards(report, status, agentLabel, profile) {
       ["unit_confidence", analysis.unit_confidence || "-"],
       ["canonical_curve", artifacts.canonical_curve || "-"],
     ]), { span: 4, tone: "analysis", eyebrow: "utm ingest" })}
-    ${renderDashboardCard("FEM / CAE Comparison", renderDashboardRows([
-      ["agreement_score", comparison.agreement_score === undefined ? "-" : comparison.agreement_score],
-      ["residual", comparison.residual || comparison.error || "-"],
-      ["fem_loop_status", femLoop.status || "-"],
-      ["selected_iteration", femLoop.selected_iteration === undefined ? "-" : femLoop.selected_iteration],
-      ["fem_result", artifacts.fem_result || "-"],
-    ]), { span: 4, tone: "analysis", eyebrow: "simulation" })}
     ${renderDashboardCard("BO Handoff", renderDashboardRows([
       ["schema", boHandoff.schema_version || "analysis_bo_handoff_v2"],
       ["ok_for_bo", boHandoff.ok_for_bo === undefined ? "-" : boHandoff.ok_for_bo],
@@ -17029,6 +17046,9 @@ function renderReportPanel(session) {
     </div>
   `;
   const patchResult = updateLiveReportPanel(reportHtml, reportContextKey);
+  if (liveSelectedAgent === "analysis" && liveAnalysisFemController) {
+    liveAnalysisFemController.mount(liveReportPanel.querySelector(".analysis-fem-live"));
+  }
   applyUtmClearCompletionVerification(report.state);
   if (patchResult.fullRender || patchResult.structureChanged || patchResult.chartChanged) scheduleOrcEchartsRender();
   hydrateDesignCaptureCanvases();
@@ -20955,6 +20975,8 @@ setInterval(() => {
   updateVisionSpecimenCountdowns();
   refreshActiveEquipmentProcess();
   refreshLivePLCStatus().catch(() => {});
+  // FEM progress remains live even when the measured foreground run has frozen as complete.
+  refreshLiveAnalysisFemEvidence().catch(() => {});
   if (!shouldFreezeCompletedTestRun(liveLastSession) && liveSyncIsStale() && !liveRefreshInFlight && planningThinkingCount === 0) {
     refreshPlanningState({ background: true }).catch(() => setChatStatus("SYNC ERROR", "warning"));
   }

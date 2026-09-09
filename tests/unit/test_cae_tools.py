@@ -222,6 +222,23 @@ def test_cae_uses_nested_quasistatic_loading_controls(tmp_path) -> None:
     }
 
 
+def test_explicit_solver_increments_survive_cae_facade_normalization(tmp_path):
+    bridge = CAEBridge(CAEBridgeConfig(artifact_dir=tmp_path))
+    normalized = bridge._normalized_payload({
+        'loading': {'initial_increment': 0.005, 'time_period': 1},
+        'increments': {'time_period': 15, 'maximum': 0.3},
+    })
+    assert normalized['increments']['time_period'] == 15
+    assert normalized['increments']['maximum'] == 0.3
+    assert normalized['increments']['initial'] == 0.005
+
+
+def test_cae_facade_does_not_silently_discard_invalid_material_curve(tmp_path):
+    bridge = CAEBridge(CAEBridgeConfig(artifact_dir=tmp_path))
+    with pytest.raises(ValueError, match='CALCULIX_PLASTIC_CURVE_INVALID'):
+        bridge._normalized_payload({'material': {'plastic_curve': '55,0'}})
+
+
 def test_cae_live_mode_delegates_displacement_control_to_calculix(tmp_path) -> None:
     class _CalculixStub:
         def __init__(self) -> None:

@@ -175,6 +175,8 @@ from utils.test_mode_execution_profiles import (
 from utils.operator_teleop_handoff import OperatorTeleopHandoffError
 
 app = FastAPI(title="Autonomous Researcher")
+from app.cae_fields_routes import router as cae_fields_router
+app.include_router(cae_fields_router)
 templates = Jinja2Templates(directory=str(resolve_path("web/templates")))
 app.mount("/static", StaticFiles(directory=str(resolve_path("web/static"))), name="static")
 app.mount(
@@ -202,6 +204,11 @@ async def favicon() -> FileResponse:
     return FileResponse(resolve_path("web/static/favicon.svg"), media_type="image/svg+xml")
 
 controller = load_runtime()
+from app.analysis_fem_routes import make_router as make_analysis_fem_router
+app.include_router(make_analysis_fem_router(
+    lambda: controller._deps.agent_context.artifact_run_root or resolve_path('runs'),
+    lambda: controller._deps.agent_context.tools.resource('analysis_improvement'),
+))
 PLC_CONFIG_PATH = resolve_path("configs/plc.yaml")
 PLC_CONFIG_MEMORY_PATH = resolve_path("memory/plc_bridge_config.json")
 PLC_TRANSACTION_STATE_PATH = resolve_path("memory/plc_bridge_state.json")
@@ -743,11 +750,20 @@ async def keep_startup_side_effect_free() -> None:
     worker = _knowledge_reconciliation_worker()
     controller._deps.agent_context.on_knowledge_ingest = lambda **_: worker.wake()
     worker.start()
+    # Restore Analysis queue metadata only. Computation requires an explicit
+    # active-runtime admission; GUI startup must not launch archived solvers.
+    from agents.analysis_runtime import service_for
+    improvement = service_for(controller._deps.agent_context)
+    if improvement is not None:
+        improvement.recover_existing()
 
 
 @app.on_event("shutdown")
 async def shutdown_lerobot_subprocesses() -> None:
     """Release LeRobot live subprocesses so cameras/serial ports are not left busy."""
+    improvement = controller._deps.agent_context.tools.resource("analysis_improvement")
+    if improvement is not None:
+        await improvement.shutdown()
     if _PLC_BRIDGE_SERVICE is not None:
         await _PLC_BRIDGE_SERVICE.shutdown()
     controller.set_terminal_error_notifier(None)
