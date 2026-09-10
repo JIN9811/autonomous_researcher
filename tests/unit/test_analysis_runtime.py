@@ -50,6 +50,41 @@ async def test_analysis_failure_does_not_enqueue_improvement(tmp_path):
     assert tools.resource('analysis_improvement') is None
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('policy', [
+    {'mesh_size_mm': .9},
+    {'surface_remesh': {'method': 'isotropic', 'edge_length_mm': .7,
+                        'iterations': 5, 'max_surface_distance_mm': .02}},
+])
+async def test_background_reference_preserves_explicit_mesh_and_remesh_options(tmp_path, policy):
+    from copy import deepcopy
+    from agents.analysis_runtime import service_for
+
+    s = state()
+    s.current_experiment_spec.update(cae_mesh_size_mm=1.2, analysis_improvement=policy,
+                                     cae_yield_strength_mpa=42)
+    original = deepcopy(s.current_experiment_spec)
+    ctx = SimpleNamespace(tools=ToolRegistry(), artifact_run_root=str(tmp_path), force_real_llm_in_test=False)
+    service = service_for(ctx)
+    agent = AnalysisAgent()
+    geometry = agent._specimen_geometry(s)
+    payload = agent._cae_payload(s, geometry)
+    try:
+        service.submit(s, {'source': {}, 'specimen_geometry': geometry},
+            [{'displacement_mm': 0, 'force_N': 0}, {'displacement_mm': 10, 'force_N': 100}],
+            payload, job_kind='fem')
+        stored = service.store(s.run_id).jobs()[0]['evidence']['payload']
+        assert stored['mesh_size_mm'] == 1.2  # Explicit experiment beats policy default.
+        assert stored['surface_remesh'] == policy.get('surface_remesh', {
+            'method': 'isotropic', 'edge_length_mm': 1.2,
+            'iterations': 8, 'max_surface_distance_mm': .0275})
+        assert stored['material']['yield_strength_mpa'] == 42
+        assert 'plastic_curve' not in stored['material']
+        assert s.current_experiment_spec == original
+    finally:
+        await service.shutdown()
+
+
 def test_pin_loop_reuses_same_snapshot_and_does_not_change_experiment_spec(tmp_path):
     from agents import analysis_runtime as module
     assert hasattr(module, 'pin_loop'), 'runtime boundary pin required'

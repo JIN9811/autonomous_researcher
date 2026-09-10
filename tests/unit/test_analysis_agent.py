@@ -75,6 +75,53 @@ def _state(*, mode: Mode = Mode.TEST, equipment_result: dict[str, Any] | None = 
     )
 
 
+def test_default_cae_request_reproduces_retained_material_without_fixing_specimen_height():
+    from device_bridges.cae_bridge import CAEBridge, CAEBridgeConfig
+    from tests.unit.test_calculix_quasistatic import CUBE_MESH
+    from utils.calculix_quasistatic import build_compression_deck
+
+    state = _state()
+    state.current_experiment_spec.update(specimen_size_mm=[10, 10, 10], cae_target_strain=.4)
+    agent = AnalysisAgent()
+    payload = agent._cae_payload(state, agent._specimen_geometry(state))
+    normalized = CAEBridge(CAEBridgeConfig())._normalized_payload(payload)
+    deck, manifest = build_compression_deck(
+        CUBE_MESH, material=normalized['material'],
+        target_displacement_mm=normalized['specimen_size_mm'][2] * normalized['target_strain'],
+        increments=normalized['increments'], boundary_tolerance_mm=.05)
+
+    assert '*PLASTIC\n55,0\n55,0.02\n30,0.15\n25,0.4\n30,1\n' in deck
+    assert '*STEP,NLGEOM,INC=500\n*STATIC\n0.01,1,1e-07,0.02' in deck
+    assert 'TOP,3,3,-4\n' in deck
+    assert manifest['frictionless_faces'] is True
+    assert payload['mesh_size_mm'] == .8
+    assert payload['runtime_solver_enabled'] is False
+
+
+@pytest.mark.parametrize('overrides, expected_curve, expected_yield', [
+    ({'cae_yield_strength_mpa': 42}, None, 42),
+    ({'yield_strength_mpa': 41}, None, 41),
+    ({'cae_plastic_curve': [[20, 0], [23, .1]]}, [[20, 0], [23, .1]], 35),
+    ({'plastic_curve': [[25, 0], [28, .2]]}, [[25, 0], [28, .2]], 35),
+])
+def test_explicit_cae_settings_override_retained_defaults(overrides, expected_curve, expected_yield):
+    state = _state()
+    state.current_experiment_spec.update(
+        cae_elastic_modulus_mpa=1200, cae_poisson_ratio=.3,
+        cae_mesh_size_mm=1.2, cae_target_strain=.3, **overrides)
+    agent = AnalysisAgent()
+    payload = agent._cae_payload(state, agent._specimen_geometry(state))
+    assert payload['material']['elastic_modulus_mpa'] == 1200
+    assert payload['material']['poisson_ratio'] == .3
+    if expected_curve is None:
+        assert 'plastic_curve' not in payload['material']
+    else:
+        assert payload['material']['plastic_curve'] == expected_curve
+    assert payload['material']['yield_strength_mpa'] == expected_yield
+    assert payload['mesh_size_mm'] == 1.2
+    assert payload['loading']['target_strain'] == .3
+
+
 def _active_objective_service(tmp_path: Path) -> ObjectiveService:
     service = ObjectiveService(
         store=ObjectiveStore(tmp_path / "memory" / "objectives", run_root=tmp_path / "runs"),

@@ -123,6 +123,14 @@ async def test_measured_bo_precedes_real_background_study_and_remains_immutable(
         store = service.store(run_id)
         worker = service._workers[run_id]
         await asyncio.wait_for(solver_entered.wait(), 5)
+        solver_request = next(payload for phase, payload in requests if phase == 'solve')
+        assert solver_request['computation_limits']['threads'] == 10
+        assert solver_request['computation_limits']['equation_solver_threads'] == 10
+        assert solver_request['mesh_size_mm'] == .8
+        assert solver_request['surface_remesh'] == {
+            'method': 'isotropic', 'edge_length_mm': .8,
+            'iterations': 8, 'max_surface_distance_mm': .0275,
+        }
         assert not release_solver.is_set()
         job_id = foreground.data['analysis']['fem_job']['job_id']
         running = ImprovementStore(store.root).get(job_id)
@@ -152,7 +160,8 @@ async def test_measured_bo_precedes_real_background_study_and_remains_immutable(
         assert all(decision['source'] == 'virtual_test' for decision in study['decisions'])
         assert [name for name, _ in requests] == ['prepare', 'solve']
         assert requests[0][1]['specimen_id'] == requests[1][1]['specimen_id'] != specimen_id
-        assert requests[1][1]['material']['yield_strength_mpa'] == 35.0
+        assert requests[1][1]['material']['plastic_curve'] == [
+            [55, 0], [55, .02], [30, .15], [25, .4], [30, 1]]
         assert requests[1][1]['loading']['target_strain'] == .5
         assert foreground.data == returned_data
         assert state.current_experiment_spec == experiment_spec

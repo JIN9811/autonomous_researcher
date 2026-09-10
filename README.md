@@ -302,6 +302,14 @@ full manufacturing, material validity, or acquisition-based optimization.
 The linked report includes an archive hash index; raw operational artifacts
 remain local and are not included in the public repository.
 
+The completed [native CPU/GPU verification](docs/agents/analysis_agent.md#native-cpu-performance-verification)
+reached the full prescribed displacement on both backends with identical stored
+force-displacement curves. CPU-only execution with 10 performance cores is the
+selected local FEM runtime; physical-model calibration remains a separate claim.
+The [retained Analysis settings](docs/agents/analysis_agent.md#retained-runtime-settings)
+use the completed full-domain energy reference: 72.78 J against the paired
+experiment's 60.11 J (+21.08%). Explicit experiment settings remain authoritative.
+
 ## Platform Contribution
 
 The secondary platform contribution makes the system adaptable while retaining

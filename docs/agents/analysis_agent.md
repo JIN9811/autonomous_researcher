@@ -23,8 +23,8 @@ source_of_truth:
   - utils/cae_field_view.py
   - app/cae_fields_routes.py
   - orchestrator/langgraph_runtime.py
-last_verified: 2026-09-09
-verified_against: 20260909-sparse-postyield-03-and-245-targeted-tests
+last_verified: 2026-09-10
+verified_against: retained-energy-reference-native-deck-match-and-131-targeted-tests
 related_docs:
   - docs/agents/README.md
   - docs/agents/equipment_agent.md
@@ -46,7 +46,7 @@ supersedes: []
 - Physical effect: None; registered solver computation only
 - Primary handoff: Measured objective and evidence → Knowledge / BO
 - Live hardware validation: Prior complete cycle preserved; no new hardware execution
-- Known gap: New full-range FE improves peak/shape error; work remains +21.1%, with mesh convergence and independent prediction unvalidated
+- Known gap: Retained full-range FE work remains +21.1%; mesh convergence and independent prediction are unvalidated
 
 ## Overview and Responsibilities
 
@@ -301,11 +301,30 @@ declared application policy for the reported corner-scaled-Jacobian diagnostic,
 not universal element-quality or accuracy guarantees. `timeout_s: null` removes
 the native deadline; no worker wall-clock cutoff replaces it.
 
-The retained background reference uses explicit isotropic surface remeshing
-(`edge_length_mm: 0.6`, `iterations: 8`, `max_surface_distance_mm: 0.05`) unless
-the policy supplies another supported profile. Declared material remains intact.
-The remeshed yield-35 MPa FE reference is a comparison baseline, not a promoted
-or independently validated material model.
+### Retained runtime settings
+
+The current compression reference reproduces the completed sparse post-yield
+study: the user selected the retained full-domain result closest in integrated
+energy, not the earlier short-domain match or a peak-only match. Its paired
+experiment / FEM work is 60.108284 / 72.780144 J (+21.08%), compared with +26.90%
+for the previous completed baseline. See the [completed result](#new-completed-native-result--sparse-post-yield-study)
+for the acquisition-specific interval, curves and fields.
+
+| Setting | Default reference | Existing override |
+|---|---|---|
+| Elastic response | E = 1,800 MPa; ν = 0.35 | Experiment material parameters |
+| Flow stress / plastic strain | `(55, 0), (55, 0.02), (30, 0.15), (25, 0.4), (30, 1.0)`; MPa / dimensionless | Explicit plastic curve; explicit yield without a curve retains the constant-yield law |
+| Volume mesh target | 0.8 mm | Experiment mesh size, then background policy default |
+| Background surface remesh | Isotropic; edge follows selected mesh size; 8 iterations; 0.0275 mm operation-distance limit | `analysis_improvement.surface_remesh` |
+| Background boundary tolerance | 0.005 × current gauge length | `analysis_improvement.boundary_tolerance_mm` |
+| Loading and boundary | Existing `NLGEOM` displacement-controlled compression; frictionless end faces | Existing experiment loading and geometry parameters |
+| Background computation | 10 assembly/result threads; 10 equation-solver threads; no wall-clock deadline | Existing registered CPU solver path |
+
+This is a user-selected working hypothesis, not identified PLA properties or an
+automatically promoted material model. Dimensions and target strain continue to
+come from the current experiment; the archived displacement is not hard-coded.
+Explicit settings and already frozen jobs remain intact. The measured objective,
+BO handoff, bridge registration and solver enablement gates are unchanged.
 
 For the separate refinement path, optional `analysis_improvement` policy supplies
 material `candidates`, per-parameter `bounds`, `max_solver_jobs`,
@@ -474,10 +493,27 @@ the entry remains visible even when an old result has no field file.
 
 ## Artifacts and Verification
 
-### Latest verification — completed sparse post-yield FEM
+### Latest verification — retained settings restored
 
-A fresh native solve completed the entire requested domain; the earlier baseline
-is preserved below for comparison. Targeted non-actuating regression passed
+On 2026-09-10, **131 targeted Python tests passed** in 23.24 s, with five existing
+schema warnings. Coverage includes default and explicit material/mesh settings,
+native-deck generation, prepared solve contracts, background FEM and the two-loop
+software path. The measured handoff returns while the fixture solver is blocked;
+late FEM results do not change its values or archived bytes.
+
+Generating a native deck through the current Analysis payload and registered
+CAE normalizer, using the retained mesh, reproduced the archived input
+byte-for-byte: SHA-256
+`add53aa2c81b8bf99f33b358c54188bda588b58ad33758eb35f002ad5d56aeaf`.
+An additional small-geometry test verifies that requested height/strain change
+the imposed displacement. This check did not rerun native FEM, call an LLM or
+operate equipment; the completed numerical and API/local records below retain
+their original scope and dates.
+
+### Completed sparse post-yield verification record
+
+The 2026-09-09 native solve completed the entire requested domain; the earlier
+baseline is preserved below for comparison. Its non-actuating regression passed
 **245 Python tests** in 30.47 s, with 26 dependency warnings. Historical test
 counts below describe different runs and must not be summed into this total.
 
@@ -511,7 +547,7 @@ are retained locally and are not bundled into Git.
 | Frozen research references | Run improvement `inputs/`; hash-addressed coupon/literature/deformation references and rewritten policy paths |
 | Calibration research | `calibration.records`, individual errors, best eligible candidate, review and retention status; no automatic promotion |
 | Explicit forward hypothesis | Frozen `inputs/material_hypothesis.json`; `evidence.material_hypothesis` and `report/metrics.json.material_hypothesis` retain declared basis separately from calibrated candidates |
-| Forward material candidate | `frozen_material_candidate.json` only after completed, explicitly retained, evidence-admissible calibration; **not produced by the cancelled pilot** |
+| Forward material candidate | `frozen_material_candidate.json` only after completed, explicitly retained, evidence-admissible calibration |
 | API/local verification | `20260909-sparse-dual-backend-01/{openai,vllm}/`: `decisions.json`, `result.json`, archived/controlled workflow receipts and unsupported-acquisition review |
 | Solver evidence | INP, DAT, FRD, request and process logs |
 | Reusable native model | `artifacts.model_package_path` and `model_package_manifest_path`; standalone deck, optional mesh/source/preparation copies, relative-file hashes and conditions |
@@ -556,6 +592,22 @@ store through injected staged tools. It checks measured BO return while a fixtur
 solver remains blocked, one-acquisition execution, aligned full-curve comparison,
 and unchanged foreground values/artifact bytes. This is non-actuating software
 evidence, not a native solver or physical calibration run.
+
+### Native CPU performance verification
+
+The selected local runtime is CPU-only CalculiX 2.21/PaStiX with 10 performance
+cores. Analysis background FEM passes 10 assembly/result and 10 equation-solver
+threads through the existing bridge. The local `atr-ccx` launcher pins GB10 CPUs
+`5-9,15-19`; the previous solver remains available as `atr-ccx-spooles`.
+
+The same frozen specimen deck completed in 1523.008 s on CPU and 1361.686 s with
+GPU assistance. Both reached 15 mm in 182 accepted increments and produced 183
+finite displacement/force points identical at output precision to the completed
+reference. Peak process-tree RSS was 1.665 GiB / 2.015 GiB respectively. This is
+backend verification on one shared-machine case, not physical-model validation.
+Receipts: `artifacts/runs/validation-fem-cpu-gpu-xo0IjJUS/full-comparison.json`.
+The activated configured bridge path also passed a native reference beam solve;
+24 targeted Analysis/runtime/solver regression tests passed without device use.
 
 ### New completed native result — sparse post-yield study
 
@@ -614,12 +666,10 @@ sampled CPU can miss short-lived children. Coarsening did **not** reduce total
 cost here: the changed nonlinear material model required more increments and
 cutbacks, so this is not an isolated mesh-speed benchmark.
 
-After native completion, the initial API review returned an empty response.
-An 8.06 s review of saved evidence concluded the numerical job without another
-solve. Original `result.json` and corrected `result-review/result.json` remain
-separate. The runtime now retains completed numerical evidence on review failure,
-records `review_status: failed`, and holds further action rather than repeating
-successful work. Cancellation still propagates to the compute owner.
+A separate 8.06 s review of saved evidence concluded the numerical job without
+another solve. Numerical execution and review receipts remain separate
+(`result.json`, `result-review/result.json`). Completed computation is retained
+if a later review fails; successful work is not repeated.
 
 The run retains numbered tool receipts, frozen inputs, the reusable native model
 package, INP/DAT/FRD, full curve and fields, `report/metrics.json`,
@@ -655,10 +705,9 @@ This is solver execution evidence, not independently validated material behavior
 
 Summed RSS can count shared pages more than once; sampled CPU can miss short-lived
 children. These are measured process-scope observations, not total host requirements.
-Initial result review exceeded the request budget because raw field arrays were
-included. The corrected decision boundary sends compact evidence; the real API
-review used saved complete results and did not rerun the solver. Original and
-corrected receipts remain separate (`result.json`, `result-review/result.json`).
+The real API review used compact saved evidence and did not rerun the solver.
+Numerical and review receipts remain separate (`result.json`,
+`result-review/result.json`).
 
 ![Paired experimental and FEM force-displacement and engineering stress-strain curves](assets/figures/analysis_04_native_comparison.png)
 
@@ -683,21 +732,6 @@ deck, mesh, original STL, preparation record, units, hashes and offline executio
 instructions. Copy that directory and run `ccx -i model`; model portability is
 separate from predictive validation. Machine-readable calculations and image
 provenance are in the run's `report/metrics.json` and `report/provenance.json`.
-
-### Cancelled softening pilot — diagnostic artifacts only
-
-`artifacts/runs/validation-fem-20260909-feature-calibration-01/` contains one
-cancelled candidate, with **65 converged increments to 4.408996 mm**, short of
-the requested 15 mm. Its partial peak was 6,121.831 N at 2.273438 mm. Elapsed time
-was **2,164.29 s (36.07 min)** and sampled peak process-tree RSS was **3.07 GiB**.
-These values describe the cancelled research computation, not a replacement for
-the completed baseline or evidence of full-domain agreement.
-
-Cancellation used the existing compute owner. The numbered preparation/solve
-receipts, partial curve, INP/DAT/FRD, field manifest, prepared model package,
-`result.json`, `resources_summary.json` and `run_metadata.json` remain preserved.
-Original source hashes were unchanged. No second candidate, full-domain work
-estimate, forward-material export or material promotion was produced.
 
 ### Prior parallel closed-loop verification
 

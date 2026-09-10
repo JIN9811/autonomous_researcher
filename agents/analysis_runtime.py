@@ -317,18 +317,18 @@ class AnalysisRuntimeService:
                             coordinate_convention={'name': 'contact_threshold', 'relative_force_threshold': .01,
                                                    'absolute_force_threshold_N': 2.0})
             evidence['payload']['computation_limits'] = {
-                'timeout_s': None, 'threads': 4, 'equation_solver_threads': 1,
+                'timeout_s': None, 'threads': 10, 'equation_solver_threads': 10,
                 'max_mesh_elements': int(policy.get('max_mesh_elements', 500000)),
             }
             # Reproduce the retained reference preprocessing on this specimen's STL,
             # never reuse the archived specimen's mesh or claim material validation.
-            evidence['payload']['surface_remesh'] = deepcopy(policy.get('surface_remesh', {
-                'method': 'isotropic', 'edge_length_mm': .6,
-                'iterations': 8, 'max_surface_distance_mm': .05,
-            }))
             spec = state.current_experiment_spec
             if 'cae_mesh_size_mm' not in spec and 'mesh_size_mm' not in spec:
-                evidence['payload']['mesh_size_mm'] = float(policy.get('mesh_size_mm', .6))
+                evidence['payload']['mesh_size_mm'] = float(policy.get('mesh_size_mm', .8))
+            evidence['payload']['surface_remesh'] = deepcopy(policy.get('surface_remesh', {
+                'method': 'isotropic', 'edge_length_mm': evidence['payload']['mesh_size_mm'],
+                'iterations': 8, 'max_surface_distance_mm': .0275,
+            }))
             evidence['payload']['boundary_tolerance_mm'] = float(policy.get('boundary_tolerance_mm',
                 .005 * float(analysis['specimen_geometry']['gauge_length_mm'])))
         from agents.analysis_mechanisms import freeze_mechanism_references

@@ -268,6 +268,12 @@ class AnalysisAgent(BaseAgent):
         }
         if isinstance(spec.get("cae_plastic_curve") or spec.get("plastic_curve"), list):
             material["plastic_curve"] = spec.get("cae_plastic_curve") or spec.get("plastic_curve")
+        elif not any(spec.get(key) is not None for key in ("cae_yield_strength_mpa", "yield_strength_mpa")):
+            # User-selected completed compression reference, not measured PLA
+            # properties. Explicit experiment material settings take precedence.
+            material["yield_strength_mpa"] = 55.0
+            material["plastic_curve"] = [[55.0, 0.0], [55.0, 0.02], [30.0, 0.15],
+                                         [25.0, 0.4], [30.0, 1.0]]
         loading = {
             "load_type": "quasistatic_compression",
             "loading_control": "displacement",
@@ -320,7 +326,7 @@ class AnalysisAgent(BaseAgent):
                 "wall_thickness_mm": self._safe_float(spec.get("wall_thickness_mm"), 1.2),
                 "cell_size_mm": self._safe_float(spec.get("cell_size_mm"), 5.0),
             },
-            "mesh_size_mm": self._safe_float(spec.get("cae_mesh_size_mm") or spec.get("mesh_size_mm"), 2.0),
+            "mesh_size_mm": self._safe_float(spec.get("cae_mesh_size_mm") or spec.get("mesh_size_mm"), 0.8),
             "require_solver": bool(spec.get("require_cae_solver", False)),
             "runtime_solver_enabled": bool(spec.get("runtime_solver_enabled", False)),
             "reference_calibration": (
