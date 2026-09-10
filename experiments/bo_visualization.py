@@ -127,14 +127,17 @@ def _design_space_display(parameter_space: dict[str, Any]) -> dict[str, Any]:
     feasible_cells = [float(value) for value in cells if _finite(value) is not None]
     density = parameter_space.get("relative_density") if isinstance(parameter_space.get("relative_density"), list) else []
     density_bounds = [float(value) for value in density if _finite(value) is not None]
-    specimen_length = 30.0
+    cell_dimension = next((d for d in space.dimensions if d.name == "cell_size_mm"), None)
+    cell_kind = cell_dimension.kind if cell_dimension else "unavailable"
+    cell_bounds = list(cell_dimension.values) if cell_kind == "continuous" else []
     return {
         "dimension": len(active),
         "variables": active,
-        "specimen_length_mm": specimen_length,
-        "cell_size_rule": "a=L/N",
-        "cell_counts": [int(round(specimen_length / value)) for value in feasible_cells if value > 0.0],
-        "feasible_cell_sizes_mm": feasible_cells,
+        "cell_size_kind": cell_kind,
+        "cell_size_rule": "continuous bounds" if cell_bounds else cell_kind,
+        "cell_size_bounds_mm": cell_bounds,
+        "cell_counts": [],
+        "feasible_cell_sizes_mm": [] if cell_bounds else feasible_cells,
         "relative_density_bounds": density_bounds[:2],
         "input_normalization": "unit_hypercube",
     }
@@ -281,7 +284,7 @@ def _objective_trace(
                 "normalized_vector": [float(value) for value in vectors[index]],
                 "mean": float(means[index]),
                 "std": max(0.0, float(stds[index])),
-                "acquisition": max(0.0, _display_acquisition(acquisitions[index], acquisition_class) or 0.0),
+                "acquisition": _display_acquisition(acquisitions[index], acquisition_class) or 0.0,
             }
             for index in range(row_count)
             if all(_finite(value) is not None for value in (search_x[index], means[index], stds[index], acquisitions[index]))
@@ -362,7 +365,7 @@ def _objective_trace(
                 "parameters": {x_name: float(x_value), y_name: float(y_value)},
                 "mean": mean,
                 "std": max(0.0, std),
-                "acquisition": max(0.0, acquisition),
+                "acquisition": acquisition,
             })
 
     observation_rows: list[dict[str, Any]] = []
@@ -389,7 +392,7 @@ def _objective_trace(
             "parameters": dict(selected_parameters),
             "mean": _finite(selected.get("mean")) if _finite(selected.get("mean")) is not None else _finite(means[row_index][column_index]),
             "std": max(0.0, _finite(selected.get("std")) if _finite(selected.get("std")) is not None else (_finite(stds[row_index][column_index]) or 0.0)),
-            "acquisition": max(0.0, _finite(selected.get("acquisition")) if _finite(selected.get("acquisition")) is not None else (_finite(acquisitions[row_index][column_index]) or 0.0)),
+            "acquisition": _finite(selected.get("acquisition")) if _finite(selected.get("acquisition")) is not None else (_finite(acquisitions[row_index][column_index]) or 0.0),
         }
 
     observed_scores = [item["observed"] for item in observation_rows if _finite(item.get("observed")) is not None]

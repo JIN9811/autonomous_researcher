@@ -16,6 +16,14 @@ from matplotlib import pyplot as plt
 from experiments.bo_visualization import validate_bo_visualization
 
 
+def _acquisition_label(payload: dict[str, Any]) -> str:
+    name = str((payload.get("acquisition") or {}).get("name") or "Acquisition")
+    key = name.lower().replace("_", "").replace(" ", "")
+    return {"expectedimprovement": "EI", "logexpectedimprovement": "EI",
+            "upperconfidencebound": "UCB", "probabilityofimprovement": "PI",
+            "uncertaintysampling": "Uncertainty"}.get(key, name)
+
+
 def _artifact_stem(payload: dict[str, Any]) -> str:
     run_id = "".join(character if character.isalnum() or character in {"-", "_"} else "-" for character in str(payload.get("run_id") or "run"))
     return f"{run_id}_bo_step_{int(payload.get('step') or 0):03d}_posterior"
@@ -78,7 +86,7 @@ def _plot_posterior(normalized: dict[str, Any]) -> Any:
             linewidth=1.8,
             s=52,
             zorder=5,
-            label="EI-selected Next point",
+            label=f"{_acquisition_label(normalized)}-selected Next point",
         )
         posterior_axis.axvline(next_point["x"], color="#f97316", linewidth=0.9, linestyle="--", alpha=0.75)
     objective = normalized.get("objective") if isinstance(normalized.get("objective"), dict) else {}
@@ -111,7 +119,9 @@ def _plot_objective_trace(normalized: dict[str, Any], trace: dict[str, Any]) -> 
     x = [row["search_x"] for row in rows]
     mean = [row["mean"] for row in rows]
     std = [row["std"] for row in rows]
-    acquisition = [max(0.0, row.get("acquisition") or 0.0) for row in rows]
+    acquisition = [row.get("acquisition") or 0.0 for row in rows]
+    acquisition_name = _acquisition_label(normalized)
+    acquisition_title = "Expected Improvement" if acquisition_name == "EI" else acquisition_name
     for sigma in (3, 2, 1):
         posterior_axis.fill_between(
             x,
@@ -128,7 +138,7 @@ def _plot_objective_trace(normalized: dict[str, Any], trace: dict[str, Any]) -> 
             [row["search_x"] for row in evaluated], [row["observed"] for row in evaluated],
             color="#dc2626", edgecolor="white", linewidth=0.7, s=31, zorder=5, label="Measured observations",
         )
-    threshold = trace.get("improvement_threshold")
+    threshold = trace.get("improvement_threshold") if acquisition_name == "EI" else None
     if isinstance(threshold, (int, float)):
         posterior_axis.axhline(
             threshold,
@@ -137,21 +147,21 @@ def _plot_objective_trace(normalized: dict[str, Any], trace: dict[str, Any]) -> 
             linestyle="--",
             label="Improvement threshold (best + ξ)",
         )
-    acquisition_axis.plot([], [], color="#15803d", linewidth=1.9, label="Expected Improvement")
+    acquisition_axis.plot([], [], color="#15803d", linewidth=1.9, label=acquisition_title)
     next_row = trace.get("next_point") if isinstance(trace.get("next_point"), dict) else None
     if next_row:
         for axis in (posterior_axis, acquisition_axis):
             axis.axvline(next_row["search_x"], color="#2563eb", linewidth=1.2, linestyle="-.")
         acquisition_axis.scatter(
-            [next_row["search_x"]], [max(0.0, next_row.get("acquisition") or 0.0)],
-            color="#1d4ed8", marker="*", s=80, zorder=6, label="EI-selected next input",
+            [next_row["search_x"]], [next_row.get("acquisition") or 0.0],
+            color="#1d4ed8", marker="*", s=80, zorder=6, label=f"{_acquisition_label(normalized)}-selected next input",
         )
     posterior_axis.set_xlim(0.0, 1.0)
     posterior_axis.set_ylabel("Score", fontsize=9)
-    acquisition_axis.set_ylabel("Expected Improvement", fontsize=9)
+    acquisition_axis.set_ylabel("Expected Improvement" if _acquisition_label(normalized) == "EI" else _acquisition_label(normalized), fontsize=9)
     acquisition_axis.set_xlabel("Normalized BO search coordinate", fontsize=9)
     posterior_axis.set_title(
-        f"BO objective posterior and expected improvement, step {int(normalized.get('step') or 0)}",
+        f"BO objective posterior and {acquisition_title.lower()}, step {int(normalized.get('step') or 0)}",
         fontsize=11, fontweight="bold", loc="left", pad=54,
     )
     posterior_axis.legend(
@@ -198,7 +208,7 @@ def _plot_objective_surface(normalized: dict[str, Any], surface: dict[str, Any])
     next_x = next_parameters.get(surface["y_parameter"])
     next_y = next_parameters.get(surface["x_parameter"])
     if isinstance(next_x, (int, float)) and isinstance(next_y, (int, float)):
-        axis.scatter([next_x], [next_y], color="#f97316", marker="x", linewidth=2.0, s=64, zorder=5, label="EI-selected next input")
+        axis.scatter([next_x], [next_y], color="#f97316", marker="x", linewidth=2.0, s=64, zorder=5, label=f"{_acquisition_label(normalized)}-selected next input")
     axis.set_xlabel(f"x2: {str(surface['y_parameter']).replace('_', ' ')}", fontsize=9)
     axis.set_ylabel(f"x1: {str(surface['x_parameter']).replace('_', ' ')}", fontsize=9)
     axis.set_title(
@@ -255,14 +265,14 @@ def _plot_grouped_posterior(normalized: dict[str, Any], series_rows: list[dict[s
     if isinstance(next_x, (int, float)) and isinstance(next_mean, (int, float)):
         posterior_axis.scatter(
             [next_x], [next_mean], color="#f97316", marker="x", linewidth=1.8, s=52,
-            zorder=5, label="EI-selected next point",
+            zorder=5, label=f"{_acquisition_label(normalized)}-selected next point",
         )
         posterior_axis.axvline(next_x, color="#f97316", linewidth=0.9, linestyle="--", alpha=0.75)
         acquisition_axis.axvline(next_x, color="#f97316", linewidth=0.9, linestyle="--", alpha=0.75)
     objective = normalized.get("objective") if isinstance(normalized.get("objective"), dict) else {}
     objective_unit = str(objective.get("unit") or "")
     posterior_axis.set_ylabel(f"Objective ({objective_unit})" if objective_unit else "Objective", fontsize=9)
-    acquisition_axis.set_ylabel("Expected Improvement", fontsize=9)
+    acquisition_axis.set_ylabel("Expected Improvement" if _acquisition_label(normalized) == "EI" else _acquisition_label(normalized), fontsize=9)
     acquisition_axis.set_xlabel(str(series_rows[0].get("x_label") or x_parameter or "Parameter"), fontsize=9)
     posterior_axis.set_title(
         f"Bayesian optimization posterior, step {int(normalized.get('step') or 0)}",

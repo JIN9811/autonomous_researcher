@@ -152,9 +152,10 @@ def test_build_bo_visualization_exposes_two_variable_gyroid_sea_contract() -> No
     assert payload["design_space"] == {
         "dimension": 2,
         "variables": ["cell_size_mm", "relative_density"],
-        "specimen_length_mm": 30.0,
-        "cell_size_rule": "a=L/N",
-        "cell_counts": [6, 5, 4, 3],
+        "cell_size_kind": "discrete",
+        "cell_size_rule": "discrete",
+        "cell_size_bounds_mm": [],
+        "cell_counts": [],
         "feasible_cell_sizes_mm": [5.0, 6.0, 7.5, 10.0],
         "relative_density_bounds": [0.2, 0.48],
         "input_normalization": "unit_hypercube",

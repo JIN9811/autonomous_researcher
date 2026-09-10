@@ -76,7 +76,7 @@ Design rows were updated on 2026-09-07 for the bounded decision layer; see its
 | Lab Equipment | `equipment` | Verified placement/specimen, exact stacked Flow/Skills, approvals | Bounded LLM Flow selection; deterministic execution; terminal screenshot/log review | Manipulation clearance → fresh Vision → Analysis | `physical_possible` through existing gated workers |
 | Analysis | `analysis` | Equipment artifact and measurement metadata | Canonical curve, metrics, optional CAE/FEM comparison, objective/uncertainty | Knowledge and BO handoff | none directly; optional external analysis process |
 | Knowledge | `knowledge` | Accepted artifacts/reports/decisions/provenance | Durable knowledge, patterns, performance, BO/evolution context | BO, Design context, Evolution review | none; persistent local/graph state |
-| BO | `bo` | Analysis handoff, prior trials, constraints, Knowledge context | Numeric acquisition and validated next-candidate recommendation | Guardian and next Design cycle | none; proposal only |
+| BO | `bo` | Analysis observations, continuous domain, settings, Knowledge context | Bounded LLM strategy/tool decision and review of the numerical candidate | Guardian and next Design cycle | none; proposal only |
 | Guardian | Safety/control plane | State, risk, failures, device health, approvals, tool records | Continue/review/stop/error safety decision | Orchestrator route translation | no direct action; can block/stop downstream action |
 
 ## Three-Level Control Matrix
@@ -96,7 +96,7 @@ progression.
 | Lab Equipment | measurement stage after verified placement; existing clearance/handoff routing | LLM selects configured Flow and reviews terminal evidence; durable claim and bounded safe recovery | Existing Skill Runtime and Windows/Local PyAutoGUI workers; no intermediate Equipment LLM calls |
 | Analysis | evaluation stage and Knowledge/BO handoff | parse, normalize, derive metrics/uncertainty/objective | bounded solver/computation bridge |
 | Knowledge | durable context stage before BO | provenance, typed records, patterns, relation review, context | ledger/outbox/ontology/graph adapters |
-| BO | next-candidate stage before Guardian/Design | LHS/GP/acquisition/constraints/recommendation | BoTorch and benchmark computation tools |
+| BO | BO-owned strategy and result judgment before Guardian/Design | Validated dispatch, LHS state, candidate integrity and handoff | BoTorch and benchmark computation tools |
 | Guardian | cross-level route authority | policy/risk/evidence/health/approval evaluation | read-only health/queue plus block/stop; hard interlocks remain in bridges |
 
 See [Three-Level Control Model](../runtime/three_level_control_model.md) for
@@ -114,7 +114,7 @@ state ownership, failure propagation, and the manual Device Workspace boundary.
 | Lab Equipment | exact Profile/Flow/Skills, verified placement, bridge readiness | existing result/report/handoff plus decisions and workflow execution ID | durable invocation, completed-block checkpoint, terminal screenshot/hash, logs, CSV/readiness | existing hard gates, rejected review, changed scope, claimed invocation or unknown effects |
 | Analysis | identifiable raw equipment artifact | canonical curve, UTM metrics, CAE/FEM result, evaluation, BO handoff | input hash, parser/unit record, derived artifacts | missing/corrupt input, unresolved units, curve quality failure |
 | Knowledge | accepted stage artifacts and provenance | `knowledge_context.v1`, `knowledge_report.v1`, `evolution_proposal.v1`, typed records | audit ledger, outbox, receipts, JSONL/graph records | provenance/ontology rejection or persistence failure |
-| BO | valid analysis/prior evidence and bounded search space | ranked candidates, recommendation, BO artifacts, Design constraints | score table, reasoning patch, penalties, recommendation | no valid candidate, constraint/validator rejection |
+| BO | valid observations and bounded search space | numerical candidate, decision, artifacts, Design constraints and domain | tool/evidence trace, numerical result, accepted candidate identity | model/optimizer failure, owner return, candidate validation rejection |
 | Guardian | current state, risk/device/failure/approval context | gate/decision/contract, incidents, corrective actions | Guardian events, approval and incident records | unsafe, uncertain, exhausted budget, missing approval or evidence |
 
 ## API Classification Matrix
@@ -144,7 +144,7 @@ state ownership, failure propagation, and the manual Device Workspace boundary.
 | Lab Equipment | Equipment-owned `equipment_workflow_decision`; bounded proposals and shared `LLMImageInput` | workflow decision boundary, durable Equipment Runtime, exact Flow/Skill registry | registered API/local model; existing PyAutoGUI HTTP worker and desktop application | UTM and registered equipment | physical_possible through existing gated execution |
 | Analysis | task-specific `analysis_reasoning`; module role empty | parsers, curve/metric logic | CAE/CalculiX through registered bridge | none directly | external_service/local process |
 | Knowledge | `knowledge_synthesis`; reconciliation uses already-loaded model | Knowledge service, ontology, ledger, outbox, repositories | optional Neo4j/Graphify and selected model service | none | model/local_state/external_service |
-| BO | `bo_policy` | candidate/acquisition/constraint logic | selected model backend for bounded advice | none | model/local_state |
+| BO | `bo_policy` | strict local tool dispatch and numerical candidate validation | selected model backend for strategy/evidence/result decisions | none | model/local_state |
 | Guardian | `guardian_review` | policy gate, status aggregation, approval/event services | device/queue status connections and selected model | none directly | model plus downstream stop/block |
 
 ## Safety and Recovery Matrix

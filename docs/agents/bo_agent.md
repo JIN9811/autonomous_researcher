@@ -4,22 +4,22 @@ subtype: system
 status: active
 authority: descriptive
 audience: [researcher, reviewer, developer, operator]
-scope: [agents, bayesian_optimization, next_candidate]
-summary: Current contract for evidence-filtered candidate generation, numeric acquisition, bounded LLM advice, and next-Design recommendation.
+scope: [agents, bayesian_optimization, next_candidate, decision_tools]
+summary: BO-owned strategy and tool decisions around the existing numerical optimizer, with continuous parameter handoff to Design.
 source_of_truth:
   - agents/bo_agent.py
-  - experiments/lhs_design_visualization.py
-  - reporting/lhs_design_visualization_artifacts.py
+  - agents/bo_decision.py
+  - learning/bo_parameter_space.py
+  - learning/botorch_backend.py
   - experiments/bo_visualization.py
+  - experiments/lhs_design_visualization.py
   - reporting/bo_visualization_artifacts.py
   - graphs/modules/bo/module.yaml
   - app/main.py
   - objectives/authoring.py
   - objectives/service.py
-  - web/static/objective_builder.js
-  - experiments
-last_verified: 2026-08-11
-verified_against: 4cccb05
+last_verified: 2026-09-10
+verified_against: BO-Agent
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -27,47 +27,181 @@ related_docs:
   - docs/agents/knowledge_agent.md
   - docs/agents/design_agent.md
   - docs/agents/bo_agent_runtime_guideline.txt
+  - docs/superpowers/specs/2026-09-10-bo-strategy-continuous-design.md
 supersedes: []
 ---
 
 # Bayesian Optimization Agent Reference
 
-## Summary
+## Status at a Glance
 
-`BOAgent` converts valid analysis/prior evidence and a bounded search space into
-one sequential next-candidate recommendation. Latin Hypercube sampling supplies
-the initial design; after enough accepted observations, a BoTorch
-`SingleTaskGP` and direct acquisition optimizer select the next point. Numeric
-acquisition, constraints, failure penalties, and validators are authoritative;
-LLM hypothesis/preference is advisory. The recommendation returns through
-Guardian and Design before any physical action.
+- Runtime status: Implemented / software recommendation only
+- LLM decision layer: Implemented / API and local vLLM verified
+- Numeric candidate authority: LHS / BoTorch; two continuous variables by default
+- Physical effect: None
+- Primary handoff: `next_design_request.v1` → Orchestrator → Design
+- Live hardware validation: No new device validation in this revision
+- Known gap: No demonstrated optimization gain from the LLM decision layer
 
-The default Gyroid problem has exactly two active variables:
-`cell_size_mm` and `relative_density`. For a 30 mm specimen,
-`cell_size_mm` is restricted by `a=L/N` to `{5.0, 6.0, 7.5, 10.0}` mm for
-`N={6,5,4,3}`, while `relative_density` is continuous on `[0.20, 0.48]`.
-Both dimensions are normalized to `[0,1]` before model fitting.
+## Overview and Responsibilities
 
-The canonical initial design requires eight accepted Latin Hypercube
-observations. Rejected, infeasible, proxy-only, or missing-SEA measurements do
-not count toward that target. The standard 20-cycle test mission uses the first
-eight accepted cycles for LHS and the remaining twelve for the ARD Matérn 5/2
-`SingleTaskGP` plus Expected Improvement phase. If a cycle is rejected, the GP
-transition waits until eight valid measured SEA observations exist.
+BO turns accepted Analysis observations and compatible Knowledge evidence into
+a proposed next experiment. Its local High layer decides which permitted
+optimization action to request and whether the numerical result is suitable
+for handoff. LHS or BoTorch calculates the point; the model does not generate
+coordinates or add a subjective preference score to replace that point.
 
-During this initial phase the selected point is the next deterministic LHS
-point. Candidate ranking, acquisition scoring, combined scoring, and LLM
-preference reranking are disabled and cannot replace that point. `bo_result`
-reports `optimization_phase=initial_design`, `backend_active=lhs`, and explicit
-`initial_design.completed/target/next_index` fields. These fields are also the
-authoritative source for the Live GUI phase display.
+| Owned by BO | Not owned |
+|---|---|
+| Optimization strategy and evidence-sufficiency decisions | Global cycle scheduling or physical execution |
+| LHS state, numerical optimizer invocation and candidate review | Recalculating measured Analysis scores |
+| Continuous search-domain normalization and recommendation | Changing the approved objective or locked user settings |
+| Decision, numerical result and next-Design artifacts | Target-attainment judgment or automatic stopping |
 
-The first and every subsequent Design call is mediated by Orchestrator. Test
-mode automatically allocates the fixed LHS queue, but Orchestrator still emits
-`orchestrator_design_contract.v1` JSON before Design Agent runs. BO emits
-`next_design_request.v1`; Orchestrator validates and republishes it for the next
-cycle. Design Agent does not read a competing default/random active-variable
-source when that contract is ready.
+### Five-Area Responsibility Map
+
+| Area | BO responsibility | Boundary |
+|---|---|---|
+| High-Level Control | Interpret optimization evidence, select a permitted strategy/tool, review the result | Global mission/routing stays with Orchestrator; coordinates stay with the optimizer |
+| Middle-Level Control | Freeze inputs, validate local requests, dispatch bounded tools, package the result | One optimizer invocation per decision; no re-execution after success |
+| Low-Level Control | Existing `experiment.benchmark`, LHS, GP fitting and acquisition optimization | Numerical computation only |
+| Guardian / Safety | Observation identity/eligibility, bounds, locked values, candidate identity and budgets | Model acceptance cannot bypass hard checks |
+| Knowledge / Evidence | Supplied history, local retrieval, diagnostics and loop-scoped artifacts | Sources are evidence, not instructions or current measurements |
+
+These are responsibility areas, not five serial model calls. The normal BO
+path contains a bounded local decision loop, not a new Orchestrator node.
+
+## Closed-Loop Position and Handoffs
+
+![BO handoffs](assets/figures/bo_01_closed_loop_handoffs.svg)
+
+**Figure BO-1.** Code-inspection projection of BO within the existing loop.
+Solid arrows carry task/result handoffs; dashed arrows carry evidence.
+Downstream device ownership is unchanged.
+
+| Direction | Contract/state | Purpose |
+|---|---|---|
+| In: Analysis | `bo_handoff`, `bo_observation`, experiment evaluations | Valid objective observations with parameter/provenance identity |
+| In: Knowledge | BO context and compatible prior records | History and failure context |
+| In: operator/runtime | Objective, `parameter_space`, strategy, LHS configuration and locks | Bounded optimization request |
+| Out: runtime | `AgentResult.data.bo_result` and decision evidence | Accepted, returned or failed result |
+| Out: Design | `next_design_request.v1` → `orchestrator_design_contract.v1` | Candidate ID, exact coordinates and declared domain |
+| Out: artifacts | Numerical result, decision/tool trace and plots | Per-loop audit and read-only visualization |
+
+## Internal Workflow
+
+| Phase | Work | Result |
+|---|---|---|
+| Intake | Resolve objective; filter incompatible/invalid observations; preserve failures separately | Frozen eligible observations and evidence IDs |
+| Decide | Existing `AgentContext.complete("bo_policy", ...)` selects a local action | Validated tool request |
+| Inspect | Compute diagnostics or retrieve bounded local context | Source-labelled evidence returned to the model |
+| Optimize | Dispatch the existing numerical tool once | LHS point or optimizer-selected candidate |
+| Review | Model accepts the exact result or returns to owner | Candidate identity and hard checks remain authoritative |
+| Finalize | Existing artifact/state/handoff builders | No change to graph, bridge or device routes |
+
+![BO decision and execution boundary](assets/figures/bo_02_execution_effect_boundary.svg)
+
+**Figure BO-2.** Strategy and evidence review belong to the local LLM layer.
+The numerical result is frozen before review; inspection cannot reopen the
+optimizer or mutate its candidate. Evidence is retained on both acceptance
+and failure.
+
+## Decision and Evaluation
+
+**Decision question:** Given the current observations, permitted settings and
+available evidence, which optimization action is appropriate, and is its
+numerical result ready for Design review?
+
+| Evidence | Model decision | Code-owned limit |
+|---|---|---|
+| Observations, domain and LHS state | Inspect or run the configured optimizer | LHS count/seed/phase cannot be overridden |
+| Acquisition configuration | Preserve configured strategy, or select an allowed strategy when explicitly enabled | Objective, domain, budget and locked settings remain fixed |
+| Local Knowledge and numerical diagnostics | Request more evidence or return to owner | No arbitrary web, file, shell or device call |
+| Numerical candidate and diagnostics | Accept that candidate or hold the handoff | Known candidate ID; unchanged finite in-domain coordinates |
+
+Diagnostics describe available observations and optimizer output. They do not
+declare that a research target has been reached or trigger cycle termination.
+Posterior uncertainty is a model quantity, not an invented measurement
+uncertainty or a proof of scientific improvement.
+
+### Local Decision Tools
+
+These names describe the BO-local JSON dispatcher, not new global bridge APIs.
+
+| Tool | Work | Allowed phase |
+|---|---|---|
+| `inspect_diagnostics` | Read code-computed observation/domain/result diagnostics | Before or after optimization |
+| `retrieve_knowledge` | Retrieve bounded source-labelled context | Before or after optimization |
+| `run_optimizer` | Invoke `experiment.benchmark` with validated settings | Before optimization only |
+| `accept_recommendation` | Accept the exact numerical candidate | After a valid optimizer result |
+| `return_to_owner` | Return without a ready Design handoff | Either phase |
+
+Requests are strict JSON with `tool`, `arguments`, `reason` and
+`evidence_refs`. Every reference must resolve to supplied context or a recorded
+tool result. An acceptance names the numerical candidate ID, not a new
+parameter vector. Malformed requests and unavailable inference remain explicit
+failures; they do not silently execute a successful numeric fallback.
+
+| Decision setting | Default | Valid control |
+|---|---|---|
+| `strategy_control` | `configured` | `configured` keeps settings; `adaptive` permits bounded acquisition arguments |
+| `decision_max_calls` | 6 | Integer 1–12 local decisions |
+| `decision_call_timeout_s` | 45 s | Positive, at most 300 s |
+| `decision_total_timeout_s` | 120 s | Positive, at most 300 s |
+
+The Workspace exposes strategy control. The timeout/call settings are BO runtime
+settings, not new device parameters. In adaptive mode, `run_optimizer` accepts
+only the supported acquisition enum, `kappa` in [0, 20], and `xi`,
+`exploration_weight`, `exploitation_weight` in [0, 1]. Other request arguments
+cannot change the experiment contract.
+
+Synchronous numerical/local-index callbacks run off the event loop. Decision
+timeouts bound how long the coordinator awaits them; cancelling that wait does
+not kill native computation already running in a worker thread. Existing
+backend optimization timeouts remain in effect. A timed-out decision is not
+accepted and does not dispatch another optimization within that decision.
+
+## Continuous Parameter Contract
+
+| Input form | Meaning in new BO requests | Example |
+|---|---|---|
+| One numeric value | Fixed coordinate | `cell_size_mm: [7.13789]` |
+| Two ascending finite values | Continuous bounds | `cell_size_mm: [6.2, 9.1]` |
+| Legacy numeric cell table | Normalize to minimum/maximum bounds | `[5, 6, 7.5, 10]` → `[5, 10]` |
+| Archived discrete visualization | Preserve original discrete semantics | Old artifacts are not rewritten |
+
+The default active domains are `cell_size_mm: [5.0, 10.0]` and
+`relative_density: [0.20, 0.48]`. These are configuration defaults, not an
+integer-cell-count equation. Existing manufacturing bounds and fixed geometry/
+process settings remain enforced. The generic `BOParameterSpace` still supports
+mixed/discrete problems.
+
+The first LHS request and subsequent BO requests carry `parameter_space`.
+Orchestrator republishes it with the authoritative point. Design validates
+against that domain and preserves numerical precision through candidate
+preparation and geometry arguments; display rounding does not change the
+stored coordinate. Older requests without domain metadata retain their
+compatible legacy validation path.
+
+### Initialization and Acquisition
+
+The existing initial-design policy is unchanged: the default two-variable
+problem requires eight accepted LHS observations. Rejected or ineligible
+records do not advance that count. The first TEST Design request is still
+published by Orchestrator; later BO requests continue the same deterministic
+queue before GP acquisition becomes active.
+
+During initialization, `optimization_phase=initial_design`,
+`backend_active=lhs` and `initial_design.completed/target/next_index` are
+authoritative. Acquisition ranking and model preference cannot replace the
+LHS point. Once eligible, the default backend fits `SingleTaskGP` and calls
+`optimize_acqf` for the continuous space. Generic mixed spaces retain
+`optimize_acqf_mixed`.
+
+The default acquisition is Expected Improvement, implemented with
+`LogExpectedImprovement`; UCB, PI and the existing other supported acquisition
+policies remain available. The selected numeric backend never silently
+switches to `lightweight_pool`.
 
 ## Compiled Objective Binding
 
@@ -119,280 +253,137 @@ choose `Load Selected as Revision` before it can become the parent of a new
 manual version. Manual drafts still require Validate, Preview, Approve, and
 Activate before BO can consume them.
 
-## Scope
 
-Included are priors, evidence table, search-space update, deterministic initial
-design, GP fitting, acquisition optimization, advisory preference audit,
-constraints, recommendation, artifacts, and Design handoff. BO does not command
-devices or certify scientific improvement.
+## Tools, APIs and Connections
 
-## Source of Truth
+![BO APIs and connections](assets/figures/bo_03_api_connection_architecture.svg)
 
-BO agent/module, experiment benchmark/evaluation services, BO routes, and
-Analysis/Knowledge/Design handoff state.
+**Figure BO-3.** Existing graph and workspace-agent entry points share the
+decision layer. The separate benchmark API remains a numerical comparison.
+Agent-local tools do not introduce device or provider-specific endpoints.
 
-## Actual Role
-
-| Does | Does not |
-|---|---|
-| Filter valid prior observations | Use invalid/missing trials as measured facts |
-| Generate and numerically score candidates | Let LLM preference override hard constraints |
-| Apply failure/constraint penalties | Treat a recommendation as approval |
-| Select and explain one bounded recommendation | Start Design, printing, robot, or equipment directly |
-| Emit artifacts and Design constraints | Prove optimization benefit without comparison evidence |
-
-## Three-Level Control Classification
-
-| Level | BO responsibility | Authority boundary |
+| Surface | Existing route/tool | Effect |
 |---|---|---|
-| High-Level Control | Receives accepted Analysis/Knowledge evidence and emits one governed next-candidate recommendation for Guardian/Orchestrator/Design | A recommendation is neither approval nor a started experiment |
-| Middle-Level Control | Filter compatible priors, maintain LHS/cold-start state, fit/update GP, optimize acquisition, apply constraints/failure penalties, rank candidates, record critique, and package Design constraints | Numeric backend and deterministic validators remain authoritative over LLM preference; measured observations and posterior state must retain provenance |
-| Low-Level Control | Calls `experiment.benchmark` and configured BoTorch/numeric computation services | Tensor/model fitting, acquisition optimization, benchmark execution, and artifact generation are bounded computation effects; no printer, robot, or equipment authority exists |
+| Read/save settings | `GET/POST /api/bo/config` | Read or persist bounded configuration |
+| Workspace benchmark | `POST /api/bo/benchmark` | Explicit numerical comparison; separate from agent judgment |
+| Workspace agent run | `POST /api/bo/run` | BO decision, numeric result and handoff proposal |
+| Model | `bo_policy` through the registered backend | Strict JSON decision; API/local transport is unchanged |
+| Numeric tool | `experiment.benchmark` | Existing LHS/BoTorch execution |
+| Objective authoring | `/api/objectives/*` | Separate draft/validate/preview/approve/activate lifecycle |
+| Design handoff | Existing Orchestrator state | Proposal for the next cycle, not direct fabrication |
 
-Numeric backend recovery is Low-Level; rebuilding a valid posterior or
-recommendation is Middle-Level; accepting another cycle or stopping remains
-High-Level through Guardian and Orchestrator. The BO Workspace is manual
-authoring/inspection and does not itself execute the recommended experiment.
+## State, Events, Artifacts and Storage
 
-## Closed-Loop Position and Handoffs
+Existing `bo_result`, `recommendation`, `next_design_request`, visualization
+and prior-summary fields remain. Decision evidence records the requested tool,
+validated arguments, evidence references, result and model/test provenance.
+Legacy preference fields are compatibility data, not candidate-selection
+authority.
 
-![BO closed-loop position and handoffs](assets/figures/bo_01_closed_loop_handoffs.svg)
-
-**Figure BO-1.** Valid Analysis evidence and provenance-bounded Knowledge
-context become a ranked recommendation that still passes Guardian,
-Orchestrator, and Design governance before another cycle. This is an
-`inspection`-backed projection of baseline `0b7627b`; it does not establish
-optimization benefit or authorize a physical action.
-
-| Direction | Component | Contract/state | Purpose | Gate |
-|---|---|---|---|---|
-| In | Analysis | objective/uncertainty/evaluation | current trial | valid evidence |
-| In | Knowledge | BO context/prior trials/patterns | historical context | provenance/compatibility |
-| In | Constraints/failures | bounded search/safety limits | exclude/penalize | schema and domain rules |
-| Out | Guardian | recommendation/risk/evidence | continuation review | policy/budget |
-| Out | Design | candidate/parameters/constraints | next experiment spec | Design hard constraints |
-
-## Inputs and Outputs
-
-Inputs include analysis handoff, objective score, uncertainty, valid prior
-observations, Knowledge BO context, search-space constraints, failure memory,
-strategy, acquisition, and budget. Outputs include reasoning hypothesis/patch,
-candidate pool, numeric and LLM scores, penalties, ranked top-k, critique,
-recommendation, artifacts, metrics, decisions, and Design constraints.
-
-## Internal Execution
-
-| Step ID | Work | Boundary/output |
-|---|---|---|
-| `01_load_analysis_handoff` | current result | invalid handoff blocks |
-| `02_filter_valid_priors` | evidence filtering | accepted prior set |
-| `03_summarize_evidence_table` | bounded table | provenance summary |
-| `04_llm_reasoning_hypothesis_pass` | advisory hypothesis | no authority |
-| `05_validate_reasoning_patch` | schema/allowlist | accepted/rejected patch |
-| `06_update_search_space` | bounded variables | valid space |
-| `07_generate_initial_or_fit_gp` | LHS point or fitted SingleTaskGP | reproducible numeric state |
-| `08_optimize_numeric_acquisition` | one optimize_acqf(_mixed) point | numeric authority |
-| `09_score_llm_preference` | advisory preference | separate score |
-| `10_apply_constraint_and_failure_penalties` | exclusions/penalties | safe ranked inputs |
-| `11_rank_top_k_candidates` | numeric combined ranking | top-k |
-| `12_llm_top_k_critique` | bounded critique | advisory notes |
-| `13_select_recommendation` | validated selection | candidate/parameters |
-| `14_write_bo_artifacts` | score/reasoning records | evidence artifacts |
-| `15_handoff_design_constraints` | next-cycle packet | Design context |
-
-![BO internal execution and effect boundary](assets/figures/bo_02_execution_effect_boundary.svg)
-
-**Figure BO-2.** Fifteen internal entries preserve evidence intake, bounded
-reasoning, search construction, numeric acquisition, advisory model preference,
-constraints, penalties, critique, recommendation, artifacts, and Design
-handoff as distinct steps. This `inspection` figure groups manifest entries;
-numeric acquisition and validators remain authoritative.
-
-### Execution trace details
-
-| Phase | State read | Authoritative decision | State/evidence written | Failure/recovery |
-|---|---|---|---|---|
-| Trial intake | Analysis handoff and evidence identity | accept only valid objective/uncertainty records | current trial row | invalid handoff blocks BO |
-| Prior filtering | Knowledge BO context and prior trials | provenance/compatibility filtering and deduplication | accepted prior set and exclusions | missing priors may use explicit cold-start configuration |
-| Reasoning patch | bounded evidence table | schema/allowlist validation of model proposal | accepted or rejected reasoning patch | invalid patch is ignored and recorded |
-| Search and acquisition | strategy, mixed space, valid priors | LHS until ready, then direct BoTorch acquisition optimization | one selected point and posterior | empty/invalid space or fit failure yields revise/stop |
-| Preference and penalty | numeric scores, model preference, constraints, failure memory | validators and penalties bound the combined rank | separate preference, exclusion, and penalty fields | model preference cannot restore an invalid candidate |
-| Top-k and recommendation | valid ranked candidates | bounded critique followed by validated selection | top-k, critique, recommendation | no accepted candidate remains explicit |
-| Handoff | recommendation, parameters, constraints | package next-cycle proposal | BO artifacts and Design context | downstream Guardian and Design gates remain required |
-
-`/api/bo/config` persists strategy, `/api/bo/benchmark` produces bounded
-comparison evidence, and `/api/bo/run` performs a direct workspace
-recommendation. None of those responses proves a subsequent graph cycle or
-physical experiment occurred.
-
-## API Surface
-
-| Class | Method | Path | Service | Effect | Notes |
-|---|---|---|---|---|---|
-| connected | GET | `/api/bo/config` | BO workspace config | read_only | strategy/search settings |
-| operator | POST | `/api/bo/config` | BO workspace config | local_state | validated save |
-| connected | POST | `/api/bo/benchmark` | experiment benchmark | local_state/model | bounded comparative tooling, not live loop |
-| owned | POST | `/api/bo/run` | BO agent workspace execution | local_state/model | direct bounded recommendation and node event |
-| connected | GET | `/api/objectives/authoring-contract` | Objective Compiler | read_only | operators, units, fields, and AST limits |
-| operator | POST | `/api/objectives/manual` | Objective Compiler | local_state | normalized immutable operator-authored draft |
-| shared | POST | `/api/run/start` | graph/controller | physical_possible | closed-loop execution, not BO alone |
-
-Objective authoring and lifecycle operations are exposed separately through
-`/api/objectives/*`. The BO Workspace can compose/revise, validate, preview,
-approve, and activate an objective, while the Live GUI only displays the
-active binding as a compact read-only card.
-
-## Tools and Connections
-
-| Tool/service | Boundary | Effect | Evidence |
-|---|---|---|---|
-| `experiment.benchmark` | experiment service | local_state/model | benchmark result/config |
-| Numeric acquisition | in-process/lightweight or configured backend | local_state | score table |
-| LLM `bo_policy` | selected model backend | model | hypothesis/preference/critique |
-| Knowledge context | runtime/service output | read_only | trial/provenance refs |
-| Design handoff | Orchestrator state | local_state | candidate/constraints |
-
-## State, Events, Artifacts, and Storage
-
-BO state records strategy, acquisition, budget, priors, evidence summary,
-search-space version, pool, scores, penalties, top-k, recommendation, rationale,
-and handoff. Direct workspace execution emits a BO node-completion/result event;
-graph execution merges through normal stage state.
-
-### Objective and posterior visualization contract
-
-Initial design and Bayesian optimization use separate read-only projections.
-LHS steps emit `lhs_design_visualization.v1`; acquisition steps emit
-`bo_visualization.v1`. Neither projection selects a candidate, alters an
-acquisition value, or calls a device. The same contracts are consumed by `/bo`,
-Live GUI, and artifact rendering, so displayed values share one backend source
-without presenting LHS as a fitted posterior.
-
-| Field | Meaning |
+| Artifact | Content |
 |---|---|
-| `objective` | active equation, direction, unit, constraints, and immutable identity |
-| `posterior.mean` | SingleTaskGP posterior mean of the scalar score over the backend-provided normalized visualization coordinate |
-| `posterior.lower_95` / `upper_95` | exact `mean +/- 1.96 * std` bounds supplied by the backend |
-| `observations` | measured or explicitly labelled test observations already accepted by BO |
-| `current_best` | best accepted observation under the objective direction |
-| `next_point` | candidate selected by the existing BO execution path |
-| `acquisition` | configured acquisition values for the same candidate coordinates |
-| `parameter_slices` | backend-only diagnostic projections; never rendered in the default BO score figure |
-| `candidate_index_view` | bounded audit order retained for compatibility and initial-design inspection |
+| `bo_reasoning_report.json` | Decision/evidence report |
+| `bo_decision.json` | `bo_decision.v1` tool trace, model provenance and terminal decision |
+| `candidate_pool.json` | Numerical candidate audit |
+| `bo_next_candidate.json` | Existing next-Design request |
+| Decision/tool records | Local action sequence, validation and terminal result |
+| `*_posterior.png/.svg/.csv` | Shared posterior/acquisition figure and exact numeric companion |
+| LHS visualization artifacts | Initial design points, domain and progress |
 
-The production backend label is `SingleTaskGP`. It is generated from the same
-posterior arrays used by the optimizer; browsers must not refit, rescale
-uncertainty, or recompute confidence bounds. During initial design the model is
-labelled `LatinHypercube`. `pool_projection` remains only for the explicitly
-selected lightweight comparison backend.
+The existing `archive_agent_run` mechanism preserves results per run/loop/
+attempt; run-local BO files remain latest-view compatibility outputs.
+See [Loop Artifact Archiving](../runtime/loop_artifact_archiving.md).
 
-The Live GUI posterior is an output-space view over accepted multidimensional
-measurements, not a fabricated one-dimensional optimization. Its visible axes,
-labels, legends, annotations, and tooltips show only score, uncertainty,
-measured score, Expected Improvement, and an anonymous normalized search
-coordinate. Input names or values, parameter strata, parameter slices, and
-facet labels belong only to the separate LHS design-space card or backend audit
-data and must never appear in this posterior/EI figure.
-Design-stage proxy scores are excluded once measured Analysis outcomes exist,
-missing uncertainty is not invented, and the acquisition label uses the actual
-backend class such as `LogExpectedImprovement`.
+### Visualization Contract
 
-Before the eight-point initial design is complete, the Live GUI displays the
-LHS progress and selected design vector instead of presenting a candidate
-ranking or combined/acquisition score. The GP posterior and EI presentation is
-enabled only after the backend reports `optimization_phase=acquisition`.
-New initial-design payloads include the measured and next LHS coordinates for a
-true `cell_size_mm x relative_density` scatter. Legacy compact payloads that do
-not contain those coordinates retain the same labeled two-dimensional design
-space with an explicit missing-coordinate notice; the frontend must not invent
-points or fall back to a misleading one-dimensional sequence chart.
+LHS and acquisition remain separate read-only projections:
+`lhs_design_visualization.v1` and `bo_visualization.v1`. The LHS card shows
+the declared continuous domain and actual measured/next/planned coordinates.
+Archived discrete payloads keep discrete labels.
 
-A normal live update occurs only after one step completes. The controller emits
-`lhs.visualization.updated` during initial design and `bo.visualization.updated`
-during acquisition, persists both latest projections independently in run
-metadata, and keeps compact step identities for selector restoration. A stale,
-missing, invalid, or unbound payload is shown explicitly rather than replaced
-with invented values.
+The posterior card uses the backend-provided normalized search path, score,
+uncertainty bands and actual acquisition. It does not refit the GP in the
+browser, invent measurements or expose a one-dimensional parameter slice as
+the multidimensional search. Signed UCB values are preserved; EI-specific
+threshold annotations are shown only for EI.
 
-On completed BO workspace/agent results, the controller writes a 7.2 x 5.2 inch
-Matplotlib figure and its numeric companion under the run-local BO artifact
-directory:
+Workspace, Live GUI and saved Matplotlib artifacts use the same projection.
+Completed-step events replace existing figures; step selection is inspection,
+not another optimizer call. Initial LHS metadata can render before a posterior
+exists. Objective identity and constraints remain read-only on Live GUI.
 
-- `<run>_bo_step_<NNN>_posterior.png`, 150 DPI preview/report figure
-- `<run>_bo_step_<NNN>_posterior.svg`, vector publication artifact
-- `<run>_bo_step_<NNN>_posterior.csv`, exact `x`, mean, standard deviation,
-  confidence bounds, and acquisition values
+## Safety and Recovery
 
-Artifact-rendering errors are recorded as warnings and cannot change BO
-selection or fail the experiment. The older compact progress SVG is retained
-only for legacy BO results that do not contain `bo_visualization.v1`.
+BO has no printer, robot or equipment authority. Existing downstream Guardian,
+Orchestrator, Design and device gates remain in place.
 
-## Modes and Fallbacks
+| Condition | Behavior |
+|---|---|
+| Missing/incompatible Analysis observation | Existing BO observation gate blocks the request |
+| Invalid domain or requested coordinate | Explicit validation error; no snap to a table point |
+| Invalid model request, unknown evidence or candidate | No corresponding action is dispatched |
+| Model failure or mock response on normal path | Failed decision; no successful numeric fallback |
+| Successful optimization followed by model rejection/error | Preserve numerical evidence; no second optimizer invocation |
+| Explicit non-LLM TEST | Same local dispatcher with deterministic actions and `virtual_test` provenance |
+| Cancel | Propagate cancellation; no hidden retry |
 
-Test uses bounded synthetic/fixture observations. Replay reuses recorded trials.
-Benchmark is a separate evaluation path. Live-loop recommendation remains a
-software proposal until downstream governance. `botorch` is the production
-default; `lightweight_pool` is never an automatic fallback.
+The software TEST path does not imply that all platform TEST configurations are
+non-actuating; only BO's own computation has no hardware effect.
 
-## Safety, Approval, and Effect Boundary
+## Artifacts and Verification
 
-BO has no direct physical authority. Numeric acquisition and validators remain
-authoritative over model advice. Constraints and failure penalties precede
-selection. Guardian and Design re-evaluate the recommendation; downstream
-Specimen/Manipulation/Equipment gates still apply.
+Verification for this revision is recorded in the
+[implementation plan](../superpowers/plans/2026-09-10-bo-strategy-continuous.md).
+Tests cover domain conversion, precision-preserving Design handoff, bounded
+tool decisions, optimizer-result integrity and read-only visualization.
 
-## Errors and Recovery
+| Software check | Observed result | Scope |
+|---|---|---|
+| Combined changed-path regression suite | 194 passed / 22.78 s | BO/Design, real BoTorch, controller domains, compiled-objective restart, two offline graph loops, API, JavaScript and figures |
+| Static browser fixture | 4 viewport/view checks passed | Production LHS/BO renderers at desktop/mobile widths; no console errors or network requests |
+| Scoped documentation and figures | 7 Markdown documents / 3 SVGs valid | Current references, design, plan and source-backed figures |
 
-Invalid analysis or priors are excluded with reason. Empty search space or no
-valid candidate yields stop/revise, not an unconstrained suggestion. Invalid
-LLM patch/critique is ignored or recorded as rejected. Backend failure can use
-an explicitly configured deterministic path; configuration change remains
-visible.
+The combined suite includes fixed-density displays and accepted-to-held cache
+invalidation. It reported 12 existing Pydantic/framework deprecation warnings.
+Fabrication/acquisition are fixtures in the offline loops. This is software-path
+verification, not another physical closed-loop demonstration.
 
-## Operator and GUI Surfaces
+Registered-provider probes on 2026-09-10 ran `BOAgent.run_with_settings` with
+real LHS/BoTorch computation and explicitly synthetic observations. Each case
+completed `inspect_diagnostics → run_optimizer → accept_recommendation` with
+exactly one optimizer invocation and unchanged numerical coordinates.
 
-BO workspace exposes configuration, benchmark, direct run, AI objective
-composition, a template-free visual expression-tree builder, and a synchronized
-advanced JSON editor. Saved objective versions remain separate from the
-unsaved manual draft until explicit revision loading. Live GUI shows
-surrogate/acquisition, candidate ranking, uncertainty, recommendation, and
-artifacts. Workspace run or manual-draft creation does not prove graph or
-physical execution.
+| Registered backend / returned model | Initial LHS | Acquisition proposal | Result |
+|---|---:|---:|---|
+| API / `gpt-5.5` | 11.684 s | 10.372 s | Both accepted |
+| Local vLLM / `gemma4:31b` | 25.074 s | 31.349 s | Both accepted |
 
-The BO Workspace and Live GUI both place `BO Objective Equation` before a
-single replace-in-place `Live Posterior` figure. The default figure is the
-scalar score posterior and Expected Improvement over an anonymous normalized
-search coordinate; it is not a selected-parameter slice. Input-space inspection
-is confined to the separate LHS card and backend audit data. Operators can
-inspect a prior completed step without running BO again. Repeated events replace
-the existing SVG; they do not append hidden figures or base64 image copies to
-browser state.
+Times cover the complete BO Agent call, not one model response. These checks
+used `strategy_control=configured`; bounded adaptive argument selection is
+covered separately by deterministic dispatch tests. No device tools were
+registered, and no model services were started or restarted.
+The [redacted verification record](assets/verification/bo_decisions_2026-09-10.json)
+retains run IDs, exact coordinates, tool sequences and timings. Reproduce with
+`scripts/verify_bo_decisions.py --execute` against available registered providers.
 
-## Current Verification
-
-The [2026-09-07 supervised integration record](../paper/evidence/2026-09-07-supervised-closed-loop.md)
-observed BO-managed LHS point 2/8 (`bo-candidate-002`) reaching the next Design,
-which preserved the requested geometry parameters. The summary's `via bo`
-label does not mean acquisition optimization was active: initialization was
-still in progress. No optimization-gain claim follows from this observation.
-
-Verified against all 15 internal steps, `experiment.benchmark`, BO and Objective
-Compiler APIs, manual Visual/JSON browser authoring at desktop/mobile widths,
-and Analysis/Knowledge/Design handoffs at baseline `4cccb05`. No comparative
-optimization benefit is claimed.
+The [supervised integration record](../paper/evidence/2026-09-07-supervised-closed-loop.md)
+remains historical evidence for the prior loop: BO-managed LHS point 2/8
+reached Design. It is not evidence for this new LLM strategy layer or for
+acquisition-stage optimization gain.
 
 ## Limitations and Known Gaps
 
-No paper-scoped evidence establishes sample efficiency, convergence,
-calibration, superiority, or physical improvement. Behavior depends on valid
-priors, selected backend, constraints, and model configuration.
+No comparative study establishes improved sample efficiency, convergence or
+research outcomes from these decisions. Continuous inputs remain subject to
+existing Design/manufacturing checks. Target-attainment decisions, automatic
+stopping, automatic re-experimentation and new device validation are excluded.
 
 ## Related Documents
 
-- [Agent Matrix](agent_api_connection_matrix.md)
+- [Agent Index](README.md)
+- [API/Connection Matrix](agent_api_connection_matrix.md)
 - [Analysis](analysis_agent.md)
 - [Knowledge](knowledge_agent.md)
 - [Design](design_agent.md)
-- [Three-Level Control Model](../runtime/three_level_control_model.md)
-- [Legacy BO Guideline](bo_agent_runtime_guideline.txt)
-- [Evaluation and Results](../paper/06_evaluation_and_results.md)
+- [BO Runtime Guideline](bo_agent_runtime_guideline.txt)
+- [Approved BO Design](../superpowers/specs/2026-09-10-bo-strategy-continuous-design.md)

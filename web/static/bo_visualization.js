@@ -34,6 +34,15 @@
     return numberText(number, digits);
   };
 
+  function acquisitionLabel(payload) {
+    const name = String((payload.acquisition || {}).name || "");
+    const key = name.toLowerCase().replace(/[_\s]/g, "");
+    return ({ expectedimprovement: "EI", logexpectedimprovement: "EI",
+      upperconfidencebound: "UCB", probabilityofimprovement: "PI",
+      uncertaintysampling: "Uncertainty", exploitation: "Exploitation",
+      exploration: "Exploration" })[key] || titleText(name) || "Acquisition";
+  }
+
   function validArrays(container, keys) {
     if (!container || typeof container !== "object") return false;
     const arrays = keys.map((key) => container[key]);
@@ -70,6 +79,8 @@
     const backend = payload.backend || {};
     const variables = Array.isArray(designSpace.variables) ? designSpace.variables.map(titleText).join(" × ") : "-";
     const cells = Array.isArray(designSpace.feasible_cell_sizes_mm) ? designSpace.feasible_cell_sizes_mm.join(", ") : "-";
+    const continuousCell = designSpace.cell_size_kind === "continuous";
+    const cellBounds = Array.isArray(designSpace.cell_size_bounds_mm) ? designSpace.cell_size_bounds_mm.join("–") : "-";
     const density = Array.isArray(designSpace.relative_density_bounds) ? designSpace.relative_density_bounds.join("–") : "-";
     return `
       <div class="bo-viz-equation-head">
@@ -82,10 +93,10 @@
       <div class="bo-viz-equation"><span>f(x) =</span><strong>${escapeHtml(objective.equation || "-")}</strong><em>${escapeHtml(objective.unit || "")}</em></div>
       <div class="bo-viz-contract" aria-label="BO design and model contract">
         <span><b>${escapeHtml(designSpace.dimension || 0)}D</b> ${escapeHtml(variables)}</span>
-        <span><b>${escapeHtml(designSpace.cell_size_rule || "a=L/N")}</b> · a=[${escapeHtml(cells)}] mm</span>
+        <span><b>${continuousCell ? "Continuous cell size" : escapeHtml(designSpace.cell_size_rule || "Cell size")}</b> · ${escapeHtml(continuousCell ? cellBounds : cells)} mm</span>
         <span><b>Relative density</b> ${escapeHtml(density)}</span>
         <span><b>GP</b> ARD Matérn 5/2 + noise</span>
-        <span><b>Acquisition</b> EI · ${escapeHtml(backend.input_normalization || "unit_hypercube")}</span>
+        <span><b>Acquisition</b> ${escapeHtml(acquisitionLabel(payload))} · ${escapeHtml(backend.input_normalization || "unit_hypercube")}</span>
       </div>
       ${constraints.length ? `<div class="bo-viz-constraints">${constraints.map((item) => `<code>${escapeHtml(item)}</code>`).join("")}</div>` : ""}
       <div class="bo-viz-equation-meta">
@@ -272,7 +283,7 @@
         <polyline class="bo-viz-mean-line" points="${points(meanLine)}"></polyline>
         ${data.observations.map((item) => `<circle class="bo-viz-observation" cx="${xScale(item.x)}" cy="${yScale(item.score)}" r="6"><title>Measured observations · ${escapeHtml(item.candidate_id || "observation")} · ${numberText(item.score)}</title></circle>`).join("")}
         ${bestX !== null && bestY !== null ? `<circle class="bo-viz-best" cx="${xScale(bestX)}" cy="${yScale(bestY)}" r="8"><title>Current best · ${escapeHtml(data.currentBest.candidate_id || "best")}</title></circle>` : ""}
-        ${nextX !== null ? `<line class="bo-viz-next-guide" x1="${xScale(nextX)}" y1="${top}" x2="${xScale(nextX)}" y2="${top + mainHeight}"></line>${nextY !== null ? `<g class="bo-viz-next-cross" transform="translate(${xScale(nextX)} ${yScale(nextY)})"><line x1="-7" y1="-7" x2="7" y2="7"></line><line x1="-7" y1="7" x2="7" y2="-7"></line><title>EI-selected next point · ${escapeHtml(data.nextPoint.candidate_id || "selected")}</title></g>` : ""}` : ""}
+        ${nextX !== null ? `<line class="bo-viz-next-guide" x1="${xScale(nextX)}" y1="${top}" x2="${xScale(nextX)}" y2="${top + mainHeight}"></line>${nextY !== null ? `<g class="bo-viz-next-cross" transform="translate(${xScale(nextX)} ${yScale(nextY)})"><line x1="-7" y1="-7" x2="7" y2="7"></line><line x1="-7" y1="7" x2="7" y2="-7"></line><title>${escapeHtml(acquisitionLabel(payload))}-selected next point · ${escapeHtml(data.nextPoint.candidate_id || "selected")}</title></g>` : ""}` : ""}
         ${xTicks.map((tick) => `<text class="bo-viz-tick" x="${xScale(tick)}" y="${top + mainHeight + 22}" text-anchor="middle">${numberText(tick, mode === "candidate_index" ? 0 : 3)}</text>`).join("")}
         <text class="bo-viz-axis-label" x="18" y="${top + mainHeight / 2}" text-anchor="middle" transform="rotate(-90 18 ${top + mainHeight / 2})">Objective</text>
         <text class="bo-viz-axis-label" x="${left + plotWidth / 2}" y="${height - 24}" text-anchor="middle">${escapeHtml(data.xLabel)}${data.xUnit ? ` (${escapeHtml(data.xUnit)})` : ""}</text>
@@ -280,7 +291,7 @@
           <line class="bo-viz-mean-line" x1="0" y1="0" x2="28" y2="0"></line><text x="35" y="4">Posterior mean</text>
           <rect class="bo-viz-confidence-band" x="150" y="-8" width="28" height="12"></rect><text x="185" y="4">95% CI</text>
           <circle class="bo-viz-observation" cx="275" cy="0" r="5"></circle><text x="287" y="4">Measured observations</text>
-          <g class="bo-viz-next-cross" transform="translate(447 0)"><line x1="-5" y1="-5" x2="5" y2="5"></line><line x1="-5" y1="5" x2="5" y2="-5"></line></g><text x="459" y="4">EI-selected Next point</text>
+          <g class="bo-viz-next-cross" transform="translate(447 0)"><line x1="-5" y1="-5" x2="5" y2="5"></line><line x1="-5" y1="5" x2="5" y2="-5"></line></g><text x="459" y="4">${escapeHtml(acquisitionLabel(payload))}-selected Next point</text>
         </g>
         ${data.candidateIds.map((id, index) => `<title>${escapeHtml(id)} · x=${escapeHtml(data.x[index])}</title>`).join("")}
         ${warning ? `<text class="bo-viz-warning" x="${left + plotWidth}" y="${height - 5}" text-anchor="end">${escapeHtml(warning)}</text>` : ""}
@@ -303,7 +314,9 @@
     const xDomain = [0, 1];
     const evaluated = (Array.isArray(trace.observations) ? trace.observations : [])
       .filter((row) => finite(row?.search_x) !== null && finite(row?.observed) !== null);
-    const threshold = finite(trace.improvement_threshold);
+    const acquisitionName = acquisitionLabel(payload);
+    const acquisitionTitle = acquisitionName === "EI" ? "Expected Improvement" : acquisitionName;
+    const threshold = acquisitionName === "EI" ? finite(trace.improvement_threshold) : null;
     const yDomain = range(rows.flatMap((row) => [
       Number(row.mean) - 3 * Number(row.std),
       Number(row.mean) + 3 * Number(row.std),
@@ -311,10 +324,10 @@
     const next = trace.next_point && finite(trace.next_point.search_x) !== null ? trace.next_point : rows[rows.length - 1];
     const acquisitionDomain = range([
       0,
-      ...rows.map((row) => Math.max(0, Number(row.acquisition || 0))),
-      Math.max(0, Number(next.acquisition || 0)),
+      ...rows.map((row) => Number(row.acquisition || 0)),
+      Number(next.acquisition || 0),
     ], [0, 1]);
-    acquisitionDomain[0] = 0;
+    if (acquisitionName === "EI") acquisitionDomain[0] = 0;
     const xScale = (value) => scale(value, xDomain, [left, left + plotWidth]);
     const yScale = (value) => scale(value, yDomain, [top + posteriorHeight, top]);
     const acquisitionScale = (value) => scale(value, acquisitionDomain, [acquisitionTop + acquisitionHeight, acquisitionTop]);
@@ -327,14 +340,14 @@
       `<polygon points="${band(orderedRows, sigma)}" fill="${fill}" fill-opacity="${opacity}"><title>BoTorch posterior mean ± ${sigma}σ</title></polygon>`
     );
     const posteriorLine = `<polyline class="bo-viz-gp-mean-grid" points="${points(orderedRows.map((row) => [xScale(row.search_x), yScale(row.mean)]))}" fill="none" stroke="#111827" stroke-width="2.7"><title>BoTorch GP posterior grid</title></polyline>`;
-    const acquisitionLine = `<polyline class="bo-viz-ei-grid" points="${points(orderedRows.map((row) => [xScale(row.search_x), acquisitionScale(Math.max(0, Number(row.acquisition || 0)))]))}" fill="none" stroke="#15803d" stroke-width="2.7"><title>BoTorch Expected Improvement grid</title></polyline>`;
+    const acquisitionLine = `<polyline class="bo-viz-ei-grid" points="${points(orderedRows.map((row) => [xScale(row.search_x), acquisitionScale(Number(row.acquisition || 0))]))}" fill="none" stroke="#15803d" stroke-width="2.7"><title>BoTorch ${escapeHtml(acquisitionTitle)} grid</title></polyline>`;
     const xTicks = Array.from({ length: 6 }, (_, index) => index / 5);
     const yTicks = Array.from({ length: 5 }, (_, index) => yDomain[0] + (yDomain[1] - yDomain[0]) * index / 4);
     const acquisitionTicks = Array.from({ length: 3 }, (_, index) => acquisitionDomain[0] + (acquisitionDomain[1] - acquisitionDomain[0]) * index / 2);
-    return `<svg class="bo-viz-svg bo-viz-objective-trace" viewBox="0 0 ${width} ${height}" role="img" aria-label="BO objective posterior and expected improvement step ${escapeHtml(payload.step)}">
+    return `<svg class="bo-viz-svg bo-viz-objective-trace" viewBox="0 0 ${width} ${height}" role="img" aria-label="BO objective posterior and ${escapeHtml(acquisitionTitle.toLowerCase())} step ${escapeHtml(payload.step)}">
       <rect class="bo-viz-paper" width="${width}" height="${height}"></rect>
-      <text class="bo-viz-title" x="${left}" y="29">BO objective posterior and expected improvement · step ${escapeHtml(payload.step)}</text>
-      <text class="bo-viz-subtitle" x="${left}" y="50">Score posterior, predictive uncertainty, measured scores, and Expected Improvement</text>
+      <text class="bo-viz-title" x="${left}" y="29">BO objective posterior and ${escapeHtml(acquisitionTitle.toLowerCase())} · step ${escapeHtml(payload.step)}</text>
+      <text class="bo-viz-subtitle" x="${left}" y="50">Score posterior, predictive uncertainty, measured scores, and ${escapeHtml(acquisitionTitle)}</text>
       ${yTicks.map((tick) => `<g><line class="bo-viz-grid" x1="${left}" y1="${yScale(tick)}" x2="${left + plotWidth}" y2="${yScale(tick)}"></line><text class="bo-viz-tick" x="${left - 10}" y="${yScale(tick) + 4}" text-anchor="end">${numberText(tick, 6)}</text></g>`).join("")}
       ${posteriorBand(3, "#dbeafe", 0.55)}
       ${posteriorBand(2, "#93c5fd", 0.50)}
@@ -349,12 +362,12 @@
       ${acquisitionLine}
       <line class="bo-viz-axis" x1="${left}" y1="${acquisitionTop}" x2="${left}" y2="${acquisitionTop + acquisitionHeight}"></line>
       <line class="bo-viz-axis" x1="${left}" y1="${acquisitionTop + acquisitionHeight}" x2="${left + plotWidth}" y2="${acquisitionTop + acquisitionHeight}"></line>
-      <text class="bo-viz-axis-label" x="28" y="${acquisitionTop + acquisitionHeight / 2}" text-anchor="middle" transform="rotate(-90 28 ${acquisitionTop + acquisitionHeight / 2})">Expected Improvement</text>
+      <text class="bo-viz-axis-label" x="28" y="${acquisitionTop + acquisitionHeight / 2}" text-anchor="middle" transform="rotate(-90 28 ${acquisitionTop + acquisitionHeight / 2})">${escapeHtml(acquisitionLabel(payload) === "EI" ? "Expected Improvement" : acquisitionLabel(payload))}</text>
       <line x1="${xScale(next.search_x)}" y1="${top}" x2="${xScale(next.search_x)}" y2="${acquisitionTop + acquisitionHeight}" stroke="#2563eb" stroke-width="1.8" stroke-dasharray="9 5"><title>Next score query</title></line>
-      <g class="bo-viz-next-star" transform="translate(${xScale(next.search_x)} ${acquisitionScale(Math.max(0, Number(next.acquisition || 0)))})"><path d="M0,-8 L2.4,-2.7 L8,-2.5 L3.7,1.2 L5.1,7 L0,4 L-5.1,7 L-3.7,1.2 L-8,-2.5 L-2.4,-2.7 Z" fill="#1d4ed8"><title>Maximum EI / next query</title></path></g>
+      <g class="bo-viz-next-star" transform="translate(${xScale(next.search_x)} ${acquisitionScale(Number(next.acquisition || 0))})"><path d="M0,-8 L2.4,-2.7 L8,-2.5 L3.7,1.2 L5.1,7 L0,4 L-5.1,7 L-3.7,1.2 L-8,-2.5 L-2.4,-2.7 Z" fill="#1d4ed8"><title>${escapeHtml(acquisitionLabel(payload))}-selected next query</title></path></g>
       ${xTicks.map((tick) => `<text class="bo-viz-tick" x="${xScale(tick)}" y="${acquisitionTop + acquisitionHeight + 23}" text-anchor="middle">${numberText(tick, 1)}</text>`).join("")}
       <text class="bo-viz-axis-label" x="${left + plotWidth / 2}" y="${height - 17}" text-anchor="middle">Normalized BO search coordinate</text>
-      <g class="bo-viz-legend" transform="translate(${left + 8} 76)"><line x1="0" y1="0" x2="26" y2="0" stroke="#111827" stroke-width="2.5"></line><text x="33" y="4">GP mean</text><circle cx="116" cy="0" r="4.5" fill="#dc2626"></circle><text x="126" y="4">Measured</text><rect x="204" y="-7" width="22" height="11" fill="#3b82f6" fill-opacity="0.42"></rect><text x="232" y="4">±1σ</text><rect x="278" y="-7" width="22" height="11" fill="#93c5fd" fill-opacity="0.5"></rect><text x="306" y="4">±2σ</text><rect x="352" y="-7" width="22" height="11" fill="#dbeafe" fill-opacity="0.7"></rect><text x="380" y="4">±3σ</text><line x1="426" y1="0" x2="452" y2="0" stroke="#f59e0b" stroke-width="1.7" stroke-dasharray="8 5"></line><text x="460" y="4">Improvement threshold (best + ξ)</text></g>
+      <g class="bo-viz-legend" transform="translate(${left + 8} 76)"><line x1="0" y1="0" x2="26" y2="0" stroke="#111827" stroke-width="2.5"></line><text x="33" y="4">GP mean</text><circle cx="116" cy="0" r="4.5" fill="#dc2626"></circle><text x="126" y="4">Measured</text><rect x="204" y="-7" width="22" height="11" fill="#3b82f6" fill-opacity="0.42"></rect><text x="232" y="4">±1σ</text><rect x="278" y="-7" width="22" height="11" fill="#93c5fd" fill-opacity="0.5"></rect><text x="306" y="4">±2σ</text><rect x="352" y="-7" width="22" height="11" fill="#dbeafe" fill-opacity="0.7"></rect><text x="380" y="4">±3σ</text>${threshold !== null ? '<line x1="426" y1="0" x2="452" y2="0" stroke="#f59e0b" stroke-width="1.7" stroke-dasharray="8 5"></line><text x="460" y="4">Improvement threshold (best + ξ)</text>' : ""}</g>
     </svg>`;
   }
 
@@ -463,7 +476,7 @@
         normalized_vector: vector,
         mean: interpolate(surface.mean, vector),
         std: Math.max(0, interpolate(surface.std, vector)),
-        acquisition: Math.max(0, interpolate(surface.acquisition, vector)),
+        acquisition: interpolate(surface.acquisition, vector),
       };
     });
     const coordinateByAnchor = new Map(ordered.map((anchorIndex, position) => [anchorIndex, coordinates[position]]));
@@ -481,7 +494,7 @@
       search_x: nextCoordinate,
       mean: finite(payload.next_point.mean) ?? interpolate(surface.mean, nextVector),
       std: Math.max(0, finite(payload.next_point.std) ?? interpolate(surface.std, nextVector)),
-      acquisition: Math.max(0, finite(payload.next_point.acquisition) ?? interpolate(surface.acquisition, nextVector)),
+      acquisition: finite(payload.next_point.acquisition) ?? interpolate(surface.acquisition, nextVector),
     } : {};
     const scores = observations.map((item) => finite(item.observed)).filter((value) => value !== null);
     const currentBest = scores.length
@@ -539,7 +552,7 @@
       return `<g transform="translate(${xScale(b)} ${yScale(a)})"><circle r="6" fill="#fff" stroke="#111827" stroke-width="2"></circle><title>${escapeHtml(item.candidate_id || 'measured')} · measured f=${numberText(z, 6)}</title></g>`;
     }).join('');
     const next = payload.next_point?.parameters || {}, nx = finite(next[surface.y_parameter]), ny = finite(next[surface.x_parameter]);
-    const nextMarker = nx === null || ny === null ? '' : `<g class="bo-viz-next-cross" transform="translate(${xScale(nx)} ${yScale(ny)})"><line x1="-9" y1="-9" x2="9" y2="9"></line><line x1="-9" y1="9" x2="9" y2="-9"></line><title>EI-selected next input</title></g>`;
+    const nextMarker = nx === null || ny === null ? '' : `<g class="bo-viz-next-cross" transform="translate(${xScale(nx)} ${yScale(ny)})"><line x1="-9" y1="-9" x2="9" y2="9"></line><line x1="-9" y1="9" x2="9" y2="-9"></line><title>${escapeHtml(acquisitionLabel(payload))}-selected next input</title></g>`;
     const xTicks = Array.from({length:5}, (_,i)=>xDomain[0]+(xDomain[1]-xDomain[0])*i/4);
     const bar = Array.from({length:80}, (_,i)=>`<rect x="${width-right+34}" y="${top+i*plotHeight/80}" width="22" height="${plotHeight/80+0.5}" fill="${color(zDomain[1]-(zDomain[1]-zDomain[0])*i/79)}"></rect>`).join('');
     return `<svg class="bo-viz-svg bo-viz-response-surface" viewBox="0 0 ${width} ${height}" role="img" aria-label="GP objective response surface step ${escapeHtml(payload.step)}">
@@ -554,7 +567,7 @@
       <text class="bo-viz-axis-label" x="24" y="${top+plotHeight/2}" text-anchor="middle" transform="rotate(-90 24 ${top+plotHeight/2})">x1 · ${escapeHtml(titleText(surface.x_parameter || 'input 1'))}</text>
       ${bar}<text class="bo-viz-axis-label" x="${width-right+45}" y="${top-14}" text-anchor="middle">f(x1,x2)</text>
       <text class="bo-viz-tick" x="${width-right+64}" y="${top+5}">${numberText(zDomain[1],6)}</text><text class="bo-viz-tick" x="${width-right+64}" y="${top+plotHeight}">${numberText(zDomain[0],6)}</text>
-      <g transform="translate(${left} 72)"><circle r="5" fill="#fff" stroke="#111827" stroke-width="2"></circle><text x="12" y="4">Measured f</text><g class="bo-viz-next-cross" transform="translate(116 0)"><line x1="-6" y1="-6" x2="6" y2="6"></line><line x1="-6" y1="6" x2="6" y2="-6"></line></g><text x="130" y="4">EI-selected next input</text></g>
+      <g transform="translate(${left} 72)"><circle r="5" fill="#fff" stroke="#111827" stroke-width="2"></circle><text x="12" y="4">Measured f</text><g class="bo-viz-next-cross" transform="translate(116 0)"><line x1="-6" y1="-6" x2="6" y2="6"></line><line x1="-6" y1="6" x2="6" y2="-6"></line></g><text x="130" y="4">${escapeHtml(acquisitionLabel(payload))}-selected next input</text></g>
     </svg>`;
   }
 
@@ -612,7 +625,7 @@
       return `
         <polygon class="bo-viz-confidence-band" style="fill:${color};fill-opacity:0.11" points="${points(band)}"><title>${escapeHtml(item.label)} · 95% CI</title></polygon>
         <polyline class="bo-viz-mean-line" style="stroke:${color}" points="${points(meanLine)}"><title>${escapeHtml(item.label)} · posterior mean</title></polyline>
-        <polyline class="bo-viz-acquisition-line" style="stroke:${color}" points="${points(acquisitionLine)}"><title>${escapeHtml(item.label)} · Expected Improvement</title></polyline>
+        <polyline class="bo-viz-acquisition-line" style="stroke:${color}" points="${points(acquisitionLine)}"><title>${escapeHtml(item.label)} · ${escapeHtml(acquisitionLabel(payload))}</title></polyline>
         ${measured}`;
     }).join("");
     const legend = seriesRows.map((item, index) => {
@@ -622,7 +635,7 @@
       return `<g transform="translate(${column * 200} ${row * 19})"><line x1="0" y1="0" x2="25" y2="0" style="stroke:${color};stroke-width:3"></line><text x="32" y="4">${escapeHtml(item.label)}</text></g>`;
     }).join("");
     const selectedMarker = selectedSeries && selectedX !== null && selectedMean !== null
-      ? `<line class="bo-viz-next-guide" x1="${xScale(selectedX)}" y1="${top}" x2="${xScale(selectedX)}" y2="${acqTop + acqHeight}"></line><g class="bo-viz-next-cross" transform="translate(${xScale(selectedX)} ${yScale(selectedMean)})"><line x1="-7" y1="-7" x2="7" y2="7"></line><line x1="-7" y1="7" x2="7" y2="-7"></line><title>EI-selected next point · ${escapeHtml(selected.candidate_id || "selected")}</title></g>`
+      ? `<line class="bo-viz-next-guide" x1="${xScale(selectedX)}" y1="${top}" x2="${xScale(selectedX)}" y2="${acqTop + acqHeight}"></line><g class="bo-viz-next-cross" transform="translate(${xScale(selectedX)} ${yScale(selectedMean)})"><line x1="-7" y1="-7" x2="7" y2="7"></line><line x1="-7" y1="7" x2="7" y2="-7"></line><title>${escapeHtml(acquisitionLabel(payload))}-selected next point · ${escapeHtml(selected.candidate_id || "selected")}</title></g>`
       : "";
     return `
       <svg class="bo-viz-svg bo-viz-grouped-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Grouped Bayesian optimization posterior step ${escapeHtml(payload.step)}">
@@ -630,7 +643,7 @@
         <text class="bo-viz-title" x="${left}" y="30">Bayesian optimization posterior · step ${escapeHtml(payload.step)}</text>
         <text class="bo-viz-subtitle" x="${left}" y="51">LHS-seeded 2D GP · grouped GP from ${seriesRows.length} measured-design strata · ${escapeHtml(payload.backend?.model || "SingleTaskGP")}</text>
         <g class="bo-viz-legend" transform="translate(${left} 78)">${legend}</g>
-        <g class="bo-viz-legend" transform="translate(${left + plotWidth - 405} 31)"><text x="0" y="0">Posterior mean · 95% CI · Measured observations · EI-selected Next point</text></g>
+        <g class="bo-viz-legend" transform="translate(${left + plotWidth - 405} 31)"><text x="0" y="0">Posterior mean · 95% CI · Measured observations · ${escapeHtml(acquisitionLabel(payload))}-selected Next point</text></g>
         ${xTicks.map((tick) => `<line class="bo-viz-grid" x1="${xScale(tick)}" y1="${top}" x2="${xScale(tick)}" y2="${acqTop + acqHeight}"></line>`).join("")}
         ${yTicks.map((tick) => `<g><line class="bo-viz-grid" x1="${left}" y1="${yScale(tick)}" x2="${left + plotWidth}" y2="${yScale(tick)}"></line><text class="bo-viz-tick" x="${left - 12}" y="${yScale(tick) + 4}" text-anchor="end">${numberText(tick, tickDigits(yDomain, yTicks.length))}</text></g>`).join("")}
         ${acqTicks.map((tick) => `<g><line class="bo-viz-grid" x1="${left}" y1="${acqScale(tick)}" x2="${left + plotWidth}" y2="${acqScale(tick)}"></line><text class="bo-viz-tick" x="${left - 12}" y="${acqScale(tick) + 4}" text-anchor="end">${numberText(tick, tickDigits(acqDomain, acqTicks.length))}</text></g>`).join("")}
@@ -641,9 +654,27 @@
         ${plots}${selectedMarker}
         ${xTicks.map((tick) => `<text class="bo-viz-tick" x="${xScale(tick)}" y="${acqTop + acqHeight + 22}" text-anchor="middle">${numberText(tick, 3)}</text>`).join("")}
         <text class="bo-viz-axis-label" x="18" y="${top + posteriorHeight / 2}" text-anchor="middle" transform="rotate(-90 18 ${top + posteriorHeight / 2})">Objective</text>
-        <text class="bo-viz-axis-label" x="28" y="${acqTop + acqHeight / 2}" text-anchor="middle" transform="rotate(-90 28 ${acqTop + acqHeight / 2})">Expected Improvement</text>
+        <text class="bo-viz-axis-label" x="28" y="${acqTop + acqHeight / 2}" text-anchor="middle" transform="rotate(-90 28 ${acqTop + acqHeight / 2})">${escapeHtml(acquisitionLabel(payload) === "EI" ? "Expected Improvement" : acquisitionLabel(payload))}</text>
         <text class="bo-viz-axis-label" x="${left + plotWidth / 2}" y="${height - 22}" text-anchor="middle">${escapeHtml(xLabel)}${escapeHtml(xUnit)}</text>
       </svg>`;
+  }
+
+  function renderDecision(decision) {
+    if (!decision || decision.schema !== "bo_decision.v1") return "";
+    const trace = Array.isArray(decision.trace) ? decision.trace.slice(0, 12) : [];
+    return `<div class="bo-decision-audit">
+      <div class="bo-reasoning-head"><strong>${escapeHtml(decision.status || "unknown")}</strong>
+        <span>${escapeHtml(decision.provenance || "unknown")}</span></div>
+      <p>${escapeHtml(decision.reason || decision.failure_code || "")}</p>
+      <ol class="bo-compact-list">${trace.map((item) => {
+        const request = item.request || {};
+        const refs = Array.isArray(request.evidence_refs) ? request.evidence_refs : [];
+        return `<li><strong>${escapeHtml(request.tool || "Invalid response")}</strong>
+          <code>${escapeHtml(JSON.stringify(request.arguments || {}).slice(0, 500))}</code>
+          <span>${escapeHtml(item.status || "")}</span>
+          <p>${escapeHtml(request.reason || "")}</p>
+          <small>${escapeHtml(refs.join(" · "))}</small></li>`;
+      }).join("")}</ol></div>`;
   }
 
   function artifactLinks(payload) {
@@ -656,6 +687,7 @@
     availableParameters,
     renderEquationCard,
     renderPlot,
+    renderDecision,
     artifactLinks,
   };
 });

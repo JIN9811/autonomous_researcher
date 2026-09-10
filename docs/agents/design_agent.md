@@ -13,12 +13,13 @@ source_of_truth:
   - backends/prompt_registry.py
   - app/controller.py
   - policies/validation_policy.py
-last_verified: 2026-09-08
-verified_against: d770334204eed03bdd817b69f11610a88294ac53
+last_verified: 2026-09-10
+verified_against: BO-Agent
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
   - docs/agents/specimen_agent.md
+  - docs/agents/bo_agent.md
   - docs/runtime/loop_artifact_archiving.md
   - docs/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md
 supersedes: []
@@ -77,6 +78,27 @@ deterministic-test paths.
 | In: Knowledge/history | Existing metadata, experiment DB and failure summaries | Context only; old scores are not current-candidate predictions |
 | Out: Specimen | `experiment_spec`, `design_candidate`, `handoff_packet` | Existing `design_candidate.v1` payload is preserved |
 | Out: runtime | `AgentResult`, decisions, reports, failure code | Existing runtime handles routing/retry; Design never starts Specimen directly |
+
+### Continuous BO Inputs
+
+New BO requests carry `parameter_space` through the existing
+`next_design_request.v1` → `orchestrator_design_contract.v1` path. Design checks
+the authoritative `requested_parameters` against that transmitted domain,
+including continuous bounds and fixed values, instead of requiring membership
+in a four-value cell-size table.
+
+| Contract case | Design behavior |
+|---|---|
+| Continuous coordinate within the declared domain | Preserve the value through candidate preparation, evaluation and geometry arguments |
+| Fixed coordinate | Preserve the declared value; reject a conflicting request |
+| Outside domain or manufacturing limits | Reject with the relevant reason; do not snap into compliance |
+| Historical request without domain metadata | Retain the compatible legacy validation path |
+
+For example, a supplied `cell_size_mm=7.13789` and
+`relative_density=0.32123456` remain those values in the geometry request.
+Display formatting is not coordinate rounding. Minimum-wall, bridge-distance,
+envelope and other manufacturing checks remain independent of BO bounds;
+Design's LLM still cannot rewrite the requested experiment point.
 
 ## Internal Workflow
 
@@ -294,6 +316,7 @@ decision evidence for later knowledge work.
 | Evidence display and zero-valued quantities | `tests/unit/test_planning_design_report_js.py` | Node helper execution, not full browser validation |
 | Guardian proxy interpretation | Design decision tests + Guardian suite | Only marked synthetic proxy comparison changes |
 | Controller display and handoff | Design/controller tests | Must distinguish baseline failures from regressions |
+| Continuous BO domain and exact coordinates (2026-09-10) | BO, Design, parameter-space, BoTorch and controller regression tests | Custom bounds, legacy compatibility and `7.13789` / `0.32123456` preserved through geometry arguments; no device execution |
 | Actual DesignAgent API / registered vLLM 31B | [Agent verification](../paper/evidence/2026-09-07-design-gemma31b-virtual-api-verification.md) | API 6.34 s / 31B 12.11 s: accepted local decision and matching handoff; 31B used registered model fallback; E4B-primary and closed-loop acceptance pending |
 | Physical closed-loop validation | Not performed for this change | Hardware validation pending; stable-tag evidence remains historical |
 

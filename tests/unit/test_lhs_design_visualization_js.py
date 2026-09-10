@@ -86,8 +86,10 @@ def test_lhs_renderer_accepts_continuous_cell_size_bounds() -> None:
     script = f"""
 const renderer = require({json.dumps(str(RENDERER))});
 const payload = {json.dumps(payload)};
-console.log(JSON.stringify({{ valid: renderer.isValid(payload), axes: renderer.renderPlot(payload).includes("Cell size (mm)") }}));
+const plot = renderer.renderPlot(payload);
+console.log(JSON.stringify({{ valid: renderer.isValid(payload), axes: plot.includes("Cell size (mm)"),
+  continuous: plot.includes("Continuous-space Latin hypercube") && !plot.includes("discrete cell size") }}));
 """
     result = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
 
-    assert json.loads(result.stdout) == {"valid": True, "axes": True}
+    assert json.loads(result.stdout) == {"valid": True, "axes": True, "continuous": True}

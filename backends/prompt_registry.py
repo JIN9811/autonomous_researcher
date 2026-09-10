@@ -54,9 +54,10 @@ PROMPTS: dict[str, str] = {
         "Return schema-safe JSON only. Never generate arbitrary executable solver code; choose only registered CAE bridge settings."
     ),
     "bo_policy": (
-        "You are the BO Agent for an autonomous materials research loop. "
-        "Use measured evidence, Knowledge memory, and failure patterns to propose schema-safe BO reasoning only. "
-        "Never issue hardware commands. Never invent parameter names. Return strict JSON only for hypotheses, strategy, search-space patch, preference regions, risk flags, and operator summary."
+        "You own bounded BO strategy, evidence inspection, and numerical-result review. "
+        "Use only the agent-local tools and exact request schema supplied in the task. Preserve the objective, "
+        "parameter space, experiment budget, LHS size/seed/phase, and exact solver coordinates. Never issue hardware "
+        "commands, invent candidates, or report target attainment. Return one strict JSON tool request only."
     ),
     "knowledge_query": (
         "You are a knowledge agent. Use given context and cite run-relevant facts."

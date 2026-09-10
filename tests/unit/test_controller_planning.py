@@ -543,6 +543,8 @@ def test_test_mode_initial_design_is_published_as_orchestrator_json_contract() -
         "cell_size_mm": seeded["cell_size_mm"],
         "relative_density": seeded["relative_density"],
     }
+    assert contract["parameter_space"]["cell_size_mm"] == [5.0, 10.0]
+    assert contract["parameter_space"]["relative_density"] == [0.20, 0.48]
     assert contract["initial_design"]["index"] == 1
     assert contract["initial_design"]["target"] == 8
     assert len(contract["initial_design"]["points"]) == 8
@@ -554,6 +556,20 @@ def test_test_mode_initial_design_is_published_as_orchestrator_json_contract() -
         key: compact["bo_initial_design"]["constraints"][key]
         for key in ("cell_size_mm", "relative_density")
     } == contract["requested_parameters"]
+
+
+@pytest.mark.parametrize("source", ["bo_settings", "next_design_request", "bo_agent"])
+def test_first_controller_lhs_uses_current_run_bo_domain(source) -> None:
+    controller = load_runtime()
+    controller._state.run_metadata[source] = {"parameter_space": {
+        "cell_size_mm": [8.6, 9.1], "relative_density": [.25, .31]}}
+    constraints = controller._normalize_test_mode_constraints(controller._default_test_constraints({}), {})
+    controller._seed_initial_bo_design_constraints(constraints, total_cycles=20)
+    contract = controller._state.run_metadata["orchestrator_design_contract"]
+    assert contract["parameter_space"]["cell_size_mm"] == [8.6, 9.1]
+    assert contract["parameter_space"]["relative_density"] == [.25, .31]
+    assert 8.6 <= contract["requested_parameters"]["cell_size_mm"] <= 9.1
+    assert .25 <= contract["requested_parameters"]["relative_density"] <= .31
 
 
 def test_first_test_loop_lhs_specimen_has_no_generated_surface_caps() -> None:
@@ -634,6 +650,10 @@ def test_next_cycle_contract_republishes_bo_next_design_request() -> None:
     controller._state.run_metadata["next_design_request"] = {
         "schema": "next_design_request.v1",
         "status": "ready",
+        "parameter_space": {
+            "cell_size_mm": [6.2, 9.1],
+            "relative_density": [0.27, 0.44],
+        },
         "constraints": {
             "cell_size_mm": 7.5,
             "relative_density": 0.413,
@@ -682,11 +702,48 @@ def test_next_cycle_contract_republishes_bo_next_design_request() -> None:
         "cell_size_mm": 7.5,
         "relative_density": pytest.approx(0.413),
     }
+    assert contract["parameter_space"] == {
+        "cell_size_mm": [6.2, 9.1],
+        "relative_density": [0.27, 0.44],
+    }
     assert contract["initial_design"]["completed"] == 1
     assert contract["initial_design"]["next_index"] == 2
     assert contract["initial_design"]["points"][1]["status"] == "next"
     assert updated["cell_size_mm"] == 7.5
     assert updated["relative_density"] == pytest.approx(0.413)
+
+
+def test_live_contract_attaches_current_bo_domain_without_replacing_requested_coordinates() -> None:
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    controller._state.run_metadata["bo_settings"] = {
+        "parameter_space": {
+            "cell_size_mm": [6.2, 9.1],
+            "relative_density": [0.27, 0.39],
+        }
+    }
+    requested = {
+        "geometry_type": "gyroid",
+        "cell_size_mm": 7.13789,
+        "relative_density": 0.32123456,
+    }
+
+    updated = controller._publish_orchestrator_design_contract(
+        requested,
+        cycle_index=1,
+        total_cycles=1,
+    )
+
+    contract = controller._state.run_metadata["orchestrator_design_contract"]
+    assert contract["source"] == "orchestrator_json"
+    assert contract["requested_parameters"] == {
+        "cell_size_mm": pytest.approx(7.13789),
+        "relative_density": pytest.approx(0.32123456),
+    }
+    assert contract["parameter_space"]["cell_size_mm"] == [6.2, 9.1]
+    assert contract["parameter_space"]["relative_density"] == [0.27, 0.39]
+    assert updated["cell_size_mm"] == pytest.approx(7.13789)
+    assert updated["relative_density"] == pytest.approx(0.32123456)
 
 
 def test_planning_bo_message_reports_lhs_without_acquisition_scores() -> None:
@@ -3485,10 +3542,10 @@ async def test_live_gui_test_planning_series_runs_twenty_design_cycles(
     }
     assert len(signatures) > 1
     assert controller._state.run_metadata["bo_agent"]["knowledge_context"]
-    assert controller._state.current_experiment_spec["cell_size_mm"] in {5.0, 6.0, 7.5, 10.0}
+    assert 5.0 <= controller._state.current_experiment_spec["cell_size_mm"] <= 10.0
     assert controller._state.current_experiment_spec["top_bottom_cap"] is False
     assert controller._state.current_experiment_spec["test_loop_surface_caps_disabled"] is True
-    assert controller._state.run_metadata["bo_recommended_constraints"]["cell_size_mm"] in {5.0, 6.0, 7.5, 10.0}
+    assert 5.0 <= controller._state.run_metadata["bo_recommended_constraints"]["cell_size_mm"] <= 10.0
     bo_messages = [message for message in controller.planning_snapshot()["messages"] if message["role"] == "bo_ai"]
     assert bo_messages
     bo_trace = bo_messages[-1]["bo_result"]["benchmark"]["strategies"]["bo"]["surrogate_trace"]
@@ -3548,7 +3605,7 @@ def test_test_mode_initial_cycle_is_seeded_from_bo_lhs() -> None:
 
     seeded = controller._seed_initial_bo_design_constraints(constraints, total_cycles=5)
 
-    assert seeded["cell_size_mm"] in {5.0, 6.0, 7.5, 10.0}
+    assert 5.0 <= seeded["cell_size_mm"] <= 10.0
     assert 0.20 <= seeded["relative_density"] <= 0.48
     assert controller._state.run_metadata["bo_initial_design"]["index"] == 1
     assert controller._state.run_metadata["bo_recommended_constraints"]["cell_size_mm"] == seeded["cell_size_mm"]

@@ -12461,6 +12461,17 @@ body.planning-live-body .planning-chat-item table {
   line-height: 1.45;
 }
 
+.bo-decision-audit {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.bo-decision-audit code {
+  display: block;
+  white-space: pre-wrap;
+  margin: 4px 0;
+}
+
 .bo-compact-list em {
   display: block;
   color: var(--muted);

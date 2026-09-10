@@ -1,0 +1,22 @@
+digraph bo_api_connection_architecture {
+  graph [rankdir=TB, bgcolor="#FFFFFF", pad="0.35", nodesep="0.4", ranksep="0.45", fontname="DejaVu Sans", label="BO: existing entry points and local decision tools", labelloc="t", fontsize=22];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=14, margin="0.18,0.12"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=12, arrowsize=0.8];
+  loop [label="Existing closed-loop graph\nagent.bo_agent"];
+  workspace [label="BO Workspace\nPOST /api/bo/run"];
+  agent [label="BOAgent.run_with_settings\nInput eligibility and frozen settings"];
+  decision [label="Agent-local decision dispatcher\nbo_decision.v1", fillcolor="#F2ECFA", color="#6B4C9A", penwidth=2];
+  model [label="AgentContext.complete(bo_policy)\nRegistered API / local model backend", fillcolor="#F2ECFA", color="#6B4C9A"];
+  numeric [label="Existing ToolRegistry\nexperiment.benchmark\nLHS / BoTorch"];
+  local [label="Supplied Knowledge / local index\nCode-owned diagnostics", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  benchmark [label="Workspace comparison\nPOST /api/bo/benchmark"];
+  result [label="Existing AgentResult + artifacts\nnext_design_request.v1\nNo direct device endpoint", fillcolor="#E9F7EF", color="#2E7D59"];
+  loop -> agent;
+  workspace -> agent;
+  agent -> decision;
+  decision -> model [label="strict JSON request / response", dir=both];
+  decision -> local [label="inspect / retrieve", dir=both];
+  decision -> numeric [label="run_optimizer: once", dir=both];
+  benchmark -> numeric [label="explicit numerical comparison", style=dashed];
+  decision -> result [label="accept / return / fail"];
+}

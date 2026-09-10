@@ -215,7 +215,7 @@ This design figure is not evidence of implemented or live-validated behavior.
 | Manipulation | Middle 중심, High 판단 | LLM의 기존 Skill 적합성·툴 선택과 Vision 이후 결과 판단 | 기존 LeRobot/VLA·고정 replay·종료 경로 유지 | [Manipulation](../../agents/manipulation_agent.md) |
 | Lab Equipment | Middle | 저장 Skill/Flow 선택·결과 확인·제한된 복구 | 기존 장비 Skill·worker·통신 | [Equipment](../../agents/equipment_agent.md) |
 | Analysis | Middle | 분석/검증/해석 툴 선택·결과 채택 | 파서·단위·지표 계산·solver | [Analysis](../../agents/analysis_agent.md) |
-| BO | Middle | 최적화 요청·전략·후보 검토 | 수치 최적화·LHS·관측 품질 검사 | [BO](../../agents/bo_agent.md) |
+| BO | 내부 High + Middle | 전략·근거 조회·수치 진단·결과 인계 판단과 제한된 툴 호출 | 좌표는 LHS/BoTorch, 목적함수·사용자 고정값·기존 그래프는 보존 | [BO](../../agents/bo_agent.md) |
 | Guardian | Guardian/Safety | 근거 조회·위험 판단·허용/보류/정지 요청 | 기존 코드 gate·하드 인터록 | [Guardian](../../agents/guardian_agent.md) |
 | Knowledge | Knowledge/Evidence | 검색·관계 판단·기억 갱신 | 저장·출처·스키마 검증·원본 보존 | [Knowledge](../../agents/knowledge_agent.md) |
 
@@ -701,6 +701,24 @@ non-LLM TEST는 별도로 표시하고, real-LLM 가상 모드는 판단층을 �
 기존 API/연결 상세, 크게 읽히는 SVG, 검증 범위와 한계를 포함한다.
 
 구현·검증 기록: [Manipulation implementation plan](../plans/2026-09-09-manipulation-decision-layer.md).
+
+## BO 적용 계약 — 2026-09-10
+
+BO 내부 High는 전략과 근거 충분성, 수치 결과의 인계 여부를 판단한다. Middle은
+검증·툴 dispatch·결과 고정을 수행하고 Low는 기존 `experiment.benchmark`의
+LHS/BoTorch로 좌표를 계산한다. LLM이 좌표를 생성하거나 선호 점수로 덮어쓰지 않는다.
+사용자가 확정한 acquisition은 기본적으로 보존하고, 명시적인 `adaptive` 설정에서만
+허용된 전략 인자를 선택한다. 초기 LHS 정책과 기존 그래프/브릿지는 변경하지 않는다.
+
+셀 크기는 신규 BO 요청에서 연속 범위로 정규화한다. 첫 LHS와 이후 추천이 동일한
+공간 정보를 기존 JSON 인계에 포함하고, Design은 범위·제작성 검사 후 원래 수치
+정밀도를 유지한다. 과거 이산 아티팩트의 의미와 일반 mixed-space 지원은 보존한다.
+
+**개선 목표 달성 판정, 자동 종료, 재시험 실행은 사용자 요청에 따라 제외한다.**
+문서는 Design 형식을 따라 Status at a Glance, 5영역 표, 실제 툴 계약, SVG,
+아티팩트와 수행한 검증을 포함한다. 세부 사항은
+[BO 설계](2026-09-10-bo-strategy-continuous-design.md)와
+[구현 기록](../plans/2026-09-10-bo-strategy-continuous.md)을 따른다.
 
 ## Related Documents
 

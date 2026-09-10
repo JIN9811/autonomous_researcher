@@ -31,6 +31,7 @@ from urllib.parse import quote
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
 from agents.design_decision import PARAMETERS, candidate_evaluation, decide_design
+from learning.bo_parameter_space import BOParameterSpace
 from utils.agent_artifact_archive import archive_agent_run
 from mcp_tools.tpms_geometry import tpms_level_for_relative_density
 from orchestrator.state import Mode, OrchestratorState
@@ -43,6 +44,10 @@ class DesignAgent(BaseAgent):
     name = "design_agent"
     TEST_DEFAULT_GEOMETRY = "gyroid"
     LEGACY_ALIAS_GEOMETRY = "gyroid"
+    LEGACY_BO_PARAMETER_SPACE: dict[str, Any] = {
+        "cell_size_mm": [5.0, 6.0, 7.5, 10.0],
+        "relative_density": [0.20, 0.48],
+    }
 
     SUPPORTED_GEOMETRIES = (
         "gyroid",
@@ -302,16 +307,24 @@ class DesignAgent(BaseAgent):
         if isinstance(state.run_metadata, dict):
             raw_bo = state.run_metadata.get("bo_recommended_constraints")
             bo_recommended = raw_bo if isinstance(raw_bo, dict) else {}
+        design_contract = state.run_metadata.get("orchestrator_design_contract") if isinstance(state.run_metadata, dict) else {}
+        parameter_space = self._active_parameter_space(state, design_contract=design_contract)
         if bo_recommended:
             try:
-                bo_cell = float(bo_recommended.get("cell_size_mm", 5.0))
-                bo_density = float(bo_recommended.get("relative_density", 0.32))
-                bo_valid = bo_cell in {5.0, 6.0, 7.5, 10.0} and 0.20 <= bo_density <= 0.48
-            except (TypeError, ValueError):
+                bo_parameters = {
+                    "cell_size_mm": float(bo_recommended.get("cell_size_mm", constraints["cell_size_mm"])),
+                    "relative_density": float(bo_recommended.get("relative_density", constraints["relative_density"])),
+                }
+                self._validate_active_parameters(
+                    bo_parameters,
+                    parameter_space,
+                    source="BO recommendation",
+                )
+                bo_valid = True
+            except (TypeError, ValueError, KeyError):
                 bo_valid = False
             if not bo_valid:
                 bo_recommended = {}
-        design_contract = state.run_metadata.get("orchestrator_design_contract") if isinstance(state.run_metadata, dict) else {}
         requested_parameters = (
             design_contract.get("requested_parameters")
             if isinstance(design_contract, dict) and isinstance(design_contract.get("requested_parameters"), dict)
@@ -323,14 +336,27 @@ class DesignAgent(BaseAgent):
                 requested_density = float(requested_parameters["relative_density"])
             except (KeyError, TypeError, ValueError) as exc:
                 raise ValueError("orchestrator design contract requires numeric cell_size_mm and relative_density") from exc
-            if requested_cell not in {5.0, 6.0, 7.5, 10.0}:
-                raise ValueError(f"orchestrator design contract cell_size_mm={requested_cell} is not feasible")
-            if not 0.20 <= requested_density <= 0.48:
-                raise ValueError(f"orchestrator design contract relative_density={requested_density} is outside [0.20, 0.48]")
             requested_parameters = {
                 "cell_size_mm": requested_cell,
                 "relative_density": requested_density,
             }
+            self._validate_active_parameters(
+                requested_parameters,
+                parameter_space,
+                source="orchestrator design contract",
+            )
+            minimum_cell = max(3.0, 3.0 * float(constraints.get("fdm_min_wall_thickness_mm", 1.2)))
+            maximum_cell = float(constraints.get("fdm_max_bridge_distance_mm", 10.0))
+            if not minimum_cell <= requested_cell <= maximum_cell:
+                raise ValueError(
+                    f"orchestrator design contract cell_size_mm={requested_cell} is outside "
+                    f"manufacturing safety bounds [{minimum_cell}, {maximum_cell}]"
+                )
+            if not 0.20 <= requested_density <= 0.60:
+                raise ValueError(
+                    f"orchestrator design contract relative_density={requested_density} is outside "
+                    "manufacturing safety bounds [0.2, 0.6]"
+                )
         explicit_cell_size = bool(
             explicit_cell_size
             or bo_recommended.get("cell_size_mm") not in (None, "", [])
@@ -421,6 +447,44 @@ class DesignAgent(BaseAgent):
             constraints["require_flat_compression_faces"] = False
         return constraints
 
+    @classmethod
+    def _active_parameter_space(
+        cls,
+        state: OrchestratorState,
+        *,
+        design_contract: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Resolve current request metadata without rewriting legacy contracts."""
+        metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
+        contract = design_contract if isinstance(design_contract, dict) else {}
+        next_request = metadata.get("next_design_request")
+        next_request = next_request if isinstance(next_request, dict) else {}
+        bo_result = metadata.get("bo_agent")
+        bo_result = bo_result if isinstance(bo_result, dict) else {}
+        for source in (contract, next_request, bo_result):
+            parameter_space = source.get("parameter_space")
+            if isinstance(parameter_space, dict) and parameter_space:
+                return dict(parameter_space)
+        return dict(cls.LEGACY_BO_PARAMETER_SPACE)
+
+    @staticmethod
+    def _validate_active_parameters(
+        parameters: dict[str, float],
+        parameter_space: dict[str, Any],
+        *,
+        source: str,
+    ) -> None:
+        """Validate requested active coordinates against their transmitted domain."""
+        space = BOParameterSpace.from_mapping(parameter_space)
+        dimensions = {dimension.name: dimension for dimension in space.dimensions}
+        missing = [name for name in ("cell_size_mm", "relative_density") if name not in dimensions]
+        if missing:
+            raise ValueError(f"{source} parameter_space is missing {', '.join(missing)}")
+        try:
+            space.encode(parameters)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{source} coordinate is outside declared parameter_space: {exc}") from exc
+
     def _candidate_pool(
         self,
         *,
@@ -462,9 +526,9 @@ class DesignAgent(BaseAgent):
                 "candidate_id": f"cand-{state.loop_count + 1}-{idx + 1:02d}",
                 "geometry_type": geometry,
                 "specimen_size_mm": list(max_size),
-                "cell_size_mm": round(cell, 3),
+                "cell_size_mm": float(cell),
                 "wall_thickness_mm": round(wall, 3),
-                "relative_density": round(rel_density, 4),
+                "relative_density": float(rel_density),
                 "porosity": round(1.0 - rel_density, 4),
                 "anisotropy_ratio": round(anisotropy, 3),
                 "orientation_deg": float(

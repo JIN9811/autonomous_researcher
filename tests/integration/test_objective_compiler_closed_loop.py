@@ -126,6 +126,7 @@ class _AgentContext:
 class _BOContext:
     def __init__(self, tools: ToolRegistry) -> None:
         self.tools = tools
+        self.force_real_llm_in_test = False
 
 
 def _curve() -> list[dict[str, float]]:

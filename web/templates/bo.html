@@ -270,15 +270,11 @@ Modification guide:
               <input id="bo-exploitation-input" class="text-input" type="number" min="0" max="1" step="0.05" value="0.65" />
             </label>
             <label>
-              LLM Preference
-              <select id="bo-llm-preference-input" class="text-input">
-                <option value="true">enabled</option>
-                <option value="false">disabled</option>
+              LLM Strategy Control
+              <select id="bo-strategy-control-input" class="text-input">
+                <option value="configured">Preserve configured acquisition</option>
+                <option value="adaptive">Allow bounded LLM strategy selection</option>
               </select>
-            </label>
-            <label>
-              LLM Candidate Weight
-              <input id="bo-llm-weight-input" class="text-input" type="text" value="auto" />
             </label>
             <label>
               Top-K Candidates
@@ -381,8 +377,8 @@ Modification guide:
       </section>
     </main>
     <script src="/static/objective_builder.js"></script>
-    <script src="/static/lhs_design_visualization.js?v=20260812-lhs-paper-1"></script>
-  <script src="/static/bo_visualization.js?v=20260813-threshold-label-1"></script>
+    <script src="/static/lhs_design_visualization.js?v=20260910-continuous-1"></script>
+  <script src="/static/bo_visualization.js?v=20260910-continuous-strategy-1"></script>
     <script src="/static/bo.js"></script>
   </body>
 </html>

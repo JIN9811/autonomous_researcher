@@ -23,10 +23,12 @@ from __future__ import annotations
 import json
 import math
 import re
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
+from agents.bo_decision import run_bo_decision
 from utils.agent_artifact_archive import archive_agent_run
 from learning.bo_parameter_space import BOParameterSpace
 from orchestrator.state import Mode, OrchestratorState
@@ -65,7 +67,7 @@ class BOAgent(BaseAgent):
     )
     DEFAULT_PARAMETER_SPACE: dict[str, Any] = {
         "geometry_type": ["gyroid"],
-        "cell_size_mm": [5.0, 6.0, 7.5, 10.0],
+        "cell_size_mm": [5.0, 10.0],
         "relative_density": [0.20, 0.48],
         "wall_thickness_mm": [1.2],
         "tpms_thickness": [0.0],
@@ -102,8 +104,10 @@ class BOAgent(BaseAgent):
             "xi": 0.01,
             "exploration_weight": 0.35,
             "exploitation_weight": 0.65,
-            "llm_preference_enabled": True,
-            "llm_candidate_weight": "auto",
+            "strategy_control": "configured",
+            # Compatibility-only fields. They no longer rerank numeric output.
+            "llm_preference_enabled": False,
+            "llm_candidate_weight": 0.0,
             "top_k": 5,
             "bo_backend": "botorch",
             "supported_bo_backends": ["botorch", "lightweight_pool"],
@@ -131,6 +135,10 @@ class BOAgent(BaseAgent):
         if acquisition not in cls.SUPPORTED_ACQUISITIONS:
             warnings.append(f"unknown acquisition '{acquisition}' fell back to expected_improvement")
             acquisition = "expected_improvement"
+        strategy_control = str(raw.get("strategy_control") or defaults["strategy_control"]).strip().lower()
+        if strategy_control not in {"configured", "adaptive"}:
+            warnings.append(f"unknown strategy_control '{strategy_control}' fell back to configured")
+            strategy_control = "configured"
         try:
             budget = max(1, int(raw.get("budget", defaults["budget"])))
         except (TypeError, ValueError):
@@ -158,6 +166,7 @@ class BOAgent(BaseAgent):
                 "strategy": strategy,
                 "benchmark_strategy": cls.BENCHMARK_STRATEGY_MAP.get(strategy, strategy),
                 "acquisition": acquisition,
+                "strategy_control": strategy_control,
                 "budget": budget,
                 "random_seed": random_seed,
                 "kappa": cls._float_setting(raw, "kappa", defaults["kappa"], warnings),
@@ -174,8 +183,8 @@ class BOAgent(BaseAgent):
                     defaults["exploitation_weight"],
                     warnings,
                 ),
-                "llm_preference_enabled": cls._bool_setting(raw, "llm_preference_enabled", bool(defaults["llm_preference_enabled"])),
-                "llm_candidate_weight": raw.get("llm_candidate_weight", defaults["llm_candidate_weight"]),
+                "llm_preference_enabled": False,
+                "llm_candidate_weight": 0.0,
                 "top_k": top_k,
                 "bo_backend": bo_backend,
                 "initial_sampler": "latin_hypercube",
@@ -183,6 +192,9 @@ class BOAgent(BaseAgent):
                 "num_restarts": int(max(1, cls._float_setting(raw, "num_restarts", defaults["num_restarts"], warnings))),
                 "raw_samples": int(max(8, cls._float_setting(raw, "raw_samples", defaults["raw_samples"], warnings))),
                 "optimizer_timeout_s": max(1.0, cls._float_setting(raw, "optimizer_timeout_s", defaults["optimizer_timeout_s"], warnings)),
+                "decision_max_calls": raw.get("decision_max_calls", 6),
+                "decision_call_timeout_s": raw.get("decision_call_timeout_s", 45.0),
+                "decision_total_timeout_s": raw.get("decision_total_timeout_s", 120.0),
                 "parameter_space": parameter_space,
             },
             warnings,
@@ -191,32 +203,67 @@ class BOAgent(BaseAgent):
     @classmethod
     def _two_variable_parameter_space(cls, raw_space: dict[str, Any]) -> dict[str, Any]:
         """Canonicalize the first Gyroid BO problem to two active dimensions."""
-        feasible_cells = [5.0, 6.0, 7.5, 10.0]
-        raw_cells = raw_space.get("cell_size_mm")
-        fixed_cell: list[float] | None = None
-        if isinstance(raw_cells, list) and len(raw_cells) == 1:
-            try:
-                requested = float(raw_cells[0])
-            except (TypeError, ValueError):
-                requested = float("nan")
-            if requested in feasible_cells:
-                fixed_cell = [requested]
-
-        density = raw_space.get("relative_density", [0.20, 0.48])
-        if not isinstance(density, list) or len(density) != 2:
-            density = [0.20, 0.48]
-        try:
-            low = max(0.20, float(density[0]))
-            high = min(0.48, float(density[1]))
-        except (TypeError, ValueError):
-            low, high = 0.20, 0.48
-        if low >= high:
-            low, high = 0.20, 0.48
-
         canonical = dict(cls.DEFAULT_PARAMETER_SPACE)
-        canonical["cell_size_mm"] = fixed_cell or feasible_cells
-        canonical["relative_density"] = [low, high]
+        for key in set(cls.DEFAULT_PARAMETER_SPACE) - {"cell_size_mm", "relative_density"}:
+            if key not in raw_space:
+                continue
+            value = raw_space[key]
+            if isinstance(value, (list, tuple)):
+                if len(value) == 1:
+                    canonical[key] = [value[0]]
+            else:
+                canonical[key] = [value]
+        canonical["cell_size_mm"] = cls._active_numeric_domain(
+            "cell_size_mm",
+            raw_space.get("cell_size_mm", cls.DEFAULT_PARAMETER_SPACE["cell_size_mm"]),
+        )
+        canonical["relative_density"] = cls._active_numeric_domain(
+            "relative_density",
+            raw_space.get("relative_density", cls.DEFAULT_PARAMETER_SPACE["relative_density"]),
+            safe_bounds=(0.20, 0.48),
+        )
         return canonical
+
+    @staticmethod
+    def _active_numeric_domain(
+        name: str,
+        raw_domain: Any,
+        *,
+        safe_bounds: tuple[float, float] | None = None,
+    ) -> list[float]:
+        """Return one fixed value or finite ascending bounds for an active variable."""
+        values = list(raw_domain) if isinstance(raw_domain, (list, tuple)) else [raw_domain]
+        if not values:
+            raise ValueError(f"{name} must declare one fixed value or finite bounds")
+        if any(isinstance(value, bool) for value in values):
+            raise ValueError(f"{name} must contain numeric values")
+        try:
+            numbers = [float(value) for value in values]
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must contain numeric values") from exc
+        if any(not math.isfinite(value) for value in numbers):
+            raise ValueError(f"{name} values must be finite")
+        if name == "cell_size_mm" and any(value <= 0.0 for value in numbers):
+            raise ValueError("cell_size_mm values must be positive")
+        if len(numbers) == 1:
+            value = numbers[0]
+            if safe_bounds is not None and not safe_bounds[0] <= value <= safe_bounds[1]:
+                raise ValueError(f"{name}={value} is outside safety bounds {list(safe_bounds)}")
+            return [value]
+        if len(numbers) == 2:
+            low, high = numbers
+            if low >= high:
+                raise ValueError(f"{name} bounds must be ascending")
+        else:
+            low, high = min(numbers), max(numbers)
+            if low >= high:
+                raise ValueError(f"{name} numeric table must span a non-zero range")
+        if safe_bounds is not None:
+            low = max(safe_bounds[0], low)
+            high = min(safe_bounds[1], high)
+            if low >= high:
+                raise ValueError(f"{name} bounds do not overlap safety bounds {list(safe_bounds)}")
+        return [low, high]
 
     @classmethod
     def _fixed_surface_space_for_state(
@@ -274,7 +321,25 @@ class BOAgent(BaseAgent):
         initial_design_size: Any = "auto",
     ) -> dict[str, Any]:
         """Return the next unobserved point from the configured canonical LHS."""
-        parameter_space = cls._fixed_surface_space_for_state(dict(cls.DEFAULT_PARAMETER_SPACE), state)
+        metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
+        bo_settings = metadata.get("bo_settings") if isinstance(metadata.get("bo_settings"), dict) else {}
+        raw_space = bo_settings.get("parameter_space") if isinstance(bo_settings.get("parameter_space"), dict) else None
+        if raw_space is None:
+            for key in ("next_design_request", "bo_agent"):
+                previous = metadata.get(key)
+                if isinstance(previous, dict) and isinstance(previous.get("parameter_space"), dict) and previous["parameter_space"]:
+                    raw_space = previous["parameter_space"]
+                    break
+        if raw_space is None:
+            contract = metadata.get("orchestrator_design_contract")
+            contract = contract if isinstance(contract, dict) else {}
+            raw_space = contract.get("parameter_space") if isinstance(contract.get("parameter_space"), dict) else None
+        if raw_space is None:
+            initial = metadata.get("bo_initial_design")
+            initial = initial if isinstance(initial, dict) else {}
+            raw_space = initial.get("parameter_space") if isinstance(initial.get("parameter_space"), dict) else None
+        parameter_space = cls._two_variable_parameter_space(raw_space) if raw_space is not None else dict(cls.DEFAULT_PARAMETER_SPACE)
+        parameter_space = cls._fixed_surface_space_for_state(parameter_space, state)
         space = BOParameterSpace.from_mapping(parameter_space)
         target = cls._initial_design_size_for_run(initial_design_size, state)
         candidates = space.lhs_points(target, seed=seed)
@@ -316,6 +381,7 @@ class BOAgent(BaseAgent):
                 "target": len(candidates),
                 "seed": int(seed),
                 "constraints": candidate,
+                "parameter_space": parameter_space,
                 "normalization": "unit_hypercube",
                 "points": points,
             }
@@ -327,6 +393,7 @@ class BOAgent(BaseAgent):
             "target": len(candidates),
             "seed": int(seed),
             "constraints": {},
+            "parameter_space": parameter_space,
             "normalization": "unit_hypercube",
             "points": points,
         }
@@ -1346,10 +1413,19 @@ class BOAgent(BaseAgent):
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True), encoding="utf-8")
         return str(path)
 
-    def _write_artifacts(self, state: OrchestratorState, *, reasoning: dict[str, Any], candidate_ranking: list[dict[str, Any]], next_candidate: dict[str, Any]) -> dict[str, str]:
+    def _write_artifacts(
+        self,
+        state: OrchestratorState,
+        *,
+        reasoning: dict[str, Any],
+        decision: dict[str, Any],
+        candidate_ranking: list[dict[str, Any]],
+        next_candidate: dict[str, Any],
+    ) -> dict[str, str]:
         base = self._artifact_dir(state)
         return {
             "bo_reasoning_report": self._write_json(base / "bo_reasoning_report.json", reasoning),
+            "bo_decision": self._write_json(base / "bo_decision.json", decision),
             "candidate_pool": self._write_json(base / "candidate_pool.json", {"schema": "bo_candidate_pool.v1", "candidates": candidate_ranking}),
             "bo_next_candidate": self._write_json(base / "bo_next_candidate.json", next_candidate),
         }
@@ -1367,6 +1443,12 @@ class BOAgent(BaseAgent):
             normalized["parameter_space"],
             state,
         )
+        # These are current-loop control caches, not historical artifacts. A
+        # previous ready recommendation must not survive a new BO attempt that
+        # is returned, invalid, cancelled, or blocked by an observation gate.
+        state.run_metadata.pop("bo_recommended_constraints", None)
+        state.run_metadata.pop("next_design_request", None)
+        state.run_metadata.pop("bo_agent", None)
         locked_cell_size = self._fixed_cell_size_from_space(normalized["parameter_space"])
         strategy = normalized["strategy"]
         benchmark_strategy = normalized["benchmark_strategy"]
@@ -1474,60 +1556,182 @@ class BOAgent(BaseAgent):
                 data={"bo_result": blocked_result, "experiment_objective": objective},
             )
         failure_model = self._failure_model(priors)
-        reasoning = await self._llm_reasoning(
-            state,
-            ctx,
-            objective=objective,
-            normalized=normalized,
-            priors=priors,
-            knowledge_context=knowledge_context,
-            failure_model=failure_model,
-            warnings=warnings,
-        )
-        benchmark_payload = {
-            "budget": normalized["budget"],
-            "sequential_only": True,
-            "strategies": benchmark_strategies,
-            "seed": normalized["random_seed"],
-            "parameter_space": normalized["parameter_space"],
+        benchmark: dict[str, Any] = {}
+
+        def run_optimizer(strategy_settings: dict[str, Any]) -> dict[str, Any]:
+            nonlocal benchmark
+            for key in ("acquisition", "kappa", "xi", "exploration_weight", "exploitation_weight"):
+                if key in strategy_settings:
+                    normalized[key] = strategy_settings[key]
+            benchmark_payload = {
+                "budget": normalized["budget"],
+                "sequential_only": True,
+                "strategies": benchmark_strategies,
+                "seed": normalized["random_seed"],
+                "parameter_space": normalized["parameter_space"],
+                "objective": objective,
+                "acquisition": normalized["acquisition"],
+                "kappa": normalized["kappa"],
+                "xi": normalized["xi"],
+                "exploration_weight": normalized["exploration_weight"],
+                "exploitation_weight": normalized["exploitation_weight"],
+                "bo_backend": normalized["bo_backend"],
+                "initial_sampler": normalized["initial_sampler"],
+                "initial_design_size": self._initial_design_size_for_run(normalized["initial_design_size"], state),
+                "num_restarts": normalized["num_restarts"],
+                "raw_samples": normalized["raw_samples"],
+                "optimizer_timeout_s": normalized["optimizer_timeout_s"],
+                "request": {
+                    "run_id": state.run_id,
+                    "experiment_id": state.experiment_id,
+                    "session_id": state.active_session_id or state.run_id,
+                    "objective": objective,
+                    "execution": {"mode": execution_mode, "bridge": "virtual", "dry_run": True},
+                    "metadata": {
+                        "agent": self.name,
+                        "strategy": strategy,
+                        "benchmark_strategy": benchmark_strategy,
+                        "strategy_control": normalized["strategy_control"],
+                        "acquisition": normalized["acquisition"],
+                        "kappa": normalized["kappa"],
+                        "xi": normalized["xi"],
+                        "exploration_weight": normalized["exploration_weight"],
+                        "exploitation_weight": normalized["exploitation_weight"],
+                        "bo_backend": normalized["bo_backend"],
+                        "knowledge_context": knowledge_context,
+                        "reasoning_source": "bo_decision.v1",
+                    },
+                },
+                "prior_evaluations": priors,
+            }
+            benchmark = ctx.tools.call("experiment.benchmark", benchmark_payload)
+            recommendation = self._recommendation(benchmark, benchmark_strategy)
+            _name, payload = self._strategy_payload(benchmark, benchmark_strategy)
+            trace = payload.get("surrogate_trace") if isinstance(payload.get("surrogate_trace"), list) else []
+            latest = trace[-1] if trace and isinstance(trace[-1], dict) else {}
+            selected = latest.get("selected") if isinstance(latest.get("selected"), dict) else {}
+            if selected.get("candidate_id") and isinstance(selected.get("parameters"), dict):
+                recommendation = {
+                    **recommendation,
+                    "candidate_id": str(selected["candidate_id"]),
+                    "parameters": dict(selected["parameters"]),
+                }
+            return {
+                "ok": bool(benchmark.get("ok")) and bool(recommendation.get("parameters")),
+                "candidate_id": recommendation.get("candidate_id"),
+                "parameters": dict(recommendation.get("parameters") or {}),
+                "phase": str(latest.get("phase") or "acquisition"),
+                "backend_active": str(latest.get("backend_active") or payload.get("backend_active") or normalized["bo_backend"]),
+                "numeric": {
+                    key: selected.get(key)
+                    for key in ("surrogate_mean", "uncertainty", "acquisition_value")
+                    if isinstance(selected.get(key), (int, float))
+                },
+            }
+
+        def retrieve_local_knowledge(query: str, top_k: int) -> list[dict[str, Any]]:
+            rag = getattr(ctx, "rag", None)
+            local_index = getattr(rag, "_local_index", None)
+            search = getattr(local_index, "search", None)
+            if not callable(search):
+                return []
+            chunks = search(query, top_k=top_k)
+            return [
+                {
+                    "source_id": str(getattr(chunk, "chunk_id", "")),
+                    "source": str(getattr(chunk, "source", "local_index")),
+                    "text": str(getattr(chunk, "text", "")),
+                }
+                for chunk in chunks
+            ]
+
+        decision_context = {
+            "run_id": state.run_id,
+            "loop_number": int(state.loop_count or 0) + 1,
+            "goal": state.active_goal,
             "objective": objective,
-            "acquisition": normalized["acquisition"],
-            "kappa": normalized["kappa"],
-            "xi": normalized["xi"],
-            "exploration_weight": normalized["exploration_weight"],
-            "exploitation_weight": normalized["exploitation_weight"],
-            "bo_backend": normalized["bo_backend"],
-            "initial_sampler": normalized["initial_sampler"],
-            "initial_design_size": self._initial_design_size_for_run(
-                normalized["initial_design_size"],
-                state,
-            ),
-            "num_restarts": normalized["num_restarts"],
-            "raw_samples": normalized["raw_samples"],
-            "optimizer_timeout_s": normalized["optimizer_timeout_s"],
-            "request": {
+            "parameter_space": normalized["parameter_space"],
+            "observations": priors,
+            "knowledge": knowledge_context,
+            "strategy_control": normalized["strategy_control"],
+            "current_strategy": {
+                key: normalized[key]
+                for key in ("acquisition", "kappa", "xi", "exploration_weight", "exploitation_weight")
+            },
+            "fixed_initial_design": {
+                "sampler": normalized["initial_sampler"],
+                "size": self._initial_design_size_for_run(normalized["initial_design_size"], state),
+                "seed": normalized["random_seed"],
+            },
+            "experiment_budget": normalized["budget"],
+        }
+        virtual_test = state.mode == Mode.TEST and getattr(ctx, "force_real_llm_in_test", None) is False
+        decision = await run_bo_decision(
+            context=decision_context,
+            ctx=ctx,
+            settings=normalized,
+            run_optimizer=run_optimizer,
+            retrieve_knowledge=retrieve_local_knowledge,
+            virtual_test=virtual_test,
+        )
+        if decision.get("status") != "accepted":
+            numerical = decision.get("optimizer_result") if isinstance(decision.get("optimizer_result"), dict) else {}
+            blocked_request = {
+                "schema": "next_design_request.v1",
                 "run_id": state.run_id,
                 "experiment_id": state.experiment_id,
-                "session_id": state.active_session_id or state.run_id,
-                "objective": objective,
-                "execution": {"mode": execution_mode, "bridge": "virtual", "dry_run": True},
-                "metadata": {
-                    "agent": self.name,
-                    "strategy": strategy,
-                    "benchmark_strategy": benchmark_strategy,
-                    "acquisition": normalized["acquisition"],
-                    "kappa": normalized["kappa"],
-                    "xi": normalized["xi"],
-                    "exploration_weight": normalized["exploration_weight"],
-                    "exploitation_weight": normalized["exploitation_weight"],
-                    "bo_backend": normalized["bo_backend"],
-                    "knowledge_context": knowledge_context,
-                    "reasoning_source": reasoning.get("source"),
-                },
+                "producer_agent": self.name,
+                "consumer_agent": "design_agent",
+                "objective_id": objective.get("objective_id"),
+                "objective_version": objective.get("objective_version"),
+                "objective_hash": objective_hash,
+                "status": "blocked",
+                "candidate_id": numerical.get("candidate_id"),
+                "constraints": {},
+                "parameter_space": normalized["parameter_space"],
+                "rationale": decision.get("reason") or decision.get("failure_code"),
+                "reasoning_ref": "bo_decision.v1",
+                "guardian_status": "not_checked",
+                "decisions": [],
+                "warnings": [],
+                "next_action": "BO owner review is required before Design handoff.",
+                "created_at": self.now_iso(),
+            }
+            blocked_result = {
+                "ok": False, "tool": "bo.agent", "run_id": state.run_id,
+                "experiment_id": state.experiment_id, "status": "blocked",
+                "failure_code": decision.get("failure_code", "BO_OWNER_REVIEW"),
+                "strategy": strategy, "strategy_control": normalized["strategy_control"],
+                "acquisition": normalized["acquisition"], "parameter_space": normalized["parameter_space"],
+                "objective": objective, "benchmark": benchmark, "decision": decision,
+                "next_design_request": blocked_request, "knowledge_context": knowledge_context,
+                "observation_integrity": observation_integrity, "warnings": warnings,
+            }
+            state.run_metadata["bo_settings"] = deepcopy(normalized)
+            state.run_metadata["bo_agent"] = blocked_result
+            state.run_metadata["next_design_request"] = blocked_request
+            return AgentResult(
+                success=False,
+                summary="BO decision did not authorize the numerical recommendation",
+                data={"bo_result": blocked_result, "experiment_objective": objective, "next_design_request": blocked_request},
+            )
+        reasoning = {
+            "schema_version": "bo_reasoning_v1",
+            "source": decision.get("provenance", "llm"),
+            "hypotheses": [],
+            "strategy_recommendation": {
+                "strategy": strategy,
+                "acquisition": normalized["acquisition"],
+                "exploration_weight": normalized["exploration_weight"],
+                "exploitation_weight": normalized["exploitation_weight"],
+                "reason": decision.get("reason", "Accepted exact numerical optimizer candidate."),
             },
-            "prior_evaluations": priors,
+            "search_space_patch": {"narrow": {}, "expand": {}, "lock": {}, "forbid": []},
+            "preference_regions": [],
+            "risk_flags": [],
+            "operator_summary": decision.get("reason", "Accepted exact numerical optimizer candidate."),
+            "failure_model": failure_model,
         }
-        benchmark = ctx.tools.call("experiment.benchmark", benchmark_payload)
         fallback_strategy = "bo" if strategy == "mbo" and warnings else benchmark_strategy
         fallback_recommendation = self._recommendation(benchmark, fallback_strategy)
         _active_strategy, active_payload = self._strategy_payload(benchmark, fallback_strategy)
@@ -1565,30 +1769,38 @@ class BOAgent(BaseAgent):
                 "next_index": next_index,
             }
         else:
-            candidate_ranking = self._rank_candidates(
-                benchmark=benchmark,
-                normalized=normalized,
-                reasoning=reasoning,
-                failure_model=failure_model,
-                locked_cell_size=locked_cell_size,
-                prior_count=len(priors),
-                loop_count=int(state.loop_count or 0),
-            )
+            numerical = decision["optimizer_result"]
+            selected_id = str(numerical["candidate_id"])
+            raw_pool = self._candidate_pool_from_benchmark(benchmark, fallback_strategy)
             if normalized["bo_backend"] == "botorch":
-                selected = latest_trace.get("selected", {}) if isinstance(latest_trace, dict) else {}
-                selected_id = str(selected.get("candidate_id") or "") if isinstance(selected, dict) else ""
-                selected_ranking = next(
-                    (item for item in candidate_ranking if str(item.get("candidate_id") or "") == selected_id),
-                    None,
-                )
-                if selected_ranking is not None:
-                    candidate_ranking = [selected_ranking]
-            recommendation = self._recommendation_from_ranking(candidate_ranking, fallback_recommendation, reasoning)
+                raw_pool = [item for item in raw_pool if str(item.get("candidate_id") or "") == selected_id]
+            candidate_ranking = [
+                {
+                    **item,
+                    "llm": {"preference_score": 0.0, "matched_regions": [], "weight": 0.0, "active": False},
+                    "constraints": {
+                        "valid": True,
+                        "risk_score": 0.0,
+                        "warnings": [],
+                        "already_evaluated": bool(item.get("already_evaluated")),
+                    },
+                    "selection_method": "numeric_backend_order",
+                }
+                for item in raw_pool
+            ]
+            recommendation = {
+                **fallback_recommendation,
+                "candidate_id": selected_id,
+                "parameters": dict(numerical["parameters"]),
+                "reason": decision.get("reason", "Accepted exact numerical optimizer candidate."),
+                "why_this_candidate": "The BO-local review accepted the exact candidate selected by the numerical backend.",
+                "why_not_best_exploitation_only": "The configured or bounded adaptive numeric acquisition selected this candidate.",
+                "expected_information_gain": (numerical.get("numeric") or {}).get("uncertainty"),
+                "risk_assessment": {"valid": True, "risk_score": 0.0, "warnings": [], "already_evaluated": False},
+                "bo_hypothesis_ids": [],
+                "why_not_chosen": [],
+            }
             initial_design_status = {}
-        recommendation["parameters"] = self._apply_locked_parameters(
-            recommendation.get("parameters", {}),
-            cell_size_mm=locked_cell_size,
-        )
         if knowledge_context.get("memory_summary"):
             recommendation["reason"] = (
                 f"{recommendation['reason']} KnowledgeAgent context was attached for next-cycle DesignAgent constraints."
@@ -1616,6 +1828,7 @@ class BOAgent(BaseAgent):
             "status": "ready" if recommendation.get("parameters") else "blocked",
             "candidate_id": recommendation.get("candidate_id"),
             "constraints": dict(recommendation.get("parameters") or {}),
+            "parameter_space": normalized["parameter_space"],
             "rationale": recommendation.get("why_this_candidate") or recommendation.get("reason"),
             "reasoning_ref": "bo_reasoning_report",
             "guardian_status": "not_checked",
@@ -1634,6 +1847,7 @@ class BOAgent(BaseAgent):
         artifacts = self._write_artifacts(
             state,
             reasoning=reasoning,
+            decision=decision,
             candidate_ranking=candidate_ranking,
             next_candidate=next_design_request,
         )
@@ -1666,6 +1880,7 @@ class BOAgent(BaseAgent):
             "experiment_id": state.experiment_id,
             "strategy": strategy,
             "benchmark_strategy": benchmark_strategy,
+            "strategy_control": normalized["strategy_control"],
             "acquisition": normalized["acquisition"],
             "optimization_phase": optimization_phase,
             "backend_active": backend_active,
@@ -1678,6 +1893,7 @@ class BOAgent(BaseAgent):
             "prior_summary": prior_summary,
             "failure_model": failure_model,
             "reasoning": reasoning,
+            "decision": decision,
             "candidate_pool": candidate_ranking,
             "candidate_ranking": top_k,
             "recommendation": recommendation,
@@ -1708,7 +1924,7 @@ class BOAgent(BaseAgent):
                 "exploration_weight": normalized["exploration_weight"],
                 "exploitation_weight": normalized["exploitation_weight"],
                 "llm_preference_enabled": normalized["llm_preference_enabled"],
-                "llm_candidate_weight": self._llm_weight(normalized, prior_count=len(priors), loop_count=int(state.loop_count or 0)),
+                "llm_candidate_weight": 0.0,
                 "bo_backend": normalized["bo_backend"],
                 "benchmark_backend_active": (benchmark.get("strategies", {}).get(recommendation.get("source_strategy"), {}) if isinstance(benchmark.get("strategies"), dict) else {}).get("backend_active"),
                 "prior_evaluation_count": len(state.experiment_evaluations),
@@ -1720,6 +1936,7 @@ class BOAgent(BaseAgent):
                 else {},
             },
         }
+        state.run_metadata["bo_settings"] = deepcopy(normalized)
         state.run_metadata["bo_agent"] = bo_result
         if initial_design_status:
             state.run_metadata["bo_initial_design"] = dict(initial_design_status)
@@ -1740,5 +1957,21 @@ class BOAgent(BaseAgent):
 
     @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
-        """Run with defaults when invoked directly by registry/future orchestrator paths."""
-        return await self.run_with_settings(state, ctx, {})
+        """Reuse this run's validated settings when invoked through the registry."""
+        current = state.run_metadata.get("bo_settings")
+        settings = deepcopy(current) if isinstance(current, dict) else {}
+        if not settings:
+            for key in ("next_design_request", "bo_agent"):
+                source = state.run_metadata.get(key)
+                if not isinstance(source, dict):
+                    continue
+                parameter_space = source.get("parameter_space")
+                if isinstance(parameter_space, dict):
+                    settings["parameter_space"] = deepcopy(parameter_space)
+                    break
+            previous = state.run_metadata.get("bo_agent")
+            if isinstance(previous, dict):
+                for key in ("strategy", "strategy_control", "acquisition", "budget", "bo_backend"):
+                    if key in previous:
+                        settings[key] = deepcopy(previous[key])
+        return await self.run_with_settings(state, ctx, settings)

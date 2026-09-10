@@ -21,6 +21,7 @@ const boStatusDot = document.getElementById("bo-status-dot");
 const boStatusLabel = document.getElementById("bo-status-label");
 const boStatusDetail = document.getElementById("bo-status-detail");
 const strategyInput = document.getElementById("bo-strategy-input");
+const strategyControlInput = document.getElementById("bo-strategy-control-input");
 const backendInput = document.getElementById("bo-backend-input");
 const initialSamplerInput = document.getElementById("bo-initial-sampler-input");
 const initialSizeInput = document.getElementById("bo-initial-size-input");
@@ -31,8 +32,6 @@ const kappaInput = document.getElementById("bo-kappa-input");
 const xiInput = document.getElementById("bo-xi-input");
 const explorationInput = document.getElementById("bo-exploration-input");
 const exploitationInput = document.getElementById("bo-exploitation-input");
-const llmPreferenceInput = document.getElementById("bo-llm-preference-input");
-const llmWeightInput = document.getElementById("bo-llm-weight-input");
 const topKInput = document.getElementById("bo-top-k-input");
 const restartsInput = document.getElementById("bo-restarts-input");
 const rawSamplesInput = document.getElementById("bo-raw-samples-input");
@@ -198,6 +197,7 @@ function parseJsonField(el, fallback) {
 function settingsPayload() {
   return {
     strategy: strategyInput.value,
+    strategy_control: strategyControlInput?.value || "configured",
     bo_backend: backendInput ? backendInput.value : "botorch",
     initial_sampler: initialSamplerInput ? initialSamplerInput.value : "latin_hypercube",
     initial_design_size: initialSizeInput && /^\d+$/.test(initialSizeInput.value.trim()) ? Number(initialSizeInput.value) : "auto",
@@ -208,8 +208,8 @@ function settingsPayload() {
     xi: Number(xiInput.value || 0.01),
     exploration_weight: Number(explorationInput.value || 0.35),
     exploitation_weight: Number(exploitationInput.value || 0.65),
-    llm_preference_enabled: boolValue(llmPreferenceInput, true),
-    llm_candidate_weight: (llmWeightInput.value || "auto").trim() || "auto",
+    llm_preference_enabled: false,
+    llm_candidate_weight: 0,
     top_k: Number(topKInput.value || 5),
     num_restarts: Number(restartsInput?.value || 12),
     raw_samples: Number(rawSamplesInput?.value || 256),
@@ -223,6 +223,7 @@ function settingsPayload() {
 function applyDefaults(data) {
   defaults = data.defaults || {};
   strategyInput.value = defaults.strategy || "bo";
+  if (strategyControlInput) strategyControlInput.value = defaults.strategy_control || "configured";
   if (backendInput) backendInput.value = defaults.bo_backend || "botorch";
   if (initialSamplerInput) initialSamplerInput.value = defaults.initial_sampler || "latin_hypercube";
   if (initialSizeInput) initialSizeInput.value = defaults.initial_design_size ?? "auto";
@@ -233,8 +234,6 @@ function applyDefaults(data) {
   xiInput.value = defaults.xi || 0.01;
   explorationInput.value = defaults.exploration_weight || 0.35;
   exploitationInput.value = defaults.exploitation_weight || 0.65;
-  if (llmPreferenceInput) llmPreferenceInput.value = String(defaults.llm_preference_enabled ?? true);
-  if (llmWeightInput) llmWeightInput.value = defaults.llm_candidate_weight ?? "auto";
   if (topKInput) topKInput.value = defaults.top_k || 5;
   if (restartsInput) restartsInput.value = defaults.num_restarts || 12;
   if (rawSamplesInput) rawSamplesInput.value = defaults.raw_samples || 256;
@@ -246,6 +245,7 @@ function applyDefaults(data) {
 function applySettings(settings) {
   if (!settings || typeof settings !== "object") return;
   if (settings.strategy) strategyInput.value = settings.strategy;
+  if (strategyControlInput) strategyControlInput.value = settings.strategy_control || "configured";
   if (settings.bo_backend && backendInput) backendInput.value = settings.bo_backend;
   if (settings.initial_sampler && initialSamplerInput) initialSamplerInput.value = settings.initial_sampler;
   if (settings.initial_design_size !== undefined && initialSizeInput) initialSizeInput.value = settings.initial_design_size;
@@ -256,8 +256,6 @@ function applySettings(settings) {
   if (settings.xi !== undefined) xiInput.value = settings.xi;
   if (settings.exploration_weight !== undefined) explorationInput.value = settings.exploration_weight;
   if (settings.exploitation_weight !== undefined) exploitationInput.value = settings.exploitation_weight;
-  if (settings.llm_preference_enabled !== undefined && llmPreferenceInput) llmPreferenceInput.value = String(settings.llm_preference_enabled);
-  if (settings.llm_candidate_weight !== undefined && llmWeightInput) llmWeightInput.value = settings.llm_candidate_weight;
   if (settings.top_k !== undefined && topKInput) topKInput.value = settings.top_k;
   if (settings.num_restarts !== undefined && restartsInput) restartsInput.value = settings.num_restarts;
   if (settings.raw_samples !== undefined && rawSamplesInput) rawSamplesInput.value = settings.raw_samples;
@@ -464,8 +462,12 @@ function renderPriorSummary(summary) {
   `;
 }
 
-function renderReasoning(reasoning, failureModel) {
+function renderReasoning(reasoning, failureModel, decision) {
   if (!reasoningPanel) return;
+  if (decision?.schema === "bo_decision.v1" && window.BOVisualization?.renderDecision) {
+    reasoningPanel.innerHTML = window.BOVisualization.renderDecision(decision);
+    return;
+  }
   if (!reasoning || typeof reasoning !== "object") {
     reasoningPanel.innerHTML = "No reasoning artifact yet.";
     return;
@@ -564,7 +566,7 @@ function renderResult(data) {
   bestScoreLabel.textContent = `${score ?? "n/a"}${backendNote}`;
   renderRecommendationPanel(recommendation, boResult ? boResult.next_design_request : null);
   renderPriorSummary(boResult ? boResult.prior_summary : null);
-  renderReasoning(boResult ? boResult.reasoning : null, boResult ? boResult.failure_model : null);
+  renderReasoning(boResult ? boResult.reasoning : null, boResult ? boResult.failure_model : null, boResult?.decision);
   renderCandidateRanking(boResult ? boResult.candidate_ranking || boResult.candidate_pool : []);
   renderCurve(boResult ? boResult.best_so_far || [] : firstCurveFromBenchmark(benchmark));
   acceptBenchmarkVisualizations(benchmark);

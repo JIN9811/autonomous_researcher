@@ -42,15 +42,16 @@ def _plot(payload: dict[str, Any]) -> Any:
     y_axis = payload["design_space"]["y"]
     cells = x_axis.get("values", x_axis.get("bounds", []))
     lower, upper = y_axis["bounds"]
+    fixed_density = y_axis.get("kind") == "fixed"
     target = int(design["target"])
     figure, axis = plt.subplots(figsize=(7.2, 4.5), constrained_layout=True)
     figure.patch.set_facecolor("white")
     _style_axis(axis)
 
-    for index in range(target + 1):
+    for index in range(1 if fixed_density else target + 1):
         boundary = lower + (upper - lower) * index / target
         axis.axhline(boundary, color="#cbd5e1", linewidth=0.55, alpha=0.72, zorder=0)
-    axis.text(1.0, 0.01, "Density strata", transform=axis.transAxes, ha="right", va="bottom", fontsize=7, color="#64748b")
+    axis.text(1.0, 0.01, "Fixed density" if fixed_density else "Density strata", transform=axis.transAxes, ha="right", va="bottom", fontsize=7, color="#64748b")
 
     groups = {
         "measured": ("Measured design", "#2563eb", "o", 42),
@@ -77,10 +78,16 @@ def _plot(payload: dict[str, Any]) -> Any:
         axis.set_xticks(cells)
     x_span = max(cells) - min(cells)
     axis.set_xlim(min(cells) - max(x_span * 0.06, 0.2), max(cells) + max(x_span * 0.06, 0.2))
-    axis.set_ylim(lower, upper)
+    if fixed_density:
+        margin = max(abs(lower) * 0.05, 0.01)
+        axis.set_ylim(lower - margin, upper + margin)
+        axis.set_yticks([lower])
+    else:
+        axis.set_ylim(lower, upper)
     axis.set_xlabel("Cell size (mm)", fontsize=9)
     axis.set_ylabel("Relative density", fontsize=9)
-    axis.set_title("Mixed-space Latin hypercube initial design", fontsize=11, fontweight="bold", loc="left")
+    space_label = "Continuous-space" if x_axis.get("kind") == "continuous" else "Mixed-space"
+    axis.set_title(f"{space_label} Latin hypercube initial design", fontsize=11, fontweight="bold", loc="left")
     axis.text(
         1.0,
         1.02,

@@ -94,7 +94,7 @@ implementations remain authoritative.
 | 4 | Lab Equipment | `agents/equipment_agent.py` | `graphs/modules/equipment/module.yaml` | [Lab Equipment](equipment_agent.md) | [Flow](assets/figures/equipment_01_closed_loop_handoffs.svg) · [Execution](assets/figures/equipment_02_execution_effect_boundary.svg) · [Connections](assets/figures/equipment_03_api_connection_architecture.svg) |
 | 5 | Analysis | `agents/analysis_agent.py` | `graphs/modules/analysis/module.yaml` | [Analysis](analysis_agent.md) | [Flow](assets/figures/analysis_01_closed_loop_handoffs.svg) · [Execution](assets/figures/analysis_02_execution_effect_boundary.svg) · [Connections](assets/figures/analysis_03_api_connection_architecture.svg) |
 | 6 | Knowledge | `agents/knowledge_agent.py` | `graphs/modules/knowledge/module.yaml` | [Knowledge](knowledge_agent.md) | [Flow](assets/figures/knowledge_01_closed_loop_handoffs.svg) · [Execution](assets/figures/knowledge_02_execution_effect_boundary.svg) · [Connections](assets/figures/knowledge_03_api_connection_architecture.svg) |
-| 7 | BO | `agents/bo_agent.py` | `graphs/modules/bo/module.yaml` | [Bayesian Optimization](bo_agent.md) | [Flow](assets/figures/bo_01_closed_loop_handoffs.svg) · [Execution](assets/figures/bo_02_execution_effect_boundary.svg) |
+| 7 | BO | `agents/bo_agent.py` | `graphs/modules/bo/module.yaml` | [Bayesian Optimization](bo_agent.md) | [Flow](assets/figures/bo_01_closed_loop_handoffs.svg) · [Execution](assets/figures/bo_02_execution_effect_boundary.svg) · [API](assets/figures/bo_03_api_connection_architecture.svg) |
 | Safety/control plane | Guardian | `agents/guardian_agent.py` | `graphs/modules/guardian/module.yaml` | [Guardian](guardian_agent.md) | [Flow](assets/figures/guardian_01_closed_loop_handoffs.svg) · [Execution](assets/figures/guardian_02_execution_effect_boundary.svg) |
 
 The [API and Connection Matrix](agent_api_connection_matrix.md) compares all ten
@@ -118,7 +118,7 @@ bridges. The complete contract and diagram are in the
 | Lab Equipment | Runs after verified placement and hands measurement proof to Analysis | Owns profile/skill/protocol selection, preflight, execution proof, export, and handoff | Windows PyAutoGUI and UTM/equipment bridges |
 | Analysis | Converts identified measurement evidence into an accepted evaluation handoff | Owns parsing, units, curves, metrics, uncertainty, CAE comparison, and objective evaluation | Bounded CAE/CalculiX or computation bridge; no direct physical actuator |
 | Knowledge | Supplies durable evidence and bounded context for BO and later cycles | Owns provenance/schema validation, typed records, patterns, relation review, and context assembly | Ledger, outbox, ontology, and graph repository adapters; no physical actuator |
-| BO | Proposes the next governed candidate after accepted Analysis/Knowledge evidence | Owns prior filtering, LHS/GP/acquisition, constraints, recommendation, and Design handoff | BoTorch/benchmark computation tools; proposal only |
+| BO | Owns bounded strategy/tool decisions and numerical-result review | Owns validated dispatch, continuous-domain/LHS state, candidate checks and Design handoff | BoTorch/benchmark computation tools; proposal only |
 | Guardian | Cross-level authority for continue, review, stop, or error | Owns risk/evidence/health/approval evaluation and corrective-action records | Read-only health/queue tools and stop/block authority; bridge hard interlocks remain authoritative |
 
 The control direction is `High-Level -> Middle-Level -> Low-Level`; telemetry

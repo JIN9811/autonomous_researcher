@@ -6744,6 +6744,16 @@ class MainController:
         next_request = self._state.run_metadata.get("next_design_request")
         next_request = next_request if isinstance(next_request, dict) else {}
         next_parameters = next_request.get("constraints") if isinstance(next_request.get("constraints"), dict) else {}
+        bo_settings = self._state.run_metadata.get("bo_settings")
+        bo_settings = bo_settings if isinstance(bo_settings, dict) else {}
+        normalized_bo_settings, _warnings = BOAgent.normalize_settings(bo_settings)
+        request_parameter_space = dict(normalized_bo_settings["parameter_space"])
+        next_parameter_space = next_request.get("parameter_space")
+        if isinstance(next_parameter_space, dict) and next_parameter_space:
+            canonical_space = BOAgent._two_variable_parameter_space(next_parameter_space)
+            request_parameter_space = {
+                key: value for key, value in canonical_space.items() if key in next_parameter_space
+            }
 
         initial_request: dict[str, Any] = {}
         if is_test and (cycle_index <= 1 or not next_parameters):
@@ -6755,6 +6765,11 @@ class MainController:
                 initial_design_size=initial_design.get("size", "auto"),
             )
             requested = initial_request.get("constraints") if isinstance(initial_request.get("constraints"), dict) else {}
+            request_parameter_space = (
+                dict(initial_request["parameter_space"])
+                if isinstance(initial_request.get("parameter_space"), dict)
+                else {}
+            )
             phase = str(initial_request.get("phase") or "initial_design")
             source = "test_mode_deterministic_lhs" if phase == "initial_design" else "test_mode_acquisition_ready"
         elif is_test:
@@ -6793,6 +6808,8 @@ class MainController:
             else {},
             "status": "ready" if len(active) == 2 else "blocked",
         }
+        if request_parameter_space:
+            contract["parameter_space"] = request_parameter_space
         if initial_request:
             contract["initial_design"] = {
                 "sampler": initial_request.get("sampler"),

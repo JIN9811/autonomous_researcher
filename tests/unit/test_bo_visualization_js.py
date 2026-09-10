@@ -289,7 +289,7 @@ console.log(JSON.stringify({{
   objectiveFunction: plot.includes("Score"),
   objectiveScale: plot.includes("GP mean"),
   observations: plot.includes("Measured"),
-  nextPoint: plot.includes("Maximum EI / next query"),
+  nextPoint: plot.includes("EI-selected next query"),
   noGroupedCellCurves: !plot.includes("Cell size 5 mm") && !plot.includes("Cell size 10 mm"),
   inputVariablesHidden: !plot.includes("cell_size_mm") && !plot.includes("relative_density"),
   responseSurface: plot.includes("BO objective posterior and expected improvement"),

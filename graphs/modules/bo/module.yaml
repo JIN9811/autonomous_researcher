@@ -20,34 +20,34 @@ module:
       label: Summarize Evidence Table
       kind: internal_step
     - id: 04_llm_reasoning_hypothesis_pass
-      label: LLM Reasoning Hypothesis Pass
+      label: LLM Strategy And Tool Decision
       kind: internal_step
     - id: 05_validate_reasoning_patch
-      label: Validate Reasoning Patch
+      label: Validate Tool Request And Evidence
       kind: internal_step
     - id: 06_update_search_space
-      label: Update Search Space
+      label: Freeze Search Contract
       kind: internal_step
     - id: 07_generate_candidate_pool
-      label: Generate Candidate Pool
+      label: Dispatch Numeric Optimizer
       kind: internal_step
     - id: 08_score_numeric_acquisition
-      label: Score Numeric Acquisition
+      label: Read Numeric Acquisition
       kind: internal_step
     - id: 09_score_llm_preference
-      label: Score LLM Preference
+      label: Inspect Numerical Diagnostics
       kind: internal_step
     - id: 10_apply_constraint_and_failure_penalties
-      label: Apply Constraint And Failure Penalties
+      label: Check Candidate Integrity
       kind: internal_step
     - id: 11_rank_top_k_candidates
-      label: Rank Top-K Candidates
+      label: Preserve Solver Recommendation
       kind: internal_step
     - id: 12_llm_top_k_critique
-      label: LLM Top-K Critique
+      label: LLM Result Review
       kind: internal_step
     - id: 13_select_recommendation
-      label: Select Recommendation
+      label: Accept Or Return Recommendation
       kind: internal_step
     - id: 14_write_bo_artifacts
       label: Write BO Artifacts
@@ -61,6 +61,7 @@ module:
   notes: >-
     GUI/module editor may edit this module config, but execution remains bound to
     allowlisted Python handlers. Python source is not modified by the GUI. BO
-    reasoning is advisory: numeric acquisition and validator gates decide the
-    handoff candidate, and hardware execution remains downstream of Design,
-    Specimen, Manipulation, Equipment, and Guardian.
+    local High selects bounded strategy/evidence tools and reviews the numeric
+    result. LHS/BoTorch own coordinates; local tool names are not global bridge
+    tools. Legacy internal IDs remain display/checkpoint identities. Existing
+    Guardian/Orchestrator and downstream device ownership are unchanged.

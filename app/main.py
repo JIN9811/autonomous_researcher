@@ -975,6 +975,7 @@ class BOAgentRequest(BaseModel):
     """Request body for BO Workspace benchmark and agent execution."""
 
     strategy: str = "bo"
+    strategy_control: Literal["configured", "adaptive"] = "configured"
     acquisition: str = "expected_improvement"
     budget: int = 8
     random_seed: int = 7
@@ -994,6 +995,13 @@ class BOAgentRequest(BaseModel):
     parameter_space: dict[str, object] = Field(default_factory=dict)
     objective: dict[str, object] = Field(default_factory=dict)
     mode: Literal["test", "live", "virtual", "replay"] = "test"
+
+    @model_validator(mode="after")
+    def validate_continuous_domain(self) -> "BOAgentRequest":
+        # Reject malformed bounds at the API boundary before save or execution.
+        if self.parameter_space:
+            BOAgent._two_variable_parameter_space(self.parameter_space)
+        return self
 
 
 class ObjectiveComposeRequest(BaseModel):
@@ -7072,7 +7080,8 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
             surrogate_trace = strategy_payload.get("surrogate_trace") if isinstance(strategy_payload.get("surrogate_trace"), list) else []
             latest_trace = surrogate_trace[-1] if surrogate_trace and isinstance(surrogate_trace[-1], dict) else {}
             latest_selected = latest_trace.get("selected") if isinstance(latest_trace.get("selected"), dict) else {}
-            role_specific["summary"] = "Reasoning-augmented BO cockpit: measured evidence, Knowledge/failure priors, surrogate/acquisition scoring, LLM preference audit, and Design handoff."
+            role_specific["summary"] = "BO strategy/tool decisions, measured evidence, numerical acquisition, result review, and the existing Design handoff."
+            role_specific["bo_decision"] = bo_result.get("decision", {})
             role_specific["surrogate_panel"] = {
                 "strategy": bo_result.get("strategy", ""),
                 "benchmark_strategy": benchmark_strategy,
@@ -8620,7 +8629,7 @@ async def post_bo_benchmark(req: BOAgentRequest) -> dict[str, object]:
 
 @app.post("/api/bo/run")
 async def post_bo_run(req: BOAgentRequest) -> dict[str, object]:
-    """Run registered BO Agent and store latest advisory result in controller state."""
+    """Run the registered BO decision path and store its governed proposal."""
     state = controller._state
     if req.mode in {"test", "live", "replay"}:
         state.mode = Mode(req.mode)

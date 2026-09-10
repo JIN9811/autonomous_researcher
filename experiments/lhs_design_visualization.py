@@ -36,6 +36,8 @@ def _density_bounds(parameter_space: dict[str, Any]) -> list[float]:
     raw = parameter_space.get("relative_density")
     values = raw if isinstance(raw, list) else []
     numeric = [_finite(item) for item in values]
+    if len(numeric) == 1 and numeric[0] is not None:
+        return [float(numeric[0]), float(numeric[0])]
     if len(numeric) >= 2 and numeric[0] is not None and numeric[-1] is not None:
         return [float(numeric[0]), float(numeric[-1])]
     return [0.20, 0.48]
@@ -50,7 +52,7 @@ def _normalized_points(points: list[dict[str, Any]], x_axis: dict[str, Any], bou
         parameters = item.get("parameters") if isinstance(item.get("parameters"), dict) else {}
         cell = _finite(parameters.get("cell_size_mm"))
         density = _finite(parameters.get("relative_density"))
-        if cell is None or density is None or density_span <= 0:
+        if cell is None or density is None or density_span < 0:
             continue
         if x_axis.get("kind") == "continuous" and len(cell_bounds) == 2:
             cell_unit = (cell - cell_bounds[0]) / max(cell_bounds[1] - cell_bounds[0], 1e-12)
@@ -58,7 +60,10 @@ def _normalized_points(points: list[dict[str, Any]], x_axis: dict[str, Any], bou
             cell_unit = cells.index(cell) / max(1, len(cells) - 1)
         else:
             continue
-        rows.append([cell_unit, (density - bounds[0]) / density_span])
+        row = [cell_unit]
+        if density_span > 0:
+            row.append((density - bounds[0]) / density_span)
+        rows.append(row)
     return rows
 
 
@@ -103,10 +108,10 @@ def build_lhs_design_visualization(
         "step": int(trace.get("step") or min(completed + 1, target)),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "design_space": {
-            "dimension": 2,
-            "mode": "mixed_discrete_continuous",
+            "dimension": int(x_axis["kind"] == "continuous" or len(x_axis.get("values", [])) > 1) + int(bounds[0] < bounds[1]),
+            "mode": "continuous_2d" if x_axis["kind"] == "continuous" else "mixed_discrete_continuous",
             "x": x_axis,
-            "y": {"name": "relative_density", "label": "Relative density", "unit": "1", "kind": "continuous", "bounds": bounds},
+            "y": {"name": "relative_density", "label": "Relative density", "unit": "1", "kind": "continuous" if bounds[0] < bounds[1] else "fixed", "bounds": bounds},
             "normalization": "unit_hypercube",
         },
         "initial_design": {
@@ -141,8 +146,8 @@ def validate_lhs_design_visualization(payload: dict[str, Any]) -> dict[str, Any]
             raise ValueError("continuous cell_size_mm bounds must be finite and ascending")
     elif not cells:
         raise ValueError("discrete cell_size_mm values are required")
-    if len(bounds) != 2 or bounds[0] >= bounds[1]:
-        raise ValueError("relative_density bounds must be finite and ascending")
+    if len(bounds) != 2 or bounds[0] > bounds[1] or (bounds[0] == bounds[1] and y_axis.get("kind") != "fixed"):
+        raise ValueError("relative_density bounds must be ascending, or equal for a fixed coordinate")
     initial = payload.get("initial_design") if isinstance(payload.get("initial_design"), dict) else {}
     target = int(initial.get("target") or 0)
     completed = int(initial.get("completed") or 0)

@@ -1,4 +1,4 @@
-/* Dedicated mixed-space LHS renderer for Design Agent and BO Workspace. */
+/* Shared continuous/mixed-space LHS renderer for BO Workspace and Live GUI. */
 (function attachLHSDesignVisualization(root, factory) {
   const api = factory();
   if (typeof module !== "undefined" && module.exports) module.exports = api;
@@ -31,9 +31,11 @@
 
   function renderPlot(payload) {
     if (!isValid(payload)) return '<div class="lhs-viz-empty">LHS design visualization unavailable</div>';
+    const continuous = payload.design_space.x.kind === "continuous";
+    const title = `${continuous ? "Continuous-space" : "Mixed-space"} Latin hypercube initial design`;
     const pngUrl = String(payload.artifacts?.png_url || "").trim();
     if (pngUrl) {
-      return `<figure class="lhs-viz-matplotlib-figure"><img class="lhs-viz-matplotlib-image" src="${escapeHtml(pngUrl)}" alt="Mixed-space Latin hypercube initial design step ${escapeHtml(payload.step)}"></figure>`;
+      return `<figure class="lhs-viz-matplotlib-figure"><img class="lhs-viz-matplotlib-image" src="${escapeHtml(pngUrl)}" alt="${title} step ${escapeHtml(payload.step)}"></figure>`;
     }
 
     const initial = payload.initial_design;
@@ -41,6 +43,9 @@
     const yAxis = payload.design_space.y;
     const cells = (Array.isArray(xAxis.values) ? xAxis.values : xAxis.bounds).map(Number);
     const bounds = yAxis.bounds.map(Number);
+    const fixedDensity = yAxis.kind === "fixed";
+    const densityMargin = Math.max(Math.abs(bounds[0]) * 0.05, 0.01);
+    const yDomain = fixedDensity ? [bounds[0] - densityMargin, bounds[0] + densityMargin] : bounds;
     const target = Math.max(1, Number(initial.target || 1));
     const width = 920;
     const height = 520;
@@ -50,9 +55,10 @@
     const xMargin = Math.max((Math.max(...cells) - Math.min(...cells)) * 0.06, 0.2);
     const xDomain = [Math.min(...cells) - xMargin, Math.max(...cells) + xMargin];
     const xScale = (value) => scale(value, xDomain, [pad.left, pad.left + plotWidth]);
-    const yScale = (value) => scale(value, bounds, [pad.top + plotHeight, pad.top]);
-    const strata = Array.from({ length: target + 1 }, (_, index) => bounds[0] + ((bounds[1] - bounds[0]) * index) / target);
-    const yTicks = Array.from({ length: 5 }, (_, index) => bounds[0] + ((bounds[1] - bounds[0]) * index) / 4);
+    const yScale = (value) => scale(value, yDomain, [pad.top + plotHeight, pad.top]);
+    const strata = fixedDensity ? [bounds[0]] : Array.from({ length: target + 1 }, (_, index) => bounds[0] + ((bounds[1] - bounds[0]) * index) / target);
+    const xTicks = continuous ? Array.from({ length: 5 }, (_, index) => cells[0] + (cells[1] - cells[0]) * index / 4) : cells;
+    const yTicks = fixedDensity ? [bounds[0]] : Array.from({ length: 5 }, (_, index) => bounds[0] + ((bounds[1] - bounds[0]) * index) / 4);
     const pointMarkup = initial.points.map((item, fallbackIndex) => {
       const cell = finite(item.parameters?.cell_size_mm);
       const density = finite(item.parameters?.relative_density);
@@ -68,12 +74,12 @@
     }).join("");
 
     return `
-      <svg class="lhs-viz-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Mixed-space Latin hypercube initial design step ${escapeHtml(payload.step)}">
+      <svg class="lhs-viz-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${title} step ${escapeHtml(payload.step)}">
         <rect class="lhs-viz-paper" width="${width}" height="${height}"></rect>
-        <text class="lhs-viz-title" x="${pad.left}" y="32">Mixed-space Latin hypercube initial design</text>
-        <text class="lhs-viz-subtitle" x="${pad.left}" y="54">${escapeHtml(`${initial.completed} / ${target} measured`)} · discrete cell size × stratified relative density</text>
+        <text class="lhs-viz-title" x="${pad.left}" y="32">${title}</text>
+        <text class="lhs-viz-subtitle" x="${pad.left}" y="54">${escapeHtml(`${initial.completed} / ${target} measured`)} · ${continuous ? "continuous" : "discrete"} cell size × ${fixedDensity ? "fixed" : "stratified"} relative density</text>
         ${strata.map((tick) => `<line class="lhs-viz-stratum" x1="${pad.left}" y1="${yScale(tick)}" x2="${pad.left + plotWidth}" y2="${yScale(tick)}"></line>`).join("")}
-        ${cells.map((tick) => `<g><line class="lhs-viz-grid" x1="${xScale(tick)}" y1="${pad.top}" x2="${xScale(tick)}" y2="${pad.top + plotHeight}"></line><text class="lhs-viz-tick" x="${xScale(tick)}" y="${pad.top + plotHeight + 24}" text-anchor="middle">${numberText(tick, 2)}</text></g>`).join("")}
+        ${xTicks.map((tick) => `<g><line class="lhs-viz-grid" x1="${xScale(tick)}" y1="${pad.top}" x2="${xScale(tick)}" y2="${pad.top + plotHeight}"></line><text class="lhs-viz-tick" x="${xScale(tick)}" y="${pad.top + plotHeight + 24}" text-anchor="middle">${numberText(tick, 2)}</text></g>`).join("")}
         ${yTicks.map((tick) => `<text class="lhs-viz-tick" x="${pad.left - 12}" y="${yScale(tick) + 4}" text-anchor="end">${numberText(tick, 3)}</text>`).join("")}
         <line class="lhs-viz-axis" x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${pad.top + plotHeight}"></line>
         <line class="lhs-viz-axis" x1="${pad.left}" y1="${pad.top + plotHeight}" x2="${pad.left + plotWidth}" y2="${pad.top + plotHeight}"></line>
@@ -85,7 +91,7 @@
           <g class="lhs-viz-next" transform="translate(154 0)"><line x1="-5" y1="-5" x2="5" y2="5"></line><line x1="-5" y1="5" x2="5" y2="-5"></line></g><text x="166" y="4">Next design</text>
           <circle class="lhs-viz-point lhs-viz-planned" cx="270" cy="0" r="5"></circle><text x="281" y="4">Planned design</text>
         </g>
-        <text class="lhs-viz-strata-label" x="${pad.left + plotWidth}" y="${pad.top + plotHeight - 8}" text-anchor="end">Density strata</text>
+        <text class="lhs-viz-strata-label" x="${pad.left + plotWidth}" y="${pad.top + plotHeight - 8}" text-anchor="end">${fixedDensity ? "Fixed density" : "Density strata"}</text>
       </svg>`;
   }
 

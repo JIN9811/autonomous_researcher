@@ -155,3 +155,24 @@ def test_two_variable_lhs_balances_feasible_cell_sizes_and_stratifies_density(
     }
     density_bins = {min(7, int((item["relative_density"] - 0.20) / 0.28 * 8)) for item in points}
     assert density_bins == set(range(8))
+
+
+def test_two_continuous_variable_round_trip_preserves_requested_precision() -> None:
+    space = BOParameterSpace.from_mapping(
+        {
+            "geometry_type": ["gyroid"],
+            "cell_size_mm": [6.2, 9.1],
+            "relative_density": [0.20, 0.48],
+            "wall_thickness_mm": [1.2],
+        }
+    )
+    requested = {
+        **space.fixed_parameters,
+        "cell_size_mm": 7.13789,
+        "relative_density": 0.32123456,
+    }
+
+    assert space.continuous_dimension_count == 2
+    decoded = space.decode(space.encode(requested))
+    assert decoded["cell_size_mm"] == pytest.approx(7.13789)
+    assert decoded["relative_density"] == pytest.approx(0.32123456)

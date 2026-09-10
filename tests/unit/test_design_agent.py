@@ -4,6 +4,8 @@ Unit tests for DesignAgent resilience behavior.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 
@@ -185,6 +187,71 @@ async def test_design_agent_uses_orchestrator_requested_parameters_as_authority(
         "relative_density": pytest.approx(0.37),
     }
     assert spec["orchestrator_design_contract_ref"] == "design-run-orchestrator-contract-c001"
+
+
+def test_design_agent_preserves_contract_precision_in_geometry_arguments(tmp_path: Path) -> None:
+    agent = DesignAgent()
+    state = OrchestratorState(
+        run_id="run-continuous-precision",
+        experiment_id="exp-continuous-precision",
+        mode=Mode.TEST,
+        stage=Stage.DESIGN,
+        active_goal="maximize gyroid SEA",
+        run_metadata={
+            "orchestrator_design_contract": {
+                "schema": "orchestrator_design_contract.v1",
+                "contract_id": "design-run-continuous-precision-c001",
+                "parameter_space": {
+                    "geometry_type": ["gyroid"],
+                    "cell_size_mm": [6.2, 9.1],
+                    "relative_density": [0.20, 0.48],
+                    "wall_thickness_mm": [1.2],
+                },
+                "requested_parameters": {
+                    "cell_size_mm": 7.13789,
+                    "relative_density": 0.32123456,
+                },
+            }
+        },
+    )
+
+    prepared = agent._prepare_design_payload(state, _DeterministicCtxStub())
+    candidate = prepared["ranked"][0]
+    payload = agent._candidate_preview_payload(
+        state=state,
+        candidate=candidate,
+        constraints=prepared["constraints"],
+        output_dir=tmp_path,
+    )
+
+    assert candidate["cell_size_mm"] == pytest.approx(7.13789)
+    assert candidate["relative_density"] == pytest.approx(0.32123456)
+    assert payload["cell_size_mm"] == pytest.approx(7.13789)
+    assert payload["relative_density"] == pytest.approx(0.32123456)
+
+
+def test_design_agent_rejects_requested_coordinate_outside_transmitted_domain() -> None:
+    state = OrchestratorState(
+        run_id="run-invalid-continuous-request",
+        experiment_id="exp-invalid-continuous-request",
+        mode=Mode.TEST,
+        stage=Stage.DESIGN,
+        run_metadata={
+            "orchestrator_design_contract": {
+                "parameter_space": {
+                    "cell_size_mm": [6.2, 9.1],
+                    "relative_density": [0.20, 0.48],
+                },
+                "requested_parameters": {
+                    "cell_size_mm": 9.2,
+                    "relative_density": 0.32,
+                },
+            }
+        },
+    )
+
+    with pytest.raises(ValueError, match="outside declared parameter_space"):
+        DesignAgent()._resolve_constraints(state)
 
 
 @pytest.mark.asyncio

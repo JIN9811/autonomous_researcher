@@ -1,0 +1,126 @@
+{
+  "schema": "bo_decision_verification.v1",
+  "date": "2026-09-10",
+  "source": "scripts/verify_bo_decisions.py --execute",
+  "evidence_class": "synthetic_software_verification",
+  "physical_actuation": false,
+  "service_startup": false,
+  "cases": [
+    {
+      "backend": "openai",
+      "case": "initial_design",
+      "duration_s": 11.684,
+      "success": true,
+      "expectation_met": true,
+      "optimizer_calls": 1,
+      "run_id": "bo-probe-openai-initial_design-20260910T123417304421Z",
+      "model": "gpt-5.5",
+      "decision_status": "accepted",
+      "tool_sequence": [
+        "inspect_diagnostics",
+        "run_optimizer",
+        "accept_recommendation"
+      ],
+      "parameters": {
+        "geometry_type": "gyroid",
+        "cell_size_mm": 6.698402893355809,
+        "relative_density": 0.2425696549757606,
+        "wall_thickness_mm": 1.2,
+        "tpms_thickness": 0.0,
+        "orientation_deg": 0.0,
+        "anisotropy_ratio": 1.0,
+        "skin_thickness_mm": 0.8,
+        "bottom_cap_enabled": true,
+        "top_cap_enabled": false,
+        "skirt_enabled": false
+      }
+    },
+    {
+      "backend": "openai",
+      "case": "acquisition",
+      "duration_s": 10.372,
+      "success": true,
+      "expectation_met": true,
+      "optimizer_calls": 1,
+      "run_id": "bo-probe-openai-acquisition-20260910T123428988646Z",
+      "model": "gpt-5.5",
+      "decision_status": "accepted",
+      "tool_sequence": [
+        "inspect_diagnostics",
+        "run_optimizer",
+        "accept_recommendation"
+      ],
+      "parameters": {
+        "geometry_type": "gyroid",
+        "relative_density": 0.24,
+        "wall_thickness_mm": 1.2,
+        "cell_size_mm": 7.623977036914598,
+        "tpms_thickness": 0.0,
+        "orientation_deg": 0.0,
+        "anisotropy_ratio": 1.0,
+        "skin_thickness_mm": 0.8,
+        "bottom_cap_enabled": true,
+        "top_cap_enabled": false,
+        "skirt_enabled": false
+      }
+    },
+    {
+      "backend": "vllm",
+      "case": "initial_design",
+      "duration_s": 25.074,
+      "success": true,
+      "expectation_met": true,
+      "optimizer_calls": 1,
+      "run_id": "bo-probe-vllm-initial_design-20260910T123439361895Z",
+      "model": "gemma4:31b",
+      "decision_status": "accepted",
+      "tool_sequence": [
+        "inspect_diagnostics",
+        "run_optimizer",
+        "accept_recommendation"
+      ],
+      "parameters": {
+        "geometry_type": "gyroid",
+        "cell_size_mm": 6.698402893355809,
+        "relative_density": 0.2425696549757606,
+        "wall_thickness_mm": 1.2,
+        "tpms_thickness": 0.0,
+        "orientation_deg": 0.0,
+        "anisotropy_ratio": 1.0,
+        "skin_thickness_mm": 0.8,
+        "bottom_cap_enabled": true,
+        "top_cap_enabled": false,
+        "skirt_enabled": false
+      }
+    },
+    {
+      "backend": "vllm",
+      "case": "acquisition",
+      "duration_s": 31.349,
+      "success": true,
+      "expectation_met": true,
+      "optimizer_calls": 1,
+      "run_id": "bo-probe-vllm-acquisition-20260910T123504437175Z",
+      "model": "gemma4:31b",
+      "decision_status": "accepted",
+      "tool_sequence": [
+        "inspect_diagnostics",
+        "run_optimizer",
+        "accept_recommendation"
+      ],
+      "parameters": {
+        "geometry_type": "gyroid",
+        "relative_density": 0.24,
+        "wall_thickness_mm": 1.2,
+        "cell_size_mm": 7.623977036914598,
+        "tpms_thickness": 0.0,
+        "orientation_deg": 0.0,
+        "anisotropy_ratio": 1.0,
+        "skin_thickness_mm": 0.8,
+        "bottom_cap_enabled": true,
+        "top_cap_enabled": false,
+        "skirt_enabled": false
+      }
+    }
+  ]
+}

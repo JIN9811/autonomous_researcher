@@ -10,6 +10,24 @@ from app import main as app_main
 from app.main import app
 
 
+def test_bo_strategy_control_is_validated_and_preserved_in_api_request():
+    import pytest
+    from pydantic import ValidationError
+
+    assert app_main.BOAgentRequest().model_dump()["strategy_control"] == "configured"
+    assert app_main.BOAgentRequest(strategy_control="adaptive").model_dump()["strategy_control"] == "adaptive"
+    with pytest.raises(ValidationError):
+        app_main.BOAgentRequest(strategy_control="unbounded")
+
+
+def test_invalid_continuous_domain_is_rejected_before_workspace_execution():
+    client = TestClient(app, raise_server_exceptions=False)
+    for route in ("/api/bo/config", "/api/bo/benchmark", "/api/bo/run"):
+        response = client.post(route, json={"parameter_space": {"cell_size_mm": [9, 6]}})
+        assert response.status_code == 422, (route, response.text)
+        assert "cell_size_mm" in response.text
+
+
 def test_bo_workspace_contains_objective_compiler_surfaces() -> None:
     client = TestClient(app)
 
@@ -87,13 +105,13 @@ def test_bo_workspace_contains_shared_live_visualization_cards() -> None:
         assert f'id="{element_id}"' in html
     assert html.index('/static/lhs_design_visualization.js') < html.index('/static/bo_visualization.js')
     assert html.index('/static/bo_visualization.js') < html.rindex('<script src="/static/bo.js"')
-    assert '/static/bo_visualization.js?v=20260813-threshold-label-1' in html
+    assert '/static/bo_visualization.js?v=20260910-continuous-strategy-1' in html
     assert '/static/styles.css?v=20260811-botorch-paper-3' in html
 
     live_html = TestClient(app).get("/live").text
-    assert '/static/lhs_design_visualization.js?v=20260812-lhs-paper-1' in live_html
-    assert '/static/bo_visualization.js?v=20260813-threshold-label-1' in live_html
-    assert '/static/planning.js?v=20260904-bo-lhs-1' in live_html
+    assert '/static/lhs_design_visualization.js?v=20260910-continuous-1' in live_html
+    assert '/static/bo_visualization.js?v=20260910-continuous-strategy-1' in live_html
+    assert '<script src="/static/planning.js?v=20260910-continuous-strategy-1" defer></script>' in live_html
 
 
 def test_bo_workspace_resets_visualization_state_before_each_new_run() -> None:

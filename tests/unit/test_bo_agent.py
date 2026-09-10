@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+import json
 from pathlib import Path
 
 import pytest
 
 from agents.bo_agent import BOAgent
+from agents.design_agent import DesignAgent
 from learning.bo_parameter_space import BOParameterSpace
 from mcp_tools.experiment_tools import register_experiment_tools
 from mcp_tools.tool_registry import ToolRegistry
@@ -17,6 +20,7 @@ class _CtxStub:
     def __init__(self) -> None:
         self.tools = ToolRegistry()
         register_experiment_tools(self.tools)
+        self.force_real_llm_in_test = False
 
 
 def _add_completed_lhs_observations(state: OrchestratorState, *, count: int = 8) -> None:
@@ -136,6 +140,8 @@ async def test_bo_agent_preserves_lhs_proposal_without_acquisition_reranking() -
         "next_index": 2,
     }
     assert recommendation["parameters"] == lhs[1]
+    assert recommendation["candidate_id"] == bo_result["decision"]["optimizer_result"]["candidate_id"]
+    assert recommendation["parameters"] == bo_result["decision"]["optimizer_result"]["parameters"]
     assert recommendation["selection_method"] == "latin_hypercube"
     assert recommendation["objective_score"] is None
     assert "combined_score" not in recommendation
@@ -238,8 +244,8 @@ async def test_bo_agent_keeps_cell_size_as_a_feasible_optimization_dimension() -
             "budget": 4,
             "parameter_space": {
                 "geometry_type": ["gyroid"],
-                "relative_density": [0.18, 0.48],
-                "cell_size_mm": [5.0, 6.0, 7.5, 10.0],
+                "relative_density": [0.27, 0.39],
+                "cell_size_mm": [6.2, 9.1],
                 "orientation_deg": [0.0],
                 "anisotropy_ratio": [1.0],
             },
@@ -248,11 +254,14 @@ async def test_bo_agent_keeps_cell_size_as_a_feasible_optimization_dimension() -
     bo_result = result.data["bo_result"]
 
     assert result.success is True
-    assert bo_result["parameter_space"]["cell_size_mm"] == [5.0, 6.0, 7.5, 10.0]
-    assert bo_result["parameter_space"]["relative_density"][0] == 0.20
-    assert bo_result["recommendation"]["parameters"]["cell_size_mm"] in {5.0, 6.0, 7.5, 10.0}
-    assert bo_result["recommendation"]["parameters"]["relative_density"] >= 0.20
-    assert result.data["experiment_spec_update"]["cell_size_mm"] == 10.0
+    assert bo_result["parameter_space"]["cell_size_mm"] == [6.2, 9.1]
+    assert bo_result["parameter_space"]["relative_density"] == [0.27, 0.39]
+    assert 6.2 <= bo_result["recommendation"]["parameters"]["cell_size_mm"] <= 9.1
+    assert 0.27 <= bo_result["recommendation"]["parameters"]["relative_density"] <= 0.39
+    assert result.data["next_design_request"]["parameter_space"] == bo_result["parameter_space"]
+    assert result.data["experiment_spec_update"]["cell_size_mm"] == pytest.approx(
+        bo_result["recommendation"]["parameters"]["cell_size_mm"]
+    )
 
 
 @pytest.mark.asyncio
@@ -293,15 +302,16 @@ async def test_bo_agent_uses_prior_shape_to_avoid_repeat_recommendation() -> Non
     params = result.data["bo_result"]["recommendation"]["parameters"]
 
     assert result.success is True
-    assert params["cell_size_mm"] == 10.0
+    assert 5.0 <= params["cell_size_mm"] <= 10.0
     signature = (
+        float(params.get("cell_size_mm", 0.0)),
         float(params.get("relative_density", 0.0)),
         float(params.get("wall_thickness_mm", 0.0)),
         float(params.get("orientation_deg", 0.0)),
         float(params.get("anisotropy_ratio", 0.0)),
         float(params.get("tpms_thickness", 0.0)),
     )
-    assert signature != (0.32, 1.2, 0.0, 1.0, 0.34)
+    assert signature != (10.0, 0.32, 1.2, 0.0, 1.0, 0.34)
 
 
 def test_bo_agent_restores_full_parameter_vector_from_objective_constraints() -> None:
@@ -554,6 +564,9 @@ def test_bo_agent_normalize_settings_fallbacks() -> None:
     assert settings["budget"] == 1
     assert settings["random_seed"] == 7
     assert settings["bo_backend"] == "botorch"
+    assert settings["strategy_control"] == "configured"
+    assert settings["llm_preference_enabled"] is False
+    assert settings["llm_candidate_weight"] == 0.0
     assert warnings
 
 
@@ -563,6 +576,107 @@ def test_bo_agent_normalize_settings_accepts_botorch_optional_backend() -> None:
     assert settings["bo_backend"] == "botorch"
     assert settings["top_k"] == 12
     assert warnings == []
+
+
+@pytest.mark.asyncio
+async def test_bo_agent_persists_current_run_settings_and_registry_run_reuses_them() -> None:
+    state = OrchestratorState(
+        run_id="run-persisted-bo-settings",
+        experiment_id="exp-persisted-bo-settings",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+    )
+    supplied = {
+        "strategy": "bo",
+        "strategy_control": "configured",
+        "acquisition": "upper_confidence_bound",
+        "kappa": 2.75,
+        "random_seed": 19,
+        "parameter_space": {"cell_size_mm": [6.2, 9.1], "relative_density": [0.27, 0.39]},
+    }
+
+    first = await BOAgent().run_with_settings(state, _CtxStub(), supplied)
+    second = await BOAgent().run(state, _CtxStub())
+
+    assert first.success is True
+    assert second.success is True
+    assert state.run_metadata["bo_settings"]["parameter_space"]["cell_size_mm"] == [6.2, 9.1]
+    assert state.run_metadata["bo_settings"]["acquisition"] == "upper_confidence_bound"
+    assert second.data["bo_result"]["parameter_space"]["cell_size_mm"] == [6.2, 9.1]
+    assert second.data["bo_result"]["acquisition"] == "upper_confidence_bound"
+
+
+@pytest.mark.asyncio
+async def test_registry_run_recovers_current_run_domain_from_existing_handoff() -> None:
+    state = OrchestratorState(
+        run_id="run-recover-bo-domain",
+        experiment_id="exp-recover-bo-domain",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+        run_metadata={
+            "next_design_request": {
+                "schema": "next_design_request.v1",
+                "parameter_space": {"cell_size_mm": [6.375, 8.925], "relative_density": [0.285, 0.365]},
+            }
+        },
+    )
+
+    result = await BOAgent().run(state, _CtxStub())
+
+    assert result.success is True
+    assert result.data["bo_result"]["parameter_space"]["cell_size_mm"] == [6.375, 8.925]
+    assert result.data["bo_result"]["parameter_space"]["relative_density"] == [0.285, 0.365]
+
+
+@pytest.mark.asyncio
+async def test_accepted_then_owner_held_decision_clears_stale_design_recommendation() -> None:
+    state = OrchestratorState(
+        run_id="run-accepted-then-held",
+        experiment_id="exp-accepted-then-held",
+        mode=Mode.TEST,
+        stage=Stage.BO,
+    )
+    settings = {"strategy": "bo", "strategy_control": "configured", "budget": 1}
+    accepted = await BOAgent().run_with_settings(state, _CtxStub(), settings)
+    assert accepted.success is True
+    assert state.run_metadata["next_design_request"]["status"] == "ready"
+    assert state.run_metadata["bo_recommended_constraints"]
+
+    class HoldContext(_CtxStub):
+        def __init__(self):
+            super().__init__()
+            self.force_real_llm_in_test = True
+            self.call_count = 0
+
+        async def complete(self, task_type, user_prompt, *, timeout_s=None):
+            self.call_count += 1
+            if self.call_count == 1:
+                payload = {
+                    "tool": "inspect_diagnostics", "arguments": {}, "reason": "inspect current state",
+                    "evidence_refs": ["context:observations"],
+                }
+            elif self.call_count == 2:
+                payload = {
+                    "tool": "run_optimizer", "arguments": {}, "reason": "obtain numeric evidence",
+                    "evidence_refs": ["context:request", "diagnostics:current"],
+                }
+            else:
+                evidence = json.loads(user_prompt.split("\n", 1)[1])["evidence_refs"]
+                candidate_ref = next(item for item in evidence if item.startswith("candidate:"))
+                payload = {
+                    "tool": "return_to_owner", "arguments": {}, "reason": "evidence needs owner review",
+                    "evidence_refs": [candidate_ref],
+                }
+            return _LLMResponse(json.dumps(payload))
+
+    held = await BOAgent().run_with_settings(state, HoldContext(), settings)
+
+    assert held.success is False
+    assert "experiment_spec_update" not in held.data
+    assert "bo_recommended_constraints" not in state.run_metadata
+    assert state.run_metadata["next_design_request"]["status"] == "blocked"
+    assert state.run_metadata["next_design_request"]["constraints"] == {}
+    assert DesignAgent()._bo_recommendation_summary(state)["available"] is False
 
 
 def test_bo_agent_auto_initial_design_requires_eight_valid_observations() -> None:
@@ -610,11 +724,86 @@ def test_bo_agent_default_space_is_two_variable_gyroid_problem() -> None:
     space = BOParameterSpace.from_mapping(settings["parameter_space"])
 
     assert [item.name for item in space.active_dimensions] == ["cell_size_mm", "relative_density"]
-    assert settings["parameter_space"]["cell_size_mm"] == [5.0, 6.0, 7.5, 10.0]
+    assert space.continuous_dimension_count == 2
+    assert settings["parameter_space"]["cell_size_mm"] == [5.0, 10.0]
     assert settings["parameter_space"]["relative_density"] == [0.20, 0.48]
     assert settings["parameter_space"]["orientation_deg"] == [0.0]
     assert settings["parameter_space"]["anisotropy_ratio"] == [1.0]
     assert settings["initial_design_size"] == 8
+
+
+def test_bo_agent_normalizes_legacy_cell_table_and_preserves_fixed_values() -> None:
+    settings, warnings = BOAgent.normalize_settings(
+        {
+            "parameter_space": {
+                "cell_size_mm": [5.0, 6.0, 7.5, 10.0],
+                "relative_density": [0.22, 0.46],
+                "wall_thickness_mm": [1.35],
+                "orientation_deg": [15.0],
+            }
+        }
+    )
+
+    assert warnings == []
+    assert settings["parameter_space"]["cell_size_mm"] == [5.0, 10.0]
+    assert settings["parameter_space"]["relative_density"] == [0.22, 0.46]
+    assert settings["parameter_space"]["wall_thickness_mm"] == [1.35]
+    assert settings["parameter_space"]["orientation_deg"] == [15.0]
+
+
+def test_bo_agent_preserves_fixed_continuous_coordinate_precision() -> None:
+    settings, _warnings = BOAgent.normalize_settings(
+        {
+            "parameter_space": {
+                "cell_size_mm": [7.13789],
+                "relative_density": [0.20, 0.48],
+            }
+        }
+    )
+
+    assert settings["parameter_space"]["cell_size_mm"] == [7.13789]
+    space = BOParameterSpace.from_mapping(settings["parameter_space"])
+    assert space.fixed_parameters["cell_size_mm"] == pytest.approx(7.13789)
+
+
+@pytest.mark.parametrize(
+    "domain",
+    (
+        [0.0, 9.1],
+        [-1.0],
+        [9.1, 6.2],
+        [6.2, 6.2],
+        [6.2, float("inf")],
+        [float("nan")],
+    ),
+)
+def test_bo_agent_rejects_invalid_active_numeric_domains(domain: list[float]) -> None:
+    with pytest.raises(ValueError, match="cell_size_mm"):
+        BOAgent.normalize_settings({"parameter_space": {"cell_size_mm": domain}})
+
+
+def test_initial_design_request_uses_custom_bo_settings_domain() -> None:
+    state = OrchestratorState(
+        run_id="run-custom-initial-domain",
+        experiment_id="exp-custom-initial-domain",
+        mode=Mode.TEST,
+        stage=Stage.DESIGN,
+        run_metadata={
+            "bo_settings": {
+                "parameter_space": {
+                    "cell_size_mm": [6.2, 9.1],
+                    "relative_density": [0.27, 0.39],
+                }
+            }
+        },
+    )
+
+    request = BOAgent.initial_design_request(state, seed=19)
+
+    assert request["parameter_space"]["cell_size_mm"] == [6.2, 9.1]
+    assert request["parameter_space"]["relative_density"] == [0.27, 0.39]
+    assert all(6.2 <= point["parameters"]["cell_size_mm"] <= 9.1 for point in request["points"])
+    assert all(0.27 <= point["parameters"]["relative_density"] <= 0.39 for point in request["points"])
 
 
 def test_bo_agent_initial_design_request_advances_through_canonical_lhs() -> None:
@@ -750,7 +939,6 @@ def test_bo_agent_uses_declared_50pct_energy_from_analysis_handoff() -> None:
             "metrics": {"energy_absorption_50pct_mJ": 1125.0},
         }
     }
-
     prior = next(
         item
         for item in BOAgent._prior_evaluations_from_state(state)
@@ -883,12 +1071,20 @@ async def test_bo_agent_blocks_after_analysis_when_exact_metric_observation_is_m
             "objective_score": None,
         }
     }
+    state.run_metadata.update(
+        bo_recommended_constraints={"cell_size_mm": 8.8, "relative_density": 0.37},
+        next_design_request={"schema": "next_design_request.v1", "status": "ready", "constraints": {"cell_size_mm": 8.8}},
+        bo_agent={"recommendation": {"parameters": {"cell_size_mm": 8.8}}},
+    )
 
     result = await BOAgent().run_with_settings(state, _CtxStub(), {"strategy": "bo", "budget": 1})
 
     assert result.success is False
     assert result.data["bo_result"]["status"] == "blocked"
     assert result.data["bo_result"]["failure_code"] == "BO_EXACT_OBJECTIVE_OBSERVATION_REQUIRED"
+    assert "bo_recommended_constraints" not in state.run_metadata
+    assert "next_design_request" not in state.run_metadata
+    assert "bo_agent" not in state.run_metadata
 
 class _LLMResponse:
     def __init__(self, text: str) -> None:
@@ -952,8 +1148,9 @@ async def test_bo_agent_emits_reasoning_ranking_handoff_and_artifacts() -> None:
     assert bo_result["recommendation"]["why_this_candidate"]
     assert bo_result["next_design_request"]["schema"] == "next_design_request.v1"
     selected_cell = bo_result["next_design_request"]["constraints"]["cell_size_mm"]
-    assert selected_cell in {5.0, 6.0, 7.5, 10.0}
+    assert 5.0 <= selected_cell <= 10.0
     assert state.run_metadata["bo_recommended_constraints"]["cell_size_mm"] == selected_cell
+    assert Path(bo_result["artifacts"]["bo_decision"]).exists()
     for path in bo_result["artifacts"].values():
         assert Path(path).exists()
 
@@ -1146,48 +1343,81 @@ async def test_next_design_request_carries_active_objective_identity() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bo_agent_uses_llm_reasoning_as_soft_preference() -> None:
+async def test_bo_agent_adaptive_decision_changes_only_numeric_optimizer_strategy() -> None:
     agent = BOAgent()
     state = OrchestratorState(
         run_id="run-bo-llm",
         experiment_id="exp-bo-llm",
         mode=Mode.TEST,
         stage=Stage.BO,
-        active_goal="prefer high density safe region",
-        current_experiment_spec={"cell_size_mm": 10.0},
+        active_goal="adapt numeric acquisition from diagnostics",
     )
     _add_completed_lhs_observations(state)
-    llm_json = """
-    {
-      "schema_version": "bo_reasoning_v1",
-      "hypotheses": [
-        {"id": "h-density", "claim": "Higher density with sufficient wall thickness may improve stiffness.", "evidence": ["prior trend"], "confidence": 0.7, "testable_by_next_candidate": true}
-      ],
-      "strategy_recommendation": {
-        "strategy": "llm_preference_bo",
-        "acquisition": "expected_improvement",
-        "exploration_weight": 0.25,
-        "exploitation_weight": 0.75,
-        "reason": "bias toward safe high-density region"
-      },
-      "search_space_patch": {
-        "narrow": {}, "expand": {}, "lock": {},
-        "forbid": [{"condition": "relative_density < 0.20", "reason": "FDM continuous shell"}]
-      },
-      "preference_regions": [
-        {"condition": "relative_density between 0.34 and 0.48 and wall_thickness_mm >= 1.2", "preference_score": 0.9, "reason": "test denser shell hypothesis"}
-      ],
-      "risk_flags": [],
-      "operator_summary": "Prefer safe high-density candidates, but keep acquisition gate active."
-    }
-    """
-    ctx = _CtxWithLLM(llm_json)
+    class AdaptiveContext(_CtxStub):
+        def __init__(self):
+            super().__init__()
+            self.force_real_llm_in_test = True
+            self.calls = []
+            self.tool_payloads = []
+            original_call = self.tools.call
 
-    result = await agent.run_with_settings(state, ctx, {"strategy": "llm_preference_bo", "budget": 5, "random_seed": 3})
+            def recording_call(name, payload):
+                if name == "experiment.benchmark":
+                    self.tool_payloads.append(deepcopy(payload))
+                return original_call(name, payload)
+
+            self.tools.call = recording_call
+
+        async def complete(self, task_type, user_prompt, *, timeout_s=None):
+            self.calls.append((task_type, user_prompt))
+            if len(self.calls) == 1:
+                payload = {"tool": "inspect_diagnostics", "arguments": {}, "reason": "inspect observations", "evidence_refs": ["context:observations"]}
+            elif len(self.calls) == 2:
+                payload = {
+                    "tool": "run_optimizer",
+                    "arguments": {"acquisition": "upper_confidence_bound", "kappa": 3.25},
+                    "reason": "use bounded exploration",
+                    "evidence_refs": ["context:request", "diagnostics:current"],
+                }
+            else:
+                evidence = json.loads(user_prompt.split("\n", 1)[1])["evidence_refs"]
+                candidate_ref = next(item for item in evidence if item.startswith("candidate:"))
+                candidate_id = candidate_ref.split(":", 1)[1]
+                payload = {"tool": "accept_recommendation", "arguments": {"candidate_id": candidate_id}, "reason": "accept solver output", "evidence_refs": [candidate_ref]}
+            return _LLMResponse(json.dumps(payload))
+
+    ctx = AdaptiveContext()
+    result = await agent.run_with_settings(
+        state,
+        ctx,
+        {
+            "strategy": "bo",
+            "strategy_control": "adaptive",
+            "acquisition": "expected_improvement",
+            "kappa": 2.0,
+            "budget": 5,
+            "random_seed": 3,
+        },
+    )
     bo_result = result.data["bo_result"]
 
-    assert ctx.calls and ctx.calls[0][0] == "bo_policy"
-    assert bo_result["reasoning"]["source"] == "llm"
-    assert bo_result["reasoning"]["hypotheses"][0]["id"] == "h-density"
-    assert any(item["llm"]["preference_score"] > 0.0 for item in bo_result["candidate_ranking"])
-    assert bo_result["recommendation"]["bo_hypothesis_ids"] == ["h-density"]
+    assert result.success is True
+    assert all(call[0] == "bo_policy" for call in ctx.calls)
+    frozen = json.loads(ctx.calls[0][1].split("\n", 1)[1])["context"]
+    assert frozen["strategy_control"] == "adaptive"
+    assert frozen["current_strategy"] == {
+        "acquisition": "expected_improvement",
+        "kappa": 2.0,
+        "xi": 0.01,
+        "exploration_weight": 0.35,
+        "exploitation_weight": 0.65,
+    }
+    assert len(ctx.tool_payloads) == 1
+    assert ctx.tool_payloads[0]["acquisition"] == "upper_confidence_bound"
+    assert ctx.tool_payloads[0]["kappa"] == 3.25
+    assert ctx.tool_payloads[0]["objective"] == bo_result["objective"]
+    assert ctx.tool_payloads[0]["parameter_space"] == bo_result["parameter_space"]
+    assert bo_result["decision"]["status"] == "accepted"
+    assert bo_result["recommendation"]["candidate_id"] == bo_result["decision"]["candidate_id"]
+    assert bo_result["metadata"]["llm_preference_enabled"] is False
+    assert bo_result["metadata"]["llm_candidate_weight"] == 0.0

@@ -4734,6 +4734,7 @@ function latestBoInitialDesign(report) {
     completed: Number.isFinite(completed) ? completed : 0,
     target: Number.isFinite(target) && target > 0 ? target : points.length,
     index: Number(contractInitial.index ?? contractInitial.next_index ?? seeded.index ?? 1),
+    parameter_space: contract.parameter_space || seeded.parameter_space || {},
     points,
   };
 }
@@ -5358,7 +5359,7 @@ function agentSpecificReportProfile(report, status, agentLabel) {
     },
     bo: {
       title: "Bayesian Optimization / Candidate Selection",
-      summary: "Shows measured priors, failure-memory penalties, numeric acquisition, LLM preference reasoning, top-k candidate ranking, and the next Design Agent handoff.",
+      summary: "Shows measured priors, LLM strategy/tool decisions, numerical acquisition, result review, and the existing Design handoff.",
       rows: [
         ["strategy", `${boResult.strategy || "-"} / benchmark=${boResult.benchmark_strategy || "-"}`],
         ["acquisition", boResult.acquisition || latestReportPayload(report, ["acquisition", "acquisition_function"]) || "-"],
@@ -6169,8 +6170,8 @@ function renderBoReportDetails(report) {
         <h5>Phase Contract</h5>
         ${renderReportList([
           "Candidate ranking is disabled during the LHS initial design.",
-          "LLM preference does not alter the selected LHS point.",
-          `GP posterior and Expected Improvement activate after ${initial.target} measured designs.`,
+          "LLM review does not alter the selected LHS point.",
+          `GP posterior and the configured acquisition activate after ${initial.target} measured designs.`,
         ], "No initial-design contract recorded.", 6)}
         <h5>Artifacts</h5>
         ${renderReportList(artifactRows, "No BO artifact paths recorded.", 8)}
@@ -15776,14 +15777,22 @@ function renderBoInitialDesignBoard(report) {
   const renderer = window.LHSDesignVisualization;
   if (renderer && typeof renderer.renderPlot === "function") {
     const legacyPoints = Array.isArray(initial.points) ? initial.points : [];
+    const space = initial.parameter_space || {};
+    const cells = Array.isArray(space.cell_size_mm) ? space.cell_size_mm : [5.0, 6.0, 7.5, 10.0];
+    const densityValues = Array.isArray(space.relative_density) ? space.relative_density : [];
+    const density = densityValues.length === 1 ? [densityValues[0], densityValues[0]]
+      : densityValues.length === 2 ? densityValues : [0.20, 0.48];
+    const cellAxis = { name: "cell_size_mm", label: "Cell size", unit: "mm",
+      ...(cells.length === 2 && Number(cells[0]) < Number(cells[1])
+        ? { kind: "continuous", bounds: cells } : { kind: "discrete", values: cells }) };
     const legacyPayload = {
       schema: "lhs_design_visualization.v1",
       run_id: "legacy-live-state",
       step: initial.index || Math.min(initial.completed + 1, initial.target),
       initial_design: initial,
       design_space: {
-        x: { name: "cell_size_mm", label: "Cell size", unit: "mm", kind: "discrete", values: [5.0, 6.0, 7.5, 10.0] },
-        y: { name: "relative_density", label: "Relative density", unit: "1", kind: "continuous", bounds: [0.20, 0.48] },
+        x: cellAxis,
+        y: { name: "relative_density", label: "Relative density", unit: "1", kind: density[0] === density[1] ? "fixed" : "continuous", bounds: density },
       },
       diagnostics: { coverage_fraction: initial.target ? initial.completed / initial.target : 0, duplicate_count: 0 },
       status: "active",
@@ -16704,7 +16713,7 @@ function renderBoDashboardCards(report, status, agentLabel, profile) {
   const visualizationCards = `
     ${renderDashboardCard("BO Objective Equation", `<div data-live-bo-equation>${equationBody}</div>`, { span: 4, tone: "bo", eyebrow: "active objective", className: "bo-objective-summary-card" })}
     ${renderDashboardCard("Live Posterior", `<div data-live-bo-posterior>${posteriorBody}</div>`, { span: 8, tone: "bo", eyebrow: "uncertainty + acquisition" })}
-    ${renderDashboardCard("Initial Design / LHS", renderBoInitialDesignBoard(report), { span: 12, tone: "bo", eyebrow: "mixed-space experimental design", className: "ar-bo-lhs-card" })}
+    ${renderDashboardCard("Initial Design / LHS", renderBoInitialDesignBoard(report), { span: 12, tone: "bo", eyebrow: "declared experimental design space", className: "ar-bo-lhs-card" })}
   `;
   const recommendation = boResult.recommendation || boResult.selected || {};
   const reasoning = boResult.reasoning || {};
@@ -16737,7 +16746,8 @@ function renderBoDashboardCards(report, status, agentLabel, profile) {
   }
   return `
     ${visualizationCards}
-    ${renderDashboardCard("Candidate Ranking", renderBoRankingBoard(boResult), { span: 8, tone: "bo", eyebrow: "top-k" })}
+    ${boResult.decision?.schema === "bo_decision.v1" && renderer?.renderDecision ? renderDashboardCard("BO Decision / Tool Audit", renderer.renderDecision(boResult.decision), { span: 12, tone: boResult.decision.status === "accepted" ? "bo" : "warning", eyebrow: "strategy + result review" }) : ""}
+    ${renderDashboardCard("Candidate Ranking", renderBoRankingBoard(boResult), { span: 8, tone: "bo", eyebrow: "numeric audit" })}
     ${renderDashboardCard("Recommendation", renderDashboardRows([
       ["candidate_id", recommendation.candidate_id || recommendation.id || "-"],
       ["combined_score", recommendation.combined_score || "-"],
@@ -16764,7 +16774,7 @@ function renderBoDashboardCards(report, status, agentLabel, profile) {
       ["ranked_candidates", ranking.length],
       ["top_candidate", ranking[0] ? ranking[0].candidate_id || ranking[0].id || "-" : "-"],
       ["selection_rule", boResult.selection_rule || "-"],
-      ["llm_preference", reasoning.preference || reasoning.summary || "-"],
+      ["llm_decision", boResult.decision?.status || reasoning.summary || "-"],
     ])}${dashboardList(rankingItems, "No BO candidate ranking recorded.", 5)}`, { span: 4, tone: "bo", eyebrow: "audit" })}
     ${renderDashboardCard("Next Design Request", renderDashboardRows([
       ["schema", (boResult.next_design_request || {}).schema || "-"],

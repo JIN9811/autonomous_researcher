@@ -351,6 +351,49 @@ def test_propose_next_rejects_insufficient_observations_without_fallback() -> No
     assert exc_info.value.to_dict()["backend_active"] == "none"
 
 
+def test_propose_next_uses_unmixed_optimizer_for_two_continuous_dimensions() -> None:
+    space = BOParameterSpace.from_mapping(
+        {
+            "geometry_type": ["gyroid"],
+            "cell_size_mm": [6.2, 9.1],
+            "relative_density": [0.20, 0.48],
+            "orientation_deg": [0.0],
+            "anisotropy_ratio": [1.0],
+        }
+    )
+    observations = [
+        {
+            "candidate_id": f"continuous-{index}",
+            "parameters": {
+                **space.fixed_parameters,
+                "cell_size_mm": cell,
+                "relative_density": density,
+            },
+            "score": score,
+        }
+        for index, (cell, density, score) in enumerate(
+            ((6.3, 0.22, 0.31), (7.0, 0.30, 0.72), (8.1, 0.38, 0.61), (9.0, 0.46, 0.42)),
+            start=1,
+        )
+    ]
+
+    result = propose_next(
+        parameter_space=space,
+        observations=observations,
+        acquisition="expected_improvement",
+        random_seed=23,
+        num_restarts=2,
+        raw_samples=16,
+        fit_max_iter=15,
+    ).to_dict()
+
+    assert result["optimizer"]["function"] == "optimize_acqf"
+    assert math.isfinite(result["candidate"]["cell_size_mm"])
+    assert math.isfinite(result["candidate"]["relative_density"])
+    assert 6.2 <= result["candidate"]["cell_size_mm"] <= 9.1
+    assert 0.20 <= result["candidate"]["relative_density"] <= 0.48
+
+
 def test_propose_next_replaces_optimizer_duplicate_with_unobserved_candidate(monkeypatch: pytest.MonkeyPatch) -> None:
     import botorch.optim
 
