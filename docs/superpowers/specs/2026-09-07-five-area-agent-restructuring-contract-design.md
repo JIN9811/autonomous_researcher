@@ -119,7 +119,7 @@ Knowledge/Evidence는 이 계층들을 가로지르는 공통 영역이다. 다�
 | Middle-Level Control | 담당 작업의 수행 전략 | 상태를 보고 툴·인자를 선택하고 반환 결과로 다음 행동/완료 판단 | 입력 검증, 계산, 계약 검사, 실행 예산 강제 | 다른 에이전트의 설정·산출물 소유권 침범 금지 |
 | Low-Level Control | 단일 요청 실행·관측 | LLM을 의무 배치하지 않음 | 기존 함수·툴·서비스·Skill·브릿지·VLA/solver 실행 | 연구 목표나 다음 에이전트를 임의 변경하지 않음 |
 | Guardian / Safety | 위험 판단과 실행 제한 | 근거 조회, 불일치 판단, 보류/검토/정지 요청 등 실제 판단 | 하드 제한·기존 승인·인터록·긴급 정지 강제 | 모델 허용으로 코드/장비 차단을 무효화할 수 없음 |
-| Knowledge / Evidence | 근거 제공·지식 갱신·이력 보존 | 검색 대상/관계/기억 내용 선택, 근거 기반 해석 | 원시 기록 자동 저장, 출처·스키마·정체성 검증 | 가설을 측정 사실로 저장하거나 타 에이전트 설정 직접 변경 금지 |
+| Knowledge / Evidence | 근거 제공·지식 갱신·이력 보존 | 검색 대상/분류/기억 내용 선택, 근거 기반 해석 | 원시 기록 자동 저장, 출처·스키마·정체성 검증 | 가설을 측정 사실로 저장하거나 타 에이전트 설정 직접 변경 금지 |
 
 각 Agent Reference는 다섯 영역을 모두 설명하되, 직접 소유하지 않는 영역에서는
 연결 대상과 계약만 기록한다. Guardian과 Knowledge도 자기 전문 작업의 판단–툴–관측
@@ -217,7 +217,7 @@ This design figure is not evidence of implemented or live-validated behavior.
 | Analysis | Middle | 분석/검증/해석 툴 선택·결과 채택 | 파서·단위·지표 계산·solver | [Analysis](../../agents/analysis_agent.md) |
 | BO | 내부 High + Middle | 전략·근거 조회·수치 진단·결과 인계 판단과 제한된 툴 호출 | 좌표는 LHS/BoTorch, 목적함수·사용자 고정값·기존 그래프는 보존 | [BO](../../agents/bo_agent.md) |
 | Guardian | Guardian/Safety | 근거 조회·위험 판단·허용/보류/정지 요청 | 기존 코드 gate·하드 인터록 | [Guardian](../../agents/guardian_agent.md) |
-| Knowledge | Knowledge/Evidence | 검색·관계 판단·기억 갱신 | 저장·출처·스키마 검증·원본 보존 | [Knowledge](../../agents/knowledge_agent.md) |
+| Knowledge | High + Knowledge/Evidence | 근거 평가·분류·범위 검색·MD 갱신 툴콜링 | 온톨로지·출처·스코프·수명주기 검증·원본 보존 | [Knowledge](../../agents/knowledge_agent.md) |
 
 Analysis의 세 LLM 역할, 지표 유지·제거, 실험 기반 모델/방법 개선, 메쉬 평가와
 실제 필드 컨투어에 관한 후속 제안은
@@ -719,6 +719,25 @@ LHS/BoTorch로 좌표를 계산한다. LLM이 좌표를 생성하거나 선호 �
 아티팩트와 수행한 검증을 포함한다. 세부 사항은
 [BO 설계](2026-09-10-bo-strategy-continuous-design.md)와
 [구현 기록](../plans/2026-09-10-bo-strategy-continuous.md)을 따른다.
+
+## Knowledge 적용 계약 — 2026-09-10
+
+Knowledge의 High 판단은 재사용 가능한 근거의 선별·온톨로지 분류·검색 범위 내
+상세 조회·기억 작성·근거 부족 판정이다. LLM은 기존 Knowledge stage 안에서
+`inspect_evidence`, `search_knowledge`, `read_knowledge`, `write_knowledge_note`,
+`publish_context`를 호출한다. Middle/Low는 스코프·출처·수명주기를 검증하고
+기존 JSONL 및 새 Markdown 리비전을 저장한다.
+
+지식 그래프/Neo4j 운영 연결만 종료한다. 온톨로지, 매뉴얼 RAG, 기존 원본과
+패턴·성능·Evolution 계약, 실행 그래프와 장비 브릿지는 보존한다. 종료 아카이브의
+관측 MD는 결정론적으로 남기며, LLM은 일반 Knowledge 단계에서만 판단한다.
+시험 조건은 명시된 메타데이터를 복사할 뿐 장비 설정으로 연결하지 않는다.
+
+Reference는 Design과 같은 6줄 Status at a Glance, 5영역 책임표, 도구·API 표,
+기존 3개 SVG, 아티팩트·실제 검증 표를 사용한다. 구현 범위와 검증은
+[Knowledge 설계](2026-09-10-knowledge-markdown-memory-design.md),
+[구현 계획](../plans/2026-09-10-knowledge-markdown-memory.md),
+[Knowledge Reference](../../agents/knowledge_agent.md)에 연결한다.
 
 ## Related Documents
 

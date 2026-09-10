@@ -1,20 +1,13 @@
 <!DOCTYPE html>
-<!--
-File purpose:
-- Dedicated operational workspace for ATR Knowledge memory, ontology, and graph retrieval.
-
-Runtime contract:
-- Uses bounded Knowledge APIs only; graph writes remain behind the sync endpoint.
-- JSONL memory is authoritative and the graph is an inspectable mirror/index.
--->
-<html lang="ko">
+<!-- Knowledge-only retrieval workspace. Raw archives and typed memory remain authoritative. -->
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
     <link rel="stylesheet" href="/static/styles.css" />
-    <link rel="stylesheet" href="/static/knowledge.css?v=20260817-manual-semantic-1" />
+    <link rel="stylesheet" href="/static/knowledge.css?v=20260910-markdown-1" />
   </head>
   <body class="knowledge-page">
     <main class="knowledge-shell">
@@ -22,7 +15,7 @@ Runtime contract:
         <div>
           <p class="knowledge-eyebrow">ATR Knowledge Runtime</p>
           <h1>Knowledge Workspace</h1>
-          <p>운영 기록, 온톨로지, 근거 연결과 프로젝트 구조를 하나의 제한된 조회면에서 확인합니다.</p>
+          <p>Scoped Markdown knowledge, operational memory, ontology, and source-cited manual evidence.</p>
         </div>
         <div class="knowledge-hero-actions">
           <a class="knowledge-button secondary" href="/">Main GUI</a>
@@ -31,88 +24,63 @@ Runtime contract:
       </header>
 
       <section class="knowledge-status-strip" aria-label="Knowledge runtime status">
-        <article><span>Backend</span><strong id="knowledge-backend-status">loading</strong><small id="knowledge-backend-detail">graph status</small></article>
-        <article><span>Ontology</span><strong id="knowledge-ontology-version">-</strong><small>immutable active version</small></article>
-        <article><span>Nodes</span><strong id="knowledge-node-count">0</strong><small>bounded graph index</small></article>
-        <article><span>Edges</span><strong id="knowledge-edge-count">0</strong><small>typed relationships</small></article>
-        <article><span>Outbox</span><strong id="knowledge-outbox-count">0</strong><small id="knowledge-outbox-detail">pending / dead letter</small></article>
+        <article><span>Storage</span><strong id="knowledge-backend-status">Loading</strong><small id="knowledge-backend-detail">Local Markdown records</small></article>
+        <article><span>Ontology</span><strong id="knowledge-ontology-version">-</strong><small>active classification version</small></article>
+        <article><span>Records / revisions</span><strong id="knowledge-record-count">0</strong><small id="knowledge-revision-count">0 preserved revisions</small></article>
+        <article><span>Validity</span><strong id="knowledge-valid-count">0 valid</strong><small id="knowledge-review-count">0 needs review · 0 superseded</small></article>
+        <article><span>Index</span><strong id="knowledge-index-status">Loading</strong><small id="knowledge-index-detail">incremental, rebuildable</small></article>
       </section>
 
       <nav class="knowledge-tabs" aria-label="Knowledge workspace sections">
-        <button class="active" type="button" data-knowledge-tab="graph">Graph Explorer</button>
+        <button class="active" type="button" data-knowledge-tab="markdown">Markdown Knowledge</button>
         <button type="button" data-knowledge-tab="memory">Memory</button>
         <button type="button" data-knowledge-tab="ontology">Ontology</button>
-        <button type="button" data-knowledge-tab="sync">Sync</button>
-        <button type="button" data-knowledge-tab="project">Project Graph</button>
         <button type="button" data-knowledge-tab="manuals">Manual RAG Knowledge</button>
-        <button type="button" data-knowledge-tab="relations">Relation Review</button>
       </nav>
 
-      <section class="knowledge-tab-panel active" data-knowledge-panel="graph">
-        <div class="knowledge-query-bar">
-          <label>View
-            <select id="knowledge-query-kind">
-              <option value="run_context">Run context</option>
-              <option value="similar_experiments">Similar experiments</option>
-              <option value="failure_path">Failure path</option>
-              <option value="success_path">Success path</option>
-              <option value="specimen_lineage">Specimen lineage</option>
-              <option value="device_history">Device history</option>
-              <option value="policy_history">Policy history</option>
-              <option value="bo_context">BO context</option>
-              <option value="safety_context">Safety context</option>
-            </select>
+      <section class="knowledge-tab-panel active" data-knowledge-panel="markdown">
+        <form id="knowledge-markdown-form" class="knowledge-query-bar knowledge-markdown-query-bar">
+          <label class="knowledge-search-field">Search knowledge
+            <input id="knowledge-markdown-query" type="search" maxlength="1000" placeholder="Search observations, outcomes, or reusable knowledge" />
           </label>
-          <label>Run / entity / search
-            <input id="knowledge-query-value" type="text" placeholder="optional bounded filter" />
-          </label>
-          <label>Depth
-            <input id="knowledge-query-depth" type="number" min="1" max="4" value="2" />
-          </label>
-          <label>Limit
-            <input id="knowledge-query-limit" type="number" min="1" max="100" value="60" />
-          </label>
-          <button id="knowledge-run-query" class="knowledge-button primary" type="button">Run Query</button>
-        </div>
-        <div class="knowledge-graph-controls">
-          <div class="knowledge-mode-switch" role="group" aria-label="Graph interaction mode">
-            <button id="knowledge-view-mode" class="active" type="button" aria-pressed="true">VIEW</button>
-            <button id="knowledge-edit-mode" type="button" aria-pressed="false">EDIT</button>
-          </div>
-          <div id="knowledge-edit-toolbar" class="knowledge-edit-toolbar" hidden>
-            <strong>Draft <span id="knowledge-edit-count">0</span></strong>
-            <button id="knowledge-edit-undo" class="knowledge-button secondary" type="button" disabled>Undo</button>
-            <button id="knowledge-edit-redo" class="knowledge-button secondary" type="button" disabled>Redo</button>
-            <button id="knowledge-edit-validate" class="knowledge-button secondary" type="button" disabled>Validate</button>
-            <button id="knowledge-edit-apply" class="knowledge-button primary" type="button" disabled>Apply</button>
-            <button id="knowledge-edit-discard" class="knowledge-button danger" type="button" disabled>Discard</button>
-            <small id="knowledge-edit-status">No unsaved graph edits.</small>
-          </div>
-        </div>
-        <div class="knowledge-graph-layout">
-          <article class="knowledge-card knowledge-graph-card">
-            <div class="knowledge-card-head"><div><span>Bounded Graph View</span><h2>Runtime Knowledge Graph</h2></div><small id="knowledge-query-summary">waiting</small></div>
-            <div id="knowledge-graph" class="knowledge-graph-canvas" role="img" aria-label="Knowledge graph"></div>
-            <div id="knowledge-graph-legend" class="knowledge-graph-legend"></div>
+          <label>Run<input id="knowledge-markdown-run" maxlength="180" placeholder="Any run" /></label>
+          <label>Cycle<input id="knowledge-markdown-cycle" maxlength="180" placeholder="Any cycle" /></label>
+          <label>Agent<input id="knowledge-markdown-agent" maxlength="180" placeholder="Any agent" /></label>
+          <label>Ontology type<select id="knowledge-markdown-type"><option value="">Any type</option></select></label>
+          <label>Fidelity<select id="knowledge-markdown-fidelity"><option value="">Any fidelity</option><option value="measured">Measured</option><option value="simulated">Simulated</option><option value="virtual">Virtual</option><option value="unknown">Unknown</option></select></label>
+          <label>Validity<select id="knowledge-markdown-status"><option value="valid">Valid</option><option value="needs_review">Needs review</option><option value="superseded">Superseded</option><option value="all">All statuses</option></select></label>
+          <label>Tags<input id="knowledge-markdown-tags" maxlength="1000" placeholder="Comma-separated tags" /></label>
+          <label class="knowledge-applicability-field">Applicability (exact JSON object)<input id="knowledge-markdown-applicability" maxlength="2000" placeholder='{"equipment":"utm"}' /></label>
+          <label>Result limit<input id="knowledge-markdown-limit" type="number" min="1" max="50" value="6" /></label>
+          <button id="knowledge-run-query" class="knowledge-button primary" type="submit">Search Knowledge</button>
+          <p class="knowledge-filter-hint">Filters apply before retrieval. Blank fields leave that dimension unrestricted. “Valid” means eligible for retrieval, not scientifically verified.</p>
+        </form>
+        <div class="knowledge-markdown-layout">
+          <article class="knowledge-card">
+            <div class="knowledge-card-head"><div><span>Scoped Retrieval</span><h2>Knowledge Records</h2></div><small id="knowledge-query-summary" aria-live="polite">Loading</small></div>
+            <div id="knowledge-markdown-scope" class="knowledge-scope-summary"></div>
+            <div id="knowledge-markdown-results" class="knowledge-markdown-results" aria-live="polite"><p>Loading knowledge records.</p></div>
           </article>
-          <aside class="knowledge-card knowledge-inspector">
-            <div class="knowledge-card-head"><div><span>Selection</span><h2>Node Inspector</h2></div></div>
-            <div id="knowledge-node-inspector">그래프에서 노드를 선택하면 식별자와 저장된 속성을 표시합니다.</div>
-            <form id="knowledge-node-edit-form" class="knowledge-node-edit-form" hidden>
-              <label>Label<input id="knowledge-edit-label" maxlength="2000" /></label>
-              <label>Alias<input id="knowledge-edit-alias" maxlength="2000" /></label>
-              <label>Note<textarea id="knowledge-edit-note" maxlength="2000" rows="3"></textarea></label>
-              <label>Tags<input id="knowledge-edit-tags" placeholder="comma separated" /></label>
-              <button id="knowledge-stage-metadata" class="knowledge-button secondary" type="submit">Stage metadata</button>
-            </form>
-            <form id="knowledge-relation-edit-form" class="knowledge-node-edit-form" hidden>
-              <label>Target<select id="knowledge-edit-target"></select></label>
-              <label>Relation<select id="knowledge-edit-relation"></select></label>
-              <button id="knowledge-stage-relation" class="knowledge-button secondary" type="submit">Stage relation</button>
-            </form>
-            <button id="knowledge-expand-node" class="knowledge-button secondary" type="button" disabled>Expand provenance</button>
-          </aside>
+          <article class="knowledge-card">
+            <div class="knowledge-card-head"><div><span>Selected Evidence</span><h2>Record Detail</h2></div><small>same retrieval scope</small></div>
+            <div id="knowledge-markdown-detail" class="knowledge-markdown-detail" aria-live="polite"><p>Select a record to read its Markdown body and source references.</p></div>
+          </article>
         </div>
+        <details id="knowledge-intake-controls" class="knowledge-card knowledge-intake">
+          <summary>Archive intake · explicit post-processing</summary>
+          <p>Import a bounded batch of existing agent archives into Markdown. No experiment replay, device action, or model call. Nothing is scanned automatically on page load.</p>
+          <form id="knowledge-intake-form" class="knowledge-query-bar knowledge-intake-bar">
+            <label>Run (blank = all runs)<input id="knowledge-intake-run" maxlength="180" pattern="[A-Za-z0-9][A-Za-z0-9_.\-]*" placeholder="Optional run ID" /></label>
+            <label>Archive limit<input id="knowledge-intake-limit" type="number" min="1" max="500" value="100" /></label>
+            <label>Continuation cursor<input id="knowledge-intake-cursor" maxlength="1000" placeholder="Optional cursor from a completed job" /></label>
+            <button id="knowledge-intake-start" class="knowledge-button secondary" type="submit">Start Archive Intake</button>
+          </form>
+          <div class="knowledge-intake-job-bar">
+            <label class="knowledge-field">Persisted job ID<input id="knowledge-intake-job" maxlength="32" placeholder="Returned after starting intake" /></label>
+            <button id="knowledge-intake-refresh" class="knowledge-button secondary" type="button">Check Job</button>
+          </div>
+          <pre id="knowledge-intake-result" aria-live="polite">No archive intake requested.</pre>
+        </details>
       </section>
 
       <section class="knowledge-tab-panel" data-knowledge-panel="memory">
@@ -120,145 +88,41 @@ Runtime contract:
         <div id="knowledge-memory-grid" class="knowledge-memory-grid"></div>
         <article class="knowledge-card knowledge-activity-card">
           <div class="knowledge-card-head"><div><span>Lifecycle</span><h2>Recorded Activity</h2></div><small>collected · updated · retrieved · used</small></div>
-          <div id="knowledge-activity-chart" class="knowledge-activity-chart"></div>
+          <div id="knowledge-activity-chart" class="knowledge-activity-chart" role="img" aria-label="Recorded knowledge activity by cycle"></div>
         </article>
       </section>
 
       <section class="knowledge-tab-panel" data-knowledge-panel="ontology">
-        <div class="knowledge-section-head"><div><span>Semantic Contract</span><h2>Ontology Registry</h2></div><small id="knowledge-ontology-summary">loading</small></div>
+        <div class="knowledge-section-head"><div><span>Semantic Contract</span><h2>Ontology Registry</h2></div><small id="knowledge-ontology-summary">Loading</small></div>
         <div class="knowledge-ontology-layout">
           <article class="knowledge-card"><div class="knowledge-card-head"><div><span>Classes</span><h2>Entity Types</h2></div></div><div id="knowledge-ontology-classes" class="knowledge-chip-grid"></div></article>
-          <article class="knowledge-card"><div class="knowledge-card-head"><div><span>Relations</span><h2>Typed Edges</h2></div></div><div id="knowledge-ontology-relations" class="knowledge-relation-list"></div></article>
+          <article class="knowledge-card"><div class="knowledge-card-head"><div><span>Relations</span><h2>Relation Definitions</h2></div></div><div id="knowledge-ontology-relations" class="knowledge-relation-list"></div></article>
         </div>
-      </section>
-
-      <section class="knowledge-tab-panel" data-knowledge-panel="sync">
-        <div class="knowledge-sync-layout">
-          <article class="knowledge-card">
-            <div class="knowledge-card-head"><div><span>Durable Outbox</span><h2>Graph Synchronization</h2></div><small>bounded replay</small></div>
-            <p>검증된 미처리 Knowledge 이벤트만 제한된 배치로 그래프 인덱스에 반영합니다.</p>
-            <label class="knowledge-field">Batch limit<input id="knowledge-sync-limit" type="number" min="1" max="1000" value="100" /></label>
-            <button id="knowledge-run-sync" class="knowledge-button primary" type="button">Sync Pending Events</button>
-          </article>
-          <article class="knowledge-card"><div class="knowledge-card-head"><div><span>Audit Result</span><h2>Last Sync</h2></div></div><pre id="knowledge-sync-result">No sync requested.</pre></article>
-        </div>
-      </section>
-
-      <section class="knowledge-tab-panel" data-knowledge-panel="project">
-        <div class="knowledge-query-bar project-query-bar">
-          <label>Module / agent / path
-            <input id="knowledge-project-query" type="text" placeholder="optional project graph filter" />
-          </label>
-          <button id="knowledge-run-project-query" class="knowledge-button primary" type="button">Load Project Context</button>
-        </div>
-        <article class="knowledge-card knowledge-graph-card">
-          <div class="knowledge-card-head"><div><span>Graphify Mirror</span><h2>ATR Project Graph</h2></div><small id="knowledge-project-summary">waiting</small></div>
-          <div id="knowledge-project-graph" class="knowledge-graph-canvas" role="img" aria-label="ATR project graph"></div>
-        </article>
       </section>
 
       <section class="knowledge-tab-panel" data-knowledge-panel="manuals">
-        <div class="knowledge-section-head">
-          <div><span>Knowledge Agent Module</span><h2>Manual RAG Knowledge</h2></div>
-          <small>UTM scope · source-separated · page citations</small>
-        </div>
+        <div class="knowledge-section-head"><div><span>Knowledge Agent Module</span><h2>Manual RAG Knowledge</h2></div><small>UTM scope · source-separated · page citations</small></div>
         <section id="knowledge-manual-status" class="knowledge-manual-status" aria-label="Manual RAG status">
           <article><span>Sources</span><strong id="knowledge-manual-sources">0</strong><small>registered manuals</small></article>
           <article><span>Chunks</span><strong id="knowledge-manual-chunks">0</strong><small>page-aware sections</small></article>
-          <article><span>Graph Nodes</span><strong id="knowledge-manual-nodes">0</strong><small>cited semantic assertions</small></article>
-          <article><span>Graph Edges</span><strong id="knowledge-manual-edges">0</strong><small>typed semantic relations</small></article>
           <article><span>Scope</span><strong id="knowledge-manual-scope">UTM</strong><small>product/version are ranking hints</small></article>
           <button id="knowledge-manual-ingest" class="knowledge-button primary" type="button">Ingest Manuals</button>
         </section>
-        <div class="knowledge-query-bar knowledge-manual-query-bar">
-          <label>Purpose
-            <select id="knowledge-manual-purpose">
-              <option value="procedure">Procedure</option>
-              <option value="decision">Decision</option>
-              <option value="skill_authoring">Skill authoring</option>
-              <option value="safety">Safety</option>
-              <option value="recovery">Recovery</option>
-            </select>
-          </label>
-          <label>UTM manual question
-            <input id="knowledge-manual-query" type="text" placeholder="예: 시험 시작 실패 시 확인 절차" />
-          </label>
-          <label>Evidence
-            <input id="knowledge-manual-top-k" type="number" min="1" max="12" value="6" />
-          </label>
-          <button id="knowledge-manual-run-query" class="knowledge-button primary" type="button">Retrieve Evidence</button>
-        </div>
-        <div class="knowledge-manual-layout">
-          <article class="knowledge-card knowledge-manual-results-card">
-            <div class="knowledge-card-head">
-              <div><span>Grounded Context</span><h2>Manual Evidence</h2></div>
-              <div class="knowledge-manual-head-actions">
-                <small id="knowledge-manual-query-summary">waiting</small>
-                <button id="knowledge-manual-show-evidence" class="knowledge-button secondary compact" type="button" aria-pressed="false" disabled>Selected support</button>
-              </div>
-            </div>
-            <div id="knowledge-manual-results" class="knowledge-manual-results"><p>Query the UTM manuals to inspect bounded evidence.</p></div>
-          </article>
-          <article class="knowledge-card knowledge-graph-card">
-            <div class="knowledge-card-head"><div><span>Semantic Projection</span><h2>Manual Knowledge Graph</h2></div><small>cited assertions · 2-hop context</small></div>
-            <div id="knowledge-manual-graph" class="knowledge-manual-graph" role="img" aria-label="UTM manual knowledge graph"></div>
-          </article>
-          <aside class="knowledge-card knowledge-manual-inspector-card">
-            <div class="knowledge-card-head"><div><span>Selection</span><h2>Semantic Inspector</h2></div><small id="knowledge-manual-selection-kind">none</small></div>
-            <div id="knowledge-manual-inspector" class="knowledge-manual-inspector" aria-live="polite">
-              <p>Select a semantic node or relation to inspect confidence and page-level support.</p>
-            </div>
-          </aside>
-        </div>
+        <form id="knowledge-manual-form" class="knowledge-query-bar knowledge-manual-query-bar">
+          <label>Purpose<select id="knowledge-manual-purpose"><option value="procedure">Procedure</option><option value="decision">Decision</option><option value="skill_authoring">Skill authoring</option><option value="safety">Safety</option><option value="recovery">Recovery</option></select></label>
+          <label>UTM manual question<input id="knowledge-manual-query" type="text" maxlength="2000" placeholder="Example: communication failure recovery steps" required /></label>
+          <label>Evidence<input id="knowledge-manual-top-k" type="number" min="1" max="12" value="6" /></label>
+          <button id="knowledge-manual-run-query" class="knowledge-button primary" type="submit">Retrieve Evidence</button>
+        </form>
+        <article class="knowledge-card">
+          <div class="knowledge-card-head"><div><span>Grounded Context</span><h2>Manual Evidence</h2></div><small id="knowledge-manual-query-summary" aria-live="polite">No query yet</small></div>
+          <div id="knowledge-manual-results" class="knowledge-manual-results" aria-live="polite"><p>Query the UTM manuals to inspect bounded evidence with original page citations.</p></div>
+        </article>
       </section>
 
-      <section class="knowledge-tab-panel" data-knowledge-panel="relations">
-        <div id="knowledge-relation-summary" class="knowledge-relation-summary" aria-label="Relation reconciliation summary">
-          <article><span>Examined gaps</span><strong id="knowledge-relation-gaps">0</strong><small>bounded graph scan</small></article>
-          <article><span>Pending review</span><strong id="knowledge-relation-pending">0</strong><small>operator decision</small></article>
-          <article><span>Auto approved</span><strong id="knowledge-relation-approved">0</strong><small>strict threshold</small></article>
-          <article><span>Deferred / rejected</span><strong id="knowledge-relation-held">0</strong><small>durable decisions</small></article>
-          <article><span>Worker</span><strong id="knowledge-relation-worker">idle</strong><small id="knowledge-relation-model">loaded model only</small></article>
-        </div>
-        <div class="knowledge-relation-actions">
-          <button id="knowledge-relation-scan" class="knowledge-button secondary" type="button">Scan Graph</button>
-          <button id="knowledge-relation-run" class="knowledge-button primary" type="button">Run Reconciliation</button>
-          <small>Background reconciliation never loads an unloaded model or blocks an active experiment.</small>
-        </div>
-        <div class="knowledge-relation-layout">
-          <article class="knowledge-card knowledge-relation-queue-card">
-            <div class="knowledge-card-head"><div><span>Review Queue</span><h2>Relation Proposals</h2></div><small id="knowledge-relation-queue-count">0 pending</small></div>
-            <div id="knowledge-relation-queue" class="knowledge-relation-queue" role="list"></div>
-          </article>
-          <article class="knowledge-card knowledge-relation-context-card">
-            <div class="knowledge-card-head"><div><span>Graph Context</span><h2>Evidence &amp; Candidate Edge</h2></div><small>amber dashed = pending</small></div>
-            <div id="knowledge-relation-context" class="knowledge-relation-context" role="img" aria-label="Pending relation graph context"></div>
-            <pre id="knowledge-relation-evidence">Select a proposal to inspect its bounded evidence.</pre>
-          </article>
-          <aside id="knowledge-relation-decision" class="knowledge-card knowledge-relation-decision">
-            <div class="knowledge-card-head"><div><span>Operator Decision</span><h2>Review &amp; Revise</h2></div><small id="knowledge-relation-version">no selection</small></div>
-            <div id="knowledge-relation-selected">Select a pending proposal.</div>
-            <label>Target ID<select id="knowledge-relation-target" disabled></select></label>
-            <label>Relation type<select id="knowledge-relation-type" disabled></select></label>
-            <label>Decision rationale<textarea id="knowledge-relation-rationale" rows="4" maxlength="2000" disabled></textarea></label>
-            <div class="knowledge-decision-actions">
-              <button id="knowledge-relation-approve" class="knowledge-button primary" type="button" disabled>Approve</button>
-              <button id="knowledge-relation-revise" class="knowledge-button secondary" type="button" disabled>Edit &amp; Approve</button>
-              <button id="knowledge-relation-defer" class="knowledge-button secondary" type="button" disabled>Defer</button>
-              <button id="knowledge-relation-reject" class="knowledge-button danger" type="button" disabled>Reject</button>
-              <button id="knowledge-relation-reevaluate" class="knowledge-button secondary" type="button" disabled>Re-evaluate</button>
-            </div>
-          </aside>
-          <article class="knowledge-card knowledge-relation-history-card">
-            <div class="knowledge-card-head"><div><span>Audit History</span><h2>Relation &amp; Graph Decisions</h2></div><small>append-only</small></div>
-            <div id="knowledge-relation-history" class="knowledge-relation-history"></div>
-          </article>
-        </div>
-      </section>
-
-      <footer class="knowledge-footer"><span id="knowledge-runtime-message">Initializing Knowledge Workspace.</span><time id="knowledge-updated-at">-</time></footer>
+      <footer class="knowledge-footer"><span id="knowledge-runtime-message" role="status">Initializing Knowledge Workspace.</span><time id="knowledge-updated-at">-</time></footer>
     </main>
     <script src="/static/vendor/echarts.min.js?v=5.6.0"></script>
-    <script src="/static/knowledge.js?v=20260817-manual-semantic-1" defer></script>
+    <script src="/static/knowledge.js?v=20260910-markdown-1" defer></script>
   </body>
 </html>

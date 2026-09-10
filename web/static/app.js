@@ -1183,18 +1183,17 @@ async function refreshCaeWorkspaceStatus() {
 async function refreshKnowledgeWorkspaceStatus() {
   if (!knowledgeWorkspaceDetailEl && !knowledgeWorkspaceDotEl) return;
   try {
-    const res = await fetch("/api/knowledge/graph/stats");
+    const res = await fetch("/api/knowledge/status");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    const graph = data.graph || {};
-    const outbox = data.outbox || {};
-    const ready = Boolean(data.ok && graph.ok);
+    const markdown = data.markdown || {};
+    const ready = Boolean(data.ok && markdown.ok && !(markdown.index?.errors || []).length);
     setDotState(knowledgeWorkspaceDotEl, ready ? "active" : "warn");
     if (knowledgeWorkspaceDetailEl) {
-      const backend = graph.backend || "disabled";
-      const nodes = Number(graph.node_count || 0);
-      const edges = Number(graph.edge_count || 0);
-      const pending = Number(outbox.pending || 0);
-      knowledgeWorkspaceDetailEl.textContent = `${backend} · ${nodes} nodes · ${edges} edges · pending=${pending}`;
+      const records = Number(markdown.records || 0);
+      const review = Number(markdown.status_counts?.needs_review || 0);
+      const errors = (markdown.index?.errors || []).length;
+      knowledgeWorkspaceDetailEl.textContent = `Markdown · ${records} records · ${review} needs review${errors ? ` · ${errors} index errors` : ""}`;
     }
   } catch (err) {
     setDotState(knowledgeWorkspaceDotEl, "warn");

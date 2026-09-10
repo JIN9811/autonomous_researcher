@@ -53,8 +53,7 @@ def test_manual_knowledge_api_exposes_ingest_status_query_and_graph(monkeypatch)
 
     assert context["context_hash"] == "manual-context-hash"
     assert context["semantic_projection"]["nodes"][0]["kind"] == "Procedure"
-    assert graph["view"] == "semantic"
-    assert graph["nodes"][0]["id"] == "equipment:utm"
+    assert graph["status"] == "retired"
 
 
 def test_manual_knowledge_api_rejects_non_utm_scope(monkeypatch) -> None:
@@ -98,9 +97,8 @@ def test_manual_graph_api_exposes_explicit_evidence_view(monkeypatch) -> None:
 
     response = client.get("/api/knowledge/manuals/graph?view=evidence&limit=20")
 
-    assert response.status_code == 200
-    assert response.json()["view"] == "evidence"
-    assert response.json()["nodes"][0]["kind"] == "ManualChunk"
+    assert response.status_code == 410
+    assert response.json()["status"] == "retired"
 
 
 def test_manual_graph_api_rejects_unknown_view(monkeypatch) -> None:
@@ -109,4 +107,4 @@ def test_manual_graph_api_rejects_unknown_view(monkeypatch) -> None:
 
     response = client.get("/api/knowledge/manuals/graph?view=unknown")
 
-    assert response.status_code == 422
+    assert response.status_code == 410

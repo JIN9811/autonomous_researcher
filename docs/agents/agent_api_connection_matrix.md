@@ -75,7 +75,7 @@ Design rows were updated on 2026-09-07 for the bounded decision layer; see its
 | Manipulation | physical transfer and post-test clearance | Specimen result, fresh Vision, configured skill and execution evidence | LLM-selected bounded tool call; task-result judgment after Vision and termination | Vision, Equipment, Analysis, Knowledge | `physical_possible` through existing robot executors |
 | Lab Equipment | `equipment` | Verified placement/specimen, exact stacked Flow/Skills, approvals | Bounded LLM Flow selection; deterministic execution; terminal screenshot/log review | Manipulation clearance → fresh Vision → Analysis | `physical_possible` through existing gated workers |
 | Analysis | `analysis` | Equipment artifact and measurement metadata | Canonical curve, metrics, optional CAE/FEM comparison, objective/uncertainty | Knowledge and BO handoff | none directly; optional external analysis process |
-| Knowledge | `knowledge` | Accepted artifacts/reports/decisions/provenance | Durable knowledge, patterns, performance, BO/evolution context | BO, Design context, Evolution review | none; persistent local/graph state |
+| Knowledge | `knowledge` | Accepted artifacts/reports/decisions/provenance | Durable knowledge, patterns, performance, BO/evolution context | BO, Design context, Evolution review | none; persistent local Markdown/typed state |
 | BO | `bo` | Analysis observations, continuous domain, settings, Knowledge context | Bounded LLM strategy/tool decision and review of the numerical candidate | Guardian and next Design cycle | none; proposal only |
 | Guardian | Safety/control plane | State, risk, failures, device health, approvals, tool records | Continue/review/stop/error safety decision | Orchestrator route translation | no direct action; can block/stop downstream action |
 
@@ -95,7 +95,7 @@ progression.
 | Manipulation | governed transfer branch and post-place wait | task/policy/rollout supervision and transfer completion | LeRobot/robot/process/port/camera/Isaac boundaries |
 | Lab Equipment | measurement stage after verified placement; existing clearance/handoff routing | LLM selects configured Flow and reviews terminal evidence; durable claim and bounded safe recovery | Existing Skill Runtime and Windows/Local PyAutoGUI workers; no intermediate Equipment LLM calls |
 | Analysis | evaluation stage and Knowledge/BO handoff | parse, normalize, derive metrics/uncertainty/objective | bounded solver/computation bridge |
-| Knowledge | durable context stage before BO | provenance, typed records, patterns, relation review, context | ledger/outbox/ontology/graph adapters |
+| Knowledge | durable context stage before BO | provenance, typed records, patterns, scoped LLM curation | audit/ontology/Markdown/JSONL adapters |
 | BO | BO-owned strategy and result judgment before Guardian/Design | Validated dispatch, LHS state, candidate integrity and handoff | BoTorch and benchmark computation tools |
 | Guardian | cross-level route authority | policy/risk/evidence/health/approval evaluation | read-only health/queue plus block/stop; hard interlocks remain in bridges |
 
@@ -113,7 +113,7 @@ state ownership, failure propagation, and the manual Device Workspace boundary.
 | Manipulation | specimen + fresh Vision + policy/profile + return-to-VLA gate | `manipulation_report.v1`, `robot_task_result.v1`, handoff packet | rollout session/log/dataset/checkpoint refs | preflight, stale Vision, policy/profile, Guardian/operator gate |
 | Lab Equipment | exact Profile/Flow/Skills, verified placement, bridge readiness | existing result/report/handoff plus decisions and workflow execution ID | durable invocation, completed-block checkpoint, terminal screenshot/hash, logs, CSV/readiness | existing hard gates, rejected review, changed scope, claimed invocation or unknown effects |
 | Analysis | identifiable raw equipment artifact | canonical curve, UTM metrics, CAE/FEM result, evaluation, BO handoff | input hash, parser/unit record, derived artifacts | missing/corrupt input, unresolved units, curve quality failure |
-| Knowledge | accepted stage artifacts and provenance | `knowledge_context.v1`, `knowledge_report.v1`, `evolution_proposal.v1`, typed records | audit ledger, outbox, receipts, JSONL/graph records | provenance/ontology rejection or persistence failure |
+| Knowledge | accepted stage artifacts and provenance | `knowledge_context.v1`, `knowledge_report.v1`, `evolution_proposal.v1`, typed records | audit ledger, Markdown revisions/receipts, JSONL records | provenance/ontology rejection or persistence failure |
 | BO | valid observations and bounded search space | numerical candidate, decision, artifacts, Design constraints and domain | tool/evidence trace, numerical result, accepted candidate identity | model/optimizer failure, owner return, candidate validation rejection |
 | Guardian | current state, risk/device/failure/approval context | gate/decision/contract, incidents, corrective actions | Guardian events, approval and incident records | unsafe, uncertain, exhausted budget, missing approval or evidence |
 
@@ -128,7 +128,7 @@ state ownership, failure propagation, and the manual Device Workspace boundary.
 | Manipulation | manipulation-agent config/test/run | `/api/lerobot/*` robotics services | LeRobot workspace configuration/training/simulation/mirror | `/openapi.json`, LeRobot bridge |
 | Lab Equipment | no isolated agent endpoint | `/api/equipment/*`, `/api/bridges*` | equipment skill/profile/worker/UTM workspaces | `/openapi.json`, equipment bridge/tool registry |
 | Analysis | no graph-stage direct endpoint | `/api/cae/config`, `/api/cae/run` | CAE workspace and run artifact APIs | `/openapi.json`, CAE bridge |
-| Knowledge | context/report records via Knowledge service | `/api/knowledge/*` graph, ledger, reconciliation, Graphify | Knowledge workspace review/edit/sync/query | `/openapi.json`, Knowledge service/repositories |
+| Knowledge | context/report records via Knowledge service | `/api/knowledge/*` Markdown, ontology, typed memory, manuals | Workspace scoped search/detail/status; lifecycle changes through API | `/openapi.json`, Knowledge service/repositories |
 | BO | `/api/bo/run` direct bounded workspace execution | `/api/bo/config`, `/api/bo/benchmark` | BO workspace and graph-run context | `/openapi.json`, BO agent/benchmark services |
 | Guardian | `/api/guardian/status`, run-scoped status | device health and queue status tools | incidents and approval review/resolve APIs | `/openapi.json`, Guardian status/policy services |
 
@@ -143,7 +143,7 @@ state ownership, failure propagation, and the manual Device Workspace boundary.
 | Manipulation | `manipulation_plan` | policy/profile/session logic | LeRobot processes, serial/camera, Isaac services | robot/manipulator | physical_possible |
 | Lab Equipment | Equipment-owned `equipment_workflow_decision`; bounded proposals and shared `LLMImageInput` | workflow decision boundary, durable Equipment Runtime, exact Flow/Skill registry | registered API/local model; existing PyAutoGUI HTTP worker and desktop application | UTM and registered equipment | physical_possible through existing gated execution |
 | Analysis | task-specific `analysis_reasoning`; module role empty | parsers, curve/metric logic | CAE/CalculiX through registered bridge | none directly | external_service/local process |
-| Knowledge | `knowledge_synthesis`; reconciliation uses already-loaded model | Knowledge service, ontology, ledger, outbox, repositories | optional Neo4j/Graphify and selected model service | none | model/local_state/external_service |
+| Knowledge | `knowledge_query`; bounded inspect/search/read/write/publish loop | Ontology, audit, Markdown and typed stores | registered API/vLLM model service | none | model/local_state |
 | BO | `bo_policy` | strict local tool dispatch and numerical candidate validation | selected model backend for strategy/evidence/result decisions | none | model/local_state |
 | Guardian | `guardian_review` | policy gate, status aggregation, approval/event services | device/queue status connections and selected model | none directly | model plus downstream stop/block |
 
@@ -158,7 +158,7 @@ state ownership, failure propagation, and the manual Device Workspace boundary.
 | Manipulation | profile/policy/Vision/return-to-VLA | configured live confirmation | camera/profile/bridge preflight | Guardian/operator plus rollout stop | status and visual verification before restarting motion |
 | Lab Equipment | exact Flow/Skill/Profile/bridge, placement, identity and Guardian | existing live equipment action scope | live preflight and exact Skill validation | Guardian/operator/bridge stop | never replay completed work or unknown effects; one wait/exact-window focus, fresh observation and explicit safe failed-block resume only |
 | Analysis | input hash/parser/unit/curve quality | not_applicable | CAE probe and validated payload | bounded process cancellation | preserve raw input and partial outputs; no fabricated measurement |
-| Knowledge | provenance/ontology/duplicate/receipt | operator review for relation edits/proposals | validate before ingest/apply | service/worker stop | retain ledger/outbox; never fabricate graph receipt |
+| Knowledge | provenance/ontology/scope/lifecycle | operator reason for lifecycle changes | validate before note write/publication | bounded decision stop | retain original evidence; no fabricated model success |
 | BO | search-space/constraint/validator gates | candidate still requires downstream governance | benchmark/dry-run where selected | Guardian/Orchestrator | reject candidate; no external physical effect |
 | Guardian | safety policy, risk, budget, evidence | may require operator decision | reads device/queue health | Guardian/operator/controller | stop or review; uncertainty never becomes allow by default |
 

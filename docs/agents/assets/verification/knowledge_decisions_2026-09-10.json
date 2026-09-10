@@ -1,0 +1,131 @@
+{
+  "schema": "knowledge_decision_verification.v1",
+  "verified_at": "2026-09-10",
+  "evidence_class": "synthetic_software_verification",
+  "physical_actuation": false,
+  "service_startup": false,
+  "procedure": "scripts/verify_knowledge_decisions.py --execute",
+  "conditions": "Synthetic evidence in temporary roots; registered provider routes; no fallback and no device tools.",
+  "cases": [
+    {
+      "backend": "openai",
+      "model": "gpt-5.5",
+      "case": "classified_note",
+      "expectation_met": true,
+      "duration_s": 16.876,
+      "tools": [
+        "inspect_evidence",
+        "search_knowledge",
+        "write_knowledge_note",
+        "publish_context"
+      ],
+      "llm_used": true,
+      "status": "accepted",
+      "note_count": 1,
+      "citation_count": 1,
+      "selected_record_count": 0,
+      "evidence_unchanged": true,
+      "explicit_gap_or_reuse_reason": false
+    },
+    {
+      "backend": "openai",
+      "model": "gpt-5.5",
+      "case": "scoped_retrieval",
+      "expectation_met": true,
+      "duration_s": 11.549,
+      "tools": [
+        "inspect_evidence",
+        "search_knowledge",
+        "read_knowledge",
+        "publish_context"
+      ],
+      "llm_used": true,
+      "status": "accepted",
+      "note_count": 0,
+      "citation_count": 2,
+      "selected_record_count": 1,
+      "evidence_unchanged": true,
+      "explicit_gap_or_reuse_reason": true
+    },
+    {
+      "backend": "openai",
+      "model": "gpt-5.5",
+      "case": "insufficient_evidence",
+      "expectation_met": true,
+      "duration_s": 5.295,
+      "tools": [
+        "inspect_evidence",
+        "publish_context"
+      ],
+      "llm_used": true,
+      "status": "accepted",
+      "note_count": 0,
+      "citation_count": 0,
+      "selected_record_count": 0,
+      "evidence_unchanged": true,
+      "explicit_gap_or_reuse_reason": true
+    },
+    {
+      "backend": "vllm",
+      "model": "gemma4:31b",
+      "case": "classified_note",
+      "expectation_met": true,
+      "duration_s": 27.746,
+      "tools": [
+        "inspect_evidence",
+        "write_knowledge_note",
+        "publish_context"
+      ],
+      "llm_used": true,
+      "status": "accepted",
+      "note_count": 1,
+      "citation_count": 1,
+      "selected_record_count": 0,
+      "evidence_unchanged": true,
+      "explicit_gap_or_reuse_reason": false
+    },
+    {
+      "backend": "vllm",
+      "model": "gemma4:31b",
+      "case": "scoped_retrieval",
+      "expectation_met": true,
+      "duration_s": 26.82,
+      "tools": [
+        "inspect_evidence",
+        "search_knowledge",
+        "read_knowledge",
+        "publish_context"
+      ],
+      "llm_used": true,
+      "status": "accepted",
+      "note_count": 0,
+      "citation_count": 2,
+      "selected_record_count": 1,
+      "evidence_unchanged": true,
+      "explicit_gap_or_reuse_reason": true
+    },
+    {
+      "backend": "vllm",
+      "model": "gemma4:31b",
+      "case": "insufficient_evidence",
+      "expectation_met": true,
+      "duration_s": 11.214,
+      "tools": [
+        "inspect_evidence",
+        "publish_context"
+      ],
+      "llm_used": true,
+      "status": "accepted",
+      "note_count": 0,
+      "citation_count": 0,
+      "selected_record_count": 0,
+      "evidence_unchanged": true,
+      "explicit_gap_or_reuse_reason": true
+    }
+  ],
+  "limitations": [
+    "No physical run or model-server startup",
+    "No held-out retrieval/scientific-benefit benchmark",
+    "Each case run once in this final verification; timings are full multi-call decisions, not token-throughput benchmarks."
+  ]
+}

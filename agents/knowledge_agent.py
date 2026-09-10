@@ -24,10 +24,15 @@ Modification guide:
 from __future__ import annotations
 
 from pathlib import Path
+import asyncio
+import hashlib
+import json
+from copy import deepcopy
 import inspect
 from typing import Any
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
+from agents.knowledge_decision import run_knowledge_decision
 from utils.agent_artifact_archive import archive_agent_run
 from knowledge.evolution_bridge import build_evidence_packs, build_outcomes_for_active_variants, map_pack_to_evolution_task
 from knowledge.graph_backend import graph_backend_from_env
@@ -38,6 +43,11 @@ from knowledge.retrieval import format_rag_context, retrieve_research_context
 from knowledge.schemas import ExperimentKnowledgeRecord, KnowledgeSourceRef, MemoryRecord
 from knowledge.service import KnowledgeService, event_pipeline_enabled
 from knowledge.stores import JsonlKnowledgeStore
+from knowledge.markdown_runtime import applicability_for, store_for
+from knowledge.audit_ledger import AuditLedger
+from knowledge.event_normalizer import normalize_knowledge_event
+from knowledge.ontology.registry import OntologyRegistry
+from knowledge.ontology.validator import OntologyValidator
 from orchestrator.state import OrchestratorState
 
 
@@ -53,26 +63,11 @@ class KnowledgeAgent(BaseAgent):
             f"Current stage={state.stage.value}. "
             "What constraints, memory, failures, and architecture rules should this loop enforce?"
         )
-        retrieval = await ctx.rag.retrieve(query=query, top_k_local=4)
-        rag_context = format_rag_context(retrieval)
-
-        timeout_s = 45.0 if state.mode.value == "test" else None
-        if state.mode.value == "test" and not getattr(ctx, "force_real_llm_in_test", True):
-            memory_summary = _deterministic_memory_summary(state, retrieval)
-        else:
-            try:
-                response = await ctx.complete(
-                    "knowledge_query",
-                    "Use the context to produce concise constraints, memory implications, failure reminders, and next-step reminders.\n" + rag_context,
-                    timeout_s=timeout_s,
-                )
-                memory_summary = response.text[:500]
-            except Exception as exc:
-                if state.mode.value == "test":
-                    memory_summary = f"Knowledge degraded in test mode: {exc.__class__.__name__}"
-                else:
-                    raise
-
+        run_root = getattr(ctx, "artifact_run_root", None)
+        project_root = Path(run_root).resolve().parent if run_root else Path(__file__).resolve().parent.parent
+        store = JsonlKnowledgeStore.default(project_root)
+        markdown_store = store_for(ctx)
+        cycle_id = f"loop-{state.loop_count + 1:06d}"
         objective_value = state.latest_analysis.get("objective_score")
         objective = float(objective_value) if objective_value is not None else None
         uncertainty_value = state.latest_analysis.get("uncertainty")
@@ -94,6 +89,50 @@ class KnowledgeAgent(BaseAgent):
             else {}
         )
 
+        settings = state.run_metadata.get("knowledge_settings", {})
+        if not isinstance(settings, dict):
+            raise ValueError("knowledge_settings must be an object")
+        scope = settings.get("scope", {})
+        if not isinstance(scope, dict):
+            raise ValueError("Knowledge scope must be an object")
+        # Exact experimental conditions belong in applicability, not inferred
+        # from a word such as test/live (test mode may actuate real equipment).
+        applicability = applicability_for(state)
+        if applicability and "applicability" not in scope:
+            scope = {**scope, "applicability": applicability}
+        content = {"objective_score": objective, "uncertainty": uncertainty,
+                   "metrics": metrics, "failure_tags": failure_tags,
+                   "objective_evaluation": objective_evaluation, "artifact_refs": artifact_refs[:20],
+                   "guardian_incidents": guardian_incident_evidence, "applicability": applicability}
+        # A retry may change evidence. Content-addressed snapshots preserve every
+        # old citation and include exactly the Guardian/Analysis evidence inspected.
+        intake = {"run_id": state.run_id, "cycle_id": cycle_id,
+                  "experiment_id": state.experiment_id, "latest_analysis": deepcopy(state.latest_analysis),
+                  "inspected_evidence": deepcopy(content)}
+        intake_hash = hashlib.sha256(json.dumps(intake, sort_keys=True, ensure_ascii=False,
+                                                allow_nan=False).encode()).hexdigest()
+        intake_paths = await asyncio.to_thread(store.write_run_artifacts, state.run_id,
+            {f"intake_{cycle_id}_{intake_hash}": intake})
+        decision = await run_knowledge_decision(state, ctx, store=markdown_store,
+            evidence=[{"id": "current-analysis", "source_ref": next(iter(intake_paths.values())),
+                       "agent_id": "analysis_agent", "applicability": applicability, "content": content}],
+            scope=scope, settings={**settings, "applicability": applicability})
+        memory_summary = (decision["summary"] if decision["status"] == "accepted" else
+                          "Knowledge decision unavailable; original analysis and provenance retained.")[:500]
+        retrieval = {"coverage": 0.0, "local_chunks": [], "web_results": []}
+        for record in decision.get("selected_knowledge", []):
+            retrieval["local_chunks"].append({"chunk_id": record["record_id"],
+                "source": record.get("path") or record.get("source_refs", [""])[0],
+                "text": record.get("body", ""),
+                "source_type": "project_guideline" if record.get("corpus") == "project" else "markdown_knowledge",
+                "trust_level": "project_local_index" if record.get("corpus") == "project" else record.get("evidence_kind", "unknown")})
+        compact_decision = {key: deepcopy(value) for key, value in decision.items()
+                            if key not in {"trace", "selected_knowledge"}}
+        compact_decision["trace"] = [{"tool": item["tool"], "status": "completed"} for item in decision["trace"]]
+        selected_knowledge = [{key: deepcopy(record[key]) for key in
+            ("record_id", "title", "source_refs", "applicability", "evidence_kind", "fidelity", "status") if key in record}
+            | {"excerpt": str(record.get("body", ""))[:1000]} for record in decision.get("selected_knowledge", [])[:6]]
+
         memory_record = MemoryRecord(
             run_id=state.run_id,
             experiment_id=state.experiment_id,
@@ -107,15 +146,13 @@ class KnowledgeAgent(BaseAgent):
         )
         ctx.experiment_db.add(memory_record)
 
-        project_root = Path(__file__).resolve().parent.parent
-        store = JsonlKnowledgeStore.default(project_root)
         now = self.now_iso()
         candidate_id = _candidate_id_from_state(state)
         parameters = _parameters_from_state(state)
         artifact_quality = validate_artifact_refs(artifact_refs, project_root=project_root)
         provenance = build_provenance_ref(
             run_id=state.run_id,
-            used=["latest_analysis", "run_metadata", "rag_context"],
+            used=["latest_analysis", "run_metadata", *intake_paths.values()],
             associated_with=["analysis_agent", "knowledge_agent"],
             derived_from=[state.run_id],
             artifact_refs=artifact_refs,
@@ -191,18 +228,8 @@ class KnowledgeAgent(BaseAgent):
         )
         evolution_outcome_payloads = [record.model_dump(mode="json") for record in evolution_outcomes]
         research_context = retrieve_research_context(query=query, retrieval_result=retrieval)
-        graph_backend = graph_backend_from_env(project_root)
-        graph_backend_status = mirror_knowledge_records(
-            graph_backend,
-            experiment_record=experiment_record,
-            performance_records=performance_records,
-            failure_patterns=failure_patterns,
-            success_patterns=success_patterns,
-            evidence_packs=evidence_packs,
-            evolution_outcomes=evolution_outcomes,
-        )
-        graph_backend.close()
-        graph_event_status = _ingest_graph_event(
+        graph_backend_status = {"ok": True, "enabled": False, "status": "retired"}
+        graph_event_status = _ingest_local_event(
             project_root=project_root,
             state=state,
             experiment_record=experiment_record,
@@ -216,12 +243,14 @@ class KnowledgeAgent(BaseAgent):
             },
             activity_consumers=["orchestrator"],
         )
-        await _notify_reconciliation_worker(ctx, graph_event_status)
         knowledge_context = {
             "schema": "knowledge_context.v1",
             "run_id": state.run_id,
             "experiment_id": state.experiment_id,
             "record_id": experiment_record.record_id,
+            "scope": decision["scope"], "selected_knowledge": selected_knowledge,
+            "citations": decision["citations"], "decision": compact_decision,
+            "no_knowledge_reason": decision["no_knowledge_reason"],
             "retrieval": {
                 "coverage": retrieval.get("coverage", 0.0),
                 "local_chunks": len(retrieval.get("local_chunks", [])),
@@ -266,6 +295,9 @@ class KnowledgeAgent(BaseAgent):
             "run_id": state.run_id,
             "experiment_id": state.experiment_id,
             "summary": memory_summary,
+            "decision": compact_decision, "markdown_notes": decision["note_receipts"],
+            "scope": decision["scope"], "selected_knowledge": selected_knowledge,
+            "citations": decision["citations"],
             "memory_intake": {
                 "experiment_record_id": experiment_record.record_id,
                 "agent_performance_count": len(performance_records),
@@ -297,6 +329,7 @@ class KnowledgeAgent(BaseAgent):
             state.run_id,
             {
                 "knowledge_report": knowledge_report,
+                "knowledge_decision": decision,
                 "experiment_knowledge_record": experiment_record.model_dump(mode="json"),
                 "agent_performance_records": [record.model_dump(mode="json") for record in performance_records],
                 "failure_patterns": [record.model_dump(mode="json") for record in failure_patterns],
@@ -319,14 +352,18 @@ class KnowledgeAgent(BaseAgent):
         compact_knowledge_report = _compact_knowledge_report(knowledge_report, compact_evolution_proposal)
 
         return AgentResult(
-            success=True,
-            summary="Knowledge memory, pattern ledger, and self-evolution evidence update complete",
+            success=decision["status"] == "accepted",
+            summary=("Knowledge memory, Markdown context and evolution evidence update complete"
+                     if decision["status"] == "accepted" else "Knowledge decision failed; raw evidence and memory retained"),
             data={
                 "knowledge": {
                     "retrieval_coverage": retrieval.get("coverage", 0.0),
                     "local_chunks": len(retrieval.get("local_chunks", [])),
                     "web_results": len(retrieval.get("web_results", [])),
                     "memory_summary": memory_summary,
+                    "decision": compact_decision, "selected_knowledge": selected_knowledge,
+                    "scope": decision["scope"], "citations": decision["citations"],
+                    "markdown_notes": decision["note_receipts"],
                     "artifact_ref_count": len(memory_record.artifact_refs),
                     "metric_count": len(memory_record.metrics),
                     "failure_tags": memory_record.failure_tags,
@@ -351,7 +388,7 @@ class KnowledgeAgent(BaseAgent):
         )
 
 
-def _ingest_graph_event(
+def _ingest_local_event(
     *,
     project_root: Path,
     state: OrchestratorState,
@@ -361,8 +398,6 @@ def _ingest_graph_event(
     activity_counts: dict[str, int] | None = None,
     activity_consumers: list[str] | None = None,
 ) -> dict[str, Any]:
-    if not event_pipeline_enabled():
-        return {"ok": True, "enabled": False, "status": "disabled", "outbox": {"pending": 0, "acknowledged": 0, "dead_letter": 0}}
     candidate_id = _candidate_id_from_state(state)
     specimen_id = _specimen_id_from_state(state)
     cycle_id = str(state.run_metadata.get("cycle_id") or state.run_metadata.get("cycle") or "cycle-unknown")
@@ -413,22 +448,23 @@ def _ingest_graph_event(
         },
         "provenance": experiment_record.provenance.model_dump(mode="json"),
     }
-    service: KnowledgeService | None = None
     try:
-        service = KnowledgeService.from_env(project_root)
-        return {"enabled": True, **service.ingest(payload)}
+        registry = OntologyRegistry.load_default(Path(__file__).resolve().parents[1])
+        event = normalize_knowledge_event(payload, ontology_version=registry.version_id)
+        validation = OntologyValidator(registry).validate_event(event)
+        receipt = AuditLedger(project_root / "memory" / "knowledge" / "ledger").append(event)
+        return {"ok": validation.ok, "enabled": False, "status": "local_only", "event_id": event["event_id"],
+                "ledger_receipt": receipt.as_dict(), "validation_errors": list(validation.errors),
+                "outbox": {"pending": 0}, "sync": {"safety_lag": 0}}
     except Exception as exc:
         return {
-            "ok": True,
-            "enabled": True,
+            "ok": False,
+            "enabled": False,
             "status": "degraded",
-            "error": f"{exc.__class__.__name__}: {exc}",
+            "error": exc.__class__.__name__,
             "outbox": {"pending": 0, "acknowledged": 0, "dead_letter": 0},
             "sync": {"acknowledged": 0, "safety_lag": 0},
         }
-    finally:
-        if service is not None:
-            service.close()
 
 
 async def _notify_reconciliation_worker(ctx: AgentContext, graph_event_status: dict[str, Any]) -> None:
@@ -555,9 +591,9 @@ def _source_refs_from_retrieval(retrieval: dict[str, Any]) -> list[KnowledgeSour
         if isinstance(chunk, dict):
             refs.append(
                 KnowledgeSourceRef(
-                    source_type="project_guideline",
+                    source_type="experiment_memory" if chunk.get("source_type") == "markdown_knowledge" else "project_guideline",
                     source_ref=str(chunk.get("source") or chunk.get("chunk_id") or "local_chunk"),
-                    trust_level="project_local_index",
+                    trust_level=str(chunk.get("trust_level") or "project_local_index"),
                     recency="indexed",
                     retrieval_score=float(chunk.get("score") or coverage),
                     used_for=["run_context", "knowledge_report"],

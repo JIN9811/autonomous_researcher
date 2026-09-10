@@ -1,4 +1,4 @@
-"""Bounded UTM manual GraphRAG service."""
+"""Bounded, citation-preserving manual retrieval without a knowledge graph."""
 
 from __future__ import annotations
 
@@ -11,10 +11,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from knowledge.graph_backend import KnowledgeGraphBackend, graph_backend_from_env
-from knowledge.manuals.graph_projection import load_manual_ontology, project_manual_graph, validate_manual_graph
+from knowledge.graph_backend import KnowledgeGraphBackend
 from knowledge.manuals.ingest import ManualIngestor
-from knowledge.manuals.semantic_projection import build_semantic_graph, project_semantic_subgraph, validate_semantic_provenance
 
 
 ALLOWED_PURPOSES = frozenset({"skill_authoring", "procedure", "decision", "safety", "recovery"})
@@ -42,64 +40,15 @@ class ManualKnowledgeService:
         self.project_root = project_root.resolve()
         self.runtime_root = (runtime_root or self.project_root / "memory" / "knowledge" / "manual_rag").resolve()
         self.registry_path = (registry_path or self.project_root / "docs" / "knowledge" / "manuals" / "registry.yaml").resolve()
-        self.graph_backend = graph_backend or graph_backend_from_env(self.project_root)
-        self._owns_backend = graph_backend is None
+        # Accept the old constructor argument, but never connect/use/close it.
+        # Corpus retrieval and page citations do not require a graph projection.
+        self.graph_backend = graph_backend
 
     def ingest(self) -> dict[str, Any]:
-        result = ManualIngestor().ingest_registry(self.registry_path, self.runtime_root)
-        if not result.get("ok"):
-            return result
-        corpus = self._load_corpus()
-        ontology = load_manual_ontology()
-        nodes, edges = project_manual_graph(corpus, ontology=ontology)
-        validation = validate_manual_graph(nodes, edges, ontology=ontology)
-        if not validation["ok"]:
-            return {**result, "ok": False, "error": "; ".join(validation["errors"])}
-        graph_payload = {
-            "schema": "manual_knowledge_graph.v1",
-            "ontology_version": str(ontology.get("version_id") or ""),
-            "nodes": nodes,
-            "edges": edges,
-        }
-        try:
-            semantic_payload = build_semantic_graph(corpus, graph_payload)
-        except Exception as exc:
-            return {**result, "ok": False, "error": f"semantic projection failed: {exc}"}
-        semantic_validation = validate_semantic_provenance(semantic_payload)
-        if not semantic_validation["ok"]:
-            return {**result, "ok": False, "error": "; ".join(semantic_validation["errors"])}
-        _write_json_atomic(self.runtime_root / "manual_graph.json", graph_payload)
-        _write_json_atomic(self.runtime_root / "manual_semantic_graph.json", semantic_payload)
-        semantic_receipt = {
-            "schema": "manual_semantic_rebuild_receipt.v1",
-            "ok": True,
-            "version": semantic_payload["version"],
-            **_semantic_quality_metrics(semantic_payload),
-        }
-        _write_json_atomic(self.runtime_root / "receipts" / f"semantic-{semantic_payload['version']}.json", semantic_receipt)
-        node_result = self.graph_backend.upsert_nodes(nodes)
-        edge_result = self.graph_backend.upsert_edges(edges)
-        semantic_node_result = self.graph_backend.upsert_nodes(semantic_payload["nodes"])
-        semantic_edge_result = self.graph_backend.upsert_edges(semantic_payload["edges"])
-        return {
-            **result,
-            "graph": {"nodes": len(nodes), "edges": len(edges), "node_sync": node_result, "edge_sync": edge_result},
-            "semantic_graph": {
-                "nodes": len(semantic_payload["nodes"]),
-                "edges": len(semantic_payload["edges"]),
-                "version": semantic_payload["version"],
-                "node_sync": semantic_node_result,
-                "edge_sync": semantic_edge_result,
-                **_semantic_quality_metrics(semantic_payload),
-            },
-        }
+        return ManualIngestor().ingest_registry(self.registry_path, self.runtime_root)
 
     def ensure_ingested(self) -> dict[str, Any]:
-        if (
-            (self.runtime_root / "corpus.json").is_file()
-            and (self.runtime_root / "manual_graph.json").is_file()
-            and (self.runtime_root / "manual_semantic_graph.json").is_file()
-        ):
+        if (self.runtime_root / "corpus.json").is_file():
             return {"ok": True, "status": "ready"}
         return self.ingest()
 
@@ -166,17 +115,7 @@ class ManualKnowledgeService:
                     },
                 }
             )
-        selected_chunk_ids = {str(item["chunk_id"]) for item in chunks}
-        graph = self._bounded_graph(selected_chunk_ids, limit=min(100, top_k * 8))
-        semantic_graph = self._load_json(self.runtime_root / "manual_semantic_graph.json")
-        semantic_projection = project_semantic_subgraph(
-            semantic_graph,
-            selected_chunk_ids,
-            purpose,
-            node_limit=40,
-            edge_limit=60,
-            depth=2,
-        )
+        compatibility = self._empty_context(equipment_type, query, purpose, error="")
         coverage = max((item["score"] for item in chunks), default=0.0)
         context = {
             "schema": "manual_context.v1",
@@ -184,11 +123,12 @@ class ManualKnowledgeService:
             "purpose": purpose,
             "query": query,
             "chunks": chunks,
-            "graph": graph,
-            "semantic_projection": semantic_projection,
+            "graph": compatibility["graph"],
+            "semantic_projection": compatibility["semantic_projection"],
+            "graph_status": "retired",
             "coverage": round(coverage, 6),
             "insufficient_evidence": not chunks or coverage < 0.08,
-            "insufficient_semantic_evidence": not semantic_projection["nodes"],
+            "insufficient_semantic_evidence": True,
             "source_separation": {"manual_only": True, "web_used": False, "runtime_memory_used": False},
         }
         context["context_hash"] = hashlib.sha256(json.dumps(context, ensure_ascii=True, sort_keys=True).encode("utf-8")).hexdigest()
@@ -196,8 +136,6 @@ class ManualKnowledgeService:
 
     def status(self) -> dict[str, Any]:
         corpus = self._load_json(self.runtime_root / "corpus.json")
-        graph = self._load_json(self.runtime_root / "manual_graph.json")
-        semantic_graph = self._load_json(self.runtime_root / "manual_semantic_graph.json")
         receipts = sorted((self.runtime_root / "receipts").glob("*.json")) if (self.runtime_root / "receipts").is_dir() else []
         latest = self._load_json(receipts[-1]) if receipts else {}
         return {
@@ -207,16 +145,18 @@ class ManualKnowledgeService:
             "registry_path": str(self.registry_path),
             "source_count": len(corpus.get("sources", [])),
             "chunk_count": len(corpus.get("chunks", [])),
-            "node_count": len(graph.get("nodes", [])),
-            "edge_count": len(graph.get("edges", [])),
-            "semantic_node_count": len(semantic_graph.get("nodes", [])),
-            "semantic_edge_count": len(semantic_graph.get("edges", [])),
-            **_semantic_quality_metrics(semantic_graph),
+            "node_count": 0,
+            "edge_count": 0,
+            "semantic_node_count": 0,
+            "semantic_edge_count": 0,
             "latest_receipt": latest,
-            "graph_backend": self.graph_backend.health(),
+            "graph_backend": {"enabled": False, "status": "retired"},
         }
 
     def graph(self, *, limit: int = 100, view: str = "semantic") -> dict[str, Any]:
+        return {"ok": False, "status": "retired", "nodes": [], "edges": []}
+
+    def _legacy_graph(self, *, limit: int = 100, view: str = "semantic") -> dict[str, Any]:
         selected_view = str(view or "semantic").strip().lower()
         if selected_view not in {"semantic", "evidence"}:
             raise ValueError("manual graph view must be semantic or evidence")
@@ -260,8 +200,7 @@ class ManualKnowledgeService:
         }
 
     def close(self) -> None:
-        if self._owns_backend:
-            self.graph_backend.close()
+        return None
 
     def _load_corpus(self) -> dict[str, Any]:
         return self._load_json(self.runtime_root / "corpus.json")

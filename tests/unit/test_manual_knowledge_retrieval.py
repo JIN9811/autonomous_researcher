@@ -123,3 +123,23 @@ def test_query_rejects_non_utm_equipment_type(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="equipment_type must be utm"):
         service.query({"equipment_type": "printer", "query": "start", "purpose": "procedure"})
+
+
+def test_manual_corpus_is_usable_without_graph_files_or_graph_backend(tmp_path: Path) -> None:
+    runtime = tmp_path / "manual_rag"
+    _write_corpus(runtime)
+    (runtime / "manual_graph.json").unlink()
+    (runtime / "manual_semantic_graph.json").unlink()
+
+    class GraphTripwire:
+        def __getattr__(self, name):
+            raise AssertionError(f"Manual retrieval touched retired graph: {name}")
+
+    service = ManualKnowledgeService(project_root=tmp_path, runtime_root=runtime, graph_backend=GraphTripwire())
+    result = service.query({"equipment_type": "utm", "query": "시험 시작 실패", "purpose": "recovery"})
+    assert result["chunks"][0]["citation"]["page"] == 66
+    assert result["chunks"][0]["citation"]["source_sha256"] == "b"
+    assert result["graph"]["nodes"] == []
+    assert result["semantic_projection"]["nodes"] == []
+    assert service.status()["chunk_count"] == 3
+    service.close()

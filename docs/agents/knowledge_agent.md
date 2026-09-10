@@ -4,291 +4,272 @@ subtype: system
 status: active
 authority: descriptive
 audience: [researcher, reviewer, developer, operator, maintainer]
-scope: [agents, knowledge, provenance, graph, reconciliation, self_evolution, manual_rag]
-summary: Current contract for durable research memory, provenance, patterns, BO context, graph synchronization, and evolution evidence recommendations.
+scope: [agents, knowledge, ontology, markdown_memory, scoped_rag, self_evolution, manual_rag]
+summary: Ontology-guided Markdown knowledge, source-backed LLM curation, scoped retrieval and preserved research-memory contracts.
 source_of_truth:
   - agents/knowledge_agent.py
-  - graphs/modules/knowledge/module.yaml
-  - knowledge/service.py
-  - knowledge/reconciliation_service.py
-  - knowledge/relation_store.py
+  - agents/knowledge_decision.py
+  - knowledge/markdown_memory.py
+  - knowledge/markdown_runtime.py
+  - knowledge/http_api.py
+  - knowledge/manuals/service.py
   - knowledge/ontology
-  - knowledge/manuals
-  - knowledge/ontology/manual_equipment.v1.yaml
-  - app/main.py
-last_verified: 2026-08-17
-verified_against: working-tree-2026-08-17
+  - utils/agent_artifact_archive.py
+  - graphs/modules/knowledge/module.yaml
+last_verified: 2026-09-10
+verified_against: working-tree-2026-09-10
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
-  - docs/agents/analysis_agent.md
-  - docs/agents/bo_agent.md
-  - docs/knowledge/knowledge_graph_operations.ko.md
+  - docs/knowledge/markdown_memory_operations.ko.md
   - docs/knowledge/manual_rag_knowledge.ko.md
   - docs/agents/knowledge_agent_self_evolution_runtime_guideline.md
+  - docs/superpowers/specs/2026-09-10-knowledge-markdown-memory-design.md
+  - docs/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md
 supersedes: []
 ---
 
 # Knowledge Agent Reference
 
-## Summary
+## Status at a Glance
 
-`KnowledgeAgent` owns the research-memory handoff: it collects accepted run
-artifacts, normalizes provenance, ingests agent reports, writes experiment
-knowledge and performance/pattern records, builds BO context, ranks potential
-self-evolution targets, and emits evidence packs and reports. Knowledge service
-contracts—not raw LLM output—control persistence and graph mutation.
+- Runtime status: Implemented — ontology-guided Markdown memory and existing typed records
+- LLM decision layer: Implemented / API and local vLLM verified
+- Physical effect: None
+- Primary handoff: `knowledge_context.v1` → BO and downstream context consumers
+- Live hardware validation: Not applicable to Knowledge; no new physical validation claimed
+- Known gap: Retrieval quality and scientific benefit have no held-out comparative benchmark
 
-## Scope
+## Overview and Responsibilities
 
-Included are local durable records, ontology validation, audit ledger, outbox,
-graph synchronization/query, relation reconciliation/review, and evolution
-recommendations. The agent does not activate evolution variants, issue raw
-Cypher, or create graph facts without provenance.
+Knowledge turns execution evidence into reusable, source-backed context. Its
+LLM decides what is worth retaining, how to classify it, which scoped records
+to read, and whether evidence supports a useful handoff. Numerical observations
+remain Analysis-owned; Knowledge does not reconstruct or optimize their values.
 
-## Source of Truth
-
-Knowledge agent/module, service, ontology, ledger/outbox/repositories,
-reconciliation service/store, route handlers, and Knowledge operations Guide.
-
-## Actual Role
-
-| Does | Does not |
+| Owned by Knowledge | Preserved outside its authority |
 |---|---|
-| Collect and normalize accepted artifacts/provenance | Treat every model statement as a fact |
-| Write typed knowledge, pattern, and performance records | Write directly to Neo4j outside service/receipt contracts |
-| Build BO and safety/retrieval context | Issue unbounded/raw Cypher |
-| Propose relation/evolution changes with evidence | Auto-activate evolution variants |
-| Preserve degraded sync state and retryable outbox | Fabricate a graph receipt or discard failed records |
+| Markdown knowledge, ontology-guided classification and scoped retrieval | Core ontology definitions and experimental settings |
+| Source citations, evidence status and append-only note revisions | Original logs, artifacts, metrics and objective evaluations |
+| Typed memory, patterns, performance and Evolution evidence packs | BO candidate generation and device execution |
+| Local decision/tool trace and explicit evidence gaps | Orchestrator stage transitions and Evolution activation |
 
-## Three-Level Control Classification
+The active Knowledge Graph, Neo4j synchronization, Graphify import and relation
+reconciliation paths are retired. Ontology classes and relation definitions are
+still present: a vocabulary is not an instantiated knowledge graph. Existing
+historical graph files and offline utilities are left untouched.
 
-| Level | Knowledge responsibility | Authority boundary |
+### Five-Area Responsibility Map
+
+These are responsibility areas, not five new runtime stages.
+
+| Area | Responsibility | Authority boundary |
 |---|---|---|
-| High-Level Control | Supplies provenance-bounded context to BO, Design, Orchestrator, and Guardian and records accepted cycle outcomes | Does not choose the next physical action and does not auto-activate relation/evolution proposals |
-| Middle-Level Control | Collect accepted reports, validate provenance/schema/ontology, build typed experiment/pattern/performance records, reconcile relations, assemble BO/safety/retrieval context, and emit reviewable evolution evidence | Model synthesis and relation proposals remain bounded advice until validation and required operator decision |
-| Low-Level Control | Uses Knowledge service contracts for ledger, local repositories, durable outbox, ontology, and optional Neo4j/Graphify sync | Storage transaction, retry/dead-letter state, graph query plan, and write receipt remain repository/service authority; no physical actuator is owned |
-
-Graph reconnection or outbox retry is Low-Level; rebuilding a rejected record
-or relation proposal is Middle-Level; deciding whether the loop continues or a
-proposal is reviewed remains High-Level/operator authority. The Knowledge
-Workspace is a manual review/edit surface and every apply remains audited.
+| High-Level Control | LLM judges reusable knowledge, relevant scope-bound evidence and qualified publication | Does not alter measurements, objectives or global routing |
+| Middle-Level Control | Collect evidence; run the bounded tool loop; assemble existing records and context | Tool validation and output assembly remain code-owned |
+| Low-Level Control | Atomic Markdown revisions, search/detail reads, JSONL and local audit append | No device tool, graph backend or model-server startup |
+| Guardian / Safety | Validate identity, ontology, sources, scope, lifecycle and tool arguments | Reject unsupported writes or scope expansion; preserve raw evidence |
+| Knowledge / Evidence | Keep sources, applicability, observation/interpretation distinction and tool trace | Derived notes are not new measurements or causal proof |
 
 ## Closed-Loop Position and Handoffs
 
-![Knowledge closed-loop position and handoffs](assets/figures/knowledge_01_closed_loop_handoffs.svg)
+![Knowledge: terminal archives feed observations; Analysis feeds LLM curation; context goes to BO](assets/figures/knowledge_01_closed_loop_handoffs.svg)
 
-**Figure Knowledge-1.** Accepted reports, artifacts, decisions, provenance, and
-Analysis evidence become durable local records and bounded contexts for BO,
-Design, Orchestrator, Guardian, and operator-reviewed Evolution work. This is
-an `inspection`-backed projection of baseline `0b7627b`, not proof of graph
-availability or knowledge quality.
+**Figure Knowledge-1.** Code-inspection architecture view, 2026-09-10. The normal
+stage remains Analysis → Knowledge → BO. Terminal archive intake is a separate,
+deterministic preservation hook and cannot replay an agent.
 
-| Direction | Component | Contract/state | Purpose | Gate |
-|---|---|---|---|---|
-| In | All completed agents | reports/artifacts/decisions | durable cycle record | accepted schema/provenance |
-| In | Analysis | objective/metrics/evidence | trial context | input/output refs |
-| In | Graph/reconciliation | receipts/proposals/decisions | graph maintenance | ontology/operator review |
-| Out | BO | `bo_context`/trial history | next candidate | record completeness |
-| Out | Design/Orchestrator/Guardian | retrieval/failure/safety context | next-cycle decisions | bounded query/provenance |
-| Out | Evolution Lab | proposal/evidence pack | operator review | never direct activation |
+| Direction | Input/output | Existing owner or consumer |
+|---|---|---|
+| In | Analysis objective, uncertainty, metrics, evaluation and artifact references | Analysis |
+| In | Terminal completed/failed/cancelled execution manifest and result | Existing agent archive wrapper |
+| In | Markdown candidates and selected project-document chunks | Scoped retrieval |
+| Out | `knowledge_context.v1`: summary, scope, selected records, citations, decision | BO and context consumers |
+| Out | `knowledge_report.v1`, typed memory/pattern/performance records | Reports, workspace and local memory |
+| Out | `evolution_proposal.v1` and evidence packs | Existing operator-reviewed Evolution path |
 
-## Inputs and Outputs
+## Internal Workflow
 
-Input is `OrchestratorState` with stage reports, artifacts, decisions, failures,
-metrics, analysis, run/cycle identity, and provenance. Declared outputs include
-`knowledge_context.v1`, `evolution_proposal.v1`, `knowledge_report.v1`,
-`experiment_knowledge_v1`, `agent_performance_v1`, `failure_pattern_v1`,
-`success_pattern_v1`, and `evolution_evidence_pack_v1`.
+1. Persist a copy of current Analysis intake before any LLM call.
+2. Freeze source identities and caller scope; expose only evidence inspection initially.
+3. Let the LLM inspect, search, read, classify/write, and publish using agent-local tools.
+4. Preserve existing numerical memory, provenance, patterns and performance records.
+5. Build existing BO/Evolution context and append a local ontology-validated audit event.
+6. Save the decision/report; the original archive wrapper preserves the terminal result.
 
-Transition requires a knowledge record, non-empty `provenance.used`, performance
-records for completed stages, BO context or explicit no-context reason, and
-evolution evidence packs or explicit no-evolution reason.
+![Knowledge: LLM tools operate behind scope and provenance validation with append-only storage](assets/figures/knowledge_02_execution_effect_boundary.svg)
 
-The manifest conditions are preserved verbatim for drift checking:
+**Figure Knowledge-2.** The LLM selects semantic actions; deterministic code owns
+their validation and storage effects. The separate archive hook records observed
+execution outcomes even if a run never reaches the Knowledge stage.
 
-```text
-knowledge_record exists
-provenance.used is non-empty
-agent_performance_records exist for completed stages
-bo_context exists or explicit no_bo_context_needed reason exists
-evolution_evidence_packs exists or explicit no_evolution_needed reason exists
+### Decision and Prompt Contract
+
+The normal path calls `ctx.complete("knowledge_query", ...)` through ATR's
+registered API or local vLLM routing. Every response is one JSON object:
+
+```json
+{"tool": "search_knowledge", "arguments": {"query": "export validation", "scope": {"agent_id": "equipment_agent"}, "top_k": 6}}
 ```
 
-## Internal Execution
+The prompt supplies the goal, run/cycle identity, allowed ontology classes,
+allowed corpus/scope, phase-specific tool schemas and actual previous tool
+observations. It asks for reusable evidence rather than general commentary:
 
-| Step ID | Work | Boundary/output |
+| Prompt requirement | Enforced effect |
+|---|---|
+| Inspect before deciding | Only inspection is offered in the initial phase |
+| Search excerpts, then read selected records | Unread search IDs cannot be cited |
+| Narrow scope without replacing conditions | The same validated filters govern search and detail |
+| Distinguish observation, derived interpretation and hypothesis | LLM writes cannot claim `evidence_kind=observed` |
+| Reuse existing evidence instead of repeated writes | At most one curated note per decision |
+| State insufficient or conflicting evidence explicitly | Publication without a note requires a reason |
+| Keep scientific data and command ownership unchanged | No numeric-edit, ontology-edit or device tool exists |
+
+This is a bounded decision layer, not an LLM implementation of file I/O or a
+replacement for Analysis/BO. It can withhold new knowledge when evidence is
+insufficient. A failed decision is reported as unsuccessful rather than
+presented as successful model reasoning.
+
+### Agent-Local Tools
+
+| Tool | Input | Effect and receipt |
 |---|---|---|
-| `01_collect_run_artifacts` | bounded artifact set | missing refs explicit |
-| `02_normalize_provenance` | identity/source/use | invalid provenance blocks |
-| `03_ingest_agent_reports` | typed report ingestion | schema rejection retained |
-| `04_write_experiment_knowledge_record` | cycle record | durable service path |
-| `05_update_failure_patterns` | failure aggregation | pattern record |
-| `06_update_success_patterns` | success aggregation | pattern record |
-| `07_update_agent_performance_ledger` | stage performance | typed records |
-| `08_build_bo_context` | trials/constraints/evidence | BO context or reason |
-| `09_rank_self_evolution_targets` | evidence-backed ranking | recommendation only |
-| `10_build_evolution_evidence_packs` | bounded packs | review input |
-| `11_emit_knowledge_report` | human/machine report | report schema |
-| `12_emit_evolution_lab_prefill` | workspace prefill | no activation |
+| `inspect_evidence` | Empty arguments | Read frozen current source identities and content |
+| `search_knowledge` | Query, optional narrower scope, top_k, corpus | Ranked metadata/excerpts; no full bodies |
+| `read_knowledge` | ID previously returned by search | Read full selected record within the same scope |
+| `write_knowledge_note` | Title/body, ontology class, source IDs, kind, tags | Validated atomic Markdown revision receipt |
+| `publish_context` | Summary, source IDs, explicit no-note reason when applicable | Accepted cited context or evidence-gap report |
 
-![Knowledge internal execution and effect boundary](assets/figures/knowledge_02_execution_effect_boundary.svg)
+These tools are dispatched inside Knowledge; the module does not register new
+bridge commands. Existing project-document retrieval remains a separate corpus.
+Manual RAG retains its own registry, query and citation contract.
 
-**Figure Knowledge-2.** Twelve internal entries, eight output contracts, and
-five transition conditions separate provenance/schema gates, experiment
-records, patterns, performance, BO context, evolution evidence, reports,
-durable local state, outbox, and optional graph receipts. This `inspection`
-figure groups contract steps and grants no automatic variant activation.
+## Storage, Scope and Lifecycle
 
-### Execution trace details
+```text
+memory/knowledge/markdown/
+  <run_id>/<cycle_id>/<agent_id>/<record_id>/revision-000001.md
+memory/knowledge/markdown_jobs/<job_id>.json
+memory/knowledge/*.jsonl                         existing typed memory
+runs/<run_id>/knowledge/intake_<loop>_<hash>.json pre-LLM immutable source snapshot
+runs/<run_id>/knowledge/knowledge_decision.json   current full tool trace
+runs/<run_id>/knowledge/knowledge_report.json     current report
+runs/<run_id>/runtime/loops/<loop>/<agent>/<attempt>/
+  manifest.json, result.json, files/...          existing per-attempt archive
+```
 
-| Phase | State read | Validation/transformation | Durable output | Failure/degraded behavior |
-|---|---|---|---|---|
-| Collect | accepted stage reports, artifacts, decisions and run/cycle IDs | bound complete referenced set | collection record and explicit missing refs | unreferenced or rejected outputs are not promoted |
-| Provenance/report ingest | producer, source, use and schema | normalize provenance and validate typed reports | ledger event and accepted report records | invalid provenance/schema blocks affected record |
-| Experiment record | complete accepted cycle context | construct typed knowledge record | `experiment_knowledge_v1` | required record absence blocks transition |
-| Patterns/performance | accepted results and failures | update typed success/failure patterns and stage performance | three typed record families | completed stages require performance or explicit defect |
-| BO context | compatible trials, constraints and evidence | create bounded context or explicit no-context reason | `knowledge_context.v1`/BO context | absence reason is data, not an empty field |
-| Evolution | evidence-backed performance/failure targets | rank targets and build packs or no-evolution reason | `evolution_proposal.v1` and evidence packs | recommendation never activates a variant |
-| Report/prefill | complete output contract set | emit human/machine report and workspace prefill | `knowledge_report.v1` and prefill | transition waits for declared conditions |
+Current per-run report aliases remain compatible. The archive wrapper snapshots
+each execution separately; Markdown identity also includes run, cycle, agent and
+event, so a similar failure in a later cycle is retained independently.
 
-## API Surface
+| Field | Meaning |
+|---|---|
+| run_id / cycle_id / agent_id / event_id | Stable event identity; retries deduplicate |
+| ontology_type / ontology_version | Existing ontology vocabulary and version |
+| source_refs | Traceable original evidence locations |
+| evidence_kind | `observed`, `derived`, or `hypothesis` |
+| fidelity | `measured`, `simulated`, `virtual`, or `unknown`; not inferred from test mode |
+| tags / applicability | Search classification and exact experimental conditions |
+| status / revision / content_hash | Lifecycle and immutable content lineage |
 
-### Manual RAG Knowledge submodule
+Search filters are conjunctive. Scalar/list fields allow exact run, cycle,
+agent, ontology type, fidelity and status selection; tags require every listed
+tag and applicability requires every specified key/value. Explicit empty lists
+match nothing. Unknown filters are rejected. Default status is `valid`.
 
-`Knowledge Agent > Manual RAG Knowledge`는 일반 실험 memory와 분리된 UTM
-매뉴얼 source registry, page/section chunk corpus, evidence graph, cited semantic
-graph, bounded 2-hop query projection을 소유합니다. 고정 식별자는
-`equipment_type=utm`이며 장비
-모델명과 소프트웨어 버전은 provenance 및 soft-ranking metadata입니다. 검색
-context는 Lab Equipment Agent의 UTM profile LLM에 제공되지만 실행 action,
-program ID, 좌표, payload 또는 안전 gate를 변경하지 않습니다. 운영 계약과
-검증 절차는 [UTM Manual RAG Knowledge Guide](../knowledge/manual_rag_knowledge.ko.md)를
-따릅니다.
+Lifecycle supports `valid`, `needs_review`, and `superseded`. Status changes
+require a reason and create a new revision. Supersession requires a distinct
+valid replacement with matching ontology class and applicability. Producer
+retries do not reactivate reviewed/superseded records. Invalid newest revisions
+quarantine the record instead of exposing an older valid version.
 
-Semantic graph의 node/edge는 모두 chunk ID와 page citation을 가져야 하며,
-`SUPPORTED_BY`가 원문 Evidence 계층을 연결합니다. Workspace/API 기본 view는
-semantic이고 Evidence chunk는 명시적으로 `view=evidence`를 요청할 때만 전체
-표시합니다. rebuild는 provenance 검증을 통과한 완성본만 atomic replace합니다.
+The in-memory index is rebuildable from Markdown and refreshes changed files
+incrementally. It is not an external vector database. Historical archive intake
+is an explicit, bounded background job, not a startup scan or a new agent run.
 
-| Class | Method | Path/family | Effect | Notes |
-|---|---|---|---|---|
-| owned | GET | `/api/knowledge/evolution-packs`, `/agent-performance`, `/failure-patterns`, `/success-patterns` | read_only | typed Knowledge outputs |
-| connected | GET/POST | `/api/knowledge/evolution-outcomes` | read_only/local_state | records reviewed outcomes |
-| operator | GET/POST | `/api/knowledge/relations/*` | read_only/local_state/model | status, scan, reconcile, proposals, decisions, approve/revise/reject/defer/re-evaluate |
-| operator | POST | `/api/knowledge/graph/edit/validate`, `/graph/edit/apply` | local_state/external_service | existing-node bounded edits |
-| connected | GET/POST | `/api/knowledge/graph/health`, `/graph/stats`, `/graph/sync`, `/graph/query`, `/graph/import` | read_only/local_state/external_service | bounded graph operations |
-| connected | GET | `/api/knowledge/activity` | read_only | recent bounded Knowledge activity |
-| owned/connected | GET/POST | `/api/knowledge/manuals/status`, `/manuals/ingest`, `/manuals/query`, `/manuals/graph?view=semantic|evidence` | read_only/local_state | UTM-only corpus, cited semantic projection, explicit evidence view |
-| connected | GET/POST | `/api/knowledge/ontology*` | read_only/local_state | registry and validation |
-| operator | POST | `/api/knowledge/graphify/scan`, `/graphify/import` | local_state/external_service | controlled import path |
-| owned/connected | GET | `/api/knowledge/run-context`, `/bo-context`, `/safety-context` | read_only | bounded consumer context |
+## Tools, APIs and Connections
 
-## Tools and Connections
+![Knowledge API connections: workspace to local Markdown, ontology and preserved manual/typed stores](assets/figures/knowledge_03_api_connection_architecture.svg)
 
-| Service | Boundary | Effect | Evidence |
+**Figure Knowledge-3.** Existing FastAPI/workspace entry points reach local
+Knowledge stores. The registered model route is used only by the agent decision
+layer; history intake does not invoke it.
+
+| Surface | Method / path | Contract |
+|---|---|---|
+| Status | GET `/api/knowledge/status` | Markdown count/index state; graph explicitly retired |
+| Query | POST `/api/knowledge/markdown/query` | `{query, scope, top_k}` → candidate excerpts |
+| Detail | POST `/api/knowledge/markdown/read` | `{record_id, scope}` → scoped record, or 404 |
+| Default detail | GET `/api/knowledge/markdown/{record_id}` | Valid record only |
+| Lifecycle | POST `/api/knowledge/markdown/{record_id}/status` | Status/reason/replacement → immutable receipt |
+| History intake | POST `/api/knowledge/markdown/intake` | Run, limit, cursor → queued job |
+| Intake progress | GET `/api/knowledge/markdown/intake/{job_id}` | Persisted state and per-file results |
+| Preserved | `/api/knowledge/ontology*`, `/activity`, typed memory/context/Evolution APIs | Existing vocabulary and evidence contracts |
+| Manual RAG | `/api/knowledge/manuals/status`, `/ingest`, `/query` | Corpus, source hashes and page citations |
+| Retired | `/graph*`, `/graphify*`, `/relations*`, `/manuals/graph` | HTTP 410; no graph factory or worker |
+
+The Knowledge workspace replaces graph-specific tabs with Markdown search and
+detail. Memory, Ontology and Manual RAG remain. The main dashboard links the same
+`/knowledge` route and reads Markdown status.
+
+## Safety, Modes and Recovery
+
+- Original Analysis numbers and objective lineage are copied, not LLM-generated.
+- Terminal archive intake is idempotent, has no device/model tool, and records
+  cancellation separately from evidence of equipment failure.
+- Markdown persistence is local and append-only; an intake error does not replace
+  the original agent outcome.
+- Normal operation requires a valid model decision. Explicit offline verification
+  uses the same tool dispatcher but is labeled `llm_used=false`.
+- `knowledge_settings` in run metadata accepts scope, corpora,
+  `decision_call_timeout_s` (default 300) and `decision_max_steps` (default 8).
+  Core experimental settings and bridges are unchanged.
+- Evolution proposals remain recommendations; approval and activation retain
+  their existing owners.
+
+## Artifacts and Verification
+
+The 2026-09-10 focused regression run passed **210 tests** (14 existing warnings),
+including Knowledge storage/decisions/archives, manual citations, preserved
+ontology and typed APIs, BO, Evolution, objective lineage and the nonactuating
+two-cycle busy-FEM-boundary integration. This is a targeted set, not the entire
+repository test suite.
+
+Workspace QA used an isolated FastAPI fixture and existing Playwright Chromium
+at 1440×1000 and 390×844. Page identity, meaningful content, filter → excerpt →
+same-scope detail, invalid/no-match states, preserved tabs/manual citations and
+intake job reload passed; console warnings/errors and retired graph requests
+were empty. The fixture was stopped after verification. Lifecycle mutation
+remains API-only; the workspace displays and filters lifecycle status.
+
+Ten changed governed documents passed their focused validation. The full
+documentation manifest still reports pre-existing Windows bridge/PLC document
+governance errors in files outside this change.
+
+| Actual provider | Classified note | Scoped reuse | Insufficient evidence |
 |---|---|---|---|
-| Knowledge service | in-process validated ingestion/query | local_state | event/result/report |
-| Ontology registry | allowlisted class/relation validation | read_only/local_state | validation result |
-| Audit ledger | append/flush/fsync | local_state | immutable event |
-| Durable outbox | persisted async sync | local_state | pending/ack/dead-letter |
-| Neo4j/graph repository | bounded service/query plans | external_service | matching receipt/health |
-| Relation store/service | queue/proposal/decision/draft | local_state/model | immutable proposal/decision |
-| LLM `knowledge_synthesis` | selected backend | model | bounded synthesis |
-| Background reconciliation LLM | already-loaded model, lease priority 30 | model | proposal; never raw write |
+| API `gpt-5.5` | Pass · 16.876 s | Pass · 11.549 s | Pass · 5.295 s |
+| Registered vLLM `gemma4:31b` | Pass · 27.746 s | Pass · 26.820 s | Pass · 11.214 s |
 
-The module declares no direct tools; persistence is through Knowledge service
-contracts.
+Times cover each complete multi-call decision. All six cases used real model
+responses and actual temporary Markdown operations; original synthetic values
+were unchanged. [Sanitized verification artifact](assets/verification/knowledge_decisions_2026-09-10.json)
+records models, action sequences, note/citation counts and limits.
+The executable provider probe is
+[`verify_knowledge_decisions.py`](../../scripts/verify_knowledge_decisions.py).
 
-![Knowledge API and connection architecture](assets/figures/knowledge_03_api_connection_architecture.svg)
-
-**Figure Knowledge-3.** Knowledge output, context, relation, ontology, graph,
-and Graphify APIs pass through the validated service into an audit ledger,
-local records, and durable outbox; configured graph writes require receipts,
-and relation/model proposals remain operator-reviewed. This `inspection`
-figure is not graph-availability or reconciliation-quality evidence.
-
-### Connection lifecycle
-
-| Lifecycle | Authoritative boundary | Required evidence/state | Failure/recovery rule |
-|---|---|---|---|
-| Validate | Knowledge service, provenance and ontology registry | accepted schema/class/relation/source/use | reject before persistence on failure |
-| Append local | audit ledger and typed JSONL/local repositories | immutable event plus typed record | local append/flush failure blocks acknowledgement |
-| Enqueue sync | durable outbox | payload identity, attempt and pending state | retain pending/dead-letter state across outage |
-| Apply graph | bounded repository/query plan | matching graph health and write receipt | never acknowledge graph success without receipt |
-| Read context | bounded service queries | provenance-filtered run/BO/safety response | no raw Cypher or unbounded query surface |
-| Relation review | scan/reconcile proposal and immutable operator decision | evidence/confidence/structural gates | defer/reject/re-evaluate without overwriting history |
-| Evolution handoff | ranked evidence pack and workspace prefill | operator-reviewable recommendation | no automatic activation edge |
-
-When optional graph sync is degraded, the audit ledger, typed local records,
-and durable outbox remain the persistence authority; the UI must not present a
-missing receipt as a successful graph write.
-
-## State, Events, Artifacts, and Storage
-
-Typed Knowledge JSONL/local records, audit ledger, durable outbox, graph
-receipts, activity events, relation queue/proposal/decision files, graph edit
-drafts, reports, BO context, and evolution packs are distinct durable records.
-Graph UI layout state is presentation preference, not semantic evidence.
-Manual corpus/evidence/semantic indexes and rebuild receipts are generated under
-`memory/knowledge/manual_rag/` and remain outside Git.
-
-## Modes and Fallbacks
-
-Test/replay can ingest bounded fixtures/records. Graph service absence reports
-degraded state while ledger/outbox remain durable. JSON graph is a compatibility
-or import path, not a silent Neo4j fallback. Background reconciliation does not
-load an unloaded model and must not block the active experiment loop.
-
-## Safety, Approval, and Effect Boundary
-
-Ontology, provenance, duplicate/self-edge, existing-node, confidence/evidence,
-and receipt gates constrain graph mutation. Automatic relation promotion needs
-LLM confidence at least `0.90`, deterministic evidence at least `0.80`, and all
-structural gates; other proposals remain operator-reviewable. Approved edits
-still pass `KnowledgeService.ingest()`.
-
-## Errors and Recovery
-
-Invalid provenance/ontology is rejected before persistence. Neo4j outage leaves
-outbox pending and exposes degraded health; never acknowledge without matching
-receipt. Model unavailable leaves reconciliation pending. Conflicting or
-uncertain proposals are deferred/rejected/re-evaluated through immutable
-decisions, not silently overwritten.
-
-## Operator and GUI Surfaces
-
-Knowledge workspace exposes Graph Explorer, Memory, Ontology, Sync, Project
-Graph, Manual RAG Knowledge, activity, Relation Review, and existing-node Edit Mode. Manual
-RAG shows a cited semantic graph by default and uses the Semantic Inspector to
-trace a selected assertion back to bounded page evidence. Review and apply
-are server validated/audited. Evolution Lab consumes prefill/evidence without
-automatic activation.
-
-## Current Verification
-
-Core Knowledge behavior remains verified against the existing internal steps,
-output contracts, transition conditions, service/ontology/ledger/outbox, and
-relation reconciliation tests. The Manual RAG submodule was additionally
-verified on 2026-08-17 against two registered manuals, 506 chunks, 565 semantic
-nodes, 872 semantic edges, provenance coverage `1.0`, and representative
-procedure/recovery queries. The focused Knowledge/Equipment/API regression set
-completed with 77 passing tests, and the 1920-wide browser audit rendered the
-semantic graph without `ManualChunk` nodes or horizontal overflow.
-
-## Limitations and Known Gaps
-
-The representative queries and structural metrics do not constitute a broad
-retrieval benchmark or prove semantic relation accuracy. No paper-scoped
-evidence establishes graph completeness, evolution benefit, or external graph
-availability. Background LLM proposals remain model-dependent.
+Tests exercise real temporary Markdown files, scoped reads, lifecycle/retries,
+archive preservation, graph retirement, manual citations, Knowledge/BO handoff,
+and the existing nonactuating two-cycle integration. Provider probes use
+synthetic evidence with empty device-tool registries and no model-server startup.
+They do not establish retrieval quality, causal scientific benefit, or a new
+physical closed-loop result.
 
 ## Related Documents
 
-- [Agent Matrix](agent_api_connection_matrix.md)
-- [Analysis](analysis_agent.md)
-- [BO](bo_agent.md)
-- [Three-Level Control Model](../runtime/three_level_control_model.md)
-- [Knowledge Operations](../knowledge/knowledge_graph_operations.ko.md)
+- [Markdown Knowledge Operations](../knowledge/markdown_memory_operations.ko.md)
+- [Manual RAG Operations](../knowledge/manual_rag_knowledge.ko.md)
 - [Knowledge/Self-Evolution Guideline](knowledge_agent_self_evolution_runtime_guideline.md)
-- [Knowledge/BO Feedback](../paper/03_closed_loop_method.md#knowledge-and-optimization-feedback)
+- [Agent Matrix](agent_api_connection_matrix.md)
+- [Analysis](analysis_agent.md) · [BO](bo_agent.md)

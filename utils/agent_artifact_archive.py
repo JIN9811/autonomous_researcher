@@ -130,10 +130,16 @@ class AgentArtifactExecution:
             "agent": agent, "stage": state.stage.value, "attempt_index": attempt,
             "execution_id": uuid4().hex, "specimen_id": str(specimen or ""),
             "experiment_id": state.experiment_id, "started_at": _now(),
+            "runtime_mode": state.mode.value,
             "status": "running", "archive_status": "recording", "artifacts": [],
             "events_path": self.relative(self.directory / "events.jsonl"),
             "manifest_path": self.relative(self.directory / "manifest.json"),
         }
+        try:
+            from knowledge.markdown_runtime import applicability_for
+            self.manifest["knowledge_applicability"] = applicability_for(state)
+        except (ValueError, TypeError, AttributeError) as exc:
+            self.manifest["knowledge_scope_error"] = type(exc).__name__
         _json(self.directory / "manifest.json", self.manifest)
 
     def relative(self, path: Path) -> str:
@@ -220,6 +226,17 @@ class AgentArtifactExecution:
             self.refresh_status()
             self.event("agent_finished", {"status": status})
             _json(self.directory / "manifest.json", self.manifest)
+            # Observe the already-completed archive; this never calls an agent,
+            # model or device. Intake failure must not change its original outcome.
+            try:
+                from knowledge.markdown_runtime import ingest_archive_manifest
+                receipt = ingest_archive_manifest(self.run_root, self.directory / "manifest.json")
+                self.manifest["knowledge_intake"] = receipt
+                _json(self.directory / "manifest.json", self.manifest)
+            except Exception as exc:
+                self.manifest["knowledge_intake"] = {"ok": False, "error": type(exc).__name__}
+                _json(self.directory / "manifest.json", self.manifest)
+                _error(self.state, exc)
 
 
 def archive_agent_run(function):

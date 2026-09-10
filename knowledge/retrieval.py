@@ -61,9 +61,9 @@ def retrieve_research_context(*, query: str, retrieval_result: dict[str, Any]) -
     for chunk in retrieval_result.get("local_chunks", []) or []:
         if isinstance(chunk, dict):
             sources.append({
-                "source_type": "project_guideline",
+                "source_type": str(chunk.get("source_type") or "project_guideline"),
                 "source_ref": str(chunk.get("source") or chunk.get("chunk_id") or "local_chunk"),
-                "trust_level": "project_local_index",
+                "trust_level": str(chunk.get("trust_level") or "project_local_index"),
                 "recency": "indexed",
                 "retrieval_score": float(chunk.get("score") or retrieval_result.get("coverage") or 0.0),
                 "used_for": ["knowledge_context"],

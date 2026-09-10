@@ -79,7 +79,7 @@ from agents.equipment_agent import LabEquipmentAgent
 from app.bootstrap import load_runtime
 from graphs import ATRLangGraphCompiler, GraphConfig, GraphVersionStore, HandlerRegistry, ModuleConfig, ModuleConfigStore, load_graph_config
 from graphs.generated_adapter import GENERATED_MODULE_HANDLER_ID, generated_adapter_enabled, generated_adapter_path, validate_generated_adapter_file
-from knowledge.graph_backend import graph_backend_from_env
+from knowledge.graph_backend import NullGraphBackend, graph_backend_from_env
 from knowledge.graph_importer import import_store_to_graph
 from knowledge.graphify_bridge import import_project_graph, scan_project_graph
 from knowledge.schemas import EvolutionOutcomeRecord
@@ -747,9 +747,7 @@ async def keep_startup_side_effect_free() -> None:
     _cleanup_bambu_video_stream_processes(include_orphans=True)
     settings = _read_api_key_settings(import_env=True)
     await _apply_runtime_api_key_settings(settings, emit_event=False)
-    worker = _knowledge_reconciliation_worker()
-    controller._deps.agent_context.on_knowledge_ingest = lambda **_: worker.wake()
-    worker.start()
+    controller._deps.agent_context.on_knowledge_ingest = None
     # Restore Analysis queue metadata only. Computation requires an explicit
     # active-runtime admission; GUI startup must not launch archived solvers.
     from agents.analysis_runtime import service_for
@@ -4052,6 +4050,11 @@ def _knowledge_store() -> JsonlKnowledgeStore:
     return JsonlKnowledgeStore(memory_root=KNOWLEDGE_MEMORY_ROOT, run_root=resolve_path("runs"))
 
 
+def _markdown_store():
+    from knowledge.markdown_runtime import store_for
+    return store_for(memory_root=KNOWLEDGE_MEMORY_ROOT)
+
+
 def _knowledge_graph_backend():
     """Return optional Knowledge graph backend from environment.
 
@@ -4063,11 +4066,11 @@ def _knowledge_graph_backend():
 
 def _knowledge_service() -> KnowledgeService:
     """Return the shared durable Knowledge service for API and CLI parity."""
-    return KnowledgeService.from_env(resolve_path("."))
+    return KnowledgeService(resolve_path("."), backend=NullGraphBackend(status="retired"))
 
 
 def _manual_knowledge_service() -> ManualKnowledgeService:
-    """Return the source-separated UTM manual GraphRAG service."""
+    """Return source-separated, citation-preserving manual retrieval."""
     return ManualKnowledgeService(project_root=resolve_path("."))
 
 
@@ -4111,7 +4114,11 @@ def _manual_knowledge_context(
 
 
 def _knowledge_reconciliation_worker() -> KnowledgeReconciliationWorker:
-    """Return one app-owned relation worker without loading an LLM model."""
+    """Knowledge graph reconciliation is retired; never create a worker."""
+    raise HTTPException(status_code=410, detail="Knowledge graph reconciliation retired")
+
+
+def _legacy_knowledge_reconciliation_worker() -> KnowledgeReconciliationWorker:
     global _KNOWLEDGE_RECONCILIATION_SERVICE
     global _KNOWLEDGE_RECONCILIATION_WORKER
     global _KNOWLEDGE_RECONCILIATION_KNOWLEDGE_SERVICE
@@ -4135,7 +4142,13 @@ def _knowledge_reconciliation_service() -> KnowledgeReconciliationService:
 
 
 def _knowledge_relation_summary() -> dict[str, object]:
-    """Return compact persisted relation state without scanning or invoking an LLM."""
+    """Compatibility status for old snapshots; no graph worker or disk scan."""
+    return {"examined": 0, "proposed": 0, "auto_approved": 0, "pending": 0,
+            "rejected_deferred": 0, "worker_status": "retired", "worker_running": False,
+            "review_url": "/knowledge"}
+
+
+def _legacy_knowledge_relation_summary() -> dict[str, object]:
     defaults: dict[str, object] = {
         "examined": 0,
         "proposed": 0,
@@ -19480,3 +19493,12 @@ async def get_agent_integration_baseline() -> dict[str, object]:
 async def get_agent_integration_baseline_markdown() -> PlainTextResponse:
     """Return baseline doc as raw markdown text."""
     return PlainTextResponse(_load_agent_baseline_markdown(), media_type="text/markdown")
+
+
+# Keep graph-only routes out of the active router and OpenAPI without touching
+# historical graph files or the independent executable LangGraph API.
+from knowledge.http_api import install_markdown_routes, retire_graph_routes
+retire_graph_routes(app)
+install_markdown_routes(app, store_factory=lambda: _markdown_store(),
+                        run_root_factory=lambda: resolve_path("runs"),
+                        memory_root_factory=lambda: KNOWLEDGE_MEMORY_ROOT)

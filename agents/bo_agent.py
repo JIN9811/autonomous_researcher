@@ -710,6 +710,12 @@ class BOAgent(BaseAgent):
             "local_chunks": knowledge.get("local_chunks", 0),
             "web_results": knowledge.get("web_results", 0),
             "memory_summary": str(knowledge.get("memory_summary", ""))[:500],
+            "selected_knowledge": knowledge["selected_knowledge"][:6]
+            if isinstance(knowledge.get("selected_knowledge"), list) else [],
+            "citations": knowledge["citations"][:16]
+            if isinstance(knowledge.get("citations"), list) else [],
+            "scope": dict(knowledge["scope"])
+            if isinstance(knowledge.get("scope"), dict) else {},
         }
 
     @classmethod

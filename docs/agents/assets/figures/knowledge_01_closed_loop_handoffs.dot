@@ -1,19 +1,18 @@
 digraph knowledge_closed_loop_handoffs {
-  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.34", ranksep="0.55", fontname="DejaVu Sans", label="Knowledge closed-loop position and handoffs", labelloc="t", fontsize=18];
-  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07"];
-  edge [color="#52667A", fontname="DejaVu Sans", fontsize=8, arrowsize=0.7];
-  inputs [label="Accepted stage reports · artifacts\ndecisions · Analysis evidence"];
-  knowledge [label="KNOWLEDGE\nvalidated durable context", penwidth=2.2];
-  gate [label="Schema · provenance ·\nontology valid?", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
-  durable [label="Ledger · local records · outbox\npatterns · performance · receipts", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
-  bo [label="BO context"];
-  control [label="Design · Orchestrator ·\nGuardian context"];
-  evolution [label="Evolution Lab\nreview proposal"];
-  reject [label="Reject / pending sync / review", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
-  inputs -> gate -> knowledge;
-  gate -> reject [label="invalid"];
-  knowledge -> durable [label="durable evidence", color="#2E7D59"];
-  durable -> bo;
-  durable -> control;
-  durable -> evolution [style=dashed, label="recommendation only"];
+  graph [rankdir=LR, bgcolor="white", pad="0.3", nodesep="0.35", ranksep="0.48", fontname="DejaVu Sans", fontsize=18, label="Knowledge retains evidence without changing the closed-loop route", labelloc=t];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=13, margin="0.13,0.1"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=11, arrowsize=0.75];
+  analysis [label="Analysis\nmeasurements + objective"];
+  knowledge [label="Knowledge\nLLM curation + typed memory", penwidth=2];
+  bo [label="BO\nexisting numerical optimizer"];
+  archive [label="All terminal agent archives\ncompleted / failed / cancelled"];
+  md [label="Markdown observations\nrun / cycle / agent / event", fillcolor="#E9F7EF", color="#2E7D59"];
+  context [label="Scoped notes + citations\npatterns / performance"];
+  evolution [label="Evolution evidence packs\noperator review required", fillcolor="#FFF1D6", color="#916100"];
+  analysis -> knowledge [label="unchanged scientific values"];
+  knowledge -> bo [label="knowledge_context.v1"];
+  archive -> md [label="deterministic intake"];
+  md -> knowledge [label="search / selected read"];
+  knowledge -> context [label="persist"];
+  context -> evolution [style=dashed, label="recommendations"];
 }

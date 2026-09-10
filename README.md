@@ -103,7 +103,7 @@ architecture observations—not performance or stability guarantees.
 | Typed stage handoffs | Separates objectives, decisions, domain artifacts, and errors | Concrete end-to-end contract matrix not evaluated here |
 | Checkpointed state | Supports explicit continuation and recovery context | Recovery effectiveness by failure class not evaluated |
 | Guardian/operator gates | Constrain consequential or uncertain actions | Control points inspected; live safety effectiveness not evaluated |
-| Evidence and Knowledge path | Preserves artifacts, ledger/outbox state, provenance, and context | Package contracts tested; full scientific lineage not evaluated |
+| Evidence and Knowledge path | Preserves artifacts, local audit records, Markdown knowledge, provenance, and context | Package contracts tested; full scientific lineage not evaluated |
 | Bayesian-optimization return path | Proposes a next candidate through governed feedback | Path inspected; scientific benefit not evaluated |
 
 The current code and configuration support the bounded architecture claim
@@ -146,7 +146,7 @@ flowchart LR
 | Middle-Level Control | Execute the active agent's bounded internal procedure and emit typed results | Agent implementation and module contract |
 | Low-Level Control | Execute and observe one approved bounded action | ToolRegistry/MCP tool, service, queue/lease manager, device or computation bridge |
 | Guardian Safety Plane | Gate all levels and issue continue/review/stop/error decisions | Guardian, approval policy, bridge hard interlocks |
-| Knowledge/Evidence Plane | Preserve intent, decision, command, observation, result, and provenance | events, artifacts, reports, Knowledge ledger/outbox/graph |
+| Knowledge/Evidence Plane | Preserve intent, decision, command, observation, result, and provenance | events, artifacts, reports, Knowledge audit/Markdown/typed memory |
 
 Device Workspaces remain explicit manual setup, commissioning, training, and
 control surfaces. Reusing a bridge does not make a workspace action an
@@ -188,7 +188,7 @@ One explanatory cycle is:
 
 Failure handling distinguishes invalid input, unavailable capability, denied
 approval, known no-effect timeout, uncertain external effect, analysis error,
-knowledge-sync degradation, and explicit policy stop. See the
+knowledge persistence failure, and explicit policy stop. See the
 [Closed-Loop Method](docs/paper/03_closed_loop_method.md).
 
 ## Agent References
@@ -210,7 +210,7 @@ remain authoritative.
 | [Manipulation](docs/agents/manipulation_agent.md) | Supervises a bounded robot transfer and post-place verification | specimen/fresh Vision → verified transfer result | physical possible after robot gates | [Reference](docs/agents/manipulation_agent.md) | [Flow](docs/agents/assets/figures/manipulation_01_closed_loop_handoffs.svg) · [Execution](docs/agents/assets/figures/manipulation_02_execution_effect_boundary.svg) · [Connections](docs/agents/assets/figures/manipulation_03_api_connection_architecture.svg) |
 | [Lab Equipment](docs/agents/equipment_agent.md) | Executes an exact registered instrument protocol | verified placement/protocol → measurement/proof | desktop and physical possible after live gates | [Reference](docs/agents/equipment_agent.md) | [Flow](docs/agents/assets/figures/equipment_01_closed_loop_handoffs.svg) · [Execution](docs/agents/assets/figures/equipment_02_execution_effect_boundary.svg) · [Connections](docs/agents/assets/figures/equipment_03_api_connection_architecture.svg) |
 | [Analysis](docs/agents/analysis_agent.md) | Derives curves, metrics, objectives, uncertainty, and optional CAE comparison | raw measurement → evaluation/BO handoff | optional external analysis; no direct device | [Reference](docs/agents/analysis_agent.md) | [Flow](docs/agents/assets/figures/analysis_01_closed_loop_handoffs.svg) · [Execution](docs/agents/assets/figures/analysis_02_execution_effect_boundary.svg) · [Connections](docs/agents/assets/figures/analysis_03_api_connection_architecture.svg) |
-| [Knowledge](docs/agents/knowledge_agent.md) | Persists provenance, patterns, performance, and bounded context | accepted artifacts/reports → durable records/contexts | local/external persistence; no physical action | [Reference](docs/agents/knowledge_agent.md) | [Flow](docs/agents/assets/figures/knowledge_01_closed_loop_handoffs.svg) · [Execution](docs/agents/assets/figures/knowledge_02_execution_effect_boundary.svg) · [Connections](docs/agents/assets/figures/knowledge_03_api_connection_architecture.svg) |
+| [Knowledge](docs/agents/knowledge_agent.md) | Persists provenance, patterns, performance, and bounded context | accepted artifacts/reports → durable records/contexts | local Markdown/typed persistence; no physical action | [Reference](docs/agents/knowledge_agent.md) | [Flow](docs/agents/assets/figures/knowledge_01_closed_loop_handoffs.svg) · [Execution](docs/agents/assets/figures/knowledge_02_execution_effect_boundary.svg) · [Connections](docs/agents/assets/figures/knowledge_03_api_connection_architecture.svg) |
 | [Bayesian Optimization](docs/agents/bo_agent.md) | Proposes the next constrained candidate | analysis/priors → ranked recommendation | model/local state; proposal only | [Reference](docs/agents/bo_agent.md) | [Flow](docs/agents/assets/figures/bo_01_closed_loop_handoffs.svg) · [Execution](docs/agents/assets/figures/bo_02_execution_effect_boundary.svg) |
 | [Guardian](docs/agents/guardian_agent.md) | Decides continue, review, stop, or error | risk/health/failures/approvals → route decision | blocks/stops downstream; no direct action | [Reference](docs/agents/guardian_agent.md) | [Flow](docs/agents/assets/figures/guardian_01_closed_loop_handoffs.svg) · [Execution](docs/agents/assets/figures/guardian_02_execution_effect_boundary.svg) |
 
@@ -321,7 +321,7 @@ its boundaries:
 | Execution graphs | Versioned nodes, edges, dispatch, transitions, validation, activation rules |
 | Model backends | Routed provider/model contract, readiness state, bounded inference, priority where configured |
 | Device bridges | Capabilities, allowlists, authentication, dry run, proof, timeout/error semantics |
-| Knowledge backends | Ontology, provenance, durable ledger/outbox, receipts, bounded queries |
+| Knowledge backends | Ontology, provenance, Markdown revisions, typed memory and scoped queries |
 | Operator workspaces | Server-authoritative APIs for inspection, review, configuration, and mutation |
 
 At baseline `0b7627b`, the FastAPI application exposes 346 `APIRoute` entries

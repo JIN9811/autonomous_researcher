@@ -353,17 +353,9 @@ def test_knowledge_graph_api_imports_and_queries_json_backend(tmp_path: Path, mo
     )
 
     client = TestClient(app)
-    before = client.get("/api/knowledge/graph/health").json()
-    assert before["ok"] is True
-    assert before["backend"] == "json"
-
-    imported = client.post("/api/knowledge/graph/import", json={"limit": 20}).json()
-    assert imported["ok"] is True
-    assert imported["backend"] == "json"
-    assert imported["records"] == 3
-    assert imported["nodes_written"] > 0
-
-    queried = client.get("/api/knowledge/graph/query?kind=target_context&target_type=prompt&target_id=analysis&limit=20").json()
-    assert queried["ok"] is True
-    assert any(node["id"] == "evolution_pack:evo-pack-analysis-graph-api" for node in queried["nodes"])
-    assert any(edge["type"] in {"AFFECTS", "RECOMMENDS", "ASSOCIATED_WITH"} for edge in queried["edges"])
+    assert client.get("/api/knowledge/graph/health").status_code == 410
+    assert client.post("/api/knowledge/graph/import", json={"limit": 20}).status_code == 410
+    assert client.get("/api/knowledge/graph/query?kind=target_context").status_code == 410
+    # Retiring graph projections must not remove source knowledge/Evolution.
+    packs = client.get("/api/knowledge/evolution-packs").json()["packs"]
+    assert packs[0]["pack_id"] == "evo-pack-analysis-graph-api"

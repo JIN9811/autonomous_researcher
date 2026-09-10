@@ -49,7 +49,7 @@ class ApiKnowledgeService:
         return None
 
 
-def test_ontology_and_graph_service_api_contracts(monkeypatch) -> None:
+def test_ontology_and_activity_remain_available_after_graph_retirement(monkeypatch) -> None:
     monkeypatch.setattr(app_main, "_knowledge_service", lambda: ApiKnowledgeService())
     client = TestClient(app)
 
@@ -81,9 +81,9 @@ def test_ontology_and_graph_service_api_contracts(monkeypatch) -> None:
     assert ontology["version_id"] == "atr-core-1.0.0"
     assert "Specimen" in ontology["classes"]
     assert validation["ok"]
-    assert stats["graph"]["node_count"] == 12
-    assert sync["limit"] == 25
-    assert query["query_plan"]["kind"] == "run_context"
+    assert stats["status"] == "retired"
+    assert sync["status"] == "retired"
+    assert query["status"] == "retired"
     assert activity["run_id"] == "run-1"
     assert activity["limit"] == 12
     assert activity["cycles"][0]["used"] == 1
@@ -95,5 +95,5 @@ def test_graph_query_api_rejects_raw_cypher(monkeypatch) -> None:
 
     response = client.post("/api/knowledge/graph/query", json={"kind": "raw", "cypher": "MATCH (n) RETURN n"})
 
-    assert response.status_code == 422
-    assert "raw Cypher" in response.json()["detail"]
+    assert response.status_code == 410
+    assert response.json()["status"] == "retired"

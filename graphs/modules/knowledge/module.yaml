@@ -2,7 +2,7 @@ module:
   id: knowledge
   label: Knowledge Agent Module
   handler: agent.knowledge_agent
-  llm_role: knowledge_synthesis
+  llm_role: knowledge_query
   editable: true
   safety:
     live_requires_validation: true
@@ -16,10 +16,10 @@ module:
       label: Normalize Provenance
       kind: internal_step
     - id: 03_ingest_agent_reports
-      label: Ingest Agent Reports
+      label: LLM Evidence Inspection And Scoped Retrieval
       kind: internal_step
     - id: 04_write_experiment_knowledge_record
-      label: Write Experiment Knowledge Record
+      label: Classify And Write Markdown Knowledge
       kind: internal_step
     - id: 05_update_failure_patterns
       label: Update Failure Patterns
@@ -65,5 +65,10 @@ module:
     - evolution_evidence_packs exists or explicit no_evolution_needed reason exists
   notes: >-
     Knowledge is the research memory and self-evolution evidence owner. It writes
-    typed run artifacts plus memory/knowledge JSONL records. It recommends
-    evolution targets but never activates prompt/graph/tool variants directly.
+    typed run artifacts plus memory/knowledge JSONL and ontology-guided Markdown
+    records. The normal knowledge_query LLM selects local inspect_evidence,
+    search_knowledge, read_knowledge, write_knowledge_note and publish_context
+    actions. Those actions are agent-local, not bridge tools. Knowledge graph
+    storage and reconciliation are retired. Original scientific values,
+    manual citations, ontology and executable graph remain unchanged.
+    Evolution evidence is preserved; variants are never directly activated.

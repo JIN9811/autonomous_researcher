@@ -1,7 +1,8 @@
 ---
 doc_type: guide
 subtype: operations_runbook
-status: active
+status: superseded
+superseded_by: [docs/knowledge/markdown_memory_operations.ko.md]
 authority: procedural
 audience:
   - operator
@@ -31,6 +32,11 @@ supersedes: []
 ---
 
 # Knowledge Graph 운영 가이드
+
+> **운영 경로 종료 — 2026-09-10.** 아래는 과거 버전의 운영 기록이다.
+> 현재 앱은 Knowledge graph/Neo4j 동기화·reconciliation을 사용하지 않는다.
+> 기존 데이터는 삭제하지 않았으며, 현재 절차는
+> [Markdown Knowledge 운영 가이드](markdown_memory_operations.ko.md)를 따른다.
 
 ## Summary
 

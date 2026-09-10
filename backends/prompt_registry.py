@@ -60,7 +60,12 @@ PROMPTS: dict[str, str] = {
         "commands, invent candidates, or report target attainment. Return one strict JSON tool request only."
     ),
     "knowledge_query": (
-        "You are a knowledge agent. Use given context and cite run-relevant facts."
+        "You are the Knowledge Agent's evidence-curation decision layer. "
+        "Return one strict JSON tool request using only the supplied tool schema. "
+        "Inspect sources, select relevant scoped searches and detail reads, and store reusable "
+        "Markdown knowledge grounded in those sources. Keep observations and hypotheses distinct; "
+        "state applicability, contradictions and missing evidence. Never change measurements, "
+        "objectives, ontology definitions, device commands or caller search scope."
     ),
     "knowledge_relation": (
         "You reconcile relationships between existing ATR Knowledge Graph nodes. "

@@ -93,7 +93,7 @@ def _semantic_corpus() -> dict:
     }
 
 
-def test_failed_semantic_rebuild_preserves_active_projection(monkeypatch, tmp_path: Path) -> None:
+def test_corpus_ingest_preserves_historical_graph_without_rebuilding(monkeypatch, tmp_path: Path) -> None:
     runtime = tmp_path / "runtime"
     runtime.mkdir()
     active = runtime / "manual_semantic_graph.json"
@@ -104,10 +104,6 @@ def test_failed_semantic_rebuild_preserves_active_projection(monkeypatch, tmp_pa
         return {"ok": True, "source_count": 1, "chunk_count": 1}
 
     monkeypatch.setattr(ManualIngestor, "ingest_registry", fake_ingest)
-    monkeypatch.setattr(
-        "knowledge.manuals.service.build_semantic_graph",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("invalid support")),
-    )
     service = ManualKnowledgeService(
         project_root=tmp_path,
         runtime_root=runtime,
@@ -117,11 +113,11 @@ def test_failed_semantic_rebuild_preserves_active_projection(monkeypatch, tmp_pa
 
     result = service.ingest()
 
-    assert result["ok"] is False
+    assert result["ok"] is True
     assert json.loads(active.read_text(encoding="utf-8"))["version"] == "old"
 
 
-def test_semantic_rebuild_persists_quality_metrics(monkeypatch, tmp_path: Path) -> None:
+def test_corpus_ingest_persists_citations_without_creating_graphs(monkeypatch, tmp_path: Path) -> None:
     runtime = tmp_path / "runtime"
 
     def fake_ingest(_self, _registry, runtime_root):
@@ -140,10 +136,10 @@ def test_semantic_rebuild_persists_quality_metrics(monkeypatch, tmp_path: Path) 
     result = service.ingest()
     status = service.status()
 
-    semantic = json.loads((runtime / "manual_semantic_graph.json").read_text(encoding="utf-8"))
     assert result["ok"] is True
-    assert semantic["schema"] == "manual_semantic_graph.v1"
-    assert status["semantic_node_count"] == 3
-    assert status["semantic_edge_count"] >= 5
-    assert status["semantic_provenance_coverage"] == 1.0
-    assert status["fault_chain_completion_rate"] == 1.0
+    assert not (runtime / "manual_semantic_graph.json").exists()
+    assert not (runtime / "manual_graph.json").exists()
+    assert status["chunk_count"] == 1
+    context = service.query({"equipment_type": "utm", "purpose": "recovery", "query": "통신 연결 실패"})
+    assert context["chunks"][0]["citation"]["page"] == 66
+    assert context["chunks"][0]["citation"]["source_sha256"] == "sha"

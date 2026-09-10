@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -22,12 +23,38 @@ class _RagStub:
 
 
 class _CtxStub:
+    force_real_llm_in_test = False
+    artifact_run_root = None
     def __init__(self) -> None:
         self.rag = _RagStub()
         self.experiment_db = ExperimentDB()
 
     async def complete(self, task_type: str, user_prompt: str, *, timeout_s: float | None = None) -> Any:
         return SimpleNamespace(text="analysis memory summary")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_knowledge_writes(tmp_path, monkeypatch):
+    monkeypatch.setattr(_CtxStub, "artifact_run_root", str(tmp_path / "runs"))
+    monkeypatch.setattr(JsonlKnowledgeStore, "default", classmethod(
+        lambda cls, project_root=None: cls(memory_root=tmp_path / "memory" / "knowledge", run_root=tmp_path / "runs")))
+
+
+@pytest.mark.asyncio
+async def test_knowledge_agent_uses_md_decision_without_graph_and_preserves_failed_model_intake(tmp_path, monkeypatch):
+    import agents.knowledge_agent as module
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Knowledge invoked retired graph")
+    monkeypatch.setattr(module, "graph_backend_from_env", forbidden)
+    ctx = _CtxStub()
+    ctx.force_real_llm_in_test = True
+    result = await KnowledgeAgent().run(_state(), ctx)
+    assert not result.success  # unstructured canned response is not a successful decision
+    knowledge = result.data["knowledge"]
+    assert knowledge["decision"]["status"] == "failed"
+    assert knowledge["knowledge_report"]["experiment_memory"]["metrics"]["objective_score"] == 0.73
+    assert list((tmp_path / "runs").rglob("intake*.json"))
+    assert ctx.experiment_db.list_recent(1)[0].score == 0.73
 
 
 def _state() -> OrchestratorState:
@@ -48,6 +75,35 @@ def _state() -> OrchestratorState:
             },
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_retry_preserves_cited_intake_and_all_inspected_evidence(tmp_path):
+    state, ctx = _state(), _CtxStub()
+    state.run_metadata["incident_records"] = [{"incident_id": "inc-review", "reason_code": "fixture"}]
+    first = await KnowledgeAgent().run(state, ctx)
+    first_ref = Path(first.data["knowledge"]["citations"][0]["source_ref"])
+    original = first_ref.read_bytes()
+    source = json.loads(original)
+    assert "inc-review" in json.dumps(source)
+    state.latest_analysis["objective_score"] = 9.0
+    second = await KnowledgeAgent().run(state, ctx)
+    second_ref = Path(second.data["knowledge"]["citations"][0]["source_ref"])
+    assert first_ref != second_ref
+    assert first_ref.read_bytes() == original
+    assert source["latest_analysis"]["objective_score"] == 0.73
+
+
+@pytest.mark.asyncio
+async def test_curated_note_retains_explicit_applicability_and_matches_returned_scope(tmp_path):
+    from knowledge.markdown_runtime import store_for
+    state = _state()
+    state.run_metadata["knowledge_settings"] = {"scope": {"applicability": {"material": "PLA"}}}
+    result = await KnowledgeAgent().run(state, _CtxStub())
+    knowledge = result.data["knowledge"]
+    found = store_for(project_root=tmp_path).search("", scope=knowledge["scope"])
+    assert any(item["agent_id"] == "knowledge_agent" and item["evidence_kind"] == "derived"
+               and item["applicability"] == {"material": "PLA"} for item in found["hits"])
 
 
 def _objective_evaluation() -> dict[str, Any]:
@@ -246,7 +302,7 @@ async def test_knowledge_agent_ingests_guardian_incidents_as_evolution_evidence(
 
 
 @pytest.mark.asyncio
-async def test_knowledge_agent_adds_durable_graph_event_status_when_enabled(monkeypatch) -> None:
+async def test_knowledge_agent_keeps_local_ledger_without_sync_when_old_graph_flag_is_enabled(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
     class _Service:
@@ -274,8 +330,10 @@ async def test_knowledge_agent_adds_durable_graph_event_status_when_enabled(monk
     result = await KnowledgeAgent().run(_state(), _CtxStub())
 
     graph_status = result.data["knowledge"]["graph_event_status"]
-    assert graph_status["status"] == "synchronized"
+    assert graph_status["status"] == "local_only"
     assert result.data["knowledge"]["knowledge_report"]["graph_event_status"] == graph_status
-    assert captured["payload"]["event_type"] == "specimen.analyzed"
-    assert captured["payload"]["run_id"] == "run-knowledge"
-    assert captured["closed"] is True
+    assert not captured
+    from pathlib import Path
+    event = json.loads(Path(graph_status["ledger_receipt"]["path"]).read_text().splitlines()[-1])
+    assert event["event_type"] == "specimen.analyzed"
+    assert event["run_id"] == "run-knowledge"
