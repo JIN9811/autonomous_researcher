@@ -29,6 +29,8 @@ def test_workspace_has_scoped_markdown_search_and_preserved_evidence_tabs():
     assert response.status_code == 200
     page = WorkspaceControls(response.text)
     assert page.tabs == ["markdown", "memory", "ontology", "manuals"]
+    assert "Source Library" in response.text and "Manual RAG Knowledge" not in response.text
+    assert "knowledge-source-enable" in page.controls
     for field in ("query", "run", "cycle", "agent", "type", "fidelity", "status", "tags", "applicability"):
         assert f"knowledge-markdown-{field}" in page.controls
     for control in ("knowledge-markdown-results", "knowledge-markdown-detail", "knowledge-record-count",

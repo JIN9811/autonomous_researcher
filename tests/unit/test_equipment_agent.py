@@ -2207,7 +2207,7 @@ async def test_legacy_utm_compatibility_path_remains_explicitly_callable() -> No
 
 
 @pytest.mark.asyncio
-async def test_equipment_agent_legacy_utm_includes_cited_manual_context_without_changing_tool_payload(monkeypatch) -> None:
+async def test_legacy_manual_audit_is_preserved_without_prompt_attachment_or_payload_change(monkeypatch) -> None:
     tools = ToolRegistry()
     register_mock_tools(tools)
     ctx = _CtxStub(tools, "manual-grounded protocol note")
@@ -2229,7 +2229,8 @@ async def test_equipment_agent_legacy_utm_includes_cited_manual_context_without_
 
     result = await LabEquipmentAgent()._legacy_utm(_state(), ctx)
 
-    assert "manual:procedure:p6" in ctx.prompts[0][1]
+    assert "manual:procedure:p6" not in ctx.prompts[0][1]
+    assert "시험 순서를 확인한다" not in ctx.prompts[0][1]
     assert result.data["manual_context"]["context_hash"] == "ctx-procedure"
     assert result.data["tool_plan"][0]["payload"]["program_id"] == "utm_compression_start_v1"
 

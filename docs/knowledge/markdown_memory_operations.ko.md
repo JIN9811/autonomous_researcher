@@ -41,9 +41,10 @@ Knowledge의 LLM은 근거를 읽고, 재사용 가치와 분류를 판단하고
 | `runs/<run>/runtime/loops/` | 기존 루프·에이전트·시도별 원본 아카이브 |
 | `memory/knowledge/markdown_jobs/` | 명시적으로 시작한 과거 아카이브 후처리 상태 |
 
-`/knowledge`의 Markdown 탭에서 검색 범위를 정하고 후보를 고른 뒤 상세 출처를
-확인한다. 숫자 값은 원본 Analysis 기록을 확인한다. MD의 해석 문장은 새 측정값이
-아니다. Memory, Ontology, Manual RAG는 같은 Workspace에 유지한다.
+Use the Markdown tab at `/knowledge` to select scope, search candidates, and read
+their provenance. Numerical values remain in the original Analysis records;
+Markdown interpretation is not a new measurement. Memory and Ontology remain in
+the workspace; [Source Library](manual_rag_knowledge.ko.md) replaces Manual RAG.
 
 ## 검색 범위
 

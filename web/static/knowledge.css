@@ -468,6 +468,11 @@ body.knowledge-page {
 .knowledge-intake-job-bar { display: flex; align-items: end; gap: 10px; }
 .knowledge-intake-job-bar label { flex: 1; }
 .knowledge-intake pre { max-height: 280px; overflow: auto; }
+.knowledge-source-path, #knowledge-source-active, #knowledge-source-detail { overflow-wrap: anywhere; min-width: 0; }
+.knowledge-source-enable { display: flex; align-items: center; gap: 8px; padding: 12px 0; }
+.knowledge-source-progress-row { display: flex; gap: 12px; justify-content: space-between; padding: 8px; overflow-wrap: anywhere; }
+.knowledge-source-progress-row span { min-width: 0; }
+#knowledge-source-detail pre { max-height: 480px; overflow: auto; }
 #knowledge-runtime-message[data-tone="error"] { color: var(--knw-red); }
 @media (max-width: 1100px) {
   .knowledge-markdown-query-bar { grid-template-columns: repeat(3, minmax(0, 1fr)); }

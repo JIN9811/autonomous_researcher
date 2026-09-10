@@ -104,7 +104,12 @@ A Profile declares:
 - required locators/evidence
 - optional `vision_link`
 - completion interpreter
-- manual knowledge scope
+- legacy manual knowledge scope (retained metadata, not an active retrieval filter)
+
+The existing workflow decision receives optional, bounded reference evidence from
+[Source Library](knowledge_agent.md#source-intake-and-curation). Its independent
+`knowledge_settings.source_scope` preserves applicability and citations without
+altering configured workflow proposals. Legacy automatic manual attachments are retired.
 
 Linux `memory/equipment_skills/` is the Skill source of truth. Windows holds
 validated deployment caches or local drafts.

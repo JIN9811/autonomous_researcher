@@ -289,68 +289,115 @@ async function refreshActivity() {
 }
 
 async function refreshManualStatus() {
-  const status = await fetchJson("/api/knowledge/manuals/status");
-  document.getElementById("knowledge-manual-sources").textContent = String(Number(status.source_count || 0));
-  document.getElementById("knowledge-manual-chunks").textContent = String(Number(status.chunk_count || 0));
-  document.getElementById("knowledge-manual-scope").textContent = String(status.equipment_type || "utm").toUpperCase();
+  const status = await fetchJson("/api/knowledge/sources/status");
+  const sources = status.library?.sources || [];
+  document.getElementById("knowledge-manual-sources").textContent = String(sources.length);
+  document.getElementById("knowledge-manual-chunks").textContent = String(sources.filter(source => source.current && source.status === "ready").length);
+  document.getElementById("knowledge-manual-scope").textContent = status.state.replaceAll("_", " ");
+  document.getElementById("knowledge-source-enable").checked = Boolean(status.enabled);
+  document.getElementById("knowledge-source-inbox").textContent = `Inbox: ${status.inbox}`;
+  document.getElementById("knowledge-source-active").textContent = status.active_source_id || status.error || "No active source";
+  const progress = document.getElementById("knowledge-source-progress");
+  progress.replaceChildren(...sources.map(source => {
+    const row = element("div", "", "knowledge-source-progress-row");
+    row.append(element("span", `${source.paths?.join(", ") || source.source_id} · ${source.status}${source.error ? ` · ${source.error}` : ""}`));
+    if (source.current && ["failed", "needs_review"].includes(source.status)) {
+      const retry = element("button", "Retry", "knowledge-button");
+      retry.type = "button";
+      retry.addEventListener("click", async () => {
+        retry.disabled = true;
+        try { await postJson("/api/knowledge/sources/retry", {source_id: source.source_id}); await refreshManualStatus(); }
+        catch (error) { setRuntimeMessage(error.message, "error"); retry.disabled = false; }
+      });
+      row.append(retry);
+    }
+    return row;
+  }));
+  if (!sources.length) progress.append(element("p", "No sources discovered. Scan the configured inbox to begin."));
   return status;
 }
 
 async function ingestManuals() {
   const button = document.getElementById("knowledge-manual-ingest");
   button.disabled = true;
-  setRuntimeMessage("Ingesting registered UTM manuals…", "busy");
+  setRuntimeMessage("Scanning the source inbox…", "busy");
   try {
-    const payload = await fetchJson("/api/knowledge/manuals/ingest", {method: "POST"});
+    await fetchJson("/api/knowledge/sources/scan", {method: "POST"});
     await refreshManualStatus();
-    setRuntimeMessage(`Manual ingestion complete: ${Number(payload.chunk_count || 0)} chunks.`, payload.ok ? "ready" : "error");
+    setRuntimeMessage("Source scan complete. Stable changes are curated when automatic intake is enabled.", "ready");
   } catch (error) {
-    setRuntimeMessage(`Manual ingestion failed: ${error.message}`, "error");
+    setRuntimeMessage(`Source scan failed: ${error.message}`, "error");
   } finally {
     button.disabled = false;
   }
 }
 
-function renderManualEvidence(payload) {
-  const chunks = Array.isArray(payload.chunks) ? payload.chunks : [];
+let sourceGeneration = 0;
+let sourceDetailGeneration = 0;
+function renderManualEvidence(payload, generation) {
+  const chunks = Array.isArray(payload.hits) ? payload.hits : [];
   const root = document.getElementById("knowledge-manual-results");
   root.replaceChildren(...chunks.map((chunk) => {
-    const citation = chunk.citation || {};
     const card = element("article", "", "knowledge-manual-result");
     const header = element("header", "");
-    const page = citation.page ?? chunk.page;
-    header.append(element("span", citation.title || citation.source_id || "Manual"),
-      element("span", page === undefined || page === null ? "Page not provided" : `p.${page}`));
-    const sections = Array.isArray(citation.section_path) ? citation.section_path.join(" > ") : "";
-    card.append(header, element("p", String(chunk.text || "")),
-      element("footer", `${citation.source_id || "manual"} · ${chunk.chunk_id || "chunk"}${sections ? ` · ${sections}` : ""} · score ${Number(chunk.score || 0).toFixed(3)}`));
+    const open = element("button", chunk.title, "knowledge-button");
+    open.type = "button";
+    open.addEventListener("click", async () => {
+      const detailGeneration = ++sourceDetailGeneration;
+      const detail = document.getElementById("knowledge-source-detail");
+      try {
+        const found = await postJson("/api/knowledge/sources/read", {record_id: chunk.record_id, scope: payload.scope});
+        if (generation !== sourceGeneration || detailGeneration !== sourceDetailGeneration) return;
+        const record = found.record || found;
+        detail.replaceChildren(element("h2", record.title), element("pre", record.body, "knowledge-markdown-body"),
+          element("h3", "Source provenance"), element("pre", JSON.stringify(record.citations || record.source_refs, null, 2), "knowledge-markdown-body"));
+        const original = record.source_markdown || record.source?.markdown;
+        if (original) {
+          const disclosure = element("details", "");
+          disclosure.append(element("summary", "Original extracted Markdown"), element("pre", original, "knowledge-markdown-body"));
+          detail.append(disclosure);
+        }
+      } catch (error) { if (generation === sourceGeneration && detailGeneration === sourceDetailGeneration) detail.replaceChildren(element("p", error.message)); }
+    });
+    header.append(open, element("span", chunk.category));
+    card.append(header, element("p", String(chunk.excerpt || "")), element("footer", chunk.source_id));
     return card;
   }));
-  if (!chunks.length) root.append(element("p", payload.insufficient_evidence
-    ? "No sufficient manual evidence was retrieved." : "No manual evidence was returned."));
+  if (!chunks.length) root.append(element("p", "No published source knowledge matches these filters."));
 }
 
 async function queryManuals() {
   const query = document.getElementById("knowledge-manual-query").value.trim();
-  if (!query) { setRuntimeMessage("Enter one UTM manual question.", "error"); return; }
+  const generation = ++sourceGeneration;
   const button = document.getElementById("knowledge-manual-run-query");
   button.disabled = true;
-  document.getElementById("knowledge-manual-results").replaceChildren(element("p", "Retrieving bounded manual evidence…"));
-  setRuntimeMessage("Retrieving bounded UTM manual evidence…", "busy");
+  document.getElementById("knowledge-source-detail").replaceChildren(element("p", "Select a source note to inspect its evidence."));
+  document.getElementById("knowledge-manual-results").replaceChildren(element("p", "Retrieving source evidence…"));
   try {
-    const payload = await postJson("/api/knowledge/manuals/query", {
-      equipment_type: "utm", purpose: document.getElementById("knowledge-manual-purpose").value, query,
+    const scope = {};
+    const category = document.getElementById("knowledge-source-category").value.trim();
+    const tags = document.getElementById("knowledge-source-tags").value.trim();
+    const applicability = document.getElementById("knowledge-source-applicability").value.trim();
+    if (category) scope.category = category;
+    if (tags) scope.tags = tags.split(",").map(tag => tag.trim()).filter(Boolean);
+    if (applicability) {
+      scope.applicability = JSON.parse(applicability);
+      if (!scope.applicability || typeof scope.applicability !== "object" || Array.isArray(scope.applicability)) throw new Error("Applicability must be a JSON object.");
+    }
+    const payload = await postJson("/api/knowledge/sources/query", {query, scope,
       top_k: boundedInteger(document.getElementById("knowledge-manual-top-k").value, 1, 12, 6),
     });
-    renderManualEvidence(payload);
-    document.getElementById("knowledge-manual-query-summary").textContent = `${payload.chunks?.length || 0} citations · coverage ${Number(payload.coverage || 0).toFixed(3)}`;
-    setRuntimeMessage(payload.insufficient_evidence ? "Manual evidence is insufficient; operator review is required." : "Manual evidence retrieved with original page citations.", payload.insufficient_evidence ? "error" : "ready");
+    if (generation !== sourceGeneration) return;
+    renderManualEvidence(payload, generation);
+    document.getElementById("knowledge-manual-query-summary").textContent = `${payload.hits?.length || 0} source notes`;
+    setRuntimeMessage("Source retrieval complete.", "ready");
   } catch (error) {
-    document.getElementById("knowledge-manual-results").replaceChildren(element("p", "Manual retrieval failed. Please try again."));
+    if (generation !== sourceGeneration) return;
+    document.getElementById("knowledge-manual-results").replaceChildren(element("p", "Source retrieval failed. Check the filters and try again."));
     document.getElementById("knowledge-manual-query-summary").textContent = "Retrieval failed";
-    setRuntimeMessage(`Manual retrieval failed: ${error.message}`, "error");
+    setRuntimeMessage(`Source retrieval failed: ${error.message}`, "error");
   } finally {
-    button.disabled = false;
+    if (generation === sourceGeneration) button.disabled = false;
   }
 }
 
@@ -435,6 +482,29 @@ document.getElementById("knowledge-markdown-form").addEventListener("submit", (e
 document.getElementById("knowledge-markdown-form").addEventListener("input", invalidateMarkdownResults);
 document.getElementById("knowledge-manual-form").addEventListener("submit", (event) => { event.preventDefault(); queryManuals(); });
 document.getElementById("knowledge-manual-ingest").addEventListener("click", ingestManuals);
+document.getElementById("knowledge-source-enable").addEventListener("change", async event => {
+  const control = event.target;
+  control.disabled = true;
+  try { await postJson("/api/knowledge/sources/settings", {enabled: control.checked}); await refreshManualStatus(); }
+  catch (error) { control.checked = !control.checked; setRuntimeMessage(error.message, "error"); }
+  finally { control.disabled = false; }
+});
+document.getElementById("knowledge-manual-form").addEventListener("input", () => {
+  sourceGeneration += 1;
+  sourceDetailGeneration += 1;
+  document.getElementById("knowledge-manual-run-query").disabled = false;
+  document.getElementById("knowledge-source-detail").replaceChildren(element("p", "Apply changed filters to retrieve current evidence."));
+  document.getElementById("knowledge-manual-results").replaceChildren(element("p", "Apply changed filters."));
+});
+let sourceTimer = null;
+async function pollSources() {
+  try {
+    if (!document.hidden && document.querySelector('[data-knowledge-panel="manuals"].active')) await refreshManualStatus();
+  } catch (error) { setRuntimeMessage(`Source status unavailable: ${error.message}`, "error"); }
+  sourceTimer = window.setTimeout(pollSources, 5000);
+}
+sourceTimer = window.setTimeout(pollSources, 5000);
+window.addEventListener("pagehide", () => window.clearTimeout(sourceTimer));
 document.getElementById("knowledge-intake-form").addEventListener("submit", (event) => { event.preventDefault(); startIntake(); });
 document.getElementById("knowledge-intake-refresh").addEventListener("click", checkIntakeJob);
 window.addEventListener("resize", () => activityChart?.resize());

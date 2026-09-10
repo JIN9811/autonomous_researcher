@@ -236,6 +236,7 @@ def _focus_action(state, result):
 async def run_decided_workflow(agent, state, ctx, flow):
     snapshot, frozen_flow = _scope(state), deepcopy(flow)
     description = _describe(agent, state, flow)
+    from mcp_tools.source_tools import source_context
     scope_digest = _digest([snapshot, description])
     service = EquipmentRuntimeService(agent._RUNTIME_ROOT / "workflow_decisions")
     specimen = state.current_experiment_spec.get("specimen_id") or (state.run_metadata.get("specimen_result") or {}).get("specimen_id") or "specimen-unresolved"
@@ -256,6 +257,9 @@ async def run_decided_workflow(agent, state, ctx, flow):
             return output
         return _blocked("EQUIPMENT_WORKFLOW_ALREADY_CLAIMED")
 
+    source_settings = state.run_metadata.get("knowledge_settings", {})
+    source_scope = source_settings.get("source_scope", {}) if isinstance(source_settings, dict) else {}
+    reference_context = await asyncio.to_thread(source_context, ctx, state.active_goal, scope=source_scope)
     checkpoint, decisions, diagnostics = {}, [], []
     result = None
     attempts = 0
@@ -269,6 +273,7 @@ async def run_decided_workflow(agent, state, ctx, flow):
         if diagnostics:
             refs.append("diagnostics:latest")
         context = {"task": state.active_goal, **_bounded_evidence(description),
+            "source_knowledge": reference_context,
             "success": bool(result and result.success), "evidence_refs": refs,
             "execution": _terminal_evidence(result) if result else {}, "diagnostics": _bounded_evidence(diagnostics),
             "completed_blocks": [x["block_id"] for x in checkpoint.get("transitions", []) if x.get("phase") == "skill"],

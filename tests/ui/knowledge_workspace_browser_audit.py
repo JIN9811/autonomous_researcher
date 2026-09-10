@@ -66,17 +66,28 @@ def fixture_server(root: Path):
         return {"ok": True, "cycles": [{"cycle_id": "loop-000001", "collected": 3, "updated": 1,
                                         "retrieved": 2, "used": 1}]}
 
-    @app.get("/api/knowledge/manuals/status")
-    @app.post("/api/knowledge/manuals/ingest")
-    def manual_status():
-        return {"ok": True, "status": "ready", "source_count": 1, "chunk_count": 2, "equipment_type": "utm"}
-
-    @app.post("/api/knowledge/manuals/query")
-    def manual_query():
-        return {"ok": True, "schema": "manual_context.v1", "coverage": 0.8, "insufficient_evidence": False,
-                "chunks": [{"chunk_id": "manual-utm-p42", "page": 42, "text": "Check the communication cable before retrying.",
-                            "score": 0.8, "citation": {"source_id": "utm-manual", "title": "UTM Operator Manual",
-                                                       "page": 42, "section_path": ["Recovery", "Communication"]}}]}
+    from knowledge.source_library import SourceLibrary
+    from knowledge.source_runtime import SourceIngestionService
+    from knowledge.source_api import install_source_routes
+    inbox = root / "inputs"
+    inbox.mkdir(parents=True)
+    (inbox / "reference.md").write_text("# Reference\nThe reference duration is 42 seconds. Source detail retained.")
+    library = SourceLibrary(root / "source_library", inbox)
+    library.scan()
+    source_id = library.scan()["pending_ids"][0]
+    extracted = library.extract(source_id)
+    library.publish(source_id, [{"title": "Reference duration", "body": "The reference duration is 42 seconds; not a command.",
+        "category": "reference", "ontology_type": "KnowledgeClaim", "tags": ["duration"],
+        "applicability": {}, "source_block_ids": [b["block_id"] for b in extracted["blocks"]]}],
+        model={"model": "browser-fixture"}, trace=[])
+    (inbox / "pending.md").write_text("Pending source for browser verification.")
+    (inbox / "failed.md").write_text("Failed source for browser verification.")
+    library.scan()
+    for item in library.scan()["sources"]:
+        if "failed.md" in item["paths"]:
+            library.mark(item["source_id"], "failed", error="Fixture extraction failure")
+    source_service = SourceIngestionService(library, lambda: None)
+    install_source_routes(app, service_factory=lambda: source_service)
 
     install_markdown_routes(app, store_factory=lambda: store, run_root_factory=lambda: root / "runs",
                             memory_root_factory=lambda: root / "memory" / "knowledge")
@@ -123,7 +134,7 @@ def audit(base_url: str, screenshot_path: Path) -> dict[str, object]:
                 expect(page.locator("#knowledge-backend-status")).to_have_text("Markdown")
                 expect(page.locator("#knowledge-record-count")).to_have_text("3")
                 expect(page.locator("#knowledge-markdown-results button")).to_have_count(2)
-                assert page.locator("[data-knowledge-tab]").all_text_contents() == ["Markdown Knowledge", "Memory", "Ontology", "Manual RAG Knowledge"]
+                assert page.locator("[data-knowledge-tab]").all_text_contents() == ["Markdown Knowledge", "Memory", "Ontology", "Source Library"]
                 assert not page.locator("vite-error-overlay, nextjs-portal, #webpack-dev-server-client-overlay").count()
                 assert "neo4j" not in page.locator(".knowledge-status-strip").inner_text().lower()
                 for control, value in (("run", "run-a"), ("cycle", "loop-000001"), ("agent", "analysis"),
@@ -187,15 +198,30 @@ def audit(base_url: str, screenshot_path: Path) -> dict[str, object]:
                         expect(page.locator("#knowledge-memory-grid")).to_contain_text("Preserved typed memory evidence")
                     if tab == "ontology":
                         expect(page.locator("#knowledge-ontology-classes")).to_contain_text("Observation")
-                page.locator("#knowledge-manual-purpose").select_option("recovery")
                 page.locator("#knowledge-manual-ingest").click()
-                expect(page.locator("#knowledge-runtime-message")).to_contain_text("Manual ingestion complete")
-                page.locator("#knowledge-manual-query").fill("Communication recovery")
+                expect(page.locator("#knowledge-runtime-message")).to_contain_text("Source scan complete")
+                page.locator("#knowledge-source-enable").check()
+                expect(page.locator("#knowledge-source-enable")).to_be_checked()
+                page.locator("#knowledge-source-enable").uncheck()
+                page.locator("#knowledge-manual-query").fill("duration")
                 page.locator("#knowledge-manual-run-query").click()
-                expect(page.locator("#knowledge-manual-results")).to_contain_text("p.42")
-                expect(page.locator("#knowledge-manual-results")).to_contain_text("UTM Operator Manual")
-                expect(page.locator("#knowledge-manual-results")).to_contain_text("Recovery > Communication")
-                shot = screenshot_path / f"knowledge-manual-{width}.png"
+                expect(page.locator("#knowledge-manual-results")).to_contain_text("Reference duration")
+                page.locator("#knowledge-manual-results button").click()
+                expect(page.locator("#knowledge-source-detail")).to_contain_text("42 seconds")
+                expect(page.locator("#knowledge-source-detail")).to_contain_text("source-")
+                page.locator("#knowledge-source-detail summary").click()
+                expect(page.locator("#knowledge-source-detail")).to_contain_text("Source detail retained")
+                page.locator("#knowledge-source-progress").locator("..").locator("summary").click()
+                expect(page.locator("#knowledge-source-progress")).to_contain_text("pending.md · discovered")
+                if width == 1440:
+                    expect(page.locator("#knowledge-source-progress")).to_contain_text("Fixture extraction failure")
+                    page.locator("#knowledge-source-progress button").click()
+                expect(page.locator("#knowledge-source-progress")).to_contain_text("failed.md · discovered")
+                page.locator("#knowledge-manual-query").fill("unmatched-term-xyz")
+                page.locator("#knowledge-manual-run-query").click()
+                expect(page.locator("#knowledge-manual-results")).to_contain_text("No published source knowledge")
+                source_request_races(page)
+                shot = screenshot_path / f"knowledge-source-{width}.png"
                 page.screenshot(path=str(shot), full_page=width == 390)
                 screenshots.append(str(shot))
                 page.locator('[data-knowledge-tab="markdown"]').click()
@@ -209,6 +235,36 @@ def audit(base_url: str, screenshot_path: Path) -> dict[str, object]:
                     "browser": "Browser plugin not available; installed Python Playwright Chromium"}
         finally:
             browser.close()
+
+
+def source_request_races(page):
+    """Resolve controlled browser fetches out of order, without timing sleeps."""
+    page.evaluate("""() => {
+      window.auditFetch = window.fetch;
+      window.auditPending = [];
+      window.fetch = (url, options) => String(url).includes('/sources/query') || String(url).includes('/sources/read')
+        ? new Promise(resolve => window.auditPending.push(resolve)) : window.auditFetch(url, options);
+      document.getElementById('knowledge-manual-query').value = 'old';
+      void queryManuals();
+      document.getElementById('knowledge-manual-query').value = 'new';
+      void queryManuals();
+    }""")
+    page.evaluate("""() => window.auditPending[1](new Response(JSON.stringify({scope:{}, hits:[
+      {record_id:'one',title:'First note',category:'reference'},
+      {record_id:'two',title:'Second note',category:'reference'}
+    ]}), {status:200}))""")
+    expect(page.locator("#knowledge-manual-results button")).to_have_count(2)
+    page.evaluate("() => window.auditPending[0](new Response(JSON.stringify({detail:'Old query failure'}), {status:422}))")
+    expect(page.locator("#knowledge-manual-results")).to_contain_text("Second note")
+    expect(page.locator("#knowledge-manual-run-query")).to_be_enabled()
+    page.locator("#knowledge-manual-results button").nth(0).click()
+    page.locator("#knowledge-manual-results button").nth(1).click()
+    page.evaluate("() => window.auditPending[3](new Response(JSON.stringify({record:{title:'Second detail',body:'newest'}}), {status:200}))")
+    expect(page.locator("#knowledge-source-detail")).to_contain_text("Second detail")
+    page.evaluate("() => window.auditPending[2](new Response(JSON.stringify({record:{title:'First detail',body:'obsolete'}}), {status:200}))")
+    expect(page.locator("#knowledge-source-detail")).to_contain_text("Second detail")
+    expect(page.locator("#knowledge-source-detail")).not_to_contain_text("First detail")
+    page.evaluate("() => { window.fetch = window.auditFetch; }")
 
 
 def main():

@@ -298,6 +298,9 @@ def load_runtime() -> MainController:
     runtime_profile = dict(runtime_profiles[backend_name])
 
     tools = ToolRegistry()
+    from knowledge.source_runtime import library_for
+    from mcp_tools.source_tools import register_source_tools
+    register_source_tools(tools, lambda: library_for(resolve_path(".")))
     register_mock_tools(tools)
     register_utm_tools(tools, repo_root=resolve_path("."))
     utm_runtime_manager = get_utm_runtime_manager(cfg.get("devices", {}), repo_root=resolve_path("."))

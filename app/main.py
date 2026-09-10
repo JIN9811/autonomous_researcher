@@ -85,7 +85,7 @@ from knowledge.graphify_bridge import import_project_graph, scan_project_graph
 from knowledge.schemas import EvolutionOutcomeRecord
 from knowledge.service import KnowledgeService
 from knowledge.manuals.service import ManualKnowledgeService
-from knowledge.manuals.prompting import build_manual_grounded_prompt, manual_context_audit
+from knowledge.manuals.prompting import manual_context_audit
 from knowledge.reconciliation_service import GraphRevisionConflict, KnowledgeReconciliationService, KnowledgeReconciliationWorker
 from knowledge.stores import JsonlKnowledgeStore
 from device_bridges.bambu_bridge import (
@@ -748,6 +748,7 @@ async def keep_startup_side_effect_free() -> None:
     settings = _read_api_key_settings(import_env=True)
     await _apply_runtime_api_key_settings(settings, emit_event=False)
     controller._deps.agent_context.on_knowledge_ingest = None
+    await _source_ingestion_service().start()
     # Restore Analysis queue metadata only. Computation requires an explicit
     # active-runtime admission; GUI startup must not launch archived solvers.
     from agents.analysis_runtime import service_for
@@ -759,6 +760,8 @@ async def keep_startup_side_effect_free() -> None:
 @app.on_event("shutdown")
 async def shutdown_lerobot_subprocesses() -> None:
     """Release LeRobot live subprocesses so cameras/serial ports are not left busy."""
+    if _SOURCE_INGESTION_SERVICE is not None:
+        await _SOURCE_INGESTION_SERVICE.shutdown()
     improvement = controller._deps.agent_context.tools.resource("analysis_improvement")
     if improvement is not None:
         await improvement.shutdown()
@@ -4082,35 +4085,8 @@ def _manual_knowledge_context(
     version_hint: str = "",
     top_k: int = 6,
 ) -> dict[str, Any]:
-    service = _manual_knowledge_service()
-    try:
-        return service.query(
-            {
-                "equipment_type": "utm",
-                "query": query,
-                "purpose": purpose,
-                "product_hint": product_hint,
-                "version_hint": version_hint,
-                "top_k": top_k,
-            }
-        )
-    except Exception as exc:
-        return {
-            "schema": "manual_context.v1",
-            "equipment_type": "utm",
-            "purpose": purpose,
-            "query": query,
-            "chunks": [],
-            "insufficient_evidence": True,
-            "error": f"{exc.__class__.__name__}: {exc}",
-            "source_separation": {
-                "manual_only": True,
-                "web_used": False,
-                "runtime_memory_used": False,
-            },
-        }
-    finally:
-        service.close()
+    from mcp_tools.source_tools import retired_manual_context
+    return retired_manual_context(query, purpose=purpose)
 
 
 def _knowledge_reconciliation_worker() -> KnowledgeReconciliationWorker:
@@ -12268,7 +12244,7 @@ async def _annotate_equipment_skill_with_selected_model(
     payload, response = await _complete_equipment_json_with_retry(
         backend,
         model=model,
-        system_prompt=build_manual_grounded_prompt(
+        system_prompt=(
             "You reconstruct and annotate one already recorded bounded Windows equipment workflow from its full "
             "ordered action list and visual timeline. First infer the workflow intent, initial state, causal state "
             "transitions, completion state, and visible success/failure evidence across the sequence; do not treat "
@@ -12281,10 +12257,7 @@ async def _annotate_equipment_skill_with_selected_model(
             "search_roi_norm, target_bbox_norm, and context_bbox_norm as [x, y, width, height] values normalized "
             "to that image. The search ROI may be broad; target_bbox must contain only the actionable control; "
             "context_bbox must preserve nearby semantic context. Use action_context and state images to explain "
-            "what changed after each action. Do not add executable actions or credentials.",
-            manual_context,
-            max_chunks=3,
-            max_chars=1800,
+            "what changed after each action. Do not add executable actions or credentials."
         ),
         user_prompt=json.dumps(
             {
@@ -19502,3 +19475,20 @@ retire_graph_routes(app)
 install_markdown_routes(app, store_factory=lambda: _markdown_store(),
                         run_root_factory=lambda: resolve_path("runs"),
                         memory_root_factory=lambda: KNOWLEDGE_MEMORY_ROOT)
+
+from knowledge.source_api import install_source_routes, retire_manual_routes
+from knowledge.source_runtime import SourceIngestionService, library_for as _source_library_for
+
+_SOURCE_INGESTION_SERVICE = None
+
+
+def _source_ingestion_service():
+    global _SOURCE_INGESTION_SERVICE
+    if _SOURCE_INGESTION_SERVICE is None:
+        _SOURCE_INGESTION_SERVICE = SourceIngestionService(_source_library_for(resolve_path(".")),
+            lambda: controller._deps.agent_context)
+    return _SOURCE_INGESTION_SERVICE
+
+
+retire_manual_routes(app)
+install_source_routes(app, service_factory=_source_ingestion_service)

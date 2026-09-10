@@ -85,6 +85,56 @@ async def test_invalid_decision_is_not_success_and_does_not_write(tmp_path, bad)
 
 
 @pytest.mark.asyncio
+async def test_model_can_correct_argument_shape_before_any_tool_effect(tmp_path):
+    from agents.knowledge_decision import run_knowledge_decision
+    responses = [request("inspect_evidence", query="not an allowed argument"),
+                 request("inspect_evidence"), request("publish_context", summary="No new note needed.",
+                    source_ids=["current-analysis"], no_knowledge_reason="Reference already retained.")]
+    state, ctx, store, evidence = setup(tmp_path, responses)
+    result = await run_knowledge_decision(state, ctx, store=store, evidence=evidence, scope={"run_id": state.run_id})
+    assert result["status"] == "accepted"
+    assert result["trace"][0]["tool"] == "protocol_error"
+    assert store.status()["records"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("failure", [OSError, KeyError])
+async def test_optional_source_storage_failure_does_not_break_markdown_decision(tmp_path, monkeypatch, enabled, failure):
+    from agents.knowledge_decision import run_knowledge_decision
+    def unavailable(_ctx):
+        if not enabled:
+            raise AssertionError("Excluded source corpus must not be resolved")
+        raise failure("Optional source catalog unavailable")
+    monkeypatch.setattr("mcp_tools.source_tools.source_library_for_context", unavailable)
+    state, ctx, store, evidence = setup(tmp_path, [request("inspect_evidence"),
+        request("publish_context", summary="Current evidence retained.", source_ids=["current-analysis"],
+                no_knowledge_reason="No new reusable note needed.")])
+    result = await run_knowledge_decision(state, ctx, store=store, evidence=evidence, scope={},
+        settings={"corpora": ["markdown", "sources"] if enabled else ["markdown"]})
+    assert result["status"] == "accepted"
+    assert result["source_library_status"] == ("unavailable" if enabled else "excluded")
+
+
+def test_source_prompt_projection_avoids_replaying_full_citation_catalogs():
+    from agents.knowledge_decision import _model_observations
+    record = {"record_id": "record-one", "corpus": "sources", "title": "Consolidated source",
+              "body": "Complete curated content retained. Final qualification: 73 days.",
+              "applicability": {"variant": "Azure"}, "citations": [{"page": 1}] * 1000,
+              "source_refs": ["source:long-source#block-long-id"] * 1000}
+    trace = [{"tool": "search_knowledge", "arguments": {}, "observation": {
+        "corpus": "sources", "scope": {}, "hits": [{**record, "excerpt": "Complete curated content"}]}},
+        {"tool": "read_knowledge", "arguments": {}, "observation": {"record": record, "citation_id": "record-one"}}]
+    before = deepcopy(trace)
+    projected = _model_observations(trace)
+    assert len(json.dumps(projected)) < 3000
+    assert projected[1]["observation"]["record"]["body"] == record["body"]
+    assert projected[1]["observation"]["citation_id"] == "record-one"
+    assert projected[1]["observation"]["record"]["applicability"] == record["applicability"]
+    assert trace == before  # Raw audit and final handoff remain complete.
+
+
+@pytest.mark.asyncio
 async def test_search_then_detail_uses_scope_and_passes_observation_back_to_model(tmp_path):
     assert importlib.util.find_spec("agents.knowledge_decision") is not None
     from agents.knowledge_decision import run_knowledge_decision

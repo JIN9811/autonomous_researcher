@@ -37,8 +37,7 @@ from utils.agent_artifact_archive import archive_agent_run
 from orchestrator.state import Mode, OrchestratorState
 from utils.equipment_profiles import EquipmentExecutionContract, EquipmentProfile, EquipmentProfileRegistry, build_execution_contract
 from policies.guardian_gate import equipment_skill_recovery_gate, gate_blocks_execution
-from knowledge.manuals.prompting import build_manual_grounded_prompt, manual_context_audit
-from knowledge.manuals.service import ManualKnowledgeService
+from knowledge.manuals.prompting import manual_context_audit
 from utils.equipment_skill_runtime import (
     EquipmentSkillRegistry,
     SkillContractError,
@@ -82,30 +81,9 @@ class LabEquipmentAgent(BaseAgent):
 
     @staticmethod
     def _manual_context(query: str, *, purpose: str) -> dict[str, Any]:
-        """Retrieve UTM-only evidence without making manuals an execution dependency."""
-        service = ManualKnowledgeService(project_root=Path(__file__).resolve().parents[1])
-        try:
-            return service.query(
-                {
-                    "equipment_type": "utm",
-                    "query": query,
-                    "purpose": purpose,
-                    "top_k": 6,
-                }
-            )
-        except Exception as exc:
-            return {
-                "schema": "manual_context.v1",
-                "equipment_type": "utm",
-                "purpose": purpose,
-                "query": query,
-                "chunks": [],
-                "insufficient_evidence": True,
-                "error": f"{exc.__class__.__name__}: {exc}",
-                "source_separation": {"manual_only": True, "web_used": False, "runtime_memory_used": False},
-            }
-        finally:
-            service.close()
+        """Compatibility audit only; active decisions use scoped source knowledge."""
+        from mcp_tools.source_tools import retired_manual_context
+        return retired_manual_context(query, purpose=purpose)
 
     def _manual_context_for_state(self, state: OrchestratorState, *, purpose: str) -> dict[str, Any]:
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
@@ -269,7 +247,7 @@ class LabEquipmentAgent(BaseAgent):
             f"available_tools={json.dumps(tools, ensure_ascii=True)}\n"
             f"experiment_spec={json.dumps(spec, ensure_ascii=True, default=str)[:4000]}\n"
         )
-        return build_manual_grounded_prompt(base_prompt, self._manual_context_for_state(state, purpose="decision"))
+        return base_prompt
 
     @staticmethod
     def _extract_json_object(text: str) -> dict[str, Any] | None:
@@ -2517,10 +2495,7 @@ class LabEquipmentAgent(BaseAgent):
         try:
             protocol = await ctx.complete(
                 "tool_formatting",
-                build_manual_grounded_prompt(
-                    f"Format UTM run command profile={profile} with concise equipment-safe options.",
-                    manual_context,
-                ),
+                f"Format UTM run command profile={profile} with concise equipment-safe options.",
                 timeout_s=timeout_s,
             )
             protocol_note = protocol.text[:220]
@@ -3717,11 +3692,10 @@ class LabEquipmentAgent(BaseAgent):
         manual_audit = manual_context_audit(manual_context)
         response = await backend.complete(
             model=model,
-            system_prompt=build_manual_grounded_prompt(
+            system_prompt=(
                 "Return one JSON object only for a bounded Windows GUI recovery. "
                 "Choose exactly one operation from allowed_recovery_operations. "
-                "Do not add shell, Python, clicks, credentials, or physical-equipment actions.",
-                manual_context,
+                "Do not add shell, Python, clicks, credentials, or physical-equipment actions."
             ),
             user_prompt=json.dumps(exception, ensure_ascii=True, sort_keys=True),
             metadata={

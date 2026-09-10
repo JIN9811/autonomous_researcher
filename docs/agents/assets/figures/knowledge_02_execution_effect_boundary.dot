@@ -12,6 +12,8 @@ digraph knowledge_execution_effect_boundary {
   store [label="Append-only MD revisions\nstable identity / hash / locks", fillcolor="#E9F7EF", color="#2E7D59"];
   publish [label="publish_context\nsource IDs or explicit evidence gap"];
   handoff [label="Existing typed memory + BO/Evolution handoff"];
+  source [label="Separate source curation\npage files → page-level LLM reading\nbounded consolidation → publication"];
+  source_store [label="Complete source MD + one curated MD\ncontent hash / page / block citations", fillcolor="#E9F7EF", color="#2E7D59"];
   snapshot -> inspect -> llm;
   llm -> search [label="optional"];
   search -> read [label="selected ID"];
@@ -22,4 +24,7 @@ digraph knowledge_execution_effect_boundary {
   llm -> publish [label="enough evidence / abstain"];
   publish -> gate [style=dashed, label="validate references"];
   publish -> handoff [label="accepted"];
+  source -> gate [label="all blocks inspected / unchanged hash"];
+  gate -> source_store [label="atomic publication"];
+  source_store -> read [style=dashed, label="independent source scope"];
 }

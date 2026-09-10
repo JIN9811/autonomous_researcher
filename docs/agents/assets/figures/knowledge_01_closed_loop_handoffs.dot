@@ -9,10 +9,16 @@ digraph knowledge_closed_loop_handoffs {
   md [label="Markdown observations\nrun / cycle / agent / event", fillcolor="#E9F7EF", color="#2E7D59"];
   context [label="Scoped notes + citations\npatterns / performance"];
   evolution [label="Evolution evidence packs\noperator review required", fillcolor="#FFF1D6", color="#916100"];
+  inbox [label="Source inbox\nstable content changes"];
+  sources [label="Background source curation\nLLM tools / preserved source MD", fillcolor="#E9F7EF", color="#2E7D59"];
+  equipment [label="Equipment decision layer\nunchanged workflow proposals"];
   analysis -> knowledge [label="unchanged scientific values"];
   knowledge -> bo [label="knowledge_context.v1"];
   archive -> md [label="deterministic intake"];
   md -> knowledge [label="search / selected read"];
   knowledge -> context [label="persist"];
   context -> evolution [style=dashed, label="recommendations"];
+  inbox -> sources [label="separate opt-in worker"];
+  sources -> knowledge [label="scoped references"];
+  sources -> equipment [label="read-only context"];
 }

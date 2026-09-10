@@ -15,7 +15,7 @@
         <div>
           <p class="knowledge-eyebrow">ATR Knowledge Runtime</p>
           <h1>Knowledge Workspace</h1>
-          <p>Scoped Markdown knowledge, operational memory, ontology, and source-cited manual evidence.</p>
+          <p>Scoped Markdown knowledge, operational memory, ontology, and source-backed references.</p>
         </div>
         <div class="knowledge-hero-actions">
           <a class="knowledge-button secondary" href="/">Main GUI</a>
@@ -35,7 +35,7 @@
         <button class="active" type="button" data-knowledge-tab="markdown">Markdown Knowledge</button>
         <button type="button" data-knowledge-tab="memory">Memory</button>
         <button type="button" data-knowledge-tab="ontology">Ontology</button>
-        <button type="button" data-knowledge-tab="manuals">Manual RAG Knowledge</button>
+        <button type="button" data-knowledge-tab="manuals">Source Library</button>
       </nav>
 
       <section class="knowledge-tab-panel active" data-knowledge-panel="markdown">
@@ -101,28 +101,34 @@
       </section>
 
       <section class="knowledge-tab-panel" data-knowledge-panel="manuals">
-        <div class="knowledge-section-head"><div><span>Knowledge Agent Module</span><h2>Manual RAG Knowledge</h2></div><small>UTM scope · source-separated · page citations</small></div>
-        <section id="knowledge-manual-status" class="knowledge-manual-status" aria-label="Manual RAG status">
-          <article><span>Sources</span><strong id="knowledge-manual-sources">0</strong><small>registered manuals</small></article>
-          <article><span>Chunks</span><strong id="knowledge-manual-chunks">0</strong><small>page-aware sections</small></article>
-          <article><span>Scope</span><strong id="knowledge-manual-scope">UTM</strong><small>product/version are ranking hints</small></article>
-          <button id="knowledge-manual-ingest" class="knowledge-button primary" type="button">Ingest Manuals</button>
+        <div class="knowledge-section-head"><div><span>Knowledge Agent Module</span><h2>Source Library</h2></div><small>Preserved originals · curated Markdown · scoped retrieval</small></div>
+        <section id="knowledge-manual-status" class="knowledge-manual-status" aria-label="Source Library status">
+          <article><span>Sources</span><strong id="knowledge-manual-sources">0</strong><small>content-addressed records</small></article>
+          <article><span>Ready</span><strong id="knowledge-manual-chunks">0</strong><small>published sources</small></article>
+          <article><span>Worker</span><strong id="knowledge-manual-scope">Disabled</strong><small id="knowledge-source-active">No active source</small></article>
+          <button id="knowledge-manual-ingest" class="knowledge-button primary" type="button">Scan Sources</button>
         </section>
+        <label class="knowledge-source-enable"><input id="knowledge-source-enable" type="checkbox" /> Automatically curate stable source changes</label>
+        <p id="knowledge-source-inbox" class="knowledge-source-path"></p>
+        <details class="knowledge-card"><summary>Source progress</summary><div id="knowledge-source-progress" aria-live="polite"></div></details>
         <form id="knowledge-manual-form" class="knowledge-query-bar knowledge-manual-query-bar">
-          <label>Purpose<select id="knowledge-manual-purpose"><option value="procedure">Procedure</option><option value="decision">Decision</option><option value="skill_authoring">Skill authoring</option><option value="safety">Safety</option><option value="recovery">Recovery</option></select></label>
-          <label>UTM manual question<input id="knowledge-manual-query" type="text" maxlength="2000" placeholder="Example: communication failure recovery steps" required /></label>
+          <label>Category<input id="knowledge-source-category" type="text" maxlength="100" placeholder="All categories" /></label>
+          <label>Reference query<input id="knowledge-manual-query" type="text" maxlength="2000" placeholder="Search published knowledge" /></label>
           <label>Evidence<input id="knowledge-manual-top-k" type="number" min="1" max="12" value="6" /></label>
           <button id="knowledge-manual-run-query" class="knowledge-button primary" type="submit">Retrieve Evidence</button>
+          <label>Tags<input id="knowledge-source-tags" type="text" placeholder="Comma-separated tags" /></label>
+          <label>Applicability<input id="knowledge-source-applicability" type="text" placeholder="Exact JSON conditions (optional)" /></label>
         </form>
         <article class="knowledge-card">
-          <div class="knowledge-card-head"><div><span>Grounded Context</span><h2>Manual Evidence</h2></div><small id="knowledge-manual-query-summary" aria-live="polite">No query yet</small></div>
-          <div id="knowledge-manual-results" class="knowledge-manual-results" aria-live="polite"><p>Query the UTM manuals to inspect bounded evidence with original page citations.</p></div>
+          <div class="knowledge-card-head"><div><span>Grounded Context</span><h2>Source Evidence</h2></div><small id="knowledge-manual-query-summary" aria-live="polite">No query yet</small></div>
+          <div id="knowledge-manual-results" class="knowledge-manual-results" aria-live="polite"><p>Search published sources to inspect curated knowledge and provenance.</p></div>
         </article>
+        <article id="knowledge-source-detail" class="knowledge-card" aria-live="polite">Select a source note to read its full Markdown and original evidence.</article>
       </section>
 
       <footer class="knowledge-footer"><span id="knowledge-runtime-message" role="status">Initializing Knowledge Workspace.</span><time id="knowledge-updated-at">-</time></footer>
     </main>
     <script src="/static/vendor/echarts.min.js?v=5.6.0"></script>
-    <script src="/static/knowledge.js?v=20260910-markdown-1" defer></script>
+    <script src="/static/knowledge.js?v=20260911-sources-1" defer></script>
   </body>
 </html>

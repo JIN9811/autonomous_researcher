@@ -34,7 +34,7 @@ DEFAULT_MAX_TOKENS_BY_TASK = {
     "design_reasoning": 256,
     "specimen_reasoning": 256,
     "analysis_reasoning": 192,
-    "knowledge_query": 256,
+    "knowledge_query": 4096,
     "guardian_reasoning": 256,
     "tool_formatting": 96,
     "equipment_workflow_decision": 768,

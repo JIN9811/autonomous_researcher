@@ -128,7 +128,7 @@ state ownership, failure propagation, and the manual Device Workspace boundary.
 | Manipulation | manipulation-agent config/test/run | `/api/lerobot/*` robotics services | LeRobot workspace configuration/training/simulation/mirror | `/openapi.json`, LeRobot bridge |
 | Lab Equipment | no isolated agent endpoint | `/api/equipment/*`, `/api/bridges*` | equipment skill/profile/worker/UTM workspaces | `/openapi.json`, equipment bridge/tool registry |
 | Analysis | no graph-stage direct endpoint | `/api/cae/config`, `/api/cae/run` | CAE workspace and run artifact APIs | `/openapi.json`, CAE bridge |
-| Knowledge | context/report records via Knowledge service | `/api/knowledge/*` Markdown, ontology, typed memory, manuals | Workspace scoped search/detail/status; lifecycle changes through API | `/openapi.json`, Knowledge service/repositories |
+| Knowledge | context/report records via Knowledge service | `/api/knowledge/*` Markdown, ontology, typed memory, source library | Workspace scoped search/detail/status; lifecycle changes through API | `/openapi.json`, Knowledge service/repositories |
 | BO | `/api/bo/run` direct bounded workspace execution | `/api/bo/config`, `/api/bo/benchmark` | BO workspace and graph-run context | `/openapi.json`, BO agent/benchmark services |
 | Guardian | `/api/guardian/status`, run-scoped status | device health and queue status tools | incidents and approval review/resolve APIs | `/openapi.json`, Guardian status/policy services |
 

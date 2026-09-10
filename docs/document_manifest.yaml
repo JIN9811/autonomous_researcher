@@ -68,6 +68,8 @@ documents:
   - docs/knowledge/markdown_memory_operations.ko.md
   - docs/superpowers/specs/2026-09-10-knowledge-markdown-memory-design.md
   - docs/superpowers/plans/2026-09-10-knowledge-markdown-memory.md
+  - docs/superpowers/specs/2026-09-11-source-curation-design.md
+  - docs/superpowers/plans/2026-09-11-source-curation.md
   - docs/knowledge/manual_rag_knowledge.ko.md
 legacy_scope:
   status: migration_debt
