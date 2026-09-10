@@ -156,20 +156,21 @@ figure groups contract steps and grants no automatic variant activation.
 
 ### Manual RAG Knowledge submodule
 
-`Knowledge Agent > Manual RAG Knowledge`는 일반 실험 memory와 분리된 UTM
-매뉴얼 source registry, page/section chunk corpus, evidence graph, cited semantic
-graph, bounded 2-hop query projection을 소유합니다. 고정 식별자는
-`equipment_type=utm`이며 장비
-모델명과 소프트웨어 버전은 provenance 및 soft-ranking metadata입니다. 검색
-context는 Lab Equipment Agent의 UTM profile LLM에 제공되지만 실행 action,
-program ID, 좌표, payload 또는 안전 gate를 변경하지 않습니다. 운영 계약과
-검증 절차는 [UTM Manual RAG Knowledge Guide](../knowledge/manual_rag_knowledge.ko.md)를
-따릅니다.
+`Knowledge Agent > Manual RAG Knowledge` owns the UTM manual source registry,
+page/section chunk corpus, evidence graph, cited semantic graph, and bounded
+2-hop query projection, separately from general experiment memory. Its fixed
+identifier is `equipment_type=utm`; equipment model names and software versions
+are provenance and soft-ranking metadata. Retrieved context is supplied to the
+Lab Equipment Agent's UTM profile LLM without changing execution actions,
+program IDs, coordinates, payloads, or safety gates. Operational contracts and
+verification procedures follow the
+[UTM Manual RAG Knowledge Guide](../knowledge/manual_rag_knowledge.ko.md).
 
-Semantic graph의 node/edge는 모두 chunk ID와 page citation을 가져야 하며,
-`SUPPORTED_BY`가 원문 Evidence 계층을 연결합니다. Workspace/API 기본 view는
-semantic이고 Evidence chunk는 명시적으로 `view=evidence`를 요청할 때만 전체
-표시합니다. rebuild는 provenance 검증을 통과한 완성본만 atomic replace합니다.
+Every semantic graph node and edge must carry a chunk ID and page citation;
+`SUPPORTED_BY` links to the original Evidence layer. The default Workspace/API
+view is semantic. Full Evidence chunks are shown only when `view=evidence` is
+explicitly requested. Rebuilds atomically replace the stored graph only after
+the complete result passes provenance validation.
 
 | Class | Method | Path/family | Effect | Notes |
 |---|---|---|---|---|
