@@ -14,6 +14,8 @@ scope:
   - runtime_contracts
   - api_connections
 summary: Canonical entry point for ATR agent roles, contracts, APIs, connections, evidence, and safety boundaries.
+last_verified: 2026-09-11
+verified_against: 5a190e8
 related_docs:
   - docs/agents/agent_api_connection_matrix.md
   - docs/paper/02_system_architecture.md
@@ -29,8 +31,8 @@ supersedes: []
 ## Summary
 
 This index is the canonical entry point for the ten executable Autonomous
-Researcher Framework (ATR) agents. Each Reference explains what the agent
-actually owns, what it does not own, its closed-loop handoffs, data contracts,
+Researcher (ATR) Framework agents used by AX4LAB. Each Reference explains what the agent
+actually owns, what it does not own, its orchestration-plan handoffs, data contracts,
 internal steps, APIs, tools and external connections, state and evidence,
 runtime modes, safety gates, error recovery, operator surfaces, and current
 verification boundary.
@@ -40,12 +42,21 @@ The shared [Loop Artifact Archiving](../runtime/loop_artifact_archiving.md)
 Reference describes the newer run/loop/agent/invocation storage contract,
 including failed/cancelled calls, file snapshots, and saved-loop GUI access.
 
-## 한국어 안내
+## Status at a Glance
 
-에이전트별 상세 문서는 영문이 기준입니다. 아래 표에서 원하는 에이전트를
-선택하고 `Actual Role`, `API Surface`, `Tools and Connections`, `Safety,
-Approval, and Effect Boundary`, `Errors and Recovery` 순서로 읽으면 실제 역할,
-API, 외부 연결, 물리 효과와 복구 경계를 빠르게 확인할 수 있습니다.
+- Inventory: Ten executable agents on the existing registered graph/module path.
+- Decision layers: Role-specific LLM decisions; Orchestrator planning and Guardian advisory notes remain distinct from local tool-selection loops.
+- Execution authority: Agent procedures and registered tools/bridges; numerical values are tool-computed.
+- Parallel work: Optional Analysis FEM and Knowledge source intake run outside the measured-data handoff.
+- Figures: Ten Sunburst role overviews; existing detailed SVGs retained.
+- Verification: Source inspection at `5a190e8`; prior API/local and hardware evidence remains scoped to each Reference.
+
+## Reading the References
+
+Start with the role overview and available status summary, then read the
+responsibility map, handoffs, decision/tools, API connections, and evidence.
+The [API and Connection Matrix](agent_api_connection_matrix.md) distinguishes
+LLM choices, executable tools, connected services, and operator surfaces.
 
 ## Scope
 
@@ -66,16 +77,18 @@ Excluded:
 
 ## Visual Contract
 
-The restructured [Design Reference](design_agent.md) follows a role/workflow
-reading order, with a five-area responsibility map linking to its detailed
-sections. APIs, configuration, safety and artifacts remain directly accessible;
-the five areas are responsibility categories, not forced chapters or runtime
-stages. Other agents adopt this layout during their own restructuring.
+The [Design Reference](design_agent.md) establishes the role/workflow reading
+order used by the restructured References. High, Middle, Low, Guardian/Safety,
+and Knowledge/Evidence describe responsibility areas, not five sequential
+model calls. Orchestrator and Guardian retain their control-plane layouts;
+each owning Reference defines where its LLM decisions actually occur.
 
 Each Reference opens with a representative role overview. These generated
-overviews supplement the editable Flow, Execution, and applicable Connections
-figures below. [Generation prompts](../assets/presentation/image-prompts.jsonl)
-record the shared visual brief.
+overviews use GPT Image 2.5 Sunburst and supplement the unchanged editable
+Flow, Execution, and applicable Connections figures below.
+[Current generation prompts](../assets/presentation/sunburst-paper-figures.jsonl)
+and [figure provenance/style](../assets/presentation/README.md) record the shared
+paper-figure brief. Conceptual pictures do not replace execution evidence.
 
 Figures are `inspection`-backed explanatory projections. The executable code,
 primary graph, module manifests, imported FastAPI routes, and bridge/service
@@ -85,16 +98,16 @@ implementations remain authoritative.
 
 | Agent reference | Main responsibility | Implementation |
 |---|---|---|
-| [Orchestrator](orchestrator_agent.md) | Intent and stage handoffs | [Source](../../agents/orchestrator_agent.py) · [Module](../../graphs/modules/orchestrator/module.yaml) |
+| [Orchestrator](orchestrator_agent.md) | LLM planning context, registered mission and agent handoffs | [Source](../../agents/orchestrator_agent.py) · [Module](../../graphs/modules/orchestrator/module.yaml) |
 | [Design](design_agent.md) | Candidate suitability | [Source](../../agents/design_agent.py) · [Module](../../graphs/modules/design/module.yaml) |
 | [Specimen](specimen_agent.md) | Fabrication tools | [Source](../../agents/specimen_agent.py) · [Module](../../graphs/modules/specimen/module.yaml) |
 | [Vision](vision_agent.md) | Visual evidence | [Source](../../agents/vision_agent.py) · [Module](../../graphs/modules/vision/module.yaml) |
 | [Manipulation](manipulation_agent.md) | Robot skills and completion | [Source](../../agents/manipulation_agent.py) · [Module](../../graphs/modules/manipulation/module.yaml) |
-| [Equipment](equipment_agent.md) | Workflows and acquisition | [Source](../../agents/equipment_agent.py) · [Module](../../graphs/modules/equipment/module.yaml) |
-| [Analysis](analysis_agent.md) | Measurements and simulation | [Source](../../agents/analysis_agent.py) · [Module](../../graphs/modules/analysis/module.yaml) |
-| [Knowledge](knowledge_agent.md) | Curation and scoped retrieval | [Source](../../agents/knowledge_agent.py) · [Module](../../graphs/modules/knowledge/module.yaml) |
-| [Bayesian Optimization](bo_agent.md) | Numerical candidate proposals | [Source](../../agents/bo_agent.py) · [Module](../../graphs/modules/bo/module.yaml) |
-| [Guardian](guardian_agent.md) | Execution evidence review | [Source](../../agents/guardian_agent.py) · [Module](../../graphs/modules/guardian/module.yaml) |
+| [Equipment](equipment_agent.md) | Stacked Flow selection, terminal review and bounded recovery | [Source](../../agents/equipment_agent.py) · [Module](../../graphs/modules/equipment/module.yaml) |
+| [Analysis](analysis_agent.md) | Measured objectives and independent background FEM | [Source](../../agents/analysis_agent.py) · [Module](../../graphs/modules/analysis/module.yaml) |
+| [Knowledge](knowledge_agent.md) | Ontology-guided Markdown, page-wise source curation and scoped retrieval | [Source](../../agents/knowledge_agent.py) · [Module](../../graphs/modules/knowledge/module.yaml) |
+| [Bayesian Optimization](bo_agent.md) | LLM strategy/review with continuous LHS/BoTorch proposals | [Source](../../agents/bo_agent.py) · [Module](../../graphs/modules/bo/module.yaml) |
+| [Guardian](guardian_agent.md) | Policy gates, advisory review and continuation decisions | [Source](../../agents/guardian_agent.py) · [Module](../../graphs/modules/guardian/module.yaml) |
 
 The [API and Connection Matrix](agent_api_connection_matrix.md) compares all ten
 agents without repeating full implementation prose.
@@ -132,9 +145,9 @@ bridges. The complete contract and diagram are in the
 | Specimen Making | Converts a selected design into a fabrication result requiring Vision verification | Owns checked geometry, bounded LLM suitability/tool decisions, start/monitor/ejection evidence and handoff | Existing evaluation/geometry tools and selected printer fleet/provider bridge |
 | Vision | Supplies stage observations and verification sidecars; bounded JSON decisions may execute the current registered contract or return it to its owner | Owns decision/image protocol, source selection, freshness/quality, same-capture review, and active-camera/UTM verification signals | Camera, ActiveCam robot move/capture/return, ROS/UTM runtime, and verified rollout-stop tools; no arbitrary driver or replay-start authority |
 | Manipulation | LLM judges configured-skill suitability and post-Vision task-result handoff | Bounded tool dispatch, preflight, rollout/replay supervision and completion contracts | Existing LeRobot/robot execution, serial/camera lease, and optional Isaac sidecars |
-| Lab Equipment | Runs after verified placement and hands measurement proof to Analysis | Owns profile/skill/protocol selection, preflight, execution proof, export, and handoff | Windows PyAutoGUI and UTM/equipment bridges |
-| Analysis | Converts identified measurement evidence into an accepted evaluation handoff | Owns parsing, units, curves, metrics, uncertainty, CAE comparison, and objective evaluation | Bounded CAE/CalculiX or computation bridge; no direct physical actuator |
-| Knowledge | LLM selects reusable evidence and scoped context for BO and later cycles | Owns provenance/schema validation, typed records, patterns, Markdown curation and context assembly | Local audit, ontology, Markdown and JSONL stores; no physical actuator |
+| Lab Equipment | Delegated equipment task; verified acquisition precedes Manipulation clearance and fresh Vision | Owns LLM Flow selection and terminal review, exact Skill execution, CSV/readiness checks and eligible failed-block recovery | Equipment Runtime and selected Windows/Local worker; no intermediate Equipment LLM calls |
+| Analysis | LLM assesses measurement admissibility, simulation actions and model evidence | Parses units/geometry, derives measured curves/objectives, and independently schedules frozen FEM jobs | Numeric tools and registered CAE prepare/solve/postprocessing; no physical actuator |
+| Knowledge | LLM selects reusable evidence and scoped context for BO and other agents | Owns typed records, ontology-guided Markdown and separate page-wise source intake into one note per source | Local audit, Markdown/JSONL and Source Library; active Knowledge Graph/Neo4j retired |
 | BO | Owns bounded strategy/tool decisions and numerical-result review | Owns validated dispatch, continuous-domain/LHS state, candidate checks and Design handoff | BoTorch/benchmark computation tools; proposal only |
 | Guardian | Cross-level authority for continue, review, stop, or error | Owns risk/evidence/health/approval evaluation and corrective-action records | Read-only health/queue tools and stop/block authority; bridge hard interlocks remain authoritative |
 
@@ -144,7 +157,10 @@ invariant: device reconnection is Low-Level, rebuilding an agent output is
 Middle-Level, and choosing retry/review/another cycle/terminal state is
 High-Level.
 
-## Closed-Loop Reading Map
+## Orchestration Plan Reading Map
+
+The current experimental cycle is one configured plan, not the framework's
+only possible topology. Its main reading path is:
 
 ```text
 operator intent
@@ -152,14 +168,27 @@ operator intent
   -> Design experiment specification
   -> Specimen manufacturing digital thread
   -> Vision observation / Manipulation transfer and verification
-  -> Lab Equipment protocol execution
-  -> Analysis metrics and objective
+  -> Lab Equipment stacked workflow and terminal review
+  -> Manipulation post-test clearance -> fresh Vision verification
+  -> Analysis measured curves and objective
   -> Knowledge provenance, patterns, and BO context
   -> BO next-candidate proposal
   -> Guardian continue / review / stop / error
   -> Orchestrator route translation
   -> next Design cycle or terminal state
 ```
+
+Optional background work has a separate lifetime:
+
+```text
+Analysis frozen evidence -> FEM preparation / solve / review -> model evidence
+Source inbox -> page-wise extraction / LLM curation -> Markdown -> scoped retrieval
+Terminal agent archives -> deterministic evidence preservation
+```
+
+The measured handoff does not wait for optional FEM; source intake does not
+insert another equipment action into the plan. Simulation-only paths still
+await the solver that supplies their observations.
 
 This is a reading projection, not a replacement for
 `graphs/configs/atr_closed_loop.yaml`. The executable graph also contains
@@ -254,10 +283,12 @@ agent contract:
 - Agent and step inventory: `graphs/modules/*/module.yaml`
 - Executable classes: `agents/*_agent.py`
 - Graph position and transitions: `graphs/configs/atr_closed_loop.yaml`
-- API paths and methods: imported FastAPI `APIRoute` objects from `app.main.app`
+- API paths and methods: route declarations and registration/retirement hooks
+  in `app/main.py`, Analysis route modules, and Knowledge API installers;
+  deployed `/openapi.json` is the instance-specific schema
 - Tools and connections: module manifests, `AgentContext`, registered tool and
   bridge implementations
-- Current counts and selected responses:
+- Separately scoped historical counts and selected responses:
   [Current Code Snapshot](../runtime/current_code_snapshot.md)
 
 Route, step, and tool counts are drift indicators, not performance metrics.
@@ -284,8 +315,11 @@ documents identify ownership boundaries without refactoring the implementation.
 
 ## Index Verification
 
-Verified on 2026-08-09 against runtime baseline `0b7627b`, ten Python agent
-classes, ten module manifests, the primary graph, and imported FastAPI routes.
+Updated on 2026-09-11 against `5a190e8`: agent implementations and local
+decision modules, ten manifests, graph handoffs, Analysis FEM/field routes,
+Knowledge Markdown/source route installers, and owning References were inspected.
+Documentation checks validate links and publication structure; no device,
+model-inference, or new physical-cycle test was performed for this update.
 
 ## Related Documents
 
