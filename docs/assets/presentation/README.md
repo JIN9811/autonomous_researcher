@@ -15,13 +15,15 @@ supersedes: []
 The representative images are conceptual architecture overviews. Exact runtime
 flows remain in the editable SVG/DOT figures in each agent reference.
 
-Generated with **GPT Image 2**, through the imagegen skill's bundled CLI/API
-workflow, at 2048 × 1152 unless noted below, high quality, WebP. No experiment images or numerical
+Generated through the imagegen skill's bundled CLI/API workflow, using
+**GPT Image 2** unless noted below, at 2048 × 1152 unless specified, high quality,
+WebP. No experiment images or numerical
 results were synthesized for the paper evidence package.
 
 | Asset | Prompt source | Used in |
 |---|---|---|
-| Existing-laboratory transformation | [Transformation prompt](laboratory-transformation.txt) | Root README below the logo; 1920 × 960, high quality, WebP |
+| Multi-agent laboratory transformation | [Sunburst prompt](laboratory-transformation-sunburst.txt) · [Footer and flat-style refinement](laboratory-transformation-sunburst-refinement.txt) | Root README below the logo; GPT Image 2.5 Sunburst, 1536 × 1024, high quality, WebP; supplied layout sketch and AX4LAB logo as image inputs |
+| Previous existing-laboratory transformation (superseded) | [Transformation prompt](laboratory-transformation.txt) | Retained source history; GPT Image 2, 1920 × 960, no longer embedded in the root README |
 | Framework overview, agent architecture, integration architecture | [Three-figure prompts](architecture-figures.jsonl) | Root README System Architecture; three independent 1920 × 960 figures, high quality, WebP |
 | Previous combined architecture (superseded) | [Initial prompt](orchestration-plan-architecture.txt) · [Graph refinement](orchestration-plan-architecture-revision.txt) · [Label correction](orchestration-plan-architecture-label-fix.txt) | Retained source history; no longer embedded in the root README |
 | Structured AI laboratory overview | [Hero prompt](hero-structured-ai.txt) | Korean overview, paper introduction; replaced by the transformation figure in the root README |
@@ -33,8 +35,10 @@ The batch's initial low-cost hero is superseded by the structured-AI overview.
 
 The root transformation figure adapts the conceptual shift in the author's
 2026-09-04 presentation: transform an existing laboratory instead of building
-a new automated facility. Matching equipment silhouettes emphasize reuse;
-the orchestration graph and robot illustrate the added capabilities, not a
+a new automated facility. The author's layout sketch places the AX4LAB logo
+above the transformation arrow. A processor pictogram represents Multi-Agent AI
+orchestration; generic equipment categories connect through Device Bridge.
+The three supporting lines describe the reuse and integration approach, not a
 fixed execution sequence or measured deployment outcome.
 
 ## Presentation References

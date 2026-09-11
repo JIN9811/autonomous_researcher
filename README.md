@@ -58,9 +58,9 @@ equipment and working environment.
   <img src="docs/assets/branding/ax4lab-logo.png" alt="AX4LAB logo" width="180">
 </p>
 
-![AX4LAB transforms an existing laboratory through structured AI layers while retaining its equipment and adding VLA-enabled manipulation](docs/assets/presentation/laboratory-transformation.webp)
+![AX4LAB transforms an existing laboratory through Multi-Agent AI orchestration, with a Device Bridge connecting AI-native, API-enabled, and PC-operated equipment](docs/assets/presentation/laboratory-transformation-sunburst.webp)
 
-*Retain existing equipment. Add software intelligence and adaptable robotic manipulation.*
+*Multi-agent orchestration connects existing equipment through device bridges.*
 
 ## Problem
 
