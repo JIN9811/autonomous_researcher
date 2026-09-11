@@ -16,13 +16,16 @@ The representative images are conceptual architecture overviews. Exact runtime
 flows remain in the editable SVG/DOT figures in each agent reference.
 
 The active generated figures use **GPT Image 2.5 Sunburst** through the imagegen
-skill's bundled CLI/API workflow: 1536 × 1024, high quality, WebP. No experiment
+skill's bundled CLI/API workflow: high-quality WebP, normally 1536 × 1024;
+the System Contribution strip is 2172 × 724 (3:1), generated with automatic
+canvas sizing. No experiment
 images or numerical results were synthesized for the paper evidence package.
 
 | Asset | Prompt source | Used in |
 |---|---|---|
 | Multi-agent laboratory transformation | [Sunburst prompt](laboratory-transformation-sunburst.txt) · [Flat-style refinement](laboratory-transformation-sunburst-refinement.txt) · [Diagonal layout and bullet alignment](laboratory-transformation-sunburst-diagonal.txt) | Root README Graphical Abstract, Korean overview and paper introduction; approved image retained unchanged |
-| SDL adoption barriers and AX4LAB transformation approach | [Motivation and contribution prompts](motivation-contribution-sunburst.jsonl), entries 1–2; [Control-routing refinement](ax4lab-transformation-approach-refinement.txt) | Root README Motivation and System Contribution; conceptual problem/response pair, not cost or generalization evidence |
+| SDL adoption barriers | [Motivation prompt](motivation-contribution-sunburst.jsonl), entry 1 | Root README Motivation; conceptual barriers, not a quantitative cost comparison |
+| Three system contributions | [Horizontal three-module redesign](system-contribution-horizontal.txt) | Root README immediately above the contribution table; three parallel contributions, not sequential runtime stages |
 | Framework overview, agent architecture, integration architecture | [Sunburst paper-figure prompts](sunburst-paper-figures.jsonl), entries 1–3 | Root README System Architecture |
 | Ten agent role diagrams | [Sunburst paper-figure prompts](sunburst-paper-figures.jsonl), entries 4–13; [Design handoff refinement](sunburst-design-handoff-refinement.txt) | [Agent references](../../agents/README.md); existing image paths retained |
 
@@ -31,9 +34,10 @@ Final agent assets reside in [agent figures](../../agents/assets/figures/).
 The motivation/contribution pair adds
 [adoption barriers](self-driving-lab-barriers.webp) and
 [the AX4LAB approach](ax4lab-transformation-approach.webp). The first isolates
-acquisition, integration, and reconfiguration burdens; the second shows how
-hierarchical automation, multi-agent coordination, and VLA-based handling
-connect existing laboratory capabilities. Neither replaces the approved
+acquisition, integration, and reconfiguration burdens; the second places
+hierarchical automation, multi-agent coordination, and VLA-based manipulation
+side-by-side as compact box-like modules, without hardware pictograms.
+Neither replaces the approved
 Graphical Abstract or the three detailed architecture overviews.
 
 ## Paper-Figure Style
@@ -42,6 +46,9 @@ Graphical Abstract or the three detailed architecture overviews.
 - Short English labels, one sans-serif family, open layouts without enclosing cards.
 - Distinct reasoning, procedure, tool and evidence roles; arrows preserve actual ownership.
 - Role-specific layouts: peer-agent orchestration, terminal workflow review, and parallel FEM are not forced into one sequential template.
+
+The System Contribution strip intentionally uses three equal outlined modules,
+as requested for this figure only. Other paper figures retain their open layouts.
 
 The prompts were checked against the corresponding agent references. They retain
 optimizer authority over coordinates, capture before Vision review, terminated
@@ -63,6 +70,10 @@ from low-cost to general-purpose hardware, and multi-agent transformation, not a
 fixed execution sequence or measured deployment outcome.
 
 ## Superseded Generation Sources
+
+The former tall System Contribution composition is superseded by the horizontal
+strip: [initial prompt](motivation-contribution-sunburst.jsonl), entry 2, and
+[control-routing refinement](ax4lab-transformation-approach-refinement.txt).
 
 Previous GPT Image 2 prompts and unused images are retained as source history,
 not active presentation figures:

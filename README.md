@@ -96,6 +96,8 @@ automation, multi-agent coordination, and VLA-based manipulation**. Built on
 the ATR Framework, it places the integration logic in reusable software
 interfaces and agent-owned procedures while retaining existing instruments.
 
+![Three parallel system contributions: Hierarchical Automation, Multi-Agent Coordination, and VLA-Based Manipulation](docs/assets/presentation/ax4lab-transformation-approach.webp)
+
 | System contribution | How it addresses the barrier | Read more |
 |---|---|---|
 | Hierarchical automation and Device Bridges | High-Level decisions, Middle-Level procedures, and Low-Level tools separate research logic from API, desktop, and robot interfaces, enabling existing equipment to participate. | [Equipment interfaces](docs/device_bridges/README.md) |
@@ -106,8 +108,6 @@ The contribution is their **integration into a reusable research framework**:
 simple hardware, advanced software coordination, and experiment feedback through
 explicit agent handoffs. The current [experimental cycle](docs/paper/03_closed_loop_method.md)
 is one configured application of that architecture.
-
-![AX4LAB combines multi-agent orchestration, High/Middle/Low automation, Device Bridges, and VLA-based manipulation over existing laboratory equipment](docs/assets/presentation/ax4lab-transformation-approach.webp)
 
 ### System Architecture
 
