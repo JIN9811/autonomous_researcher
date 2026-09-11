@@ -26,11 +26,17 @@ related_docs:
 supersedes: []
 -->
 
-# Autonomous Researcher Framework
+# AX4LAB
+
+![AX4LAB — Autonomous Research Platform](docs/assets/branding/ax4lab-banner.png)
+
+<p align="center">
+  <img src="docs/assets/branding/ax4lab-logo.png" alt="AX4LAB logo" width="180">
+</p>
 
 ### Simple hardware. Structured intelligence. Self-driving laboratories.
 
-ATR adds a **structured AI control architecture to existing laboratories**.
+AX4LAB adds a **structured AI control architecture to existing laboratories**.
 Specialist agents connect reasoning, procedures, and device execution across
 AI-native robots, API-controlled devices, and PC-operated instruments.
 
