@@ -10,6 +10,20 @@ module:
   tools:
   - device.health
   - experiment.queue.status
+  local_decision_tools:
+  - guardian.evidence.read
+  - guardian.failures.read
+  - guardian.decision.submit
+  decision_contract:
+    schema: guardian_evidence_decision.v1
+    actions:
+    - continue
+    - review
+    - safe_stop
+    max_turns_default: 6
+    call_timeout_s_default: 120
+    total_timeout_s_default: 300
+    authority: read_only_evidence_review
   internal_graph:
     - id: 01_check_safety_gates
       label: Check Safety Gates

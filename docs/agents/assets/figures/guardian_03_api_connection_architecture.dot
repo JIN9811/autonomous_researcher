@@ -1,0 +1,26 @@
+digraph guardian_api_connection_architecture {
+  graph [rankdir=TB, bgcolor="white", pad="0.3", nodesep="0.35", ranksep="0.48", fontname="DejaVu Sans", label="Guardian: tools, connections and authority", labelloc="t", fontsize=22];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=16, margin="0.18,0.13"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=13, arrowsize=0.8];
+  runtime [label="Existing graph\nagent.guardian_agent"];
+  agent [label="GuardianAgent + local dispatcher"];
+  model [label="AgentContext.complete\nguardian_reasoning\nRegistered API / vLLM", fillcolor="#F2ECFA", color="#6B4C9A"];
+  local [label="Local scoped tools\nevidence.read / failures.read\ndecision.submit", shape=component];
+  registry [label="Existing ToolRegistry\ndevice.health\nexperiment.queue.status", shape=component];
+  policy [label="Existing deterministic gates\nCannot be cleared by the LLM", fillcolor="#FFF1D6", color="#B26A00"];
+  result [label="Guardian result + archived trace", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  ui [label="Existing status / incident APIs\nOperator review and approvals"];
+  forbidden [label="Not exposed to model\nDevice execution / reset / replay", shape=octagon, fillcolor="#FFE9E7", color="#A33A32"];
+  {rank=same; model; local;}
+  {rank=same; registry; forbidden;}
+  local -> registry [style=invis];
+  registry -> result [style=invis];
+  runtime -> agent;
+  agent -> model [dir=both, label="structured request"];
+  agent -> local [dir=both];
+  agent -> registry [dir=both, label="read-only", constraint=false];
+  policy -> agent [label="mandatory floor"];
+  agent -> result [constraint=false];
+  result -> ui [style=dashed, label="view / review"];
+  agent -> forbidden [style=dashed, arrowhead=tee, label="no capability", constraint=false];
+}

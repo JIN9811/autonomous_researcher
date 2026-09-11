@@ -24,6 +24,8 @@ documents:
   - docs/agents/knowledge_agent.md
   - docs/agents/bo_agent.md
   - docs/agents/guardian_agent.md
+  - docs/superpowers/specs/2026-09-11-guardian-evidence-decision-design.md
+  - docs/superpowers/plans/2026-09-11-guardian-evidence-decision.md
   - docs/device_bridges/README.md
   - docs/device_bridges/bridge_api_connection_matrix.md
   - docs/device_bridges/printer_fleet_bridge.md

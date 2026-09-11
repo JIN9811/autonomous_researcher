@@ -119,6 +119,7 @@ AGENT_REFERENCE_FIGURES = {
     "guardian": (
         "guardian_01_closed_loop_handoffs",
         "guardian_02_execution_effect_boundary",
+        "guardian_03_api_connection_architecture",
     ),
 }
 AGENT_REFERENCE_TITLES = {

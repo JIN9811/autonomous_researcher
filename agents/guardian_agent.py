@@ -20,9 +20,11 @@ Modification guide:
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
+from agents.guardian_decision import read_guardian_health, run_guardian_decision
 from utils.agent_artifact_archive import archive_agent_run
 from knowledge.failure_memory import FailureRecord
 from orchestrator.runtime_defaults import TEST_MODE_LOOP_CYCLES
@@ -67,7 +69,22 @@ class GuardianAgent(BaseAgent):
 
         recent_failures = ctx.failure_memory.recent(limit=30)
         design_validation = self._validate_design_spec(spec_payload, recent_failures)
-        health_validation = self._resolve_device_health(state, ctx)
+        settings = state.run_metadata.get("guardian_settings") if isinstance(state.run_metadata, dict) else {}
+        configured_health_timeout = settings.get("call_timeout_s", 120.0) if isinstance(settings, dict) else 120.0
+        health_timeout = (
+            float(configured_health_timeout)
+            if type(configured_health_timeout) in (int, float)
+            and math.isfinite(float(configured_health_timeout))
+            and 0 < float(configured_health_timeout) <= 600
+            else 120.0
+        )
+        health_validation = await read_guardian_health(
+            state,
+            lambda: self._resolve_device_health(state, ctx),
+            timeout_s=health_timeout,
+        )
+        if health_validation is None:
+            health_validation = self._resolve_device_health(state, ctx, query_tool=False)
         consistency = self._consistency_check(
             spec=spec_payload,
             latest_analysis=state.latest_analysis,
@@ -76,106 +93,109 @@ class GuardianAgent(BaseAgent):
             retry_pressure=retry_pressure,
         )
         graph_gate_pressure = self._resolve_graph_gate_pressure(state)
+        baseline = self._baseline_outcome(
+            state=state,
+            ctx=ctx,
+            spec_payload=spec_payload,
+            anomaly_detected=anomaly_detected,
+            uncertainty=uncertainty,
+            retry_pressure=retry_pressure,
+            design_validation=design_validation,
+            health_validation=health_validation,
+            graph_gate_pressure=graph_gate_pressure,
+            consistency=consistency,
+            record_failure=True,
+        )
+        evidence = {
+            "identity": {
+                "run_id": state.run_id,
+                "experiment_id": state.experiment_id,
+                "loop_count": state.loop_count,
+                "stage": state.stage.value,
+                "specimen_id": str(spec_payload.get("specimen_id") or ""),
+            },
+            "baseline": baseline,
+            "design": self._bounded_evidence(design_validation),
+            "health": self._bounded_evidence(health_validation),
+            "graph_gates": self._bounded_evidence(graph_gate_pressure),
+            "consistency": self._bounded_evidence(consistency),
+            "observations": {
+                "anomaly_detected": anomaly_detected,
+                "uncertainty": uncertainty,
+                "latest_observations": self._bounded_evidence(state.latest_observations),
+                "latest_analysis": self._bounded_evidence(state.latest_analysis),
+            },
+            "retries": {"pressure": retry_pressure},
+            "failures": [
+                {
+                    "stage": item.stage,
+                    "failure_type": item.failure_type,
+                    "context": self._bounded_evidence(item.context),
+                    "timestamp": item.timestamp,
+                }
+                for item in recent_failures[-10:]
+            ],
+        }
+        llm_decision = await run_guardian_decision(
+            state,
+            ctx,
+            evidence=evidence,
+            read_health=lambda: self._resolve_device_health(state, ctx),
+        )
 
-        timeout_s = 45.0 if state.mode.value == "test" else None
-        try:
-            reasoning = await ctx.complete(
-                "guardian_reasoning",
-                (
-                    "Evaluate continue/recover/retry/safe-stop policy.\n"
-                    f"stage={state.stage.value}\n"
-                    f"loop={state.loop_count}\n"
-                    f"anomaly_detected={anomaly_detected}\n"
-                    f"uncertainty={uncertainty}\n"
-                    f"retry_pressure={retry_pressure}\n"
-                    f"safe_stop_requested={state.safe_stop_requested}\n"
-                    f"design_validation={design_validation}\n"
-                    f"health_validation={health_validation}\n"
-                    f"graph_gate_pressure={graph_gate_pressure}\n"
-                    f"consistency={consistency}\n"
-                ),
-                timeout_s=timeout_s,
-            )
-            policy_note = reasoning.text[:260]
-        except Exception as exc:
-            if state.mode.value == "test":
-                policy_note = f"Guardian degraded in test mode: {exc.__class__.__name__}"
-            else:
-                raise
-
-        decision = "continue"
-        action = "continue"
-        reason = "Safety checks passed."
-
-        if state.safe_stop_requested or state.stop_requested:
-            decision = "stop"
-            action = "safe_stop"
-            reason = "Operator requested stop."
-        elif design_validation["status"] == "fail":
-            decision = "stop"
-            action = "safe_stop"
-            reason = f"Design validation failed: {design_validation['reject_reasons'][0]}"
-            ctx.failure_memory.add(
-                FailureRecord(
-                    stage="guardian",
-                    failure_type="guardian_design_validation",
-                    context={
-                        "candidate_id": str(spec_payload.get("candidate_id", "")),
-                        "specimen_id": str(spec_payload.get("specimen_id", "")),
-                        "geometry_type": str(spec_payload.get("geometry_type", "")),
-                        "reject_reasons": design_validation["reject_reasons"][:3],
-                        "loop_count": state.loop_count,
-                    },
-                )
-            )
-        elif health_validation["status"] == "fail":
-            decision = "stop"
-            action = "safe_stop"
-            reason = f"Device health check failed: {', '.join(health_validation['unhealthy_devices'])}"
-            ctx.failure_memory.add(
-                FailureRecord(
-                    stage="guardian",
-                    failure_type="device_unhealthy",
-                    context={
-                        "unhealthy_devices": health_validation["unhealthy_devices"],
-                        "loop_count": state.loop_count,
-                    },
-                )
-            )
-        elif graph_gate_pressure["status"] == "fail" and graph_gate_pressure.get("recommended_action") == "safe_stop":
-            decision = "stop"
-            action = "safe_stop"
-            reason = f"Guardian graph-wide gate requested safe stop: {graph_gate_pressure.get('primary_reason') or 'gate_blocked'}"
-            ctx.failure_memory.add(
-                FailureRecord(
-                    stage="guardian",
-                    failure_type="guardian_gate_safe_stop",
-                    context={
-                        "active_gates": graph_gate_pressure.get("active_gates", [])[:5],
-                        "loop_count": state.loop_count,
-                    },
-                )
-            )
-        elif state.mode.value == "test" and state.loop_count >= self.TEST_LOOP_CYCLE_LIMIT - 1:
-            decision = "stop"
-            action = "safe_stop"
-            reason = f"Test run reached planned {self.TEST_LOOP_CYCLE_LIMIT}-cycle loop cap."
-        elif graph_gate_pressure["status"] == "fail":
-            decision = "continue"
-            action = "recover"
-            reason = f"Guardian graph-wide gate blocked progression: {graph_gate_pressure.get('primary_reason') or 'gate_blocked'}"
-        elif consistency["status"] == "fail":
-            decision = "continue"
-            action = "recover"
-            reason = f"Consistency risk detected: {consistency['issues'][0]}"
-        elif anomaly_detected:
-            decision = "continue"
-            action = "recover"
-            reason = "Recovery suggested; continue with caution."
-        elif retry_pressure >= 3 or (uncertainty is not None and uncertainty >= 0.3) or consistency["status"] == "warning":
-            decision = "continue"
-            action = "retry"
-            reason = "Retry recommended due uncertainty/retry pressure."
+        # Recompute mutable gates and evidence before applying a model request. This
+        # local health pass does not reissue the external health call.
+        latest_spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
+        latest_retry_pressure = int(sum(max(0, int(v)) for v in state.retry_counters.values()))
+        latest_uncertainty = (
+            None
+            if state.latest_analysis.get("uncertainty_status", {}).get("status") == "not_estimated"
+            else self._safe_float(state.latest_analysis.get("uncertainty"), 0.0)
+        )
+        latest_design = self._validate_design_spec(latest_spec, ctx.failure_memory.recent(limit=30))
+        latest_health = self._resolve_device_health(state, ctx, query_tool=False)
+        fresh_health = llm_decision.get("fresh_health")
+        if isinstance(fresh_health, dict) and fresh_health.get("status") in {"fail", "unknown"}:
+            latest_health = fresh_health
+        elif health_validation.get("status") in {"fail", "unknown"} and latest_health.get("status") == "pass":
+            latest_health = health_validation
+        latest_graph_gates = self._resolve_graph_gate_pressure(state)
+        latest_consistency = self._consistency_check(
+            spec=latest_spec,
+            latest_analysis=state.latest_analysis,
+            latest_observations=state.latest_observations,
+            uncertainty=latest_uncertainty,
+            retry_pressure=latest_retry_pressure,
+        )
+        latest_baseline = self._baseline_outcome(
+            state=state,
+            ctx=ctx,
+            spec_payload=latest_spec,
+            anomaly_detected=bool(state.latest_observations.get("anomaly", False)),
+            uncertainty=latest_uncertainty,
+            retry_pressure=latest_retry_pressure,
+            design_validation=latest_design,
+            health_validation=latest_health,
+            graph_gate_pressure=latest_graph_gates,
+            consistency=latest_consistency,
+            record_failure=False,
+        )
+        requested_action = str(llm_decision.get("action") or "review")
+        model_action = {"continue": "continue", "review": "recover", "safe_stop": "safe_stop"}.get(
+            requested_action, "recover"
+        )
+        if llm_decision.get("status") not in {"accepted", "deterministic_test", "skipped"}:
+            model_action = "recover"
+        priority = {"continue": 0, "retry": 1, "recover": 2, "safe_stop": 3}
+        action = max((baseline["action"], latest_baseline["action"], model_action), key=priority.__getitem__)
+        decision = "stop" if action == "safe_stop" else "continue"
+        if action == latest_baseline["action"]:
+            reason = latest_baseline["reason"]
+        elif action == baseline["action"]:
+            reason = baseline["reason"]
+        else:
+            reason = str(llm_decision["reason"])
+        policy_note = str(llm_decision.get("reason") or reason)[:260]
 
         return AgentResult(
             success=True,
@@ -186,15 +206,74 @@ class GuardianAgent(BaseAgent):
                     "reason": reason,
                     "policy_note": policy_note,
                     "action": action,
-                    "retry_pressure": retry_pressure,
-                    "design_validation": design_validation,
-                    "health_validation": health_validation,
-                    "graph_gate_pressure": graph_gate_pressure,
-                    "consistency": consistency,
+                    "retry_pressure": latest_retry_pressure,
+                    "design_validation": latest_design,
+                    "health_validation": latest_health,
+                    "graph_gate_pressure": latest_graph_gates,
+                    "consistency": latest_consistency,
+                    "llm_decision": llm_decision,
                 }
             },
             next_hint=decision,
         )
+
+    def _baseline_outcome(
+        self,
+        *,
+        state: OrchestratorState,
+        ctx: AgentContext,
+        spec_payload: dict[str, Any],
+        anomaly_detected: bool,
+        uncertainty: float | None,
+        retry_pressure: int,
+        design_validation: dict[str, Any],
+        health_validation: dict[str, Any],
+        graph_gate_pressure: dict[str, Any],
+        consistency: dict[str, Any],
+        record_failure: bool,
+    ) -> dict[str, str]:
+        decision, action, reason = "continue", "continue", "Safety checks passed."
+        if state.safe_stop_requested or state.stop_requested or state.emergency_stop_requested:
+            decision, action, reason = "stop", "safe_stop", "Operator requested stop."
+        elif design_validation["status"] == "fail":
+            decision, action = "stop", "safe_stop"
+            reason = f"Design validation failed: {design_validation['reject_reasons'][0]}"
+            if record_failure:
+                ctx.failure_memory.add(FailureRecord(stage="guardian", failure_type="guardian_design_validation", context={
+                    "candidate_id": str(spec_payload.get("candidate_id", "")),
+                    "specimen_id": str(spec_payload.get("specimen_id", "")),
+                    "geometry_type": str(spec_payload.get("geometry_type", "")),
+                    "reject_reasons": design_validation["reject_reasons"][:3], "loop_count": state.loop_count,
+                }))
+        elif health_validation["status"] == "fail":
+            decision, action = "stop", "safe_stop"
+            reason = f"Device health check failed: {', '.join(health_validation['unhealthy_devices'])}"
+            if record_failure:
+                ctx.failure_memory.add(FailureRecord(stage="guardian", failure_type="device_unhealthy", context={
+                    "unhealthy_devices": health_validation["unhealthy_devices"], "loop_count": state.loop_count,
+                }))
+        elif graph_gate_pressure["status"] == "fail" and graph_gate_pressure.get("recommended_action") == "safe_stop":
+            decision, action = "stop", "safe_stop"
+            reason = f"Guardian graph-wide gate requested safe stop: {graph_gate_pressure.get('primary_reason') or 'gate_blocked'}"
+            if record_failure:
+                ctx.failure_memory.add(FailureRecord(stage="guardian", failure_type="guardian_gate_safe_stop", context={
+                    "active_gates": graph_gate_pressure.get("active_gates", [])[:5], "loop_count": state.loop_count,
+                }))
+        elif state.mode.value == "test" and state.loop_count >= self.TEST_LOOP_CYCLE_LIMIT - 1:
+            decision, action = "stop", "safe_stop"
+            reason = f"Test run reached planned {self.TEST_LOOP_CYCLE_LIMIT}-cycle loop cap."
+        elif health_validation["status"] == "unknown":
+            action, reason = "recover", "Device health evidence is unavailable; operator review is required."
+        elif graph_gate_pressure["status"] == "fail":
+            action = "recover"
+            reason = f"Guardian graph-wide gate blocked progression: {graph_gate_pressure.get('primary_reason') or 'gate_blocked'}"
+        elif consistency["status"] == "fail":
+            action, reason = "recover", f"Consistency risk detected: {consistency['issues'][0]}"
+        elif anomaly_detected:
+            action, reason = "recover", "Recovery suggested; continue with caution."
+        elif retry_pressure >= 3 or (uncertainty is not None and uncertainty >= 0.3) or consistency["status"] == "warning":
+            action, reason = "retry", "Retry recommended due uncertainty/retry pressure."
+        return {"decision": decision, "action": action, "reason": reason}
 
     @staticmethod
     def _safe_float(value: Any, default: float) -> float:
@@ -202,6 +281,49 @@ class GuardianAgent(BaseAgent):
             return float(value)
         except (TypeError, ValueError):
             return default
+
+    @classmethod
+    def _bounded_evidence(
+        cls,
+        value: Any,
+        *,
+        depth: int = 0,
+        _budget: list[int] | None = None,
+    ) -> Any:
+        """Project current observations without credentials or unbounded payloads."""
+        budget = _budget if _budget is not None else [24_000]
+        if budget[0] <= 0 or depth >= 5:
+            return "[TRUNCATED]"
+        if isinstance(value, dict):
+            result: dict[str, Any] = {}
+            for key, child in list(value.items())[:40]:
+                if budget[0] <= 0:
+                    break
+                name = str(key)
+                budget[0] -= len(name)
+                lower = name.lower()
+                if any(secret in lower for secret in ("password", "passwd", "secret", "token", "api_key", "credential")):
+                    result[name] = "[REDACTED]"
+                else:
+                    result[name] = cls._bounded_evidence(child, depth=depth + 1, _budget=budget)
+            return result
+        if isinstance(value, (list, tuple)):
+            result = []
+            for item in list(value)[:30]:
+                if budget[0] <= 0:
+                    break
+                result.append(cls._bounded_evidence(item, depth=depth + 1, _budget=budget))
+            return result
+        if isinstance(value, str):
+            text = value[: min(1_000, max(0, budget[0]))]
+            budget[0] -= len(text)
+            return text
+        if value is None or isinstance(value, (bool, int, float)):
+            budget[0] -= 32
+            return value
+        text = str(value)[: min(1_000, max(0, budget[0]))]
+        budget[0] -= len(text)
+        return text
 
     @staticmethod
     def _vector3(value: Any, default: list[float]) -> list[float]:
@@ -280,8 +402,17 @@ class GuardianAgent(BaseAgent):
             "active_incidents": active_incidents[-10:],
         }
 
-    def _resolve_device_health(self, state: OrchestratorState, ctx: AgentContext) -> dict[str, Any]:
+    def _resolve_device_health(
+        self,
+        state: OrchestratorState,
+        ctx: AgentContext,
+        *,
+        query_tool: bool = True,
+    ) -> dict[str, Any]:
         snapshot = dict(state.device_health or {})
+        query_status = "not_queried"
+        query_error = ""
+        query_reported_ok: bool | None = None
         try:
             spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
             printer_test_path = str(
@@ -303,17 +434,38 @@ class GuardianAgent(BaseAgent):
             for key in ("printer_profile_id", "printer_profile", "printer_provider", "provider", "printer_model"):
                 if spec.get(key):
                     health_request[key] = spec[key]
-            health_payload = ctx.tools.call("device.health", health_request)
-            if isinstance(health_payload, dict):
-                for key in ("printer", "camera", "robot", "utm", "simulator"):
+            if query_tool:
+                health_payload = ctx.tools.call("device.health", health_request)
+                payload_status = (
+                    str(health_payload.get("status") or "").strip().lower()
+                    if isinstance(health_payload, dict)
+                    else ""
+                )
+                health_keys = {"printer", "camera", "robot", "utm", "simulator"}
+                present_health_keys = health_keys.intersection(health_payload) if isinstance(health_payload, dict) else set()
+                if (
+                    not isinstance(health_payload, dict)
+                    or payload_status in {"error", "failed", "failure", "unavailable", "unknown"}
+                    or not present_health_keys
+                    or any(
+                        not self._valid_device_health_value(health_payload[key])
+                        for key in present_health_keys
+                    )
+                ):
+                    raise ValueError("device health response unavailable")
+                if isinstance(health_payload.get("ok"), bool):
+                    query_reported_ok = health_payload["ok"]
+                for key in health_keys:
                     if key in health_payload:
                         snapshot[key] = health_payload[key]
-        except Exception:
-            pass
+                query_status = "ok"
+        except Exception as exc:
+            query_status = "unavailable"
+            query_error = type(exc).__name__
 
         unhealthy: list[str] = []
         for device, raw_status in snapshot.items():
-            status = str(raw_status).strip().lower()
+            status = self._normalized_device_health_status(raw_status)
             status_head = status.split(":", 1)[0]
             if status in self._UNHEALTHY_DEVICE_STATES or status_head in self._UNHEALTHY_DEVICE_STATES:
                 unhealthy.append(f"{device}:{status}")
@@ -329,12 +481,45 @@ class GuardianAgent(BaseAgent):
                     entry = f"{device}:{code}"
                     if entry not in unhealthy:
                         unhealthy.append(entry)
+        status = (
+            "fail"
+            if unhealthy
+            else "unknown"
+            if query_status == "unavailable" or query_reported_ok is False
+            else "pass"
+        )
         return {
-            "status": "fail" if unhealthy else "pass",
+            "status": status,
             "snapshot": snapshot,
             "unhealthy_devices": unhealthy,
             "active_hardware_alerts": active_alerts,
+            "query_status": query_status,
+            "query_error": query_error,
         }
+
+    @staticmethod
+    def _valid_device_health_value(value: Any) -> bool:
+        if isinstance(value, str):
+            return bool(value.strip())
+        if not isinstance(value, dict):
+            return False
+        if value.get("ok") is False:
+            return True
+        state = value.get("state", value.get("status"))
+        return isinstance(state, str) and bool(state.strip())
+
+    @staticmethod
+    def _normalized_device_health_status(value: Any) -> str:
+        if isinstance(value, str):
+            return value.strip().lower()
+        if not isinstance(value, dict):
+            return "unknown"
+        raw_state = value.get("state", value.get("status"))
+        state = str(raw_state or "").strip().lower()
+        if value.get("ok") is False:
+            state_head = state.split(":", 1)[0]
+            return state if state_head in GuardianAgent._UNHEALTHY_DEVICE_STATES else "failed"
+        return state or "unknown"
 
     def _validate_design_spec(
         self,

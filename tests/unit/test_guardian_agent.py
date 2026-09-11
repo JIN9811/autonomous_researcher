@@ -4,6 +4,8 @@ Unit tests for GuardianAgent safety and decision policies.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from agents.guardian_agent import GuardianAgent
@@ -38,6 +40,8 @@ def _valid_spec() -> dict[str, object]:
 class _Response:
     def __init__(self, text: str) -> None:
         self.text = text
+        self.model = "guardian-test-model"
+        self.raw: dict[str, object] = {}
 
 
 class _ToolsStub:
@@ -64,9 +68,22 @@ class _CtxStub:
         self.failure_memory = FailureMemory()
         self.tools = _ToolsStub(health=health)
         self._policy_note = policy_note
+        self._complete_count = 0
 
     async def complete(self, task_type: str, user_prompt: str, *, timeout_s: float | None = None) -> _Response:
-        return _Response(self._policy_note)
+        self._complete_count += 1
+        if self._complete_count == 1:
+            request = {"tool": "guardian.evidence.read", "arguments": {"section": "baseline"}}
+        else:
+            request = {
+                "tool": "guardian.decision.submit",
+                "arguments": {
+                    "action": "continue",
+                    "reason": self._policy_note,
+                    "evidence_refs": ["baseline:action"],
+                },
+            }
+        return _Response(json.dumps(request))
 
 
 def _state(
@@ -158,7 +175,8 @@ async def test_guardian_reports_only_existing_safety_evidence() -> None:
 
     assert guardian["decision"] == "continue"
     assert set(guardian) == {"decision", "action", "reason", "policy_note", "retry_pressure",
-        "design_validation", "health_validation", "graph_gate_pressure", "consistency"}
+        "design_validation", "health_validation", "graph_gate_pressure", "consistency", "llm_decision"}
+    assert guardian["llm_decision"]["status"] == "accepted"
 
 
 @pytest.mark.asyncio

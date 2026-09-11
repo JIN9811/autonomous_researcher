@@ -1,29 +1,20 @@
 digraph guardian_closed_loop_handoffs {
-  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.34", ranksep="0.55", fontname="DejaVu Sans", label="Guardian closed-loop position and handoffs", labelloc="t", fontsize=18];
-  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07"];
-  edge [color="#52667A", fontname="DejaVu Sans", fontsize=8, arrowsize=0.7];
-
-  state [label="Current run +\nstage state"];
-  failures [label="Failures · incidents ·\ntool records", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
-  health [label="Device health +\nqueue status", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
-  approvals [label="Scoped approval\nstate", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
-  budget [label="Risk vector +\nsafety budget", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
-  guardian [label="GUARDIAN\ngraph-wide safety decision", shape=diamond, fillcolor="#FFF1D6", color="#B26A00", penwidth=2.2];
-  orchestrator [label="Orchestrator\nroute translation"];
-  operator [label="Operator review /\ncorrective action", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
-  stop [label="Stop / error", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
-  continue [label="Continue next cycle"];
-  evidence [label="Decision · contract · incident\napproval · alert · budget", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
-
-  state -> guardian;
-  failures -> guardian;
-  health -> guardian;
-  approvals -> guardian;
-  budget -> guardian;
-  guardian -> orchestrator [label="continue / review / stop / error"];
-  orchestrator -> continue [label="continue"];
-  orchestrator -> operator [label="review"];
-  orchestrator -> stop [label="stop / error"];
-  guardian -> evidence [label="evidence", color="#2E7D59"];
-  operator -> approvals [style=dashed, label="new scoped decision"];
+  graph [rankdir=TB, bgcolor="white", pad="0.3", nodesep="0.35", ranksep="0.48", fontname="DejaVu Sans", label="Guardian: evidence review in the existing loop", labelloc="t", fontsize=22];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=16, margin="0.18,0.13"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=13, arrowsize=0.8];
+  inputs [label="Current run / loop / specimen\nAgent results and policy gates"];
+  evidence [label="Health, queue and failure evidence", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  guardian [label="GuardianAgent\nMandatory checks + local LLM review", fillcolor="#F2ECFA", color="#6B4C9A", penwidth=2];
+  runtime [label="Existing Orchestrator / runtime\nGuardian result contract"];
+  next [label="Continue\nNext design / cycle"];
+  hold [label="Review hold\nSame specimen and loop", fillcolor="#FFF1D6", color="#B26A00"];
+  stop [label="Safe stop\nExisting terminal route", fillcolor="#FFE9E7", color="#A33A32"];
+  archive [label="Knowledge / Evidence\nPer-loop decision and tool trace", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  inputs -> guardian;
+  evidence -> guardian [style=dashed, label="read-only evidence"];
+  guardian -> runtime [label="continue / recover / safe_stop"];
+  runtime -> next;
+  runtime -> hold;
+  runtime -> stop;
+  guardian -> archive [style=dashed, label="automatic preservation"];
 }

@@ -739,6 +739,23 @@ Reference는 Design과 같은 6줄 Status at a Glance, 5영역 책임표, 도구
 [구현 계획](../plans/2026-09-10-knowledge-markdown-memory.md),
 [Knowledge Reference](../../agents/knowledge_agent.md)에 연결한다.
 
+## Guardian 적용 계약 — 2026-09-11
+
+Guardian은 기존 노드에서 현재 근거를 읽고, LLM이 제한된 읽기 전용 툴 호출과
+계속·검토·정지 판단을 수행한다. 기존 코드 게이트는 최종 판단의 하한이며
+LLM이 해제할 수 없다. 검토는 기존 `continue/recover` 대기 경로로 연결하고,
+자동 복구·작업 재실행·장비 조작·PLC 연결은 추가하지 않는다.
+
+모델 판단은 Guardian/Safety 영역에 위치하며 High는 기존 결과 인계,
+Middle은 요청·근거 검증, Low는 기존 상태 조회, Knowledge는 루프별 기록을
+담당한다. 공유 큐 상태는 해당 시편의 완료 증거와 구분한다.
+
+Reference는 6줄 상태 요약, 5영역 표, 실제 툴 계약, 3개 DOT/SVG와
+분리된 소프트웨어 검증 기록을 갖춘다.
+[Guardian 설계](2026-09-11-guardian-evidence-decision-design.md),
+[구현 계획](../plans/2026-09-11-guardian-evidence-decision.md),
+[Guardian Reference](../../agents/guardian_agent.md)를 따른다.
+
 ## Related Documents
 
 - [기존 3계층 제어 정의](../../runtime/three_level_control_model.md)

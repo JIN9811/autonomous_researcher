@@ -145,7 +145,7 @@ state ownership, failure propagation, and the manual Device Workspace boundary.
 | Analysis | task-specific `analysis_reasoning`; module role empty | parsers, curve/metric logic | CAE/CalculiX through registered bridge | none directly | external_service/local process |
 | Knowledge | `knowledge_query`; bounded inspect/search/read/write/publish loop | Ontology, audit, Markdown and typed stores | registered API/vLLM model service | none | model/local_state |
 | BO | `bo_policy` | strict local tool dispatch and numerical candidate validation | selected model backend for strategy/evidence/result decisions | none | model/local_state |
-| Guardian | `guardian_review` | policy gate, status aggregation, approval/event services | device/queue status connections and selected model | none directly | model plus downstream stop/block |
+| Guardian | `guardian_review` / `guardian_reasoning` | bounded evidence decision, policy gate, status aggregation, approval/event services | agent-local evidence/failure reads, existing device/queue status tools and selected model | none directly | model-selected review/stop; mandatory gates remain authoritative |
 
 ## Safety and Recovery Matrix
 
