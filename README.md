@@ -70,7 +70,9 @@ equipment and working environment.
 
 *Multi-agent orchestration connects existing equipment through device bridges.*
 
-## Motivation — Barriers to Self-Driving Laboratories
+## Motivation
+
+<sub>Barriers to adopting self-driving laboratories.</sub>
 
 Building a self-driving laboratory remains a costly integration project, not
 simply a matter of adding an AI model. Existing laboratories contain useful
@@ -109,12 +111,12 @@ simple hardware, advanced software coordination, and experiment feedback through
 explicit agent handoffs. The current [experimental cycle](docs/paper/03_closed_loop_method.md)
 is one configured application of that architecture.
 
-### System Architecture
+## System Architecture
 
 The framework separates coordination between agents, responsibility within
 agents, and integration with laboratory equipment.
 
-#### Framework — Configurable Orchestration
+### Framework
 
 The Orchestrator translates research intent into agent tasks and coordinates
 their results through a configurable Orchestration Plan. Specialist agents
@@ -125,7 +127,7 @@ contribute capabilities to that plan rather than defining one fixed sequence.
 - Task routing and specialist-agent coordination — [System architecture](docs/paper/02_system_architecture.md).
 - Plan configuration and execution monitoring — [Runtime IDE](docs/runtime/runtime_ide.md).
 
-#### Agents — Decisions, Procedures, and Tools
+### Agents
 
 High-Level control owns task decisions, Middle-Level control supervises
 procedures, and Low-Level tools perform execution. Guardian/Safety and
@@ -136,7 +138,7 @@ stages. LLM decisions use the owning agent's permitted tools and evidence.
 
 - Responsibility levels and shared evidence — [Control model](docs/runtime/three_level_control_model.md).
 
-#### Integration — Reusing Existing Equipment
+### Integration
 
 Agent procedures reach laboratory capabilities through tools and Device
 Bridges. These adapters accommodate learned robot policies, device APIs, and

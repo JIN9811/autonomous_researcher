@@ -1,0 +1,11 @@
+Use case: text-localization / typography refinement. Input image is the edit target, the existing three-column System Contribution strip. Make a TYPOGRAPHY-ONLY refinement; preserve all meanings, labels, three equal outlined modules, node counts, arrows, internal diagrams, footer text, white background and navy/cyan Sunburst palette. Keep the shallow 3:1 canvas and the complete uncropped diagram. Do not introduce hardware pictograms, badges, numbering, decorative graphics or new boxes.
+
+Replace the three long single-line module headings with exactly TWO centered lines each, using the SAME navy geometric sans-serif, SAME semibold weight, SAME font size and SAME line spacing in all three modules:
+Left heading line 1: 'Hierarchical'
+Left heading line 2: 'Automation'
+Center heading line 1: 'Multi-Agent'
+Center heading line 2: 'Coordination'
+Right heading line 1: 'VLA-Based'
+Right heading line 2: 'Manipulation'
+
+Use compact but comfortable typography, not oversized bold text. Give every heading matching top padding, first-line baseline, second-line baseline, and generous side margins. Align the first diagram blocks below a shared heading region with a clear small gap. Preserve enough space for all blocks and footers without making the image taller; modest uniform adjustments to internal spacing are allowed. Replace the thick cyan top bands with delicate thin cyan accent rules, approximately the weight of the existing footer divider; keep navy card borders thin. Keep footer baselines matched. Preserve all remaining text verbatim: High: decisions, Middle: procedures, Low: tools, Device Bridges; four Agent nodes, Configurable orchestration; Task instruction, VLA policy, Robot interface, LeRobot integration. No arrows between the three contribution cards. This should look like a restrained professional research-paper diagram with consistent typographic hierarchy, not a marketing dashboard. Output aspect ratio must remain exactly 3:1.

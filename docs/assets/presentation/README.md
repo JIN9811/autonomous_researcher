@@ -25,7 +25,7 @@ images or numerical results were synthesized for the paper evidence package.
 |---|---|---|
 | Multi-agent laboratory transformation | [Sunburst prompt](laboratory-transformation-sunburst.txt) · [Flat-style refinement](laboratory-transformation-sunburst-refinement.txt) · [Diagonal layout and bullet alignment](laboratory-transformation-sunburst-diagonal.txt) | Root README Graphical Abstract, Korean overview and paper introduction; approved image retained unchanged |
 | SDL adoption barriers | [Motivation prompt](motivation-contribution-sunburst.jsonl), entry 1 | Root README Motivation; conceptual barriers, not a quantitative cost comparison |
-| Three system contributions | [Horizontal three-module redesign](system-contribution-horizontal.txt) | Root README immediately above the contribution table; three parallel contributions, not sequential runtime stages |
+| Three system contributions | [Horizontal three-module redesign](system-contribution-horizontal.txt) · [Two-line typography refinement](system-contribution-typography.txt) | Root README immediately above the contribution table; three parallel contributions, not sequential runtime stages |
 | Framework overview, agent architecture, integration architecture | [Sunburst paper-figure prompts](sunburst-paper-figures.jsonl), entries 1–3 | Root README System Architecture |
 | Ten agent role diagrams | [Sunburst paper-figure prompts](sunburst-paper-figures.jsonl), entries 4–13; [Design handoff refinement](sunburst-design-handoff-refinement.txt) | [Agent references](../../agents/README.md); existing image paths retained |
 
@@ -48,7 +48,9 @@ Graphical Abstract or the three detailed architecture overviews.
 - Role-specific layouts: peer-agent orchestration, terminal workflow review, and parallel FEM are not forced into one sequential template.
 
 The System Contribution strip intentionally uses three equal outlined modules,
-as requested for this figure only. Other paper figures retain their open layouts.
+as requested for this figure only. Matching two-line headings, aligned diagram
+baselines, and thin cyan accent rules establish its typographic hierarchy.
+Other paper figures retain their open layouts.
 
 The prompts were checked against the corresponding agent references. They retain
 optimizer authority over coordinates, capture before Vision review, terminated
