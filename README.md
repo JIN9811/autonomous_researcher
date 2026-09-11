@@ -84,46 +84,23 @@ robot policy, or finite-element solver.
 
 ### System Architecture
 
-ATR organizes research work through an **Orchestration Plan**: a graph of
-agent tasks, dependencies, conditional routes, and feedback. A closed-loop
-experiment is one execution pattern within that plan—not the framework's
-fixed organizing sequence.
+ATR coordinates research tasks through configurable orchestration plans.
 
-![ATR architecture: an orchestration plan, an agent responsibility model, shared safety and knowledge planes, and integration interfaces](docs/assets/presentation/orchestration-plan-architecture.webp)
+![Figure 1. Framework overview](docs/assets/presentation/framework-overview.webp)
 
-*Framework overview. Plan nodes represent tasks assigned to specialist agents;
-the configured plan defines their dependencies, conditions, and actual routes.*
+*Figure 1. Framework overview.*
 
-**Plan and coordination.** The Orchestrator connects research intent to
-specialist-agent handoffs, while the graph runtime follows declared routes
-and evaluates transition conditions. Feedback can initiate another design;
-independent background work, such as FEM, can continue without blocking the
-measurement-to-optimization path. See the [system architecture](docs/paper/02_system_architecture.md)
-for runtime responsibilities and the [Runtime IDE](docs/runtime/runtime_ide.md)
-for plan inspection and configuration.
+![Figure 2. Agent architecture](docs/assets/presentation/agent-architecture.webp)
 
-**Structured agent intelligence.** High-level decision layers interpret evidence
-and select bounded actions; middle-level procedures manage the task; low-level
-tools execute it and return observations. LLM judgment complements numerical
-methods and established workflows rather than replacing their computations.
-The [control model](docs/runtime/three_level_control_model.md) explains the
-levels, and the [agent references](docs/agents/README.md) map each agent's
-implemented decisions, tools, and handoffs.
+*Figure 2. Agent architecture.*
 
-**Shared safety and knowledge.** Guardian/Safety reviews execution conditions
-and continuation, while Knowledge/Evidence preserves artifacts, curates memory,
-and supplies relevant context. These responsibilities span the architecture;
-they are not simply two more sequential experiment steps. See
-[Guardian](docs/agents/guardian_agent.md) and [Knowledge](docs/agents/knowledge_agent.md)
-for their respective contracts.
+![Figure 3. Integration architecture](docs/assets/presentation/integration-architecture.webp)
 
-**Replaceable integration interfaces.** Registered tools and device bridges
-connect agent procedures to VLA/LeRobot robotics, device APIs, desktop-operated
-instruments, and computation. This separates research coordination from
-equipment-specific execution and supports reuse of existing laboratory
-hardware. The [bridge references](docs/device_bridges/README.md) describe these
-interfaces; the [API and connection matrix](docs/agents/agent_api_connection_matrix.md)
-shows which agents consume them.
+*Figure 3. Integration architecture.*
+
+- Plan routing and specialist-agent coordination — [System architecture](docs/paper/02_system_architecture.md).
+- High/Middle/Low responsibilities and shared safety and knowledge — [Control model](docs/runtime/three_level_control_model.md).
+- Agent tool calls, contracts, and external connections — [API and connection matrix](docs/agents/agent_api_connection_matrix.md).
 
 ## Closed Loop
 

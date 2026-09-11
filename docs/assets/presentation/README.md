@@ -21,7 +21,8 @@ results were synthesized for the paper evidence package.
 
 | Asset | Prompt source | Used in |
 |---|---|---|
-| Orchestration-plan system architecture | [Initial prompt](orchestration-plan-architecture.txt) · [Graph refinement](orchestration-plan-architecture-revision.txt) · [Label correction](orchestration-plan-architecture-label-fix.txt) | Root README System Architecture; 2560 × 1440, high quality, WebP |
+| Framework overview, agent architecture, integration architecture | [Three-figure prompts](architecture-figures.jsonl) | Root README System Architecture; three independent 1920 × 960 figures, high quality, WebP |
+| Previous combined architecture (superseded) | [Initial prompt](orchestration-plan-architecture.txt) · [Graph refinement](orchestration-plan-architecture-revision.txt) · [Label correction](orchestration-plan-architecture-label-fix.txt) | Retained source history; no longer embedded in the root README |
 | Structured AI laboratory overview | [Hero prompt](hero-structured-ai.txt) | Root README, Korean overview, paper introduction |
 | Ten agent role diagrams | [Batch prompts](image-prompts.jsonl) | [Agent references](../../agents/README.md) |
 | Vision capture-first diagram | [Vision prompt](vision-correction.txt) | Vision reference; supersedes its initial batch image |
