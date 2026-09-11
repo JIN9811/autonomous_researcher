@@ -26,20 +26,37 @@ related_docs:
 supersedes: []
 -->
 
-# AX4LAB <sub>Powered by the ATR Framework</sub>
-
 ![AX4LAB — Autonomous Research Platform](docs/assets/branding/ax4lab-banner.png)
+
+<div align="center">
+
+# AX4LAB
+
+<sub>Powered by the ATR Framework</sub>
+
+<p>
+  <a href="README.en.md"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat&amp;logo=python&amp;logoColor=white" alt="Python 3.11 or later"></a>
+  <a href="docs/agents/agent_api_connection_matrix.md"><img src="https://img.shields.io/badge/FastAPI-10324D?style=flat&amp;logo=fastapi&amp;logoColor=white" alt="FastAPI"></a>
+  <a href="docs/runtime/langgraph_runtime.md"><img src="https://img.shields.io/badge/LangGraph-10324D?style=flat&amp;logo=langgraph&amp;logoColor=white" alt="LangGraph"></a>
+  <a href="docs/device_bridges/lerobot_bridge.md"><img src="https://img.shields.io/badge/LeRobot-10324D?style=flat&amp;logo=huggingface&amp;logoColor=white" alt="LeRobot"></a>
+  <a href="README.en.md"><img src="https://img.shields.io/badge/vLLM-10324D?style=flat" alt="vLLM"></a>
+</p>
 
 ### Simple hardware. Structured intelligence. Self-driving laboratories.
 
-AX4LAB adds a **structured AI control architecture to existing laboratories**.
-Specialist agents connect reasoning, procedures, and device execution across
-AI-native robots, API-controlled devices, and PC-operated instruments.
+<p>
+  <strong>Multi-agent AI for existing laboratories.</strong><br>
+  Connect research reasoning, procedures, and device execution<br>
+  across AI-native robots, API-controlled devices, and PC-operated instruments.
+</p>
 
-The approach combines **equipment reuse, a VLA-enabled robot arm, and advanced
-software coordination**. It aims to reduce dependence on bespoke fixtures and
-dedicated transfer automation while retaining the laboratory's existing
-equipment and working environment.
+<p>
+  <strong>Reuse equipment. Connect with VLA. Coordinate through software.</strong><br>
+  Designed to reduce reliance on bespoke fixtures and dedicated transfer automation<br>
+  while preserving existing equipment and the working environment.
+</p>
+
+</div>
 
 [한국어 안내](README.ko.md)
 
