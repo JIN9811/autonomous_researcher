@@ -22,19 +22,19 @@ const context = vm.createContext({ window: {}, graph });
 vm.runInContext(fs.readFileSync(path.join(root, 'web/static/runtime_graph_geometry.js'), 'utf8'), context);
 vm.runInContext(frontend.slice(start, end), context);
 const model = vm.runInContext(`(() => {
-  // Document-only geometry: preserve the GUI's relative layout and topology,
-  // but spend less width on empty space and more on readable labels.
-  const width = 224, height = 92;
+  // Document-only geometry: retain the GUI topology with generous spacing.
+  // README uses a horizontal viewport rather than shrinking the whole map.
+  const width = 224, height = 84;
   runtimeMapGeometryOptions = () => ({
     nodeWidth: width, nodeHeight: height, edgeSpacing: 14,
     parallelSpacing: 26, handlePercent: 0.28, outwardOffset: 8,
   });
   graph.nodes.forEach(n => {
-    n.position = { x: n.position.x * 0.8, y: n.position.y * 0.9 };
+    n.position = { x: n.position.x * 1.15, y: n.position.y };
   });
   const normalized = RUNTIME_MAP_GEOMETRY.normalizeNodePositions(graph, {
     grid: 8, nodeWidth: width, nodeHeight: height,
-    collisionGapX: 24, collisionGapY: 24,
+    collisionGapX: 56, collisionGapY: 40,
   });
   const edges = runtimeMapEdges(normalized);
   return {
@@ -73,12 +73,12 @@ for (let i = 0; i < model.nodes.length; i++) {
 const esc = s => String(s ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;')
   .replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 const palette = {
-  logical_transition: ['#176b96', '', 'Default route'],
-  conditional: ['#39799a', '8 5', 'Conditional route'],
-  control_overlay: ['#9d8958', '10 8', 'Guardian / control'],
-  device_bridge: ['#4898a4', '6 5', 'Device bridge'],
-  evidence_flow: ['#518675', '5 6', 'Evidence'],
-  runtime_sidecar: ['#9585a6', '12 5 3 5', 'Sidecar'],
+  logical_transition: ['#315C9B', '', 'Default route'],
+  conditional: ['#315C9B', '8 5', 'Conditional route'],
+  control_overlay: ['#B26A00', '10 8', 'Guardian / control'],
+  device_bridge: ['#397B8C', '6 5', 'Device bridge'],
+  evidence_flow: ['#2E7D59', '5 6', 'Evidence'],
+  runtime_sidecar: ['#806699', '12 5 3 5', 'Sidecar'],
 };
 function wrapLabel(label) {
   const lines = [''];
@@ -104,11 +104,11 @@ const edges = [...model.edges].sort((a, b) => Number(a.type === 'logical_transit
 const nodes = model.nodes.map(n => {
   const label = (n.label || n.id).replace(/ Agent$/, '').replace(/ Plane$/, '');
   const lines = wrapLabel(label);
-  const color = n.kind === 'bridge' ? '#4898a4' : n.kind === 'evidence_plane' ? '#518675' : n.kind === 'sidecar' ? '#9d8958' : '#93b5c6';
-  const fill = n.kind === 'agent' ? '#f0f7fb' : '#ffffff';
+  const color = n.kind === 'bridge' ? '#397B8C' : n.kind === 'evidence_plane' ? '#2E7D59' : n.kind === 'sidecar' ? '#B26A00' : '#315C9B';
+  const fill = n.kind === 'evidence_plane' ? '#E9F7EF' : n.kind === 'sidecar' ? '#FFF1D6' : '#EEF4FF';
   const dashed = n.metadata?.runtime_node === 'sidecar' || ['bridge', 'evidence_plane'].includes(n.kind);
   const text = lines.map((line, i) => `<tspan x="${model.width / 2}" y="${model.height / 2 - (lines.length - 1) * 14 + i * 28}">${esc(line)}</tspan>`).join('');
-  return `<g data-node-id="${esc(n.id)}" transform="translate(${n.position.x} ${n.position.y})"><title>${esc(n.label)} · ${esc(n.handler || n.metadata?.plane || n.id)}</title><rect width="${model.width}" height="${model.height}" rx="10" fill="${fill}" stroke="${color}" stroke-width="1.6"${dashed ? ' stroke-dasharray="6 4"' : ''}/><text fill="#15394f" font-size="24" font-weight="600" text-anchor="middle" dominant-baseline="middle">${text}</text></g>`;
+  return `<g data-node-id="${esc(n.id)}" transform="translate(${n.position.x} ${n.position.y})"><title>${esc(n.label)} · ${esc(n.handler || n.metadata?.plane || n.id)}</title><rect width="${model.width}" height="${model.height}" rx="10" fill="${fill}" stroke="${color}" stroke-width="1.5"${dashed ? ' stroke-dasharray="6 4"' : ''}/><text fill="#172B42" font-size="22" font-weight="400" text-anchor="middle" dominant-baseline="middle">${text}</text></g>`;
 }).join('\n');
 const legend = Object.entries(palette).map(([type, [color, dash, label]], i) => {
   const x = 52 + (i % 3) * ((width - 104) / 3);
@@ -121,7 +121,7 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${
 <!-- Regenerate: node docs/assets/readme/export-orchestration-route.cjs -->
 <defs>${markers}</defs>
 <rect width="100%" height="100%" fill="#ffffff"/>
-<g font-family="Arial, Helvetica, sans-serif">${edges}\n${nodes}\n${legend}</g>
+<g font-family="DejaVu Sans, Arial, sans-serif">${edges}\n${nodes}\n${legend}</g>
 </svg>
 `;
 const target = path.join(__dirname, 'orchestration-route.svg');
