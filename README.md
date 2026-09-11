@@ -30,10 +30,6 @@ supersedes: []
 
 ![AX4LAB — Autonomous Research Platform](docs/assets/branding/ax4lab-banner.png)
 
-<p align="center">
-  <img src="docs/assets/branding/ax4lab-logo.png" alt="AX4LAB logo" width="180">
-</p>
-
 ### Simple hardware. Structured intelligence. Self-driving laboratories.
 
 AX4LAB adds a **structured AI control architecture to existing laboratories**.
@@ -57,6 +53,10 @@ equipment and working environment.
 | **[Documentation index](docs/README.md)** | All references, guides, and documentation standards. |
 
 [한국어 안내](README.ko.md)
+
+<p align="center">
+  <img src="docs/assets/branding/ax4lab-logo.png" alt="AX4LAB logo" width="180">
+</p>
 
 ![ATR integrates existing equipment into a closed research loop](docs/assets/presentation/structured-ai-lab.webp)
 
