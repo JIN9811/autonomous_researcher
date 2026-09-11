@@ -99,7 +99,12 @@ ATR coordinates research tasks through configurable orchestration plans.
 *Figure 3. Integration architecture.*
 
 - Plan routing and specialist-agent coordination — [System architecture](docs/paper/02_system_architecture.md).
+- Plan inspection, configuration, and execution monitoring — [Runtime IDE](docs/runtime/runtime_ide.md).
 - High/Middle/Low responsibilities and shared safety and knowledge — [Control model](docs/runtime/three_level_control_model.md).
+- Each agent's decisions, tools, and handoffs — [Agent references](docs/agents/README.md).
+- Execution checks and continuation review — [Guardian](docs/agents/guardian_agent.md).
+- Artifact curation, memory, and scoped retrieval — [Knowledge](docs/agents/knowledge_agent.md).
+- Robotics, device APIs, desktop workflows, and computation interfaces — [Bridge references](docs/device_bridges/README.md).
 - Agent tool calls, contracts, and external connections — [API and connection matrix](docs/agents/agent_api_connection_matrix.md).
 
 ## Closed Loop
