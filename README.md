@@ -39,10 +39,18 @@ software coordination**. It aims to reduce dependence on bespoke fixtures and
 dedicated transfer automation while retaining the laboratory's existing
 equipment and working environment.
 
-[Paper](docs/paper/README.md) · [Results](docs/paper/06_evaluation_and_results.md) ·
-[Setup](README.en.md) · [Agents](docs/agents/README.md) ·
-[Device bridges](docs/device_bridges/README.md) · [All docs](docs/README.md) ·
-[한국어](README.ko.md)
+| Documentation | What you'll find |
+|:---|:---|
+| **[Paper overview](docs/paper/README.md)** | Research motivation, contributions, and the paper reading path. |
+| **[System architecture](docs/paper/02_system_architecture.md)** | Orchestration, agent responsibilities, and execution interfaces. |
+| **[Agent references](docs/agents/README.md)** | Each agent's role, LLM decisions, tools, and verification. |
+| **[Device bridges](docs/device_bridges/README.md)** | Robotics, equipment, and computation integration contracts. |
+| **[Runtime IDE](docs/runtime/runtime_ide.md)** | Plan editing, execution control, and run inspection. |
+| **[Results and evidence](docs/paper/06_evaluation_and_results.md)** | Demonstrated outcomes and their supporting artifacts. |
+| **[Setup and operation](README.en.md)** | Installation, configuration, and operator workflows. |
+| **[Documentation index](docs/README.md)** | All references, guides, and documentation standards. |
+
+[한국어 안내](README.ko.md)
 
 ![ATR integrates existing equipment into a closed research loop](docs/assets/presentation/structured-ai-lab.webp)
 
