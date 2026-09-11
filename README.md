@@ -42,6 +42,8 @@ supersedes: []
   <a href="README.en.md"><img src="https://img.shields.io/badge/vLLM-10324D?style=flat" alt="vLLM"></a>
 </p>
 
+<p align="center"><a href="README.ko.md">Korean</a></p>
+
 ### Simple hardware. Structured intelligence. Self-driving laboratories.
 
 <p>
@@ -57,8 +59,6 @@ supersedes: []
 </p>
 
 </div>
-
-[한국어 안내](README.ko.md)
 
 <p align="center">
   <img src="docs/assets/branding/ax4lab-logo.png" alt="AX4LAB logo" width="180">
@@ -137,7 +137,9 @@ The Orchestrator translates research intent into agent tasks and coordinates
 their results through a configurable Orchestration Plan. Specialist agents
 contribute capabilities to that plan rather than defining one fixed sequence.
 
-![Research intent, configurable Orchestration Plan, and specialist-agent task/result exchange](docs/assets/presentation/framework-overview.webp)
+<p align="center">
+  <img src="docs/assets/presentation/framework-overview.webp" alt="Research intent, configurable Orchestration Plan, and specialist-agent task/result exchange" width="70%">
+</p>
 
 - Task routing and specialist-agent coordination — [System architecture](docs/paper/02_system_architecture.md).
 - Plan configuration and execution monitoring — [Runtime IDE](docs/runtime/runtime_ide.md).
