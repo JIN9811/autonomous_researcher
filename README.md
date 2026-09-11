@@ -41,8 +41,14 @@ software coordination**. It aims to reduce dependence on bespoke fixtures and
 dedicated transfer automation while retaining the laboratory's existing
 equipment and working environment.
 
+<p align="center">
+  <img src="docs/assets/branding/ax4lab-logo.png" alt="AX4LAB logo" width="180">
+</p>
+
+<div align="center">
+
 | Documentation | What you'll find |
-|:---|:---|
+|:---:|:---:|
 | **[Paper overview](docs/paper/README.md)** | Research motivation, contributions, and the paper reading path. |
 | **[System architecture](docs/paper/02_system_architecture.md)** | Orchestration, agent responsibilities, and execution interfaces. |
 | **[Agent references](docs/agents/README.md)** | Each agent's role, LLM decisions, tools, and verification. |
@@ -52,11 +58,9 @@ equipment and working environment.
 | **[Setup and operation](README.en.md)** | Installation, configuration, and operator workflows. |
 | **[Documentation index](docs/README.md)** | All references, guides, and documentation standards. |
 
-[한국어 안내](README.ko.md)
+</div>
 
-<p align="center">
-  <img src="docs/assets/branding/ax4lab-logo.png" alt="AX4LAB logo" width="180">
-</p>
+[한국어 안내](README.ko.md)
 
 ![AX4LAB transforms an existing laboratory through Multi-Agent AI orchestration, with a Device Bridge connecting AI-native, API-enabled, and PC-operated equipment](docs/assets/presentation/laboratory-transformation-sunburst.webp)
 
