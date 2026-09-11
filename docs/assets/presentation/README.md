@@ -22,10 +22,19 @@ images or numerical results were synthesized for the paper evidence package.
 | Asset | Prompt source | Used in |
 |---|---|---|
 | Multi-agent laboratory transformation | [Sunburst prompt](laboratory-transformation-sunburst.txt) · [Flat-style refinement](laboratory-transformation-sunburst-refinement.txt) · [Diagonal layout and bullet alignment](laboratory-transformation-sunburst-diagonal.txt) | Root README Graphical Abstract, Korean overview and paper introduction; approved image retained unchanged |
+| SDL adoption barriers and AX4LAB transformation approach | [Motivation and contribution prompts](motivation-contribution-sunburst.jsonl), entries 1–2; [Control-routing refinement](ax4lab-transformation-approach-refinement.txt) | Root README Motivation and System Contribution; conceptual problem/response pair, not cost or generalization evidence |
 | Framework overview, agent architecture, integration architecture | [Sunburst paper-figure prompts](sunburst-paper-figures.jsonl), entries 1–3 | Root README System Architecture |
 | Ten agent role diagrams | [Sunburst paper-figure prompts](sunburst-paper-figures.jsonl), entries 4–13; [Design handoff refinement](sunburst-design-handoff-refinement.txt) | [Agent references](../../agents/README.md); existing image paths retained |
 
 Final agent assets reside in [agent figures](../../agents/assets/figures/).
+
+The motivation/contribution pair adds
+[adoption barriers](self-driving-lab-barriers.webp) and
+[the AX4LAB approach](ax4lab-transformation-approach.webp). The first isolates
+acquisition, integration, and reconfiguration burdens; the second shows how
+hierarchical automation, multi-agent coordination, and VLA-based handling
+connect existing laboratory capabilities. Neither replaces the approved
+Graphical Abstract or the three detailed architecture overviews.
 
 ## Paper-Figure Style
 

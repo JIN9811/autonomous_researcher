@@ -70,60 +70,82 @@ equipment and working environment.
 
 *Multi-agent orchestration connects existing equipment through device bridges.*
 
-## Problem
+## Motivation — Barriers to Self-Driving Laboratories
 
-Laboratories rarely start with a uniform automation interface. A robot may use
-a learned policy, a printer may expose an API, and a measurement instrument may
-only be accessible through its desktop software. Connecting those capabilities
-to research decisions is the systems problem ATR addresses.
+Building a self-driving laboratory remains a costly integration project, not
+simply a matter of adding an AI model. Existing laboratories contain useful
+instruments designed for human operation, while dedicated automation introduces
+additional hardware, software, and engineering requirements.
 
-The hardware remains simple; the software carries the integration complexity.
-A VLA-enabled arm provides the manipulation capability, with LeRobot offering
-an integration boundary for supported replacement robots. Changing an arm
-still requires compatible hardware support, calibration, and policy validation.
+- **Acquisition cost:** Replacing working instruments with automation-ready alternatives, or adding dedicated handling systems, increases the investment needed to begin.
+- **Integration complexity:** API-controlled devices, desktop-operated instruments, and manual sample handling expose different interfaces that must work together.
+- **Reconfiguration burden:** Automation tied to particular tasks, fixtures, and device combinations can require substantial reintegration when the experiment changes.
 
-Reusing instruments avoids replacing them solely for automation, while learned
-manipulation offers an alternative to task-specific fixtures and transfer
-mechanisms. These are architectural cost advantages, not a measured comparison
-of total deployment cost.
+These adoption challenges motivate work on
+[SDL accessibility](https://www.nature.com/articles/s41467-025-59231-1) and
+[modular laboratory interfaces](https://www.nist.gov/programs-projects/development-standards-support-modular-and-autonomous-laboratory-ecosystem).
+Our research question is: **How can an existing laboratory become self-driving
+without rebuilding its automation around every new experimental workflow?**
+
+![Three barriers between an existing laboratory and a self-driving laboratory: acquisition cost, integration complexity, and reconfiguration burden](docs/assets/presentation/self-driving-lab-barriers.webp)
 
 ## System Contribution
 
-ATR places High/Middle/Low control and the cross-cutting Guardian/Safety and
-Knowledge/Evidence responsibilities over existing laboratory capabilities.
-VLA-based manipulation connects otherwise separate physical stages; the
-software architecture coordinates that capability with research decisions.
+AX4LAB transforms existing laboratory capabilities through **hierarchical
+automation, multi-agent coordination, and VLA-based manipulation**. Built on
+the ATR Framework, it places the integration logic in reusable software
+interfaces and agent-owned procedures while retaining existing instruments.
 
-The primary contribution is the integrated research system—not a new optimizer,
-robot policy, or finite-element solver.
-
-| System idea | What ATR implements | Read more |
+| System contribution | How it addresses the barrier | Read more |
 |---|---|---|
-| Existing-lab transformation | Agent-owned procedures call tools and bridges for robot, API, and desktop operations | [Equipment interfaces](docs/device_bridges/README.md) |
-| VLA-enabled physical integration | A robot arm connects physical stages, offering an alternative to bespoke transfer fixtures; LeRobot separates supported robot integration from task coordination | [Manipulation](docs/agents/manipulation_agent.md) |
-| Structured AI layers | LLM decision layers interpret evidence and select bounded tools; numerical and device execution stay with their specialist implementations | [Agent responsibilities](docs/agents/README.md) |
-| Closed-loop experimental feedback | Design, fabrication, observation, transfer, testing, analysis, knowledge, and next-candidate selection share explicit handoffs | [Closed-loop method](docs/paper/03_closed_loop_method.md) |
+| Hierarchical automation and Device Bridges | High-Level decisions, Middle-Level procedures, and Low-Level tools separate research logic from API, desktop, and robot interfaces, enabling existing equipment to participate. | [Equipment interfaces](docs/device_bridges/README.md) |
+| Multi-agent coordination | Specialist agents own task decisions, procedures, and evidence contracts; orchestration plans compose their capabilities so changes can be localized to the affected agents and interfaces. | [Agent responsibilities](docs/agents/README.md) |
+| VLA-based physical integration | A learned-policy robot arm connects otherwise manual handling stages, offering an alternative to task-specific transfer fixtures; LeRobot separates supported robot integration from task coordination. | [Manipulation](docs/agents/manipulation_agent.md) |
+
+The contribution is their **integration into a reusable research framework**:
+simple hardware, advanced software coordination, and experiment feedback through
+explicit agent handoffs. The current [experimental cycle](docs/paper/03_closed_loop_method.md)
+is one configured application of that architecture.
+
+![AX4LAB combines multi-agent orchestration, High/Middle/Low automation, Device Bridges, and VLA-based manipulation over existing laboratory equipment](docs/assets/presentation/ax4lab-transformation-approach.webp)
 
 ### System Architecture
 
-ATR coordinates research tasks through configurable orchestration plans.
+The framework separates coordination between agents, responsibility within
+agents, and integration with laboratory equipment.
 
-![Figure 1. Framework overview](docs/assets/presentation/framework-overview.webp)
+#### Framework — Configurable Orchestration
 
-*Figure 1. Framework overview.*
+The Orchestrator translates research intent into agent tasks and coordinates
+their results through a configurable Orchestration Plan. Specialist agents
+contribute capabilities to that plan rather than defining one fixed sequence.
 
-![Figure 2. Agent architecture](docs/assets/presentation/agent-architecture.webp)
+![Research intent, configurable Orchestration Plan, and specialist-agent task/result exchange](docs/assets/presentation/framework-overview.webp)
 
-*Figure 2. Agent architecture.*
+- Task routing and specialist-agent coordination — [System architecture](docs/paper/02_system_architecture.md).
+- Plan configuration and execution monitoring — [Runtime IDE](docs/runtime/runtime_ide.md).
 
-![Figure 3. Integration architecture](docs/assets/presentation/integration-architecture.webp)
+#### Agents — Decisions, Procedures, and Tools
 
-*Figure 3. Integration architecture.*
+High-Level control owns task decisions, Middle-Level control supervises
+procedures, and Low-Level tools perform execution. Guardian/Safety and
+Knowledge/Evidence span these responsibilities; they are not extra sequential
+stages. LLM decisions use the owning agent's permitted tools and evidence.
 
-- Plan routing and specialist-agent coordination — [System architecture](docs/paper/02_system_architecture.md).
-- Plan inspection, configuration, and execution monitoring — [Runtime IDE](docs/runtime/runtime_ide.md).
-- High/Middle/Low responsibilities and shared safety and knowledge — [Control model](docs/runtime/three_level_control_model.md).
-- Agent tool calls, contracts, and external connections — [API and connection matrix](docs/agents/agent_api_connection_matrix.md).
+![High-Level decisions, Middle-Level procedures, and Low-Level tools with cross-cutting Guardian/Safety and Knowledge/Evidence](docs/assets/presentation/agent-architecture.webp)
+
+- Responsibility levels and shared evidence — [Control model](docs/runtime/three_level_control_model.md).
+
+#### Integration — Reusing Existing Equipment
+
+Agent procedures reach laboratory capabilities through tools and Device
+Bridges. These adapters accommodate learned robot policies, device APIs, and
+desktop-operated instruments, keeping device-specific execution separate from
+the research plan.
+
+![Agent tools and Device Bridges connect learned robot policies, API-controlled devices, and PC-operated instruments](docs/assets/presentation/integration-architecture.webp)
+
+- Tool calls, contracts, and external connections — [API and connection matrix](docs/agents/agent_api_connection_matrix.md).
 
 ## Closed Loop
 
