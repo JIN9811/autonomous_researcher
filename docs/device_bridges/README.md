@@ -14,7 +14,9 @@ scope:
   - providers
   - runtime_sidecars
   - api_connections
-summary: Canonical entry point for ATR device-bridge roles, APIs, protocols, effects, evidence, and recovery boundaries.
+summary: How AX4LAB connects existing laboratory capabilities through device-specific execution interfaces, with bridge references and integration contracts.
+last_verified: 2026-09-11
+verified_against: cf8cb9f
 related_docs:
   - docs/device_bridges/bridge_api_connection_matrix.md
   - docs/agents/agent_api_connection_matrix.md
@@ -24,32 +26,114 @@ related_docs:
 supersedes: []
 -->
 
-# Device Bridge Reference Index
+# Device Bridges
 
-## Summary
+<sub>Reuse laboratory equipment. Separate research decisions from device execution.</sub>
 
-This index is the canonical entry point for the eight operator-visible device
-bridge boundaries in ATR. A boundary may be a manager, provider, runtime
-sidecar, external-computation adapter, or deterministic test substitute. The
-classification is explicit because `/api/bridges`, the Tool Registry, API
-workspaces, and Python subclasses do not expose identical inventories.
+AX4LAB connects **robot policies, native device APIs, and desktop-operated
+instruments** through tools and Device Bridges. Agents own research decisions
+and task assessment; bridges adapt those requests to the selected equipment
+and return status, observations, and artifacts.
 
-The implementation baseline is `188a1d6`. Later commits in this documentation
-series change documents, figures, validation, and tests—not bridge runtime
-behavior.
+The integration layer lets the framework reuse existing capabilities without
+embedding a particular printer protocol, robot process, or desktop workflow
+inside the research plan. Computation adapters and virtual devices use related
+integration boundaries, but are distinguished from physical equipment below.
 
-## 한국어 안내
+## Integration Architecture
 
-각 Reference는 실제 역할, API와 도구, 외부 연결, 설정·비밀정보 경계, 실행
-모드, 물리·데스크톱 효과, 증거, 실패 후 재시도 조건을 코드 기준으로
-정리합니다. 빠르게 확인하려면 `Actual Role`, `Connections and Protocols`,
-`Safety, Approval, and Effect Boundary`, `Errors, Timeouts, and Recovery`
-순서로 읽으십시오.
+Agent procedures call registered tools or shared runtime resources. Managers
+select providers where needed; the owning adapter executes the requested
+operation and exposes evidence for the agent's next decision.
+
+![Specialist agents use tools and Device Bridges to connect robotics, API-controlled devices, and PC-operated instruments, receiving status, observations, and artifacts](assets/figures/device-bridge-overview.webp)
+
+- Agent decisions and tool ownership — [Agent API and Connection Matrix](../agents/agent_api_connection_matrix.md).
+- Protocols, execution modes, and return evidence — [Bridge API and Connection Matrix](bridge_api_connection_matrix.md).
+
+## Integration Approaches
+
+Different interfaces require different adapters, not a new research plan for
+each communication protocol.
+
+| Approach | Existing capability | Adapter responsibility | Evidence returned |
+|---|---|---|---|
+| Policies and robot skills | Learned policies, teleoperation, configured replay | Profile/port/camera handling and execution lifecycle | Session state, telemetry, observations and termination records |
+| Native device control | Device APIs and provider protocols | Connection, artifact transfer, command dispatch and status reconciliation | Job/status responses and artifact identity |
+| Desktop workflow execution | Instrument software without a usable control API | Selected worker, deployed Flow/Skills and bounded GUI actions | Screenshots, step traces, execution records and acquired files |
+
+These are complementary routes. Observation services support physical tasks;
+CAE adapters provide computation; simulators provide explicitly labeled test
+responses. A successful API response alone does not establish task completion.
+
+## Bridge Catalog
+
+The eight core references describe operational capabilities, not eight Python
+classes or eight identical entries in `/api/bridges`.
+
+| Reference | Capability | Owning consumer | Connection / execution |
+|---|---|---|---|
+| [Printer Fleet](printer_fleet_bridge.md) | Provider selection and preparation | Specimen | Shared tool → selected printer provider |
+| [Bambu X2D](bambu_x2d_bridge.md) | Slicing, printer control and ejection artifacts | Specimen through Printer Fleet | Slicer process, MQTT TLS, FTPS and video |
+| [Prusa MK4S](prusa_mk4s_bridge.md) | Printer preparation and provider execution | Specimen through Printer Fleet | PrusaSlicer and PrusaLink HTTP |
+| [LeRobot](lerobot_bridge.md) | Policy rollout, replay, teleoperation and ActiveCam | Manipulation / Vision | Managed processes, serial, camera and optional sidecars |
+| [Windows PyAutoGUI](windows_pyautogui_bridge.md) | Stored desktop workflows and data acquisition | Equipment | Token-gated HTTP to the selected Windows or Local worker |
+| [UTM Vision](utm_vision_bridge.md) | Test-area observation and verification evidence | Vision | Camera/ROS streams, calibration and pose services |
+| [CAE Computation](cae_computation_bridges.md) | Preparation, solver execution and model adapters | Analysis | Filesystem, solver processes and field postprocessing |
+| [Base and Simulators](base_simulator_bridges.md) | Deterministic substitutes for non-hardware checks | Test harness / configured agents | In-process simulated responses |
+
+The [PLC operator guide](plc_safety_bridge.md) covers a separate Controller-owned
+supervisory transport. It is graph/workspace-visible but is not an additional
+agent stage or a device tool selected by an LLM.
+
+## Execution and Evidence
+
+**Agents decide what to do and assess the outcome; device integrations own how
+the requested operation reaches the selected equipment.** Bridge runtimes may
+supervise processes or execute stored workflows without taking ownership of the
+research objective.
+
+| Phase | Owner | What must stay identifiable |
+|---|---|---|
+| Request | Agent procedure / operator surface | Task, requested operation, run and applicable specimen/artifact context |
+| Bind and validate | Tool, manager and provider | Selected profile/worker, executable capability, mode and inputs |
+| Execute and observe | Device runtime | Invocation or session, progress, actual effect and terminal state |
+| Collect evidence | Runtime and artifact services | Logs, captured frames, acquired files and result identity |
+| Assess and hand off | Owning agent | Accepted evidence, next task, operator return or failure |
+
+The concrete payloads differ by bridge. The [matrix](bridge_api_connection_matrix.md#evidence-matrix)
+maps their evidence; [loop artifact archiving](../runtime/loop_artifact_archiving.md)
+describes run/loop/agent/invocation retention.
+
+Current paths worth distinguishing:
+
+- **Equipment:** the stored Flow/Skills execute before terminal agent review. Durable execution records, screenshots and CSV/readiness evidence support assessment without replaying completed work.
+- **Robotics and vision:** rollout/replay termination and fresh visual verification are separate evidence. ActiveCam capture can include robot motion; it is not just an image read.
+- **Analysis:** measured-data handoff can proceed while optional, frozen-input FEM jobs run independently. Saved-field retrieval does not start a solver.
+- **Modes:** TEST does not universally mean no hardware. Selected transport, per-agent settings and live/promotion gates determine the actual effect.
+
+## Extension Points
+
+Extend the narrowest existing boundary that fits the new capability.
+
+| Change | Reuse first | Device-specific work |
+|---|---|---|
+| Another printer | Fleet/profile selection and `printer.prepare` | Provider transport, preparation/status mapping and supported placement/ejection behavior |
+| Another desktop-operated instrument | Equipment worker and Flow/Skill lifecycle | Exact programs, locators, runtime context and exported-data checks |
+| Another supported robot or policy | LeRobot profile and session APIs | Hardware support, calibration, camera mapping and policy/task validation |
+| Another observation source | Existing capture and evidence handoff | Capture adapter, calibration, timestamp and observation semantics |
+| Another computation backend | Analysis request and artifact/job boundaries | Preparation/solve adapter, result parser and numerical verification |
+
+`BaseBridge.execute(command, payload)` is available for adapters that use that
+base contract; it is not the universal interface of every service in this catalog.
+Tool/resource registration lives in `mcp_tools/` and `app/bootstrap.py`. New
+equipment still needs its own integration and validation; registry membership
+does not imply plug-and-play compatibility.
 
 ## Scope and Classification
 
-The canonical unit is an operational capability, not one source file. Labels
-used below mean:
+<details>
+<summary>Registry, graph and runtime classifications</summary>
 
 | Label | Meaning |
 |---|---|
@@ -61,27 +145,18 @@ used below mean:
 | `artifact_transformer` | changes files but cannot itself command a device |
 | `test_only` | deterministic substitute; does not establish live compatibility |
 
-## Canonical Inventory and Figure Navigation
+`camera_utm_bridge` is a shared visual/equipment evidence projection, not a
+separate implementation of all tools it lists. `prusa_bridge` is a legacy
+graph entry while Bambu is the checked-in default provider. CAE's graph entry
+names the facade; CalculiX and PINN have additional registered tools. PLC is a
+separate Controller service. Graph labels are not a current model/provider roster.
 
-| Reference | Interface role | Main consumer |
-|---|---|---|
-| [Printer Fleet](printer_fleet_bridge.md) | Provider selection and coordination | Specimen |
-| [Bambu X2D](bambu_x2d_bridge.md) | Printer control and artifacts | Printer Fleet |
-| [Prusa MK4S](prusa_mk4s_bridge.md) | Printer provider | Printer Fleet |
-| [LeRobot](lerobot_bridge.md) | Robotics and observation runtime | Manipulation / Vision |
-| [Windows PyAutoGUI](windows_pyautogui_bridge.md) | Desktop workflows and acquisition | Equipment |
-| [UTM Vision](utm_vision_bridge.md) | Test-area visual evidence | Vision |
-| [CAE Computation](cae_computation_bridges.md) | Simulation adapters | Analysis |
-| [Base and Simulators](base_simulator_bridges.md) | Non-hardware test substitutes | Test-mode agents |
+</details>
 
-Each reference includes its own Flow, Execution, and Connections diagrams.
-For detailed classifications and APIs, see the [connection matrix](bridge_api_connection_matrix.md).
+## Detailed Figure Navigation
 
-`camera_utm_bridge` is the graph-projected identifier for the UTM/visual
-evidence capability. CAE's graph entry names the facade, while CalculiX and
-PINN are separately registered implementations within the computation
-boundary. Bambu is the configured default printer provider but is not a
-separate graph bridge entry at this baseline.
+Existing Flow, Execution and Connections diagrams remain unchanged. The new
+overview is conceptual; owning references and source code provide detail.
 
 <details>
 <summary>Detailed figure index</summary>
@@ -130,26 +205,27 @@ Reference, code is current and the document has drift.
 
 | Existing Guide | Canonical Reference | Continued use |
 |---|---|---|
-| `docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md` | [Bambu X2D](bambu_x2d_bridge.md) | Bambu setup, artifact and supervised validation detail |
-| `docs/hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt` | [Prusa MK4S](prusa_mk4s_bridge.md) | Phase-one Prusa workflow context |
-| `docs/hardware/lerobot_robotis_manipulation_runtime_guideline.md` | [LeRobot](lerobot_bridge.md) | ROBOTIS/LeRobot operating detail |
-| `docs/hardware/windows_pyautogui_equipment_agent_guideline.md` | [Windows PyAutoGUI](windows_pyautogui_bridge.md) | equipment console, proof, and live-operation detail |
-| `docs/hardware/windows_pyautogui_bridge_windows_setup.md` | [Windows PyAutoGUI](windows_pyautogui_bridge.md) | Windows installation procedure |
-| `docs/hardware/utm_ros_vision_runtime_bridge.md` | [UTM Vision](utm_vision_bridge.md) | ROS/camera installation and operation |
-| `docs/hardware/isaac_sim_robotis_omx_mirror_mode.md` | [LeRobot](lerobot_bridge.md) | Isaac mirror-mode procedure |
+| [Bambu operation](../hardware/bambulab_x2d_device_bridge_runtime_guideline.md) | [Bambu X2D](bambu_x2d_bridge.md) | Setup, artifacts and supervised validation |
+| [Prusa workflow](../hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) | [Prusa MK4S](prusa_mk4s_bridge.md) | Phase-one workflow context |
+| [LeRobot operation](../hardware/lerobot_robotis_manipulation_runtime_guideline.md) | [LeRobot](lerobot_bridge.md) | ROBOTIS/LeRobot operating detail |
+| [Equipment operation](../hardware/windows_pyautogui_equipment_agent_guideline.md) | [Windows PyAutoGUI](windows_pyautogui_bridge.md) | Console, evidence and live operation |
+| [Windows setup](../hardware/windows_pyautogui_bridge_windows_setup.md) | [Windows PyAutoGUI](windows_pyautogui_bridge.md) | Installation procedure |
+| [Vision runtime](../hardware/utm_ros_vision_runtime_bridge.md) | [UTM Vision](utm_vision_bridge.md) | ROS/camera installation and operation |
+| [Isaac mirror](../hardware/isaac_sim_robotis_omx_mirror_mode.md) | [LeRobot](lerobot_bridge.md) | Mirror-mode procedure |
 
 ## Verification Method
 
 - graph classification: `graphs/configs/atr_closed_loop.yaml`;
 - tool/resource registration: `app/bootstrap.py` and `mcp_tools/*_tools.py`;
 - runtime behavior: owning `device_bridges/*.py` implementations;
-- API families: imported FastAPI routes and handlers in `app/main.py`;
+- API families: route declarations in `app/main.py`, `app/analysis_fem_routes.py`
+  and `app/cae_fields_routes.py`; deployed `/openapi.json` owns the instance schema;
 - configuration: `configs/devices.yaml` and `configs/lerobot.yaml`;
 - operator behavior: linked Guides and focused bridge/API tests.
 
-The figures are explanatory `inspection` projections. Dashed paths are
-conditional, optional, compatibility, or test paths; they are not evidence of
-successful live execution.
+The detailed SVG figures are explanatory `inspection` projections. Their dashed
+paths denote conditional, optional, compatibility, or test paths. The overview
+uses a dashed line for returned evidence. Neither establishes live execution.
 
 ## Update Checklist
 
@@ -173,9 +249,15 @@ documentation inspection.
 
 ## Index Verification
 
-Verified on 2026-08-09 against implementation baseline `188a1d6`, the primary
-graph metadata, runtime bootstrap registrations, bridge implementations,
-configuration, API handlers, and focused test inventory.
+Updated on 2026-09-11 by source inspection at `cf8cb9f`: graph metadata,
+bootstrap/tool/resource registration, owning implementations, Equipment Runtime,
+Analysis job/field routes and the existing references. This document refresh
+does not start a server, device, model rollout or solver.
+
+Individual references retain their own verification dates and evidence scope;
+the current index does not silently recertify their older snapshots. The new
+[overview prompt](../assets/presentation/device-bridge-overview.txt) and
+[image provenance](../assets/presentation/README.md) accompany the figure.
 
 ## Related Documents
 

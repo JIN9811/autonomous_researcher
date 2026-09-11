@@ -17,9 +17,10 @@ flows remain in the editable SVG/DOT figures in each agent reference.
 
 The active generated figures use **GPT Image 2.5 Sunburst** through the imagegen
 skill's bundled CLI/API workflow: high-quality WebP, normally 1536 × 1024;
-the System Contribution strip is 2172 × 724 (3:1), generated with automatic
-canvas sizing. No experiment
-images or numerical results were synthesized for the paper evidence package.
+the System Contribution strip is 2172 × 724 (3:1), and the Device Bridge overview
+is 1983 × 793 (approximately 5:2), both generated with automatic canvas sizing.
+No experiment images or numerical results were synthesized for the paper
+evidence package.
 
 | Asset | Prompt source | Used in |
 |---|---|---|
@@ -28,6 +29,7 @@ images or numerical results were synthesized for the paper evidence package.
 | Three system contributions | [Horizontal three-module redesign](system-contribution-horizontal.txt) · [Two-line typography refinement](system-contribution-typography.txt) | Root README immediately above the contribution table; three parallel contributions, not sequential runtime stages |
 | Framework overview, agent architecture, integration architecture | [Sunburst paper-figure prompts](sunburst-paper-figures.jsonl), entries 1–3 | Root README System Architecture |
 | Ten agent role diagrams | [Sunburst paper-figure prompts](sunburst-paper-figures.jsonl), entries 4–13; [Design handoff refinement](sunburst-design-handoff-refinement.txt) | [Agent references](../../agents/README.md); existing image paths retained |
+| Device Bridge integration overview | [Device Bridge prompt](device-bridge-overview.txt) · [Shared evidence-return refinement](device-bridge-evidence-refinement.txt) | [Device Bridge index](../../device_bridges/README.md); physical integration approaches with a separate evidence return |
 
 Final agent assets reside in [agent figures](../../agents/assets/figures/).
 
