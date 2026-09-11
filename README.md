@@ -41,6 +41,8 @@ software coordination**. It aims to reduce dependence on bespoke fixtures and
 dedicated transfer automation while retaining the laboratory's existing
 equipment and working environment.
 
+[한국어 안내](README.ko.md)
+
 <p align="center">
   <img src="docs/assets/branding/ax4lab-logo.png" alt="AX4LAB logo" width="180">
 </p>
@@ -60,7 +62,7 @@ equipment and working environment.
 
 </div>
 
-[한국어 안내](README.ko.md)
+## Graphical Abstract
 
 ![AX4LAB transforms an existing laboratory through Multi-Agent AI orchestration, with a Device Bridge connecting AI-native, API-enabled, and PC-operated equipment](docs/assets/presentation/laboratory-transformation-sunburst.webp)
 
