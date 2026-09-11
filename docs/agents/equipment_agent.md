@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: system
 status: active
@@ -26,9 +26,13 @@ related_docs:
   - docs/strategy/2026-08-27-windows-lab-equipment-consolidation-report.md
   - docs/superpowers/plans/2026-09-09-equipment-workflow-decision-layer.md
 supersedes: []
----
+-->
 
 # Lab Equipment Agent Reference
+
+![equipment agent role overview](assets/figures/equipment-overview.webp)
+
+*Role overview; detailed execution and connection diagrams follow below.*
 
 ## Status at a Glance
 

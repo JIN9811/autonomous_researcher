@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: runtime
 status: active
@@ -17,7 +17,7 @@ related_docs:
   - docs/agents/equipment_agent.md
   - docs/hardware/windows_pyautogui_bridge_windows_setup.md
   - Pyautogui_server_for_window/README.md
----
+-->
 
 # Windows PyAutoGUI Bridge Reference
 

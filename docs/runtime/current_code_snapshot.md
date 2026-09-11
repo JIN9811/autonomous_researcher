@@ -27,7 +27,7 @@ verified_against: 4329853
 related_docs:
   - docs/runtime/langgraph_runtime.md
   - docs/runtime/closed_loop_and_pages_reference.md
-  - docs/knowledge/knowledge_graph_operations.ko.md
+  - docs/knowledge/markdown_memory_operations.ko.md
 supersedes: []
 ---
 
@@ -1360,5 +1360,5 @@ directory proven to have been created by that import.
 
 - [LangGraph Runtime](langgraph_runtime.md)
 - [Closed Loop and Pages Reference](closed_loop_and_pages_reference.md)
-- [Knowledge Graph Operations Guide](../knowledge/knowledge_graph_operations.ko.md)
+- [Markdown Knowledge Operations Guide](../knowledge/markdown_memory_operations.ko.md)
 - [Documentation Standard](../standards/documentation_standard.md)

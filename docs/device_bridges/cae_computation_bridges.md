@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: runtime
 status: active
@@ -37,7 +37,7 @@ related_docs:
   - docs/agents/analysis_agent.md
   - docs/paper/appendix_a_interfaces.md
 supersedes: []
----
+-->
 
 # CAE, CalculiX, and PINN Bridge Reference
 

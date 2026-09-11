@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: guide
 subtype: how_to
 status: review
@@ -31,7 +31,7 @@ related_docs:
   - docs/paper/06_evaluation_and_results.md
   - docs/paper/artifact_manifest.yaml
 supersedes: []
----
+-->
 
 # Reproducibility
 

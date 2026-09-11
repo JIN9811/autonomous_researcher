@@ -1,7 +1,7 @@
 ---
 doc_type: guide
 subtype: operations_runbook
-status: superseded
+status: archived
 superseded_by: [docs/knowledge/markdown_memory_operations.ko.md]
 authority: procedural
 audience:
@@ -36,7 +36,7 @@ supersedes: []
 > **운영 경로 종료 — 2026-09-10.** 아래는 과거 버전의 운영 기록이다.
 > 현재 앱은 Knowledge graph/Neo4j 동기화·reconciliation을 사용하지 않는다.
 > 기존 데이터는 삭제하지 않았으며, 현재 절차는
-> [Markdown Knowledge 운영 가이드](markdown_memory_operations.ko.md)를 따른다.
+> [Markdown Knowledge 운영 가이드](../../knowledge/markdown_memory_operations.ko.md)를 따른다.
 
 ## Summary
 
@@ -360,7 +360,7 @@ unit/integration/browser 검증을
 
 ## Related Reference
 
-- [Current Code Snapshot](../runtime/current_code_snapshot.md)
-- [LangGraph Runtime](../runtime/langgraph_runtime.md)
-- [Closed Loop and Pages Reference](../runtime/closed_loop_and_pages_reference.md)
-- [Documentation Standard](../standards/documentation_standard.md)
+- [Current Code Snapshot](../../runtime/current_code_snapshot.md)
+- [LangGraph Runtime](../../runtime/langgraph_runtime.md)
+- [Closed Loop and Pages Reference](../../runtime/closed_loop_and_pages_reference.md)
+- [Documentation Standard](../../standards/documentation_standard.md)

@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: system
 status: active
@@ -26,9 +26,13 @@ related_docs:
   - docs/agents/manipulation_agent.md
   - docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md
 supersedes: []
----
+-->
 
 # Specimen Making Agent Reference
+
+![specimen agent role overview](assets/figures/specimen-overview.webp)
+
+*Role overview; detailed execution and connection diagrams follow below.*
 
 ## Status at a Glance
 

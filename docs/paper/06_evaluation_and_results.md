@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: evidence
 subtype: benchmark
 status: review
@@ -31,7 +31,7 @@ related_docs:
   - docs/paper/07_reproducibility.md
   - docs/paper/09_claim_evidence_traceability.md
 supersedes: []
----
+-->
 
 # Evaluation and Results
 

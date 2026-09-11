@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: index
 subtype: index
 status: active
@@ -18,9 +18,11 @@ related_docs:
   - docs/runtime/current_code_snapshot.md
   - docs/runtime/three_level_control_model.md
 supersedes: []
----
+-->
 
 # Autonomous Researcher Framework
+
+[Research overview](README.md) · [Paper](docs/paper/README.md) · [Agents](docs/agents/README.md) · [Device bridges](docs/device_bridges/README.md)
 
 Autonomous Researcher Framework is a local multi-agent automation system for closed-loop experimental research.
 It connects experiment design, specimen manufacturing, equipment control, analysis, Bayesian optimization, and safety gating through a FastAPI server, Live GUI, LangGraph runtime, device bridges, BO/CAE workspaces, LeRobot tooling, and Runtime IDE.
@@ -317,7 +319,7 @@ the Bambu printer bridge is inactive.
 - [Experiment runtime](docs/runtime/autonomous_experiment_runtime.md)
 - [Live GUI guide](docs/gui/gui.md)
 - [API key / OpenAI fallback](docs/runtime/api_keys.md)
-- [Knowledge Graph operations guide (Korean)](docs/knowledge/knowledge_graph_operations.ko.md)
+- [Markdown Knowledge operations guide (Korean)](docs/knowledge/markdown_memory_operations.ko.md)
 - [Documentation governance Design](docs/superpowers/specs/2026-08-08-documentation-governance-design.md)
 - [First autonomous run tutorial](docs/tutorials/first_autonomous_run.en.md)
 - [GitHub/version-control rules](docs/repository/github_version_control.md)

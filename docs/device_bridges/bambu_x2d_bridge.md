@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: runtime
 status: active
@@ -29,7 +29,7 @@ related_docs:
   - docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md
   - docs/agents/specimen_agent.md
 supersedes: []
----
+-->
 
 # Bambu Lab X2D Bridge Reference
 

@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: standard
 subtype: documentation
 status: active
@@ -18,7 +18,7 @@ related_docs:
   - docs/templates/document_types.md
   - docs/superpowers/specs/2026-08-09-github-paper-first-documentation-design.md
 supersedes: []
----
+-->
 
 # Paper Documentation Standard
 
@@ -63,11 +63,28 @@ claim-evidence contract; the general Standard governs document taxonomy.
 
 Paper-facing documents MUST present contributions in this order:
 
-1. the laboratory-automation problem and evidence gap;
-2. the safety-gated closed-loop multi-agent system;
-3. evidence capture, auditability, and recovery boundaries;
-4. evaluation status and limitations;
-5. the platform and extension model.
+1. the research purpose: integrate existing, heterogeneous laboratory equipment;
+2. the closed-loop multi-agent system and the role of scoped agent decisions;
+3. demonstrated results linked directly to retained artifacts;
+4. the supporting platform and extension model;
+5. reproduction details, operational constraints, and remaining evaluation gaps.
+
+The central thesis MUST be structured AI layers transforming an existing
+laboratory with minimal hardware modification. Equipment reuse, VLA-enabled
+manipulation, and software coordination form the system argument. Reduced
+equipment and bespoke-fixture costs are consequences of that architecture,
+not its sole novelty or a measured cost-saving claim. LeRobot-based robot
+replacement MUST be qualified by supported hardware, calibration, and policy
+validation.
+Application-specific equipment MUST be presented as a demonstration instance,
+not as the platform definition. Safety and evidence support the system thesis;
+they MUST NOT replace its purpose in the title or opening paragraph.
+
+The landing page SHOULD use compact linked navigation, a restrained overview,
+and short role/reference tables. Descriptive pages SHOULD place technical
+metadata in the hidden carrier specified by the general Documentation Standard.
+Generated conceptual overviews MAY supplement editable technical diagrams;
+retain model/prompts and label the overview separately from empirical evidence.
 
 The platform MUST be described as enabling and extending the system thesis. It
 MUST NOT displace the system contribution through earlier placement, greater
@@ -259,13 +276,18 @@ affiliations, venues, dates, or persistent identifiers.
 
 ## Figures and Tables
 
-Each figure MUST have:
+Each numbered technical figure MUST have:
 
 - an editable source under `docs/paper/assets/figures/`;
 - a checked-in SVG rendering with the same stem;
 - a numbered caption stating its message, scope, and evidence state;
 - readable labels without relying on color alone;
 - explicit styling for gates, durable evidence, and optional paths.
+
+Unnumbered conceptual raster overviews MAY accompany these technical figures.
+They MUST retain generation prompts and model provenance, use descriptive alt
+text and a scope caption, and MUST NOT substitute for a technical figure or an
+experimental result. Their source directory may be `docs/assets/presentation/`.
 
 Figures MUST distinguish current implementation from proposed or unevaluated
 paths. Screenshots MUST include the route, viewport, collection date, and

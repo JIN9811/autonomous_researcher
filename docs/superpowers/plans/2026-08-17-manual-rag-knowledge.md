@@ -130,7 +130,7 @@
 ### Task 7: Documentation and End-to-End Verification
 
 **Files:**
-- Modify: `docs/knowledge/knowledge_graph_operations.ko.md`
+- Modify: `docs/oldversion/knowledge/knowledge_graph_operations.ko.md`
 - Modify: `docs/agents/knowledge_agent.md`
 - Modify: `docs/agents/equipment_agent.md`
 - Modify: `docs/document_manifest.yaml`
@@ -144,4 +144,3 @@
 - [ ] Query Skill authoring, procedure, warning, and recovery examples and verify page citations.
 - [ ] Run focused Knowledge/Equipment/API/UI tests and documentation validation.
 - [ ] Run `git diff --check` and inspect generated artifacts for secrets or copied manual images.
-

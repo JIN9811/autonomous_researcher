@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: standard
 subtype: documentation
 status: active
@@ -16,7 +16,7 @@ related_docs:
   - docs/superpowers/specs/2026-08-08-documentation-governance-design.md
   - docs/superpowers/specs/2026-08-09-device-bridge-reference-documentation-design.md
 supersedes: []
----
+-->
 
 # Documentation Standard
 
@@ -114,7 +114,19 @@ Design, Plan, and Evidence documents MUST qualify unimplemented statements with
 
 ## Required Metadata
 
-Governed Markdown MUST begin with YAML front matter containing:
+Governed Markdown MUST begin with YAML metadata. Public-facing pages SHOULD use
+an HTML comment carrier to avoid rendering metadata as a GitHub table:
+
+```text
+<!-- atr-doc
+doc_type: reference
+... other required YAML fields ...
+-->
+```
+
+The existing `---` front-matter carrier remains supported. Both carriers MUST
+be validated against the same required fields. Metadata must precede the title.
+The required content includes:
 
 ```yaml
 doc_type: reference
@@ -237,6 +249,12 @@ presented as five sequential runtime stages or forced top-level chapters.
 Detailed contracts SHOULD have one explanatory home with links from other
 sections. Tables SHOULD compare contracts/settings/results; figures SHOULD show
 flow and connections; short prose SHOULD explain decisions and limitations.
+A representative conceptual overview MAY appear immediately below the agent
+H1, before Status at a Glance. AI-generated raster overviews MUST retain their
+model and prompts; they supplement, rather than replace, the required editable
+SVG/DOT diagrams. They MUST NOT depict unimplemented authority or empirical
+results. Reader-facing inventory tables SHOULD link to the actual documents.
+
 Repeated defensive wording SHOULD be consolidated into Safety and Verification
 without removing substantive constraints or unverified-scope disclosures.
 
@@ -459,8 +477,9 @@ All bridge figures MUST:
 
 `docs/device_bridges/README.md` MUST link all eight References and all 24
 renderings. The root `README.md` MUST contain exactly eight canonical rows and
-direct links to each Reference and its three figures whenever all References
-are governed. `bridge_api_connection_matrix.md` owns cross-boundary comparison;
+direct links to each Reference whenever all References are governed. The bridge
+index is the canonical home for direct figure navigation; the root landing page
+need not repeat all 24 figure links. `bridge_api_connection_matrix.md` owns cross-boundary comparison;
 individual References own lifecycle and recovery detail.
 
 Executable code, checked-in configuration, Tool Registry wiring, imported API

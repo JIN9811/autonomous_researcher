@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: index
 subtype: index
 status: active
@@ -26,9 +26,19 @@ related_docs:
   - docs/runtime/runtime_ide.md
   - docs/runtime/three_level_control_model.md
 supersedes: []
----
+-->
 
 # Documentation Index
+
+| Read about | Start here |
+|---|---|
+| Research purpose and system contribution | [Paper overview](paper/README.md) |
+| Demonstrated closed loop | [Results and evidence](paper/06_evaluation_and_results.md) |
+| Agent roles, decisions, and tools | [Ten agent references](agents/README.md) |
+| Existing equipment integration | [Device bridge references](device_bridges/README.md) |
+| Installation and operation | [English guide](../README.en.md) |
+| Documentation conventions | [Writing rules](standards/documentation_standard.md) |
+
 
 ## Summary
 
@@ -91,7 +101,7 @@ Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 
 | Index | [../README.md](../README.md), 이 문서 | 언어·대상·도메인별 탐색 |
 | Standard | [standards/documentation_standard.md](standards/documentation_standard.md), [standards/paper_documentation_standard.md](standards/paper_documentation_standard.md) | 문서 분류·권한·메타데이터·검증 및 논문 주장·증거·도표·공개 규칙 |
 | Reference | [agents/README.md](agents/README.md), [device_bridges/README.md](device_bridges/README.md), [device_bridges/bridge_api_connection_matrix.md](device_bridges/bridge_api_connection_matrix.md), [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md), [runtime/runtime_ide.md](runtime/runtime_ide.md), [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md), [runtime/three_level_control_model.md](runtime/three_level_control_model.md) | 현재 코드가 실제로 제공하는 역할·계약·동작과 편집 가능한 Graphviz/SVG 피겨 |
-| Guide | [knowledge/knowledge_graph_operations.ko.md](knowledge/knowledge_graph_operations.ko.md), `tutorials/` | 사용자·운영자 절차와 성공/복구 기준 |
+| Guide | [knowledge/markdown_memory_operations.ko.md](knowledge/markdown_memory_operations.ko.md), `tutorials/` | 사용자·운영자 절차와 성공/복구 기준 |
 | Design | [superpowers/specs/2026-08-08-documentation-governance-design.md](superpowers/specs/2026-08-08-documentation-governance-design.md) | 승인 또는 제안된 목표 결정; 현재 구현 사실이 아님 |
 | Plan | `superpowers/plans/` | Design을 실현하는 작업 순서 |
 | Evidence | [paper/06_evaluation_and_results.md](paper/06_evaluation_and_results.md), [paper/09_claim_evidence_traceability.md](paper/09_claim_evidence_traceability.md), 조사·감사·시험 보고서 | 기록된 날짜·환경·방법에 한정된 근거 |
@@ -201,7 +211,7 @@ UTM ROS Vision Runtime은 현재 Windows/PyAutoGUI UTM 제어 증거를 대체�
 | Live GUI | `/live`, `/planning` | `web/templates/planning.html`, `web/static/planning.js` | [gui/gui.md](gui/gui.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md) |
 | Runtime IDE | `/ide` | `web/templates/runtime_ide.html`, `web/static/runtime_ide.js` | [runtime/runtime_ide.md](runtime/runtime_ide.md), [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md) |
 | Module Management | `/module-management` | `web/templates/module_management.html`, `web/static/module_management.js` | [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md), [runtime/agent_program_baseline.md](runtime/agent_program_baseline.md) |
-| Knowledge Workspace | `/knowledge` | `web/templates/knowledge.html`, `web/static/knowledge.js`, `web/static/knowledge.css` | [knowledge/knowledge_graph_operations.ko.md](knowledge/knowledge_graph_operations.ko.md), [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md) |
+| Knowledge Workspace | `/knowledge` | `web/templates/knowledge.html`, `web/static/knowledge.js`, `web/static/knowledge.css` | [knowledge/markdown_memory_operations.ko.md](knowledge/markdown_memory_operations.ko.md), [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md) |
 | 3DP Workspace | `/printer` | `web/templates/printer.html`, `web/static/printer.js`, `device_bridges/bambu_bridge.py`, `device_bridges/bambu_autoejection.py` | [gui/gui.md](gui/gui.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md), [hardware/bambulab_x2d_device_bridge_runtime_guideline.md](hardware/bambulab_x2d_device_bridge_runtime_guideline.md), [../개선안/13_bambulab_x2d_spc_device_bridge_research.md](../개선안/13_bambulab_x2d_spc_device_bridge_research.md), [../개선안/14_bambulab_gcode_autoejection_runtime_plan.md](../개선안/14_bambulab_gcode_autoejection_runtime_plan.md), [tutorials/device_workspace_3dp_usage.ko.md](tutorials/device_workspace_3dp_usage.ko.md), [hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt](hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) |
 | Vision Camera Bridge | `/device-bridge/vision-utm` | `web/templates/vision_utm_device_bridge.html`, `web/static/vision_utm_device_bridge.js`, `device_bridges/utm_runtime_bridge.py` | [hardware/utm_ros_vision_runtime_bridge.md](hardware/utm_ros_vision_runtime_bridge.md), [tutorials/device_workspace_vision_camera_bridge_usage.ko.md](tutorials/device_workspace_vision_camera_bridge_usage.ko.md), [../개선안/17_vision_agent_camera_device_bridge_live_gui_plan.md](../개선안/17_vision_agent_camera_device_bridge_live_gui_plan.md) |
 | LeRobot Workspace | `/lerobot` | `web/templates/lerobot.html`, `web/static/lerobot.js` | [hardware/lerobot_robotis_manipulation_runtime_guideline.md](hardware/lerobot_robotis_manipulation_runtime_guideline.md), [hardware/isaac_sim_robotis_omx_mirror_mode.md](hardware/isaac_sim_robotis_omx_mirror_mode.md), [runtime/lerobot_dataset_policy_naming.md](runtime/lerobot_dataset_policy_naming.md) |
@@ -226,7 +236,7 @@ UTM ROS Vision Runtime은 현재 Windows/PyAutoGUI UTM 제어 증거를 대체�
 | Manipulation | `graphs/modules/manipulation` | [Manipulation](agents/manipulation_agent.md) | [기존 Pi0.5 transfer guideline](agents/manipulation_pi05_transfer_runtime_guideline.txt), [LeRobot runtime](hardware/lerobot_robotis_manipulation_runtime_guideline.md) |
 | Lab Equipment | `graphs/modules/equipment` | [Lab Equipment](agents/equipment_agent.md) | [Windows equipment guideline](hardware/windows_pyautogui_equipment_agent_guideline.md), [UTM completion audit](hardware/evidence/lab_equipment_utm_visual_control_completion_audit.md) |
 | Analysis | `graphs/modules/analysis` | [Analysis](agents/analysis_agent.md) | [기존 UTM guideline](agents/analysis_utm_runtime_guideline.txt), [기존 CAE guideline](agents/cae_analysis_runtime_guideline.txt) |
-| Knowledge | `graphs/modules/knowledge` | [Knowledge](agents/knowledge_agent.md) | [Self-evolution guideline](agents/knowledge_agent_self_evolution_runtime_guideline.md), [Knowledge operations](knowledge/knowledge_graph_operations.ko.md) |
+| Knowledge | `graphs/modules/knowledge` | [Knowledge](agents/knowledge_agent.md) | [Self-evolution guideline](agents/knowledge_agent_self_evolution_runtime_guideline.md), [Knowledge operations](knowledge/markdown_memory_operations.ko.md) |
 | BO | `graphs/modules/bo` | [Bayesian Optimization](agents/bo_agent.md) | [기존 BO guideline](agents/bo_agent_runtime_guideline.txt) |
 | Guardian | `graphs/modules/guardian` | [Guardian](agents/guardian_agent.md) | [Guardian graph-wide safety](runtime/guardian_graphwide_safety.md), [Agent program baseline](runtime/agent_program_baseline.md) |
 

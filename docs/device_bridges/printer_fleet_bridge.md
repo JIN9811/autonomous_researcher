@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: runtime
 status: active
@@ -27,7 +27,7 @@ related_docs:
   - docs/device_bridges/prusa_mk4s_bridge.md
   - docs/agents/specimen_agent.md
 supersedes: []
----
+-->
 
 # Printer Fleet Bridge Reference
 

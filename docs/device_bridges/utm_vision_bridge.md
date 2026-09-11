@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: runtime
 status: active
@@ -31,7 +31,7 @@ related_docs:
   - docs/agents/equipment_agent.md
   - docs/hardware/utm_ros_vision_runtime_bridge.md
 supersedes: []
----
+-->
 
 # UTM Vision Bridge Reference
 

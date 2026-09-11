@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: system
 status: active
@@ -23,9 +23,13 @@ related_docs:
   - docs/runtime/loop_artifact_archiving.md
   - docs/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md
 supersedes: []
----
+-->
 
 # Design Agent Reference
+
+![design agent role overview](assets/figures/design-overview.webp)
+
+*Role overview; detailed execution and connection diagrams follow below.*
 
 ## Status at a Glance
 

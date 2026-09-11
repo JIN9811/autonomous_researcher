@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: system
 status: active
@@ -32,7 +32,7 @@ related_docs:
   - docs/paper/appendix_a_interfaces.md
   - docs/runtime/current_code_snapshot.md
 supersedes: []
----
+-->
 
 # Agent API and Connection Matrix
 

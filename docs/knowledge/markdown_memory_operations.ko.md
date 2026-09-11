@@ -16,7 +16,7 @@ verified_against: working-tree-2026-09-10
 related_docs:
   - docs/agents/knowledge_agent.md
   - docs/knowledge/manual_rag_knowledge.ko.md
-supersedes: [docs/knowledge/knowledge_graph_operations.ko.md]
+supersedes: [docs/oldversion/knowledge/knowledge_graph_operations.ko.md]
 ---
 
 # Markdown Knowledge 운영 가이드

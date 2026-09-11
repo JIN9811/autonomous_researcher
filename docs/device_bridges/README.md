@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: index
 subtype: index
 status: active
@@ -22,7 +22,7 @@ related_docs:
   - docs/paper/appendix_a_interfaces.md
   - docs/standards/documentation_standard.md
 supersedes: []
----
+-->
 
 # Device Bridge Reference Index
 
@@ -63,22 +63,41 @@ used below mean:
 
 ## Canonical Inventory and Figure Navigation
 
-| Boundary | Classification | Primary consumers | Canonical Reference | Figures |
-|---|---|---|---|---|
-| Printer Fleet | `tool_registered`, `api_exposed` | Specimen, Guardian, operator | [Printer Fleet](printer_fleet_bridge.md) | [Flow](assets/figures/printer_fleet_01_system_handoffs.svg) · [Execution](assets/figures/printer_fleet_02_execution_effect_boundary.svg) · [Connections](assets/figures/printer_fleet_03_api_connection_architecture.svg) |
-| Bambu Lab X2D | `provider`, `api_exposed`, `artifact_transformer` | Printer Fleet, Specimen, operator | [Bambu X2D](bambu_x2d_bridge.md) | [Flow](assets/figures/bambu_x2d_01_system_handoffs.svg) · [Execution](assets/figures/bambu_x2d_02_execution_effect_boundary.svg) · [Connections](assets/figures/bambu_x2d_03_api_connection_architecture.svg) |
-| Prusa MK4S | `graph_projected`, `provider`, `tool_registered`, `api_exposed` | Printer Fleet, Specimen, operator | [Prusa MK4S](prusa_mk4s_bridge.md) | [Flow](assets/figures/prusa_mk4s_01_system_handoffs.svg) · [Execution](assets/figures/prusa_mk4s_02_execution_effect_boundary.svg) · [Connections](assets/figures/prusa_mk4s_03_api_connection_architecture.svg) |
-| LeRobot | `graph_projected`, `tool_registered`, `api_exposed`, `runtime_sidecar` | Manipulation, Vision, Guardian, operator | [LeRobot](lerobot_bridge.md) | [Flow](assets/figures/lerobot_01_system_handoffs.svg) · [Execution](assets/figures/lerobot_02_execution_effect_boundary.svg) · [Connections](assets/figures/lerobot_03_api_connection_architecture.svg) |
-| Windows PyAutoGUI | `graph_projected`, `tool_registered`, `api_exposed`, `runtime_sidecar` | Equipment, Vision, Analysis, Guardian, operator | [Windows PyAutoGUI](windows_pyautogui_bridge.md) | [Flow](assets/figures/windows_pyautogui_01_system_handoffs.svg) · [Execution](assets/figures/windows_pyautogui_02_execution_effect_boundary.svg) · [Connections](assets/figures/windows_pyautogui_03_api_connection_architecture.svg) |
-| UTM Vision | `graph_projected`, `api_exposed`, `runtime_sidecar` | Vision, Equipment, Manipulation, operator | [UTM Vision](utm_vision_bridge.md) | [Flow](assets/figures/utm_vision_01_system_handoffs.svg) · [Execution](assets/figures/utm_vision_02_execution_effect_boundary.svg) · [Connections](assets/figures/utm_vision_03_api_connection_architecture.svg) |
-| CAE Computation | `graph_projected`, `tool_registered`, `api_exposed`, `runtime_sidecar` | Analysis, Guardian, operator | [CAE Computation](cae_computation_bridges.md) | [Flow](assets/figures/cae_computation_01_system_handoffs.svg) · [Execution](assets/figures/cae_computation_02_execution_effect_boundary.svg) · [Connections](assets/figures/cae_computation_03_api_connection_architecture.svg) |
-| Base and Simulators | `test_only` | Tool fixtures and test-mode agents | [Base and Simulators](base_simulator_bridges.md) | [Flow](assets/figures/base_simulator_01_system_handoffs.svg) · [Execution](assets/figures/base_simulator_02_execution_effect_boundary.svg) · [Connections](assets/figures/base_simulator_03_api_connection_architecture.svg) |
+| Reference | Interface role | Main consumer |
+|---|---|---|
+| [Printer Fleet](printer_fleet_bridge.md) | Provider selection and coordination | Specimen |
+| [Bambu X2D](bambu_x2d_bridge.md) | Printer control and artifacts | Printer Fleet |
+| [Prusa MK4S](prusa_mk4s_bridge.md) | Printer provider | Printer Fleet |
+| [LeRobot](lerobot_bridge.md) | Robotics and observation runtime | Manipulation / Vision |
+| [Windows PyAutoGUI](windows_pyautogui_bridge.md) | Desktop workflows and acquisition | Equipment |
+| [UTM Vision](utm_vision_bridge.md) | Test-area visual evidence | Vision |
+| [CAE Computation](cae_computation_bridges.md) | Simulation adapters | Analysis |
+| [Base and Simulators](base_simulator_bridges.md) | Non-hardware test substitutes | Test-mode agents |
+
+Each reference includes its own Flow, Execution, and Connections diagrams.
+For detailed classifications and APIs, see the [connection matrix](bridge_api_connection_matrix.md).
 
 `camera_utm_bridge` is the graph-projected identifier for the UTM/visual
 evidence capability. CAE's graph entry names the facade, while CalculiX and
 PINN are separately registered implementations within the computation
 boundary. Bambu is the configured default printer provider but is not a
 separate graph bridge entry at this baseline.
+
+<details>
+<summary>Detailed figure index</summary>
+
+| Boundary | Diagrams |
+|---|---|
+| Printer Fleet | [Flow](assets/figures/printer_fleet_01_system_handoffs.svg) · [Execution](assets/figures/printer_fleet_02_execution_effect_boundary.svg) · [Connections](assets/figures/printer_fleet_03_api_connection_architecture.svg) |
+| Bambu Lab X2D | [Flow](assets/figures/bambu_x2d_01_system_handoffs.svg) · [Execution](assets/figures/bambu_x2d_02_execution_effect_boundary.svg) · [Connections](assets/figures/bambu_x2d_03_api_connection_architecture.svg) |
+| Prusa MK4S | [Flow](assets/figures/prusa_mk4s_01_system_handoffs.svg) · [Execution](assets/figures/prusa_mk4s_02_execution_effect_boundary.svg) · [Connections](assets/figures/prusa_mk4s_03_api_connection_architecture.svg) |
+| LeRobot | [Flow](assets/figures/lerobot_01_system_handoffs.svg) · [Execution](assets/figures/lerobot_02_execution_effect_boundary.svg) · [Connections](assets/figures/lerobot_03_api_connection_architecture.svg) |
+| Windows PyAutoGUI | [Flow](assets/figures/windows_pyautogui_01_system_handoffs.svg) · [Execution](assets/figures/windows_pyautogui_02_execution_effect_boundary.svg) · [Connections](assets/figures/windows_pyautogui_03_api_connection_architecture.svg) |
+| UTM Vision | [Flow](assets/figures/utm_vision_01_system_handoffs.svg) · [Execution](assets/figures/utm_vision_02_execution_effect_boundary.svg) · [Connections](assets/figures/utm_vision_03_api_connection_architecture.svg) |
+| CAE Computation | [Flow](assets/figures/cae_computation_01_system_handoffs.svg) · [Execution](assets/figures/cae_computation_02_execution_effect_boundary.svg) · [Connections](assets/figures/cae_computation_03_api_connection_architecture.svg) |
+| Base and Simulators | [Flow](assets/figures/base_simulator_01_system_handoffs.svg) · [Execution](assets/figures/base_simulator_02_execution_effect_boundary.svg) · [Connections](assets/figures/base_simulator_03_api_connection_architecture.svg) |
+
+</details>
 
 ## Recommended Reading Paths
 

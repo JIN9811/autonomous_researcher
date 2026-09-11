@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: index
 subtype: index
 status: active
@@ -22,7 +22,7 @@ related_docs:
   - docs/runtime/three_level_control_model.md
   - docs/standards/documentation_standard.md
 supersedes: []
----
+-->
 
 # Agent Reference Index
 
@@ -72,11 +72,10 @@ sections. APIs, configuration, safety and artifacts remain directly accessible;
 the five areas are responsibility categories, not forced chapters or runtime
 stages. Other agents adopt this layout during their own restructuring.
 
-Every Reference includes `Flow` and `Execution` figures. Design, Specimen, Vision,
-Manipulation, Equipment, Analysis, and Knowledge also include a `Connections`
-figure because their bridge, external-service, device, or persistence boundary
-needs a separate view. Each checked-in SVG has an editable same-stem Graphviz
-source under `assets/figures/`.
+Each Reference opens with a representative role overview. These generated
+overviews supplement the editable Flow, Execution, and applicable Connections
+figures below. [Generation prompts](../assets/presentation/image-prompts.jsonl)
+record the shared visual brief.
 
 Figures are `inspection`-backed explanatory projections. The executable code,
 primary graph, module manifests, imported FastAPI routes, and bridge/service
@@ -84,21 +83,39 @@ implementations remain authoritative.
 
 ## Canonical Inventory
 
-| Plane/order | Agent | Python implementation | Module manifest | Canonical Reference | Figures |
-|---|---|---|---|---|---|
-| Control plane | Orchestrator | `agents/orchestrator_agent.py` | `graphs/modules/orchestrator/module.yaml` | [Orchestrator](orchestrator_agent.md) | [Flow](assets/figures/orchestrator_01_closed_loop_handoffs.svg) · [Execution](assets/figures/orchestrator_02_execution_effect_boundary.svg) |
-| 1 | Design | `agents/design_agent.py` | `graphs/modules/design/module.yaml` | [Design](design_agent.md) | [Flow](assets/figures/design_01_closed_loop_handoffs.svg) · [Execution](assets/figures/design_02_execution_effect_boundary.svg) · [Connections](assets/figures/design_03_api_connection_architecture.svg) |
-| 2 | Specimen Making | `agents/specimen_agent.py` | `graphs/modules/specimen/module.yaml` | [Specimen Making](specimen_agent.md) | [Flow](assets/figures/specimen_01_closed_loop_handoffs.svg) · [Execution](assets/figures/specimen_02_execution_effect_boundary.svg) · [Connections](assets/figures/specimen_03_api_connection_architecture.svg) |
-| 3 + verification sidecars | Vision | `agents/vision_agent.py` | `graphs/modules/vision/module.yaml` | [Vision](vision_agent.md) | [Flow](assets/figures/vision_01_closed_loop_handoffs.svg) · [Execution](assets/figures/vision_02_execution_effect_boundary.svg) · [Connections](assets/figures/vision_03_api_connection_architecture.svg) |
-| Physical transfer branch | Manipulation | `agents/manipulation_agent.py` | `graphs/modules/manipulation/module.yaml` | [Manipulation](manipulation_agent.md) | [Flow](assets/figures/manipulation_01_closed_loop_handoffs.svg) · [Execution](assets/figures/manipulation_02_execution_effect_boundary.svg) · [Connections](assets/figures/manipulation_03_api_connection_architecture.svg) |
-| 4 | Lab Equipment | `agents/equipment_agent.py` | `graphs/modules/equipment/module.yaml` | [Lab Equipment](equipment_agent.md) | [Flow](assets/figures/equipment_01_closed_loop_handoffs.svg) · [Execution](assets/figures/equipment_02_execution_effect_boundary.svg) · [Connections](assets/figures/equipment_03_api_connection_architecture.svg) |
-| 5 | Analysis | `agents/analysis_agent.py` | `graphs/modules/analysis/module.yaml` | [Analysis](analysis_agent.md) | [Flow](assets/figures/analysis_01_closed_loop_handoffs.svg) · [Execution](assets/figures/analysis_02_execution_effect_boundary.svg) · [Connections](assets/figures/analysis_03_api_connection_architecture.svg) |
-| 6 | Knowledge | `agents/knowledge_agent.py` | `graphs/modules/knowledge/module.yaml` | [Knowledge](knowledge_agent.md) | [Flow](assets/figures/knowledge_01_closed_loop_handoffs.svg) · [Execution](assets/figures/knowledge_02_execution_effect_boundary.svg) · [Connections](assets/figures/knowledge_03_api_connection_architecture.svg) |
-| 7 | BO | `agents/bo_agent.py` | `graphs/modules/bo/module.yaml` | [Bayesian Optimization](bo_agent.md) | [Flow](assets/figures/bo_01_closed_loop_handoffs.svg) · [Execution](assets/figures/bo_02_execution_effect_boundary.svg) · [API](assets/figures/bo_03_api_connection_architecture.svg) |
-| Safety/control plane | Guardian | `agents/guardian_agent.py` | `graphs/modules/guardian/module.yaml` | [Guardian](guardian_agent.md) | [Flow](assets/figures/guardian_01_closed_loop_handoffs.svg) · [Execution](assets/figures/guardian_02_execution_effect_boundary.svg) |
+| Agent reference | Main responsibility | Implementation |
+|---|---|---|
+| [Orchestrator](orchestrator_agent.md) | Intent and stage handoffs | [Source](../../agents/orchestrator_agent.py) · [Module](../../graphs/modules/orchestrator/module.yaml) |
+| [Design](design_agent.md) | Candidate suitability | [Source](../../agents/design_agent.py) · [Module](../../graphs/modules/design/module.yaml) |
+| [Specimen](specimen_agent.md) | Fabrication tools | [Source](../../agents/specimen_agent.py) · [Module](../../graphs/modules/specimen/module.yaml) |
+| [Vision](vision_agent.md) | Visual evidence | [Source](../../agents/vision_agent.py) · [Module](../../graphs/modules/vision/module.yaml) |
+| [Manipulation](manipulation_agent.md) | Robot skills and completion | [Source](../../agents/manipulation_agent.py) · [Module](../../graphs/modules/manipulation/module.yaml) |
+| [Equipment](equipment_agent.md) | Workflows and acquisition | [Source](../../agents/equipment_agent.py) · [Module](../../graphs/modules/equipment/module.yaml) |
+| [Analysis](analysis_agent.md) | Measurements and simulation | [Source](../../agents/analysis_agent.py) · [Module](../../graphs/modules/analysis/module.yaml) |
+| [Knowledge](knowledge_agent.md) | Curation and scoped retrieval | [Source](../../agents/knowledge_agent.py) · [Module](../../graphs/modules/knowledge/module.yaml) |
+| [Bayesian Optimization](bo_agent.md) | Numerical candidate proposals | [Source](../../agents/bo_agent.py) · [Module](../../graphs/modules/bo/module.yaml) |
+| [Guardian](guardian_agent.md) | Execution evidence review | [Source](../../agents/guardian_agent.py) · [Module](../../graphs/modules/guardian/module.yaml) |
 
 The [API and Connection Matrix](agent_api_connection_matrix.md) compares all ten
 agents without repeating full implementation prose.
+
+<details>
+<summary>Detailed figure index</summary>
+
+| Agent | Diagrams |
+|---|---|
+| Orchestrator | [Flow](assets/figures/orchestrator_01_closed_loop_handoffs.svg) · [Execution](assets/figures/orchestrator_02_execution_effect_boundary.svg) |
+| Design | [Flow](assets/figures/design_01_closed_loop_handoffs.svg) · [Execution](assets/figures/design_02_execution_effect_boundary.svg) · [Connections](assets/figures/design_03_api_connection_architecture.svg) |
+| Specimen Making | [Flow](assets/figures/specimen_01_closed_loop_handoffs.svg) · [Execution](assets/figures/specimen_02_execution_effect_boundary.svg) · [Connections](assets/figures/specimen_03_api_connection_architecture.svg) |
+| Vision | [Flow](assets/figures/vision_01_closed_loop_handoffs.svg) · [Execution](assets/figures/vision_02_execution_effect_boundary.svg) · [Connections](assets/figures/vision_03_api_connection_architecture.svg) |
+| Manipulation | [Flow](assets/figures/manipulation_01_closed_loop_handoffs.svg) · [Execution](assets/figures/manipulation_02_execution_effect_boundary.svg) · [Connections](assets/figures/manipulation_03_api_connection_architecture.svg) |
+| Lab Equipment | [Flow](assets/figures/equipment_01_closed_loop_handoffs.svg) · [Execution](assets/figures/equipment_02_execution_effect_boundary.svg) · [Connections](assets/figures/equipment_03_api_connection_architecture.svg) |
+| Analysis | [Flow](assets/figures/analysis_01_closed_loop_handoffs.svg) · [Execution](assets/figures/analysis_02_execution_effect_boundary.svg) · [Connections](assets/figures/analysis_03_api_connection_architecture.svg) |
+| Knowledge | [Flow](assets/figures/knowledge_01_closed_loop_handoffs.svg) · [Execution](assets/figures/knowledge_02_execution_effect_boundary.svg) · [Connections](assets/figures/knowledge_03_api_connection_architecture.svg) |
+| BO | [Flow](assets/figures/bo_01_closed_loop_handoffs.svg) · [Execution](assets/figures/bo_02_execution_effect_boundary.svg) · [API](assets/figures/bo_03_api_connection_architecture.svg) |
+| Guardian | [Flow](assets/figures/guardian_01_closed_loop_handoffs.svg) · [Execution](assets/figures/guardian_02_execution_effect_boundary.svg) |
+
+</details>
 
 ## Three-Level Control Classification
 

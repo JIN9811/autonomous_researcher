@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: system
 status: review
@@ -33,7 +33,7 @@ related_docs:
   - docs/paper/07_reproducibility.md
   - docs/paper/08_safety_ethics_and_limitations.md
 supersedes: []
----
+-->
 
 # Appendix B: Hardware and Deployment
 

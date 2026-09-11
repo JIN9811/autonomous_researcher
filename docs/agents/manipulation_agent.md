@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: system
 status: active
@@ -23,9 +23,13 @@ related_docs:
   - docs/agents/manipulation_pi05_transfer_runtime_guideline.txt
   - docs/hardware/lerobot_robotis_manipulation_runtime_guideline.md
 supersedes: []
----
+-->
 
 # Manipulation Agent Reference
+
+![manipulation agent role overview](assets/figures/manipulation-overview.webp)
+
+*Role overview; detailed execution and connection diagrams follow below.*
 
 ## Status at a Glance
 

@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: system
 status: active
@@ -33,9 +33,13 @@ related_docs:
   - docs/superpowers/specs/2026-09-10-knowledge-markdown-memory-design.md
   - docs/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md
 supersedes: []
----
+-->
 
 # Knowledge Agent Reference
+
+![knowledge agent role overview](assets/figures/knowledge-overview.webp)
+
+*Role overview; detailed execution and connection diagrams follow below.*
 
 ## Status at a Glance
 

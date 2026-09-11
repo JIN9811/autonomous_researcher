@@ -1112,10 +1112,9 @@ or saved connection details:
 memory/windows_pyautogui_connection.json
 ```
 
-## Optional Knowledge Graph Backend
+## Retired Knowledge Graph Backend (Legacy Tooling)
 
-The default Knowledge memory remains file-backed JSON/JSONL and requires no graph database.
-Neo4j/Graphify support is optional and should be installed only when using the Knowledge graph mirror/index layer.
+The active application uses Markdown Knowledge memory and manual retrieval, with existing JSON/JSONL contracts preserved; it requires no graph database. Knowledge graph/Neo4j application routes were retired on 2026-09-10. The dependencies, commands, and former endpoints below describe retained legacy tooling, not current application setup. Use [Markdown Knowledge operations](docs/knowledge/markdown_memory_operations.ko.md) for current procedures.
 
 Install optional dependencies:
 
@@ -1168,7 +1167,7 @@ The CLI also supports `--json-path` for routing the local JSON graph fallback to
 The graph query endpoint supports `project_context` for project code/docs/module graph retrieval separate from runtime experiment memory.
 The installed `graphify` command is also exposed through `/home/jin/.local/bin/graphify`; ATR uses the installed Graphify Python API when `atr knowledge graphify-scan --external-graphify` is used.
 
-The operational Knowledge write path is ontology validation -> append-only JSONL/fsync -> durable outbox -> Neo4j -> acknowledgement. When Neo4j is selected but unavailable, ATR reports degraded state and retains pending outbox events; it does not silently switch operational writes to the JSON graph backend. See `docs/knowledge/knowledge_graph_operations.ko.md`.
+The active Knowledge workflow uses scoped Markdown memory and manual retrieval while preserving ontology definitions and original artifacts. Knowledge graph/Neo4j synchronization and reconciliation are retired; their HTTP endpoints return 410. See `docs/knowledge/markdown_memory_operations.ko.md` for current operation. The graph tooling below is retained legacy context, not an active application dependency.
 For `graphify query`, use the raw Graphify node-link file at `memory/knowledge/graphify/external_raw/graph.json`; use `memory/knowledge/graphify/project_graph.json` for ATR JSON/Neo4j import.
 
 Operational CLI commands:

@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: system
 status: active
@@ -24,9 +24,13 @@ related_docs:
   - docs/runtime/loop_artifact_archiving.md
   - docs/superpowers/specs/2026-09-11-guardian-evidence-decision-design.md
 supersedes: []
----
+-->
 
 # Guardian Agent Reference
+
+![guardian agent role overview](assets/figures/guardian-overview.webp)
+
+*Role overview; detailed execution and connection diagrams follow below.*
 
 ## Status at a Glance
 

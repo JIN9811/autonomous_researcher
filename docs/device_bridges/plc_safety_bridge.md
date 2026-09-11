@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: guide
 subtype: operations_runbook
 status: active
@@ -28,7 +28,7 @@ related_docs:
   - docs/superpowers/plans/2026-08-24-plc-safety-bridge.md
   - docs/device_bridges/README.md
 supersedes: []
----
+-->
 
 # PLC Safety Bridge Operator Guide
 

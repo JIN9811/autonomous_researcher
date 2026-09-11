@@ -356,7 +356,7 @@ git commit -m "feat: surface knowledge relation review state"
 ### Task 8: Documentation and Full Verification
 
 **Files:**
-- Modify: `docs/knowledge/knowledge_graph_operations.ko.md`
+- Modify: `docs/oldversion/knowledge/knowledge_graph_operations.ko.md`
 - Modify: `docs/agents/knowledge_agent_self_evolution_runtime_guideline.md`
 - Modify: `docs/runtime/current_code_snapshot.md`
 - Modify: `README.md`
@@ -390,6 +390,6 @@ Run: `.venv/bin/python tests/ui/knowledge_workspace_browser_audit.py --base-url 
 ```bash
 git diff --check
 git status --short
-git add README.md docs/knowledge/knowledge_graph_operations.ko.md docs/agents/knowledge_agent_self_evolution_runtime_guideline.md docs/runtime/current_code_snapshot.md
+git add README.md docs/oldversion/knowledge/knowledge_graph_operations.ko.md docs/agents/knowledge_agent_self_evolution_runtime_guideline.md docs/runtime/current_code_snapshot.md
 git commit -m "docs: document knowledge relation reconciliation"
 ```

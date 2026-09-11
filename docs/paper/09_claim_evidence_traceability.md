@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: evidence
 subtype: audit
 status: review
@@ -31,7 +31,7 @@ related_docs:
   - docs/paper/06_evaluation_and_results.md
   - docs/standards/paper_documentation_standard.md
 supersedes: []
----
+-->
 
 # Claim-Evidence Traceability
 
