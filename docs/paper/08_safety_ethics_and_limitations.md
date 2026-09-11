@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: standard
 subtype: safety
 status: review
@@ -26,7 +26,7 @@ research_questions:
 claim_ids:
   - C-SAFE-LIVE-01
   - C-LIMIT-EVAL-01
----
+-->
 
 # Safety, Ethics, and Limitations
 

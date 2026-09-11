@@ -24,7 +24,7 @@ verified_against: 09bbe32
 related_docs:
   - docs/runtime/current_code_snapshot.md
   - docs/runtime/langgraph_runtime.md
-  - docs/knowledge/knowledge_graph_operations.ko.md
+  - docs/knowledge/markdown_memory_operations.ko.md
 supersedes: []
 ---
 
@@ -430,5 +430,5 @@ agent/module registry, Knowledge Workspace, Live GUI event/artifact 경로를
 
 - [Current Code Snapshot](current_code_snapshot.md)
 - [LangGraph Runtime](langgraph_runtime.md)
-- [Knowledge Graph Operations Guide](../knowledge/knowledge_graph_operations.ko.md)
+- [Markdown Knowledge Operations Guide](../knowledge/markdown_memory_operations.ko.md)
 - [Documentation Standard](../standards/documentation_standard.md)

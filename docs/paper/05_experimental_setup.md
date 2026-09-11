@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: system
 status: review
@@ -35,7 +35,7 @@ related_docs:
   - docs/paper/06_evaluation_and_results.md
   - docs/paper/07_reproducibility.md
 supersedes: []
----
+-->
 
 # Experimental Setup
 
@@ -49,9 +49,16 @@ record.
 
 ## Scope
 
-The current package instantiates repository inspection and documentation
-contract tests. It specifies, but does not claim completion of, replay,
-simulation, browser, and supervised live-hardware campaigns.
+The current package includes repository inspection, documentation contract
+tests, and retained supervised mixed-mode closed-loop records linked in
+[Results](06_evaluation_and_results.md). Broader comparative campaigns remain
+evaluation work.
+
+The application setup combines existing instruments with VLA-enabled robot
+manipulation and structured software coordination. To evaluate the hardware
+simplification thesis, a future comparison should record reused equipment,
+added robot hardware, bespoke fixtures, integration effort, and operating cost
+against a clearly specified alternative. The current run is not that cost study.
 
 ## Evidence Basis
 

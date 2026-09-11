@@ -248,7 +248,7 @@ def test_ledger_appends_one_json_line_and_returns_hash(tmp_path):
 - Modify: `REQUIREMENTS.md`
 - Modify: `docs/runtime/current_code_snapshot.md`
 - Modify: `docs/tutorials/user_manual.ko.md`
-- Create: `docs/knowledge/knowledge_graph_operations.ko.md`
+- Create: `docs/oldversion/knowledge/knowledge_graph_operations.ko.md`
 - Test: `tests/integration/test_knowledge_migration.py`
 
 **Interfaces:**

@@ -16,7 +16,7 @@ summary: Continuous LLM-assisted reconciliation of disconnected Knowledge Graph 
 decision_status: approved
 related_docs:
   - docs/superpowers/specs/2026-08-08-knowledge-agent-neo4j-graphify-ontology-design.md
-  - docs/knowledge/knowledge_graph_operations.ko.md
+  - docs/oldversion/knowledge/knowledge_graph_operations.ko.md
   - docs/agents/knowledge_agent_self_evolution_runtime_guideline.md
 supersedes: []
 ---

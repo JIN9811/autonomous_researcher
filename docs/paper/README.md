@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: index
 subtype: index
 status: active
@@ -19,43 +19,43 @@ related_docs:
   - docs/paper/03_closed_loop_method.md
   - docs/paper/04_platform_architecture.md
 supersedes: []
----
+-->
 
 # Autonomous Researcher Framework Paper Package
 
 ## Summary
 
-**Working title:** *Autonomous Researcher Framework: A Safety-Gated
-Closed-Loop Multi-Agent System and Extensible Platform for Laboratory
-Automation*
+**Working title:** *Autonomous Researcher Framework: Transforming Existing Laboratories
+with Structured AI Layers and VLA-Enabled Manipulation*
 
-Autonomous Researcher Framework (ATR) is presented primarily as a system for
-connecting research intent, experimental design, specimen preparation,
-perception, manipulation, equipment operation, analysis, durable knowledge,
-Bayesian optimization, and safety review in one resumable control loop. The
-platform contribution—replaceable models, devices, agent modules, and operator
-workspaces—supports that system thesis.
+ATR adds structured AI layers to existing laboratory equipment. A VLA-enabled
+robot arm connects physical stages without making bespoke fixtures or dedicated
+transfer automation the organizing principle. Specialist agents coordinate
+research decisions and execution; the platform supports equipment reuse and
+robot integration through LeRobot.
 
-This package is structured like a paper, but it does not imply that a
-manuscript has been accepted or that every planned evaluation has been run.
-Code inspection and documentation-contract evidence are separated from
-simulation, browser, and live-hardware evidence. End-to-end scientific
-efficacy and live-hardware robustness are currently `not_evaluated`.
+[Results](06_evaluation_and_results.md) · [Reproduce](07_reproducibility.md) ·
+[Agent references](../agents/README.md) · [Device interfaces](../device_bridges/README.md)
+
+![Existing equipment connected through multi-agent orchestration](../assets/presentation/structured-ai-lab.webp)
 
 ## Abstract
 
-Laboratory automation systems must coordinate heterogeneous reasoning and
-physical stages without losing the provenance needed to audit a scientific
-result. ATR addresses this systems problem with a typed, checkpointed
-multi-agent graph in which execution stages exchange explicit contracts,
-Guardian and operator gates constrain consequential actions, and observations
-flow into durable evidence and knowledge services. The current repository
-contains a 19-node graph with 68 declared edges and 12 stage-dispatch entries,
-observed at implementation baseline `0b7627b`. It also exposes an extensible
-platform for device bridges, model routing, graph/module management, and
-operator workspaces. This documentation establishes the argument and
-claim-evidence structure for evaluating that design; it does not report
-unevaluated physical or scientific outcomes as results.
+Existing laboratories contain equipment with heterogeneous automation
+interfaces. ATR investigates how those capabilities can be composed into a
+self-driving research loop without requiring a purpose-built laboratory.
+Specialist agents connect research intent, design, fabrication, perception,
+robotic transfer, testing, analysis, knowledge, and optimization. Scoped LLM
+decision layers interpret evidence and call tools, while established numerical
+methods and device bridges execute bounded tasks. Explicit handoffs preserve
+measurement identity and feed observations into subsequent design decisions.
+A retained supervised mixed-mode run demonstrates equipment testing through
+analysis, next-point selection, and next-design entry; its printing deposition
+was skipped. The extensible platform supports this system through modular
+interfaces and operator workspaces. The system places integration complexity in structured software rather than
+extensive hardware modification. Equipment reuse and VLA-enabled manipulation
+provide a route to lower equipment and fixture costs; comparative savings and
+scientific gains are not yet measured.
 
 ## Scope
 

@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: runtime
 status: active
@@ -26,7 +26,7 @@ related_docs:
   - docs/hardware/evidence/prusa_mk4s_live_validation_20260506.md
   - docs/agents/specimen_agent.md
 supersedes: []
----
+-->
 
 # Prusa MK4S Bridge Reference
 

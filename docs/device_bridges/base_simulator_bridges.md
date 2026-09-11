@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: runtime
 status: active
@@ -27,7 +27,7 @@ related_docs:
   - docs/agents/agent_api_connection_matrix.md
   - docs/standards/documentation_standard.md
 supersedes: []
----
+-->
 
 # Base and Simulator Bridge Reference
 

@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: system
 status: review
@@ -34,7 +34,7 @@ related_docs:
   - docs/paper/appendix_b_hardware_and_deployment.md
   - docs/runtime/current_code_snapshot.md
 supersedes: []
----
+-->
 
 # Platform Architecture
 

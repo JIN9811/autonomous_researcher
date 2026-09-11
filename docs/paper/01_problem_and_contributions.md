@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: system
 status: review
@@ -34,18 +34,22 @@ related_docs:
   - docs/paper/03_closed_loop_method.md
   - docs/paper/04_platform_architecture.md
 supersedes: []
----
+-->
 
 # Problem and Contributions
 
 ## Summary
 
-ATR addresses a systems problem: a research loop spans reasoning, software,
-physical actions, measurements, analysis, and iterative decision-making, yet
-each boundary can lose intent, provenance, safety state, or recovery context.
-The primary contribution is a typed, safety-gated, evidence-aware control loop.
-The secondary contribution is a platform for extending that loop without
-discarding its contracts.
+ATR transforms existing laboratories by adding structured AI layers above
+their equipment. High/Middle/Low control separates decisions, procedures, and
+execution; Guardian/Safety and Knowledge/Evidence support the loop across those
+levels. A VLA-enabled robot arm connects physical stages, complementing API
+and desktop-controlled instruments.
+
+The novelty is the system-level combination: simple, reusable hardware with
+advanced software coordination. Reduced replacement and bespoke-fixture needs
+are design advantages, not the sole contribution. Compression testing is one
+application, not a platform constraint.
 
 ## Scope
 
@@ -62,46 +66,37 @@ full artifact manifest is validated.
 
 ## Problem
 
-A laboratory workflow is not merely a sequence of API calls. It combines
-heterogeneous stages with different failure modes and evidence needs:
+A laboratory is rarely a uniform collection of programmable instruments.
+Robotics may use learned policies, fabrication devices may expose APIs, and
+measurement equipment may require desktop operation. Replacing all of these
+with a purpose-built automation stack is not the only route to self-driving
+experiments: existing interfaces can be integrated through software.
 
-- a design decision must remain connected to the objective and prior results;
-- specimen preparation and manipulation create physical state that software
-  alone cannot assume;
-- equipment actions may be irreversible, hazardous, or externally timed;
-- analysis can produce derived artifacts whose parameters and inputs must be
-  recoverable;
-- an optimization step must distinguish measured observations from model
-  suggestions;
-- a resumed run must preserve why the system arrived at its current state.
-
-Treating these stages as independent tools makes demos easy to assemble but
-makes a scientific run difficult to audit. Treating the entire loop as one
-opaque agent hides policy boundaries and makes failure recovery ambiguous.
-ATR therefore treats the loop as an explicit graph of typed stages, sidecars,
-gates, evidence paths, and terminal states.
+The challenge is to connect these heterogeneous capabilities to the same
+research intent and feedback loop. Tool execution alone does not resolve
+candidate suitability, visual interpretation, workflow result assessment, or
+the handoff from measurement to numerical optimization.
 
 ## System Thesis
 
-The central thesis is that heterogeneous laboratory automation can be made
-more inspectable and recoverable by combining:
+ATR combines specialist decision layers with existing execution mechanisms.
+VLA-based manipulation provides an alternative to task-specific transfer
+hardware, while the LeRobot boundary permits supported robot substitutions
+with corresponding calibration and policy validation:
 
-1. a declared execution graph;
-2. typed handoffs and stage-specific responsibilities;
-3. Guardian and operator gates before consequential transitions;
-4. checkpointed state and bounded failure routes;
-5. durable evidence and knowledge feedback;
-6. an optimization return path that begins another governed cycle.
 
-Figure 1 summarizes this thesis.
+| Integration layer | Responsibility | Reference |
+|---|---|---|
+| Agent decisions | Interpret task-specific evidence and select bounded actions | [Agent inventory](../agents/README.md) |
+| Tools and device bridges | Execute robot skills, APIs, desktop workflows, and computations | [Bridge inventory](../device_bridges/README.md) |
+| Closed-loop coordination | Carry results from design through testing into the next decision | [Method](03_closed_loop_method.md) |
+| Shared support | Preserve knowledge, execution evidence, and operational constraints | [Architecture](02_system_architecture.md) |
 
-![Graphical abstract showing a safety-gated research loop](assets/figures/01_graphical_abstract.svg)
+![Existing equipment integrated into a closed research loop](../assets/presentation/structured-ai-lab.webp)
 
-**Figure 1 — Graphical abstract.** ATR connects objective, design, physical
-execution, observation, analysis, durable knowledge, and next-candidate
-selection through a closed loop. Amber diamonds mark safety or operator gates;
-green artifacts mark evidence. The structure is code-backed, while end-to-end
-scientific benefit remains `not_evaluated`.
+*Conceptual overview. Structured software layers transform existing equipment
+into a research system; comparative hardware and fixture savings require a
+separate evaluation.*
 
 ## Research Questions
 
@@ -135,7 +130,7 @@ through declared schemas, policies, and evidence paths.
 |---|---|---|---|---|
 | Primary | A declared, resumable multi-agent graph spanning the research loop | RQ1 | `C-SYS-ARCH-01` | `supported` by bounded repository inspection |
 | Primary | An evidence model separating inspection, tests, replay, simulation, browser, and live results | RQ2 | `C-TRACE-DOC-01` | `partially_supported`; documentation contracts are testable, full run lineage is not yet evaluated here |
-| Primary | Guardian, dry-run, approval, stop, and error routes around consequential actions | RQ3 | `C-SAFE-LIVE-01` | `not_evaluated` for live effectiveness |
+| Supporting mechanism | Guardian, dry-run, approval, stop, and error routes around consequential actions | RQ3 | `C-SAFE-LIVE-01` | `not_evaluated` for live effectiveness |
 | Secondary | Module, backend, bridge, graph, and workspace extension surfaces | RQ4 | `C-PLAT-EXT-01` | `supported` as an inspected architecture claim |
 
 ## Relationship to Existing Systems

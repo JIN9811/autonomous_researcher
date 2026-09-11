@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: system
 status: active
@@ -21,9 +21,13 @@ related_docs:
   - docs/paper/08_safety_ethics_and_limitations.md
   - docs/runtime/guardian_graphwide_safety.md
 supersedes: []
----
+-->
 
 # Guardian Agent Reference
+
+![guardian agent role overview](assets/figures/guardian-overview.webp)
+
+*Role overview; detailed execution and connection diagrams follow below.*
 
 ## Summary
 

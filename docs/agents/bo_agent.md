@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: system
 status: active
@@ -29,9 +29,13 @@ related_docs:
   - docs/agents/bo_agent_runtime_guideline.txt
   - docs/superpowers/specs/2026-09-10-bo-strategy-continuous-design.md
 supersedes: []
----
+-->
 
 # Bayesian Optimization Agent Reference
+
+![bo agent role overview](assets/figures/bo-overview.webp)
+
+*Role overview; detailed execution and connection diagrams follow below.*
 
 ## Status at a Glance
 

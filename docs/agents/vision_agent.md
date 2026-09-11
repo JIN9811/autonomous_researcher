@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: system
 status: active
@@ -29,9 +29,13 @@ related_docs:
   - docs/agents/equipment_agent.md
   - docs/agents/vision_pickup_observation_runtime_guideline.txt
 supersedes: []
----
+-->
 
 # Vision Agent Reference
+
+![vision agent role overview](assets/figures/vision-overview.webp)
+
+*Role overview; detailed execution and connection diagrams follow below.*
 
 ## Status at a Glance
 

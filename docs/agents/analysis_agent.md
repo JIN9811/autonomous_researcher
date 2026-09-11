@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: system
 status: active
@@ -35,9 +35,13 @@ related_docs:
   - docs/paper/evidence/2026-09-09-analysis-improvement-validation.md
   - docs/paper/evidence/2026-09-09-feature-informed-fem-calibration.md
 supersedes: []
----
+-->
 
 # Analysis Agent Reference
+
+![analysis agent role overview](assets/figures/analysis-overview.webp)
+
+*Role overview; detailed execution and connection diagrams follow below.*
 
 ## Status at a Glance
 

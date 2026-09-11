@@ -308,14 +308,16 @@ RUNTIME_IDE_NAVIGATION_LINKS = {
 
 
 def split_front_matter(text: str) -> tuple[dict[str, Any], str]:
-    """Return a leading YAML front matter mapping and Markdown body."""
+    """Read YAML metadata, including the non-rendering public-doc carrier."""
 
     lines = text.splitlines(keepends=True)
-    if not lines or lines[0].strip() != "---":
+    if not lines or lines[0].strip() not in {"---", "<!-- atr-doc"}:
         raise ValueError("missing leading YAML front matter")
 
+    closing_marker = "-->" if lines[0].strip() == "<!-- atr-doc" else "---"
+
     closing_index = next(
-        (index for index, line in enumerate(lines[1:], start=1) if line.strip() == "---"),
+        (index for index, line in enumerate(lines[1:], start=1) if line.strip() == closing_marker),
         None,
     )
     if closing_index is None:

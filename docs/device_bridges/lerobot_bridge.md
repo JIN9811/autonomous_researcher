@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: runtime
 status: active
@@ -32,7 +32,7 @@ related_docs:
   - docs/hardware/lerobot_robotis_manipulation_runtime_guideline.md
   - docs/hardware/isaac_sim_robotis_omx_mirror_mode.md
 supersedes: []
----
+-->
 
 # LeRobot Bridge Reference
 

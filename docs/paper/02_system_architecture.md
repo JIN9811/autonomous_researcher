@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: system
 status: review
@@ -36,7 +36,7 @@ related_docs:
   - docs/runtime/langgraph_runtime.md
   - docs/paper/03_closed_loop_method.md
 supersedes: []
----
+-->
 
 # System Architecture
 
@@ -64,6 +64,24 @@ does not certify every optional backend or physical device.
 - `policies/guardian_gate.py` implements Guardian policy evaluation.
 
 ## Layered Architecture
+
+### Structured intelligence over existing hardware
+
+The architecture places integration complexity in software rather than in a
+purpose-built laboratory. High-level decisions, middle-level procedures, and
+low-level execution are supported by Guardian/Safety and Knowledge/Evidence.
+The [control model](../runtime/three_level_control_model.md) and individual
+agent responsibility maps define these boundaries in detail.
+
+| Mechanism | Existing-laboratory role | Current implementation reference |
+|---|---|---|
+| VLA-enabled manipulation | Connect physical stages using a robot arm rather than making dedicated transfer fixtures the default | [Manipulation](../agents/manipulation_agent.md) |
+| Robot integration boundary | Permit supported robot substitutions with calibration and policy validation | [LeRobot bridge](../device_bridges/lerobot_bridge.md) |
+| API integration | Reuse programmatically controllable equipment | [Printer fleet](../device_bridges/printer_fleet_bridge.md) |
+| Desktop workflow integration | Reuse equipment operated through PC software | [Lab Equipment](../agents/equipment_agent.md) |
+
+These mechanisms explain the hardware-reuse strategy; measured cost savings
+and cross-robot transfer performance are separate evaluation questions.
 
 ![Layered system architecture](assets/figures/02_layered_architecture.svg)
 

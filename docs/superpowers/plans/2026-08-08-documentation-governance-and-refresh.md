@@ -36,7 +36,7 @@
 | `docs/runtime/current_code_snapshot.md` | Reproducible current implementation counts and contracts for commit `09bbe32`. |
 | `docs/runtime/langgraph_runtime.md` | Current LangGraph runtime Reference metadata and verification boundary. |
 | `docs/runtime/closed_loop_and_pages_reference.md` | Current system/page/agent Reference metadata and Knowledge workspace coverage. |
-| `docs/knowledge/knowledge_graph_operations.ko.md` | Operator Guide metadata, safety boundaries, success/recovery criteria, and current endpoints. |
+| `docs/oldversion/knowledge/knowledge_graph_operations.ko.md` | Operator Guide metadata, safety boundaries, success/recovery criteria, and current endpoints. |
 
 ### Validator interfaces
 
@@ -312,7 +312,7 @@ Index Verification
 Related Documents
 ```
 
-Add the `/knowledge` page row with `web/templates/knowledge.html`, `web/static/knowledge.js`, `web/static/knowledge.css`, and `docs/knowledge/knowledge_graph_operations.ko.md`.
+Add the `/knowledge` page row with `web/templates/knowledge.html`, `web/static/knowledge.js`, `web/static/knowledge.css`, and `docs/oldversion/knowledge/knowledge_graph_operations.ko.md`.
 
 - [ ] **Step 5: Validate navigation and commit**
 
@@ -339,7 +339,7 @@ git commit -m "docs: refresh documentation entry points"
 - Modify: `docs/runtime/current_code_snapshot.md`
 - Modify: `docs/runtime/langgraph_runtime.md`
 - Modify: `docs/runtime/closed_loop_and_pages_reference.md`
-- Modify: `docs/knowledge/knowledge_graph_operations.ko.md`
+- Modify: `docs/oldversion/knowledge/knowledge_graph_operations.ko.md`
 - Modify: `docs/document_manifest.yaml`
 
 **Interfaces:**
@@ -414,7 +414,7 @@ Expected: all commands pass and stale graph counts are absent.
 - [ ] **Step 6: Commit the migration**
 
 ```bash
-git add docs/runtime/current_code_snapshot.md docs/runtime/langgraph_runtime.md docs/runtime/closed_loop_and_pages_reference.md docs/knowledge/knowledge_graph_operations.ko.md docs/document_manifest.yaml
+git add docs/runtime/current_code_snapshot.md docs/runtime/langgraph_runtime.md docs/runtime/closed_loop_and_pages_reference.md docs/oldversion/knowledge/knowledge_graph_operations.ko.md docs/document_manifest.yaml
 git commit -m "docs: align runtime references with current code"
 ```
 
@@ -466,7 +466,7 @@ git add README.md README.ko.md README.en.md docs/README.md \
   docs/templates/document_types.md docs/runtime/current_code_snapshot.md \
   docs/runtime/langgraph_runtime.md \
   docs/runtime/closed_loop_and_pages_reference.md \
-  docs/knowledge/knowledge_graph_operations.ko.md
+  docs/oldversion/knowledge/knowledge_graph_operations.ko.md
 git commit -m "docs: correct documentation verification findings"
 ```
 

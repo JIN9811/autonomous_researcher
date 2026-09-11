@@ -345,7 +345,7 @@ git commit -m "feat: add objective compiler workspace"
 - Modify: `docs/agents/knowledge_agent_self_evolution_runtime_guideline.md`
 - Modify: `docs/runtime/autonomous_experiment_runtime.md`
 - Modify: `docs/runtime/current_code_snapshot.md`
-- Modify: `docs/knowledge/knowledge_graph_operations.ko.md`
+- Modify: `docs/oldversion/knowledge/knowledge_graph_operations.ko.md`
 - Modify: `docs/document_manifest.yaml` if route counts change
 - Test: `tests/unit/test_documentation_validation.py`
 
@@ -386,6 +386,6 @@ Document exact DSL, lifecycle, persistence, APIs/tools, GUI, no-live-proxy rule,
 ```bash
 git diff --check
 git status --short
-git add tests/integration/test_objective_compiler_closed_loop.py docs/agents/bo_agent.md docs/agents/bo_agent_runtime_guideline.txt docs/agents/analysis_utm_runtime_guideline.txt docs/agents/knowledge_agent_self_evolution_runtime_guideline.md docs/runtime/autonomous_experiment_runtime.md docs/runtime/current_code_snapshot.md docs/knowledge/knowledge_graph_operations.ko.md docs/document_manifest.yaml
+git add tests/integration/test_objective_compiler_closed_loop.py docs/agents/bo_agent.md docs/agents/bo_agent_runtime_guideline.txt docs/agents/analysis_utm_runtime_guideline.txt docs/agents/knowledge_agent_self_evolution_runtime_guideline.md docs/runtime/autonomous_experiment_runtime.md docs/runtime/current_code_snapshot.md docs/oldversion/knowledge/knowledge_graph_operations.ko.md docs/document_manifest.yaml
 git commit -m "docs: document objective compiler runtime"
 ```

@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: api
 status: review
@@ -38,7 +38,7 @@ related_docs:
   - docs/agents/agent_api_connection_matrix.md
   - docs/runtime/current_code_snapshot.md
 supersedes: []
----
+-->
 
 # Appendix A: Interfaces and Contracts
 

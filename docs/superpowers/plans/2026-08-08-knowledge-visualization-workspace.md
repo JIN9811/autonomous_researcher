@@ -69,7 +69,7 @@
 ### Task 4: Verification and Documentation
 
 **Files:**
-- Modify: `docs/knowledge/knowledge_graph_operations.ko.md`
+- Modify: `docs/oldversion/knowledge/knowledge_graph_operations.ko.md`
 - Modify: `docs/runtime/current_code_snapshot.md`
 
 - [x] Run Knowledge unit/integration regressions.

@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: system
 status: active
@@ -22,9 +22,13 @@ related_docs:
   - docs/agents/guardian_agent.md
   - docs/runtime/langgraph_runtime.md
 supersedes: []
----
+-->
 
 # Orchestrator Agent Reference
+
+![orchestrator agent role overview](assets/figures/orchestrator-overview.webp)
+
+*Role overview; detailed execution and connection diagrams follow below.*
 
 ## Summary
 

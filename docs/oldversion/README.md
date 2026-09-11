@@ -41,6 +41,7 @@ supersedes: []
 | Archive date | Original path | Archived path | Reason | Current replacement |
 |---|---|---|---|---|
 | 2026-08-09 | `docs/github_docs_image/autonomous_researcher_gpt_image_schematics/` | `docs/oldversion/github_docs_image/autonomous_researcher_gpt_image_schematics/` | 활성 inbound reference가 없고, 편집 불가능한 GPT 생성 PNG 묶음이 현재 에이전트 문서 피겨로 대체됨 | [Agent Reference Index](../agents/README.md), [`docs/agents/assets/figures/`](../agents/assets/figures/) |
+| 2026-09-11 | `docs/knowledge/knowledge_graph_operations.ko.md` | [knowledge/knowledge_graph_operations.ko.md](knowledge/knowledge_graph_operations.ko.md) | Knowledge graph/Neo4j 운영 경로가 2026-09-10 종료되고 Markdown 운영 가이드로 대체됨. 실행 코드·패키지 소비 없음; 활성 탐색은 대체물로, 과거 설계·계획 경로는 보관본으로 갱신. 운영 절차 문서만 이동하며 구현·Evidence·원본 데이터는 보존 | [Markdown Knowledge 운영 가이드](../knowledge/markdown_memory_operations.ko.md) |
 
 ## Restoration
 

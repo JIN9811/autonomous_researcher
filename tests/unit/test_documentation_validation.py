@@ -441,6 +441,38 @@ def test_split_front_matter_returns_metadata_and_body() -> None:
     assert body == "# Index\n"
 
 
+def test_hidden_metadata_has_same_contract() -> None:
+    module = _load_validator()
+    metadata, body = module.split_front_matter(
+        "<!-- atr-doc\ndoc_type: index\nstatus: active\n-->\n# Index\n"
+    )
+    assert metadata == {"doc_type": "index", "status": "active"}
+    assert body == "# Index\n"
+
+
+def test_hidden_metadata_rejects_unclosed_comment() -> None:
+    module = _load_validator()
+    import pytest
+    with pytest.raises(ValueError, match="unterminated"):
+        module.split_front_matter("<!-- atr-doc\ndoc_type: index\n# Index\n")
+
+
+def test_hidden_metadata_requires_mapping() -> None:
+    module = _load_validator()
+    import pytest
+    with pytest.raises(ValueError, match="mapping"):
+        module.split_front_matter("<!-- atr-doc\n- index\n-->\n# Index\n")
+
+
+def test_hidden_metadata_keeps_required_field_validation(tmp_path: Path) -> None:
+    module = _load_validator()
+    text = VALID_REFERENCE.replace("source_of_truth:\n  - app/main.py\n", "")
+    text = text.replace("---", "<!-- atr-doc", 1)
+    text = text.replace("---", "-->", 1)
+    document = _write(tmp_path, "docs/runtime.md", text)
+    assert any("source_of_truth" in error for error in module.validate_document(document, tmp_path))
+
+
 def test_active_reference_requires_verification_fields(tmp_path: Path) -> None:
     module = _load_validator()
     document = _write(

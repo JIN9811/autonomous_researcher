@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: system
 status: active
@@ -31,7 +31,7 @@ related_docs:
   - docs/agents/agent_api_connection_matrix.md
   - docs/paper/appendix_a_interfaces.md
 supersedes: []
----
+-->
 
 # Device Bridge API and Connection Matrix
 
