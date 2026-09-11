@@ -43,7 +43,7 @@ LeRobot을 통해 지원 로봇으로 교체할 수 있는 경계를 두되, 교
 [실증 결과](docs/paper/06_evaluation_and_results.md) ·
 [설치·운영](README.en.md) · [전체 문서](docs/README.md)
 
-![기존 장비를 연결하는 ATR 시스템](docs/assets/presentation/structured-ai-lab.webp)
+![기존 실험실을 멀티에이전트 기반으로 전환하는 AX4LAB](docs/assets/presentation/laboratory-transformation-sunburst.webp)
 
 ## 시스템 기여
 

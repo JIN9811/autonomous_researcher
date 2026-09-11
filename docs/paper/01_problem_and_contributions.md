@@ -92,11 +92,9 @@ with corresponding calibration and policy validation:
 | Closed-loop coordination | Carry results from design through testing into the next decision | [Method](03_closed_loop_method.md) |
 | Shared support | Preserve knowledge, execution evidence, and operational constraints | [Architecture](02_system_architecture.md) |
 
-![Existing equipment integrated into a closed research loop](../assets/presentation/structured-ai-lab.webp)
+![Existing laboratory transformation through multi-agent orchestration and device bridges](../assets/presentation/laboratory-transformation-sunburst.webp)
 
-*Conceptual overview. Structured software layers transform existing equipment
-into a research system; comparative hardware and fixture savings require a
-separate evaluation.*
+*Multi-agent orchestration connects existing laboratory equipment through device bridges.*
 
 ## Research Questions
 

@@ -37,7 +37,7 @@ robot integration through LeRobot.
 [Results](06_evaluation_and_results.md) · [Reproduce](07_reproducibility.md) ·
 [Agent references](../agents/README.md) · [Device interfaces](../device_bridges/README.md)
 
-![Existing equipment connected through multi-agent orchestration](../assets/presentation/structured-ai-lab.webp)
+![AX4LAB transforms an existing laboratory through multi-agent orchestration and device bridges](../assets/presentation/laboratory-transformation-sunburst.webp)
 
 ## Abstract
 
