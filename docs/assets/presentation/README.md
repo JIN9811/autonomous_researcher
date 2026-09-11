@@ -21,14 +21,21 @@ results were synthesized for the paper evidence package.
 
 | Asset | Prompt source | Used in |
 |---|---|---|
+| Existing-laboratory transformation | [Transformation prompt](laboratory-transformation.txt) | Root README below the logo; 1920 × 960, high quality, WebP |
 | Framework overview, agent architecture, integration architecture | [Three-figure prompts](architecture-figures.jsonl) | Root README System Architecture; three independent 1920 × 960 figures, high quality, WebP |
 | Previous combined architecture (superseded) | [Initial prompt](orchestration-plan-architecture.txt) · [Graph refinement](orchestration-plan-architecture-revision.txt) · [Label correction](orchestration-plan-architecture-label-fix.txt) | Retained source history; no longer embedded in the root README |
-| Structured AI laboratory overview | [Hero prompt](hero-structured-ai.txt) | Root README, Korean overview, paper introduction |
+| Structured AI laboratory overview | [Hero prompt](hero-structured-ai.txt) | Korean overview, paper introduction; replaced by the transformation figure in the root README |
 | Ten agent role diagrams | [Batch prompts](image-prompts.jsonl) | [Agent references](../../agents/README.md) |
 | Vision capture-first diagram | [Vision prompt](vision-correction.txt) | Vision reference; supersedes its initial batch image |
 
 Final agent assets reside in [agent figures](../../agents/assets/figures/).
 The batch's initial low-cost hero is superseded by the structured-AI overview.
+
+The root transformation figure adapts the conceptual shift in the author's
+2026-09-04 presentation: transform an existing laboratory instead of building
+a new automated facility. Matching equipment silhouettes emphasize reuse;
+the orchestration graph and robot illustrate the added capabilities, not a
+fixed execution sequence or measured deployment outcome.
 
 ## Presentation References
 

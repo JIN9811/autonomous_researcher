@@ -58,9 +58,9 @@ equipment and working environment.
   <img src="docs/assets/branding/ax4lab-logo.png" alt="AX4LAB logo" width="180">
 </p>
 
-![ATR integrates existing equipment into a closed research loop](docs/assets/presentation/structured-ai-lab.webp)
+![AX4LAB transforms an existing laboratory through structured AI layers while retaining its equipment and adding VLA-enabled manipulation](docs/assets/presentation/laboratory-transformation.webp)
 
-*Structured AI layers coordinate existing equipment and VLA-enabled manipulation.*
+*Retain existing equipment. Add software intelligence and adaptable robotic manipulation.*
 
 ## Problem
 
