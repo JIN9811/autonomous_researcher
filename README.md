@@ -26,11 +26,9 @@ related_docs:
 supersedes: []
 -->
 
-# AX4LAB
+# AX4LAB <sub>Powered by the ATR Framework</sub>
 
 ![AX4LAB — Autonomous Research Platform](docs/assets/branding/ax4lab-banner.png)
-
-<sub>an Autonomous Research Platform built on the Autonomous Researcher (ATR) Framework</sub>
 
 ### Simple hardware. Structured intelligence. Self-driving laboratories.
 
