@@ -23,7 +23,7 @@ vm.runInContext(fs.readFileSync(path.join(root, 'web/static/runtime_graph_geomet
 vm.runInContext(frontend.slice(start, end), context);
 const model = vm.runInContext(`(() => {
   // Document-only geometry: retain the GUI topology with generous spacing.
-  // README uses a horizontal viewport rather than shrinking the whole map.
+  // README scales the complete SVG proportionally and links to the full size.
   const width = 224, height = 84;
   runtimeMapGeometryOptions = () => ({
     nodeWidth: width, nodeHeight: height, edgeSpacing: 14,
