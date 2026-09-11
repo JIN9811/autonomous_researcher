@@ -166,15 +166,14 @@ the research plan.
 
 - Tool calls, contracts, and external connections — [API and connection matrix](docs/agents/agent_api_connection_matrix.md).
 
-## Closed Loop
+## Orchestration Route
 
-![Control and evidence flow in the research loop](docs/paper/assets/figures/03_closed_loop_evidence_flow.svg)
+![Main GUI runtime map showing agent routes, control gates, device bridges and evidence connections](docs/assets/readme/orchestration-route.svg)
 
-Design → Make → Observe and transfer → Test → Analyze → Learn and optimize → Design.
+The main GUI's runtime map shows the configured agent handoffs and conditional
+returns, alongside control, device-bridge and evidence connections.
 
-The execution graph also includes verification, operator review, failure routes,
-and per-cycle artifacts. Analysis supplies measured objectives to optimization;
-background FEM work can continue independently.
+- Graph configuration and runtime inspection — [Runtime map and IDE](docs/runtime/runtime_ide.md).
 
 ## Demonstration and Evidence
 

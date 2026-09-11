@@ -164,15 +164,14 @@ High-Level은 작업 판단을, Middle-Level은 절차 감독을, Low-Level 도�
 
 - 도구 호출, 데이터 규약, 외부 연결 — [API 및 연결 매트릭스](docs/agents/agent_api_connection_matrix.md).
 
-## Closed Loop
+## Orchestration Route
 
-![실험 사이클의 제어 흐름과 근거 전달](docs/paper/assets/figures/03_closed_loop_evidence_flow.svg)
+![에이전트 실행 경로, 제어 게이트, Device Bridge와 근거 연결을 보여주는 메인 GUI 런타임 맵](docs/assets/readme/orchestration-route.svg)
 
-설계 → 제작 → 관측·이송 → 시험 → 분석 → 학습·최적화 → 다음 설계.
+메인 GUI의 런타임 맵으로, 설정된 에이전트 인계와 조건부 복귀 경로를
+제어·Device Bridge·근거 연결과 함께 보여줍니다.
 
-실행 그래프에는 검증, 운영자 검토, 실패 처리 경로, 사이클별 아티팩트도
-포함됩니다. Analysis는 실측 목적값을 최적화에 전달하며,
-백그라운드 FEM은 독립적으로 계속 실행될 수 있습니다.
+- 그래프 설정과 실행 상태 확인 — [런타임 맵과 IDE](docs/runtime/runtime_ide.md).
 
 ## 실증과 근거
 
