@@ -62,6 +62,12 @@ tests, and retained supervised mixed-mode closed-loop records linked in
 [Results](06_evaluation_and_results.md). Broader comparative campaigns remain
 evaluation work.
 
+The working-tree Orchestrator Setup contract also has a bounded verification
+record for next-new-run admission and provider-case aggregation. It belongs to
+the `test`/controlled-local boundary, not to this chapter's live-environment
+rows or a complete campaign result; see the
+[runtime evidence note](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md).
+
 The application setup combines existing instruments with VLA-enabled robot
 manipulation and structured software coordination. To evaluate the hardware
 simplification thesis, a future comparison should record reused equipment,

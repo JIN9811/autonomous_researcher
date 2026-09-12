@@ -1,9 +1,10 @@
 digraph orchestrator_closed_loop_handoffs {
-  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.34", ranksep="0.55", fontname="DejaVu Sans", label="Orchestrator closed-loop position and handoffs", labelloc="t", fontsize=18];
+  graph [rankdir=LR, bgcolor="#F8FAFC", pad="0.25", nodesep="0.34", ranksep="0.55", fontname="DejaVu Sans", label="Orchestrator closed-loop position and handoffs", labelloc="t", fontsize=18];
   node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07"];
   edge [color="#52667A", fontname="DejaVu Sans", fontsize=8, arrowsize=0.7];
 
   operator [label="Operator intent +\naccepted inputs"];
+  setup [label="Canonical Experimental Setup\nblocks + revision", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
   prior [label="Prior Knowledge / BO /\nfailure context", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
   checkpoint [label="Run checkpoint +\ncurrent stage", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
   orchestrator [label="ORCHESTRATOR\nmission · context · handoff", penwidth=2.2];
@@ -15,6 +16,7 @@ digraph orchestrator_closed_loop_handoffs {
   evidence [label="Transcript · handoff · decision\ncheckpoint · event", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
 
   operator -> orchestrator [label="operator_intent.v1"];
+  setup -> orchestrator [label="scoped proposal / readback"];
   prior -> orchestrator [label="accepted prior state"];
   checkpoint -> orchestrator [label="resume context"];
   orchestrator -> agent [label="mission_contract.v1\nhandoff_packet.v1"];
@@ -25,6 +27,7 @@ digraph orchestrator_closed_loop_handoffs {
   orchestrator -> review [label="ask / review"];
   orchestrator -> terminal [label="stop / complete / error"];
   orchestrator -> evidence [label="evidence", color="#2E7D59"];
+  setup -> evidence [label="history + receipt", color="#2E7D59"];
   agent -> evidence [label="evidence", color="#2E7D59"];
   guardian -> evidence [label="evidence", color="#2E7D59"];
 }

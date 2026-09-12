@@ -1,4 +1,14 @@
 module:
+  orchestration_contract:
+    version: orchestration_contract.v1
+    admission:
+      authority: existing_owner_and_runtime_validation
+      description: Descriptive only; absent evidence is unknown, not ready.
+    result:
+      required: ["equipment_result","protocol_note"]
+    acceptance:
+      authority: policies/validation_policy.py and existing owner validators
+      description: existing conditional CSV, handoff and status predicates remain authoritative
   id: equipment
   label: Lab Equipment Agent Module
   handler: agent.equipment_agent
@@ -13,6 +23,7 @@ module:
   - equipment.pyautogui.run
   - equipment.pyautogui.screenshot
   - equipment.pyautogui.request_log
+  - vision.equipment_cross_check
   - utm.run_protocol
   workflow_agentic_tasks:
     - id: run_utm_compression_cycle

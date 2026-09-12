@@ -59,6 +59,47 @@ Current CSS seed remains:
 
 Do not move Windows Bridge, 3DP, LeRobot, BO Workspace, or CAE Workspace controls into Live GUI if they belong to Main GUI Device Workspaces. Live GUI should show runtime state and handoff evidence, not become every device setup screen.
 
+## Current Experimental Setup and Chat Boundary
+
+New run/session identifiers use [date, KST time, and the known purpose](../../runtime/logging.md#readable-run-and-session-names).
+An already-created planning session or run keeps its identity when the operator
+later selects a mode; this naming change does not replace the canonical Setup store.
+
+The existing Live GUI Setup allocation now renders the server-canonical
+Experimental Setup blocks for the current planning session. It remains in the
+existing Setup dock; it does not add a panel or move the Chat allocation. When
+content exceeds that allocation, the Setup region scrolls vertically internally.
+
+`Edit in Chat` opens the existing Orchestrator Chat with the selected
+`block_id` and revision as context. The click does not send a message, propose
+or confirm a value, or start a run. Chat-originated edits and Setup-originated
+edits use the same canonical server state, rather than a selected historical
+report. Draft, confirmed, effective, validation, application, and availability
+are separate displayed facts. An unknown owner availability must remain
+`unknown`; a descriptor or an editable field is not a readiness badge.
+
+The current public writable topics are `research.goal`, `bo.parameter_space`,
+and `bo.acquisition`. Actual owner validation occurs before a draft is stored.
+Explicit confirmation schedules settings for the next new run; the current run
+snapshot is not changed. At that new run's admission, all captured confirmed
+settings are validated together from one snapshot, same-owner values are
+combined before any owner effect, and owner readback completes before the
+affected runtime path. Other owners appear according to graph-linked descriptors
+but are read-only or unsupported when they lack the complete owner adapter
+contract. A Confirm or Discard action is an explicit scoped request and never
+starts a run.
+
+Rejected, failed, unknown, or partial receipts remain visible holds. An ordinary
+retry preserves the original failed-run inputs and does not repeat a successful
+owner; only an explicit replacement confirmation may supersede the hold.
+
+Focused static-fixture browser evidence covered this allocation and internal
+scroll at 1440x960, 1440x480, and 390x640, including the last block's keyboard
+actions and the same Chat context. It is not evidence of an operating GUI
+service, live owner readiness, a full-page mobile layout pass, or hardware.
+The related [bounded verification evidence](../../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md)
+records the aggregate/provider scope separately; it is not browser or service proof.
+
 ## Color And Tone
 
 Use the reference palette as a restrained dark laboratory console:

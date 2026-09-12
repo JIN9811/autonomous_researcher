@@ -1,0 +1,116 @@
+/* Only the existing Setup dock and its editing context in the existing Chat. */
+body.planning-live-body #live-experiment-setup-panel {
+  min-height: 0;
+  min-width: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+  align-content: start;
+  box-sizing: border-box;
+  /* The mobile shell uses auto-height fractional rows. Exclude block contents
+     from intrinsic row sizing; the existing dock, not block count, owns height. */
+  contain: size;
+}
+
+#live-experiment-setup-panel :is(.setup-block-list, .setup-owner-list) {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+#live-experiment-setup-panel .setup-block {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, .28);
+  border-radius: 10px;
+  background: rgba(148, 163, 184, .06);
+  overflow-wrap: anywhere;
+}
+
+#live-experiment-setup-panel .setup-block-title {
+  margin: 0 0 7px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+#live-experiment-setup-panel :is(.setup-intro, .setup-notice, .setup-block-meta, .setup-block-status, .setup-block-timing, .setup-readonly-reason, .setup-editing, .setup-owner) {
+  margin: 0 0 7px;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+#live-experiment-setup-panel :is(.setup-notice, .setup-editing, .setup-readonly-reason) {
+  padding: 7px;
+  border-left: 2px solid currentColor;
+}
+
+#live-experiment-setup-panel .setup-block-details {
+  margin: 9px 0;
+  font-size: 11px;
+}
+
+#live-experiment-setup-panel summary {
+  cursor: pointer;
+  padding: 5px 0;
+}
+
+#live-experiment-setup-panel h4 {
+  font-size: 11px;
+  margin: 8px 0 4px;
+}
+
+#live-experiment-setup-panel .setup-value {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  margin: 0;
+  padding: 7px;
+  font-size: 11px;
+  line-height: 1.45;
+  border-radius: 5px;
+  background: rgba(148, 163, 184, .08);
+  max-width: 100%;
+}
+
+#live-experiment-setup-panel .setup-block-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+#live-experiment-setup-panel .setup-block-actions button {
+  min-height: 32px;
+  padding: 5px 9px;
+  font-size: 11px;
+}
+
+#live-experiment-setup-panel button:disabled { opacity: .5; cursor: not-allowed; }
+
+#live-experiment-setup-panel :is(button, summary):focus-visible,
+#live-experiment-setup-panel:focus-visible,
+#live-chat-context-strip [data-setup-exit]:focus-visible {
+  outline: 2px solid #5393ef;
+  outline-offset: 2px;
+}
+
+#live-chat-context-strip:has([data-setup-edit-label]) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#live-chat-context-strip [data-setup-edit-label] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#live-chat-context-strip [data-setup-exit] {
+  flex: 0 0 auto;
+  font-size: 10px;
+  padding: 3px 6px;
+}

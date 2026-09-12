@@ -338,6 +338,14 @@ function saveExpandedBoCards() {
 }
 let liveExpandedBoCards = loadExpandedBoCards();
 let planningSessionId = "";
+// Session-local editing only; never persisted or inferred from historical reports.
+let liveSetupSnapshot = null;
+let liveSetupSessionId = "";
+let liveSetupEditContext = null;
+let liveSetupNotice = "";
+const liveSetupActionRequests = new Map();
+let liveSetupTransportVersion = 0;
+let liveSetupAppliedVersion = 0;
 let planningThinkingCount = 0;
 let planningMessageSubmitInFlight = false;
 let liveQuickActionBusy = false;
@@ -1384,8 +1392,9 @@ function collectPlanningPayload(message, options = {}) {
     message,
     goal: planningGoalInput ? planningGoalInput.value : queryGoal,
     backend: queryBackend,
-    session_id: ensurePlanningSessionId(),
+    session_id: liveSetupSessionId || ensurePlanningSessionId(),
     constraints,
+    ...(liveSetupEditContext ? { setup_context: { ...liveSetupEditContext } } : {}),
   };
 }
 
@@ -6652,6 +6661,7 @@ function liveChatContextSummary() {
 
 function renderLiveChatContextStrip() {
   if (!liveChatContextStrip) return;
+  if (renderLiveSetupEditContext()) return;
   const ctx = liveChatContextSummary();
   const anchor = ctx.trace_id || ctx.selected_event_id || ctx.selected_graph_node_id || compactRunId(ctx.run_id || "-");
   const text = [
@@ -6682,55 +6692,147 @@ function renderLiveChatContextStrip() {
   setCompactTextWithTitle(liveChatContextStrip, text, title);
 }
 
-function experimentSetupDisplayValue(...values) {
-  for (const value of values) {
-    if (value !== undefined && value !== null && value !== "") return renderRuntimeValue(value);
+function syncLiveSetupSession(session, options = {}) {
+  const canonical = session.planning_session_id;
+  if (!canonical) return;
+  if (liveSetupSessionId !== canonical) {
+    liveSetupSessionId = canonical;
+    liveSetupSnapshot = null;
+    liveSetupEditContext = null;
+    liveSetupNotice = "";
+    liveSetupActionRequests.clear();
   }
-  return "waiting";
+  acceptLiveSetupSnapshot(session.state && session.state.setup, options);
+  // Compact/older responses must not make Chat and Setup disagree.
+  if (liveSetupSnapshot) session.state = { ...(session.state || {}), setup: liveSetupSnapshot };
 }
 
-function renderLiveExperimentSetupPanel(session = liveLastSession) {
+function acceptLiveSetupSnapshot(incoming, options = {}) {
+  if (!incoming || incoming.session_id !== liveSetupSessionId) return false;
+  const version = options.version === undefined ? ++liveSetupTransportVersion : options.version;
+  const accepted = ExperimentalSetup.acceptSnapshot(liveSetupSnapshot, incoming);
+  if (accepted !== incoming) return false;
+  // Server revision establishes value order. Dispatch order only resolves the
+  // ambiguous equal-revision graph/status projections, not a later commit from
+  // an earlier-started action or Chat request.
+  if (liveSetupSnapshot && incoming.revision === liveSetupSnapshot.revision && version < liveSetupAppliedVersion) return false;
+  liveSetupAppliedVersion = Math.max(liveSetupAppliedVersion, version);
+  liveSetupTransportVersion = Math.max(liveSetupTransportVersion, version);
+  liveSetupSnapshot = accepted;
+  if (liveSetupEditContext && !accepted.blocks.some(block => block.block_id === liveSetupEditContext.block_id && block.active && block.editable)) {
+    liveSetupEditContext = null;
+  }
+  if (liveLastSession.planning_session_id === liveSetupSessionId) {
+    liveLastSession.state = { ...(liveLastSession.state || {}), setup: accepted };
+  }
+  renderLiveExperimentSetupPanel();
+  renderLiveChatContextStrip();
+  return true;
+}
+
+function onEditSetupBlock(block) {
+  const current = liveSetupSnapshot && liveSetupSnapshot.blocks.find(item => item.block_id === block.block_id);
+  if (!current || !current.active || !current.editable) return;
+  liveSetupEditContext = ExperimentalSetup.beginEdit(current);
+  setLiveChatTargetMode("orchestrator");
+  setLiveChatCollapsed(false, { resetUnread: false });
+  renderLiveChatContextStrip();
+  if (planningMessageInput) planningMessageInput.focus();
+}
+
+function exitLiveSetupEditing() {
+  liveSetupEditContext = null;
+  renderLiveChatContextStrip();
+  renderLiveExperimentSetupPanel();
+  if (planningMessageInput) planningMessageInput.focus();
+}
+
+function renderLiveSetupEditContext() {
+  if (!liveChatContextStrip || !liveSetupEditContext) return false;
+  let label = liveChatContextStrip.querySelector("[data-setup-edit-label]");
+  if (!label) {
+    liveChatContextStrip.textContent = "";
+    label = document.createElement("span");
+    label.dataset.setupEditLabel = "";
+    const exit = document.createElement("button");
+    exit.type = "button";
+    exit.className = "btn";
+    exit.dataset.setupExit = "";
+    exit.textContent = "Exit editing";
+    exit.addEventListener("click", exitLiveSetupEditing);
+    liveChatContextStrip.append(label, exit);
+  }
+  const block = liveSetupSnapshot && liveSetupSnapshot.blocks.find(item => item.block_id === liveSetupEditContext.block_id);
+  const stale = block && block.revision !== liveSetupEditContext.revision;
+  const text = `Editing: ${block && (block.title || block.topic_key) || liveSetupEditContext.block_id} · revision ${liveSetupEditContext.revision}${stale ? " · Changed: select Edit again before revising" : " · Next new run only"}`;
+  if (label.textContent !== text) label.textContent = text;
+  liveChatContextStrip.title = text;
+  return true;
+}
+
+function renderLiveExperimentSetupPanel() {
   if (!liveExperimentSetupPanel) return;
-  const report = selectedReportModel(session || {});
-  const state = report.state || {};
-  const spec = report.spec || state.current_experiment_spec || {};
-  const ctx = orchestratorContext(report, eventStatusForAgent(liveSelectedAgent, state, liveRunningFlag(session || {}, liveLastSnapshot || {}, state)));
-  const mission = ctx.missionContract || {};
-  const pending = (ctx.pendingApprovals || []).slice(0, 3);
-  const geometry = experimentSetupDisplayValue(spec.geometry_type, spec.specimen_geometry, spec.specimen_size_mm, spec.geometry);
-  const material = experimentSetupDisplayValue(spec.polymer_grade, spec.material, spec.polymer, mission.material);
-  const orientation = experimentSetupDisplayValue(spec.print_orientation, spec.orientation, spec.build_orientation);
-  const layer = experimentSetupDisplayValue(spec.layer_height_mm, spec.layer_height, spec.print_layer_height_mm);
-  const infill = experimentSetupDisplayValue(spec.infill_pattern, spec.pattern, spec.lattice_type, spec.geometry_type);
-  const protocol = experimentSetupDisplayValue(spec.test_protocol, spec.protocol, state.test_protocol);
-  liveExperimentSetupPanel.innerHTML = `
-    <div class="live-experiment-setup-head">
-      <div>
-        <span>Experimental Setup</span>
-        <strong>${escapeHtml(compactText(mission.goal || state.active_goal || "Autonomous specimen mission", 54))}</strong>
-      </div>
-      <em>${escapeHtml(ctx.missingCount ? `${ctx.missingCount} missing` : "ready")}</em>
-    </div>
-    <div class="live-experiment-setup-grid">
-      <label><span>Specimen Type</span><input class="text-input compact-input" value="${escapeHtml(geometry)}" readonly /></label>
-      <label><span>Polymer Grade</span><input class="text-input compact-input" value="${escapeHtml(material)}" readonly /></label>
-      <label><span>Print Orientation</span><input class="text-input compact-input" value="${escapeHtml(orientation)}" readonly /></label>
-      <label><span>Layer Height</span><input class="text-input compact-input" value="${escapeHtml(layer)}" readonly /></label>
-      <label><span>Infill / Pattern</span><input class="text-input compact-input" value="${escapeHtml(infill)}" readonly /></label>
-      <label><span>Test Protocol</span><input class="text-input compact-input" value="${escapeHtml(protocol)}" readonly /></label>
-    </div>
-    <div class="live-experiment-setup-queue">
-      <span>Approvals / Pending Actions</span>
-      ${pending.length ? pending.map((item) => `
-        <div>
-          <i></i>
-          <strong>${escapeHtml(compactText(item.title || item.stage || item.source || "Approval gate", 32))}</strong>
-          <em>${escapeHtml(compactText(item.agent || item.stage || item.status || "pending", 18))}</em>
-        </div>
-      `).join("") : `<p class="hint">No pending approvals. Mission setup is ready for the next ORC action.</p>`}
-    </div>
-    <button class="btn live-experiment-setup-apply" type="button" data-experiment-setup-action="draft_apply" title="Draft a mission setup update in Runtime Chat" aria-label="Draft a mission setup update in Runtime Chat">Draft Mission Update</button>
-  `;
+  ExperimentalSetup.renderBlocks(liveExperimentSetupPanel, liveSetupSnapshot, {
+    onEdit: onEditSetupBlock,
+    onConfirm: block => onSetupBlockAction("confirm", block),
+    onDiscard: block => onSetupBlockAction("discard", block),
+    editContext: liveSetupEditContext,
+    actionRequests: liveSetupActionRequests,
+    notice: liveSetupNotice,
+  });
+}
+
+async function refreshLiveSetupState() {
+  const version = ++liveSetupTransportVersion;
+  const response = await fetch(`/api/planning/session?session_id=${encodeURIComponent(ensurePlanningSessionId())}`);
+  if (!response.ok) throw new Error(`Setup refresh HTTP ${response.status}`);
+  applyPlanningSession(await response.json(), { setupVersion: version });
+}
+
+async function onSetupBlockAction(action, block) {
+  if (!["confirm", "discard"].includes(action) || !liveSetupSessionId) return;
+  const current = liveSetupSnapshot && liveSetupSnapshot.blocks.find(item => item.block_id === block.block_id);
+  if (!current || !current.active || !current.editable || !current.current_draft_proposal_id) return;
+  let request = liveSetupActionRequests.get(block.block_id);
+  if (request && request.pending) return;
+  // Only a transport retry reuses the original body. A successor/changed action
+  // needs a new explicit click and identity, including owner-normalized drafts.
+  if (!request || request.body.action !== action || request.body.proposal_id !== current.current_draft_proposal_id || request.body.expected_revision !== current.revision) {
+    request = { body: {
+      action, proposal_id: current.current_draft_proposal_id, expected_revision: current.revision,
+      request_id: crypto.randomUUID(), session_id: liveSetupSessionId, target: "next_run",
+    }, pending: false };
+    liveSetupActionRequests.set(block.block_id, request);
+  }
+  request.pending = true;
+  liveSetupNotice = `${action === "confirm" ? "Confirming" : "Discarding"} draft…`;
+  renderLiveExperimentSetupPanel();
+  const version = ++liveSetupTransportVersion;
+  try {
+    const response = await fetch("/api/planning/setup/actions", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request.body),
+    });
+    const data = await response.json();
+    if (request.body.session_id !== liveSetupSessionId) return;
+    liveSetupActionRequests.delete(block.block_id);
+    if (!response.ok) {
+      const detail = data.detail;
+      liveSetupNotice = `Setup ${response.status}: ${typeof detail === "string" ? detail : detail && detail.message || "Request rejected. Review the current draft."}`;
+      if ([403, 409, 422].includes(response.status)) {
+        try { await refreshLiveSetupState(); } catch (_err) { liveSetupNotice += " Refresh failed; reconnect and review before retrying."; }
+      }
+      return;
+    }
+    liveSetupNotice = data.message || (data.ok ? "Setup updated. No run was started." : "Setup was not changed.");
+    acceptLiveSetupSnapshot(data.setup, { version });
+  } catch (_err) {
+    if (request.body.session_id === liveSetupSessionId) {
+      liveSetupNotice = "Connection interrupted; the result is unknown. Retry the same action to safely retrieve its result.";
+    }
+  } finally {
+    request.pending = false;
+    renderLiveExperimentSetupPanel();
+  }
 }
 
 function liveFocusChip(label, value, title = "", tone = "") {
@@ -19170,7 +19272,12 @@ function openPendingOperatorTeleopHandoff(metadata = {}) {
   return true;
 }
 
-function applyPlanningSession(session) {
+function applyPlanningSession(session, options = {}) {
+  // Ignore a request dispatched before a later authoritative Setup event or
+  // session response when it would switch sessions. Same-session Chat replies
+  // still update the transcript; syncLiveSetupSession retains the newer Setup.
+  if (options.setupVersion !== undefined && options.setupVersion < liveSetupAppliedVersion
+      && session && session.planning_session_id !== liveSetupSessionId) return;
   const authoritativeSession = session || {};
   const runTransitionReset = resetLiveRunScopedStateForAuthoritativeSession(authoritativeSession);
   liveLastSession = runTransitionReset
@@ -19185,6 +19292,7 @@ function applyPlanningSession(session) {
   if (liveLastSession.planning_session_id) {
     persistPlanningSessionId(liveLastSession.planning_session_id);
   }
+  syncLiveSetupSession(liveLastSession, { version: options.setupVersion });
   const snapshot = liveLastSnapshot || {};
   const state = liveLastSession.state || snapshot.state || {};
   const metadata = state.run_metadata || {};
@@ -19390,6 +19498,7 @@ async function refreshPlanningState(options = {}) {
   markLiveSyncRefreshStart();
   liveRefreshInFlight = (async () => {
     try {
+      const setupVersion = ++liveSetupTransportVersion;
       const sessionId = encodeURIComponent(ensurePlanningSessionId());
       const sessionRes = await fetch(`/api/planning/session?session_id=${sessionId}`);
       if (!sessionRes.ok) throw new Error(`session HTTP ${sessionRes.status}`);
@@ -19401,7 +19510,7 @@ async function refreshPlanningState(options = {}) {
       };
       if (!session.state && liveLastSnapshot.state) session.state = liveLastSnapshot.state;
       if (!session.runtime && liveLastSnapshot.runtime) session.runtime = liveLastSnapshot.runtime;
-      applyPlanningSession(session);
+      applyPlanningSession(session, { setupVersion });
       markLiveSyncComplete();
       if (!shouldFreezeCompletedTestRun(session)) refreshPlanningAuxiliaryState(session);
       return session;
@@ -19460,13 +19569,27 @@ async function sendPlanningMessage(message) {
   ]);
 
   try {
+    const setupVersion = ++liveSetupTransportVersion;
     const res = await fetch("/api/planning/message", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(collectPlanningPayload(clean, { runtimeFollowupQueueOnly: queueOnly })),
     });
     const data = await res.json();
-    applyPlanningSession(data.session || {});
+    if (!res.ok) {
+      // A rejected contextual edit is not a sent transcript entry. Preserve its
+      // text unless the user has already started a new message during the await.
+      if (planningMessageInput && !planningMessageInput.value) planningMessageInput.value = clean;
+      const detail = data.detail;
+      liveSetupNotice = `Chat ${res.status}: ${typeof detail === "string" ? detail : detail && detail.message || "Request rejected. Review the current setup."}`;
+      if ([403, 409, 422].includes(res.status)) {
+        try { await refreshLiveSetupState(); } catch (_err) { /* Keep the unsent text for reconnection. */ }
+      }
+      renderLiveExperimentSetupPanel();
+      setChatStatus("ERROR", "warning", liveSetupNotice);
+      return;
+    }
+    if (data.session) applyPlanningSession(data.session, { setupVersion });
     setChatStatus(data.ok ? "READY" : "ERROR", data.ok ? "idle" : "warning");
   } catch (err) {
     try {
@@ -19622,6 +19745,9 @@ function connectPlanningEventStream() {
   const source = new EventSource("/api/events/stream");
   source.onopen = () => {
     markLiveStreamState("live");
+    // Fetch only the canonical planning snapshot on (re)connect, including when
+    // ordinary completed-run polling is frozen. Never reconnect by replaying an action.
+    refreshLiveSetupState().catch(() => {});
   };
   source.addEventListener("update", (event) => {
     try {
@@ -19629,6 +19755,10 @@ function connectPlanningEventStream() {
       const eventType = String(data.event_type || data.type || "");
       const eventTime = data.ts || data.timestamp || new Date().toISOString();
       markLiveStreamState("live", eventTime);
+      if (eventType === "planning_setup_changed") {
+        acceptLiveSetupSnapshot(data.payload && data.payload.setup);
+        return;
+      }
       if (eventType === "bo.visualization.updated") {
         updateLiveBoVisualizationCards(data.payload?.visualization);
         // SSE keeps large posterior arrays compact; fetch the complete state
@@ -19930,26 +20060,6 @@ if (liveChatMode) {
   liveChatMode.addEventListener("change", () => {
     renderLiveChatContextStrip();
     persistLiveUiState();
-  });
-}
-
-if (liveExperimentSetupPanel) {
-  liveExperimentSetupPanel.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-experiment-setup-action]");
-    if (!button) return;
-    const report = selectedReportModel(liveLastSession || {});
-    const spec = report.spec || {};
-    const state = report.state || {};
-    const prompt = [
-      "현재 Experiment Setup 패널 값을 기준으로 미션 스펙 업데이트 초안을 작성하고, 누락값/승인 필요 항목을 먼저 확인해줘.",
-      `run_id=${state.run_id || "-"}`,
-      `stage=${state.stage || "-"}`,
-      `spec=${JSON.stringify(spec)}`,
-    ].join("\n");
-    setLiveChatTargetMode("orchestrator");
-    draftRuntimeChat(prompt, "command");
-    setLiveChatCollapsed(false, { resetUnread: false });
-    renderLiveRuntime(liveLastSession);
   });
 }
 

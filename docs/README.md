@@ -229,7 +229,7 @@ UTM ROS Vision Runtime은 현재 Windows/PyAutoGUI UTM 제어 증거를 대체�
 
 | Agent | Runtime module | Reference | 운용 상세 |
 |---|---|---|---|
-| Orchestrator | `graphs/modules/orchestrator` | [Orchestrator](agents/orchestrator_agent.md) | [LangGraph runtime](runtime/langgraph_runtime.md), [Closed loop and pages](runtime/closed_loop_and_pages_reference.md) |
+| Orchestrator | `graphs/modules/orchestrator` | [Orchestrator](agents/orchestrator_agent.md) | [LangGraph runtime](runtime/langgraph_runtime.md), [bounded verification](runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md) |
 | Design | `graphs/modules/design` | [Design](agents/design_agent.md) | [Specimen 제작·핸드오프 계약](agents/specimen_agent.md) |
 | Specimen Making | `graphs/modules/specimen` | [Specimen Making](agents/specimen_agent.md) | [BambuLab X2D bridge](hardware/bambulab_x2d_device_bridge_runtime_guideline.md), [기존 Prusa bridge guideline](hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) |
 | Vision | `graphs/modules/vision` | [Vision](agents/vision_agent.md) | [기존 pickup observation guideline](agents/vision_pickup_observation_runtime_guideline.txt), [UTM ROS Vision bridge](hardware/utm_ros_vision_runtime_bridge.md) |

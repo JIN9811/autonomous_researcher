@@ -266,7 +266,13 @@ Per-run artifacts are written to `runs/<run_id>/knowledge/`, and long-term JSONL
 Self-evolution remains conservative: Knowledge recommends and prepares evidence, while `SelfEvolutionService`, Guardian gates, and operator approval control candidate validation and activation.
 
 
-### 2026-05-31 Orchestration Supervisor Follow-up Contract
+### Historical 2026-05-31 Orchestration Supervisor Follow-up Contract
+
+This dated section records the deterministic supervisor contract introduced on
+2026-05-31. It does not by itself describe the current dynamic Experimental
+Setup admission behavior. The current bounded contract, including canonical
+Setup/Chat state and next-new-run admission, is in the
+[Orchestrator Agent Reference](../agents/orchestrator_agent.md).
 
 `OrchestratorAgent` is no longer treated as a keyword-only router. The runtime now records a deterministic supervisor layer around the existing graph execution without replacing the agent-specific packets.
 

@@ -146,6 +146,13 @@ the configuration surface; it does not imply 74 sequential physical actions.
 The table states responsibilities rather than a universal payload schema. The
 interface appendix records concrete contracts and source paths.
 
+The current working-tree Orchestrator contract keeps Setup confirmation and
+new-run admission inside the controller/runtime boundary: it validates the
+captured confirmed set before the affected path and does not grant a device
+bypass. Its bounded verification is recorded separately in the
+[runtime evidence note](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md);
+that note is not a complete physical-campaign result.
+
 ## State, Checkpoints, and Resume
 
 Runtime state carries run/cycle identity, current stage, domain artifacts,

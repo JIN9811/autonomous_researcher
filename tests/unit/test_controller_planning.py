@@ -19,6 +19,30 @@ from app.bootstrap import load_runtime
 from graphs import load_graph_config
 from orchestrator.state import AgentRuntimeStatus, Mode, Stage
 
+pytestmark = pytest.mark.usefixtures("handoff_no_external")
+
+
+@pytest.fixture(autouse=True)
+def controlled_chat_intake(monkeypatch, handoff_no_external):
+    """Explicit legacy operator inputs get model fixtures, not a production bypass."""
+    from agents.base_agent import AgentContext
+    original = AgentContext.complete
+    starts = {"실험 수행", "테스트 모드", "테스트 모드, 가상 브릿지", "테스트 모드, 설치 프린터",
+              "테스트 모드, 실제 프린터", "테스트 모드, 실제 출력"}
+    replies = {"가상 브릿지", "설치 프린터", "실제 출력", "연결정보 입력 완료", "테스트 모드, 설치 프린터"}
+    async def complete(self, task_type, prompt, **kwargs):
+        try:
+            packet = json.loads(prompt)
+        except (TypeError, ValueError):
+            packet = {}
+        if packet.get("operation") == "classify_chat_request":
+            message, pending = packet["message"], packet["pending_id"]
+            intent = "confirm_pending" if pending and message in replies else "start_run" if message in starts else "question"
+            return SimpleNamespace(model="controlled-chat-test", raw={}, text=json.dumps({"intent": intent,
+                "reason": "Explicit test scenario intent", "pending_id": pending if intent == "confirm_pending" else None}))
+        return await original(self, task_type, prompt, **kwargs)
+    monkeypatch.setattr(AgentContext, "complete", complete)
+
 
 def _controlled_design_model(monkeypatch):
     """Keep the configured graph/context route; replace only its model response."""
@@ -2341,6 +2365,14 @@ async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
     controller._state.current_experiment_spec = {}
     controller._state.run_metadata.pop("pending_specimen_input", None)
     captured: dict[str, object] = {}
+    from agents.bo_agent import BOAgent
+    seeds = []
+    original_initial = BOAgent.initial_design_request
+    def observe_initial(cls, state, *args, **kwargs):
+        value = original_initial(state, *args, **kwargs)
+        seeds.append(copy.deepcopy(value))
+        return value
+    monkeypatch.setattr(BOAgent, "initial_design_request", classmethod(observe_initial))
 
     async def fake_complete(*, prompt: str):
         return (
@@ -2381,7 +2413,11 @@ async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
     assert result["ok"] is True
     assert isinstance(constraints, dict)
     assert constraints["geometry_type"] == "gyroid"
-    assert constraints["cell_size_mm"] == 10.0
+    assert len(seeds) == 1
+    assert constraints["cell_size_mm"] == seeds[0]["constraints"]["cell_size_mm"]
+    assert constraints["relative_density"] == seeds[0]["constraints"]["relative_density"]
+    assert controller._state.run_metadata["orchestrator_design_contract"]["requested_parameters"] == {
+        key: seeds[0]["constraints"][key] for key in ("cell_size_mm", "relative_density")}
     assert constraints["printer_test_path"] == choice
     assert constraints["test_printer_transport"] == transport
     assert constraints["allow_test_printer_live"] is (choice != "virtual_bridge")
@@ -2571,6 +2607,14 @@ async def test_live_gui_test_mode_virtual_bridge_handoff_returns_before_loop_fin
 async def test_planning_tail_continues_original_loop_after_specimen(tmp_path: Path) -> None:
     controller = load_runtime()
     controller._state.mode = Mode.LIVE
+    # This actual-agent tail previously launched the background UTM runtime.
+    # Explicitly simulate that I/O; the suite-wide process denial stays active.
+    utm_runtime_requests = []
+    def simulated_utm_runtime(payload):
+        utm_runtime_requests.append(dict(payload))
+        return {"ok": True, "status": "running", "source": "controlled_test_io"}
+    controller._deps.agent_context.tools.register("vision.utm_runtime.start", simulated_utm_runtime)
+    controller._deps.agent_context.tools.register("vision.utm_runtime.status", simulated_utm_runtime)
     rollout_session_id = "rollout-cand-tail"
     utm_frame = tmp_path / "utm-confirmed.png"
     utm_frame.write_bytes(b"utm-confirmed")

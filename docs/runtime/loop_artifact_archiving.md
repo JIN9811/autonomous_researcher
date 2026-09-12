@@ -74,6 +74,10 @@ results whose loop ownership is unknown.
 
 ## Storage and Identity
 
+New run and Chat identities follow the [readable naming contract](logging.md#readable-run-and-session-names).
+Names are fixed at allocation; older IDs and directories are not migrated.
+The loop/agent/attempt hierarchy below is unchanged.
+
 ```text
 runs/<run_id>/
 └── runtime/loops/

@@ -305,6 +305,19 @@ when an executable graph node references it, graph validation succeeds, and the
 graph itself passes the save/dry-run/run gates. The IDE does not edit arbitrary
 Python source or bypass generated-handler registration.
 
+The current main graph's Orchestrator registration is the executable source for
+the bounded `orchestrator_plan` decision and its graph-linked Setup-owner
+descriptors. Confirmed Setup values are applied/read back only through the
+existing controller/runtime new-run admission path; they do not add an IDE
+activation control, change a running snapshot, or make every module visible in
+Module Management an active Setup owner. The IDE remains a configuration and
+inspection surface, not the canonical planning-session store or a device bridge
+write path.
+
+The [Orchestrator verification evidence](evidence/2026-09-12-orchestrator-dynamic-setup-verification.md)
+covers bounded working-tree checks and aggregate provider cases; it does not
+turn this IDE surface into a provider, service, or hardware validation record.
+
 Optional `ui.yaml` is a presentation descriptor. It may change labels, cards,
 charts, report sections, and allowlisted navigation/read-only API actions; it
 cannot register tools, handlers, graph routes, or physical execution rights.

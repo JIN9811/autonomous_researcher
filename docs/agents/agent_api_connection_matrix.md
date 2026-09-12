@@ -28,8 +28,8 @@ source_of_truth:
   - knowledge
   - knowledge/http_api.py
   - knowledge/source_api.py
-last_verified: 2026-09-11
-verified_against: 5a190e8
+last_verified: 2026-09-12
+verified_against: working-tree
 related_docs:
   - docs/agents/README.md
   - docs/runtime/three_level_control_model.md
@@ -53,7 +53,7 @@ connection boundary without duplicating the tables below.
 
 ## Scope
 
-The matrix covers source baseline `5a190e8` (2026-09-11). API entries are curated
+The matrix covers the intentional working-tree scope verified on 2026-09-12. API entries are curated
 functional families checked against route declarations and active installers. They do not replace
 `/openapi.json` and do not assign exclusive ownership where services overlap.
 
@@ -76,7 +76,7 @@ and the current Sunburst figure references. It adds no runtime or device path.
 
 | Agent | Plane/stage | Preceding inputs | Authoritative work | Following handoff | Physical effect |
 |---|---|---|---|---|---|
-| Orchestrator | Control plane and Design pre-stage | Operator intent, session, graph/run state, prior decisions | Mission/plan/context/handoff/decision compilation | Active agent, Guardian route, next cycle or terminal | none; direct device execution prohibited |
+| Orchestrator | Control plane and Design pre-stage | Canonical session, operator intent, Setup block/revision, graph/run state, prior decisions | Bounded decision, mission/plan/context/handoff compilation, owner-validated Setup proposal, and all-confirmed admission | Existing active-agent/Guardian route; confirmed settings at next new run or a deterministic held admission | none; direct device execution prohibited |
 | Design | `design` | Objective, constraints, prior BO/Knowledge/failure context | Code-owned checks and bounded LLM suitability decision; accepted experiment specification | Specimen Making | none |
 | Specimen Making | `specimen` | Approved experiment specification and fabrication intent | Bounded LLM suitability/tool decision, manufacturing digital thread and print handoff | Vision and Manipulation readiness | `physical_possible` through printer service |
 | Vision | `vision` plus verification sidecars | Specimen/manipulation context, camera and scene state | Bounded decision plus ordered raw/annotated review, freshness-bounded observation, and verification signals | Manipulation, Equipment, Specimen completion, Guardian | `physical_possible` through ActiveCam move/capture/return and verified rollout stop |
@@ -94,7 +94,7 @@ The owning Python dispatcher validates each choice before existing execution.
 
 | Agent | LLM contribution | Action / execution boundary | Output authority |
 |---|---|---|---|
-| [Orchestrator](orchestrator_agent.md) | Planning context for the current stage | Planning note feeds code-owned mission/plan/handoff builders; no direct device tools | Registered runtime chooses and executes graph routes |
+| [Orchestrator](orchestrator_agent.md) | Schema-bounded `orchestrator_plan` choice for context, availability, Setup proposal, owner review, handoff, or defer | Code validates allowed tools/scope/evidence and owner adapters validate before draft persistence, then apply/read back only declared settings; no direct device tools | Explicit confirmation schedules a next new run, whose admission validates the captured set and consumes it only after readback |
 | [Design](design_agent.md) | Accept, inspect or return candidate suitability | Agent-local evidence queries and candidate acceptance | Prepared candidate, locked inputs and hard checks |
 | [Specimen](specimen_agent.md) | Fabrication suitability and tool choice | `inspect_fabrication_evidence`, `execute_fabrication`, `return_to_owner`; execution uses existing evaluation/printer route | Geometry/process checks and actual printer evidence |
 | [Vision](vision_agent.md) | Select current observation contract, then review same-capture evidence | `execute_verification`, `accept_visual_evidence`, `return_to_owner`; registered capture/detection callbacks | Detector facts, identity/freshness and existing completion gates |
@@ -137,7 +137,7 @@ cross-cutting responsibilities, not additional sequential model calls.
 
 | Agent | Required state | Primary output contracts | Checkpoint/evidence | Blocking condition |
 |---|---|---|---|---|
-| Orchestrator | Intent/session, current run/stage, accepted values | `mission_contract.v1`, `orchestration_plan.v1`, `handoff_packet.v1`, `decision_register.v1` | planning transcript, events, checkpoint/run metadata | missing required input, Guardian route, terminal state |
+| Orchestrator | Canonical planning session, current scope, accepted values, Setup revision, admitted candidates | mission/handoff/decision contracts plus Setup proposal/readback records | planning transcript, Setup history/receipts, events, checkpoint/run metadata | missing/stale scope, unsupported owner, unknown availability, Guardian route, terminal state |
 | Design | objective + constraint context | `experiment_spec`, design report/candidate/ledger, handoff packet | design artifacts, decisions, metrics | hard constraint failure or no valid candidate |
 | Specimen Making | complete fabrication specification | STL/mesh/process/slice/fabrication result and specimen handoff | source/patched hashes, printer proof, digital thread | missing fields, QA failure, start gate, bed-clear/proof failure |
 | Vision | available capture/zone/task and fresh context | `vision_report.v1`, `vision_signal.v1`, evidence refs | images, pose/event reports, timestamps/expiry | unavailable capture or stale/low-quality signal |
@@ -152,7 +152,7 @@ cross-cutting responsibilities, not additional sequential model calls.
 
 | Agent | Owned API | Connected API | Operator/shared API | Route/schema source |
 |---|---|---|---|---|
-| Orchestrator | planning message/bootstrap/session contract | runtime backend/model readiness | run lifecycle, run events/artifacts, approvals, SSE/recent events | `/openapi.json`, `/api/planning/*`, `/api/run*`, `/api/runtime/*` |
+| Orchestrator | planning session/message plus scoped Setup proposal/action contract | owner availability/readback and registered model backend | run lifecycle, run events/artifacts, approvals, SSE/recent events | `/openapi.json`, `/api/planning/*`, `/api/run*`, `/api/runtime/*` |
 | Design | no dedicated direct execution endpoint | planning artifact/session context | `/api/graphs/*` authoring/validate/dry-run/run | `/openapi.json`, graph execution handler |
 | Specimen Making | no direct agent endpoint | `/api/printer/*`, geometry/artifact tools | printer workspace and selected module management | `/openapi.json`, printer service/bridge implementations |
 | Vision | specimen-pose status/snapshot/release | camera, active robot camera, UTM vision/runtime APIs | Vision/UTM workspaces and run retry | `/openapi.json`, Vision tools/bridge handlers |
@@ -167,7 +167,7 @@ cross-cutting responsibilities, not additional sequential model calls.
 
 | Agent | LLM route | Internal services | External software/protocol | Device boundary | Highest possible effect |
 |---|---|---|---|---|---|
-| Orchestrator | Python: `orchestrator_plan`; manifest: `orchestrator_supervisor` | controller, run loop, checkpoint/event/planning services | registered model backend for planning context | none | model/local_state |
+| Orchestrator | Python: `orchestrator_plan`; manifest: `orchestrator_supervisor` | controller, Setup store/application, owner adapters, run loop, checkpoint/event/planning services | registered API/vLLM model backend for bounded decisions | none | model/local_state |
 | Design | `design_reasoning` | candidate checks and validated local decision loop | registered model backend for suitability/tool decisions | none | model/local_state |
 | Specimen Making | `specimen_reasoning` | bounded suitability tools, geometry, artifact, evaluation, printer manager | slicer/provider, Bambu MQTT/HTTP artifact path, Prusa bridge where selected | 3D printer | physical_possible through existing gates |
 | Vision | `vision_observation` with bounded JSON tools and ordered `LLMImageInput` pairs | decision validation, pose tracker, signal arbitration, evidence packaging | camera, ActiveCam, ROS/UTM runtime, shared API/vLLM multimodal route | cameras; ActiveCam robot motion; rollout stop process | physical_possible through ActiveCam move/capture/return and verified stop |

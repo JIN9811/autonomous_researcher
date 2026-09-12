@@ -39,6 +39,53 @@ class BOAgent(BaseAgent):
 
     name = "bo_agent"
 
+    def setup_descriptor(self) -> dict[str, Any]:
+        return {"write_enabled": True, "fields": [
+            {"id": "bo.parameter_space", "field": "parameter_space", "type": "object",
+             "units": {"cell_size_mm": "mm", "relative_density": "fraction"}},
+            {"id": "bo.acquisition", "field": "acquisition", "type": "string",
+             "enum": list(self.SUPPORTED_ACQUISITIONS)}]}
+
+    def read_setup(self, state: OrchestratorState) -> dict[str, Any]:
+        current = state.run_metadata.get("bo_settings")
+        normalized, _ = self.normalize_settings(current if isinstance(current, dict) else {})
+        return {key: deepcopy(normalized[key]) for key in ("parameter_space", "acquisition")}
+
+    def validate_setup(self, changes: dict, state: OrchestratorState) -> dict[str, Any]:
+        if not isinstance(changes, dict) or set(changes) - {"parameter_space", "acquisition"}:
+            raise ValueError("Unsupported BO setup field")
+        if "acquisition" in changes and changes["acquisition"] not in self.SUPPORTED_ACQUISITIONS:
+            raise ValueError("Unsupported acquisition")
+        if "parameter_space" in changes:
+            space = changes["parameter_space"]
+            if not isinstance(space, dict) or not space or set(space) - set(self.DEFAULT_PARAMETER_SPACE):
+                raise ValueError("Unsupported parameter or unit in parameter_space")
+            for key, domain in space.items():
+                values = domain if isinstance(domain, (list, tuple)) else [domain]
+                if not values:
+                    raise ValueError(f"{key} requires values")
+                if key == "geometry_type":
+                    if any(not isinstance(v, str) or not v.strip() for v in values):
+                        raise ValueError("geometry_type requires text")
+                elif key.endswith("_enabled"):
+                    if any(not isinstance(v, bool) for v in values):
+                        raise ValueError(f"{key} requires booleans")
+                elif any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in values):
+                    raise ValueError(f"{key} requires finite numbers in declared units")
+        current = state.run_metadata.get("bo_settings")
+        normalized, warnings = self.normalize_settings({**(current if isinstance(current, dict) else {}), **deepcopy(changes)})
+        return {"values": normalized, "warnings": warnings,
+                "requires_confirmation": any(normalized[key] != value for key, value in changes.items())}
+
+    def apply_setup(self, changes: dict, state: OrchestratorState, request_id: str) -> dict[str, Any]:
+        if state.stage.value != "idle" or state.loop_count or state.experiment_evaluations:
+            raise ValueError("Setup applies only to fresh-run inputs")
+        if not isinstance(request_id, str) or not request_id.strip():
+            raise ValueError("request_id is required")
+        validated = self.validate_setup(changes, state)
+        state.run_metadata["bo_settings"] = deepcopy(validated["values"])
+        return {"owner": self.name, "request_id": request_id, "values": self.read_setup(state)}
+
     SUPPORTED_STRATEGIES = (
         "random",
         "grid",

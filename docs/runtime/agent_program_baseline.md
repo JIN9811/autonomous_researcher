@@ -16,10 +16,11 @@ Use it when replacing mock logic with production device/program logic in each ag
 ```text
 User/GUI
   -> MainController
+    -> canonical planning session / confirmed Setup admission at a new-run boundary
     -> LangGraphRunLoop
       -> selected graphs/configs/*.yaml
       -> Compiled LangGraph node
-      -> (design stage only) OrchestratorAgent
+      -> OrchestratorAgent control-plane planning (controller handoff and Design pre-execution where configured)
       -> Stage Agent (design/specimen/vision/manipulation/equipment/analysis/knowledge/bo/guardian)
         -> ToolRegistry / RAG / DB / FailureMemory / Backends
 ```
@@ -102,7 +103,7 @@ When replacing internals with real programs, keep these output keys stable.
 Notes:
 
 - Manipulation emits `manipulation_report.v1` and `robot_task_result.v1`; downstream agents and GUI reports must consume those structured packets rather than scraping raw rollout logs.
-- Design-stage orchestrator planning is declared as `module.pre_execution` in `graphs/modules/design/module.yaml` (`orchestrator_plan -> agent.orchestrator_agent`) and writes plan metadata to `state.run_metadata.orchestrator_plan`; it must not be reintroduced as a hard-coded run-loop special case.
+- Design-stage Orchestrator planning is declared as `module.pre_execution` in `graphs/modules/design/module.yaml` (`orchestrator_plan -> agent.orchestrator_agent`) and writes plan metadata to `state.run_metadata.orchestrator_plan`; the same control plane also owns bounded controller planning and confirmed Setup admission for a next new run. It must not be reintroduced as a hard-coded run-loop special case. The detailed current contract is the [Orchestrator Agent Reference](../agents/orchestrator_agent.md).
 - Live GUI planning may skip that pre-execution step only after the chat orchestrator has already approved the same Design handoff, to avoid duplicate model calls.
 - Live GUI agent tabs and descriptor cards are loaded from `/api/runtime/agent-manifests`, not directly from hard-coded JavaScript. The manifest merges `graphs/configs/atr_closed_loop.yaml`, `graphs/modules/*/module.yaml`, and optional presentation-only `graphs/modules/*/ui.yaml`.
 - Module Management may create preview modules through `/api/modules/templates/{agent|ui-only|bridge}`. These draft modules are intentionally `enabled=false`, `status=draft`, and `graph.attached=false`; they cannot execute until attached, validated, dry-run, and saved with allowlisted handlers/tools.

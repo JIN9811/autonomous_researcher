@@ -139,7 +139,7 @@ from utils.manipulation_profile import (
     save_manipulation_agent_profile,
 )
 from utils.recording_specimen_pose import load_recording_specimen_pose
-from utils.ids import make_event_id
+from utils.ids import is_run_id, make_event_id
 from utils.equipment_profiles import DEFAULT_UTM_PROFILE_ID, EquipmentProfile, EquipmentProfileRegistry, build_execution_contract
 from utils.equipment_skill_runtime import EquipmentSkillRegistry, SkillContractError, canonical_sha256
 from utils.equipment_skill_flow import EquipmentSkillFlowError, EquipmentSkillFlowStore, normalize_equipment_skill_flow
@@ -826,6 +826,18 @@ class PlanningMessageRequest(BaseModel):
     backend: Literal["openai", "nemoclaw", "ollama", "vllm"] | None = None
     constraints: dict[str, object] = Field(default_factory=dict)
     session_id: str | None = None
+    setup_context: dict | None = None
+
+
+class PlanningSetupActionRequest(BaseModel):
+    """Confirmation/discard is next-run scoped and never starts execution."""
+    model_config = {"extra": "forbid"}
+    action: Literal["confirm", "discard"]
+    proposal_id: str = Field(min_length=1)
+    expected_revision: int = Field(ge=1, strict=True)
+    request_id: str = Field(min_length=1)
+    session_id: str = Field(min_length=1)
+    target: Literal["next_run"]
 
 
 class PlanningBootstrapRequest(BaseModel):
@@ -6538,10 +6550,10 @@ def _parse_artifact_id(artifact_id: str, run_id: str | None = None) -> tuple[str
     if "::" in raw:
         decoded_run_id, encoded_path = raw.split("::", 1)
         return decoded_run_id, unquote(encoded_path)
-    if raw.startswith("run-") and ":" in raw:
+    if ":" in raw and is_run_id(raw.split(":", 1)[0]):
         decoded_run_id, encoded_path = raw.split(":", 1)
         return decoded_run_id, unquote(encoded_path)
-    if raw.startswith("run-") and "/" in raw:
+    if "/" in raw and is_run_id(raw.split("/", 1)[0]):
         decoded_run_id, artifact_path = raw.split("/", 1)
         return decoded_run_id, artifact_path
     return run_id or _current_run_id(), raw
@@ -19064,13 +19076,31 @@ async def post_planning_bootstrap(req: PlanningBootstrapRequest) -> dict[str, ob
 @app.post("/api/planning/message")
 async def post_planning_message(req: PlanningMessageRequest) -> dict[str, object]:
     """Ask the OrchestratorAgent model for live-planning guidance."""
-    return await controller.planning_message(
-        message=req.message,
-        goal=req.goal,
-        backend=req.backend,
-        constraints=dict(req.constraints),
-        session_id=req.session_id,
-    )
+    from orchestrator.experimental_setup import SetupConflict, SetupValidationError
+    try:
+        return await controller.planning_message(
+            message=req.message, goal=req.goal, backend=req.backend,
+            constraints=dict(req.constraints), session_id=req.session_id, setup_context=req.setup_context)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail={"message": str(exc),
+            "planning_session_id": controller._planning_session_id}) from exc
+    except SetupConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (SetupValidationError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/planning/setup/actions")
+async def post_planning_setup_action(req: PlanningSetupActionRequest) -> dict[str, object]:
+    from orchestrator.experimental_setup import SetupConflict, SetupValidationError
+    try:
+        return await controller.planning_setup_action(req.model_dump())
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except SetupConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (SetupValidationError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/api/planning/artifacts/{run_id}/{specimen_id}/{filename}")

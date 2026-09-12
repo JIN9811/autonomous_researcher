@@ -69,6 +69,7 @@ TEST_AGENT_FIGURES = {
     "orchestrator": (
         "orchestrator_01_closed_loop_handoffs",
         "orchestrator_02_execution_effect_boundary",
+        "orchestrator_03_api_connection_architecture",
     ),
     "design": (
         "design_01_closed_loop_handoffs",
@@ -550,6 +551,16 @@ def test_simple_agent_reference_requires_two_complete_figure_pairs(tmp_path: Pat
     errors = module.validate_document(document, tmp_path)
 
     assert any("missing agent figure source" in error for error in errors)
+
+
+def test_orchestrator_reference_requires_third_figure(tmp_path: Path) -> None:
+    module = _load_validator()
+    document = _write_agent_reference(tmp_path, "orchestrator", figure_count=2)
+
+    assert any(
+        "orchestrator_03_api_connection_architecture" in error
+        for error in module.validate_document(document, tmp_path)
+    )
 
 
 def test_complex_agent_reference_requires_third_figure(tmp_path: Path) -> None:

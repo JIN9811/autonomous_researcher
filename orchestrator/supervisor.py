@@ -1,8 +1,8 @@
 """
 Deterministic supervisor helpers for the Orchestration Agent layer.
 
-These helpers keep the Orchestrator's operational records structured without
-making the runtime depend on an LLM call for every stage transition.
+These helpers format operational records; invocation-local model review and
+once-only handoff consumption remain owned by the existing runtime boundaries.
 """
 
 from __future__ import annotations

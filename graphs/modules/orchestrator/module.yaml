@@ -1,9 +1,22 @@
 module:
+  orchestration_contract:
+    version: orchestration_contract.v1
+    admission:
+      authority: existing_owner_and_runtime_validation
+      description: Descriptive only; absent evidence is unknown, not ready.
+    result:
+      required: []
+    acceptance:
+      authority: policies/validation_policy.py and existing owner validators
+      description: pre-step and overlay coordination; no generic result validation
   id: orchestrator
   label: Orchestrator Supervisor Module
   handler: agent.orchestrator_agent
   llm_role: orchestrator_supervisor
   editable: true
+  decision_settings:
+    max_steps: 4
+    timeout_s: null
   safety:
     live_requires_validation: true
     dry_run_supported: true

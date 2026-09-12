@@ -2651,6 +2651,28 @@ class LabEquipmentAgent(BaseAgent):
             },
         )
 
+    def _real_manipulation_preflight_ready(self, state: OrchestratorState, specimen_id: str) -> bool:
+        """A virtual UTM may follow a real transfer, never an unverified one."""
+        context = self._base_run_payload(state)["source_stage_context"]
+        gate = evaluate_equipment_entry_gate(run_id=state.run_id, specimen_id=specimen_id,
+            source_stage_context=context, test_like=False)
+        manipulation = context.get("manipulation") or {}
+        stop = manipulation.get("rollout_stop") or {}
+        observation = state.run_metadata.get("latest_vision_observation") or {}
+        signal = observation.get("vision_manipulation_completion") or {}
+        session_id = str(manipulation.get("session_id") or "")
+        timestamp = self._parse_vision_time(signal.get("timestamp"))
+        age = (datetime.now(timezone.utc) - timestamp).total_seconds() if timestamp else -1
+        evidence = str(signal.get("evidence_path") or "")
+        return bool(gate["ok"] and session_id
+            and manipulation.get("completion_status") == "verified_complete"
+            and stop.get("ok") is True and stop.get("status") == "STOPPED"
+            and stop.get("session_id") == session_id
+            and signal.get("run_id") == state.run_id and signal.get("specimen_id") == specimen_id
+            and signal.get("loop_id") == state.loop_count and signal.get("session_id") == session_id
+            and signal.get("detected") is True and signal.get("rollout_stopped") is True
+            and 0 <= age <= 120 and evidence and Path(evidence).is_file())
+
     def _preflight_equipment_skill_flow(
         self,
         state: OrchestratorState,
@@ -2712,11 +2734,14 @@ class LabEquipmentAgent(BaseAgent):
             and str(manipulation_preflight.get("status") or "") == "execution_ready_pending_approval"
             and manipulation_preflight.get("actuation_performed") is False
         )
+        real_manipulation = (state.current_experiment_spec.get("execution_policy") or {}).get("manipulation") == "execute"
+        if real_manipulation:
+            entry_ready = self._real_manipulation_preflight_ready(state, specimen_id)
         if not entry_ready:
             return self._blocked_equipment_preflight(
                 state,
-                failure_code="MANIPULATION_PREFLIGHT_REQUIRED",
-                message="A matching no-actuation Manipulation preflight is required.",
+                failure_code="MANIPULATION_VERIFIED_HANDOFF_REQUIRED" if real_manipulation else "MANIPULATION_PREFLIGHT_REQUIRED",
+                message="A matching stopped transfer and fresh scoped Vision evidence are required." if real_manipulation else "A matching no-actuation Manipulation preflight is required.",
                 requested_branch="saved_flow",
                 profile_id=profile_id,
                 details={

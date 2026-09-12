@@ -33,6 +33,8 @@ import json
 import os
 import re
 import shutil
+from uuid import uuid4
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -42,6 +44,9 @@ import yaml
 
 from agents.base_agent import AgentContext, AgentResult
 from agents.registry import AgentRegistry
+from agents.orchestrator_capabilities import OwnerCatalog
+from orchestrator.handoff_boundary import review_handoff, authorization_scope, incoming_authorization_matches
+from orchestrator.orchestrator_checkpoint import handoff_checkpoint
 from backends.llm_backend import LLMImageInput
 from backends.prompt_registry import get_system_prompt
 from graphs import ATRLangGraphCompiler, GraphConfig, HandlerRegistry, load_graph_config
@@ -744,6 +749,8 @@ class LangGraphRunLoop:
         graph_config_path: str | Path | None = None,
         module_root: str | Path | None = None,
         run_orchestrator_before_design: bool | None = None,
+        owner_catalog: OwnerCatalog | None = None,
+        decision_settings: dict | None = None,
     ) -> None:
         self._state = state
         self._agent_registry = agent_registry
@@ -757,6 +764,22 @@ class LangGraphRunLoop:
         self._module_root = self._resolve_module_root(module_root)
         self._graph_config = self._load_config(graph_config_path)
         self._module_configs = self._load_module_configs()
+        self._owner_catalog = owner_catalog or OwnerCatalog(agent_registry, self._graph_config, graph_root=self._module_root).snapshot()
+        self._orchestrator_settings = {}
+        self._supervision_declared = any(binding["owner"] == orchestrator_agent_name and binding.get("executable")
+            for binding in self._owner_catalog.describe(state, ctx))
+        for node in self._graph_config.nodes:
+            module = {}
+            if node.module_id:
+                path = (self._module_root / node.module_id / "module.yaml").resolve()
+                if path.is_relative_to(self._module_root.resolve()) and path.is_file():
+                    raw = yaml.safe_load(path.read_text()) or {}
+                    module = raw.get("module", raw)
+            handler = str(module.get("handler") or "").strip() or str(node.handler or "").strip()
+            if handler == f"agent.{orchestrator_agent_name}":
+                self._orchestrator_settings = module.get("decision_settings", {})
+        if decision_settings is not None:
+            self._orchestrator_settings = deepcopy(decision_settings)
         self._pause_notice_emitted = False
         self._handler_registry = self._build_handler_registry()
         module_ids = {str(module.get("id") or stage) for stage, module in self._module_configs.items()}
@@ -1150,6 +1173,7 @@ class LangGraphRunLoop:
         self._state.run_metadata["operator_followup_queue"] = remaining[-50:]
         if not pending:
             return []
+        self._state.run_metadata["orchestrator_review_revision"] = int(self._state.run_metadata.get("orchestrator_review_revision", 0)) + 1
 
         context = self._state.run_metadata.setdefault("operator_followup_context", [])
         if not isinstance(context, list):
@@ -1196,6 +1220,7 @@ class LangGraphRunLoop:
         selected_transition: dict[str, Any],
         transition_candidates: list[dict[str, Any]],
         guardian_context: dict[str, Any] | None = None,
+        prepared_decision: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         evidence_refs: list[str] = []
         if isinstance(result_data.get("handoff_packet"), dict):
@@ -1220,6 +1245,11 @@ class LangGraphRunLoop:
             selected_transition=selected_transition,
             guardian_context=guardian_context,
         )
+        if prepared_decision and prepared_decision.get("status") == "prepared":
+            handoff = deepcopy(prepared_decision["effect"])
+            decision.update(decision_id=prepared_decision["decision_id"],
+                            reason=prepared_decision["reason"], status="prepared",
+                            evidence_refs=deepcopy(prepared_decision["evidence_refs"]))
         self._append_metadata_record("orchestrator_decision_register", decision)
         self._append_metadata_record("orchestrator_handoff_packets", handoff)
         self._state.run_metadata["latest_orchestrator_decision"] = decision
@@ -2659,10 +2689,10 @@ class LangGraphRunLoop:
         *,
         stage: Stage,
         module_runtime: dict[str, Any],
-    ) -> None:
+    ) -> bool:
         """Execute config-declared pre-stage agent steps before the stage handler."""
         if not self._pre_execution_enabled(stage, module_runtime):
-            return
+            return True
         steps = [step for step in module_runtime.get("pre_execution", []) if isinstance(step, dict) and step.get("enabled", True)]
         for step in steps:
             handler = str(step.get("handler") or "").strip()
@@ -2684,7 +2714,16 @@ class LangGraphRunLoop:
                 },
             )
             try:
-                result = await self._agent_registry.get(agent_name).run(self._state, self._ctx)
+                if agent_name == self._orchestrator_agent_name:
+                    key = self._state.run_metadata.get("orchestrator_stage_entry_key")
+                    if not key:
+                        if not await self._review_stage_entry(stage):
+                            return False
+                        key = self._state.run_metadata.get("orchestrator_stage_entry_key")
+                    data = handoff_checkpoint(self._state.run_metadata, key, action="read").get("payload", {}).get("agent_data", {})
+                    result = AgentResult(success=True, summary="Existing handoff admitted this task", data=data)
+                else:
+                    result = await self._agent_registry.get(agent_name).run(self._state, self._ctx)
             except Exception as exc:
                 await self._emit(
                     event_type="module_pre_step_failed",
@@ -2783,6 +2822,166 @@ class LangGraphRunLoop:
                     message=result.summary,
                     payload={**completed_payload, "node_id": str(step.get("id") or stage.value)},
                 )
+        return True
+
+    def _observation_task_scope(self) -> dict:
+        return {"run_id": self._state.run_id, "loop": self._state.loop_count,
+                "specimen_id": (self._state.current_experiment_spec or {}).get("specimen_id", "")}
+
+    def _observation_task_admitted(self) -> bool:
+        task = self._state.run_metadata.get("orchestrator_observation_task", {})
+        return task.get("scope") == self._observation_task_scope() and task.get("authorization") == authorization_scope(self._state)
+
+    def _hold_observation_refresh(self, key: str) -> None:
+        metadata = self._state.run_metadata
+        previous = metadata.get("orchestrator_observation_refresh", {})
+        if previous.get("status") == "waiting" and previous.get("held_checkpoint") == key:
+            return
+        metadata["orchestrator_observation_refresh"] = {"status": "waiting", "held_checkpoint": key,
+            "scope": self._observation_task_scope(), "action": "refresh_observation",
+            "held_stage": self._state.stage.value,
+            "kind": "result" if metadata.get("orchestrator_pending_handoff") == key else "entry"}
+
+    def _retire_observation_refresh(self, key: str) -> None:
+        held = self._state.run_metadata.get("orchestrator_observation_refresh", {})
+        if held.get("status") == "waiting" and held.get("held_checkpoint") == key:
+            held["status"] = "retired"
+            if self._state.run_metadata.get("orchestrator_waiting_entry") == key:
+                self._state.run_metadata.pop("orchestrator_waiting_entry", None)
+
+    def _apply_observation_refresh(self, followups: list[dict]) -> bool:
+        """Explicit, scoped recapture admission using the existing Vision route."""
+        metadata = self._state.run_metadata
+        held = metadata.get("orchestrator_observation_refresh", {})
+        if held.get("status") != "waiting" or held.get("scope") != self._observation_task_scope():
+            return False
+        if self._state.stop_requested or self._state.safe_stop_requested or self._state.emergency_stop_requested:
+            return False
+        observation = metadata.get("orchestrator_observation_task", {})
+        pending = metadata.get("orchestrator_pending_handoff")
+        if (not observation or self._observation_task_admitted()
+                or held.get("held_stage") != self._state.stage.value):
+            self._retire_observation_refresh(held["held_checkpoint"])
+            return False
+        if held.get("kind") == "result":
+            record = handoff_checkpoint(metadata, held["held_checkpoint"], action="read")
+            active = (pending == held["held_checkpoint"] and record.get("status") in {"prepared", "deferred"}
+                      and record.get("payload", {}).get("reuse_observation_task")
+                      and record["payload"].get("stage") == self._state.stage.value)
+        else:
+            active = (not pending and self._state.stage in {Stage.MANIPULATION, Stage.EQUIPMENT}
+                      and metadata.get("orchestrator_waiting_entry") == held["held_checkpoint"]
+                      and observation.get("checkpoint") == held["held_checkpoint"])
+        if not active:
+            self._retire_observation_refresh(held["held_checkpoint"])
+            return False
+        expected = {"action": "refresh_observation", "held_checkpoint": held["held_checkpoint"], **held["scope"]}
+        reply = next((record for record in followups if record.get("orchestrator_action") == expected), None)
+        if reply is None:
+            return False
+        if pending:
+            if pending != held["held_checkpoint"]:
+                return False
+            # Retire only routing authorization, preserving the completed owner's
+            # result and accounting. This does not execute its physical effect.
+            handoff_checkpoint(metadata, pending, action="prepare", payload={"superseded_by_refresh": reply["followup_id"]})
+            handoff_checkpoint(metadata, pending, action="consume")
+            metadata.pop("orchestrator_pending_handoff", None)
+        held.update(status="admitted", followup_id=reply["followup_id"])
+        for name in ("orchestrator_observation_task", "orchestrator_incoming_handoff", "orchestrator_waiting_entry"):
+            metadata.pop(name, None)
+        self._state.stage = Stage.VISION
+        return True
+
+    async def _review_stage_entry(self, stage: Stage) -> bool:
+        """Review direct entry before owner work; reuse an admitted incoming task.
+
+        Vision, manipulation and post-placement/clearance observation belong to
+        the same bounded observation/consumption task. Their owner gates remain
+        authoritative, with no new model await inside that fresh-signal chain.
+        """
+        metadata = self._state.run_metadata
+        if not self._supervision_declared:
+            return True  # custom graph has not delegated decisions to this owner
+        if stage == Stage.GUARDIAN:
+            return True  # mandatory safety inspection cannot wait on this model
+        if stage in {Stage.VISION, Stage.MANIPULATION, Stage.EQUIPMENT} and self._observation_task_admitted():
+            self._retire_observation_refresh(metadata["orchestrator_observation_task"]["checkpoint"])
+            return True
+        observation = metadata.get("orchestrator_observation_task", {})
+        if stage in {Stage.MANIPULATION, Stage.EQUIPMENT} and observation.get("scope") == self._observation_task_scope():
+            # Input changed after capture: hold, never insert a model await in
+            # the fresh signal chain. Re-enter Vision for a newly admitted task.
+            metadata["orchestrator_waiting_entry"] = observation["checkpoint"]
+            self._hold_observation_refresh(observation["checkpoint"])
+            return False
+        incoming = metadata.get("orchestrator_incoming_handoff", {})
+        if ((incoming.get("run_id"), incoming.get("loop"), incoming.get("stage")) == (self._state.run_id, self._state.loop_count, stage.value)
+                and incoming_authorization_matches(self._state, incoming, handoff_checkpoint(metadata, incoming["key"], action="read"))):
+            key = incoming["key"]
+        else:
+            identity = {**self._observation_task_scope(), "stage": stage.value,
+                        "authorization": authorization_scope(self._state),
+                        "retry": self._state.retry_counters.get(stage.value, 0)}
+            key = "entry:" + hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+            record = await review_handoff(state=self._state, ctx=self._ctx, registry=self._agent_registry,
+                catalog=self._owner_catalog, key=key, candidate=stage.value,
+                payload={"stage": stage.value, "input": compact_runtime_payload(self._state.current_experiment_spec)},
+                settings=self._orchestrator_settings, agent_name=self._orchestrator_agent_name)
+            if record.get("status") not in {"prepared", "consumed"}:
+                metadata["orchestrator_waiting_entry"] = key
+                return False
+            handoff_checkpoint(metadata, key, action="consume")
+        metadata.pop("orchestrator_waiting_entry", None)
+        metadata["orchestrator_stage_entry_key"] = key
+        if stage == Stage.VISION:
+            metadata["orchestrator_observation_task"] = {"scope": self._observation_task_scope(), "checkpoint": key,
+                "authorization": authorization_scope(self._state)}
+        return True
+
+    async def _resume_completed_handoff(self, key: str) -> None:
+        """Consume only the saved result; never reenter owner/archive/counters."""
+        record = handoff_checkpoint(self._state.run_metadata, key, action="read")
+        payload = record.get("payload", {})
+        stage = Stage(payload["stage"])
+        next_stage = Stage(payload["next_stage"])
+        if (self._supervision_declared and payload.get("reuse_observation_task")
+                and self._state.run_metadata.get("orchestrator_observation_task")
+                and not self._observation_task_admitted()):
+            self._hold_observation_refresh(key)
+            return  # hold stale capture/result; no model await before consumption
+        if self._supervision_declared and not payload.get("mandatory") and not (payload.get("reuse_observation_task") and self._observation_task_admitted()):
+            record = await review_handoff(state=self._state, ctx=self._ctx, registry=self._agent_registry,
+                catalog=self._owner_catalog, key=key, candidate=next_stage.value,
+                payload=payload, settings=self._orchestrator_settings, agent_name=self._orchestrator_agent_name)
+        if record.get("status") != "prepared":
+            return
+        if self._state.stop_requested or self._state.safe_stop_requested or self._state.emergency_stop_requested:
+            self._state.stage = Stage.COMPLETE
+            return
+        if not handoff_checkpoint(self._state.run_metadata, key, action="consume")["consume_now"]:
+            return
+        self._retire_observation_refresh(key)
+        # Commit routing synchronously before event callbacks can fail/cancel.
+        self._state.stage = next_stage
+        self._state.run_metadata.pop("orchestrator_pending_handoff", None)
+        self._state.run_metadata["orchestrator_incoming_handoff"] = {
+            "key": key, "run_id": self._state.run_id, "loop": self._state.loop_count, "stage": next_stage.value}
+        await self._record_orchestrator_transition(stage=stage, next_stage=next_stage,
+            result_data=payload["result_data"], selected_transition=payload["selected_transition"],
+            transition_candidates=payload["transition_candidates"], guardian_context=payload["guardian_context"],
+            prepared_decision=record.get("payload", {}).get("decision"))
+        await self._record_orchestrator_followup(stage=stage, trigger="post_stage", payload=payload["result_data"],
+            next_stage=next_stage, guardian_context=payload["guardian_context"])
+        if stage == Stage.GUARDIAN:
+            await self._record_orchestrator_loop_reflection(guardian_payload=payload["result_data"].get("guardian", {}), next_stage=next_stage)
+        await self._emit(event_type="stage_transition", message=f"Transition {stage.value} -> {next_stage.value}",
+            payload={"node_id": stage.value, "status": "done", "from_stage": stage.value, "to_stage": next_stage.value,
+                     "transition_candidates": payload["transition_candidates"], "selected_transition": payload["selected_transition"],
+                     "orchestrator_checkpoint": key,
+                     "orchestrator_decision": self._state.run_metadata.get("latest_orchestrator_decision", {}),
+                     "orchestrator_handoff": self._state.run_metadata.get("latest_orchestrator_handoff", {}),
+                     "orchestrator_followup": self._state.run_metadata.get("latest_orchestrator_followup", {})})
 
     @archive_runtime_stage
     async def _execute_agent_stage(self, stage: Stage) -> None:
@@ -2795,7 +2994,13 @@ class LangGraphRunLoop:
                 level="WARNING",
             )
             return
-        await self._drain_operator_followups(stage=stage, phase="pre_stage")
+        followups = await self._drain_operator_followups(stage=stage, phase="pre_stage")
+        if self._apply_observation_refresh(followups):
+            return  # next tick reviews the NEW enclosing task before capture
+        pending = self._state.run_metadata.get("orchestrator_pending_handoff")
+        if pending:
+            await self._resume_completed_handoff(pending)
+            return
         # Freeze available model versions before Design; Analysis resolves the
         # finalized design scope later without adopting mid-loop promotions.
         from agents.analysis_runtime import pin_loop
@@ -2909,7 +3114,12 @@ class LangGraphRunLoop:
         await self._emit_module_graph_started(stage, agent_name, module_runtime)
         try:
             self._apply_fault_injection()
-            await self._execute_module_pre_steps(stage=stage, module_runtime=module_runtime)
+            if not await self._review_stage_entry(stage):
+                status.state = "waiting"
+                return
+            if not await self._execute_module_pre_steps(stage=stage, module_runtime=module_runtime):
+                status.state = "waiting"
+                return
             await self._execute_module_internal_steps(stage=stage, agent_name=agent_name, module_runtime=module_runtime)
             ctx = self._context_for_stage(stage)
             result = await agent.run(self._state, ctx)
@@ -3045,44 +3255,21 @@ class LangGraphRunLoop:
                 (candidate for candidate in candidates if str(candidate.get("to_stage")) == next_stage.value),
                 {},
             )
-            await self._record_orchestrator_transition(
-                stage=stage,
-                next_stage=next_stage,
-                result_data=result_data,
-                selected_transition=selected_candidate,
-                transition_candidates=candidates,
-                guardian_context=post_gate,
-            )
-            await self._record_orchestrator_followup(
-                stage=stage,
-                trigger="post_stage",
-                payload=compact_runtime_payload(result_data),
-                next_stage=next_stage,
-                guardian_context=post_gate,
-            )
-            if stage == Stage.GUARDIAN:
-                await self._record_orchestrator_loop_reflection(
-                    guardian_payload=compact_runtime_payload(result.data.get("guardian", {})) if isinstance(result.data, dict) else {},
-                    next_stage=next_stage,
-                )
-            self._state.stage = next_stage
-
-            await self._emit(
-                event_type="stage_transition",
-                message=f"Transition {stage.value} -> {self._state.stage.value}",
-                payload={
-                    "node_id": stage.value,
-                    "status": "done",
-                    "from_stage": stage.value,
-                    "to_stage": self._state.stage.value,
-                    "transition_candidates": candidates,
-                    "selected_transition": selected_candidate,
-                    "orchestrator_decision": self._state.run_metadata.get("latest_orchestrator_decision", {}),
-                    "orchestrator_handoff": self._state.run_metadata.get("latest_orchestrator_handoff", {}),
-                    "orchestrator_followup": self._state.run_metadata.get("latest_orchestrator_followup", {}),
-                },
-            )
+            key = f"{self._state.run_id}:{stage.value}:{uuid4()}"
+            handoff_checkpoint(self._state.run_metadata, key, action="prepare", payload={
+                "stage": stage.value, "next_stage": next_stage.value, "result_data": compact_runtime_payload(result_data),
+                "selected_transition": selected_candidate, "transition_candidates": candidates,
+                "guardian_context": post_gate, "mandatory": next_stage in {Stage.GUARDIAN, Stage.COMPLETE, Stage.ERROR},
+                "reuse_observation_task": stage in {Stage.VISION, Stage.MANIPULATION}
+                    and next_stage in {Stage.VISION, Stage.MANIPULATION, Stage.EQUIPMENT}})
+            self._state.run_metadata["orchestrator_pending_handoff"] = key
+            await self._resume_completed_handoff(key)
         except Exception as exc:
+            # Once a completed result exists, a late review/event failure may not
+            # retry a successful physical action or increment Guardian again.
+            if self._state.run_metadata.get("orchestrator_pending_handoff") or self._state.stage != stage:
+                self._state.run_metadata["orchestrator_handoff_error"] = type(exc).__name__
+                return
             if stage == Stage.MANIPULATION:
                 sync_manipulation_execution_status(self._state, stage, failed=True)
             if stage == Stage.SPECIMEN:
@@ -3177,7 +3364,7 @@ class LangGraphRunLoop:
 
     async def step(self) -> None:
         """Invoke the compiled LangGraph graph for exactly one runtime step."""
-        if self._state.safe_stop_requested:
+        if self._state.safe_stop_requested or self._state.stop_requested or self._state.emergency_stop_requested:
             self._state.stage = Stage.COMPLETE
             await self._emit(
                 event_type="safe_stop",

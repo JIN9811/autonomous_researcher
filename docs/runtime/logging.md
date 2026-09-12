@@ -6,6 +6,47 @@ The runtime writes:
 
 Each event includes `run_id`, `experiment_id`, `layer`, `event_type`, and payload.
 
+## Readable Run and Session Names
+
+New run IDs use `YYYYMMDD_HHMMSS_KST_<purpose>_<8-hex-suffix>`.
+For example: `20260912_143025_KST_test_virtual_a17e90cd`.
+The timestamp is explicitly Korean Standard Time (UTC+09:00), independent of
+the host timezone. The random suffix reduces same-second collisions; the
+timestamp is not itself a unique identifier. Event timestamps remain UTC.
+
+| Context known when the ID is allocated | Purpose |
+|---|---|
+| Initial controller or a new conversation | `planning` |
+| Live mode | `Experiment` |
+| Test mode without a selected profile | `test` |
+| Test profile `virtual_bridge` | `test_virtual` |
+| Test profile `installed_printer` | `test_real_printer` |
+| Test profile `physical_print` | `test_physical_print` |
+| Replay mode | `replay` |
+| Fault-injection mode | `fault_injection` |
+
+Naming is applied only where the existing controller already creates a run.
+The direct start API supplies a mode, not a printer profile, so its test run
+uses `test`. A confirmed-Setup new-series allocation can use the explicit
+printer choice or the retained profile copied into that new run. An unknown
+profile does not imply virtual hardware. Live GUI test requests keep their
+existing `LIVE` execution mode; their existing test-handoff marker selects the
+test naming purpose only, without changing device policy. A run created before a later Chat
+choice keeps its original name, including `planning`; naming does not create
+an extra run or rename directories to reflect a later choice.
+
+New experiment record IDs use the same format with `Experiment`; newly reset
+Chat session IDs use `planning` beneath `planning_sessions/`. Run and Chat
+session identities remain separate. Existing IDs, canonical transcripts,
+Setup stores, resume references, and old directories are retained unchanged.
+Loop folders remain `runtime/loops/loop-000001/`, followed by agent and attempt
+directories. Event IDs and internal approval/idempotency tokens are unchanged.
+Artifact compatibility references accept both legacy `run-...` and readable
+IDs; neither format changes path-containment checks.
+
+Sources: `utils/ids.py`, `app/controller.py`, `app/main.py`.
+Focused nonactuating checks: `tests/unit/test_readable_ids.py`.
+
 Live GUI planning/tool events:
 - Planning chat messages are also emitted as structured events by `MainController`.
 - `printer.prepare` can emit supplemental per-step tool events while Specimen Making Agent is running.

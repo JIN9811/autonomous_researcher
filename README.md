@@ -204,7 +204,7 @@ workflow, tools, interfaces, artifacts, and verification.
 
 | Agent | Responsibility | Detailed reference |
 |---|---|---|
-| Orchestrator | Interpret intent and coordinate stage handoffs | [Orchestrator](docs/agents/orchestrator_agent.md) |
+| Orchestrator | Interpret scoped intent, coordinate handoffs, and admit confirmed Setup only for the next new run | [Orchestrator](docs/agents/orchestrator_agent.md) |
 | Design | Review candidate suitability and emit design specifications | [Design](docs/agents/design_agent.md) |
 | Specimen Making | Evaluate fabrication suitability and call preparation tools | [Specimen Making](docs/agents/specimen_agent.md) |
 | Vision | Capture observations and review visual evidence | [Vision](docs/agents/vision_agent.md) |

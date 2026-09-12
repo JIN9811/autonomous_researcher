@@ -219,6 +219,9 @@ Route, Knowledge and BO descriptions were checked through static repository
 inspection on 2026-09-12 against `5542ef2`. The original 2026-08-09 inspection
 and later demonstrations retain their own dates and configurations. Test,
 replay, simulation, browser and live evidence are not inferred from the graph.
+The separately recorded Orchestrator Setup verification covers bounded
+next-new-run admission and provider-case aggregation, not a model-driven or
+physical whole cycle; see the [runtime evidence note](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md).
 
 ## Related Documents
 

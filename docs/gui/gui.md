@@ -63,6 +63,16 @@ Live GUI chat route:
 - Live GUI orchestrator calls retry once internally before surfacing a chat failure, because the 31B MTP/NVFP4 server and the E4B NVFP4 server may JIT kernels on the first real generation after readiness. Current code does not auto-load those deployments when the page opens.
 - `실험 수행` must not fabricate missing design values. If required values are missing, the chat must show current confirmed values, missing values, and one concrete example input.
 - Required values before Design Agent handoff are experiment objective/metric, material, specimen size, and geometry/domain.
+
+Experimental Setup is the canonical planning-session projection, not a second
+run-start control. `Edit in Chat` only selects the same block/revision context.
+Explicit confirmation schedules values for the next new run; that run's
+admission validates the complete captured set, combines same-owner settings,
+and completes owner readback before the affected path. A held admission does
+not enter runtime/model review/LHS/Design. See the
+[Orchestrator Agent Reference](../agents/orchestrator_agent.md) for the limited
+writable topics and recovery rules.
+
 - Material and print defaults may come from the operator-controlled 3DP Printer GUI profile when not stated in chat. This counts as a confirmed GUI default, not an LLM-fabricated value.
 - Validated print defaults are shown/used when the operator does not override them. The active printer profile decides which bridge/profile values are authoritative: default is Bambu Lab X2D, while Prusa MK4S remains available only through explicit fleet selection.
 - 3DP Printer GUI route:

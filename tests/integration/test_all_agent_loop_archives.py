@@ -6,6 +6,9 @@ coverage, not experimental success or hardware behavior.
 from pathlib import Path
 
 import pytest
+from orchestrator_setup_fixtures import numeric_archive_guard
+
+pytestmark = pytest.mark.usefixtures("numeric_archive_guard")
 
 from agents.analysis_agent import AnalysisAgent
 from agents.bo_agent import BOAgent

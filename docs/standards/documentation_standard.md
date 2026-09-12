@@ -225,7 +225,8 @@ verification information.
 ### Restructured Agent Reference Layout
 
 Immediately below the title, restructured Agent References MUST include a
-`Status at a Glance` section with 5–7 short `Label: Value` lines. The default
+`Status at a Glance` section as a two-column `At a glance | Details` table with
+5–7 short rows. The default
 six labels are `Runtime status`, `LLM decision layer`, `Physical effect`,
 `Primary handoff`, `Live hardware validation`, and `Known gap`.
 Values MUST reflect that agent's current implementation and recorded verification;
@@ -342,7 +343,7 @@ Every canonical agent Reference MUST include:
 1. a closed-loop position and handoff figure;
 2. an internal execution and effect-boundary figure.
 
-Design, Specimen, Vision, Manipulation, Equipment, Analysis, and Knowledge MUST also
+Orchestrator, Design, Specimen, Vision, Manipulation, Equipment, Analysis, and Knowledge MUST also
 include an API and connection architecture figure. These agents have
 decision-tool, bridge, external-service, device, or persistence boundaries that would be
 ambiguous if compressed into the execution figure.

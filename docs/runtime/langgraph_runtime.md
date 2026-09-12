@@ -42,6 +42,13 @@ module activation, event contracts, and the Runtime IDE/Module Management
 surfaces that edit or inspect those contracts. Device-specific procedures and
 future modularization proposals are outside its authority.
 
+The controller's bounded Orchestrator planning/Setup contract is separate from
+graph authoring: explicit confirmation schedules settings for the next new run,
+whose admission validates the complete captured confirmed set before the
+affected runtime path. It neither alters a running snapshot nor creates an IDE
+activation surface. See the [Orchestrator Agent Reference](../agents/orchestrator_agent.md)
+for owner fields, receipts, and recovery boundaries.
+
 ## Source of Truth
 
 - `graphs/configs/atr_closed_loop.yaml`

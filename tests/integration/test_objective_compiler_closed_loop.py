@@ -7,6 +7,9 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from orchestrator_setup_fixtures import numeric_archive_guard
+
+pytestmark = pytest.mark.usefixtures("numeric_archive_guard")
 
 from agents.analysis_agent import AnalysisAgent
 from agents.bo_agent import BOAgent

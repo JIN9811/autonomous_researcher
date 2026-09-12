@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from copy import deepcopy
 
 import httpx
 
@@ -41,6 +42,14 @@ from agents.base_agent import AgentContext
 from agents.bo_agent import BOAgent
 from agents.design_agent import DesignAgent
 from agents.registry import AgentRegistry
+from agents.orchestrator_capabilities import OwnerCatalog
+from agents.orchestrator_decision import classify_chat_request
+from app.planning_setup import project_setup, propose_from_chat, planning_decision_settings
+from orchestrator.experimental_setup import SetupStore, SetupConflict, SetupValidationError
+from orchestrator.setup_application import SetupApplication, pending_setup_blocks
+from orchestrator.handoff_boundary import review_handoff, authorization_scope, authorization_matches
+from uuid import uuid4
+from orchestrator.orchestrator_checkpoint import handoff_checkpoint
 from logging_system.event_logger import log_system_event
 from logging_system.logger_factory import LoggerBundle, build_logger_bundle
 from logging_system.run_trace import RunTrace
@@ -66,7 +75,7 @@ from orchestrator.supervisor import (
 from policies.validation_policy import validate_agent_output
 from policies.guardian_gate import gate_blocks_execution, tool_requires_action_shield
 from utils.active_cam_artifact import apply_active_cam_artifact_update
-from utils.ids import make_event_id, make_experiment_id, make_run_id
+from utils.ids import make_event_id, make_experiment_id, make_planning_session_id, make_run_id, run_purpose
 from utils.manipulation_execution import sync_manipulation_execution_status
 from utils.specimen_execution import sync_specimen_execution_status
 from utils.utm_completion_artifact import apply_utm_completion_artifact_update
@@ -186,8 +195,8 @@ class MainController:
         self._deps.agent_context.on_model_call = self._on_model_call
         self._deps.agent_context.on_tool_event = self._on_tool_event
 
-    def _new_logger_bundle(self) -> LoggerBundle:
-        run_id = make_run_id()
+    def _new_logger_bundle(self, purpose: str = "planning") -> LoggerBundle:
+        run_id = make_run_id(purpose)
         return build_logger_bundle(
             run_id=run_id,
             run_root=self._deps.run_root,
@@ -2116,7 +2125,183 @@ class MainController:
 
     def _planning_transcript_path(self) -> Path:
         """Return the append-only Live GUI transcript file for this run."""
-        return self._logger_bundle.run_dir / "live_planning_transcript.jsonl"
+        return getattr(self, "_canonical_planning_transcript_path", self._logger_bundle.run_dir / "live_planning_transcript.jsonl")
+
+    def _setup_store(self) -> SetupStore:
+        """Canonical session store, retained across execution logger/state reset.
+
+        Task6 callers bind the server planning session before using this factory.
+        The store remains alongside the originating session transcript, not a
+        browser's supplied ID or a newly allocated execution directory.
+        """
+        session = self._planning_session_id or self._state.active_session_id
+        if self._planning_session_id is None:
+            self._planning_session_id = session
+        cached = getattr(self, "_experimental_setup_store", None)
+        if cached is not None and getattr(self, "_experimental_setup_session", None) == session:
+            return cached
+        self._planning_transcript_path().parent.mkdir(parents=True, exist_ok=True)
+        store = SetupStore(self._planning_transcript_path().parent, session)
+        self._canonical_planning_transcript_path = self._planning_transcript_path()
+        self._experimental_setup_store = store
+        self._experimental_setup_session = session
+        return store
+
+    def _capture_pending_setup(self) -> tuple[SetupStore | None, list[str]]:
+        store = getattr(self, "_experimental_setup_store", None)
+        if store is None:
+            return None, []
+        return store, [b["confirmed_proposal_id"] for b in pending_setup_blocks(store.snapshot())]
+
+    def _retained_setup_hold(self) -> dict | None:
+        """Keep failed-run inputs available for readback; a retry is not reapproval."""
+        snapshot = self._state.run_metadata.get("experimental_setup_snapshot", {})
+        admission = snapshot.get("admission", {})
+        store = getattr(self, "_experimental_setup_store", None)
+        if admission.get("status") != "blocked" or store is None:
+            return None
+        current_ids = {block.get("confirmed_proposal_id") for block in store.snapshot()["blocks"]}
+        if set(admission.get("proposal_ids", [])) <= current_ids:
+            return deepcopy(snapshot)
+        return None
+
+    async def _setup_admission_rejection(self, snapshot: dict | None) -> dict | None:
+        if not snapshot or snapshot.get("admission", {}).get("status") == "admitted":
+            return None
+        message = "Experimental Setup is on hold. Review stale settings or owner readback, then explicitly confirm any revised proposal. No new work was started."
+        await self._append_planning_message({"role": "orchestrator", "content": message, "ok": False})
+        return {"ok": False, "status": "blocked", "failure_code": "SETUP_ADMISSION_REQUIRED",
+                "message": message, "setup_admission": deepcopy(snapshot["admission"]),
+                "session": self.planning_snapshot()}
+
+    def _planning_setup_catalog(self) -> OwnerCatalog:
+        graph = load_graph_config(self._active_graph_config_path or Path(__file__).resolve().parents[1] / "graphs/configs/atr_closed_loop.yaml")
+        # Freeze only this resolution so describe/readback can share bindings.
+        # The next call (including after a model await) reads current graph files.
+        return OwnerCatalog(self._deps.agent_registry, graph).snapshot()
+
+    def _planning_setup_projection(self) -> dict:
+        projection = project_setup(self._setup_store(), self._planning_setup_catalog(), self._state, self._deps.agent_context)
+        projection["session_id"] = self._planning_session_id
+        return projection
+
+    async def planning_setup_action(self, action: dict) -> dict:
+        required = {"action", "proposal_id", "expected_revision", "request_id", "session_id", "target"}
+        if (not isinstance(action, dict) or set(action) != required or action["action"] not in {"confirm", "discard"}
+                or action["target"] != "next_run" or type(action["expected_revision"]) is not int
+                or action["expected_revision"] < 1
+                or any(not isinstance(action[key], str) or not action[key].strip() for key in ("proposal_id", "request_id", "session_id"))):
+            raise SetupValidationError("Invalid next-run setup action")
+        if not self._planning_session_id or action["session_id"] != self._planning_session_id:
+            raise PermissionError("Use the canonical server planning session")
+        store = self._setup_store()
+        projection = self._planning_setup_projection()
+        proposal = store.proposal(action["proposal_id"])
+        block = next(b for b in projection["blocks"] if b["block_id"] == proposal["block_id"])
+        if not block["active"]:
+            raise SetupValidationError("Setup owner is no longer active in the graph")
+        if action["action"] == "discard":
+            store.discard(action["proposal_id"], action["expected_revision"], action["request_id"])
+            message = "Draft discarded. No run was started."
+        else:
+            result = await SetupApplication(store, self._planning_setup_catalog()).confirm(
+                action["proposal_id"], action["expected_revision"], action["request_id"], self._state)
+            message = "Setup confirmed for the next new run. No run was started."
+            if result.get("requires_confirmation"):
+                message = "Owner-normalized values are shown in a new draft. Review and confirm again."
+        setup = self._planning_setup_projection()
+        await self.emit_runtime_event(event_type="planning_setup_changed", message=message, payload={"setup": setup})
+        return {"ok": True, "setup": setup, "message": message}
+
+    def _planning_pending_request(self) -> dict | None:
+        metadata = self._state.run_metadata
+        refresh = metadata.get("orchestrator_observation_refresh", {})
+        if refresh.get("status") == "waiting":
+            return {"pending_id": refresh["held_checkpoint"], "kind": "refresh_observation",
+                    "description": "Explicitly request a fresh observation for this held checkpoint; ordinary approval is insufficient.",
+                    "options": ["Request a fresh observation", "Keep waiting"], "request": deepcopy(refresh)}
+        boundary = metadata.get("orchestrator_planning_boundary", {})
+        if boundary.get("status") == "deferred":
+            return {"pending_id": boundary["task_id"], "kind": "planning_boundary",
+                    "description": "Continue the held initial planning review without starting a new series.",
+                    "options": ["Continue review", "Keep waiting"], "request": deepcopy(boundary)}
+        specimen = metadata.get("pending_specimen_input")
+        if not specimen:
+            spec = self._state.current_experiment_spec
+            if isinstance(spec, dict) and self._is_live_gui_test_handoff_spec(spec) and not self._specimen_printer_path(spec):
+                # A server-owned generated specimen with a missing printer path
+                # is a recoverable pending choice, not an arbitrary chat approval.
+                specimen = {"type": "printer_test_path_choice", "specimen_id": spec.get("specimen_id"),
+                    "candidate_id": spec.get("candidate_id"), "spec": deepcopy(spec),
+                    "input_request": {"type": "printer_test_path_choice", "choices": ["virtual_bridge", "installed_printer", "physical_print"]}}
+        if specimen:
+            identity = hashlib.sha256(json.dumps(specimen, sort_keys=True, default=str).encode()).hexdigest()
+            return {"pending_id": f"specimen:{identity}", "kind": "specimen", "description": "Reply to the current specimen/printer selection request.",
+                    "request": deepcopy(specimen)}
+        held = metadata.get("orchestrator_pending_handoff") or metadata.get("orchestrator_waiting_entry")
+        if held:
+            return {"pending_id": str(held), "kind": "runtime_boundary", "description": "Reply to this held runtime review.",
+                    "request": deepcopy(metadata.get("orchestrator_checkpoints", {}).get(str(held), {}))}
+        store = getattr(self, "_experimental_setup_store", None)
+        drafts = [b for b in store.snapshot()["blocks"] if b.get("current_draft_proposal_id")] if store else []
+        if len(drafts) == 1:
+            block = drafts[0]
+            return {"pending_id": block["current_draft_proposal_id"], "kind": "setup_proposal",
+                    "description": "Confirm these draft values for the next new run only.", "request": deepcopy(block)}
+        return None
+
+    def _planning_intake_scope(self) -> dict:
+        store = getattr(self, "_experimental_setup_store", None)
+        return {"run_id": self._state.run_id, "session_id": self._planning_session_id,
+                "loop": self._state.loop_count, "stage": self._state.stage.value,
+                "mode": self._state.mode.value, "goal": self._state.active_goal,
+                "specimen": deepcopy(self._state.current_experiment_spec),
+                "running": bool(self._run_task and not self._run_task.done()) or self._planning_handoff_active(),
+                "pending": self._planning_pending_request(),
+                "stop_flags": [self._state.stop_requested, self._state.safe_stop_requested, self._state.emergency_stop_requested],
+                "owners": self._planning_setup_catalog().describe(self._state, self._deps.agent_context),
+                "stop": {key: deepcopy(value) for key, value in self._state.run_metadata.items() if "stop" in key or "emergency" in key},
+                "setup_revision": store.snapshot()["revision"] if store else None}
+
+    def _validate_setup_context(self, context: dict, session_id: str | None) -> dict:
+        if session_id != self._planning_session_id:
+            raise PermissionError("Use the canonical server planning session")
+        if (not isinstance(context, dict) or set(context) != {"block_id", "revision"}
+                or not isinstance(context["block_id"], str) or type(context["revision"]) is not int):
+            raise SetupValidationError("setup_context requires block_id and integer revision")
+        block = next((b for b in self._planning_setup_projection()["blocks"] if b["block_id"] == context["block_id"]), None)
+        if block is None or not block["editable"]:
+            raise SetupValidationError("Unknown or inactive setup block")
+        if block["revision"] != context["revision"]:
+            raise SetupConflict("Setup changed; refresh the proposal")
+        return block
+
+    def _run_owner_catalog(self) -> OwnerCatalog:
+        """Pin graph-linked owners for this execution's existing runtime paths."""
+        if getattr(self, "_owner_catalog_run_id", None) != self._state.run_id:
+            graph = load_graph_config(self._active_graph_config_path or Path(__file__).resolve().parents[1] / "graphs/configs/atr_closed_loop.yaml")
+            self._execution_owner_catalog = OwnerCatalog(self._deps.agent_registry, graph).snapshot()
+            self._execution_orchestrator_settings = {}
+            for binding in self._execution_owner_catalog.describe(self._state, self._deps.agent_context):
+                if binding["owner"] != self._deps.orchestrator_agent_name or not binding.get("module_id"):
+                    continue
+                path = self._execution_owner_catalog.graph_root / binding["module_id"] / "module.yaml"
+                if path.is_file():
+                    module = load_module_config(path).model_dump(mode="json", exclude_none=True)
+                    if str(module.get("handler") or "").strip() == f"agent.{self._deps.orchestrator_agent_name}":
+                        self._execution_orchestrator_settings = deepcopy(module.get("decision_settings", {}))
+            self._owner_catalog_run_id = self._state.run_id
+        return self._execution_owner_catalog
+
+    async def _activate_captured_setup(self, store: SetupStore | None, proposal_ids: list[str]) -> dict | None:
+        if store is None or not proposal_ids or self._state.mode == Mode.REPLAY:
+            return
+        current = [b["confirmed_proposal_id"] for b in pending_setup_blocks(store.snapshot())]
+        if current != proposal_ids:
+            raise SetupConflict("Pending setup changed across new-run reset")
+        self._state.run_metadata["experimental_setup_source"] = {
+            "session_id": self._experimental_setup_session, "proposal_ids": list(proposal_ids)}
+        return await SetupApplication(store, self._run_owner_catalog()).activate_for_new_run(self._state)
 
     @staticmethod
     def _select_runtime_fields(source: Any, keys: tuple[str, ...] | list[str]) -> dict[str, Any]:
@@ -2666,13 +2851,14 @@ class MainController:
             self._planning_message_total = max(self._planning_message_total, len(self._planning_messages))
 
     def _reset_planning_transcript(self) -> None:
-        """Clear the active Live GUI transcript for an explicit fresh session."""
+        """Select a fresh session directory without deleting prior evidence."""
         self._planning_messages = []
         self._planning_message_total = 0
-        try:
-            self._planning_transcript_path().unlink(missing_ok=True)
-        except OSError:
-            return
+        self._planning_session_id = make_planning_session_id()
+        self._canonical_planning_transcript_path = (
+            self._logger_bundle.run_dir / "planning_sessions" / self._planning_session_id / "live_planning_transcript.jsonl")
+        self._experimental_setup_store = None
+        self._experimental_setup_session = None
 
     def _record_planning_message(self, entry: dict[str, Any]) -> dict[str, Any]:
         """Persist the full chat message to disk and keep only a recent memory window."""
@@ -3371,7 +3557,10 @@ class MainController:
         """Return a compact state payload for high-frequency Live GUI refreshes."""
         self._ensure_orchestrator_supervisor_baseline()
         state_json = self._state.model_dump(mode="json")
-        return self._compact_planning_state_for_display(state_json)
+        compact = self._compact_planning_state_for_display(state_json)
+        compact["setup"] = self._planning_setup_projection()
+        compact["pending_request"] = self._planning_pending_request()
+        return compact
 
     def planning_snapshot(self, *, session_id: str | None = None) -> dict[str, Any]:
         """Return current live-planning context with only the latest transcript page."""
@@ -3407,21 +3596,14 @@ class MainController:
             self._state.active_goal = goal
         if reset:
             self._reset_planning_transcript()
-            self._planning_session_id = None
             self._planning_bootstrapped = False
         self._ensure_planning_intro()
         return self.planning_snapshot()
 
     def _bind_planning_session(self, session_id: str | None) -> None:
         """Bind Live GUI to a shared server-side conversation for all open windows."""
-        clean_session_id = str(session_id or "").strip()
-        if not clean_session_id:
-            return
         if self._planning_session_id is None:
-            self._planning_session_id = clean_session_id
-            return
-        if clean_session_id == self._planning_session_id:
-            return
+            self._planning_session_id = self._state.active_session_id
         # A newly opened browser window may have a different local id. Do not clear
         # the server-side Live GUI transcript; reset is handled explicitly by fresh=1.
         return
@@ -3577,6 +3759,8 @@ class MainController:
             "selected_node": selected_node,
             "chat_mode": str(constraints.get("live_chat_mode") or "ask"),
             "operator_intent": normalize_operator_intent(message),
+            "orchestrator_action": deepcopy(constraints.get("orchestrator_action"))
+                if isinstance(constraints.get("orchestrator_action"), dict) else None,
             "run_context": run_context,
             "transcript_message_id": user_entry.get("message_id") if isinstance(user_entry, dict) else "",
             "transcript_index": user_entry.get("transcript_index") if isinstance(user_entry, dict) else None,
@@ -3656,6 +3840,7 @@ class MainController:
         goal: str | None,
         constraints: dict[str, Any],
         session_id: str | None,
+        intake_scope: dict | None = None,
     ) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
         operator_intent = normalize_operator_intent(message)
@@ -3684,6 +3869,8 @@ class MainController:
                 "source": "live_gui",
             },
         )
+        if intake_scope is not None and intake_scope != self._planning_intake_scope():
+            return {"ok": False, "message": "Pending request changed before queue admission.", "session": self.planning_snapshot()}
         await self._queue_runtime_operator_followup(
             message=message,
             goal=goal,
@@ -3701,6 +3888,7 @@ class MainController:
         to_stage: Stage,
         payload: dict[str, Any] | None = None,
         selected_transition: dict[str, Any] | None = None,
+        prepared_decision: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         result_payload = payload or {}
         decision = build_decision_record(
@@ -3719,6 +3907,10 @@ class MainController:
             result_payload=result_payload,
             selected_transition=selected_transition or {"to_stage": to_stage.value, "source": "planning_chain"},
         )
+        if prepared_decision and prepared_decision.get("status") == "prepared":
+            handoff = deepcopy(prepared_decision["effect"])
+            decision.update(decision_id=prepared_decision["decision_id"], reason=prepared_decision["reason"],
+                            status="prepared", evidence_refs=deepcopy(prepared_decision["evidence_refs"]))
         self._append_orchestrator_metadata("orchestrator_decision_register", decision)
         self._append_orchestrator_metadata("orchestrator_handoff_packets", handoff)
         self._state.run_metadata["latest_orchestrator_decision"] = decision
@@ -3785,6 +3977,8 @@ class MainController:
         configured_interval = float(self._deps.system_config.get("loop_interval_seconds", 1.25))
         loop = RunLoop(
             state=self._state,
+            owner_catalog=self._run_owner_catalog(),
+            decision_settings=self._execution_orchestrator_settings,
             agent_registry=self._deps.agent_registry,
             orchestrator_agent_name=self._deps.orchestrator_agent_name,
             ctx=self._deps.agent_context,
@@ -4041,10 +4235,15 @@ class MainController:
             return {"ok": False, "message": str(exc)}
         self._cancel_pending_vllm_transition()
 
+        setup_store, setup_proposals = self._capture_pending_setup()
+        if mode != Mode.REPLAY:
+            setup_rejection = await self._setup_admission_rejection(self._retained_setup_hold())
+            if setup_rejection is not None:
+                return setup_rejection
         self._active_graph_id = graph_id or "atr_closed_loop"
         self._active_graph_config_path = Path(graph_config_path) if graph_config_path else None
         self._trace = RunTrace(max_events=int(self._deps.system_config.get("event_buffer_size", 300)))
-        self._logger_bundle = self._new_logger_bundle()
+        self._logger_bundle = self._new_logger_bundle(run_purpose(mode.value))
         self._state = self._new_state(mode=mode)
         self._state.run_metadata["runtime_graph"] = {
             "graph_id": self._active_graph_id,
@@ -4058,6 +4257,10 @@ class MainController:
         if goal:
             self._state.active_goal = goal
         self._state.fault_injection = {"fault": fault, "stage": fault_stage}
+        setup_rejection = await self._setup_admission_rejection(
+            await self._activate_captured_setup(setup_store, setup_proposals))
+        if setup_rejection is not None:
+            return setup_rejection
 
         await self.emit_runtime_event(
             event_type="run.created",
@@ -4400,6 +4603,8 @@ class MainController:
             "completion_status": "reported_complete",
             "session_id": session_id,
             "handoff_strategy": "operator_teleop",
+            "tool": "lerobot.teleoperate.stop",
+            "workflow": "teleoperate",
             "teleop_stop_verified": True,
             "robot_port_released": bool(handoff.get("robot_port_released")),
             "camera_returned_to_vision": bool(handoff.get("camera_returned_to_vision")),
@@ -4414,6 +4619,14 @@ class MainController:
         }
         manipulation = self._state.run_metadata.get("manipulation_result")
         manipulation = dict(manipulation) if isinstance(manipulation, dict) else {}
+        # The no-actuation preflight may describe a *would-run* rollout. Keep
+        # that provenance, but do not attribute its autonomous telemetry to the
+        # operator's independently stopped and resource-released session.
+        previous_execution = {key: manipulation[key] for key in (
+            "tool", "workflow", "execution_evidence", "runtime", "runtime_phase", "action_count") if key in manipulation}
+        manipulation["pre_teleop_execution_provenance"] = deepcopy(previous_execution)
+        for key in ("execution_evidence", "runtime", "runtime_phase", "action_count"):
+            manipulation.pop(key, None)
         manipulation.update(common)
         self._state.run_metadata["manipulation_result"] = manipulation
         robot_task = self._state.run_metadata.get("robot_task_result")
@@ -5035,8 +5248,16 @@ class MainController:
         backend: str | None = None,
         constraints: dict[str, Any] | None = None,
         session_id: str | None = None,
+        setup_context: dict | None = None,
     ) -> dict[str, Any]:
         """Run the top-level orchestrator model for live-planning discussion only."""
+        # Exact standalone safety controls bypass both model and planning lock.
+        # Quotes, questions, negations and longer prose are not stop commands.
+        safety_command = message.strip().casefold()
+        if safety_command in {"stop", "정지"}:
+            return await self.stop()
+        if safety_command in {"emergency stop", "긴급정지", "긴급 정지"}:
+            return await self.emergency_stop(source="planning_chat")
         try:
             self._apply_inference_backend(backend)
         except Exception as exc:
@@ -5044,17 +5265,76 @@ class MainController:
         self._cancel_pending_vllm_transition()
         self._bind_planning_session(session_id)
         self._ensure_planning_intro()
-        constraints = constraints or {}
+        constraints = deepcopy(constraints or {})
+        constraints.pop("orchestrator_action", None)
         clean_message = message.strip()
         if not clean_message:
             return {"ok": False, "message": "Planning message is empty.", "session": self.planning_snapshot(session_id=session_id)}
+        if setup_context is not None:
+            self._validate_setup_context(setup_context, session_id)
+        scope = self._planning_intake_scope()
+        pending = scope["pending"]
+        intake = await classify_chat_request(self._state, self._deps.agent_context, message=clean_message,
+            pending_id=pending["pending_id"] if pending else None,
+            context={"request": {"pending_request": pending, "setup_context": setup_context,
+                "instruction": "A setup context is editing/discussion only, never run approval. For observation refresh, confirm_pending requires an explicit request for a fresh observation, not yes or ordinary continue."},
+                "settings": planning_decision_settings(self._planning_setup_catalog(), self._deps.orchestrator_agent_name)})
+        if scope != self._planning_intake_scope():
+            return {"ok": False, "message": "Request scope changed while classifying; review the current request.", "session": self.planning_snapshot()}
+        if setup_context is not None:
+            self._validate_setup_context(setup_context, session_id)
+            if intake["intent"] in {"start_run", "confirm_pending"}:
+                intake["intent"] = "unclear"
+        if intake["intent"] == "confirm_pending" and pending and pending["kind"] == "refresh_observation":
+            expected_refresh_scope = {"run_id": self._state.run_id, "loop": self._state.loop_count,
+                "specimen_id": (self._state.current_experiment_spec or {}).get("specimen_id", "")}
+            held = pending["request"]
+            if (held.get("scope") != expected_refresh_scope or held.get("action") != "refresh_observation"
+                    or held.get("held_checkpoint") != pending["pending_id"]):
+                intake["intent"] = "unclear"
+        if intake["intent"] == "change_setup":
+            if session_id != self._planning_session_id:
+                raise PermissionError("Use the canonical server planning session before changing setup")
+            projection = self._planning_setup_projection()
+            proposal_scope = self._planning_intake_scope()
+            decision = await propose_from_chat(store=self._setup_store(), catalog=self._planning_setup_catalog(), projection=projection,
+                state=self._state, ctx=self._deps.agent_context, message=clean_message,
+                scope=proposal_scope, current_scope=self._planning_intake_scope,
+                settings=planning_decision_settings(self._planning_setup_catalog(), self._deps.orchestrator_agent_name),
+                block_id=setup_context["block_id"] if setup_context else None)
+            self._record_planning_message({"role": "operator", "content": clean_message, "setup_context": setup_context})
+            await self._append_planning_message({"role": "orchestrator", "content": "Draft proposed; review and confirm for the next new run." if decision["status"] == "proposed" else decision["reason"],
+                "ok": decision["status"] == "proposed"}, message="Setup proposal reviewed.")
+            await self.emit_runtime_event(event_type="planning_setup_changed", message="Setup proposal reviewed.", payload={"setup": self._planning_setup_projection()})
+            return {"ok": decision["status"] == "proposed", "decision": decision, "session": self.planning_snapshot()}
+        if intake["intent"] in {"out_of_scope", "unclear"}:
+            message = "This chat supports the current research workflow." if intake["intent"] == "out_of_scope" else "Please clarify the request and the pending action you intend to confirm."
+            self._record_planning_message({"role": "operator", "content": clean_message, "setup_context": setup_context})
+            await self._append_planning_message({"role": "orchestrator", "content": message, "ok": True})
+            return {"ok": True, "message": message, "session": self.planning_snapshot()}
+        if intake["intent"] == "confirm_pending" and pending and pending["kind"] == "setup_proposal":
+            if session_id != self._planning_session_id:
+                raise PermissionError("Use the canonical server planning session before confirming setup")
+            block = pending["request"]
+            result = await self.planning_setup_action({"action": "confirm", "proposal_id": pending["pending_id"],
+                "expected_revision": block["revision"], "request_id": str(uuid4()),
+                "session_id": self._planning_session_id, "target": "next_run"})
+            return {**result, "session": self.planning_snapshot()}
+        if intake["intent"] == "start_run" and scope["running"]:
+            return {"ok": False, "message": "A run is already active; no new run was started.", "session": self.planning_snapshot()}
+        if intake["intent"] == "confirm_pending" and pending and pending["kind"] == "refresh_observation":
+            held = pending["request"]
+            constraints["orchestrator_action"] = {"action": "refresh_observation", "held_checkpoint": held["held_checkpoint"], **held["scope"]}
+            return await self._queue_runtime_operator_followup_message(message=clean_message, goal=goal,
+                constraints=constraints, session_id=self._planning_session_id, intake_scope=scope)
         if self._planning_request_lock.locked():
-            if self._runtime_followup_is_active(constraints):
+            if intake["intent"] == "confirm_pending" and pending and pending["kind"] == "runtime_boundary":
                 return await self._queue_runtime_operator_followup_message(
                     message=clean_message,
                     goal=goal,
                     constraints=constraints,
                     session_id=session_id,
+                    intake_scope=scope,
                 )
             return {
                 "ok": False,
@@ -5068,6 +5348,8 @@ class MainController:
                 goal=goal,
                 constraints=constraints,
                 session_id=session_id,
+                intake=intake,
+                intake_scope=scope,
             )
 
     async def _planning_message_locked(
@@ -5077,8 +5359,17 @@ class MainController:
         goal: str | None,
         constraints: dict[str, Any],
         session_id: str | None,
+        intake: dict | None = None,
+        intake_scope: dict | None = None,
     ) -> dict[str, Any]:
         """Handle one operator message while the Live GUI planning lock is held."""
+        if intake is None:
+            # Internal callers use the same semantic boundary, not a private bypass.
+            return await self.planning_message(message=message, goal=goal, constraints=constraints, session_id=session_id)
+        if intake_scope != self._planning_intake_scope():
+            return {"ok": False, "message": "Request scope changed; retry after refresh.", "session": self.planning_snapshot()}
+        can_start = intake["intent"] == "start_run"
+        can_confirm = intake["intent"] == "confirm_pending"
         now = datetime.now(timezone.utc).isoformat()
         operator_intent = normalize_operator_intent(message)
         user_entry = {
@@ -5090,6 +5381,14 @@ class MainController:
             "operator_intent": operator_intent,
         }
         user_entry = self._record_planning_message(user_entry)
+        boundary = self._state.run_metadata.get("orchestrator_planning_boundary", {})
+        if can_confirm and boundary.get("status") == "deferred":
+            # No RunLoop exists yet: this explicit reply resumes only admission.
+            metadata = self._state.run_metadata
+            metadata.setdefault("operator_followup_context", []).append({"message": message, "source": "planning_reply"})
+            metadata["orchestrator_review_revision"] = int(metadata.get("orchestrator_review_revision", 0)) + 1
+            return await self._handoff_planning_to_design(goal=boundary["goal"],
+                constraints=deepcopy(boundary["constraints"]), new_series=False)
         target_agent = str(
             constraints.get("live_chat_target_resolved")
             or constraints.get("live_chat_target")
@@ -5151,7 +5450,10 @@ class MainController:
             level="INFO",
         )
 
-        runtime_followup_active = self._runtime_followup_is_active(constraints)
+        # Display constraints never grant queue or execution authority.
+        if intake_scope != self._planning_intake_scope():
+            return {"ok": False, "message": "Request scope changed; retry after refresh.", "session": self.planning_snapshot()}
+        runtime_followup_active = can_confirm and bool(intake_scope["pending"] and intake_scope["pending"]["kind"] == "runtime_boundary")
         if runtime_followup_active:
             await self._queue_runtime_operator_followup(
                 message=message,
@@ -5164,19 +5466,19 @@ class MainController:
             if bool(constraints.get("live_runtime_followup_queue_only")):
                 return {"ok": True, "message": "Runtime follow-up queued.", "session": self.planning_snapshot(session_id=session_id)}
 
-        if not runtime_followup_active and self._state.run_metadata.get("pending_specimen_input"):
+        if can_confirm and not runtime_followup_active and self._state.run_metadata.get("pending_specimen_input"):
             if self._should_route_specimen_printer_choice(message):
                 self._ensure_pending_specimen_printer_choice()
             return await self._handle_pending_specimen_operator_input(message=message, session_id=session_id)
 
-        if not runtime_followup_active and self._should_trigger_test_design(message):
+        if can_start and not runtime_followup_active and self._should_trigger_test_design(message):
             return await self._run_test_mode_planning(goal=goal, constraints=constraints, operator_message=message)
 
-        if not runtime_followup_active and self._should_route_specimen_printer_choice(message):
+        if can_confirm and not runtime_followup_active and self._should_route_specimen_printer_choice(message):
             self._ensure_pending_specimen_printer_choice()
             return await self._handle_pending_specimen_operator_input(message=message, session_id=session_id)
 
-        if not runtime_followup_active and self._should_trigger_design(message):
+        if can_start and not runtime_followup_active:
             readiness = self._planning_design_handoff_readiness(goal=goal, constraints=constraints)
             if readiness["missing"]:
                 return await self._request_missing_design_values(readiness, session_id=session_id)
@@ -5341,10 +5643,11 @@ class MainController:
                 test_constraints = self._apply_specimen_printer_choice_to_spec(test_constraints, inline_printer_choice)
             else:
                 test_constraints = self._strip_specimen_printer_choice_from_spec(test_constraints)
-            test_constraints = self._seed_initial_bo_design_constraints(
-                test_constraints,
-                total_cycles=self._planning_cycle_limit(test_constraints),
-            )
+            if not self._capture_pending_setup()[1]:
+                test_constraints = self._seed_initial_bo_design_constraints(
+                    test_constraints,
+                    total_cycles=self._planning_cycle_limit(test_constraints),
+                )
             assistant_entry = {
                 "role": "orchestrator",
                 "content": (
@@ -5514,7 +5817,7 @@ class MainController:
                 design_constraints=design_constraints,
                 start_cycle=cycle_index,
             )
-        return await self._handoff_planning_to_design(goal=goal, constraints=design_constraints)
+        return await self._handoff_planning_to_design(goal=goal, constraints=design_constraints, new_series=False)
 
     async def _start_planning_handoff_background(self, *, goal: str | None, constraints: dict[str, Any]) -> dict[str, Any]:
         """Return the Live GUI request before the full test/live planning loop blocks fetch."""
@@ -6994,6 +7297,8 @@ class MainController:
         """Execute one Live GUI planning stage through the configured LangGraph runtime."""
         loop = RunLoop(
             state=self._state,
+            owner_catalog=self._run_owner_catalog(),
+            decision_settings=self._execution_orchestrator_settings,
             agent_registry=self._deps.agent_registry,
             orchestrator_agent_name=self._deps.orchestrator_agent_name,
             ctx=self._deps.agent_context,
@@ -7006,6 +7311,12 @@ class MainController:
         )
         self._state.stage = stage
         await loop.step()
+        while (self._state.run_metadata.get("orchestrator_pending_handoff")
+               or self._state.run_metadata.get("orchestrator_waiting_entry")):
+            if self._state.stop_requested or self._state.safe_stop_requested or self._state.emergency_stop_requested:
+                break
+            await asyncio.sleep(0.25)
+            await loop.step()
         self._state = loop._state
         if self._state.is_paused:
             raise RuntimeError(f"Planning LangGraph stage={stage.value} paused for approval.")
@@ -7021,6 +7332,8 @@ class MainController:
         total_cycles: int,
         emit_handoff: bool,
     ) -> dict[str, Any]:
+        previous_spec = deepcopy(previous_spec or {})
+        design_constraints = deepcopy(design_constraints)
         if emit_handoff:
             await self._append_planning_message(
                 {
@@ -7032,6 +7345,19 @@ class MainController:
                 event_type="planning_handoff",
                 message="Planning handoff to DesignAgent started.",
             )
+        incoming = self._state.run_metadata.get("orchestrator_incoming_handoff", {})
+        source_record = handoff_checkpoint(self._state.run_metadata, incoming["key"], action="read") if incoming.get("key") else {}
+        source_valid = (incoming.get("stage") == Stage.DESIGN.value and source_record.get("status") == "consumed"
+                        and authorization_matches(self._state, source_record))
+        source_request = source_record.get("payload", {}).get("authorization_request", {})
+        admitted_constraints = source_request.get("payload", {}).get("constraints")
+        derivation = incoming.get("design_input_derivation", {})
+        arguments_bound = (previous_spec == source_record.get("payload", {}).get("authorization_scope", {}).get("specimen")
+                           and design_constraints == admitted_constraints)
+        if derivation.get("source_request") == source_request:
+            arguments_bound = arguments_bound or (previous_spec == derivation.get("previous_spec")
+                                                  and design_constraints == derivation.get("constraints"))
+        source_valid = source_valid and arguments_bound
         design_constraints = self._publish_orchestrator_design_contract(
             design_constraints,
             cycle_index=cycle_index,
@@ -7045,6 +7371,10 @@ class MainController:
             **{key: value for key, value in effective_constraints.items() if key in {"geometry_type", "specimen_size_mm"}},
             "constraints": {**previous_constraints, **effective_constraints},
         }
+        if source_valid:
+            incoming["materialization"] = {"owner": "planning_design_input",
+                "source": deepcopy(source_record["payload"]["authorization_scope"]),
+                "scope": authorization_scope(self._state)}
         design_status_times = {name: status.last_run_time for name, status in self._state.agent_status.items()}
         await self._run_planning_langgraph_stage(
             Stage.DESIGN,
@@ -7353,8 +7683,10 @@ class MainController:
         *,
         goal: str | None,
         constraints: dict[str, Any],
+        new_series: bool = True,
     ) -> dict[str, Any]:
         """Call DesignAgent for planning-only candidate generation and emit handoff chat messages."""
+        constraints = deepcopy(constraints)  # Pin caller-owned inputs before any await.
         plc_rejection = await self._plc_service_start_rejection()
         if plc_rejection is not None:
             return plc_rejection
@@ -7368,9 +7700,68 @@ class MainController:
                 "active_safety_sources": active_safety_sources,
                 "state": self._state.model_dump(mode="json"),
             }
+        setup_store, setup_proposals = self._capture_pending_setup() if new_series else (None, [])
+        setup_rejection = await self._setup_admission_rejection(self._retained_setup_hold())
+        if setup_rejection is not None:
+            return setup_rejection
         self._reset_planning_workflow_controls()
-        self._state.active_goal = goal or self._state.active_goal
+        if setup_proposals:
+            # Only this explicit new-series entry allocates new execution inputs.
+            # Continuations/retry/teleop/next BO cycle never call this activation.
+            old = self._state
+            preferences = {key: deepcopy(old.run_metadata[key]) for key in
+                ("bo_settings", "test_mode_profile", "execution_policy", "runtime_graph") if key in old.run_metadata}
+            retained_profile = preferences.get("test_mode_profile")
+            profile_id = self._specimen_printer_path(constraints) or (
+                str(retained_profile.get("profile_id") or "") if isinstance(retained_profile, dict) else "")
+            # Live GUI test requests intentionally retain LIVE execution mode.
+            # Use the existing test-handoff marker for naming only.
+            naming_mode = "test" if self._is_live_gui_test_handoff_spec(constraints) else old.mode.value
+            self._logger_bundle = self._new_logger_bundle(run_purpose(naming_mode, profile_id))
+            self._state = self._new_state(mode=old.mode)
+            self._state.run_metadata.update(preferences)
+            self._state.fault_injection = deepcopy(old.fault_injection)
+            self._state.active_goal = goal or old.active_goal
+            setup_rejection = await self._setup_admission_rejection(
+                await self._activate_captured_setup(setup_store, setup_proposals))
+            if setup_rejection is not None:
+                return setup_rejection
+        else:
+            self._state.active_goal = goal or self._state.active_goal
+        boundary = self._state.run_metadata.get("orchestrator_planning_boundary")
+        if new_series or not isinstance(boundary, dict):
+            task_id = uuid4().hex
+            boundary = {"task_id": task_id, "key": f"{self._state.run_id}:planning-design:{task_id}",
+                        "goal": self._state.active_goal, "constraints": deepcopy(constraints),
+                        "previous_spec": deepcopy(self._state.current_experiment_spec or {}), "status": "reviewing"}
+            self._state.run_metadata["orchestrator_planning_boundary"] = boundary
         total_cycles = self._bind_planning_cycle_contract(constraints)
+        # Existing planning caller bypasses Design's module pre-step. Review here
+        # and pass the same incoming authorization through the actual RunLoop.
+        catalog = self._run_owner_catalog()
+        prepared_decision = None
+        if any(binding["owner"] == self._deps.orchestrator_agent_name and binding.get("executable")
+               for binding in catalog.describe(self._state, self._deps.agent_context)):
+            key = boundary["key"]
+            try:
+                record = await review_handoff(state=self._state, ctx=self._deps.agent_context,
+                    registry=self._deps.agent_registry, catalog=catalog, key=key,
+                    candidate=Stage.DESIGN.value, payload={"goal": self._state.active_goal, "constraints": constraints},
+                    settings=self._execution_orchestrator_settings, agent_name=self._deps.orchestrator_agent_name)
+            except asyncio.CancelledError:
+                boundary["status"] = "deferred"
+                raise
+            resume_admitted = not new_series and record.get("status") == "consumed" and not boundary.get("design_started")
+            if record.get("status") != "prepared" and not resume_admitted:
+                boundary["status"] = "deferred" if record.get("status") != "consumed" else "consumed"
+                return {"ok": False, "status": "deferred", "message": "Orchestrator handoff awaits review.",
+                        "session": self.planning_snapshot()}
+            if not resume_admitted and not handoff_checkpoint(self._state.run_metadata, key, action="consume")["consume_now"]:
+                return {"ok": False, "status": "consumed", "message": "Handoff already consumed."}
+            self._state.run_metadata["orchestrator_incoming_handoff"] = {
+                "key": key, "run_id": self._state.run_id, "loop": self._state.loop_count, "stage": Stage.DESIGN.value}
+            prepared_decision = record.get("payload", {}).get("decision")
+        boundary["status"] = "consumed"
         await self._append_planning_message(
             {
                 "role": "orchestrator",
@@ -7396,6 +7787,7 @@ class MainController:
             from_stage=self._state.stage if self._state.stage not in {Stage.COMPLETE, Stage.ERROR} else Stage.IDLE,
             to_stage=Stage.DESIGN,
             payload={"goal": self._state.active_goal, "constraints": constraints},
+            prepared_decision=prepared_decision,
         )
         await self._record_planning_orchestrator_followup(
             stage=Stage.IDLE,
@@ -7405,18 +7797,25 @@ class MainController:
         )
 
         try:
-            design_constraints = dict(constraints)
+            design_constraints = deepcopy(boundary["constraints"])
             geometry_hint = self._normalize_planning_geometry_type(design_constraints.get("geometry_type"))
             if geometry_hint:
                 design_constraints["geometry_type"] = geometry_hint
                 design_constraints["preferred_geometry_type"] = self._normalize_planning_geometry_type(
                     design_constraints.get("preferred_geometry_type") or geometry_hint
                 ) or geometry_hint
-            previous_spec = dict(self._state.current_experiment_spec or {})
+            previous_spec = deepcopy(boundary["previous_spec"])
             design_constraints = self._seed_initial_bo_design_constraints(
                 design_constraints,
                 total_cycles=total_cycles,
             )
+            incoming = self._state.run_metadata.get("orchestrator_incoming_handoff", {})
+            if incoming.get("key") == boundary["key"] and prepared_decision:
+                source = handoff_checkpoint(self._state.run_metadata, boundary["key"], action="read")
+                incoming["design_input_derivation"] = {
+                    "source_request": deepcopy(source["payload"]["authorization_request"]),
+                    "previous_spec": deepcopy(previous_spec), "constraints": deepcopy(design_constraints)}
+            boundary["design_started"] = True
             experiment_spec = await self._run_planning_design_stage(
                 previous_spec=previous_spec,
                 design_constraints=design_constraints,
@@ -8659,7 +9058,27 @@ class MainController:
 
     def _compact_planning_runtime_state(self) -> None:
         """Keep Live GUI handoff state bounded after agent payload merges."""
-        self._state.run_metadata = self._compact_planning_run_metadata(self._state.run_metadata)
+        metadata = self._state.run_metadata
+        # UI summaries are not execution state. Preserve exact owner inputs and
+        # durable authorization/once-only records; never rederive them from the
+        # shortened presentation. Keep the root and authority objects stable for
+        # a suspended handoff's captured scope/readback closures.
+        authority_keys = (
+            "experimental_setup_snapshot", "experimental_setup_source", "bo_settings",
+            "test_mode_profile", "execution_policy", "availability_reports",
+            "orchestrator_checkpoints", "orchestrator_planning_boundary",
+            "orchestrator_observation_refresh", "orchestrator_observation_task",
+            "orchestrator_stage_entry_key", "orchestrator_review_revision",
+            "orchestrator_incoming_handoff", "orchestrator_pending_handoff", "orchestrator_waiting_entry",
+            "operator_followup_queue", "operator_followup_context", "bo_initial_design",
+            "next_design_request", "bo_recommended_constraints", "orchestrator_design_contract",
+            PLANNING_RESUME_CONTEXT_KEY, "_planning_workflow_controls_reset",
+        )
+        authority = {key: metadata[key] for key in authority_keys if key in metadata}
+        compact = self._compact_planning_run_metadata(metadata)
+        metadata.clear()
+        metadata.update(compact)
+        metadata.update(authority)
         self._state.current_experiment_spec = compact_runtime_payload(self._state.current_experiment_spec)
         self._state.current_experiment_objective = compact_runtime_payload(self._state.current_experiment_objective)
         self._state.latest_observations = compact_runtime_payload(self._state.latest_observations)
@@ -9297,6 +9716,8 @@ class MainController:
             self._state.stage = tail_start
             loop = RunLoop(
                 state=self._state,
+                owner_catalog=self._run_owner_catalog(),
+                decision_settings=self._execution_orchestrator_settings,
                 agent_registry=self._deps.agent_registry,
                 orchestrator_agent_name=self._deps.orchestrator_agent_name,
                 ctx=self._deps.agent_context,
@@ -9313,6 +9734,12 @@ class MainController:
                 from utils.utm_clear_cycle import clear_poll_pending
                 was_clear_poll = before_stage == Stage.VISION and clear_poll_pending(self._state)
                 await loop.step()
+                if (self._state.run_metadata.get("orchestrator_pending_handoff")
+                        or self._state.run_metadata.get("orchestrator_waiting_entry")):
+                    if self._state.emergency_stop_requested or self._state.safe_stop_requested or self._state.stop_requested:
+                        return await halt_for_control_flag()
+                    await asyncio.sleep(0.25)
+                    continue
                 if not was_clear_poll:
                     ordinary_steps += 1
                 if self._state.emergency_stop_requested or self._state.safe_stop_requested or self._state.stop_requested:

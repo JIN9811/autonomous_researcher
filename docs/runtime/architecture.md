@@ -64,7 +64,7 @@ returns to first priority.
 
 ## Agent responsibilities
 
-- `orchestrator_agent`: top-level planning text
+- `orchestrator_agent`: bounded control-plane planning, canonical Setup proposal, and next-new-run admission coordination; it has no direct device authority
 - `bo_agent`: mandatory LangGraph stage after `knowledge_agent` and before `guardian_agent`; exposed through `/bo` for acquisition/BO/MBO controls and bounded Objective Compiler authoring. It consumes KnowledgeAgent context and writes next-cycle DesignAgent constraints to `run_metadata["bo_recommended_constraints"]`.
 - `design/specimen/vision/manipulation/equipment/analysis/knowledge/guardian`: stage-specific execution
 - `specimen_agent`: geometry/handoff owner plus printer preparation delegation; it does not directly implement PrusaLink write logic.

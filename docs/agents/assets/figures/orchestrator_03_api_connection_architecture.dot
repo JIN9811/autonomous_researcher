@@ -1,0 +1,29 @@
+digraph OrchestratorConnections {
+  graph [rankdir=TB, bgcolor="#F8FAFC", pad="0.25", nodesep="0.42", ranksep="0.52", fontname="DejaVu Sans", label="Orchestrator: Chat, Setup, owner, model and runtime boundaries", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=9, margin="0.10,0.07"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=8, arrowsize=0.7];
+
+  chat [label="Existing Chat\noptional block_id + revision"];
+  api [label="Planning API / Controller\ncanonical session + scope checks", fillcolor="#E0F2FE"];
+  setup [label="Experimental Setup store\nblock history / request replay", shape=component, fillcolor="#E9F7EF", color="#2E7D59"];
+  decision [label="Bounded Orchestrator decision\nregistered tools + JSON schema", fillcolor="#F2ECFA", color="#6B4C9A"];
+  model [label="Registered API / vLLM backend\norchestrator_plan", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
+  owners [label="Graph-linked owner adapters\nvalidate / apply / readback", fillcolor="#E0F2FE"];
+  fields [label="Writable only:\nresearch.goal · bo.parameter_space\nbo.acquisition", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  runtime [label="Existing controller +\nLangGraph new-run admission"];
+  evidence [label="Transcript · Setup history\nreceipt · checkpoint · event", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  bridge [label="No direct bridge /\ndevice bypass", fillcolor="#FFE9E7", color="#A33A32", penwidth=2];
+
+  chat -> api [label="message / explicit action"];
+  api -> setup [label="read / propose / confirm"];
+  api -> decision [label="scoped intent"];
+  decision -> model [style=dashed, label="bounded request"];
+  model -> decision [style=dashed, label="validated JSON"];
+  decision -> setup [label="proposal only"];
+  setup -> owners [label="confirmed next-run values"];
+  owners -> fields [label="declared contract"];
+  owners -> runtime [label="readback / scheduled values"];
+  setup -> evidence [label="history / receipt", color="#2E7D59"];
+  runtime -> evidence [label="existing event/checkpoint", color="#2E7D59"];
+  runtime -> bridge [style=dashed, arrowhead=tee, label="no Orchestrator path"];
+}

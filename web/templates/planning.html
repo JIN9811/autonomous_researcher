@@ -48,6 +48,7 @@ Modification guide:
     -->
     <link rel="stylesheet" href="/static/styles.css?v=20260907-equipment-process-progress-1" />
     <link rel="stylesheet" href="/static/analysis_fem_live.css?v=20260909-1" />
+    <link rel="stylesheet" href="/static/experimental_setup.css?v=20260912-1" />
   </head>
   <body class="planning-live-body">
     <main class="planning-runtime-shell" aria-label="ATR Live Runtime GUI">
@@ -163,7 +164,7 @@ Modification guide:
           <button id="btn-live-chat-collapse" class="btn live-chat-collapse" type="button" title="Collapse chat panel" aria-label="Collapse chat panel" aria-expanded="true">Hide</button>
         </header>
 
-        <div id="live-experiment-setup-panel" class="live-experiment-setup-panel" aria-label="experiment setup console"></div>
+        <div id="live-experiment-setup-panel" class="live-experiment-setup-panel" role="region" aria-label="Experimental Setup blocks" tabindex="0"></div>
 
         <div id="live-chat-context-strip" class="live-chat-context-strip" title="Runtime chat context" aria-label="runtime chat context">CTX -</div>
 
@@ -261,6 +262,7 @@ Modification guide:
   <script src="/static/bo_visualization.js?v=20260910-continuous-strategy-1"></script>
     <script src="/static/equipment_agentic_task_model.js?v=20260903-passive-vision-1"></script>
     <script src="/static/analysis_fem_live.js?v=20260909-1" defer></script>
-    <script src="/static/planning.js?v=20260910-continuous-strategy-1" defer></script>
+    <script src="/static/experimental_setup.js?v=20260912-1" defer></script>
+    <script src="/static/planning.js?v=20260912-setup-1" defer></script>
   </body>
 </html>

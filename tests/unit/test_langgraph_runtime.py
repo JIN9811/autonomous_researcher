@@ -11,7 +11,17 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-import app.main as app_main
+app_main = None
+
+
+@pytest.fixture(autouse=True)
+def _safe_runtime_bootstrap(handoff_no_external, monkeypatch):
+    # app.main eagerly constructs a controller: import only AFTER denial hooks.
+    global app_main
+    import app.main as application
+    app_main = application
+    monkeypatch.setattr(application, "_resolve_nvidia_smi", lambda: None)
+
 from agents.registry import AgentRegistry
 from agents.base_agent import AgentResult
 from experiments.bo_visualization import build_bo_visualization
@@ -2027,7 +2037,13 @@ def test_runtime_run_artifact_event_compatibility_api_exposes_current_run() -> N
         artifact_file.unlink(missing_ok=True)
 
 
-def test_graph_run_endpoint_compile_checks_then_delegates_controller_start(monkeypatch) -> None:
+def test_graph_run_endpoint_compile_checks_then_delegates_controller_start(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(app_main, "RUNTIME_GRAPH_VERSION_ROOT", tmp_path / "graph_versions")
+    versions = {}
+    for graph_id in ("atr_closed_loop", "printer_pipeline"):
+        config = load_graph_config(app_main._graph_config_path(graph_id))
+        versions[graph_id] = app_main._graph_version_store(graph_id).save_version(
+            graph_id, config.model_dump(mode="json"), reason="isolated-version-fixture", author="pytest")
     async def _fake_start(**kwargs: object) -> dict[str, object]:
         return {"ok": True, "message": "fake started", "run_id": "run-fake", "received": kwargs}
 
@@ -2045,6 +2061,7 @@ def test_graph_run_endpoint_compile_checks_then_delegates_controller_start(monke
     assert result["run"]["run_id"] == "run-fake"
     assert result["run"]["received"]["mode"] == "test"
     assert result["run"]["received"]["graph_id"] == "atr_closed_loop"
+    assert result["run"]["received"]["graph_version"] == versions["atr_closed_loop"]["version_id"]
     assert str(result["run"]["received"]["graph_config_path"]).endswith("graphs/configs/atr_closed_loop.yaml")
 
     live_without_dry_run = client.post("/api/graphs/atr_closed_loop/run", json={"mode": "live", "goal": "unit live gate"})
@@ -2082,6 +2099,7 @@ def test_graph_run_endpoint_compile_checks_then_delegates_controller_start(monke
     assert template_result["ok"] is True
     assert template_result["graph_id"] == "printer_pipeline"
     assert template_result["run"]["received"]["graph_id"] == "printer_pipeline"
+    assert template_result["run"]["received"]["graph_version"] == versions["printer_pipeline"]["version_id"]
     assert str(template_result["run"]["received"]["graph_config_path"]).endswith("graphs/configs/printer_pipeline.yaml")
 
     template_live = client.post("/api/graphs/printer_pipeline/run", json={"mode": "live", "goal": "unit template live"})
@@ -2857,7 +2875,35 @@ from orchestrator.run_loop import RunLoop
 from orchestrator.state import Mode, OrchestratorState, Stage
 
 
-class _StaticAgent(BaseAgent):
+from agents.orchestrator_agent import OrchestratorAgent
+from types import SimpleNamespace
+
+
+class _ObservedOrchestrator(OrchestratorAgent):
+    """Legacy graph tests retain real decision logic with controlled model I/O."""
+    def __init__(self, data):
+        self.run_count = 0
+        self._legacy_data = data
+
+    async def run(self, state, ctx, *, context=None, handlers=None):
+        self.run_count += 1
+        async def complete(task, prompt, **kwargs):
+            request = json.loads(prompt)
+            return SimpleNamespace(model="controlled-runtime-test", text=json.dumps({"tool": "prepare_handoff",
+                "arguments": {"candidate": request["context"]["handoff_candidates"][0]},
+                "reason": "Dispatcher candidate reviewed", "evidence_refs": ["boundary:result"]}))
+        result = await super().run(state, SimpleNamespace(complete=complete), context=context, handlers=handlers)
+        result.data.update(self._legacy_data)
+        return result
+
+
+def _StaticAgent(name, data):
+    if name == "orchestrator_agent":
+        return _ObservedOrchestrator(data)
+    return _StaticStageAgent(name, data)
+
+
+class _StaticStageAgent(BaseAgent):
     """Tiny agent used to prove graph-config transitions affect runtime execution."""
 
     def __init__(self, name: str, data: dict[str, object]) -> None:
@@ -3494,10 +3540,10 @@ async def test_module_pre_execution_runs_orchestrator_before_design_from_config(
 
     await loop.step()
 
-    assert orchestrator.run_count == 1
+    assert orchestrator.run_count == 2  # Design entry and its distinct result handoff
     assert design.run_count == 1
     assert state.current_experiment_spec == {"specimen_id": "pre-exec"}
-    assert state.run_metadata["orchestrator_plan"] == {"plan_text": "pre plan", "model": "unit"}
+    assert state.run_metadata["orchestrator_plan"]["plan_text"] == "pre plan"
     assert any(event["type"] == "module.pre_step.started" for event in events)
     assert any(event["type"] == "module.pre_step.completed" for event in events)
     legacy = [event for event in events if event["event_type"] == "orchestrator_plan"]
@@ -3534,7 +3580,7 @@ async def test_module_pre_execution_can_be_skipped_for_live_planning_handoff(tmp
 
     await loop.step()
 
-    assert orchestrator.run_count == 0
+    assert orchestrator.run_count == 2  # module pre-step skipped, dispatcher review retained
     assert design.run_count == 1
     assert state.current_experiment_spec == {"specimen_id": "handoff-design"}
     assert "orchestrator_plan" not in state.run_metadata

@@ -62,6 +62,11 @@ Tier 0 and the focused Tier 1 documentation checks are instantiated in the
 initial package. Other tests exist in the repository, but a paper-scoped Tier
 1–4 result requires a new evidence record.
 
+The [Orchestrator dynamic Setup verification](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md)
+is one such bounded working-tree/Tier 1 record. Its provider cases use guarded
+local handlers and do not elevate the result to Tier 2–4, live hardware, or a
+complete experimental cycle.
+
 ## Source of Truth
 
 - Environment and setup requirements: `REQUIREMENTS.md`

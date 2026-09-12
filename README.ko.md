@@ -201,7 +201,7 @@ High-Level은 작업 판단을, Middle-Level은 절차 감독을, Low-Level 도�
 
 | 에이전트 | 담당 역할 | 상세 문서 |
 |---|---|---|
-| Orchestrator | 연구 의도를 해석하고 단계 간 인계를 조율 | [Orchestrator](docs/agents/orchestrator_agent.md) |
+| Orchestrator | 범위가 있는 연구 의도를 해석하고 인계를 조율하며 확정 Setup은 다음 새 실행에만 수용 | [Orchestrator](docs/agents/orchestrator_agent.md) |
 | Design | 후보 적합성을 검토하고 설계 명세를 생성 | [Design](docs/agents/design_agent.md) |
 | Specimen Making | 제작 적합성을 평가하고 준비 도구를 호출 | [Specimen Making](docs/agents/specimen_agent.md) |
 | Vision | 관측을 수행하고 시각적 근거를 검토 | [Vision](docs/agents/vision_agent.md) |

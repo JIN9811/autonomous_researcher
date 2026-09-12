@@ -4,23 +4,28 @@ subtype: system
 status: active
 authority: descriptive
 audience: [researcher, operator, developer, maintainer]
-scope: [agents, orchestrator, control_plane]
-summary: Current contract for ATR workflow coordination, mission compilation, handoffs, run lifecycle, and Guardian route translation.
+scope: [agents, orchestrator, control_plane, experimental_setup]
+summary: Current contract for bounded Orchestrator decisions, dynamic Experimental Setup, Chat editing, handoffs, and next-run application.
 source_of_truth:
   - agents/orchestrator_agent.py
-  - graphs/modules/orchestrator/module.yaml
-  - graphs/configs/atr_closed_loop.yaml
+  - agents/orchestrator_capabilities.py
+  - agents/orchestrator_decision.py
   - app/controller.py
   - app/main.py
-  - orchestrator/supervisor.py
-last_verified: 2026-08-09
-verified_against: 0b7627b
+  - app/planning_setup.py
+  - orchestrator/experimental_setup.py
+  - orchestrator/setup_application.py
+  - orchestrator/langgraph_runtime.py
+  - graphs/modules/orchestrator/module.yaml
+last_verified: 2026-09-12
+verified_against: working-tree
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
-  - docs/agents/design_agent.md
-  - docs/agents/guardian_agent.md
+  - docs/gui/reference/live_gui_reference_alignment.md
   - docs/runtime/langgraph_runtime.md
+  - docs/runtime/runtime_ide.md
+  - docs/superpowers/specs/2026-09-12-orchestrator-dynamic-experimental-setup-design.md
 supersedes: []
 -->
 
@@ -28,237 +33,227 @@ supersedes: []
 
 ![orchestrator agent role overview](assets/figures/orchestrator-overview.webp)
 
-*Role overview; detailed execution and connection diagrams follow below.*
+*Conceptual role overview; editable, inspection-backed architecture figures follow.*
 
 ## Status at a Glance
 
 | At a glance | Details |
 |---|---|
-| Runtime status | Implemented / mission, handoff and run coordination |
-| LLM decision layer | Planning and context support; executable routing remains code-owned |
-| Physical effect | No direct device tools; downstream agent actions can have physical effects |
-| Primary handoff | Mission and stage contracts → registered agents |
-| Verification | [Recorded inspection and scope](#current-verification) |
-| Known gap | Long-running recovery, concurrent operation and model quality not established |
+| Runtime status | Implemented bounded planning, handoff, Setup proposal, and next-new-run application paths in the working tree |
+| LLM decision layer | `orchestrator_plan` selects only schema-validated, registered decision tools; code and owners validate every effect |
+| Physical effect | No direct device tool or bridge path; downstream routes remain subject to their owners, Guardian, approvals, and device gates |
+| Primary handoff | Existing planning/runtime boundary prepares an admitted handoff for the graph-selected domain owner |
+| Live hardware validation | None in this work; device actuation and operating-service changes were not performed |
+| Verification | Corrected aggregate passed for 78 bounded cases per provider; see [verification evidence](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md) for capture/postprocessor epochs and limits |
 
-## Summary
+## Overview and Responsibilities
 
-`OrchestratorAgent` is ATR's workflow coordination plane. It converts accepted
-operator intent into mission and orchestration contracts, prepares bounded
-context for the active agent, records follow-up decisions and loop reflection,
-and translates Guardian results into runtime routes. It does not execute device
-tools and is not the safety authority.
+### Summary, scope, and source of truth
 
-## Scope
+`OrchestratorAgent` coordinates accepted operator intent, bounded decisions,
+Setup proposals, existing handoffs, and Guardian route translation. The active
+working-tree sources listed in this document's metadata are authoritative;
+this Reference describes them and does not make a device, safety, or model
+quality claim.
 
-Included are pre-execution planning, handoffs, shared run lifecycle, planning
-session, events, artifacts, and approval coordination. Device implementation,
-domain decisions, and Guardian policy are owned elsewhere.
+The scope includes the planning session and Experimental Setup state, the
+existing controller and LangGraph handoff boundaries, and their visible Chat
+surface. It excludes direct bridge configuration, device execution, a new IDE
+activation feature, and applying a change to an already-running loop.
 
-## Source of Truth
-
-- Agent: `agents/orchestrator_agent.py`
-- Module: `graphs/modules/orchestrator/module.yaml`
-- Runtime: `app/controller.py`, `orchestrator/supervisor.py`
-- Graph: `graphs/configs/atr_closed_loop.yaml`
-- APIs: `app/main.py`
-
-## Actual Role
-
-| Does | Does not |
-|---|---|
-| Normalize operator intent and required inputs | Infer missing required values as accepted facts |
-| Compile mission, orchestration plan, context, and handoffs | Replace domain agents' authoritative transformations |
-| Coordinate read-only checks and agent follow-up | Directly invoke printer, robot, desktop, or instrument motion |
-| Record ask/retry/continue/stop decisions | Override Guardian or operator safety decisions |
-| Translate Guardian output into a graph route | Treat a chat response as a completed experiment |
-
-## Three-Level Control Classification
-
-| Level | Orchestrator responsibility | Authority boundary |
+| Responsibility area | Current Orchestrator role | Boundary and detailed home |
 |---|---|---|
-| High-Level Control | Primary owner of accepted mission, active stage/agent, cycle identity, handoff, retry/review, terminal state, and Guardian route translation | May dispatch only graph/module-registered handlers and may not convert planning text into execution proof |
-| Middle-Level Control | Normalize intent, detect missing inputs, compile mission/context/handoff contracts, perform read-only checks, record follow-up decisions, and summarize cycle reflection | Produces coordination contracts; domain transformations remain authoritative in their owning agents |
-| Low-Level Control | No direct device role and no direct tools declared by the module | Printer, robot, camera, desktop, instrument, and solver actions must be requested through the selected domain agent and its registered tool/bridge path |
+| High-Level Control | Accepts scoped intent; coordinates mission, route, retry/review, and next-new-run selection | [Closed-Loop Position and Handoffs](#closed-loop-position-and-handoffs) |
+| Middle-Level Control | Builds bounded context, validates model choices, proposes Setup changes, and prepares admitted handoffs | [Decision and Evaluation](#decision-and-evaluation) |
+| Low-Level Control | Has no direct printer, robot, camera, desktop, instrument, or solver tool | [Tools, APIs and Connections](#tools-apis-and-connections) |
+| Guardian / Safety | Preserves Guardian and operator decisions; unknown or missing authority does not become continuation | [Safety and Recovery](#safety-and-recovery) |
+| Knowledge / Evidence | Keeps planning transcript, Setup history/readback, decision traces, checkpoints, and events distinct | [Artifacts and Verification](#artifacts-and-verification) |
 
-Guardian decisions constrain Orchestrator routing, while Knowledge/evidence
-records preserve the reason for each route. Device Workspace actions are
-manual operations outside Orchestrator's automatic-loop dispatch.
+These are cross-cutting responsibility areas, not five runtime stages.
 
 ## Closed-Loop Position and Handoffs
 
 ![Orchestrator closed-loop position and handoffs](assets/figures/orchestrator_01_closed_loop_handoffs.svg)
 
-**Figure Orchestrator-1.** Accepted operator intent, prior state, and checkpoint
-context become bounded domain handoffs; agent and Guardian results return as
-explicit next routes. This is an `inspection`-backed projection of baseline
-`0b7627b`; the executable graph remains authoritative and runtime
-effectiveness is not evaluated here.
+**Figure Orchestrator-1.** Operator intent, accepted state, checkpoint, Setup
+snapshot, domain results, and Guardian results meet at the existing
+Orchestrator boundary. Solid edges show current coordination/evidence paths;
+the figure adds no direct-device path. This is an `inspection`
+projection of the working tree, not live runtime or safety-effectiveness proof.
 
-| Direction | Component | Contract/state | Purpose | Gate |
-|---|---|---|---|---|
-| In | Operator/Live GUI | message, session memory, accepted inputs | establish intent | missing-input state machine |
-| In | Runtime/checkpoint | `OrchestratorState`, stage, run/cycle | resume coordination | valid run and graph state |
-| In | Any agent | result, concern, evidence refs | decide follow-up | schema and result status |
-| In | Guardian | gate/decision/contract | choose route | Guardian authority |
-| Out | Design pre-stage | `mission_contract.v1`, context | begin a governed cycle | required inputs complete |
-| Out | Active agent | `handoff_packet.v1` | bounded work request | graph-selected stage |
-| Out | Runtime | route/decision register | continue, ask, retry, stop, error | checkpoint and terminal rules |
+The controller retains canonical session, run, scope, pending request, and
+execution admission authority. A prepared handoff is consumed once at the
+existing runtime boundary; it is not a second dispatcher or a new graph stage.
+An accepted setup change is captured and read back when a **new** run starts;
+it does not alter the current run or a later cycle in that run.
 
-Trace interpretation: entering Orchestrator changes accepted planning and run
-state only after required-value and graph-state checks. Leaving Orchestrator
-changes the requested next route and handoff context; it does not itself change
-printer, robot, desktop, or instrument state.
-
-## Inputs and Outputs
-
-Inputs include Live chat content, session memory, accepted constraints,
-`OrchestratorState`, graph stage, prior handoffs, failures, Knowledge/BO context,
-and Guardian results.
-
-Declared outputs are `operator_intent.v1`, `experiment_contract.v1`,
-`mission_contract.v1`, `orchestration_plan.v1`,
-`orchestrator_parallel_checks.v1`, `orchestrator_followup.v1`,
-`decision_register.v1`, `handoff_packet.v1`, and `loop_reflection.v1`.
-They are merged into run/planning state and emitted as events/artifacts where
-the controller contract requires it.
-
-## Internal Execution
-
-| Step | Kind | Consumes | Produces/decides | Failure boundary |
-|---|---|---|---|---|
-| `01_receive_operator_intent` | pre-stage | message/session | `operator_intent.v1` | malformed/empty intent |
-| `02_check_missing_required_values` | pre-stage | intent/constraints | `missing_input_request.v1` | execution remains pending |
-| `03_build_mission_contract` | pre-stage | accepted values | `mission_contract.v1` | invalid contract blocks handoff |
-| `01_intent_state_machine` | internal | operator state | normalized intent | contradictory/missing state |
-| `02_compile_orchestration_plan` | internal | mission/graph | `orchestration_plan.v1` | invalid stage/handler plan |
-| `03_parallel_read_only_checks` | internal | capability/context | check report | unavailable dependency remains explicit |
-| `04_build_context_pack` | internal | bounded prior state | `context_pack.v1` | context size/schema rejection |
-| `05_emit_handoff_packet` | internal | plan/context | `handoff_packet.v1` | target/contract invalid |
-| `06_followup_opinion` | internal | agent result | `orchestrator_followup.v1` | unresolved concern |
-| `07_decision_register` | internal | result/follow-up | ask/retry/continue/stop | route not authorized |
-| `08_loop_reflection` | internal | cycle evidence | `loop_reflection.v1` | incomplete evidence is recorded |
-| `09_translate_guardian_result` | internal | Guardian contract | `route_decision.v1` | unknown decision routes to review/error |
-
-These IDs describe the module's contract; they are not twelve independently
-scheduled top-level graph nodes.
+## Internal Workflow
 
 ![Orchestrator internal execution and effect boundary](assets/figures/orchestrator_02_execution_effect_boundary.svg)
 
-**Figure Orchestrator-2.** Three pre-execution entries and nine internal
-contract steps separate intent, mission, checks, context, handoff, decision,
-reflection, and Guardian route translation. Model work is bounded advice and
-there is no direct device path. This `inspection` figure groups adjacent
-manifest entries; it does not claim separately scheduled runtime nodes.
+**Figure Orchestrator-2.** The localized decision boundary reads a bounded
+current contract, optionally gathers registered inspection evidence, validates
+one tool choice, and returns to the existing controller/runtime path. It does
+not portray five areas as sequential stages or add a direct device effect.
+This is an `inspection` figure, not evidence that a model, service, or device
+executed successfully.
 
-### Execution trace details
+Planning semantic intake distinguishes questions, `change_setup`, `start_run`,
+server-bound `confirm_pending`, out-of-scope requests, and unclear requests.
+Only the existing explicit start path can start a run. A setup proposal does
+not confirm or apply itself; normalized validation results create a new draft
+that requires a separate explicit confirmation.
 
-| Phase | State read | Decision/transformation | State written | Evidence | Stop/recovery rule |
-|---|---|---|---|---|---|
-| Intent | message, session, accepted values | normalize intent and detect missing fields | intent or pending request | planning transcript | remain pending until a bounded value is accepted |
-| Mission | intent, constraints, graph state | compile mission and stage plan | mission/plan contracts | contract and validation event | invalid mission blocks dispatch |
-| Checks | capability and prior context | run read-only readiness/context checks | explicit available/degraded facts | check report | unavailable dependency is not silently healthy |
-| Handoff | plan and bounded context | select target and package request | context pack and handoff packet | handoff event/artifact | invalid target or schema blocks handoff |
-| Follow-up | agent result, concerns, evidence refs | register ask/retry/continue/stop | follow-up and decision register | result-linked decision | retry stays bounded and preserves prior evidence |
-| Reflection | completed cycle evidence | summarize accepted outcome | loop reflection | checkpoint/event | incomplete evidence remains visible |
-| Guardian translation | Guardian decision contract | map decision to authorized route | route decision | Guardian-linked route event | missing/unknown decision routes to review or error |
+## Decision and Evaluation
 
-Planning transcript, checkpointed `OrchestratorState`, append-only events, and
-external device state have different lifetimes. A recovered chat session does
-not prove a resumed device state, and a checkpoint does not resolve an
-uncertain external effect without new status or proof evidence.
+`decide_orchestration` calls the registered `orchestrator_plan` model route
+with a bounded public context and exact JSON response schema. Its current
+tools are `inspect_context`, `inspect_availability`,
+`propose_setup_change`, `request_owner_review`, `prepare_handoff`, and
+`defer`. The dispatcher checks allowlisted arguments, evidence references,
+current scope, admitted candidates, and handler results before returning an
+effect. A changed scope before or after a handler result rejects consumption.
 
-## API Surface
+`classify_chat_request` is semantic intake only. Questions, negations, quoted
+commands, and an unbound approval do not authorize execution. Exact standalone
+stop/emergency-stop handling remains on the existing immediate control path,
+outside the model and planning lock.
 
-| Class | Method | Path/family | Handler/service | Effect | Notes |
-|---|---|---|---|---|---|
-| owned | GET/POST | `/api/planning/session`, `/messages`, `/bootstrap`, `/message` | planning/controller | local_state/model | operator intent and transcript workflow |
-| connected | GET | `/api/planning/artifacts/{run_id}/{specimen_id}/{filename}` | artifact service | read_only | retrieves planning artifacts |
-| shared | POST | `/api/run/start`, `/pause`, `/resume`, `/stop` | controller | local_state/physical_possible | mode and active stage determine effect |
-| shared | POST | `/api/run/safe-stop`, `/emergency-*` | controller | physical_possible | stop/resume/reset control surface |
-| shared | GET/POST | `/api/runs/{run_id}/*` | run service | read_only/local_state/physical_possible | state, pause/resume/stop, events, artifacts, approvals |
-| shared | GET | `/api/events/recent`, `/api/events/stream` | event service | read_only | snapshot and SSE |
-| shared | GET/POST | `/api/runtime/*` | runtime compatibility/model service | read_only/local_state/model | state, lifecycle, backend, model, API-key status |
-| operator | POST | `/api/approvals/{approval_id}/approve`, `/api/approvals/{approval_id}/reject`, `/api/approvals/{approval_id}/revise` | approval service | local_state/physical_possible | resolution can enable/block downstream work |
+The decision prompt identifies the requested operation and exposes only
+registered top-level evidence IDs; nested provenance is retained as provenance,
+not silently promoted to a selectable reference. An unclear or off-scope Chat
+request records bounded canonical guidance without changing Setup, a pending
+authorization, or a follow-up queue. A conditional observation refresh also
+requires the current server run, loop, specimen, action, and held checkpoint;
+missing or foreign scope becomes the same nonaction clarification.
 
-The exhaustive source is `/openapi.json`. Compatibility runtime routes do not
-create a second Orchestrator implementation.
+Availability is an independent, evidence-freshness projection. The synchronous
+Setup projection starts at `unknown`; a descriptor, a writable field, or an
+owner's presence is not readiness. Read-only inspection may report a fresh
+owner result, but it does not start an owner, load a model, or create device
+evidence.
 
-## Tools and Connections
+The current corrected joined captures have a maximum prompt size of 15,632
+UTF-8 bytes against the unchanged 16,000-byte bound. This is controlled prompt
+capacity only: it does not establish provider acceptance, a handler effect,
+model-driven cycle, served fallback behavior, or a live device result.
 
-| Tool/service | Registry/implementation | Boundary | Mode | Effect | Evidence |
-|---|---|---|---|---|---|
-| LLM role | `orchestrator_supervisor` | selected model backend | configured | model | prompt/result metadata |
-| Controller | `app/controller.py` | in-process | all | local_state/physical_possible | run state/events/artifacts |
-| Supervisor | `orchestrator/supervisor.py` | in-process | all | local_state | handoff/decision records |
-| Checkpoint/run loop | LangGraph runtime | in-process/file state | test/replay/live | local_state | checkpoint and stage events |
-| Approval service | controller/API | in-process/operator | live where configured | physical_possible | approval request/resolution |
+Separate fresh capacity probes reported API-served `gpt-5.5-2026-04-23`
+(5,227 input / 1,102 output tokens; 16.28 s) selecting
+`inspect_availability`, and `gemma4:31b` (6,333 / 214 tokens; 22.03 s)
+selecting `request_owner_review` with Guardian context. The negative BO
+conditions were retained; physical effects and denied attempts were both zero.
+These probes remain capacity/schema evidence, not full-batch or whole-cycle evidence.
 
-The module declares no direct tools; coordination occurs through runtime and
-handoff contracts.
+## Tools, APIs and Connections
 
-## State, Events, Artifacts, and Storage
+![Orchestrator API and connection architecture](assets/figures/orchestrator_03_api_connection_architecture.svg)
 
-Planning messages are file-backed for an active run. Run state contains stage,
-mode, loop count, metadata, decisions, health, approvals, and artifact refs.
-Events are available as recent/SSE/run-scoped streams; artifacts are retrieved
-through run/planning APIs. UI session state is not a substitute for checkpoint
-or file-backed run evidence.
+**Figure Orchestrator-3.** Chat and Setup read the same canonical server
+snapshot; owner adapters validate and read back the limited next-run settings,
+and the existing runtime consumes them only at new-run admission. Solid paths
+are current working-tree interfaces; the dashed line marks no direct bridge
+bypass. This is an `inspection` projection, not browser, service, or hardware
+evidence.
 
-## Modes and Fallbacks
+| Surface | Current ownership/effect boundary |
+|---|---|
+| `GET /api/planning/session` and Setup events | Controller returns canonical `state.setup` and `state.pending_request`; projection revisions and IDs are server-owned |
+| `POST /api/planning/message` | Optional `{block_id, revision}` Setup context is validated against the canonical session; a click alone sends nothing |
+| `POST /api/planning/setup/actions` | Explicit `confirm` or `discard` for `target: next_run`; validates canonical session, proposal, block revision, and request ID; never starts a run |
+| Owner adapters | Only registered graph-linked owners expose descriptors, validation, apply, and readback; actual owner validation precedes draft persistence, and unsupported owners remain read-only |
+| Existing controller/runtime handoff | Code consumes a prepared, admitted decision once through the existing path; not a direct `agent.run` or bridge call |
+| Model backend | Existing registered API/vLLM route under `orchestrator_plan`; provider selection does not grant tool or device authority |
 
-- Test: uses bounded test providers and must remain labeled Test.
-- Replay: consumes recorded trace/state; no new physical action is implied.
-- Simulation: depends on selected domain adapters.
-- Browser: operates shared APIs and may mutate server state.
-- Live: can coordinate downstream physical effects only through agent, bridge,
-  Guardian, and approval boundaries.
+## Configuration and Operation
 
-Model/backend fallback changes the evaluated configuration and remains recorded.
+Experimental Setup is a server-side, canonical-session state beside the
+planning transcript. It is dynamic from graph-linked owner descriptors, not a
+fixed five-block form. Active and historical blocks retain stable IDs and
+revisions; inactive history is visible but not editable. Draft, confirmed, and
+effective values are separate, as are agreement, application, validation, and
+availability states.
 
-## Safety, Approval, and Effect Boundary
+The current write-enabled public fields are deliberately narrow:
 
-Orchestrator has workflow authority, not safety authority. It may request and
-route approvals, but Guardian and the operator decide safety/approval outcomes.
-`direct_device_execution_allowed` is false. Safe stop and emergency routes are
-shared controller operations; route translation must never convert missing or
-uncertain Guardian state into implicit continuation.
-
-## Errors and Recovery
-
-| Failure | Persisted state | Recovery | Prohibited action |
+| Owner | Writable public topic | Existing consumer | Apply timing |
 |---|---|---|---|
-| Missing input | pending request/session | operator supplies bounded value | invent value and start |
-| Invalid handoff | decision/error event | repair contract and retry before effect | skip target validation |
-| Agent failure | result/error/checkpoint | bounded retry or route to Guardian/error | discard prior evidence |
-| Unknown external effect | uncertain run state | stop, inspect device/evidence, then decide | automatic physical retry |
-| Missing Guardian result | review/error | re-evaluate policy/context | implicit allow |
+| `orchestrator_agent` | `research.goal` | next new-run planning state / active goal | after explicit confirmation and new-run admission |
+| `bo_agent` | `bo.parameter_space` | BO initial-design/request settings | after explicit confirmation and new-run admission |
+| `bo_agent` | `bo.acquisition` | BO `run_with_settings` acquisition input | after explicit confirmation and new-run admission |
 
-## Operator and GUI Surfaces
+All other exposed graph owners are read-only or unsupported unless they provide
+the complete owner adapter contract. A proposed change is owner-validated before
+draft persistence. At new-run admission, the complete captured confirmed set is
+validated from one snapshot; same-owner confirmed settings are combined before
+any owner effect. Readback is required before an owner receipt is `applied`.
+Partial, rejected, failed, or unknown receipts remain explicit and do not claim
+a globally applied configuration.
 
-The Live GUI and planning APIs expose chat, mission, handoff, cycle, approval,
-event, and artifact state. Runtime IDE and graph/module workspaces configure the
-execution platform; they do not replace Orchestrator contracts. Main GUI run
-controls call shared controller APIs.
+In the existing Live GUI allocation, Setup uses its current dock and internal
+vertical scroll. `Edit in Chat` opens the existing Chat with the same
+`block_id`/revision context, without sending a message, mutating values, or
+starting a run. Chat and Setup use the same canonical state, not a historical
+report model. This has focused static-fixture browser coverage; it is not an
+operating GUI service claim.
 
-## Current Verification
+## Safety and Recovery
 
-Verified against `OrchestratorAgent`, its 3 pre-execution and 9 internal module
-entries, graph overlays, controller lifecycle, and 56 broad shared/prefix route
-entries at baseline `0b7627b`. The prefix count overlaps other agents and is
-not a performance metric.
+- Current execution snapshots remain immutable during a setup edit. `scheduled`
+  means next-run intent, not successful application.
+- Wrong/foreign session IDs, stale block revisions, inactive blocks, unsupported
+  owners, invalid values, and changed request IDs are rejected rather than
+  widened into a write.
+- A transport retry reuses the original request ID and stored outcome; a changed
+  request needs a new ID. Response loss triggers refresh/readback, not blind
+  reapplication.
+- Setup events and reconnect snapshots use canonical revision/projection rules;
+  they do not replay actions. Pending state does not resume hardware work.
+- Both existing new-run entries stop before runtime/model review/LHS/Design when
+  the all-confirmed admission is held. Failed, unknown, or partial receipts keep
+  the original failed-run inputs and detached blocked snapshot for readback
+  recovery; successful owners are not repeated on an ordinary retry. An explicit
+  replacement confirmation is required to supersede a hold.
+- Guardian, approval, cancellation, stop, freshness, and domain-device gates
+  remain authoritative. Orchestrator does not turn uncertainty into readiness
+  or continuation.
 
-## Limitations and Known Gaps
+## Artifacts and Verification
 
-This Reference does not validate long-running recovery, concurrent operator
-actions, model quality, or complete live campaigns. Some coordination behavior
-is concentrated in the large controller file.
+The working-tree implementation has focused deterministic/API/GUI/loop
+evidence recorded by the implementation tasks. The final correction review
+directly inspected 117 affected tests, eight retained-input tests, and one
+joined trace with zero failures/errors/skips; the joined trace took 48.99 s.
+The preceding 44-test mode suite predates the final projection-only `None`
+guard and is retained as earlier-epoch evidence, not current whole-suite
+evidence. Counts overlap and are not summed. Task 7's isolated browser audit covered the existing
+Setup allocation, internal scrolling, and the same Chat context at 1440x960,
+1440x480, and 390x640; it did not establish whole-page responsive quality or
+an operating service.
 
-## Related Documents
+Corrected aggregation of the complete immutable raw reports found exactly 78 cases
+per provider (72 intake, including H01–H12 holdouts, plus six decisions), with
+current frozen source/fixture/prompt epochs, strict statuses/labels/effects,
+actual attempt identities, full coverage, and no fallback. The API report
+served only `gpt-5.5-2026-04-23`; Gemma used two 39-case shards. Physical
+effects and denied attempts were zero; one Gemma lifecycle case was explicitly
+simulated with `actual_effect=false`. This is actual bounded model-case
+evidence, not a model-driven whole cycle, public-Chat-to-end trace, 20-cycle
+campaign, or hardware result. The corrected aggregate uses the same raw capture
+epoch and a separately hashed postprocessor; it did not rerun providers. Exact
+checks, hashes, and command scope are in the [verification evidence](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md).
 
-- [Agent Matrix](agent_api_connection_matrix.md)
-- [Design Agent](design_agent.md)
-- [Guardian Agent](guardian_agent.md)
-- [LangGraph Runtime](../runtime/langgraph_runtime.md)
-- [Three-Level Control Model](../runtime/three_level_control_model.md)
-- [Closed-Loop Method](../paper/03_closed_loop_method.md)
+### Limitations and known gaps
+
+Only `research.goal`, `bo.parameter_space`, and `bo.acquisition` have the
+current descriptor-to-owner-to-consumer path. Unknown availability remains
+unknown. The current reference is verified against intentional uncommitted
+working-tree scope, not a commit containing these changes.
+
+### Related documents
+
+- [Agent Reference Index](README.md)
+- [Agent API and Connection Matrix](agent_api_connection_matrix.md)
+- [Live GUI reference alignment](../gui/reference/live_gui_reference_alignment.md)
+- [Runtime IDE Reference](../runtime/runtime_ide.md)
+- [Approved dynamic Experimental Setup design](../superpowers/specs/2026-09-12-orchestrator-dynamic-experimental-setup-design.md)

@@ -14,8 +14,8 @@ scope:
   - runtime_contracts
   - api_connections
 summary: Canonical entry point for ATR agent roles, contracts, APIs, connections, evidence, and safety boundaries.
-last_verified: 2026-09-11
-verified_against: 5a190e8
+last_verified: 2026-09-12
+verified_against: working-tree
 related_docs:
   - docs/agents/agent_api_connection_matrix.md
   - docs/paper/02_system_architecture.md
@@ -44,12 +44,14 @@ including failed/cancelled calls, file snapshots, and saved-loop GUI access.
 
 ## Status at a Glance
 
-- Inventory: Ten executable agents on the existing registered graph/module path.
-- Decision layers: Role-specific LLM decisions; Orchestrator planning and Guardian advisory notes remain distinct from local tool-selection loops.
-- Execution authority: Agent procedures and registered tools/bridges; numerical values are tool-computed.
-- Parallel work: Optional Analysis FEM and Knowledge source intake run outside the measured-data handoff.
-- Figures: Ten Sunburst role overviews; existing detailed SVGs retained.
-- Verification: Source inspection at `5a190e8`; prior API/local and hardware evidence remains scoped to each Reference.
+| At a glance | Details |
+|---|---|
+| Inventory | Ten executable agents on the existing registered graph/module path |
+| Orchestrator | Bounded `orchestrator_plan` decisions and dynamic Experimental Setup are documented against working-tree scope |
+| Setup ownership | Only Orchestrator goal and BO parameter-space/acquisition adapters currently expose writable public fields; other owners remain read-only or unsupported |
+| Execution authority | Agent procedures and registered tools/bridges retain execution authority; numerical values are tool-computed |
+| Figures | Ten Sunburst role overviews plus editable agent figures; Orchestrator now includes Flow, Execution, and Connections views |
+| Verification | A corrected aggregate passed 78 bounded cases per provider; [verification evidence](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md) retains capture/postprocessor distinction and no hardware claim is added |
 
 ## Reading the References
 
@@ -98,7 +100,7 @@ implementations remain authoritative.
 
 | Agent reference | Main responsibility | Implementation |
 |---|---|---|
-| [Orchestrator](orchestrator_agent.md) | LLM planning context, registered mission and agent handoffs | [Source](../../agents/orchestrator_agent.py) · [Module](../../graphs/modules/orchestrator/module.yaml) |
+| [Orchestrator](orchestrator_agent.md) | Bounded decisions, canonical Setup proposals, registered mission and agent handoffs | [Source](../../agents/orchestrator_agent.py) · [Module](../../graphs/modules/orchestrator/module.yaml) |
 | [Design](design_agent.md) | Candidate suitability | [Source](../../agents/design_agent.py) · [Module](../../graphs/modules/design/module.yaml) |
 | [Specimen](specimen_agent.md) | Fabrication tools | [Source](../../agents/specimen_agent.py) · [Module](../../graphs/modules/specimen/module.yaml) |
 | [Vision](vision_agent.md) | Visual evidence | [Source](../../agents/vision_agent.py) · [Module](../../graphs/modules/vision/module.yaml) |
@@ -117,7 +119,7 @@ agents without repeating full implementation prose.
 
 | Agent | Diagrams |
 |---|---|
-| Orchestrator | [Flow](assets/figures/orchestrator_01_closed_loop_handoffs.svg) · [Execution](assets/figures/orchestrator_02_execution_effect_boundary.svg) |
+| Orchestrator | [Flow](assets/figures/orchestrator_01_closed_loop_handoffs.svg) · [Execution](assets/figures/orchestrator_02_execution_effect_boundary.svg) · [Connections](assets/figures/orchestrator_03_api_connection_architecture.svg) |
 | Design | [Flow](assets/figures/design_01_closed_loop_handoffs.svg) · [Execution](assets/figures/design_02_execution_effect_boundary.svg) · [Connections](assets/figures/design_03_api_connection_architecture.svg) |
 | Specimen Making | [Flow](assets/figures/specimen_01_closed_loop_handoffs.svg) · [Execution](assets/figures/specimen_02_execution_effect_boundary.svg) · [Connections](assets/figures/specimen_03_api_connection_architecture.svg) |
 | Vision | [Flow](assets/figures/vision_01_closed_loop_handoffs.svg) · [Execution](assets/figures/vision_02_execution_effect_boundary.svg) · [Connections](assets/figures/vision_03_api_connection_architecture.svg) |

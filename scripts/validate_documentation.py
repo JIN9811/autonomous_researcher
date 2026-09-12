@@ -76,6 +76,7 @@ AGENT_REFERENCE_FIGURES = {
     "orchestrator": (
         "orchestrator_01_closed_loop_handoffs",
         "orchestrator_02_execution_effect_boundary",
+        "orchestrator_03_api_connection_architecture",
     ),
     "design": (
         "design_01_closed_loop_handoffs",

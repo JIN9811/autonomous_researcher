@@ -1,0 +1,516 @@
+{
+  "schema": "guardian_gate_result.v1",
+  "gate_id": "guardian-gate-41a9b7d6452b5e",
+  "run_id": "run-20260912T085332Z-20becb",
+  "experiment_id": "exp-20260912T085332Z-36a3",
+  "loop_id": 0,
+  "stage": "knowledge",
+  "phase": "post",
+  "agent": "knowledge_agent",
+  "tool": "",
+  "action": "",
+  "status": "warning",
+  "decision": "allow_with_warning",
+  "reason_code": "BO_CANDIDATE_UNSAFE",
+  "risk_score": 0.45,
+  "risk_vector": {
+    "hardware": 0.0,
+    "vision": 0.0,
+    "robot": 0.0,
+    "equipment": 0.0,
+    "data": 0.45,
+    "optimization": 0.45,
+    "self_evolution": 0.45,
+    "operator": 0.0
+  },
+  "guardian_contract": {
+    "schema_version": "guardian_contract.v1",
+    "run_id": "run-20260912T085332Z-20becb",
+    "loop_id": 0,
+    "stage": "knowledge",
+    "phase": "post",
+    "agent": "knowledge_agent",
+    "tool": "",
+    "action": "",
+    "status": "warning",
+    "confidence": 0.7,
+    "artifact_refs": [],
+    "provenance_refs": [
+      "guardian-gate-41a9b7d6452b5e"
+    ],
+    "requires_human_approval": false,
+    "ok_for_next_stage": true,
+    "ok_for_bo": false,
+    "failure_code": "",
+    "risk_flags": [
+      "ACTION_CLAMP_DISABLED",
+      "ANALYSIS_AGENT",
+      "BO_CANDIDATE_UNSAFE",
+      "DATA_QUALITY_LOW",
+      "DESIGN_AGENT",
+      "EXPERIMENT.EVALUATE",
+      "HARDWARE",
+      "MANIPULATION_AGENT",
+      "MANUFACTURABILITY SCORE IS LOW; GUARDIAN SHOULD INSPECT CLOSELY",
+      "MISSING_REQUIRED_INPUT",
+      "NEAR_MISS",
+      "RESULT_NOT_OK",
+      "SPECIMEN_AGENT",
+      "STATUS=WARNING",
+      "WARN",
+      "WARNING"
+    ]
+  },
+  "guardian_decision": {
+    "schema": "guardian_decision.v1",
+    "decision_id": "guardian-gate-41a9b7d6452b5e",
+    "decision": "allow_with_warning",
+    "reason_code": "BO_CANDIDATE_UNSAFE",
+    "stage": "knowledge",
+    "phase": "post",
+    "agent": "knowledge_agent",
+    "tool": "",
+    "action": "",
+    "risk_score": 0.45,
+    "risk_vector": {
+      "hardware": 0.0,
+      "vision": 0.0,
+      "robot": 0.0,
+      "equipment": 0.0,
+      "data": 0.45,
+      "optimization": 0.45,
+      "self_evolution": 0.45,
+      "operator": 0.0
+    },
+    "dominant_risks": [],
+    "requires_human_approval": false,
+    "recommended_action": "continue_with_warning_and_record_evidence",
+    "required_evidence": [
+      "artifact_refs",
+      "provenance_refs"
+    ],
+    "missing_evidence": [
+      "MISSING_REQUIRED_INPUT",
+      "artifact_refs"
+    ],
+    "fallback_action": "request_new_candidate",
+    "taxonomy_action": "block_bo_update",
+    "modified_payload_patch": {}
+  },
+  "modified_payload_patch": {},
+  "alarms": [
+    {
+      "reason_code": "BO_CANDIDATE_UNSAFE",
+      "severity": "warning",
+      "message": "BO_CANDIDATE_UNSAFE",
+      "source_path": "payload.knowledge.failure_tags"
+    },
+    {
+      "reason_code": "MANUFACTURABILITY SCORE IS LOW; GUARDIAN SHOULD INSPECT CLOSELY",
+      "severity": "warning",
+      "message": "MANUFACTURABILITY SCORE IS LOW; GUARDIAN SHOULD INSPECT CLOSELY",
+      "source_path": "payload.knowledge.failure_tags"
+    },
+    {
+      "reason_code": "WARN",
+      "severity": "warning",
+      "message": "WARN",
+      "source_path": "payload.knowledge.failure_tags"
+    },
+    {
+      "reason_code": "ANALYSIS_AGENT",
+      "severity": "warning",
+      "message": "analysis_agent",
+      "source_path": "payload.knowledge.failure_tags"
+    },
+    {
+      "reason_code": "DATA_QUALITY_LOW",
+      "severity": "warning",
+      "message": "data",
+      "source_path": "payload.knowledge.failure_tags"
+    },
+    {
+      "reason_code": "DESIGN_AGENT",
+      "severity": "warning",
+      "message": "design_agent",
+      "source_path": "payload.knowledge.failure_tags"
+    },
+    {
+      "reason_code": "EXPERIMENT.EVALUATE",
+      "severity": "warning",
+      "message": "experiment.evaluate",
+      "source_path": "payload.knowledge.failure_tags"
+    },
+    {
+      "reason_code": "HARDWARE",
+      "severity": "warning",
+      "message": "hardware",
+      "source_path": "payload.knowledge.failure_tags"
+    },
+    {
+      "reason_code": "MANIPULATION_AGENT",
+      "severity": "warning",
+      "message": "manipulation_agent",
+      "source_path": "payload.knowledge.failure_tags"
+    },
+    {
+      "reason_code": "NEAR_MISS",
+      "severity": "warning",
+      "message": "near_miss",
+      "source_path": "payload.knowledge.failure_tags"
+    },
+    {
+      "reason_code": "BO_CANDIDATE_UNSAFE",
+      "severity": "warning",
+      "message": "peak_at_curve_boundary",
+      "source_path": "payload.knowledge.failure_tags"
+    },
+    {
+      "reason_code": "SPECIMEN_AGENT",
+      "severity": "warning",
+      "message": "specimen_agent",
+      "source_path": "payload.knowledge.failure_tags"
+    },
+    {
+      "reason_code": "MANUFACTURABILITY SCORE IS LOW; GUARDIAN SHOULD INSPECT CLOSELY",
+      "severity": "warning",
+      "message": "manufacturability score is low; Guardian should inspect closely",
+      "source_path": "payload.knowledge.knowledge_report.experiment_memory.parameters.validation_warnings"
+    },
+    {
+      "reason_code": "RESULT_NOT_OK",
+      "severity": "warning",
+      "message": "ok=false",
+      "source_path": "payload.knowledge.knowledge_report.experiment_memory.metrics.curve_quality"
+    },
+    {
+      "reason_code": "WARNING",
+      "severity": "warning",
+      "message": "warning",
+      "source_path": "payload.knowledge.knowledge_report.agent_performance_records[0]"
+    },
+    {
+      "reason_code": "MISSING_REQUIRED_INPUT",
+      "severity": "warning",
+      "message": "design_candidate",
+      "source_path": "payload.knowledge.knowledge_report.agent_performance_records[0].signals.missing_required_fields"
+    },
+    {
+      "reason_code": "ACTION_CLAMP_DISABLED",
+      "severity": "warning",
+      "message": "action_clamp_disabled",
+      "source_path": "payload.knowledge.knowledge_report.agent_performance_records[3].signals.warnings"
+    },
+    {
+      "reason_code": "STATUS=WARNING",
+      "severity": "warning",
+      "message": "status=warning",
+      "source_path": "payload.knowledge.knowledge_report.agent_performance_records[3].signals.warnings"
+    },
+    {
+      "reason_code": "MISSING_REQUIRED_INPUT",
+      "severity": "warning",
+      "message": "utm_data_ready",
+      "source_path": "payload.knowledge.knowledge_report.agent_performance_records[4].signals.missing_required_fields"
+    }
+  ],
+  "incident_records": [
+    {
+      "schema": "incident_record.v1",
+      "incident_id": "guardian-gate-41a9b7d6452b5e",
+      "run_id": "run-20260912T085332Z-20becb",
+      "experiment_id": "exp-20260912T085332Z-36a3",
+      "loop_id": 0,
+      "stage": "knowledge",
+      "phase": "post",
+      "severity": "near_miss",
+      "class": "data",
+      "risk_class": "data",
+      "event_time": "2026-09-12T08:54:22.731641+00:00",
+      "source": "guardian_gate",
+      "component": "knowledge_agent",
+      "summary": "BO_CANDIDATE_UNSAFE; MANUFACTURABILITY SCORE IS LOW; GUARDIAN SHOULD INSPECT CLOSELY; WARN; analysis_agent",
+      "message": "BO_CANDIDATE_UNSAFE; MANUFACTURABILITY SCORE IS LOW; GUARDIAN SHOULD INSPECT CLOSELY; WARN; analysis_agent",
+      "detected_by": [
+        "guardian_gate",
+        "knowledge_agent"
+      ],
+      "immediate_cause": "BO_CANDIDATE_UNSAFE",
+      "root_cause_hypotheses": [
+        "BO_CANDIDATE_UNSAFE",
+        "MANUFACTURABILITY SCORE IS LOW; GUARDIAN SHOULD INSPECT CLOSELY",
+        "WARN",
+        "ANALYSIS_AGENT",
+        "DATA_QUALITY_LOW",
+        "DESIGN_AGENT"
+      ],
+      "evidence_refs": [],
+      "guardian_decision": "allow_with_warning",
+      "corrective_actions": [
+        "guardian_review",
+        "guardian_review",
+        "request_new_candidate",
+        "quarantine_artifact",
+        "guardian_review",
+        "guardian_review",
+        "guardian_review",
+        "guardian_review",
+        "guardian_review",
+        "guardian_review",
+        "guardian_review",
+        "guardian_review",
+        "guardian_review",
+        "guardian_review",
+        "guardian_review",
+        "guardian_review"
+      ],
+      "corrective_action_refs": [
+        "guardian-gate-41a9b7d6452b5e-ca-1",
+        "guardian-gate-41a9b7d6452b5e-ca-2",
+        "guardian-gate-41a9b7d6452b5e-ca-3",
+        "guardian-gate-41a9b7d6452b5e-ca-4",
+        "guardian-gate-41a9b7d6452b5e-ca-5",
+        "guardian-gate-41a9b7d6452b5e-ca-6",
+        "guardian-gate-41a9b7d6452b5e-ca-7",
+        "guardian-gate-41a9b7d6452b5e-ca-8",
+        "guardian-gate-41a9b7d6452b5e-ca-9",
+        "guardian-gate-41a9b7d6452b5e-ca-10",
+        "guardian-gate-41a9b7d6452b5e-ca-11",
+        "guardian-gate-41a9b7d6452b5e-ca-12",
+        "guardian-gate-41a9b7d6452b5e-ca-13",
+        "guardian-gate-41a9b7d6452b5e-ca-14",
+        "guardian-gate-41a9b7d6452b5e-ca-15",
+        "guardian-gate-41a9b7d6452b5e-ca-16"
+      ],
+      "status": "open",
+      "owner": "guardian_agent",
+      "tool": "",
+      "action": "",
+      "risk_score": 0.45,
+      "risk_vector": {
+        "hardware": 0.0,
+        "vision": 0.0,
+        "robot": 0.0,
+        "equipment": 0.0,
+        "data": 0.45,
+        "optimization": 0.45,
+        "self_evolution": 0.45,
+        "operator": 0.0
+      },
+      "created_at": "2026-09-12T08:54:22.731641+00:00"
+    }
+  ],
+  "corrective_actions": [
+    {
+      "schema": "corrective_action.v1",
+      "action_id": "guardian-gate-41a9b7d6452b5e-ca-1",
+      "run_id": "run-20260912T085332Z-20becb",
+      "loop_id": 0,
+      "stage": "knowledge",
+      "phase": "post",
+      "reason_code": "ACTION_CLAMP_DISABLED",
+      "recommended_action": "guardian_review",
+      "status": "open",
+      "owner": "guardian_agent",
+      "created_at": "2026-09-12T08:54:22.731641+00:00"
+    },
+    {
+      "schema": "corrective_action.v1",
+      "action_id": "guardian-gate-41a9b7d6452b5e-ca-2",
+      "run_id": "run-20260912T085332Z-20becb",
+      "loop_id": 0,
+      "stage": "knowledge",
+      "phase": "post",
+      "reason_code": "ANALYSIS_AGENT",
+      "recommended_action": "guardian_review",
+      "status": "open",
+      "owner": "guardian_agent",
+      "created_at": "2026-09-12T08:54:22.731641+00:00"
+    },
+    {
+      "schema": "corrective_action.v1",
+      "action_id": "guardian-gate-41a9b7d6452b5e-ca-3",
+      "run_id": "run-20260912T085332Z-20becb",
+      "loop_id": 0,
+      "stage": "knowledge",
+      "phase": "post",
+      "reason_code": "BO_CANDIDATE_UNSAFE",
+      "recommended_action": "request_new_candidate",
+      "status": "open",
+      "owner": "guardian_agent",
+      "created_at": "2026-09-12T08:54:22.731641+00:00"
+    },
+    {
+      "schema": "corrective_action.v1",
+      "action_id": "guardian-gate-41a9b7d6452b5e-ca-4",
+      "run_id": "run-20260912T085332Z-20becb",
+      "loop_id": 0,
+      "stage": "knowledge",
+      "phase": "post",
+      "reason_code": "DATA_QUALITY_LOW",
+      "recommended_action": "quarantine_artifact",
+      "status": "open",
+      "owner": "guardian_agent",
+      "created_at": "2026-09-12T08:54:22.731641+00:00"
+    },
+    {
+      "schema": "corrective_action.v1",
+      "action_id": "guardian-gate-41a9b7d6452b5e-ca-5",
+      "run_id": "run-20260912T085332Z-20becb",
+      "loop_id": 0,
+      "stage": "knowledge",
+      "phase": "post",
+      "reason_code": "DESIGN_AGENT",
+      "recommended_action": "guardian_review",
+      "status": "open",
+      "owner": "guardian_agent",
+      "created_at": "2026-09-12T08:54:22.731641+00:00"
+    },
+    {
+      "schema": "corrective_action.v1",
+      "action_id": "guardian-gate-41a9b7d6452b5e-ca-6",
+      "run_id": "run-20260912T085332Z-20becb",
+      "loop_id": 0,
+      "stage": "knowledge",
+      "phase": "post",
+      "reason_code": "EXPERIMENT.EVALUATE",
+      "recommended_action": "guardian_review",
+      "status": "open",
+      "owner": "guardian_agent",
+      "created_at": "2026-09-12T08:54:22.731641+00:00"
+    },
+    {
+      "schema": "corrective_action.v1",
+      "action_id": "guardian-gate-41a9b7d6452b5e-ca-7",
+      "run_id": "run-20260912T085332Z-20becb",
+      "loop_id": 0,
+      "stage": "knowledge",
+      "phase": "post",
+      "reason_code": "HARDWARE",
+      "recommended_action": "guardian_review",
+      "status": "open",
+      "owner": "guardian_agent",
+      "created_at": "2026-09-12T08:54:22.731641+00:00"
+    },
+    {
+      "schema": "corrective_action.v1",
+      "action_id": "guardian-gate-41a9b7d6452b5e-ca-8",
+      "run_id": "run-20260912T085332Z-20becb",
+      "loop_id": 0,
+      "stage": "knowledge",
+      "phase": "post",
+      "reason_code": "MANIPULATION_AGENT",
+      "recommended_action": "guardian_review",
+      "status": "open",
+      "owner": "guardian_agent",
+      "created_at": "2026-09-12T08:54:22.731641+00:00"
+    },
+    {
+      "schema": "corrective_action.v1",
+      "action_id": "guardian-gate-41a9b7d6452b5e-ca-9",
+      "run_id": "run-20260912T085332Z-20becb",
+      "loop_id": 0,
+      "stage": "knowledge",
+      "phase": "post",
+      "reason_code": "MANUFACTURABILITY SCORE IS LOW; GUARDIAN SHOULD INSPECT CLOSELY",
+      "recommended_action": "guardian_review",
+      "status": "open",
+      "owner": "guardian_agent",
+      "created_at": "2026-09-12T08:54:22.731641+00:00"
+    },
+    {
+      "schema": "corrective_action.v1",
+      "action_id": "guardian-gate-41a9b7d6452b5e-ca-10",
+      "run_id": "run-20260912T085332Z-20becb",
+      "loop_id": 0,
+      "stage": "knowledge",
+      "phase": "post",
+      "reason_code": "MISSING_REQUIRED_INPUT",
+      "recommended_action": "guardian_review",
+      "status": "open",
+      "owner": "guardian_agent",
+      "created_at": "2026-09-12T08:54:22.731641+00:00"
+    },
+    {
+      "schema": "corrective_action.v1",
+      "action_id": "guardian-gate-41a9b7d6452b5e-ca-11",
+      "run_id": "run-20260912T085332Z-20becb",
+      "loop_id": 0,
+      "stage": "knowledge",
+      "phase": "post",
+      "reason_code": "NEAR_MISS",
+      "recommended_action": "guardian_review",
+      "status": "open",
+      "owner": "guardian_agent",
+      "created_at": "2026-09-12T08:54:22.731641+00:00"
+    },
+    {
+      "schema": "corrective_action.v1",
+      "action_id": "guardian-gate-41a9b7d6452b5e-ca-12",
+      "run_id": "run-20260912T085332Z-20becb",
+      "loop_id": 0,
+      "stage": "knowledge",
+      "phase": "post",
+      "reason_code": "RESULT_NOT_OK",
+      "recommended_action": "guardian_review",
+      "status": "open",
+      "owner": "guardian_agent",
+      "created_at": "2026-09-12T08:54:22.731641+00:00"
+    },
+    {
+      "schema": "corrective_action.v1",
+      "action_id": "guardian-gate-41a9b7d6452b5e-ca-13",
+      "run_id": "run-20260912T085332Z-20becb",
+      "loop_id": 0,
+      "stage": "knowledge",
+      "phase": "post",
+      "reason_code": "SPECIMEN_AGENT",
+      "recommended_action": "guardian_review",
+      "status": "open",
+      "owner": "guardian_agent",
+      "created_at": "2026-09-12T08:54:22.731641+00:00"
+    },
+    {
+      "schema": "corrective_action.v1",
+      "action_id": "guardian-gate-41a9b7d6452b5e-ca-14",
+      "run_id": "run-20260912T085332Z-20becb",
+      "loop_id": 0,
+      "stage": "knowledge",
+      "phase": "post",
+      "reason_code": "STATUS=WARNING",
+      "recommended_action": "guardian_review",
+      "status": "open",
+      "owner": "guardian_agent",
+      "created_at": "2026-09-12T08:54:22.731641+00:00"
+    },
+    {
+      "schema": "corrective_action.v1",
+      "action_id": "guardian-gate-41a9b7d6452b5e-ca-15",
+      "run_id": "run-20260912T085332Z-20becb",
+      "loop_id": 0,
+      "stage": "knowledge",
+      "phase": "post",
+      "reason_code": "WARN",
+      "recommended_action": "guardian_review",
+      "status": "open",
+      "owner": "guardian_agent",
+      "created_at": "2026-09-12T08:54:22.731641+00:00"
+    },
+    {
+      "schema": "corrective_action.v1",
+      "action_id": "guardian-gate-41a9b7d6452b5e-ca-16",
+      "run_id": "run-20260912T085332Z-20becb",
+      "loop_id": 0,
+      "stage": "knowledge",
+      "phase": "post",
+      "reason_code": "WARNING",
+      "recommended_action": "guardian_review",
+      "status": "open",
+      "owner": "guardian_agent",
+      "created_at": "2026-09-12T08:54:22.731641+00:00"
+    }
+  ],
+  "ok_for_next_stage": true,
+  "ok_for_bo": false,
+  "created_at": "2026-09-12T08:54:22.731641+00:00"
+}

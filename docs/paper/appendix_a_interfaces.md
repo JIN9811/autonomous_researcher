@@ -112,6 +112,11 @@ analysis, and operator pages. The current code snapshot records counts and
 representative responses. Routes are implementation interfaces; they are not
 independent paper contributions.
 
+The working-tree [Orchestrator Agent Reference](../agents/orchestrator_agent.md)
+owns the bounded Setup proposal, confirmation, and next-new-run admission
+contract. Its [verification evidence](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md)
+is controlled/local and does not establish a device or whole-cycle interface result.
+
 ## Versioning and Compatibility
 
 - Graphs and modules use stable IDs and versioned configuration.

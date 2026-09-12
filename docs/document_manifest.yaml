@@ -38,7 +38,9 @@ documents:
   - docs/superpowers/specs/2026-08-24-plc-safety-bridge-design.md
   - docs/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md
   - docs/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md
+  - docs/superpowers/specs/2026-09-12-orchestrator-dynamic-experimental-setup-design.md
   - docs/superpowers/plans/2026-09-07-design-decision-layer.md
+  - docs/superpowers/plans/2026-09-12-orchestrator-dynamic-experimental-setup.md
   - docs/paper/README.md
   - docs/paper/evidence/2026-09-07-supervised-closed-loop.md
   - docs/paper/evidence/2026-09-07-latest-cycle-demonstration.md
@@ -61,6 +63,7 @@ documents:
   - docs/runtime/runtime_ide.md
   - docs/runtime/loop_artifact_archiving.md
   - docs/runtime/evidence/2026-09-06-loop-artifact-archiving-tests.md
+  - docs/runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md
   - docs/runtime/langgraph_runtime.md
   - docs/runtime/closed_loop_and_pages_reference.md
   - docs/runtime/three_level_control_model.md

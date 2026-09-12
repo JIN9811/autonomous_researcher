@@ -16,6 +16,7 @@ related_docs:
   - docs/templates/document_types.md
   - docs/runtime/loop_artifact_archiving.md
   - docs/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md
+  - docs/superpowers/specs/2026-09-12-orchestrator-dynamic-experimental-setup-design.md
   - docs/paper/evidence/2026-09-07-latest-cycle-demonstration.md
 supersedes: []
 ---
@@ -448,6 +449,18 @@ Known gap: <most important current gap, or None identified within the verified s
 확인한 후 해당 작업에서 확정한다. 이는 공통 계약의 빈칸이 아니라 개별 작업의 책임이다.
 
 ## Related Evidence and Plan
+
+### Orchestrator 상세 설계: 가용 상태 · 동적 Experimental Setup · Live GUI
+
+2026-09-12 사용자 대화에서 Orchestrator 재구성에 동적 실험 설정 블록과 Chat/Live GUI
+연계를 포함하기로 합의했다. [통합 상세 설계](2026-09-12-orchestrator-dynamic-experimental-setup-design.md)에
+에이전트 보고 기반 가용 상태, 제한된 판단·툴콜링, 설정 소유권과 실제 적용 확인,
+블록 수정 시 Chat 맥락 연결, 기존 인계·실행 보존 및 비구동 검증을 정리한다.
+
+이 후속 범위에 한하여 본 공통 계약의 새 설정 연동 제외 항목을 확장한다.
+과거 캠페인·슬롯 설계나 bridge 직접 제어를 재도입하는 승인이 아니다.
+상세안 승인 후 [구현 계획](../plans/2026-09-12-orchestrator-dynamic-experimental-setup.md)을 작성했다.
+구현·검증 완료 기록은 아니다.
 
 ### Design 추가 인수 기준: 가상 폐루프 · API · Gemma4 31B
 
