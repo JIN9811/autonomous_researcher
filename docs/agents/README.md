@@ -325,6 +325,11 @@ model-inference, or new physical-cycle test was performed for this update.
 
 ## Related Documents
 
+- [AX4LAB Wiki and Memory](../knowledge/wiki_memory.md): shared agent reference
+  context, private-memory lifecycle and Workspace delivery evidence.
+- [Knowledge Publication Boundary](../knowledge/publication.md): staged-file
+  checks and the separation of public documentation from private context.
+
 - [Agent API and Connection Matrix](agent_api_connection_matrix.md)
 - [System Architecture](../paper/02_system_architecture.md)
 - [Platform Architecture](../paper/04_platform_architecture.md)

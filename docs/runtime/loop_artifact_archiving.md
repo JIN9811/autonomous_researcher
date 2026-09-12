@@ -74,6 +74,12 @@ results whose loop ownership is unknown.
 
 ## Storage and Identity
 
+Knowledge delivery now retains separate content-free citation receipts, scoped
+to the available consumer/run/loop/attempt identity. These do not replace the
+original invocation archive or copy private context into it. Private memory
+deletion does not delete original run artifacts. See [Wiki and Memory](../knowledge/wiki_memory.md)
+and the [publication boundary](../knowledge/publication.md).
+
 New run and Chat identities follow the [readable naming contract](logging.md#readable-run-and-session-names).
 Names are fixed at allocation; older IDs and directories are not migrated.
 The loop/agent/attempt hierarchy below is unchanged.

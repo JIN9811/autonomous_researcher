@@ -503,3 +503,13 @@ body.knowledge-page {
   .knowledge-intake-job-bar label { flex-basis: 100%; }
   .knowledge-footer { flex-wrap: wrap; gap: 8px; overflow-wrap: anywhere; }
 }
+/* Scoped Wiki / Memory / Delivery panels reuse the workspace visual language. */
+.knowledge-v2-row { display: grid; gap: .4rem; padding: .65rem 0; border-bottom: 1px solid rgba(148,163,184,.15); }
+.knowledge-v2-row button { justify-self: start; text-align: left; }
+.knowledge-v2-row small, .knowledge-v2-source { color: #94a3b8; overflow-wrap: anywhere; }
+.knowledge-v2-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+.knowledge-v2-detail { min-width: 0; max-height: 65vh; overflow-y: auto; }
+.knowledge-v2-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1rem; }
+.knowledge-v2-actions textarea { width: 100%; min-height: 8rem; color: inherit; background: transparent; border: 1px solid #475569; padding: .6rem; }
+.knowledge-preserved-memory { margin-top: 1rem; }
+.knowledge-preserved-memory > summary { cursor: pointer; padding: .5rem 0; }

@@ -26,6 +26,12 @@ generic source material without enumerating input subject categories or devices.
 
 ## Ownership and Flow
 
+The [Wiki and Memory integration](../../knowledge/wiki_memory.md) adds a public
+platform corpus and separately scoped private memory. It preserves this source
+worker and its existing retrieval contract. Source Library remains its own
+Workspace tab and store; its publications are not automatically copied into
+public Wiki or private memory. Opening the Workspace does not start ingestion.
+
 `Folder change → stable source snapshot → page files → page-level LLM reading → bounded consolidation → one Markdown publication → scoped retrieval`
 
 - Code detects files and owns extraction, hashing, locks, path containment,

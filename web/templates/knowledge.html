@@ -7,15 +7,15 @@
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
     <link rel="stylesheet" href="/static/styles.css" />
-    <link rel="stylesheet" href="/static/knowledge.css?v=20260910-markdown-1" />
+    <link rel="stylesheet" href="/static/knowledge.css?v=20260913-wiki-memory-1" />
   </head>
   <body class="knowledge-page">
     <main class="knowledge-shell">
       <header class="knowledge-hero">
         <div>
-          <p class="knowledge-eyebrow">ATR Knowledge Runtime</p>
+          <p class="knowledge-eyebrow">AX4LAB Knowledge</p>
           <h1>Knowledge Workspace</h1>
-          <p>Scoped Markdown knowledge, operational memory, ontology, and source-backed references.</p>
+          <p>Shared Wiki, scoped memory, source-backed references and agent delivery evidence.</p>
         </div>
         <div class="knowledge-hero-actions">
           <a class="knowledge-button secondary" href="/">Main GUI</a>
@@ -23,7 +23,8 @@
         </div>
       </header>
 
-      <section class="knowledge-status-strip" aria-label="Knowledge runtime status">
+      <p id="knowledge-workspace-summary" class="knowledge-scope-summary" aria-live="polite">Loading Wiki and memory scope…</p>
+      <section class="knowledge-status-strip" aria-label="Execution knowledge status">
         <article><span>Storage</span><strong id="knowledge-backend-status">Loading</strong><small id="knowledge-backend-detail">Local Markdown records</small></article>
         <article><span>Ontology</span><strong id="knowledge-ontology-version">-</strong><small>active classification version</small></article>
         <article><span>Records / revisions</span><strong id="knowledge-record-count">0</strong><small id="knowledge-revision-count">0 preserved revisions</small></article>
@@ -32,13 +33,23 @@
       </section>
 
       <nav class="knowledge-tabs" aria-label="Knowledge workspace sections">
-        <button class="active" type="button" data-knowledge-tab="markdown">Markdown Knowledge</button>
+        <button class="active" type="button" data-knowledge-tab="wiki">AX4LAB Wiki</button>
         <button type="button" data-knowledge-tab="memory">Memory</button>
-        <button type="button" data-knowledge-tab="ontology">Ontology</button>
         <button type="button" data-knowledge-tab="manuals">Source Library</button>
+        <button type="button" data-knowledge-tab="delivery">Agent Delivery</button>
+        <button type="button" data-knowledge-tab="ontology">Ontology</button>
       </nav>
 
-      <section class="knowledge-tab-panel active" data-knowledge-panel="markdown">
+      <section class="knowledge-tab-panel active" data-knowledge-panel="wiki">
+        <div class="knowledge-section-head"><div><span>Shared Platform Knowledge</span><h2>AX4LAB Wiki</h2></div><small>Reviewed references · freshness checked</small></div>
+        <div id="knowledge-wiki-browser"></div>
+      </section>
+
+      <section class="knowledge-tab-panel" data-knowledge-panel="memory">
+        <div class="knowledge-section-head"><div><span>Scoped Retained Context</span><h2>Private Memory</h2></div><small>Confirmation is separate from experiment approval</small></div>
+        <div id="knowledge-private-browser"></div>
+        <details class="knowledge-card knowledge-preserved-memory">
+          <summary>Execution knowledge · source-backed Markdown</summary>
         <form id="knowledge-markdown-form" class="knowledge-query-bar knowledge-markdown-query-bar">
           <label class="knowledge-search-field">Search knowledge
             <input id="knowledge-markdown-query" type="search" maxlength="1000" placeholder="Search observations, outcomes, or reusable knowledge" />
@@ -81,15 +92,21 @@
           </div>
           <pre id="knowledge-intake-result" aria-live="polite">No archive intake requested.</pre>
         </details>
-      </section>
-
-      <section class="knowledge-tab-panel" data-knowledge-panel="memory">
+        </details>
+        <details class="knowledge-card knowledge-preserved-memory">
+          <summary>Operational memory, patterns and recorded activity</summary>
         <div class="knowledge-section-head"><div><span>Authoritative Records</span><h2>Knowledge Memory</h2></div><small>JSONL-backed operational memory</small></div>
         <div id="knowledge-memory-grid" class="knowledge-memory-grid"></div>
         <article class="knowledge-card knowledge-activity-card">
           <div class="knowledge-card-head"><div><span>Lifecycle</span><h2>Recorded Activity</h2></div><small>collected · updated · retrieved · used</small></div>
           <div id="knowledge-activity-chart" class="knowledge-activity-chart" role="img" aria-label="Recorded knowledge activity by cycle"></div>
         </article>
+        </details>
+      </section>
+
+      <section class="knowledge-tab-panel" data-knowledge-panel="delivery">
+        <div class="knowledge-section-head"><div><span>Evidence of Agent Context</span><h2>Agent Delivery</h2></div><small>Retrieved ≠ delivered ≠ cited</small></div>
+        <div id="knowledge-delivery-browser"></div>
       </section>
 
       <section class="knowledge-tab-panel" data-knowledge-panel="ontology">
@@ -129,6 +146,7 @@
       <footer class="knowledge-footer"><span id="knowledge-runtime-message" role="status">Initializing Knowledge Workspace.</span><time id="knowledge-updated-at">-</time></footer>
     </main>
     <script src="/static/vendor/echarts.min.js?v=5.6.0"></script>
-    <script src="/static/knowledge.js?v=20260911-sources-1" defer></script>
+    <script src="/static/knowledge_workspace.js?v=20260913-wiki-memory-1" defer></script>
+    <script src="/static/knowledge.js?v=20260913-wiki-memory-1" defer></script>
   </body>
 </html>

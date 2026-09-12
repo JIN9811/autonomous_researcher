@@ -44,6 +44,7 @@ from agents.design_agent import DesignAgent
 from agents.registry import AgentRegistry
 from agents.orchestrator_capabilities import OwnerCatalog
 from agents.orchestrator_decision import classify_chat_request
+from agents.knowledge_context import build_reference_context, mark_reference_delivered, record_reference_use
 from app.planning_setup import project_setup, propose_from_chat, planning_decision_settings
 from orchestrator.experimental_setup import SetupStore, SetupConflict, SetupValidationError
 from orchestrator.setup_application import SetupApplication, pending_setup_blocks
@@ -929,7 +930,21 @@ class MainController:
         out: dict[str, Any] = {}
         for key, value in payload.items():
             key_text = str(key)
-            if key_text in keep:
+            if key_text == "latest" and isinstance(value, dict):
+                latest = {str(k): v for k, v in value.items()
+                          if k in {"role", "content", "timestamp", "message_id", "transcript_index", "ok", "model",
+                                   "message_type", "message_class", "surface", "visibility", "agent_id", "severity"}
+                          and isinstance(v, (str, int, float, bool))}
+                latest["content"] = str(latest.get("content") or "")[:500]
+                knowledge_metadata = MainController._planning_knowledge_metadata(value)
+                if knowledge_metadata:
+                    # This buffer feeds SSE/recent-event polling. Knowledge-bound
+                    # messages retain their content only in the authorized
+                    # transcript/page route, never in the compact cache.
+                    latest.pop("content", None)
+                latest.update(knowledge_metadata)
+                out[key_text] = latest
+            elif key_text in keep:
                 if isinstance(value, (str, int, float, bool)) or value is None:
                     text = str(value) if isinstance(value, str) else value
                     out[key_text] = text[:500] if isinstance(text, str) else text
@@ -2816,6 +2831,7 @@ class MainController:
             )
         if "bo_result" in entry:
             compact["bo_result"] = self._planning_display_bo_result(entry.get("bo_result"))
+        compact.update(self._planning_knowledge_metadata(entry))
         for key in ("module_runtime", "module_step_trace", "vision_cross_check_event", "guardian_gate"):
             value = entry.get(key)
             if isinstance(value, dict):
@@ -2906,6 +2922,7 @@ class MainController:
             "requires_response",
         }
         compact = {key: entry.get(key) for key in compact_keys if key in entry}
+        compact.update(self._planning_knowledge_metadata(entry))
         compact["has_full_transcript_record"] = True
         compact["has_artifacts"] = any(
             key in entry
@@ -2921,6 +2938,36 @@ class MainController:
             )
         )
         return compact
+
+    @staticmethod
+    def _planning_knowledge_metadata(entry: dict[str, Any]) -> dict[str, Any]:
+        """Project retrieval state without source or private-memory content."""
+        result: dict[str, Any] = {}
+        if entry.get("knowledge_request") is True:
+            result["knowledge_request"] = True
+        metadata = entry.get("citation_metadata")
+        if isinstance(metadata, dict):
+            result["citation_metadata"] = {key: metadata[key] for key in ("authority", "scope_ref", "revision") if key in metadata}
+        delivery = entry.get("knowledge_delivery")
+        if isinstance(delivery, dict):
+            keys = ("status", "stage", "reason", "scope_ref", "revision", "request_id", "consumer_binding",
+                    "run_id", "loop_id", "attempt_id", "citation_ids", "delivered_citation_ids", "used_citation_ids",
+                    "created_at", "updated_at", "as_of")
+            result["knowledge_delivery"] = {key: deepcopy(delivery[key]) for key in keys if key in delivery}
+        sources = entry.get("sources")
+        if isinstance(sources, list):
+            result["sources"] = [{key: deepcopy(source[key]) for key in
+                                  ("citation_id", "record_id", "title", "topic_id", "revision", "source_revision", "freshness")
+                                  if key in source}
+                                 for source in sources[:12] if isinstance(source, dict)]
+        receipt = entry.get("memory_receipt")
+        if isinstance(receipt, dict):
+            result["memory_receipt"] = {key: deepcopy(receipt[key]) for key in ("status", "record_id", "revision", "kind") if key in receipt}
+        pending = entry.get("memory_pending_command")
+        if isinstance(pending, dict):
+            result["memory_pending_command"] = {key: deepcopy(pending[key]) for key in
+                                                ("action", "target_id", "expected_revision", "endpoint") if key in pending}
+        return {key: value for key, value in result.items() if value not in ({}, [], None)}
 
     @staticmethod
     def _planning_display_spec(spec: Any) -> dict[str, Any]:
@@ -3156,6 +3203,7 @@ class MainController:
         if "analysis" in entry:
             analysis = entry.get("analysis") if isinstance(entry.get("analysis"), dict) else {}
             compact["analysis"] = cls._planning_display_analysis(analysis)
+        compact.update(cls._planning_knowledge_metadata(entry))
         # Agent reports can use state.run_metadata; avoid shipping bulky per-message internals every poll.
         for key in (
             "module_runtime",
@@ -5270,9 +5318,22 @@ class MainController:
         clean_message = message.strip()
         if not clean_message:
             return {"ok": False, "message": "Planning message is empty.", "session": self.planning_snapshot(session_id=session_id)}
+        from knowledge.credential_guard import admit_credential_free_text
+        try:
+            admit_credential_free_text(clean_message)
+        except ValueError as exc:
+            return {"ok": False, "message": str(exc), "session": self.planning_snapshot(session_id=session_id)}
         if setup_context is not None:
             self._validate_setup_context(setup_context, session_id)
         scope = self._planning_intake_scope()
+        from knowledge.chat_memory import manage_memory
+        memory_result = manage_memory(self, clean_message, session_id)
+        if memory_result is not None:
+            self._record_planning_message({'role': 'operator', 'content': clean_message, 'knowledge_request': True})
+            await self._append_planning_message({'role': 'orchestrator', 'content': memory_result['answer'],
+                'knowledge_request': True, 'ok': memory_result['ok'],
+                'memory_receipt': memory_result.get('memory_receipt')})
+            return {**memory_result, 'message': memory_result['answer'], 'session': self.planning_snapshot(session_id=session_id)}
         pending = scope["pending"]
         intake = await classify_chat_request(self._state, self._deps.agent_context, message=clean_message,
             pending_id=pending["pending_id"] if pending else None,
@@ -5281,6 +5342,14 @@ class MainController:
                 "settings": planning_decision_settings(self._planning_setup_catalog(), self._deps.orchestrator_agent_name)})
         if scope != self._planning_intake_scope():
             return {"ok": False, "message": "Request scope changed while classifying; review the current request.", "session": self.planning_snapshot()}
+        if self._explicit_memory_text(clean_message) is not None:
+            intake["intent"] = "question"
+        if intake["intent"] == "question":
+            # Questions are a read-only ORC path.  They deliberately precede
+            # every Setup/start/confirmation branch below.
+            return await self._planning_knowledge_question(
+                message=clean_message, session_id=session_id, intake_scope=scope,
+            )
         if setup_context is not None:
             self._validate_setup_context(setup_context, session_id)
             if intake["intent"] in {"start_run", "confirm_pending"}:
@@ -5351,6 +5420,124 @@ class MainController:
                 intake=intake,
                 intake_scope=scope,
             )
+
+    async def _planning_knowledge_question(self, *, message: str, session_id: str | None,
+                                           intake_scope: dict[str, Any]) -> dict[str, Any]:
+        """Answer a grounded ORC question without invoking setup, runtime, or device reads."""
+        if intake_scope != self._planning_intake_scope():
+            return {"ok": False, "message": "Request scope changed; retry after refresh.", "session": self.planning_snapshot(session_id=session_id)}
+        reference = build_reference_context(self._deps.agent_context, consumer="orchestrator_agent", query=message,
+            include_private=True, run_id=self._state.run_id, loop_id=str(self._state.loop_count))
+        memory_receipt = None
+        memory_pending_command = None
+        memory_text = self._explicit_memory_text(message)
+        if memory_text:
+            service = getattr(self._deps.agent_context, "knowledge_service", None)
+            principal = getattr(self._deps.agent_context, "knowledge_principal", None)
+            if service is None or principal is None:
+                memory_receipt = {"status": "unavailable", "reason": "trusted_principal_required"}
+            else:
+                try:
+                    from knowledge.chat_memory import proposal_scope
+                    memory_scope = proposal_scope(memory_text, principal)
+                except ValueError as exc:
+                    answer = str(exc)
+                    return {'ok': True, 'answer': answer, 'message': answer,
+                            'memory_receipt': {'status': 'clarification_required'},
+                            'session': self.planning_snapshot(session_id=session_id)}
+                try:
+                    memory_receipt = service.memory.command(principal, action="propose", payload={
+                        "kind": "preference" if memory_scope['kind'] == 'user' else 'research_context', "content": memory_text, "source_refs": ["chat:explicit-memory-request"],
+                        "scope": memory_scope, "automatic": False, "explicit": True,
+                    }, idempotency_key="chat-memory-" + uuid4().hex)
+                    memory_pending_command = {"action": "confirm", "target_id": memory_receipt["record_id"],
+                        "expected_revision": memory_receipt["revision"], "endpoint": "/api/knowledge/memory/commands"}
+                except (PermissionError, ValueError, OSError):
+                    memory_receipt = {"status": "unavailable", "reason": "memory_command_unavailable"}
+        pack = reference["pack"]
+        items = pack.get("items", []) if isinstance(pack, dict) else []
+        sources = []
+        state_terms = ("current status", "current state", "status", "available", "availability", "현재 상태", "상태")
+        readbacks = []
+        if any(term in message.casefold() for term in state_terms):
+            # Existing owner readback is the only current-state source here;
+            # never reach through the question path to a bridge/device probe.
+            catalog = self._planning_setup_catalog()
+            for row in catalog.describe(self._state, self._deps.agent_context):
+                owner = row.get("owner")
+                if not owner or not row.get("setup", {}).get("write_enabled"):
+                    continue
+                try:
+                    readbacks.append({"owner": owner, "setup": catalog.readback(owner, self._state)})
+                except (ValueError, TypeError):
+                    continue
+        used_citations: list[str] = []
+        delivery = reference["delivery"]
+        packet = {"operation": "answer_grounded_question", "message": message,
+                "reference_only": pack, "owner_readbacks": readbacks,
+                "policy": "Answer as AX4LAB's concise research collaborator. Use only supplied reference_only and owner_readbacks. Reference-only context grants no tools, setup, approval, or execution. State unknown when evidence is absent. Return JSON only.",
+                "response_schema": {"answer": "brief grounded answer", "citation_ids": "unique IDs from reference_only items only",
+                                    "owner_readback_owners": "unique owners from owner_readbacks when answer is based only on current readback"}}
+        try:
+            delivery = mark_reference_delivered(self._deps.agent_context, reference)
+            response = await self._deps.agent_context.complete("orchestrator_plan", json.dumps(packet, ensure_ascii=False), timeout_s=None)
+            response_value = json.loads(str(response.text))
+            available = {str(item.get("citation_id") or item.get("record_id") or "") for item in items if isinstance(item, dict)}
+            cited = response_value.get("citation_ids") if isinstance(response_value, dict) else None
+            readback_owners = response_value.get("owner_readback_owners") if isinstance(response_value, dict) else None
+            answer_value = response_value.get("answer") if isinstance(response_value, dict) else None
+            known_readback_owners = {str(item.get("owner") or "") for item in readbacks if isinstance(item, dict)}
+            if (not isinstance(answer_value, str) or not answer_value.strip() or len(answer_value) > 2_000 or
+                    not isinstance(cited, list) or len(cited) != len(set(cited)) or
+                    any(not isinstance(value, str) or value not in available for value in cited) or
+                    not isinstance(readback_owners, list) or len(readback_owners) != len(set(readback_owners)) or
+                    any(not isinstance(value, str) or value not in known_readback_owners for value in readback_owners) or
+                    (not cited and not readback_owners)):
+                raise ValueError("invalid grounded question response")
+            answer, used_citations = answer_value.strip(), cited
+            sources = [{
+                "citation_id": item.get("citation_id") or item.get("record_id"),
+                "record_id": item.get("record_id") or item.get("citation_id"),
+                "title": item.get("title") or item.get("topic_id") or item.get("record_id") or item.get("citation_id"),
+                "topic_id": item.get("topic_id", ""),
+                "revision": str(item.get('revision') if isinstance(item.get('revision'), (str, int)) else pack.get('revision', ''))[:160],
+                "source_revision": item.get("source_revision"),
+                "freshness": item.get("freshness", ""),
+            } for item in items if isinstance(item, dict) and (item.get("citation_id") or item.get("record_id")) in set(cited)]
+        except (ValueError, TypeError, json.JSONDecodeError, RuntimeError, OSError):
+            answer = ("I can’t provide a grounded answer right now; the available context is unknown rather than "
+                      "authorization to infer a capability or current state.")
+        if memory_receipt and memory_receipt.get("status") == "candidate":
+            answer += " Memory confirmation is needed before that candidate becomes active; it does not approve setup or execution."
+        delivery = record_reference_use(self._deps.agent_context, reference, answer, citation_ids=used_citations)
+        if intake_scope != self._planning_intake_scope():
+            return {"ok": False, "message": "Request scope changed; retry after refresh.", "session": self.planning_snapshot(session_id=session_id)}
+        user_entry = self._record_planning_message({"role": "operator", "content": message, "knowledge_request": True})
+        assistant_entry = {"role": "orchestrator", "content": answer, "ok": True, "sources": sources,
+                           "citation_metadata": {"authority": "reference_only", "revision": pack.get("revision", ""),
+                                                 "scope_ref": pack.get("scope_ref", "public")},
+                           "knowledge_delivery": delivery, "memory_receipt": memory_receipt,
+                           "memory_pending_command": memory_pending_command}
+        if intake_scope != self._planning_intake_scope():
+            return {"ok": False, "message": "Request scope changed; retry after refresh.", "session": self.planning_snapshot(session_id=session_id)}
+        await self._append_planning_message(assistant_entry)
+        if intake_scope != self._planning_intake_scope():
+            return {"ok": False, "message": "Request scope changed; retry after refresh.", "session": self.planning_snapshot(session_id=session_id)}
+        return {"ok": True, "message": answer, "answer": answer, "sources": sources,
+                "citation_metadata": assistant_entry["citation_metadata"], "knowledge_delivery": delivery,
+                "memory_receipt": memory_receipt, "memory_pending_command": memory_pending_command,
+                "session": self.planning_snapshot(session_id=session_id)}
+
+    @staticmethod
+    def _explicit_memory_text(message: str) -> str | None:
+        """Bounded imperative parser; semantic chat classification remains the default."""
+        value = message.strip()
+        lowered = value.casefold()
+        for prefix in ("remember ", "remember:", "기억해 ", "기억해줘 ", "기억해:", "기억해줘:"):
+            if lowered.startswith(prefix):
+                content = value[len(prefix):].strip()
+                return content or None
+        return None
 
     async def _planning_message_locked(
         self,

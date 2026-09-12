@@ -15,6 +15,7 @@ import math
 from backends.llm_backend import LLMImageInput
 from orchestrator.state import Mode
 from utils.agent_artifact_archive import record_tool_artifact
+from agents.knowledge_context import append_reference_only, build_reference_context, mark_reference_delivered, record_reference_use
 
 
 _TOOLS = frozenset({"execute_stacked_workflow", "accept_workflow_result", "request_operator",
@@ -128,6 +129,10 @@ async def decide_equipment(state, ctx, *, phase, context, proposals, images=None
                     "response_options": [{"tool": tool, "arguments": arguments,
                         "reason": "<brief evidence-grounded justification>", "evidence_refs": list(refs)}
                         for tool, arguments in frozen_proposals.items()]}
+        reference = build_reference_context(ctx, consumer="equipment_agent", query=state.active_goal or "Equipment workflow contract",
+            run_id=state.run_id, loop_id=str(state.loop_count))
+        envelope = append_reference_only(envelope, reference)
+        result["knowledge_delivery"] = reference["delivery"]
         # Never serialize the raster objects or data URLs into the prompt/archive.
         serialized = _json(envelope)
         result["evidence"] = envelope
@@ -152,6 +157,7 @@ async def decide_equipment(state, ctx, *, phase, context, proposals, images=None
         kwargs = {"timeout_s": timeout}
         if frozen_images:
             kwargs["images"] = frozen_images
+        result["knowledge_delivery"] = mark_reference_delivered(ctx, reference)
         response = await asyncio.wait_for(
             owned.complete("equipment_workflow_decision",
                 _PROMPT + "\nCURRENT DECISION:\n" + _PHASE_GUIDANCE[phase] + "\nCONTEXT:\n" + serialized,
@@ -181,6 +187,7 @@ async def decide_equipment(state, ctx, *, phase, context, proposals, images=None
             len(set(cited)) != len(cited) or (tool != "request_operator" and set(cited) != set(refs))):
             raise ValueError("invalid bounded tool request or evidence reference")
         result.update(status="accepted", request=request, reason=request["reason"])
+        result['knowledge_delivery'] = record_reference_use(ctx, reference, request['reason'])
     except asyncio.CancelledError:
         result.update(status="review_required", failure_code="EQUIPMENT_DECISION_CANCELLED")
         raise

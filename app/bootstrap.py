@@ -52,6 +52,7 @@ from backends.vllm_client import VLLMBackend
 from knowledge.experiment_db import ExperimentDB
 from knowledge.failure_memory import FailureMemory
 from knowledge.rag import HybridRAG, LocalRAGIndex, WebRetriever
+from knowledge.context_service import KnowledgeContextService
 from device_bridges.specimen_pose_tracker import get_specimen_pose_tracker_bridge
 from device_bridges.utm_runtime_bridge import get_utm_runtime_manager
 from device_bridges.utm_state_observer import observe_utm_state_window
@@ -338,6 +339,7 @@ def load_runtime() -> MainController:
         runtime_profiles=runtime_profiles,
         llm_lease=LLMLeaseCoordinator(),
         artifact_run_root=str(resolve_path(system_cfg.get("run_root", "./runs"))),
+        knowledge_service=KnowledgeContextService(resolve_path("."), data_root=resolve_path("memory/knowledge")),
     )
 
     objective_service = ObjectiveService(

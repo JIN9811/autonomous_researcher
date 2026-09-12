@@ -1,0 +1,30 @@
+name: Knowledge publication boundary
+
+on:
+  push:
+    branches: [main, 'feature-*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  publication:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check changed publication blobs
+        env:
+          EVENT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -z "$EVENT_BASE" ] || [ "$EVENT_BASE" = "0000000000000000000000000000000000000000" ]; then
+            EVENT_BASE=$(git hash-object -t tree -w --stdin </dev/null)
+          fi
+          python scripts/verify_knowledge_publication.py --base "$EVENT_BASE" --head "$EVENT_HEAD"

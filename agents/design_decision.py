@@ -13,6 +13,7 @@ from copy import deepcopy
 from time import monotonic
 
 from utils.agent_artifact_archive import record_tool_artifact
+from agents.knowledge_context import append_reference_only, build_reference_context, mark_reference_delivered, record_reference_use
 
 
 PARAMETERS = ("geometry_type", "specimen_size_mm", "cell_size_mm", "wall_thickness_mm",
@@ -122,6 +123,10 @@ async def decide_design(agent, state, ctx, prepared):
                                        for cid,c in candidates.items() if cid not in authorized_ids],
                    "history":{"prior_count":history["prior_count"], "failure_count":prepared["failure_summary"]["count"]},
                    "evidence_refs":sorted(evidence_refs), "tools":tools}
+        reference = build_reference_context(ctx, consumer="design_agent", query=state.active_goal or "Design Agent",
+            run_id=state.run_id, loop_id=str(state.loop_count))
+        context = append_reference_only(context, reference)
+        decision["knowledge_delivery"] = reference["delivery"]
         instructions = (
             "You own the Design suitability/evidence decision, not BO optimization. On the normal path choose "
             "a valid candidate for the requested experiment, inspect relevant evidence when needed, or return "
@@ -137,6 +142,7 @@ async def decide_design(agent, state, ctx, prepared):
             if remaining <= 0:
                 raise TimeoutError("decision budget expired")
             prompt = instructions + json.dumps({"context":context, "observations":decision["trace"]}, ensure_ascii=False, allow_nan=False)
+            decision["knowledge_delivery"] = mark_reference_delivered(ctx, reference)
             response = await asyncio.wait_for(ctx.complete("design_reasoning", prompt, timeout_s=remaining), timeout=remaining)
             if getattr(response, "raw", {}).get("mock"):
                 raise ValueError("mock fallback is not a normal LLM decision")
@@ -165,6 +171,7 @@ async def decide_design(agent, state, ctx, prepared):
             if expected and (not isinstance(cid, str) or cid not in candidates or f"candidate:{cid}" not in refs):
                 raise ValueError("unknown or uncited candidate")
             entry["request"] = req
+            decision['knowledge_delivery'] = record_reference_use(ctx, reference, reason)
             if tool == "inspect_history":
                 entry["result"] = deepcopy(history)
                 evidence_refs.add("context:history")

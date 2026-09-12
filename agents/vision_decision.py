@@ -16,6 +16,7 @@ from PIL import Image
 from backends.llm_backend import LLMImageInput, MAX_LLM_IMAGE_BYTES
 from orchestrator.state import Mode
 from utils.agent_artifact_archive import record_tool_artifact
+from agents.knowledge_context import append_reference_only, build_reference_context, mark_reference_delivered, record_reference_use
 
 
 def _identity(state):
@@ -101,6 +102,10 @@ async def _decide(state, ctx, contract_id, capture=None):
         images = None
         context = {"contract_id": contract_id, "run_id": state.run_id, "loop_id": state.loop_count,
                    "evidence_refs": ["context:task"]}
+        reference = build_reference_context(ctx, consumer="vision_agent", query=state.active_goal or "Vision observation contract",
+            run_id=state.run_id, loop_id=str(state.loop_count))
+        context = append_reference_only(context, reference)
+        result["knowledge_delivery"] = reference["delivery"]
         spec = state.current_experiment_spec or {}
         specimen = state.run_metadata.get("specimen_result") or {}
         expected = {"run_id": state.run_id, "loop_id": state.loop_count,
@@ -182,6 +187,7 @@ async def _decide(state, ctx, contract_id, capture=None):
         kwargs = {"timeout_s": timeout}
         if images:
             kwargs["images"] = images
+        result["knowledge_delivery"] = mark_reference_delivered(ctx, reference)
         response = await asyncio.wait_for(ctx.complete("vision_observation", prompt, **kwargs), timeout)
         if (getattr(response, "raw", None) or {}).get("mock"):
             raise ValueError("mock completion cannot establish visual judgment")
@@ -227,6 +233,7 @@ async def _decide(state, ctx, contract_id, capture=None):
             result["status"] = "accepted"
         else:
             result["failure_code"] = "VISION_REVIEW_REQUIRED"
+        result['knowledge_delivery'] = record_reference_use(ctx, reference, request['reason'])
     except Exception as exc:
         result.setdefault("failure_code", "VISION_REVIEW_REQUIRED")
         result["error"] = f"{type(exc).__name__}: {exc}"

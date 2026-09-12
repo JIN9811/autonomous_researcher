@@ -56,6 +56,10 @@ supersedes: []
 
 ## Overview and Responsibilities
 
+The existing LLM decision boundary receives a bounded, reference-only
+[AX4LAB Wiki pack](../knowledge/wiki_memory.md). This supplies platform context
+without changing this agent's tools, numerical authority or execution gates.
+
 Analysis processes Equipment measurements and returns an evidence-bearing BO
 observation without waiting for optional FEM. The next physical loop may proceed
 while an Analysis-owned worker prepares, assesses and solves the frozen specimen

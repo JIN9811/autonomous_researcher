@@ -50,6 +50,10 @@ supersedes: []
 
 ## Overview and Responsibilities
 
+The existing LLM decision boundary receives a bounded, reference-only
+[AX4LAB Wiki pack](../knowledge/wiki_memory.md). This supplies platform context
+without changing this agent's tools, numerical authority or execution gates.
+
 `VisionAgent` turns a bounded observation task into current visual evidence. Existing
 code owns task resolution, camera and session identity, capture, detector facts,
 coordinates, thresholds, freshness, rollout state, and final handoff gates. The

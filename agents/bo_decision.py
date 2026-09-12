@@ -15,6 +15,7 @@ from time import monotonic
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from utils.agent_artifact_archive import record_tool_artifact
+from agents.knowledge_context import append_reference_only, build_reference_context, mark_reference_delivered, record_reference_use
 
 
 SUPPORTED_ACQUISITIONS = {
@@ -226,9 +227,14 @@ async def run_bo_decision(
 ) -> dict[str, Any]:
     """Run the finite BO-local tool protocol and return its trace/result."""
     frozen = deepcopy(dict(context))
+    reference = build_reference_context(ctx, consumer="bo_agent",
+        query=str(frozen.get("goal") or frozen.get("objective") or "BO strategy"),
+        run_id=str(frozen.get("run_id") or ""), loop_id=str(frozen.get("loop_id") or ""))
+    frozen = append_reference_only(frozen, reference)
     result: dict[str, Any] = {
         "schema": "bo_decision.v1", "status": "failed", "provenance": "virtual_test" if virtual_test else "llm",
         "llm_used": False, "trace": [], "optimizer_result": None, "knowledge": [],
+        "knowledge_delivery": reference["delivery"],
     }
     try:
         control = settings.get("strategy_control", "configured")
@@ -301,6 +307,7 @@ async def run_bo_decision(
                 else:
                     if not hasattr(ctx, "complete"):
                         raise ValueError("registered bo_policy inference is unavailable")
+                    result["knowledge_delivery"] = mark_reference_delivered(ctx, reference)
                     response = await asyncio.wait_for(
                         ctx.complete("bo_policy", prompt, timeout_s=remaining), timeout=remaining,
                     )
@@ -314,6 +321,7 @@ async def run_bo_decision(
                 if virtual_test:
                     request = _parse_request(response_entry["response"], evidence, available_tools)
                 response_entry["request"] = deepcopy(request)
+                result['knowledge_delivery'] = record_reference_use(ctx, reference, request['reason'])
                 record_tool_artifact("decision_response", "bo.decision", response_entry)
                 tool = request["tool"]
                 arguments = request["arguments"]

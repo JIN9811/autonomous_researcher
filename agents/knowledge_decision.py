@@ -9,6 +9,7 @@ from time import monotonic
 from typing import Any
 
 from utils.agent_artifact_archive import record_tool_artifact
+from agents.knowledge_context import build_reference_context, mark_reference_delivered, record_reference_use
 
 _TOOLS = {
     "inspect_evidence": {},
@@ -114,6 +115,9 @@ async def run_knowledge_decision(state, ctx, *, store, evidence: list[dict], sco
     result = {"schema": "knowledge_decision.v1", "status": "failed", "llm_used": llm_used,
               "scope": scope, "trace": trace, "note_receipts": receipts, "selected_knowledge": [],
               "citations": [], "summary": "", "no_knowledge_reason": ""}
+    reference = build_reference_context(ctx, consumer="knowledge_agent", query=state.active_goal or "Knowledge contract",
+        run_id=state.run_id, loop_id=str(state.loop_count))
+    result["knowledge_delivery"] = reference["delivery"]
     corpora = settings.get("corpora", ["markdown", "project", "sources"])
     if not isinstance(corpora, list) or any(item not in {"markdown", "project", "sources"} for item in corpora):
         raise ValueError("Unsupported Knowledge corpus")
@@ -154,6 +158,7 @@ async def run_knowledge_decision(state, ctx, *, store, evidence: list[dict], sco
             "No equipment action, graph mutation, numeric objective change, or ontology rewrite is available.",
         ],
     }
+    intro["reference_only"] = reference["pack"]
 
     async def execute(tool, arguments):
         nonlocal inspected
@@ -262,6 +267,7 @@ async def run_knowledge_decision(state, ctx, *, store, evidence: list[dict], sco
                           "source_refs": available[key].get("source_refs", [available[key]["source_ref"]])} for key in source_ids]
             result.update(status="accepted", summary=summary, no_knowledge_reason=reason, citations=citations,
                           selected_knowledge=[deepcopy(read_records[key]) for key in source_ids if key in read_records])
+            result['knowledge_delivery'] = record_reference_use(ctx, reference, summary)
             return {"published": True, "citation_count": len(citations)}
         raise ValueError("Unsupported tool")
 
@@ -274,6 +280,7 @@ async def run_knowledge_decision(state, ctx, *, store, evidence: list[dict], sco
                     "instruction": ("Choose one of the available tools and include only its declared arguments."
                         if inspected else 'Call exactly {"tool":"inspect_evidence","arguments":{}}. No scope, query, corpus or other arguments are allowed for this tool.'),
                     "observations": _model_observations(trace)}, ensure_ascii=False, default=str)
+                result["knowledge_delivery"] = mark_reference_delivered(ctx, reference)
                 response = await asyncio.wait_for(ctx.complete("knowledge_query", prompt, timeout_s=float(timeout)), float(timeout) + 1)
                 result["model"] = str(getattr(response, "model", ""))
                 try:

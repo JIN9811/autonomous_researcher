@@ -8,6 +8,23 @@ let markdownGeneration = 0;
 let detailGeneration = 0;
 let intakeTimer = null;
 const intakeStorageKey = "knowledgeMarkdownIntakeJob";
+const scopedKnowledgeViews = {
+  wiki: AX4LABKnowledgeWorkspace.createBrowser(document.getElementById('knowledge-wiki-browser'), {kind:'wiki'}),
+  memory: AX4LABKnowledgeWorkspace.createBrowser(document.getElementById('knowledge-private-browser'), {kind:'memory'}),
+  delivery: AX4LABKnowledgeWorkspace.createBrowser(document.getElementById('knowledge-delivery-browser'), {kind:'delivery'}),
+};
+let workspaceScope = null;
+let workspaceResyncTimer = null;
+let workspaceNavigationGeneration = 0;
+
+async function refreshScopedKnowledge() {
+  const summary = await AX4LABKnowledgeWorkspace.request('/api/knowledge/workspace/summary');
+  if (workspaceScope !== null && workspaceScope !== summary.scope_ref) Object.values(scopedKnowledgeViews).forEach(view => view.clear());
+  workspaceScope = summary.scope_ref;
+  document.getElementById('knowledge-workspace-summary').textContent = `${summary.wiki?.count || 0} Wiki pages · ${summary.memory?.status === 'public_only' ? 'Wiki-only access; private identity not configured' : `${summary.memory?.count || 0} scoped memories · ${summary.delivery?.count || 0} delivery records`}`;
+  const active = document.querySelector('[data-knowledge-tab].active')?.dataset.knowledgeTab;
+  if (scopedKnowledgeViews[active]) await scopedKnowledgeViews[active].refresh();
+}
 
 function element(tag, text, className = "") {
   const node = document.createElement(tag);
@@ -455,21 +472,26 @@ async function startIntake() {
   }
 }
 
-function activateTab(name) {
+async function activateTab(name, preserveTarget=false, navigation=++workspaceNavigationGeneration) {
+  const hash=window.location.hash;
+  Object.values(scopedKnowledgeViews).forEach(view=>view.clear());
+  name = AX4LABKnowledgeWorkspace.normalizeTab(name);
   document.querySelectorAll("[data-knowledge-tab]").forEach((button) => {
     button.classList.toggle("active", button.dataset.knowledgeTab === name);
     button.setAttribute("aria-pressed", String(button.dataset.knowledgeTab === name));
   });
   document.querySelectorAll("[data-knowledge-panel]").forEach((panel) => panel.classList.toggle("active", panel.dataset.knowledgePanel === name));
   if (name === "memory") window.requestAnimationFrame(renderActivity);
-  if (window.location.hash !== `#${name}`) window.history.replaceState(null, "", `#${name}`);
+  if (scopedKnowledgeViews[name]) await scopedKnowledgeViews[name].refresh();
+  if(navigation!==workspaceNavigationGeneration || hash!==window.location.hash) return;
+  if (!preserveTarget && window.location.hash !== `#${name}`) window.history.replaceState(null, "", `#${name}`);
 }
 
 async function refreshWorkspace() {
   const button = document.getElementById("knowledge-refresh");
   button.disabled = true;
   setRuntimeMessage("Refreshing Knowledge Workspace…", "busy");
-  const results = await Promise.allSettled([refreshStatus(), refreshOntology(), refreshMemory(), refreshActivity(), refreshManualStatus()]);
+  const results = await Promise.allSettled([refreshStatus(), refreshOntology(), refreshMemory(), refreshActivity(), refreshManualStatus(), refreshScopedKnowledge()]);
   const failed = results.filter((result) => result.status === "rejected");
   await queryMarkdown();
   if (failed.length) setRuntimeMessage(`${failed.length} Knowledge sections could not be refreshed: ${failed.map((item) => item.reason.message).join("; ")}`, "error");
@@ -510,6 +532,20 @@ document.getElementById("knowledge-intake-refresh").addEventListener("click", ch
 window.addEventListener("resize", () => activityChart?.resize());
 window.addEventListener("pagehide", () => window.clearTimeout(intakeTimer));
 try { document.getElementById("knowledge-intake-job").value = window.sessionStorage.getItem(intakeStorageKey) || ""; } catch (_error) { /* Optional browser persistence. */ }
-const initialTab = ["markdown", "memory", "ontology", "manuals"].includes(window.location.hash.slice(1)) ? window.location.hash.slice(1) : "markdown";
-activateTab(initialTab);
-refreshWorkspace().catch((error) => setRuntimeMessage(`Workspace initialization failed: ${error.message}`, "error"));
+async function openWorkspaceLocation() {
+  const navigation=++workspaceNavigationGeneration;
+  const hash=window.location.hash, target=AX4LABKnowledgeWorkspace.parseTarget(hash);
+  await activateTab(target.tab,true,navigation);
+  if(navigation!==workspaceNavigationGeneration || hash!==window.location.hash) return;
+  await AX4LABKnowledgeWorkspace.openTarget(scopedKnowledgeViews,hash);
+}
+refreshWorkspace().then(openWorkspaceLocation).catch((error) => setRuntimeMessage(`Workspace initialization failed: ${error.message}`, "error"));
+window.addEventListener('hashchange',()=>openWorkspaceLocation().catch(()=>setRuntimeMessage('Knowledge target unavailable.','error')));
+async function resyncScopedKnowledge() {
+  try { if (!document.hidden) await refreshScopedKnowledge(); }
+  catch (error) { document.getElementById('knowledge-workspace-summary').textContent = 'Knowledge scope unavailable. Refresh to retry.'; if([401,403].includes(error.status)) Object.values(scopedKnowledgeViews).forEach(view => view.clear()); }
+  workspaceResyncTimer = window.setTimeout(resyncScopedKnowledge, 5000);
+}
+workspaceResyncTimer = window.setTimeout(resyncScopedKnowledge, 5000);
+window.addEventListener('ax4lab:knowledge-changed', () => { window.clearTimeout(workspaceResyncTimer); resyncScopedKnowledge(); });
+window.addEventListener('pagehide', () => { window.clearTimeout(workspaceResyncTimer); Object.values(scopedKnowledgeViews).forEach(view => view.clear()); });

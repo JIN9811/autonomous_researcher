@@ -48,6 +48,20 @@ supersedes: []
 
 ## Overview and Responsibilities
 
+### Grounded Questions and Memory
+
+The existing Chat question branch now uses a concise research-assistant persona
+and reference-only [AX4LAB Wiki context](../knowledge/wiki_memory.md).
+Current-state questions use existing owner readback rather than assumed device
+availability. Questions do not enter the Experimental Setup mutation or run-start
+path. Returned sources identify the evidence cited by the answer.
+
+Explicit memory requests produce a candidate; Chat confirmation calls the
+Knowledge memory service, not an execution tool. Private access requires trusted
+server identity and consent for every possible model destination. Without that
+integration, Chat remains public-Wiki-only. Earlier planning-provider verification
+does not establish verification of this new question/memory path.
+
 ### Summary, scope, and source of truth
 
 `OrchestratorAgent` coordinates accepted operator intent, bounded decisions,

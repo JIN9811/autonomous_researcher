@@ -20,6 +20,7 @@ Modification guide:
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
@@ -27,6 +28,7 @@ from utils.agent_artifact_archive import archive_agent_run
 from knowledge.failure_memory import FailureRecord
 from orchestrator.runtime_defaults import TEST_MODE_LOOP_CYCLES
 from orchestrator.state import OrchestratorState
+from agents.knowledge_context import build_reference_context, mark_reference_delivered, record_reference_use
 
 
 class GuardianAgent(BaseAgent):
@@ -78,7 +80,11 @@ class GuardianAgent(BaseAgent):
         graph_gate_pressure = self._resolve_graph_gate_pressure(state)
 
         timeout_s = 45.0 if state.mode.value == "test" else None
+        reference = build_reference_context(ctx, consumer="guardian_agent", query=state.active_goal or "Guardian policy evidence",
+            run_id=state.run_id, loop_id=str(state.loop_count))
+        delivery = reference["delivery"]
         try:
+            delivery = mark_reference_delivered(ctx, reference)
             reasoning = await ctx.complete(
                 "guardian_reasoning",
                 (
@@ -93,10 +99,12 @@ class GuardianAgent(BaseAgent):
                     f"health_validation={health_validation}\n"
                     f"graph_gate_pressure={graph_gate_pressure}\n"
                     f"consistency={consistency}\n"
+                    f"reference_only={json.dumps(reference['pack'], ensure_ascii=False)}\n"
                 ),
                 timeout_s=timeout_s,
             )
             policy_note = reasoning.text[:260]
+            delivery = record_reference_use(ctx, reference, policy_note)
         except Exception as exc:
             if state.mode.value == "test":
                 policy_note = f"Guardian degraded in test mode: {exc.__class__.__name__}"
@@ -191,6 +199,7 @@ class GuardianAgent(BaseAgent):
                     "health_validation": health_validation,
                     "graph_gate_pressure": graph_gate_pressure,
                     "consistency": consistency,
+                    "knowledge_delivery": delivery,
                 }
             },
             next_hint=decision,

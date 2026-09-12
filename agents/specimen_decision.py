@@ -9,6 +9,7 @@ from time import monotonic
 
 from orchestrator.state import Mode
 from utils.agent_artifact_archive import record_tool_artifact
+from agents.knowledge_context import append_reference_only, build_reference_context, mark_reference_delivered, record_reference_use
 
 
 def fabrication_evidence(spec, geometry, mesh, manufacturing, execution, printer_payload=None):
@@ -69,6 +70,10 @@ async def decide_specimen(state, ctx, specimen_id, evidence, execute):
         }
         context = {"specimen_id": specimen_id, "evidence": evidence,
                    "evidence_refs": sorted(evidence), "tools": schemas}
+        reference = build_reference_context(ctx, consumer="specimen_agent", query=state.active_goal or "Specimen fabrication contract",
+            run_id=state.run_id, loop_id=str(state.loop_count))
+        context = append_reference_only(context, reference)
+        decision["knowledge_delivery"] = reference["delivery"]
         instructions = (
             "You own fabrication suitability for this Design specification. Decide whether its checked "
             "geometry and manufacturing evidence support the requested fabrication intent, inspect evidence "
@@ -94,6 +99,7 @@ async def decide_specimen(state, ctx, specimen_id, evidence, execute):
                 raise TimeoutError("decision budget expired")
             prompt = instructions + json.dumps({"context": context, "observations": decision["trace"]},
                                               ensure_ascii=False, allow_nan=False)
+            decision["knowledge_delivery"] = mark_reference_delivered(ctx, reference)
             response = await asyncio.wait_for(ctx.complete("specimen_reasoning", prompt, timeout_s=remaining), remaining)
             if (getattr(response, "raw", None) or {}).get("mock"):
                 raise ValueError("mock response is not a real decision")
@@ -116,6 +122,7 @@ async def decide_specimen(state, ctx, specimen_id, evidence, execute):
                     any(not isinstance(r, str) or r not in evidence for r in refs)):
                 raise ValueError("invalid local tool or evidence")
             entry["request"] = req
+            decision['knowledge_delivery'] = record_reference_use(ctx, reference, reason)
             if tool == "inspect_fabrication_evidence":
                 ref = args["evidence_ref"]
                 if not isinstance(ref, str) or ref not in evidence:

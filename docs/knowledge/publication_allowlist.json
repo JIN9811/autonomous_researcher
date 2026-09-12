@@ -1,0 +1,7 @@
+{
+  "schema": "knowledge_publication.v1",
+  "approved_assets": {},
+  "approved_corpora": [
+    "docs/knowledge/wiki/"
+  ]
+}

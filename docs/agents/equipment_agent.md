@@ -47,6 +47,10 @@ supersedes: []
 
 ## Summary and Actual Role
 
+The existing LLM decision boundary receives a bounded, reference-only
+[AX4LAB Wiki pack](../knowledge/wiki_memory.md). This supplies platform context
+without changing this agent's tools, numerical authority or execution gates.
+
 `LabEquipmentAgent` owns the experiment stage for PC-controlled laboratory
 equipment. UTM is a registered Equipment Profile, not a hard-coded agent identity.
 For a configured stacked Skill Flow, an Equipment-owned LLM judges task fit and

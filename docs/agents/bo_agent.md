@@ -51,6 +51,10 @@ supersedes: []
 
 ## Overview and Responsibilities
 
+The existing LLM decision boundary receives a bounded, reference-only
+[AX4LAB Wiki pack](../knowledge/wiki_memory.md). This supplies platform context
+without changing this agent's tools, numerical authority or execution gates.
+
 BO turns accepted Analysis observations and compatible Knowledge evidence into
 a proposed next experiment. Its local High layer decides which permitted
 optimization action to request and whether the numerical result is suitable

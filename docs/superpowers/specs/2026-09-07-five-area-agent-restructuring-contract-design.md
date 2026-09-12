@@ -45,6 +45,16 @@ supersedes: []
 
 ## Problem
 
+### Shared Knowledge integration
+
+The implemented [Wiki and Memory contract](../../knowledge/wiki_memory.md)
+supplies bounded, reference-only knowledge at existing agent decision boundaries.
+Knowledge owns retained context and lifecycle; each agent retains its decisions,
+tools and execution authority. Retrieved, Delivered and Used are distinct
+evidence states. Trusted identity and model consent gate private memory; an
+unidentified caller remains Wiki-only. This integration adds no sixth control
+layer and does not make deterministic safety checks depend on retrieval.
+
 기존 코드에는 역할·입출력·툴·브릿지 경계가 있지만, 여러 LLM 호출은 실행 선택에
 영향을 주지 않는 설명 메모 생성에 머문다. 반대로 `agentic`, `reasoning`이라는
 화면 단계명만으로 실제 모델 판단·툴 실행이 존재한다고 해석할 위험이 있다.

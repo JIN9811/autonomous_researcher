@@ -200,6 +200,63 @@ def project_handoff_prompt(packet):
         public["trace"].append(item)
     public["presentation"] = {"schema": "handoff_prompt_projection.v1", "complete_current_contract_summary": True,
         "raw_records": "Retained server-side; hashes are references, not approvals. Owner admission remains authoritative."}
+    _fit_optional_reference_only(public)
     if len(json.dumps(public, ensure_ascii=False).encode("utf-8")) > MAX_PROMPT_BYTES:
         raise ValueError("Handoff current-contract prompt exceeds presentation budget; owner review required")
     return public
+
+
+def _fit_optional_reference_only(public):
+    """Use only spare handoff-prompt capacity for non-authoritative Wiki text.
+
+    The model's owner contract is assembled before this runs and remains the
+    hard presentation boundary.  A reference pack that cannot fit is made
+    explicit rather than silently omitted; callers use that marker to avoid a
+    false delivery receipt.
+    """
+    context = public.get("context")
+    if not isinstance(context, dict):
+        return
+    reference_only = context.pop("reference_only", None)
+    if not isinstance(reference_only, dict):
+        return
+    items = reference_only.get("items")
+    if not isinstance(items, list):
+        items = []
+
+    def fits(candidate):
+        context["reference_only"] = candidate
+        within_budget = len(json.dumps(public, ensure_ascii=False).encode("utf-8")) <= MAX_PROMPT_BYTES
+        context.pop("reference_only", None)
+        return within_budget
+
+    # Preserve ordinary no-match/unavailable envelopes when they fit: they do
+    # not contain optional source text and have no delivery to suppress.
+    if not items and fits(reference_only):
+        context["reference_only"] = reference_only
+        return
+
+    excluded = {key: deepcopy(value) for key, value in reference_only.items()
+                if key not in {"items", "next_cursor"}}
+    excluded["items"] = []
+    excluded["next_cursor"] = ""
+    excluded["presentation"] = {"status": "excluded", "reason": "presentation_budget_exhausted"}
+    if not fits(excluded):
+        # The current owner contract itself is too large.  Leave no optional
+        # context so the unchanged hard gate below can fail closed.
+        return
+
+    included = {key: deepcopy(value) for key, value in reference_only.items() if key != "items"}
+    selected = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        candidate = {**included, "items": [*selected, deepcopy(item)],
+                     "presentation": {"status": "included"}}
+        if fits(candidate):
+            selected.append(deepcopy(item))
+    if selected:
+        context["reference_only"] = {**included, "items": selected,
+                                      "presentation": {"status": "included"}}
+    else:
+        context["reference_only"] = excluded

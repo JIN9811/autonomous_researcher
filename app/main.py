@@ -19522,3 +19522,25 @@ def _source_ingestion_service():
 
 retire_manual_routes(app)
 install_source_routes(app, service_factory=_source_ingestion_service)
+
+# Workspace v2 is deliberately public-Wiki-only until the hosting deployment
+# injects a verified principal resolver.  Do not infer identity from a request
+# address, header, URL, or request body.
+from knowledge.context_service import KnowledgeContextService
+from knowledge.workspace_api import install_workspace_routes, trusted_local_profile_resolver
+
+_KNOWLEDGE_CONTEXT_SERVICE: KnowledgeContextService | None = None
+
+
+def _knowledge_context_service() -> KnowledgeContextService:
+    global _KNOWLEDGE_CONTEXT_SERVICE
+    shared = getattr(controller._deps.agent_context, "knowledge_service", None)
+    if isinstance(shared, KnowledgeContextService):
+        return shared
+    if _KNOWLEDGE_CONTEXT_SERVICE is None:
+        _KNOWLEDGE_CONTEXT_SERVICE = KnowledgeContextService(resolve_path("."), data_root=KNOWLEDGE_MEMORY_ROOT)
+    return _KNOWLEDGE_CONTEXT_SERVICE
+
+
+install_workspace_routes(app, service_factory=_knowledge_context_service,
+                         principal_resolver=trusted_local_profile_resolver())

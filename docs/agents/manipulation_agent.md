@@ -44,6 +44,10 @@ supersedes: []
 
 ## Summary
 
+The existing LLM decision boundary receives a bounded, reference-only
+[AX4LAB Wiki pack](../knowledge/wiki_memory.md). This supplies platform context
+without changing this agent's tools, numerical authority or execution gates.
+
 `ManipulationAgent` supervises existing LeRobot VLA policies, including SmolVLA,
 and fixed skills. The LLM judges whether the configured skill fits the delegated
 task and selects its bounded tool call. Existing code validates profile, policy,

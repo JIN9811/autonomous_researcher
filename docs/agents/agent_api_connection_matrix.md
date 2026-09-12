@@ -186,12 +186,23 @@ backend routing and shared leases apply; no model service is started here.
 
 ### Background and Source Interfaces
 
+All ten current agent owners receive bounded, reference-only Wiki context at
+their existing LLM decision entrypoints through `agents/knowledge_context.py`.
+This is not a new execution stage or tool permission. Retrieved, delivered and
+model-cited states are distinct; structured tool schemas retain their existing
+evidence allowlists. See [Wiki and Memory](../knowledge/wiki_memory.md).
+
 | Surface | Purpose | Effect |
 |---|---|---|
 | `GET /api/analysis/fem/jobs` | Filter background jobs by run/loop/specimen | Read-only; never starts or resumes a solve |
 | `POST /api/analysis/fem/jobs/{job_id}/cancel` | Cancel the addressed computation with run scope | Computation cancellation only |
 | `GET /api/cae/fields`, `/metadata`, `/section`, `/render` under that prefix | Read fields/frames and perform local section/render postprocessing | No solver invocation or device action |
 | `POST /api/knowledge/markdown/query`, `/read` | Search/read scoped execution knowledge | Read-only retrieval |
+| `GET /api/knowledge/workspace/summary` | Wiki, authorized memory and delivery revisions | Read-only; no scan or model call |
+| `POST /api/knowledge/wiki/query`, `/read` | Checked public platform reference | Read-only |
+| `POST /api/knowledge/memory/query`, `/read` | Authorized private records | Trusted server principal required |
+| `POST /api/knowledge/memory/commands` | Propose, confirm, revise, dismiss, expire or forget | Private-memory state only; no execution approval |
+| `POST /api/knowledge/delivery/query`, `/read` | Scoped delivery receipts | Read-only; retrieval is not proof of model use |
 | `POST /api/knowledge/markdown/intake` | Import terminal archives through the preservation hook | Local deterministic intake; no agent replay |
 | `GET /api/knowledge/sources/status` | Inspect the source-intake worker/catalog | Read-only |
 | `POST /api/knowledge/sources/settings`, `/scan`, `/retry` | Enable/schedule or retry source intake | Local state; may schedule background LLM curation |

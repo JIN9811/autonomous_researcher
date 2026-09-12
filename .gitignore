@@ -43,6 +43,13 @@ artifacts/*
 outputs/*
 !outputs/README.md
 !outputs/.gitkeep
+output/*
+!output/README.md
+!output/.gitkeep
+# Raw Knowledge source inputs are private; only the inbox guide is public.
+docs/knowledge/manuals/sources/*
+!docs/knowledge/manuals/sources/README.md
+!docs/knowledge/manuals/sources/.gitkeep
 user_files/*
 !user_files/README.md
 !user_files/.gitkeep

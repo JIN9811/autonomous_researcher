@@ -358,6 +358,106 @@ let planningHistoryHasMore = false;
 let planningHistoryTotal = 0;
 let planningHistoryLoading = false;
 let planningHistorySessionId = "";
+let liveKnowledgeSummary = null;
+let liveKnowledgeScope = '';
+let liveKnowledgeSession = '';
+let liveKnowledgeTimer = null;
+let liveKnowledgePollingStopped = false;
+let liveKnowledgeSelectedResponseId = '';
+const liveKnowledgeReceipts = new Map();
+const liveKnowledgeCommands = new Set();
+
+function liveKnowledgeMessages() {
+  return Array.isArray(liveLastSession?.messages) ? liveLastSession.messages : [];
+}
+
+function liveKnowledgeActiveConsumers() {
+  if (!liveAgentManifestStatus.ok) return [];
+  return LIVE_AGENTS.filter(agent => agent && agent.id !== 'objective' && agent.enabled !== false && agent.kind !== 'ui_only');
+}
+
+function liveKnowledgeResponseId(message) {
+  return String(message?.message_id || message?.decision_id || message?.request_id || '');
+}
+
+function liveSelectedOrcResponses() {
+  return selectedMessages().filter(message=>{
+    const role=String(message?.role || '').toLowerCase();
+    if(['operator','user','system'].includes(role)) return false;
+    const explicitOrcRole=['orchestrator','orchestrator_ai'].includes(role);
+    const responseShaped=String(message?.agent_id || '').toLowerCase().replace(/_agent$/, '')==='orchestrator'
+      && Boolean(message?.ok || message?.knowledge_delivery || message?.decision_id);
+    return (explicitOrcRole || responseShaped) && liveKnowledgeResponseId(message);
+  });
+}
+
+function liveKnowledgeProvenance() {
+  const state=(liveLastSession && liveLastSession.state) || (liveLastSnapshot && liveLastSnapshot.state) || {};
+  const metadata=state.run_metadata && typeof state.run_metadata==='object' ? state.run_metadata : {};
+  return {run_id:String(state.run_id || ''),loop_id:String(state.loop_count ?? ''),attempt_id:String(state.attempt_id || metadata.attempt_id || metadata.current_attempt_id || '')};
+}
+
+function liveKnowledgeDeliveryReports() {
+  const state=(liveLastSession && liveLastSession.state) || (liveLastSnapshot && liveLastSnapshot.state) || {};
+  const metadata=state.run_metadata && typeof state.run_metadata==='object' ? state.run_metadata : {};
+  return liveKnowledgeActiveConsumers().map(agent=>{
+    const id=String(agent.id || '');
+    const keys=[`${id}_agent_payload`,`latest_${id}_agent_report`,`${id}_agent_report`];
+    if(id==='bo') keys.push('bo_agent');
+    if(id==='orchestrator') keys.push('latest_orchestrator_decision','orchestrator_decision_register');
+    const sources=keys.map(key=>metadata[key]).filter(value=>value && typeof value==='object');
+    const last=metadata.last_stage_payload;
+    if(last && typeof last==='object' && agentIdFromStage(last.stage || '')===id) sources.push(last);
+    const runtime=state.agent_status && typeof state.agent_status==='object' ? state.agent_status[`${id}_agent`] : null;
+    const runtimeState=String(runtime?.state || runtime?.status || '').toLowerCase();
+    const availability=sources.length ? 'available' : ['idle','not_started','not-started'].includes(runtimeState) ? 'not_requested' : 'unavailable';
+    return {agent_id:id,run_id:String(state.run_id || ''),availability,sections:{current_agent_reports:sources}};
+  });
+}
+
+function renderOrcKnowledgeEvidence() {
+  const responses=liveSelectedOrcResponses();
+  if (!responses.some(message=>liveKnowledgeResponseId(message)===liveKnowledgeSelectedResponseId)) liveKnowledgeSelectedResponseId=responses.length===1 ? liveKnowledgeResponseId(responses[0]) : '';
+  const model=window.AX4LABKnowledgeLive?.selectedResponseEvidence(responses,liveKnowledgeSelectedResponseId) || {response_id:'',request:'No retrieval yet',scope_ref:'public',revision:'',retrieved_at:'',source_count:0,memory_activity:'None',status:'No retrieval yet'};
+  const provenance=liveKnowledgeProvenance();
+  const selector=responses.length ? `<label>Response <select data-live-knowledge-response>${liveKnowledgeSelectedResponseId?'':'<option value="" selected>Select response…</option>'}${responses.map(message=>{const id=liveKnowledgeResponseId(message); return `<option value="${escapeHtml(id)}"${id===liveKnowledgeSelectedResponseId?' selected':''}>${escapeHtml(id)}${message.timestamp?` · ${escapeHtml(formatTime(message.timestamp))}`:''}</option>`;}).join('')}</select></label>` : '<p>No selectable ORC response in the current report context.</p>';
+  return `${selector}<p><strong>${escapeHtml(model.status)}</strong></p><p>Request: ${escapeHtml(model.request)} · Response: ${escapeHtml(model.response_id || 'No response selected')}</p><p>Scope: ${escapeHtml(model.scope_ref)} · Evidence: ${Number(model.source_count || 0)} · Revision: ${escapeHtml(model.revision || '—')}</p><p>Run: ${escapeHtml(provenance.run_id || '—')} · Loop: ${escapeHtml(provenance.loop_id || '—')} · Attempt: ${escapeHtml(provenance.attempt_id || '—')}</p><p>Retrieved: ${escapeHtml(model.retrieved_at || '—')} · ${escapeHtml(model.memory_activity)}</p><a href="/knowledge#memory" target="_blank" rel="noopener">Manage Memory</a>`;
+}
+
+function renderLiveDeliverySummary() {
+  const model=window.AX4LABKnowledgeLive?.deliverySummary(liveKnowledgeDeliveryReports(),liveKnowledgeActiveConsumers(),liveSelectedAgent,liveKnowledgeProvenance()) || {rows:[],selected:{label:'Selected agent',status:'Unknown',citation_ids:[]}};
+  if (!model.rows.length) return '<p>Unavailable: active graph consumers are not loaded.</p><a href="/knowledge#delivery" target="_blank" rel="noopener">Inspect agent delivery</a>';
+  const rows=model.rows.map(row=>`<li>${escapeHtml(row.label)}: <strong>${escapeHtml(row.status)}</strong>${row.decision_at?` · ${escapeHtml(row.decision_at)}`:''}${row.run_id?` · run ${escapeHtml(row.run_id)}`:''}${row.loop_id?` · loop ${escapeHtml(row.loop_id)}`:''}${row.attempt_id?` · attempt ${escapeHtml(row.attempt_id)}`:''}</li>`).join('');
+  const selected=model.selected;
+  const href=selected.receipt_id?window.AX4LABKnowledgeLive.workspaceHref(selected.receipt_id):'/knowledge#delivery';
+  return `<p>Selected: <strong>${escapeHtml(selected.label)}</strong> · ${escapeHtml(selected.status)}</p><p>Evidence: ${Number(selected.citation_ids?.length || 0)} retrieved · ${Number(selected.used_citation_ids?.length || 0)} used${selected.receipt_id?` · receipt ${escapeHtml(selected.receipt_id)}`:''}${selected.decision_id?` · decision ${escapeHtml(selected.decision_id)}`:''}</p><ul>${rows}</ul><a href="${escapeHtml(href)}" target="_blank" rel="noopener">Inspect agent delivery</a>`;
+}
+
+function renderLiveKnowledgeSummary(kind) {
+  if (kind==='orc') return renderOrcKnowledgeEvidence();
+  if (kind==='delivery') return renderLiveDeliverySummary();
+  const summary=liveKnowledgeSummary;
+  if (!summary) return '<p>Knowledge scope unavailable or loading.</p>';
+  const publicOnly=summary.scope_ref==='public';
+  if (kind==='wiki') return `<p><strong>${Number(summary.wiki?.count || 0)}</strong> reviewed pages</p><p>Default agent corpus · freshness checked</p><a href="/knowledge#wiki" target="_blank" rel="noopener">Browse AX4LAB Wiki</a>`;
+  if (kind==='memory') return `<p>${publicOnly?'Wiki-only access; private identity not configured':`${Number(summary.memory?.count || 0)} scoped memory records`}</p><p>Candidate confirmation is separate from run approval.</p><a href="/knowledge#memory" target="_blank" rel="noopener">Manage memory</a>`;
+  return '<p>Knowledge scope unavailable or loading.</p>';
+}
+
+async function refreshLiveKnowledgeSummary() {
+  if (liveKnowledgePollingStopped) return;
+  try {
+    if (!document.hidden) {
+      const session=planningSessionId;
+      const summary=await AX4LABKnowledgeWorkspace.request('/api/knowledge/workspace/summary');
+      if(session!==planningSessionId) return;
+      if(liveKnowledgeScope!==summary.scope_ref || liveKnowledgeSession!==session) {liveKnowledgeReceipts.clear();liveKnowledgeSelectedResponseId='';}
+      liveKnowledgeScope=summary.scope_ref; liveKnowledgeSession=session; liveKnowledgeSummary=summary;
+      document.querySelectorAll('[data-live-knowledge-body]').forEach(el=>{el.innerHTML=renderLiveKnowledgeSummary(el.dataset.liveKnowledgeBody);});
+    }
+  } catch (_error) {liveKnowledgeSummary=null;liveKnowledgeReceipts.clear();}
+  finally {if (!liveKnowledgePollingStopped) liveKnowledgeTimer=window.setTimeout(refreshLiveKnowledgeSummary,5000);}
+}
 
 function liveSessionStorage() {
   try {
@@ -921,8 +1021,13 @@ function persistLivePlanningCache(session = liveLastSession) {
   const sessionId = (session && session.planning_session_id) || planningSessionId || "";
   const key = planningSessionCacheKey(sessionId);
   if (!key) return;
+  if (!window.AX4LABKnowledgeLive?.canPersist(session, liveKnowledgeSummary)) {
+    try { storage.removeItem(key); } catch (_error) { /* Server transcript remains authoritative. */ }
+    return;
+  }
   const cachedSession = compactPlanningSessionForStorage(session);
   const payload = {
+    knowledge_cache_version: 1,
     savedAt: new Date().toISOString(),
     planningSessionId: sessionId,
     session: cachedSession,
@@ -976,6 +1081,7 @@ function restoreCachedPlanningState() {
     }
     const payload = JSON.parse(raw);
     if (!payload || typeof payload !== "object" || !payload.session) return false;
+    if (payload.knowledge_cache_version !== 1 || !window.AX4LABKnowledgeLive?.canPersist(payload.session, liveKnowledgeSummary)) return false;
     liveBrowserCacheRestoredRunId = String(
       (payload.session && payload.session.state && payload.session.state.run_id)
       || (payload.snapshot && payload.snapshot.state && payload.snapshot.state.run_id)
@@ -2077,6 +2183,7 @@ function renderPlanningChatMessageDetail(msg, messageIndex) {
       <small>${escapeHtml(formatTime(msg.timestamp))} / ${escapeHtml(roleLabel(role))}${escapeHtml(model)}</small>
       ${renderReasoningBlock(msg)}
       ${content ? `<div class="message-content">${content}</div>` : ""}
+      ${window.AX4LABKnowledgeLive?.messageHTML(msg, liveKnowledgeReceipts.get(msg.memory_receipt?.record_id)) || ''}
       ${renderChatReportHint(msg)}
       ${renderFemContourCard(msg)}
       ${renderBoResultCard(msg, `chat-${messageIndex}`)}
@@ -2248,9 +2355,11 @@ function bindPlanningChatGroupToggles() {
       event.preventDefault();
       const key = button.dataset.chatGroupKey || "";
       if (!key || button.disabled) return;
-      // Accordion behavior: opening one chat/loop bubble closes the others.
-      planningExpandedChatGroups.clear();
+      // Keep up to three bubbles in opening order, including loop summaries.
       planningExpandedChatGroups.add(key);
+      while (planningExpandedChatGroups.size > 3) {
+        planningExpandedChatGroups.delete(planningExpandedChatGroups.values().next().value);
+      }
       renderPlanningMessages(planningMessagesCache, { scrollToBottom: false });
       persistLiveUiState();
       persistLivePlanningCache(liveLastSession);
@@ -3169,6 +3278,11 @@ function updatePlanningDisplayedMessages(messages, options = {}) {
   const canonical = limitPlanningMessageCache(Array.isArray(messages) ? messages : []);
   const canonicalItems = buildPlanningChatItems(canonical);
   const canonicalItemKeys = new Set(canonicalItems.map(planningChatItemRevealKey));
+  // Compression replaces detailed group keys with a closed loop-summary key.
+  // Prune before the immediate-return path too; never reclose a reopened summary.
+  for (const key of Array.from(planningExpandedChatGroups)) {
+    if (!canonicalItemKeys.has(`group:${key}`)) planningExpandedChatGroups.delete(key);
+  }
   const initialTranscriptHydration = planningDisplayInitialized
     && canonicalItemKeys.size > 0
     && planningDisplayedChatItemKeys.size === 0;
@@ -3199,9 +3313,6 @@ function updatePlanningDisplayedMessages(messages, options = {}) {
     if (!canonicalItemKeys.has(key)) planningDisplayedChatItemKeys.delete(key);
   }
   planningMessageRevealQueue = planningMessageRevealQueue.filter((entry) => canonicalItemKeys.has(entry.key));
-  for (const key of Array.from(planningExpandedChatGroups)) {
-    if (!canonicalItemKeys.has(key)) planningExpandedChatGroups.delete(key);
-  }
 
   // Refresh already visible bubbles from the newest canonical transcript. This lets
   // an active agent append step details inside the same bubble without creating a backlog.
@@ -11569,6 +11680,7 @@ function renderOrchestratorDashboardCards(report, status, agentLabel, profile) {
   const ctx = orchestratorContext(report, status);
   const model = buildOrcBriefingModel(report, status, ctx);
   return `
+    ${renderDashboardCard("Knowledge & Memory", `<div data-live-knowledge-body="orc">${renderLiveKnowledgeSummary('orc')}</div>`, {span:12,tone:"knowledge",eyebrow:"current response evidence"})}
     ${renderDashboardCard("Mission Contract", renderOrcReferenceMissionContract(model), { span: 4, tone: model.verdict.tone, eyebrow: "orchestrator contract", className: "ar-orc-reference-card ar-orc-mission-contract-card" })}
     ${renderDashboardCard("Decision Register (Today)", renderOrcReferenceDecisionRegister(report, model), { span: 8, tone: ctx.missingCount ? "warning" : "orchestrator", eyebrow: "decisions + input impact", className: "ar-orc-reference-card ar-orc-decision-register-card" })}
     ${renderDashboardCard("Orchestration Plan / Handoff Route", renderOrcReferenceRoute(model), { span: 7, tone: "route", eyebrow: "execution graph", className: "ar-orc-reference-card ar-orc-route-card" })}
@@ -16750,7 +16862,10 @@ function renderKnowledgeDashboardCards(report, status, agentLabel, profile) {
   const packItems = packs.map((item) => `${item.target_type || "target"}:${item.target_id || "unknown"} / ${item.status || "proposed"} / ${item.summary || ""}`);
   return `
     ${renderKnowledgeActivityCard()}
-    ${renderDashboardCard("Memory Ledger", renderKnowledgeMemoryBoard(knowledgeReport, evolution), { span: 8, tone: "knowledge", eyebrow: "memory" })}
+    ${renderDashboardCard("AX4LAB Wiki", `<div data-live-knowledge-body="wiki">${renderLiveKnowledgeSummary('wiki')}</div>`, {span:4,tone:"knowledge",eyebrow:"shared platform knowledge"})}
+    ${renderDashboardCard("Memory", `<div data-live-knowledge-body="memory">${renderLiveKnowledgeSummary('memory')}</div><details><summary>Operational ledger</summary>${renderKnowledgeMemoryBoard(knowledgeReport,evolution)}</details>`, {span:4,tone:"knowledge",eyebrow:"retained context"})}
+    ${renderDashboardCard("Agent Delivery", `<div data-live-knowledge-body="delivery">${renderLiveKnowledgeSummary('delivery')}</div>`, {span:4,tone:"knowledge",eyebrow:"retrieved / delivered / cited"})}
+    <details style="grid-column:1/-1"><summary>Operational evidence, patterns and Evolution</summary><div class="agent-dashboard-grid">
     ${renderDashboardCard("Evidence Quality", renderDashboardRows([
       ["artifact_links", evidenceQuality.artifact_link_coverage ?? "-"],
       ["agent_reports", evidenceQuality.agent_report_coverage ?? "-"],
@@ -16772,6 +16887,7 @@ function renderKnowledgeDashboardCards(report, status, agentLabel, profile) {
       ["activation_gate", evolution.activation_gate || "Self-Evolution / Guardian / operator"],
     ])}${dashboardList(packItems, "No evolution evidence packs recorded.", 4)}`, { span: 6, tone: "knowledge", eyebrow: "self-evolution prep" })}
     ${renderDashboardCard("Retrieval / Provenance", dashboardObjectList(context.retrieval || payload.retrieval || {}, "No retrieval context recorded.", 4), { span: 6, tone: "knowledge", eyebrow: "memory context" })}
+    </div></details>
   `;
 }
 
@@ -21125,4 +21241,38 @@ async function initializeLiveGuiRuntime() {
     .catch(() => setChatStatus("ERROR", "warning"));
 }
 
+document.addEventListener('click', async event => {
+  const button=event.target.closest?.('[data-knowledge-memory-target]');
+  if(!button) return;
+  const target=button.dataset.knowledgeMemoryTarget;
+  if(liveKnowledgeCommands.has(target) || liveKnowledgeReceipts.has(target)) return;
+  const command=AX4LABKnowledgeLive.memoryCommand(liveLastSession?.messages || [],target,button.dataset.knowledgeMemoryAction,AX4LABKnowledgeLive.requestId());
+  if(!command) {setChatStatus('Memory candidate changed; review it in Knowledge Workspace.','warning');return;}
+  const session=planningSessionId;
+  liveKnowledgeCommands.add(target);button.disabled=true;
+  try {
+    const receipt=await AX4LABKnowledgeWorkspace.request('/api/knowledge/memory/commands',command);
+    if(session!==planningSessionId) return;
+    const strip=button.closest('.knowledge-chat-memory');
+    const presentation=AX4LABKnowledgeLive.memoryReceiptPresentation(receipt);
+    if(presentation.terminal) {
+      liveKnowledgeReceipts.set(target,receipt);
+      if(strip) strip.textContent=presentation.label;
+    } else {
+      setChatStatus(presentation.label,'warning');
+    }
+    window.dispatchEvent(new Event('ax4lab:knowledge-changed'));
+  } catch (_error) {setChatStatus('Memory was not changed. Refresh Knowledge Workspace and review access/revision.','warning');}
+  finally {liveKnowledgeCommands.delete(target);button.disabled=false;}
+});
+document.addEventListener('change',event=>{
+  const selector=event.target.closest?.('[data-live-knowledge-response]');
+  if(!selector) return;
+  liveKnowledgeSelectedResponseId=String(selector.value || '');
+  if(liveLastSession) renderLiveRuntime(liveLastSession);
+});
+window.addEventListener('ax4lab:knowledge-changed',()=>{if(!liveKnowledgePollingStopped){window.clearTimeout(liveKnowledgeTimer);refreshLiveKnowledgeSummary();}});
+window.addEventListener('pagehide',()=>{liveKnowledgePollingStopped=true;window.clearTimeout(liveKnowledgeTimer);liveKnowledgeReceipts.clear();liveKnowledgeSummary=null;});
+window.addEventListener('pageshow',()=>{if(liveKnowledgePollingStopped){liveKnowledgePollingStopped=false;refreshLiveKnowledgeSummary();}});
 initializeLiveGuiRuntime().catch(() => setChatStatus("ERROR", "warning"));
+refreshLiveKnowledgeSummary();

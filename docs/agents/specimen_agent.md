@@ -47,6 +47,10 @@ supersedes: []
 
 ## Overview and Responsibilities
 
+The existing LLM decision boundary receives a bounded, reference-only
+[AX4LAB Wiki pack](../knowledge/wiki_memory.md). This supplies platform context
+without changing this agent's tools, numerical authority or execution gates.
+
 `SpecimenMakingAgent` turns an approved experiment specification into a
 manufacturing digital thread: geometry, mesh and manufacturability evidence,
 process/slice artifacts, printer execution state, fabrication monitoring, and

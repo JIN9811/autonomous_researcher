@@ -9,6 +9,7 @@ import math
 
 from orchestrator.state import Mode
 from utils.agent_artifact_archive import record_tool_artifact
+from agents.knowledge_context import append_reference_only, build_reference_context, mark_reference_delivered, record_reference_use
 
 
 def _scope(state):
@@ -94,6 +95,10 @@ async def _decide(state, ctx, tool, payload, *, checkpoint, capture=None, eligib
             "loop_id": state.loop_count, "task": {**_evidence(payload), **_evidence(task_context or {})}, "vision": _evidence(capture or {}),
             "evidence_refs": ["task:configured"] + (["execution:ended", "vision:verified"] if capture is not None else []),
             "tools": {name: {"proposal_id": key} for name in (tool, "return_to_owner")}}
+        reference = build_reference_context(ctx, consumer="manipulation_agent", query=state.active_goal or "Manipulation task handoff contract",
+            run_id=state.run_id, loop_id=str(state.loop_count))
+        context = append_reference_only(context, reference)
+        result["knowledge_delivery"] = reference["delivery"]
         result["evidence"] = context
         if explicit_test:
             result.update(status="deterministic_test", reason="Explicit non-LLM TEST; not physical validation.",
@@ -128,6 +133,7 @@ async def _decide(state, ctx, tool, payload, *, checkpoint, capture=None, eligib
         owned = ctx
         if callable(getattr(ctx, "for_agent_decision", None)):
             owned = ctx.for_agent_decision("manipulation")
+        result["knowledge_delivery"] = mark_reference_delivered(ctx, reference)
         response = await asyncio.wait_for(owned.complete("manipulation_plan", prompt, timeout_s=timeout), timeout)
         if (getattr(response, "raw", None) or {}).get("mock"):
             raise ValueError("mock backend cannot establish model judgment")
@@ -152,6 +158,7 @@ async def _decide(state, ctx, tool, payload, *, checkpoint, capture=None, eligib
         if _stopped(state) or _scope(state) != snapshot or payload != frozen or capture != frozen_capture:
             raise ValueError("decision scope or evidence changed")
         result["status"] = "accepted" if request["tool"] == tool else "review_required"
+        result['knowledge_delivery'] = record_reference_use(ctx, reference, request['reason'])
     except Exception as exc:
         result.update(failure_code="MANIPULATION_REVIEW_REQUIRED", error=f"{type(exc).__name__}: {exc}")
     finally:

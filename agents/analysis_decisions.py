@@ -6,6 +6,9 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
+from agents.knowledge_context import append_reference_only, build_reference_context, mark_reference_delivered, record_reference_use
+from backends.llm_backend import LLMImageInput, MAX_LLM_IMAGE_BYTES
+
 
 def compact_evidence(value, key=''):
     """Keep decision facts; raw engineering arrays remain in source artifacts."""
@@ -68,7 +71,6 @@ def fem_decision_evidence(value, key=''):
 def _artifact_images(ctx, paths):
     """Optional visual evidence, never arbitrary files named by model output."""
     from PIL import Image
-    from backends.llm_backend import LLMImageInput, MAX_LLM_IMAGE_BYTES
     roots = [Path(__file__).resolve().parents[1] / 'artifacts']
     if getattr(ctx, 'artifact_run_root', None):
         roots.append(Path(ctx.artifact_run_root).resolve())
@@ -110,6 +112,8 @@ async def decide(ctx, phase: str, evidence: dict, options: dict[str, str | None]
         'evidence': fem_decision_evidence(evidence) if phase.startswith('fem_') else evidence,
         'response_options': [{'option_id': key, 'tool': value} for key, value in options.items()],
     }
+    reference = build_reference_context(ctx, consumer="analysis_agent", query=str(evidence.get("knowledge_query") or f"Analysis {phase}"))
+    prompt = append_reference_only(prompt, reference)
     if phase.startswith('fem_'):
         prompt['assessment_protocol'] = (
             'First identify the requested task: numerical execution, calibration, or independent validation. '
@@ -146,6 +150,7 @@ async def decide(ctx, phase: str, evidence: dict, options: dict[str, str | None]
             images = _artifact_images(ctx, evidence.get('image_paths', []))
             if images:
                 kwargs['images'] = images
+        reference['delivery'] = mark_reference_delivered(ctx, reference)
         reply = await ctx.complete('analysis_reasoning', json.dumps(prompt, ensure_ascii=True, allow_nan=False), **kwargs)
         text = reply.text.strip()
         if text.startswith('```') and text.endswith('```'):
@@ -156,4 +161,5 @@ async def decide(ctx, phase: str, evidence: dict, options: dict[str, str | None]
     if not isinstance(raw['reason'], str) or not raw['reason'].strip() or len(raw['reason']) > 2000:
         raise ValueError('ANALYSIS_DECISION_REASON_REQUIRED')
     return {'schema': 'analysis_decision.v1', 'phase': phase, **raw,
+            'knowledge_delivery': record_reference_use(ctx, reference, raw['reason']),
             'tool': options[raw['option_id']], 'source': 'virtual_test' if virtual else 'llm'}

@@ -44,6 +44,10 @@ supersedes: []
 
 ## Overview and Responsibilities
 
+The existing LLM decision boundary receives a bounded, reference-only
+[AX4LAB Wiki pack](../knowledge/wiki_memory.md). This supplies platform context
+without changing this agent's tools, numerical authority or execution gates.
+
 Design converts a requested experiment into a checked specimen specification.
 Existing code prepares candidates; a role-specific LLM layer decides acceptance,
 additional inspection, or return to the owner.

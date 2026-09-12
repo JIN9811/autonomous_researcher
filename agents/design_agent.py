@@ -1048,8 +1048,16 @@ class DesignAgent(BaseAgent):
         best = prior_summary.get("best") if isinstance(prior_summary.get("best"), dict) else {}
         entries: list[str] = []
         if knowledge:
-            for key in ("summary", "memory_update", "recommendation", "evidence"):
-                value = knowledge.get(key)
+            # Knowledge's current result fields and the historical handoff
+            # names meet here; downstream Design context has one stable shape.
+            aliases = {
+                "summary": ("summary", "memory_summary"),
+                "memory_update": ("memory_update", "selected_knowledge"),
+                "recommendation": ("recommendation",),
+                "evidence": ("evidence", "citations"),
+            }
+            for key, sources in aliases.items():
+                value = next((knowledge.get(source) for source in sources if knowledge.get(source)), None)
                 if value:
                     entries.append(f"{key}: {str(value)[:220]}")
         if best:

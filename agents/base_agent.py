@@ -76,6 +76,10 @@ class AgentContext:
     runtime_profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
     llm_lease: LLMLeaseCoordinator | None = None
     artifact_run_root: str | None = None
+    # Server-owned read-only knowledge dependency.  A trusted deployment may
+    # inject one immutable principal per request/decision; the default is None.
+    knowledge_service: Any | None = None
+    knowledge_principal: Any | None = None
 
     def set_active_backend(self, backend_name: str) -> dict[str, Any]:
         """Switch the shared inference backend for all agents."""

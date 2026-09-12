@@ -4,6 +4,7 @@ from copy import deepcopy
 import json
 import math
 from uuid import uuid4
+from agents.knowledge_context import build_reference_context, mark_reference_delivered, mark_reference_excluded, record_reference_use
 
 
 TOOL_ARGUMENTS = {
@@ -118,6 +119,11 @@ async def decide_orchestration(state, ctx, *, context: dict, handlers: dict) -> 
         return result
     public_context = {key: deepcopy(context[key]) for key in (
         'handoff_candidates', 'owners', 'capabilities', 'setup_blocks', 'required_evidence', 'request') if key in context}
+    reference = build_reference_context(ctx, consumer="orchestrator_agent",
+        query=str(context.get("request", {}).get("message") or getattr(state, "active_goal", "") or "Orchestrator contract"),
+        run_id=state.run_id, loop_id=str(state.loop_count))
+    public_context["reference_only"] = reference["pack"]
+    result["knowledge_delivery"] = reference["delivery"]
     for _ in range(max_steps):
         try:
             prompt_packet = {
@@ -132,6 +138,20 @@ async def decide_orchestration(state, ctx, *, context: dict, handlers: dict) -> 
             }
             if context.get('prompt_projection'):
                 prompt_packet = context['prompt_projection'](prompt_packet)
+            projected_reference = prompt_packet.get("context", {}).get("reference_only")
+            original_citations = {str(item.get("citation_id") or item.get("record_id") or "")
+                                  for item in reference["pack"].get("items", []) if isinstance(item, dict)}
+            presented_citations = [str(item.get("citation_id") or item.get("record_id") or "")
+                                   for item in projected_reference.get("items", []) if isinstance(item, dict)] if isinstance(projected_reference, dict) else []
+            excluded = bool(original_citations) and (not isinstance(projected_reference, dict)
+                        or projected_reference.get("presentation", {}).get("status") == "excluded"
+                        or not presented_citations)
+            if excluded:
+                result["knowledge_delivery"] = mark_reference_excluded(ctx, reference,
+                    reason="presentation_budget_exhausted")
+            else:
+                result['knowledge_delivery'] = mark_reference_delivered(ctx, reference,
+                    citation_ids=presented_citations if original_citations else None)
             response = await ctx.complete('orchestrator_plan', json.dumps(prompt_packet, ensure_ascii=False),
                 timeout_s=settings.get('timeout_s'))
             result['model'] = response.model
@@ -143,6 +163,7 @@ async def decide_orchestration(state, ctx, *, context: dict, handlers: dict) -> 
             result['reason'] = f'{type(exc).__name__}: {exc}'
             return result
         result.update(selected)
+        result['knowledge_delivery'] = record_reference_use(ctx, reference, selected['reason'])
         try:
             effect = await handlers[selected['tool']](deepcopy(selected['arguments']))
             if not isinstance(effect, dict):

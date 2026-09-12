@@ -179,6 +179,144 @@ def test_inspection_trace_never_reintroduces_raw_payload_and_oversized_condition
         project_handoff_prompt(raw)
 
 
+def test_optional_reference_pack_is_explicitly_excluded_when_current_contract_uses_budget():
+    """A Wiki addition cannot displace the complete existing owner contract."""
+    from orchestrator.handoff_projection import MAX_PROMPT_BYTES, project_handoff_prompt
+
+    raw = packet()
+    raw["context"]["reference_only"] = {
+        "authority": "reference_only", "status": "ok", "scope_ref": "public", "revision": "wiki-rev",
+        "items": [{"citation_id": "wiki:oversized", "title": "Optional Wiki", "content": "reference " * 4_000}],
+    }
+
+    public = project_handoff_prompt(raw)
+
+    reference = public["context"]["reference_only"]
+    assert reference["items"] == []
+    assert reference["presentation"] == {"status": "excluded", "reason": "presentation_budget_exhausted"}
+    assert public["evidence"]["boundary:result"]["required_admission"]["owner_admits_now"] is False
+    assert len(json.dumps(public, ensure_ascii=False).encode()) <= MAX_PROMPT_BYTES
+
+
+@pytest.mark.asyncio
+async def test_excluded_handoff_reference_is_not_marked_delivered(monkeypatch):
+    """The real ORC decision entrypoint must not advance a receipt for omitted text."""
+    import agents.orchestrator_decision as decision_module
+    from agents.orchestrator_decision import decide_orchestration
+    from orchestrator.handoff_projection import project_handoff_prompt
+
+    raw = packet()
+    scope = deepcopy(raw["scope"]["context"])
+    state = SimpleNamespace(run_id="r", loop_count=0, stage=SimpleNamespace(value="equipment"), active_goal="goal")
+    reference = {"pack": {"authority": "reference_only", "status": "ok", "scope_ref": "public", "revision": "wiki-rev",
+        "items": [{"citation_id": "wiki:oversized", "title": "Optional Wiki", "content": "reference " * 4_000}]},
+        "delivery": {"status": "retrieved", "stage": "retrieved", "citation_ids": ["wiki:oversized"]}}
+    prompts = []
+
+    monkeypatch.setattr(decision_module, "build_reference_context", lambda *args, **kwargs: deepcopy(reference))
+    monkeypatch.setattr(decision_module, "mark_reference_delivered",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("omitted reference cannot be delivered")))
+
+    async def complete(task, prompt, **kwargs):
+        prompts.append(json.loads(prompt))
+        return SimpleNamespace(model="controlled", text=json.dumps({"tool": "defer",
+            "arguments": {"condition": "owner review"}, "reason": "contract remains authoritative",
+            "evidence_refs": ["boundary:result"]}))
+
+    async def defer(args):
+        return {"status": "deferred", **args}
+
+    result = await decide_orchestration(state, SimpleNamespace(complete=complete), context={
+        "scope": deepcopy(scope), "current_scope": lambda: deepcopy(scope), "evidence": raw["evidence"],
+        "required_evidence": ["boundary:result"], "prompt_projection": project_handoff_prompt},
+        handlers={"defer": defer})
+
+    assert result["status"] == "deferred"
+    assert result["knowledge_delivery"]["stage"] == "excluded"
+    assert result["knowledge_delivery"]["status"] == "excluded"
+    assert prompts[0]["context"]["reference_only"]["presentation"]["status"] == "excluded"
+
+
+@pytest.mark.asyncio
+async def test_partial_handoff_reference_persists_only_the_ids_in_the_actual_prompt(monkeypatch, tmp_path):
+    """Prompt clipping is a delivery boundary, not merely a display preference."""
+    import agents.orchestrator_decision as decision_module
+    from agents.orchestrator_decision import decide_orchestration
+    from knowledge.context_service import KnowledgeContextService, KnowledgePrincipal
+    from orchestrator.handoff_projection import project_handoff_prompt
+
+    raw = packet()
+    scope = deepcopy(raw["scope"]["context"])
+    service = KnowledgeContextService(tmp_path)
+    principal = KnowledgePrincipal("receipt-owner", run_ids=frozenset({"r"}))
+    pack = {"authority": "reference_only", "status": "ok", "scope_ref": "public", "revision": "wiki-rev",
+            "diagnostics": {"no_match": False}, "items": [
+                {"citation_id": "wiki:fits", "title": "Fits", "content": "brief reference " * 30},
+                {"citation_id": "wiki:omitted", "title": "Omitted", "content": "large reference " * 5_000},
+            ]}
+    delivery = service.delivery.record_retrieved(principal, request_id="partial-prompt", consumer_binding="orchestrator_agent",
+                                                  context_pack=pack, run_id="r", loop_id="0")
+    reference = {"pack": pack, "delivery": delivery, "principal": principal}
+    prompts = []
+    monkeypatch.setattr(decision_module, "build_reference_context", lambda *args, **kwargs: deepcopy(reference))
+
+    async def complete(task, prompt, **kwargs):
+        prompts.append(json.loads(prompt))
+        return SimpleNamespace(model="controlled", text=json.dumps({"tool": "defer",
+            "arguments": {"condition": "owner review"}, "reason": "contract remains authoritative",
+            "evidence_refs": ["boundary:result"]}))
+
+    async def defer(args):
+        return {"status": "deferred", **args}
+
+    state = SimpleNamespace(run_id="r", loop_count=0, stage=SimpleNamespace(value="equipment"), active_goal="goal")
+    result = await decide_orchestration(state, SimpleNamespace(complete=complete, knowledge_service=service), context={
+        "scope": deepcopy(scope), "current_scope": lambda: deepcopy(scope), "evidence": raw["evidence"],
+        "required_evidence": ["boundary:result"], "prompt_projection": project_handoff_prompt}, handlers={"defer": defer})
+
+    presented = [item["citation_id"] for item in prompts[0]["context"]["reference_only"]["items"]]
+    persisted = service.delivery.read(principal, delivery["receipt_id"])
+    assert presented == ["wiki:fits"]
+    assert result["knowledge_delivery"]["delivered_citation_ids"] == presented
+    assert persisted["stage"] == "delivered"
+    assert persisted["delivered_citation_ids"] == presented
+
+
+@pytest.mark.asyncio
+async def test_absent_handoff_reference_marker_persists_excluded_not_delivered(monkeypatch, tmp_path):
+    """If even the optional envelope cannot fit, the receipt says excluded."""
+    import agents.orchestrator_decision as decision_module
+    from agents.orchestrator_decision import decide_orchestration
+    from knowledge.context_service import KnowledgeContextService, KnowledgePrincipal
+    from orchestrator.handoff_projection import project_handoff_prompt
+
+    raw, scope = packet(), deepcopy(packet()["scope"]["context"])
+    service = KnowledgeContextService(tmp_path)
+    principal = KnowledgePrincipal("receipt-owner", run_ids=frozenset({"r"}))
+    pack = {"authority": "reference_only", "status": "ok", "scope_ref": "public", "revision": "wiki-rev",
+            "diagnostics": {"no_match": False}, "items": [{"citation_id": "wiki:omitted", "title": "Omitted",
+            "content": "large reference " * 5_000}]}
+    delivery = service.delivery.record_retrieved(principal, request_id="absent-prompt", consumer_binding="orchestrator_agent",
+                                                  context_pack=pack, run_id="r", loop_id="0")
+    monkeypatch.setattr(decision_module, "build_reference_context", lambda *args, **kwargs:
+                        {"pack": deepcopy(pack), "delivery": deepcopy(delivery), "principal": principal})
+
+    async def complete(task, prompt, **kwargs):
+        return SimpleNamespace(model="controlled", text=json.dumps({"tool": "defer", "arguments": {"condition": "review"},
+            "reason": "contract", "evidence_refs": ["boundary:result"]}))
+    async def defer(args): return {"status": "deferred", **args}
+
+    state = SimpleNamespace(run_id="r", loop_count=0, stage=SimpleNamespace(value="equipment"), active_goal="goal")
+    result = await decide_orchestration(state, SimpleNamespace(complete=complete, knowledge_service=service), context={
+        "scope": scope, "current_scope": lambda: deepcopy(scope), "evidence": raw["evidence"],
+        "required_evidence": ["boundary:result"], "prompt_projection": project_handoff_prompt}, handlers={"defer": defer})
+
+    persisted = service.delivery.read(principal, delivery["receipt_id"])
+    assert result["knowledge_delivery"]["stage"] == "excluded"
+    assert persisted["stage"] == "excluded"
+    assert persisted["delivered_citation_ids"] == []
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mutate", [False, True])
 async def test_model_projection_preserves_private_evidence_and_scope_checks(mutate):

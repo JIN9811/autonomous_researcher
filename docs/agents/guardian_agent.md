@@ -42,6 +42,10 @@ supersedes: []
 
 ## Summary
 
+The existing LLM decision boundary receives a bounded, reference-only
+[AX4LAB Wiki pack](../knowledge/wiki_memory.md). This supplies platform context
+without changing this agent's tools, numerical authority or execution gates.
+
 `GuardianAgent` is ATR's graph-wide safety review and continuation control
 plane. It evaluates current gates and recent failures, incorporates device and
 queue health, records risk/incident/approval evidence, and returns continue,

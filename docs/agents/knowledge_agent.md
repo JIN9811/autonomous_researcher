@@ -16,6 +16,9 @@ source_of_truth:
   - knowledge/source_extraction.py
   - knowledge/source_runtime.py
   - knowledge/source_api.py
+  - knowledge/context_service.py
+  - knowledge/workspace_api.py
+  - agents/knowledge_context.py
   - agents/source_curation.py
   - mcp_tools/source_tools.py
   - knowledge/ontology
@@ -24,6 +27,8 @@ source_of_truth:
 last_verified: 2026-09-11
 verified_against: working-tree-2026-09-11
 related_docs:
+  - docs/knowledge/wiki_memory.md
+  - docs/knowledge/publication.md
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
   - docs/knowledge/markdown_memory_operations.ko.md
@@ -45,14 +50,27 @@ supersedes: []
 
 | At a glance | Details |
 |---|---|
-| Runtime status | Implemented — source curation, ontology-guided Markdown memory and typed records |
+| Runtime status | Source curation, ontology-guided Markdown, AX4LAB Wiki and scoped private memory |
 | LLM decision layer | Implemented / API and local vLLM verified |
 | Physical effect | None |
-| Primary handoff | `knowledge_context.v1` → BO and downstream context consumers |
+| Primary handoff | Existing `knowledge_context.v1` plus reference-only Wiki packs at agent decision boundaries |
 | Live hardware validation | Not applicable to Knowledge; no new physical validation claimed |
 | Known gap | Image-only sources need usable text; retrieval benefit has no held-out comparative benchmark |
 
 ## Overview and Responsibilities
+
+### Shared Wiki and Private Memory
+
+[AX4LAB Wiki and Memory](../knowledge/wiki_memory.md) supplies checked platform
+knowledge at existing agent decision boundaries. Retrieval does not insert a
+new graph stage. Private memories have a separate candidate/confirmation
+lifecycle and require a trusted server principal plus provider consent.
+
+The Workspace exposes Wiki, Memory, Source Library, Agent Delivery and Ontology.
+Source curation and execution Markdown retain their original stores and routes;
+the Wiki is not an automatic merger of all historical knowledge. Delivery
+distinguishes retrieved references, outgoing model context and returned citations.
+New integration verification is reported separately from earlier curation tests.
 
 Knowledge turns execution evidence into reusable, source-backed context. Its
 LLM decides what is worth retaining, how to classify it, which scoped records

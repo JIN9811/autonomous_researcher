@@ -61,7 +61,20 @@ Do not move Windows Bridge, 3DP, LeRobot, BO Workspace, or CAE Workspace control
 
 ## Current Experimental Setup and Chat Boundary
 
-Knowledge cards retain activity, memory and retrieval evidence. Retired graph
+Chat supports up to three expanded message/loop bubbles. Opening a fourth closes
+the earliest opened bubble; explicit Hide closes only its own bubble. Refreshes
+preserve expansion. When a completed loop is compressed, its replaced detailed
+bubbles close and the new summary starts closed; unrelated bubbles stay open.
+A manually reopened summary follows the same three-bubble rule and remains open
+on subsequent refreshes.
+
+Knowledge cards retain activity, memory and retrieval evidence. The
+[Wiki and Memory](../../knowledge/wiki_memory.md) integration adds the shared
+Wiki, scoped private-memory actions and delivery receipts; its browser rendering
+is not yet verified. The existing Knowledge Workspace keeps Source Library,
+execution Markdown and ontology alongside the new views. Knowledge-bound Chat
+HTML is excluded from persistent browser snapshots, while the server transcript
+and existing three-expanded-message interaction remain intact. Retired graph
 relation summaries are not polled, and relation review cards/links are absent.
 Operator Attention covers approvals, agent questions and runtime faults, not
 retired relation queues. See the [Knowledge Agent](../../agents/knowledge_agent.md)
