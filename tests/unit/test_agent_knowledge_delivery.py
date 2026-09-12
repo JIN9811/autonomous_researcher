@@ -127,7 +127,11 @@ def test_mixed_possible_provider_route_excludes_private_memory_without_both_cons
 
 
 @pytest.mark.asyncio
-async def test_deterministic_equipment_entrypoint_never_marks_retrieved_context_delivered(tmp_path):
+@pytest.mark.parametrize("query, expected_stage", [
+    ("Lab Equipment Agent", "retrieved"),
+    ("nonexistenttokenonly", "no_match"),
+])
+async def test_deterministic_equipment_entrypoint_never_marks_retrieved_context_delivered(tmp_path, query, expected_stage):
     """Would fail if a no-LLM branch advanced a delivery receipt before any prompt existed."""
     from agents.equipment_decision import decide_equipment
     from knowledge.context_service import KnowledgeContextService
@@ -135,12 +139,13 @@ async def test_deterministic_equipment_entrypoint_never_marks_retrieved_context_
 
     ctx = CapturingContext(KnowledgeContextService(Path(__file__).resolve().parents[2], data_root=tmp_path))
     ctx.force_real_llm_in_test = False
-    state = OrchestratorState(run_id="synthetic-run", experiment_id="synthetic", mode=Mode.TEST, stage=Stage.EQUIPMENT)
+    state = OrchestratorState(run_id="synthetic-run", experiment_id="synthetic", mode=Mode.TEST,
+        stage=Stage.EQUIPMENT, active_goal=query)
     result = await decide_equipment(state, ctx, phase="select", context={"evidence_refs": ["task:configured"]},
         proposals={"execute_stacked_workflow": {"proposal_id": "synthetic"}})
 
     assert ctx.prompts == []
-    assert result["knowledge_delivery"]["stage"] == "retrieved"
+    assert result["knowledge_delivery"]["stage"] == expected_stage
     assert result["knowledge_delivery"]["consumer_binding"] == "equipment_agent"
     assert result["knowledge_delivery"]["run_id"] == "synthetic-run"
     assert result["knowledge_delivery"]["loop_id"] == "0"

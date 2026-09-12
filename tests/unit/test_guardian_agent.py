@@ -158,7 +158,14 @@ async def test_guardian_reports_only_existing_safety_evidence() -> None:
 
     assert guardian["decision"] == "continue"
     assert set(guardian) == {"decision", "action", "reason", "policy_note", "retry_pressure",
-        "design_validation", "health_validation", "graph_gate_pressure", "consistency"}
+        "design_validation", "health_validation", "graph_gate_pressure", "consistency",
+        "knowledge_delivery"}
+    # Missing knowledge must stay unavailable, not become fabricated safety evidence.
+    delivery = guardian["knowledge_delivery"]
+    assert delivery["status"] == "unavailable"
+    assert delivery["stage"] == "unavailable"
+    assert delivery["citation_ids"] == []
+    assert delivery["used_citation_ids"] == []
 
 
 @pytest.mark.asyncio
