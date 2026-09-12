@@ -61,6 +61,12 @@ Do not move Windows Bridge, 3DP, LeRobot, BO Workspace, or CAE Workspace control
 
 ## Current Experimental Setup and Chat Boundary
 
+Knowledge cards retain activity, memory and retrieval evidence. Retired graph
+relation summaries are not polled, and relation review cards/links are absent.
+Operator Attention covers approvals, agent questions and runtime faults, not
+retired relation queues. See the [Knowledge Agent](../../agents/knowledge_agent.md)
+for the current workspace and API boundaries.
+
 New run/session identifiers use [date, KST time, and the known purpose](../../runtime/logging.md#readable-run-and-session-names).
 An already-created planning session or run keeps its identity when the operator
 later selects a mode; this naming change does not replace the canonical Setup store.

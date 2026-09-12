@@ -290,6 +290,12 @@ place. It provides enablement, scan/retry, background progress, filters and
 full note/source detail. The main dashboard links the same
 `/knowledge` route and reads Markdown status.
 
+Live GUI preserves Knowledge activity, memory, evidence and retrieval cards;
+it does not poll retired graph/relation endpoints or display relation review
+queues. Operator Attention counts runtime approvals, questions and faults only.
+Legacy graph URLs still return HTTP 410; ontology definitions and scoped
+Markdown retrieval remain available.
+
 ## Safety, Modes and Recovery
 
 - Original Analysis numbers and objective lineage are copied, not LLM-generated.

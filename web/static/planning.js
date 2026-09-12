@@ -217,16 +217,6 @@ let liveKnowledgeActivityChartMount = null;
 let liveKnowledgeActivityResizeObserver = null;
 let liveBoVisualization = null;
 let liveBoVisualizationHydrationTimer = null;
-let liveKnowledgeRelationSummary = {
-  examined: 0,
-  proposed: 0,
-  auto_approved: 0,
-  pending: 0,
-  rejected_deferred: 0,
-  worker_status: "idle",
-  worker_running: false,
-  review_url: "/knowledge#relations",
-};
 let livePrinterMonitorInFlight = null;
 let liveSpecimenVideoPlaying = false;
 let liveSpecimenVideoStartedAt = 0;
@@ -16758,23 +16748,13 @@ function renderKnowledgeDashboardCards(report, status, agentLabel, profile) {
   const packs = Array.isArray(evolution.evidence_packs) ? evolution.evidence_packs : [];
   const outcomes = Array.isArray(evolution.outcomes) ? evolution.outcomes : Array.isArray(knowledgeReport.evolution_outcomes) ? knowledgeReport.evolution_outcomes : [];
   const packItems = packs.map((item) => `${item.target_type || "target"}:${item.target_id || "unknown"} / ${item.status || "proposed"} / ${item.summary || ""}`);
-  const relationSummary = liveKnowledgeRelationSummary || {};
   return `
     ${renderKnowledgeActivityCard()}
-    ${renderDashboardCard("Relation Reconciliation", `${renderDashboardRows([
-      ["examined", relationSummary.examined ?? 0],
-      ["proposed", relationSummary.proposed ?? 0],
-      ["auto_approved", relationSummary.auto_approved ?? 0],
-      ["pending_review", relationSummary.pending ?? 0],
-      ["rejected_or_deferred", relationSummary.rejected_deferred ?? 0],
-      ["worker", relationSummary.worker_status || "idle"],
-    ])}<a class="btn" href="/knowledge#relations" target="_blank" rel="noreferrer">Open Relation Review</a>`, { span: 12, tone: "knowledge", eyebrow: "ontology-bounded review queue" })}
     ${renderDashboardCard("Memory Ledger", renderKnowledgeMemoryBoard(knowledgeReport, evolution), { span: 8, tone: "knowledge", eyebrow: "memory" })}
     ${renderDashboardCard("Evidence Quality", renderDashboardRows([
       ["artifact_links", evidenceQuality.artifact_link_coverage ?? "-"],
       ["agent_reports", evidenceQuality.agent_report_coverage ?? "-"],
       ["guardian_incidents", evidenceQuality.guardian_incident_count ?? "-"],
-      ["graph_backend", evidenceQuality.graph_backend_enabled ?? "-"],
       ["context_items", Array.isArray(context.items) ? context.items.length : "-"],
     ]), { span: 4, tone: "knowledge", eyebrow: "provenance" })}
     ${renderDashboardCard("Pattern Library", renderKnowledgePatternBoard(knowledgeReport), { span: 6, tone: "knowledge", eyebrow: "failure + success" })}
@@ -18257,30 +18237,13 @@ function liveAttentionCounts() {
   const questions = pendingAgentQuestions().length;
   const faults = pendingRuntimeFaults().length;
   const errors = pendingRuntimeFaults().filter((event) => eventTimelineKind(event) === "error").length;
-  const knowledgeRelations = Math.max(0, Number((liveKnowledgeRelationSummary || {}).pending) || 0);
   return {
     approvals,
     questions,
     faults,
     errors,
-    knowledge_relations: knowledgeRelations,
-    total: approvals + questions + faults + (knowledgeRelations ? 1 : 0),
+    total: approvals + questions + faults,
   };
-}
-
-function renderKnowledgeRelationAttentionCard(summary = liveKnowledgeRelationSummary) {
-  const pending = Math.max(0, Number((summary || {}).pending) || 0);
-  if (!pending) return "<p class='hint'>No Knowledge relation proposals waiting for review.</p>";
-  return `
-    <article class="live-approval-card live-attention-card" data-attention-kind="knowledge_relation_review">
-      <strong>Knowledge Relation Review</strong>
-      <p>${escapeHtml(`${pending} ontology-valid relation proposal${pending === 1 ? "" : "s"} require operator review.`)}</p>
-      <small>Knowledge Agent · ${escapeHtml((summary || {}).worker_status || "idle")}</small>
-      <div class="button-row">
-        <a class="btn primary" href="/knowledge#relations" target="_blank" rel="noreferrer">Open Relation Review</a>
-      </div>
-    </article>
-  `;
 }
 
 function renderAttentionApprovalCard(item, runId = "") {
@@ -18313,7 +18276,7 @@ function renderAttentionReportPage(session = liveLastSession) {
       <div class="live-report-head live-attention-report-head">
         <div>
           <h3>Operator Attention</h3>
-          <p><span class="live-report-role-tag attention">ATT</span> ${empty ? "No pending operator attention." : `${counts.approvals} approvals · ${counts.questions} questions · ${counts.faults} faults · ${counts.knowledge_relations} relation reviews`}</p>
+          <p><span class="live-report-role-tag attention">ATT</span> ${empty ? "No pending operator attention." : `${counts.approvals} approvals · ${counts.questions} questions · ${counts.faults} faults`}</p>
         </div>
         <div class="live-attention-score ${counts.errors ? "error" : counts.total ? "warning" : "idle"}">
           <strong>${counts.total}</strong>
@@ -18330,7 +18293,6 @@ function renderAttentionReportPage(session = liveLastSession) {
         ${renderReportSection("Pending Approvals", pending.length ? pending.map((item) => renderAttentionApprovalCard(item, runId)).join("") : "<p class='hint'>No pending approvals.</p>", { wide: true })}
         ${renderReportSection("Agent Questions", questions.length ? questions.map(renderQuestionCard).join("") : "<p class='hint'>No agent questions waiting for operator input.</p>", { wide: true })}
         ${renderReportSection("Runtime Faults / Warnings", faults.length ? faults.map(renderFaultCard).join("") : "<p class='hint'>No unread runtime faults.</p>", { wide: true })}
-        ${renderReportSection("Knowledge Relation Review", renderKnowledgeRelationAttentionCard(), { wide: true })}
         ${renderReportSection("Recently Resolved", renderReportList(resolvedItems, "No resolved approvals recorded yet."))}
       </div>
     </div>
@@ -19408,11 +19370,10 @@ async function refreshPlanningAuxiliaryState(session) {
   if (liveAuxRefreshInFlight) return liveAuxRefreshInFlight;
   liveAuxRefreshInFlight = (async () => {
     try {
-      const [guardianResult, eventsResult, printerStatusResult, relationSummaryResult] = await Promise.allSettled([
+      const [guardianResult, eventsResult, printerStatusResult] = await Promise.allSettled([
         fetch("/api/guardian/status"),
         fetch("/api/events/recent"),
         refreshLivePrinterMonitorStatus(session),
-        fetch("/api/knowledge/relations/summary"),
         refreshLiveObjectiveState(session),
       ]);
       let guardianPayload = null;
@@ -19423,15 +19384,6 @@ async function refreshPlanningAuxiliaryState(session) {
       if (eventsResult.status === "fulfilled" && eventsResult.value.ok) {
         const recentPayload = await eventsResult.value.json();
         liveRecentEvents = Array.isArray(recentPayload.events) ? recentPayload.events : [];
-      }
-      if (relationSummaryResult.status === "fulfilled" && relationSummaryResult.value.ok) {
-        const relationPayload = await relationSummaryResult.value.json();
-        if (relationPayload && relationPayload.relation_reconciliation) {
-          liveKnowledgeRelationSummary = {
-            ...liveKnowledgeRelationSummary,
-            ...relationPayload.relation_reconciliation,
-          };
-        }
       }
       if (printerStatusResult.status === "fulfilled" && printerStatusResult.value) {
         const status = printerStatusResult.value;

@@ -16,6 +16,7 @@ import app.main as main
     ("post", "/api/knowledge/graph/import"),
     ("post", "/api/knowledge/graphify/scan"),
     ("get", "/api/knowledge/relations/status"),
+    ("get", "/api/knowledge/relations/summary"),
     ("post", "/api/knowledge/relations/reconcile"),
     ("get", "/api/knowledge/manuals/graph"),
 ])
