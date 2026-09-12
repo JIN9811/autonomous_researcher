@@ -30,6 +30,17 @@ supersedes: []
 
 *Role overview; detailed execution and connection diagrams follow below.*
 
+## Status at a Glance
+
+| At a glance | Details |
+|---|---|
+| Runtime status | Implemented / mission, handoff and run coordination |
+| LLM decision layer | Planning and context support; executable routing remains code-owned |
+| Physical effect | No direct device tools; downstream agent actions can have physical effects |
+| Primary handoff | Mission and stage contracts → registered agents |
+| Verification | [Recorded inspection and scope](#current-verification) |
+| Known gap | Long-running recovery, concurrent operation and model quality not established |
+
 ## Summary
 
 `OrchestratorAgent` is ATR's workflow coordination plane. It converts accepted

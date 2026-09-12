@@ -18,10 +18,14 @@ source_of_truth:
   - orchestrator/langgraph_runtime.py
   - app/controller.py
   - policies/guardian_gate.py
-  - knowledge/service.py
+  - agents/knowledge_agent.py
+  - knowledge/markdown_runtime.py
+  - knowledge/source_api.py
   - agents/bo_agent.py
-last_verified: 2026-08-09
-verified_against: 0b7627b
+  - agents/bo_decision.py
+  - utils/utm_clear_cycle.py
+last_verified: 2026-09-12
+verified_against: 5542ef2
 paper_section: closed_loop_method
 research_questions:
   - RQ1
@@ -41,6 +45,12 @@ supersedes: []
 
 # Closed-Loop Method
 
+| At a glance | Details |
+|---|---|
+| Topic | Orchestration handoffs, verification and feedback |
+| Evidence boundary | [Retained one-cycle demonstration](evidence/2026-09-07-latest-cycle-demonstration.md), with its mixed-mode limits |
+| Recorded basis | 2026-09-12 · [Scope and verification](#verification) |
+
 ## Summary
 
 One ATR cycle converts a research objective and prior evidence into a governed
@@ -58,8 +68,9 @@ that every stage must invoke physical equipment in every mode.
 ## Evidence Basis
 
 The method is reconstructed from the graph configuration, runtime/controller,
-Guardian policy, Knowledge service, and Bayesian-optimization agent at baseline
-`0b7627b`. Behavioral claims remain bounded by the evidence manifest.
+Guardian policy, Knowledge and Bayesian-optimization agents at baseline
+`5542ef2`. Behavioral claims remain bounded by the evidence manifest; updating
+this description does not extend the scope of retained demonstrations.
 
 ## Cycle Semantics
 
@@ -71,12 +82,15 @@ The nominal path is:
    objective and available context.
 3. **Prepare and position.** Create or identify the specimen and verify the
    physical state needed for measurement.
-4. **Execute equipment action.** Resolve capabilities, validate dry-run and
-   approval requirements, invoke a bridge, and capture proof.
+4. **Execute and clear.** Resolve capabilities, validate dry-run and approval
+   requirements, invoke a bridge, and capture proof. Where the selected route
+   requires post-test clearance, return through Manipulation and Vision before
+   Analysis; a completed measurement alone does not satisfy that handoff.
 5. **Analyze.** Convert validated observations into derived artifacts while
    preserving parameters and input identity.
-6. **Update knowledge.** Record accepted facts, provenance, graph events, and
-   cycle reports through bounded services.
+6. **Update knowledge.** Preserve numerical observations and cycle reports;
+   use bounded LLM tools to classify Markdown knowledge and publish cited,
+   scope-qualified context alongside typed memory and local audit records.
 7. **Select next candidate.** Use constraints and prior trials to propose the
    next design point.
 8. **Gate continuation.** Guardian and operator policy choose continue, stop,
@@ -84,7 +98,11 @@ The nominal path is:
 
 The actual graph can branch, invoke sidecars, retry bounded operations, or
 terminate early. The list is an explanatory projection of the declared graph,
-not a replacement for it.
+not a replacement for it. The current specimen-transfer route returns to
+Vision for placement confirmation before Equipment, then uses a separate
+Manipulation clearance task and Vision confirmation after Equipment. The
+[Orchestration Route](../../README.md#orchestration-route) shows the broader
+graph; these handoffs are not new top-level agents.
 
 ## Control and Evidence Flow
 
@@ -92,7 +110,8 @@ not a replacement for it.
 
 **Figure 3 — Closed-loop control and evidence flow.** Blue arrows represent
 stage/control progression; green arrows represent durable artifact and
-evidence flow; the feedback edge carries accepted knowledge and candidate
+evidence flow. The dashed equipment-to-analysis edge applies only without a
+required clearance contract. The feedback edge carries accepted knowledge and candidate
 context into the next design stage. The paths are code-backed; continuity
 through a complete physical campaign remains `not_evaluated`.
 
@@ -133,18 +152,27 @@ domain-specific adequacy are evaluation questions.
 
 ![Knowledge and Bayesian-optimization feedback](assets/figures/05_knowledge_bo_feedback.svg)
 
-**Figure 5 — Knowledge and Bayesian-optimization feedback.** Validated
-observations and analysis enter the durable Knowledge path; accepted context
-and trial history inform Bayesian optimization, which returns a candidate to
-the supervisor and Guardian before the next cycle. The feedback path is
+**Figure 5 — Knowledge and Bayesian-optimization feedback.** Measured values
+remain Analysis-owned; cited context comes from Knowledge. BO's LLM calls the
+numerical optimizer and reviews its exact result before the existing
+Orchestrator-to-Design handoff. Dashed source intake is separate from the cycle;
+global Guardian gates are omitted from this data-flow view. The feedback path is
 implemented; optimization benefit is `not_evaluated` in this package.
 
-Knowledge updates pass through service contracts that validate ontology and
-provenance and persist ledger/outbox state before asynchronous graph sync. The
-relation-reconciliation subsystem may propose links among existing nodes but
-does not bypass the same ingestion and review boundary. Bayesian optimization
-consumes trial context and constraints; its output remains a candidate, not an
-automatic physical command.
+Knowledge retains ontology-validated local audit events, typed memory and
+append-only Markdown notes. Its LLM selects evidence inspection, scoped search,
+note writing and context publication; deterministic code checks each action.
+Source Library is a separate intake path that preserves originals, processes
+long documents page by page and publishes one cited note per source. It is not
+a required stage on every experimental cycle.
+
+Analysis-owned observations feed the numerical trial history; retrieved prose
+does not become a new measurement. BO's LLM requests the configured optimizer
+and reviews its result, while LHS or BoTorch owns the numerical coordinates.
+Continuous-domain values are handed to Design without snapping to an old
+candidate table. The output remains a proposal, not an automatic physical
+command. See [Knowledge](../agents/knowledge_agent.md) and
+[BO](../agents/bo_agent.md) for the implemented contracts.
 
 ## Failure and Recovery Semantics
 
@@ -155,7 +183,7 @@ automatic physical command.
 | Approval denied/expired | No approved action | Stop or remain pending | New approval must reference current action/context |
 | External timeout | Effect may be unknown | Record uncertainty and require evidence/review | Do not blindly repeat physical action |
 | Analysis failure | Inputs retained | Retry bounded analysis or route to error | Preserve parameters and prior partial outputs |
-| Knowledge sync degradation | Ledger/outbox retained | Report degraded state; retry bounded sync | Do not fabricate graph receipt |
+| Knowledge storage/retrieval degradation | Source artifacts and existing records retained | Report the storage error or evidence gap according to the active path | Do not invent citations, notes or successful write receipts |
 | Guardian stop | Explicit stop decision | Enter terminal or review path | Resume requires a new governed decision |
 
 The critical distinction is whether an external effect may already have
@@ -185,9 +213,10 @@ loop.
 
 ## Verification
 
-Verified through repository inspection on 2026-08-09 against baseline
-`0b7627b`. Planned behavioral evidence is divided among test, replay,
-simulation, browser, and live tiers rather than inferred from the graph.
+Route, Knowledge and BO descriptions were checked through static repository
+inspection on 2026-09-12 against `5542ef2`. The original 2026-08-09 inspection
+and later demonstrations retain their own dates and configurations. Test,
+replay, simulation, browser and live evidence are not inferred from the graph.
 
 ## Related Documents
 

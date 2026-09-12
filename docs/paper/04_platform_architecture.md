@@ -21,8 +21,8 @@ source_of_truth:
   - device_bridges
   - web/templates
   - web/static
-last_verified: 2026-08-09
-verified_against: 0b7627b
+last_verified: 2026-09-12
+verified_against: 5542ef2
 paper_section: platform_architecture
 research_questions:
   - RQ4
@@ -37,6 +37,12 @@ supersedes: []
 -->
 
 # Platform Architecture
+
+| At a glance | Details |
+|---|---|
+| Topic | Modules, providers, workspaces and integration boundaries |
+| Evidence boundary | Implementation inspection; not universal adapter compatibility |
+| Recorded basis | 2026-09-12 · [Scope and verification](#verification) |
 
 ## Summary
 
@@ -55,7 +61,9 @@ does not promise that arbitrary third-party components are compatible or safe.
 
 The platform surface is observed in module manifests and UI descriptors,
 backend/model routing, device bridges, FastAPI routes, graph management, and
-web workspaces at code baseline `0b7627b`.
+web workspaces. Knowledge storage, source intake and deployment descriptions
+were refreshed against `5542ef2`; dated route counts below retain their
+original baseline.
 
 ## Platform Role in the System
 
@@ -80,7 +88,7 @@ An extension is system-compatible only when it:
 | Execution graph | Versioned graph configuration | Valid nodes, handlers, transitions, safety metadata | Adapts workflow without hiding control flow | Architecture inspected |
 | Model backend | Routed provider/model adapter | Bounded completion contract, readiness, priority lease where applicable | Replaces inference implementation | Architecture inspected |
 | Device bridge | Capability-oriented adapter | Allowlisted actions, dry run, proof, timeout, authentication | Connects physical or external tools | Architecture inspected; broad live reliability not evaluated |
-| Knowledge backend | Service/repository/outbox contract | Ontology, provenance, receipt, bounded queries | Preserves durable context and lineage | Architecture and focused tests referenced elsewhere |
+| Knowledge storage and source intake | Markdown/JSONL, local audit and Source Library contracts | Ontology, provenance, caller scope and write receipts | Preserves originals, derived notes and reusable context | [Knowledge Reference](../agents/knowledge_agent.md) |
 | Operator workspace | FastAPI route plus static/template surface | API authorization, explicit mutation, audit event | Exposes control and review | Route surface inspected; browser coverage varies |
 
 ## Module and Graph Contracts
@@ -106,8 +114,8 @@ defects, while domain and physical risks remain subject to policy and evidence.
 Backend abstraction prevents a paper claim from depending on one model server
 or vendor. Routing identifies a task, selected model/provider, readiness state,
 and bounded request/response path. The shared LLM lease prioritizes Guardian
-and active workflow access over lower-priority background work such as
-knowledge relation reconciliation.
+and active workflow access over lower-priority background work. The retired
+Knowledge relation-reconciliation worker is not part of the active deployment.
 
 Model substitution changes the evaluated system configuration. A result
 obtained with one provider or model MUST name it and MUST NOT be generalized to
@@ -136,9 +144,11 @@ show surface breadth and documentation drift; they are not usability or
 reliability metrics.
 
 Mutation-capable workspaces must make review and apply distinct where the
-underlying service requires it. For example, knowledge relation proposals and
-graph edits retain server-side validation and audited ingestion rather than
-writing directly to the graph backend.
+underlying service requires it. The Knowledge workspace exposes Markdown,
+Memory, Ontology and Source Library. Source intake preserves originals and
+publishes derived notes only through validated agent-local tools; retrieval
+retains source citations and caller scope. Ontology is the shared vocabulary,
+not an active graph database. See the [Knowledge Reference](../agents/knowledge_agent.md).
 
 ## Deployment Topology
 
@@ -146,7 +156,8 @@ writing directly to the graph backend.
 
 **Figure 6 — Deployment topology.** The primary application, orchestrator,
 agents, evidence stores, and local workspaces may coordinate remote Windows
-workers, device bridges, model services, and optional graph backends. Dashed
+workers, device bridges and model services. Knowledge records and source
+curation live on the primary host rather than requiring graph synchronization. Dashed
 links are deployment options, not proof that every combination has been
 validated.
 
@@ -174,6 +185,10 @@ breadth if read as user-visible features. Optional external services may be
 unavailable in a clean local environment.
 
 ## Verification
+
+Knowledge and deployment descriptions and figures were rechecked by static
+inspection on 2026-09-12 against `5542ef2`, without starting services or devices.
+The earlier route inspection below is retained as historical evidence.
 
 Verified by repository and route inspection on 2026-08-09 against code
 baseline `0b7627b`. Detailed interfaces and deployment prerequisites are

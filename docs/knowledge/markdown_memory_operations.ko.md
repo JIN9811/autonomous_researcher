@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: guide
 subtype: operations_runbook
 status: active
@@ -17,9 +17,16 @@ related_docs:
   - docs/agents/knowledge_agent.md
   - docs/knowledge/manual_rag_knowledge.ko.md
 supersedes: [docs/oldversion/knowledge/knowledge_graph_operations.ko.md]
----
+-->
 
 # Markdown Knowledge 운영 가이드
+
+| At a glance | Details |
+|---|---|
+| Purpose | 원본과 ontology를 보존하며 Markdown 지식의 검색·출처·수명주기 관리 |
+| Workspace | Knowledge → Markdown / Memory / Ontology |
+| Preparation | 조회할 run·agent·지식 범위와 원본 근거 확인 |
+| Recorded basis | 2026-09-10 · [Knowledge Agent 계약](../agents/knowledge_agent.md) |
 
 ## 무엇이 바뀌었는가
 

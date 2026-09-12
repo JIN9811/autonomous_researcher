@@ -33,12 +33,14 @@ supersedes: []
 
 ## Status at a Glance
 
-- Runtime status: Implemented on the existing transfer and post-test clearance paths
-- LLM decision layer: Implemented; registered API and local vLLM each matched 4/4 non-actuating development cases
-- Physical effect: Possible only through existing rollout, fixed-skill and managed-replay executors
-- Primary handoff: `robot_task_result.v1` → Vision → Equipment; verified clearance → Analysis
-- Live hardware validation: Not performed for this reconstruction
-- Known gap: No new pose-to-policy routing; LIVE pickup freshness can expire during model inference
+| At a glance | Details |
+|---|---|
+| Runtime status | Implemented on the existing transfer and post-test clearance paths |
+| LLM decision layer | Implemented; registered API and local vLLM each matched 4/4 non-actuating development cases |
+| Physical effect | Possible only through existing rollout, fixed-skill and managed-replay executors |
+| Primary handoff | `robot_task_result.v1` → Vision → Equipment; verified clearance → Analysis |
+| Live hardware validation | Not performed for this reconstruction |
+| Known gap | No new pose-to-policy routing; LIVE pickup freshness can expire during model inference |
 
 ## Summary
 

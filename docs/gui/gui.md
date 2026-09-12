@@ -1,4 +1,12 @@
 # GUI
+
+| At a glance | Details |
+|---|---|
+| Purpose | Navigate the Main GUI, Live GUI and connected workspaces |
+| Entry points | `/` · `/live` · `/ide` |
+| Coverage | Run control, models, agent reports and device-workspace entry |
+| Implementation | [Main GUI](../../web/static/app.js) · [Live GUI](../../web/static/planning.js) |
+| Execution boundary | Controls can invoke runtime/device actions; this guide is not execution evidence |
 > [Runtime Closed-Loop/페이지/에이전트 실행 레퍼런스](../runtime/closed_loop_and_pages_reference.md)
 
 
@@ -294,7 +302,8 @@ Runtime IDE graph workspace:
 
 Design Agent report surface:
 - The Live GUI selected-agent report for Design Agent reads `state.run_metadata.design_report`, latest message `design_report`, or event payload `design_report`.
-- The Design report card shows objective metric/direction, hypothesis, candidate counts, valid/rejected counts, selected score, uncertainty, information gain, risk, prior count, and handoff readiness.
+- The current Design report shows objective metric/direction, hypothesis, candidate counts, validity, constraint margins, estimated physical quantities, performance-evidence status, LLM decision/tool trace and handoff readiness. Candidate performance is `unassessed` when no candidate-matched evidence exists; it is not a synthetic prediction.
+- `design_evaluation.v1` selects the evidence-based display. Selected-score, information-gain and risk strips remain only for legacy payloads without that evaluation; they are not the current candidate-selection criteria. See the [Design Reference](../agents/design_agent.md).
 - The expanded Design detail area shows candidate board, rejected/repair log, decision register, Knowledge/BO/failure prior context, and missing handoff fields.
 - The Agent Report API `/api/agents/design/report` returns the same structured report under `sections.design_report`, plus role-specific `candidate_board`, `manufacturability`, `decision_register`, and `handoff_packet` fields.
 

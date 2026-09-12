@@ -1,5 +1,12 @@
 # Autonomous Researcher 사용자 종합 매뉴얼
 
+| At a glance | Details |
+|---|---|
+| Purpose | 설치부터 GUI 운영·확장까지 전체 사용 경로 안내 |
+| Audience | 신규 사용자 · 운영자 · 개발자 |
+| Preparation | 실행 환경, 모델 설정, 사용할 장비 프로필 확인 |
+| Reading path | [설치 요구사항](../../REQUIREMENTS.md) · [에이전트](../agents/README.md) |
+
 이 문서는 새 사용자가 저장소를 받아서 실행하고, 기존 사용자가 구조를 이해해 수정/확장할 수 있도록 만든 운영 매뉴얼입니다.
 
 대상 독자:
@@ -15,9 +22,21 @@
   -> Main GUI 또는 Live GUI
   -> FastAPI runtime controller
   -> LangGraphRunLoop
-  -> design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian
+  -> design -> specimen -> vision(픽업 관측) -> manipulation(이송)
+  -> vision(배치 검증) -> equipment
+  -> manipulation(시험 후 정리) -> vision(정리 검증)
+  -> analysis -> knowledge -> bo -> guardian
   -> continue면 design으로 반복, stop이면 complete, error면 error
 ```
+
+위 경로는 현재 시편 이송·정리가 포함된 구성의 예시이며, 모든 실험·모드에
+강제되는 일직선 순서는 아닙니다. Vision은 대기하거나 경로를 전환할 수 있고,
+시험 후 정리가 요구되면 같은 run·cycle·specimen의 완료·검증 근거가 있어야
+Analysis로 넘어갑니다. 장비 응답 성공만으로 이 조건을 대신하지 않습니다.
+[Orchestration Route](../../README.ko.md#orchestration-route)에서 전체 그래프를,
+[Manipulation](../agents/manipulation_agent.md)과 [Vision](../agents/vision_agent.md)에서
+배치·정리 검증 경계를 확인할 수 있습니다. Analysis는 실측 목적값을 BO에
+전달하며, 설정된 백그라운드 FEM 작업은 이 동기식 데이터 처리와 분리됩니다.
 
 핵심 원칙:
 

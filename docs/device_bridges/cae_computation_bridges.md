@@ -41,6 +41,14 @@ supersedes: []
 
 # CAE, CalculiX, and PINN Bridge Reference
 
+| At a glance | Details |
+|---|---|
+| Purpose | Staged solver computation and saved-field access |
+| Connects | Analysis / CAE workspace ↔ computation services |
+| Effect | Local computation and artifacts; no equipment motion |
+| Implementation | [CAE tools](../../mcp_tools/cae_tools.py) |
+| Verification | [Recorded scope and evidence](#current-verification) · 2026-09-09 |
+
 ## Summary
 
 The CAE Computation boundary provides three related adapters: a deterministic/

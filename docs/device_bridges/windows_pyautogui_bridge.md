@@ -21,6 +21,14 @@ related_docs:
 
 # Windows PyAutoGUI Bridge Reference
 
+| At a glance | Details |
+|---|---|
+| Purpose | Paired desktop programs, recording and execution evidence |
+| Connects | Lab Equipment / workspace ↔ Windows worker |
+| Effect | GUI input can operate equipment through the selected application |
+| Implementation | [Windows bridge](../../device_bridges/windows_pyautogui_bridge.py) |
+| Verification | Document baseline: 2026-08-28; no new hardware validation implied |
+
 ## 목적
 
 Windows PyAutoGUI Bridge는 Linux Equipment Runtime의 저수준 worker입니다. Windows desktop에서 검증된 프로그램을 실행하고 화면, locator, 녹화, 파일, 요청 로그를 반환합니다.

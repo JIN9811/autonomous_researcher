@@ -31,6 +31,14 @@ supersedes: []
 
 # Printer Fleet Bridge Reference
 
+| At a glance | Details |
+|---|---|
+| Purpose | Select a printer profile and route preparation/status requests |
+| Connects | Specimen / 3DP workspace ↔ selected Bambu or Prusa provider |
+| Effect | Delegated upload and motion are possible; no silent provider fallback |
+| Implementation | [Printer tools](../../mcp_tools/printer_tools.py) |
+| Verification | [Recorded scope and evidence](#current-verification) · 2026-08-09 |
+
 ## Summary
 
 The Printer Fleet boundary chooses one configured printer profile and routes

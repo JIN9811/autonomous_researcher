@@ -30,6 +30,12 @@ claim_ids:
 
 # Safety, Ethics, and Limitations
 
+| At a glance | Details |
+|---|---|
+| Topic | Human oversight, control boundaries and scientific integrity |
+| Evidence boundary | [Limitations](#limitation-register); implemented controls are not safety certification |
+| Recorded basis | [Source of truth](#source-of-truth) · [Verification scope](#verification) |
+
 ## Summary
 
 ATR coordinates software, models, remote workers, and potentially hazardous
@@ -59,7 +65,7 @@ to those controls.
 | Human oversight | Approval, review, stop, and operator workspaces | Constant attention, informed consent, or error-free judgment | Scenario behavior `not_evaluated` |
 | Pre-execution control | Schema, capability, allowlist, and dry-run checks | Physical safety under valid but hazardous commands | Broad live behavior `not_evaluated` |
 | Failure containment | Error/stop states, checkpointing, bounded retries | Safe recovery from every uncertain external effect | Failure matrix `not_evaluated` |
-| Auditability | Events, artifacts, ledger/outbox, proof records | Scientific truth or completeness of all provenance | Partially supported structurally |
+| Auditability | Events, artifacts, local audit receipts, cited Markdown/JSONL and proof records | Scientific truth or completeness of all provenance | Partially supported structurally |
 | Access boundary | Bridge configuration, authentication surfaces, secret separation | Secure deployment under arbitrary networks | Security assessment `not_evaluated` |
 
 ## Human Oversight
@@ -132,7 +138,7 @@ live protocol.
 
 The system MUST preserve failed, stopped, and contradictory outcomes when they
 affect interpretation. Selective omission of interventions or failed runs is
-not permitted. Model-generated explanations, inferred graph relations, and
+not permitted. Model-generated explanations, curated knowledge notes, and
 optimization candidates MUST remain distinguishable from measured facts.
 
 Documentation or test pass status MUST NOT be used as evidence of scientific

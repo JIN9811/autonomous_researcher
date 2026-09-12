@@ -35,6 +35,14 @@ supersedes: []
 
 # UTM Vision Bridge Reference
 
+| At a glance | Details |
+|---|---|
+| Purpose | Camera capture, pose tracking and temporal visual evidence |
+| Connects | Vision / camera workspace ↔ camera and ROS services |
+| Effect | Capture, configuration and process control; not instrument actuation |
+| Implementation | [Vision runtime](../../device_bridges/utm_runtime_bridge.py) |
+| Verification | [Recorded scope and evidence](#current-verification) · 2026-08-09 |
+
 ## Summary
 
 The UTM Vision boundary manages the configured ROS 2 UTM/YOLO/camera runtime,

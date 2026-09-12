@@ -19,8 +19,8 @@ source_of_truth:
   - device_bridges
   - Pyautogui_server_for_window
   - web
-last_verified: 2026-08-09
-verified_against: 0b7627b
+last_verified: 2026-09-12
+verified_against: 5542ef2
 paper_section: appendix_hardware_and_deployment
 research_questions:
   - RQ3
@@ -36,6 +36,12 @@ supersedes: []
 -->
 
 # Appendix B: Hardware and Deployment
+
+| At a glance | Details |
+|---|---|
+| Topic | Deployment roles, dependencies and hardware boundaries |
+| Evidence boundary | Topology inspection; not certification of every deployment |
+| Recorded basis | 2026-09-12 · [Scope and verification](#verification) |
 
 ## Summary
 
@@ -53,7 +59,9 @@ installation recipe.
 ## Source of Truth
 
 Bootstrap/configuration sources, bridge implementations, the Windows worker,
-and web/API surfaces at baseline `0b7627b` define the available roles.
+and web/API surfaces define the available roles. Knowledge deployment was
+rechecked against `5542ef2`; earlier deployment evidence keeps its original
+configuration and date.
 
 ## Deployment Roles
 
@@ -61,7 +69,7 @@ and web/API surfaces at baseline `0b7627b` define the available roles.
 |---|---|---|---|
 | Primary application host | FastAPI, orchestrator, agents, local state, operator workspaces | Local process and configured services | OS/Python/dependencies, server command, graph/modules, logs |
 | Model host/service | Local managed model or remote inference provider | Model API or managed process | Provider/model/version, readiness, generation config, latency protocol if measured |
-| Knowledge backend | Durable local records and optional graph service | Service/repository interface | Backend/version, health, sync/receipt state, data snapshot |
+| Knowledge storage and source intake | Ontology-guided Markdown, JSONL, local audit and preserved source originals | Local stores and bounded curation/retrieval APIs | Storage/configuration, intake status, citations, write receipts and data snapshot |
 | Remote Windows worker | Allowlisted desktop/equipment automation | Authenticated bridge | Worker version, capability list, target application, proof and stop path |
 | Device host/bridge | Printer, robot, camera, instrument, or analysis service | Provider-specific bridge | Device/profile/firmware, calibration, dry run, raw response/proof |
 | Browser client | Operator review and control | HTTP/API and rendered UI | Browser/driver, viewport, route, server mode, trace/screenshots |
@@ -97,11 +105,15 @@ when the same bridge interface is used.
 
 ## Optional Services
 
-Model providers, Neo4j, analysis services, robotics stacks, slicers, and vendor
+Model providers, analysis services, robotics stacks, slicers, and vendor
 software may be optional for a selected reproduction tier. The system should
 report unavailable or degraded state rather than silently changing the
 evidence environment. A fallback creates a new evaluated configuration and
 must be recorded.
+
+Active Knowledge memory and Source Library do not require Neo4j or a graph
+synchronization worker. Preserved offline graph utilities are not dependencies
+of this runtime path.
 
 ## Network and Secret Handling
 
@@ -127,6 +139,9 @@ code deployment, compatibility certification, physical equipment bill of
 materials, or paper-scoped live topology record.
 
 ## Verification
+
+Knowledge deployment roles were refreshed against `5542ef2` on 2026-09-12 by
+static inspection. No optional service or device was started.
 
 Reviewed on 2026-08-09 against bootstrap, configuration, bridge, worker, and
 web source families at baseline `0b7627b`.

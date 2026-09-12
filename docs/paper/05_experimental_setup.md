@@ -39,6 +39,12 @@ supersedes: []
 
 # Experimental Setup
 
+| At a glance | Details |
+|---|---|
+| Topic | Evaluation environments, protocols and required evidence |
+| Evidence boundary | Protocol definition; planned evaluations are not completed results |
+| Recorded basis | 2026-08-09 · [Scope and verification](#verification) |
+
 ## Summary
 
 ATR evaluation is organized by evidence environment rather than by a single
@@ -118,7 +124,7 @@ The minimum protocol executes or replays a run from initialization to an
 explicit continuation or terminal state. It records every stage transition,
 typed handoff, checkpoint, artifact, failure route, and resume action. Scenario
 families SHOULD include nominal flow, invalid contract, unavailable capability,
-analysis failure, knowledge-sync degradation, Guardian stop, and uncertain
+analysis failure, knowledge storage/retrieval degradation, Guardian stop, and uncertain
 external effect.
 
 Primary measures:

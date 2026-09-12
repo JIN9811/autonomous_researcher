@@ -31,6 +31,14 @@ supersedes: []
 
 # Base and Simulator Bridge Reference
 
+| At a glance | Details |
+|---|---|
+| Purpose | Abstract contracts and deterministic test substitutes |
+| Connects | Agents and tools ↔ simulated printer, camera, robot and instrument |
+| Effect | No physical device actuation |
+| Implementation | [Base contract](../../device_bridges/base_bridge.py) |
+| Verification | [Recorded scope and evidence](#current-verification) · 2026-08-09 |
+
 ## Summary
 
 `BaseBridge` defines the minimal `execute(command, payload) -> dict` interface.

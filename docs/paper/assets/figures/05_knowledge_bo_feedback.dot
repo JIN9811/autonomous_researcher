@@ -1,21 +1,23 @@
 digraph knowledge_bo_feedback {
-  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.34", ranksep="0.5", fontname="DejaVu Sans", label="Knowledge and Bayesian-optimization feedback", labelloc="t", fontsize=18];
-  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=9, margin="0.1,0.07"];
-  edge [color="#52667A", fontname="DejaVu Sans", fontsize=8, arrowsize=0.7];
+  graph [rankdir=LR, bgcolor="transparent", pad="0.25", nodesep="0.4", ranksep="0.55", fontname="DejaVu Sans", label="Measured values and cited knowledge have separate roles", labelloc="t", fontsize=18];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=11, margin="0.12,0.09"];
+  edge [color="#52667A", fontname="DejaVu Sans", fontsize=10, arrowsize=0.7];
 
-  observation [label="Validated\nobservation"];
-  analysis [label="Analysis\nartifact"];
-  service [label="Knowledge\nservice"];
-  ledger [label="Audit ledger +\ndurable outbox", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
-  kg [label="Bounded\nknowledge graph", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
-  trials [label="Accepted trial\nhistory"];
-  bo [label="Bayesian\noptimization"];
-  candidate [label="Candidate\nproposal"];
-  gate [label="Supervisor +\nGuardian", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
-  design [label="Next design"];
-  reconcile [label="Relation proposal\nreview", style="rounded,dashed,filled", fillcolor="#F5F3FF", color="#7157A8"];
+  analysis [label="Analysis-owned\nmeasurements"];
+  trials [label="Accepted\ntrial values", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  service [label="Knowledge LLM\ninspect / classify / publish"];
+  memory [label="Markdown + JSONL\nlocal audit + citations", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  sources [label="Source Library\npage-wise intake\none note per source", style="rounded,dashed,filled", fillcolor="#F5F3FF", color="#7157A8"];
+  bo [label="BO LLM\nstrategy + result review"];
+  optimizer [label="LHS / BoTorch\nnumerical candidate"];
+  design [label="Orchestrator\nto Design"];
 
-  observation -> analysis -> service -> ledger -> kg -> trials -> bo -> candidate -> gate -> design;
-  kg -> reconcile [style=dashed, color="#7157A8"];
-  reconcile -> service [style=dashed, color="#7157A8", label="approved only"];
+  analysis -> service [label="evidence"];
+  service -> memory [label="validated writes"];
+  sources -> service [style=dashed, color="#7157A8", label="scoped retrieval"];
+  memory -> bo [color="#2E7D59", label="cited context"];
+  analysis -> trials -> bo;
+  bo -> optimizer [label="run_optimizer"];
+  optimizer -> bo [label="exact result", constraint=false];
+  bo -> design [label="accepted proposal"];
 }

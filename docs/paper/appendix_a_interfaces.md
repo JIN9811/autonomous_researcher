@@ -20,8 +20,8 @@ source_of_truth:
   - device_bridges
   - knowledge
   - app/main.py
-last_verified: 2026-08-09
-verified_against: 0b7627b
+last_verified: 2026-09-12
+verified_against: 5542ef2
 paper_section: appendix_interfaces
 research_questions:
   - RQ1
@@ -41,6 +41,12 @@ supersedes: []
 -->
 
 # Appendix A: Interfaces and Contracts
+
+| At a glance | Details |
+|---|---|
+| Topic | Agent, runtime, device and knowledge interface families |
+| Evidence boundary | [Agent API matrix](../agents/agent_api_connection_matrix.md); concrete schemas remain code-owned |
+| Recorded basis | 2026-09-12 · [Scope and verification](#verification) |
 
 ## Summary
 
@@ -75,7 +81,7 @@ The `agents/`, `orchestrator/`, `graphs/modules/`, `device_bridges/`,
 | Guardian | `policies/guardian_gate.py` | Action/risk/evidence context | Continue, stop, review, or error | Decision record and operator boundary |
 | Model routing | `backends/`, agent context/bootstrap | Task and bounded prompt/input | Provider response normalized to caller contract | Readiness and priority lease where configured |
 | Device bridges | `device_bridges/` | Capability-oriented action | Status, artifact, proof, or error | Allowlist, auth, dry run, timeout |
-| Knowledge service | `knowledge/service.py` and repositories | Validated event/query/review request | Context, report, graph update, receipt | Ontology, ledger, outbox, bounded query |
+| Knowledge memory and Source Library | `agents/knowledge_agent.py`, `knowledge/markdown_runtime.py`, `knowledge/source_api.py` | Run evidence or separately submitted sources; scope-bound retrieval request | Context, report, Markdown/JSONL records, citations and local receipts | Ontology, provenance, identity, scope and validated publication |
 | Graph/module management | graph/module APIs and manifests | Versioned configuration or draft | Validation, dry run, saved/activated state | Active-run and handler constraints |
 | Operator workspaces | FastAPI routes, templates, static clients | Review/configuration/action intent | Rendered state and API result | Server policy remains authoritative |
 
@@ -131,6 +137,9 @@ artifact may need generated OpenAPI/schema exports pinned to the release
 commit.
 
 ## Verification
+
+The Knowledge interface row was refreshed against `5542ef2` on 2026-09-12 by
+static inspection. No API or device was invoked for this documentation refresh.
 
 Interface families were reviewed on 2026-08-09 against baseline `0b7627b` and
 the current code snapshot.

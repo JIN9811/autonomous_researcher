@@ -275,7 +275,7 @@ agent contract:
 | `bo_agent_runtime_guideline.txt` | [BO](bo_agent.md) | BO algorithm/runtime detail |
 | `knowledge_agent_self_evolution_runtime_guideline.md` | [Knowledge](knowledge_agent.md) | Knowledge/self-evolution detail |
 | `manipulation_pi05_transfer_runtime_guideline.txt` | [Manipulation](manipulation_agent.md) | Pi0.5 transfer detail |
-| `specimen_design_existing_runtime_guideline.txt` | [Design](design_agent.md), [Specimen](specimen_agent.md) | Older combined design/specimen context |
+| `specimen_design_existing_runtime_guideline.txt` | [Design](design_agent.md), [Specimen](specimen_agent.md) | Runtime-consumed legacy prompt input, not a reader-facing current contract; retained in place to avoid changing execution |
 | `vision_pickup_observation_runtime_guideline.txt` | [Vision](vision_agent.md) | Pickup observation detail |
 
 ## Verification Method

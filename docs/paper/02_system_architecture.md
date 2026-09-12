@@ -19,8 +19,11 @@ source_of_truth:
   - orchestrator/supervisor.py
   - app/controller.py
   - policies/guardian_gate.py
-last_verified: 2026-08-09
-verified_against: 0b7627b
+  - agents/knowledge_agent.py
+  - knowledge/markdown_runtime.py
+  - knowledge/source_api.py
+last_verified: 2026-09-12
+verified_against: 5542ef2
 paper_section: system_architecture
 research_questions:
   - RQ1
@@ -40,12 +43,19 @@ supersedes: []
 
 # System Architecture
 
+| At a glance | Details |
+|---|---|
+| Topic | Control areas, executable graph and evidence ownership |
+| Evidence boundary | Static code/configuration inspection; not deployment certification |
+| Recorded basis | 2026-09-12 · [Scope and verification](#verification) |
+
 ## Summary
 
 ATR separates control, agent work, physical integration, evidence, and
-operator interaction into explicit layers. The checked-in graph contains 19
-nodes, 68 declared edges, and 12 stage-dispatch entries at code baseline
-`0b7627b`. These are dated architecture observations, not stability or
+operator interaction into explicit layers. At code baseline `5542ef2`, the
+checked-in graph contains 19 nodes, 74 declared edges, and 12 stage-dispatch
+entries. The reader-facing runtime map displays 50 connections after internal
+dispatch/step-return edges are filtered. These are architecture observations, not stability or
 performance guarantees.
 
 ## Scope
@@ -100,7 +110,7 @@ The layers have different authorities:
 | Agent and sidecar | Domain reasoning and typed outputs | Schema/policy rejection, bounded agent error | Stage artifacts and handoff packets |
 | Guardian | Route, allow, deny, or require review | Unsafe/uncertain decision | Guardian decision record |
 | Device/model adapter | External execution behind stable contracts | Unavailable capability, dry-run failure, bridge error | Request, response, proof artifact |
-| Evidence and knowledge | Ledger, outbox, graph, reports, provenance | Degraded sync, validation rejection | Durable records and receipts |
+| Evidence and knowledge | Ontology-guided Markdown, JSONL, local audit, reports and provenance | Missing evidence, scope/validation rejection, storage failure | Source citations, durable records and receipts |
 | Platform workspace | Inspect, configure, review, and operate | Authorization/UI/API error | API response and browser evidence |
 
 ## Executable Graph
@@ -111,8 +121,8 @@ Dispatch maps the current stage to one of 12 entries: `idle`, `design`,
 `bo`, `guardian`, `complete`, and `error`.
 
 Declared edges include logical transitions, supervisor overlays, evidence
-flows, and runtime-sidecar relations. Counting all 68 edges therefore describes
-the configuration surface; it does not imply 68 sequential physical actions.
+flows, and runtime-sidecar relations. Counting all 74 edges therefore describes
+the configuration surface; it does not imply 74 sequential physical actions.
 
 ## Stage Contracts
 
@@ -125,7 +135,7 @@ the configuration surface; it does not imply 68 sequential physical actions.
 | Manipulation | Placement or motion intent | Manipulation result and proof | Device bridge and physical-action gate |
 | Equipment | Typed instrument action | Measurement/execution artifact | Guardian, operator approval, dry run, timeout |
 | Analysis | Validated observations | Analysis artifact | Input/schema validity and bounded failure |
-| Knowledge | Accepted cycle artifacts | Context, report, graph events | Ontology, ledger, outbox, sync validation |
+| Knowledge | Accepted cycle artifacts and scoped source evidence | Context, report, Markdown notes and typed memory | Ontology, provenance, scope and local audit validation |
 | Bayesian optimization | Prior trials and constraints | Next candidate | Candidate remains a proposal until governed handoff |
 | Guardian | Risk/evidence/context packet | Continue, stop, review, or error decision | Policy and operator boundary |
 | Complete | Terminal success state | Final run state | No implicit next action |
@@ -158,16 +168,23 @@ configuration is only architecture evidence.
 ## Evidence Plane
 
 The evidence plane receives validated artifacts from execution and analysis,
-persists knowledge events, and returns context to later design decisions. The
-Knowledge service uses durable ledger/outbox patterns and a bounded graph
-interface. This makes provenance a system path rather than a final-report
-afterthought, while leaving scientific correctness to evaluation.
+persists knowledge records, and returns context to later design decisions.
+The Knowledge Agent uses ontology-guided Markdown, typed JSONL records and a
+local audit ledger. Its LLM inspects evidence, selects scoped retrieval and
+publishes cited context without rewriting measured values. Source Library
+separately preserves submitted originals and curates page-wise input into one
+published note per source. Active graph storage and reconciliation are retired;
+the ontology vocabulary remains in use.
+
+See the [Knowledge Agent](../agents/knowledge_agent.md) for the decision tools,
+storage contracts and source-intake boundary. Provenance is part of execution,
+while scientific correctness remains an evaluation question.
 
 ## Compatibility Boundaries
 
 - Modules and handlers must match declared identifiers and schemas.
 - Raw model output does not bypass policy, ontology, or device contracts.
-- Raw Cypher from an LLM or GUI is not an accepted graph interface.
+- Knowledge writes and retrieval remain bounded by source identity, ontology and caller scope.
 - A remote worker remains behind an authenticated, allowlisted bridge.
 - Presentation metadata does not become executable plugin code.
 
@@ -179,6 +196,10 @@ backend. Counts can change as routes and overlays evolve. Evaluation must use
 behavioral evidence rather than treating diagram completeness as correctness.
 
 ## Verification
+
+Current graph counts and Knowledge ownership were checked by static inspection
+on 2026-09-12 against `5542ef2`. No hardware or model was invoked for this refresh.
+The earlier application-import measurements below remain historical evidence.
 
 On 2026-08-09, importing the FastAPI application produced 346 `APIRoute`
 entries and 353 total route entries. Parsing the graph configuration produced

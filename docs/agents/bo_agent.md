@@ -39,13 +39,15 @@ supersedes: []
 
 ## Status at a Glance
 
-- Runtime status: Implemented / software recommendation only
-- LLM decision layer: Implemented / API and local vLLM verified
-- Numeric candidate authority: LHS / BoTorch; two continuous variables by default
-- Physical effect: None
-- Primary handoff: `next_design_request.v1` → Orchestrator → Design
-- Live hardware validation: No new device validation in this revision
-- Known gap: No demonstrated optimization gain from the LLM decision layer
+| At a glance | Details |
+|---|---|
+| Runtime status | Implemented / software recommendation only |
+| LLM decision layer | Implemented / API and local vLLM verified |
+| Numeric candidate authority | LHS / BoTorch; two continuous variables by default |
+| Physical effect | None |
+| Primary handoff | `next_design_request.v1` → Orchestrator → Design |
+| Live hardware validation | No new device validation in this revision |
+| Known gap | No demonstrated optimization gain from the LLM decision layer |
 
 ## Overview and Responsibilities
 

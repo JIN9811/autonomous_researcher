@@ -54,10 +54,10 @@
 <!-- evidence -->
 <g id="node6" class="node">
 <title>evidence</title>
-<polygon fill="#e9f7ef" stroke="#2e7d59" points="268,-36 36,-36 36,0 274,0 274,-30 268,-36"/>
-<polyline fill="none" stroke="#2e7d59" points="268,-36 268,-30 "/>
-<polyline fill="none" stroke="#2e7d59" points="274,-30 268,-30 "/>
-<text text-anchor="middle" x="155" y="-15.5" font-family="DejaVu Sans" font-size="10.00">Ledger / artifacts / knowledge graph / reports</text>
+<polygon fill="#e9f7ef" stroke="#2e7d59" points="304,-36 0,-36 0,0 310,0 310,-30 304,-36"/>
+<polyline fill="none" stroke="#2e7d59" points="304,-36 304,-30 "/>
+<polyline fill="none" stroke="#2e7d59" points="310,-30 304,-30 "/>
+<text text-anchor="middle" x="155" y="-15.5" font-family="DejaVu Sans" font-size="10.00">Artifacts / Markdown + JSONL / local audit / source citations</text>
 </g>
 <!-- agents&#45;&gt;evidence -->
 <g id="edge5" class="edge">
@@ -86,7 +86,7 @@
 <!-- evidence&#45;&gt;orchestration -->
 <g id="edge7" class="edge">
 <title>evidence&#45;&gt;orchestration</title>
-<path fill="none" stroke="#2e7d59" d="M35.95,-33.05C15.14,-42.23 0,-56.87 0,-80 0,-208 0,-208 0,-208 0,-230.33 42.97,-244.86 90.76,-254.11"/>
+<path fill="none" stroke="#2e7d59" d="M29.52,-36.16C12.09,-45.44 0,-59.32 0,-80 0,-208 0,-208 0,-208 0,-230.33 42.97,-244.86 90.76,-254.11"/>
 <polygon fill="#2e7d59" stroke="#2e7d59" points="90.51,-256.56 97.84,-255.44 91.41,-251.74 90.51,-256.56"/>
 <text text-anchor="middle" x="62" y="-140.3" font-family="Times,serif" font-size="14.00">validated context</text>
 </g>

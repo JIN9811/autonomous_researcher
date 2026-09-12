@@ -38,6 +38,12 @@ supersedes: []
 
 # Problem and Contributions
 
+| At a glance | Details |
+|---|---|
+| Topic | Motivation, research questions and system/platform contributions |
+| Evidence boundary | [Claim boundaries](09_claim_evidence_traceability.md); contribution statements are not performance results |
+| Recorded basis | 2026-08-09 · [Scope and verification](#verification) |
+
 ## Summary
 
 ATR transforms existing laboratories by adding structured AI layers above

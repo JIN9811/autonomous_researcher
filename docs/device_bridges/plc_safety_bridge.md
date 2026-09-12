@@ -32,6 +32,14 @@ supersedes: []
 
 # PLC Safety Bridge Operator Guide
 
+| At a glance | Details |
+|---|---|
+| Purpose | Supervisory PLC stop, recovery and status integration |
+| Connects | Controller ↔ PLC over MC Protocol Type 3E |
+| Effect | PLC writes and controller stop/recovery; not a hardwired safety replacement |
+| Implementation | [PLC implementation](../../device_bridges/plc_bridge.py) |
+| Verification | [Software-only checks](#software-only-verification); physical validation pending |
+
 ## Purpose And Safety Boundary
 
 The bridge connects the ATR Controller safety state to a Mitsubishi PLC through

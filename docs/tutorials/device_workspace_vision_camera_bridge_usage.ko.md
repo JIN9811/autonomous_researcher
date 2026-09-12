@@ -1,5 +1,12 @@
 # Vision / UTM Camera Bridge 사용법
 
+| At a glance | Details |
+|---|---|
+| Purpose | 카메라 연결·프레임·보정·비전 브릿지 상태 확인 |
+| Workspace | `/device-bridge/vision-utm` |
+| Preparation | 사용할 카메라·ROS 설정과 캡처 대상 확인 |
+| Reference | [Vision Bridge](../device_bridges/utm_vision_bridge.md) · [Vision Agent](../agents/vision_agent.md) |
+
 이 페이지는 Vision Agent가 UTM ROS runtime에서 사용할 Camera를 설정하고 검증하는 운영자 화면입니다. 특정 카메라 제품명을 bridge 이름으로 쓰지 않습니다. 실제 물리 장치명은 `/dev/v4l/by-id` 탐색 결과 label로만 표시됩니다.
 
 ## 접속

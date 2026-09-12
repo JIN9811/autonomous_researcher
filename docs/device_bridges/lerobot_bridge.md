@@ -36,6 +36,14 @@ supersedes: []
 
 # LeRobot Bridge Reference
 
+| At a glance | Details |
+|---|---|
+| Purpose | Robot profiles, teleoperation, recording, training and rollout |
+| Connects | Manipulation / LeRobot workspace ↔ robot and camera stack |
+| Effect | Robot motion is possible through live executors |
+| Implementation | [LeRobot implementation](../../device_bridges/lerobot_bridge.py) |
+| Verification | [Recorded scope and evidence](#current-verification) · 2026-09-06 |
+
 ## Summary
 
 `LeRobotBridge` is the robot/process boundary for profile and port management,

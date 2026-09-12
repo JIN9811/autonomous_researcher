@@ -36,12 +36,14 @@ supersedes: []
 
 ## Status at a Glance
 
-- Runtime status: Managed stacked Flow decision boundary implemented in the working tree
-- LLM decision layer: Implemented; archived terminal evidence checked through registered API/local models
-- Physical effect: Existing gated Skills and Windows/Local workers only
-- Primary handoff: Verified CSV/readiness → Manipulation clearance → fresh Vision → Analysis
-- Live hardware validation: Not performed for this reconstruction
-- Known limit: Offline recovery decisions verified; live recovery not exercised; no crash-resume
+| At a glance | Details |
+|---|---|
+| Runtime status | Managed stacked Flow decision boundary implemented in the working tree |
+| LLM decision layer | Implemented; archived terminal evidence checked through registered API/local models |
+| Physical effect | Existing gated Skills and Windows/Local workers only |
+| Primary handoff | Verified CSV/readiness → Manipulation clearance → fresh Vision → Analysis |
+| Live hardware validation | Not performed for this reconstruction |
+| Known limit | Offline recovery decisions verified; live recovery not exercised; no crash-resume |
 
 ## Summary and Actual Role
 

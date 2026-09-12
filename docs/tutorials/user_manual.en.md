@@ -1,5 +1,12 @@
 # Autonomous Researcher Complete User Manual
 
+| At a glance | Details |
+|---|---|
+| Purpose | Navigate installation, GUI operation and extension workflows |
+| Audience | New users, operators and developers |
+| Preparation | Runtime environment, model configuration and selected device profiles |
+| Reading path | [Requirements](../../REQUIREMENTS.md) · [Agent references](../agents/README.md) |
+
 This manual is the operator and developer entry point for the current repository.
 It is split into beginner and advanced sections so a new user can run the GUI while a developer can trace the runtime contracts, APIs, and extension points.
 
@@ -101,19 +108,28 @@ stored key but returns local vLLM to first priority.
 
 ## 2. Advanced Path
 
-### 2.1 Closed Loop
+### 2.1 Orchestration Route
 
 The executable source of truth is [../../graphs/configs/atr_closed_loop.yaml](../../graphs/configs/atr_closed_loop.yaml).
 
 ```text
-dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian
-                                                                                                      | continue
-                                                                                                      v
-                                                                                                    design
-
-guardian -> stop: complete
-guardian -> error: error
+dispatch -> current executable stage
+idle -> design -> specimen -> vision (pickup) -> manipulation (transfer)
+     -> vision (placement verification) -> equipment
+     -> manipulation (post-test clearance) -> vision (clearance verification)
+     -> analysis -> knowledge -> bo -> guardian
+guardian: continue -> design | stop -> complete | error -> error
 ```
+
+This is the configured specimen-transfer/clearance path, not a mandatory
+sequence for every experiment or mode. Vision can wait or redirect, and the
+post-test handoff is guarded by same-run/cycle/specimen evidence. When clearance
+is required, a successful equipment response alone cannot advance to Analysis.
+The [Orchestration Route](../../README.md#orchestration-route) shows the full
+graph; [Manipulation](../agents/manipulation_agent.md) and
+[Vision](../agents/vision_agent.md) explain the two verification boundaries.
+Analysis publishes the measured objective for BO; configured background FEM
+work is separate from the synchronous measurement-processing handoff.
 
 Runtime evidence is emitted through `run.started`, `node.started`, `node.completed`, `edge.traversed`, `approval.*`, `artifact.created`, and terminal run events.
 

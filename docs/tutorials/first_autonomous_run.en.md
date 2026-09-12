@@ -1,5 +1,12 @@
 # First Autonomous Run (English)
 
+| At a glance | Details |
+|---|---|
+| Purpose | Check stage progression, artifacts and trace on a first run |
+| Audience | First-time operators |
+| Preparation | Dependencies, model and execution mode; physical actions are opt-in |
+| Reading path | [Complete user manual](user_manual.en.md) |
+
 This tutorial validates the whole cycle from operator message to run completion without skipping safety gates.
 
 ## Scope

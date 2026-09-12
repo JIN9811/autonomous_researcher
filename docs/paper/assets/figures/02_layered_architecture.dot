@@ -8,7 +8,7 @@ digraph layered_architecture {
   agents [label="Typed agent stages + sidecars"];
   guardian [label="Guardian and approval gates", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];
   adapters [label="Device bridges + model backends"];
-  evidence [label="Ledger / artifacts / knowledge graph / reports", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+  evidence [label="Artifacts / Markdown + JSONL / local audit / source citations", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
   platform [label="Modules / graph management / workspaces", style="rounded,dashed,filled", fillcolor="#F5F3FF", color="#7157A8"];
 
   operator -> orchestration -> agents -> guardian -> adapters;

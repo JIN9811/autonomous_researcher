@@ -35,6 +35,12 @@ supersedes: []
 
 # Reproducibility
 
+| At a glance | Details |
+|---|---|
+| Topic | Reproduction tiers from inspection to supervised hardware |
+| Evidence boundary | Each tier requires its own recorded inputs, commands and outcomes |
+| Recorded basis | 2026-08-09 · [Scope and verification](#verification) |
+
 ## Summary
 
 Reproduction is progressive. A reviewer can validate the public document and

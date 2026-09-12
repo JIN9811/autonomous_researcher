@@ -165,9 +165,14 @@ Knowledge Agent report should show:
 
 Live chat should report memory/evidence update counts and top evolution target, not raw JSON.
 
-The `/knowledge` workspace owns Markdown search/detail and the preserved Memory,
-Ontology and Manual RAG tabs. Historical graph review files are not deleted, but
-no graph worker is started by this path.
+The `/knowledge` workspace owns Markdown search/detail, Memory, Ontology and
+Source Library. Source Library preserves submitted originals, extracts long
+documents page by page, and uses the bounded curation tools to publish one
+cited Markdown note per source. Its intake runs separately from the experiment
+stage; other agents retrieve published notes within their permitted scope.
+See the [Knowledge Reference](knowledge_agent.md) and
+[Source Library guide](../knowledge/manual_rag_knowledge.ko.md). Historical
+graph review files are retained, but no graph worker is started by this path.
 
 ## Safety Rules
 

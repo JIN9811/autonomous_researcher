@@ -29,6 +29,17 @@ supersedes: []
 
 *Role overview; detailed execution and connection diagrams follow below.*
 
+## Status at a Glance
+
+| At a glance | Details |
+|---|---|
+| Runtime status | Implemented / policy gates, incidents and approval coordination |
+| LLM decision layer | Advisory policy note; deterministic checks retain gating authority |
+| Physical effect | No direct motion; downstream actions can be blocked or stopped |
+| Primary handoff | Continue / stop / error decisions → Orchestrator and controller |
+| Verification | [Inspection, regressions and read-only re-evaluation](#current-verification) |
+| Known gap | Live safety effectiveness and physical stop latency not established |
+
 ## Summary
 
 `GuardianAgent` is ATR's graph-wide safety review and continuation control
@@ -150,12 +161,13 @@ not rewrite the original failure or gate history.
 |---|---|---|---|---|---|
 | `device.health` | registered tool/bridge registry | in-process to device status | all | read_only | health snapshot |
 | `experiment.queue.status` | experiment queue tool | in-process | all | read_only | queue status |
-| LLM role | `guardian_review` | selected model backend | configured | model | advisory review metadata |
+| LLM role | Runtime call: `guardian_reasoning`; module declaration: `guardian_review` | selected model backend | configured | model | advisory policy note; role names are reported separately rather than assumed identical |
 | Policy gate | `policies/guardian_gate.py` | deterministic/in-process | all | local_state | gate decision |
 | Approval service | controller/API | human boundary | live/configured | physical_possible | request and resolution |
 
 Guardian LLM work has the highest shared lease priority (`0`) relative to active
-workflow (`10`), operator chat (`20`), and background reconciliation (`30`).
+workflow (`10`), operator chat (`20`), and background work (`30`). The priority
+class does not imply that the retired Knowledge reconciliation worker runs.
 
 ## State, Events, Artifacts, and Storage
 

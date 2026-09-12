@@ -33,6 +33,14 @@ supersedes: []
 
 # Bambu Lab X2D Bridge Reference
 
+| At a glance | Details |
+|---|---|
+| Purpose | Slicing, artifact transfer, telemetry and guarded autoejection |
+| Connects | Specimen / 3DP workspace ↔ Bambu provider |
+| Effect | Upload, heating and motion are possible through gated commands |
+| Implementation | [Bambu implementation](../../device_bridges/bambu_bridge.py) |
+| Verification | [Recorded scope and evidence](#current-verification) · 2026-09-06 |
+
 ## Summary
 
 The Bambu X2D provider turns a selected fabrication request into sliced and

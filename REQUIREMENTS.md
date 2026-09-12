@@ -1,5 +1,12 @@
 # Autonomous Researcher Requirements
 
+| At a glance | Details |
+|---|---|
+| Purpose | Install external runtimes, services and device-side dependencies |
+| Audience | Workstation maintainers and deployment operators |
+| Preparation | Choose the operating system, model backend and required device integrations |
+| Reading path | [Python packages](requirements.txt) · [Setup and operation](README.en.md) · [Device bridges](docs/device_bridges/README.md) |
+
 This file lists non-Python installation requirements, external checkouts, local
 services, model downloads, and device-side programs required by this repository.
 

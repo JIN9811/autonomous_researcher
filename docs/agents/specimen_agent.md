@@ -36,12 +36,14 @@ supersedes: []
 
 ## Status at a Glance
 
-- Runtime status: Implemented
-- LLM decision layer: Implemented / API and local-model verified without actuation
-- Physical effect: Possible through existing gated printer tools
-- Primary handoff: `specimen_fabricated.v1` → Vision / Manipulation
-- Live hardware validation: Not performed for this decision-layer change
-- Known gap: Suitability decisions do not establish physical print quality
+| At a glance | Details |
+|---|---|
+| Runtime status | Implemented |
+| LLM decision layer | Implemented / API and local-model verified without actuation |
+| Physical effect | Possible through existing gated printer tools |
+| Primary handoff | `specimen_fabricated.v1` → Vision / Manipulation |
+| Live hardware validation | Not performed for this decision-layer change |
+| Known gap | Suitability decisions do not establish physical print quality |
 
 ## Overview and Responsibilities
 

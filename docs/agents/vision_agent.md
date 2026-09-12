@@ -39,12 +39,14 @@ supersedes: []
 
 ## Status at a Glance
 
-- Runtime status: Existing deterministic paths plus the bounded decision integration are implemented in the working tree
-- LLM decision layer: Generic multimodal review implemented; revised API/local choices matched 12/13 development expectations each, with remaining errors
-- Physical effect: Possible through existing ActiveCam move/capture/return and verified rollout-stop paths
-- Primary handoff: `vision_signal.v1` and role-specific verification evidence to the current graph consumer
-- Live hardware validation: Not performed for this reconstruction
-- Known gap: LIVE downstream handoffs keep their 5-second freshness bound; observed local-vLLM reviews exceeded it
+| At a glance | Details |
+|---|---|
+| Runtime status | Existing deterministic paths plus the bounded decision integration are implemented in the working tree |
+| LLM decision layer | Generic multimodal review implemented; revised API/local choices matched 12/13 development expectations each, with remaining errors |
+| Physical effect | Possible through existing ActiveCam move/capture/return and verified rollout-stop paths |
+| Primary handoff | `vision_signal.v1` and role-specific verification evidence to the current graph consumer |
+| Live hardware validation | Not performed for this reconstruction |
+| Known gap | LIVE downstream handoffs keep their 5-second freshness bound; observed local-vLLM reviews exceeded it |
 
 ## Overview and Responsibilities
 

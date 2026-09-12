@@ -43,12 +43,14 @@ supersedes: []
 
 ## Status at a Glance
 
-- Runtime status: Implemented — source curation, ontology-guided Markdown memory and typed records
-- LLM decision layer: Implemented / API and local vLLM verified
-- Physical effect: None
-- Primary handoff: `knowledge_context.v1` → BO and downstream context consumers
-- Live hardware validation: Not applicable to Knowledge; no new physical validation claimed
-- Known gap: Image-only sources need usable text; retrieval benefit has no held-out comparative benchmark
+| At a glance | Details |
+|---|---|
+| Runtime status | Implemented — source curation, ontology-guided Markdown memory and typed records |
+| LLM decision layer | Implemented / API and local vLLM verified |
+| Physical effect | None |
+| Primary handoff | `knowledge_context.v1` → BO and downstream context consumers |
+| Live hardware validation | Not applicable to Knowledge; no new physical validation claimed |
+| Known gap | Image-only sources need usable text; retrieval benefit has no held-out comparative benchmark |
 
 ## Overview and Responsibilities
 

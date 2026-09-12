@@ -4,8 +4,9 @@ digraph closed_loop_evidence_flow {
   edge [color="#315C9B", fontname="DejaVu Sans", fontsize=8, arrowsize=0.7];
 
   design [label="Design"];
-  prepare [label="Specimen +\nmanipulation"];
+  prepare [label="Specimen + transfer\n+ placement verification"];
   equipment [label="Equipment"];
+  clear [label="Post-test clearance\n+ Vision verification"];
   analysis [label="Analysis"];
   knowledge [label="Knowledge"];
   bo [label="Bayesian\noptimization"];
@@ -13,7 +14,11 @@ digraph closed_loop_evidence_flow {
   artifacts [label="Versioned artifacts", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
   ledger [label="Evidence ledger +\ncheckpoint state", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
 
-  design -> prepare -> equipment -> analysis -> knowledge -> bo -> gate -> design;
+  design -> prepare -> equipment;
+  equipment -> clear [label="when required"];
+  clear -> analysis;
+  equipment -> analysis [style=dashed, label="no clearance contract", constraint=false];
+  analysis -> knowledge -> bo -> gate -> design;
   design -> artifacts [color="#2E7D59"];
   equipment -> artifacts [color="#2E7D59"];
   analysis -> artifacts [color="#2E7D59"];

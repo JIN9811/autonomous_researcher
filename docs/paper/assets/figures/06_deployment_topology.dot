@@ -9,14 +9,16 @@ digraph deployment_topology {
     style="rounded";
     web [label="FastAPI +\noperator workspaces"];
     orchestrator [label="Orchestrator +\nagents"];
-    stores [label="Checkpoints +\nartifacts + ledger", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+    stores [label="Checkpoints + artifacts\nMarkdown / JSONL / audit", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
+    sources [label="Source Library\noriginals + curated notes", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
     web -> orchestrator -> stores;
+    web -> sources [label="source intake"];
+    sources -> orchestrator [label="scoped retrieval"];
   }
 
   worker [label="Remote Windows\nworker", style="rounded,dashed,filled", fillcolor="#F5F3FF", color="#7157A8"];
   devices [label="Laboratory devices\nrobots / printers", style="rounded,dashed,filled", fillcolor="#F5F3FF", color="#7157A8"];
   models [label="Local or remote\nmodel service", style="rounded,dashed,filled", fillcolor="#F5F3FF", color="#7157A8"];
-  graphdb [label="Optional graph\nbackend", shape=note, style="dashed,filled", fillcolor="#E9F7EF", color="#2E7D59"];
   operator [label="Researcher /\noperator"];
 
   operator -> web [label="review + control"];
@@ -24,5 +26,4 @@ digraph deployment_topology {
   worker -> devices [style=dashed];
   orchestrator -> devices [style=dashed, label="device bridge"];
   orchestrator -> models [style=dashed, label="routed inference"];
-  stores -> graphdb [style=dashed, color="#2E7D59", label="durable sync"];
 }

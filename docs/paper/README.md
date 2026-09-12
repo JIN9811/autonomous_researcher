@@ -118,10 +118,10 @@ or live-hardware evidence.
 |---|---|---|
 | [Figure 1](assets/figures/01_graphical_abstract.svg) | System thesis and closed-loop research flow | Code-backed structure; scientific outcome not evaluated |
 | [Figure 2](assets/figures/02_layered_architecture.svg) | Layered system and secondary platform surfaces | Code/configuration inspection |
-| [Figure 3](assets/figures/03_closed_loop_evidence_flow.svg) | Control, artifact, and evidence flow | Code/configuration inspection |
+| [Figure 3](assets/figures/03_closed_loop_evidence_flow.svg) | Control, required post-test clearance, and evidence flow | Code/configuration inspection |
 | [Figure 4](assets/figures/04_safety_gated_sequence.svg) | Guardian/operator gate sequence | Implemented paths; effectiveness not evaluated |
-| [Figure 5](assets/figures/05_knowledge_bo_feedback.svg) | Knowledge and Bayesian-optimization feedback | Implemented paths; scientific benefit not evaluated |
-| [Figure 6](assets/figures/06_deployment_topology.svg) | Local, remote-worker, and optional backend topology | Supported configuration surfaces, not deployment certification |
+| [Figure 5](assets/figures/05_knowledge_bo_feedback.svg) | Analysis-owned values, cited Knowledge context and BO numerical-tool authority | Implemented paths; scientific benefit not evaluated |
+| [Figure 6](assets/figures/06_deployment_topology.svg) | Local knowledge/source stores, remote workers and model/device services | Supported configuration surfaces, not deployment certification |
 
 ## Table Index
 

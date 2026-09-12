@@ -35,6 +35,12 @@ supersedes: []
 
 # Claim-Evidence Traceability
 
+| At a glance | Details |
+|---|---|
+| Topic | Claims mapped to evidence and explicit gaps |
+| Evidence boundary | [Artifact manifest](artifact_manifest.yaml); source records retain their original scope |
+| Recorded basis | 2026-09-07 · [Scope and verification](#verification) |
+
 ## Summary
 
 This chapter is the human-readable view of

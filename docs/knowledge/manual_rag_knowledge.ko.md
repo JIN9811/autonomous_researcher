@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: guide
 subtype: operations_runbook
 status: active
@@ -20,9 +20,16 @@ related_docs:
   - docs/knowledge/markdown_memory_operations.ko.md
   - docs/superpowers/specs/2026-09-11-source-curation-design.md
 supersedes: []
----
+-->
 
 # Source Library Operations
+
+| At a glance | Details |
+|---|---|
+| Purpose | Curate submitted sources into cited Markdown and retrieve them by scope |
+| Workspace | Knowledge → Source Library |
+| Preparation | Configured Knowledge model; source inbox; explicit intake enablement |
+| Recorded basis | 2026-09-11 · [Troubleshooting and verification](#troubleshooting-and-verification) |
 
 The existing document URL is retained for link compatibility. Source Library
 replaces the former manual-specific runtime; the old `/api/knowledge/manuals/*`

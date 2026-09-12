@@ -33,12 +33,14 @@ supersedes: []
 
 ## Status at a Glance
 
-- Runtime status: Implemented
-- LLM decision layer: Implemented / locally verified
-- Physical effect: None
-- Primary handoff: `design_candidate.v1` → Specimen
-- Live hardware validation: Not applicable to Design / downstream pending
-- Known gap: Candidate-matched performance prediction unavailable
+| At a glance | Details |
+|---|---|
+| Runtime status | Implemented |
+| LLM decision layer | Implemented / locally verified |
+| Physical effect | None |
+| Primary handoff | `design_candidate.v1` → Specimen |
+| Live hardware validation | Not applicable to Design / downstream pending |
+| Known gap | Candidate-matched performance prediction unavailable |
 
 ## Overview and Responsibilities
 
@@ -347,4 +349,4 @@ tracked in the linked verification records.
 - [API and Connection Matrix](agent_api_connection_matrix.md)
 - [Specimen Making](specimen_agent.md)
 - [Loop Artifact Archiving](../runtime/loop_artifact_archiving.md)
-- [Legacy runtime guideline](specimen_design_existing_runtime_guideline.txt)
+- [Specimen manufacturing and handoff contract](specimen_agent.md)

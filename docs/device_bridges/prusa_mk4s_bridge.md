@@ -30,6 +30,14 @@ supersedes: []
 
 # Prusa MK4S Bridge Reference
 
+| At a glance | Details |
+|---|---|
+| Purpose | Slicing, PrusaLink transfer/start and optional ejection |
+| Connects | Specimen / 3DP workspace ↔ selected Prusa provider |
+| Effect | Remote storage, heating and motion through enabled actions |
+| Implementation | [Prusa implementation](../../device_bridges/prusa_bridge.py) |
+| Verification | [Recorded scope and evidence](#current-verification) · 2026-08-09 |
+
 ## Summary
 
 The Prusa MK4S provider combines PrusaSlicer, G-code validation, PrusaLink

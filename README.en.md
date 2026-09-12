@@ -20,12 +20,14 @@ related_docs:
 supersedes: []
 -->
 
-# Autonomous Researcher Framework
+# AX4LAB — Setup and Operation
 
 [Research overview](README.md) · [Paper](docs/paper/README.md) · [Agents](docs/agents/README.md) · [Device bridges](docs/device_bridges/README.md)
 
-Autonomous Researcher Framework is a local multi-agent automation system for closed-loop experimental research.
-It connects experiment design, specimen manufacturing, equipment control, analysis, Bayesian optimization, and safety gating through a FastAPI server, Live GUI, LangGraph runtime, device bridges, BO/CAE workspaces, LeRobot tooling, and Runtime IDE.
+AX4LAB applies multi-agent orchestration to existing laboratory equipment through
+the Autonomous Researcher (ATR) framework. This companion covers setup and
+operation; the [main README](README.md) is the canonical English research
+overview, with a [Korean version](README.ko.md).
 
 ## 1. Quick Start
 
@@ -40,13 +42,9 @@ If code and documentation appear to disagree, check the
 [Current Code Snapshot](docs/runtime/current_code_snapshot.md) first. That
 snapshot is refreshed against `app/main.py`, `graphs/configs/*.yaml`,
 `graphs/modules/*`, `device_bridges/*`, `web/templates/*`, and `web/static/*`.
-At commit `09bbe32` on 2026-08-08, the application exposes 332 FastAPI
-`APIRoute` objects. The full `app.routes` registry has 339 entries when
-`/openapi.json`, `/docs`, `/docs/oauth2-redirect`, `/redoc`, and `/static`
-are included. These counts are used as documentation sanity checks when
-route/API contracts are updated. They are measured by importing the FastAPI
-app, not by grepping decorators, because some route registrations are not
-single-line decorator literals.
+Dated counts in that snapshot describe its recorded commit, not necessarily
+your checkout. Use the running server's `/docs` for available API contracts and
+the current graph/module files for execution contracts.
 
 Windows/API-key users can skip local AI by setting `AUTONOMOUS_BACKEND=openai`
 and `OPENAI_API_KEY` in `.env`, then starting with `python -m app.serve`.
@@ -115,11 +113,11 @@ PowerShell process with `install\windows_pyautogui_bridge_server.py`.
 | Live GUI | `http://localhost:7860/live` | `web/templates/planning.html`, `web/static/planning.js` | Chat-based orchestration, agent progress, artifacts, backend trace |
 | Runtime IDE | `http://localhost:7860/ide` | `web/templates/runtime_ide.html`, `web/static/runtime_ide.js` | [Reference](docs/runtime/runtime_ide.md): graph/module draft editing, validation, compile evidence, dry-run gates, version activation, saved execution, approvals, timeline, and artifact lineage |
 | Module Management | `http://localhost:7860/module-management` | `web/templates/module_management.html`, `web/static/module_management.js` | Module loading, validation, versioning, draft module creation, `ui.yaml` descriptor management, generated adapter management |
-| Knowledge Workspace | `http://localhost:7860/knowledge` | `web/templates/knowledge.html`, `web/static/knowledge.js`, `web/static/knowledge.css` | Graph Explorer, Memory, Ontology, Sync, Project Graph, and activity state |
+| Knowledge Workspace | `http://localhost:7860/knowledge` | `web/templates/knowledge.html`, `web/static/knowledge.js`, `web/static/knowledge.css` | Markdown search/detail, Memory, Ontology and Source Library: preserved originals, page-wise curation and scoped retrieval |
 | 3DP Workspace | `http://localhost:7860/printer` | `web/templates/printer.html`, `web/static/printer.js` | Bambu Lab X2D default bridge, explicit Prusa selection, live video/status, slicing/start gates, auto-ejection, test-print settings |
 | LeRobot Workspace | `http://localhost:7860/lerobot` | `web/templates/lerobot.html`, `web/static/lerobot.js` | Port detection, teleop, recording, training, visualization, rollout |
-| BO Workspace | `http://localhost:7860/bo` | `web/templates/bo.html`, `web/static/bo.js` | BO/MBO/LLM preference strategy, lightweight/BoTorch optional backend, reasoning audit, candidate ranking/selection |
-| CAE Workspace | `http://localhost:7860/cae` | `web/templates/cae.html`, `web/static/cae.js` | STL analysis, bottom fixed/top cyclic load settings, result review |
+| BO Workspace | `http://localhost:7860/bo` | `web/templates/bo.html`, `web/static/bo.js` | Optimization settings and result review; see [BO Agent](docs/agents/bo_agent.md) for the LLM strategy/tool layer, LHS/BoTorch numerical authority and continuous-domain handoff |
+| CAE Workspace | `http://localhost:7860/cae` | `web/templates/cae.html`, `web/static/cae.js` | Analysis settings and result review; see [Analysis](docs/agents/analysis_agent.md) for measured-data processing and background FEM |
 | Lab Equipment Workspace | `http://localhost:7860/equipment/windows` | `web/templates/windows_equipment.html`, `web/static/windows_equipment.js` | Shared equipment profile selection, Windows or localhost PyAutoGUI bridge connection, UTM test/live execution, evidence and Analysis handoff |
 | Self-Evolution Lab | `http://localhost:7860/evolution-lab` | `web/templates/evolution_lab.html`, `web/static/evolution_lab.js` | Prompt/module/graph variants, validation, approval, rollback |
 
@@ -131,7 +129,7 @@ reachable URL such as `http://<ATR-server-LAN-IP>:7860/printer-artifacts/...`.
 If the server is bound only to `127.0.0.1`, the GUI can load locally but Bambu
 fetch probe and the SPC Readiness transfer gate will fail.
 
-## 3. Actual Closed Loop
+## 3. Orchestration Route
 
 ### Three-Level Control During a Run
 
@@ -157,6 +155,11 @@ flowchart LR
 - Device Workspaces reuse low-level services for explicit manual work but are
   not part of automatic-loop progression.
 
+Within each agent, the local High layer owns its permitted LLM decisions and
+tool selection; it does not replace the global runtime router. The current
+[five-area responsibility maps](docs/agents/README.md) distinguish High,
+Middle, Low, Guardian/Safety and Knowledge/Evidence responsibilities.
+
 See [Three-Level Control Model](docs/runtime/three_level_control_model.md) for
 the complete contract and
 [Agent Reference Index](docs/agents/README.md#three-level-control-classification)
@@ -166,14 +169,19 @@ The default execution graph is [graphs/configs/atr_closed_loop.yaml](graphs/conf
 A run starts through `POST /api/run/start` or `POST /api/runtime/start`. The runtime then invokes `LangGraphRunLoop`, reads the current stage, executes the corresponding node, and records events.
 
 ```text
-dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment -> analysis -> knowledge -> bo -> guardian
-                                                                                                      | continue
-                                                                                                      v
-                                                                                                    design
-
-guardian -> stop: complete
-guardian -> error: error
+dispatch -> current executable stage
+idle -> design -> specimen -> vision (pickup) -> manipulation (transfer)
+     -> vision (placement verification) -> equipment
+     -> manipulation (post-test clearance) -> vision (clearance verification)
+     -> analysis -> knowledge -> bo -> guardian
+guardian: continue -> design | stop -> complete | error -> error
 ```
+
+This projection describes the configured transfer/clearance route; other modes
+and contracts may wait, branch or omit physical work. Required clearance is
+checked against the same run/cycle/specimen before Analysis. Background FEM
+does not replace the synchronous measured-data-to-BO handoff. See the full
+[Orchestration Route](README.md#orchestration-route).
 
 A real loop is visible through runtime events:
 
@@ -198,17 +206,20 @@ Useful APIs:
 
 | Stage | Module Path | Responsibility | Representative Output |
 |---|---|---|---|
-| `design` | `graphs/modules/design` | Convert the objective into TPMS/specimen design variables and `experiment_spec` | `current_experiment_spec`, STL candidate settings |
+| `design` | `graphs/modules/design` | LLM reviews valid candidates and accepts a checked candidate while preserving BO coordinates and locked settings | `design_candidate.v1`, `experiment_spec`, decision/tool trace |
 | `specimen` | `graphs/modules/specimen` | Create STL/manufacturing metadata and hand off to the selected Bambu/Prusa/virtual printer bridge | STL, gcode/sliced artifact, slicer settings, printer prepare result |
 | `vision` | `graphs/modules/vision` | Observe printed specimen/workspace and create pickup/test observation | `observation`, camera artifact |
-| `manipulation` | `graphs/modules/manipulation` | Run LeRobot rollout or pick-place handoff | rollout status, policy path, transfer evidence |
+| `manipulation` | `graphs/modules/manipulation` | Select permitted rollout/replay tools and assess completion evidence; handle transfer and post-test clearance | rollout/replay status, transfer/clearance evidence, decision trace |
 | `equipment` | `graphs/modules/equipment` | Execute UTM/Windows bridge/equipment commands | equipment result, protocol note |
-| `analysis` | `graphs/modules/analysis` | Compute UTM/CAE/FEM metrics and objective score | metrics, contour artifact, objective_score |
-| `knowledge` | `graphs/modules/knowledge` | Summarize evidence into memory and inform next optimization | memory update, evidence summary |
-| `bo` | `graphs/modules/bo` | Select next candidate using Analysis/Knowledge evidence, numeric BO, and LLM reasoning as a soft prior | `bo_result`, `candidate_ranking`, `next_design_request` |
+| `analysis` | `graphs/modules/analysis` | Process measured data and publish the BO objective; run configured FEM refinement separately | metrics, objective evaluation, background FEM artifacts |
+| `knowledge` | `graphs/modules/knowledge` | LLM-curated Markdown, ontology-guided memory and scoped context; separate source intake | `knowledge_context.v1`, typed records, cited notes |
+| `bo` | `graphs/modules/bo` | LLM selects permitted optimization actions and reviews the exact LHS/BoTorch result; numerical tools own coordinates | `bo_result`, decision/tool trace, `next_design_request.v1` |
 | `guardian` | `graphs/modules/guardian` | Enforce safety, approval, continue/stop/error decision | guardian decision |
 
-The older top-level `agents/` directory is an implementation/compatibility layer. The active runtime contract is primarily defined by `graphs/modules/*/module.yaml` and `graphs/configs/*.yaml`.
+The `agents/` directory contains current executable agent implementations and
+local decision layers. Module YAML selects registered handlers and declares
+contracts; graph YAML and runtime state govern transitions. See the
+[Agent Index](docs/agents/README.md) for current ownership and verification.
 
 Live GUI agent lists and some report cards/sections are loaded from graph/module/`ui.yaml` metadata through `/api/runtime/agent-manifests`. That API returns a manifest payload containing `agents[]`; `web/static/planning.js` keeps `DEFAULT_LIVE_AGENTS` only as a fallback if the backend manifest request fails. The current descriptor-backed examples are `design`, `equipment`, and `guardian`; they use descriptor cards and selector-backed `report_sections`. Agents without a `ui.yaml` descriptor continue to use the generic renderer. The current generic descriptor renderer handles selector rows/cards/report sections, `mini_bar_chart`, `scatter_plot`, `line_chart`, `table`, `heatmap`, `compound_chart`/`chart_grid`, internal GUI navigation actions, read-only GET API actions, and safe workspace handoff buttons. The backend normalizes chart/action descriptors as presentation contracts with `supported`, `render_mode`, `safe_navigation`, `live_card_runnable`, `handoff_required`, `handoff_workspace`, `execution_scope`, and `blocked_reason`; the frontend applies its own safe rendering filter on top. `ui.renderer.dashboard/report/fallback` is only a presentation-only profile inside the `descriptor`, `generic`, and `<agent>_reference` allowlist; it does not load arbitrary external renderer/plugin code. Only internal `/api/*` actions declared as `kind=api`, `method=GET`, `read_only=true`, and backed by an actual FastAPI GET route are callable as `read_only_api`. POST, confirmation-required, or non-read-only API descriptors can only hand off to a safe operator workspace; physical device actions are not executed by this descriptor path. New draft modules can be created through `/api/modules/templates/{agent|ui-only|bridge}`, but the generated default is `status=draft`, `enabled=false`, and `graph.attached=false`, so it is preview-only until validated, attached, dry-run, and saved.
 
@@ -249,7 +260,7 @@ Shared contracts:
 | `device_bridges/` | Bambu, Prusa, LeRobot, Windows, UTM bridge layers |
 | `experiments/` | Experiment objective/evaluate/benchmark/queue contracts |
 | `orchestrator/` | Orchestration and planning flow |
-| `backends/` | Ollama/vLLM/Nemoclaw backend integration |
+| `backends/` | Registered model/provider adapters; configured local vLLM and API routing |
 | `gui/` | GUI viewmodel/panel support code |
 | `knowledge/` | Memory and retrieval code |
 | `learning/` | LeRobot/training helper code |
@@ -320,6 +331,7 @@ the Bambu printer bridge is inactive.
 - [Live GUI guide](docs/gui/gui.md)
 - [API key / OpenAI fallback](docs/runtime/api_keys.md)
 - [Markdown Knowledge operations guide (Korean)](docs/knowledge/markdown_memory_operations.ko.md)
+- [Source Library intake and retrieval guide (Korean)](docs/knowledge/manual_rag_knowledge.ko.md)
 - [Documentation governance Design](docs/superpowers/specs/2026-08-08-documentation-governance-design.md)
 - [First autonomous run tutorial](docs/tutorials/first_autonomous_run.en.md)
 - [GitHub/version-control rules](docs/repository/github_version_control.md)

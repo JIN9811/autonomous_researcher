@@ -45,12 +45,14 @@ supersedes: []
 
 ## Status at a Glance
 
-- Runtime status: Measured handoff and independent background FEM implemented / non-actuating regression verified
-- LLM decision layer: Bounded roles / API and local vLLM improvement-loop decisions verified
-- Physical effect: None; registered solver computation only
-- Primary handoff: Measured objective and evidence → Knowledge / BO
-- Live hardware validation: Prior complete cycle preserved; no new hardware execution
-- Known gap: Retained full-range FE work remains +21.1%; mesh convergence and independent prediction are unvalidated
+| At a glance | Details |
+|---|---|
+| Runtime status | Measured handoff and independent background FEM implemented / non-actuating regression verified |
+| LLM decision layer | Bounded roles / API and local vLLM improvement-loop decisions verified |
+| Physical effect | None; registered solver computation only |
+| Primary handoff | Measured objective and evidence → Knowledge / BO |
+| Live hardware validation | Prior complete cycle preserved; no new hardware execution |
+| Known gap | Retained full-range FE work remains +21.1%; mesh convergence and independent prediction are unvalidated |
 
 ## Overview and Responsibilities
 

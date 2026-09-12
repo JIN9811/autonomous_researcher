@@ -35,6 +35,12 @@ supersedes: []
 
 # Evaluation and Results
 
+| At a glance | Details |
+|---|---|
+| Topic | Reported results and their evaluation limits |
+| Evidence boundary | [Artifact manifest](artifact_manifest.yaml); supervised mixed-mode integration, not general scientific efficacy |
+| Recorded basis | 2026-09-07 · [Scope and verification](#verification) |
+
 ## Summary
 
 The current evidence establishes bounded architecture and documentation

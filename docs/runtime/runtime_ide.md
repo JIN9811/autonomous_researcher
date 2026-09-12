@@ -1,4 +1,4 @@
----
+<!-- atr-doc
 doc_type: reference
 subtype: runtime
 status: active
@@ -44,9 +44,17 @@ related_docs:
   - docs/standards/documentation_standard.md
   - docs/superpowers/specs/2026-08-09-runtime-ide-reference-documentation-design.md
 supersedes: []
----
+-->
 
 # Runtime IDE Reference
+
+| At a glance | Details |
+|---|---|
+| Purpose | Configure and inspect orchestration graphs and agent modules |
+| Workspace | `/ide` |
+| Coverage | Editing, validation, versioning, run control and evidence inspection |
+| Implementation | [Runtime APIs](../../app/main.py) · [IDE client](../../web/static/runtime_ide.js) |
+| Recorded basis | 2026-09-01 · [Verification scope](#verification) |
 
 ## Summary
 
