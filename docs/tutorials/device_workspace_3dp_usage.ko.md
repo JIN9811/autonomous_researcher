@@ -1,5 +1,7 @@
 # Device Workspaces 사용법: 3DP Printer Bridge
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Purpose | 프린터 선택·슬라이싱·출력·오토이젝션 설정 안내 |

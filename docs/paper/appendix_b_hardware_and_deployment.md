@@ -37,6 +37,8 @@ supersedes: []
 
 # Appendix B: Hardware and Deployment
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Topic | Deployment roles, dependencies and hardware boundaries |

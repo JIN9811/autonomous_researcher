@@ -31,6 +31,8 @@ supersedes: []
 
 # Printer Fleet Bridge Reference
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Purpose | Select a printer profile and route preparation/status requests |

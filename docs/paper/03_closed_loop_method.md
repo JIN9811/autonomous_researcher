@@ -45,6 +45,8 @@ supersedes: []
 
 # Closed-Loop Method
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Topic | Orchestration handoffs, verification and feedback |

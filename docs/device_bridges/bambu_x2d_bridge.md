@@ -33,6 +33,8 @@ supersedes: []
 
 # Bambu Lab X2D Bridge Reference
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Purpose | Slicing, artifact transfer, telemetry and guarded autoejection |

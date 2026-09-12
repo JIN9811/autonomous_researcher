@@ -30,6 +30,8 @@ supersedes: []
 
 # Prusa MK4S Bridge Reference
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Purpose | Slicing, PrusaLink transfer/start and optional ejection |

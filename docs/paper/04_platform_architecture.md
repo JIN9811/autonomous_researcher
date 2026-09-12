@@ -38,6 +38,8 @@ supersedes: []
 
 # Platform Architecture
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Topic | Modules, providers, workspaces and integration boundaries |

@@ -1,5 +1,7 @@
 # Autonomous Researcher 사용자 종합 매뉴얼
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Purpose | 설치부터 GUI 운영·확장까지 전체 사용 경로 안내 |

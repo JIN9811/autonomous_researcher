@@ -35,6 +35,8 @@ supersedes: []
 
 # Claim-Evidence Traceability
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Topic | Claims mapped to evidence and explicit gaps |

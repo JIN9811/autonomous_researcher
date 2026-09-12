@@ -21,6 +21,8 @@ supersedes: [docs/oldversion/knowledge/knowledge_graph_operations.ko.md]
 
 # Markdown Knowledge 운영 가이드
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Purpose | 원본과 ontology를 보존하며 Markdown 지식의 검색·출처·수명주기 관리 |

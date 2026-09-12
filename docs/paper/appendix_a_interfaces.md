@@ -42,6 +42,8 @@ supersedes: []
 
 # Appendix A: Interfaces and Contracts
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Topic | Agent, runtime, device and knowledge interface families |

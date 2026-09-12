@@ -1,5 +1,7 @@
 # Autonomous Researcher Complete User Manual
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Purpose | Navigate installation, GUI operation and extension workflows |

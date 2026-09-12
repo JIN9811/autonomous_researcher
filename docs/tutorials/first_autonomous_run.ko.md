@@ -1,5 +1,7 @@
 # 첫 번째 자동실험 실행 가이드
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Purpose | 첫 실행의 단계 진행·산출물·추적 근거 확인 |

@@ -1,5 +1,7 @@
 # First Autonomous Run (English)
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Purpose | Check stage progression, artifacts and trace on a first run |

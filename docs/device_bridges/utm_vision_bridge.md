@@ -35,6 +35,8 @@ supersedes: []
 
 # UTM Vision Bridge Reference
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Purpose | Camera capture, pose tracking and temporal visual evidence |

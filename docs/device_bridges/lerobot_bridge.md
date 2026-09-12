@@ -36,6 +36,8 @@ supersedes: []
 
 # LeRobot Bridge Reference
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Purpose | Robot profiles, teleoperation, recording, training and rollout |

@@ -41,6 +41,8 @@ supersedes: []
 
 # CAE, CalculiX, and PINN Bridge Reference
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Purpose | Staged solver computation and saved-field access |

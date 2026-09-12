@@ -32,6 +32,8 @@ supersedes: []
 
 # PLC Safety Bridge Operator Guide
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Purpose | Supervisory PLC stop, recovery and status integration |

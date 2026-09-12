@@ -31,6 +31,8 @@ supersedes: []
 
 # Base and Simulator Bridge Reference
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Purpose | Abstract contracts and deterministic test substitutes |

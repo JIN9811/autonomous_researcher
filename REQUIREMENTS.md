@@ -1,5 +1,7 @@
 # Autonomous Researcher Requirements
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Purpose | Install external runtimes, services and device-side dependencies |

@@ -21,6 +21,8 @@ related_docs:
 
 # Windows PyAutoGUI Bridge Reference
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Purpose | Paired desktop programs, recording and execution evidence |

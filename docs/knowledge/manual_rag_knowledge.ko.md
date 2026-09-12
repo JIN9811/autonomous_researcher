@@ -24,6 +24,8 @@ supersedes: []
 
 # Source Library Operations
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Purpose | Curate submitted sources into cited Markdown and retrieve them by scope |

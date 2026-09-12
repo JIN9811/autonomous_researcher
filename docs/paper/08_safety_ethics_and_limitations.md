@@ -30,6 +30,8 @@ claim_ids:
 
 # Safety, Ethics, and Limitations
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Topic | Human oversight, control boundaries and scientific integrity |

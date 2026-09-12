@@ -43,6 +43,8 @@ supersedes: []
 
 # System Architecture
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Topic | Control areas, executable graph and evidence ownership |

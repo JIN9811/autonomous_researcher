@@ -1,5 +1,7 @@
 # GUI
 
+## Status at a Glance
+
 | At a glance | Details |
 |---|---|
 | Purpose | Navigate the Main GUI, Live GUI and connected workspaces |
