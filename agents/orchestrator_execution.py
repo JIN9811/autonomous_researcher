@@ -16,6 +16,7 @@ from agents.execution_graph import (
     run_execution_graph,
 )
 from agents.orchestrator_decision import decide_orchestration
+from agents.orchestrator_structure import orchestrator_implementation_structure
 from orchestrator.supervisor import (
     build_decision_record,
     build_mission_contract,
@@ -143,6 +144,7 @@ def orchestrator_execution_catalog(
             ),
         ),
         required_outputs=("agent_result",),
+        implementation_structure=orchestrator_implementation_structure,
     )
 
 

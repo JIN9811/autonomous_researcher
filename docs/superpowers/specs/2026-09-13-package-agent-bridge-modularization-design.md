@@ -305,11 +305,13 @@ High / Middle / Low를 중심에, Guardian / Safety와 Knowledge / Evidence를
 - module descriptor의 `execution_graph`를 backend 실행·IDE 편집·문서 SVG의 공통 원본으로 사용한다. `metadata.control_view`의 장식용 체크포인트 순서는 실행 원본이 아니다.
 - 노드는 owner catalog에 등록된 기존 함수를 호출한다. ID·handler·포트·저장 좌표를 유지하고, 실행 순서는 노드 배열이 아닌 명시적 outcome edge로 결정한다.
 - 기존 bounded LLM 판단·툴 루프는 composite 노드로 표시하고, 없는 책임은 명시한다. 내부 함수가 모두 별도 편집 가능하거나 5개 순차 실행 단계인 것처럼 표현하지 않는다.
+- composite 내부를 숨기지는 않는다. owner catalog의 `implementation_structure`로 실제 함수·툴·검증·근거 및 관측 반환 관계를 같은 캔버스에 펼친다. 실선 실행 노드와 파선 CODE 노드를 구분하고, CODE 선택은 기존 Inspector의 owner·소스 참조로 연결한다. CODE 관계를 추가 실행 명령이나 개별 완료 상태로 취급하지 않는다.
+- Low는 장비뿐 아니라 계산·조회·소프트웨어 툴 실행도 포함한다. Design 전문 판단은 Middle이며, High는 위임·인계 책임과 구분한다.
 - 실선·파선·점선은 edge의 `execution`·`validation`·`evidence` 종류를 표현한다. 실제 상태는 module·run·loop·revision·invocation이 일치하는 실행 trace로 표시한다.
 - Runtime IDE의 색상·노드·포트·줌·스크롤 체계를 사용한다. 데스크톱과 좁은 화면에서 겹침·잘림·가독성을 검증한다.
 - 미완성 draft는 화면에서 편집 가능하되, 잘못된 owner operation·분기·의존성·종료 결과는 저장 전에 거절한다. 라벨·좌표 변경은 표현만 바꾸고, 유효한 경로 변경은 활성화 후 실행을 바꾼다.
 - backend reload는 최신 정의를 읽되 dirty draft를 무단 덮어쓰지 않는다. 진행 중인 런은 시작 시 정의를 유지한다. 미전환 모듈의 기존 표현·handler override는 유지한다.
-- 문서 SVG는 공통 renderer로 갱신하고 생성 결과 일치와 실제 브라우저 편집 동작을 검사한다.
+- 문서 SVG는 공통 구조 데이터·renderer를 사용하되 **문서용 테마**로 생성한다. IDE의 어두운 배경·네온 강조를 복사하지 않고 흰 배경·짙은 글자·절제된 영역 색상을 쓴다. 생성 결과 일치와 실제 브라우저 편집 동작을 검사한다.
 
 #### 다음 에이전트 모듈의 필수 인수 항목
 
@@ -320,6 +322,7 @@ High / Middle / Low를 중심에, Guardian / Safety와 Knowledge / Evidence를
 |---|---|
 | Owner operation catalog | 입력·산출물·분기별 산출물·허용 outcome·설정 schema 선언; 미등록 호출 거절 |
 | 실제 내부 실행 구조 | 명시적 edge, 각 종료 경로의 새 `AgentResult`, branch별 의존성 검증; 기존 bounded LLM 루프는 composite로 유지 |
+| 내부 관계와 문서 테마 | 실제 소스에 연결된 함수·검증·툴·근거 및 관측 반환 관계 공개; 실행 편집과 구분, 문서 SVG는 별도 밝은 테마 |
 | 프론트 → 백엔드 | 기존 IDE에서 유효한 경로 편집·저장·활성화 후 실제 owner 함수의 호출 순서 확인; 구조 dry-run만으로 대체하지 않음 |
 | 백엔드 → 프론트 | 재조회 시 정의 반영; dirty draft·늦은 저장 응답·탭 전환에서 편집 내용 보존 |
 | 실행과 표시의 일치 | 런 시작 정의 고정, module/run/loop/revision/invocation별 trace 분리; 과거 완료 표시 재사용 금지 |

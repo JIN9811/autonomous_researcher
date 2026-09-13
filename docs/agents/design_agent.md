@@ -10,6 +10,7 @@ source_of_truth:
   - agents/design/agent.py
   - agents/design/decision.py
   - agents/design/execution.py
+  - agents/design/structure.py
   - agents/execution_graph.py
   - agents/design/module.py
   - agents/design/presentation.py
@@ -183,16 +184,24 @@ not five mandatory sequential stages.
 The **LLM** node is the existing composite, bounded suitability/tool-calling loop.
 Candidate preparation, result finalization and review reporting retain their
 existing functions in the [owner adapters](../../agents/design/execution.py).
-Embedded checks and evidence reads are not fabricated as separate executable
-nodes. Stage-level Orchestrator preparation and runtime validation remain outside
-this internal graph.
+Its **Middle** decision is surrounded by source-bound internal relationships:
+candidate generation and inspection tools in **Low**, constraint and acceptance
+checks in **Guardian / Safety**, and context, traces and reports in **Knowledge /
+Evidence**. **High** shows the handoff boundary, not a new mission decision.
+The [owner structure](../../agents/design/structure.py) supplies these relationships
+through the existing catalog API. Dashed **CODE** boxes reference existing functions
+or inline tool branches; they do not add commands, editable inner-loop routes or
+independent completion states. Selecting one opens its owner and source references
+in the existing inspector. Stage-level Orchestrator preparation and runtime
+validation remain outside this internal graph.
 
 The existing inspector edits allowlisted operations and outcome routes. Validate
 rejects unsupported handlers, missing dependencies and invalid routes before
 activation. Running definitions remain pinned; reload obtains backend changes
 without silently replacing a dirty draft. The [renderer](../../web/static/module_control_view.js)
 uses explicit edge kinds and outcomes; regenerate with
-`python scripts/render_module_control_views.py`.
+`python -m scripts.render_module_control_views`. The document SVG uses a white
+background and print-readable colors; the interactive IDE retains its own theme.
 
 | Phase | Implementation | Authority |
 |---|---|---|
@@ -203,8 +212,8 @@ uses explicit edge kinds and outcomes; regenerate with
 | Return | `AgentResult` plus `archive_agent_run` | Runtime handoff and execution-scoped evidence |
 
 Executable node IDs identify real owner-operation calls and their traces.
-The detailed decision-loop figure below expands the composite boundary for
-explanation; its individual checks are not separate IDE execution nodes.
+The detailed decision-loop figure below focuses on the same inspection/observation
+feedback visible in the CODE relationships; its checks remain inside the owner loop.
 
 ![Design decision loop](assets/figures/design_02_execution_effect_boundary.svg)
 

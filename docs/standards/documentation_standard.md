@@ -256,6 +256,12 @@ model and prompts; they supplement, rather than replace, the required editable
 SVG/DOT diagrams. They MUST NOT depict unimplemented authority or empirical
 results. Reader-facing inventory tables SHOULD link to the actual documents.
 
+Generated architecture SVGs MUST use the document theme: light background, dark
+text and restrained, consistent responsibility colors. Reuse the Runtime IDE's
+structural data, not its dark canvas theme. Distinguish editable execution nodes
+from source-bound internal function/tool relationships, and never depict an
+implementation-reference box as an independently completed runtime action.
+
 Repeated defensive wording SHOULD be consolidated into Safety and Verification
 without removing substantive constraints or unverified-scope disclosures.
 

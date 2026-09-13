@@ -11,6 +11,7 @@ source_of_truth:
   - agents/orchestrator_capabilities.py
   - agents/orchestrator_decision.py
   - agents/orchestrator_execution.py
+  - agents/orchestrator_structure.py
   - agents/execution_graph.py
   - app/controller.py
   - app/main.py
@@ -81,7 +82,7 @@ activation feature, and applying a change to an already-running loop.
 |---|---|---|
 | High-Level Control | Accepts scoped intent; coordinates mission, route, retry/review, and next-new-run selection | [Closed-Loop Position and Handoffs](#closed-loop-position-and-handoffs) |
 | Middle-Level Control | Builds bounded context, validates model choices, proposes Setup changes, and prepares admitted handoffs | [Decision and Evaluation](#decision-and-evaluation) |
-| Low-Level Control | Has no direct printer, robot, camera, desktop, instrument, or solver tool | [Tools, APIs and Connections](#tools-apis-and-connections) |
+| Low-Level Control | Existing contract/plan builders and bound software tools; no direct device commands | [Tools, APIs and Connections](#tools-apis-and-connections) |
 | Guardian / Safety | Preserves Guardian and operator decisions; unknown or missing authority does not become continuation | [Safety and Recovery](#safety-and-recovery) |
 | Knowledge / Evidence | Keeps planning transcript, Setup history/readback, decision traces, checkpoints, and events distinct | [Artifacts and Verification](#artifacts-and-verification) |
 
@@ -119,9 +120,14 @@ ordering can be edited while both remain prerequisites for decision-making.
 The [owner adapters](../../agents/orchestrator_execution.py) call the existing
 mission, plan, bounded LLM/tool decision and reporting functions. **LLM** labels
 the composite decision, including its existing checks and tool loop—not each
-internal check as an independently editable operation. Empty responsibility
-areas explain embedded or external authority. Orchestrator remains application
-core and has no direct device tools.
+internal check as an independently editable operation. Dashed **CODE** boxes now
+expose the [existing internal relationships](../../agents/orchestrator_structure.py):
+plan builders and bound tool dispatch in **Low**, schema/target/effect checks in
+**Guardian / Safety**, and scoped references and decision records in **Knowledge /
+Evidence**. Inspection evidence returns to the same bounded LLM decision.
+Selecting a CODE box opens its owner and source references in the existing
+inspector; these boxes are not extra commands or independently traced steps.
+Orchestrator remains application core and has no direct device tools.
 
 This graph is the `OrchestratorAgent.run` boundary used for agent execution and
 handoff decisions. Program-core Chat/Setup semantic intake remains in its existing
@@ -131,7 +137,8 @@ Validate/version/activate use the current module API. Active runs retain their
 definition; backend edits appear on reload, and invalid drafts are not applied.
 The [shared renderer](../../web/static/module_control_view.js) draws explicit
 outcomes and connection kinds, not an inferred checkpoint chain. Regenerate with
-`python scripts/render_module_control_views.py`. Structural Dry Run enumerates
+`python -m scripts.render_module_control_views`. Documentation uses a light,
+print-readable theme independently of the IDE's dark theme. Structural Dry Run enumerates
 routes; it does not execute the model or prove live device behavior.
 
 ![Orchestrator internal execution and effect boundary](assets/figures/orchestrator_02_execution_effect_boundary.svg)

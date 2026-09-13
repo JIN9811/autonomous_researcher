@@ -66,6 +66,16 @@ access, new device actions, or inferred readiness. Five responsibility areas are
 presentation groups; an area without a separate operation explains where its
 checks actually live. Do not create fake nodes just to fill five areas.
 
+Owner catalogs additionally expose `implementation_structure`, keyed by registered
+operation handler, with source-bound internal nodes and call/validation/evidence
+relationships. These are displayed beside the executable nodes in the same canvas.
+Dashed CODE boxes inspect the existing implementation; they cannot be connected as
+extra commands, serialized as execution nodes or painted as independently done.
+Repeated/added/rebound operation instances receive their own matching relationships.
+Low includes software functions and tools; Design's suitability decision is Middle.
+Document SVGs share this structure but use a separate light document theme, not the
+Runtime IDE's dark theme.
+
 The Orchestrator execution graph covers its `run()` operation boundary. Existing
 program-core Chat/Setup semantic intake is not rerouted through a mission run to
 make the diagram appear broader; document that boundary explicitly.

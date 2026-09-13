@@ -249,15 +249,20 @@ Design and Orchestrator use the existing editable graph canvas with responsibili
 areas: **High**, **Middle**, **Low**, **Guardian / Safety**, and **Knowledge / Evidence**.
 There is no separate architecture-view switch. Their `module.execution_graph`
 is the executable source for both backend and canvas; legacy modules retain
-their existing checkpoint representation. Empty areas are explicit;
-Orchestrator does not acquire direct device tools.
+their existing checkpoint representation. The owner catalog also supplies
+`implementation_structure`: source-bound function, tool, check and evidence
+relationships around those operations. Low includes software execution, not only
+hardware. Orchestrator does not acquire direct device tools.
 
 | Visual | Meaning |
 |---|---|
 | Area header and tinted boundary | Responsibility grouping, not a runtime stage |
+| Solid node boundary | Editable registered execution operation |
+| Dashed CODE node boundary | Existing implementation inside an operation; select or press Enter to inspect its owner, source symbols and relationships |
 | LLM badge | Composite LLM-capable decision/tool loop; existing mode policy still determines whether a model is called |
 | Solid / dashed / dotted connection | Explicit `execution` / `validation` / `evidence` edge kind |
 | Outcome label | Registered operation result selecting that edge |
+| Internal call / observation relation | Code-owned function/tool relationship, not an extra editable outcome or a live completion assertion |
 | Active edge and node status | Actual execution trace scoped to module, run, loop, revision and invocation |
 | Empty area | Responsibility embedded in a composite operation or owned outside this graph |
 
@@ -265,8 +270,15 @@ Executable nodes declare stable `id`, registered `handler`, `label`, `area` and
 optional presentation `position`. Edges declare `source`, `target`, `on` and
 `kind`; `entry` and `terminals` identify route boundaries. The module GET returns
 an `execution_catalog` with accepted handlers, dependencies, outcome-specific
-outputs, supported config and required terminal outputs.
+outputs, supported config, required terminal outputs and source-bound internal
+relationships. The latter are keyed by registered handler, rebound for each node
+instance, removed with that instance, and never serialized into `execution_graph`.
 No arbitrary Python function or device call is admitted through the editor.
+
+The document export shares the definition and owner relationship catalog, but not
+the IDE theme: SVGs use a white background, dark text and restrained area colors.
+Generate with `python -m scripts.render_module_control_views`; source-reference
+checks and SVG parity tests guard the exported structure.
 
 The existing inspector and ports edit this definition without converting it
 back into an ordered list. A valid connection change alters execution after

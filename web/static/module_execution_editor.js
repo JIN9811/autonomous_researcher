@@ -5,7 +5,7 @@
   const isGraph=graph=>Boolean(graph?.metadata?.execution_graph);
   const operation=(graph,handler)=>graph.metadata.execution_catalog?.operations?.find(op=>op.handler===handler);
   function project(payload,catalog,revision,view) {
-    const module=payload.module || payload, definition=module.execution_graph, control=view.layout(module);
+    const module=payload.module || payload, definition=module.execution_graph, control=view.layout(module,catalog);
     return {id:`module:${module.id}`,name:`${module.label || module.id} Execution Graph`,version:'draft',
       entry_node:definition.entry,finish_nodes:copy(definition.terminals),terminal_stages:copy(definition.terminals),transitions:{},
       stage_dispatch:Object.fromEntries(definition.nodes.map(node=>[node.id,node.id])),

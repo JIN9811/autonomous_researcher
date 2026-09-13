@@ -1,34 +1,119 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1176 806" role="img" aria-label="Design Agent Module five-area internal graph" style="font-family:Arial,sans-serif;background:#0c1524">
+<svg xmlns="http://www.w3.org/2000/svg" data-theme="document" viewBox="0 0 1184 1010" role="img" aria-label="Design Agent Module five-area internal graph" style="font-family:Arial,sans-serif;background:#ffffff">
       <title>Design Agent Module — five-area internal graph</title><desc>Executable owner operations and explicit outcomes. Positions are presentation only. Composite LLM tools are not separate editable operations.</desc>
-      <defs><marker id="control-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6z" fill="#91a6bf"/></marker></defs>
+      <rect width="100%" height="100%" fill="#ffffff"/>
+      <defs><marker id="control-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6z" fill="#526174"/></marker></defs>
       <g class="runtime-control-area" data-control-area="high" pointer-events="none">
-      <rect x="360" y="56" width="488" height="148" rx="12" fill="#65c9ef" fill-opacity=".045" stroke="#65c9ef" stroke-opacity=".35"/>
-      <text x="376" y="82" fill="#65c9ef" font-size="15" font-weight="600">High</text>
+      <rect x="360" y="56" width="488" height="148" rx="12" fill="#2463a5" fill-opacity=".035" stroke="#2463a5" stroke-opacity=".3"/>
+      <text x="376" y="82" fill="#2463a5" font-size="15" font-weight="600">High</text>
       </g><g class="runtime-control-area" data-control-area="middle" pointer-events="none">
-      <rect x="360" y="280" width="488" height="148" rx="12" fill="#7bc6ad" fill-opacity=".045" stroke="#7bc6ad" stroke-opacity=".35"/>
-      <text x="376" y="306" fill="#7bc6ad" font-size="15" font-weight="600">Middle</text>
+      <rect x="360" y="280" width="488" height="260" rx="12" fill="#177768" fill-opacity=".035" stroke="#177768" stroke-opacity=".3"/>
+      <text x="376" y="306" fill="#177768" font-size="15" font-weight="600">Middle</text>
       </g><g class="runtime-control-area" data-control-area="low" pointer-events="none">
-      <rect x="352" y="496" width="488" height="176" rx="12" fill="#a7b7cf" fill-opacity=".045" stroke="#a7b7cf" stroke-opacity=".35"/>
-      <text x="368" y="522" fill="#a7b7cf" font-size="15" font-weight="600">Low</text>
-      <text x="368" y="570" fill="#a7b7cf" font-size="12">No direct device operation</text></g><g class="runtime-control-area" data-control-area="guardian" pointer-events="none">
-      <rect x="32" y="56" width="264" height="148" rx="12" fill="#e1b364" fill-opacity=".045" stroke="#e1b364" stroke-opacity=".35"/>
-      <text x="48" y="82" fill="#e1b364" font-size="15" font-weight="600">Guardian / Safety</text>
+      <rect x="360" y="616" width="488" height="260" rx="12" fill="#4c6079" fill-opacity=".035" stroke="#4c6079" stroke-opacity=".3"/>
+      <text x="376" y="642" fill="#4c6079" font-size="15" font-weight="600">Low</text>
+      </g><g class="runtime-control-area" data-control-area="guardian" pointer-events="none">
+      <rect x="32" y="56" width="264" height="484" rx="12" fill="#a36b16" fill-opacity=".035" stroke="#a36b16" stroke-opacity=".3"/>
+      <text x="48" y="82" fill="#a36b16" font-size="15" font-weight="600">Guardian / Safety</text>
       </g><g class="runtime-control-area" data-control-area="knowledge" pointer-events="none">
-      <rect x="888" y="48" width="264" height="176" rx="12" fill="#b9a1dc" fill-opacity=".045" stroke="#b9a1dc" stroke-opacity=".35"/>
-      <text x="904" y="74" fill="#b9a1dc" font-size="15" font-weight="600">Knowledge / Evidence</text>
-      <text x="904" y="122" fill="#a7b7cf" font-size="12">Evidence lives in prepare and</text><text x="904" y="140" fill="#a7b7cf" font-size="12">the bounded decision</text></g><g data-source="prepare" data-target="decide" data-outcome="next" data-kind="execution"><title>prepare → decide · next · execution</title><path d="M476,328 C476,254 476,254 476,180" fill="none" stroke="#7e9ab8" stroke-opacity=".65" stroke-width="1.5" stroke-dasharray="" marker-end="url(#control-arrow)"/><rect x="457" y="241" width="38" height="20" rx="4" fill="#0c1524"/><text x="476" y="255" text-anchor="middle" fill="#7e9ab8" font-size="11">next</text></g><g data-source="decide" data-target="finalize" data-outcome="accepted" data-kind="execution"><title>decide → finalize · accepted · execution</title><path d="M476,180 C476,254 716,254 716,328" fill="none" stroke="#7e9ab8" stroke-opacity=".65" stroke-width="1.5" stroke-dasharray="" marker-end="url(#control-arrow)"/><rect x="565" y="241" width="62" height="20" rx="4" fill="#0c1524"/><text x="596" y="255" text-anchor="middle" fill="#7e9ab8" font-size="11">accepted</text></g><g data-source="decide" data-target="owner_review" data-outcome="blocked" data-kind="validation"><title>decide → owner_review · blocked · validation</title><path d="M384,142 C312,142 312,142 240,142" fill="none" stroke="#e1b364" stroke-opacity=".65" stroke-width="1.5" stroke-dasharray="8 5" marker-end="url(#control-arrow)"/><rect x="284" y="129" width="56" height="20" rx="4" fill="#0c1524"/><text x="312" y="143" text-anchor="middle" fill="#e1b364" font-size="11">blocked</text></g><g><title>prepare · design.prepare</title>
-        <rect x="384" y="328" width="184" height="76" rx="9" fill="#132135" stroke="#7bc6ad" stroke-opacity=".6"/>
-        <text x="396" y="349" fill="#e6edf7" font-size="12">Prepare candidates and</text><text x="396" y="365" fill="#e6edf7" font-size="12">evidence</text>
+      <rect x="896" y="56" width="264" height="484" rx="12" fill="#79529c" fill-opacity=".035" stroke="#79529c" stroke-opacity=".3"/>
+      <text x="912" y="82" fill="#79529c" font-size="15" font-weight="600">Knowledge / Evidence</text>
+      </g><defs><marker id="control-detail-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6z" fill="#526174"/></marker></defs><g data-implementation-edge="prepare" pointer-events="none"><title>normalize · call (code-owned)</title><path d="M568,366 C596,366 596,478 624,478" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="prepare" pointer-events="none"><title>collect context · evidence (code-owned)</title><path d="M568,366 C744,366 744,142 920,142" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="prepare" pointer-events="none"><title>generate · call (code-owned)</title><path d="M476,404 C500,534 500,534 476,664" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="prepare" pointer-events="none"><title>candidate checks · validation (code-owned)</title><path d="M384,702 C312,702 312,254 240,254" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="prepare" pointer-events="none"><title>if no valid / preferred candidate · validation (code-owned)</title><path d="M240,254 C432,254 432,702 624,702" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="prepare" pointer-events="none"><title>prepared evidence · evidence (code-owned)</title><path d="M920,142 C744,142 744,366 568,366" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="decide" pointer-events="none"><title>reference only · evidence (code-owned)</title><path d="M920,254 C864,254 864,366 808,366" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="decide" pointer-events="none"><title>LLM choice · validation (code-owned)</title><path d="M624,366 C432,366 432,366 240,366" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="decide" pointer-events="none"><title>inspect · call (code-owned)</title><path d="M240,366 C312,366 312,814 384,814" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="decide" pointer-events="none"><title>observation / next decision · evidence (code-owned)</title><path d="M568,814 C596,814 596,366 624,366" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="decide" pointer-events="none"><title>accept candidate · validation (code-owned)</title><path d="M148,404 C172,422 172,422 148,440" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="decide" pointer-events="none"><title>record · evidence (code-owned)</title><path d="M808,366 C864,366 864,366 920,366" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="finalize" pointer-events="none"><title>build report · evidence (code-owned)</title><path d="M568,478 C744,478 744,478 920,478" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="finalize" pointer-events="none"><title>handoff evidence · call (code-owned)</title><path d="M920,478 C744,478 744,142 568,142" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="finalize" pointer-events="none"><title>build packet · call (code-owned)</title><path d="M476,440 C500,310 500,310 476,180" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-node="prepare::contract" data-implementation-owner="prepare" pointer-events="auto" role="img"  aria-label="Objective and locked inputs; code-owned; DesignAgent._objective_contract">
+      <title>Objective and locked inputs
+Code-owned inside prepare
+agents/design/agent.py · DesignAgent._objective_contract</title>
+      <rect x="624" y="440" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="458" fill="#172b4d" font-size="12">Objective and locked</text><text x="634" y="473" fill="#172b4d" font-size="12">inputs</text>
+      <text x="634" y="507" fill="#526174" font-size="9">CODE · prepare</text>
+    </g><g data-implementation-node="prepare::history" data-implementation-owner="prepare" pointer-events="auto" role="img"  aria-label="BO, prior results and failure memory; code-owned; DesignAgent._prepare_design_payload">
+      <title>BO, prior results and failure memory
+Code-owned inside prepare
+agents/design/agent.py · DesignAgent._prepare_design_payload</title>
+      <rect x="920" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="122" fill="#172b4d" font-size="12">BO, prior results and</text><text x="930" y="137" fill="#172b4d" font-size="12">failure memory</text>
+      <text x="930" y="171" fill="#526174" font-size="9">CODE · prepare</text>
+    </g><g data-implementation-node="prepare::generate" data-implementation-owner="prepare" pointer-events="auto" role="img"  aria-label="Generate candidate pool; code-owned; DesignAgent._candidate_pool">
+      <title>Generate candidate pool
+Code-owned inside prepare
+agents/design/agent.py · DesignAgent._candidate_pool</title>
+      <rect x="384" y="664" width="184" height="76" rx="5" fill="#ffffff" stroke="#4c6079" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="682" fill="#172b4d" font-size="12">Generate candidate pool</text>
+      <text x="394" y="731" fill="#526174" font-size="9">CODE · prepare</text>
+    </g><g data-implementation-node="prepare::constraints" data-implementation-owner="prepare" pointer-events="auto" role="img"  aria-label="Constraint gate and rejected ledger; code-owned; DesignAgent._filter_candidates">
+      <title>Constraint gate and rejected ledger
+Code-owned inside prepare
+agents/design/agent.py · DesignAgent._filter_candidates</title>
+      <rect x="56" y="216" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="234" fill="#172b4d" font-size="12">Constraint gate and</text><text x="66" y="249" fill="#172b4d" font-size="12">rejected ledger</text>
+      <text x="66" y="283" fill="#526174" font-size="9">CODE · prepare</text>
+    </g><g data-implementation-node="prepare::repair" data-implementation-owner="prepare" pointer-events="auto" role="img"  aria-label="Conditional candidate repair; code-owned; DesignAgent._safe_seed_candidate">
+      <title>Conditional candidate repair
+Code-owned inside prepare
+agents/design/agent.py · DesignAgent._safe_seed_candidate</title>
+      <rect x="624" y="664" width="184" height="76" rx="5" fill="#ffffff" stroke="#4c6079" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="682" fill="#172b4d" font-size="12">Conditional candidate</text><text x="634" y="697" fill="#172b4d" font-size="12">repair</text>
+      <text x="634" y="731" fill="#526174" font-size="9">CODE · prepare</text>
+    </g><g data-implementation-node="decide::references" data-implementation-owner="decide" pointer-events="auto" role="img"  aria-label="Scoped Wiki / reference context; code-owned; build_reference_context">
+      <title>Scoped Wiki / reference context
+Code-owned inside decide
+agents/knowledge_context.py · build_reference_context</title>
+      <rect x="920" y="216" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="234" fill="#172b4d" font-size="12">Scoped Wiki / reference</text><text x="930" y="249" fill="#172b4d" font-size="12">context</text>
+      <text x="930" y="283" fill="#526174" font-size="9">CODE · decide</text>
+    </g><g data-implementation-node="decide::choice_gate" data-implementation-owner="decide" pointer-events="auto" role="img"  aria-label="Tool, arguments and evidence gate; code-owned; decide_design">
+      <title>Tool, arguments and evidence gate
+Code-owned inside decide
+agents/design/decision.py · decide_design</title>
+      <rect x="56" y="328" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="346" fill="#172b4d" font-size="12">Tool, arguments and</text><text x="66" y="361" fill="#172b4d" font-size="12">evidence gate</text>
+      <text x="66" y="395" fill="#526174" font-size="9">CODE · decide</text>
+    </g><g data-implementation-node="decide::inspect" data-implementation-owner="decide" pointer-events="auto" role="img"  aria-label="inspect_candidate / inspect_history; code-owned; decide_design">
+      <title>inspect_candidate / inspect_history
+Code-owned inside decide
+agents/design/decision.py · decide_design</title>
+      <rect x="384" y="776" width="184" height="76" rx="5" fill="#ffffff" stroke="#4c6079" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="794" fill="#172b4d" font-size="12">inspect_candidate /</text><text x="394" y="809" fill="#172b4d" font-size="12">inspect_history</text>
+      <text x="394" y="843" fill="#526174" font-size="9">CODE · decide</text>
+    </g><g data-implementation-node="decide::accept" data-implementation-owner="decide" pointer-events="auto" role="img"  aria-label="Checked candidate acceptance; code-owned; candidate_evaluation">
+      <title>Checked candidate acceptance
+Code-owned inside decide
+agents/design/decision.py · candidate_evaluation</title>
+      <rect x="56" y="440" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="458" fill="#172b4d" font-size="12">Checked candidate</text><text x="66" y="473" fill="#172b4d" font-size="12">acceptance</text>
+      <text x="66" y="507" fill="#526174" font-size="9">CODE · decide</text>
+    </g><g data-implementation-node="decide::trace" data-implementation-owner="decide" pointer-events="auto" role="img"  aria-label="Decision and tool evidence trace; code-owned; decide_design">
+      <title>Decision and tool evidence trace
+Code-owned inside decide
+agents/design/decision.py · decide_design</title>
+      <rect x="920" y="328" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="346" fill="#172b4d" font-size="12">Decision and tool</text><text x="930" y="361" fill="#172b4d" font-size="12">evidence trace</text>
+      <text x="930" y="395" fill="#526174" font-size="9">CODE · decide</text>
+    </g><g data-implementation-node="finalize::report" data-implementation-owner="finalize" pointer-events="auto" role="img"  aria-label="Evaluation and design report; code-owned; DesignAgent._design_report">
+      <title>Evaluation and design report
+Code-owned inside finalize
+agents/design/agent.py · DesignAgent._design_report</title>
+      <rect x="920" y="440" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="458" fill="#172b4d" font-size="12">Evaluation and design</text><text x="930" y="473" fill="#172b4d" font-size="12">report</text>
+      <text x="930" y="507" fill="#526174" font-size="9">CODE · finalize</text>
+    </g><g data-implementation-node="finalize::handoff" data-implementation-owner="finalize" pointer-events="auto" role="img"  aria-label="Checked Specimen handoff packet; code-owned; DesignAgent._design_handoff_packet">
+      <title>Checked Specimen handoff packet
+Code-owned inside finalize
+agents/design/agent.py · DesignAgent._design_handoff_packet</title>
+      <rect x="384" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#2463a5" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="122" fill="#172b4d" font-size="12">Checked Specimen handoff</text><text x="394" y="137" fill="#172b4d" font-size="12">packet</text>
+      <text x="394" y="171" fill="#526174" font-size="9">CODE · finalize</text>
+    </g><g data-source="prepare" data-target="decide" data-outcome="next" data-kind="execution"><title>prepare → decide · next · execution</title><path d="M568,366 C596,366 596,366 624,366" fill="none" stroke="#526174" stroke-opacity=".8" stroke-width="2" stroke-dasharray="" marker-end="url(#control-arrow)"/><rect x="577" y="353" width="38" height="20" rx="4" fill="#ffffff"/><text x="596" y="367" text-anchor="middle" fill="#526174" font-size="11">next</text></g><g data-source="decide" data-target="finalize" data-outcome="accepted" data-kind="execution"><title>decide → finalize · accepted · execution</title><path d="M716,404 C716,422 476,422 476,440" fill="none" stroke="#526174" stroke-opacity=".8" stroke-width="2" stroke-dasharray="" marker-end="url(#control-arrow)"/><rect x="565" y="409" width="62" height="20" rx="4" fill="#ffffff"/><text x="596" y="423" text-anchor="middle" fill="#526174" font-size="11">accepted</text></g><g data-source="decide" data-target="owner_review" data-outcome="blocked" data-kind="validation"><title>decide → owner_review · blocked · validation</title><path d="M716,328 C716,254 148,254 148,180" fill="none" stroke="#a36b16" stroke-opacity=".8" stroke-width="2" stroke-dasharray="8 5" marker-end="url(#control-arrow)"/><rect x="404" y="241" width="56" height="20" rx="4" fill="#ffffff"/><text x="432" y="255" text-anchor="middle" fill="#a36b16" font-size="11">blocked</text></g><g><title>prepare · design.prepare</title>
+        <rect x="384" y="328" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="396" y="349" fill="#172b4d" font-size="12">Prepare candidates and</text><text x="396" y="365" fill="#172b4d" font-size="12">evidence</text>
         </g><g><title>decide · design.decide</title>
-        <rect x="384" y="104" width="184" height="76" rx="9" fill="#132135" stroke="#65c9ef" stroke-opacity=".6"/>
-        <text x="396" y="125" fill="#e6edf7" font-size="12">Composite bounded</text><text x="396" y="141" fill="#e6edf7" font-size="12">suitability decision</text>
-        <text x="529" y="172" fill="#65c9ef" font-size="10">LLM</text></g><g><title>finalize · design.finalize</title>
-        <rect x="624" y="328" width="184" height="76" rx="9" fill="#132135" stroke="#7bc6ad" stroke-opacity=".6"/>
-        <text x="636" y="349" fill="#e6edf7" font-size="12">Finalize accepted design</text><text x="636" y="365" fill="#e6edf7" font-size="12">and Specimen handoff</text>
+        <rect x="624" y="328" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="636" y="349" fill="#172b4d" font-size="12">Composite bounded</text><text x="636" y="365" fill="#172b4d" font-size="12">suitability decision</text>
+        <text x="769" y="396" fill="#177768" font-size="10">LLM</text></g><g><title>finalize · design.finalize</title>
+        <rect x="384" y="440" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="396" y="461" fill="#172b4d" font-size="12">Finalize accepted design</text><text x="396" y="477" fill="#172b4d" font-size="12">and Specimen handoff</text>
         </g><g><title>owner_review · design.review_result</title>
-        <rect x="56" y="104" width="184" height="76" rx="9" fill="#132135" stroke="#e1b364" stroke-opacity=".6"/>
-        <text x="68" y="125" fill="#e6edf7" font-size="12">Return review-required</text><text x="68" y="141" fill="#e6edf7" font-size="12">result</text>
+        <rect x="56" y="104" width="184" height="76" rx="9" fill="#ffffff" stroke="#a36b16" stroke-width="2"/>
+        <text x="68" y="125" fill="#172b4d" font-size="12">Return review-required</text><text x="68" y="141" fill="#172b4d" font-size="12">result</text>
         </g>
-      <line x1="24" x2="62" y1="730" y2="730" stroke="#7e9ab8" stroke-width="2" stroke-dasharray=""/><text x="72" y="734" fill="#e6edf7" font-size="14">Execution</text><line x1="244" x2="282" y1="730" y2="730" stroke="#e1b364" stroke-width="2" stroke-dasharray="8 5"/><text x="292" y="734" fill="#e6edf7" font-size="14">Validation</text><line x1="464" x2="502" y1="730" y2="730" stroke="#b9a1dc" stroke-width="2" stroke-dasharray="2 5"/><text x="512" y="734" fill="#e6edf7" font-size="14">Evidence</text>
-      <text x="24" y="766" fill="#a7b7cf" font-size="13">Explicit outcome routes · LLM = composite bounded decision · five areas are responsibility groups</text>
+      <line x1="24" x2="62" y1="934" y2="934" stroke="#526174" stroke-width="2" stroke-dasharray=""/><text x="72" y="938" fill="#172b4d" font-size="14">Execution</text><line x1="244" x2="282" y1="934" y2="934" stroke="#526174" stroke-width="2" stroke-dasharray="8 5"/><text x="292" y="938" fill="#172b4d" font-size="14">Validation</text><line x1="464" x2="502" y1="934" y2="934" stroke="#526174" stroke-width="2" stroke-dasharray="2 5"/><text x="512" y="938" fill="#172b4d" font-size="14">Evidence</text><line x1="684" x2="722" y1="934" y2="934" stroke="#526174" stroke-width="2" stroke-dasharray="5 3"/><text x="732" y="938" fill="#172b4d" font-size="14">Internal call</text>
+      <text x="24" y="970" fill="#526174" font-size="13">Solid boxes: executable operations · Dashed CODE boxes: implementation relationships · LLM: bounded decision</text>
     </svg>

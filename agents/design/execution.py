@@ -12,6 +12,7 @@ from typing import Any, Mapping
 
 from agents.base_agent import AgentResult
 from agents.design.decision import decide_design
+from agents.design.structure import design_implementation_structure
 from agents.execution_graph import (
     ExecutionCatalog,
     ExecutionGraphError,
@@ -129,6 +130,7 @@ def design_execution_catalog(agent: Any) -> ExecutionCatalog:
             ),
         ),
         required_outputs=("agent_result",),
+        implementation_structure=design_implementation_structure,
     )
 
 

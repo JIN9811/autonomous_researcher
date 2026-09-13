@@ -109,6 +109,7 @@ class ExecutionCatalog:
     operations: tuple[ExecutionOperation, ...]
     inputs: tuple[str, ...] = ()
     required_outputs: tuple[str, ...] = ()
+    implementation_structure: Callable[[], dict[str, Any]] | None = None
 
     def __post_init__(self) -> None:
         handlers = [operation.handler for operation in self.operations]
@@ -130,6 +131,7 @@ class ExecutionCatalog:
             "inputs": list(self.inputs),
             "required_outputs": list(self.required_outputs),
             "operations": [operation.describe() for operation in self.operations],
+            "implementation_structure": deepcopy(self.implementation_structure()) if self.implementation_structure else None,
         }
 
 

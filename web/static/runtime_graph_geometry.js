@@ -190,7 +190,7 @@ Design rule:
 
   function labelPoint(edge = {}, options = {}) {
     const { sourcePoint, targetPoint, c1, c2 } = controlPoints(edge, options);
-    const t = 0.5;
+    const t = Math.max(0, Math.min(1, number(options.labelT, 0.5)));
     const mt = 1 - t;
     return {
       x: mt ** 3 * sourcePoint.x + 3 * mt ** 2 * t * c1.x + 3 * mt * t ** 2 * c2.x + t ** 3 * targetPoint.x,
@@ -320,8 +320,11 @@ Design rule:
       const origin = { x: number(label.x, 0), y: number(label.y, 0) };
       const stepX = Math.max(24, number(label.width, 1) * 0.42 + gap);
       const stepY = Math.max(18, number(label.height, 1) + gap);
-      const candidates = [];
-      for (let yLevel = 0; yLevel <= 16; yLevel += 1) {
+      // Explicit anchors stay on the owning curve; other graph consumers keep grid placement.
+      const candidates = Array.isArray(label.candidates) ? label.candidates.map(point=>({
+        x:point.x,y:point.y,distance:(point.x-origin.x)**2+(point.y-origin.y)**2,
+      })) : [];
+      for (let yLevel = 0; !Array.isArray(label.candidates) && yLevel <= 16; yLevel += 1) {
         const yOffsets = yLevel === 0 ? [0] : [-yLevel * stepY, yLevel * stepY];
         for (let xLevel = 0; xLevel <= 4; xLevel += 1) {
           const xOffsets = xLevel === 0 ? [0] : [-xLevel * stepX, xLevel * stepX];

@@ -42,7 +42,7 @@ module:
     - id: decide
       handler: design.decide
       label: Composite bounded suitability decision
-      area: high
+      area: middle
       llm: true
     - id: finalize
       handler: design.finalize
@@ -63,8 +63,9 @@ module:
   metadata:
     control_view:
       empty_roles:
-        low: No direct device operation
-        knowledge: Evidence lives in prepare and the bounded decision
+        high: Mission authority belongs to Orchestrator
+        low: Candidate and inspection functions are code-owned
+        knowledge: Source context and result evidence
   notes: >-
     GUI/module editor may edit this module config, but execution remains bound to
     allowlisted Python handlers. The Design-owned LLM decision layer selects

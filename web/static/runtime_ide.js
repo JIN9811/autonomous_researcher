@@ -3801,8 +3801,10 @@ function renderGraph(graph) {
       const showLabel = isExecutionGraph(activeGraph) ? samePairCount===1 || Boolean(activeClass) : (moduleGraph && !controlView) || conditionalRouteLabel || Boolean(activeClass);
       const maxLabelChars = moduleGraph ? 42 : 28;
       const labelText = label.length > maxLabelChars ? `${label.slice(0, maxLabelChars - 1)}…` : label;
-      const labelWidth = Math.max(moduleGraph ? 168 : 74, Math.min(moduleGraph ? 340 : 158, labelText.length * (moduleGraph ? 7.4 : 7.2) + 28));
-      const labelHeight = moduleGraph ? 24 : 22;
+      const labelWidth = isExecutionGraph(activeGraph)
+        ? Math.max(44, Math.min(220, labelText.length * 6.6 + 18))
+        : Math.max(moduleGraph ? 168 : 74, Math.min(moduleGraph ? 340 : 158, labelText.length * (moduleGraph ? 7.4 : 7.2) + 28));
+      const labelHeight = isExecutionGraph(activeGraph) ? 20 : moduleGraph ? 24 : 22;
       const edgeData = `data-edge-index="${index}" data-edge-source="${escapeHtml(edge.sourceStage)}" data-edge-target="${escapeHtml(edge.targetStage)}" data-edge-condition="${escapeHtml(edge.condition || "")}" data-edge-default="${edge.isDefault ? "true" : "false"}"`;
       return {
         edge,
@@ -3821,14 +3823,16 @@ function renderGraph(graph) {
         simpleDefaultLabel,
       };
     });
-  const labelObstacles = nodes.map((node) => {
+  const labelNodes = controlView ? [...nodes, ...AX4LABControlView.internalDetails(nodes, controlView).nodes] : nodes;
+  const labelPadding = isExecutionGraph(activeGraph) ? 2 : 8;
+  const labelObstacles = labelNodes.map((node) => {
     const x = Number(node.position?.x || 0);
     const y = Number(node.position?.y || 0);
     return {
-      left: Math.max(0, x - 8),
-      top: Math.max(0, y - 8),
-      right: x + GRAPH_NODE_WIDTH + 8,
-      bottom: y + GRAPH_NODE_HEIGHT + 8,
+      left: Math.max(0, x - labelPadding),
+      top: Math.max(0, y - labelPadding),
+      right: x + GRAPH_NODE_WIDTH + labelPadding,
+      bottom: y + GRAPH_NODE_HEIGHT + labelPadding,
     };
   });
   if(isExecutionGraph(activeGraph) && controlView) {
@@ -3843,8 +3847,10 @@ function renderGraph(graph) {
       y: view.labelPoint.y,
       width: view.labelWidth,
       height: view.labelHeight,
+      ...(isExecutionGraph(activeGraph) ? {candidates:Array.from({length:81},(_,index)=>
+        GRAPH_GEOMETRY.labelPoint(view.edge,{...graphGeometryOptions(),labelT:0.1+index*0.01}))} : {}),
     })),
-    { gap: 8, obstacles: labelObstacles, maxX: bounds.width, maxY: bounds.height },
+    { gap: isExecutionGraph(activeGraph) ? 2 : 8, obstacles: labelObstacles, maxX: bounds.width, maxY: bounds.height },
   ).map((label) => [label.key, label]));
   const edgeMarkup = edgeViews
     .map((view) => {
@@ -3872,7 +3878,7 @@ function renderGraph(graph) {
         ${showLabel ? `<g class="runtime-ide-edge-label${activeClass}${defaultClass}${typeClass}${moduleGraph ? " edge-module-flow" : ""}" ${edgeData}>
           <title>${escapeHtml(edgeTitle(edge))}</title>
           <rect x="${labelPoint.x - labelWidth / 2}" y="${labelPoint.y - labelHeight / 2}" width="${labelWidth}" height="${labelHeight}" rx="9"></rect>
-          <text x="${labelPoint.x}" y="${labelPoint.y + 4}">${escapeHtml(labelText)}</text>
+          <text x="${labelPoint.x}" y="${labelPoint.y + (isExecutionGraph(activeGraph) ? 0 : 4)}">${escapeHtml(labelText)}</text>
         </g>` : ""}
       `;
     })
@@ -3926,7 +3932,7 @@ function renderGraph(graph) {
     .join("");
   graphCanvas.innerHTML = `
     <div class="runtime-ide-canvas-world" style="width:${bounds.width}px;height:${bounds.height}px;transform:scale(${graphZoom});">
-      <svg class="runtime-ide-edge-layer" viewBox="0 0 ${bounds.width} ${bounds.height}" ${controlView?`style="width:${bounds.width}px;height:${bounds.height}px"`:''} aria-hidden="true">
+      <svg class="runtime-ide-edge-layer" viewBox="0 0 ${bounds.width} ${bounds.height}" ${controlView?`style="width:${bounds.width}px;height:${bounds.height}px" aria-label="Code-owned internal relationships"`:''} aria-hidden="${controlView?'false':'true'}">
         <defs>
           <marker id="ide-arrow" markerWidth="14" markerHeight="12" refX="9.8" refY="5" orient="auto" markerUnits="userSpaceOnUse" overflow="visible">
             <path d="M0,0 L10,5 L0,10 L2.4,5 z" fill="context-stroke" stroke="none"></path>
@@ -3935,7 +3941,7 @@ function renderGraph(graph) {
             <path d="M0,1 L13.6,6 L0,11 L3.2,6 z" fill="context-stroke" stroke="none"></path>
           </marker>
         </defs>
-        ${controlView && typeof AX4LABControlView !== "undefined" ? AX4LABControlView.backdrop(nodes, controlView) : ''}
+        ${controlView && typeof AX4LABControlView !== "undefined" ? AX4LABControlView.backdrop(nodes, controlView, {selected:selectedNodeId}) : ''}
         ${edgeMarkup}
       </svg>
       ${nodeMarkup}
@@ -3949,10 +3955,23 @@ function renderGraph(graph) {
     if (legend) {
       legend.innerHTML = AX4LABControlView.legend(controlView);
       legend.parentElement.dataset.controlLegend = '1';
-      legend.parentElement.querySelector('.runtime-ide-edge-legend-head small').textContent = '5 areas · 3 relations';
+      legend.parentElement.querySelector('.runtime-ide-edge-legend-head small').textContent = '5 areas · execution + internals';
     }
   }
   updateCanvasViewHint(bounds);
+  graphCanvas.querySelectorAll('[data-implementation-owner]').forEach(el=>{
+    const inspect=event=>{
+      event.stopPropagation();
+      const detailId=el.dataset.implementationNode;
+      selectNode(el.dataset.implementationOwner);
+      if(event.type==='keydown') {
+        [...graphCanvas.querySelectorAll('[data-implementation-node]')].find(node=>node.dataset.implementationNode===detailId)?.focus();
+      }
+    };
+    el.addEventListener('click',inspect);
+    el.addEventListener('keydown',event=>{if(event.key==='Enter' || event.key===' '){event.preventDefault();inspect(event);}});
+    el.addEventListener('pointerdown',event=>event.stopPropagation());
+  });
   graphCanvas.querySelectorAll("[data-node-id]").forEach((el) => {
     const nodeId = el.getAttribute("data-node-id") || "";
     el.addEventListener("pointerdown", (event) => beginNodeDrag(event, nodeId));
@@ -4986,6 +5005,7 @@ function renderExecutionInspector(node) {
   const op=AX4LABExecutionEditor.operation(graph,node?.handler);
   const selectOptions=(values,value)=>values.map(item=>`<option value="${escapeHtml(item)}" ${item===value?'selected':''}>${escapeHtml(item)}</option>`).join('');
   const trace=executionTraceProjection(graph);
+  const implementation=graph.metadata.execution_catalog?.implementation_structure?.operations?.[node?.handler];
   nodeInspector.innerHTML=`<div class="runtime-execution-inspector">
     <p>Executable owner graph · ${activeGraphTab()?.dirty?'unsaved draft; trace paint paused':`revision ${escapeHtml((graph.metadata.execution_graph_revision || 'unavailable').slice(0,12))}`}</p>
     <button class="btn tiny" id="ide-execution-reload">Reload backend definition</button>
@@ -5003,7 +5023,11 @@ function renderExecutionInspector(node) {
     ${Object.keys(op?.config || {}).length?Object.entries(op.config).map(([key,rule])=>`<label>Config: ${escapeHtml(key)} <small>${escapeHtml(JSON.stringify(rule))}</small><input class="text-input" data-execution-config="${escapeHtml(key)}" value="${escapeHtml(JSON.stringify(node.config?.[key]) || '')}" placeholder="JSON value"/></label>`).join(''):'<p>No per-operation configuration keys are registered.</p>'}
     <button class="btn tiny" id="ide-execution-apply">Apply operation</button>
     <button class="btn tiny danger" id="ide-execution-delete">Delete operation</button>
-    <div id="ide-execution-inspector-error" role="alert"></div>`:'<p>Select or add an operation.</p>'}
+    <div id="ide-execution-inspector-error" role="alert"></div>
+    ${implementation?`<section class="runtime-implementation-inspector"><h4>Internal implementation</h4>
+    <p>Code-owned relationships, not additional executable operations. Select a CODE box to inspect its owner here.</p>
+    <dl>${implementation.nodes.map(item=>`<dt>${escapeHtml(item.label)} · ${escapeHtml(item.area)}</dt><dd><code>${escapeHtml(item.source.symbol)}</code><br/><small>${escapeHtml(item.source.path)}</small></dd>`).join('')}</dl>
+    <ul>${implementation.edges.map(edge=>`<li>${escapeHtml(edge.source==='$operation'?node.id:edge.source)} → ${escapeHtml(edge.target==='$operation'?node.id:edge.target)}: ${escapeHtml(edge.label)}</li>`).join('')}</ul></section>`:''}`:'<p>Select or add an operation.</p>'}
     <p>Entry: ${escapeHtml(graph.entry_node)} · terminal nodes: ${escapeHtml(graph.finish_nodes.join(', ') || 'none')}. Validate reports incomplete routes and dependencies.</p>
     </div>`;
   document.getElementById('ide-execution-reload').onclick=()=>loadModule(graph.metadata.module_id).catch(err=>log(String(err),'error'));

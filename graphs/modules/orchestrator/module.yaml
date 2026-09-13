@@ -79,8 +79,8 @@ module:
   metadata:
     control_view:
       empty_roles:
-        guardian: Validation lives inside the bounded decision
-        low: No direct device operation
+        guardian: Existing request and effect validation
+        low: Software tools; no direct device operation
   notes: The Orchestrator is a supervisor/control-plane module. It plans and hands
     off work but does not directly execute device tools; Guardian remains the safety
     authority.

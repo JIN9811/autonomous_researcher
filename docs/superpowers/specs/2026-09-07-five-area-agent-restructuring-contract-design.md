@@ -402,6 +402,10 @@ Known gap: <most important current gap, or None identified within the verified s
 필요한 경우 composite 노드로 정확히 표시하고, 다섯 영역을 채우기 위한
 가짜 실행 노드를 만들지 않는다. 실선·점선 등의 의미는 edge 선언을 따르며
 영역 색으로 추론하지 않는다. 없는 독립 책임은 명시적으로 표시한다.
+단, composite라는 이유로 내부 관계를 생략하지 않는다. owner catalog의 소스 참조로
+함수·툴·검증·근거 및 관측 반환 관계를 함께 표시하고, CODE 관계와 편집 가능한 실행
+노드를 구분한다. Low에는 소프트웨어 계산·조회도 포함한다. 문서 SVG는 같은 구조
+데이터를 사용하되 IDE 테마가 아닌 흰 배경·짙은 글자의 문서 테마로 생성한다.
 노드·분기 편집 후 실제 호출 순서, backend reload, 실행 revision별 trace,
 기존 결과 보존, 저장 좌표와 SVG 일치를 검증한다. Design과 Orchestrator부터
 적용하며 미이관 모듈의 기존 경로는 유지한다.
