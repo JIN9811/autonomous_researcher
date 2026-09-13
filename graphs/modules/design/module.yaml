@@ -1,4 +1,9 @@
 module:
+  implementation:
+    schema: ax4lab.agent_module.v1
+    id: design
+    version: 1.0.0
+    registration: installed_code
   orchestration_contract:
     version: orchestration_contract.v1
     admission:
@@ -26,46 +31,40 @@ module:
       output_key: orchestrator_plan
       event_type: orchestrator_plan
       enabled: true
-  internal_graph:
-    - id: 01_receive_objective_context
-      label: Receive Objective and Runtime Context
-      kind: internal_step
-    - id: 02_normalize_objective_contract
-      label: Normalize Objective Contract
-      kind: internal_step
-    - id: 03_collect_prior_bo_knowledge_failure
-      label: Collect Prior BO Knowledge Failure Context
-      kind: internal_step
-    - id: 04_form_hypothesis
-      label: Form Hypothesis and Test Variables
-      kind: internal_step
-    - id: 05_construct_design_space
-      label: Construct Constrained Design Space
-      kind: internal_step
-    - id: 06_generate_candidate_pool
-      label: Generate Deterministic Candidate Pool
-      kind: internal_step
-    - id: 07_apply_constraint_gate
-      label: Apply FDM Fixture Failure Constraint Gate
-      kind: internal_step
-    - id: 08_repair_or_reject_candidates
-      label: Repair or Reject Invalid Candidates
-      kind: internal_step
-    - id: 09_score_uncertainty_information_risk
-      label: Score Objective Uncertainty Information Risk
-      kind: internal_step
-    - id: 10_select_authoritative_candidate
-      label: LLM Suitability Decision and Checked Candidate Selection
-      kind: internal_step
-    - id: 11_emit_design_report
-      label: Emit Design Report and Decision Register
-      kind: internal_step
-    - id: 12_handoff_specimen
-      label: Handoff Experiment Spec to Specimen Agent
-      kind: internal_step
+  execution_graph:
+    schema: ax4lab.execution_graph.v1
+    entry: prepare
+    nodes:
+    - id: prepare
+      handler: design.prepare
+      label: Prepare candidates and evidence
+      area: middle
+    - id: decide
+      handler: design.decide
+      label: Composite bounded suitability decision
+      area: high
+      llm: true
+    - id: finalize
+      handler: design.finalize
+      label: Finalize accepted design and Specimen handoff
+      area: middle
+    - id: owner_review
+      handler: design.review_result
+      label: Return review-required result
+      area: guardian
+    edges:
+    - {source: prepare, target: decide, 'on': next, kind: execution}
+    - {source: decide, target: finalize, 'on': accepted, kind: execution}
+    - {source: decide, target: owner_review, 'on': blocked, kind: validation}
+    terminals: [finalize, owner_review]
   io_contract:
     input: OrchestratorState with objective, constraints, prior_context, bo_result, knowledge, and failure_memory
     output: AgentResult.data with experiment_spec, design_report, design_candidate, candidate_ledger, decisions, metrics, and handoff_packet
+  metadata:
+    control_view:
+      empty_roles:
+        low: No direct device operation
+        knowledge: Evidence lives in prepare and the bounded decision
   notes: >-
     GUI/module editor may edit this module config, but execution remains bound to
     allowlisted Python handlers. The Design-owned LLM decision layer selects

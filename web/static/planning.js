@@ -121,12 +121,20 @@ const DEFAULT_LIVE_AGENTS = [
   { id: "bo", label: "BO Agent", short: "BO", stage: "bo", icon: "B", iconPath: "/static/live_gui_icons/bo_agent.svg" },
   { id: "guardian", label: "Guardian Agent", short: "GRD", stage: "guardian", icon: "G", iconPath: "/static/live_gui_icons/guardian_agent.svg" },
 ];
-let LIVE_AGENTS = DEFAULT_LIVE_AGENTS.map((agent) => ({ ...agent, manifestSource: "fallback" }));
-let liveAgentManifestStatus = { ok: false, source: "fallback", error: "" };
+function coreDefaultLiveAgents() {
+  return DEFAULT_LIVE_AGENTS
+    .filter((agent) => agent.id === "objective" || agent.id === "orchestrator")
+    .map((agent) => ({ ...agent, manifestSource: "bootstrap" }));
+}
+let LIVE_AGENTS = coreDefaultLiveAgents();
+let liveAgentManifestStatus = { ok: false, source: "bootstrap", error: "", stale: false };
+let liveAgentManifestRequestGeneration = 0;
+const liveAgentModuleHost = window.AX4LABAgentModuleHost.createModuleHost();
 
 const LIVE_RENDERER_PROFILES = {
   descriptor: { id: "descriptor", dashboardAgent: "", reportAgent: "", supported: true, execution_scope: "presentation_only", blocked_reason: "" },
   generic: { id: "generic", dashboardAgent: "", reportAgent: "", supported: true, execution_scope: "presentation_only", blocked_reason: "" },
+  module: { id: "module", dashboardAgent: "", reportAgent: "", supported: true, execution_scope: "presentation_only", blocked_reason: "" },
   objective_reference: { id: "objective_reference", dashboardAgent: "objective", reportAgent: "objective", supported: true, execution_scope: "presentation_only", blocked_reason: "" },
   orchestrator_reference: { id: "orchestrator_reference", dashboardAgent: "orchestrator", reportAgent: "orchestrator", supported: true, execution_scope: "presentation_only", blocked_reason: "" },
   design_reference: { id: "design_reference", dashboardAgent: "design", reportAgent: "design", supported: true, execution_scope: "presentation_only", blocked_reason: "" },
@@ -533,25 +541,57 @@ function applyLiveAgentManifest(payload) {
     if (objective) normalized.unshift(objective);
   }
   LIVE_AGENTS = normalized;
-  liveAgentManifestStatus = { ok: true, source: "/api/runtime/agent-manifests", error: "", graphId: payload.graph_id || "" };
+  liveAgentManifestStatus = { ok: true, source: "/api/runtime/agent-manifests", error: "", graphId: payload.graph_id || "", stale: false };
   if (!knownLiveAgent(liveSelectedAgent)) liveSelectedAgent = "orchestrator";
   return true;
 }
 
+function liveAgentModuleHostServices() {
+  return {
+    escapeHtml,
+    compactText,
+    renderRuntimeValue,
+    renderDashboardRows,
+    dashboardList,
+    orcChartPayloadAttr,
+    designImageUrlFromSource,
+    designCandidateDirectCaptureUrl,
+    latestDesignAgentReport,
+    latestDesignReport,
+    designSelectedCandidate,
+    designCandidateRows,
+    designActualSpecimenRows,
+    renderDesignCandidateCards,
+    renderDesignParameterSweep,
+    renderDashboardCard,
+    runtimeRows,
+    renderReportList,
+  };
+}
+
 async function refreshLiveAgentManifest(options = {}) {
+  const requestGeneration = ++liveAgentManifestRequestGeneration;
   try {
     const res = await fetch("/api/runtime/agent-manifests", { headers: { "Accept": "application/json" } });
     if (!res.ok) throw new Error(`agent manifest HTTP ${res.status}`);
     const payload = await res.json();
+    if (requestGeneration !== liveAgentManifestRequestGeneration) return { ok: false, superseded: true };
     if (!payload || payload.ok === false || !applyLiveAgentManifest(payload)) {
       throw new Error((payload && payload.error) || "agent manifest payload invalid");
     }
+    const moduleResult = await liveAgentModuleHost.reconcile(payload.agents, liveAgentModuleHostServices());
+    if (requestGeneration !== liveAgentManifestRequestGeneration) return { ok: false, superseded: true };
+    liveAgentManifestStatus.moduleErrors = moduleResult && Array.isArray(moduleResult.errors) ? moduleResult.errors : [];
     if (liveLastSession && !options.skipRender) renderLiveRuntime(liveLastSession);
     return payload;
   } catch (err) {
-    liveAgentManifestStatus = { ok: false, source: "fallback", error: String(err) };
-    if (!options.silent) setChatStatus("MANIFEST FALLBACK", "warning", String(err));
-    return { ok: false, agents: LIVE_AGENTS, error: String(err), fallback: true };
+    if (requestGeneration !== liveAgentManifestRequestGeneration) return { ok: false, superseded: true };
+    const hadValidManifest = liveAgentManifestStatus.ok;
+    liveAgentManifestStatus = hadValidManifest
+      ? { ...liveAgentManifestStatus, error: String(err), stale: true }
+      : { ok: false, source: "bootstrap", error: String(err), stale: true };
+    if (!options.silent) setChatStatus(hadValidManifest ? "MANIFEST STALE" : "MANIFEST UNAVAILABLE", "warning", String(err));
+    return { ok: false, agents: LIVE_AGENTS, error: String(err), stale: true };
   }
 }
 
@@ -5600,44 +5640,8 @@ function renderOrchestratorReportDetails(report) {
 }
 
 function renderDesignReportDetails(report) {
-  const designReport = latestDesignReport(report);
-  if (!designReport || typeof designReport !== "object") return "";
-  const hypothesis = designReport.hypothesis || {};
-  const objective = designReport.objective || {};
-  const generation = designReport.candidate_generation || {};
-  const evaluation = designReport.candidate_evaluation || {};
-  const prior = designReport.prior_context || {};
-  const handoff = designReport.handoff_to_specimen || {};
-  const topCandidates = Array.isArray(generation.top_candidates) ? generation.top_candidates.slice(0, 5) : [];
-  const rejected = Array.isArray(designReport.rejected_candidates) ? designReport.rejected_candidates.slice(0, 6) : [];
-  const decisions = Array.isArray(designReport.decision_register) ? designReport.decision_register.slice(0, 6) : [];
-  const evidenceBased = designReport.evaluation_semantics === "evidence_based_v1";
-  const topList = topCandidates.map((item) => evidenceBased
-    ? `${item.candidate_id || "candidate"} · ${item.geometry_type || "-"} · validity=${item.design_evaluation?.validity?.status || "unknown"} · performance=${item.design_evaluation?.performance?.status || "unassessed"}`
-    : `${item.candidate_id || "candidate"} · ${item.geometry_type || "-"} · score=${renderRuntimeValue(item.expected_objective_proxy_score || item.predicted_objective)} · risk=${renderRuntimeValue(item.risk_score)}`);
-  const rejectedList = rejected.map((item) => `${item.candidate_id || "candidate"} · ${item.reason || "rejected"}`);
-  const decisionList = decisions.map((item) => `${item.decision_id || item.decision || "decision"} · ${item.status || "-"} · ${item.rationale || ""}`);
-  return `
-    <div class="live-agent-specific-design-details">
-      ${runtimeRows([
-        ["report_id", designReport.report_id || "-"],
-        ["primary_metric", objective.primary_metric || "-"],
-        ["direction", objective.direction || "-"],
-        ["variables", hypothesis.variables_under_test || "-"],
-        ["selected_candidate", evaluation.selected_candidate_id || "-"],
-        evidenceBased ? ["validity", designReport.design_evaluation?.validity?.status || "unknown"] : ["manufacturability", evaluation.manufacturability_score || "-"],
-        ["knowledge_prior", prior.knowledge_summary || "-"],
-        ["bo_recommendation", prior.bo_recommendation || "-"],
-        ["handoff_missing", handoff.missing_required_fields || []],
-      ])}
-      <h5>Candidate Board</h5>
-      ${renderReportList(topList, "No candidate board recorded.")}
-      <h5>Rejected / Repair Log</h5>
-      ${renderReportList(rejectedList, "No rejected candidates recorded.")}
-      <h5>Decision Register</h5>
-      ${renderReportList(decisionList, "No design decisions recorded.")}
-    </div>
-  `;
+  const frontend = liveAgentModuleHost.get("design");
+  return frontend && typeof frontend.renderReport === "function" ? frontend.renderReport(report) : "";
 }
 
 function renderSpecimenReportDetails(report) {
@@ -6330,7 +6334,11 @@ function renderAgentSpecificReportSection(report, status, agentLabel) {
   const rows = runtimeRows(profile.rows || []);
   const checklist = renderReportList(profile.checklist || [], "No role-specific checklist recorded.");
   const rendererProfile = liveAgentRendererProfile(liveSelectedAgent);
+  const moduleFrontend = rendererProfile.id === "module" ? liveAgentModuleHost.get(liveSelectedAgent) : null;
   const reportAgentId = rendererProfile.reportAgent || String(liveSelectedAgent || "").toLowerCase();
+  const moduleDetails = moduleFrontend && typeof moduleFrontend.renderReport === "function"
+    ? moduleFrontend.renderReport(report)
+    : "";
   const orchestratorDetails = reportAgentId === "orchestrator" ? renderOrchestratorReportDetails(report) : "";
   const designDetails = reportAgentId === "design" ? renderDesignReportDetails(report) : "";
   const specimenDetails = reportAgentId === "specimen" ? renderSpecimenReportDetails(report) : "";
@@ -6346,8 +6354,9 @@ function renderAgentSpecificReportSection(report, status, agentLabel) {
       <h4>${escapeHtml(profile.title)}</h4>
       <p class="live-agent-specific-summary">${escapeHtml(profile.summary || "")}</p>
       ${rows}
+      ${moduleDetails}
       ${orchestratorDetails}
-      ${designDetails}
+      ${moduleDetails ? "" : designDetails}
       ${specimenDetails}
       ${visionDetails}
       ${manipulationDetails}
@@ -11815,8 +11824,10 @@ function renderDesignSpecimenMetric(label, value, options = {}) {
   `;
 }
 
-function renderDesignSpecimenMetricStrip(item) {
-  if (item && item.design_evaluation) return renderDesignEvidence(item.design_evaluation);
+function renderDesignSpecimenMetricStrip(item, helpers = {}) {
+  if (item && item.design_evaluation && typeof helpers.renderEvidence === "function") {
+    return helpers.renderEvidence(item.design_evaluation);
+  }
   if (item && item.__actual_specimen) {
     const maxLoop = dashboardFiniteNumber(item.__max_loop) || Math.max(dashboardFiniteNumber(item.loop_index) || 1, 1);
     const hasStl = Boolean(item.stl_url || item.stl_path);
@@ -12529,7 +12540,7 @@ function hydrateDesignCaptureCanvases(root = liveReportPanel) {
   });
 }
 
-function renderDesignCandidateCards(screenReport, designReport, report) {
+function renderDesignCandidateCards(screenReport, designReport, report, helpers = {}) {
   const rows = designActualSpecimenRows(screenReport, designReport, report);
   if (!rows.length) return renderDesignEmpty("No generated specimens yet.");
   const spec = report && report.spec ? report.spec : {};
@@ -12565,7 +12576,7 @@ function renderDesignCandidateCards(screenReport, designReport, report) {
               <span class="ar-design-specimen-status tone-${escapeHtml(tone)}">${escapeHtml(designCandidateStatusText(item, isSelected))}</span>
               <small>#${escapeHtml(String(rank).padStart(2, "0"))}</small>
             </div>
-            ${renderDesignSpecimenMetricStrip(item)}
+            ${renderDesignSpecimenMetricStrip(item, helpers)}
           </article>
         `;
       }).join("")}
@@ -12638,240 +12649,11 @@ function renderDesignParameterSweep(screenReport) {
   `;
 }
 
-function designScatterRows(points) {
-  const clean = (points || []).map((point) => ({
-    ...point,
-    x: dashboardFiniteNumber(point && point.x_mass_g),
-    y: dashboardFiniteNumber(point && point.y_predicted_objective),
-    r: dashboardFiniteNumber(point && point.radius_uncertainty),
-  })).filter((point) => point.x !== null && point.y !== null).slice(0, 24);
-  return clean.map((point) => ({
-    candidate_id: point.candidate_id || "candidate",
-    geometry_type: point.geometry_type || "",
-    x: point.x,
-    y: point.y,
-    r: point.r || 0,
-    score: dashboardFiniteNumber(point.score),
-    status: point.status || "",
-  }));
-}
-
-function designRadarRows(source, fallbackMetrics = {}) {
-  const explicit = Array.isArray(source) ? source.map((item) => ({
-    label: item.axis || item.label || "metric",
-    value: dashboardFiniteNumber(item.value),
-    max: dashboardFiniteNumber(item.max) || 1,
-  })).filter((item) => item.value !== null) : [];
-  if (explicit.length) return explicit.slice(0, 6);
-  return [
-    ["objective", fallbackMetrics.selected_score],
-    ["manufacturing", fallbackMetrics.manufacturability_score],
-    ["info_gain", fallbackMetrics.information_gain_score],
-    ["margin", fallbackMetrics.constraint_margin_score],
-    ["risk_inv", (() => {
-      const risk = dashboardFiniteNumber(fallbackMetrics.risk_score);
-      return risk === null ? null : Math.max(0, 1 - risk);
-    })()],
-  ].map(([label, value]) => ({ label, value: dashboardFiniteNumber(value), max: 1 }))
-    .filter((item) => item.value !== null);
-}
-
-function renderDesignEvidence(evaluation, details = false) {
-  const e = evaluation || {};
-  const validity = e.validity || {};
-  const performance = e.performance || {};
-  const cost = e.cost || {};
-  const quantity = q => q && q.value != null ? `${renderRuntimeValue(q.value)} ${q.unit || ""}` : "unavailable";
-  const rows = [
-    ["Validity", validity.status || "unknown"],
-    ["Performance", performance.status === "unassessed" ? "unassessed" : quantity(performance)],
-    ["Mass (estimated)", quantity(cost.mass)],
-    ["Time (rough estimate)", quantity(cost.duration)],
-  ];
-  const margins = details && Array.isArray(e.constraint_margins) ? e.constraint_margins : [];
-  const reasons = Array.isArray(validity.reasons) ? validity.reasons : [];
-  return `<div class="ar-design-metric-strip">${rows.map(([label,value]) => `<span><b>${escapeHtml(label)}</b>${escapeHtml(value)}</span>`).join("")}</div>
-    ${margins.length ? `<div class="ar-design-note-list">${margins.map(m => `<span>${escapeHtml(m.constraint)}: ${escapeHtml(m.margin)} ${escapeHtml(m.unit)} margin · ${escapeHtml(m.status)}</span>`).join("")}</div>` : ""}
-    ${reasons.length ? `<div class="ar-design-note-list">${reasons.map(r => `<span>${escapeHtml(r)}</span>`).join("")}</div>` : ""}`;
-}
-
-function renderDesignExpectedPerformance(screenReport, designReport, selected = {}) {
-  const evidence = (designReport && designReport.design_evaluation) || (screenReport && screenReport.design_evaluation) || selected.design_evaluation;
-  if (evidence) return renderDesignEvidence(evidence);
-  const expected = screenReport && screenReport.expected_performance ? screenReport.expected_performance : {};
-  const evaluation = designReport && designReport.candidate_evaluation ? designReport.candidate_evaluation : {};
-  const scatterRows = designScatterRows(Array.isArray(expected.scatter_points) ? expected.scatter_points : []);
-  const metricRows = [
-    ["OBJ", evaluation.selected_score ?? selected.expected_objective_proxy_score ?? selected.predicted_objective ?? selected.score],
-    ["PRINT", selected.manufacturability_score ?? selected.expected_manufacturability_score],
-    ["INFO", selected.information_gain_score],
-    ["RISK", evaluation.risk_score ?? selected.risk_score],
-  ].map(([label, value]) => ({ label, value: designScoreText(value, 2) }));
-  return `
-    <div class="ar-design-performance-map">
-      ${scatterRows.length
-        ? `<div class="ar-design-echart ar-design-scatter-chart" data-orc-echart="dsn-scatter" data-orc-payload="${orcChartPayloadAttr({ rows: scatterRows })}" aria-label="Candidate mass versus predicted objective"></div>`
-        : renderDesignEmpty("Waiting for scatter.")}
-      <div class="ar-design-metric-strip">
-        ${metricRows.map((item) => `<span><b>${escapeHtml(item.label)}</b>${escapeHtml(item.value)}</span>`).join("")}
-      </div>
-    </div>
-  `;
-}
-
-function renderDesignArtifactLedger(items) {
-  const rows = (Array.isArray(items) ? items : []).map((item) => {
-    const status = item.status || "recorded";
-    return `${item.artifact_type || "artifact"} / ${item.artifact_id || "-"} / ${status}`;
-  });
-  return dashboardList(rows, "No design artifact ledger recorded.", 8);
-}
-
-function renderDesignBriefCard(brief, objective, hypothesis, spec, prior, material = {}, manufacturability = {}, selected = {}) {
-  const constraints = Array.isArray(brief.success_criteria) ? brief.success_criteria.slice(0, 3) : [];
-  const goal = brief.hypothesis || hypothesis.statement || objective.statement || spec.objective || "Objective pending.";
-  return `
-    <div class="ar-design-brief-layout">
-      ${renderDashboardRows([
-        ["Metric", brief.primary_metric || objective.primary_metric || spec.objective_type || "-"],
-        ["Test", spec.specimen_type || spec.specimen_kind || "compression"],
-        ["Standard", spec.standard || spec.test_standard || "-"],
-        ["Material", material.material || brief.material || spec.material || spec.material_family || "-"],
-        ["Printer", manufacturability.printer_model || spec.printer_model || "-"],
-        ["Selected", selected.candidate_id || spec.candidate_id || "-"],
-        ["Priors", prior.prior_count || 0],
-      ])}
-      ${constraints.length ? `<ul class="ar-design-check-list">${constraints.map((item) => `<li>${escapeHtml(compactText(item, 72))}</li>`).join("")}</ul>` : ""}
-      <p>${escapeHtml(compactText(goal, 120))}</p>
-    </div>
-  `;
-}
-
-function renderDesignManufacturabilityCard(screenReport, designReport, selected, spec, material = {}, candidateRows = []) {
-  const evidence = (designReport && designReport.design_evaluation) || (screenReport && screenReport.design_evaluation) || spec.design_evaluation;
-  if (evidence) return renderDesignEvidence(evidence, true);
-  const expected = screenReport && screenReport.expected_performance ? screenReport.expected_performance : {};
-  const evaluation = designReport && designReport.candidate_evaluation ? designReport.candidate_evaluation : {};
-  const manufacturability = (screenReport && screenReport.manufacturability) || (designReport && designReport.manufacturability) || {};
-  const radarRows = designRadarRows(Array.isArray(expected.radar) ? expected.radar : [], {
-    ...evaluation,
-    manufacturability_score: manufacturability.manufacturability_score || selected.manufacturability_score || selected.expected_manufacturability_score,
-  });
-  const warnings = Array.isArray(manufacturability.warnings) ? manufacturability.warnings : [];
-  const previewCount = candidateRows.filter((item) => designImageUrlFromSource(item) || designCandidateDirectCaptureUrl(item)).length;
-  return `
-    <div class="ar-design-manufacturing-layout">
-      ${radarRows.length
-        ? `<div class="ar-design-echart ar-design-radar-chart" data-orc-echart="dsn-radar" data-orc-payload="${orcChartPayloadAttr({ rows: radarRows })}" aria-label="Manufacturability radar chart"></div>`
-        : renderDesignEmpty("Waiting for gate.")}
-      <div class="ar-design-metric-strip">
-        <span><b>Printer</b>${escapeHtml(compactText(manufacturability.printer_model || spec.printer_model || "-", 18))}</span>
-        <span><b>Material</b>${escapeHtml(compactText(material.material || spec.material || "-", 18))}</span>
-        <span><b>Mass</b>${escapeHtml(`${renderRuntimeValue(manufacturability.expected_mass_g || spec.expected_mass_g || "-")} g`)}</span>
-        <span><b>Time</b>${escapeHtml(`${renderRuntimeValue(manufacturability.expected_print_time_min || spec.expected_print_time_min || "-")} min`)}</span>
-        <span><b>Nozzle</b>${escapeHtml(renderRuntimeValue(material.nozzle_diameter_mm || spec.nozzle_diameter_mm || "-"))}</span>
-        <span><b>Captures</b>${escapeHtml(`${previewCount || 0}/${candidateRows.length || 0}`)}</span>
-      </div>
-      ${warnings.length ? `<div class="ar-design-note-list">${warnings.slice(0, 2).map((item) => `<span>${escapeHtml(compactText(item, 72))}</span>`).join("")}</div>` : ""}
-    </div>
-  `;
-}
-
-function renderDesignMaterialCard(material, spec) {
-  const notes = Array.isArray(material.notes) ? material.notes.slice(0, 3) : [];
-  return `
-    <div class="ar-design-material-layout">
-      <div class="ar-design-metric-strip">
-        <span><b>Material</b>${escapeHtml(compactText(material.material || spec.material || "-", 22))}</span>
-        <span><b>Layer</b>${escapeHtml(renderRuntimeValue(material.layer_height_mm || spec.layer_height_mm || "-"))}</span>
-        <span><b>Nozzle</b>${escapeHtml(renderRuntimeValue(material.nozzle_diameter_mm || spec.nozzle_diameter_mm || "-"))}</span>
-        <span><b>Bed</b>${escapeHtml(renderRuntimeValue(material.bed_temperature_c || spec.bed_temperature_c || "-"))}</span>
-      </div>
-      <div class="ar-design-note-list">
-        ${(notes.length ? notes : ["Material notes pending."]).map((item) => `<span>${escapeHtml(compactText(item, 88))}</span>`).join("")}
-      </div>
-    </div>
-  `;
-}
-
-function renderDesignHandoffCard(handoff, selected, material, spec, artifactLedger = []) {
-  const missing = Array.isArray(handoff.missing_required_fields) ? handoff.missing_required_fields : [];
-  const ready = handoff.required_fields_present !== false && !missing.length;
-  return `
-    <div class="ar-design-handoff-layout">
-      <div class="ar-design-handoff-main">
-        <span class="tone-${ready ? "success" : "warning"}">${ready ? "Ready" : "Needs Input"}</span>
-        <strong>${escapeHtml(compactText(handoff.authoritative_candidate_id || selected.candidate_id || spec.candidate_id || "-", 34))}</strong>
-        <em>${escapeHtml(compactText(handoff.authoritative_specimen_id || selected.specimen_id || spec.specimen_id || "-", 44))}</em>
-      </div>
-      <div class="ar-design-metric-strip">
-        <span><b>Next</b>SPC</span>
-        <span><b>Status</b>${escapeHtml(handoff.packet_status || (ready ? "ready" : "blocked"))}</span>
-        <span><b>Profile</b>${escapeHtml(compactText(material.printer_profile || spec.printer_profile || "-", 18))}</span>
-        <span><b>Evidence</b>${escapeHtml(`${Array.isArray(artifactLedger) ? artifactLedger.length : 0} files`)}</span>
-      </div>
-      ${missing.length ? `<div class="ar-design-note-list">${missing.slice(0, 4).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
-    </div>
-  `;
-}
-
-function renderDesignEvidenceCard(artifactLedger, rejected) {
-  const artifacts = Array.isArray(artifactLedger) ? artifactLedger.slice(0, 5) : [];
-  const repairs = Array.isArray(rejected) ? rejected.slice(0, 4) : [];
-  return `
-    <div class="ar-design-evidence-layout">
-      <section>
-        <h5>Artifacts</h5>
-        ${renderDesignArtifactLedger(artifacts)}
-      </section>
-      <section>
-        <h5>Rejected / Repair</h5>
-        ${dashboardList(repairs.map((item) => renderRuntimeValue(item)), "No rejected entries.", 4)}
-      </section>
-    </div>
-  `;
-}
-
 function renderDesignDashboardCards(report, status, agentLabel, profile) {
-  const spec = report.spec || {};
-  const screenReport = latestDesignAgentReport(report) || {};
-  const designReport = latestDesignReport(report) || {};
-  const decision = designReport.design_decision;
-  if (decision && ["returned", "failed"].includes(decision.status)) {
-    return renderDashboardCard("Design Decision — Review Required", runtimeRows([
-      ["status", decision.status], ["reason", decision.reason || decision.failure_code || "No accepted candidate"],
-      ["handoff", "blocked — no specification emitted"],
-    ]), {span:12, tone:"warning", eyebrow:"dsn decision"});
-  }
-  const brief = screenReport.design_brief || {};
-  const board = screenReport.candidate_board || {};
-  const material = screenReport.material_notes || {};
-  const artifactLedger = Array.isArray(screenReport.artifact_ledger) ? screenReport.artifact_ledger : [];
-  const objective = designReport.objective || {};
-  const hypothesis = designReport.hypothesis || {};
-  const generation = designReport.candidate_generation || {};
-  const evaluation = designReport.candidate_evaluation || {};
-  const prior = designReport.prior_context || {};
-  const manufacturability = screenReport.manufacturability || designReport.manufacturability || {};
-  const handoff = screenReport.handoff_to_specimen || designReport.handoff_to_specimen || {};
-  const rejected = Array.isArray(designReport.rejected_candidates) ? designReport.rejected_candidates
-    : Array.isArray(generation.rejection_log) ? generation.rejection_log
-    : Array.isArray(generation.rejected_candidates) ? generation.rejected_candidates
-      : Array.isArray(evaluation.rejected_candidates) ? evaluation.rejected_candidates : [];
-  const selected = designSelectedCandidate(screenReport, designReport, spec);
-  const candidateRows = designCandidateRows(screenReport, designReport, report);
-  const specimenRows = designActualSpecimenRows(screenReport, designReport, report);
-  const generatedCount = specimenRows.length;
-  const validCount = specimenRows.filter((item) => !/reject|fail|block|invalid/i.test(String(item.status || item.candidate_status || ""))).length;
-  const previewCount = specimenRows.filter((item) => designImageUrlFromSource(item)).length;
-  return `
-    ${renderDashboardCard("Experiment Contract", renderDesignBriefCard(brief, objective, hypothesis, spec, prior, material, manufacturability, selected), { span: 3, tone: "design", eyebrow: "mission input", className: "ar-design-reference-card ar-design-brief-card" })}
-    ${renderDashboardCard("Generated Specimens", renderDesignCandidateCards(screenReport, designReport, report), { span: 9, tone: "design", eyebrow: "built specimen log", className: "ar-design-reference-card ar-design-candidates-card", meta: `${renderRuntimeValue(generatedCount)} built / ${renderRuntimeValue(validCount)} usable / ${renderRuntimeValue(previewCount)} previews` })}
-    ${renderDashboardCard("DOE Map / Design Space", renderDesignParameterSweep(screenReport), { span: 4, tone: "metrics", eyebrow: "parameter sweep", className: "ar-design-reference-card ar-design-sweep-card" })}
-    ${renderDashboardCard("Evaluation Matrix", renderDesignExpectedPerformance(screenReport, designReport, selected), { span: 4, tone: "metrics", eyebrow: "objective vs mass", className: "ar-design-reference-card ar-design-performance-card" })}
-    ${renderDashboardCard("Buildability Gate", renderDesignManufacturabilityCard(screenReport, designReport, selected, spec, material, specimenRows.length ? specimenRows : candidateRows), { span: 4, tone: handoff.required_fields_present === false || (manufacturability.warnings || []).length ? "warning" : "success", eyebrow: "print path", className: "ar-design-reference-card ar-design-manufacturing-card" })}
-    ${renderDashboardCard("Active Handoff", renderDesignHandoffCard(handoff, selected, material, spec, artifactLedger), { span: 12, tone: handoff.required_fields_present === false || rejected.length ? "warning" : "success", eyebrow: "dsn -> spc", className: "ar-design-reference-card ar-design-handoff-card" })}
-  `;
+  const frontend = liveAgentModuleHost.get("design");
+  return frontend && typeof frontend.renderDashboard === "function"
+    ? frontend.renderDashboard(report, status, agentLabel, profile)
+    : "";
 }
 
 function renderSpecimenDonut(items, options = {}) {
@@ -17043,12 +16825,16 @@ function renderAgentSpecializedDashboardSections(session, report, status, agentL
     guardian: () => renderGuardianDashboardCards(report, status, agentLabel, profile),
   };
   const rendererProfile = liveAgentRendererProfile(agentId);
+  const moduleFrontend = rendererProfile.id === "module" ? liveAgentModuleHost.get(agentId) : null;
   const dashboardAgentId = rendererProfile.dashboardAgent && cardsByAgent[rendererProfile.dashboardAgent] ? rendererProfile.dashboardAgent : agentId;
   const hasBuiltInReferenceDashboard = Boolean(cardsByAgent[dashboardAgentId]);
-  const specialized = hasBuiltInReferenceDashboard ? cardsByAgent[dashboardAgentId]() : renderAgentWorkcellCard(profile, report, status, agentLabel);
-  const descriptorCards = hasBuiltInReferenceDashboard ? "" : renderAgentDescriptorCards(report, agentId);
-  const descriptorReportSections = hasBuiltInReferenceDashboard ? "" : renderAgentDescriptorReportSections(report, agentId);
-  const visualization = ["orchestrator", "design", "specimen", "vision", "manipulation", "equipment", "analysis", "knowledge", "bo"].includes(dashboardAgentId) ? "" : renderAgentVisualizationCard(report, status, agentLabel);
+  const moduleDashboard = moduleFrontend && typeof moduleFrontend.renderDashboard === "function"
+    ? moduleFrontend.renderDashboard(report, status, agentLabel, profile)
+    : "";
+  const specialized = moduleDashboard || (hasBuiltInReferenceDashboard ? cardsByAgent[dashboardAgentId]() : renderAgentWorkcellCard(profile, report, status, agentLabel));
+  const descriptorCards = moduleDashboard || hasBuiltInReferenceDashboard ? "" : renderAgentDescriptorCards(report, agentId);
+  const descriptorReportSections = moduleDashboard || hasBuiltInReferenceDashboard ? "" : renderAgentDescriptorReportSections(report, agentId);
+  const visualization = moduleDashboard || ["orchestrator", "design", "specimen", "vision", "manipulation", "equipment", "analysis", "knowledge", "bo"].includes(dashboardAgentId) ? "" : renderAgentVisualizationCard(report, status, agentLabel);
   const checklistItems = Array.isArray(profile.checklist) ? profile.checklist : [];
   const checklist = controlSurface && !["objective", "orchestrator"].includes(agentId) && checklistItems.length
     ? renderDashboardCard(`${agentLabel} Checklist`, dashboardList(checklistItems, "No checklist recorded.", 5), { span: 4, tone: agentId || "agent", eyebrow: "operator" })
@@ -19567,6 +19353,7 @@ async function refreshPlanningState(options = {}) {
   liveRefreshInFlight = (async () => {
     try {
       const setupVersion = ++liveSetupTransportVersion;
+      await refreshLiveAgentManifest({ silent: background, skipRender: true });
       const sessionId = encodeURIComponent(ensurePlanningSessionId());
       const sessionRes = await fetch(`/api/planning/session?session_id=${sessionId}`);
       if (!sessionRes.ok) throw new Error(`session HTTP ${sessionRes.status}`);
@@ -20145,7 +19932,7 @@ const DEFAULT_LIVE_NODE_TEST_MODULES = new Set(["design", "specimen", "vision", 
 const LIVE_BUSY_QUICK_ACTIONS = new Set(["pause_run", "resume_run", "dry_run", "run_node_test", "explain_current_node"]);
 
 function liveNodeTestModules() {
-  const moduleIds = new Set(DEFAULT_LIVE_NODE_TEST_MODULES);
+  const moduleIds = new Set();
   for (const agent of LIVE_AGENTS) {
     if (!agent || agent.id === "objective" || agent.id === "orchestrator") continue;
     const moduleId = String(agent.moduleId || agent.module_id || agent.id || "").trim();

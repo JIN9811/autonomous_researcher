@@ -39,6 +39,8 @@ supersedes: []
 | Existing equipment integration | [Device bridge references](device_bridges/README.md) |
 | Installation and operation | [English guide](../README.en.md) |
 | Documentation conventions | [Writing rules](standards/documentation_standard.md) |
+| Proposed package and module architecture | [Package, agent and bridge design](superpowers/specs/2026-09-13-package-agent-bridge-modularization-design.md) |
+| Shared IDE and agent execution definition | [Executable graph contract](superpowers/specs/2026-09-13-executable-agent-ide-contract-design.md) · [Runtime IDE](runtime/runtime_ide.md#five-area-editable-module-canvas) |
 
 
 ## Summary

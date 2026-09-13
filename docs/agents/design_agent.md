@@ -7,14 +7,19 @@ audience: [researcher, developer, operator, reviewer]
 scope: [agents, design, experiment_specification, decision_tools]
 summary: Evidence-based design evaluation and a bounded LLM decision layer preserving existing experiment and device contracts.
 source_of_truth:
-  - agents/design_agent.py
-  - agents/design_decision.py
+  - agents/design/agent.py
+  - agents/design/decision.py
+  - agents/design/execution.py
+  - agents/execution_graph.py
+  - agents/design/module.py
+  - agents/design/presentation.py
+  - agents/design/frontend/live_report.js
   - graphs/modules/design/module.yaml
   - backends/prompt_registry.py
   - app/controller.py
   - policies/validation_policy.py
-last_verified: 2026-09-10
-verified_against: BO-Agent
+last_verified: 2026-09-13
+verified_against: working-tree-2026-09-13-executable-agent-ide
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -35,12 +40,64 @@ supersedes: []
 
 | At a glance | Details |
 |---|---|
-| Runtime status | Implemented |
+| Runtime status | Implemented; applied-graph Design module lifecycle |
 | LLM decision layer | Implemented / locally verified |
 | Physical effect | None |
 | Primary handoff | `design_candidate.v1` → Specimen |
 | Live hardware validation | Not applicable to Design / downstream pending |
 | Known gap | Candidate-matched performance prediction unavailable |
+
+### Module Ownership and Layout
+
+Design is the first agent bound through the existing `AgentRegistry` with a
+code-owned `AgentModule` declaration. Orchestrator and LangGraph remain in the
+program core; the existing `agent.design_agent` handler invokes the same agent.
+
+```text
+agents/
+├── design/
+│   ├── module.py                 # implementation, UI/config/storage declarations
+│   ├── agent.py                  # existing DesignAgent implementation
+│   ├── decision.py               # existing bounded LLM decision and local tools
+│   ├── presentation.py           # Design projection for the existing report API
+│   └── frontend/live_report.js   # Design-only report rendering
+├── design_agent.py               # legacy import compatibility
+└── design_decision.py            # legacy import compatibility
+```
+
+| Boundary | Design owns | Existing host retained |
+|---|---|---|
+| Registration | [Code declaration](../../agents/design/module.py), factory and public metadata | `AgentRegistry`; [graph module](../../graphs/modules/design/module.yaml) remains the editable execution contract |
+| Backend/API | Design report projection | `/api/agents/design/report`; module details and runtime manifests expose read-only `implementation` metadata |
+| Frontend | Dashboard/report factory, evidence, brief, material, manufacturability and handoff renderers | Common manifest-driven module host at `/live`; shared STL/capture/Specimen helpers are explicitly injected |
+| Configuration | Declared defaults and existing experiment/Orchestrator input sources | Graph/module configuration and run snapshots; no new editable Design Setup control or settings store |
+| Storage | `design_agent` archive identity and candidate preview references | `runs/<run_id>/runtime/loops/loop-N/design_agent/attempt-N/` and existing `design_candidates/` folders |
+| Documents | This reference and its existing figures | Canonical documentation paths and links remain stable |
+
+The application discovers installed `agents/*/module.py` declarations. Applying
+a valid IDE graph attaches or detaches Design execution admission, current
+report/asset access, Live GUI and ORC owner discovery together. A remaining
+graph reference, including an enabled pre-execution binding, keeps the owner
+available. Installed handlers stay in the editor catalog for later re-addition.
+
+The common browser host loads `/module-assets/design/live_report.js` only from
+active code-owned manifests and calls `AX4LABDesignUI.createFrontend(deps)`.
+Its dashboard/report renderers receive explicit host helpers and start no
+timers, network calls or device commands. Exclusion disposes the frontend;
+re-addition reuses installed code and the retained backend instance.
+
+| IDE action | Runtime effect |
+|---|---|
+| Open/close Module Management editor | None; not activation |
+| Validate/Compile draft | Preview applied/draft owners and add/remove impact; no membership change |
+| Apply a valid graph while idle | Reconcile execution access, manifests and owner/setup discovery |
+| Invalid graph or activation during a run | Reject; retain the applied composition |
+| Exclude Design | Detach active access, not files, history, settings or shared bridges |
+
+The graph still needs valid transitions; removal never invents a replacement
+experiment route. New editable Design Setup fields, running-job hot swaps,
+package installation and Bridge migration are outside this change. See the
+[lifecycle plan and verification](../superpowers/plans/2026-09-13-design-ide-module-lifecycle.md).
 
 ## Overview and Responsibilities
 
@@ -112,6 +169,31 @@ Design's LLM still cannot rewrite the requested experiment point.
 
 ## Internal Workflow
 
+### Editable Runtime IDE Structure
+
+![Design five-area editable internal graph](assets/figures/design_control_areas.svg)
+
+The canvas, backend runner and this SVG share
+[`module.execution_graph`](../../graphs/modules/design/module.yaml). Its edges
+route actual registered operations: `prepare → decide`, then `accepted → finalize`
+or `blocked → owner_review`. Editing a valid route changes backend execution after
+activation; moving a node changes layout only. Five areas classify responsibility,
+not five mandatory sequential stages.
+
+The **LLM** node is the existing composite, bounded suitability/tool-calling loop.
+Candidate preparation, result finalization and review reporting retain their
+existing functions in the [owner adapters](../../agents/design/execution.py).
+Embedded checks and evidence reads are not fabricated as separate executable
+nodes. Stage-level Orchestrator preparation and runtime validation remain outside
+this internal graph.
+
+The existing inspector edits allowlisted operations and outcome routes. Validate
+rejects unsupported handlers, missing dependencies and invalid routes before
+activation. Running definitions remain pinned; reload obtains backend changes
+without silently replacing a dirty draft. The [renderer](../../web/static/module_control_view.js)
+uses explicit edge kinds and outcomes; regenerate with
+`python scripts/render_module_control_views.py`.
+
 | Phase | Implementation | Authority |
 |---|---|---|
 | Prepare | `_prepare_design_payload` | Existing constraints, candidates, filtering, legacy ranking and prior summaries |
@@ -120,8 +202,9 @@ Design's LLM still cannot rewrite the requested experiment point.
 | Finalize | `_finalize_design_payload` | Existing report, preview, identity and handoff builders |
 | Return | `AgentResult` plus `archive_agent_run` | Runtime handoff and execution-scoped evidence |
 
-Module internal IDs remain display/checkpoint contracts, not twelve independently
-scheduled LLM calls. The LLM participates only at the bounded decision boundary.
+Executable node IDs identify real owner-operation calls and their traces.
+The detailed decision-loop figure below expands the composite boundary for
+explanation; its individual checks are not separate IDE execution nodes.
 
 ![Design decision loop](assets/figures/design_02_execution_effect_boundary.svg)
 
@@ -179,7 +262,7 @@ tools or constraints.
 ### Agent-Local Decision Tools
 
 All four decision tools are **agent-local**, dispatched in
-`agents/design_decision.py`; they are not new global ToolRegistry/device tools.
+`agents/design/decision.py`; they are not new global ToolRegistry/device tools.
 
 | Tool | Arguments | Result/effect | Preconditions |
 |---|---|---|---|
@@ -310,6 +393,7 @@ by this decision layer.
 | `design_decision.v1` | Model, selected action, brief rationale, evidence refs, tool results/errors | Agent result/report and existing attempt archive |
 | `experiment_spec` / `handoff_packet` | Existing authoritative specimen input | Existing controller/runtime merge |
 | Candidate previews | Existing STL/viewer/SVG artifacts | Existing run candidate folders, archived references |
+| `ax4lab.execution_trace.v1` | Real operation IDs, outcome edges, run/revision/invocation and status; no private operation inputs | Existing runtime event stream |
 | Legacy numeric fields | Compatibility only, marked `score_semantics=legacy_heuristic_compatibility_only` | Retained for historical/virtual consumers; excluded from model context |
 
 The result records which candidate was accepted or why none was committed.
@@ -323,9 +407,16 @@ decision evidence for later knowledge work.
 | Meaningful tool selection, inspect→accept/return | `tests/unit/test_design_decision.py` | Controlled model responses, real dispatcher/evaluation |
 | Locked variables, invalid requests, unchecked repair, timeout/budget/cancel | Same suite | No devices |
 | Existing output schema and explicit deterministic mode | `tests/unit/test_design_agent.py` | Legacy test compatibility, not model quality |
+| Executable IDE definition and guarded activation | `tests/unit/test_agent_execution_graph.py`, `tests/integration/test_agent_execution_graph_api.py` | Real owner routing, rejected invalid graphs and pinned definitions; synthetic providers and denied hardware |
 | Evidence display and zero-valued quantities | `tests/unit/test_planning_design_report_js.py` | Node helper execution, not full browser validation |
 | Guardian proxy interpretation | Design decision tests + Guardian suite | Only marked synthetic proxy comparison changes |
 | Controller display and handoff | Design/controller tests | Must distinguish baseline failures from regressions |
+| Module registration and report/asset hosting | `tests/unit/test_design_module.py`, `tests/integration/test_design_module_api.py` | Real registry and in-process API; external effects denied |
+| Applied graph lifecycle and IDE preview | `tests/integration/test_design_module_lifecycle.py`, `tests/unit/test_ide_module_lifecycle_js.py` | Add/remove/re-add, inactive entry rejection, draft/busy protection, retained data and alternate bindings; isolated roots |
+| Browser module lifecycle | `tests/js/agent_module_host.test.cjs` | Repeated refresh, removal during loading, overlapping reconciliation and re-addition |
+| Existing mode routes and redesign | `tests/integration/test_orchestrator_setup_loop.py` | Existing owners/controller; simulated transport only, including printer profiles and next Design handoff |
+| Loop-scoped retention | Module tests and `tests/integration/test_all_agent_loop_archives.py` | Two-loop decision evidence and all agent archive identities; not hardware proof |
+| Module frontend extraction | `tests/js/design_live_report.test.cjs` and isolated browser fixture | Existing markup/values preserved; no operating Live GUI server restarted |
 | Continuous BO domain and exact coordinates (2026-09-10) | BO, Design, parameter-space, BoTorch and controller regression tests | Custom bounds, legacy compatibility and `7.13789` / `0.32123456` preserved through geometry arguments; no device execution |
 | Actual DesignAgent API / registered vLLM 31B | [Agent verification](../paper/evidence/2026-09-07-design-gemma31b-virtual-api-verification.md) | API 6.34 s / 31B 12.11 s: accepted local decision and matching handoff; 31B used registered model fallback; E4B-primary and closed-loop acceptance pending |
 | Physical closed-loop validation | Not performed for this change | Hardware validation pending; stable-tag evidence remains historical |
@@ -344,8 +435,10 @@ tracked in the linked verification records.
 
 ### Source of Truth and Related Documents
 
-- [Design implementation](../../agents/design_agent.py)
-- [Evaluation and local decision tools](../../agents/design_decision.py)
+- [Design implementation](../../agents/design/agent.py)
+- [Evaluation and local decision tools](../../agents/design/decision.py)
+- [Code module declaration](../../agents/design/module.py)
+- [Module implementation and verification](../superpowers/plans/2026-09-13-design-agent-module.md)
 - [Module](../../graphs/modules/design/module.yaml)
 - [Controller](../../app/controller.py)
 - [Implementation and verification plan](../superpowers/plans/2026-09-07-design-decision-layer.md)

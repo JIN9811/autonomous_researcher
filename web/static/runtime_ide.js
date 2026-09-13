@@ -174,6 +174,105 @@ let availableTools = [];
 let graphTabs = [];
 let activeGraphTabId = MAIN_GRAPH_TAB_ID;
 let modulePayloadCache = new Map();
+const moduleExecutionContracts = new Map();
+const moduleRequestTokens = new Map();
+let moduleOpenToken = null;
+const outerConditionPresets = transitionConditionPreset?.innerHTML || '';
+
+function rememberExecutionContract(moduleId, result) {
+  moduleExecutionContracts.set(moduleId, {catalog:result.execution_catalog, revision:result.execution_graph_revision});
+}
+
+function moduleRequestFingerprint(moduleId, tab) {
+  let payload=tab?.modulePayload || modulePayloadCache.get(moduleId) || null;
+  let graph=tab?.graph || null;
+  if(activeModuleId===moduleId) {
+    try { payload=parseModuleEditor(); } catch { payload={invalid_json:moduleJson.value}; }
+  }
+  if(tab && activeGraphTabId===tab.id) {
+    try { graph=parseGraphEditor(); } catch { graph={invalid_json:graphJson.value}; }
+  }
+  return JSON.stringify([modulePayloadFingerprint(payload),graph]);
+}
+
+function captureModuleRequest(moduleId) {
+  const tab=graphTabs.find(item=>item.id===`${MODULE_TAB_PREFIX}${moduleId}`) || null;
+  const request={moduleId,tab,token:Symbol(moduleId),fingerprint:moduleRequestFingerprint(moduleId,tab),
+    viewTabId:activeGraphTabId,viewModuleId:activeModuleId};
+  moduleRequestTokens.set(moduleId,request.token);
+  return request;
+}
+
+function moduleRequestOwnsView(request) {
+  return (!request.openToken || request.openToken===moduleOpenToken)
+    && activeGraphTabId===request.viewTabId && activeModuleId===request.viewModuleId;
+}
+
+function applyModuleResponse(request,result,{saved=false}={}) {
+  const {moduleId}=request;
+  if(moduleRequestTokens.get(moduleId)!==request.token) return false;
+  const payload=normalizedModulePayload(result.module);
+  if(payload.module?.id!==moduleId) throw new Error(`Unexpected module response for ${moduleId}`);
+  const tab=graphTabs.find(item=>item.id===`${MODULE_TAB_PREFIX}${moduleId}`) || null;
+  if(tab!==request.tab) return false; // A closed/reopened tab owns a different draft.
+  const unchanged=moduleRequestFingerprint(moduleId,tab)===request.fingerprint && (saved || !tab?.dirty);
+  rememberExecutionContract(moduleId,result);
+  const backendGraph=modulePayloadToGraph(payload);
+  if(tab) {
+    tab.baselineModulePayload=cloneConfig(payload);
+    tab.baselineGraph=cloneConfig(backendGraph);
+    if(unchanged) {
+      tab.modulePayload=cloneConfig(payload);
+      tab.graph=backendGraph;
+      tab.dirty=false;
+    } else {
+      tab.dirty=true;
+      const evidence=moduleEvidenceRecord(moduleId);
+      evidence.dirty=true;
+      evidence.reason='newer local draft preserved';
+    }
+  }
+  if(!unchanged) {
+    log(`Updated ${moduleId} backend baseline; newer local edits are preserved.`, 'warn');
+    renderGraphTabs();
+    return false;
+  }
+  modulePayloadCache.set(moduleId,cloneConfig(payload));
+  if(moduleRequestOwnsView(request)) {
+    activeModuleId=moduleId;
+    if(moduleSelect)moduleSelect.value=moduleId;
+    setModuleJson(payload);
+    updateModuleSummary(payload.module);
+    renderModuleGraph(payload);
+    if(tab && activeGraphTabId===tab.id)renderGraph(tab.graph);
+    renderModuleTabs();
+  }
+  renderGraphTabs();
+  return true;
+}
+
+function isExecutionGraph(graph = activeGraph) {
+  return Boolean(graph?.metadata?.execution_graph);
+}
+
+function executionTraceProjection(graph = activeGraph, runId = '') {
+  const tab = graphTabs.find(item => item.id === graph?.id);
+  return AX4LABExecutionEditor.trace(graph, recentRuntimeEvents, runId || currentRunId || latestStateSnapshot?.state?.run_id || '', Boolean(tab?.dirty));
+}
+
+function commitExecutionDraft(graph) {
+  setGraphJson(graph);
+  applyModuleGraphDraftToEditor(graph);
+  markActiveTabDirty(graph);
+  renderGraph(graph);
+}
+
+function addExecutionOperation(handler, position) {
+  const graph = parseGraphEditor();
+  const node = AX4LABExecutionEditor.addNode(graph, handler, position);
+  selectedNodeId = node.id;
+  commitExecutionDraft(graph);
+}
 let runtimeEquipmentFlowPayload = null;
 let runtimeEquipmentFlowProfileId = "utm_windows_v1";
 let runtimeEquipmentProfiles = [];
@@ -352,6 +451,13 @@ function moduleValidationResultMarkup(result, moduleId = "") {
 }
 
 function moduleDryRunResultMarkup(result, moduleId = "") {
+  if(result?.mode==='structural_preview') {
+    return `<div class="runtime-module-evidence-card ${result.ok?'ok':'error'}"><strong>Structural preview ${result.ok?'passed':'failed'}</strong>
+      <p>Owner operations not executed. This validates routes and dependencies; it is not execution evidence.</p>
+      <small>${escapeHtml(moduleId)} · revision ${escapeHtml((result.graph_revision || '').slice(0,12))}</small>
+      ${(result.paths || []).map(path=>`<div>${escapeHtml(path.nodes.join(' → '))}${path.edges?.length?` <small>(${escapeHtml(path.edges.map(edge=>edge.on).join(' / '))})</small>`:''}</div>`).join('')}
+      ${(result.errors || []).map(error=>`<p>${escapeHtml(error)}</p>`).join('')}</div>`;
+  }
   const sequence = Array.isArray(result?.sequence) ? result.sequence : [];
   const summary = result?.summary && typeof result.summary === "object" ? result.summary : {};
   const ok = Boolean(result?.ok);
@@ -556,6 +662,17 @@ function graphBounds(nodes) {
   const maxX = Math.max(...nodes.map((node, index) => (node.position?.x ?? defaultNodePosition(index).x) + GRAPH_NODE_WIDTH), GRAPH_NODE_WIDTH);
   const maxY = Math.max(...nodes.map((node, index) => (node.position?.y ?? defaultNodePosition(index).y) + GRAPH_NODE_HEIGHT), GRAPH_NODE_HEIGHT);
   return { width: maxX + 96, height: maxY + 96 };
+}
+
+function graphViewBounds(graph) {
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const bounds = graphBounds(nodes);
+  if (graph.metadata?.control_view && typeof AX4LABControlView !== 'undefined') {
+    const groups = AX4LABControlView.groupBoxes(nodes, graph.metadata.control_view);
+    bounds.width = Math.max(bounds.width, ...groups.map(group => group.x + group.width + 48));
+    bounds.height = Math.max(bounds.height, ...groups.map(group => group.y + group.height + 48));
+  }
+  return bounds;
 }
 
 function nodeStage(node) {
@@ -976,7 +1093,7 @@ function graphFitZoom(bounds) {
 
 function fitGraphToCanvas(options = {}) {
   const graph = normalizeNodePositions(parseGraphEditor());
-  const bounds = graphBounds(Array.isArray(graph.nodes) ? graph.nodes : []);
+  const bounds = graphViewBounds(graph);
   graphZoom = graphFitZoom(bounds);
   renderGraph(graph);
   requestAnimationFrame(() => {
@@ -1142,6 +1259,10 @@ function addCatalogModuleAsGraphNode(module, event) {
 
 function addCatalogModuleAsInternalStep(module, event) {
   const graph = parseGraphEditor();
+  if (isExecutionGraph(graph)) {
+    log('Use the registered owner operation selector in the inspector to add executable nodes.', 'warn');
+    return;
+  }
   const moduleId = graph.metadata?.module_id || activeModuleId;
   const payload = normalizedModulePayload(modulePayloadCache.get(moduleId) || parseModuleEditor());
   const targetModule = payload.module || {};
@@ -1225,6 +1346,12 @@ function removeGraphNodeFromDraft(nodeId) {
 
 function removeModuleStepNodeFromDraft(nodeId) {
   const graph = parseGraphEditor();
+  if (isExecutionGraph(graph)) {
+    AX4LABExecutionEditor.removeNode(graph,nodeId);
+    selectedNodeId=graph.nodes[0]?.id || '';
+    commitExecutionDraft(graph);
+    return true;
+  }
   const node = (Array.isArray(graph.nodes) ? graph.nodes : []).find((item) => item.id === nodeId);
   if (!node) return false;
   const phase = node.metadata?.module_step_phase || "internal_graph";
@@ -2353,7 +2480,7 @@ function updateModuleSummary(module) {
       </div>
       <div class="runtime-module-health-strip">
         <span><strong>${escapeHtml(preCount)}</strong><small>pre</small></span>
-        <span><strong>${escapeHtml(internalCount)}</strong><small>steps</small></span>
+        <span><strong>${escapeHtml(module.execution_graph?.nodes?.length ?? internalCount)}</strong><small>${module.execution_graph?'operations':'steps'}</small></span>
         <span><strong>${escapeHtml(toolCount)}</strong><small>tools</small></span>
       </div>
     </div>
@@ -2361,7 +2488,7 @@ function updateModuleSummary(module) {
       <section class="runtime-module-config-card">
         <div class="runtime-module-card-title"><strong>Basic Routing</strong><small>actual runtime handler</small></div>
         <label class="runtime-handler-select-label">Module Handler
-          <select id="ide-module-handler-select" class="text-input">${handlerOptions(module.handler || "")}</select>
+          <select id="ide-module-handler-select" class="text-input" ${module.execution_graph?'disabled':''}>${handlerOptions(module.handler || "")}</select>
         </label>
         <label class="runtime-handler-select-label">LLM Role
           <input id="ide-module-llm-role" class="text-input" value="${escapeHtml(module.llm_role || "")}" placeholder="inherit route" />
@@ -2829,6 +2956,7 @@ function conditionPresetFromCondition(condition = "") {
 function transitionConditionSpec() {
   const source = transitionSource?.value || "";
   const target = transitionTarget?.value || "";
+  if (isExecutionGraph()) return {source,target,condition:transitionConditionPreset.value,makeDefault:false};
   const preset = transitionConditionPreset?.value || "default";
   const rawValue = String(transitionConditionInput?.value || "").trim();
   if (preset === "default") return { source, target, condition: "default", makeDefault: true, label: "default" };
@@ -2851,6 +2979,17 @@ function transitionConditionSpec() {
 
 function setTransitionConditionControls(condition = "default", target = "") {
   if (!transitionConditionPreset || !transitionConditionInput) return;
+  if (isExecutionGraph()) {
+    const node=activeGraph.nodes.find(item=>item.id===transitionSource.value);
+    const outcomes=AX4LABExecutionEditor.operation(activeGraph,node?.handler)?.outcomes || [];
+    transitionConditionPreset.innerHTML=outcomes.map(outcome=>`<option value="${escapeHtml(outcome)}">${escapeHtml(outcome)}</option>`).join('');
+    transitionConditionPreset.value=outcomes.includes(condition)?condition:AX4LABExecutionEditor.nextOutcome(activeGraph,node?.id);
+    transitionConditionInput.value=transitionConditionPreset.value;
+    transitionConditionInput.disabled=true;
+    return;
+  }
+  transitionConditionPreset.innerHTML=outerConditionPresets;
+  transitionConditionInput.disabled=false;
   const clean = String(condition || "default").trim();
   const preset = conditionPresetFromCondition(clean);
   transitionConditionPreset.value = preset;
@@ -2863,6 +3002,11 @@ function setTransitionConditionControls(condition = "default", target = "") {
 
 function updateTransitionConditionPlaceholder() {
   if (!transitionConditionInput || !transitionConditionPreset) return;
+  if (isExecutionGraph()) {
+    transitionConditionInput.value=transitionConditionPreset.value;
+    renderEdgeRoutePreview();
+    return;
+  }
   const target = transitionTarget?.value || "target";
   const preset = transitionConditionPreset.value || "default";
   const placeholders = {
@@ -2970,6 +3114,14 @@ function renderEdgeRoutePreview(graph = null) {
     }
   }
   const { source, target, condition, makeDefault } = transitionConditionSpec();
+  if (isExecutionGraph(parsedGraph)) {
+    const selected=parsedGraph.edges.find(edge=>edge.source===activeRuntimeEdge?.source && edge.target===activeRuntimeEdge?.target && edge.condition===activeRuntimeEdge?.condition);
+    edgeRoutePreview.innerHTML=`<p>Outcome <strong>${escapeHtml(condition)}</strong> routes ${escapeHtml(source)} → ${escapeHtml(target)}. Validate checks dependencies and complete outcomes.</p>
+      <label>Relation kind <select id="ide-execution-edge-kind" class="text-input">${['execution','validation','evidence'].map(kind=>`<option ${kind===(selected?.kind || 'execution')?'selected':''}>${kind}</option>`).join('')}</select></label>
+      ${routeInventoryMarkup(parsedGraph,source)}`;
+    bindRouteInventoryActions();
+    return;
+  }
   if (!source || !target) {
     edgeRoutePreview.innerHTML = "Select source and target stages to preview route behavior.";
     return;
@@ -3212,6 +3364,11 @@ function moduleGraphNodeId(phase, step, index) {
 function modulePayloadToGraph(modulePayload) {
   const payload = normalizedModulePayload(modulePayload);
   const module = payload.module || {};
+  if (module.execution_graph) {
+    const contract = moduleExecutionContracts.get(module.id) || {};
+    return AX4LABExecutionEditor.project(payload, contract.catalog, contract.revision, AX4LABControlView);
+  }
+  const controlView = typeof AX4LABControlView !== "undefined" ? AX4LABControlView.layout(module) : null;
   const preSteps = Array.isArray(module.pre_execution) ? module.pre_execution : [];
   const internalSteps = Array.isArray(module.internal_graph) ? module.internal_graph : [];
   const records = [
@@ -3220,7 +3377,8 @@ function modulePayloadToGraph(modulePayload) {
   ];
   const nodes = records.map((record) => {
     const fallback = defaultModuleNodePosition(record);
-    const pos = record.step?.metadata?.position || fallback;
+    const controlNode = controlView?.nodes.find(node => node.key === `${record.phase}:${record.step.id}`);
+    const pos = record.step?.metadata?.position || controlNode?.position || fallback;
     return {
       id: moduleGraphNodeId(record.phase, record.step, record.phaseIndex),
       label: record.step?.label || record.step?.id || `${record.phase} ${record.phaseIndex + 1}`,
@@ -3232,6 +3390,7 @@ function modulePayloadToGraph(modulePayload) {
       position: { x: snapToGrid(pos.x ?? fallback.x), y: snapToGrid(pos.y ?? fallback.y) },
       metadata: {
         ...(record.step?.metadata || {}),
+        ...(controlNode ? { control_area: controlNode.area, display_label: controlNode.label, llm_decision: controlNode.llm } : {}),
         icon: record.phase === "pre_execution" ? "orchestrator" : "artifact",
         module_step_phase: record.phase,
         module_step_index: record.phaseIndex,
@@ -3267,7 +3426,7 @@ function modulePayloadToGraph(modulePayload) {
     stage_dispatch: Object.fromEntries(nodes.map((node) => [node.stage, node.id])),
     transitions,
     terminal_stages: finishNode ? [finishNode.stage] : [],
-    metadata: { ide_tab_kind: "module", module_id: module.id || activeModuleId || "", module_label: module.label || "" },
+    metadata: { ide_tab_kind: "module", module_id: module.id || activeModuleId || "", module_label: module.label || "", ...(controlView ? {control_view: controlView} : {}) },
   };
 }
 
@@ -3352,6 +3511,10 @@ function applyModuleGraphDraftToEditor(graph = activeGraph) {
   if (!graph || graph.metadata?.ide_tab_kind !== "module") return;
   const moduleId = graph.metadata?.module_id || activeModuleId;
   const payload = modulePayloadForGraphDraft(graph);
+  if (isExecutionGraph(graph)) {
+    persistModuleTabPayload(moduleId, AX4LABExecutionEditor.serialize(graph,payload), graph);
+    return;
+  }
   const module = payload.module || {};
   module.id = module.id || moduleId;
   module.pre_execution = Array.isArray(module.pre_execution) ? module.pre_execution : [];
@@ -3383,12 +3546,22 @@ function applyModuleGraphDraftToEditor(graph = activeGraph) {
 
 async function openModuleGraphTab(moduleId) {
   if (!moduleId) return;
+  const openToken=moduleOpenToken=Symbol(moduleId);
   rememberActiveGraphDraft();
+  const existing = graphTabs.find(tab=>tab.id===`${MODULE_TAB_PREFIX}${moduleId}`);
+  if(existing?.dirty) {
+    activateGraphTab(existing.id);
+    log('Unsaved module draft preserved. Save or discard it before reloading the backend.', 'warn');
+    return;
+  }
   let payload = modulePayloadCache.get(moduleId);
-  if (!payload) {
+  if (!payload || payload.module?.execution_graph) {
+    const request=captureModuleRequest(moduleId);
+    request.openToken=openToken;
     const result = await requestJson(`/api/modules/${moduleId}`);
+    const ownsView=moduleRequestOwnsView(request);
+    if(!applyModuleResponse(request,result) || !ownsView)return;
     payload = result.module;
-    modulePayloadCache.set(moduleId, payload);
   }
   const normalized = normalizedModulePayload(payload);
   const module = normalized.module || {};
@@ -3600,15 +3773,22 @@ function renderGraph(graph) {
     selectedNodeId = nodes[0].id;
   }
   const transitions = activeGraph.transitions || {};
-  const bounds = graphBounds(nodes);
+  const bounds = graphViewBounds(activeGraph);
+  const controlView = activeGraph.metadata?.control_view;
+  graphCanvas.toggleAttribute('data-control-canvas', Boolean(controlView));
   const edges = logicalGraphEdges(activeGraph);
   const moduleGraph = activeGraph.metadata?.ide_tab_kind === "module";
+  const executionTrace=isExecutionGraph(activeGraph)?executionTraceProjection(activeGraph):null;
   const readiness = runtimeReadinessStatus(activeGraph);
   const nodeReadinessIssues = runtimeReadinessNodeIssueMap(readiness);
   const edgeViews = edges.map((edge, index) => {
-      const activeClass = activeRuntimeEdge?.source === edge.sourceStage && activeRuntimeEdge?.target === edge.targetStage && (!activeRuntimeEdge.condition || activeRuntimeEdge.condition === edge.condition) ? " edge-active" : "";
+      const selectedEdge=activeRuntimeEdge?.source === edge.sourceStage && activeRuntimeEdge?.target === edge.targetStage && (!activeRuntimeEdge.condition || activeRuntimeEdge.condition === edge.condition);
+      const executedEdge=executionTrace?.edge?.source===edge.sourceStage && executionTrace.edge.target===edge.targetStage && executionTrace.edge.on===edge.condition;
+      const activeClass = selectedEdge || executedEdge ? " edge-active" : "";
       const defaultClass = edge.isDefault ? " edge-default" : " edge-candidate";
-      const typeClass = ` edge-type-${classToken(edgeRuntimeType(edge))}`;
+      const relation = isExecutionGraph(activeGraph) ? edge.metadata?.execution_kind : controlView && typeof AX4LABControlView !== "undefined"
+        ? AX4LABControlView.relation(edge.source?.metadata?.control_area, edge.target?.metadata?.control_area) : "";
+      const typeClass = ` edge-type-${classToken(edgeRuntimeType(edge))}${relation ? ` control-relation-${relation}` : ""}`;
       const moduleClass = moduleGraph ? " edge-module-flow" : "";
       const path = edgePath(edge);
       const labelPoint = edgeLabelPoint(edge);
@@ -3617,7 +3797,8 @@ function renderGraph(graph) {
         : edgeDisplayLabel(edge);
       const simpleDefaultLabel = edge.isDefault && ["", "default", "continue", "always"].includes(String(edge.condition || "").trim());
       const conditionalRouteLabel = edgeRuntimeType(edge) === "logical_transition" && !simpleDefaultLabel;
-      const showLabel = moduleGraph || conditionalRouteLabel || Boolean(activeClass);
+      const samePairCount=edges.filter(item=>item.sourceStage===edge.sourceStage && item.targetStage===edge.targetStage).length;
+      const showLabel = isExecutionGraph(activeGraph) ? samePairCount===1 || Boolean(activeClass) : (moduleGraph && !controlView) || conditionalRouteLabel || Boolean(activeClass);
       const maxLabelChars = moduleGraph ? 42 : 28;
       const labelText = label.length > maxLabelChars ? `${label.slice(0, maxLabelChars - 1)}…` : label;
       const labelWidth = Math.max(moduleGraph ? 168 : 74, Math.min(moduleGraph ? 340 : 158, labelText.length * (moduleGraph ? 7.4 : 7.2) + 28));
@@ -3650,6 +3831,11 @@ function renderGraph(graph) {
       bottom: y + GRAPH_NODE_HEIGHT + 8,
     };
   });
+  if(isExecutionGraph(activeGraph) && controlView) {
+    for(const group of AX4LABControlView.groupBoxes(nodes,controlView)) {
+      labelObstacles.push({left:group.x+8,top:group.y+6,right:group.x+group.width-8,bottom:group.y+36});
+    }
+  }
   const resolvedLabelPoints = new Map(GRAPH_GEOMETRY.resolveLabelCollisions(
     edgeViews.filter((view) => view.showLabel).map((view) => ({
       key: String(view.index),
@@ -3696,7 +3882,8 @@ function renderGraph(graph) {
       const stage = nodeStage(node);
       const next = transitions[stage] || transitions[node.stage] || "";
       const outgoing = edges.filter((edgeItem) => edgeItem.sourceStage === stage);
-      const stateClass = stage === activeRuntimeStage ? " active" : visitedRuntimeStages.has(stage) ? " visited" : "";
+      const status=executionTrace?.statuses[node.id];
+      const stateClass = executionTrace ? status==='running'?' active':status==='done'?' visited':status==='failed'?' execution-failed':status==='cancelled'?' execution-cancelled':'' : stage === activeRuntimeStage ? " active" : visitedRuntimeStages.has(stage) ? " visited" : "";
       const selectedClass = node.id === selectedNodeId ? " selected" : "";
       const edgeActiveClass = activeRuntimeEdge?.source === stage ? " edge-active" : "";
       const connectSourceClass = edgeConnectSource === stage || edgeConnectDraft?.sourceNodeId === node.id ? " connect-source" : "";
@@ -3721,16 +3908,17 @@ function renderGraph(graph) {
       const y = Number(node.position?.y || 0);
       const ports = PORT_SIDES.map((side) => `<span class="runtime-ide-port runtime-ide-port-${side}" data-port-node="${escapeHtml(node.id)}" data-port-stage="${escapeHtml(stage)}" data-port-side="${side}" title="${escapeHtml(stage)} ${side} port"></span>`).join("");
       return `
-        <button class="runtime-ide-node${stateClass}${selectedClass}${edgeActiveClass}${connectSourceClass}${readinessClass}${nodeKindClass}${nodePlaneClass}" data-node-id="${escapeHtml(node.id)}" data-node-stage="${escapeHtml(stage)}" type="button" style="left:${x}px;top:${y}px;">
+        <button class="runtime-ide-node${stateClass}${selectedClass}${edgeActiveClass}${connectSourceClass}${readinessClass}${nodeKindClass}${nodePlaneClass}" data-control-area="${escapeHtml(node.metadata?.control_area || '')}" data-node-id="${escapeHtml(node.id)}" data-node-stage="${escapeHtml(stage)}" type="button" style="left:${x}px;top:${y}px;">
           ${ports}
           ${runtimeNodeIconMarkup(icon)}
           ${routeBadge}
           ${readinessBadge}
           ${nonExecutableBadge}
           ${outputBadge}
+          ${node.metadata?.llm_decision ? '<em class="runtime-control-llm">LLM</em>' : ''}
           <span class="runtime-ide-node-copy">
-            <strong>${escapeHtml(node.label || node.id)}</strong>
-            <small>${escapeHtml(edge)}</small>
+            <strong title="${escapeHtml(node.metadata?.display_label || node.label || node.id)}">${escapeHtml(node.metadata?.display_label || node.label || node.id)}</strong>
+            <small title="${escapeHtml(edge)}">${escapeHtml(isExecutionGraph(activeGraph)?`${node.area} · ${node.handler}`:node.metadata?.control_area ? `${node.metadata.control_area} · ${node.metadata.module_step_phase === 'pre_execution' ? 'pre' : 'step'} ${Number(node.metadata.module_step_index) + 1}` : edge)}</small>
           </span>
         </button>
       `;
@@ -3738,7 +3926,7 @@ function renderGraph(graph) {
     .join("");
   graphCanvas.innerHTML = `
     <div class="runtime-ide-canvas-world" style="width:${bounds.width}px;height:${bounds.height}px;transform:scale(${graphZoom});">
-      <svg class="runtime-ide-edge-layer" viewBox="0 0 ${bounds.width} ${bounds.height}" aria-hidden="true">
+      <svg class="runtime-ide-edge-layer" viewBox="0 0 ${bounds.width} ${bounds.height}" ${controlView?`style="width:${bounds.width}px;height:${bounds.height}px"`:''} aria-hidden="true">
         <defs>
           <marker id="ide-arrow" markerWidth="14" markerHeight="12" refX="9.8" refY="5" orient="auto" markerUnits="userSpaceOnUse" overflow="visible">
             <path d="M0,0 L10,5 L0,10 L2.4,5 z" fill="context-stroke" stroke="none"></path>
@@ -3747,6 +3935,7 @@ function renderGraph(graph) {
             <path d="M0,1 L13.6,6 L0,11 L3.2,6 z" fill="context-stroke" stroke="none"></path>
           </marker>
         </defs>
+        ${controlView && typeof AX4LABControlView !== "undefined" ? AX4LABControlView.backdrop(nodes, controlView) : ''}
         ${edgeMarkup}
       </svg>
       ${nodeMarkup}
@@ -3755,6 +3944,14 @@ function renderGraph(graph) {
   `;
   graphCanvas.style.minHeight = `${Math.max(460, Math.min(680, bounds.height * graphZoom + 96))}px`;
   bindGraphLegendDrag();
+  if (controlView && typeof AX4LABControlView !== "undefined") {
+    const legend = graphCanvas.querySelector('[data-edge-legend] .runtime-ide-edge-legend-list');
+    if (legend) {
+      legend.innerHTML = AX4LABControlView.legend(controlView);
+      legend.parentElement.dataset.controlLegend = '1';
+      legend.parentElement.querySelector('.runtime-ide-edge-legend-head small').textContent = '5 areas · 3 relations';
+    }
+  }
   updateCanvasViewHint(bounds);
   graphCanvas.querySelectorAll("[data-node-id]").forEach((el) => {
     const nodeId = el.getAttribute("data-node-id") || "";
@@ -3899,6 +4096,10 @@ function connectionDragPlan(target = null) {
     return { valid: false, label: "Invalid target", detail: "Self connections are ignored; choose a different stage.", sourceStage, targetStage, condition: "" };
   }
   const defaultTarget = graph.transitions?.[sourceStage] || "";
+  if (isExecutionGraph(graph)) {
+    const condition=AX4LABExecutionEditor.nextOutcome(graph,sourceStage);
+    return {valid:Boolean(condition),makeDefault:false,label:`Route outcome: ${condition}`,detail:`${sourceStage} → ${targetStage}; Validate checks the route.`,sourceStage,targetStage,condition};
+  }
   const makeDefault = !defaultTarget || defaultTarget === targetStage;
   const condition = makeDefault ? "default" : `next_stage:${targetStage}`;
   const label = makeDefault ? "Create default route" : "Add candidate route";
@@ -4368,10 +4569,12 @@ function runtimeEventMatchesNode(event, node) {
 }
 
 function nodeRuntimeEvents(node) {
+  if(isExecutionGraph())return executionTraceProjection().events.filter(event=>event.payload.node_id===node.id).slice(0,6);
   return recentRuntimeEvents.filter((event) => runtimeEventMatchesNode(event, node)).slice(0, 6);
 }
 
 function runtimeStatusForNode(node, lastEvent = null) {
+  if(isExecutionGraph())return executionTraceProjection().statuses[node.id] || 'idle';
   const stage = nodeStage(node);
   const eventType = String(lastEvent?.type || lastEvent?.event_type || "").toLowerCase();
   const eventStatus = String(lastEvent?.status || lastEvent?.payload?.status || "").toLowerCase();
@@ -4778,9 +4981,68 @@ function nodeRuntimeContractMarkup(node, module) {
   `;
 }
 
+function renderExecutionInspector(node) {
+  const graph=activeGraph, operations=graph.metadata.execution_catalog?.operations || [];
+  const op=AX4LABExecutionEditor.operation(graph,node?.handler);
+  const selectOptions=(values,value)=>values.map(item=>`<option value="${escapeHtml(item)}" ${item===value?'selected':''}>${escapeHtml(item)}</option>`).join('');
+  const trace=executionTraceProjection(graph);
+  nodeInspector.innerHTML=`<div class="runtime-execution-inspector">
+    <p>Executable owner graph · ${activeGraphTab()?.dirty?'unsaved draft; trace paint paused':`revision ${escapeHtml((graph.metadata.execution_graph_revision || 'unavailable').slice(0,12))}`}</p>
+    <button class="btn tiny" id="ide-execution-reload">Reload backend definition</button>
+    <label>Add registered operation<select id="ide-execution-add-handler" class="text-input">${selectOptions(operations.map(item=>item.handler),'')}</select></label>
+    <button class="btn tiny" id="ide-execution-add" ${operations.length?'':'disabled'}>Add operation</button>
+    ${node?`<h3>${escapeHtml(node.id)}</h3><p>Status: ${escapeHtml(trace.statuses[node.id] || 'idle')}${trace.invocation?` · invocation ${escapeHtml(trace.invocation.slice(0,12))}`:''}</p>
+    <label>Label<input id="ide-execution-label" class="text-input" value="${escapeHtml(node.label)}" /></label>
+    <label>Operation<select id="ide-execution-handler" class="text-input">${selectOptions([...new Set([node.handler,...operations.map(item=>item.handler)])],node.handler)}</select></label>
+    <label>Responsibility area<select id="ide-execution-area" class="text-input">${selectOptions(['high','middle','low','guardian','knowledge'],node.area)}</select></label>
+    <label><input id="ide-execution-entry" type="checkbox" ${graph.entry_node===node.id?'checked':''}/> Entry operation</label>
+    <label><input id="ide-execution-terminal" type="checkbox" ${graph.finish_nodes.includes(node.id)?'checked':''}/> Terminal operation</label>
+    ${op?.llm?`<label><input id="ide-execution-llm" type="checkbox" ${node.llm?'checked':''}/> LLM capability annotation</label><p>Composite bounded decision. Its internal tools and retry loop remain inside this operation.</p>`:''}
+    <p>Requires: ${escapeHtml((op?.requires || []).join(', ') || 'none')}<br/>Produces: ${escapeHtml((op?.produces || []).join(', ') || 'none')}<br/>Outcomes: ${escapeHtml((op?.outcomes || []).join(', ') || 'unknown operation')}</p>
+    ${Object.entries(op?.outcome_produces || {}).map(([outcome,keys])=>`<small>${escapeHtml(outcome)} produces: ${escapeHtml(keys.join(', '))}</small>`).join('')}
+    ${Object.keys(op?.config || {}).length?Object.entries(op.config).map(([key,rule])=>`<label>Config: ${escapeHtml(key)} <small>${escapeHtml(JSON.stringify(rule))}</small><input class="text-input" data-execution-config="${escapeHtml(key)}" value="${escapeHtml(JSON.stringify(node.config?.[key]) || '')}" placeholder="JSON value"/></label>`).join(''):'<p>No per-operation configuration keys are registered.</p>'}
+    <button class="btn tiny" id="ide-execution-apply">Apply operation</button>
+    <button class="btn tiny danger" id="ide-execution-delete">Delete operation</button>
+    <div id="ide-execution-inspector-error" role="alert"></div>`:'<p>Select or add an operation.</p>'}
+    <p>Entry: ${escapeHtml(graph.entry_node)} · terminal nodes: ${escapeHtml(graph.finish_nodes.join(', ') || 'none')}. Validate reports incomplete routes and dependencies.</p>
+    </div>`;
+  document.getElementById('ide-execution-reload').onclick=()=>loadModule(graph.metadata.module_id).catch(err=>log(String(err),'error'));
+  document.getElementById('ide-execution-add').onclick=()=>addExecutionOperation(document.getElementById('ide-execution-add-handler').value);
+  if(!node)return;
+  document.getElementById('ide-execution-delete').onclick=()=>removeModuleStepNodeFromDraft(node.id);
+  document.getElementById('ide-execution-handler').onchange=event=>{
+    const draft=parseGraphEditor(),item=draft.nodes.find(item=>item.id===node.id);
+    item.handler=event.target.value;
+    // Preserve config for backend validation; changing operation never silently drops a draft key.
+    if(!AX4LABExecutionEditor.operation(draft,item.handler)?.llm) {
+      delete item.llm;
+      item.metadata.llm_decision=false;
+    }
+    commitExecutionDraft(draft);
+  };
+  document.getElementById('ide-execution-apply').onclick=()=>{
+    try {
+      const draft=parseGraphEditor(),item=draft.nodes.find(item=>item.id===node.id);
+      item.label=document.getElementById('ide-execution-label').value;
+      item.area=document.getElementById('ide-execution-area').value;item.metadata.control_area=item.area;
+      if(document.getElementById('ide-execution-entry').checked)draft.entry_node=item.id;
+      else if(draft.entry_node===item.id)draft.entry_node='';
+      draft.finish_nodes=draft.finish_nodes.filter(id=>id!==item.id);
+      if(document.getElementById('ide-execution-terminal').checked)draft.finish_nodes.push(item.id);
+      const llm=document.getElementById('ide-execution-llm');if(llm){item.llm=llm.checked;item.metadata.llm_decision=llm.checked;}
+      nodeInspector.querySelectorAll('[data-execution-config]').forEach(input=>{item.config=item.config || {};const key=input.dataset.executionConfig;if(input.value.trim())item.config[key]=JSON.parse(input.value);else delete item.config[key];});
+      commitExecutionDraft(draft);
+    }catch(error){document.getElementById('ide-execution-inspector-error').textContent=String(error);}
+  };
+}
+
 function renderNodeInspector() {
   const node = findNodeById(selectedNodeId);
   selectedNodeBadge.textContent = node?.id || "none";
+  if (isExecutionGraph()) {
+    renderExecutionInspector(node);
+    return;
+  }
   if (!node) {
     nodeInspector.innerHTML = "<div>No node selected.</div>";
     return;
@@ -5109,6 +5371,24 @@ async function loadGraph(graphId = "") {
   log(`Loaded graph ${graph.graph.id}`);
 }
 
+function moduleLifecyclePreviewMarkup(impact) {
+  if (!impact || typeof impact !== "object") return "";
+  const names = (items) => (Array.isArray(items) && items.length)
+    ? items.map((name) => escapeHtml(name)).join(", ") : "None";
+  return `<div class="runtime-version-draft-note">
+    <strong>Module membership · Draft preview, not applied</strong>
+    <dl>
+      <dt>Applied</dt><dd>${names(impact.applied)}</dd>
+      <dt>Draft</dt><dd>${names(impact.draft)}</dd>
+      <dt>Add</dt><dd>${names(impact.added)}</dd>
+      <dt>Remove</dt><dd>${names(impact.removed)}</dd>
+    </dl>
+    <p>Applying a valid graph updates execution admission, Live GUI, and owner/setup discovery.
+    History, settings, installed code, and shared bridges are retained.</p>
+    <p>${impact.running ? "Application is blocked while a run is active." : "Save Version applies this draft. Opening or closing a module editor does not change membership."}</p>
+  </div>`;
+}
+
 async function validateGraph() {
   const graph = parseGraphEditor();
   if (graph.metadata?.ide_tab_kind === "module") {
@@ -5122,7 +5402,7 @@ async function validateGraph() {
   });
   setStatus(result.ok ? "busy" : "warn", result.ok ? "Valid" : "Invalid", result.errors.join("; ") || "Draft graph validated and compiled.");
   if (result.compiled_graph) {
-    dryRunOutput.innerHTML = compiledGraphSummaryMarkup(result.compiled_graph);
+    dryRunOutput.innerHTML = moduleLifecyclePreviewMarkup(result.module_lifecycle) + compiledGraphSummaryMarkup(result.compiled_graph);
   }
   setActivationEvidence("validation", { ok: result.ok, errors: result.errors || [], detail: result.ok ? "draft validated + compiled" : "validation failed", compiled_graph: result.compiled_graph || null });
   if (result.compiled_graph) setActivationEvidence("compile", { ok: true, detail: compiledGraphEvidenceText(result.compiled_graph), compiled_graph: result.compiled_graph });
@@ -5142,7 +5422,8 @@ async function compileGraph() {
     body: JSON.stringify({ graph, reason: "runtime_ide_compile_draft", author: "runtime_ide", activate: false }),
   });
   setStatus(result.ok ? "busy" : "warn", result.compiled ? "Compiled" : "Compile Failed", result.errors.join("; ") || "Draft graph compiled.");
-  dryRunOutput.innerHTML = compiledGraphSummaryMarkup(result.compiled_graph) || `<pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>`;
+  dryRunOutput.innerHTML = moduleLifecyclePreviewMarkup(result.module_lifecycle)
+    + (compiledGraphSummaryMarkup(result.compiled_graph) || `<pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>`);
   setActivationEvidence("compile", { ok: result.compiled, errors: result.errors || [], detail: result.compiled_graph ? compiledGraphEvidenceText(result.compiled_graph) : "compile failed", compiled_graph: result.compiled_graph || null });
   log(`Compile draft ${result.compiled ? "ok" : "failed"}`, result.compiled ? "ok" : "error");
 }
@@ -5426,6 +5707,7 @@ function logicalEdgeCondition(edge) {
 }
 
 function normalizeDefaultLogicalEdges(graph, sourceStage = "") {
+  if (isExecutionGraph(graph)) return;
   graph.transitions = graph.transitions || {};
   graph.edges = Array.isArray(graph.edges) ? graph.edges : [];
   const stages = sourceStage
@@ -5456,6 +5738,11 @@ function normalizeDefaultLogicalEdges(graph, sourceStage = "") {
 }
 
 function syncLogicalTransitionEdge(graph, source, target, ports = {}) {
+  if (isExecutionGraph(graph)) {
+    const condition = ports.condition && !['default','next_stage'].some(value=>ports.condition.startsWith(value))
+      ? ports.condition : AX4LABExecutionEditor.nextOutcome(graph,source);
+    return AX4LABExecutionEditor.upsertEdge(graph,source,target,condition,ports.kind || 'execution',null,ports);
+  }
   const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
   const sourceNode = nodes.find((node) => node.stage === source || node.id === source);
   const targetNode = nodes.find((node) => node.stage === target || node.id === target);
@@ -5516,6 +5803,12 @@ function syncLogicalTransitionEdge(graph, source, target, ports = {}) {
 function applyTransitionEdit() {
   const graph = parseGraphEditor();
   const { source, target, condition, makeDefault } = transitionConditionSpec();
+  if (isExecutionGraph(graph)) {
+    if (!source || !target) return;
+    activeRuntimeEdge=AX4LABExecutionEditor.upsertEdge(graph,source,target,condition,document.getElementById('ide-execution-edge-kind')?.value || 'execution',activeRuntimeEdge);
+    commitExecutionDraft(graph);
+    return;
+  }
   if (!source || !target) {
     log("Transition source/target is empty.", "error");
     return;
@@ -5684,6 +5977,12 @@ async function loadModules(options = {}) {
 async function loadModule(moduleId = "", options = {}) {
   const requested = moduleId || moduleSelect.value || activeModuleId;
   if (!requested) return;
+  const requestedTab=graphTabs.find(tab=>tab.id===`${MODULE_TAB_PREFIX}${requested}`);
+  if (requestedTab?.dirty) {
+    setStatus('warn','Draft preserved',`${requested}: save or discard local edits before reloading the backend.`);
+    log('Backend reload skipped because this module has unsaved edits.','warn');
+    return;
+  }
   const activeTab = activeGraphTab();
   if (activeTab?.kind === "module" && activeTab.moduleId && requested !== activeTab.moduleId && options.force !== true) {
     const payload = activeTab.modulePayload || modulePayloadCache.get(activeTab.moduleId);
@@ -5693,30 +5992,19 @@ async function loadModule(moduleId = "", options = {}) {
     log(`Skipped loading ${requested}; ${activeTab.moduleId} module tab is active.`, "warn");
     return;
   }
-  activeModuleId = requested;
-  if (moduleSelect && Array.from(moduleSelect.options).some((option) => option.value === requested)) moduleSelect.value = requested;
-  const result = await requestJson(`/api/modules/${activeModuleId}`);
-  modulePayloadCache.set(activeModuleId, result.module);
-  setModuleJson(result.module);
-  const module = result.module.module || {};
-  renderModuleTabs();
-  updateModuleSummary(module);
-  renderModuleGraph(result.module);
-  const tab = graphTabs.find((item) => item.id === `${MODULE_TAB_PREFIX}${activeModuleId}`);
-  if (tab && activeGraphTabId === tab.id) {
-    tab.modulePayload = cloneConfig(result.module);
-    tab.graph = modulePayloadToGraph(result.module);
-    tab.baselineGraph = tab.dirty ? tab.baselineGraph : cloneConfig(tab.graph);
-    renderGraph(tab.graph);
-  } else {
-    refreshOpenModuleGraphTab(activeModuleId, { dirty: false, renderIfActive: true });
-  }
-  log(`Loaded module ${activeModuleId}`);
+  const request=captureModuleRequest(requested);
+  const result = await requestJson(`/api/modules/${requested}`);
+  if(applyModuleResponse(request,result))log(`Loaded module ${requested}`);
 }
 
 function renderModuleGraph(modulePayload = parseModuleEditor()) {
   const payload = modulePayload.module ? modulePayload : { module: modulePayload };
   const module = payload.module || {};
+  if (module.execution_graph) {
+    moduleGraphOutput.innerHTML=`<p>${module.execution_graph.nodes.length} executable operations · ${module.execution_graph.edges.length} explicit outcome routes. Edit operations in the canvas inspector and routes with Apply/Delete Edge.</p>
+      <p>${(module.pre_execution || []).length} outer pre-execution step(s) remain stage policy, outside this owner graph.</p>`;
+    return;
+  }
   const preSteps = Array.isArray(module.pre_execution) ? module.pre_execution : [];
   const internalSteps = Array.isArray(module.internal_graph) ? module.internal_graph : [];
 
@@ -5920,6 +6208,7 @@ function updateModuleStepHandler(index, handler, phase = "internal_graph") {
 
 function updateModuleStepField(index, field, value, phase = "internal_graph", options = {}) {
   const payload = modulePayloadWithSteps();
+  if(payload.module.execution_graph && phase==='internal_graph')return;
   const steps = moduleStepsForPhase(payload.module, phase);
   if (!field || index < 0 || index >= steps.length) return;
   if (field === "enabled") {
@@ -5968,6 +6257,10 @@ function deleteModuleStep(index, phase = "internal_graph") {
 
 function addModuleStep(phase = "internal_graph") {
   const payload = modulePayloadWithSteps();
+  if(payload.module.execution_graph) {
+    log('Add a registered owner operation from the canvas inspector.','warn');
+    return;
+  }
   const steps = moduleStepsForPhase(payload.module, phase);
   const nextIndex = steps.length + 1;
   const defaultHandler = payload.module.handler || availableHandlers[0] || "";
@@ -5987,6 +6280,7 @@ function addModuleStep(phase = "internal_graph") {
 }
 
 async function saveModule(options = {}) {
+  if(isExecutionGraph())applyModuleGraphDraftToEditor(parseGraphEditor());
   const modulePayload = parseModuleEditor();
   const module = modulePayload.module || modulePayload;
   const moduleId = module.id || activeModuleId;
@@ -6001,14 +6295,17 @@ async function saveModule(options = {}) {
     }
     saveFingerprint = preflight.fingerprint;
   }
+  const request=captureModuleRequest(moduleId);
   const result = await requestJson(`/api/modules/${moduleId}`, {
     method: "PUT",
     body: JSON.stringify({ module: modulePayload, reason: "runtime_ide_module_save", author: "runtime_ide", activate: true }),
   });
   if (!result.ok) {
     const errors = result.errors || ["module save failed"];
-    setStatus("error", "Module Save Failed", errors.join("; "));
-    dryRunOutput.innerHTML = moduleValidationResultMarkup({ ok: false, errors }, moduleId);
+    if(moduleRequestOwnsView(request)) {
+      setStatus("error", "Module Save Failed", errors.join("; "));
+      dryRunOutput.innerHTML = moduleValidationResultMarkup({ ok: false, errors }, moduleId);
+    }
     setModulePreflightEvidence(moduleId, "save", { ok: false, fingerprint: saveFingerprint, detail: errors.join("; ") });
     log(`Module save failed for ${moduleId}: ${errors.join("; ")}`, "error");
     return result;
@@ -6024,17 +6321,9 @@ async function saveModule(options = {}) {
   }
   setModulePreflightEvidence(moduleId, "save", { ok: true, fingerprint: saveFingerprint, detail: result.version?.version_id || "module version saved", version_id: result.version?.version_id || "" });
   log(`Saved module ${moduleId} ${result.version?.version_id || "version recorded"}`, "ok");
-  await loadModule();
-  const tab = graphTabs.find((item) => item.id === `${MODULE_TAB_PREFIX}${moduleId}`);
-  if (tab) {
-    tab.modulePayload = normalizedModulePayload(parseModuleEditor());
-    tab.baselineModulePayload = cloneConfig(tab.modulePayload);
-    tab.graph = modulePayloadToGraph(tab.modulePayload);
-    tab.baselineGraph = cloneConfig(tab.graph);
-    tab.dirty = false;
-    if (activeGraphTabId === tab.id) renderGraph(tab.graph);
-    else renderGraphTabs();
-  }
+  const refreshed=await requestJson(`/api/modules/${moduleId}`);
+  applyModuleResponse(request,refreshed,{saved:true});
+  return result;
 }
 
 async function validateModule(targetOutput = null) {
@@ -6130,7 +6419,7 @@ function eventPayloadSummary(event) {
 
 function isModuleTraceEvent(event) {
   const type = eventTypeName(event);
-  return type.startsWith("module.step.") || type.startsWith("module.graph.") || type.startsWith("module.pre_step.");
+  return type.startsWith('execution.') || type.startsWith("module.step.") || type.startsWith("module.graph.") || type.startsWith("module.pre_step.");
 }
 
 function moduleIdFromEvent(event) {
@@ -6147,6 +6436,9 @@ function moduleStepFromEvent(event) {
 function moduleTraceEventsForStage(stage = "", moduleId = "", limit = 80, runId = "") {
   const cleanStage = String(stage || "");
   const cleanModule = String(moduleId || "").split("/").filter(Boolean).pop() || String(moduleId || "");
+  const executionTab=graphTabs.find(tab=>tab.moduleId===cleanModule && isExecutionGraph(tab.graph));
+  if(executionTab) return executionTraceProjection(executionTab.graph,runId).events.filter(event=>!stage || event.payload.node_id===stage).slice(0,limit).reverse();
+  if(modulePayloadCache.get(cleanModule)?.module?.execution_graph) return [];
   const selectedRun = runId || currentRunId || latestStateSnapshot?.state?.run_id || "";
   const matchesTrace = (event, enforceRun = true) => {
     if (!isModuleTraceEvent(event)) return false;
@@ -7561,7 +7853,7 @@ function consumeRuntimeEvent(event) {
   if (eventUpdatesRuntimeState(event)) mergeRuntimeEventState(event);
   recentRuntimeEvents.unshift(event);
   if (selectedTimelineEventIndex >= 0) selectedTimelineEventIndex = Math.min(selectedTimelineEventIndex + 1, 39);
-  recentRuntimeEvents = recentRuntimeEvents.slice(0, 40);
+  recentRuntimeEvents = recentRuntimeEvents.slice(0, 400);
   const stateStage = event?.state?.stage || event?.timestamp_stage || event?.node_id || "";
   if (stateStage) {
     visitedRuntimeStages.add(String(stateStage));
@@ -7589,7 +7881,7 @@ async function loadRecentEvents() {
   if (incoming.length) {
     const latest = incoming[incoming.length - 1];
     activeRuntimeStage = latest?.state?.stage || latest?.timestamp_stage || latest?.node_id || activeRuntimeStage;
-    recentRuntimeEvents = incoming.slice(-40).reverse();
+    recentRuntimeEvents = incoming.slice(-400).reverse();
   }
   renderRuntimeHeader();
   renderGraphExplorer(activeGraph);

@@ -4,6 +4,10 @@ ui:
   report_title: Design Agent
   chat:
     mode: open_on_demand
+  renderer:
+    dashboard: module
+    report: module
+    fallback: descriptor
   cards:
   - id: design_decision_descriptor
     type: metric_group

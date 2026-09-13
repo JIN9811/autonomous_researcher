@@ -204,6 +204,26 @@ async def favicon() -> FileResponse:
     return FileResponse(resolve_path("web/static/favicon.svg"), media_type="image/svg+xml")
 
 controller = load_runtime()
+
+
+def _installed_agent_module(module_id: str):
+    registry = getattr(getattr(controller, "_deps", None), "agent_registry", None)
+    lookup = getattr(registry, "get_module", None)
+    return lookup(module_id) if callable(lookup) else None
+
+
+@app.get("/module-assets/{module_id}/{asset_path:path}")
+async def get_agent_module_asset(module_id: str, asset_path: str):
+    installed = _installed_agent_module(module_id)
+    if (installed is None or installed.frontend_root is None
+            or installed.agent_name not in controller._deps.agent_registry.active_names()):
+        raise HTTPException(status_code=404, detail="Inactive or unknown module asset")
+    root = installed.frontend_root.resolve()
+    path = (root / asset_path).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise HTTPException(status_code=404, detail="Unknown module asset")
+    return FileResponse(path)
+
 from app.analysis_fem_routes import make_router as make_analysis_fem_router
 app.include_router(make_analysis_fem_router(
     lambda: controller._deps.agent_context.artifact_run_root or resolve_path('runs'),
@@ -444,7 +464,6 @@ def _objective_http_error(exc: Exception) -> HTTPException:
 LIVE_AGENT_DEFINITIONS: list[dict[str, str]] = [
     {"agent_id": "objective", "label": "Objective", "stage": "idle", "module_id": "objective"},
     {"agent_id": "orchestrator", "label": "Orchestrator", "stage": "orchestrator", "module_id": "orchestrator"},
-    {"agent_id": "design", "label": "Design Agent", "stage": "design", "module_id": "design"},
     {"agent_id": "specimen", "label": "Specimen Agent", "stage": "specimen", "module_id": "specimen"},
     {"agent_id": "vision", "label": "Vision Agent", "stage": "vision", "module_id": "vision"},
     {"agent_id": "manipulation", "label": "Manipulation Agent", "stage": "manipulation", "module_id": "manipulation"},
@@ -475,16 +494,6 @@ LIVE_AGENT_REPORT_PROFILES: dict[str, dict[str, object]] = {
             {"label": "Context", "value": "session memory, selected chat target, selected trace, and active graph stage"},
         ],
         "checklist": ["Validate required inputs", "Emit system handoff messages", "Stop on unresolved approval"],
-    },
-    "design": {
-        "title": "Design Geometry / Manufacturability",
-        "summary": "Converts approved requirements into printable TPMS/FDM specimen geometry with traceable parameters.",
-        "focus_rows": [
-            {"label": "Geometry", "value": "gyroid TPMS with cell size, unit-cell count, shell thickness, and cap settings"},
-            {"label": "Manufacturability", "value": "single connected body, FDM constraints, slicer-safe dimensions"},
-            {"label": "Artifacts", "value": "STL preview, parameter JSON, and design candidate metadata"},
-        ],
-        "checklist": ["Check connected components", "Record final parameters", "Expose STL artifact"],
     },
     "specimen": {
         "title": "Manufacturing Digital Thread / Printer Runtime",
@@ -3676,7 +3685,7 @@ async def get_runtime_state_compat() -> dict[str, object]:
 @app.get("/api/runtime/agent-manifests")
 async def get_runtime_agent_manifests() -> dict[str, object]:
     """Return graph/module/UI-derived agent manifests for Live GUI consumers."""
-    return _runtime_agent_manifests_payload(PRIMARY_RUNTIME_GRAPH_ID)
+    return _runtime_agent_manifests_payload()
 
 
 @app.get("/api/devices/state")
@@ -3918,7 +3927,9 @@ async def get_agents_compat() -> dict[str, object]:
     state = snapshot.get("state", {}) if isinstance(snapshot.get("state"), dict) else {}
     active_stage = str(state.get("stage") or "")
     agents = []
-    for item in LIVE_AGENT_DEFINITIONS:
+    for manifest in _runtime_agent_manifests_payload()["agents"]:
+        item = {"agent_id": manifest["id"], "label": manifest["label"],
+                "stage": manifest["stage"], "module_id": manifest["module_id"]}
         agents.append({
             **item,
             "status": "running" if item["stage"] == active_stage and snapshot.get("is_running") else "idle",
@@ -4398,7 +4409,7 @@ def _agent_manifest_icon_path(agent_id: str) -> str:
     return f"/static/live_gui_icons/{filename}"
 
 
-def _module_ui_payload(module_id: str) -> tuple[dict[str, Any], str]:
+def _module_ui_payload(module_id: str, *, module_root: Path | None = None) -> tuple[dict[str, Any], str]:
     """Read optional module-local ui.yaml descriptor without requiring it to exist."""
     if not module_id or module_id == "objective":
         return {}, ""
@@ -4406,7 +4417,7 @@ def _module_ui_payload(module_id: str) -> tuple[dict[str, Any], str]:
         safe_module = ModuleConfigStore.safe_module_id(module_id)
     except ValueError:
         return {}, ""
-    ui_path = RUNTIME_MODULE_ROOT / safe_module / "ui.yaml"
+    ui_path = (module_root or RUNTIME_MODULE_ROOT) / safe_module / "ui.yaml"
     if not ui_path.exists():
         return {}, ""
     try:
@@ -4535,6 +4546,7 @@ _UI_DESCRIPTOR_MOBILE_BEHAVIORS = {"stack", "compact", "hide", "scroll"}
 _UI_DESCRIPTOR_RENDERER_IDS = {
     "descriptor",
     "generic",
+    "module",
     "objective_reference",
     "orchestrator_reference",
     "design_reference",
@@ -4944,10 +4956,10 @@ def _module_ui_path(module_id: str) -> Path:
     return RUNTIME_MODULE_ROOT / safe_module / "ui.yaml"
 
 
-def _module_payload_by_id() -> dict[str, dict[str, Any]]:
+def _module_payload_by_id(module_root: Path | None = None) -> dict[str, dict[str, Any]]:
     """Return active module payloads keyed by module id."""
     modules: dict[str, dict[str, Any]] = {}
-    for module_path in sorted(RUNTIME_MODULE_ROOT.glob("*/module.yaml")):
+    for module_path in sorted((module_root or RUNTIME_MODULE_ROOT).glob("*/module.yaml")):
         try:
             raw = yaml.safe_load(module_path.read_text(encoding="utf-8")) or {}
         except (OSError, yaml.YAMLError):
@@ -5147,10 +5159,24 @@ def _module_management_lifecycle(module_id: str, payload: dict[str, Any]) -> dic
     }
 
 
-def _runtime_agent_manifests_payload(graph_id: str = PRIMARY_RUNTIME_GRAPH_ID) -> dict[str, object]:
+def _runtime_agent_manifests_payload(graph_id: str | None = None, *, include_unattached: bool = False) -> dict[str, object]:
     """Merge graph, module, and optional UI descriptors into Live GUI agent manifests."""
-    config = _load_runtime_graph_config(graph_id)
-    modules = _module_payload_by_id()
+    from agents.orchestrator_capabilities import OwnerCatalog
+
+    if graph_id is None:
+        catalog = controller._planning_setup_catalog()
+        config = catalog.graph_config
+    else:
+        config = _load_runtime_graph_config(graph_id)
+        catalog = OwnerCatalog(controller._deps.agent_registry, config,
+                               graph_root=RUNTIME_MODULE_ROOT.parent).snapshot()
+    bindings = catalog.bindings()
+    # Presentation/generated adapters are graph modules too, even though they
+    # do not register an agent.* owner in the capability catalog.
+    active_modules = {_module_id_from_graph_node_module_id(node.module_id) for node in config.nodes}
+    bindings_by_node = {row["node_id"]: row for row in bindings if row["role"] != "pre_execution"}
+    module_root = catalog.graph_root / "modules"
+    modules = _module_payload_by_id(module_root)
     nodes_by_stage = {str(node.stage): node for node in config.nodes if node.stage}
     nodes_by_module: dict[str, Any] = {}
     for node in config.nodes:
@@ -5162,15 +5188,21 @@ def _runtime_agent_manifests_payload(graph_id: str = PRIMARY_RUNTIME_GRAPH_ID) -
     seen_modules: set[str] = set()
     seen_agents: set[str] = set()
 
-    def build_manifest(agent_id: str, label: str, stage: str, module_id: str, order: int) -> dict[str, object]:
+    def build_manifest(agent_id: str, label: str, stage: str, module_id: str, order: int,
+                       owner_binding: dict | None = None) -> dict[str, object]:
         module = modules.get(module_id, {}) if module_id and module_id != "objective" else {}
-        ui, ui_path = _module_ui_payload(module_id)
+        ui, ui_path = _module_ui_payload(module_id, module_root=module_root)
         node = nodes_by_module.get(module_id) or nodes_by_stage.get(stage)
+        if owner_binding is not None:
+            node = next((value for value in config.nodes if value.id == owner_binding["node_id"]), node)
+        if agent_id not in {"objective", "orchestrator"} and node:
+            order = next(index for index, value in enumerate(config.nodes) if value.id == node.id) + 2
         metadata = module.get("metadata") if isinstance(module.get("metadata"), dict) else {}
         execution = module.get("execution") if isinstance(module.get("execution"), dict) else {}
         safety = module.get("safety") if isinstance(module.get("safety"), dict) else {}
         runtime_contract = module.get("runtime_contract") if isinstance(module.get("runtime_contract"), dict) else {}
-        handler = str(module.get("handler") or (node.handler if node else "") or "runtime.step_complete")
+        binding = owner_binding if owner_binding is not None else (bindings_by_node.get(node.id, {}) if node else {})
+        handler = str(binding.get("handler") or module.get("handler") or (node.handler if node else "") or "runtime.step_complete")
         status = str(module.get("status") or metadata.get("status") or "active")
         if agent_id == "objective":
             capability = "ui_only"
@@ -5186,6 +5218,7 @@ def _runtime_agent_manifests_payload(graph_id: str = PRIMARY_RUNTIME_GRAPH_ID) -
         short = str(ui.get("short") or _agent_manifest_short(agent_id, manifest_label))
         icon = str(ui.get("icon") or _agent_manifest_icon_path(agent_id))
         chat = ui.get("chat") if isinstance(ui.get("chat"), dict) else runtime_contract.get("chat_policy") if isinstance(runtime_contract.get("chat_policy"), dict) else {}
+        installed = controller._deps.agent_registry.module_for_agent(handler.removeprefix("agent."))
         return {
             "id": agent_id,
             "label": manifest_label,
@@ -5209,13 +5242,16 @@ def _runtime_agent_manifests_payload(graph_id: str = PRIMARY_RUNTIME_GRAPH_ID) -
             "output_contracts": module.get("output_contracts", []) if isinstance(module.get("output_contracts"), list) else [],
             "io_contract": module.get("io_contract", {}) if isinstance(module.get("io_contract"), dict) else {},
             "runtime_contract": runtime_contract,
+            "implementation": installed.describe() if installed else None,
+            "activation": {"source": "applied_graph", "included": bool(binding) or module_id in active_modules or agent_id in {"objective", "orchestrator"},
+                           "owner": binding.get("owner", ""), "role": binding.get("role", "core")},
             "safety": safety,
             "editable": bool(module.get("editable", True)) if module else False,
             "graph_node_id": node.id if node else "",
             "graph_node_kind": node.kind if node else "",
             "graph_stage": node.stage if node else stage,
             "graph_position": node.position if node else {},
-            "module_path": str(RUNTIME_MODULE_ROOT / module_id / "module.yaml") if module_id and module_id != "objective" else "",
+            "module_path": str(module_root / module_id / "module.yaml") if module_id and module_id != "objective" else "",
             "ui_path": ui_path,
             "source": "graph_module_ui_manifest",
             "order": order,
@@ -5224,6 +5260,8 @@ def _runtime_agent_manifests_payload(graph_id: str = PRIMARY_RUNTIME_GRAPH_ID) -
     for order, item in enumerate(LIVE_AGENT_DEFINITIONS):
         agent_id = str(item.get("agent_id") or item.get("module_id") or "").strip()
         module_id = str(item.get("module_id") or agent_id).strip()
+        if agent_id not in {"objective", "orchestrator"} and module_id not in active_modules:
+            continue
         manifest = build_manifest(
             agent_id=agent_id,
             label=str(item.get("label") or agent_id),
@@ -5237,7 +5275,7 @@ def _runtime_agent_manifests_payload(graph_id: str = PRIMARY_RUNTIME_GRAPH_ID) -
             seen_modules.add(module_id)
 
     for module_id, module in sorted(modules.items()):
-        if module_id in seen_modules:
+        if module_id in seen_modules or (module_id not in active_modules and not include_unattached):
             continue
         agent_id = module_id
         node = nodes_by_module.get(module_id)
@@ -5247,11 +5285,25 @@ def _runtime_agent_manifests_payload(graph_id: str = PRIMARY_RUNTIME_GRAPH_ID) -
             label=str(module.get("label") or module_id),
             stage=stage,
             module_id=module_id,
-            order=len(manifests),
+            order=next((index for index, value in enumerate(config.nodes) if value.id == node.id), len(manifests)) if node else len(manifests),
         )
         manifest["id"] = agent_id if agent_id not in seen_agents else f"{agent_id}_module"
         manifests.append(manifest)
         seen_agents.add(str(manifest["id"]))
+
+    # Pre-execution owners can be admitted by another module without owning a
+    # standalone node. Their installed frontend must follow that same binding.
+    represented_owners = {str(item["handler"]).removeprefix("agent.") for item in manifests}
+    for binding in bindings:
+        installed = controller._deps.agent_registry.module_for_agent(binding["owner"])
+        if installed is None or binding["owner"] in represented_owners:
+            continue
+        module_id = installed.module_id
+        agent_id = module_id if module_id not in seen_agents else f"{module_id}_owner"
+        manifests.append(build_manifest(agent_id, module_id, module_id,
+                                        module_id, len(manifests), owner_binding=binding))
+        represented_owners.add(binding["owner"])
+        seen_agents.add(agent_id)
 
     categories: dict[str, int] = {}
     for item in manifests:
@@ -5261,7 +5313,7 @@ def _runtime_agent_manifests_payload(graph_id: str = PRIMARY_RUNTIME_GRAPH_ID) -
         "ok": True,
         "graph_id": config.id,
         "graph_version": config.version,
-        "agents": manifests,
+        "agents": sorted(manifests, key=lambda item: item["order"]),
         "count": len(manifests),
         "categories": categories,
         "source_endpoints": ["/api/graphs/atr_closed_loop", "/api/modules", "/api/runtime/agent-manifests"],
@@ -6157,7 +6209,7 @@ def _module_runtime_summary(module_id: str) -> dict[str, object]:
     if not isinstance(module, dict):
         return {"module_id": module_id, "missing": True}
     try:
-        module = ModuleConfig.model_validate(module).model_dump(mode="json", exclude_none=True)
+        module = ModuleConfig.model_validate(module).model_dump(mode="json", exclude_none=True, by_alias=True)
     except Exception as exc:
         return {"module_id": module_id, "schema_error": str(exc)}
     sequence = _module_dry_run_sequence(module_id, {"module": module})
@@ -6194,10 +6246,32 @@ def _validate_module_payload(module_id: str, payload: dict[str, Any]) -> list[st
         errors.append(f"module schema validation failed: {exc}")
     if module.get("id") != module_id:
         errors.append(f"module_id path/body mismatch: {module_id} != {module.get('id')}")
+    execution_graph = module.get("execution_graph")
+    if module_id in {"design", "orchestrator"} and execution_graph is None:
+        errors.append(f"execution_graph is required for migrated module: {module_id}")
+    elif execution_graph is not None:
+        catalog = _module_execution_catalog(module_id)
+        if catalog is None:
+            errors.append(f"execution_graph is unsupported for module: {module_id}")
+        elif isinstance(execution_graph, dict):
+            try:
+                from agents.execution_graph import compile_execution_graph
+
+                compile_execution_graph(execution_graph, catalog)
+            except Exception as exc:
+                errors.append(f"execution_graph validation failed: {exc}")
+        else:
+            errors.append("execution_graph must be an object")
     handler_registry = _runtime_graph_handler_registry().names()
     handler = str(module.get("handler", ""))
     if handler not in handler_registry:
         errors.append(f"unregistered handler: {handler}")
+    migrated_handler = {
+        "design": "agent.design_agent",
+        "orchestrator": f"agent.{controller._deps.orchestrator_agent_name}",
+    }.get(module_id)
+    if execution_graph is not None and migrated_handler is not None and handler != migrated_handler:
+        errors.append(f"handler must remain {migrated_handler} while execution_graph is configured")
     llm_role = module.get("llm_role", "")
     if llm_role is not None and not isinstance(llm_role, str):
         errors.append("llm_role must be a string")
@@ -6260,6 +6334,8 @@ def _validate_module_payload(module_id: str, payload: dict[str, Any]) -> list[st
     if not isinstance(internal_graph, list):
         errors.append("internal_graph must be a list")
     else:
+        if isinstance(module.get("execution_graph"), dict) and internal_graph:
+            errors.append("internal_graph must be empty when execution_graph is configured")
         step_ids = [str(step.get("id", "")) for step in internal_graph if isinstance(step, dict)]
         missing_id_count = sum(1 for step_id in step_ids if not step_id.strip())
         if missing_id_count:
@@ -6299,6 +6375,50 @@ def _validate_module_payload(module_id: str, payload: dict[str, Any]) -> list[st
             if registered_tools and tool.strip() not in registered_tools:
                 errors.append(f"unregistered tool: {tool.strip()}")
     return errors
+
+
+def _module_execution_catalog(module_id: str):
+    """Return a code-owned operation catalog for explicitly migrated modules."""
+    if module_id == "design":
+        from agents.design.execution import design_execution_catalog
+
+        agent = controller._deps.agent_registry.get_installed("design_agent")
+        return design_execution_catalog(agent)
+    if module_id == "orchestrator":
+        from agents.orchestrator_execution import orchestrator_execution_catalog
+
+        agent = controller._deps.agent_registry.get_installed(controller._deps.orchestrator_agent_name)
+        return orchestrator_execution_catalog(agent, context=None, handlers=None)
+    return None
+
+
+def _compiled_module_execution_graph(module_id: str, module: dict[str, Any]):
+    """Compile a detached module graph for validation or structural preview."""
+    graph = module.get("execution_graph")
+    catalog = _module_execution_catalog(module_id)
+    if not isinstance(graph, dict) or catalog is None:
+        return None
+    from agents.execution_graph import compile_execution_graph
+
+    return compile_execution_graph(graph, catalog)
+
+
+def _execution_graph_paths(compiled) -> list[dict[str, Any]]:
+    """Enumerate all acyclic outcome paths without invoking owner functions."""
+    if compiled is None:
+        return []
+    paths: list[dict[str, Any]] = []
+
+    def walk(node_id: str, nodes: list[str], edges: list[dict[str, str]]) -> None:
+        if node_id in compiled.terminals:
+            paths.append({"nodes": nodes, "edges": edges, "terminal": node_id})
+            return
+        for edge in compiled.edges:
+            if edge.source == node_id:
+                walk(edge.target, [*nodes, edge.target], [*edges, edge.describe()])
+
+    walk(compiled.entry, [compiled.entry], [])
+    return paths
 
 
 def _module_dry_run_sequence(module_id: str, payload: dict[str, Any] | None = None) -> list[dict[str, object]]:
@@ -6341,6 +6461,28 @@ def _module_dry_run_sequence(module_id: str, payload: dict[str, Any] | None = No
                     "draft": is_draft,
                 }
             )
+    compiled = _compiled_module_execution_graph(module_id, module)
+    paths = _execution_graph_paths(compiled)
+    if compiled is not None and paths:
+        nodes = {node.id: node for node in compiled.nodes}
+        for node_id in paths[0]["nodes"]:
+            node = nodes[node_id]
+            sequence.append(
+                {
+                    "step": len(sequence) + 1,
+                    "id": node.id,
+                    "label": node.label,
+                    "handler": node.handler,
+                    "kind": "execution_node",
+                    "phase": "execution_graph",
+                    "handler_configured": True,
+                    "executable": not is_draft,
+                    "module_status": module_status or "active",
+                    "draft": is_draft,
+                    "area": node.area,
+                }
+            )
+        return sequence
     for index, step in enumerate(internal_graph, start=1):
         item = step if isinstance(step, dict) else {}
         configured_handler = str(item.get("handler") or "").strip()
@@ -6366,6 +6508,7 @@ def _module_dry_run_summary(sequence: list[dict[str, object]]) -> dict[str, obje
     """Summarize draft module dry-run sequence for operator evidence panels."""
     pre = [item for item in sequence if item.get("phase") == "pre_execution"]
     internal = [item for item in sequence if item.get("phase") == "internal_graph"]
+    execution_nodes = [item for item in sequence if item.get("phase") == "execution_graph"]
     executable = [item for item in sequence if item.get("executable")]
     checkpoints = [item for item in sequence if not item.get("executable")]
     handlers = sorted({str(item.get("handler") or "") for item in sequence if item.get("handler")})
@@ -6374,6 +6517,7 @@ def _module_dry_run_summary(sequence: list[dict[str, object]]) -> dict[str, obje
         "step_count": len(sequence),
         "pre_execution_count": len(pre),
         "internal_graph_count": len(internal),
+        "execution_graph_count": len(execution_nodes),
         "executable_count": len(executable),
         "checkpoint_count": len(checkpoints),
         "draft": draft,
@@ -6386,11 +6530,18 @@ def _module_dry_run_summary(sequence: list[dict[str, object]]) -> dict[str, obje
 
 
 def _module_dry_run_evidence(module_id: str, payload: dict[str, Any]) -> dict[str, object]:
-    """Build reusable non-device dry-run evidence for module API save/create responses."""
+    """Build an honest structural preview without invoking owner functions."""
     sequence = _module_dry_run_sequence(module_id, payload)
+    normalized = ModuleConfigStore.normalize_payload(dict(payload))
+    module = normalized.get("module", {}) if isinstance(normalized, dict) else {}
+    compiled = _compiled_module_execution_graph(module_id, module) if isinstance(module, dict) else None
     return {
         "ok": True,
         "module_id": module_id,
+        "mode": "structural_preview",
+        "executes_owner_functions": False,
+        "graph_revision": compiled.revision if compiled is not None else "",
+        "paths": _execution_graph_paths(compiled),
         "sequence": sequence,
         "summary": _module_dry_run_summary(sequence),
     }
@@ -6559,10 +6710,18 @@ def _parse_artifact_id(artifact_id: str, run_id: str | None = None) -> tuple[str
     return run_id or _current_run_id(), raw
 
 
-def _agent_definition(agent_id: str) -> dict[str, str]:
+def _agent_definition(agent_id: str, *, include_inactive: bool = False) -> dict[str, str]:
     """Return one Live GUI agent definition by canonical id or module/stage alias."""
     normalized = str(agent_id or "").strip().lower().replace("-", "_")
-    for item in LIVE_AGENT_DEFINITIONS:
+    definitions = [{"agent_id": item["id"], "label": item["label"], "stage": item["stage"],
+                    "module_id": item["module_id"], "handler": item["handler"]} for item in _runtime_agent_manifests_payload()["agents"]]
+    if include_inactive:
+        definitions.extend(LIVE_AGENT_DEFINITIONS)
+        definitions.extend({"agent_id": module.module_id, "label": module.module_id,
+                            "stage": module.module_id, "module_id": module.module_id,
+                            "handler": f"agent.{module.agent_name}"}
+                           for module in controller._deps.agent_registry.modules())
+    for item in definitions:
         aliases = {item["agent_id"], item["stage"], item["module_id"]}
         if normalized in aliases:
             return item
@@ -6600,7 +6759,7 @@ def _event_matches_agent(event: dict[str, Any], definition: dict[str, str]) -> b
 
 def _events_for_agent(agent_id: str, run_id: str | None = None) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Return recent runtime events filtered for one Live GUI agent."""
-    definition = _agent_definition(agent_id)
+    definition = _agent_definition(agent_id, include_inactive=bool(run_id))
     events = controller.recent_events()
     if run_id:
         events = [event for event in events if str(event.get("run_id") or "") == run_id]
@@ -6631,8 +6790,7 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
     }))
     metadata = state.get("run_metadata", {}) if isinstance(state.get("run_metadata"), dict) else {}
     agent_payload = metadata.get(f"{definition['stage']}_agent_payload") if isinstance(metadata.get(f"{definition['stage']}_agent_payload"), dict) else {}
-    design_report = None
-    design_agent_report = None
+    module_sections = {}
     report_decisions: list[object] = []
     report_metrics: dict[str, object] = {}
     if definition["agent_id"] == "orchestrator":
@@ -6711,38 +6869,15 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
         )
         report_decisions = decisions
         report_metrics = role_specific["run_health"]
-    if definition["agent_id"] == "design":
-        if isinstance(metadata.get("latest_design_agent_report"), dict):
-            design_agent_report = metadata["latest_design_agent_report"]
-        elif isinstance(agent_payload.get("design_agent_report"), dict):
-            design_agent_report = agent_payload["design_agent_report"]
-        if isinstance(metadata.get("design_report"), dict):
-            design_report = metadata["design_report"]
-        elif isinstance(agent_payload.get("design_report"), dict):
-            design_report = agent_payload["design_report"]
-        if isinstance(design_report, dict):
-            candidate_generation = design_report.get("candidate_generation") if isinstance(design_report.get("candidate_generation"), dict) else {}
-            candidate_evaluation = design_report.get("candidate_evaluation") if isinstance(design_report.get("candidate_evaluation"), dict) else {}
-            manufacturability = design_report.get("manufacturability") if isinstance(design_report.get("manufacturability"), dict) else {}
-            handoff_packet = design_report.get("handoff_to_specimen") if isinstance(design_report.get("handoff_to_specimen"), dict) else {}
-            role_specific["summary"] = "Traceable objective, hypothesis, candidate pool, selection rationale, rejected/repair log, and Specimen Agent handoff evidence."
-            role_specific["candidate_board"] = {
-                "candidate_count": candidate_generation.get("candidate_count"),
-                "valid_count": candidate_generation.get("valid_count"),
-                "rejected_count": candidate_generation.get("rejected_count"),
-                "top_candidates": candidate_generation.get("top_candidates", []),
-                "candidate_ledger": candidate_generation.get("candidate_ledger", []),
-            }
-            role_specific["manufacturability"] = manufacturability
-            role_specific["decision_register"] = design_report.get("decision_register", [])
-            role_specific["handoff_packet"] = handoff_packet
-            role_specific["objective"] = design_report.get("objective", {})
-            role_specific["hypothesis"] = design_report.get("hypothesis", {})
-            role_specific["prior_context"] = design_report.get("prior_context", {})
-            if isinstance(design_agent_report, dict):
-                role_specific["design_agent_report"] = design_agent_report
-            report_decisions = design_report.get("decision_register", []) if isinstance(design_report.get("decision_register"), list) else []
-            report_metrics = candidate_evaluation
+    installed = controller._deps.agent_registry.module_for_agent(definition.get("handler", "").removeprefix("agent."))
+    if installed is not None and installed.project_report is not None:
+        role_specific.update(installed.describe().get("report_profile", {}))
+        projection = installed.project_report(metadata, agent_payload)
+        role_specific.update(projection["role_specific"])
+        report_decisions = projection["decisions"]
+        report_metrics = projection["metrics"]
+        module_sections = {key: value for key, value in projection.items()
+                           if key not in {"role_specific", "decisions", "metrics"}}
     specimen_fabrication_report = None
     specimen_agent_report = None
     if definition["agent_id"] == "specimen":
@@ -7181,8 +7316,7 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
         "sections": {
             "overview": summary,
             "role_specific": role_specific,
-            "design_agent_report": design_agent_report if definition["agent_id"] == "design" else None,
-            "design_report": design_report if definition["agent_id"] == "design" else None,
+            **module_sections,
             "specimen_agent_report": specimen_agent_report if definition["agent_id"] == "specimen" else None,
             "fabrication_report": specimen_fabrication_report if definition["agent_id"] == "specimen" else None,
             "vision_agent_report": vision_agent_report if definition["agent_id"] == "vision" else None,
@@ -7747,7 +7881,7 @@ async def create_runtime_module_template(template_kind: str, req: RuntimeModuleT
         "ui": ui_payload,
         "ui_path": str(ui_path),
         "catalog_item": _module_list_item(module_path),
-        "manifest": next((item for item in _runtime_agent_manifests_payload(PRIMARY_RUNTIME_GRAPH_ID)["agents"] if item.get("id") == safe_id), {}),
+        "manifest": next((item for item in _runtime_agent_manifests_payload(PRIMARY_RUNTIME_GRAPH_ID, include_unattached=True)["agents"] if item.get("id") == safe_id), {}),
         "dry_run": dry_run,
         "errors": [],
     }
@@ -7757,9 +7891,17 @@ async def create_runtime_module_template(template_kind: str, req: RuntimeModuleT
 async def get_runtime_module(module_id: str) -> dict[str, object]:
     """Return one editable module config."""
     payload = _module_config_payload(module_id)
+    installed = _installed_agent_module(module_id)
+    catalog = _module_execution_catalog(module_id)
+    normalized = ModuleConfigStore.normalize_payload(dict(payload))
+    module = normalized.get("module", {}) if isinstance(normalized, dict) else {}
+    compiled = _compiled_module_execution_graph(module_id, module) if catalog is not None and isinstance(module, dict) else None
     return {
         "ok": True,
         "module": payload,
+        "execution_catalog": catalog.describe() if catalog is not None else None,
+        "execution_graph_revision": compiled.revision if compiled is not None else None,
+        "implementation": installed.describe() if installed else None,
         "loaded": module_id in _RUNTIME_MODULE_MANAGEMENT_LOADED,
         "runtime_effect": _module_management_runtime_effect(),
         "lifecycle": _module_management_lifecycle(module_id, payload),
@@ -7791,7 +7933,7 @@ async def save_runtime_module_ui(module_id: str, req: RuntimeModuleUiSaveRequest
     payload = {"ui": ui}
     ui_path.parent.mkdir(parents=True, exist_ok=True)
     ui_path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), encoding="utf-8")
-    manifest = next((item for item in _runtime_agent_manifests_payload(PRIMARY_RUNTIME_GRAPH_ID)["agents"] if item.get("module_id") == safe_id or item.get("id") == safe_id), {})
+    manifest = next((item for item in _runtime_agent_manifests_payload(PRIMARY_RUNTIME_GRAPH_ID, include_unattached=True)["agents"] if item.get("module_id") == safe_id or item.get("id") == safe_id), {})
     return {
         "ok": True,
         "module_id": safe_id,
@@ -7923,13 +8065,16 @@ async def validate_runtime_module(module_id: str, req: RuntimeModuleSaveRequest 
 
 @app.post("/api/modules/{module_id}/dry-run")
 async def dry_run_runtime_module(module_id: str, req: RuntimeModuleSaveRequest | None = None) -> dict[str, object]:
-    """Simulate the configured internal module step order without calling tools/devices."""
+    """Validate and enumerate structural paths without calling owner functions."""
     payload = dict(req.module) if req and req.module else _module_config_payload(module_id)
     errors = _validate_module_payload(module_id, payload)
     if errors:
-        return {"ok": False, "module_id": module_id, "errors": errors, "sequence": [], "summary": _module_dry_run_summary([])}
-    sequence = _module_dry_run_sequence(module_id, payload)
-    return {"ok": True, "module_id": module_id, "errors": [], "sequence": sequence, "summary": _module_dry_run_summary(sequence)}
+        return {
+            "ok": False, "module_id": module_id, "errors": errors,
+            "mode": "structural_preview", "executes_owner_functions": False,
+            "graph_revision": "", "paths": [], "sequence": [], "summary": _module_dry_run_summary([]),
+        }
+    return {**_module_dry_run_evidence(module_id, payload), "errors": []}
 
 
 @app.put("/api/modules/{module_id}")
@@ -7995,7 +8140,29 @@ async def validate_runtime_graph_draft(graph_id: str, req: RuntimeGraphSaveReque
     compiler.compile()
     compiled_graph = compiler.summary()
     await _emit_graph_compiled(graph_id=graph_id, action="validate-draft", compiled_graph=compiled_graph, graph_evidence=_graph_version_evidence(graph_id, config))
-    return {"ok": True, "graph_id": graph_id, "errors": [], "compiled": True, "compiled_graph": compiled_graph}
+    return {"ok": True, "graph_id": graph_id, "errors": [], "compiled": True,
+            "compiled_graph": compiled_graph, "module_lifecycle": _graph_module_lifecycle_preview(config)}
+
+
+def _graph_module_lifecycle_preview(draft: GraphConfig) -> dict[str, object]:
+    """Compare owner bindings without applying the draft or contacting equipment."""
+    from agents.orchestrator_capabilities import OwnerCatalog
+
+    applied = controller._planning_setup_catalog()
+    draft_catalog = OwnerCatalog(controller._deps.agent_registry, draft,
+                                 graph_root=RUNTIME_MODULE_ROOT.parent).snapshot()
+    current = {row["owner"] for row in applied.bindings()}
+    proposed = {row["owner"] for row in draft_catalog.bindings()}
+    return {
+        "applied_graph_id": applied.graph_config.id,
+        "draft_graph_id": draft.id,
+        "applied": sorted(current), "draft": sorted(proposed),
+        "added": sorted(proposed - current), "removed": sorted(current - proposed),
+        "retained": sorted(current & proposed),
+        "running": bool(controller.snapshot().get("is_running")),
+        "history_preserved": True,
+        "affected_surfaces": ["Execution admission", "Live GUI", "Owner/setup discovery"],
+    }
 
 
 @app.post("/api/graphs/{graph_id}/compile")

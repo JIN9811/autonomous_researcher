@@ -384,6 +384,28 @@ Known gap: <most important current gap, or None identified within the verified s
 
 ### 8. 추적성과 기존 계약 보존
 
+#### Runtime IDE 연동 계약 (2026-09-13)
+
+후속 에이전트 모듈화는 문서뿐 아니라 Runtime IDE의 기존 편집 그래프도
+5영역으로 구조화한다. 별도 구조 보기/단계 보기 전환은 추가하지 않는다.
+영역명, 실제 LLM 판단점, 실행·검증·증거 레전드를 IDE 스타일로 표현하며,
+기존 함수·외부 인계·포트·드래그 편집은 보존하되, 실행과 다른 표시용
+체크포인트 연결은 실행 구조로 취급하지 않는다. `module.execution_graph`의
+노드·명시적 outcome edge를 backend runner, IDE, 문서 SVG가 공통으로 쓴다.
+프론트의 유효한 실행 정의 수정은 기존 검증·저장·활성화 API를 통해 다음
+실행에 적용되고, backend 정의 수정은 조회·reload로 프론트에 반영한다.
+실행 중 정의와 편집 중 draft는 조용히 덮어쓰지 않는다. 좌표·라벨 수정만으로
+실행 순서가 바뀌어서는 안 된다. 상세 계약은
+[공통 실행 정의](2026-09-13-executable-agent-ide-contract-design.md)를 따른다.
+
+등록된 실제 owner operation만 편집 대상으로 공개한다. 내부 LLM 툴 루프는
+필요한 경우 composite 노드로 정확히 표시하고, 다섯 영역을 채우기 위한
+가짜 실행 노드를 만들지 않는다. 실선·점선 등의 의미는 edge 선언을 따르며
+영역 색으로 추론하지 않는다. 없는 독립 책임은 명시적으로 표시한다.
+노드·분기 편집 후 실제 호출 순서, backend reload, 실행 revision별 trace,
+기존 결과 보존, 저장 좌표와 SVG 일치를 검증한다. Design과 Orchestrator부터
+적용하며 미이관 모듈의 기존 경로는 유지한다.
+
 각 변경 패키지는 결정 지점 → 코드/툴 → Agent Reference의 영역/표 → SVG → 검증을
 연결한 짧은 추적표를 가진다. 이 표는 해당 Reference의 Verification에 포함하며
 별도 중복 문서군을 만들지 않는다.

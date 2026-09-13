@@ -39,7 +39,12 @@ documents:
   - docs/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md
   - docs/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md
   - docs/superpowers/specs/2026-09-12-orchestrator-dynamic-experimental-setup-design.md
+  - docs/superpowers/specs/2026-09-13-package-agent-bridge-modularization-design.md
+  - docs/superpowers/specs/2026-09-13-executable-agent-ide-contract-design.md
   - docs/superpowers/plans/2026-09-07-design-decision-layer.md
+  - docs/superpowers/plans/2026-09-13-design-agent-module.md
+  - docs/superpowers/plans/2026-09-13-design-ide-module-lifecycle.md
+  - docs/superpowers/plans/2026-09-13-executable-agent-ide.md
   - docs/superpowers/plans/2026-09-12-orchestrator-dynamic-experimental-setup.md
   - docs/paper/README.md
   - docs/paper/evidence/2026-09-07-supervised-closed-loop.md

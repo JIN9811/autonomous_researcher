@@ -1,0 +1,21 @@
+digraph PackageModules {
+  graph [rankdir=TB, bgcolor="white", pad="0.3", nodesep="0.5", ranksep="0.55", fontname="DejaVu Sans"];
+  node [shape=box, style="rounded,filled", fillcolor="#F4F7FA", color="#8596A8", fontcolor="#172D42", fontname="DejaVu Sans", fontsize=13, margin="0.2,0.15"];
+  edge [fontname="DejaVu Sans", fontsize=10, color="#526B80", fontcolor="#526B80", arrowsize=0.7];
+  package [label="Package\nVersions / dependencies / default bindings", fillcolor="#FFF3DF"];
+  core [label="Application core + Orchestrator\nActive graph / sessions / shared GUI", fillcolor="#E7F2FA"];
+  agent [label="Agent module\nDecisions / API / Workspace / settings"];
+  tools [label="Existing Tool Registry\nDispatch / device queue / evidence"];
+  bridge [label="Bridge module + instances\nDevice execution / API / Workspace / profiles"];
+  storage [label="Existing storage services\nLocal settings / run-loop-attempt archives", shape=cylinder, fillcolor="#EEF5EF"];
+  package -> agent [label="includes", style=dashed];
+  package -> bridge [label="includes", style=dashed];
+  package -> core [label="configuration only", style=dashed];
+  core -> agent [label="graph-selected invocation"];
+  agent -> tools [label="registered tool call"];
+  tools -> bridge [label="selected instance"];
+  {rank=same; agent; tools; bridge;}
+  core -> storage [label="run identity", constraint=false];
+  agent -> storage [label="results / artifact references"];
+  bridge -> storage [label="job / parent execution references"];
+}

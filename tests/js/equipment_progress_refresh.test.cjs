@@ -128,7 +128,7 @@ test('authoritative session updates refresh equipment while another agent page i
     liveRunningFlag: () => true, formatPlanningCycleLabel: () => '1', liveRunTopbarLabel: () => '',
     mergePlanningMessages: () => [],
   });
-  for (const name of ['persistPlanningSessionId', 'openPendingOperatorTeleopHandoff', 'syncLiveBoVisualizationFromState', 'setLiveBackendPlanningBusy', 'setPlanningDot', 'setCompactTextWithTitle', 'scheduleLiveMissionMarquee', 'renderSpecSummary', 'resetPlanningMessageDisplayState', 'renderPlanningMessages', 'persistLivePlanningCache']) c[name] = () => {};
+  for (const name of ['persistPlanningSessionId', 'syncLiveSetupSession', 'openPendingOperatorTeleopHandoff', 'syncLiveBoVisualizationFromState', 'setLiveBackendPlanningBusy', 'setPlanningDot', 'setCompactTextWithTitle', 'scheduleLiveMissionMarquee', 'renderSpecSummary', 'resetPlanningMessageDisplayState', 'renderPlanningMessages', 'persistLivePlanningCache']) c[name] = () => {};
   load(c, ['applyPlanningSession']);
   c.applyPlanningSession(c.liveLastSession);
   assert.ok(c.liveEquipmentRuntimeRefreshInFlight, 'state receipt must initiate progress synchronization');

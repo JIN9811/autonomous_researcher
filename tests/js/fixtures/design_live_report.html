@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Design live report fixture</title></head>
+  <body>
+    <main id="report"></main>
+    <script src="../../../agents/design/frontend/live_report.js"></script>
+    <script>
+      const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
+      }[character]));
+      const renderer = window.AX4LABDesignUI.createLiveReportRenderer({
+        escapeHtml,
+        compactText: (value, limit) => String(value ?? "").slice(0, limit),
+        renderRuntimeValue: (value) => value == null ? "-" : String(value),
+        renderDashboardRows: (rows) => `<dl>${rows.map(([key, value]) => `<dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd>`).join("")}</dl>`,
+        dashboardList: (rows, emptyText) => rows.length ? `<ul>${rows.map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ul>` : `<p>${escapeHtml(emptyText)}</p>`,
+        orcChartPayloadAttr: (payload) => escapeHtml(JSON.stringify(payload)),
+        designImageUrlFromSource: () => "",
+        designCandidateDirectCaptureUrl: () => "",
+      });
+      document.getElementById("report").innerHTML = renderer.renderEvidence({
+        validity: { status: "pass" },
+        performance: { status: "unassessed" },
+        cost: { mass: { value: 0, unit: "g" }, duration: { value: 32, unit: "min" } },
+        constraint_margins: [{ constraint: "minimum_wall", margin: 0.2, unit: "mm", status: "pass" }],
+      }, true);
+      document.body.dataset.rendered = "true";
+    </script>
+  </body>
+</html>

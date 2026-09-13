@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Agent module lifecycle fixture</title></head>
+  <body>
+    <main id="report">Core agents only.</main>
+    <ol id="lifecycle-log"></ol>
+    <script src="../../../web/static/agent_module_host.js"></script>
+    <script>
+      const log = (message) => {
+        const item = document.createElement("li");
+        item.textContent = message;
+        document.getElementById("lifecycle-log").appendChild(item);
+      };
+      const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (character) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
+      }[character]));
+      const services = {
+        escapeHtml,
+        compactText: (value, limit) => String(value ?? "").slice(0, limit),
+        renderRuntimeValue: (value) => value == null ? "-" : String(value),
+        renderDashboardRows: (rows) => `<dl>${rows.map(([key, value]) => `<dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd>`).join("")}</dl>`,
+        dashboardList: (rows, emptyText) => rows.length ? `<ul>${rows.map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ul>` : `<p>${escapeHtml(emptyText)}</p>`,
+        orcChartPayloadAttr: (payload) => escapeHtml(JSON.stringify(payload)),
+        designImageUrlFromSource: () => "",
+        designCandidateDirectCaptureUrl: () => "",
+        latestDesignAgentReport: (report) => report.screen_report || {},
+        latestDesignReport: (report) => report.design_report || {},
+        designSelectedCandidate: () => ({}),
+        designCandidateRows: () => [],
+        designActualSpecimenRows: () => [],
+        renderDesignCandidateCards: () => '<div class="ar-design-empty">No generated specimens yet.</div>',
+        renderDesignParameterSweep: () => '<div class="ar-design-empty">Waiting for sweep.</div>',
+        renderDashboardCard: (title, body) => `<section><h4>${escapeHtml(title)}</h4>${body}</section>`,
+        runtimeRows: (rows) => `<dl>${rows.map(([key, value]) => `<dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd>`).join("")}</dl>`,
+        renderReportList: (rows, emptyText) => rows.length ? rows.join("|") : emptyText,
+      };
+      const manifest = {
+        id: "design",
+        implementation: {
+          version: "1.0.0",
+          frontend: {
+            asset_url: "/module-assets/design/live_report.js",
+            namespace: "AX4LABDesignUI",
+            factory: "createFrontend",
+          },
+        },
+      };
+      const loadAsset = () => new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = "../../../agents/design/frontend/live_report.js";
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.appendChild(script);
+      });
+      const host = AX4LABAgentModuleHost.createModuleHost({ loadAsset });
+      const report = {
+        screen_report: {
+          design_evaluation: {
+            validity: { status: "pass" },
+            performance: { status: "unassessed" },
+            cost: { mass: { value: 0, unit: "g" }, duration: { value: 32, unit: "min" } },
+          },
+        },
+        design_report: {},
+      };
+
+      (async () => {
+        await host.reconcile([manifest], services);
+        const first = host.get("design");
+        document.getElementById("report").innerHTML = first.renderDashboard(report, "idle", "Design Agent", {});
+        log(`active:${Boolean(first)} zero:${document.body.textContent.includes("0 g")}`);
+        await host.reconcile([], services);
+        log(`removed:${host.get("design") === null}`);
+        await host.reconcile([manifest], services);
+        const second = host.get("design");
+        log(`readded:${Boolean(second && second !== first)}`);
+        document.body.dataset.rendered = "true";
+      })().catch((error) => {
+        log(`error:${error.message}`);
+        document.body.dataset.rendered = "error";
+      });
+    </script>
+  </body>
+</html>

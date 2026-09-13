@@ -23,7 +23,7 @@ Modification guide:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -128,6 +128,67 @@ class ModuleStep(BaseModel):
         return clean
 
 
+class ExecutionGraphNodeDefinition(BaseModel):
+    """One editable node bound later to a code-owned operation catalog."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    handler: str
+    label: str = ""
+    area: Literal["high", "middle", "low", "knowledge", "guardian"]
+    llm: bool | None = None
+    config: dict[str, Any] = Field(default_factory=dict)
+    position: dict[str, float] = Field(default_factory=dict)
+
+    @field_validator("id", "handler")
+    @classmethod
+    def _required_execution_node_value(cls, value: str) -> str:
+        clean = value.strip()
+        if not clean:
+            raise ValueError("execution node id/handler cannot be empty")
+        return clean
+
+
+class ExecutionGraphEdgeDefinition(BaseModel):
+    """One explicit outcome route; array order never supplies connectivity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str
+    target: str
+    on: str
+    kind: Literal["execution", "validation", "evidence"]
+
+    @field_validator("source", "target", "on")
+    @classmethod
+    def _required_execution_edge_value(cls, value: str) -> str:
+        clean = value.strip()
+        if not clean:
+            raise ValueError("execution edge source/target/outcome cannot be empty")
+        return clean
+
+
+class ExecutionGraphDefinition(BaseModel):
+    """The shared executable module definition projected by Runtime IDE."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, serialize_by_alias=True)
+
+    schema_: Literal["ax4lab.execution_graph.v1"] = Field(alias="schema", serialization_alias="schema")
+    entry: str
+    nodes: list[ExecutionGraphNodeDefinition]
+    edges: list[ExecutionGraphEdgeDefinition]
+    terminals: list[str]
+
+    @field_validator("entry")
+    @classmethod
+    def _required_execution_entry(cls, value: str) -> str:
+        clean = value.strip()
+        if not clean:
+            raise ValueError("execution graph entry cannot be empty")
+        return clean
+
+
 class ModuleConfig(BaseModel):
     """Versioned editable module definition consumed by Runtime IDE and runtime binding."""
 
@@ -142,6 +203,7 @@ class ModuleConfig(BaseModel):
     tools: list[str] = Field(default_factory=list)
     pre_execution: list[ModuleStep] = Field(default_factory=list)
     internal_graph: list[ModuleStep] = Field(default_factory=list)
+    execution_graph: ExecutionGraphDefinition | None = None
     llm: ModuleLLMConfig | None = None
     prompt: ModulePromptConfig | str | None = None
     timeout_s: float | None = None

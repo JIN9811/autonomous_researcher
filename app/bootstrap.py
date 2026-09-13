@@ -31,7 +31,7 @@ from dotenv import load_dotenv
 from agents.analysis_agent import AnalysisAgent
 from agents.base_agent import AgentContext
 from agents.bo_agent import BOAgent
-from agents.design_agent import DesignAgent
+from agents.module_discovery import discover_agent_modules
 from agents.equipment_agent import LabEquipmentAgent
 from agents.guardian_agent import GuardianAgent
 from agents.knowledge_agent import KnowledgeAgent
@@ -352,7 +352,8 @@ def load_runtime() -> MainController:
     agent_registry = AgentRegistry()
     agent_registry.register(OrchestratorAgent())
     agent_registry.register(BOAgent())
-    agent_registry.register(DesignAgent())
+    for module in discover_agent_modules():
+        agent_registry.register_module(module)
     agent_registry.register(SpecimenMakingAgent())
     agent_registry.register(VisionAgent())
     agent_registry.register(ManipulationAgent())

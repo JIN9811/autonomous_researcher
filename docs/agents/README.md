@@ -101,7 +101,7 @@ implementations remain authoritative.
 | Agent reference | Main responsibility | Implementation |
 |---|---|---|
 | [Orchestrator](orchestrator_agent.md) | Bounded decisions, canonical Setup proposals, registered mission and agent handoffs | [Source](../../agents/orchestrator_agent.py) · [Module](../../graphs/modules/orchestrator/module.yaml) |
-| [Design](design_agent.md) | Candidate suitability | [Source](../../agents/design_agent.py) · [Module](../../graphs/modules/design/module.yaml) |
+| [Design](design_agent.md) | Candidate suitability | [Source](../../agents/design/agent.py) · [Code module](../../agents/design/module.py) · [Graph module](../../graphs/modules/design/module.yaml) |
 | [Specimen](specimen_agent.md) | Fabrication tools | [Source](../../agents/specimen_agent.py) · [Module](../../graphs/modules/specimen/module.yaml) |
 | [Vision](vision_agent.md) | Visual evidence | [Source](../../agents/vision_agent.py) · [Module](../../graphs/modules/vision/module.yaml) |
 | [Manipulation](manipulation_agent.md) | Robot skills and completion | [Source](../../agents/manipulation_agent.py) · [Module](../../graphs/modules/manipulation/module.yaml) |

@@ -1009,6 +1009,41 @@ body.runtime-ide-body .runtime-ide-canvas-world {
   min-height: 100%;
 }
 
+/* Five-area grouping uses the same editable node/port surface and theme. */
+body.runtime-ide-body .runtime-ide-canvas[data-control-canvas] .runtime-ide-canvas-world { min-width: 0; min-height: 0; }
+body.runtime-ide-body .runtime-ide-canvas[data-control-canvas] .runtime-ide-node-route-count { top: -19px; right: 4px; }
+body.runtime-ide-body .runtime-ide-canvas[data-control-canvas] .runtime-ide-node:hover,
+body.runtime-ide-body .runtime-ide-canvas[data-control-canvas] .runtime-ide-node.selected { transform: none; }
+body.runtime-ide-body .runtime-ide-canvas[data-control-canvas] .execution-failed { border-color: #fb7185 !important; }
+body.runtime-ide-body .runtime-ide-canvas[data-control-canvas] .execution-cancelled { border-color: #fbbf24 !important; }
+body.runtime-ide-body .runtime-execution-inspector { display: grid; gap: 12px; font-size: 13px; }
+body.runtime-ide-body .runtime-execution-inspector label { display: grid; gap: 5px; }
+body.runtime-ide-body .runtime-execution-inspector label:has(input[type="checkbox"]) { display: flex; gap: 8px; align-items: center; }
+body.runtime-ide-body .runtime-execution-inspector p { margin: 0; line-height: 1.45; }
+body.runtime-ide-body #ide-execution-inspector-error { color: #fda4af; }
+body.runtime-ide-body .runtime-ide-graph-panel .runtime-ide-canvas[data-control-canvas] { height: clamp(580px, 74vh, 860px) !important; min-height: 580px !important; max-height: 860px !important; }
+body.runtime-ide-body .runtime-control-legend { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+body.runtime-ide-body .runtime-control-legend > strong,
+body.runtime-ide-body .runtime-control-legend > small { grid-column: 1 / -1; }
+body.runtime-ide-body .runtime-control-legend > span { display: flex; align-items: center; gap: 9px; font-size: 11px; }
+body.runtime-ide-body .runtime-control-legend i { width: 9px; height: 9px; border-radius: 2px; }
+body.runtime-ide-body .runtime-control-legend small { color: #9bacbf; line-height: 1.4; }
+body.runtime-ide-body .runtime-control-llm { position: absolute; left: 7px; top: -17px; color: #65c9ef; font-size: 9px; font-style: normal; font-weight: 700; }
+body.runtime-ide-body .runtime-ide-canvas .runtime-ide-node[data-control-area]:not([data-control-area=""]) { box-sizing: border-box; height: 76px; padding-top: 7px; padding-bottom: 7px; }
+body.runtime-ide-body .runtime-ide-canvas .runtime-ide-node[data-control-area]:not([data-control-area=""]) strong { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; font-size: 13px; }
+body.runtime-ide-body .runtime-ide-canvas [data-control-legend] { width: 330px; min-width: 0 !important; max-width: min(330px, calc(100% - 24px)) !important; max-height: none !important; }
+body.runtime-ide-body .runtime-ide-canvas [data-control-legend] .runtime-ide-edge-legend-list { max-height: 240px !important; }
+body.runtime-ide-body .runtime-ide-edge-layer .runtime-ide-edge.control-relation-execution:not(.edge-active) { stroke: #7e9ab8; stroke-dasharray: none; }
+body.runtime-ide-body .runtime-ide-edge-layer .runtime-ide-edge.control-relation-validation:not(.edge-active) { stroke: #e1b364; stroke-dasharray: 8 5; }
+body.runtime-ide-body .runtime-ide-edge-layer .runtime-ide-edge.control-relation-evidence:not(.edge-active) { stroke: #b9a1dc; stroke-dasharray: 2 5; }
+@media (max-width: 800px) {
+  body.runtime-ide-body .runtime-ide-page:has([data-control-canvas]) { grid-template-columns: minmax(0, 1fr); }
+  body.runtime-ide-body .runtime-ide-shell:has([data-control-canvas]) { grid-template-columns: minmax(0, 1fr) !important; min-width: 0; }
+  body.runtime-ide-body .runtime-ide-shell:has([data-control-canvas]) .runtime-ide-sidebar { min-width: 0 !important; min-height: 0 !important; height: 180px !important; max-height: 180px !important; }
+  body.runtime-ide-body .runtime-ide-shell:has([data-control-canvas]) .runtime-ide-graph-panel { min-width: 0; }
+  body.runtime-ide-body .runtime-ide-graph-panel .runtime-ide-canvas[data-control-canvas] { min-width: 0; width: 100%; }
+}
+
 body.runtime-ide-body .runtime-ide-canvas .runtime-ide-node {
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr);

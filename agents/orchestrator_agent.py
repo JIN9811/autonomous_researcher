@@ -21,7 +21,8 @@ Modification guide:
 from __future__ import annotations
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
-from agents.orchestrator_decision import decide_orchestration
+from agents.execution_graph import execution_event_emitter, execution_graph_from_context
+from agents.orchestrator_execution import default_orchestrator_execution_graph, execute_orchestrator_graph
 from utils.agent_artifact_archive import archive_agent_run
 from orchestrator.state import OrchestratorState
 from orchestrator.supervisor import (
@@ -68,59 +69,15 @@ class OrchestratorAgent(BaseAgent):
     @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext, *,
                   context: dict | None = None, handlers: dict | None = None) -> AgentResult:
-        mission_contract = build_mission_contract(state=state)
-        orchestration_plan = build_orchestration_plan(state=state)
-        if context is None:
-            # Standalone calls have no dispatcher authority. The live boundaries
-            # supply invocation-local candidates, scope and handlers explicitly.
-            context = {'scope': {'checkpoint': 'standalone'},
-                       'evidence': {'context:mission': mission_contract},
-                       'handoff_candidates': [],
-                       'settings': state.run_metadata.get('orchestrator_decision_settings', {})}
-            async def defer(arguments):
-                return {'condition': arguments['condition'], 'status': 'deferred'}
-            handlers = {'defer': defer}
-        decision = await decide_orchestration(state, ctx, context=context, handlers=handlers or {})
-        plan_text = decision['reason'][:600]
-        model = decision['model']
-        control_plane = build_orchestrator_control_plane_snapshot(
-            state=state,
-            mission_contract=mission_contract,
-            orchestration_plan=orchestration_plan,
-            next_action=plan_text,
+        execution = await execute_orchestrator_graph(
+            self,
+            state,
+            ctx,
+            context=context,
+            handlers=handlers,
+            graph=execution_graph_from_context(ctx, "orchestrator", default_orchestrator_execution_graph),
+            emit=execution_event_emitter(ctx),
         )
-        followup = build_orchestrator_followup(
-            state=state,
-            stage=state.stage,
-            trigger="pre_stage_plan",
-            payload={"status": "planning", "mission_contract": mission_contract, "orchestration_plan": orchestration_plan, "plan_text": plan_text},
-            next_stage=state.stage,
-        )
-        record = build_decision_record(
-            state=state, stage=state.stage,
-            decision=decision['tool'] or decision['status'],
-            selected=decision['arguments'].get('candidate') if decision['status'] == 'prepared' else None,
-            reason=decision['reason'], evidence_refs=decision['evidence_refs'],
-        )
-        record['decision_id'] = decision['decision_id']
-        record['status'] = decision['status']
-        return AgentResult(
-            success=decision['status'] == 'prepared',
-            summary=f"Orchestration decision: {decision['status']}",
-            data={
-                "plan_text": plan_text,
-                "model": model,
-                "mission_contract": mission_contract,
-                "orchestration_plan": orchestration_plan,
-                "orchestrator_control_plane": control_plane,
-                "orchestrator_followup": followup,
-                "decisions": [record],
-                "orchestration_decision": decision,
-                "metrics": {
-                    "plan_text_chars": len(plan_text),
-                    "followup_confidence": followup.get("confidence", 0.0),
-                    "route_stage_count": len(orchestration_plan.get("route", [])),
-                    "parallelizable_check_count": len(orchestration_plan.get("parallelizable_checks", [])),
-                },
-            },
-        )
+        if not isinstance(execution.result, AgentResult):
+            raise RuntimeError("Orchestrator execution graph completed without AgentResult")
+        return execution.result

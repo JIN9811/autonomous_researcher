@@ -22,6 +22,8 @@ source_of_truth:
   - web/static/runtime_ide.js
   - web/static/runtime_ide.css
   - web/static/runtime_graph_geometry.js
+  - web/static/module_control_view.js
+  - agents/execution_graph.py
   - graphs/schema.py
   - graphs/validator.py
   - graphs/compiler.py
@@ -33,8 +35,8 @@ source_of_truth:
   - graphs/configs/atr_closed_loop.yaml
   - graphs/modules
   - orchestrator/langgraph_runtime.py
-last_verified: 2026-09-01
-verified_against: working-tree-2026-09-01
+last_verified: 2026-09-13
+verified_against: working-tree-2026-09-13-executable-agent-ide
 related_docs:
   - docs/runtime/langgraph_runtime.md
   - docs/runtime/architecture.md
@@ -56,7 +58,33 @@ supersedes: []
 | Workspace | `/ide` |
 | Coverage | Editing, validation, versioning, run control and evidence inspection |
 | Implementation | [Runtime APIs](../../app/main.py) · [IDE client](../../web/static/runtime_ide.js) |
-| Recorded basis | 2026-09-01 · [Verification scope](#verification) |
+| Recorded basis | 2026-09-13 module lifecycle and executable Design/Orchestrator graphs; earlier sections retain their recorded scope · [Verification scope](#verification) |
+
+## Applied Module Membership
+
+Validate and Compile display **Applied**, **Draft**, **Add** and **Remove**
+owner lists before a graph is applied. The preview uses the same graph-linked
+owner catalog as ORC; it neither queries equipment nor activates the draft.
+Save Version continues to use the existing validated graph activation path.
+
+| State/action | Result |
+|---|---|
+| Open or close a module editor | Editor visibility only; not runtime activation |
+| Save a version without activation | Keep the applied membership unchanged |
+| Apply a valid graph while idle | Update graph-attached Live GUI manifests and owner/setup discovery; Design also enforces installed-module execution/asset admission |
+| Remove a module reference | Detach only when no graph binding remains; retain files, settings, history and shared bridges |
+| Invalid graph or active run | Reject activation without partial membership changes |
+
+Installed modules remain in `/api/modules` for editing and re-addition;
+unattached catalog drafts do not appear in `/api/runtime/agent-manifests`.
+Graph-attached generated/presentation modules remain visible. The Design
+frontend is attached through the common manifest-driven host, with cleanup on
+exclusion and stale-load protection. Other agents retain their existing
+implementation boundaries until individually migrated.
+
+Removing a node still requires a valid remaining route. This feature does not
+automatically skip experimental stages or implement running-job hot swaps.
+See [Design lifecycle implementation](../superpowers/plans/2026-09-13-design-ide-module-lifecycle.md).
 
 ## Summary
 
@@ -214,6 +242,58 @@ displayed activation evidence in the browser. The backend still revalidates
 every submitted payload; client state is never the execution authority.
 
 ## Module and Bridge Descriptor Editing
+
+### Five-area editable module canvas
+
+Design and Orchestrator use the existing editable graph canvas with responsibility
+areas: **High**, **Middle**, **Low**, **Guardian / Safety**, and **Knowledge / Evidence**.
+There is no separate architecture-view switch. Their `module.execution_graph`
+is the executable source for both backend and canvas; legacy modules retain
+their existing checkpoint representation. Empty areas are explicit;
+Orchestrator does not acquire direct device tools.
+
+| Visual | Meaning |
+|---|---|
+| Area header and tinted boundary | Responsibility grouping, not a runtime stage |
+| LLM badge | Composite LLM-capable decision/tool loop; existing mode policy still determines whether a model is called |
+| Solid / dashed / dotted connection | Explicit `execution` / `validation` / `evidence` edge kind |
+| Outcome label | Registered operation result selecting that edge |
+| Active edge and node status | Actual execution trace scoped to module, run, loop, revision and invocation |
+| Empty area | Responsibility embedded in a composite operation or owned outside this graph |
+
+Executable nodes declare stable `id`, registered `handler`, `label`, `area` and
+optional presentation `position`. Edges declare `source`, `target`, `on` and
+`kind`; `entry` and `terminals` identify route boundaries. The module GET returns
+an `execution_catalog` with accepted handlers, dependencies, outcome-specific
+outputs, supported config and required terminal outputs.
+No arbitrary Python function or device call is admitted through the editor.
+
+The existing inspector and ports edit this definition without converting it
+back into an ordered list. A valid connection change alters execution after
+activation; position and label edits alter presentation only. Validation rejects
+cycles, dangling nodes, unknown operations, incomplete outcomes and skipped
+dependencies before any dispatch. Accepted and review branches have distinct
+prerequisites; each terminal must produce a fresh owner result. Existing stage-level admission, Guardian,
+handoff and archive policies stay outside and around the internal graph.
+
+Save Version uses the existing module API; busy activation remains rejected.
+Running definitions are pinned. GET/reload obtains backend edits and protects
+dirty local drafts. The structural Dry Run previews declared routes without
+calling the owner functions; execution verification is a separate test.
+Runtime paint follows the newest retained invocation-start event. If that
+evidence is absent from recent history, nodes remain unpainted rather than
+borrowing completion from an older invocation.
+For these migrated modules, a legacy saved version without `execution_graph`
+must be updated before activation; checkpoint lists are not silently interpreted
+as executable operations. The declared module handler must match its operation
+catalog owner. Unmigrated modules retain their existing handler overrides.
+
+The legend remains draggable and scrollable on constrained screens; zoom, Fit,
+and canvas scrolling use the existing IDE controls. Document SVGs share
+[`module_control_view.js`](../../web/static/module_control_view.js) with the
+canvas and are regenerated by `python scripts/render_module_control_views.py`.
+See the [Design](../agents/design_agent.md#editable-runtime-ide-structure) and
+[Orchestrator](../agents/orchestrator_agent.md#editable-runtime-ide-structure) views.
 
 ### Equipment Agent Flow projection
 
@@ -560,6 +640,20 @@ an active run or by bypassing the validator. Do not repair an unknown physical
 effect by assuming a missing event means “nothing happened.”
 
 ## Verification
+
+The executable Design/Orchestrator addition uses
+`tests/unit/test_agent_execution_graph.py` and
+`tests/integration/test_agent_execution_graph_api.py` for routing, branch
+contracts, active-byte preservation and snapshots across controller loop
+boundaries. Existing owner-result, mode-path and loop/archive suites are rerun
+with denied external effects. Frontend and SVG acceptance is recorded in the
+[implementation plan](../superpowers/plans/2026-09-13-executable-agent-ide.md).
+
+The 2026-09-13 lifecycle addition is covered by
+`tests/integration/test_design_module_lifecycle.py` (real IDE APIs with isolated
+graph roots and external effects denied), `tests/unit/test_ide_module_lifecycle_js.py`
+(preview rendering/escaping), and the common browser module host tests.
+These checks do not certify physical equipment or the entire IDE interface.
 
 This Reference was checked on 2026-08-09 against commit `541c93a` by repository
 inspection of the declared source files. The following evidence types are

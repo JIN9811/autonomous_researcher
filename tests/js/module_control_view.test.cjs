@@ -1,0 +1,33 @@
+const assert = require('node:assert/strict');
+const view = require('../../web/static/module_control_view.js');
+const moduleConfig = {id:'example',label:'Example',internal_graph:[
+  {id:'choose', label:'LLM choice'}, {id:'run',label:'Run <tool>'},
+],metadata:{control_view:{areas:{'internal_graph:choose':'high','internal_graph:run':'low'},llm_steps:['internal_graph:choose']}}};
+const before=JSON.stringify(moduleConfig);
+const layout=view.layout(moduleConfig);
+assert.deepEqual(layout.nodes.map(n=>n.step.id), ['choose','run']);
+assert.ok(layout.nodes[0].position.y < layout.nodes[1].position.y);
+assert.equal(JSON.stringify(moduleConfig),before);
+assert.equal(view.layout({id:'legacy'}),null);
+assert.equal(view.relation('high','low'),'execution');
+assert.equal(view.relation('guardian','high'),'validation');
+assert.equal(view.relation('knowledge','high'),'evidence');
+const svg=view.renderSvg(moduleConfig);
+for (const label of ['High','Middle','Low','Guardian / Safety','Knowledge / Evidence','Execution','Validation','Evidence']) assert.ok(svg.includes(label),label);
+assert.ok(svg.includes('Run &lt;tool&gt;'));
+assert.ok(svg.includes('No role declared'));
+const pending=view.layout({...moduleConfig,metadata:{control_view:{areas:{'internal_graph:choose':'invented'}}}});
+assert.deepEqual(pending.nodes.map(n=>n.area), ['unassigned','unassigned']);
+assert.ok(pending.groups.some(g=>g.id==='unassigned'));
+assert.ok(view.legend(pending).includes('Unassigned'));
+const aliased=structuredClone(moduleConfig);
+aliased.metadata.control_view.labels={'internal_graph:choose':'Concise choice'};
+aliased.metadata.control_view.label_sources={'internal_graph:choose':'LLM choice'};
+assert.equal(view.layout(aliased).nodes[0].label,'Concise choice');
+aliased.internal_graph[0].label='Renamed decision';
+assert.equal(view.layout(aliased).nodes[0].label,'Renamed decision');
+aliased.internal_graph.push({id:'new-step',label:'New step'});
+aliased.internal_graph[0].id='renamed-id';
+assert.deepEqual(view.layout(aliased).nodes.map(n=>n.area), ['unassigned','low','unassigned']);
+assert.ok(view.renderSvg(aliased).includes('Unassigned'));
+console.log('module control view semantics: ok');

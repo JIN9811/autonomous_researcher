@@ -1115,7 +1115,7 @@ def test_module_config_schema_validates_active_modules() -> None:
         module_ids.add(config.id)
         assert config.handler.startswith("agent.")
         assert config.safety.dry_run_supported is True
-        assert config.internal_graph
+        assert config.internal_graph or config.execution_graph is not None
         assert all(step.id for step in config.internal_graph)
 
     assert {"design", "specimen", "vision", "manipulation", "equipment", "analysis", "knowledge", "bo", "guardian"}.issubset(module_ids)
@@ -1343,7 +1343,7 @@ def test_graph_runtime_api_exposes_validate_and_dry_run() -> None:
     assert design_step["module_handler"] == "agent.design_agent"
     assert design_step["effective_handler"] == "agent.design_agent"
     assert design_step["module_runtime"]["pre_execution_count"] == 1
-    assert design_step["module_runtime"]["internal_graph_count"] >= 1
+    assert len([item for item in design_step["module_runtime"]["sequence"] if item["phase"] == "execution_graph"]) >= 1
     specimen_step = next(item for item in sequence if item["stage"] == "specimen")
     assert specimen_step["module_runtime"]["tool_count"] >= 1
 
@@ -1465,7 +1465,8 @@ def test_graph_runtime_api_exposes_handlers_modules_and_compile() -> None:
     design = client.get("/api/modules/design").json()
     assert design["ok"] is True
     assert design["module"]["module"]["handler"] == "agent.design_agent"
-    assert design["module"]["module"]["internal_graph"]
+    assert design["module"]["module"]["execution_graph"]
+    assert design["execution_catalog"]["module_id"] == "design"
     assert design["runtime_effect"]["scope"] == "management_workspace"
     assert design["lifecycle"]["graph_attached"] is True
     assert design["lifecycle"]["activation_status"] == "active_graph_attached"
@@ -1513,15 +1514,13 @@ def test_graph_runtime_api_exposes_handlers_modules_and_compile() -> None:
     assert module_dry_run["sequence"][0]["id"] == "orchestrator_plan"
     assert module_dry_run["sequence"][0]["phase"] == "pre_execution"
     assert module_dry_run["sequence"][0]["executable"] is True
-    assert [item["id"] for item in module_dry_run["sequence"][1:3]] == [
-        "01_receive_objective_context",
-        "02_normalize_objective_contract",
-    ]
-    assert module_dry_run["sequence"][1]["handler_configured"] is False
-    assert module_dry_run["sequence"][1]["executable"] is False
+    assert [item["id"] for item in module_dry_run["sequence"][1:3]] == ["prepare", "decide"]
+    assert module_dry_run["sequence"][1]["handler_configured"] is True
+    assert module_dry_run["sequence"][1]["executable"] is True
     assert module_dry_run["summary"]["step_count"] == len(module_dry_run["sequence"])
     assert module_dry_run["summary"]["pre_execution_count"] == 1
-    assert module_dry_run["summary"]["internal_graph_count"] >= 1
+    assert module_dry_run["summary"]["internal_graph_count"] == 0
+    assert module_dry_run["summary"]["execution_graph_count"] >= 1
     assert module_dry_run["summary"]["executable_count"] >= 1
     assert module_dry_run["summary"]["ordered_step_ids"][0] == "orchestrator_plan"
 
@@ -1532,7 +1531,8 @@ def test_graph_runtime_api_exposes_handlers_modules_and_compile() -> None:
     assert saved_module["ok"] is True
     assert saved_module["dry_run"]["ok"] is True
     assert saved_module["dry_run"]["summary"]["pre_execution_count"] == 1
-    assert saved_module["dry_run"]["summary"]["internal_graph_count"] >= 1
+    assert saved_module["dry_run"]["summary"]["internal_graph_count"] == 0
+    assert saved_module["dry_run"]["summary"]["execution_graph_count"] >= 1
     assert saved_module["dry_run"]["summary"]["ordered_step_ids"][0] == "orchestrator_plan"
     module_versions = client.get("/api/modules/design/versions").json()
     assert module_versions["ok"] is True
@@ -1544,7 +1544,12 @@ def test_graph_runtime_api_exposes_handlers_modules_and_compile() -> None:
     assert missing_graph_version.status_code == 404
 
 
-def test_runtime_module_template_creates_non_executable_draft_manifest() -> None:
+def test_runtime_module_template_creates_non_executable_draft_manifest(tmp_path, monkeypatch) -> None:
+    # Catalog creation must not edit deployed modules or make drafts live.
+    module_root = tmp_path / "graphs/modules"
+    shutil.copytree(app_main.RUNTIME_MODULE_ROOT, module_root)
+    monkeypatch.setattr(app_main, "RUNTIME_MODULE_ROOT", module_root)
+    monkeypatch.setattr(app_main, "RUNTIME_MODULE_VERSION_ROOT", tmp_path / "module_versions")
     client = TestClient(app_main.app)
     module_id = "unit_draft_template"
     module_dir = app_main.RUNTIME_MODULE_ROOT / module_id
@@ -1577,11 +1582,9 @@ def test_runtime_module_template_creates_non_executable_draft_manifest() -> None
         assert requirement_by_id["module_dry_run_executable"]["ok"] is False
 
         listed = client.get("/api/runtime/agent-manifests").json()
-        draft_manifest = next(item for item in listed["agents"] if item["id"] == module_id)
-        assert draft_manifest["status"] == "draft"
-        assert draft_manifest["enabled"] is False
-        assert draft_manifest["execution_capability"] == "ui_only"
-        assert draft_manifest["graph_node_id"] == ""
+        assert module_id not in {item["id"] for item in listed["agents"]}
+        catalog = client.get("/api/modules").json()
+        assert module_id in {item["id"] for item in catalog["modules"]}
 
         dry_run = client.post(f"/api/modules/{module_id}/dry-run").json()
         assert dry_run["ok"] is True
@@ -1897,20 +1900,11 @@ def test_runtime_module_template_creates_non_executable_draft_manifest() -> None
         assert ui_after["ui"]["report_sections"][5]["chart"]["panels"][0]["chart"]["render_mode"] == "line_chart"
 
         listed_after = client.get("/api/runtime/agent-manifests").json()
-        listed_manifest = next(item for item in listed_after["agents"] if item["id"] == module_id)
-        assert listed_manifest["renderer"]["dashboard"] == "design_reference"
-        assert listed_manifest["renderer"]["execution_scope"] == "presentation_only"
-        assert listed_manifest["status"] == "draft"
-        assert listed_manifest["enabled"] is False
-        assert listed_manifest["chat"]["mode"] == "open_on_demand"
-        assert listed_manifest["cards"][0]["id"] == "unit_descriptor"
-        assert listed_manifest["cards"][0]["layout_intent"]["density"] == "compact"
-        assert listed_manifest["report_sections"][0]["id"] == "unit_report_section"
-        assert listed_manifest["report_sections"][0]["chart"]["render_mode"] == "mini_bar_chart"
-        assert listed_manifest["report_sections"][0]["actions"][1]["execution_scope"] == "read_only_api"
-        assert listed_manifest["report_sections"][0]["actions"][3]["execution_scope"] == "workspace_handoff"
-        assert listed_manifest["report_sections"][0]["actions"][4]["blocked_reason"] == "physical_device_action_requires_bridge_workspace"
-        assert listed_manifest["report_sections"][5]["chart"]["render_mode"] == "compound_chart"
+        assert module_id not in {item["id"] for item in listed_after["agents"]}
+        # Edited presentation remains queryable in Module Management, not Live.
+        assert ui_after["ui"]["chat"]["mode"] == "open_on_demand"
+        assert ui_after["ui"]["cards"][0]["id"] == "unit_descriptor"
+        assert ui_after["ui"]["report_sections"][0]["id"] == "unit_report_section"
     finally:
         shutil.rmtree(module_dir, ignore_errors=True)
         shutil.rmtree(version_dir, ignore_errors=True)
@@ -2218,7 +2212,7 @@ def test_module_runtime_api_saves_version_without_activating(tmp_path, monkeypat
     assert versions["versions"][0]["version_id"] == version["version_id"]
 
 
-def test_activated_module_version_changes_runtime_handler(tmp_path, monkeypatch) -> None:
+def test_migrated_module_rejects_runtime_handler_override(tmp_path, monkeypatch) -> None:
     graph_root = tmp_path / "graphs"
     config_root = graph_root / "configs"
     module_root = graph_root / "modules"
@@ -2229,6 +2223,8 @@ def test_activated_module_version_changes_runtime_handler(tmp_path, monkeypatch)
     monkeypatch.setattr(app_main, "RUNTIME_MODULE_VERSION_ROOT", tmp_path / "module_versions")
 
     client = TestClient(app_main.app)
+    active_path = module_root / "design" / "module.yaml"
+    before = active_path.read_bytes()
     module = client.get("/api/modules/design").json()["module"]
     module["module"]["handler"] = "agent.guardian_agent"
 
@@ -2237,49 +2233,9 @@ def test_activated_module_version_changes_runtime_handler(tmp_path, monkeypatch)
         json={"module": module, "reason": "activate-handler-override", "author": "pytest", "activate": True},
     ).json()
 
-    assert saved["ok"] is True
-    assert saved["activated"] is True
-    assert saved["dry_run"]["summary"]["internal_graph_count"] == 12
-    active = client.get("/api/modules/design").json()["module"]
-    assert active["module"]["handler"] == "agent.guardian_agent"
-    assert "agent.guardian_agent" in (module_root / "design" / "module.yaml").read_text(encoding="utf-8")
-
-    registry = AgentRegistry()
-    orchestrator = _StaticAgent("orchestrator_agent", {"plan_text": "module api plan"})
-    design = _StaticAgent("design_agent", {"experiment_spec": {"specimen_id": "wrong-module"}})
-    guardian = _StaticAgent("guardian_agent", {"experiment_spec": {"specimen_id": "active-module-handler"}})
-    registry.register(orchestrator)
-    registry.register(design)
-    registry.register(guardian)
-    bundle = build_logger_bundle(run_id="run-module-api-active", run_root=tmp_path / "runs", logging_config={})
-    state = OrchestratorState(
-        run_id=bundle.run_dir.name,
-        experiment_id="exp-module-api-active",
-        mode=Mode.TEST,
-        stage=Stage.DESIGN,
-    )
-    events: list[dict[str, object]] = []
-    loop = RunLoop(
-        state=state,
-        agent_registry=registry,
-        orchestrator_agent_name="orchestrator_agent",
-        ctx=object(),
-        logger=bundle.logger,
-        interval_seconds=0,
-        graph_config_path=config_root / "atr_closed_loop.yaml",
-        module_root=graph_root,
-        on_event=events.append,
-    )
-
-    asyncio.run(loop.step())
-
-    assert orchestrator.run_count == 1
-    assert design.run_count == 0
-    assert guardian.run_count == 1
-    assert state.current_experiment_spec == {"specimen_id": "active-module-handler"}
-    started = [event for event in events if event["type"] == "node.started" and event["node_id"] == "design"]
-    assert started[-1]["agent"] == "guardian_agent"
-    assert started[-1]["payload"]["module_runtime"]["effective_handler"] == "agent.guardian_agent"
+    assert saved["ok"] is False
+    assert "handler must remain agent.design_agent" in " ".join(saved["errors"])
+    assert active_path.read_bytes() == before
 
 
 def test_module_runtime_api_rejects_unregistered_handler(tmp_path, monkeypatch) -> None:
@@ -2294,7 +2250,10 @@ def test_module_runtime_api_rejects_unregistered_handler(tmp_path, monkeypatch) 
     ).json()
 
     assert saved["ok"] is False
-    assert saved["errors"] == ["unregistered handler: agent.not_registered"]
+    assert set(saved["errors"]) == {
+        "unregistered handler: agent.not_registered",
+        "handler must remain agent.design_agent while execution_graph is configured",
+    }
     assert saved["dry_run"]["ok"] is False
     assert saved["dry_run"]["summary"]["step_count"] == 0
 
@@ -2313,8 +2272,6 @@ def test_module_runtime_api_validates_llm_prompt_tool_safety_config() -> None:
             "safety": {"live_requires_validation": True, "dry_run_supported": True, "requires_human_approval": False},
         }
     )
-    module["module"]["internal_graph"][0]["handler"] = "agent.design_agent"
-
     valid = client.post(
         "/api/modules/design/validate",
         json={"module": module, "reason": "valid-config", "author": "pytest", "activate": False},
@@ -2332,7 +2289,7 @@ def test_module_runtime_api_validates_llm_prompt_tool_safety_config() -> None:
             "safety": {"live_requires_validation": "yes"},
         }
     )
-    bad["module"]["internal_graph"][0]["handler"] = "agent.not_registered"
+    bad["module"]["execution_graph"]["nodes"][0]["handler"] = "agent.not_registered"
 
     invalid = client.post(
         "/api/modules/design/validate",
@@ -2347,7 +2304,7 @@ def test_module_runtime_api_validates_llm_prompt_tool_safety_config() -> None:
     assert "timeout_s must be a non-negative number" in invalid["errors"]
     assert "retry.max_attempts must be an integer between 0 and 10" in invalid["errors"]
     assert "safety.live_requires_validation must be boolean" in invalid["errors"]
-    assert "unregistered internal_graph step handler at 1: agent.not_registered" in invalid["errors"]
+    assert any("unknown handler: agent.not_registered" in error for error in invalid["errors"])
 
 
 def test_runtime_ide_page_and_main_entry_render() -> None:
@@ -3042,14 +2999,14 @@ def test_runtime_handler_registry_exposes_new_registered_agents_to_graph_and_mod
     assert graph_validation["errors"] == []
     assert graph_validation["compiled_graph"]["nodes"][2]["handler"] == "agent.experimental_agent"
 
-    module = client.get("/api/modules/design").json()["module"]
+    module = client.get("/api/modules/specimen").json()["module"]
     module["module"]["handler"] = "agent.experimental_agent"
     module["module"]["internal_graph"][0]["handler"] = "agent.experimental_agent"
     module_validation = client.post(
-        "/api/modules/design/validate",
+        "/api/modules/specimen/validate",
         json={"module": module, "reason": "experimental-handler", "author": "pytest", "activate": False},
     ).json()
-    assert module_validation == {"ok": True, "module_id": "design", "errors": []}
+    assert module_validation == {"ok": True, "module_id": "specimen", "errors": []}
 
 
 def _retry_test_loop(

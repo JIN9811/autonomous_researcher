@@ -10,6 +10,8 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PLANNING_JS = PROJECT_ROOT / "web" / "static" / "planning.js"
+PLANNING_HTML = PROJECT_ROOT / "web" / "templates" / "planning.html"
+DESIGN_LIVE_REPORT_JS = PROJECT_ROOT / "agents" / "design" / "frontend" / "live_report.js"
 
 
 def _extract_function(source: str, name: str) -> str:
@@ -50,24 +52,33 @@ def _node_eval(script: str) -> str:
 
 
 def test_evidence_cards_show_units_and_unassessed_performance_without_proxy_scores():
-    source = PLANNING_JS.read_text(encoding="utf-8")
-    functions = "\n".join(_extract_function(source, name) for name in (
-        "renderDesignEvidence", "renderDesignExpectedPerformance", "renderDesignSpecimenMetricStrip"))
+    source = DESIGN_LIVE_REPORT_JS.read_text(encoding="utf-8")
     evaluation = {"schema":"design_evaluation.v1", "validity":{"status":"pass", "reasons":[]},
                   "performance":{"status":"unassessed", "value":None},
                   "cost":{"mass":{"value":0,"unit":"g","status":"estimated"},
                           "duration":{"value":32,"unit":"min","status":"rough_heuristic"}},
                   "constraint_margins":[{"constraint":"minimum_wall", "margin":0.2,"unit":"mm","status":"pass"}]}
     script = f"""
+const window = {{}};
 const escapeHtml = s => String(s).replaceAll('<','&lt;').replaceAll('>','&gt;');
 const renderRuntimeValue = v => v == null ? '-' : String(v);
-{functions}
+{source}
+const renderer = window.AX4LABDesignUI.createLiveReportRenderer({{
+ escapeHtml,
+ renderRuntimeValue,
+ compactText: (value, limit) => String(value ?? '').slice(0, limit),
+ renderDashboardRows: rows => JSON.stringify(rows),
+ dashboardList: (rows, empty) => rows.length ? rows.join('|') : empty,
+ orcChartPayloadAttr: value => escapeHtml(JSON.stringify(value)),
+ designImageUrlFromSource: () => '',
+ designCandidateDirectCaptureUrl: () => '',
+}});
 const e = {json.dumps(evaluation)};
 const report = {{design_evaluation:e, candidate_evaluation:{{selected_score:0.9988}}}};
 console.log(JSON.stringify([
- renderDesignExpectedPerformance({{}}, report, {{expected_objective_proxy_score:0.9988}}),
- renderDesignSpecimenMetricStrip({{design_evaluation:e, expected_objective_proxy_score:0.9988}}),
- renderDesignEvidence(e, true)
+ renderer.renderExpectedPerformance({{}}, report, {{expected_objective_proxy_score:0.9988}}),
+ renderer.renderEvidence(e),
+ renderer.renderEvidence(e, true)
 ]));
 """
     html = " ".join(json.loads(_node_eval(script)))
@@ -79,14 +90,36 @@ console.log(JSON.stringify([
 
 
 def test_blocked_decision_dashboard_does_not_render_previous_ready_spec():
-    function = _extract_function(PLANNING_JS.read_text(), "renderDesignDashboardCards")
+    source = DESIGN_LIVE_REPORT_JS.read_text(encoding="utf-8")
     script = f"""
+const window = {{}};
+{source}
+const escapeHtml = value => String(value ?? '');
 const latestDesignAgentReport = () => ({{}});
 const latestDesignReport = () => ({{design_decision:{{status:'returned', reason:'Review evidence'}}}});
 const runtimeRows = rows => JSON.stringify(rows);
 const renderDashboardCard = (title, body) => title + body;
-{function}
-console.log(renderDesignDashboardCards({{spec:{{candidate_id:'previous',expected_objective_proxy_score:0.9988}}}}));
+const frontend = window.AX4LABDesignUI.createFrontend({{
+  escapeHtml,
+  compactText: (value, limit) => String(value ?? '').slice(0, limit),
+  renderRuntimeValue: value => value == null ? '-' : String(value),
+  renderDashboardRows: rows => JSON.stringify(rows),
+  dashboardList: (rows, empty) => rows.length ? rows.join('|') : empty,
+  orcChartPayloadAttr: value => JSON.stringify(value),
+  designImageUrlFromSource: () => '',
+  designCandidateDirectCaptureUrl: () => '',
+  latestDesignAgentReport,
+  latestDesignReport,
+  designSelectedCandidate: () => ({{}}),
+  designCandidateRows: () => [],
+  designActualSpecimenRows: () => [],
+  renderDesignCandidateCards: () => '',
+  renderDesignParameterSweep: () => '',
+  renderDashboardCard,
+  runtimeRows,
+  renderReportList: (rows, empty) => rows.length ? rows.join('|') : empty,
+}});
+console.log(frontend.renderDashboard({{spec:{{candidate_id:'previous',expected_objective_proxy_score:0.9988}}}}));
 """
     html = _node_eval(script)
     assert "blocked" in html
@@ -204,11 +237,14 @@ def test_spc_now_printing_preview_uses_dsn_capture_contract() -> None:
     assert "ctx.thread.viewer_capture_url" not in body
 
 
-def test_live_agent_events_are_scoped_to_current_run() -> None:
+def test_live_agent_events_keep_current_run_and_unscoped_global_events() -> None:
     source = PLANNING_JS.read_text(encoding="utf-8")
     helpers = "\n".join(
         _extract_function(source, name)
-        for name in ("eventRunId", "eventMatchesCurrentRun", "currentRunEventSources")
+        for name in (
+            "eventStableKey", "dedupeRuntimeEvents", "mergeRuntimeEventSources",
+            "eventRunId", "eventMatchesCurrentRun", "currentRunEventSources",
+        )
     )
     script = f"""
 function eventPayload(event) {{ return event && typeof event.payload === "object" ? event.payload : {{}}; }}
@@ -224,7 +260,7 @@ console.log(JSON.stringify(currentRunEventSources().map((event) => event.event_i
 """
     event_ids = json.loads(_node_eval(script))
 
-    assert event_ids == ["current-design"]
+    assert event_ids == ["current-design", "global-no-run"]
 
 
 def test_normal_artifact_events_do_not_raise_agent_unread_alarm() -> None:
@@ -242,6 +278,7 @@ function isAgentQuestionEvent(event) {{
   const payload = eventPayload(event);
   return Boolean(payload.question || payload.requires_operator_input);
 }}
+function isResolvedEmergencyLifecycleEvent() {{ return false; }}
 {helper}
 console.log(JSON.stringify([
   isAgentNotificationEvent({{ event_type: "artifact.created", payload: {{ agent: "specimen" }} }}),
@@ -302,3 +339,97 @@ def test_planning_js_mentions_specimen_pose_and_d455f_return() -> None:
     assert "camera_returned_to_vla" in source
     assert "VLA camera" in source
     assert "D455F" in source
+
+
+def test_agent_boot_and_node_test_choices_only_use_authoritative_membership() -> None:
+    source = PLANNING_JS.read_text(encoding="utf-8")
+    core_helper = _extract_function(source, "coreDefaultLiveAgents")
+    node_test_helper = _extract_function(source, "liveNodeTestModules")
+    script = f"""
+const DEFAULT_LIVE_AGENTS = [
+  {{id:'objective'}}, {{id:'orchestrator'}}, {{id:'design'}}, {{id:'bo'}}
+];
+const DEFAULT_LIVE_NODE_TEST_MODULES = new Set(['design','bo']);
+let LIVE_AGENTS = [{{id:'objective'}}, {{id:'orchestrator'}}, {{id:'design',moduleId:'design',enabled:true}}];
+{core_helper}
+{node_test_helper}
+console.log(JSON.stringify({{
+  boot: coreDefaultLiveAgents().map((item) => item.id),
+  nodeTests: [...liveNodeTestModules()],
+}}));
+"""
+    result = json.loads(_node_eval(script))
+
+    assert result == {
+        "boot": ["objective", "orchestrator"],
+        "nodeTests": ["design"],
+    }
+
+
+def test_planning_template_boots_common_host_without_eager_design_asset() -> None:
+    html = PLANNING_HTML.read_text(encoding="utf-8")
+
+    assert 'src="/module-assets/design/live_report.js' not in html
+    assert html.index('src="/static/agent_module_host.js') < html.index('src="/static/planning.js')
+
+
+def test_manifest_refresh_reconciles_before_render_and_preserves_last_valid_set() -> None:
+    source = PLANNING_JS.read_text(encoding="utf-8")
+    sync_helpers = "\n".join(
+        _extract_function(source, name)
+        for name in (
+            "knownLiveAgent",
+            "defaultLiveAgentForId",
+            "normalizeLiveAgentManifestItem",
+            "applyLiveAgentManifest",
+        )
+    )
+    refresh_helper = "async " + _extract_function(source, "refreshLiveAgentManifest")
+    script = f"""
+const DEFAULT_LIVE_AGENTS = [
+  {{id:'objective',label:'Objective',short:'OBJ',stage:'idle'}},
+  {{id:'orchestrator',label:'Orchestrator',short:'ORC',stage:'orchestrator'}},
+  {{id:'design',label:'Design Agent',short:'DSN',stage:'design'}},
+];
+let LIVE_AGENTS = DEFAULT_LIVE_AGENTS.slice(0, 2);
+let liveAgentManifestStatus = {{ok:false,source:'bootstrap',error:''}};
+let liveAgentManifestRequestGeneration = 0;
+let liveSelectedAgent = 'orchestrator';
+let liveLastSession = {{state:{{}}}};
+const events = [];
+const liveAgentModuleHost = {{
+  async reconcile(agents) {{ events.push(`reconcile:${{agents.map((item) => item.id).join(',')}}`); }}
+}};
+function liveAgentModuleHostServices() {{ return {{marker:'services'}}; }}
+function renderLiveRuntime() {{ events.push('render'); }}
+function setChatStatus() {{}}
+const responses = [
+  {{ok:true,json:async()=>({{ok:true,graph_id:'g1',agents:[
+    {{id:'orchestrator',order:0}},
+    {{id:'design',order:1,implementation:{{version:'1',frontend:{{asset_url:'/module-assets/design/live_report.js',namespace:'AX4LABDesignUI',factory:'createFrontend'}}}}}},
+  ]}})}},
+  {{ok:false,status:503,json:async()=>({{}})}},
+];
+async function fetch() {{ return responses.shift(); }}
+{sync_helpers}
+{refresh_helper}
+(async()=>{{
+  await refreshLiveAgentManifest();
+  const afterValid = LIVE_AGENTS.map((item) => item.id);
+  await refreshLiveAgentManifest({{silent:true}});
+  console.log(JSON.stringify({{
+    afterValid,
+    afterFailure: LIVE_AGENTS.map((item) => item.id),
+    events,
+    status: liveAgentManifestStatus,
+  }}));
+}})().catch((error)=>{{console.error(error);process.exitCode=1;}});
+"""
+    result = json.loads(_node_eval(script))
+
+    assert result["afterValid"] == ["objective", "orchestrator", "design"]
+    assert result["afterFailure"] == result["afterValid"]
+    assert result["events"][:2] == ["reconcile:orchestrator,design", "render"]
+    assert result["events"].count("reconcile:orchestrator,design") == 1
+    assert result["status"]["ok"] is True
+    assert result["status"]["stale"] is True

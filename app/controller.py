@@ -61,7 +61,7 @@ from mcp_tools.tpms_geometry import (
 )
 from graphs import load_graph_config, load_module_config
 from orchestrator.run_loop import RunLoop
-from orchestrator.langgraph_runtime import compact_runtime_payload, trim_runtime_memory
+from orchestrator.langgraph_runtime import ModuleRuntimeContext, compact_runtime_payload, trim_runtime_memory
 from orchestrator.runtime_defaults import TEST_MODE_LOOP_CYCLES as DEFAULT_TEST_MODE_LOOP_CYCLES
 from orchestrator.state import AgentRuntimeStatus, Mode, OrchestratorState, Stage
 from orchestrator.supervisor import (
@@ -178,6 +178,9 @@ class MainController:
         self._run_task: asyncio.Task[None] | None = None
         self._active_graph_id = "atr_closed_loop"
         self._active_graph_config_path: Path | None = None
+        self._deps.agent_registry.bind_activation(
+            lambda: {row["owner"] for row in self._planning_setup_catalog().bindings()}
+        )
 
         self._logger_bundle = self._new_logger_bundle()
         self._state = self._new_state(mode=Mode(deps.system_config.get("default_mode", "test")))
@@ -1925,7 +1928,7 @@ class MainController:
                 "summary": str(self._logger_bundle.summary_log_path),
             },
             "is_running": bool(self._run_task and not self._run_task.done()) or self._planning_handoff_active(),
-            "agents": self._deps.agent_registry.names(),
+            "agents": self._deps.agent_registry.active_names(),
         }
 
     def recent_events(self) -> list[dict[str, Any]]:
@@ -2193,7 +2196,8 @@ class MainController:
         graph = load_graph_config(self._active_graph_config_path or Path(__file__).resolve().parents[1] / "graphs/configs/atr_closed_loop.yaml")
         # Freeze only this resolution so describe/readback can share bindings.
         # The next call (including after a model await) reads current graph files.
-        return OwnerCatalog(self._deps.agent_registry, graph).snapshot()
+        return OwnerCatalog(self._deps.agent_registry, graph,
+                            graph_root=self._active_graph_module_root()).snapshot()
 
     def _planning_setup_projection(self) -> dict:
         projection = project_setup(self._setup_store(), self._planning_setup_catalog(), self._state, self._deps.agent_context)
@@ -2295,18 +2299,80 @@ class MainController:
         """Pin graph-linked owners for this execution's existing runtime paths."""
         if getattr(self, "_owner_catalog_run_id", None) != self._state.run_id:
             graph = load_graph_config(self._active_graph_config_path or Path(__file__).resolve().parents[1] / "graphs/configs/atr_closed_loop.yaml")
-            self._execution_owner_catalog = OwnerCatalog(self._deps.agent_registry, graph).snapshot()
+            self._execution_owner_catalog = OwnerCatalog(
+                self._deps.agent_registry,
+                graph,
+                graph_root=self._active_graph_module_root(),
+            ).snapshot()
             self._execution_orchestrator_settings = {}
+            self._execution_owner_modules = {}
+            self._execution_module_configs = {}
             for binding in self._execution_owner_catalog.describe(self._state, self._deps.agent_context):
-                if binding["owner"] != self._deps.orchestrator_agent_name or not binding.get("module_id"):
+                if not binding.get("module_id"):
                     continue
                 path = self._execution_owner_catalog.graph_root / binding["module_id"] / "module.yaml"
                 if path.is_file():
-                    module = load_module_config(path).model_dump(mode="json", exclude_none=True)
-                    if str(module.get("handler") or "").strip() == f"agent.{self._deps.orchestrator_agent_name}":
+                    module = load_module_config(path).model_dump(mode="json", exclude_none=True, by_alias=True)
+                    module_id = str(module.get("id") or Path(binding["module_id"]).name)
+                    self._execution_module_configs.setdefault(module_id, deepcopy(module))
+                    handler = str(module.get("handler") or "").strip()
+                    if handler.startswith("agent."):
+                        self._execution_owner_modules.setdefault(handler.removeprefix("agent."), deepcopy(module))
+                    if handler == f"agent.{self._deps.orchestrator_agent_name}":
                         self._execution_orchestrator_settings = deepcopy(module.get("decision_settings", {}))
             self._owner_catalog_run_id = self._state.run_id
         return self._execution_owner_catalog
+
+    def _new_execution_run_loop(
+        self,
+        *,
+        interval_seconds: float,
+        on_event: Callable[[dict[str, Any]], Any] | None,
+        run_orchestrator_before_design: bool | None = None,
+    ) -> RunLoop:
+        """Build every controller loop from the current run's pinned owner modules."""
+        catalog = self._run_owner_catalog()
+        return RunLoop(
+            state=self._state,
+            owner_catalog=catalog,
+            decision_settings=deepcopy(self._execution_orchestrator_settings),
+            module_configs=deepcopy(self._execution_module_configs),
+            agent_registry=self._deps.agent_registry,
+            orchestrator_agent_name=self._deps.orchestrator_agent_name,
+            ctx=self._deps.agent_context,
+            logger=self._logger_bundle.logger,
+            max_retry_per_stage=int(self._deps.system_config.get("max_retry_per_stage", 2)),
+            interval_seconds=interval_seconds,
+            on_event=on_event,
+            graph_config_path=self._active_graph_config_path,
+            module_root=self._active_graph_module_root(),
+            run_orchestrator_before_design=run_orchestrator_before_design,
+        )
+
+    async def _emit_agent_execution_event(self, event: dict[str, Any]) -> None:
+        """Publish one redacted executable-module trace through controller events."""
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        status = str(payload.get("status") or "")
+        await self._emit_control_event(
+            str(event.get("type") or "execution.trace"),
+            f"{payload.get('module_id', 'module')} {payload.get('node_id', 'graph')}: {status}",
+            deepcopy(payload),
+            level="ERROR" if status == "failed" else "WARNING" if status == "cancelled" else "INFO",
+        )
+
+    def _execution_context_for_owner(self, agent_name: str, stage: Stage) -> AgentContext | ModuleRuntimeContext:
+        """Return the run-pinned module config for planning-side owner calls."""
+        self._run_owner_catalog()
+        module = getattr(self, "_execution_owner_modules", {}).get(agent_name)
+        if not isinstance(module, dict) or not isinstance(self._deps.agent_context, AgentContext):
+            return self._deps.agent_context
+        return ModuleRuntimeContext(
+            self._deps.agent_context,
+            module,
+            stage,
+            state=self._state,
+            execution_event_emitter=self._emit_agent_execution_event,
+        )
 
     async def _activate_captured_setup(self, store: SetupStore | None, proposal_ids: list[str]) -> dict | None:
         if store is None or not proposal_ids or self._state.mode == Mode.REPLAY:
@@ -4023,18 +4089,9 @@ class MainController:
 
     async def _run_live_or_test(self) -> None:
         configured_interval = float(self._deps.system_config.get("loop_interval_seconds", 1.25))
-        loop = RunLoop(
-            state=self._state,
-            owner_catalog=self._run_owner_catalog(),
-            decision_settings=self._execution_orchestrator_settings,
-            agent_registry=self._deps.agent_registry,
-            orchestrator_agent_name=self._deps.orchestrator_agent_name,
-            ctx=self._deps.agent_context,
-            logger=self._logger_bundle.logger,
-            max_retry_per_stage=int(self._deps.system_config.get("max_retry_per_stage", 2)),
+        loop = self._new_execution_run_loop(
             interval_seconds=0.0 if self._state.mode == Mode.TEST else configured_interval,
             on_event=self._broadcast_event,
-            graph_config_path=self._active_graph_config_path,
         )
         try:
             await loop.run()
@@ -7482,18 +7539,9 @@ class MainController:
         run_orchestrator_before_design: bool = False,
     ) -> None:
         """Execute one Live GUI planning stage through the configured LangGraph runtime."""
-        loop = RunLoop(
-            state=self._state,
-            owner_catalog=self._run_owner_catalog(),
-            decision_settings=self._execution_orchestrator_settings,
-            agent_registry=self._deps.agent_registry,
-            orchestrator_agent_name=self._deps.orchestrator_agent_name,
-            ctx=self._deps.agent_context,
-            logger=self._logger_bundle.logger,
-            max_retry_per_stage=int(self._deps.system_config.get("max_retry_per_stage", 2)),
+        loop = self._new_execution_run_loop(
             interval_seconds=0.0,
             on_event=self._broadcast_event if emit_runtime_events else None,
-            graph_config_path=self._active_graph_config_path,
             run_orchestrator_before_design=run_orchestrator_before_design,
         )
         self._state.stage = stage
@@ -7874,6 +7922,9 @@ class MainController:
     ) -> dict[str, Any]:
         """Call DesignAgent for planning-only candidate generation and emit handoff chat messages."""
         constraints = deepcopy(constraints)  # Pin caller-owned inputs before any await.
+        if "design_agent" not in {row["owner"] for row in self._planning_setup_catalog().bindings()}:
+            return {"ok": False, "status": "blocked", "failure_code": "DESIGN_MODULE_INACTIVE",
+                    "message": "Design is not included in the applied graph. Add and apply its module before requesting design generation."}
         plc_rejection = await self._plc_service_start_rejection()
         if plc_rejection is not None:
             return plc_rejection
@@ -7931,7 +7982,7 @@ class MainController:
                for binding in catalog.describe(self._state, self._deps.agent_context)):
             key = boundary["key"]
             try:
-                record = await review_handoff(state=self._state, ctx=self._deps.agent_context,
+                record = await review_handoff(state=self._state, ctx=self._execution_context_for_owner(self._deps.orchestrator_agent_name, Stage("orchestrator")),
                     registry=self._deps.agent_registry, catalog=catalog, key=key,
                     candidate=Stage.DESIGN.value, payload={"goal": self._state.active_goal, "constraints": constraints},
                     settings=self._execution_orchestrator_settings, agent_name=self._deps.orchestrator_agent_name)
@@ -9901,17 +9952,8 @@ class MainController:
             self._state.mode = effective_mode
             self._state.current_experiment_spec = experiment_spec
             self._state.stage = tail_start
-            loop = RunLoop(
-                state=self._state,
-                owner_catalog=self._run_owner_catalog(),
-                decision_settings=self._execution_orchestrator_settings,
-                agent_registry=self._deps.agent_registry,
-                orchestrator_agent_name=self._deps.orchestrator_agent_name,
-                ctx=self._deps.agent_context,
-                logger=self._logger_bundle.logger,
-                max_retry_per_stage=int(self._deps.system_config.get("max_retry_per_stage", 2)),
+            loop = self._new_execution_run_loop(
                 interval_seconds=0.0,
-                graph_config_path=self._active_graph_config_path,
                 on_event=planning_runtime_event,
             )
             max_steps = max(16, len(planning_stages) * 4)

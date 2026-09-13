@@ -153,7 +153,7 @@ cross-cutting responsibilities, not additional sequential model calls.
 | Agent | Owned API | Connected API | Operator/shared API | Route/schema source |
 |---|---|---|---|---|
 | Orchestrator | planning session/message plus scoped Setup proposal/action contract | owner availability/readback and registered model backend | run lifecycle, run events/artifacts, approvals, SSE/recent events | `/openapi.json`, `/api/planning/*`, `/api/run*`, `/api/runtime/*` |
-| Design | no dedicated direct execution endpoint | planning artifact/session context | `/api/graphs/*` authoring/validate/dry-run/run | `/openapi.json`, graph execution handler |
+| Design | no dedicated direct execution endpoint | planning artifact/session context; `/api/agents/design/report` | Existing `/api/graphs/*` path; `/api/modules/design` exposes code-module metadata | `/openapi.json`, unchanged `agent.design_agent` handler; module-owned report UI hosted at `/live` |
 | Specimen Making | no direct agent endpoint | `/api/printer/*`, geometry/artifact tools | printer workspace and selected module management | `/openapi.json`, printer service/bridge implementations |
 | Vision | specimen-pose status/snapshot/release | camera, active robot camera, UTM vision/runtime APIs | Vision/UTM workspaces and run retry | `/openapi.json`, Vision tools/bridge handlers |
 | Manipulation | manipulation-agent config/test/run | `/api/lerobot/*` robotics services | LeRobot workspace configuration/training/simulation/mirror | `/openapi.json`, LeRobot bridge |

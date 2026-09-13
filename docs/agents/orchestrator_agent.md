@@ -10,6 +10,8 @@ source_of_truth:
   - agents/orchestrator_agent.py
   - agents/orchestrator_capabilities.py
   - agents/orchestrator_decision.py
+  - agents/orchestrator_execution.py
+  - agents/execution_graph.py
   - app/controller.py
   - app/main.py
   - app/planning_setup.py
@@ -17,8 +19,8 @@ source_of_truth:
   - orchestrator/setup_application.py
   - orchestrator/langgraph_runtime.py
   - graphs/modules/orchestrator/module.yaml
-last_verified: 2026-09-12
-verified_against: working-tree
+last_verified: 2026-09-13
+verified_against: working-tree-2026-09-13-executable-agent-ide
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -102,6 +104,35 @@ An accepted setup change is captured and read back when a **new** run starts;
 it does not alter the current run or a later cycle in that run.
 
 ## Internal Workflow
+
+### Editable Runtime IDE Structure
+
+![Orchestrator five-area editable internal graph](assets/figures/orchestrator_control_areas.svg)
+
+The backend, existing editable canvas and SVG consume the same
+[`module.execution_graph`](../../graphs/modules/orchestrator/module.yaml):
+`mission → plan → decide → report`. The decision's explicit outcomes select
+the declared edges; ordering the node array or moving a card does not select a
+route. Mission and plan construction are independent operations whose valid
+ordering can be edited while both remain prerequisites for decision-making.
+
+The [owner adapters](../../agents/orchestrator_execution.py) call the existing
+mission, plan, bounded LLM/tool decision and reporting functions. **LLM** labels
+the composite decision, including its existing checks and tool loop—not each
+internal check as an independently editable operation. Empty responsibility
+areas explain embedded or external authority. Orchestrator remains application
+core and has no direct device tools.
+
+This graph is the `OrchestratorAgent.run` boundary used for agent execution and
+handoff decisions. Program-core Chat/Setup semantic intake remains in its existing
+path; it is not an extra invocation of the full mission graph.
+
+Validate/version/activate use the current module API. Active runs retain their
+definition; backend edits appear on reload, and invalid drafts are not applied.
+The [shared renderer](../../web/static/module_control_view.js) draws explicit
+outcomes and connection kinds, not an inferred checkpoint chain. Regenerate with
+`python scripts/render_module_control_views.py`. Structural Dry Run enumerates
+routes; it does not execute the model or prove live device behavior.
 
 ![Orchestrator internal execution and effect boundary](assets/figures/orchestrator_02_execution_effect_boundary.svg)
 
@@ -233,6 +264,19 @@ operating GUI service claim.
   or continuation.
 
 ## Artifacts and Verification
+
+### Executable IDE boundary
+
+`ax4lab.execution_trace.v1` records actual operation IDs, selected outcome edges,
+run, graph revision, invocation and status through the existing runtime event
+stream. Private operation inputs are not included. The shared runner and API
+checks live in `tests/unit/test_agent_execution_graph.py` and
+`tests/integration/test_agent_execution_graph_api.py`: valid saved routes execute
+registered owner functions, while invalid or busy activation cannot replace the
+active definition. Structural Dry Run is separate from this non-actuating
+execution verification. See the [implementation plan](../superpowers/plans/2026-09-13-executable-agent-ide.md).
+
+### Earlier orchestration evidence
 
 The working-tree implementation has focused deterministic/API/GUI/loop
 evidence recorded by the implementation tasks. The final correction review

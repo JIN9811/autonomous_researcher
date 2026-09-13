@@ -37,7 +37,7 @@ from uuid import uuid4
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Mapping
 from urllib.parse import quote
 
 import yaml
@@ -474,14 +474,16 @@ class ModuleRuntimeContext:
         gate_recorder: Callable[[dict[str, Any]], None] | None = None,
         tool_call_recorder: Callable[[dict[str, Any]], None] | None = None,
         decision_context_factory: Callable[[Stage], Any] | None = None,
+        execution_event_emitter: Callable[[dict[str, Any]], Any] | None = None,
     ) -> None:
         self._base = base
         self._decision_context_factory = decision_context_factory
-        self._module = module_config
+        self._module = deepcopy(module_config)
         self._stage = stage
         self._state = state
         self._gate_recorder = gate_recorder
         self._tool_call_recorder = tool_call_recorder
+        self._execution_event_emitter = execution_event_emitter
         self._active_internal_step = dict(active_internal_step or {})
         self._llm = module_config.get("llm") if isinstance(module_config.get("llm"), dict) else {}
         self._prompt = module_config.get("prompt") if isinstance(module_config.get("prompt"), dict) else {}
@@ -544,10 +546,18 @@ class ModuleRuntimeContext:
 
     def runtime_module_config(self) -> dict[str, Any]:
         """Return the stage module config visible to agents that opt in."""
-        payload = dict(self._module)
+        payload = deepcopy(self._module)
         if self._active_internal_step:
             payload["active_internal_step"] = dict(self._active_internal_step)
         return payload
+
+    async def emit_execution_event(self, event: dict[str, Any]) -> None:
+        """Forward a public execution trace to the invocation's runtime sink."""
+        if self._execution_event_emitter is None:
+            return
+        result = self._execution_event_emitter(deepcopy(event))
+        if inspect.isawaitable(result):
+            await result
 
     def for_agent_decision(self, agent: str):
         """Resolve an owner's model binding without changing the running graph stage."""
@@ -751,6 +761,7 @@ class LangGraphRunLoop:
         run_orchestrator_before_design: bool | None = None,
         owner_catalog: OwnerCatalog | None = None,
         decision_settings: dict | None = None,
+        module_configs: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> None:
         self._state = state
         self._agent_registry = agent_registry
@@ -763,21 +774,24 @@ class LangGraphRunLoop:
         self._run_orchestrator_before_design = run_orchestrator_before_design
         self._module_root = self._resolve_module_root(module_root)
         self._graph_config = self._load_config(graph_config_path)
-        self._module_configs = self._load_module_configs()
+        if module_configs is None:
+            self._module_configs = self._load_module_configs()
+            self._owner_module_configs = self._load_owner_module_configs()
+        else:
+            pinned_modules = {
+                str(module_id): deepcopy(dict(module))
+                for module_id, module in module_configs.items()
+                if isinstance(module, Mapping)
+            }
+            self._module_configs = self._stage_configs_from_module_snapshots(pinned_modules)
+            self._owner_module_configs = self._owner_configs_from_module_snapshots(pinned_modules)
         self._owner_catalog = owner_catalog or OwnerCatalog(agent_registry, self._graph_config, graph_root=self._module_root).snapshot()
         self._orchestrator_settings = {}
         self._supervision_declared = any(binding["owner"] == orchestrator_agent_name and binding.get("executable")
             for binding in self._owner_catalog.describe(state, ctx))
-        for node in self._graph_config.nodes:
-            module = {}
-            if node.module_id:
-                path = (self._module_root / node.module_id / "module.yaml").resolve()
-                if path.is_relative_to(self._module_root.resolve()) and path.is_file():
-                    raw = yaml.safe_load(path.read_text()) or {}
-                    module = raw.get("module", raw)
-            handler = str(module.get("handler") or "").strip() or str(node.handler or "").strip()
-            if handler == f"agent.{orchestrator_agent_name}":
-                self._orchestrator_settings = module.get("decision_settings", {})
+        orchestrator_module = self._owner_module_configs.get(orchestrator_agent_name, {})
+        if isinstance(orchestrator_module, dict):
+            self._orchestrator_settings = deepcopy(orchestrator_module.get("decision_settings", {}))
         if decision_settings is not None:
             self._orchestrator_settings = deepcopy(decision_settings)
         self._pause_notice_emitted = False
@@ -813,6 +827,56 @@ class LangGraphRunLoop:
             if isinstance(module, dict):
                 configs[node.stage] = module
         return configs
+
+    def _load_owner_module_configs(self) -> dict[str, dict[str, Any]]:
+        """Pin ordinary and sidecar owner modules for every call in this loop."""
+        configs: dict[str, dict[str, Any]] = {}
+        for node in self._graph_config.nodes:
+            if not node.module_id:
+                continue
+            module_path = self._module_root / node.module_id / "module.yaml"
+            if not module_path.is_file():
+                continue
+            raw = yaml.safe_load(module_path.read_text(encoding="utf-8")) or {}
+            module = raw.get("module", raw) if isinstance(raw, dict) else {}
+            if not isinstance(module, dict):
+                continue
+            handler = str(module.get("handler") or node.handler or "").strip()
+            if handler.startswith("agent."):
+                configs.setdefault(handler.removeprefix("agent."), deepcopy(module))
+        return configs
+
+    def _stage_configs_from_module_snapshots(
+        self,
+        modules: Mapping[str, Mapping[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        """Project controller-pinned module identities onto ordinary graph stages."""
+        by_module_id = {
+            str(module.get("id") or ""): module
+            for module in modules.values()
+            if isinstance(module, Mapping) and str(module.get("id") or "")
+        }
+        by_module_id.update({str(module_id): module for module_id, module in modules.items()})
+        configs: dict[str, dict[str, Any]] = {}
+        for node in self._graph_config.nodes:
+            if not node.stage or not node.module_id:
+                continue
+            module = by_module_id.get(node.module_id) or by_module_id.get(Path(node.module_id).name)
+            if isinstance(module, Mapping):
+                configs[node.stage] = deepcopy(dict(module))
+        return configs
+
+    @staticmethod
+    def _owner_configs_from_module_snapshots(
+        modules: Mapping[str, Mapping[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        """Index pinned modules by their own executable handler, not pre-step caller."""
+        owners: dict[str, dict[str, Any]] = {}
+        for module in modules.values():
+            handler = str(module.get("handler") or "").strip()
+            if handler.startswith("agent."):
+                owners.setdefault(handler.removeprefix("agent."), deepcopy(dict(module)))
+        return owners
 
     def _graph_node_for_stage(self, stage: Stage):
         """Return the graph node bound to one stage, if present."""
@@ -860,6 +924,35 @@ class LangGraphRunLoop:
             gate_recorder=self._record_guardian_gate_snapshot,
             tool_call_recorder=self._record_tool_call_snapshot,
             decision_context_factory=self._context_for_stage,
+            execution_event_emitter=self._emit_execution_event,
+        )
+
+    def _context_for_owner(self, agent_name: str, stage: Stage) -> AgentContext | ModuleRuntimeContext:
+        """Apply a pinned module to supervisors that do not own an ordinary Stage."""
+        module = self._owner_module_configs.get(agent_name)
+        if not module or not isinstance(self._ctx, AgentContext):
+            return self._ctx
+        return ModuleRuntimeContext(
+            self._ctx,
+            module,
+            stage,
+            state=self._state,
+            gate_recorder=self._record_guardian_gate_snapshot,
+            tool_call_recorder=self._record_tool_call_snapshot,
+            decision_context_factory=self._context_for_stage,
+            execution_event_emitter=self._emit_execution_event,
+        )
+
+    async def _emit_execution_event(self, event: dict[str, Any]) -> None:
+        """Publish internal execution through the existing run event bus."""
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        event_type = str(event.get("type") or "execution.trace")
+        status = str(payload.get("status") or "")
+        await self._emit(
+            event_type=event_type,
+            message=f"{payload.get('module_id', 'module')} {payload.get('node_id', 'graph')}: {status}",
+            payload=deepcopy(payload),
+            level="ERROR" if status == "failed" else "WARNING" if status == "cancelled" else "INFO",
         )
 
     def _module_runtime_payload(self, stage: Stage) -> dict[str, Any]:
@@ -924,6 +1017,7 @@ class LangGraphRunLoop:
             "timeout_s": module.get("timeout_s"),
             "retry": module.get("retry", {}) if isinstance(module.get("retry"), dict) else {},
             "safety": module.get("safety", {}) if isinstance(module.get("safety"), dict) else {},
+            "execution_graph_migrated": isinstance(module.get("execution_graph"), dict),
             "internal_graph": internal_steps,
             "pre_execution": pre_steps,
         }
@@ -2324,6 +2418,8 @@ class LangGraphRunLoop:
 
     def _module_internal_steps(self, module_runtime: dict[str, Any]) -> list[dict[str, Any]]:
         """Return sanitized internal graph steps from module runtime metadata."""
+        if module_runtime.get("execution_graph_migrated") is True or isinstance(module_runtime.get("execution_graph"), dict):
+            return []
         steps = module_runtime.get("internal_graph")
         if not isinstance(steps, list):
             return []
@@ -2723,7 +2819,9 @@ class LangGraphRunLoop:
                     data = handoff_checkpoint(self._state.run_metadata, key, action="read").get("payload", {}).get("agent_data", {})
                     result = AgentResult(success=True, summary="Existing handoff admitted this task", data=data)
                 else:
-                    result = await self._agent_registry.get(agent_name).run(self._state, self._ctx)
+                    result = await self._agent_registry.get(agent_name).run(
+                        self._state, self._context_for_owner(agent_name, stage)
+                    )
             except Exception as exc:
                 await self._emit(
                     event_type="module_pre_step_failed",
@@ -2924,7 +3022,7 @@ class LangGraphRunLoop:
                         "authorization": authorization_scope(self._state),
                         "retry": self._state.retry_counters.get(stage.value, 0)}
             key = "entry:" + hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
-            record = await review_handoff(state=self._state, ctx=self._ctx, registry=self._agent_registry,
+            record = await review_handoff(state=self._state, ctx=self._context_for_owner(self._orchestrator_agent_name, stage), registry=self._agent_registry,
                 catalog=self._owner_catalog, key=key, candidate=stage.value,
                 payload={"stage": stage.value, "input": compact_runtime_payload(self._state.current_experiment_spec)},
                 settings=self._orchestrator_settings, agent_name=self._orchestrator_agent_name)
@@ -2951,7 +3049,7 @@ class LangGraphRunLoop:
             self._hold_observation_refresh(key)
             return  # hold stale capture/result; no model await before consumption
         if self._supervision_declared and not payload.get("mandatory") and not (payload.get("reuse_observation_task") and self._observation_task_admitted()):
-            record = await review_handoff(state=self._state, ctx=self._ctx, registry=self._agent_registry,
+            record = await review_handoff(state=self._state, ctx=self._context_for_owner(self._orchestrator_agent_name, stage), registry=self._agent_registry,
                 catalog=self._owner_catalog, key=key, candidate=next_stage.value,
                 payload=payload, settings=self._orchestrator_settings, agent_name=self._orchestrator_agent_name)
         if record.get("status") != "prepared":

@@ -97,6 +97,10 @@ class OwnerCatalog:
         frozen._pinned_bindings = deepcopy(self._bindings())
         return frozen
 
+    def bindings(self):
+        """Share the same owner membership with execution and presentation."""
+        return deepcopy(self._bindings())
+
     def _owner(self, owner):
         if owner not in {row["owner"] for row in self._bindings()}:
             raise ValueError(f"Owner is not active in graph: {owner}")

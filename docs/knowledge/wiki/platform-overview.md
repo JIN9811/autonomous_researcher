@@ -1,5 +1,5 @@
 ---
-{"topic_id":"platform-overview","owner":"documentation","source_refs":["docs/README.md","docs/system/README.md"],"source_revision":{"docs/README.md":"3a79aa8044addd1a5f720a98d4ef60e80e89728cc5141b11529213a287910693","docs/system/README.md":"b68e15e08f8b3f85d43f5e29bb55399317ef9c287b719ef14eb158a31d689e1e"},"verified_at":"2026-09-12T00:00:00+00:00","applicability":"AX4LAB public system orientation","status":"reviewed"}
+{"topic_id":"platform-overview","owner":"documentation","source_refs":["docs/README.md","docs/system/README.md"],"source_revision":{"docs/README.md":"b25b0a4f92ddc61458fc1d1915ee012c8e2c4102348be596bfb36dd3ad0caf65","docs/system/README.md":"b68e15e08f8b3f85d43f5e29bb55399317ef9c287b719ef14eb158a31d689e1e"},"verified_at":"2026-09-13T00:00:00+00:00","applicability":"AX4LAB public system orientation","status":"reviewed"}
 ---
 
 # AX4LAB platform overview

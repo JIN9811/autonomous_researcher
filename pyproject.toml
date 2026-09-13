@@ -59,6 +59,9 @@ graph = [
 [tool.setuptools]
 include-package-data = true
 
+[tool.setuptools.package-data]
+"agents.design" = ["frontend/*.js"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = [
