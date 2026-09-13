@@ -406,6 +406,10 @@ Known gap: <most important current gap, or None identified within the verified s
 함수·툴·검증·근거 및 관측 반환 관계를 함께 표시하고, CODE 관계와 편집 가능한 실행
 노드를 구분한다. Low에는 소프트웨어 계산·조회도 포함한다. 문서 SVG는 같은 구조
 데이터를 사용하되 IDE 테마가 아닌 흰 배경·짙은 글자의 문서 테마로 생성한다.
+
+IDE outcome 라벨은 짧은 캡슐로 해당 연결선에 붙인다. 겹침 회피는 같은 곡선 위의
+위치를 우선 탐색하고, 라벨 선택·분기 편집 및 확대·축소 시 부착 상태를 검증한다.
+표시 위치 조정이 outcome이나 실행 순서를 변경해서는 안 된다.
 노드·분기 편집 후 실제 호출 순서, backend reload, 실행 revision별 trace,
 기존 결과 보존, 저장 좌표와 SVG 일치를 검증한다. Design과 Orchestrator부터
 적용하며 미이관 모듈의 기존 경로는 유지한다.

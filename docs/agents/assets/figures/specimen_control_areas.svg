@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" data-theme="document" viewBox="0 0 1184 1122" role="img" aria-label="Specimen Making Module five-area internal graph" style="font-family:Arial,sans-serif;background:#ffffff">
+      <title>Specimen Making Module — five-area internal graph</title><desc>Executable owner operations and explicit outcomes. Positions are presentation only. Composite LLM tools are not separate editable operations.</desc>
+      <rect width="100%" height="100%" fill="#ffffff"/>
+      <defs><marker id="control-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6z" fill="#526174"/></marker></defs>
+      <g class="runtime-control-area" data-control-area="high" pointer-events="none">
+      <rect x="360" y="56" width="488" height="260" rx="12" fill="#2463a5" fill-opacity=".035" stroke="#2463a5" stroke-opacity=".3"/>
+      <text x="376" y="82" fill="#2463a5" font-size="15" font-weight="600">High</text>
+      </g><g class="runtime-control-area" data-control-area="middle" pointer-events="none">
+      <rect x="360" y="392" width="488" height="260" rx="12" fill="#177768" fill-opacity=".035" stroke="#177768" stroke-opacity=".3"/>
+      <text x="376" y="418" fill="#177768" font-size="15" font-weight="600">Middle</text>
+      </g><g class="runtime-control-area" data-control-area="low" pointer-events="none">
+      <rect x="360" y="728" width="488" height="260" rx="12" fill="#4c6079" fill-opacity=".035" stroke="#4c6079" stroke-opacity=".3"/>
+      <text x="376" y="754" fill="#4c6079" font-size="15" font-weight="600">Low</text>
+      </g><g class="runtime-control-area" data-control-area="guardian" pointer-events="none">
+      <rect x="32" y="56" width="264" height="596" rx="12" fill="#a36b16" fill-opacity=".035" stroke="#a36b16" stroke-opacity=".3"/>
+      <text x="48" y="82" fill="#a36b16" font-size="15" font-weight="600">Guardian / Safety</text>
+      </g><g class="runtime-control-area" data-control-area="knowledge" pointer-events="none">
+      <rect x="896" y="56" width="264" height="484" rx="12" fill="#79529c" fill-opacity=".035" stroke="#79529c" stroke-opacity=".3"/>
+      <text x="912" y="82" fill="#79529c" font-size="15" font-weight="600">Knowledge / Evidence</text>
+      </g><defs><marker id="control-detail-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6z" fill="#526174"/></marker></defs><g data-implementation-edge="prepare" pointer-events="none"><title>required fields · validation (code-owned)</title><path d="M384,478 C312,478 312,254 240,254" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="prepare" pointer-events="none"><title>resolve intent · call (code-owned)</title><path d="M568,478 C596,478 596,590 624,590" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="prepare" pointer-events="none"><title>geometry constraints · validation (code-owned)</title><path d="M384,478 C312,478 312,366 240,366" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="prepare" pointer-events="none"><title>prepare checked artifacts · call (code-owned)</title><path d="M476,516 C500,646 500,646 476,776" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="decide" pointer-events="none"><title>manufacturing facts · evidence (code-owned)</title><path d="M920,142 C864,142 864,478 808,478" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="decide" pointer-events="none"><title>reference only · evidence (code-owned)</title><path d="M920,254 C864,254 864,478 808,478" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="decide" pointer-events="none"><title>bounded choice · validation (code-owned)</title><path d="M624,478 C432,478 432,478 240,478" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="decide" pointer-events="none"><title>inspect · call (code-owned)</title><path d="M240,478 C432,478 432,814 624,814" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="decide" pointer-events="none"><title>observation / next choice · evidence (code-owned)</title><path d="M716,776 C740,646 740,646 716,516" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="decide" pointer-events="none"><title>execute once · call (code-owned)</title><path d="M240,478 C312,478 312,926 384,926" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="finalize" pointer-events="none"><title>callback response · evidence (code-owned)</title><path d="M568,590 C744,590 744,366 920,366" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="finalize" pointer-events="none"><title>handoff evidence · call (code-owned)</title><path d="M920,366 C864,366 864,142 808,142" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="finalize" pointer-events="none"><title>report projection · call (code-owned)</title><path d="M568,590 C744,590 744,478 920,478" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="review" pointer-events="none"><title>return to owner · call (code-owned)</title><path d="M148,180 C172,366 172,366 148,552" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="operator_input" pointer-events="none"><title>prepared operator request · evidence (code-owned)</title><path d="M476,216 C500,198 500,198 476,180" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-node="prepare::intake" data-implementation-owner="prepare" pointer-events="auto" role="img"  aria-label="Required experiment fields; code-owned; SpecimenMakingAgent._required_missing">
+      <title>Required experiment fields
+Code-owned inside prepare
+agents/specimen/agent.py · SpecimenMakingAgent._required_missing</title>
+      <rect x="56" y="216" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="234" fill="#172b4d" font-size="12">Required experiment</text><text x="66" y="249" fill="#172b4d" font-size="12">fields</text>
+      <text x="66" y="283" fill="#526174" font-size="9">CODE · prepare</text>
+    </g><g data-implementation-node="prepare::intent" data-implementation-owner="prepare" pointer-events="auto" role="img"  aria-label="Printer path and execution intent; code-owned; SpecimenMakingAgent._printer_test_path">
+      <title>Printer path and execution intent
+Code-owned inside prepare
+agents/specimen/agent.py · SpecimenMakingAgent._printer_test_path</title>
+      <rect x="624" y="552" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="570" fill="#172b4d" font-size="12">Printer path and</text><text x="634" y="585" fill="#172b4d" font-size="12">execution intent</text>
+      <text x="634" y="619" fill="#526174" font-size="9">CODE · prepare</text>
+    </g><g data-implementation-node="prepare::hard_rules" data-implementation-owner="prepare" pointer-events="auto" role="img"  aria-label="FDM geometry hard rules; code-owned; SpecimenMakingAgent._enforce_fdm_gyroid_hard_rules">
+      <title>FDM geometry hard rules
+Code-owned inside prepare
+agents/specimen/agent.py · SpecimenMakingAgent._enforce_fdm_gyroid_hard_rules</title>
+      <rect x="56" y="328" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="346" fill="#172b4d" font-size="12">FDM geometry hard rules</text>
+      <text x="66" y="395" fill="#526174" font-size="9">CODE · prepare</text>
+    </g><g data-implementation-node="prepare::geometry" data-implementation-owner="prepare" pointer-events="auto" role="img"  aria-label="Geometry, mesh, manufacturing and handoff tools; code-owned; SpecimenMakingAgent._prepare_fabrication">
+      <title>Geometry, mesh, manufacturing and handoff tools
+Code-owned inside prepare
+agents/specimen/agent.py · SpecimenMakingAgent._prepare_fabrication</title>
+      <rect x="384" y="776" width="184" height="76" rx="5" fill="#ffffff" stroke="#4c6079" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="794" fill="#172b4d" font-size="12">Geometry, mesh,</text><text x="394" y="809" fill="#172b4d" font-size="12">manufacturing and handoff</text><text x="394" y="824" fill="#172b4d" font-size="12">tools</text>
+      <text x="394" y="843" fill="#526174" font-size="9">CODE · prepare</text>
+    </g><g data-implementation-node="decide::evidence" data-implementation-owner="decide" pointer-events="auto" role="img"  aria-label="Credential-free fabrication evidence; code-owned; fabrication_evidence">
+      <title>Credential-free fabrication evidence
+Code-owned inside decide
+agents/specimen/decision.py · fabrication_evidence</title>
+      <rect x="920" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="122" fill="#172b4d" font-size="12">Credential-free</text><text x="930" y="137" fill="#172b4d" font-size="12">fabrication evidence</text>
+      <text x="930" y="171" fill="#526174" font-size="9">CODE · decide</text>
+    </g><g data-implementation-node="decide::choice" data-implementation-owner="decide" pointer-events="auto" role="img"  aria-label="Schema and evidence validated tool choice; code-owned; decide_specimen">
+      <title>Schema and evidence validated tool choice
+Code-owned inside decide
+agents/specimen/decision.py · decide_specimen</title>
+      <rect x="56" y="440" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="458" fill="#172b4d" font-size="12">Schema and evidence</text><text x="66" y="473" fill="#172b4d" font-size="12">validated tool choice</text>
+      <text x="66" y="507" fill="#526174" font-size="9">CODE · decide</text>
+    </g><g data-implementation-node="decide::inspect" data-implementation-owner="decide" pointer-events="auto" role="img"  aria-label="Inspect evidence and return observations; code-owned; decide_specimen">
+      <title>Inspect evidence and return observations
+Code-owned inside decide
+agents/specimen/decision.py · decide_specimen</title>
+      <rect x="624" y="776" width="184" height="76" rx="5" fill="#ffffff" stroke="#4c6079" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="794" fill="#172b4d" font-size="12">Inspect evidence and</text><text x="634" y="809" fill="#172b4d" font-size="12">return observations</text>
+      <text x="634" y="843" fill="#526174" font-size="9">CODE · decide</text>
+    </g><g data-implementation-node="decide::execute" data-implementation-owner="decide" pointer-events="auto" role="img"  aria-label="experiment.evaluate / printer.prepare callback; code-owned; SpecimenMakingAgent._decide_fabrication">
+      <title>experiment.evaluate / printer.prepare callback
+Code-owned inside decide
+agents/specimen/agent.py · SpecimenMakingAgent._decide_fabrication</title>
+      <rect x="384" y="888" width="184" height="76" rx="5" fill="#ffffff" stroke="#4c6079" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="906" fill="#172b4d" font-size="12">experiment.evaluate /</text><text x="394" y="921" fill="#172b4d" font-size="12">printer.prepare callback</text>
+      <text x="394" y="955" fill="#526174" font-size="9">CODE · decide</text>
+    </g><g data-implementation-node="decide::references" data-implementation-owner="decide" pointer-events="auto" role="img"  aria-label="Reference-only knowledge context; code-owned; build_reference_context">
+      <title>Reference-only knowledge context
+Code-owned inside decide
+agents/knowledge_context.py · build_reference_context</title>
+      <rect x="920" y="216" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="234" fill="#172b4d" font-size="12">Reference-only knowledge</text><text x="930" y="249" fill="#172b4d" font-size="12">context</text>
+      <text x="930" y="283" fill="#526174" font-size="9">CODE · decide</text>
+    </g><g data-implementation-node="finalize::report" data-implementation-owner="finalize" pointer-events="auto" role="img"  aria-label="Manufacturing digital thread and quality gates; code-owned; SpecimenMakingAgent._build_fabrication_report">
+      <title>Manufacturing digital thread and quality gates
+Code-owned inside finalize
+agents/specimen/agent.py · SpecimenMakingAgent._build_fabrication_report</title>
+      <rect x="920" y="328" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="346" fill="#172b4d" font-size="12">Manufacturing digital</text><text x="930" y="361" fill="#172b4d" font-size="12">thread and quality gates</text>
+      <text x="930" y="395" fill="#526174" font-size="9">CODE · finalize</text>
+    </g><g data-implementation-node="finalize::handoff" data-implementation-owner="finalize" pointer-events="auto" role="img"  aria-label="Vision / manipulation fabricated packet; code-owned; SpecimenMakingAgent._build_specimen_fabricated_packet">
+      <title>Vision / manipulation fabricated packet
+Code-owned inside finalize
+agents/specimen/agent.py · SpecimenMakingAgent._build_specimen_fabricated_packet</title>
+      <rect x="624" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#2463a5" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="122" fill="#172b4d" font-size="12">Vision / manipulation</text><text x="634" y="137" fill="#172b4d" font-size="12">fabricated packet</text>
+      <text x="634" y="171" fill="#526174" font-size="9">CODE · finalize</text>
+    </g><g data-implementation-node="finalize::screen" data-implementation-owner="finalize" pointer-events="auto" role="img"  aria-label="Specimen report snapshot; code-owned; SpecimenMakingAgent._specimen_agent_report_snapshot">
+      <title>Specimen report snapshot
+Code-owned inside finalize
+agents/specimen/agent.py · SpecimenMakingAgent._specimen_agent_report_snapshot</title>
+      <rect x="920" y="440" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="458" fill="#172b4d" font-size="12">Specimen report snapshot</text>
+      <text x="930" y="507" fill="#526174" font-size="9">CODE · finalize</text>
+    </g><g data-implementation-node="review::review" data-implementation-owner="review" pointer-events="auto" role="img"  aria-label="Blocked decision result; code-owned; SpecimenMakingAgent._review_fabrication">
+      <title>Blocked decision result
+Code-owned inside review
+agents/specimen/agent.py · SpecimenMakingAgent._review_fabrication</title>
+      <rect x="56" y="552" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="570" fill="#172b4d" font-size="12">Blocked decision result</text>
+      <text x="66" y="619" fill="#526174" font-size="9">CODE · review</text>
+    </g><g data-implementation-node="operator_input::request" data-implementation-owner="operator_input" pointer-events="auto" role="img"  aria-label="Printer-path operator request; code-owned; SpecimenMakingAgent._printer_path_choice_result">
+      <title>Printer-path operator request
+Code-owned inside operator_input
+agents/specimen/agent.py · SpecimenMakingAgent._printer_path_choice_result</title>
+      <rect x="384" y="216" width="184" height="76" rx="5" fill="#ffffff" stroke="#2463a5" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="234" fill="#172b4d" font-size="12">Printer-path operator</text><text x="394" y="249" fill="#172b4d" font-size="12">request</text>
+      <text x="394" y="283" fill="#526174" font-size="9">CODE · operator_input</text>
+    </g><g data-source="prepare" data-target="decide" data-outcome="ready" data-kind="execution"><title>prepare → decide · ready · execution</title><path d="M 576 478 C 587.2 493, 604.8 493, 616 478" fill="none" stroke="#526174" stroke-opacity=".8" stroke-width="2" stroke-dasharray="" marker-end="url(#control-arrow)"/><rect x="574" y="479.25" width="44" height="20" rx="4" fill="#ffffff"/><text x="596" y="493.25" text-anchor="middle" fill="#526174" font-size="11">ready</text></g><g data-source="prepare" data-target="operator_input" data-outcome="operator_input" data-kind="validation"><title>prepare → operator_input · operator_input · validation</title><path d="M 476 432 C 521 363.68, 521 256.32, 476 188" fill="none" stroke="#a36b16" stroke-opacity=".8" stroke-width="2" stroke-dasharray="8 5" marker-end="url(#control-arrow)"/><rect x="460.75" y="300" width="98" height="20" rx="4" fill="#ffffff"/><text x="509.75" y="314" text-anchor="middle" fill="#a36b16" font-size="11">operator_input</text></g><g data-source="decide" data-target="finalize" data-outcome="executed" data-kind="execution"><title>decide → finalize · executed · execution</title><path d="M 616 478 C 618.4861986466104 490.78078308592995, 658.270573396925 607.4894926439041, 576 590" fill="none" stroke="#526174" stroke-opacity=".8" stroke-width="2" stroke-dasharray="" marker-end="url(#control-arrow)"/><rect x="596.3702263583648" y="524.9474372234315" width="62" height="20" rx="4" fill="#ffffff"/><text x="627.3702263583648" y="538.9474372234315" text-anchor="middle" fill="#526174" font-size="11">executed</text></g><g data-source="decide" data-target="review" data-outcome="blocked" data-kind="validation"><title>decide → review · blocked · validation</title><path d="M 616 478 C 461.63726693004963 494.2466808664188, 382.1346521493104 147.90788395142502, 248 142" fill="none" stroke="#a36b16" stroke-opacity=".8" stroke-width="2" stroke-dasharray="8 5" marker-end="url(#control-arrow)"/><rect x="396.41446965476" y="308.3079618066914" width="56" height="20" rx="4" fill="#ffffff"/><text x="424.41446965476" y="322.3079618066914" text-anchor="middle" fill="#a36b16" font-size="11">blocked</text></g><g><title>prepare · specimen.prepare</title>
+        <rect x="384" y="440" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="396" y="461" fill="#172b4d" font-size="12">Prepare geometry and</text><text x="396" y="477" fill="#172b4d" font-size="12">manufacturing evidence</text>
+        </g><g><title>decide · specimen.decide</title>
+        <rect x="624" y="440" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="636" y="461" fill="#172b4d" font-size="12">Bounded fabrication</text><text x="636" y="477" fill="#172b4d" font-size="12">decision and execution</text>
+        <text x="769" y="508" fill="#177768" font-size="10">LLM</text></g><g><title>finalize · specimen.finalize</title>
+        <rect x="384" y="552" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="396" y="573" fill="#172b4d" font-size="12">Build fabrication report</text><text x="396" y="589" fill="#172b4d" font-size="12">and handoff</text>
+        </g><g><title>review · specimen.review</title>
+        <rect x="56" y="104" width="184" height="76" rx="9" fill="#ffffff" stroke="#a36b16" stroke-width="2"/>
+        <text x="68" y="125" fill="#172b4d" font-size="12">Return owner review</text><text x="68" y="141" fill="#172b4d" font-size="12">result</text>
+        </g><g><title>operator_input · specimen.operator_input</title>
+        <rect x="384" y="104" width="184" height="76" rx="9" fill="#ffffff" stroke="#2463a5" stroke-width="2"/>
+        <text x="396" y="125" fill="#172b4d" font-size="12">Return printer path</text><text x="396" y="141" fill="#172b4d" font-size="12">request</text>
+        </g>
+      <line x1="24" x2="62" y1="1046" y2="1046" stroke="#526174" stroke-width="2" stroke-dasharray=""/><text x="72" y="1050" fill="#172b4d" font-size="14">Execution</text><line x1="244" x2="282" y1="1046" y2="1046" stroke="#526174" stroke-width="2" stroke-dasharray="8 5"/><text x="292" y="1050" fill="#172b4d" font-size="14">Validation</text><line x1="464" x2="502" y1="1046" y2="1046" stroke="#526174" stroke-width="2" stroke-dasharray="2 5"/><text x="512" y="1050" fill="#172b4d" font-size="14">Evidence</text><line x1="684" x2="722" y1="1046" y2="1046" stroke="#526174" stroke-width="2" stroke-dasharray="5 3"/><text x="732" y="1050" fill="#172b4d" font-size="14">Internal call</text>
+      <text x="24" y="1082" fill="#526174" font-size="13">Solid boxes: executable operations · Dashed CODE boxes: implementation relationships · LLM: bounded decision</text>
+    </svg>

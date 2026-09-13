@@ -186,9 +186,16 @@ owner result, but it does not start an owner, load a model, or create device
 evidence.
 
 The current corrected joined captures have a maximum prompt size of 15,632
-UTF-8 bytes against the unchanged 16,000-byte bound. This is controlled prompt
+UTF-8 bytes against the then-current 16,000-byte bound. This is controlled prompt
 capacity only: it does not establish provider acceptance, a handler effect,
 model-driven cycle, served fallback behavior, or a live device result.
+
+The current handoff presentation limit is 32,000 UTF-8 bytes: the complete
+virtual-device route exposed a larger current Guardian contract. Current
+admission facts are retained, optional Wiki context uses only remaining space,
+and an oversized current contract still requires review rather than truncation.
+This input allowance does not change Guardian decisions or authorize devices;
+see the [current integration verification](../superpowers/plans/2026-09-13-specimen-agent-packages.md).
 
 Separate fresh capacity probes reported API-served `gpt-5.5-2026-04-23`
 (5,227 input / 1,102 output tokens; 16.28 s) selecting

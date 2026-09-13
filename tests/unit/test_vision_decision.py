@@ -209,6 +209,45 @@ async def test_selects_existing_contract_not_raw_hardware_arguments(state):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [Mode.TEST, Mode.LIVE])
+@pytest.mark.parametrize("contract", ["pickup", "active_cam", "placement", "clearance"])
+@pytest.mark.parametrize("choice", ["execute_verification", "return_to_owner"])
+async def test_acquisition_prompt_identifies_precapture_scope_without_removing_owner_rejection(state, mode, contract, choice):
+    from agents.vision_decision import select_vision_tool
+    state.mode = mode
+    model = Model(choice)
+    result = await select_vision_tool(state, model, contract)
+    _, prompt, images = model.inputs[0]
+    context = json.loads(prompt.split("\nCONTEXT:\n")[1])
+    assert context["checkpoint"] == "tool_selection"
+    assert context["evidence_state"] == "not_yet_acquired"
+    assert context["evidence_refs"] == ["context:task"] and images is None
+    assert set(context["tools"]) == {"execute_verification", "return_to_owner"}
+    assert "detector" not in context and "image_geometry" not in context
+    assert result["status"] == ("accepted" if choice == "execute_verification" else "review_required")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [Mode.TEST, Mode.LIVE])
+async def test_image_review_context_is_postcapture_and_missing_pair_still_blocks(state, capture, mode):
+    from agents.vision_decision import review_visual_evidence
+    state.mode = mode
+    model = Model("return_to_owner")
+    result = await review_visual_evidence(state, model, capture, "pickup")
+    context = json.loads(model.inputs[0][1].split("\nCONTEXT:\n")[1])
+    assert context["checkpoint"] == "image_review"
+    assert context["evidence_state"] == "captured"
+    assert "frame:current" in context["evidence_refs"] and len(model.inputs[0][2]) == 2
+    assert set(context["tools"]) == {"accept_visual_evidence", "return_to_owner"}
+    assert result["status"] == "review_required"
+    capture.pop("raw_frame_path")
+    missing = Model()
+    result = await review_visual_evidence(state, missing, capture, "pickup")
+    assert result["status"] == "review_required" and "same-capture" in result["error"]
+    assert missing.inputs == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("tool", ["lerobot.replay.start", "execute_verification", "return_to_owner"])
 async def test_review_only_accepts_bounded_review_tools(state, capture, tool):
     from agents.vision_decision import review_visual_evidence

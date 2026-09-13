@@ -38,7 +38,6 @@ from agents.knowledge_agent import KnowledgeAgent
 from agents.manipulation_agent import ManipulationAgent
 from agents.orchestrator_agent import OrchestratorAgent
 from agents.registry import AgentRegistry
-from agents.specimen_agent import SpecimenMakingAgent
 from agents.vision_agent import VisionAgent
 from app.controller import ControllerDeps, MainController
 from backends.mock_llm import MockLLMBackend
@@ -354,7 +353,6 @@ def load_runtime() -> MainController:
     agent_registry.register(BOAgent())
     for module in discover_agent_modules():
         agent_registry.register_module(module)
-    agent_registry.register(SpecimenMakingAgent())
     agent_registry.register(VisionAgent())
     agent_registry.register(ManipulationAgent())
     agent_registry.register(LabEquipmentAgent())

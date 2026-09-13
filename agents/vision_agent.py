@@ -35,6 +35,7 @@ from agents.vision_decision import (
     review_visual_evidence, select_vision_tool,
 )
 from utils.agent_artifact_archive import archive_agent_run
+from utils.test_mode_execution_profiles import is_resolved_all_virtual_bridge
 from orchestrator.state import Mode, OrchestratorState
 from utils.utm_specimen_presence import inspect_specimen_presence_path
 from utils.vision_operator_intervention import (
@@ -2495,7 +2496,9 @@ class VisionAgent(BaseAgent):
         try:
             return ctx.tools.call(
                 "vision.utm_runtime.start",
-                {"mode": state.mode.value, "source": "vision_agent.preflight", "agent": self.name},
+                {"mode": self._camera_runtime_mode(state), "source": "vision_agent.preflight", "agent": self.name,
+                 **({"prefer_virtual_bridge_in_test": True} if is_resolved_all_virtual_bridge(
+                     state.current_experiment_spec, mode=state.mode) else {})},
             )
         except Exception as exc:
             return {
@@ -2686,6 +2689,7 @@ class VisionAgent(BaseAgent):
         if (
             str(policy.get("vision") or "").strip().lower() == "preflight_only"
             and not equipment_owned_utm_verification
+            and not is_resolved_all_virtual_bridge(spec, mode=state.mode)
         ):
             specimen_id = str(specimen.get("specimen_id") or spec.get("specimen_id") or "")
             candidate_id = str(specimen.get("candidate_id") or spec.get("candidate_id") or "")
@@ -2721,7 +2725,7 @@ class VisionAgent(BaseAgent):
             )
         printer_preflight = (
             {}
-            if equipment_owned_utm_verification
+            if equipment_owned_utm_verification or is_resolved_all_virtual_bridge(spec, mode=state.mode)
             else self._no_actuation_transfer_preflight(state)
         )
         if printer_preflight:
@@ -2814,6 +2818,25 @@ class VisionAgent(BaseAgent):
                         300.0,
                     ),
                 }
+                if is_resolved_all_virtual_bridge(spec, mode=state.mode):
+                    # Only the host's current Specimen result supplies render authority.
+                    mesh_path = Path(str(specimen.get("stl_path") or "")).expanduser()
+                    mesh_sha = ""
+                    try:
+                        if mesh_path.is_file() and mesh_path.stat().st_size <= 64 * 1024 * 1024:
+                            mesh_sha = hashlib.sha256(mesh_path.read_bytes()).hexdigest()
+                    except OSError:
+                        pass  # The registered camera returns unknown for an invalid requested mesh.
+                    tool_payload.update(loop_id=state.loop_count,
+                        candidate_id=spec.get("candidate_id") or specimen.get("candidate_id"),
+                        virtual_specimen_mesh_required=True)
+                    tool_payload["virtual_specimen_mesh"] = {
+                        "schema": "virtual_specimen_mesh.v1",
+                        **{key: tool_payload[key] for key in ("run_id", "loop_id", "session_id")},
+                        "specimen_id": specimen.get("specimen_id"), "candidate_id": specimen.get("candidate_id"),
+                        "stl_path": str(mesh_path), "stl_sha256": mesh_sha,
+                        "geometry_hash": specimen.get("geometry_hash") or (specimen.get("geometry_report") or {}).get("geometry_hash"),
+                    }
                 response = dict(ctx.tools.call(tool_name, tool_payload))
                 response.setdefault("frame_id", frame_id)
                 response.setdefault("observation_id", f"obs-{response['frame_id']}")

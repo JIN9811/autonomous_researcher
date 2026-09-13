@@ -5,7 +5,9 @@ import json
 import math
 
 
-MAX_PROMPT_BYTES = 16000
+# Full-cycle Guardian contracts include current alarms and action receipts.
+# Keep them exact while retaining a hard, finite UTF-8 presentation boundary.
+MAX_PROMPT_BYTES = 32000
 CURRENT_FIELDS = {
     "schema", "status", "success", "ok", "ready", "completed", "admitted", "mandatory",
     "owner", "agent", "source", "phase", "stage", "next_stage", "target", "candidate", "capability",

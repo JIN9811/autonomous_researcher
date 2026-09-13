@@ -370,6 +370,148 @@ def test_guardian_gate_reports_bo_block_update_taxonomy() -> None:
     assert gate["guardian_decision"]["taxonomy_action"] == "block_bo_update"
     assert gate["guardian_decision"]["recommended_action"] == "block_bo_update_and_request_new_candidate"
 
+
+def test_analysis_gate_reads_canonical_bo_readiness_without_misclassifying_boundary_warning() -> None:
+    gate = guardian_gate(
+        state=_state(Stage.ANALYSIS),
+        stage="analysis",
+        phase="post",
+        agent="analysis_agent",
+        payload={
+            "bo_handoff": {"schema_version": "analysis_bo_handoff_v2", "ok_for_bo": True},
+            "bo_observation": {"schema": "bo_observation.v1", "ok_for_bo": True},
+            "quality_gate": {
+                "schema": "analysis_quality_gate.v1",
+                "ok_for_bo": True,
+                "warnings": ["peak_at_curve_boundary"],
+            },
+        },
+    )
+
+    assert gate["ok_for_bo"] is True
+    assert any(alarm["reason_code"] == "PEAK_AT_CURVE_BOUNDARY" for alarm in gate["alarms"])
+    assert not any(alarm["reason_code"] == "BO_CANDIDATE_UNSAFE" for alarm in gate["alarms"])
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"bo_handoff": {"ok_for_bo": False}},
+        {"bo_handoff": {"ok_for_bo": "false"}},
+        {"bo_handoff": {"ok_for_bo": True}, "ok_for_bo": False},
+        {"bo_handoff": {"ok_for_bo": True}, "bo_observation": {"ok_for_bo": False}},
+        {"bo_handoff": {"ok_for_bo": True}, "quality_gate": {"ok_for_bo": None}},
+    ],
+    ids=["absent", "canonical-false", "canonical-malformed", "legacy-conflict", "observation-conflict", "quality-malformed"],
+)
+def test_analysis_gate_conservatively_rejects_missing_false_malformed_or_conflicting_readiness(
+    payload: dict,
+) -> None:
+    gate = guardian_gate(
+        state=_state(Stage.ANALYSIS),
+        stage="analysis",
+        phase="post",
+        agent="analysis_agent",
+        payload=payload,
+    )
+
+    assert gate["ok_for_bo"] is False
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"ok_for_bo": True},
+        {"analysis": {"ok_for_bo": True}},
+    ],
+    ids=["top-level", "nested-analysis"],
+)
+def test_analysis_gate_supports_legacy_readiness_when_canonical_claims_are_absent(payload: dict) -> None:
+    gate = guardian_gate(
+        state=_state(Stage.ANALYSIS),
+        stage="analysis",
+        phase="post",
+        agent="analysis_agent",
+        payload=payload,
+    )
+
+    assert gate["ok_for_bo"] is True
+
+
+@pytest.mark.parametrize(
+    "failure_tag,expected_reason",
+    [
+        ("BO_CANDIDATE_UNSAFE", "BO_CANDIDATE_UNSAFE"),
+        ("DATA_PARSE_FAILED", "DATA_PARSE_FAILED"),
+        ("DATA_QUALITY_LOW", "DATA_QUALITY_LOW"),
+    ],
+)
+def test_analysis_gate_keeps_genuine_bo_and_data_failures_out_of_bo(failure_tag: str, expected_reason: str) -> None:
+    gate = guardian_gate(
+        state=_state(Stage.ANALYSIS),
+        stage="analysis",
+        phase="post",
+        agent="analysis_agent",
+        payload={
+            "bo_handoff": {"ok_for_bo": True},
+            "failure_tags": [failure_tag],
+        },
+    )
+
+    assert gate["ok_for_bo"] is False
+    assert any(alarm["reason_code"] == expected_reason for alarm in gate["alarms"])
+
+
+def test_analysis_gate_keeps_stop_and_approval_out_of_bo() -> None:
+    stopped = _state(Stage.ANALYSIS)
+    stopped.stop_requested = True
+    stop_gate = guardian_gate(
+        state=stopped,
+        stage="analysis",
+        phase="post",
+        payload={"bo_handoff": {"ok_for_bo": True}},
+    )
+    approval_gate = guardian_gate(
+        state=_state(Stage.ANALYSIS),
+        stage="analysis",
+        phase="post",
+        payload={"bo_handoff": {"ok_for_bo": True}, "requires_human_approval": True},
+    )
+
+    assert gate_blocks_execution(stop_gate) is True
+    assert stop_gate["ok_for_bo"] is False
+    assert approval_gate["decision"] == "require_human_approval"
+    assert approval_gate["ok_for_bo"] is False
+
+
+@pytest.mark.parametrize(
+    "current_fields,expected_reason",
+    [
+        ({"failure_code": "BO_CANDIDATE_UNSAFE"}, "BO_CANDIDATE_UNSAFE"),
+        ({"safe_stop_recommended": True}, "OPERATOR_STOP_REQUESTED"),
+    ],
+)
+def test_guardian_archive_envelope_does_not_hide_explicit_current_failure(
+    current_fields: dict,
+    expected_reason: str,
+) -> None:
+    gate = guardian_gate(
+        state=_state(Stage.KNOWLEDGE),
+        stage="knowledge",
+        phase="post",
+        payload={
+            "guardian_incident_evidence": {
+                "schema": "guardian_incident_evidence.v1",
+                "incident_records": [{"failure_code": "DATA_PARSE_FAILED", "status": "closed"}],
+                **current_fields,
+            }
+        },
+    )
+
+    assert any(alarm["reason_code"] == expected_reason for alarm in gate["alarms"])
+    assert gate["ok_for_bo"] is False
+
 def test_guardian_gate_allows_expected_test_dry_run_print_disabled_marker() -> None:
     state = OrchestratorState(run_id="run-gate-test", experiment_id="exp-gate-test", mode=Mode.TEST, stage=Stage.SPECIMEN)
     gate = guardian_gate(

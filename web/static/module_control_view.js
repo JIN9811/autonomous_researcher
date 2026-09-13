@@ -11,6 +11,18 @@
     runtime:{background:'#0c1524',node:'#132135',text:'#e6edf7',muted:'#a7b7cf',colors:AREAS.map(row=>row[2])},
     document:{background:'#ffffff',node:'#ffffff',text:'#172b4d',muted:'#526174',colors:['#2463a5','#177768','#4c6079','#a36b16','#79529c']},
   };
+  function sharedGeometry() {
+    if(root.ATRRuntimeGraphGeometry)return root.ATRRuntimeGraphGeometry;
+    if(typeof require!=='function')return null;
+    const host=globalThis,hadWindow=Object.prototype.hasOwnProperty.call(host,'window'),previousWindow=host.window;
+    try {
+      host.window=host;
+      require('./runtime_graph_geometry.js');
+      return host.ATRRuntimeGraphGeometry || null;
+    } finally {
+      if(hadWindow)host.window=previousWindow;else delete host.window;
+    }
+  }
   const palette=options=>THEMES[options?.theme || 'runtime'] || THEMES.runtime;
   const areaColor=(area,theme)=>theme.colors[AREAS.findIndex(row=>row[0]===area)] || theme.muted;
   const esc = value => String(value ?? '').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -118,23 +130,32 @@
   function renderSvg(module,options={theme:'document'}) {
     const theme=palette(options),control=layout(module,options.catalog);
     if(!control)throw new Error('No control view declared');
+    const geometry=sharedGeometry();
+    if(!geometry)throw new Error('Shared runtime graph geometry is unavailable');
     const boxes=groupBoxes(control.nodes,control);
     const width=Math.max(...boxes.map(box=>box.x+box.width))+24;
     const height=Math.max(...boxes.map(box=>box.y+box.height))+134;
-    const edges=control.edges.map((edge,index)=>{
+    const edgeRecords=control.edges.flatMap((edge,index)=>{
       const previous=control.nodes.find(node=>node.key===edge.source),node=control.nodes.find(node=>node.key===edge.target);
-      if(!previous || !node)return '';
+      if(!previous || !node)return [];
+      const ports=geometry.inferPorts(previous,node,{nodeWidth:184,nodeHeight:76});
+      return [{...edge,key:`${edge.source}->${edge.target}:${edge.on}:${index}`,source:previous,target:node,sourceSide:ports.sourceSide,targetSide:ports.targetSide}];
+    });
+    geometry.assignOffsets(edgeRecords,{nodeWidth:184,nodeHeight:76,edgeSpacing:14,parallelSpacing:30});
+    const detailNodes=internalDetails(control.nodes,control).nodes;
+    const obstacles=[...control.nodes,...detailNodes].map(node=>({left:node.position.x-3,top:node.position.y-3,right:node.position.x+187,bottom:node.position.y+79}));
+    const labelDrafts=edgeRecords.map(edge=>{
+      const labelWidth=Math.max(38,String(edge.on).length*6+14);
+      const origin=geometry.labelPoint(edge,{nodeWidth:184,nodeHeight:76,labelT:.5});
+      const candidates=Array.from({length:37},(_,index)=>geometry.labelPoint(edge,{nodeWidth:184,nodeHeight:76,labelT:.14+index*.02}));
+      return {...edge,x:origin.x,y:origin.y,width:labelWidth,height:20,candidates};
+    });
+    const labels=geometry.resolveLabelCollisions(labelDrafts,{gap:5,obstacles,maxX:width,maxY:height});
+    const edges=edgeRecords.map((edge,index)=>{
       const type=edge.kind,[,,dash]=TYPES[type] || TYPES.execution;
       const color=type==='validation'?areaColor('guardian',theme):type==='evidence'?areaColor('knowledge',theme):theme.muted;
-      const a=previous.position,b=node.position;
-      const siblings=control.edges.filter(item=>item.source===edge.source && item.target===edge.target),offset=(siblings.indexOf(edge)-(siblings.length-1)/2)*30;
-      const vertical=Math.abs(b.y-a.y)>100;
-      const sx=vertical?a.x+92:a.x+(b.x>a.x?184:0),sy=vertical?a.y+(b.y>a.y?76:0):a.y+38;
-      const tx=vertical?b.x+92:b.x+(b.x>a.x?0:184),ty=vertical?b.y+(b.y>a.y?0:76):b.y+38;
-      const midX=(sx+tx)/2,midY=(sy+ty)/2+offset;
-      const labelWidth=Math.max(38,String(edge.on).length*6+14);
-      const path=vertical?`M${sx},${sy} C${sx},${midY} ${tx},${midY} ${tx},${ty}`:`M${sx},${sy} C${midX},${sy+offset*2} ${midX},${ty+offset*2} ${tx},${ty}`;
-      return `<g data-source="${esc(edge.source)}" data-target="${esc(edge.target)}" data-outcome="${esc(edge.on)}" data-kind="${esc(type)}"><title>${esc(edge.source)} → ${esc(edge.target)} · ${esc(edge.on)} · ${esc(type)}</title><path d="${path}" fill="none" stroke="${color}" stroke-opacity=".8" stroke-width="2" stroke-dasharray="${dash}" marker-end="url(#control-arrow)"/>${control.executable?`<rect x="${midX-labelWidth/2}" y="${midY-13}" width="${labelWidth}" height="20" rx="4" fill="${theme.background}"/><text x="${midX}" y="${midY+1}" text-anchor="middle" fill="${color}" font-size="11">${esc(edge.on)}</text>`:''}</g>`;
+      const label=labels[index],path=geometry.path(edge,{nodeWidth:184,nodeHeight:76});
+      return `<g data-source="${esc(edge.source.key)}" data-target="${esc(edge.target.key)}" data-outcome="${esc(edge.on)}" data-kind="${esc(type)}"><title>${esc(edge.source.key)} → ${esc(edge.target.key)} · ${esc(edge.on)} · ${esc(type)}</title><path d="${path}" fill="none" stroke="${color}" stroke-opacity=".8" stroke-width="2" stroke-dasharray="${dash}" marker-end="url(#control-arrow)"/>${control.executable?`<rect x="${label.x-label.width/2}" y="${label.y-label.height/2}" width="${label.width}" height="${label.height}" rx="4" fill="${theme.background}"/><text x="${label.x}" y="${label.y+4}" text-anchor="middle" fill="${color}" font-size="11">${esc(edge.on)}</text>`:''}</g>`;
     }).join('');
     const nodes=control.nodes.map(node=>{
       const words=node.label.split(/\s+/), rows=[''];

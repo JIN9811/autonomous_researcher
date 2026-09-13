@@ -258,6 +258,9 @@ def _try_write_stl_iso_capture_png(
     stl_path: Path,
     specimen_id: str,
     geometry_type: str,
+    material_color: tuple[int, int, int] | None = None,
+    canvas_size: tuple[int, int] = (760, 420),
+    background_color: tuple[int, int, int] | None = None,
 ) -> bool:
     """Render an actual STL mesh into a deterministic isometric PNG preview."""
     try:
@@ -274,7 +277,11 @@ def _try_write_stl_iso_capture_png(
         faces = np.asarray(mesh.faces, dtype=int)
     except Exception:
         return False
-    if vertices.size == 0 or faces.size == 0:
+    if (vertices.size == 0 or faces.size == 0 or not np.isfinite(vertices).all()
+            or vertices.ndim != 2 or vertices.shape[1] != 3 or faces.ndim != 2 or faces.shape[1] != 3
+            or faces.min() < 0 or faces.max() >= len(vertices)):
+        return False
+    if not math.isfinite(float(mesh.area)) or mesh.area <= 0:
         return False
 
     # Keep the surface solid in small GUI cards.  The old 18k face stride made
@@ -284,17 +291,18 @@ def _try_write_stl_iso_capture_png(
         stride = max(1, math.ceil(len(faces) / max_faces))
         faces = faces[::stride]
 
-    width, height = 760, 420
+    width, height = canvas_size
     scale_factor = 2
     render_size = (width * scale_factor, height * scale_factor)
-    image = Image.new("RGB", render_size, "#07111f")
+    image = Image.new("RGB", render_size, background_color or "#07111f")
     draw = ImageDraw.Draw(image, "RGBA")
 
-    for y in range(render_size[1]):
-        r = int(7 + y * 0.009)
-        g = int(17 + y * 0.013)
-        b = int(31 + y * 0.021)
-        draw.line([(0, y), (render_size[0], y)], fill=(r, g, min(b, 66), 255))
+    if background_color is None:
+        for y in range(render_size[1]):
+            r = int(7 + y * 0.009)
+            g = int(17 + y * 0.013)
+            b = int(31 + y * 0.021)
+            draw.line([(0, y), (render_size[0], y)], fill=(r, g, min(b, 66), 255))
     centered = vertices - ((vertices.min(axis=0) + vertices.max(axis=0)) / 2.0)
     iso_x = (centered[:, 0] - centered[:, 1]) * 0.8660254
     iso_y = (centered[:, 0] + centered[:, 1]) * 0.50 - centered[:, 2] * 0.92
@@ -340,7 +348,7 @@ def _try_write_stl_iso_capture_png(
         "auxetic_reentrant": (244, 114, 182),
         "random_voronoi": (34, 211, 238),
     }
-    base = palette.get(str(geometry_type), (96, 165, 250))
+    base = material_color if material_color is not None else palette.get(str(geometry_type), (96, 165, 250))
     screen_points = np.column_stack([px, py])
     for face_index in order:
         face = faces[face_index]

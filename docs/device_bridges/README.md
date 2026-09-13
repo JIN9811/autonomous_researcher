@@ -114,6 +114,25 @@ Current paths worth distinguishing:
 
 ## Extension Points
 
+### Package-Owned Bridge Composition
+
+The current modularized fabrication slice declares a
+[Specimen Agent Package](../../packages/agents/specimen/package.yaml) referencing
+one [Printer Fleet module](../../device_bridges/printer_fleet/README.md).
+Its [Bambu](../../device_bridges/bambu/README.md) and
+[Prusa](../../device_bridges/prusa/README.md) provider folders each include Python
+requirements and external-tool notes. Bridge source stays under `device_bridges/`,
+not inside the agent package; flat imports remain compatibility adapters.
+
+`GET /api/packages` describes installed ownership without hardware probes.
+[Experimental Packages](../../packages/README.md) combine exact installed package
+references, orchestration plans and portable module drafts. Importing a package
+does not install code, configure equipment, activate a graph or delete shared
+bridges. Other bridge families retain their current structure until their own
+module migration.
+
+### Existing Integration Boundaries
+
 Extend the narrowest existing boundary that fits the new capability.
 
 | Change | Reuse first | Device-specific work |

@@ -8,6 +8,29 @@ from types import SimpleNamespace
 import pytest
 
 
+def virtual_device_io(controller, tmp_path, guard):
+    """Use the deployed simulator implementations, with native effects guarded."""
+    from mcp_tools.camera_tools import register_camera_tools
+    from mcp_tools.lerobot_tools import register_lerobot_tools
+    from utils.config_loader import load_all_configs
+    tools = controller._deps.agent_context.tools
+    register_camera_tools(tools)
+    register_lerobot_tools(tools, load_all_configs(Path("configs")).get("lerobot", {}), repo_root=tmp_path)
+    from tests.unit.test_lerobot_replay import dataset_at
+    dataset_at(tmp_path / "replay/jin/utm_clear")
+    names = ("camera.capture", "vision.utm_runtime.start", "vision.utm_specimen_presence.capture",
+        "vision.equipment_cross_check", "lerobot.camera.test", "lerobot.active_robot_cam.capture",
+        "lerobot.rollout.start", "lerobot.rollout.status", "lerobot.rollout.stop",
+        "lerobot.replay.start", "lerobot.replay.status", "lerobot.replay.stop")
+    for name in names:
+        original = tools._tools[name]
+        guard.allowed_tools.add(name)
+        def call(payload, callback=original, name=name):
+            guard.simulated_boundary_requests.append({"tool": name, "payload": deepcopy(payload)})
+            return callback(payload)
+        tools.register(name, call)
+
+
 @pytest.fixture
 def numeric_archive_guard(tmp_path, monkeypatch):
     """Isolate the existing numeric/archive regressions before owner execution."""
@@ -212,20 +235,28 @@ def equipment_io(controller, monkeypatch, tmp_path, guard):
         if block == "save_raw_data":
             context = payload["export_context"]
             saved["context"] = deepcopy(context)
-            assert all(str(context[key]).replace("-", "").isalnum() for key in ("session_id", "specimen_id"))
+            assert all(str(context[key]).replace("-", "").replace("_", "").isalnum() for key in ("session_id", "specimen_id"))
             filename = (f"{context['mode']}_{context['session_id']}_{context['specimen_id']}_"
                 f"loop-{context['loop_index']:04d}_rep-{context['repeat_index']:04d}.csv")
             csv = root / filename
-            values = [0, 80, 180, 310, 430, 520, 500, 455, 390, 340, 300]
-            data = "time_s,force_N,displacement_mm\n" + "".join(f"{i / 2},{force},{i / 2}\n" for i, force in enumerate(values))
-            csv.write_text(data)
+            if payload.get("virtual_bridge_simulation") is True:
+                import shutil
+                shutil.copyfile(result["result_file"], csv)
+                saved["row_count"] = result["data_acquisition"]["row_count_probe"]
+                saved["columns"] = result["data_acquisition"]["columns_probe"]
+            else:
+                values = [0, 80, 180, 310, 430, 520, 500, 455, 390, 340, 300]
+                data = "time_s,force_N,displacement_mm\n" + "".join(f"{i / 2},{force},{i / 2}\n" for i, force in enumerate(values))
+                csv.write_text(data)
+                saved.update(row_count=11, columns=["time_s", "force_N", "displacement_mm"])
             saved.update(path=str(csv), sha=hashlib.sha256(csv.read_bytes()).hexdigest(), windows="C:/exports/" + filename)
         if block in {"save_raw_data", "validate_raw_data"}:
             artifact = {"kind": "utm_csv", "artifact_id": "controlled-export", "windows_path": saved["windows"],
                 "local_path": saved["path"], "linux_path": saved["path"], "run_id": payload["run_id"],
                 "specimen_id": saved["context"]["specimen_id"], "sha256": saved["sha"], "pulled_to_linux": True,
-                "local_parse_ok": True, "row_count_probe": 11,
-                "columns_probe": ["time_s", "force_N", "displacement_mm"], "stable_for_sec": 2}
+                "local_parse_ok": True, "row_count_probe": saved["row_count"],
+                "columns_probe": saved["columns"], "stable_for_sec": 2,
+                "synthetic": True}
             result.update(run_id=payload["run_id"], specimen_id=saved["context"]["specimen_id"],
                 result_file=saved["path"], utm_csv_path=saved["path"], output_artifacts=[artifact],
                 data_acquisition={**deepcopy(artifact), "status": "pulled_to_linux"})

@@ -24,6 +24,30 @@ AGENT_POLICY_KEYS = {
 }
 
 
+def is_resolved_all_virtual_bridge(spec: Mapping[str, Any], *, mode: Any) -> bool:
+    """Recognize host-resolved virtual execution, distinct from standalone preflight."""
+    if not isinstance(spec, Mapping):
+        return False
+    profile = spec.get("test_mode_profile")
+    if not isinstance(profile, Mapping):
+        return False
+    agents = profile.get("agents")
+    derived = profile.get("derived")
+    return bool(
+        profile.get("schema") == RESOLVED_SCHEMA
+        and profile.get("profile_id") == "virtual_bridge"
+        and spec.get("printer_test_path") == "virtual_bridge"
+        and spec.get("test_printer_transport") == "virtual"
+        and (getattr(mode, "value", mode) == "test"
+             or spec.get("test_mode_autofill") or spec.get("test_mode_llm_generated"))
+        and isinstance(agents, Mapping)
+        and all(isinstance(agents.get(key), Mapping)
+                and agents[key].get("device_mode") == "virtual" for key in AGENT_POLICY_KEYS)
+        and isinstance(derived, Mapping)
+        and derived.get("operator_teleop_required") is False
+    )
+
+
 class TestModeExecutionProfileError(ValueError):
     """Base error for test-mode execution profile operations."""
 
@@ -384,5 +408,6 @@ __all__ = [
     "TestModeExecutionProfileError",
     "TestModeExecutionProfileStore",
     "TestModeExecutionProfileValidationError",
+    "is_resolved_all_virtual_bridge",
     "validate_profile",
 ]

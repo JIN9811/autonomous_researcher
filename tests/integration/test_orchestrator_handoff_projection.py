@@ -179,6 +179,44 @@ def test_inspection_trace_never_reintroduces_raw_payload_and_oversized_condition
         project_handoff_prompt(raw)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("oversized", [False, True])
+async def test_full_current_guardian_contract_has_bounded_decision_headroom(oversized):
+    from agents.orchestrator_decision import decide_orchestration
+    from orchestrator.handoff_projection import project_handoff_prompt
+    raw = packet()
+    gate = raw["evidence"]["boundary:result"]["guardian_context"]
+    # Current action receipts are authoritative, not optional historical text.
+    gate["corrective_actions"] = [{"action": "owner_review", "status": "pending",
+        "reason": "Current required evidence must remain available. " * 20,
+        "receipt_id": str(i)} for i in range(40 if oversized else 18)]
+    before = deepcopy(raw)
+    scope = deepcopy(raw["scope"]["context"])
+    prompts, effects = [], []
+    async def complete(task, prompt, **kwargs):
+        prompts.append(json.loads(prompt))
+        assert 16_000 < len(prompt.encode("utf-8")) <= 32_000
+        assert prompts[-1]["evidence"]["boundary:result"]["guardian_context"]["corrective_actions"] == gate["corrective_actions"]
+        return SimpleNamespace(model="offline-contract-fixture", text=json.dumps({"tool": "defer",
+            "arguments": {"condition": "current owner review required"}, "reason": "current Guardian contract",
+            "evidence_refs": ["boundary:result"]}))
+    async def defer(args):
+        effects.append(args)
+        return {"status": "deferred", **args}
+    state = SimpleNamespace(run_id="r", loop_count=0, stage=SimpleNamespace(value="equipment"))
+    result = await decide_orchestration(state, SimpleNamespace(complete=complete), context={
+        "scope": scope, "current_scope": lambda: deepcopy(scope), "evidence": raw["evidence"],
+        "required_evidence": ["boundary:result"], "prompt_projection": project_handoff_prompt},
+        handlers={"defer": defer})
+    assert raw == before
+    if oversized:
+        assert result["status"] == "failed" and "budget" in result["reason"]
+        assert prompts == effects == []
+    else:
+        assert result["status"] == "deferred"
+        assert len(prompts) == len(effects) == 1
+
+
 def test_optional_reference_pack_is_explicitly_excluded_when_current_contract_uses_budget():
     """A Wiki addition cannot displace the complete existing owner contract."""
     from orchestrator.handoff_projection import MAX_PROMPT_BYTES, project_handoff_prompt

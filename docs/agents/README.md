@@ -102,7 +102,7 @@ implementations remain authoritative.
 |---|---|---|
 | [Orchestrator](orchestrator_agent.md) | Bounded decisions, canonical Setup proposals, registered mission and agent handoffs | [Source](../../agents/orchestrator_agent.py) · [Module](../../graphs/modules/orchestrator/module.yaml) |
 | [Design](design_agent.md) | Candidate suitability | [Source](../../agents/design/agent.py) · [Code module](../../agents/design/module.py) · [Graph module](../../graphs/modules/design/module.yaml) |
-| [Specimen](specimen_agent.md) | Fabrication tools | [Source](../../agents/specimen_agent.py) · [Module](../../graphs/modules/specimen/module.yaml) |
+| [Specimen](specimen_agent.md) | Fabrication suitability and tools | [Owner](../../agents/specimen/agent.py) · [Code module](../../agents/specimen/module.py) · [Execution graph](../../graphs/modules/specimen/module.yaml) · [Agent Package](../../packages/agents/specimen/package.yaml) |
 | [Vision](vision_agent.md) | Visual evidence | [Source](../../agents/vision_agent.py) · [Module](../../graphs/modules/vision/module.yaml) |
 | [Manipulation](manipulation_agent.md) | Robot skills and completion | [Source](../../agents/manipulation_agent.py) · [Module](../../graphs/modules/manipulation/module.yaml) |
 | [Equipment](equipment_agent.md) | Stacked Flow selection, terminal review and bounded recovery | [Source](../../agents/equipment_agent.py) · [Module](../../graphs/modules/equipment/module.yaml) |
@@ -121,7 +121,7 @@ agents without repeating full implementation prose.
 |---|---|
 | Orchestrator | [Flow](assets/figures/orchestrator_01_closed_loop_handoffs.svg) · [Execution](assets/figures/orchestrator_02_execution_effect_boundary.svg) · [Connections](assets/figures/orchestrator_03_api_connection_architecture.svg) |
 | Design | [Flow](assets/figures/design_01_closed_loop_handoffs.svg) · [Execution](assets/figures/design_02_execution_effect_boundary.svg) · [Connections](assets/figures/design_03_api_connection_architecture.svg) |
-| Specimen Making | [Flow](assets/figures/specimen_01_closed_loop_handoffs.svg) · [Execution](assets/figures/specimen_02_execution_effect_boundary.svg) · [Connections](assets/figures/specimen_03_api_connection_architecture.svg) |
+| Specimen Making | [Control areas](assets/figures/specimen_control_areas.svg) · [Flow](assets/figures/specimen_01_closed_loop_handoffs.svg) · [Execution](assets/figures/specimen_02_execution_effect_boundary.svg) · [Connections](assets/figures/specimen_03_api_connection_architecture.svg) |
 | Vision | [Flow](assets/figures/vision_01_closed_loop_handoffs.svg) · [Execution](assets/figures/vision_02_execution_effect_boundary.svg) · [Connections](assets/figures/vision_03_api_connection_architecture.svg) |
 | Manipulation | [Flow](assets/figures/manipulation_01_closed_loop_handoffs.svg) · [Execution](assets/figures/manipulation_02_execution_effect_boundary.svg) · [Connections](assets/figures/manipulation_03_api_connection_architecture.svg) |
 | Lab Equipment | [Flow](assets/figures/equipment_01_closed_loop_handoffs.svg) · [Execution](assets/figures/equipment_02_execution_effect_boundary.svg) · [Connections](assets/figures/equipment_03_api_connection_architecture.svg) |

@@ -12,8 +12,8 @@ source_of_truth:
   - policies/guardian_gate.py
   - app/controller.py
   - app/main.py
-last_verified: 2026-08-09
-verified_against: 0b7627b
+last_verified: 2026-09-13
+verified_against: working-tree-2026-09-13
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -148,6 +148,20 @@ Unknown state never becomes an allow decision through model fallback. Approval
 resolution, incident notes, and corrective action may add evidence, but they do
 not rewrite the original failure or gate history.
 
+### BO admission and historical evidence
+
+BO readiness is an Analysis-owned claim, not a conclusion inferred from the
+absence of warnings. Guardian checks the canonical `quality_gate`, `bo_handoff`
+and `bo_observation` readiness fields; missing, malformed or contradictory
+claims do not become permission to update BO. Legacy readiness fields remain
+compatible, with an explicit negative claim taking precedence.
+
+Reason classification uses BO domain tokens/codes rather than matching `BO`
+inside unrelated words such as `boundary`. Knowledge's archived incident
+evidence remains available for audit and retrieval, but is not recursively
+reissued as a new current-stage alarm. Current failures, active hardware
+alerts, stop requests and approval requirements retain their gating authority.
+
 ## API Surface
 
 | Class | Method | Path/family | Handler/service | Effect | Notes |
@@ -223,6 +237,14 @@ server-side requests. Incident-note APIs append operator context without
 rewriting the original incident.
 
 ## Current Verification
+
+The 2026-09-13 BO-admission correction passed 48 focused Guardian/Knowledge
+checks and 32 additional Guardian agent, action-shield and fault-matrix checks.
+They cover the curve-boundary warning, canonical and legacy readiness, historical
+evidence isolation and retained current BO/data, stop and approval blockers.
+Both runs reported five existing schema-field warnings. These non-actuating
+regressions are not physical safety validation; registered-model cycle evidence
+is tracked in the [implementation verification record](../superpowers/plans/2026-09-13-specimen-agent-packages.md#verification-record).
 
 The 2026-09-07 working-tree correction preserves unavailable-link diagnostics
 from Equipment transitions explicitly marked `phase: vision`,

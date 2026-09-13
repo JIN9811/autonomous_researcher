@@ -181,7 +181,7 @@ async def _capture(agent, state, ctx, result, execution_id):
     if "equipment.pyautogui.screenshot" not in ctx.tools.list_tools():
         return [], {"ok": False, "error": "screenshot tool unavailable"}
     try:
-        raw = await agent._call_tool(ctx, "equipment.pyautogui.screenshot", {**payload, "checkpoint": "workflow_terminal"})
+        raw = await agent._call_tool(ctx, "equipment.pyautogui.screenshot", {**payload, "checkpoint": "workflow_terminal"}, state=state)
         if raw.get("ok") is not True:
             raise ValueError("screenshot capture failed")
         if payload["runtime_mode"] == "live" and (raw.get("mode") != "live" or raw.get("simulated") is True):
@@ -260,7 +260,7 @@ async def run_decided_workflow(agent, state, ctx, flow):
     source_settings = state.run_metadata.get("knowledge_settings", {})
     source_scope = source_settings.get("source_scope", {}) if isinstance(source_settings, dict) else {}
     reference_context = await asyncio.to_thread(source_context, ctx, state.active_goal, scope=source_scope)
-    checkpoint, decisions, diagnostics = {}, [], []
+    checkpoint, decisions, diagnostics = {"workflow_execution_id": execution_id}, [], []
     result = None
     attempts = 0
     def valid():
@@ -337,7 +337,7 @@ async def run_decided_workflow(agent, state, ctx, flow):
                 if choice == "observe_workflow":
                     observed = True
                     if "equipment.pyautogui.request_log" in ctx.tools.list_tools():
-                        log = await agent._call_tool(ctx, "equipment.pyautogui.request_log", _payload(agent, state, result, execution_id))
+                        log = await agent._call_tool(ctx, "equipment.pyautogui.request_log", _payload(agent, state, result, execution_id), state=state)
                         diagnostics.append({"request_log": log})
                     phase = "terminal_review"
                     continue
@@ -359,7 +359,7 @@ async def run_decided_workflow(agent, state, ctx, flow):
                         action = _focus_action(state, result)
                         recovery_result = await agent._call_tool(ctx, "equipment.pyautogui.run", {
                             **_payload(agent, state, result, execution_id), "sequence": [action],
-                            "sequence_id": f"{execution_id}-recovery-{attempts}"})
+                            "sequence_id": f"{execution_id}-recovery-{attempts}"}, state=state)
                     diagnostics.append({"recovery": recovery_result, "guardian": gate})
                     if recovery_result.get("ok") is not True:
                         result = _blocked("EQUIPMENT_WORKFLOW_RECOVERY_FAILED", result)

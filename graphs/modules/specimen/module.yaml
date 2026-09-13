@@ -1,4 +1,9 @@
 module:
+  implementation:
+    schema: ax4lab.agent_module.v1
+    id: specimen
+    version: 1.0.0
+    registration: installed_code
   orchestration_contract:
     version: orchestration_contract.v1
     admission:
@@ -24,40 +29,37 @@ module:
   - artifact.create_specimen_handoff
   - experiment.evaluate
   - printer.prepare
-  internal_graph:
-    - id: 01_spec_intake
-      label: Spec Intake / Required Field Gate
-      kind: internal_step
-    - id: 02_resolve_fabrication_intent
-      label: Resolve Fabrication Intent
-      kind: internal_step
-    - id: 03_initialize_digital_thread
-      label: Initialize Manufacturing Digital Thread
-      kind: internal_step
-    - id: 04_generate_geometry_stl
-      label: Generate Geometry STL
-      kind: internal_step
-    - id: 05_mesh_dimensional_qa
-      label: Mesh and Dimensional QA
-      kind: internal_step
-    - id: 06_printability_process_plan
-      label: Printability and Fabrication Suitability
-      kind: internal_step
-    - id: 07_slice_gcode_qa
-      label: Slicing and G-code QA
-      kind: internal_step
-    - id: 08_execution_gate
-      label: Execution Gate / Virtual or Live Bridge
-      kind: internal_step
-    - id: 09_fabrication_monitoring
-      label: Fabrication Monitoring Evidence
-      kind: internal_step
-    - id: 10_repair_or_stop_decision
-      label: Repair or Stop Decision
-      kind: internal_step
-    - id: 11_handoff_vision_manipulation
-      label: Specimen Fabricated Handoff
-      kind: internal_step
+  execution_graph:
+    schema: ax4lab.execution_graph.v1
+    entry: prepare
+    nodes:
+    - id: prepare
+      handler: specimen.prepare
+      label: Prepare geometry and manufacturing evidence
+      area: middle
+    - id: decide
+      handler: specimen.decide
+      label: Bounded fabrication decision and execution
+      area: middle
+      llm: true
+    - id: finalize
+      handler: specimen.finalize
+      label: Build fabrication report and handoff
+      area: middle
+    - id: review
+      handler: specimen.review
+      label: Return owner review result
+      area: guardian
+    - id: operator_input
+      handler: specimen.operator_input
+      label: Return printer path request
+      area: high
+    edges:
+    - {source: prepare, target: decide, 'on': ready, kind: execution}
+    - {source: prepare, target: operator_input, 'on': operator_input, kind: validation}
+    - {source: decide, target: finalize, 'on': executed, kind: execution}
+    - {source: decide, target: review, 'on': blocked, kind: validation}
+    terminals: [finalize, review, operator_input]
   io_contract:
     input: OrchestratorState
     output: AgentResult.data merged into OrchestratorState
@@ -66,4 +68,5 @@ module:
     allowlisted Python handlers. Python source is not modified by the GUI.
     Specimen reasoning selects bounded local inspect/execute/return tools after
     hard geometry/manufacturing checks; execution retains experiment.evaluate and
-    printer.prepare. Internal entries are display steps, not separate LLM calls.
+    printer.prepare. CODE relationships document inner functions; only registered
+    owner operations participate in execution routing.

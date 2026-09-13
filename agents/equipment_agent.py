@@ -34,6 +34,7 @@ from uuid import uuid4
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
 from utils.agent_artifact_archive import archive_agent_run
+from utils.test_mode_execution_profiles import is_resolved_all_virtual_bridge
 from orchestrator.state import Mode, OrchestratorState
 from utils.equipment_profiles import EquipmentExecutionContract, EquipmentProfile, EquipmentProfileRegistry, build_execution_contract
 from policies.guardian_gate import equipment_skill_recovery_gate, gate_blocks_execution
@@ -444,7 +445,23 @@ class LabEquipmentAgent(BaseAgent):
             program_id=self._program_hint(state),
         )
 
-    async def _call_tool(self, ctx: AgentContext, tool: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _call_tool(self, ctx: AgentContext, tool: str, payload: dict[str, Any], *, state: OrchestratorState | None = None) -> dict[str, Any]:
+        # Model arguments never establish virtual authority, including for live callers.
+        for key in ("virtual_bridge_simulation", "allow_virtual_bridge_in_test", "prefer_virtual_bridge_in_test"):
+            payload.pop(key, None)
+        if state is not None and is_resolved_all_virtual_bridge(state.current_experiment_spec, mode=state.mode):
+            # Transport authority comes from the resolved host state, never model arguments.
+            for key in ("force_live_bridge", "confirm_live_execute", "confirm_execute", "confirm_setup_gui_execute"):
+                payload.pop(key, None)
+            payload.update(runtime_mode="test", mode="test", virtual_bridge_simulation=True,
+                           allow_virtual_bridge_in_test=True, prefer_virtual_bridge_in_test=True,
+                           run_id=state.run_id, loop_id=state.loop_count,
+                           specimen_id=state.current_experiment_spec.get("specimen_id") or
+                           (state.run_metadata.get("specimen_result") or {}).get("specimen_id"))
+            if tool == "equipment.pyautogui.run":
+                payload["experiment_spec"] = {key: state.current_experiment_spec[key] for key in
+                    ("specimen_id", "specimen_size_mm", "size_mm", "gauge_length_mm", "height_mm", "target_strain")
+                    if key in state.current_experiment_spec}
         return await asyncio.to_thread(ctx.tools.call, tool, payload)
 
     @staticmethod
@@ -2582,7 +2599,8 @@ class LabEquipmentAgent(BaseAgent):
     def _preflight_only_requested(state: OrchestratorState) -> bool:
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
         policy = spec.get("execution_policy") if isinstance(spec.get("execution_policy"), dict) else {}
-        return str(policy.get("lab_equipment") or "").strip().lower() == "preflight_only"
+        return (str(policy.get("lab_equipment") or "").strip().lower() == "preflight_only"
+                and not is_resolved_all_virtual_bridge(spec, mode=state.mode))
 
     @classmethod
     def _preflight_requested_branch(cls, state: OrchestratorState) -> str:
@@ -3385,7 +3403,7 @@ class LabEquipmentAgent(BaseAgent):
                         "duration_sec": float(vision_task.get("timeout_s") or 5),
                     }
                     passive_vision_call = asyncio.create_task(
-                        self._call_tool(ctx, "vision.equipment_cross_check", passive_payload)
+                        self._call_tool(ctx, "vision.equipment_cross_check", passive_payload, state=state)
                     )
             write_execution(active_block=block_id, active_phase="skill")
             request = {
@@ -3397,6 +3415,7 @@ class LabEquipmentAgent(BaseAgent):
                 "task": task,
                 "skip_profile_vision_preflight": True,
                 "completion_scope": "skill_step",
+                "workflow_execution_id": (checkpoint or {}).get("workflow_execution_id"),
             }
             request["runtime_context"] = dict(run_context)
             if checkpoint is not None:
@@ -3495,7 +3514,7 @@ class LabEquipmentAgent(BaseAgent):
                             "source_stage_context": source_context,
                             "duration_sec": float(vision_task.get("timeout_s") or 5),
                         }
-                        response = await self._call_tool(ctx, "vision.equipment_cross_check", payload)
+                        response = await self._call_tool(ctx, "vision.equipment_cross_check", payload, state=state)
                     results = response.get("results") if isinstance(response.get("results"), list) else []
                     result_item = results[0] if len(results) == 1 and isinstance(results[0], dict) else {}
                     vision_outcome = self._equipment_vision_outcome(response)
@@ -3906,7 +3925,7 @@ class LabEquipmentAgent(BaseAgent):
                     ),
                     "source_stage_context": source_stage_context,
                 }
-                vision_result = await self._call_tool(ctx, "vision.equipment_cross_check", vision_payload)
+                vision_result = await self._call_tool(ctx, "vision.equipment_cross_check", vision_payload, state=state)
                 tool_results.append(
                     {
                         "tool": "vision.equipment_cross_check",
@@ -3983,10 +4002,13 @@ class LabEquipmentAgent(BaseAgent):
                 "program_id": program_id,
                 "sequence_id": f"{execution['execution_id']}-segment-{index:03d}",
                 "run_id": state.run_id,
+                "loop_id": state.loop_count,
+                "specimen_id": spec.get("specimen_id") or (state.run_metadata.get("specimen_result") or {}).get("specimen_id"),
                 "experiment_id": state.experiment_id,
                 "equipment_skill_id": skill_id,
                 "equipment_skill_version": version,
                 "equipment_skill_execution_id": execution["execution_id"],
+                "workflow_execution_id": request.get("workflow_execution_id"),
                 "bridge_id": bridge_id,
             }
             if payload["runtime_mode"] == "live":
@@ -4020,7 +4042,7 @@ class LabEquipmentAgent(BaseAgent):
                 return AgentResult(success=False, summary="Equipment Skill cancelled before next segment",
                     data={"equipment_skill_execution": execution, "tool_results": tool_results,
                           "equipment_handoff": {"status": "blocked", "failure_code": "EQUIPMENT_WORKFLOW_SCOPE_CHANGED"}})
-            result = await self._call_tool(ctx, "equipment.pyautogui.run", payload)
+            result = await self._call_tool(ctx, "equipment.pyautogui.run", payload, state=state)
             tool_results.append({"tool": "equipment.pyautogui.run", "payload": payload, "result": result})
             if not result.get("ok"):
                 evidence = result.get("screen_artifacts") if isinstance(result.get("screen_artifacts"), list) else []
@@ -4082,7 +4104,7 @@ class LabEquipmentAgent(BaseAgent):
                             "equipment_skill_execution_id": execution["execution_id"],
                             "bridge_id": bridge_id,
                         }
-                        recovery_result = await self._call_tool(ctx, "equipment.pyautogui.run", recovery_payload)
+                        recovery_result = await self._call_tool(ctx, "equipment.pyautogui.run", recovery_payload, state=state)
                         tool_results.append(
                             {"tool": "equipment.pyautogui.run", "payload": recovery_payload, "result": recovery_result}
                         )
@@ -4111,7 +4133,7 @@ class LabEquipmentAgent(BaseAgent):
                             **payload,
                             "sequence_id": f"{execution['execution_id']}-segment-{index:03d}-resume-001",
                         }
-                        result = await self._call_tool(ctx, "equipment.pyautogui.run", resume_payload)
+                        result = await self._call_tool(ctx, "equipment.pyautogui.run", resume_payload, state=state)
                         tool_results.append(
                             {"tool": "equipment.pyautogui.run", "payload": resume_payload, "result": result}
                         )
@@ -4220,7 +4242,7 @@ class LabEquipmentAgent(BaseAgent):
                 "runtime_mode": self._effective_runtime_mode(state),
                 "bridge_id": bridge_id,
             }
-            audit_result = await self._call_tool(ctx, "equipment.pyautogui.request_log", audit_payload)
+            audit_result = await self._call_tool(ctx, "equipment.pyautogui.request_log", audit_payload, state=state)
             tool_results.append(
                 {"tool": "equipment.pyautogui.request_log", "payload": audit_payload, "result": audit_result}
             )
@@ -4480,7 +4502,8 @@ class LabEquipmentAgent(BaseAgent):
             )
         timeout_s = 30.0 if test_like else None
         raw_plan: dict[str, Any] | None = None
-        force_safe_test_plan = test_like and not self._has_explicit_equipment_plan(state)
+        require_model = bool(getattr(ctx, "force_real_llm_in_test", False))
+        force_safe_test_plan = test_like and not require_model and not self._has_explicit_equipment_plan(state)
         try:
             response = await ctx.complete(
                 "tool_formatting",
@@ -4491,9 +4514,15 @@ class LabEquipmentAgent(BaseAgent):
             if raw_plan is None:
                 raise ValueError("Equipment tool planner returned non-JSON output.")
         except Exception as exc:
-            if test_like:
+            if test_like and not require_model:
                 raw_plan = self._fallback_tool_plan(state)
                 raw_plan["note"] = f"E2B degraded in test mode: {exc.__class__.__name__}; using safe equipment tool plan"
+            elif test_like:
+                return AgentResult(success=False, summary="Equipment model decision unavailable",
+                    data={"failure_code": "EQUIPMENT_REVIEW_REQUIRED", "tool_results": [],
+                          "protocol_note": "Required Equipment model decision was unavailable.",
+                          "equipment_result": {"ok": False, "status": "blocked", "failure_code": "EQUIPMENT_REVIEW_REQUIRED"},
+                          "equipment_handoff": {"status": "blocked", "failure_code": "EQUIPMENT_REVIEW_REQUIRED"}})
             else:
                 raise
         if force_safe_test_plan:
@@ -4546,7 +4575,7 @@ class LabEquipmentAgent(BaseAgent):
                     "checks": vision_checks,
                 }
             )
-            vision_result = await self._call_tool(ctx, "vision.equipment_cross_check", vision_payload)
+            vision_result = await self._call_tool(ctx, "vision.equipment_cross_check", vision_payload, state=state)
             tool_results.append({"tool": "vision.equipment_cross_check", "result": vision_result})
             vision_results = vision_result.get("results") if isinstance(vision_result.get("results"), list) else []
             for check in vision_results:
@@ -4679,11 +4708,11 @@ class LabEquipmentAgent(BaseAgent):
                             "step_trace": [{"step": "PROFILE_PROGRAM_GATE", "status": "blocked", "detail": program_id}],
                         }
                     else:
-                        result = await self._call_tool(ctx, tool, merged)
+                        result = await self._call_tool(ctx, tool, merged, state=state)
                 else:
-                    result = await self._call_tool(ctx, tool, merged)
+                    result = await self._call_tool(ctx, tool, merged, state=state)
             else:
-                result = await self._call_tool(ctx, tool, payload)
+                result = await self._call_tool(ctx, tool, payload, state=state)
 
             if tool == "equipment.pyautogui.run":
                 self._replay_pyautogui_step_trace(
@@ -4714,7 +4743,7 @@ class LabEquipmentAgent(BaseAgent):
         )
         if run_tool_result is not None and "equipment.pyautogui.request_log" in available_tools:
             audit_payload = {"runtime_mode": self._effective_runtime_mode(state)}
-            audit_result = await self._call_tool(ctx, "equipment.pyautogui.request_log", audit_payload)
+            audit_result = await self._call_tool(ctx, "equipment.pyautogui.request_log", audit_payload, state=state)
             tool_results.append({"tool": "equipment.pyautogui.request_log", "result": audit_result})
 
         final_result = run_tool_result if isinstance(run_tool_result, dict) else (tool_results[-1]["result"] if tool_results else {"ok": False, "status": "no_tool_calls"})

@@ -80,7 +80,10 @@ class KnowledgeAgent(BaseAgent):
         failure_tags = [str(item) for item in failure_tags if item]
         guardian_incident_evidence = _guardian_incident_evidence_from_state(state)
         guardian_failure_tags = [str(item) for item in guardian_incident_evidence.get("failure_tags", []) if item]
-        failure_tags = sorted(dict.fromkeys([*failure_tags, *guardian_failure_tags]))
+        current_guardian_failure_tags = [
+            str(item) for item in guardian_incident_evidence.get("current_failure_tags", []) if item
+        ]
+        failure_tags = sorted(dict.fromkeys([*failure_tags, *current_guardian_failure_tags]))
         objective_evaluation = (
             dict(state.latest_analysis.get("objective_evaluation"))
             if isinstance(state.latest_analysis.get("objective_evaluation"), dict)
@@ -492,6 +495,8 @@ def _guardian_incident_evidence_from_state(state: OrchestratorState) -> dict[str
     tool_records = _list_of_dicts(metadata.get("tool_call_records"))[-80:]
 
     tags: list[str] = []
+    current_tags: list[str] = []
+    active_hardware_alerts: list[dict[str, Any]] = []
     incident_ids: list[str] = []
     for incident in incidents:
         incident_id = str(incident.get("incident_id") or incident.get("id") or "")
@@ -511,6 +516,13 @@ def _guardian_incident_evidence_from_state(state: OrchestratorState) -> dict[str
             value = str(alert.get(key) or "").strip()
             if value:
                 tags.append(value)
+        status = str(alert.get("status") or "").strip().lower()
+        if bool(alert.get("blocks_workflow", False)) and status not in {"resolved", "closed", "dismissed"}:
+            active_hardware_alerts.append(alert)
+            for key in ("failure_code", "reason_code"):
+                value = str(alert.get(key) or "").strip()
+                if value:
+                    current_tags.append(value)
     for record in tool_records:
         status = str(record.get("status") or "").strip()
         if status in {"failed", "blocked", "approval_required"}:
@@ -540,9 +552,11 @@ def _guardian_incident_evidence_from_state(state: OrchestratorState) -> dict[str
         "tool_call_record_count": len(tool_records),
         "incident_ids": incident_ids[-20:],
         "failure_tags": sorted(dict.fromkeys(tags))[:80],
+        "current_failure_tags": sorted(dict.fromkeys(current_tags))[:20],
         "incident_records": incidents[-20:],
         "gate_decisions": gate_decisions,
         "hardware_alerts": hardware_alerts[-20:],
+        "active_hardware_alerts": active_hardware_alerts[-20:],
         "blocked_tool_records": [item for item in tool_records if str(item.get("status") or "") in {"failed", "blocked", "approval_required"}][-20:],
     }
 

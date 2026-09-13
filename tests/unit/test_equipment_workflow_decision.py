@@ -67,6 +67,31 @@ def setup_flow(tmp_path, monkeypatch, *, multi_segment=False):
         return {"ok": True, "status": "completed", "executed_action_count": 1,
             "program_id": payload.get("program_id"), "step_trace": []}
     tools.register("equipment.pyautogui.run", worker)
+    # This fixture replaces the Windows worker, so its screen must come from
+    # that same controlled worker result, not an unexecuted real simulator.
+    observed = {}
+    original_call = tools.call
+    def tracked_call(name, payload):
+        result = original_call(name, payload)
+        if name == "equipment.pyautogui.run":
+            observed.update(payload=deepcopy(payload), result=deepcopy(result))
+        return result
+    monkeypatch.setattr(tools, "call", tracked_call)
+    def screenshot(payload):
+        import hashlib
+        from PIL import Image, ImageDraw
+        identity = observed.get("payload", {})
+        if not identity or any(identity.get(key) != payload.get(key) for key in ("run_id", "workflow_execution_id")):
+            return {"ok": False, "status": "unknown", "synthetic": True}
+        image = Image.new("RGB", (640, 240), "white")
+        ImageDraw.Draw(image).text((10, 10), "CONTROLLED WORKER / " + str(observed["result"].get("status")), fill="black")
+        path = tmp_path / "controlled-worker-screen.png"
+        image.save(path)
+        return {"ok": True, "mode": "simulator", "simulated": True,
+            **{key: identity[key] for key in ("run_id", "loop_id", "specimen_id", "workflow_execution_id") if key in identity},
+            "artifact": {"local_path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                         "artifact_id": "controlled-worker-screen", "content_type": "image/png"}}
+    tools.register("equipment.pyautogui.screenshot", screenshot)
     return agent, state, tools, executed, worker, flow
 
 
@@ -92,6 +117,25 @@ async def test_stacked_workflow_model_runs_only_before_and_after_and_reuses_comp
     state.loop_count += 1
     assert (await agent.run(state, model)).success
     assert executed == ["prepare", "measure", "export"] * 2
+
+
+@pytest.mark.asyncio
+async def test_standalone_test_workflow_binds_actual_simulator_screen_to_host_identity(tmp_path, monkeypatch):
+    from tests.unit.test_equipment_pyautogui_bridge import _bridge
+    agent, state, tools, _, _, _ = setup_flow(tmp_path, monkeypatch)
+    state.current_experiment_spec["specimen_id"] = "standalone-specimen"
+    bridge = _bridge(tmp_path)
+    registry = EquipmentSkillRegistry(tmp_path / "skills")
+    for name in ("prepare", "measure", "export"):
+        package = registry.get(name, "1.0.0")
+        bridge.config.registered_programs.update({program["program_id"]: program for program in package["programs"]})
+    tools.register("equipment.pyautogui.run", bridge.run)
+    tools.register("equipment.pyautogui.screenshot", bridge.screenshot)
+    result = await agent.run(state, Model(tools))
+    assert result.success, result.data
+    screenshot = result.data["equipment_workflow_recovery"]["diagnostics"][-1]["screenshot"]
+    assert screenshot["response_identity"] == {"run_id": state.run_id, "loop_id": state.loop_count,
+        "specimen_id": "standalone-specimen", "workflow_execution_id": result.data["equipment_workflow_execution_id"]}
 
 
 @pytest.mark.asyncio
@@ -227,7 +271,10 @@ async def test_live_review_rejects_simulated_screenshot(tmp_path, monkeypatch):
     from orchestrator.state import Mode
     agent, state, tools, _, _, _ = setup_flow(tmp_path, monkeypatch)
     state.mode = Mode.LIVE
-    original = tools.call("equipment.pyautogui.screenshot", {"runtime_mode": "test"})
+    request = {"runtime_mode": "test", "run_id": state.run_id, "workflow_execution_id": "test-execution"}
+    tools.call("equipment.pyautogui.run", request)
+    original = tools.call("equipment.pyautogui.screenshot", request)
+    assert original["ok"] and original["simulated"]
     tools.register("equipment.pyautogui.screenshot", lambda payload: original)
     images, evidence = await _capture(agent, state, Model(tools), None, "test-execution")
     assert images == [] and evidence["ok"] is False

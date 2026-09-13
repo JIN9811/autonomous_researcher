@@ -317,6 +317,19 @@ capture pair selected by existing code.
 | Forced-real TEST fixture | Exercises the registered API/vLLM model route; must not be described as deterministic-test validation |
 | Replay/virtual evidence | Retains its original environment label; never promoted to Live physical proof |
 
+The resolved all-virtual `virtual_bridge` profile executes normal tool selection
+and visual review; only camera/robot I/O is simulated. It is distinct from an
+explicit standalone preflight. A model failure cannot become successful virtual
+preflight. See the [virtual-device contract](../runtime/runtime_ide.md#virtual-device-execution-contract).
+
+For resolved virtual placement, the camera renders the current Specimen STL using
+the existing CPU renderer and simulated red material. The request binds run,
+loop, session, specimen and candidate identity, and records the STL content digest
+separately from the parameter geometry hash. Missing or changed requested geometry
+returns unknown instead of a placeholder success. The labeled synthetic raster
+passes through the same detector and raw/annotated image-review path; it is not a
+physical observation. Clearance remains dependent on the matching virtual replay.
+
 The decision timeout does not extend camera, motion, rollout, replay, or task
 deadlines. There is no TTL increase and no timestamp rewrite. For pickup and
 ActiveCam, the existing LIVE signal TTL remains 5,000 ms; a slower decision yields

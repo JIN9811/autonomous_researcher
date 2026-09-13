@@ -15,6 +15,7 @@ from knowledge.experiment_db import ExperimentDB
 from knowledge.schemas import AgentPerformanceRecord, EvolutionOutcomeRecord, ExperimentKnowledgeRecord
 from knowledge.stores import JsonlKnowledgeStore
 from orchestrator.state import Mode, OrchestratorState, Stage
+from policies.guardian_gate import gate_blocks_execution, guardian_gate
 
 
 class _RagStub:
@@ -295,10 +296,86 @@ async def test_knowledge_agent_ingests_guardian_incidents_as_evolution_evidence(
     assert evidence["incident_count"] == 1
     assert evidence["gate_count"] == 1
     assert "inc-utm-no-motion" in evidence["incident_ids"]
-    assert "UTM_NO_MOTION" in knowledge["failure_tags"]
-    assert "UTM_NO_MOTION_AFTER_START" in knowledge["failure_tags"]
+    assert "UTM_NO_MOTION" not in knowledge["failure_tags"]
+    assert "UTM_NO_MOTION_AFTER_START" not in knowledge["failure_tags"]
+    assert "UTM_NO_MOTION" in evidence["failure_tags"]
+    assert "UTM_NO_MOTION_AFTER_START" in evidence["failure_tags"]
     assert knowledge["knowledge_report"]["guardian_incident_evidence"]["incident_count"] == 1
     assert knowledge["knowledge_context"]["evidence_quality"]["guardian_incident_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_knowledge_history_is_retained_without_becoming_a_new_guardian_alarm() -> None:
+    state = _state()
+    state.latest_analysis["knowledge_payload"]["failure_tags"] = ["peak_at_curve_boundary"]
+    state.latest_analysis["bo_handoff"] = {"schema_version": "analysis_bo_handoff_v2", "ok_for_bo": True}
+    state.run_metadata["incident_records"] = [
+        {
+            "schema": "incident_record.v1",
+            "incident_id": "inc-historical-bo",
+            "status": "closed",
+            "reason_code": "BO_CANDIDATE_UNSAFE",
+            "severity": "near_miss",
+            "component": "analysis_agent",
+            "risk_class": "data",
+        }
+    ]
+    state.run_metadata["guardian_gates"] = [
+        {
+            "schema": "guardian_gate_result.v1",
+            "gate_id": "guardian-gate-historical-bo",
+            "decision": "allow_with_warning",
+            "reason_code": "BO_CANDIDATE_UNSAFE",
+        }
+    ]
+
+    result = await KnowledgeAgent().run(state, _CtxStub())
+    knowledge = result.data["knowledge"]
+    gate = guardian_gate(
+        state=state,
+        stage="knowledge",
+        phase="post",
+        agent="knowledge_agent",
+        payload=result.data,
+    )
+
+    assert knowledge["failure_tags"] == ["peak_at_curve_boundary"]
+    assert "BO_CANDIDATE_UNSAFE" in knowledge["guardian_incident_evidence"]["failure_tags"]
+    assert "data" in knowledge["guardian_incident_evidence"]["failure_tags"]
+    assert "BO_CANDIDATE_UNSAFE" in knowledge["knowledge_report"]["data_quality_map"]["guardian_incident_failure_tags"]
+    assert gate["ok_for_bo"] is True
+    assert not any(alarm["reason_code"] in {"BO_CANDIDATE_UNSAFE", "DATA_QUALITY_LOW"} for alarm in gate["alarms"])
+
+
+@pytest.mark.asyncio
+async def test_knowledge_projection_keeps_active_hardware_alert_blocking() -> None:
+    state = _state()
+    state.run_metadata["hardware_alerts"] = [
+        {
+            "schema": "hardware_alert.v1",
+            "alert_id": "alert-active-utm",
+            "status": "blocked",
+            "failure_code": "UTM_NO_MOTION",
+            "severity": "blocking",
+            "component": "utm_motion",
+            "blocks_workflow": True,
+        }
+    ]
+
+    result = await KnowledgeAgent().run(state, _CtxStub())
+    knowledge = result.data["knowledge"]
+    gate = guardian_gate(
+        state=state,
+        stage="knowledge",
+        phase="post",
+        agent="knowledge_agent",
+        payload=result.data,
+    )
+
+    assert "UTM_NO_MOTION" in knowledge["failure_tags"]
+    assert "blocking" not in knowledge["failure_tags"]
+    assert gate_blocks_execution(gate) is True
+    assert any(alarm["reason_code"] == "UTM_NO_MOTION" and alarm["severity"] == "blocking" for alarm in gate["alarms"])
 
 
 @pytest.mark.asyncio

@@ -1770,3 +1770,8 @@ class DesignAgent(BaseAgent):
         if not isinstance(execution.result, AgentResult):
             raise RuntimeError("Design execution graph completed without AgentResult")
         return execution.result
+
+    def execution_catalog(self):
+        from agents.design.execution import design_execution_catalog
+
+        return design_execution_catalog(self)

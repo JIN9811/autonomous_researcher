@@ -1,0 +1,27 @@
+ui:
+  short: SPC
+  icon: /static/live_gui_icons/specimen_agent.svg
+  report_title: Specimen Making Agent
+  chat:
+    mode: open_on_demand
+  renderer:
+    dashboard: module
+    report: module
+    fallback: descriptor
+  cards:
+  - id: specimen_fabrication_descriptor
+    type: metric_group
+    title: Specimen Fabrication
+    eyebrow: module descriptor
+    span: 12
+    tone: specimen
+    selectors:
+      specimen_id: spec.specimen_id
+      printer_profile: spec.printer_profile
+      fabrication: metadata.fabrication_report.fabrication_outcome.status
+  report_sections:
+  - id: specimen_overview
+    title: Fabrication Evidence
+    selectors:
+      fabrication_report: metadata.fabrication_report
+      handoff: metadata.specimen_fabricated

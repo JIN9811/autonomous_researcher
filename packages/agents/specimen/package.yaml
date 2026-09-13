@@ -1,0 +1,8 @@
+schema: ax4lab.agent_package.v1
+id: specimen
+version: 1.0.0
+agent_module: {id: specimen, version: 1.0.0}
+handler: agent.specimen_agent
+module_reference: graphs/modules/specimen/module.yaml
+bridge_modules:
+  - {id: printer_fleet, version: 1.0.0}

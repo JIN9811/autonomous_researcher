@@ -7,17 +7,24 @@ audience: [researcher, operator, developer, maintainer]
 scope: [agents, specimen, manufacturing, printer_connection]
 summary: Current contract for geometry, manufacturing QA, printer preparation, fabrication evidence, and specimen handoff.
 source_of_truth:
-  - agents/specimen_agent.py
-  - agents/specimen_decision.py
+  - agents/specimen/agent.py
+  - agents/specimen/decision.py
+  - agents/specimen/execution.py
+  - agents/specimen/structure.py
+  - agents/specimen/module.py
+  - agents/specimen/presentation.py
+  - agents/specimen/frontend/live_report.js
   - utils/specimen_execution.py
   - graphs/modules/specimen/module.yaml
-  - device_bridges/bambu_bridge.py
-  - device_bridges/bambu_autoejection.py
-  - device_bridges/prusa_bridge.py
+  - device_bridges/printer_fleet/module.py
+  - device_bridges/bambu/bridge.py
+  - device_bridges/bambu/autoejection.py
+  - device_bridges/prusa/bridge.py
+  - packages/agents/specimen/package.yaml
   - app/main.py
   - web/static/planning.js
-last_verified: 2026-09-08
-verified_against: working-tree
+last_verified: 2026-09-13
+verified_against: working-tree-2026-09-13-specimen-modularization
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -38,12 +45,52 @@ supersedes: []
 
 | At a glance | Details |
 |---|---|
-| Runtime status | Implemented |
+| Runtime status | Implemented; code-owned module and editable owner execution graph |
 | LLM decision layer | Implemented / API and local-model verified without actuation |
 | Physical effect | Possible through existing gated printer tools |
 | Primary handoff | `specimen_fabricated.v1` → Vision / Manipulation |
 | Live hardware validation | Not performed for this decision-layer change |
 | Known gap | Suitability decisions do not establish physical print quality |
+
+### Module Ownership and Layout
+
+The installed [Specimen module](../../agents/specimen/module.py) binds the
+existing `SpecimenMakingAgent` to `AgentRegistry`. The handler remains
+`agent.specimen_agent`; flat Python imports remain compatibility adapters.
+
+| Boundary | Specimen owns | Existing host retained |
+|---|---|---|
+| Backend | `agents/specimen/agent.py`, `decision.py`, `execution.py` | Agent context, ToolRegistry and orchestration handoffs |
+| Internal structure | Registered operations and source-bound `structure.py` relationships | Runtime IDE graph editing, validation and execution trace |
+| Report/API | `presentation.py` projection | `/api/agents/specimen/report`, module details and runtime manifests |
+| Frontend | `frontend/live_report.js` report and six-card composition | `/live` module host; injected camera, STL and shared helpers; no added polling |
+| Configuration | Existing fabrication inputs and module definition | Graph/module stores and run snapshots; no second settings store |
+| Storage | `specimen_agent` archive identity and manufacturing artifacts | Existing run/loop/agent/attempt archives; geometry remains under the run's `specimens/` directory |
+| Device execution | Existing tool requests only | Printer Fleet and provider implementations remain under `device_bridges/` |
+
+The browser loads `/module-assets/specimen/live_report.js` from the active
+code-owned manifest. Applying a valid graph controls active owner/report/asset
+access; opening an editor does not activate the owner or operate a printer.
+Removing a graph reference never deletes installed code or historical results.
+
+### Agent Package and Device Bridge Composition
+
+The [Specimen Agent Package](../../packages/agents/specimen/package.yaml)
+declares `specimen@1.0.0` and its `printer_fleet@1.0.0` dependency. Fleet
+references the existing Bambu and Prusa provider components; it is not another
+printer protocol or an installer.
+
+| Package boundary | Canonical location | Contract |
+|---|---|---|
+| Agent | `agents/specimen/` | Decision, execution, report and frontend ownership |
+| Shared bridge | [Printer Fleet](../../device_bridges/printer_fleet/README.md) | Registered printer tools and package membership |
+| Provider components | [Bambu](../../device_bridges/bambu/README.md), [Prusa](../../device_bridges/prusa/README.md) | Provider implementation, requirements and external-tool notes |
+| Experimental Package | [Package API](../../packages/README.md) | Graph plan, exact dependencies and portable module drafts |
+
+Bridge code stays under `device_bridges/`; existing connection memory and
+run/loop artifacts keep their owners and locations. Export does not bundle that
+private storage. Import validates installed dependencies and returns an inactive
+draft; existing explicit save/activation remains the execution boundary.
 
 ## Overview and Responsibilities
 
@@ -135,25 +182,33 @@ creates a preparation artifact and builds the existing evaluation payload.
 invokes `experiment.evaluate → printer.prepare` once with that existing payload.
 The preparation artifact alone is not physical completion.
 
-| Step ID | Work | Output/failure boundary |
+![Specimen owner operations and source-bound five-area relationships](assets/figures/specimen_control_areas.svg)
+
+The IDE and this document projection share the
+[execution definition](../../graphs/modules/specimen/module.yaml) and
+[source relationships](../../agents/specimen/structure.py). Solid owner nodes
+are executable; CODE relationships expose inner checks, tools and evidence
+without adding execution steps. The document uses the light theme.
+
+| Operation | Work | Output/failure boundary |
 |---|---|---|
-| `01_spec_intake` | required field gate | incomplete input blocks |
-| `02_resolve_fabrication_intent` | mode/provider/process | unsupported intent blocks |
-| `03_initialize_digital_thread` | identity/provenance | immutable references |
-| `04_generate_geometry_stl` | geometry/STL | generation artifact/error |
-| `05_mesh_dimensional_qa` | mesh/dimensions | QA pass/repair/stop |
-| `06_printability_process_plan` | FDM/process plan and suitability | code checks, then bounded LLM decision |
-| `07_slice_gcode_qa` | slice/G-code validation | source/patched evidence |
-| `08_execution_gate` | virtual/live bridge | approval/prestart/start gate |
-| `09_fabrication_monitoring` | runtime/video/status | observation evidence |
-| `10_repair_or_stop_decision` | bounded response | repair/review/stop |
-| `11_handoff_vision_manipulation` | specimen-ready packet | verification required |
+| `specimen.prepare` | Required fields, execution intent, geometry and manufacturing evidence | `ready` with preparation, or `operator_input` with a pending request |
+| `specimen.decide` | Bounded LLM inspection/execute/return loop and existing fabrication callback | `executed` with callback response, or `blocked`; no repeated decision/effect within an invocation |
+| `specimen.finalize` | Fabrication report, digital thread and Vision/Manipulation packet | Requires preparation plus the executed branch; produces a fresh `AgentResult` |
+| `specimen.review` | Package blocked decision for existing recovery | Requires the blocked branch; no ready fabrication handoff |
+| `specimen.operator_input` | Return the prepared printer-path selection request | Requires the pending request; does not fabricate |
+
+Explicit outcome edges determine execution. Saved definitions are checked for
+registered operations, branch-specific producers and fresh terminal results.
+Preparation and the bounded fabrication decision cannot replay within one
+invocation; repeated report-only projection does not issue another print.
 
 ![Specimen internal execution and effect boundary](assets/figures/specimen_02_execution_effect_boundary.svg)
 
 **Figure Specimen-2.** The LLM decision sits after hard geometry/manufacturing
-checks and before the existing evaluation route. Eleven manifest entries remain
-display descriptors, not eleven model calls or independent graph scheduling.
+checks and before the existing evaluation route. This detailed manufacturing
+sequence expands work inside the registered operations above; its numbered
+phases are not separate manifest nodes or eleven model calls.
 Dashed paths identify explicit deterministic testing and review/return.
 
 ### Execution trace details
@@ -202,7 +257,8 @@ through existing AgentContext/ModuleRuntimeContext and backend routing.
 | connected | POST | `/api/printer/start-publish` | provider bridge | physical_possible | requires current gates/proof context |
 | connected | GET/POST | `/api/printer/bed-clear`, `/autoejection-status`, `/autoejection-*` | autoejection service | read_only/physical_possible | test/sweep can move printer when live |
 | operator | POST | `/api/printer/bambu-autoejection-proof-template`, `/bambu-autoejection-completion-audit` | audit service | local_state | verifies proof package |
-| shared | GET/POST | `/api/modules/*` | module platform | read_only/local_state | module lifecycle, not specimen execution |
+| owned | GET | `/api/agents/specimen/report`, `/module-assets/specimen/live_report.js` | registered Specimen module | read_only | current report projection and module frontend |
+| shared | GET/POST/PUT | `/api/modules/specimen` and validation/dry-run subroutes | module platform | read_only/local_state | editable owner graph; explicit save/activation |
 
 ### Registered Tools and Providers
 
@@ -353,6 +409,23 @@ requests/results and the final `specimen_decision.v1`. Its `status=executed` mea
 the callback returned, not that a physical print or Vision confirmation completed.
 Existing fabrication, verification and completion contracts remain authoritative.
 
+### Module-Migration Evidence — 2026-09-13
+
+| Check | Observed result / scope |
+|---|---|
+| Owner/catalog/API regression | 67 focused Python checks passed before the final test-only addition |
+| Durable deterministic parity | 12 module tests passed, including a synthetic golden for the complete result, state changes and exact ordered tool payloads; no dependency on Git history at test runtime |
+| Frontend extraction | 37 JavaScript checks passed; existing report/dashboard and lifecycle behavior retained |
+| Saved execution definition | Guarded API save/reload changed real owner call order; preparation bypass rejected without replacing active configuration |
+| Supervised status | Fully registered runtime: success continues to Vision; failed Specimen result publishes error |
+| Registered-model virtual cycle | Passed through BO, Guardian and next Design: 34 actual `gpt-5.5` calls across all 10 owners, 343.50 s test elapsed, zero physical calls; device observations/data simulated, background FEM not run |
+
+Two older isolated status fixtures still fail because they omit the supervisor
+required by their graph. They failed before and after migration; the new guarded
+tests retain real supervisor admission. These checks do not claim physical
+printing or a comparative API/local-model benchmark. Final package/IDE and cycle checks
+are recorded in the [implementation plan](../superpowers/plans/2026-09-13-specimen-agent-packages.md).
+
 ### Decision-Layer Evidence — 2026-09-08
 
 | Check | Observed result / scope |
@@ -390,7 +463,7 @@ and 14 JavaScript tests on 2026-09-06 (five existing Python schema warnings).
 Backend lifecycle changes require restarting the running server; refreshing a
 browser alone does not load updated Python code.
 
-Verified against the class, 11 internal IDs, six tools, 27 primary printer API
+The earlier inspection covered the class, 11 then-declared internal IDs, six tools, 27 primary printer API
 entries plus artifact routes, and current Bambu/Prusa provider sources at
 baseline `0b7627b`.
 
@@ -422,5 +495,5 @@ camera, and provider availability varies by environment.
 - [Three-Level Control Model](../runtime/three_level_control_model.md)
 - [Bambu Runtime Guide](../hardware/bambulab_x2d_device_bridge_runtime_guideline.md)
 - [3DP Usage Guide](../tutorials/device_workspace_3dp_usage.ko.md)
-- [Specimen handler](../../agents/specimen_agent.py) and [decision dispatcher](../../agents/specimen_decision.py)
+- [Specimen handler](../../agents/specimen/agent.py) and [decision dispatcher](../../agents/specimen/decision.py)
 - [Five-area contract](../superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md)

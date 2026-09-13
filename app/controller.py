@@ -10434,8 +10434,9 @@ class MainController:
         analysis = analysis_data.get("analysis") if isinstance(analysis_data.get("analysis"), dict) else {}
         cae_result = analysis.get("cae_result") if isinstance(analysis.get("cae_result"), dict) else {}
         artifacts = cae_result.get("artifacts") if isinstance(cae_result.get("artifacts"), dict) else {}
-        source_contour = Path(str(artifacts.get("contour_svg_path") or "")).expanduser()
-        if not source_contour.exists():
+        contour_ref = str(artifacts.get("contour_svg_path") or "").strip()
+        source_contour = Path(contour_ref).expanduser()
+        if not contour_ref or not source_contour.is_file():
             return {}
         specimen_id = self._safe_artifact_segment(str(experiment_spec["specimen_id"]))
         artifact_dir = self._deps.run_root / self._state.run_id / "planning" / specimen_id
@@ -10444,7 +10445,7 @@ class MainController:
         shutil.copy2(source_contour, contour_path)
         source_report = Path(str(artifacts.get("report_path") or "")).expanduser()
         report_path = artifact_dir / "cae_report.json"
-        if source_report.exists():
+        if source_report.is_file():
             shutil.copy2(source_report, report_path)
         base = f"/api/planning/artifacts/{self._state.run_id}/{specimen_id}"
         return {

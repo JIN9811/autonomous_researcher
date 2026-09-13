@@ -3000,8 +3000,8 @@ def test_runtime_handler_registry_exposes_new_registered_agents_to_graph_and_mod
     assert graph_validation["compiled_graph"]["nodes"][2]["handler"] == "agent.experimental_agent"
 
     module = client.get("/api/modules/specimen").json()["module"]
-    module["module"]["handler"] = "agent.experimental_agent"
-    module["module"]["internal_graph"][0]["handler"] = "agent.experimental_agent"
+    assert module["module"]["handler"] == "agent.specimen_agent"
+    assert module["module"]["execution_graph"]["nodes"][0]["handler"] == "specimen.prepare"
     module_validation = client.post(
         "/api/modules/specimen/validate",
         json={"module": module, "reason": "experimental-handler", "author": "pytest", "activate": False},

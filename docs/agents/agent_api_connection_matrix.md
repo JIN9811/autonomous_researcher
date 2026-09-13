@@ -154,7 +154,7 @@ cross-cutting responsibilities, not additional sequential model calls.
 |---|---|---|---|---|
 | Orchestrator | planning session/message plus scoped Setup proposal/action contract | owner availability/readback and registered model backend | run lifecycle, run events/artifacts, approvals, SSE/recent events | `/openapi.json`, `/api/planning/*`, `/api/run*`, `/api/runtime/*` |
 | Design | no dedicated direct execution endpoint | planning artifact/session context; `/api/agents/design/report` | Existing `/api/graphs/*` path; `/api/modules/design` exposes code-module metadata | `/openapi.json`, unchanged `agent.design_agent` handler; module-owned report UI hosted at `/live` |
-| Specimen Making | no direct agent endpoint | `/api/printer/*`, geometry/artifact tools | printer workspace and selected module management | `/openapi.json`, printer service/bridge implementations |
+| Specimen Making | `GET /api/agents/specimen/report`; module-owned frontend asset | `/api/printer/*`, geometry/artifact tools; `/api/packages` describes composition | printer workspace and existing module draft/save controls | [Owner module](../../agents/specimen/module.py), `/openapi.json`, printer bridge implementations |
 | Vision | specimen-pose status/snapshot/release | camera, active robot camera, UTM vision/runtime APIs | Vision/UTM workspaces and run retry | `/openapi.json`, Vision tools/bridge handlers |
 | Manipulation | manipulation-agent config/test/run | `/api/lerobot/*` robotics services | LeRobot workspace configuration/training/simulation/mirror | `/openapi.json`, LeRobot bridge |
 | Lab Equipment | no isolated agent endpoint | `/api/equipment/*`, `/api/bridges*` | equipment skill/profile/worker/UTM workspaces | `/openapi.json`, equipment bridge/tool registry |

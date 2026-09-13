@@ -13,6 +13,7 @@ from urllib.parse import quote
 from typing import Any
 
 from orchestrator.state import Stage
+from utils.test_mode_execution_profiles import is_resolved_all_virtual_bridge
 
 TASK_ID = "clear_utm_to_disposal"
 
@@ -154,10 +155,14 @@ def _explicit_virtual(state):
 
 def _physical_execution(state):
     from agents.manipulation_agent import ManipulationAgent
+    if is_resolved_all_virtual_bridge(state.current_experiment_spec, mode=state.mode):
+        return False
     return state.mode.value == "live" or ManipulationAgent._physical_printer_tail_requested(state)
 
 
 def _execution_allowed(state, agent):
+    if is_resolved_all_virtual_bridge(state.current_experiment_spec, mode=state.mode):
+        return True
     policy = state.current_experiment_spec.get("execution_policy") or {}
     return policy.get(agent) == "execute" if agent in policy else _physical_execution(state)
 
@@ -239,12 +244,14 @@ async def run_clear_manipulation(state, ctx, *, spec):
         return _result(execution)
     root = Path(str(spec.get("lerobot_dataset_root") or spec.get("dataset_root")
                     or os.environ.get("HF_LEROBOT_HOME") or Path.home() / ".cache/huggingface/lerobot")).expanduser()
-    runtime_mode = "live" if _physical_execution(state) else state.mode.value
+    virtual = is_resolved_all_virtual_bridge(state.current_experiment_spec, mode=state.mode)
+    runtime_mode = "test" if virtual else "live" if _physical_execution(state) else state.mode.value
     confirmation = spec.get("confirm_live_execute", spec.get("confirm_manipulation_execute", runtime_mode == "live"))
     payload = {**scope(state), "session_id": execution["session_id"], "dataset_repo_id": "jin/utm_clear",
         "dataset_path": str(root / "jin/utm_clear"), "replay_episode": 0, "mode": state.mode.value, "runtime_mode": runtime_mode,
         "profile_id": spec.get("lerobot_profile_id") or spec.get("robot_profile_id") or spec.get("profile_id") or "",
-        "confirm_live_execute": confirmation is True}
+        "confirm_live_execute": confirmation is True and not virtual,
+        **({"virtual_bridge_simulation": True} if virtual else {})}
     execution["runtime_mode"] = runtime_mode
     from agents.manipulation_decision import select_manipulation_tool, allows
     execution["state"] = "deciding"
@@ -341,8 +348,10 @@ async def run_clear_vision(state, ctx, *, artifact_dir):
     red = first.get("confirmed") is True and (
         evidence.get("detector") == "high_chroma_red_hsv_largest_component"
         or artifact.get("detector") == "high_chroma_red_hsv_largest_component")
-    payload = {**identity, "runtime_mode": "live", "purpose": "utm_clear_verification", "auto_start_runtime": False,
-        "allow_virtual_bridge_in_test": False, "material": "high_chroma_red" if red else "unknown",
+    virtual = is_resolved_all_virtual_bridge(state.current_experiment_spec, mode=state.mode)
+    payload = {**identity, "runtime_mode": "test" if virtual else "live", "purpose": "utm_clear_verification", "auto_start_runtime": False,
+        "allow_virtual_bridge_in_test": virtual, "prefer_virtual_bridge_in_test": virtual,
+        "virtual_bridge_simulation": virtual, "material": "high_chroma_red" if red else "unknown",
         "after_timestamp": execution["replay_completed_at"], "output_dir": str(artifact_dir), "frame_attempts": 1}
     try:
         capture = await asyncio.to_thread(ctx.tools.call, "vision.utm_specimen_presence.capture", payload)
@@ -356,8 +365,9 @@ async def run_clear_vision(state, ctx, *, artifact_dir):
     confirmed = bool(red and fresh and matches(state, capture) and capture.get("session_id") == execution["session_id"]
         and capture.get("ok") is True and capture.get("clear_confirmed") is True and capture.get("detected") is False
         and capture.get("status") == "clear" and capture.get("registered") is True
-        and capture.get("topic") in UTM_CLEAR_CAMERA_TOPICS and capture.get("camera_profile_id") == "camera_utm_primary"
-        and not capture.get("virtualized"))
+        and ((virtual and capture.get("virtualized") is True and capture.get("topic") == "virtual://utm-clear")
+             or (not virtual and capture.get("topic") in UTM_CLEAR_CAMERA_TOPICS
+                 and capture.get("camera_profile_id") == "camera_utm_primary" and not capture.get("virtualized"))))
     if not confirmed and capture.get("status") == "clear":
         capture = {**capture, "status": "unknown", "clear_confirmed": False}
     # Replay supervision and measured return above remain independent of model latency.

@@ -416,6 +416,7 @@ class WindowsPyAutoGUIBridge(BaseBridge):
 
     def __init__(self, config: WindowsPyAutoGUIBridgeConfig) -> None:
         self.config = config
+        self._simulator_observations: dict[tuple, dict[str, Any]] = {}
 
     def execute(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Execute one bridge command."""
@@ -1388,6 +1389,9 @@ class WindowsPyAutoGUIBridge(BaseBridge):
     def run(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Execute an allowlisted sequence or registered program."""
         payload = dict(payload or {})
+        # A new attempted operation invalidates prior success even if validation
+        # below refuses it before the simulator executes.
+        self._simulator_observations.pop(self._simulator_scope(payload), None)
         if not self.config.enabled:
             return self._failure(
                 tool="equipment.pyautogui.run",
@@ -1420,7 +1424,13 @@ class WindowsPyAutoGUIBridge(BaseBridge):
                 step_trace=[{"step": "VALIDATE_ROBOT_CLEARANCE_CONTEXT", "status": "blocked", "detail": clearance_context_error}],
             )
         if not self._should_use_live(payload, for_execution=True):
-            return self._attach_control_profile(self._run_simulator(runtime_payload), runtime_payload)
+            result = self._attach_control_profile(self._run_simulator(runtime_payload), runtime_payload)
+            self._simulator_observations[self._simulator_scope(payload)] = {
+                **{key: payload[key] for key in ("run_id", "loop_id", "specimen_id", "workflow_execution_id") if key in payload},
+                **{
+                key: result[key] for key in ("ok", "status", "program_id", "sequence_id", "failure_code", "result_file")
+                if key in result}}
+            return result
 
         precheck = self._live_precheck(require_execute=True, payload=payload)
         if precheck:
@@ -1435,6 +1445,9 @@ class WindowsPyAutoGUIBridge(BaseBridge):
         return self._attach_control_profile(result, runtime_payload)
 
     def _should_use_live(self, payload: dict[str, Any], *, for_execution: bool) -> bool:
+        # Host-owned virtual selection vetoes saved promotion and conflicting live flags.
+        if payload.get("virtual_bridge_simulation") is True:
+            return False
         if bool(payload.get("force_live_bridge")):
             return True
         runtime_mode = str(payload.get("runtime_mode", "")).strip().lower()
@@ -1806,13 +1819,35 @@ class WindowsPyAutoGUIBridge(BaseBridge):
             response["next_specimen_readiness"] = readiness
         return response
 
+    @staticmethod
+    def _simulator_scope(payload: dict[str, Any]) -> tuple:
+        return tuple(payload.get(key) for key in ("run_id", "loop_id", "specimen_id", "workflow_execution_id"))
+
     def _simulated_screenshot(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from PIL import Image, ImageDraw, ImageFont
+        from uuid import uuid4
         checkpoint = str(payload.get("checkpoint") or "manual")
         run_id = str(payload.get("run_id") or "simulated-calibration")
-        artifact_id = f"sim_screen_{checkpoint}_{int(time.time())}"
+        artifact_id = f"sim_screen_{checkpoint}_{uuid4().hex}"
         path = self.config.artifact_dir / run_id / "screenshots" / f"{artifact_id}.png"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNoaGgAAAMEAYFL09IQAAAAAElFTkSuQmCC"))
+        observed = dict(self._simulator_observations.get(self._simulator_scope(payload), {}))
+        scoped = any(payload.get(key) is not None for key in ("loop_id", "specimen_id", "workflow_execution_id"))
+        raster = Image.new("RGB", (960, 540), (235, 239, 244))
+        draw = ImageDraw.Draw(raster)
+        font = ImageFont.load_default(size=18)
+        draw.rectangle((0, 0, 960, 66), fill=(32, 51, 76))
+        draw.text((24, 20), "SIMULATED EQUIPMENT / no physical I/O", fill="white", font=font)
+        lines = [f"Observed run/loop: {observed.get('run_id', 'unknown')} / {observed.get('loop_id', 'unknown')}",
+                 f"Observed specimen: {observed.get('specimen_id') or 'unknown'}; checkpoint: {checkpoint}",
+                 f"Observed workflow: {observed.get('workflow_execution_id') or 'unknown'}",
+                 f"Program: {observed.get('program_id') or 'no operation recorded'}",
+                 f"Observed simulator status: {observed.get('status') or 'unknown'}",
+                 f"Failure: {observed.get('failure_code') or 'none recorded'}",
+                 f"Local result: {observed.get('result_file') or 'none recorded'}"]
+        for index, line in enumerate(lines):
+            draw.text((24, 92 + index * 52), line[:100], fill=(30, 40, 52), font=font)
+        raster.save(path, format="PNG")
         data = path.read_bytes()
         artifact = {
             "kind": "screen_png",
@@ -1826,11 +1861,15 @@ class WindowsPyAutoGUIBridge(BaseBridge):
             "content_type": "image/png",
         }
         return {
-            "ok": True,
+            "ok": bool(observed) or not scoped,
             "tool": "equipment.pyautogui.screenshot",
             "mode": "simulator",
+            "simulated": True,
+            "synthetic": True,
+            "simulator_state": observed,
+            **{key: observed[key] for key in ("run_id", "loop_id", "specimen_id", "workflow_execution_id") if key in observed},
             "bridge": "windows_pyautogui",
-            "status": "captured",
+            "status": "captured" if observed or not scoped else "unknown",
             "artifact": artifact,
             "output_artifacts": [artifact],
             "step_trace": [{"step": "SCREENSHOT", "status": "ok", "detail": str(path)}],

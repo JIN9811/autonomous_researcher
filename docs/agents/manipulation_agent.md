@@ -365,6 +365,10 @@ simulated evidence. Preflight-only does not start a skill. Status polling and
 mandatory stop do not wait for selection or result reasoning. Manual teleoperation
 approval and the existing stop/confirmation route remain unchanged.
 
+The resolved all-virtual `virtual_bridge` profile uses the normal decision and
+registered LeRobot tool path with virtual transport, not the standalone preflight
+return. See the [virtual-device contract](../runtime/runtime_ide.md#virtual-device-execution-contract).
+
 ## Safety, Approval, and Effect Boundary
 
 `execution_boundary` is `lerobot_bridge_only`; Guardian has stop authority;

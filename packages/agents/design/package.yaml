@@ -1,0 +1,7 @@
+schema: ax4lab.agent_package.v1
+id: design
+version: 1.0.0
+agent_module: {id: design, version: 1.0.0}
+handler: agent.design_agent
+module_reference: graphs/modules/design/module.yaml
+bridge_modules: []

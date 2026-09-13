@@ -203,7 +203,13 @@ async def test_original_persistent_fault_retries_before_owner_and_model(actual_c
 
 
 @pytest.fixture
-def actual_controller(tmp_path, monkeypatch):
+def actual_controller(tmp_path, monkeypatch, request):
+    if getattr(request, "param", None) == "registered_models":
+        # Override conftest's intentionally offline defaults in this isolated
+        # fixture only. Model IDs still come from the registered API router.
+        monkeypatch.setenv("AUTONOMOUS_BACKEND", "openai")
+        monkeypatch.setenv("AUTONOMOUS_USE_REAL_LLM_IN_TEST", "1")
+        monkeypatch.setenv("AUTONOMOUS_ALLOW_MOCK_FALLBACK", "0")
     from scripts.orchestrator_verification_guard import VerificationGuard
     with VerificationGuard() as guard:
         import app.bootstrap as bootstrap
@@ -271,9 +277,10 @@ def actual_controller(tmp_path, monkeypatch):
             from backends.prompt_registry import get_system_prompt
             return await MockLLMBackend().complete(model="controlled-tail", system_prompt=get_system_prompt(task_type),
                 user_prompt=prompt, metadata={"task_type": task_type})
-        monkeypatch.setattr(AgentContext, "complete", complete)
         from orchestrator.langgraph_runtime import ModuleRuntimeContext
-        monkeypatch.setattr(ModuleRuntimeContext, "complete", complete)
+        if getattr(request, "param", None) != "registered_models":
+            monkeypatch.setattr(AgentContext, "complete", complete)
+            monkeypatch.setattr(ModuleRuntimeContext, "complete", complete)
         yield controller, guard
         (tmp_path / "controlled-decision-prompts.json").write_text(json.dumps(decision_prompts, ensure_ascii=False, indent=2))
         assert not guard.denied, guard.denied
@@ -282,7 +289,7 @@ def actual_controller(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stop_stage,profile", [("design", "virtual_bridge"), ("specimen", "virtual_bridge"),
     ("specimen", "installed_printer"), ("specimen", "physical_print"), ("next_design", "virtual_bridge")])
-async def test_confirmed_setup_enters_original_initial_lhs_and_real_design(actual_controller, monkeypatch, tmp_path, stop_stage, profile):
+async def test_confirmed_setup_enters_original_initial_lhs_and_real_design(actual_controller, monkeypatch, tmp_path, stop_stage, profile, cycle_timeout_s=None):
     """The genuine new-series entry must apply captured setup before owner sampling."""
     from agents.bo_agent import BOAgent
     from agents.design_agent import DesignAgent
@@ -347,9 +354,11 @@ async def test_confirmed_setup_enters_original_initial_lhs_and_real_design(actua
     constraints = controller._apply_specimen_printer_choice_to_spec(
         controller._default_test_constraints({"test_mode_autofill": True, "test_mode_llm_generated": True}), profile)
     if stop_stage == "next_design":
-        from orchestrator_setup_fixtures import equipment_io
+        from orchestrator_setup_fixtures import equipment_io, virtual_device_io
         from utils.utm_reference_calibration import build_reference_calibration
         equipment = equipment_io(controller, monkeypatch, tmp_path, guard)
+        virtual_device_io(controller, tmp_path, guard)
+        constraints["lerobot_dataset_root"] = str(tmp_path / "replay")
         reference = tmp_path / "controlled-reference.csv"
         reference.write_text("time_s,force_N,displacement_mm\n" + "".join(f"{i},{100*i},{i}\n" for i in range(17)))
         calibration = build_reference_calibration([reference], target_strain=.5, specimen_size_mm=[30, 30, 30])
@@ -371,7 +380,7 @@ async def test_confirmed_setup_enters_original_initial_lhs_and_real_design(actua
     task = asyncio.create_task(controller._handoff_planning_to_design(goal="controlled bounds verification", constraints=constraints))
     event_task = asyncio.create_task(reached.wait())
     try:
-        done, _ = await asyncio.wait({task, event_task}, timeout=120 if stop_stage == "next_design" else 40,
+        done, _ = await asyncio.wait({task, event_task}, timeout=cycle_timeout_s or (120 if stop_stage == "next_design" else 40),
             return_when=asyncio.FIRST_COMPLETED)
         assert reached.is_set(), (task.result() if task.done() else "No Design result within bound", designs)
         # Admission and stage publication read the same pure deterministic seed;
@@ -392,6 +401,24 @@ async def test_confirmed_setup_enters_original_initial_lhs_and_real_design(actua
         if stop_stage == "next_design":
             assert len(bo_runs) == 1 and bo_runs[0]["result"].success
             assert designs[1]["result"].success
+            # A next-design result alone could hide a skipped owner. Preserve the
+            # current production route and each completed loop's archive owners.
+            completed = [event.get("node_id") for event in controller.recent_events()
+                         if event.get("type") == "node.completed"]
+            assert completed == ["design", "specimen", "vision", "manipulation", "vision",
+                                 "equipment", "manipulation", "vision", "analysis", "knowledge", "bo", "guardian", "design"]
+            assert controller._state.loop_count == 1
+            from utils.agent_artifact_archive import list_executions
+            archived = list_executions(controller._deps.run_root / controller._state.run_id)
+            expected_owners = {f"{name}_agent" for name in
+                               ("orchestrator", "design", "specimen", "vision", "manipulation",
+                                "equipment", "analysis", "knowledge", "bo", "guardian")}
+            assert {entry["agent"] for entry in archived if entry["loop_index"] == 0} == expected_owners
+            assert any(entry["agent"] == "design_agent" and entry["loop_index"] == 1
+                       for entry in archived)
+            assert all(entry["status"] == "completed" for entry in archived)
+            assert len({entry["execution_id"] for entry in archived}) == len(archived)
+            assert guard.physical_call_count == 0 and not guard.denied
             assert designs[1]["contract"]["requested_parameters"] == {
                 key: bo_runs[0]["next"]["constraints"][key] for key in ("cell_size_mm", "relative_density")}
             assert designs[1]["snapshot"] == designs[0]["snapshot"]
@@ -410,7 +437,13 @@ async def test_confirmed_setup_enters_original_initial_lhs_and_real_design(actua
             assert controller._state.run_metadata["bo_settings"] == expected_settings
             assert {key: bo_runs[0]["next"]["parameter_space"][key] for key in ("cell_size_mm", "relative_density")} == {
                 key: values[key] for key in ("cell_size_mm", "relative_density")}
-            assert equipment["calls"] == []
+            assert len(equipment["calls"]) == len(equipment["programs"])
+            assert len({call["sequence_id"] for call in equipment["calls"]}) == len(equipment["calls"])
+            assert all(call["runtime_mode"] == "test" and call["virtual_bridge_simulation"] is True
+                       for call in equipment["calls"])
+            ready = controller._state.run_metadata["utm_data_ready"]
+            assert ready["status"] == "ready" and Path(ready["result_file"]).is_file()
+            assert controller._state.run_metadata["equipment_handoff"]["status"] == "ready_for_analysis"
         else:
             assert bo_runs == []
         if stop_stage == "specimen":
@@ -494,6 +527,10 @@ async def test_actual_tail_preserves_profile_preflight_or_deployed_csv_contract(
         "width": 640, "height": 480, "run_id": p["run_id"], "session_id": p["session_id"], "specimen_id": p["specimen_id"]})
     simulated("lerobot.rollout.stop", lambda p: {"ok": True, "tool": "lerobot.rollout.stop", "workflow": "rollout",
         "status": "STOPPED", "session_id": p["session_id"]})
+    if path == "virtual_profile":
+        from orchestrator_setup_fixtures import virtual_device_io
+        virtual_device_io(controller, tmp_path, guard)
+        controller._state.mode = Mode.TEST
     spec = controller._build_planning_spec(base_spec={"candidate_id": "controlled-candidate", "geometry_type": "gyroid",
         "specimen_size_mm": [30, 30, 30]}, constraints={"geometry_type": "gyroid", "specimen_size_mm": [30, 30, 30],
         "test_mode_autofill": True, "test_mode_llm_generated": True, "printer_test_path": "virtual_bridge"})
@@ -521,9 +558,19 @@ async def test_actual_tail_preserves_profile_preflight_or_deployed_csv_contract(
         spec["cae_reference_calibration"] = calibration
     spec.update(equipment_skill_registry_root=equipment["skills"], equipment_profile_id="utm_windows_v1",
         raw_csv_session_id="controlled-session", specimen_id="controlled-specimen")
+    if path == "virtual_profile":
+        spec["lerobot_dataset_root"] = str(tmp_path / "replay")
     controller._state.current_experiment_spec = spec
     controller._state.run_metadata["specimen_result"] = {"ok": True, "candidate_id": spec["candidate_id"],
         "specimen_id": spec["specimen_id"], "handoff_status": "ready", "stl_path": str(tmp_path / "upstream.stl")}
+    if path == "virtual_profile":
+        # This isolated tail starts after Specimen: provide its real generated
+        # candidate mesh, not a nonexistent upstream pathname or camera rectangle.
+        guard.allowed_tools.add("geometry.generate_metamaterial_stl")
+        geometry = tools.call("geometry.generate_metamaterial_stl", {**spec, "output_dir": str(tmp_path / "upstream_geometry")})
+        assert geometry["ok"]
+        controller._state.run_metadata["specimen_result"].update(
+            stl_path=geometry["stl_path"], geometry_hash=geometry["geometry_hash"])
     result = None
     try:
         if hybrid:
@@ -609,7 +656,9 @@ async def test_actual_tail_preserves_profile_preflight_or_deployed_csv_contract(
                 wait_task.cancel()
                 await asyncio.gather(tail_task, wait_task, return_exceptions=True)
         else:
-            result = await asyncio.wait_for(controller._run_planning_loop_tail(spec), timeout=40)
+            # This now includes actual CSV analysis and disposal-owner archives,
+            # not the former virtual preflight prefix.
+            result = await asyncio.wait_for(controller._run_planning_loop_tail(spec), timeout=120)
     finally:
         (tmp_path / "tail-evidence.json").write_text(json.dumps({"result": result,
             "metadata": controller._state.run_metadata, "events": controller.recent_events(),
@@ -622,9 +671,11 @@ async def test_actual_tail_preserves_profile_preflight_or_deployed_csv_contract(
         assert names.count("lerobot.rollout.start") == (1 if path.startswith("real_manip") else 0)
     elif path == "virtual_profile":
         assert result["ok"], (result, stages, controller._state.run_metadata.get("equipment_result"), guard.denied)
-        assert stages[-5:] == ["equipment", "analysis", "knowledge", "bo", "guardian"], stages
-        assert equipment["calls"] == []
-        assert controller._state.run_metadata["equipment_handoff"]["status"] == "execution_ready_pending_approval"
+        assert stages == ["vision", "manipulation", "vision", "equipment", "manipulation", "vision",
+            "analysis", "knowledge", "bo", "guardian"], stages
+        assert len(equipment["calls"]) == len(equipment["programs"])
+        assert controller._state.run_metadata["equipment_handoff"]["status"] == "ready_for_analysis"
+        assert controller._state.run_metadata["utm_clear_execution"]["success"] is True
     else:
         assert stages == ["vision", "manipulation", "vision", "equipment", "manipulation", "guardian"]
         assert "analysis" not in stages and controller._state.run_metadata["utm_data_ready"]["status"] == "ready"

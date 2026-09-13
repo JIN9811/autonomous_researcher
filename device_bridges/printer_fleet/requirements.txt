@@ -1,0 +1,3 @@
+# Descriptor uses only stdlib. Runtime printer_tools uses both providers:
+-r ../bambu/requirements.txt
+-r ../prusa/requirements.txt

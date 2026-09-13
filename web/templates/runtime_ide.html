@@ -83,10 +83,13 @@ Modification guide:
           <button id="ide-dry-run-btn" class="btn">Dry Run</button>
           <button id="ide-export-yaml-btn" class="btn">Export YAML</button>
           <button id="ide-import-yaml-btn" class="btn">Import YAML</button>
+          <button id="ide-export-package-btn" class="btn" type="button" title="Export the current graph and retained module drafts as a detached Experimental Package">Export Package</button>
+          <button id="ide-import-package-btn" class="btn" type="button" title="Validate and load an Experimental Package as an unsaved draft">Import Package</button>
           <button id="ide-save-btn" class="btn warning">Save Version</button>
           <button id="ide-versions-btn" class="btn">Versions</button>
         </div>
         <input id="ide-yaml-import-file" type="file" accept=".yaml,.yml,text/yaml,text/plain" hidden />
+        <input id="ide-package-import-file" type="file" accept=".json,application/json" hidden />
       </section>
 
       <section class="runtime-ide-operator-drawers" aria-label="Runtime operator drawers">
@@ -467,6 +470,7 @@ Modification guide:
     <script src="/static/equipment_skill_flow_model.js?v=20260830-flow-1"></script>
     <script src="/static/module_control_view.js?v=20260913-internal-relations-2"></script>
     <script src="/static/module_execution_editor.js?v=20260913-internal-relations-2"></script>
-    <script src="/static/runtime_ide.js?v=20260913-inline-route-labels" defer></script>
+    <script src="/static/experimental_packages.js?v=20260913-package-drafts-1"></script>
+    <script src="/static/runtime_ide.js?v=20260913-package-drafts-1" defer></script>
   </body>
 </html>

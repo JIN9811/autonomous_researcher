@@ -76,6 +76,12 @@ Low includes software functions and tools; Design's suitability decision is Midd
 Document SVGs share this structure but use a separate light document theme, not the
 Runtime IDE's dark theme.
 
+Outcome labels such as `blocked`, `next`, and `accepted` use compact capsules
+anchored to their owning edge. Collision avoidance searches along the same Bezier
+curve instead of moving labels onto an unrelated canvas grid. Preserve label
+selection and route editing; verify curve attachment and node clearance after
+zooming. Label placement does not alter outcomes or execution routing.
+
 The Orchestrator execution graph covers its `run()` operation boundary. Existing
 program-core Chat/Setup semantic intake is not rerouted through a mission run to
 make the diagram appear broader; document that boundary explicitly.

@@ -2614,10 +2614,24 @@ class LeRobotBridge:
             session.update(identity, replay_result_path=str(result_path), replay_evidence_token=token,
                 replay_max_duration_s=duration, replay_num_frames=episode["num_frames"], replay_fps=episode["fps"],
                 replay_target_state=episode["target_state"])
+            if mode == "test" and request.virtual_bridge_simulation:
+                # Advance the recorded replay in the simulator only after local episode validation.
+                session.update(status="COMPLETED", returncode=0,
+                    simulated_replay={"simulated": True, "actuation_performed": False,
+                        "frames_replayed": episode["num_frames"], "target_state": dict(episode["target_state"]),
+                        "completed_at": time.time()})
+                result["status"] = "COMPLETED"
             result.update(self._replay_evidence(session))
         return result
 
     def _replay_evidence(self, session: dict[str, Any]) -> dict[str, Any]:
+        simulated = session.get("simulated_replay")
+        if session.get("mode") == "test" and session.get("virtual_bridge_simulation") is True and isinstance(simulated, dict):
+            completed = session.get("status") == "COMPLETED" and session.get("returncode") == 0
+            return {**{key: session.get(key, "") for key in ("run_id", "loop_id", "specimen_id", "replay_episode")},
+                "exit_code": session.get("returncode"), "replay_home_verified": completed,
+                "replay_max_duration_s": session.get("replay_max_duration_s"),
+                "replay_evidence": dict(simulated), "simulated": True, "ok": completed}
         evidence = self._read_json_file(str(session.get("replay_result_path") or ""))
         keys = ("session_id", "dataset_repo_id", "dataset_path", "replay_episode")
         matches = bool(evidence) and all(evidence.get(k) == session.get(k) for k in keys)
@@ -2641,6 +2655,14 @@ class LeRobotBridge:
             "replay_result_path": session.get("replay_result_path", ""),
             "replay_evidence": evidence if matches else {},
             "ok": session.get("status") != "FAILED"}
+
+    def simulated_utm_clearance(self, payload: dict[str, Any]) -> bool:
+        """Expose only a matching completed virtual replay's fixture transition."""
+        session = self._sessions.get(str(payload.get("session_id") or ""), {})
+        return bool(session.get("workflow") == "replay" and session.get("mode") == "test"
+            and session.get("virtual_bridge_simulation") is True and session.get("status") == "COMPLETED"
+            and session.get("returncode") == 0 and session.get("simulated_replay")
+            and all(session.get(key) == payload.get(key) for key in ("run_id", "loop_id", "specimen_id")))
 
     def replay_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = dict(payload or {})

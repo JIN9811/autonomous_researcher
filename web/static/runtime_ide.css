@@ -8310,6 +8310,174 @@ body.runtime-ide-body #ide-runtime-contract-map .runtime-contract-row {
   padding: 8px 9px !important;
 }
 
+/* Experimental Package composition uses the existing Dry-run Trace detail surface. */
+body.runtime-ide-body .runtime-infra-navigation {
+  appearance: none;
+  background: rgba(20, 31, 61, 0.78);
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+
+body.runtime-ide-body .runtime-infra-navigation:hover,
+body.runtime-ide-body .runtime-infra-navigation:focus-visible {
+  border-color: rgba(125, 211, 252, 0.72);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.16);
+  outline: none;
+}
+
+body.runtime-ide-body .runtime-package-composition {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-package-head,
+body.runtime-ide-body .runtime-package-row,
+body.runtime-ide-body .runtime-package-bridge,
+body.runtime-ide-body .runtime-package-binding,
+body.runtime-ide-body .runtime-package-notice {
+  align-items: center;
+  border: 1px solid rgba(125, 211, 252, 0.2);
+  border-radius: 9px;
+  display: flex;
+  gap: 9px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+body.runtime-ide-body .runtime-package-head {
+  background: rgba(14, 25, 51, 0.9);
+  justify-content: flex-start;
+}
+
+body.runtime-ide-body .runtime-package-head > .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+body.runtime-ide-body .runtime-package-head > div,
+body.runtime-ide-body .runtime-package-copy,
+body.runtime-ide-body .runtime-package-bridge > div:first-child,
+body.runtime-ide-body .runtime-package-binding {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+body.runtime-ide-body .runtime-package-head small,
+body.runtime-ide-body .runtime-package-copy small,
+body.runtime-ide-body .runtime-package-bridge small,
+body.runtime-ide-body .runtime-package-binding small,
+body.runtime-ide-body .runtime-package-notice small,
+body.runtime-ide-body .runtime-package-empty small {
+  color: rgba(202, 213, 236, 0.7);
+  overflow-wrap: anywhere;
+}
+
+body.runtime-ide-body .runtime-package-section {
+  display: grid;
+  gap: 6px;
+}
+
+body.runtime-ide-body .runtime-package-section h3 {
+  color: #dff6ff;
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  margin: 2px 0 0;
+  text-transform: uppercase;
+}
+
+body.runtime-ide-body .runtime-package-row,
+body.runtime-ide-body .runtime-package-bridge,
+body.runtime-ide-body .runtime-package-binding {
+  background: rgba(10, 19, 40, 0.72);
+}
+
+body.runtime-ide-body .runtime-package-row.in-draft,
+body.runtime-ide-body .runtime-package-bridge.in-draft {
+  border-color: rgba(52, 211, 153, 0.42);
+}
+
+body.runtime-ide-body .runtime-package-copy {
+  flex: 1;
+}
+
+body.runtime-ide-body .runtime-package-copy strong em,
+body.runtime-ide-body .runtime-package-bridge strong em {
+  color: rgba(186, 230, 253, 0.72);
+  font-size: 0.7rem;
+  font-style: normal;
+}
+
+body.runtime-ide-body .runtime-package-badges,
+body.runtime-ide-body .runtime-package-owner-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+body.runtime-ide-body .runtime-package-badges em,
+body.runtime-ide-body .runtime-package-owner-list span {
+  background: rgba(59, 130, 246, 0.13);
+  border: 1px solid rgba(96, 165, 250, 0.24);
+  border-radius: 999px;
+  color: #bfdbfe;
+  font-size: 0.64rem;
+  font-style: normal;
+  padding: 3px 6px;
+}
+
+body.runtime-ide-body .runtime-package-badges em.draft,
+body.runtime-ide-body .runtime-package-owner-list span.draft {
+  background: rgba(16, 185, 129, 0.13);
+  border-color: rgba(52, 211, 153, 0.34);
+  color: #a7f3d0;
+}
+
+body.runtime-ide-body .runtime-package-badges em.excluded {
+  background: rgba(100, 116, 139, 0.12);
+  border-color: rgba(148, 163, 184, 0.2);
+  color: #cbd5e1;
+}
+
+body.runtime-ide-body .runtime-package-notice {
+  align-items: flex-start;
+  display: grid;
+  justify-content: stretch;
+}
+
+body.runtime-ide-body .runtime-package-notice.ok { border-color: rgba(52, 211, 153, 0.45); }
+body.runtime-ide-body .runtime-package-notice.warn { border-color: rgba(251, 191, 36, 0.45); }
+body.runtime-ide-body .runtime-package-notice.error,
+body.runtime-ide-body .runtime-package-empty.error { border-color: rgba(248, 113, 113, 0.5); }
+
+body.runtime-ide-body .runtime-package-empty {
+  border: 1px dashed rgba(148, 163, 184, 0.28);
+  border-radius: 9px;
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-package-row,
+  body.runtime-ide-body .runtime-package-bridge {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  body.runtime-ide-body .runtime-package-badges,
+  body.runtime-ide-body .runtime-package-owner-list {
+    justify-content: flex-start;
+    width: 100%;
+  }
+}
+
 body.runtime-ide-body #ide-runtime-contract-map .runtime-contract-summary strong,
 body.runtime-ide-body #ide-runtime-contract-map .runtime-contract-row strong {
   color: #f3fbff !important;
@@ -8416,4 +8584,22 @@ body.runtime-ide-body .runtime-canvas-view-hint {
 
 body.runtime-ide-body #ide-graph-id {
   flex: 0 0 auto !important;
+}
+
+/* Package details temporarily expand the existing trace output; no separate dashboard. */
+body.runtime-ide-body #ide-dry-run-output[data-package-composition="open"] {
+  max-height: 360px !important;
+  min-height: 220px !important;
+  overflow: auto !important;
+}
+
+@media (max-width: 760px) {
+  body.runtime-ide-body .runtime-ide-graph-aux-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  body.runtime-ide-body #ide-dry-run-output[data-package-composition="open"] {
+    max-height: 420px !important;
+    min-height: 280px !important;
+  }
 }

@@ -31,9 +31,9 @@ supersedes: []
 | 설계 상태 | 상위 방향 합의; 아래 상세 계약은 검토안 |
 | 모듈화 대상 | 전문 에이전트와 디바이스 브릿지, 각각의 backend·frontend·설정·저장 계약 |
 | 프로그램 코어 | Orchestrator, LangGraph, 세션, 공통 GUI 및 서비스 연결 유지 |
-| Package | 모듈 구성·버전·의존성·기본 연결을 선언하는 배포 단위 |
+| Package | Agent Package는 owner 단위, Experimental Package는 플랜·설정·연결을 포함한 실험 조합 |
 | 소프트웨어 기준점 | `9d11cf923f556e6abe87df3084dbbd5c022a5ea6`; 모듈별 전환 전에 동작 비교 근거 확정 |
-| 구현 상태 | Design 모듈·활성화 수명주기와 Design/ORC 공통 실행 그래프 적용; Package 설치·Bridge 전환·전체 모듈 이전은 미구현 |
+| 구현 상태 | Design/Specimen 모듈, Design/Specimen/ORC 실행 그래프와 로컬 Package 계약 적용; IDE 및 실제 LLM 가상 장비 사이클 최종 검증 진행 중 |
 | 실증 경계 | 소프트웨어 호환성 검증과 기존 물리 동작 stable 실증을 별도로 관리 |
 
 ## Summary
@@ -45,15 +45,16 @@ GUI를 묶는다. 기존 그래프·API·설정·저장 경로는 유지하며 �
 모두 구현했다고 간주하지 않는다.
 
 Runtime IDE 내부 구조는 단순 설명 그림이 아니라 **실행 정의를 편집하는 화면**이다.
-Design과 코어 Orchestrator의 `run()`은 같은 `execution_graph`를 실행하고,
+Design·Specimen과 코어 Orchestrator의 `run()`은 각 owner의 같은 `execution_graph`를 실행하고,
 IDE와 문서 SVG도 그 정의에서 생성한다. 유효한 경로 편집은 기존 검증·활성화
 절차를 거쳐 다음 런에 반영되며, 백엔드 정의 변경은 재조회 시 화면에 반영된다.
 이는 소스 코드를 화면에서 임의 생성하거나 모든 내부 함수를 자동 노출한다는 뜻이 아니다.
 구현·비구동 검증 범위는 [실행 그래프 완료 기록](../plans/2026-09-13-executable-agent-ide.md#verification-record--2026-09-13)에 정리한다.
 
 에이전트 모듈과 브릿지 모듈은 자기 기능에 필요한 백엔드, API, 전용 화면,
-설정 스키마, 저장 형식, 테스트와 문서를 소유한다. **Package는 모듈들을 함께
-설치하고 구성하는 단위**이며, 실행 순서와 실험 참여는 기존 활성 LangGraph가 결정한다.
+설정 스키마, 저장 형식, 테스트와 문서를 소유한다. **Agent Package는 owner 모듈과
+의존성을 묶고, Experimental Package는 이 패키지들과 오케스트레이션 플랜을 조합**한다.
+포함한 플랜도 가져오기 직후에는 초안이며 실행 순서와 실험 참여는 기존 활성 LangGraph가 결정한다.
 
 Orchestrator는 프로그램 코어에 유지한다. 공통 GUI는 모듈의 화면과 카드를 연결하고,
 공통 저장 서비스는 실행 식별자와 저장 위치를 제공한다. 전문 판단과 설정 적용은
@@ -152,7 +153,8 @@ Package의 모듈 구성과 활성 그래프의 실행 선택을 구분하며, �
 | 코어 + ORC | Chat·세션·그래프·실행 연결·공통 GUI·서비스 주입 | 전문 알고리즘·브릿지 프로토콜은 모듈에 위임 |
 | Agent module | 역할에 맞는 LLM 판단, 설정 적용, 작업 결과·진행·전용 화면 | 다른 owner 설정과 상태를 직접 변경하지 않음 |
 | Bridge module | 장비·계산 provider 연결, 명령, 상태, 장비별 설정·전용 화면 | 연구 목적·다음 에이전트를 결정하지 않음 |
-| Package | 포함 모듈, 버전, 설치 의존성, 권장 binding·문서 | 별도 스케줄러·설정 소유자·장비 실행 주체가 아님 |
+| Agent Package | 에이전트 모듈, 버전, 브릿지 의존성, 권장 binding·문서 | 모듈 소유권·파일 경로를 바꾸지 않음 |
+| Experimental Package | Agent Package 조합, 오케스트레이션 플랜, 휴대 가능한 설정·binding | 별도 스케줄러·설정 소유자·장비 실행 주체가 아님 |
 | Module instance | 선택한 모듈 구현의 개별 설정·연결·작업 상태 | 동일 브릿지 구현의 여러 장비를 구분 |
 
 에이전트와 브릿지는 다대다 연결을 허용한다. 연결 대상은 모듈 개수가 아니라
@@ -164,7 +166,7 @@ Guardian와 Knowledge도 전문 모듈 범위에 포함한다. 코어의 강제 
 
 | 항목 | 의미 |
 |---|---|
-| `package_id` | 설치·구성 묶음의 고유 ID |
+| `package_id` + `kind` | `agent` / `experimental` 구성 묶음 ID; agent 종류는 에이전트 ID와 일치 |
 | `module_id` + `kind` | 구현의 고유 ID와 `agent` / `bridge` 구분 |
 | `instance_id` | 해당 구현의 설정·연결 인스턴스; 최초 에이전트는 기본 인스턴스 하나 |
 | `handler_id`, `tool_id` | 기존 실행 호출 ID; 이동해도 호환 alias 보존 |
@@ -205,22 +207,51 @@ Guardian와 Knowledge도 전문 모듈 범위에 포함한다. 코어의 강제 
 `requires`는 capability·버전·필수 여부를 표현한다. tool handler와 실행 함수는
 코드 등록으로 제공하고, 사용자가 편집한 YAML의 임의 import 경로를 실행하지 않는다.
 
-### 4. Package 계약
+### 4. Agent Package / Experimental Package 계약
 
-Package는 공통 loader가 읽는 `package.yaml`과 안내 문서를 갖는다. 아래는 목표
-schema의 예시이며 실제 설치 파일이 아니다. 버전과 capability ID는 예시 값이다.
+2026-09-13 사용자 합의로 Package를 두 종류로 구분한다. **Agent Package**는
+에이전트 이름을 ID로 사용하고 에이전트 모듈·전용 UI/API/문서/저장 계약과 필요한
+브릿지 의존성을 참조한다. `design`은 직접 브릿지 없이, `specimen`은 기존 Printer
+Fleet 브릿지를 연결한다. 브릿지는 별도 모듈로 남아 다른 패키지도 공유할 수 있다.
+같은 패키지에 포함되어도 브릿지 코드의 폴더는 **`device_bridges/`**로 유지한다.
+`agents/<agent_id>/`나 패키지 폴더 아래로 복사·중첩하지 않으며 manifest로 참조한다.
+이관하는 각 브릿지는 `device_bridges/<bridge_id>/` 폴더에 구현·설정 계약·의존성
+안내를 묶는다. `requirements.txt`에는 해당 브릿지의 실제 Python 의존성을 적고,
+슬라이서·드라이버·별도 프로세스 등 외부 요구사항은 README에서 구분한다. 기존 flat
+import는 필요한 호환 adapter로 유지하며 모든 미이관 브릿지를 한 번에 옮기지는 않는다.
+
+**Experimental Package**는 Agent Package의 버전 목록, 브릿지 binding, 실험 설정과
+오케스트레이션 플랜을 함께 보관·내보내기·가져오기하는 조합이다. Orchestrator 자체는
+코어에 유지하며, 패키지가 새 실행 엔진이나 설정 소유자가 되지 않는다. 다른 실험에서는
+기존 에이전트를 재배치·연결하여 새 Experimental Package를 구성한다.
+
+가져오기는 로컬에 이미 설치된 코드와 버전·handler·설정 호환성을 검사하여 **비활성
+초안**을 만든다. 가져오기만으로 현재 그래프·장비 설정을 덮어쓰거나 장비를 실행하지
+않는다. 현지 장비 binding과 기존 IDE 검증·저장·활성화 절차를 거쳐야 참여가 바뀐다.
+원격 코드를 다운로드하거나 문서의 import 경로를 실행하지 않는다. 내보내기에는
+로컬 연결값·인증 정보·사용자 메모리·실행 세션·산출물을 포함하지 않는다.
+
+패키지를 제거해도 다른 패키지·그래프·작업에서 사용하는 모듈과 과거 결과를 지우지
+않는다. 배포 목록은 참조 집합이며 실행 순서는 포함된 플랜의 명시적 연결이 정한다.
+
+#### Module composition example
+
+Agent Package는 공통 loader가 읽는 `package.yaml`과 안내 문서를 갖는다. 아래는 목표
+schema의 예시이며 실제 구현 schema는 이관 시 검증한다. Experimental Package의
+교환 파일은 선언형 JSON으로 플랜과 선택한 모듈 설정을 포함한다. 원격 코드 설치 파일이 아니다.
 
 ```yaml
-schema_version: ax4lab.package.v1
-id: fabrication
+schema_version: ax4lab.agent_package.v1
+kind: agent
+id: specimen
 version: 1.0.0
 modules:
   - {kind: agent, id: specimen, version: 1.0.0}
-  - {kind: bridge, id: printer_provider, version: 1.0.0}
+  - {kind: bridge, id: printer_fleet, version: 1.0.0}
 bindings:
   - consumer: {kind: agent, id: specimen}
-    capability: fabrication.print
-    provider: {kind: bridge, id: printer_provider}
+    capability: printer.prepare
+    provider: {kind: bridge, id: printer_fleet}
     instance: operator_selected
 presets: []
 documentation: README.md
@@ -309,9 +340,23 @@ High / Middle / Low를 중심에, Guardian / Safety와 Knowledge / Evidence를
 - Low는 장비뿐 아니라 계산·조회·소프트웨어 툴 실행도 포함한다. Design 전문 판단은 Middle이며, High는 위임·인계 책임과 구분한다.
 - 실선·파선·점선은 edge의 `execution`·`validation`·`evidence` 종류를 표현한다. 실제 상태는 module·run·loop·revision·invocation이 일치하는 실행 trace로 표시한다.
 - Runtime IDE의 색상·노드·포트·줌·스크롤 체계를 사용한다. 데스크톱과 좁은 화면에서 겹침·잘림·가독성을 검증한다.
+- `blocked`·`next`·`accepted` 같은 outcome 라벨은 기존 스타일의 짧은 캡슐로 해당 연결선 위에 배치한다. 충돌 시 선 밖의 임의 좌표가 아닌 같은 곡선의 다른 지점을 우선 탐색한다. 라벨 선택·분기 편집은 유지하며 확대·축소 후 선 부착과 노드 겹침을 검증한다. 이는 표시 규칙이며 outcome·실행 경로를 바꾸지 않는다.
 - 미완성 draft는 화면에서 편집 가능하되, 잘못된 owner operation·분기·의존성·종료 결과는 저장 전에 거절한다. 라벨·좌표 변경은 표현만 바꾸고, 유효한 경로 변경은 활성화 후 실행을 바꾼다.
 - backend reload는 최신 정의를 읽되 dirty draft를 무단 덮어쓰지 않는다. 진행 중인 런은 시작 시 정의를 유지한다. 미전환 모듈의 기존 표현·handler override는 유지한다.
 - 문서 SVG는 공통 구조 데이터·renderer를 사용하되 **문서용 테마**로 생성한다. IDE의 어두운 배경·네온 강조를 복사하지 않고 흰 배경·짙은 글자·절제된 영역 색상을 쓴다. 생성 결과 일치와 실제 브라우저 편집 동작을 검사한다.
+
+#### Device Bridge 내부 구성 보기
+
+2026-09-13 추가 합의: Runtime IDE의 Device Bridges 항목을 클릭하면 기존 IDE 안에서
+**Agent Package → Device Bridge** 포함 관계를 볼 수 있게 한다. 브릿지 내부를
+에이전트의 5영역 실행 단계처럼 새로 구성하지 않고, 어떤 패키지가 어떤 브릿지를
+묶어 사용하는지에 집중한다.
+
+- 관계의 원본은 설치된 Agent Package/Bridge 선언과 현재 Experimental Package draft다. 프론트엔드 전용 연결 목록을 따로 만들지 않는다.
+- 패키지명과 브릿지 ID·버전, 공유 관계를 표시한다. provider 구성 요소가 선언되어 있으면 해당 브릿지 아래에 표시하되, 독립 모듈로 등록되지 않은 provider를 독립 모듈처럼 표현하지 않는다.
+- 설치된 패키지의 의존성과 현재 draft에 포함된 패키지를 구분한다. 패키지 추가·제거 또는 재조회 시 표시도 갱신하며, 연결 브릿지가 없는 패키지는 빈 상태를 명시한다.
+- 이 화면은 구성 관계 조회이며 실제 연결 상태 확인·장비 탐색·명령 실행을 하지 않는다. 기존 그래프 실행 편집과 브릿지 설정 경로는 유지한다.
+- 클릭·내부 진입·뒤로 이동, 공유 브릿지, 추가·제거, 빈 상태와 좁은 화면 가독성을 비구동 테스트로 확인한다.
 
 #### 다음 에이전트 모듈의 필수 인수 항목
 
@@ -355,9 +400,11 @@ Analysis의 background FEM처럼 루프가 끝나도 진행하는 작업은 별�
 기존 import는 필요한 범위에서 compatibility adapter로 유지한다.
 
 ```text
-packages/<package_id>/
+packages/agents/<agent_id>/
   package.yaml
   README.md
+packages/experiments/<experiment_package_id>/  # explicitly published portable presets only
+  package.json
 agents/<module_id>/                  device_bridges/<module_id>/
   module.yaml                         module.yaml
   backend/                            backend/
@@ -471,10 +518,11 @@ freshness 규칙을 유지한다. 공통 adapter를 추가해 기존 실행 검�
 
 ## Open Questions
 
-상세 검토 대상은 첫 실제 package의 구성 모듈과 이관 순서다. 권장 초기 연결 묶음은
-Specimen + 현재 사용 중인 printer bridge이며 Design은 공통 agent 계약의 선행 검증에 사용한다.
-기존 실행 경로 확인 없이 provider를 새로 분리하거나 장비 종류를 추가하지 않는다.
-모듈별 실제 파일 이전표와 모드별 기준 fixture는 단계 1에서 확정한다.
+첫 묶음은 `specimen` Agent Package와 `printer_fleet` Bridge Module로 확정했다.
+`design`은 브릿지 없는 Agent Package이며, Fleet의 기존 Bambu/Prusa 구현은
+`device_bridges/bambu/`와 `device_bridges/prusa/`에 두고 기존 import를 유지한다.
+다음 owner의 이전 순서는 별도 확정한다. 기존 실행 경로 확인 없이 provider를
+새로 분리하거나 장비 종류를 추가하지 않는다.
 
 ## Related Evidence and Plan
 
@@ -484,10 +532,11 @@ Specimen + 현재 사용 중인 printer bridge이며 Design은 공통 agent 계�
 - [동적 Setup 설계](2026-09-12-orchestrator-dynamic-experimental-setup-design.md): owner 기반 설정·Chat·가용성 연결.
 - [저장 계약](../../runtime/loop_artifact_archiving.md): 실행별 archive와 독립 bridge session의 구분.
 - [첫 Design 구현·검증 계획](../plans/2026-09-13-design-agent-module.md): 기존 경로 보존을 확인하는 선행 적용. 이 문서는 전체 모듈 전환의 완료 보고서가 아니다.
+- [Specimen·Package 적용 및 검증](../plans/2026-09-13-specimen-agent-packages.md): 기존 제작 경로, 브릿지 폴더, 초안 교환 및 가상 장비 모델 호출 검증.
 
 ## Limitations and Known Gaps
 
-- Design은 코드 등록 계약뿐 아니라 적용 그래프 기반 실행 접근·Live GUI·ORC owner 발견을 연결했다. 설치 catalog와 활성 binding을 분리하며, IDE 탭 열기/닫기는 활성화가 아니다. [적용 수명주기 계획·검증](../plans/2026-09-13-design-ide-module-lifecycle.md)을 기준으로 한다. Package 설치 및 Bridge 배포 모듈 연결은 아직 구현하지 않았다.
+- Design/Specimen은 owner 코드·전용 화면·실행 정의를 모듈 계약에 연결했다. 설치 catalog와 활성 binding을 분리하며, IDE 탭 열기/닫기는 활성화가 아니다. [적용 수명주기 계획·검증](../plans/2026-09-13-design-ide-module-lifecycle.md)을 기준으로 한다. 로컬 Package catalog와 비활성 Experimental Package 초안 교환은 추가했으나, 원격 코드 설치·전체 Bridge 이전은 구현 범위가 아니다.
 - 전체 API·화면·파일 소유권 실사는 미완료이며, Current Context는 조사한 연결 지점이다.
 - 코어에 남는 module별 분기는 개별 이관 시 확인한다. 모든 분기의 제거를 미리 보장하지 않는다.
 - 과거 archive에 없는 module 버전·장비 instance를 소급하여 만들어 넣지 않는다.

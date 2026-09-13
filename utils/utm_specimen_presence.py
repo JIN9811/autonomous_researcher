@@ -40,14 +40,29 @@ def _decode_data_url(data_url: str) -> Image.Image:
     return Image.open(BytesIO(image_bytes)).convert("RGB")
 
 
-def virtual_specimen_frame_data_url(*, width: int = 640, height: int = 480) -> str:
+def virtual_specimen_frame_data_url(*, width: int = 640, height: int = 480, specimen_present: bool = True,
+                                    registered_fixture: bool = False, rendered_mesh_path: Path | None = None) -> str:
     """Create an explicitly virtual red specimen frame for test-bridge verification."""
     image = np.full((height, width, 3), 210, dtype=np.uint8)
     x0, x1 = int(width * 0.42), int(width * 0.58)
     y0, y1 = int(height * 0.38), int(height * 0.68)
-    image[y0:y1, x0:x1] = [225, 30, 35]
+    if specimen_present and rendered_mesh_path is not None:
+        with Image.open(rendered_mesh_path) as rendered:
+            if rendered.size != (width, height):
+                raise ValueError("candidate render dimensions differ from virtual camera")
+            image = np.asarray(rendered.convert("RGB")).copy()
+    elif specimen_present:
+        image[y0:y1, x0:x1] = [225, 30, 35]
+    if registered_fixture:
+        image[358:368, 232:242] = [25, 200, 45]
+        image[358:368, 347:357] = [25, 200, 45]
     buffer = BytesIO()
-    Image.fromarray(image).save(buffer, format="JPEG", quality=92)
+    frame = Image.fromarray(image)
+    if rendered_mesh_path is not None:
+        ImageDraw.Draw(frame).text((12, 12), "SYNTHETIC STL CAMERA / simulated red material / no physical I/O", fill=(20, 20, 20))
+        frame.save(buffer, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+    frame.save(buffer, format="JPEG", quality=92)
     return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
@@ -200,8 +215,10 @@ def _inspect_clear_presence(image, *, output_dir, specimen_id, frame_id, evidenc
     try:
         stamp, after = float(evidence.get("frame_timestamp", 0)), float(evidence.get("after_timestamp", 0))
         valid = (0 < after < stamp <= time.time() + 1 and time.time() - stamp <= 3
-            and image.size == (640, 480) and evidence.get("topic") in UTM_CLEAR_CAMERA_TOPICS
-            and evidence.get("camera_profile_id") == "camera_utm_primary" and evidence.get("material") == "high_chroma_red")
+            and image.size == (640, 480)
+            and ((evidence.get("topic") in UTM_CLEAR_CAMERA_TOPICS and evidence.get("camera_profile_id") == "camera_utm_primary")
+                 or (evidence.get("topic") == "virtual://utm-clear" and evidence.get("virtual_bridge_simulation") is True))
+            and evidence.get("material") == "high_chroma_red")
     except (ValueError, TypeError):
         stamp, valid = 0, False
     result["captured_at"] = datetime.fromtimestamp(stamp, timezone.utc).isoformat() if 0 < stamp < 1e11 else ""

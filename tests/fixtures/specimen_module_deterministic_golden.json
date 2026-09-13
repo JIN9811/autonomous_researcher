@@ -1,0 +1,2310 @@
+{
+  "description": "Synthetic second-loop Specimen owner baseline, captured from pre-migration ba8e1f5 implementation. No device, model, private connection, or runtime artifacts. Dynamic clock/request ID fixed; artifact directory is a test placeholder.",
+  "state_input": {
+    "run_id": "synthetic-specimen-golden",
+    "experiment_id": "synthetic-experiment",
+    "mode": "test",
+    "stage": "specimen",
+    "loop_count": 1,
+    "current_experiment_spec": {
+      "candidate_id": "synthetic-candidate",
+      "specimen_id": "synthetic-specimen",
+      "candidate_fingerprint": "synthetic-design-hash",
+      "geometry_type": "gyroid",
+      "specimen_size_mm": [
+        30.0,
+        30.0,
+        30.0
+      ],
+      "cell_size_mm": 5.0,
+      "wall_thickness_mm": 1.2,
+      "relative_density": 0.32,
+      "porosity": 0.68,
+      "anisotropy_ratio": 1.0,
+      "orientation_deg": 0.0,
+      "defect_seed": 2,
+      "defect_ratio": 0.0,
+      "skin_thickness_mm": 0.8,
+      "top_cap_enabled": true,
+      "bottom_cap_enabled": true,
+      "top_bottom_cap": true,
+      "material": "PLA",
+      "printer_profile": "synthetic_pla_0p4",
+      "slicer_profile_hint": "synthetic_quality",
+      "layer_height_mm": 0.2,
+      "nozzle_diameter_mm": 0.4,
+      "expected_mass_g": 12.0,
+      "expected_print_time_min": 65.0,
+      "constraints": {
+        "minimum_feature_size_mm": 0.8,
+        "fdm_max_gyroid_wall_cell_ratio": 0.28,
+        "max_print_time_min": 120.0,
+        "max_mass_g": 50.0
+      }
+    }
+  },
+  "tool_responses": {
+    "geometry.generate_metamaterial_stl": {
+      "ok": true,
+      "stl_path": "$ARTIFACT_ROOT/model.stl",
+      "preview_image_path": "$ARTIFACT_ROOT/preview.png",
+      "geometry_hash": "synthetic-geometry-hash",
+      "geometry_report": {
+        "synthetic": true,
+        "connected_components": 1
+      }
+    },
+    "geometry.check_mesh_quality": {
+      "ok": true,
+      "mesh_status": "pass",
+      "mesh_report": {
+        "watertight": true,
+        "connected_components": 1
+      },
+      "warnings": [
+        "synthetic mesh warning"
+      ],
+      "reject_reasons": []
+    },
+    "geometry.check_manufacturability": {
+      "ok": true,
+      "manufacturability_status": "pass",
+      "expected_mass_g": 12.0,
+      "expected_print_time_min": 65.0,
+      "warnings": [
+        "synthetic process warning"
+      ],
+      "reject_reasons": []
+    },
+    "artifact.create_specimen_handoff": {
+      "ok": true,
+      "handoff_status": "ready",
+      "handoff_package_path": "$ARTIFACT_ROOT/handoff.json"
+    },
+    "experiment.evaluate": {
+      "ok": true,
+      "evaluation_id": "synthetic-evaluation",
+      "bridge_result": {
+        "ok": true,
+        "status": "virtual_finished",
+        "mode": "test",
+        "printer_path": "virtual_bridge",
+        "provider": "synthetic",
+        "sliced_path": "$ARTIFACT_ROOT/model.gcode",
+        "slicer_settings": {
+          "layer_height_mm": 0.2,
+          "nozzle_diameter_mm": 0.4
+        },
+        "slicer_result": {
+          "ok": true,
+          "status": "completed"
+        },
+        "gcode_validation": {
+          "ok": true,
+          "status": "pass"
+        },
+        "print_result": {
+          "status": "virtual_finished"
+        },
+        "ejection_result": {
+          "status": "not_requested"
+        },
+        "operator_messages": [
+          "Synthetic offline fabrication complete"
+        ],
+        "step_trace": [
+          {
+            "step": "slice",
+            "status": "completed"
+          }
+        ]
+      }
+    }
+  },
+  "expected_tool_calls": [
+    {
+      "tool": "geometry.generate_metamaterial_stl",
+      "payload": {
+        "run_id": "synthetic-specimen-golden",
+        "experiment_id": "synthetic-experiment",
+        "candidate_id": "synthetic-candidate",
+        "specimen_id": "synthetic-specimen",
+        "geometry_type": "gyroid",
+        "specimen_size_mm": [
+          30.0,
+          30.0,
+          30.0
+        ],
+        "cell_size_mm": 5.0,
+        "wall_thickness_mm": 1.2,
+        "relative_density": 0.32,
+        "anisotropy_ratio": 1.0,
+        "orientation_deg": 0.0,
+        "defect_seed": 2,
+        "defect_ratio": 0.0,
+        "skin_thickness_mm": 0.0,
+        "top_cap_enabled": false,
+        "bottom_cap_enabled": false,
+        "top_bottom_cap": false,
+        "material": "PLA",
+        "output_dir": "$ARTIFACT_ROOT",
+        "output_format": "stl"
+      }
+    },
+    {
+      "tool": "geometry.check_mesh_quality",
+      "payload": {
+        "stl_path": "$ARTIFACT_ROOT/model.stl",
+        "expected_bounding_box_mm": [
+          30.0,
+          30.0,
+          30.0
+        ],
+        "constraints": {
+          "minimum_feature_size_mm": 0.8,
+          "fdm_max_gyroid_wall_cell_ratio": 0.28,
+          "max_print_time_min": 120.0,
+          "max_mass_g": 50.0,
+          "top_cap_enabled": false,
+          "bottom_cap_enabled": false,
+          "top_bottom_cap": false,
+          "skin_thickness_mm": 0.0,
+          "require_flat_compression_faces": false
+        }
+      }
+    },
+    {
+      "tool": "geometry.check_manufacturability",
+      "payload": {
+        "stl_path": "$ARTIFACT_ROOT/model.stl",
+        "printer_profile": "synthetic_pla_0p4",
+        "material": "PLA",
+        "constraints": {
+          "minimum_feature_size_mm": 0.8,
+          "fdm_max_gyroid_wall_cell_ratio": 0.28,
+          "max_print_time_min": 120.0,
+          "max_mass_g": 50.0,
+          "top_cap_enabled": false,
+          "bottom_cap_enabled": false,
+          "top_bottom_cap": false,
+          "skin_thickness_mm": 0.0,
+          "require_flat_compression_faces": false,
+          "geometry_type": "gyroid",
+          "wall_thickness_mm": 1.2,
+          "cell_size_mm": 5.0,
+          "relative_density": 0.32,
+          "nozzle_diameter_mm": 0.4,
+          "layer_height_mm": 0.2,
+          "tpms_thickness": null,
+          "fdm_min_wall_thickness_mm": 1.2,
+          "fdm_max_bridge_distance_mm": 10.0,
+          "fdm_max_unsupported_overhang_deg": 45.0,
+          "expected_print_time_min": 65.0,
+          "expected_mass_g": 12.0
+        },
+        "mesh_report": {
+          "watertight": true,
+          "connected_components": 1
+        }
+      }
+    },
+    {
+      "tool": "artifact.create_specimen_handoff",
+      "payload": {
+        "run_id": "synthetic-specimen-golden",
+        "experiment_id": "synthetic-experiment",
+        "specimen_id": "synthetic-specimen",
+        "experiment_spec": {
+          "candidate_id": "synthetic-candidate",
+          "specimen_id": "synthetic-specimen",
+          "candidate_fingerprint": "synthetic-design-hash",
+          "geometry_type": "gyroid",
+          "specimen_size_mm": [
+            30.0,
+            30.0,
+            30.0
+          ],
+          "cell_size_mm": 5.0,
+          "wall_thickness_mm": 1.2,
+          "relative_density": 0.32,
+          "porosity": 0.68,
+          "anisotropy_ratio": 1.0,
+          "orientation_deg": 0.0,
+          "defect_seed": 2,
+          "defect_ratio": 0.0,
+          "skin_thickness_mm": 0.0,
+          "top_cap_enabled": false,
+          "bottom_cap_enabled": false,
+          "top_bottom_cap": false,
+          "material": "PLA",
+          "printer_profile": "synthetic_pla_0p4",
+          "slicer_profile_hint": "synthetic_quality",
+          "layer_height_mm": 0.2,
+          "nozzle_diameter_mm": 0.4,
+          "expected_mass_g": 12.0,
+          "expected_print_time_min": 65.0,
+          "constraints": {
+            "minimum_feature_size_mm": 0.8,
+            "fdm_max_gyroid_wall_cell_ratio": 0.28,
+            "max_print_time_min": 120.0,
+            "max_mass_g": 50.0,
+            "top_cap_enabled": false,
+            "bottom_cap_enabled": false,
+            "top_bottom_cap": false,
+            "skin_thickness_mm": 0.0,
+            "require_flat_compression_faces": false
+          },
+          "require_flat_compression_faces": false,
+          "test_loop_surface_caps_disabled": true
+        },
+        "geometry_result": {
+          "ok": true,
+          "stl_path": "$ARTIFACT_ROOT/model.stl",
+          "preview_image_path": "$ARTIFACT_ROOT/preview.png",
+          "geometry_hash": "synthetic-geometry-hash",
+          "geometry_report": {
+            "synthetic": true,
+            "connected_components": 1
+          }
+        },
+        "mesh_result": {
+          "ok": true,
+          "mesh_status": "pass",
+          "mesh_report": {
+            "watertight": true,
+            "connected_components": 1
+          },
+          "warnings": [
+            "synthetic mesh warning"
+          ],
+          "reject_reasons": []
+        },
+        "manufacturability_result": {
+          "ok": true,
+          "manufacturability_status": "pass",
+          "expected_mass_g": 12.0,
+          "expected_print_time_min": 65.0,
+          "warnings": [
+            "synthetic process warning"
+          ],
+          "reject_reasons": []
+        },
+        "next_agent": "vision_agent"
+      }
+    },
+    {
+      "tool": "experiment.evaluate",
+      "payload": {
+        "run_id": "synthetic-specimen-golden",
+        "experiment_id": "synthetic-experiment",
+        "session_id": "synthetic-specimen-golden",
+        "objective": {
+          "objective_id": "specimen-print-synthetic-specimen",
+          "name": "Specimen print preparation",
+          "description": "Evaluate generated specimen through the unified experiment runtime.",
+          "metric_name": "printability_score",
+          "direction": "maximize",
+          "constraints": {
+            "minimum_feature_size_mm": 0.8,
+            "fdm_max_gyroid_wall_cell_ratio": 0.28,
+            "max_print_time_min": 120.0,
+            "max_mass_g": 50.0,
+            "top_cap_enabled": false,
+            "bottom_cap_enabled": false,
+            "top_bottom_cap": false,
+            "skin_thickness_mm": 0.0,
+            "require_flat_compression_faces": false
+          },
+          "tags": [
+            "specimen",
+            "printer",
+            "fdm"
+          ]
+        },
+        "candidate": {
+          "candidate_id": "synthetic-candidate",
+          "source_agent": "specimen_agent",
+          "experiment_spec": {
+            "candidate_id": "synthetic-candidate",
+            "specimen_id": "synthetic-specimen",
+            "candidate_fingerprint": "synthetic-design-hash",
+            "geometry_type": "gyroid",
+            "specimen_size_mm": [
+              30.0,
+              30.0,
+              30.0
+            ],
+            "cell_size_mm": 5.0,
+            "wall_thickness_mm": 1.2,
+            "relative_density": 0.32,
+            "porosity": 0.68,
+            "anisotropy_ratio": 1.0,
+            "orientation_deg": 0.0,
+            "defect_seed": 2,
+            "defect_ratio": 0.0,
+            "skin_thickness_mm": 0.0,
+            "top_cap_enabled": false,
+            "bottom_cap_enabled": false,
+            "top_bottom_cap": false,
+            "material": "PLA",
+            "printer_profile": "synthetic_pla_0p4",
+            "slicer_profile_hint": "synthetic_quality",
+            "layer_height_mm": 0.2,
+            "nozzle_diameter_mm": 0.4,
+            "expected_mass_g": 12.0,
+            "expected_print_time_min": 65.0,
+            "constraints": {
+              "minimum_feature_size_mm": 0.8,
+              "fdm_max_gyroid_wall_cell_ratio": 0.28,
+              "max_print_time_min": 120.0,
+              "max_mass_g": 50.0,
+              "top_cap_enabled": false,
+              "bottom_cap_enabled": false,
+              "top_bottom_cap": false,
+              "skin_thickness_mm": 0.0,
+              "require_flat_compression_faces": false
+            },
+            "require_flat_compression_faces": false,
+            "test_loop_surface_caps_disabled": true
+          },
+          "parameters": {
+            "run_id": "synthetic-specimen-golden",
+            "specimen_placement": null,
+            "experiment_id": "synthetic-experiment",
+            "runtime_mode": "test",
+            "specimen_id": "synthetic-specimen",
+            "candidate_id": "synthetic-candidate",
+            "stl_path": "$ARTIFACT_ROOT/model.stl",
+            "handoff_package_path": "$ARTIFACT_ROOT/handoff.json",
+            "printer_profile": "synthetic_pla_0p4",
+            "material": "PLA",
+            "slicer_profile_hint": "synthetic_quality",
+            "experiment_spec": {
+              "candidate_id": "synthetic-candidate",
+              "specimen_id": "synthetic-specimen",
+              "candidate_fingerprint": "synthetic-design-hash",
+              "geometry_type": "gyroid",
+              "specimen_size_mm": [
+                30.0,
+                30.0,
+                30.0
+              ],
+              "cell_size_mm": 5.0,
+              "wall_thickness_mm": 1.2,
+              "relative_density": 0.32,
+              "porosity": 0.68,
+              "anisotropy_ratio": 1.0,
+              "orientation_deg": 0.0,
+              "defect_seed": 2,
+              "defect_ratio": 0.0,
+              "skin_thickness_mm": 0.0,
+              "top_cap_enabled": false,
+              "bottom_cap_enabled": false,
+              "top_bottom_cap": false,
+              "material": "PLA",
+              "printer_profile": "synthetic_pla_0p4",
+              "slicer_profile_hint": "synthetic_quality",
+              "layer_height_mm": 0.2,
+              "nozzle_diameter_mm": 0.4,
+              "expected_mass_g": 12.0,
+              "expected_print_time_min": 65.0,
+              "constraints": {
+                "minimum_feature_size_mm": 0.8,
+                "fdm_max_gyroid_wall_cell_ratio": 0.28,
+                "max_print_time_min": 120.0,
+                "max_mass_g": 50.0,
+                "top_cap_enabled": false,
+                "bottom_cap_enabled": false,
+                "top_bottom_cap": false,
+                "skin_thickness_mm": 0.0,
+                "require_flat_compression_faces": false
+              },
+              "require_flat_compression_faces": false,
+              "test_loop_surface_caps_disabled": true
+            },
+            "print": {},
+            "ejection": {},
+            "connection_info": {},
+            "stop_requested": false,
+            "safe_stop_requested": false,
+            "execution_policy_mode": "execute"
+          }
+        },
+        "execution": {
+          "mode": "test",
+          "bridge": "printer",
+          "requested_tool": "printer.prepare",
+          "dry_run": true,
+          "allow_physical": false
+        },
+        "metadata": {
+          "stage": "specimen",
+          "live_gui_test_spec": false,
+          "printer_test_path": ""
+        }
+      }
+    }
+  ],
+  "expected_result": {
+    "success": true,
+    "summary": "Specimen preparation executed (Synthetic offline fabrication complete)",
+    "data": {
+      "specimen_decision": {
+        "schema": "specimen_decision.v1",
+        "status": "executed",
+        "llm_used": false,
+        "run_id": "synthetic-specimen-golden",
+        "loop_number": 2,
+        "specimen_id": "synthetic-specimen",
+        "trace": [],
+        "mode": "deterministic_test",
+        "knowledge_delivery": {
+          "status": "unavailable",
+          "stage": "unavailable",
+          "citation_ids": [],
+          "scope_ref": "public",
+          "revision": "",
+          "private_delivery": "unavailable_without_trusted_principal",
+          "request_id": "knowledge-synthetic-request",
+          "consumer_binding": "specimen_agent",
+          "run_id": "synthetic-specimen-golden",
+          "loop_id": "1",
+          "attempt_id": "",
+          "as_of": ""
+        },
+        "reason": "Explicit deterministic TEST harness after code-owned checks.",
+        "evidence_refs": [
+          "context:request"
+        ]
+      },
+      "specimen_result": {
+        "specimen_decision": {
+          "schema": "specimen_decision.v1",
+          "status": "executed",
+          "llm_used": false,
+          "run_id": "synthetic-specimen-golden",
+          "loop_number": 2,
+          "specimen_id": "synthetic-specimen",
+          "trace": [],
+          "mode": "deterministic_test",
+          "knowledge_delivery": {
+            "status": "unavailable",
+            "stage": "unavailable",
+            "citation_ids": [],
+            "scope_ref": "public",
+            "revision": "",
+            "private_delivery": "unavailable_without_trusted_principal",
+            "request_id": "knowledge-synthetic-request",
+            "consumer_binding": "specimen_agent",
+            "run_id": "synthetic-specimen-golden",
+            "loop_id": "1",
+            "attempt_id": "",
+            "as_of": ""
+          },
+          "reason": "Explicit deterministic TEST harness after code-owned checks.",
+          "evidence_refs": [
+            "context:request"
+          ]
+        },
+        "ok": true,
+        "tool": "printer.prepare",
+        "experiment_evaluation": {
+          "ok": true,
+          "evaluation_id": "synthetic-evaluation",
+          "bridge_result": {
+            "ok": true,
+            "status": "virtual_finished",
+            "mode": "test",
+            "printer_path": "virtual_bridge",
+            "provider": "synthetic",
+            "sliced_path": "$ARTIFACT_ROOT/model.gcode",
+            "slicer_settings": {
+              "layer_height_mm": 0.2,
+              "nozzle_diameter_mm": 0.4
+            },
+            "slicer_result": {
+              "ok": true,
+              "status": "completed"
+            },
+            "gcode_validation": {
+              "ok": true,
+              "status": "pass"
+            },
+            "print_result": {
+              "status": "virtual_finished"
+            },
+            "ejection_result": {
+              "status": "not_requested"
+            },
+            "operator_messages": [
+              "Synthetic offline fabrication complete"
+            ],
+            "step_trace": [
+              {
+                "step": "slice",
+                "status": "completed"
+              }
+            ]
+          }
+        },
+        "candidate_id": "synthetic-candidate",
+        "specimen_id": "synthetic-specimen",
+        "geometry_status": "generated",
+        "mesh_status": "pass",
+        "manufacturability_status": "pass",
+        "handoff_status": "ready",
+        "printer_prepare_status": "virtual_finished",
+        "printer_path": "virtual_bridge",
+        "printer_mode": "test",
+        "provider": "synthetic",
+        "selected_printer": {},
+        "device_screen": {},
+        "preprint_gate": {},
+        "readiness_levels": [],
+        "operator_actions": [],
+        "autoejection": {},
+        "autoejection_handoff": {},
+        "stl_path": "$ARTIFACT_ROOT/model.stl",
+        "sliced_path": "$ARTIFACT_ROOT/model.gcode",
+        "preview_image_path": "$ARTIFACT_ROOT/preview.png",
+        "viewer_capture_path": null,
+        "handoff_package_path": "$ARTIFACT_ROOT/handoff.json",
+        "geometry_hash": "synthetic-geometry-hash",
+        "geometry_report": {
+          "synthetic": true,
+          "connected_components": 1
+        },
+        "surface_cap_policy": {
+          "generated_model_caps_disabled": true,
+          "analysis_uses_top_bottom_platens": true,
+          "top_cap_enabled": false,
+          "bottom_cap_enabled": false,
+          "skin_thickness_mm": 0.0
+        },
+        "expected_mass_g": 12.0,
+        "expected_print_time_min": 65.0,
+        "slicer_settings": {
+          "layer_height_mm": 0.2,
+          "nozzle_diameter_mm": 0.4
+        },
+        "slicer_result": {
+          "ok": true,
+          "status": "completed"
+        },
+        "gcode_validation": {
+          "ok": true,
+          "status": "pass"
+        },
+        "printer": {},
+        "prusalink": {},
+        "print_result": {
+          "status": "virtual_finished"
+        },
+        "ejection_result": {
+          "status": "not_requested"
+        },
+        "step_trace": [
+          {
+            "step": "slice",
+            "status": "completed"
+          }
+        ],
+        "operator_messages": [
+          "Synthetic offline fabrication complete"
+        ],
+        "reject_reasons": [],
+        "warnings": [
+          "synthetic mesh warning",
+          "synthetic process warning"
+        ],
+        "tool_result": {
+          "ok": true,
+          "status": "virtual_finished",
+          "mode": "test",
+          "printer_path": "virtual_bridge",
+          "provider": "synthetic",
+          "sliced_path": "$ARTIFACT_ROOT/model.gcode",
+          "slicer_settings": {
+            "layer_height_mm": 0.2,
+            "nozzle_diameter_mm": 0.4
+          },
+          "slicer_result": {
+            "ok": true,
+            "status": "completed"
+          },
+          "gcode_validation": {
+            "ok": true,
+            "status": "pass"
+          },
+          "print_result": {
+            "status": "virtual_finished"
+          },
+          "ejection_result": {
+            "status": "not_requested"
+          },
+          "operator_messages": [
+            "Synthetic offline fabrication complete"
+          ],
+          "step_trace": [
+            {
+              "step": "slice",
+              "status": "completed"
+            }
+          ]
+        },
+        "fabrication_report": {
+          "schema": "fabrication_report.v1",
+          "fabrication_intent": {
+            "mode": "test",
+            "physical_intent": false,
+            "printer_path": "virtual_bridge",
+            "specimen_purpose": "mechanical_test",
+            "live_gui_test_spec": false,
+            "printer_test_path": "",
+            "execution_policy_mode": "execute"
+          },
+          "digital_thread": {
+            "candidate_id": "synthetic-candidate",
+            "specimen_id": "synthetic-specimen",
+            "design_hash": "synthetic-design-hash",
+            "geometry_hash": "synthetic-geometry-hash",
+            "stl_path": "$ARTIFACT_ROOT/model.stl",
+            "viewer_capture_path": "",
+            "gcode_path": "$ARTIFACT_ROOT/model.gcode",
+            "remote_gcode_path": "",
+            "handoff_package_path": "$ARTIFACT_ROOT/handoff.json",
+            "printer_profile": "synthetic_pla_0p4",
+            "slicer_profile_hint": "synthetic_quality",
+            "material": "PLA",
+            "printer_provider": "synthetic",
+            "selected_printer_label": "",
+            "graph_version": "",
+            "run_id": "synthetic-specimen-golden",
+            "printer_job_id": ""
+          },
+          "process_plan": {
+            "layer_height_mm": 0.2,
+            "first_layer_height_mm": null,
+            "nozzle_diameter_mm": 0.4,
+            "bed_temperature_c": null,
+            "first_layer_bed_temperature_c": null,
+            "adhesion_policy": {
+              "skirt_enabled": false,
+              "brim_enabled": false,
+              "raft_enabled": false,
+              "slow_first_layer_enabled": true,
+              "first_layer_speed_mm_s": null
+            },
+            "cap_skin_policy": {
+              "top_cap_enabled": false,
+              "bottom_cap_enabled": false,
+              "top_bottom_cap": false,
+              "skin_thickness_mm": 0.0,
+              "generated_model_caps_disabled": true
+            },
+            "ejection_policy": {
+              "requested": false,
+              "status": "not_requested",
+              "failure_code": null,
+              "policy_source": "3dp_gui_or_experiment_spec"
+            },
+            "bambu_autoejection_readiness": {},
+            "estimated_mass_g": 12.0,
+            "estimated_print_time_min": 65.0,
+            "slicer_command": []
+          },
+          "quality_gates": [
+            {
+              "gate": "required_fields",
+              "status": "pass",
+              "evidence": {
+                "missing": []
+              },
+              "repair": null
+            },
+            {
+              "gate": "geometry",
+              "status": "pass",
+              "evidence": {
+                "geometry_hash": "synthetic-geometry-hash",
+                "stl_path": "$ARTIFACT_ROOT/model.stl"
+              },
+              "repair": null
+            },
+            {
+              "gate": "mesh",
+              "status": "pass",
+              "evidence": {
+                "mesh_status": "pass",
+                "warnings": [
+                  "synthetic mesh warning"
+                ]
+              },
+              "repair": null
+            },
+            {
+              "gate": "manufacturability",
+              "status": "pass",
+              "evidence": {
+                "status": "pass",
+                "warnings": [
+                  "synthetic process warning"
+                ]
+              },
+              "repair": null
+            },
+            {
+              "gate": "slicer",
+              "status": "pass",
+              "evidence": {
+                "sliced_path": "$ARTIFACT_ROOT/model.gcode",
+                "failure_code": null
+              },
+              "repair": null
+            },
+            {
+              "gate": "gcode",
+              "status": "pass",
+              "evidence": {
+                "failure_code": null,
+                "violations": []
+              },
+              "repair": null
+            },
+            {
+              "gate": "printer_storage",
+              "status": "warn",
+              "evidence": {
+                "selected_storage": null,
+                "transport": null,
+                "storage": {}
+              },
+              "repair": null
+            },
+            {
+              "gate": "spc_readiness",
+              "status": "warn",
+              "evidence": {
+                "provider": "synthetic",
+                "selected_printer": {},
+                "preprint_gate": {},
+                "readiness_levels": [],
+                "operator_actions": [],
+                "autoejection_handoff": {}
+              },
+              "repair": null
+            },
+            {
+              "gate": "execution_gate",
+              "status": "pass",
+              "evidence": {
+                "physical_intent": false,
+                "printer_path": "virtual_bridge",
+                "status": "virtual_finished",
+                "failure_code": null
+              },
+              "repair": null
+            },
+            {
+              "gate": "ejection",
+              "status": "warn",
+              "evidence": {
+                "status": "not_requested",
+                "failure_code": null
+              },
+              "repair": null
+            }
+          ],
+          "monitoring_plan": {
+            "observe_prusalink_status": false,
+            "observe_printer_bridge_status": false,
+            "observe_transfer_idle": false,
+            "observe_camera_after_print": true,
+            "active_cam_verification_required": true,
+            "layerwise_monitoring_available": false,
+            "defect_classes": [
+              "warping",
+              "stringing",
+              "under_extrusion",
+              "layer_adhesion"
+            ],
+            "expected_location": "a4_workspace",
+            "after_print_consumer": "vision_agent"
+          },
+          "printer_runtime": {
+            "provider": "synthetic",
+            "selected_printer": {},
+            "device_screen": {},
+            "preprint_gate": {},
+            "readiness_levels": [],
+            "operator_actions": [],
+            "autoejection": {},
+            "autoejection_handoff": {},
+            "prepare_status": "virtual_finished",
+            "mode": "test",
+            "path": "virtual_bridge",
+            "step_trace": [
+              {
+                "step": "slice",
+                "status": "completed"
+              }
+            ],
+            "operator_messages": [
+              "Synthetic offline fabrication complete"
+            ],
+            "upload": {},
+            "transfer_wait": {},
+            "start": {},
+            "ejection": {
+              "status": "not_requested"
+            },
+            "printer_preflight": {}
+          },
+          "fabrication_outcome": {
+            "status": "ready_for_vision",
+            "location": "a4_workspace",
+            "autoejection_status": "complete",
+            "warnings": [
+              "synthetic mesh warning",
+              "synthetic process warning"
+            ],
+            "failure_code": null,
+            "requires_after_print_confirmation": false
+          },
+          "feedback_to_design": {
+            "do_not_repeat": [],
+            "recommended_parameter_adjustments": {},
+            "quality_score": 0.7,
+            "uncertainty": 0.15
+          },
+          "protocol_note": "Explicit deterministic TEST harness after code-owned checks.",
+          "experiment_evaluation_ref": {},
+          "specimen_decision": {
+            "schema": "specimen_decision.v1",
+            "status": "executed",
+            "llm_used": false,
+            "run_id": "synthetic-specimen-golden",
+            "loop_number": 2,
+            "specimen_id": "synthetic-specimen",
+            "trace": [],
+            "mode": "deterministic_test",
+            "knowledge_delivery": {
+              "status": "unavailable",
+              "stage": "unavailable",
+              "citation_ids": [],
+              "scope_ref": "public",
+              "revision": "",
+              "private_delivery": "unavailable_without_trusted_principal",
+              "request_id": "knowledge-synthetic-request",
+              "consumer_binding": "specimen_agent",
+              "run_id": "synthetic-specimen-golden",
+              "loop_id": "1",
+              "attempt_id": "",
+              "as_of": ""
+            },
+            "reason": "Explicit deterministic TEST harness after code-owned checks.",
+            "evidence_refs": [
+              "context:request"
+            ]
+          }
+        },
+        "specimen_fabricated": {
+          "schema": "specimen_fabricated.v1",
+          "run_id": "synthetic-specimen-golden",
+          "loop_id": "loop-1",
+          "specimen_id": "synthetic-specimen",
+          "candidate_id": "synthetic-candidate",
+          "producer_agent": "specimen_agent",
+          "consumer_agent": [
+            "vision_agent",
+            "manipulation_agent",
+            "knowledge_agent",
+            "bo_agent"
+          ],
+          "created_at": "2026-09-13T00:00:00+00:00",
+          "status": "ready",
+          "evidence_refs": [
+            {
+              "type": "stl",
+              "path": "$ARTIFACT_ROOT/model.stl"
+            },
+            {
+              "type": "gcode",
+              "path": "$ARTIFACT_ROOT/model.gcode"
+            },
+            {
+              "type": "handoff_package",
+              "path": "$ARTIFACT_ROOT/handoff.json"
+            }
+          ],
+          "guardian_status": "not_checked",
+          "decisions": [
+            {
+              "decision_id": "specimen.intent.resolved",
+              "status": "ok",
+              "rationale": "Fabrication path resolved as virtual_bridge; physical_intent=False."
+            },
+            {
+              "decision_id": "specimen.digital_thread.initialized",
+              "status": "ok",
+              "rationale": "Design, geometry, slicer, printer, and handoff artifacts were linked into one digital thread."
+            },
+            {
+              "decision_id": "specimen.quality_gates.evaluated",
+              "status": "ok",
+              "rationale": "10 manufacturing gates evaluated; blocked_or_failed=0."
+            },
+            {
+              "decision_id": "specimen.handoff.prepared",
+              "status": "ok",
+              "rationale": "Stage completion records either a physical specimen handoff or a no-actuation fabrication preflight."
+            }
+          ],
+          "warnings": [
+            "synthetic mesh warning",
+            "synthetic process warning"
+          ],
+          "next_action": "vision_after_print_inspection",
+          "fabrication_report_ref": "run_metadata.fabrication_report",
+          "fabrication_summary": {
+            "schema": "fabrication_report.v1",
+            "physical_intent": false,
+            "printer_path": "virtual_bridge",
+            "stl_path": "$ARTIFACT_ROOT/model.stl",
+            "gcode_path": "$ARTIFACT_ROOT/model.gcode",
+            "outcome_status": "ready_for_vision",
+            "quality_gate_count": 10,
+            "quality_gate_pass_count": 7,
+            "quality_gate_blocked_or_failed": []
+          },
+          "physical_location": "a4_workspace",
+          "pickup_pose_hint": {
+            "source": "vision_agent_required",
+            "status": "pending"
+          }
+        },
+        "specimen_agent_report": {
+          "schema": "specimen_agent_report.v1",
+          "source_report_schema": "fabrication_report.v1",
+          "report_id": "specimen-agent-report-synthetic-specimen-golden-2",
+          "run_id": "synthetic-specimen-golden",
+          "experiment_id": "synthetic-experiment",
+          "loop_index": 2,
+          "created_at": "2026-09-13T00:00:00+00:00",
+          "producer_agent": "specimen_agent",
+          "slicer_configuration": {
+            "slicer_profile_hint": "synthetic_quality",
+            "layer_height_mm": 0.2,
+            "first_layer_height_mm": null,
+            "nozzle_diameter_mm": 0.4,
+            "bed_temperature_c": null,
+            "first_layer_bed_temperature_c": null,
+            "slicer_command": [],
+            "slicer_gate": {
+              "gate": "slicer",
+              "status": "pass",
+              "evidence": {
+                "sliced_path": "$ARTIFACT_ROOT/model.gcode",
+                "failure_code": null
+              },
+              "repair": null
+            }
+          },
+          "printer_profile": {
+            "printer_profile": "synthetic_pla_0p4",
+            "provider": "synthetic",
+            "selected_printer": {},
+            "printer_path": "virtual_bridge",
+            "material": "PLA",
+            "physical_intent": false,
+            "storage_status": "warn",
+            "remote_gcode_path": ""
+          },
+          "build_queue": {
+            "queue_status": "ready_for_vision",
+            "printer_job_id": "",
+            "items": [
+              {
+                "queue_id": "ejection",
+                "status": "not_requested",
+                "remote_path": "",
+                "detail": ""
+              }
+            ]
+          },
+          "estimated_print_time": {
+            "estimated_print_time_min": 65.0,
+            "bars": [
+              {
+                "label": "slice",
+                "value": 2.0,
+                "unit": "min"
+              },
+              {
+                "label": "print",
+                "value": 65.0,
+                "unit": "min"
+              },
+              {
+                "label": "handoff",
+                "value": 1.0,
+                "unit": "min"
+              }
+            ]
+          },
+          "filament_usage": {
+            "material": "PLA",
+            "estimated_mass_g": 12.0,
+            "donut": [
+              {
+                "label": "part",
+                "value": 12.0,
+                "unit": "g"
+              },
+              {
+                "label": "purge_support_allowance",
+                "value": 0.72,
+                "unit": "g"
+              }
+            ]
+          },
+          "gcode_validation": {
+            "status": "pass",
+            "gcode_path": "$ARTIFACT_ROOT/model.gcode",
+            "slicer_gate": {
+              "gate": "slicer",
+              "status": "pass",
+              "evidence": {
+                "sliced_path": "$ARTIFACT_ROOT/model.gcode",
+                "failure_code": null
+              },
+              "repair": null
+            },
+            "gcode_gate": {
+              "gate": "gcode",
+              "status": "pass",
+              "evidence": {
+                "failure_code": null,
+                "violations": []
+              },
+              "repair": null
+            }
+          },
+          "print_readiness": {
+            "readiness_score": 0.7,
+            "gate_count": 10,
+            "pass_count": 7,
+            "warn_count": 3,
+            "blocked_count": 0,
+            "fail_count": 0,
+            "gates": [
+              {
+                "gate": "required_fields",
+                "status": "pass",
+                "evidence": {
+                  "missing": []
+                },
+                "repair": null
+              },
+              {
+                "gate": "geometry",
+                "status": "pass",
+                "evidence": {
+                  "geometry_hash": "synthetic-geometry-hash",
+                  "stl_path": "$ARTIFACT_ROOT/model.stl"
+                },
+                "repair": null
+              },
+              {
+                "gate": "mesh",
+                "status": "pass",
+                "evidence": {
+                  "mesh_status": "pass",
+                  "warnings": [
+                    "synthetic mesh warning"
+                  ]
+                },
+                "repair": null
+              },
+              {
+                "gate": "manufacturability",
+                "status": "pass",
+                "evidence": {
+                  "status": "pass",
+                  "warnings": [
+                    "synthetic process warning"
+                  ]
+                },
+                "repair": null
+              },
+              {
+                "gate": "slicer",
+                "status": "pass",
+                "evidence": {
+                  "sliced_path": "$ARTIFACT_ROOT/model.gcode",
+                  "failure_code": null
+                },
+                "repair": null
+              },
+              {
+                "gate": "gcode",
+                "status": "pass",
+                "evidence": {
+                  "failure_code": null,
+                  "violations": []
+                },
+                "repair": null
+              },
+              {
+                "gate": "printer_storage",
+                "status": "warn",
+                "evidence": {
+                  "selected_storage": null,
+                  "transport": null,
+                  "storage": {}
+                },
+                "repair": null
+              },
+              {
+                "gate": "spc_readiness",
+                "status": "warn",
+                "evidence": {
+                  "provider": "synthetic",
+                  "selected_printer": {},
+                  "preprint_gate": {},
+                  "readiness_levels": [],
+                  "operator_actions": [],
+                  "autoejection_handoff": {}
+                },
+                "repair": null
+              },
+              {
+                "gate": "execution_gate",
+                "status": "pass",
+                "evidence": {
+                  "physical_intent": false,
+                  "printer_path": "virtual_bridge",
+                  "status": "virtual_finished",
+                  "failure_code": null
+                },
+                "repair": null
+              },
+              {
+                "gate": "ejection",
+                "status": "warn",
+                "evidence": {
+                  "status": "not_requested",
+                  "failure_code": null
+                },
+                "repair": null
+              }
+            ],
+            "donut": [
+              {
+                "label": "pass",
+                "value": 7
+              },
+              {
+                "label": "warn",
+                "value": 3
+              },
+              {
+                "label": "blocked",
+                "value": 0
+              },
+              {
+                "label": "fail",
+                "value": 0
+              }
+            ]
+          },
+          "spc_readiness": {
+            "provider": "synthetic",
+            "selected_printer": {},
+            "preprint_gate": {},
+            "preprint_gate_state": null,
+            "technical_ready_for_start": null,
+            "ready_for_live_print": null,
+            "blockers": [],
+            "readiness_levels": [],
+            "operator_actions": [],
+            "device_actions": {},
+            "device_connection": {},
+            "gate_status": "warn"
+          },
+          "autoejection_gate": {
+            "status": "not_requested",
+            "blockers": [],
+            "provider": "synthetic",
+            "requested": null,
+            "method": null,
+            "handoff": {}
+          },
+          "bambu_autoejection_readiness": {},
+          "build_timeline": {
+            "timeline": [
+              {
+                "order": 1,
+                "step": "slice",
+                "status": "completed",
+                "detail": "",
+                "duration_s": null
+              }
+            ],
+            "bars": [
+              {
+                "label": "slice",
+                "status": "completed",
+                "value": 1
+              }
+            ]
+          },
+          "layer_preview": {
+            "preview_image_path": "$ARTIFACT_ROOT/preview.png",
+            "viewer_capture_path": "",
+            "preview_available": true,
+            "viewer_capture_available": false,
+            "stl_path": "$ARTIFACT_ROOT/model.stl",
+            "gcode_path": "$ARTIFACT_ROOT/model.gcode",
+            "layerwise_monitoring_available": false
+          },
+          "artifact_ledger": [
+            {
+              "artifact_type": "stl",
+              "artifact_id": "$ARTIFACT_ROOT/model.stl",
+              "status": "ready",
+              "owner": "specimen_agent"
+            },
+            {
+              "artifact_type": "gcode",
+              "artifact_id": "$ARTIFACT_ROOT/model.gcode",
+              "status": "ready",
+              "owner": "specimen_agent"
+            },
+            {
+              "artifact_type": "remote_gcode",
+              "artifact_id": "",
+              "status": "pending",
+              "owner": "specimen_agent"
+            },
+            {
+              "artifact_type": "handoff_package",
+              "artifact_id": "$ARTIFACT_ROOT/handoff.json",
+              "status": "ready",
+              "owner": "specimen_agent"
+            },
+            {
+              "artifact_type": "layer_preview",
+              "artifact_id": "$ARTIFACT_ROOT/preview.png",
+              "status": "ready",
+              "owner": "specimen_agent"
+            },
+            {
+              "artifact_type": "viewer_capture",
+              "artifact_id": "",
+              "status": "pending",
+              "owner": "specimen_agent"
+            }
+          ],
+          "printer_status": {
+            "provider": "synthetic",
+            "selected_printer": {},
+            "connection": {},
+            "actions": {},
+            "preprint_gate_state": null,
+            "prepare_status": "virtual_finished",
+            "mode": "test",
+            "path": "virtual_bridge",
+            "location": "a4_workspace",
+            "warnings": [
+              "synthetic mesh warning",
+              "synthetic process warning"
+            ],
+            "failure_code": null
+          },
+          "handoff_status": {
+            "status": "ready",
+            "next_action": "vision_after_print_inspection",
+            "consumer_agent": [
+              "vision_agent",
+              "manipulation_agent",
+              "knowledge_agent",
+              "bo_agent"
+            ],
+            "physical_location": "a4_workspace",
+            "fabrication_report_ref": "run_metadata.fabrication_report"
+          },
+          "visualization_manifest": [
+            {
+              "id": "layer_preview",
+              "section": "layer_preview",
+              "type": "layer_preview"
+            },
+            {
+              "id": "filament_usage",
+              "section": "filament_usage",
+              "type": "material_donut"
+            },
+            {
+              "id": "print_readiness",
+              "section": "print_readiness",
+              "type": "readiness_donut"
+            },
+            {
+              "id": "spc_readiness",
+              "section": "spc_readiness",
+              "type": "readiness_levels"
+            },
+            {
+              "id": "autoejection_gate",
+              "section": "autoejection_gate",
+              "type": "gate_board"
+            },
+            {
+              "id": "build_timeline",
+              "section": "build_timeline",
+              "type": "timeline_bars"
+            },
+            {
+              "id": "estimated_print_time",
+              "section": "estimated_print_time",
+              "type": "print_time_bars"
+            }
+          ]
+        },
+        "decisions": [
+          {
+            "decision_id": "specimen.intent.resolved",
+            "status": "ok",
+            "rationale": "Fabrication path resolved as virtual_bridge; physical_intent=False."
+          },
+          {
+            "decision_id": "specimen.digital_thread.initialized",
+            "status": "ok",
+            "rationale": "Design, geometry, slicer, printer, and handoff artifacts were linked into one digital thread."
+          },
+          {
+            "decision_id": "specimen.quality_gates.evaluated",
+            "status": "ok",
+            "rationale": "10 manufacturing gates evaluated; blocked_or_failed=0."
+          },
+          {
+            "decision_id": "specimen.handoff.prepared",
+            "status": "ok",
+            "rationale": "Stage completion records either a physical specimen handoff or a no-actuation fabrication preflight."
+          }
+        ],
+        "metrics": {
+          "quality_gate_count": 10,
+          "quality_gate_pass_count": 7,
+          "quality_gate_blocked_count": 0,
+          "quality_gate_fail_count": 0,
+          "fabrication_quality_score": 0.7,
+          "estimated_mass_g": 12.0,
+          "estimated_print_time_min": 65.0
+        },
+        "evidence_refs": [
+          {
+            "type": "stl",
+            "path": "$ARTIFACT_ROOT/model.stl"
+          },
+          {
+            "type": "gcode",
+            "path": "$ARTIFACT_ROOT/model.gcode"
+          },
+          {
+            "type": "handoff_package",
+            "path": "$ARTIFACT_ROOT/handoff.json"
+          }
+        ]
+      },
+      "fabrication_report": {
+        "schema": "fabrication_report.v1",
+        "fabrication_intent": {
+          "mode": "test",
+          "physical_intent": false,
+          "printer_path": "virtual_bridge",
+          "specimen_purpose": "mechanical_test",
+          "live_gui_test_spec": false,
+          "printer_test_path": "",
+          "execution_policy_mode": "execute"
+        },
+        "digital_thread": {
+          "candidate_id": "synthetic-candidate",
+          "specimen_id": "synthetic-specimen",
+          "design_hash": "synthetic-design-hash",
+          "geometry_hash": "synthetic-geometry-hash",
+          "stl_path": "$ARTIFACT_ROOT/model.stl",
+          "viewer_capture_path": "",
+          "gcode_path": "$ARTIFACT_ROOT/model.gcode",
+          "remote_gcode_path": "",
+          "handoff_package_path": "$ARTIFACT_ROOT/handoff.json",
+          "printer_profile": "synthetic_pla_0p4",
+          "slicer_profile_hint": "synthetic_quality",
+          "material": "PLA",
+          "printer_provider": "synthetic",
+          "selected_printer_label": "",
+          "graph_version": "",
+          "run_id": "synthetic-specimen-golden",
+          "printer_job_id": ""
+        },
+        "process_plan": {
+          "layer_height_mm": 0.2,
+          "first_layer_height_mm": null,
+          "nozzle_diameter_mm": 0.4,
+          "bed_temperature_c": null,
+          "first_layer_bed_temperature_c": null,
+          "adhesion_policy": {
+            "skirt_enabled": false,
+            "brim_enabled": false,
+            "raft_enabled": false,
+            "slow_first_layer_enabled": true,
+            "first_layer_speed_mm_s": null
+          },
+          "cap_skin_policy": {
+            "top_cap_enabled": false,
+            "bottom_cap_enabled": false,
+            "top_bottom_cap": false,
+            "skin_thickness_mm": 0.0,
+            "generated_model_caps_disabled": true
+          },
+          "ejection_policy": {
+            "requested": false,
+            "status": "not_requested",
+            "failure_code": null,
+            "policy_source": "3dp_gui_or_experiment_spec"
+          },
+          "bambu_autoejection_readiness": {},
+          "estimated_mass_g": 12.0,
+          "estimated_print_time_min": 65.0,
+          "slicer_command": []
+        },
+        "quality_gates": [
+          {
+            "gate": "required_fields",
+            "status": "pass",
+            "evidence": {
+              "missing": []
+            },
+            "repair": null
+          },
+          {
+            "gate": "geometry",
+            "status": "pass",
+            "evidence": {
+              "geometry_hash": "synthetic-geometry-hash",
+              "stl_path": "$ARTIFACT_ROOT/model.stl"
+            },
+            "repair": null
+          },
+          {
+            "gate": "mesh",
+            "status": "pass",
+            "evidence": {
+              "mesh_status": "pass",
+              "warnings": [
+                "synthetic mesh warning"
+              ]
+            },
+            "repair": null
+          },
+          {
+            "gate": "manufacturability",
+            "status": "pass",
+            "evidence": {
+              "status": "pass",
+              "warnings": [
+                "synthetic process warning"
+              ]
+            },
+            "repair": null
+          },
+          {
+            "gate": "slicer",
+            "status": "pass",
+            "evidence": {
+              "sliced_path": "$ARTIFACT_ROOT/model.gcode",
+              "failure_code": null
+            },
+            "repair": null
+          },
+          {
+            "gate": "gcode",
+            "status": "pass",
+            "evidence": {
+              "failure_code": null,
+              "violations": []
+            },
+            "repair": null
+          },
+          {
+            "gate": "printer_storage",
+            "status": "warn",
+            "evidence": {
+              "selected_storage": null,
+              "transport": null,
+              "storage": {}
+            },
+            "repair": null
+          },
+          {
+            "gate": "spc_readiness",
+            "status": "warn",
+            "evidence": {
+              "provider": "synthetic",
+              "selected_printer": {},
+              "preprint_gate": {},
+              "readiness_levels": [],
+              "operator_actions": [],
+              "autoejection_handoff": {}
+            },
+            "repair": null
+          },
+          {
+            "gate": "execution_gate",
+            "status": "pass",
+            "evidence": {
+              "physical_intent": false,
+              "printer_path": "virtual_bridge",
+              "status": "virtual_finished",
+              "failure_code": null
+            },
+            "repair": null
+          },
+          {
+            "gate": "ejection",
+            "status": "warn",
+            "evidence": {
+              "status": "not_requested",
+              "failure_code": null
+            },
+            "repair": null
+          }
+        ],
+        "monitoring_plan": {
+          "observe_prusalink_status": false,
+          "observe_printer_bridge_status": false,
+          "observe_transfer_idle": false,
+          "observe_camera_after_print": true,
+          "active_cam_verification_required": true,
+          "layerwise_monitoring_available": false,
+          "defect_classes": [
+            "warping",
+            "stringing",
+            "under_extrusion",
+            "layer_adhesion"
+          ],
+          "expected_location": "a4_workspace",
+          "after_print_consumer": "vision_agent"
+        },
+        "printer_runtime": {
+          "provider": "synthetic",
+          "selected_printer": {},
+          "device_screen": {},
+          "preprint_gate": {},
+          "readiness_levels": [],
+          "operator_actions": [],
+          "autoejection": {},
+          "autoejection_handoff": {},
+          "prepare_status": "virtual_finished",
+          "mode": "test",
+          "path": "virtual_bridge",
+          "step_trace": [
+            {
+              "step": "slice",
+              "status": "completed"
+            }
+          ],
+          "operator_messages": [
+            "Synthetic offline fabrication complete"
+          ],
+          "upload": {},
+          "transfer_wait": {},
+          "start": {},
+          "ejection": {
+            "status": "not_requested"
+          },
+          "printer_preflight": {}
+        },
+        "fabrication_outcome": {
+          "status": "ready_for_vision",
+          "location": "a4_workspace",
+          "autoejection_status": "complete",
+          "warnings": [
+            "synthetic mesh warning",
+            "synthetic process warning"
+          ],
+          "failure_code": null,
+          "requires_after_print_confirmation": false
+        },
+        "feedback_to_design": {
+          "do_not_repeat": [],
+          "recommended_parameter_adjustments": {},
+          "quality_score": 0.7,
+          "uncertainty": 0.15
+        },
+        "protocol_note": "Explicit deterministic TEST harness after code-owned checks.",
+        "experiment_evaluation_ref": {},
+        "specimen_decision": {
+          "schema": "specimen_decision.v1",
+          "status": "executed",
+          "llm_used": false,
+          "run_id": "synthetic-specimen-golden",
+          "loop_number": 2,
+          "specimen_id": "synthetic-specimen",
+          "trace": [],
+          "mode": "deterministic_test",
+          "knowledge_delivery": {
+            "status": "unavailable",
+            "stage": "unavailable",
+            "citation_ids": [],
+            "scope_ref": "public",
+            "revision": "",
+            "private_delivery": "unavailable_without_trusted_principal",
+            "request_id": "knowledge-synthetic-request",
+            "consumer_binding": "specimen_agent",
+            "run_id": "synthetic-specimen-golden",
+            "loop_id": "1",
+            "attempt_id": "",
+            "as_of": ""
+          },
+          "reason": "Explicit deterministic TEST harness after code-owned checks.",
+          "evidence_refs": [
+            "context:request"
+          ]
+        }
+      },
+      "specimen_agent_report": {
+        "schema": "specimen_agent_report.v1",
+        "source_report_schema": "fabrication_report.v1",
+        "report_id": "specimen-agent-report-synthetic-specimen-golden-2",
+        "run_id": "synthetic-specimen-golden",
+        "experiment_id": "synthetic-experiment",
+        "loop_index": 2,
+        "created_at": "2026-09-13T00:00:00+00:00",
+        "producer_agent": "specimen_agent",
+        "slicer_configuration": {
+          "slicer_profile_hint": "synthetic_quality",
+          "layer_height_mm": 0.2,
+          "first_layer_height_mm": null,
+          "nozzle_diameter_mm": 0.4,
+          "bed_temperature_c": null,
+          "first_layer_bed_temperature_c": null,
+          "slicer_command": [],
+          "slicer_gate": {
+            "gate": "slicer",
+            "status": "pass",
+            "evidence": {
+              "sliced_path": "$ARTIFACT_ROOT/model.gcode",
+              "failure_code": null
+            },
+            "repair": null
+          }
+        },
+        "printer_profile": {
+          "printer_profile": "synthetic_pla_0p4",
+          "provider": "synthetic",
+          "selected_printer": {},
+          "printer_path": "virtual_bridge",
+          "material": "PLA",
+          "physical_intent": false,
+          "storage_status": "warn",
+          "remote_gcode_path": ""
+        },
+        "build_queue": {
+          "queue_status": "ready_for_vision",
+          "printer_job_id": "",
+          "items": [
+            {
+              "queue_id": "ejection",
+              "status": "not_requested",
+              "remote_path": "",
+              "detail": ""
+            }
+          ]
+        },
+        "estimated_print_time": {
+          "estimated_print_time_min": 65.0,
+          "bars": [
+            {
+              "label": "slice",
+              "value": 2.0,
+              "unit": "min"
+            },
+            {
+              "label": "print",
+              "value": 65.0,
+              "unit": "min"
+            },
+            {
+              "label": "handoff",
+              "value": 1.0,
+              "unit": "min"
+            }
+          ]
+        },
+        "filament_usage": {
+          "material": "PLA",
+          "estimated_mass_g": 12.0,
+          "donut": [
+            {
+              "label": "part",
+              "value": 12.0,
+              "unit": "g"
+            },
+            {
+              "label": "purge_support_allowance",
+              "value": 0.72,
+              "unit": "g"
+            }
+          ]
+        },
+        "gcode_validation": {
+          "status": "pass",
+          "gcode_path": "$ARTIFACT_ROOT/model.gcode",
+          "slicer_gate": {
+            "gate": "slicer",
+            "status": "pass",
+            "evidence": {
+              "sliced_path": "$ARTIFACT_ROOT/model.gcode",
+              "failure_code": null
+            },
+            "repair": null
+          },
+          "gcode_gate": {
+            "gate": "gcode",
+            "status": "pass",
+            "evidence": {
+              "failure_code": null,
+              "violations": []
+            },
+            "repair": null
+          }
+        },
+        "print_readiness": {
+          "readiness_score": 0.7,
+          "gate_count": 10,
+          "pass_count": 7,
+          "warn_count": 3,
+          "blocked_count": 0,
+          "fail_count": 0,
+          "gates": [
+            {
+              "gate": "required_fields",
+              "status": "pass",
+              "evidence": {
+                "missing": []
+              },
+              "repair": null
+            },
+            {
+              "gate": "geometry",
+              "status": "pass",
+              "evidence": {
+                "geometry_hash": "synthetic-geometry-hash",
+                "stl_path": "$ARTIFACT_ROOT/model.stl"
+              },
+              "repair": null
+            },
+            {
+              "gate": "mesh",
+              "status": "pass",
+              "evidence": {
+                "mesh_status": "pass",
+                "warnings": [
+                  "synthetic mesh warning"
+                ]
+              },
+              "repair": null
+            },
+            {
+              "gate": "manufacturability",
+              "status": "pass",
+              "evidence": {
+                "status": "pass",
+                "warnings": [
+                  "synthetic process warning"
+                ]
+              },
+              "repair": null
+            },
+            {
+              "gate": "slicer",
+              "status": "pass",
+              "evidence": {
+                "sliced_path": "$ARTIFACT_ROOT/model.gcode",
+                "failure_code": null
+              },
+              "repair": null
+            },
+            {
+              "gate": "gcode",
+              "status": "pass",
+              "evidence": {
+                "failure_code": null,
+                "violations": []
+              },
+              "repair": null
+            },
+            {
+              "gate": "printer_storage",
+              "status": "warn",
+              "evidence": {
+                "selected_storage": null,
+                "transport": null,
+                "storage": {}
+              },
+              "repair": null
+            },
+            {
+              "gate": "spc_readiness",
+              "status": "warn",
+              "evidence": {
+                "provider": "synthetic",
+                "selected_printer": {},
+                "preprint_gate": {},
+                "readiness_levels": [],
+                "operator_actions": [],
+                "autoejection_handoff": {}
+              },
+              "repair": null
+            },
+            {
+              "gate": "execution_gate",
+              "status": "pass",
+              "evidence": {
+                "physical_intent": false,
+                "printer_path": "virtual_bridge",
+                "status": "virtual_finished",
+                "failure_code": null
+              },
+              "repair": null
+            },
+            {
+              "gate": "ejection",
+              "status": "warn",
+              "evidence": {
+                "status": "not_requested",
+                "failure_code": null
+              },
+              "repair": null
+            }
+          ],
+          "donut": [
+            {
+              "label": "pass",
+              "value": 7
+            },
+            {
+              "label": "warn",
+              "value": 3
+            },
+            {
+              "label": "blocked",
+              "value": 0
+            },
+            {
+              "label": "fail",
+              "value": 0
+            }
+          ]
+        },
+        "spc_readiness": {
+          "provider": "synthetic",
+          "selected_printer": {},
+          "preprint_gate": {},
+          "preprint_gate_state": null,
+          "technical_ready_for_start": null,
+          "ready_for_live_print": null,
+          "blockers": [],
+          "readiness_levels": [],
+          "operator_actions": [],
+          "device_actions": {},
+          "device_connection": {},
+          "gate_status": "warn"
+        },
+        "autoejection_gate": {
+          "status": "not_requested",
+          "blockers": [],
+          "provider": "synthetic",
+          "requested": null,
+          "method": null,
+          "handoff": {}
+        },
+        "bambu_autoejection_readiness": {},
+        "build_timeline": {
+          "timeline": [
+            {
+              "order": 1,
+              "step": "slice",
+              "status": "completed",
+              "detail": "",
+              "duration_s": null
+            }
+          ],
+          "bars": [
+            {
+              "label": "slice",
+              "status": "completed",
+              "value": 1
+            }
+          ]
+        },
+        "layer_preview": {
+          "preview_image_path": "$ARTIFACT_ROOT/preview.png",
+          "viewer_capture_path": "",
+          "preview_available": true,
+          "viewer_capture_available": false,
+          "stl_path": "$ARTIFACT_ROOT/model.stl",
+          "gcode_path": "$ARTIFACT_ROOT/model.gcode",
+          "layerwise_monitoring_available": false
+        },
+        "artifact_ledger": [
+          {
+            "artifact_type": "stl",
+            "artifact_id": "$ARTIFACT_ROOT/model.stl",
+            "status": "ready",
+            "owner": "specimen_agent"
+          },
+          {
+            "artifact_type": "gcode",
+            "artifact_id": "$ARTIFACT_ROOT/model.gcode",
+            "status": "ready",
+            "owner": "specimen_agent"
+          },
+          {
+            "artifact_type": "remote_gcode",
+            "artifact_id": "",
+            "status": "pending",
+            "owner": "specimen_agent"
+          },
+          {
+            "artifact_type": "handoff_package",
+            "artifact_id": "$ARTIFACT_ROOT/handoff.json",
+            "status": "ready",
+            "owner": "specimen_agent"
+          },
+          {
+            "artifact_type": "layer_preview",
+            "artifact_id": "$ARTIFACT_ROOT/preview.png",
+            "status": "ready",
+            "owner": "specimen_agent"
+          },
+          {
+            "artifact_type": "viewer_capture",
+            "artifact_id": "",
+            "status": "pending",
+            "owner": "specimen_agent"
+          }
+        ],
+        "printer_status": {
+          "provider": "synthetic",
+          "selected_printer": {},
+          "connection": {},
+          "actions": {},
+          "preprint_gate_state": null,
+          "prepare_status": "virtual_finished",
+          "mode": "test",
+          "path": "virtual_bridge",
+          "location": "a4_workspace",
+          "warnings": [
+            "synthetic mesh warning",
+            "synthetic process warning"
+          ],
+          "failure_code": null
+        },
+        "handoff_status": {
+          "status": "ready",
+          "next_action": "vision_after_print_inspection",
+          "consumer_agent": [
+            "vision_agent",
+            "manipulation_agent",
+            "knowledge_agent",
+            "bo_agent"
+          ],
+          "physical_location": "a4_workspace",
+          "fabrication_report_ref": "run_metadata.fabrication_report"
+        },
+        "visualization_manifest": [
+          {
+            "id": "layer_preview",
+            "section": "layer_preview",
+            "type": "layer_preview"
+          },
+          {
+            "id": "filament_usage",
+            "section": "filament_usage",
+            "type": "material_donut"
+          },
+          {
+            "id": "print_readiness",
+            "section": "print_readiness",
+            "type": "readiness_donut"
+          },
+          {
+            "id": "spc_readiness",
+            "section": "spc_readiness",
+            "type": "readiness_levels"
+          },
+          {
+            "id": "autoejection_gate",
+            "section": "autoejection_gate",
+            "type": "gate_board"
+          },
+          {
+            "id": "build_timeline",
+            "section": "build_timeline",
+            "type": "timeline_bars"
+          },
+          {
+            "id": "estimated_print_time",
+            "section": "estimated_print_time",
+            "type": "print_time_bars"
+          }
+        ]
+      },
+      "handoff_packet": {
+        "schema": "specimen_fabricated.v1",
+        "run_id": "synthetic-specimen-golden",
+        "loop_id": "loop-1",
+        "specimen_id": "synthetic-specimen",
+        "candidate_id": "synthetic-candidate",
+        "producer_agent": "specimen_agent",
+        "consumer_agent": [
+          "vision_agent",
+          "manipulation_agent",
+          "knowledge_agent",
+          "bo_agent"
+        ],
+        "created_at": "2026-09-13T00:00:00+00:00",
+        "status": "ready",
+        "evidence_refs": [
+          {
+            "type": "stl",
+            "path": "$ARTIFACT_ROOT/model.stl"
+          },
+          {
+            "type": "gcode",
+            "path": "$ARTIFACT_ROOT/model.gcode"
+          },
+          {
+            "type": "handoff_package",
+            "path": "$ARTIFACT_ROOT/handoff.json"
+          }
+        ],
+        "guardian_status": "not_checked",
+        "decisions": [
+          {
+            "decision_id": "specimen.intent.resolved",
+            "status": "ok",
+            "rationale": "Fabrication path resolved as virtual_bridge; physical_intent=False."
+          },
+          {
+            "decision_id": "specimen.digital_thread.initialized",
+            "status": "ok",
+            "rationale": "Design, geometry, slicer, printer, and handoff artifacts were linked into one digital thread."
+          },
+          {
+            "decision_id": "specimen.quality_gates.evaluated",
+            "status": "ok",
+            "rationale": "10 manufacturing gates evaluated; blocked_or_failed=0."
+          },
+          {
+            "decision_id": "specimen.handoff.prepared",
+            "status": "ok",
+            "rationale": "Stage completion records either a physical specimen handoff or a no-actuation fabrication preflight."
+          }
+        ],
+        "warnings": [
+          "synthetic mesh warning",
+          "synthetic process warning"
+        ],
+        "next_action": "vision_after_print_inspection",
+        "fabrication_report_ref": "run_metadata.fabrication_report",
+        "fabrication_summary": {
+          "schema": "fabrication_report.v1",
+          "physical_intent": false,
+          "printer_path": "virtual_bridge",
+          "stl_path": "$ARTIFACT_ROOT/model.stl",
+          "gcode_path": "$ARTIFACT_ROOT/model.gcode",
+          "outcome_status": "ready_for_vision",
+          "quality_gate_count": 10,
+          "quality_gate_pass_count": 7,
+          "quality_gate_blocked_or_failed": []
+        },
+        "physical_location": "a4_workspace",
+        "pickup_pose_hint": {
+          "source": "vision_agent_required",
+          "status": "pending"
+        }
+      },
+      "specimen_fabricated": {
+        "schema": "specimen_fabricated.v1",
+        "run_id": "synthetic-specimen-golden",
+        "loop_id": "loop-1",
+        "specimen_id": "synthetic-specimen",
+        "candidate_id": "synthetic-candidate",
+        "producer_agent": "specimen_agent",
+        "consumer_agent": [
+          "vision_agent",
+          "manipulation_agent",
+          "knowledge_agent",
+          "bo_agent"
+        ],
+        "created_at": "2026-09-13T00:00:00+00:00",
+        "status": "ready",
+        "evidence_refs": [
+          {
+            "type": "stl",
+            "path": "$ARTIFACT_ROOT/model.stl"
+          },
+          {
+            "type": "gcode",
+            "path": "$ARTIFACT_ROOT/model.gcode"
+          },
+          {
+            "type": "handoff_package",
+            "path": "$ARTIFACT_ROOT/handoff.json"
+          }
+        ],
+        "guardian_status": "not_checked",
+        "decisions": [
+          {
+            "decision_id": "specimen.intent.resolved",
+            "status": "ok",
+            "rationale": "Fabrication path resolved as virtual_bridge; physical_intent=False."
+          },
+          {
+            "decision_id": "specimen.digital_thread.initialized",
+            "status": "ok",
+            "rationale": "Design, geometry, slicer, printer, and handoff artifacts were linked into one digital thread."
+          },
+          {
+            "decision_id": "specimen.quality_gates.evaluated",
+            "status": "ok",
+            "rationale": "10 manufacturing gates evaluated; blocked_or_failed=0."
+          },
+          {
+            "decision_id": "specimen.handoff.prepared",
+            "status": "ok",
+            "rationale": "Stage completion records either a physical specimen handoff or a no-actuation fabrication preflight."
+          }
+        ],
+        "warnings": [
+          "synthetic mesh warning",
+          "synthetic process warning"
+        ],
+        "next_action": "vision_after_print_inspection",
+        "fabrication_report_ref": "run_metadata.fabrication_report",
+        "fabrication_summary": {
+          "schema": "fabrication_report.v1",
+          "physical_intent": false,
+          "printer_path": "virtual_bridge",
+          "stl_path": "$ARTIFACT_ROOT/model.stl",
+          "gcode_path": "$ARTIFACT_ROOT/model.gcode",
+          "outcome_status": "ready_for_vision",
+          "quality_gate_count": 10,
+          "quality_gate_pass_count": 7,
+          "quality_gate_blocked_or_failed": []
+        },
+        "physical_location": "a4_workspace",
+        "pickup_pose_hint": {
+          "source": "vision_agent_required",
+          "status": "pending"
+        }
+      },
+      "decisions": [
+        {
+          "decision_id": "specimen.intent.resolved",
+          "status": "ok",
+          "rationale": "Fabrication path resolved as virtual_bridge; physical_intent=False."
+        },
+        {
+          "decision_id": "specimen.digital_thread.initialized",
+          "status": "ok",
+          "rationale": "Design, geometry, slicer, printer, and handoff artifacts were linked into one digital thread."
+        },
+        {
+          "decision_id": "specimen.quality_gates.evaluated",
+          "status": "ok",
+          "rationale": "10 manufacturing gates evaluated; blocked_or_failed=0."
+        },
+        {
+          "decision_id": "specimen.handoff.prepared",
+          "status": "ok",
+          "rationale": "Stage completion records either a physical specimen handoff or a no-actuation fabrication preflight."
+        }
+      ],
+      "metrics": {
+        "quality_gate_count": 10,
+        "quality_gate_pass_count": 7,
+        "quality_gate_blocked_count": 0,
+        "quality_gate_fail_count": 0,
+        "fabrication_quality_score": 0.7,
+        "estimated_mass_g": 12.0,
+        "estimated_print_time_min": 65.0
+      },
+      "evidence_refs": [
+        {
+          "type": "stl",
+          "path": "$ARTIFACT_ROOT/model.stl"
+        },
+        {
+          "type": "gcode",
+          "path": "$ARTIFACT_ROOT/model.gcode"
+        },
+        {
+          "type": "handoff_package",
+          "path": "$ARTIFACT_ROOT/handoff.json"
+        }
+      ],
+      "protocol_note": "Explicit deterministic TEST harness after code-owned checks."
+    },
+    "next_hint": null
+  },
+  "expected_state_changes": {
+    "current_experiment_spec": {
+      "candidate_id": "synthetic-candidate",
+      "specimen_id": "synthetic-specimen",
+      "candidate_fingerprint": "synthetic-design-hash",
+      "geometry_type": "gyroid",
+      "specimen_size_mm": [
+        30.0,
+        30.0,
+        30.0
+      ],
+      "cell_size_mm": 5.0,
+      "wall_thickness_mm": 1.2,
+      "relative_density": 0.32,
+      "porosity": 0.68,
+      "anisotropy_ratio": 1.0,
+      "orientation_deg": 0.0,
+      "defect_seed": 2,
+      "defect_ratio": 0.0,
+      "skin_thickness_mm": 0.0,
+      "top_cap_enabled": false,
+      "bottom_cap_enabled": false,
+      "top_bottom_cap": false,
+      "material": "PLA",
+      "printer_profile": "synthetic_pla_0p4",
+      "slicer_profile_hint": "synthetic_quality",
+      "layer_height_mm": 0.2,
+      "nozzle_diameter_mm": 0.4,
+      "expected_mass_g": 12.0,
+      "expected_print_time_min": 65.0,
+      "constraints": {
+        "minimum_feature_size_mm": 0.8,
+        "fdm_max_gyroid_wall_cell_ratio": 0.28,
+        "max_print_time_min": 120.0,
+        "max_mass_g": 50.0,
+        "top_cap_enabled": false,
+        "bottom_cap_enabled": false,
+        "top_bottom_cap": false,
+        "skin_thickness_mm": 0.0,
+        "require_flat_compression_faces": false
+      },
+      "require_flat_compression_faces": false,
+      "test_loop_surface_caps_disabled": true
+    }
+  }
+}

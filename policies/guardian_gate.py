@@ -24,6 +24,7 @@ Modification guide:
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -298,6 +299,30 @@ def _collect_alarm_signals(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
     def walk(value: Any, path: str, *, passive_vision: bool = False) -> None:
         if isinstance(value, dict):
+            # Knowledge retains Guardian history for retrieval and audit. Only
+            # its explicitly projected active hardware alerts are current gate
+            # inputs; replaying incident/gate history would manufacture a new
+            # alarm on every Knowledge pass.
+            if value.get("schema") == "guardian_incident_evidence.v1":
+                current_fields = {
+                    key: value[key]
+                    for key in (
+                        "failure_code",
+                        "error_code",
+                        "incident_code",
+                        "requires_operator_input",
+                        "requires_connection_info",
+                        "requires_human_approval",
+                        "requires_approval",
+                        "blocks_workflow",
+                        "safe_stop_recommended",
+                    )
+                    if key in value
+                }
+                if current_fields:
+                    walk(current_fields, f"{path}.current")
+                walk(value.get("active_hardware_alerts", []), f"{path}.active_hardware_alerts")
+                return
             # Optional Equipment observers are diagnostic, not mandatory gates.
             # Keep their unavailable-link evidence, without masking safety signals.
             if value.get("phase") == "vision":
@@ -341,6 +366,8 @@ def _collect_alarm_signals(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
             for key, items in value.items():
                 key_lower = str(key).lower()
+                if key_lower == "guardian_incident_failure_tags":
+                    continue
                 if _is_blocking_signal_key(key_lower):
                     if key_lower.endswith("blocking_reason") and status not in TERMINAL_FAILURE_STATUSES:
                         continue
@@ -986,6 +1013,7 @@ def _dedupe_alarms(alarms: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _map_reason_code(value: str) -> str:
     text = str(value or "").upper()
+    tokens = set(re.findall(r"[A-Z0-9]+", text))
     if "APPROVAL" in text:
         return "HUMAN_APPROVAL_REQUIRED"
     if "ARTIFACT" in text and "MISSING" in text:
@@ -1020,7 +1048,7 @@ def _map_reason_code(value: str) -> str:
         return "DATA_QUALITY_LOW"
     if "FEM" in text or "CAE" in text or "CALCULIX" in text or "DIVERGENCE" in text:
         return "FEM_DIVERGENCE_HIGH"
-    if "BO" in text or "CANDIDATE" in text or "UNSAFE" in text:
+    if "BO" in tokens or {"CANDIDATE", "UNSAFE"}.issubset(tokens):
         return "BO_CANDIDATE_UNSAFE"
     if "EVOLUTION" in text or "VARIANT" in text:
         return "SELF_EVOLUTION_GATE_FAILED"
@@ -1131,9 +1159,50 @@ def _contract_confidence(payload: dict[str, Any], alarms: list[dict[str, Any]]) 
 def _ok_for_bo(*, stage: str, payload: dict[str, Any], ok_for_next_stage: bool, alarms: list[dict[str, Any]]) -> bool:
     if not ok_for_next_stage:
         return False
+    has_bo_blocker = any(
+        alarm.get("reason_code") in {"DATA_PARSE_FAILED", "DATA_QUALITY_LOW", "FEM_DIVERGENCE_HIGH", "BO_CANDIDATE_UNSAFE"}
+        for alarm in alarms
+    )
     if stage == "analysis":
-        return bool(payload.get("ok_for_bo", payload.get("analysis", {}).get("ok_for_bo", False) if isinstance(payload.get("analysis"), dict) else False))
-    return not any(alarm.get("reason_code") in {"DATA_PARSE_FAILED", "DATA_QUALITY_LOW", "FEM_DIVERGENCE_HIGH", "BO_CANDIDATE_UNSAFE"} for alarm in alarms)
+        return _analysis_ok_for_bo(payload) and not has_bo_blocker
+    return not has_bo_blocker
+
+
+def _analysis_ok_for_bo(payload: dict[str, Any]) -> bool:
+    """Read Analysis readiness with false/malformed claims taking precedence."""
+    analysis = payload.get("analysis")
+    analysis_payload = analysis if isinstance(analysis, dict) else {}
+    canonical_claims: list[bool] = []
+    for owner, key in (
+        (payload, "bo_handoff"),
+        (payload, "bo_observation"),
+        (payload, "quality_gate"),
+        (analysis_payload, "bo_handoff"),
+        (analysis_payload, "bo_observation"),
+        (analysis_payload, "quality_gate"),
+    ):
+        if key not in owner:
+            continue
+        envelope = owner[key]
+        if not isinstance(envelope, dict) or "ok_for_bo" not in envelope:
+            return False
+        claim = envelope["ok_for_bo"]
+        if type(claim) is not bool or claim is False:
+            return False
+        canonical_claims.append(claim)
+
+    legacy_claims: list[bool] = []
+    for owner in (payload, analysis_payload):
+        if "ok_for_bo" not in owner:
+            continue
+        claim = owner["ok_for_bo"]
+        if type(claim) is not bool or claim is False:
+            return False
+        legacy_claims.append(claim)
+
+    if canonical_claims:
+        return True
+    return bool(legacy_claims)
 
 
 def _extract_refs(payload: dict[str, Any], keys: tuple[str, ...]) -> list[Any]:

@@ -14,8 +14,9 @@ scope:
   - specimen_fabrication
 summary: Current contract for selecting, configuring, and routing ATR printer providers without silent fallback.
 source_of_truth:
-  - device_bridges/bambu_bridge.py
-  - device_bridges/prusa_bridge.py
+  - device_bridges/printer_fleet/module.py
+  - device_bridges/bambu/bridge.py
+  - device_bridges/prusa/bridge.py
   - mcp_tools/printer_tools.py
   - configs/devices.yaml
   - app/main.py
@@ -47,6 +48,30 @@ The Printer Fleet boundary chooses one configured printer profile and routes
 `printer.prepare` and health work to the matching Bambu or Prusa
 implementation. It owns selection and normalized fleet state; provider
 implementations own their network commands and device-specific proof.
+
+## Package Composition
+
+The installed [Fleet descriptor](../../device_bridges/printer_fleet/module.py)
+publishes `printer_fleet@1.0.0`. The [Specimen Agent Package](../../packages/agents/specimen/package.yaml)
+references it; Design has no bridge dependency. Package membership is available
+through `GET /api/packages` without opening transports or reading connection
+memory. A shared bridge remains one installed module across package references.
+
+| Owner | Folder and requirements | Runtime boundary |
+|---|---|---|
+| Printer Fleet | [Fleet](../../device_bridges/printer_fleet/README.md) · [Requirements](../../device_bridges/printer_fleet/requirements.txt) | Existing manager and tool registration |
+| Bambu provider | [Bambu](../../device_bridges/bambu/README.md) · [Requirements](../../device_bridges/bambu/requirements.txt) | Provider clients and autoejection transformer |
+| Prusa provider | [Prusa](../../device_bridges/prusa/README.md) · [Requirements](../../device_bridges/prusa/requirements.txt) | PrusaLink and slicer workflow |
+
+The original flat imports remain identity-preserving compatibility adapters.
+Provider commands, selection, configuration and artifact locations are unchanged.
+External slicers are documented separately from Python requirements. Experimental
+Package import/export carries declarations and editable drafts, not credentials,
+equipment readiness or installation actions; see the [package contract](../../packages/README.md).
+
+The 2026-09-13 folder migration was checked with 150 original provider/tool/
+autoejection tests and 57 overlapping workflow/completion checks. These used
+virtual or intercepted transports; they are not additional live-printer evidence.
 
 ## Scope
 

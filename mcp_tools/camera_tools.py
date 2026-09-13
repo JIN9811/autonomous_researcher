@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import hashlib
 import time
 from typing import Any
 
@@ -197,10 +198,16 @@ def _utm_specimen_presence_capture(
     payload: dict[str, Any],
     *,
     utm_runtime_manager: Any | None,
+    virtual_clearance: Callable[[dict[str, Any]], bool] | None = None,
 ) -> dict[str, Any]:
     mode = str(payload.get("runtime_mode") or payload.get("mode") or "test").strip().lower()
     clear_verification = payload.get("purpose") == "utm_clear_verification"
-    allow_virtual = not clear_verification and mode == "test" and bool(payload.get("allow_virtual_bridge_in_test", False))
+    virtual_clear = bool(clear_verification and mode == "test" and payload.get("virtual_bridge_simulation") is True
+                         and virtual_clearance is not None and virtual_clearance(payload))
+    if clear_verification and mode == "test" and payload.get("prefer_virtual_bridge_in_test") and not virtual_clear:
+        return {"ok": False, "status": "unknown", "detected": False, "clear_confirmed": False,
+                "failure_code": "VIRTUAL_CLEAR_REPLAY_REQUIRED", "virtualized": True}
+    allow_virtual = (not clear_verification or virtual_clear) and mode == "test" and bool(payload.get("allow_virtual_bridge_in_test", False))
     prefer_virtual = allow_virtual and bool(payload.get("prefer_virtual_bridge_in_test", False))
     runtime_status: dict[str, Any] = {}
     frame: dict[str, Any] = {}
@@ -275,14 +282,49 @@ def _utm_specimen_presence_capture(
                 "specimen_id": str(payload.get("specimen_id") or ""),
             }
         virtualized = True
+        mesh_render = None
+        mesh_path = None
+        if not virtual_clear and (payload.get("virtual_specimen_mesh_required") is True or "virtual_specimen_mesh" in payload):
+            try:
+                from uuid import uuid4
+                from mcp_tools.mock_tools import _try_write_stl_iso_capture_png
+                mesh = payload.get("virtual_specimen_mesh")
+                if (not isinstance(mesh, dict) or mesh.get("schema") != "virtual_specimen_mesh.v1"
+                    or any(mesh.get(key) != payload.get(key) for key in ("run_id", "loop_id", "specimen_id", "session_id", "candidate_id"))
+                    or any(not mesh.get(key) for key in ("run_id", "specimen_id", "session_id", "candidate_id", "geometry_hash", "stl_sha256"))):
+                    raise ValueError("current candidate mesh identity is missing or mismatched")
+                source = Path(str(mesh.get("stl_path") or "")).expanduser().resolve(strict=True)
+                if not source.is_file() or source.suffix.lower() != ".stl" or not 0 < source.stat().st_size <= 64 * 1024 * 1024:
+                    raise ValueError("candidate mesh must be a bounded regular STL file")
+                digest = hashlib.sha256(source.read_bytes()).hexdigest()
+                if digest != mesh["stl_sha256"]:
+                    raise ValueError("candidate mesh content changed")
+                mesh_path = Path(str(payload.get("output_dir") or "runs/utm_specimen_presence")).expanduser() / f"candidate-render-{uuid4().hex}.png"
+                if not _try_write_stl_iso_capture_png(mesh_path, stl_path=source,
+                    specimen_id=mesh["specimen_id"], geometry_type="", material_color=(225, 30, 35),
+                    canvas_size=(640, 480), background_color=(210, 210, 210)):
+                    raise ValueError("actual candidate mesh could not be rendered")
+                if hashlib.sha256(source.read_bytes()).hexdigest() != digest:
+                    raise ValueError("candidate mesh changed during capture")
+                mesh_render = {**mesh, "stl_path": str(source), "stl_sha256": digest,
+                    "synthetic": True, "renderer": "actual_stl_cpu", "material_color": [225, 30, 35],
+                    "rendered_image_path": str(mesh_path)}
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                return {"ok": False, "tool": "vision.utm_specimen_presence.capture",
+                    "schema": "vision_utm_specimen_presence.v1", "status": "unknown", "detected": False,
+                    "virtualized": True, "source": "virtual_utm_bridge", "failure_code": "VIRTUAL_SPECIMEN_MESH_INVALID",
+                    "message": str(exc), **{key: payload.get(key) for key in ("run_id", "loop_id", "specimen_id", "session_id")}}
         frame = {
             "ok": True,
             "frame_available": True,
             "frame_id": str(payload.get("frame_id") or "virtual-utm-specimen-frame"),
-            "topic": "virtual://utm-observation",
+            "topic": "virtual://utm-clear" if virtual_clear else "virtual://utm-observation",
             "width": 640,
             "height": 480,
-            "data_url": virtual_specimen_frame_data_url(),
+            "data_url": virtual_specimen_frame_data_url(specimen_present=not virtual_clear, registered_fixture=virtual_clear,
+                rendered_mesh_path=mesh_path),
+            "frame_timestamp": time.time(),
+            **({"mesh_render": mesh_render} if mesh_render else {}),
         }
 
     output_dir = Path(str(payload.get("output_dir") or "runs/utm_specimen_presence")).expanduser()
@@ -301,7 +343,8 @@ def _utm_specimen_presence_capture(
             purpose=str(payload.get("purpose") or ""),
             capture_evidence={"topic": frame.get("topic"), "camera_profile_id": frame.get("camera_profile_id"),
                 "frame_timestamp": frame.get("frame_timestamp"), "frame_age_ms": frame.get("frame_age_ms"),
-                "material": payload.get("material"), "after_timestamp": payload.get("after_timestamp")},
+                "material": payload.get("material"), "after_timestamp": payload.get("after_timestamp"),
+                **({"virtual_bridge_simulation": True} if virtual_clear else {})},
         )
     except Exception as exc:
         return {
@@ -359,6 +402,7 @@ def _equipment_cross_check(
     minimum_samples = int(payload.get("minimum_samples", 8))
     auto_start = bool(payload.get("auto_start_runtime", True))
     allow_virtual = bool(payload.get("allow_virtual_bridge_in_test", True))
+    prefer_virtual = mode == "test" and allow_virtual and bool(payload.get("prefer_virtual_bridge_in_test"))
 
     results: list[dict[str, Any]] = []
     failure_codes: list[str] = []
@@ -389,6 +433,18 @@ def _equipment_cross_check(
             continue
 
         check_id = str(item.get("check_id") or "utm_motion_confirm")
+        if prefer_virtual:
+            observer_mode = "virtual_utm_bridge"
+            virtualized = True
+            runtime_status = {"ok": True, "status": "virtual_bridge_selected", "observer_mode": observer_mode}
+            result, failure_code = _utm_result_from_observation(
+                item, _virtual_utm_observation(check_id), source=observer_mode,
+                timestamp=timestamp, expires_at=expires_at, ttl_ms=ttl_ms, payload=payload,
+            )
+            results.append(result)
+            if failure_code:
+                failure_codes.append(failure_code)
+            continue
         observer_mode = "ros_topic"
         if utm_runtime_manager is not None:
             if auto_start:
@@ -505,6 +561,11 @@ def register_camera_tools(
     registry.register(
         "vision.utm_runtime.start",
         lambda payload: (
+            {"ok": True, "tool": "vision.utm_runtime.start", "status": "virtual_bridge_selected",
+             "observer_mode": "virtual_utm_bridge"}
+            if str(payload.get("runtime_mode") or payload.get("mode") or "").lower() == "test"
+            and payload.get("prefer_virtual_bridge_in_test") is True
+            else
             {
                 **dict(utm_runtime_manager.start()),
                 "tool": "vision.utm_runtime.start",
@@ -557,6 +618,8 @@ def register_camera_tools(
         lambda payload: _utm_specimen_presence_capture(
             payload if isinstance(payload, dict) else {},
             utm_runtime_manager=utm_runtime_manager,
+            virtual_clearance=lambda request: bool(registry.resource("lerobot.bridge")
+                and registry.resource("lerobot.bridge").simulated_utm_clearance(request)),
         ),
     )
     registry.register(

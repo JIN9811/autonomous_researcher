@@ -223,11 +223,11 @@ DEVICE_BRIDGE_SOURCE_CONTRACTS = {
         ("app/main.py", '@app.get("/api/printer/fleet")'),
     ),
     "bambu_x2d": (
-        ("device_bridges/bambu_bridge.py", "class PrinterDeviceBridgeManager:"),
+        ("device_bridges/bambu/bridge.py", "class PrinterDeviceBridgeManager:"),
         ("app/main.py", '@app.post("/api/printer/bambu-prestart-check")'),
     ),
     "prusa_mk4s": (
-        ("device_bridges/prusa_bridge.py", "class PrinterAgenticWorkflow:"),
+        ("device_bridges/prusa/bridge.py", "class PrinterAgenticWorkflow:"),
         ("mcp_tools/printer_tools.py", 'selected_provider(normalized) == "prusa_mk4s"'),
     ),
     "lerobot": (

@@ -27,6 +27,7 @@ from typing import Any
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
 from utils.agent_artifact_archive import archive_agent_run, current_execution
+from utils.test_mode_execution_profiles import is_resolved_all_virtual_bridge
 from orchestrator.state import Mode, OrchestratorState
 from utils.manipulation_profile import load_manipulation_agent_profile
 
@@ -743,7 +744,8 @@ class ManipulationAgent(BaseAgent):
         metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
         execution_policy = spec.get("execution_policy") if isinstance(spec.get("execution_policy"), dict) else {}
-        preflight_only = str(execution_policy.get("manipulation") or "").strip().lower() == "preflight_only"
+        preflight_only = (str(execution_policy.get("manipulation") or "").strip().lower() == "preflight_only"
+                          and not is_resolved_all_virtual_bridge(spec, mode=state.mode))
         vision_preflight = metadata.get("vision_preflight") if isinstance(metadata.get("vision_preflight"), dict) else {}
         readiness = vision_context.get("transfer_readiness") if isinstance(vision_context.get("transfer_readiness"), dict) else {}
         vision_contract = ""
@@ -1776,7 +1778,8 @@ class ManipulationAgent(BaseAgent):
         freshness = self._vision_signal_freshness(state)
         vision_context = self._vision_context(state, freshness)
         execution_policy = spec.get("execution_policy") if isinstance(spec.get("execution_policy"), dict) else {}
-        preflight_only = str(execution_policy.get("manipulation") or "").strip().lower() == "preflight_only"
+        preflight_only = (str(execution_policy.get("manipulation") or "").strip().lower() == "preflight_only"
+                          and not is_resolved_all_virtual_bridge(spec, mode=state.mode))
         existing_completion_response = None
         if not preflight_only:
             existing_completion_response = self._existing_rollout_response_for_completion(

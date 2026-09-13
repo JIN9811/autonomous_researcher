@@ -72,12 +72,15 @@ const fitGraphBtn = document.getElementById("ide-fit-graph-btn");
 const zoomInBtn = document.getElementById("ide-zoom-in-btn");
 const exportYamlBtn = document.getElementById("ide-export-yaml-btn");
 const importYamlBtn = document.getElementById("ide-import-yaml-btn");
+const exportPackageBtn = document.getElementById("ide-export-package-btn");
+const importPackageBtn = document.getElementById("ide-import-package-btn");
 const graphVersionsBtn = document.getElementById("ide-versions-btn");
 const graphVersionPanel = document.getElementById("ide-version-panel");
 const graphVersionOutput = document.getElementById("ide-version-output");
 const activationChecklistOutput = document.getElementById("ide-activation-checklist");
 const activationOverallBadge = document.getElementById("ide-activation-overall");
 const yamlImportFile = document.getElementById("ide-yaml-import-file");
+const packageImportFile = document.getElementById("ide-package-import-file");
 const runStatusLabel = document.getElementById("ide-run-status");
 const runIdLabel = document.getElementById("ide-run-id");
 const elapsedLabel = document.getElementById("ide-elapsed");
@@ -177,6 +180,16 @@ let modulePayloadCache = new Map();
 const moduleExecutionContracts = new Map();
 const moduleRequestTokens = new Map();
 let moduleOpenToken = null;
+let packageCatalogPayload = null;
+let packageCatalogErrors = [];
+// null means the catalog has not initialized membership; [] is an intentional empty draft.
+let experimentalPackageRefs = null;
+let experimentalPackageDraft = null;
+let experimentalPackageBindings = [];
+let experimentalPackageExportToken = 0;
+let experimentalPackageImportToken = 0;
+let packageCompositionReturnMarkup = "";
+let packageCompositionNotice = null;
 const outerConditionPresets = transitionConditionPreset?.innerHTML || '';
 
 function rememberExecutionContract(moduleId, result) {
@@ -2205,7 +2218,8 @@ function statusBadgeClass(status) {
 }
 
 function renderInfraList(snapshot = latestStateSnapshot) {
-  if (!infraListOutput || !snapshot) return;
+  if (!infraListOutput) return;
+  snapshot = snapshot || { state: {} };
   const state = snapshot.state || {};
   const runtime = snapshot.runtime || state.run_metadata || {};
   const backend = runtime.backend || state.run_metadata?.backend || {};
@@ -2223,7 +2237,7 @@ function renderInfraList(snapshot = latestStateSnapshot) {
     <div class="runtime-infra-item" title="${escapeHtml(backend.label || backend.name || "n/a")}"><strong>Backend</strong></div>
     <div class="runtime-infra-item" title="ToolRegistry / agent context"><strong>MCP Tools</strong></div>
     <div class="runtime-infra-item" title="${escapeHtml(snapshot.logs?.run_dir || "n/a")}"><strong>Memory / Logs</strong></div>
-    <div class="runtime-infra-item" title="${escapeHtml(bridgeDetail)}"><strong>Device Bridges</strong></div>
+    <button type="button" class="runtime-infra-item runtime-infra-navigation" title="${escapeHtml(bridgeDetail)}" data-open-package-composition aria-label="Inspect Agent Package to Device Bridge membership"><strong>Device Bridges</strong><small>inspect package composition</small></button>
     <div class="runtime-infra-models">${modelLines}</div>
     ${bridgeActionDescriptorEditor(bridges)}
   `;
@@ -5381,6 +5395,9 @@ async function loadGraph(graphId = "") {
     dirty: false,
   });
   activeGraphTabId = MAIN_GRAPH_TAB_ID;
+  experimentalPackageDraft = null;
+  experimentalPackageBindings = [];
+  refreshExperimentalPackageRefs(graph.graph);
   activationEvidence = { validation: null, compile: null, dry_run: null, save: null, dirty: false, reason: "graph loaded" };
   liveGateSnapshot = { graph_id: selected, gate_ok: false, has_record: false, dry_run_record: {}, checking: true };
   renderGraph(graph.graph);
@@ -5592,6 +5609,9 @@ async function loadGraphVersionDraft(versionId) {
     tab.dirty = true;
   }
   markActivationDirty(`version draft ${versionId}`);
+  experimentalPackageDraft = null;
+  experimentalPackageBindings = [];
+  refreshExperimentalPackageRefs(draft);
   renderGraph(draft);
   setStatus("busy", "Version Draft Loaded", `${graphId} ${versionId}`);
   dryRunOutput.innerHTML = `<div class="runtime-version-draft-note"><strong>Loaded graph version into draft.</strong> Validate, dry-run, then Save Version to activate.</div>`;
@@ -5669,6 +5689,301 @@ async function saveGraph() {
   if (graphVersionPanel?.open) loadGraphVersions().catch((err) => log(String(err), "error"));
 }
 
+function currentExperimentalPackageGraph() {
+  rememberActiveGraphDraft();
+  const mainTab = graphTabs.find((tab) => tab.id === MAIN_GRAPH_TAB_ID);
+  if (activeGraphTabId === MAIN_GRAPH_TAB_ID) {
+    try { return cloneConfig(parseGraphEditor()); } catch (_error) { /* retain last valid main draft */ }
+  }
+  return cloneConfig(mainTab?.graph || activeGraph || {});
+}
+
+function collectExperimentalModuleConfigurations() {
+  rememberActiveGraphDraft();
+  if (activeGraphTab()?.kind === "module" && activeGraph?.metadata?.ide_tab_kind === "module") {
+    try { applyModuleGraphDraftToEditor(parseGraphEditor()); } catch (_error) { /* use the last valid module draft */ }
+  }
+  const graph = currentExperimentalPackageGraph();
+  return AX4LABExperimentalPackages.buildExportState({
+    graph,
+    catalogPayload: packageCatalogPayload,
+    selectedAgentPackages: experimentalPackageRefs,
+    modulePayloadCache,
+    openModuleTabs: graphTabs,
+  }).moduleConfigurations;
+}
+
+function packageDraftFingerprint() {
+  return JSON.stringify(stableConfigValue({
+    graph: currentExperimentalPackageGraph(),
+    module_configurations: collectExperimentalModuleConfigurations(),
+    agent_packages: experimentalPackageRefs === null ? null : experimentalPackageRefs,
+    package_metadata: experimentalPackageDraft ? {
+      id: experimentalPackageDraft.id,
+      version: experimentalPackageDraft.version,
+      bindings: experimentalPackageDraft.bindings || [],
+    } : null,
+  }));
+}
+
+function setExperimentalPackageRefs(refs) {
+  experimentalPackageRefs = (Array.isArray(refs) ? refs : []).map((ref) => ({ id: String(ref.id || ""), version: String(ref.version || "") }));
+}
+
+function refreshExperimentalPackageRefs(graph = currentExperimentalPackageGraph(), explicitRefs = null) {
+  if (Array.isArray(explicitRefs)) setExperimentalPackageRefs(explicitRefs);
+  else if (packageCatalogPayload) setExperimentalPackageRefs(AX4LABExperimentalPackages.packageRefsForGraph(graph, packageCatalogPayload));
+}
+
+async function loadPackageCatalog() {
+  try {
+    const result = await requestJson("/api/packages");
+    const catalog = AX4LABExperimentalPackages.normalizeCatalog(result);
+    packageCatalogPayload = result;
+    packageCatalogErrors = catalog.ok ? [] : catalog.errors;
+    if (catalog.ok && !experimentalPackageDraft && experimentalPackageRefs === null) refreshExperimentalPackageRefs(currentExperimentalPackageGraph());
+  } catch (error) {
+    packageCatalogPayload = null;
+    packageCatalogErrors = [String(error?.message || error)];
+  }
+  renderInfraList(latestStateSnapshot || { state: {} });
+  if (dryRunOutput?.dataset.packageComposition === "open") renderPackageComposition();
+  return packageCatalogPayload;
+}
+
+function packageBindingRows(composition) {
+  if (experimentalPackageBindings.length) return experimentalPackageBindings.map((binding) => ({ ...binding }));
+  const seen = new Set();
+  return composition.bridges.flatMap((bridge) => bridge.inDraft ? bridge.bindingRequirements : []).flatMap((binding) => {
+    const key = `${binding.id}:${binding.kind}:${binding.owner_id}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ ...binding, status: "requires_local_configuration" }];
+  });
+}
+
+function renderPackageComposition() {
+  if (!dryRunOutput) return;
+  dryRunOutput.dataset.packageComposition = "open";
+  const composition = packageCatalogPayload
+    ? AX4LABExperimentalPackages.projectComposition(packageCatalogPayload, experimentalPackageRefs)
+    : { ok: false, errors: packageCatalogErrors.length ? packageCatalogErrors : ["Package catalog has not loaded."], packages: [], bridges: [] };
+  const notice = packageCompositionNotice
+    ? `<div class="runtime-package-notice ${escapeHtml(packageCompositionNotice.kind || "idle")}"><strong>${escapeHtml(packageCompositionNotice.title)}</strong><small>${escapeHtml(packageCompositionNotice.detail || "")}</small></div>`
+    : "";
+  if (!composition.ok) {
+    dryRunOutput.innerHTML = `<section class="runtime-package-composition" aria-label="Experimental Package composition">
+      <div class="runtime-package-head"><button type="button" class="btn tiny" data-package-composition-back>Back</button><div><strong>Agent Packages · Device Bridges</strong><small>installed composition and current unsaved draft membership</small></div></div>
+      ${notice}<div class="runtime-package-empty error"><strong>Package catalog unavailable</strong><small>${escapeHtml(composition.errors.join("; "))}</small></div>
+    </section>`;
+  } else {
+    const bindings = packageBindingRows(composition);
+    const packageRows = composition.packages.map((pkg) => `
+      <label class="runtime-package-row${pkg.inDraft ? " in-draft" : ""}">
+        <input type="checkbox" data-package-draft-toggle value="${escapeHtml(`${pkg.id}@${pkg.version}`)}" ${pkg.inDraft ? "checked" : ""} />
+        <span class="runtime-package-copy"><strong>${escapeHtml(pkg.id)} <em>${escapeHtml(pkg.version)}</em></strong><small>${pkg.bridges.length ? pkg.bridges.map((bridge) => escapeHtml(`${bridge.id}@${bridge.version}`)).join(" · ") : "No Device Bridges"}</small></span>
+        <span class="runtime-package-badges"><em>Installed dependency</em><em class="${pkg.inDraft ? "draft" : "excluded"}">${pkg.inDraft ? "Current draft membership" : "Not in current draft"}</em></span>
+      </label>`).join("");
+    const bridgeRows = composition.bridges.length ? composition.bridges.map((bridge) => `
+      <div class="runtime-package-bridge${bridge.inDraft ? " in-draft" : ""}" data-package-bridge="${escapeHtml(bridge.id)}">
+        <div><strong>${escapeHtml(bridge.id)} <em>${escapeHtml(bridge.version)}</em></strong><small>Installed Device Bridge · ${bridge.inDraft ? "referenced by current draft" : "not referenced by current draft"}</small></div>
+        <div class="runtime-package-owner-list">${bridge.owners.map((owner) => `<span class="${owner.inDraft ? "draft" : "installed"}">${escapeHtml(owner.id)} · ${owner.inDraft ? "draft member" : "installed only"}</span>`).join("") || "<span>No Agent Package owners declared.</span>"}</div>
+      </div>`).join("") : `<div class="runtime-package-empty"><strong>No Device Bridge modules installed</strong><small>The catalog returned no bridge modules.</small></div>`;
+    const bindingRows = bindings.length ? bindings.map((binding) => `<div class="runtime-package-binding"><strong>${escapeHtml(binding.id)}</strong><small>${escapeHtml(binding.kind)} · ${escapeHtml(binding.owner_id)} · requires local configuration</small></div>`).join("") : `<div class="runtime-package-empty"><strong>No missing bindings</strong><small>The current package draft declares no local bindings.</small></div>`;
+    dryRunOutput.innerHTML = `<section class="runtime-package-composition" aria-label="Experimental Package composition">
+      <div class="runtime-package-head"><button type="button" class="btn tiny" data-package-composition-back>Back</button><div><strong>Agent Packages · Device Bridges</strong><small>composition only; installed code and active graphs are unchanged</small></div></div>
+      ${notice}
+      <div class="runtime-package-section"><h3>Agent Packages</h3>${packageRows || `<div class="runtime-package-empty"><strong>No Agent Packages installed</strong><small>The catalog returned no package manifests.</small></div>`}</div>
+      <div class="runtime-package-section"><h3>Device Bridges</h3>${bridgeRows}</div>
+      <div class="runtime-package-section"><h3>Missing Local Bindings</h3>${bindingRows}</div>
+    </section>`;
+  }
+  dryRunOutput.querySelector("[data-package-composition-back]")?.addEventListener("click", closePackageCompositionView);
+  dryRunOutput.querySelectorAll("[data-package-draft-toggle]").forEach((input) => input.addEventListener("change", () => {
+    const [id, version] = String(input.value || "").split("@");
+    const key = `${id}@${version}`;
+    const retained = (experimentalPackageRefs || []).filter((ref) => `${ref.id}@${ref.version}` !== key);
+    if (input.checked) retained.push({ id, version });
+    setExperimentalPackageRefs(retained);
+    experimentalPackageDraft = experimentalPackageDraft ? { ...experimentalPackageDraft, agent_packages: cloneConfig(experimentalPackageRefs) } : null;
+    packageCompositionNotice = { kind: "warn", title: "Package draft membership changed", detail: "Export captures this detached selection; installed dependencies are unchanged." };
+    renderPackageComposition();
+  }));
+}
+
+function openPackageCompositionView() {
+  if (!dryRunOutput) return;
+  if (dryRunOutput.dataset.packageComposition !== "open") packageCompositionReturnMarkup = dryRunOutput.innerHTML;
+  packageCompositionNotice = packageCompositionNotice || { kind: "idle", title: "Composition view", detail: "Installed dependencies are shown separately from the current draft." };
+  renderPackageComposition();
+  dryRunOutput.scrollIntoView?.({ behavior: "smooth", block: "center" });
+}
+
+function closePackageCompositionView() {
+  if (!dryRunOutput) return;
+  delete dryRunOutput.dataset.packageComposition;
+  dryRunOutput.innerHTML = packageCompositionReturnMarkup || "<div>No dry-run output yet.</div>";
+  packageCompositionReturnMarkup = "";
+  packageCompositionNotice = null;
+}
+
+function downloadExperimentalPackage(pkg) {
+  const blob = new Blob([`${JSON.stringify(pkg, null, 2)}\n`], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${pkg.id || "experimental_package"}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function exportExperimentalPackage() {
+  const graph = currentExperimentalPackageGraph();
+  const exportState = AX4LABExperimentalPackages.buildExportState({
+    graph,
+    catalogPayload: packageCatalogPayload,
+    selectedAgentPackages: experimentalPackageRefs,
+    modulePayloadCache,
+    openModuleTabs: graphTabs,
+  });
+  if (experimentalPackageRefs === null) setExperimentalPackageRefs(exportState.agentPackages);
+  const payload = AX4LABExperimentalPackages.buildExportPayload({
+    graph,
+    agentPackages: exportState.agentPackages,
+    moduleConfigurations: exportState.moduleConfigurations,
+    sourcePackage: experimentalPackageDraft,
+  });
+  const requestToken = ++experimentalPackageExportToken;
+  const requestFingerprint = packageDraftFingerprint();
+  const result = await requestJson("/api/packages/experimental/export", { method: "POST", body: JSON.stringify(payload) });
+  const acceptance = AX4LABExperimentalPackages.acceptExportResult({
+    requestToken,
+    activeToken: experimentalPackageExportToken,
+    requestFingerprint,
+    currentFingerprint: packageDraftFingerprint(),
+    result,
+    currentDraft: experimentalPackageDraft,
+  });
+  if (acceptance.reason === "stale") {
+    if (result?.ok && result.package) {
+      downloadExperimentalPackage(result.package);
+      log("Exported the requested Experimental Package snapshot; newer package draft state was preserved.", "warn");
+    } else {
+      log("Ignored a stale Experimental Package export failure; newer package draft state was preserved.", "warn");
+    }
+    return { ...result, stale: true };
+  }
+  if (!acceptance.applied) {
+    const errors = acceptance.errors;
+    packageCompositionNotice = { kind: "error", title: "Export failed", detail: errors.join("; ") };
+    openPackageCompositionView();
+    log(`Experimental Package export failed: ${errors.join("; ")}`, "error");
+    return result;
+  }
+  experimentalPackageDraft = cloneConfig(acceptance.draft);
+  setExperimentalPackageRefs(result.package.agent_packages || experimentalPackageRefs);
+  experimentalPackageBindings = (result.package.bindings || []).map((binding) => ({ ...binding, status: "requires_local_configuration" }));
+  packageCompositionNotice = { kind: "ok", title: "Experimental Package exported", detail: `${result.package.id}@${result.package.version} · detached JSON · not persisted or activated` };
+  downloadExperimentalPackage(result.package);
+  openPackageCompositionView();
+  log(`Exported Experimental Package ${result.package.id}; active graph unchanged.`, "ok");
+  return result;
+}
+
+function dirtyExperimentalPackageTargets(payload) {
+  const targets = [];
+  const main = graphTabs.find((tab) => tab.id === MAIN_GRAPH_TAB_ID);
+  if (main?.dirty || graphConfigFingerprint(main?.graph) !== graphConfigFingerprint(main?.baselineGraph)) targets.push(main?.title || "Main System");
+  for (const moduleId of Object.keys(payload?.module_configurations || {})) {
+    const tab = graphTabs.find((item) => item.id === `${MODULE_TAB_PREFIX}${moduleId}`);
+    if (tab?.dirty) targets.push(tab.title || moduleId);
+  }
+  return Array.from(new Set(targets));
+}
+
+function applyExperimentalPackageDraft(pkg, unresolvedBindings = []) {
+  const graph = cloneConfig(pkg.graph);
+  const main = graphTabs.find((tab) => tab.id === MAIN_GRAPH_TAB_ID);
+  upsertGraphTab({
+    id: MAIN_GRAPH_TAB_ID, kind: "main", title: main?.title || "Main System", subtitle: graph.name || graph.id || "Experimental Package draft",
+    graphId: graph.id || main?.graphId || "", graph, baselineGraph: main?.baselineGraph || null, fixed: true, dirty: true,
+  });
+  for (const [moduleId, configuration] of Object.entries(pkg.module_configurations || {})) {
+    const payload = normalizedModulePayload(cloneConfig(configuration));
+    modulePayloadCache.set(moduleId, payload);
+    const existing = graphTabs.find((tab) => tab.id === `${MODULE_TAB_PREFIX}${moduleId}`);
+    const moduleGraph = modulePayloadToGraph(payload);
+    upsertGraphTab({
+      id: `${MODULE_TAB_PREFIX}${moduleId}`, kind: "module", title: payload.module?.label || existing?.title || moduleId,
+      subtitle: "imported package draft", moduleId, modulePayload: payload,
+      baselineModulePayload: existing?.baselineModulePayload || null, graph: moduleGraph,
+      baselineGraph: existing?.baselineGraph || null, fixed: false, dirty: true,
+    });
+    markModulePreflightDirty(moduleId, "Experimental Package import draft");
+  }
+  experimentalPackageDraft = cloneConfig(pkg);
+  experimentalPackageBindings = cloneConfig(unresolvedBindings || []);
+  refreshExperimentalPackageRefs(graph, pkg.agent_packages || []);
+  activeGraphTabId = MAIN_GRAPH_TAB_ID;
+  selectedNodeId = "";
+  canvasAutoSelectNode = true;
+  activeRuntimeEdge = null;
+  markActivationDirty("Experimental Package import draft");
+  renderGraph(graph);
+}
+
+async function importExperimentalPackageObject(payload, sourceJson = "") {
+  const dirtyTargets = dirtyExperimentalPackageTargets(payload);
+  if (dirtyTargets.length && !window.confirm(`Replace unsaved drafts for ${dirtyTargets.join(", ")}? Imported graph and module configurations remain unsaved until you use the existing Save Version controls.`)) {
+    packageCompositionNotice = { kind: "warn", title: "Import cancelled", detail: "Existing unsaved graph and module drafts were preserved." };
+    openPackageCompositionView();
+    return { ok: false, cancelled: true };
+  }
+  const requestToken = ++experimentalPackageImportToken;
+  const requestFingerprint = packageDraftFingerprint();
+  let result;
+  try {
+    result = await requestJson("/api/packages/experimental/import", { method: "POST", body: sourceJson || JSON.stringify(payload) });
+  } catch (error) {
+    result = { ok: false, errors: [String(error?.message || error)], draft: null };
+  }
+  const decision = AX4LABExperimentalPackages.acceptImportResult({
+    requestToken, activeToken: experimentalPackageImportToken, requestFingerprint,
+    currentFingerprint: packageDraftFingerprint(), result, currentDraft: experimentalPackageDraft,
+  });
+  if (!decision.applied) {
+    packageCompositionNotice = decision.reason === "stale"
+      ? { kind: "warn", title: "Stale import ignored", detail: "Newer local edits were preserved. Choose the file again to retry." }
+      : { kind: "error", title: "Import failed", detail: decision.errors.join("; ") };
+    openPackageCompositionView();
+    log(`${packageCompositionNotice.title}: ${packageCompositionNotice.detail}`, decision.reason === "failed" ? "error" : "warn");
+    return result;
+  }
+  applyExperimentalPackageDraft(decision.draft, result.unresolved_bindings || []);
+  packageCompositionNotice = { kind: "ok", title: "Experimental Package draft loaded", detail: "Graph and module configurations are unsaved drafts; nothing was persisted or activated." };
+  openPackageCompositionView();
+  setStatus("warn", "Package Draft Loaded", `${decision.draft.id}@${decision.draft.version}: validate and use existing Save Version controls explicitly.`);
+  log(`Loaded Experimental Package ${decision.draft.id} as an unsaved draft.`, "ok");
+  return result;
+}
+
+async function importExperimentalPackageFile(file) {
+  if (!file) return;
+  try {
+    const sourceJson = await file.text();
+    const payload = AX4LABExperimentalPackages.parsePackageJson(sourceJson);
+    return await importExperimentalPackageObject(payload, sourceJson);
+  } catch (error) {
+    packageCompositionNotice = { kind: "error", title: "Import file rejected", detail: String(error?.message || error) };
+    openPackageCompositionView();
+    log(`Experimental Package import file rejected: ${error?.message || error}`, "error");
+  } finally {
+    if (packageImportFile) packageImportFile.value = "";
+  }
+}
+
 async function exportGraphYaml() {
   const graph = parseGraphEditor();
   const res = await fetch(`/api/graphs/${graph.id}/export-yaml`, {
@@ -5711,6 +6026,9 @@ async function importGraphYamlText(yamlText) {
     tab.graph = result.graph;
     tab.dirty = true;
   }
+  experimentalPackageDraft = null;
+  experimentalPackageBindings = [];
+  refreshExperimentalPackageRefs(result.graph);
   markActivationDirty("yaml import draft");
   renderGraph(result.graph);
   setStatus("busy", "YAML Imported", result.compiled ? "Imported draft compiled." : "Imported draft loaded.");
@@ -7967,6 +8285,12 @@ function openModuleManagementTool(event) {
 
 graphCanvas?.addEventListener("click", handleGraphCanvasBlankClick);
 document.addEventListener("click", (event) => {
+  const packageComposition = event.target?.closest?.("[data-open-package-composition]");
+  if (packageComposition) {
+    event.preventDefault();
+    openPackageCompositionView();
+    return;
+  }
   const bridgeActionSave = event.target?.closest?.("[data-bridge-action-save]");
   if (bridgeActionSave) {
     event.preventDefault();
@@ -8009,6 +8333,7 @@ function connectEventStream() {
 async function boot() {
   try {
     await loadGraph();
+    await loadPackageCatalog();
     await loadHandlers();
     await loadTools();
     await loadModules({ preferredModuleId: deepLinkModuleId() });
@@ -8030,6 +8355,9 @@ document.getElementById("ide-dry-run-btn").addEventListener("click", () => dryRu
 exportYamlBtn.addEventListener("click", () => exportGraphYaml().catch((err) => log(String(err), "error")));
 importYamlBtn.addEventListener("click", () => yamlImportFile.click());
 yamlImportFile.addEventListener("change", () => importGraphYamlFile(yamlImportFile.files?.[0]).catch((err) => log(String(err), "error")));
+exportPackageBtn?.addEventListener("click", () => exportExperimentalPackage().catch((err) => log(String(err), "error")));
+importPackageBtn?.addEventListener("click", () => packageImportFile?.click());
+packageImportFile?.addEventListener("change", () => importExperimentalPackageFile(packageImportFile.files?.[0]).catch((err) => log(String(err), "error")));
 document.getElementById("ide-save-btn").addEventListener("click", () => saveGraph().catch((err) => log(String(err), "error")));
 graphVersionsBtn?.addEventListener("click", () => loadGraphVersions().catch((err) => log(String(err), "error")));
 document.getElementById("ide-module-load-btn").addEventListener("click", () => openModuleGraphTab(moduleSelect.value || activeModuleId).catch((err) => log(String(err), "error")));

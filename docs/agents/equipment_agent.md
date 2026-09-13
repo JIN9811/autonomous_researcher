@@ -328,6 +328,19 @@ references, mock output, timeout, stop or changed scope invalidate the request.
 return `deterministic_test` with `llm_used: false`; it is neither model nor visual
 or physical validation.
 
+The resolved all-virtual `virtual_bridge` profile executes the existing decision
+and workflow path against the Windows simulator, including its generated CSV and
+readiness evidence. It does not replace the owner with successful preflight or
+substitute a CAE curve for the equipment export. Explicit virtual transport cannot
+be promoted to physical I/O by saved connection settings. Standalone preflight and
+mixed-mode operator handoff retain their existing gates; see the
+[virtual-device contract](../runtime/runtime_ide.md#virtual-device-execution-contract).
+
+The host derives transport authority on every dispatch; model payloads cannot
+switch a physical request into simulated success. Simulator screenshots retain
+the observed run, loop, specimen and workflow identity. An unmatched workflow or
+a newly refused operation cannot reuse earlier success as current evidence.
+
 The decision timeout is
 `run_metadata.equipment_decision_settings.timeout_s` (default 120 seconds; positive,
 finite and at most 600). The managed invocation permits at most five terminal/

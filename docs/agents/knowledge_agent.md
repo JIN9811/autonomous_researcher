@@ -24,8 +24,8 @@ source_of_truth:
   - knowledge/ontology
   - utils/agent_artifact_archive.py
   - graphs/modules/knowledge/module.yaml
-last_verified: 2026-09-11
-verified_against: working-tree-2026-09-11
+last_verified: 2026-09-13
+verified_against: working-tree-2026-09-13
 related_docs:
   - docs/knowledge/wiki_memory.md
   - docs/knowledge/publication.md
@@ -254,6 +254,12 @@ Current per-run report aliases remain compatible. The archive wrapper snapshots
 each execution separately; Markdown identity also includes run, cycle, agent and
 event, so a similar failure in a later cycle is retained independently.
 
+Current `failure_tags` describe the current owner's failure evidence. Guardian
+incident history is retained separately for audit, retrieval and Self-Evolution;
+its component, severity and risk-class labels are not new current failures.
+Historical evidence does not replace the current Analysis BO-readiness claim
+or clear active hardware alerts, stop requests or pending approvals.
+
 | Field | Meaning |
 |---|---|
 | run_id / cycle_id / agent_id / event_id | Stable event identity; retries deduplicate |
@@ -330,6 +336,13 @@ Markdown retrieval remain available.
   their existing owners.
 
 ## Artifacts and Verification
+
+The 2026-09-13 current-versus-historical evidence correction passed 48 focused
+Guardian/Knowledge tests (five existing schema-field warnings). The tests use
+the real Knowledge projection and Guardian gate: archival classifications remain
+retrievable without becoming new failures, while active hardware alerts and
+current explicit failures remain enforceable. Registered-model cycle acceptance
+is recorded separately in the [implementation verification record](../superpowers/plans/2026-09-13-specimen-agent-packages.md#verification-record).
 
 The 2026-09-11 source-curation matrix passed on both registered providers:
 

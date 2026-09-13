@@ -495,17 +495,6 @@ LIVE_AGENT_REPORT_PROFILES: dict[str, dict[str, object]] = {
         ],
         "checklist": ["Validate required inputs", "Emit system handoff messages", "Stop on unresolved approval"],
     },
-    "specimen": {
-        "title": "Manufacturing Digital Thread / Printer Runtime",
-        "summary": "Transforms the selected STL into a fabrication digital thread with slicer settings, quality gates, printer runtime evidence, monitoring handoff, and feedback to the next loop.",
-        "focus_rows": [
-            {"label": "Digital thread", "value": "design candidate -> STL -> G-code -> printer job -> Vision/Manipulation handoff"},
-            {"label": "Process plan", "value": "material, profile, layer/nozzle/temp, adhesion, cap skin, and ejection policy"},
-            {"label": "Quality gates", "value": "required fields, mesh, manufacturability, slicer, G-code, storage, live execution, and ejection"},
-            {"label": "Runtime evidence", "value": "PrusaLink upload/start/transfer trace, operator messages, outcome, and feedback to Design/Knowledge/BO"},
-        ],
-        "checklist": ["Confirm fabrication intent", "Inspect digital thread", "Review quality gates", "Log printer runtime", "Prepare Vision handoff"],
-    },
     "vision": {
         "title": "Lab Perception Signal Bus / Visual Evidence",
         "summary": "Converts camera or screenshot evidence into zone states, freshness-bounded agent signals, visual evidence, and downstream handoff gates.",
@@ -6247,10 +6236,11 @@ def _validate_module_payload(module_id: str, payload: dict[str, Any]) -> list[st
     if module.get("id") != module_id:
         errors.append(f"module_id path/body mismatch: {module_id} != {module.get('id')}")
     execution_graph = module.get("execution_graph")
-    if module_id in {"design", "orchestrator"} and execution_graph is None:
+    installed_owner = controller._deps.agent_registry.get_module(module_id)
+    catalog = _module_execution_catalog(module_id)
+    if catalog is not None and execution_graph is None:
         errors.append(f"execution_graph is required for migrated module: {module_id}")
     elif execution_graph is not None:
-        catalog = _module_execution_catalog(module_id)
         if catalog is None:
             errors.append(f"execution_graph is unsupported for module: {module_id}")
         elif isinstance(execution_graph, dict):
@@ -6266,10 +6256,10 @@ def _validate_module_payload(module_id: str, payload: dict[str, Any]) -> list[st
     handler = str(module.get("handler", ""))
     if handler not in handler_registry:
         errors.append(f"unregistered handler: {handler}")
-    migrated_handler = {
-        "design": "agent.design_agent",
-        "orchestrator": f"agent.{controller._deps.orchestrator_agent_name}",
-    }.get(module_id)
+    migrated_handler = (
+        f"agent.{installed_owner.agent_name}" if installed_owner is not None
+        else f"agent.{controller._deps.orchestrator_agent_name}" if module_id == "orchestrator" else None
+    )
     if execution_graph is not None and migrated_handler is not None and handler != migrated_handler:
         errors.append(f"handler must remain {migrated_handler} while execution_graph is configured")
     llm_role = module.get("llm_role", "")
@@ -6379,11 +6369,12 @@ def _validate_module_payload(module_id: str, payload: dict[str, Any]) -> list[st
 
 def _module_execution_catalog(module_id: str):
     """Return a code-owned operation catalog for explicitly migrated modules."""
-    if module_id == "design":
-        from agents.design.execution import design_execution_catalog
-
-        agent = controller._deps.agent_registry.get_installed("design_agent")
-        return design_execution_catalog(agent)
+    installed = controller._deps.agent_registry.get_module(module_id)
+    if installed is not None:
+        agent = controller._deps.agent_registry.get_installed(installed.agent_name)
+        catalog = getattr(agent, "execution_catalog", None)
+        if callable(catalog):
+            return catalog()
     if module_id == "orchestrator":
         from agents.orchestrator_execution import orchestrator_execution_catalog
 
@@ -6878,42 +6869,6 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
         report_metrics = projection["metrics"]
         module_sections = {key: value for key, value in projection.items()
                            if key not in {"role_specific", "decisions", "metrics"}}
-    specimen_fabrication_report = None
-    specimen_agent_report = None
-    if definition["agent_id"] == "specimen":
-        specimen_result = metadata.get("specimen_result") if isinstance(metadata.get("specimen_result"), dict) else {}
-        if not specimen_result and isinstance(agent_payload.get("specimen_result"), dict):
-            specimen_result = agent_payload["specimen_result"]
-        if isinstance(metadata.get("latest_specimen_agent_report"), dict):
-            specimen_agent_report = metadata["latest_specimen_agent_report"]
-        elif isinstance(agent_payload.get("specimen_agent_report"), dict):
-            specimen_agent_report = agent_payload["specimen_agent_report"]
-        elif isinstance(specimen_result.get("specimen_agent_report"), dict):
-            specimen_agent_report = specimen_result["specimen_agent_report"]
-        if isinstance(metadata.get("fabrication_report"), dict):
-            specimen_fabrication_report = metadata["fabrication_report"]
-        elif isinstance(specimen_result.get("fabrication_report"), dict):
-            specimen_fabrication_report = specimen_result["fabrication_report"]
-        elif isinstance(agent_payload.get("fabrication_report"), dict):
-            specimen_fabrication_report = agent_payload["fabrication_report"]
-        specimen_packet = metadata.get("specimen_fabricated") if isinstance(metadata.get("specimen_fabricated"), dict) else {}
-        if not specimen_packet and isinstance(agent_payload.get("specimen_fabricated"), dict):
-            specimen_packet = agent_payload["specimen_fabricated"]
-        if isinstance(specimen_fabrication_report, dict):
-            role_specific["summary"] = "Manufacturing digital thread, process plan, quality gates, printer runtime evidence, monitoring handoff, and feedback to Design/Knowledge/BO."
-            role_specific["fabrication_intent"] = specimen_fabrication_report.get("fabrication_intent", {})
-            role_specific["digital_thread"] = specimen_fabrication_report.get("digital_thread", {})
-            role_specific["process_plan"] = specimen_fabrication_report.get("process_plan", {})
-            role_specific["quality_gates"] = specimen_fabrication_report.get("quality_gates", [])
-            role_specific["monitoring_plan"] = specimen_fabrication_report.get("monitoring_plan", {})
-            role_specific["printer_runtime"] = specimen_fabrication_report.get("printer_runtime", {})
-            role_specific["fabrication_outcome"] = specimen_fabrication_report.get("fabrication_outcome", {})
-            role_specific["feedback_to_design"] = specimen_fabrication_report.get("feedback_to_design", {})
-            role_specific["handoff_packet"] = specimen_packet
-            if isinstance(specimen_agent_report, dict):
-                role_specific["specimen_agent_report"] = specimen_agent_report
-            report_decisions = specimen_packet.get("decisions", []) if isinstance(specimen_packet.get("decisions"), list) else agent_payload.get("decisions", []) if isinstance(agent_payload.get("decisions"), list) else []
-            report_metrics = metadata.get("specimen_metrics") if isinstance(metadata.get("specimen_metrics"), dict) else agent_payload.get("metrics", {}) if isinstance(agent_payload.get("metrics"), dict) else {}
     vision_report = None
     vision_agent_report = None
     knowledge_report = None
@@ -7316,9 +7271,9 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
         "sections": {
             "overview": summary,
             "role_specific": role_specific,
+            "specimen_agent_report": None,
+            "fabrication_report": None,
             **module_sections,
-            "specimen_agent_report": specimen_agent_report if definition["agent_id"] == "specimen" else None,
-            "fabrication_report": specimen_fabrication_report if definition["agent_id"] == "specimen" else None,
             "vision_agent_report": vision_agent_report if definition["agent_id"] == "vision" else None,
             "vision_report": vision_report if definition["agent_id"] == "vision" else None,
             "manipulation_report": manipulation_report if definition["agent_id"] == "manipulation" else None,
@@ -7550,6 +7505,34 @@ def _runtime_module_ids() -> set[str]:
 def _runtime_graph_compiler(config: GraphConfig) -> ATRLangGraphCompiler:
     """Build a compiler with current handler and module allowlists."""
     return ATRLangGraphCompiler(config, _runtime_graph_handler_registry(), module_ids=_runtime_module_ids())
+
+
+def _package_service():
+    """Inject installed metadata and existing validation; never load device settings."""
+    from device_bridges.printer_fleet.module import MODULE as printer_fleet
+    from packages.service import PackageService, installed_agent_packages
+
+    def validate_graph(payload):
+        config = GraphConfig.model_validate(payload)
+        compiler = _runtime_graph_compiler(config)
+        errors = compiler.validate()
+        if not errors:
+            compiler.compile()
+        return errors
+
+    return PackageService(
+        agent_packages=installed_agent_packages(
+            module.describe() for module in controller._deps.agent_registry.modules()),
+        bridge_modules=[printer_fleet.describe()],
+        installed_handlers=_runtime_graph_handler_registry().names(),
+        installed_module_ids=_runtime_module_ids(),
+        validate_graph=validate_graph, validate_module=_validate_module_payload,
+    )
+
+
+from packages.api import make_packages_router
+
+app.include_router(make_packages_router(_package_service))
 
 
 async def _emit_graph_validation_failed(
