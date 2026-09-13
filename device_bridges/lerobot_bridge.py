@@ -4921,9 +4921,9 @@ class LeRobotBridge:
             "--dataset-path",
             str(dataset_path),
             "--isaac-lab-path",
-            str(Path(request.isaac_lab_path or "/home/jin/IsaacLab").expanduser()),
+            str(Path(request.isaac_lab_path or Path.home() / "IsaacLab").expanduser()),
             "--isaac-sim-python",
-            str(Path(request.isaac_sim_python or "/home/jin/IsaacSim/python.sh").expanduser()),
+            str(Path(request.isaac_sim_python or Path.home() / "IsaacSim" / "python.sh").expanduser()),
             "--trials",
             str(request.mimic_trials),
             "--num-envs",
@@ -9479,7 +9479,7 @@ class LeRobotBridge:
         env_value = os.environ.get("ATR_ISAAC_SIM_EXECUTABLE", "").strip()
         if env_value:
             return env_value
-        isaac_sim = Path("/home/jin/IsaacSim/isaac-sim.sh")
+        isaac_sim = Path.home() / "IsaacSim" / "isaac-sim.sh"
         if isaac_sim.exists():
             return str(isaac_sim)
         return "isaac-sim.sh"
@@ -9504,7 +9504,7 @@ class LeRobotBridge:
         env_value = os.environ.get("ATR_ISAAC_MIRROR_RECEIVER_PYTHON", "").strip()
         if env_value:
             return env_value
-        isaac_python = Path("/home/jin/IsaacSim/python.sh")
+        isaac_python = Path.home() / "IsaacSim" / "python.sh"
         if isaac_python.exists():
             return str(isaac_python)
         return sys.executable

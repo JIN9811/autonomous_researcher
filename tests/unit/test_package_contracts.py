@@ -97,7 +97,7 @@ def test_roundtrip_detached_rearranged_nodes_and_symbolic_bindings():
     lambda p: p.update(files=["secrets.txt"]),
     lambda p: p.update(connection={"host": "192.168.0.1"}),
     lambda p: p["graph"]["nodes"][0].update(executable="do_it"),
-    lambda p: p["graph"].update(metadata={"path": "/home/jin/private.json"}),
+    lambda p: p["graph"].update(metadata={"path": "/private/example.json"}),
     lambda p: p["graph"].update(metadata={"file": "../../private.json"}),
     lambda p: p["graph"].update(metadata={"api_key": "secret"}),
     lambda p: p["graph"].update(metadata={"nested": {"command": "run"}}),
@@ -189,7 +189,7 @@ def test_strict_agent_manifest_rejects_machine_path_even_without_reading_target(
     from packages.contracts import AgentPackage
     from pydantic import ValidationError
     manifest = service().catalog()["agent_packages"][0]
-    manifest["module_reference"] = "/home/jin/private/module.yaml"
+    manifest["module_reference"] = "/private/modules/example.yaml"
     with pytest.raises(ValidationError):
         AgentPackage.model_validate(manifest)
 

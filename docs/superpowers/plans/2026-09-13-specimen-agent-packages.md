@@ -26,7 +26,7 @@ supersedes: []
 
 ## Global Constraints
 
-- Existing checkout `/home/jin/autonomous_researcher`; baseline `ba8e1f5`. Preserve the three pending specification edits.
+- Existing repository checkout; baseline `ba8e1f5`. Preserve the three pending specification edits.
 - No physical devices, live device transport probes, server restart, commit or push. Test physical-mode semantics using intercepted transports and existing effect guards. Real model calls are included in final non-actuating cycle verification through ATR's registered routes; never substitute an unregistered model/provider or change live model lifecycle/settings.
 - Preserve `agent.specimen_agent`, `SpecimenMakingAgent`, `printer.prepare`, `experiment.evaluate`, modes, slicing/placement/cooling/ejection, approvals, cancellation and run/loop/attempt archives.
 - Agent Package IDs follow owner IDs: `design`, `specimen`. Shared bridge module ID `printer_fleet` refers to current Bambu/Prusa owner code, not a new printer protocol.
