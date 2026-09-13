@@ -66,6 +66,7 @@ include-package-data = true
 "device_bridges.bambu" = ["requirements.txt", "README.md"]
 "device_bridges.prusa" = ["requirements.txt", "README.md"]
 "device_bridges.printer_fleet" = ["requirements.txt", "README.md"]
+"device_bridges.printer_fleet.providers" = ["*-requirements.txt"]
 
 [tool.setuptools.packages.find]
 where = ["."]

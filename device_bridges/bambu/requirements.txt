@@ -1,6 +1,2 @@
-paho-mqtt>=2.1.0
-# Shared placement/material helpers imported by this provider:
-pydantic>=2.8.0
-# Used by explicit-position STL placement preflight:
-numpy>=1.26.0
-trimesh>=4.4.0
+# Compatibility entry point; install the fleet package for both providers.
+-r ../printer_fleet/providers/bambu-requirements.txt

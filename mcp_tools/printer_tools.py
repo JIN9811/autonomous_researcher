@@ -24,8 +24,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from device_bridges.bambu_bridge import PrinterDeviceBridgeManager
-from device_bridges.prusa_bridge import PrinterAgenticWorkflow, PrusaBridgeConfig
+from device_bridges.printer_fleet.bridge import PrinterDeviceBridgeManager
+from device_bridges.printer_fleet.providers.prusa import PrinterAgenticWorkflow, PrusaBridgeConfig
 from mcp_tools.tool_registry import ToolRegistry
 from utils.specimen_placement import placement_from_payload
 

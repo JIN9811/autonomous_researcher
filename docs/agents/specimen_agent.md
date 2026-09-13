@@ -17,9 +17,9 @@ source_of_truth:
   - utils/specimen_execution.py
   - graphs/modules/specimen/module.yaml
   - device_bridges/printer_fleet/module.py
-  - device_bridges/bambu/bridge.py
-  - device_bridges/bambu/autoejection.py
-  - device_bridges/prusa/bridge.py
+  - device_bridges/printer_fleet/bridge.py
+  - device_bridges/printer_fleet/providers/bambu_autoejection.py
+  - device_bridges/printer_fleet/providers/prusa.py
   - packages/agents/specimen/package.yaml
   - app/main.py
   - web/static/planning.js
@@ -84,7 +84,7 @@ printer protocol or an installer.
 |---|---|---|
 | Agent | `agents/specimen/` | Decision, execution, report and frontend ownership |
 | Shared bridge | [Printer Fleet](../../device_bridges/printer_fleet/README.md) | Registered printer tools and package membership |
-| Provider components | [Bambu](../../device_bridges/bambu/README.md), [Prusa](../../device_bridges/prusa/README.md) | Provider implementation, requirements and external-tool notes |
+| Internal providers | [Printer Fleet package layout](../../device_bridges/printer_fleet/README.md) | Bambu and Prusa implementations within one Device Bridge Package |
 | Experimental Package | [Package API](../../packages/README.md) | Graph plan, exact dependencies and portable module drafts |
 
 Bridge code stays under `device_bridges/`; existing connection memory and
@@ -403,6 +403,13 @@ This is a frontend-only change: reload the Live GUI to load the updated script;
 it does not require a Python restart or any equipment action.
 
 ## Artifacts and Verification
+
+The Printer Fleet package consolidation was rechecked on 2026-09-13. Specimen
+passed the virtual-bridge, installed-printer and physical-print preparation
+prefixes with device transports intercepted. A separate registered-API cycle
+completed all 13 stage transitions through the next Design handoff, with 34
+successful model calls and zero physical calls (393.809 s). This verifies the
+software handoff, not live fabrication. See the [consolidation verification record](../superpowers/plans/2026-09-13-specimen-agent-packages.md#printer-fleet-consolidation-and-ide-separation--2026-09-13).
 
 Existing per-loop/attempt archiving also retains decision responses, local tool
 requests/results and the final `specimen_decision.v1`. Its `status=executed` means

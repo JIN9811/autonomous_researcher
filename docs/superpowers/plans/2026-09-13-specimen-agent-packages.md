@@ -31,11 +31,11 @@ supersedes: []
 - Preserve `agent.specimen_agent`, `SpecimenMakingAgent`, `printer.prepare`, `experiment.evaluate`, modes, slicing/placement/cooling/ejection, approvals, cancellation and run/loop/attempt archives.
 - Agent Package IDs follow owner IDs: `design`, `specimen`. Shared bridge module ID `printer_fleet` refers to current Bambu/Prusa owner code, not a new printer protocol.
 - Bridge source remains under `device_bridges/`, including when referenced by the same Agent Package; never nest or duplicate it under `agents/specimen/` or the package folder.
-- Group migrated bridges in their own folders, with per-bridge requirements and external-tool notes. For this slice: `device_bridges/printer_fleet/`, `device_bridges/bambu/`, `device_bridges/prusa/`; preserve the existing flat imports through compatibility adapters. Other bridge families are migrated in their own agent tasks, not mass-moved now.
+- Keep one Device Bridge Package at `device_bridges/printer_fleet/`, containing the shared runtime, internal Bambu/Prusa providers and requirements. Old Bambu/Prusa paths retain only compatibility aliases. Other bridge families remain outside this migration.
 - Experimental Packages carry graph plans and portable owner configuration. Import returns an inactive draft; only existing explicit graph/module save and activation can change execution. No arbitrary Python imports or remote downloads.
 - Keep private connection/configuration memory and runtime artifacts out of exports. Reject unknown fields, unresolved dependencies and conflicting versions rather than silently enabling substitutes.
 - Five-area display uses editable registered owner operations plus source-bound CODE relationships; compact outcome labels stay on their curves. Document SVGs use the light document theme.
-- Clicking Device Bridges in the Runtime IDE opens a package-composition view: Agent Package → declared Device Bridge dependencies. Derive relationships from the installed package/bridge contracts and the current Experimental Package draft, not a second hardcoded registry. This view describes membership, not bridge execution stages or live hardware readiness.
+- Device Bridges opens an internal node-based Agent Package → Device Bridge Package → provider structure and Inspector. Package Manager is a separate IDE tab for membership and exchange. Both use installed contracts and the current draft; neither reports live hardware readiness.
 
 ### Task 1: Specimen owner module, executable graph, and presentation
 
@@ -59,7 +59,7 @@ parity is covered; the isolated legacy fixture limitations are recorded below.
 **Status:** Implemented and reviewed. Provider bodies preserve their previous
 behavior; package import/export remains inactive and local-only.
 
-**Files:** add declarative `device_bridges/printer_fleet/module.py`, `device_bridges/module_contract.py`, `device_bridges/{printer_fleet,bambu,prusa}/{requirements.txt,README.md}`, relocate current provider implementations into `device_bridges/bambu/` and `device_bridges/prusa/` with flat import compatibility adapters, add `packages/{__init__,contracts,service,api}.py`, `packages/agents/{design,specimen}/package.yaml`; modify the existing tool registration/bootstrap and app router mount only as needed; add package/bridge unit and guarded API tests.
+**Files:** `device_bridges/printer_fleet/{module,bridge}.py`, internal `providers/`, package/provider requirements, `device_bridges/module_contract.py`, legacy aliases, `packages/{__init__,contracts,service,api}.py`, and `packages/agents/{design,specimen}/package.yaml`; existing tool registration/bootstrap; guarded API and package tests.
 
 **Interfaces:** `BridgeModule.describe()` publishes code-owned ID/version/tools/provider/UI/storage references, never probes equipment. Package service accepts installed agent/bridge descriptions and existing graph validation callbacks. Public methods `catalog()`, `export_experimental(payload)`, `import_experimental(payload)` return JSON-compatible results. Mount `/api/packages` (catalog), `/api/packages/experimental/export`, `/api/packages/experimental/import` through an APIRouter; application owns injected graph/module stores and validators.
 
@@ -80,8 +80,8 @@ behavior; package import/export remains inactive and local-only.
 **Interfaces:** Existing graph editor is the editable draft host. Package controls call Task 2 APIs; export downloads JSON, import validates the chosen JSON file and explicitly loads the accepted draft into the current editor. Dirty drafts require replacement confirmation. Module configurations travel with the draft and use existing save/activation, never hidden POSTs on import.
 
 - [x] Test pure package UI parsing/projection and stale/failed import preservation before implementation.
-- [x] Add compact Export/Import Experimental Package controls to the existing IDE; expose package members and missing bindings in the existing output/details area, not a new dashboard.
-- [x] Make Device Bridges clickable into an internal composition view in the existing IDE. Show which Agent Packages include which bridge modules, preserve shared-bridge relationships, distinguish installed dependencies from current draft membership, and show an explicit empty state for bridge-free packages. Refresh from the same package contract on draft replacement/reload; no synthetic workflow or hardware controls.
+- [x] Keep Export/Import Experimental Package controls and membership in a separate Package Manager tab, preserving detached draft semantics.
+- [x] Open Device Bridges as a node-based structure tab with an Inspector. Show Agent Package ownership, shared bridge packages and internal providers. Refresh from the same catalog; preserve Dry-run Trace and graph/module drafts.
 - [x] Verify bridge click/open/back behavior, shared bridge membership, package addition/removal, empty states, and draft-versus-installed labels in unit/browser checks without any device request.
 - [x] Validate actual served static files and API shape in guarded intercepted browser at desktop/narrow sizes; exercise Specimen CODE inspection, outcome label attachment, draft import/export and dirty-state preservation.
 - [x] Update current references, index/matrix and approved package spec; preserve canonical files and old physical-proof scope. Generate the Specimen document SVG using the same source structure with document theme and verify parity.
@@ -117,6 +117,46 @@ preflight behavior; mixed real/virtual profiles retain operator handoff gates.
   Explicit offline fixtures remain useful regression evidence, never LLM evidence.
 
 ## Verification Record
+
+### Printer Fleet consolidation and IDE separation — 2026-09-13
+
+Printer Fleet is one Device Bridge Package. The canonical manager, internal
+providers, G-code transformer and requirements are under its directory. Legacy
+imports share the same runtime module objects. Provider selection, existing
+3DP APIs, storage and physical gates were not rewritten.
+
+| Check | Result |
+|---|---|
+| Fleet/package, Bambu, Prusa and printer tools | 164 passed; 5 existing warnings |
+| Specimen three-mode prefix, module/API linkage | 19 passed; 75 existing warnings |
+| IDE navigation/module lifecycle and package API | 7 passed; 10 existing warnings |
+| Bridge structure renderer | 1 passed; safe text, no management controls, unchanged-update preservation |
+| Package projection and bridge topology | 11 Node tests passed |
+| Registered-model full virtual-device cycle | 1 passed; 394.57 s pytest / 393.809 s cycle |
+| Actual model requests | 34 successful, 0 failed; gpt-5.5 through the saved ATR API route; all 10 owners |
+| Physical effects | 0 calls; no denied effects |
+
+The three prefix modes are `virtual_bridge`, `installed_printer`, and
+`physical_print`. The last two execute the existing preparation, placement and
+G-code patching path with intercepted slicer/transport boundaries, not hardware.
+The installed-printer artifact omits the print body and cooling; physical-print
+retains the print body and cooling. Default Bambu and explicit Prusa dispatch
+are additionally exercised by the original printer-tool tests.
+
+The real-model cycle follows Design → Specimen → Vision → Manipulation → Vision
+→ Equipment → Manipulation → Vision → Analysis → Knowledge → BO → Guardian →
+Design. Device data is synthetic and background FEM is not executed. No claim
+of new physical validation is made. Local evidence is retained under the ignored
+`artifacts/validation/printer-fleet-package-20260913/` directory; credentials,
+prompts and user memory are not part of the published record.
+
+Browser verification at `/ide` uses the existing server: bridge entry opens a
+relationship canvas and node Inspector, while **Package Manager** opens a separate
+tab with membership and exchange controls. Back preserves Main/agent drafts and
+Dry-run Trace. After the user's subsequent restart approval, the existing server
+was restarted with its launch command and environment preserved. It returned to
+idle; the catalog API and 1920×1080 IDE then showed the canonical fleet manager
+and internal provider paths. No graph run or device action was started.
 
 ### Approved follow-up: Guardian/Knowledge BO admission repair
 

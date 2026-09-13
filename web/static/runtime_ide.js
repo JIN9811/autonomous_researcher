@@ -28,6 +28,12 @@ const statusDetail = document.getElementById("ide-status-detail");
 const graphIdBadge = document.getElementById("ide-graph-id");
 const graphSelect = document.getElementById("ide-graph-select");
 const graphCanvas = document.getElementById("ide-graph-canvas");
+const packageCompositionOutput = document.createElement("div");
+packageCompositionOutput.id = "ide-package-composition";
+packageCompositionOutput.setAttribute("role", "tabpanel");
+packageCompositionOutput.setAttribute("aria-label", "Device Bridges");
+packageCompositionOutput.hidden = true;
+graphCanvas?.after(packageCompositionOutput);
 const draftSafetyStrip = document.getElementById("ide-draft-safety-strip");
 const graphTabsOutput = document.getElementById("ide-graph-tabs");
 const minimapOutput = document.getElementById("ide-minimap");
@@ -137,6 +143,8 @@ const MODULE_GRAPH_PRE_Y = 64;
 const MODULE_GRAPH_INTERNAL_Y = 220;
 const MAIN_GRAPH_TAB_ID = "main-system";
 const MODULE_TAB_PREFIX = "module:";
+const BRIDGE_GRAPH_TAB_ID = "infra:device-bridges";
+const PACKAGE_MANAGER_TAB_ID = "infra:package-manager";
 const DISPLAY_EDGE_TYPES = new Set(["logical_transition", "control_overlay", "device_bridge", "evidence_flow", "runtime_sidecar"]);
 const PORT_SIDES = ["top", "right", "bottom", "left"];
 const GRAPH_GEOMETRY = window.ATRRuntimeGraphGeometry;
@@ -188,8 +196,8 @@ let experimentalPackageDraft = null;
 let experimentalPackageBindings = [];
 let experimentalPackageExportToken = 0;
 let experimentalPackageImportToken = 0;
-let packageCompositionReturnMarkup = "";
 let packageCompositionNotice = null;
+let selectedBridgeDetailId = "";
 const outerConditionPresets = transitionConditionPreset?.innerHTML || '';
 
 function rememberExecutionContract(moduleId, result) {
@@ -2237,7 +2245,8 @@ function renderInfraList(snapshot = latestStateSnapshot) {
     <div class="runtime-infra-item" title="${escapeHtml(backend.label || backend.name || "n/a")}"><strong>Backend</strong></div>
     <div class="runtime-infra-item" title="ToolRegistry / agent context"><strong>MCP Tools</strong></div>
     <div class="runtime-infra-item" title="${escapeHtml(snapshot.logs?.run_dir || "n/a")}"><strong>Memory / Logs</strong></div>
-    <button type="button" class="runtime-infra-item runtime-infra-navigation" title="${escapeHtml(bridgeDetail)}" data-open-package-composition aria-label="Inspect Agent Package to Device Bridge membership"><strong>Device Bridges</strong><small>inspect package composition</small></button>
+    <button type="button" class="runtime-infra-item runtime-infra-navigation" title="${escapeHtml(bridgeDetail)}" data-open-device-bridges aria-label="Inspect Device Bridge structure"><strong>Device Bridges</strong><small>bridge structure and providers</small></button>
+    <button type="button" class="runtime-infra-item runtime-infra-navigation" data-open-package-composition aria-label="Open Package Manager"><strong>Package Manager</strong><small>composition and exchange</small></button>
     <div class="runtime-infra-models">${modelLines}</div>
     ${bridgeActionDescriptorEditor(bridges)}
   `;
@@ -3191,6 +3200,7 @@ function runtimeIdeStateSnapshot() {
   const tabKind = tab?.kind || currentGraphTabKind();
   const currentModuleId = tabKind === "module" ? (tab?.moduleId || activeModuleId || activeGraph?.metadata?.module_id || "") : "";
   const tabDirtyState = (item) => {
+    if (["bridges", "packages"].includes(item?.kind)) return false;
     const routeDiff = graphRouteDiff(item?.baselineGraph || null, item?.graph || {});
     const configDiff = graphConfigDiff(item?.baselineGraph || null, item?.graph || {});
     return Boolean(item?.dirty || routeDiff.changed || configDiff.changed);
@@ -3199,7 +3209,7 @@ function runtimeIdeStateSnapshot() {
   return {
     activeGraphTabId,
     activeGraphTabKind: tabKind,
-    activeGraphId: activeGraph?.id || "",
+    activeGraphId: ["bridges", "packages"].includes(tabKind) ? activeGraphTabId : activeGraph?.id || "",
     activeModuleId: currentModuleId,
     activeTabDirty,
     selectedNodeId,
@@ -3234,7 +3244,7 @@ function syncRuntimeIdeState() {
 
 function rememberActiveGraphDraft() {
   const tab = activeGraphTab();
-  if (!tab || !graphJson.value.trim()) return;
+  if (!tab || ["bridges", "packages"].includes(tab.kind) || !graphJson.value.trim()) return;
   try {
     tab.graph = parseGraphEditor();
   } catch (_error) {
@@ -3313,7 +3323,23 @@ function activateGraphTab(tabId) {
   const targetTabId = normalizeGraphTabId(tabId);
   const tab = graphTabs.find((item) => item.id === targetTabId);
   if (!tab) return;
+  const auxiliary = ["bridges", "packages"].includes(tab.kind);
+  if (auxiliary && activeGraphTab()?.kind === "module") collectExperimentalModuleConfigurations();
+  if (auxiliary && activeGraphTabId !== tab.id) {
+    tab.returnTabId = ["bridges", "packages"].includes(activeGraphTab()?.kind)
+      ? activeGraphTab().returnTabId : activeGraphTabId;
+  }
   activeGraphTabId = tab.id;
+  if (auxiliary) {
+    moduleOpenToken = null;
+    showRuntimeEquipmentFlowWorkspace(false);
+    showPackageCompositionWorkspace(true);
+    renderGraphTabs();
+    if (tab.kind === "bridges") renderDeviceBridges();
+    else renderPackageComposition();
+    return;
+  }
+  showPackageCompositionWorkspace(false);
   selectedNodeId = "";
   canvasAutoSelectNode = true;
   activeRuntimeEdge = null;
@@ -3341,6 +3367,7 @@ function closeGraphTab(tabId) {
   const targetTabId = normalizeGraphTabId(tabId);
   const tab = graphTabs.find((item) => item.id === targetTabId);
   if (!tab || tab.fixed) return;
+  if (["bridges", "packages"].includes(tab.kind) && activeGraphTabId === targetTabId) closePackageCompositionView();
   const index = graphTabs.findIndex((item) => item.id === targetTabId);
   graphTabs.splice(index, 1);
   if (activeGraphTabId === targetTabId) {
@@ -3691,6 +3718,7 @@ async function loadRuntimeEquipmentSkillFlow(profileId = "utm_windows_v1") {
 
 function focusModuleForNode(nodeId) {
   const node = findNodeById(nodeId);
+  if (node?.kind === "bridge") return openPackageCompositionView("bridges");
   if (!node?.module_id) return;
   const moduleId = String(node.module_id).split("/").pop();
   if (!moduleId) return;
@@ -3770,6 +3798,12 @@ function handleGraphCanvasBlankClick(event) {
 }
 
 function renderGraph(graph) {
+  if (["bridges", "packages"].includes(activeGraphTab()?.kind)) {
+    if (activeGraphTab().kind === "bridges") renderDeviceBridges();
+    else renderPackageComposition();
+    return;
+  }
+  showPackageCompositionWorkspace(false);
   activeGraph = normalizeNodePositions(graph);
   const tab = activeGraphTab();
   if (tab) tab.graph = activeGraph;
@@ -5254,6 +5288,8 @@ function focusGraphNodeInCanvas(nodeId) {
 }
 
 function selectNode(nodeId, options = {}) {
+  if (["bridges", "packages"].includes(activeGraphTab()?.kind)) closePackageCompositionView();
+  if (findNodeById(nodeId)?.kind === "bridge") return openPackageCompositionView("bridges");
   canvasAutoSelectNode = true;
   selectedNodeId = nodeId;
   renderGraph(parseGraphEditor());
@@ -5747,7 +5783,8 @@ async function loadPackageCatalog() {
     packageCatalogErrors = [String(error?.message || error)];
   }
   renderInfraList(latestStateSnapshot || { state: {} });
-  if (dryRunOutput?.dataset.packageComposition === "open") renderPackageComposition();
+  if (activeGraphTab()?.kind === "bridges") renderDeviceBridges();
+  if (activeGraphTab()?.kind === "packages") renderPackageComposition();
   return packageCatalogPayload;
 }
 
@@ -5762,9 +5799,78 @@ function packageBindingRows(composition) {
   });
 }
 
+function renderDeviceBridges() {
+  const topology = AX4LABExperimentalPackages.projectBridgeTopology(packageCatalogPayload, experimentalPackageRefs);
+  const selected = topology.nodes.find((node) => node.id === selectedBridgeDetailId)
+    || topology.nodes.find((node) => node.kind === "bridge");
+  selectedBridgeDetailId = selected?.id || "";
+  const renderKey = JSON.stringify([topology, selectedBridgeDetailId]);
+  if (packageCompositionOutput.dataset.bridgeStructureKey === renderKey) return;
+  packageCompositionOutput.dataset.bridgeStructureKey = renderKey;
+  const byId = new Map(topology.nodes.map((node) => [node.id, node]));
+  const edges = topology.edges.map((edge) => {
+    const from = byId.get(edge.from), to = byId.get(edge.to);
+    const x1 = from.x + 240, x2 = to.x, middle = (x1 + x2) / 2;
+    return `<path class="bridge-route ${edge.kind}" d="M ${x1} ${from.y} C ${middle} ${from.y}, ${middle} ${to.y}, ${x2} ${to.y}" />`;
+  }).join("");
+  const nodes = topology.nodes.map((node) => {
+    const kindLabel = { package: "AGENT PACKAGE", bridge: "DEVICE BRIDGE PACKAGE", provider: "INTERNAL PROVIDER" }[node.kind];
+    return `<g role="button" tabindex="0" aria-label="Inspect ${escapeHtml(node.label)} ${escapeHtml(kindLabel)}"
+      aria-pressed="${node.id === selectedBridgeDetailId}" data-bridge-detail="${escapeHtml(node.id)}"
+      class="bridge-structure-node ${node.kind} ${node.id === selectedBridgeDetailId ? "selected" : ""}">
+      <title>${escapeHtml(node.label)} · ${escapeHtml(kindLabel)}</title>
+      <rect x="${node.x}" y="${node.y - 34}" width="240" height="68" rx="10" />
+      <text class="bridge-node-kind" x="${node.x + 16}" y="${node.y - 12}">${kindLabel}</text>
+      <text class="bridge-node-label" x="${node.x + 16}" y="${node.y + 12}">${escapeHtml(node.label.length > 25 ? `${node.label.slice(0, 24)}…` : node.label)}</text>
+    </g>`;
+  }).join("");
+  const row = (label, value) => value ? `<div class="bridge-detail-row"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>` : "";
+  const data = selected?.data || {};
+  const parent = topology.nodes.find((node) => node.kind === "bridge" && node.bridgeId === selected?.bridgeId)?.data || {};
+  const workspace = parent.ui?.workspace;
+  const safeWorkspace = typeof workspace === "string" && /^\/[a-zA-Z0-9_/-]*$/.test(workspace) && !workspace.startsWith("//");
+  const detail = selected ? `
+    <div class="bridge-inspector-head"><small>${escapeHtml(selected.kind === "provider" ? "INTERNAL PROVIDER" : selected.kind === "bridge" ? "DEVICE BRIDGE PACKAGE" : "AGENT PACKAGE")}</small><h3>${escapeHtml(selected.label)}</h3></div>
+    <dl>${row("Version", data.version)}${row("Bridge package", selected.bridgeId)}
+    ${row("Agent Package owners", (parent.owners || []).map((owner) => owner.id).join(", "))}
+    ${row("Draft membership", selected.inDraft ? "Referenced by current package draft" : "Installed; not in current package draft")}
+    ${row("Package root", parent.root)}${row("Component", data.component)}
+    ${row("Shared manager", parent.manager)}${row("Requirements", data.requirements || parent.requirements)}
+    ${row("Tools", (parent.tools || []).join(" · "))}${row("Registration", parent.registration)}
+    ${row("API", parent.ui?.api)}${row("Frontend", parent.ui?.assets)}
+    ${row("Storage references", Object.values(parent.storage || {}).join(" · "))}</dl>
+    ${safeWorkspace ? `<a class="btn small" href="${escapeHtml(workspace)}" target="_blank" rel="noopener">Open existing printer workspace ↗</a>` : ""}
+    <p class="bridge-inspector-note">Structure only. Connection setup and device actions stay in the existing workspace.</p>`
+    : `<p>Select a bridge node to inspect its contract.</p>`;
+  packageCompositionOutput.innerHTML = `<section class="runtime-bridge-structure" aria-label="Device Bridge structure">
+    <div class="runtime-package-head"><button type="button" class="btn tiny" data-package-composition-back>Back</button>
+      <div><strong>Device Bridges</strong><small>Agent Package ownership · bridge packages · internal providers</small></div></div>
+    <div class="bridge-structure-layout"><div class="bridge-structure-canvas">
+      <div class="bridge-structure-legend"><span class="package">Agent Package</span><span class="bridge">Device Bridge Package</span><span class="provider">Internal Provider</span><small>Solid: uses · Dashed: contains</small></div>
+      ${!topology.ok ? `<p role="alert">${escapeHtml(topology.errors.join("; "))}</p>` : !nodes ? `<p>No Device Bridge packages are registered.</p>` : `
+      <svg viewBox="0 0 ${topology.width} ${topology.height}" role="group" aria-label="Bridge package relationships">${edges}${nodes}</svg>`}
+      <p class="bridge-inspector-note">Declared package structure, not live device health.</p>
+    </div><aside class="runtime-bridge-inspector" aria-label="Bridge Inspector">${detail}</aside></div>
+  </section>`;
+  packageCompositionOutput.querySelector("[data-package-composition-back]")?.addEventListener("click", closePackageCompositionView);
+  packageCompositionOutput.querySelectorAll("[data-bridge-detail]").forEach((element) => {
+    const select = () => {
+      selectedBridgeDetailId = element.dataset.bridgeDetail;
+      renderDeviceBridges();
+      packageCompositionOutput.querySelectorAll("[data-bridge-detail]").forEach((node) => {
+        if (node.dataset.bridgeDetail === selectedBridgeDetailId) node.focus();
+      });
+    };
+    element.addEventListener("click", select);
+    element.addEventListener("keydown", (event) => {
+      if (["Enter", " "].includes(event.key)) { event.preventDefault(); select(); }
+    });
+  });
+}
+
 function renderPackageComposition() {
-  if (!dryRunOutput) return;
-  dryRunOutput.dataset.packageComposition = "open";
+  if (!packageCompositionOutput) return;
+  delete packageCompositionOutput.dataset.bridgeStructureKey;
   const composition = packageCatalogPayload
     ? AX4LABExperimentalPackages.projectComposition(packageCatalogPayload, experimentalPackageRefs)
     : { ok: false, errors: packageCatalogErrors.length ? packageCatalogErrors : ["Package catalog has not loaded."], packages: [], bridges: [] };
@@ -5772,8 +5878,8 @@ function renderPackageComposition() {
     ? `<div class="runtime-package-notice ${escapeHtml(packageCompositionNotice.kind || "idle")}"><strong>${escapeHtml(packageCompositionNotice.title)}</strong><small>${escapeHtml(packageCompositionNotice.detail || "")}</small></div>`
     : "";
   if (!composition.ok) {
-    dryRunOutput.innerHTML = `<section class="runtime-package-composition" aria-label="Experimental Package composition">
-      <div class="runtime-package-head"><button type="button" class="btn tiny" data-package-composition-back>Back</button><div><strong>Agent Packages · Device Bridges</strong><small>installed composition and current unsaved draft membership</small></div></div>
+    packageCompositionOutput.innerHTML = `<section class="runtime-package-composition" aria-label="Experimental Package composition">
+      <div class="runtime-package-head"><button type="button" class="btn tiny" data-package-composition-back>Back</button><div><strong>Package Manager</strong><small>installed composition and current unsaved draft membership</small></div></div>
       ${notice}<div class="runtime-package-empty error"><strong>Package catalog unavailable</strong><small>${escapeHtml(composition.errors.join("; "))}</small></div>
     </section>`;
   } else {
@@ -5790,16 +5896,16 @@ function renderPackageComposition() {
         <div class="runtime-package-owner-list">${bridge.owners.map((owner) => `<span class="${owner.inDraft ? "draft" : "installed"}">${escapeHtml(owner.id)} · ${owner.inDraft ? "draft member" : "installed only"}</span>`).join("") || "<span>No Agent Package owners declared.</span>"}</div>
       </div>`).join("") : `<div class="runtime-package-empty"><strong>No Device Bridge modules installed</strong><small>The catalog returned no bridge modules.</small></div>`;
     const bindingRows = bindings.length ? bindings.map((binding) => `<div class="runtime-package-binding"><strong>${escapeHtml(binding.id)}</strong><small>${escapeHtml(binding.kind)} · ${escapeHtml(binding.owner_id)} · requires local configuration</small></div>`).join("") : `<div class="runtime-package-empty"><strong>No missing bindings</strong><small>The current package draft declares no local bindings.</small></div>`;
-    dryRunOutput.innerHTML = `<section class="runtime-package-composition" aria-label="Experimental Package composition">
-      <div class="runtime-package-head"><button type="button" class="btn tiny" data-package-composition-back>Back</button><div><strong>Agent Packages · Device Bridges</strong><small>composition only; installed code and active graphs are unchanged</small></div></div>
+    packageCompositionOutput.innerHTML = `<section class="runtime-package-composition" aria-label="Experimental Package composition">
+      <div class="runtime-package-head"><button type="button" class="btn tiny" data-package-composition-back>Back</button><div><strong>Package Manager</strong><small>composition only; installed code and active graphs are unchanged</small></div></div>
       ${notice}
       <div class="runtime-package-section"><h3>Agent Packages</h3>${packageRows || `<div class="runtime-package-empty"><strong>No Agent Packages installed</strong><small>The catalog returned no package manifests.</small></div>`}</div>
       <div class="runtime-package-section"><h3>Device Bridges</h3>${bridgeRows}</div>
       <div class="runtime-package-section"><h3>Missing Local Bindings</h3>${bindingRows}</div>
     </section>`;
   }
-  dryRunOutput.querySelector("[data-package-composition-back]")?.addEventListener("click", closePackageCompositionView);
-  dryRunOutput.querySelectorAll("[data-package-draft-toggle]").forEach((input) => input.addEventListener("change", () => {
+  packageCompositionOutput.querySelector("[data-package-composition-back]")?.addEventListener("click", closePackageCompositionView);
+  packageCompositionOutput.querySelectorAll("[data-package-draft-toggle]").forEach((input) => input.addEventListener("change", () => {
     const [id, version] = String(input.value || "").split("@");
     const key = `${id}@${version}`;
     const retained = (experimentalPackageRefs || []).filter((ref) => `${ref.id}@${ref.version}` !== key);
@@ -5811,20 +5917,31 @@ function renderPackageComposition() {
   }));
 }
 
-function openPackageCompositionView() {
-  if (!dryRunOutput) return;
-  if (dryRunOutput.dataset.packageComposition !== "open") packageCompositionReturnMarkup = dryRunOutput.innerHTML;
+function openPackageCompositionView(kind = "packages") {
+  if (!packageCompositionOutput) return;
   packageCompositionNotice = packageCompositionNotice || { kind: "idle", title: "Composition view", detail: "Installed dependencies are shown separately from the current draft." };
-  renderPackageComposition();
-  dryRunOutput.scrollIntoView?.({ behavior: "smooth", block: "center" });
+  const bridgeView = kind === "bridges";
+  const id = bridgeView ? BRIDGE_GRAPH_TAB_ID : PACKAGE_MANAGER_TAB_ID;
+  upsertGraphTab({ id, kind: bridgeView ? "bridges" : "packages",
+    title: bridgeView ? "Device Bridges" : "Package Manager",
+    subtitle: bridgeView ? "Structure and providers" : "Composition and exchange", fixed: false });
+  activateGraphTab(id);
+  graphTabsOutput?.scrollIntoView?.({ behavior: "smooth", block: "start" });
 }
 
 function closePackageCompositionView() {
-  if (!dryRunOutput) return;
-  delete dryRunOutput.dataset.packageComposition;
-  dryRunOutput.innerHTML = packageCompositionReturnMarkup || "<div>No dry-run output yet.</div>";
-  packageCompositionReturnMarkup = "";
+  const tab = activeGraphTab();
+  const returnTabId = graphTabs.some((item) => item.id === tab?.returnTabId && !["bridges", "packages"].includes(item.kind))
+    ? tab.returnTabId : MAIN_GRAPH_TAB_ID;
   packageCompositionNotice = null;
+  activateGraphTab(returnTabId);
+}
+
+function showPackageCompositionWorkspace(show) {
+  packageCompositionOutput.hidden = !show;
+  document.body.classList.toggle("runtime-package-tab-active", show);
+  document.body.classList.toggle("runtime-bridge-tab-active", show && activeGraphTab()?.kind === "bridges");
+  packageCompositionOutput.setAttribute("aria-label", activeGraphTab()?.kind === "bridges" ? "Device Bridges" : "Package Manager");
 }
 
 function downloadExperimentalPackage(pkg) {
@@ -8285,6 +8402,11 @@ function openModuleManagementTool(event) {
 
 graphCanvas?.addEventListener("click", handleGraphCanvasBlankClick);
 document.addEventListener("click", (event) => {
+  if (event.target?.closest?.("[data-open-device-bridges]")) {
+    event.preventDefault();
+    openPackageCompositionView("bridges");
+    return;
+  }
   const packageComposition = event.target?.closest?.("[data-open-package-composition]");
   if (packageComposition) {
     event.preventDefault();

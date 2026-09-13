@@ -462,16 +462,32 @@ retained module drafts. This is separate from graph-only YAML exchange.
 |---|---|---|
 | Export Package | Validate and download detached JSON with declared dependencies | No save, install or activation |
 | Import Package | Validate JSON, confirm replacement of affected dirty drafts, and load graph/module drafts | Existing explicit save controls remain required |
-| Device Bridges | Open installed Agent Package → Device Bridge composition and current draft membership | No device probes or transport commands |
-| Back | Restore the prior output panel | No membership or execution change |
+| Package Manager | Open draft membership and package composition in a separate internal tab | No install or activation |
+| Device Bridges | Open a node-based Agent Package → Device Bridge Package → internal provider structure and Inspector | No device probes or transport commands |
+| Back | Return to the previous Main System or agent tab | No membership or execution change |
 
-The composition view distinguishes installed dependencies from current draft
+Click **Device Bridge Plane** in the graph or Explorer, or **Infra → Device
+Bridges**, to open the same structure tab. Graph double-click also opens it, even
+when the bridge node has no agent `module_id`. Back retains the composition tab;
+its close button removes only that tab. **Infra → Package Manager** opens a
+separate tab for membership and package exchange. Main and agent drafts, including
+unsaved module edits, remain intact. Neither view replaces **Dry-run Trace**
+or become an executable graph, and live updates keep the selected tab open.
+
+The Package Manager distinguishes installed dependencies from current draft
 membership, shows shared bridges once with their owners, and identifies local
 bindings that need configuration. A bridge-free package displays **No Device
 Bridges**. Membership selection does not rewrite the orchestration route or
 remove installed code. Failed or stale imports preserve newer local edits.
 Connection secrets and runtime artifacts are not package contents; see the
 [package contracts and API](../../packages/README.md).
+
+The bridge structure uses solid **uses** edges from Agent Packages and dashed
+**contains** edges to internal providers. Printer Fleet is one bridge package;
+Bambu and Prusa appear beneath it, not as independently registered bridges.
+Select a node to inspect its owner, implementation, requirements, API and storage
+references. The Inspector links to the existing printer workspace for setup;
+membership controls and package exchange are not part of this structure view.
 
 ### Explicit graph and module activation
 

@@ -1,1 +1,2 @@
-httpx>=0.27.0
+# Compatibility entry point; install the fleet package for both providers.
+-r ../printer_fleet/providers/prusa-requirements.txt

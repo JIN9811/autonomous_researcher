@@ -14,8 +14,8 @@ scope:
   - autoejection
 summary: Current Bambu Lab X2D provider contract for slicing, probing, transfer, telemetry, video, guarded start, and artifact-based autoejection.
 source_of_truth:
-  - device_bridges/bambu/bridge.py
-  - device_bridges/bambu/autoejection.py
+  - device_bridges/printer_fleet/bridge.py
+  - device_bridges/printer_fleet/providers/bambu_autoejection.py
   - configs/devices.yaml
   - mcp_tools/printer_tools.py
   - app/main.py
@@ -40,7 +40,7 @@ supersedes: []
 | Purpose | Slicing, artifact transfer, telemetry and guarded autoejection |
 | Connects | Specimen / 3DP workspace ↔ Bambu provider |
 | Effect | Upload, heating and motion are possible through gated commands |
-| Implementation | [Bambu implementation](../../device_bridges/bambu/bridge.py) · [Requirements](../../device_bridges/bambu/requirements.txt) |
+| Implementation | [Bambu implementation](../../device_bridges/printer_fleet/bridge.py) · [Requirements](../../device_bridges/printer_fleet/providers/bambu-requirements.txt) |
 | Verification | [Recorded scope and evidence](#current-verification) · 2026-09-06 |
 
 ## Summary
@@ -59,8 +59,8 @@ device firmware internals and claims for untested printer/firmware variants.
 
 ## Source of Truth
 
-`device_bridges/bambu/bridge.py` owns the provider and clients;
-`device_bridges/bambu/autoejection.py` owns pure transformation and validation;
+`device_bridges/printer_fleet/bridge.py` owns the provider and clients;
+`device_bridges/printer_fleet/providers/bambu_autoejection.py` owns pure transformation and validation;
 `devices.printer.bambu` and `devices.printer.autoejection` own defaults.
 
 ## Actual Role

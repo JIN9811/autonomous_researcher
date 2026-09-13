@@ -127,6 +127,37 @@
     return { ok: true, errors: [], packages, bridges };
   }
 
+  // Read-only topology: providers belong to one bridge, never separate packages.
+  function projectBridgeTopology(catalogPayload, draftRefs) {
+    const composition = projectComposition(catalogPayload, draftRefs);
+    const nodes = [], edges = [];
+    let top = 64;
+    for (const bridge of composition.bridges) {
+      const providers = Array.isArray(bridge.providers) ? bridge.providers : [];
+      const height = Math.max(180, Math.max(providers.length, bridge.owners.length) * 96);
+      const id = `bridge:${refKey(bridge)}`;
+      const center = top + height / 2;
+      nodes.push({ id, kind: "bridge", label: bridge.label || bridge.id, x: 360, y: center,
+        inDraft: bridge.inDraft, bridgeId: bridge.id, data: bridge });
+      bridge.owners.forEach((owner, index) => {
+        const ownerId = `${id}:owner:${refKey(owner)}`;
+        nodes.push({ id: ownerId, kind: "package", label: owner.id, x: 40,
+          y: center + (index - (bridge.owners.length - 1) / 2) * 96,
+          inDraft: owner.inDraft, bridgeId: bridge.id, data: owner });
+        edges.push({ from: ownerId, to: id, kind: "uses" });
+      });
+      providers.forEach((provider, index) => {
+        const providerId = `${id}:provider:${provider.id}`;
+        nodes.push({ id: providerId, kind: "provider", label: provider.label || provider.id, x: 680,
+          y: center + (index - (providers.length - 1) / 2) * 96,
+          inDraft: bridge.inDraft, bridgeId: bridge.id, data: provider });
+        edges.push({ from: id, to: providerId, kind: "contains" });
+      });
+      top += height + 48;
+    }
+    return { ok: composition.ok, errors: composition.errors, nodes, edges, width: 960, height: Math.max(340, top) };
+  }
+
   function packageId(value) {
     const clean = String(value || "runtime")
       .trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
@@ -207,6 +238,7 @@
     packageRefsForGraph,
     buildExportState,
     projectComposition,
+    projectBridgeTopology,
     buildExportPayload,
     parsePackageJson,
     acceptImportResult,

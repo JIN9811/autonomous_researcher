@@ -354,9 +354,18 @@ High / Middle / Low를 중심에, Guardian / Safety와 Knowledge / Evidence를
 
 - 관계의 원본은 설치된 Agent Package/Bridge 선언과 현재 Experimental Package draft다. 프론트엔드 전용 연결 목록을 따로 만들지 않는다.
 - 패키지명과 브릿지 ID·버전, 공유 관계를 표시한다. provider 구성 요소가 선언되어 있으면 해당 브릿지 아래에 표시하되, 독립 모듈로 등록되지 않은 provider를 독립 모듈처럼 표현하지 않는다.
-- 설치된 패키지의 의존성과 현재 draft에 포함된 패키지를 구분한다. 패키지 추가·제거 또는 재조회 시 표시도 갱신하며, 연결 브릿지가 없는 패키지는 빈 상태를 명시한다.
+- 설치된 패키지의 의존성과 현재 draft에 포함된 패키지를 구분한다. 패키지 추가·제거 또는 재조회 시 표시도 갱신한다. 브릿지가 없는 패키지는 Package Manager에 빈 상태를 표시하며, 브릿지 구조도에 가짜 연결을 만들지 않는다.
 - 이 화면은 구성 관계 조회이며 실제 연결 상태 확인·장비 탐색·명령 실행을 하지 않는다. 기존 그래프 실행 편집과 브릿지 설정 경로는 유지한다.
 - 클릭·내부 진입·뒤로 이동, 공유 브릿지, 추가·제거, 빈 상태와 좁은 화면 가독성을 비구동 테스트로 확인한다.
+
+2026-09-13 화면 및 패키지 경계 확정:
+
+- **Package Manager**: 별도 IDE 탭에서 패키지 포함 여부·의존성·Experimental Package Import/Export를 제공한다. 기존 구성 관리 화면은 이 이름으로 보존한다.
+- **Device Bridges**: 그래프의 Device Bridge Plane 및 Infra에서 같은 내부 구조 탭을 연다. Agent Package → Device Bridge Package → 내부 provider를 노드와 관계선으로 표시한다. 선택한 노드의 구현·requirements·API·저장 참조는 Inspector에 표시한다.
+- 관계선은 사용(실선)과 내부 포함(파선)을 구분한다. 현재 연결 상태나 실행 성공을 의미하지 않는다. 기존 브릿지 workspace로 이동하는 링크를 제공하며 연결·조작 UI를 중복 구현하지 않는다.
+- **Printer Fleet은 단일 Device Bridge Package**다. Bambu·Prusa는 내부 provider이며 독립 패키지나 Fleet과 동급인 브릿지로 표시하지 않는다. 구현·requirements는 `device_bridges/printer_fleet/`에 모으고 옛 경로는 같은 런타임 객체를 가리키는 호환 alias로만 남긴다.
+- 공통 매니저의 canonical 경로는 `device_bridges.printer_fleet.bridge`다. Bambu transport 구현은 전역 의존성과 기존 monkeypatch 동작 보존을 위해 공통 런타임에 유지하고 내부 provider 진입점이 이를 참조한다. 물리 동작 재작성이나 제조사별 런타임 완전 분리는 이번 변경에 포함하지 않는다.
+- 두 조회 탭은 실행 그래프가 아니다. Main/agent의 미저장 편집·Dry-run Trace를 보존하며 그래프 활성화와 장비 호출을 발생시키지 않는다.
 
 #### 다음 에이전트 모듈의 필수 인수 항목
 
@@ -520,7 +529,8 @@ freshness 규칙을 유지한다. 공통 adapter를 추가해 기존 실행 검�
 
 첫 묶음은 `specimen` Agent Package와 `printer_fleet` Bridge Module로 확정했다.
 `design`은 브릿지 없는 Agent Package이며, Fleet의 기존 Bambu/Prusa 구현은
-`device_bridges/bambu/`와 `device_bridges/prusa/`에 두고 기존 import를 유지한다.
+하나의 `device_bridges/printer_fleet/` 패키지에 둔다. 기존 Bambu/Prusa 경로는
+호환 alias로 유지한다.
 다음 owner의 이전 순서는 별도 확정한다. 기존 실행 경로 확인 없이 provider를
 새로 분리하거나 장비 종류를 추가하지 않는다.
 
@@ -543,6 +553,13 @@ freshness 규칙을 유지한다. 공통 adapter를 추가해 기존 실행 검�
 - 초기 버전은 동일 프로세스 다중 코드 버전·무중단 코드 교체·원격 package marketplace를 지원 대상으로 삼지 않는다.
 
 ## Verification
+
+Printer Fleet 단일화 및 두 IDE 탭 분리 후, 기존 프린터 계열 164개 검사와
+Specimen 모드별 경로·모듈/API 19개 검사를 통과했다. 별도 등록 API 비구동 사이클은
+10개 owner의 모델 호출 34회 전부 성공, 물리 호출 0회로 다음 Design까지 완료했다
+(사이클 393.809초). 장비·측정 데이터는 가상이며 신규 물리 실증을 뜻하지 않는다.
+브라우저에서는 두 탭의 분리와 내부 provider 선택을 확인했다.
+상세 조건·제한은 [실행 검증 기록](../plans/2026-09-13-specimen-agent-packages.md#printer-fleet-consolidation-and-ide-separation--2026-09-13)에 남긴다.
 
 2026-09-13에 기준 커밋의 registry, owner catalog, graph/module store, tool 경계,
 API·UI 연결 및 보관 문서를 읽고 목표 계약과 대조했다.

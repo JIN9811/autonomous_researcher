@@ -15,8 +15,8 @@ scope:
 summary: Current contract for selecting, configuring, and routing ATR printer providers without silent fallback.
 source_of_truth:
   - device_bridges/printer_fleet/module.py
-  - device_bridges/bambu/bridge.py
-  - device_bridges/prusa/bridge.py
+  - device_bridges/printer_fleet/bridge.py
+  - device_bridges/printer_fleet/providers/prusa.py
   - mcp_tools/printer_tools.py
   - configs/devices.yaml
   - app/main.py
@@ -60,8 +60,8 @@ memory. A shared bridge remains one installed module across package references.
 | Owner | Folder and requirements | Runtime boundary |
 |---|---|---|
 | Printer Fleet | [Fleet](../../device_bridges/printer_fleet/README.md) · [Requirements](../../device_bridges/printer_fleet/requirements.txt) | Existing manager and tool registration |
-| Bambu provider | [Bambu](../../device_bridges/bambu/README.md) · [Requirements](../../device_bridges/bambu/requirements.txt) | Provider clients and autoejection transformer |
-| Prusa provider | [Prusa](../../device_bridges/prusa/README.md) · [Requirements](../../device_bridges/prusa/requirements.txt) | PrusaLink and slicer workflow |
+| Bambu provider | [Bambu](../../device_bridges/printer_fleet/README.md) · [Requirements](../../device_bridges/printer_fleet/providers/bambu-requirements.txt) | Provider clients and autoejection transformer |
+| Prusa provider | [Prusa](../../device_bridges/printer_fleet/README.md) · [Requirements](../../device_bridges/printer_fleet/providers/prusa-requirements.txt) | PrusaLink and slicer workflow |
 
 The original flat imports remain identity-preserving compatibility adapters.
 Provider commands, selection, configuration and artifact locations are unchanged.
@@ -211,6 +211,13 @@ selection, capability, readiness, and provider-specific controls. UI state is
 descriptive; it does not arm a live action outside the API/provider gates.
 
 ## Current Verification
+
+The 2026-09-13 consolidation passed 164 fleet/provider/tool tests and 19
+Specimen linkage, mode-prefix and module/API tests. The registered-model
+virtual-device cycle completed through the next Design handoff: 34 successful
+API model calls across 10 owners, zero physical calls, 393.809 s cycle time.
+Slicer/device boundaries and measurement data were simulated; this is not new
+hardware validation. See the [commands and scope record](../superpowers/plans/2026-09-13-specimen-agent-packages.md#printer-fleet-consolidation-and-ide-separation--2026-09-13).
 
 Inspection covered the manager/config classes, `register_printer_tools`,
 printer route handlers, configured profiles, and focused Bambu/Prusa tests at

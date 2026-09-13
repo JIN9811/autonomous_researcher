@@ -78,6 +78,14 @@ over 1,048,576 bytes use HTTP 413. Parsing is streamed and bounded; nesting is
 limited to 40. Messages omit private values. Unknown top-level/schema fields,
 executable fields, connection fields and non-exact versions fail closed.
 
+In Runtime IDE, **Device Bridge Plane** (graph or Explorer) and **Infra → Device
+Bridges** open the same internal structure tab. It shows Agent Package owners,
+bridge package nodes and their internal providers, with an Inspector. **Infra →
+Package Manager** separately hosts membership, dependencies and package exchange.
+Printer Fleet is one bridge package containing Bambu and Prusa providers.
+Back returns to the prior
+graph or agent tab without replacing its draft or Dry-run Trace output.
+
 Removing composition references only changes a detached package. Installed
 agents, bridges, private configuration, active graphs and artifact storage remain
 owned by their existing components; this API provides no removal or install action.
