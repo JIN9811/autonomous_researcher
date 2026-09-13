@@ -231,7 +231,7 @@ DEVICE_BRIDGE_SOURCE_CONTRACTS = {
         ("mcp_tools/printer_tools.py", 'selected_provider(normalized) == "prusa_mk4s"'),
     ),
     "lerobot": (
-        ("mcp_tools/lerobot_tools.py", 'registry.register("lerobot.rollout.start"'),
+        ("device_bridges/lerobot/tools.py", 'registry.register("lerobot.rollout.start"'),
         ("app/main.py", '@app.post("/api/lerobot/rollout/start")'),
     ),
     "windows_pyautogui": (
@@ -239,7 +239,7 @@ DEVICE_BRIDGE_SOURCE_CONTRACTS = {
         ("app/main.py", '@app.post("/api/equipment/windows/run-program")'),
     ),
     "utm_vision": (
-        ("device_bridges/utm_runtime_bridge.py", "class UTMRuntimeProcessManager:"),
+        ("device_bridges/camera_vision/utm_runtime_bridge.py", "class UTMRuntimeProcessManager:"),
         ("app/main.py", '@app.get("/api/equipment/utm-runtime/status")'),
     ),
     "cae_computation": (

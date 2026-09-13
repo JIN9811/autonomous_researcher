@@ -7,13 +7,18 @@ audience: [researcher, operator, developer, maintainer]
 scope: [agents, manipulation, robotics, lerobot]
 summary: Manipulation-owned bounded LLM skill selection and post-Vision result judgment over existing robot executors.
 source_of_truth:
-  - agents/manipulation_agent.py
-  - agents/manipulation_decision.py
+  - agents/manipulation/agent.py
+  - agents/manipulation/decision.py
+  - agents/manipulation/execution.py
+  - agents/manipulation/structure.py
+  - agents/manipulation/presentation.py
+  - agents/manipulation/frontend/live_report.js
   - graphs/modules/manipulation/module.yaml
-  - device_bridges/lerobot_bridge.py
+  - device_bridges/lerobot/bridge.py
+  - packages/agents/manipulation/package.yaml
   - app/main.py
   - utils/utm_clear_cycle.py
-last_verified: 2026-09-09
+last_verified: 2026-09-13
 verified_against: working-tree
 related_docs:
   - docs/agents/README.md
@@ -72,6 +77,43 @@ surfaces; they are not automatically executed by the graph-stage agent.
 Manipulation agent/module, LeRobot bridge, route handlers, robotics Guides, and
 primary graph/sidecar handoffs.
 
+## Installed Package and Executable Structure
+
+The installed [Manipulation Agent Package](../../packages/agents/manipulation/README.md)
+is a composition contract: `manipulation@1.0.0` binds the owner module and
+`lerobot@1.0.0`. Agent code, bounded LLM decisions, execution definitions, report
+projection and frontend composition live under `agents/manipulation/`.
+`agents.manipulation_agent` and `agents.manipulation_decision` remain exact module
+aliases, preserving import and monkeypatch identity. LeRobot's canonical bridge
+and tool registration live under `device_bridges/lerobot/`; Vision shares that
+same installed bridge and runtime identity.
+
+![Manipulation source-bound control areas](assets/figures/manipulation_control_areas.svg)
+
+The light document figure and Runtime IDE consume the same execution graph and
+installed source catalog. Two Middle operations preserve the existing composite
+task and result delivery. The task's CODE details expose agent-local LLM reasoning
+as High, API/internal software and composite workflows as Middle, actual
+device/bridge execution as Low, and Guardian/Safety and Knowledge/Evidence as
+cross-cutting responsibilities. These relationships are not executable commands;
+the graph does not split the existing transfer, stop, or clearance procedure.
+
+`/api/agents/manipulation/report` uses the owner projector with existing metadata
+precedence. `/module-assets/manipulation/live_report.js` mounts through
+`AX4LABManipulationUI.createFrontend`. The existing eight cards retain their names,
+selectors and shared telemetry updates: Live Robot Pose, Policy Tracking, Runtime
+State Strip, Runtime Execution, Runtime Interlocks, Completion Verification, Run
+Result and Run Metrics. Shared polling, joint/gripper samples, stream buffers,
+3D viewer lifecycle and event-status decisions stay in the host. Missing or
+deactivated owner modules contribute no current Manipulation card.
+
+Settings and archive locations are unchanged: the existing Manipulation profile,
+run snapshots and `runs/<run_id>/runtime/loops/loop-N/manipulation_agent/attempt-N/`
+remain authoritative. The package introduces no additional settings store or
+robot workspace. [Implementation and validation](../superpowers/plans/2026-09-13-manipulation-agent-package.md)
+records virtual-device software evidence; prior physical evidence below retains
+its original provenance and scope.
+
 ## Actual Role
 
 | Does | Does not |
@@ -86,9 +128,9 @@ primary graph/sidecar handoffs.
 
 | Level | Manipulation responsibility | Authority boundary |
 |---|---|---|
-| High-Level Control | LLM judges configured-skill suitability and, after Vision and termination, task-result consistency | Orchestrator owns the mission; Vision owns visual facts; model cannot grant physical safety |
-| Middle-Level Control | Bind saved task/profile, expose bounded tools, validate request, supervise motion-state evidence and completion, and package handoff | Model selects a listed tool with an immutable proposal reference; code supplies all driver arguments |
-| Low-Level Control | Calls `lerobot.rollout.start/stop/status` and `robot.pick_place` where selected | LeRobot process/PID lifecycle, serial ports, camera leases, robot commands, action timing, and optional Isaac sidecars remain bridge authority |
+| High-Level Control | LLM judges configured-skill suitability and post-Vision task-result consistency | Orchestrator owns the mission; Vision owns visual facts; model cannot grant physical safety |
+| Middle-Level Control | Bind saved profiles, validate immutable tool proposals, dispatch rollout/replay/status/stop APIs and supervise completion | Model selects a listed tool with an immutable proposal reference; code supplies all driver arguments |
+| Low-Level Control | LeRobot owns policy/replay execution, robot commands, serial ports, camera leases and action timing | LeRobot process/PID lifecycle, serial ports, camera leases, robot commands, action timing, and optional Isaac sidecars remain bridge authority |
 | Guardian / Safety | Existing approvals, identity, freshness, camera return, stop, interlock and deadline gates; post-inference scope checks | No model override; uncertain start effects never trigger an automatic repeat |
 | Knowledge / Evidence | Run/loop-scoped model request, decision, execution and Vision evidence | Task success requires stopped execution and verified evidence, not a model confidence score |
 

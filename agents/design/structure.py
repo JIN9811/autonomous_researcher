@@ -16,9 +16,9 @@ def design_implementation_structure():
         "design.prepare": detail([
             ("contract", "Objective and locked inputs", "middle", A, "DesignAgent._objective_contract"),
             ("history", "BO, prior results and failure memory", "knowledge", A, "DesignAgent._prepare_design_payload"),
-            ("generate", "Generate candidate pool", "low", A, "DesignAgent._candidate_pool"),
+            ("generate", "Generate candidate pool", "middle", A, "DesignAgent._candidate_pool"),
             ("constraints", "Constraint gate and rejected ledger", "guardian", A, "DesignAgent._filter_candidates"),
-            ("repair", "Conditional candidate repair", "low", A, "DesignAgent._safe_seed_candidate"),
+            ("repair", "Conditional candidate repair", "middle", A, "DesignAgent._safe_seed_candidate"),
         ], [
             ("$operation", "contract", "call", "normalize"),
             ("$operation", "history", "evidence", "collect context"),
@@ -28,22 +28,24 @@ def design_implementation_structure():
             ("history", "$operation", "evidence", "prepared evidence"),
         ]),
         "design.decide": detail([
+            ("reason", "LLM suitability and tool decision", "high", D, "decide_design"),
             ("references", "Scoped Wiki / reference context", "knowledge", K, "build_reference_context"),
             ("choice_gate", "Tool, arguments and evidence gate", "guardian", D, "decide_design"),
-            ("inspect", "inspect_candidate / inspect_history", "low", D, "decide_design"),
+            ("inspect", "inspect_candidate / inspect_history", "middle", D, "decide_design"),
             ("accept", "Checked candidate acceptance", "guardian", D, "candidate_evaluation"),
             ("trace", "Decision and tool evidence trace", "knowledge", D, "decide_design"),
         ], [
-            ("references", "$operation", "evidence", "reference only"),
-            ("$operation", "choice_gate", "validation", "LLM choice"),
+            ("references", "reason", "evidence", "reference only"),
+            ("$operation", "reason", "call", "existing bounded model loop"),
+            ("reason", "choice_gate", "validation", "LLM choice"),
             ("choice_gate", "inspect", "call", "inspect"),
-            ("inspect", "$operation", "evidence", "observation / next decision"),
+            ("inspect", "reason", "evidence", "observation / next decision"),
             ("choice_gate", "accept", "validation", "accept candidate"),
             ("$operation", "trace", "evidence", "record"),
         ]),
         "design.finalize": detail([
             ("report", "Evaluation and design report", "knowledge", A, "DesignAgent._design_report"),
-            ("handoff", "Checked Specimen handoff packet", "high", A, "DesignAgent._design_handoff_packet"),
+            ("handoff", "Checked Specimen handoff packet", "middle", A, "DesignAgent._design_handoff_packet"),
         ], [
             ("$operation", "report", "evidence", "build report"),
             ("report", "handoff", "call", "handoff evidence"),

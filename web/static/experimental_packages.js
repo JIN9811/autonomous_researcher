@@ -177,8 +177,8 @@
     return bridgeStructureGraph("device-bridge-plane", [...owners.values(), ...nodes], edges, composition.errors);
   }
 
-  function projectBridgeInternal(catalogPayload, bridgeId, runtimeBridges = []) {
-    const composition = bridgeStructureCatalog(catalogPayload, [], runtimeBridges);
+  function projectBridgeInternal(catalogPayload, bridgeId, runtimeBridges = [], draftRefs = []) {
+    const composition = bridgeStructureCatalog(catalogPayload, draftRefs, runtimeBridges);
     const bridge = composition.bridges.find(bridge => bridge.id === bridgeId);
     if (!bridge) return bridgeStructureGraph(`bridge:${bridgeId}`, [], [], ["Bridge contract is unavailable."]);
     const managerId = `bridge:${bridgeId}:manager`;

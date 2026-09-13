@@ -1,0 +1,24 @@
+ui:
+  short: VIS
+  icon: /static/live_gui_icons/vision_agent.svg
+  report_title: Vision Agent
+  chat:
+    mode: open_on_demand
+  renderer:
+    dashboard: module
+    report: module
+    fallback: descriptor
+  cards:
+  - id: vision_observation_descriptor
+    type: metric_group
+    title: Visual Evidence
+    span: 12
+    tone: vision
+    selectors:
+      observation: latest_observations
+  report_sections:
+  - id: vision_evidence
+    title: Visual Evidence
+    selectors:
+      vision_report: metadata.vision_report
+      handoff: metadata.vision_signal

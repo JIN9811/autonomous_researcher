@@ -1,0 +1,9 @@
+schema: ax4lab.agent_package.v1
+id: vision
+version: 1.0.0
+agent_module: {id: vision, version: 1.0.0}
+handler: agent.vision_agent
+module_reference: graphs/modules/vision/module.yaml
+bridge_modules:
+  - {id: camera_vision, version: 1.0.0}
+  - {id: lerobot, version: 1.0.0}

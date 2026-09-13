@@ -69,9 +69,9 @@ values. Running FEM and promoting a material model are separate operations.
 
 | Area | Responsibility | Detail |
 |---|---|---|
-| High-Level Control | Assess measurement admissibility, simulation action, and candidate promotion within the assigned task | [Decision and evaluation](#decision-and-evaluation) |
-| Middle-Level Control | Order measurement parsing/validation and handoff; independently schedule staged FEM and optional model studies | [Internal workflow](#internal-workflow) |
-| Low-Level Control | Existing parser, numeric tools, registered CAE prepare/solve, and field postprocessing | [Tools and connections](#tools-apis-and-connections) |
+| High-Level Control | LLM assesses measurement admissibility, simulation choices and model review within the assigned task | [Decision and evaluation](#decision-and-evaluation) |
+| Middle-Level Control | Parse and process curves, calculate objectives, run registered numerical/CAE tools and independently schedule FEM studies | [Internal workflow](#internal-workflow) |
+| Low-Level Control | No direct device execution; measurement hardware remains with Equipment | [Tools and connections](#tools-apis-and-connections) |
 | Guardian / Safety | Identity, units, curve coverage, numerical and budget gates; immutable loop model | [Safety and recovery](#safety-and-recovery) |
 | Knowledge / Evidence | Raw hashes, decisions, acquisition lineage, jobs, candidate versions and validation records | [Artifacts and verification](#artifacts-and-verification) |
 

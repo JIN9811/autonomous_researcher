@@ -126,18 +126,19 @@ Knowledge/Evidence는 이 계층들을 가로지르는 공통 영역이다. 다�
 
 | 영역 | 주된 책임 | LLM의 역할 | 기존 코드/실행기의 역할 | 경계 |
 |---|---|---|---|---|
-| High-Level Control | 목표·위임·인계·사이클 진행 | 허용된 작업 위임, 결과 검토, 추가 작업/진행/상위 검토 판단 | 실행 가능한 경로, 상태 전이, 식별자와 인계 계약 적용 | 전문 에이전트를 건너뛰어 브릿지 직접 제어 금지 |
-| Middle-Level Control | 담당 작업의 수행 전략 | 상태를 보고 툴·인자를 선택하고 반환 결과로 다음 행동/완료 판단 | 입력 검증, 계산, 계약 검사, 실행 예산 강제 | 다른 에이전트의 설정·산출물 소유권 침범 금지 |
-| Low-Level Control | 단일 요청 실행·관측 | LLM을 의무 배치하지 않음 | 기존 함수·툴·서비스·Skill·브릿지·VLA/solver 실행 | 연구 목표나 다음 에이전트를 임의 변경하지 않음 |
+| High-Level Control | 각 에이전트의 LLM 추론·의사결정 | 근거를 보고 허용된 툴 선택·결과 검토·상위 검토 판단 | 모델 출력 계약 검증은 Middle/Guardian에서 적용 | 전역 오케스트레이션 권한은 Orchestrator에 유지; 전문 에이전트의 국소 High와 구분 |
+| Middle-Level Control | API·내부 프로세스·소프트웨어 실행 | High의 판단 결과를 소비하며 추가 판단을 임의 생성하지 않음 | 입력 검증, 계산, 검색, solver, 툴 디스패치, 계약 검사, 기존 절차와 인계 | 다른 에이전트의 설정·산출물 소유권 침범 금지 |
+| Low-Level Control | 실제 장비 실행·관측 경계 | LLM을 의무 배치하지 않음 | 장비 브릿지·드라이버·VLA/로봇 실행·장비 상태와 확인 응답 | 단순 API·계산·저장을 Low로 분류하지 않으며 연구 목표나 다음 에이전트를 임의 변경하지 않음 |
 | Guardian / Safety | 위험 판단과 실행 제한 | 근거 조회, 불일치 판단, 보류/검토/정지 요청 등 실제 판단 | 하드 제한·기존 승인·인터록·긴급 정지 강제 | 모델 허용으로 코드/장비 차단을 무효화할 수 없음 |
 | Knowledge / Evidence | 근거 제공·지식 갱신·이력 보존 | 검색 대상/분류/기억 내용 선택, 근거 기반 해석 | 원시 기록 자동 저장, 출처·스키마·정체성 검증 | 가설을 측정 사실로 저장하거나 타 에이전트 설정 직접 변경 금지 |
 
 각 Agent Reference는 다섯 영역을 모두 설명하되, 직접 소유하지 않는 영역에서는
 연결 대상과 계약만 기록한다. Guardian과 Knowledge도 자기 전문 작업의 판단–툴–관측
 루프를 갖지만, 이를 위해 별도의 Guardian/Knowledge 복제 에이전트를 만들지 않는다.
-High 담당 에이전트는 High의 위임 판단에, Middle 담당 에이전트는 전문 작업 판단에,
-Guardian/Knowledge 에이전트는 각자의 검토·지식 판단에 LLM을 둔다. 모든 에이전트의
-다섯 영역 각각에 모델을 배치하거나 모든 결정권을 Middle로 옮긴다는 뜻이 아니다.
+에이전트의 시스템상 역할과 내부 계층을 혼동하지 않는다. 전문 작업의 LLM 판단과
+Guardian/Knowledge의 모델 검토도 각 에이전트 내부에서는 High다. Middle은 기존
+API·내부 실행을 유지한다. 복합 handler는 쪼개지 않고 실제 LLM 부분만 High CODE로
+표현한다. 분류 보정은 호출 순서·툴·인계·안전조건 변경의 허가가 아니다.
 
 ### 2. 공통 실행 계약
 
@@ -146,8 +147,8 @@ Guardian/Knowledge 에이전트는 각자의 검토·지식 판단에 LLM을 둔
 **Figure Contract-1.** Proposed architecture: deterministic preparation feeds a
 role-owned LLM decision layer on the normal task path. Only that bounded layer
 selects meaningful actions/tools and interprets observations; existing execution,
-mandatory checks and handoff remain code-owned. Its owner is High, Middle,
-Guardian or Knowledge according to the agent, not an additional control level.
+mandatory checks and handoff remain code-owned in Middle. Every agent's model
+decision is High; Guardian and Knowledge remain cross-cutting responsibilities.
 The lower acceptance box is a development-completion contract, not a runtime stage.
 This design figure is not evidence of implemented or live-validated behavior.
 
@@ -177,9 +178,9 @@ This design figure is not evidence of implemented or live-validated behavior.
 
 #### 역할과 LLM의 적합성 계약
 
-에이전트별 구현에 앞서 다음 내용을 해당 Reference의 Middle 영역
-`LLM Reasoning and Decision Authority`에 적고, 실제 소유 영역이 High/Guardian/Knowledge면
-그 영역의 책임 설명과 연결한다.
+에이전트별 구현에 앞서 다음 내용을 해당 Reference의 High 판단 설명인
+`LLM Reasoning and Decision Authority`에 적고, Middle 실행 계약 및
+Guardian/Knowledge 횡단 책임과 연결한다.
 
 | 항목 | 반드시 설명할 내용 |
 |---|---|
@@ -219,16 +220,16 @@ This design figure is not evidence of implemented or live-validated behavior.
 
 | 에이전트 | 주된 판단 영역 | 재구성 시 분석할 판단/툴 경계 | 보존할 전문 실행 | 갱신할 기존 Reference |
 |---|---|---|---|---|
-| Orchestrator | High | 위임·조회·추가 작업·진행 판단 | 기존 graph/runtime와 인계 | [Orchestrator](../../agents/orchestrator_agent.md) |
-| Design | Middle | 목표·상위 요청·설계 검증·실험 근거를 종합한 설계 채택/추가 확인/허용된 수정/상위 반환 | BO/LHS 지정점·사용자 조건, 후보 생성·형상·제약·점수 계산, 기존 인계 | [Design](../../agents/design_agent.md) |
-| Specimen Making | Middle | 제작 준비·작업 선택·완료 근거 검토 | 슬라이싱·전송·프린터·이젝션 | [Specimen](../../agents/specimen_agent.md) |
-| Vision | Middle | 관측/검증 요청·해석·재관측 | 카메라·검출·좌표·freshness 검증 | [Vision](../../agents/vision_agent.md) |
-| Manipulation | Middle 중심, High 판단 | LLM의 기존 Skill 적합성·툴 선택과 Vision 이후 결과 판단 | 기존 LeRobot/VLA·고정 replay·종료 경로 유지 | [Manipulation](../../agents/manipulation_agent.md) |
-| Lab Equipment | Middle | 저장 Skill/Flow 선택·결과 확인·제한된 복구 | 기존 장비 Skill·worker·통신 | [Equipment](../../agents/equipment_agent.md) |
-| Analysis | Middle | 분석/검증/해석 툴 선택·결과 채택 | 파서·단위·지표 계산·solver | [Analysis](../../agents/analysis_agent.md) |
-| BO | 내부 High + Middle | 전략·근거 조회·수치 진단·결과 인계 판단과 제한된 툴 호출 | 좌표는 LHS/BoTorch, 목적함수·사용자 고정값·기존 그래프는 보존 | [BO](../../agents/bo_agent.md) |
-| Guardian | Guardian/Safety | 근거 조회·위험 판단·허용/보류/정지 요청 | 기존 코드 gate·하드 인터록 | [Guardian](../../agents/guardian_agent.md) |
-| Knowledge | High + Knowledge/Evidence | 근거 평가·분류·범위 검색·MD 갱신 툴콜링 | 온톨로지·출처·스코프·수명주기 검증·원본 보존 | [Knowledge](../../agents/knowledge_agent.md) |
+| Orchestrator | High (에이전트 내부 LLM) | 위임·조회·추가 작업·진행 판단 | 기존 graph/runtime와 인계 | [Orchestrator](../../agents/orchestrator_agent.md) |
+| Design | High (에이전트 내부 LLM) | 목표·상위 요청·설계 검증·실험 근거를 종합한 설계 채택/추가 확인/허용된 수정/상위 반환 | BO/LHS 지정점·사용자 조건, 후보 생성·형상·제약·점수 계산, 기존 인계 | [Design](../../agents/design_agent.md) |
+| Specimen Making | High (에이전트 내부 LLM) | 제작 준비·작업 선택·완료 근거 검토 | 슬라이싱·전송·프린터·이젝션 | [Specimen](../../agents/specimen_agent.md) |
+| Vision | High (에이전트 내부 LLM) | 관측/검증 요청·해석·재관측 | 카메라·검출·좌표·freshness 검증 | [Vision](../../agents/vision_agent.md) |
+| Manipulation | High (에이전트 내부 LLM) | LLM의 기존 Skill 적합성·툴 선택과 Vision 이후 결과 판단 | 기존 LeRobot/VLA·고정 replay·종료 경로 유지 | [Manipulation](../../agents/manipulation_agent.md) |
+| Lab Equipment | High (에이전트 내부 LLM) | 저장 Skill/Flow 선택·결과 확인·제한된 복구 | 기존 장비 Skill·worker·통신 | [Equipment](../../agents/equipment_agent.md) |
+| Analysis | High (에이전트 내부 LLM) | 분석/검증/해석 툴 선택·결과 채택 | 파서·단위·지표 계산·solver | [Analysis](../../agents/analysis_agent.md) |
+| BO | High (에이전트 내부 LLM) | 전략·근거 조회·수치 진단·결과 인계 판단과 제한된 툴 호출 | 좌표는 LHS/BoTorch, 목적함수·사용자 고정값·기존 그래프는 보존 | [BO](../../agents/bo_agent.md) |
+| Guardian | High (에이전트 내부 LLM) | 근거 조회·위험 판단·허용/보류/정지 요청 | 기존 코드 gate·하드 인터록 | [Guardian](../../agents/guardian_agent.md) |
+| Knowledge | High (에이전트 내부 LLM) | 근거 평가·분류·범위 검색·MD 갱신 툴콜링 | 온톨로지·출처·스코프·수명주기 검증·원본 보존 | [Knowledge](../../agents/knowledge_agent.md) |
 
 Analysis의 세 LLM 역할, 지표 유지·제거, 실험 기반 모델/방법 개선, 메쉬 평가와
 실제 필드 컨투어에 관한 후속 제안은
@@ -343,17 +344,17 @@ Known gap: <most important current gap, or None identified within the verified s
   적용하며, 문서 목차 변경을 근거로 런타임·모델·장비 경로를 바꾸지 않는다.
 
 소유하지 않는 기능은 `Not owned`와 실제 담당자를 적는다. 비장비 에이전트의 Low는
-계산·검색·저장 실행을 설명한다. 에이전트 Reference와 피겨는 영어로 작성하고,
+직접 장비 실행 없음으로 표시하고 계산·검색·저장은 Middle에 둔다. 에이전트 Reference와 피겨는 영어로 작성하고,
 이 한국어 설계안은 사용자 검토용으로 유지한다.
 
 ### 6. 필수 표 계약
 
 | 영역 | 필수 표 | 열에 포함할 정보 |
 |---|---|---|
-| High | 책임·인계 표 | 책임자, 입력 생산자, 계약/필드, 소비자, 시작/완료 조건 |
-| Middle | 단계·판단권 표 | 판단 문제, 정상 경로 위치, 사용 근거, LLM 적합성, 모델 선택권, 코드 고정 조건, 실제 적용 함수, 결과 |
-| Low | 툴 표 | 실제 등록명, 입력 스키마/제약, 출력 상태, 구현/연결 대상, 부작용, 실행 전제조건 |
-| Low | API·설정 표 | 소유/연결/공유 API, 방식, 설정 소유자, 기본값 출처, 적용 시점, 모드 차이 |
+| High | 판단권 표 | 판단 문제, 정상 경로 위치, 사용 근거, LLM 적합성, 모델 선택권, 코드 고정 조건, 실제 적용 함수, 결과 |
+| Middle | 책임·인계·툴 표 | 책임자, 입력 생산자, 계약/필드, 소비자, 등록 툴, 출력 상태, 시작/완료 조건 |
+| Middle | API·설정 표 | 소유/연결/공유 API, 방식, 설정 소유자, 기본값 출처, 적용 시점, 모드 차이 |
+| Low | 장비 실행 경계 표 | 브릿지·드라이버, 장비 요청·응답, 부작용, 실행 전제조건, 비장비 에이전트는 직접 실행 없음 |
 | Guardian/Safety | 실패·검증 대응 표 | 실패/차단 조건, 감지자, 허용 대응, 재시도 가능성, 정지/상위 요청, 필요한 근거 |
 | Knowledge/Evidence | 근거·산출물 표 | 입력/출력, 종류, producer/consumer, 저장 패턴, 정체성, 원본/파생 구분 |
 | Knowledge/Evidence | 검증 표 | 검사 항목, 입력/모드, 기대 결과, 실제 결과, 근거/커밋, 미검증 범위 |
@@ -404,7 +405,7 @@ Known gap: <most important current gap, or None identified within the verified s
 영역 색으로 추론하지 않는다. 없는 독립 책임은 명시적으로 표시한다.
 단, composite라는 이유로 내부 관계를 생략하지 않는다. owner catalog의 소스 참조로
 함수·툴·검증·근거 및 관측 반환 관계를 함께 표시하고, CODE 관계와 편집 가능한 실행
-노드를 구분한다. Low에는 소프트웨어 계산·조회도 포함한다. 문서 SVG는 같은 구조
+노드를 구분한다. 계산·조회·API는 Middle, 실제 장비 실행 경계만 Low다. 문서 SVG는 같은 구조
 데이터를 사용하되 IDE 테마가 아닌 흰 배경·짙은 글자의 문서 테마로 생성한다.
 
 IDE outcome 라벨은 짧은 캡슐로 해당 연결선에 붙인다. 겹침 회피는 같은 곡선 위의
@@ -540,8 +541,8 @@ Design에 한해 [구현 계획](../plans/2026-09-07-design-decision-layer.md)�
 | 영역 | 적용 계약 |
 |---|---|
 | High | 선택된 설계가 요청된 제작 의도에 적합한지 판단; 실행/근거 조회/상위 반환 |
-| Middle | 기존 geometry/mesh/manufacturability 준비 뒤 제한된 판단 루프와 인계 생성 |
-| Low | `execute_fabrication`은 기존 `experiment.evaluate → printer.prepare → provider` 호출 |
+| Middle | 기존 geometry/mesh/manufacturability 준비, High 판단 호출, `execute_fabrication`의 기존 API 디스패치와 인계 생성 |
+| Low | 선택된 printer provider의 실제 장비 통신·실행 경계 |
 | Guardian / Safety | 엄격한 도구 인자, 현재 사양·모드·정지 재검사, 기존 장비 게이트; 모델 승인 우회 금지 |
 | Knowledge / Evidence | 현재 제작 근거, 추정치와 측정치 구분, `specimen_decision.v1` 및 루프별 아티팩트 |
 
@@ -582,7 +583,7 @@ LLM이 답할 질문은 두 가지로 제한한다.
 |---|---|---|
 | High-Level Control | 현재 제한된 관측 계약의 적합성과 근거 충분성을 판단해 계속 또는 owner review 반환 | 전체 연구 목표와 graph route는 Orchestrator 소유; 물리 안전 선언 불가 |
 | Middle-Level Control | 현재 맥락 투영, 제한 도구 디스패치, 기존 검증 결과와 판단 결합 | task resolver, 실행 순서, detector 판정과 최종 handoff gate 유지 |
-| Low-Level Control | 기존 촬영, ActiveCam 이동·촬영·복귀, detector, artifact, rollout status/stop, managed-clear 작업 | bridge가 포트·pose·process/replay 상태와 명령 확인 소유 |
+| Low-Level Control | 카메라 획득 및 LeRobot ActiveCam/rollout 장비 실행 경계 | detector·artifact·API·managed-clear 감독은 Middle; bridge가 포트·pose·process/replay 상태와 명령 확인 소유 |
 | Guardian / Safety | identity/mode/stop/lease/lifecycle/freshness/interlock/budget 및 hard gate | 모델이 실패 detector, 미확인 stop, stale signal, Guardian 판단을 덮어쓰지 않음 |
 | Knowledge / Evidence | `vision_decision.v1`, tool trace, 이미지 hash/label, detector facts와 기존 report/signal 보존 | 과거·가상·mock·타 세션 근거를 현재 물리 증거로 승격 금지 |
 
@@ -758,8 +759,8 @@ non-LLM TEST는 별도로 표시하고, real-LLM 가상 모드는 판단층을 �
 ## BO 적용 계약 — 2026-09-10
 
 BO 내부 High는 전략과 근거 충분성, 수치 결과의 인계 여부를 판단한다. Middle은
-검증·툴 dispatch·결과 고정을 수행하고 Low는 기존 `experiment.benchmark`의
-LHS/BoTorch로 좌표를 계산한다. LLM이 좌표를 생성하거나 선호 점수로 덮어쓰지 않는다.
+검증·툴 dispatch·결과 고정 및 기존 `experiment.benchmark`의 LHS/BoTorch 좌표
+계산을 수행한다. BO에는 직접 Low 장비 실행이 없다. LLM이 좌표를 생성하거나 선호 점수로 덮어쓰지 않는다.
 사용자가 확정한 acquisition은 기본적으로 보존하고, 명시적인 `adaptive` 설정에서만
 허용된 전략 인자를 선택한다. 초기 LHS 정책과 기존 그래프/브릿지는 변경하지 않는다.
 
@@ -778,8 +779,8 @@ LHS/BoTorch로 좌표를 계산한다. LLM이 좌표를 생성하거나 선호 �
 Knowledge의 High 판단은 재사용 가능한 근거의 선별·온톨로지 분류·검색 범위 내
 상세 조회·기억 작성·근거 부족 판정이다. LLM은 기존 Knowledge stage 안에서
 `inspect_evidence`, `search_knowledge`, `read_knowledge`, `write_knowledge_note`,
-`publish_context`를 호출한다. Middle/Low는 스코프·출처·수명주기를 검증하고
-기존 JSONL 및 새 Markdown 리비전을 저장한다.
+`publish_context`를 호출한다. Middle은 스코프·출처·수명주기를 검증하고
+기존 JSONL 및 새 Markdown 리비전을 저장한다. 직접 Low 장비 실행은 없다.
 
 지식 그래프/Neo4j 운영 연결만 종료한다. 온톨로지, 매뉴얼 RAG, 기존 원본과
 패턴·성능·Evolution 계약, 실행 그래프와 장비 브릿지는 보존한다. 종료 아카이브의

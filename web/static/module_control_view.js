@@ -44,7 +44,7 @@
     }));
     const details={nodes:[],edges:[]};
     for(const owner of nodes) {
-      const detail=catalog?.implementation_structure?.operations?.[owner.step.handler];
+      const detail=catalog?.implementation_structure?.operations?.[owner.step.handler] || (!executable && view.checkpoint_details?.[owner.key]);
       if(!detail)continue;
       const key=id=>id==='$operation'?owner.key:`${owner.key}::${id}`;
       for(const item of detail.nodes)details.nodes.push({...item,key:key(item.id),owner:owner.key,owner_handler:owner.step.handler,step:{},implementation:true});
@@ -53,11 +53,12 @@
     let y=48;
     const groups=AREAS.map(([id,label,color])=>{
       const members=[...nodes,...details.nodes].filter(node=>node.area===id), central=['high','middle','low'].includes(id);
-      const height=64+Math.max(1,Math.ceil(members.length/(central?2:1)))*112;
+      const rowSpacing=central?144:112;
+      const height=64+Math.max(1,Math.ceil(members.length/(central?2:1)))*rowSpacing;
       const group={id,label,color,x:central?352:id==='guardian'?24:888,y:central?y:48,width:central?488:264,height};
       if(central)y+=height+48;
       members.forEach((node,index)=>{node.position=node.step.position || node.step.metadata?.position || {
-        x:group.x+32+(central?index%2*240:0),y:group.y+56+Math.floor(index/(central?2:1))*112};});
+        x:group.x+32+(central?index%2*240:0),y:group.y+56+Math.floor(index/(central?2:1))*rowSpacing};});
       return group;
     });
     const unassigned=nodes.filter(node=>node.area==='unassigned');
@@ -72,7 +73,22 @@
   function internalDetails(nodes,control) {
     const present=new Map(nodes.map(node=>[node.key || node.id,node]));
     const occupied=nodes.map(node=>node.position);
-    const fresh=control.structure?layout({execution_graph:{nodes:nodes.map(node=>({...node.step,...node,id:node.key || node.id,handler:node.handler || node.step?.handler,area:node.metadata?.control_area || node.area})),edges:[]},metadata:{control_view:control.view}}, {implementation_structure:control.structure}).details:control.details;
+    let fresh=control.structure?layout({execution_graph:{nodes:nodes.map(node=>({...node.step,...node,id:node.key || node.id,handler:node.handler || node.step?.handler,area:node.metadata?.control_area || node.area})),edges:[]},metadata:{control_view:control.view}}, {implementation_structure:control.structure}).details:control.details;
+    if(!control.executable) {
+      // Legacy checkpoints keep their existing IDE IDs and serialization. CODE
+      // references are display-only children, never inserted into their route.
+      const owners=new Map(nodes.map(node=>[node.metadata?.module_step_phase
+        ? `${node.metadata.module_step_phase}:${node.metadata.module_step_id}` : node.key || node.id,node]));
+      const remap=new Map();
+      const children=(control.details?.nodes || []).flatMap(node=>{
+        const owner=owners.get(node.owner);if(!owner)return [];
+        const ownerId=owner.key || owner.id,key=`${ownerId}::${node.id}`;
+        remap.set(node.owner,ownerId);remap.set(node.key,key);
+        return [{...node,key,owner:ownerId,owner_handler:owner.handler || owner.step?.handler}];
+      });
+      fresh={nodes:children,edges:(control.details?.edges || []).filter(edge=>remap.has(edge.source)&&remap.has(edge.target))
+        .map(edge=>({...edge,source:remap.get(edge.source),target:remap.get(edge.target),owner:remap.get(edge.owner)}))};
+    }
     const details=(fresh?.nodes || []).filter(node=>present.get(node.owner)?.handler===node.owner_handler || present.get(node.owner)?.step?.handler===node.owner_handler).map(node=>{
       const position={...node.position};
       while(occupied.some(other=>Math.abs(other.x-position.x)<208 && Math.abs(other.y-position.y)<100))position.y+=112;
@@ -109,7 +125,7 @@
       <title>${esc(`${node.label}\nCode-owned inside ${node.owner}\n${node.source.path} · ${node.source.symbol}`)}</title>
       <rect x="${node.position.x}" y="${node.position.y}" width="184" height="76" rx="5" fill="${theme.node}" stroke="${areaColor(node.area,theme)}" stroke-opacity=".65" stroke-dasharray="4 3"/>
       ${textRows(node.label,24).slice(0,3).map((row,index)=>`<text x="${node.position.x+10}" y="${node.position.y+18+index*15}" fill="${theme.text}" font-size="12">${esc(row)}</text>`).join('')}
-      <text x="${node.position.x+10}" y="${node.position.y+67}" fill="${theme.muted}" font-size="9">CODE · ${esc(node.owner)}</text>
+      <text x="${node.position.x+10}" y="${node.position.y+67}" fill="${theme.muted}" font-size="9">CODE · ${esc(node.owner.length>26?node.owner.slice(0,23)+'…':node.owner)}</text>
     </g>`).join('');
     return `<defs><marker id="control-detail-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6z" fill="${theme.muted}"/></marker></defs>${lines}${boxes}`;
   }
@@ -121,11 +137,11 @@
       ${group.empty?textRows(control.view.empty_roles?.[group.id] || (control.executable?'No separate owner operation':'No role declared'),31).map((row,index)=>`<text x="${group.x+16}" y="${group.y+74+index*18}" fill="${theme.muted}" font-size="12">${esc(row)}</text>`).join(''):''}</g>`).join('')+internalMarkup(nodes,control,options);
   }
   function legend(control) {
-    return `<div class="runtime-control-legend"><strong>Control areas · not sequential layers</strong>
+    return `<div class="runtime-control-legend"><strong>High: LLM decisions · Middle: software / APIs · Low: devices</strong>
       ${AREAS.map(([id,label,color])=>`<span><i style="background:${color}"></i>${esc(label)}</span>`).join('')}
       ${Object.entries(TYPES).map(([id,[label,color,dash]])=>`<span><svg width="32" height="12" aria-hidden="true"><line x1="0" x2="30" y1="6" y2="6" stroke="${color}" stroke-width="2" stroke-dasharray="${dash}"/></svg>${label}</span>`).join('')}
       ${control?.groups.some(group=>group.id==='unassigned')?'<small>Unassigned: classify new or renamed checkpoints in module metadata.control_view.areas.</small>':''}
-      <small>${control?.executable?'Solid boxes: editable execution. Dashed CODE boxes: existing internal functions/tools; not extra commands or live statuses. LLM feedback stays inside its bounded owner loop.':'Lines retain configured checkpoint order; styling denotes responsibility. LLM marks actual decision points.'}</small></div>`;
+      <small>Guardian / Safety and Knowledge / Evidence are cross-cutting. ${control?.executable?'Solid boxes: editable execution. Dashed CODE boxes: existing internals, not extra commands or live statuses. Middle composites can contain the High decisions shown inside them.':'Lines retain configured checkpoint order, not a new execution plan. Dashed CODE boxes expose existing internal decisions and device boundaries.'}</small></div>`;
   }
   function renderSvg(module,options={theme:'document'}) {
     const theme=palette(options),control=layout(module,options.catalog);
@@ -163,7 +179,7 @@
       return `<g><title>${esc(node.key)} · ${esc(node.step.handler || module.handler)}</title>
         <rect x="${node.position.x}" y="${node.position.y}" width="184" height="76" rx="9" fill="${theme.node}" stroke="${areaColor(node.area,theme)}" stroke-width="2"/>
         ${rows.slice(0,3).map((row,index)=>`<text x="${node.position.x+12}" y="${node.position.y+21+index*16}" fill="${theme.text}" font-size="12">${esc(row)}</text>`).join('')}
-        ${node.llm?`<text x="${node.position.x+145}" y="${node.position.y+68}" fill="${areaColor(node.area,theme)}" font-size="10">LLM</text>`:''}</g>`;
+        ${node.llm?`<text x="${node.position.x+105}" y="${node.position.y+68}" fill="${areaColor(node.area,theme)}" font-size="10">${node.area==='high'?'LLM':'LLM inside'}</text>`:''}</g>`;
     }).join('');
     return `<svg xmlns="http://www.w3.org/2000/svg" data-theme="${options.theme || 'runtime'}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(module.label)} five-area internal graph" style="font-family:Arial,sans-serif;background:${theme.background}">
       <title>${esc(module.label)} — five-area internal graph</title><desc>${control.executable?'Executable owner operations and explicit outcomes. Positions are presentation only. Composite LLM tools are not separate editable operations.':'Existing editable checkpoints grouped by responsibility. Not five sequential layers.'}</desc>

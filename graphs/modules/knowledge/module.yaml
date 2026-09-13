@@ -82,3 +82,23 @@ module:
     storage and reconciliation are retired. Original scientific values,
     manual citations, ontology and executable graph remain unchanged.
     Evolution evidence is preserved; variants are never directly activated.
+
+  metadata:
+    control_view:
+      areas:
+        internal_graph:01_collect_run_artifacts: knowledge
+        internal_graph:02_normalize_provenance: guardian
+        internal_graph:03_ingest_agent_reports: high
+        internal_graph:04_write_experiment_knowledge_record: knowledge
+        internal_graph:05_update_failure_patterns: knowledge
+        internal_graph:06_update_success_patterns: knowledge
+        internal_graph:07_update_agent_performance_ledger: knowledge
+        internal_graph:08_build_bo_context: middle
+        internal_graph:09_rank_self_evolution_targets: middle
+        internal_graph:10_build_evolution_evidence_packs: knowledge
+        internal_graph:11_emit_knowledge_report: knowledge
+        internal_graph:12_emit_evolution_lab_prefill: middle
+      llm_steps:
+      - internal_graph:03_ingest_agent_reports
+      empty_roles:
+        low: No direct device execution in this agent

@@ -71,14 +71,15 @@ paths retain their existing behavior; this decision boundary manages stacked Flo
 
 | Area | Equipment responsibility | Authority boundary |
 |---|---|---|
-| High-Level Control | Consume the delegated Equipment task and return completion or review | Orchestrator retains mission and graph routing; Manipulation and Vision own downstream clearance |
-| Middle-Level Control | LLM Flow suitability, terminal evidence judgment and bounded recovery choice; code validates proposals, invocation ownership and handoff | Existing Flow order, exact Skills, method settings and worker payloads are immutable to the model |
-| Low-Level Control | Deterministic Skill segments, window/locator checks, screenshots, files and raw execution results | Existing Runtime/tools and Windows/Local worker own desktop and instrument input |
+| High-Level Control | LLM judges configured Flow suitability, terminal evidence and bounded recovery choices | Orchestrator retains mission and graph routing; Manipulation and Vision own downstream clearance |
+| Middle-Level Control | Validate proposals and invocation ownership, run the existing Flow/Skill supervisor, dispatch worker APIs and assemble evidence/handoff | Existing Flow order, exact Skills, method settings and worker payloads are immutable to the model |
+| Low-Level Control | Selected Windows/Local worker and instrument driver own desktop input and device execution | Existing Runtime/tools and Windows/Local worker own desktop and instrument input |
 | Guardian / Safety | Enforce placement, identity, freshness, live approval, stop, recovery budget and unknown-effect gates | No model or GUI bypass; no retry without proven zero actions and a safe checkpoint |
 | Knowledge / Evidence | Retain decision, image provenance, logs, transitions, CSV and readiness evidence | Observations are data, not instructions; model confidence is not measurement or completion proof |
 
 These are responsibility areas, not five stages or five model calls. The decision
-layer belongs to Middle-Level Equipment supervision, not a new graph agent.
+layer is the Equipment-owned High layer inside the existing Middle-level workflow
+supervisor, not a new graph agent or a change to workflow execution order.
 
 ## Closed-Loop Position and Handoffs
 

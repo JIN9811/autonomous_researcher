@@ -36,3 +36,21 @@ module:
   notes: >-
     GUI/module editor may edit this module config, but execution remains bound to
     allowlisted Python handlers. Python source is not modified by the GUI.
+
+  metadata:
+    control_view:
+      areas:
+        internal_graph:01_check_safety_gates: guardian
+        internal_graph:02_review_recent_failures: knowledge
+        internal_graph:03_decide_continue_stop_error: guardian
+      empty_roles:
+        low: No direct device execution in this agent
+      checkpoint_details:
+        internal_graph:02_review_recent_failures:
+          nodes:
+          - id: review
+            label: "LLM policy evidence review"
+            area: high
+            source: {path: agents/guardian_agent.py, symbol: GuardianAgent.run}
+          edges:
+          - {source: $operation, target: review, kind: evidence, label: "existing internal decision"}

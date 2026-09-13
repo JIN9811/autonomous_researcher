@@ -95,9 +95,9 @@ These are responsibility areas, not five new runtime stages.
 
 | Area | Responsibility | Authority boundary |
 |---|---|---|
-| High-Level Control | LLM judges reusable knowledge, relevant scope-bound evidence and qualified publication | Does not alter measurements, objectives or global routing |
-| Middle-Level Control | Collect evidence; run the bounded tool loop; assemble existing records and context | Tool validation and output assembly remain code-owned |
-| Low-Level Control | Atomic Markdown revisions, search/detail reads, JSONL and local audit append | No device tool, graph backend or model-server startup |
+| High-Level Control | LLM judges reusable knowledge, scope-bound evidence and qualified publication | Does not alter measurements, objectives or global routing |
+| Middle-Level Control | Collect evidence, dispatch bounded retrieval/curation tools and assemble context; search, Markdown/JSONL persistence and audit are software operations | Tool validation and output assembly remain code-owned |
+| Low-Level Control | No direct device execution; local storage and retrieval are not device control | No device tool, graph backend or model-server startup |
 | Guardian / Safety | Validate identity, ontology, sources, scope, lifecycle and tool arguments | Reject unsupported writes or scope expansion; preserve raw evidence |
 | Knowledge / Evidence | Keep sources, applicability, observation/interpretation distinction and tool trace | Derived notes are not new measurements or causal proof |
 

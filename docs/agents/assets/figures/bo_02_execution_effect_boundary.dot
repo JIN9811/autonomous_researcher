@@ -6,7 +6,7 @@ digraph bo_execution_effect_boundary {
   high [label="High: BO-owned LLM decision\nStrategy / evidence sufficiency / tool choice", fillcolor="#F2ECFA", color="#6B4C9A", penwidth=2];
   gate [label="Guardian / Safety\nAllowed tool, arguments, evidence refs\nPhase + settings + call-budget checks", fillcolor="#FFF1D6", color="#B26A00"];
   inspect [label="Knowledge / Evidence\ninspect_diagnostics\nretrieve_knowledge", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
-  optimize [label="Low: run_optimizer\nExisting experiment.benchmark\nLHS or BoTorch produces coordinates", penwidth=2];
+  optimize [label="Middle: run_optimizer\nExisting experiment.benchmark\nLHS or BoTorch produces coordinates", penwidth=2];
   result [label="Middle: freeze numeric result\nExact candidate ID + values + diagnostics"];
   review [label="High: LLM result review\nAccept, inspect further, or return to owner", fillcolor="#F2ECFA", color="#6B4C9A"];
   accept [label="accept_recommendation\nValidated solver candidate only\nExisting next_design_request.v1", fillcolor="#E9F7EF", color="#2E7D59"];

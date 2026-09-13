@@ -80,9 +80,9 @@ activation feature, and applying a change to an already-running loop.
 
 | Responsibility area | Current Orchestrator role | Boundary and detailed home |
 |---|---|---|
-| High-Level Control | Accepts scoped intent; coordinates mission, route, retry/review, and next-new-run selection | [Closed-Loop Position and Handoffs](#closed-loop-position-and-handoffs) |
-| Middle-Level Control | Builds bounded context, validates model choices, proposes Setup changes, and prepares admitted handoffs | [Decision and Evaluation](#decision-and-evaluation) |
-| Low-Level Control | Existing contract/plan builders and bound software tools; no direct device commands | [Tools, APIs and Connections](#tools-apis-and-connections) |
+| High-Level Control | LLM judges scoped intent, availability and evidence, selects admitted tools and reviews returned effects | [Closed-Loop Position and Handoffs](#closed-loop-position-and-handoffs) |
+| Middle-Level Control | Build mission/plan contracts, validate model choices, dispatch bound software tools and assemble reports | [Decision and Evaluation](#decision-and-evaluation) |
+| Low-Level Control | No direct device execution; device commands remain with agent-owned bridge paths | [Tools, APIs and Connections](#tools-apis-and-connections) |
 | Guardian / Safety | Preserves Guardian and operator decisions; unknown or missing authority does not become continuation | [Safety and Recovery](#safety-and-recovery) |
 | Knowledge / Evidence | Keeps planning transcript, Setup history/readback, decision traces, checkpoints, and events distinct | [Artifacts and Verification](#artifacts-and-verification) |
 
@@ -122,7 +122,7 @@ mission, plan, bounded LLM/tool decision and reporting functions. **LLM** labels
 the composite decision, including its existing checks and tool loop—not each
 internal check as an independently editable operation. Dashed **CODE** boxes now
 expose the [existing internal relationships](../../agents/orchestrator_structure.py):
-plan builders and bound tool dispatch in **Low**, schema/target/effect checks in
+plan builders and bound tool dispatch in **Middle**, schema/target/effect checks in
 **Guardian / Safety**, and scoped references and decision records in **Knowledge /
 Evidence**. Inspection evidence returns to the same bounded LLM decision.
 Selecting a CODE box opens its owner and source references in the existing

@@ -14,17 +14,18 @@ scope:
   - specimen_pose
 summary: Current UTM and visual-evidence bridge contract for ROS process lifecycle, topics, camera streams/configuration, RealSense capture, pose tracking, and temporal state evidence.
 source_of_truth:
-  - device_bridges/utm_runtime_bridge.py
-  - device_bridges/realsense_bridge.py
-  - device_bridges/specimen_pose_tracker.py
-  - device_bridges/utm_state_observer.py
+  - device_bridges/camera_vision/module.py
+  - device_bridges/camera_vision/utm_runtime_bridge.py
+  - device_bridges/camera_vision/realsense_bridge.py
+  - device_bridges/camera_vision/specimen_pose_tracker.py
+  - device_bridges/camera_vision/utm_state_observer.py
   - device_bridges/utm_macro_bridge.py
-  - mcp_tools/camera_tools.py
+  - device_bridges/camera_vision/tools.py
   - mcp_tools/utm_tools.py
   - configs/devices.yaml
   - app/main.py
-last_verified: 2026-08-09
-verified_against: 188a1d6
+last_verified: 2026-09-13
+verified_against: working-tree
 related_docs:
   - docs/device_bridges/README.md
   - docs/agents/vision_agent.md
@@ -42,8 +43,28 @@ supersedes: []
 | Purpose | Camera capture, pose tracking and temporal visual evidence |
 | Connects | Vision / camera workspace ↔ camera and ROS services |
 | Effect | Capture, configuration and process control; not instrument actuation |
-| Implementation | [Vision runtime](../../device_bridges/utm_runtime_bridge.py) |
-| Verification | [Recorded scope and evidence](#current-verification) · 2026-08-09 |
+| Implementation | [Camera/Vision module](../../device_bridges/camera_vision/module.py) and [runtime](../../device_bridges/camera_vision/utm_runtime_bridge.py) |
+| Verification | Package, alias, observation and API regressions on 2026-09-13; earlier physical scope remains [recorded separately](#current-verification) |
+
+## Installed Observation Bridge
+
+`camera_vision@1.0.0` is the observation bridge required by the installed
+`vision@1.0.0` Agent Package. The Runtime IDE shows package → bridge → observation
+components using the common graph and Inspector. This does not turn each provider
+into a peer package. Package ownership and current draft membership are preserved
+when opening bridge internals, including shared owners.
+
+The package directory contains the UTM runtime manager, temporal observer,
+RealSense adapter, specimen-pose tracker and camera tool registration. Legacy
+imports alias these canonical modules, preserving monkeypatches, injected resources
+and existing configuration/calibration/output locations. Dependencies are listed in
+the [bridge README](../../device_bridges/camera_vision/README.md); discovery does not
+install packages, start processes or probe hardware.
+
+LeRobot is a shared execution dependency: it owns ActiveCam move/capture/return
+and rollout stop. Camera/Vision owns observation services only. The shared observer
+used by Equipment is not recreated. Existing simulated camera tools stay simulated;
+the migration does not silently activate the optional RealSense capture route.
 
 ## Summary
 

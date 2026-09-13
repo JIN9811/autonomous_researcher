@@ -23,8 +23,8 @@ source_of_truth:
   - graphs/modules
   - mcp_tools/tool_registry.py
   - device_bridges
-last_verified: 2026-08-14
-verified_against: 25f692e
+last_verified: 2026-09-13
+verified_against: working-tree-2026-09-13-control-area-correction
 related_docs:
   - README.md
   - docs/agents/README.md
@@ -42,13 +42,15 @@ ATR describes control during an **automatic experiment loop** through three
 levels. This vocabulary names boundaries already present in the runtime; it
 does not create a second scheduler or a new device path.
 
-1. **High-Level Control** governs the experiment mission, active agent, stage
-   transition, cycle, retry, review, and terminal route.
-2. **Middle-Level Control** governs the bounded procedure inside the active
-   agent and produces typed handoffs, reports, decisions, and evidence.
-3. **Low-Level Control** executes a registered tool through its service or
-   device bridge and owns protocol details, process/device state, telemetry,
-   and hard execution interlocks.
+1. **High-Level Control** is the bounded LLM reasoning and decision layer inside
+   each agent. Orchestrator owns global intent and routing decisions; specialist
+   agents retain their local decision scope.
+2. **Middle-Level Control** implements software processes, APIs, tool dispatch,
+   numerical computation, validation, storage and typed handoffs. Runtime routing
+   and composite owner handlers stay unchanged.
+3. **Low-Level Control** is actual device execution through the selected bridge
+   and driver: device state, commands, telemetry and hard execution interlocks.
+   A parser, solver, retrieval operation or API wrapper is not a physical device.
 
 Guardian safety and Knowledge/evidence are cross-level planes. Device
 Workspaces are manual maintenance and commissioning surfaces outside the
@@ -56,10 +58,9 @@ automatic-loop hierarchy, even when they reuse the same low-level bridges.
 
 ## 한국어 요약
 
-자동 실험 루프에서 **High-Level Control**은 어떤 에이전트와 사이클을 진행할지,
-**Middle-Level Control**은 선택된 에이전트가 내부 절차를 어떤 순서와 계약으로
-수행할지, **Low-Level Control**은 등록된 tool과 bridge가 실제 소프트웨어·장비를
-어떻게 구동할지를 담당합니다. Guardian은 세 계층 모두를 차단·검토할 수 있는
+각 에이전트 내부에서 **High-Level Control**은 LLM 추론·의사결정,
+**Middle-Level Control**은 API·내부 프로세스·계산·툴 디스패치,
+**Low-Level Control**은 실제 장비/브릿지 실행 경계입니다. Guardian은 세 계층 모두를 차단·검토할 수 있는
 안전면이고, Knowledge/Evidence는 모든 계층의 근거를 보존하는 증거면입니다.
 Device Workspace는 동일한 bridge를 사용할 수 있지만 자동 루프 밖의 수동
 운영면이므로 세 계층의 자동 진행과 동일시하지 않습니다.
@@ -70,41 +71,32 @@ Device Workspace는 동일한 bridge를 사용할 수 있지만 자동 루프 �
 flowchart TB
     OP[Operator intent / approved objective]
 
-    subgraph H[High-Level Control - experiment and agent control]
-        ORC[Orchestrator supervisor]
-        RT[LangGraph runtime and controller]
-        ROUTE[Stage / cycle / retry / terminal route]
-        ORC --> RT --> ROUTE
+    subgraph H[High-Level Control - bounded LLM decisions]
+        ORC[Orchestrator LLM: intent and admitted actions]
+        LOCAL[Each agent's LLM: local task and evidence decisions]
     end
 
-    subgraph M[Middle-Level Control - active agent procedure]
-        DSN[Design]
-        SPC[Specimen Making]
-        VIS[Vision]
-        MAN[Manipulation]
-        EQP[Lab Equipment]
-        ANL[Analysis]
-        KNW[Knowledge]
-        BO[Bayesian Optimization]
+    subgraph M[Middle-Level Control - software and APIs]
+        RT[Existing LangGraph runtime and controller]
+        PROC[Existing owner procedures and handoffs]
+        COMPUTE[Parsing / solver / optimization / retrieval / storage]
+        MCP[Registered tool dispatch and API contracts]
+        RT --> PROC
+        PROC --> COMPUTE
+        PROC --> MCP
     end
 
-    subgraph L[Low-Level Control - bounded execution]
-        MCP[MCP Tool contract / ToolRegistry]
-        SVC[Service, queue, lease and process manager]
-        BRG[Device or computation bridge]
-        EXT[Physical device / external runtime / solver]
-        MCP --> SVC --> BRG --> EXT
+    subgraph L[Low-Level Control - device execution]
+        BRG[Selected device bridge and driver]
+        EXT[Camera / robot / printer / instrument]
+        BRG --> EXT
     end
 
     OP --> ORC
-    ROUTE --> DSN --> SPC --> VIS --> MAN --> EQP --> ANL --> KNW --> BO
-    BO --> RT
-    SPC --> MCP
-    VIS --> MCP
-    MAN --> MCP
-    EQP --> MCP
-    ANL --> MCP
-    BO --> MCP
+    ORC --> RT
+    PROC --> LOCAL
+    LOCAL --> PROC
+    MCP --> BRG
     EXT -. telemetry and effect evidence .-> M
 
     GRD[Guardian safety plane] -. gate / block / stop / review .-> H
@@ -115,7 +107,7 @@ flowchart TB
     EVD -. commands / telemetry / receipts .-> L
 
     WS[Device Workspaces - manual control outside automatic loop]
-    WS -. explicit operator action .-> SVC
+    WS -. explicit operator action .-> MCP
 ```
 
 **Figure 1. Three-level control in the automatic experiment loop.** Solid
@@ -129,9 +121,9 @@ tool or external service is used.
 
 | Level | Primary question | Authoritative components | Owns | Must not do |
 |---|---|---|---|---|
-| High-Level Control | What agent/stage/cycle runs next? | Orchestrator, LangGraph runtime, `MainController`, checkpoint/run state | mission, route, stage, cycle, retry/review/terminal decision | implement device protocol details or infer a physical effect from a chat response |
-| Middle-Level Control | How does the active agent complete its bounded responsibility? | `agents/*_agent.py`, module manifest, typed handoff/report schemas | internal procedure, deterministic validation, bounded model reasoning, agent result and handoff | bypass graph routing, claim an unobserved device result, or bypass bridge interlocks |
-| Low-Level Control | How is one approved bounded action executed and observed? | ToolRegistry/MCP tool, service, queue/lease/process manager, device/computation bridge | protocol command, port/process lease, device state, hard interlocks, telemetry, command/effect evidence | choose the research objective, silently change the active agent, or convert uncertain effect into success |
+| High-Level Control | What permitted choice is supported by current evidence? | Existing agent-local model decision functions | scoped reasoning, tool choice and evidence review | invent device effects or bypass code-owned constraints |
+| Middle-Level Control | How is the accepted task processed and dispatched? | Existing runtime/controller, agent functions, ToolRegistry, software services | internal procedure, APIs, numerical work, deterministic validation, result and handoff | bypass graph routing, claim unobserved effects or bypass bridge interlocks |
+| Low-Level Control | How does the selected device execute and report an action? | Device bridge and driver | protocol command, port/device state, hard interlocks, telemetry, effect evidence | choose the research objective, silently change the active agent or convert unknown effects into success |
 | Guardian safety plane | May work continue safely and with sufficient evidence? | Guardian agent, policy gates, approval service, bridge hard interlocks | allow/block/review/stop decisions and incidents | replace hardware interlocks or execute normal device work directly |
 | Knowledge/evidence plane | What proves what was requested, executed, observed, and accepted? | event log, artifacts, typed reports, Knowledge service, ledger/outbox/graph receipts | provenance, immutable records, context for later cycles | rewrite prior evidence or treat a proposal as an executed result |
 
@@ -139,32 +131,34 @@ tool or external service is used.
 
 | Direction | Required behavior |
 |---|---|
-| High → Middle | Dispatch one allowlisted agent handler with run/cycle identity, typed state, and bounded context. |
+| High → Middle | Return a bounded decision/tool request; existing code validates identity, schema and authority before dispatch. |
 | Middle → Low | Issue only registered tool requests allowed by the module manifest; preserve action identity and expected evidence. |
 | Low → Middle | Return explicit command, status, telemetry, artifact, receipt, or uncertainty. A timeout is not automatically success or failure. |
-| Middle → High | Merge a typed agent result and handoff only after the agent's completion conditions are satisfied. |
+| Middle → High | Supply scoped context and observations to the existing model decision boundary; handoff requires code-owned completion conditions. |
 | Any level → Guardian | Surface stale state, missing evidence, failed precondition, unknown external effect, policy breach, or exhausted retry budget. |
 | Any level → Evidence | Persist enough identity and provenance to distinguish intent, decision, command, observed effect, and accepted scientific result. |
 
 Recovery remains at the level that owns the failed invariant. A device
 reconnection belongs to Low-Level Control; rebuilding an agent output belongs
 to Middle-Level Control; choosing retry, review, another agent, another cycle,
-or a terminal state belongs to High-Level Control.
+or a terminal state may involve the High LLM decision where implemented. Existing
+deterministic routing and safety decisions remain code-owned; this classification
+does not introduce model calls or move those decisions into a new model loop.
 
 ## Agent Classification
 
 | Agent | High-Level relationship | Middle-Level ownership | Low-Level boundary |
 |---|---|---|---|
-| Orchestrator | Primary mission, dispatch, handoff, cycle, and route owner | intent normalization, mission/context compilation, follow-up and decision register | no direct device tools; delegates through agent stages |
-| Design | Receives a governed design stage and returns a Specimen handoff | objective normalization, constrained candidate generation, scoring, selection, experiment specification | deterministic local computation; no device authority |
-| Specimen Making | Converts the selected design into a verified fabrication handoff | geometry, mesh/manufacturability QA, slicing plan, print lifecycle, ejection/bed-clear evidence | geometry/artifact tools and selected printer fleet/provider bridge |
-| Vision | Supplies observation and verification sidecars used by stage routing | camera selection, freshness/quality checks, active-camera and UTM verification signals | camera, LeRobot camera, ROS/UTM runtime, and verified rollout-stop tools |
-| Manipulation | Runs the governed physical-transfer branch and waits for post-place verification | policy/task selection, preflight, rollout supervision, motion-state and completion contract | LeRobot rollout/process, robot, serial/camera lease, and optional Isaac sidecars |
-| Lab Equipment | Runs after verified placement and hands measurement evidence to Analysis | profile/skill/protocol selection, preflight, execution proof, export/handoff | Windows PyAutoGUI and UTM/equipment bridges |
-| Analysis | Converts identified measurement evidence into an evaluation handoff | parsing, units, curves, metrics, uncertainty, CAE comparison, objective evaluation | bounded CAE/CalculiX or other computation bridge; no direct physical actuator |
-| Knowledge | Persists accepted evidence and supplies bounded context to BO and later cycles | provenance/schema validation, typed records, patterns, relation review, context assembly | ledger, outbox, ontology, graph repository/Neo4j/Graphify adapters; no physical actuator |
-| Bayesian Optimization | Proposes the next governed candidate after accepted Analysis/Knowledge evidence | prior filtering, LHS/GP/acquisition, constraints, recommendation and Design handoff | BoTorch/benchmark computation tools; proposal only |
-| Guardian | Cross-level safety/control authority for continue, review, stop, or error | risk/evidence/health/approval evaluation and corrective-action records | read-only health/queue tools and stop/block authority; hard interlocks remain in bridges |
+| Orchestrator | LLM intent, availability and admitted action review | Existing runtime supervision, contract/plan builders and tool dispatch | No direct device execution |
+| Design | LLM candidate suitability and bounded tool choice | Candidate generation, inspection, validation and handoff | No direct device execution |
+| Specimen Making | LLM fabrication suitability and bounded tool choice | Geometry, manufacturing checks, existing printer API calls and handoff | Selected Printer Fleet provider and printer |
+| Vision | LLM observation choice and same-frame evidence review | Task resolution, detectors, interlocks, capture/status/stop API dispatch | Selected camera and LeRobot device paths |
+| Manipulation | LLM saved-skill suitability and post-Vision result review | Profile binding, API dispatch, preflight and completion supervision | LeRobot robot policy/replay execution and device lifecycle |
+| Lab Equipment | LLM stacked-Flow selection and terminal evidence/recovery review | Existing exact Flow/Skill supervision, APIs, CSV checks and handoff | Selected desktop/instrument worker and device driver |
+| Analysis | LLM data, simulation and model-review choices | Parsing, units, objectives, solver, postprocessing and asynchronous FEM scheduling | No direct device execution |
+| Knowledge | LLM scoped retrieval and evidence curation | Provenance, ontology, Markdown/JSONL persistence and context assembly | No direct device execution |
+| Bayesian Optimization | LLM strategy/tool choice and numerical result review | LHS/BoTorch, constraints, numeric recommendation and handoff | No direct device execution |
+| Guardian | Existing LLM policy-evidence review | Deterministic safety/risk checks, health APIs and incident/route results | Hardware interlocks and effective stops remain in device bridges |
 
 ## Device Workspace Boundary
 
@@ -182,9 +176,9 @@ completion still requires the relevant agent and graph contracts.
 Use these names in new explanatory documents, GUI labels, figures, and paper
 text:
 
-- `High-Level Control` — experiment/agent/cycle control;
-- `Middle-Level Control` — internal agent procedure control;
-- `Low-Level Control` — registered tool, service, bridge, and device execution;
+- `High-Level Control` — agent-local LLM reasoning and decisions;
+- `Middle-Level Control` — internal processes, APIs and software tools;
+- `Low-Level Control` — device bridge/driver execution;
 - `Guardian Safety Plane` — cross-level safety and approval authority;
 - `Knowledge/Evidence Plane` — cross-level provenance and durable evidence;
 - `Device Workspace` — manual control outside the automatic loop.
@@ -204,6 +198,7 @@ future typed contract needs to expose the level explicitly.
 - `mcp_tools/tool_registry.py`
 - `device_bridges/*`
 
-This explanation was reconciled with repository state at commit `25f692e`.
+This classification was reconciled with the 2026-09-13 working tree. It changes
+presentation and documentation only, not calls, workflow order, gates or handoffs.
 Executable code, active graph configuration, module manifests, tool registry,
 and bridge implementations remain authoritative.

@@ -79,7 +79,7 @@
 <g id="node5" class="node">
 <title>optimize</title>
 <path fill="#eef4ff" stroke="#315c9b" stroke-width="2" d="M510.5,-457C510.5,-457 250.5,-457 250.5,-457 244.5,-457 238.5,-451 238.5,-445 238.5,-445 238.5,-406 238.5,-406 238.5,-400 244.5,-394 250.5,-394 250.5,-394 510.5,-394 510.5,-394 516.5,-394 522.5,-400 522.5,-406 522.5,-406 522.5,-445 522.5,-445 522.5,-451 516.5,-457 510.5,-457"/>
-<text text-anchor="middle" x="380.5" y="-436.8" font-family="DejaVu Sans" font-size="14.00">Low: run_optimizer</text>
+<text text-anchor="middle" x="380.5" y="-436.8" font-family="DejaVu Sans" font-size="14.00">Middle: run_optimizer</text>
 <text text-anchor="middle" x="380.5" y="-421.8" font-family="DejaVu Sans" font-size="14.00">Existing experiment.benchmark</text>
 <text text-anchor="middle" x="380.5" y="-406.8" font-family="DejaVu Sans" font-size="14.00">LHS or BoTorch produces coordinates</text>
 </g>

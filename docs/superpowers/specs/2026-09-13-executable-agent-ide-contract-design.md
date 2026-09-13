@@ -72,7 +72,16 @@ relationships. These are displayed beside the executable nodes in the same canva
 Dashed CODE boxes inspect the existing implementation; they cannot be connected as
 extra commands, serialized as execution nodes or painted as independently done.
 Repeated/added/rebound operation instances receive their own matching relationships.
-Low includes software functions and tools; Design's suitability decision is Middle.
+High is each agent's bounded LLM reasoning and decision layer. Middle is software
+processing, API/tool dispatch and internal workflow supervision. Low is the actual
+device/bridge execution boundary, not numerical computation or local queries.
+Guardian / Safety and Knowledge / Evidence are cross-cutting responsibilities.
+Software-only agents may have an empty Low area. Composite owner operations stay
+intact in Middle, with their actual model decisions exposed as High CODE nodes;
+classification must never split handlers or change call order, tools or handoffs.
+Legacy modules use `metadata.control_view.areas` and optional source-bound
+`checkpoint_details`, keyed by `phase:step_id`. Those details are display-only;
+legacy checkpoint IDs, ordering, serialization and runtime handlers stay unchanged.
 Document SVGs share this structure but use a separate light document theme, not the
 Runtime IDE's dark theme.
 

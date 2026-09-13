@@ -1,0 +1,148 @@
+<svg xmlns="http://www.w3.org/2000/svg" data-theme="document" viewBox="0 0 1184 1138" role="img" aria-label="Manipulation Agent Module five-area internal graph" style="font-family:Arial,sans-serif;background:#ffffff">
+      <title>Manipulation Agent Module — five-area internal graph</title><desc>Executable owner operations and explicit outcomes. Positions are presentation only. Composite LLM tools are not separate editable operations.</desc>
+      <rect width="100%" height="100%" fill="#ffffff"/>
+      <defs><marker id="control-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6z" fill="#526174"/></marker></defs>
+      <g class="runtime-control-area" data-control-area="high" pointer-events="none">
+      <rect x="360" y="56" width="488" height="148" rx="12" fill="#2463a5" fill-opacity=".035" stroke="#2463a5" stroke-opacity=".3"/>
+      <text x="376" y="82" fill="#2463a5" font-size="15" font-weight="600">High</text>
+      </g><g class="runtime-control-area" data-control-area="middle" pointer-events="none">
+      <rect x="360" y="312" width="488" height="436" rx="12" fill="#177768" fill-opacity=".035" stroke="#177768" stroke-opacity=".3"/>
+      <text x="376" y="338" fill="#177768" font-size="15" font-weight="600">Middle</text>
+      </g><g class="runtime-control-area" data-control-area="low" pointer-events="none">
+      <rect x="360" y="856" width="488" height="148" rx="12" fill="#4c6079" fill-opacity=".035" stroke="#4c6079" stroke-opacity=".3"/>
+      <text x="376" y="882" fill="#4c6079" font-size="15" font-weight="600">Low</text>
+      </g><g class="runtime-control-area" data-control-area="guardian" pointer-events="none">
+      <rect x="32" y="56" width="264" height="484" rx="12" fill="#a36b16" fill-opacity=".035" stroke="#a36b16" stroke-opacity=".3"/>
+      <text x="48" y="82" fill="#a36b16" font-size="15" font-weight="600">Guardian / Safety</text>
+      </g><g class="runtime-control-area" data-control-area="knowledge" pointer-events="none">
+      <rect x="896" y="56" width="264" height="708" rx="12" fill="#79529c" fill-opacity=".035" stroke="#79529c" stroke-opacity=".3"/>
+      <text x="912" y="82" fill="#79529c" font-size="15" font-weight="600">Knowledge / Evidence</text>
+      </g><defs><marker id="control-detail-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6z" fill="#526174"/></marker></defs><g data-implementation-edge="task" pointer-events="none"><title>unchanged composite task · call (code-owned)</title><path d="M476,436 C500,470 500,470 476,504" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>clear dispatch comes first · validation (code-owned)</title><path d="M384,542 C312,542 312,366 240,366" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>same-cycle clear branch · call (code-owned)</title><path d="M240,366 C432,366 432,686 624,686" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>existing replay path · call (code-owned)</title><path d="M624,686 C596,686 596,942 568,942" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>clear skill selection · call (code-owned)</title><path d="M624,686 C596,686 596,142 568,142" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>initial and post-model recheck · validation (code-owned)</title><path d="M384,542 C312,542 312,142 240,142" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>configured skill only · call (code-owned)</title><path d="M476,504 C500,342 500,342 476,180" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>claim before uncertain start · validation (code-owned)</title><path d="M384,142 C312,142 312,254 240,254" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>selected rollout execution · call (code-owned)</title><path d="M476,580 C500,742 500,742 476,904" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>existing completion recovery · call (code-owned)</title><path d="M568,542 C596,542 596,542 624,542" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>refresh status · call (code-owned)</title><path d="M624,542 C596,542 596,942 568,942" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>verified completion stop · call (code-owned)</title><path d="M476,580 C500,614 500,614 476,648" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>stop boundary · call (code-owned)</title><path d="M476,724 C500,814 500,814 476,904" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>Vision completion evidence · validation (code-owned)</title><path d="M384,542 C312,542 312,478 240,478" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>execution ended and Vision accepted · evidence (code-owned)</title><path d="M240,478 C432,478 432,142 624,142" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>execution artifacts · evidence (code-owned)</title><path d="M568,542 C744,542 744,142 920,142" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="deliver" pointer-events="none"><title>original owner AgentResult · evidence (code-owned)</title><path d="M920,254 C864,254 864,398 808,398" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="deliver" pointer-events="none"><title>runtime report fields · evidence (code-owned)</title><path d="M1012,404 C1036,478 1036,478 1012,552" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="deliver" pointer-events="none"><title>handoff and decisions · evidence (code-owned)</title><path d="M1012,516 C1036,534 1036,534 1012,552" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="deliver" pointer-events="none"><title>metadata and payload precedence · evidence (code-owned)</title><path d="M1012,292 C1036,422 1036,422 1012,552" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="deliver" pointer-events="none"><title>public run archives once · evidence (code-owned)</title><path d="M808,398 C864,398 864,702 920,702" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-node="task::task" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Existing task admission and dispatch; code-owned; ManipulationAgent._run_task">
+      <title>Existing task admission and dispatch
+Code-owned inside task
+agents/manipulation/agent.py · ManipulationAgent._run_task</title>
+      <rect x="384" y="504" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="522" fill="#172b4d" font-size="12">Existing task admission</text><text x="394" y="537" fill="#172b4d" font-size="12">and dispatch</text>
+      <text x="394" y="571" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::preflight" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Preflight and post-decision freshness recheck; code-owned; ManipulationAgent._preflight">
+      <title>Preflight and post-decision freshness recheck
+Code-owned inside task
+agents/manipulation/agent.py · ManipulationAgent._preflight</title>
+      <rect x="56" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="122" fill="#172b4d" font-size="12">Preflight and</text><text x="66" y="137" fill="#172b4d" font-size="12">post-decision freshness</text><text x="66" y="152" fill="#172b4d" font-size="12">recheck</text>
+      <text x="66" y="171" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::choice" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="LLM bounded skill selection; code-owned; select_manipulation_tool">
+      <title>LLM bounded skill selection
+Code-owned inside task
+agents/manipulation/decision.py · select_manipulation_tool</title>
+      <rect x="384" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#2463a5" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="122" fill="#172b4d" font-size="12">LLM bounded skill</text><text x="394" y="137" fill="#172b4d" font-size="12">selection</text>
+      <text x="394" y="171" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::once" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Persistent task start claim; code-owned; claim_skill_execution">
+      <title>Persistent task start claim
+Code-owned inside task
+agents/manipulation/decision.py · claim_skill_execution</title>
+      <rect x="56" y="216" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="234" fill="#172b4d" font-size="12">Persistent task start</text><text x="66" y="249" fill="#172b4d" font-size="12">claim</text>
+      <text x="66" y="283" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::rollout" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Rollout status recovery; code-owned; ManipulationAgent._refresh_existing_rollout_status">
+      <title>Rollout status recovery
+Code-owned inside task
+agents/manipulation/agent.py · ManipulationAgent._refresh_existing_rollout_status</title>
+      <rect x="624" y="504" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="522" fill="#172b4d" font-size="12">Rollout status recovery</text>
+      <text x="634" y="571" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::stop" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Stop rollout for verified completion; code-owned; ManipulationAgent._stop_rollout_for_completion">
+      <title>Stop rollout for verified completion
+Code-owned inside task
+agents/manipulation/agent.py · ManipulationAgent._stop_rollout_for_completion</title>
+      <rect x="384" y="648" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="666" fill="#172b4d" font-size="12">Stop rollout for verified</text><text x="394" y="681" fill="#172b4d" font-size="12">completion</text>
+      <text x="394" y="715" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::robot" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="LeRobot rollout, replay and stop boundary; code-owned; LeRobotBridge">
+      <title>LeRobot rollout, replay and stop boundary
+Code-owned inside task
+device_bridges/lerobot/bridge.py · LeRobotBridge</title>
+      <rect x="384" y="904" width="184" height="76" rx="5" fill="#ffffff" stroke="#4c6079" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="922" fill="#172b4d" font-size="12">LeRobot rollout, replay</text><text x="394" y="937" fill="#172b4d" font-size="12">and stop boundary</text>
+      <text x="394" y="971" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::clear" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Existing UTM clear-cycle dispatch; code-owned; run_clear_manipulation">
+      <title>Existing UTM clear-cycle dispatch
+Code-owned inside task
+utils/utm_clear_cycle.py · run_clear_manipulation</title>
+      <rect x="624" y="648" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="666" fill="#172b4d" font-size="12">Existing UTM clear-cycle</text><text x="634" y="681" fill="#172b4d" font-size="12">dispatch</text>
+      <text x="634" y="715" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::clear_scope" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Same-cycle Equipment handoff admission; code-owned; current_clear">
+      <title>Same-cycle Equipment handoff admission
+Code-owned inside task
+utils/utm_clear_cycle.py · current_clear</title>
+      <rect x="56" y="328" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="346" fill="#172b4d" font-size="12">Same-cycle Equipment</text><text x="66" y="361" fill="#172b4d" font-size="12">handoff admission</text>
+      <text x="66" y="395" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::verification" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Deterministic Vision verification gate; code-owned; ManipulationAgent._verification_status">
+      <title>Deterministic Vision verification gate
+Code-owned inside task
+agents/manipulation/agent.py · ManipulationAgent._verification_status</title>
+      <rect x="56" y="440" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="458" fill="#172b4d" font-size="12">Deterministic Vision</text><text x="66" y="473" fill="#172b4d" font-size="12">verification gate</text>
+      <text x="66" y="507" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::review" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="LLM post-Vision result review; code-owned; review_manipulation_result">
+      <title>LLM post-Vision result review
+Code-owned inside task
+agents/manipulation/decision.py · review_manipulation_result</title>
+      <rect x="624" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#2463a5" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="122" fill="#172b4d" font-size="12">LLM post-Vision result</text><text x="634" y="137" fill="#172b4d" font-size="12">review</text>
+      <text x="634" y="171" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::evidence" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Rollout evidence references; code-owned; ManipulationAgent._evidence_refs">
+      <title>Rollout evidence references
+Code-owned inside task
+agents/manipulation/agent.py · ManipulationAgent._evidence_refs</title>
+      <rect x="920" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="122" fill="#172b4d" font-size="12">Rollout evidence</text><text x="930" y="137" fill="#172b4d" font-size="12">references</text>
+      <text x="930" y="171" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="deliver::report" data-implementation-owner="deliver" pointer-events="auto" role="img"  aria-label="Manipulation task report; code-owned; ManipulationAgent._manipulation_report">
+      <title>Manipulation task report
+Code-owned inside deliver
+agents/manipulation/agent.py · ManipulationAgent._manipulation_report</title>
+      <rect x="920" y="216" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="234" fill="#172b4d" font-size="12">Manipulation task report</text>
+      <text x="930" y="283" fill="#526174" font-size="9">CODE · deliver</text>
+    </g><g data-implementation-node="deliver::screen" data-implementation-owner="deliver" pointer-events="auto" role="img"  aria-label="Runtime report snapshot; code-owned; ManipulationAgent._manipulation_agent_report_snapshot">
+      <title>Runtime report snapshot
+Code-owned inside deliver
+agents/manipulation/agent.py · ManipulationAgent._manipulation_agent_report_snapshot</title>
+      <rect x="920" y="328" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="346" fill="#172b4d" font-size="12">Runtime report snapshot</text>
+      <text x="930" y="395" fill="#526174" font-size="9">CODE · deliver</text>
+    </g><g data-implementation-node="deliver::packet" data-implementation-owner="deliver" pointer-events="auto" role="img"  aria-label="Robot task handoff result; code-owned; ManipulationAgent._robot_task_result">
+      <title>Robot task handoff result
+Code-owned inside deliver
+agents/manipulation/agent.py · ManipulationAgent._robot_task_result</title>
+      <rect x="920" y="440" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="458" fill="#172b4d" font-size="12">Robot task handoff result</text>
+      <text x="930" y="507" fill="#526174" font-size="9">CODE · deliver</text>
+    </g><g data-implementation-node="deliver::projection" data-implementation-owner="deliver" pointer-events="auto" role="img"  aria-label="Owner report projection; code-owned; project_manipulation_report">
+      <title>Owner report projection
+Code-owned inside deliver
+agents/manipulation/presentation.py · project_manipulation_report</title>
+      <rect x="920" y="552" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="570" fill="#172b4d" font-size="12">Owner report projection</text>
+      <text x="930" y="619" fill="#526174" font-size="9">CODE · deliver</text>
+    </g><g data-implementation-node="deliver::archive" data-implementation-owner="deliver" pointer-events="auto" role="img"  aria-label="Public run archive wrapper; code-owned; archive_agent_run">
+      <title>Public run archive wrapper
+Code-owned inside deliver
+utils/agent_artifact_archive.py · archive_agent_run</title>
+      <rect x="920" y="664" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="682" fill="#172b4d" font-size="12">Public run archive</text><text x="930" y="697" fill="#172b4d" font-size="12">wrapper</text>
+      <text x="930" y="731" fill="#526174" font-size="9">CODE · deliver</text>
+    </g><g data-source="task" data-target="deliver" data-outcome="next" data-kind="evidence"><title>task → deliver · next · evidence</title><path d="M 576 398 C 587.2 398, 604.8 398, 616 398" fill="none" stroke="#79529c" stroke-opacity=".8" stroke-width="2" stroke-dasharray="2 5" marker-end="url(#control-arrow)"/><rect x="577" y="388" width="38" height="20" rx="4" fill="#ffffff"/><text x="596" y="402" text-anchor="middle" fill="#79529c" font-size="11">next</text></g><g><title>task · manipulation.task</title>
+        <rect x="384" y="360" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="396" y="381" fill="#172b4d" font-size="12">Composite bounded</text><text x="396" y="397" fill="#172b4d" font-size="12">manipulation task</text>
+        <text x="489" y="428" fill="#177768" font-size="10">LLM inside</text></g><g><title>deliver · manipulation.deliver</title>
+        <rect x="624" y="360" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="636" y="381" fill="#172b4d" font-size="12">Deliver owner result</text>
+        </g>
+      <line x1="24" x2="62" y1="1062" y2="1062" stroke="#526174" stroke-width="2" stroke-dasharray=""/><text x="72" y="1066" fill="#172b4d" font-size="14">Execution</text><line x1="244" x2="282" y1="1062" y2="1062" stroke="#526174" stroke-width="2" stroke-dasharray="8 5"/><text x="292" y="1066" fill="#172b4d" font-size="14">Validation</text><line x1="464" x2="502" y1="1062" y2="1062" stroke="#526174" stroke-width="2" stroke-dasharray="2 5"/><text x="512" y="1066" fill="#172b4d" font-size="14">Evidence</text><line x1="684" x2="722" y1="1062" y2="1062" stroke="#526174" stroke-width="2" stroke-dasharray="5 3"/><text x="732" y="1066" fill="#172b4d" font-size="14">Internal call</text>
+      <text x="24" y="1098" fill="#526174" font-size="13">Solid boxes: executable operations · Dashed CODE boxes: implementation relationships · LLM: bounded decision</text>
+    </svg>

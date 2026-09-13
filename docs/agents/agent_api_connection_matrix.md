@@ -63,6 +63,33 @@ and the current Sunburst figure references. It adds no runtime or device path.
 
 ## Source of Truth
 
+### Installed Manipulation Owner (2026-09-13)
+
+| Surface | Implemented boundary |
+|---|---|
+| Agent/package | `agent.manipulation_agent`, owner and package `manipulation@1.0.0`; canonical code under `agents/manipulation/` with legacy module aliases |
+| Execution | `/api/modules/manipulation` uses two Middle composite operations, `manipulation.task` and `manipulation.deliver`; source-bound CODE relationships expose actual High/Low and cross-cutting responsibilities |
+| Live report | `/api/agents/manipulation/report` uses the owner projector; `/module-assets/manipulation/live_report.js` supplies eight existing cards through shared telemetry/lifecycle services |
+| Bridge | `lerobot@1.0.0`, one `lerobot_bridge` runtime identity shared with Vision; existing rollout/replay/status/stop and workspace APIs |
+| Settings/evidence | Existing profile, run snapshot and archive paths; no additional store or physical validation |
+
+See the [Manipulation Reference](manipulation_agent.md#installed-package-and-executable-structure)
+and [LeRobot Reference](../device_bridges/lerobot_bridge.md).
+
+### Installed Vision Owner (2026-09-13)
+
+| Surface | Current owner and boundary |
+|---|---|
+| Agent/package | `agent.vision_agent`, installed `vision@1.0.0`; owner code under `agents/vision/` |
+| Module API | Existing `/api/modules/vision` save/validate/preview/catalog routes use the registered execution catalog; saved valid graphs drive the actual owner |
+| Live report | `/api/agents/vision/report` projects through the module; `/module-assets/vision/live_report.js` mounts the original six cards through the common live host |
+| Observation bridge | `camera_vision@1.0.0`, shared UTM observer, camera/runtime/pose evidence; no new motion owner |
+| Physical dependency | Existing LeRobot tools own ActiveCam movement/capture/return and rollout stop; original gates and ordering remain |
+| Evidence | Existing AgentResult, signals, timestamps and run/loop/attempt storage retained; fresh registered-model validation used virtual equipment |
+
+See the [Vision Reference](vision_agent.md) and
+[Camera/Vision Reference](../device_bridges/utm_vision_bridge.md).
+
 - `agents/*_agent.py`
 - `agents/*_decision*.py`, `agents/analysis_improvement.py`, `agents/source_curation.py`
 - `graphs/modules/*/module.yaml`
@@ -117,16 +144,16 @@ progression.
 
 | Agent | High-Level Control | Middle-Level Control | Low-Level Control |
 |---|---|---|---|
-| Orchestrator | primary owner: mission, dispatch, handoff, cycle, route | intent/mission/context/follow-up/decision compilation | prohibited from direct device execution |
-| Design | LLM accept / inspect / return decision in the governed Design stage | constrained candidate preparation and checked specification finalization | local evidence/check tools; no device authority |
-| Specimen Making | fabrication stage and Vision/Manipulation readiness | geometry-to-fabrication digital thread and completion conditions | geometry tools and selected printer provider bridge |
-| Vision | observation stage plus verification sidecars; execute or return the current registered contract | decision/image protocol, same-capture review, and source/freshness/quality arbitration | camera, ROS/UTM, ActiveCam move/capture/return, verified rollout stop; no arbitrary driver or replay-start command |
-| Manipulation | configured-skill suitability and evidence-supported task handoff | transfer/clearance tool dispatch, supervision and post-Vision result review | LeRobot rollout/fixed-skill/replay, process/port/camera and optional Isaac boundaries |
-| Lab Equipment | measurement stage after verified placement; existing clearance/handoff routing | LLM selects configured Flow and reviews terminal evidence; durable claim and bounded safe recovery | Existing Skill Runtime and Windows/Local PyAutoGUI workers; no intermediate Equipment LLM calls |
-| Analysis | measurement admissibility and offered simulation/improvement choices | parse/normalize/derive objective; schedule and review independent frozen FEM | numeric routines, registered prepare/solve and field postprocessing |
-| Knowledge | reusable evidence and scoped context before BO/agent consumption | provenance, typed records, page-wise source curation and context publication | audit/ontology/Markdown/JSONL and Source Library adapters; no active graph backend |
-| BO | BO-owned strategy and result judgment before Guardian/Design | Validated dispatch, LHS state, candidate integrity and handoff | BoTorch and benchmark computation tools |
-| Guardian | cross-level continuation authority | policy/risk/evidence/health/approval evaluation with advisory LLM context | read-only health/queue plus block/stop; hard interlocks remain in bridges |
+| Orchestrator | LLM intent, availability and admitted action review | Existing runtime supervision, contract/plan builders and tool dispatch | No direct device execution |
+| Design | LLM candidate suitability and bounded tool choice | Candidate generation, inspection, validation and handoff | No direct device execution |
+| Specimen Making | LLM fabrication suitability and bounded tool choice | Geometry, manufacturing checks, existing printer API calls and handoff | Selected Printer Fleet provider and printer |
+| Vision | LLM observation choice and same-frame evidence review | Task resolution, detectors, interlocks, capture/status/stop API dispatch | Selected camera and LeRobot device paths |
+| Manipulation | LLM saved-skill suitability and post-Vision result review | Profile binding, API dispatch, preflight and completion supervision | LeRobot robot policy/replay execution and device lifecycle |
+| Lab Equipment | LLM stacked-Flow selection and terminal evidence/recovery review | Existing exact Flow/Skill supervision, APIs, CSV checks and handoff | Selected desktop/instrument worker and device driver |
+| Analysis | LLM data, simulation and model-review choices | Parsing, units, objectives, solver, postprocessing and asynchronous FEM scheduling | No direct device execution |
+| Knowledge | LLM scoped retrieval and evidence curation | Provenance, ontology, Markdown/JSONL persistence and context assembly | No direct device execution |
+| BO | LLM strategy/tool choice and numerical result review | LHS/BoTorch, constraints, numeric recommendation and handoff | No direct device execution |
+| Guardian | Existing LLM policy-evidence review | Deterministic safety/risk checks, health APIs and incident/route results | Hardware interlocks and effective stops remain in device bridges |
 
 See [Three-Level Control Model](../runtime/three_level_control_model.md) for
 state ownership, failure propagation, and the manual Device Workspace boundary.

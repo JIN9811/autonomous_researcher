@@ -124,9 +124,9 @@ sequential runtime stages.
 
 | Area | Design responsibility and boundary | Detail |
 |---|---|---|
-| High-Level Control | Interpret the bounded design task and return an accepted specification or owner-review result; global mission/routing stays with Orchestrator | [Position and handoffs](#closed-loop-position-and-handoffs), [decision](#decision-and-evaluation) |
-| Middle-Level Control | Prepare candidates and evidence, run the bounded decision loop, and finalize the result | [Internal workflow](#internal-workflow) |
-| Low-Level Control | Execute local queries/checks and code-owned preview generation; no device commands | [Tools and connections](#tools-apis-and-connections) |
+| High-Level Control | LLM interprets bounded candidate evidence and selects inspect, accept or return tools; global routing stays with Orchestrator | [Position and handoffs](#closed-loop-position-and-handoffs), [decision](#decision-and-evaluation) |
+| Middle-Level Control | Prepare candidates; execute local queries, checks and previews; dispatch bounded tools and finalize the handoff | [Internal workflow](#internal-workflow) |
+| Low-Level Control | No direct device execution; downstream Specimen owns fabrication | [Tools and connections](#tools-apis-and-connections) |
 | Guardian / Safety | Enforce input ownership, hard checks, budgets and existing handoff gates across the workflow | [Safety and recovery](#safety-and-recovery) |
 | Knowledge / Evidence | Supply compatible history and preserve evaluation, decision and artifact provenance | [Decision evidence](#decision-and-evaluation), [artifacts and verification](#artifacts-and-verification) |
 
@@ -181,13 +181,13 @@ or `blocked → owner_review`. Editing a valid route changes backend execution a
 activation; moving a node changes layout only. Five areas classify responsibility,
 not five mandatory sequential stages.
 
-The **LLM** node is the existing composite, bounded suitability/tool-calling loop.
+The **LLM inside** operation retains the existing composite suitability/tool loop.
 Candidate preparation, result finalization and review reporting retain their
 existing functions in the [owner adapters](../../agents/design/execution.py).
-Its **Middle** decision is surrounded by source-bound internal relationships:
-candidate generation and inspection tools in **Low**, constraint and acceptance
-checks in **Guardian / Safety**, and context, traces and reports in **Knowledge /
-Evidence**. **High** shows the handoff boundary, not a new mission decision.
+Its actual LLM suitability and tool decisions appear in **High**. Candidate
+generation, inspection and deterministic handoff remain **Middle**, constraint
+and acceptance checks remain **Guardian / Safety**, and context, traces and
+reports remain **Knowledge / Evidence**. Design has no direct **Low** device work.
 The [owner structure](../../agents/design/structure.py) supplies these relationships
 through the existing catalog API. Dashed **CODE** boxes reference existing functions
 or inline tool branches; they do not add commands, editable inner-loop routes or

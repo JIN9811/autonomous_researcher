@@ -63,8 +63,7 @@ module:
   metadata:
     control_view:
       empty_roles:
-        high: Mission authority belongs to Orchestrator
-        low: Candidate and inspection functions are code-owned
+        low: No direct device execution; fabrication belongs to Specimen
         knowledge: Source context and result evidence
   notes: >-
     GUI/module editor may edit this module config, but execution remains bound to

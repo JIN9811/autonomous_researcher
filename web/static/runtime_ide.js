@@ -3986,7 +3986,7 @@ function renderGraph(graph) {
           ${readinessBadge}
           ${nonExecutableBadge}
           ${outputBadge}
-          ${node.metadata?.llm_decision ? '<em class="runtime-control-llm">LLM</em>' : ''}
+          ${node.metadata?.llm_decision ? `<em class="runtime-control-llm">${node.metadata?.control_area === 'high' ? 'LLM' : 'LLM inside'}</em>` : ''}
           <span class="runtime-ide-node-copy">
             <strong title="${escapeHtml(node.metadata?.display_label || node.label || node.id)}">${escapeHtml(node.metadata?.display_label || node.label || node.id)}</strong>
             <small title="${escapeHtml(edge)}">${escapeHtml(isExecutionGraph(activeGraph)?`${node.area} · ${node.handler}`:node.metadata?.control_area ? `${node.metadata.control_area} · ${node.metadata.module_step_phase === 'pre_execution' ? 'pre' : 'step'} ${Number(node.metadata.module_step_index) + 1}` : edge)}</small>
@@ -5069,6 +5069,14 @@ function nodeRuntimeContractMarkup(node, module) {
   `;
 }
 
+function implementationInspectorMarkup(node, implementation) {
+  if (!implementation) return '';
+  return `<section class="runtime-implementation-inspector runtime-node-inspector-card wide"><h4>Internal implementation</h4>
+    <p>Code-owned relationships, not additional executable operations. Select a CODE box to inspect its owner here.</p>
+    <dl>${implementation.nodes.map(item=>`<dt>${escapeHtml(item.label)} · ${escapeHtml(item.area)}</dt><dd><code>${escapeHtml(item.source.symbol)}</code><br/><small>${escapeHtml(item.source.path)}</small></dd>`).join('')}</dl>
+    <ul>${implementation.edges.map(edge=>`<li>${escapeHtml(edge.source==='$operation'?node.id:edge.source)} → ${escapeHtml(edge.target==='$operation'?node.id:edge.target)}: ${escapeHtml(edge.label)}</li>`).join('')}</ul></section>`;
+}
+
 function renderExecutionInspector(node) {
   const graph=activeGraph, operations=graph.metadata.execution_catalog?.operations || [];
   const op=AX4LABExecutionEditor.operation(graph,node?.handler);
@@ -5093,10 +5101,7 @@ function renderExecutionInspector(node) {
     <button class="btn tiny" id="ide-execution-apply">Apply operation</button>
     <button class="btn tiny danger" id="ide-execution-delete">Delete operation</button>
     <div id="ide-execution-inspector-error" role="alert"></div>
-    ${implementation?`<section class="runtime-implementation-inspector"><h4>Internal implementation</h4>
-    <p>Code-owned relationships, not additional executable operations. Select a CODE box to inspect its owner here.</p>
-    <dl>${implementation.nodes.map(item=>`<dt>${escapeHtml(item.label)} · ${escapeHtml(item.area)}</dt><dd><code>${escapeHtml(item.source.symbol)}</code><br/><small>${escapeHtml(item.source.path)}</small></dd>`).join('')}</dl>
-    <ul>${implementation.edges.map(edge=>`<li>${escapeHtml(edge.source==='$operation'?node.id:edge.source)} → ${escapeHtml(edge.target==='$operation'?node.id:edge.target)}: ${escapeHtml(edge.label)}</li>`).join('')}</ul></section>`:''}`:'<p>Select or add an operation.</p>'}
+    ${implementationInspectorMarkup(node,implementation)}`:'<p>Select or add an operation.</p>'}
     <p>Entry: ${escapeHtml(graph.entry_node)} · terminal nodes: ${escapeHtml(graph.finish_nodes.join(', ') || 'none')}. Validate reports incomplete routes and dependencies.</p>
     </div>`;
   document.getElementById('ide-execution-reload').onclick=()=>loadModule(graph.metadata.module_id).catch(err=>log(String(err),'error'));
@@ -5173,6 +5178,7 @@ function renderNodeInspector() {
   const nodeEventDisabled = problemEventId ? "" : "disabled";
   nodeInspector.innerHTML = `
     <div class="runtime-node-inspector-grid">
+      ${implementationInspectorMarkup(node, activeGraph?.metadata?.control_view?.view?.checkpoint_details?.[`${node.metadata?.module_step_phase}:${node.metadata?.module_step_id}`])}
       <section class="runtime-node-inspector-card wide runtime-node-quick-actions">
         <span>
           <h3>Node Quick Actions</h3>
@@ -5830,7 +5836,7 @@ function renderDeviceBridges() {
   const runtimeBridges = latestStateSnapshot?.runtime_ide_contract?.device_bridges
     || graphTabs.find(item => item.id === MAIN_GRAPH_TAB_ID)?.graph?.metadata?.device_bridges || [];
   const graph = tab?.bridgeId
-    ? AX4LABExperimentalPackages.projectBridgeInternal(packageCatalogPayload, tab.bridgeId, runtimeBridges)
+    ? AX4LABExperimentalPackages.projectBridgeInternal(packageCatalogPayload, tab.bridgeId, runtimeBridges, experimentalPackageRefs)
     : AX4LABExperimentalPackages.projectBridgeTopology(packageCatalogPayload, experimentalPackageRefs, runtimeBridges);
   tab.baselineGraph = cloneConfig(graph);
   tab.dirty = false;

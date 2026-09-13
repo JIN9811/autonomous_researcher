@@ -1,5 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
 const packages = require('../../web/static/experimental_packages.js');
 
 const catalog = {
@@ -28,6 +29,38 @@ const catalog = {
     binding_requirements: [{ id: 'printer_fleet_connection', kind: 'device', owner_id: 'printer_fleet', required: true }],
   }],
 };
+
+test('bridge drill-down retains selected and unselected shared package owners', () => {
+  for (const refs of [[], [{id:'specimen',version:'1.0.0'}], [{id:'specimen',version:'1.0.0'},{id:'shared_specimen',version:'1.0.0'}]]) {
+    const graph = packages.projectBridgeInternal(catalog, 'printer_fleet', [], refs);
+    const owners = graph.nodes[0].metadata.contract.owners;
+    assert.deepEqual(owners.map(owner => [owner.id, owner.inDraft]), [
+      ['specimen', refs.some(ref => ref.id === 'specimen')],
+      ['shared_specimen', refs.some(ref => ref.id === 'shared_specimen')],
+    ]);
+  }
+});
+
+test('installed LeRobot drill-down groups real capabilities instead of expanding every tool', () => {
+  const root = require('node:path').resolve(__dirname, '../..');
+  const bridge = JSON.parse(execFileSync(process.env.PYTHON || 'python3', [
+    '-c',
+    'import json; from device_bridges.lerobot.module import MODULE; print(json.dumps(MODULE.describe()))',
+  ], { cwd: root, encoding: 'utf8' }));
+  const graph = packages.projectBridgeInternal({
+    ok: true, schema: 'ax4lab.package_catalog.v1', errors: [], agent_packages: [],
+    bridge_modules: [{ ...bridge, package_owners: [] }],
+  }, 'lerobot');
+  const internals = graph.nodes.slice(1);
+
+  assert.deepEqual(internals.map(node => node.metadata.contract.id), [
+    'profiles_ports', 'active_robot_cam', 'teleoperation', 'recording', 'training',
+    'rollout', 'replay', 'datasets_policies', 'isaac_sidecars', 'visualization',
+  ]);
+  assert.ok(internals.every(node => node.metadata.structure_kind === 'provider'));
+  assert.equal(graph.edges.length, 10);
+  assert.ok(graph.edges.every(edge => edge.label === 'contains'));
+});
 
 test('graph projection selects exact installed Agent Packages and keeps bridge-free packages explicit', () => {
   const graph = { nodes: [

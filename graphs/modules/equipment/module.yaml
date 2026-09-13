@@ -85,3 +85,36 @@ module:
     The Equipment-owned decision boundary selects the configured stacked Flow and
     reviews screenshots and evidence after terminal completion or failure. It does
     not interrupt running blocks; existing Vision and safety gates remain active.
+
+  metadata:
+    control_view:
+      areas:
+        internal_graph:00_verify_equipment_entry_handoff: guardian
+        internal_graph:00_preflight_all_bound_resources: guardian
+        internal_graph:01_resolve_equipment_profile: middle
+        internal_graph:02_validate_bridge_contract: guardian
+        internal_graph:03_execute_registered_protocol: middle
+        internal_graph:04_exception_recovery_gate: middle
+        internal_graph:05_validate_evidence_handoff: guardian
+      checkpoint_details:
+        internal_graph:03_execute_registered_protocol:
+          nodes:
+          - id: choice
+            label: "LLM stacked-workflow suitability"
+            area: high
+            source: {path: agents/equipment_decision.py, symbol: decide_equipment}
+          - id: device
+            label: "Selected desktop / instrument worker"
+            area: low
+            source: {path: device_bridges/windows_pyautogui_bridge.py, symbol: WindowsPyAutoGUIBridge}
+          edges:
+          - {source: $operation, target: choice, kind: evidence, label: "existing internal decision"}
+          - {source: $operation, target: device, kind: call, label: "existing selected device path"}
+        internal_graph:04_exception_recovery_gate:
+          nodes:
+          - id: review
+            label: "LLM terminal evidence / recovery review"
+            area: high
+            source: {path: agents/equipment_decision.py, symbol: decide_equipment}
+          edges:
+          - {source: $operation, target: review, kind: evidence, label: "existing internal decision"}

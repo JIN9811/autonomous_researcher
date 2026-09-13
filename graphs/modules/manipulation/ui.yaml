@@ -1,0 +1,12 @@
+ui:
+  short: MAN
+  icon: /static/live_gui_icons/manipulation_agent.svg
+  report_title: Manipulation Agent
+  chat:
+    mode: open_on_demand
+  renderer:
+    dashboard: module
+    report: module
+    fallback: descriptor
+  cards: []
+  report_sections: []

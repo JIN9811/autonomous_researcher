@@ -1,0 +1,174 @@
+<svg xmlns="http://www.w3.org/2000/svg" data-theme="document" viewBox="0 0 1184 1858" role="img" aria-label="Vision Agent Module five-area internal graph" style="font-family:Arial,sans-serif;background:#ffffff">
+      <title>Vision Agent Module — five-area internal graph</title><desc>Executable owner operations and explicit outcomes. Positions are presentation only. Composite LLM tools are not separate editable operations.</desc>
+      <rect width="100%" height="100%" fill="#ffffff"/>
+      <defs><marker id="control-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6z" fill="#526174"/></marker></defs>
+      <g class="runtime-control-area" data-control-area="high" pointer-events="none">
+      <rect x="360" y="56" width="488" height="292" rx="12" fill="#2463a5" fill-opacity=".035" stroke="#2463a5" stroke-opacity=".3"/>
+      <text x="376" y="82" fill="#2463a5" font-size="15" font-weight="600">High</text>
+      </g><g class="runtime-control-area" data-control-area="middle" pointer-events="none">
+      <rect x="360" y="456" width="488" height="1012" rx="12" fill="#177768" fill-opacity=".035" stroke="#177768" stroke-opacity=".3"/>
+      <text x="376" y="482" fill="#177768" font-size="15" font-weight="600">Middle</text>
+      </g><g class="runtime-control-area" data-control-area="low" pointer-events="none">
+      <rect x="360" y="1576" width="488" height="148" rx="12" fill="#4c6079" fill-opacity=".035" stroke="#4c6079" stroke-opacity=".3"/>
+      <text x="376" y="1602" fill="#4c6079" font-size="15" font-weight="600">Low</text>
+      </g><g class="runtime-control-area" data-control-area="guardian" pointer-events="none">
+      <rect x="32" y="56" width="264" height="596" rx="12" fill="#a36b16" fill-opacity=".035" stroke="#a36b16" stroke-opacity=".3"/>
+      <text x="48" y="82" fill="#a36b16" font-size="15" font-weight="600">Guardian / Safety</text>
+      </g><g class="runtime-control-area" data-control-area="knowledge" pointer-events="none">
+      <rect x="896" y="56" width="264" height="260" rx="12" fill="#79529c" fill-opacity=".035" stroke="#79529c" stroke-opacity=".3"/>
+      <text x="912" y="82" fill="#79529c" font-size="15" font-weight="600">Knowledge / Evidence</text>
+      </g><defs><marker id="control-detail-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6z" fill="#526174"/></marker></defs><g data-implementation-edge="prepare" pointer-events="none"><title>original admission order · validation (code-owned)</title><path d="M148,180 C172,198 172,198 148,216" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="prepare" pointer-events="none"><title>preflight route · call (code-owned)</title><path d="M240,254 C432,254 432,830 624,830" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="observe" pointer-events="none"><title>task contract · call (code-owned)</title><path d="M476,580 C500,758 500,758 476,936" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="observe" pointer-events="none"><title>bounded choice when applicable · call (code-owned)</title><path d="M476,504 C500,342 500,342 476,180" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="observe" pointer-events="none"><title>placement admission · validation (code-owned)</title><path d="M384,542 C312,542 312,366 240,366" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="observe" pointer-events="none"><title>composite observation · call (code-owned)</title><path d="M568,542 C596,542 596,974 624,974" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="observe" pointer-events="none"><title>camera route when selected · call (code-owned)</title><path d="M624,974 C596,974 596,1662 568,1662" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="observe" pointer-events="none"><title>ActiveCam route when selected · call (code-owned)</title><path d="M716,1012 C740,1318 740,1318 716,1624" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="observe" pointer-events="none"><title>existing stop boundary · call (code-owned)</title><path d="M568,1118 C596,1118 596,1662 624,1662" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="observe" pointer-events="none"><title>verified placement stop · call (code-owned)</title><path d="M624,974 C596,974 596,1118 568,1118" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="observe" pointer-events="none"><title>stop precedes placement review · evidence (code-owned)</title><path d="M568,1118 C596,1118 596,142 624,142" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="observe" pointer-events="none"><title>same frame · evidence (code-owned)</title><path d="M716,936 C740,558 740,558 716,180" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="observe" pointer-events="none"><title>persist evidence · call (code-owned)</title><path d="M808,974 C864,974 864,142 920,142" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="observe" pointer-events="none"><title>downstream readiness · validation (code-owned)</title><path d="M384,542 C312,542 312,478 240,478" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="clearance" pointer-events="none"><title>composite clearance · call (code-owned)</title><path d="M716,580 C740,830 740,830 716,1080" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="clearance" pointer-events="none"><title>same invocation scope · validation (code-owned)</title><path d="M624,1118 C432,1118 432,590 240,590" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="clearance" pointer-events="none"><title>existing early-stop route · call (code-owned)</title><path d="M624,1118 C596,1118 596,1262 568,1262" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="clearance" pointer-events="none"><title>captured clearance frame · evidence (code-owned)</title><path d="M624,1118 C596,1118 596,286 568,286" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="deliver" pointer-events="none"><title>completed owner result · evidence (code-owned)</title><path d="M920,254 C744,254 744,686 568,686" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="deliver_prepared" pointer-events="none"><title>prepared owner result · evidence (code-owned)</title><path d="M716,1224 C740,974 740,974 716,724" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="deliver_clearance" pointer-events="none"><title>clearance owner result · evidence (code-owned)</title><path d="M476,1368 C500,1118 500,1118 476,868" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-node="prepare::admission" data-implementation-owner="prepare" pointer-events="auto" role="img"  aria-label="Clearance, stop and preflight admission; code-owned; VisionAgent._prepare_observation">
+      <title>Clearance, stop and preflight admission
+Code-owned inside prepare
+agents/vision/agent.py · VisionAgent._prepare_observation</title>
+      <rect x="56" y="216" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="234" fill="#172b4d" font-size="12">Clearance, stop and</text><text x="66" y="249" fill="#172b4d" font-size="12">preflight admission</text>
+      <text x="66" y="283" fill="#526174" font-size="9">CODE · prepare</text>
+    </g><g data-implementation-node="prepare::preflight" data-implementation-owner="prepare" pointer-events="auto" role="img"  aria-label="Immutable printer artifact transfer inputs; code-owned; VisionAgent._no_actuation_transfer_preflight">
+      <title>Immutable printer artifact transfer inputs
+Code-owned inside prepare
+agents/vision/agent.py · VisionAgent._no_actuation_transfer_preflight</title>
+      <rect x="624" y="792" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="810" fill="#172b4d" font-size="12">Immutable printer</text><text x="634" y="825" fill="#172b4d" font-size="12">artifact transfer inputs</text>
+      <text x="634" y="859" fill="#526174" font-size="9">CODE · prepare</text>
+    </g><g data-implementation-node="observe::task" data-implementation-owner="observe" pointer-events="auto" role="img"  aria-label="Resolve observation task; code-owned; VisionAgent._resolve_task">
+      <title>Resolve observation task
+Code-owned inside observe
+agents/vision/agent.py · VisionAgent._resolve_task</title>
+      <rect x="384" y="936" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="954" fill="#172b4d" font-size="12">Resolve observation task</text>
+      <text x="394" y="1003" fill="#526174" font-size="9">CODE · observe</text>
+    </g><g data-implementation-node="observe::choice" data-implementation-owner="observe" pointer-events="auto" role="img"  aria-label="LLM observation tool choice; code-owned; select_vision_tool">
+      <title>LLM observation tool choice
+Code-owned inside observe
+agents/vision/decision.py · select_vision_tool</title>
+      <rect x="384" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#2463a5" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="122" fill="#172b4d" font-size="12">LLM observation tool</text><text x="394" y="137" fill="#172b4d" font-size="12">choice</text>
+      <text x="394" y="171" fill="#526174" font-size="9">CODE · observe</text>
+    </g><g data-implementation-node="observe::capture" data-implementation-owner="observe" pointer-events="auto" role="img"  aria-label="Existing capture and placement interlock composite; code-owned; VisionAgent._observe_and_review">
+      <title>Existing capture and placement interlock composite
+Code-owned inside observe
+agents/vision/agent.py · VisionAgent._observe_and_review</title>
+      <rect x="624" y="936" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="954" fill="#172b4d" font-size="12">Existing capture and</text><text x="634" y="969" fill="#172b4d" font-size="12">placement interlock</text><text x="634" y="984" fill="#172b4d" font-size="12">composite</text>
+      <text x="634" y="1003" fill="#526174" font-size="9">CODE · observe</text>
+    </g><g data-implementation-node="observe::camera" data-implementation-owner="observe" pointer-events="auto" role="img"  aria-label="Camera acquisition / selected provider; code-owned; RealSenseBridge.capture_one_frame">
+      <title>Camera acquisition / selected provider
+Code-owned inside observe
+device_bridges/camera_vision/realsense_bridge.py · RealSenseBridge.capture_one_frame</title>
+      <rect x="384" y="1624" width="184" height="76" rx="5" fill="#ffffff" stroke="#4c6079" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="1642" fill="#172b4d" font-size="12">Camera acquisition /</text><text x="394" y="1657" fill="#172b4d" font-size="12">selected provider</text>
+      <text x="394" y="1691" fill="#526174" font-size="9">CODE · observe</text>
+    </g><g data-implementation-node="observe::robot" data-implementation-owner="observe" pointer-events="auto" role="img"  aria-label="LeRobot ActiveCam and rollout boundary; code-owned; LeRobotBridge">
+      <title>LeRobot ActiveCam and rollout boundary
+Code-owned inside observe
+device_bridges/lerobot/bridge.py · LeRobotBridge</title>
+      <rect x="624" y="1624" width="184" height="76" rx="5" fill="#ffffff" stroke="#4c6079" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="1642" fill="#172b4d" font-size="12">LeRobot ActiveCam and</text><text x="634" y="1657" fill="#172b4d" font-size="12">rollout boundary</text>
+      <text x="634" y="1691" fill="#526174" font-size="9">CODE · observe</text>
+    </g><g data-implementation-node="observe::interlock" data-implementation-owner="observe" pointer-events="auto" role="img"  aria-label="Refresh rollout evidence and interlock; code-owned; VisionAgent._refresh_rollout_status_for_utm_completion">
+      <title>Refresh rollout evidence and interlock
+Code-owned inside observe
+agents/vision/agent.py · VisionAgent._refresh_rollout_status_for_utm_completion</title>
+      <rect x="56" y="328" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="346" fill="#172b4d" font-size="12">Refresh rollout evidence</text><text x="66" y="361" fill="#172b4d" font-size="12">and interlock</text>
+      <text x="66" y="395" fill="#526174" font-size="9">CODE · observe</text>
+    </g><g data-implementation-node="observe::stop" data-implementation-owner="observe" pointer-events="auto" role="img"  aria-label="Stop verified rollout before placement model review; code-owned; VisionAgent._stop_verified_rollout">
+      <title>Stop verified rollout before placement model review
+Code-owned inside observe
+agents/vision/agent.py · VisionAgent._stop_verified_rollout</title>
+      <rect x="384" y="1080" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="1098" fill="#172b4d" font-size="12">Stop verified rollout</text><text x="394" y="1113" fill="#172b4d" font-size="12">before placement model</text><text x="394" y="1128" fill="#172b4d" font-size="12">review</text>
+      <text x="394" y="1147" fill="#526174" font-size="9">CODE · observe</text>
+    </g><g data-implementation-node="observe::review" data-implementation-owner="observe" pointer-events="auto" role="img"  aria-label="LLM same-frame visual review; code-owned; review_visual_evidence">
+      <title>LLM same-frame visual review
+Code-owned inside observe
+agents/vision/decision.py · review_visual_evidence</title>
+      <rect x="624" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#2463a5" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="122" fill="#172b4d" font-size="12">LLM same-frame visual</text><text x="634" y="137" fill="#172b4d" font-size="12">review</text>
+      <text x="634" y="171" fill="#526174" font-size="9">CODE · observe</text>
+    </g><g data-implementation-node="observe::evidence" data-implementation-owner="observe" pointer-events="auto" role="img"  aria-label="Persist observation evidence; code-owned; VisionAgent._write_evidence_artifacts">
+      <title>Persist observation evidence
+Code-owned inside observe
+agents/vision/agent.py · VisionAgent._write_evidence_artifacts</title>
+      <rect x="920" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="122" fill="#172b4d" font-size="12">Persist observation</text><text x="930" y="137" fill="#172b4d" font-size="12">evidence</text>
+      <text x="930" y="171" fill="#526174" font-size="9">CODE · observe</text>
+    </g><g data-implementation-node="observe::signals" data-implementation-owner="observe" pointer-events="auto" role="img"  aria-label="Freshness-bounded downstream signals; code-owned; VisionAgent._agent_signals">
+      <title>Freshness-bounded downstream signals
+Code-owned inside observe
+agents/vision/agent.py · VisionAgent._agent_signals</title>
+      <rect x="56" y="440" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="458" fill="#172b4d" font-size="12">Freshness-bounded</text><text x="66" y="473" fill="#172b4d" font-size="12">downstream signals</text>
+      <text x="66" y="507" fill="#526174" font-size="9">CODE · observe</text>
+    </g><g data-implementation-node="clearance::clear" data-implementation-owner="clearance" pointer-events="auto" role="img"  aria-label="Existing UTM clearance owner route; code-owned; run_clear_vision">
+      <title>Existing UTM clearance owner route
+Code-owned inside clearance
+utils/utm_clear_cycle.py · run_clear_vision</title>
+      <rect x="624" y="1080" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="1098" fill="#172b4d" font-size="12">Existing UTM clearance</text><text x="634" y="1113" fill="#172b4d" font-size="12">owner route</text>
+      <text x="634" y="1147" fill="#526174" font-size="9">CODE · clearance</text>
+    </g><g data-implementation-node="clearance::scope" data-implementation-owner="clearance" pointer-events="auto" role="img"  aria-label="Current clearance scope and terminal guards; code-owned; current_clear">
+      <title>Current clearance scope and terminal guards
+Code-owned inside clearance
+utils/utm_clear_cycle.py · current_clear</title>
+      <rect x="56" y="552" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="570" fill="#172b4d" font-size="12">Current clearance scope</text><text x="66" y="585" fill="#172b4d" font-size="12">and terminal guards</text>
+      <text x="66" y="619" fill="#526174" font-size="9">CODE · clearance</text>
+    </g><g data-implementation-node="clearance::stop" data-implementation-owner="clearance" pointer-events="auto" role="img"  aria-label="Stop pending replay on deadline or stop request; code-owned; stop_pending_clear">
+      <title>Stop pending replay on deadline or stop request
+Code-owned inside clearance
+utils/utm_clear_cycle.py · stop_pending_clear</title>
+      <rect x="384" y="1224" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="1242" fill="#172b4d" font-size="12">Stop pending replay on</text><text x="394" y="1257" fill="#172b4d" font-size="12">deadline or stop request</text>
+      <text x="394" y="1291" fill="#526174" font-size="9">CODE · clearance</text>
+    </g><g data-implementation-node="clearance::review" data-implementation-owner="clearance" pointer-events="auto" role="img"  aria-label="LLM clearance image review; code-owned; review_visual_evidence">
+      <title>LLM clearance image review
+Code-owned inside clearance
+agents/vision/decision.py · review_visual_evidence</title>
+      <rect x="384" y="248" width="184" height="76" rx="5" fill="#ffffff" stroke="#2463a5" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="266" fill="#172b4d" font-size="12">LLM clearance image</text><text x="394" y="281" fill="#172b4d" font-size="12">review</text>
+      <text x="394" y="315" fill="#526174" font-size="9">CODE · clearance</text>
+    </g><g data-implementation-node="deliver::report" data-implementation-owner="deliver" pointer-events="auto" role="img"  aria-label="Observation report and intervention evidence; code-owned; VisionAgent._vision_agent_report_snapshot">
+      <title>Observation report and intervention evidence
+Code-owned inside deliver
+agents/vision/agent.py · VisionAgent._vision_agent_report_snapshot</title>
+      <rect x="920" y="216" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="234" fill="#172b4d" font-size="12">Observation report and</text><text x="930" y="249" fill="#172b4d" font-size="12">intervention evidence</text>
+      <text x="930" y="283" fill="#526174" font-size="9">CODE · deliver</text>
+    </g><g data-implementation-node="deliver_prepared::preflight" data-implementation-owner="deliver_prepared" pointer-events="auto" role="img"  aria-label="Prepared preflight or stop result; code-owned; VisionAgent._prepare_observation">
+      <title>Prepared preflight or stop result
+Code-owned inside deliver_prepared
+agents/vision/agent.py · VisionAgent._prepare_observation</title>
+      <rect x="624" y="1224" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="1242" fill="#172b4d" font-size="12">Prepared preflight or</text><text x="634" y="1257" fill="#172b4d" font-size="12">stop result</text>
+      <text x="634" y="1291" fill="#526174" font-size="9">CODE · deliver_prepared</text>
+    </g><g data-implementation-node="deliver_clearance::clearance" data-implementation-owner="deliver_clearance" pointer-events="auto" role="img"  aria-label="Completed clearance result; code-owned; VisionAgent._verify_clearance">
+      <title>Completed clearance result
+Code-owned inside deliver_clearance
+agents/vision/agent.py · VisionAgent._verify_clearance</title>
+      <rect x="384" y="1368" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="1386" fill="#172b4d" font-size="12">Completed clearance</text><text x="394" y="1401" fill="#172b4d" font-size="12">result</text>
+      <text x="394" y="1435" fill="#526174" font-size="9">CODE · deliver_clearance</text>
+    </g><g data-source="prepare" data-target="observe" data-outcome="ready" data-kind="validation"><title>prepare → observe · ready · validation</title><path d="M 248 142 C 321.78315577455504 156.01968344677405, 187.92594656152608 564.55340380568, 376 542" fill="none" stroke="#a36b16" stroke-opacity=".8" stroke-width="2" stroke-dasharray="8 5" marker-end="url(#control-arrow)"/><rect x="247.14091337603043" y="345.7149077196703" width="44" height="20" rx="4" fill="#ffffff"/><text x="269.1409133760304" y="359.7149077196703" text-anchor="middle" fill="#a36b16" font-size="11">ready</text></g><g data-source="prepare" data-target="clearance" data-outcome="clearance" data-kind="validation"><title>prepare → clearance · clearance · validation</title><path d="M 248 142 C 400.18817825310873 142, 474.1148559115569 532.5212085685076, 616 542" fill="none" stroke="#a36b16" stroke-opacity=".8" stroke-width="2" stroke-dasharray="8 5" marker-end="url(#control-arrow)"/><rect x="408.4875259158637" y="340.30278610757125" width="68" height="20" rx="4" fill="#ffffff"/><text x="442.4875259158637" y="354.30278610757125" text-anchor="middle" fill="#a36b16" font-size="11">clearance</text></g><g data-source="prepare" data-target="deliver_prepared" data-outcome="prepared_result" data-kind="evidence"><title>prepare → deliver_prepared · prepared_result · evidence</title><path d="M 248 142 C 395.45393655826285 166.65361217898527, 407.2530908702679 702.8092810311263, 616 686" fill="none" stroke="#79529c" stroke-opacity=".8" stroke-width="2" stroke-dasharray="2 5" marker-end="url(#control-arrow)"/><rect x="357.01513528569905" y="419.5485849537918" width="104" height="20" rx="4" fill="#ffffff"/><text x="409.01513528569905" y="433.5485849537918" text-anchor="middle" fill="#79529c" font-size="11">prepared_result</text></g><g data-source="observe" data-target="deliver" data-outcome="next" data-kind="evidence"><title>observe → deliver · next · evidence</title><path d="M 476 588 C 513 602.56, 506 625.44, 476 640" fill="none" stroke="#79529c" stroke-opacity=".8" stroke-width="2" stroke-dasharray="2 5" marker-end="url(#control-arrow)"/><rect x="482.125" y="604" width="38" height="20" rx="4" fill="#ffffff"/><text x="501.125" y="618" text-anchor="middle" fill="#79529c" font-size="11">next</text></g><g data-source="clearance" data-target="deliver_clearance" data-outcome="next" data-kind="evidence"><title>clearance → deliver_clearance · next · evidence</title><path d="M 716 588 C 761.8762433254177 692.8218865425874, 706.2172808674327 860.0452552575634, 576 830" fill="none" stroke="#79529c" stroke-opacity=".8" stroke-width="2" stroke-dasharray="2 5" marker-end="url(#control-arrow)"/><rect x="693.0350715723189" y="749.5751781750566" width="38" height="20" rx="4" fill="#ffffff"/><text x="712.0350715723189" y="763.5751781750566" text-anchor="middle" fill="#79529c" font-size="11">next</text></g><g><title>prepare · vision.prepare</title>
+        <rect x="56" y="104" width="184" height="76" rx="9" fill="#ffffff" stroke="#a36b16" stroke-width="2"/>
+        <text x="68" y="125" fill="#172b4d" font-size="12">Task admission and</text><text x="68" y="141" fill="#172b4d" font-size="12">preflight</text>
+        </g><g><title>observe · vision.observe</title>
+        <rect x="384" y="504" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="396" y="525" fill="#172b4d" font-size="12">Composite observation /</text><text x="396" y="541" fill="#172b4d" font-size="12">interlock / stop /</text><text x="396" y="557" fill="#172b4d" font-size="12">review</text>
+        <text x="489" y="572" fill="#177768" font-size="10">LLM inside</text></g><g><title>clearance · vision.clearance</title>
+        <rect x="624" y="504" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="636" y="525" fill="#172b4d" font-size="12">Composite UTM clearance</text><text x="636" y="541" fill="#172b4d" font-size="12">verification and review</text>
+        <text x="729" y="572" fill="#177768" font-size="10">LLM inside</text></g><g><title>deliver · vision.deliver</title>
+        <rect x="384" y="648" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="396" y="669" fill="#172b4d" font-size="12">Deliver observation</text><text x="396" y="685" fill="#172b4d" font-size="12">result</text>
+        </g><g><title>deliver_prepared · vision.deliver_prepared</title>
+        <rect x="624" y="648" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="636" y="669" fill="#172b4d" font-size="12">Deliver preflight or</text><text x="636" y="685" fill="#172b4d" font-size="12">stop result</text>
+        </g><g><title>deliver_clearance · vision.deliver_clearance</title>
+        <rect x="384" y="792" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="396" y="813" fill="#172b4d" font-size="12">Deliver clearance result</text>
+        </g>
+      <line x1="24" x2="62" y1="1782" y2="1782" stroke="#526174" stroke-width="2" stroke-dasharray=""/><text x="72" y="1786" fill="#172b4d" font-size="14">Execution</text><line x1="244" x2="282" y1="1782" y2="1782" stroke="#526174" stroke-width="2" stroke-dasharray="8 5"/><text x="292" y="1786" fill="#172b4d" font-size="14">Validation</text><line x1="464" x2="502" y1="1782" y2="1782" stroke="#526174" stroke-width="2" stroke-dasharray="2 5"/><text x="512" y="1786" fill="#172b4d" font-size="14">Evidence</text><line x1="684" x2="722" y1="1782" y2="1782" stroke="#526174" stroke-width="2" stroke-dasharray="5 3"/><text x="732" y="1786" fill="#172b4d" font-size="14">Internal call</text>
+      <text x="24" y="1818" fill="#526174" font-size="13">Solid boxes: executable operations · Dashed CODE boxes: implementation relationships · LLM: bounded decision</text>
+    </svg>

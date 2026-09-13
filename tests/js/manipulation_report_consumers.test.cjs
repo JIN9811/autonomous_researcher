@@ -46,8 +46,8 @@ test("planning manipulation details render stage evidence without empty reward m
     runtimeRows: rows => JSON.stringify(rows),
     renderReportList: rows => JSON.stringify(rows),
   });
-  loadFunctions("web/static/planning.js", ["renderManipulationReportDetails"], context);
-  const html = context.renderManipulationReportDetails({});
+  vm.runInContext(fs.readFileSync("agents/manipulation/frontend/live_report.js", "utf8"), vm.createContext({window: context}));
+  const html = context.AX4LABManipulationUI.createFrontend(context).renderReport({});
   assert.match(html, /approach/);
   assert.match(html, /1\/3/);
   assert.match(html, /operator confirmation required/);

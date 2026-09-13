@@ -7,19 +7,23 @@ audience: [researcher, operator, developer, maintainer]
 scope: [agents, vision, perception, verification, decision_tools]
 summary: Bounded multimodal Vision decisions over existing capture, detector, freshness, rollout-stop, and evidence contracts.
 source_of_truth:
-  - agents/vision_agent.py
-  - agents/vision_decision.py
+  - agents/vision/agent.py
+  - agents/vision/decision.py
+  - agents/vision/module.py
+  - agents/vision/execution.py
+  - agents/vision/presentation.py
+  - agents/vision/frontend/live_report.js
   - agents/base_agent.py
   - orchestrator/langgraph_runtime.py
   - backends/llm_backend.py
   - graphs/modules/vision/module.yaml
-  - device_bridges/utm_runtime_bridge.py
+  - device_bridges/camera_vision/utm_runtime_bridge.py
   - device_bridges/lerobot_bridge.py
   - app/main.py
   - utils/utm_clear_cycle.py
   - utils/utm_specimen_presence.py
-  - mcp_tools/camera_tools.py
-last_verified: 2026-09-08
+  - device_bridges/camera_vision/tools.py
+last_verified: 2026-09-13
 verified_against: working-tree
 related_docs:
   - docs/agents/README.md
@@ -41,12 +45,45 @@ supersedes: []
 
 | At a glance | Details |
 |---|---|
-| Runtime status | Existing deterministic paths plus the bounded decision integration are implemented in the working tree |
+| Runtime status | Installed `vision@1.0.0` owner, executable module graph and owned live report; existing observation and bounded decision behavior retained |
 | LLM decision layer | Generic multimodal review implemented; revised API/local choices matched 12/13 development expectations each, with remaining errors |
 | Physical effect | Possible through existing ActiveCam move/capture/return and verified rollout-stop paths |
 | Primary handoff | `vision_signal.v1` and role-specific verification evidence to the current graph consumer |
 | Live hardware validation | Not performed for this reconstruction |
 | Known gap | LIVE downstream handoffs keep their 5-second freshness bound; observed local-vLLM reviews exceeded it |
+
+## Installed Package and Executable Structure
+
+The [Vision package](../../packages/agents/vision/package.yaml) binds the installed
+`vision@1.0.0` AgentModule to the observation-only `camera_vision@1.0.0`
+[Device Bridge](../device_bridges/utm_vision_bridge.md). Package Manager shows the
+package; Device Bridges shows its bridge and internal observation components.
+LeRobot continues to own ActiveCam movement, capture/return and rollout stop.
+The shared UTM observer remains available to Equipment without a second instance.
+
+![Vision executable operations and source-bound five-area implementation relationships](assets/figures/vision_control_areas.svg)
+
+The IDE and this light document figure use the same execution catalog. `prepare`
+admits the existing task and routes to composite `observe`, existing `clearance`,
+or a terminal result; `deliver` returns the current AgentResult. Observation,
+interlocks and bounded model review remain one coherent owner operation. CODE
+relationships expose High/Middle/Low/Guardian/Knowledge responsibilities inside
+that operation; they are not extra model calls or executable graph steps.
+
+`project_vision_report(metadata, agent_payload)` supplies the existing report API.
+Explicit metadata reports retain priority; otherwise current
+`state.latest_observations` outranks the older metadata observation. The common
+API host supplies request-only context without persisting a second report store.
+The frontend descriptor mounts the original six cards, images and UTM verification
+tabs through the shared live host. Camera polling, tab selection and controls keep
+their existing lifecycle. Removing all graph bindings makes the owner and its
+frontend asset inactive while retaining code, settings and archived evidence.
+
+Fresh software verification on 2026-09-13 completed the registered API-model
+virtual-device cycle through the next Design: 34/34 model attempts across ten
+owners, 357.934 seconds of recorded cycle time and zero physical calls. A separate
+guarded 44-test suite covered mode combinations. These are virtual equipment and
+software results, not new hardware evidence; the freshness limitation above remains.
 
 ## Overview and Responsibilities
 
@@ -78,9 +115,9 @@ The five areas are responsibility boundaries, not five sequential model calls.
 
 | Area | Vision responsibility | Authority boundary |
 |---|---|---|
-| High-Level Control | Decide whether the current bounded observation contract is appropriate and whether current visual evidence supports the requested handoff | Orchestrator owns the mission and graph route; the model cannot select another domain task or declare physical safety |
-| Middle-Level Control | Assemble current context, expose the bounded tool set, dispatch the selected existing routine, and combine model decisions with code-owned gates | Existing task resolver, capture ordering, detector result, freshness, and completion state remain authoritative |
-| Low-Level Control | Existing camera acquisition, ActiveCam move/capture/return, detector execution, artifact writing, rollout status/stop, and managed-clear operations | Bridges own ports, calibration, robot/process state, replay execution, and command acknowledgement |
+| High-Level Control | LLM selects bounded observation tools and reviews current detector evidence and same-frame images | Orchestrator owns the mission and graph route; the model cannot select another domain task or declare physical safety |
+| Middle-Level Control | Resolve tasks, dispatch capture/status/stop APIs, process detector results and artifacts, enforce interlocks and assemble handoff | Existing task resolver, capture ordering, detector result, freshness, and completion state remain authoritative |
+| Low-Level Control | Selected camera acquisition and LeRobot ActiveCam / rollout device boundaries | Bridges own ports, calibration, robot/process state, replay execution, and command acknowledgement |
 | Guardian / Safety | Identity, mode, stop flags, lease, lifecycle, freshness, interlock, decision budget, and hard-gate enforcement | No model response overrides a failed detector, missing stop acknowledgement, stale signal, or Guardian decision |
 | Knowledge / Evidence | Preserve `vision_decision.v1`, model/tool trace, raw and annotated image hashes, detector facts, and existing reports/signals | Historical, virtual, mock, or mismatched evidence is never promoted to current physical proof |
 

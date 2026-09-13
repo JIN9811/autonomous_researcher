@@ -13,17 +13,17 @@ K = "agents/knowledge_context.py"
 def orchestrator_implementation_structure():
     return {"schema": "ax4lab.implementation_structure.v1", "operations": {
         "orchestrator.mission": detail([
-            ("contract", "Accepted intent and experiment contract", "low", S, "build_mission_contract"),
+            ("contract", "Accepted intent and experiment contract", "middle", S, "build_mission_contract"),
         ], [("$operation", "contract", "call", "build")]),
         "orchestrator.plan": detail([
-            ("route", "Graph route and parallel-check plan", "low", S, "build_orchestration_plan"),
+            ("route", "Graph route and parallel-check plan", "middle", S, "build_orchestration_plan"),
         ], [("$operation", "route", "call", "compile plan")]),
         "orchestrator.decide": detail([
             ("reference", "Scoped Wiki / reference context", "knowledge", K, "build_reference_context"),
             ("schema", "Tool schema and cited evidence", "guardian", D, "validate_choice"),
             ("target", "Admitted owner and setup revision", "guardian", D, "_validate_target"),
-            ("inspect", "inspect_context / inspect_availability", "low", D, "decide_orchestration"),
-            ("dispatch", "Bound terminal handler dispatch", "low", D, "decide_orchestration"),
+            ("inspect", "inspect_context / inspect_availability", "middle", D, "decide_orchestration"),
+            ("dispatch", "Bound terminal handler dispatch", "middle", D, "decide_orchestration"),
             ("effect", "Returned effect and scope checks", "guardian", D, "decide_orchestration"),
         ], [
             ("reference", "$operation", "evidence", "reference only"),

@@ -248,7 +248,7 @@ TEST_DEVICE_BRIDGE_SOURCE_CONTRACTS = {
         ("app/main.py", '@app.post("/api/equipment/windows/run-program")'),
     ),
     "utm_vision": (
-        ("device_bridges/utm_runtime_bridge.py", "class UTMRuntimeProcessManager:"),
+        ("device_bridges/camera_vision/utm_runtime_bridge.py", "class UTMRuntimeProcessManager:"),
         ("app/main.py", '@app.get("/api/equipment/utm-runtime/status")'),
     ),
     "cae_computation": (

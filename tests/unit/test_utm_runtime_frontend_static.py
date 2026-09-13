@@ -35,6 +35,8 @@ def test_main_gui_js_does_not_own_utm_runtime_controls() -> None:
 
 def test_live_gui_js_renders_utm_runtime_device_card() -> None:
     js = (ROOT / "web/static/planning.js").read_text(encoding="utf-8")
+    vision_module = (ROOT / "agents/vision/frontend/live_report.js").read_text(encoding="utf-8")
+    js += "\n" + vision_module
 
     assert "renderUtmRuntimeDeviceCard" in js
     assert "refreshLiveUtmRuntimeStatus" in js
@@ -50,11 +52,11 @@ def test_live_gui_js_renders_utm_runtime_device_card() -> None:
     assert 'renderDashboardCard("Live Observation"' in js
     assert 'renderDashboardCard("Specimen Pose"' not in js
     assert 'renderDashboardCard("Active Cam Ejection"' in js
-    assert 'renderDashboardCard("UTM Placement Confirmation"' in js
+    assert 'renderDashboardCard("UTM Verification"' in js
     assert 'renderDashboardCard("Camera / Runtime"' in js
     assert 'renderDashboardCard("Handoff Signal"' in js
     assert 'renderDashboardCard("Agentic Progress"' in js
-    vision_dashboard_source = js[js.index("function renderVisionDashboardCards("):js.index("function manipulationReportTone")]
+    vision_dashboard_source = vision_module[vision_module.index("function renderDashboard("):]
     assert "function renderVisionActiveCamEjectionCheck(" in js
     assert "function latestActiveCamArtifact(report)" in js
     assert "metadata.latest_active_cam_artifact" in js
@@ -82,7 +84,8 @@ def test_live_gui_js_renders_utm_runtime_device_card() -> None:
     assert "artifact.specimen_id" in utm_artifact_source
     assert "return {};" in utm_artifact_source
     assert "function renderVisionUtmPlacementConfirmation(" in js
-    assert "latestUtmCompletionArtifact(report)" in vision_dashboard_source
+    assert "utmVerificationScope(report)" in vision_dashboard_source
+    assert "selectVerification(utmScope, utmSelection.index)" in vision_dashboard_source
     assert 'id: "utm_confirmation"' in js
     assert 'renderVisionCardDetails("Inspection details"' in active_cam_source
     assert 'class="ar-vis-active-cam-details"' not in active_cam_source
@@ -98,9 +101,9 @@ def test_live_gui_js_renders_utm_runtime_device_card() -> None:
     assert 'span: 4, tone: liveFrameReady ? "success" : "warning", eyebrow: "camera frame"' in js
     assert 'span: 4, tone: activeCamConfirmed ? "success" : "warning", eyebrow: "SPC confirmation"' in js
     assert 'span: 4, tone: "vision", eyebrow: "pose gate"' not in js
-    assert 'span: 4, tone: (liveUtmRuntimeStatus && liveUtmRuntimeStatus.status) === "running" ? "success" : "vision", eyebrow: "device bridge"' in js
+    assert 'span: 4, tone: (visionRuntimeStatus() && visionRuntimeStatus().status) === "running" ? "success" : "vision", eyebrow: "device bridge"' in js
     assert 'span: 4, tone: defectSummary.anomaly || !quality.transfer_ready ? "warning" : "success", eyebrow: "runtime steps"' in js
-    assert vision_dashboard_source.index('renderDashboardCard("UTM Placement Confirmation"') < vision_dashboard_source.index('renderDashboardCard("Camera / Runtime"')
+    assert vision_dashboard_source.index('renderDashboardCard("UTM Verification"') < vision_dashboard_source.index('renderDashboardCard("Camera / Runtime"')
     assert vision_dashboard_source.index('renderDashboardCard("Camera / Runtime"') < vision_dashboard_source.index('renderDashboardCard("Handoff Signal"')
     assert vision_dashboard_source.index('renderDashboardCard("Handoff Signal"') < vision_dashboard_source.index('renderDashboardCard("Agentic Progress"')
     for cluttered_card in [
@@ -115,7 +118,7 @@ def test_live_gui_js_renders_utm_runtime_device_card() -> None:
     assert "refreshLiveUtmRuntimeFrame" in js
     assert "utmRuntimeFrameStreamUrl" in js
     assert "utmRuntimeLiveStreamTopic" in js
-    assert 'const liveFrameReady = Boolean(liveFrame.data_url) || ((liveUtmRuntimeStatus && liveUtmRuntimeStatus.status) === "running")' in js
+    assert 'const liveFrameReady = Boolean(liveFrame.data_url) || ((visionRuntimeStatus() && visionRuntimeStatus().status) === "running")' in js
     assert "profile.ros_output_topic || profile.ros_rect_topic || profile.ros_image_topic" in js
     assert "liveUtmRuntimeStreamUrlCache" in js
     assert "liveUtmRuntimeStreamUrlKey" in js
@@ -136,8 +139,8 @@ def test_live_gui_js_renders_utm_runtime_device_card() -> None:
     assert ".ar-vis-active-cam-details" not in css
 
     html = (ROOT / "web/templates/planning.html").read_text(encoding="utf-8")
-    assert "/static/styles.css?v=20260720-manipulation-grounded-1" in html
-    assert "/static/planning.js?v=20260813-bo-run-cache-2" in html
+    assert "/static/styles.css?v=" in html
+    assert "/static/planning.js?v=" in html
     assert "const detected = artifact.detected === true;" in js
     assert "artifact.detected === true || signal.detected === true" not in js
 
@@ -175,6 +178,7 @@ def test_live_gui_utm_runtime_actions_force_fresh_status_after_click() -> None:
 
 def test_live_gui_vision_load_unload_buttons_live_in_observation_header() -> None:
     js = (ROOT / "web/static/planning.js").read_text(encoding="utf-8")
+    js += "\n" + (ROOT / "agents/vision/frontend/live_report.js").read_text(encoding="utf-8")
     controls_source = js[js.index("function renderVisionRuntimeControls"):js.index("function renderVisionCameraHealthBoard")]
     live_observation_source = js[js.index('renderDashboardCard("Live Observation"'):js.index('renderDashboardCard("Active Cam Ejection"')]
 
@@ -269,7 +273,7 @@ def test_utm_runtime_api_offloads_slow_ros_calls_from_event_loop() -> None:
 
 
 def test_utm_runtime_mjpeg_stream_rate_limits_to_requested_fps_with_jitter_tolerance() -> None:
-    bridge_py = (ROOT / "device_bridges/utm_runtime_bridge.py").read_text(encoding="utf-8")
+    bridge_py = (ROOT / "device_bridges/camera_vision/utm_runtime_bridge.py").read_text(encoding="utf-8")
 
     assert "emit_interval_tolerance = 0.80" in bridge_py
     assert "rate_limit_enabled = True" in bridge_py

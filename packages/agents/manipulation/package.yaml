@@ -1,0 +1,8 @@
+schema: ax4lab.agent_package.v1
+id: manipulation
+version: 1.0.0
+agent_module: {id: manipulation, version: 1.0.0}
+handler: agent.manipulation_agent
+module_reference: graphs/modules/manipulation/module.yaml
+bridge_modules:
+  - {id: lerobot, version: 1.0.0}

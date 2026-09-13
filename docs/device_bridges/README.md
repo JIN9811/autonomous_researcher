@@ -42,6 +42,20 @@ integration boundaries, but are distinguished from physical equipment below.
 
 ## Integration Architecture
 
+The [Manipulation Agent Package](../../packages/agents/manipulation/README.md)
+and Vision package both pin `lerobot@1.0.0`. Its canonical implementation lives
+under `device_bridges/lerobot/`, with exact legacy import aliases and one runtime
+identity, `lerobot_bridge`. Device Bridges exposes ten internal capability groups
+under this shared bridge; the [LeRobot Reference](lerobot_bridge.md) documents
+their existing workspace, API, configuration and artifact boundaries.
+
+The installed [Vision Agent Package](../../packages/agents/vision/README.md)
+declares the observation-only `camera_vision@1.0.0` bridge. Package Manager lists
+the package; Device Bridges presents package → bridge and opens its existing
+observation components. [Camera/Vision](utm_vision_bridge.md) shares its temporal
+observer with Equipment and depends on LeRobot for motion, ActiveCam capture/return
+and rollout stop. Local configuration, calibration and evidence stores remain in place.
+
 Agent procedures call registered tools or shared runtime resources. Managers
 select providers where needed; the owning adapter executes the requested
 operation and exposes evidence for the agent's next decision.

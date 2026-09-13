@@ -5,7 +5,7 @@ digraph DesignHandoffs {
  high [label="HIGH: existing runtime\nGoal / constraints / run + loop identity",fillcolor="#e0f2fe"];
  bo [label="BO / LHS + operator\nRequested variables remain authoritative"];
  prep [label="DESIGN: code-owned preparation\nCandidates / checks / estimates"];
- llm [label="DESIGN: Middle decision layer\nAccept / inspect / return to owner",fillcolor="#dbeafe"];
+ llm [label="DESIGN: High decision layer\nAccept / inspect / return to owner",fillcolor="#dbeafe"];
  out [label="Existing experiment_spec\nReport + handoff_packet"];
  spc [label="SPECIMEN\nExisting fabrication path",fillcolor="#e0f2fe"];
  history [label="KNOWLEDGE / EVIDENCE\nContext + separate attempt archive",fillcolor="#dcfce7"];

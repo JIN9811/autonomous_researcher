@@ -79,9 +79,9 @@ This Reference does not claim that control presence proves safety effectiveness.
 
 | Level | Guardian responsibility | Authority boundary |
 |---|---|---|
-| High-Level Control | Cross-level authority that returns continue, review, stop, or error for Orchestrator route translation | May block progression but does not own normal mission planning or silently resume a stopped run |
-| Middle-Level Control | Evaluate stage evidence, policy, risk, failures, approvals, freshness, and safety budget; emit incidents, corrective actions, and decision contracts | Model review is advisory; unknown state never becomes allow through fallback |
-| Low-Level Control | Reads `device.health` and `experiment.queue.status` and can request/block/stop bounded work | Device-specific hard interlocks, emergency behavior, command acknowledgement, and physical stop effectiveness remain bridge/hardware authority |
+| High-Level Control | LLM reviews policy and failure evidence within the bounded Guardian role | May block progression but does not own normal mission planning or silently resume a stopped run |
+| Middle-Level Control | Collect health/status through APIs, calculate risk and validate/assemble continue, review, stop or error results | Model review is advisory; unknown state never becomes allow through fallback |
+| Low-Level Control | No direct device execution; hardware interlocks and effective stops remain bridge/device authority | Device-specific hard interlocks, emergency behavior, command acknowledgement, and physical stop effectiveness remain bridge/hardware authority |
 
 Guardian spans all three levels but does not collapse them. It may reject a
 High-Level route, invalidate a Middle-Level completion claim, or require fresh

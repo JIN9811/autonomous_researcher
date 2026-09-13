@@ -134,9 +134,9 @@ The areas describe responsibilities, not five sequential model calls.
 
 | Level | Specimen Making responsibility | Authority boundary |
 |---|---|---|
-| High-Level Control | Decide fabrication suitability for the Design contract: execute, inspect or return with evidence | Global routing/recovery stays with Orchestrator; model selection is not operator approval |
-| Middle-Level Control | Validate fabrication intent, initialize the digital thread, generate geometry, run mesh/dimensional/manufacturability QA, plan slicing, apply execution gates, monitor the selected job, and package Vision/Manipulation evidence | Must keep source, sliced, patched, published, started, completed, ejected, and Vision-confirmed states distinct |
-| Low-Level Control | Calls geometry/artifact/evaluation tools and `printer.prepare`; printer fleet selection routes to the explicitly selected Bambu or Prusa provider | Slicer invocation, transfer protocol, MQTT/HTTP/FTPS/PrusaLink details, printer state, autoejection motion, and hard interlocks remain bridge/provider authority |
+| High-Level Control | LLM judges fabrication suitability and selects bounded inspect, execute or return tools | Global routing/recovery stays with Orchestrator; model selection is not operator approval |
+| Middle-Level Control | Prepare geometry and manufacturing evidence, validate tool requests, dispatch existing printer APIs and assemble handoff | Must keep source, sliced, patched, published, started, completed, ejected, and Vision-confirmed states distinct |
+| Low-Level Control | Selected Printer Fleet provider owns printer communication and physical execution | Transfer protocol, MQTT/HTTP/FTPS/PrusaLink, printer state, autoejection motion and hard interlocks remain provider authority; slicing is Middle software work |
 | Guardian / Safety | Hard checks, strict tool arguments, decision budgets, current intent/stop checks, existing provider gates | No model override of specification, mode, approval or G-code |
 | Knowledge / Evidence | Current intent, geometry/QA warnings, manufacturing estimates, decision/tool trace and artifacts | Estimates are not measurements; no synthetic performance prediction |
 

@@ -53,7 +53,7 @@ module:
     - id: operator_input
       handler: specimen.operator_input
       label: Return printer path request
-      area: high
+      area: middle
     edges:
     - {source: prepare, target: decide, 'on': ready, kind: execution}
     - {source: prepare, target: operator_input, 'on': operator_input, kind: validation}

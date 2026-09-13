@@ -1,0 +1,8 @@
+# Camera tool image inspection dependencies used by utils.utm_specimen_presence.
+numpy>=1.26.0
+Pillow>=10.0.0
+scikit-image>=0.23.0
+trimesh>=4.4.0
+
+# Optional live camera/ROS routes are supplied by the external environment:
+# pyrealsense2, ROS 2 (rclpy, sensor_msgs, std_msgs), cv_bridge and OpenCV.

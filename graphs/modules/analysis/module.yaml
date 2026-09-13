@@ -96,3 +96,64 @@ module:
     CAE/CalculiX evidence is produced only through registered cae.* tools and
     validated payloads.
     Python source is not modified by the GUI or LLM.
+
+  metadata:
+    control_view:
+      areas:
+        internal_graph:01_receive_equipment_artifact: knowledge
+        internal_graph:02_fingerprint_input_file: knowledge
+        internal_graph:03_detect_format_and_parser: middle
+        internal_graph:04_parse_raw_table: middle
+        internal_graph:05_resolve_columns_and_units: middle
+        internal_graph:06_build_canonical_curve: middle
+        internal_graph:07_preprocess_curve: middle
+        internal_graph:08_validate_curve_quality: guardian
+        internal_graph:09_compute_utm_metrics: middle
+        internal_graph:10_prepare_fem_problem: middle
+        internal_graph:11_prepare_cae_calculix_payload: middle
+        internal_graph:12_probe_cae_runtime: middle
+        internal_graph:13_run_cae_calculix_analysis: middle
+        internal_graph:14_compare_iteration_with_utm: middle
+        internal_graph:15_accept_or_refine_fem: middle
+        internal_graph:16_run_cae_if_available: middle
+        internal_graph:17_compare_fem_with_utm: middle
+        internal_graph:18_compute_objective_and_uncertainty: middle
+        internal_graph:19_compare_with_previous_experiments: middle
+        internal_graph:20_write_analysis_artifacts: knowledge
+        internal_graph:21_emit_experiment_evaluation: middle
+        internal_graph:22_emit_bo_handoff: middle
+      empty_roles:
+        low: No direct device execution in this agent
+      checkpoint_details:
+        internal_graph:07_preprocess_curve:
+          nodes:
+          - id: data_decision
+            label: "LLM data-processing choice"
+            area: high
+            source: {path: agents/analysis_decisions.py, symbol: decide}
+          edges:
+          - {source: $operation, target: data_decision, kind: evidence, label: "existing internal decision"}
+        internal_graph:08_validate_curve_quality:
+          nodes:
+          - id: validation_decision
+            label: "LLM evidence review"
+            area: high
+            source: {path: agents/analysis_decisions.py, symbol: decide}
+          edges:
+          - {source: $operation, target: validation_decision, kind: evidence, label: "existing internal decision"}
+        internal_graph:10_prepare_fem_problem:
+          nodes:
+          - id: simulation_decision
+            label: "LLM simulation / model choice"
+            area: high
+            source: {path: agents/analysis_decisions.py, symbol: decide}
+          edges:
+          - {source: $operation, target: simulation_decision, kind: evidence, label: "existing internal decision"}
+        internal_graph:15_accept_or_refine_fem:
+          nodes:
+          - id: refinement_decision
+            label: "LLM FEM review (background when enabled)"
+            area: high
+            source: {path: agents/analysis_decisions.py, symbol: decide}
+          edges:
+          - {source: $operation, target: refinement_decision, kind: evidence, label: "existing internal decision"}

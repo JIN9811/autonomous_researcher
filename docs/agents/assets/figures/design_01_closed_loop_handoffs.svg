@@ -48,7 +48,7 @@
 <g id="node4" class="node">
 <title>llm</title>
 <path fill="#dbeafe" stroke="black" d="M918,-141C918,-141 739,-141 739,-141 733,-141 727,-135 727,-129 727,-129 727,-117 727,-117 727,-111 733,-105 739,-105 739,-105 918,-105 918,-105 924,-105 930,-111 930,-117 930,-117 930,-129 930,-129 930,-135 924,-141 918,-141"/>
-<text text-anchor="middle" x="828.5" y="-126.2" font-family="DejaVu Sans" font-size="11.00">DESIGN: Middle decision layer</text>
+<text text-anchor="middle" x="828.5" y="-126.2" font-family="DejaVu Sans" font-size="11.00">DESIGN: High decision layer</text>
 <text text-anchor="middle" x="828.5" y="-114.2" font-family="DejaVu Sans" font-size="11.00">Accept / inspect / return to owner</text>
 </g>
 <!-- prep&#45;&gt;llm -->

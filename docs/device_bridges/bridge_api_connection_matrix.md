@@ -59,6 +59,22 @@ Analysis FEM jobs, and saved-field APIs. No device or solver was executed.
 
 ## Source of Truth
 
+The 2026-09-13 Manipulation package migration registers `lerobot@1.0.0` with
+canonical bridge/tool code under `device_bridges/lerobot/` and exact legacy
+aliases. Manipulation and Vision pin one shared bridge; `lerobot_bridge` remains
+its runtime identity. Ten internal capability groups organize the same existing
+workspace and API routes. No second robot, workspace, settings store or lifecycle
+was introduced. The later package scope does not change the historical baseline
+for other rows in this matrix.
+
+The 2026-09-13 Camera/Vision package migration groups observation implementations
+under `device_bridges/camera_vision/` as `camera_vision@1.0.0`; previous import paths
+remain aliases. Its runtime aliases (including `camera_utm_bridge`) resolve to one
+bridge in the IDE. The Vision package declares this bridge separately from shared
+LeRobot dependencies. LeRobot retains ActiveCam motion/capture/return and rollout
+stop; Camera/Vision retains observation and evidence services. This changes code
+ownership and discovery without adding a device route or physical validation.
+
 - `device_bridges/` implementations;
 - `mcp_tools/*_tools.py` and `app/bootstrap.py` registration;
 - route declarations in `app/main.py`, `app/analysis_fem_routes.py` and `app/cae_fields_routes.py`;

@@ -72,9 +72,9 @@ coordinates or add a subjective preference score to replace that point.
 
 | Area | BO responsibility | Boundary |
 |---|---|---|
-| High-Level Control | Interpret optimization evidence, select a permitted strategy/tool, review the result | Global mission/routing stays with Orchestrator; coordinates stay with the optimizer |
-| Middle-Level Control | Freeze inputs, validate local requests, dispatch bounded tools, package the result | One optimizer invocation per decision; no re-execution after success |
-| Low-Level Control | Existing `experiment.benchmark`, LHS, GP fitting and acquisition optimization | Numerical computation only |
+| High-Level Control | LLM interprets optimization evidence, selects permitted strategy/tools and reviews the numerical result | Global mission/routing stays with Orchestrator; coordinates stay with the optimizer |
+| Middle-Level Control | Freeze inputs, validate requests, run LHS/BoTorch and acquisition optimization, then package the result | One optimizer invocation per decision; no re-execution after success |
+| Low-Level Control | No direct device execution; numerical optimizers are Middle | Numerical computation only |
 | Guardian / Safety | Observation identity/eligibility, bounds, locked values, candidate identity and budgets | Model acceptance cannot bypass hard checks |
 | Knowledge / Evidence | Supplied history, local retrieval, diagnostics and loop-scoped artifacts | Sources are evidence, not instructions or current measurements |
 

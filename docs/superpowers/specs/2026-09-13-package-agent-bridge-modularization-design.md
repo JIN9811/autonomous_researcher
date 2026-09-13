@@ -33,7 +33,7 @@ supersedes: []
 | 프로그램 코어 | Orchestrator, LangGraph, 세션, 공통 GUI 및 서비스 연결 유지 |
 | Package | Agent Package는 owner 단위, Experimental Package는 플랜·설정·연결을 포함한 실험 조합 |
 | 소프트웨어 기준점 | `9d11cf923f556e6abe87df3084dbbd5c022a5ea6`; 모듈별 전환 전에 동작 비교 근거 확정 |
-| 구현 상태 | Design/Specimen 모듈, Design/Specimen/ORC 실행 그래프와 로컬 Package 계약 적용; IDE 및 실제 LLM 가상 장비 사이클 최종 검증 진행 중 |
+| Implementation status | Design/Specimen/Vision/Manipulation installed modules and live reports; their executable graphs and ORC reuse the common host. Local Agent Packages include one LeRobot bridge shared by Manipulation and Vision. Validation and scope are recorded in the owner execution plans. |
 | 실증 경계 | 소프트웨어 호환성 검증과 기존 물리 동작 stable 실증을 별도로 관리 |
 
 ## Summary
@@ -337,7 +337,8 @@ High / Middle / Low를 중심에, Guardian / Safety와 Knowledge / Evidence를
 - 노드는 owner catalog에 등록된 기존 함수를 호출한다. ID·handler·포트·저장 좌표를 유지하고, 실행 순서는 노드 배열이 아닌 명시적 outcome edge로 결정한다.
 - 기존 bounded LLM 판단·툴 루프는 composite 노드로 표시하고, 없는 책임은 명시한다. 내부 함수가 모두 별도 편집 가능하거나 5개 순차 실행 단계인 것처럼 표현하지 않는다.
 - composite 내부를 숨기지는 않는다. owner catalog의 `implementation_structure`로 실제 함수·툴·검증·근거 및 관측 반환 관계를 같은 캔버스에 펼친다. 실선 실행 노드와 파선 CODE 노드를 구분하고, CODE 선택은 기존 Inspector의 owner·소스 참조로 연결한다. CODE 관계를 추가 실행 명령이나 개별 완료 상태로 취급하지 않는다.
-- Low는 장비뿐 아니라 계산·조회·소프트웨어 툴 실행도 포함한다. Design 전문 판단은 Middle이며, High는 위임·인계 책임과 구분한다.
+- High는 각 에이전트 내부의 LLM 추론·의사결정이다. Middle은 API·툴 디스패치·계산·조회·내부 프로세스이며, Low는 실제 장비/브릿지 실행 경계다. Guardian / Safety와 Knowledge / Evidence는 횡단 책임이다. 소프트웨어 전용 에이전트에 가짜 Low를 만들지 않는다.
+- 기존 composite handler는 그대로 유지하고, 내부 LLM 판단만 High CODE로 펼쳐 표시한다. 분류를 맞추기 위해 호출 순서·툴·인계·안전조건을 바꾸거나 실행 노드를 쪼개지 않는다. 기존 checkpoint 모듈은 `metadata.control_view.areas` 및 `checkpoint_details`로 표시만 분류하며 실행 계약은 유지한다.
 - 실선·파선·점선은 edge의 `execution`·`validation`·`evidence` 종류를 표현한다. 실제 상태는 module·run·loop·revision·invocation이 일치하는 실행 trace로 표시한다.
 - Runtime IDE의 색상·노드·포트·줌·스크롤 체계를 사용한다. 데스크톱과 좁은 화면에서 겹침·잘림·가독성을 검증한다.
 - `blocked`·`next`·`accepted` 같은 outcome 라벨은 기존 스타일의 짧은 캡슐로 해당 연결선 위에 배치한다. 충돌 시 선 밖의 임의 좌표가 아닌 같은 곡선의 다른 지점을 우선 탐색한다. 라벨 선택·분기 편집은 유지하며 확대·축소 후 선 부착과 노드 겹침을 검증한다. 이는 표시 규칙이며 outcome·실행 경로를 바꾸지 않는다.
@@ -555,6 +556,59 @@ freshness 규칙을 유지한다. 공통 adapter를 추가해 기존 실행 검�
 - 초기 버전은 동일 프로세스 다중 코드 버전·무중단 코드 교체·원격 package marketplace를 지원 대상으로 삼지 않는다.
 
 ## Verification
+
+### Manipulation Implementation Update — 2026-09-13
+
+`manipulation@1.0.0`은 `agents/manipulation/`의 owner와
+`lerobot@1.0.0` Bridge Module을 조합한다. 기존 task 전체와 result delivery를
+두 Middle operation으로 유지하고, CODE 관계에서 실제 agent-local LLM 판단은
+High, API·내부 소프트웨어·복합 작업은 Middle, 장치·bridge 실행은 Low로 표시한다.
+Guardian/Safety와 Knowledge/Evidence는 횡단 책임이다. CODE 관계는 실행 명령이
+아니며 transfer·stop·clearance handler를 영역 채우기 목적으로 분해하지 않았다.
+
+LeRobot 구현과 도구 등록은 `device_bridges/lerobot/`에 있고 이전 import는 같은
+module identity의 alias이다. Manipulation과 Vision은 같은 `lerobot@1.0.0`을
+참조하며 runtime identity는 `lerobot_bridge` 하나다. IDE는 package 연결과
+10개 bridge 내부 component를 보여 준다. `/lerobot` workspace, API, script,
+설정·세션·보정·dataset·archive 경로는 기존 위치를 descriptor에서 참조한다.
+Agent Package는 장치가 아니라 조합 계약이다.
+
+owner frontend factory는 기존 Manipulation 카드 8개와 report 구성을 제공한다.
+공통 polling, joint/gripper sample stream, 3D viewer, event 상태, 검증 lifecycle은
+기존 host에 남아 있다. 비활성·미설치 owner는 현재 Manipulation 카드를 만들지 않는다.
+문서 SVG와 IDE는 동일한 source-bound execution catalog를 사용한다.
+
+49개 guarded original-mode/hybrid 검사와 등록 API 모델 가상장치 cycle이 통과했다.
+cycle은 10개 owner의 실제 모델 호출 34/34회, 물리 호출 0회, denied effect 0회로
+다음 Design까지 완료했다(392.336초). 첫 시도는 Vision에서 중단되어 통과 근거가
+아니다. 장치·측정 데이터는 가상이고 FEM은 실행하지 않았다. 기존 물리 실증
+provenance는 유지한다. 상세 명령·제한·브라우저 확인은
+[Manipulation 실행 계획](../plans/2026-09-13-manipulation-agent-package.md)에 기록한다.
+
+### Vision Implementation Update — 2026-09-13
+
+Vision now follows the installed AgentModule/BridgeModule contract: package
+`vision@1.0.0` binds owner `vision@1.0.0` and observation bridge
+`camera_vision@1.0.0`. Owner execution, bounded decision code, live report projector
+and frontend composition live under `agents/vision/`; observation services and
+tools live under `device_bridges/camera_vision/`. Legacy imports retain canonical
+module identity and local configuration/evidence paths. LeRobot owns motion,
+ActiveCam capture/return and rollout stop; this remains a shared dependency.
+
+The execution graph exposes the existing prepare, composite observation/clearance
+and delivery boundaries. Source-bound CODE relationships show the five areas
+inside these operations without introducing extra model calls. The IDE and light
+document SVG share the installed catalog. The existing six Vision cards, images,
+verification tabs and shared host lifecycle remain available through the module
+descriptor. API projection preserves current-state observation precedence through
+transient context and does not persist a second report store.
+
+The fresh registered API-model virtual-device cycle completed 34/34 model attempts
+across ten owners through the next Design, in 357.934 seconds, with zero physical
+calls and no denied effects. The separate guarded mode suite passed 44 tests. These
+results establish software integration with virtual equipment, not hardware proof.
+Detailed implementation and remaining integration checks belong to the
+[Vision execution plan](../plans/2026-09-13-vision-agent-package.md).
 
 Printer Fleet 단일화 및 두 IDE 탭 분리 후, 기존 프린터 계열 164개 검사와
 Specimen 모드별 경로·모듈/API 19개 검사를 통과했다. 별도 등록 API 비구동 사이클은

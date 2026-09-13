@@ -42,6 +42,77 @@ def _reversed_orchestrator_payload(client: TestClient) -> dict:
     return payload
 
 
+@pytest.mark.parametrize('module_id', ['analysis', 'bo', 'equipment', 'guardian', 'knowledge'])
+def test_legacy_module_api_delivers_control_view_without_converting_execution(module_api, module_id):
+    client, _, _, guard, root = module_api
+    installed = yaml.safe_load((root / module_id / 'module.yaml').read_text())['module']
+    response = client.get(f'/api/modules/{module_id}')
+    assert response.status_code == 200
+    delivered = response.json()['module']['module']
+    assert delivered['metadata']['control_view'] == installed['metadata']['control_view']
+    assert delivered['internal_graph'] == installed['internal_graph']
+    assert not delivered.get('execution_graph')
+    assert guard.physical_call_count == 0
+
+
+def test_manipulation_installed_report_projection_and_graph(module_api):
+    client, _, controller, guard, _ = module_api
+    response = client.get("/api/modules/manipulation").json()
+    assert {op["handler"] for op in response["execution_catalog"]["operations"]} == {
+        "manipulation.task", "manipulation.deliver"}
+    assert len(response["execution_graph_revision"]) == 64
+    state = controller._state
+    state.run_metadata.update(manipulation_report={"task": {"task_id": "transfer_to_utm"},
+        "rollout_runtime": {"action_count": 7}}, latest_manipulation_agent_report={"status": "running"},
+        robot_task_result={"handoff_status": "needs_post_place_vision", "decisions": []},
+        manipulation_metrics={"action_count": 0})
+    before = deepcopy(state.run_metadata)
+    report = client.get("/api/agents/manipulation/report")
+    assert report.status_code == 200
+    sections = report.json()["report"]["sections"]
+    assert sections["manipulation_report"]["task"] == {"task_id": "transfer_to_utm"}
+    assert sections["manipulation_agent_report"] == {"status": "running"}
+    assert sections["role_specific"]["rollout_runtime"] == {"action_count": 7}
+    assert sections["metrics"] == {"action_count": 0}
+    assert {key: state.run_metadata[key] for key in before} == before
+    assert "_projection_state" not in state.run_metadata
+    assert guard.physical_call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_saved_manipulation_graph_uses_registered_archived_owner(module_api, tmp_path, monkeypatch):
+    from orchestrator.langgraph_runtime import ModuleRuntimeContext
+    from orchestrator.state import Stage
+    from tests.unit.test_manipulation_module_contract import BoundaryTools
+    from tests.unit.test_manipulation_lerobot_agent import _state, _CtxStub, _isolate_manipulation_profile
+    client, _, controller, guard, _ = module_api
+    _isolate_manipulation_profile(tmp_path, monkeypatch)
+    payload = client.get("/api/modules/manipulation").json()["module"]
+    graph = payload["module"]["execution_graph"]
+    graph["nodes"][0]["id"] = "saved_task"
+    graph["entry"] = "saved_task"
+    graph["edges"][0]["source"] = "saved_task"
+    saved = client.put("/api/modules/manipulation", json={"module": payload, "activate": True})
+    assert saved.status_code == 200 and saved.json()["activated"] is True
+    loaded = client.get("/api/modules/manipulation").json()
+    module = loaded["module"]["module"]
+    ctx, state = _CtxStub(BoundaryTools()), _state()
+    ctx.active_backend = "controlled"
+    ctx.force_real_llm_in_test = False
+    ctx.artifact_run_root = tmp_path / "runs"
+    events = []
+    scoped = ModuleRuntimeContext(ctx, module, Stage.MANIPULATION, state=state,
+        execution_event_emitter=events.append)
+    result = await controller._deps.agent_registry.get("manipulation_agent").run(state, scoped)
+    assert result.success and result.data["requested_next_stage"] == "vision"
+    assert result.data["artifact_execution"]
+    assert [event["payload"]["node_id"] for event in events
+        if event["type"] == "execution.node.completed"] == ["saved_task", "deliver"]
+    assert all(event["payload"]["graph_revision"] == loaded["execution_graph_revision"] for event in events)
+    assert [name for name, _ in ctx.tools.calls] == ["lerobot.rollout.start"]
+    assert guard.physical_call_count == 0
+
+
 @pytest.mark.asyncio
 async def test_get_save_reload_and_real_owner_execution_share_edited_edges(module_api, monkeypatch):
     """A valid API edge edit must change actual registered owner operation order."""

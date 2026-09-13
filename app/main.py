@@ -495,29 +495,6 @@ LIVE_AGENT_REPORT_PROFILES: dict[str, dict[str, object]] = {
         ],
         "checklist": ["Validate required inputs", "Emit system handoff messages", "Stop on unresolved approval"],
     },
-    "vision": {
-        "title": "Lab Perception Signal Bus / Visual Evidence",
-        "summary": "Converts camera or screenshot evidence into zone states, freshness-bounded agent signals, visual evidence, and downstream handoff gates.",
-        "focus_rows": [
-            {"label": "Scene task", "value": "post-ejection, pickup, UTM fixture, or reset observation task with current specimen context"},
-            {"label": "Signal board", "value": "pickup_ready, visual_evidence_ready, anomaly_detected, and future equipment cross-check signals with confidence/freshness"},
-            {"label": "D455F snapshot", "value": "one-shot RGB-D pose after auto-ejection, then camera returned to VLA route"},
-            {"label": "VLA gate", "value": "Manipulation starts only when specimen_pose_ready and camera_returned_to_vla are true"},
-            {"label": "Evidence", "value": "frame/annotated scene, detection JSON, zone states, and Knowledge memory payload"},
-            {"label": "Safety", "value": "Vision observes only; robot/printer/equipment actions remain gated by downstream agents and Guardian"},
-        ],
-        "checklist": ["Check camera heartbeat", "Review zone state", "Verify signal freshness", "Inspect visual evidence", "Gate manipulation handoff"],
-    },
-    "manipulation": {
-        "title": "Manipulation Agent / Runtime Supervision",
-        "summary": "Supervises bounded LeRobot policy skills, preflight readiness, task stages, Vision verification dependency, and robot_task_result handoff.",
-        "focus_rows": [
-            {"label": "Task", "value": "transfer_to_utm or clear_utm_to_disposal with source/target/terminal pose"},
-            {"label": "Policy boundary", "value": "LeRobot bridge executes; Manipulation Agent supervises stage, safety, and handoff"},
-            {"label": "Task stages", "value": "current stage, completed stages, and post-place verification"},
-        ],
-        "checklist": ["Confirm Vision freshness", "Validate robot/profile/policy preflight", "Run bounded rollout", "Check task stages", "Require post-place Vision verification"],
-    },
     "equipment": {
         "title": "Lab Equipment / UTM Visual Control",
         "summary": "Shows Windows/UTM control trace, screen-state assertions, Vision physical cross-checks, data artifact ledger, and Analysis handoff gate evidence.",
@@ -6863,54 +6840,14 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
     installed = controller._deps.agent_registry.module_for_agent(definition.get("handler", "").removeprefix("agent."))
     if installed is not None and installed.project_report is not None:
         role_specific.update(installed.describe().get("report_profile", {}))
-        projection = installed.project_report(metadata, agent_payload)
+        # Request-only context preserves owner observation precedence without a new store.
+        projection = installed.project_report({**metadata, "_projection_state": state}, agent_payload)
         role_specific.update(projection["role_specific"])
         report_decisions = projection["decisions"]
         report_metrics = projection["metrics"]
         module_sections = {key: value for key, value in projection.items()
                            if key not in {"role_specific", "decisions", "metrics"}}
-    vision_report = None
-    vision_agent_report = None
     knowledge_report = None
-    manipulation_report = None
-    manipulation_agent_report = None
-    robot_task_result = None
-    if definition["agent_id"] == "vision":
-        latest_observation = state.get("latest_observations") if isinstance(state.get("latest_observations"), dict) else {}
-        if not latest_observation and isinstance(metadata.get("latest_vision_observation"), dict):
-            latest_observation = metadata["latest_vision_observation"]
-        if isinstance(metadata.get("latest_vision_agent_report"), dict):
-            vision_agent_report = metadata["latest_vision_agent_report"]
-        elif isinstance(latest_observation.get("vision_agent_report"), dict):
-            vision_agent_report = latest_observation["vision_agent_report"]
-        elif isinstance(agent_payload.get("vision_agent_report"), dict):
-            vision_agent_report = agent_payload["vision_agent_report"]
-        if isinstance(metadata.get("vision_report"), dict):
-            vision_report = metadata["vision_report"]
-        elif isinstance(latest_observation.get("vision_report"), dict):
-            vision_report = latest_observation["vision_report"]
-        elif isinstance(agent_payload.get("vision_report"), dict):
-            vision_report = agent_payload["vision_report"]
-        vision_packet = metadata.get("vision_signal") if isinstance(metadata.get("vision_signal"), dict) else {}
-        if not vision_packet and isinstance(latest_observation.get("vision_signal"), dict):
-            vision_packet = latest_observation["vision_signal"]
-        if not vision_packet and isinstance(agent_payload.get("vision_signal"), dict):
-            vision_packet = agent_payload["vision_signal"]
-        if isinstance(vision_report, dict):
-            role_specific["summary"] = "Lab perception signal board with zone states, freshness-bounded signals, visual evidence artifacts, and Knowledge/Guardian handoff context."
-            role_specific["scene_map"] = vision_report.get("scene_map", vision_report.get("zones", {}))
-            role_specific["signal_board"] = vision_report.get("signal_board", vision_report.get("agent_signals", []))
-            role_specific["evidence_timeline"] = vision_report.get("events", [])
-            role_specific["dataset_ledger"] = vision_report.get("dataset_ledger", {})
-            role_specific["model_backend"] = vision_report.get("model_backend", {})
-            role_specific["camera_source"] = vision_report.get("camera_source", {})
-            role_specific["safety_anomaly"] = vision_report.get("safety_anomaly", {})
-            role_specific["knowledge_payload"] = vision_report.get("knowledge_payload", {})
-            role_specific["handoff_packet"] = vision_packet
-            if isinstance(vision_agent_report, dict):
-                role_specific["vision_agent_report"] = vision_agent_report
-            report_decisions = vision_packet.get("decisions", []) if isinstance(vision_packet.get("decisions"), list) else agent_payload.get("decisions", []) if isinstance(agent_payload.get("decisions"), list) else []
-            report_metrics = metadata.get("vision_metrics") if isinstance(metadata.get("vision_metrics"), dict) else agent_payload.get("metrics", {}) if isinstance(agent_payload.get("metrics"), dict) else {}
     if definition["agent_id"] == "equipment":
         equipment_report = metadata.get("equipment_report") if isinstance(metadata.get("equipment_report"), dict) else {}
         if not equipment_report and isinstance(agent_payload.get("equipment_report"), dict):
@@ -7062,43 +6999,6 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
             }
             report_decisions = [equipment_report.get("decision", {})] if isinstance(equipment_report.get("decision"), dict) else agent_payload.get("decisions", []) if isinstance(agent_payload.get("decisions"), list) else []
             report_metrics = metadata.get("equipment_metrics") if isinstance(metadata.get("equipment_metrics"), dict) else agent_payload.get("metrics", {}) if isinstance(agent_payload.get("metrics"), dict) else {}
-    if definition["agent_id"] == "manipulation":
-        if isinstance(metadata.get("latest_manipulation_agent_report"), dict):
-            manipulation_agent_report = metadata["latest_manipulation_agent_report"]
-        elif isinstance(agent_payload.get("manipulation_agent_report"), dict):
-            manipulation_agent_report = agent_payload["manipulation_agent_report"]
-        if isinstance(metadata.get("manipulation_report"), dict):
-            manipulation_report = metadata["manipulation_report"]
-        elif isinstance(agent_payload.get("manipulation_report"), dict):
-            manipulation_report = agent_payload["manipulation_report"]
-        if isinstance(metadata.get("robot_task_result"), dict):
-            robot_task_result = metadata["robot_task_result"]
-        elif isinstance(agent_payload.get("robot_task_result"), dict):
-            robot_task_result = agent_payload["robot_task_result"]
-        if isinstance(manipulation_report, dict):
-            task = manipulation_report.get("task") if isinstance(manipulation_report.get("task"), dict) else {}
-            role_specific["summary"] = "Bounded policy execution, preflight readiness, execution supervision, Vision dependency, and robot_task_result handoff evidence."
-            role_specific["task"] = task
-            role_specific["skill_episode_board"] = {
-                "task_id": task.get("task_id", ""),
-                "skill_id": robot_task_result.get("skill_id", "") if isinstance(robot_task_result, dict) else "",
-                "episode_id": robot_task_result.get("episode_id", "") if isinstance(robot_task_result, dict) else manipulation_report.get("session_id", ""),
-                "terminal_pose": robot_task_result.get("terminal_pose", "") if isinstance(robot_task_result, dict) else "",
-                "handoff_status": robot_task_result.get("handoff_status", "") if isinstance(robot_task_result, dict) else "",
-                "completion_status": robot_task_result.get("completion_status", "") if isinstance(robot_task_result, dict) else "",
-            }
-            role_specific["policy_plan"] = manipulation_report.get("policy_plan", {})
-            role_specific["preflight"] = manipulation_report.get("preflight", {})
-            role_specific["vision_context"] = manipulation_report.get("vision_context", {})
-            role_specific["rollout_runtime"] = manipulation_report.get("rollout_runtime", {})
-            role_specific["stage_machine"] = manipulation_report.get("stage_machine", {})
-            role_specific["decision"] = manipulation_report.get("decision", {})
-            role_specific["knowledge_payload"] = manipulation_report.get("knowledge_payload", {})
-            role_specific["handoff_packet"] = robot_task_result if isinstance(robot_task_result, dict) else manipulation_report.get("handoff_packet", {})
-            if isinstance(manipulation_agent_report, dict):
-                role_specific["manipulation_agent_report"] = manipulation_agent_report
-            report_decisions = robot_task_result.get("decisions", []) if isinstance(robot_task_result, dict) and isinstance(robot_task_result.get("decisions"), list) else agent_payload.get("decisions", []) if isinstance(agent_payload.get("decisions"), list) else []
-            report_metrics = metadata.get("manipulation_metrics") if isinstance(metadata.get("manipulation_metrics"), dict) else agent_payload.get("metrics", {}) if isinstance(agent_payload.get("metrics"), dict) else {}
     if definition["agent_id"] == "knowledge":
         knowledge_payload = metadata.get("knowledge") if isinstance(metadata.get("knowledge"), dict) else {}
         knowledge_report = knowledge_payload.get("knowledge_report") if isinstance(knowledge_payload.get("knowledge_report"), dict) else {}
@@ -7273,12 +7173,9 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
             "role_specific": role_specific,
             "specimen_agent_report": None,
             "fabrication_report": None,
+            "vision_agent_report": None,
+            "vision_report": None,
             **module_sections,
-            "vision_agent_report": vision_agent_report if definition["agent_id"] == "vision" else None,
-            "vision_report": vision_report if definition["agent_id"] == "vision" else None,
-            "manipulation_report": manipulation_report if definition["agent_id"] == "manipulation" else None,
-            "manipulation_agent_report": manipulation_agent_report if definition["agent_id"] == "manipulation" else None,
-            "robot_task_result": robot_task_result if definition["agent_id"] == "manipulation" else None,
             "knowledge_report": knowledge_report if definition["agent_id"] == "knowledge" else None,
             "bo_result": metadata.get("bo_agent") if definition["agent_id"] == "bo" else None,
             "metrics": report_metrics,
@@ -7509,7 +7406,7 @@ def _runtime_graph_compiler(config: GraphConfig) -> ATRLangGraphCompiler:
 
 def _package_service():
     """Inject installed metadata and existing validation; never load device settings."""
-    from device_bridges.printer_fleet.module import MODULE as printer_fleet
+    from device_bridges.module_discovery import discover_bridge_modules
     from packages.service import PackageService, installed_agent_packages
 
     def validate_graph(payload):
@@ -7523,7 +7420,7 @@ def _package_service():
     return PackageService(
         agent_packages=installed_agent_packages(
             module.describe() for module in controller._deps.agent_registry.modules()),
-        bridge_modules=[printer_fleet.describe()],
+        bridge_modules=[module.describe() for module in discover_bridge_modules()],
         installed_handlers=_runtime_graph_handler_registry().names(),
         installed_module_ids=_runtime_module_ids(),
         validate_graph=validate_graph, validate_module=_validate_module_payload,

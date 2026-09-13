@@ -40,6 +40,7 @@ def test_design_detail_includes_actual_inspection_feedback_and_five_area_respons
     public = design_execution_catalog(DesignAgent()).describe()
     structure = public.get('implementation_structure', {})
     detail = structure.get('operations', {}).get('design.decide', {})
-    assert any(edge['source'] == 'inspect' and edge['target'] == '$operation'
+    assert any(edge['source'] == 'inspect' and edge['target'] == 'reason'
                and edge['kind'] == 'evidence' for edge in detail.get('edges', []))
-    assert any(node['id'] == 'inspect' and node['area'] == 'low' for node in detail.get('nodes', []))
+    assert any(node['id'] == 'inspect' and node['area'] == 'middle' for node in detail.get('nodes', []))
+    assert any(node['id'] == 'reason' and node['area'] == 'high' for node in detail.get('nodes', []))

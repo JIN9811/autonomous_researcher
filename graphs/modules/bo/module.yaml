@@ -75,3 +75,27 @@ module:
     result. LHS/BoTorch own coordinates; local tool names are not global bridge
     tools. Legacy internal IDs remain display/checkpoint identities. Existing
     Guardian/Orchestrator and downstream device ownership are unchanged.
+
+  metadata:
+    control_view:
+      areas:
+        internal_graph:01_load_analysis_handoff: knowledge
+        internal_graph:02_filter_valid_priors: guardian
+        internal_graph:03_summarize_evidence_table: knowledge
+        internal_graph:04_llm_reasoning_hypothesis_pass: high
+        internal_graph:05_validate_reasoning_patch: guardian
+        internal_graph:06_update_search_space: middle
+        internal_graph:07_generate_candidate_pool: middle
+        internal_graph:08_score_numeric_acquisition: middle
+        internal_graph:09_score_llm_preference: middle
+        internal_graph:10_apply_constraint_and_failure_penalties: guardian
+        internal_graph:11_rank_top_k_candidates: middle
+        internal_graph:12_llm_top_k_critique: high
+        internal_graph:13_select_recommendation: middle
+        internal_graph:14_write_bo_artifacts: knowledge
+        internal_graph:15_handoff_design_constraints: middle
+      llm_steps:
+      - internal_graph:04_llm_reasoning_hypothesis_pass
+      - internal_graph:12_llm_top_k_critique
+      empty_roles:
+        low: No direct device execution in this agent

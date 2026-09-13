@@ -540,6 +540,8 @@ def test_bridge_projects_its_computed_replay_time_bound():
 async def test_full_controller_tail_waits_for_replay_beyond_step_budget(tmp_path, monkeypatch, ending):
     """Real controller tail, LangGraph, agents, merges and routing; only device/time/UI sinks injected."""
     import asyncio
+    import json
+    from agents.orchestrator_agent import OrchestratorAgent
     from agents.manipulation_agent import ManipulationAgent
     from agents.vision_agent import VisionAgent
     from agents.registry import AgentRegistry
@@ -577,6 +579,19 @@ async def test_full_controller_tail_waits_for_replay_beyond_step_budget(tmp_path
             return result
     tools = LongReplay(state)
     registry = AgentRegistry()
+    # The configured graph delegates stage admission to the real Orchestrator.
+    # Supply its model boundary so this fixture exercises admission and routing.
+    registry.register(OrchestratorAgent())
+    async def complete(task_type, prompt, **kwargs):
+        assert task_type == "orchestrator_plan"
+        request = json.loads(prompt)
+        assert request["operation"] == "decide_orchestration"
+        candidates = request["context"]["handoff_candidates"]
+        assert len(candidates) == 1
+        return SimpleNamespace(model="controlled-handoff", raw={}, text=json.dumps({
+            "tool": "prepare_handoff", "arguments": {"candidate": candidates[0]},
+            "reason": "Accept the dispatcher-admitted fixture boundary",
+            "evidence_refs": list(request["evidence"])}))
     registry.register(ManipulationAgent())
     registry.register(VisionAgent())
     registry.register(ResultAgent("analysis_agent", {"analysis": {"ok": True}}))
@@ -588,7 +603,7 @@ async def test_full_controller_tail_waits_for_replay_beyond_step_budget(tmp_path
     controller._active_graph_config_path = None
     controller._active_graph_id = "atr_closed_loop"
     controller._deps = SimpleNamespace(agent_registry=registry, orchestrator_agent_name="orchestrator_agent",
-        agent_context=SimpleNamespace(tools=tools), system_config={})
+        agent_context=SimpleNamespace(tools=tools, complete=complete), system_config={})
     controller._logger_bundle = SimpleNamespace(logger=StructuredLogger(tmp_path / "events.jsonl", tmp_path / "summary.log"))
     controller._planning_tail_start_stage = lambda: Stage.MANIPULATION
     async def sink(*args, **kwargs): return None
@@ -598,7 +613,9 @@ async def test_full_controller_tail_waits_for_replay_beyond_step_budget(tmp_path
     controller._append_planning_message = sink
     controller._write_planning_fem_artifacts = lambda *a, **k: {}
     controller._wait_for_vision_intervention_resume = lambda: asyncio.sleep(0, result=False)
-    result = await controller._run_planning_loop_tail(state.current_experiment_spec)
+    # Fail promptly if fixture admission breaks again; replay duration uses the
+    # injected clock and never needs a corresponding real-time wait.
+    result = await asyncio.wait_for(controller._run_planning_loop_tail(state.current_experiment_spec), 10)
     assert tools.polls > 32  # Exceeds the ordinary full-tail stage budget.
     assert sleeps and sum(sleeps) >= 8
     assert sum(name == "lerobot.replay.start" for name, _ in tools.calls) == 1

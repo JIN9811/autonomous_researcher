@@ -14,16 +14,17 @@ scope:
   - isaac_sidecars
 summary: Current LeRobot bridge contract for profiles, devices, cameras, teleoperation, recording, training, rollout, visualization, and Isaac sidecars.
 source_of_truth:
-  - device_bridges/lerobot_bridge.py
+  - device_bridges/lerobot/bridge.py
+  - device_bridges/lerobot/module.py
   - device_bridges/isaac_lab_synthetic.py
   - device_bridges/isaac_lab_hdf5.py
   - device_bridges/isaac_lab_joint_replay_mimic.py
-  - mcp_tools/lerobot_tools.py
+  - device_bridges/lerobot/tools.py
   - configs/lerobot.yaml
   - app/main.py
   - scripts/lerobot_managed_replay.py
   - utils/utm_clear_cycle.py
-last_verified: 2026-09-06
+last_verified: 2026-09-13
 verified_against: working-tree
 related_docs:
   - docs/device_bridges/README.md
@@ -43,8 +44,8 @@ supersedes: []
 | Purpose | Robot profiles, teleoperation, recording, training and rollout |
 | Connects | Manipulation / LeRobot workspace ↔ robot and camera stack |
 | Effect | Robot motion is possible through live executors |
-| Implementation | [LeRobot implementation](../../device_bridges/lerobot_bridge.py) |
-| Verification | [Recorded scope and evidence](#current-verification) · 2026-09-06 |
+| Implementation | [LeRobot implementation](../../device_bridges/lerobot/bridge.py) |
+| Verification | 2026-09-13 package inspection and guarded software checks; [earlier physical scope and evidence](#current-verification) retained |
 
 ## Summary
 
@@ -55,6 +56,24 @@ workflows. It owns process/session evidence and stop/status operations; agents
 own scientific intent and Guardian/operator policy remains authoritative.
 
 ## Scope
+
+The installed `lerobot@1.0.0` Bridge Module has one runtime bridge identity,
+`lerobot_bridge`. Manipulation and Vision Agent Packages pin this same dependency;
+opening it in Device Bridges shows ten internal capability groups: profiles/ports,
+ActiveCam, teleoperation, recording, training, rollout, replay, datasets/policies,
+Isaac sidecars, and visualization. These are components of one bridge, not separate
+devices or an agent execution pipeline.
+
+Canonical implementation and registration are
+[`device_bridges/lerobot/bridge.py`](../../device_bridges/lerobot/bridge.py) and
+[`device_bridges/lerobot/tools.py`](../../device_bridges/lerobot/tools.py).
+Legacy `device_bridges.lerobot_bridge` and `mcp_tools.lerobot_tools` imports remain
+exact module aliases. The [bridge descriptor](../../device_bridges/lerobot/module.py)
+declares the existing `/lerobot` workspace, `/api/lerobot/*` services,
+`web/templates/lerobot.html`, `web/static/lerobot.js`, requirements, scripts and
+producer storage. Port memory, session logs, calibration, datasets, training
+outputs and configuration paths remain in their existing locations. Inspection
+does not create a bridge instance or contact a device.
 
 Included: ROBOTIS OMX-AI and SO-101 profile families, serial-port memory,
 camera checks, active robot camera lease, subprocess lifecycle, policies,

@@ -62,6 +62,39 @@ supersedes: []
 
 ## Applied Module Membership
 
+Manipulation now exposes its installed owner through `/api/modules/manipulation`.
+The graph has two Middle composite operations: task execution and result delivery.
+Seventeen CODE details point to actual LLM, software, bridge, validation and evidence
+symbols. High is agent-local LLM reasoning; Middle is API/internal software and
+composite workflows; Low is actual device/bridge execution. Guardian/Safety and
+Knowledge/Evidence are cross-cutting responsibilities. CODE relationships do not
+add executable commands or split the existing transfer/clearance procedure.
+The [Manipulation figure](../agents/assets/figures/manipulation_control_areas.svg)
+uses the same source-bound graph with the light document theme.
+
+Package Manager links `manipulation@1.0.0` to `lerobot@1.0.0`; Vision references that
+same bridge alongside `camera_vision@1.0.0`. Device Bridges shows one LeRobot with
+ten internal capability groups. The original canvas background, ports, legend and
+Inspector remain shared. Manipulation's owner frontend supplies its eight existing
+cards through the module host, while shared telemetry, polling and 3D viewer
+lifecycle remain unchanged. Absent or deactivated owner modules supply no current
+Manipulation card. The original `/lerobot` workspace stays available through its
+declared bridge references.
+
+Vision now uses the same installed module contract as Design and Specimen.
+`/api/modules/vision` exposes its executable graph and source-bound implementation
+catalog; edited valid graphs drive the registered Vision owner. The original graph
+canvas, ports, curves, labels, legend, Inspector and five control areas are reused.
+Composite observation/review internals appear as CODE relationships, not fabricated
+extra execution or model-call steps. The [Vision document figure](../agents/assets/figures/vision_control_areas.svg)
+is generated from this catalog in the shared light document theme.
+
+Package Manager and Device Bridges remain separate: `vision@1.0.0` owns the
+`camera_vision@1.0.0` observation bridge dependency. Opening that bridge shows its
+actual observation components and preserves draft membership. LeRobot retains the
+existing motion/capture/return and stop lifecycle. The live frontend module reuses
+all six Vision cards and UTM verification tabs without introducing polling.
+
 Validate and Compile display **Applied**, **Draft**, **Add** and **Remove**
 owner lists before a graph is applied. The preview uses the same graph-linked
 owner catalog as ORC; it neither queries equipment nor activates the draft.
@@ -245,21 +278,27 @@ every submitted payload; client state is never the execution authority.
 
 ### Five-area editable module canvas
 
-Design, Specimen and Orchestrator use the existing editable graph canvas with responsibility
+All ten agents use the existing graph canvas with responsibility
 areas: **High**, **Middle**, **Low**, **Guardian / Safety**, and **Knowledge / Evidence**.
-There is no separate architecture-view switch. Their `module.execution_graph`
-is the executable source for both backend and canvas; legacy modules retain
+There is no separate architecture-view switch. Design, Specimen, Vision, Manipulation and
+Orchestrator use `module.execution_graph` as the executable source for backend
+and canvas; the other modules retain
 their existing checkpoint representation. The owner catalog also supplies
 `implementation_structure`: source-bound function, tool, check and evidence
-relationships around those operations. Low includes software execution, not only
-hardware. Orchestrator does not acquire direct device tools.
+relationships around those operations. **High** means bounded LLM decisions;
+**Middle** means software processing, APIs and tool dispatch; **Low** means device
+execution. Guardian / Safety and Knowledge / Evidence are cross-cutting.
+Software-only agents leave Low empty. Composite handlers stay intact, with their
+internal model decisions shown in High; no calls, routes or safety gates change.
+Legacy checkpoint details use `metadata.control_view.checkpoint_details` and do
+not become executable nodes. Orchestrator does not acquire direct device tools.
 
 | Visual | Meaning |
 |---|---|
 | Area header and tinted boundary | Responsibility grouping, not a runtime stage |
 | Solid node boundary | Editable registered execution operation |
 | Dashed CODE node boundary | Existing implementation inside an operation; select or press Enter to inspect its owner, source symbols and relationships |
-| LLM badge | Composite LLM-capable decision/tool loop; existing mode policy still determines whether a model is called |
+| LLM / LLM inside badge | High decision / unchanged composite containing the displayed High decisions; mode policy still determines whether a model is called |
 | Solid / dashed / dotted connection | Explicit `execution` / `validation` / `evidence` edge kind |
 | Outcome label | Registered operation result selecting that edge |
 | Internal call / observation relation | Code-owned function/tool relationship, not an extra editable outcome or a live completion assertion |

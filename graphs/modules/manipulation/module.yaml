@@ -48,64 +48,15 @@ module:
     terminal_pose: standby_clear_of_utm
     verification_signal: utm_fixture_clear_verified
     verified_next_agent: analysis_agent
-  internal_graph:
-    - id: 01_resolve_transfer_task
-      label: Resolve bounded manipulation task
-      kind: internal_step
-      emits:
-      - task_id
-      - skill_id
-    - id: 02_collect_vision_and_specimen_context
-      label: Collect Vision signal and specimen handoff context
-      kind: internal_step
-      consumes:
-      - vision_signal
-      - specimen_result
-    - id: 03_validate_policy_profile_and_live_gates
-      label: Validate robot profile, policy ref, Vision freshness, and live confirmation
-      kind: internal_step
-      emits:
-      - preflight
-    - id: 04_select_policy_backend
-      label: Select LeRobot/Pi0.5 backend without bypassing bridge boundary
-      kind: internal_step
-      emits:
-      - policy_plan
-    - id: 05_start_bounded_rollout
-      label: Start bounded LeRobot rollout or compatibility pick-place
-      kind: tool_step
-      tool: lerobot.rollout.start
-    - id: 06_monitor_rollout_events
-      label: Capture rollout session, logs, and event trace
-      kind: internal_step
-      emits:
-      - rollout_runtime
-    - id: 07_observe_task_stage
-      label: Observe task stage from execution and verification evidence
-      kind: internal_step
-      emits:
-      - stage_machine
-    - id: 08_request_post_place_vision_verification
-      label: Request Vision verification before downstream physical handoff
-      kind: handoff_gate
-      emits:
-      - verification_status
-    - id: 09_decide_recover_stop_or_handoff
-      label: Decide recover, stop, Vision verify, or verified downstream handoff
-      kind: internal_step
-      emits:
-      - decision
-    - id: 10_package_manipulation_report
-      label: Package manipulation_report.v1 and robot_task_result.v1
-      kind: internal_step
-      emits:
-      - manipulation_report
-      - robot_task_result
-    - id: 11_store_rollout_evidence
-      label: Attach rollout log/dataset/checkpoint evidence for Knowledge and Guardian
-      kind: internal_step
-      emits:
-      - evidence_refs
+  execution_graph:
+    schema: ax4lab.execution_graph.v1
+    entry: task
+    nodes:
+    - {id: task, handler: manipulation.task, label: Composite bounded manipulation task, area: middle, llm: true}
+    - {id: deliver, handler: manipulation.deliver, label: Deliver owner result, area: middle}
+    edges:
+    - {source: task, target: deliver, 'on': next, kind: evidence}
+    terminals: [deliver]
   io_contract:
     input:
     - OrchestratorState with specimen_result, latest Vision observation, and manipulation profile

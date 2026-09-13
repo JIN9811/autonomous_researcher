@@ -47,6 +47,7 @@ including failed/cancelled calls, file snapshots, and saved-loop GUI access.
 | At a glance | Details |
 |---|---|
 | Inventory | Ten executable agents on the existing registered graph/module path |
+| Installed packages | Design, Specimen, Vision and Manipulation expose owned code, execution definitions and live reports; Manipulation and Vision share one installed LeRobot bridge, and Vision also uses Camera/Vision observation services |
 | Orchestrator | Bounded `orchestrator_plan` decisions and dynamic Experimental Setup are documented against working-tree scope |
 | Setup ownership | Only Orchestrator goal and BO parameter-space/acquisition adapters currently expose writable public fields; other owners remain read-only or unsupported |
 | Execution authority | Agent procedures and registered tools/bridges retain execution authority; numerical values are tool-computed |
@@ -54,6 +55,16 @@ including failed/cancelled calls, file snapshots, and saved-loop GUI access.
 | Verification | A corrected aggregate passed 78 bounded cases per provider; [verification evidence](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md) retains capture/postprocessor distinction and no hardware claim is added |
 
 ## Reading the References
+
+The [Manipulation Reference](manipulation_agent.md#installed-package-and-executable-structure)
+covers its two composite execution operations, source-bound control-area figure,
+eight owner frontend cards and shared LeRobot dependency. An Agent Package is a
+composition contract; the Device Bridges view shows the actual bridge components.
+
+The [Vision Reference](vision_agent.md#installed-package-and-executable-structure)
+documents the installed package, composite observation operation and shared
+five-area IDE/document projection. Its new validation uses virtual equipment and
+registered model calls; it does not add physical validation claims.
 
 Start with the role overview and available status summary, then read the
 responsibility map, handoffs, decision/tools, API connections, and evidence.
@@ -104,7 +115,7 @@ implementations remain authoritative.
 | [Design](design_agent.md) | Candidate suitability | [Source](../../agents/design/agent.py) · [Code module](../../agents/design/module.py) · [Graph module](../../graphs/modules/design/module.yaml) |
 | [Specimen](specimen_agent.md) | Fabrication suitability and tools | [Owner](../../agents/specimen/agent.py) · [Code module](../../agents/specimen/module.py) · [Execution graph](../../graphs/modules/specimen/module.yaml) · [Agent Package](../../packages/agents/specimen/package.yaml) |
 | [Vision](vision_agent.md) | Visual evidence | [Source](../../agents/vision_agent.py) · [Module](../../graphs/modules/vision/module.yaml) |
-| [Manipulation](manipulation_agent.md) | Robot skills and completion | [Source](../../agents/manipulation_agent.py) · [Module](../../graphs/modules/manipulation/module.yaml) |
+| [Manipulation](manipulation_agent.md) | Robot skills and completion | [Source](../../agents/manipulation/agent.py) · [Module](../../graphs/modules/manipulation/module.yaml) · [Control areas](assets/figures/manipulation_control_areas.svg) |
 | [Equipment](equipment_agent.md) | Stacked Flow selection, terminal review and bounded recovery | [Source](../../agents/equipment_agent.py) · [Module](../../graphs/modules/equipment/module.yaml) |
 | [Analysis](analysis_agent.md) | Measured objectives and independent background FEM | [Source](../../agents/analysis_agent.py) · [Module](../../graphs/modules/analysis/module.yaml) |
 | [Knowledge](knowledge_agent.md) | Ontology-guided Markdown, page-wise source curation and scoped retrieval | [Source](../../agents/knowledge_agent.py) · [Module](../../graphs/modules/knowledge/module.yaml) |
@@ -142,22 +153,23 @@ bridges. The complete contract and diagram are in the
 
 | Agent | High-Level Control relationship | Middle-Level Control ownership | Low-Level Control boundary |
 |---|---|---|---|
-| Orchestrator | Owns mission, dispatch, handoff, cycle, retry/review, and route translation | Normalizes intent and compiles mission, context, follow-up, decision, and reflection contracts | No direct device tools; delegates bounded work to graph-selected agents |
-| Design | Receives the governed Design stage; LLM accepts, inspects, or returns the candidate decision | Builds/checks candidates, enforces locked inputs, and emits the approved specification | Deterministic checks and agent-local evidence tools; no device authority |
-| Specimen Making | Converts a selected design into a fabrication result requiring Vision verification | Owns checked geometry, bounded LLM suitability/tool decisions, start/monitor/ejection evidence and handoff | Existing evaluation/geometry tools and selected printer fleet/provider bridge |
-| Vision | Supplies stage observations and verification sidecars; bounded JSON decisions may execute the current registered contract or return it to its owner | Owns decision/image protocol, source selection, freshness/quality, same-capture review, and active-camera/UTM verification signals | Camera, ActiveCam robot move/capture/return, ROS/UTM runtime, and verified rollout-stop tools; no arbitrary driver or replay-start authority |
-| Manipulation | LLM judges configured-skill suitability and post-Vision task-result handoff | Bounded tool dispatch, preflight, rollout/replay supervision and completion contracts | Existing LeRobot/robot execution, serial/camera lease, and optional Isaac sidecars |
-| Lab Equipment | Delegated equipment task; verified acquisition precedes Manipulation clearance and fresh Vision | Owns LLM Flow selection and terminal review, exact Skill execution, CSV/readiness checks and eligible failed-block recovery | Equipment Runtime and selected Windows/Local worker; no intermediate Equipment LLM calls |
-| Analysis | LLM assesses measurement admissibility, simulation actions and model evidence | Parses units/geometry, derives measured curves/objectives, and independently schedules frozen FEM jobs | Numeric tools and registered CAE prepare/solve/postprocessing; no physical actuator |
-| Knowledge | LLM selects reusable evidence and scoped context for BO and other agents | Owns typed records, ontology-guided Markdown and separate page-wise source intake into one note per source | Local audit, Markdown/JSONL and Source Library; active Knowledge Graph/Neo4j retired |
-| BO | Owns bounded strategy/tool decisions and numerical-result review | Owns validated dispatch, continuous-domain/LHS state, candidate checks and Design handoff | BoTorch/benchmark computation tools; proposal only |
-| Guardian | Cross-level authority for continue, review, stop, or error | Owns risk/evidence/health/approval evaluation and corrective-action records | Read-only health/queue tools and stop/block authority; bridge hard interlocks remain authoritative |
+| Orchestrator | LLM intent, availability and admitted action review | Existing runtime supervision, contract/plan builders and tool dispatch | No direct device execution |
+| Design | LLM candidate suitability and bounded tool choice | Candidate generation, inspection, validation and handoff | No direct device execution |
+| Specimen Making | LLM fabrication suitability and bounded tool choice | Geometry, manufacturing checks, existing printer API calls and handoff | Selected Printer Fleet provider and printer |
+| Vision | LLM observation choice and same-frame evidence review | Task resolution, detectors, interlocks, capture/status/stop API dispatch | Selected camera and LeRobot device paths |
+| Manipulation | LLM saved-skill suitability and post-Vision result review | Profile binding, API dispatch, preflight and completion supervision | LeRobot robot policy/replay execution and device lifecycle |
+| Lab Equipment | LLM stacked-Flow selection and terminal evidence/recovery review | Existing exact Flow/Skill supervision, APIs, CSV checks and handoff | Selected desktop/instrument worker and device driver |
+| Analysis | LLM data, simulation and model-review choices | Parsing, units, objectives, solver, postprocessing and asynchronous FEM scheduling | No direct device execution |
+| Knowledge | LLM scoped retrieval and evidence curation | Provenance, ontology, Markdown/JSONL persistence and context assembly | No direct device execution |
+| Bayesian Optimization | LLM strategy/tool choice and numerical result review | LHS/BoTorch, constraints, numeric recommendation and handoff | No direct device execution |
+| Guardian | Existing LLM policy-evidence review | Deterministic safety/risk checks, health APIs and incident/route results | Hardware interlocks and effective stops remain in device bridges |
 
 The control direction is `High-Level -> Middle-Level -> Low-Level`; telemetry
 and evidence return upward. Recovery stays with the owner of the failed
 invariant: device reconnection is Low-Level, rebuilding an agent output is
 Middle-Level, and choosing retry/review/another cycle/terminal state is
-High-Level.
+High-Level only where an existing LLM decision participates. Deterministic
+routing remains Middle; classification never inserts new model calls.
 
 ## Orchestration Plan Reading Map
 
@@ -224,9 +236,9 @@ sidecars, and explicit `complete` and `error` nodes.
 | `operator` API | Supports configuration, review, evidence inspection, or manual invocation |
 | `shared` API | Serves multiple agents, such as run, event, approval, graph, module, or runtime APIs |
 | `physical_possible` | May produce a physical or desktop effect after mode, policy, approval, and bridge gates |
-| High-Level Control | Experiment mission, active agent, stage, cycle, retry/review, and terminal-route control |
-| Middle-Level Control | Bounded internal procedure owned by the active agent |
-| Low-Level Control | Registered tool, service, bridge, process, solver, or physical-device execution |
+| High-Level Control | Each agent's bounded LLM reasoning and decisions |
+| Middle-Level Control | Existing internal processes, APIs, tool dispatch and software computation |
+| Low-Level Control | Actual device bridge/driver execution; not local computation or storage |
 | Device Workspace | Explicit manual control surface outside automatic-loop progression |
 
 ## API and Effect Rules
