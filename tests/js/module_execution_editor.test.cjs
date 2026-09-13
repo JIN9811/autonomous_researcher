@@ -9,6 +9,21 @@ const payload = {module:{id:'fixture',label:'Fixture',pre_execution:[{id:'outer'
   {id:'c',handler:'fixture.work',area:'knowledge',label:'Work'},
 ],edges:[{source:'a',target:'c',on:'yes',kind:'evidence'},{source:'a',target:'b',on:'no',kind:'validation'},{source:'c',target:'b',on:'next',kind:'execution'}],terminals:['b']}}};
 const catalog = {operations:[{handler:'fixture.choose',outcomes:['yes','no'],config:{limit:{type:'integer'}}},{handler:'fixture.work',outcomes:['next'],config:{}},{handler:'fixture.result',outcomes:['next'],config:{}}]};
+test('model badges distinguish a High decision from a process calling it without changing the route',()=>{
+ const module=structuredClone(payload.module);
+ module.execution_graph.nodes[0].llm=true;
+ module.execution_graph.nodes[1].llm=true;
+ const before=JSON.stringify(module);
+ const svg=view.renderSvg(module);
+ const decision=svg.split('<g><title>a · fixture.choose</title>')[1].split('</g>')[0];
+ const caller=svg.split('<g><title>b · fixture.result</title>')[1].split('</g>')[0];
+ const ordinary=svg.split('<g><title>c · fixture.work</title>')[1].split('</g>')[0];
+ assert.match(decision,/>LLM<\/text>/);
+ assert.doesNotMatch(decision,/>LLM call<\/text>/);
+ assert.match(caller,/>LLM call<\/text>/);
+ assert.doesNotMatch(ordinary,/>LLM(?: call)?<\/text>/);
+ assert.equal(JSON.stringify(module),before);
+});
 test('projection uses explicit executable nodes and relation kinds, omitting outer pre steps',()=>{
  const result=view.layout(payload.module);
  assert.ok(result,'execution graph must project without legacy metadata');
@@ -88,6 +103,43 @@ test('actual IDE structural preview clearly says owner operations were not execu
  const markup=runtimeFunction('moduleDryRunResultMarkup',context)({ok:true,mode:'structural_preview',executes_owner_functions:false,paths:[{nodes:['a','c','b']}],sequence:[]},'fixture');
  assert.match(markup,/Structural preview/);
  assert.match(markup,/owner (?:functions|operations) (?:were )?not executed/i);
+});
+
+test('installed Equipment opens its catalog-backed execution graph and keeps Skill Flow as a side workspace',async()=>{
+ const normalized={module:{id:'equipment',label:'Lab Equipment',execution_graph:{entry:'task',nodes:[{id:'task'}],edges:[],terminals:['task']}}};
+ const projected={id:'module:equipment',metadata:{ide_tab_kind:'module',module_id:'equipment',execution_graph_revision:'rev'},nodes:[{id:'task'}]};
+ const tabs=[];const workspace=[];let rendered=null;
+ const context={MODULE_TAB_PREFIX:'module:',moduleOpenToken:null,modulePayloadCache:new Map(),graphTabs:tabs,moduleRequestTokens:new Map(),moduleExecutionContracts:new Map(),runtimeEquipmentFlowProfileId:'utm_windows_v1',runtimeEquipmentFlowPayload:{graph:{id:'equipment-skill-flow'}},
+   activeGraphTabId:'main',activeModuleId:'',moduleSelect:{value:''},normalizedModulePayload:p=>p.module?p:{module:p},cloneConfig:structuredClone,
+   captureModuleRequest:id=>({moduleId:id,fingerprint:'f'}),moduleRequestOwnsView:()=>true,applyModuleResponse:()=>true,
+   requestJson:async()=>({module:normalized,execution_graph_revision:'rev'}),setModuleJson:()=>{},updateModuleSummary:()=>{},rememberActiveGraphDraft:()=>{},
+   showRuntimeEquipmentFlowWorkspace:value=>workspace.push(value),loadRuntimeEquipmentSkillFlow:async()=>({graph:{id:'equipment-skill-flow'}}),
+   modulePayloadToGraph:()=>projected,renderModuleGraph:()=>{},renderGraph:g=>{rendered=g;},log:()=>{},
+   upsertGraphTab:tab=>tabs.push(tab),
+ };
+ const open=runtimeFunction('openModuleGraphTab',context);
+ await open('equipment');
+ assert.equal(tabs[0].subtitle,'agent internal map');
+ assert.equal(tabs[0].graph.id,'module:equipment');
+ assert.equal(rendered.id,'module:equipment');
+ assert.deepEqual(workspace,[true]);
+});
+
+test('Equipment Skill Flow refresh cannot overwrite a catalog-backed module tab graph',async()=>{
+ const executionGraph={id:'module:equipment',metadata:{execution_graph_revision:'rev'}};
+ const tab={id:'module:equipment',moduleId:'equipment',modulePayload:{module:{id:'equipment',execution_graph:{entry:'task'}}},graph:executionGraph,baselineGraph:structuredClone(executionGraph),dirty:false};
+ let rendered=0,workspaceRendered=0;
+ const context={MODULE_TAB_PREFIX:'module:',runtimeEquipmentFlowProfileId:'utm_windows_v1',runtimeEquipmentProfiles:[],runtimeEquipmentFlowPayload:{},
+   graphTabs:[tab],activeGraphTabId:'module:equipment',cloneConfig:structuredClone,
+   requestJson:async url=>url==='/api/equipment/profiles'?{profiles:[{profile_id:'utm_windows_v1'}]}:{graph:{id:'equipment-skill-flow'}},
+   renderRuntimeEquipmentSkillFlow:()=>{workspaceRendered+=1;},renderGraph:()=>{rendered+=1;},
+ };
+ const refresh=runtimeFunction('loadRuntimeEquipmentSkillFlow',context);
+ await refresh('utm_windows_v1');
+ assert.equal(tab.graph.id,'module:equipment');
+ assert.equal(tab.baselineGraph.id,'module:equipment');
+ assert.equal(rendered,0);
+ assert.equal(workspaceRendered,1);
 });
 
 function requestHarness() {

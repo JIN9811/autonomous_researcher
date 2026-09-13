@@ -141,7 +141,8 @@
       ${AREAS.map(([id,label,color])=>`<span><i style="background:${color}"></i>${esc(label)}</span>`).join('')}
       ${Object.entries(TYPES).map(([id,[label,color,dash]])=>`<span><svg width="32" height="12" aria-hidden="true"><line x1="0" x2="30" y1="6" y2="6" stroke="${color}" stroke-width="2" stroke-dasharray="${dash}"/></svg>${label}</span>`).join('')}
       ${control?.groups.some(group=>group.id==='unassigned')?'<small>Unassigned: classify new or renamed checkpoints in module metadata.control_view.areas.</small>':''}
-      <small>Guardian / Safety and Knowledge / Evidence are cross-cutting. ${control?.executable?'Solid boxes: editable execution. Dashed CODE boxes: existing internals, not extra commands or live statuses. Middle composites can contain the High decisions shown inside them.':'Lines retain configured checkpoint order, not a new execution plan. Dashed CODE boxes expose existing internal decisions and device boundaries.'}</small></div>`;
+      <small>LLM: High decision. LLM call: process sends context to that decision and consumes its result; not file containment or live-call proof.</small>
+      <small>Guardian / Safety and Knowledge / Evidence are cross-cutting. ${control?.executable?'Solid boxes: editable execution. Dashed CODE boxes: existing internals, not extra commands or live statuses. Middle composites call the High decisions shown separately.':'Lines retain configured checkpoint order, not a new execution plan. Dashed CODE boxes expose existing internal decisions and device boundaries.'}</small></div>`;
   }
   function renderSvg(module,options={theme:'document'}) {
     const theme=palette(options),control=layout(module,options.catalog);
@@ -179,7 +180,7 @@
       return `<g><title>${esc(node.key)} · ${esc(node.step.handler || module.handler)}</title>
         <rect x="${node.position.x}" y="${node.position.y}" width="184" height="76" rx="9" fill="${theme.node}" stroke="${areaColor(node.area,theme)}" stroke-width="2"/>
         ${rows.slice(0,3).map((row,index)=>`<text x="${node.position.x+12}" y="${node.position.y+21+index*16}" fill="${theme.text}" font-size="12">${esc(row)}</text>`).join('')}
-        ${node.llm?`<text x="${node.position.x+105}" y="${node.position.y+68}" fill="${areaColor(node.area,theme)}" font-size="10">${node.area==='high'?'LLM':'LLM inside'}</text>`:''}</g>`;
+        ${node.llm?`<text x="${node.position.x+105}" y="${node.position.y+68}" fill="${areaColor(node.area,theme)}" font-size="10">${node.area==='high'?'LLM':'LLM call'}</text>`:''}</g>`;
     }).join('');
     return `<svg xmlns="http://www.w3.org/2000/svg" data-theme="${options.theme || 'runtime'}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(module.label)} five-area internal graph" style="font-family:Arial,sans-serif;background:${theme.background}">
       <title>${esc(module.label)} — five-area internal graph</title><desc>${control.executable?'Executable owner operations and explicit outcomes. Positions are presentation only. Composite LLM tools are not separate editable operations.':'Existing editable checkpoints grouped by responsibility. Not five sequential layers.'}</desc>
@@ -187,7 +188,7 @@
       <defs><marker id="control-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6z" fill="${theme.muted}"/></marker></defs>
       ${backdrop(control.nodes,control,options)}${edges}${nodes}
       ${Object.entries(TYPES).map(([id,[label,,dash]],index)=>`<line x1="${24+index*220}" x2="${62+index*220}" y1="${height-76}" y2="${height-76}" stroke="${theme.muted}" stroke-width="2" stroke-dasharray="${dash}"/><text x="${72+index*220}" y="${height-72}" fill="${theme.text}" font-size="14">${label}</text>`).join('')}
-      <text x="24" y="${height-40}" fill="${theme.muted}" font-size="13">Solid boxes: executable operations · Dashed CODE boxes: implementation relationships · LLM: bounded decision</text>
+      <text x="24" y="${height-40}" fill="${theme.muted}" font-size="13">Solid: execution · Dashed CODE: implementation · LLM: High decision · LLM call: process calls that decision</text>
     </svg>`;
   }
   const api=Object.freeze({layout,relation,internalDetails,groupBoxes,backdrop,legend,renderSvg});

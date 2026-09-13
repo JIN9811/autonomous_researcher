@@ -20,6 +20,32 @@ from app.main import app, controller, _package_runtime_event
 TINY_PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"atr-test-screen-evidence"
 
 
+def _equipment_frontend_source(client: TestClient) -> str:
+    response = client.get("/module-assets/equipment/live_report.js")
+    assert response.status_code == 200
+    return response.text
+
+
+def _live_equipment_sources(client: TestClient) -> str:
+    return client.get("/static/planning.js").text + "\n" + _equipment_frontend_source(client)
+
+
+def test_live_host_keeps_analysis_fem_timer_dependency_outside_equipment_frontend() -> None:
+    client = TestClient(app)
+    host = client.get("/static/planning.js").text
+    equipment_frontend = _equipment_frontend_source(client)
+
+    declaration = "let liveAnalysisFemController = null;"
+    helper = "function refreshLiveAnalysisFemEvidence()"
+    timer_call = "refreshLiveAnalysisFemEvidence().catch(() => {});"
+    assert declaration in host
+    assert helper in host
+    assert timer_call in host
+    assert host.index(declaration) < host.index("function renderAnalysisDashboardCards(")
+    assert declaration not in equipment_frontend
+    assert helper not in equipment_frontend
+
+
 def test_skill_workflow_editor_preserves_step_rows_inside_scroll_viewport() -> None:
     css = TestClient(app).get("/static/styles.css").text
 
@@ -2533,7 +2559,7 @@ def test_live_gui_equipment_report_exposes_utm_visual_control_contract() -> None
         assert role_specific["live_evidence_audit"]["request_audit_log"]["execute_event_seen"] is True
         assert role_specific["live_evidence_audit"]["save_export"]["ok"] is True
 
-        script = client.get("/static/planning.js").text
+        script = _live_equipment_sources(client)
         for token in [
             "latestEquipmentReport",
             "renderEquipmentReportDetails",
@@ -2612,7 +2638,7 @@ def test_live_gui_equipment_report_exposes_utm_visual_control_contract() -> None
 def test_live_gui_equipment_dashboard_uses_operational_card_layout() -> None:
     client = TestClient(app)
 
-    script = client.get("/static/planning.js").text
+    script = _equipment_frontend_source(client)
     css = client.get("/static/styles.css").text
 
     for token in (
@@ -2692,7 +2718,7 @@ def test_live_gui_equipment_agentic_nodes_fit_content_and_align_number_with_titl
 
 def test_live_gui_equipment_agentic_progress_reserves_passive_vision_slots() -> None:
     client = TestClient(app)
-    script = client.get("/static/planning.js").text
+    script = _equipment_frontend_source(client)
     css = client.get("/static/styles.css").text
     manager = client.get("/static/equipment_agent_manager.js").text
 
@@ -2711,7 +2737,7 @@ def test_live_gui_equipment_agentic_progress_reserves_passive_vision_slots() -> 
 def test_live_gui_equipment_dashboard_projects_recorded_cycle_overlay() -> None:
     client = TestClient(app)
 
-    script = client.get("/static/planning.js").text
+    script = _live_equipment_sources(client)
 
     for token in (
         "ATREquipmentAgenticTaskModel",
@@ -2735,9 +2761,9 @@ def test_live_gui_equipment_dashboard_projects_recorded_cycle_overlay() -> None:
 def test_live_gui_equipment_cycle_overlay_has_no_direct_test_execution_action() -> None:
     client = TestClient(app)
 
-    script = client.get("/static/planning.js").text
+    script = _equipment_frontend_source(client)
     overlay_start = script.index("function renderEquipmentCycleHeader(")
-    overlay_end = script.index("function renderEquipmentDashboardCards(", overlay_start)
+    overlay_end = script.index("function renderDashboard(", overlay_start)
     overlay = script[overlay_start:overlay_end]
 
     assert "Start Test" not in overlay
@@ -2748,7 +2774,7 @@ def test_live_gui_equipment_cycle_overlay_has_no_direct_test_execution_action() 
 def test_live_gui_equipment_screen_transition_card_renders_bounded_evidence_fields() -> None:
     client = TestClient(app)
 
-    script = client.get("/static/planning.js").text
+    script = _equipment_frontend_source(client)
     start = script.index("function renderEquipmentScreenTransitions(")
     end = script.index("function renderEquipmentRawDataReadiness(", start)
     renderer = script[start:end]
@@ -2760,9 +2786,9 @@ def test_live_gui_equipment_screen_transition_card_renders_bounded_evidence_fiel
 def test_live_gui_equipment_cycle_cards_are_additive_only_when_overlay_exists() -> None:
     client = TestClient(app)
 
-    script = client.get("/static/planning.js").text
-    start = script.index("function renderEquipmentDashboardCards(")
-    end = script.index("function renderAnalysisDashboardCards(", start)
+    script = _equipment_frontend_source(client)
+    start = script.index("function renderDashboard(")
+    end = script.index("function dispose(", start)
     renderer = script[start:end]
 
     assert "const cycleAvailable = equipmentCycleContext(ctx).available" in renderer
@@ -2777,7 +2803,7 @@ def test_live_gui_equipment_cycle_uses_active_profile_and_inflight_flow_checkpoi
     refresh_end = script.index("function ensureEquipmentRuntimeSnapshot(", refresh_start)
     refresh = script[refresh_start:refresh_end]
     context_start = script.index("function equipmentCycleContext(")
-    context_end = script.index("function equipmentCanonicalProgressSteps(", context_start)
+    context_end = script.index("function renderEquipmentDashboardCards(", context_start)
     context = script[context_start:context_end]
 
     assert "activeEquipmentProfileId" in refresh
@@ -2824,12 +2850,12 @@ def test_live_gui_run_transition_clears_equipment_run_scoped_snapshots() -> None
 def test_live_gui_equipment_cycle_header_renders_execution_identity_and_csv_artifact_link() -> None:
     client = TestClient(app)
 
-    script = client.get("/static/planning.js").text
+    script = _live_equipment_sources(client)
     header_start = script.index("function renderEquipmentCycleHeader(")
     header_end = script.index("function equipmentCycleDisplayValue(", header_start)
     header = script[header_start:header_end]
     raw_start = script.index("function renderEquipmentRawDataReadiness(")
-    raw_end = script.index("function renderEquipmentDashboardCards(", raw_start)
+    raw_end = script.index("function renderDashboard(", raw_start)
     raw = script[raw_start:raw_end]
 
     for token in ("profile_id", "flow_version", "run_id", "specimen_id"):
@@ -2841,7 +2867,7 @@ def test_live_gui_equipment_cycle_header_renders_execution_identity_and_csv_arti
 def test_live_gui_equipment_actions_are_passive_and_reuse_existing_routes() -> None:
     client = TestClient(app)
 
-    script = client.get("/static/planning.js").text
+    script = _live_equipment_sources(client)
 
     for token in (
         'data-equipment-live-action="test"',
@@ -2860,7 +2886,7 @@ def test_live_gui_equipment_actions_are_passive_and_reuse_existing_routes() -> N
 def test_live_gui_equipment_progress_uses_canonical_runtime_projection() -> None:
     client = TestClient(app)
 
-    script = client.get("/static/planning.js").text
+    script = _live_equipment_sources(client)
 
     assert '"/api/equipment/runtime/current"' in script
     assert "run_id=${encodeURIComponent(activeRunId)}" in script
@@ -2964,7 +2990,7 @@ def test_windows_equipment_workspace_uses_four_digit_pairing_instead_of_token_en
 
 def test_live_gui_skill_authoring_progress_uses_runtime_metadata_not_lifecycle_aliases() -> None:
     client = TestClient(app)
-    script = client.get("/static/planning.js").text
+    script = _equipment_frontend_source(client)
 
     start = script.index("function equipmentCanonicalProgressSteps")
     end = script.index("function equipmentBridgeState", start)
@@ -2987,7 +3013,7 @@ def test_live_gui_skill_authoring_progress_uses_runtime_metadata_not_lifecycle_a
 
 def test_live_gui_equipment_runtime_progress_uses_backend_lifecycle_contract() -> None:
     client = TestClient(app)
-    script = client.get("/static/planning.js").text
+    script = _equipment_frontend_source(client)
     start = script.index("function equipmentCanonicalProgressSteps")
     end = script.index("function equipmentBridgeState", start)
     progress_source = script[start:end]

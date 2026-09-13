@@ -56,6 +56,15 @@ Guardian safety and Knowledge/evidence are cross-level planes. Device
 Workspaces are manual maintenance and commissioning surfaces outside the
 automatic-loop hierarchy, even when they reuse the same low-level bridges.
 
+### LLM Node Labels
+
+Runtime IDE and document figures use **LLM** for an actual High-level decision
+and **LLM call** for a process that supplies its context and consumes the returned
+decision. A call relationship does not mean the functions share a file or that
+the LLM belongs to Middle. Mode policy still determines whether a particular run
+uses a real model; the badge alone is not execution evidence. Existing High,
+Middle, Low and cross-cutting background areas remain unchanged.
+
 ## 한국어 요약
 
 각 에이전트 내부에서 **High-Level Control**은 LLM 추론·의사결정,

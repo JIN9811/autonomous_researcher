@@ -28,8 +28,8 @@ source_of_truth:
   - configs/devices.yaml
   - configs/lerobot.yaml
   - graphs/configs/atr_closed_loop.yaml
-last_verified: 2026-09-11
-verified_against: cf8cb9f
+last_verified: 2026-09-13
+verified_against: working-tree
 related_docs:
   - docs/device_bridges/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -194,6 +194,8 @@ These are selected current interfaces, not instructions to execute live tests.
 
 | Surface | Purpose | Ownership / effect |
 |---|---|---|
+| `GET /api/packages`, `GET /api/modules/equipment`, `GET /api/runtime/agent-manifests` | Inspect installed Equipment/Windows-PyAutoGUI composition | Read-only metadata; no worker discovery, pairing or execution |
+| `GET /module-assets/equipment/live_report.js` | Serve owner composition only while Equipment is installed and active | Presentation only; no timer, listener or device action |
 | `GET /api/equipment/runtime/current` | Latest execution, optionally scoped by run/profile/execution | Read durable Equipment Runtime state |
 | `GET /api/equipment/runtime/executions` and `GET /api/equipment/runtime/executions/{execution_id}` | List records or inspect one execution | Read-only; does not replay a Flow |
 | `/api/equipment/skills/*` and `/api/equipment/profiles/*` | Versioned workflow/profile lifecycle and tests | Operator actions may deploy or execute; inspect the individual method/contract |
@@ -242,6 +244,13 @@ device/protocol combinations were not exhaustively exercised. Legacy graph
 labels, including a named robot policy, do not enumerate current saved profiles.
 
 ## Verification
+
+The 2026-09-13 Equipment migration adds the installed
+`windows_pyautogui@1.0.0` module, its package reference and source-bound IDE
+projection. Guarded tests observed no physical calls. An unchanged second
+registered-model attempt completed through the next Design with 34 actual calls,
+while the first stopped on a later Knowledge tool-contract rejection before BO.
+Both outcomes remain recorded; no hardware claim is made.
 
 Updated on 2026-09-11 by static inspection at `cf8cb9f`: graph metadata,
 bootstrap/tool/resource registration, owning implementations, Equipment Runtime,

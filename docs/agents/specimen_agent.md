@@ -130,6 +130,9 @@ geometry/artifact tools, and hardware Guides.
 
 ### Five-Area Responsibility Map
 
+Figure notation: **LLM** marks the High decision; **LLM call** marks the process
+that supplies context and consumes its response ([shared label contract](../runtime/three_level_control_model.md#llm-node-labels)).
+
 The areas describe responsibilities, not five sequential model calls.
 
 | Level | Specimen Making responsibility | Authority boundary |

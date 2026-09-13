@@ -27,7 +27,9 @@ _EXECUTABLE_KEYS = {"code", "python", "script", "scripts", "command", "commands"
 _MODULE_EXTENSION_KEYS = {"implementation", "orchestration_contract", "metadata", "decision_settings",
                           "runtime_contract", "output_contracts", "workflow_agentic_tasks",
                           "transition_conditions", "supported_tasks"}
-_WORKSPACE_ROUTES = {"/printer", "/lerobot", "/windows-equipment", "/cae", "/plc", "/live"}
+_WORKSPACE_ROUTES = {
+    "/printer", "/lerobot", "/windows-equipment", "/equipment/windows", "/cae", "/plc", "/live"
+}
 
 
 def _local_ui_reference(value):
@@ -43,7 +45,7 @@ def installed_agent_packages(descriptions: Iterable[dict]) -> list[dict]:
     """
     installed = {item["id"]: item for item in descriptions}
     result = []
-    for ident in ("design", "specimen", "vision", "manipulation"):
+    for ident in ("design", "specimen", "vision", "manipulation", "equipment"):
         if ident not in installed:
             continue
         raw = yaml.safe_load(files("packages").joinpath("agents", ident, "package.yaml").read_text())

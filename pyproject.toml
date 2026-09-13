@@ -64,6 +64,7 @@ include-package-data = true
 "agents.specimen" = ["frontend/*.js"]
 "agents.vision" = ["frontend/*.js"]
 "agents.manipulation" = ["frontend/*.js"]
+"agents.equipment" = ["frontend/*.js"]
 "packages" = ["agents/*/package.yaml", "agents/*/README.md", "README.md"]
 "device_bridges.bambu" = ["requirements.txt", "README.md"]
 "device_bridges.prusa" = ["requirements.txt", "README.md"]
@@ -71,6 +72,7 @@ include-package-data = true
 "device_bridges.printer_fleet.providers" = ["*-requirements.txt"]
 "device_bridges.camera_vision" = ["requirements.txt", "README.md"]
 "device_bridges.lerobot" = ["requirements.txt", "README.md"]
+"device_bridges.windows_pyautogui" = ["requirements.txt", "README.md"]
 
 [tool.setuptools.packages.find]
 where = ["."]

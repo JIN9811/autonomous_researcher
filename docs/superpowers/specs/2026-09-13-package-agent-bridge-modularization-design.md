@@ -33,7 +33,7 @@ supersedes: []
 | 프로그램 코어 | Orchestrator, LangGraph, 세션, 공통 GUI 및 서비스 연결 유지 |
 | Package | Agent Package는 owner 단위, Experimental Package는 플랜·설정·연결을 포함한 실험 조합 |
 | 소프트웨어 기준점 | `9d11cf923f556e6abe87df3084dbbd5c022a5ea6`; 모듈별 전환 전에 동작 비교 근거 확정 |
-| Implementation status | Design/Specimen/Vision/Manipulation installed modules and live reports; their executable graphs and ORC reuse the common host. Local Agent Packages include one LeRobot bridge shared by Manipulation and Vision. Validation and scope are recorded in the owner execution plans. |
+| Implementation status | Design/Specimen/Vision/Manipulation/Equipment installed modules and live reports; their executable graphs and ORC reuse the common host. Local Agent Packages include one LeRobot bridge shared by Manipulation and Vision, plus Equipment's existing Windows/PyAutoGUI bridge. Validation and scope are recorded in the owner execution plans. |
 | 실증 경계 | 소프트웨어 호환성 검증과 기존 물리 동작 stable 실증을 별도로 관리 |
 
 ## Summary
@@ -338,6 +338,7 @@ High / Middle / Low를 중심에, Guardian / Safety와 Knowledge / Evidence를
 - 기존 bounded LLM 판단·툴 루프는 composite 노드로 표시하고, 없는 책임은 명시한다. 내부 함수가 모두 별도 편집 가능하거나 5개 순차 실행 단계인 것처럼 표현하지 않는다.
 - composite 내부를 숨기지는 않는다. owner catalog의 `implementation_structure`로 실제 함수·툴·검증·근거 및 관측 반환 관계를 같은 캔버스에 펼친다. 실선 실행 노드와 파선 CODE 노드를 구분하고, CODE 선택은 기존 Inspector의 owner·소스 참조로 연결한다. CODE 관계를 추가 실행 명령이나 개별 완료 상태로 취급하지 않는다.
 - High는 각 에이전트 내부의 LLM 추론·의사결정이다. Middle은 API·툴 디스패치·계산·조회·내부 프로세스이며, Low는 실제 장비/브릿지 실행 경계다. Guardian / Safety와 Knowledge / Evidence는 횡단 책임이다. 소프트웨어 전용 에이전트에 가짜 Low를 만들지 않는다.
+- 실제 High 판단 노드에는 **LLM**, 판단용 문맥을 전달하고 응답을 받아 처리하는 프로세스에는 **LLM call**을 표시한다. 같은 파일에 포함된다는 의미가 아니며, Middle에 LLM 판단을 분류하거나 모든 모드에서 실제 호출됐음을 뜻하지 않는다. 기존 배경 영역과 실행·호출 관계는 유지한다.
 - 기존 composite handler는 그대로 유지하고, 내부 LLM 판단만 High CODE로 펼쳐 표시한다. 분류를 맞추기 위해 호출 순서·툴·인계·안전조건을 바꾸거나 실행 노드를 쪼개지 않는다. 기존 checkpoint 모듈은 `metadata.control_view.areas` 및 `checkpoint_details`로 표시만 분류하며 실행 계약은 유지한다.
 - 실선·파선·점선은 edge의 `execution`·`validation`·`evidence` 종류를 표현한다. 실제 상태는 module·run·loop·revision·invocation이 일치하는 실행 trace로 표시한다.
 - Runtime IDE의 색상·노드·포트·줌·스크롤 체계를 사용한다. 데스크톱과 좁은 화면에서 겹침·잘림·가독성을 검증한다.
@@ -549,7 +550,7 @@ freshness 규칙을 유지한다. 공통 adapter를 추가해 기존 실행 검�
 
 ## Limitations and Known Gaps
 
-- Design/Specimen은 owner 코드·전용 화면·실행 정의를 모듈 계약에 연결했다. 설치 catalog와 활성 binding을 분리하며, IDE 탭 열기/닫기는 활성화가 아니다. [적용 수명주기 계획·검증](../plans/2026-09-13-design-ide-module-lifecycle.md)을 기준으로 한다. 로컬 Package catalog와 비활성 Experimental Package 초안 교환은 추가했으나, 원격 코드 설치·전체 Bridge 이전은 구현 범위가 아니다.
+- Design/Specimen/Vision/Manipulation/Equipment은 owner 코드·전용 화면·실행 정의를 모듈 계약에 연결했다. 설치 catalog와 활성 binding을 분리하며, IDE 탭 열기/닫기는 활성화가 아니다. [적용 수명주기 계획·검증](../plans/2026-09-13-design-ide-module-lifecycle.md)을 기준으로 한다. 로컬 Package catalog와 비활성 Experimental Package 초안 교환은 추가했으나, 원격 코드 설치·전체 Bridge 이전은 구현 범위가 아니다.
 - 전체 API·화면·파일 소유권 실사는 미완료이며, Current Context는 조사한 연결 지점이다.
 - 코어에 남는 module별 분기는 개별 이관 시 확인한다. 모든 분기의 제거를 미리 보장하지 않는다.
 - 과거 archive에 없는 module 버전·장비 instance를 소급하여 만들어 넣지 않는다.
@@ -609,6 +610,39 @@ calls and no denied effects. The separate guarded mode suite passed 44 tests. Th
 results establish software integration with virtual equipment, not hardware proof.
 Detailed implementation and remaining integration checks belong to the
 [Vision execution plan](../plans/2026-09-13-vision-agent-package.md).
+
+### Equipment Implementation Update — 2026-09-13
+
+`equipment@1.0.0` now owns the canonical agent, decision, workflow, source
+catalog, report projection and Live composition under `agents/equipment/`.
+The package composes the existing `windows_pyautogui@1.0.0` bridge under
+`device_bridges/windows_pyautogui/`; flat legacy imports remain exact aliases.
+The existing task and delivery stay as two Middle composite operations. Actual
+suitability and terminal-review model calls are High, software/API supervision
+is Middle, selected Windows/local execution is Low, and Guardian/Evidence remain
+cross-cutting CODE relationships. No operation was split to populate an area.
+
+The generic Runtime IDE and light document SVG consume the installed executable
+and source catalog. Equipment's eight-block Profile Skill Flow remains a
+separate workspace and cannot overwrite a catalog-backed module tab. The
+module-owned frontend preserves the existing report and nine card IDs; the host
+continues to own polling, process/run synchronization and delegated actions.
+Package and Device Bridge views show Package → Windows/PyAutoGUI → actual
+selected/bundled/local worker components rather than a new management graph.
+
+Focused verification passed 38 Node frontend/runtime tests, 69 API/control-view
+tests, 19 Runtime IDE editor tests, and 16 Live Equipment/host layout tests. The
+unchanged second guarded registered-model attempt completed the virtual cycle
+through the next Design with 34 saved-provider calls across all ten owners,
+zero physical calls and no denied effects (`1 passed` in 470.15 seconds; cycle
+469.367 seconds). The first attempt remains recorded: Knowledge violated its
+search-identity tool contract and Guardian blocked before BO. This demonstrates
+one successful guarded virtual integration cycle with an observed stochastic
+reliability caveat, not hardware proof or a universal model success rate. See
+the [Equipment implementation plan](../plans/2026-09-13-equipment-agent-package.md).
+The 1920×1080 browser check confirmed the generic five-area map, separate Flow,
+package-to-bridge drilldown, original Live cards and Design → Equipment owner
+switching with no console warning/error; physical calls remained zero.
 
 Printer Fleet 단일화 및 두 IDE 탭 분리 후, 기존 프린터 계열 164개 검사와
 Specimen 모드별 경로·모듈/API 19개 검사를 통과했다. 별도 등록 API 비구동 사이클은

@@ -70,6 +70,9 @@ coordinates or add a subjective preference score to replace that point.
 
 ### Five-Area Responsibility Map
 
+Figure notation: **LLM** marks the High decision; **LLM call** marks the process
+that supplies context and consumes its response ([shared label contract](../runtime/three_level_control_model.md#llm-node-labels)).
+
 | Area | BO responsibility | Boundary |
 |---|---|---|
 | High-Level Control | LLM interprets optimization evidence, selects permitted strategy/tools and reviews the numerical result | Global mission/routing stays with Orchestrator; coordinates stay with the optimizer |

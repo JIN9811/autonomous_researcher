@@ -14,7 +14,7 @@ scope:
   - runtime_contracts
   - api_connections
 summary: Canonical entry point for ATR agent roles, contracts, APIs, connections, evidence, and safety boundaries.
-last_verified: 2026-09-12
+last_verified: 2026-09-13
 verified_against: working-tree
 related_docs:
   - docs/agents/agent_api_connection_matrix.md
@@ -55,6 +55,10 @@ including failed/cancelled calls, file snapshots, and saved-loop GUI access.
 | Verification | A corrected aggregate passed 78 bounded cases per provider; [verification evidence](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md) retains capture/postprocessor distinction and no hardware claim is added |
 
 ## Reading the References
+
+In IDE and document figures, **LLM** marks the High decision; **LLM call** marks
+the process that sends context to it and consumes its response. See the shared
+[node-label contract](../runtime/three_level_control_model.md#llm-node-labels).
 
 The [Manipulation Reference](manipulation_agent.md#installed-package-and-executable-structure)
 covers its two composite execution operations, source-bound control-area figure,
@@ -116,7 +120,7 @@ implementations remain authoritative.
 | [Specimen](specimen_agent.md) | Fabrication suitability and tools | [Owner](../../agents/specimen/agent.py) · [Code module](../../agents/specimen/module.py) · [Execution graph](../../graphs/modules/specimen/module.yaml) · [Agent Package](../../packages/agents/specimen/package.yaml) |
 | [Vision](vision_agent.md) | Visual evidence | [Source](../../agents/vision_agent.py) · [Module](../../graphs/modules/vision/module.yaml) |
 | [Manipulation](manipulation_agent.md) | Robot skills and completion | [Source](../../agents/manipulation/agent.py) · [Module](../../graphs/modules/manipulation/module.yaml) · [Control areas](assets/figures/manipulation_control_areas.svg) |
-| [Equipment](equipment_agent.md) | Stacked Flow selection, terminal review and bounded recovery | [Source](../../agents/equipment_agent.py) · [Module](../../graphs/modules/equipment/module.yaml) |
+| [Equipment](equipment_agent.md) | Stacked Flow selection, terminal review and bounded recovery | [Owner](../../agents/equipment/agent.py) · [Code module](../../agents/equipment/module.py) · [Execution graph](../../graphs/modules/equipment/module.yaml) · [Agent Package](../../packages/agents/equipment/package.yaml) · [Control areas](assets/figures/equipment_control_areas.svg) |
 | [Analysis](analysis_agent.md) | Measured objectives and independent background FEM | [Source](../../agents/analysis_agent.py) · [Module](../../graphs/modules/analysis/module.yaml) |
 | [Knowledge](knowledge_agent.md) | Ontology-guided Markdown, page-wise source curation and scoped retrieval | [Source](../../agents/knowledge_agent.py) · [Module](../../graphs/modules/knowledge/module.yaml) |
 | [Bayesian Optimization](bo_agent.md) | LLM strategy/review with continuous LHS/BoTorch proposals | [Source](../../agents/bo_agent.py) · [Module](../../graphs/modules/bo/module.yaml) |
@@ -135,7 +139,7 @@ agents without repeating full implementation prose.
 | Specimen Making | [Control areas](assets/figures/specimen_control_areas.svg) · [Flow](assets/figures/specimen_01_closed_loop_handoffs.svg) · [Execution](assets/figures/specimen_02_execution_effect_boundary.svg) · [Connections](assets/figures/specimen_03_api_connection_architecture.svg) |
 | Vision | [Flow](assets/figures/vision_01_closed_loop_handoffs.svg) · [Execution](assets/figures/vision_02_execution_effect_boundary.svg) · [Connections](assets/figures/vision_03_api_connection_architecture.svg) |
 | Manipulation | [Flow](assets/figures/manipulation_01_closed_loop_handoffs.svg) · [Execution](assets/figures/manipulation_02_execution_effect_boundary.svg) · [Connections](assets/figures/manipulation_03_api_connection_architecture.svg) |
-| Lab Equipment | [Flow](assets/figures/equipment_01_closed_loop_handoffs.svg) · [Execution](assets/figures/equipment_02_execution_effect_boundary.svg) · [Connections](assets/figures/equipment_03_api_connection_architecture.svg) |
+| Lab Equipment | [Control areas](assets/figures/equipment_control_areas.svg) · [Flow](assets/figures/equipment_01_closed_loop_handoffs.svg) · [Execution](assets/figures/equipment_02_execution_effect_boundary.svg) · [Connections](assets/figures/equipment_03_api_connection_architecture.svg) |
 | Analysis | [Flow](assets/figures/analysis_01_closed_loop_handoffs.svg) · [Execution](assets/figures/analysis_02_execution_effect_boundary.svg) · [Connections](assets/figures/analysis_03_api_connection_architecture.svg) |
 | Knowledge | [Flow](assets/figures/knowledge_01_closed_loop_handoffs.svg) · [Execution](assets/figures/knowledge_02_execution_effect_boundary.svg) · [Connections](assets/figures/knowledge_03_api_connection_architecture.svg) |
 | BO | [Flow](assets/figures/bo_01_closed_loop_handoffs.svg) · [Execution](assets/figures/bo_02_execution_effect_boundary.svg) · [API](assets/figures/bo_03_api_connection_architecture.svg) |

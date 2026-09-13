@@ -126,6 +126,9 @@ its original provenance and scope.
 
 ## Five-Area Responsibility Map
 
+Figure notation: **LLM** marks the High decision; **LLM call** marks the process
+that supplies context and consumes its response ([shared label contract](../runtime/three_level_control_model.md#llm-node-labels)).
+
 | Level | Manipulation responsibility | Authority boundary |
 |---|---|---|
 | High-Level Control | LLM judges configured-skill suitability and post-Vision task-result consistency | Orchestrator owns the mission; Vision owns visual facts; model cannot grant physical safety |

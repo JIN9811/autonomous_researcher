@@ -12,12 +12,14 @@ from agents.orchestrator_structure import orchestrator_implementation_structure
 from agents.specimen.structure import specimen_implementation_structure
 from agents.vision.structure import vision_implementation_structure
 from agents.manipulation.structure import manipulation_implementation_structure
+from agents.equipment.structure import equipment_implementation_structure
 
 ROOT = Path(__file__).resolve().parents[2]
 STRUCTURES = dict(design=design_implementation_structure, orchestrator=orchestrator_implementation_structure,
                   specimen=specimen_implementation_structure, vision=vision_implementation_structure,
-                  manipulation=manipulation_implementation_structure)
-MODULES = [*STRUCTURES, 'analysis', 'bo', 'equipment', 'guardian', 'knowledge']
+                  manipulation=manipulation_implementation_structure,
+                  equipment=equipment_implementation_structure)
+MODULES = [*STRUCTURES, 'analysis', 'bo', 'guardian', 'knowledge']
 
 
 def projection(module_id):
@@ -79,7 +81,7 @@ def test_every_code_reference_resolves_without_registering_new_execution(module_
             tree = next(n for n in ast.walk(tree) if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == part)
 
 
-@pytest.mark.parametrize('module_id', ['analysis', 'equipment', 'guardian'])
+@pytest.mark.parametrize('module_id', ['analysis', 'guardian'])
 def test_legacy_ide_projection_renders_internal_decisions_without_adding_checkpoints(module_id):
     from test_planning_design_report_js import _extract_function
     source = (ROOT / 'web/static/runtime_ide.js').read_text()
@@ -104,6 +106,20 @@ g.nodes=g.nodes.filter(n=>n.id!==removed);
 assert.ok(!AX4LABControlView.internalDetails(g.nodes,cv).nodes.some(n=>n.owner===removed));
 '''
     subprocess.run(['node', '-e', script], cwd=ROOT, capture_output=True, text=True, check=True)
+
+
+@pytest.mark.parametrize('owner,node,area', [
+    ('task', 'suitability', 'high'),
+    ('task', 'terminal', 'high'),
+    ('task', 'runtime', 'middle'),
+    ('task', 'worker', 'low'),
+    ('task', 'guardian', 'guardian'),
+    ('task', 'csv', 'knowledge'),
+])
+def test_equipment_catalog_places_real_source_bound_components(owner, node, area):
+    _, view = projection('equipment')
+    actual = next(item for item in view['details']['nodes'] if item['key'] == f'{owner}::{node}')
+    assert actual['area'] == area
 
 
 def test_legacy_code_inspector_shows_source_and_area_in_the_existing_inspector():

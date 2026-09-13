@@ -77,6 +77,9 @@ This Reference does not claim that control presence proves safety effectiveness.
 
 ## Three-Level Control Classification
 
+Figure notation: **LLM** marks the High decision; **LLM call** marks the process
+that supplies context and consumes its response ([shared label contract](../runtime/three_level_control_model.md#llm-node-labels)).
+
 | Level | Guardian responsibility | Authority boundary |
 |---|---|---|
 | High-Level Control | LLM reviews policy and failure evidence within the bounded Guardian role | May block progression but does not own normal mission planning or silently resume a stopped run |

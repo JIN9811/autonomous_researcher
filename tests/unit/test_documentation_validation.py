@@ -244,7 +244,7 @@ TEST_DEVICE_BRIDGE_SOURCE_CONTRACTS = {
         ("app/main.py", '@app.post("/api/lerobot/rollout/start")'),
     ),
     "windows_pyautogui": (
-        ("mcp_tools/equipment_tools.py", 'registry.register("equipment.pyautogui.run"'),
+        ("device_bridges/windows_pyautogui/tools.py", 'registry.register("equipment.pyautogui.run"'),
         ("app/main.py", '@app.post("/api/equipment/windows/run-program")'),
     ),
     "utm_vision": (
@@ -261,6 +261,15 @@ TEST_DEVICE_BRIDGE_SOURCE_CONTRACTS = {
         ("device_bridges/simulator/printer_sim.py", "class PrinterSimulator(BaseBridge):"),
     ),
 }
+
+
+def test_windows_pyautogui_source_contract_tracks_canonical_module() -> None:
+    module = _load_validator()
+
+    assert module.DEVICE_BRIDGE_SOURCE_CONTRACTS["windows_pyautogui"][0] == (
+        "device_bridges/windows_pyautogui/tools.py",
+        'registry.register("equipment.pyautogui.run"',
+    )
 
 TEST_RUNTIME_IDE_SECTIONS = (
     "Summary",

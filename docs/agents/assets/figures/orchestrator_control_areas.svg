@@ -108,5 +108,5 @@ orchestrator/supervisor.py · build_decision_record</title>
         <text x="932" y="125" fill="#172b4d" font-size="12">Build control, follow-up</text><text x="932" y="141" fill="#172b4d" font-size="12">and decision records</text>
         </g>
       <line x1="24" x2="62" y1="1258" y2="1258" stroke="#526174" stroke-width="2" stroke-dasharray=""/><text x="72" y="1262" fill="#172b4d" font-size="14">Execution</text><line x1="244" x2="282" y1="1258" y2="1258" stroke="#526174" stroke-width="2" stroke-dasharray="8 5"/><text x="292" y="1262" fill="#172b4d" font-size="14">Validation</text><line x1="464" x2="502" y1="1258" y2="1258" stroke="#526174" stroke-width="2" stroke-dasharray="2 5"/><text x="512" y="1262" fill="#172b4d" font-size="14">Evidence</text><line x1="684" x2="722" y1="1258" y2="1258" stroke="#526174" stroke-width="2" stroke-dasharray="5 3"/><text x="732" y="1262" fill="#172b4d" font-size="14">Internal call</text>
-      <text x="24" y="1294" fill="#526174" font-size="13">Solid boxes: executable operations · Dashed CODE boxes: implementation relationships · LLM: bounded decision</text>
+      <text x="24" y="1294" fill="#526174" font-size="13">Solid: execution · Dashed CODE: implementation · LLM: High decision · LLM call: process calls that decision</text>
     </svg>

@@ -3626,6 +3626,8 @@ async function openModuleGraphTab(moduleId) {
   if (moduleId === "equipment") {
     showRuntimeEquipmentFlowWorkspace(true);
     await loadRuntimeEquipmentSkillFlow(runtimeEquipmentFlowProfileId);
+  }
+  if (moduleId === "equipment" && !module.execution_graph) {
     const flowGraph = runtimeEquipmentFlowPayload.graph;
     upsertGraphTab({
       id: `${MODULE_TAB_PREFIX}${moduleId}`,
@@ -3645,7 +3647,7 @@ async function openModuleGraphTab(moduleId) {
     log(`Opened ${moduleId} shared Skill Flow runtime projection.`, "ok");
     return;
   }
-  showRuntimeEquipmentFlowWorkspace(false);
+  if (moduleId !== "equipment") showRuntimeEquipmentFlowWorkspace(false);
   renderModuleGraph(normalized);
   const graph = modulePayloadToGraph(normalized);
   upsertGraphTab({
@@ -3720,12 +3722,13 @@ async function loadRuntimeEquipmentSkillFlow(profileId = "utm_windows_v1") {
   runtimeEquipmentFlowPayload = flowPayload;
   renderRuntimeEquipmentSkillFlow();
   const tab = graphTabs.find((item) => item.id === `${MODULE_TAB_PREFIX}equipment`);
-  if (tab) {
+  const catalogBacked = Boolean(tab?.modulePayload?.module?.execution_graph || tab?.modulePayload?.execution_graph);
+  if (tab && !catalogBacked) {
     tab.graph = flowPayload.graph;
     tab.baselineGraph = cloneConfig(flowPayload.graph);
     tab.dirty = false;
   }
-  if (activeGraphTabId === `${MODULE_TAB_PREFIX}equipment`) renderGraph(flowPayload.graph);
+  if (activeGraphTabId === `${MODULE_TAB_PREFIX}equipment` && !catalogBacked) renderGraph(flowPayload.graph);
   return flowPayload;
 }
 
@@ -3986,7 +3989,7 @@ function renderGraph(graph) {
           ${readinessBadge}
           ${nonExecutableBadge}
           ${outputBadge}
-          ${node.metadata?.llm_decision ? `<em class="runtime-control-llm">${node.metadata?.control_area === 'high' ? 'LLM' : 'LLM inside'}</em>` : ''}
+          ${node.metadata?.llm_decision ? `<em class="runtime-control-llm">${node.metadata?.control_area === 'high' ? 'LLM' : 'LLM call'}</em>` : ''}
           <span class="runtime-ide-node-copy">
             <strong title="${escapeHtml(node.metadata?.display_label || node.label || node.id)}">${escapeHtml(node.metadata?.display_label || node.label || node.id)}</strong>
             <small title="${escapeHtml(edge)}">${escapeHtml(isExecutionGraph(activeGraph)?`${node.area} · ${node.handler}`:node.metadata?.control_area ? `${node.metadata.control_area} · ${node.metadata.module_step_phase === 'pre_execution' ? 'pre' : 'step'} ${Number(node.metadata.module_step_index) + 1}` : edge)}</small>

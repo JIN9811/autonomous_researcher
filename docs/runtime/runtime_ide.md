@@ -32,6 +32,9 @@ source_of_truth:
   - graphs/module_store.py
   - utils/equipment_skill_flow.py
   - graphs/modules/equipment/equipment_skill_flows.json
+  - agents/equipment/module.py
+  - agents/equipment/structure.py
+  - agents/equipment/frontend/live_report.js
   - graphs/configs/atr_closed_loop.yaml
   - graphs/modules
   - orchestrator/langgraph_runtime.py
@@ -58,7 +61,7 @@ supersedes: []
 | Workspace | `/ide` |
 | Coverage | Editing, validation, versioning, run control and evidence inspection |
 | Implementation | [Runtime APIs](../../app/main.py) · [IDE client](../../web/static/runtime_ide.js) |
-| Recorded basis | 2026-09-13 module lifecycle and executable Design/Orchestrator graphs; earlier sections retain their recorded scope · [Verification scope](#verification) |
+| Recorded basis | 2026-09-13 module lifecycle and executable Design/Orchestrator/Equipment graphs; earlier sections retain their recorded scope · [Verification scope](#verification) |
 
 ## Applied Module Membership
 
@@ -94,6 +97,22 @@ Package Manager and Device Bridges remain separate: `vision@1.0.0` owns the
 actual observation components and preserves draft membership. LeRobot retains the
 existing motion/capture/return and stop lifecycle. The live frontend module reuses
 all six Vision cards and UTM verification tabs without introducing polling.
+
+Equipment now exposes its installed owner at `/api/modules/equipment`. Its two
+Middle operations retain the existing composite task and result-delivery
+boundaries. Source-bound CODE relationships show the actual suitability and
+terminal-review LLM decisions in High, software supervision and validation in
+Middle, Windows/local worker execution in Low, and Guardian/Evidence as
+cross-cutting responsibilities. `equipment@1.0.0` composes the existing
+`windows_pyautogui@1.0.0` bridge; no second transport or management layout was
+introduced. The [Equipment document figure](../agents/assets/figures/equipment_control_areas.svg)
+uses the same installed catalog and shared light document renderer.
+
+The module-owned frontend supplies the existing Equipment report and nine card
+IDs while the Live host retains polling, run/process synchronization and action
+delegation. An inactive owner supplies no current cards or frontend asset. The
+generic module canvas renders the executable Equipment graph and source catalog;
+the Profile-bound Skill Flow remains a separate read-only workspace.
 
 Validate and Compile display **Applied**, **Draft**, **Add** and **Remove**
 owner lists before a graph is applied. The preview uses the same graph-linked
@@ -173,6 +192,7 @@ It does not replace:
 | Versioned configuration | `graphs/version_store.py`, `graphs/module_store.py` |
 | Runtime execution | `orchestrator/langgraph_runtime.py` |
 | Profile-bound Equipment Skill Flow | `utils/equipment_skill_flow.py`, `graphs/modules/equipment/equipment_skill_flows.json` |
+| Equipment executable/source catalog and Live composition | `agents/equipment/module.py`, `agents/equipment/structure.py`, `agents/equipment/frontend/live_report.js` |
 | Interaction and runtime regression evidence | `tests/ui/runtime_ide_browser_audit.py`, `tests/unit/test_langgraph_runtime.py` |
 
 Historical Codex packages under `docs/ATR_*_Package/` describe implementation
@@ -298,7 +318,8 @@ not become executable nodes. Orchestrator does not acquire direct device tools.
 | Area header and tinted boundary | Responsibility grouping, not a runtime stage |
 | Solid node boundary | Editable registered execution operation |
 | Dashed CODE node boundary | Existing implementation inside an operation; select or press Enter to inspect its owner, source symbols and relationships |
-| LLM / LLM inside badge | High decision / unchanged composite containing the displayed High decisions; mode policy still determines whether a model is called |
+| LLM badge | Actual High-level reasoning or decision node |
+| LLM call badge | Process sends context to the High decision and consumes its response; not file containment or proof that this run called a model |
 | Solid / dashed / dotted connection | Explicit `execution` / `validation` / `evidence` edge kind |
 | Outcome label | Registered operation result selecting that edge |
 | Internal call / observation relation | Code-owned function/tool relationship, not an extra editable outcome or a live completion assertion |
@@ -349,11 +370,17 @@ See the [Design](../agents/design_agent.md#editable-runtime-ide-structure),
 
 ### Equipment Agent Flow projection
 
-The Equipment module tab is a read-only projection of the Profile-bound flow in
-`graphs/modules/equipment/equipment_skill_flows.json`. It selects a Profile,
+The installed Equipment module tab is the generic editable projection of its
+`execution_graph` and source-bound implementation catalog. It renders the same
+High/Middle/Low and cross-cutting relationships used by the document SVG. A
+Profile refresh cannot replace this module graph with the Skill Flow graph.
+
+The Profile-bound flow in `graphs/modules/equipment/equipment_skill_flows.json`
+remains a separate read-only Skill Flow workspace. It selects a Profile,
 refreshes the derived supervisor/Skill/Vision graph and latest phase state, and
 opens `/equipment/agent-manager` for any edit. Runtime IDE does not maintain or
-save a second Equipment flow draft.
+save a second Equipment flow draft. Legacy Equipment definitions without an
+`execution_graph` retain the former shared Skill Flow projection for compatibility.
 
 The code-owned `run_utm_compression_cycle` is a workflow-level supervisor above,
 not a replacement for, that editable Profile flow:
@@ -773,6 +800,25 @@ graph roots and external effects denied), `tests/unit/test_ide_module_lifecycle_
 (preview rendering/escaping), and the common browser module host tests.
 These checks do not certify physical equipment or the entire IDE interface.
 
+The 2026-09-13 Equipment migration is covered by owner-asset/report API tests,
+module-catalog/SVG tests, the existing Equipment progress/task/Flow/selection
+suites, Runtime IDE catalog-preservation regressions, and host-level Live helper
+checks. Focused results were 38 Node frontend/runtime tests, 69 API/control-view
+tests, 19 Runtime IDE editor tests, and 16 Live Equipment/host layout tests. A
+controller browser inspection at 1920×1080 confirmed the generic Equipment
+source map, its separate eight-block Skill Flow workspace, the Package-to-
+Windows/PyAutoGUI bridge graph, the original Live cards, and Design → Equipment
+owner lifecycle after cache-busted reload. The corrected Live check reported no
+console warning or error and made no physical call.
+
+A guarded registered API-model retry completed the virtual cycle through the
+next Design with 34 actual saved-provider calls, all ten required owners, zero
+physical calls and no denied effects (`1 passed` in 470.15 seconds; cycle
+469.367 seconds). The unchanged first attempt stopped at Knowledge because its
+model response wrote evidence without first returning a search identity;
+Guardian blocked before BO. Both attempts remain part of the reliability record.
+No physical-equipment result is claimed.
+
 This Reference was checked on 2026-08-09 against commit `541c93a` by repository
 inspection of the declared source files. The following evidence types are
 appropriate:
@@ -819,6 +865,9 @@ viewport. It does not prove live device readiness or scientific outcomes.
   browser, zoom level, or accessibility path.
 - Code inspection establishes interface and control flow, not live reliability,
   safety effectiveness, or scientific validity.
+- The registered-model cycle succeeded on one unchanged retry after a first
+  Knowledge tool-contract failure; that pair is evidence of successful guarded
+  integration and observed stochastic reliability, not a universal success rate.
 
 ## Related Documents
 

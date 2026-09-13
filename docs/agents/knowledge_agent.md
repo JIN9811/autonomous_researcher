@@ -91,6 +91,9 @@ historical graph files and offline utilities are left untouched.
 
 ### Five-Area Responsibility Map
 
+Figure notation: **LLM** marks the High decision; **LLM call** marks the process
+that supplies context and consumes its response ([shared label contract](../runtime/three_level_control_model.md#llm-node-labels)).
+
 These are responsibility areas, not five new runtime stages.
 
 | Area | Responsibility | Authority boundary |

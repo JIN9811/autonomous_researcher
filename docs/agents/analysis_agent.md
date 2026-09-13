@@ -188,6 +188,9 @@ separation; concurrency control does not promise zero resource contention.
 
 ### LLM role fit and tool authority
 
+Figure notation: **LLM** marks the High decision; **LLM call** marks the process
+that supplies context and consumes its response ([shared label contract](../runtime/three_level_control_model.md#llm-node-labels)).
+
 | Role / phase | Model decides | Code executes / forbids |
 |---|---|---|
 | Simulation analyst / `simulation` | Run required simulation-only/preflight CAE or hold | Not an optional FEM dependency of measured BO |

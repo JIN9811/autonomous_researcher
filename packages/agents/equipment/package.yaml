@@ -1,0 +1,8 @@
+schema: ax4lab.agent_package.v1
+id: equipment
+version: 1.0.0
+agent_module: {id: equipment, version: 1.0.0}
+handler: agent.equipment_agent
+module_reference: graphs/modules/equipment/module.yaml
+bridge_modules:
+  - {id: windows_pyautogui, version: 1.0.0}

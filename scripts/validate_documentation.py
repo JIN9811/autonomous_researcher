@@ -235,7 +235,7 @@ DEVICE_BRIDGE_SOURCE_CONTRACTS = {
         ("app/main.py", '@app.post("/api/lerobot/rollout/start")'),
     ),
     "windows_pyautogui": (
-        ("mcp_tools/equipment_tools.py", 'registry.register("equipment.pyautogui.run"'),
+        ("device_bridges/windows_pyautogui/tools.py", 'registry.register("equipment.pyautogui.run"'),
         ("app/main.py", '@app.post("/api/equipment/windows/run-program")'),
     ),
     "utm_vision": (

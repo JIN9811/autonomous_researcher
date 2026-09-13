@@ -114,7 +114,7 @@ agents/design/agent.py · DesignAgent._design_handoff_packet</title>
         </g><g><title>decide · design.decide</title>
         <rect x="624" y="360" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
         <text x="636" y="381" fill="#172b4d" font-size="12">Composite bounded</text><text x="636" y="397" fill="#172b4d" font-size="12">suitability decision</text>
-        <text x="729" y="428" fill="#177768" font-size="10">LLM inside</text></g><g><title>finalize · design.finalize</title>
+        <text x="729" y="428" fill="#177768" font-size="10">LLM call</text></g><g><title>finalize · design.finalize</title>
         <rect x="384" y="504" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
         <text x="396" y="525" fill="#172b4d" font-size="12">Finalize accepted design</text><text x="396" y="541" fill="#172b4d" font-size="12">and Specimen handoff</text>
         </g><g><title>owner_review · design.review_result</title>
@@ -122,5 +122,5 @@ agents/design/agent.py · DesignAgent._design_handoff_packet</title>
         <text x="68" y="125" fill="#172b4d" font-size="12">Return review-required</text><text x="68" y="141" fill="#172b4d" font-size="12">result</text>
         </g>
       <line x1="24" x2="62" y1="1258" y2="1258" stroke="#526174" stroke-width="2" stroke-dasharray=""/><text x="72" y="1262" fill="#172b4d" font-size="14">Execution</text><line x1="244" x2="282" y1="1258" y2="1258" stroke="#526174" stroke-width="2" stroke-dasharray="8 5"/><text x="292" y="1262" fill="#172b4d" font-size="14">Validation</text><line x1="464" x2="502" y1="1258" y2="1258" stroke="#526174" stroke-width="2" stroke-dasharray="2 5"/><text x="512" y="1262" fill="#172b4d" font-size="14">Evidence</text><line x1="684" x2="722" y1="1258" y2="1258" stroke="#526174" stroke-width="2" stroke-dasharray="5 3"/><text x="732" y="1262" fill="#172b4d" font-size="14">Internal call</text>
-      <text x="24" y="1294" fill="#526174" font-size="13">Solid boxes: executable operations · Dashed CODE boxes: implementation relationships · LLM: bounded decision</text>
+      <text x="24" y="1294" fill="#526174" font-size="13">Solid: execution · Dashed CODE: implementation · LLM: High decision · LLM call: process calls that decision</text>
     </svg>

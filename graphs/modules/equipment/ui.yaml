@@ -4,56 +4,27 @@ ui:
   report_title: Lab Equipment Agent
   chat:
     mode: open_on_demand
+  renderer:
+    dashboard: module
+    report: module
+    fallback: descriptor
   cards:
-  - id: equipment_skill_execution
-    type: evidence_summary
-    title: Equipment Skill Execution
-    eyebrow: deterministic runtime
-    span: 8
-    tone: equipment
-    selectors:
-      skill_id: metadata.equipment_skill_execution.skill_id
-      version: metadata.equipment_skill_execution.version
-      state: metadata.equipment_skill_execution.state
-      completed_segments: metadata.equipment_skill_execution.completed_segments
-      model: metadata.equipment_skill_execution.model_snapshot.model
-  - id: equipment_skill_recovery
-    type: evidence_summary
-    title: Recovery Boundary
-    eyebrow: bounded recovery
-    span: 4
-    tone: warning
-    selectors:
-      attempt: metadata.equipment_skill_execution.attempt
-      failed_segment: metadata.equipment_skill_execution.failed_segment
-      failure_code: metadata.equipment_skill_exception.failure_code
-      allowed_operations: metadata.equipment_skill_exception.allowed_recovery_operations
-  - id: equipment_bridge_descriptor
-    type: bridge_status
-    title: Equipment Profile / Bridge
-    eyebrow: module descriptor
-    span: 4
-    tone: equipment
-    selectors:
-      profile_id: metadata.latest_equipment_profile.profile_id
-      bridge: metadata.latest_equipment_report.bridge
-      profile: metadata.latest_equipment_report.control_plan.profile
-      data_file: metadata.latest_equipment_result.result_file
-      handoff: metadata.latest_equipment_handoff_packet.status
-  - id: utm_data_descriptor
-    type: evidence_summary
-    title: UTM Runtime Evidence
-    eyebrow: module descriptor
-    span: 4
-    tone: success
-    selectors:
-      acquisition_status: metadata.latest_utm_data_ready_packet.status
-      linux_path: metadata.latest_utm_data_ready_packet.result_file
-      screen_checks: metadata.latest_equipment_report.screen_checks
-      physical_checks: metadata.latest_equipment_report.physical_checks
+  - {id: equipment_bridge_runtime, type: runtime, title: Bridge / Runtime, span: 4, tone: equipment}
+  - {id: equipment_active_program_skill, type: runtime, title: Active Program / Skill, span: 4, tone: equipment}
+  - {id: equipment_recovery_boundary, type: runtime, title: Recovery Boundary, span: 4, tone: equipment}
+  - {id: equipment_agentic_progress, type: progress, title: Agentic Progress, span: 12, tone: equipment}
+  - {id: equipment_method_values, type: metric_group, title: Method Values, span: 4, tone: equipment}
+  - {id: equipment_screen_transitions, type: evidence, title: Screen Transitions, span: 4, tone: equipment}
+  - {id: equipment_raw_data_next_specimen, type: evidence, title: Raw Data / Next Specimen, span: 4, tone: equipment}
+  - {id: equipment_execution_evidence, type: evidence, title: Execution Evidence, span: 8, tone: equipment}
+  - {id: equipment_handoff, type: handoff, title: Handoff, span: 4, tone: equipment}
   report_sections:
-  - id: equipment_overview
-    title: Equipment Overview
+  - id: equipment_execution_report
+    title: Equipment Execution Evidence
     selectors:
-      bridge: metadata.latest_equipment_report
-      result: metadata.latest_equipment_result
+      equipment_report: metadata.equipment_report
+      equipment_result: metadata.equipment_result
+  - id: equipment_analysis_handoff
+    title: Analysis Handoff
+    selectors:
+      handoff: metadata.equipment_handoff

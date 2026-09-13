@@ -340,6 +340,11 @@ current/future content by authority rather than merely relabel it.
 
 ## Agent Reference Figures
 
+Use **LLM** for an actual High decision and **LLM call** for its calling process
+in both Runtime IDE and document figures. The call label means context is sent
+and a decision is returned; it does not describe file containment or prove a
+model ran. Preserve the existing responsibility areas and execution topology.
+
 The ten canonical `docs/agents/*_agent.md` References MUST include paired,
 implementation-backed architecture figures. This requirement does not apply
 retroactively to legacy agent guidelines.

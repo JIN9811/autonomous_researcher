@@ -9,10 +9,13 @@ summary: Lightweight Windows worker contract for paired bounded PyAutoGUI progra
 source_of_truth:
   - Pyautogui_server_for_window/bridge/windows_pyautogui_bridge_server.py
   - install/windows_pyautogui_bridge_server.py
-  - device_bridges/windows_pyautogui_bridge.py
-  - mcp_tools/equipment_tools.py
-last_verified: 2026-08-28
-verified_against: working-tree-2026-08-28
+  - device_bridges/windows_pyautogui/bridge.py
+  - device_bridges/windows_pyautogui/tools.py
+  - device_bridges/windows_pyautogui/module.py
+  - device_bridges/windows_pyautogui/README.md
+  - packages/agents/equipment/package.yaml
+last_verified: 2026-09-13
+verified_against: working-tree
 related_docs:
   - docs/agents/equipment_agent.md
   - docs/hardware/windows_pyautogui_bridge_windows_setup.md
@@ -28,14 +31,33 @@ related_docs:
 | Purpose | Paired desktop programs, recording and execution evidence |
 | Connects | Lab Equipment / workspace ↔ Windows worker |
 | Effect | GUI input can operate equipment through the selected application |
-| Implementation | [Windows bridge](../../device_bridges/windows_pyautogui_bridge.py) |
-| Verification | Document baseline: 2026-08-28; no new hardware validation implied |
+| Implementation | [Installed bridge module](../../device_bridges/windows_pyautogui/module.py) · [Windows bridge](../../device_bridges/windows_pyautogui/bridge.py) |
+| Package | `windows_pyautogui@1.0.0`, referenced once by `equipment@1.0.0` |
+| Verification | Guarded software/API checks through 2026-09-13; no new hardware validation implied |
 
 ## 목적
 
 Windows PyAutoGUI Bridge는 Linux Equipment Runtime의 저수준 worker입니다. Windows desktop에서 검증된 프로그램을 실행하고 화면, locator, 녹화, 파일, 요청 로그를 반환합니다.
 
 Windows Bridge는 LLM, Guardian 판단, Skill lifecycle, UTM 실험 의미, 완료 판정, Analysis handoff, ATR Controller 탐색을 소유하지 않습니다.
+
+## Installed Module and Ownership
+
+`device_bridges/windows_pyautogui/module.py` declares the installed
+`windows_pyautogui@1.0.0` Bridge Module and runtime identity
+`windows_pyautogui_bridge`. The Equipment Agent Package references that bridge
+once; the package is a composition contract, not a device or a second worker.
+All 18 existing registered tool IDs and the `equipment:windows_pyautogui` queue
+remain unchanged. The flat bridge and tool imports are exact compatibility
+aliases, so existing imports and monkeypatch targets resolve to the canonical
+module objects.
+
+Package and Runtime IDE views show `Equipment Package → Windows/PyAutoGUI →`
+the existing bridge, transport, local/Windows worker, profiles, Skills, Flow,
+runtime and evidence components. These are source-bound inspection links. They
+do not install, pair, select, start, stop, update or execute a worker. The
+existing `/equipment/windows` workspace remains the only declared bridge
+workspace for both explicit Windows and Local provider selections.
 
 ## 배포 형태
 
@@ -229,6 +251,12 @@ register, verify를 순서대로 수행합니다. Deploy는 실행 요청이 아
 
 `pairing.json`, connection memory, 사용자 프로그램/녹화는 Git에 포함하지 않습니다.
 
+The module declaration references existing Linux storage without creating a
+second store: `memory/windows_pyautogui_connection.json`,
+`memory/equipment_runtime/`, `memory/equipment_skills/`, current workspace
+templates/assets and run-scoped artifacts. Windows program, locator, recording,
+request-log and export data remain under the selected worker's `<data-root>`.
+
 ## 안전
 
 - PyAutoGUI failsafe 유지
@@ -237,3 +265,16 @@ register, verify를 순서대로 수행합니다. Deploy는 실행 요청이 아
 - credential을 program/recording에 포함하지 않음
 - Windows에서 자동 provider 전환 금지
 - 물리 장비 검증은 Profile별 현장 절차로 별도 수행
+
+## Verification and Limits
+
+The 2026-09-13 package migration passed the guarded Equipment owner/module/bridge
+selection (285 tests) and the focused frontend/API/control-view selections. The
+checks observed zero physical calls and no denied effects. An unchanged second
+registered-model attempt completed through the next Design with 34 actual calls;
+the first stopped on a later Knowledge tool-contract rejection before BO. This
+records one guarded virtual success plus the observed stochastic failure and
+says nothing about physical bridge readiness. No worker pairing,
+update, restart, desktop input or instrument action was performed. The earlier
+physical proof remains linked from the Equipment Reference and is not replaced
+or expanded by this migration.

@@ -48,28 +48,15 @@ module:
         - advance_without_save
         - restore_robot_clearance
       vision_policy: optional_per_block
-  internal_graph:
-    - id: 00_verify_equipment_entry_handoff
-      label: Verify Locked Specimen and UTM Entry Handoff
-      kind: workflow_agentic_task_gate
-    - id: 00_preflight_all_bound_resources
-      label: Preflight Every Exact Skill and Enabled Vision Task
-      kind: workflow_agentic_task_gate
-    - id: 01_resolve_equipment_profile
-      label: Resolve Exact Equipment Profile or Skill Version
-      kind: internal_step
-    - id: 02_validate_bridge_contract
-      label: Validate Bridge and Skill Contract
-      kind: internal_step
-    - id: 03_execute_registered_protocol
-      label: Select and Execute Stacked Workflow
-      kind: internal_step
-    - id: 04_exception_recovery_gate
-      label: Review Terminal Screens and Bound Recovery Through Guardian
-      kind: internal_step
-    - id: 05_validate_evidence_handoff
-      label: Validate Evidence and Handoff
-      kind: internal_step
+  execution_graph:
+    schema: ax4lab.execution_graph.v1
+    entry: task
+    nodes:
+    - {id: task, handler: equipment.task, label: Composite bounded equipment task, area: middle, llm: true}
+    - {id: deliver, handler: equipment.deliver, label: Deliver owner result, area: middle}
+    edges:
+    - {source: task, target: deliver, 'on': next, kind: evidence}
+    terminals: [deliver]
   io_contract:
     input: OrchestratorState
     output: AgentResult.data merged into OrchestratorState
@@ -85,36 +72,3 @@ module:
     The Equipment-owned decision boundary selects the configured stacked Flow and
     reviews screenshots and evidence after terminal completion or failure. It does
     not interrupt running blocks; existing Vision and safety gates remain active.
-
-  metadata:
-    control_view:
-      areas:
-        internal_graph:00_verify_equipment_entry_handoff: guardian
-        internal_graph:00_preflight_all_bound_resources: guardian
-        internal_graph:01_resolve_equipment_profile: middle
-        internal_graph:02_validate_bridge_contract: guardian
-        internal_graph:03_execute_registered_protocol: middle
-        internal_graph:04_exception_recovery_gate: middle
-        internal_graph:05_validate_evidence_handoff: guardian
-      checkpoint_details:
-        internal_graph:03_execute_registered_protocol:
-          nodes:
-          - id: choice
-            label: "LLM stacked-workflow suitability"
-            area: high
-            source: {path: agents/equipment_decision.py, symbol: decide_equipment}
-          - id: device
-            label: "Selected desktop / instrument worker"
-            area: low
-            source: {path: device_bridges/windows_pyautogui_bridge.py, symbol: WindowsPyAutoGUIBridge}
-          edges:
-          - {source: $operation, target: choice, kind: evidence, label: "existing internal decision"}
-          - {source: $operation, target: device, kind: call, label: "existing selected device path"}
-        internal_graph:04_exception_recovery_gate:
-          nodes:
-          - id: review
-            label: "LLM terminal evidence / recovery review"
-            area: high
-            source: {path: agents/equipment_decision.py, symbol: decide_equipment}
-          edges:
-          - {source: $operation, target: review, kind: evidence, label: "existing internal decision"}

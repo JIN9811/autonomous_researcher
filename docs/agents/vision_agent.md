@@ -111,6 +111,9 @@ camera/robot/UTM/desktop commands.
 
 ### Five-Area Responsibility Map
 
+Figure notation: **LLM** marks the High decision; **LLM call** marks the process
+that supplies context and consumes its response ([shared label contract](../runtime/three_level_control_model.md#llm-node-labels)).
+
 The five areas are responsibility boundaries, not five sequential model calls.
 
 | Area | Vision responsibility | Authority boundary |

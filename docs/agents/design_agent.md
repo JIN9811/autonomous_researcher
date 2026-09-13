@@ -119,6 +119,9 @@ additional inspection, or return to the owner.
 
 ### Five-Area Responsibility Map
 
+Figure notation: **LLM** marks the High decision; **LLM call** marks the process
+that supplies context and consumes its response ([shared label contract](../runtime/three_level_control_model.md#llm-node-labels)).
+
 The five areas map responsibilities across the workflow, rather than defining
 sequential runtime stages.
 
@@ -181,7 +184,9 @@ or `blocked → owner_review`. Editing a valid route changes backend execution a
 activation; moving a node changes layout only. Five areas classify responsibility,
 not five mandatory sequential stages.
 
-The **LLM inside** operation retains the existing composite suitability/tool loop.
+The **LLM call** operation sends context to the High decision and consumes its
+response through the existing composite suitability/tool loop. This denotes a
+call relationship, not a shared source file or an additional decision layer.
 Candidate preparation, result finalization and review reporting retain their
 existing functions in the [owner adapters](../../agents/design/execution.py).
 Its actual LLM suitability and tool decisions appear in **High**. Candidate

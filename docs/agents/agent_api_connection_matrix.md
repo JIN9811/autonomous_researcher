@@ -28,7 +28,7 @@ source_of_truth:
   - knowledge
   - knowledge/http_api.py
   - knowledge/source_api.py
-last_verified: 2026-09-12
+last_verified: 2026-09-13
 verified_against: working-tree
 related_docs:
   - docs/agents/README.md
@@ -90,6 +90,19 @@ and [LeRobot Reference](../device_bridges/lerobot_bridge.md).
 See the [Vision Reference](vision_agent.md) and
 [Camera/Vision Reference](../device_bridges/utm_vision_bridge.md).
 
+### Installed Equipment Owner (2026-09-13)
+
+| Surface | Current owner and boundary |
+|---|---|
+| Agent/package | `agent.equipment_agent`, installed `equipment@1.0.0`; canonical owner code under `agents/equipment/` with exact flat-module aliases |
+| Execution | `equipment.task` and `equipment.deliver` preserve the existing composite workflow/result; source-bound CODE relationships expose High decisions, Middle software and Low worker execution |
+| Live report | `/api/agents/equipment/report` uses the owner projector; `/module-assets/equipment/live_report.js` mounts the existing cards and passive actions through the common host |
+| Bridge | `windows_pyautogui@1.0.0`, runtime identity `windows_pyautogui_bridge`, existing 18 tool IDs and selected Windows/Local worker |
+| Settings/evidence | Existing Profile, Skill, Flow, connection, runtime, CSV and archive paths; no second polling loop or settings store |
+
+See the [Equipment Reference](equipment_agent.md#installed-package-and-executable-structure)
+and [Windows/PyAutoGUI Reference](../device_bridges/windows_pyautogui_bridge.md).
+
 - `agents/*_agent.py`
 - `agents/*_decision*.py`, `agents/analysis_improvement.py`, `agents/source_curation.py`
 - `graphs/modules/*/module.yaml`
@@ -118,6 +131,10 @@ See the [Vision Reference](vision_agent.md) and
 
 Local JSON actions are not automatically global tools or HTTP endpoints.
 The owning Python dispatcher validates each choice before existing execution.
+
+Figure labels distinguish **LLM** (the High decision) from **LLM call** (the
+process that sends context and consumes its response). This is a calling
+relationship, not file containment; the badge alone is not model-call evidence.
 
 | Agent | LLM contribution | Action / execution boundary | Output authority |
 |---|---|---|---|
@@ -184,7 +201,7 @@ cross-cutting responsibilities, not additional sequential model calls.
 | Specimen Making | `GET /api/agents/specimen/report`; module-owned frontend asset | `/api/printer/*`, geometry/artifact tools; `/api/packages` describes composition | printer workspace and existing module draft/save controls | [Owner module](../../agents/specimen/module.py), `/openapi.json`, printer bridge implementations |
 | Vision | specimen-pose status/snapshot/release | camera, active robot camera, UTM vision/runtime APIs | Vision/UTM workspaces and run retry | `/openapi.json`, Vision tools/bridge handlers |
 | Manipulation | manipulation-agent config/test/run | `/api/lerobot/*` robotics services | LeRobot workspace configuration/training/simulation/mirror | `/openapi.json`, LeRobot bridge |
-| Lab Equipment | no isolated agent endpoint | `/api/equipment/*`, `/api/bridges*` | equipment skill/profile/worker/UTM workspaces | `/openapi.json`, equipment bridge/tool registry |
+| Lab Equipment | `GET /api/agents/equipment/report`; installed frontend asset | `/api/equipment/*`, `/api/bridges*` | equipment skill/profile/worker/UTM workspaces; module/package catalogs | `/openapi.json`, `agents/equipment/module.py`, Windows/PyAutoGUI bridge/tool registry |
 | Analysis | `/api/analysis/fem/jobs` and scoped job cancellation; not direct graph-stage execution | `/api/cae/config`, `/api/cae/run`, `/api/cae/fields*` | CAE workspace, field viewer and run artifacts | `/openapi.json`, Analysis FEM and CAE route modules |
 | Knowledge | context/report/Markdown via Knowledge service | `/api/knowledge/markdown/*`, `/api/knowledge/sources/*`, ontology and typed-memory surfaces | Source intake settings/scan/retry; archive intake and scoped note lifecycle | `/openapi.json`, active Markdown/source installers; retired graph/manual routes excluded |
 | BO | `/api/bo/run` direct bounded workspace execution | `/api/bo/config`, `/api/bo/benchmark` | BO workspace and graph-run context | `/openapi.json`, BO agent/benchmark services |
@@ -302,7 +319,15 @@ or scientific evidence.
 
 ## Verification
 
-Updated on 2026-09-11 by source inspection at `5a190e8`: agent/decision modules,
+Updated through 2026-09-13 by source inspection and guarded Equipment package/API
+tests. The installed Equipment owner, frontend admission, execution catalog and
+Windows/PyAutoGUI composition are now included. One unchanged registered-model
+retry completed through the next Design with 34 actual calls across all ten
+owners, zero physical calls and no denied effects. The first attempt stopped on
+a Knowledge tool-contract rejection before BO; both outcomes remain recorded.
+Neither attempt is hardware evidence.
+
+The earlier 2026-09-11 inspection at `5a190e8` covered agent/decision modules,
 ten manifests, the primary graph, source/API installers, Analysis job/field
 interfaces, and owning References. Documentation/link checks cover this edit.
 Prior API/local inference and live evidence remain attached to the individual

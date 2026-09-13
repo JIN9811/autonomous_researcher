@@ -42,7 +42,7 @@ def _reversed_orchestrator_payload(client: TestClient) -> dict:
     return payload
 
 
-@pytest.mark.parametrize('module_id', ['analysis', 'bo', 'equipment', 'guardian', 'knowledge'])
+@pytest.mark.parametrize('module_id', ['analysis', 'bo', 'guardian', 'knowledge'])
 def test_legacy_module_api_delivers_control_view_without_converting_execution(module_api, module_id):
     client, _, _, guard, root = module_api
     installed = yaml.safe_load((root / module_id / 'module.yaml').read_text())['module']
@@ -52,6 +52,39 @@ def test_legacy_module_api_delivers_control_view_without_converting_execution(mo
     assert delivered['metadata']['control_view'] == installed['metadata']['control_view']
     assert delivered['internal_graph'] == installed['internal_graph']
     assert not delivered.get('execution_graph')
+    assert guard.physical_call_count == 0
+
+
+def test_equipment_installed_report_projection_and_graph(module_api):
+    client, _, controller, guard, _ = module_api
+    response = client.get("/api/modules/equipment").json()
+    assert {operation["handler"] for operation in response["execution_catalog"]["operations"]} == {
+        "equipment.task", "equipment.deliver"
+    }
+    assert len(response["execution_graph_revision"]) == 64
+    state = controller._state
+    state.run_metadata.update(
+        equipment_report={
+            "bridge": {"provider": "windows_pyautogui"},
+            "control_plan": {"program_id": "utm_cycle"},
+            "screen_checks": [],
+            "decision": {"handoff_status": "blocked"},
+        },
+        equipment_result={"status": "blocked", "failure_code": "PREFLIGHT"},
+        equipment_handoff={"status": "blocked"},
+        equipment_metrics={"rows": 0},
+    )
+    before = deepcopy(state.run_metadata)
+    report = client.get("/api/agents/equipment/report")
+    assert report.status_code == 200
+    sections = report.json()["report"]["sections"]
+    assert sections["equipment_report"]["control_plan"] == {"program_id": "utm_cycle"}
+    assert sections["equipment_result"]["failure_code"] == "PREFLIGHT"
+    assert sections["equipment_handoff"] == {"status": "blocked"}
+    assert sections["role_specific"]["control_trace"]["program_id"] == "utm_cycle"
+    assert sections["metrics"] == {"rows": 0}
+    assert {key: state.run_metadata[key] for key in before} == before
+    assert "_projection_state" not in state.run_metadata
     assert guard.physical_call_count == 0
 
 

@@ -5,7 +5,7 @@ status: active
 authority: proposal
 decision_status: approved
 audience: [developer, maintainer]
-scope: [runtime_ide, design, orchestrator, executable_modules]
+scope: [runtime_ide, design, orchestrator, specimen, vision, manipulation, equipment, executable_modules]
 summary: One executable definition shared by the agent backend and editable Runtime IDE.
 related_docs:
   - docs/runtime/runtime_ide.md
@@ -21,7 +21,7 @@ supersedes: []
 | Item | Status |
 |---|---|
 | User approval | Approved in conversation, 2026-09-13 |
-| Scope | Orchestrator and Design internals; shared extension contract |
+| Scope | Orchestrator plus installed Design, Specimen, Vision, Manipulation and Equipment internals; shared extension contract |
 | Authority | One executable graph, not a separate diagram or inferred checkpoint chain |
 | Physical effects | No hardware validation or device-path changes in this migration |
 | Application | Existing validate/version/activate path; running definitions remain pinned |
@@ -79,6 +79,10 @@ Guardian / Safety and Knowledge / Evidence are cross-cutting responsibilities.
 Software-only agents may have an empty Low area. Composite owner operations stay
 intact in Middle, with their actual model decisions exposed as High CODE nodes;
 classification must never split handlers or change call order, tools or handoffs.
+Use **LLM** on the actual High decision and **LLM call** on the calling process.
+The latter supplies decision context and consumes the response; it does not imply
+file containment, Middle-level reasoning, or a model call in every mode. Keep
+the existing background responsibility areas and source-bound call relationships.
 Legacy modules use `metadata.control_view.areas` and optional source-bound
 `checkpoint_details`, keyed by `phase:step_id`. Those details are display-only;
 legacy checkpoint IDs, ordering, serialization and runtime handlers stay unchanged.
@@ -104,6 +108,13 @@ Migrated modules retain the handler of their catalog owner; an unrelated handler
 cannot coexist with a graph that claims to execute Design/Orchestrator operations.
 Generic handler overrides remain available for unmigrated modules.
 
+Equipment applies this contract without flattening its nested Profile Skill
+Flow. `equipment.task` and `equipment.deliver` are the executable Middle
+operations; source-bound CODE relationships expose the real High LLM decisions,
+Middle software, Low Windows/local worker boundary and cross-cutting
+Guardian/Evidence internals. The editable module graph and the read-only
+eight-block Skill Flow are separate projections of separate contracts.
+
 ## Frontend and Application
 
 The existing Runtime IDE module canvas projects the executable definition. Edges
@@ -114,6 +125,11 @@ writing or silently repairing them. GET and explicit reload obtain backend
 changes. Dirty drafts are never silently overwritten; revisions/conflicts are
 visible. Closing a tab is not deactivation. Running invocations/loops use pinned
 definitions; an idle change applies through the existing next-run boundary.
+
+A catalog-backed Equipment tab always uses this generic executable/source-bound
+renderer. Profile/Skill Flow refresh may update its separate workspace but must
+not replace the module graph or baseline. Legacy Equipment definitions without
+an `execution_graph` retain the earlier shared Skill Flow projection.
 
 The backend dry-run API must clearly describe structural validation/path
 enumeration if it does not execute the owner functions. Test evidence separately
@@ -131,11 +147,31 @@ simulated. It must not misrepresent a structural preview as successful execution
 5. Invalid handlers/dependencies/branches/cycles, failed saves and busy activation
    cannot partially apply. Running definitions remain unchanged.
 6. Existing virtual, real-printer and physical-print policy tests run with denied
-   equipment transport. No physical or live-model validation is claimed.
+   equipment transport. Any registered-model verification records every attempt
+   separately and makes no physical-equipment claim.
 7. Rendered node/port/edge editing, long labels, legend and narrow viewport
    navigation work. Documentation SVGs use explicit executable edges.
 8. Agent docs, Runtime IDE reference and future modularization contract state
    achieved scope and remaining composite boundaries accurately.
+
+## Equipment Implementation Evidence — 2026-09-13
+
+Equipment's installed graph, source relationships, generated light-theme SVG,
+module asset admission, report/card preservation, host timer boundary and IDE
+Skill Flow separation are covered by focused Node and Python tests. A controller
+browser inspection at 1920×1080 confirmed the generic Equipment internal map,
+the separate eight-block Flow workspace, and the Package-to-Windows/PyAutoGUI
+bridge internals after cache-busted reload. The corrected Live check also
+rendered the original Equipment cards and eight-step Flow, preserved Design →
+Equipment owner switching, and reported no console warning or error.
+
+An unchanged second guarded registered-model run completed through the next
+Design with 34 actual saved-provider calls across all ten required owners, zero
+physical calls and no denied effects. The first attempt stopped at Knowledge
+after a response violated the required search-before-read identity contract;
+Guardian correctly blocked before BO. Both attempts are retained, so the record
+shows a successful virtual cycle and the observed stochastic failure rather than
+claiming universal model reliability or physical validation.
 
 ## Non-goals
 

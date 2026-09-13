@@ -1,0 +1,2858 @@
+"""
+File purpose:
+- Safe simulator/live bridge client for Windows PyAutoGUI equipment macros.
+
+Key classes/functions:
+- WindowsPyAutoGUIBridgeConfig
+- WindowsPyAutoGUIBridge
+
+Inputs/outputs:
+- Input: equipment.pyautogui.* tool payloads and devices.yaml config.
+- Output: structured bridge health/program/run responses.
+
+Dependencies:
+- httpx for optional live bridge HTTP calls.
+
+Modification guide:
+- Safe places to edit: allowed actions, simulator defaults, program metadata.
+- Risky places to edit: live execution gates and action validation.
+- Related files: device_bridges/windows_pyautogui/tools.py, agents/equipment/agent.py,
+  install/windows_pyautogui_bridge_server.py.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import hashlib
+import ipaddress
+import json
+import math
+import os
+import re
+import socket
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable
+from urllib.parse import quote, urljoin, urlparse
+
+import httpx
+
+from device_bridges.base_bridge import BaseBridge
+from utils.windows_bridge_release import build_release_package, load_release_manifest
+from utils.utm_csv import probe_utm_csv_bytes
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CONNECTION_MEMORY = REPO_ROOT / "memory" / "windows_pyautogui_connection.json"
+DEFAULT_UTM_PROFILE_MEMORY = REPO_ROOT / "memory" / "equipment_utm_profile.json"
+DEFAULT_ALLOWED_ACTIONS = {
+    "health",
+    "screenshot",
+    "locate_image",
+    "type_path",
+    "paste_runtime_value",
+    "wait_for_file",
+    "wait_until",
+    "wait_until_image",
+    "assert_visible",
+    "assert_text",
+    "wait_until_text",
+    "focus_window",
+    "wait",
+    "move_to",
+    "move_rel",
+    "query_pointer",
+    "query_screen",
+    "click",
+    "double_click",
+    "triple_click",
+    "mouse_down",
+    "mouse_up",
+    "drag_to",
+    "drag_rel",
+    "press",
+    "key_down",
+    "key_up",
+    "set_input_language",
+    "hotkey",
+    "write",
+    "scroll",
+    "hscroll",
+    "vscroll",
+    "pixel",
+    "pixel_matches_color",
+    "locate_all_images",
+    "window_activate",
+    "window_minimize",
+    "window_maximize",
+    "window_restore",
+    "window_move",
+    "window_resize",
+    "alert",
+    "confirm",
+    "run_registered_program",
+    "demo_mouse_wiggle",
+    "log",
+}
+DEFAULT_REGISTERED_PROGRAMS = {
+    "program1": {
+        "description": "Connectivity demo: bounded mouse wiggle and completion log.",
+        "requires_pyautogui": True,
+        "safe_test": True,
+        "program_type": "connectivity_demo",
+        "sequence": [
+            {"action": "health"},
+            {"action": "demo_mouse_wiggle", "duration_sec": 1.0, "distance_px": 20},
+            {"action": "log", "message": "program1 completed"},
+        ],
+    },
+    "utm_compression_start_v1": {
+        "description": "UTM compression protocol through the completed-test screen; raw CSV export is a separate step.",
+        "requires_pyautogui": True,
+        "safe_test": True,
+        "program_type": "utm_protocol",
+        "target_app": "UTM software",
+        "target_window": "main_window_title_or_regex",
+        "locator_backend": "image",
+        "max_retries": 1,
+        "preconditions": ["windows_bridge_ready", "utm_app_visible", "specimen_verified_on_fixture", "robot_clear_of_utm"],
+        "expected_screen_before": [{"name": "ready_state", "required": True}],
+        "sequence": [
+            {"action": "health"},
+            {"action": "focus_window", "window": "main"},
+            {"action": "assert_visible", "target": "ready_state"},
+            {"action": "click", "target": "start_button"},
+            {"action": "wait_until", "target": "running_state", "timeout_s": 10},
+            {"action": "wait_until", "target": "complete_state", "timeout_s": 300},
+        ],
+        "expected_screen_after": [{"name": "running_state", "required": True}, {"name": "complete_state", "required": True}],
+        "save_policy": {
+            "auto_save_expected": False,
+            "manual_save_required_if_no_artifact": False,
+            "windows_export_root": "C:/ATR/utm_exports",
+            "save_actions": [],
+        },
+        "output_artifacts": [],
+        "safe_abort": {"program_id": "utm_stop_or_abort_v1"},
+    },
+    "utm_export_csv_v1": {
+        "description": "Save raw test data to CSV after a completed test.",
+        "requires_pyautogui": True,
+        "safe_test": True,
+        "program_type": "utm_export",
+        "target_app": "UTM software",
+        "target_window": "main_window_title_or_regex",
+        "locator_backend": "image",
+        "max_retries": 1,
+        "preconditions": ["windows_bridge_ready", "utm_app_visible", "complete_state_visible"],
+        "expected_screen_before": [{"name": "complete_state", "required": True}],
+        "sequence": [
+            {"action": "assert_visible", "target": "complete_state"},
+            {"action": "click", "target": "save_raw_data_csv"},
+            {"action": "wait", "seconds": 1.0},
+            {"action": "hotkey", "keys": ["ctrl", "a"]},
+            {"action": "write", "text": "C:/ATR/utm_exports/{run_id}/{specimen_id}.csv", "interval_sec": 0.01},
+            {"action": "press", "key": "enter"},
+            {"action": "wait_for_file", "pattern": "C:/ATR/utm_exports/{run_id}/{specimen_id}*.csv", "timeout_s": 20},
+        ],
+        "expected_screen_after": [{"name": "complete_state", "required": True}],
+        "save_policy": {
+            "auto_save_expected": False,
+            "manual_save_required_if_no_artifact": False,
+            "windows_export_root": "C:/ATR/utm_exports",
+            "save_method": "raw_csv_button",
+            "save_actions": ["assert_complete_state", "click_save_raw_data_csv", "type_standard_path", "press_enter", "wait_for_file"],
+        },
+        "output_artifacts": [{"kind": "utm_csv", "pattern": "C:/ATR/utm_exports/{run_id}/{specimen_id}*.csv"}],
+        "safe_abort": {"program_id": "utm_stop_or_abort_v1"},
+    },
+    "utm_stop_or_abort_v1": {
+        "description": "Safe UTM stop/abort macro for operator or Guardian recovery.",
+        "requires_pyautogui": True,
+        "safe_test": True,
+        "program_type": "utm_abort",
+        "target_app": "UTM software",
+        "target_window": "main_window_title_or_regex",
+        "locator_backend": "keyboard",
+        "max_retries": 0,
+        "preconditions": ["windows_bridge_ready", "utm_app_visible_or_focused"],
+        "expected_screen_before": [{"name": "running_or_unknown_state", "required": False}],
+        "sequence": [{"action": "press", "key": "esc"}, {"action": "log", "message": "UTM stop/abort requested"}],
+        "expected_screen_after": [{"name": "stopped_or_idle_state", "required": False}],
+        "save_policy": {"save_method": "not_applicable", "manual_save_required_if_no_artifact": False},
+        "output_artifacts": [],
+        "safe_abort": {"action": "press", "key": "esc"},
+    },
+}
+
+
+
+UTM_PROFILE_PROGRAM_KEYS = (
+    "locators",
+    "export_glob",
+    "artifact_timeout_s",
+    "stable_for_sec",
+    "expected_export_path",
+    "require_window_focus",
+    "manual_save_required_if_no_artifact",
+    "target_window",
+    "target_window_regex",
+    "require_screen_assertions",
+    "simulate_utm_protocol",
+    "sequence",
+    "robot_entry_clearance_mm",
+)
+
+
+def _read_json_object(path: Path) -> dict[str, Any]:
+    """Read a JSON object from disk, returning an empty object on absence or invalid data."""
+    try:
+        if not path.exists():
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _sanitize_utm_profile(raw: dict[str, Any]) -> dict[str, Any]:
+    """Keep only UTM profile fields that can safely override the registered protocol."""
+    if not isinstance(raw, dict):
+        return {}
+    program_id = str(raw.get("program_id") or "utm_compression_start_v1").strip() or "utm_compression_start_v1"
+    profile: dict[str, Any] = {"program_id": program_id}
+    export_glob = str(raw.get("export_glob") or "").strip()
+    if export_glob:
+        profile["export_glob"] = export_glob
+    expected_export_path = str(raw.get("expected_export_path") or "").strip()
+    if expected_export_path:
+        profile["expected_export_path"] = expected_export_path
+    for key in ("target_window", "target_window_regex"):
+        value = str(raw.get(key) or "").strip()
+        if value:
+            profile[key] = value
+    for key in ("artifact_timeout_s", "stable_for_sec"):
+        if raw.get(key) is None or raw.get(key) == "":
+            continue
+        try:
+            value = float(raw[key])
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            profile[key] = value
+    if raw.get("robot_entry_clearance_mm") not in (None, ""):
+        try:
+            clearance_mm = float(raw["robot_entry_clearance_mm"])
+        except (TypeError, ValueError):
+            clearance_mm = 0.0
+        if 0 < clearance_mm <= 1000:
+            profile["robot_entry_clearance_mm"] = clearance_mm
+    for key in ("require_window_focus", "manual_save_required_if_no_artifact", "require_screen_assertions", "simulate_utm_protocol"):
+        if key in raw:
+            profile[key] = bool(raw.get(key))
+    locators = raw.get("locators")
+    if isinstance(locators, dict):
+        clean_locators: dict[str, dict[str, Any]] = {}
+        for name, locator in locators.items():
+            if isinstance(locator, dict):
+                clean_locators[str(name)] = dict(locator)
+        if clean_locators:
+            profile["locators"] = clean_locators
+    sequence = raw.get("sequence")
+    if isinstance(sequence, list) and sequence:
+        clean_sequence = [dict(item) for item in sequence if isinstance(item, dict)]
+        if clean_sequence:
+            profile["sequence"] = clean_sequence
+    if raw.get("updated_at"):
+        profile["updated_at"] = str(raw.get("updated_at"))
+    return profile
+
+
+def _apply_utm_profile_to_programs(
+    programs: dict[str, dict[str, Any]],
+    profile_raw: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Merge the persisted UTM GUI profile into the registered UTM program."""
+    profile = _sanitize_utm_profile(profile_raw)
+    if not profile:
+        return programs
+    program_id = str(profile.get("program_id") or "utm_compression_start_v1")
+    merged = dict(programs.get(program_id, DEFAULT_REGISTERED_PROGRAMS.get(program_id, {})))
+    for key in UTM_PROFILE_PROGRAM_KEYS:
+        if key in profile:
+            merged[key] = profile[key]
+    merged["utm_profile_memory_applied"] = True
+    programs = dict(programs)
+    programs[program_id] = merged
+    return programs
+
+
+ToolEventCallback = Callable[[dict[str, Any]], None]
+
+
+@dataclass(slots=True)
+class WindowsPyAutoGUIBridgeConfig:
+    """Config for a Windows PyAutoGUI bridge host or simulator."""
+
+    mode: str = "simulator"
+    provider: str = "windows_pyautogui"
+    enabled: bool = True
+    bridge_url_env: str = "WINDOWS_PYAUTOGUI_BRIDGE_URL"
+    token_env: str = "WINDOWS_PYAUTOGUI_BRIDGE_TOKEN"
+    token_header: str = "X-Bridge-Token"
+    request_timeout_sec: float = 10.0
+    discovery_timeout_sec: float = 0.45
+    discovery_port: int = 8765
+    allow_live_execute: bool = False
+    allow_screenshot: bool = True
+    artifact_dir: Path = REPO_ROOT / "artifacts" / "equipment"
+    allowed_actions: set[str] = field(default_factory=lambda: set(DEFAULT_ALLOWED_ACTIONS))
+    allowed_hotkeys: list[list[str]] = field(default_factory=lambda: [["ctrl", "s"], ["ctrl", "o"], ["enter"], ["esc"]])
+    limits: dict[str, Any] = field(
+        default_factory=lambda: {"max_wait_sec": 30.0, "max_write_chars": 512, "max_steps": 50}
+    )
+    simulator: dict[str, Any] = field(
+        default_factory=lambda: {
+            "screen_width": 1920,
+            "screen_height": 1080,
+            "screenshot_name": "simulated_windows_screen.png",
+            "pyautogui_available": True,
+        }
+    )
+    test_live_promotion: dict[str, Any] = field(
+        default_factory=lambda: {"enabled": False, "transport": "virtual", "allow_real_network_in_test": False}
+    )
+    default_sequence: list[dict[str, Any]] = field(default_factory=lambda: [{"action": "health"}, {"action": "screenshot"}])
+    registered_programs: dict[str, dict[str, Any]] = field(default_factory=lambda: dict(DEFAULT_REGISTERED_PROGRAMS))
+    connection_memory_path: Path = DEFAULT_CONNECTION_MEMORY
+    utm_profile_memory_path: Path = DEFAULT_UTM_PROFILE_MEMORY
+
+    @classmethod
+    def from_devices_config(
+        cls,
+        cfg: dict[str, Any] | None,
+        *,
+        repo_root: Path | None = None,
+    ) -> "WindowsPyAutoGUIBridgeConfig":
+        """Build config from the project devices config."""
+        root = repo_root or REPO_ROOT
+        cfg = cfg if isinstance(cfg, dict) else {}
+        devices = cfg.get("devices") if isinstance(cfg.get("devices"), dict) else cfg
+        equipment = devices.get("equipment", {}) if isinstance(devices, dict) else {}
+        if not isinstance(equipment, dict):
+            equipment = {}
+        bridge_raw = equipment.get("windows_pyautogui", {})
+        bridge = bridge_raw if isinstance(bridge_raw, dict) else {}
+
+        artifact_dir = Path(str(bridge.get("artifact_dir", "artifacts/equipment")))
+        if not artifact_dir.is_absolute():
+            artifact_dir = root / artifact_dir
+        memory_path = Path(str(bridge.get("connection_memory_path", DEFAULT_CONNECTION_MEMORY)))
+        if not memory_path.is_absolute():
+            memory_path = root / memory_path
+        raw_utm_profile_path = bridge.get("utm_profile_memory_path")
+        utm_profile_path = Path(str(raw_utm_profile_path)) if raw_utm_profile_path else root / "memory" / "equipment_utm_profile.json"
+        if not utm_profile_path.is_absolute():
+            utm_profile_path = root / utm_profile_path
+
+        allowed_actions = bridge.get("allowed_actions")
+        registered = bridge.get("registered_programs")
+        default_sequence = bridge.get("default_sequence")
+        registered_programs = {
+            **dict(DEFAULT_REGISTERED_PROGRAMS),
+            **(
+                {
+                    str(program_id): dict(program)
+                    for program_id, program in registered.items()
+                    if isinstance(program, dict)
+                }
+                if isinstance(registered, dict) and registered
+                else {}
+            ),
+        }
+        registered_programs = _apply_utm_profile_to_programs(registered_programs, _read_json_object(utm_profile_path))
+
+        return cls(
+            mode=str(equipment.get("mode", bridge.get("mode", "simulator"))).strip().lower() or "simulator",
+            provider=str(equipment.get("provider", "windows_pyautogui")),
+            enabled=bool(bridge.get("enabled", True)),
+            bridge_url_env=str(bridge.get("bridge_url_env", "WINDOWS_PYAUTOGUI_BRIDGE_URL")),
+            token_env=str(bridge.get("token_env", "WINDOWS_PYAUTOGUI_BRIDGE_TOKEN")),
+            token_header=str(bridge.get("token_header", "X-Bridge-Token")),
+            request_timeout_sec=float(bridge.get("request_timeout_sec", 10)),
+            discovery_timeout_sec=float(bridge.get("discovery_timeout_sec", 0.45)),
+            discovery_port=int(bridge.get("discovery_port", 8765)),
+            allow_live_execute=bool(bridge.get("allow_live_execute", False)),
+            allow_screenshot=bool(bridge.get("allow_screenshot", True)),
+            artifact_dir=artifact_dir,
+            allowed_actions=(set(DEFAULT_ALLOWED_ACTIONS) | {str(item) for item in allowed_actions})
+            if isinstance(allowed_actions, list) and allowed_actions
+            else set(DEFAULT_ALLOWED_ACTIONS),
+            allowed_hotkeys=[
+                [str(key) for key in item]
+                for item in bridge.get("allowed_hotkeys", [["ctrl", "s"], ["ctrl", "o"], ["enter"], ["esc"]])
+                if isinstance(item, list)
+            ],
+            limits=dict(bridge.get("limits", {})) if isinstance(bridge.get("limits"), dict) else cls().limits,
+            simulator=dict(bridge.get("simulator", {})) if isinstance(bridge.get("simulator"), dict) else cls().simulator,
+            test_live_promotion=(
+                dict(bridge.get("test_live_promotion", {}))
+                if isinstance(bridge.get("test_live_promotion"), dict)
+                else cls().test_live_promotion
+            ),
+            default_sequence=[dict(item) for item in default_sequence]
+            if isinstance(default_sequence, list) and default_sequence
+            else cls().default_sequence,
+            registered_programs=registered_programs,
+            connection_memory_path=memory_path,
+            utm_profile_memory_path=utm_profile_path,
+        )
+
+
+class WindowsPyAutoGUIBridge(BaseBridge):
+    """Simulator/live client for Windows PyAutoGUI bridge commands."""
+
+    def __init__(self, config: WindowsPyAutoGUIBridgeConfig) -> None:
+        self.config = config
+        self._simulator_observations: dict[tuple, dict[str, Any]] = {}
+
+    def execute(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Execute one bridge command."""
+        if command == "health":
+            return self.health(payload)
+        if command == "list_programs":
+            return self.list_programs(payload)
+        if command == "run":
+            return self.run(payload)
+        if command == "register_program":
+            return self.register_program(payload)
+        if command == "delete_program":
+            return self.delete_program(payload)
+        if command == "screenshot":
+            return self.screenshot(payload)
+        if command == "list_locators":
+            return self.list_locators(payload)
+        if command == "capture_locator":
+            return self.capture_locator(payload)
+        if command == "request_log":
+            return self.request_log(payload)
+        return self._failure(
+            tool=f"equipment.pyautogui.{command}",
+            status="blocked",
+            failure_code="PYAUTOGUI_UNKNOWN_COMMAND",
+            message=f"Unknown Windows PyAutoGUI bridge command: {command}",
+            step_trace=[{"step": "PRECHECK", "status": "blocked", "detail": "unknown command"}],
+        )
+
+    def health(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return Windows bridge health or simulator health."""
+        payload = payload or {}
+        if not self._should_use_live(payload, for_execution=False):
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.health",
+                "mode": "simulator",
+                "bridge": "windows_pyautogui",
+                "status": "ready",
+                "screen": self._simulated_screen(),
+                "pyautogui": {
+                    "available": bool(self.config.simulator.get("pyautogui_available", True)),
+                    "failsafe": True,
+                    "pause": 0.1,
+                    "simulated": True,
+                },
+                "artifact_root": str(self.config.artifact_dir),
+                "locator_root": str(self.config.artifact_dir / "simulated_locators"),
+                "utm_export_root": str(self.config.artifact_dir / "simulated_utm_exports"),
+                "artifacts": {
+                    "root": str(self.config.artifact_dir),
+                    "request_log": str(self.config.artifact_dir / "bridge_requests.jsonl"),
+                    "locator_root": str(self.config.artifact_dir / "simulated_locators"),
+                    "utm_export_root": str(self.config.artifact_dir / "simulated_utm_exports"),
+                },
+                "program_count": len(self.config.registered_programs),
+                "server_version": "simulator",
+                "bridge_url": "simulator://windows_pyautogui",
+                "bridge_host": "simulator",
+                "client_latency_ms": 0.0,
+            }
+        precheck = self._live_precheck(require_execute=False, payload=payload)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.health"
+            return precheck
+        return self._live_get("equipment.pyautogui.health", "/health", payload)
+
+    def list_programs(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return registered macro programs."""
+        payload = payload or {}
+        if not self._should_use_live(payload, for_execution=False):
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.list_programs",
+                "mode": "simulator",
+                "bridge": "windows_pyautogui",
+                "status": "ready",
+                "programs": self._program_metadata(self.config.registered_programs),
+            }
+        precheck = self._live_precheck(require_execute=False, payload=payload)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.list_programs"
+            return precheck
+        response = self._live_get("equipment.pyautogui.list_programs", "/programs", payload)
+        if isinstance(response.get("programs"), dict):
+            response["programs"] = self._program_metadata(response["programs"])
+        return response
+
+    def list_recordings(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """List recordings owned by the explicitly selected live worker."""
+        payload = dict(payload or {})
+        if not self._should_use_live(payload, for_execution=False):
+            return self._failure(
+                tool="equipment.pyautogui.list_recordings",
+                status="blocked",
+                failure_code="PYAUTOGUI_RECORDING_WORKER_REQUIRED",
+                message="A selected live or local Bridge worker is required to list recordings.",
+            )
+        precheck = self._live_precheck(require_execute=False, payload=payload)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.list_recordings"
+            return precheck
+        return self._live_get("equipment.pyautogui.list_recordings", "/recordings", payload)
+
+    def get_recording(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Fetch and verify one saved recording from the selected live worker."""
+        payload = dict(payload or {})
+        recording_id = str(payload.get("recording_id") or "").strip()
+        if not recording_id:
+            return self._failure(
+                tool="equipment.pyautogui.get_recording",
+                status="invalid",
+                failure_code="PYAUTOGUI_RECORDING_ID_REQUIRED",
+                message="recording_id is required.",
+            )
+        if not self._should_use_live(payload, for_execution=False):
+            return self._failure(
+                tool="equipment.pyautogui.get_recording",
+                status="blocked",
+                failure_code="PYAUTOGUI_RECORDING_WORKER_REQUIRED",
+                message="A selected live or local Bridge worker is required to fetch recordings.",
+            )
+        precheck = self._live_precheck(require_execute=False, payload=payload)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.get_recording"
+            return precheck
+        encoded_id = quote(recording_id, safe="")
+        package = self._live_get("equipment.pyautogui.get_recording", f"/recordings/{encoded_id}/package", payload)
+        if package.get("ok") and package.get("schema") == "atr.equipment_recording_package.v1":
+            return self._import_recording_package(package)
+        if package.get("ok"):
+            return self._failure(
+                tool="equipment.pyautogui.get_recording",
+                status="blocked",
+                failure_code="PYAUTOGUI_RECORDING_PACKAGE_INVALID",
+                message="The selected worker returned recording metadata without a verified package.",
+            )
+        return package
+
+    @staticmethod
+    def _worker_update_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+        request = dict(payload or {})
+        candidate_alias = str(request.get("candidate_alias") or request.get("bridge_id") or "").strip()
+        request.update(
+            {
+                "candidate_alias": candidate_alias,
+                "bridge_id": candidate_alias,
+                "runtime_mode": "live",
+                "force_live_bridge": True,
+            }
+        )
+        return request
+
+    @staticmethod
+    def _version_key(value: Any) -> tuple[int, ...]:
+        return tuple(int(item) for item in re.findall(r"\d+", str(value or "")))
+
+    def worker_update_status(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Read one explicitly addressed Saved Worker's update state."""
+        request = self._worker_update_payload(payload)
+        if not request["bridge_id"]:
+            return self._failure(
+                tool="equipment.pyautogui.worker_update_status",
+                status="blocked",
+                failure_code="PYAUTOGUI_CANDIDATE_ALIAS_REQUIRED",
+                message="candidate_alias is required for Worker update operations.",
+            )
+        precheck = self._live_precheck(require_execute=False, payload=request)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.worker_update_status"
+            return precheck
+        result = self._live_get("equipment.pyautogui.worker_update_status", "/update/status", request)
+        latest_version = str(load_release_manifest().get("version") or "")
+        current_version = str(result.get("current_version") or "")
+        result.update(
+            {
+                "candidate_alias": request["candidate_alias"],
+                "latest_version": latest_version,
+                "update_available": bool(
+                    result.get("ok")
+                    and latest_version
+                    and self._version_key(latest_version) > self._version_key(current_version)
+                ),
+            }
+        )
+        return result
+
+    def update_worker(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Stage and apply the bounded repository release on one Saved Worker."""
+        request = self._worker_update_payload(payload)
+        if not request["bridge_id"]:
+            return self._failure(
+                tool="equipment.pyautogui.update_worker",
+                status="blocked",
+                failure_code="PYAUTOGUI_CANDIDATE_ALIAS_REQUIRED",
+                message="candidate_alias is required for Worker update operations.",
+            )
+        precheck = self._live_precheck(require_execute=False, payload=request)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.update_worker"
+            return precheck
+        try:
+            package = build_release_package()
+        except (OSError, TypeError, ValueError) as exc:
+            return self._failure(
+                tool="equipment.pyautogui.update_worker",
+                status="blocked",
+                failure_code="PYAUTOGUI_UPDATE_PACKAGE_BUILD_FAILED",
+                message=str(exc),
+            )
+        staged = self._live_post("equipment.pyautogui.update_worker", "/update/stage", package, request)
+        if not staged.get("ok"):
+            return staged
+        applied = self._live_post("equipment.pyautogui.update_worker", "/update/apply", {}, request)
+        applied["candidate_alias"] = request["candidate_alias"]
+        applied["staged"] = staged
+        applied["target_version"] = str(package.get("version") or "")
+        return applied
+
+    def rollback_worker(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Request the most recent verified Worker backup for one explicit candidate."""
+        request = self._worker_update_payload(payload)
+        if not request["bridge_id"]:
+            return self._failure(
+                tool="equipment.pyautogui.rollback_worker",
+                status="blocked",
+                failure_code="PYAUTOGUI_CANDIDATE_ALIAS_REQUIRED",
+                message="candidate_alias is required for Worker update operations.",
+            )
+        precheck = self._live_precheck(require_execute=False, payload=request)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.rollback_worker"
+            return precheck
+        result = self._live_post("equipment.pyautogui.rollback_worker", "/update/rollback", {}, request)
+        result["candidate_alias"] = request["candidate_alias"]
+        return result
+
+    def _import_recording_package(self, package: dict[str, Any]) -> dict[str, Any]:
+        recording = package.get("recording") if isinstance(package.get("recording"), dict) else {}
+        recording = dict(recording)
+        recording_id = str(recording.get("recording_id") or "").strip()
+        if not re.fullmatch(r"rec-[A-Za-z0-9_-]{3,80}", recording_id):
+            return self._failure(
+                tool="equipment.pyautogui.get_recording",
+                status="invalid",
+                failure_code="PYAUTOGUI_RECORDING_PACKAGE_INVALID",
+                message="Recording package contains an invalid recording_id.",
+            )
+        artifacts = package.get("artifacts")
+        if not isinstance(artifacts, list):
+            return self._failure(
+                tool="equipment.pyautogui.get_recording",
+                status="blocked",
+                failure_code="PYAUTOGUI_RECORDING_PACKAGE_INTEGRITY_FAILED",
+                message="Recording package artifact list is invalid.",
+            )
+        declared_count_raw = package.get("artifact_count")
+        declared_total_raw = package.get("total_bytes")
+        try:
+            declared_sizes = [int(item.get("size_bytes")) for item in artifacts if isinstance(item, dict)]
+            declared_count = int(declared_count_raw) if declared_count_raw is not None else len(artifacts)
+            declared_total = int(declared_total_raw) if declared_total_raw is not None else sum(declared_sizes)
+        except (TypeError, ValueError, OverflowError):
+            return self._failure(
+                tool="equipment.pyautogui.get_recording",
+                status="blocked",
+                failure_code="PYAUTOGUI_RECORDING_ARTIFACT_INTEGRITY_FAILED",
+                message="Recording package contains an invalid declared artifact size.",
+            )
+        if (
+            declared_count != len(artifacts)
+            or len(declared_sizes) != len(artifacts)
+            or any(size < 1 or size > 16 * 1024 * 1024 for size in declared_sizes)
+            or declared_total != sum(declared_sizes)
+        ):
+            return self._failure(
+                tool="equipment.pyautogui.get_recording",
+                status="blocked",
+                failure_code="PYAUTOGUI_RECORDING_PACKAGE_INTEGRITY_FAILED",
+                message="Recording package count or total byte declarations do not match its artifacts.",
+            )
+        import_root = (self.config.artifact_dir / "recording_imports" / recording_id).resolve()
+        import_root.mkdir(parents=True, exist_ok=True)
+        path_map: dict[str, str] = {}
+        imported_files: list[dict[str, Any]] = []
+        total_bytes = 0
+        for artifact in artifacts:
+            if not isinstance(artifact, dict):
+                continue
+            relative = Path(str(artifact.get("relative_path") or ""))
+            if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+                return self._failure(
+                    tool="equipment.pyautogui.get_recording",
+                    status="blocked",
+                    failure_code="PYAUTOGUI_RECORDING_ARTIFACT_PATH_INVALID",
+                    message="Recording package contains an unsafe artifact path.",
+                )
+            try:
+                raw = base64.b64decode(str(artifact.get("data_base64") or ""), validate=True)
+            except Exception:
+                raw = b""
+            digest = hashlib.sha256(raw).hexdigest()
+            declared_digest = str(artifact.get("sha256") or "").lower()
+            declared_size = int(artifact.get("size_bytes") or -1)
+            total_bytes += len(raw)
+            if (
+                not raw
+                or digest != declared_digest
+                or declared_size != len(raw)
+                or len(raw) > 16 * 1024 * 1024
+            ):
+                return self._failure(
+                    tool="equipment.pyautogui.get_recording",
+                    status="blocked",
+                    failure_code="PYAUTOGUI_RECORDING_ARTIFACT_INTEGRITY_FAILED",
+                    message="Recording artifact size or SHA-256 verification failed.",
+                )
+            destination = (import_root / relative).resolve()
+            try:
+                destination.relative_to(import_root)
+            except ValueError:
+                return self._failure(
+                    tool="equipment.pyautogui.get_recording",
+                    status="blocked",
+                    failure_code="PYAUTOGUI_RECORDING_ARTIFACT_PATH_INVALID",
+                    message="Recording artifact escaped the import root.",
+                )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            temporary = destination.with_suffix(destination.suffix + ".tmp")
+            temporary.write_bytes(raw)
+            temporary.replace(destination)
+            source_path = str(artifact.get("source_path") or "")
+            if source_path:
+                path_map[source_path] = str(destination)
+            imported_files.append(
+                {
+                    "relative_path": relative.as_posix(),
+                    "local_path": str(destination),
+                    "sha256": digest,
+                    "size_bytes": len(raw),
+                    "media_type": str(artifact.get("media_type") or "application/octet-stream"),
+                }
+            )
+
+        def rewrite(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {key: rewrite(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [rewrite(item) for item in value]
+            if isinstance(value, str) and value in path_map:
+                return path_map[value]
+            return value
+
+        imported = rewrite(recording)
+        if imported.get("content_sha256"):
+            imported["worker_content_sha256"] = imported.pop("content_sha256")
+        manifest = {
+            "schema": "atr.equipment_recording_import.v1",
+            "recording_id": recording_id,
+            "verified_count": len(imported_files),
+            "total_bytes": total_bytes,
+            "files": imported_files,
+        }
+        manifest_path = import_root / "import_manifest.json"
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        recording_path = import_root / "recording.imported.json"
+        recording_path.write_text(json.dumps(imported, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        return {
+            "ok": True,
+            "tool": "equipment.pyautogui.get_recording",
+            "mode": "live",
+            **imported,
+            "artifact_import": manifest,
+            "import_manifest_path": str(manifest_path),
+            "imported_recording_path": str(recording_path),
+            "failure_code": None,
+        }
+
+    def register_program(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Register one exact existing-schema macro without actuating equipment."""
+        payload = dict(payload or {})
+        program = payload.get("program") if isinstance(payload.get("program"), dict) else payload
+        program = dict(program)
+        program_id = str(program.get("program_id") or "").strip()
+        sequence = program.get("sequence") if isinstance(program.get("sequence"), list) else []
+        if program.get("schema") != "atr.pyautogui_program.v1":
+            return self._failure(
+                tool="equipment.pyautogui.register_program",
+                status="invalid",
+                failure_code="PYAUTOGUI_PROGRAM_SCHEMA_INVALID",
+                message="schema must be atr.pyautogui_program.v1",
+            )
+        if not program_id or program_id in DEFAULT_REGISTERED_PROGRAMS:
+            return self._failure(
+                tool="equipment.pyautogui.register_program",
+                status="blocked",
+                failure_code="PYAUTOGUI_PROGRAM_ID_INVALID",
+                message="Compiled Skill program_id is missing or collides with a built-in program.",
+            )
+        if not 1 <= len(sequence) <= 100:
+            return self._failure(
+                tool="equipment.pyautogui.register_program",
+                status="invalid",
+                failure_code="PYAUTOGUI_PROGRAM_SEQUENCE_INVALID",
+                message="sequence must contain 1 to 100 actions.",
+            )
+        invalid_actions = [
+            str(item.get("action") or "")
+            for item in sequence
+            if not isinstance(item, dict) or str(item.get("action") or "") not in self.config.allowed_actions
+        ]
+        if invalid_actions:
+            return self._failure(
+                tool="equipment.pyautogui.register_program",
+                status="blocked",
+                failure_code="PYAUTOGUI_ACTION_NOT_ALLOWED",
+                message=f"Compiled Skill contains unsupported actions: {', '.join(invalid_actions[:5])}",
+            )
+        public_program = {**program, "built_in": False}
+        digest = hashlib.sha256(
+            json.dumps(program, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        if not self._should_use_live(payload, for_execution=False):
+            self.config.registered_programs[program_id] = dict(public_program)
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.register_program",
+                "mode": "simulator",
+                "status": "registered",
+                "program": public_program,
+                "program_id": program_id,
+                "program_sha256": digest,
+                "failure_code": None,
+            }
+        precheck = self._live_precheck(require_execute=False, payload=payload)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.register_program"
+            return precheck
+        deployment_payload = {
+            "program": program,
+            "_atr_deployment": {
+                "managed_by": "atr_equipment_skill",
+                "program_sha256": digest,
+            },
+        }
+        result = self._live_post(
+            "equipment.pyautogui.register_program",
+            "/programs/register",
+            deployment_payload,
+            payload,
+        )
+        return result
+
+    def delete_program(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Delete one custom compiled program; built-ins stay immutable."""
+        payload = dict(payload or {})
+        program_id = str(payload.get("program_id") or "").strip()
+        if not program_id or program_id in DEFAULT_REGISTERED_PROGRAMS:
+            return self._failure(
+                tool="equipment.pyautogui.delete_program",
+                status="blocked",
+                failure_code="PYAUTOGUI_PROGRAM_BUILTIN_IMMUTABLE",
+                message="Only custom Skill programs can be deleted.",
+                step_trace=[{"step": "DELETE_PROGRAM", "status": "blocked", "detail": "immutable program"}],
+            )
+        if not self._should_use_live(payload, for_execution=False):
+            existed = self.config.registered_programs.pop(program_id, None) is not None
+            return {
+                "ok": existed,
+                "tool": "equipment.pyautogui.delete_program",
+                "mode": "simulator",
+                "status": "deleted" if existed else "not_found",
+                "program_id": program_id,
+                "failure_code": None if existed else "PYAUTOGUI_PROGRAM_NOT_FOUND",
+            }
+        precheck = self._live_precheck(require_execute=False, payload=payload)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.delete_program"
+            return precheck
+        try:
+            with httpx.Client(timeout=self.config.request_timeout_sec) as client:
+                response = client.delete(
+                    self._url(f"/programs/{program_id}?source=atr", payload), headers=self._headers(payload)
+                )
+                response.raise_for_status()
+                result = response.json()
+                return dict(result) if isinstance(result, dict) else {"ok": False, "status": "invalid_response"}
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                try:
+                    result = exc.response.json()
+                except ValueError:
+                    result = {}
+                if isinstance(result, dict):
+                    return {
+                        "ok": False,
+                        "tool": "equipment.pyautogui.delete_program",
+                        "mode": "live",
+                        "status": "not_found",
+                        "program_id": program_id,
+                        "failure_code": "PYAUTOGUI_PROGRAM_NOT_FOUND",
+                        **result,
+                    }
+            return self._failure(
+                tool="equipment.pyautogui.delete_program",
+                mode="live",
+                status="failed",
+                failure_code="PYAUTOGUI_BRIDGE_HTTP_ERROR",
+                message=f"Windows PyAutoGUI bridge delete failed: HTTP {exc.response.status_code}",
+                step_trace=[
+                    {
+                        "step": "DELETE_PROGRAM",
+                        "status": "failed",
+                        "detail": f"HTTP {exc.response.status_code}",
+                    }
+                ],
+            )
+        except Exception as exc:
+            return self._failure(
+                tool="equipment.pyautogui.delete_program",
+                mode="live",
+                status="unreachable",
+                failure_code="PYAUTOGUI_BRIDGE_UNREACHABLE",
+                message=f"Windows PyAutoGUI bridge delete failed: {exc.__class__.__name__}",
+                step_trace=[
+                    {"step": "DELETE_PROGRAM", "status": "blocked", "detail": exc.__class__.__name__}
+                ],
+            )
+
+    @staticmethod
+    def _request_log_execute_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+        execute_events = [event for event in events if isinstance(event, dict) and str(event.get("path") or "") == "/execute"]
+        payload_events = [event for event in execute_events if str(event.get("audit_kind") or "") == "execute_payload"]
+        result_events = [event for event in execute_events if str(event.get("audit_kind") or "") == "execute_result"]
+        identity_events = payload_events or execute_events
+
+        def uniq(key: str) -> list[str]:
+            values: list[str] = []
+            seen: set[str] = set()
+            for event in identity_events:
+                value = str(event.get(key) or "").strip()
+                if value and value not in seen:
+                    seen.add(value)
+                    values.append(value)
+            return values[-10:]
+
+        last_context = dict(identity_events[-1]) if identity_events else {}
+        return {
+            "execute_event_seen": bool(execute_events),
+            "execute_event_count": len(execute_events),
+            "execute_payload_event_count": len(payload_events),
+            "execute_result_event_count": len(result_events),
+            "execute_run_ids": uniq("run_id"),
+            "execute_sequence_ids": uniq("sequence_id"),
+            "execute_specimen_ids": uniq("specimen_id"),
+            "execute_program_ids": uniq("program_id"),
+            "last_execute_context": {
+                key: value
+                for key, value in last_context.items()
+                if key in {"at", "status", "audit_kind", "sequence_id", "run_id", "specimen_id", "program_id", "payload_sha256", "result_ok", "result_status", "failure_code"}
+            },
+        }
+
+    def request_log(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Return recent Windows bridge request-audit entries without exposing tokens."""
+        payload = dict(payload or {})
+        if not self._should_use_live(payload, for_execution=False):
+            log_path = self.config.artifact_dir / "bridge_requests.jsonl"
+            events: list[dict[str, Any]] = []
+            if log_path.exists():
+                for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-100:]:
+                    if not line.strip():
+                        continue
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError:
+                        item = {"raw": line}
+                    if isinstance(item, dict):
+                        events.append(item)
+            recent_paths = [str(event.get("path") or "") for event in events if isinstance(event, dict) and str(event.get("path") or "").strip()]
+            execute_summary = self._request_log_execute_summary(events)
+            last_execute_at = ""
+            for event in reversed(events):
+                if isinstance(event, dict) and str(event.get("path") or "") == "/execute":
+                    last_execute_at = str(event.get("ts") or event.get("at") or "")
+                    break
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.request_log",
+                "mode": "simulator",
+                "bridge": "windows_pyautogui",
+                "status": "ready",
+                "request_log": str(log_path),
+                "event_count": len(events),
+                "recent_paths": recent_paths[-10:],
+                **execute_summary,
+                "last_execute_at": last_execute_at,
+                "events": events,
+            }
+        precheck = self._live_precheck(require_execute=False, payload=payload)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.request_log"
+            return precheck
+        return self._live_get("equipment.pyautogui.request_log", "/request-log", payload)
+
+    def screenshot(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Capture a Windows bridge screenshot for UTM UI calibration."""
+        payload = dict(payload or {})
+        if not self.config.allow_screenshot:
+            return self._failure(
+                tool="equipment.pyautogui.screenshot",
+                status="blocked",
+                failure_code="PYAUTOGUI_SCREENSHOT_BLOCKED",
+                message="Screenshot action is disabled by config.",
+                step_trace=[{"step": "PRECHECK", "status": "blocked", "detail": "allow_screenshot=false"}],
+            )
+        if not self._should_use_live(payload, for_execution=False):
+            return self._simulated_screenshot(payload)
+        precheck = self._live_precheck(require_execute=False, payload=payload)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.screenshot"
+            return precheck
+        public_payload = self._public_payload({**payload, "runtime_mode": "live"})
+        return self._live_post("equipment.pyautogui.screenshot", "/screenshot", public_payload, payload)
+
+    def list_locators(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """List saved Windows-side image locators for registered equipment protocols."""
+        payload = dict(payload or {})
+        if not self._should_use_live(payload, for_execution=False):
+            return {
+                "ok": True,
+                "tool": "equipment.pyautogui.list_locators",
+                "mode": "simulator",
+                "bridge": "windows_pyautogui",
+                "status": "ready",
+                "locator_root": str(self.config.artifact_dir / "simulated_locators"),
+                "locators": [],
+            }
+        precheck = self._live_precheck(require_execute=False, payload=payload)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.list_locators"
+            return precheck
+        return self._live_get("equipment.pyautogui.list_locators", "/locators", payload)
+
+    def capture_locator(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Capture a Windows screen region as an image locator for UTM protocol assertions."""
+        payload = dict(payload or {})
+        if not self.config.allow_screenshot:
+            return self._failure(
+                tool="equipment.pyautogui.capture_locator",
+                status="blocked",
+                failure_code="PYAUTOGUI_SCREENSHOT_BLOCKED",
+                message="Locator capture requires screenshots, but screenshots are disabled by config.",
+                step_trace=[{"step": "PRECHECK", "status": "blocked", "detail": "allow_screenshot=false"}],
+            )
+        region = payload.get("region")
+        if not isinstance(region, list) or len(region) != 4:
+            return self._failure(
+                tool="equipment.pyautogui.capture_locator",
+                status="blocked",
+                failure_code="PYAUTOGUI_LOCATOR_REGION_REQUIRED",
+                message="region=[x,y,width,height] is required for locator capture.",
+                step_trace=[{"step": "VALIDATE_REGION", "status": "blocked", "detail": "missing region"}],
+            )
+        if not self._should_use_live(payload, for_execution=True):
+            return self._simulated_capture_locator(payload)
+        precheck = self._live_precheck(require_execute=True, payload=payload)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.capture_locator"
+            return precheck
+        public_payload = self._public_payload({**payload, "runtime_mode": "live"})
+        return self._live_post(
+            "equipment.pyautogui.capture_locator", "/locators/capture", public_payload, payload
+        )
+
+    def utm_profile_status(self) -> dict[str, Any]:
+        """Return the active UTM protocol profile used by autonomous Equipment runs."""
+        stored = _sanitize_utm_profile(_read_json_object(self.config.utm_profile_memory_path))
+        program_id = str(stored.get("program_id") or "utm_compression_start_v1")
+        program = dict(self.config.registered_programs.get(program_id, {}))
+        profile = {"program_id": program_id}
+        source = "memory" if stored else "registered_program"
+        for key in UTM_PROFILE_PROGRAM_KEYS:
+            if key in stored:
+                profile[key] = stored[key]
+            elif key in program:
+                profile[key] = program[key]
+        if stored.get("updated_at"):
+            profile["updated_at"] = stored["updated_at"]
+        return {
+            "ok": True,
+            "tool": "equipment.pyautogui.utm_profile",
+            "mode": self.config.mode,
+            "bridge": "windows_pyautogui",
+            "status": "ready",
+            "source": source,
+            "profile_exists": self.config.utm_profile_memory_path.exists(),
+            "profile_memory_path": str(self.config.utm_profile_memory_path),
+            "profile": profile,
+            "program": program,
+        }
+
+    def save_utm_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist UTM locator/export settings so GUI, CUI, and autonomous loop stay aligned."""
+        profile = _sanitize_utm_profile(dict(payload or {}))
+        if not profile:
+            return self._failure(
+                tool="equipment.pyautogui.save_utm_profile",
+                status="blocked",
+                failure_code="PYAUTOGUI_UTM_PROFILE_INVALID",
+                message="A valid UTM profile payload is required.",
+                step_trace=[{"step": "SAVE_UTM_PROFILE", "status": "blocked", "detail": "invalid profile"}],
+            )
+        profile["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        self.config.utm_profile_memory_path.parent.mkdir(parents=True, exist_ok=True)
+        self.config.utm_profile_memory_path.write_text(json.dumps(profile, indent=2, ensure_ascii=True), encoding="utf-8")
+        try:
+            self.config.utm_profile_memory_path.chmod(0o600)
+        except OSError:
+            pass
+        self.config.registered_programs = _apply_utm_profile_to_programs(self.config.registered_programs, profile)
+        status = self.utm_profile_status()
+        status.update(
+            {
+                "tool": "equipment.pyautogui.save_utm_profile",
+                "status": "saved",
+                "message": "UTM protocol profile saved and will be merged into autonomous Equipment Agent runs.",
+            }
+        )
+        return status
+
+    def connection_status(self) -> dict[str, Any]:
+        """Return saved Windows bridge candidate settings without exposing the full token."""
+        memory = self.load_connection_memory()
+        token = self._token()
+        url = self._bridge_url()
+        selected_alias, selected = self._selected_candidate(memory)
+        candidates = []
+        stored_candidates = self._candidate_map(memory)
+        for alias, raw in sorted(stored_candidates.items()):
+            candidate = raw if isinstance(raw, dict) else {}
+            candidates.append(
+                {
+                    "candidate_alias": str(alias),
+                    "bridge_url": str(candidate.get("bridge_url", "")),
+                    "host": str(candidate.get("host", "")),
+                    "port": candidate.get("port", self.config.discovery_port),
+                    "selected": str(alias) == selected_alias,
+                    "token_configured": bool(candidate.get("internal_key") or candidate.get("token")),
+                    "paired": bool(candidate.get("internal_key") or candidate.get("token")),
+                    "allow_live_execute": bool(candidate.get("allow_live_execute", False)),
+                    "platform": str(candidate.get("platform") or "windows"),
+                    "scope": str(candidate.get("scope") or "network"),
+                    "managed_local": bool(candidate.get("managed_local", False)),
+                    "last_status": candidate.get("last_status"),
+                    "last_checked": candidate.get("last_checked"),
+                }
+            )
+        return {
+            "ok": True,
+            "tool": "equipment.pyautogui.connection_status",
+            "mode": self.config.mode,
+            "bridge": "windows_pyautogui",
+            "connection_memory_path": str(self.config.connection_memory_path),
+            "selected_candidate": selected_alias,
+            "bridge_url": url,
+            "host": selected.get("host", memory.get("host", "")),
+            "port": selected.get("port", memory.get("port", self.config.discovery_port)),
+            "token_configured": bool(token),
+            "paired": bool(token),
+            "selected": bool(url),
+            "last_checked": selected.get("last_checked", memory.get("last_checked")),
+            "last_status": selected.get("last_status", memory.get("last_status")),
+            "platform": str(selected.get("platform") or memory.get("platform") or ""),
+            "scope": str(selected.get("scope") or memory.get("scope") or ""),
+            "managed_local": bool(selected.get("managed_local", memory.get("managed_local", False))),
+            "candidates": candidates,
+        }
+
+    def pair_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Exchange a four-digit one-time code and persist only the returned internal key."""
+        pairing_code = str(payload.get("pairing_code") or "").strip()
+        if len(pairing_code) != 4 or not pairing_code.isdigit():
+            return self._failure(
+                tool="equipment.pyautogui.pair_connection",
+                status="invalid",
+                failure_code="PYAUTOGUI_PAIRING_CODE_INVALID",
+                message="pairing_code must contain exactly four digits.",
+            )
+        host = str(payload.get("host") or "").strip()
+        port = int(payload.get("port") or self.config.discovery_port)
+        bridge_url = str(payload.get("bridge_url") or payload.get("url") or "").strip().rstrip("/")
+        if not bridge_url and host:
+            bridge_url = f"http://{host}:{port}"
+        if not bridge_url:
+            return self._failure(
+                tool="equipment.pyautogui.pair_connection",
+                status="invalid",
+                failure_code="PYAUTOGUI_BRIDGE_URL_REQUIRED",
+                message="bridge_url or host is required.",
+            )
+        validated_url, url_error = self._validate_private_bridge_url(bridge_url)
+        if url_error:
+            return self._failure(
+                tool="equipment.pyautogui.pair_connection",
+                mode="live",
+                status="invalid",
+                failure_code=str(url_error[0]),
+                message=str(url_error[1]),
+                step_trace=[{"step": "VALIDATE_BRIDGE_URL", "status": "blocked", "detail": bridge_url}],
+            )
+        bridge_url = validated_url
+        try:
+            with httpx.Client(timeout=self.config.request_timeout_sec) as client:
+                for attempt in range(2):
+                    try:
+                        response = client.post(f"{bridge_url}/pairing/complete", json={"pairing_code": pairing_code})
+                        response.raise_for_status()
+                        result = response.json()
+                        break
+                    except httpx.TransportError:
+                        if attempt == 0:
+                            continue
+                        raise
+        except httpx.HTTPStatusError as exc:
+            return self._failure(
+                tool="equipment.pyautogui.pair_connection",
+                mode="live",
+                status="blocked",
+                failure_code="PYAUTOGUI_PAIRING_REJECTED",
+                message=f"Windows bridge pairing rejected: HTTP {exc.response.status_code}",
+            )
+        except Exception as exc:
+            return self._failure(
+                tool="equipment.pyautogui.pair_connection",
+                mode="live",
+                status="unreachable",
+                failure_code="PYAUTOGUI_BRIDGE_UNREACHABLE",
+                message=f"Windows bridge pairing failed: {exc.__class__.__name__}",
+            )
+        internal_key = str(result.get("internal_key") or "").strip() if isinstance(result, dict) else ""
+        if not internal_key:
+            return self._failure(
+                tool="equipment.pyautogui.pair_connection",
+                mode="live",
+                status="invalid_response",
+                failure_code="PYAUTOGUI_PAIRING_KEY_MISSING",
+                message="Windows bridge pairing response did not include an internal key.",
+            )
+        connection = dict(payload)
+        connection.pop("pairing_code", None)
+        connection.update({"bridge_url": bridge_url, "host": host, "port": port, "internal_key": internal_key})
+        saved = self.save_connection(connection)
+        if saved.get("ok"):
+            saved["paired"] = True
+        return saved
+
+    def save_connection(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist a selected Windows bridge candidate for quick connection."""
+        alias = self._clean_candidate_alias(
+            payload.get("candidate_alias")
+            or payload.get("alias")
+            or payload.get("name")
+            or payload.get("profile_name")
+            or payload.get("connection_name")
+        )
+        if not alias:
+            return self._failure(
+                tool="equipment.pyautogui.save_connection",
+                status="blocked",
+                failure_code="PYAUTOGUI_CANDIDATE_ALIAS_REQUIRED",
+                message="A candidate alias is required.",
+                step_trace=[{"step": "SAVE_CANDIDATE", "status": "blocked", "detail": "missing candidate alias"}],
+            )
+        host = str(payload.get("host") or "").strip()
+        raw_url = str(payload.get("bridge_url") or payload.get("url") or "").strip().rstrip("/")
+        port = int(payload.get("port") or self.config.discovery_port)
+        if not raw_url and host:
+            raw_url = f"http://{host}:{port}"
+        if not raw_url:
+            return self._failure(
+                tool="equipment.pyautogui.save_connection",
+                status="blocked",
+                failure_code="PYAUTOGUI_BRIDGE_URL_REQUIRED",
+                message="bridge_url or host is required.",
+                step_trace=[{"step": "SAVE_CONNECTION", "status": "blocked", "detail": "missing url"}],
+            )
+        internal_key = str(payload.get("internal_key") or payload.get("token") or "").strip()
+        existing = self.load_connection_memory()
+        candidates = self._candidate_map(existing)
+        previous = candidates.get(alias) if isinstance(candidates.get(alias), dict) else {}
+        if not internal_key and previous:
+            internal_key = str(previous.get("internal_key") or previous.get("token") or "").strip()
+        if not internal_key:
+            return self._failure(
+                tool="equipment.pyautogui.save_connection",
+                status="blocked",
+                failure_code="PYAUTOGUI_TOKEN_REQUIRED",
+                message="A valid token is required before saving a Windows PyAutoGUI bridge candidate.",
+                step_trace=[{"step": "SAVE_CANDIDATE", "status": "blocked", "detail": "missing token"}],
+            )
+        should_select = bool(payload.get("select", True))
+        candidate = {
+            "candidate_alias": alias,
+            "bridge_url": raw_url,
+            "host": host or raw_url.split("//", 1)[-1].split(":", 1)[0],
+            "port": port,
+            "internal_key": internal_key,
+            "token_header": str(payload.get("token_header") or self.config.token_header),
+            "allow_live_execute": bool(payload.get("allow_live_execute", True)),
+            "platform": str(payload.get("platform") or previous.get("platform") or "windows"),
+            "scope": str(payload.get("scope") or previous.get("scope") or "network"),
+            "managed_local": bool(payload.get("managed_local", previous.get("managed_local", False))),
+            "last_checked": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "last_status": str(payload.get("last_status") or ("selected" if should_select else "standby")),
+        }
+        candidates[alias] = candidate
+        selected_alias = alias if should_select else str(existing.get("selected_candidate") or "").strip()
+        memory = {"selected_candidate": selected_alias, "candidates": candidates}
+        selected_candidate = candidates.get(selected_alias)
+        if isinstance(selected_candidate, dict):
+            memory.update(selected_candidate)
+        self._write_connection_memory(memory)
+        return self.connection_status()
+
+    def select_candidate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Select a saved Windows bridge candidate for quick connection."""
+        alias = self._clean_candidate_alias(payload.get("candidate_alias") or payload.get("alias"))
+        memory = self.load_connection_memory()
+        candidates = self._candidate_map(memory)
+        if not alias or alias not in candidates:
+            return self._failure(
+                tool="equipment.pyautogui.select_candidate",
+                status="blocked",
+                failure_code="PYAUTOGUI_CANDIDATE_NOT_FOUND",
+                message=f"Saved Windows PyAutoGUI bridge candidate not found: {alias}",
+                step_trace=[{"step": "SELECT_CANDIDATE", "status": "blocked", "detail": alias}],
+            )
+        selected = dict(candidates[alias])
+        selected["last_checked"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        selected["last_status"] = "selected"
+        candidates[alias] = selected
+        memory = {"selected_candidate": alias, "candidates": candidates, **selected}
+        self._write_connection_memory(memory)
+        return self.connection_status()
+
+    def delete_candidate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Delete a saved Windows bridge candidate."""
+        alias = self._clean_candidate_alias(payload.get("candidate_alias") or payload.get("alias"))
+        memory = self.load_connection_memory()
+        candidates = self._candidate_map(memory)
+        if not alias or alias not in candidates:
+            return self._failure(
+                tool="equipment.pyautogui.delete_candidate",
+                status="blocked",
+                failure_code="PYAUTOGUI_CANDIDATE_NOT_FOUND",
+                message=f"Saved Windows PyAutoGUI bridge candidate not found: {alias}",
+                step_trace=[{"step": "DELETE_CANDIDATE", "status": "blocked", "detail": alias}],
+            )
+        candidates.pop(alias, None)
+        next_alias = sorted(candidates)[0] if candidates else ""
+        if next_alias:
+            selected = dict(candidates[next_alias])
+            memory = {"selected_candidate": next_alias, "candidates": candidates, **selected}
+        else:
+            memory = {"selected_candidate": "", "candidates": {}}
+        self._write_connection_memory(memory)
+        return self.connection_status()
+
+    def run(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Execute an allowlisted sequence or registered program."""
+        payload = dict(payload or {})
+        # A new attempted operation invalidates prior success even if validation
+        # below refuses it before the simulator executes.
+        self._simulator_observations.pop(self._simulator_scope(payload), None)
+        if not self.config.enabled:
+            return self._failure(
+                tool="equipment.pyautogui.run",
+                mode="disabled",
+                status="blocked",
+                failure_code="PYAUTOGUI_BRIDGE_DISABLED",
+                message="Windows PyAutoGUI bridge is disabled in config.",
+                step_trace=[{"step": "PRECHECK", "status": "blocked", "detail": "bridge disabled"}],
+            )
+
+        runtime_payload = self._runtime_program_payload(payload)
+        raw_csv_context_error = str(runtime_payload.get("_raw_csv_context_error") or "")
+        if raw_csv_context_error:
+            return self._failure(
+                tool="equipment.pyautogui.run",
+                mode=str(runtime_payload.get("runtime_mode") or "test"),
+                status="invalid",
+                failure_code="UTM_RAW_CSV_CONTEXT_INVALID",
+                message=raw_csv_context_error,
+                step_trace=[{"step": "VALIDATE_RAW_CSV_CONTEXT", "status": "blocked", "detail": raw_csv_context_error}],
+            )
+        clearance_context_error = str(runtime_payload.get("_robot_clearance_context_error") or "")
+        if clearance_context_error:
+            return self._failure(
+                tool="equipment.pyautogui.run",
+                mode=str(runtime_payload.get("runtime_mode") or "test"),
+                status="invalid",
+                failure_code="UTM_ROBOT_CLEARANCE_CONTEXT_INVALID",
+                message=clearance_context_error,
+                step_trace=[{"step": "VALIDATE_ROBOT_CLEARANCE_CONTEXT", "status": "blocked", "detail": clearance_context_error}],
+            )
+        if not self._should_use_live(payload, for_execution=True):
+            result = self._attach_control_profile(self._run_simulator(runtime_payload), runtime_payload)
+            self._simulator_observations[self._simulator_scope(payload)] = {
+                **{key: payload[key] for key in ("run_id", "loop_id", "specimen_id", "workflow_execution_id") if key in payload},
+                **{
+                key: result[key] for key in ("ok", "status", "program_id", "sequence_id", "failure_code", "result_file")
+                if key in result}}
+            return result
+
+        precheck = self._live_precheck(require_execute=True, payload=payload)
+        if precheck:
+            precheck["tool"] = "equipment.pyautogui.run"
+            return precheck
+        validation = self._validate_sequence_payload(runtime_payload)
+        if validation:
+            return validation
+        result = self._live_post(
+            "equipment.pyautogui.run", "/execute", self._public_payload(runtime_payload), payload
+        )
+        return self._attach_control_profile(result, runtime_payload)
+
+    def _should_use_live(self, payload: dict[str, Any], *, for_execution: bool) -> bool:
+        # Host-owned virtual selection vetoes saved promotion and conflicting live flags.
+        if payload.get("virtual_bridge_simulation") is True:
+            return False
+        if bool(payload.get("force_live_bridge")):
+            return True
+        runtime_mode = str(payload.get("runtime_mode", "")).strip().lower()
+        if runtime_mode != "live":
+            test_promotion = self.config.test_live_promotion
+            return bool(
+                for_execution
+                and runtime_mode == "test"
+                and test_promotion.get("enabled")
+                and test_promotion.get("transport") == "real"
+                and test_promotion.get("allow_real_network_in_test")
+            )
+        return True
+
+    def _live_precheck(self, *, require_execute: bool, payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        payload = payload or {}
+        setup_gui_execute = bool(payload.get("confirm_setup_gui_execute"))
+        memory = self.load_connection_memory()
+        requested_alias, selected = self._candidate_for_payload(memory, payload)
+        if self._requested_candidate_id(payload) and not requested_alias:
+            return self._failure(
+                tool="equipment.pyautogui",
+                mode="live",
+                status="blocked",
+                failure_code="PYAUTOGUI_CANDIDATE_NOT_FOUND",
+                message="The requested Windows Equipment worker is not registered.",
+            )
+        profile_allows_execute = bool(selected.get("allow_live_execute", False))
+        if require_execute and not self.config.allow_live_execute and not setup_gui_execute and not profile_allows_execute:
+            return self._failure(
+                tool="equipment.pyautogui.run",
+                mode="live",
+                status="blocked",
+                failure_code="PYAUTOGUI_LIVE_EXECUTION_BLOCKED",
+                message="Live Windows PyAutoGUI execution is disabled by config.",
+                step_trace=[{"step": "PRECHECK", "status": "blocked", "detail": "allow_live_execute=false"}],
+            )
+        if not self._bridge_url(payload):
+            return self._failure(
+                tool="equipment.pyautogui",
+                mode="live",
+                status="connection_info_required",
+                failure_code="PYAUTOGUI_BRIDGE_URL_REQUIRED",
+                requires_connection_info=True,
+                message=f"Set {self.config.bridge_url_env}=http://<windows-private-ip>:8765.",
+                step_trace=[{"step": "PRECHECK", "status": "blocked", "detail": "missing bridge URL"}],
+            )
+        if self.config.token_env and not self._token(payload):
+            return self._failure(
+                tool="equipment.pyautogui",
+                mode="live",
+                status="connection_info_required",
+                failure_code="PYAUTOGUI_TOKEN_REQUIRED",
+                requires_connection_info=True,
+                message=f"Set {self.config.token_env} before live Windows bridge calls.",
+                step_trace=[{"step": "PRECHECK", "status": "blocked", "detail": "missing bridge token"}],
+            )
+        return None
+
+    def _run_simulator(self, payload: dict[str, Any]) -> dict[str, Any]:
+        sequence_id = str(payload.get("sequence_id") or f"sim-{int(time.time())}")
+        program_id = str(payload.get("program_id") or "").strip()
+        callback = payload.get("_event_callback")
+        event_callback = callback if callable(callback) else None
+
+        trace: list[dict[str, Any]] = []
+
+        def step(name: str, status: str, detail: str = "") -> None:
+            item = {"step": name, "status": status}
+            if detail:
+                item["detail"] = detail
+            trace.append(item)
+            self._emit(event_callback, "equipment.pyautogui.run", name, status, detail=detail, sequence_id=sequence_id, program_id=program_id)
+
+        step("PRECHECK", "ok", "simulator")
+        if program_id:
+            programs = self.config.registered_programs
+            if program_id not in programs:
+                step("RESOLVE_PROGRAM", "blocked", program_id)
+                return self._failure(
+                    tool="equipment.pyautogui.run",
+                    mode="simulator",
+                    status="blocked",
+                    failure_code="PYAUTOGUI_PROGRAM_NOT_FOUND",
+                    message=f"Registered PyAutoGUI macro program not found: {program_id}",
+                    program_id=program_id,
+                    sequence_id=sequence_id,
+                    step_trace=trace,
+                )
+            step("RESOLVE_PROGRAM", "ok", program_id)
+            pyautogui_available = bool(payload.get("simulate_pyautogui_available", self.config.simulator.get("pyautogui_available", True)))
+            if programs[program_id].get("requires_pyautogui", False) and not pyautogui_available:
+                step("HEALTH", "blocked", "pyautogui import failed")
+                return self._failure(
+                    tool="equipment.pyautogui.run",
+                    mode="simulator",
+                    status="blocked",
+                    failure_code="PYAUTOGUI_NOT_INSTALLED",
+                    requires_install=True,
+                    message="PyAutoGUI is not installed on the Windows bridge host. Install with: py -m pip install pyautogui",
+                    program_id=program_id,
+                    sequence_id=sequence_id,
+                    step_trace=trace,
+                )
+            if program_id == "program1":
+                step("HEALTH", "ok")
+                step("EXECUTE_PROGRAM", "ok", "demo_mouse_wiggle")
+                step("DONE", "ok", "program1 completed")
+                return {
+                    "ok": True,
+                    "tool": "equipment.pyautogui.run",
+                    "mode": "simulator",
+                    "bridge": "windows_pyautogui",
+                    "status": "completed",
+                    "sequence_id": sequence_id,
+                    "program_id": program_id,
+                    "program_type": "connectivity_demo",
+                    "program_log": "program1 completed",
+                    "step_trace": trace,
+                    "failure_code": None,
+                }
+            program_type = str(programs[program_id].get("program_type") or "")
+            if program_type.startswith("utm_") or program_id.startswith("utm_"):
+                return self._run_simulated_utm_protocol(
+                    payload=payload,
+                    sequence_id=sequence_id,
+                    program_id=program_id,
+                    trace=trace,
+                    event_callback=event_callback,
+                )
+
+        sequence = self._sequence_from_payload(payload)
+        validation = self._validate_actions(sequence)
+        if validation:
+            validation["sequence_id"] = sequence_id
+            validation["step_trace"] = trace + validation.get("step_trace", [])
+            return validation
+        for action in sequence:
+            action_name = str(action.get("action", "")).strip()
+            if action_name == "health":
+                step("HEALTH", "ok")
+            elif action_name == "screenshot":
+                if not self.config.allow_screenshot:
+                    step("SCREENSHOT", "blocked", "screenshot disabled")
+                    return self._failure(
+                        tool="equipment.pyautogui.run",
+                        mode="simulator",
+                        status="blocked",
+                        failure_code="PYAUTOGUI_SCREENSHOT_BLOCKED",
+                        message="Screenshot action is disabled by config.",
+                        sequence_id=sequence_id,
+                        step_trace=trace,
+                    )
+                step("SCREENSHOT", "ok", str(self.config.artifact_dir / str(self.config.simulator.get("screenshot_name", "simulated_windows_screen.png"))))
+            elif action_name == "wait":
+                step("WAIT", "ok", f"{float(action.get('seconds', 0.1)):.2f}s")
+            elif action_name == "log":
+                step("LOG", "ok", str(action.get("message", "")))
+            else:
+                step("EXECUTE_STEP", "ok", action_name)
+        step("DONE", "ok")
+        return {
+            "ok": True,
+            "tool": "equipment.pyautogui.run",
+            "mode": "simulator",
+            "bridge": "windows_pyautogui",
+            "status": "completed",
+            "sequence_id": sequence_id,
+            "program_id": program_id,
+            "program_type": str(self.config.registered_programs.get(program_id, {}).get("program_type") or "macro") if program_id else "sequence",
+            "step_trace": trace,
+            "failure_code": None,
+        }
+
+    def _run_simulated_utm_protocol(
+        self,
+        *,
+        payload: dict[str, Any],
+        sequence_id: str,
+        program_id: str,
+        trace: list[dict[str, Any]],
+        event_callback: ToolEventCallback | None,
+    ) -> dict[str, Any]:
+        run_id = str(payload.get("run_id") or sequence_id or f"sim-{int(time.time())}")
+        experiment = payload.get("experiment_spec") if isinstance(payload.get("experiment_spec"), dict) else {}
+        specimen_id = str(
+            payload.get("specimen_id")
+            or experiment.get("specimen_id")
+            or experiment.get("candidate_id")
+            or "specimen-simulated"
+        )
+        context = payload.get("source_stage_context")
+        specimen = context.get("specimen") if isinstance(context, dict) else None
+        candidate = specimen.get("candidate") if isinstance(specimen, dict) else None
+        parameters = candidate.get("parameters") if isinstance(candidate, dict) else None
+        geometry = {**(parameters if isinstance(parameters, dict) else {}), **experiment}
+        size = geometry.get("specimen_size_mm", geometry.get("size_mm", [20, 20, 20]))
+        raw_height = geometry.get("gauge_length_mm", geometry.get("height_mm",
+            size[2] if isinstance(size, (list, tuple)) and len(size) >= 3 else None))
+        raw_strain = experiment.get("target_strain", 0.5)
+        try:
+            # Match Analysis' published gauge-length normalization exactly.
+            height, target_strain = round(float(raw_height), 6), float(raw_strain)
+            valid_extent = (
+                not isinstance(raw_height, bool) and not isinstance(raw_strain, bool)
+                and math.isfinite(height) and height > 0
+                and math.isfinite(target_strain) and 0 < target_strain <= 1
+                and math.isfinite(height * target_strain)
+            )
+        except (TypeError, ValueError, OverflowError):
+            valid_extent = False
+        if not valid_extent:
+            return {
+                **self._failure(
+                    tool="equipment.pyautogui.run", status="blocked",
+                    failure_code="SIMULATED_UTM_CURVE_CONFIG_INVALID",
+                    message="Simulated UTM requires positive finite specimen height and target_strain in (0, 1].",
+                    program_id=program_id, sequence_id=sequence_id,
+                    step_trace=trace + [{"step": "VALIDATE_SIMULATED_CURVE", "status": "blocked"}],
+                ),
+                "simulated": True, "synthetic": True, "actuation_performed": False,
+            }
+        safe_specimen = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in specimen_id)[:96]
+        artifact_dir = self.config.artifact_dir / run_id / "utm"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        artifact_id = f"utm_csv_{safe_specimen}_{timestamp}"
+        local_path = artifact_dir / f"{artifact_id}.csv"
+        columns = ["time_s", "displacement_mm", "force_N"]
+        rows: list[str] = [",".join(columns)]
+        for idx in range(80):
+            t = idx * 0.25
+            displacement = height * target_strain * (idx / 79)
+            # Retain the synthetic sample shape; scaling extent is not a physical prediction.
+            sample_coordinate = idx * 0.05
+            force = max(0.0, 18.0 * sample_coordinate - 1.1 * sample_coordinate * sample_coordinate + (idx % 5) * 0.45)
+            rows.append(f"{t:.3f},{displacement:.17g},{force:.4f}")
+        local_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+        data = local_path.read_bytes()
+        parse_probe = self._probe_utm_csv_bytes(data)
+        parse_ok = parse_probe.get("ok") is True
+        digest = hashlib.sha256(data).hexdigest()
+        size_bytes = len(data)
+        row_count = int(parse_probe.get("row_count_probe") or 0)
+        windows_path = f"C:/ATR/utm_exports/{run_id}/{local_path.name}"
+
+        def step(name: str, status: str, detail: str = "") -> None:
+            item = {"step": name, "status": status}
+            if detail:
+                item["detail"] = detail
+            trace.append(item)
+            self._emit(event_callback, "equipment.pyautogui.run", name, status, detail=detail, sequence_id=sequence_id, program_id=program_id)
+
+        step("HEALTH", "ok")
+        step("FOCUS_WINDOW", "ok", "UTM software")
+        step("SCREEN_ASSERT_BEFORE", "ok", "ready_state")
+        step("EXECUTE_START_MACRO", "ok", "start_button")
+        step("SCREEN_ASSERT_RUNNING", "ok", "running_state")
+        step("PHYSICAL_ASSERT", "ok", "simulated crosshead motion and force curve")
+        step("SCREEN_ASSERT_COMPLETE", "ok", "complete_state")
+        step("SAVE_EXPORT", "ok", windows_path)
+        step("PULL_ARTIFACT", "ok", str(local_path))
+        step("PARSE_PROBE", "ok" if parse_ok else "blocked", f"rows={row_count}; columns={','.join(columns)}")
+
+        artifact = {
+            "kind": "utm_csv",
+            "synthetic": True,
+            "artifact_id": artifact_id,
+            "windows_path": windows_path,
+            "local_path": str(local_path),
+            "path": str(local_path),
+            "filename": local_path.name,
+            "size_bytes": size_bytes,
+            "sha256": digest,
+            "stable_for_sec": 2.0,
+            "row_count_probe": row_count,
+            "columns_probe": columns,
+        }
+        screen_checks = [
+            {"checkpoint": "before_start", "ok": True, "state": "ready", "screenshot_artifact": "simulated_before_start"},
+            {"checkpoint": "after_start", "ok": True, "state": "running", "screenshot_artifact": "simulated_after_start"},
+            {"checkpoint": "after_complete", "ok": True, "state": "complete", "screenshot_artifact": "simulated_after_complete"},
+        ]
+        physical_checks = {
+            "vision_motion_confirmed": True,
+            "specimen_alignment_ok": True,
+            "fixture_safe_to_access": True,
+            "evidence_frame_ids": ["sim-frame-pre", "sim-frame-motion", "sim-frame-complete"],
+            "simulated": True,
+        }
+        data_acquisition = {
+            "status": "pulled_to_linux",
+            "save_method": "simulated_auto_export",
+            "save_attempted_by_agent": True,
+            "save_confirmation_screen_ok": True,
+            "windows_path": windows_path,
+            "linux_path": str(local_path),
+            "sha256": digest,
+            "size_bytes": size_bytes,
+            "row_count_probe": row_count,
+            "columns_probe": columns,
+        }
+        scope: dict[str, Any] = {"run_id": run_id, "specimen_id": specimen_id}
+        if "loop_id" in payload:
+            scope["loop_id"] = payload["loop_id"]
+        readiness: dict[str, Any] | None = None
+        program = self.config.registered_programs.get(program_id, {})
+        if program.get("program_type") == "utm_protocol":
+            # These are simulator state transitions, never physical clearance proof.
+            complete = parse_ok and any(
+                check.get("checkpoint") == "after_complete" and check.get("ok") is True
+                for check in screen_checks
+            )
+            next_test_completed = complete
+            clearance_restored = next_test_completed and physical_checks.get("fixture_safe_to_access") is True
+            step("SIMULATED_NEXT_TEST_RESET", "ok" if next_test_completed else "blocked",
+                 "simulated next-test/reset transition; no actuation performed")
+            step("SIMULATED_RESTORE_CLEARANCE", "ok" if clearance_restored else "blocked",
+                 "simulated fixture clearance restored; not physical clearance evidence")
+            readiness = {
+                **scope,
+                "ready": next_test_completed and clearance_restored,
+                "next_test_completed": next_test_completed,
+                "save_current_test": False,
+                "clearance_restored": clearance_restored,
+                "simulated": True,
+                "actuation_performed": False,
+                "terminal_checks": {
+                    "complete_state": complete,
+                    "next_test_reset": next_test_completed,
+                    "fixture_clearance": clearance_restored,
+                },
+                "failure_code": "" if clearance_restored else str(parse_probe.get("failure_code") or "SIMULATED_UTM_TERMINAL_CHECK_FAILED"),
+            }
+        step("DONE", "ok" if parse_ok else "blocked",
+             "UTM protocol verified complete in simulator" if parse_ok else "Simulated UTM CSV validation failed")
+        response = {
+            **scope,
+            "ok": parse_ok,
+            "tool": "equipment.pyautogui.run",
+            "mode": "simulator",
+            "simulated": True,
+            "synthetic": True,
+            "actuation_performed": False,
+            "bridge": "windows_pyautogui",
+            "status": "verified_complete" if parse_ok else "blocked",
+            "sequence_id": sequence_id,
+            "program_id": program_id,
+            "program_type": "utm_protocol",
+            "program_log": "UTM protocol verified complete in simulator." if parse_ok else "Simulated UTM CSV validation failed.",
+            "result_file": str(local_path),
+            "utm_csv_path": str(local_path),
+            "output_artifacts": [artifact],
+            "data_integrity": artifact,
+            "screen_checks": screen_checks,
+            "physical_checks": physical_checks,
+            "data_acquisition": data_acquisition,
+            "cross_checks": {
+                "screen_started": True,
+                "physical_motion_started": True,
+                "save_completed": True,
+                "data_file_created": True,
+                "data_parse_probe_ok": parse_ok,
+            },
+            "step_trace": trace,
+            "failure_code": parse_probe.get("failure_code"),
+        }
+        if readiness is not None:
+            response["next_specimen_readiness"] = readiness
+        return response
+
+    @staticmethod
+    def _simulator_scope(payload: dict[str, Any]) -> tuple:
+        return tuple(payload.get(key) for key in ("run_id", "loop_id", "specimen_id", "workflow_execution_id"))
+
+    def _simulated_screenshot(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from PIL import Image, ImageDraw, ImageFont
+        from uuid import uuid4
+        checkpoint = str(payload.get("checkpoint") or "manual")
+        run_id = str(payload.get("run_id") or "simulated-calibration")
+        artifact_id = f"sim_screen_{checkpoint}_{uuid4().hex}"
+        path = self.config.artifact_dir / run_id / "screenshots" / f"{artifact_id}.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        observed = dict(self._simulator_observations.get(self._simulator_scope(payload), {}))
+        scoped = any(payload.get(key) is not None for key in ("loop_id", "specimen_id", "workflow_execution_id"))
+        raster = Image.new("RGB", (960, 540), (235, 239, 244))
+        draw = ImageDraw.Draw(raster)
+        font = ImageFont.load_default(size=18)
+        draw.rectangle((0, 0, 960, 66), fill=(32, 51, 76))
+        draw.text((24, 20), "SIMULATED EQUIPMENT / no physical I/O", fill="white", font=font)
+        lines = [f"Observed run/loop: {observed.get('run_id', 'unknown')} / {observed.get('loop_id', 'unknown')}",
+                 f"Observed specimen: {observed.get('specimen_id') or 'unknown'}; checkpoint: {checkpoint}",
+                 f"Observed workflow: {observed.get('workflow_execution_id') or 'unknown'}",
+                 f"Program: {observed.get('program_id') or 'no operation recorded'}",
+                 f"Observed simulator status: {observed.get('status') or 'unknown'}",
+                 f"Failure: {observed.get('failure_code') or 'none recorded'}",
+                 f"Local result: {observed.get('result_file') or 'none recorded'}"]
+        for index, line in enumerate(lines):
+            draw.text((24, 92 + index * 52), line[:100], fill=(30, 40, 52), font=font)
+        raster.save(path, format="PNG")
+        data = path.read_bytes()
+        artifact = {
+            "kind": "screen_png",
+            "artifact_id": artifact_id,
+            "filename": path.name,
+            "local_path": str(path),
+            "path": str(path),
+            "windows_path": f"simulator://{path.name}",
+            "size_bytes": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "content_type": "image/png",
+        }
+        return {
+            "ok": bool(observed) or not scoped,
+            "tool": "equipment.pyautogui.screenshot",
+            "mode": "simulator",
+            "simulated": True,
+            "synthetic": True,
+            "simulator_state": observed,
+            **{key: observed[key] for key in ("run_id", "loop_id", "specimen_id", "workflow_execution_id") if key in observed},
+            "bridge": "windows_pyautogui",
+            "status": "captured" if observed or not scoped else "unknown",
+            "artifact": artifact,
+            "output_artifacts": [artifact],
+            "step_trace": [{"step": "SCREENSHOT", "status": "ok", "detail": str(path)}],
+            "failure_code": None,
+        }
+
+    def _simulated_capture_locator(self, payload: dict[str, Any]) -> dict[str, Any]:
+        name = self._clean_candidate_alias(payload.get("name") or payload.get("target") or "locator") or "locator"
+        program_id = self._clean_candidate_alias(payload.get("program_id") or "utm_compression_start_v1") or "utm_compression_start_v1"
+        region = [int(float(item)) for item in payload.get("region", [0, 0, 1, 1])]
+        artifact_id = f"sim_locator_{program_id}_{name}_{int(time.time())}"
+        path = self.config.artifact_dir / "simulated_locators" / program_id / f"{name}.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="))
+        data = path.read_bytes()
+        locator = {
+            "image_path": str(path),
+            "confidence": float(payload.get("confidence", 0.9)),
+            "region": region,
+            "target": name,
+        }
+        artifact = {
+            "kind": "locator_png",
+            "artifact_id": artifact_id,
+            "filename": path.name,
+            "local_path": str(path),
+            "path": str(path),
+            "windows_path": f"simulator://{program_id}/{path.name}",
+            "size_bytes": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "content_type": "image/png",
+        }
+        return {
+            "ok": True,
+            "tool": "equipment.pyautogui.capture_locator",
+            "mode": "simulator",
+            "bridge": "windows_pyautogui",
+            "status": "captured",
+            "program_id": program_id,
+            "locator_name": name,
+            "locator": locator,
+            "artifact": artifact,
+            "output_artifacts": [artifact],
+            "step_trace": [{"step": "CAPTURE_LOCATOR", "status": "ok", "detail": str(path)}],
+            "failure_code": None,
+        }
+
+    def _validate_sequence_payload(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        return self._validate_actions(self._sequence_from_payload(payload))
+
+    def _validate_actions(self, sequence: list[dict[str, Any]]) -> dict[str, Any] | None:
+        max_steps = int(self.config.limits.get("max_steps", 50))
+        if len(sequence) > max_steps:
+            return self._failure(
+                tool="equipment.pyautogui.run",
+                status="blocked",
+                failure_code="PYAUTOGUI_TOO_MANY_STEPS",
+                message=f"PyAutoGUI sequence has {len(sequence)} steps; max is {max_steps}.",
+                step_trace=[{"step": "VALIDATE_SEQUENCE", "status": "blocked", "detail": "too many steps"}],
+            )
+        for action in sequence:
+            action_name = str(action.get("action", "")).strip()
+            if action_name not in self.config.allowed_actions:
+                return self._failure(
+                    tool="equipment.pyautogui.run",
+                    status="blocked",
+                    failure_code="PYAUTOGUI_ACTION_NOT_ALLOWED",
+                    message=f"PyAutoGUI action is not allowed: {action_name}",
+                    step_trace=[{"step": "VALIDATE_SEQUENCE", "status": "blocked", "detail": action_name}],
+                )
+            if action_name == "wait":
+                seconds = float(action.get("seconds", action.get("duration_sec", 0)))
+                max_wait = float(self.config.limits.get("max_wait_sec", 30))
+                if seconds < 0 or seconds > max_wait:
+                    return self._failure(
+                        tool="equipment.pyautogui.run",
+                        status="blocked",
+                        failure_code="PYAUTOGUI_WAIT_OUT_OF_BOUNDS",
+                        message=f"Wait duration {seconds} exceeds allowed range 0..{max_wait}.",
+                        step_trace=[{"step": "VALIDATE_SEQUENCE", "status": "blocked", "detail": "wait"}],
+                    )
+            if action_name == "write":
+                max_chars = int(self.config.limits.get("max_write_chars", 512))
+                if len(str(action.get("text", ""))) > max_chars:
+                    return self._failure(
+                        tool="equipment.pyautogui.run",
+                        status="blocked",
+                        failure_code="PYAUTOGUI_WRITE_TOO_LONG",
+                        message=f"Write text exceeds max length {max_chars}.",
+                        step_trace=[{"step": "VALIDATE_SEQUENCE", "status": "blocked", "detail": "write"}],
+                    )
+        return None
+
+    def _sequence_from_payload(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        sequence = payload.get("sequence")
+        if isinstance(sequence, list) and sequence:
+            return [dict(item) for item in sequence if isinstance(item, dict)]
+        program_id = str(payload.get("program_id") or "").strip()
+        if program_id and program_id in self.config.registered_programs:
+            raw = self.config.registered_programs[program_id].get("sequence", [])
+            if isinstance(raw, list):
+                return [dict(item) for item in raw if isinstance(item, dict)]
+        return [dict(item) for item in self.config.default_sequence]
+
+    def _live_get(
+        self, tool: str, path: str, connection_payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        started = time.perf_counter()
+        try:
+            with httpx.Client(timeout=self.config.request_timeout_sec) as client:
+                response = client.get(
+                    self._url(path, connection_payload), headers=self._headers(connection_payload)
+                )
+                response.raise_for_status()
+                data = response.json()
+        except httpx.HTTPStatusError as exc:
+            failure_code = "PYAUTOGUI_AUTH_FAILED" if exc.response.status_code in {401, 403} else "PYAUTOGUI_BRIDGE_HTTP_ERROR"
+            return self._failure(
+                tool=tool,
+                mode="live",
+                status="blocked",
+                failure_code=failure_code,
+                message=f"Windows PyAutoGUI bridge returned HTTP {exc.response.status_code}.",
+                step_trace=[{"step": "CONNECT", "status": "blocked", "detail": str(exc.response.status_code)}],
+            )
+        except Exception as exc:
+            return self._failure(
+                tool=tool,
+                mode="live",
+                status="unreachable",
+                failure_code="PYAUTOGUI_BRIDGE_UNREACHABLE",
+                message=f"Windows PyAutoGUI bridge unreachable: {exc.__class__.__name__}",
+                step_trace=[{"step": "CONNECT", "status": "failed", "detail": exc.__class__.__name__}],
+            )
+        return self._normalize_live_response(
+            tool,
+            data,
+            latency_ms=(time.perf_counter() - started) * 1000.0,
+            connection_payload=connection_payload,
+        )
+
+    def _live_post(
+        self,
+        tool: str,
+        path: str,
+        payload: dict[str, Any],
+        connection_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        started = time.perf_counter()
+        try:
+            with httpx.Client(timeout=self._live_post_timeout(path, payload)) as client:
+                response = client.post(
+                    self._url(path, connection_payload),
+                    headers=self._headers(connection_payload),
+                    json=payload,
+                )
+                response.raise_for_status()
+                data = response.json()
+        except httpx.HTTPStatusError as exc:
+            failure_code = "PYAUTOGUI_AUTH_FAILED" if exc.response.status_code in {401, 403} else "PYAUTOGUI_BRIDGE_HTTP_ERROR"
+            return self._failure(
+                tool=tool,
+                mode="live",
+                status="blocked",
+                failure_code=failure_code,
+                message=f"Windows PyAutoGUI bridge returned HTTP {exc.response.status_code}.",
+                step_trace=[{"step": "CONNECT", "status": "blocked", "detail": str(exc.response.status_code)}],
+            )
+        except httpx.ReadTimeout as exc:
+            if path == "/execute":
+                result = self._failure(
+                    tool=tool,
+                    mode="live",
+                    status="effect_unknown",
+                    failure_code="PYAUTOGUI_EFFECT_UNKNOWN",
+                    message="Windows worker did not confirm the result after execution was dispatched; do not retry automatically.",
+                    step_trace=[{"step": "EXECUTE_RESPONSE", "status": "effect_unknown", "detail": exc.__class__.__name__}],
+                )
+                result.update(
+                    {
+                        "attempted": True,
+                        "retryable": False,
+                        "operator_intervention_required": True,
+                    }
+                )
+                return result
+            return self._failure(
+                tool=tool,
+                mode="live",
+                status="unreachable",
+                failure_code="PYAUTOGUI_BRIDGE_UNREACHABLE",
+                message=f"Windows PyAutoGUI bridge response timed out: {exc.__class__.__name__}",
+                step_trace=[{"step": "CONNECT", "status": "failed", "detail": exc.__class__.__name__}],
+            )
+        except Exception as exc:
+            return self._failure(
+                tool=tool,
+                mode="live",
+                status="unreachable",
+                failure_code="PYAUTOGUI_BRIDGE_UNREACHABLE",
+                message=f"Windows PyAutoGUI bridge unreachable: {exc.__class__.__name__}",
+                step_trace=[{"step": "CONNECT", "status": "failed", "detail": exc.__class__.__name__}],
+            )
+        normalized = self._normalize_live_response(
+            tool,
+            data,
+            latency_ms=(time.perf_counter() - started) * 1000.0,
+            connection_payload=connection_payload,
+        )
+        if normalized.get("output_artifacts"):
+            normalized = self._pull_live_artifacts(normalized)
+        return normalized
+
+    def _live_post_timeout(self, path: str, payload: dict[str, Any]) -> float | httpx.Timeout:
+        base_timeout = max(float(self.config.request_timeout_sec), 0.1)
+        if path != "/execute":
+            return base_timeout
+        sequence = payload.get("sequence") if isinstance(payload.get("sequence"), list) else []
+        declared_wait = 0.0
+        for action in sequence:
+            if not isinstance(action, dict):
+                continue
+            timeout_s = action.get("timeout_s")
+            if isinstance(timeout_s, (int, float)) and not isinstance(timeout_s, bool):
+                declared_wait += max(float(timeout_s), 0.0)
+            if str(action.get("action") or "") == "wait":
+                seconds = action.get("seconds", action.get("duration_sec"))
+                if isinstance(seconds, (int, float)) and not isinstance(seconds, bool):
+                    declared_wait += max(float(seconds), 0.0)
+        declared_execution_timeout = payload.get("declared_execution_timeout_s")
+        if isinstance(declared_execution_timeout, (int, float)) and not isinstance(
+            declared_execution_timeout, bool
+        ):
+            declared_wait = max(declared_wait, max(float(declared_execution_timeout), 0.0))
+        if declared_wait <= base_timeout:
+            return base_timeout
+        read_timeout = min(declared_wait + 30.0, 4 * 60 * 60.0)
+        return httpx.Timeout(
+            connect=min(base_timeout, 10.0),
+            read=read_timeout,
+            write=base_timeout,
+            pool=base_timeout,
+        )
+
+    @staticmethod
+    def _probe_utm_csv_bytes(data: bytes) -> dict[str, Any]:
+        return probe_utm_csv_bytes(data)
+
+
+    def _pull_live_artifacts(self, response: dict[str, Any]) -> dict[str, Any]:
+        artifacts = response.get("output_artifacts") if isinstance(response.get("output_artifacts"), list) else []
+        if not artifacts:
+            return response
+        run_id = str(response.get("run_id") or response.get("sequence_id") or "live")
+        pulled: list[dict[str, Any]] = []
+        ledger: dict[str, Any] = {
+            "status": "pending",
+            "attempted_count": 0,
+            "pulled_count": 0,
+            "failed_count": 0,
+            "metadata_only_count": 0,
+            "pulled_artifacts": [],
+            "failed_artifacts": [],
+            "local_paths": [],
+            "data_artifact_pulled": False,
+            "screen_artifact_count": 0,
+            "screen_artifact_paths": [],
+        }
+
+        def record_failure(artifact: dict[str, Any], reason: str, detail: str = "") -> None:
+            ledger["failed_count"] = int(ledger["failed_count"]) + 1
+            ledger["failed_artifacts"].append(
+                {
+                    "artifact_id": str(artifact.get("artifact_id") or ""),
+                    "kind": str(artifact.get("kind") or ""),
+                    "reason": reason,
+                    "detail": detail,
+                }
+            )
+
+        for artifact in artifacts:
+            if not isinstance(artifact, dict):
+                continue
+            artifact_id = str(artifact.get("artifact_id") or "").strip()
+            if not artifact_id:
+                record_failure(artifact, "ARTIFACT_ID_MISSING")
+                pulled.append(artifact)
+                continue
+            ledger["attempted_count"] = int(ledger["attempted_count"]) + 1
+            try:
+                with httpx.Client(timeout=self.config.request_timeout_sec) as client:
+                    reply = client.get(self._url(f"/artifacts/{artifact_id}"), headers=self._headers())
+                    reply.raise_for_status()
+                    payload = reply.json()
+            except Exception as exc:
+                record_failure(artifact, "ARTIFACT_PULL_FAILED", exc.__class__.__name__)
+                pulled.append(artifact)
+                continue
+            if not isinstance(payload, dict):
+                record_failure(artifact, "ARTIFACT_PAYLOAD_INVALID", type(payload).__name__)
+                pulled.append(artifact)
+                continue
+            filename = str(payload.get("filename") or artifact.get("filename") or f"{artifact_id}.dat")
+            content_bytes: bytes | None = None
+            if isinstance(payload.get("content_base64"), str) and payload.get("content_base64"):
+                try:
+                    content_bytes = base64.b64decode(str(payload["content_base64"]))
+                except Exception as exc:
+                    record_failure(artifact, "ARTIFACT_BASE64_DECODE_FAILED", exc.__class__.__name__)
+                    content_bytes = None
+            elif isinstance(payload.get("content_text"), str):
+                content_bytes = str(payload["content_text"]).encode("utf-8")
+            if content_bytes is None:
+                ledger["metadata_only_count"] = int(ledger["metadata_only_count"]) + 1
+                record_failure(artifact, "ARTIFACT_CONTENT_MISSING")
+                pulled.append({**artifact, **{key: value for key, value in payload.items() if key != "content_base64"}})
+                continue
+            safe_name = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in filename)[:160] or f"{artifact_id}.dat"
+            kind = str(artifact.get("kind") or payload.get("kind") or "")
+            if kind == "utm_csv":
+                local_dir = self.config.artifact_dir / run_id / "utm"
+            elif kind in {"screen_png", "screenshot"}:
+                local_dir = self.config.artifact_dir / run_id / "screenshots"
+            elif kind == "locator_png":
+                local_dir = self.config.artifact_dir / run_id / "locators"
+            else:
+                local_dir = self.config.artifact_dir / run_id / "artifacts"
+            local_dir.mkdir(parents=True, exist_ok=True)
+            local_path = local_dir / safe_name
+            local_path.write_bytes(content_bytes)
+            digest = hashlib.sha256(content_bytes).hexdigest()
+            merged = {**artifact, **{key: value for key, value in payload.items() if key != "content_base64"}}
+            local_parse_probe: dict[str, Any] = {}
+            if kind == "utm_csv":
+                local_parse_probe = self._probe_utm_csv_bytes(content_bytes)
+                merged.update(
+                    {
+                        "local_parse_probe": local_parse_probe,
+                        "local_parse_ok": bool(local_parse_probe.get("ok")),
+                        "row_count_probe": local_parse_probe.get("row_count_probe", merged.get("row_count_probe", 0)),
+                        "columns_probe": local_parse_probe.get("columns_probe", merged.get("columns_probe", [])),
+                        "missing_columns": local_parse_probe.get("missing_columns", []),
+                        "data_quality": local_parse_probe.get("data_quality", {}),
+                        "parse_failure_code": local_parse_probe.get("failure_code"),
+                        "parse_failure_message": local_parse_probe.get("message", ""),
+                    }
+                )
+            merged.update({"local_path": str(local_path), "path": str(local_path), "sha256": digest, "size_bytes": len(content_bytes), "pulled_to_linux": True})
+            pulled.append(merged)
+            ledger["pulled_count"] = int(ledger["pulled_count"]) + 1
+            pulled_record = {
+                "artifact_id": artifact_id,
+                "kind": kind,
+                "local_path": str(local_path),
+                "sha256": digest,
+                "size_bytes": len(content_bytes),
+            }
+            if kind == "utm_csv":
+                pulled_record.update(
+                    {
+                        "parse_ok": bool(local_parse_probe.get("ok")),
+                        "row_count_probe": local_parse_probe.get("row_count_probe", 0),
+                        "columns_probe": local_parse_probe.get("columns_probe", []),
+                        "missing_columns": local_parse_probe.get("missing_columns", []),
+                        "data_quality": local_parse_probe.get("data_quality", {}),
+                        "parse_failure_code": local_parse_probe.get("failure_code"),
+                    }
+                )
+                ledger["data_artifact_probe"] = local_parse_probe
+                ledger["data_artifact_parse_ok"] = bool(local_parse_probe.get("ok"))
+            ledger["pulled_artifacts"].append(pulled_record)
+            ledger["local_paths"].append(str(local_path))
+            if kind in {"screen_png", "screenshot"}:
+                ledger["screen_artifact_count"] = int(ledger["screen_artifact_count"]) + 1
+                ledger["screen_artifact_paths"].append(str(local_path))
+            if str(merged.get("kind") or "") == "utm_csv":
+                parse_ok = bool(local_parse_probe.get("ok"))
+                ledger["data_artifact_pulled"] = True
+                if parse_ok:
+                    response["result_file"] = str(local_path)
+                    response["utm_csv_path"] = str(local_path)
+                response["data_integrity"] = merged
+                data_acquisition = response.get("data_acquisition") if isinstance(response.get("data_acquisition"), dict) else {}
+                data_acquisition = dict(data_acquisition)
+                data_acquisition.update(
+                    {
+                        "status": "pulled_to_linux" if parse_ok else "pulled_to_linux_parse_failed",
+                        "linux_path": str(local_path),
+                        "local_path": str(local_path),
+                        "sha256": digest,
+                        "size_bytes": len(content_bytes),
+                        "artifact_pull_status": "pulled_parse_ok" if parse_ok else "pulled_parse_failed",
+                        "local_parse_probe": local_parse_probe,
+                        "local_parse_ok": parse_ok,
+                    }
+                )
+                if merged.get("windows_path") and not data_acquisition.get("windows_path"):
+                    data_acquisition["windows_path"] = str(merged["windows_path"])
+                for key in ("row_count_probe", "columns_probe", "missing_columns", "data_quality", "parse_failure_code", "parse_failure_message", "stable_for_sec", "filename", "artifact_id"):
+                    if key in merged:
+                        data_acquisition[key] = merged[key]
+                response["data_acquisition"] = data_acquisition
+        ledger["status"] = "complete" if int(ledger["failed_count"]) == 0 else "partial" if int(ledger["pulled_count"]) > 0 else "failed"
+        response["output_artifacts"] = pulled
+        existing_records = response.get("artifact_records") if isinstance(response.get("artifact_records"), list) else []
+        deduped_records: list[dict[str, Any]] = []
+        seen_records: set[str] = set()
+        for record in [*existing_records, *pulled]:
+            if not isinstance(record, dict):
+                continue
+            key = str(
+                record.get("artifact_id")
+                or record.get("local_path")
+                or record.get("linux_path")
+                or record.get("path")
+                or record.get("filename")
+                or len(deduped_records)
+            )
+            if key in seen_records:
+                continue
+            seen_records.add(key)
+            deduped_records.append(record)
+        response["artifact_records"] = deduped_records
+        response["artifact_pull"] = ledger
+        return response
+
+    def _normalize_live_response(
+        self,
+        tool: str,
+        data: Any,
+        *,
+        latency_ms: float | None = None,
+        connection_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        response = dict(data) if isinstance(data, dict) else {"raw_response": data}
+        response.setdefault("ok", bool(response.get("status") in {"ready", "captured", "completed", "verified_complete", "data_ready", "exported_on_windows"}))
+        response.setdefault("tool", tool)
+        response.setdefault("mode", "live")
+        response.setdefault("bridge", "windows_pyautogui")
+        response.setdefault("step_trace", [])
+        response.setdefault("failure_code", None if response.get("ok") else "PYAUTOGUI_BRIDGE_ERROR")
+        bridge_url = self._bridge_url(connection_payload)
+        response.setdefault("bridge_url", bridge_url)
+        response.setdefault("bridge_host", self._bridge_host(bridge_url))
+        if latency_ms is not None:
+            response.setdefault("client_latency_ms", round(float(latency_ms), 2))
+        return response
+
+    @staticmethod
+    def _bridge_host(bridge_url: str) -> str:
+        try:
+            parsed = urlparse(str(bridge_url or ""))
+            return parsed.hostname or ""
+        except Exception:
+            return ""
+
+    def _bridge_url(self, payload: dict[str, Any] | None = None) -> str:
+        memory = self.load_connection_memory()
+        requested = self._requested_candidate_id(payload)
+        _, selected = self._candidate_for_payload(memory, payload)
+        if requested:
+            return str(selected.get("bridge_url") or "").strip().rstrip("/")
+        env_url = os.getenv(self.config.bridge_url_env, "").strip().rstrip("/")
+        if env_url:
+            return env_url
+        return str(selected.get("bridge_url") or memory.get("bridge_url", "")).strip().rstrip("/")
+
+    def _url(self, path: str, payload: dict[str, Any] | None = None) -> str:
+        return urljoin(self._bridge_url(payload) + "/", path.lstrip("/"))
+
+    def proxy_ui_request(
+        self,
+        *,
+        method: str,
+        resource_path: str,
+        query_string: str = "",
+        body: bytes = b"",
+        content_type: str = "",
+    ) -> dict[str, Any]:
+        """Proxy the selected Windows bridge UI without exposing its token to the browser."""
+        normalized_method = str(method or "GET").upper()
+        normalized_path = str(resource_path or "").strip().lstrip("/")
+        if normalized_method not in {"GET", "POST", "DELETE"}:
+            return self._proxy_ui_failure(
+                405,
+                "PYAUTOGUI_UI_METHOD_NOT_ALLOWED",
+                "Only GET, POST, and DELETE are supported.",
+            )
+        if ".." in normalized_path.split("/") or "://" in normalized_path or normalized_path.startswith("//"):
+            return self._proxy_ui_failure(400, "PYAUTOGUI_UI_INVALID_PATH", "Bridge UI path is invalid.")
+
+        precheck = self._live_precheck(
+            require_execute=False,
+            payload={"runtime_mode": "live", "force_live_bridge": True},
+        )
+        if precheck:
+            return self._proxy_ui_failure(
+                503,
+                str(precheck.get("failure_code") or "PYAUTOGUI_UI_UNAVAILABLE"),
+                str(precheck.get("message") or "Windows bridge UI is unavailable."),
+            )
+
+        target = self._url(normalized_path or "/")
+        if query_string:
+            target = f"{target}?{str(query_string).lstrip('?')}"
+        headers = self._headers()
+        headers["Accept"] = "text/html, application/json, */*"
+        if content_type:
+            headers["Content-Type"] = str(content_type)
+        try:
+            with httpx.Client(timeout=self.config.request_timeout_sec, follow_redirects=False) as client:
+                response = client.request(normalized_method, target, headers=headers, content=body)
+        except Exception as exc:
+            return self._proxy_ui_failure(
+                503,
+                "PYAUTOGUI_BRIDGE_UNREACHABLE",
+                f"Windows PyAutoGUI bridge unreachable: {exc.__class__.__name__}",
+            )
+        return {
+            "ok": response.status_code < 400,
+            "status_code": int(response.status_code),
+            "content_type": response.headers.get("content-type", "application/octet-stream"),
+            "content": bytes(response.content),
+        }
+
+    @staticmethod
+    def _proxy_ui_failure(status_code: int, failure_code: str, message: str) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "status_code": int(status_code),
+            "content_type": "application/json; charset=utf-8",
+            "content": json.dumps(
+                {"ok": False, "status": "blocked", "failure_code": failure_code, "message": message},
+                ensure_ascii=True,
+            ).encode("utf-8"),
+        }
+
+    def _headers(self, payload: dict[str, Any] | None = None) -> dict[str, str]:
+        token = self._token(payload)
+        headers = {"Accept": "application/json"}
+        if token:
+            headers[self.config.token_header] = token
+        return headers
+
+    def _token(self, payload: dict[str, Any] | None = None) -> str:
+        memory = self.load_connection_memory()
+        requested = self._requested_candidate_id(payload)
+        _, selected = self._candidate_for_payload(memory, payload)
+        paired_key = str(
+            selected.get("internal_key")
+            or selected.get("token")
+            or memory.get("internal_key")
+            or memory.get("token")
+            or ""
+        ).strip()
+        if paired_key:
+            return paired_key
+        if requested:
+            return ""
+        return os.getenv(self.config.token_env, "").strip() if self.config.token_env else ""
+
+    @staticmethod
+    def _validate_private_bridge_url(raw_url: str) -> tuple[str, tuple[str, str] | None]:
+        parsed = urlparse(str(raw_url or "").strip())
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or parsed.path not in {"", "/"}
+        ):
+            return "", (
+                "PYAUTOGUI_BRIDGE_URL_INVALID",
+                "Bridge URL must be an HTTP(S) origin without credentials, path, query, or fragment.",
+            )
+        try:
+            addresses = {
+                ipaddress.ip_address(item[4][0])
+                for item in socket.getaddrinfo(parsed.hostname, parsed.port or None, type=socket.SOCK_STREAM)
+            }
+        except (ValueError, OSError, socket.gaierror):
+            return "", ("PYAUTOGUI_BRIDGE_URL_NOT_PRIVATE", "Bridge host must resolve to a local or private address.")
+        if not addresses or any(not (item.is_private or item.is_loopback or item.is_link_local) for item in addresses):
+            return "", ("PYAUTOGUI_BRIDGE_URL_NOT_PRIVATE", "Bridge host must resolve only to local or private addresses.")
+        origin = f"{parsed.scheme}://{parsed.hostname}"
+        if parsed.port is not None:
+            origin += f":{parsed.port}"
+        return origin, None
+
+    def load_connection_memory(self) -> dict[str, Any]:
+        """Read persisted bridge selection, returning empty dict when absent/invalid."""
+        try:
+            if not self.config.connection_memory_path.exists():
+                return {}
+            data = json.loads(self.config.connection_memory_path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _write_connection_memory(self, memory: dict[str, Any]) -> None:
+        self.config.connection_memory_path.parent.mkdir(parents=True, exist_ok=True)
+        self.config.connection_memory_path.write_text(json.dumps(memory, indent=2, ensure_ascii=True), encoding="utf-8")
+        try:
+            self.config.connection_memory_path.chmod(0o600)
+        except OSError:
+            pass
+
+    @staticmethod
+    def _clean_candidate_alias(value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        cleaned = "".join(ch if ch.isalnum() or ch in {"_", "-", "."} else "_" for ch in text)
+        return cleaned[:64].strip("._-")
+
+    @staticmethod
+    def _candidate_map(memory: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        candidates = memory.get("candidates") if isinstance(memory.get("candidates"), dict) else {}
+        if candidates:
+            return {str(alias): dict(value) for alias, value in candidates.items() if isinstance(value, dict)}
+        connections = memory.get("connections") if isinstance(memory.get("connections"), dict) else {}
+        if connections:
+            return {str(alias): dict(value) for alias, value in connections.items() if isinstance(value, dict)}
+        return {}
+
+    @staticmethod
+    def _selected_candidate(memory: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        candidates = WindowsPyAutoGUIBridge._candidate_map(memory)
+        selected_alias = str(memory.get("selected_candidate") or memory.get("selected", "")).strip()
+        if selected_alias and isinstance(candidates.get(selected_alias), dict):
+            return selected_alias, dict(candidates[selected_alias])
+        if "selected_candidate" in memory:
+            return "", {}
+        if candidates:
+            first_alias = sorted(str(alias) for alias in candidates)[0]
+            raw = candidates.get(first_alias)
+            return first_alias, dict(raw) if isinstance(raw, dict) else {}
+        # Legacy flat memory format.
+        if memory.get("bridge_url"):
+            return str(memory.get("candidate_alias") or memory.get("name") or "default"), dict(memory)
+        return "", {}
+
+    @staticmethod
+    def _requested_candidate_id(payload: dict[str, Any] | None) -> str:
+        source = payload if isinstance(payload, dict) else {}
+        return str(source.get("bridge_id") or source.get("candidate_alias") or "").strip()
+
+    @classmethod
+    def _candidate_for_payload(
+        cls, memory: dict[str, Any], payload: dict[str, Any] | None
+    ) -> tuple[str, dict[str, Any]]:
+        requested = cls._requested_candidate_id(payload)
+        if not requested:
+            return cls._selected_candidate(memory)
+        candidates = cls._candidate_map(memory)
+        direct = candidates.get(requested)
+        if isinstance(direct, dict):
+            return requested, dict(direct)
+        for alias, candidate in candidates.items():
+            identities = {
+                str(candidate.get(key) or "").strip()
+                for key in ("bridge_id", "candidate_id", "candidate_alias", "name")
+            }
+            if requested in identities:
+                return str(alias), dict(candidate)
+        return "", {}
+
+    def _runtime_program_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        runtime = dict(payload or {})
+        program_id = str(runtime.get("program_id") or "").strip()
+        if program_id.startswith("utm_restore_robot_clearance_"):
+            profile = _sanitize_utm_profile(
+                _read_json_object(self.config.utm_profile_memory_path)
+            )
+            clearance = profile.get("robot_entry_clearance_mm")
+            if isinstance(clearance, (int, float)) and not isinstance(clearance, bool) and clearance > 0:
+                rendered = f"{float(clearance):g}"
+                runtime_values = (
+                    dict(runtime.get("runtime_values"))
+                    if isinstance(runtime.get("runtime_values"), dict)
+                    else {}
+                )
+                runtime_values["robot_entry_clearance_mm"] = rendered
+                runtime["runtime_values"] = runtime_values
+            else:
+                runtime["_robot_clearance_context_error"] = (
+                    "UTM profile robot_entry_clearance_mm is missing or invalid."
+                )
+        if program_id.startswith("utm_save_raw_data_"):
+            for forbidden_key in ("output_csv_path", "export_root", "filename"):
+                runtime.pop(forbidden_key, None)
+            raw_context = runtime.get("export_context") if isinstance(runtime.get("export_context"), dict) else {}
+            approved_context = {
+                key: raw_context.get(key)
+                for key in ("mode", "session_id", "specimen_id", "loop_index", "repeat_index")
+            }
+            runtime["export_context"] = approved_context
+            context_mode = str(approved_context.get("mode") or "").strip().lower()
+            runtime_mode = str(runtime.get("runtime_mode") or "").strip().lower()
+            session_id = str(approved_context.get("session_id") or "").strip()
+            specimen_id = str(approved_context.get("specimen_id") or "").strip()
+            loop_index = approved_context.get("loop_index")
+            repeat_index = approved_context.get("repeat_index")
+            valid_indexes = all(
+                isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 9999
+                for value in (loop_index, repeat_index)
+            )
+            if (
+                context_mode not in {"dry_run", "test", "live"}
+                or runtime_mode != context_mode
+                or not session_id
+                or len(session_id) > 96
+                or not specimen_id
+                or len(specimen_id) > 96
+                or not valid_indexes
+            ):
+                runtime["_raw_csv_context_error"] = (
+                    "Raw CSV export_context must contain a matching mode, non-empty session/specimen IDs, "
+                    "and loop/repeat indexes from 1 to 9999."
+                )
+        program = self.config.registered_programs.get(program_id, {}) if program_id else {}
+        if isinstance(program, dict) and program:
+            if "sequence" not in runtime and isinstance(program.get("sequence"), list):
+                runtime["sequence"] = [dict(item) for item in program["sequence"] if isinstance(item, dict)]
+            if "locators" not in runtime and isinstance(program.get("locators"), dict):
+                runtime["locators"] = dict(program["locators"])
+            for key in (
+                "export_glob",
+                "artifact_timeout_s",
+                "stable_for_sec",
+                "expected_export_path",
+                "require_window_focus",
+                "manual_save_required_if_no_artifact",
+                "target_window",
+                "target_window_regex",
+                "screen_assertions_verified",
+            ):
+                if key not in runtime and key in program:
+                    runtime[key] = program[key]
+            if "require_screen_assertions" not in runtime:
+                runtime["require_screen_assertions"] = bool(
+                    program.get("require_screen_assertions", program.get("screen_assertions_required", False))
+                )
+            if "simulate_utm_protocol" not in runtime and "simulate_utm_protocol" in program:
+                runtime["simulate_utm_protocol"] = bool(program.get("simulate_utm_protocol"))
+        return runtime
+
+    def _control_profile_metadata(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return non-secret UTM control-profile metadata for reports and traces."""
+        program_id = str(payload.get("program_id") or "").strip()
+        if not self._is_utm_program_id(program_id):
+            return {}
+        locators = payload.get("locators") if isinstance(payload.get("locators"), dict) else {}
+        program = self.config.registered_programs.get(program_id, {}) if program_id else {}
+        return {
+            "program_id": program_id,
+            "profile_memory_path": str(self.config.utm_profile_memory_path),
+            "profile_memory_applied": bool(program.get("utm_profile_memory_applied")),
+            "export_glob": str(payload.get("export_glob") or ""),
+            "artifact_timeout_s": payload.get("artifact_timeout_s"),
+            "stable_for_sec": payload.get("stable_for_sec"),
+            "expected_export_path": str(payload.get("expected_export_path") or ""),
+            "target_window": str(payload.get("target_window") or ""),
+            "target_window_regex": str(payload.get("target_window_regex") or ""),
+            "require_window_focus": bool(payload.get("require_window_focus", False)),
+            "manual_save_required_if_no_artifact": bool(payload.get("manual_save_required_if_no_artifact", True)),
+            "require_screen_assertions": bool(payload.get("require_screen_assertions", False)),
+            "simulate_utm_protocol": bool(payload.get("simulate_utm_protocol", False)),
+            "locator_count": len(locators),
+            "locator_names": sorted(str(name) for name in locators),
+        }
+
+    def _attach_control_profile(self, response: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+        profile = self._control_profile_metadata(payload)
+        if profile:
+            response = dict(response)
+            response.setdefault("control_profile", profile)
+        return response
+
+    @staticmethod
+    def _is_utm_program_id(program_id: str) -> bool:
+        return str(program_id or "").startswith("utm_")
+
+    def _public_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {key: value for key, value in payload.items() if not key.startswith("_")}
+
+    def _simulated_screen(self) -> dict[str, int]:
+        return {
+            "width": int(self.config.simulator.get("screen_width", 1920)),
+            "height": int(self.config.simulator.get("screen_height", 1080)),
+        }
+
+    @staticmethod
+    def _program_metadata(programs: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for program_id, program in sorted(programs.items()):
+            metadata = {
+                "program_id": program_id,
+                "description": str(program.get("description", "")),
+                "requires_pyautogui": bool(program.get("requires_pyautogui", True)),
+                "safe_test": bool(program.get("safe_test", False)),
+                "program_type": str(program.get("program_type", "macro")),
+                "target_app": str(program.get("target_app", "")),
+                "target_window": str(program.get("target_window", "")),
+                "locator_backend": str(program.get("locator_backend", "")),
+                "max_retries": int(program.get("max_retries", 0) or 0),
+            }
+            for key in (
+                "preconditions",
+                "expected_screen_before",
+                "sequence",
+                "expected_screen_after",
+                "save_policy",
+                "output_artifacts",
+                "safe_abort",
+            ):
+                if key in program:
+                    metadata[key] = program[key]
+            out.append(metadata)
+        return out
+
+    @staticmethod
+    def _emit(
+        callback: ToolEventCallback | None,
+        tool: str,
+        step: str,
+        status: str,
+        *,
+        detail: str = "",
+        sequence_id: str = "",
+        program_id: str = "",
+    ) -> None:
+        if not callback:
+            return
+        event = {
+            "tool": tool,
+            "step": step,
+            "status": status,
+            "detail": detail,
+            "sequence_id": sequence_id,
+        }
+        if program_id:
+            event["program_id"] = program_id
+        callback(event)
+
+    @staticmethod
+    def _failure(
+        *,
+        tool: str,
+        status: str,
+        failure_code: str,
+        message: str,
+        step_trace: list[dict[str, Any]] | None = None,
+        mode: str = "simulator",
+        program_id: str = "",
+        sequence_id: str = "",
+        requires_connection_info: bool = False,
+        requires_install: bool = False,
+    ) -> dict[str, Any]:
+        response: dict[str, Any] = {
+            "ok": False,
+            "tool": tool,
+            "mode": mode,
+            "bridge": "windows_pyautogui",
+            "status": status,
+            "failure_code": failure_code,
+            "message": message,
+            "step_trace": step_trace or [],
+        }
+        if program_id:
+            response["program_id"] = program_id
+        if sequence_id:
+            response["sequence_id"] = sequence_id
+        if requires_connection_info:
+            response["requires_connection_info"] = True
+        if requires_install:
+            response["requires_install"] = True
+        return response
+
+
+def local_ipv4_scan_targets(*, port: int, subnet: str = "", max_hosts: int = 256) -> list[dict[str, Any]]:
+    """Return local-network HTTP bridge URLs to probe."""
+    networks: list[ipaddress.IPv4Network] = []
+    if subnet:
+        try:
+            networks.append(ipaddress.ip_network(subnet, strict=False))  # type: ignore[arg-type]
+        except ValueError:
+            return []
+    else:
+        addresses: set[str] = set()
+        try:
+            for item in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                addresses.add(str(item[4][0]))
+        except socket.gaierror:
+            pass
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.connect(("8.8.8.8", 80))
+                addresses.add(sock.getsockname()[0])
+        except OSError:
+            pass
+        for address in sorted(addresses):
+            if address.startswith("127."):
+                continue
+            try:
+                networks.append(ipaddress.ip_network(f"{address}/24", strict=False))  # type: ignore[arg-type]
+            except ValueError:
+                continue
+
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for network in networks:
+        for ip in network.hosts():
+            host = str(ip)
+            if host in seen:
+                continue
+            seen.add(host)
+            out.append({"host": host, "port": port, "bridge_url": f"http://{host}:{port}"})
+            if len(out) >= max_hosts:
+                return out
+    return out
+
+
+async def discover_windows_pyautogui_bridges(
+    config: WindowsPyAutoGUIBridgeConfig,
+    *,
+    subnet: str = "",
+    port: int | None = None,
+    token: str = "",
+    timeout_sec: float | None = None,
+    max_hosts: int = 256,
+) -> dict[str, Any]:
+    """Scan the current LAN through the public, non-actuating discovery contract."""
+    scan_port = int(port or config.discovery_port)
+    timeout = float(timeout_sec or config.discovery_timeout_sec)
+    targets = local_ipv4_scan_targets(port=scan_port, subnet=subnet, max_hosts=max_hosts)
+    headers = {"Accept": "application/json"}
+
+    semaphore = asyncio.Semaphore(48)
+
+    async def probe(target: dict[str, Any]) -> dict[str, Any] | None:
+        url = str(target["bridge_url"]).rstrip("/")
+        async with semaphore:
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.get(f"{url}/discovery", headers=headers)
+                if response.status_code != 200:
+                    return None
+                data = response.json()
+                if not isinstance(data, dict):
+                    return None
+                bridge_name = str(data.get("bridge", "windows_pyautogui"))
+                if bridge_name and "pyautogui" not in bridge_name.lower():
+                    return None
+                pairing = data.get("pairing") if isinstance(data.get("pairing"), dict) else {}
+                paired = bool(pairing.get("paired"))
+                return {
+                    **target,
+                    "ok": bool(data.get("ok", True)),
+                    "reachable": True,
+                    "auth_required": paired,
+                    "token_verified": False,
+                    "pairing_required": not paired,
+                    "status": str(data.get("status", "ready")),
+                    "server_version": str(data.get("server_version") or ""),
+                    "hostname": str(data.get("hostname") or ""),
+                    "platform": str(data.get("platform") or "windows"),
+                    "screen": data.get("screen"),
+                    "pyautogui": data.get("pyautogui", {}),
+                    "raw": data,
+                }
+            except Exception:
+                return None
+
+    results = await asyncio.gather(*(probe(target) for target in targets))
+    candidates = [item for item in results if isinstance(item, dict)]
+    return {
+        "ok": True,
+        "tool": "equipment.pyautogui.discover",
+        "subnet": subnet,
+        "port": scan_port,
+        "scanned": len(targets),
+        "candidates": candidates,
+    }

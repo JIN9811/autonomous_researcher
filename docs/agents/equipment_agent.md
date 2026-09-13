@@ -7,18 +7,24 @@ audience: [researcher, operator, developer, maintainer]
 scope: [agents, equipment, pyautogui, equipment_runtime, vision_link]
 summary: Equipment-owned bounded Flow selection and terminal multimodal review over the existing Linux Runtime and local or Windows workers.
 source_of_truth:
-  - agents/equipment_agent.py
-  - agents/equipment_workflow.py
-  - agents/equipment_decision.py
+  - agents/equipment/agent.py
+  - agents/equipment/workflow.py
+  - agents/equipment/decision.py
+  - agents/equipment/execution.py
+  - agents/equipment/structure.py
+  - agents/equipment/presentation.py
+  - agents/equipment/frontend/live_report.js
   - scripts/verify_equipment_decisions.py
   - utils/equipment_runtime_service.py
   - utils/equipment_profiles.py
   - utils/equipment_skill_runtime.py
   - utils/equipment_skill_flow.py
   - graphs/modules/equipment/equipment_skill_flows.json
-  - device_bridges/windows_pyautogui_bridge.py
-  - mcp_tools/equipment_tools.py
-last_verified: 2026-09-09
+  - device_bridges/windows_pyautogui/module.py
+  - packages/agents/equipment/package.yaml
+  - graphs/modules/equipment/module.yaml
+  - graphs/modules/equipment/ui.yaml
+last_verified: 2026-09-13
 verified_against: working-tree
 related_docs:
   - docs/device_bridges/windows_pyautogui_bridge.md
@@ -38,12 +44,12 @@ supersedes: []
 
 | At a glance | Details |
 |---|---|
-| Runtime status | Managed stacked Flow decision boundary implemented in the working tree |
+| Runtime status | Installed `equipment@1.0.0` owner/package with the existing managed stacked Flow |
 | LLM decision layer | Implemented; archived terminal evidence checked through registered API/local models |
 | Physical effect | Existing gated Skills and Windows/Local workers only |
 | Primary handoff | Verified CSV/readiness → Manipulation clearance → fresh Vision → Analysis |
-| Live hardware validation | Not performed for this reconstruction |
-| Known limit | Offline recovery decisions verified; live recovery not exercised; no crash-resume |
+| Live hardware validation | No new hardware run; prior physical proof remains separately sourced |
+| Known limit | One unchanged registered-model retry completed; the first attempt stopped on a Knowledge tool-contract error, so both outcomes remain in the reliability record |
 
 ## Summary and Actual Role
 
@@ -67,7 +73,40 @@ Workspaces are manual development/configuration surfaces, not independent owners
 of the automatic experiment loop. Standalone/direct Skill and legacy program
 paths retain their existing behavior; this decision boundary manages stacked Flows.
 
+## Installed Package and Executable Structure
+
+The installed [Equipment Agent Package](../../packages/agents/equipment/README.md)
+binds owner `equipment@1.0.0` to bridge `windows_pyautogui@1.0.0`. Canonical
+owner, decision, workflow, execution, source structure, report projection and
+Live composition now live under `agents/equipment/`. The flat
+`agents.equipment_agent`, `agents.equipment_decision` and
+`agents.equipment_workflow` imports remain exact module-identity aliases. The
+bridge implementation and its 18 existing tools remain under
+`device_bridges/windows_pyautogui/`; `device_bridges.windows_pyautogui_bridge`
+and `mcp_tools.equipment_tools` retain compatibility identity.
+
+![Equipment source-bound control areas](assets/figures/equipment_control_areas.svg)
+
+The Runtime IDE and light document renderer consume the same two-operation
+execution graph and source-bound catalog. `equipment.task` keeps the existing
+composite task intact and `equipment.deliver` returns the same `AgentResult`.
+CODE relationships expose suitability and terminal LLM review as High,
+software/API/Flow supervision as Middle, and the selected Windows or Local
+worker as Low. Guardian/Safety and Knowledge/Evidence remain cross-cutting.
+These CODE nodes are inspection relationships, not independently executable
+stages or extra model/device calls.
+
+The module-owned `/module-assets/equipment/live_report.js` factory mounts the
+existing report and dashboard cards through `AX4LABEquipmentUI.createFrontend`.
+The shared host retains polling, process/state synchronization, delegated
+`TEST`/`OPEN`/`REFRESH` handling and report API transport. Deactivating the
+installed owner removes its current cards and denies its asset; it does not
+delete saved Equipment configuration or evidence.
+
 ## Five-Area Responsibility Map
+
+Figure notation: **LLM** marks the High decision; **LLM call** marks the process
+that supplies context and consumes its response ([shared label contract](../runtime/three_level_control_model.md#llm-node-labels)).
 
 | Area | Equipment responsibility | Authority boundary |
 |---|---|---|
@@ -490,6 +529,13 @@ Connected `/api/equipment/*` and `/api/bridges*` expose existing worker, Skill,
 Profile and runtime services. Agent-local decision names are not new public APIs.
 `utm.run_protocol` remains an explicit compatibility path, never automatic fallback.
 
+Installed ownership adds read-only composition surfaces, not another execution
+path: `GET /api/modules/equipment`, `GET /api/agents/equipment/report`,
+`GET /api/runtime/agent-manifests`, `GET /module-assets/equipment/live_report.js`
+and `GET /api/packages`. The asset is admitted only while `equipment_agent` is
+active. Existing `/equipment/windows` and `/api/equipment/*` routes remain the
+configuration, runtime and worker surfaces.
+
 ## Safety and Failure Boundaries
 
 - Profile/program mismatch, unavailable/unhealthy worker, or missing required Vision Link blocks before input.
@@ -502,6 +548,27 @@ Model output grants no arbitrary PyAutoGUI/shell authority. Existing bridge and
 Guardian/operator stop paths remain authoritative.
 
 ## Current Verification and Known Limits
+
+### Installed package verification (2026-09-13)
+
+Guarded owner/module/bridge/API coverage passed 285 tests; guarded Runtime and
+Skill coverage passed 86 tests with the multiprocessing serialization case
+passing separately. The guarded original-mode/hybrid selection passed 49 tests.
+Task 2's owner frontend/progress/Flow/selection Node selection passed 38 tests,
+and its focused API/control-area/document-render selection passed 69 tests.
+These are overlapping software checks and must not be summed. They created no
+physical calls; no hardware, server restart or model lifecycle operation was
+performed by Task 2.
+
+The controller's unchanged second registered API-model attempt completed through
+the next Design with 34 actual saved-provider calls across all ten required
+owners, zero physical calls and no denied effects (`1 passed` in 470.15 seconds;
+cycle 469.367 seconds). The first attempt reached successful Equipment and
+Analysis handling, then Knowledge returned a tool-contract-invalid sequence and
+Guardian blocked before BO. Both attempts remain recorded. This is one complete
+guarded virtual cycle with an observed stochastic reliability caveat; it does not
+establish hardware proof. The earlier physical eight-block provenance below
+remains the only cited physical demonstration for this workflow.
 
 ### Non-actuating verification (2026-09-09)
 

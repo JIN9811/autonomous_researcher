@@ -108,6 +108,9 @@ it does not alter the current run or a later cycle in that run.
 
 ### Editable Runtime IDE Structure
 
+Figure notation: **LLM** marks the High decision; **LLM call** marks the process
+that supplies context and consumes its response ([shared label contract](../runtime/three_level_control_model.md#llm-node-labels)).
+
 ![Orchestrator five-area editable internal graph](assets/figures/orchestrator_control_areas.svg)
 
 The backend, existing editable canvas and SVG consume the same

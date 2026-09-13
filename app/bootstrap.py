@@ -32,7 +32,6 @@ from agents.analysis_agent import AnalysisAgent
 from agents.base_agent import AgentContext
 from agents.bo_agent import BOAgent
 from agents.module_discovery import discover_agent_modules
-from agents.equipment_agent import LabEquipmentAgent
 from agents.guardian_agent import GuardianAgent
 from agents.knowledge_agent import KnowledgeAgent
 from agents.orchestrator_agent import OrchestratorAgent
@@ -56,7 +55,7 @@ from device_bridges.utm_state_observer import observe_utm_state_window
 from mcp_tools.cae_tools import register_cae_tools
 from mcp_tools.calculix_tools import register_calculix_tools
 from mcp_tools.camera_tools import register_camera_tools
-from mcp_tools.equipment_tools import register_equipment_tools
+from device_bridges.windows_pyautogui.tools import register_equipment_tools
 from mcp_tools.experiment_tools import register_experiment_tools
 from mcp_tools.lerobot_tools import register_lerobot_tools
 from mcp_tools.mock_tools import register_mock_tools
@@ -351,7 +350,6 @@ def load_runtime() -> MainController:
     agent_registry.register(BOAgent())
     for module in discover_agent_modules():
         agent_registry.register_module(module)
-    agent_registry.register(LabEquipmentAgent())
     agent_registry.register(AnalysisAgent())
     agent_registry.register(KnowledgeAgent())
     agent_registry.register(GuardianAgent())

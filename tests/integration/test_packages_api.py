@@ -44,13 +44,19 @@ def test_full_graph_package_roundtrip_is_detached_and_catalog_never_reads_privat
     assert catalog_response.status_code == 200
     catalog = catalog_response.json()
     assert catalog["ok"]
-    assert {item["id"] for item in catalog["bridge_modules"]} == {"printer_fleet", "camera_vision", "lerobot"}
-    assert {item["id"] for item in catalog["agent_packages"]} >= {"design", "specimen", "vision", "manipulation"}
+    assert {item["id"] for item in catalog["bridge_modules"]} == {
+        "printer_fleet", "camera_vision", "lerobot", "windows_pyautogui"
+    }
+    assert {item["id"] for item in catalog["agent_packages"]} >= {
+        "design", "specimen", "vision", "manipulation", "equipment"
+    }
     lerobot = next(item for item in catalog["bridge_modules"] if item["id"] == "lerobot")
     assert lerobot["package_owners"] == [
         {"id": "vision", "version": "1.0.0"},
         {"id": "manipulation", "version": "1.0.0"},
     ]
+    windows = next(item for item in catalog["bridge_modules"] if item["id"] == "windows_pyautogui")
+    assert windows["package_owners"] == [{"id": "equipment", "version": "1.0.0"}]
     exported = client.post("/api/packages/experimental/export", json=draft)
     assert exported.status_code == 200
     assert exported.json()["ok"], exported.json()

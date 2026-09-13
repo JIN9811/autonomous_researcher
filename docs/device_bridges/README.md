@@ -15,8 +15,8 @@ scope:
   - runtime_sidecars
   - api_connections
 summary: How AX4LAB connects existing laboratory capabilities through device-specific execution interfaces, with bridge references and integration contracts.
-last_verified: 2026-09-11
-verified_against: cf8cb9f
+last_verified: 2026-09-13
+verified_against: working-tree
 related_docs:
   - docs/device_bridges/bridge_api_connection_matrix.md
   - docs/agents/agent_api_connection_matrix.md
@@ -144,6 +144,14 @@ references, orchestration plans and portable module drafts. Importing a package
 does not install code, configure equipment, activate a graph or delete shared
 bridges. Other bridge families retain their current structure until their own
 module migration.
+
+The installed [Equipment Agent Package](../../packages/agents/equipment/package.yaml)
+now references [Windows/PyAutoGUI](../../device_bridges/windows_pyautogui/module.py)
+as `windows_pyautogui@1.0.0`. Its canonical implementation and tool registration
+live under `device_bridges/windows_pyautogui/`; flat imports remain exact aliases.
+The package reuses the existing Windows/Local worker choice, 18 tool IDs,
+`equipment:windows_pyautogui` queue, `/equipment/windows` workspace and storage.
+Catalog and IDE inspection never pairs, selects or executes a worker.
 
 ### Existing Integration Boundaries
 
