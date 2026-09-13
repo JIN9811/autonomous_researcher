@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" data-theme="document" viewBox="0 0 1184 1190" role="img" aria-label="Guardian Agent Module five-area internal graph" style="font-family:Arial,sans-serif;background:#ffffff">
+      <title>Guardian Agent Module — five-area internal graph</title><desc>Executable owner operations and explicit outcomes. Positions are presentation only. Composite LLM tools are not separate editable operations.</desc>
+      <rect width="100%" height="100%" fill="#ffffff"/>
+      <defs><marker id="control-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6z" fill="#526174"/></marker></defs>
+      <g class="runtime-control-area" data-control-area="high" pointer-events="none">
+      <rect x="360" y="56" width="488" height="148" rx="12" fill="#2463a5" fill-opacity=".035" stroke="#2463a5" stroke-opacity=".3"/>
+      <text x="376" y="82" fill="#2463a5" font-size="15" font-weight="600">High</text>
+      </g><g class="runtime-control-area" data-control-area="middle" pointer-events="none">
+      <rect x="360" y="312" width="488" height="436" rx="12" fill="#177768" fill-opacity=".035" stroke="#177768" stroke-opacity=".3"/>
+      <text x="376" y="338" fill="#177768" font-size="15" font-weight="600">Middle</text>
+      </g><g class="runtime-control-area" data-control-area="low" pointer-events="none">
+      <rect x="352" y="848" width="488" height="208" rx="12" fill="#4c6079" fill-opacity=".035" stroke="#4c6079" stroke-opacity=".3"/>
+      <text x="368" y="874" fill="#4c6079" font-size="15" font-weight="600">Low</text>
+      <text x="368" y="922" fill="#526174" font-size="12">No direct device execution in</text><text x="368" y="940" fill="#526174" font-size="12">this agent</text></g><g class="runtime-control-area" data-control-area="guardian" pointer-events="none">
+      <rect x="32" y="56" width="264" height="484" rx="12" fill="#a36b16" fill-opacity=".035" stroke="#a36b16" stroke-opacity=".3"/>
+      <text x="48" y="82" fill="#a36b16" font-size="15" font-weight="600">Guardian / Safety</text>
+      </g><g class="runtime-control-area" data-control-area="knowledge" pointer-events="none">
+      <rect x="896" y="56" width="264" height="148" rx="12" fill="#79529c" fill-opacity=".035" stroke="#79529c" stroke-opacity=".3"/>
+      <text x="912" y="82" fill="#79529c" font-size="15" font-weight="600">Knowledge / Evidence</text>
+      </g><defs><marker id="control-detail-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6z" fill="#526174"/></marker></defs><g data-implementation-edge="task" pointer-events="none"><title>read mandatory inputs · evidence (code-owned)</title><path d="M384,398 C312,398 312,142 240,142" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>device.health · call (code-owned)</title><path d="M240,142 C312,142 312,542 384,542" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>read failure memory · evidence (code-owned)</title><path d="M240,142 C580,142 580,142 920,142" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>validate design history · evidence (code-owned)</title><path d="M920,142 C580,142 580,254 240,254" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>read graph gates · evidence (code-owned)</title><path d="M148,180 C172,254 172,254 148,328" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>read analysis and retries · evidence (code-owned)</title><path d="M148,180 C172,310 172,310 148,440" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>health evidence · evidence (code-owned)</title><path d="M476,504 C500,342 500,342 476,180" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>validated design evidence · evidence (code-owned)</title><path d="M240,254 C312,254 312,142 384,142" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>gate evidence · evidence (code-owned)</title><path d="M240,366 C312,366 312,142 384,142" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>consistency evidence · evidence (code-owned)</title><path d="M240,478 C312,478 312,142 384,142" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>mandatory precedence · validation (code-owned)</title><path d="M240,254 C432,254 432,542 624,542" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>mandatory precedence · validation (code-owned)</title><path d="M568,542 C596,542 596,542 624,542" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>mandatory precedence · validation (code-owned)</title><path d="M240,366 C432,366 432,542 624,542" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>select action · validation (code-owned)</title><path d="M240,478 C432,478 432,542 624,542" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>advisory note only · evidence (code-owned)</title><path d="M568,142 C596,142 596,542 624,542" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="deliver" pointer-events="none"><title>deliver same result · call (code-owned)</title><path d="M624,398 C596,398 596,686 568,686" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-node="task::inputs" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Current mandatory policy inputs; code-owned; GuardianAgent._run_task">
+      <title>Current mandatory policy inputs
+Code-owned inside task
+agents/core/guardian/agent.py · GuardianAgent._run_task</title>
+      <rect x="56" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="122" fill="#172b4d" font-size="12">Current mandatory policy</text><text x="66" y="137" fill="#172b4d" font-size="12">inputs</text>
+      <text x="66" y="171" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::health" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Device health API and blocking alerts; code-owned; GuardianAgent._resolve_device_health">
+      <title>Device health API and blocking alerts
+Code-owned inside task
+agents/core/guardian/agent.py · GuardianAgent._resolve_device_health</title>
+      <rect x="384" y="504" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="522" fill="#172b4d" font-size="12">Device health API and</text><text x="394" y="537" fill="#172b4d" font-size="12">blocking alerts</text>
+      <text x="394" y="571" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::failures" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Recent failure memory evidence; code-owned; GuardianAgent._failure_pattern_match">
+      <title>Recent failure memory evidence
+Code-owned inside task
+agents/core/guardian/agent.py · GuardianAgent._failure_pattern_match</title>
+      <rect x="920" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="122" fill="#172b4d" font-size="12">Recent failure memory</text><text x="930" y="137" fill="#172b4d" font-size="12">evidence</text>
+      <text x="930" y="171" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::advisory" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="LLM policy evidence review; code-owned; run_guardian_advisory">
+      <title>LLM policy evidence review
+Code-owned inside task
+agents/core/guardian/decision.py · run_guardian_advisory</title>
+      <rect x="384" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#2463a5" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="122" fill="#172b4d" font-size="12">LLM policy evidence</text><text x="394" y="137" fill="#172b4d" font-size="12">review</text>
+      <text x="394" y="171" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::design_gate" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Design and failure-pattern validation; code-owned; GuardianAgent._validate_design_spec">
+      <title>Design and failure-pattern validation
+Code-owned inside task
+agents/core/guardian/agent.py · GuardianAgent._validate_design_spec</title>
+      <rect x="56" y="216" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="234" fill="#172b4d" font-size="12">Design and</text><text x="66" y="249" fill="#172b4d" font-size="12">failure-pattern</text><text x="66" y="264" fill="#172b4d" font-size="12">validation</text>
+      <text x="66" y="283" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::graph_gate" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Graph-wide gate and incident precedence; code-owned; GuardianAgent._resolve_graph_gate_pressure">
+      <title>Graph-wide gate and incident precedence
+Code-owned inside task
+agents/core/guardian/agent.py · GuardianAgent._resolve_graph_gate_pressure</title>
+      <rect x="56" y="328" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="346" fill="#172b4d" font-size="12">Graph-wide gate and</text><text x="66" y="361" fill="#172b4d" font-size="12">incident precedence</text>
+      <text x="66" y="395" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::consistency" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Analysis, observation and retry consistency; code-owned; GuardianAgent._consistency_check">
+      <title>Analysis, observation and retry consistency
+Code-owned inside task
+agents/core/guardian/agent.py · GuardianAgent._consistency_check</title>
+      <rect x="56" y="440" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="458" fill="#172b4d" font-size="12">Analysis, observation and</text><text x="66" y="473" fill="#172b4d" font-size="12">retry consistency</text>
+      <text x="66" y="507" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::result" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Continue, recover, retry or safe-stop result; code-owned; GuardianAgent._run_task">
+      <title>Continue, recover, retry or safe-stop result
+Code-owned inside task
+agents/core/guardian/agent.py · GuardianAgent._run_task</title>
+      <rect x="624" y="504" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="522" fill="#172b4d" font-size="12">Continue, recover, retry</text><text x="634" y="537" fill="#172b4d" font-size="12">or safe-stop result</text>
+      <text x="634" y="571" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="deliver::result" data-implementation-owner="deliver" pointer-events="auto" role="img"  aria-label="Fresh composite AgentResult; code-owned; guardian_execution_catalog">
+      <title>Fresh composite AgentResult
+Code-owned inside deliver
+agents/core/guardian/execution.py · guardian_execution_catalog</title>
+      <rect x="384" y="648" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="666" fill="#172b4d" font-size="12">Fresh composite</text><text x="394" y="681" fill="#172b4d" font-size="12">AgentResult</text>
+      <text x="394" y="715" fill="#526174" font-size="9">CODE · deliver</text>
+    </g><g data-source="task" data-target="deliver" data-outcome="next" data-kind="evidence"><title>task → deliver · next · evidence</title><path d="M 576 398 C 587.2 398, 604.8 398, 616 398" fill="none" stroke="#79529c" stroke-opacity=".8" stroke-width="2" stroke-dasharray="2 5" marker-end="url(#control-arrow)"/><rect x="577" y="388" width="38" height="20" rx="4" fill="#ffffff"/><text x="596" y="402" text-anchor="middle" fill="#79529c" font-size="11">next</text></g><g><title>task · guardian.task</title>
+        <rect x="384" y="360" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="396" y="381" fill="#172b4d" font-size="12">Composite deterministic</text><text x="396" y="397" fill="#172b4d" font-size="12">gates and advisory</text><text x="396" y="413" fill="#172b4d" font-size="12">policy task</text>
+        <text x="489" y="428" fill="#177768" font-size="10">LLM call</text></g><g><title>deliver · guardian.deliver</title>
+        <rect x="624" y="360" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="636" y="381" fill="#172b4d" font-size="12">Deliver owner result</text>
+        </g>
+      <line x1="24" x2="62" y1="1114" y2="1114" stroke="#526174" stroke-width="2" stroke-dasharray=""/><text x="72" y="1118" fill="#172b4d" font-size="14">Execution</text><line x1="244" x2="282" y1="1114" y2="1114" stroke="#526174" stroke-width="2" stroke-dasharray="8 5"/><text x="292" y="1118" fill="#172b4d" font-size="14">Validation</text><line x1="464" x2="502" y1="1114" y2="1114" stroke="#526174" stroke-width="2" stroke-dasharray="2 5"/><text x="512" y="1118" fill="#172b4d" font-size="14">Evidence</text><line x1="684" x2="722" y1="1114" y2="1114" stroke="#526174" stroke-width="2" stroke-dasharray="5 3"/><text x="732" y="1118" fill="#172b4d" font-size="14">Internal call</text>
+      <text x="24" y="1150" fill="#526174" font-size="13">Solid: execution · Dashed CODE: implementation · LLM: High decision · LLM call: process calls that decision</text>
+    </svg>

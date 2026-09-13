@@ -1,6 +1,6 @@
 import pytest
-from agents import analysis_refinement as module
-from agents.analysis_improvement import ImprovementStore
+from agents.analysis import refinement as module
+from agents.analysis.improvement import ImprovementStore
 
 
 def test_bounded_material_curve_candidates_reach_existing_solver_parameters():

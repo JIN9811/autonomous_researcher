@@ -334,6 +334,21 @@ def test_scope_filters_are_exact_conjunctions_and_fail_closed(
         store.search("export", scope={"project_id": "secret"})
 
 
+def test_scope_class_validation_preserves_existing_search_normalization(
+    store: MarkdownKnowledgeStore,
+) -> None:
+    scope = {"run_id": " run-a ", "tags": ["csv", "csv"], "applicability": {"material": "PLA"}}
+    expected = {
+        "run_id": "run-a",
+        "tags": ["csv"],
+        "applicability": {"material": "PLA"},
+        "status": "valid",
+    }
+
+    assert MarkdownKnowledgeStore._normalize_scope(scope) == expected
+    assert store.search("", scope=scope)["scope"] == expected
+
+
 def test_scoped_read_uses_the_same_filtering_rules_as_search(
     store: MarkdownKnowledgeStore,
 ) -> None:

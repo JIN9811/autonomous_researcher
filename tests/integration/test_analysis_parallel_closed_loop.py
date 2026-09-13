@@ -26,14 +26,14 @@ import time
 import pytest
 import yaml
 
-from agents.analysis_agent import AnalysisAgent
-from agents.analysis_runtime import service_for
+from agents.analysis.agent import AnalysisAgent
+from agents.analysis.runtime import service_for
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
-from agents.bo_agent import BOAgent
-from agents.design_agent import DesignAgent
-from agents.guardian_agent import GuardianAgent
-from agents.knowledge_agent import KnowledgeAgent
-from agents.orchestrator_agent import OrchestratorAgent
+from agents.bo.agent import BOAgent
+from agents.design.agent import DesignAgent
+from agents.core.guardian.agent import GuardianAgent
+from agents.core.knowledge.agent import KnowledgeAgent
+from agents.core.orchestrator.agent import OrchestratorAgent
 from agents.registry import AgentRegistry
 from backends.mock_llm import MockLLMBackend
 from backends.llm_backend import LLMResponse

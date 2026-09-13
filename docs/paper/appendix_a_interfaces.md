@@ -79,11 +79,11 @@ The `agents/`, `orchestrator/`, `graphs/modules/`, `device_bridges/`,
 |---|---|---|---|---|
 | Orchestrator graph | `graphs/configs/atr_closed_loop.yaml`, runtime compiler | Orchestrator state and current stage | Next node/state/terminal route | Checkpoint and transition evidence |
 | Supervisor | `orchestrator/supervisor.py` | Run context, handoff, candidate, Guardian decision | Routed handoff and context | No direct device bypass |
-| Domain agents | `agents/*_agent.py`, module manifests | Typed stage context | Domain artifact and handoff | Schema/policy validation |
+| Domain agents | canonical owner modules under `agents/<owner>/`, module manifests | Typed stage context | Domain artifact and handoff | Schema/policy validation |
 | Guardian | `policies/guardian_gate.py` | Action/risk/evidence context | Continue, stop, review, or error | Decision record and operator boundary |
 | Model routing | `backends/`, agent context/bootstrap | Task and bounded prompt/input | Provider response normalized to caller contract | Readiness and priority lease where configured |
 | Device bridges | `device_bridges/` | Capability-oriented action | Status, artifact, proof, or error | Allowlist, auth, dry run, timeout |
-| Knowledge memory and Source Library | `agents/knowledge_agent.py`, `knowledge/markdown_runtime.py`, `knowledge/source_api.py` | Run evidence or separately submitted sources; scope-bound retrieval request | Context, report, Markdown/JSONL records, citations and local receipts | Ontology, provenance, identity, scope and validated publication |
+| Knowledge memory and Source Library | `agents/core/knowledge/agent.py`, `knowledge/markdown_runtime.py`, `knowledge/source_api.py` | Run evidence or separately submitted sources; scope-bound retrieval request | Context, report, Markdown/JSONL records, citations and local receipts | Ontology, provenance, identity, scope and validated publication |
 | Graph/module management | graph/module APIs and manifests | Versioned configuration or draft | Validation, dry run, saved/activated state | Active-run and handler constraints |
 | Operator workspaces | FastAPI routes, templates, static clients | Review/configuration/action intent | Rendered state and API result | Server policy remains authoritative |
 

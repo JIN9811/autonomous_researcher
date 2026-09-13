@@ -15,7 +15,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: command payload and score fields
 - Risky places to edit: tool names consumed by manipulation agent
-- Related files: agents/manipulation_agent.py, device_bridges/robot_bridge.py
+- Related files: agents/manipulation/agent.py, device_bridges/robot_bridge.py
 """
 
 from __future__ import annotations

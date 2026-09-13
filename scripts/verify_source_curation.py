@@ -166,9 +166,9 @@ def answer_checks(answer, required, *, qualification=None):
 
 
 async def verify_consumers(ctx, library, root, source_id, *, question, required, qualification=None):
-    from agents.knowledge_decision import run_knowledge_decision
-    from agents.bo_agent import BOAgent
-    from agents.equipment_decision import decide_equipment
+    from agents.core.knowledge.decision import run_knowledge_decision
+    from agents.bo.agent import BOAgent
+    from agents.equipment.decision import decide_equipment
     from knowledge.markdown_runtime import store_for
     from mcp_tools.source_tools import register_source_tools, source_context
     from orchestrator.state import Mode, OrchestratorState, Stage
@@ -206,7 +206,7 @@ async def verify_consumers(ctx, library, root, source_id, *, question, required,
 
 
 async def verify(args):
-    from agents.source_curation import curate_source
+    from agents.core.knowledge.source_curation import curate_source
     from knowledge.source_library import SourceLibrary
     report = {"schema": "source_curation_verification.v1", "physical_actuation": False,
         "model_startup": False, "evidence_class": "software_verification",

@@ -1,7 +1,7 @@
 # Low-Cost SDL Improvement Full Runtime Guideline
 
 Source basis:
-- `/home/jin/다운로드/codex_improvement_instructions.txt`
+- operator-provided `codex_improvement_instructions.txt`
 - `docs/project/Project_guide.txt`
 - `docs/runtime/architecture.md`
 - `docs/runtime/test_mode.md`
@@ -20,7 +20,7 @@ Current repository mapping:
 - API/runtime controller: `app/controller.py`, `app/main.py`, `app/bootstrap.py`
 - Main stage loop: `orchestrator/run_loop.py`
 - Stage definitions/transitions: `orchestrator/state.py`, `orchestrator/transitions.py`, `orchestrator/router.py`
-- Stage agents: `agents/*.py`
+- Stage agents: canonical owner modules under `agents/<owner>/` and `agents/core/<owner>/`
 - Tool layer: `mcp_tools/*.py`
 - Device bridges: `device_bridges/*.py`, `device_bridges/simulator/*.py`
 - LLM/vLLM/NemoClaw backends: `backends/*.py`, `deploy/nemoclaw-vllm.yaml`
@@ -232,7 +232,7 @@ Add files:
 - `benchmarks/report_manipulation.py`
 
 Update files:
-- `agents/manipulation_agent.py`
+- `agents/manipulation/agent.py`
 - `device_bridges/simulator/robot_sim.py`
 - `device_bridges/simulator/camera_sim.py`
 - `submodules/vla/` when real VLA integration is added
@@ -289,10 +289,10 @@ Add files:
 - `learning/candidate_selector.py`
 
 Update files:
-- `agents/design_agent.py`
-- `agents/analysis_agent.py`
-- `agents/knowledge_agent.py`
-- `agents/guardian_agent.py`
+- `agents/design/agent.py`
+- `agents/analysis/agent.py`
+- `agents/core/knowledge/agent.py`
+- `agents/core/guardian/agent.py`
 - `orchestrator/run_loop.py`
 - `memory/experiment_db.py`
 - `configs/system.yaml`
@@ -377,7 +377,7 @@ Add files:
 - `configs/objectives.yaml`
 
 Update files:
-- `agents/analysis_agent.py`
+- `agents/analysis/agent.py`
 - `learning/evaluation.py`
 - tests under `tests/unit/test_objectives.py`
 
@@ -434,9 +434,9 @@ Add files:
 - `memory/specimen_registry.py`
 
 Update files:
-- `agents/design_agent.py`
-- `agents/specimen_agent.py`
-- `agents/analysis_agent.py`
+- `agents/design/agent.py`
+- `agents/specimen/agent.py`
+- `agents/analysis/agent.py`
 - `memory/experiment_db.py`
 
 Behavior:
@@ -477,10 +477,10 @@ Add files:
 - `policies/promotion_policy.py`
 
 Update files:
-- `agents/guardian_agent.py`
-- `agents/vision_agent.py`
-- `agents/manipulation_agent.py`
-- `agents/equipment_agent.py`
+- `agents/core/guardian/agent.py`
+- `agents/vision/agent.py`
+- `agents/manipulation/agent.py`
+- `agents/equipment/agent.py`
 - `mcp_tools/*_tools.py`
 - `tests/fault_injection/*`
 
@@ -720,15 +720,15 @@ Completion criteria:
 Preferred test command pattern:
 
 ```bash
-/home/jin/autonomous_researcher/.venv/bin/pytest tests -q
+.venv/bin/pytest tests -q
 ```
 
 Use narrower tests first, then full tests:
 
 ```bash
-/home/jin/autonomous_researcher/.venv/bin/pytest tests/unit/<target>.py -q
-/home/jin/autonomous_researcher/.venv/bin/pytest tests/integration/<target>.py -q
-/home/jin/autonomous_researcher/.venv/bin/pytest tests -q
+.venv/bin/pytest tests/unit/<target>.py -q
+.venv/bin/pytest tests/integration/<target>.py -q
+.venv/bin/pytest tests -q
 ```
 
 ============================================================

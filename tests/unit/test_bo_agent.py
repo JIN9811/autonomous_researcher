@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from agents.bo_agent import BOAgent
-from agents.design_agent import DesignAgent
+from agents.bo.agent import BOAgent
+from agents.design.agent import DesignAgent
 from learning.bo_parameter_space import BOParameterSpace
 from mcp_tools.experiment_tools import register_experiment_tools
 from mcp_tools.tool_registry import ToolRegistry

@@ -1,6 +1,5 @@
 """Installed Manipulation consumers exercise the owner with controlled I/O only."""
 import ast
-import importlib
 from copy import deepcopy
 from pathlib import Path
 
@@ -16,18 +15,17 @@ def no_external_effects():
         assert guard.denied == []
 
 
-def test_discovery_aliases_and_active_owner(monkeypatch):
+def test_discovery_registers_canonical_active_owner():
+    from agents.manipulation.agent import ManipulationAgent
     from agents.module_discovery import discover_agent_modules
     from agents.registry import AgentRegistry
     owners = {m.module_id: m for m in discover_agent_modules()}
     assert "manipulation" in owners
     module = owners["manipulation"]
-    owner = importlib.import_module("agents.manipulation.agent")
-    decision = importlib.import_module("agents.manipulation.decision")
-    assert importlib.import_module("agents.manipulation_agent") is owner
-    assert importlib.import_module("agents.manipulation_decision") is decision
     registry = AgentRegistry()
     registry.register_module(module)
+    assert registry.get_module("manipulation").factory is ManipulationAgent
+    assert registry.get("manipulation_agent").__class__ is ManipulationAgent
     active = {"manipulation_agent"}
     registry.bind_activation(lambda: active)
     assert registry.get("manipulation_agent").execution_catalog().module_id == "manipulation"

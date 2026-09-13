@@ -15,7 +15,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: task taxonomy, preflight checks, report fields
 - Risky places to edit: legacy output keys consumed by Guardian, runtime merge, and LeRobot GUI
-- Related files: agents/guardian_agent.py, device_bridges/lerobot_bridge.py, web/templates/lerobot.html
+- Related files: agents/core/guardian/agent.py, device_bridges/lerobot_bridge.py, web/templates/lerobot.html
 """
 
 from __future__ import annotations
@@ -1782,7 +1782,7 @@ class ManipulationAgent(BaseAgent):
         from utils.utm_clear_cycle import current_clear, run_clear_manipulation
         if current_clear(state):
             return await run_clear_manipulation(state, ctx, spec=self._spec(state))
-        from agents.manipulation_decision import select_manipulation_tool, review_manipulation_result, allows, claim_skill_execution
+        from agents.manipulation.decision import select_manipulation_tool, review_manipulation_result, allows, claim_skill_execution
         skill_decision = None
         result_decision = None
         strategy = self._strategy(state)

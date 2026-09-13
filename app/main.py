@@ -73,9 +73,9 @@ from mcp_tools.lerobot_schemas import IsaacLabSyntheticRequest
 from self_evolution import EvolutionTaskCreate, SelfEvolutionService
 from self_evolution.models import EvolutionActivationRequest, EvolutionRollbackRequest
 
-from agents.manipulation_agent import ManipulationAgent
-from agents.bo_agent import BOAgent
-from agents.equipment_agent import LabEquipmentAgent
+from agents.manipulation.agent import ManipulationAgent
+from agents.bo.agent import BOAgent
+from agents.equipment.agent import LabEquipmentAgent
 from app.bootstrap import load_runtime
 from graphs import ATRLangGraphCompiler, GraphConfig, GraphVersionStore, HandlerRegistry, ModuleConfig, ModuleConfigStore, load_graph_config
 from graphs.generated_adapter import GENERATED_MODULE_HANDLER_ID, generated_adapter_enabled, generated_adapter_path, validate_generated_adapter_file
@@ -209,7 +209,20 @@ controller = load_runtime()
 def _installed_agent_module(module_id: str):
     registry = getattr(getattr(controller, "_deps", None), "agent_registry", None)
     lookup = getattr(registry, "get_module", None)
-    return lookup(module_id) if callable(lookup) else None
+    installed = lookup(module_id) if callable(lookup) else None
+    if installed is not None:
+        return installed
+    names = getattr(registry, "names", None)
+    get_installed = getattr(registry, "get_installed", None)
+    if not callable(names) or not callable(get_installed):
+        return None
+    for agent_name in names():
+        owner = get_installed(agent_name)
+        core_module = getattr(owner, "core_module", None)
+        contract = core_module() if callable(core_module) else None
+        if contract is not None and contract.module_id == module_id:
+            return contract
+    return None
 
 
 @app.get("/module-assets/{module_id}/{asset_path:path}")
@@ -495,26 +508,6 @@ LIVE_AGENT_REPORT_PROFILES: dict[str, dict[str, object]] = {
         ],
         "checklist": ["Validate required inputs", "Emit system handoff messages", "Stop on unresolved approval"],
     },
-    "knowledge": {
-        "title": "Knowledge Memory / Evidence Update",
-        "summary": "Writes validated outcomes into session/project knowledge so BO and later reports use observed evidence.",
-        "focus_rows": [
-            {"label": "Memory", "value": "experiment id, specimen id, final parameters, metrics, and artifacts"},
-            {"label": "Quality", "value": "provenance, duplicate detection, uncertainty, and failed-run notes"},
-            {"label": "Consumers", "value": "BO candidate selection and final report generation"},
-        ],
-        "checklist": ["Store observed data", "Link artifacts", "Expose BO-ready row"],
-    },
-    "guardian": {
-        "title": "Safety Gate / Continue-Stop Decision",
-        "summary": "Checks live/test gate results, hardware risk, and operator approvals before continuation.",
-        "focus_rows": [
-            {"label": "Gate", "value": "safe/hold/retry/replan/stop decision with reason"},
-            {"label": "Risk", "value": "device errors, missing approvals, unsafe bridge state, failed validation"},
-            {"label": "Action", "value": "continue workflow, request operator input, or trigger safe stop"},
-        ],
-        "checklist": ["Require approval when needed", "Surface blocking errors", "Record final decision"],
-    },
 }
 
 
@@ -694,7 +687,7 @@ async def keep_startup_side_effect_free() -> None:
     await _source_ingestion_service().start()
     # Restore Analysis queue metadata only. Computation requires an explicit
     # active-runtime admission; GUI startup must not launch archived solvers.
-    from agents.analysis_runtime import service_for
+    from agents.analysis.runtime import service_for
     improvement = service_for(controller._deps.agent_context)
     if improvement is not None:
         improvement.recover_existing()
@@ -5095,7 +5088,7 @@ def _module_management_lifecycle(module_id: str, payload: dict[str, Any]) -> dic
 
 def _runtime_agent_manifests_payload(graph_id: str | None = None, *, include_unattached: bool = False) -> dict[str, object]:
     """Merge graph, module, and optional UI descriptors into Live GUI agent manifests."""
-    from agents.orchestrator_capabilities import OwnerCatalog
+    from agents.core.orchestrator.capabilities import OwnerCatalog
 
     if graph_id is None:
         catalog = controller._planning_setup_catalog()
@@ -5152,7 +5145,7 @@ def _runtime_agent_manifests_payload(graph_id: str | None = None, *, include_una
         short = str(ui.get("short") or _agent_manifest_short(agent_id, manifest_label))
         icon = str(ui.get("icon") or _agent_manifest_icon_path(agent_id))
         chat = ui.get("chat") if isinstance(ui.get("chat"), dict) else runtime_contract.get("chat_policy") if isinstance(runtime_contract.get("chat_policy"), dict) else {}
-        installed = controller._deps.agent_registry.module_for_agent(handler.removeprefix("agent."))
+        installed = _installed_agent_module(module_id)
         return {
             "id": agent_id,
             "label": manifest_label,
@@ -6180,6 +6173,20 @@ def _validate_module_payload(module_id: str, payload: dict[str, Any]) -> list[st
         errors.append(f"module schema validation failed: {exc}")
     if module.get("id") != module_id:
         errors.append(f"module_id path/body mismatch: {module_id} != {module.get('id')}")
+    if module.get("owner_plan") is not None:
+        installed = _installed_agent_module(module_id)
+        owner = (
+            controller._deps.agent_registry.get_installed(installed.agent_name)
+            if installed is not None else None
+        )
+        validate_declaration = getattr(owner, "validate_plan_declaration", None)
+        if not callable(validate_declaration):
+            errors.append(f"owner_plan is unsupported for module: {module_id}")
+        else:
+            try:
+                validate_declaration(copy.deepcopy(module["owner_plan"]), controller._state)
+            except (TypeError, ValueError) as exc:
+                errors.append(f"owner_plan validation failed: {exc}")
     execution_graph = module.get("execution_graph")
     installed_owner = controller._deps.agent_registry.get_module(module_id)
     catalog = _module_execution_catalog(module_id)
@@ -6314,14 +6321,14 @@ def _validate_module_payload(module_id: str, payload: dict[str, Any]) -> list[st
 
 def _module_execution_catalog(module_id: str):
     """Return a code-owned operation catalog for explicitly migrated modules."""
-    installed = controller._deps.agent_registry.get_module(module_id)
+    installed = _installed_agent_module(module_id)
     if installed is not None:
         agent = controller._deps.agent_registry.get_installed(installed.agent_name)
         catalog = getattr(agent, "execution_catalog", None)
         if callable(catalog):
             return catalog()
     if module_id == "orchestrator":
-        from agents.orchestrator_execution import orchestrator_execution_catalog
+        from agents.core.orchestrator.execution import orchestrator_execution_catalog
 
         agent = controller._deps.agent_registry.get_installed(controller._deps.orchestrator_agent_name)
         return orchestrator_execution_catalog(agent, context=None, handlers=None)
@@ -6805,73 +6812,20 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
         )
         report_decisions = decisions
         report_metrics = role_specific["run_health"]
-    installed = controller._deps.agent_registry.module_for_agent(definition.get("handler", "").removeprefix("agent."))
+    installed = _installed_agent_module(definition["module_id"])
     if installed is not None and installed.project_report is not None:
         role_specific.update(installed.describe().get("report_profile", {}))
         # Request-only context preserves owner observation precedence without a new store.
-        projection = installed.project_report({**metadata, "_projection_state": state}, agent_payload)
+        projection_metadata = {**metadata, "_projection_state": state}
+        if definition["agent_id"] == "knowledge":
+            projection_metadata["_relation_reconciliation"] = _knowledge_relation_summary()
+        projection = installed.project_report(projection_metadata, agent_payload)
         role_specific.update(projection["role_specific"])
         report_decisions = projection["decisions"]
         report_metrics = projection["metrics"]
         module_sections = {key: value for key, value in projection.items()
                            if key not in {"role_specific", "decisions", "metrics"}}
-    knowledge_report = None
-    if definition["agent_id"] == "knowledge":
-        knowledge_payload = metadata.get("knowledge") if isinstance(metadata.get("knowledge"), dict) else {}
-        knowledge_report = knowledge_payload.get("knowledge_report") if isinstance(knowledge_payload.get("knowledge_report"), dict) else {}
-        knowledge_context = knowledge_payload.get("knowledge_context") if isinstance(knowledge_payload.get("knowledge_context"), dict) else {}
-        evolution_proposal = knowledge_payload.get("evolution_proposal") if isinstance(knowledge_payload.get("evolution_proposal"), dict) else {}
-        role_specific["relation_reconciliation"] = _knowledge_relation_summary()
-        if knowledge_report:
-            memory_intake = knowledge_report.get("memory_intake") if isinstance(knowledge_report.get("memory_intake"), dict) else {}
-            self_evolution = knowledge_report.get("self_evolution") if isinstance(knowledge_report.get("self_evolution"), dict) else evolution_proposal
-            packs = self_evolution.get("evidence_packs") if isinstance(self_evolution.get("evidence_packs"), list) else []
-            performance = knowledge_report.get("agent_performance_records") if isinstance(knowledge_report.get("agent_performance_records"), list) else []
-            role_specific["summary"] = "Research memory board with provenance, failure/success pattern memory, agent performance ledger, and self-evolution evidence packs."
-            role_specific["memory_ledger"] = {
-                "experiment_record_id": memory_intake.get("experiment_record_id", ""),
-                "agent_performance_count": memory_intake.get("agent_performance_count", 0),
-                "failure_pattern_count": memory_intake.get("failure_pattern_count", 0),
-                "success_pattern_count": memory_intake.get("success_pattern_count", 0),
-                "evolution_pack_count": memory_intake.get("evolution_pack_count", len(packs)),
-                "artifact_paths": knowledge_payload.get("artifact_paths", {}),
-            }
-            role_specific["retrieval_panel"] = {
-                "coverage": knowledge_payload.get("retrieval_coverage", 0.0),
-                "local_chunks": knowledge_payload.get("local_chunks", 0),
-                "web_results": knowledge_payload.get("web_results", 0),
-                "sources": (knowledge_report.get("data_quality_map") or {}).get("retrieval_sources", {}) if isinstance(knowledge_report.get("data_quality_map"), dict) else {},
-            }
-            role_specific["failure_success_library"] = {
-                "failure_patterns": knowledge_report.get("failure_patterns", []),
-                "success_patterns": knowledge_report.get("success_patterns", []),
-            }
-            role_specific["self_evolution_board"] = {
-                "status": self_evolution.get("status", ""),
-                "top_packs": packs[:5],
-                "prefill_tasks": self_evolution.get("prefill_tasks", []),
-                "outcomes": self_evolution.get("outcomes", knowledge_report.get("evolution_outcomes", [])),
-                "no_evolution_needed_reason": self_evolution.get("no_evolution_needed_reason", ""),
-            }
-            role_specific["data_quality_map"] = knowledge_report.get("data_quality_map", {})
-            role_specific["graph_backend_status"] = knowledge_report.get("graph_backend_status", knowledge_context.get("graph_backend_status", {}))
-            role_specific["agent_performance_memory"] = performance
-            role_specific["handoff_packet"] = {
-                "knowledge_context": knowledge_context,
-                "evolution_proposal": evolution_proposal,
-            }
-            report_decisions = [
-                {
-                    "decision": "prepare_self_evolution_evidence_pack",
-                    "target_type": pack.get("target_type", ""),
-                    "target_id": pack.get("target_id", ""),
-                    "priority": pack.get("priority", 0.0),
-                    "rationale": "; ".join(pack.get("why_this_target", [])[:2]) if isinstance(pack, dict) else "",
-                }
-                for pack in packs[:8]
-                if isinstance(pack, dict)
-            ] or [{"decision": "no_evolution_needed", "rationale": self_evolution.get("no_evolution_needed_reason", "No evidence pack generated.")}]
-            report_metrics = knowledge_report.get("evidence_quality", {}) if isinstance(knowledge_report.get("evidence_quality"), dict) else knowledge_context.get("evidence_quality", {}) if isinstance(knowledge_context.get("evidence_quality"), dict) else {}
+    knowledge_report = module_sections.get("knowledge_report")
     process_steps = [
         {
             "timestamp": event.get("ts") or event.get("timestamp") or "",
@@ -7535,12 +7489,17 @@ async def get_runtime_module(module_id: str) -> dict[str, object]:
     normalized = ModuleConfigStore.normalize_payload(dict(payload))
     module = normalized.get("module", {}) if isinstance(normalized, dict) else {}
     compiled = _compiled_module_execution_graph(module_id, module) if catalog is not None and isinstance(module, dict) else None
+    owner = controller._deps.agent_registry.get_installed(installed.agent_name) if installed is not None else None
+    plan_contract = getattr(owner, "plan_contract", None)
+    owner_plan_contract = plan_contract() if callable(plan_contract) else None
     return {
         "ok": True,
         "module": payload,
         "execution_catalog": catalog.describe() if catalog is not None else None,
         "execution_graph_revision": compiled.revision if compiled is not None else None,
         "implementation": installed.describe() if installed else None,
+        "owner_plan_contract": owner_plan_contract,
+        "owner_plan_state": "configured" if isinstance(module, dict) and module.get("owner_plan") is not None else "default",
         "loaded": module_id in _RUNTIME_MODULE_MANAGEMENT_LOADED,
         "runtime_effect": _module_management_runtime_effect(),
         "lifecycle": _module_management_lifecycle(module_id, payload),
@@ -7785,7 +7744,7 @@ async def validate_runtime_graph_draft(graph_id: str, req: RuntimeGraphSaveReque
 
 def _graph_module_lifecycle_preview(draft: GraphConfig) -> dict[str, object]:
     """Compare owner bindings without applying the draft or contacting equipment."""
-    from agents.orchestrator_capabilities import OwnerCatalog
+    from agents.core.orchestrator.capabilities import OwnerCatalog
 
     applied = controller._planning_setup_catalog()
     draft_catalog = OwnerCatalog(controller._deps.agent_registry, draft,

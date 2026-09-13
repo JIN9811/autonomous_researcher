@@ -37,10 +37,10 @@ def numeric_archive_guard(tmp_path, monkeypatch):
     from scripts.orchestrator_verification_guard import VerificationGuard
     with VerificationGuard() as guard:
         guard.allowed_tools.update({"cae.run_static_analysis", "experiment.benchmark", "experiment.evaluate", "source.query"})
-        import agents.analysis_agent as analysis
+        import agents.analysis.agent as analysis
         original_resolve = analysis.resolve_path
         monkeypatch.setattr(analysis, "resolve_path", lambda p: tmp_path / str(p) if str(p).startswith(("runs", "memory", "artifacts", "output")) else original_resolve(p))
-        from agents.analysis_runtime import AnalysisRuntimeService
+        from agents.analysis.runtime import AnalysisRuntimeService
         monkeypatch.setattr(AnalysisRuntimeService, "resume", lambda *a, **k: False)
         yield guard
         assert guard.physical_call_count == 0 and guard.denied == [], guard.denied
@@ -178,7 +178,7 @@ def printer_io(controller, monkeypatch, tmp_path, guard):
 
 
 def equipment_io(controller, monkeypatch, tmp_path, guard):
-    from agents.equipment_agent import LabEquipmentAgent
+    from agents.equipment.agent import LabEquipmentAgent
     from mcp_tools.equipment_tools import register_equipment_tools
     from utils.equipment_utm_skills import stage_utm_skill_packages, bind_deployed_utm_skills, UTM_SKILL_BINDINGS
     from utils.equipment_skill_runtime import EquipmentSkillRegistry, canonical_sha256

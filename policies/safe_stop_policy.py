@@ -15,7 +15,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: reason templates
 - Risky places to edit: semantics used in UI
-- Related files: agents/guardian_agent.py, orchestrator/run_loop.py
+- Related files: agents/core/guardian/agent.py, orchestrator/run_loop.py
 """
 
 from __future__ import annotations

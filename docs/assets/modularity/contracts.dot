@@ -1,0 +1,36 @@
+digraph modularity_contracts {
+  rankdir=TB;
+  graph [bgcolor="white", pad="0.28", nodesep="0.42", ranksep="0.62", fontname="DejaVu Sans", fontsize=16, label="Packages describe composition; registered runtime owns execution", labelloc=t];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=10, margin="0.13,0.09"];
+  edge [color="#334155", fontname="DejaVu Sans", fontsize=9, arrowsize=0.72];
+
+  experimental [label="Experimental Package\ngraph + package references\n+ detached module configurations", fillcolor="#F4F0FF", color="#6750A4"];
+  agent_package [label="Agent Package\nowner + version + dependencies", fillcolor="#F4F0FF", color="#6750A4"];
+  orchestration [label="Existing Orchestration Plan\ngraph + LangGraph runtime", penwidth=2];
+  core [label="Core owners\nORC · KNW · GRD", fillcolor="#E8F6EC", color="#2E7D59"];
+  specialist [label="Specialist agent modules\nregistered owner handlers", fillcolor="#E8F6EC", color="#2E7D59"];
+  tools [label="Registered tools + gates\nauthority and validation", shape=diamond, fillcolor="#FFF3CD", color="#946200"];
+  bridge [label="Device Bridge module\nprovider / command / status", fillcolor="#FDECEC", color="#A33A3A"];
+  evidence [label="Run evidence + artifacts", shape=folder, fillcolor="#F7F8FA", color="#64748B"];
+
+  experimental -> orchestration [label="references", style=dashed, color="#6750A4"];
+  experimental -> agent_package [label="references", style=dashed, color="#6750A4"];
+  agent_package -> specialist [label="describes owner", style=dashed, color="#6750A4"];
+  agent_package -> bridge [label="declares dependency", style=dashed, color="#6750A4"];
+  orchestration -> core [label="dispatches", penwidth=1.6];
+  orchestration -> specialist [label="dispatches", penwidth=1.6];
+  core -> evidence [label="returns records"];
+  specialist -> tools [label="requests allowed action"];
+  tools -> bridge [label="gated execution", penwidth=1.6];
+  bridge -> evidence [label="status / effect evidence"];
+  specialist -> evidence [label="result / archive"];
+
+  legend [shape=plaintext, label=<
+    <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+      <TR><TD><B>Line</B></TD><TD><B>Meaning</B></TD></TR>
+      <TR><TD>solid</TD><TD>runtime call or evidence flow</TD></TR>
+      <TR><TD><FONT COLOR="#6750A4">dashed</FONT></TD><TD>package reference / composition only</TD></TR>
+      <TR><TD>diamond</TD><TD>registered validation or authority gate</TD></TR>
+    </TABLE>
+  >];
+}

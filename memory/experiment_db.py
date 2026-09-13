@@ -15,7 +15,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: extension methods
 - Risky places to edit: breaking compatibility import path
-- Related files: knowledge/experiment_db.py, agents/knowledge_agent.py
+- Related files: knowledge/experiment_db.py, agents/core/knowledge/agent.py
 """
 
 from knowledge.experiment_db import ExperimentDB

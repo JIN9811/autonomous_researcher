@@ -222,3 +222,73 @@ test('stale and failed responses preserve the current draft; only the owning suc
     result: { ok: true, errors: [], draft: imported }, currentDraft: current,
   }), { applied: true, reason: 'accepted', draft: imported, errors: [] });
 });
+
+test('owner plan controls switch default/configured on detached module drafts and parse settings', () => {
+  const source = { module: { id: 'knowledge', handler: 'agent.knowledge_agent', notes: 'kept' } };
+  const configured = packages.buildOwnerPlanDraft({
+    owner: 'knowledge', modulePayload: source, mode: 'configured',
+    id: 'knowledge_reference', version: '1.0.0',
+    settingsText: '{"corpora":["markdown"],"decision_max_steps":6}',
+  });
+  assert.equal(configured.ok, true);
+  assert.deepEqual(configured.modulePayload.module.owner_plan, {
+    schema: 'ax4lab.owner_plan.v1', id: 'knowledge_reference', owner: 'knowledge',
+    version: '1.0.0', contract_version: '1.0.0',
+    settings: { corpora: ['markdown'], decision_max_steps: 6 },
+  });
+  assert.equal(source.module.owner_plan, undefined);
+  assert.equal(packages.ownerPlanControlState('knowledge', configured.modulePayload).mode, 'configured');
+
+  const cleared = packages.buildOwnerPlanDraft({
+    owner: 'knowledge', modulePayload: configured.modulePayload, mode: 'default',
+  });
+  assert.equal(cleared.ok, true);
+  assert.equal(cleared.modulePayload.module.owner_plan, undefined);
+  assert.equal(cleared.modulePayload.module.notes, 'kept');
+  assert.equal(packages.ownerPlanControlState('knowledge', cleared.modulePayload).mode, 'default');
+});
+
+test('owner plan controls reject invalid JSON and preserve the previous detached draft', () => {
+  const source = { module: { id: 'guardian', handler: 'agent.guardian_agent' } };
+  const invalid = packages.buildOwnerPlanDraft({
+    owner: 'guardian', modulePayload: source, mode: 'configured',
+    id: 'guardian_reference', version: '1.0.0', settingsText: '[]',
+  });
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.errors.join(' '), /settings.*object/i);
+  assert.deepEqual(invalid.modulePayload, source);
+  const malformed = packages.buildOwnerPlanDraft({
+    owner: 'guardian', modulePayload: source, mode: 'configured',
+    id: 'guardian_reference', version: '1.0.0', settingsText: '{bad',
+  });
+  assert.equal(malformed.ok, false);
+  assert.match(malformed.errors.join(' '), /valid JSON/i);
+  assert.deepEqual(malformed.modulePayload, source);
+});
+
+test('owner plan response state distinguishes draft validation, applied success, and errors', () => {
+  assert.deepEqual(packages.ownerPlanResponseState('validate', { ok: true, errors: [] }), {
+    ok: true, kind: 'ok', title: 'Draft valid', detail: 'Validated only; active configuration is unchanged.',
+  });
+  assert.deepEqual(packages.ownerPlanResponseState('apply', { ok: true, activated: true, errors: [] }), {
+    ok: true, kind: 'ok', title: 'Applied', detail: 'Saved for future runs through the active owner module.',
+  });
+  const failed = packages.ownerPlanResponseState('apply', { ok: false, errors: ['unsupported setting'] });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.kind, 'error');
+  assert.match(failed.title, /failed/i);
+  assert.doesNotMatch(failed.title, /applied/i);
+});
+
+test('imported module configuration projects a configured owner plan without applying it', () => {
+  const imported = {
+    module: { id: 'knowledge', handler: 'agent.knowledge_agent', owner_plan: {
+      schema: 'ax4lab.owner_plan.v1', id: 'imported_reference', owner: 'knowledge',
+      version: '3.2.1', contract_version: '1.0.0', settings: { corpora: ['markdown'] },
+    } },
+  };
+  assert.deepEqual(packages.ownerPlanControlState('knowledge', imported), {
+    mode: 'configured', id: 'imported_reference', version: '3.2.1',
+    contractVersion: '1.0.0', settings: { corpora: ['markdown'] },
+  });
+});

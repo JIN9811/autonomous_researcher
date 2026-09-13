@@ -16,7 +16,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: scoring formula and summary fields
 - Risky places to edit: schema expected by memory DB and guardian
-- Related files: knowledge/experiment_db.py, agents/knowledge_agent.py
+- Related files: knowledge/experiment_db.py, agents/core/knowledge/agent.py
 """
 
 from __future__ import annotations

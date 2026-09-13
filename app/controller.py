@@ -39,12 +39,12 @@ from copy import deepcopy
 import httpx
 
 from agents.base_agent import AgentContext
-from agents.bo_agent import BOAgent
-from agents.design_agent import DesignAgent
+from agents.bo.agent import BOAgent
+from agents.design.agent import DesignAgent
 from agents.registry import AgentRegistry
-from agents.orchestrator_capabilities import OwnerCatalog
-from agents.orchestrator_decision import classify_chat_request
-from agents.knowledge_context import build_reference_context, mark_reference_delivered, record_reference_use
+from agents.core.orchestrator.capabilities import OwnerCatalog
+from agents.core.orchestrator.decision import classify_chat_request
+from agents.core.knowledge.context import build_reference_context, mark_reference_delivered, record_reference_use
 from app.planning_setup import project_setup, propose_from_chat, planning_decision_settings
 from orchestrator.experimental_setup import SetupStore, SetupConflict, SetupValidationError
 from orchestrator.setup_application import SetupApplication, pending_setup_blocks

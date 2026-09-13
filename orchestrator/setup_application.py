@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from agents.orchestrator_capabilities import OwnerCatalog
+from agents.core.orchestrator.capabilities import OwnerCatalog
 from orchestrator.experimental_setup import SetupConflict, SetupStore
 
 

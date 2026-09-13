@@ -14,8 +14,8 @@ pytestmark = pytest.mark.usefixtures("handoff_no_external")
 def controller(tmp_path, handoff_no_external):
     from app.controller import MainController, ControllerDeps
     from agents.registry import AgentRegistry
-    from agents.orchestrator_agent import OrchestratorAgent
-    from agents.bo_agent import BOAgent
+    from agents.core.orchestrator.agent import OrchestratorAgent
+    from agents.bo.agent import BOAgent
     registry = AgentRegistry()
     registry.register(OrchestratorAgent())
     registry.register(BOAgent())
@@ -363,7 +363,7 @@ def test_setup_restart_reloads_same_store_and_never_resumes(controller):
 def test_delayed_proposal_rejects_graph_change_and_uses_module_budget(controller, monkeypatch):
     block = goal_block(controller)
     from graphs import load_graph_config
-    from agents.orchestrator_capabilities import OwnerCatalog
+    from agents.core.orchestrator.capabilities import OwnerCatalog
     graph = load_graph_config("graphs/configs/atr_closed_loop.yaml")
     catalogs = [OwnerCatalog(controller._deps.agent_registry, graph)]
     monkeypatch.setattr(controller, "_planning_setup_catalog", lambda: catalogs[0])

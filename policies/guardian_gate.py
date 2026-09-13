@@ -18,7 +18,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: reason-code mapping and risk thresholds
 - Risky places to edit: decision values consumed by Runtime GUI and GuardianAgent
-- Related files: orchestrator/langgraph_runtime.py, agents/guardian_agent.py
+- Related files: orchestrator/langgraph_runtime.py, agents/core/guardian/agent.py
 """
 
 from __future__ import annotations

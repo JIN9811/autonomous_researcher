@@ -15,7 +15,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: retrieval filters
 - Risky places to edit: storage interface expected by agents
-- Related files: agents/knowledge_agent.py, app/controller.py
+- Related files: agents/core/knowledge/agent.py, app/controller.py
 """
 
 from __future__ import annotations

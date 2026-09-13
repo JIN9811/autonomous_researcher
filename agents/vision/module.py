@@ -19,7 +19,6 @@ VISION_MODULE = AgentModule(
         "backend": {
             "entrypoint": "agents/vision/agent.py", "decision": "agents/vision/decision.py",
             "presentation": "agents/vision/presentation.py",
-            "compatibility_imports": ["agents.vision_agent", "agents.vision_decision"],
         },
         "configuration": {"setup_write_enabled": False, "source": "graphs/modules/vision/module.yaml",
             "inputs": ["OrchestratorState.current_experiment_spec"],

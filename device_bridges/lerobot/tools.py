@@ -16,7 +16,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: additive tool names and payload normalization
 - Risky places to edit: response key contracts consumed by GUI/tests
-- Related files: app/bootstrap.py, app/main.py, agents/manipulation_agent.py
+- Related files: app/bootstrap.py, app/main.py, agents/manipulation/agent.py
 """
 
 from __future__ import annotations

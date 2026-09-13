@@ -95,7 +95,7 @@ def make_router(root_provider, service_provider):
             requested = service.request_cancel(run_id, job_id)
         else:
             # Explicit operator write, unlike GET. A remote owning worker observes it.
-            from agents.analysis_improvement import ImprovementStore
+            from agents.analysis.improvement import ImprovementStore
             requested = ImprovementStore(path.parent).request_cancel(job_id)
         return {'job_id': job_id, 'cancel_requested': requested}
 

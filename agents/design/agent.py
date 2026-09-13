@@ -16,7 +16,7 @@ Dependencies:
 Modification guide:
 - Evaluation/decision boundary: agents/design/decision.py; legacy scores are compatibility only
 - Risky places to edit: top-level AgentResult keys consumed by RunLoop/downstream agents
-- Related files: docs/agents/design_agent.md, agents/specimen_agent.py
+- Related files: docs/agents/design_agent.md, agents/specimen/agent.py
 """
 
 from __future__ import annotations

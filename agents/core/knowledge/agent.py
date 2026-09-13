@@ -56,8 +56,57 @@ class KnowledgeAgent(BaseAgent):
 
     name = "knowledge_agent"
 
+    def plan_contract(self) -> dict[str, Any]:
+        from agents.core.knowledge.plan import knowledge_plan_contract
+
+        return knowledge_plan_contract()
+
+    def resolve_plan(self, state: OrchestratorState) -> dict[str, Any]:
+        from agents.core.knowledge.plan import resolve_knowledge_plan
+
+        return resolve_knowledge_plan(state)
+
+    def validate_plan(self, plan: dict[str, Any], state: OrchestratorState) -> dict[str, Any]:
+        from agents.core.knowledge.plan import validate_knowledge_plan
+
+        return validate_knowledge_plan(plan, state)
+
+    def validate_plan_declaration(self, plan: dict[str, Any], state: OrchestratorState) -> dict[str, Any]:
+        from agents.core.knowledge.plan import validate_knowledge_plan_declaration
+
+        return validate_knowledge_plan_declaration(plan, state)
+
+    def execution_catalog(self):
+        from agents.core.knowledge.execution import knowledge_execution_catalog
+
+        return knowledge_execution_catalog(self)
+
+    @classmethod
+    def core_module(cls):
+        from agents.core.knowledge.module import CORE_MODULE
+
+        return CORE_MODULE
+
     @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
+        return await self._execute(state, ctx)
+
+    async def _execute(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
+        from agents.core.knowledge.execution import default_knowledge_execution_graph, execute_knowledge_graph
+        from agents.execution_graph import execution_event_emitter, execution_graph_from_context
+
+        execution = await execute_knowledge_graph(
+            self,
+            state,
+            ctx,
+            graph=execution_graph_from_context(ctx, "knowledge", default_knowledge_execution_graph),
+            emit=execution_event_emitter(ctx),
+        )
+        if not isinstance(execution.result, AgentResult):
+            raise RuntimeError("Knowledge execution graph completed without AgentResult")
+        return execution.result
+
+    async def _run_task(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
         query = (
             f"{state.active_goal}. "
             f"Current stage={state.stage.value}. "
@@ -92,15 +141,22 @@ class KnowledgeAgent(BaseAgent):
             else {}
         )
 
-        settings = state.run_metadata.get("knowledge_settings", {})
-        if not isinstance(settings, dict):
-            raise ValueError("knowledge_settings must be an object")
+        from agents.core.knowledge.plan import (
+            applicability_for_knowledge_settings,
+            resolve_runtime_knowledge_plan,
+        )
+
+        settings, owner_plan = resolve_runtime_knowledge_plan(state, ctx)
         scope = settings.get("scope", {})
         if not isinstance(scope, dict):
             raise ValueError("Knowledge scope must be an object")
         # Exact experimental conditions belong in applicability, not inferred
         # from a word such as test/live (test mode may actuate real equipment).
-        applicability = applicability_for(state)
+        applicability = (
+            applicability_for(state)
+            if owner_plan is None
+            else applicability_for_knowledge_settings(settings, state)
+        )
         if applicability and "applicability" not in scope:
             scope = {**scope, "applicability": applicability}
         content = {"objective_score": objective, "uncertainty": uncertainty,
@@ -284,6 +340,8 @@ class KnowledgeAgent(BaseAgent):
             "graph_backend_status": graph_backend_status,
             "graph_event_status": graph_event_status,
         }
+        if owner_plan is not None:
+            knowledge_context["owner_plan"] = deepcopy(owner_plan)
         evolution_proposal = {
             "schema": "evolution_proposal.v1",
             "run_id": state.run_id,
@@ -327,6 +385,8 @@ class KnowledgeAgent(BaseAgent):
             "graph_event_status": graph_event_status,
             "warnings": failure_tags,
         }
+        if owner_plan is not None:
+            knowledge_report["owner_plan"] = deepcopy(owner_plan)
         full_evidence_packs = [pack.model_dump(mode="json") for pack in evidence_packs]
         artifact_paths = store.write_run_artifacts(
             state.run_id,
@@ -384,6 +444,7 @@ class KnowledgeAgent(BaseAgent):
                     "graph_event_status": graph_event_status,
                     "guardian_incident_evidence": guardian_incident_evidence,
                     "guardian_incident_count": guardian_incident_evidence.get("incident_count", 0),
+                    **({"owner_plan": deepcopy(owner_plan)} if owner_plan is not None else {}),
                 },
                 "knowledge_context": knowledge_context,
                 "evolution_proposal": compact_evolution_proposal,

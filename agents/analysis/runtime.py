@@ -100,7 +100,7 @@ def _acquisition_identity(state, source, original_stl, hashes):
     # Current Equipment managed exports bind loop/repeat in an exact filename,
     # not in each packet. Reuse its existing parser/hash binding against the
     # current request context; never infer identity from an arbitrary basename.
-    from agents.equipment_agent import LabEquipmentAgent
+    from agents.equipment.agent import LabEquipmentAgent
     from utils.equipment_agentic_task import bind_cycle_csv_artifact
     unbound = deepcopy(equipment)
     for artifact in unbound.get('output_artifacts', []):

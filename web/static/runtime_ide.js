@@ -206,7 +206,9 @@ function rememberExecutionContract(moduleId, result) {
 function moduleRequestFingerprint(moduleId, tab) {
   let payload=tab?.modulePayload || modulePayloadCache.get(moduleId) || null;
   let graph=tab?.graph || null;
-  if(activeModuleId===moduleId) {
+  const activeTabKind=graphTabs.find(item=>item.id===activeGraphTabId)?.kind || "";
+  const auxiliaryView=["packages","bridges"].includes(activeTabKind);
+  if(activeModuleId===moduleId && !auxiliaryView && (!tab || activeGraphTabId===tab.id)) {
     try { payload=parseModuleEditor(); } catch { payload={invalid_json:moduleJson.value}; }
   }
   if(tab && activeGraphTabId===tab.id) {
@@ -228,14 +230,28 @@ function moduleRequestOwnsView(request) {
     && activeGraphTabId===request.viewTabId && activeModuleId===request.viewModuleId;
 }
 
+function moduleRequestDraftState(request) {
+  const {moduleId}=request;
+  if(moduleRequestTokens.get(moduleId)!==request.token)return {owns:false,unchanged:false,tab:null};
+  const tab=graphTabs.find(item=>item.id===`${MODULE_TAB_PREFIX}${moduleId}`) || null;
+  if(tab!==request.tab)return {owns:false,unchanged:false,tab};
+  return {owns:true,unchanged:moduleRequestFingerprint(moduleId,tab)===request.fingerprint,tab};
+}
+
+function ownerPlanRequestDraftState(request) {
+  const state=moduleRequestDraftState(request);
+  const controlsFingerprint=JSON.stringify(ownerPlanControlValues(request.moduleId));
+  return {...state,unchanged:state.unchanged && controlsFingerprint===request.ownerPlanControlFingerprint};
+}
+
 function applyModuleResponse(request,result,{saved=false}={}) {
   const {moduleId}=request;
-  if(moduleRequestTokens.get(moduleId)!==request.token) return false;
+  const requestState=moduleRequestDraftState(request);
+  if(!requestState.owns)return false;
   const payload=normalizedModulePayload(result.module);
   if(payload.module?.id!==moduleId) throw new Error(`Unexpected module response for ${moduleId}`);
-  const tab=graphTabs.find(item=>item.id===`${MODULE_TAB_PREFIX}${moduleId}`) || null;
-  if(tab!==request.tab) return false; // A closed/reopened tab owns a different draft.
-  const unchanged=moduleRequestFingerprint(moduleId,tab)===request.fingerprint && (saved || !tab?.dirty);
+  const {tab}=requestState;
+  const unchanged=requestState.unchanged && (saved || !tab?.dirty);
   rememberExecutionContract(moduleId,result);
   const backendGraph=modulePayloadToGraph(payload);
   if(tab) {
@@ -5834,6 +5850,172 @@ function packageBindingRows(composition) {
   });
 }
 
+function ownerPlanModulePayload(owner) {
+  const tab = graphTabs.find((item) => item?.kind === "module" && item.moduleId === owner);
+  return cloneConfig(tab?.modulePayload || modulePayloadCache.get(owner) || null);
+}
+
+function ownerPlanControlValues(owner) {
+  const root = packageCompositionOutput.querySelector(`[data-owner-plan-card="${owner}"]`);
+  const mode = root?.querySelector(`[data-owner-plan-mode="${owner}"]:checked`)?.value || "default";
+  return {
+    mode,
+    id: root?.querySelector(`[data-owner-plan-id="${owner}"]`)?.value || `${owner}_reference`,
+    version: root?.querySelector(`[data-owner-plan-version="${owner}"]`)?.value || "1.0.0",
+    contractVersion: root?.querySelector(`[data-owner-plan-contract="${owner}"]`)?.value || "1.0.0",
+    settingsText: root?.querySelector(`[data-owner-plan-settings="${owner}"]`)?.value || "{}",
+  };
+}
+
+function storeOwnerPlanDraft(owner, payload) {
+  const detached = cloneConfig(payload);
+  modulePayloadCache.set(owner, detached);
+  const tab = graphTabs.find((item) => item?.kind === "module" && item.moduleId === owner);
+  if (tab) {
+    tab.modulePayload = cloneConfig(detached);
+    tab.graph = modulePayloadToGraph(detached);
+    tab.dirty = true;
+  }
+  if (activeModuleId === owner && currentGraphTabKind() === "module") setModuleJson(detached);
+  if (experimentalPackageDraft) {
+    experimentalPackageDraft.module_configurations = {
+      ...(experimentalPackageDraft.module_configurations || {}),
+      [owner]: cloneConfig(detached),
+    };
+  }
+  markModulePreflightDirty(owner, "owner plan draft changed");
+  return detached;
+}
+
+function setOwnerPlanControlStatus(owner, state) {
+  const output = packageCompositionOutput.querySelector(`[data-owner-plan-status="${owner}"]`);
+  if (output) {
+    output.className = `runtime-owner-plan-status ${state?.kind || "idle"}`;
+    output.textContent = `${state?.title || "Draft"}: ${state?.detail || "Not applied."}`;
+  }
+  return state;
+}
+
+function updateOwnerPlanDraftFromControls(owner) {
+  const source = ownerPlanModulePayload(owner);
+  if (!source) {
+    const result = { ok: false, errors: [`${owner} module draft is unavailable.`], modulePayload: source };
+    setOwnerPlanControlStatus(owner, { kind: "error", title: "Draft unavailable", detail: result.errors[0] });
+    return result;
+  }
+  const result = AX4LABExperimentalPackages.buildOwnerPlanDraft({
+    owner,
+    modulePayload: source,
+    ...ownerPlanControlValues(owner),
+  });
+  if (!result.ok) {
+    setOwnerPlanControlStatus(owner, { kind: "error", title: "Draft invalid", detail: result.errors.join("; ") });
+    return result;
+  }
+  storeOwnerPlanDraft(owner, result.modulePayload);
+  setOwnerPlanControlStatus(owner, {
+    kind: "warn",
+    title: "Draft changed",
+    detail: "Unsaved and not active; validate, then explicitly apply for future runs.",
+  });
+  return result;
+}
+
+async function validateOwnerPlanControl(owner) {
+  const draft = updateOwnerPlanDraftFromControls(owner);
+  if (!draft.ok) return draft;
+  const request = captureModuleRequest(owner);
+  request.ownerPlanControlFingerprint = JSON.stringify(ownerPlanControlValues(owner));
+  try {
+    const result = await requestJson(`/api/modules/${owner}/validate`, {
+      method: "POST",
+      body: JSON.stringify({
+        module: draft.modulePayload,
+        reason: "runtime_ide_owner_plan_validate",
+        author: "runtime_ide",
+        activate: false,
+      }),
+    });
+    const requestState = ownerPlanRequestDraftState(request);
+    if (requestState.owns && requestState.unchanged) {
+      setOwnerPlanControlStatus(owner, AX4LABExperimentalPackages.ownerPlanResponseState("validate", result));
+    }
+    return result;
+  } catch (error) {
+    const result = { ok: false, errors: [String(error?.message || error)] };
+    const requestState = ownerPlanRequestDraftState(request);
+    if (requestState.owns && requestState.unchanged) {
+      setOwnerPlanControlStatus(owner, AX4LABExperimentalPackages.ownerPlanResponseState("validate", result));
+    }
+    return result;
+  }
+}
+
+async function applyOwnerPlanControl(owner) {
+  const draft = updateOwnerPlanDraftFromControls(owner);
+  if (!draft.ok) return draft;
+  const request = captureModuleRequest(owner);
+  request.ownerPlanControlFingerprint = JSON.stringify(ownerPlanControlValues(owner));
+  try {
+    const result = await requestJson(`/api/modules/${owner}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        module: draft.modulePayload,
+        reason: "runtime_ide_owner_plan_apply",
+        author: "runtime_ide",
+        activate: true,
+      }),
+    });
+    const state = AX4LABExperimentalPackages.ownerPlanResponseState("apply", result);
+    const requestState = ownerPlanRequestDraftState(request);
+    if (!requestState.owns) return result;
+    if (result?.ok === true && result?.activated === true) {
+      const acknowledgedPayload = cloneConfig(draft.modulePayload);
+      const tab = requestState.tab;
+      if (tab) {
+        tab.baselineModulePayload = cloneConfig(acknowledgedPayload);
+        tab.baselineGraph = cloneConfig(modulePayloadToGraph(acknowledgedPayload));
+        tab.dirty = !requestState.unchanged;
+      }
+      if (!requestState.unchanged) {
+        log(`Applied ${owner} backend baseline; newer local owner plan edits are preserved.`, "warn");
+        renderGraphTabs();
+        return result;
+      }
+    }
+    if (requestState.unchanged) {
+      setOwnerPlanControlStatus(owner, state);
+    }
+    if (state.ok && result?.activated === true && requestState.unchanged) {
+      log(`Applied ${owner} owner plan for future runs; no run was started.`, "ok");
+    }
+    return result;
+  } catch (error) {
+    const result = { ok: false, errors: [String(error?.message || error)] };
+    const requestState = ownerPlanRequestDraftState(request);
+    if (requestState.owns && requestState.unchanged) {
+      setOwnerPlanControlStatus(owner, AX4LABExperimentalPackages.ownerPlanResponseState("apply", result));
+    }
+    return result;
+  }
+}
+
+async function ensureOwnerPlanModuleDrafts() {
+  for (const owner of ["knowledge", "guardian"]) {
+    if (ownerPlanModulePayload(owner)) continue;
+    try {
+      const result = await requestJson(`/api/modules/${owner}`);
+      if (result?.module) {
+        modulePayloadCache.set(owner, normalizedModulePayload(cloneConfig(result.module)));
+        rememberExecutionContract(owner, result);
+      }
+    } catch (error) {
+      log(`Owner plan module unavailable for ${owner}: ${error}`, "warn");
+    }
+  }
+  if (activeGraphTab()?.kind === "packages") renderPackageComposition();
+}
+
 function renderDeviceBridges() {
   const tab = activeGraphTab();
   const runtimeBridges = latestStateSnapshot?.runtime_ide_contract?.device_bridges
@@ -5912,10 +6094,41 @@ function renderPackageComposition() {
         <div class="runtime-package-owner-list">${bridge.owners.map((owner) => `<span class="${owner.inDraft ? "draft" : "installed"}">${escapeHtml(owner.id)} · ${owner.inDraft ? "draft member" : "installed only"}</span>`).join("") || "<span>No Agent Package owners declared.</span>"}</div>
       </div>`).join("") : `<div class="runtime-package-empty"><strong>No Device Bridge modules installed</strong><small>The catalog returned no bridge modules.</small></div>`;
     const bindingRows = bindings.length ? bindings.map((binding) => `<div class="runtime-package-binding"><strong>${escapeHtml(binding.id)}</strong><small>${escapeHtml(binding.kind)} · ${escapeHtml(binding.owner_id)} · requires local configuration</small></div>`).join("") : `<div class="runtime-package-empty"><strong>No missing bindings</strong><small>The current package draft declares no local bindings.</small></div>`;
+    const graph = currentExperimentalPackageGraph();
+    const orchestrationReference = `<div class="runtime-package-binding" data-orchestration-plan-reference>
+      <strong>${escapeHtml(graph.name || graph.id || "Current Orchestration graph")} <em>${escapeHtml(graph.version || "")}</em></strong>
+      <small>Reference only · the existing graph remains the Orchestration Plan and is not copied into an owner declaration.</small>
+    </div>`;
+    const ownerPlans = ["knowledge", "guardian"].map((owner) => {
+      const payload = ownerPlanModulePayload(owner);
+      if (!payload) return `<article class="runtime-owner-plan-card" data-owner-plan-card="${owner}"><strong>${escapeHtml(owner)}</strong><small>Loading owner module draft…</small></article>`;
+      const plan = AX4LABExperimentalPackages.ownerPlanControlState(owner, payload);
+      const configured = plan.mode === "configured";
+      return `<article class="runtime-owner-plan-card${configured ? " configured" : ""}" data-owner-plan-card="${owner}">
+        <div class="runtime-owner-plan-head"><div><strong>${escapeHtml(owner === "knowledge" ? "Knowledge" : "Guardian")} Plan</strong><small>${configured ? "Configured detached draft" : "Default legacy behavior"}</small></div>
+          <div class="runtime-owner-plan-modes" role="radiogroup" aria-label="${escapeHtml(owner)} plan mode">
+            <label><input type="radio" name="owner-plan-${escapeHtml(owner)}" data-owner-plan-mode="${escapeHtml(owner)}" value="default" ${configured ? "" : "checked"}> Default</label>
+            <label><input type="radio" name="owner-plan-${escapeHtml(owner)}" data-owner-plan-mode="${escapeHtml(owner)}" value="configured" ${configured ? "checked" : ""}> Configured</label>
+          </div></div>
+        <div class="runtime-owner-plan-fields" ${configured ? "" : "hidden"}>
+          <label>ID<input data-owner-plan-id="${escapeHtml(owner)}" value="${escapeHtml(plan.id)}"></label>
+          <label>Definition version<input data-owner-plan-version="${escapeHtml(owner)}" value="${escapeHtml(plan.version)}"></label>
+          <label>Contract<input data-owner-plan-contract="${escapeHtml(owner)}" value="${escapeHtml(plan.contractVersion)}" readonly></label>
+          <label class="wide">Settings JSON<textarea data-owner-plan-settings="${escapeHtml(owner)}" rows="5">${escapeHtml(JSON.stringify(plan.settings, null, 2))}</textarea></label>
+        </div>
+        <div class="runtime-owner-plan-actions">
+          <button type="button" class="btn tiny" data-owner-plan-validate="${escapeHtml(owner)}">Validate Draft</button>
+          <button type="button" class="btn tiny" data-owner-plan-apply="${escapeHtml(owner)}">Apply for Future Runs</button>
+          <small class="runtime-owner-plan-status idle" data-owner-plan-status="${escapeHtml(owner)}">Draft only: active configuration is unchanged.</small>
+        </div>
+      </article>`;
+    }).join("");
     packageCompositionOutput.innerHTML = `<section class="runtime-package-composition" aria-label="Experimental Package composition">
       <div class="runtime-package-head"><button type="button" class="btn tiny" data-package-composition-back>Back</button><div><strong>Package Manager</strong><small>composition only; installed code and active graphs are unchanged</small></div></div>
       ${notice}
       <div class="runtime-package-section"><h3>Agent Packages</h3>${packageRows || `<div class="runtime-package-empty"><strong>No Agent Packages installed</strong><small>The catalog returned no package manifests.</small></div>`}</div>
+      <div class="runtime-package-section"><h3>Orchestration Plan</h3>${orchestrationReference}</div>
+      <div class="runtime-package-section"><h3>Core Owner Plans</h3><div class="runtime-owner-plan-grid">${ownerPlans}</div></div>
       <div class="runtime-package-section"><h3>Device Bridges</h3>${bridgeRows}</div>
       <div class="runtime-package-section"><h3>Missing Local Bindings</h3>${bindingRows}</div>
     </section>`;
@@ -5931,6 +6144,19 @@ function renderPackageComposition() {
     packageCompositionNotice = { kind: "warn", title: "Package draft membership changed", detail: "Export captures this detached selection; installed dependencies are unchanged." };
     renderPackageComposition();
   }));
+  packageCompositionOutput.querySelectorAll("[data-owner-plan-mode]").forEach((input) => input.addEventListener("change", () => {
+    const owner = input.getAttribute("data-owner-plan-mode") || "";
+    const result = updateOwnerPlanDraftFromControls(owner);
+    if (result.ok) renderPackageComposition();
+  }));
+  packageCompositionOutput.querySelectorAll("[data-owner-plan-id], [data-owner-plan-version], [data-owner-plan-settings]").forEach((input) => input.addEventListener("input", () => {
+    const owner = input.getAttribute("data-owner-plan-id") || input.getAttribute("data-owner-plan-version") || input.getAttribute("data-owner-plan-settings") || "";
+    updateOwnerPlanDraftFromControls(owner);
+  }));
+  packageCompositionOutput.querySelectorAll("[data-owner-plan-validate]").forEach((button) => button.addEventListener("click", () =>
+    validateOwnerPlanControl(button.getAttribute("data-owner-plan-validate") || "")));
+  packageCompositionOutput.querySelectorAll("[data-owner-plan-apply]").forEach((button) => button.addEventListener("click", () =>
+    applyOwnerPlanControl(button.getAttribute("data-owner-plan-apply") || "")));
 }
 
 function openPackageCompositionView(kind = "packages") {
@@ -5942,6 +6168,7 @@ function openPackageCompositionView(kind = "packages") {
     title: bridgeView ? "Device Bridges" : "Package Manager",
     subtitle: bridgeView ? "Package → bridge contracts" : "Composition and exchange", fixed: false });
   activateGraphTab(id);
+  if (!bridgeView) ensureOwnerPlanModuleDrafts();
   graphTabsOutput?.scrollIntoView?.({ behavior: "smooth", block: "start" });
 }
 
@@ -7881,7 +8108,16 @@ function runtimeReadinessStatus(graph = activeGraph, snapshot = latestStateSnaps
   const draft = graph || activeGraph || {};
   const nodes = Array.isArray(draft.nodes) ? draft.nodes : [];
   const edges = Array.isArray(draft.edges) ? draft.edges : [];
-  const handlerSet = new Set(availableHandlers);
+  const moduleTab = draft?.metadata?.ide_tab_kind === "module";
+  const moduleId = moduleTab ? String(draft?.metadata?.module_id || "").trim() : "";
+  const storedContract = moduleId ? moduleExecutionContracts.get(moduleId)?.catalog : null;
+  const candidateCatalog = draft?.metadata?.execution_catalog || storedContract || {};
+  const localCatalog = moduleId && candidateCatalog?.module_id === moduleId ? candidateCatalog : {};
+  const localHandlerSet = new Set(
+    (Array.isArray(localCatalog.operations) ? localCatalog.operations : [])
+      .map((operation) => String(operation?.handler || "").trim()).filter(Boolean),
+  );
+  const handlerSet = new Set([...availableHandlers, ...localHandlerSet]);
   const moduleMap = moduleCatalogById();
   const handlerCatalogReady = availableHandlers.length > 0;
   const moduleCatalogReady = availableModules.length > 0;
@@ -7908,7 +8144,7 @@ function runtimeReadinessStatus(graph = activeGraph, snapshot = latestStateSnaps
   });
   const agentLikeNodes = nodes.filter((node) => ["agent", "module"].includes(String(node.kind || "")) || node.module_id);
   const missingHandlers = handlerCatalogReady ? nodes.filter((node) => node.handler && !handlerSet.has(node.handler)) : [];
-  const invalidHandlers = handlerCatalogReady ? nodes.filter((node) => node.handler && handlerSet.has(node.handler) && handlerMetadataStatus(node.handler).kind === "error") : [];
+  const invalidHandlers = handlerCatalogReady ? nodes.filter((node) => node.handler && handlerSet.has(node.handler) && !localHandlerSet.has(node.handler) && handlerMetadataStatus(node.handler).kind === "error") : [];
   const missingModules = moduleCatalogReady ? agentLikeNodes.filter((node) => node.module_id && !moduleMap.has(normalizeModuleIdRef(node.module_id))) : [];
   const pendingModules = moduleCatalogReady
     ? agentLikeNodes
@@ -7941,12 +8177,12 @@ function runtimeReadinessStatus(graph = activeGraph, snapshot = latestStateSnaps
   const deviceHealth = state.device_health || {};
   const deviceWarnings = Object.entries(deviceHealth).filter(([, status]) => String(status) !== "ready");
   const preflight = livePreflightStatus(draft, runModeSelect?.value || "test");
-  const moduleTab = draft?.metadata?.ide_tab_kind === "module" || Boolean(preflight.moduleTab);
+  const effectiveModuleTab = moduleTab || Boolean(preflight.moduleTab);
   let validationOk = Boolean(activationEvidence.validation?.ok && !activationEvidence.dirty);
   let dryRunOk = Boolean(activationEvidence.dry_run?.ok && !activationEvidence.dirty);
   let compileOk = Boolean(activationEvidence.compile?.ok && !activationEvidence.dirty);
   let modulePreflight = null;
-  if (moduleTab) {
+  if (effectiveModuleTab) {
     const moduleId = draft?.metadata?.module_id || activeModuleId || "module";
     try {
       modulePreflight = moduleSavePreflightStatus(moduleId, modulePayloadForGraphDraft(draft));
@@ -7963,15 +8199,15 @@ function runtimeReadinessStatus(graph = activeGraph, snapshot = latestStateSnaps
   const hardIssues = [...missingHandlers, ...invalidHandlers, ...missingModules, ...moduleHandlerIssues, ...moduleSignatureIssues, ...routeIssues];
   const warnings = [...pendingModules, ...deviceWarnings, ...catalogWarnings];
   const catalogsReady = handlerCatalogReady && moduleCatalogReady;
-  const readyForTest = catalogsReady && hardIssues.length === 0 && validationOk && dryRunOk && preflight.draftClean && !moduleTab;
-  const moduleDraftReady = moduleTab && hardIssues.length === 0 && validationOk && dryRunOk;
+  const readyForTest = catalogsReady && hardIssues.length === 0 && validationOk && dryRunOk && preflight.draftClean && !effectiveModuleTab;
+  const moduleDraftReady = effectiveModuleTab && hardIssues.length === 0 && validationOk && dryRunOk;
   const readyForLive = readyForTest && preflight.gateOk && (!preflight.liveMode || preflight.confirmed);
-  const status = moduleTab
+  const status = effectiveModuleTab
     ? hardIssues.length ? "error" : warnings.length || !moduleDraftReady ? "warn" : "ok"
     : hardIssues.length ? "error" : warnings.length || !readyForTest ? "warn" : "ok";
   return {
     status,
-    moduleTab,
+    moduleTab: effectiveModuleTab,
     moduleDraftReady,
     modulePreflight,
     handlerCatalogReady,

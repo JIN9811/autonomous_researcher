@@ -1,74 +1,129 @@
-"""Core-owned agent modules keep one implementation and their legacy imports."""
+"""Canonical agent owners keep one import surface and stable registry identities."""
 
 from __future__ import annotations
 
+import ast
 import importlib
 from pathlib import Path
 import subprocess
-import sys
 from types import SimpleNamespace
 
 import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-MODULES = (
-    ("agents.orchestrator_agent", "agents.core.orchestrator.agent", "OrchestratorAgent"),
-    ("agents.orchestrator_decision", "agents.core.orchestrator.decision", None),
-    ("agents.orchestrator_execution", "agents.core.orchestrator.execution", None),
-    ("agents.orchestrator_structure", "agents.core.orchestrator.structure", None),
-    ("agents.orchestrator_capabilities", "agents.core.orchestrator.capabilities", "OwnerCatalog"),
-    ("agents.knowledge_agent", "agents.core.knowledge.agent", "KnowledgeAgent"),
-    ("agents.knowledge_decision", "agents.core.knowledge.decision", None),
-    ("agents.knowledge_context", "agents.core.knowledge.context", None),
-    ("agents.source_curation", "agents.core.knowledge.source_curation", None),
-    ("agents.guardian_agent", "agents.core.guardian.agent", "GuardianAgent"),
+RETAINED_ROOT_FILES = {
+    "__init__.py",
+    "base_agent.py",
+    "control_structure.py",
+    "execution_graph.py",
+    "module_contract.py",
+    "module_discovery.py",
+    "registry.py",
+}
+RETIRED_TO_CANONICAL = {
+    "analysis_agent": "agents.analysis.agent",
+    "analysis_calibration": "agents.analysis.calibration",
+    "analysis_decisions": "agents.analysis.decisions",
+    "analysis_fem": "agents.analysis.fem",
+    "analysis_improvement": "agents.analysis.improvement",
+    "analysis_mechanisms": "agents.analysis.mechanisms",
+    "analysis_refinement": "agents.analysis.refinement",
+    "analysis_runtime": "agents.analysis.runtime",
+    "bo_agent": "agents.bo.agent",
+    "bo_decision": "agents.bo.decision",
+    "design_agent": "agents.design.agent",
+    "design_decision": "agents.design.decision",
+    "equipment_agent": "agents.equipment.agent",
+    "equipment_decision": "agents.equipment.decision",
+    "equipment_workflow": "agents.equipment.workflow",
+    "guardian_agent": "agents.core.guardian.agent",
+    "knowledge_agent": "agents.core.knowledge.agent",
+    "knowledge_context": "agents.core.knowledge.context",
+    "knowledge_decision": "agents.core.knowledge.decision",
+    "manipulation_agent": "agents.manipulation.agent",
+    "manipulation_decision": "agents.manipulation.decision",
+    "orchestrator_agent": "agents.core.orchestrator.agent",
+    "orchestrator_capabilities": "agents.core.orchestrator.capabilities",
+    "orchestrator_decision": "agents.core.orchestrator.decision",
+    "orchestrator_execution": "agents.core.orchestrator.execution",
+    "orchestrator_structure": "agents.core.orchestrator.structure",
+    "source_curation": "agents.core.knowledge.source_curation",
+    "specimen_agent": "agents.specimen.agent",
+    "specimen_decision": "agents.specimen.decision",
+    "vision_agent": "agents.vision.agent",
+    "vision_decision": "agents.vision.decision",
+}
+AGENT_CLASSES = (
+    ("agents.analysis.agent", "AnalysisAgent", "analysis_agent"),
+    ("agents.bo.agent", "BOAgent", "bo_agent"),
+    ("agents.design.agent", "DesignAgent", "design_agent"),
+    ("agents.equipment.agent", "LabEquipmentAgent", "equipment_agent"),
+    ("agents.core.guardian.agent", "GuardianAgent", "guardian_agent"),
+    ("agents.core.knowledge.agent", "KnowledgeAgent", "knowledge_agent"),
+    ("agents.manipulation.agent", "ManipulationAgent", "manipulation_agent"),
+    ("agents.core.orchestrator.agent", "OrchestratorAgent", "orchestrator_agent"),
+    ("agents.specimen.agent", "SpecimenMakingAgent", "specimen_agent"),
+    ("agents.vision.agent", "VisionAgent", "vision_agent"),
 )
+def test_agent_root_contains_only_shared_runtime_files() -> None:
+    """Would fail if a retired wrapper remained or a shared root file was removed."""
+    assert {path.name for path in (ROOT / "agents").glob("*.py")} == RETAINED_ROOT_FILES
 
 
-@pytest.mark.parametrize("legacy,canonical,public_symbol", MODULES)
-def test_legacy_and_canonical_imports_are_the_same_mutable_module(
-    legacy: str,
-    canonical: str,
-    public_symbol: str | None,
-) -> None:
-    """Would fail if a compatibility file re-exported a second module object."""
-    first = importlib.import_module(legacy)
-    marker = object()
-    first._core_root_identity_probe = marker
-    try:
-        second = importlib.import_module(canonical)
-        assert first is second
-        assert second._core_root_identity_probe is marker
-        if public_symbol:
-            assert getattr(first, public_symbol) is getattr(second, public_symbol)
-    finally:
-        del first._core_root_identity_probe
+def test_all_retired_modules_have_canonical_imports() -> None:
+    """Would fail if any owner module were unavailable after wrapper retirement."""
+    assert len(RETIRED_TO_CANONICAL) == 31
+    for module_name in RETIRED_TO_CANONICAL.values():
+        assert importlib.import_module(module_name).__name__ == module_name
 
 
-@pytest.mark.parametrize("legacy_first", (True, False), ids=("cold-legacy-first", "cold-canonical-first"))
-def test_every_mapping_preserves_identity_in_a_fresh_import_order(legacy_first: bool) -> None:
-    """Would fail if either cold import order created compatibility wrapper modules."""
-    pairs = [(legacy, canonical) for legacy, canonical, _ in MODULES]
-    script = f"""
-import importlib
-pairs = {pairs!r}
-first = [pair[0 if {legacy_first!r} else 1] for pair in pairs]
-second = [pair[1 if {legacy_first!r} else 0] for pair in pairs]
-loaded = [importlib.import_module(name) for name in first]
-for pair, module, name in zip(pairs, loaded, second):
-    other = importlib.import_module(name)
-    assert module is other, pair
-    module._core_root_identity_probe = pair
-    assert other._core_root_identity_probe == pair
-"""
+def test_canonical_agent_classes_keep_registry_identities() -> None:
+    """Would fail if caller migration changed a runtime agent ID or class owner."""
+    from agents.registry import AgentRegistry
+
+    registry = AgentRegistry()
+    for module_name, class_name, agent_id in AGENT_CLASSES:
+        agent_class = getattr(importlib.import_module(module_name), class_name)
+        assert agent_class.__module__ == module_name
+        registry.register(agent_class())
+        assert registry.get(agent_id).__class__ is agent_class
+    assert registry.names() == sorted(agent_id for _, _, agent_id in AGENT_CLASSES)
+
+
+def test_maintained_python_uses_no_retired_agent_imports() -> None:
+    """Would fail if a maintained caller still depended on a removed root module."""
+    retired_imports = {f"agents.{stem}" for stem in RETIRED_TO_CANONICAL}
     completed = subprocess.run(
-        [sys.executable, "-c", script],
+        ["git", "ls-files", "-z", "*.py"],
         cwd=ROOT,
+        check=True,
         capture_output=True,
-        text=True,
     )
-    assert completed.returncode == 0, completed.stderr
+    paths = [
+        ROOT / item.decode("utf-8")
+        for item in completed.stdout.split(b"\0")
+        if item and b"oldversion" not in item
+    ]
+    stale: list[str] = []
+    for path in paths:
+        if not path.is_file():
+            continue
+        relative = path.relative_to(ROOT)
+        text = path.read_text(encoding="utf-8")
+        stale.extend(
+            f"{relative}: {retired_import}"
+            for retired_import in retired_imports
+            if retired_import in text
+        )
+        if "from agents import" in text:
+            tree = ast.parse(text, filename=str(relative))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module == "agents":
+                    for alias in node.names:
+                        if alias.name in RETIRED_TO_CANONICAL:
+                            stale.append(f"{relative}:{node.lineno}: from agents import {alias.name}")
+    assert stale == []
 
 
 @pytest.mark.asyncio

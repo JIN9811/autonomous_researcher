@@ -34,8 +34,8 @@ def setup(tmp_path, responses):
 
 @pytest.mark.asyncio
 async def test_model_inspects_writes_real_md_and_publishes_cited_context(tmp_path):
-    assert importlib.util.find_spec("agents.knowledge_decision") is not None
-    from agents.knowledge_decision import run_knowledge_decision
+    assert importlib.util.find_spec("agents.core.knowledge.decision") is not None
+    from agents.core.knowledge.decision import run_knowledge_decision
     responses = [request("inspect_evidence"), request("write_knowledge_note", title="Verified export",
         body="The current analysis reports verified export; no causal claim is made.", ontology_type="KnowledgeClaim",
         evidence_kind="derived", source_ids=["current-analysis"], tags=["export"]),
@@ -56,8 +56,8 @@ async def test_model_inspects_writes_real_md_and_publishes_cited_context(tmp_pat
 
 @pytest.mark.asyncio
 async def test_model_can_withhold_derived_knowledge_when_evidence_is_insufficient(tmp_path):
-    assert importlib.util.find_spec("agents.knowledge_decision") is not None
-    from agents.knowledge_decision import run_knowledge_decision
+    assert importlib.util.find_spec("agents.core.knowledge.decision") is not None
+    from agents.core.knowledge.decision import run_knowledge_decision
     responses = [request("inspect_evidence"), request("search_knowledge", query="root cause", scope={}, top_k=3),
         request("publish_context", summary="No supported root cause is available.", source_ids=[],
                 no_knowledge_reason="The current export observation does not establish a cause.")]
@@ -76,8 +76,8 @@ async def test_model_can_withhold_derived_knowledge_when_evidence_is_insufficien
     "not json",
 ])
 async def test_invalid_decision_is_not_success_and_does_not_write(tmp_path, bad):
-    assert importlib.util.find_spec("agents.knowledge_decision") is not None
-    from agents.knowledge_decision import run_knowledge_decision
+    assert importlib.util.find_spec("agents.core.knowledge.decision") is not None
+    from agents.core.knowledge.decision import run_knowledge_decision
     state, ctx, store, evidence = setup(tmp_path, [request("inspect_evidence"), bad])
     result = await run_knowledge_decision(state, ctx, store=store, evidence=evidence, scope={"run_id": "decision-run"})
     assert result["status"] == "failed"
@@ -86,7 +86,7 @@ async def test_invalid_decision_is_not_success_and_does_not_write(tmp_path, bad)
 
 @pytest.mark.asyncio
 async def test_model_can_correct_argument_shape_before_any_tool_effect(tmp_path):
-    from agents.knowledge_decision import run_knowledge_decision
+    from agents.core.knowledge.decision import run_knowledge_decision
     responses = [request("inspect_evidence", query="not an allowed argument"),
                  request("inspect_evidence"), request("publish_context", summary="No new note needed.",
                     source_ids=["current-analysis"], no_knowledge_reason="Reference already retained.")]
@@ -101,7 +101,7 @@ async def test_model_can_correct_argument_shape_before_any_tool_effect(tmp_path)
 @pytest.mark.parametrize("enabled", [False, True])
 @pytest.mark.parametrize("failure", [OSError, KeyError])
 async def test_optional_source_storage_failure_does_not_break_markdown_decision(tmp_path, monkeypatch, enabled, failure):
-    from agents.knowledge_decision import run_knowledge_decision
+    from agents.core.knowledge.decision import run_knowledge_decision
     def unavailable(_ctx):
         if not enabled:
             raise AssertionError("Excluded source corpus must not be resolved")
@@ -117,7 +117,7 @@ async def test_optional_source_storage_failure_does_not_break_markdown_decision(
 
 
 def test_source_prompt_projection_avoids_replaying_full_citation_catalogs():
-    from agents.knowledge_decision import _model_observations
+    from agents.core.knowledge.decision import _model_observations
     record = {"record_id": "record-one", "corpus": "sources", "title": "Consolidated source",
               "body": "Complete curated content retained. Final qualification: 73 days.",
               "applicability": {"variant": "Azure"}, "citations": [{"page": 1}] * 1000,
@@ -136,8 +136,8 @@ def test_source_prompt_projection_avoids_replaying_full_citation_catalogs():
 
 @pytest.mark.asyncio
 async def test_search_then_detail_uses_scope_and_passes_observation_back_to_model(tmp_path):
-    assert importlib.util.find_spec("agents.knowledge_decision") is not None
-    from agents.knowledge_decision import run_knowledge_decision
+    assert importlib.util.find_spec("agents.core.knowledge.decision") is not None
+    from agents.core.knowledge.decision import run_knowledge_decision
     responses = []
     state, ctx, store, evidence = setup(tmp_path, responses)
     receipt = store.write_note(dict(run_id="decision-run", cycle_id="loop-000001", agent_id="equipment",
@@ -154,7 +154,7 @@ async def test_search_then_detail_uses_scope_and_passes_observation_back_to_mode
 
 
 def test_bo_receives_scoped_knowledge_citations_without_changing_analysis_values():
-    from agents.bo_agent import BOAgent
+    from agents.bo.agent import BOAgent
     state = OrchestratorState(run_id="run-a", experiment_id="a", mode=Mode.TEST, stage=Stage.BO,
         latest_analysis={"objective_score": 1.25}, run_metadata={"knowledge": {
             "memory_summary": "Supported export", "scope": {"run_id": "run-a"},
@@ -169,7 +169,7 @@ def test_bo_receives_scoped_knowledge_citations_without_changing_analysis_values
 
 
 def test_llm_scope_cannot_drop_required_tags_but_can_add_constraints():
-    from agents.knowledge_decision import _narrow_scope
+    from agents.core.knowledge.decision import _narrow_scope
     base = {"tags": ["export", "reviewed"], "run_id": ["a", "b"]}
     with pytest.raises(ValueError):
         _narrow_scope(base, {"tags": ["export"]})
@@ -179,7 +179,7 @@ def test_llm_scope_cannot_drop_required_tags_but_can_add_constraints():
 
 @pytest.mark.asyncio
 async def test_derived_note_inherits_source_conditions_without_relabeling(tmp_path):
-    from agents.knowledge_decision import run_knowledge_decision
+    from agents.core.knowledge.decision import run_knowledge_decision
     responses = [request("inspect_evidence"), request("write_knowledge_note", title="Export",
         body="Source-conditioned export observation.", ontology_type="KnowledgeClaim",
         source_ids=["current-analysis"]), request("publish_context", summary="Export observed.",
@@ -199,7 +199,7 @@ def test_research_context_preserves_markdown_source_classification():
         "trust_level": "derived", "text": "Export"}]})
     assert result["sources"][0]["source_type"] == "markdown_knowledge"
     assert result["sources"][0]["trust_level"] == "derived"
-    from agents.knowledge_agent import _source_refs_from_retrieval
+    from agents.core.knowledge.agent import _source_refs_from_retrieval
     typed = _source_refs_from_retrieval({"local_chunks": [{"chunk_id": "note-a",
         "source": "memory/note.md", "source_type": "markdown_knowledge", "trust_level": "derived"}]})
     assert typed[0].source_type == "experiment_memory"

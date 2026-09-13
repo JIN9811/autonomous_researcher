@@ -10,10 +10,10 @@ from knowledge.graphify_bridge import import_project_graph, load_graphify_graph,
 
 
 def _fixture_project(root: Path) -> None:
-    (root / "agents").mkdir(parents=True)
+    (root / "agents" / "analysis").mkdir(parents=True)
     (root / "docs" / "runtime").mkdir(parents=True)
     (root / "graphs" / "modules" / "analysis").mkdir(parents=True)
-    (root / "agents" / "analysis_agent.py").write_text(
+    (root / "agents" / "analysis" / "agent.py").write_text(
         "from knowledge.stores import JsonlKnowledgeStore\n\n"
         "def run_analysis():\n"
         "    return 'guardian bo gyroid utm'\n",
@@ -38,7 +38,7 @@ def test_scan_project_graph_writes_graph_report_and_excludes_secrets(tmp_path: P
     graph = json.loads(graph_json.read_text(encoding="utf-8"))
     node_ids = {node["id"] for node in graph["nodes"]}
     edge_types = {edge["type"] for edge in graph["edges"]}
-    assert "file:agents/analysis_agent.py" in node_ids
+    assert "file:agents/analysis/agent.py" in node_ids
     assert "agent:analysis" in node_ids
     assert "module:analysis" in node_ids
     assert "memory/prusa_connection.json" not in json.dumps(graph, ensure_ascii=False)
@@ -56,7 +56,7 @@ def test_import_project_graph_to_json_backend(tmp_path: Path) -> None:
     assert result["project_nodes"] > 0
     assert result["nodes_written"] > 0
     context = backend.query({"kind": "project_context", "target_id": "analysis", "limit": 20})
-    assert any(node["id"] == "agent:analysis" or node["id"] == "file:agents/analysis_agent.py" for node in context["nodes"])
+    assert any(node["id"] == "agent:analysis" or node["id"] == "file:agents/analysis/agent.py" for node in context["nodes"])
 
 
 def test_load_common_graphify_link_schema(tmp_path: Path) -> None:

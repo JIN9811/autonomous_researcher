@@ -28,6 +28,10 @@ source_of_truth:
   - knowledge
   - knowledge/http_api.py
   - knowledge/source_api.py
+  - agents/core/plans.py
+  - agents/core/knowledge/plan.py
+  - agents/core/guardian/plan.py
+  - packages/service.py
 last_verified: 2026-09-14
 verified_against: working-tree
 related_docs:
@@ -35,6 +39,7 @@ related_docs:
   - docs/runtime/three_level_control_model.md
   - docs/paper/appendix_a_interfaces.md
   - docs/runtime/current_code_snapshot.md
+  - docs/modularity.md
 supersedes: []
 -->
 
@@ -53,7 +58,7 @@ connection boundary without duplicating the tables below.
 
 ## Scope
 
-The matrix covers the intentional working-tree scope verified on 2026-09-12. API entries are curated
+The matrix covers the intentional working-tree scope verified on 2026-09-14. API entries are curated
 functional families checked against route declarations and active installers. They do not replace
 `/openapi.json` and do not assign exclusive ownership where services overlap.
 
@@ -128,7 +133,7 @@ and [CAE Computation Bridge Reference](../device_bridges/cae_computation_bridges
 
 See the [BO Reference](bo_agent.md#installed-package-and-executable-structure).
 
-- installed owner packages under `agents/<agent_id>/`; exact flat modules remain compatibility aliases;
+- installed owner packages under `agents/<agent_id>/`; maintained callers use these canonical modules after retirement of the migrated root wrappers;
 - Analysis source catalog and decisions under `agents/analysis/`, including `module.py`, `execution.py`, `structure.py` and `frontend/live_report.js`;
 - BO source catalog and decisions under `agents/bo/`, including `module.py`, `execution.py`, `structure.py` and `frontend/live_report.js`;
 - `graphs/modules/*/module.yaml`
@@ -137,6 +142,13 @@ See the [BO Reference](bo_agent.md#installed-package-and-executable-structure).
 - `app/analysis_fem_routes.py`, `app/cae_fields_routes.py`, `device_bridges/cae/module.py`
 - `knowledge/http_api.py`, `knowledge/source_api.py`, `knowledge/source_runtime.py`
 - `backends/`, `device_bridges/`, and `knowledge/`
+
+Knowledge and Guardian accept optional strict `module.owner_plan` declarations
+through the existing module validate/apply API. Query methods stay read-only;
+validation does not persist; explicit apply changes only future-run module
+configuration. Each new run pins the matching declaration, while the existing
+graph remains the Orchestration Plan. Package exchange carries declarations only
+through `module_configurations`. See the [Modularity Reference](../modularity.md).
 
 ## Closed-Loop Responsibility Matrix
 
@@ -149,9 +161,9 @@ See the [BO Reference](bo_agent.md#installed-package-and-executable-structure).
 | Manipulation | physical transfer and post-test clearance | Specimen result, fresh Vision, configured skill and execution evidence | LLM-selected bounded tool call; task-result judgment after Vision and termination | Vision, Equipment, Analysis, Knowledge | `physical_possible` through existing robot executors |
 | Lab Equipment | `equipment` | Verified placement/specimen, exact stacked Flow/Skills, approvals | Bounded LLM Flow selection; deterministic execution; terminal screenshot/log review | Manipulation clearance → fresh Vision → Analysis | `physical_possible` through existing gated workers |
 | Analysis | `analysis` plus independent background worker | Identified measurement, geometry and bound objective | LLM action/evidence review; tool-computed curves/objective; separately frozen FEM studies | Measured Knowledge/BO handoff without waiting for optional FEM; separate model evidence | none physically; registered computation |
-| Knowledge | `knowledge` plus source-intake worker | Analysis, terminal archives and applicable source evidence | Ontology-guided Markdown, page-wise source curation, scoped retrieval and typed memory | Cited BO/agent context; separate Evolution review | none; persistent local Markdown/typed state |
+| Knowledge | `knowledge` plus source-intake worker | Analysis, terminal archives and applicable source evidence | One composite executable task; ontology-guided Markdown, scoped retrieval and typed memory; optional pinned declaration overlays owner-supported inputs | Cited BO/agent context; separate Evolution review | none; persistent local Markdown/typed state |
 | BO | `bo` | Analysis observations, continuous domain, settings, Knowledge context | Bounded LLM strategy/tool decision and review of the numerical candidate | Guardian and next Design cycle | none; proposal only |
-| Guardian | Safety/control plane | State, risk, failures, device health, approvals, tool records | Deterministic policy/approval decision with advisory LLM note | Orchestrator route translation | no direct action; can block/stop downstream action |
+| Guardian | Safety/control plane | State, risk, failures, device health, approvals, tool records | One composite executable task; deterministic gates retain authority; an optional pinned declaration adds reference-only advisory context | Orchestrator route translation | no direct action; can block/stop downstream action |
 
 ## Decision and Tool-Calling Matrix
 
@@ -258,7 +270,7 @@ backend routing and shared leases apply; no model service is started here.
 
 All ten current agent owners receive bounded, reference-only Wiki context at
 their existing LLM decision entrypoints through `agents/core/knowledge/context.py`
-(the `agents.knowledge_context` compatibility import is unchanged).
+(the canonical context helper is `agents.core.knowledge.context`).
 This is not a new execution stage or tool permission. Retrieved, delivered and
 model-cited states are distinct; structured tool schemas retain their existing
 evidence allowlists. See [Wiki and Memory](../knowledge/wiki_memory.md).

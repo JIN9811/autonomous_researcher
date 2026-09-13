@@ -10,7 +10,7 @@ import yaml
 from agents.design.structure import design_implementation_structure
 from agents.analysis.structure import analysis_implementation_structure
 from agents.bo.structure import bo_implementation_structure
-from agents.orchestrator_structure import orchestrator_implementation_structure
+from agents.core.orchestrator.structure import orchestrator_implementation_structure
 from agents.specimen.structure import specimen_implementation_structure
 from agents.vision.structure import vision_implementation_structure
 from agents.manipulation.structure import manipulation_implementation_structure

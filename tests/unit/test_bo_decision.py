@@ -10,7 +10,7 @@ from time import monotonic
 
 import pytest
 
-from agents.bo_decision import run_bo_decision
+from agents.bo.decision import run_bo_decision
 
 
 class _Response:

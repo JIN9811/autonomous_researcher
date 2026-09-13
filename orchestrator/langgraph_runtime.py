@@ -44,7 +44,7 @@ import yaml
 
 from agents.base_agent import AgentContext, AgentResult
 from agents.registry import AgentRegistry
-from agents.orchestrator_capabilities import OwnerCatalog
+from agents.core.orchestrator.capabilities import OwnerCatalog
 from orchestrator.handoff_boundary import review_handoff, authorization_scope, incoming_authorization_matches
 from orchestrator.orchestrator_checkpoint import handoff_checkpoint
 from backends.llm_backend import LLMImageInput
@@ -3101,7 +3101,7 @@ class LangGraphRunLoop:
             return
         # Freeze available model versions before Design; Analysis resolves the
         # finalized design scope later without adopting mid-loop promotions.
-        from agents.analysis_runtime import pin_loop
+        from agents.analysis.runtime import pin_loop
         try:
             pin_loop(self._state, self._ctx, resume_background=True)
         except (OSError, ValueError) as exc:

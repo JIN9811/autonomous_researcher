@@ -121,7 +121,7 @@ class SourceIngestionService:
                 pass
 
     async def tick(self):
-        from agents.source_curation import curate_source
+        from agents.core.knowledge.source_curation import curate_source
         async with self._tick_lock:
             if not self._enabled:
                 self._state = "disabled"

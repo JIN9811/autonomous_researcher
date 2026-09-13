@@ -17,7 +17,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: deterministic equivalent formulas and default parameters.
 - Risky places to edit: response keys consumed by AnalysisAgent and CAE GUI.
-- Related files: mcp_tools/cae_tools.py, agents/analysis_agent.py.
+- Related files: mcp_tools/cae_tools.py, agents/analysis/agent.py.
 """
 
 from __future__ import annotations

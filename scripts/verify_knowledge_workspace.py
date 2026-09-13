@@ -19,7 +19,7 @@ sys.path.insert(0, str(ROOT))
 
 
 def classify_response(pack: dict, output: str) -> dict:
-    from agents.knowledge_context import _REFERENCE_TOKEN
+    from agents.core.knowledge.context import _REFERENCE_TOKEN
     tokens = set(_REFERENCE_TOKEN.findall(output[:16_000]))
     return {"responded": bool(output.strip()), "cited_ids": [
         item["citation_id"] for item in pack.get("items", [])

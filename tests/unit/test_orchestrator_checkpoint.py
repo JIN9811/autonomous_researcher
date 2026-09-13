@@ -15,7 +15,7 @@ def deny_external(monkeypatch):
         raise AssertionError("Unlisted external effect in checkpoint tests")
     monkeypatch.setattr(socket.socket, "connect", deny)
     monkeypatch.setattr(subprocess, "Popen", deny)
-    from agents.analysis_runtime import AnalysisRuntimeService
+    from agents.analysis.runtime import AnalysisRuntimeService
     monkeypatch.setattr(AnalysisRuntimeService, "resume", lambda *args, **kwargs: None)
 
 
@@ -33,7 +33,7 @@ def test_consumption_is_once_and_payload_is_detached():
 
 def _planning_boundary_controller(tmp_path, responses):
     from app.controller import MainController, ControllerDeps
-    from agents.orchestrator_agent import OrchestratorAgent
+    from agents.core.orchestrator.agent import OrchestratorAgent
     from agents.registry import AgentRegistry
     registry = AgentRegistry()
     registry.register(OrchestratorAgent())
@@ -328,8 +328,8 @@ def test_explicit_observation_refresh_dispatch_retires_only_stale_handoff(tmp_pa
 
 
 def test_refresh_runs_actual_clearance_vision_without_replaying_manipulation(tmp_path, monkeypatch):
-    from agents.manipulation_agent import ManipulationAgent
-    from agents.vision_agent import VisionAgent
+    from agents.manipulation.agent import ManipulationAgent
+    from agents.vision.agent import VisionAgent
     from orchestrator.langgraph_runtime import LangGraphRunLoop
     from orchestrator.state import Stage
     from logging_system.structured_logger import StructuredLogger
@@ -414,7 +414,7 @@ def test_refresh_runs_actual_clearance_vision_without_replaying_manipulation(tmp
 
 
 def test_refresh_preserves_actual_post_place_vision_branch(tmp_path, monkeypatch):
-    from agents.vision_agent import VisionAgent
+    from agents.vision.agent import VisionAgent
     from orchestrator.langgraph_runtime import LangGraphRunLoop
     from orchestrator.state import Stage
     from logging_system.structured_logger import StructuredLogger
@@ -479,8 +479,8 @@ def test_refresh_preserves_actual_post_place_vision_branch(tmp_path, monkeypatch
 @pytest.mark.parametrize("pending_result", [False, True])
 @pytest.mark.parametrize("queued_at_restoration", [False, True])
 def test_natural_observation_resume_rejects_delayed_refresh_after_analysis_progress(tmp_path, monkeypatch, pending_result, queued_at_restoration):
-    from agents.analysis_agent import AnalysisAgent
-    from agents.equipment_agent import LabEquipmentAgent
+    from agents.analysis.agent import AnalysisAgent
+    from agents.equipment.agent import LabEquipmentAgent
     from orchestrator.langgraph_runtime import LangGraphRunLoop
     from orchestrator.state import Stage
     from logging_system.structured_logger import StructuredLogger
@@ -572,7 +572,7 @@ def test_missing_consume_and_invalid_payload_cannot_authorize_effect():
 
 
 def test_declared_but_missing_orchestrator_does_not_execute_design(tmp_path):
-    from agents.design_agent import DesignAgent
+    from agents.design.agent import DesignAgent
     from agents.registry import AgentRegistry
     from orchestrator.langgraph_runtime import LangGraphRunLoop
     from orchestrator.state import OrchestratorState, Stage, Mode
@@ -592,7 +592,7 @@ def test_declared_but_missing_orchestrator_does_not_execute_design(tmp_path):
 def test_overlay_only_orchestrator_is_visible_but_not_a_runtime_participant(tmp_path, monkeypatch):
     import shutil
     import yaml
-    from agents.orchestrator_agent import OrchestratorAgent
+    from agents.core.orchestrator.agent import OrchestratorAgent
     from agents.registry import AgentRegistry
     from orchestrator.langgraph_runtime import LangGraphRunLoop
     from orchestrator.state import OrchestratorState, Stage, Mode
@@ -631,7 +631,7 @@ def test_overlay_only_orchestrator_is_visible_but_not_a_runtime_participant(tmp_
 def test_controller_pins_decision_settings_with_owner_catalog(monkeypatch):
     from app.controller import MainController
     from agents.registry import AgentRegistry
-    from agents.orchestrator_agent import OrchestratorAgent
+    from agents.core.orchestrator.agent import OrchestratorAgent
     from orchestrator.state import OrchestratorState
     registry = AgentRegistry()
     registry.register(OrchestratorAgent())
@@ -656,8 +656,8 @@ def test_real_orchestrator_boundary_defers_without_recalling_model_until_reply(t
     # Removing the checkpoint's wait fingerprint would turn each runtime tick
     # into another model invocation, even though the completed owner is unchanged.
     from orchestrator import handoff_boundary
-    from agents.orchestrator_agent import OrchestratorAgent
-    from agents.orchestrator_capabilities import OwnerCatalog
+    from agents.core.orchestrator.agent import OrchestratorAgent
+    from agents.core.orchestrator.capabilities import OwnerCatalog
     from agents.registry import AgentRegistry
     from graphs import load_graph_config
     from orchestrator.state import OrchestratorState, Mode, Stage
@@ -690,7 +690,7 @@ def test_real_orchestrator_boundary_defers_without_recalling_model_until_reply(t
 
 
 def test_missing_pre_step_entry_key_propagates_defer_to_dispatcher(tmp_path):
-    from agents.orchestrator_agent import OrchestratorAgent
+    from agents.core.orchestrator.agent import OrchestratorAgent
     from agents.registry import AgentRegistry
     from orchestrator.langgraph_runtime import LangGraphRunLoop
     from orchestrator.state import OrchestratorState, Stage, Mode
@@ -712,8 +712,8 @@ def test_missing_pre_step_entry_key_propagates_defer_to_dispatcher(tmp_path):
 
 
 def test_delayed_model_cannot_prepare_after_specimen_input_changes(tmp_path):
-    from agents.orchestrator_agent import OrchestratorAgent
-    from agents.orchestrator_capabilities import OwnerCatalog
+    from agents.core.orchestrator.agent import OrchestratorAgent
+    from agents.core.orchestrator.capabilities import OwnerCatalog
     from agents.registry import AgentRegistry
     from graphs import load_graph_config
     from orchestrator.handoff_boundary import review_handoff
@@ -741,9 +741,9 @@ def test_delayed_model_cannot_prepare_after_specimen_input_changes(tmp_path):
 @pytest.mark.parametrize("with_setup", [True, False])
 def test_planning_new_series_applies_setup_before_review_preserving_profile(tmp_path, profile, with_setup):
     from app.controller import MainController, ControllerDeps
-    from agents.bo_agent import BOAgent
-    from agents.orchestrator_agent import OrchestratorAgent
-    from agents.orchestrator_capabilities import OwnerCatalog
+    from agents.bo.agent import BOAgent
+    from agents.core.orchestrator.agent import OrchestratorAgent
+    from agents.core.orchestrator.capabilities import OwnerCatalog
     from agents.registry import AgentRegistry
     from graphs import load_graph_config
     from orchestrator.setup_application import SetupApplication
@@ -794,9 +794,9 @@ def test_planning_new_series_applies_setup_before_review_preserving_profile(tmp_
 @pytest.mark.parametrize("mode_name", ["live", "test", "replay", "fault-injection"])
 def test_controller_start_activates_captured_setup_only_after_fresh_reset(tmp_path, mode_name):
     from app.controller import MainController, ControllerDeps
-    from agents.bo_agent import BOAgent
-    from agents.orchestrator_agent import OrchestratorAgent
-    from agents.orchestrator_capabilities import OwnerCatalog
+    from agents.bo.agent import BOAgent
+    from agents.core.orchestrator.agent import OrchestratorAgent
+    from agents.core.orchestrator.capabilities import OwnerCatalog
     from agents.registry import AgentRegistry
     from graphs import load_graph_config
     from orchestrator.setup_application import SetupApplication
@@ -837,7 +837,7 @@ def test_controller_start_activates_captured_setup_only_after_fresh_reset(tmp_pa
 
 
 def test_runtime_entry_reviews_once_and_reuses_before_fresh_vision_consumption(tmp_path):
-    from agents.orchestrator_agent import OrchestratorAgent
+    from agents.core.orchestrator.agent import OrchestratorAgent
     from agents.registry import AgentRegistry
     from orchestrator.langgraph_runtime import LangGraphRunLoop
     from orchestrator.state import OrchestratorState, Stage, Mode
@@ -886,8 +886,8 @@ def test_runtime_entry_reviews_once_and_reuses_before_fresh_vision_consumption(t
     ("controller", "defer"), ("controller", "review"), ("controller", "failure"),
 ])
 def test_actual_guardian_result_wait_resume_does_not_rerun_owner_or_increment(tmp_path, outcome, executor):
-    from agents.guardian_agent import GuardianAgent
-    from agents.orchestrator_agent import OrchestratorAgent
+    from agents.core.guardian.agent import GuardianAgent
+    from agents.core.orchestrator.agent import OrchestratorAgent
     from agents.registry import AgentRegistry
     from knowledge.failure_memory import FailureMemory
     from mcp_tools.tool_registry import ToolRegistry

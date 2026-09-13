@@ -15,7 +15,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: simulated anomaly injection fields
 - Risky places to edit: frame key names used by vision agent
-- Related files: mcp_tools/mock_tools.py, agents/vision_agent.py
+- Related files: mcp_tools/mock_tools.py, agents/vision/agent.py
 """
 
 from __future__ import annotations

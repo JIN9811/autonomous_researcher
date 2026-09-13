@@ -14,7 +14,7 @@ import yaml
 import pytest
 
 from agents.base_agent import AgentResult
-from agents.specimen_agent import SpecimenMakingAgent
+from agents.specimen.agent import SpecimenMakingAgent
 from app.bootstrap import load_runtime
 from graphs import load_graph_config
 from orchestrator.state import AgentRuntimeStatus, Mode, Stage
@@ -2396,7 +2396,7 @@ async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
     controller._state.current_experiment_spec = {}
     controller._state.run_metadata.pop("pending_specimen_input", None)
     captured: dict[str, object] = {}
-    from agents.bo_agent import BOAgent
+    from agents.bo.agent import BOAgent
     seeds = []
     original_initial = BOAgent.initial_design_request
     def observe_initial(cls, state, *args, **kwargs):

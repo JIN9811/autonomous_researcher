@@ -18,43 +18,22 @@ module:
     live_requires_validation: true
     dry_run_supported: true
   tools: []
-  internal_graph:
-    - id: 01_collect_run_artifacts
-      label: Collect Run Artifacts
-      kind: internal_step
-    - id: 02_normalize_provenance
-      label: Normalize Provenance
-      kind: internal_step
-    - id: 03_ingest_agent_reports
-      label: LLM Evidence Inspection And Scoped Retrieval
-      kind: internal_step
-    - id: 04_write_experiment_knowledge_record
-      label: Classify And Write Markdown Knowledge
-      kind: internal_step
-    - id: 05_update_failure_patterns
-      label: Update Failure Patterns
-      kind: internal_step
-    - id: 06_update_success_patterns
-      label: Update Success Patterns
-      kind: internal_step
-    - id: 07_update_agent_performance_ledger
-      label: Update Agent Performance Ledger
-      kind: internal_step
-    - id: 08_build_bo_context
-      label: Build BO Context
-      kind: internal_step
-    - id: 09_rank_self_evolution_targets
-      label: Rank Self-Evolution Targets
-      kind: internal_step
-    - id: 10_build_evolution_evidence_packs
-      label: Build Evolution Evidence Packs
-      kind: internal_step
-    - id: 11_emit_knowledge_report
-      label: Emit Knowledge Report
-      kind: internal_step
-    - id: 12_emit_evolution_lab_prefill
-      label: Emit Evolution Lab Prefill
-      kind: internal_step
+  execution_graph:
+    schema: ax4lab.execution_graph.v1
+    entry: task
+    nodes:
+    - id: task
+      handler: knowledge.task
+      label: Composite scoped curation, memory and evidence task
+      area: middle
+      llm: true
+    - id: deliver
+      handler: knowledge.deliver
+      label: Deliver owner result
+      area: middle
+    edges:
+    - {source: task, target: deliver, 'on': next, kind: evidence}
+    terminals: [deliver]
   io_contract:
     input: OrchestratorState
     output: AgentResult.data with knowledge_context.v1 and evolution_proposal.v1
@@ -85,20 +64,5 @@ module:
 
   metadata:
     control_view:
-      areas:
-        internal_graph:01_collect_run_artifacts: knowledge
-        internal_graph:02_normalize_provenance: guardian
-        internal_graph:03_ingest_agent_reports: high
-        internal_graph:04_write_experiment_knowledge_record: knowledge
-        internal_graph:05_update_failure_patterns: knowledge
-        internal_graph:06_update_success_patterns: knowledge
-        internal_graph:07_update_agent_performance_ledger: knowledge
-        internal_graph:08_build_bo_context: middle
-        internal_graph:09_rank_self_evolution_targets: middle
-        internal_graph:10_build_evolution_evidence_packs: knowledge
-        internal_graph:11_emit_knowledge_report: knowledge
-        internal_graph:12_emit_evolution_lab_prefill: middle
-      llm_steps:
-      - internal_graph:03_ingest_agent_reports
       empty_roles:
         low: No direct device execution in this agent

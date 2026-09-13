@@ -21,7 +21,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: additive optional fields and new record types
 - Risky places to edit: MemoryRecord required fields used in DB serialization
-- Related files: knowledge/experiment_db.py, agents/knowledge_agent.py, knowledge/stores.py
+- Related files: knowledge/experiment_db.py, agents/core/knowledge/agent.py, knowledge/stores.py
 """
 
 from __future__ import annotations

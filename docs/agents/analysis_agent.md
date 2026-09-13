@@ -92,9 +92,9 @@ selection. Its external graph node and existing device connections are unchanged
 The active `agent.analysis_agent` implementation is owned by
 [`agents/analysis/`](../../agents/analysis/). The installed
 [`analysis@1.0.0` package](../../packages/agents/analysis/package.yaml) composes
-that single owner with the existing `cae@1.0.0` computation bridge. Exact legacy
-modules such as `agents/analysis_agent.py` remain compatibility aliases; they are
-not a second implementation. The package is a composition contract, not a
+that single owner with the existing `cae@1.0.0` computation bridge. Maintained
+callers use the canonical owner modules directly; the former root compatibility
+files were retired only after caller migration and regression coverage. The package is a composition contract, not a
 bridge: Analysis calls CAE, whose internal provider remains CalculiX where the
 registered runtime selects it. The shared PINN bridge stays inactive here.
 

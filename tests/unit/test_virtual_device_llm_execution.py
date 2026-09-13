@@ -33,8 +33,8 @@ def test_virtual_execution_requires_complete_resolved_test_authority(tmp_path, f
 @pytest.mark.parametrize("owner", ["manipulation", "equipment"])
 async def test_virtual_owner_cannot_report_preflight_success_on_model_failure(tmp_path, owner):
     from types import SimpleNamespace
-    from agents.manipulation_agent import ManipulationAgent
-    from agents.equipment_agent import LabEquipmentAgent
+    from agents.manipulation.agent import ManipulationAgent
+    from agents.equipment.agent import LabEquipmentAgent
     from tests.unit.test_manipulation_lerobot_agent import _state as manipulation_state
     from tests.unit.test_equipment_agent import _state as equipment_state, _tools
     state = virtualize(manipulation_state() if owner == "manipulation" else equipment_state(experiment_spec={}), tmp_path)
@@ -102,7 +102,7 @@ def test_virtual_screenshot_renders_same_run_success_and_failure_without_physica
 @pytest.mark.asyncio
 @pytest.mark.parametrize("host", ["live", "installed_printer", "no_state"])
 async def test_nonvirtual_equipment_dispatch_strips_model_virtual_authority(tmp_path, host):
-    from agents.equipment_agent import LabEquipmentAgent
+    from agents.equipment.agent import LabEquipmentAgent
     from tests.unit.test_equipment_agent import _state
     from tests.unit.test_equipment_pyautogui_bridge import _bridge
     from types import SimpleNamespace
@@ -181,7 +181,7 @@ async def test_virtual_equipment_model_plan_executes_simulator_csv_with_host_tra
     import json
     from types import SimpleNamespace
     from pathlib import Path
-    from agents.equipment_agent import LabEquipmentAgent
+    from agents.equipment.agent import LabEquipmentAgent
     from tests.unit.test_equipment_agent import _state, _tools
     tools = _tools(tmp_path)
     monkeypatch.setattr(LabEquipmentAgent, "_SKILL_FLOW_PATH", tmp_path / "flows.json")
@@ -206,7 +206,7 @@ async def test_virtual_equipment_model_plan_executes_simulator_csv_with_host_tra
 async def test_virtual_manipulation_model_choice_runs_existing_lerobot_simulator_once(tmp_path):
     import json
     from types import SimpleNamespace
-    from agents.manipulation_agent import ManipulationAgent
+    from agents.manipulation.agent import ManipulationAgent
     from tests.unit.test_manipulation_lerobot_agent import _state, _tools
     state = virtualize(_state(), tmp_path)
     async def decide(task_type, prompt, **kw):
@@ -225,7 +225,7 @@ async def test_virtual_manipulation_model_choice_runs_existing_lerobot_simulator
 
 @pytest.mark.asyncio
 async def test_virtual_vision_reviews_existing_synthetic_capture_pair(tmp_path, monkeypatch):
-    from agents.vision_agent import VisionAgent
+    from agents.vision.agent import VisionAgent
     from tests.unit.test_vision_agent import _state, _CtxStub
     from tests.unit.test_manipulation_lerobot_agent import _tools
     from mcp_tools.camera_tools import register_camera_tools
@@ -293,7 +293,7 @@ async def test_resolved_virtual_clearance_runs_replay_and_visual_decisions_or_bl
 async def test_virtual_vision_cannot_bypass_unavailable_real_model(tmp_path):
     from types import SimpleNamespace
     from tests.unit.test_vision_agent import _state
-    from agents.vision_agent import VisionAgent
+    from agents.vision.agent import VisionAgent
     from mcp_tools.tool_registry import ToolRegistry
     from utils.test_mode_execution_profiles import TestModeExecutionProfileStore
     from scripts.orchestrator_verification_guard import VerificationGuard

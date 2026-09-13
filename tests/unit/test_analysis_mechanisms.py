@@ -8,7 +8,7 @@ from tests.unit.test_analysis_calibration import evidence, SolverFixture
 
 
 def assessment(data, attempts=None, convergence=None):
-    from agents.analysis_mechanisms import assess_mechanisms
+    from agents.analysis.mechanisms import assess_mechanisms
     return assess_mechanisms(data, attempts or [], convergence or {'status': 'not_assessed'})
 
 
@@ -87,7 +87,7 @@ async def test_existing_fem_decision_receives_mechanism_report_without_changing_
 
 @pytest.mark.asyncio
 async def test_unsubstantiated_softening_cannot_launch_solver_even_if_llm_says_calibrate(tmp_path):
-    from agents.analysis_calibration import calibrate
+    from agents.analysis.calibration import calibrate
     data = evidence(tmp_path)
     data['policy'].pop('mechanism_evidence', None)
     io = SolverFixture()
@@ -114,7 +114,7 @@ async def test_llm_can_request_deformation_review_without_actuation(tmp_path):
 
 @pytest.mark.asyncio
 async def test_evidence_request_stops_calibration_search_and_export(tmp_path):
-    from agents.analysis_calibration import calibrate, freeze_candidate
+    from agents.analysis.calibration import calibrate, freeze_candidate
     data = supported_evidence(evidence(tmp_path), tmp_path)
     io = SolverFixture()
     # Use an actually offered action: a material-supported candidate can still
@@ -141,7 +141,7 @@ def test_runtime_singular_acquisition_id_cannot_be_reused_as_coupon(tmp_path):
 
 @pytest.mark.asyncio
 async def test_partial_candidate_stops_search_even_when_llm_concludes(tmp_path):
-    from agents.analysis_calibration import calibrate
+    from agents.analysis.calibration import calibrate
     io = SolverFixture(partial=True)
     result = await calibrate(evidence(tmp_path), io.choose, io.call, lambda event: None)
     assert len(io.calls) == 2
@@ -152,7 +152,7 @@ async def test_partial_candidate_stops_search_even_when_llm_concludes(tmp_path):
 
 def test_runtime_freezes_declared_mechanism_refs_with_existing_job_inputs(tmp_path, monkeypatch):
     from types import SimpleNamespace
-    from agents.analysis_runtime import service_for
+    from agents.analysis.runtime import service_for
     from mcp_tools.tool_registry import ToolRegistry
     from tests.unit.test_analysis_runtime import state
     s = state()
@@ -172,7 +172,7 @@ def test_runtime_freezes_declared_mechanism_refs_with_existing_job_inputs(tmp_pa
 
 
 def test_freezer_preserves_sources_and_missing_refs_cannot_pass(tmp_path):
-    from agents.analysis_mechanisms import freeze_mechanism_references
+    from agents.analysis.mechanisms import freeze_mechanism_references
     data = supported_evidence(evidence(tmp_path), tmp_path)
     original = deepcopy(data['policy'])
     source = data['policy']['mechanism_evidence']['material_basis']['refs'][0]
@@ -198,7 +198,7 @@ def test_cli_config_transfers_mechanism_evidence_without_mutating_configuration(
 
 
 def test_freezer_cannot_turn_geometry_copy_into_material_evidence(tmp_path):
-    from agents.analysis_mechanisms import freeze_mechanism_references
+    from agents.analysis.mechanisms import freeze_mechanism_references
     data = supported_evidence(evidence(tmp_path), tmp_path)
     data['policy']['mechanism_evidence']['material_basis']['refs'] = [data['payload']['stl_path']]
     freeze_mechanism_references(data, tmp_path / 'copied-inputs')

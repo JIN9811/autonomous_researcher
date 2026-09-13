@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from agents.vision_agent import VisionAgent
+from agents.vision.agent import VisionAgent
 from mcp_tools.mock_tools import register_mock_tools
 from mcp_tools.tool_registry import ToolRegistry
 from orchestrator.state import Mode, OrchestratorState, Stage

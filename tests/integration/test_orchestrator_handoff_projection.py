@@ -182,7 +182,7 @@ def test_inspection_trace_never_reintroduces_raw_payload_and_oversized_condition
 @pytest.mark.asyncio
 @pytest.mark.parametrize("oversized", [False, True])
 async def test_full_current_guardian_contract_has_bounded_decision_headroom(oversized):
-    from agents.orchestrator_decision import decide_orchestration
+    from agents.core.orchestrator.decision import decide_orchestration
     from orchestrator.handoff_projection import project_handoff_prompt
     raw = packet()
     gate = raw["evidence"]["boundary:result"]["guardian_context"]
@@ -239,8 +239,8 @@ def test_optional_reference_pack_is_explicitly_excluded_when_current_contract_us
 @pytest.mark.asyncio
 async def test_excluded_handoff_reference_is_not_marked_delivered(monkeypatch):
     """The real ORC decision entrypoint must not advance a receipt for omitted text."""
-    import agents.orchestrator_decision as decision_module
-    from agents.orchestrator_decision import decide_orchestration
+    import agents.core.orchestrator.decision as decision_module
+    from agents.core.orchestrator.decision import decide_orchestration
     from orchestrator.handoff_projection import project_handoff_prompt
 
     raw = packet()
@@ -278,8 +278,8 @@ async def test_excluded_handoff_reference_is_not_marked_delivered(monkeypatch):
 @pytest.mark.asyncio
 async def test_partial_handoff_reference_persists_only_the_ids_in_the_actual_prompt(monkeypatch, tmp_path):
     """Prompt clipping is a delivery boundary, not merely a display preference."""
-    import agents.orchestrator_decision as decision_module
-    from agents.orchestrator_decision import decide_orchestration
+    import agents.core.orchestrator.decision as decision_module
+    from agents.core.orchestrator.decision import decide_orchestration
     from knowledge.context_service import KnowledgeContextService, KnowledgePrincipal
     from orchestrator.handoff_projection import project_handoff_prompt
 
@@ -323,8 +323,8 @@ async def test_partial_handoff_reference_persists_only_the_ids_in_the_actual_pro
 @pytest.mark.asyncio
 async def test_absent_handoff_reference_marker_persists_excluded_not_delivered(monkeypatch, tmp_path):
     """If even the optional envelope cannot fit, the receipt says excluded."""
-    import agents.orchestrator_decision as decision_module
-    from agents.orchestrator_decision import decide_orchestration
+    import agents.core.orchestrator.decision as decision_module
+    from agents.core.orchestrator.decision import decide_orchestration
     from knowledge.context_service import KnowledgeContextService, KnowledgePrincipal
     from orchestrator.handoff_projection import project_handoff_prompt
 
@@ -358,7 +358,7 @@ async def test_absent_handoff_reference_marker_persists_excluded_not_delivered(m
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mutate", [False, True])
 async def test_model_projection_preserves_private_evidence_and_scope_checks(mutate):
-    from agents.orchestrator_decision import decide_orchestration
+    from agents.core.orchestrator.decision import decide_orchestration
     from orchestrator.handoff_projection import project_handoff_prompt
     raw = packet()
     scope = deepcopy(raw["scope"]["context"])

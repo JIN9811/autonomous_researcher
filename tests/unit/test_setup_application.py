@@ -6,9 +6,9 @@ import asyncio
 
 import pytest
 
-from agents.bo_agent import BOAgent
-from agents.orchestrator_agent import OrchestratorAgent
-from agents.orchestrator_capabilities import OwnerCatalog
+from agents.bo.agent import BOAgent
+from agents.core.orchestrator.agent import OrchestratorAgent
+from agents.core.orchestrator.capabilities import OwnerCatalog
 from agents.registry import AgentRegistry
 from graphs.schema import load_graph_config
 from orchestrator.experimental_setup import SetupStore, SetupConflict

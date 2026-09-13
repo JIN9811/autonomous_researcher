@@ -3,7 +3,7 @@ import asyncio
 
 import pytest
 
-from agents import analysis_improvement as module
+from agents.analysis import improvement as module
 
 
 def store_at(tmp_path):

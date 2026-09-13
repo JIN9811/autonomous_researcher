@@ -43,15 +43,155 @@ def _reversed_orchestrator_payload(client: TestClient) -> dict:
 
 
 @pytest.mark.parametrize('module_id', ['guardian', 'knowledge'])
-def test_legacy_module_api_delivers_control_view_without_converting_execution(module_api, module_id):
-    client, _, _, guard, root = module_api
+def test_core_module_api_delivers_executable_contract_without_package_activation(module_api, module_id):
+    client, _, controller, guard, root = module_api
     installed = yaml.safe_load((root / module_id / 'module.yaml').read_text())['module']
     response = client.get(f'/api/modules/{module_id}')
     assert response.status_code == 200
-    delivered = response.json()['module']['module']
+    payload = response.json()
+    delivered = payload['module']['module']
     assert delivered['metadata']['control_view'] == installed['metadata']['control_view']
-    assert delivered['internal_graph'] == installed['internal_graph']
-    assert not delivered.get('execution_graph')
+    assert delivered['execution_graph'] == installed['execution_graph']
+    assert {operation['handler'] for operation in payload['execution_catalog']['operations']} == {
+        f'{module_id}.task', f'{module_id}.deliver',
+    }
+    assert len(payload['execution_graph_revision']) == 64
+    assert payload['implementation']['id'] == module_id
+    assert payload['implementation']['configuration']['activation_supported'] is False
+    assert payload['owner_plan_contract']['owner'] == module_id
+    assert payload['owner_plan_contract']['version'] == '1.0.0'
+    assert payload['owner_plan_state'] == 'default'
+    assert controller._deps.agent_registry.get_module(module_id) is None
+    assert guard.physical_call_count == 0
+
+
+def test_core_owner_plan_validate_then_apply_uses_existing_module_store(module_api, monkeypatch):
+    client, app_main, controller, guard, root = module_api
+    knowledge_path = root / 'knowledge' / 'module.yaml'
+    guardian_path = root / 'guardian' / 'module.yaml'
+    before_knowledge = knowledge_path.read_bytes()
+    before_guardian = guardian_path.read_bytes()
+    payload = client.get('/api/modules/knowledge').json()['module']
+    payload['module']['owner_plan'] = {
+        'schema': 'ax4lab.owner_plan.v1', 'id': 'knowledge_reference',
+        'owner': 'knowledge', 'version': '1.0.0', 'contract_version': '1.0.0',
+        'settings': {'corpora': ['markdown'], 'decision_max_steps': 6},
+    }
+
+    validated = client.post('/api/modules/knowledge/validate', json={'module': payload})
+    assert validated.status_code == 200 and validated.json()['ok'], validated.text
+    assert knowledge_path.read_bytes() == before_knowledge
+    applied = client.put('/api/modules/knowledge', json={
+        'module': payload, 'reason': 'configured owner plan fixture', 'author': 'pytest', 'activate': True,
+    })
+    assert applied.status_code == 200 and applied.json()['ok'], applied.text
+    assert yaml.safe_load(knowledge_path.read_text())['module']['owner_plan'] == payload['module']['owner_plan']
+    assert guardian_path.read_bytes() == before_guardian
+
+    monkeypatch.setattr(controller, 'snapshot', lambda: {'is_running': True})
+    payload['module']['owner_plan']['settings']['decision_max_steps'] = 7
+    busy = client.put('/api/modules/knowledge', json={'module': payload, 'activate': True})
+    assert busy.status_code == 409
+    assert yaml.safe_load(knowledge_path.read_text())['module']['owner_plan']['settings']['decision_max_steps'] == 6
+    assert guard.physical_call_count == 0
+
+
+@pytest.mark.parametrize('change', ['owner', 'setting', 'snapshot'])
+def test_core_owner_plan_rejects_mismatch_unknown_setting_and_snapshot_before_persistence(module_api, change):
+    client, _, _, guard, root = module_api
+    path = root / 'knowledge' / 'module.yaml'
+    before = path.read_bytes()
+    payload = client.get('/api/modules/knowledge').json()['module']
+    plan = {
+        'schema': 'ax4lab.owner_plan.v1', 'id': 'knowledge_reference',
+        'owner': 'knowledge', 'version': '1.0.0', 'contract_version': '1.0.0',
+        'settings': {'corpora': ['markdown']},
+    }
+    if change == 'owner':
+        plan['owner'] = 'guardian'
+    elif change == 'setting':
+        plan['settings']['private_memory'] = True
+    else:
+        plan['runtime_snapshot'] = {'run_id': 'private'}
+    payload['module']['owner_plan'] = plan
+
+    result = client.put('/api/modules/knowledge', json={'module': payload, 'activate': True})
+
+    assert result.status_code == 200 and not result.json()['ok']
+    assert path.read_bytes() == before
+    assert guard.physical_call_count == 0
+
+
+@pytest.mark.parametrize(
+    'advisory_evidence_context',
+    [
+        {'trace': {'run_id': 'private-run'}},
+        {'authentication': {'password': 'secret'}},
+        {'reference': {'location': '/tmp/owner-plan-private-note.md'}},
+        {'reference': {'address': '10.0.0.42'}},
+        {'network': {'connections': ['lab-controller']}},
+        {'reference': {'session_id': 'private-session'}},
+        {'reference': {'sessionId': 'private-session'}},
+        {'reference': {'user_id': 'private-user'}},
+        {'reference': {'user-id': 'private-user'}},
+    ],
+)
+def test_guardian_owner_plan_validate_and_apply_reject_nested_private_context_before_persistence(
+    module_api, advisory_evidence_context,
+):
+    client, _, _, guard, root = module_api
+    path = root / 'guardian' / 'module.yaml'
+    before = path.read_bytes()
+    payload = client.get('/api/modules/guardian').json()['module']
+    payload['module']['owner_plan'] = {
+        'schema': 'ax4lab.owner_plan.v1', 'id': 'guardian_reference',
+        'owner': 'guardian', 'version': '1.0.0', 'contract_version': '1.0.0',
+        'settings': {'advisory_evidence_context': advisory_evidence_context},
+    }
+
+    validated = client.post('/api/modules/guardian/validate', json={'module': payload})
+    applied = client.put('/api/modules/guardian', json={
+        'module': payload, 'reason': 'private owner plan probe', 'author': 'pytest', 'activate': True,
+    })
+
+    assert validated.status_code == 200 and not validated.json()['ok']
+    assert applied.status_code == 200 and not applied.json()['ok']
+    assert path.read_bytes() == before
+    assert guard.physical_call_count == 0
+
+
+@pytest.mark.parametrize('module_id,namespace', [
+    ('guardian', 'AX4LABGuardianUI'), ('knowledge', 'AX4LABKnowledgeUI'),
+])
+def test_core_module_manifest_and_asset_use_registered_owner_presentation(module_api, module_id, namespace):
+    client, _, _, guard, _ = module_api
+
+    manifests = client.get('/api/runtime/agent-manifests').json()['agents']
+    manifest = next(item for item in manifests if item['id'] == module_id)
+    asset = client.get(f'/module-assets/{module_id}/live_report.js')
+
+    assert manifest['implementation']['id'] == module_id
+    assert manifest['implementation']['frontend']['namespace'] == namespace
+    assert manifest['renderer']['dashboard'] == 'module'
+    assert asset.status_code == 200
+    assert namespace in asset.text
+    assert guard.physical_call_count == 0
+
+
+def test_core_owner_report_projection_is_read_only(module_api):
+    client, _, controller, guard, _ = module_api
+    controller._state.run_metadata['knowledge'] = {
+        'knowledge_report': {'memory_intake': {'experiment_record_id': 'record-1'}},
+        'knowledge_context': {'schema': 'knowledge_context.v1'},
+        'evolution_proposal': {'schema': 'evolution_proposal.v1'},
+    }
+    before = deepcopy(controller._state.run_metadata)
+
+    report = client.get('/api/agents/knowledge/report').json()['report']
+
+    assert report['sections']['knowledge_report']['memory_intake']['experiment_record_id'] == 'record-1'
+    assert report['sections']['knowledge_context']['schema'] == 'knowledge_context.v1'
+    assert {key: controller._state.run_metadata[key] for key in before} == before
     assert guard.physical_call_count == 0
 
 
@@ -187,8 +327,8 @@ async def test_saved_manipulation_graph_uses_registered_archived_owner(module_ap
 async def test_get_save_reload_and_real_owner_execution_share_edited_edges(module_api, monkeypatch):
     """A valid API edge edit must change actual registered owner operation order."""
     client, app_main, controller, guard, module_root = module_api
-    from agents import orchestrator_execution as owner
-    from agents.orchestrator_agent import OrchestratorAgent
+    from agents.core.orchestrator import execution as owner
+    from agents.core.orchestrator.agent import OrchestratorAgent
     from orchestrator.langgraph_runtime import ModuleRuntimeContext
     from orchestrator.state import Stage
 
@@ -331,7 +471,7 @@ def test_controller_snapshot_survives_into_later_real_run_loops(actual_controlle
     controller, guard = actual_controller
     from agents.design.execution import design_execution_catalog
     from agents.execution_graph import compile_execution_graph
-    from agents.orchestrator_execution import orchestrator_execution_catalog
+    from agents.core.orchestrator.execution import orchestrator_execution_catalog
     from orchestrator.langgraph_runtime import LangGraphRunLoop
     from orchestrator.state import Stage
 
@@ -341,6 +481,17 @@ def test_controller_snapshot_survives_into_later_real_run_loops(actual_controlle
     shutil.copy2(Path("graphs/configs/atr_closed_loop.yaml"), graph_root / "configs" / "atr_closed_loop.yaml")
     controller._active_graph_config_path = graph_root / "configs" / "atr_closed_loop.yaml"
     controller._owner_catalog_run_id = None
+    knowledge_path = graph_root / "modules" / "knowledge" / "module.yaml"
+    knowledge_source = yaml.safe_load(knowledge_path.read_text(encoding="utf-8"))
+    knowledge_source["module"]["owner_plan"] = {
+        "schema": "ax4lab.owner_plan.v1",
+        "id": "knowledge_reference",
+        "owner": "knowledge",
+        "version": "1.0.0",
+        "contract_version": "1.0.0",
+        "settings": {"corpora": ["markdown"], "decision_max_steps": 6},
+    }
+    knowledge_path.write_text(yaml.safe_dump(knowledge_source, sort_keys=False), encoding="utf-8")
 
     first_loop = controller._new_execution_run_loop(interval_seconds=0.0, on_event=None)
     first_design_ctx = first_loop._context_for_stage(Stage.DESIGN)
@@ -359,6 +510,8 @@ def test_controller_snapshot_survives_into_later_real_run_loops(actual_controlle
         ),
     )
     assert first_compiled.entry == "mission"
+    first_knowledge_ctx = first_loop._context_for_owner("knowledge_agent", Stage.KNOWLEDGE)
+    assert first_knowledge_ctx.runtime_module_config()["owner_plan"]["settings"]["decision_max_steps"] == 6
 
     module_path = graph_root / "modules" / "orchestrator" / "module.yaml"
     source = yaml.safe_load(module_path.read_text(encoding="utf-8"))
@@ -375,6 +528,8 @@ def test_controller_snapshot_survives_into_later_real_run_loops(actual_controlle
     design_source = yaml.safe_load(design_path.read_text(encoding="utf-8"))
     design_source["module"]["execution_graph"]["nodes"][0]["label"] = "Edited after controller pin"
     design_path.write_text(yaml.safe_dump(design_source, sort_keys=False), encoding="utf-8")
+    knowledge_source["module"]["owner_plan"]["settings"]["decision_max_steps"] = 7
+    knowledge_path.write_text(yaml.safe_dump(knowledge_source, sort_keys=False), encoding="utf-8")
 
     later_loop = controller._new_execution_run_loop(interval_seconds=0.0, on_event=None)
     later_design_ctx = later_loop._context_for_stage(Stage.DESIGN)
@@ -403,6 +558,8 @@ def test_controller_snapshot_survives_into_later_real_run_loops(actual_controlle
     )
     unpinned_ctx = unpinned_loop._context_for_owner(controller._deps.orchestrator_agent_name, Stage.DESIGN)
     unpinned_design_ctx = unpinned_loop._context_for_stage(Stage.DESIGN)
+    later_knowledge_ctx = later_loop._context_for_owner("knowledge_agent", Stage.KNOWLEDGE)
+    unpinned_knowledge_ctx = unpinned_loop._context_for_owner("knowledge_agent", Stage.KNOWLEDGE)
     unpinned_design_compiled = compile_execution_graph(
         unpinned_design_ctx.runtime_module_config()["execution_graph"],
         design_execution_catalog(controller._deps.agent_registry.get("design_agent")),
@@ -419,6 +576,8 @@ def test_controller_snapshot_survives_into_later_real_run_loops(actual_controlle
     assert later_compiled.entry == "mission"
     assert later_compiled.revision == first_compiled.revision
     assert later_design_compiled.revision == first_design_compiled.revision
+    assert later_knowledge_ctx.runtime_module_config()["owner_plan"]["settings"]["decision_max_steps"] == 6
+    assert unpinned_knowledge_ctx.runtime_module_config()["owner_plan"]["settings"]["decision_max_steps"] == 7
     assert unpinned_compiled.entry == "plan"
     assert unpinned_compiled.revision != first_compiled.revision
     assert unpinned_design_compiled.revision != first_design_compiled.revision

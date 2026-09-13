@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agents.base_agent import AgentResult
-from agents.equipment_agent import LabEquipmentAgent
+from agents.equipment.agent import LabEquipmentAgent
 from app.main import app, controller, _package_runtime_event
 
 

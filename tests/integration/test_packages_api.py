@@ -45,7 +45,7 @@ def test_full_graph_package_roundtrip_is_detached_and_catalog_never_reads_privat
     catalog = catalog_response.json()
     assert catalog["ok"]
     assert {item["id"] for item in catalog["bridge_modules"]} == {
-        "printer_fleet", "camera_vision", "lerobot", "windows_pyautogui"
+        "printer_fleet", "camera_vision", "lerobot", "windows_pyautogui", "cae"
     }
     assert {item["id"] for item in catalog["agent_packages"]} >= {
         "design", "specimen", "vision", "manipulation", "equipment"
@@ -114,4 +114,31 @@ def test_package_api_rejects_invalid_modules_private_values_and_oversized_body(m
     malformed = client.post("/api/packages/experimental/import", content=b'{"id": 1, "id": 2}',
                             headers={"content-type": "application/json"})
     assert malformed.status_code == 400 and not malformed.json()["ok"]
+    assert guard.physical_call_count == 0
+
+
+def test_package_owner_plan_import_is_a_detached_draft_and_private_scope_export_fails_closed(module_api):
+    client, _, _, guard, module_root = module_api
+    draft = draft_from_repository()
+    plan = {
+        'schema': 'ax4lab.owner_plan.v1', 'id': 'knowledge_reference',
+        'owner': 'knowledge', 'version': '1.0.0', 'contract_version': '1.0.0',
+        'settings': {'corpora': ['markdown'], 'decision_max_steps': 6},
+    }
+    draft['module_configurations']['knowledge']['module']['owner_plan'] = deepcopy(plan)
+    before = {p: p.read_bytes() for p in module_root.rglob('*') if p.is_file()}
+
+    exported = client.post('/api/packages/experimental/export', json=draft).json()
+    assert exported['ok'], exported
+    imported = client.post('/api/packages/experimental/import', json=exported['package']).json()
+    assert imported['ok'] and not imported['activated'] and not imported['persisted']
+    assert imported['draft']['module_configurations']['knowledge']['module']['owner_plan'] == plan
+    assert {p: p.read_bytes() for p in module_root.rglob('*') if p.is_file()} == before
+
+    private = deepcopy(draft)
+    private['module_configurations']['knowledge']['module']['owner_plan']['settings'] = {
+        'scope': {'run_id': 'private-run'},
+    }
+    rejected = client.post('/api/packages/experimental/export', json=private).json()
+    assert not rejected['ok'] and rejected['package'] is None
     assert guard.physical_call_count == 0

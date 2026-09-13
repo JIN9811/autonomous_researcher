@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import ast
 from copy import deepcopy
-import importlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,19 +10,8 @@ from types import SimpleNamespace
 import pytest
 
 
-LEGACY_MODULES = {
-    "agents.analysis_agent": "agents.analysis.agent",
-    "agents.analysis_decisions": "agents.analysis.decisions",
-    "agents.analysis_runtime": "agents.analysis.runtime",
-    "agents.analysis_improvement": "agents.analysis.improvement",
-    "agents.analysis_refinement": "agents.analysis.refinement",
-    "agents.analysis_mechanisms": "agents.analysis.mechanisms",
-    "agents.analysis_calibration": "agents.analysis.calibration",
-    "agents.analysis_fem": "agents.analysis.fem",
-}
-
-
-def test_analysis_discovery_and_legacy_modules_share_runtime_identity(monkeypatch):
+def test_analysis_discovery_registers_canonical_owner_identity():
+    from agents.analysis.agent import AnalysisAgent
     from agents.module_discovery import discover_agent_modules
     from agents.registry import AgentRegistry
 
@@ -31,16 +19,11 @@ def test_analysis_discovery_and_legacy_modules_share_runtime_identity(monkeypatc
     assert len(modules) == 1
     module = modules[0]
     assert (module.agent_name, module.version) == ("analysis_agent", "1.0.0")
-    for legacy_name, canonical_name in LEGACY_MODULES.items():
-        legacy = importlib.import_module(legacy_name)
-        canonical = importlib.import_module(canonical_name)
-        assert legacy is canonical
-        monkeypatch.setattr(canonical, "_identity_probe", canonical_name, raising=False)
-        assert importlib.import_module(legacy_name)._identity_probe == canonical_name
-
     registry = AgentRegistry()
     registry.register_module(module)
     assert registry.names() == ["analysis_agent"]
+    assert registry.get_module("analysis").factory is AnalysisAgent
+    assert registry.get("analysis_agent").__class__ is AnalysisAgent
     assert registry.get("analysis_agent").execution_catalog().module_id == "analysis"
 
 
@@ -69,7 +52,6 @@ def test_analysis_descriptor_owns_sources_without_a_physical_low_boundary():
         "execution": "agents/analysis/execution.py",
         "structure": "agents/analysis/structure.py",
         "presentation": "agents/analysis/presentation.py",
-        "compatibility_imports": list(LEGACY_MODULES),
     }
     for path in descriptor["backend"].values():
         for item in path if isinstance(path, list) else [path]:

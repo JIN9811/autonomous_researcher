@@ -17,12 +17,13 @@ related_docs:
   - docs/standards/documentation_standard.md
   - docs/runtime/current_code_snapshot.md
   - docs/runtime/three_level_control_model.md
+  - docs/modularity.md
 supersedes: []
 -->
 
 # AX4LAB — Setup and Operation
 
-[Research overview](README.md) · [Paper](docs/paper/README.md) · [Agents](docs/agents/README.md) · [Device bridges](docs/device_bridges/README.md)
+[Research overview](README.md) · [Paper](docs/paper/README.md) · [Modularity](docs/modularity.md) · [Agents](docs/agents/README.md) · [Device bridges](docs/device_bridges/README.md)
 
 AX4LAB applies multi-agent orchestration to existing laboratory equipment through
 the Autonomous Researcher (ATR) framework. This companion covers setup and
@@ -321,6 +322,7 @@ the Bambu printer bridge is inactive.
 ## 9. Documentation Entry Points
 
 - [Documentation index](docs/README.md)
+- [Modularity reference](docs/modularity.md)
 - [Documentation Standard](docs/standards/documentation_standard.md)
 - [Document type templates](docs/templates/document_types.md)
 - [Complete User Manual](docs/tutorials/user_manual.en.md)

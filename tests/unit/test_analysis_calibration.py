@@ -8,8 +8,8 @@ import pytest
 
 
 def module():
-    assert importlib.util.find_spec('agents.analysis_calibration'), 'feature-informed calibration is required'
-    return importlib.import_module('agents.analysis_calibration')
+    assert importlib.util.find_spec('agents.analysis.calibration'), 'feature-informed calibration is required'
+    return importlib.import_module('agents.analysis.calibration')
 
 
 def test_features_have_hand_checked_units_and_no_fitted_shift():
@@ -117,7 +117,7 @@ class SolverFixture:
 
 @pytest.mark.asyncio
 async def test_single_acquisition_can_calibrate_through_existing_fem_without_promotion(tmp_path):
-    from agents.analysis_fem import run_fem_study
+    from agents.analysis.fem import run_fem_study
     data = evidence(tmp_path)
     original = deepcopy(data)
     io = SolverFixture()

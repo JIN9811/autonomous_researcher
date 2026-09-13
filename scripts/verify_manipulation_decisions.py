@@ -41,7 +41,7 @@ async def main(args):
     from dotenv import load_dotenv
     import yaml
     from agents.base_agent import AgentContext
-    from agents.manipulation_decision import select_manipulation_tool, review_manipulation_result
+    from agents.manipulation.decision import select_manipulation_tool, review_manipulation_result
     from app.bootstrap import _build_backend, _load_configs, _models_cfg_for_backend
     from backends.llm_lease import LLMLeaseCoordinator
     from backends.model_router import ModelRouter

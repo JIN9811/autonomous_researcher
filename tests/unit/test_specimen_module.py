@@ -4,22 +4,22 @@ from pathlib import Path
 import pytest
 
 from agents.registry import AgentRegistry
-from agents.specimen_agent import SpecimenMakingAgent
+from agents.specimen.agent import SpecimenMakingAgent
 from agents.execution_graph import ExecutionGraphError, compile_execution_graph
 from orchestrator.state import Mode, OrchestratorState, Stage
 
 
-def test_discovered_specimen_preserves_compatibility_and_activation():
+def test_discovered_specimen_preserves_canonical_identity_and_activation():
     from agents.module_discovery import discover_agent_modules
     modules = {module.module_id: module for module in discover_agent_modules()}
     assert "specimen" in modules, "Specimen must be a discovered code owner"
     from agents.specimen.agent import SpecimenMakingAgent as Owner
-    from agents.specimen.decision import decide_specimen
-    from agents.specimen_decision import decide_specimen as legacy_decide
-    assert Owner is SpecimenMakingAgent and legacy_decide is decide_specimen
+    assert Owner is SpecimenMakingAgent
     registry = AgentRegistry()
     registry.register_module(modules["specimen"])
     agent = registry.get("specimen_agent")
+    assert registry.get_module("specimen").factory is SpecimenMakingAgent
+    assert agent.__class__ is SpecimenMakingAgent
     active = {"specimen_agent"}
     registry.bind_activation(lambda: active)
     active.clear()
@@ -203,7 +203,7 @@ async def test_deterministic_specimen_matches_complete_result_state_and_tool_pay
             return datetime(2026, 9, 13, tzinfo=timezone.utc)
 
     monkeypatch.setattr(owner, "datetime", Clock)
-    monkeypatch.setattr("agents.knowledge_context.uuid4", lambda: SimpleNamespace(hex="synthetic-request"))
+    monkeypatch.setattr("agents.core.knowledge.context.uuid4", lambda: SimpleNamespace(hex="synthetic-request"))
     monkeypatch.setattr(SpecimenMakingAgent, "_artifact_dir", lambda *args: tmp_path / "geometry")
     state = OrchestratorState(**fixture["state_input"])
     before = state.model_dump(mode="json")

@@ -558,6 +558,8 @@ function liveAgentModuleHostServices() {
     latestAnalysisBoHandoff,
     latestReportBoResult,
     latestKnowledgeReport,
+    latestKnowledgePayload,
+    latestKnowledgeContext,
     latestKnowledgeEvolutionProposal,
     latestReportPayload,
     resolveLiveBoVisualization,
@@ -652,6 +654,31 @@ function liveAgentModuleHostServices() {
     visionProgressTone,
     runtimeRows,
     renderReportList,
+    dashboardObjectList,
+    renderKnowledgeActivityCard,
+    renderLiveKnowledgeSummary,
+    renderKnowledgeMemoryBoard,
+    renderKnowledgePatternBoard,
+    liveGuardianStatusPayload,
+    renderGuardianRiskMap,
+    renderGuardianApprovalQueue,
+    renderGuardianBlockedActions,
+    renderGuardianIncidentLedger,
+    renderGuardianSafetyBudget,
+    renderGuardianLiveHeartbeat,
+    renderGuardianSafeStopVerification,
+    renderGuardianEvidenceCompleteness,
+    renderGuardianSelfEvolutionGate,
+    liveApprovalSnapshot: () => ({
+      pending: Array.isArray(liveApprovals.pending) ? liveApprovals.pending : [],
+      resolved: Array.isArray(liveApprovals.resolved) ? liveApprovals.resolved : [],
+    }),
+    liveRunEvidenceCounts: (report) => ({
+      artifacts: liveRunArtifacts.length + (Array.isArray(report?.artifactItems) ? report.artifactItems.length : 0),
+      validationItems: Array.isArray(report?.validationItems) ? report.validationItems.length : 0,
+      warnings: Array.isArray(report?.warnings) ? report.warnings.length : 0,
+      events: liveRunEvents.length,
+    }),
   };
 }
 
@@ -678,7 +705,7 @@ function liveOwnerReportForSession(session, agentId = liveSelectedAgent) {
 
 async function hydrateLiveSelectedAgentReport(session, manifestGeneration = liveAgentManifestRequestGeneration) {
   const agentId = String(liveSelectedAgent || "").trim().toLowerCase();
-  if (!["analysis", "bo"].includes(agentId) || !knownLiveAgent(agentId)) return session;
+  if (!["analysis", "bo", "knowledge", "guardian"].includes(agentId) || !knownLiveAgent(agentId)) return session;
   const endpoint = liveAgentReportApi(agentId);
   const state = session && session.state && typeof session.state === "object" ? session.state : {};
   const runId = String(state.run_id || "");
@@ -4771,80 +4798,8 @@ function renderGuardianSelfEvolutionGate(status) {
 }
 
 function renderGuardianReportDetails(report) {
-  const status = liveGuardianStatusPayload(report);
-  if (!status) return `<p class="hint">Guardian status report is not available yet. Refresh the active run state after a run starts.</p>`;
-  const summary = status.summary && typeof status.summary === "object" ? status.summary : {};
-  const deviceData = status.device_data_integrity && typeof status.device_data_integrity === "object" ? status.device_data_integrity : {};
-  const policy = status.policy_version_panel && typeof status.policy_version_panel === "object" ? status.policy_version_panel : {};
-  const handoff = status.handoff_packet && typeof status.handoff_packet === "object" ? status.handoff_packet : {};
-  const latestDecision = handoff.latest_guardian_decision && typeof handoff.latest_guardian_decision === "object" ? handoff.latest_guardian_decision : {};
-  const latestContract = handoff.latest_guardian_contract && typeof handoff.latest_guardian_contract === "object" ? handoff.latest_guardian_contract : {};
-  const corrective = Array.isArray(handoff.corrective_actions) ? handoff.corrective_actions : [];
-  const correctiveItems = corrective.slice(-8).reverse().map((item) => `${item.action_id || item.action || "corrective_action"} · ${item.status || "open"} · ${item.description || item.message || item.owner || "-"}`);
-  return `
-    <div class="live-agent-specific-guardian-details">
-      <h5>Graph-Wide Risk Map</h5>
-      ${renderGuardianRiskMap(status)}
-      <h5>Guardian Status Summary</h5>
-      ${runtimeRows([
-        ["schema", status.schema || "guardian_status_report.v1"],
-        ["run_id", status.run_id || "-"],
-        ["stage", status.stage || "-"],
-        ["status", status.status || "-"],
-        ["risk_score", summary.risk_score ?? "-"],
-        ["dominant_risks", summary.dominant_risks || []],
-        ["gate_count", summary.gate_count ?? "-"],
-        ["incident_count", summary.incident_count ?? "-"],
-        ["blocked_action_count", summary.blocked_action_count ?? "-"],
-        ["pending_approval_count", summary.pending_approval_count ?? "-"],
-        ["safety_budget_status", summary.safety_budget_status || "-"],
-        ["safe_stop_status", summary.safe_stop_status || "-"],
-        ["evidence_completeness_status", summary.evidence_completeness_status || "-"],
-        ["self_evolution_gate_status", summary.self_evolution_gate_status || "-"],
-        ["latest_decision", latestDecision.decision || "-"],
-        ["latest_reason", latestDecision.reason_code || latestContract.failure_code || "-"],
-        ["ok_for_next_stage", latestContract.ok_for_next_stage === undefined ? "-" : latestContract.ok_for_next_stage],
-        ["ok_for_bo", latestContract.ok_for_bo === undefined ? "-" : latestContract.ok_for_bo],
-      ])}
-      <h5>Safety Budget</h5>
-      ${renderGuardianSafetyBudget(status)}
-      <h5>Live Device Heartbeat</h5>
-      ${renderGuardianLiveHeartbeat(status)}
-      <h5>Safe-Stop Verification</h5>
-      ${renderGuardianSafeStopVerification(status)}
-      <h5>Evidence Completeness</h5>
-      ${renderGuardianEvidenceCompleteness(status)}
-      <h5>Self-Evolution Gate</h5>
-      ${renderGuardianSelfEvolutionGate(status)}
-      <h5>Gate Timeline</h5>
-      ${renderReportList((Array.isArray(status.gate_timeline) ? status.gate_timeline : []).slice(-14).reverse().map((item) => `${item.stage || "stage"}.${item.phase || "gate"}${item.tool ? `/${item.tool}` : ""} · ${item.decision || "allow"} · ${item.reason_code || "OK"} · risk=${renderRuntimeValue(item.risk_score)}`), "No Guardian gate timeline recorded.", 14)}
-      <h5>Blocked Actions</h5>
-      ${renderGuardianBlockedActions(status)}
-      <h5>Approval Queue</h5>
-      ${renderGuardianApprovalQueue(status)}
-      <h5>Incident / Near-Miss Ledger</h5>
-      ${renderGuardianIncidentLedger(status)}
-      <h5>Policy / Version Panel</h5>
-      ${runtimeRows([
-        ["guardian_gate_schema", policy.guardian_gate_schema || "-"],
-        ["contract_schema", policy.contract_schema || "-"],
-        ["decision_schema", policy.decision_schema || "-"],
-        ["incident_schema", policy.incident_schema || "-"],
-        ["tool_call_schema", policy.tool_call_schema || "-"],
-        ["source_doc", policy.source_doc || "-"],
-      ])}
-      <h5>Device / Data Integrity</h5>
-      ${runtimeRows([
-        ["device_health", deviceData.device_health || {}],
-        ["live_device_heartbeat", deviceData.live_device_heartbeat || []],
-        ["hardware_alert_count", deviceData.hardware_alert_count ?? "-"],
-        ["tool_call_counts", deviceData.tool_call_counts || {}],
-        ["data_related_incident_count", deviceData.data_related_incident_count ?? "-"],
-      ])}
-      <h5>Corrective Actions</h5>
-      ${renderReportList(correctiveItems, "No corrective actions recorded.", 8)}
-    </div>
-  `;
+  const frontend = liveAgentModuleHost.get("guardian");
+  return frontend && typeof frontend.renderReport === "function" ? frontend.renderReport(report) : "";
 }
 
 function reportSectionKey(title) {
@@ -5875,66 +5830,8 @@ function activeModuleDescriptorFallback(agentId, rendererProfile, moduleFrontend
 
 
 function renderKnowledgeReportDetails(report) {
-  const payload = latestKnowledgePayload(report) || {};
-  const knowledgeReport = latestKnowledgeReport(report) || {};
-  const context = latestKnowledgeContext(report) || {};
-  const evolution = latestKnowledgeEvolutionProposal(report) || {};
-  const intake = knowledgeReport.memory_intake || {};
-  const quality = knowledgeReport.evidence_quality || context.evidence_quality || {};
-  const dataQuality = knowledgeReport.data_quality_map || {};
-  const failures = Array.isArray(knowledgeReport.failure_patterns) ? knowledgeReport.failure_patterns : [];
-  const successes = Array.isArray(knowledgeReport.success_patterns) ? knowledgeReport.success_patterns : [];
-  const performance = Array.isArray(knowledgeReport.agent_performance_records) ? knowledgeReport.agent_performance_records : [];
-  const packs = Array.isArray(evolution.evidence_packs) ? evolution.evidence_packs : [];
-  const prefill = Array.isArray(evolution.prefill_tasks) ? evolution.prefill_tasks : [];
-  const outcomes = Array.isArray(evolution.outcomes) ? evolution.outcomes : Array.isArray(knowledgeReport.evolution_outcomes) ? knowledgeReport.evolution_outcomes : [];
-  const graphStatus = knowledgeReport.graph_backend_status || context.graph_backend_status || payload.graph_backend_status || {};
-  const memoryRows = runtimeRows([
-    ["experiment_record_id", intake.experiment_record_id || "-"],
-    ["agent_performance_count", intake.agent_performance_count ?? performance.length ?? 0],
-    ["failure_pattern_count", intake.failure_pattern_count ?? failures.length ?? 0],
-    ["success_pattern_count", intake.success_pattern_count ?? successes.length ?? 0],
-    ["evolution_pack_count", intake.evolution_pack_count ?? packs.length ?? 0],
-    ["retrieval_coverage", payload.retrieval_coverage ?? context.retrieval?.coverage ?? "-"],
-    ["artifact_link_coverage", quality.artifact_link_coverage ?? "-"],
-    ["agent_report_coverage", quality.agent_report_coverage ?? "-"],
-  ]);
-  const failureItems = failures.map((item) => `${item.pattern_id || item.failure_type || "failure"} · recurrence=${renderRuntimeValue(item.recurrence_count, "1")} · ${compactText(item.root_cause_hypothesis || item.failure_type || "", 160)}`);
-  const successItems = successes.map((item) => `${item.skill_id || item.scope || "success"} · agent=${item.agent_id || "-"} · ${compactText(item.procedure_summary || item.scope || "", 160)}`);
-  const performanceItems = performance.map((item) => `${item.agent_id || item.stage || "agent"} · status=${item.status || "-"} · score=${renderRuntimeValue(item.score)} · missing=${renderRuntimeValue((item.signals || {}).missing_required_fields || [])}`);
-  const packItems = packs.map((pack) => `${pack.pack_id || "pack"} · ${pack.target_type || "target"}:${pack.target_id || "-"} · priority=${renderRuntimeValue(pack.priority)} · ${compactText(pack.objective || (pack.why_this_target || []).join("; "), 180)}`);
-  const prefillItems = prefill.map((task) => `${task.target_type || "target"}:${task.target_id || "-"} · ${compactText(task.objective || renderRuntimeValue(task.constraints || {}), 180)}`);
-  const outcomeItems = outcomes.map((item) => `${item.variant_id || item.outcome_id || "variant"} · ${item.target_type || "target"}:${item.target_id || "-"} · verdict=${item.verdict || "observe"} · rollback=${renderRuntimeValue(item.rollback_recommended)}`);
-  const missingArtifacts = Array.isArray(dataQuality.missing_artifacts) ? dataQuality.missing_artifacts : [];
-  return `
-    <div class="live-agent-specific-report-detail live-agent-specific-knowledge-details">
-      <h5>Memory Ledger</h5>
-      ${memoryRows}
-      <h5>Failure Pattern Memory</h5>
-      ${renderReportList(failureItems, "No failure pattern recorded.", 12)}
-      <h5>Success / Skill Library</h5>
-      ${renderReportList(successItems, "No reusable success pattern recorded.", 12)}
-      <h5>Agent Performance Ledger</h5>
-      ${renderReportList(performanceItems, "No agent performance record available.", 16)}
-      <h5>Self-Evolution Evidence Packs</h5>
-      ${renderReportList(packItems, "No evidence pack prepared.", 10)}
-      <h5>Evolution Lab Prefill</h5>
-      ${renderReportList(prefillItems, "No Evolution Lab prefill task prepared.", 8)}
-      <h5>Evolution Outcome Attribution</h5>
-      ${renderReportList(outcomeItems, "No activated variant outcome attribution recorded yet.", 8)}
-      <h5>Optional Graph Backend</h5>
-      ${runtimeRows([
-        ["enabled", graphStatus.enabled === undefined ? false : graphStatus.enabled],
-        ["backend", graphStatus.backend || "disabled"],
-        ["ok", graphStatus.ok === undefined ? "-" : graphStatus.ok],
-        ["nodes_written", graphStatus.nodes_written ?? graphStatus.node_count ?? "-"],
-        ["edges_written", graphStatus.edges_written ?? graphStatus.edge_count ?? "-"],
-        ["error", graphStatus.error || ""],
-      ])}
-      <h5>Data Quality / Missing Evidence</h5>
-      ${renderReportList(missingArtifacts.map((item) => renderRuntimeValue(item)), "No missing artifact recorded.", 12)}
-    </div>
-  `;
+  const frontend = liveAgentModuleHost.get("knowledge");
+  return frontend && typeof frontend.renderReport === "function" ? frontend.renderReport(report) : "";
 }
 
 function renderBoReportDetails(report) {
@@ -5961,9 +5858,9 @@ function renderAgentSpecificReportSection(report, status, agentLabel) {
   const equipmentDetails = !moduleDetails && reportAgentId === "equipment" ? renderEquipmentReportDetails(report) : "";
   const analysisDetails = !moduleDetails && !descriptorFallback && reportAgentId === "analysis" ? renderAnalysisReportDetails(report) : "";
   const descriptorDetails = descriptorFallback ? renderAgentDescriptorReportSections(report, liveSelectedAgent, { academic: true }) : "";
-  const knowledgeDetails = reportAgentId === "knowledge" ? renderKnowledgeReportDetails(report) : "";
+  const knowledgeDetails = !moduleDetails && reportAgentId === "knowledge" ? renderKnowledgeReportDetails(report) : "";
   const boDetails = !moduleDetails && !descriptorFallback && reportAgentId === "bo" ? renderBoReportDetails(report) : "";
-  const guardianDetails = reportAgentId === "guardian" ? renderGuardianReportDetails(report) : "";
+  const guardianDetails = !moduleDetails && reportAgentId === "guardian" ? renderGuardianReportDetails(report) : "";
   return `
     <section class="runtime-card-section live-report-section live-agent-specific-report">
       <h4>${escapeHtml(profile.title)}</h4>
@@ -15292,47 +15189,9 @@ function renderAnalysisDashboardCards(report, status, agentLabel, profile) {
 }
 
 function renderKnowledgeDashboardCards(report, status, agentLabel, profile) {
-  const payload = latestKnowledgePayload(report) || {};
-  const knowledgeReport = latestKnowledgeReport(report) || {};
-  const context = latestKnowledgeContext(report) || {};
-  const evolution = latestKnowledgeEvolutionProposal(report) || {};
-  const intake = knowledgeReport.memory_intake || {};
-  const evidenceQuality = knowledgeReport.evidence_quality || context.evidence_quality || {};
-  const failures = Array.isArray(knowledgeReport.failure_patterns) ? knowledgeReport.failure_patterns : [];
-  const successes = Array.isArray(knowledgeReport.success_patterns) ? knowledgeReport.success_patterns : [];
-  const performance = Array.isArray(knowledgeReport.agent_performance_records) ? knowledgeReport.agent_performance_records : [];
-  const packs = Array.isArray(evolution.evidence_packs) ? evolution.evidence_packs : [];
-  const outcomes = Array.isArray(evolution.outcomes) ? evolution.outcomes : Array.isArray(knowledgeReport.evolution_outcomes) ? knowledgeReport.evolution_outcomes : [];
-  const packItems = packs.map((item) => `${item.target_type || "target"}:${item.target_id || "unknown"} / ${item.status || "proposed"} / ${item.summary || ""}`);
-  return `
-    ${renderKnowledgeActivityCard()}
-    ${renderDashboardCard("AX4LAB Wiki", `<div data-live-knowledge-body="wiki">${renderLiveKnowledgeSummary('wiki')}</div>`, {span:4,tone:"knowledge",eyebrow:"shared platform knowledge"})}
-    ${renderDashboardCard("Memory", `<div data-live-knowledge-body="memory">${renderLiveKnowledgeSummary('memory')}</div><details><summary>Operational ledger</summary>${renderKnowledgeMemoryBoard(knowledgeReport,evolution)}</details>`, {span:4,tone:"knowledge",eyebrow:"retained context"})}
-    ${renderDashboardCard("Agent Delivery", `<div data-live-knowledge-body="delivery">${renderLiveKnowledgeSummary('delivery')}</div>`, {span:4,tone:"knowledge",eyebrow:"retrieved / delivered / cited"})}
-    <details style="grid-column:1/-1"><summary>Operational evidence, patterns and Evolution</summary><div class="agent-dashboard-grid">
-    ${renderDashboardCard("Evidence Quality", renderDashboardRows([
-      ["artifact_links", evidenceQuality.artifact_link_coverage ?? "-"],
-      ["agent_reports", evidenceQuality.agent_report_coverage ?? "-"],
-      ["guardian_incidents", evidenceQuality.guardian_incident_count ?? "-"],
-      ["context_items", Array.isArray(context.items) ? context.items.length : "-"],
-    ]), { span: 4, tone: "knowledge", eyebrow: "provenance" })}
-    ${renderDashboardCard("Pattern Library", renderKnowledgePatternBoard(knowledgeReport), { span: 6, tone: "knowledge", eyebrow: "failure + success" })}
-    ${renderDashboardCard("Memory Intake", renderDashboardRows([
-      ["experiment_record", intake.experiment_record_id || "-"],
-      ["agent_performance", intake.agent_performance_count ?? performance.length ?? "-"],
-      ["failure_patterns", intake.failure_pattern_count ?? failures.length ?? 0],
-      ["success_patterns", intake.success_pattern_count ?? successes.length ?? 0],
-      ["evolution_packs", intake.evolution_pack_count ?? packs.length ?? "-"],
-    ]), { span: 6, tone: "knowledge", eyebrow: "typed memory" })}
-    ${renderDashboardCard("Evolution Packs", `${renderDashboardRows([
-      ["packs", packs.length],
-      ["outcomes", outcomes.length],
-      ["top_target", packs[0] ? `${packs[0].target_type || "target"}:${packs[0].target_id || "unknown"}` : "-"],
-      ["activation_gate", evolution.activation_gate || "Self-Evolution / Guardian / operator"],
-    ])}${dashboardList(packItems, "No evolution evidence packs recorded.", 4)}`, { span: 6, tone: "knowledge", eyebrow: "self-evolution prep" })}
-    ${renderDashboardCard("Retrieval / Provenance", dashboardObjectList(context.retrieval || payload.retrieval || {}, "No retrieval context recorded.", 4), { span: 6, tone: "knowledge", eyebrow: "memory context" })}
-    </div></details>
-  `;
+  const frontend = liveAgentModuleHost.get("knowledge");
+  return frontend && typeof frontend.renderDashboard === "function"
+    ? frontend.renderDashboard(report, status, agentLabel, profile) : "";
 }
 
 function renderBoDashboardCards(report, status, agentLabel, profile) {
@@ -15343,44 +15202,9 @@ function renderBoDashboardCards(report, status, agentLabel, profile) {
 }
 
 function renderGuardianDashboardCards(report, status, agentLabel, profile) {
-  const guardianStatus = liveGuardianStatusPayload(report);
-  const summary = guardianStatus && guardianStatus.summary ? guardianStatus.summary : {};
-  const decisionRaw = latestReportPayload(report, ["latest_guardian_decision", "guardian_decision", "data.guardian_decision"]);
-  const decision = decisionRaw && typeof decisionRaw === "object" ? decisionRaw : {};
-  const incidents = Array.isArray(guardianStatus && guardianStatus.incidents) ? guardianStatus.incidents : Array.isArray(summary.incidents) ? summary.incidents : [];
-  const gates = Array.isArray(guardianStatus && guardianStatus.gates) ? guardianStatus.gates : Array.isArray(summary.gates) ? summary.gates : [];
-  const gateItems = gates.map((item) => `${item.name || item.gate || "gate"} / ${item.status || "unknown"} / ${item.reason || ""}`);
-  const incidentItems = incidents.map((item) => `${item.severity || "incident"} / ${item.type || item.code || "event"} / ${item.summary || item.reason || ""}`);
-  return `
-    ${renderDashboardCard("Safety Summary", renderDashboardRows([
-      ["guardian_status", guardianStatus ? guardianStatus.status || "-" : "not_loaded"],
-      ["risk_score", summary.risk_score ?? "-"],
-      ["dominant_risks", summary.dominant_risks || []],
-      ["blocked_actions", summary.blocked_action_count ?? "-"],
-      ["incidents", summary.incident_count ?? incidents.length ?? "-"],
-    ]), { span: 4, tone: summary.risk_score > 0.6 ? "warning" : "guardian", eyebrow: "global risk" })}
-    ${renderDashboardCard("Gate Queue", `${renderDashboardRows([
-      ["gate_count", summary.gate_count ?? gates.length ?? "-"],
-      ["pending_approvals", summary.pending_approval_count ?? (liveApprovals.pending || []).length],
-      ["approval_api_pending", (liveApprovals.pending || []).length],
-      ["resolved", (liveApprovals.resolved || []).length],
-    ])}${dashboardList(gateItems, "No guardian gate queue recorded.", 8)}`, { span: 4, tone: "guardian", eyebrow: "approval interrupts" })}
-    ${renderDashboardCard("Stop / Continue Decision", renderDashboardRows([
-      ["decision", decision.decision || latestReportPayload(report, ["guardian_decision", "decision", "next_stage"]) || report.nextAction],
-      ["reason_code", decision.reason_code || "-"],
-      ["latest_warning", report.warnings[report.warnings.length - 1] || "-"],
-      ["policy_schema", decision.policy_schema || "-"],
-      ["next_action", decision.next_action || report.nextAction],
-    ]), { span: 4, tone: "guardian", eyebrow: "authority" })}
-    ${renderDashboardCard("Incidents", dashboardList(incidentItems, "No active incidents recorded.", 8), { span: 6, tone: incidents.length ? "danger" : "success", eyebrow: "runtime safety" })}
-    ${renderDashboardCard("Device / Data Integrity", renderDashboardRows([
-      ["artifact_refs", liveRunArtifacts.length + report.artifactItems.length],
-      ["validation_items", report.validationItems.length],
-      ["warnings", report.warnings.length],
-      ["run_events", liveRunEvents.length],
-      ["integrity_status", summary.integrity_status || "-"],
-    ]), { span: 6, tone: "guardian", eyebrow: "audit trail" })}
-  `;
+  const frontend = liveAgentModuleHost.get("guardian");
+  return frontend && typeof frontend.renderDashboard === "function"
+    ? frontend.renderDashboard(report, status, agentLabel, profile) : "";
 }
 
 function renderAgentSpecializedDashboardSections(session, report, status, agentLabel) {

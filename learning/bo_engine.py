@@ -15,7 +15,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: acquisition logic
 - Risky places to edit: objective direction assumptions
-- Related files: learning/surrogate_model.py, agents/design_agent.py
+- Related files: learning/surrogate_model.py, agents/design/agent.py
 """
 
 from __future__ import annotations

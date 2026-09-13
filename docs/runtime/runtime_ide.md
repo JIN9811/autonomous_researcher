@@ -23,7 +23,11 @@ source_of_truth:
   - web/static/runtime_ide.css
   - web/static/runtime_graph_geometry.js
   - web/static/module_control_view.js
+  - web/static/experimental_packages.js
   - agents/execution_graph.py
+  - agents/core/plans.py
+  - agents/core/knowledge/plan.py
+  - agents/core/guardian/plan.py
   - graphs/schema.py
   - graphs/validator.py
   - graphs/compiler.py
@@ -55,6 +59,7 @@ related_docs:
   - docs/device_bridges/README.md
   - docs/standards/documentation_standard.md
   - docs/superpowers/specs/2026-08-09-runtime-ide-reference-documentation-design.md
+  - docs/modularity.md
 supersedes: []
 -->
 
@@ -66,7 +71,7 @@ supersedes: []
 |---|---|
 | Purpose | Configure and inspect orchestration graphs and agent modules |
 | Workspace | `/ide` |
-| Coverage | Editing, validation, versioning, run control and evidence inspection |
+| Coverage | Editing, validation, versioning, Package/core-owner configuration, run control and evidence inspection |
 | Implementation | [Runtime APIs](../../app/main.py) · [IDE client](../../web/static/runtime_ide.js) |
 | Recorded basis | 2026-09-13 module lifecycle and executable Design/Orchestrator/Equipment/Analysis graphs; earlier sections retain their recorded scope · [Verification scope](#verification) |
 
@@ -409,7 +414,19 @@ See the [Design](../agents/design_agent.md#editable-runtime-ide-structure),
 [Specimen](../agents/specimen_agent.md#internal-workflow), and
 [Orchestrator](../agents/orchestrator_agent.md#editable-runtime-ide-structure) views.
 The Orchestrator inspector resolves implementation references from
-`agents/core/orchestrator/`; the former flat module names remain import aliases.
+`agents/core/orchestrator/`; maintained callers now import the canonical package
+directly, and the former flat wrappers were retired after that migration.
+
+Knowledge and Guardian use the same executable projection without becoming
+specialist packages. Their module tabs obtain the operation catalog from the
+already registered core instance, so `knowledge.task`/`deliver` and
+`guardian.task`/`deliver` count as registered module-local operations while an
+unknown handler remains a readiness error. CODE boxes show source ownership only.
+Their current-plan query and proposal-validation methods remain read-only. A
+separate strict `module.owner_plan` declaration can be edited in Package Manager,
+validated without writes, and explicitly applied through the existing module
+version/configuration API for future runs. This does not activate or remove the
+core module, schedule a run, or turn CODE boxes into execution nodes.
 
 ### Equipment Agent Flow projection
 
@@ -571,7 +588,7 @@ retained module drafts. This is separate from graph-only YAML exchange.
 |---|---|---|
 | Export Package | Validate and download detached JSON with declared dependencies | No save, install or activation |
 | Import Package | Validate JSON, confirm replacement of affected dirty drafts, and load graph/module drafts | Existing explicit save controls remain required |
-| Package Manager | Open draft membership and package composition in a separate internal tab | No install or activation |
+| Package Manager | Open draft membership, Package composition, and Knowledge/Guardian owner-plan controls in a separate internal tab | No install or graph activation; owner declarations require separate explicit apply |
 | Device Bridges | Open Agent Package → Device Bridge contract nodes in the standard graph canvas | No device probes or transport commands |
 | Open bridge internals / double-click bridge | Inspect only that bridge's manager, providers or declared tools | Read-only contract projection |
 | Back | Return from bridge internals to the plane, then to the previous Main System or agent tab | No membership or execution change |
@@ -591,6 +608,16 @@ Bridges**. Membership selection does not rewrite the orchestration route or
 remove installed code. Failed or stale imports preserve newer local edits.
 Connection secrets and runtime artifacts are not package contents; see the
 [package contracts and API](../../packages/README.md).
+
+Package Manager displays the existing Orchestration graph as reference-only and
+offers Default/Configured declarations for Knowledge and Guardian. Each card
+edits ID, definition version, contract version, and settings JSON. **Validate
+Draft** calls `POST /api/modules/{id}/validate` with `activate=false`; **Apply
+for Future Runs** calls the existing `PUT /api/modules/{id}` path with explicit
+activation. Default removes only `owner_plan`, restoring the owner's legacy
+future-run behavior. Imported module configurations update detached controls and
+caches without writing active files. See the
+[Modularity Reference](../modularity.md#ide-package-and-owner-plan-lifecycle).
 
 The plane shows **uses** links from package contracts to actual bridge modules.
 Providers are not plane nodes: open Printer Fleet to see its manager and
@@ -872,6 +899,15 @@ physical calls and no denied effects (`1 passed` in 470.15 seconds; cycle
 model response wrote evidence without first returning a search identity;
 Guardian blocked before BO. Both attempts remain part of the reliability record.
 No physical-equipment result is claimed.
+
+The 2026-09-14 core-owner plan checks passed 150 focused Python tests with 10
+existing warnings and 37 Package Manager/module-editor Node tests. A guarded
+five-route suite passed 5 cases. Isolated browser/API checks at 1920 and 900 px
+covered invalid JSON, validation without writes, explicit Knowledge-only apply,
+Default restore, export, and detached import with zero physical calls. These
+used controlled model and equipment I/O; they are not live-provider, hardware,
+or scientific evidence. Exact commands are recorded in the
+[core-plan implementation plan](../superpowers/plans/2026-09-14-core-plans-and-modularity-guide.md).
 
 This Reference was checked on 2026-08-09 against commit `541c93a` by repository
 inspection of the declared source files. The following evidence types are

@@ -329,7 +329,7 @@ Existing files likely to modify:
 - `app/bootstrap.py`
 - `app/main.py`
 - `app/controller.py`
-- `agents/manipulation_agent.py`
+- `agents/manipulation/agent.py`
 - `docs/README.md`
 - `docs/runtime/agent_program_baseline.md`
 - `docs/runtime/test_mode.md`
@@ -600,7 +600,7 @@ Teleoperation GUI requirements:
 - `/lerobot` Device Port Setup exposes a per-camera `RealSense SDK` checkbox. When checked for a camera key, baseline/detect/save/test payloads store `backend=intelrealsense`, `use_depth=true`, `fps=15` by default, and downstream teleoperation, recording, rollout, and Manipulation Agent bridge commands all receive the RealSense camera config instead of OpenCV `/dev/video*` config.
 - When `top` or `wrist` is saved without an explicit RealSense identifier, the backend must resolve the role through SDK enumeration before writing memory: `top` prefers a detected D455/D455F serial, and `wrist` prefers a detected D405 serial. If `wrist` D405 is not visible, Device Port Setup must fail with `LEROBOT_REALSENSE_ROLE_CAMERA_NOT_FOUND` instead of saving D455F as wrist.
 - RealSense discovery must enumerate devices without opening camera streams and must use the official SDK path only. The bridge uses `pyrealsense2.context().query_devices()` and returns no RealSense candidates if SDK enumeration fails; it must not silently substitute OpenCV/V4L paths because downstream recording and rollout require the official LeRobot `intelrealsense` backend.
-- On the Spark workstation, D405 enumeration must load the local librealsense RSUSB build before the pip wheel package. The expected bindings are `/home/jin/librealsense-rsusb/build-rsusb/Release/pyrealsense2*.so` for ATR `.venv` and `/home/jin/librealsense-rsusb/build-rsusb-py310/Release/pyrealsense2*.so` for the `lerobot` conda environment. This follows the GitHub/libuvc workaround for V4L/UVC `UVCIOC_CTRL_QUERY` protocol failures and is not a fallback path.
+- On the Spark workstation, D405 enumeration must load the local librealsense RSUSB build before the pip wheel package. The expected bindings are `<librealsense-rsusb-root>/build-rsusb/Release/pyrealsense2*.so` for ATR `.venv` and `<librealsense-rsusb-root>/build-rsusb-py310/Release/pyrealsense2*.so` for the `lerobot` conda environment. This follows the GitHub/libuvc workaround for V4L/UVC `UVCIOC_CTRL_QUERY` protocol failures and is not a fallback path.
 - The host also has a system-wide RealSense RSUSB install under `/usr/local` for operator diagnostics: `rs-enumerate-devices`, `rs-fw-update`, `realsense-viewer`, `rs-depth-quality`, and system Python `pyrealsense2`. This global install is for hardware diagnosis and manual viewer use; live ATR/LeRobot subprocesses still use their configured `.venv` or conda environment.
 - Before live teleoperation, recording, or rollout starts, the bridge must validate all saved camera identities when `camera_enabled=true`. For `backend=intelrealsense`, this preflight must query the same LeRobot conda environment used by the subprocess, not only the main ATR `.venv`. A missing saved serial blocks before process launch with `LEROBOT_REALSENSE_CAMERA_UNAVAILABLE`; for example, if only D455F serial `341522300873` is visible and wrist D405 serial `352122273019` is missing, the operator must restore D405/hub/SDK visibility instead of letting LeRobot start and fail inside `RealSenseCamera.connect()`.
 - After a live recording session that requested RealSense depth, the bridge must inspect `meta/info.json`. If `observation.images.top_depth` or `observation.images.wrist_depth` is missing, the session is failed with `LEROBOT_REALSENSE_DEPTH_FEATURE_MISSING`; do not treat a command containing `use_depth=true` as proof that depth was recorded.
@@ -1133,7 +1133,7 @@ Rollout guard rule:
 Pi0.5 rollout execution rule:
 
 - The local `lerobot-pi05-torch211` environment is the TorchCodec runtime for Pi0.5, X-VLA, and SmolVLA training; Pi0.5 rollout still uses the project wrapper rather than a direct `lerobot-rollout` binary.
-- Pi0.5 real-robot inference is routed through `scripts/lerobot_pi05_rollout_wrapper.py`, which delegates to `/home/jin/lerobot_pi05/examples/rtc/eval_with_real_robot.py` after registering the ROBOTIS OMX robot class.
+- Pi0.5 real-robot inference is routed through `scripts/lerobot_pi05_rollout_wrapper.py`, which delegates to `<lerobot-pi05-root>/examples/rtc/eval_with_real_robot.py` after registering the ROBOTIS OMX robot class.
 - Pi0.5 RTC arguments use the installed script contract: `--rtc.enabled`, `--rtc.execution_horizon`, `--rtc.max_guidance_weight`, `--duration`, `--fps`, and `--task`.
 - ACT-specific rollout smoothing such as `--policy.temporal_ensemble_coeff` is not injected for Pi0.5 rollout.
 - If `max_duration_s` is set, it becomes the Pi0.5 run duration. If it is blank and continuous rollout is requested, the bridge maps the run to a long duration so the operator can stop it with `Stop Rollout`.

@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" data-theme="document" viewBox="0 0 1184 1190" role="img" aria-label="Knowledge Agent Module five-area internal graph" style="font-family:Arial,sans-serif;background:#ffffff">
+      <title>Knowledge Agent Module — five-area internal graph</title><desc>Executable owner operations and explicit outcomes. Positions are presentation only. Composite LLM tools are not separate editable operations.</desc>
+      <rect width="100%" height="100%" fill="#ffffff"/>
+      <defs><marker id="control-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6z" fill="#526174"/></marker></defs>
+      <g class="runtime-control-area" data-control-area="high" pointer-events="none">
+      <rect x="360" y="56" width="488" height="148" rx="12" fill="#2463a5" fill-opacity=".035" stroke="#2463a5" stroke-opacity=".3"/>
+      <text x="376" y="82" fill="#2463a5" font-size="15" font-weight="600">High</text>
+      </g><g class="runtime-control-area" data-control-area="middle" pointer-events="none">
+      <rect x="360" y="312" width="488" height="436" rx="12" fill="#177768" fill-opacity=".035" stroke="#177768" stroke-opacity=".3"/>
+      <text x="376" y="338" fill="#177768" font-size="15" font-weight="600">Middle</text>
+      </g><g class="runtime-control-area" data-control-area="low" pointer-events="none">
+      <rect x="352" y="848" width="488" height="208" rx="12" fill="#4c6079" fill-opacity=".035" stroke="#4c6079" stroke-opacity=".3"/>
+      <text x="368" y="874" fill="#4c6079" font-size="15" font-weight="600">Low</text>
+      <text x="368" y="922" fill="#526174" font-size="12">No direct device execution in</text><text x="368" y="940" fill="#526174" font-size="12">this agent</text></g><g class="runtime-control-area" data-control-area="guardian" pointer-events="none">
+      <rect x="32" y="56" width="264" height="260" rx="12" fill="#a36b16" fill-opacity=".035" stroke="#a36b16" stroke-opacity=".3"/>
+      <text x="48" y="82" fill="#a36b16" font-size="15" font-weight="600">Guardian / Safety</text>
+      </g><g class="runtime-control-area" data-control-area="knowledge" pointer-events="none">
+      <rect x="896" y="56" width="264" height="372" rx="12" fill="#79529c" fill-opacity=".035" stroke="#79529c" stroke-opacity=".3"/>
+      <text x="912" y="82" fill="#79529c" font-size="15" font-weight="600">Knowledge / Evidence</text>
+      </g><defs><marker id="control-detail-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6z" fill="#526174"/></marker></defs><g data-implementation-edge="task" pointer-events="none"><title>read current owner settings · validation (code-owned)</title><path d="M384,398 C312,398 312,142 240,142" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>scope observed inputs · evidence (code-owned)</title><path d="M240,142 C580,142 580,142 920,142" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>reference only · evidence (code-owned)</title><path d="M920,254 C744,254 744,142 568,142" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>current evidence · evidence (code-owned)</title><path d="M920,142 C744,142 744,142 568,142" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>bounded tool choice · call (code-owned)</title><path d="M476,180 C500,342 500,342 476,504" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>observation / next choice · evidence (code-owned)</title><path d="M476,504 C500,342 500,342 476,180" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>accepted evidence · validation (code-owned)</title><path d="M384,142 C312,142 312,254 240,254" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>validated records · evidence (code-owned)</title><path d="M240,254 C580,254 580,366 920,366" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>build result · call (code-owned)</title><path d="M920,366 C864,366 864,542 808,542" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="deliver" pointer-events="none"><title>deliver same result · call (code-owned)</title><path d="M624,398 C596,398 596,686 568,686" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-node="task::binding" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Existing knowledge_settings and applicability parsing; code-owned; KnowledgeAgent._run_task">
+      <title>Existing knowledge_settings and applicability parsing
+Code-owned inside task
+agents/core/knowledge/agent.py · KnowledgeAgent._run_task</title>
+      <rect x="56" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="122" fill="#172b4d" font-size="12">Existing</text><text x="66" y="137" fill="#172b4d" font-size="12">knowledge_settings and</text><text x="66" y="152" fill="#172b4d" font-size="12">applicability parsing</text>
+      <text x="66" y="171" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::intake" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Frozen Analysis and Guardian evidence intake; code-owned; KnowledgeAgent._run_task">
+      <title>Frozen Analysis and Guardian evidence intake
+Code-owned inside task
+agents/core/knowledge/agent.py · KnowledgeAgent._run_task</title>
+      <rect x="920" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="122" fill="#172b4d" font-size="12">Frozen Analysis and</text><text x="930" y="137" fill="#172b4d" font-size="12">Guardian evidence intake</text>
+      <text x="930" y="171" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::references" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Scoped Wiki / reference delivery; code-owned; build_reference_context">
+      <title>Scoped Wiki / reference delivery
+Code-owned inside task
+agents/core/knowledge/context.py · build_reference_context</title>
+      <rect x="920" y="216" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="234" fill="#172b4d" font-size="12">Scoped Wiki / reference</text><text x="930" y="249" fill="#172b4d" font-size="12">delivery</text>
+      <text x="930" y="283" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::decision" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="LLM scoped retrieval and curation; code-owned; run_knowledge_decision">
+      <title>LLM scoped retrieval and curation
+Code-owned inside task
+agents/core/knowledge/decision.py · run_knowledge_decision</title>
+      <rect x="384" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#2463a5" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="122" fill="#172b4d" font-size="12">LLM scoped retrieval and</text><text x="394" y="137" fill="#172b4d" font-size="12">curation</text>
+      <text x="394" y="171" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::local_tools" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Inspect, search, read, note and publish tools; code-owned; run_knowledge_decision">
+      <title>Inspect, search, read, note and publish tools
+Code-owned inside task
+agents/core/knowledge/decision.py · run_knowledge_decision</title>
+      <rect x="384" y="504" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="522" fill="#172b4d" font-size="12">Inspect, search, read,</text><text x="394" y="537" fill="#172b4d" font-size="12">note and publish tools</text>
+      <text x="394" y="571" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::provenance" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Provenance and ontology validation; code-owned; _ingest_local_event">
+      <title>Provenance and ontology validation
+Code-owned inside task
+agents/core/knowledge/agent.py · _ingest_local_event</title>
+      <rect x="56" y="216" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="234" fill="#172b4d" font-size="12">Provenance and ontology</text><text x="66" y="249" fill="#172b4d" font-size="12">validation</text>
+      <text x="66" y="283" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::storage" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Markdown, JSONL, report and evidence persistence; code-owned; KnowledgeAgent._run_task">
+      <title>Markdown, JSONL, report and evidence persistence
+Code-owned inside task
+agents/core/knowledge/agent.py · KnowledgeAgent._run_task</title>
+      <rect x="920" y="328" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="346" fill="#172b4d" font-size="12">Markdown, JSONL, report</text><text x="930" y="361" fill="#172b4d" font-size="12">and evidence persistence</text>
+      <text x="930" y="395" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::handoff" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Knowledge context and evolution proposal; code-owned; KnowledgeAgent._run_task">
+      <title>Knowledge context and evolution proposal
+Code-owned inside task
+agents/core/knowledge/agent.py · KnowledgeAgent._run_task</title>
+      <rect x="624" y="504" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="522" fill="#172b4d" font-size="12">Knowledge context and</text><text x="634" y="537" fill="#172b4d" font-size="12">evolution proposal</text>
+      <text x="634" y="571" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="deliver::result" data-implementation-owner="deliver" pointer-events="auto" role="img"  aria-label="Fresh composite AgentResult; code-owned; knowledge_execution_catalog">
+      <title>Fresh composite AgentResult
+Code-owned inside deliver
+agents/core/knowledge/execution.py · knowledge_execution_catalog</title>
+      <rect x="384" y="648" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="666" fill="#172b4d" font-size="12">Fresh composite</text><text x="394" y="681" fill="#172b4d" font-size="12">AgentResult</text>
+      <text x="394" y="715" fill="#526174" font-size="9">CODE · deliver</text>
+    </g><g data-source="task" data-target="deliver" data-outcome="next" data-kind="evidence"><title>task → deliver · next · evidence</title><path d="M 576 398 C 587.2 398, 604.8 398, 616 398" fill="none" stroke="#79529c" stroke-opacity=".8" stroke-width="2" stroke-dasharray="2 5" marker-end="url(#control-arrow)"/><rect x="577" y="388" width="38" height="20" rx="4" fill="#ffffff"/><text x="596" y="402" text-anchor="middle" fill="#79529c" font-size="11">next</text></g><g><title>task · knowledge.task</title>
+        <rect x="384" y="360" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="396" y="381" fill="#172b4d" font-size="12">Composite scoped</text><text x="396" y="397" fill="#172b4d" font-size="12">curation, memory and</text><text x="396" y="413" fill="#172b4d" font-size="12">evidence task</text>
+        <text x="489" y="428" fill="#177768" font-size="10">LLM call</text></g><g><title>deliver · knowledge.deliver</title>
+        <rect x="624" y="360" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="636" y="381" fill="#172b4d" font-size="12">Deliver owner result</text>
+        </g>
+      <line x1="24" x2="62" y1="1114" y2="1114" stroke="#526174" stroke-width="2" stroke-dasharray=""/><text x="72" y="1118" fill="#172b4d" font-size="14">Execution</text><line x1="244" x2="282" y1="1114" y2="1114" stroke="#526174" stroke-width="2" stroke-dasharray="8 5"/><text x="292" y="1118" fill="#172b4d" font-size="14">Validation</text><line x1="464" x2="502" y1="1114" y2="1114" stroke="#526174" stroke-width="2" stroke-dasharray="2 5"/><text x="512" y="1118" fill="#172b4d" font-size="14">Evidence</text><line x1="684" x2="722" y1="1114" y2="1114" stroke="#526174" stroke-width="2" stroke-dasharray="5 3"/><text x="732" y="1118" fill="#172b4d" font-size="14">Internal call</text>
+      <text x="24" y="1150" fill="#526174" font-size="13">Solid: execution · Dashed CODE: implementation · LLM: High decision · LLM call: process calls that decision</text>
+    </svg>

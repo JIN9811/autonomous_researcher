@@ -83,7 +83,7 @@ supersedes: []
 
 | 현재 코드 | 확인한 동작 | 재사용·변경 방향 |
 |---|---|---|
-| [OrchestratorAgent](../../../agents/orchestrator_agent.py) | `orchestrator_plan`으로 문장을 생성한 뒤 고정 결정 `prepare_stage_handoff_context` 구성 | 기존 결과 키를 유지하고 제한된 판단·도구 실행 추가 |
+| [OrchestratorAgent](../../../agents/core/orchestrator/agent.py) | `orchestrator_plan`으로 문장을 생성한 뒤 고정 결정 `prepare_stage_handoff_context` 구성 | 기존 결과 키를 유지하고 제한된 판단·도구 실행 추가 |
 | [Supervisor](../../../orchestrator/supervisor.py) | mission/plan/followup/decision/handoff 계약 생성 | 구조화 결과와 근거의 직렬화에 재사용 |
 | [LangGraph runtime](../../../orchestrator/langgraph_runtime.py) | pre-step 실행, 완료 결과 처리, graph 후보·다음 단계 계산, followup 기록 | 기존 인계 경계에서만 판단 결과 소비; 별도 실행 루프 신설 금지 |
 | [Controller](../../../app/controller.py) | planning lock, 세션 snapshot, Chat, 실행 중 followup queue, Design 인계 경로 | 같은 판단 서비스·설정 상태를 연결하고 기존 진입 경로 유지 |

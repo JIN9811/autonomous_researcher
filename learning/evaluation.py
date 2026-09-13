@@ -15,7 +15,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: weighting coefficients
 - Risky places to edit: score direction assumptions
-- Related files: learning/bo_engine.py, agents/analysis_agent.py
+- Related files: learning/bo_engine.py, agents/analysis/agent.py
 """
 
 from __future__ import annotations

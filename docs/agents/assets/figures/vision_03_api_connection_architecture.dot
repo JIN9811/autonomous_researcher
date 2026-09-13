@@ -4,7 +4,7 @@ digraph vision_api_connection_architecture {
   edge [color="#52667A", fontname="DejaVu Sans", fontsize=10, arrowsize=0.64];
 
   runtime [label="AgentContext / ModuleRuntimeContext\nlease + configured fallbacks"];
-  helper [label="agents/vision_decision.py\nstrict JSON + full scope recheck", penwidth=2.1];
+  helper [label="agents/vision/decision.py\nstrict JSON + full scope recheck", penwidth=2.1];
   images [label="LLMImageInput list\n1 raw · 2 annotated", shape=note, fillcolor="#E9F7EF", color="#2E7D59"];
   backend [label="Shared API / vLLM backend\nvision_observation", shape=component, fillcolor="#F2ECFA", color="#6B4C9A"];
   decision [label="Bounded local tool\ncontract_id only", shape=diamond, fillcolor="#FFF1D6", color="#B26A00"];

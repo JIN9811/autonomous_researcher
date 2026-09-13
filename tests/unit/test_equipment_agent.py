@@ -14,8 +14,8 @@ from typing import Any
 import pytest
 
 from agents.base_agent import AgentResult
-from agents.equipment_agent import LabEquipmentAgent
-from agents.analysis_agent import AnalysisAgent
+from agents.equipment.agent import LabEquipmentAgent
+from agents.analysis.agent import AnalysisAgent
 from backends.llm_backend import LLMResponse
 from mcp_tools.equipment_tools import register_equipment_tools
 from mcp_tools.mock_tools import register_mock_tools

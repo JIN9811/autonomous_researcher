@@ -57,7 +57,7 @@ async def probe(path, backend="vllm", project=False):
                 user_prompt=prompt, metadata={"task_type": "orchestrator_plan"})
             report.update(status="response_received", served_model=(response.raw or {}).get("model"),
                 text=response.text, usage=(response.raw or {}).get("usage"))
-            from agents.orchestrator_decision import _json_response, validate_choice, _validate_target
+            from agents.core.orchestrator.decision import _json_response, validate_choice, _validate_target
             packet = json.loads(prompt)
             choice = validate_choice(_json_response(response.text), set(packet["tools"]), set(packet["evidence"]))
             _validate_target(choice, packet["context"], packet["evidence"])

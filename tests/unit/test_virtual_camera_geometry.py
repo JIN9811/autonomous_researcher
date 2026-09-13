@@ -102,7 +102,7 @@ def test_render_material_option_does_not_change_default_preview_or_use_schematic
 @pytest.mark.asyncio
 @pytest.mark.parametrize("virtual", [True, False])
 async def test_vision_passes_current_host_mesh_only_on_strict_virtual_placement(tmp_path, monkeypatch, virtual):
-    from agents.vision_agent import VisionAgent
+    from agents.vision.agent import VisionAgent
     from tests.unit.test_vision_agent import _state, _CtxStub
     from tests.unit.test_virtual_device_llm_execution import virtualize
     from mcp_tools.tool_registry import ToolRegistry

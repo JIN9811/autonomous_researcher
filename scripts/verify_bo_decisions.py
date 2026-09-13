@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 async def verify(args):
     from dotenv import load_dotenv
     from agents.base_agent import AgentContext
-    from agents.bo_agent import BOAgent
+    from agents.bo.agent import BOAgent
     from app.bootstrap import _build_backend, _load_configs, _models_cfg_for_backend
     from backends.model_router import ModelRouter
     from learning.bo_parameter_space import BOParameterSpace

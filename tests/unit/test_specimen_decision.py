@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agents.specimen_decision import decide_specimen, fabrication_evidence
+from agents.specimen.decision import decide_specimen, fabrication_evidence
 from orchestrator.state import Mode, OrchestratorState
 
 

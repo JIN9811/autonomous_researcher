@@ -56,15 +56,17 @@ program core; the existing `agent.design_agent` handler invokes the same agent.
 
 ```text
 agents/
-├── design/
-│   ├── module.py                 # implementation, UI/config/storage declarations
-│   ├── agent.py                  # existing DesignAgent implementation
-│   ├── decision.py               # existing bounded LLM decision and local tools
-│   ├── presentation.py           # Design projection for the existing report API
-│   └── frontend/live_report.js   # Design-only report rendering
-├── design_agent.py               # legacy import compatibility
-└── design_decision.py            # legacy import compatibility
+└── design/
+    ├── module.py                 # implementation, UI/config/storage declarations
+    ├── agent.py                  # existing DesignAgent implementation
+    ├── decision.py               # existing bounded LLM decision and local tools
+    ├── presentation.py           # Design projection for the existing report API
+    └── frontend/live_report.js   # Design-only report rendering
 ```
+
+Maintained callers import `agents.design.agent` and `agents.design.decision`
+directly. The former root wrappers were retired after the caller migration and
+canonical-import regression coverage.
 
 | Boundary | Design owns | Existing host retained |
 |---|---|---|

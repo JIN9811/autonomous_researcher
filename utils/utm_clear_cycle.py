@@ -154,7 +154,7 @@ def _explicit_virtual(state):
 
 
 def _physical_execution(state):
-    from agents.manipulation_agent import ManipulationAgent
+    from agents.manipulation.agent import ManipulationAgent
     if is_resolved_all_virtual_bridge(state.current_experiment_spec, mode=state.mode):
         return False
     return state.mode.value == "live" or ManipulationAgent._physical_printer_tail_requested(state)
@@ -222,7 +222,7 @@ async def run_clear_manipulation(state, ctx, *, spec):
         return _result(execution)
     policy = state.current_experiment_spec.get("execution_policy") or {}
     if _explicit_virtual(state):
-        from agents.manipulation_decision import select_manipulation_tool, allows
+        from agents.manipulation.decision import select_manipulation_tool, allows
         execution["state"] = "deciding"
         try:
             decision = await select_manipulation_tool(state, ctx, "lerobot.replay.start", {
@@ -253,7 +253,7 @@ async def run_clear_manipulation(state, ctx, *, spec):
         "confirm_live_execute": confirmation is True and not virtual,
         **({"virtual_bridge_simulation": True} if virtual else {})}
     execution["runtime_mode"] = runtime_mode
-    from agents.manipulation_decision import select_manipulation_tool, allows
+    from agents.manipulation.decision import select_manipulation_tool, allows
     execution["state"] = "deciding"
     try:
         decision = await select_manipulation_tool(state, ctx, "lerobot.replay.start", payload,
@@ -309,7 +309,7 @@ async def run_clear_vision(state, ctx, *, artifact_dir):
             return _result(execution)
         capture = {"ok": True, "status": "clear", "detected": False, "clear_confirmed": True,
                    "simulated": True, "actuation_performed": False, "captured_at": datetime.now(timezone.utc).isoformat()}
-        from agents.manipulation_decision import review_manipulation_result, allows
+        from agents.manipulation.decision import review_manipulation_result, allows
         decision = await review_manipulation_result(state, ctx, "clear_utm_to_disposal", execution, capture,
             execution_ended=True, vision_accepted=True)
         if not allows(decision):
@@ -371,7 +371,7 @@ async def run_clear_vision(state, ctx, *, artifact_dir):
     if not confirmed and capture.get("status") == "clear":
         capture = {**capture, "status": "unknown", "clear_confirmed": False}
     # Replay supervision and measured return above remain independent of model latency.
-    from agents.vision_decision import review_visual_evidence, decision_allows_existing_gate, blocked_decision_result
+    from agents.vision.decision import review_visual_evidence, decision_allows_existing_gate, blocked_decision_result
     review_deadline = execution.get("pending_deadline_at")
     decision = await review_visual_evidence(state, ctx, capture, "clearance")
     capture["vision_decision"] = decision
@@ -389,7 +389,7 @@ async def run_clear_vision(state, ctx, *, artifact_dir):
         result.data.update(vision_decision=decision, safe_stop_recommended=True)
         return result
     if confirmed:
-        from agents.manipulation_decision import review_manipulation_result, allows
+        from agents.manipulation.decision import review_manipulation_result, allows
         execution["visual_clearance_confirmed"] = True
         task_decision = await review_manipulation_result(state, ctx, "clear_utm_to_disposal", replay, capture,
             execution_ended=True, vision_accepted=True)

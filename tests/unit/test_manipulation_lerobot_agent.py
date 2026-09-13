@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from agents.manipulation_agent import ManipulationAgent
+from agents.manipulation.agent import ManipulationAgent
 from mcp_tools.lerobot_tools import register_lerobot_tools
 from mcp_tools.mock_tools import register_mock_tools
 from mcp_tools.tool_registry import ToolRegistry
@@ -429,7 +429,7 @@ def test_manipulation_agent_reloads_changed_saved_policy_path(tmp_path: Path, mo
 
 def test_manipulation_agent_uses_saved_policy_for_requested_task(monkeypatch: Any) -> None:
     monkeypatch.setattr(
-        "agents.manipulation_agent.load_manipulation_agent_profile",
+        "agents.manipulation.agent.load_manipulation_agent_profile",
         lambda: normalize_manipulation_agent_profile(
             {
                 "task_id": "clear_utm_to_disposal",
@@ -460,7 +460,7 @@ def test_manipulation_agent_uses_saved_policy_for_requested_task(monkeypatch: An
 
 def test_live_workflow_saved_task_profile_overrides_stale_experiment_policy(monkeypatch: Any) -> None:
     monkeypatch.setattr(
-        "agents.manipulation_agent.load_manipulation_agent_profile",
+        "agents.manipulation.agent.load_manipulation_agent_profile",
         lambda: normalize_manipulation_agent_profile(
             {
                 "task_id": "transfer_to_utm",
@@ -522,7 +522,7 @@ def test_live_workflow_saved_task_profile_overrides_stale_experiment_policy(monk
 
 def test_direct_manipulation_bridge_run_uses_saved_task_profile_policy(monkeypatch: Any) -> None:
     monkeypatch.setattr(
-        "agents.manipulation_agent.load_manipulation_agent_profile",
+        "agents.manipulation.agent.load_manipulation_agent_profile",
         lambda: normalize_manipulation_agent_profile(
             {
                 "task_id": "transfer_to_utm",
@@ -555,7 +555,7 @@ def test_direct_manipulation_bridge_run_uses_saved_task_profile_policy(monkeypat
 
 def test_live_workflow_selects_clear_task_after_equipment_completion(monkeypatch: Any) -> None:
     monkeypatch.setattr(
-        "agents.manipulation_agent.load_manipulation_agent_profile",
+        "agents.manipulation.agent.load_manipulation_agent_profile",
         lambda: normalize_manipulation_agent_profile(
             {
                 "task_id": "transfer_to_utm",
@@ -579,7 +579,7 @@ def test_live_workflow_selects_clear_task_after_equipment_completion(monkeypatch
 
 def test_installed_printer_test_tail_uses_saved_policy_with_live_runtime(monkeypatch: Any) -> None:
     monkeypatch.setattr(
-        "agents.manipulation_agent.load_manipulation_agent_profile",
+        "agents.manipulation.agent.load_manipulation_agent_profile",
         lambda: normalize_manipulation_agent_profile(
             {
                 "manipulation_strategy": "lerobot_policy",

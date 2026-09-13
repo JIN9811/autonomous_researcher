@@ -25,8 +25,8 @@ def published_library(tmp_path):
 
 @pytest.mark.asyncio
 async def test_knowledge_reads_sources_with_independent_scope_and_preserves_bo_citations(tmp_path):
-    from agents.knowledge_decision import run_knowledge_decision
-    from agents.bo_agent import BOAgent
+    from agents.core.knowledge.decision import run_knowledge_decision
+    from agents.bo.agent import BOAgent
     from knowledge.markdown_runtime import store_for
     from mcp_tools.tool_registry import ToolRegistry
     from mcp_tools.source_tools import register_source_tools

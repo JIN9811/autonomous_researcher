@@ -83,8 +83,8 @@ The installed [Manipulation Agent Package](../../packages/agents/manipulation/RE
 is a composition contract: `manipulation@1.0.0` binds the owner module and
 `lerobot@1.0.0`. Agent code, bounded LLM decisions, execution definitions, report
 projection and frontend composition live under `agents/manipulation/`.
-`agents.manipulation_agent` and `agents.manipulation_decision` remain exact module
-aliases, preserving import and monkeypatch identity. LeRobot's canonical bridge
+Maintained imports and monkeypatch targets use that package directly; the former
+root wrappers were retired only after caller migration. LeRobot's canonical bridge
 and tool registration live under `device_bridges/lerobot/`; Vision shares that
 same installed bridge and runtime identity.
 

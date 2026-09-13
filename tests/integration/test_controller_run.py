@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 from app.bootstrap import load_runtime
-from agents.design_agent import DesignAgent
-from agents.guardian_agent import GuardianAgent
+from agents.design.agent import DesignAgent
+from agents.core.guardian.agent import GuardianAgent
 from device_bridges.lerobot_bridge import LeRobotBridge
 from orchestrator.state import Mode, Stage
 from utils.agent_artifact_archive import list_executions

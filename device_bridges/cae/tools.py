@@ -16,7 +16,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: payload normalization and additional CAE endpoints.
 - Risky places to edit: tool names consumed by AnalysisAgent and GUI.
-- Related files: agents/analysis_agent.py, app/bootstrap.py, app/main.py.
+- Related files: agents/analysis/agent.py, app/bootstrap.py, app/main.py.
 """
 
 from __future__ import annotations

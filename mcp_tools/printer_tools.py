@@ -16,7 +16,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: payload normalization and health response decoration
 - Risky places to edit: tool names consumed by specimen and guardian agents
-- Related files: agents/specimen_agent.py, device_bridges/prusa_bridge.py
+- Related files: agents/specimen/agent.py, device_bridges/prusa_bridge.py
 """
 
 from __future__ import annotations

@@ -4,7 +4,7 @@ import hashlib
 import json
 from uuid import uuid4
 
-from agents.orchestrator_decision import decide_orchestration
+from agents.core.orchestrator.decision import decide_orchestration
 from orchestrator.experimental_setup import SetupConflict, SetupValidationError
 from orchestrator.setup_application import SetupApplication
 from graphs import load_module_config

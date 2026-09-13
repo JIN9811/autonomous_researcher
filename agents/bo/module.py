@@ -29,7 +29,6 @@ BO_MODULE = AgentModule(
             "execution": "agents/bo/execution.py",
             "structure": "agents/bo/structure.py",
             "presentation": "agents/bo/presentation.py",
-            "compatibility_imports": ["agents.bo_agent", "agents.bo_decision"],
         },
         "frontend": {
             "host": "/live",

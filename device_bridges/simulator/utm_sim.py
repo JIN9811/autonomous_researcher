@@ -15,7 +15,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: result summary fields
 - Risky places to edit: keys used by analysis pipeline
-- Related files: mcp_tools/mock_tools.py, agents/equipment_agent.py
+- Related files: mcp_tools/mock_tools.py, agents/equipment/agent.py
 """
 
 from __future__ import annotations

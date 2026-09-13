@@ -17,7 +17,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: fake state traces, response decorations, config fields
 - Risky places to edit: live gate behavior and command argument validation
-- Related files: mcp_tools/lerobot_tools.py, app/main.py, agents/manipulation_agent.py
+- Related files: mcp_tools/lerobot_tools.py, app/main.py, agents/manipulation/agent.py
 """
 
 from __future__ import annotations

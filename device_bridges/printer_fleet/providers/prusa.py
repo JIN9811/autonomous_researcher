@@ -18,7 +18,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: config defaults, failure codes, virtual responses
 - Risky places to edit: live upload/start/ejection gates and G-code validation policy
-- Related files: mcp_tools/printer_tools.py, device_bridges/simulator/printer_sim.py, agents/specimen_agent.py
+- Related files: mcp_tools/printer_tools.py, device_bridges/simulator/printer_sim.py, agents/specimen/agent.py
 """
 
 from __future__ import annotations

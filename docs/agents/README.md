@@ -23,6 +23,7 @@ related_docs:
   - docs/runtime/current_code_snapshot.md
   - docs/runtime/three_level_control_model.md
   - docs/standards/documentation_standard.md
+  - docs/modularity.md
 supersedes: []
 -->
 
@@ -41,6 +42,8 @@ The individual agent References retain their declared verification baselines.
 The shared [Loop Artifact Archiving](../runtime/loop_artifact_archiving.md)
 Reference describes the newer run/loop/agent/invocation storage contract,
 including failed/cancelled calls, file snapshots, and saved-loop GUI access.
+The [Modularity Reference](../modularity.md) explains core versus specialist
+ownership, Package composition, Device Bridges, and configuration lifecycle.
 
 ## Status at a Glance
 
@@ -49,7 +52,7 @@ including failed/cancelled calls, file snapshots, and saved-loop GUI access.
 | Inventory | Ten executable agents on the existing registered graph/module path |
 | Installed packages | Design, Specimen, Vision, Manipulation, Equipment, Analysis and BO expose owned code, execution definitions and live reports; Analysis composes the existing CAE computation bridge, while BO reuses numerical services without a bridge |
 | Orchestrator | Bounded `orchestrator_plan` decisions and dynamic Experimental Setup are documented against working-tree scope |
-| Setup ownership | Only Orchestrator goal and BO parameter-space/acquisition adapters currently expose writable public fields; other owners remain read-only or unsupported |
+| Configuration ownership | Orchestrator/BO keep existing Setup fields; Knowledge/Guardian declarations use owner validation and explicit future-run module apply |
 | Execution authority | Agent procedures and registered tools/bridges retain execution authority; numerical values are tool-computed |
 | Figures | Ten Sunburst role overviews plus editable agent figures; Orchestrator now includes Flow, Execution, and Connections views |
 | Verification | A corrected aggregate passed 78 bounded cases per provider; [verification evidence](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md) retains capture/postprocessor distinction and no hardware claim is added |
@@ -127,13 +130,13 @@ implementations remain authoritative.
 | [Orchestrator](orchestrator_agent.md) | Bounded decisions, canonical Setup proposals, registered mission and agent handoffs | [Core source](../../agents/core/orchestrator/agent.py) · [Module](../../graphs/modules/orchestrator/module.yaml) |
 | [Design](design_agent.md) | Candidate suitability | [Source](../../agents/design/agent.py) · [Code module](../../agents/design/module.py) · [Graph module](../../graphs/modules/design/module.yaml) |
 | [Specimen](specimen_agent.md) | Fabrication suitability and tools | [Owner](../../agents/specimen/agent.py) · [Code module](../../agents/specimen/module.py) · [Execution graph](../../graphs/modules/specimen/module.yaml) · [Agent Package](../../packages/agents/specimen/package.yaml) |
-| [Vision](vision_agent.md) | Visual evidence | [Source](../../agents/vision_agent.py) · [Module](../../graphs/modules/vision/module.yaml) |
+| [Vision](vision_agent.md) | Visual evidence | [Source](../../agents/vision/agent.py) · [Module](../../graphs/modules/vision/module.yaml) |
 | [Manipulation](manipulation_agent.md) | Robot skills and completion | [Source](../../agents/manipulation/agent.py) · [Module](../../graphs/modules/manipulation/module.yaml) · [Control areas](assets/figures/manipulation_control_areas.svg) |
 | [Equipment](equipment_agent.md) | Stacked Flow selection, terminal review and bounded recovery | [Owner](../../agents/equipment/agent.py) · [Code module](../../agents/equipment/module.py) · [Execution graph](../../graphs/modules/equipment/module.yaml) · [Agent Package](../../packages/agents/equipment/package.yaml) · [Control areas](assets/figures/equipment_control_areas.svg) |
 | [Analysis](analysis_agent.md) | Measured objectives and independent background FEM | [Owner](../../agents/analysis/agent.py) · [Code module](../../agents/analysis/module.py) · [Execution graph](../../graphs/modules/analysis/module.yaml) · [Agent Package](../../packages/agents/analysis/package.yaml) · [Control areas](assets/figures/analysis_control_areas.svg) |
-| [Knowledge](knowledge_agent.md) | Ontology-guided Markdown, page-wise source curation and scoped retrieval | [Core source](../../agents/core/knowledge/agent.py) · [Module](../../graphs/modules/knowledge/module.yaml) |
+| [Knowledge](knowledge_agent.md) | Ontology-guided Markdown, page-wise source curation and scoped retrieval | [Core source](../../agents/core/knowledge/agent.py) · [Plan query](../../agents/core/knowledge/plan.py) · [Module](../../graphs/modules/knowledge/module.yaml) |
 | [Bayesian Optimization](bo_agent.md) | LLM strategy/review with continuous LHS/BoTorch proposals | [Owner](../../agents/bo/agent.py) · [Code module](../../agents/bo/module.py) · [Execution graph](../../graphs/modules/bo/module.yaml) · [Agent Package](../../packages/agents/bo/package.yaml) · [Control areas](assets/figures/bo_control_areas.svg) |
-| [Guardian](guardian_agent.md) | Policy gates, advisory review and continuation decisions | [Core source](../../agents/core/guardian/agent.py) · [Module](../../graphs/modules/guardian/module.yaml) |
+| [Guardian](guardian_agent.md) | Policy gates, advisory review and continuation decisions | [Core source](../../agents/core/guardian/agent.py) · [Plan query](../../agents/core/guardian/plan.py) · [Module](../../graphs/modules/guardian/module.yaml) |
 
 The [API and Connection Matrix](agent_api_connection_matrix.md) compares all ten
 agents without repeating full implementation prose.
@@ -150,9 +153,9 @@ agents without repeating full implementation prose.
 | Manipulation | [Flow](assets/figures/manipulation_01_closed_loop_handoffs.svg) · [Execution](assets/figures/manipulation_02_execution_effect_boundary.svg) · [Connections](assets/figures/manipulation_03_api_connection_architecture.svg) |
 | Lab Equipment | [Control areas](assets/figures/equipment_control_areas.svg) · [Flow](assets/figures/equipment_01_closed_loop_handoffs.svg) · [Execution](assets/figures/equipment_02_execution_effect_boundary.svg) · [Connections](assets/figures/equipment_03_api_connection_architecture.svg) |
 | Analysis | [Control areas](assets/figures/analysis_control_areas.svg) · [Flow](assets/figures/analysis_01_closed_loop_handoffs.svg) · [Execution](assets/figures/analysis_02_execution_effect_boundary.svg) · [Connections](assets/figures/analysis_03_api_connection_architecture.svg) |
-| Knowledge | [Flow](assets/figures/knowledge_01_closed_loop_handoffs.svg) · [Execution](assets/figures/knowledge_02_execution_effect_boundary.svg) · [Connections](assets/figures/knowledge_03_api_connection_architecture.svg) |
+| Knowledge | [Control areas](assets/figures/knowledge_control_areas.svg) · [Flow](assets/figures/knowledge_01_closed_loop_handoffs.svg) · [Execution](assets/figures/knowledge_02_execution_effect_boundary.svg) · [Connections](assets/figures/knowledge_03_api_connection_architecture.svg) |
 | BO | [Control areas](assets/figures/bo_control_areas.svg) · [Flow](assets/figures/bo_01_closed_loop_handoffs.svg) · [Execution](assets/figures/bo_02_execution_effect_boundary.svg) · [API](assets/figures/bo_03_api_connection_architecture.svg) |
-| Guardian | [Flow](assets/figures/guardian_01_closed_loop_handoffs.svg) · [Execution](assets/figures/guardian_02_execution_effect_boundary.svg) |
+| Guardian | [Control areas](assets/figures/guardian_control_areas.svg) · [Flow](assets/figures/guardian_01_closed_loop_handoffs.svg) · [Execution](assets/figures/guardian_02_execution_effect_boundary.svg) |
 
 </details>
 

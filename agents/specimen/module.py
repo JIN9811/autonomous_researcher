@@ -17,7 +17,6 @@ SPECIMEN_MODULE = AgentModule(
         "backend": {
             "entrypoint": "agents/specimen/agent.py", "decision": "agents/specimen/decision.py",
             "presentation": "agents/specimen/presentation.py",
-            "compatibility_imports": ["agents.specimen_agent", "agents.specimen_decision"],
         },
         "frontend": {
             "host": "/live", "descriptor": "graphs/modules/specimen/ui.yaml",

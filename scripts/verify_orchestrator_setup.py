@@ -133,8 +133,8 @@ def intake_case_status(*, intent_ok, transport_blocked, effect, raw_attempts):
 def controller_for(ctx, root, *, lifecycle_requests=None):
     from app.controller import MainController, ControllerDeps
     from agents.registry import AgentRegistry
-    from agents.bo_agent import BOAgent
-    from agents.orchestrator_agent import OrchestratorAgent
+    from agents.bo.agent import BOAgent
+    from agents.core.orchestrator.agent import OrchestratorAgent
     registry = AgentRegistry()
     registry.register(BOAgent())
     registry.register(OrchestratorAgent())
@@ -217,7 +217,7 @@ async def verify(args):
         from backends.model_router import ModelRouter
         from agents.base_agent import AgentContext
         from mcp_tools.tool_registry import ToolRegistry
-        from agents.orchestrator_decision import classify_chat_request
+        from agents.core.orchestrator.decision import classify_chat_request
         from scripts.orchestrator_decision_fixtures import (run_case, exercise_intake_effect,
             registered_planning_settings, INTAKE_CLEANUP_TIMEOUT_S, HANDLER_CLEANUP_TIMEOUT_S)
         cfg = _load_configs()
@@ -243,11 +243,11 @@ async def verify(args):
             "code_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             "prompt_sha256": hashlib.sha256((ROOT / "backends/prompt_registry.py").read_bytes()).hexdigest(),
             "source_sha256": {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
-                for path in [ROOT / name for name in ("app/controller.py", "app/planning_setup.py", "agents/equipment_agent.py", "agents/core/orchestrator/decision.py",
+                for path in [ROOT / name for name in ("app/controller.py", "app/planning_setup.py", "agents/equipment/agent.py", "agents/core/orchestrator/decision.py",
                     "agents/core/orchestrator/capabilities.py", "scripts/orchestrator_decision_fixtures.py",
                     "scripts/orchestrator_verification_guard.py", "orchestrator/handoff_boundary.py",
                     "orchestrator/handoff_projection.py", "graphs/modules/equipment/module.yaml",
-                    "orchestrator/setup_application.py", "orchestrator/experimental_setup.py", "agents/bo_agent.py")]},
+                    "orchestrator/setup_application.py", "orchestrator/experimental_setup.py", "agents/bo/agent.py")]},
             "limitations": ["Intake effects replay the just-captured real classification through the same-scope controller.",
                 "Decision owner evidence is explicitly supplied; completed-result retention is not a measured owner cycle.",
                 "No physical execution or live readiness discovery is claimed."]}

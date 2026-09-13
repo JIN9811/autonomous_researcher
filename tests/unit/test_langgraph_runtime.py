@@ -2832,7 +2832,7 @@ from orchestrator.run_loop import RunLoop
 from orchestrator.state import Mode, OrchestratorState, Stage
 
 
-from agents.orchestrator_agent import OrchestratorAgent
+from agents.core.orchestrator.agent import OrchestratorAgent
 from types import SimpleNamespace
 
 

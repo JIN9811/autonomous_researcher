@@ -58,9 +58,9 @@ supersedes: []
 ## Installed Package and Executable Structure
 
 BO is discovered once from `agents/bo/module.py` and installed as
-`bo@1.0.0`. Canonical implementation lives under `agents/bo/`; the historical
-`agents.bo_agent` and `agents.bo_decision` imports are exact aliases of the
-canonical modules so runtime type and monkeypatch identity do not split.
+`bo@1.0.0`. Canonical implementation lives under `agents/bo/`. Maintained
+callers and monkeypatch targets now import that owner directly; the former root
+wrappers were retired after migration without changing the `bo_agent` runtime ID.
 
 The public `run(state, ctx)` and `run_with_settings(state, ctx, settings)`
 entrypoints both traverse the registered `bo.task` → `bo.deliver` graph once.

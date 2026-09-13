@@ -246,8 +246,8 @@ async def test_design_owner_adapter_preserves_deterministic_policy_and_real_fina
 @pytest.mark.asyncio
 async def test_orchestrator_owner_adapter_routes_failure_status_through_existing_report_builders():
     """A failed bounded decision still requires the original ORC report envelope."""
-    from agents.orchestrator_agent import OrchestratorAgent
-    from agents.orchestrator_execution import default_orchestrator_execution_graph, execute_orchestrator_graph
+    from agents.core.orchestrator.agent import OrchestratorAgent
+    from agents.core.orchestrator.execution import default_orchestrator_execution_graph, execute_orchestrator_graph
     from orchestrator.state import Mode, OrchestratorState, Stage
     from tests.unit.test_orchestrator_decision import Model
 
@@ -276,8 +276,8 @@ async def test_orchestrator_owner_adapter_routes_failure_status_through_existing
 @pytest.mark.asyncio
 async def test_orchestrator_agent_run_uses_context_snapshot_and_edited_edges(monkeypatch):
     """Keeping the old fixed run body would ignore a backend module edge edit."""
-    from agents import orchestrator_execution as owner
-    from agents.orchestrator_agent import OrchestratorAgent
+    from agents.core.orchestrator import execution as owner
+    from agents.core.orchestrator.agent import OrchestratorAgent
     from orchestrator.state import Mode, OrchestratorState, Stage
     from tests.unit.test_orchestrator_decision import Model
 
@@ -328,8 +328,8 @@ def test_migrated_module_schema_and_yaml_are_the_executable_owner_definitions():
     """Leaving decorative internal lists would preserve two conflicting definitions."""
     from agents.design.agent import DesignAgent
     from agents.design.execution import design_execution_catalog
-    from agents.orchestrator_agent import OrchestratorAgent
-    from agents.orchestrator_execution import orchestrator_execution_catalog
+    from agents.core.orchestrator.agent import OrchestratorAgent
+    from agents.core.orchestrator.execution import orchestrator_execution_catalog
     from graphs.schema import ExecutionGraphDefinition, load_module_config
 
     design = load_module_config("graphs/modules/design/module.yaml")
@@ -351,7 +351,7 @@ def test_migrated_module_schema_and_yaml_are_the_executable_owner_definitions():
 def test_module_runtime_context_detaches_nested_execution_graph_snapshot():
     """Mutating a source module after invocation capture must not alter its graph."""
     from types import SimpleNamespace
-    from agents.orchestrator_execution import default_orchestrator_execution_graph
+    from agents.core.orchestrator.execution import default_orchestrator_execution_graph
     from orchestrator.langgraph_runtime import ModuleRuntimeContext
     from orchestrator.state import Stage
 

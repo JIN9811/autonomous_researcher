@@ -19,9 +19,9 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from agents.analysis_calibration import calibrate
-from agents.analysis_decisions import compact_evidence, decide
-from agents.analysis_fem import run_fem_study
+from agents.analysis.calibration import calibrate
+from agents.analysis.decisions import compact_evidence, decide
+from agents.analysis.fem import run_fem_study
 from scripts.validation.run_analysis_fem_cycle import Journal, build_context, pin_validation_backend, write_json
 
 

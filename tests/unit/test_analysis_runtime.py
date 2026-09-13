@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agents.analysis_agent import AnalysisAgent
+from agents.analysis.agent import AnalysisAgent
 from mcp_tools.tool_registry import ToolRegistry
 from orchestrator.state import OrchestratorState, Mode, Stage
 
@@ -58,7 +58,7 @@ async def test_analysis_failure_does_not_enqueue_improvement(tmp_path):
 ])
 async def test_background_reference_preserves_explicit_mesh_and_remesh_options(tmp_path, policy):
     from copy import deepcopy
-    from agents.analysis_runtime import service_for
+    from agents.analysis.runtime import service_for
 
     s = state()
     s.current_experiment_spec.update(cae_mesh_size_mm=1.2, analysis_improvement=policy,
@@ -86,7 +86,7 @@ async def test_background_reference_preserves_explicit_mesh_and_remesh_options(t
 
 
 def test_pin_loop_reuses_same_snapshot_and_does_not_change_experiment_spec(tmp_path):
-    from agents import analysis_runtime as module
+    from agents.analysis import runtime as module
     assert hasattr(module, 'pin_loop'), 'runtime boundary pin required'
     s = state()
     ctx = SimpleNamespace(tools=ToolRegistry(), artifact_run_root=str(tmp_path), force_real_llm_in_test=False)
@@ -98,7 +98,7 @@ def test_pin_loop_reuses_same_snapshot_and_does_not_change_experiment_spec(tmp_p
 
 @pytest.mark.asyncio
 async def test_boundary_snapshot_uses_final_design_but_excludes_midloop_promotion(tmp_path):
-    from agents.analysis_runtime import pin_loop, resolve_loop_model, service_for
+    from agents.analysis.runtime import pin_loop, resolve_loop_model, service_for
     from tests.unit.test_analysis_improvement import validation
     ctx = SimpleNamespace(tools=ToolRegistry(), artifact_run_root=str(tmp_path), force_real_llm_in_test=False)
     s = state()
@@ -157,7 +157,7 @@ async def test_failed_next_loop_clears_previous_ready_handoff(tmp_path, failure)
 @pytest.mark.asyncio
 async def test_optional_sqlite_failure_does_not_break_foreground(tmp_path, monkeypatch):
     import sqlite3
-    from agents.analysis_improvement import ImprovementStore
+    from agents.analysis.improvement import ImprovementStore
     def unavailable(*args, **kwargs):
         raise sqlite3.OperationalError('database is locked')
     monkeypatch.setattr(ImprovementStore, '__init__', unavailable)
@@ -170,7 +170,7 @@ async def test_optional_sqlite_failure_does_not_break_foreground(tmp_path, monke
 @pytest.mark.asyncio
 async def test_two_loop_acquisitions_accumulate_but_csv_reuse_is_not_independent(tmp_path):
     import hashlib
-    from agents.analysis_runtime import service_for
+    from agents.analysis.runtime import service_for
     s = state()
     ctx = SimpleNamespace(tools=ToolRegistry(), artifact_run_root=str(tmp_path), force_real_llm_in_test=False)
     service = service_for(ctx)
@@ -200,7 +200,7 @@ async def test_two_loop_acquisitions_accumulate_but_csv_reuse_is_not_independent
 
 @pytest.mark.asyncio
 async def test_specimen_and_stl_alone_do_not_prove_csv_pairing(tmp_path):
-    from agents.analysis_runtime import service_for
+    from agents.analysis.runtime import service_for
     s = state()
     ctx = SimpleNamespace(tools=ToolRegistry(), artifact_run_root=str(tmp_path), force_real_llm_in_test=False)
     stl, csv = tmp_path / 'shape.stl', tmp_path / 'raw.csv'
@@ -217,7 +217,7 @@ async def test_specimen_and_stl_alone_do_not_prove_csv_pairing(tmp_path):
 
 @pytest.mark.asyncio
 async def test_startup_recovers_queue_without_running_solver(tmp_path):
-    from agents.analysis_runtime import AnalysisRuntimeService
+    from agents.analysis.runtime import AnalysisRuntimeService
     ctx = SimpleNamespace(tools=ToolRegistry(), artifact_run_root=str(tmp_path), force_real_llm_in_test=False)
     previous = AnalysisRuntimeService(tmp_path, ctx)
     store = previous.store('restart-run')
@@ -235,7 +235,7 @@ async def test_startup_recovers_queue_without_running_solver(tmp_path):
 
 @pytest.mark.asyncio
 async def test_active_loop_boundary_resumes_prior_queue_without_new_submission(tmp_path):
-    from agents.analysis_runtime import service_for, pin_loop
+    from agents.analysis.runtime import service_for, pin_loop
     ctx = SimpleNamespace(tools=ToolRegistry(), artifact_run_root=str(tmp_path), force_real_llm_in_test=False)
     s = state()
     service = service_for(ctx)
@@ -262,7 +262,7 @@ def test_saved_equipment_managed_export_shape_binds_without_invented_loop_fields
     import hashlib
     import json
     from pathlib import Path
-    from agents.analysis_runtime import _acquisition_identity
+    from agents.analysis.runtime import _acquisition_identity
     root = Path(__file__).resolve().parents[2]
     loop = root / 'runs/run-20260907T043145Z-f6152b/runtime/loops/loop-000001'
     if not loop.exists():
@@ -300,7 +300,7 @@ async def test_optional_fem_failure_does_not_invalidate_measured_bo(tmp_path):
 
 @pytest.mark.parametrize('patch', [{'specimen_size_mm': [30, 30, 30]}, {'cae_boundary_condition': 'different_fixture'}])
 def test_model_scope_excludes_incompatible_geometry_and_boundary(tmp_path, patch):
-    from agents.analysis_runtime import resolve_loop_model
+    from agents.analysis.runtime import resolve_loop_model
     ctx = SimpleNamespace(tools=ToolRegistry(), artifact_run_root=str(tmp_path), force_real_llm_in_test=False)
     s = state()
     first = resolve_loop_model(s, ctx)
@@ -311,7 +311,7 @@ def test_model_scope_excludes_incompatible_geometry_and_boundary(tmp_path, patch
 
 @pytest.mark.asyncio
 async def test_worker_owner_releases_process_lock_when_admission_budget_ends(tmp_path):
-    from agents.analysis_runtime import AnalysisRuntimeService
+    from agents.analysis.runtime import AnalysisRuntimeService
     ctx = SimpleNamespace(tools=ToolRegistry(), artifact_run_root=str(tmp_path), force_real_llm_in_test=False)
     first = AnalysisRuntimeService(tmp_path, ctx)
     second = AnalysisRuntimeService(tmp_path, ctx)

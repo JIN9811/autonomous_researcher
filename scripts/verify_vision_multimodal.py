@@ -139,7 +139,7 @@ async def main(args):
     import yaml
 
     from agents.base_agent import AgentContext
-    from agents.vision_decision import review_visual_evidence, select_vision_tool
+    from agents.vision.decision import review_visual_evidence, select_vision_tool
     from app.bootstrap import _build_backend, _load_configs, _models_cfg_for_backend
     from backends.llm_lease import LLMLeaseCoordinator
     from backends.model_router import ModelRouter

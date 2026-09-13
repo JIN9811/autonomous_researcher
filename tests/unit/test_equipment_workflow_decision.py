@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agents.equipment_agent import LabEquipmentAgent
+from agents.equipment.agent import LabEquipmentAgent
 from tests.unit.test_equipment_agent import _state, _tools, _saved_recording
 from utils.equipment_skill_runtime import EquipmentSkillRegistry, canonical_sha256
 from utils.equipment_skill_flow import EquipmentSkillFlowStore
@@ -267,7 +267,7 @@ async def test_bad_screenshot_cannot_trigger_successful_work_replay(tmp_path, mo
 
 @pytest.mark.asyncio
 async def test_live_review_rejects_simulated_screenshot(tmp_path, monkeypatch):
-    from agents.equipment_workflow import _capture
+    from agents.equipment.workflow import _capture
     from orchestrator.state import Mode
     agent, state, tools, _, _, _ = setup_flow(tmp_path, monkeypatch)
     state.mode = Mode.LIVE
@@ -378,7 +378,7 @@ async def test_zero_counter_does_not_override_contradictory_effect_evidence(tmp_
 
 
 def test_terminal_projection_deduplicates_worker_artifacts_but_keeps_failure_and_gate_evidence():
-    from agents.equipment_workflow import _terminal_evidence
+    from agents.equipment.workflow import _terminal_evidence
     from agents.base_agent import AgentResult
     raw = {"ok": False, "failure_code": "UI_ERROR", "executed_action_count": 0,
            "output_artifacts": [{"path": "large/repeated/path" * 100}] * 50}

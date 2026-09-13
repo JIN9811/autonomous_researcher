@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agents import orchestrator_decision as decision
+from agents.core.orchestrator import decision
 from orchestrator.state import Mode, OrchestratorState, Stage
 
 
@@ -112,7 +112,7 @@ async def test_intake_has_no_effect_and_requires_server_pending_id(response, pen
 
 @pytest.mark.asyncio
 async def test_agent_preserves_archive_fields_but_never_falls_back_to_test_success():
-    from agents.orchestrator_agent import OrchestratorAgent
+    from agents.core.orchestrator.agent import OrchestratorAgent
     result = await OrchestratorAgent().run(state(), Model(RuntimeError('offline')))
     assert result.success is False
     assert result.data['orchestration_decision']['status'] == 'failed'
@@ -124,7 +124,7 @@ async def test_agent_preserves_archive_fields_but_never_falls_back_to_test_succe
 
 @pytest.mark.asyncio
 async def test_agent_consumes_explicit_dispatch_context_without_changing_mode():
-    from agents.orchestrator_agent import OrchestratorAgent
+    from agents.core.orchestrator.agent import OrchestratorAgent
     current = state()
     current.run_metadata['execution_policy'] = 'execute'
     effects = []
@@ -199,7 +199,7 @@ async def test_rejected_handler_effect_is_not_prepared():
 
 @pytest.mark.asyncio
 async def test_explicit_ok_false_handler_effect_never_reports_agent_success():
-    from agents.orchestrator_agent import OrchestratorAgent
+    from agents.core.orchestrator.agent import OrchestratorAgent
     async def reject(args):
         return {'ok': False, 'reason': 'owner admission denied'}
     result = await OrchestratorAgent().run(state(), Model(choice()), context=context(),

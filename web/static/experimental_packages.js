@@ -241,6 +241,61 @@
     return payload;
   }
 
+  function ownerPlanControlState(owner, modulePayload) {
+    const plan = modulePayload?.module?.owner_plan;
+    if (!plan || typeof plan !== "object" || Array.isArray(plan)) {
+      return { mode: "default", id: `${owner}_reference`, version: "1.0.0", contractVersion: "1.0.0", settings: {} };
+    }
+    return {
+      mode: "configured",
+      id: String(plan.id || `${owner}_reference`),
+      version: String(plan.version || "1.0.0"),
+      contractVersion: String(plan.contract_version || "1.0.0"),
+      settings: clone(plan.settings && typeof plan.settings === "object" && !Array.isArray(plan.settings) ? plan.settings : {}),
+    };
+  }
+
+  function buildOwnerPlanDraft({ owner, modulePayload, mode, id, version, contractVersion = "1.0.0", settingsText = "{}" } = {}) {
+    const original = clone(modulePayload || {});
+    const payload = clone(modulePayload || {});
+    if (!payload.module || typeof payload.module !== "object" || Array.isArray(payload.module)) {
+      return { ok: false, errors: ["Owner module draft is unavailable."], modulePayload: original };
+    }
+    if (mode === "default") {
+      delete payload.module.owner_plan;
+      return { ok: true, errors: [], modulePayload: payload };
+    }
+    let settings;
+    try {
+      settings = JSON.parse(String(settingsText || "{}"));
+    } catch (_error) {
+      return { ok: false, errors: ["Owner plan settings must be valid JSON."], modulePayload: original };
+    }
+    if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+      return { ok: false, errors: ["Owner plan settings must be a JSON object."], modulePayload: original };
+    }
+    payload.module.owner_plan = {
+      schema: "ax4lab.owner_plan.v1",
+      id: String(id || ""),
+      owner: String(owner || ""),
+      version: String(version || ""),
+      contract_version: String(contractVersion || "1.0.0"),
+      settings: clone(settings),
+    };
+    return { ok: true, errors: [], modulePayload: payload };
+  }
+
+  function ownerPlanResponseState(operation, result) {
+    const errors = Array.isArray(result?.errors) ? result.errors.map(String) : [];
+    if (result?.ok !== true || errors.length) {
+      return { ok: false, kind: "error", title: `${operation === "apply" ? "Apply" : "Validation"} failed`, detail: errors.join("; ") || "The owner module rejected this draft." };
+    }
+    if (operation === "apply" && result?.activated === true) {
+      return { ok: true, kind: "ok", title: "Applied", detail: "Saved for future runs through the active owner module." };
+    }
+    return { ok: true, kind: "ok", title: "Draft valid", detail: "Validated only; active configuration is unchanged." };
+  }
+
   function acceptImportResult({ requestToken, activeToken, requestFingerprint, currentFingerprint, result, currentDraft }) {
     if (requestToken !== activeToken || requestFingerprint !== currentFingerprint) {
       return { applied: false, reason: "stale", draft: currentDraft, errors: [] };
@@ -282,6 +337,9 @@
     projectBridgeInternal,
     buildExportPayload,
     parsePackageJson,
+    ownerPlanControlState,
+    buildOwnerPlanDraft,
+    ownerPlanResponseState,
     acceptImportResult,
     acceptExportResult,
   };

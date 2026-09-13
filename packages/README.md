@@ -1,5 +1,8 @@
 # Agent and Experimental Packages
 
+For the relationship between packages, modules, core owners, bridges, and the
+runtime path, start with the [Modularity Reference](../docs/modularity.md).
+
 Agent Packages are installed metadata, not an installer. Shipped manifests in
 `packages/agents/` are loaded only when their matching code-owned agent module
 is registered. Current owner packages are Design, Specimen, Vision,
@@ -47,6 +50,13 @@ the IDE intends to retain. Export never implicitly opens referenced module files
 Existing declarative `modules/design`, repository-relative source references and
 local API/UI routes are retained as data.
 
+Knowledge and Guardian module configurations may contain one optional strict
+`module.owner_plan` declaration. It travels only inside the existing
+`module_configurations` map; there is no second Package-level plan copy. Import
+hydrates a detached draft. The Package Manager's separate **Validate Draft** and
+**Apply for Future Runs** actions use the existing module APIs, and only explicit
+apply can change the active module configuration for a later run.
+
 Export computes `bridge_modules: [{id,version}]` and
 `external_owners: [{handler,module_id}]`. External owners explicitly capture
 installed legacy/core graph handlers and module IDs; they have no invented
@@ -87,6 +97,8 @@ separate graph tab. Both levels reuse the standard IDE canvas and Inspector.
 Package contracts are not device bridges. **Infra →
 Package Manager** separately hosts membership, dependencies and package exchange.
 Printer Fleet is one bridge package containing Bambu and Prusa providers.
+The current Orchestration graph is shown as a reference rather than copied into
+a Knowledge or Guardian declaration.
 Back returns from bridge internals to the plane, then to the prior
 graph or agent tab without replacing its draft or Dry-run Trace output.
 

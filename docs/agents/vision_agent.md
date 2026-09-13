@@ -240,7 +240,7 @@ Those fields are context for semantic consistency review, not editable model out
 
 ### Current Prompt Contract
 
-The current prompt in `agents/vision_decision.py` uses the following ordered checks.
+The current prompt in `agents/vision/decision.py` uses the following ordered checks.
 This section describes the implemented code contract, not earlier prompt variants.
 
 | Order | Check | Required comparison | Return for review when |
@@ -296,7 +296,7 @@ pose, topic, port, ROI, threshold, or replay command.
 
 | Surface | Method/path or implementation | Effect/owner |
 |---|---|---|
-| Decision | `agents/vision_decision.py` | Local JSON validation, image loading, identity/freshness recheck, decision artifact |
+| Decision | `agents/vision/decision.py` | Local JSON validation, image loading, identity/freshness recheck, decision artifact |
 | Model | `AgentContext.complete` / `ModuleRuntimeContext.complete`, `vision_observation` | Shared inference and fallback routing; optional ordered images |
 | Pose tracker | GET/POST `/api/vision/specimen-pose/status`, `/snapshot`, `/release` | Existing read/local-state tracker surface |
 | ActiveCam | `lerobot.active_robot_cam.capture` | Existing physical-possible robot move/capture/return routine |

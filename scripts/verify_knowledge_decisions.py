@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT))
 async def verify(args):
     from dotenv import load_dotenv
     from agents.base_agent import AgentContext
-    from agents.knowledge_decision import run_knowledge_decision
+    from agents.core.knowledge.decision import run_knowledge_decision
     from app.bootstrap import _build_backend, _load_configs, _models_cfg_for_backend
     from backends.model_router import ModelRouter
     from knowledge.markdown_runtime import store_for

@@ -16,7 +16,7 @@ from PIL import Image
 from backends.llm_backend import LLMImageInput, MAX_LLM_IMAGE_BYTES
 from orchestrator.state import Mode
 from utils.agent_artifact_archive import record_tool_artifact
-from agents.knowledge_context import append_reference_only, build_reference_context, mark_reference_delivered, record_reference_use
+from agents.core.knowledge.context import append_reference_only, build_reference_context, mark_reference_delivered, record_reference_use
 
 
 def _identity(state):
@@ -230,8 +230,8 @@ async def _decide(state, ctx, contract_id, capture=None):
             if current_images != result["images"]:
                 raise ValueError("capture images changed during review")
         if review and contract_id in {"pickup", "active_cam"}:
-            from agents.vision_agent import VisionAgent
-            from agents.manipulation_agent import ManipulationAgent
+            from agents.vision.agent import VisionAgent
+            from agents.manipulation.agent import ManipulationAgent
             timestamp = datetime.fromisoformat(capture_timestamp(capture).replace("Z", "+00:00"))
             if timestamp.tzinfo is None:
                 raise ValueError("capture timestamp must carry timezone")

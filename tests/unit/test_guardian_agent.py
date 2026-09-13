@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from agents.guardian_agent import GuardianAgent
+from agents.core.guardian.agent import GuardianAgent
 from knowledge.failure_memory import FailureMemory
 from orchestrator.state import Mode, OrchestratorState, Stage
 

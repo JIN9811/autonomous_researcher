@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agents.source_curation import _publication_audit_event, curate_source
+from agents.core.knowledge.source_curation import _publication_audit_event, curate_source
 from backends.llm_lease import RECONCILIATION_PRIORITY
 from knowledge.source_library import SourceLibrary
 from knowledge import source_library as source_library_module

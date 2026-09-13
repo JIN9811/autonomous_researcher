@@ -21,7 +21,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: chunk size and ranking blend
 - Risky places to edit: web provider request contract and auth headers
-- Related files: agents/knowledge_agent.py, configs/system.yaml
+- Related files: agents/core/knowledge/agent.py, configs/system.yaml
 """
 
 from __future__ import annotations

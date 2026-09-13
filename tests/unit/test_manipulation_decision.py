@@ -35,7 +35,7 @@ class Model:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool", ["lerobot.rollout.start", "lerobot.replay.start", "robot.pick_place"])
 async def test_selected_skill_is_exactly_bound_to_payload(tool):
-    from agents.manipulation_decision import select_manipulation_tool, allows
+    from agents.manipulation.decision import select_manipulation_tool, allows
     s, model = state(), Model()
     payload = {"session_id": "session", "task_instruction": "saved instruction", "replay_episode": 0}
     before = deepcopy(payload)
@@ -48,7 +48,7 @@ async def test_selected_skill_is_exactly_bound_to_payload(tool):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("choice", ["return_to_owner", "robot.move_joint", "lerobot.replay.start"])
 async def test_rejection_or_unlisted_tool_cannot_authorize_rollout(choice):
-    from agents.manipulation_decision import select_manipulation_tool, allows
+    from agents.manipulation.decision import select_manipulation_tool, allows
     decision = await select_manipulation_tool(state(), Model(choice), "lerobot.rollout.start", {"session_id": "s"})
     assert not allows(decision)
 
@@ -56,7 +56,7 @@ async def test_rejection_or_unlisted_tool_cannot_authorize_rollout(choice):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("change", ["stop", "loop", "payload", "spec"])
 async def test_inflight_changes_invalidate_selected_skill(change):
-    from agents.manipulation_decision import select_manipulation_tool, allows
+    from agents.manipulation.decision import select_manipulation_tool, allows
     s, payload = state(), {"session_id": "s"}
     def mutate():
         if change == "stop": s.stop_requested = True
@@ -68,7 +68,7 @@ async def test_inflight_changes_invalidate_selected_skill(change):
 
 @pytest.mark.asyncio
 async def test_result_review_requires_stopped_execution_and_accepted_vision():
-    from agents.manipulation_decision import review_manipulation_result, allows
+    from agents.manipulation.decision import review_manipulation_result, allows
     s, model = state(), Model()
     for ended, visual in [(False, True), (True, False)]:
         result = await review_manipulation_result(s, model, "placement", {"session_id": "s"},
@@ -82,7 +82,7 @@ async def test_result_review_requires_stopped_execution_and_accepted_vision():
 
 @pytest.mark.asyncio
 async def test_same_evidence_review_is_cached_but_new_loop_is_not():
-    from agents.manipulation_decision import review_manipulation_result
+    from agents.manipulation.decision import review_manipulation_result
     s, model = state(), Model()
     for _ in range(2):
         await review_manipulation_result(s, model, "placement", {"session_id": "s"},
@@ -96,7 +96,7 @@ async def test_same_evidence_review_is_cached_but_new_loop_is_not():
 
 @pytest.mark.asyncio
 async def test_explicit_non_llm_test_is_not_reported_as_model_judgment():
-    from agents.manipulation_decision import select_manipulation_tool
+    from agents.manipulation.decision import select_manipulation_tool
     result = await select_manipulation_tool(state(), SimpleNamespace(force_real_llm_in_test=False),
         "lerobot.rollout.start", {"session_id": "s"})
     assert result["status"] == "deterministic_test" and result["llm_used"] is False
@@ -107,8 +107,8 @@ async def test_explicit_non_llm_test_is_not_reported_as_model_judgment():
 async def test_clearance_handoff_requires_manipulation_after_vision(tmp_path, monkeypatch, accept):
     from tests.unit.test_utm_clear_cycle import state_with_placement, equipment_data, ReplayTools
     from utils import utm_clear_cycle as cycle
-    from agents.vision_agent import VisionAgent
-    from agents import vision_decision
+    from agents.vision.agent import VisionAgent
+    from agents.vision import decision as vision_decision
     s = state_with_placement()
     s.current_experiment_spec["execution_policy"] = {"vision": "execute", "manipulation": "execute"}
     cycle.merge_utm_clear_cycle(s, Stage.EQUIPMENT, equipment_data(s))
@@ -131,7 +131,7 @@ async def test_clearance_handoff_requires_manipulation_after_vision(tmp_path, mo
 @pytest.mark.asyncio
 async def test_module_delegation_uses_owner_model_not_vision():
     from orchestrator.langgraph_runtime import ModuleRuntimeContext
-    from agents.manipulation_decision import review_manipulation_result, allows
+    from agents.manipulation.decision import review_manipulation_result, allows
     owner = Model()
     class Base:
         active_backend = "fixture"
@@ -146,7 +146,7 @@ async def test_module_delegation_uses_owner_model_not_vision():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["malformed", "mock", "timeout", "empty", "foreign_session"])
 async def test_untrustworthy_response_never_authorizes_handoff(kind):
-    from agents.manipulation_decision import review_manipulation_result, allows
+    from agents.manipulation.decision import review_manipulation_result, allows
     s = state()
     class Broken(Model):
         async def complete(self, *args, **kwargs):
@@ -164,7 +164,7 @@ async def test_untrustworthy_response_never_authorizes_handoff(kind):
 
 @pytest.mark.asyncio
 async def test_canceled_decision_does_not_leave_accepted_cache():
-    from agents.manipulation_decision import review_manipulation_result
+    from agents.manipulation.decision import review_manipulation_result
     s = state()
     def cancel(): raise asyncio.CancelledError()
     with pytest.raises(asyncio.CancelledError):
@@ -174,7 +174,7 @@ async def test_canceled_decision_does_not_leave_accepted_cache():
 
 
 def test_execution_claim_blocks_duplicate_start_but_not_next_loop():
-    from agents.manipulation_decision import claim_skill_execution
+    from agents.manipulation.decision import claim_skill_execution
     s = state()
     assert claim_skill_execution(s, "transfer_to_utm", {"session_id": "s"})
     assert not claim_skill_execution(s, "transfer_to_utm", {"session_id": "changed-attempt"})
@@ -184,7 +184,7 @@ def test_execution_claim_blocks_duplicate_start_but_not_next_loop():
 
 @pytest.mark.asyncio
 async def test_same_session_stop_revocation_invalidates_review():
-    from agents.manipulation_decision import review_manipulation_result, allows
+    from agents.manipulation.decision import review_manipulation_result, allows
     s = state()
     s.run_metadata["manipulation_result"] = {"session_id": "s", "status": "STOPPED", "stop_confirmed": True}
     def revoke(): s.run_metadata["manipulation_result"].update(status="RUNNING", stop_confirmed=False)
@@ -226,7 +226,7 @@ async def test_cancelled_replay_selection_ends_without_rearming():
 
 @pytest.mark.asyncio
 async def test_decision_context_exposes_task_and_checkpoint_without_editing_payload():
-    from agents.manipulation_decision import select_manipulation_tool
+    from agents.manipulation.decision import select_manipulation_tool
     payload = {"session_id": "s", "policy_checkpoint_path": "/saved/checkpoint", "replay_episode": 0}
     before, model = deepcopy(payload), Model()
     await select_manipulation_tool(state(), model, "lerobot.replay.start", payload,
@@ -239,7 +239,7 @@ async def test_decision_context_exposes_task_and_checkpoint_without_editing_payl
 
 @pytest.mark.asyncio
 async def test_manual_completion_exposes_stop_and_resource_evidence():
-    from agents.manipulation_decision import review_manipulation_result
+    from agents.manipulation.decision import review_manipulation_result
     model = Model()
     await review_manipulation_result(state(), model, "placement", {"session_id": "s", "teleop_stop_verified": True,
         "robot_port_released": True, "camera_returned_to_vision": True}, {"detected": True},
@@ -251,7 +251,7 @@ async def test_manual_completion_exposes_stop_and_resource_evidence():
 
 @pytest.mark.asyncio
 async def test_rejection_can_cite_specific_task_vision_conflict_without_irrelevant_execution_ref():
-    from agents.manipulation_decision import review_manipulation_result
+    from agents.manipulation.decision import review_manipulation_result
     class Conflict(Model):
         async def complete(self, *args, **kwargs):
             result = await super().complete(*args, **kwargs)

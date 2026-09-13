@@ -124,7 +124,7 @@ async def test_path_traversal_is_not_used_as_archive_target(tmp_path):
 
 @pytest.mark.asyncio
 async def test_real_orchestrator_entrypoint_preserves_each_loop(tmp_path):
-    from agents.orchestrator_agent import OrchestratorAgent
+    from agents.core.orchestrator.agent import OrchestratorAgent
 
     async def offline(*args, **kwargs):
         raise RuntimeError("No model service in this non-actuating test")
@@ -140,7 +140,7 @@ async def test_real_orchestrator_entrypoint_preserves_each_loop(tmp_path):
 
 @pytest.mark.asyncio
 async def test_rollout_payload_uses_invocation_identity_not_only_run(tmp_path):
-    from agents.manipulation_agent import ManipulationAgent
+    from agents.manipulation.agent import ManipulationAgent
 
     class PayloadProducer:
         name = "manipulation_agent"

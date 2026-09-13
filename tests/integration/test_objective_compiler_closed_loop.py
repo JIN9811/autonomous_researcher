@@ -11,9 +11,9 @@ from orchestrator_setup_fixtures import numeric_archive_guard
 
 pytestmark = pytest.mark.usefixtures("numeric_archive_guard")
 
-from agents.analysis_agent import AnalysisAgent
-from agents.bo_agent import BOAgent
-from agents.knowledge_agent import KnowledgeAgent
+from agents.analysis.agent import AnalysisAgent
+from agents.bo.agent import BOAgent
+from agents.core.knowledge.agent import KnowledgeAgent
 from knowledge.experiment_db import ExperimentDB
 from knowledge.stores import JsonlKnowledgeStore
 from mcp_tools.cae_tools import register_cae_tools

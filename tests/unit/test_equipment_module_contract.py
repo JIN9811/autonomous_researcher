@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import ast
 from copy import deepcopy
-import importlib
 from pathlib import Path
 from uuid import UUID
 
@@ -20,25 +19,19 @@ def no_external_effects():
         assert guard.denied == []
 
 
-def test_equipment_identity_and_discovery(monkeypatch):
+def test_equipment_canonical_identity_and_discovery():
+    from agents.equipment.agent import LabEquipmentAgent
     from agents.module_discovery import discover_agent_modules
     from agents.registry import AgentRegistry
 
     owners = {module.module_id: module for module in discover_agent_modules()}
     assert "equipment" in owners
-    owner = importlib.import_module("agents.equipment.agent")
-    decision = importlib.import_module("agents.equipment.decision")
-    workflow = importlib.import_module("agents.equipment.workflow")
-    assert importlib.import_module("agents.equipment_agent") is owner
-    assert importlib.import_module("agents.equipment_decision") is decision
-    assert importlib.import_module("agents.equipment_workflow") is workflow
-    monkeypatch.setattr(owner, "_identity_probe", "shared-owner", raising=False)
-    assert importlib.import_module("agents.equipment_agent")._identity_probe == "shared-owner"
-
     module = owners["equipment"]
     assert (module.agent_name, module.version) == ("equipment_agent", "1.0.0")
     registry = AgentRegistry()
     registry.register_module(module)
+    assert registry.get_module("equipment").factory is LabEquipmentAgent
+    assert registry.get("equipment_agent").__class__ is LabEquipmentAgent
     assert registry.get("equipment_agent").execution_catalog().module_id == "equipment"
 
 
@@ -57,11 +50,6 @@ def test_equipment_repository_paths_and_module_ownership_stay_local():
         "workflow": "agents/equipment/workflow.py",
         "execution": "agents/equipment/execution.py",
         "presentation": "agents/equipment/presentation.py",
-        "compatibility_imports": [
-            "agents.equipment_agent",
-            "agents.equipment_decision",
-            "agents.equipment_workflow",
-        ],
     }
     assert descriptor["configuration"]["source"] == "graphs/modules/equipment/module.yaml"
     assert descriptor["storage"]["new_settings_store"] is False
@@ -331,7 +319,7 @@ async def test_equipment_graph_preserves_original_body_modes(
 ):
     from agents.equipment.agent import LabEquipmentAgent
     import agents.equipment.agent as owner_module
-    import agents.knowledge_context as knowledge_context
+    import agents.core.knowledge.context as knowledge_context
     import device_bridges.windows_pyautogui.bridge as bridge_module
     import experiments.job_queue as job_queue
     from agents.equipment.execution import execute_equipment_graph

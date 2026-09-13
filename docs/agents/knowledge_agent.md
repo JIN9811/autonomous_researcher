@@ -9,6 +9,12 @@ summary: Ontology-guided Markdown knowledge, source-backed LLM curation, scoped 
 source_of_truth:
   - agents/core/knowledge/agent.py
   - agents/core/knowledge/decision.py
+  - agents/core/knowledge/execution.py
+  - agents/core/knowledge/structure.py
+  - agents/core/knowledge/plan.py
+  - agents/core/knowledge/presentation.py
+  - agents/core/knowledge/module.py
+  - agents/core/knowledge/frontend/live_report.js
   - knowledge/markdown_memory.py
   - knowledge/markdown_runtime.py
   - knowledge/http_api.py
@@ -24,6 +30,7 @@ source_of_truth:
   - knowledge/ontology
   - utils/agent_artifact_archive.py
   - graphs/modules/knowledge/module.yaml
+  - graphs/modules/knowledge/ui.yaml
 last_verified: 2026-09-14
 verified_against: working-tree-2026-09-14-core-agent-roots
 related_docs:
@@ -37,6 +44,7 @@ related_docs:
   - docs/agents/knowledge_agent_self_evolution_runtime_guideline.md
   - docs/superpowers/specs/2026-09-10-knowledge-markdown-memory-design.md
   - docs/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md
+  - docs/modularity.md
 supersedes: []
 -->
 
@@ -54,6 +62,7 @@ supersedes: []
 | LLM decision layer | Implemented / API and local vLLM verified |
 | Physical effect | None |
 | Primary handoff | Existing `knowledge_context.v1` plus reference-only Wiki packs at agent decision boundaries |
+| Plan boundary | Read-only queries remain; optional declarations validate/apply through existing module config and affect only pinned future runs |
 | Live hardware validation | Not applicable to Knowledge; no new physical validation claimed |
 | Known gap | Image-only sources need usable text; retrieval benefit has no held-out comparative benchmark |
 
@@ -96,6 +105,12 @@ that supplies context and consumes its response ([shared label contract](../runt
 
 These are responsibility areas, not five new runtime stages.
 
+![Knowledge source-backed composite control areas](assets/figures/knowledge_control_areas.svg)
+
+**Figure Knowledge-3.** The executable module remains a single composite task
+followed by delivery. CODE relationships expose the real decision, retrieval,
+storage and evidence sources without creating independently runnable stages.
+
 | Area | Responsibility | Authority boundary |
 |---|---|---|
 | High-Level Control | LLM judges reusable knowledge, scope-bound evidence and qualified publication | Does not alter measurements, objectives or global routing |
@@ -105,6 +120,26 @@ These are responsibility areas, not five new runtime stages.
 | Knowledge / Evidence | Keep sources, applicability, observation/interpretation distinction and tool trace | Derived notes are not new measurements or causal proof |
 
 ## Closed-Loop Position and Handoffs
+
+### Plan declaration and query boundary
+
+`plan_contract()`, `resolve_plan(state)`, and `validate_plan(plan, state)` expose
+the existing scope, corpora, source scope, applicability, timeout and step-budget
+bindings as detached data. A proposal rejects unknown owner/version/settings,
+new corpora and contradictory applicability. It does not write `run_metadata`,
+activate a plan or widen any Knowledge service permission. Strict proposal
+validation is deliberately outside the unchanged default invocation path, which
+continues to accept ignored legacy metadata annotations and preserves its prior
+error/side-effect order.
+
+The separate `validate_plan_declaration()` path accepts the strict portable
+`ax4lab.owner_plan.v1` shape. `GET /api/modules/knowledge` exposes the supported
+contract and Default/Configured state; validation writes nothing, while explicit
+module apply versions and persists the declaration for future runs. Knowledge
+reads it only from its matching run-pinned `ctx.runtime_module_config()` and
+derives a detached overlay. Applying this declaration is not core-agent loading,
+removal, scheduling, or permission expansion. See the
+[Modularity Reference](../modularity.md#ide-package-and-owner-plan-lifecycle).
 
 ![Knowledge: terminal archives feed observations; Analysis feeds LLM curation; context goes to BO](assets/figures/knowledge_01_closed_loop_handoffs.svg)
 
@@ -339,6 +374,13 @@ Markdown retrieval remain available.
   their existing owners.
 
 ## Artifacts and Verification
+
+The 2026-09-14 core-owner plan regression passed 150 focused owner, declaration,
+package, and module-API tests with 10 existing warning messages; the Package
+Manager/editor suite passed 37 Node tests. Controlled five-route and isolated
+browser/API checks confirmed future-run pinning and explicit apply without a
+physical call. Full command and environment boundaries are recorded in the
+[implementation plan](../superpowers/plans/2026-09-14-core-plans-and-modularity-guide.md).
 
 The 2026-09-13 current-versus-historical evidence correction passed 48 focused
 Guardian/Knowledge tests (five existing schema-field warnings). The tests use

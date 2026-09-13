@@ -28,6 +28,8 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from agents.core.plans import OwnerPlanDeclaration
+
 
 class GraphNode(BaseModel):
     """One graph node bound to a registered runtime handler."""
@@ -204,6 +206,7 @@ class ModuleConfig(BaseModel):
     pre_execution: list[ModuleStep] = Field(default_factory=list)
     internal_graph: list[ModuleStep] = Field(default_factory=list)
     execution_graph: ExecutionGraphDefinition | None = None
+    owner_plan: OwnerPlanDeclaration | None = None
     llm: ModuleLLMConfig | None = None
     prompt: ModulePromptConfig | str | None = None
     timeout_s: float | None = None

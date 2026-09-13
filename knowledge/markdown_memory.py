@@ -290,7 +290,8 @@ class MarkdownKnowledgeStore:
             raise ValueError(f"unknown ontology_type: {normalized['ontology_type']}")
         return normalized
 
-    def _normalize_scope(self, scope: dict[str, Any] | None) -> dict[str, Any]:
+    @classmethod
+    def _normalize_scope(cls, scope: dict[str, Any] | None) -> dict[str, Any]:
         if scope is None:
             raw: dict[str, Any] = {}
         elif isinstance(scope, dict):
@@ -304,13 +305,13 @@ class MarkdownKnowledgeStore:
         normalized: dict[str, Any] = {}
         for field, value in raw.items():
             if field == "applicability":
-                normalized[field] = self._applicability(value)
+                normalized[field] = cls._applicability(value)
                 continue
             if isinstance(value, str):
-                normalized[field] = self._bounded_text(value, f"scope.{field}", maximum=256)
+                normalized[field] = cls._bounded_text(value, f"scope.{field}", maximum=256)
                 continue
             if isinstance(value, list):
-                normalized[field] = self._string_list(
+                normalized[field] = cls._string_list(
                     value, f"scope.{field}", maximum_items=256, maximum_length=256
                 )
                 continue
@@ -687,8 +688,9 @@ class MarkdownKnowledgeStore:
             raise ValueError(f"{field} contains control characters")
         return clean
 
+    @classmethod
     def _string_list(
-        self,
+        cls,
         value: Any,
         field: str,
         *,
@@ -702,20 +704,21 @@ class MarkdownKnowledgeStore:
         result: list[str] = []
         seen: set[str] = set()
         for item in value:
-            clean = self._bounded_text(item, field, maximum=maximum_length)
+            clean = cls._bounded_text(item, field, maximum=maximum_length)
             if clean not in seen:
                 seen.add(clean)
                 result.append(clean)
         return result
 
-    def _applicability(self, value: Any) -> dict[str, Any]:
+    @classmethod
+    def _applicability(cls, value: Any) -> dict[str, Any]:
         if not isinstance(value, dict):
             raise TypeError("applicability must be a mapping")
         if len(value) > 256:
             raise ValueError("applicability exceeds maximum item count 256")
         normalized: dict[str, Any] = {}
         for key, item in value.items():
-            clean_key = self._bounded_text(key, "applicability key", maximum=128)
+            clean_key = cls._bounded_text(key, "applicability key", maximum=128)
             normalized[clean_key] = _json_value(item, field=f"applicability.{clean_key}", depth=0)
         if len(_canonical_json(normalized).encode("utf-8")) > 16_384:
             raise ValueError("applicability exceeds maximum serialized size 16384")

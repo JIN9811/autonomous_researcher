@@ -18,14 +18,14 @@ source_of_truth:
   - orchestrator/langgraph_runtime.py
   - app/controller.py
   - policies/guardian_gate.py
-  - agents/knowledge_agent.py
+  - agents/core/knowledge/agent.py
   - knowledge/markdown_runtime.py
   - knowledge/source_api.py
-  - agents/bo_agent.py
-  - agents/bo_decision.py
+  - agents/bo/agent.py
+  - agents/bo/decision.py
   - utils/utm_clear_cycle.py
-last_verified: 2026-09-12
-verified_against: 5542ef2
+last_verified: 2026-09-14
+verified_against: agent-canonical-import-cleanup
 paper_section: closed_loop_method
 research_questions:
   - RQ1

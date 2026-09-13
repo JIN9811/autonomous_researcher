@@ -20,16 +20,22 @@ module:
   tools:
   - device.health
   - experiment.queue.status
-  internal_graph:
-    - id: 01_check_safety_gates
-      label: Check Safety Gates
-      kind: internal_step
-    - id: 02_review_recent_failures
-      label: Review Recent Failures
-      kind: internal_step
-    - id: 03_decide_continue_stop_error
-      label: Decide Continue Stop Error
-      kind: internal_step
+  execution_graph:
+    schema: ax4lab.execution_graph.v1
+    entry: task
+    nodes:
+    - id: task
+      handler: guardian.task
+      label: Composite deterministic gates and advisory policy task
+      area: middle
+      llm: true
+    - id: deliver
+      handler: guardian.deliver
+      label: Deliver owner result
+      area: middle
+    edges:
+    - {source: task, target: deliver, 'on': next, kind: evidence}
+    terminals: [deliver]
   io_contract:
     input: OrchestratorState
     output: AgentResult.data merged into OrchestratorState
@@ -39,18 +45,5 @@ module:
 
   metadata:
     control_view:
-      areas:
-        internal_graph:01_check_safety_gates: guardian
-        internal_graph:02_review_recent_failures: knowledge
-        internal_graph:03_decide_continue_stop_error: guardian
       empty_roles:
         low: No direct device execution in this agent
-      checkpoint_details:
-        internal_graph:02_review_recent_failures:
-          nodes:
-          - id: review
-            label: "LLM policy evidence review"
-            area: high
-            source: {path: agents/core/guardian/agent.py, symbol: GuardianAgent.run}
-          edges:
-          - {source: $operation, target: review, kind: evidence, label: "existing internal decision"}

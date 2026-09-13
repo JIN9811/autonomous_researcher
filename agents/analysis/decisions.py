@@ -6,7 +6,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-from agents.knowledge_context import append_reference_only, build_reference_context, mark_reference_delivered, record_reference_use
+from agents.core.knowledge.context import append_reference_only, build_reference_context, mark_reference_delivered, record_reference_use
 from backends.llm_backend import LLMImageInput, MAX_LLM_IMAGE_BYTES
 
 

@@ -15,7 +15,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: selection policy
 - Risky places to edit: assumptions about uncertainty scale
-- Related files: learning/uncertainty.py, agents/design_agent.py
+- Related files: learning/uncertainty.py, agents/design/agent.py
 """
 
 from __future__ import annotations

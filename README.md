@@ -21,6 +21,7 @@ related_docs:
   - docs/standards/paper_documentation_standard.md
   - docs/runtime/current_code_snapshot.md
   - docs/runtime/three_level_control_model.md
+  - docs/modularity.md
   - CONTRIBUTING.md
   - SECURITY.md
 supersedes: []
@@ -70,6 +71,7 @@ supersedes: []
 |:---:|:---:|
 | **[Paper overview](docs/paper/README.md)** | Research motivation, contributions, and the paper reading path. |
 | **[System architecture](docs/paper/02_system_architecture.md)** | Orchestration, agent responsibilities, and execution interfaces. |
+| **[Modularity](docs/modularity.md)** | Core and specialist ownership, packages, bridges, and configuration lifecycle. |
 | **[Agent references](docs/agents/README.md)** | Each agent's role, LLM decisions, tools, and verification. |
 | **[Device bridges](docs/device_bridges/README.md)** | Robotics, equipment, and computation integration contracts. |
 | **[Runtime IDE](docs/runtime/runtime_ide.md)** | Plan editing, execution control, and run inspection. |

@@ -134,7 +134,7 @@ class ProcessTreeSampler:
 
 def prepare_evidence(archive_request, output, *, max_fem_jobs, max_mesh_actions, mesh_size_mm=.6,
                      surface_distance_mm=.05):
-    from agents.analysis_agent import AnalysisAgent
+    from agents.analysis.agent import AnalysisAgent
 
     mesh_size_mm = float(mesh_size_mm)
     if not math.isfinite(mesh_size_mm) or not .05 <= mesh_size_mm <= 5:
@@ -247,7 +247,7 @@ def configure_material_hypothesis(evidence, metadata, configuration):
 
 def configure_calibration(evidence, metadata, configuration):
     """Opt in to calibration without changing the measured or physical inputs."""
-    from agents.analysis_calibration import _search_policy
+    from agents.analysis.calibration import _search_policy
     configuration = deepcopy(configuration)
     mechanism = configuration.pop('mechanism_evidence', None)
     candidate = {**evidence, 'policy': {**evidence['policy'], 'calibration': configuration}}
@@ -357,9 +357,9 @@ def pin_validation_backend(ctx, backend, *, model=None):
 
 
 async def execute(args, output):
-    from agents.analysis_decisions import decide
-    from agents.analysis_fem import run_fem_study
-    from agents.analysis_runtime import AnalysisRuntimeService
+    from agents.analysis.decisions import decide
+    from agents.analysis.fem import run_fem_study
+    from agents.analysis.runtime import AnalysisRuntimeService
 
     journal = Journal(output)
     sampler = ProcessTreeSampler(output)
@@ -390,7 +390,7 @@ async def execute(args, output):
             metadata['source_hashes_before'][str(configuration_path)] = source_hash
         if getattr(args, 'calibration_config', None):
             configure_calibration(evidence, metadata, json.loads(args.calibration_config.read_text()))
-        from agents.analysis_mechanisms import freeze_mechanism_references
+        from agents.analysis.mechanisms import freeze_mechanism_references
         extra_hashes = freeze_mechanism_references(evidence, output / 'inputs')
         metadata['source_hashes_before'].update(extra_hashes)
         write_json(output / 'evidence.json', evidence)
@@ -431,7 +431,7 @@ async def execute(args, output):
 
         result = await run_fem_study(evidence, choose, call_tool, journal.emit)
         if result.get('status') == 'completed' and (result.get('calibration') or {}).get('retention_status') == 'retained_for_research':
-            from agents.analysis_calibration import freeze_candidate
+            from agents.analysis.calibration import freeze_candidate
             write_json(output / 'frozen_material_candidate.json', freeze_candidate(result, evidence))
     except asyncio.CancelledError:
         cancel.set()

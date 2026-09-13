@@ -4,19 +4,19 @@ Project:
 - Autonomous Researcher Framework for Low-Cost Self-Driving Lab on DGX Spark
 
 Purpose:
-- Adapt `/home/jin/다운로드/codex_printer_agent_prusabridge_phase1.txt` to this repository's actual runtime.
+- Adapt the operator-provided `codex_printer_agent_prusabridge_phase1.txt` brief to this repository's actual runtime.
 - This file is an implementation guideline, not executable code.
 - The existing autonomous_researcher runtime contract is authoritative.
 - Phase 1 must make the printer pipeline ready for staged live integration without starting physical hardware by default.
 
 Source Basis:
-- /home/jin/다운로드/codex_printer_agent_prusabridge_phase1.txt
-- /home/jin/autonomous_researcher/docs/project/Project_guide.txt
-- /home/jin/autonomous_researcher/docs/runtime/agent_program_baseline.md
-- /home/jin/autonomous_researcher/docs/runtime/architecture.md
-- /home/jin/autonomous_researcher/docs/runtime/test_mode.md
-- /home/jin/autonomous_researcher/docs/process/codex_workflow.md
-- /home/jin/autonomous_researcher/docs/agents/specimen_design_existing_runtime_guideline.txt
+- operator-provided `codex_printer_agent_prusabridge_phase1.txt`
+- docs/project/Project_guide.txt
+- docs/runtime/agent_program_baseline.md
+- docs/runtime/architecture.md
+- docs/runtime/test_mode.md
+- docs/process/codex_workflow.md
+- docs/agents/specimen_design_existing_runtime_guideline.txt
 
 ============================================================
 0. Current Runtime Snapshot
@@ -205,7 +205,7 @@ Primary files to update/create:
 - Add safe printer, PrusaLink, slicer, and ejection defaults.
 - All live write gates default to false.
 
-`agents/specimen_agent.py`
+`agents/specimen/agent.py`
 - Only change if needed to pass richer payload into `printer.prepare`.
 - Preserve `specimen_result` and `protocol_note`.
 - Do not move print control into SpecimenMakingAgent.

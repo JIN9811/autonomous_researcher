@@ -8,7 +8,7 @@ import time
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT))
 from scripts.validation.run_analysis_fem_cycle import build_context, Journal, write_json
-from agents.analysis_decisions import decide, compact_evidence
+from agents.analysis.decisions import decide, compact_evidence
 
 
 async def main(run):

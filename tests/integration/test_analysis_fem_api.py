@@ -5,7 +5,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agents.analysis_improvement import ImprovementStore
+from agents.analysis.improvement import ImprovementStore
 
 
 def client_at(root):

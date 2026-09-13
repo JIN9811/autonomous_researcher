@@ -15,7 +15,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: formatting style
 - Risky places to edit: downstream parsing assumptions
-- Related files: agents/knowledge_agent.py, backends/prompt_registry.py
+- Related files: agents/core/knowledge/agent.py, backends/prompt_registry.py
 """
 
 from __future__ import annotations

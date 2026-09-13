@@ -16,7 +16,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: additional metadata fields
 - Risky places to edit: consumer expectations in guardian policies
-- Related files: agents/guardian_agent.py, policies/recovery_policy.py
+- Related files: agents/core/guardian/agent.py, policies/recovery_policy.py
 """
 
 from __future__ import annotations

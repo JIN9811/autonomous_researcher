@@ -36,11 +36,6 @@ EQUIPMENT_MODULE = AgentModule(
             "workflow": "agents/equipment/workflow.py",
             "execution": "agents/equipment/execution.py",
             "presentation": "agents/equipment/presentation.py",
-            "compatibility_imports": [
-                "agents.equipment_agent",
-                "agents.equipment_decision",
-                "agents.equipment_workflow",
-            ],
         },
         "configuration": {
             "setup_write_enabled": False,

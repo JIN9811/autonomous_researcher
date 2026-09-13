@@ -1,12 +1,11 @@
 """Vision code ownership and executable routing with synthetic device boundaries."""
 import asyncio
-import importlib
 from pathlib import Path
 
 import pytest
 
 from agents.execution_graph import ExecutionGraphError, compile_execution_graph
-from agents.vision_agent import VisionAgent
+from agents.vision.agent import VisionAgent
 from agents.registry import AgentRegistry
 
 
@@ -15,19 +14,19 @@ def catalog_graph():
     return VisionAgent().execution_catalog(), default_vision_execution_graph()
 
 
-def test_discovered_owner_aliases_and_activation(monkeypatch, tmp_path):
+def test_discovered_canonical_owner_and_activation(monkeypatch, tmp_path):
     from agents.module_discovery import discover_agent_modules
     modules = {m.module_id: m for m in discover_agent_modules()}
     assert "vision" in modules, "Vision must be a code-discovered owner"
-    owner = importlib.import_module("agents.vision.agent")
-    decision = importlib.import_module("agents.vision.decision")
-    assert importlib.import_module("agents.vision_agent") is owner
-    assert importlib.import_module("agents.vision_decision") is decision
+    from agents.vision import agent as owner
+
     assert owner.VisionAgent is VisionAgent
     monkeypatch.setattr(owner, "__file__", str(tmp_path / "agents/vision/agent.py"))
     assert VisionAgent._repo_root() == tmp_path
     registry = AgentRegistry()
     registry.register_module(modules["vision"])
+    assert registry.get_module("vision").factory is VisionAgent
+    assert registry.get("vision_agent").__class__ is VisionAgent
     active = {"vision_agent"}
     registry.bind_activation(lambda: active)
     assert registry.get("vision_agent").execution_catalog().module_id == "vision"

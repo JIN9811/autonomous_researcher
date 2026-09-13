@@ -23,6 +23,7 @@ related_docs:
   - docs/paper/02_system_architecture.md
   - docs/paper/appendix_a_interfaces.md
   - docs/standards/documentation_standard.md
+  - docs/modularity.md
 supersedes: []
 -->
 
@@ -59,6 +60,10 @@ and rollout stop. Local configuration, calibration and evidence stores remain in
 Agent procedures call registered tools or shared runtime resources. Managers
 select providers where needed; the owning adapter executes the requested
 operation and exposes evidence for the agent's next decision.
+
+The [Modularity Reference](../modularity.md) explains why Package dependency
+links are composition metadata, while registered tools, gates, and the bridge
+remain the execution path. A package reference never grants direct device control.
 
 ![Specialist agents use tools and Device Bridges to connect robotics, API-controlled devices, and PC-operated instruments, receiving status, observations, and artifacts](assets/figures/device-bridge-overview.webp)
 

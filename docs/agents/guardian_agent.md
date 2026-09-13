@@ -8,7 +8,15 @@ scope: [agents, guardian, safety_control_plane]
 summary: Current contract for graph-wide risk review, incidents, approvals, safety budgets, and continue/stop/error routing.
 source_of_truth:
   - agents/core/guardian/agent.py
+  - agents/core/guardian/decision.py
+  - agents/core/guardian/execution.py
+  - agents/core/guardian/structure.py
+  - agents/core/guardian/plan.py
+  - agents/core/guardian/presentation.py
+  - agents/core/guardian/module.py
+  - agents/core/guardian/frontend/live_report.js
   - graphs/modules/guardian/module.yaml
+  - graphs/modules/guardian/ui.yaml
   - policies/guardian_gate.py
   - app/controller.py
   - app/main.py
@@ -20,6 +28,7 @@ related_docs:
   - docs/agents/orchestrator_agent.md
   - docs/paper/08_safety_ethics_and_limitations.md
   - docs/runtime/guardian_graphwide_safety.md
+  - docs/modularity.md
 supersedes: []
 -->
 
@@ -37,6 +46,7 @@ supersedes: []
 | LLM decision layer | Advisory policy note; deterministic checks retain gating authority |
 | Physical effect | No direct motion; downstream actions can be blocked or stopped |
 | Primary handoff | Continue / stop / error decisions → Orchestrator and controller |
+| Plan boundary | Read-only queries remain; an optional reference-only declaration can be applied for pinned future runs without changing gates |
 | Verification | [Inspection, regressions and read-only re-evaluation](#current-verification) |
 | Known gap | Live safety effectiveness and physical stop latency not established |
 
@@ -60,7 +70,7 @@ This Reference does not claim that control presence proves safety effectiveness.
 
 ## Source of Truth
 
-- Agent: `agents/core/guardian/agent.py` (legacy import: `agents.guardian_agent`)
+- Agent: `agents/core/guardian/agent.py`
 - Module: `graphs/modules/guardian/module.yaml`
 - Policy: `policies/guardian_gate.py`
 - State/API aggregation: `app/controller.py`, `app/main.py`
@@ -91,7 +101,32 @@ High-Level route, invalidate a Middle-Level completion claim, or require fresh
 Low-Level status. It cannot replace hardware interlocks or treat a manual
 Device Workspace action as automatic-loop completion.
 
+![Guardian source-backed composite control areas](assets/figures/guardian_control_areas.svg)
+
+**Figure Guardian-3.** One composite task retains deterministic gate precedence
+and the bounded advisory call; delivery returns that task's fresh result. The
+source nodes are CODE relationships, not separately schedulable policy steps.
+
 ## Closed-Loop Position and Handoffs
+
+### Plan declaration and query boundary
+
+`plan_contract()`, `resolve_plan(state)`, and `validate_plan(plan, state)` expose
+detached mandatory operator-stop/policy/reference inputs and optional advisory
+evidence context. They never apply or store a plan. Proposals cannot change
+thresholds, disable a deterministic check or operator stop, manufacture readiness,
+or widen permissions; those fields are rejected rather than ignored.
+
+The separate `validate_plan_declaration()` path accepts only the strict portable
+`ax4lab.owner_plan.v1` shape and the owner-supported
+`advisory_evidence_context`. `GET /api/modules/guardian` exposes its contract and
+Default/Configured state. Validation writes nothing; explicit module apply uses
+the existing version/configuration store for future runs. Guardian reads the
+declaration only from its matching pinned module snapshot and labels the added
+context `reference_only` inside its original advisory call. Core registration,
+operator stops, deterministic gates, thresholds, tools, and device authority do
+not move to the declaration. See the
+[Modularity Reference](../modularity.md#ide-package-and-owner-plan-lifecycle).
 
 ![Guardian closed-loop position and handoffs](assets/figures/guardian_01_closed_loop_handoffs.svg)
 
@@ -240,6 +275,13 @@ server-side requests. Incident-note APIs append operator context without
 rewriting the original incident.
 
 ## Current Verification
+
+The 2026-09-14 core-owner plan regression passed 150 focused owner, declaration,
+package, and module-API tests with 10 existing warning messages; the Package
+Manager/editor suite passed 37 Node tests. Controlled five-route and isolated
+browser/API checks exercised configured/default behavior without a physical
+call. Exact scope and commands are in the
+[implementation plan](../superpowers/plans/2026-09-14-core-plans-and-modularity-guide.md).
 
 The 2026-09-13 BO-admission correction passed 48 focused Guardian/Knowledge
 checks and 32 additional Guardian agent, action-shield and fault-matrix checks.

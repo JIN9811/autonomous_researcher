@@ -135,7 +135,7 @@ def build_cases(image_path, result_path=None):
     # Identical projection to production, including credential/raster redaction.
     # Importing these helpers registers no devices and performs no bootstrap.
     from agents.base_agent import AgentResult
-    from agents.equipment_workflow import _terminal_evidence
+    from agents.equipment.workflow import _terminal_evidence
     historical_result = AgentResult(success=archived.get("status") == "completed",
         summary=archived.get("summary", ""), data=deepcopy(historical))
     historical_execution = _terminal_evidence(historical_result)
@@ -201,7 +201,7 @@ async def main(args):
     from dotenv import load_dotenv
     import yaml
     from agents.base_agent import AgentContext
-    from agents.equipment_decision import decide_equipment
+    from agents.equipment.decision import decide_equipment
     from app.bootstrap import _build_backend, _load_configs, _models_cfg_for_backend
     from backends.llm_lease import LLMLeaseCoordinator
     from backends.model_router import ModelRouter

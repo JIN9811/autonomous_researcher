@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from agents.analysis_agent import AnalysisAgent
+from agents.analysis.agent import AnalysisAgent
 from mcp_tools.cae_tools import register_cae_tools
 from mcp_tools.tool_registry import ToolRegistry
 from objectives.metric_registry import MetricRegistry

@@ -3077,7 +3077,7 @@ class VisionAgent(BaseAgent):
                 completion.update(rollout_stopped=True, rollout_stop_status="STOPPED")
                 monitoring_ok = False
             else:
-                from agents.manipulation_decision import review_manipulation_result, allows
+                from agents.manipulation.decision import review_manipulation_result, allows
                 completion["vision_decision"] = visual_decision
                 response["vision_decision"] = visual_decision
                 for key in ("manipulation_result", "robot_task_result"):

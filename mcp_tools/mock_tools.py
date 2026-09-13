@@ -15,7 +15,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: simulated response payload fields
 - Risky places to edit: tool names used in agent logic
-- Related files: agents/specimen_agent.py, agents/equipment_agent.py
+- Related files: agents/specimen/agent.py, agents/equipment/agent.py
 """
 
 from __future__ import annotations

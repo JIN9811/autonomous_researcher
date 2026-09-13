@@ -10,8 +10,8 @@ import pytest
 import numpy as np
 from PIL import Image
 
-from agents.manipulation_agent import ManipulationAgent
-from agents.vision_agent import VisionAgent
+from agents.manipulation.agent import ManipulationAgent
+from agents.vision.agent import VisionAgent
 from mcp_tools.tool_registry import ToolRegistry
 from orchestrator.state import Mode, OrchestratorState, Stage
 from policies.guardian_gate import gate_blocks_execution, guardian_gate

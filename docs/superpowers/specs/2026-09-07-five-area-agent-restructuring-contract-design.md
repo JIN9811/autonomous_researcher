@@ -243,7 +243,7 @@ Analysis의 세 LLM 역할, 지표 유지·제거, 실험 기반 모델/방법 �
 
 #### Design 우선 재검토 — 구현 전 검토안
 
-검토 기준은 현재 [Design 코드](../../../agents/design_agent.py),
+검토 기준은 현재 [Design 코드](../../../agents/design/agent.py),
 [모듈 정의](../../../graphs/modules/design/module.yaml),
 [controller](../../../app/controller.py), [기존 테스트](../../../tests/unit/test_design_agent.py)다.
 아래는 현재 구현과 제안을 구분한 첫 적용 대상 검토이며, 구현 승인이 아니다.

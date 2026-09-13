@@ -10,16 +10,16 @@ from orchestrator_setup_fixtures import numeric_archive_guard
 
 pytestmark = pytest.mark.usefixtures("numeric_archive_guard")
 
-from agents.analysis_agent import AnalysisAgent
-from agents.bo_agent import BOAgent
-from agents.design_agent import DesignAgent
-from agents.equipment_agent import LabEquipmentAgent
-from agents.guardian_agent import GuardianAgent
-from agents.knowledge_agent import KnowledgeAgent
-from agents.manipulation_agent import ManipulationAgent
-from agents.orchestrator_agent import OrchestratorAgent
-from agents.specimen_agent import SpecimenMakingAgent
-from agents.vision_agent import VisionAgent
+from agents.analysis.agent import AnalysisAgent
+from agents.bo.agent import BOAgent
+from agents.design.agent import DesignAgent
+from agents.equipment.agent import LabEquipmentAgent
+from agents.core.guardian.agent import GuardianAgent
+from agents.core.knowledge.agent import KnowledgeAgent
+from agents.manipulation.agent import ManipulationAgent
+from agents.core.orchestrator.agent import OrchestratorAgent
+from agents.specimen.agent import SpecimenMakingAgent
+from agents.vision.agent import VisionAgent
 from orchestrator.state import OrchestratorState, Stage
 from utils.agent_artifact_archive import list_executions
 

@@ -78,9 +78,9 @@ paths retain their existing behavior; this decision boundary manages stacked Flo
 The installed [Equipment Agent Package](../../packages/agents/equipment/README.md)
 binds owner `equipment@1.0.0` to bridge `windows_pyautogui@1.0.0`. Canonical
 owner, decision, workflow, execution, source structure, report projection and
-Live composition now live under `agents/equipment/`. The flat
-`agents.equipment_agent`, `agents.equipment_decision` and
-`agents.equipment_workflow` imports remain exact module-identity aliases. The
+Live composition now live under `agents/equipment/`. Maintained callers and
+monkeypatch targets use that canonical package directly; the former root agent,
+decision and workflow wrappers were retired after caller migration. The
 bridge implementation and its 18 existing tools remain under
 `device_bridges/windows_pyautogui/`; `device_bridges.windows_pyautogui_bridge`
 and `mcp_tools.equipment_tools` retain compatibility identity.

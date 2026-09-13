@@ -62,7 +62,7 @@ _PRESET_PAYLOADS: tuple[dict[str, object], ...] = (
         "created_by": "system:preset",
         "metadata": {
             "preset_id": "legacy-utm-composite",
-            "source": "agents.analysis_agent.AnalysisAgent._objective_score",
+            "source": "agents.analysis.agent.AnalysisAgent._objective_score",
             "activation": "operator_required",
             "runtime_postprocessing": [
                 "curve_quality_warning_factor",

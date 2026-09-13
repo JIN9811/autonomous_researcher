@@ -45,7 +45,7 @@ class Model:
 
 @pytest.mark.asyncio
 async def test_review_transmits_ordered_images_and_preserves_detector_facts(state, capture):
-    from agents.vision_decision import review_visual_evidence
+    from agents.vision.decision import review_visual_evidence
     before, model = deepcopy(capture), Model()
     result = await review_visual_evidence(state, model, capture, "pickup")
     assert result["status"] == "accepted"
@@ -59,7 +59,7 @@ async def test_review_transmits_ordered_images_and_preserves_detector_facts(stat
 
 @pytest.mark.asyncio
 async def test_review_supplies_actual_pixel_frame_and_original_validity_reason(state, capture):
-    from agents.vision_decision import review_visual_evidence
+    from agents.vision.decision import review_visual_evidence
     capture.update(status="unknown", unknown_reason="registration_unavailable", registered=False,
                    width=999, height=999)
     before, model = deepcopy(capture), Model()
@@ -76,7 +76,7 @@ async def test_review_supplies_actual_pixel_frame_and_original_validity_reason(s
 @pytest.mark.asyncio
 @pytest.mark.parametrize("contract", ["active_cam", "placement", "clearance"])
 async def test_prompt_response_examples_are_dispatchable_for_both_choices(state, capture, contract):
-    from agents.vision_decision import review_visual_evidence
+    from agents.vision.decision import review_visual_evidence
     model = Model()
     await review_visual_evidence(state, model, capture, contract)
     context = json.loads(model.inputs[0][1].split("\nCONTEXT:\n")[1])
@@ -97,7 +97,7 @@ async def test_prompt_response_examples_are_dispatchable_for_both_choices(state,
 @pytest.mark.asyncio
 @pytest.mark.parametrize("broken", ["missing", "invalid", "dimensions", "identity"])
 async def test_invalid_pair_or_scope_never_reaches_model(state, capture, tmp_path, broken):
-    from agents.vision_decision import review_visual_evidence
+    from agents.vision.decision import review_visual_evidence
     if broken == "missing": capture.pop("raw_frame_path")
     if broken == "invalid": (tmp_path / "raw.png").write_bytes(b"not an image")
     if broken == "dimensions": Image.new("RGB", (20, 20)).save(tmp_path / "raw.png")
@@ -111,7 +111,7 @@ async def test_invalid_pair_or_scope_never_reaches_model(state, capture, tmp_pat
 @pytest.mark.asyncio
 @pytest.mark.parametrize("change", ["stop", "loop", "spec", "session"])
 async def test_review_cannot_authorize_changed_state(state, capture, change):
-    from agents.vision_decision import review_visual_evidence
+    from agents.vision.decision import review_visual_evidence
     def mutate():
         if change == "stop": state.stop_requested = True
         if change == "loop": state.loop_count += 1
@@ -123,7 +123,7 @@ async def test_review_cannot_authorize_changed_state(state, capture, change):
 
 @pytest.mark.asyncio
 async def test_rollout_session_alias_change_during_review_is_rejected(state, capture):
-    from agents.vision_decision import review_visual_evidence
+    from agents.vision.decision import review_visual_evidence
     state.run_metadata["robot_task_result"] = {"rollout_session_id": "one"}
     model = Model(change=lambda: state.run_metadata["robot_task_result"].update(rollout_session_id="two"))
     result = await review_visual_evidence(state, model, capture, "placement")
@@ -132,7 +132,7 @@ async def test_rollout_session_alias_change_during_review_is_rejected(state, cap
 
 @pytest.mark.asyncio
 async def test_evidence_changed_on_disk_during_review_is_rejected(state, capture):
-    from agents.vision_decision import review_visual_evidence
+    from agents.vision.decision import review_visual_evidence
     model = Model(change=lambda: Image.new("RGB", (32, 24), "blue").save(capture["raw_frame_path"]))
     result = await review_visual_evidence(state, model, capture, "placement")
     assert result["status"] == "review_required"
@@ -140,7 +140,7 @@ async def test_evidence_changed_on_disk_during_review_is_rejected(state, capture
 
 @pytest.mark.asyncio
 async def test_mismatched_capture_session_never_reaches_model(state, capture):
-    from agents.vision_decision import review_visual_evidence
+    from agents.vision.decision import review_visual_evidence
     state.run_metadata["manipulation_result"] = {"session_id": "one"}
     capture["session_id"] = "old"
     model = Model()
@@ -151,7 +151,7 @@ async def test_mismatched_capture_session_never_reaches_model(state, capture):
 
 @pytest.mark.asyncio
 async def test_specimen_metadata_change_cannot_relabel_capture(state, capture):
-    from agents.vision_decision import review_visual_evidence
+    from agents.vision.decision import review_visual_evidence
     state.current_experiment_spec = {}
     state.run_metadata["specimen_result"] = {"specimen_id": "s1"}
     model = Model(change=lambda: state.run_metadata["specimen_result"].update(specimen_id="s2"))
@@ -162,7 +162,7 @@ async def test_specimen_metadata_change_cannot_relabel_capture(state, capture):
 
 @pytest.mark.asyncio
 async def test_stale_pickup_never_becomes_fresh_after_model_acceptance(state, capture):
-    from agents.vision_decision import review_visual_evidence
+    from agents.vision.decision import review_visual_evidence
     capture["timestamp"] = "2000-01-01T00:00:00+00:00"
     result = await review_visual_evidence(state, Model(), capture, "pickup")
     assert result["status"] == "review_required"
@@ -172,7 +172,7 @@ async def test_stale_pickup_never_becomes_fresh_after_model_acceptance(state, ca
 
 @pytest.mark.asyncio
 async def test_pickup_uses_original_capture_alias_not_current_time(state, capture):
-    from agents.vision_decision import review_visual_evidence
+    from agents.vision.decision import review_visual_evidence
     capture.pop("timestamp")
     capture["captured_at"] = "2000-01-01T00:00:00+00:00"
     result = await review_visual_evidence(state, Model(), capture, "pickup")
@@ -182,7 +182,7 @@ async def test_pickup_uses_original_capture_alias_not_current_time(state, captur
 
 @pytest.mark.asyncio
 async def test_test_mode_retains_existing_consumer_grace_without_renewing_timestamp(state, capture):
-    from agents.vision_decision import review_visual_evidence
+    from agents.vision.decision import review_visual_evidence
     original = (datetime.now(timezone.utc) - timedelta(seconds=20)).isoformat()
     capture["timestamp"] = original
     result = await review_visual_evidence(state, Model(), capture, "pickup")
@@ -193,7 +193,7 @@ async def test_test_mode_retains_existing_consumer_grace_without_renewing_timest
 
 @pytest.mark.asyncio
 async def test_live_mode_never_uses_test_grace(state, capture):
-    from agents.vision_decision import review_visual_evidence
+    from agents.vision.decision import review_visual_evidence
     state.mode = Mode.LIVE
     capture["timestamp"] = (datetime.now(timezone.utc) - timedelta(seconds=20)).isoformat()
     result = await review_visual_evidence(state, Model(), capture, "pickup")
@@ -202,7 +202,7 @@ async def test_live_mode_never_uses_test_grace(state, capture):
 
 @pytest.mark.asyncio
 async def test_selects_existing_contract_not_raw_hardware_arguments(state):
-    from agents.vision_decision import select_vision_tool
+    from agents.vision.decision import select_vision_tool
     result = await select_vision_tool(state, Model("execute_verification"), "active_cam")
     assert result["status"] == "accepted"
     assert result["request"]["arguments"] == {"contract_id": "active_cam"}
@@ -213,7 +213,7 @@ async def test_selects_existing_contract_not_raw_hardware_arguments(state):
 @pytest.mark.parametrize("contract", ["pickup", "active_cam", "placement", "clearance"])
 @pytest.mark.parametrize("choice", ["execute_verification", "return_to_owner"])
 async def test_acquisition_prompt_identifies_precapture_scope_without_removing_owner_rejection(state, mode, contract, choice):
-    from agents.vision_decision import select_vision_tool
+    from agents.vision.decision import select_vision_tool
     state.mode = mode
     model = Model(choice)
     result = await select_vision_tool(state, model, contract)
@@ -230,7 +230,7 @@ async def test_acquisition_prompt_identifies_precapture_scope_without_removing_o
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", [Mode.TEST, Mode.LIVE])
 async def test_image_review_context_is_postcapture_and_missing_pair_still_blocks(state, capture, mode):
-    from agents.vision_decision import review_visual_evidence
+    from agents.vision.decision import review_visual_evidence
     state.mode = mode
     model = Model("return_to_owner")
     result = await review_visual_evidence(state, model, capture, "pickup")
@@ -250,14 +250,14 @@ async def test_image_review_context_is_postcapture_and_missing_pair_still_blocks
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tool", ["lerobot.replay.start", "execute_verification", "return_to_owner"])
 async def test_review_only_accepts_bounded_review_tools(state, capture, tool):
-    from agents.vision_decision import review_visual_evidence
+    from agents.vision.decision import review_visual_evidence
     result = await review_visual_evidence(state, Model(tool), capture, "placement")
     assert result["status"] == "review_required"
 
 
 @pytest.mark.asyncio
 async def test_explicit_non_llm_test_is_not_visual_validation(state):
-    from agents.vision_decision import review_visual_evidence
+    from agents.vision.decision import review_visual_evidence
     result = await review_visual_evidence(state, SimpleNamespace(), {}, "pickup")
     assert result["status"] == "deterministic_test"
     assert result["llm_used"] is False
@@ -265,7 +265,7 @@ async def test_explicit_non_llm_test_is_not_visual_validation(state):
 
 @pytest.mark.asyncio
 async def test_vision_run_selects_capture_then_reviews_and_blocks_conflicting_frame(state, capture, tmp_path, monkeypatch):
-    from agents.vision_agent import VisionAgent
+    from agents.vision.agent import VisionAgent
     from mcp_tools.tool_registry import ToolRegistry
     monkeypatch.setattr(VisionAgent, "_repo_root", staticmethod(lambda: tmp_path))
     state.run_metadata["specimen_result"] = {"ok": True, "specimen_id": "s1", "handoff_status": "ready"}
@@ -291,7 +291,7 @@ async def test_vision_run_selects_capture_then_reviews_and_blocks_conflicting_fr
 @pytest.mark.parametrize("outcome", ["reject", "cancel", "scope", "lowercase_stop", "accept_lowercase", "task_reject"])
 async def test_placement_stop_precedes_multimodal_review_and_rejection_blocks_handoff(state, capture, tmp_path, monkeypatch, outcome):
     import asyncio
-    from agents.vision_agent import VisionAgent
+    from agents.vision.agent import VisionAgent
     from mcp_tools.tool_registry import ToolRegistry
     monkeypatch.setattr(VisionAgent, "_repo_root", staticmethod(lambda: tmp_path))
     state.run_metadata["specimen_result"] = {"ok": True, "specimen_id": "s1", "handoff_status": "ready"}
@@ -356,7 +356,7 @@ async def test_placement_stop_precedes_multimodal_review_and_rejection_blocks_ha
 @pytest.mark.parametrize("outcome", ["reject", "deadline", "terminal", "scope"])
 async def test_clearance_model_disagreement_prevents_analysis_after_completed_replay(capture, tmp_path, outcome):
     import time
-    from agents.vision_agent import VisionAgent
+    from agents.vision.agent import VisionAgent
     from tests.unit.test_utm_clear_cycle import state_with_placement, equipment_data, ReplayTools
     from utils import utm_clear_cycle as cycle
     state = state_with_placement()
@@ -395,7 +395,7 @@ async def test_clearance_model_disagreement_prevents_analysis_after_completed_re
 @pytest.mark.parametrize("detector_status", ["unknown", "occupied"])
 async def test_model_acceptance_does_not_override_clearance_detector_gate(capture, detector_status):
     """Archived unknown images may look empty to a model; only code owns clearance."""
-    from agents.vision_agent import VisionAgent
+    from agents.vision.agent import VisionAgent
     from tests.unit.test_utm_clear_cycle import state_with_placement, equipment_data, ReplayTools
     from utils import utm_clear_cycle as cycle
     state = state_with_placement()
@@ -426,7 +426,7 @@ async def test_model_acceptance_does_not_override_clearance_detector_gate(captur
 
 @pytest.mark.asyncio
 async def test_selection_refusal_is_valid_observation_contract_without_capture(state):
-    from agents.vision_agent import VisionAgent
+    from agents.vision.agent import VisionAgent
     from mcp_tools.tool_registry import ToolRegistry
     from policies.validation_policy import validate_agent_output
     model = Model("return_to_owner")
@@ -440,7 +440,7 @@ async def test_selection_refusal_is_valid_observation_contract_without_capture(s
 
 @pytest.mark.asyncio
 async def test_stop_requested_before_vision_never_starts_camera_runtime(state):
-    from agents.vision_agent import VisionAgent
+    from agents.vision.agent import VisionAgent
     from mcp_tools.tool_registry import ToolRegistry
     called = []
     model = Model()

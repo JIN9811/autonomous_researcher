@@ -9,8 +9,8 @@ import pytest
 
 
 def study():
-    assert importlib.util.find_spec('agents.analysis_fem'), 'FEM study module is required'
-    return importlib.import_module('agents.analysis_fem').run_fem_study
+    assert importlib.util.find_spec('agents.analysis.fem'), 'FEM study module is required'
+    return importlib.import_module('agents.analysis.fem').run_fem_study
 
 
 def evidence(tmp_path, **patch):

@@ -16,7 +16,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: additive helper methods
 - Risky places to edit: import compatibility
-- Related files: knowledge/failure_memory.py, agents/guardian_agent.py
+- Related files: knowledge/failure_memory.py, agents/core/guardian/agent.py
 """
 
 from knowledge.failure_memory import FailureMemory, FailureRecord

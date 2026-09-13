@@ -22,7 +22,6 @@ DESIGN_MODULE = AgentModule(
             "entrypoint": "agents/design/agent.py",
             "decision": "agents/design/decision.py",
             "presentation": "agents/design/presentation.py",
-            "compatibility_imports": ["agents.design_agent", "agents.design_decision"],
         },
         "frontend": {
             "host": "/live",

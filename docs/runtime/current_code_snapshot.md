@@ -259,8 +259,8 @@ verification did not change the DSN/design-window layout contract.
 | Printer APIs/artifacts | `device_bridges/bambu_*`, `device_bridges/prusa_bridge.py`, `app/main.py` | 3DP provider fleet, Bambu/Prusa status, slicing, start, autoejection, proof, Bambu HTTP artifact fetch route |
 | LeRobot APIs | `device_bridges/lerobot_bridge.py`, `app/main.py` | ROBOTIS/LeRobot teleop, record, train, rollout, manipulation bridge, Isaac Sim mirror-state probe and mirror loop |
 | PyAutoGUI equipment APIs | `device_bridges/windows_pyautogui_bridge.py`, `utils/local_pyautogui_bridge.py`, `app/main.py` | Windows bridge discovery plus managed localhost development target, proof, execution |
-| Recorded Equipment Skills | `utils/equipment_skill_runtime.py`, `Pyautogui_server_for_window/bridge/windows_pyautogui_bridge_server.py`, `agents/equipment_agent.py`, `policies/guardian_gate.py` | Versioned demonstration packages, v2 image-first click/drag locators, deterministic segment execution, exact-model bounded recovery |
-| BO/CAE APIs | `agents/bo_agent.py`, `device_bridges/cae_bridge.py` | Optimizer and analysis workspaces |
+| Recorded Equipment Skills | `utils/equipment_skill_runtime.py`, `Pyautogui_server_for_window/bridge/windows_pyautogui_bridge_server.py`, `agents/equipment/agent.py`, `policies/guardian_gate.py` | Versioned demonstration packages, v2 image-first click/drag locators, deterministic segment execution, exact-model bounded recovery |
+| BO/CAE APIs | `agents/bo/agent.py`, `device_bridges/cae_bridge.py` | Optimizer and analysis workspaces |
 | Knowledge/Evolution APIs | `knowledge/`, `self_evolution/`, `app/main.py`, `web/templates/knowledge.html`, `web/static/knowledge.*` | Durable memory, bounded Neo4j/Graphify inspection, ontology, relation review/edit, activity visualization, and self-evolution tasks |
 
 Do not use this document as an instruction prompt. Use it as the "what the code
@@ -292,7 +292,7 @@ Current LeRobot bridge behavior:
 - `/api/lerobot/mirror/receiver-process/start`, `/api/lerobot/mirror/receiver-process/status`,
   and `/api/lerobot/mirror/receiver-process/stop` manage the local
   Isaac receiver process for the configured host/port. The production default
-  launches `/home/jin/IsaacSim/isaac-sim.sh` with
+  launches the operator-home-relative `IsaacSim/isaac-sim.sh` with
   `--ext-folder sim/robotis_omx/extensions --enable atr.omx.mirror`, so
   `sim/robotis_omx/extensions/atr.omx.mirror` hosts the HTTP receiver inside
   Isaac Sim, opens `sim/robotis_omx/scene/omx_table_layout.usda`, starts the
@@ -987,7 +987,7 @@ one unified live-camera stack.
 
 | Path | Current owner | Runtime behavior |
 |---|---|---|
-| `camera.capture` tool | `mcp_tools/camera_tools.py`, `mcp_tools/mock_tools.py`, `agents/vision_agent.py` | Deterministic simulator-style capture contract used by Vision Agent. It returns typed observation fields and does not open real camera streams by itself. |
+| `camera.capture` tool | `mcp_tools/camera_tools.py`, `mcp_tools/mock_tools.py`, `agents/vision/agent.py` | Deterministic simulator-style capture contract used by Vision Agent. It returns typed observation fields and does not open real camera streams by itself. |
 | LeRobot camera test | `device_bridges/lerobot_bridge.py`, `/api/lerobot/camera/test` | Profile-scoped OpenCV capture for saved `top`, `wrist`, or additional GUI camera keys. It may use the LeRobot conda environment when `cv2` is not available in the main `.venv`. |
 | RealSense bridge class | `device_bridges/realsense_bridge.py` | Fail-closed bridge for RealSense enumeration, profile validation, and explicitly allowed single-frame capture. It is not currently exposed as a standalone FastAPI workspace route. |
 
@@ -1180,7 +1180,7 @@ When code changes after this snapshot, update docs in this order:
 Use these commands when this snapshot needs to be refreshed:
 
 ```bash
-cd /home/jin/autonomous_researcher
+cd <repository-root>
 .venv/bin/python - <<'PY'
 from fastapi.testclient import TestClient
 from app.main import app

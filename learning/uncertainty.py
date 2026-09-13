@@ -15,7 +15,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: uncertainty formula
 - Risky places to edit: stability when list is empty
-- Related files: learning/evaluation.py, agents/analysis_agent.py
+- Related files: learning/evaluation.py, agents/analysis/agent.py
 """
 
 from __future__ import annotations

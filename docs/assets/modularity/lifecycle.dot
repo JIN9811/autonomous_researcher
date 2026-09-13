@@ -1,0 +1,29 @@
+digraph owner_plan_lifecycle {
+  rankdir=TB;
+  graph [bgcolor="white", pad="0.28", nodesep="0.38", ranksep="0.58", fontname="DejaVu Sans", fontsize=16, label="A core-owner declaration affects only an explicitly applied future run", labelloc=t];
+  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=10, margin="0.13,0.09"];
+  edge [color="#334155", fontname="DejaVu Sans", fontsize=9, arrowsize=0.72];
+
+  draft [label="Detached draft\nPackage import or IDE edit", fillcolor="#F4F0FF", color="#6750A4"];
+  validate [label="Validate Draft\nstrict shape + owner policy", shape=diamond, fillcolor="#FFF3CD", color="#946200"];
+  rejected [label="Errors shown\nactive config unchanged", fillcolor="#FDECEC", color="#A33A3A"];
+  apply [label="Explicit Apply for Future Runs\nPUT existing module API", penwidth=2];
+  store [label="ModuleConfigStore\nversion + active module.yaml", shape=folder, fillcolor="#E8F6EC", color="#2E7D59"];
+  pin [label="Next new RunLoop\npins detached module snapshot", fillcolor="#E8F6EC", color="#2E7D59"];
+  owner [label="Matching KNW or GRD owner\nreads ctx.runtime_module_config()"];
+  evidence [label="Existing result/archive\nconfigured identity + effective settings", shape=folder, fillcolor="#F7F8FA", color="#64748B"];
+  legacy [label="No declaration\nlegacy owner behavior", fillcolor="#F7F8FA", color="#64748B"];
+
+  draft -> validate [label="POST /validate\nactivate=false"];
+  validate -> rejected [label="invalid", color="#A33A3A"];
+  rejected -> draft [label="repair", style=dashed, color="#A33A3A"];
+  validate -> apply [label="valid; operator chooses apply"];
+  apply -> store [label="validate + version + activate config"];
+  store -> pin [label="run starts later"];
+  pin -> owner [label="matching module only"];
+  owner -> evidence [label="supported inputs + evidence"];
+  legacy -> owner [label="absence remains compatible", style=dashed, color="#64748B"];
+
+  note [shape=note, style="filled", fillcolor="#FFF9E8", color="#946200", label="Applying does not start a run.\nA pinned active run never rereads changed files."];
+  apply -> note [style=dotted, arrowhead=none, color="#946200"];
+}

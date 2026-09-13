@@ -19,6 +19,7 @@ related_docs:
   - docs/knowledge/wiki_memory.md
   - docs/knowledge/publication.md
   - docs/standards/documentation_standard.md
+  - docs/modularity.md
 supersedes: []
 -->
 
@@ -33,7 +34,7 @@ supersedes: []
 | 프로그램 코어 | 기본 에이전트 ORC·KNW·GRD, LangGraph, 세션, 공통 GUI 및 서비스 연결 유지 |
 | Package | Agent Package는 owner 단위, Experimental Package는 플랜·설정·연결을 포함한 실험 조합 |
 | 소프트웨어 기준점 | `9d11cf923f556e6abe87df3084dbbd5c022a5ea6`; 모듈별 전환 전에 동작 비교 근거 확정 |
-| Implementation status | Design/Specimen/Vision/Manipulation/Equipment/Analysis/BO installed modules and live reports; ORC/KNW/GRD implementation sources are grouped under `agents/core/` with exact flat-import aliases and unchanged explicit bootstrap registration. Analysis composes the installed CAE bridge and its internal CalculiX provider; BO references existing numerical services without a bridge. Shared PINN remains inactive. Validation and scope are recorded in the owner execution plans. |
+| Implementation status | Design/Specimen/Vision/Manipulation/Equipment/Analysis/BO installed modules and live reports; ORC/KNW/GRD stay bootstrap-registered under `agents/core/`. Knowledge/Guardian optional `module.owner_plan` declarations now use existing module validation, Package exchange, explicit apply, and future-run pinning. The 31 migrated root wrappers remain retired. Analysis composes CAE/CalculiX; BO references numerical services without a bridge; shared PINN remains inactive. |
 | 실증 경계 | 소프트웨어 호환성 검증과 기존 물리 동작 stable 실증을 별도로 관리 |
 
 ## Summary
@@ -99,7 +100,7 @@ Orchestrator·Knowledge·Guardian는 플랫폼 기본 에이전트로 유지한�
 |---|---|---|
 | [agents/base_agent.py](../../../agents/base_agent.py) | `run(state, ctx)`, `AgentResult`, 공통 모델·툴·지식 서비스 | 기존 호출 표면을 유지하고 서비스 접근 및 상태 소유권을 명시 |
 | [agents/registry.py](../../../agents/registry.py) | 이름별 에이전트 register/get/names | 검증된 모듈 진입점으로 등록을 모으고 중복 ID 정책 추가 |
-| [agents/core/orchestrator/capabilities.py](../../../agents/core/orchestrator/capabilities.py) | 그래프 연결 owner, Setup callback, 가용성, 실행 snapshot | ORC와 Setup의 실행 가능 owner 판정에 재사용; 기존 flat import는 exact alias |
+| [agents/core/orchestrator/capabilities.py](../../../agents/core/orchestrator/capabilities.py) | 그래프 연결 owner, Setup callback, 가용성, 실행 snapshot | ORC와 Setup의 실행 가능 owner 판정에 재사용; 유지 호출자는 canonical package import 사용 |
 | [graphs/module_store.py](../../../graphs/module_store.py), [graphs/schema.py](../../../graphs/schema.py) | IDE module 설정 저장·버전과 스키마 | 구현 모듈 선언과 IDE 편집 설정을 연결 |
 | [graphs/modules/design/module.yaml](../../../graphs/modules/design/module.yaml), [ui.yaml](../../../graphs/modules/design/ui.yaml) | 인계 설명·pre-execution·내부 단계 및 표시 descriptor | 현재 형식에 맞춰 점진적으로 공통 선언 참조 |
 | [graphs/registry.py](../../../graphs/registry.py) | 허용된 실행 handler 조회 | 모듈 선언을 임의 실행 코드로 해석하지 않고 등록 handler 연결 |
@@ -154,7 +155,7 @@ Package의 모듈 구성과 활성 그래프의 실행 선택을 구분하며, �
 | Agent module | 역할에 맞는 LLM 판단, 설정 적용, 작업 결과·진행·전용 화면 | 다른 owner 설정과 상태를 직접 변경하지 않음 |
 | Bridge module | 장비·계산 provider 연결, 명령, 상태, 장비별 설정·전용 화면 | 연구 목적·다음 에이전트를 결정하지 않음 |
 | Agent Package | 에이전트 모듈, 버전, 브릿지 의존성, 권장 binding·문서 | 모듈 소유권·파일 경로를 바꾸지 않음 |
-| Experimental Package | Agent Package 조합, Orchestration/Knowledge/Guardian Plan 참조·버전, 휴대 가능한 설정·binding | 별도 스케줄러·설정 소유자·장비 실행 주체가 아님; 후속 두 플랜은 계약 설계 대상 |
+| Experimental Package | Agent Package 조합과 Orchestration Plan 참조·버전, 휴대 가능한 설정·binding | 별도 스케줄러·설정 소유자·장비 실행 주체가 아님; Knowledge/Guardian 선언은 기존 `module_configurations` 안의 draft로만 운반 |
 | Module instance | 선택한 모듈 구현의 개별 설정·연결·작업 상태 | 동일 브릿지 구현의 여러 장비를 구분 |
 
 에이전트와 브릿지는 다대다 연결을 허용한다. 연결 대상은 모듈 개수가 아니라
@@ -169,8 +170,8 @@ Orchestrator와 함께 플랫폼 기본 에이전트로 구분한다. 기본 제
 참조하며, 수치 최적화를 장비로 취급하는 새 Device Bridge를 만들지 않는다.
 BO 이후 별도 단계에서 기본 에이전트 소유 코드를 `agents/core/orchestrator/`,
 `agents/core/knowledge/`, `agents/core/guardian/`로 구분했다. 기존 전문 에이전트
-폴더는 다시 이동하지 않았고, 공개 import·handler·API·저장 경로는 exact alias와
-기존 bootstrap으로 호환을 유지한다. 이 배치는 소유권 구분이며 새 Package나
+폴더는 다시 이동하지 않았고, 유지 호출자는 canonical package import를 사용하며
+handler·API·저장 경로와 기존 bootstrap을 유지한다. 이 배치는 소유권 구분이며 새 Package나
 플랜 runtime을 만들지 않는다.
 
 | 플랜 | 소유자 | 설정할 책임 | 바꾸지 않는 경계 |
@@ -179,17 +180,47 @@ BO 이후 별도 단계에서 기본 에이전트 소유 코드를 `agents/core/
 | Knowledge Plan | KNW | 지식 공급 대상·범위, 결과 분류, 메모리 보관 | 기존 Wiki·RAG·메모리 서비스, 개인정보 접근 범위 |
 | Guardian Plan | GRD | 검토 지점·근거, 승인·재시도·중단 정책 | 코어 강제 안전 제한, 기존 장비 인터록 |
 
-Knowledge/Guardian Plan은 기본 에이전트가 읽는 **실험별 설정 계약**으로
-설계한다. 별도 스케줄러·저장소·에이전트 통신 버스를 신설하지 않는다.
-Experimental Package는 세 플랜의 참조와 버전을 함께 묶고, 가져온 플랜은
-기존 검증·활성화 절차를 거치는 초안으로 취급한다. 기본값은 기존 동작을 보존하며,
-플랜이 생겼다는 이유로 호출 순서·횟수·장비 동작을 변경하지 않는다.
+Knowledge/Guardian의 기존 binding snapshot 조회와 제안 검증은 계속
+**read-only**다. 별도의 선언 경로는 선택적 `module.owner_plan`을 owner 정책으로
+검증한 뒤 기존 module version/apply API로만 저장한다. 별도 스케줄러·저장소·
+에이전트 통신 버스는 없으며, 새 런이 기존 module snapshot을 고정할 때만 선언을
+소비한다. 현재 runtime metadata의 호환 annotation은 기존 실행에서 그대로 허용하고,
+미설정 실행의 호출 순서·횟수·오류·장비 동작은 유지한다.
 Knowledge Plan은 기존 접근 범위를 넓히거나 개인 메모리를 공개 패키지에 포함하지
 않으며, Guardian Plan은 강제 제한을 해제할 수 없다.
 
-진행 순서는 **BO 패키지 구현·비구동 검증 → 기본 에이전트 폴더 구분 →
-Knowledge/Guardian Plan 상세 계약 설계**다. 후속 플랜의 실행 구현은 해당 계약을
-검토한 뒤 별도 범위로 정한다.
+Package Manager의 Knowledge/Guardian Default/Configured UI, 검증, 명시적
+future-run 적용, Experimental Package draft 운반이 이 승인 범위에서 구현됐다.
+이는 core module 등록/제거 또는 graph 활성화와 다른 수명주기다.
+
+#### Core Plan 연결과 독자용 설명 — 2026-09-14 승인 범위
+
+위 read-only 상태 다음 단계로, 기존 모듈 설정의 선택적 `owner_plan` 선언을
+Knowledge/Guardian이 해석하도록 연결한다. 선언은 `schema`, `id`, `owner`,
+`version`, `contract_version`, `settings`로 구성하며 runtime 입력 snapshot과
+분리한다. 미설정은 기존 동작이다. ORC의 Orchestration Plan은 기존 graph를
+계속 사용하며 이중 정의하지 않는다.
+
+설정 저장·버전·명시적 적용은 기존 ModuleConfigStore/API, 런별 고정은 기존
+controller/RunLoop module snapshot을 재사용한다. Experimental Package의 기존
+`module_configurations`가 이 선언을 함께 운반하고 Import는 비활성 draft로 남는다.
+Package Manager 안에서 Default/Configured 선택, 설정 편집, 검증, 개별 owner
+적용을 제공한다. 실행 중 적용은 기존 정책대로 거부한다. 새 Plan 저장소,
+스케줄러, 원격 설치기, 브릿지 직접 제어는 만들지 않는다.
+
+지원 설정은 현재 Knowledge 계약의 범위·corpora·applicability·호출 예산과
+Guardian의 reference-only advisory context로 제한한다. Guardian 강제 검사는
+항상 유지한다. 플랜에는 runtime snapshot, 개인/세션 식별자, 자격증명, 장비
+연결값을 넣지 않으며 export 시 조건을 조용히 제거해 검색 범위를 넓히지 않는다.
+부적합 선언은 owner 검증에서 거부한다. 미설정 실행의 호출 순서·횟수·결과는
+회귀 검증하고, 설정된 값은 실제 owner 입력에 반영됨을 확인한다.
+
+독자용 `docs/modularity.md`는 설계안과 별도로 개념 관계, 코드/화면/저장 소유권,
+등록·설정·적용·실행, 확장 방법, 구현 한계를 설명한다. 기존 문서 테마의 표와
+편집 가능한 DOT/SVG를 사용하고 메인 README/문서 index에서 연결한다.
+최종 검증 후에만 이번 변경으로 대체된 구코드를 정리한다. 참조·동적 등록·배포
+소비자·재현 자료가 남은 코드는 보존한다. 미사용이 증명된 대체 코드만 삭제하거나
+역사적 가치가 있는 경우 `oldversion`에 원래 경로와 대체 위치를 기록한다.
 
 ### 2. 식별자와 버전
 
@@ -439,7 +470,7 @@ Analysis의 background FEM처럼 루프가 끝나도 진행하는 작업은 별�
 다음은 신규 또는 책임 분리가 필요한 모듈의 권장 배치다. 기존 모듈이 이미 명확한
 경계를 갖고 있으면 현재 위치를 manifest에서 참조하여 같은 배포 단위로 묶는다.
 현재 모듈 ID·import 경로와 충돌하지 않는 이름은 개별 이관에서 확인하며, 이동한
-기존 import는 필요한 범위에서 compatibility adapter로 유지한다.
+기존 import의 compatibility adapter는 소비자 이관과 회귀 검증이 끝날 때까지만 유지한 뒤 제거한다.
 
 ```text
 packages/agents/<agent_id>/
@@ -587,6 +618,22 @@ freshness 규칙을 유지한다. 공통 adapter를 추가해 기존 실행 검�
 
 ## Verification
 
+### Core Owner Plan Implementation Update — 2026-09-14
+
+Knowledge/Guardian의 선택적 `module.owner_plan` 선언은 기존 module validator,
+`ModuleConfigStore`, Experimental Package `module_configurations`, Runtime IDE
+Package Manager, 런별 module snapshot에 연결됐다. Query/proposal API는 read-only로
+남고, Validate는 쓰지 않으며, explicit Apply만 future-run 구성을 변경한다.
+Knowledge는 지원 입력 overlay만 만들고 Guardian은 reference-only advisory context만
+추가한다. Guardian의 deterministic gate와 operator stop 우선순위는 유지된다.
+
+최종 코드 회귀는 Python 150 passed(기존 warning 10개), Package/editor Node 37
+passed였다. Guarded five-route는 5 passed, 격리 Browser/API 검사는 invalid 입력,
+no-write validation, Knowledge-only explicit apply, Default 복원, export와 detached
+import를 1920/900 px에서 확인했다. 제어된 model/equipment I/O를 사용했고 물리 호출은
+없었다. 세부 명령과 범위는 [구현 계획](../plans/2026-09-14-core-plans-and-modularity-guide.md),
+독자 설명은 [Modularity Reference](../../modularity.md)에 둔다.
+
 ### Manipulation Implementation Update — 2026-09-13
 
 `manipulation@1.0.0`은 `agents/manipulation/`의 owner와
@@ -645,7 +692,8 @@ Detailed implementation and remaining integration checks belong to the
 `equipment@1.0.0` now owns the canonical agent, decision, workflow, source
 catalog, report projection and Live composition under `agents/equipment/`.
 The package composes the existing `windows_pyautogui@1.0.0` bridge under
-`device_bridges/windows_pyautogui/`; flat legacy imports remain exact aliases.
+`device_bridges/windows_pyautogui/`; migrated flat agent imports are retired after
+caller migration, while device-bridge compatibility paths remain outside that cleanup.
 The existing task and delivery stay as two Middle composite operations. Actual
 suitability and terminal-review model calls are High, software/API supervision
 is Middle, selected Windows/local execution is Low, and Guardian/Evidence remain
@@ -677,7 +725,8 @@ switching with no console warning/error; physical calls remained zero.
 
 `analysis@1.0.0` now owns the canonical agent, bounded decisions, executable and
 source catalogs, report projection and Live composition under `agents/analysis/`.
-Exact flat legacy imports remain aliases. The package composes `cae@1.0.0` under
+Maintained callers use the canonical package and the migrated flat agent imports
+are retired. The package composes `cae@1.0.0` under
 `device_bridges/cae/`; CAE and its internal CalculiX provider retain the existing
 tool IDs, runtime identity, settings, artifacts, admission and cancellation.
 Analysis is not a bridge, CalculiX is not a separate package dependency, and the
@@ -704,8 +753,8 @@ Analysis, and that outcome is retained rather than reported as an Analysis pass.
 ### BO Implementation Update — 2026-09-14
 
 `bo@1.0.0` now owns the canonical agent, decision loop, executable/source
-catalogs, report projection and Live composition under `agents/bo/`. Exact flat
-legacy imports remain aliases. The public `run` and `run_with_settings` paths
+catalogs, report projection and Live composition under `agents/bo/`. Maintained
+callers use canonical imports and the migrated flat wrappers are retired. The public `run` and `run_with_settings` paths
 both execute one composite `bo.task` followed by `bo.deliver`, while retaining
 normal persisted/default settings versus explicit settings and one public
 archive attempt per invocation.
@@ -764,6 +813,7 @@ API·UI 연결 및 보관 문서를 읽고 목표 계약과 대조했다.
 
 ## Related Documents
 
+- [Modularity Reference](../../modularity.md)
 - [Agent Reference Index](../../agents/README.md)
 - [Device Bridges](../../device_bridges/README.md)
 - [Runtime IDE](../../runtime/runtime_ide.md)

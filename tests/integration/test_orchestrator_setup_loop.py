@@ -34,9 +34,9 @@ def test_guard_rejects_network_native_camera_process_and_unlisted_tool_before_bo
 @pytest.mark.parametrize("status", ["ready", "busy", "unavailable", "unknown", "blocked"])
 async def test_owner_availability_preserves_fresh_meaning_without_manufacturing_readiness(status):
     """Collapsing a trustworthy busy/unavailable report loses the owner's decision evidence."""
-    from agents.orchestrator_capabilities import OwnerCatalog
+    from agents.core.orchestrator.capabilities import OwnerCatalog
     from agents.registry import AgentRegistry
-    from agents.bo_agent import BOAgent
+    from agents.bo.agent import BOAgent
     from graphs.schema import load_graph_config
     from orchestrator.state import OrchestratorState
     state = OrchestratorState(run_id="availability-verification", experiment_id="availability")
@@ -107,7 +107,7 @@ def test_live_state_compaction_preserves_exact_setup_and_once_only_authority(act
 
 @pytest.mark.parametrize("mutation", [None, "run", "specimen", "loop", "session", "stale", "missing_file", "not_stopped", "not_verified"])
 def test_real_manipulation_equipment_preflight_requires_scoped_stop_and_fresh_vision(actual_controller, tmp_path, mutation):
-    from agents.equipment_agent import LabEquipmentAgent
+    from agents.equipment.agent import LabEquipmentAgent
     from datetime import datetime, timezone, timedelta
     controller, _ = actual_controller
     state = controller._state
@@ -173,7 +173,7 @@ async def test_original_persistent_fault_retries_before_owner_and_model(actual_c
     from orchestrator.langgraph_runtime import LangGraphRunLoop
     from orchestrator.state import Mode, Stage
     from logging_system.structured_logger import StructuredLogger
-    from agents.bo_agent import BOAgent
+    from agents.bo.agent import BOAgent
     controller, guard = actual_controller
     state = controller._state
     state.mode, state.stage = Mode.FAULT_INJECTION, Stage.BO
@@ -213,7 +213,7 @@ def actual_controller(tmp_path, monkeypatch, request):
     from scripts.orchestrator_verification_guard import VerificationGuard
     with VerificationGuard() as guard:
         import app.bootstrap as bootstrap
-        from agents.analysis_runtime import AnalysisRuntimeService
+        from agents.analysis.runtime import AnalysisRuntimeService
         from knowledge.stores import JsonlKnowledgeStore
         memory = JsonlKnowledgeStore(memory_root=tmp_path / "memory/knowledge", run_root=tmp_path / "runs")
         monkeypatch.setattr(JsonlKnowledgeStore, "default", classmethod(lambda cls, project_root=None: memory))
@@ -240,9 +240,9 @@ def actual_controller(tmp_path, monkeypatch, request):
                 return tmp_path / value
             return original_resolve(path)
         monkeypatch.setattr(bootstrap, "resolve_path", resolve)
-        import agents.analysis_agent as analysis_module
+        import agents.analysis.agent as analysis_module
         monkeypatch.setattr(analysis_module, "resolve_path", resolve)
-        from agents.vision_agent import VisionAgent
+        from agents.vision.agent import VisionAgent
         monkeypatch.setattr(VisionAgent, "_repo_root", staticmethod(lambda: tmp_path))
         controller = bootstrap.load_runtime()
         controller._state.active_session_id = "controlled-session"
@@ -291,8 +291,8 @@ def actual_controller(tmp_path, monkeypatch, request):
     ("specimen", "installed_printer"), ("specimen", "physical_print"), ("next_design", "virtual_bridge")])
 async def test_confirmed_setup_enters_original_initial_lhs_and_real_design(actual_controller, monkeypatch, tmp_path, stop_stage, profile, cycle_timeout_s=None):
     """The genuine new-series entry must apply captured setup before owner sampling."""
-    from agents.bo_agent import BOAgent
-    from agents.design_agent import DesignAgent
+    from agents.bo.agent import BOAgent
+    from agents.design.agent import DesignAgent
     controller, guard = actual_controller
     if stop_stage != "design":
         from orchestrator_setup_fixtures import printer_io
@@ -310,7 +310,7 @@ async def test_confirmed_setup_enters_original_initial_lhs_and_real_design(actua
         "session_id": controller._planning_session_id, "target": "next_run"})
     assert old_state.model_dump() == before
     seeds, designs, bo_runs, specimen_runs = [], [], [], []
-    from agents.specimen_agent import SpecimenMakingAgent
+    from agents.specimen.agent import SpecimenMakingAgent
     original_specimen = SpecimenMakingAgent.run
     async def observed_specimen(self, state, ctx):
         result = await original_specimen(self, state, ctx)
@@ -586,7 +586,7 @@ async def test_actual_tail_preserves_profile_preflight_or_deployed_csv_contract(
                     await barrier.wait()
             monkeypatch.setattr(controller, "_broadcast_event", observed_event)
             if path == "virtual_manip_real_equipment":
-                from agents.equipment_agent import LabEquipmentAgent
+                from agents.equipment.agent import LabEquipmentAgent
                 original_equipment = LabEquipmentAgent.run
                 async def observed_equipment(self, state, ctx):
                     assert state.run_metadata["operator_teleop_handoff"]["status"] == "confirmed"

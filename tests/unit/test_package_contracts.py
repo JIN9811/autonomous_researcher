@@ -116,11 +116,20 @@ def test_import_rejects_invalid_or_private_payload_without_a_draft(mutation):
 def test_export_excludes_runtime_state_and_credentials_but_preserves_declarative_references():
     draft = payload()
     draft["runtime_state"] = {"run_id": "private", "token": "secret"}
-    draft["graph"]["metadata"] = {"api_key": "secret", "source": "graphs/configs/atr_closed_loop.yaml"}
+    draft["graph"]["metadata"] = {
+        "api_key": "secret",
+        "source": "graphs/configs/atr_closed_loop.yaml",
+        "session_id": "portable-session",
+        "userId": "portable-user",
+    }
     result = service().export_experimental(draft)
     assert result["ok"], result
     assert "runtime_state" not in result["package"]
-    assert result["package"]["graph"]["metadata"] == {"source": "graphs/configs/atr_closed_loop.yaml"}
+    assert result["package"]["graph"]["metadata"] == {
+        "source": "graphs/configs/atr_closed_loop.yaml",
+        "session_id": "portable-session",
+        "userId": "portable-user",
+    }
 
 
 def test_legacy_owners_are_explicit_and_missing_owner_fails():
@@ -200,6 +209,73 @@ def test_module_configuration_unknown_nested_execution_fields_are_rejected():
     package["module_configurations"] = {"design": {"module": {"id": "design", "handler": "agent.design_agent",
                                                              "metadata": {"shell": "printf bad"}}}}
     assert not svc.import_experimental(package)["ok"]
+
+
+def test_owner_plan_roundtrip_is_exact_and_private_scope_is_never_stripped_wider():
+    def validate_module(ident, raw):
+        if ident != "knowledge":
+            return []
+        from agents.core.knowledge.agent import KnowledgeAgent
+        from orchestrator.state import OrchestratorState
+        try:
+            KnowledgeAgent().validate_plan_declaration(
+                raw["module"]["owner_plan"],
+                OrchestratorState(run_id="package-plan", experiment_id="package-plan"),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            return [str(exc)]
+        return []
+
+    svc = service(
+        installed_handlers=[*service()._handlers, "agent.knowledge_agent"],
+        installed_module_ids=[*service()._module_ids, "knowledge"],
+        validate_module=validate_module,
+    )
+    draft = payload()
+    configured = {
+        "module": {
+            "id": "knowledge",
+            "handler": "agent.knowledge_agent",
+            "owner_plan": {
+                "schema": "ax4lab.owner_plan.v1",
+                "id": "knowledge_reference",
+                "owner": "knowledge",
+                "version": "1.0.0",
+                "contract_version": "1.0.0",
+                "settings": {"corpora": ["markdown"], "decision_max_steps": 6},
+            },
+        },
+    }
+    draft["module_configurations"]["knowledge"] = configured
+
+    exported = svc.export_experimental(draft)
+    assert exported["ok"], exported
+    assert exported["package"]["module_configurations"]["knowledge"] == configured
+    imported = svc.import_experimental(exported["package"])
+    assert imported["ok"] and imported["draft"]["module_configurations"]["knowledge"] == configured
+
+    private = deepcopy(draft)
+    private["module_configurations"]["knowledge"]["module"]["owner_plan"]["settings"] = {
+        "scope": {"run_id": "private-run"},
+    }
+    rejected = svc.export_experimental(private)
+    assert not rejected["ok"]
+    assert rejected["package"] is None
+
+    for selector in ("session_id", "sessionId", "user_id", "user-id"):
+        settings = {
+            "corpora": ["sources"],
+            "source_scope": {selector: "private-subject"},
+        }
+        private_export = deepcopy(draft)
+        private_export["module_configurations"]["knowledge"]["module"]["owner_plan"]["settings"] = settings
+        export_result = svc.export_experimental(private_export)
+        assert not export_result["ok"] and export_result["package"] is None
+
+        private_import = deepcopy(exported["package"])
+        private_import["module_configurations"]["knowledge"]["module"]["owner_plan"]["settings"] = settings
+        import_result = svc.import_experimental(private_import)
+        assert not import_result["ok"] and import_result["draft"] is None
 
 
 def test_bridge_descriptor_does_not_import_providers_or_read_memory(monkeypatch):

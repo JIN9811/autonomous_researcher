@@ -129,7 +129,7 @@ async def test_proposal_prompt_projects_only_declared_editable_blocks(tmp_path):
     ("```json\n{payload}\n```\n```json\n{payload}\n```", False),
 ])
 async def test_registered_single_json_envelope_preserves_strict_schema(envelope, accepted):
-    from agents.orchestrator_decision import classify_chat_request
+    from agents.core.orchestrator.decision import classify_chat_request
     from orchestrator.state import OrchestratorState
     payload = json.dumps({"intent": "question", "reason": "An explanation request", "pending_id": None})
     async def complete(*args, **kwargs):
@@ -146,7 +146,7 @@ async def test_registered_single_json_envelope_preserves_strict_schema(envelope,
     {"tool": "printer.send", "arguments": {}, "reason": "x", "evidence_refs": ["e"]},
 ])
 async def test_json_fence_never_relaxes_intake_authority(payload):
-    from agents.orchestrator_decision import classify_chat_request
+    from agents.core.orchestrator.decision import classify_chat_request
     from orchestrator.state import OrchestratorState
     async def complete(*args, **kwargs):
         return SimpleNamespace(model="controlled", text="```json\n" + json.dumps(payload) + "\n```")

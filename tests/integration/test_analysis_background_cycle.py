@@ -13,9 +13,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from agents.analysis_agent import AnalysisAgent
-from agents.analysis_improvement import ImprovementStore
-from agents.analysis_runtime import AnalysisRuntimeService
+from agents.analysis.agent import AnalysisAgent
+from agents.analysis.improvement import ImprovementStore
+from agents.analysis.runtime import AnalysisRuntimeService
 from mcp_tools.tool_registry import ToolRegistry
 from orchestrator.state import Mode, OrchestratorState, Stage
 

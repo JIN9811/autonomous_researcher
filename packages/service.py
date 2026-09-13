@@ -5,36 +5,19 @@ accepted. Import returns detached drafts; the host owns any subsequent save.
 """
 from copy import deepcopy
 from importlib.resources import files
-import ipaddress
 import json
-import re
 from typing import Any, Callable, Iterable
 
 import yaml
 from pydantic import ValidationError
 from graphs import ModuleConfig, ModuleConfigStore
 from packages.contracts import AgentPackage, ExperimentalPackage, PackageReference
+from packages.portability import portable_value as _portable
 
 MAX_PACKAGE_BYTES = 1_048_576
-MAX_DEPTH = 40
-_PRIVATE_KEYS = {"password", "token", "api_key", "access_token", "access_code", "secret",
-                 "credentials", "authorization", "connection", "connections", "host", "hostname",
-                 "ip", "ip_address", "port", "base_url", "endpoint", "serial_number",
-                 "runtime_state", "runtime_snapshot", "run_state", "run_id", "events", "history"}
-_EXECUTABLE_KEYS = {"code", "python", "script", "scripts", "command", "commands", "command_template",
-                    "executable", "executable_path", "entrypoint", "factory", "imports", "files",
-                    "file_contents", "attachments", "environment", "env", "shell", "callback", "function"}
 _MODULE_EXTENSION_KEYS = {"implementation", "orchestration_contract", "metadata", "decision_settings",
                           "runtime_contract", "output_contracts", "workflow_agentic_tasks",
                           "transition_conditions", "supported_tasks"}
-_WORKSPACE_ROUTES = {
-    "/printer", "/lerobot", "/windows-equipment", "/equipment/windows", "/cae", "/plc", "/live"
-}
-
-
-def _local_ui_reference(value):
-    return isinstance(value, str) and (value in _WORKSPACE_ROUTES or bool(
-        re.fullmatch(r"/api/[a-zA-Z0-9_/{}/.-]+", value)) and ".." not in value)
 
 
 def installed_agent_packages(descriptions: Iterable[dict]) -> list[dict]:
@@ -69,47 +52,6 @@ def _bounded_copy(payload: Any) -> dict:
     if not isinstance(result, dict):
         raise ValueError("Package must be an object")
     return result
-
-
-def _portable(value: Any, *, exporting: bool, depth: int = 0) -> Any:
-    if depth > MAX_DEPTH:
-        raise ValueError("Package nesting exceeds limit")
-    if isinstance(value, dict):
-        result = {}
-        for key, child in value.items():
-            normalized = re.sub(r"(?<!^)(?=[A-Z])", "_", key).lower().replace("-", "_")
-            private = normalized in _PRIVATE_KEYS or any(
-                token in normalized for token in ("password", "credential", "secret", "access_token", "api_key", "connection"))
-            private = private or normalized.endswith(("_host", "_ip", "_port", "_address", "_url"))
-            if normalized == "endpoint" and _local_ui_reference(child):
-                private = False
-            if private:
-                if exporting:
-                    continue
-                raise ValueError("Package contains private connection or runtime fields")
-            if normalized in _EXECUTABLE_KEYS or normalized.endswith(("_code", "_command", "_script", "_executable")):
-                raise ValueError("Package contains unsupported executable or file-inclusion fields")
-            result[key] = _portable(child, exporting=exporting, depth=depth + 1)
-        return result
-    if isinstance(value, list):
-        return [_portable(item, exporting=exporting, depth=depth + 1) for item in value]
-    if isinstance(value, str):
-        if _local_ui_reference(value):
-            return value
-        try:
-            ipaddress.ip_address(value)
-        except ValueError:
-            pass
-        else:
-            raise ValueError("Package contains a machine connection address")
-        if re.fullmatch(r"[a-zA-Z0-9_.-]+\.(local|lan)", value):
-            raise ValueError("Package contains a machine connection address")
-        if (value.startswith(("/", "~", "\\")) or re.search(r"(^|[\s\"'])[/](home|Users|tmp|etc|mnt|var)/", value)
-                or re.search(r"(^|[/\\])\.\.([/\\]|$)", value)
-                or re.search(r"[A-Za-z]:[/\\]", value)
-                or re.search(r"(?:https?|file|ssh|mqtt|ftp)://", value, re.I)):
-            raise ValueError("Package contains a machine-local path or connection URL")
-    return value
 
 
 def _unique(items: list[dict], key: str, label: str) -> dict[str, dict]:

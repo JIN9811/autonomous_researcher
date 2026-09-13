@@ -6,7 +6,7 @@ import pytest
 
 from agents.design.agent import DesignAgent
 from agents.design.execution import design_execution_catalog
-from agents.orchestrator_execution import orchestrator_execution_catalog
+from agents.core.orchestrator.execution import orchestrator_execution_catalog
 
 ROOT = Path(__file__).resolve().parents[2]
 

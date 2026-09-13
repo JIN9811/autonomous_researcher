@@ -8,9 +8,9 @@ import subprocess
 import pytest
 import yaml
 
-from agents import orchestrator_capabilities as capabilities
-from agents.bo_agent import BOAgent
-from agents.orchestrator_agent import OrchestratorAgent
+from agents.core.orchestrator import capabilities
+from agents.bo.agent import BOAgent
+from agents.core.orchestrator.agent import OrchestratorAgent
 from agents.registry import AgentRegistry
 from graphs.schema import GraphConfig, GraphNode, load_graph_config
 from orchestrator.state import OrchestratorState, Stage

@@ -1,5 +1,5 @@
 ---
-{"topic_id":"agent-contracts","owner":"agent-architecture","source_refs":["docs/agents/agent_api_connection_matrix.md"],"source_revision":{"docs/agents/agent_api_connection_matrix.md":"18c2cc8fbbc26f6c5ff3ef5272f78c9e6ec7a1aee70d11c6e0524250c4926ac5"},"verified_at":"2026-09-13T00:00:00+00:00","applicability":"Public agent role and handoff orientation","status":"reviewed"}
+{"topic_id":"agent-contracts","owner":"agent-architecture","source_refs":["docs/agents/agent_api_connection_matrix.md"],"source_revision":{"docs/agents/agent_api_connection_matrix.md":"da219327285b8f811fb694d1528fa7f9616e575910612ba46225d7085abb2ff1"},"verified_at":"2026-09-14T00:00:00+00:00","applicability":"Public agent role and handoff orientation","status":"reviewed"}
 ---
 
 # Agent roles and handoffs
@@ -24,3 +24,6 @@ separate delivery and use evidence.
 Every handoff remains subject to the owner’s validation, current state, and
 existing approval gates. A Wiki citation never authorizes a setup change, run,
 model call, or device operation.
+
+Knowledge and Guardian can consume explicitly applied, owner-validated module
+declarations in a later pinned run. Package import and draft validation do not apply them.

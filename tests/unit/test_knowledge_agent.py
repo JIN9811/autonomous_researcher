@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from agents.knowledge_agent import KnowledgeAgent
+from agents.core.knowledge.agent import KnowledgeAgent
 from knowledge.evolution_bridge import build_outcomes_for_active_variants
 from knowledge.experiment_db import ExperimentDB
 from knowledge.schemas import AgentPerformanceRecord, EvolutionOutcomeRecord, ExperimentKnowledgeRecord
@@ -43,7 +43,7 @@ def _isolate_knowledge_writes(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_knowledge_agent_uses_md_decision_without_graph_and_preserves_failed_model_intake(tmp_path, monkeypatch):
-    import agents.knowledge_agent as module
+    import agents.core.knowledge.agent as module
     def forbidden(*args, **kwargs):
         raise AssertionError("Knowledge invoked retired graph")
     monkeypatch.setattr(module, "graph_backend_from_env", forbidden)
@@ -105,6 +105,42 @@ async def test_curated_note_retains_explicit_applicability_and_matches_returned_
     found = store_for(project_root=tmp_path).search("", scope=knowledge["scope"])
     assert any(item["agent_id"] == "knowledge_agent" and item["evidence_kind"] == "derived"
                and item["applicability"] == {"material": "PLA"} for item in found["hits"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("settings,error", [
+    ([], "knowledge_settings must be an object"),
+    ({"scope": []}, "Knowledge scope must be an object"),
+])
+async def test_invalid_early_knowledge_scope_preserves_pre_intake_failure(tmp_path, settings, error):
+    state = _state()
+    state.run_metadata["knowledge_settings"] = settings
+
+    with pytest.raises(ValueError, match=error):
+        await KnowledgeAgent().run(state, _CtxStub())
+
+    assert not list((tmp_path / "runs").rglob("intake*.json"))
+
+
+@pytest.mark.asyncio
+async def test_invalid_knowledge_corpus_preserves_post_intake_failure(tmp_path):
+    state = _state()
+    state.run_metadata["knowledge_settings"] = {"corpora": ["private_memory"]}
+
+    with pytest.raises(ValueError, match="Unsupported Knowledge corpus"):
+        await KnowledgeAgent().run(state, _CtxStub())
+
+    assert list((tmp_path / "runs").rglob("intake*.json"))
+
+
+@pytest.mark.asyncio
+async def test_ignored_legacy_knowledge_setting_remains_accepted_by_default_run():
+    state = _state()
+    state.run_metadata["knowledge_settings"] = {"legacy_annotation": {"display": "kept"}}
+
+    result = await KnowledgeAgent().run(state, _CtxStub())
+
+    assert result.data["knowledge"]["knowledge_context"]["schema"] == "knowledge_context.v1"
 
 
 def _objective_evaluation() -> dict[str, Any]:
@@ -401,8 +437,8 @@ async def test_knowledge_agent_keeps_local_ledger_without_sync_when_old_graph_fl
         def close(self):
             captured["closed"] = True
 
-    monkeypatch.setattr("agents.knowledge_agent.event_pipeline_enabled", lambda: True)
-    monkeypatch.setattr("agents.knowledge_agent.KnowledgeService", _Service)
+    monkeypatch.setattr("agents.core.knowledge.agent.event_pipeline_enabled", lambda: True)
+    monkeypatch.setattr("agents.core.knowledge.agent.KnowledgeService", _Service)
 
     result = await KnowledgeAgent().run(_state(), _CtxStub())
 

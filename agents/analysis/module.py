@@ -35,16 +35,6 @@ ANALYSIS_MODULE = AgentModule(
             "execution": "agents/analysis/execution.py",
             "structure": "agents/analysis/structure.py",
             "presentation": "agents/analysis/presentation.py",
-            "compatibility_imports": [
-                "agents.analysis_agent",
-                "agents.analysis_decisions",
-                "agents.analysis_runtime",
-                "agents.analysis_improvement",
-                "agents.analysis_refinement",
-                "agents.analysis_mechanisms",
-                "agents.analysis_calibration",
-                "agents.analysis_fem",
-            ],
         },
         "frontend": {
             "host": "/live",

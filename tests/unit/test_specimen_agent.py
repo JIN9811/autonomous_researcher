@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from agents.specimen_agent import SpecimenMakingAgent
+from agents.specimen.agent import SpecimenMakingAgent
 from device_bridges.prusa_bridge import PrusaSlicerRunner
 from mcp_tools.mock_tools import register_mock_tools
 from mcp_tools.experiment_tools import register_experiment_tools
@@ -113,7 +113,7 @@ async def test_specimen_failed_decision_never_reaches_printer_or_ready_handoff(t
 @pytest.mark.asyncio
 @pytest.mark.parametrize("origin", ["lhs_contract", "bo_redesign", "operator_constraints"])
 async def test_design_json_handoff_reaches_specimen_selected_tool_without_hardware(tmp_path, monkeypatch, origin):
-    from agents.design_agent import DesignAgent
+    from agents.design.agent import DesignAgent
     state = OrchestratorState(run_id="design-spc-contract", experiment_id="offline", mode=Mode.TEST,
                                stage=Stage.DESIGN, active_goal="prepare the requested compression specimen")
     requested = {"cell_size_mm": 6.0, "relative_density": .37}

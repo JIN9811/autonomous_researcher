@@ -1,7 +1,6 @@
 """BO package ownership contracts; numerical work stays in existing services."""
 from __future__ import annotations
 
-import importlib
 import ast
 from copy import deepcopy
 import json
@@ -12,7 +11,8 @@ import pytest
 import yaml
 
 
-def test_bo_discovery_and_legacy_modules_share_runtime_identity(monkeypatch):
+def test_bo_discovery_registers_canonical_owner_identity():
+    from agents.bo.agent import BOAgent
     from agents.module_discovery import discover_agent_modules
     from agents.registry import AgentRegistry
 
@@ -21,16 +21,10 @@ def test_bo_discovery_and_legacy_modules_share_runtime_identity(monkeypatch):
     module = modules[0]
     assert (module.agent_name, module.version) == ("bo_agent", "1.0.0")
 
-    owner = importlib.import_module("agents.bo.agent")
-    decision = importlib.import_module("agents.bo.decision")
-    assert importlib.import_module("agents.bo_agent") is owner
-    assert importlib.import_module("agents.bo_decision") is decision
-    monkeypatch.setattr(owner, "_identity_probe", "canonical-bo", raising=False)
-    assert importlib.import_module("agents.bo_agent")._identity_probe == "canonical-bo"
-
     registry = AgentRegistry()
     registry.register_module(module)
-    assert registry.get_module("bo").factory is owner.BOAgent
+    assert registry.get_module("bo").factory is BOAgent
+    assert registry.get("bo_agent").__class__ is BOAgent
     assert registry.get("bo_agent").name == "bo_agent"
 
 
@@ -50,9 +44,7 @@ def test_bo_descriptor_and_package_name_existing_services_without_a_bridge():
     assert descriptor["dependencies"]["bridge_modules"] == []
     assert descriptor["dependencies"]["direct_device_effect"] is False
     assert descriptor["storage"]["new_settings_store"] is False
-    assert descriptor["backend"]["compatibility_imports"] == [
-        "agents.bo_agent", "agents.bo_decision",
-    ]
+    assert "compatibility_imports" not in descriptor["backend"]
     for path in (
         descriptor["backend"]["entrypoint"],
         descriptor["backend"]["decision"],

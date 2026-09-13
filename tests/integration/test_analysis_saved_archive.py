@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from agents.analysis_agent import AnalysisAgent
+from agents.analysis.agent import AnalysisAgent
 
 
 def test_preserved_completed_cycle_same_stl_and_measured_reprocessing():

@@ -15,7 +15,7 @@ import math
 from backends.llm_backend import LLMImageInput
 from orchestrator.state import Mode
 from utils.agent_artifact_archive import record_tool_artifact
-from agents.knowledge_context import append_reference_only, build_reference_context, mark_reference_delivered, record_reference_use
+from agents.core.knowledge.context import append_reference_only, build_reference_context, mark_reference_delivered, record_reference_use
 
 
 _TOOLS = frozenset({"execute_stacked_workflow", "accept_workflow_result", "request_operator",

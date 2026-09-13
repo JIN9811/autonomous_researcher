@@ -19,11 +19,11 @@ source_of_truth:
   - orchestrator/supervisor.py
   - app/controller.py
   - policies/guardian_gate.py
-  - agents/knowledge_agent.py
+  - agents/core/knowledge/agent.py
   - knowledge/markdown_runtime.py
   - knowledge/source_api.py
-last_verified: 2026-09-12
-verified_against: 5542ef2
+last_verified: 2026-09-14
+verified_against: agent-canonical-import-cleanup
 paper_section: system_architecture
 research_questions:
   - RQ1

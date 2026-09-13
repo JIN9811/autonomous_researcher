@@ -20,7 +20,7 @@
 <g id="node2" class="node">
 <title>helper</title>
 <path fill="#eef4ff" stroke="#315c9b" stroke-width="2.1" d="M476,-394C476,-394 298,-394 298,-394 292,-394 286,-388 286,-382 286,-382 286,-370 286,-370 286,-364 292,-358 298,-358 298,-358 476,-358 476,-358 482,-358 488,-364 488,-370 488,-370 488,-382 488,-382 488,-388 482,-394 476,-394"/>
-<text text-anchor="middle" x="387" y="-379.4" font-family="DejaVu Sans" font-size="12.00">agents/vision_decision.py</text>
+<text text-anchor="middle" x="387" y="-379.4" font-family="DejaVu Sans" font-size="12.00">agents/vision/decision.py</text>
 <text text-anchor="middle" x="387" y="-366.4" font-family="DejaVu Sans" font-size="12.00">strict JSON + full scope recheck</text>
 </g>
 <!-- runtime&#45;&gt;helper -->

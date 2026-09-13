@@ -29,7 +29,7 @@ async def test_current_cycle_uses_registered_models_without_actuation(actual_con
     # Exercise the existing configurable wait budget, not a replacement decision.
     # Image API latency can exceed the 45-second default. Freshness admission is
     # unchanged and may still reject evidence that expires during a completion.
-    from agents.vision_agent import VisionAgent
+    from agents.vision.agent import VisionAgent
     original_vision_run = VisionAgent.run
 
     async def configured_vision_run(self, state, context):

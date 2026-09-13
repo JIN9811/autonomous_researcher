@@ -25,6 +25,7 @@ related_docs:
   - docs/runtime/current_code_snapshot.md
   - docs/runtime/runtime_ide.md
   - docs/runtime/three_level_control_model.md
+  - docs/modularity.md
 supersedes: []
 -->
 
@@ -37,6 +38,7 @@ supersedes: []
 | Agent roles, decisions, and tools | [Ten agent references](agents/README.md) |
 | Shared Wiki, private memory and publication | [Knowledge contracts](knowledge/wiki_memory.md) · [Publication checks](knowledge/publication.md) |
 | Existing equipment integration | [Device bridge references](device_bridges/README.md) |
+| Implemented module and package boundaries | [Modularity Reference](modularity.md) |
 | Installation and operation | [English guide](../README.en.md) |
 | Documentation conventions | [Writing rules](standards/documentation_standard.md) |
 | Proposed package and module architecture | [Package, agent and bridge design](superpowers/specs/2026-09-13-package-agent-bridge-modularization-design.md) |

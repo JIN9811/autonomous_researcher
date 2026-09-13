@@ -3,7 +3,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from agents import analysis_decisions as module
+from agents.analysis import decisions as module
 
 
 class Context:

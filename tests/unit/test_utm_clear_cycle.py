@@ -131,8 +131,8 @@ class ReplayTools:
 @pytest.mark.parametrize("topic", ["/camera/image_raw", "/camera/image_rect"])
 async def test_replay_launch_poll_return_then_fresh_clear_routes_analysis(topic):
     from utils import utm_clear_cycle as cycle
-    from agents.manipulation_agent import ManipulationAgent
-    from agents.vision_agent import VisionAgent
+    from agents.manipulation.agent import ManipulationAgent
+    from agents.vision.agent import VisionAgent
     from policies.validation_policy import validate_agent_output
     from policies.guardian_gate import guardian_gate
     state = state_with_placement()
@@ -172,7 +172,7 @@ async def test_replay_launch_poll_return_then_fresh_clear_routes_analysis(topic)
 @pytest.mark.parametrize("policy", ["preflight_only", "virtual", "off", ""])
 async def test_mixed_policy_cannot_actuate_or_simulate_real_clear(policy):
     from utils import utm_clear_cycle as cycle
-    from agents.manipulation_agent import ManipulationAgent
+    from agents.manipulation.agent import ManipulationAgent
     state = state_with_placement()
     state.current_experiment_spec["execution_policy"] = {"manipulation": policy, "lab_equipment": "execute"}
     cycle.merge_utm_clear_cycle(state, Stage.EQUIPMENT, equipment_data(state))
@@ -190,7 +190,7 @@ async def test_mixed_policy_cannot_actuate_or_simulate_real_clear(policy):
 @pytest.mark.parametrize("mode,physical", [("live", False), ("test", True)])
 async def test_existing_execution_mode_maps_to_live_transport_and_local_dataset(mode, physical):
     from orchestrator.state import Mode
-    from agents.manipulation_agent import ManipulationAgent
+    from agents.manipulation.agent import ManipulationAgent
     from utils import utm_clear_cycle as cycle
     state = state_with_placement()
     state.mode = Mode(mode)
@@ -227,7 +227,7 @@ def test_stage_module_allowlists_accept_managed_replay_tools():
 @pytest.mark.parametrize("status,home", [("STOPPED", True), ("FAILED", False), ("COMPLETED", False)])
 async def test_stop_failure_or_missing_return_never_captures(status, home):
     from utils import utm_clear_cycle as cycle
-    from agents.vision_agent import VisionAgent
+    from agents.vision.agent import VisionAgent
     state = state_with_placement()
     state.current_experiment_spec["execution_policy"] = {"vision": "execute"}
     cycle.merge_utm_clear_cycle(state, Stage.EQUIPMENT, equipment_data(state))
@@ -243,8 +243,8 @@ async def test_stop_failure_or_missing_return_never_captures(status, home):
 @pytest.mark.asyncio
 async def test_explicit_fully_virtual_cycle_has_simulated_evidence_and_no_tools():
     from utils import utm_clear_cycle as cycle
-    from agents.manipulation_agent import ManipulationAgent
-    from agents.vision_agent import VisionAgent
+    from agents.manipulation.agent import ManipulationAgent
+    from agents.vision.agent import VisionAgent
     state = state_with_placement()
     state.current_experiment_spec["execution_policy"] = {key: "virtual" for key in ("manipulation", "vision", "lab_equipment")}
     cycle.merge_utm_clear_cycle(state, Stage.EQUIPMENT, equipment_data(state))
@@ -323,7 +323,7 @@ def test_controller_configured_route_uses_clear_context():
 @pytest.mark.parametrize("flag", ["stop_requested", "safe_stop_requested", "emergency_stop_requested"])
 async def test_control_stop_flags_never_start_clear(flag):
     from utils import utm_clear_cycle as cycle
-    from agents.manipulation_agent import ManipulationAgent
+    from agents.manipulation.agent import ManipulationAgent
     state = state_with_placement()
     state.current_experiment_spec["execution_policy"] = {"manipulation": "execute", "lab_equipment": "execute"}
     cycle.merge_utm_clear_cycle(state, Stage.EQUIPMENT, equipment_data(state))
@@ -338,8 +338,8 @@ async def test_control_stop_flags_never_start_clear(flag):
 @pytest.mark.parametrize("flag", ["stop_requested", "safe_stop_requested", "emergency_stop_requested"])
 @pytest.mark.parametrize("entry", ["helper", "manipulation", "vision"])
 async def test_later_stop_preserves_completed_clear_history_without_tools(flag, entry):
-    from agents.manipulation_agent import ManipulationAgent
-    from agents.vision_agent import VisionAgent
+    from agents.manipulation.agent import ManipulationAgent
+    from agents.vision.agent import VisionAgent
     from utils import utm_clear_cycle as cycle
     state = state_with_completed_clear()
     setattr(state, flag, True)
@@ -417,7 +417,7 @@ async def test_controller_downstream_stop_preserves_completed_clear_history():
     {"ok": False}, {"run_id": "old"}, {"loop_id": 9}, {"session_id": "transfer"}, {"topic": "/image_utm"}])
 async def test_bad_clear_capture_is_archived_but_never_confirms(change):
     from utils import utm_clear_cycle as cycle
-    from agents.vision_agent import VisionAgent
+    from agents.vision.agent import VisionAgent
     state = state_with_placement()
     state.current_experiment_spec["execution_policy"] = {"vision": "execute"}
     cycle.merge_utm_clear_cycle(state, Stage.EQUIPMENT, equipment_data(state))
@@ -456,7 +456,7 @@ def test_real_archived_first_verification_captures_red_material_and_is_immutable
 
 @pytest.mark.asyncio
 async def test_legacy_direct_clear_request_cannot_fall_back_to_policy_or_pick_place():
-    from agents.manipulation_agent import ManipulationAgent
+    from agents.manipulation.agent import ManipulationAgent
     state = state_with_placement()
     state.current_experiment_spec["manipulation_task_id"] = "clear_utm_to_disposal"
     tools = ReplayTools(state)
@@ -509,8 +509,8 @@ def test_contradictory_repeat_equipment_cannot_leave_clear_armed():
 @pytest.mark.asyncio
 async def test_replay_deadline_does_not_extend_on_status_refresh(monkeypatch):
     from utils import utm_clear_cycle as cycle
-    from agents.manipulation_agent import ManipulationAgent
-    from agents.vision_agent import VisionAgent
+    from agents.manipulation.agent import ManipulationAgent
+    from agents.vision.agent import VisionAgent
     import asyncio
     state = state_with_placement()
     state.current_experiment_spec["execution_policy"] = {"manipulation": "execute", "vision": "execute", "lab_equipment": "execute"}
@@ -541,9 +541,9 @@ async def test_full_controller_tail_waits_for_replay_beyond_step_budget(tmp_path
     """Real controller tail, LangGraph, agents, merges and routing; only device/time/UI sinks injected."""
     import asyncio
     import json
-    from agents.orchestrator_agent import OrchestratorAgent
-    from agents.manipulation_agent import ManipulationAgent
-    from agents.vision_agent import VisionAgent
+    from agents.core.orchestrator.agent import OrchestratorAgent
+    from agents.manipulation.agent import ManipulationAgent
+    from agents.vision.agent import VisionAgent
     from agents.registry import AgentRegistry
     from app.controller import MainController
     from logging_system.structured_logger import StructuredLogger

@@ -105,6 +105,235 @@ test('actual IDE structural preview clearly says owner operations were not execu
  assert.match(markup,/owner (?:functions|operations) (?:were )?not executed/i);
 });
 
+test('module request fingerprint ignores a hidden stale editor while Package Manager is active',()=>{
+ const tabPayload={module:{id:'knowledge',owner_plan:{settings:{decision_max_steps:6}}}};
+ const staleEditor={module:{id:'knowledge',owner_plan:{settings:{decision_max_steps:4}}}};
+ const tab={id:'module:knowledge',kind:'module',moduleId:'knowledge',modulePayload:tabPayload,graph:{id:'module:knowledge'}};
+ const context={MODULE_TAB_PREFIX:'module:',graphTabs:[tab,{id:'packages',kind:'packages'}],modulePayloadCache:new Map([['knowledge',tabPayload]]),
+   activeModuleId:'knowledge',activeGraphTabId:'packages',modulePayloadFingerprint:JSON.stringify,
+   parseModuleEditor:()=>staleEditor,parseGraphEditor:()=>({id:'stale-editor-graph'})};
+ const fingerprint=runtimeFunction('moduleRequestFingerprint',context)('knowledge',tab);
+ const [payloadFingerprint,graphFingerprint]=JSON.parse(fingerprint);
+ assert.equal(payloadFingerprint,JSON.stringify(tabPayload));
+ assert.deepEqual(graphFingerprint,{id:'module:knowledge'});
+});
+
+test('module request fingerprint uses cache when Package Manager is active without an owner tab',()=>{
+ const cached={module:{id:'knowledge',owner_plan:{settings:{decision_max_steps:6}}}};
+ const staleEditor={module:{id:'knowledge',owner_plan:{settings:{decision_max_steps:4}}}};
+ const context={MODULE_TAB_PREFIX:'module:',graphTabs:[{id:'packages',kind:'packages'}],
+   modulePayloadCache:new Map([['knowledge',cached]]),activeModuleId:'knowledge',activeGraphTabId:'packages',
+   modulePayloadFingerprint:JSON.stringify,parseModuleEditor:()=>staleEditor,parseGraphEditor:()=>({})};
+ const fingerprint=runtimeFunction('moduleRequestFingerprint',context)('knowledge',null);
+ const [payloadFingerprint,graphFingerprint]=JSON.parse(fingerprint);
+ assert.equal(payloadFingerprint,JSON.stringify(cached));
+ assert.equal(graphFingerprint,null);
+});
+
+test('module request fingerprint keeps the editor path outside auxiliary views without an owner tab',()=>{
+ const cached={module:{id:'knowledge',owner_plan:{settings:{decision_max_steps:6}}}};
+ const editor={module:{id:'knowledge',owner_plan:{settings:{decision_max_steps:7}}}};
+ const context={MODULE_TAB_PREFIX:'module:',graphTabs:[{id:'main',kind:'main'}],
+   modulePayloadCache:new Map([['knowledge',cached]]),activeModuleId:'knowledge',activeGraphTabId:'main',
+   modulePayloadFingerprint:JSON.stringify,parseModuleEditor:()=>editor,parseGraphEditor:()=>({})};
+ const fingerprint=runtimeFunction('moduleRequestFingerprint',context)('knowledge',null);
+ assert.equal(JSON.parse(fingerprint)[0],JSON.stringify(editor));
+});
+
+test('Package Manager owner controls validate drafts and explicitly apply only the selected owner module',async()=>{
+ const packageHelpers=require('../../web/static/experimental_packages.js');
+ const status={className:'',textContent:''};
+ const requests=[];
+ const knowledge={module:{id:'knowledge',handler:'agent.knowledge_agent',notes:'knowledge kept'}};
+ const guardian={module:{id:'guardian',handler:'agent.guardian_agent',notes:'guardian kept'}};
+ const context={
+   AX4LABExperimentalPackages:packageHelpers,modulePayloadCache:new Map([
+     ['knowledge',structuredClone(knowledge)],['guardian',structuredClone(guardian)],
+   ]),graphTabs:[],MODULE_TAB_PREFIX:'module:',moduleRequestTokens:new Map(),moduleOpenToken:null,activeModuleId:'',activeGraphTabId:'main',
+   experimentalPackageDraft:null,
+   packageCompositionOutput:{querySelector:()=>status},cloneConfig:structuredClone,
+   modulePayloadFingerprint:JSON.stringify,markModulePreflightDirty:()=>{},renderPackageComposition:()=>{},log:()=>{},
+   requestJson:async(url,options)=>{requests.push({url,options});return url.endsWith('/validate')
+     ?{ok:true,errors:[]}:{ok:true,errors:[],activated:true,version:{version_id:'plan-version'}};},
+ };
+ for(const name of ['moduleRequestFingerprint','captureModuleRequest','moduleRequestDraftState','ownerPlanRequestDraftState','ownerPlanModulePayload','storeOwnerPlanDraft','setOwnerPlanControlStatus','updateOwnerPlanDraftFromControls','validateOwnerPlanControl','applyOwnerPlanControl'])runtimeFunction(name,context);
+ context.ownerPlanControlValues=()=>({mode:'configured',id:'knowledge_reference',version:'1.0.0',contractVersion:'1.0.0',settingsText:'{"corpora":["markdown"]}'});
+
+ await context.validateOwnerPlanControl('knowledge');
+ assert.equal(requests[0].url,'/api/modules/knowledge/validate');
+ assert.equal(JSON.parse(requests[0].options.body).activate,false);
+ assert.deepEqual(context.modulePayloadCache.get('knowledge').module.owner_plan.settings,{corpora:['markdown']});
+ assert.equal(context.modulePayloadCache.get('guardian').module.owner_plan,undefined);
+ assert.match(status.textContent,/Draft valid/);
+
+ await context.applyOwnerPlanControl('knowledge');
+ assert.equal(requests[1].url,'/api/modules/knowledge');
+ assert.equal(JSON.parse(requests[1].options.body).activate,true);
+ assert.match(status.textContent,/Applied/);
+
+ context.ownerPlanControlValues=()=>({mode:'configured',id:'knowledge_reference',version:'1.0.0',contractVersion:'1.0.0',settingsText:'[]'});
+ const rejected=await context.validateOwnerPlanControl('knowledge');
+ assert.equal(rejected.ok,false);
+ assert.equal(requests.length,2);
+ assert.match(status.textContent,/settings.*object/i);
+
+ context.ownerPlanControlValues=()=>({mode:'default',id:'knowledge_reference',version:'1.0.0',contractVersion:'1.0.0',settingsText:'{}'});
+ await context.applyOwnerPlanControl('knowledge');
+ assert.equal(JSON.parse(requests[2].options.body).module.module.owner_plan,undefined);
+ assert.equal(context.modulePayloadCache.get('guardian').module.notes,'guardian kept');
+});
+
+function ownerPlanRequestHarness({withTab=true}={}) {
+ const packageHelpers=require('../../web/static/experimental_packages.js');
+ const payload=steps=>({module:{id:'knowledge',handler:'agent.knowledge_agent',owner_plan:{
+   schema:'ax4lab.owner_plan.v1',id:'knowledge_reference',owner:'knowledge',version:'1.0.0',contract_version:'1.0.0',
+   settings:{corpora:['markdown'],decision_max_steps:steps},
+ }}});
+ const graphFor=value=>({id:'module:knowledge',steps:value.module.owner_plan.settings.decision_max_steps});
+ const initial=payload(5);
+ const tab={id:'module:knowledge',kind:'module',moduleId:'knowledge',modulePayload:payload(6),graph:graphFor(payload(6)),
+   baselineModulePayload:structuredClone(initial),baselineGraph:graphFor(initial),dirty:true};
+ const status={className:'runtime-owner-plan-status warn',textContent:'Draft changed: Unsaved.'};
+ const pending=[];
+ const c={
+   AX4LABExperimentalPackages:packageHelpers,MODULE_TAB_PREFIX:'module:',moduleRequestTokens:new Map(),moduleOpenToken:null,
+   modulePayloadCache:new Map([['knowledge',structuredClone(tab.modulePayload)]]),
+   graphTabs:[...(withTab?[tab]:[]),{id:'packages',kind:'packages'}],
+   activeModuleId:'knowledge',activeGraphTabId:'packages',moduleJson:{value:JSON.stringify(payload(4))},graphJson:{value:'{}'},
+   experimentalPackageDraft:null,packageCompositionOutput:{querySelector:()=>status},cloneConfig:structuredClone,
+   modulePayloadFingerprint:JSON.stringify,modulePayloadToGraph:graphFor,
+   parseModuleEditor:()=>JSON.parse(c.moduleJson.value),parseGraphEditor:()=>JSON.parse(c.graphJson.value),
+   currentGraphTabKind:()=> 'packages',
+   markModulePreflightDirty:()=>{},renderPackageComposition:()=>{},renderGraphTabs:()=>{},log:()=>{},
+   moduleEvidenceRecord:()=>({}),rememberExecutionContract:()=>{},setModuleJson:()=>{},updateModuleSummary:()=>{},
+   renderModuleGraph:()=>{},renderModuleTabs:()=>{},renderGraph:()=>{},moduleSelect:null,
+   requestJson:(url,options)=>new Promise(resolve=>pending.push({url,options,resolve})),
+ };
+ for(const name of ['moduleRequestFingerprint','captureModuleRequest','moduleRequestOwnsView','moduleRequestDraftState','ownerPlanRequestDraftState',
+   'ownerPlanModulePayload','storeOwnerPlanDraft','setOwnerPlanControlStatus','updateOwnerPlanDraftFromControls',
+   'validateOwnerPlanControl','applyOwnerPlanControl']) {
+   if(source.includes(`function ${name}(`))runtimeFunction(name,c);
+ }
+ let steps=6,settingsText=JSON.stringify({corpora:['markdown'],decision_max_steps:steps});
+ c.ownerPlanControlValues=()=>({mode:'configured',id:'knowledge_reference',version:'1.0.0',contractVersion:'1.0.0',
+   settingsText});
+ const edit=value=>{steps=value;settingsText=JSON.stringify({corpora:['markdown'],decision_max_steps:steps});c.updateOwnerPlanDraftFromControls('knowledge');};
+ const editRaw=value=>{settingsText=value;c.updateOwnerPlanDraftFromControls('knowledge');};
+ const success={ok:true,errors:[],activated:true,version:{version_id:'owner-plan-version'}};
+ return {c,tab,status,pending,payload,graphFor,edit,editRaw,success};
+}
+
+test('owner plan Apply acknowledges the sent snapshot while preserving edits made during PUT',async()=>{
+ const {c,tab,status,pending,edit,success}=ownerPlanRequestHarness();
+ const applying=c.applyOwnerPlanControl('knowledge');
+ edit(7);
+ assert.equal(JSON.parse(pending[0].options.body).module.module.owner_plan.settings.decision_max_steps,6);
+
+ pending[0].resolve(success);await applying;
+
+ assert.equal(tab.modulePayload.module.owner_plan.settings.decision_max_steps,7);
+ assert.equal(c.modulePayloadCache.get('knowledge').module.owner_plan.settings.decision_max_steps,7);
+ assert.equal(tab.baselineModulePayload.module.owner_plan.settings.decision_max_steps,6);
+ assert.equal(tab.baselineGraph.steps,6);
+ assert.equal(tab.graph.steps,7);
+ assert.equal(tab.dirty,true);
+ assert.match(status.textContent,/Draft changed/);
+});
+
+test('owner plan Validate cannot mark a newer unsent draft valid',async()=>{
+ const {c,tab,status,pending,edit}=ownerPlanRequestHarness();
+ const validating=c.validateOwnerPlanControl('knowledge');
+ edit(7);
+ pending[0].resolve({ok:true,errors:[]});await validating;
+
+ assert.equal(tab.modulePayload.module.owner_plan.settings.decision_max_steps,7);
+ assert.equal(tab.dirty,true);
+ assert.match(status.textContent,/Draft changed/);
+ assert.doesNotMatch(status.textContent,/Draft valid/);
+});
+
+test('only the latest overlapping owner plan Apply may update acknowledgement state',async()=>{
+ const {c,tab,status,pending,edit,success}=ownerPlanRequestHarness();
+ const first=c.applyOwnerPlanControl('knowledge');
+ edit(7);
+ const second=c.applyOwnerPlanControl('knowledge');
+
+ pending[1].resolve(success);await second;
+ pending[0].resolve(success);await first;
+
+ assert.equal(tab.modulePayload.module.owner_plan.settings.decision_max_steps,7);
+ assert.equal(tab.baselineModulePayload.module.owner_plan.settings.decision_max_steps,7);
+ assert.equal(tab.baselineGraph.steps,7);
+ assert.equal(tab.dirty,false);
+ assert.match(status.textContent,/Applied/);
+});
+
+test('owner plan response cannot mutate a closed and reopened module tab',async()=>{
+ const {c,tab,status,pending,payload,graphFor,success}=ownerPlanRequestHarness();
+ const applying=c.applyOwnerPlanControl('knowledge');
+ const reopenedPayload=payload(7);
+ const reopened={...tab,modulePayload:reopenedPayload,graph:graphFor(reopenedPayload),
+   baselineModulePayload:payload(5),baselineGraph:graphFor(payload(5)),dirty:true};
+ c.graphTabs[0]=reopened;
+ status.textContent='Reopened draft: Unsaved.';
+
+ pending[0].resolve(success);await applying;
+
+ assert.equal(reopened.modulePayload.module.owner_plan.settings.decision_max_steps,7);
+ assert.equal(reopened.baselineModulePayload.module.owner_plan.settings.decision_max_steps,5);
+ assert.equal(reopened.baselineGraph.steps,5);
+ assert.equal(reopened.dirty,true);
+ assert.match(status.textContent,/Reopened draft/);
+});
+
+for(const operation of ['Apply','Validate'])test(`owner plan ${operation} with no owner tab preserves a newer cache draft`,async()=>{
+ const {c,status,pending,edit,success}=ownerPlanRequestHarness({withTab:false});
+ const request=operation==='Apply'?c.applyOwnerPlanControl('knowledge'):c.validateOwnerPlanControl('knowledge');
+ edit(7);
+ pending[0].resolve(operation==='Apply'?success:{ok:true,errors:[]});await request;
+
+ assert.equal(c.modulePayloadCache.get('knowledge').module.owner_plan.settings.decision_max_steps,7);
+ assert.match(status.textContent,/Draft changed/);
+ assert.doesNotMatch(status.textContent,/Applied|Draft valid/);
+});
+
+for(const operation of ['Apply','Validate'])test(`owner plan ${operation} response preserves newer invalid settings text`,async()=>{
+ const {c,tab,status,pending,editRaw,success}=ownerPlanRequestHarness();
+ const request=operation==='Apply'?c.applyOwnerPlanControl('knowledge'):c.validateOwnerPlanControl('knowledge');
+ editRaw('{bad');
+ assert.match(status.textContent,/Draft invalid/);
+ pending[0].resolve(operation==='Apply'?success:{ok:true,errors:[]});await request;
+
+ assert.equal(tab.baselineModulePayload.module.owner_plan.settings.decision_max_steps,operation==='Apply'?6:5);
+ assert.equal(tab.baselineGraph.steps,operation==='Apply'?6:5);
+ assert.equal(tab.dirty,true);
+ assert.match(status.textContent,/Draft invalid/);
+ assert.doesNotMatch(status.textContent,/Applied|Draft valid/);
+});
+
+test('readiness applies a local catalog only to its matching module graph and never to the outer graph',()=>{
+ const catalog={schema:'ax4lab.execution_catalog.v1',module_id:'knowledge',operations:[{handler:'knowledge.task'}]};
+ const context={
+   activeGraph:null,latestStateSnapshot:{state:{}},activeModuleId:'knowledge',availableHandlers:['global.handler'],availableModules:[{id:'knowledge'}],
+   moduleExecutionContracts:new Map([['knowledge',{catalog}]]),runModeSelect:{value:'test'},activationEvidence:{validation:{ok:true},dry_run:{ok:true},compile:{ok:true},dirty:false},
+   moduleCatalogById:()=>new Map([['knowledge',{id:'knowledge'}]]),logicalTransitionEdges:()=>[],nodeMapByStageOrId:nodes=>new Map(nodes.flatMap(node=>[[node.id,node],[node.stage,node]].filter(([key])=>key))),
+   nodeStage:node=>node.stage||node.id,normalizeModuleIdRef:value=>String(value||'').replace(/^modules\//,'').trim(),handlerMetadataStatus:()=>({kind:'ok'}),
+   livePreflightStatus:draft=>({moduleTab:draft?.metadata?.ide_tab_kind==='module',draftClean:true,gateOk:true,liveMode:false,confirmed:false}),
+   moduleSavePreflightStatus:()=>({ok:true,validationOk:true,dryRunOk:true}),modulePayloadForGraphDraft:()=>({}),
+ };
+ const readiness=runtimeFunction('runtimeReadinessStatus',context);
+ const node=handler=>({id:'task',stage:'knowledge',kind:'agent',handler});
+ const moduleGraph={metadata:{ide_tab_kind:'module',module_id:'knowledge'},entry_node:'task',finish_nodes:['task'],nodes:[node('knowledge.task')],edges:[]};
+ const mismatchedGraph={...moduleGraph,metadata:{...moduleGraph.metadata,module_id:'guardian',execution_catalog:catalog}};
+ const outerGraph={metadata:{},entry_node:'task',finish_nodes:['task'],nodes:[node('knowledge.task')],edges:[]};
+ const unknownGraph={...moduleGraph,nodes:[node('knowledge.unknown')]};
+
+ assert.deepEqual(readiness(moduleGraph).missingHandlers,[]);
+ assert.deepEqual(readiness(mismatchedGraph).missingHandlers.map(item=>item.handler),['knowledge.task']);
+ assert.deepEqual(readiness(outerGraph).missingHandlers.map(item=>item.handler),['knowledge.task']);
+ assert.deepEqual(readiness(unknownGraph).missingHandlers.map(item=>item.handler),['knowledge.unknown']);
+});
+
 test('installed Equipment opens its catalog-backed execution graph and keeps Skill Flow as a side workspace',async()=>{
  const normalized={module:{id:'equipment',label:'Lab Equipment',execution_graph:{entry:'task',nodes:[{id:'task'}],edges:[],terminals:['task']}}};
  const projected={id:'module:equipment',metadata:{ide_tab_kind:'module',module_id:'equipment',execution_graph_revision:'rev'},nodes:[{id:'task'}]};
@@ -165,7 +394,7 @@ function requestHarness() {
    upsertGraphTab:tab=>{const index=c.graphTabs.findIndex(item=>item.id===tab.id);if(index<0)c.graphTabs.push(tab);else Object.assign(c.graphTabs[index],tab);},
    persistModuleTabPayload:()=>{},refreshOpenModuleGraphTab:()=>{},rememberActiveGraphDraft:()=>{},
  };
- for(const name of ['moduleRequestFingerprint','captureModuleRequest','moduleRequestOwnsView','applyModuleResponse','loadModule','saveModule','openModuleGraphTab']){
+ for(const name of ['moduleRequestFingerprint','captureModuleRequest','moduleRequestOwnsView','moduleRequestDraftState','applyModuleResponse','loadModule','saveModule','openModuleGraphTab']){
    if(source.includes(`function ${name}(`))runtimeFunction(name,c);
  }
  const edit=(tab,label)=>{tab.dirty=true;tab.modulePayload=payload(tab.moduleId,label);c.modulePayloadCache.set(tab.moduleId,structuredClone(tab.modulePayload));if(c.activeGraphTabId===tab.id)c.moduleJson.value=JSON.stringify(tab.modulePayload);};

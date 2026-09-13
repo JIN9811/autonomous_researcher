@@ -20,7 +20,6 @@ Modification guide:
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
@@ -28,7 +27,7 @@ from utils.agent_artifact_archive import archive_agent_run
 from knowledge.failure_memory import FailureRecord
 from orchestrator.runtime_defaults import TEST_MODE_LOOP_CYCLES
 from orchestrator.state import OrchestratorState
-from agents.core.knowledge.context import build_reference_context, mark_reference_delivered, record_reference_use
+from agents.core.guardian.decision import run_guardian_advisory
 
 
 class GuardianAgent(BaseAgent):
@@ -59,8 +58,60 @@ class GuardianAgent(BaseAgent):
         "critical",
     }
 
+    def plan_contract(self) -> dict[str, Any]:
+        from agents.core.guardian.plan import guardian_plan_contract
+
+        return guardian_plan_contract()
+
+    def resolve_plan(self, state: OrchestratorState) -> dict[str, Any]:
+        from agents.core.guardian.plan import resolve_guardian_plan
+
+        return resolve_guardian_plan(state)
+
+    def validate_plan(self, plan: dict[str, Any], state: OrchestratorState) -> dict[str, Any]:
+        from agents.core.guardian.plan import validate_guardian_plan
+
+        return validate_guardian_plan(plan, state)
+
+    def validate_plan_declaration(self, plan: dict[str, Any], state: OrchestratorState) -> dict[str, Any]:
+        from agents.core.guardian.plan import validate_guardian_plan_declaration
+
+        return validate_guardian_plan_declaration(plan, state)
+
+    def execution_catalog(self):
+        from agents.core.guardian.execution import guardian_execution_catalog
+
+        return guardian_execution_catalog(self)
+
+    @classmethod
+    def core_module(cls):
+        from agents.core.guardian.module import CORE_MODULE
+
+        return CORE_MODULE
+
     @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
+        return await self._execute(state, ctx)
+
+    async def _execute(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
+        from agents.core.guardian.execution import default_guardian_execution_graph, execute_guardian_graph
+        from agents.execution_graph import execution_event_emitter, execution_graph_from_context
+
+        execution = await execute_guardian_graph(
+            self,
+            state,
+            ctx,
+            graph=execution_graph_from_context(ctx, "guardian", default_guardian_execution_graph),
+            emit=execution_event_emitter(ctx),
+        )
+        if not isinstance(execution.result, AgentResult):
+            raise RuntimeError("Guardian execution graph completed without AgentResult")
+        return execution.result
+
+    async def _run_task(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
+        from agents.core.guardian.plan import resolve_runtime_guardian_plan
+
+        plan_settings, owner_plan = resolve_runtime_guardian_plan(state, ctx)
         spec_payload = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
         anomaly_detected = bool(state.latest_observations.get("anomaly", False))
         uncertainty = (None if state.latest_analysis.get("uncertainty_status", {}).get("status") == "not_estimated"
@@ -79,37 +130,18 @@ class GuardianAgent(BaseAgent):
         )
         graph_gate_pressure = self._resolve_graph_gate_pressure(state)
 
-        timeout_s = 45.0 if state.mode.value == "test" else None
-        reference = build_reference_context(ctx, consumer="guardian_agent", query=state.active_goal or "Guardian policy evidence",
-            run_id=state.run_id, loop_id=str(state.loop_count))
-        delivery = reference["delivery"]
-        try:
-            delivery = mark_reference_delivered(ctx, reference)
-            reasoning = await ctx.complete(
-                "guardian_reasoning",
-                (
-                    "Evaluate continue/recover/retry/safe-stop policy.\n"
-                    f"stage={state.stage.value}\n"
-                    f"loop={state.loop_count}\n"
-                    f"anomaly_detected={anomaly_detected}\n"
-                    f"uncertainty={uncertainty}\n"
-                    f"retry_pressure={retry_pressure}\n"
-                    f"safe_stop_requested={state.safe_stop_requested}\n"
-                    f"design_validation={design_validation}\n"
-                    f"health_validation={health_validation}\n"
-                    f"graph_gate_pressure={graph_gate_pressure}\n"
-                    f"consistency={consistency}\n"
-                    f"reference_only={json.dumps(reference['pack'], ensure_ascii=False)}\n"
-                ),
-                timeout_s=timeout_s,
-            )
-            policy_note = reasoning.text[:260]
-            delivery = record_reference_use(ctx, reference, policy_note)
-        except Exception as exc:
-            if state.mode.value == "test":
-                policy_note = f"Guardian degraded in test mode: {exc.__class__.__name__}"
-            else:
-                raise
+        policy_note, delivery = await run_guardian_advisory(
+            state,
+            ctx,
+            anomaly_detected=anomaly_detected,
+            uncertainty=uncertainty,
+            retry_pressure=retry_pressure,
+            design_validation=design_validation,
+            health_validation=health_validation,
+            graph_gate_pressure=graph_gate_pressure,
+            consistency=consistency,
+            advisory_evidence_context=plan_settings.get("advisory_evidence_context"),
+        )
 
         decision = "continue"
         action = "continue"
@@ -200,6 +232,7 @@ class GuardianAgent(BaseAgent):
                     "graph_gate_pressure": graph_gate_pressure,
                     "consistency": consistency,
                     "knowledge_delivery": delivery,
+                    **({"owner_plan": owner_plan} if owner_plan is not None else {}),
                 }
             },
             next_hint=decision,

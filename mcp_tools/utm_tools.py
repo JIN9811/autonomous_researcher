@@ -16,7 +16,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: protocol argument fields and test-mode deterministic artifact generation
 - Risky places to edit: tool names consumed by equipment agent
-- Related files: agents/equipment_agent.py, device_bridges/utm_macro_bridge.py
+- Related files: agents/equipment/agent.py, device_bridges/utm_macro_bridge.py
 """
 
 from __future__ import annotations

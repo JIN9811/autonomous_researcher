@@ -65,12 +65,15 @@ evidence:
       agent results and events; cross-check raw CSV provenance, quality,
       placement/clearance, BO handoff, and next Design parameters; verify
       local artifact SHA-256 digests with the read-only protocol in the report.
+      Historical evidence retains the flat import paths used at execution time;
+      the current source inputs below resolve the same implementations at their
+      canonical owner paths.
     inputs:
       - graphs/configs/atr_closed_loop.yaml
-      - agents/equipment_agent.py
-      - agents/analysis_agent.py
-      - agents/bo_agent.py
-      - agents/design_agent.py
+      - agents/equipment/agent.py
+      - agents/analysis/agent.py
+      - agents/bo/agent.py
+      - agents/design/agent.py
     outputs:
       - path: docs/paper/evidence/2026-09-07-latest-cycle-demonstration.md
         sha256: 0823fcef423f1bd2d0cb239411261ec26099b41f2c4a538f45b0824639c5a9a1
@@ -91,13 +94,15 @@ evidence:
       Observe the operator-started run run-20260906T154601Z-95cb07 through
       read-only planning, events, and equipment-flow endpoints; inspect the
       loop-scoped archived agent results and verify their SHA-256 digests
-      using the non-actuating protocol in the evidence report.
+      using the non-actuating protocol in the evidence report. Historical
+      evidence retains the flat import paths used at execution time; the current
+      source inputs below resolve the same implementations at canonical paths.
     inputs:
       - graphs/configs/atr_closed_loop.yaml
-      - agents/equipment_agent.py
-      - agents/analysis_agent.py
-      - agents/bo_agent.py
-      - agents/design_agent.py
+      - agents/equipment/agent.py
+      - agents/analysis/agent.py
+      - agents/bo/agent.py
+      - agents/design/agent.py
     outputs:
       - path: docs/paper/evidence/2026-09-07-supervised-closed-loop.md
         sha256: 86d93656e194ee6aa1d99861d759ccfac1003402f6be055aa6757d9554c3ab97

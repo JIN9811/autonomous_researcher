@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from agents.design_agent import DesignAgent
+from agents.design.agent import DesignAgent
 from agents.registry import AgentRegistry
 
 

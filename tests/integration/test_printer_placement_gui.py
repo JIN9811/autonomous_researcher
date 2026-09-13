@@ -74,7 +74,7 @@ def test_controller_defaults_keep_placement_for_design_handoff(monkeypatch):
 
 
 async def test_design_preserves_operator_placement_across_bo_redesign():
-    from agents.design_agent import DesignAgent
+    from agents.design.agent import DesignAgent
     from orchestrator.state import Mode, OrchestratorState, Stage
     placement = {"mode": "custom", "center_x_mm": 110, "center_y_mm": 145}
     state = OrchestratorState(run_id="placement-fixture", experiment_id="fixture", mode=Mode.TEST,

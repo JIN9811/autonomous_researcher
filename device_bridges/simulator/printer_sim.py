@@ -16,7 +16,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: simulated status values and artifact naming
 - Risky places to edit: response keys consumed by SpecimenMakingAgent
-- Related files: mcp_tools/printer_tools.py, agents/specimen_agent.py
+- Related files: mcp_tools/printer_tools.py, agents/specimen/agent.py
 """
 
 from __future__ import annotations

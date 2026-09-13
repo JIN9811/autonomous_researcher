@@ -22,6 +22,7 @@ related_docs:
   - docs/standards/paper_documentation_standard.md
   - docs/runtime/current_code_snapshot.md
   - docs/runtime/three_level_control_model.md
+  - docs/modularity.md
   - CONTRIBUTING.md
   - SECURITY.md
 supersedes: []
@@ -71,6 +72,7 @@ supersedes: []
 |:---:|:---:|
 | **[논문 개요](docs/paper/README.md)** | 연구 배경, 기여, 논문 구성과 읽는 순서. |
 | **[시스템 아키텍처](docs/paper/02_system_architecture.md)** | 오케스트레이션, 에이전트별 책임, 실행 인터페이스. |
+| **[모듈화](docs/modularity.md)** | 코어·전문 owner, Package, Device Bridge, 설정 수명주기. |
 | **[에이전트 상세 문서](docs/agents/README.md)** | 각 에이전트의 역할, LLM 판단, 도구, 검증 현황. |
 | **[Device Bridges](docs/device_bridges/README.md)** | 로봇, 실험 장비, 해석 도구의 연동 규약. |
 | **[Runtime IDE](docs/runtime/runtime_ide.md)** | 실행 계획 편집, 실행 제어, 런 상태 확인. |
