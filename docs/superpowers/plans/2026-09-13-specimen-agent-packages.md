@@ -81,7 +81,7 @@ behavior; package import/export remains inactive and local-only.
 
 - [x] Test pure package UI parsing/projection and stale/failed import preservation before implementation.
 - [x] Keep Export/Import Experimental Package controls and membership in a separate Package Manager tab, preserving detached draft semantics.
-- [x] Open Device Bridges as a node-based structure tab with an Inspector. Show Agent Package ownership, shared bridge packages and internal providers. Refresh from the same catalog; preserve Dry-run Trace and graph/module drafts.
+- [x] Open Device Bridges using the existing IDE graph renderer: package → bridge contracts on the plane, then a separate drill-down graph for one bridge's internals. Reuse canvas background, coordinate system, ports, labels, legend and Inspector; no custom renderer. Resolve legacy bridge aliases from installed declarations, preserve other runtime bridges and Main/module drafts, and keep Package Manager separate.
 - [x] Verify bridge click/open/back behavior, shared bridge membership, package addition/removal, empty states, and draft-versus-installed labels in unit/browser checks without any device request.
 - [x] Validate actual served static files and API shape in guarded intercepted browser at desktop/narrow sizes; exercise Specimen CODE inspection, outcome label attachment, draft import/export and dirty-state preservation.
 - [x] Update current references, index/matrix and approved package spec; preserve canonical files and old physical-proof scope. Generate the Specimen document SVG using the same source structure with document theme and verify parity.
@@ -157,6 +157,27 @@ Dry-run Trace. After the user's subsequent restart approval, the existing server
 was restarted with its launch command and environment preserved. It returned to
 idle; the catalog API and 1920×1080 IDE then showed the canonical fleet manager
 and internal provider paths. No graph run or device action was started.
+
+#### Two-level bridge canvas correction
+
+The bridge view now reuses the standard IDE graph renderer and Inspector rather
+than a separate SVG implementation. The plane contains package → bridge links;
+Printer Fleet internals contain its manager and Bambu/Prusa providers. Declared
+runtime aliases prevent duplicate printer nodes. Other runtime bridge contracts
+remain visible, without invented package owners. Contract projections reject
+route edits, catalog drops and graph execution. Global operator stop controls
+remain available. Closing an agent tab into Package Manager also activates the
+correct workspace instead of leaving the closed canvas visible.
+
+- IDE/package/API/document regression: **87 passed**, 10 existing warnings.
+- Package projection and two-level topology: **12 Node tests passed**.
+- Specimen three-mode prefix and module/API regression: **19 passed**,
+  75 existing warnings, **39.05 seconds**; all device boundaries intercepted.
+- Browser: `/ide`, **1920×1080**; plane/internal navigation, provider isolation,
+  Package Manager separation, standard canvas background, port alignment and
+  Inspector checked. No app console warnings/errors observed.
+- This correction does not add physical or new full-LLM-cycle evidence; the
+  earlier registered-model cycle above remains a separate verification record.
 
 ### Approved follow-up: Guardian/Knowledge BO admission repair
 

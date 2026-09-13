@@ -31,6 +31,7 @@ def test_catalog_provider_components_and_requirements_resolve_inside_fleet():
     descriptor = MODULE.describe()
     root = Path(__file__).resolve().parents[2]
     assert descriptor["manager"] == "device_bridges.printer_fleet.bridge.PrinterDeviceBridgeManager"
+    assert descriptor["runtime_bridge_ids"] == ["prusa_bridge"]
     assert {p["id"] for p in descriptor["providers"]} == {"bambu", "prusa"}
     for provider in descriptor["providers"]:
         assert provider["component"].startswith("device_bridges.printer_fleet.providers.")

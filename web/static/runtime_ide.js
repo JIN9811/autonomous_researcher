@@ -197,7 +197,6 @@ let experimentalPackageBindings = [];
 let experimentalPackageExportToken = 0;
 let experimentalPackageImportToken = 0;
 let packageCompositionNotice = null;
-let selectedBridgeDetailId = "";
 const outerConditionPresets = transitionConditionPreset?.innerHTML || '';
 
 function rememberExecutionContract(moduleId, result) {
@@ -811,9 +810,10 @@ function graphLegendTabKey() {
 }
 
 function edgeLegendMarkup(edges = [], moduleGraph = false) {
-  const entries = edgeLegendEntries(edges);
+  const entries = edgeLegendEntries(edges).map(entry => activeGraph?.metadata?.read_only
+    ? { ...entry, label: "Contract link", detail: "uses · contains · exposes; not an execution route" } : entry);
   if (!entries.length) return "";
-  const scope = moduleGraph ? "module internal" : "current graph";
+  const scope = activeGraph?.metadata?.read_only ? "bridge contracts" : moduleGraph ? "module internal" : "current graph";
   return `
     <aside class="runtime-ide-edge-legend" data-edge-legend="1" data-legend-scope="${escapeHtml(scope)}" aria-label="Visible edge legend">
       <div class="runtime-ide-edge-legend-head" data-edge-legend-drag="1" title="Drag legend">
@@ -1096,7 +1096,7 @@ function updateCanvasViewHint(bounds) {
   const tab = activeGraphTab();
   const context = tab?.kind === "module"
     ? `module: ${tab.moduleId || activeGraph?.metadata?.module_id || "internal"}`
-    : "main system";
+    : tab?.kind === "bridges" ? (tab.bridgeId ? `bridge: ${tab.bridgeId}` : "device bridge plane") : "main system";
   const action = needsFit ? (canImproveWithFit ? "use Fit" : "scroll/map") : "ready";
   hint.textContent = `${context} · view: ${percent}% · zoom: ${zoomPercent}%${needsFit ? ` · ${action}` : ""}`;
   hint.className = `runtime-canvas-view-hint${needsFit ? " warn" : " ok"}`;
@@ -1244,6 +1244,7 @@ function uniqueName(base, existing) {
 }
 
 function addCatalogModuleAsGraphNode(module, event) {
+  if (activeGraph?.metadata?.read_only) return;
   const graph = parseGraphEditor();
   normalizeNodePositions(graph);
   graph.nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
@@ -1319,6 +1320,7 @@ function addCatalogModuleAsInternalStep(module, event) {
 }
 
 function addCatalogModuleToCanvas(moduleId, event) {
+  if (activeGraph?.metadata?.read_only) return;
   const module = availableModules.find((item) => item.id === moduleId);
   if (!module) {
     log(`Module catalog item not found: ${moduleId}`, "error");
@@ -1337,6 +1339,7 @@ function handleCanvasCatalogDrop(event) {
 }
 
 function removeGraphNodeFromDraft(nodeId) {
+  if (activeGraph?.metadata?.read_only) return false;
   const graph = parseGraphEditor();
   normalizeNodePositions(graph);
   const node = (Array.isArray(graph.nodes) ? graph.nodes : []).find((item) => item.id === nodeId);
@@ -2315,6 +2318,7 @@ function bridgeActionFieldValue(field, fallback = "") {
 }
 
 async function saveBridgeCustomActionDescriptor() {
+  if (activeGraph?.metadata?.read_only) return;
   const root = infraListOutput?.querySelector("[data-bridge-action-editor]");
   const status = root?.querySelector("[data-bridge-action-status]");
   const bridgeId = bridgeActionFieldValue("bridge_id");
@@ -3318,8 +3322,8 @@ function showRuntimeEquipmentFlowWorkspace(show) {
   equipmentFlowWorkspace.setAttribute("aria-hidden", show ? "false" : "true");
 }
 
-function activateGraphTab(tabId) {
-  rememberActiveGraphDraft();
+function activateGraphTab(tabId, options = {}) {
+  if (options.remember !== false) rememberActiveGraphDraft();
   const targetTabId = normalizeGraphTabId(tabId);
   const tab = graphTabs.find((item) => item.id === targetTabId);
   if (!tab) return;
@@ -3332,8 +3336,13 @@ function activateGraphTab(tabId) {
   activeGraphTabId = tab.id;
   if (auxiliary) {
     moduleOpenToken = null;
+    selectedNodeId = "";
+    activeRuntimeEdge = null;
+    edgeConnectDraft = null;
+    edgeConnectSource = "";
+    edgeConnectMode = false;
     showRuntimeEquipmentFlowWorkspace(false);
-    showPackageCompositionWorkspace(true);
+    showPackageCompositionWorkspace(tab.kind === "packages");
     renderGraphTabs();
     if (tab.kind === "bridges") renderDeviceBridges();
     else renderPackageComposition();
@@ -3371,7 +3380,10 @@ function closeGraphTab(tabId) {
   const index = graphTabs.findIndex((item) => item.id === targetTabId);
   graphTabs.splice(index, 1);
   if (activeGraphTabId === targetTabId) {
-    activeGraphTabId = graphTabs[Math.max(0, index - 1)]?.id || MAIN_GRAPH_TAB_ID;
+    const nextId = graphTabs[Math.max(0, index - 1)]?.id || MAIN_GRAPH_TAB_ID;
+    // The closed editor must not be remembered into its replacement tab.
+    activateGraphTab(nextId, { remember: false });
+    return;
   }
   renderGraphTabs();
   const next = activeGraphTab();
@@ -3380,6 +3392,7 @@ function closeGraphTab(tabId) {
 }
 
 function markActiveTabDirty(graph = activeGraph) {
+  if (graph?.metadata?.read_only) return;
   const tab = activeGraphTab();
   if (!tab) return;
   tab.graph = graph;
@@ -3718,6 +3731,10 @@ async function loadRuntimeEquipmentSkillFlow(profileId = "utm_windows_v1") {
 
 function focusModuleForNode(nodeId) {
   const node = findNodeById(nodeId);
+  if (activeGraphTab()?.kind === "bridges") {
+    if (node?.kind === "bridge") openDeviceBridgeInternal(node.metadata.bridge_id, node.label);
+    return;
+  }
   if (node?.kind === "bridge") return openPackageCompositionView("bridges");
   if (!node?.module_id) return;
   const moduleId = String(node.module_id).split("/").pop();
@@ -3798,11 +3815,11 @@ function handleGraphCanvasBlankClick(event) {
 }
 
 function renderGraph(graph) {
-  if (["bridges", "packages"].includes(activeGraphTab()?.kind)) {
-    if (activeGraphTab().kind === "bridges") renderDeviceBridges();
-    else renderPackageComposition();
+  if (activeGraphTab()?.kind === "packages") {
+    renderPackageComposition();
     return;
   }
+  if (activeGraphTab()?.kind === "bridges" && graph?.metadata?.ide_tab_kind !== "bridges") return renderDeviceBridges();
   showPackageCompositionWorkspace(false);
   activeGraph = normalizeNodePositions(graph);
   const tab = activeGraphTab();
@@ -3823,7 +3840,7 @@ function renderGraph(graph) {
   const transitions = activeGraph.transitions || {};
   const bounds = graphViewBounds(activeGraph);
   const controlView = activeGraph.metadata?.control_view;
-  graphCanvas.toggleAttribute('data-control-canvas', Boolean(controlView));
+  graphCanvas.toggleAttribute('data-control-canvas', Boolean(controlView || activeGraph.metadata?.read_only));
   const edges = logicalGraphEdges(activeGraph);
   const moduleGraph = activeGraph.metadata?.ide_tab_kind === "module";
   const executionTrace=isExecutionGraph(activeGraph)?executionTraceProjection(activeGraph):null;
@@ -3846,7 +3863,7 @@ function renderGraph(graph) {
       const simpleDefaultLabel = edge.isDefault && ["", "default", "continue", "always"].includes(String(edge.condition || "").trim());
       const conditionalRouteLabel = edgeRuntimeType(edge) === "logical_transition" && !simpleDefaultLabel;
       const samePairCount=edges.filter(item=>item.sourceStage===edge.sourceStage && item.targetStage===edge.targetStage).length;
-      const showLabel = isExecutionGraph(activeGraph) ? samePairCount===1 || Boolean(activeClass) : (moduleGraph && !controlView) || conditionalRouteLabel || Boolean(activeClass);
+      const showLabel = activeGraph.metadata?.read_only || (isExecutionGraph(activeGraph) ? samePairCount===1 || Boolean(activeClass) : (moduleGraph && !controlView) || conditionalRouteLabel || Boolean(activeClass));
       const maxLabelChars = moduleGraph ? 42 : 28;
       const labelText = label.length > maxLabelChars ? `${label.slice(0, maxLabelChars - 1)}…` : label;
       const labelWidth = isExecutionGraph(activeGraph)
@@ -3944,12 +3961,12 @@ function renderGraph(graph) {
       const readinessIssue = nodeReadinessIssues.get(node.id) || null;
       const readinessClass = readinessIssue ? ` readiness-${readinessIssue.level}` : " readiness-ok";
       const extraRouteCount = Math.max(0, outgoing.length - (next ? 1 : 0));
-      const edge = next
+      const edge = activeGraph.metadata?.read_only ? node.metadata.structure_kind : next
         ? `${stageDisplayLabel(stage)} -> ${stageDisplayLabel(next)}${extraRouteCount > 0 ? ` · +${extraRouteCount}` : ""}`
         : outgoing.length
           ? `${outgoing.length} route candidate${outgoing.length > 1 ? "s" : ""}`
           : node.handler;
-      const routeBadge = outgoing.length > 1 ? `<em class="runtime-ide-node-route-count" title="${escapeHtml(outgoing.length)} outgoing runtime routes">${escapeHtml(outgoing.length)} routes</em>` : "";
+      const routeBadge = outgoing.length > 1 && !activeGraph.metadata?.read_only ? `<em class="runtime-ide-node-route-count" title="${escapeHtml(outgoing.length)} outgoing runtime routes">${escapeHtml(outgoing.length)} routes</em>` : "";
       const readinessBadge = readinessIssue ? `<em class="runtime-node-readiness-badge ${escapeHtml(readinessIssue.level)}" title="${escapeHtml(runtimeReadinessIssueTitle(readinessIssue))}">${escapeHtml(runtimeReadinessIssueLabel(readinessIssue))}</em>` : "";
       const runtimePlane = nodeRuntimePlane(node);
       const nodeKindClass = ` kind-${classToken(node.kind || "runtime")}`;
@@ -3980,7 +3997,7 @@ function renderGraph(graph) {
     .join("");
   graphCanvas.innerHTML = `
     <div class="runtime-ide-canvas-world" style="width:${bounds.width}px;height:${bounds.height}px;transform:scale(${graphZoom});">
-      <svg class="runtime-ide-edge-layer" viewBox="0 0 ${bounds.width} ${bounds.height}" ${controlView?`style="width:${bounds.width}px;height:${bounds.height}px" aria-label="Code-owned internal relationships"`:''} aria-hidden="${controlView?'false':'true'}">
+      <svg class="runtime-ide-edge-layer" viewBox="0 0 ${bounds.width} ${bounds.height}" ${controlView || activeGraph.metadata?.read_only ? `style="width:${bounds.width}px;height:${bounds.height}px" aria-label="Code-owned internal relationships"`:''} aria-hidden="${controlView || activeGraph.metadata?.read_only ? 'false':'true'}">
         <defs>
           <marker id="ide-arrow" markerWidth="14" markerHeight="12" refX="9.8" refY="5" orient="auto" markerUnits="userSpaceOnUse" overflow="visible">
             <path d="M0,0 L10,5 L0,10 L2.4,5 z" fill="context-stroke" stroke="none"></path>
@@ -4244,6 +4261,7 @@ function cancelPortConnection(message = "Connection cancelled. Drag from a port 
 }
 
 function beginPortConnect(nodeId, side = "right", event = null) {
+  if (activeGraph?.metadata?.read_only) return;
   const graph = parseGraphEditor();
   normalizeNodePositions(graph);
   const node = graph.nodes.find((item) => item.id === nodeId);
@@ -4362,6 +4380,7 @@ function finishPortConnect(nodeId, side = "left", options = {}) {
 }
 
 function beginNodeDrag(event, nodeId) {
+  if (activeGraph?.metadata?.read_only) return;
   if (event.button !== 0 || event.target.closest("[data-port-node]")) return;
   const graph = parseGraphEditor();
   normalizeNodePositions(graph);
@@ -4520,6 +4539,7 @@ function renderMiniMap(graph, bounds) {
 }
 
 function handleGraphNodeClick(nodeId) {
+  if (activeGraph?.metadata?.read_only) return selectNode(nodeId);
   canvasAutoSelectNode = true;
   const graph = parseGraphEditor();
   normalizeNodePositions(graph);
@@ -4571,6 +4591,7 @@ function toggleEdgeConnectMode() {
 }
 
 function deleteSelectedEdge() {
+  if (activeGraph?.metadata?.read_only) return;
   const graph = parseGraphEditor();
   const source = activeRuntimeEdge?.source || transitionSource.value;
   const target = activeRuntimeEdge?.target || transitionTarget.value || graph.transitions?.[source];
@@ -5111,6 +5132,7 @@ function renderExecutionInspector(node) {
 function renderNodeInspector() {
   const node = findNodeById(selectedNodeId);
   selectedNodeBadge.textContent = node?.id || "none";
+  if (activeGraph?.metadata?.ide_tab_kind === "bridges") return renderBridgeNodeInspector(node);
   if (isExecutionGraph()) {
     renderExecutionInspector(node);
     return;
@@ -5288,8 +5310,8 @@ function focusGraphNodeInCanvas(nodeId) {
 }
 
 function selectNode(nodeId, options = {}) {
-  if (["bridges", "packages"].includes(activeGraphTab()?.kind)) closePackageCompositionView();
-  if (findNodeById(nodeId)?.kind === "bridge") return openPackageCompositionView("bridges");
+  if (activeGraphTab()?.kind === "packages") closePackageCompositionView();
+  if (activeGraphTab()?.kind !== "bridges" && findNodeById(nodeId)?.kind === "bridge") return openPackageCompositionView("bridges");
   canvasAutoSelectNode = true;
   selectedNodeId = nodeId;
   renderGraph(parseGraphEditor());
@@ -5467,6 +5489,7 @@ function moduleLifecyclePreviewMarkup(impact) {
 }
 
 async function validateGraph() {
+  if (activeGraph?.metadata?.read_only) return;
   const graph = parseGraphEditor();
   if (graph.metadata?.ide_tab_kind === "module") {
     applyModuleGraphDraftToEditor(graph);
@@ -5487,6 +5510,7 @@ async function validateGraph() {
 }
 
 async function compileGraph() {
+  if (activeGraph?.metadata?.read_only) return;
   const graph = parseGraphEditor();
   if (graph.metadata?.ide_tab_kind === "module") {
     applyModuleGraphDraftToEditor(graph);
@@ -5568,6 +5592,7 @@ function replayValidationMarkup(event = null, startStage = "", result = {}) {
 }
 
 async function dryRunGraph(startStage = "idle", targetOutput = dryRunOutput) {
+  if (activeGraph?.metadata?.read_only) return;
   const graph = parseGraphEditor();
   if (graph.metadata?.ide_tab_kind === "module") {
     applyModuleGraphDraftToEditor(graph);
@@ -5655,6 +5680,7 @@ async function loadGraphVersionDraft(versionId) {
 }
 
 async function saveGraph() {
+  if (activeGraph?.metadata?.read_only) return;
   const graph = parseGraphEditor();
   if (graph.metadata?.ide_tab_kind === "module") {
     applyModuleGraphDraftToEditor(graph);
@@ -5800,72 +5826,53 @@ function packageBindingRows(composition) {
 }
 
 function renderDeviceBridges() {
-  const topology = AX4LABExperimentalPackages.projectBridgeTopology(packageCatalogPayload, experimentalPackageRefs);
-  const selected = topology.nodes.find((node) => node.id === selectedBridgeDetailId)
-    || topology.nodes.find((node) => node.kind === "bridge");
-  selectedBridgeDetailId = selected?.id || "";
-  const renderKey = JSON.stringify([topology, selectedBridgeDetailId]);
-  if (packageCompositionOutput.dataset.bridgeStructureKey === renderKey) return;
-  packageCompositionOutput.dataset.bridgeStructureKey = renderKey;
-  const byId = new Map(topology.nodes.map((node) => [node.id, node]));
-  const edges = topology.edges.map((edge) => {
-    const from = byId.get(edge.from), to = byId.get(edge.to);
-    const x1 = from.x + 240, x2 = to.x, middle = (x1 + x2) / 2;
-    return `<path class="bridge-route ${edge.kind}" d="M ${x1} ${from.y} C ${middle} ${from.y}, ${middle} ${to.y}, ${x2} ${to.y}" />`;
-  }).join("");
-  const nodes = topology.nodes.map((node) => {
-    const kindLabel = { package: "AGENT PACKAGE", bridge: "DEVICE BRIDGE PACKAGE", provider: "INTERNAL PROVIDER" }[node.kind];
-    return `<g role="button" tabindex="0" aria-label="Inspect ${escapeHtml(node.label)} ${escapeHtml(kindLabel)}"
-      aria-pressed="${node.id === selectedBridgeDetailId}" data-bridge-detail="${escapeHtml(node.id)}"
-      class="bridge-structure-node ${node.kind} ${node.id === selectedBridgeDetailId ? "selected" : ""}">
-      <title>${escapeHtml(node.label)} · ${escapeHtml(kindLabel)}</title>
-      <rect x="${node.x}" y="${node.y - 34}" width="240" height="68" rx="10" />
-      <text class="bridge-node-kind" x="${node.x + 16}" y="${node.y - 12}">${kindLabel}</text>
-      <text class="bridge-node-label" x="${node.x + 16}" y="${node.y + 12}">${escapeHtml(node.label.length > 25 ? `${node.label.slice(0, 24)}…` : node.label)}</text>
-    </g>`;
-  }).join("");
-  const row = (label, value) => value ? `<div class="bridge-detail-row"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>` : "";
-  const data = selected?.data || {};
-  const parent = topology.nodes.find((node) => node.kind === "bridge" && node.bridgeId === selected?.bridgeId)?.data || {};
-  const workspace = parent.ui?.workspace;
-  const safeWorkspace = typeof workspace === "string" && /^\/[a-zA-Z0-9_/-]*$/.test(workspace) && !workspace.startsWith("//");
-  const detail = selected ? `
-    <div class="bridge-inspector-head"><small>${escapeHtml(selected.kind === "provider" ? "INTERNAL PROVIDER" : selected.kind === "bridge" ? "DEVICE BRIDGE PACKAGE" : "AGENT PACKAGE")}</small><h3>${escapeHtml(selected.label)}</h3></div>
-    <dl>${row("Version", data.version)}${row("Bridge package", selected.bridgeId)}
-    ${row("Agent Package owners", (parent.owners || []).map((owner) => owner.id).join(", "))}
-    ${row("Draft membership", selected.inDraft ? "Referenced by current package draft" : "Installed; not in current package draft")}
-    ${row("Package root", parent.root)}${row("Component", data.component)}
-    ${row("Shared manager", parent.manager)}${row("Requirements", data.requirements || parent.requirements)}
-    ${row("Tools", (parent.tools || []).join(" · "))}${row("Registration", parent.registration)}
-    ${row("API", parent.ui?.api)}${row("Frontend", parent.ui?.assets)}
-    ${row("Storage references", Object.values(parent.storage || {}).join(" · "))}</dl>
-    ${safeWorkspace ? `<a class="btn small" href="${escapeHtml(workspace)}" target="_blank" rel="noopener">Open existing printer workspace ↗</a>` : ""}
-    <p class="bridge-inspector-note">Structure only. Connection setup and device actions stay in the existing workspace.</p>`
-    : `<p>Select a bridge node to inspect its contract.</p>`;
-  packageCompositionOutput.innerHTML = `<section class="runtime-bridge-structure" aria-label="Device Bridge structure">
-    <div class="runtime-package-head"><button type="button" class="btn tiny" data-package-composition-back>Back</button>
-      <div><strong>Device Bridges</strong><small>Agent Package ownership · bridge packages · internal providers</small></div></div>
-    <div class="bridge-structure-layout"><div class="bridge-structure-canvas">
-      <div class="bridge-structure-legend"><span class="package">Agent Package</span><span class="bridge">Device Bridge Package</span><span class="provider">Internal Provider</span><small>Solid: uses · Dashed: contains</small></div>
-      ${!topology.ok ? `<p role="alert">${escapeHtml(topology.errors.join("; "))}</p>` : !nodes ? `<p>No Device Bridge packages are registered.</p>` : `
-      <svg viewBox="0 0 ${topology.width} ${topology.height}" role="group" aria-label="Bridge package relationships">${edges}${nodes}</svg>`}
-      <p class="bridge-inspector-note">Declared package structure, not live device health.</p>
-    </div><aside class="runtime-bridge-inspector" aria-label="Bridge Inspector">${detail}</aside></div>
-  </section>`;
-  packageCompositionOutput.querySelector("[data-package-composition-back]")?.addEventListener("click", closePackageCompositionView);
-  packageCompositionOutput.querySelectorAll("[data-bridge-detail]").forEach((element) => {
-    const select = () => {
-      selectedBridgeDetailId = element.dataset.bridgeDetail;
-      renderDeviceBridges();
-      packageCompositionOutput.querySelectorAll("[data-bridge-detail]").forEach((node) => {
-        if (node.dataset.bridgeDetail === selectedBridgeDetailId) node.focus();
-      });
-    };
-    element.addEventListener("click", select);
-    element.addEventListener("keydown", (event) => {
-      if (["Enter", " "].includes(event.key)) { event.preventDefault(); select(); }
-    });
-  });
+  const tab = activeGraphTab();
+  const runtimeBridges = latestStateSnapshot?.runtime_ide_contract?.device_bridges
+    || graphTabs.find(item => item.id === MAIN_GRAPH_TAB_ID)?.graph?.metadata?.device_bridges || [];
+  const graph = tab?.bridgeId
+    ? AX4LABExperimentalPackages.projectBridgeInternal(packageCatalogPayload, tab.bridgeId, runtimeBridges)
+    : AX4LABExperimentalPackages.projectBridgeTopology(packageCatalogPayload, experimentalPackageRefs, runtimeBridges);
+  tab.baselineGraph = cloneConfig(graph);
+  tab.dirty = false;
+  renderGraph(graph);
+}
+
+function openDeviceBridgeInternal(bridgeId, label) {
+  if (!bridgeId) return;
+  const id = `infra:bridge:${bridgeId}`;
+  upsertGraphTab({ id, kind: "bridges", bridgeId, title: label || bridgeId,
+    subtitle: "Bridge internals", fixed: false, parentTabId: BRIDGE_GRAPH_TAB_ID });
+  activateGraphTab(id);
+}
+
+function renderBridgeNodeInspector(node) {
+  const data = node?.metadata?.contract || {};
+  const kind = node?.metadata?.structure_kind || "";
+  const row = (label, value) => value == null || value === "" ? "" :
+    `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(typeof value === "object" ? compactJson(value) : value)}</dd>`;
+  nodeInspector.innerHTML = `<div class="runtime-node-inspector-grid">
+    <section class="runtime-node-inspector-card wide runtime-node-quick-actions">
+      <button type="button" class="btn tiny" data-bridge-back>Back</button>
+      ${kind === "bridge" ? '<button type="button" class="btn tiny" data-bridge-enter>Open bridge internals</button>' : ""}
+      <span>Contract view · read only</span>
+    </section>
+    <section class="runtime-node-inspector-card wide runtime-contract-card">
+      <h3>${escapeHtml(node?.label || "Device Bridges")}</h3><dl>
+      ${row("Type", kind === "package" ? "Agent Package" : kind === "bridge" ? "Device Bridge" : kind)}
+      ${row("Version", data.version)}${row("Registration", data.registration_status || data.registration)}
+      ${row("Draft membership", kind === "package" ? (data.inDraft ? "Included" : "Not included") : "")}
+      ${row("Owners", data.owners)}${row("Root", data.root)}
+      ${row("Component", data.component)}${row("Manager", data.manager)}
+      ${row("Requirements", data.requirements)}${row("Tools", data.tools)}
+      ${row("UI", data.ui)}${row("Storage", data.storage)}
+      ${row("Bridge contracts", data.bridge_modules)}
+      </dl>
+      <p>${kind === "bridge" ? "Double-click to inspect this bridge. Package membership is edited in Package Manager."
+        : "Declared structure only; no device action is executed."}</p>
+    </section></div>`;
+  nodeInspector.querySelector("[data-bridge-back]")?.addEventListener("click", closePackageCompositionView);
+  nodeInspector.querySelector("[data-bridge-enter]")?.addEventListener("click", () =>
+    openDeviceBridgeInternal(node.metadata.bridge_id, node.label));
 }
 
 function renderPackageComposition() {
@@ -5924,15 +5931,16 @@ function openPackageCompositionView(kind = "packages") {
   const id = bridgeView ? BRIDGE_GRAPH_TAB_ID : PACKAGE_MANAGER_TAB_ID;
   upsertGraphTab({ id, kind: bridgeView ? "bridges" : "packages",
     title: bridgeView ? "Device Bridges" : "Package Manager",
-    subtitle: bridgeView ? "Structure and providers" : "Composition and exchange", fixed: false });
+    subtitle: bridgeView ? "Package → bridge contracts" : "Composition and exchange", fixed: false });
   activateGraphTab(id);
   graphTabsOutput?.scrollIntoView?.({ behavior: "smooth", block: "start" });
 }
 
 function closePackageCompositionView() {
   const tab = activeGraphTab();
-  const returnTabId = graphTabs.some((item) => item.id === tab?.returnTabId && !["bridges", "packages"].includes(item.kind))
-    ? tab.returnTabId : MAIN_GRAPH_TAB_ID;
+  const parentTab = graphTabs.find(item => item.id === tab?.parentTabId);
+  const returnTabId = parentTab?.id || (graphTabs.some((item) => item.id === tab?.returnTabId && !["bridges", "packages"].includes(item.kind))
+    ? tab.returnTabId : MAIN_GRAPH_TAB_ID);
   packageCompositionNotice = null;
   activateGraphTab(returnTabId);
 }
@@ -5940,7 +5948,7 @@ function closePackageCompositionView() {
 function showPackageCompositionWorkspace(show) {
   packageCompositionOutput.hidden = !show;
   document.body.classList.toggle("runtime-package-tab-active", show);
-  document.body.classList.toggle("runtime-bridge-tab-active", show && activeGraphTab()?.kind === "bridges");
+  document.body.classList.toggle("runtime-bridge-tab-active", activeGraphTab()?.kind === "bridges");
   packageCompositionOutput.setAttribute("aria-label", activeGraphTab()?.kind === "bridges" ? "Device Bridges" : "Package Manager");
 }
 
@@ -6260,6 +6268,7 @@ function syncLogicalTransitionEdge(graph, source, target, ports = {}) {
 
 
 function applyTransitionEdit() {
+  if (activeGraph?.metadata?.read_only) return;
   const graph = parseGraphEditor();
   const { source, target, condition, makeDefault } = transitionConditionSpec();
   if (isExecutionGraph(graph)) {
@@ -8077,6 +8086,10 @@ function runtimeReadinessModuleCard(status) {
 
 function renderRuntimeReadinessPanel(snapshot = latestStateSnapshot) {
   if (!runtimeReadinessOutput) return;
+  if (activeGraph?.metadata?.read_only) {
+    runtimeReadinessOutput.textContent = "Read-only bridge contracts. Execution readiness belongs to the orchestration plan; this view does not run devices.";
+    return;
+  }
   const status = runtimeReadinessStatus(activeGraph, snapshot);
   const issues = runtimeReadinessIssueRows(status);
   const headline = status.moduleTab

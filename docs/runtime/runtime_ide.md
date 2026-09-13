@@ -463,8 +463,9 @@ retained module drafts. This is separate from graph-only YAML exchange.
 | Export Package | Validate and download detached JSON with declared dependencies | No save, install or activation |
 | Import Package | Validate JSON, confirm replacement of affected dirty drafts, and load graph/module drafts | Existing explicit save controls remain required |
 | Package Manager | Open draft membership and package composition in a separate internal tab | No install or activation |
-| Device Bridges | Open a node-based Agent Package → Device Bridge Package → internal provider structure and Inspector | No device probes or transport commands |
-| Back | Return to the previous Main System or agent tab | No membership or execution change |
+| Device Bridges | Open Agent Package → Device Bridge contract nodes in the standard graph canvas | No device probes or transport commands |
+| Open bridge internals / double-click bridge | Inspect only that bridge's manager, providers or declared tools | Read-only contract projection |
+| Back | Return from bridge internals to the plane, then to the previous Main System or agent tab | No membership or execution change |
 
 Click **Device Bridge Plane** in the graph or Explorer, or **Infra → Device
 Bridges**, to open the same structure tab. Graph double-click also opens it, even
@@ -482,12 +483,20 @@ remove installed code. Failed or stale imports preserve newer local edits.
 Connection secrets and runtime artifacts are not package contents; see the
 [package contracts and API](../../packages/README.md).
 
-The bridge structure uses solid **uses** edges from Agent Packages and dashed
-**contains** edges to internal providers. Printer Fleet is one bridge package;
-Bambu and Prusa appear beneath it, not as independently registered bridges.
-Select a node to inspect its owner, implementation, requirements, API and storage
-references. The Inspector links to the existing printer workspace for setup;
-membership controls and package exchange are not part of this structure view.
+The plane shows **uses** links from package contracts to actual bridge modules.
+Providers are not plane nodes: open Printer Fleet to see its manager and
+**contains** links to Bambu and Prusa. Declared legacy runtime IDs resolve to the
+same installed bridge; other runtime bridges remain visible without fabricated
+package owners. Their Inspector identifies contracts that are not yet packaged.
+Both levels reuse the existing graph renderer, canvas background, zoom, ports,
+edge labels, legend, Mini Map and Inspector; no parallel SVG renderer is used.
+Select a node to inspect its implementation, requirements, API and storage
+references. Contract graphs have no stage dispatch, cannot edit routes or run
+devices, and never replace the graph used for Experimental Package export.
+Connection setup stays in existing device workspaces; membership and exchange
+stay in Package Manager.
+The global Pause/Resume/Stop controls still target the active run, independent
+of the inspected tab; bridge browsing does not disable operator stop controls.
 
 ### Explicit graph and module activation
 

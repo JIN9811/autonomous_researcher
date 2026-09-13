@@ -8613,33 +8613,12 @@ body.runtime-bridge-tab-active #ide-import-package-btn {
   display: none !important;
 }
 
-.bridge-structure-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; margin-top: 16px; }
-.bridge-structure-canvas { min-width: 0; overflow: auto; padding: 14px; background: #071427; border: 1px solid #20364e; border-radius: 12px; }
-.bridge-structure-canvas svg { display: block; width: 100%; min-width: 680px; min-height: 300px; }
-.bridge-route { fill: none; stroke: #6397af; stroke-width: 2; }
-.bridge-route.contains { stroke: #c0a266; stroke-dasharray: 6 5; }
-.bridge-structure-node { cursor: pointer; outline: none; }
-.bridge-structure-node rect { fill: #0e2138; stroke: #6caac4; stroke-width: 1.5; }
-.bridge-structure-node.bridge rect { fill: #142534; stroke: #d7b56a; }
-.bridge-structure-node.provider rect { fill: #112932; stroke: #58b9ab; }
-.bridge-structure-node.selected rect, .bridge-structure-node:focus rect { stroke: #60e6ff; stroke-width: 3; }
-.bridge-node-kind { fill: #97acc1; font: 10px system-ui, sans-serif; letter-spacing: .5px; }
-.bridge-node-label { fill: #e6f1fb; font: 600 17px system-ui, sans-serif; }
-.bridge-structure-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; color: #a9bfd3; font-size: 11px; }
-.bridge-structure-legend span::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 2px; background: #6caac4; }
-.bridge-structure-legend .bridge::before { background: #d7b56a; }
-.bridge-structure-legend .provider::before { background: #58b9ab; }
-.runtime-bridge-inspector { border-left: 1px solid #284056; padding: 8px 0 8px 18px; min-width: 0; }
-.bridge-inspector-head small { color: #68d3e9; font-size: 10px; letter-spacing: 1px; }
-.bridge-inspector-head h3 { margin: 8px 0 18px; color: #e7f3ff; font-size: 20px; }
-.bridge-detail-row { margin-bottom: 13px; }
-.bridge-detail-row dt { color: #8ea6bf; font-size: 11px; margin-bottom: 4px; }
-.bridge-detail-row dd { color: #d6e7f7; font-size: 12px; margin: 0; overflow-wrap: anywhere; }
-.bridge-inspector-note { color: #8ea6bf; font-size: 11px; line-height: 1.6; margin: 18px 0 0; }
-@media (max-width: 1100px) {
-  .bridge-structure-layout { grid-template-columns: minmax(0, 1fr); }
-  .runtime-bridge-inspector { border-left: 0; border-top: 1px solid #284056; padding: 16px 0 0; }
-}
+/* Contract projections reuse the graph canvas and Inspector, but cannot edit or run. */
+body.runtime-bridge-tab-active :is(#ide-draft-safety-strip, .runtime-ide-json-drawer,
+  .runtime-activation-panel, [data-bridge-action-editor],
+  .runtime-ide-transition-editor, #ide-run-launcher-drawer, #ide-version-panel,
+  #ide-validate-btn, #ide-compile-btn, #ide-dry-run-btn, #ide-export-yaml-btn,
+  #ide-import-yaml-btn, #ide-save-btn, #ide-versions-btn) { display: none !important; }
 
 @media (max-width: 760px) {
   body.runtime-ide-body .runtime-ide-graph-aux-grid {

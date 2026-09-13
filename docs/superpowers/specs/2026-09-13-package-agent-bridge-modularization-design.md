@@ -361,8 +361,10 @@ High / Middle / Low를 중심에, Guardian / Safety와 Knowledge / Evidence를
 2026-09-13 화면 및 패키지 경계 확정:
 
 - **Package Manager**: 별도 IDE 탭에서 패키지 포함 여부·의존성·Experimental Package Import/Export를 제공한다. 기존 구성 관리 화면은 이 이름으로 보존한다.
-- **Device Bridges**: 그래프의 Device Bridge Plane 및 Infra에서 같은 내부 구조 탭을 연다. Agent Package → Device Bridge Package → 내부 provider를 노드와 관계선으로 표시한다. 선택한 노드의 구현·requirements·API·저장 참조는 Inspector에 표시한다.
-- 관계선은 사용(실선)과 내부 포함(파선)을 구분한다. 현재 연결 상태나 실행 성공을 의미하지 않는다. 기존 브릿지 workspace로 이동하는 링크를 제공하며 연결·조작 UI를 중복 구현하지 않는다.
+- **Device Bridges**: 그래프의 Device Bridge Plane 및 Infra에서 같은 계약 그래프를 연다. 상위에는 **Agent Package → Device Bridge**만 표시한다. 패키지는 연결 계약이고 브릿지는 장비 모듈이며 서로 다른 개념이다.
+- 개별 브릿지를 더블클릭하거나 Inspector의 Open bridge internals를 누르면 그 브릿지 내부만 별도 탭에서 표시한다. Printer Fleet의 manager·Bambu·Prusa는 이 안에서만 표시한다. Back은 내부 → Plane → 이전 Main/agent 순서로 돌아간다.
+- 기존 IDE의 **공통 그래프 renderer·캔버스 배경·크기 좌표계·노드·포트·라인 라벨·레전드·Mini Map·Inspector**를 그대로 사용한다. 별도 SVG renderer나 독립 브릿지 테마를 만들지 않는다. 관계 라벨은 uses/contains/exposes로 구분하며 현재 연결 상태나 실행 성공을 의미하지 않는다.
+- 설치 선언의 runtime_bridge_ids로 기존 런타임 ID를 같은 브릿지에 대응시켜 중복을 제거한다. 미패키지화 런타임 브릿지도 보여주되 가짜 패키지 소유 관계를 만들지 않는다. 연결·조작 UI는 기존 workspace에 유지한다.
 - **Printer Fleet은 단일 Device Bridge Package**다. Bambu·Prusa는 내부 provider이며 독립 패키지나 Fleet과 동급인 브릿지로 표시하지 않는다. 구현·requirements는 `device_bridges/printer_fleet/`에 모으고 옛 경로는 같은 런타임 객체를 가리키는 호환 alias로만 남긴다.
 - 공통 매니저의 canonical 경로는 `device_bridges.printer_fleet.bridge`다. Bambu transport 구현은 전역 의존성과 기존 monkeypatch 동작 보존을 위해 공통 런타임에 유지하고 내부 provider 진입점이 이를 참조한다. 물리 동작 재작성이나 제조사별 런타임 완전 분리는 이번 변경에 포함하지 않는다.
 - 두 조회 탭은 실행 그래프가 아니다. Main/agent의 미저장 편집·Dry-run Trace를 보존하며 그래프 활성화와 장비 호출을 발생시키지 않는다.

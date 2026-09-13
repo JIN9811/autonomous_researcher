@@ -79,11 +79,13 @@ limited to 40. Messages omit private values. Unknown top-level/schema fields,
 executable fields, connection fields and non-exact versions fail closed.
 
 In Runtime IDE, **Device Bridge Plane** (graph or Explorer) and **Infra → Device
-Bridges** open the same internal structure tab. It shows Agent Package owners,
-bridge package nodes and their internal providers, with an Inspector. **Infra →
+Bridges** open the same contract graph: Agent Package nodes connect to Device
+Bridge nodes. Double-click a bridge to inspect its internal components in a
+separate graph tab. Both levels reuse the standard IDE canvas and Inspector.
+Package contracts are not device bridges. **Infra →
 Package Manager** separately hosts membership, dependencies and package exchange.
 Printer Fleet is one bridge package containing Bambu and Prusa providers.
-Back returns to the prior
+Back returns from bridge internals to the plane, then to the prior
 graph or agent tab without replacing its draft or Dry-run Trace output.
 
 Removing composition references only changes a detached package. Installed

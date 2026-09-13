@@ -37,8 +37,11 @@ to the internal provider requirements. They do not register extra packages.
 | Bambu | paho-mqtt, Pydantic; NumPy/trimesh for placement preflight | Configured slicer and ffmpeg |
 | Prusa | httpx | Configured PrusaSlicer |
 
-In Runtime IDE, **Device Bridges** shows Agent Package → Printer Fleet →
-internal provider relationships and a node Inspector. **Package Manager** is
+In Runtime IDE, **Device Bridges** shows Agent Package → Device Bridge contracts.
+Printer Fleet appears once; its declared legacy runtime ID resolves to that same
+node. Open Printer Fleet to inspect its manager and Bambu/Prusa providers inside
+the bridge. Both levels reuse the standard IDE canvas, ports and Inspector.
+**Package Manager** is
 separate: draft membership and Experimental Package import/export live there.
 Use the existing `/printer` workspace for connection setup and device operations.
 

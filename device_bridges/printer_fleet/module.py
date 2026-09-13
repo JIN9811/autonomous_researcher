@@ -6,6 +6,7 @@ MODULE = BridgeModule("printer_fleet", "1.0.0", json.dumps({
     "tools": ["printer.prepare", "device.health"],
     "registration": "mcp_tools.printer_tools.register_printer_tools",
     "label": "Printer Fleet",
+    "runtime_bridge_ids": ["prusa_bridge"],
     "root": "device_bridges/printer_fleet",
     "requirements": "device_bridges/printer_fleet/requirements.txt",
     "manager": "device_bridges.printer_fleet.bridge.PrinterDeviceBridgeManager",

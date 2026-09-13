@@ -127,35 +127,75 @@
     return { ok: true, errors: [], packages, bridges };
   }
 
-  // Read-only topology: providers belong to one bridge, never separate packages.
-  function projectBridgeTopology(catalogPayload, draftRefs) {
+  // These are inspectable contracts, never executable orchestration plans.
+  function bridgeStructureGraph(id, nodes, edges, errors = []) {
+    return { id, name: id, ok: !errors.length, errors, nodes, edges,
+      transitions: {}, stage_dispatch: {},
+      metadata: { ide_tab_kind: "bridges", read_only: true } };
+  }
+
+  function structureNode(id, label, kind, data, x, y, bridgeId = "") {
+    return { id, label, kind: kind === "provider" || kind === "manager" || kind === "tool" ? "tool" : kind,
+      handler: "", position: { x, y }, inDraft: Boolean(data.inDraft),
+      metadata: { structure_kind: kind, bridge_id: bridgeId, contract: clone(data),
+        icon: kind === "bridge" || kind === "manager" ? "device_bridges" : kind === "package" ? "artifact" : "mcp_tools",
+        plane: "device_bridge", runtime_node: kind, display_label: label } };
+  }
+
+  function structureEdge(source, target, label) {
+    return { source, target, label, condition: label,
+      metadata: { runtime_edge: "device_bridge", overlay_relation: label, auto_ports: true } };
+  }
+
+  function bridgeStructureCatalog(catalogPayload, draftRefs, runtimeBridges = []) {
     const composition = projectComposition(catalogPayload, draftRefs);
-    const nodes = [], edges = [];
-    let top = 64;
-    for (const bridge of composition.bridges) {
-      const providers = Array.isArray(bridge.providers) ? bridge.providers : [];
-      const height = Math.max(180, Math.max(providers.length, bridge.owners.length) * 96);
-      const id = `bridge:${refKey(bridge)}`;
-      const center = top + height / 2;
-      nodes.push({ id, kind: "bridge", label: bridge.label || bridge.id, x: 360, y: center,
-        inDraft: bridge.inDraft, bridgeId: bridge.id, data: bridge });
-      bridge.owners.forEach((owner, index) => {
-        const ownerId = `${id}:owner:${refKey(owner)}`;
-        nodes.push({ id: ownerId, kind: "package", label: owner.id, x: 40,
-          y: center + (index - (bridge.owners.length - 1) / 2) * 96,
-          inDraft: owner.inDraft, bridgeId: bridge.id, data: owner });
-        edges.push({ from: ownerId, to: id, kind: "uses" });
-      });
-      providers.forEach((provider, index) => {
-        const providerId = `${id}:provider:${provider.id}`;
-        nodes.push({ id: providerId, kind: "provider", label: provider.label || provider.id, x: 680,
-          y: center + (index - (providers.length - 1) / 2) * 96,
-          inDraft: bridge.inDraft, bridgeId: bridge.id, data: provider });
-        edges.push({ from: id, to: providerId, kind: "contains" });
-      });
-      top += height + 48;
+    const bridges = [...composition.bridges];
+    const known = new Set(bridges.flatMap(bridge => [bridge.id, ...(bridge.runtime_bridge_ids || [])]));
+    for (const bridge of runtimeBridges) {
+      if (!bridge?.id || known.has(bridge.id)) continue;
+      known.add(bridge.id);
+      bridges.push({ ...clone(bridge), owners: [], registration_status: "Runtime contract; not packaged" });
     }
-    return { ok: composition.ok, errors: composition.errors, nodes, edges, width: 960, height: Math.max(340, top) };
+    return { ...composition, bridges };
+  }
+
+  function projectBridgeTopology(catalogPayload, draftRefs, runtimeBridges = []) {
+    const composition = bridgeStructureCatalog(catalogPayload, draftRefs, runtimeBridges);
+    const nodes = [], edges = [], owners = new Map();
+    for (const [index, bridge] of composition.bridges.entries()) {
+      const id = `bridge:${bridge.id}`;
+      nodes.push(structureNode(id, bridge.label || bridge.id, "bridge", bridge, 430, 70 + index * 132, bridge.id));
+      for (const owner of bridge.owners) {
+        const ownerId = `package:${refKey(owner)}`;
+        if (!owners.has(ownerId)) {
+          const pkg = composition.packages.find(pkg => refKey(pkg) === refKey(owner)) || owner;
+          owners.set(ownerId, structureNode(ownerId, pkg.label || pkg.id, "package", pkg, 90, 70 + owners.size * 132));
+        }
+        edges.push(structureEdge(ownerId, id, "uses"));
+      }
+    }
+    return bridgeStructureGraph("device-bridge-plane", [...owners.values(), ...nodes], edges, composition.errors);
+  }
+
+  function projectBridgeInternal(catalogPayload, bridgeId, runtimeBridges = []) {
+    const composition = bridgeStructureCatalog(catalogPayload, [], runtimeBridges);
+    const bridge = composition.bridges.find(bridge => bridge.id === bridgeId);
+    if (!bridge) return bridgeStructureGraph(`bridge:${bridgeId}`, [], [], ["Bridge contract is unavailable."]);
+    const managerId = `bridge:${bridgeId}:manager`;
+    const nodes = [structureNode(managerId, bridge.label || bridge.id, "manager", bridge, 90, 100, bridgeId)];
+    const edges = [];
+    const providers = Array.isArray(bridge.providers) ? bridge.providers : [];
+    const components = providers.length ? providers.map(item => ({ ...item, type: "provider" }))
+      : (bridge.tools || []).map(tool => typeof tool === "string" ? { id: tool, label: tool, type: "tool" }
+        : { ...tool, type: "tool" });
+    components.forEach((item, index) => {
+      const id = `${managerId}:${item.type}:${item.id || index}`;
+      nodes.push(structureNode(id, item.label || item.id, item.type, item, 430, 70 + index * 132, bridgeId));
+      edges.push(structureEdge(managerId, id, providers.length ? "contains" : "exposes"));
+    });
+    const graph = bridgeStructureGraph(`bridge:${bridgeId}`, nodes, edges);
+    graph.metadata.bridge_id = bridgeId;
+    return graph;
   }
 
   function packageId(value) {
@@ -239,6 +279,7 @@
     buildExportState,
     projectComposition,
     projectBridgeTopology,
+    projectBridgeInternal,
     buildExportPayload,
     parsePackageJson,
     acceptImportResult,
