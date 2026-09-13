@@ -1,0 +1,190 @@
+<svg xmlns="http://www.w3.org/2000/svg" data-theme="document" viewBox="0 0 1184 2054" role="img" aria-label="Analysis Agent Module five-area internal graph" style="font-family:Arial,sans-serif;background:#ffffff">
+      <title>Analysis Agent Module — five-area internal graph</title><desc>Executable owner operations and explicit outcomes. Positions are presentation only. Composite LLM tools are not separate editable operations.</desc>
+      <rect width="100%" height="100%" fill="#ffffff"/>
+      <defs><marker id="control-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6z" fill="#526174"/></marker></defs>
+      <g class="runtime-control-area" data-control-area="high" pointer-events="none">
+      <rect x="360" y="56" width="488" height="580" rx="12" fill="#2463a5" fill-opacity=".035" stroke="#2463a5" stroke-opacity=".3"/>
+      <text x="376" y="82" fill="#2463a5" font-size="15" font-weight="600">High</text>
+      </g><g class="runtime-control-area" data-control-area="middle" pointer-events="none">
+      <rect x="360" y="744" width="488" height="868" rx="12" fill="#177768" fill-opacity=".035" stroke="#177768" stroke-opacity=".3"/>
+      <text x="376" y="770" fill="#177768" font-size="15" font-weight="600">Middle</text>
+      </g><g class="runtime-control-area" data-control-area="low" pointer-events="none">
+      <rect x="352" y="1712" width="488" height="208" rx="12" fill="#4c6079" fill-opacity=".035" stroke="#4c6079" stroke-opacity=".3"/>
+      <text x="368" y="1738" fill="#4c6079" font-size="15" font-weight="600">Low</text>
+      <text x="368" y="1786" fill="#526174" font-size="12">No separate owner operation</text></g><g class="runtime-control-area" data-control-area="guardian" pointer-events="none">
+      <rect x="32" y="56" width="264" height="148" rx="12" fill="#a36b16" fill-opacity=".035" stroke="#a36b16" stroke-opacity=".3"/>
+      <text x="48" y="82" fill="#a36b16" font-size="15" font-weight="600">Guardian / Safety</text>
+      </g><g class="runtime-control-area" data-control-area="knowledge" pointer-events="none">
+      <rect x="896" y="56" width="264" height="708" rx="12" fill="#79529c" fill-opacity=".035" stroke="#79529c" stroke-opacity=".3"/>
+      <text x="912" y="82" fill="#79529c" font-size="15" font-weight="600">Knowledge / Evidence</text>
+      </g><defs><marker id="control-detail-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6z" fill="#526174"/></marker></defs><g data-implementation-edge="task" pointer-events="none"><title>existing measured or simulation input · evidence (code-owned)</title><path d="M920,142 C744,142 744,830 568,830" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>actual bounded simulation decision · call (code-owned)</title><path d="M476,792 C500,486 500,486 476,180" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>actual bounded data-processing decision · call (code-owned)</title><path d="M568,142 C596,142 596,142 624,142" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>existing evidence gate · validation (code-owned)</title><path d="M624,142 C432,142 432,142 240,142" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>actual bounded measured-evidence review · call (code-owned)</title><path d="M240,142 C312,142 312,286 384,286" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>accepted curve computation · call (code-owned)</title><path d="M476,324 C500,630 500,630 476,936" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>registered optional computation · call (code-owned)</title><path d="M568,142 C596,142 596,974 624,974" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>existing CAE request · call (code-owned)</title><path d="M624,974 C596,974 596,1118 568,1118" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>guarded internal solver component · call (code-owned)</title><path d="M568,1118 C596,1118 596,1118 624,1118" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>queue without awaiting FEM · call (code-owned)</title><path d="M476,1012 C500,1118 500,1118 476,1224" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>actual bounded mesh review · call (code-owned)</title><path d="M568,1262 C596,1262 596,286 624,286" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>existing background worker · call (code-owned)</title><path d="M716,324 C740,774 740,774 716,1224" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>actual bounded post-solve review · call (code-owned)</title><path d="M624,1262 C596,1262 596,430 568,430" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>registered calibration branch · call (code-owned)</title><path d="M476,468 C500,918 500,918 476,1368" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>actual bounded calibration review · call (code-owned)</title><path d="M568,1406 C596,1406 596,430 624,430" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>deformation interpretation · evidence (code-owned)</title><path d="M568,430 C596,430 596,1406 624,1406" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>registered refinement branch · call (code-owned)</title><path d="M476,1300 C500,1406 500,1406 476,1512" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>actual bounded improvement review · call (code-owned)</title><path d="M476,1512 C500,1062 500,1062 476,612" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>persistent job evidence · evidence (code-owned)</title><path d="M568,1262 C744,1262 744,254 920,254" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>foreground measured result · evidence (code-owned)</title><path d="M568,974 C744,974 744,366 920,366" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="deliver" pointer-events="none"><title>original owner AgentResult · evidence (code-owned)</title><path d="M920,478 C864,478 864,830 808,830" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="deliver" pointer-events="none"><title>state and payload precedence · evidence (code-owned)</title><path d="M1012,516 C1036,534 1036,534 1012,552" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="deliver" pointer-events="none"><title>public run archives once · evidence (code-owned)</title><path d="M808,830 C864,830 864,702 920,702" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-node="task::input" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Equipment artifact and curve provenance; code-owned; AnalysisAgent._curve_from_equipment">
+      <title>Equipment artifact and curve provenance
+Code-owned inside task
+agents/analysis/agent.py · AnalysisAgent._curve_from_equipment</title>
+      <rect x="920" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="122" fill="#172b4d" font-size="12">Equipment artifact and</text><text x="930" y="137" fill="#172b4d" font-size="12">curve provenance</text>
+      <text x="930" y="171" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::simulation_decision" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="LLM optional simulation selection; code-owned; decide">
+      <title>LLM optional simulation selection
+Code-owned inside task
+agents/analysis/decisions.py · decide</title>
+      <rect x="384" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#2463a5" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="122" fill="#172b4d" font-size="12">LLM optional simulation</text><text x="394" y="137" fill="#172b4d" font-size="12">selection</text>
+      <text x="394" y="171" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::data_decision" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="LLM data-processing selection; code-owned; decide">
+      <title>LLM data-processing selection
+Code-owned inside task
+agents/analysis/decisions.py · decide</title>
+      <rect x="624" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#2463a5" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="122" fill="#172b4d" font-size="12">LLM data-processing</text><text x="634" y="137" fill="#172b4d" font-size="12">selection</text>
+      <text x="634" y="171" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::validation_decision" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="LLM measured-evidence review; code-owned; decide">
+      <title>LLM measured-evidence review
+Code-owned inside task
+agents/analysis/decisions.py · decide</title>
+      <rect x="384" y="248" width="184" height="76" rx="5" fill="#ffffff" stroke="#2463a5" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="266" fill="#172b4d" font-size="12">LLM measured-evidence</text><text x="394" y="281" fill="#172b4d" font-size="12">review</text>
+      <text x="394" y="315" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::quality" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Existing curve and BO admission gates; code-owned; AnalysisAgent._quality_gate">
+      <title>Existing curve and BO admission gates
+Code-owned inside task
+agents/analysis/agent.py · AnalysisAgent._quality_gate</title>
+      <rect x="56" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="122" fill="#172b4d" font-size="12">Existing curve and BO</text><text x="66" y="137" fill="#172b4d" font-size="12">admission gates</text>
+      <text x="66" y="171" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::metrics" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="UTM numerical metrics and objective inputs; code-owned; AnalysisAgent._metrics">
+      <title>UTM numerical metrics and objective inputs
+Code-owned inside task
+agents/analysis/agent.py · AnalysisAgent._metrics</title>
+      <rect x="384" y="936" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="954" fill="#172b4d" font-size="12">UTM numerical metrics and</text><text x="394" y="969" fill="#172b4d" font-size="12">objective inputs</text>
+      <text x="394" y="1003" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::cae" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Optional registered CAE orchestration; code-owned; AnalysisAgent._run_cae">
+      <title>Optional registered CAE orchestration
+Code-owned inside task
+agents/analysis/agent.py · AnalysisAgent._run_cae</title>
+      <rect x="624" y="936" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="954" fill="#172b4d" font-size="12">Optional registered CAE</text><text x="634" y="969" fill="#172b4d" font-size="12">orchestration</text>
+      <text x="634" y="1003" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::bridge" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Deterministic CAE and CalculiX orchestration boundary; code-owned; CAEBridge">
+      <title>Deterministic CAE and CalculiX orchestration boundary
+Code-owned inside task
+device_bridges/cae/bridge.py · CAEBridge</title>
+      <rect x="384" y="1080" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="1098" fill="#172b4d" font-size="12">Deterministic CAE and</text><text x="394" y="1113" fill="#172b4d" font-size="12">CalculiX orchestration</text><text x="394" y="1128" fill="#172b4d" font-size="12">boundary</text>
+      <text x="394" y="1147" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::solver" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Existing guarded CalculiX implementation; code-owned; CalculiXBridge">
+      <title>Existing guarded CalculiX implementation
+Code-owned inside task
+device_bridges/cae/calculix.py · CalculiXBridge</title>
+      <rect x="624" y="1080" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="1098" fill="#172b4d" font-size="12">Existing guarded CalculiX</text><text x="634" y="1113" fill="#172b4d" font-size="12">implementation</text>
+      <text x="634" y="1147" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::background" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Existing Analysis background resource and queue; code-owned; AnalysisRuntimeService">
+      <title>Existing Analysis background resource and queue
+Code-owned inside task
+agents/analysis/runtime.py · AnalysisRuntimeService</title>
+      <rect x="384" y="1224" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="1242" fill="#172b4d" font-size="12">Existing Analysis</text><text x="394" y="1257" fill="#172b4d" font-size="12">background resource and</text><text x="394" y="1272" fill="#172b4d" font-size="12">queue</text>
+      <text x="394" y="1291" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::mesh_decision" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="LLM FEM mesh preparation and assessment; code-owned; decide">
+      <title>LLM FEM mesh preparation and assessment
+Code-owned inside task
+agents/analysis/decisions.py · decide</title>
+      <rect x="624" y="248" width="184" height="76" rx="5" fill="#ffffff" stroke="#2463a5" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="266" fill="#172b4d" font-size="12">LLM FEM mesh preparation</text><text x="634" y="281" fill="#172b4d" font-size="12">and assessment</text>
+      <text x="634" y="315" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::fem" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Existing bounded FEM study; code-owned; run_fem_study">
+      <title>Existing bounded FEM study
+Code-owned inside task
+agents/analysis/fem.py · run_fem_study</title>
+      <rect x="624" y="1224" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="1242" fill="#172b4d" font-size="12">Existing bounded FEM</text><text x="634" y="1257" fill="#172b4d" font-size="12">study</text>
+      <text x="634" y="1291" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::result_decision" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="LLM post-solve FEM evidence review; code-owned; decide">
+      <title>LLM post-solve FEM evidence review
+Code-owned inside task
+agents/analysis/decisions.py · decide</title>
+      <rect x="384" y="392" width="184" height="76" rx="5" fill="#ffffff" stroke="#2463a5" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="410" fill="#172b4d" font-size="12">LLM post-solve FEM</text><text x="394" y="425" fill="#172b4d" font-size="12">evidence review</text>
+      <text x="394" y="459" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::calibration" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Existing bounded calibration study; code-owned; calibrate">
+      <title>Existing bounded calibration study
+Code-owned inside task
+agents/analysis/calibration.py · calibrate</title>
+      <rect x="384" y="1368" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="1386" fill="#172b4d" font-size="12">Existing bounded</text><text x="394" y="1401" fill="#172b4d" font-size="12">calibration study</text>
+      <text x="394" y="1435" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::calibration_decision" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="LLM calibration admission and review; code-owned; decide">
+      <title>LLM calibration admission and review
+Code-owned inside task
+agents/analysis/decisions.py · decide</title>
+      <rect x="624" y="392" width="184" height="76" rx="5" fill="#ffffff" stroke="#2463a5" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="410" fill="#172b4d" font-size="12">LLM calibration admission</text><text x="634" y="425" fill="#172b4d" font-size="12">and review</text>
+      <text x="634" y="459" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::mechanisms" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Mechanism evidence assessment; code-owned; assess_mechanisms">
+      <title>Mechanism evidence assessment
+Code-owned inside task
+agents/analysis/mechanisms.py · assess_mechanisms</title>
+      <rect x="624" y="1368" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="1386" fill="#172b4d" font-size="12">Mechanism evidence</text><text x="634" y="1401" fill="#172b4d" font-size="12">assessment</text>
+      <text x="634" y="1435" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::refinement" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Existing numerical refinement; code-owned; refine">
+      <title>Existing numerical refinement
+Code-owned inside task
+agents/analysis/refinement.py · refine</title>
+      <rect x="384" y="1512" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="1530" fill="#172b4d" font-size="12">Existing numerical</text><text x="394" y="1545" fill="#172b4d" font-size="12">refinement</text>
+      <text x="394" y="1579" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::improvement_decision" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="LLM improvement candidate and validation review; code-owned; decide">
+      <title>LLM improvement candidate and validation review
+Code-owned inside task
+agents/analysis/decisions.py · decide</title>
+      <rect x="384" y="536" width="184" height="76" rx="5" fill="#ffffff" stroke="#2463a5" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="554" fill="#172b4d" font-size="12">LLM improvement candidate</text><text x="394" y="569" fill="#172b4d" font-size="12">and validation review</text>
+      <text x="394" y="603" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::store" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Existing improvement records and worker lifetime; code-owned; ImprovementStore">
+      <title>Existing improvement records and worker lifetime
+Code-owned inside task
+agents/analysis/improvement.py · ImprovementStore</title>
+      <rect x="920" y="216" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="234" fill="#172b4d" font-size="12">Existing improvement</text><text x="930" y="249" fill="#172b4d" font-size="12">records and worker</text><text x="930" y="264" fill="#172b4d" font-size="12">lifetime</text>
+      <text x="930" y="283" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::handoff" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Measured observation and BO handoff; code-owned; AnalysisAgent._handoff_payloads">
+      <title>Measured observation and BO handoff
+Code-owned inside task
+agents/analysis/agent.py · AnalysisAgent._handoff_payloads</title>
+      <rect x="920" y="328" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="346" fill="#172b4d" font-size="12">Measured observation and</text><text x="930" y="361" fill="#172b4d" font-size="12">BO handoff</text>
+      <text x="930" y="395" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="deliver::report" data-implementation-owner="deliver" pointer-events="auto" role="img"  aria-label="Analysis artifacts and evidence report; code-owned; AnalysisAgent._write_analysis_artifacts">
+      <title>Analysis artifacts and evidence report
+Code-owned inside deliver
+agents/analysis/agent.py · AnalysisAgent._write_analysis_artifacts</title>
+      <rect x="920" y="440" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="458" fill="#172b4d" font-size="12">Analysis artifacts and</text><text x="930" y="473" fill="#172b4d" font-size="12">evidence report</text>
+      <text x="930" y="507" fill="#526174" font-size="9">CODE · deliver</text>
+    </g><g data-implementation-node="deliver::projection" data-implementation-owner="deliver" pointer-events="auto" role="img"  aria-label="Owner report projection; code-owned; project_analysis_report">
+      <title>Owner report projection
+Code-owned inside deliver
+agents/analysis/presentation.py · project_analysis_report</title>
+      <rect x="920" y="552" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="570" fill="#172b4d" font-size="12">Owner report projection</text>
+      <text x="930" y="619" fill="#526174" font-size="9">CODE · deliver</text>
+    </g><g data-implementation-node="deliver::archive" data-implementation-owner="deliver" pointer-events="auto" role="img"  aria-label="Public run archive wrapper; code-owned; archive_agent_run">
+      <title>Public run archive wrapper
+Code-owned inside deliver
+utils/agent_artifact_archive.py · archive_agent_run</title>
+      <rect x="920" y="664" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="682" fill="#172b4d" font-size="12">Public run archive</text><text x="930" y="697" fill="#172b4d" font-size="12">wrapper</text>
+      <text x="930" y="731" fill="#526174" font-size="9">CODE · deliver</text>
+    </g><g data-source="task" data-target="deliver" data-outcome="next" data-kind="evidence"><title>task → deliver · next · evidence</title><path d="M 576 830 C 587.2 830, 604.8 830, 616 830" fill="none" stroke="#79529c" stroke-opacity=".8" stroke-width="2" stroke-dasharray="2 5" marker-end="url(#control-arrow)"/><rect x="577" y="820" width="38" height="20" rx="4" fill="#ffffff"/><text x="596" y="834" text-anchor="middle" fill="#79529c" font-size="11">next</text></g><g><title>task · analysis.task</title>
+        <rect x="384" y="792" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="396" y="813" fill="#172b4d" font-size="12">Composite measured</text><text x="396" y="829" fill="#172b4d" font-size="12">analysis and optional</text><text x="396" y="845" fill="#172b4d" font-size="12">background FEM task</text>
+        <text x="489" y="860" fill="#177768" font-size="10">LLM call</text></g><g><title>deliver · analysis.deliver</title>
+        <rect x="624" y="792" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="636" y="813" fill="#172b4d" font-size="12">Deliver owner result</text>
+        </g>
+      <line x1="24" x2="62" y1="1978" y2="1978" stroke="#526174" stroke-width="2" stroke-dasharray=""/><text x="72" y="1982" fill="#172b4d" font-size="14">Execution</text><line x1="244" x2="282" y1="1978" y2="1978" stroke="#526174" stroke-width="2" stroke-dasharray="8 5"/><text x="292" y="1982" fill="#172b4d" font-size="14">Validation</text><line x1="464" x2="502" y1="1978" y2="1978" stroke="#526174" stroke-width="2" stroke-dasharray="2 5"/><text x="512" y="1982" fill="#172b4d" font-size="14">Evidence</text><line x1="684" x2="722" y1="1978" y2="1978" stroke="#526174" stroke-width="2" stroke-dasharray="5 3"/><text x="732" y="1982" fill="#172b4d" font-size="14">Internal call</text>
+      <text x="24" y="2014" fill="#526174" font-size="13">Solid: execution · Dashed CODE: implementation · LLM: High decision · LLM call: process calls that decision</text>
+    </svg>

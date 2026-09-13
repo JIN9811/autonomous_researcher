@@ -28,7 +28,6 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from agents.analysis_agent import AnalysisAgent
 from agents.base_agent import AgentContext
 from agents.bo_agent import BOAgent
 from agents.module_discovery import discover_agent_modules
@@ -52,8 +51,8 @@ from knowledge.context_service import KnowledgeContextService
 from device_bridges.specimen_pose_tracker import get_specimen_pose_tracker_bridge
 from device_bridges.utm_runtime_bridge import get_utm_runtime_manager
 from device_bridges.utm_state_observer import observe_utm_state_window
-from mcp_tools.cae_tools import register_cae_tools
-from mcp_tools.calculix_tools import register_calculix_tools
+from device_bridges.cae.calculix_tools import register_calculix_tools
+from device_bridges.cae.tools import register_cae_tools
 from mcp_tools.camera_tools import register_camera_tools
 from device_bridges.windows_pyautogui.tools import register_equipment_tools
 from mcp_tools.experiment_tools import register_experiment_tools
@@ -350,7 +349,6 @@ def load_runtime() -> MainController:
     agent_registry.register(BOAgent())
     for module in discover_agent_modules():
         agent_registry.register_module(module)
-    agent_registry.register(AnalysisAgent())
     agent_registry.register(KnowledgeAgent())
     agent_registry.register(GuardianAgent())
 

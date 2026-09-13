@@ -1,0 +1,29 @@
+ui:
+  short: ANL
+  icon: /static/live_gui_icons/analysis_agent.svg
+  report_title: Analysis Agent
+  chat:
+    mode: open_on_demand
+  renderer:
+    dashboard: module
+    report: module
+    fallback: descriptor
+  cards:
+  - {id: analysis_fem_overlay, type: evidence, title: Experiment vs FEM, span: 6, tone: analysis}
+  - {id: analysis_fem_response, type: evidence, title: FEM Response, span: 6, tone: analysis}
+  - {id: analysis_fem_contour, type: evidence, title: Solver Contour, span: 6, tone: analysis}
+  - {id: analysis_fem_progress, type: evidence, title: Agentic Progress, span: 6, tone: analysis}
+  - {id: analysis_result_summary, type: metric_group, title: Result Summary, span: 4, tone: analysis}
+  - {id: analysis_admissibility, type: gate_summary, title: Analysis Admissibility / Gate, span: 4, tone: analysis}
+  - {id: analysis_metric_bars, type: chart, title: Metric Bars, span: 4, tone: metrics}
+  - {id: analysis_data_quality, type: chart, title: Data Quality, span: 4, tone: analysis}
+  - {id: analysis_provenance, type: evidence, title: Provenance, span: 4, tone: analysis}
+  - {id: analysis_raw_data, type: evidence, title: Raw Data Ledger, span: 4, tone: analysis}
+  - {id: analysis_bo_handoff, type: handoff, title: BO Handoff, span: 4, tone: analysis}
+  report_sections:
+  - id: analysis_evidence
+    title: Analysis Evidence
+    selectors:
+      analysis: latest_analysis
+      handoff: metadata.analysis_bo_handoff
+      metrics: metadata.analysis_metrics

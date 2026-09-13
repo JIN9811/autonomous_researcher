@@ -41,6 +41,9 @@
   }
   function createController(options = {}) {
     const request = options.fetch || ((...args) => root.fetch(...args));
+    const renderCard = typeof options.renderCard === 'function'
+      ? options.renderCard
+      : (title, body, card) => `<article class="fem-live-card" data-fem-card="${escape(card.id)}"><h3>${escape(title)}</h3>${body}</article>`;
     let analysis = {}, key = null, pointer = null, job = null, generation = 0, inFlight = null, error = '';
     let mode = 'fd', field = 'S_MISES', selectedAttempt = '', selectedContour = '', mounted = null;
     const navigation = new Map(), metadata = new Map(), metadataRequests = new Map();
@@ -89,7 +92,7 @@
     }
     function html() {
       const parts = content(), titles = {overlay: 'Experiment vs FEM', response: 'FEM Response', contour: 'Solver Contour', agentic: 'Agentic Progress'};
-      return `<section class="analysis-fem-live" data-live-preserve="fem:${escape(key || 'pending')}" aria-label="Analysis FEM evidence">${Object.entries(parts).map(([name, body]) => `<article class="fem-live-card" data-fem-card="${name}"><h3>${titles[name]}</h3><div data-fem-body="${name}">${body}</div></article>`).join('')}</section>`;
+      return `<div class="analysis-fem-live" data-live-preserve="fem:${escape(key || 'pending')}" aria-label="Analysis FEM evidence">${Object.entries(parts).map(([name, body]) => renderCard(titles[name], `<div data-fem-body="${name}">${body}</div>`, {id: name, span: 6, tone: 'analysis', eyebrow: 'background FEM'})).join('')}</div>`;
     }
     function update() {
       if (mounted?.isConnected) {

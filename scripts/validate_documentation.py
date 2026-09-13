@@ -243,7 +243,7 @@ DEVICE_BRIDGE_SOURCE_CONTRACTS = {
         ("app/main.py", '@app.get("/api/equipment/utm-runtime/status")'),
     ),
     "cae_computation": (
-        ("mcp_tools/calculix_tools.py", 'registry.register("calculix.run_job"'),
+        ("device_bridges/cae/calculix_tools.py", 'registry.register("calculix.run_job"'),
         ("mcp_tools/pinn_tools.py", 'registry.register("pinn.predict"'),
         ("app/main.py", '@app.post("/api/cae/run")'),
     ),

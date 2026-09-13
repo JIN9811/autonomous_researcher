@@ -554,6 +554,8 @@ function liveAgentModuleHostServices() {
     latestEquipmentSkillException,
     latestUtmDataReadyPacket,
     latestEquipmentHandoffPacket,
+    latestAnalysisPayload,
+    latestAnalysisBoHandoff,
     equipmentAgenticTaskModel: window.ATREquipmentAgenticTaskModel || null,
     equipmentRuntimeState,
     equipmentCycleContext,
@@ -600,6 +602,13 @@ function liveAgentModuleHostServices() {
     specimenFirstValue,
     specimenStatusTone,
     renderDashboardMetric,
+    renderAnalysisTrustScore,
+    renderAnalysisCurveOverlay,
+    renderAnalysisFieldLink,
+    renderAnalysisMetricBars,
+    renderAnalysisQualityDonut,
+    renderAnalysisProvenance,
+    renderAnalysisFemEvidence,
     renderSpecimenProgressBar,
     renderSpecimenNowPrintingBody,
     renderSpecimenPrintMonitoringBody,
@@ -631,6 +640,81 @@ function liveAgentModuleHostServices() {
     runtimeRows,
     renderReportList,
   };
+}
+
+function liveAgentReportApi(agentId) {
+  const cleanAgentId = String(agentId || "").trim().toLowerCase();
+  const agent = LIVE_AGENTS.find((item) => item.id === cleanAgentId);
+  const frontend = agent && agent.implementation && typeof agent.implementation === "object"
+    && agent.implementation.frontend && typeof agent.implementation.frontend === "object"
+    ? agent.implementation.frontend
+    : {};
+  const endpoint = String(frontend.report_api || frontend.reportApi || "").trim();
+  return endpoint === `/api/agents/${cleanAgentId}/report` ? endpoint : "";
+}
+
+function liveOwnerReportForSession(session, agentId = liveSelectedAgent) {
+  const report = session && session.ownerReport && typeof session.ownerReport === "object" ? session.ownerReport : null;
+  const cleanAgentId = String(agentId || "").trim().toLowerCase();
+  const state = session && session.state && typeof session.state === "object" ? session.state : {};
+  const runId = String(state.run_id || "");
+  if (!report || String(report.agent_id || "").toLowerCase() !== cleanAgentId) return null;
+  if (runId && String(report.run_id || "") !== runId) return null;
+  return report;
+}
+
+async function hydrateLiveSelectedAgentReport(session, manifestGeneration = liveAgentManifestRequestGeneration) {
+  const agentId = String(liveSelectedAgent || "").trim().toLowerCase();
+  if (agentId !== "analysis" || !knownLiveAgent(agentId)) return session;
+  const endpoint = liveAgentReportApi(agentId);
+  const state = session && session.state && typeof session.state === "object" ? session.state : {};
+  const runId = String(state.run_id || "");
+  if (!endpoint || !runId) return session;
+  const requestGeneration = Number(session.ownerReportRequestGeneration || 0) + 1;
+  Object.defineProperty(session, "ownerReportRequestGeneration", {
+    value: requestGeneration,
+    configurable: true,
+    writable: true,
+    enumerable: false,
+  });
+  try {
+    const payload = await fetchJsonOrThrowWithTimeout(
+      `${endpoint}?run_id=${encodeURIComponent(runId)}`,
+      { headers: { "Accept": "application/json" } },
+      1200,
+    );
+    const report = payload && payload.report && typeof payload.report === "object" ? payload.report : null;
+    if (
+      !report
+      || liveSelectedAgent !== agentId
+      || !knownLiveAgent(agentId)
+      || manifestGeneration !== liveAgentManifestRequestGeneration
+      || session.ownerReportRequestGeneration !== requestGeneration
+      || String(report.agent_id || "").toLowerCase() !== agentId
+      || String(report.run_id || "") !== runId
+    ) return session;
+    const analysis = report.sections && typeof report.sections === "object" && report.sections.analysis_report
+      && typeof report.sections.analysis_report === "object" ? report.sections.analysis_report : {};
+    const reportIdentity = analysis.bo_observation && typeof analysis.bo_observation === "object"
+      ? analysis.bo_observation
+      : report.sections && report.sections.bo_observation && typeof report.sections.bo_observation === "object"
+        ? report.sections.bo_observation
+        : analysis.bo_handoff && typeof analysis.bo_handoff === "object"
+          ? analysis.bo_handoff
+          : report.sections && report.sections.bo_handoff && typeof report.sections.bo_handoff === "object"
+            ? report.sections.bo_handoff
+            : {};
+    if (reportIdentity.run_id && String(reportIdentity.run_id) !== runId) return session;
+    Object.defineProperty(session, "ownerReport", {
+      value: report,
+      configurable: true,
+      writable: true,
+      enumerable: false,
+    });
+  } catch (_err) {
+    // The compact planning snapshot remains the safe fallback when owner projection is unavailable.
+  }
+  return session;
 }
 
 async function refreshLiveAgentManifest(options = {}) {
@@ -4822,6 +4906,7 @@ function selectedReportModel(session) {
   const snapshot = liveLastSnapshot || {};
   const state = session.state || snapshot.state || {};
   const spec = state.current_experiment_spec || {};
+  const ownerReport = liveOwnerReportForSession(session);
   const messages = selectedMessages();
   const events = selectedEvents();
   const payloadEvents = events.map((event) => ({ event, payload: eventPayload(event) }));
@@ -4860,6 +4945,8 @@ function selectedReportModel(session) {
   const nextAction = handoffs[handoffs.length - 1]
     || (state.stage ? `Continue from current stage '${state.stage}' after checking required approvals and failed gates.` : "Wait for the next orchestrator instruction or operator command.");
   return {
+    sections: ownerReport && ownerReport.sections && typeof ownerReport.sections === "object" ? ownerReport.sections : {},
+    ownerReport,
     state,
     spec,
     messages,
@@ -5218,6 +5305,10 @@ function latestEquipmentHandoffPacket(report) {
 function latestAnalysisPayload(report) {
   const state = report && report.state ? report.state : {};
   const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
+  const ownerSections = report && report.sections && typeof report.sections === "object" ? report.sections : {};
+  if (ownerSections.analysis_report && typeof ownerSections.analysis_report === "object") return ownerSections.analysis_report;
+  const projected = latestReportPayload(report, ["analysis_report", "data.analysis_report", "sections.analysis_report", "role_specific.analysis_report"]);
+  if (projected && typeof projected === "object" && Object.keys(projected).length) return projected;
   const payload = metadata.analysis_agent_payload;
   if (payload && typeof payload === "object") {
     if (payload.analysis && typeof payload.analysis === "object") return payload.analysis;
@@ -5237,7 +5328,7 @@ function latestAnalysisPayload(report) {
 function latestAnalysisBoHandoff(report) {
   const analysis = latestAnalysisPayload(report) || {};
   if (analysis.bo_handoff && typeof analysis.bo_handoff === "object") return analysis.bo_handoff;
-  return latestReportPayload(report, ["bo_handoff", "data.bo_handoff", "analysis.bo_handoff"]);
+  return latestReportPayload(report, ["bo_handoff", "data.bo_handoff", "analysis.bo_handoff", "sections.bo_handoff"]);
 }
 
 
@@ -5729,98 +5820,12 @@ function renderEquipmentReportDetails(report) {
   return frontend && typeof frontend.renderReport === "function" ? frontend.renderReport(report) : "";
 }
 function renderAnalysisReportDetails(report) {
-  const analysis = latestAnalysisPayload(report) || {};
-  const source = analysis.source || {};
-  const fingerprint = source.fingerprint || {};
-  const columnMapping = source.column_mapping || {};
-  const metrics = analysis.utm_metrics || {};
-  const quality = analysis.quality_gate || analysis.data_quality_gate || {};
-  const comparison = analysis.comparison || {};
-  const femComparison = analysis.fem_utm_comparison || {};
-  const multifidelityComparison = analysis.multifidelity_comparison || {};
-  const trustScore = analysis.trust_score || {};
-  const fidelityRecords = analysis.fidelity_records || {};
-  const femResult = analysis.fem_result || {};
-  const femMetrics = analysis.fem_metrics || {};
-  const femLoop = analysis.fem_agentic_loop || {};
-  const caeResult = analysis.cae_result || {};
-  const artifacts = analysis.analysis_artifacts || {};
-  const boHandoff = latestAnalysisBoHandoff(report) || {};
-  const failureTags = Array.isArray(analysis.failure_tags) ? analysis.failure_tags : [];
-  const closedLoopSources = Array.isArray(analysis.closed_loop_sources) ? analysis.closed_loop_sources : [];
-  const artifactRows = Object.entries(artifacts).map(([key, value]) => `${key} · ${renderRuntimeValue(value)}`);
-  return `
-    <div class="live-agent-specific-report-detail">
-      <h5>Analysis Admissibility / Gate</h5>
-      ${renderAnalysisTrustScore(analysis)}
-      <h5>Measurement / Simulation Comparison</h5>
-      ${renderAnalysisCurveOverlay(analysis)}
-      <h5>Solver Field Results</h5>
-      ${renderAnalysisFieldLink(analysis)}
-      ${renderAnalysisProvenance(analysis)}
-      <h5>Raw Data Ledger</h5>
-      ${runtimeRows([
-        ["source", source.source || "-"],
-        ["parser_id", source.parser_id || source.format || "-"],
-        ["path", source.path || "-"],
-        ["sha256", fingerprint.sha256 || "-"],
-        ["size_bytes", fingerprint.size_bytes === undefined ? "-" : fingerprint.size_bytes],
-        ["column_mapping_confidence", columnMapping.column_mapping_confidence === undefined ? "-" : columnMapping.column_mapping_confidence],
-        ["unit_mapping_confidence", columnMapping.unit_mapping_confidence === undefined ? "-" : columnMapping.unit_mapping_confidence],
-      ])}
-      <h5>UTM Metrics / Quality Gate</h5>
-      ${runtimeRows([
-        ["peak_force_N", metrics.peak_force_N ?? "-"],
-        ["initial_stiffness_N_per_mm", metrics.initial_stiffness_N_per_mm ?? "-"],
-        ["compressive_strength_MPa", metrics.compressive_strength_MPa ?? "-"],
-        ["apparent_modulus_MPa", metrics.apparent_modulus_MPa ?? "-"],
-        ["energy_absorption_mJ", metrics.energy_absorption_mJ ?? "-"],
-        ["specific_energy_absorption_J_per_g", metrics.specific_energy_absorption_J_per_g ?? "-"],
-        ["ok_for_metrics", quality.ok_for_metrics === undefined ? "-" : quality.ok_for_metrics],
-        ["ok_for_bo", quality.ok_for_bo === undefined ? "-" : quality.ok_for_bo],
-        ["quality_score", quality.score === undefined ? "-" : quality.score],
-        ["quality_warnings", quality.warnings || []],
-      ])}
-      <h5>FEM / CAE / CalculiX Evidence</h5>
-      ${runtimeRows([
-        ["closed_loop_sources", closedLoopSources],
-        ["trust_score", trustScore.score === undefined ? "-" : trustScore.score],
-        ["trust_gate", trustScore.gate || "-"],
-        ["multifidelity_comparison", multifidelityComparison.schema || "-"],
-        ["fidelity_records", Object.keys(fidelityRecords)],
-        ["cae_loop_status", femResult.status || "-"],
-        ["cae_backend", femResult.solver || femResult.solver_backend || "-"],
-        ["fem_cache", femResult.cache_status || "-"],
-        ["predicted_peak_force_N", femMetrics.predicted_peak_force_N ?? "-"],
-        ["predicted_stiffness_N_per_mm", femMetrics.predicted_initial_stiffness_N_per_mm ?? "-"],
-        ["cae_status", caeResult.status || "-"],
-        ["fem_utm_agreement", femComparison.agreement_score === undefined ? "-" : femComparison.agreement_score],
-        ["fem_utm_tags", femComparison.discrepancy_tags || []],
-      ])}
-      <h5>LLM Agentic FEM Loop</h5>
-      ${runtimeRows([
-        ["loop_status", femLoop.status || "-"],
-        ["llm_plan_source", femLoop.llm_plan && femLoop.llm_plan.source ? femLoop.llm_plan.source : "-"],
-        ["selected_iteration", femLoop.selected_iteration === undefined ? "-" : femLoop.selected_iteration],
-        ["acceptance_threshold", femLoop.acceptance_threshold === undefined ? "-" : femLoop.acceptance_threshold],
-        ["tool_sequence", femLoop.tool_sequence || []],
-        ["safety_rule", femLoop.safety_rule || "-"],
-      ])}
-      ${renderReportList((femLoop.iterations || []).map((item) => `iter=${item.iteration} · mesh=${item.mesh_size_mm} mm · agreement=${renderRuntimeValue(item.agreement_score)} · accepted=${renderRuntimeValue(item.accepted)} · cache=${item.cache_status || "-"}`), "No FEM agentic iterations recorded.", 12)}
-      <h5>BO Handoff / Loop Comparison</h5>
-      ${runtimeRows([
-        ["bo_schema", boHandoff.schema_version || "analysis_bo_handoff_v2"],
-        ["ok_for_bo", boHandoff.ok_for_bo === undefined ? "-" : boHandoff.ok_for_bo],
-        ["trust_gate", boHandoff.trust_gate || (boHandoff.trust_score || {}).gate || "-"],
-        ["objective", boHandoff.objective || {}],
-        ["comparison_mode", comparison.mode || "-"],
-        ["comparison_summary", comparison.summary || "-"],
-        ["failure_tags", failureTags],
-      ])}
-      <h5>Analysis Artifact Ledger</h5>
-      ${renderReportList(artifactRows, "No Analysis artifact paths recorded.", 28)}
-    </div>
-  `;
+  const frontend = liveAgentModuleHost.get("analysis");
+  return frontend && typeof frontend.renderReport === "function" ? frontend.renderReport(report) : "";
+}
+
+function activeModuleDescriptorFallback(agentId, rendererProfile, moduleFrontend) {
+  return rendererProfile.id === "module" && knownLiveAgent(agentId) && !moduleFrontend;
 }
 
 
@@ -5977,13 +5982,15 @@ function renderAgentSpecificReportSection(report, status, agentLabel) {
   const moduleDetails = moduleFrontend && typeof moduleFrontend.renderReport === "function"
     ? moduleFrontend.renderReport(report)
     : "";
+  const descriptorFallback = activeModuleDescriptorFallback(liveSelectedAgent, rendererProfile, moduleFrontend);
   const orchestratorDetails = reportAgentId === "orchestrator" ? renderOrchestratorReportDetails(report) : "";
   const designDetails = reportAgentId === "design" ? renderDesignReportDetails(report) : "";
   const specimenDetails = reportAgentId === "specimen" ? renderSpecimenReportDetails(report) : "";
   const visionDetails = reportAgentId === "vision" ? renderVisionReportDetails(report) : "";
   const manipulationDetails = !moduleDetails && reportAgentId === "manipulation" ? renderManipulationReportDetails(report) : "";
   const equipmentDetails = !moduleDetails && reportAgentId === "equipment" ? renderEquipmentReportDetails(report) : "";
-  const analysisDetails = reportAgentId === "analysis" ? renderAnalysisReportDetails(report) : "";
+  const analysisDetails = !moduleDetails && !descriptorFallback && reportAgentId === "analysis" ? renderAnalysisReportDetails(report) : "";
+  const descriptorDetails = descriptorFallback ? renderAgentDescriptorReportSections(report, liveSelectedAgent, { academic: true }) : "";
   const knowledgeDetails = reportAgentId === "knowledge" ? renderKnowledgeReportDetails(report) : "";
   const boDetails = reportAgentId === "bo" ? renderBoReportDetails(report) : "";
   const guardianDetails = reportAgentId === "guardian" ? renderGuardianReportDetails(report) : "";
@@ -6000,6 +6007,7 @@ function renderAgentSpecificReportSection(report, status, agentLabel) {
       ${manipulationDetails}
       ${equipmentDetails}
       ${analysisDetails}
+      ${descriptorDetails}
       ${knowledgeDetails}
       ${boDetails}
       ${guardianDetails}
@@ -15290,43 +15298,27 @@ function refreshLiveAnalysisFemEvidence() {
   return liveAnalysisFemController ? liveAnalysisFemController.poll() : Promise.resolve();
 }
 
+function renderAnalysisFemEvidence(analysis) {
+  if (!liveAnalysisFemController && window.AnalysisFemLive) {
+    liveAnalysisFemController = window.AnalysisFemLive.createController({
+      renderCard: (title, body, card) => renderDashboardCard(title, body, {
+        span: card.span,
+        tone: card.tone,
+        eyebrow: card.eyebrow,
+        data: {"fem-card": card.id},
+      }),
+    });
+  }
+  if (!liveAnalysisFemController) return "";
+  liveAnalysisFemController.setContext(analysis);
+  return liveAnalysisFemController.html();
+}
+
 function renderAnalysisDashboardCards(report, status, agentLabel, profile) {
-  const analysis = latestAnalysisPayload(report) || {};
-  const metrics = analysis.utm_metrics || {};
-  const quality = analysis.quality_gate || analysis.data_quality_gate || {};
-  const artifacts = analysis.analysis_artifacts || {};
-  const boHandoff = latestAnalysisBoHandoff(report) || {};
-  if (!liveAnalysisFemController && window.AnalysisFemLive) liveAnalysisFemController = window.AnalysisFemLive.createController();
-  if (liveAnalysisFemController) liveAnalysisFemController.setContext(analysis);
-  return `
-    ${liveAnalysisFemController ? liveAnalysisFemController.html() : ""}
-    ${renderDashboardCard("Result Summary", `<div class="ar-report-metrics">
-      ${renderDashboardMetric("Peak", metrics.peak_force_N ?? "-", "N", "info")}
-      ${renderDashboardMetric("Strength", metrics.compressive_strength_MPa ?? "-", "MPa", "success")}
-      ${renderDashboardMetric("Score", analysis.objective_score ?? "-", "objective", "running")}
-      ${renderDashboardMetric("Unc.", analysis.uncertainty ?? "-", "model", "warning")}
-    </div>`, { span: 4, tone: "analysis", eyebrow: "result" })}
-    ${renderDashboardCard("Analysis Admissibility / Gate", renderAnalysisTrustScore(analysis), { span: 4, tone: (analysis.trust_score || {}).gate === "block" ? "danger" : "analysis", eyebrow: "evidence" })}
-    ${renderDashboardCard("Metric Bars", renderAnalysisMetricBars(analysis), { span: 4, tone: "metrics", eyebrow: "features" })}
-    ${renderDashboardCard("Data Quality", renderAnalysisQualityDonut(quality), { span: 4, tone: quality.ok_for_bo === false ? "warning" : "analysis", eyebrow: "qa" })}
-    ${renderDashboardCard("Provenance", renderAnalysisProvenance(analysis), { span: 4, tone: "analysis", eyebrow: "artifacts" })}
-    ${renderDashboardCard("Raw Data Ledger", renderDashboardRows([
-      ["raw_file", analysis.raw_file || analysis.source_file || "-"],
-      ["fingerprint", analysis.file_fingerprint || analysis.checksum || "-"],
-      ["row_count", analysis.row_count || metrics.row_count || "-"],
-      ["unit_confidence", analysis.unit_confidence || "-"],
-      ["canonical_curve", artifacts.canonical_curve || "-"],
-    ]), { span: 4, tone: "analysis", eyebrow: "utm ingest" })}
-    ${renderDashboardCard("BO Handoff", renderDashboardRows([
-      ["schema", boHandoff.schema_version || "analysis_bo_handoff_v2"],
-      ["ok_for_bo", boHandoff.ok_for_bo === undefined ? "-" : boHandoff.ok_for_bo],
-      ["trust_gate", boHandoff.trust_gate || (boHandoff.trust_score || {}).gate || "-"],
-      ["objective_score", boHandoff.objective_score ?? analysis.objective_score ?? "-"],
-      ["uncertainty", boHandoff.uncertainty ?? analysis.uncertainty ?? "-"],
-      ["experiment_evaluation", artifacts.experiment_evaluation || "-"],
-      ["next_agent", boHandoff.next_agent || "BO"],
-    ]), { span: 4, tone: "analysis", eyebrow: "optimization" })}
-  `;
+  const frontend = liveAgentModuleHost.get("analysis");
+  return frontend && typeof frontend.renderDashboard === "function"
+    ? frontend.renderDashboard(report, status, agentLabel, profile)
+    : "";
 }
 
 function renderKnowledgeDashboardCards(report, status, agentLabel, profile) {
@@ -15531,9 +15523,14 @@ function renderAgentSpecializedDashboardSections(session, report, status, agentL
   const moduleDashboard = moduleFrontend && typeof moduleFrontend.renderDashboard === "function"
     ? moduleFrontend.renderDashboard(report, status, agentLabel, profile)
     : "";
-  const specialized = moduleDashboard || (hasBuiltInReferenceDashboard ? cardsByAgent[dashboardAgentId]() : renderAgentWorkcellCard(profile, report, status, agentLabel));
-  const descriptorCards = moduleDashboard || hasBuiltInReferenceDashboard ? "" : renderAgentDescriptorCards(report, agentId);
-  const descriptorReportSections = moduleDashboard || hasBuiltInReferenceDashboard ? "" : renderAgentDescriptorReportSections(report, agentId);
+  const descriptorFallback = activeModuleDescriptorFallback(agentId, rendererProfile, moduleFrontend);
+  const specialized = moduleDashboard || (descriptorFallback
+    ? renderAgentWorkcellCard(profile, report, status, agentLabel)
+    : hasBuiltInReferenceDashboard
+      ? cardsByAgent[dashboardAgentId]()
+      : renderAgentWorkcellCard(profile, report, status, agentLabel));
+  const descriptorCards = descriptorFallback || (!moduleDashboard && !hasBuiltInReferenceDashboard) ? renderAgentDescriptorCards(report, agentId) : "";
+  const descriptorReportSections = descriptorFallback || (!moduleDashboard && !hasBuiltInReferenceDashboard) ? renderAgentDescriptorReportSections(report, agentId) : "";
   const visualization = moduleDashboard || ["orchestrator", "design", "specimen", "vision", "manipulation", "equipment", "analysis", "knowledge", "bo"].includes(dashboardAgentId) ? "" : renderAgentVisualizationCard(report, status, agentLabel);
   const checklistItems = Array.isArray(profile.checklist) ? profile.checklist : [];
   const checklist = controlSurface && !["objective", "orchestrator"].includes(agentId) && checklistItems.length
@@ -18058,6 +18055,7 @@ async function refreshPlanningState(options = {}) {
       const sessionRes = await fetch(`/api/planning/session?session_id=${sessionId}`);
       if (!sessionRes.ok) throw new Error(`session HTTP ${sessionRes.status}`);
       const session = await sessionRes.json();
+      await hydrateLiveSelectedAgentReport(session, liveAgentManifestRequestGeneration);
       liveLastSnapshot = {
         state: session.state || {},
         runtime: session.runtime || {},
@@ -18554,6 +18552,14 @@ if (liveAgentBinderList) {
     }
     setLiveView("report");
     renderLiveRuntime(liveLastSession);
+    if (liveSelectedAgent === "analysis") {
+      const selectedSession = liveLastSession;
+      hydrateLiveSelectedAgentReport(selectedSession).then(() => {
+        if (liveSelectedAgent !== "analysis" || liveLastSession !== selectedSession) return;
+        invalidateLiveCenterRender("report");
+        renderLiveRuntime(selectedSession);
+      }).catch(() => {});
+    }
   });
   liveAgentBinderList.addEventListener("dblclick", (event) => {
     const button = event.target.closest("[data-agent-id]");

@@ -19,141 +19,31 @@ module:
     dry_run_supported: true
   tools:
   - cae.run_static_analysis
-  internal_graph:
-    - id: 01_receive_equipment_artifact
-      label: Receive Equipment Artifact
-      kind: internal_step
-    - id: 02_fingerprint_input_file
-      label: Fingerprint Input File
-      kind: internal_step
-    - id: 03_detect_format_and_parser
-      label: Detect Format And Parser
-      kind: internal_step
-    - id: 04_parse_raw_table
-      label: Parse Raw Table
-      kind: internal_step
-    - id: 05_resolve_columns_and_units
-      label: Resolve Columns And Units
-      kind: internal_step
-    - id: 06_build_canonical_curve
-      label: Build Canonical Curve
-      kind: internal_step
-    - id: 07_preprocess_curve
-      label: Preprocess Curve
-      kind: internal_step
-    - id: 08_validate_curve_quality
-      label: Validate Curve Quality
-      kind: internal_step
-    - id: 09_compute_utm_metrics
-      label: Compute UTM Metrics
-      kind: internal_step
-    - id: 10_prepare_fem_problem
-      label: Prepare FEM Problem
-      kind: internal_step
-    - id: 11_prepare_cae_calculix_payload
-      label: Prepare CAE CalculiX Payload
-      kind: internal_step
-    - id: 12_probe_cae_runtime
-      label: Probe CAE Runtime
-      kind: internal_step
-    - id: 13_run_cae_calculix_analysis
-      label: Run CAE CalculiX Analysis
-      kind: internal_step
-    - id: 14_compare_iteration_with_utm
-      label: Compare Iteration With UTM
-      kind: internal_step
-    - id: 15_accept_or_refine_fem
-      label: Accept Or Refine FEM
-      kind: internal_step
-    - id: 16_run_cae_if_available
-      label: Run CAE If Available
-      kind: internal_step
-    - id: 17_compare_fem_with_utm
-      label: Compare FEM With UTM
-      kind: internal_step
-    - id: 18_compute_objective_and_uncertainty
-      label: Compute Objective And Uncertainty
-      kind: internal_step
-    - id: 19_compare_with_previous_experiments
-      label: Compare With Previous Experiments
-      kind: internal_step
-    - id: 20_write_analysis_artifacts
-      label: Write Analysis Artifacts
-      kind: internal_step
-    - id: 21_emit_experiment_evaluation
-      label: Emit Experiment Evaluation
-      kind: internal_step
-    - id: 22_emit_bo_handoff
-      label: Emit BO Handoff
-      kind: internal_step
+  execution_graph:
+    schema: ax4lab.execution_graph.v1
+    entry: task
+    nodes:
+    - id: task
+      handler: analysis.task
+      label: Composite measured analysis and optional background FEM task
+      area: middle
+      llm: true
+    - id: deliver
+      handler: analysis.deliver
+      label: Deliver owner result
+      area: middle
+    edges:
+    - {source: task, target: deliver, 'on': next, kind: evidence}
+    terminals: [deliver]
   io_contract:
     input: OrchestratorState
     output: AgentResult.data merged into OrchestratorState
   notes: >-
-    GUI/module editor may edit this module config, but execution remains bound to
-    allowlisted Python handlers. This module leaves llm_role empty so Python
-    task routes such as analysis_reasoning remain distinct inside the agent.
-    CAE/CalculiX evidence is produced only through registered cae.* tools and
-    validated payloads.
-    Python source is not modified by the GUI or LLM.
-
-  metadata:
-    control_view:
-      areas:
-        internal_graph:01_receive_equipment_artifact: knowledge
-        internal_graph:02_fingerprint_input_file: knowledge
-        internal_graph:03_detect_format_and_parser: middle
-        internal_graph:04_parse_raw_table: middle
-        internal_graph:05_resolve_columns_and_units: middle
-        internal_graph:06_build_canonical_curve: middle
-        internal_graph:07_preprocess_curve: middle
-        internal_graph:08_validate_curve_quality: guardian
-        internal_graph:09_compute_utm_metrics: middle
-        internal_graph:10_prepare_fem_problem: middle
-        internal_graph:11_prepare_cae_calculix_payload: middle
-        internal_graph:12_probe_cae_runtime: middle
-        internal_graph:13_run_cae_calculix_analysis: middle
-        internal_graph:14_compare_iteration_with_utm: middle
-        internal_graph:15_accept_or_refine_fem: middle
-        internal_graph:16_run_cae_if_available: middle
-        internal_graph:17_compare_fem_with_utm: middle
-        internal_graph:18_compute_objective_and_uncertainty: middle
-        internal_graph:19_compare_with_previous_experiments: middle
-        internal_graph:20_write_analysis_artifacts: knowledge
-        internal_graph:21_emit_experiment_evaluation: middle
-        internal_graph:22_emit_bo_handoff: middle
-      empty_roles:
-        low: No direct device execution in this agent
-      checkpoint_details:
-        internal_graph:07_preprocess_curve:
-          nodes:
-          - id: data_decision
-            label: "LLM data-processing choice"
-            area: high
-            source: {path: agents/analysis_decisions.py, symbol: decide}
-          edges:
-          - {source: $operation, target: data_decision, kind: evidence, label: "existing internal decision"}
-        internal_graph:08_validate_curve_quality:
-          nodes:
-          - id: validation_decision
-            label: "LLM evidence review"
-            area: high
-            source: {path: agents/analysis_decisions.py, symbol: decide}
-          edges:
-          - {source: $operation, target: validation_decision, kind: evidence, label: "existing internal decision"}
-        internal_graph:10_prepare_fem_problem:
-          nodes:
-          - id: simulation_decision
-            label: "LLM simulation / model choice"
-            area: high
-            source: {path: agents/analysis_decisions.py, symbol: decide}
-          edges:
-          - {source: $operation, target: simulation_decision, kind: evidence, label: "existing internal decision"}
-        internal_graph:15_accept_or_refine_fem:
-          nodes:
-          - id: refinement_decision
-            label: "LLM FEM review (background when enabled)"
-            area: high
-            source: {path: agents/analysis_decisions.py, symbol: decide}
-          edges:
-          - {source: $operation, target: refinement_decision, kind: evidence, label: "existing internal decision"}
+    The executable graph wraps the existing archived owner body once. Actual
+    LLM decisions and Middle numerical, CAE, FEM, calibration and improvement
+    relationships are source-backed implementation details, not additional
+    executable workflow stages. Measured foreground results reach BO without
+    awaiting background FEM. The Analysis agent has no physical Low boundary;
+    the installed CAE bridge owns computation and retains its existing gates,
+    queue, solver settings, and resource lifetime. Python source is not modified
+    by the GUI or LLM.

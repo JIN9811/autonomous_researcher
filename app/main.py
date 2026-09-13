@@ -495,16 +495,6 @@ LIVE_AGENT_REPORT_PROFILES: dict[str, dict[str, object]] = {
         ],
         "checklist": ["Validate required inputs", "Emit system handoff messages", "Stop on unresolved approval"],
     },
-    "analysis": {
-        "title": "UTM / FEM / Objective Evaluation",
-        "summary": "Processes measurement or simulation output into force/displacement features and objective scores.",
-        "focus_rows": [
-            {"label": "Data", "value": "UTM curve, CAE contour, boundary conditions, and specimen metadata"},
-            {"label": "Metrics", "value": "stiffness, energy absorption, peak force, mass-normalized score"},
-            {"label": "Evidence", "value": "plots, contour SVG, tabular summary, and objective JSON"},
-        ],
-        "checklist": ["Validate boundary conditions", "Attach quantitative metrics", "Prepare BO observation"],
-    },
     "knowledge": {
         "title": "Knowledge Memory / Evidence Update",
         "summary": "Writes validated outcomes into session/project knowledge so BO and later reports use observed evidence.",

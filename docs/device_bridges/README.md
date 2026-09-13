@@ -153,6 +153,15 @@ The package reuses the existing Windows/Local worker choice, 18 tool IDs,
 `equipment:windows_pyautogui` queue, `/equipment/windows` workspace and storage.
 Catalog and IDE inspection never pairs, selects or executes a worker.
 
+The installed [Analysis Agent Package](../../packages/agents/analysis/package.yaml)
+references [`cae@1.0.0`](../../device_bridges/cae/module.py). Canonical facade,
+CalculiX provider and registered tools live under `device_bridges/cae/`; the flat
+imports remain exact aliases. Analysis is the package/decision owner, CAE is the
+computation bridge, and CalculiX is its internal provider. The shared PINN bridge
+is not activated by this package. Catalog and IDE inspection never starts a
+solver, changes admission/queue/cancellation state or reclassifies computation
+as a Low-level device.
+
 ### Existing Integration Boundaries
 
 Extend the narrowest existing boundary that fits the new capability.

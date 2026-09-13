@@ -5,7 +5,7 @@ status: active
 authority: proposal
 decision_status: approved
 audience: [developer, maintainer]
-scope: [runtime_ide, design, orchestrator, specimen, vision, manipulation, equipment, executable_modules]
+scope: [runtime_ide, design, orchestrator, specimen, vision, manipulation, equipment, analysis, executable_modules]
 summary: One executable definition shared by the agent backend and editable Runtime IDE.
 related_docs:
   - docs/runtime/runtime_ide.md
@@ -21,7 +21,7 @@ supersedes: []
 | Item | Status |
 |---|---|
 | User approval | Approved in conversation, 2026-09-13 |
-| Scope | Orchestrator plus installed Design, Specimen, Vision, Manipulation and Equipment internals; shared extension contract |
+| Scope | Orchestrator plus installed Design, Specimen, Vision, Manipulation, Equipment and Analysis internals; shared extension contract |
 | Authority | One executable graph, not a separate diagram or inferred checkpoint chain |
 | Physical effects | No hardware validation or device-path changes in this migration |
 | Application | Existing validate/version/activate path; running definitions remain pinned |
@@ -115,6 +115,14 @@ Middle software, Low Windows/local worker boundary and cross-cutting
 Guardian/Evidence internals. The editable module graph and the read-only
 eight-block Skill Flow are separate projections of separate contracts.
 
+Analysis applies the contract with `analysis.task` and `analysis.deliver` as its
+two composite Middle operations. Its High CODE nodes show actual bounded LLM
+decisions; numerical processing and the CAE computation bridge stay Middle; Low
+is empty because a solver is not a device controller. Guardian/Evidence remain
+cross-cutting. The installed package composes CAE and its internal CalculiX
+provider without activating the shared PINN bridge or changing foreground BO,
+background worker, admission, queue or cancellation semantics.
+
 ## Frontend and Application
 
 The existing Runtime IDE module canvas projects the executable definition. Edges
@@ -172,6 +180,25 @@ after a response violated the required search-before-read identity contract;
 Guardian correctly blocked before BO. Both attempts are retained, so the record
 shows a successful virtual cycle and the observed stochastic failure rather than
 claiming universal model reliability or physical validation.
+
+## Analysis Implementation Evidence — 2026-09-13
+
+Analysis now uses the same installed executable/source catalog for backend,
+generic five-area IDE canvas and light document SVG. The two composite operations
+and source-bound CODE relationships preserve High actual LLM decisions, Middle
+processing/CAE computation, an empty Low device area and cross-cutting
+Guardian/Evidence. `analysis@1.0.0` composes `cae@1.0.0`, whose internal provider
+is CalculiX; the shared PINN bridge remains inactive.
+
+The module frontend owns the existing Analysis report/dashboard composition.
+Four FEM panels now use independent common dashboard-card wrappers while the host
+retains one controller, read-only polling, selection and in-place updates. Focused
+Node and guarded Python owner, asset, source-symbol and renderer tests pass. The
+scoped GPT-5.5 Analysis path reached BO readiness with two actual decisions and
+without waiting for FEM; the separate background resource-held two-loop test also
+passed. Both used non-physical boundaries. A whole real-API virtual cycle has not
+passed because two attempts stopped at upstream review/recovery gates before
+Analysis, so this evidence does not claim a complete cycle or hardware validation.
 
 ## Non-goals
 

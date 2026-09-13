@@ -42,7 +42,7 @@ def _reversed_orchestrator_payload(client: TestClient) -> dict:
     return payload
 
 
-@pytest.mark.parametrize('module_id', ['analysis', 'bo', 'guardian', 'knowledge'])
+@pytest.mark.parametrize('module_id', ['bo', 'guardian', 'knowledge'])
 def test_legacy_module_api_delivers_control_view_without_converting_execution(module_api, module_id):
     client, _, _, guard, root = module_api
     installed = yaml.safe_load((root / module_id / 'module.yaml').read_text())['module']
@@ -52,6 +52,43 @@ def test_legacy_module_api_delivers_control_view_without_converting_execution(mo
     assert delivered['metadata']['control_view'] == installed['metadata']['control_view']
     assert delivered['internal_graph'] == installed['internal_graph']
     assert not delivered.get('execution_graph')
+    assert guard.physical_call_count == 0
+
+
+def test_analysis_installed_report_projection_and_graph(module_api):
+    client, _, controller, guard, _ = module_api
+    response = client.get("/api/modules/analysis").json()
+    assert {operation["handler"] for operation in response["execution_catalog"]["operations"]} == {
+        "analysis.task", "analysis.deliver"
+    }
+    assert len(response["execution_graph_revision"]) == 64
+    state = controller._state
+    state.latest_analysis.update({
+        "ok": True,
+        "utm_metrics": {"peak_force_N": 520.0},
+        "fem_agentic_loop": {"execution": "background", "status": "queued"},
+        "quality_gate": {"ok_for_bo": True},
+        "decisions": [{"phase": "data_validation"}],
+    })
+    state.run_metadata.update(
+        analysis_agent_payload={
+            "analysis": {"ok": False},
+            "bo_observation": {"ok_for_bo": True},
+            "bo_handoff": {"schema_version": "analysis_bo_handoff_v2"},
+        },
+        analysis_metrics={"peak_force_N": 520.0},
+    )
+    before = deepcopy(state.run_metadata)
+    report = client.get("/api/agents/analysis/report")
+    assert report.status_code == 200
+    sections = report.json()["report"]["sections"]
+    assert sections["analysis_report"]["ok"] is True
+    assert sections["role_specific"]["measurement"] == {"peak_force_N": 520.0}
+    assert sections["role_specific"]["fem"] == {"execution": "background", "status": "queued"}
+    assert sections["bo_handoff"] == {"schema_version": "analysis_bo_handoff_v2"}
+    assert sections["metrics"] == {"peak_force_N": 520.0}
+    assert {key: state.run_metadata[key] for key in before} == before
+    assert "_projection_state" not in state.run_metadata
     assert guard.physical_call_count == 0
 
 

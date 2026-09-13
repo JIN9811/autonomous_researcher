@@ -7,14 +7,22 @@ audience: [researcher, developer, reviewer, operator]
 scope: [agents, analysis, experimental_data, cae, model_improvement]
 summary: Measured BO handoff independent of cancellable background FEM, bounded evidence-driven decisions, immutable model improvement, and read-only Live result cards.
 source_of_truth:
-  - agents/analysis_agent.py
-  - agents/analysis_decisions.py
-  - agents/analysis_improvement.py
-  - agents/analysis_refinement.py
-  - agents/analysis_runtime.py
-  - agents/analysis_fem.py
-  - agents/analysis_calibration.py
-  - agents/analysis_mechanisms.py
+  - agents/analysis/agent.py
+  - agents/analysis/module.py
+  - agents/analysis/execution.py
+  - agents/analysis/structure.py
+  - agents/analysis/presentation.py
+  - agents/analysis/frontend/live_report.js
+  - agents/analysis/decisions.py
+  - agents/analysis/improvement.py
+  - agents/analysis/refinement.py
+  - agents/analysis/runtime.py
+  - agents/analysis/fem.py
+  - agents/analysis/calibration.py
+  - agents/analysis/mechanisms.py
+  - device_bridges/cae/module.py
+  - packages/agents/analysis/package.yaml
+  - graphs/modules/analysis/ui.yaml
   - app/analysis_fem_routes.py
   - utils/cae_model_package.py
   - web/static/analysis_fem_live.js
@@ -23,8 +31,8 @@ source_of_truth:
   - utils/cae_field_view.py
   - app/cae_fields_routes.py
   - orchestrator/langgraph_runtime.py
-last_verified: 2026-09-10
-verified_against: retained-energy-reference-native-deck-match-and-131-targeted-tests
+last_verified: 2026-09-13
+verified_against: installed-analysis-owner-asset-report-and-control-view-tests
 related_docs:
   - docs/agents/README.md
   - docs/agents/equipment_agent.md
@@ -47,7 +55,7 @@ supersedes: []
 
 | At a glance | Details |
 |---|---|
-| Runtime status | Measured handoff and independent background FEM implemented / non-actuating regression verified |
+| Runtime status | Installed `analysis@1.0.0` owner; measured handoff and independent background FEM preserved |
 | LLM decision layer | Bounded roles / API and local vLLM improvement-loop decisions verified |
 | Physical effect | None; registered solver computation only |
 | Primary handoff | Measured objective and evidence → Knowledge / BO |
@@ -78,6 +86,26 @@ values. Running FEM and promoting a material model are separate operations.
 These are responsibility areas, not five sequential graph nodes. Analysis does
 not redesign specimens, operate laboratory equipment, or replace BO's candidate
 selection. Its external graph node and existing device connections are unchanged.
+
+## Installed Package and Executable Structure
+
+The active `agent.analysis_agent` implementation is owned by
+[`agents/analysis/`](../../agents/analysis/). The installed
+[`analysis@1.0.0` package](../../packages/agents/analysis/package.yaml) composes
+that single owner with the existing `cae@1.0.0` computation bridge. Exact legacy
+modules such as `agents/analysis_agent.py` remain compatibility aliases; they are
+not a second implementation. The package is a composition contract, not a
+bridge: Analysis calls CAE, whose internal provider remains CalculiX where the
+registered runtime selects it. The shared PINN bridge stays inactive here.
+
+![Analysis source-bound five-area control view](assets/figures/analysis_control_areas.svg)
+
+**Figure Analysis-0.** The installed module exposes two composite Middle
+operations, `analysis.task` and `analysis.deliver`. Solid edges are task/data
+flow; dashed `CODE` edges bind the nodes to canonical source symbols. High-Level
+nodes preserve the `LLM` decision and `LLM call` process labels. Guardian and
+Knowledge remain cross-cutting areas, while Low-Level Control is intentionally
+empty because CAE is computation, not a device actuator.
 
 ## Closed-Loop Position and Handoffs
 
@@ -251,6 +279,9 @@ solver execution or device command connection.
 
 | Interface | Purpose | Effect |
 |---|---|---|
+| `GET /api/modules/analysis` | Installed module, source catalog and executable structure | Read-only owner metadata |
+| `GET /api/agents/analysis/report` | Project the full Analysis report, BO handoff and FEM evidence | Read-only; hydrates the owner UI without compact-state loss |
+| `GET /module-assets/analysis/live_report.js` | Serve the active owner's Live frontend factory | Read-only; unavailable when the owner is inactive |
 | `AgentContext.complete("analysis_reasoning", ...)` | Role-specific bounded decision | Existing registered API/local model route |
 | `cae.prepare_static_analysis` | Prepare and assess an isolated mesh/deck | Registered computation; returns reusable receipt and mesh evidence |
 | `cae.run_static_analysis` | Solve the prepared mesh, or existing explicit simulation request | Registered computation with preserved mode/runtime gates |
@@ -267,11 +298,13 @@ solver execution or device command connection.
 
 ### Four persistent Live cards
 
-The Live Analysis area always contains **Experiment vs FEM**, **FEM Response**,
-**Solver Contour**, and **Agentic Progress**. Empty/pending/partial/failed states
-are explicit. Previous/Next selects attempts inside the existing response and
-overlay cards, and available attempt/frame contours inside the existing contour
-card; new attempts do not create duplicate cards. Field controls select available
+The Live Analysis area always contains four independent common dashboard cards:
+**Experiment vs FEM**, **FEM Response**, **Solver Contour**, and **Agentic
+Progress**. They use the same header, section-selection and grid-spacing rules as
+other Live report cards; there is no monolithic FEM region. Empty, pending,
+partial, and failed states are explicit. Previous/Next updates the existing response and
+overlay cards in place, and available attempt/frame contours in the existing
+contour card; new attempts do not create duplicate cards. Field controls select available
 von Mises stress or displacement, with a link to the full field viewer. F-D/S-S
 selection uses the declared specimen area/height, not fitted normalization.
 

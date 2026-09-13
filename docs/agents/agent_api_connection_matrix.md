@@ -103,12 +103,25 @@ See the [Vision Reference](vision_agent.md) and
 See the [Equipment Reference](equipment_agent.md#installed-package-and-executable-structure)
 and [Windows/PyAutoGUI Reference](../device_bridges/windows_pyautogui_bridge.md).
 
-- `agents/*_agent.py`
-- `agents/*_decision*.py`, `agents/analysis_improvement.py`, `agents/source_curation.py`
+### Installed Analysis Owner (2026-09-13)
+
+| Surface | Current owner and boundary |
+|---|---|
+| Agent/package | `agent.analysis_agent`, installed `analysis@1.0.0`; canonical code under `agents/analysis/` with exact flat-module aliases |
+| Execution | `analysis.task` and `analysis.deliver` preserve the composite measured/BO path and independent background FEM; High LLM decisions, Middle numeric/CAE work, no Low device owner |
+| Live report | `/api/agents/analysis/report` projects the full owner evidence; `/module-assets/analysis/live_report.js` renders its report and four independent common FEM dashboard cards |
+| Bridge | `cae@1.0.0`, runtime identity `cae_bridge`; the internal registered provider is CalculiX, while shared PINN remains inactive |
+| Settings/evidence | Existing Analysis state, FEM job store, artifacts, cancellation and read-only polling; no new settings store, unload API or worker cancellation |
+
+See the [Analysis Reference](analysis_agent.md#installed-package-and-executable-structure)
+and [CAE Computation Bridge Reference](../device_bridges/cae_computation_bridges.md).
+
+- installed owner packages under `agents/<agent_id>/`; exact flat modules remain compatibility aliases;
+- Analysis source catalog and decisions under `agents/analysis/`, including `module.py`, `execution.py`, `structure.py` and `frontend/live_report.js`;
 - `graphs/modules/*/module.yaml`
 - `graphs/configs/atr_closed_loop.yaml`
 - `app/main.py` and `app/controller.py`
-- `app/analysis_fem_routes.py`, `app/cae_fields_routes.py`
+- `app/analysis_fem_routes.py`, `app/cae_fields_routes.py`, `device_bridges/cae/module.py`
 - `knowledge/http_api.py`, `knowledge/source_api.py`, `knowledge/source_runtime.py`
 - `backends/`, `device_bridges/`, and `knowledge/`
 
@@ -202,7 +215,7 @@ cross-cutting responsibilities, not additional sequential model calls.
 | Vision | specimen-pose status/snapshot/release | camera, active robot camera, UTM vision/runtime APIs | Vision/UTM workspaces and run retry | `/openapi.json`, Vision tools/bridge handlers |
 | Manipulation | manipulation-agent config/test/run | `/api/lerobot/*` robotics services | LeRobot workspace configuration/training/simulation/mirror | `/openapi.json`, LeRobot bridge |
 | Lab Equipment | `GET /api/agents/equipment/report`; installed frontend asset | `/api/equipment/*`, `/api/bridges*` | equipment skill/profile/worker/UTM workspaces; module/package catalogs | `/openapi.json`, `agents/equipment/module.py`, Windows/PyAutoGUI bridge/tool registry |
-| Analysis | `/api/analysis/fem/jobs` and scoped job cancellation; not direct graph-stage execution | `/api/cae/config`, `/api/cae/run`, `/api/cae/fields*` | CAE workspace, field viewer and run artifacts | `/openapi.json`, Analysis FEM and CAE route modules |
+| Analysis | `/api/agents/analysis/report`, `/api/analysis/fem/jobs` and scoped job cancellation; not direct graph-stage execution | `/api/modules/analysis`, `/module-assets/analysis/live_report.js`, `/api/cae/config`, `/api/cae/run`, `/api/cae/fields*` | CAE workspace, field viewer and run artifacts | `/openapi.json`, `agents/analysis/module.py`, `device_bridges/cae/module.py` |
 | Knowledge | context/report/Markdown via Knowledge service | `/api/knowledge/markdown/*`, `/api/knowledge/sources/*`, ontology and typed-memory surfaces | Source intake settings/scan/retry; archive intake and scoped note lifecycle | `/openapi.json`, active Markdown/source installers; retired graph/manual routes excluded |
 | BO | `/api/bo/run` direct bounded workspace execution | `/api/bo/config`, `/api/bo/benchmark` | BO workspace and graph-run context | `/openapi.json`, BO agent/benchmark services |
 | Guardian | `/api/guardian/status`, run-scoped status | device health and queue status tools | incidents and approval review/resolve APIs | `/openapi.json`, Guardian status/policy services |

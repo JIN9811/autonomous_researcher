@@ -35,6 +35,10 @@ source_of_truth:
   - agents/equipment/module.py
   - agents/equipment/structure.py
   - agents/equipment/frontend/live_report.js
+  - agents/analysis/module.py
+  - agents/analysis/structure.py
+  - agents/analysis/frontend/live_report.js
+  - device_bridges/cae/module.py
   - graphs/configs/atr_closed_loop.yaml
   - graphs/modules
   - orchestrator/langgraph_runtime.py
@@ -61,7 +65,7 @@ supersedes: []
 | Workspace | `/ide` |
 | Coverage | Editing, validation, versioning, run control and evidence inspection |
 | Implementation | [Runtime APIs](../../app/main.py) · [IDE client](../../web/static/runtime_ide.js) |
-| Recorded basis | 2026-09-13 module lifecycle and executable Design/Orchestrator/Equipment graphs; earlier sections retain their recorded scope · [Verification scope](#verification) |
+| Recorded basis | 2026-09-13 module lifecycle and executable Design/Orchestrator/Equipment/Analysis graphs; earlier sections retain their recorded scope · [Verification scope](#verification) |
 
 ## Applied Module Membership
 
@@ -113,6 +117,23 @@ IDs while the Live host retains polling, run/process synchronization and action
 delegation. An inactive owner supplies no current cards or frontend asset. The
 generic module canvas renders the executable Equipment graph and source catalog;
 the Profile-bound Skill Flow remains a separate read-only workspace.
+
+Analysis now exposes its installed owner at `/api/modules/analysis`. Its two
+Middle operations retain the existing composite analysis task and delivery
+boundaries; the measured foreground still reaches BO without waiting for
+optional background FEM. Source-bound CODE relationships show actual High LLM
+decisions, Middle processing and CAE computation, cross-cutting Guardian/Evidence,
+and an intentionally empty Low area. `analysis@1.0.0` composes `cae@1.0.0`, which
+opens its internal CAE/CalculiX components without treating the package itself as
+a bridge or enabling the shared PINN adapter. The
+[Analysis document figure](../agents/assets/figures/analysis_control_areas.svg)
+uses this same catalog and the shared light document renderer.
+
+The module-owned frontend supplies the existing report composition. Its four FEM
+views are independent common dashboard cards while the Live host retains the
+single FEM controller, polling, in-place attempt/contour navigation and lifecycle.
+An inactive owner supplies no current Analysis cards or frontend asset; removing
+it does not cancel an already owned computation worker.
 
 Validate and Compile display **Applied**, **Draft**, **Add** and **Remove**
 owner lists before a graph is applied. The preview uses the same graph-linked
@@ -193,6 +214,8 @@ It does not replace:
 | Runtime execution | `orchestrator/langgraph_runtime.py` |
 | Profile-bound Equipment Skill Flow | `utils/equipment_skill_flow.py`, `graphs/modules/equipment/equipment_skill_flows.json` |
 | Equipment executable/source catalog and Live composition | `agents/equipment/module.py`, `agents/equipment/structure.py`, `agents/equipment/frontend/live_report.js` |
+| Analysis executable/source catalog and Live composition | `agents/analysis/module.py`, `agents/analysis/structure.py`, `agents/analysis/frontend/live_report.js` |
+| Analysis computation bridge catalog | `device_bridges/cae/module.py`, internal `device_bridges/cae/bridge.py`, `device_bridges/cae/calculix.py` |
 | Interaction and runtime regression evidence | `tests/ui/runtime_ide_browser_audit.py`, `tests/unit/test_langgraph_runtime.py` |
 
 Historical Codex packages under `docs/ATR_*_Package/` describe implementation
@@ -300,9 +323,9 @@ every submitted payload; client state is never the execution authority.
 
 All ten agents use the existing graph canvas with responsibility
 areas: **High**, **Middle**, **Low**, **Guardian / Safety**, and **Knowledge / Evidence**.
-There is no separate architecture-view switch. Design, Specimen, Vision, Manipulation and
-Orchestrator use `module.execution_graph` as the executable source for backend
-and canvas; the other modules retain
+There is no separate architecture-view switch. Design, Specimen, Vision, Manipulation,
+Equipment, Analysis and Orchestrator use `module.execution_graph` as the executable source for backend
+and canvas; the remaining modules retain
 their existing checkpoint representation. The owner catalog also supplies
 `implementation_structure`: source-bound function, tool, check and evidence
 relationships around those operations. **High** means bounded LLM decisions;
@@ -810,6 +833,17 @@ source map, its separate eight-block Skill Flow workspace, the Package-to-
 Windows/PyAutoGUI bridge graph, the original Live cards, and Design → Equipment
 owner lifecycle after cache-busted reload. The corrected Live check reported no
 console warning or error and made no physical call.
+
+The 2026-09-13 Analysis migration is covered by owner-asset/report admission,
+full source-symbol resolution, execution-catalog/SVG, module-host and FEM
+controller tests. The read-only 1920×1080 check confirmed the generic five-area
+Analysis map, Package → CAE → internal CalculiX drilldown, four independent
+common dashboard cards, report-section selection, attempt navigation,
+stress/strain switching, contour frame/field selection and polling from the
+preserved compact job identity. The scoped registered-model Analysis check
+reached BO readiness without waiting for FEM. No physical or native solver call
+was made, and the unsuccessful whole-cycle attempts stopped at upstream owners
+before Analysis rather than establishing a complete-cycle pass.
 
 A guarded registered API-model retry completed the virtual cycle through the
 next Design with 34 actual saved-provider calls, all ten required owners, zero

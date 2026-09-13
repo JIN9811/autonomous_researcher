@@ -36,6 +36,7 @@ from agents.knowledge_agent import KnowledgeAgent
 from agents.orchestrator_agent import OrchestratorAgent
 from agents.registry import AgentRegistry
 from backends.mock_llm import MockLLMBackend
+from backends.llm_backend import LLMResponse
 from backends.model_router import ModelRouter
 from knowledge.experiment_db import ExperimentDB
 from knowledge.failure_memory import FailureMemory
@@ -50,6 +51,34 @@ from utils import paths
 class _OfflineRAG:
     async def retrieve(self, **kwargs):
         return {'coverage': 1.0, 'local_chunks': [], 'web_results': []}
+
+
+class _OfflineDecisionBackend(MockLLMBackend):
+    """Admit only the runtime-selected owner handoff; all other mock behavior stays unchanged."""
+
+    async def complete(self, *, model, system_prompt, user_prompt, metadata=None, images=None):
+        requested = metadata.get('requested_task_type', metadata.get('task_type')) if isinstance(metadata, dict) else None
+        if requested == 'orchestrator_plan':
+            request = json.loads(user_prompt[user_prompt.index('{'):])
+            candidate = request['context']['handoff_candidates'][0]
+            evidence_refs = list(request['evidence'])
+            return LLMResponse(
+                text=json.dumps({
+                    'tool': 'prepare_handoff',
+                    'arguments': {'candidate': candidate},
+                    'reason': 'Controlled fixture admits the runtime-selected production owner.',
+                    'evidence_refs': evidence_refs,
+                }),
+                model=model,
+                raw={'mock': True, 'fixture': 'runtime_selected_handoff'},
+            )
+        return await super().complete(
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            metadata=metadata,
+            images=images,
+        )
 
 
 class _CSVAcquisitionBoundary(BaseAgent):
@@ -132,7 +161,7 @@ async def test_two_measured_loops_reach_next_design_while_native_compute_is_busy
     tools.register('cae.prepare_static_analysis', lambda payload: {
         'ok': False, 'status': 'blocked', 'failure_code': 'OFFLINE_NATIVE_NOT_REGISTERED'})
     tools.register('cae.run_static_analysis', forbidden)
-    backend = MockLLMBackend()
+    backend = _OfflineDecisionBackend()
     context = AgentContext(model_router=ModelRouter(yaml.safe_load((tmp_path / 'configs/models.yaml').read_text())),
         primary_backend=backend, fallback_backend=backend, rag=_OfflineRAG(),
         experiment_db=ExperimentDB(), failure_memory=FailureMemory(), tools=tools,
@@ -144,7 +173,13 @@ async def test_two_measured_loops_reach_next_design_while_native_compute_is_busy
         registry.register(agent)
     state = OrchestratorState(run_id='parallel-software-loop', experiment_id='offline-measured-loop',
         mode=Mode.TEST, stage=Stage.DESIGN, active_goal='maximize compression energy density',
-        current_experiment_spec={'specimen_size_mm': [20, 20, 20], 'expected_mass_g': 6.0})
+        current_experiment_spec={
+            'specimen_size_mm': [20, 20, 20],
+            'expected_mass_g': 6.0,
+            'material': 'PLA',
+            'objective_type': 'energy_absorption',
+            'test_protocol': 'quasistatic_compression',
+        })
     run_dir = tmp_path / 'runs' / state.run_id
     run_dir.mkdir(parents=True)
     events = []
@@ -174,7 +209,7 @@ async def test_two_measured_loops_reach_next_design_while_native_compute_is_busy
             await asyncio.wait_for(runtime.step(), 20)
             assert not state.is_paused, state.run_metadata.get('guardian')
             assert state.stage != Stage.ERROR, state.model_dump(mode='json')
-            if previous == Stage.ANALYSIS:
+            if previous == Stage.ANALYSIS and state.stage != previous:
                 observed = state.latest_analysis['bo_observation']
                 assert observed['ok_for_bo'] is True
                 assert observed['fidelity'] == 'utm_high'
@@ -183,12 +218,12 @@ async def test_two_measured_loops_reach_next_design_while_native_compute_is_busy
                 assert Path(state.latest_analysis['source']['path']).is_relative_to(tmp_path)
                 records.append({'kind': 'analysis', 'loop': state.loop_count,
                     'observation_id': observed['observation_id'], 'score': observed['objective_score']})
-            elif previous == Stage.BO:
+            elif previous == Stage.BO and state.stage != previous:
                 bo = state.run_metadata['bo_agent']
                 records.append({'kind': 'bo', 'loop': state.loop_count,
                     'result': deepcopy(bo),
                     'recommended_constraints': deepcopy(state.run_metadata['bo_recommended_constraints'])})
-            elif previous == Stage.DESIGN:
+            elif previous == Stage.DESIGN and state.stage != previous:
                 records.append({'kind': 'design', 'loop': state.loop_count,
                     'specimen_id': state.current_experiment_spec['specimen_id'],
                     'report': deepcopy(state.run_metadata.get('design_report', {}))})
@@ -200,7 +235,7 @@ async def test_two_measured_loops_reach_next_design_while_native_compute_is_busy
         designs = [r for r in records if r['kind'] == 'design']
         bos = [r for r in records if r['kind'] == 'bo']
         assert len(analyses) == len(designs) == 2
-        assert len(bos) == 1  # Terminal loop does not request an unused next design.
+        assert len(bos) == 2
         assert len({r['observation_id'] for r in analyses}) == 2
         assert designs[0]['specimen_id'] != designs[1]['specimen_id']
         assert designs[1]['report']['prior_context']['prior_count'] >= 1
@@ -208,7 +243,7 @@ async def test_two_measured_loops_reach_next_design_while_native_compute_is_busy
         assert designs[1]['report']['prior_context']['bo_recommendation']
         for observation, bo in zip(analyses, bos):
             assert observation['observation_id'] in bo['result']['observation_integrity']['accepted_observation_ids']
-        assert [r['kind'] for r in records] == ['design', 'analysis', 'bo', 'design', 'analysis']
+        assert [r['kind'] for r in records] == ['design', 'analysis', 'bo', 'design', 'analysis', 'bo']
         native_after = _native_snapshot()
         if native_before:
             assert (native_before['pid'], native_before['start_ticks']) == (native_after['pid'], native_after['start_ticks'])

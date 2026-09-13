@@ -81,6 +81,37 @@ def test_planning_snapshot_preserves_latest_bo_visualization_projection() -> Non
     assert compact["bo_visualization"] == visualization
 
 
+def test_planning_analysis_message_preserves_compact_background_fem_identity() -> None:
+    controller = load_runtime()
+    controller._record_planning_message(
+        {
+            "role": "analysis_ai",
+            "content": "Measured analysis completed; background FEM queued.",
+            "analysis": {
+                "utm_curve": {"preview": [{"displacement_mm": 0.0, "force_N": 0.0}]},
+                "fem_job": {
+                    "job_id": "analysis-job-7",
+                    "run_id": "run-7",
+                    "loop_key": "run-7:loop-2",
+                    "specimen_id": "specimen-7",
+                    "status": "queued",
+                    "attempts": [{"attempt_id": "large-runtime-payload"}],
+                },
+            },
+        }
+    )
+
+    displayed = controller.planning_snapshot()["messages"][-1]["analysis"]
+
+    assert displayed["fem_job"] == {
+        "job_id": "analysis-job-7",
+        "run_id": "run-7",
+        "loop_key": "run-7:loop-2",
+        "specimen_id": "specimen-7",
+        "status": "queued",
+    }
+
+
 def test_manipulation_message_contains_result_without_removed_reward_fields() -> None:
     controller = load_runtime()
     message = controller._format_planning_stage_message(
@@ -1612,7 +1643,7 @@ async def test_installed_printer_connection_info_pending_reprompts_without_crash
         "specimen_id": "specimen-installed",
         "input_request": {
             "type": "printer_connection_info",
-            "connection_memory_path": "/home/jin/autonomous_researcher/memory/printer_connection.json",
+            "connection_memory_path": "memory/printer_connection.json",
             "provider": "selected active printer",
         },
     }
@@ -1637,7 +1668,7 @@ async def test_installed_printer_connection_info_pending_reprompts_without_crash
     assert resume_called is False
     assert controller._state.run_metadata["pending_specimen_input"]["type"] == "printer_connection_info"
     assert any(
-        "/home/jin/autonomous_researcher/memory/printer_connection.json" in str(entry.get("content", ""))
+        "memory/printer_connection.json" in str(entry.get("content", ""))
         for entry in controller._planning_messages
     )
 
@@ -1659,7 +1690,7 @@ async def test_pending_printer_choice_phrase_routes_to_specimen_before_new_test_
         "specimen_id": "specimen-installed",
         "input_request": {
             "type": "printer_connection_info",
-            "connection_memory_path": "/home/jin/autonomous_researcher/memory/printer_connection.json",
+            "connection_memory_path": "memory/printer_connection.json",
             "provider": "selected active printer",
         },
     }
@@ -1705,7 +1736,7 @@ async def test_installed_printer_connection_info_done_retries_same_specimen_stag
         "specimen_id": "specimen-installed",
         "input_request": {
             "type": "printer_connection_info",
-            "connection_memory_path": "/home/jin/autonomous_researcher/memory/printer_connection.json",
+            "connection_memory_path": "memory/printer_connection.json",
             "provider": "selected active printer",
         },
     }
@@ -3841,9 +3872,9 @@ async def test_planning_blocked_tool_event_carries_visual_data_recovery_metadata
             "detail": "C:/ATR/utm_exports/run-001/specimen.csv",
             "sequence_id": "equipment-run-001",
             "program_id": "utm_compression_start_v1",
-            "data_file_ref": "/home/jin/autonomous_researcher/artifacts/equipment/run-001/utm/specimen.csv",
+            "data_file_ref": "artifacts/equipment/run-001/utm/specimen.csv",
             "windows_path": "C:/ATR/utm_exports/run-001/specimen.csv",
-            "linux_path": "/home/jin/autonomous_researcher/artifacts/equipment/run-001/utm/specimen.csv",
+            "linux_path": "artifacts/equipment/run-001/utm/specimen.csv",
             "sha256": "abc123",
             "row_count_probe": 80,
             "save_method": "manual_save_dialog",

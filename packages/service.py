@@ -45,7 +45,7 @@ def installed_agent_packages(descriptions: Iterable[dict]) -> list[dict]:
     """
     installed = {item["id"]: item for item in descriptions}
     result = []
-    for ident in ("design", "specimen", "vision", "manipulation", "equipment"):
+    for ident in ("design", "specimen", "vision", "manipulation", "equipment", "analysis"):
         if ident not in installed:
             continue
         raw = yaml.safe_load(files("packages").joinpath("agents", ident, "package.yaml").read_text())

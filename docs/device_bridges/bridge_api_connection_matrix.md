@@ -75,6 +75,12 @@ LeRobot dependencies. LeRobot retains ActiveCam motion/capture/return and rollou
 stop; Camera/Vision retains observation and evidence services. This changes code
 ownership and discovery without adding a device route or physical validation.
 
+The 2026-09-13 Analysis package migration installs `cae@1.0.0` with canonical
+bridge/tool code under `device_bridges/cae/` and exact legacy aliases. Analysis
+pins this computation bridge; CalculiX is an internal provider and shared PINN
+remains inactive. Existing admission, queue, cancellation and solver semantics
+are unchanged, and no computation is reclassified as Low hardware control.
+
 - `device_bridges/` implementations;
 - `mcp_tools/*_tools.py` and `app/bootstrap.py` registration;
 - route declarations in `app/main.py`, `app/analysis_fem_routes.py` and `app/cae_fields_routes.py`;
@@ -194,8 +200,9 @@ These are selected current interfaces, not instructions to execute live tests.
 
 | Surface | Purpose | Ownership / effect |
 |---|---|---|
-| `GET /api/packages`, `GET /api/modules/equipment`, `GET /api/runtime/agent-manifests` | Inspect installed Equipment/Windows-PyAutoGUI composition | Read-only metadata; no worker discovery, pairing or execution |
+| `GET /api/packages`, `GET /api/modules/equipment`, `GET /api/modules/analysis`, `GET /api/runtime/agent-manifests` | Inspect installed Equipment and Analysis compositions | Read-only metadata; no worker/device probe or solver execution |
 | `GET /module-assets/equipment/live_report.js` | Serve owner composition only while Equipment is installed and active | Presentation only; no timer, listener or device action |
+| `GET /module-assets/analysis/live_report.js`, `GET /api/agents/analysis/report` | Serve the active Analysis owner UI and full projected evidence | Presentation/read-only projection; no solve, poll duplication or cancellation |
 | `GET /api/equipment/runtime/current` | Latest execution, optionally scoped by run/profile/execution | Read durable Equipment Runtime state |
 | `GET /api/equipment/runtime/executions` and `GET /api/equipment/runtime/executions/{execution_id}` | List records or inspect one execution | Read-only; does not replay a Flow |
 | `/api/equipment/skills/*` and `/api/equipment/profiles/*` | Versioned workflow/profile lifecycle and tests | Operator actions may deploy or execute; inspect the individual method/contract |

@@ -15,11 +15,13 @@ scope:
   - external_computation
 summary: Staged, cancellable CAE/CalculiX computation independent of measured BO, saved solver-field access, and explicit-availability PINN operations.
 source_of_truth:
-  - device_bridges/cae_bridge.py
-  - device_bridges/calculix_bridge.py
+  - device_bridges/cae/module.py
+  - device_bridges/cae/bridge.py
+  - device_bridges/cae/calculix.py
+  - device_bridges/cae/tools.py
+  - device_bridges/cae/calculix_tools.py
+  - device_bridges/cae/requirements.txt
   - device_bridges/pinn_bridge.py
-  - mcp_tools/cae_tools.py
-  - mcp_tools/calculix_tools.py
   - mcp_tools/pinn_tools.py
   - configs/devices.yaml
   - app/main.py
@@ -27,11 +29,11 @@ source_of_truth:
   - utils/cae_field_view.py
   - app/cae_fields_routes.py
   - app/analysis_fem_routes.py
-  - agents/analysis_fem.py
-  - agents/analysis_runtime.py
+  - agents/analysis/fem.py
+  - agents/analysis/runtime.py
   - utils/cae_model_package.py
-last_verified: 2026-09-09
-verified_against: working-tree-2026-09-09-nonblocking-fem-live-cards
+last_verified: 2026-09-13
+verified_against: installed-cae-module-and-analysis-package-contracts
 related_docs:
   - docs/device_bridges/README.md
   - docs/agents/analysis_agent.md
@@ -48,16 +50,17 @@ supersedes: []
 | Purpose | Staged solver computation and saved-field access |
 | Connects | Analysis / CAE workspace ↔ computation services |
 | Effect | Local computation and artifacts; no equipment motion |
-| Implementation | [CAE tools](../../mcp_tools/cae_tools.py) |
-| Verification | [Recorded scope and evidence](#current-verification) · 2026-09-09 |
+| Implementation | [Installed CAE module](../../device_bridges/cae/module.py) |
+| Verification | [Recorded scope and evidence](#current-verification) · 2026-09-13 |
 
 ## Summary
 
-The CAE Computation boundary provides three related adapters: a deterministic/
-real-solver CAE facade, a guarded CalculiX quasi-static job path, and a PINN
-dataset/model registry that reports unavailable models instead of inventing
-predictions. These are external-computation and filesystem effects, not
-physical laboratory device control.
+The installed `cae@1.0.0` computation bridge contains the deterministic/
+real-solver CAE facade and guarded CalculiX quasi-static provider. The Analysis
+package composes this bridge; it does not become a bridge itself. The separate,
+shared PINN adapter remains inactive for Analysis and reports unavailable models
+instead of inventing predictions. These are external-computation and filesystem
+effects, not physical laboratory device control.
 
 Measured CSV analysis returns its BO observation and permits the next loop
 without waiting for optional FEM preparation or solving. An Analysis-owned job
@@ -76,9 +79,21 @@ between deterministic/test and real results.
 
 ## Source of Truth
 
-`CAEBridge`, `CalculiXBridge`, and `PINNBridge` define separate contracts.
-Their `mcp_tools` registrars are all called by bootstrap. `/api/cae/*` exposes
-the facade, while CalculiX and PINN primarily enter through registered tools.
+[`device_bridges/cae/module.py`](../../device_bridges/cae/module.py) is the
+installed bridge catalog. `CAEBridge` and its internal `CalculiXBridge` provider
+live under `device_bridges/cae/`; the exact legacy `device_bridges/cae_bridge.py`,
+`device_bridges/calculix_bridge.py`, `mcp_tools/cae_tools.py` and
+`mcp_tools/calculix_tools.py` paths remain aliases. `PINNBridge` is separate and
+shared. Bootstrap registers the same tool IDs, and `/api/cae/*` exposes the
+facade without creating a second runtime identity.
+
+### Installed composition
+
+`analysis@1.0.0` → `cae@1.0.0` → internal `CAEBridge` / `CalculiXBridge`.
+The bridge has computational Middle-level authority only: it may prepare meshes,
+run registered solvers and write artifacts, but it is never classified as a Low
+hardware controller. No new unload, cancellation, admission or queue contract is
+introduced by the package boundary.
 
 ## Actual Role
 
@@ -266,9 +281,10 @@ model/prediction contracts and does not hide model unavailability.
 solver requirement, artifact directory, and material/loading/boundary/mesh defaults.
 CalculiX falls back to CAE config unless a dedicated section exists. PINN uses
 defaults unless `devices.pinn` is provided; runtime training defaults false and
-no active model is configured. The current host uses `/home/jin/.local/bin/atr-ccx`
-and `/home/jin/.local/bin/atr-gmsh` wrappers for CalculiX 2.21 and Gmsh 4.12.1.
-Current adapters require executable paths, not network credentials.
+no active model is configured. The configured wrapper commands are declared in
+[`configs/devices.yaml`](../../configs/devices.yaml); the recorded runtime used
+CalculiX 2.21 and Gmsh 4.12.1. Current adapters require executable paths, not
+network credentials.
 
 ## State, Events, Artifacts, and Evidence
 

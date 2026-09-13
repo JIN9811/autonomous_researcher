@@ -2419,6 +2419,12 @@ class MainController:
             ),
         )
         source = analysis if isinstance(analysis, dict) else {}
+        fem_job = cls._select_runtime_fields(
+            source.get("fem_job"),
+            ("job_id", "run_id", "loop_key", "specimen_id", "status"),
+        )
+        if fem_job:
+            compact["fem_job"] = fem_job
         curve = source.get("stress_strain_curve") if isinstance(source.get("stress_strain_curve"), dict) else {}
         rows = curve.get("preview") if isinstance(curve.get("preview"), list) else curve.get("points") if isinstance(curve.get("points"), list) else []
         if rows:

@@ -1,0 +1,1 @@
+# Uses application Python dependencies; optional native solvers remain local runtime bindings.

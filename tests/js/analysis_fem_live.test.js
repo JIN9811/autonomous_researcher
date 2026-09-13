@@ -20,6 +20,69 @@ test('pending FEM shows measured curve and exactly four cards without fabricatin
   assert.match(html, /FEM pending/);
 });
 
+test('Live host adapter can render each FEM panel as an independent common dashboard card', () => {
+  const calls = [];
+  const view = fem.createController({renderCard: (title, body, options) => {
+    calls.push({title, body, options});
+    return `<section class="ar-report-card live-report-section ar-span-${options.span}" data-fem-card="${options.id}">${body}</section>`;
+  }});
+  view.setContext(analysis);
+  const html = view.html();
+  assert.equal(calls.length, 4);
+  assert.deepEqual(calls.map(call => call.title), ['Experiment vs FEM', 'FEM Response', 'Solver Contour', 'Agentic Progress']);
+  assert.ok(calls.every(call => call.options.span === 6 && call.options.tone === 'analysis'));
+  assert.equal((html.match(/class="ar-report-card live-report-section/g) || []).length, 4);
+  assert.equal((html.match(/data-fem-body=/g) || []).length, 4);
+  assert.match(html, /data-live-preserve="fem:/);
+});
+
+test('common FEM cards use Live report contrast tokens while plots keep a white canvas', () => {
+  const css = fs.readFileSync(path.resolve(__dirname, '../../web/static/analysis_fem_live.css'), 'utf8');
+  const liveCss = css.slice(css.indexOf('/* Common Live report cards'));
+  assert.match(liveCss, /body\.planning-live-body \.analysis-fem-live \.fem-evidence dt,/);
+  assert.match(liveCss, /color: var\(--ar-muted/);
+  assert.match(liveCss, /body\.planning-live-body \.analysis-fem-live button[^}]*var\(--ar-text/s);
+  assert.match(css, /\.fem-chart[^}]*background:\s*#fff/s);
+});
+
+test('common card bodies update controls in place without recreating wrappers', () => {
+  let wrapperRenders = 0;
+  const bodies = Object.fromEntries(['overlay', 'response', 'contour', 'agentic'].map(name => [name, {
+    name, __femHTML: '', replacements: 0,
+    querySelector: () => null,
+    replaceChildren(content) { this.replacements += 1; this.lastContent = content; },
+  }]));
+  const ownerDocument = {createElement: () => {
+    const content = {querySelector: () => null, html: ''};
+    return {content, set innerHTML(value) { content.html = value; }};
+  }};
+  const mounted = {
+    isConnected: true, ownerDocument,
+    addEventListener() {},
+    querySelector(selector) {
+      const match = selector.match(/data-fem-body="([^"]+)"/);
+      return match ? bodies[match[1]] : null;
+    },
+  };
+  const view = fem.createController({renderCard: (title, body, options) => {
+    wrapperRenders += 1;
+    return `<section data-fem-card="${options.id}">${body}</section>`;
+  }});
+  view.setContext(analysis);
+  view.html();
+  view.mount(mounted);
+  const responseBody = bodies.response;
+  const before = responseBody.replacements;
+
+  view.accept({jobs: [job({attempts: [{attempt_id: 'a1'}, {attempt_id: 'a2'}]})]});
+  view.navigate('attempt', 1);
+
+  assert.equal(wrapperRenders, 4);
+  assert.equal(bodies.response, responseBody);
+  assert.ok(responseBody.replacements > before);
+  assert.match(responseBody.lastContent.html, /Attempt<\/dt><dd>a2/);
+});
+
 test('unavailable registration stays visible without inventing a job or making requests', async () => {
   const view = fem.createController({fetch: () => {throw Error('No job to query');}});
   view.setContext({fem_job: {status:'unavailable', reason:'worker unavailable'}});
@@ -131,17 +194,34 @@ function planningFunction(name) {
   return source.slice(start, end < 0 ? undefined : end);
 }
 
-test('Analysis dashboard embeds the consolidated cards, not the old curve and contour duplicates', () => {
-  const context = {window: {AnalysisFemLive: fem}, analysis, latestAnalysisPayload: () => analysis,
-    latestAnalysisBoHandoff: () => ({}), renderDashboardCard: title => `<aside>${title}</aside>`,
-    renderDashboardMetric: () => '', renderAnalysisTrustScore: () => '', renderAnalysisCurveOverlay: () => '',
-    renderAnalysisFieldLink: () => '', renderAnalysisMetricBars: () => '', renderAnalysisQualityDonut: () => '',
-    renderAnalysisProvenance: () => '', renderDashboardRows: () => '', liveAnalysisFemController: null};
+test('Analysis owner report hydration takes precedence over scalar-compacted session state', () => {
+  const context = {backendField: (source, keys) => {
+    for (const key of keys) {
+      let value = source;
+      for (const part of key.split('.')) value = value && value[part];
+      if (value !== undefined && value !== null) return value;
+    }
+    return null;
+  }, eventPayload: event => event.payload || {}};
   vm.createContext(context);
-  vm.runInContext(planningFunction('renderAnalysisDashboardCards'), context);
-  const html = vm.runInContext('renderAnalysisDashboardCards({}, "completed", "Analysis", {})', context);
+  vm.runInContext(planningFunction('latestReportPayload'), context);
+  vm.runInContext(planningFunction('latestAnalysisPayload'), context);
+  const hydrated = {utm_curve: {preview: [{displacement_mm: 1, force_N: 20}]}, fem_job: pointer};
+  context.report = {state: {latest_analysis: {objective_score: 0.7}}, messages: [{sections: {analysis_report: hydrated}}], events: []};
+  const selected = vm.runInContext('latestAnalysisPayload(report)', context);
+  assert.equal(selected.utm_curve.preview.length, 1);
+  assert.equal(selected.fem_job.job_id, 'j1');
+});
+
+test('host-owned Analysis FEM evidence keeps four common cards for the owner frontend', () => {
+  const context = {window: {AnalysisFemLive: fem}, liveAnalysisFemController: null,
+    renderDashboardCard: (title, body, options) => `<section class="ar-report-card live-report-section" data-fem-card="${options.data['fem-card']}"><h4>${title}</h4>${body}</section>`};
+  vm.createContext(context);
+  vm.runInContext(planningFunction('renderAnalysisFemEvidence'), context);
+  const html = vm.runInContext(`renderAnalysisFemEvidence(${JSON.stringify(analysis)})`, context);
   assert.equal((html.match(/data-fem-card=/g) || []).length, 4);
   assert.doesNotMatch(html, /Engineering Stress-Strain Curve|Solver Field Results|FEM \/ CAE Comparison/);
+  assert.ok(context.liveAnalysisFemController);
 });
 
 test('active Analysis polling is independent of completed foreground and pauses on other views', async () => {

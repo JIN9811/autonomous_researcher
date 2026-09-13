@@ -33,7 +33,7 @@ supersedes: []
 | 프로그램 코어 | Orchestrator, LangGraph, 세션, 공통 GUI 및 서비스 연결 유지 |
 | Package | Agent Package는 owner 단위, Experimental Package는 플랜·설정·연결을 포함한 실험 조합 |
 | 소프트웨어 기준점 | `9d11cf923f556e6abe87df3084dbbd5c022a5ea6`; 모듈별 전환 전에 동작 비교 근거 확정 |
-| Implementation status | Design/Specimen/Vision/Manipulation/Equipment installed modules and live reports; their executable graphs and ORC reuse the common host. Local Agent Packages include one LeRobot bridge shared by Manipulation and Vision, plus Equipment's existing Windows/PyAutoGUI bridge. Validation and scope are recorded in the owner execution plans. |
+| Implementation status | Design/Specimen/Vision/Manipulation/Equipment/Analysis installed modules and live reports; their executable graphs and ORC reuse the common host. Analysis composes the installed CAE bridge and its internal CalculiX provider; shared PINN remains inactive. Validation and scope are recorded in the owner execution plans. |
 | 실증 경계 | 소프트웨어 호환성 검증과 기존 물리 동작 stable 실증을 별도로 관리 |
 
 ## Summary
@@ -550,7 +550,7 @@ freshness 규칙을 유지한다. 공통 adapter를 추가해 기존 실행 검�
 
 ## Limitations and Known Gaps
 
-- Design/Specimen/Vision/Manipulation/Equipment은 owner 코드·전용 화면·실행 정의를 모듈 계약에 연결했다. 설치 catalog와 활성 binding을 분리하며, IDE 탭 열기/닫기는 활성화가 아니다. [적용 수명주기 계획·검증](../plans/2026-09-13-design-ide-module-lifecycle.md)을 기준으로 한다. 로컬 Package catalog와 비활성 Experimental Package 초안 교환은 추가했으나, 원격 코드 설치·전체 Bridge 이전은 구현 범위가 아니다.
+- Design/Specimen/Vision/Manipulation/Equipment/Analysis은 owner 코드·전용 화면·실행 정의를 모듈 계약에 연결했다. 설치 catalog와 활성 binding을 분리하며, IDE 탭 열기/닫기는 활성화가 아니다. [적용 수명주기 계획·검증](../plans/2026-09-13-design-ide-module-lifecycle.md)을 기준으로 한다. 로컬 Package catalog와 비활성 Experimental Package 초안 교환은 추가했으나, 원격 코드 설치·전체 Bridge 이전은 구현 범위가 아니다.
 - 전체 API·화면·파일 소유권 실사는 미완료이며, Current Context는 조사한 연결 지점이다.
 - 코어에 남는 module별 분기는 개별 이관 시 확인한다. 모든 분기의 제거를 미리 보장하지 않는다.
 - 과거 archive에 없는 module 버전·장비 instance를 소급하여 만들어 넣지 않는다.
@@ -643,6 +643,34 @@ the [Equipment implementation plan](../plans/2026-09-13-equipment-agent-package.
 The 1920×1080 browser check confirmed the generic five-area map, separate Flow,
 package-to-bridge drilldown, original Live cards and Design → Equipment owner
 switching with no console warning/error; physical calls remained zero.
+
+### Analysis Implementation Update — 2026-09-13
+
+`analysis@1.0.0` now owns the canonical agent, bounded decisions, executable and
+source catalogs, report projection and Live composition under `agents/analysis/`.
+Exact flat legacy imports remain aliases. The package composes `cae@1.0.0` under
+`device_bridges/cae/`; CAE and its internal CalculiX provider retain the existing
+tool IDs, runtime identity, settings, artifacts, admission and cancellation.
+Analysis is not a bridge, CalculiX is not a separate package dependency, and the
+shared PINN adapter remains inactive.
+
+The task and delivery remain two Middle composite operations. Actual model
+decisions are High; parsing, numerical solvers and APIs are Middle; Low is empty;
+Guardian/Evidence are cross-cutting CODE relationships. The generic Runtime IDE
+and light document SVG consume this catalog. The owner frontend consumes the full
+existing report projection and preserves one host-owned FEM controller. Its four
+evidence panels are independent common Live dashboard cards whose attempt/contour
+controls update in place. No new report store, poller, unload API or worker
+cancellation was introduced.
+
+Focused Node and guarded Python owner/asset/source-contract tests pass. A scoped
+registered GPT-5.5 Analysis run reached BO readiness in 7.06 seconds with two
+actual `data_processing`/`data_validation` decisions and without waiting for FEM;
+an offline two-loop resource-held background check passed in 45.26 seconds. These
+are software/virtual-boundary results with zero physical calls, not new hardware
+or numerical-model validation. The whole real-API virtual cycle did not pass:
+two attempts stopped at upstream Vision/Manipulation/Guardian gates before
+Analysis, and that outcome is retained rather than reported as an Analysis pass.
 
 Printer Fleet 단일화 및 두 IDE 탭 분리 후, 기존 프린터 계열 164개 검사와
 Specimen 모드별 경로·모듈/API 19개 검사를 통과했다. 별도 등록 API 비구동 사이클은

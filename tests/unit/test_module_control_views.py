@@ -12,7 +12,7 @@ from test_planning_design_report_js import _extract_function
 ROOT = Path(__file__).resolve().parents[2]
 
 
-@pytest.mark.parametrize('module_id', ['design', 'orchestrator', 'specimen', 'vision', 'equipment'])
+@pytest.mark.parametrize('module_id', ['design', 'orchestrator', 'specimen', 'vision', 'equipment', 'analysis'])
 def test_control_layout_preserves_executable_nodes_edges_and_saved_positions(module_id):
     module = yaml.safe_load((ROOT / f'graphs/modules/{module_id}/module.yaml').read_text())['module']
     original = json.dumps(module)
@@ -31,7 +31,7 @@ def test_control_layout_preserves_executable_nodes_edges_and_saved_positions(mod
             assert abs(a['x']-b['x']) >= 184 or abs(a['y']-b['y']) >= 76
 
 
-@pytest.mark.parametrize('module_id', ['design', 'orchestrator', 'specimen', 'vision', 'manipulation', 'equipment'])
+@pytest.mark.parametrize('module_id', ['design', 'orchestrator', 'specimen', 'vision', 'manipulation', 'equipment', 'analysis'])
 def test_document_svg_is_current_renderer_output(module_id):
     from scripts.render_module_control_views import render
     generated = render(module_id, ROOT)
@@ -69,7 +69,7 @@ assert.deepEqual(AX4LABExecutionEditor.serialize(edited,payload).module.executio
     subprocess.run(['node', '-e', script], cwd=ROOT, capture_output=True, text=True, check=True)
 
 
-@pytest.mark.parametrize('module_id', ['design', 'orchestrator', 'specimen', 'vision', 'equipment'])
+@pytest.mark.parametrize('module_id', ['design', 'orchestrator', 'specimen', 'vision', 'equipment', 'analysis'])
 def test_document_outcome_labels_stay_on_their_curves_without_collisions(module_id):
     module = yaml.safe_load((ROOT / f'graphs/modules/{module_id}/module.yaml').read_text())['module']
     script = 'const v=require("./web/static/module_control_view.js");const m=JSON.parse(process.argv[1]);process.stdout.write(v.renderSvg(m,{theme:"document"}));'
