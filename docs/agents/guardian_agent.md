@@ -7,13 +7,13 @@ audience: [researcher, reviewer, operator, developer, safety_reviewer]
 scope: [agents, guardian, safety_control_plane]
 summary: Current contract for graph-wide risk review, incidents, approvals, safety budgets, and continue/stop/error routing.
 source_of_truth:
-  - agents/guardian_agent.py
+  - agents/core/guardian/agent.py
   - graphs/modules/guardian/module.yaml
   - policies/guardian_gate.py
   - app/controller.py
   - app/main.py
-last_verified: 2026-09-13
-verified_against: working-tree-2026-09-13
+last_verified: 2026-09-14
+verified_against: working-tree-2026-09-14-core-agent-roots
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -60,7 +60,7 @@ This Reference does not claim that control presence proves safety effectiveness.
 
 ## Source of Truth
 
-- Agent: `agents/guardian_agent.py`
+- Agent: `agents/core/guardian/agent.py` (legacy import: `agents.guardian_agent`)
 - Module: `graphs/modules/guardian/module.yaml`
 - Policy: `policies/guardian_gate.py`
 - State/API aggregation: `app/controller.py`, `app/main.py`

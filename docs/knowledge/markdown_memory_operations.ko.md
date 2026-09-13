@@ -10,9 +10,9 @@ source_of_truth:
   - knowledge/markdown_memory.py
   - knowledge/markdown_runtime.py
   - knowledge/http_api.py
-  - agents/knowledge_decision.py
-last_verified: 2026-09-10
-verified_against: working-tree-2026-09-10
+  - agents/core/knowledge/decision.py
+last_verified: 2026-09-14
+verified_against: working-tree-2026-09-14-core-agent-roots
 related_docs:
   - docs/agents/knowledge_agent.md
   - docs/knowledge/manual_rag_knowledge.ko.md

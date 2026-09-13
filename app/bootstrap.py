@@ -29,11 +29,10 @@ from typing import Any
 from dotenv import load_dotenv
 
 from agents.base_agent import AgentContext
-from agents.bo_agent import BOAgent
 from agents.module_discovery import discover_agent_modules
-from agents.guardian_agent import GuardianAgent
-from agents.knowledge_agent import KnowledgeAgent
-from agents.orchestrator_agent import OrchestratorAgent
+from agents.core.guardian.agent import GuardianAgent
+from agents.core.knowledge.agent import KnowledgeAgent
+from agents.core.orchestrator.agent import OrchestratorAgent
 from agents.registry import AgentRegistry
 from app.controller import ControllerDeps, MainController
 from backends.mock_llm import MockLLMBackend
@@ -346,7 +345,6 @@ def load_runtime() -> MainController:
 
     agent_registry = AgentRegistry()
     agent_registry.register(OrchestratorAgent())
-    agent_registry.register(BOAgent())
     for module in discover_agent_modules():
         agent_registry.register_module(module)
     agent_registry.register(KnowledgeAgent())

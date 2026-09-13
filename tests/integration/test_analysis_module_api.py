@@ -88,7 +88,7 @@ def test_inactive_analysis_owner_cannot_serve_its_module_asset(module_api):
 def test_live_host_publishes_current_analysis_frontend_asset_versions(module_api):
     client, _, _, guard, _ = module_api
     live_html = client.get("/live").text
-    assert "/static/planning.js?v=20260913-analysis-owner-3" in live_html
+    assert "/static/planning.js?v=20260914-bo-owner-1" in live_html
     assert "/static/analysis_fem_live.js?v=20260913-common-cards-2" in live_html
     assert "/static/analysis_fem_live.css?v=20260913-common-cards-2" in live_html
     assert guard.physical_call_count == 0

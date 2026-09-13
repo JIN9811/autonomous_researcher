@@ -11,10 +11,10 @@ source_of_truth:
   - knowledge/source_extraction.py
   - knowledge/source_runtime.py
   - knowledge/source_api.py
-  - agents/source_curation.py
+  - agents/core/knowledge/source_curation.py
   - mcp_tools/source_tools.py
-last_verified: 2026-09-11
-verified_against: working-tree-2026-09-11
+last_verified: 2026-09-14
+verified_against: working-tree-2026-09-14-core-agent-roots
 related_docs:
   - docs/agents/knowledge_agent.md
   - docs/knowledge/markdown_memory_operations.ko.md

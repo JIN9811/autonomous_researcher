@@ -30,10 +30,10 @@ supersedes: []
 |---|---|
 | 설계 상태 | 상위 방향 합의; 아래 상세 계약은 검토안 |
 | 모듈화 대상 | 전문 에이전트와 디바이스 브릿지, 각각의 backend·frontend·설정·저장 계약 |
-| 프로그램 코어 | Orchestrator, LangGraph, 세션, 공통 GUI 및 서비스 연결 유지 |
+| 프로그램 코어 | 기본 에이전트 ORC·KNW·GRD, LangGraph, 세션, 공통 GUI 및 서비스 연결 유지 |
 | Package | Agent Package는 owner 단위, Experimental Package는 플랜·설정·연결을 포함한 실험 조합 |
 | 소프트웨어 기준점 | `9d11cf923f556e6abe87df3084dbbd5c022a5ea6`; 모듈별 전환 전에 동작 비교 근거 확정 |
-| Implementation status | Design/Specimen/Vision/Manipulation/Equipment/Analysis installed modules and live reports; their executable graphs and ORC reuse the common host. Analysis composes the installed CAE bridge and its internal CalculiX provider; shared PINN remains inactive. Validation and scope are recorded in the owner execution plans. |
+| Implementation status | Design/Specimen/Vision/Manipulation/Equipment/Analysis/BO installed modules and live reports; ORC/KNW/GRD implementation sources are grouped under `agents/core/` with exact flat-import aliases and unchanged explicit bootstrap registration. Analysis composes the installed CAE bridge and its internal CalculiX provider; BO references existing numerical services without a bridge. Shared PINN remains inactive. Validation and scope are recorded in the owner execution plans. |
 | 실증 경계 | 소프트웨어 호환성 검증과 기존 물리 동작 stable 실증을 별도로 관리 |
 
 ## Summary
@@ -56,7 +56,7 @@ IDE와 문서 SVG도 그 정의에서 생성한다. 유효한 경로 편집은 �
 의존성을 묶고, Experimental Package는 이 패키지들과 오케스트레이션 플랜을 조합**한다.
 포함한 플랜도 가져오기 직후에는 초안이며 실행 순서와 실험 참여는 기존 활성 LangGraph가 결정한다.
 
-Orchestrator는 프로그램 코어에 유지한다. 공통 GUI는 모듈의 화면과 카드를 연결하고,
+Orchestrator·Knowledge·Guardian는 플랫폼 기본 에이전트로 유지한다. 공통 GUI는 모듈의 화면과 카드를 연결하고,
 공통 저장 서비스는 실행 식별자와 저장 위치를 제공한다. 전문 판단과 설정 적용은
 담당 에이전트, 장비 실행과 장비별 상태는 담당 브릿지가 소유한다.
 
@@ -99,7 +99,7 @@ Orchestrator는 프로그램 코어에 유지한다. 공통 GUI는 모듈의 화
 |---|---|---|
 | [agents/base_agent.py](../../../agents/base_agent.py) | `run(state, ctx)`, `AgentResult`, 공통 모델·툴·지식 서비스 | 기존 호출 표면을 유지하고 서비스 접근 및 상태 소유권을 명시 |
 | [agents/registry.py](../../../agents/registry.py) | 이름별 에이전트 register/get/names | 검증된 모듈 진입점으로 등록을 모으고 중복 ID 정책 추가 |
-| [agents/orchestrator_capabilities.py](../../../agents/orchestrator_capabilities.py) | 그래프 연결 owner, Setup callback, 가용성, 실행 snapshot | ORC와 Setup의 실행 가능 owner 판정에 재사용 |
+| [agents/core/orchestrator/capabilities.py](../../../agents/core/orchestrator/capabilities.py) | 그래프 연결 owner, Setup callback, 가용성, 실행 snapshot | ORC와 Setup의 실행 가능 owner 판정에 재사용; 기존 flat import는 exact alias |
 | [graphs/module_store.py](../../../graphs/module_store.py), [graphs/schema.py](../../../graphs/schema.py) | IDE module 설정 저장·버전과 스키마 | 구현 모듈 선언과 IDE 편집 설정을 연결 |
 | [graphs/modules/design/module.yaml](../../../graphs/modules/design/module.yaml), [ui.yaml](../../../graphs/modules/design/ui.yaml) | 인계 설명·pre-execution·내부 단계 및 표시 descriptor | 현재 형식에 맞춰 점진적으로 공통 선언 참조 |
 | [graphs/registry.py](../../../graphs/registry.py) | 허용된 실행 handler 조회 | 모듈 선언을 임의 실행 코드로 해석하지 않고 등록 handler 연결 |
@@ -150,17 +150,46 @@ Package의 모듈 구성과 활성 그래프의 실행 선택을 구분하며, �
 
 | 단위 | 소유 | 다른 단위와의 경계 |
 |---|---|---|
-| 코어 + ORC | Chat·세션·그래프·실행 연결·공통 GUI·서비스 주입 | 전문 알고리즘·브릿지 프로토콜은 모듈에 위임 |
+| 코어 + 기본 에이전트 | ORC·KNW·GRD, Chat·세션·그래프·공통 GUI·서비스 주입 | 전문 알고리즘·브릿지 프로토콜은 모듈에 위임 |
 | Agent module | 역할에 맞는 LLM 판단, 설정 적용, 작업 결과·진행·전용 화면 | 다른 owner 설정과 상태를 직접 변경하지 않음 |
 | Bridge module | 장비·계산 provider 연결, 명령, 상태, 장비별 설정·전용 화면 | 연구 목적·다음 에이전트를 결정하지 않음 |
 | Agent Package | 에이전트 모듈, 버전, 브릿지 의존성, 권장 binding·문서 | 모듈 소유권·파일 경로를 바꾸지 않음 |
-| Experimental Package | Agent Package 조합, 오케스트레이션 플랜, 휴대 가능한 설정·binding | 별도 스케줄러·설정 소유자·장비 실행 주체가 아님 |
+| Experimental Package | Agent Package 조합, Orchestration/Knowledge/Guardian Plan 참조·버전, 휴대 가능한 설정·binding | 별도 스케줄러·설정 소유자·장비 실행 주체가 아님; 후속 두 플랜은 계약 설계 대상 |
 | Module instance | 선택한 모듈 구현의 개별 설정·연결·작업 상태 | 동일 브릿지 구현의 여러 장비를 구분 |
 
 에이전트와 브릿지는 다대다 연결을 허용한다. 연결 대상은 모듈 개수가 아니라
 필요한 capability와 선택된 instance로 결정하며 기존 tool ID는 유지한다.
-Guardian와 Knowledge도 전문 모듈 범위에 포함한다. 코어의 강제 제한과 공통 저장
-기반은 별도로 유지하고, 관련 모듈이 없는 그래프에서 필요한 의존성은 명시적으로 검사한다.
+Guardian와 Knowledge는 교체 가능한 전문 Agent Package 대상에서 제외하고
+Orchestrator와 함께 플랫폼 기본 에이전트로 구분한다. 기본 제공은 모든 단계에서
+무조건 실행한다는 뜻이 아니다. 기존 그래프의 호출 시점, 인계 및 강제 제한을 유지한다.
+
+### 기본 에이전트와 실험별 플랜 — 2026-09-14 합의
+
+전문 패키지 전환은 BO까지 진행한다. BO는 기존 LHS·BoTorch 계산 서비스를
+참조하며, 수치 최적화를 장비로 취급하는 새 Device Bridge를 만들지 않는다.
+BO 이후 별도 단계에서 기본 에이전트 소유 코드를 `agents/core/orchestrator/`,
+`agents/core/knowledge/`, `agents/core/guardian/`로 구분했다. 기존 전문 에이전트
+폴더는 다시 이동하지 않았고, 공개 import·handler·API·저장 경로는 exact alias와
+기존 bootstrap으로 호환을 유지한다. 이 배치는 소유권 구분이며 새 Package나
+플랜 runtime을 만들지 않는다.
+
+| 플랜 | 소유자 | 설정할 책임 | 바꾸지 않는 경계 |
+|---|---|---|---|
+| Orchestration Plan | ORC | 참여 에이전트, 실행 조건, 인계 관계 | 기존 LangGraph 실행 엔진 |
+| Knowledge Plan | KNW | 지식 공급 대상·범위, 결과 분류, 메모리 보관 | 기존 Wiki·RAG·메모리 서비스, 개인정보 접근 범위 |
+| Guardian Plan | GRD | 검토 지점·근거, 승인·재시도·중단 정책 | 코어 강제 안전 제한, 기존 장비 인터록 |
+
+Knowledge/Guardian Plan은 기본 에이전트가 읽는 **실험별 설정 계약**으로
+설계한다. 별도 스케줄러·저장소·에이전트 통신 버스를 신설하지 않는다.
+Experimental Package는 세 플랜의 참조와 버전을 함께 묶고, 가져온 플랜은
+기존 검증·활성화 절차를 거치는 초안으로 취급한다. 기본값은 기존 동작을 보존하며,
+플랜이 생겼다는 이유로 호출 순서·횟수·장비 동작을 변경하지 않는다.
+Knowledge Plan은 기존 접근 범위를 넓히거나 개인 메모리를 공개 패키지에 포함하지
+않으며, Guardian Plan은 강제 제한을 해제할 수 없다.
+
+진행 순서는 **BO 패키지 구현·비구동 검증 → 기본 에이전트 폴더 구분 →
+Knowledge/Guardian Plan 상세 계약 설계**다. 후속 플랜의 실행 구현은 해당 계약을
+검토한 뒤 별도 범위로 정한다.
 
 ### 2. 식별자와 버전
 
@@ -550,7 +579,7 @@ freshness 규칙을 유지한다. 공통 adapter를 추가해 기존 실행 검�
 
 ## Limitations and Known Gaps
 
-- Design/Specimen/Vision/Manipulation/Equipment/Analysis은 owner 코드·전용 화면·실행 정의를 모듈 계약에 연결했다. 설치 catalog와 활성 binding을 분리하며, IDE 탭 열기/닫기는 활성화가 아니다. [적용 수명주기 계획·검증](../plans/2026-09-13-design-ide-module-lifecycle.md)을 기준으로 한다. 로컬 Package catalog와 비활성 Experimental Package 초안 교환은 추가했으나, 원격 코드 설치·전체 Bridge 이전은 구현 범위가 아니다.
+- Design/Specimen/Vision/Manipulation/Equipment/Analysis/BO는 owner 코드·전용 화면·실행 정의를 모듈 계약에 연결했다. 설치 catalog와 활성 binding을 분리하며, IDE 탭 열기/닫기는 활성화가 아니다. [적용 수명주기 계획·검증](../plans/2026-09-13-design-ide-module-lifecycle.md)을 기준으로 한다. 로컬 Package catalog와 비활성 Experimental Package 초안 교환은 추가했으나, 원격 코드 설치·전체 Bridge 이전은 구현 범위가 아니다.
 - 전체 API·화면·파일 소유권 실사는 미완료이며, Current Context는 조사한 연결 지점이다.
 - 코어에 남는 module별 분기는 개별 이관 시 확인한다. 모든 분기의 제거를 미리 보장하지 않는다.
 - 과거 archive에 없는 module 버전·장비 instance를 소급하여 만들어 넣지 않는다.
@@ -671,6 +700,35 @@ are software/virtual-boundary results with zero physical calls, not new hardware
 or numerical-model validation. The whole real-API virtual cycle did not pass:
 two attempts stopped at upstream Vision/Manipulation/Guardian gates before
 Analysis, and that outcome is retained rather than reported as an Analysis pass.
+
+### BO Implementation Update — 2026-09-14
+
+`bo@1.0.0` now owns the canonical agent, decision loop, executable/source
+catalogs, report projection and Live composition under `agents/bo/`. Exact flat
+legacy imports remain aliases. The public `run` and `run_with_settings` paths
+both execute one composite `bo.task` followed by `bo.deliver`, while retaining
+normal persisted/default settings versus explicit settings and one public
+archive attempt per invocation.
+
+BO has no bridge dependency. The installed package references the existing
+parameter-space, BoTorch and benchmark services without changing their numeric
+authority, domain handling, objective, budget/seed or exact selected
+coordinates. The source-backed IDE/document projection has High strategy and
+result-review calls, Middle numerical work, Guardian checks, Knowledge evidence
+and an intentionally empty Low area. The module-owned frontend retains initial
+LHS, posterior/acquisition, decision, ranking and Design-handoff surfaces through
+the shared host, with no new settings/report store or polling lifecycle.
+
+Post-move regression retained 74 focused BO tests. Five guarded route scenarios
+also passed with zero device calls. A guarded registered `gpt-5.5` check covered
+both LHS and real BoTorch acquisition through `run_with_settings`, with three
+BO-policy calls per case, unchanged optimizer coordinates and zero physical
+calls. It used explicitly synthetic observations and was not a whole-cycle or
+hardware validation. Detailed RED/GREEN and scoped evidence belongs to the
+[BO implementation plan](../plans/2026-09-14-bo-agent-package.md).
+Final review also retained 44 plotting contracts, four guarded BO API contracts,
+a clean 37-file staged publication scan and the post-fix 1920×1080 owner view;
+no Critical or Important finding remained.
 
 Printer Fleet 단일화 및 두 IDE 탭 분리 후, 기존 프린터 계열 164개 검사와
 Specimen 모드별 경로·모듈/API 19개 검사를 통과했다. 별도 등록 API 비구동 사이클은

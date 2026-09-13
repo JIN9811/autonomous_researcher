@@ -936,7 +936,7 @@ graph:
     runtime_planes:
     - id: orchestration_supervisor
       node_id: orchestrator_supervisor
-      source: agents/orchestrator_agent.py + orchestrator/supervisor.py + app/controller.py
+      source: agents/core/orchestrator/agent.py + orchestrator/supervisor.py + app/controller.py
       contract:
       - mission_contract.v1
       - orchestration_plan.v1
@@ -944,7 +944,7 @@ graph:
       - decision_register.v1
     - id: guardian_graphwide_gate
       node_id: safety_gate_plane
-      source: policies/guardian_gate.py + agents/guardian_agent.py
+      source: policies/guardian_gate.py + agents/core/guardian/agent.py
       contract:
       - guardian_report.v1
       - safety_decision.v1

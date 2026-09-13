@@ -14,7 +14,7 @@ scope:
   - runtime_contracts
   - api_connections
 summary: Canonical entry point for ATR agent roles, contracts, APIs, connections, evidence, and safety boundaries.
-last_verified: 2026-09-13
+last_verified: 2026-09-14
 verified_against: working-tree
 related_docs:
   - docs/agents/agent_api_connection_matrix.md
@@ -47,7 +47,7 @@ including failed/cancelled calls, file snapshots, and saved-loop GUI access.
 | At a glance | Details |
 |---|---|
 | Inventory | Ten executable agents on the existing registered graph/module path |
-| Installed packages | Design, Specimen, Vision, Manipulation, Equipment and Analysis expose owned code, execution definitions and live reports; Analysis composes the existing CAE computation bridge |
+| Installed packages | Design, Specimen, Vision, Manipulation, Equipment, Analysis and BO expose owned code, execution definitions and live reports; Analysis composes the existing CAE computation bridge, while BO reuses numerical services without a bridge |
 | Orchestrator | Bounded `orchestrator_plan` decisions and dynamic Experimental Setup are documented against working-tree scope |
 | Setup ownership | Only Orchestrator goal and BO parameter-space/acquisition adapters currently expose writable public fields; other owners remain read-only or unsupported |
 | Execution authority | Agent procedures and registered tools/bridges retain execution authority; numerical values are tool-computed |
@@ -68,6 +68,11 @@ composition contract; the Device Bridges view shows the actual bridge components
 The [Analysis Reference](analysis_agent.md#installed-package-and-executable-structure)
 covers its composite owner, source-backed five-area view, module-owned Live
 report, and Analysis package → CAE bridge → internal CalculiX relationship.
+
+The [BO Reference](bo_agent.md#installed-package-and-executable-structure)
+covers the single discovered owner, executable composite task, source-backed
+five-area view and module-owned Live report. Its package has no Device Bridge;
+LHS, BoTorch and benchmark computation remain existing referenced services.
 
 The [Vision Reference](vision_agent.md#installed-package-and-executable-structure)
 documents the installed package, composite observation operation and shared
@@ -119,16 +124,16 @@ implementations remain authoritative.
 
 | Agent reference | Main responsibility | Implementation |
 |---|---|---|
-| [Orchestrator](orchestrator_agent.md) | Bounded decisions, canonical Setup proposals, registered mission and agent handoffs | [Source](../../agents/orchestrator_agent.py) · [Module](../../graphs/modules/orchestrator/module.yaml) |
+| [Orchestrator](orchestrator_agent.md) | Bounded decisions, canonical Setup proposals, registered mission and agent handoffs | [Core source](../../agents/core/orchestrator/agent.py) · [Module](../../graphs/modules/orchestrator/module.yaml) |
 | [Design](design_agent.md) | Candidate suitability | [Source](../../agents/design/agent.py) · [Code module](../../agents/design/module.py) · [Graph module](../../graphs/modules/design/module.yaml) |
 | [Specimen](specimen_agent.md) | Fabrication suitability and tools | [Owner](../../agents/specimen/agent.py) · [Code module](../../agents/specimen/module.py) · [Execution graph](../../graphs/modules/specimen/module.yaml) · [Agent Package](../../packages/agents/specimen/package.yaml) |
 | [Vision](vision_agent.md) | Visual evidence | [Source](../../agents/vision_agent.py) · [Module](../../graphs/modules/vision/module.yaml) |
 | [Manipulation](manipulation_agent.md) | Robot skills and completion | [Source](../../agents/manipulation/agent.py) · [Module](../../graphs/modules/manipulation/module.yaml) · [Control areas](assets/figures/manipulation_control_areas.svg) |
 | [Equipment](equipment_agent.md) | Stacked Flow selection, terminal review and bounded recovery | [Owner](../../agents/equipment/agent.py) · [Code module](../../agents/equipment/module.py) · [Execution graph](../../graphs/modules/equipment/module.yaml) · [Agent Package](../../packages/agents/equipment/package.yaml) · [Control areas](assets/figures/equipment_control_areas.svg) |
 | [Analysis](analysis_agent.md) | Measured objectives and independent background FEM | [Owner](../../agents/analysis/agent.py) · [Code module](../../agents/analysis/module.py) · [Execution graph](../../graphs/modules/analysis/module.yaml) · [Agent Package](../../packages/agents/analysis/package.yaml) · [Control areas](assets/figures/analysis_control_areas.svg) |
-| [Knowledge](knowledge_agent.md) | Ontology-guided Markdown, page-wise source curation and scoped retrieval | [Source](../../agents/knowledge_agent.py) · [Module](../../graphs/modules/knowledge/module.yaml) |
-| [Bayesian Optimization](bo_agent.md) | LLM strategy/review with continuous LHS/BoTorch proposals | [Source](../../agents/bo_agent.py) · [Module](../../graphs/modules/bo/module.yaml) |
-| [Guardian](guardian_agent.md) | Policy gates, advisory review and continuation decisions | [Source](../../agents/guardian_agent.py) · [Module](../../graphs/modules/guardian/module.yaml) |
+| [Knowledge](knowledge_agent.md) | Ontology-guided Markdown, page-wise source curation and scoped retrieval | [Core source](../../agents/core/knowledge/agent.py) · [Module](../../graphs/modules/knowledge/module.yaml) |
+| [Bayesian Optimization](bo_agent.md) | LLM strategy/review with continuous LHS/BoTorch proposals | [Owner](../../agents/bo/agent.py) · [Code module](../../agents/bo/module.py) · [Execution graph](../../graphs/modules/bo/module.yaml) · [Agent Package](../../packages/agents/bo/package.yaml) · [Control areas](assets/figures/bo_control_areas.svg) |
+| [Guardian](guardian_agent.md) | Policy gates, advisory review and continuation decisions | [Core source](../../agents/core/guardian/agent.py) · [Module](../../graphs/modules/guardian/module.yaml) |
 
 The [API and Connection Matrix](agent_api_connection_matrix.md) compares all ten
 agents without repeating full implementation prose.
@@ -146,7 +151,7 @@ agents without repeating full implementation prose.
 | Lab Equipment | [Control areas](assets/figures/equipment_control_areas.svg) · [Flow](assets/figures/equipment_01_closed_loop_handoffs.svg) · [Execution](assets/figures/equipment_02_execution_effect_boundary.svg) · [Connections](assets/figures/equipment_03_api_connection_architecture.svg) |
 | Analysis | [Control areas](assets/figures/analysis_control_areas.svg) · [Flow](assets/figures/analysis_01_closed_loop_handoffs.svg) · [Execution](assets/figures/analysis_02_execution_effect_boundary.svg) · [Connections](assets/figures/analysis_03_api_connection_architecture.svg) |
 | Knowledge | [Flow](assets/figures/knowledge_01_closed_loop_handoffs.svg) · [Execution](assets/figures/knowledge_02_execution_effect_boundary.svg) · [Connections](assets/figures/knowledge_03_api_connection_architecture.svg) |
-| BO | [Flow](assets/figures/bo_01_closed_loop_handoffs.svg) · [Execution](assets/figures/bo_02_execution_effect_boundary.svg) · [API](assets/figures/bo_03_api_connection_architecture.svg) |
+| BO | [Control areas](assets/figures/bo_control_areas.svg) · [Flow](assets/figures/bo_01_closed_loop_handoffs.svg) · [Execution](assets/figures/bo_02_execution_effect_boundary.svg) · [API](assets/figures/bo_03_api_connection_architecture.svg) |
 | Guardian | [Flow](assets/figures/guardian_01_closed_loop_handoffs.svg) · [Execution](assets/figures/guardian_02_execution_effect_boundary.svg) |
 
 </details>

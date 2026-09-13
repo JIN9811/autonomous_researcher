@@ -505,16 +505,6 @@ LIVE_AGENT_REPORT_PROFILES: dict[str, dict[str, object]] = {
         ],
         "checklist": ["Store observed data", "Link artifacts", "Expose BO-ready row"],
     },
-    "bo": {
-        "title": "Bayesian Optimization / Candidate Selection",
-        "summary": "Updates surrogate/acquisition state from knowledge observations and proposes the next candidate.",
-        "focus_rows": [
-            {"label": "Observation", "value": "latest design parameters and objective value from Knowledge Agent"},
-            {"label": "Acquisition", "value": "EI/UCB/PI or benchmark mode, plotted sampled points, next candidate"},
-            {"label": "Loop", "value": "candidate handoff to Design Agent with graph/event evidence"},
-        ],
-        "checklist": ["Plot surrogate/acquisition", "Log selected candidate", "Preserve parameter bounds"],
-    },
     "guardian": {
         "title": "Safety Gate / Continue-Stop Decision",
         "summary": "Checks live/test gate results, hardware risk, and operator approvals before continuation.",
@@ -6882,63 +6872,6 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
                 if isinstance(pack, dict)
             ] or [{"decision": "no_evolution_needed", "rationale": self_evolution.get("no_evolution_needed_reason", "No evidence pack generated.")}]
             report_metrics = knowledge_report.get("evidence_quality", {}) if isinstance(knowledge_report.get("evidence_quality"), dict) else knowledge_context.get("evidence_quality", {}) if isinstance(knowledge_context.get("evidence_quality"), dict) else {}
-    if definition["agent_id"] == "bo":
-        bo_result = metadata.get("bo_agent") if isinstance(metadata.get("bo_agent"), dict) else {}
-        if not bo_result and isinstance(agent_payload.get("bo_result"), dict):
-            bo_result = agent_payload["bo_result"]
-        if isinstance(bo_result, dict) and bo_result:
-            reasoning = bo_result.get("reasoning") if isinstance(bo_result.get("reasoning"), dict) else {}
-            recommendation = bo_result.get("recommendation") if isinstance(bo_result.get("recommendation"), dict) else {}
-            candidate_ranking = bo_result.get("candidate_ranking") if isinstance(bo_result.get("candidate_ranking"), list) else bo_result.get("candidate_pool", []) if isinstance(bo_result.get("candidate_pool"), list) else []
-            next_design_request = bo_result.get("next_design_request") if isinstance(bo_result.get("next_design_request"), dict) else metadata.get("next_design_request") if isinstance(metadata.get("next_design_request"), dict) else {}
-            benchmark = bo_result.get("benchmark") if isinstance(bo_result.get("benchmark"), dict) else {}
-            strategies = benchmark.get("strategies") if isinstance(benchmark.get("strategies"), dict) else {}
-            benchmark_strategy = bo_result.get("benchmark_strategy") or bo_result.get("strategy") or "bo"
-            strategy_payload = strategies.get(benchmark_strategy) if isinstance(strategies.get(benchmark_strategy), dict) else strategies.get("bo") if isinstance(strategies.get("bo"), dict) else {}
-            surrogate_trace = strategy_payload.get("surrogate_trace") if isinstance(strategy_payload.get("surrogate_trace"), list) else []
-            latest_trace = surrogate_trace[-1] if surrogate_trace and isinstance(surrogate_trace[-1], dict) else {}
-            latest_selected = latest_trace.get("selected") if isinstance(latest_trace.get("selected"), dict) else {}
-            role_specific["summary"] = "BO strategy/tool decisions, measured evidence, numerical acquisition, result review, and the existing Design handoff."
-            role_specific["bo_decision"] = bo_result.get("decision", {})
-            role_specific["surrogate_panel"] = {
-                "strategy": bo_result.get("strategy", ""),
-                "benchmark_strategy": benchmark_strategy,
-                "acquisition": bo_result.get("acquisition", ""),
-                "budget": bo_result.get("budget", ""),
-                "trace_step_count": len(surrogate_trace),
-                "latest_selected": latest_selected,
-                "prior_summary": bo_result.get("prior_summary", {}),
-            }
-            role_specific["candidate_ranking"] = candidate_ranking[:10]
-            role_specific["reasoning_audit"] = {
-                "schema_version": reasoning.get("schema_version", ""),
-                "source": reasoning.get("source", ""),
-                "operator_summary": reasoning.get("operator_summary", ""),
-                "strategy_recommendation": reasoning.get("strategy_recommendation", {}),
-                "hypotheses": reasoning.get("hypotheses", []),
-                "preference_regions": reasoning.get("preference_regions", []),
-                "risk_flags": reasoning.get("risk_flags", []),
-            }
-            role_specific["decision_register"] = [
-                {
-                    "decision": "select_next_design_candidate",
-                    "candidate_id": recommendation.get("candidate_id", ""),
-                    "source_strategy": recommendation.get("source_strategy", ""),
-                    "combined_score": recommendation.get("combined_score", ""),
-                    "rationale": recommendation.get("why_this_candidate") or recommendation.get("reason", ""),
-                }
-            ]
-            role_specific["recommendation"] = recommendation
-            role_specific["handoff_packet"] = next_design_request
-            role_specific["failure_model"] = bo_result.get("failure_model", {})
-            role_specific["artifacts"] = bo_result.get("artifacts", {})
-            report_decisions = role_specific["decision_register"]
-            report_metrics = {
-                "prior_summary": bo_result.get("prior_summary", {}),
-                "best_so_far_count": len(bo_result.get("best_so_far", [])) if isinstance(bo_result.get("best_so_far"), list) else 0,
-                "candidate_count": len(bo_result.get("candidate_pool", [])) if isinstance(bo_result.get("candidate_pool"), list) else len(candidate_ranking),
-                "recommended_score": recommendation.get("objective_score"),
-            }
     process_steps = [
         {
             "timestamp": event.get("ts") or event.get("timestamp") or "",
@@ -7004,7 +6937,6 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
             "vision_report": None,
             **module_sections,
             "knowledge_report": knowledge_report if definition["agent_id"] == "knowledge" else None,
-            "bo_result": metadata.get("bo_agent") if definition["agent_id"] == "bo" else None,
             "metrics": report_metrics,
             "messages": agent_messages[-12:],
             "events": events[-50:],

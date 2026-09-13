@@ -76,7 +76,7 @@ def test_inactive_equipment_owner_cannot_serve_its_module_asset(module_api):
 
 def test_equipment_frontend_hosts_publish_current_asset_versions(module_api):
     client, _, _, guard, _ = module_api
-    assert '/static/planning.js?v=20260913-equipment-owner-2' in client.get('/live').text
+    assert '/static/planning.js?v=20260914-bo-owner-1' in client.get('/live').text
     assert '/static/runtime_ide.js?v=20260913-llm-call-label' in client.get('/ide').text
     assert guard.physical_call_count == 0
     assert guard.denied == []

@@ -1,0 +1,7 @@
+schema: ax4lab.agent_package.v1
+id: bo
+version: 1.0.0
+agent_module: {id: bo, version: 1.0.0}
+handler: agent.bo_agent
+module_reference: graphs/modules/bo/module.yaml
+bridge_modules: []

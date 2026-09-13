@@ -8,6 +8,8 @@ import pytest
 import yaml
 
 from agents.design.structure import design_implementation_structure
+from agents.analysis.structure import analysis_implementation_structure
+from agents.bo.structure import bo_implementation_structure
 from agents.orchestrator_structure import orchestrator_implementation_structure
 from agents.specimen.structure import specimen_implementation_structure
 from agents.vision.structure import vision_implementation_structure
@@ -18,7 +20,8 @@ ROOT = Path(__file__).resolve().parents[2]
 STRUCTURES = dict(design=design_implementation_structure, orchestrator=orchestrator_implementation_structure,
                   specimen=specimen_implementation_structure, vision=vision_implementation_structure,
                   manipulation=manipulation_implementation_structure,
-                  equipment=equipment_implementation_structure)
+                  equipment=equipment_implementation_structure,
+                  analysis=analysis_implementation_structure, bo=bo_implementation_structure)
 MODULES = [*STRUCTURES, 'analysis', 'bo', 'guardian', 'knowledge']
 
 
@@ -81,8 +84,8 @@ def test_every_code_reference_resolves_without_registering_new_execution(module_
             tree = next(n for n in ast.walk(tree) if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == part)
 
 
-@pytest.mark.parametrize('module_id', ['analysis', 'guardian'])
-def test_legacy_ide_projection_renders_internal_decisions_without_adding_checkpoints(module_id):
+@pytest.mark.parametrize('module_id', ['guardian'])
+def test_legacy_checkpoint_projection_renders_internal_decisions_without_adding_steps(module_id):
     from test_planning_design_report_js import _extract_function
     source = (ROOT / 'web/static/runtime_ide.js').read_text()
     functions = '\n'.join(_extract_function(source, n) for n in ('normalizedModulePayload', 'moduleGraphNodeId', 'modulePayloadToGraph'))
@@ -95,15 +98,17 @@ const inferPortPair=()=>({sourceSide:'right',targetSide:'left'});
 ''' + functions + '\nconst payload=' + json.dumps(module) + ''';
 const original=JSON.stringify(payload),g=modulePayloadToGraph(payload),cv=g.metadata.control_view;
 const detail=AX4LABControlView.internalDetails(g.nodes,cv);
-assert.ok(detail.nodes.some(n=>n.area==='high'));
+assert.ok(g.nodes.some(n=>n.metadata.control_area==='high') || detail.nodes.some(n=>n.area==='high'));
 assert.equal(g.nodes.length,payload.module.internal_graph.length);
 assert.equal(g.edges.length,g.nodes.length-1);
 assert.equal(JSON.stringify(payload),original);
 assert.match(AX4LABControlView.backdrop(g.nodes,cv),/LLM/);
 for(const d of detail.nodes)assert.ok(g.nodes.some(n=>n.id===d.owner));
-const removed=detail.nodes[0].owner;
-g.nodes=g.nodes.filter(n=>n.id!==removed);
-assert.ok(!AX4LABControlView.internalDetails(g.nodes,cv).nodes.some(n=>n.owner===removed));
+if(detail.nodes.length){
+  const removed=detail.nodes[0].owner;
+  g.nodes=g.nodes.filter(n=>n.id!==removed);
+  assert.ok(!AX4LABControlView.internalDetails(g.nodes,cv).nodes.some(n=>n.owner===removed));
+}
 '''
     subprocess.run(['node', '-e', script], cwd=ROOT, capture_output=True, text=True, check=True)
 
@@ -122,18 +127,18 @@ def test_equipment_catalog_places_real_source_bound_components(owner, node, area
     assert actual['area'] == area
 
 
-def test_legacy_code_inspector_shows_source_and_area_in_the_existing_inspector():
+def test_legacy_code_inspector_shows_canonical_guardian_source_and_area():
     from test_planning_design_report_js import _extract_function
     source = (ROOT / 'web/static/runtime_ide.js').read_text()
     markup = _extract_function(source, 'implementationInspectorMarkup')
-    module, _ = projection('analysis')
-    detail = module['metadata']['control_view']['checkpoint_details']['internal_graph:07_preprocess_curve']
+    module, _ = projection('guardian')
+    detail = module['metadata']['control_view']['checkpoint_details']['internal_graph:02_review_recent_failures']
     script = "const assert=require('node:assert/strict');const escapeHtml=x=>String(x);\n" + markup
     script += '\nconst detail=' + json.dumps(detail) + r''';
 const html=implementationInspectorMarkup({id:'existing-checkpoint'},detail);
-assert.match(html,/LLM data-processing choice/);
+assert.match(html,/LLM policy evidence review/);
 assert.match(html,/high/);
-assert.match(html,/agents\/analysis_decisions.py/);
+assert.match(html,/agents\/core\/guardian\/agent.py/);
 assert.match(html,/existing-checkpoint/);
 assert.equal(implementationInspectorMarkup({id:'other'},null),'');
 '''

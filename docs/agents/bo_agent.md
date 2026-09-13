@@ -7,8 +7,14 @@ audience: [researcher, reviewer, developer, operator]
 scope: [agents, bayesian_optimization, next_candidate, decision_tools]
 summary: BO-owned strategy and tool decisions around the existing numerical optimizer, with continuous parameter handoff to Design.
 source_of_truth:
-  - agents/bo_agent.py
-  - agents/bo_decision.py
+  - agents/bo/agent.py
+  - agents/bo/decision.py
+  - agents/bo/module.py
+  - agents/bo/execution.py
+  - agents/bo/structure.py
+  - agents/bo/presentation.py
+  - agents/bo/frontend/live_report.js
+  - packages/agents/bo/package.yaml
   - learning/bo_parameter_space.py
   - learning/botorch_backend.py
   - experiments/bo_visualization.py
@@ -18,8 +24,8 @@ source_of_truth:
   - app/main.py
   - objectives/authoring.py
   - objectives/service.py
-last_verified: 2026-09-10
-verified_against: BO-Agent
+last_verified: 2026-09-14
+verified_against: working-tree BO owner package
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -41,13 +47,45 @@ supersedes: []
 
 | At a glance | Details |
 |---|---|
-| Runtime status | Implemented / software recommendation only |
+| Runtime status | Installed `bo@1.0.0` owner package / software recommendation only |
 | LLM decision layer | Implemented / API and local vLLM verified |
 | Numeric candidate authority | LHS / BoTorch; two continuous variables by default |
 | Physical effect | None |
 | Primary handoff | `next_design_request.v1` → Orchestrator → Design |
 | Live hardware validation | No new device validation in this revision |
 | Known gap | No demonstrated optimization gain from the LLM decision layer |
+
+## Installed Package and Executable Structure
+
+BO is discovered once from `agents/bo/module.py` and installed as
+`bo@1.0.0`. Canonical implementation lives under `agents/bo/`; the historical
+`agents.bo_agent` and `agents.bo_decision` imports are exact aliases of the
+canonical modules so runtime type and monkeypatch identity do not split.
+
+The public `run(state, ctx)` and `run_with_settings(state, ctx, settings)`
+entrypoints both traverse the registered `bo.task` → `bo.deliver` graph once.
+The first resolves the existing workspace/default settings, while the second
+preserves its explicit settings. The original composite task still owns all
+numerical behavior, and the existing public archive wrapper writes one attempt
+receipt for either entrypoint.
+
+| Surface | Owner contract |
+|---|---|
+| Agent module | `agents/bo/module.py`, discovered as the single `bo_agent` owner |
+| Execution/source catalog | `agents/bo/execution.py` and `agents/bo/structure.py` |
+| Package | `packages/agents/bo/package.yaml`; no Device Bridge dependencies |
+| Live report | `/api/agents/bo/report` projected by `agents/bo/presentation.py` |
+| Frontend | `/module-assets/bo/live_report.js`, composed through the common Live module host |
+| Settings | Existing `/api/bo/settings` and `memory/bo_workspace_settings.json`; no second store |
+| Numerics | Existing `learning/` and `experiments/` services; no optimizer bridge |
+
+![BO source-backed control areas](assets/figures/bo_control_areas.svg)
+
+**BO control areas.** The Runtime IDE and this document use the same owner
+catalog. High nodes are the existing BO policy/review calls, Middle nodes cite
+the actual parameter-space and numerical services, Guardian nodes retain hard
+identity/domain checks, and Knowledge nodes retain report/artifact evidence.
+The Low area is intentionally empty because BO has no physical effect.
 
 ## Overview and Responsibilities
 
@@ -345,8 +383,9 @@ non-actuating; only BO's own computation has no hardware effect.
 
 ## Artifacts and Verification
 
-Verification for this revision is recorded in the
-[implementation plan](../superpowers/plans/2026-09-10-bo-strategy-continuous.md).
+Owner-package verification is recorded in the
+[BO package plan](../superpowers/plans/2026-09-14-bo-agent-package.md); the
+earlier strategy verification remains in its linked historical plan.
 Tests cover domain conversion, precision-preserving Design handoff, bounded
 tool decisions, optimizer-result integrity and read-only visualization.
 
@@ -360,6 +399,21 @@ The combined suite includes fixed-density displays and accepted-to-held cache
 invalidation. It reported 12 existing Pydantic/framework deprecation warnings.
 Fabrication/acquisition are fixtures in the offline loops. This is software-path
 verification, not another physical closed-loop demonstration.
+
+The 2026-09-14 migration retained all 74 focused BO agent, decision and
+parameter-space regressions. Five guarded mode/route scenarios passed with no
+device calls. A separately guarded registered `gpt-5.5` check exercised both
+initial LHS and real BoTorch acquisition through the public
+`run_with_settings` path: each made three `bo_policy` calls and preserved the
+optimizer coordinates, with zero physical calls. Those inputs were explicitly
+synthetic observations and did not represent a whole closed-loop cycle.
+
+Final owner-package checks passed 44 BO plotting/visualization contracts and
+four guarded BO API contracts. A 37-file staged publication scan was clean, and
+the corrected 1920×1080 Live/IDE helper showed the installed control map,
+initial-LHS/acquisition views, exact candidate parameters and Design priority
+with no console error, physical call or denied effect. Scoped review closed the
+report-preservation and pre-hydration precedence findings before handoff.
 
 Registered-provider probes on 2026-09-10 ran `BOAgent.run_with_settings` with
 real LHS/BoTorch computation and explicitly synthetic observations. Each case

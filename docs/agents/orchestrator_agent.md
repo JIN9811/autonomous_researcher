@@ -7,11 +7,11 @@ audience: [researcher, operator, developer, maintainer]
 scope: [agents, orchestrator, control_plane, experimental_setup]
 summary: Current contract for bounded Orchestrator decisions, dynamic Experimental Setup, Chat editing, handoffs, and next-run application.
 source_of_truth:
-  - agents/orchestrator_agent.py
-  - agents/orchestrator_capabilities.py
-  - agents/orchestrator_decision.py
-  - agents/orchestrator_execution.py
-  - agents/orchestrator_structure.py
+  - agents/core/orchestrator/agent.py
+  - agents/core/orchestrator/capabilities.py
+  - agents/core/orchestrator/decision.py
+  - agents/core/orchestrator/execution.py
+  - agents/core/orchestrator/structure.py
   - agents/execution_graph.py
   - app/controller.py
   - app/main.py
@@ -20,8 +20,8 @@ source_of_truth:
   - orchestrator/setup_application.py
   - orchestrator/langgraph_runtime.py
   - graphs/modules/orchestrator/module.yaml
-last_verified: 2026-09-13
-verified_against: working-tree-2026-09-13-executable-agent-ide
+last_verified: 2026-09-14
+verified_against: working-tree-2026-09-14-core-agent-roots
 related_docs:
   - docs/agents/README.md
   - docs/agents/agent_api_connection_matrix.md
@@ -120,11 +120,11 @@ the declared edges; ordering the node array or moving a card does not select a
 route. Mission and plan construction are independent operations whose valid
 ordering can be edited while both remain prerequisites for decision-making.
 
-The [owner adapters](../../agents/orchestrator_execution.py) call the existing
+The [owner adapters](../../agents/core/orchestrator/execution.py) call the existing
 mission, plan, bounded LLM/tool decision and reporting functions. **LLM** labels
 the composite decision, including its existing checks and tool loop—not each
 internal check as an independently editable operation. Dashed **CODE** boxes now
-expose the [existing internal relationships](../../agents/orchestrator_structure.py):
+expose the [existing internal relationships](../../agents/core/orchestrator/structure.py):
 plan builders and bound tool dispatch in **Middle**, schema/target/effect checks in
 **Guardian / Safety**, and scoped references and decision records in **Knowledge /
 Evidence**. Inspection evidence returns to the same bounded LLM decision.

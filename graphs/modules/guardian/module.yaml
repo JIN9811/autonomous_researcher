@@ -51,6 +51,6 @@ module:
           - id: review
             label: "LLM policy evidence review"
             area: high
-            source: {path: agents/guardian_agent.py, symbol: GuardianAgent.run}
+            source: {path: agents/core/guardian/agent.py, symbol: GuardianAgent.run}
           edges:
           - {source: $operation, target: review, kind: evidence, label: "existing internal decision"}

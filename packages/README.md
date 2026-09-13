@@ -1,9 +1,11 @@
 # Agent and Experimental Packages
 
 Agent Packages are installed metadata, not an installer. Shipped manifests in
-`agents/design/package.yaml` and `agents/specimen/package.yaml` are loaded only
-when their matching code-owned agent module is registered. Design has no bridge;
-Specimen references the single installed `printer_fleet@1.0.0`. References use
+`packages/agents/` are loaded only when their matching code-owned agent module
+is registered. Current owner packages are Design, Specimen, Vision,
+Manipulation, Equipment, Analysis and BO. BO and Design have no bridge;
+Specimen references the single installed `printer_fleet@1.0.0`, and other
+owners retain the dependencies declared by their manifests. References use
 exact numeric `major.minor.patch` versions. Python distribution data includes
 these manifests and the provider requirements/READMEs.
 

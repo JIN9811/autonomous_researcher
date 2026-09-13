@@ -10,6 +10,8 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PLANNING_JS = PROJECT_ROOT / "web" / "static" / "planning.js"
+BO_OWNER_JS = PROJECT_ROOT / "agents" / "bo" / "frontend" / "live_report.js"
+DESIGN_OWNER_JS = PROJECT_ROOT / "agents" / "design" / "frontend" / "live_report.js"
 
 
 def _inspect_source() -> dict[str, object]:
@@ -18,9 +20,11 @@ def _inspect_source() -> dict[str, object]:
     script = f"""
 const fs = require("fs");
 const source = fs.readFileSync({json.dumps(str(PLANNING_JS))}, "utf8");
-const start = source.indexOf("function renderBoDashboardCards");
-const end = source.indexOf("function renderGuardianDashboardCards", start);
-const body = source.slice(start, end);
+const boOwner = fs.readFileSync({json.dumps(str(BO_OWNER_JS))}, "utf8");
+const designOwner = fs.readFileSync({json.dumps(str(DESIGN_OWNER_JS))}, "utf8");
+const start = boOwner.indexOf("function renderDashboard");
+const end = boOwner.indexOf("function dispose", start);
+const body = boOwner.slice(start, end);
 const renderKeyStart = source.indexOf("function liveCenterRenderKey");
 const renderKeyEnd = source.indexOf("function invalidateLiveCenterRender", renderKeyStart);
 const renderKeyBody = source.slice(renderKeyStart, renderKeyEnd);
@@ -42,18 +46,18 @@ const chatBody = source.slice(chatStart, chatEnd);
 const resultStart = source.indexOf("function renderBoResultCard");
 const resultEnd = source.indexOf("function renderRuntimeValue", resultStart);
 const resultBody = source.slice(resultStart, resultEnd);
-const detailsStart = source.indexOf("function renderBoReportDetails");
-const detailsEnd = source.indexOf("function renderAgentSpecificReportSection", detailsStart);
-const detailsBody = source.slice(detailsStart, detailsEnd);
+const detailsStart = boOwner.indexOf("function renderReport");
+const detailsEnd = boOwner.indexOf("function renderDashboard", detailsStart);
+const detailsBody = boOwner.slice(detailsStart, detailsEnd);
 const specializedStart = source.indexOf("function renderAgentSpecializedDashboardSections");
 const specializedEnd = source.indexOf("function renderLiveDashboardReportSections", specializedStart);
 const specializedBody = source.slice(specializedStart, specializedEnd);
-const designStart = source.indexOf("function renderDesignDashboardCards");
-const designEnd = source.indexOf("function renderSpecimenDonut", designStart);
-const designBody = source.slice(designStart, designEnd);
+const designStart = designOwner.indexOf("function renderDashboard");
+const designEnd = designOwner.indexOf("function renderReport", designStart);
+const designBody = designOwner.slice(designStart, designEnd);
 console.log(JSON.stringify({{
-  sharedEquation: body.includes("BOVisualization.renderEquationCard"),
-  sharedPlot: body.includes("BOVisualization.renderPlot"),
+  sharedEquation: body.includes("renderer.renderEquationCard"),
+  sharedPlot: body.includes("renderer.renderPlot"),
   waiting: body.includes("Waiting for a completed BO step"),
   equationBeforeRanking: body.indexOf("BO Objective Equation") >= 0 && body.indexOf("BO Objective Equation") < body.indexOf("Candidate Ranking"),
   posteriorBeforeRanking: body.indexOf("Live Posterior") >= 0 && body.indexOf("Live Posterior") < body.indexOf("Candidate Ranking"),
@@ -61,9 +65,9 @@ console.log(JSON.stringify({{
   sharedChatPlot: chatBody.includes("BOVisualization.renderPlot"),
   legacyChatPlot: chatBody.includes("renderBoTraceSvg"),
 	  restoresMetadata: source.includes("metadata.bo_visualization"),
-	  validatesReportVisualizationBeforeFallback: body.includes("preferredLiveBoVisualization")
-	    && body.includes("boResult.visualization")
-	    && body.includes("liveBoVisualization"),
+	  validatesReportVisualizationBeforeFallback: body.includes("resolveLiveBoVisualization")
+    && source.includes("preferredLiveBoVisualization")
+    && source.includes("liveBoVisualization"),
 	  scopesVisualizationToRun: source.includes("function currentRunBoVisualization")
 	    && source.includes("visualization.run_id")
 	    && updateBody.includes("liveCurrentRunId()"),
@@ -73,8 +77,8 @@ console.log(JSON.stringify({{
 	  ranksVisualizationCompleteness: preferenceBody.includes("boVisualizationPointCount")
 	    && preferenceBody.includes("incomingStep > cachedStep")
 	    && preferenceBody.includes("incomingPoints < cachedPoints"),
-	  reportPrefersCompleteVisualization: body.includes("preferredLiveBoVisualization")
-	    && body.includes("liveBoVisualization"),
+	  reportPrefersCompleteVisualization: body.includes("resolveLiveBoVisualization")
+    && source.includes("preferredLiveBoVisualization"),
 	  preservesVisualizationForCompactSameRunState: source.includes('Object.prototype.hasOwnProperty.call(metadata, "bo_visualization")')
 	    && source.includes("currentRunBoVisualization(liveBoVisualization, state.run_id)"),
 	  ignoresCompactSameRunVisualizationEvent: updateBody.includes("preferredLiveBoVisualization")
@@ -95,7 +99,7 @@ console.log(JSON.stringify({{
 	    && !body.includes("Waiting for initial design data"),
 	  lhsRemovedFromDesignDashboard: !designBody.includes("Initial Design / LHS")
 	    && !designBody.includes("renderDesignInitialDesignBoard"),
-	  designDashboardAlwaysShowsDesignSpace: designBody.includes('renderDashboardCard("DOE Map / Design Space", renderDesignParameterSweep(screenReport)')
+	  designDashboardAlwaysShowsDesignSpace: designBody.includes('services.renderDashboardCard("DOE Map / Design Space", services.renderDesignParameterSweep(screenReport)')
 	    && !designBody.includes("const initialDesign")
 	    && !designBody.includes("initialDesign ?"),
 	  lhsUsesDedicatedRenderer: source.includes("function renderBoInitialDesignBoard(report)")
@@ -165,12 +169,15 @@ def test_live_gui_bo_report_prefers_newer_runtime_visualization() -> None:
     node = shutil.which("node")
     assert node
     source = PLANNING_JS.read_text(encoding="utf-8")
+    payload_start = source.index("function latestReportPayload")
+    payload_end = source.index("function latestDesignReport", payload_start)
     start = source.index("function latestReportBoResult")
     end = source.index("function latestReportArtifacts", start)
-    function_source = source[start:end]
+    function_source = source[payload_start:payload_end] + source[start:end]
     script = f"""
 {function_source}
 const report = {{
+  sections: {{ bo_result: {{ visualization: {{ schema: "bo_visualization.v1", step: 1 }} }} }},
   state: {{ run_metadata: {{
     bo_agent: {{ visualization: {{ schema: "bo_visualization.v1", step: 1 }} }},
     bo_visualization: {{
@@ -189,6 +196,47 @@ console.log(JSON.stringify({{ step: selected.visualization.step, png: selected.v
     assert json.loads(result.stdout) == {
         "step": 8,
         "png": "/api/runs/run-1/artifact-file/runtime/bo/step-008.png",
+    }
+
+
+def test_live_gui_bo_report_prefers_current_metadata_over_historical_evidence() -> None:
+    node = shutil.which("node")
+    assert node
+    source = PLANNING_JS.read_text(encoding="utf-8")
+    payload_start = source.index("function latestReportPayload")
+    payload_end = source.index("function latestDesignReport", payload_start)
+    result_start = source.index("function latestReportBoResult")
+    result_end = source.index("function resolveLiveBoVisualization", result_start)
+    backend_start = source.index("function backendField")
+    backend_end = source.index("function eventRunId", backend_start)
+    function_source = (
+        source[backend_start:backend_end]
+        + source[payload_start:payload_end]
+        + source[result_start:result_end]
+    )
+    script = f"""
+{function_source}
+const historical = {{ recommendation: {{ candidate_id: "prior-candidate" }} }};
+const report = {{
+  state: {{ run_metadata: {{
+    bo_agent: {{ recommendation: {{ candidate_id: "current-candidate" }} }},
+    bo_agent_payload: {{ bo_result: historical }},
+    bo_visualization: {{ schema: "bo_visualization.v1", step: 9 }},
+  }} }},
+  messages: [{{ bo_result: historical }}],
+  events: [],
+}};
+const selected = latestReportBoResult(report);
+console.log(JSON.stringify({{
+  candidate: selected.recommendation.candidate_id,
+  visualizationStep: selected.visualization.step,
+}}));
+"""
+    result = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
+
+    assert json.loads(result.stdout) == {
+        "candidate": "current-candidate",
+        "visualizationStep": 9,
     }
 
 

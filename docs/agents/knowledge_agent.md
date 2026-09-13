@@ -7,8 +7,8 @@ audience: [researcher, reviewer, developer, operator, maintainer]
 scope: [agents, knowledge, ontology, markdown_memory, scoped_rag, self_evolution, source_curation]
 summary: Ontology-guided Markdown knowledge, source-backed LLM curation, scoped retrieval and preserved research-memory contracts.
 source_of_truth:
-  - agents/knowledge_agent.py
-  - agents/knowledge_decision.py
+  - agents/core/knowledge/agent.py
+  - agents/core/knowledge/decision.py
   - knowledge/markdown_memory.py
   - knowledge/markdown_runtime.py
   - knowledge/http_api.py
@@ -18,14 +18,14 @@ source_of_truth:
   - knowledge/source_api.py
   - knowledge/context_service.py
   - knowledge/workspace_api.py
-  - agents/knowledge_context.py
-  - agents/source_curation.py
+  - agents/core/knowledge/context.py
+  - agents/core/knowledge/source_curation.py
   - mcp_tools/source_tools.py
   - knowledge/ontology
   - utils/agent_artifact_archive.py
   - graphs/modules/knowledge/module.yaml
-last_verified: 2026-09-13
-verified_against: working-tree-2026-09-13
+last_verified: 2026-09-14
+verified_against: working-tree-2026-09-14-core-agent-roots
 related_docs:
   - docs/knowledge/wiki_memory.md
   - docs/knowledge/publication.md

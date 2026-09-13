@@ -524,7 +524,9 @@ console.log(JSON.stringify({{ ticks, uniqueCount: new Set(ticks).size }}));
 
 
 def test_live_bo_objective_card_does_not_stretch_to_plot_height() -> None:
-    source = (PROJECT_ROOT / "web" / "static" / "planning.js").read_text(encoding="utf-8")
+    source = (
+        PROJECT_ROOT / "agents" / "bo" / "frontend" / "live_report.js"
+    ).read_text(encoding="utf-8")
     css = STYLES.read_text(encoding="utf-8")
 
     assert 'className: "bo-objective-summary-card"' in source

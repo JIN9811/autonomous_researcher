@@ -243,8 +243,8 @@ async def verify(args):
             "code_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             "prompt_sha256": hashlib.sha256((ROOT / "backends/prompt_registry.py").read_bytes()).hexdigest(),
             "source_sha256": {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
-                for path in [ROOT / name for name in ("app/controller.py", "app/planning_setup.py", "agents/equipment_agent.py", "agents/orchestrator_decision.py",
-                    "agents/orchestrator_capabilities.py", "scripts/orchestrator_decision_fixtures.py",
+                for path in [ROOT / name for name in ("app/controller.py", "app/planning_setup.py", "agents/equipment_agent.py", "agents/core/orchestrator/decision.py",
+                    "agents/core/orchestrator/capabilities.py", "scripts/orchestrator_decision_fixtures.py",
                     "scripts/orchestrator_verification_guard.py", "orchestrator/handoff_boundary.py",
                     "orchestrator/handoff_projection.py", "graphs/modules/equipment/module.yaml",
                     "orchestrator/setup_application.py", "orchestrator/experimental_setup.py", "agents/bo_agent.py")]},

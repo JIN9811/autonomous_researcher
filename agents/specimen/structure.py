@@ -23,7 +23,7 @@ def specimen_implementation_structure():
             ("inspect", "Inspect evidence and return observations", "middle", D, "decide_specimen"),
             ("execute", "experiment.evaluate / printer.prepare callback", "middle", A, "SpecimenMakingAgent._decide_fabrication"),
             ("device", "Printer device boundary / selected provider", "low", "device_bridges/printer_fleet/bridge.py", "PrinterDeviceBridgeManager"),
-            ("references", "Reference-only knowledge context", "knowledge", "agents/knowledge_context.py", "build_reference_context"),
+            ("references", "Reference-only knowledge context", "knowledge", "agents/core/knowledge/context.py", "build_reference_context"),
         ], [("evidence", "$operation", "evidence", "manufacturing facts"),
             ("references", "$operation", "evidence", "reference only"),
             ("$operation", "reason", "call", "existing bounded model loop"),

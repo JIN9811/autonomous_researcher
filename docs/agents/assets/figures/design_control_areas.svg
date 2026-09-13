@@ -62,7 +62,7 @@ agents/design/decision.py · decide_design</title>
     </g><g data-implementation-node="decide::references" data-implementation-owner="decide" pointer-events="auto" role="img"  aria-label="Scoped Wiki / reference context; code-owned; build_reference_context">
       <title>Scoped Wiki / reference context
 Code-owned inside decide
-agents/knowledge_context.py · build_reference_context</title>
+agents/core/knowledge/context.py · build_reference_context</title>
       <rect x="920" y="216" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
       <text x="930" y="234" fill="#172b4d" font-size="12">Scoped Wiki / reference</text><text x="930" y="249" fill="#172b4d" font-size="12">context</text>
       <text x="930" y="283" fill="#526174" font-size="9">CODE · decide</text>

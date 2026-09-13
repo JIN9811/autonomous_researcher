@@ -108,6 +108,8 @@ def test_bo_setup_rejects_invalid_inputs(changes):
 
 @pytest.mark.asyncio
 async def test_setup_is_consumed_by_real_initial_design_and_run(monkeypatch):
+    from agents.base_agent import AgentResult
+
     owner = BOAgent()
     fresh = state()
     prior = {"constraints": {"cell_size_mm": 99}}
@@ -120,12 +122,15 @@ async def test_setup_is_consumed_by_real_initial_design_and_run(monkeypatch):
     assert initial["parameter_space"]["cell_size_mm"] == [6, 7]
     assert all(6 <= point["parameters"]["cell_size_mm"] <= 7 for point in initial["points"])
     assert fresh.run_metadata["next_design_request"] == prior
+    consumed_settings = {}
     async def consume(state, ctx, settings):
-        return settings
-    monkeypatch.setattr(owner, "run_with_settings", consume)
+        consumed_settings.update(settings)
+        return AgentResult(success=True, summary="captured owner settings")
+    monkeypatch.setattr(owner, "_execute", consume)
     consumed = await owner.run(fresh, SimpleNamespace())
-    assert consumed["acquisition"] == "upper_confidence_bound"
-    assert consumed["parameter_space"]["cell_size_mm"] == [6, 7]
+    assert consumed.success is True
+    assert consumed_settings["acquisition"] == "upper_confidence_bound"
+    assert consumed_settings["parameter_space"]["cell_size_mm"] == [6, 7]
     fresh.stage = Stage.BO
     with pytest.raises(ValueError):
         owner.apply_setup(changes, fresh, "later")

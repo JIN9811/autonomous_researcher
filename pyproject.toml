@@ -66,6 +66,7 @@ include-package-data = true
 "agents.manipulation" = ["frontend/*.js"]
 "agents.equipment" = ["frontend/*.js"]
 "agents.analysis" = ["frontend/*.js"]
+"agents.bo" = ["frontend/*.js"]
 "packages" = ["agents/*/package.yaml", "agents/*/README.md", "README.md"]
 "device_bridges.bambu" = ["requirements.txt", "README.md"]
 "device_bridges.prusa" = ["requirements.txt", "README.md"]

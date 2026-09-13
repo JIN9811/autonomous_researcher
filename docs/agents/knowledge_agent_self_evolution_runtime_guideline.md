@@ -36,7 +36,8 @@ The active module graph is `graphs/modules/knowledge/module.yaml` and uses this 
 12_emit_evolution_lab_prefill
 ```
 
-The Python handler is `agents/knowledge_agent.py`.
+The Python handler is `agents/core/knowledge/agent.py`; the former flat module
+name remains an exact compatibility alias.
 
 ## Typed Memory Records
 

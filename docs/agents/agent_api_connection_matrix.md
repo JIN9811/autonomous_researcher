@@ -28,7 +28,7 @@ source_of_truth:
   - knowledge
   - knowledge/http_api.py
   - knowledge/source_api.py
-last_verified: 2026-09-13
+last_verified: 2026-09-14
 verified_against: working-tree
 related_docs:
   - docs/agents/README.md
@@ -116,8 +116,21 @@ and [Windows/PyAutoGUI Reference](../device_bridges/windows_pyautogui_bridge.md)
 See the [Analysis Reference](analysis_agent.md#installed-package-and-executable-structure)
 and [CAE Computation Bridge Reference](../device_bridges/cae_computation_bridges.md).
 
+### Installed BO Owner (2026-09-14)
+
+| Surface | Current owner and boundary |
+|---|---|
+| Agent/package | `agent.bo_agent`, installed `bo@1.0.0`; canonical code under `agents/bo/` with exact flat-module aliases |
+| Execution | `bo.task` and `bo.deliver` preserve one composite optimization/result path; both public entrypoints traverse it once and archive once |
+| Live report | `/api/agents/bo/report` uses the owner projector; `/module-assets/bo/live_report.js` retains initial-LHS, posterior, decision, ranking and Design-handoff cards |
+| Numerics | Existing `learning.BOParameterSpace`, `learning.botorch_backend` and `experiment.benchmark`; no BO Device Bridge and no direct physical effect |
+| Settings/evidence | Existing BO workspace settings, run metadata and loop archive; no second settings or report store |
+
+See the [BO Reference](bo_agent.md#installed-package-and-executable-structure).
+
 - installed owner packages under `agents/<agent_id>/`; exact flat modules remain compatibility aliases;
 - Analysis source catalog and decisions under `agents/analysis/`, including `module.py`, `execution.py`, `structure.py` and `frontend/live_report.js`;
+- BO source catalog and decisions under `agents/bo/`, including `module.py`, `execution.py`, `structure.py` and `frontend/live_report.js`;
 - `graphs/modules/*/module.yaml`
 - `graphs/configs/atr_closed_loop.yaml`
 - `app/main.py` and `app/controller.py`
@@ -244,7 +257,8 @@ backend routing and shared leases apply; no model service is started here.
 ### Background and Source Interfaces
 
 All ten current agent owners receive bounded, reference-only Wiki context at
-their existing LLM decision entrypoints through `agents/knowledge_context.py`.
+their existing LLM decision entrypoints through `agents/core/knowledge/context.py`
+(the `agents.knowledge_context` compatibility import is unchanged).
 This is not a new execution stage or tool permission. Retrieved, delivered and
 model-cited states are distinct; structured tool schemas retain their existing
 evidence allowlists. See [Wiki and Memory](../knowledge/wiki_memory.md).

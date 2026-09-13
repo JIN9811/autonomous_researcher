@@ -34,42 +34,42 @@ orchestrator/supervisor.py · build_orchestration_plan</title>
     </g><g data-implementation-node="decide::reference" data-implementation-owner="decide" pointer-events="auto" role="img"  aria-label="Scoped Wiki / reference context; code-owned; build_reference_context">
       <title>Scoped Wiki / reference context
 Code-owned inside decide
-agents/knowledge_context.py · build_reference_context</title>
+agents/core/knowledge/context.py · build_reference_context</title>
       <rect x="920" y="216" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
       <text x="930" y="234" fill="#172b4d" font-size="12">Scoped Wiki / reference</text><text x="930" y="249" fill="#172b4d" font-size="12">context</text>
       <text x="930" y="283" fill="#526174" font-size="9">CODE · decide</text>
     </g><g data-implementation-node="decide::schema" data-implementation-owner="decide" pointer-events="auto" role="img"  aria-label="Tool schema and cited evidence; code-owned; validate_choice">
       <title>Tool schema and cited evidence
 Code-owned inside decide
-agents/orchestrator_decision.py · validate_choice</title>
+agents/core/orchestrator/decision.py · validate_choice</title>
       <rect x="56" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
       <text x="66" y="122" fill="#172b4d" font-size="12">Tool schema and cited</text><text x="66" y="137" fill="#172b4d" font-size="12">evidence</text>
       <text x="66" y="171" fill="#526174" font-size="9">CODE · decide</text>
     </g><g data-implementation-node="decide::target" data-implementation-owner="decide" pointer-events="auto" role="img"  aria-label="Admitted owner and setup revision; code-owned; _validate_target">
       <title>Admitted owner and setup revision
 Code-owned inside decide
-agents/orchestrator_decision.py · _validate_target</title>
+agents/core/orchestrator/decision.py · _validate_target</title>
       <rect x="56" y="216" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
       <text x="66" y="234" fill="#172b4d" font-size="12">Admitted owner and setup</text><text x="66" y="249" fill="#172b4d" font-size="12">revision</text>
       <text x="66" y="283" fill="#526174" font-size="9">CODE · decide</text>
     </g><g data-implementation-node="decide::inspect" data-implementation-owner="decide" pointer-events="auto" role="img"  aria-label="inspect_context / inspect_availability; code-owned; decide_orchestration">
       <title>inspect_context / inspect_availability
 Code-owned inside decide
-agents/orchestrator_decision.py · decide_orchestration</title>
+agents/core/orchestrator/decision.py · decide_orchestration</title>
       <rect x="384" y="648" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
       <text x="394" y="666" fill="#172b4d" font-size="12">inspect_context /</text><text x="394" y="681" fill="#172b4d" font-size="12">inspect_availability</text>
       <text x="394" y="715" fill="#526174" font-size="9">CODE · decide</text>
     </g><g data-implementation-node="decide::dispatch" data-implementation-owner="decide" pointer-events="auto" role="img"  aria-label="Bound terminal handler dispatch; code-owned; decide_orchestration">
       <title>Bound terminal handler dispatch
 Code-owned inside decide
-agents/orchestrator_decision.py · decide_orchestration</title>
+agents/core/orchestrator/decision.py · decide_orchestration</title>
       <rect x="624" y="648" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
       <text x="634" y="666" fill="#172b4d" font-size="12">Bound terminal handler</text><text x="634" y="681" fill="#172b4d" font-size="12">dispatch</text>
       <text x="634" y="715" fill="#526174" font-size="9">CODE · decide</text>
     </g><g data-implementation-node="decide::effect" data-implementation-owner="decide" pointer-events="auto" role="img"  aria-label="Returned effect and scope checks; code-owned; decide_orchestration">
       <title>Returned effect and scope checks
 Code-owned inside decide
-agents/orchestrator_decision.py · decide_orchestration</title>
+agents/core/orchestrator/decision.py · decide_orchestration</title>
       <rect x="56" y="328" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
       <text x="66" y="346" fill="#172b4d" font-size="12">Returned effect and scope</text><text x="66" y="361" fill="#172b4d" font-size="12">checks</text>
       <text x="66" y="395" fill="#526174" font-size="9">CODE · decide</text>

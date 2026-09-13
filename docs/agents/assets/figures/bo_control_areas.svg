@@ -1,0 +1,127 @@
+<svg xmlns="http://www.w3.org/2000/svg" data-theme="document" viewBox="0 0 1184 1190" role="img" aria-label="BO Agent Module five-area internal graph" style="font-family:Arial,sans-serif;background:#ffffff">
+      <title>BO Agent Module — five-area internal graph</title><desc>Executable owner operations and explicit outcomes. Positions are presentation only. Composite LLM tools are not separate editable operations.</desc>
+      <rect width="100%" height="100%" fill="#ffffff"/>
+      <defs><marker id="control-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6z" fill="#526174"/></marker></defs>
+      <g class="runtime-control-area" data-control-area="high" pointer-events="none">
+      <rect x="360" y="56" width="488" height="148" rx="12" fill="#2463a5" fill-opacity=".035" stroke="#2463a5" stroke-opacity=".3"/>
+      <text x="376" y="82" fill="#2463a5" font-size="15" font-weight="600">High</text>
+      </g><g class="runtime-control-area" data-control-area="middle" pointer-events="none">
+      <rect x="360" y="312" width="488" height="436" rx="12" fill="#177768" fill-opacity=".035" stroke="#177768" stroke-opacity=".3"/>
+      <text x="376" y="338" fill="#177768" font-size="15" font-weight="600">Middle</text>
+      </g><g class="runtime-control-area" data-control-area="low" pointer-events="none">
+      <rect x="352" y="848" width="488" height="208" rx="12" fill="#4c6079" fill-opacity=".035" stroke="#4c6079" stroke-opacity=".3"/>
+      <text x="368" y="874" fill="#4c6079" font-size="15" font-weight="600">Low</text>
+      <text x="368" y="922" fill="#526174" font-size="12">No separate owner operation</text></g><g class="runtime-control-area" data-control-area="guardian" pointer-events="none">
+      <rect x="32" y="56" width="264" height="260" rx="12" fill="#a36b16" fill-opacity=".035" stroke="#a36b16" stroke-opacity=".3"/>
+      <text x="48" y="82" fill="#a36b16" font-size="15" font-weight="600">Guardian / Safety</text>
+      </g><g class="runtime-control-area" data-control-area="knowledge" pointer-events="none">
+      <rect x="896" y="56" width="264" height="708" rx="12" fill="#79529c" fill-opacity=".035" stroke="#79529c" stroke-opacity=".3"/>
+      <text x="912" y="82" fill="#79529c" font-size="15" font-weight="600">Knowledge / Evidence</text>
+      </g><defs><marker id="control-detail-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6z" fill="#526174"/></marker></defs><g data-implementation-edge="task" pointer-events="none"><title>current or historical measured evidence · evidence (code-owned)</title><path d="M920,142 C744,142 744,398 568,398" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>objective identity and evidence gate · validation (code-owned)</title><path d="M384,398 C312,398 312,142 240,142" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>unchanged configured domain · call (code-owned)</title><path d="M240,142 C312,142 312,542 384,542" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>bounded BO-local decision · call (code-owned)</title><path d="M476,504 C500,342 500,342 476,180" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>inspect observations before optimization · call (code-owned)</title><path d="M568,142 C596,142 596,542 624,542" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>existing experiment.benchmark service · call (code-owned)</title><path d="M624,542 C596,542 596,686 568,686" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>existing numerical backend · call (code-owned)</title><path d="M568,686 C596,686 596,686 624,686" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>preserve exact solver coordinates · validation (code-owned)</title><path d="M624,686 C432,686 432,254 240,254" fill="none" stroke="#a36b16" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="8 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>accept or return without coordinate edits · call (code-owned)</title><path d="M240,254 C432,254 432,142 624,142" fill="none" stroke="#526174" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="5 3" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>accepted or blocked decision record · evidence (code-owned)</title><path d="M808,142 C864,142 864,254 920,254" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="task" pointer-events="none"><title>ready or blocked Design request · evidence (code-owned)</title><path d="M1012,292 C1036,310 1036,310 1012,328" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="deliver" pointer-events="none"><title>original owner AgentResult · evidence (code-owned)</title><path d="M920,478 C864,478 864,398 808,398" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="deliver" pointer-events="none"><title>metadata and payload precedence · evidence (code-owned)</title><path d="M1012,516 C1036,534 1036,534 1012,552" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-edge="deliver" pointer-events="none"><title>public entrypoint archives once · evidence (code-owned)</title><path d="M808,398 C864,398 864,702 920,702" fill="none" stroke="#79529c" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="2 5" marker-end="url(#control-detail-arrow)"/></g><g data-implementation-node="task::input" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Analysis handoff and measured priors; code-owned; BOAgent._analysis_handoff_records">
+      <title>Analysis handoff and measured priors
+Code-owned inside task
+agents/bo/agent.py · BOAgent._analysis_handoff_records</title>
+      <rect x="920" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="122" fill="#172b4d" font-size="12">Analysis handoff and</text><text x="930" y="137" fill="#172b4d" font-size="12">measured priors</text>
+      <text x="930" y="171" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::objective" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Objective-bound observation filtering; code-owned; BOAgent.objective_observations">
+      <title>Objective-bound observation filtering
+Code-owned inside task
+agents/bo/agent.py · BOAgent.objective_observations</title>
+      <rect x="56" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="122" fill="#172b4d" font-size="12">Objective-bound</text><text x="66" y="137" fill="#172b4d" font-size="12">observation filtering</text>
+      <text x="66" y="171" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::space" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Existing mixed and continuous parameter-space contract; code-owned; BOParameterSpace">
+      <title>Existing mixed and continuous parameter-space contract
+Code-owned inside task
+learning/bo_parameter_space.py · BOParameterSpace</title>
+      <rect x="384" y="504" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="522" fill="#172b4d" font-size="12">Existing mixed and</text><text x="394" y="537" fill="#172b4d" font-size="12">continuous</text><text x="394" y="552" fill="#172b4d" font-size="12">parameter-space contract</text>
+      <text x="394" y="571" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::strategy" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="LLM bounded strategy and evidence review; code-owned; run_bo_decision">
+      <title>LLM bounded strategy and evidence review
+Code-owned inside task
+agents/bo/decision.py · run_bo_decision</title>
+      <rect x="384" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#2463a5" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="122" fill="#172b4d" font-size="12">LLM bounded strategy and</text><text x="394" y="137" fill="#172b4d" font-size="12">evidence review</text>
+      <text x="394" y="171" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::diagnostics" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Code-owned observation diagnostics; code-owned; _diagnostics">
+      <title>Code-owned observation diagnostics
+Code-owned inside task
+agents/bo/decision.py · _diagnostics</title>
+      <rect x="624" y="504" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="522" fill="#172b4d" font-size="12">Code-owned observation</text><text x="634" y="537" fill="#172b4d" font-size="12">diagnostics</text>
+      <text x="634" y="571" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::benchmark" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Existing numerical benchmark tool implementation; code-owned; run_benchmark">
+      <title>Existing numerical benchmark tool implementation
+Code-owned inside task
+experiments/benchmark.py · run_benchmark</title>
+      <rect x="384" y="648" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="394" y="666" fill="#172b4d" font-size="12">Existing numerical</text><text x="394" y="681" fill="#172b4d" font-size="12">benchmark tool</text><text x="394" y="696" fill="#172b4d" font-size="12">implementation</text>
+      <text x="394" y="715" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::botorch" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Existing BoTorch acquisition implementation; code-owned; propose_next">
+      <title>Existing BoTorch acquisition implementation
+Code-owned inside task
+learning/botorch_backend.py · propose_next</title>
+      <rect x="624" y="648" width="184" height="76" rx="5" fill="#ffffff" stroke="#177768" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="666" fill="#172b4d" font-size="12">Existing BoTorch</text><text x="634" y="681" fill="#172b4d" font-size="12">acquisition</text><text x="634" y="696" fill="#172b4d" font-size="12">implementation</text>
+      <text x="634" y="715" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::candidate" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Exact numerical candidate validation; code-owned; _validate_candidate">
+      <title>Exact numerical candidate validation
+Code-owned inside task
+agents/bo/decision.py · _validate_candidate</title>
+      <rect x="56" y="216" width="184" height="76" rx="5" fill="#ffffff" stroke="#a36b16" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="66" y="234" fill="#172b4d" font-size="12">Exact numerical candidate</text><text x="66" y="249" fill="#172b4d" font-size="12">validation</text>
+      <text x="66" y="283" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::review" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="LLM exact-result acceptance or owner return; code-owned; run_bo_decision">
+      <title>LLM exact-result acceptance or owner return
+Code-owned inside task
+agents/bo/decision.py · run_bo_decision</title>
+      <rect x="624" y="104" width="184" height="76" rx="5" fill="#ffffff" stroke="#2463a5" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="634" y="122" fill="#172b4d" font-size="12">LLM exact-result</text><text x="634" y="137" fill="#172b4d" font-size="12">acceptance or owner</text><text x="634" y="152" fill="#172b4d" font-size="12">return</text>
+      <text x="634" y="171" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::artifacts" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Existing BO evidence artifact writer; code-owned; BOAgent._write_artifacts">
+      <title>Existing BO evidence artifact writer
+Code-owned inside task
+agents/bo/agent.py · BOAgent._write_artifacts</title>
+      <rect x="920" y="216" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="234" fill="#172b4d" font-size="12">Existing BO evidence</text><text x="930" y="249" fill="#172b4d" font-size="12">artifact writer</text>
+      <text x="930" y="283" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="task::handoff" data-implementation-owner="task" pointer-events="auto" role="img"  aria-label="Existing Design request construction; code-owned; BOAgent._run_task">
+      <title>Existing Design request construction
+Code-owned inside task
+agents/bo/agent.py · BOAgent._run_task</title>
+      <rect x="920" y="328" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="346" fill="#172b4d" font-size="12">Existing Design request</text><text x="930" y="361" fill="#172b4d" font-size="12">construction</text>
+      <text x="930" y="395" fill="#526174" font-size="9">CODE · task</text>
+    </g><g data-implementation-node="deliver::report" data-implementation-owner="deliver" pointer-events="auto" role="img"  aria-label="BO result and Design handoff payload; code-owned; BOAgent._run_task">
+      <title>BO result and Design handoff payload
+Code-owned inside deliver
+agents/bo/agent.py · BOAgent._run_task</title>
+      <rect x="920" y="440" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="458" fill="#172b4d" font-size="12">BO result and Design</text><text x="930" y="473" fill="#172b4d" font-size="12">handoff payload</text>
+      <text x="930" y="507" fill="#526174" font-size="9">CODE · deliver</text>
+    </g><g data-implementation-node="deliver::projection" data-implementation-owner="deliver" pointer-events="auto" role="img"  aria-label="Owner report projection; code-owned; project_bo_report">
+      <title>Owner report projection
+Code-owned inside deliver
+agents/bo/presentation.py · project_bo_report</title>
+      <rect x="920" y="552" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="570" fill="#172b4d" font-size="12">Owner report projection</text>
+      <text x="930" y="619" fill="#526174" font-size="9">CODE · deliver</text>
+    </g><g data-implementation-node="deliver::archive" data-implementation-owner="deliver" pointer-events="auto" role="img"  aria-label="Public run archive wrapper; code-owned; archive_agent_run">
+      <title>Public run archive wrapper
+Code-owned inside deliver
+utils/agent_artifact_archive.py · archive_agent_run</title>
+      <rect x="920" y="664" width="184" height="76" rx="5" fill="#ffffff" stroke="#79529c" stroke-opacity=".65" stroke-dasharray="4 3"/>
+      <text x="930" y="682" fill="#172b4d" font-size="12">Public run archive</text><text x="930" y="697" fill="#172b4d" font-size="12">wrapper</text>
+      <text x="930" y="731" fill="#526174" font-size="9">CODE · deliver</text>
+    </g><g data-source="task" data-target="deliver" data-outcome="next" data-kind="evidence"><title>task → deliver · next · evidence</title><path d="M 576 398 C 587.2 398, 604.8 398, 616 398" fill="none" stroke="#79529c" stroke-opacity=".8" stroke-width="2" stroke-dasharray="2 5" marker-end="url(#control-arrow)"/><rect x="577" y="388" width="38" height="20" rx="4" fill="#ffffff"/><text x="596" y="402" text-anchor="middle" fill="#79529c" font-size="11">next</text></g><g><title>task · bo.task</title>
+        <rect x="384" y="360" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="396" y="381" fill="#172b4d" font-size="12">Composite BO strategy,</text><text x="396" y="397" fill="#172b4d" font-size="12">evidence and numerical</text><text x="396" y="413" fill="#172b4d" font-size="12">task</text>
+        <text x="489" y="428" fill="#177768" font-size="10">LLM call</text></g><g><title>deliver · bo.deliver</title>
+        <rect x="624" y="360" width="184" height="76" rx="9" fill="#ffffff" stroke="#177768" stroke-width="2"/>
+        <text x="636" y="381" fill="#172b4d" font-size="12">Deliver owner result</text>
+        </g>
+      <line x1="24" x2="62" y1="1114" y2="1114" stroke="#526174" stroke-width="2" stroke-dasharray=""/><text x="72" y="1118" fill="#172b4d" font-size="14">Execution</text><line x1="244" x2="282" y1="1114" y2="1114" stroke="#526174" stroke-width="2" stroke-dasharray="8 5"/><text x="292" y="1118" fill="#172b4d" font-size="14">Validation</text><line x1="464" x2="502" y1="1114" y2="1114" stroke="#526174" stroke-width="2" stroke-dasharray="2 5"/><text x="512" y="1118" fill="#172b4d" font-size="14">Evidence</text><line x1="684" x2="722" y1="1114" y2="1114" stroke="#526174" stroke-width="2" stroke-dasharray="5 3"/><text x="732" y="1118" fill="#172b4d" font-size="14">Internal call</text>
+      <text x="24" y="1150" fill="#526174" font-size="13">Solid: execution · Dashed CODE: implementation · LLM: High decision · LLM call: process calls that decision</text>
+    </svg>

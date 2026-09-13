@@ -42,7 +42,7 @@ def _reversed_orchestrator_payload(client: TestClient) -> dict:
     return payload
 
 
-@pytest.mark.parametrize('module_id', ['bo', 'guardian', 'knowledge'])
+@pytest.mark.parametrize('module_id', ['guardian', 'knowledge'])
 def test_legacy_module_api_delivers_control_view_without_converting_execution(module_api, module_id):
     client, _, _, guard, root = module_api
     installed = yaml.safe_load((root / module_id / 'module.yaml').read_text())['module']

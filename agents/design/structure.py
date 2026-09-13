@@ -8,7 +8,7 @@ from agents.control_structure import implementation_detail as detail
 
 A = "agents/design/agent.py"
 D = "agents/design/decision.py"
-K = "agents/knowledge_context.py"
+K = "agents/core/knowledge/context.py"
 
 
 def design_implementation_structure():

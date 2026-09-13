@@ -1,5 +1,5 @@
 ---
-{"topic_id":"orchestrator-role","owner":"orchestrator_agent","source_refs":["docs/agents/orchestrator_agent.md"],"source_revision":{"docs/agents/orchestrator_agent.md":"876b88af3da5b6a7e1bc3f7ead0a5700c9c5e0823a36fb0fdf403bf6d96aa0e8"},"verified_at":"2026-09-13T00:00:00+00:00","applicability":"Public Orchestrator Agent responsibilities and handoff","status":"reviewed"}
+{"topic_id":"orchestrator-role","owner":"orchestrator_agent","source_refs":["docs/agents/orchestrator_agent.md"],"source_revision":{"docs/agents/orchestrator_agent.md":"5745b9bebf5db1d283f477d23b86877d390c2988cf08bd24cf3312103e1aaeb3"},"verified_at":"2026-09-14T00:00:00+00:00","applicability":"Public Orchestrator Agent responsibilities and handoff","status":"reviewed"}
 ---
 
 # Orchestrator Agent

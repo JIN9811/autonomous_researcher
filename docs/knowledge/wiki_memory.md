@@ -11,13 +11,13 @@ source_of_truth:
   - knowledge/private_memory.py
   - knowledge/workspace_api.py
   - knowledge/delivery.py
-  - agents/knowledge_context.py
+  - agents/core/knowledge/context.py
   - app/controller.py
   - web/static/knowledge_workspace.js
   - web/static/knowledge_live.js
   - web/static/planning.js
-last_verified: 2026-09-13
-verified_against: working-tree-2026-09-13
+last_verified: 2026-09-14
+verified_against: working-tree-2026-09-14-core-agent-roots
 related_docs:
   - docs/agents/knowledge_agent.md
   - docs/knowledge/publication.md
