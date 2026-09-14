@@ -103,6 +103,66 @@ The shared host retains polling, process/state synchronization, delegated
 installed owner removes its current cards and denies its asset; it does not
 delete saved Equipment configuration or evidence.
 
+## Error-run recovery and code updates
+
+`Resume` retains its existing pause behavior. For an error-ended run it can
+revalidate a fully completed Equipment workflow whose terminal review failed;
+it does not replay Skills, restore a different specimen, or clear safety latches.
+The run, experiment, mode, immutable execution scope and ordered completed
+blocks must match the persisted decision record. The exported CSV must still
+match its SHA-256. Partial or unknown-effect execution remains blocked.
+
+The retry captures a fresh, hash-verified Windows screenshot and refreshes
+post-Skill Vision evidence before the normal terminal LLM review. `NOT WORKING`
+and completion observations run after their Skill, while in-motion observations
+retain concurrent timing. Downloaded screenshot artifacts are matched to the
+Windows artifact identity and digest, rather than interpreting a missing path
+as the repository directory. Only accepted results return through the normal
+Equipment/Guardian/Orchestrator handoff to Analysis.
+Cold observer startup may collect up to five fresh observation windows when
+samples are insufficient; contradictory measurements are not retried into
+acceptance. Read-only review errors remain review-required, not unknown motion.
+For older ROS results stamped before startup/probing, terminal review derives
+freshness from the actual fresh sample timestamps and retains the five-second
+limit. It never refreshes stale samples using the response receipt time.
+Model inputs are immutable snapshots; live execution scope, approvals and stop
+flags are rechecked before accepting a choice. UI/token telemetry is not authority.
+After a fresh terminal observation passes, the report's `block_executions` is
+rebuilt from the same current transitions used by the workflow. Superseded
+observations and warmup attempts remain in prior immutable attempts and the
+current attempt's `equipment.terminal_observation_history` audit event, not in
+the active Guardian payload. Unrelated block failures remain blocking.
+An explicitly requested terminal revalidation can also inspect an already
+accepted completed execution (for example after a stale report blocked its
+handoff). Its actuation claim stays `COMPLETED` throughout: a rejected review
+does not overwrite the previous accepted result, and no Skill is reopened.
+Only the first recovered cycle skips completed stages. If the existing plan
+continues, subsequent cycles retain the normal Design/Specimen/tail path and
+their original mode and safety checks; recovery does not reset stop controls.
+
+Before the initial server update, `python -m app.run_recovery <run-id>` saves an
+integrity-checked state/transcript checkpoint and a second CSV copy under the
+ignored private run directory. `POST /api/runs/{run_id}/recovery/restore` restores
+that error boundary without executing it; the normal run `resume` endpoint is
+a separate operator action. This is not an unrestricted historical-run loader.
+Restoration also rebinds the original canonical transcript path and Experimental
+Setup session/cache. The initial conversation directory can differ from the run
+directory; retaining startup's cache would cause a session-conflict HTTP 500.
+Messages and their count are rehydrated from that canonical transcript, including
+messages written after the checkpoint, rather than rolling the chat back to an
+older in-memory snapshot. A Guardian-paused task must first reach an inactive
+boundary before hot reload; the reload endpoint does not bypass paused-task or
+PLC safety checks. Preserve the current snapshot and transcript before using
+the existing PLC-gated runtime reset and restoring the same private checkpoint.
+
+`POST /api/runtime/hot-reload/equipment-support` supports only the stateless
+Equipment workflow/recovery, private run-checkpoint helpers and Vision-task catalog modules. It runs focused
+tests, rejects changed function signatures or sources changed during validation,
+and publishes only at an inactive boundary. Existing imported function aliases
+retain their identity. Controller classes, bridge objects, active/paused workflows
+and arbitrary modules are not hot-reloadable; those changes require a controlled
+server update. Neither hot reload nor checkpoint restoration actuates equipment.
+
 ## Five-Area Responsibility Map
 
 Figure notation: **LLM** marks the High decision; **LLM call** marks the process

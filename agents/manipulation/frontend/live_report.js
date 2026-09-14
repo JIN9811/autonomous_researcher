@@ -80,7 +80,7 @@
 
     function renderManipulationTelemetryCards() {
       const jointOptions = ["Joint1", "Joint2", "Joint3", "Joint4", "Joint5", "Gripper"]
-        .map((joint) => `<option value="${joint}">${joint}</option>`)
+        .map((joint) => `<option value="${joint}"${joint === "Gripper" ? " selected" : ""}>${joint}</option>`)
         .join("");
       const motionStates = ["home", "moving", "grasping", "ungrasping"];
       const motionSummary = (channel, label) => `

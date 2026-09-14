@@ -3,6 +3,22 @@ import json
 from types import SimpleNamespace
 
 import pytest
+
+
+@pytest.mark.asyncio
+async def test_validation_distinguishes_warnings_from_blocking_quality_checks():
+    from agents.analysis.decisions import decide
+    from types import SimpleNamespace
+    prompts = []
+    class Ctx:
+        async def complete(self, task, prompt, **kwargs):
+            prompts.append(json.loads(prompt))
+            return SimpleNamespace(text='{"option_id":"hold","reason":"An independent inconsistency remains."}')
+    result = await decide(Ctx(), 'data_validation', {'quality_gate': {'ok_for_metrics': True,
+        'ok_for_bo': True, 'warnings': ['peak_at_curve_boundary']}}, {'accept':'analysis.accept_metrics','hold':None})
+    assert 'not by itself' in prompts[0]['instructions']
+    assert prompts[0]['evidence']['quality_gate']['warnings'] == ['peak_at_curve_boundary']
+    assert result['tool'] is None  # Advice never forces model acceptance.
 from agents.analysis import decisions as module
 
 

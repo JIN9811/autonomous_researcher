@@ -189,9 +189,22 @@ async def _capture(agent, state, ctx, result, execution_id):
         for key in ("run_id", "loop_id", "specimen_id", "workflow_execution_id"):
             if key in raw and raw[key] != payload[key]:
                 raise ValueError("screenshot identity mismatch")
-        artifact = raw.get("artifact") or next((a for a in raw.get("output_artifacts", [])
-            if str(a.get("content_type", "")).startswith("image/")), {})
-        path = Path(artifact.get("local_path") or artifact.get("path") or "").resolve(strict=True)
+        alias = raw.get("artifact") or {}
+        # The bridge downloads output_artifacts to Linux; the singular alias
+        # may still contain only the Windows-side metadata. Match its identity
+        # rather than treating that truthy alias as a local file.
+        artifact = next((a for a in raw.get("output_artifacts", [])
+            if str(a.get("content_type", "")).startswith("image/")
+            and a.get("local_path")
+            and (not alias.get("artifact_id") or a.get("artifact_id") == alias["artifact_id"])), alias)
+        if alias.get("sha256") and alias["sha256"] != artifact.get("sha256"):
+            raise ValueError("screenshot alias/download digest mismatch")
+        filename = artifact.get("local_path") or artifact.get("path")
+        if not filename:
+            raise ValueError("screenshot local file unavailable")
+        path = Path(filename).resolve(strict=True)
+        if not path.is_file():
+            raise ValueError("screenshot path is not a file")
         with path.open("rb") as stream:
             data = stream.read(MAX_LLM_IMAGE_BYTES + 1)
         if len(data) > MAX_LLM_IMAGE_BYTES or not artifact.get("sha256") or _digest_bytes(data) != artifact["sha256"]:
@@ -249,19 +262,43 @@ async def run_decided_workflow(agent, state, ctx, flow):
         metadata={"scope_digest": scope_digest, "profile_id": flow.get("profile_id"),
                   "runtime_mode": agent._effective_runtime_mode(state)})
     execution_id = record["execution_id"]
+    completed_recheck = record.get("lifecycle") == "COMPLETED"
+    def transition(lifecycle, **fields):
+        if completed_recheck:
+            # A new observation/review never reopens the completed actuation
+            # claim. Failed reviews are archived by this invocation; the last
+            # accepted execution remains immutable until another acceptance.
+            record_tool_artifact("review_transition", "equipment.terminal_revalidation",
+                {"execution_id": execution_id, "review_state": lifecycle, "actuation_performed": False})
+            if lifecycle != "COMPLETED":
+                return
+        service.transition(execution_id, lifecycle, **fields)
+    retry_result = None
     if record.get("idempotent"):
         stored = record.get("workflow_result")
         if stored and record.get("metadata", {}).get("scope_digest") == scope_digest and not _stopped(state):
-            output = AgentResult(**deepcopy(stored))
-            output.data["equipment_workflow_cached"] = True
-            return output
-        return _blocked("EQUIPMENT_WORKFLOW_ALREADY_CLAIMED")
+            requested = state.run_metadata.pop("equipment_terminal_review_retry", None)
+            if requested == execution_id and record.get("lifecycle") in {"ESCALATED", "COMPLETED"}:
+                from agents.equipment.recovery import completed_candidate
+                try:
+                    retry_result = completed_candidate(record, flow, state)
+                except (ValueError, OSError, KeyError) as exc:
+                    output = _blocked("EQUIPMENT_REVIEW_RETRY_UNSAFE")
+                    output.data["recovery_error"] = str(exc)
+                    return output
+            else:
+                output = AgentResult(**deepcopy(stored))
+                output.data["equipment_workflow_cached"] = True
+                return output
+        else:
+            return _blocked("EQUIPMENT_WORKFLOW_ALREADY_CLAIMED")
 
     source_settings = state.run_metadata.get("knowledge_settings", {})
     source_scope = source_settings.get("source_scope", {}) if isinstance(source_settings, dict) else {}
     reference_context = await asyncio.to_thread(source_context, ctx, state.active_goal, scope=source_scope)
-    checkpoint, decisions, diagnostics = {"workflow_execution_id": execution_id}, [], []
-    result = None
+    checkpoint = deepcopy(record["checkpoint"]) if retry_result else {"workflow_execution_id": execution_id}
+    decisions, diagnostics = [], []
+    result = retry_result
     attempts = 0
     def valid():
         return not _stopped(state) and _scope(state) == snapshot and flow == frozen_flow and _describe(agent, state, flow) == description
@@ -278,7 +315,10 @@ async def run_decided_workflow(agent, state, ctx, flow):
             "execution": _terminal_evidence(result) if result else {}, "diagnostics": _bounded_evidence(diagnostics),
             "completed_blocks": [x["block_id"] for x in checkpoint.get("transitions", []) if x.get("phase") == "skill"],
             "recovery_eligible": bool(result and _safe_resume(agent, result, checkpoint, flow))}
-        decision = await decide_equipment(state, ctx, phase=phase, context=context,
+        # The model reads an immutable input, while valid() below checks the live
+        # execution/approval/stop authority. Token/UI telemetry can change during
+        # inference without invalidating an otherwise identical proposal.
+        decision = await decide_equipment(deepcopy(state), ctx, phase=phase, context=context,
             proposals={name: {"proposal_id": _digest([execution_id, phase, len(decisions), context]), **args}
                        for name, args in proposals.items()}, images=images)
         decisions.append(decision)
@@ -287,22 +327,31 @@ async def run_decided_workflow(agent, state, ctx, flow):
         return (decision.get("request") or {}).get("tool", "request_operator")
 
     try:
-        if valid():
+        if valid() and retry_result is None:
             preflight = await agent._run_equipment_skill_flow(state, ctx, frozen_flow,
                 checkpoint=checkpoint, validate_only=True)
             if not preflight.success:
                 result = preflight
         if not valid():
             result = _blocked("EQUIPMENT_WORKFLOW_SCOPE_CHANGED")
-        elif result is not None:
+        elif result is not None and retry_result is None:
             pass  # Preserve the original hard-gate result; no model can override it.
-        elif await decide("select", {"execute_stacked_workflow": {}, "request_operator": {}}) != "execute_stacked_workflow":
+        elif retry_result is None and await decide("select", {"execute_stacked_workflow": {}, "request_operator": {}}) != "execute_stacked_workflow":
             result = _blocked("EQUIPMENT_WORKFLOW_SELECTION_REJECTED")
         else:
-            service.transition(execution_id, "PREFLIGHT")
-            service.transition(execution_id, "EXECUTING")
-            result = await agent._run_equipment_skill_flow(state, ctx, frozen_flow,
-                checkpoint=checkpoint, cancel_requested=lambda: not valid())
+            if retry_result is None:
+                transition("PREFLIGHT")
+                transition("EXECUTING")
+                result = await agent._run_equipment_skill_flow(state, ctx, frozen_flow,
+                    checkpoint=checkpoint, cancel_requested=lambda: not valid())
+                if result.success:
+                    transition("VERIFYING", terminal_result={
+                        "success": result.success, "summary": result.summary, "data": deepcopy(result.data)})
+            else:
+                from agents.equipment.recovery import refresh_terminal_observations
+                transition("RECOVERING", recovery={"operation": "terminal_review_only", "actuation_performed": False})
+                result = await refresh_terminal_observations(agent, state, ctx, frozen_flow, result)
+                transition("VERIFYING")
             phase, recovered, observed = "terminal_review", False, False
             before_recovery_images = []
             for _ in range(5):
@@ -350,7 +399,7 @@ async def run_decided_workflow(agent, state, ctx, flow):
                     if gate_blocks_execution(gate) or not valid():
                         result = _blocked("EQUIPMENT_WORKFLOW_RECOVERY_REJECTED", result)
                         break
-                    service.transition(execution_id, "RECOVERING", checkpoint=checkpoint,
+                    transition("RECOVERING", checkpoint=checkpoint,
                         recovery={"attempts": attempts, "operation": operation})
                     if choice == "recover_wait":
                         await asyncio.sleep(0 if agent._effective_runtime_mode(state) == "test" else 1)
@@ -367,7 +416,7 @@ async def run_decided_workflow(agent, state, ctx, flow):
                     recovered, phase = True, "recovery_review"
                     continue
                 if choice == "resume_failed_block" and recovered and safe and valid():
-                    service.transition(execution_id, "EXECUTING", checkpoint=checkpoint)
+                    transition("EXECUTING", checkpoint=checkpoint)
                     result = await agent._run_equipment_skill_flow(state, ctx, frozen_flow,
                         checkpoint=checkpoint, cancel_requested=lambda: not valid())
                     recovered, phase = False, "terminal_review"
@@ -377,10 +426,11 @@ async def run_decided_workflow(agent, state, ctx, flow):
             else:
                 result = _blocked("EQUIPMENT_WORKFLOW_REVIEW_BUDGET_EXHAUSTED", result)
     except asyncio.CancelledError:
-        service.transition(execution_id, "ESCALATED", failure={"failure_code": "EQUIPMENT_WORKFLOW_CANCELLED"})
+        transition("ESCALATED", failure={"failure_code": "EQUIPMENT_WORKFLOW_CANCELLED"})
         raise
     except Exception as exc:
-        result = _blocked("EQUIPMENT_WORKFLOW_EFFECT_UNKNOWN", result)
+        result = _blocked("EQUIPMENT_WORKFLOW_REVIEW_REQUIRED" if retry_result is not None
+                          else "EQUIPMENT_WORKFLOW_EFFECT_UNKNOWN", result)
         diagnostics.append({"error": f"{type(exc).__name__}: {exc}"})
     if not valid():
         result = _blocked("EQUIPMENT_WORKFLOW_SCOPE_CHANGED", result)
@@ -390,8 +440,8 @@ async def run_decided_workflow(agent, state, ctx, flow):
         "accepted": result.success, "execution_id": execution_id, "decisions": decisions}
     stored = {"success": result.success, "summary": result.summary, "data": result.data}
     if result.success:
-        service.transition(execution_id, "VERIFYING")
-    service.transition(execution_id, "COMPLETED" if result.success else "ESCALATED",
+        transition("VERIFYING")
+    transition("COMPLETED" if result.success else "ESCALATED",
         workflow_result=stored, checkpoint=checkpoint)
     record_tool_artifact("decision_result", "equipment.workflow_review", stored)
     return result

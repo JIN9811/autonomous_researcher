@@ -108,6 +108,27 @@ class NoopBridge:
         return None
 
 
+@pytest.fixture(autouse=True)
+def isolate_non_plc_lifespan(monkeypatch):
+    """PLC API tests must not reuse real ingestion tasks across TestClient loops."""
+    class Ingestion:
+        async def start(self):
+            pass
+        async def shutdown(self):
+            pass
+    ingestion = Ingestion()
+    monkeypatch.setattr(main_module, "_source_ingestion_service", lambda: ingestion)
+    monkeypatch.setattr(main_module, "_SOURCE_INGESTION_SERVICE", ingestion)
+    monkeypatch.setattr(main_module, "_cleanup_bambu_video_stream_processes", lambda **_: None)
+    monkeypatch.setattr(main_module, "_lerobot_bridge", lambda: NoopBridge())
+    monkeypatch.setattr(main_module, "_utm_runtime_bridge", lambda: NoopBridge())
+    monkeypatch.setattr(main_module, "_LOCAL_PYAUTOGUI_BRIDGE_SUPERVISOR", None)
+    monkeypatch.setattr(main_module, "_read_api_key_settings", lambda **_: {})
+    async def no_settings(*args, **kwargs):
+        return {}
+    monkeypatch.setattr(main_module, "_apply_runtime_api_key_settings", no_settings)
+
+
 def _config_payload(**overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
         "transport": "pymcprotocol_type3e",
@@ -734,7 +755,19 @@ def test_plc_workspace_dashboard_and_openapi_contract(client: TestClient) -> Non
     assert workspace.status_code == 200
     assert 'id="plc-workspace"' in workspace.text
     assert dashboard.status_code == 200
-    assert 'id="btn-open-plc" class="btn primary" href="/plc"' in dashboard.text
+    from html.parser import HTMLParser
+    class Links(HTMLParser):
+        plc = None
+        def handle_starttag(self, tag, attrs):
+            attributes = dict(attrs)
+            if tag == "a" and attributes.get("id") == "btn-open-plc":
+                self.plc = attributes
+    links = Links()
+    links.feed(dashboard.text)
+    assert links.plc is not None
+    assert links.plc["href"] == "/plc"
+    assert links.plc["target"] == "_blank"
+    assert "noopener" in links.plc["rel"].split()
     assert plc_paths == {
         "/api/plc/config": {"get", "post"},
         "/api/plc/connect": {"post"},

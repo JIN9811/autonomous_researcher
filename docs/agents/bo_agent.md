@@ -232,6 +232,13 @@ process settings remain enforced. The generic `BOParameterSpace` still supports
 mixed/discrete problems.
 
 The first LHS request and subsequent BO requests carry `parameter_space`.
+At the planning-to-Design boundary, the initial-design contract publishes its
+actual LHS points and a run-local figure before the first measurement or BO
+result exists. Live GUI consumes `lhs.visualization.updated` and hydrates the
+current run's figure; no optimizer replay is needed. Test paths and live
+experiments explicitly configured with `initial_design.sampler=latin_hypercube`
+use this same intake. A manually specified live design without LHS configuration
+retains its requested coordinates.
 Orchestrator republishes it with the authoritative point. Design validates
 against that domain and preserves numerical precision through candidate
 preparation and geometry arguments; display rounding does not change the
@@ -350,6 +357,13 @@ attempt; run-local BO files remain latest-view compatibility outputs.
 See [Loop Artifact Archiving](../runtime/loop_artifact_archiving.md).
 
 ### Visualization Contract
+
+Live Posterior and Initial Design / LHS have independent previous/next arrows
+at the right of their card headers. They browse stored PNG artifacts from the
+current run, show the step and position, and disable unavailable directions.
+Unchanged refreshes preserve browsing; a new live step returns its card to the
+latest graph. Switching runs clears the selection and history. This is
+read-only artifact browsing, not replay or restoration of optimizer state.
 
 Live GUI places the run objective across the full report width, with posterior
 and LHS figures side by side below it. The objective is supplied independently

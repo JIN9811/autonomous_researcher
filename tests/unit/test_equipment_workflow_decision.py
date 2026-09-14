@@ -33,6 +33,21 @@ class Model:
         }))
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("authority_change", [False, True])
+async def test_model_telemetry_does_not_invalidate_but_approval_changes_do(tmp_path, monkeypatch, authority_change):
+    agent, state, tools, executed, _, _ = setup_flow(tmp_path, monkeypatch)
+    class UpdatingModel(Model):
+        async def complete(self, *args, **kwargs):
+            state.run_metadata["llm_last_call_telemetry"] = {"tokens": len(self.calls) + 1}
+            if authority_change:
+                state.run_metadata["runtime_approvals"] = {"operator": "revoked"}
+            return await super().complete(*args, **kwargs)
+    result = await agent.run(state, UpdatingModel(tools))
+    assert result.success is (not authority_change)
+    assert executed == ([] if authority_change else ["prepare", "measure", "export"])
+
+
 def setup_flow(tmp_path, monkeypatch, *, multi_segment=False):
     agent = LabEquipmentAgent()
     monkeypatch.setattr(agent, "_RUNTIME_ROOT", tmp_path / "runtime")
@@ -93,6 +108,71 @@ def setup_flow(tmp_path, monkeypatch, *, multi_segment=False):
                          "artifact_id": "controlled-worker-screen", "content_type": "image/png"}}
     tools.register("equipment.pyautogui.screenshot", screenshot)
     return agent, state, tools, executed, worker, flow
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("corruption", [None, "alias_digest", "artifact_id", "run_id", "missing_file", "directory"])
+async def test_terminal_review_uses_downloaded_image_not_remote_artifact_alias(tmp_path, monkeypatch, corruption):
+    agent, state, tools, executed, _, _ = setup_flow(tmp_path, monkeypatch)
+    # The Windows response retains a metadata-only singular artifact while
+    # the bridge places the downloaded, hash-bound file in output_artifacts.
+    original_call = tools.call
+    def windows_shape(name, payload):
+        raw = original_call(name, payload)
+        if name == "equipment.pyautogui.screenshot":
+            local = raw["artifact"]
+            raw["output_artifacts"] = [local]
+            raw["artifact"] = {"artifact_id": local["artifact_id"],
+                "content_type": "image/png", "sha256": local["sha256"]}
+            if corruption == "alias_digest":
+                raw["artifact"]["sha256"] = "0" * 64
+            elif corruption == "artifact_id":
+                local["artifact_id"] = "another-image"
+            elif corruption == "run_id":
+                raw["run_id"] = "another-run"
+            elif corruption == "missing_file":
+                local["local_path"] = str(tmp_path / "missing.png")
+            elif corruption == "directory":
+                local["local_path"] = str(tmp_path)
+        return raw
+    monkeypatch.setattr(tools, "call", windows_shape)
+    result = await agent.run(state, Model(tools))
+    assert result.success is (corruption is None)
+    assert executed == ["prepare", "measure", "export"]
+    assert result.data["equipment_workflow_recovery"]["diagnostics"][-1]["screenshot"]["ok"] is (corruption is None)
+
+
+@pytest.mark.asyncio
+async def test_not_working_observation_is_taken_after_skill_completion(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    agent, state, tools, _, _, flow = setup_flow(tmp_path, monkeypatch)
+    flow["blocks"][-1]["vision"] = {"enabled": True, "blocking": False,
+        "task_id": "utm_state_not_working"}
+    flow = EquipmentSkillFlowStore(agent._SKILL_FLOW_PATH).save("windows_desktop_v1", flow)["flow"]
+    completed = False
+    original_skill = agent._run_equipment_skill
+    async def delayed_skill(*args, **kwargs):
+        nonlocal completed
+        result = await original_skill(*args, **kwargs)
+        await asyncio.sleep(0)
+        completed = True
+        return result
+    monkeypatch.setattr(agent, "_run_equipment_skill", delayed_skill)
+    # Keep only the final block: a real Skill executes against the controlled
+    # worker, and the external observation depends on its completion boundary.
+    flow["blocks"] = flow["blocks"][-1:]
+    def vision(payload):
+        now = datetime.now(timezone.utc)
+        check = payload["checks"][0]
+        return {"ok": completed, "results": [{**check, "ok": completed,
+            "status": "verified" if completed else "attention_required",
+            "confidence": 0.92, "timestamp": now.isoformat(),
+            "expires_at": (now + timedelta(seconds=5)).isoformat(),
+            "source": "controlled_sensor"}]}
+    tools.register("vision.equipment_cross_check", vision)
+    result = await agent._run_equipment_skill_flow(state, Model(tools), flow)
+    observations = [t for t in result.data["equipment_skill_flow_execution"]["transitions"] if t["phase"] == "vision"]
+    assert observations[-1]["outcome"] == "detected"
 
 
 @pytest.mark.asyncio
@@ -266,6 +346,33 @@ async def test_bad_screenshot_cannot_trigger_successful_work_replay(tmp_path, mo
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("change", [None, "scope", "stop", "wrong_execution"])
+async def test_explicit_terminal_review_retry_never_replays_worker(tmp_path, monkeypatch, change):
+    agent, state, tools, executed, _, _ = setup_flow(tmp_path, monkeypatch)
+    original_call = tools.call
+    broken = True
+    def screen(name, payload):
+        if name == "equipment.pyautogui.screenshot" and broken:
+            return {"ok": False}
+        return original_call(name, payload)
+    monkeypatch.setattr(tools, "call", screen)
+    first = await agent.run(state, Model(tools))
+    assert not first.success
+    broken = False
+    execution = first.data["equipment_workflow_execution_id"]
+    state.run_metadata["equipment_terminal_review_retry"] = execution
+    if change == "scope":
+        state.active_session_id = "another-session"
+    elif change == "stop":
+        state.stop_requested = True
+    elif change == "wrong_execution":
+        state.run_metadata["equipment_terminal_review_retry"] = "wrong-execution"
+    second = await agent.run(state, Model(tools))
+    assert second.success is (change is None)
+    assert executed == ["prepare", "measure", "export"]
+
+
+@pytest.mark.asyncio
 async def test_live_review_rejects_simulated_screenshot(tmp_path, monkeypatch):
     from agents.equipment.workflow import _capture
     from orchestrator.state import Mode
@@ -278,6 +385,178 @@ async def test_live_review_rejects_simulated_screenshot(tmp_path, monkeypatch):
     tools.register("equipment.pyautogui.screenshot", lambda payload: original)
     images, evidence = await _capture(agent, state, Model(tools), None, "test-execution")
     assert images == [] and evidence["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_read_only_review_failure_remains_retryable_without_worker_replay(tmp_path, monkeypatch):
+    from agents.equipment import recovery
+    agent, state, tools, executed, _, _ = setup_flow(tmp_path, monkeypatch)
+    first = await agent.run(state, Model(tools, ["execute_stacked_workflow", "request_operator"]))
+    assert not first.success
+    execution = first.data["equipment_workflow_execution_id"]
+    async def unavailable(*args):
+        raise ValueError("Sensor is starting")
+    original = recovery.refresh_terminal_observations
+    monkeypatch.setattr(recovery, "refresh_terminal_observations", unavailable)
+    state.run_metadata["equipment_terminal_review_retry"] = execution
+    second = await agent.run(state, Model(tools))
+    assert second.data["equipment_handoff"]["failure_code"] == "EQUIPMENT_WORKFLOW_REVIEW_REQUIRED"
+    monkeypatch.setattr(recovery, "refresh_terminal_observations", original)
+    state.run_metadata["equipment_terminal_review_retry"] = execution
+    assert (await agent.run(state, Model(tools))).success
+    assert executed == ["prepare", "measure", "export"]
+
+
+@pytest.mark.asyncio
+async def test_completed_work_can_be_revalidated_without_reopening_actuation_claim(tmp_path, monkeypatch):
+    from utils.equipment_runtime_service import EquipmentRuntimeService
+    agent, state, tools, executed, _, _ = setup_flow(tmp_path, monkeypatch)
+    first = await agent.run(state, Model(tools))
+    assert first.success
+    execution = first.data["equipment_workflow_execution_id"]
+    service = EquipmentRuntimeService(agent._RUNTIME_ROOT / "workflow_decisions")
+    original = deepcopy(service.get(execution)["workflow_result"])
+    state.run_metadata["equipment_terminal_review_retry"] = execution
+    rejected = await agent.run(state, Model(tools, ["request_operator"]))
+    assert not rejected.success
+    assert service.get(execution)["lifecycle"] == "COMPLETED"
+    assert service.get(execution)["workflow_result"] == original
+    state.run_metadata["equipment_terminal_review_retry"] = execution
+    model = Model(tools)
+    reviewed = await agent.run(state, model)
+    assert reviewed.success and len(model.calls) == 1
+    assert service.get(execution)["lifecycle"] == "COMPLETED"
+    assert executed == ["prepare", "measure", "export"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("revoked", [False, True])
+async def test_error_resume_accepts_completed_review_but_not_changed_authority(tmp_path, monkeypatch, revoked):
+    from app.run_recovery import prepare_error_resume
+    from orchestrator.state import Stage
+    agent, state, tools, _, _, _ = setup_flow(tmp_path, monkeypatch)
+    first = await agent.run(state, Model(tools))
+    archive_data = deepcopy(first.data)
+    archive_data["equipment_handoff"] = {"status": "ready_for_analysis", "ready_for_analysis": True}
+    archive = tmp_path / state.run_id / "runtime/loops/loop-000001/equipment_agent/attempt-000001/result.json"
+    archive.parent.mkdir(parents=True)
+    archive.write_text(json.dumps({"status": "completed", "data": archive_data}))
+    state.stage = Stage.ERROR
+    if revoked:
+        state.active_session_id = "another-session"
+    controller = SimpleNamespace(_state=state,
+        _deps=SimpleNamespace(run_root=tmp_path, agent_registry={"equipment_agent": agent}),
+        snapshot=lambda: {"is_running": False, "state": state.model_dump(mode="json")},
+        _is_planning_test_spec=lambda spec: True)
+    if revoked:
+        with pytest.raises(ValueError, match="scope"):
+            prepare_error_resume(controller)
+    else:
+        assert prepare_error_resume(controller) == first.data["equipment_workflow_execution_id"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_read_only_review_exception_requires_durable_no_actuation_proof(tmp_path, monkeypatch):
+    from agents.equipment.recovery import completed_candidate
+    from utils.equipment_runtime_service import EquipmentRuntimeService
+    agent, state, tools, _, _, _ = setup_flow(tmp_path, monkeypatch)
+    first = await agent.run(state, Model(tools, ["execute_stacked_workflow", "request_operator"]))
+    record = EquipmentRuntimeService(agent._RUNTIME_ROOT / "workflow_decisions").get(first.data["equipment_workflow_execution_id"])
+    record["workflow_result"]["data"]["equipment_handoff"]["failure_code"] = "EQUIPMENT_WORKFLOW_EFFECT_UNKNOWN"
+    flow = agent._equipment_skill_flow(state)
+    with pytest.raises(ValueError):
+        completed_candidate(record, flow, state)
+    record["recovery"] = {"operation": "terminal_review_only", "actuation_performed": False}
+    assert completed_candidate(record, flow, state).success
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure,expected_calls", [
+    ("UTM_INSUFFICIENT_TEMPORAL_EVIDENCE", 2), ("UTM_EXPECTED_VISION_RESULT_MISMATCH", 1)])
+async def test_terminal_sensor_warmup_retries_missing_samples_not_contradictions(tmp_path, monkeypatch, failure, expected_calls):
+    from datetime import datetime, timedelta, timezone
+    from agents.base_agent import AgentResult
+    from agents.equipment.recovery import refresh_terminal_observations
+    agent, state, tools, executed, _, _ = setup_flow(tmp_path, monkeypatch)
+    calls = []
+    async def observe(ctx, name, payload, **kwargs):
+        assert name == "vision.equipment_cross_check"
+        calls.append(name)
+        good = len(calls) > 1
+        result = {**payload["checks"][0], "ok": good,
+            "expires_at": (datetime.now(timezone.utc) + timedelta(seconds=5)).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat()}
+        return {"ok": good, "results": [result], "failure_code": None if good else failure}
+    monkeypatch.setattr(agent, "_call_tool", observe)
+    flow = {"blocks": [{"id": "clearance", "vision": {"enabled": True, "task_id": "utm_state_not_working"}}]}
+    result = AgentResult(success=True, summary="Completed", data={})
+    if expected_calls == 1:
+        with pytest.raises(ValueError):
+            await refresh_terminal_observations(agent, state, Model(tools), flow, result)
+    else:
+        assert (await refresh_terminal_observations(agent, state, Model(tools), flow, result)).success
+    assert len(calls) == expected_calls and not executed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sample_age,accepted", [(0, True), (20, False)])
+async def test_terminal_review_uses_measured_sample_time_not_request_start(tmp_path, monkeypatch, sample_age, accepted):
+    from datetime import datetime, timedelta, timezone
+    from agents.base_agent import AgentResult
+    from agents.equipment.recovery import refresh_terminal_observations
+    agent, state, tools, executed, _, _ = setup_flow(tmp_path, monkeypatch)
+    async def observe(ctx, name, payload, **kwargs):
+        now = datetime.now(timezone.utc)
+        return {"ok": True, "results": [{**payload["checks"][0], "ok": True, "source": "ros_topic",
+            "timestamp": (now - timedelta(seconds=30)).isoformat(),
+            "expires_at": (now - timedelta(seconds=25)).isoformat(), "freshness_ttl_ms": 5000,
+            "evidence": {"ok": True, "samples": [{"summary_fresh": True,
+                "timestamp": (now - timedelta(seconds=sample_age)).isoformat()}]}}]}
+    monkeypatch.setattr(agent, "_call_tool", observe)
+    flow = {"blocks": [{"id": "clearance", "vision": {"enabled": True, "task_id": "utm_state_not_working"}}]}
+    result = AgentResult(success=True, summary="Completed", data={})
+    if accepted:
+        assert (await refresh_terminal_observations(agent, state, Model(tools), flow, result)).success
+    else:
+        with pytest.raises(ValueError):
+            await refresh_terminal_observations(agent, state, Model(tools), flow, result)
+    assert not executed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("independent_failure", [False, True])
+async def test_refreshed_terminal_observation_replaces_report_not_unrelated_alarms(tmp_path, monkeypatch, independent_failure):
+    from datetime import datetime, timedelta, timezone
+    from agents.base_agent import AgentResult
+    from agents.equipment.recovery import refresh_terminal_observations
+    from policies.guardian_gate import guardian_gate, gate_blocks_execution
+    agent, state, tools, executed, _, _ = setup_flow(tmp_path, monkeypatch)
+    old = {"block_id": "clearance", "phase": "vision", "vision_task_id": "utm_state_not_working",
+        "check_id": "utm_state_not_working", "outcome": "error", "confidence": 0.0,
+        "failure_code": "UTM_EXPECTED_VISION_RESULT_MISMATCH",
+        "operator_attention": {"failure_code": "UTM_EXPECTED_VISION_RESULT_MISMATCH"}}
+    transitions = [deepcopy(old)]
+    if independent_failure:
+        transitions.append({"block_id": "other", "phase": "skill", "failure_code": "UTM_MOTION_FAILED"})
+    result = AgentResult(success=True, summary="Completed", data={
+        "equipment_skill_flow_execution": {"transitions": transitions},
+        "equipment_report": {"block_executions": deepcopy(transitions)}})
+    async def observe(ctx, name, payload, **kwargs):
+        assert name == "vision.equipment_cross_check"
+        now = datetime.now(timezone.utc)
+        return {"ok": True, "results": [{**payload["checks"][0], "ok": True, "confidence": 0.93,
+            "timestamp": now.isoformat(), "expires_at": (now + timedelta(seconds=5)).isoformat()}]}
+    monkeypatch.setattr(agent, "_call_tool", observe)
+    flow = {"blocks": [{"id": "clearance", "vision": {"enabled": True, "task_id": "utm_state_not_working"}}]}
+    await refresh_terminal_observations(agent, state, Model(tools), flow, result)
+    current = result.data["equipment_report"]["block_executions"][0]
+    assert current["outcome"] == "detected"
+    assert current["failure_code"] is None and current["operator_attention"] is None
+    assert current["confidence"] == 0.93
+    assert old["failure_code"] == "UTM_EXPECTED_VISION_RESULT_MISMATCH"
+    gate = guardian_gate(state=state, stage="equipment", phase="post", payload=result.data)
+    assert gate_blocks_execution(gate) is independent_failure
+    assert not executed
 
 
 @pytest.mark.asyncio

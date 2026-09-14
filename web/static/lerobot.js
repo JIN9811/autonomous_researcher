@@ -1850,7 +1850,7 @@ function syncExcludeFlaggedEpisodesCheckboxes(source = null) {
 function applyIsaacLabStandardDefaults() {
   setInputValue(isaacSyntheticIsaacLabPathInput, "~/IsaacLab");
   setInputValue(isaacSyntheticIsaacSimPythonInput, "~/IsaacSim/python.sh");
-  setInputValue(isaacSyntheticStagePathInput, "~/autonomous_researcher/sim/robotis_omx/scene/omx_table_layout.usda");
+  setInputValue(isaacSyntheticStagePathInput, "~/autonomous_researcher/sim/robotis_omx/scene/omx_table_layout_20260915.usda");
   setInputValue(isaacSyntheticMimicTrialsInput, 3);
   setInputValue(isaacSyntheticMimicNumEnvsInput, 3);
   setInputValue(isaacSyntheticRlTeacherStepsInput, 0);

@@ -26,6 +26,20 @@ const sample = (sequence, elapsed_s = sequence - 1) => ({
   target_source: { Joint1: sequence + 1, Gripper: sequence % 100 + 1 },
 });
 
+test("reset clears real tracking state, rejects old history and accepts a new rollout", () => {
+  const {api} = viewer();
+  api.consumePacket({type:'joint_history',samples:[sample(1)],reset_at_ms:0});
+  api.runtime.latestTargetRad={Joint1:.4};
+  api.consumePacket({type:'telemetry_state',status:'idle',session:{},reset_at_ms:100});
+  assert.equal(api.runtime.history.length,0);
+  assert.equal(Object.keys(api.runtime.latestTargetRad).length,0);
+  api.consumePacket({type:'joint_history',samples:[sample(1)],reset_at_ms:0});
+  assert.equal(api.runtime.history.length,0);
+  api.consumePacket({type:'joint_history',reset_at_ms:100,session:{session_id:'new'},samples:[{...sample(1),session_id:'new'}]});
+  assert.equal(api.runtime.sessionId,'new');
+  assert.equal(api.runtime.history.length,1);
+});
+
 test("a compact batch preserves every curve point and applies its latest pose and grasp once", () => {
   const context = viewer();
   const { api } = context;
@@ -112,7 +126,7 @@ for (const compact of [false, true]) {
       specimenObject = () => ({});
       syncHeldSpecimenPose = () => true;
       settleSpecimenOnSupport = () => true;
-      runtime.viewer = { environmentGroup: {},
+      runtime.viewer = { environmentGroup: {}, measuredRobot: { joints: new Map() },
         specimenGraspState: { held: true, attemptIndex: 1, releasedAttemptIndex: null } };
     `, context);
     const points = ["ungrasping", "idle"].map((gripper_state, index) => ({

@@ -73,6 +73,16 @@ async def test_public_planning_handoff_blocks_before_design_when_plc_latched(
         raise AssertionError("PLC-latched planning must not enter Design")
 
     monkeypatch.setattr(controller, "_run_planning_design_stage", fail_if_design_starts)
+    # The chat entry point now classifies intent through the model. Keep that
+    # external boundary deterministic, and require the PLC gate before dialogue.
+    import json
+    from types import SimpleNamespace
+    async def classify_only(self, task_type, prompt, **kwargs):
+        packet = json.loads(prompt)
+        assert packet.get("operation") == "classify_chat_request", "PLC gate must precede further dialogue"
+        return SimpleNamespace(model="controlled-intake", raw={}, text=json.dumps({
+            "intent": "start_run", "reason": "Explicit experiment request", "pending_id": None}))
+    monkeypatch.setattr(type(controller._deps.agent_context), "complete", classify_only)
 
     result = await controller.planning_message(
         message="실험 수행",
@@ -198,8 +208,8 @@ async def test_plc_fast_stop_uses_rollout_stop_path_and_cancels_runtime_tasks(
 
     assert result["ok"] is True
     assert result["rollout_stop"]["status"] == "STOPPED"
-    assert [name for name, _payload in tool_calls] == ["lerobot.rollout.stop"]
-    assert tool_calls[0][1]["reason"] == "plc_emergency_stop"
+    assert [name for name, _payload in tool_calls] == ["lerobot.replay.stop", "lerobot.rollout.stop"]
+    assert all(payload["reason"] == "plc_emergency_stop" for _, payload in tool_calls)
     assert controller._run_task.cancelled()
     assert controller._planning_handoff_task.cancelled()
 
@@ -208,6 +218,7 @@ async def test_plc_fast_stop_uses_rollout_stop_path_and_cancels_runtime_tasks(
 @pytest.mark.parametrize("command", ["resume", "reset"])
 async def test_gui_cannot_recover_plc_originated_estop(controller, command: str) -> None:
     await controller.emergency_stop(source="plc_pb2")
+    previous_epoch = getattr(controller, "telemetry_reset_at_ms", 0)
 
     operation = controller.emergency_resume if command == "resume" else controller.emergency_reset
     result = await operation(source="gui")
@@ -216,6 +227,7 @@ async def test_gui_cannot_recover_plc_originated_estop(controller, command: str)
     assert result["failure_code"] == "PLC_PHYSICAL_RECOVERY_REQUIRED"
     assert result["state"]["emergency_stop_requested"] is True
     assert "plc_pb2" in result["state"]["run_metadata"]["active_safety_sources"]
+    assert getattr(controller, "telemetry_reset_at_ms", 0) == previous_epoch
 
 
 @pytest.mark.asyncio
@@ -334,6 +346,7 @@ async def test_plc_resume_uses_saved_checkpoint_and_existing_decision_reset(
 @pytest.mark.asyncio
 async def test_plc_reset_reuses_fresh_state_reset(controller) -> None:
     old_run_id = controller.snapshot()["state"]["run_id"]
+    previous_epoch = getattr(controller, "telemetry_reset_at_ms", 0)
     await controller.emergency_stop(source="plc_pb2")
     controller._state.run_metadata["task_4_stale_marker"] = True
 
@@ -344,6 +357,7 @@ async def test_plc_reset_reuses_fresh_state_reset(controller) -> None:
     assert result["state"]["stage"] == "idle"
     assert result["state"]["emergency_stop_requested"] is False
     assert "task_4_stale_marker" not in result["state"]["run_metadata"]
+    assert controller.telemetry_reset_at_ms > previous_epoch
 
 
 @pytest.mark.asyncio

@@ -87,7 +87,7 @@ from utils.vision_operator_intervention import (
 )
 from device_bridges.bambu_bridge import PrinterDeviceBridgeManager
 from experiments.bo_visualization import validate_bo_visualization
-from experiments.lhs_design_visualization import validate_lhs_design_visualization
+from experiments.lhs_design_visualization import build_lhs_design_visualization, validate_lhs_design_visualization
 from reporting.bo_visualization_artifacts import write_bo_visualization_artifacts
 from reporting.lhs_design_visualization_artifacts import write_lhs_design_visualization_artifacts
 from utils.config_loader import load_all_configs
@@ -190,6 +190,7 @@ class MainController:
         self._planning_session_id: str | None = None
         self._planning_bootstrapped = False
         self._planning_request_lock = asyncio.Lock()
+        self._error_resume_lock = asyncio.Lock()
         from app.test_scenario import TestScenarioInput
         self._test_scenario = TestScenarioInput(self)
         self._test_input_revision = 0
@@ -2028,6 +2029,35 @@ class MainController:
         )
         return {"emitted": True, "run_id": run_id, "step": step, "event": event}
 
+    async def _publish_initial_lhs_visualization(self) -> None:
+        """Expose the actual DSN input, without waiting for a BO measurement/result."""
+        metadata = self._state.run_metadata
+        contract = metadata.get("orchestrator_design_contract") or {}
+        initial = contract.get("initial_design") or {}
+        if not initial.get("points") or not contract.get("parameter_space"):
+            return
+        completed = sum(point.get("status") == "measured" for point in initial["points"])
+        step = int(initial.get("index") or initial.get("next_index") or completed + 1)
+        latest = metadata.get("lhs_visualization") or {}
+        if latest.get("run_id") == self._state.run_id and int(latest.get("step") or 0) >= step:
+            return
+        visualization = build_lhs_design_visualization(
+            run_id=self._state.run_id, parameter_space=contract["parameter_space"],
+            trace={"step": step, "initial_design": {**initial, "completed": completed}},
+        )
+        records = await asyncio.to_thread(
+            self._write_lhs_visualization_artifacts,
+            workspace="bo", result={"lhs_visualization": visualization},
+        )
+        if self._state.run_id != visualization["run_id"] or self._state.run_metadata is not metadata:
+            return  # A reset/new run must not inherit an in-flight figure.
+        visualization["artifacts"] = {
+            f"{Path(record['path']).suffix.lstrip('.')}_url":
+                f"/api/runs/{self._state.run_id}/artifact-file/{record['path']}"
+            for record in records if record.get("path") and not record.get("error")
+        }
+        await self.emit_lhs_visualization(visualization, source="orchestrator_design_contract")
+
     async def emit_lhs_visualization(self, visualization: dict[str, Any], *, source: str) -> dict[str, Any]:
         """Persist and stream one monotonic initial-design visualization."""
         normalized = dict(validate_lhs_design_visualization(visualization))
@@ -2446,7 +2476,9 @@ class MainController:
         curve = source.get("stress_strain_curve") if isinstance(source.get("stress_strain_curve"), dict) else {}
         rows = curve.get("preview") if isinstance(curve.get("preview"), list) else curve.get("points") if isinstance(curve.get("points"), list) else []
         if rows:
-            limit = 80
+            # Analysis already retains bucket extrema within 200 points. A second
+            # 80-point uniform pass can discard the very peaks/drops it preserved.
+            limit = 200
             if len(rows) > limit:
                 indices = [round(index * (len(rows) - 1) / (limit - 1)) for index in range(limit)]
                 rows = [rows[index] for index in indices]
@@ -3734,7 +3766,7 @@ class MainController:
         reset: bool = False,
     ) -> dict[str, Any]:
         """Prepare the shared controller state for the live GUI without starting hardware."""
-        if self._run_task and not self._run_task.done():
+        if (self._run_task and not self._run_task.done()) or self._planning_handoff_active():
             return self.planning_snapshot()
         self._apply_inference_backend(backend)
         self._state.mode = Mode.LIVE
@@ -4440,7 +4472,38 @@ class MainController:
         return {"ok": True, "message": "Paused", "state": self._state.model_dump(mode="json")}
 
     async def resume(self) -> dict[str, Any]:
-        """Resume paused run loop."""
+        """Resume pause, or revalidate a proven completed error boundary."""
+        if self._state.stage == Stage.ERROR:
+            async with self._error_resume_lock:
+                if self._planning_handoff_active():
+                    return {"ok": True, "status": "already_resuming", "run_id": self._state.run_id}
+                if any(getattr(self._state, k) for k in ("stop_requested", "safe_stop_requested", "emergency_stop_requested")) or self._active_safety_sources():
+                    return {"ok": False, "status": "blocked", "message": "Use the existing safety recovery controls first."}
+                rejection = await self._plc_service_start_rejection()
+                if rejection:
+                    return rejection
+                from app.run_recovery import prepare_error_resume
+                try:
+                    execution_id = prepare_error_resume(self)
+                except (ValueError, OSError, KeyError) as exc:
+                    return {"ok": False, "status": "blocked", "message": str(exc)}
+                self._state.run_metadata["equipment_terminal_review_retry"] = execution_id
+                self._state.retry_counters.pop("equipment", None)
+                self._state.is_paused = False
+                context = self._state.run_metadata.get(PLANNING_RESUME_CONTEXT_KEY) or {}
+                cycle = int(context.get("cycle_index") or self._state.loop_count + 1)
+                async def continue_error_run():
+                    try:
+                        return await self._run_planning_cycle_series(
+                            first_spec=self._state.current_experiment_spec,
+                            design_constraints=context.get("design_constraints") or {},
+                            start_cycle=cycle, resume_tail_stage=Stage.EQUIPMENT)
+                    finally:
+                        self._state.run_metadata.pop("equipment_terminal_review_retry", None)
+                self._set_planning_handoff_task(asyncio.create_task(continue_error_run()))
+                await self._emit_control_event("run_resume", "Operator resumed completed Equipment terminal review; no Skill replay",
+                    {"status": "resuming", "workflow_execution_id": execution_id, "recovery_scope": "terminal_review_only"})
+                return {"ok": True, "status": "resuming", "run_id": self._state.run_id}
         self._state.is_paused = False
         await self._emit_control_event("run_resume", "Run resumed by operator", {"status": "resumed", "control": "resume", "operator_action": True})
         return {"ok": True, "message": "Resumed", "state": self._state.model_dump(mode="json")}
@@ -5369,6 +5432,8 @@ class MainController:
         self._planning_message_total = 0
         self._planning_session_id = None
         self._planning_bootstrapped = False
+        # Shared by GUI and PLC reset paths; retire display replay, not saved logs.
+        self.telemetry_reset_at_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         await self._emit_control_event(
             "run_emergency_reset",
             "Emergency reset completed; runtime state returned to fresh-server defaults",
@@ -5453,6 +5518,10 @@ class MainController:
             return {"ok": False, "message": "Reply did not confirm the current request; no action taken."}
         if self._explicit_memory_text(clean_message) is not None:
             intake["intent"] = "question"
+        if intake["intent"] == "start_run":
+            plc_rejection = await self._plc_service_start_rejection()
+            if plc_rejection:
+                return plc_rejection
         # Idle research dialogue admits through the existing handoff only after
         # LLM-led collection/review. Runtime holds and owner setup stay unchanged.
         conversational = (not scope["running"] and (not pending or pending["kind"] == "conversation")
@@ -7338,9 +7407,10 @@ class MainController:
             }
 
         initial_request: dict[str, Any] = {}
-        if is_test and (cycle_index <= 1 or not next_parameters):
-            optimization = constraints.get("design_optimization") if isinstance(constraints.get("design_optimization"), dict) else {}
-            initial_design = optimization.get("initial_design") if isinstance(optimization.get("initial_design"), dict) else {}
+        optimization = constraints.get("design_optimization") if isinstance(constraints.get("design_optimization"), dict) else {}
+        initial_design = optimization.get("initial_design") if isinstance(optimization.get("initial_design"), dict) else {}
+        uses_lhs = is_test or initial_design.get("sampler") == "latin_hypercube"
+        if uses_lhs and (cycle_index <= 1 or not next_parameters):
             initial_request = BOAgent.initial_design_request(
                 self._state,
                 seed=int(initial_design.get("seed", 7) or 7),
@@ -7353,8 +7423,11 @@ class MainController:
                 else {}
             )
             phase = str(initial_request.get("phase") or "initial_design")
-            source = "test_mode_deterministic_lhs" if phase == "initial_design" else "test_mode_acquisition_ready"
-        elif is_test:
+            if phase == "initial_design":
+                source = "test_mode_deterministic_lhs" if is_test else "bo_agent_initial_design_request"
+            else:
+                source = "test_mode_acquisition_ready" if is_test else "bo_agent_acquisition_ready"
+        elif uses_lhs:
             requested = dict(next_parameters)
             bo_result = self._state.run_metadata.get("bo_agent")
             bo_result = bo_result if isinstance(bo_result, dict) else {}
@@ -7406,7 +7479,7 @@ class MainController:
                 ],
             }
             self._state.run_metadata["bo_initial_design"] = dict(initial_request)
-        elif is_test and phase == "initial_design":
+        elif uses_lhs and phase == "initial_design":
             bo_result = self._state.run_metadata.get("bo_agent")
             bo_result = bo_result if isinstance(bo_result, dict) else {}
             bo_initial = bo_result.get("initial_design") if isinstance(bo_result.get("initial_design"), dict) else {}
@@ -7574,6 +7647,8 @@ class MainController:
         run_orchestrator_before_design: bool = False,
     ) -> None:
         """Execute one Live GUI planning stage through the configured LangGraph runtime."""
+        if stage == Stage.DESIGN:
+            await self._publish_initial_lhs_visualization()
         loop = self._new_execution_run_loop(
             interval_seconds=0.0,
             on_event=self._broadcast_event if emit_runtime_events else None,
@@ -7859,8 +7934,13 @@ class MainController:
         first_spec: dict[str, Any],
         design_constraints: dict[str, Any],
         start_cycle: int = 1,
+        resume_tail_stage: Stage | None = None,
     ) -> dict[str, Any]:
-        if start_cycle <= 1:
+        if resume_tail_stage is not None and self._state.run_metadata.get("archived_postprocessing_request"):
+            from app.run_recovery import continue_archived_postprocessing
+            return await continue_archived_postprocessing(self, first_spec=first_spec,
+                design_constraints=design_constraints, start_cycle=start_cycle)
+        if start_cycle <= 1 and resume_tail_stage is None:
             already_reset = bool(self._state.run_metadata.pop("_planning_workflow_controls_reset", False))
             if not already_reset:
                 self._reset_planning_workflow_controls()
@@ -7869,6 +7949,8 @@ class MainController:
         current_spec = first_spec
         previous_spec: dict[str, Any] | None = None if start_cycle == 1 else dict(first_spec)
         last_tail: dict[str, Any] = {"ok": True, "decision": "continue", "message": "Planning cycle started."}
+        if resume_tail_stage == Stage.EQUIPMENT and self._state.run_metadata.pop("recovery_resume_stage", None) == "vision":
+            resume_tail_stage = Stage.VISION
 
         for cycle_index in range(start_cycle, total_cycles + 1):
             self._store_planning_resume_context(
@@ -7895,6 +7977,22 @@ class MainController:
                     total_cycles=total_cycles,
                     emit_handoff=True,
                 )
+                limit = self._state.run_metadata.get("recovery_design_limit") or {}
+                if (limit.get("run_id") == self._state.run_id
+                        and limit.get("requested_by") == "operator"
+                        and limit.get("cycle_index") == cycle_index):
+                    self._store_planning_resume_context(
+                        goal=self._state.active_goal, current_spec=current_spec,
+                        design_constraints=static_design_constraints, cycle_index=cycle_index,
+                        total_cycles=total_cycles, phase="specimen")
+                    self._state.is_paused = True
+                    self._state.stage = Stage.DESIGN
+                    limit["reached"] = True
+                    self._state.run_metadata["completed_recovery_design_limit"] = dict(limit)
+                    self._state.run_metadata.pop("recovery_design_limit", None)
+                    return {"ok": True, "decision": "paused_after_design",
+                            "message": "Requested next design completed; fabrication not started.",
+                            "specimen_id": current_spec.get("specimen_id")}
                 self._store_planning_resume_context(
                     goal=self._state.active_goal,
                     current_spec=current_spec,
@@ -7923,6 +8021,8 @@ class MainController:
                 current_spec,
                 cycle_index=cycle_index,
                 total_cycles=total_cycles,
+                **({"resume_stage": resume_tail_stage}
+                   if cycle_index == start_cycle and resume_tail_stage is not None else {}),
             )
             if not bool(last_tail.get("ok", False)):
                 return last_tail
@@ -9345,6 +9445,9 @@ class MainController:
             "orchestrator_incoming_handoff", "orchestrator_pending_handoff", "orchestrator_waiting_entry",
             "operator_followup_queue", "operator_followup_context", "bo_initial_design",
             "next_design_request", "bo_recommended_constraints", "orchestrator_design_contract",
+            "specimen_result", "robot_task_result", "clearance_review_recovery",
+            "recovery_design_limit", "recovery_resume_stage", "archived_postprocessing_request",
+            "completed_recovery_design_limit", "completed_archived_postprocessing",
             PLANNING_RESUME_CONTEXT_KEY, "_planning_workflow_controls_reset",
         )
         authority = {key: metadata[key] for key in authority_keys if key in metadata}
@@ -9711,6 +9814,7 @@ class MainController:
         *,
         cycle_index: int = 1,
         total_cycles: int = 1,
+        resume_stage: Stage | None = None,
     ) -> dict[str, Any]:
         """Continue Live GUI handoff through the configured LangGraph runtime after Specimen."""
         original_mode = self._state.mode
@@ -9718,7 +9822,7 @@ class MainController:
         guardian_payload: dict[str, Any] = {}
         active_teleop_handoff_token = ""
         previous_label = self._planning_stage_label(Stage.SPECIMEN)
-        tail_start = self._planning_tail_start_stage()
+        tail_start = resume_stage if resume_stage is not None else self._planning_tail_start_stage()
         if tail_start is None or tail_start in {Stage.COMPLETE, Stage.ERROR}:
             self._state.stage = Stage.COMPLETE if tail_start != Stage.ERROR else Stage.ERROR
             return {

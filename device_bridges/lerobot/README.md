@@ -22,3 +22,16 @@ Installing this source package does not install or configure robot, camera,
 LeRobot CLI, Isaac, or W&B integrations. The requirements file only declares
 Python dependencies; live execution still requires the existing configuration,
 environment, approval, and safety gates.
+
+## Default Isaac environment
+
+The mirror receiver and synthetic-stage defaults load
+[`omx_table_layout_20260915.usda`](../../sim/robotis_omx/scene/omx_table_layout_20260915.usda).
+Explicitly selected scene paths still take precedence. This overlay retains the
+original robot transform and joints, aligns the 175 mm tray midpoint with the
+robot, and rotates the environment clockwise by 90 degrees. The upper platform
+matches the 395 mm lower assembly width; the lower working surface remains at
+Z=0 with its underside extended to the robot anchor at Z=-20 mm.
+Live Robot Pose uses the matching web manifest. The original USD is retained as
+the overlay's sublayer, not replaced. These geometry changes do not recalibrate
+camera poses or robot control targets.

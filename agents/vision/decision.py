@@ -136,7 +136,8 @@ async def _decide(state, ctx, contract_id, capture=None):
             context["detector"] = {key: source[key] for key in (
                 "ok", "detected", "specimen_detected", "status", "detector", "bbox_xyxy", "center_px",
                 "roi_xyxy", "confidence", "frame_id", "timestamp", "frame_timestamp", "clear_confirmed",
-                "unknown_reason", "failure_code", "registered") if key in source}
+                "unknown_reason", "failure_code", "registered", "inspection_method", "roi_valid",
+                "historical_review", "current_physical_clearance", "source_sha256") if key in source}
             result["frame_id"] = capture.get("frame_id", "")
             result["captured_at"] = capture_timestamp(capture)
         accepted_tool = "accept_visual_evidence" if review else "execute_verification"
@@ -237,7 +238,8 @@ async def _decide(state, ctx, contract_id, capture=None):
                 raise ValueError("capture timestamp must carry timezone")
             age_ms = (datetime.now(timezone.utc) - timestamp).total_seconds() * 1000
             expiry = (timestamp + timedelta(milliseconds=VisionAgent.SIGNAL_TTL_MS)).isoformat()
-            # Reuse the existing consumer policy, including its explicit TEST grace.
+            # Producer, model review and consumer share the original observation expiry.
+            # TEST has no additional grace, and inference never renews the timestamp.
             freshness_state = SimpleNamespace(mode=state.mode, latest_observations={"vision_signal": {"expires_at": expiry}})
             result["freshness"] = ManipulationAgent._vision_signal_freshness(freshness_state)
             if age_ms < 0 or not result["freshness"]["fresh"]:

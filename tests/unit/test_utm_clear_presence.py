@@ -29,10 +29,31 @@ def inspect(arr, tmp_path, **kwargs):
 
 @pytest.mark.parametrize("red,expected", [(False, "clear"), (True, "occupied")])
 @pytest.mark.parametrize("topic", ["/camera/image_raw", "/camera/image_rect"])
-def test_registered_synthetic_clear_and_compressed_positive(tmp_path, red, expected, topic):
+def test_roi_clear_and_compressed_positive(tmp_path, red, expected, topic):
     result = inspect(frame(red), tmp_path, topic=topic)
     assert result["status"] == expected
     assert result["clear_confirmed"] is (not red)
+
+
+@pytest.mark.parametrize("red", [False, True])
+def test_markerless_platen_uses_roi_not_anchor_registration(tmp_path, red):
+    arr = frame()
+    arr[360:400, 230:365] = 160
+    if red: arr[375:390, 260:290] = [225, 30, 35]
+    result = inspect(arr, tmp_path)
+    assert result["status"] == ("occupied" if red else "clear")
+    assert result["roi_xyxy"] == [200, 240, 400, 420]
+    assert result["roi_valid"] is True
+    assert result["inspection_method"] == "fixed_platen_roi"
+    assert "registered" not in result
+
+
+@pytest.mark.parametrize("value", [0, 255])
+def test_no_signal_is_not_an_empty_platen(tmp_path, value):
+    arr = np.full((480, 640, 3), value, dtype=np.uint8)
+    result = inspect(arr, tmp_path)
+    assert result["status"] == "unknown"
+    assert result["clear_confirmed"] is False
 
 
 @pytest.mark.parametrize("topic", ["/camera/image_raw", "/camera/image_rect"])
@@ -51,12 +72,13 @@ def test_invalid_evidence_is_unknown(tmp_path, failure):
 
 
 @pytest.mark.parametrize("topic", ["/camera/image_raw", "/camera/image_rect"])
-def test_missing_anchor_and_off_roi_red(tmp_path, topic):
+def test_off_roi_discarded_red_and_missing_markers_do_not_block(tmp_path, topic):
     arr = frame()
     arr[10:100, 10:100] = [225, 30, 35]
+    arr[440:480, 80:160] = [225, 30, 35]
     assert inspect(arr, tmp_path, topic=topic)["status"] == "clear"
     arr[360:380, 230:250] = 160
-    assert inspect(arr, tmp_path, topic=topic)["status"] == "unknown"
+    assert inspect(arr, tmp_path, topic=topic)["status"] == "clear"
 
 
 @pytest.mark.parametrize("topic", ["/camera/image_raw", "/camera/image_rect"])

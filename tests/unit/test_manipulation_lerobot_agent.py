@@ -843,7 +843,7 @@ async def test_manipulation_does_not_reenter_before_vision_handoff(tmp_path: Pat
     assert calls == ["lerobot.rollout.start"]
 
 
-def test_manipulation_agent_test_mode_accepts_recently_expired_vision_signal() -> None:
+def test_manipulation_agent_test_mode_rejects_expired_vision_signal_without_grace() -> None:
     state = _post_specimen_state()
     expires_at = (datetime.now(timezone.utc) - timedelta(seconds=20)).isoformat()
     state.latest_observations["transfer_readiness"]["expires_at"] = expires_at
@@ -855,9 +855,9 @@ def test_manipulation_agent_test_mode_accepts_recently_expired_vision_signal() -
 
     freshness = ManipulationAgent._vision_signal_freshness(state)
 
-    assert freshness["fresh"] is True
-    assert freshness["reason"] == "fresh_with_test_mode_grace"
-    assert freshness["grace_s"] == 120
+    assert freshness["fresh"] is False
+    assert freshness["reason"] == "stale_vision_signal"
+    assert "grace_s" not in freshness
 
 @pytest.mark.asyncio
 async def test_manipulation_agent_blocks_expired_vision_signal(tmp_path: Path, monkeypatch: Any) -> None:

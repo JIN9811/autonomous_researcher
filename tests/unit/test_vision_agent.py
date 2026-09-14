@@ -1107,9 +1107,13 @@ def test_live_gui_virtual_printer_path_uses_test_camera_runtime() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mode,path", [(Mode.LIVE, ""), (Mode.TEST, "installed_printer"),
+                                     (Mode.TEST, "physical_print"), (Mode.TEST, "virtual_bridge")])
 async def test_vision_agent_stops_rollout_when_fresh_session_telemetry_confirms_actions(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    mode: Mode,
+    path: str,
 ) -> None:
     """UTM confirmation must use current same-session telemetry, not launch-time log text."""
     tools = ToolRegistry()
@@ -1176,7 +1180,8 @@ async def test_vision_agent_stops_rollout_when_fresh_session_telemetry_confirms_
         },
     )
     state = _state()
-    state.mode = Mode.LIVE
+    state.mode = mode
+    state.current_experiment_spec["printer_test_path"] = path
     state.run_metadata["manipulation_result"] = {
         "ok": True,
         "workflow": "rollout",
@@ -1195,15 +1200,36 @@ async def test_vision_agent_stops_rollout_when_fresh_session_telemetry_confirms_
         "post_place_interlock": gate,
     }
 
-    result = await VisionAgent().run(state, _CtxStub(tools))
+    class EvidenceCtx(_CtxStub):
+        force_real_llm_in_test = True
+        task_evidence = None
 
-    assert status_calls == [{"mode": "live", "runtime_mode": "live", "profile_id": "", "session_id": session_id}]
+        async def complete(self, task_type, prompt, **kwargs):
+            if task_type == "manipulation_plan":
+                context = json.loads(prompt.split("\nCONTEXT:\n")[1])
+                self.task_evidence = context["task"]
+                observed = context["task"].get("execution_evidence", {}).get("observed")
+                return SimpleNamespace(text=json.dumps({
+                    "tool": "accept_task_result" if observed else "return_to_owner",
+                    "arguments": {"proposal_id": context["proposal_id"]},
+                    "reason": "Review the supplied current execution evidence.",
+                    "evidence_refs": context["evidence_refs"]}), raw={}, model="fixture-evidence-review")
+            return await super().complete(task_type, prompt, **kwargs)
+
+    ctx = EvidenceCtx(tools)
+    result = await VisionAgent().run(state, ctx)
+
+    assert ctx.task_evidence["execution_evidence"]["observed"] is True
+    assert ctx.task_evidence["execution_evidence"]["session_id"] == session_id
+    assert result.success is True
+    assert status_calls == [{"mode": mode.value, "runtime_mode": mode.value, "profile_id": "", "session_id": session_id}]
     completion = result.data["observation"]["vision_manipulation_completion"]
     assert completion["ready_to_stop_rollout"] is True
     assert completion["rollout_execution"]["observed"] is True
     assert completion["rollout_execution"]["telemetry_sequence"] == 24
-    assert len(stop_calls) == 1
-    assert stop_calls[0]["session_id"] == session_id
+    assert len(stop_calls) == (0 if path == "virtual_bridge" else 1)
+    if stop_calls:
+        assert stop_calls[0]["session_id"] == session_id
 
 
 @pytest.mark.asyncio

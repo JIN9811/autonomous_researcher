@@ -3829,6 +3829,12 @@ body.planning-live-body .bo-stage-detail > .ar-spm-progress-node { width: 100%; 
 .bo-stage-detail > summary::-webkit-details-marker { display: none; }
 .bo-stage-evidence { padding: 12px 4px 0; font-size: 13px; }
 .bo-stage-rail > .ar-spm-progress-edge { margin-top: 23px; }
+.bo-history-nav { display: flex; align-items: center; justify-content: flex-end; gap: 6px; align-self: center; white-space: nowrap; }
+.bo-history-nav > span { color: #a8b7c9; font-size: 12px; font-variant-numeric: tabular-nums; margin-right: 3px; }
+.bo-history-nav > button { width: 26px; height: 26px; padding: 0; border: 1px solid #46576c; border-radius: 4px; background: transparent; color: #dbe6f2; font-size: 16px; line-height: 1; cursor: pointer; box-shadow: none; }
+.bo-history-nav > button:hover:not(:disabled) { background: #29384a; border-color: #a8b7c9; }
+.bo-history-nav > button:disabled { opacity: .3; cursor: default; }
+.bo-history-nav > button:focus-visible { outline: 2px solid #a8b7c9; outline-offset: 2px; }
 
 body.planning-live-body .bo-objective-summary-card .bo-equation-compact {
   display: grid;

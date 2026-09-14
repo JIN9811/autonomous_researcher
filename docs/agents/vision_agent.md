@@ -50,7 +50,7 @@ supersedes: []
 | Physical effect | Possible through existing ActiveCam move/capture/return and verified rollout-stop paths |
 | Primary handoff | `vision_signal.v1` and role-specific verification evidence to the current graph consumer |
 | Live hardware validation | Not performed for this reconstruction |
-| Known gap | LIVE downstream handoffs keep their 5-second freshness bound; observed local-vLLM reviews exceeded it |
+| Freshness | Handoff evidence expires 180 seconds after observation in LIVE and TEST; safety signals retain 5 seconds |
 
 ## Installed Package and Executable Structure
 
@@ -173,7 +173,7 @@ return. Polling and mandatory stop/cancel paths never wait on the model.
 
 | Path | Decision and evidence order | Completion rule |
 |---|---|---|
-| Pickup | Select existing verification, capture, review same-capture raw/annotated images plus detector facts | Existing pickup gates pass and evidence remains within the 5-second TTL |
+| Pickup | Select existing verification, capture, review same-capture raw/annotated images plus detector facts | Existing pickup gates pass and evidence remains within the 180-second handoff TTL |
 | ActiveCam ejection | Select the existing composite routine, then robot move → capture → return, detector, and same-capture review | Existing ejection, artifact, camera-return and port-release gates pass; no automatic model-driven rerun |
 | Manipulation placement | Existing status/interlock and capture polling runs without LLM awaits; existing code verifies and canonically records STOPPED for the matching rollout; only then review its current raw/annotated evidence | Preserve `needs_post_place_vision` / `stopped_pending_visual_review` until acceptance; reuse a same-session verified STOPPED result without repeating the stop |
 | Post-test clearance | Existing managed replay monitoring/cancel/timeout and measured-home return complete first; then review a fresh registered clearance capture before done | Replay completed, measured home verified, detector says clear, and evidence is current and consistent |
@@ -330,21 +330,33 @@ selected tool, reason, evidence refs, image hashes, and error/failure state.
 
 ## Post-Test Clearance Baseline
 
+Initial live placement detection is restricted to the green Live Observation
+region. It reads the enabled pixel bounds from the monitor's current
+`/compression_tester/summary` → `x_roi`, rather than duplicating display constants
+or accepting a caller's full-frame override. Missing/disabled/invalid live ROI
+returns unresolved; it never falls back to whole-frame detection. The current
+installation publishes x=180–410 across the image height.
+
 Verification 1 remains placement evidence. Verification 2 uses the separate
 post-clear detector after managed replay completion and measured robot return.
-The accepted camera topic, registration anchors, platen ROI, red-residual rules,
-material provenance, and thresholds remain unchanged; the model does not adjust
-them.
+It reuses the placement detector's high-chroma-red mask and normalized ROI crop
+path, but aggregates small residuals instead of looking only for the largest
+specimen. The fixed 640 × 480 camera profile uses a generous platen ROI
+`[200, 240, 400, 420]` (left, top, right, bottom); discarded specimens outside
+that region do not count. Green marker registration is not required. The model
+does not move the ROI or change the material/area thresholds.
 
 | Result | Existing deterministic meaning | Analysis handoff |
 |---|---|---|
-| `occupied` | Registered current frame contains sufficient specimen residual | Blocked |
-| `clear` | Registered fresh frame supports absence in the inspection region | Allowed only with successful replay, measured return, and accepted visual review |
-| `unknown` | Capture, registration, identity, freshness, or material evidence insufficient | Blocked |
+| `occupied` | Current ROI contains sufficient specimen residual | Blocked |
+| `clear` | Fresh profile-matched frame supports absence in the inspection region | Allowed only with successful replay, measured return, and accepted visual review |
+| `unknown` | Capture, ROI/signal, identity, freshness, or material evidence insufficient | Blocked |
 
 A failed capture is never absence. Verification 2 owns distinct raw/annotated
 artifacts and does not overwrite placement evidence. The model sees only the same
-capture pair selected by existing code.
+capture pair selected by existing code. Black/white signal loss is rejected by
+the detector; occlusion, wrong viewpoint or an unobservable platen must still be
+rejected by the visual review. `detected=false` alone never releases Analysis.
 
 ## Configuration and Modes
 
@@ -371,12 +383,14 @@ passes through the same detector and raw/annotated image-review path; it is not 
 physical observation. Clearance remains dependent on the matching virtual replay.
 
 The decision timeout does not extend camera, motion, rollout, replay, or task
-deadlines. There is no TTL increase and no timestamp rewrite. For pickup and
-ActiveCam, the existing LIVE signal TTL remains 5,000 ms; a slower decision yields
-`VISION_EVIDENCE_EXPIRED`/review and requires a new observation through existing
-ownership. The helper reuses `ManipulationAgent` freshness semantics, including
-the pre-existing 120-second TEST-only grace; this is not a new model-latency grace
-and does not alter LIVE behavior.
+deadlines. Pickup/ActiveCam review and downstream handoff evidence use the same
+180,000-ms TTL in LIVE and TEST, measured from the original observation timestamp.
+Inference never renews this timestamp, and there is no TEST-only additional grace.
+Expiry at or after 180 seconds yields `VISION_EVIDENCE_EXPIRED`/review and requires
+a new observation through existing ownership. `VisionAgent.HANDOFF_SIGNALS`
+explicitly identifies the long-lived evidence; all other signals, including
+workspace clearance, anomaly, fixture alignment and UTM motion, retain 5,000 ms.
+The 180-second handoff budget does not replace current safety interlocks.
 
 ## Safety, Recovery, and Idempotency
 
@@ -480,11 +494,10 @@ decision latency, or physical safety.
 
 ## Limitations and Known Gaps
 
-- The LIVE 5-second freshness bound for pickup/ActiveCam signals and downstream
-  handoffs is intentionally unchanged. Pickup explicitly checks expiry after model review.
-  The measured local-vLLM image reviews took 8.302--8.458 seconds, so a LIVE
-  capture can expire and require owner-driven reobservation. TEST retains its
-  existing 120-second grace only for its established test semantics.
+- Pickup/ActiveCam explicitly checks expiry after model review against the shared
+  180-second handoff budget. A slower review or queue can still require owner-driven
+  reobservation. Safety signals remain short-lived and must not be inferred fresh
+  merely because associated handoff evidence remains usable.
 - Placement inspection retains its durable image proof, but existing emitted
   signals retain their original expiry and downstream gates remain unchanged.
 - No benchmark establishes visual-decision accuracy, calibration robustness,
@@ -503,6 +516,32 @@ decision latency, or physical safety.
   scientific measurement, or physical safety.
 - Backend/provider multimodal support and camera availability remain
   environment-dependent.
+
+## Operator-requested archived-image recovery
+
+A stopped run can be recovered for data postprocessing using its original
+post-removal image only on explicit operator request. The private request pins
+the run, loop, specimen, completed replay session and archived-result SHA-256.
+The original raw-image SHA-256 and timestamp must match the saved review and
+fall after that replay's measured completion. Original images/results remain
+unchanged; the revised ROI overlay and both real model reviews are separate
+recovery artifacts. ROI remeasurement evaluates the original capture instant,
+not a fabricated current timestamp. Live capture freshness rules are unchanged.
+
+Accepted evidence is marked `historical_review=true` and
+`current_physical_clearance=false`: it describes the saved scene, not current
+hardware safety. The bounded recovery continues the normal Analysis/BO tail
+using the saved CSV, then generates one next Design and pauses before Specimen.
+Its temporary tool allowlist prohibits device commands and camera acquisition;
+only geometry generation and the existing nonphysical BO benchmark are allowed.
+The next-design stop request is consumed after use, not installed as a global
+or permanent stop rule. Failed/ambiguous image or task reviews remain failures.
+
+If Analysis and BO have completed but historical physical Guardian holds remain,
+an explicitly scoped `design_only` continuation may generate the next design from
+the hash-pinned accepted BO result. It retains the Guardian stop/hold, uses the
+same non-actuating tool guard, and pauses before fabrication. This is a design
+artifact operation, not clearance to resume a physical cycle.
 
 ## Related Documents
 

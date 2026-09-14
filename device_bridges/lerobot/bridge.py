@@ -4805,7 +4805,7 @@ class LeRobotBridge:
                 "step_trace": [{"stage": "resolve_dataset", "status": "blocked", "message": "Dataset path is outside allowed roots."}],
             }
         isaac_lab_path = Path(request.isaac_lab_path).expanduser().resolve() if request.isaac_lab_path else (self.config.repo_root / "IsaacLab").resolve()
-        stage_path = Path(request.stage_path).expanduser().resolve() if request.stage_path else (self.config.repo_root / "sim" / "robotis_omx" / "scene" / "omx_table_layout.usda").resolve()
+        stage_path = Path(request.stage_path).expanduser().resolve() if request.stage_path else (self.config.repo_root / ISAAC_OMX_SCENE_RELATIVE_PATH).resolve()
         fixture = {}
         if request.e2e_create_fixture:
             fixture = build_fixture_recording_dataset(
@@ -8587,6 +8587,7 @@ class LeRobotBridge:
                 "phase": runtime.get("phase"),
                 "message": runtime.get("message"),
                 "action_count": runtime.get("action_count", 0),
+                "action_count_observed": runtime.get("action_count_observed", False),
                 "max_abs_delta": runtime.get("max_abs_delta"),
                 "action_rate_hz": runtime.get("action_rate_hz"),
                 "latency_ms": runtime.get("latency_ms"),
@@ -8644,6 +8645,7 @@ class LeRobotBridge:
             "runtime_phase": runtime.get("phase"),
             "runtime_message": runtime.get("message"),
             "action_count": runtime.get("action_count"),
+            "action_count_observed": runtime.get("action_count_observed", False),
             "max_abs_delta": runtime.get("max_abs_delta"),
             "command_preview": list(session.get("command_preview", [])),
             "events": step_trace,
@@ -10292,6 +10294,7 @@ class LeRobotBridge:
                 "phase": "ACTION_ACTIVE",
                 "message": "Virtual bridge rollout completed with simulated action evidence.",
                 "action_count": 30,
+                "action_count_observed": True,
                 "max_abs_delta": 0.0,
                 "warnings": [],
                 "log_path": "",
@@ -10332,6 +10335,7 @@ class LeRobotBridge:
             message = "Policy pre/post processors loaded; action inference active."
         action_matches = list(re.finditer(r"\[ATR_ACTION\]\s+count=(\d+)\s+max_abs_delta=([0-9.+-]+)", text))
         action_count = 0
+        action_count_observed = bool(action_matches)
         max_abs_delta = None
         if action_matches:
             last = action_matches[-1]
@@ -10351,8 +10355,9 @@ class LeRobotBridge:
             count_match = re.search(r"Total actions executed:\s*(\d+)", text)
             if count_match:
                 action_count = int(count_match.group(1))
+                action_count_observed = True
             phase = "ACTION_STOPPED"
-            message = f"Actor stopped after {action_count} actions."
+            message = f"Actor stopped after {action_count} actions." if action_count_observed else "Actor stopped; action count unavailable in log tail."
         workflow = str(session.get("workflow") or "").lower()
         workflow_label = "training" if workflow == "train" else "rollout" if workflow == "rollout" else workflow or "runtime"
         if "RTC demo finished" in text or (returncode == 0 and status == "COMPLETED"):
@@ -10366,7 +10371,8 @@ class LeRobotBridge:
         if status in {"STOPPED", "CANCELLED"}:
             phase = "STOPPED"
             if workflow == "rollout":
-                message = f"Rollout stopped by operator/system after {action_count} actions."
+                message = (f"Rollout stopped by operator/system after {action_count} actions."
+                           if action_count_observed else "Rollout stopped; action count unavailable in log tail.")
             else:
                 message = f"{workflow_label.capitalize()} stopped by operator/system."
         if "Fatal exception" in text or "Traceback" in text or status == "FAILED":
@@ -10384,6 +10390,7 @@ class LeRobotBridge:
             "phase": phase,
             "message": message,
             "action_count": action_count,
+            "action_count_observed": action_count_observed,
             "max_abs_delta": max_abs_delta,
             "warnings": sorted(set(warnings)),
             "log_path": session.get("log_path", ""),

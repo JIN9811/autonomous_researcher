@@ -114,6 +114,13 @@ vertically within the dock instead of overlapping subsequent rows. Tab selection
 and disclosure do not execute bridge actions.
 The registry is read from the existing device snapshot; execution routes are unchanged.
 
+Live chat opens each newly visible agent bubble automatically and closes the
+previous automatically opened bubble when the next agent or operator bubble
+appears. Streaming updates and unchanged polling do not toggle it. Manually
+reopened history keeps the existing three-bubble limit; completed-loop summaries
+remain initially collapsed and can still be reopened manually. Chat-panel pinning
+is independent of message expansion.
+
 Artifacts uses a compact folder tree and one-line file list, scoped by default to
 the selected agent and current loop. Darker folder navigation, lighter file rows
 and a restrained cyan selection distinguish the regions without large artifact

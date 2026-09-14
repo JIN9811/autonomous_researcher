@@ -12,7 +12,7 @@ function display(events = [{ agent: "specimen", status: "done" }], messages = []
     eventRequiresOperatorInput: () => false, eventPayload: e => e.payload || {},
     isResolvedEmergencyLifecycleEvent: () => false,
   });
-  for (const name of ["knownLiveAgent", "agentIdFromStage", "agentIdFromRole", "agentIdFromFreeText", "agentIdFromMessage", "agentIdFromEvent", "nestedPrinterRuntimeObjects", "isTransientPrinterCommunicationEvent", "specimenPrinterRuntimeState", "specimenExecutionDisplayState", "eventStatusForAgent"]) {
+  for (const name of ["knownLiveAgent", "agentIdFromStage", "agentIdFromRole", "agentIdFromFreeText", "agentIdFromMessage", "agentIdFromEvent", "nestedPrinterRuntimeObjects", "isTransientPrinterCommunicationEvent", "specimenExecutionDisplayState", "eventStatusForAgent"]) {
     const start = source.indexOf(`function ${name}(`);
     if (start >= 0) vm.runInContext(source.slice(start, source.indexOf("\n}", start) + 2), context);
   }
@@ -109,10 +109,14 @@ test("a completed run cannot promote a nonterminal SPC status from success alone
   assert.equal(display()(snapshot, false), "waiting");
 });
 
-test("SPC diagnostic error and actual printer progress remain visible without completion evidence", () => {
+test("SPC diagnostics remain visible but printer telemetry cannot promote the agent status", () => {
   const snapshot = { run_id: "r1", stage: "idle", agent_status: {}, run_metadata: {} };
   assert.equal(display([{ agent: "specimen", level: "ERROR", message: "Printer connection failed" }])(snapshot), "error");
-  assert.equal(display([{ agent: "specimen", status: "PRINTING" }])(snapshot), "running");
+  for(const status of ["PRINTING","RUNNING","FINISH","FINISHED","IDLE","READY","COMPLETE","COMPLETED"]) {
+    assert.equal(display([{ agent: "specimen", status }])(snapshot,false), "idle",status);
+    assert.equal(display([{ agent: "specimen", status }])(snapshot,true), "idle",status);
+  }
+  assert.equal(display([{agent:'specimen',event_type:'planning_printer_completion_wait',payload:{printer_wait:{status:'started'}}}])(snapshot,false),'idle');
 });
 
 test("actual specimen events keep their ownership when their text mentions another agent", () => {

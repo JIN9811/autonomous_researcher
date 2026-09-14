@@ -4,14 +4,15 @@ import subprocess
 import pytest
 
 
-def test_first_chat_opens_once_with_inline_controls():
+def test_new_chat_opens_and_previous_auto_bubble_closes_without_refresh_flicker():
     source = (Path(__file__).resolve().parents[2] / "web/static/planning.js").read_text()
-    render = "function renderPlanningChatGroup(" + source.split(
-        "function renderPlanningChatGroup(", 1
+    render = "function syncPlanningChatAutoExpansion(" + source.split(
+        "function syncPlanningChatAutoExpansion(", 1
     )[1].split("function syncPlanningChatBubbleHeights(", 1)[0]
     script = """
 const assert = require('node:assert/strict');
-let planningInitialChatOpened = false;
+let planningAutoExpandedChatGroup = '', planningLastVisibleChatItemKey = '';
+const planningChatItemRevealKey = item => item.type === 'operator' ? 'operator:'+item.msg.id : 'group:'+item.group.key;
 const planningExpandedChatGroups = new Set();
 const liveLastSession = null;
 const planningLoopArtifactCache = new Map();
@@ -24,14 +25,34 @@ const renderChatGroupProgress = () => '';
 const renderPlanningChatMessageDetail = (m, i, controls) => controls;
 const group = {key:'greeting',role:'orchestrator',messages:[{content:'Hello'}]};
 """ + render + """
+const first={type:'group',group};
+syncPlanningChatAutoExpansion([first]);
 const html = renderPlanningChatGroup(group, 0);
 assert.match(html, /is-expanded/);
 assert.match(html, /planning-agent-chat-hide/);
 assert.match(html, /<img alt="agent">/);
 assert.ok(!html.includes('planning-agent-chat-expanded-tools'));
 planningExpandedChatGroups.delete('greeting');
+syncPlanningChatAutoExpansion([first]);
 assert.match(renderPlanningChatGroup(group, 0), /is-collapsed/);
-assert.match(renderPlanningChatGroup({...group,key:'second'}, 1), /is-collapsed/);
+const second={type:'group',group:{...group,key:'second'}};
+syncPlanningChatAutoExpansion([first,second]);
+assert.match(renderPlanningChatGroup(second.group, 1), /is-expanded/);
+assert.match(renderPlanningChatGroup(group, 0), /is-collapsed/);
+planningExpandedChatGroups.add('greeting'); // manually reopened historical bubble
+syncPlanningChatAutoExpansion([first,second]);
+assert.deepEqual([...planningExpandedChatGroups],['second','greeting']);
+const third={type:'group',group:{...group,key:'third'}};
+syncPlanningChatAutoExpansion([first,second,third]);
+assert.deepEqual([...planningExpandedChatGroups],['greeting','third']);
+syncPlanningChatAutoExpansion([first,second,third,{type:'operator',msg:{id:4}}]);
+assert.deepEqual([...planningExpandedChatGroups],['greeting']);
+const loop={type:'group',group:{key:'loop:1',kind:'loop_summary'}};
+syncPlanningChatAutoExpansion([loop]);
+assert.ok(!planningExpandedChatGroups.has('loop:1'));
+planningExpandedChatGroups.add('loop:1');
+syncPlanningChatAutoExpansion([loop]);
+assert.ok(planningExpandedChatGroups.has('loop:1'));
 """
     result = subprocess.run(["node", "-e", script], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr

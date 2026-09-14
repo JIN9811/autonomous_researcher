@@ -69,6 +69,30 @@ async def test_model_can_withhold_derived_knowledge_when_evidence_is_insufficien
 
 
 @pytest.mark.asyncio
+async def test_model_can_read_its_successful_write_receipt_without_new_search(tmp_path):
+    from agents.core.knowledge.decision import run_knowledge_decision
+    state, ctx, store, evidence = setup(tmp_path, [])
+    async def complete(task, prompt, **kwargs):
+        observations = json.loads(prompt)["observations"]
+        step = len(observations)
+        if step == 0: value = request("inspect_evidence")
+        elif step == 1:
+            value = request("write_knowledge_note", title="Bounded interval", body="Measured interval only; no ultimate-peak claim.",
+                ontology_type="KnowledgeClaim", evidence_kind="derived", source_ids=["current-analysis"])
+        elif step == 2:
+            value = request("read_knowledge", record_id=observations[-1]["observation"]["record_id"])
+        else:
+            value = request("publish_context", summary="Preserved interval interpretation.",
+                source_ids=[observations[-1]["observation"]["citation_id"]], no_knowledge_reason="")
+        return SimpleNamespace(text=value, model="fixture")
+    ctx.complete = complete
+    result = await run_knowledge_decision(state, ctx, store=store, evidence=evidence, scope={"run_id": state.run_id})
+    assert result["status"] == "accepted"
+    assert len(result["note_receipts"]) == 1
+    assert store.status()["records"] == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("bad", [
     request("search_knowledge", query="x", scope={"run_id": "other-run"}),
     request("write_knowledge_note", title="x", body="Invented", ontology_type="Observation", evidence_kind="observed", source_ids=["fake"]),

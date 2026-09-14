@@ -24,7 +24,7 @@ from typing import Any, Callable
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8766
-DEFAULT_SCENE = Path(__file__).resolve().parents[1] / "scene" / "omx_table_layout.usda"
+DEFAULT_SCENE = Path(__file__).resolve().parents[1] / "scene" / "omx_table_layout_20260915.usda"
 LATEST_STATE_PATH = Path("/tmp/atr_isaac_omx_mirror_latest.json")
 RUNTIME_GRIP_JOINT_PATH = "/World/RuntimeGrip/OmxTeleopGripJoint"
 RED_SPECIMEN_BLOCK_PATH = "/World/Workspace/RedSpecimenBlock"

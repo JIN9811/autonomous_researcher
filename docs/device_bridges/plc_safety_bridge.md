@@ -21,7 +21,7 @@ source_of_truth:
   - app/main.py
   - web/templates/plc.html
   - web/static/plc.js
-last_verified: 2026-09-03
+last_verified: 2026-09-15
 verified_against: working-tree
 related_docs:
   - docs/oldversion/superpowers/specs/2026-08-24-plc-safety-bridge-design.md
@@ -58,6 +58,13 @@ hardwired E-STOP circuit, safety-rated PLC logic, contactors, or a PLC-side
 watchdog. Total PC power, kernel, or network failure cannot guarantee a D101
 write. Physical validation must begin with printer, robot, UTM, and all other
 downstream motion disabled.
+
+Experiment-start intent is checked against the PLC service latch before entering
+the setup/start dialogue; ordinary system questions remain available. The final
+handoff retains its existing PLC check. Error-run checkpoint restoration and
+Resume also check the PLC service and never clear its latch. Fast stop requests
+both LeRobot replay and rollout stop paths before cancelling runtime tasks.
+These are software-tested boundaries, not a claim of physical safety validation.
 
 ## Register Contract And Ownership
 

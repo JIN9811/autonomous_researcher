@@ -269,6 +269,11 @@ waive physical interlocks, restart fabrication, or implement a recovery action.
 Unresolved pressure causes another hold. Operators must reconcile the cause
 and evidence before proceeding; this is not an automatic stage-retry workflow.
 
+An agent's `safe_stop_recommended` is classified as
+`SYSTEM_SAFE_STOP_RECOMMENDED`, not `OPERATOR_STOP_REQUESTED`. Both can block
+progression, but only the latter describes an operator stop request. An automatic
+review failure must not be presented as evidence that the user pressed Stop.
+
 The Live GUI dashboard keeps Current Decision, Gate Checks, Device & Stop
 Verification, Approval Queue, and Incident History visible. Recorded decisions
 and their reasons are separate from the monitor status; missing decisions display

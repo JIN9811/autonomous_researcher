@@ -1,17 +1,19 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
+import { boxUnion } from "./box_union.cjs";
+import { specimenPosition } from "./specimen_pose.cjs";
 
 const MODEL_ROOT = "/assets/robotis-omx";
 const MODEL_XML_URL = "/assets/robotis-omx/omx.xml";
-const ENVIRONMENT_MANIFEST_URL = "/assets/robotis-omx/scene/omx_table_layout.web.json?v=20260714-grid5mm-1";
+const ENVIRONMENT_MANIFEST_URL = "/assets/robotis-omx/scene/omx_table_layout.web.json?v=20260915-web-platen-offset-8";
 const TELEMETRY_WS_PATH = "/ws/lerobot/joint-telemetry";
 const SNAPSHOT_URL = "/api/lerobot/joint-telemetry/snapshot";
 const SPECIMEN_POSE_URL = "/api/lerobot/active-robot-cam/specimen-pose";
 const SPECIMEN_POSE_POLL_MS = 1000;
 const CAMERA_FIT_PADDING = 1.0;
-const CAMERA_FIT_DISTANCE_SCALE = 1.34;
-const CAMERA_FIT_VERTICAL_OFFSET_M = -0.115;
+const CAMERA_FIT_DISTANCE_SCALE = 1.8;
+const CAMERA_FIT_VERTICAL_OFFSET_M = 0;
 const JOINT_NAMES = ["Joint1", "Joint2", "Joint3", "Joint4", "Joint5", "Gripper"];
 const ACTUAL_LABEL = "Measured follower";
 const TARGET_LABEL = "Policy target";
@@ -35,6 +37,7 @@ const anchorWorldEuler = new THREE.Euler();
 
 const runtime = {
   sessionId: "",
+  resetAtMs: 0,
   status: "idle",
   history: [],
   latestSequence: -1,
@@ -48,7 +51,7 @@ const runtime = {
   reconnectTimer: null,
   reconnectAttempt: 0,
   chartFrame: null,
-  selectedJoint: "Joint1",
+  selectedJoint: "Gripper",
   poseMount: null,
   chartMount: null,
   viewer: null,
@@ -341,8 +344,12 @@ function buildEnvironmentObject(item, wireframe) {
   }
   const group = new THREE.Group();
   group.name = item.name || "environment-object";
+  // Display-only adjustment: canonical positions still generate the Isaac stage.
+  const position = item.position.map((value, index) => Number(value) + Number(item.web_display_offset?.[index] || 0));
   group.userData.environmentItem = {
     primitive: String(item.primitive || ""),
+    position,
+    rotation_z_deg: Number(item.rotation_z_deg || 0),
     size: Array.isArray(item.size) ? item.size.map(Number) : null,
     radius: Number(item.radius),
     height: Number(item.height),
@@ -357,8 +364,36 @@ function buildEnvironmentObject(item, wireframe) {
     const surfaceGrid = buildCylinderSurfaceGrid(item, wireframe);
     if (surfaceGrid) group.add(surfaceGrid);
   }
-  group.position.fromArray(item.position.map(Number));
+  group.position.fromArray(position);
   group.rotation.z = THREE.MathUtils.degToRad(Number(item.rotation_z_deg || 0));
+  return group;
+}
+
+function buildUnifiedTable(items, wireframe = {}) {
+  const quads = boxUnion(items), vertices = [], gridVertices = [];
+  const spacing = Number(wireframe.spacing_m || .005);
+  for (const {points, axis, sign} of quads) {
+    for (const i of [0,1,2,0,2,3]) vertices.push(...points[i]);
+    const u=(axis+1)%3, v=(axis+2)%3;
+    for (const [along,across] of [[u,v],[v,u]]) {
+      const lo=Math.min(...points.map(p=>p[along])), hi=Math.max(...points.map(p=>p[along]));
+      const start=Math.min(...points.map(p=>p[across])), end=Math.max(...points.map(p=>p[across]));
+      for(let n=Math.ceil((lo-1e-9)/spacing);n*spacing<=hi+1e-9;n++) {
+        const a=[...points[0]],b=[...points[0]];
+        a[along]=b[along]=n*spacing;a[across]=start;b[across]=end;
+        a[axis]=b[axis]=points[0][axis]+sign*.00015;
+        gridVertices.push(...a,...b);
+      }
+    }
+  }
+  const geometry=new THREE.BufferGeometry();
+  geometry.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));
+  const group=new THREE.Group();group.name='UnifiedWorkstationBody';
+  group.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry,20),new THREE.LineBasicMaterial({color:'#94a3b8',transparent:true,opacity:.6})));
+  const gridGeometry=new THREE.BufferGeometry();
+  gridGeometry.setAttribute('position',new THREE.Float32BufferAttribute(gridVertices,3));
+  group.add(new THREE.LineSegments(gridGeometry,surfaceGridMaterial(wireframe)));
+  geometry.dispose();
   return group;
 }
 
@@ -367,7 +402,9 @@ function buildEnvironment(manifest) {
   environmentGroup.name = "omx-table-layout-wireframe";
   const grid = buildEnvironmentGrid(manifest.grid);
   if (grid) environmentGroup.add(grid);
-  (manifest.objects || []).forEach((item) => {
+  const tableItems=(manifest.objects || []).filter(item=>item.source_prim?.startsWith('/World/Table/') && item.primitive==='box');
+  if (tableItems.length) environmentGroup.add(buildUnifiedTable(tableItems,manifest.wireframe));
+  (manifest.objects || []).filter(item=>!tableItems.includes(item)).forEach((item) => {
     const object = buildEnvironmentObject(item, manifest.wireframe);
     if (object) environmentGroup.add(object);
   });
@@ -529,7 +566,15 @@ function releaseSpecimenFromGripper(viewer = runtime.viewer) {
 function resetSpecimenGraspVisualization(viewer = runtime.viewer) {
   const state = viewer && viewer.specimenGraspState;
   if (!state) return;
-  if (state.held) releaseSpecimenFromGripper(viewer);
+  state.held = false;
+  const specimen = specimenObject(viewer);
+  const item = specimen && specimen.userData.environmentItem;
+  if (item && viewer.environmentGroup) {
+    viewer.environmentGroup.add(specimen);
+    specimen.position.fromArray(item.position);
+    specimen.rotation.set(0, 0, THREE.MathUtils.degToRad(Number(item.rotation_z_deg || 0)));
+  }
+  runtime.specimenPoseFrameId = "";
   state.attemptIndex = null;
   state.releasedAttemptIndex = null;
   state.original = null;
@@ -591,22 +636,19 @@ function applySpecimenGraspVisualization(outcome, measuredMotion, viewer = runti
   return false;
 }
 
-function applyRecordingSpecimenPose(pose) {
-  if (!runtime.viewer || !runtime.viewer.environmentGroup || !pose || pose.schema !== "specimen_pose.v1") return false;
+function applyRecordingSpecimenPose(pose, serverStartedAtMs) {
+  if (!runtime.viewer || !runtime.viewer.environmentGroup) return false;
   if (runtime.viewer.specimenGraspState && runtime.viewer.specimenGraspState.poseLocked) return false;
-  const frameId = String(pose.frame_id || pose.timestamp || "");
+  const cutoff = Math.max(runtime.resetAtMs, Number.isFinite(serverStartedAtMs) && serverStartedAtMs > 0 ? serverStartedAtMs : Infinity);
+  const frameId = String(serverStartedAtMs) + ":" + String((pose && (pose.frame_id || pose.timestamp)) || "");
   if (frameId && frameId === runtime.specimenPoseFrameId) return false;
-  const world = pose.position_isaac_world_mm;
-  const x = Number(world && world.x);
-  const y = Number(world && world.y);
-  const z = Number(world && world.z);
-  if (![x, y, z].every(Number.isFinite)) return false;
   const specimen = runtime.viewer.environmentGroup.getObjectByName("RedSpecimenBlock");
   if (!specimen) return false;
-  specimen.position.set(x / 1000, y / 1000, z / 1000);
+  specimen.position.fromArray(specimenPosition(pose, specimen.userData.environmentItem.position, cutoff));
   settleSpecimenOnSupport(runtime.viewer, specimen);
-  const yaw = Number(pose.orientation_deg && pose.orientation_deg.yaw);
-  if (Number.isFinite(yaw)) specimen.rotation.z = THREE.MathUtils.degToRad(yaw);
+  const currentPose = Date.parse(pose && pose.timestamp) >= cutoff;
+  const yaw = currentPose && pose && pose.orientation_deg && pose.orientation_deg.yaw;
+  specimen.rotation.z = THREE.MathUtils.degToRad(typeof yaw==='number' && Number.isFinite(yaw) ? yaw : Number(specimen.userData.environmentItem.rotation_z_deg || 0));
   runtime.specimenPoseFrameId = frameId;
   return true;
 }
@@ -618,7 +660,7 @@ async function pollRecordingSpecimenPose() {
     const response = await fetch(SPECIMEN_POSE_URL, { cache: "no-store" });
     if (!response.ok) return;
     const payload = await response.json();
-    applyRecordingSpecimenPose(payload.pose);
+    applyRecordingSpecimenPose(payload.pose, payload.server_started_at_ms);
   } catch (_error) {
     // Pose evidence is optional; keep the last validated scene position.
   } finally {
@@ -760,15 +802,38 @@ async function createViewer() {
   if (environmentGroup) bounds.expandByObject(environmentGroup);
   const center = bounds.getCenter(new THREE.Vector3());
   const size = bounds.getSize(new THREE.Vector3());
-  const radius = Math.max(size.x, size.y, size.z, 0.25);
-  const fitTarget = center.clone().add(new THREE.Vector3(0.03, 0, CAMERA_FIT_VERTICAL_OFFSET_M));
-  const fitDirection = new THREE.Vector3(1.25, -1.65, 1.1).normalize();
+  let radius = Math.max(size.x, size.y, size.z, 0.25);
+  const fitTarget = center.clone().add(new THREE.Vector3(0, 0, CAMERA_FIT_VERTICAL_OFFSET_M));
+  // Match the approved Isaac view: upper platform left, robot right, tray below.
+  const fitDirection = new THREE.Vector3(-1.25, 1.65, 1.1).normalize();
 
   function zoomToFit() {
+    bounds.setFromObject(measuredRobot.root);
+    if (environmentGroup) bounds.expandByObject(environmentGroup);
+    bounds.getCenter(fitTarget);
+    fitTarget.z += CAMERA_FIT_VERTICAL_OFFSET_M;
+    bounds.getSize(size);
+    radius = Math.max(size.x, size.y, size.z, 0.25);
+    const right = new THREE.Vector3().crossVectors(camera.up, fitDirection).normalize();
+    const up = new THREE.Vector3().crossVectors(fitDirection, right).normalize();
+    const tanVertical = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    const tanHorizontal = tanVertical * camera.aspect;
+    let distance = radius * CAMERA_FIT_DISTANCE_SCALE * CAMERA_FIT_PADDING;
+    for (const x of [bounds.min.x, bounds.max.x]) {
+      for (const y of [bounds.min.y, bounds.max.y]) {
+        for (const z of [bounds.min.z, bounds.max.z]) {
+          const relative = new THREE.Vector3(x, y, z).sub(fitTarget);
+          distance = Math.max(distance, relative.dot(fitDirection) + 1.06 * Math.max(
+            Math.abs(relative.dot(right)) / tanHorizontal,
+            Math.abs(relative.dot(up)) / tanVertical,
+          ));
+        }
+      }
+    }
     controls.target.copy(fitTarget);
     camera.position.copy(fitTarget).addScaledVector(
       fitDirection,
-      radius * CAMERA_FIT_DISTANCE_SCALE * CAMERA_FIT_PADDING,
+      distance,
     );
     camera.zoom = 1;
     camera.near = Math.max(0.001, radius / 100);
@@ -810,6 +875,8 @@ async function createViewer() {
     active = true;
     resize();
     if (!initialFitApplied) {
+      Object.assign(currentActual, runtime.latestActualRad);
+      applyJointRadians(measuredRobot, currentActual);
       zoomToFit();
       initialFitApplied = true;
     }
@@ -856,6 +923,15 @@ async function ensureViewer() {
     runtime.viewerPromise = createViewer()
       .then((viewer) => {
         runtime.viewer = viewer;
+        // History can arrive before meshes. Replay discrete grasp/release at
+        // each measured pose once, before applying the latest (possibly home) pose.
+        for (const sample of runtime.history) {
+          if (sample.actual_rad) applyJointRadians(viewer.measuredRobot, sample.actual_rad);
+          const visual = sample.grasp_visual;
+          const motion = sample.motion_state || {};
+          applySpecimenGraspVisualization(visual || motion.grasp_outcome, visual || motion.measured, viewer);
+        }
+        applyJointRadians(viewer.measuredRobot, runtime.latestActualRad);
         return viewer;
       })
       .finally(() => {
@@ -1274,6 +1350,7 @@ function resetSession(sessionId) {
   runtime.latestActualRad = {};
   runtime.latestTargetRad = {};
   runtime.latestMotionState = {};
+  if (runtime.viewer) runtime.viewer.policyTargetGhost.root.visible = false;
   runtime.stableYDomains = {};
   runtime.artifacts = {};
   runtime.runtimeView = {};
@@ -1295,6 +1372,9 @@ function appendSample(sample, updateDisplay = true) {
   if (Number.isFinite(sequence) && sequence <= runtime.latestSequence) return;
   if (Number.isFinite(sequence)) runtime.latestSequence = sequence;
   runtime.history.push(sample);
+  // Grasp/release is discrete: capture FK at the measured sample, never at the
+  // previous animation frame (or the final pose of a compact history batch).
+  if (runtime.viewer && sample.actual_rad) applyJointRadians(runtime.viewer.measuredRobot, sample.actual_rad);
   if (updateDisplay) applySampleDisplay(sample);
   else if (sample.grasp_visual) {
     // Keep release/regrasp transitions; only heavy card/pose updates are batched.
@@ -1308,6 +1388,7 @@ function appendSample(sample, updateDisplay = true) {
 function applySampleDisplay(sample) {
   runtime.latestActualRad = sample.actual_rad || {};
   runtime.latestTargetRad = sample.target_rad || {};
+  if (runtime.viewer) applyJointRadians(runtime.viewer.measuredRobot, runtime.latestActualRad);
   applyMotionState(sample.motion_state || {});
   runtime.status = sample.status || "live";
   setPoseStatus("live follower telemetry", "live");
@@ -1343,6 +1424,12 @@ function replaceJointHistory(samples, latestSample) {
 
 function consumePacket(packet) {
   if (!packet || typeof packet !== "object") return;
+  const resetAtMs = Number(packet.reset_at_ms || 0);
+  if (resetAtMs < runtime.resetAtMs) return;
+  if (resetAtMs > runtime.resetAtMs) {
+    runtime.resetAtMs = resetAtMs;
+    resetSession("");
+  }
   const sessionId = String((packet.session && packet.session.session_id) || packet.session_id || "");
   if (sessionId && sessionId !== runtime.sessionId) resetSession(sessionId);
   runtime.status = String(packet.status || runtime.status || "idle");
@@ -1396,6 +1483,7 @@ function connectTelemetrySocket() {
     try {
       consumePacket(JSON.parse(event.data));
     } catch (error) {
+      console.warn("OMX telemetry update failed", error);
       setTrackingStatus("invalid telemetry packet", "failed");
     }
   };
@@ -1414,6 +1502,8 @@ async function loadSnapshot() {
     const response = await fetch(SNAPSHOT_URL, { cache: "no-store" });
     if (!response.ok) return;
     const payload = await response.json();
+    if (Number(payload.reset_at_ms || 0) < runtime.resetAtMs) return;
+    if (Number(payload.reset_at_ms || 0) > runtime.resetAtMs) consumePacket({ ...payload, type: "telemetry_state" });
     // A latest-only snapshot must never advance the history sequence cursor.
     // All chart samples, including startup backfill, arrive through the socket.
     const sessionId = String((payload.session && payload.session.session_id) || "");
@@ -1432,7 +1522,7 @@ function bindJointSelectors() {
     if (select.dataset.bound === "1") return;
     select.dataset.bound = "1";
     select.addEventListener("change", () => {
-      runtime.selectedJoint = JOINT_NAMES.includes(select.value) ? select.value : "Joint1";
+      runtime.selectedJoint = JOINT_NAMES.includes(select.value) ? select.value : "Gripper";
       document.querySelectorAll("[data-atr-joint-selector]").forEach((other) => { other.value = runtime.selectedJoint; });
       scheduleChartRender();
     });

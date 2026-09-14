@@ -1,4 +1,83 @@
 var ATRRobotTelemetryBundle = (() => {
+  var __create = Object.create;
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __getProtoOf = Object.getPrototypeOf;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __commonJS = (cb, mod) => function __require() {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+    // If the importer is in node compatibility mode or this is not an ESM
+    // file that has been converted to a CommonJS file using a Babel-
+    // compatible transform (i.e. "__esModule" has not been set), then set
+    // "default" to the CommonJS "module.exports" for node compatibility.
+    isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+    mod
+  ));
+
+  // src/box_union.cjs
+  var require_box_union = __commonJS({
+    "src/box_union.cjs"(exports, module) {
+      function boxUnion2(boxes) {
+        const bounds = boxes.map((b) => b.position.map((v, i) => [v - b.size[i] / 2, v + b.size[i] / 2]));
+        const axes = [0, 1, 2].map((a) => [...new Set(bounds.flatMap((b) => b[a]).map((v) => Number(v.toFixed(9))))].sort((a2, b) => a2 - b));
+        const occupied = /* @__PURE__ */ new Set(), key = (i, j, k) => `${i},${j},${k}`;
+        for (let i = 0; i < axes[0].length - 1; i++) for (let j = 0; j < axes[1].length - 1; j++) for (let k = 0; k < axes[2].length - 1; k++) {
+          const ids = [i, j, k], p = ids.map((n, a) => (axes[a][n] + axes[a][n + 1]) / 2);
+          if (bounds.some((b) => p.every((v, a) => v > b[a][0] - 1e-10 && v < b[a][1] + 1e-10))) occupied.add(key(i, j, k));
+        }
+        const quads = [];
+        for (const cell of occupied) {
+          const ids = cell.split(",").map(Number);
+          for (let a = 0; a < 3; a++) for (const sign of [-1, 1]) {
+            const neighbor = [...ids];
+            neighbor[a] += sign;
+            if (occupied.has(key(...neighbor))) continue;
+            const u = (a + 1) % 3, v = (a + 2) % 3, coord = axes[a][ids[a] + (sign === 1 ? 1 : 0)];
+            let points = [[0, 0], [1, 0], [1, 1], [0, 1]].map(([du, dv]) => {
+              const p = [];
+              p[a] = coord;
+              p[u] = axes[u][ids[u] + du];
+              p[v] = axes[v][ids[v] + dv];
+              return p;
+            });
+            if (sign < 0) points.reverse();
+            quads.push({ points, axis: a, sign });
+          }
+        }
+        return quads;
+      }
+      module.exports = { boxUnion: boxUnion2 };
+    }
+  });
+
+  // src/specimen_pose.cjs
+  var require_specimen_pose = __commonJS({
+    "src/specimen_pose.cjs"(exports, module) {
+      function specimenPosition2(pose, fallback, notBefore = 0) {
+        if (notBefore > 0) {
+          const timestamp = Date.parse(pose && pose.timestamp);
+          if (!Number.isFinite(timestamp) || timestamp < notBefore) return [...fallback];
+        }
+        const world = pose && pose.schema === "specimen_pose.v1" && pose.position_isaac_world_mm;
+        const values = world && [world.x, world.y, world.z];
+        if (!values || !values.every((v) => typeof v === "number" && Number.isFinite(v))) return [...fallback];
+        return values.map((v) => v / 1e3);
+      }
+      module.exports = { specimenPosition: specimenPosition2 };
+    }
+  });
+
   // node_modules/three/build/three.core.js
   var REVISION = "177";
   var MOUSE = { LEFT: 0, MIDDLE: 1, RIGHT: 2, ROTATE: 0, DOLLY: 1, PAN: 2 };
@@ -27142,16 +27221,18 @@ void main() {
   };
 
   // src/index.js
+  var import_box_union = __toESM(require_box_union());
+  var import_specimen_pose = __toESM(require_specimen_pose());
   var MODEL_ROOT = "/assets/robotis-omx";
   var MODEL_XML_URL = "/assets/robotis-omx/omx.xml";
-  var ENVIRONMENT_MANIFEST_URL = "/assets/robotis-omx/scene/omx_table_layout.web.json?v=20260714-grid5mm-1";
+  var ENVIRONMENT_MANIFEST_URL = "/assets/robotis-omx/scene/omx_table_layout.web.json?v=20260915-web-platen-offset-8";
   var TELEMETRY_WS_PATH = "/ws/lerobot/joint-telemetry";
   var SNAPSHOT_URL = "/api/lerobot/joint-telemetry/snapshot";
   var SPECIMEN_POSE_URL = "/api/lerobot/active-robot-cam/specimen-pose";
   var SPECIMEN_POSE_POLL_MS = 1e3;
   var CAMERA_FIT_PADDING = 1;
-  var CAMERA_FIT_DISTANCE_SCALE = 1.34;
-  var CAMERA_FIT_VERTICAL_OFFSET_M = -0.115;
+  var CAMERA_FIT_DISTANCE_SCALE = 1.8;
+  var CAMERA_FIT_VERTICAL_OFFSET_M = 0;
   var JOINT_NAMES = ["Joint1", "Joint2", "Joint3", "Joint4", "Joint5", "Gripper"];
   var ACTUAL_LABEL = "Measured follower";
   var TARGET_LABEL = "Policy target";
@@ -27174,6 +27255,7 @@ void main() {
   var anchorWorldEuler = new Euler();
   var runtime = {
     sessionId: "",
+    resetAtMs: 0,
     status: "idle",
     history: [],
     latestSequence: -1,
@@ -27187,7 +27269,7 @@ void main() {
     reconnectTimer: null,
     reconnectAttempt: 0,
     chartFrame: null,
-    selectedJoint: "Joint1",
+    selectedJoint: "Gripper",
     poseMount: null,
     chartMount: null,
     viewer: null,
@@ -27454,8 +27536,11 @@ void main() {
     }
     const group = new Group();
     group.name = item.name || "environment-object";
+    const position = item.position.map((value, index) => Number(value) + Number(item.web_display_offset?.[index] || 0));
     group.userData.environmentItem = {
       primitive: String(item.primitive || ""),
+      position,
+      rotation_z_deg: Number(item.rotation_z_deg || 0),
       size: Array.isArray(item.size) ? item.size.map(Number) : null,
       radius: Number(item.radius),
       height: Number(item.height)
@@ -27470,8 +27555,38 @@ void main() {
       const surfaceGrid = buildCylinderSurfaceGrid(item, wireframe);
       if (surfaceGrid) group.add(surfaceGrid);
     }
-    group.position.fromArray(item.position.map(Number));
+    group.position.fromArray(position);
     group.rotation.z = MathUtils.degToRad(Number(item.rotation_z_deg || 0));
+    return group;
+  }
+  function buildUnifiedTable(items, wireframe = {}) {
+    const quads = (0, import_box_union.boxUnion)(items), vertices = [], gridVertices = [];
+    const spacing = Number(wireframe.spacing_m || 5e-3);
+    for (const { points, axis, sign } of quads) {
+      for (const i of [0, 1, 2, 0, 2, 3]) vertices.push(...points[i]);
+      const u = (axis + 1) % 3, v = (axis + 2) % 3;
+      for (const [along, across] of [[u, v], [v, u]]) {
+        const lo = Math.min(...points.map((p) => p[along])), hi = Math.max(...points.map((p) => p[along]));
+        const start = Math.min(...points.map((p) => p[across])), end = Math.max(...points.map((p) => p[across]));
+        for (let n = Math.ceil((lo - 1e-9) / spacing); n * spacing <= hi + 1e-9; n++) {
+          const a = [...points[0]], b = [...points[0]];
+          a[along] = b[along] = n * spacing;
+          a[across] = start;
+          b[across] = end;
+          a[axis] = b[axis] = points[0][axis] + sign * 15e-5;
+          gridVertices.push(...a, ...b);
+        }
+      }
+    }
+    const geometry = new BufferGeometry();
+    geometry.setAttribute("position", new Float32BufferAttribute(vertices, 3));
+    const group = new Group();
+    group.name = "UnifiedWorkstationBody";
+    group.add(new LineSegments(new EdgesGeometry(geometry, 20), new LineBasicMaterial({ color: "#94a3b8", transparent: true, opacity: 0.6 })));
+    const gridGeometry = new BufferGeometry();
+    gridGeometry.setAttribute("position", new Float32BufferAttribute(gridVertices, 3));
+    group.add(new LineSegments(gridGeometry, surfaceGridMaterial(wireframe)));
+    geometry.dispose();
     return group;
   }
   function buildEnvironment(manifest) {
@@ -27479,7 +27594,9 @@ void main() {
     environmentGroup.name = "omx-table-layout-wireframe";
     const grid = buildEnvironmentGrid(manifest.grid);
     if (grid) environmentGroup.add(grid);
-    (manifest.objects || []).forEach((item) => {
+    const tableItems = (manifest.objects || []).filter((item) => item.source_prim?.startsWith("/World/Table/") && item.primitive === "box");
+    if (tableItems.length) environmentGroup.add(buildUnifiedTable(tableItems, manifest.wireframe));
+    (manifest.objects || []).filter((item) => !tableItems.includes(item)).forEach((item) => {
       const object = buildEnvironmentObject(item, manifest.wireframe);
       if (object) environmentGroup.add(object);
     });
@@ -27629,7 +27746,15 @@ void main() {
   function resetSpecimenGraspVisualization(viewer = runtime.viewer) {
     const state = viewer && viewer.specimenGraspState;
     if (!state) return;
-    if (state.held) releaseSpecimenFromGripper(viewer);
+    state.held = false;
+    const specimen = specimenObject(viewer);
+    const item = specimen && specimen.userData.environmentItem;
+    if (item && viewer.environmentGroup) {
+      viewer.environmentGroup.add(specimen);
+      specimen.position.fromArray(item.position);
+      specimen.rotation.set(0, 0, MathUtils.degToRad(Number(item.rotation_z_deg || 0)));
+    }
+    runtime.specimenPoseFrameId = "";
     state.attemptIndex = null;
     state.releasedAttemptIndex = null;
     state.original = null;
@@ -27684,22 +27809,19 @@ void main() {
     }
     return false;
   }
-  function applyRecordingSpecimenPose(pose) {
-    if (!runtime.viewer || !runtime.viewer.environmentGroup || !pose || pose.schema !== "specimen_pose.v1") return false;
+  function applyRecordingSpecimenPose(pose, serverStartedAtMs) {
+    if (!runtime.viewer || !runtime.viewer.environmentGroup) return false;
     if (runtime.viewer.specimenGraspState && runtime.viewer.specimenGraspState.poseLocked) return false;
-    const frameId = String(pose.frame_id || pose.timestamp || "");
+    const cutoff = Math.max(runtime.resetAtMs, Number.isFinite(serverStartedAtMs) && serverStartedAtMs > 0 ? serverStartedAtMs : Infinity);
+    const frameId = String(serverStartedAtMs) + ":" + String(pose && (pose.frame_id || pose.timestamp) || "");
     if (frameId && frameId === runtime.specimenPoseFrameId) return false;
-    const world = pose.position_isaac_world_mm;
-    const x = Number(world && world.x);
-    const y = Number(world && world.y);
-    const z = Number(world && world.z);
-    if (![x, y, z].every(Number.isFinite)) return false;
     const specimen = runtime.viewer.environmentGroup.getObjectByName("RedSpecimenBlock");
     if (!specimen) return false;
-    specimen.position.set(x / 1e3, y / 1e3, z / 1e3);
+    specimen.position.fromArray((0, import_specimen_pose.specimenPosition)(pose, specimen.userData.environmentItem.position, cutoff));
     settleSpecimenOnSupport(runtime.viewer, specimen);
-    const yaw = Number(pose.orientation_deg && pose.orientation_deg.yaw);
-    if (Number.isFinite(yaw)) specimen.rotation.z = MathUtils.degToRad(yaw);
+    const currentPose = Date.parse(pose && pose.timestamp) >= cutoff;
+    const yaw = currentPose && pose && pose.orientation_deg && pose.orientation_deg.yaw;
+    specimen.rotation.z = MathUtils.degToRad(typeof yaw === "number" && Number.isFinite(yaw) ? yaw : Number(specimen.userData.environmentItem.rotation_z_deg || 0));
     runtime.specimenPoseFrameId = frameId;
     return true;
   }
@@ -27710,7 +27832,7 @@ void main() {
       const response = await fetch(SPECIMEN_POSE_URL, { cache: "no-store" });
       if (!response.ok) return;
       const payload = await response.json();
-      applyRecordingSpecimenPose(payload.pose);
+      applyRecordingSpecimenPose(payload.pose, payload.server_started_at_ms);
     } catch (_error) {
     } finally {
       runtime.specimenPoseRequestPending = false;
@@ -27839,14 +27961,36 @@ void main() {
     if (environmentGroup) bounds.expandByObject(environmentGroup);
     const center = bounds.getCenter(new Vector3());
     const size = bounds.getSize(new Vector3());
-    const radius = Math.max(size.x, size.y, size.z, 0.25);
-    const fitTarget = center.clone().add(new Vector3(0.03, 0, CAMERA_FIT_VERTICAL_OFFSET_M));
-    const fitDirection = new Vector3(1.25, -1.65, 1.1).normalize();
+    let radius = Math.max(size.x, size.y, size.z, 0.25);
+    const fitTarget = center.clone().add(new Vector3(0, 0, CAMERA_FIT_VERTICAL_OFFSET_M));
+    const fitDirection = new Vector3(-1.25, 1.65, 1.1).normalize();
     function zoomToFit() {
+      bounds.setFromObject(measuredRobot.root);
+      if (environmentGroup) bounds.expandByObject(environmentGroup);
+      bounds.getCenter(fitTarget);
+      fitTarget.z += CAMERA_FIT_VERTICAL_OFFSET_M;
+      bounds.getSize(size);
+      radius = Math.max(size.x, size.y, size.z, 0.25);
+      const right = new Vector3().crossVectors(camera.up, fitDirection).normalize();
+      const up = new Vector3().crossVectors(fitDirection, right).normalize();
+      const tanVertical = Math.tan(MathUtils.degToRad(camera.fov / 2));
+      const tanHorizontal = tanVertical * camera.aspect;
+      let distance = radius * CAMERA_FIT_DISTANCE_SCALE * CAMERA_FIT_PADDING;
+      for (const x of [bounds.min.x, bounds.max.x]) {
+        for (const y of [bounds.min.y, bounds.max.y]) {
+          for (const z of [bounds.min.z, bounds.max.z]) {
+            const relative = new Vector3(x, y, z).sub(fitTarget);
+            distance = Math.max(distance, relative.dot(fitDirection) + 1.06 * Math.max(
+              Math.abs(relative.dot(right)) / tanHorizontal,
+              Math.abs(relative.dot(up)) / tanVertical
+            ));
+          }
+        }
+      }
       controls.target.copy(fitTarget);
       camera.position.copy(fitTarget).addScaledVector(
         fitDirection,
-        radius * CAMERA_FIT_DISTANCE_SCALE * CAMERA_FIT_PADDING
+        distance
       );
       camera.zoom = 1;
       camera.near = Math.max(1e-3, radius / 100);
@@ -27884,6 +28028,8 @@ void main() {
       active = true;
       resize();
       if (!initialFitApplied) {
+        Object.assign(currentActual, runtime.latestActualRad);
+        applyJointRadians(measuredRobot, currentActual);
         zoomToFit();
         initialFitApplied = true;
       }
@@ -27926,6 +28072,13 @@ void main() {
     if (!runtime.viewerPromise) {
       runtime.viewerPromise = createViewer().then((viewer) => {
         runtime.viewer = viewer;
+        for (const sample of runtime.history) {
+          if (sample.actual_rad) applyJointRadians(viewer.measuredRobot, sample.actual_rad);
+          const visual = sample.grasp_visual;
+          const motion = sample.motion_state || {};
+          applySpecimenGraspVisualization(visual || motion.grasp_outcome, visual || motion.measured, viewer);
+        }
+        applyJointRadians(viewer.measuredRobot, runtime.latestActualRad);
         return viewer;
       }).finally(() => {
         runtime.viewerPromise = null;
@@ -28299,6 +28452,7 @@ void main() {
     runtime.latestActualRad = {};
     runtime.latestTargetRad = {};
     runtime.latestMotionState = {};
+    if (runtime.viewer) runtime.viewer.policyTargetGhost.root.visible = false;
     runtime.stableYDomains = {};
     runtime.artifacts = {};
     runtime.runtimeView = {};
@@ -28319,6 +28473,7 @@ void main() {
     if (Number.isFinite(sequence) && sequence <= runtime.latestSequence) return;
     if (Number.isFinite(sequence)) runtime.latestSequence = sequence;
     runtime.history.push(sample);
+    if (runtime.viewer && sample.actual_rad) applyJointRadians(runtime.viewer.measuredRobot, sample.actual_rad);
     if (updateDisplay) applySampleDisplay(sample);
     else if (sample.grasp_visual) {
       applySpecimenGraspVisualization(sample.grasp_visual, sample.grasp_visual);
@@ -28330,6 +28485,7 @@ void main() {
   function applySampleDisplay(sample) {
     runtime.latestActualRad = sample.actual_rad || {};
     runtime.latestTargetRad = sample.target_rad || {};
+    if (runtime.viewer) applyJointRadians(runtime.viewer.measuredRobot, runtime.latestActualRad);
     applyMotionState(sample.motion_state || {});
     runtime.status = sample.status || "live";
     setPoseStatus("live follower telemetry", "live");
@@ -28355,6 +28511,12 @@ void main() {
   }
   function consumePacket(packet) {
     if (!packet || typeof packet !== "object") return;
+    const resetAtMs = Number(packet.reset_at_ms || 0);
+    if (resetAtMs < runtime.resetAtMs) return;
+    if (resetAtMs > runtime.resetAtMs) {
+      runtime.resetAtMs = resetAtMs;
+      resetSession("");
+    }
     const sessionId = String(packet.session && packet.session.session_id || packet.session_id || "");
     if (sessionId && sessionId !== runtime.sessionId) resetSession(sessionId);
     runtime.status = String(packet.status || runtime.status || "idle");
@@ -28403,6 +28565,7 @@ void main() {
       try {
         consumePacket(JSON.parse(event.data));
       } catch (error) {
+        console.warn("OMX telemetry update failed", error);
         setTrackingStatus("invalid telemetry packet", "failed");
       }
     };
@@ -28420,6 +28583,8 @@ void main() {
       const response = await fetch(SNAPSHOT_URL, { cache: "no-store" });
       if (!response.ok) return;
       const payload = await response.json();
+      if (Number(payload.reset_at_ms || 0) < runtime.resetAtMs) return;
+      if (Number(payload.reset_at_ms || 0) > runtime.resetAtMs) consumePacket({ ...payload, type: "telemetry_state" });
       const sessionId = String(payload.session && payload.session.session_id || "");
       if (runtime.sessionId && sessionId && runtime.sessionId !== sessionId) return;
       if (payload.artifacts) applyArtifacts(payload.artifacts);
@@ -28434,7 +28599,7 @@ void main() {
       if (select.dataset.bound === "1") return;
       select.dataset.bound = "1";
       select.addEventListener("change", () => {
-        runtime.selectedJoint = JOINT_NAMES.includes(select.value) ? select.value : "Joint1";
+        runtime.selectedJoint = JOINT_NAMES.includes(select.value) ? select.value : "Gripper";
         document.querySelectorAll("[data-atr-joint-selector]").forEach((other) => {
           other.value = runtime.selectedJoint;
         });

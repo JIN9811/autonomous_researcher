@@ -8,6 +8,34 @@ const vm = require("node:vm");
 
 const planningSource = fs.readFileSync(path.resolve(__dirname, "../../web/static/planning.js"), "utf8");
 
+test("FD retains the same measured peak and drop as the normalized SS preview", () => {
+  const context = vm.createContext({
+    dashboardFiniteNumber: x => x == null || !Number.isFinite(Number(x)) ? null : Number(x),
+    numberText: (x, n) => Number(x).toFixed(n), escapeHtml: String,
+    renderVizEmpty: () => "empty", polyline: points => points.map(p => p.join(",")).join(" "),
+  });
+  // The raw summary misses the interior peak; the canonical preview retains it.
+  context.analysis = {
+    utm_curve: {preview: [{displacement_mm:0,force_N:0},{displacement_mm:20,force_N:200}]},
+    stress_strain_curve: {preview: [
+      {displacement_mm:0,force_N:0,strain_pct:0,stress_MPa:0},
+      {displacement_mm:5,force_N:500,strain_pct:25,stress_MPa:5},
+      {displacement_mm:6,force_N:100,strain_pct:30,stress_MPa:1},
+      {displacement_mm:20,force_N:200,strain_pct:100,stress_MPa:2},
+    ]},
+  };
+  for (const name of ["analysisStressStrainPoints", "analysisScientificTicks", "renderAnalysisCurve"]) {
+    vm.runInContext(declaration(name), context);
+  }
+  const html = vm.runInContext("renderAnalysisCurve(analysis, 'fd')", context);
+  const points = html.match(/<polyline points="([^"]+)" class="curve"/)[1].split(" ");
+  assert.equal(points.length, 4, "FD must not draw the sparse two-point summary");
+  assert.match(html, /Force \(N\)/);
+  context.analysis.stress_strain_curve = {};
+  const legacy = vm.runInContext("renderAnalysisCurve(analysis, 'fd')", context);
+  assert.equal(legacy.match(/<polyline points="([^"]+)" class="curve"/)[1].split(" ").length, 2);
+});
+
 function declaration(name) {
   const candidates = [`function ${name}(`, `async function ${name}(`];
   const start = candidates.map((token) => planningSource.indexOf(token)).filter((index) => index >= 0).sort((a, b) => a - b)[0];
@@ -37,6 +65,46 @@ function declaration(name) {
   }
   throw new Error(`unterminated function ${name}`);
 }
+
+test("truncated live curves hydrate from the same-run hash-matched archive without replacing metrics", async () => {
+  const hash = "a".repeat(64);
+  let archiveHash = hash;
+  const analysis = {
+    source: {sha256: hash}, utm_metrics: {score: 7},
+    analysis_artifacts: {analysis_report: "/repo/runs/run-current/analysis/spec-1/analysis_report.json"},
+    stress_strain_curve: {point_count: 300, preview: [{strain: 0}, {_truncated_items: 110}]},
+  };
+  const calls = [];
+  const context = vm.createContext({
+    liveSelectedAgent: "analysis", liveAgentManifestRequestGeneration: 1,
+    liveAgentReportApi: () => "/api/agents/analysis/report", knownLiveAgent: () => true,
+    fetchJsonOrThrowWithTimeout: async (url, _options, timeout) => {
+      calls.push(url);
+      if (url.includes("artifact-file")) return {source: {sha256: archiveHash}, utm_metrics: {score:999},
+        stress_strain_curve: {point_count:300, preview:[{strain:0}, {strain:0.7}]}};
+      // A full owner report takes ~2.2s for the active run; do not fall back
+      // permanently to a truncated curve before that response can arrive.
+      if (timeout < 2200) throw new Error("owner report timed out");
+      return {report:{agent_id:"analysis",run_id:"run-current",sections:{analysis_report:structuredClone(analysis)}}};
+    },
+  });
+  vm.runInContext(declaration("hydrateLiveSelectedAgentReport"), context);
+  context.session = {state:{run_id:"run-current"}};
+  await vm.runInContext("hydrateLiveSelectedAgentReport(session)", context);
+  assert.equal(context.session.ownerReport.sections.analysis_report.stress_strain_curve.preview.at(-1).strain, 0.7);
+  assert.equal(context.session.ownerReport.sections.analysis_report.utm_metrics.score, 7);
+  await vm.runInContext("hydrateLiveSelectedAgentReport(session)", context);
+  assert.equal(calls.filter(x=>x.includes("artifact-file")).length, 1, "cache avoids rereading the archive on every poll");
+  archiveHash = "b".repeat(64);
+  vm.runInContext("delete hydrateLiveSelectedAgentReport.curveCache", context);
+  await vm.runInContext("hydrateLiveSelectedAgentReport(session)", context);
+  assert.equal(context.session.ownerReport.sections.analysis_report.stress_strain_curve.preview.at(-1)._truncated_items, 110,
+    "an archive for different raw measurements must not be used");
+  analysis.analysis_artifacts.analysis_report = "/repo/runs/another-run/analysis/spec-1/analysis_report.json";
+  const reads = calls.length;
+  await vm.runInContext("hydrateLiveSelectedAgentReport(session)", context);
+  assert.equal(calls.length, reads + 1, "cross-run artifact paths must not be fetched");
+});
 
 test("active Analysis falls back to its installed descriptors when the owner asset is unavailable", () => {
   const calls = { cards: 0, sections: 0, workcell: 0 };

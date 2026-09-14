@@ -350,7 +350,7 @@ def _collect_alarm_signals(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 ("requires_human_approval", "HUMAN_APPROVAL_REQUIRED"),
                 ("requires_approval", "HUMAN_APPROVAL_REQUIRED"),
                 ("blocks_workflow", "WORKFLOW_BLOCKED"),
-                ("safe_stop_recommended", "OPERATOR_STOP_REQUESTED"),
+                ("safe_stop_recommended", "SYSTEM_SAFE_STOP_RECOMMENDED"),
             )
             is_module_safety_config = path.endswith("module_runtime.safety")
             for key, reason in boolean_blockers:
@@ -1011,6 +1011,8 @@ def _dedupe_alarms(alarms: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _map_reason_code(value: str) -> str:
     text = str(value or "").upper()
+    if text == "SYSTEM_SAFE_STOP_RECOMMENDED":
+        return text
     tokens = set(re.findall(r"[A-Z0-9]+", text))
     if "APPROVAL" in text:
         return "HUMAN_APPROVAL_REQUIRED"

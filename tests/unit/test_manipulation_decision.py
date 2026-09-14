@@ -46,11 +46,65 @@ async def test_selected_skill_is_exactly_bound_to_payload(tool):
 
 
 @pytest.mark.asyncio
+async def test_replay_selection_exposes_task_to_executor_binding_without_changing_recording():
+    from agents.manipulation.decision import select_manipulation_tool, allows
+    s, model = state(), Model()
+    payload = {"session_id": "clear-session", "dataset_repo_id": "jin/utm_clear", "replay_episode": 0,
+               "profile_id": "robotis_omx_ai"}
+    task = {"task_id": "clear_utm_to_disposal", "source_location": "utm_fixture", "target_location": "discard_bin"}
+    decision = await select_manipulation_tool(s, model, "lerobot.replay.start", payload, task_context=task)
+    binding = model.calls[0][1]["skill_binding"]
+    assert binding["executor"] == "lerobot.replay.start"
+    assert binding["kind"] == "recorded_episode_replay"
+    assert binding["task_contract"] == task
+    assert binding["configured_parameters"]["dataset_repo_id"] == "jin/utm_clear"
+    assert binding["configured_parameters"]["replay_episode"] == 0
+    assert payload["replay_episode"] == 0
+    assert allows(decision)
+
+
+@pytest.mark.asyncio
+async def test_explicit_replay_binding_does_not_override_model_rejection():
+    from agents.manipulation.decision import select_manipulation_tool, allows
+    decision = await select_manipulation_tool(state(), Model("return_to_owner"), "lerobot.replay.start",
+        {"session_id": "clear", "dataset_repo_id": "jin/utm_clear", "replay_episode": 0},
+        task_context={"task_id": "clear_utm_to_disposal"})
+    assert not allows(decision)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("choice", ["return_to_owner", "robot.move_joint", "lerobot.replay.start"])
 async def test_rejection_or_unlisted_tool_cannot_authorize_rollout(choice):
     from agents.manipulation.decision import select_manipulation_tool, allows
     decision = await select_manipulation_tool(state(), Model(choice), "lerobot.rollout.start", {"session_id": "s"})
     assert not allows(decision)
+
+
+@pytest.mark.asyncio
+async def test_unlisted_evidence_path_is_diagnosed_without_accepting_it():
+    from agents.manipulation.decision import select_manipulation_tool, allows
+    class BadCitation(Model):
+        async def complete(self, task, prompt, **kwargs):
+            response = await super().complete(task, prompt, **kwargs)
+            request = json.loads(response.text)
+            request["evidence_refs"].append("task.execution_evidence.observed=false")
+            response.text = json.dumps(request)
+            return response
+    result = await select_manipulation_tool(state(), BadCitation("return_to_owner"),
+                                           "lerobot.rollout.start", {"session_id": "s"})
+    assert not allows(result)
+    assert "unlisted evidence_refs" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_required_execution_evidence_cannot_be_replaced_by_model_acceptance():
+    from agents.manipulation.decision import review_manipulation_result, allows
+    model = Model()
+    result = await review_manipulation_result(state(), model, "transfer_to_utm",
+        {"session_id": "s", "execution_evidence": {"required": True, "observed": False}},
+        {"detected": True}, execution_ended=True, vision_accepted=True)
+    assert not allows(result)
+    assert model.calls == []
 
 
 @pytest.mark.asyncio

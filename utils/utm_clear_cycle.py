@@ -361,10 +361,12 @@ async def run_clear_vision(state, ctx, *, artifact_dir):
         fresh = execution["replay_completed_at"] < float(capture.get("frame_timestamp", 0)) <= time.time() + 1
     except (TypeError, ValueError):
         fresh = False
-    from utils.utm_specimen_presence import UTM_CLEAR_CAMERA_TOPICS
+    from utils.utm_specimen_presence import UTM_CLEAR_CAMERA_TOPICS, UTM_CLEAR_ROI_XYXY
     confirmed = bool(red and fresh and matches(state, capture) and capture.get("session_id") == execution["session_id"]
         and capture.get("ok") is True and capture.get("clear_confirmed") is True and capture.get("detected") is False
-        and capture.get("status") == "clear" and capture.get("registered") is True
+        and capture.get("status") == "clear" and capture.get("roi_valid") is True
+        and capture.get("inspection_method") == "fixed_platen_roi"
+        and capture.get("roi_xyxy") == list(UTM_CLEAR_ROI_XYXY)
         and ((virtual and capture.get("virtualized") is True and capture.get("topic") == "virtual://utm-clear")
              or (not virtual and capture.get("topic") in UTM_CLEAR_CAMERA_TOPICS
                  and capture.get("camera_profile_id") == "camera_utm_primary" and not capture.get("virtualized"))))

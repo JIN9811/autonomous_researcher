@@ -106,6 +106,20 @@ precedence. `/module-assets/manipulation/live_report.js` mounts through
 their upper layout. Motion & Grasp and Completion & Handoff group the status and
 verification evidence. Run Metrics, Runtime Execution and Interlocks occupy one
 row below them. Existing field selectors remain mounted and updated.
+An accepted emergency Reset (GUI or PLC) also resets the telemetry display:
+the specimen returns to the configured input center, grasp locks and policy
+targets clear, and pre-reset rollout logs are excluded from live replay (not
+deleted). Reconnecting clients receive the same reset boundary; only a new
+rollout resumes tracking. This does not command robot homing or claim a new
+measured pose. FIT retains the workstation bounds with a small clipping margin.
+Compact telemetry retains measured joint angles at every grasp/release sample,
+so the displayed released specimen uses that sample's forward kinematics rather
+than the previous animation frame or the last pose of a batch. This is a
+kinematic visualization, not an independent measurement of the resting specimen.
+The Live Robot Pose platen assembly has a display-only X offset of −30 mm
+(center 505, 180 mm). Its base and yellow marker move together; the canonical
+Isaac Sim stage remains at 535, 180 mm. This operator-selected visual adjustment
+does not modify robot calibration, physical control targets or the USD geometry.
 Shared polling, joint/gripper samples, stream buffers,
 3D viewer lifecycle and event-status decisions stay in the host. Missing or
 deactivated owner modules contribute no current Manipulation card.
@@ -156,13 +170,37 @@ The JSON response has exactly `tool`, `arguments`, `reason`, and `evidence_refs`
 For either choice, arguments contain only the exact `proposal_id`; the model never
 supplies bridge parameters. Selection cites `task:configured`; result review also
 cites `execution:ended` and `vision:verified` on acceptance; rejection may cite the
-specific contradictory evidence with `task:configured`. Malformed output, mock backend output,
+the supplied `execution:ended` and/or `vision:verified` IDs with `task:configured`.
+Field paths and observed values belong in `reason`, never in `evidence_refs`.
+Selection also supplies `skill_binding`: the offered executor, execution kind,
+frozen configured parameters and delegated task contract. Tool names describe
+executors, not task names: `lerobot.replay.start` is the executor for the configured
+recording/episode (including the existing `jin/utm_clear` episode 0 task). This
+binding is not evidence of device readiness or task completion; asset checks,
+safety gates and post-execution Vision review remain required. The model can
+still choose `return_to_owner`; it cannot change the recording or episode.
+Malformed output, mock backend output,
 timeout, stop, changed scope/evidence, or rejection cannot authorize execution.
 
 `run_metadata.manipulation_decision_settings.timeout_s` configures the bounded
 decision wait (default 120 seconds, positive finite value up to 600). This is
 separate from robot polling/stop deadlines. Existing freshness is rechecked after
 selection, not extended to accommodate model latency.
+
+Vision handoff evidence carries one `expires_at`, 180 seconds after its original
+observation, for both LIVE and TEST. Manipulation consumes this exact expiry;
+the previous TEST-only 120-second grace is removed. At the expiry boundary the
+evidence is stale and cannot authorize a new action. Workspace safety signals
+retain their separate 5-second expiry; handoff validity does not renew them.
+
+For post-placement review, Vision passes the same current, session-bound execution
+evidence used by its placement gate into the Manipulation task result. Launch-time
+zero-action snapshots do not override newer action logs or measured/target telemetry.
+`action_count_source=joint_telemetry_sequence` denotes a stream sequence, not an
+independently measured count of discrete motions. Missing counters in bounded log
+tails are marked `action_count_observed=false`, not treated as proof of zero motion.
+This contract is shared across live experiments and installed-printer, physical-print
+and virtual-bridge test paths; simulated evidence remains simulated.
 
 ### Current prompt strategy
 
@@ -252,7 +290,7 @@ identity conflict blocks; restarting the same stage does not rearm motion.
 | Verification 1 | Vision: original confirmed placement image and stopped transfer |
 | UTM test | Equipment: existing agentic cycle, CSV export and robot-entry clearance |
 | Recorded sweep | Manipulation: `jin/utm_clear`, episode `0`, managed replay through the saved robot profile; no grasp/contact requirement |
-| Verification 2 | Vision: successful replay, measured return, then a fresh registered UTM image confirming absence |
+| Verification 2 | Vision: successful replay, measured return, then a fresh UTM image with a valid fixed platen ROI confirming absence |
 | Task-result review | Manipulation: judge completed replay and accepted clearance facts; retain visual confirmation even if task handoff is rejected |
 | Analysis | Existing CSV processing, released only after the clearance contract and task-result judgment succeed |
 
@@ -260,8 +298,14 @@ The runner's measured return target comes from the final recorded
 `observation.state`, not its final action command. A pending replay has one
 fixed deadline derived from the bridge duration bound; repeated polls do not
 restart it or exhaust the ordinary graph-step budget. Failed/stopped replay,
-missing return, stale image, residual specimen, or unknown camera registration
+missing return, stale image, residual specimen, or invalid/unobservable platen ROI
 blocks Analysis. There is no automatic effectful replay retry.
+
+An explicit stopped-run recovery may retry only the observation after a completed
+replay whose measured return and closed follower are proven by the same archived
+session. It preserves the replay identity/completion and CSV, retains the failed
+review archive, and grants one bounded observation window. It does not repeat
+removal, relax PLC/stop controls, or replace fresh Vision and task-result reviews.
 
 `run_metadata.utm_clear_requirement` retains the gate even if its execution
 record is missing. `utm_clear_execution` carries the child lifecycle;
@@ -537,6 +581,17 @@ of this added decision layer has been performed.
 No paper-scoped result establishes grasp success, collision avoidance, policy
 generalization, recovery success, or live timing. Hardware, dataset, policy,
 camera, and Isaac availability vary.
+
+## Archived removal-result review
+
+An explicitly requested, run-scoped offline recovery may review an already
+completed removal against its hash-verified saved post-removal image. It retains
+the original replay/session identity, measured-home and closed-follower proof;
+neither replay nor camera acquisition is repeated. Vision and Manipulation each
+make a real model judgment before Analysis receives the saved compression data.
+Historical acceptance describes the archived scene only, not present clearance.
+This recovery stops at the next Design before fabrication, with device dispatch
+disabled throughout. See [Vision recovery contract](vision_agent.md#operator-requested-archived-image-recovery).
 
 ## Related Documents
 

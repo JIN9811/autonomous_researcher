@@ -51,7 +51,14 @@ class VisionAgent(BaseAgent):
     """Build lab scene signals and close a verified manipulation rollout before handoff."""
 
     name = "vision_agent"
-    SIGNAL_TTL_MS = 5000
+    # Observation-to-handoff budget, shared by LIVE and TEST and never renewed by inference.
+    SIGNAL_TTL_MS = 180_000
+    SAFETY_SIGNAL_TTL_MS = 5_000
+    HANDOFF_SIGNALS = frozenset({
+        "printer_output_visible", "specimen_ejected_to_basket", "spc_autoejection_confirmed",
+        "basket_contains_specimen", "pickup_ready", "basket_empty_after_pick",
+        "gripper_holding_specimen", "specimen_on_utm_platen", "visual_test_evidence_ready",
+    })
     ACTIVE_CAM_WORKSPACE_ROI = (0.18, 0.0, 0.84, 0.62)
 
     @staticmethod
@@ -333,10 +340,15 @@ class VisionAgent(BaseAgent):
         status_session_id = str(status.get("session_id") or "").strip()
         status_matches_session = bool(
             status
+            and status.get("ok") is not False
             and expected_session_id
             and status_session_id
             and status_session_id == expected_session_id
         )
+        if not status_matches_session:
+            status_runtime = {}
+        if embedded.get("session_id") and embedded["session_id"] != expected_session_id:
+            embedded = {}
         telemetry = status.get("joint_telemetry") if isinstance(status.get("joint_telemetry"), dict) else {}
         packet = telemetry.get("packet") if isinstance(telemetry.get("packet"), dict) else {}
         packet_session_id = str(packet.get("session_id") or "").strip()
@@ -361,32 +373,34 @@ class VisionAgent(BaseAgent):
         workflow = str(manipulation.get("workflow") or "").strip().lower()
         required = bool(embedded.get("required", workflow == "rollout" or tool.startswith("lerobot.rollout.")))
         phase = str(
-            embedded.get("runtime_phase")
+            status_runtime.get("phase")
+            or embedded.get("runtime_phase")
             or manipulation.get("runtime_phase")
-            or status_runtime.get("phase")
             or runtime.get("phase")
             or ""
         ).strip().upper()
-        raw_count = embedded.get(
-            "action_count",
-            manipulation.get("action_count", status_runtime.get("action_count", runtime.get("action_count", 0))),
-        )
-        try:
-            action_count = max(0, int(raw_count or 0))
-        except (TypeError, ValueError):
-            action_count = 0
+        counts = [0]
+        for source in (embedded, manipulation, status_runtime, runtime):
+            if source.get("action_count_observed") is False:
+                continue
+            try:
+                counts.append(max(0, int(source.get("action_count") or 0)))
+            except (TypeError, ValueError):
+                pass
+        action_count = max(counts)
         action_count = max(action_count, telemetry_sequence if telemetry_action_observed else 0)
         observed = bool(
             not required
             or embedded.get("observed")
             or telemetry_action_observed
-            or (phase == "ACTION_ACTIVE" and action_count > 0)
+            or (phase in {"ACTION_ACTIVE", "ACTION_STOPPED", "STOPPED", "COMPLETED"} and action_count > 0)
         )
         return {
             "required": required,
             "observed": observed,
             "runtime_phase": phase or "UNKNOWN",
             "action_count": action_count,
+            "action_count_source": "joint_telemetry_sequence" if telemetry_action_observed else "runtime_log",
             "session_id": expected_session_id,
             "telemetry_sequence": telemetry_sequence if telemetry_action_observed else 0,
             "telemetry_status": str(telemetry.get("status") or "waiting"),
@@ -1233,7 +1247,8 @@ class VisionAgent(BaseAgent):
         except ValueError:
             timestamp_dt = self._now()
             timestamp = timestamp_dt.isoformat()
-        expires_at = (timestamp_dt + timedelta(milliseconds=self.SIGNAL_TTL_MS)).isoformat()
+        ttl_ms = self.SIGNAL_TTL_MS if signal in self.HANDOFF_SIGNALS else self.SAFETY_SIGNAL_TTL_MS
+        expires_at = (timestamp_dt + timedelta(milliseconds=ttl_ms)).isoformat()
         signal_id = f"sig-{state.run_id}-{state.loop_count}-{signal}-{self._stable_digest([zone_id, value, confidence], 6)}"
         specimen = self._specimen_result(state)
         return {
@@ -2365,6 +2380,9 @@ class VisionAgent(BaseAgent):
             },
             "freshness_policy": {
                 "ttl_ms": self.SIGNAL_TTL_MS,
+                "safety_signal_ttl_ms": self.SAFETY_SIGNAL_TTL_MS,
+                "handoff_signals": sorted(self.HANDOFF_SIGNALS),
+                "clock_origin": "observation_timestamp",
                 "stale_action": "block_downstream_use",
             },
             "specimen_pose": pose_payload,
@@ -3083,6 +3101,14 @@ class VisionAgent(BaseAgent):
                 for key in ("manipulation_result", "robot_task_result"):
                     if isinstance(state.run_metadata.get(key), dict):
                         state.run_metadata[key]["completion_status"] = "stopped_pending_task_review"
+                        current = state.run_metadata[key]
+                        execution = completion.get("rollout_execution") or {}
+                        session_id = current.get("session_id") or current.get("rollout_session_id")
+                        if (session_id and execution.get("session_id") == session_id
+                                and completion.get("session_id") == session_id):
+                            # Use the same evidence that admitted placement verification,
+                            # not the zero-action snapshot returned when the skill started.
+                            current["execution_evidence"] = dict(execution)
                 manipulation_result_decision = await review_manipulation_result(
                     state, ctx, "transfer_to_utm", {**(state.run_metadata.get("manipulation_result") or {}),
                         "status": "STOPPED", "rollout_stopped": True}, response,

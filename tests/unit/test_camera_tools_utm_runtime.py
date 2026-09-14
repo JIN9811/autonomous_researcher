@@ -49,6 +49,12 @@ class FakeRuntimeManager:
         self.raw_frame_calls += 1
         return dict(self._frame)
 
+    def _run_ros_frame_command(self, command, *, timeout_sec):
+        import json
+        # The ROS observation publishes already-resolved pixel bounds.
+        return 0, json.dumps({"enabled": True, "x_min": 50, "y_min": 0,
+            "x_max": 115, "y_max": 120}), ""
+
 
 def _red_specimen_frame(*, topic: str = "/camera/image_raw") -> dict[str, Any]:
     image = np.full((120, 180, 3), 215, dtype=np.uint8)
@@ -243,6 +249,25 @@ def test_utm_specimen_presence_captures_exactly_one_runtime_frame(tmp_path: Path
     assert result["run_id"] == "run-1"
     assert result["session_id"] == "rollout-1"
     assert Path(result["annotated_frame_path"]).is_file()
+
+
+def test_placement_uses_live_observation_roi_and_ignores_larger_red_outside(tmp_path):
+    from mcp_tools.camera_tools import _utm_specimen_presence_capture
+    arr = np.full((120, 180, 3), 160, dtype=np.uint8)
+    arr[10:115, 5:45] = [230, 20, 25]
+    arr[50:80, 70:95] = [230, 20, 25]
+    stream = BytesIO()
+    Image.fromarray(arr).save(stream, format="PNG")
+    frame = {**_red_specimen_frame(), "data_url": "data:image/png;base64," + base64.b64encode(stream.getvalue()).decode()}
+    manager = FakeRuntimeManager(frame=frame)
+    payload = {"runtime_mode": "live", "output_dir": str(tmp_path), "roi_normalized": [0, 0, 1, 1]}
+    result = _utm_specimen_presence_capture(payload, utm_runtime_manager=manager)
+    assert result["roi_xyxy"] == [50, 0, 115, 120]
+    assert result["bbox_xyxy"] == [70, 50, 95, 80]
+    manager._run_ros_frame_command = lambda *args, **kwargs: (1, "", "unavailable")
+    result = _utm_specimen_presence_capture(payload, utm_runtime_manager=manager)
+    assert result["ok"] is False and result["detected"] is False
+    assert result["failure_code"] == "UTM_OBSERVATION_ROI_UNAVAILABLE"
 
 
 def test_utm_specimen_presence_retries_transient_ros_frame_failure(tmp_path: Path) -> None:

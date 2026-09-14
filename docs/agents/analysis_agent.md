@@ -156,7 +156,7 @@ Live GUI uses five stable, full-width cards in the existing report theme:
 | Card | Visible information |
 |---|---|
 | Objective | Recorded objective identity, direction, value, unit and evaluation interval |
-| Measured Response | SS/FD switch and shaded evaluation region from recorded settings |
+| Measured Response | SS/FD switch and shaded evaluation region from recorded settings; both views use the same canonical measured samples (up to 200 extrema-preserving points), not the sparse raw summary |
 | Key Metrics | Peak load, peak stress, absorbed energy and measured travel |
 | Agentic Progress | Measurement, processing decision, metrics, evidence review and BO handoff |
 | Data Quality & BO Handoff | Admissibility and warnings; expandable source, parser, geometry and decision evidence |
@@ -199,6 +199,29 @@ or physical validation. The wider legacy UI suite and documentation validator
 still contain unrelated Equipment/Windows documentation expectations; this is
 not a claim that every repository test passes. The prior supervised physical demonstration
 is documented separately in the [cycle evidence](../paper/evidence/2026-09-07-supervised-closed-loop.md).
+
+## Validation warnings and archived-data recovery
+
+The Live GUI restores the complete bounded plotting preview from the same-run
+`analysis_report.json` when available, checking the original CSV SHA-256 before
+using it. It caches that curve and leaves metrics, decisions and source files
+unchanged. SS and FD use identical canonical samples and the recorded-start
+zero reference. Contact detection is reported separately; it does not silently
+shift displacement or the objective integration interval.
+
+The validation decision distinguishes `quality_gate.ok_for_metrics` and
+`ok_for_bo` from diagnostic `curve_quality` warnings. An endpoint maximum alone
+does not invalidate a measured interval maximum or a fixed-limit energy integral
+whose required coverage is present; it does not establish an ultimate peak
+outside that interval. The warning remains in the report. Invalid signals,
+units, missing coverage and contradictory evidence can still require a hold.
+No metric values, thresholds or model acceptance are forced by this clarification.
+
+For an operator-requested archived recovery, Analysis reads the original
+hash-verified compression CSV after separate saved-image review. The non-actuating
+route continues through BO to one next Design, then pauses before fabrication.
+It does not recapture images, re-run compression, or convert an old image into
+current physical-safety evidence.
 
 ## Related Documents
 

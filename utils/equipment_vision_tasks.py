@@ -29,6 +29,7 @@ _TASKS: tuple[dict[str, Any], ...] = (
     },
     {
         "task_id": "utm_state_not_working",
+        "observation_timing": "after_skill",
         "check_id": "utm_state_not_working",
         "label": "UTM Not Working State",
         "result_label": "NOT WORKING",
@@ -66,6 +67,7 @@ _TASKS: tuple[dict[str, Any], ...] = (
     },
     {
         "task_id": "utm_test_complete",
+        "observation_timing": "after_skill",
         "check_id": "utm_test_complete",
         "label": "Post-UTM Completion Check",
         "description": "Verify stopped motion, safe access, and completion evidence.",

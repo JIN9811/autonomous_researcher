@@ -21,7 +21,7 @@ Modification guide:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import inspect
 from typing import Any
 
@@ -415,14 +415,6 @@ class ManipulationAgent(BaseAgent):
                 "reason": "fresh",
                 "expires_at": expires_at,
                 "checked_at": now.isoformat(),
-            }
-        if state.mode == Mode.TEST and (expiry + timedelta(seconds=120)) > now:
-            return {
-                "fresh": True,
-                "reason": "fresh_with_test_mode_grace",
-                "expires_at": expires_at,
-                "checked_at": now.isoformat(),
-                "grace_s": 120,
             }
         return {
             "fresh": False,

@@ -123,7 +123,8 @@ class ReplayTools:
         from datetime import datetime, timezone
         return {**identity, "ok": True, "status": "clear", "clear_confirmed": True, "detected": False,
             "captured_at": datetime.now(timezone.utc).isoformat(), "frame_timestamp": datetime.now(timezone.utc).timestamp(),
-            "registered": True, "topic": self.topic, "camera_profile_id": "camera_utm_primary",
+            "roi_valid": True, "inspection_method": "fixed_platen_roi", "roi_xyxy": [200, 240, 400, 420],
+            "topic": self.topic, "camera_profile_id": "camera_utm_primary",
             "raw_frame_path": "synthetic.png", "evidence_path": "synthetic.json", "failure_code": ""}
 
 
@@ -413,7 +414,8 @@ async def test_controller_downstream_stop_preserves_completed_clear_history():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("change", [{"frame_timestamp": 1}, {"registered": False}, {"status": "occupied", "detected": True},
+@pytest.mark.parametrize("change", [{"frame_timestamp": 1}, {"roi_valid": False}, {"inspection_method": "other"},
+    {"roi_xyxy": [0, 0, 640, 480]}, {"status": "occupied", "detected": True},
     {"ok": False}, {"run_id": "old"}, {"loop_id": 9}, {"session_id": "transfer"}, {"topic": "/image_utm"}])
 async def test_bad_clear_capture_is_archived_but_never_confirms(change):
     from utils import utm_clear_cycle as cycle

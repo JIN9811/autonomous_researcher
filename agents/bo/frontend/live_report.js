@@ -2,7 +2,97 @@
 (function installBOLiveReport(global) {
   "use strict";
 
+  const escape = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+
+  function createPlotHistory() {
+    let runId = "";
+    let entries = {posterior: [], lhs: []};
+    let selected = {posterior: null, lhs: null}; // new steps resume latest
+    function reset(run) {
+      if (run === runId) return;
+      runId = run;
+      entries = {posterior: [], lhs: []};
+      selected = {posterior: null, lhs: null};
+    }
+    function accept(artifacts) {
+      const previousLatest = {posterior: entries.posterior.at(-1)?.key, lhs: entries.lhs.at(-1)?.key};
+      for (const item of artifacts || []) {
+        if (item.run_id !== runId || !item.url) continue;
+        const name = String(item.name || item.path?.split('/').pop() || '');
+        const posterior = name.match(/_bo_step_(\d+)_posterior\.png$/);
+        const lhs = name.match(/_lhs_design_step_(\d+)\.png$/);
+        if (!posterior && !lhs) continue;
+        const kind = posterior ? 'posterior' : 'lhs';
+        const entry = {...item, key: name, step: Number((posterior || lhs)[1])};
+        const index = entries[kind].findIndex(row => row.key === name);
+        if (index < 0) entries[kind].push(entry);
+        else if (item.execution_id || !entries[kind][index].execution_id) entries[kind][index] = entry;
+      }
+      for (const kind of ['posterior', 'lhs']) {
+        entries[kind].sort((a, b) => a.step - b.step || a.key.localeCompare(b.key));
+        if (entries[kind].at(-1)?.key !== previousLatest[kind]) selected[kind] = null;
+      }
+    }
+    function status(kind) {
+      const rows = entries[kind] || [];
+      const index = selected[kind] === null ? rows.length - 1 : rows.findIndex(row => row.key === selected[kind]);
+      return {index, total: rows.length, latest: selected[kind] === null};
+    }
+    function current(kind) { return entries[kind]?.[status(kind).index] || null; }
+    function move(kind, direction) {
+      if (!entries[kind] || ![-1, 1].includes(direction)) return false;
+      const {index, total} = status(kind);
+      const next = index + direction;
+      if (next < 0 || next >= total) return false;
+      selected[kind] = next === total - 1 ? null : entries[kind][next].key;
+      return true;
+    }
+    return {reset, accept, current, status, move};
+  }
+
   function createFrontend(host) {
+    const history = createPlotHistory();
+    let historyRun = "";
+    let historyRequest = null;
+    let historyFetchedAt = 0;
+    let disposed = false;
+    function refreshHistory(run) {
+      if (run !== historyRun) {
+        historyRun = run;
+        history.reset(run);
+        historyRequest = null;
+        historyFetchedAt = 0;
+      }
+      if (!run || !global.fetch || historyRequest || Date.now() - historyFetchedAt < 15000) return;
+      const request = global.fetch(`/api/runs/${encodeURIComponent(run)}/artifacts`, {cache: "no-store"});
+      historyRequest = request;
+      request.then(response => response.ok ? response.json() : null).then(payload => {
+        if (disposed || historyRun !== run || historyRequest !== request) return;
+        if (payload?.run_id === run) history.accept(payload.artifacts);
+        historyFetchedAt = Date.now();
+        historyRequest = null;
+        host.refreshBoReport?.();
+      }).catch(() => {
+        if (historyRequest === request) { historyRequest = null; historyFetchedAt = Date.now(); }
+      });
+    }
+    function historyAction(kind) {
+      const {index, total} = history.status(kind);
+      const current = history.current(kind);
+      const label = kind === 'posterior' ? 'Live Posterior' : 'LHS';
+      return `<div class="bo-history-nav" aria-label="${label} history">
+        <span aria-live="polite">${current ? `Step ${current.step} · ${index + 1}/${total}` : 'No steps'}</span>
+        <button type="button" data-bo-history="${kind}" data-direction="-1" aria-label="Previous ${label} step" ${index <= 0 ? 'disabled' : ''}>&lt;</button>
+        <button type="button" data-bo-history="${kind}" data-direction="1" aria-label="Next ${label} step" ${index >= total - 1 ? 'disabled' : ''}>&gt;</button>
+      </div>`;
+    }
+    function historyBody(kind, fallback, latestStep) {
+      const item = history.current(kind);
+      // A new live step can arrive before its PNG is indexed. Keep it visible.
+      if (!item || (history.status(kind).latest && Number(latestStep) > item.step)) return fallback;
+      const prefix = kind === 'lhs' ? 'lhs' : 'bo';
+      return `<figure class="${prefix}-viz-matplotlib-figure"><img class="${prefix}-viz-matplotlib-image" src="${escape(item.url)}" alt="${kind === 'lhs' ? 'LHS' : 'BO posterior and acquisition'} step ${item.step}"></figure>`;
+    }
     const {
       latestReportBoResult,
       latestAnalysisPayload,
@@ -122,8 +212,18 @@
 
     function renderDashboard(report, status, agentLabel, profile) {
       const boResult = latestReportBoResult(report) || {};
+      refreshHistory(String(report.state?.run_id || boResult.run_id || ""));
       const renderer = boVisualization;
       const visualization = resolveLiveBoVisualization(report, boResult);
+      const lhsVisualization = host.resolveLiveLhsVisualization?.(report)
+        || report.state?.run_metadata?.lhs_visualization || boResult.lhs_visualization;
+      for (const [kind, payload] of [['posterior', visualization], ['lhs', lhsVisualization]]) {
+        if (!historyRun || payload?.run_id !== historyRun || !payload?.artifacts?.png_url) continue;
+        const step = Number(payload.step);
+        if (!Number.isFinite(step)) continue;
+        const suffix = kind === 'posterior' ? `bo_step_${String(step).padStart(3, '0')}_posterior` : `lhs_design_step_${String(step).padStart(3, '0')}`;
+        history.accept([{run_id: historyRun, name: `${historyRun}_${suffix}.png`, url: payload.artifacts.png_url}]);
+      }
       const hasVisualization = Boolean(renderer && renderer.isValid(visualization));
       const objective = report.sections?.objective_display;
       const hasObjectiveReport = Object.prototype.hasOwnProperty.call(report.sections || {}, "objective_display");
@@ -138,8 +238,8 @@
         : '<div class="bo-viz-empty">Waiting for a completed BO step.</div>';
       const visualizationCards = `
         ${renderDashboardCard("Objective Equation", `<div data-live-bo-equation>${equationBody}</div>`, {span: 12, tone: "bo", eyebrow: "optimization objective", className: "bo-objective-summary-card"})}
-        ${renderDashboardCard("Live Posterior", `<div data-live-bo-posterior>${posteriorBody}</div>`, {span: 6, tone: "bo", eyebrow: "uncertainty + acquisition", className: "bo-posterior-card"})}
-        ${renderDashboardCard("Initial Design / LHS", renderBoInitialDesignBoard(report), {span: 6, tone: "bo", eyebrow: "experimental design space", className: "ar-bo-lhs-card"})}
+        ${renderDashboardCard("Live Posterior", `<div data-live-bo-posterior data-history-pinned="${!history.status('posterior').latest}">${historyBody('posterior', posteriorBody, visualization?.step)}</div>`, {span: 6, tone: "bo", eyebrow: "uncertainty + acquisition", className: "bo-posterior-card", action: historyAction('posterior')})}
+        ${renderDashboardCard("Initial Design / LHS", historyBody('lhs', renderBoInitialDesignBoard(report), lhsVisualization?.step), {span: 6, tone: "bo", eyebrow: "experimental design space", className: "ar-bo-lhs-card", action: historyAction('lhs')})}
       `;
       const recommendation = boResult.recommendation || boResult.selected || {};
       const reasoning = boResult.reasoning || {};
@@ -216,9 +316,10 @@
       `;
     }
 
-    function dispose() {}
-    return Object.freeze({renderReport, renderDashboard, dispose});
+    function movePlotHistory(kind, direction) { return history.move(kind, direction); }
+    function dispose() { disposed = true; }
+    return Object.freeze({renderReport, renderDashboard, movePlotHistory, dispose});
   }
 
-  global.AX4LABBOUI = Object.freeze({createFrontend});
+  global.AX4LABBOUI = Object.freeze({createFrontend, createPlotHistory});
 })(typeof window !== "undefined" ? window : globalThis);

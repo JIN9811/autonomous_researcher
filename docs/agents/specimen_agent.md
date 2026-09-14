@@ -94,6 +94,11 @@ draft; existing explicit save/activation remains the execution boundary.
 
 ## Overview and Responsibilities
 
+Live GUI identifies SPC as **Specimen Making Agent Module**. Its agent badge
+follows scoped agent execution and verified completion, not printer telemetry.
+Printer running/completed states stay inside the fabrication progress report;
+receiving a printer status alone does not start or complete the agent.
+
 The existing LLM decision boundary receives a bounded, reference-only
 [AX4LAB Wiki pack](../knowledge/wiki_memory.md). This supplies platform context
 without changing this agent's tools, numerical authority or execution gates.

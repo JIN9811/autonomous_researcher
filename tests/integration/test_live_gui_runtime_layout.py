@@ -5101,7 +5101,7 @@ def test_live_gui_serves_lightweight_omx_environment_manifest() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["schema"] == "atr.omx_web_scene.v1"
-    assert payload["source"] == "omx_table_layout.usda"
+    assert payload["source"] == "omx_table_layout_20260915.usda"
     assert payload["meters_per_unit"] == 1.0
     assert payload["up_axis"] == "Z"
     assert payload["robot_anchor"] == {
@@ -5121,8 +5121,8 @@ def test_live_gui_serves_lightweight_omx_environment_manifest() -> None:
     }.issubset(names)
     assert "Robot" not in names
     workspace = next(item for item in payload["objects"] if item["name"] == "A4Sheet")
-    assert workspace["position"] == [0.315, 0.245, 0.00006]
-    assert workspace["size"] == [0.17, 0.25, 0.00012]
+    assert workspace["position"] == [0.315, 0.2475, 0.00006]
+    assert workspace["size"] == [0.145, 0.255, 0.00012]
 
 
 def test_live_gui_active_robot_cam_specimen_pose_endpoint(monkeypatch) -> None:
@@ -5143,6 +5143,7 @@ def test_live_gui_active_robot_cam_specimen_pose_endpoint(monkeypatch) -> None:
     assert response.json() == {
         "ok": True,
         "source": "recording_active_robot_cam",
+        "server_started_at_ms": app.state.specimen_pose_server_started_at_ms,
         "pose": pose,
     }
 

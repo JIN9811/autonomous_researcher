@@ -462,6 +462,14 @@ isolated reference evidence with empty device-tool registries and no model-serve
 They do not establish retrieval quality, causal scientific benefit, or a new
 physical closed-loop result.
 
+## Reading newly written notes
+
+`read_knowledge` accepts record identities returned by a scoped search or by a
+successful `write_knowledge_note` receipt in the same decision. A newly written
+note still goes through `store.read_note` with the original caller scope before
+it can be cited. Unknown identities, failed write receipts and out-of-scope reads
+remain rejected; one-note-per-decision and evidence provenance rules are unchanged.
+
 ## Related Documents
 
 - [Markdown Knowledge Operations](../knowledge/markdown_memory_operations.ko.md)

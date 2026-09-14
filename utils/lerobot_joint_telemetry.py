@@ -890,7 +890,7 @@ def build_joint_telemetry_batch(
     fields = (
         "type", "session_id", "execution_index", "sequence", "timestamp",
         "elapsed_s", "actual_source", "target_source", "applied_target_source",
-        "source_units",
+        "source_units", "actual_rad",
     )
     samples = []
     for packet in packets:
@@ -899,7 +899,9 @@ def build_joint_telemetry_batch(
         outcome = motion.get("grasp_outcome") or {}
         measured = motion.get("measured") or {}
         # The 3D held/released latch needs intervening release/regrasp evidence,
-        # even when both transitions happen inside one displayed batch.
+        # even when both transitions happen inside one displayed batch. Keep
+        # each measured joint pose too: release FK cannot use the batch's final
+        # pose or the previous animation frame.
         sample["grasp_visual"] = {
             "status": outcome.get("status", "idle"),
             "attempt_index": outcome.get("attempt_index"),

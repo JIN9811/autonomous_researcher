@@ -3392,7 +3392,8 @@ class LabEquipmentAgent(BaseAgent):
                     state=state,
                     source_stage_context=self._base_run_payload(state)["source_stage_context"],
                 )
-                if "vision.equipment_cross_check" in set(ctx.tools.list_tools()):
+                if ("vision.equipment_cross_check" in set(ctx.tools.list_tools())
+                        and vision_task.get("observation_timing") != "after_skill"):
                     passive_vision_requested_at = datetime.now(timezone.utc)
                     passive_payload = {
                         "run_id": state.run_id,

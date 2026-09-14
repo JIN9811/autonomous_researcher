@@ -77,7 +77,7 @@ REPLICATOR_REQUIRED_MODULES = ["omni.replicator.core"]
 REPLICATOR_WRITER_TYPE = "BasicWriter"
 REPLICATOR_ANNOTATORS = ["rgb", "distance_to_image_plane", "semantic_segmentation"]
 REPLICATOR_RENDER_RESOLUTION = [640, 480]
-DEFAULT_ISAAC_SIM_PYTHON = Path("/home/jin/IsaacSim/python.sh")
+DEFAULT_ISAAC_SIM_PYTHON = Path.home() / "IsaacSim/python.sh"
 ISAAC_LAB_SYNTHETIC_AGGREGATE_SOURCE = "isaac_lab_synthetic"
 MIMIC_SCRIPT_RELATIVE_PATHS = {
     "generate_dataset": "scripts/imitation_learning/isaaclab_mimic/generate_dataset.py",
@@ -1848,7 +1848,7 @@ class IsaacLabSyntheticPipeline:
 
     def _annotation_command(self, request: IsaacLabSyntheticRequest, input_file: Path, output_file: Path) -> list[str]:
         isaac_python = Path(request.isaac_sim_python).expanduser() if request.isaac_sim_python else DEFAULT_ISAAC_SIM_PYTHON
-        isaac_lab_root = Path(request.isaac_lab_path).expanduser() if request.isaac_lab_path else Path("/home/jin/IsaacLab")
+        isaac_lab_root = Path(request.isaac_lab_path).expanduser() if request.isaac_lab_path else Path.home() / "IsaacLab"
         script = isaac_lab_root / MIMIC_SCRIPT_RELATIVE_PATHS["annotate_demos"]
         command = [
             *_python_script_command(isaac_python, script),
@@ -1879,7 +1879,7 @@ class IsaacLabSyntheticPipeline:
 
     def _il_train_command(self, request: IsaacLabSyntheticRequest, dataset_file: Path) -> list[str]:
         isaac_python = Path(request.isaac_sim_python).expanduser() if request.isaac_sim_python else DEFAULT_ISAAC_SIM_PYTHON
-        isaac_lab_root = Path(request.isaac_lab_path).expanduser() if request.isaac_lab_path else Path("/home/jin/IsaacLab")
+        isaac_lab_root = Path(request.isaac_lab_path).expanduser() if request.isaac_lab_path else Path.home() / "IsaacLab"
         output_root = self._output_root(request, self._dataset_path(request))
         wrapper = self.repo_root / "scripts" / "lerobot_isaac_lab_robomimic_train.py"
         command = [
@@ -2042,7 +2042,7 @@ class IsaacLabSyntheticPipeline:
 
     def _il_play_command(self, request: IsaacLabSyntheticRequest, checkpoint: Path) -> list[str]:
         isaac_python = Path(request.isaac_sim_python).expanduser() if request.isaac_sim_python else DEFAULT_ISAAC_SIM_PYTHON
-        isaac_lab_root = Path(request.isaac_lab_path).expanduser() if request.isaac_lab_path else Path("/home/jin/IsaacLab")
+        isaac_lab_root = Path(request.isaac_lab_path).expanduser() if request.isaac_lab_path else Path.home() / "IsaacLab"
         wrapper = self.repo_root / "scripts" / "lerobot_isaac_lab_robomimic_play.py"
         command = [
             *_python_script_command(isaac_python, wrapper),
@@ -2116,7 +2116,7 @@ class IsaacLabSyntheticPipeline:
 
     def _il_robust_eval_command(self, request: IsaacLabSyntheticRequest, input_dir: Path) -> list[str]:
         isaac_python = Path(request.isaac_sim_python).expanduser() if request.isaac_sim_python else DEFAULT_ISAAC_SIM_PYTHON
-        isaac_lab_root = Path(request.isaac_lab_path).expanduser() if request.isaac_lab_path else Path("/home/jin/IsaacLab")
+        isaac_lab_root = Path(request.isaac_lab_path).expanduser() if request.isaac_lab_path else Path.home() / "IsaacLab"
         output_root = self._output_root(request, self._dataset_path(request))
         wrapper = self.repo_root / "scripts" / "lerobot_isaac_lab_robomimic_robust_eval.py"
         command = [
@@ -7848,12 +7848,12 @@ class IsaacLabSyntheticPipeline:
         local = self.repo_root / "IsaacLab"
         if local.exists():
             return local.resolve()
-        return Path("/home/jin/IsaacLab").expanduser().resolve()
+        return (Path.home() / "IsaacLab").resolve()
 
     def _stage_path(self, request: IsaacLabSyntheticRequest) -> Path:
         if request.stage_path:
             return Path(request.stage_path).expanduser().resolve()
-        return (self.repo_root / "sim" / "robotis_omx" / "scene" / "omx_table_layout.usda").resolve()
+        return (self.repo_root / "sim" / "robotis_omx" / "scene" / "omx_table_layout_20260915.usda").resolve()
 
     def _depth_manifest_path(self, dataset_path: Path) -> Path:
         for rel in (

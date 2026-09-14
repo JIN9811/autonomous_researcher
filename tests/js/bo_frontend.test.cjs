@@ -89,7 +89,7 @@ function services() {
     runtimeRows: (rows) => `<dl>${rows.map(([key, item]) => `<dt>${key}</dt><dd>${value(item)}</dd>`).join("")}</dl>`,
     renderReportList: (items, empty) => items.length ? `<ul>${items.map((item) => `<li>${value(item)}</li>`).join("")}</ul>` : `<p>${empty}</p>`,
     renderDashboardRows: (rows) => `<dl>${rows.map(([key, item]) => `<dt>${key}</dt><dd>${value(item)}</dd>`).join("")}</dl>`,
-    renderDashboardCard: (title, body, options = {}) => `<section data-title="${title}" data-span="${options.span}">${body}</section>`,
+    renderDashboardCard: (title, body, options = {}) => `<section data-title="${title}" data-span="${options.span}">${options.action || ''}${body}</section>`,
     dashboardList: (items, empty) => items.length ? items.join("|") : empty,
   };
 }
@@ -99,6 +99,41 @@ function sandbox() {
   vm.runInContext(hostSource, context);
   return context;
 }
+
+test("BO header arrows browse real artifact entries independently without changing objective", async () => {
+  const context = sandbox();
+  let fetched = 0;
+  let refreshed = 0;
+  context.window.fetch = async url => {
+    fetched += 1;
+    assert.equal(url, '/api/runs/run-a/artifacts');
+    return {ok: true, json: async () => ({run_id: 'run-a', artifacts: [1, 2, 3].flatMap(step => [
+      {run_id: 'run-a', name: `run-a_bo_step_00${step}_posterior.png`, url: `/bo-${step}.png`},
+      {run_id: 'run-a', name: `run-a_lhs_design_step_00${step}.png`, url: `/lhs-${step}.png`},
+    ])})};
+  };
+  vm.runInContext(fs.readFileSync(asset, 'utf8'), context);
+  const frontend = context.window.AX4LABBOUI.createFrontend({...services(), refreshBoReport: () => refreshed++});
+  const report = {state: {run_id: 'run-a'}, bo_result: {visualization: {schema: 'bo_visualization.v1', step: 3}}};
+  let html = frontend.renderDashboard(report);
+  assert.match(html, /Previous Live Posterior step" disabled/);
+  await new Promise(resolve => setImmediate(resolve));
+  html = frontend.renderDashboard(report);
+  assert.equal(fetched, 1, 'ordinary redraws do not refetch the entire artifact index');
+  assert.equal(refreshed, 1);
+  assert.match(html, /Step 3 · 3\/3/);
+  assert.match(html, /src="\/bo-3.png"/);
+  assert.match(html, /src="\/lhs-3.png"/);
+  assert.equal(frontend.movePlotHistory('posterior', -1), true);
+  html = frontend.renderDashboard(report);
+  assert.match(html, /src="\/bo-2.png"/);
+  assert.match(html, /src="\/lhs-3.png"/);
+  assert.match(html, /data-history-pinned="true"/);
+  assert.match(html, /objective equation/);
+  assert.equal(frontend.movePlotHistory('lhs', -1), true);
+  assert.match(frontend.renderDashboard(report), /src="\/lhs-2.png"/);
+  frontend.dispose();
+});
 
 test("installed BO owner renders initial design, posterior, decision and handoff evidence", async () => {
   assert.ok(fs.existsSync(asset), "BO must own its frontend composition");

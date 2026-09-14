@@ -171,6 +171,7 @@ from utils.test_mode_execution_profiles import (
 from utils.operator_teleop_handoff import OperatorTeleopHandoffError
 
 app = FastAPI(title="Autonomous Researcher")
+app.state.specimen_pose_server_started_at_ms = int(time.time() * 1000)
 templates = Jinja2Templates(directory=str(resolve_path("web/templates")))
 app.mount("/static", StaticFiles(directory=str(resolve_path("web/static"))), name="static")
 app.mount(
@@ -2198,6 +2199,7 @@ def _lerobot_bridge() -> LeRobotBridge:
 def _joint_telemetry_session_context() -> dict[str, Any] | None:
     """Select the current rollout log without opening robot or camera devices."""
 
+    reset_at_ms = getattr(controller, "telemetry_reset_at_ms", 0)
     sessions: list[dict[str, Any]] = []
     session_log_paths: dict[str, Path] = {}
     seen_sessions: set[str] = set()
@@ -2213,6 +2215,13 @@ def _joint_telemetry_session_context() -> dict[str, Any] | None:
         for raw_session in recent:
             if not isinstance(raw_session, dict) or str(raw_session.get("workflow") or "") != "rollout":
                 continue
+            if reset_at_ms:
+                try:
+                    created_ms = datetime.fromisoformat(str(raw_session.get("created_at") or "").replace("Z", "+00:00")).timestamp() * 1000
+                except (ValueError, TypeError):
+                    continue
+                if created_ms <= reset_at_ms:
+                    continue
             session_id = str(raw_session.get("session_id") or "").strip()
             if not session_id or session_id in seen_sessions:
                 continue
@@ -16644,12 +16653,14 @@ async def get_lerobot_sessions() -> dict[str, object]:
 async def get_lerobot_joint_telemetry_snapshot() -> dict[str, object]:
     """Return the latest read-only follower/policy sample and terminal artifacts."""
 
+    reset_at_ms = getattr(controller, "telemetry_reset_at_ms", 0)
     context = _joint_telemetry_session_context()
     if context is None:
         return {
             "ok": True,
             "schema": TELEMETRY_SCHEMA,
             "type": "telemetry_state",
+            "reset_at_ms": reset_at_ms,
             "status": "idle",
             "session": {},
             "packet": None,
@@ -16671,6 +16682,7 @@ async def get_lerobot_joint_telemetry_snapshot() -> dict[str, object]:
         "ok": True,
         "schema": TELEMETRY_SCHEMA,
         "type": "telemetry_snapshot",
+        "reset_at_ms": reset_at_ms,
         "status": status,
         "session": _joint_telemetry_public_session(session),
         "packet": packet,
@@ -16727,6 +16739,7 @@ async def get_lerobot_active_robot_cam_specimen_pose() -> dict[str, object]:
     return {
         "ok": True,
         "source": "recording_active_robot_cam",
+        "server_started_at_ms": max(app.state.specimen_pose_server_started_at_ms, getattr(controller, "telemetry_reset_at_ms", 0)),
         "pose": await asyncio.to_thread(_recording_active_cam_specimen_pose),
     }
 
@@ -16745,15 +16758,17 @@ async def stream_lerobot_joint_telemetry(websocket: WebSocket) -> None:
     latest_packet: dict[str, Any] | None = None
     try:
         while True:
+            reset_at_ms = getattr(controller, "telemetry_reset_at_ms", 0)
             context = _joint_telemetry_session_context()
             if context is None:
-                signature = "idle"
+                signature = f"idle:{reset_at_ms}"
                 if signature != last_state_signature:
                     await websocket.send_json(
                         {
                             "ok": True,
                             "schema": TELEMETRY_SCHEMA,
                             "type": "telemetry_state",
+                            "reset_at_ms": reset_at_ms,
                             "status": "idle",
                             "session": {},
                             "runtime_view": _manipulation_runtime_view(),
@@ -16791,6 +16806,7 @@ async def stream_lerobot_joint_telemetry(websocket: WebSocket) -> None:
                             "ok": True,
                             "schema": TELEMETRY_SCHEMA,
                             "type": "joint_samples" if history_sent else "joint_history",
+                            "reset_at_ms": reset_at_ms,
                             "status": status,
                             "session": public_session,
                             **build_joint_telemetry_batch(batch, compact=compact),
@@ -16806,6 +16822,7 @@ async def stream_lerobot_joint_telemetry(websocket: WebSocket) -> None:
                             "ok": True,
                             "schema": TELEMETRY_SCHEMA,
                             "type": "telemetry_state",
+                            "reset_at_ms": reset_at_ms,
                             "status": status,
                             "session": public_session,
                             "runtime_view": _manipulation_runtime_view(session, latest_packet),
@@ -16821,6 +16838,7 @@ async def stream_lerobot_joint_telemetry(websocket: WebSocket) -> None:
                         "ok": bool(artifacts.get("ok")),
                         "schema": TELEMETRY_SCHEMA,
                         "type": "telemetry_artifacts",
+                        "reset_at_ms": reset_at_ms,
                         "status": status,
                         "session": public_session,
                         "artifacts": artifacts,
@@ -18504,6 +18522,31 @@ async def resume_runtime_run(run_id: str) -> dict[str, object]:
     """Resume the active run addressed by run_id."""
     _require_current_run(run_id)
     return await controller.resume()
+
+
+@app.post("/api/runs/{run_id}/recovery/restore")
+async def restore_error_run_checkpoint(run_id: str) -> dict[str, object]:
+    """Restore an integrity-checked error checkpoint without starting execution."""
+    from app.run_recovery import restore_checkpoint
+    async with controller._error_resume_lock:
+        rejection = await controller._plc_service_start_rejection()
+        if rejection:
+            return rejection
+        try:
+            return restore_checkpoint(controller, run_id)
+        except (ValueError, OSError, KeyError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/runtime/hot-reload/equipment-support")
+async def hot_reload_equipment_support() -> dict[str, object]:
+    """Reload tested stateless support code only; never live device/control classes."""
+    from app.safe_hot_reload import reload_equipment_support
+    async with controller._error_resume_lock:
+        try:
+            return await reload_equipment_support(controller)
+        except (ValueError, OSError, SyntaxError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.post("/api/runs/{run_id}/vision/specimen-placement-retry")

@@ -43,7 +43,7 @@ async def test_late_open_and_reconnect_replay_all_samples_then_follow_live(tmp_p
                         assert "motion_state" in latest
                         assert len(latest["actual_rad"]) == 6
                         assert all("motion_state" not in sample for sample in payload["samples"])
-                        assert all("actual_rad" not in sample for sample in payload["samples"])
+                        assert all(len(sample["actual_rad"]) == 6 for sample in payload["samples"])
                         assert all("grasp_visual" in sample for sample in payload["samples"])
                         assert payload["samples"][-1]["grasp_visual"]["status"] == latest["motion_state"]["grasp_outcome"]["status"]
                         assert payload["samples"][-1]["grasp_visual"]["gripper_state"] == latest["motion_state"]["measured"]["gripper_state"]

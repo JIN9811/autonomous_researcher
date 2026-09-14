@@ -453,7 +453,7 @@ def test_mirror_joint_mapping_returns_isaac_omx_contract(tmp_path: Path) -> None
 
     assert result["ok"] is True
     assert result["tool"] == "lerobot.mirror.joint_mapping"
-    assert result["scene_path"].endswith("sim/robotis_omx/scene/omx_table_layout.usda")
+    assert result["scene_path"].endswith("sim/robotis_omx/scene/omx_table_layout_20260915.usda")
     assert result["articulation_root"] == "/World/Robot/Geometry/link0"
     assert [item["motor_id"] for item in result["joint_map"]] == [11, 12, 13, 14, 15, 16]
     assert [item["isaac_joint_name"] for item in result["joint_map"]] == ["Joint1", "Joint2", "Joint3", "Joint4", "Joint5", "Gripper"]

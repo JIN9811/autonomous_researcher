@@ -181,21 +181,24 @@ async def test_pickup_uses_original_capture_alias_not_current_time(state, captur
 
 
 @pytest.mark.asyncio
-async def test_test_mode_retains_existing_consumer_grace_without_renewing_timestamp(state, capture):
+@pytest.mark.parametrize("mode", [Mode.LIVE, Mode.TEST])
+async def test_review_uses_shared_handoff_ttl_without_renewing_timestamp(state, capture, mode):
     from agents.vision.decision import review_visual_evidence
-    original = (datetime.now(timezone.utc) - timedelta(seconds=20)).isoformat()
+    state.mode = mode
+    original = (datetime.now(timezone.utc) - timedelta(seconds=170)).isoformat()
     capture["timestamp"] = original
     result = await review_visual_evidence(state, Model(), capture, "pickup")
     assert result["status"] == "accepted"
-    assert result["freshness"]["reason"] == "fresh_with_test_mode_grace"
+    assert result["freshness"]["reason"] == "fresh"
     assert capture["timestamp"] == original
 
 
 @pytest.mark.asyncio
-async def test_live_mode_never_uses_test_grace(state, capture):
+@pytest.mark.parametrize("mode", [Mode.LIVE, Mode.TEST])
+async def test_review_rejects_expired_handoff_in_every_mode(state, capture, mode):
     from agents.vision.decision import review_visual_evidence
-    state.mode = Mode.LIVE
-    capture["timestamp"] = (datetime.now(timezone.utc) - timedelta(seconds=20)).isoformat()
+    state.mode = mode
+    capture["timestamp"] = (datetime.now(timezone.utc) - timedelta(seconds=181)).isoformat()
     result = await review_visual_evidence(state, Model(), capture, "pickup")
     assert result["failure_code"] == "VISION_EVIDENCE_EXPIRED"
 

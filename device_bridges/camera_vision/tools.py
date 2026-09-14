@@ -332,6 +332,15 @@ def _utm_specimen_presence_capture(
     if clear_verification:
         from uuid import uuid4
         frame_id = f"utm-clear-{uuid4().hex}"
+    roi_normalized = payload.get("roi_normalized")
+    if not clear_verification and not virtualized:
+        from utils.utm_observation_roi import observation_roi
+        try:
+            roi_normalized = observation_roi(utm_runtime_manager, int(frame["width"]), int(frame["height"]))
+        except (ValueError, KeyError, TypeError, OSError) as exc:
+            return {"ok": False, "status": "unknown", "detected": False,
+                "failure_code": "UTM_OBSERVATION_ROI_UNAVAILABLE", "message": str(exc),
+                **{key: payload.get(key) for key in ("run_id", "loop_id", "specimen_id", "session_id")}}
     try:
         result = inspect_specimen_presence(
             str(frame.get("data_url") or ""),
@@ -339,7 +348,7 @@ def _utm_specimen_presence_capture(
             specimen_id=str(payload.get("specimen_id") or ""),
             frame_id=frame_id,
             min_area_px=float(payload.get("min_area_px") or 300.0),
-            roi_normalized=payload.get("roi_normalized"),
+            roi_normalized=roi_normalized,
             purpose=str(payload.get("purpose") or ""),
             capture_evidence={"topic": frame.get("topic"), "camera_profile_id": frame.get("camera_profile_id"),
                 "frame_timestamp": frame.get("frame_timestamp"), "frame_age_ms": frame.get("frame_age_ms"),

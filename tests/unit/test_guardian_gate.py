@@ -49,7 +49,7 @@ def test_passive_vision_link_warning_does_not_hide_independent_safety_failure():
     assert gate_blocks_execution(gate) is True
     assert any(a["reason_code"] == "UTM_MACRO_MISMATCH" and a["severity"] == "blocking"
                for a in gate["alarms"])
-    assert any(a["reason_code"] == "OPERATOR_STOP_REQUESTED" and a["severity"] == "critical"
+    assert any(a["reason_code"] == "SYSTEM_SAFE_STOP_RECOMMENDED" and a["severity"] == "critical"
                for a in gate["alarms"])
 
 
@@ -489,7 +489,7 @@ def test_analysis_gate_keeps_stop_and_approval_out_of_bo() -> None:
     "current_fields,expected_reason",
     [
         ({"failure_code": "BO_CANDIDATE_UNSAFE"}, "BO_CANDIDATE_UNSAFE"),
-        ({"safe_stop_recommended": True}, "OPERATOR_STOP_REQUESTED"),
+        ({"safe_stop_recommended": True}, "SYSTEM_SAFE_STOP_RECOMMENDED"),
     ],
 )
 def test_guardian_archive_envelope_does_not_hide_explicit_current_failure(

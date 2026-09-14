@@ -89,7 +89,7 @@ const fs = require('fs');
 const vm = require('vm');
 const source = fs.readFileSync({json.dumps(str(planning))}, 'utf8');
 const extract = (name, next) => source.slice(source.indexOf(`function ${{name}}(`), source.indexOf(`function ${{next}}(`));
-const context = {{window: {{LHSDesignVisualization: {{isValid: () => false, renderPlot: p => p}}}}}};
+const context = {{liveLhsVisualization: null, window: {{LHSDesignVisualization: {{isValid: () => false, renderPlot: p => p}}}}}};
 vm.createContext(context);
 vm.runInContext(extract('latestBoInitialDesign', 'latestSpecimenFabricationReport') +
   extract('renderBoInitialDesignBoard', 'renderBoParameterChips'), context);

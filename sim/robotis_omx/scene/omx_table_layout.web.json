@@ -1,16 +1,27 @@
 {
   "schema": "atr.omx_web_scene.v1",
-  "source": "omx_table_layout.usda",
-  "meters_per_unit": 1.0,
+  "source": "omx_table_layout_20260915.usda",
+  "meters_per_unit": 1,
   "up_axis": "Z",
   "robot_anchor": {
-    "position": [0.315, 0.06, -0.02],
-    "rotation_z_deg": 90.0
+    "position": [
+      0.315,
+      0.06,
+      -0.02
+    ],
+    "rotation_z_deg": 90
   },
   "grid": {
     "visible": false,
-    "origin": [0.0, 0.0, 0.0002],
-    "size": [0.7, 0.45],
+    "origin": [
+      0,
+      0,
+      0.0002
+    ],
+    "size": [
+      0.7,
+      0.45
+    ],
     "spacing_m": 0.005,
     "major_spacing_m": 0.05,
     "minor_color": "#63809a",
@@ -30,98 +41,94 @@
       "name": "TableTop",
       "source_prim": "/World/Table/TableTop",
       "primitive": "box",
-      "position": [0.35, 0.285, -0.015],
-      "size": [0.7, 0.33, 0.03],
-      "color": "#9a6a58",
+      "position": [
+        0.5125,
+        0.1875,
+        0.0225
+      ],
+      "size": [
+        0.22,
+        0.395,
+        0.085
+      ],
+      "color": "#64748b",
       "opacity": 0.46
     },
     {
       "name": "TableTopFrontLeft",
       "source_prim": "/World/Table/TableTopFrontLeft",
       "primitive": "box",
-      "position": [0.12, 0.06, -0.015],
-      "size": [0.24, 0.12, 0.03],
-      "color": "#9a6a58",
+      "position": [
+        0.315,
+        0.2525,
+        -0.01
+      ],
+      "size": [
+        0.175,
+        0.265,
+        0.02
+      ],
+      "color": "#64748b",
       "opacity": 0.46
     },
     {
       "name": "TableTopFrontRight",
       "source_prim": "/World/Table/TableTopFrontRight",
       "primitive": "box",
-      "position": [0.545, 0.06, -0.015],
-      "size": [0.31, 0.12, 0.03],
-      "color": "#9a6a58",
+      "position": [
+        0.39625,
+        0.055,
+        -0.01
+      ],
+      "size": [
+        0.0125,
+        0.13,
+        0.02
+      ],
+      "color": "#64748b",
       "opacity": 0.46
-    },
-    {
-      "name": "RobotBasePocketFloor",
-      "source_prim": "/World/Table/RobotBasePocketFloor",
-      "primitive": "box",
-      "position": [0.315, 0.06, -0.022],
-      "size": [0.15, 0.12, 0.004],
-      "color": "#765448",
-      "opacity": 0.42
     },
     {
       "name": "A4Sheet",
       "source_prim": "/World/Workspace/A4Sheet",
       "primitive": "box",
-      "position": [0.315, 0.245, 0.00006],
-      "size": [0.17, 0.25, 0.00012],
+      "position": [
+        0.315,
+        0.2475,
+        0.00006
+      ],
+      "size": [
+        0.145,
+        0.255,
+        0.00012
+      ],
       "color": "#dbeafe",
       "opacity": 0.72,
       "surface_grid": false
     },
     {
-      "name": "A4CornerMarker_1",
-      "source_prim": "/World/Workspace/A4CornerMarker_1",
-      "primitive": "circle",
-      "position": [0.23, 0.12, 0.00014],
-      "radius": 0.004,
-      "color": "#38bdf8",
-      "opacity": 0.9
-    },
-    {
-      "name": "A4CornerMarker_2",
-      "source_prim": "/World/Workspace/A4CornerMarker_2",
-      "primitive": "circle",
-      "position": [0.4, 0.12, 0.00014],
-      "radius": 0.004,
-      "color": "#38bdf8",
-      "opacity": 0.9
-    },
-    {
-      "name": "A4CornerMarker_3",
-      "source_prim": "/World/Workspace/A4CornerMarker_3",
-      "primitive": "circle",
-      "position": [0.23, 0.37, 0.00014],
-      "radius": 0.004,
-      "color": "#38bdf8",
-      "opacity": 0.9
-    },
-    {
-      "name": "A4CornerMarker_4",
-      "source_prim": "/World/Workspace/A4CornerMarker_4",
-      "primitive": "circle",
-      "position": [0.4, 0.37, 0.00014],
-      "radius": 0.004,
-      "color": "#38bdf8",
-      "opacity": 0.9
-    },
-    {
       "name": "A4CenterMarker",
       "source_prim": "/World/Workspace/A4CenterMarker",
       "primitive": "circle",
-      "position": [0.315, 0.245, 0.00014],
+      "position": [
+        0.315,
+        0.2475,
+        0.00014
+      ],
       "radius": 0.004,
       "color": "#38bdf8",
       "opacity": 0.9
     },
     {
       "name": "RightDiskAluminumTop",
+      "web_display_offset": [-0.03, 0, 0],
       "source_prim": "/World/Workspace/RightDiskAluminumTop",
       "primitive": "cylinder",
-      "position": [0.59, 0.078, 0.052],
+      "position": [
+        0.535,
+        0.18,
+        0.117
+      ],
       "radius": 0.05,
       "height": 0.104,
       "color": "#cbd5e1",
@@ -129,9 +136,14 @@
     },
     {
       "name": "RightDiskBlackBase",
+      "web_display_offset": [-0.03, 0, 0],
       "source_prim": "/World/Workspace/RightDiskBlackBase",
       "primitive": "cylinder",
-      "position": [0.59, 0.078, 0.012],
+      "position": [
+        0.535,
+        0.18,
+        0.077
+      ],
       "radius": 0.052,
       "height": 0.024,
       "color": "#64748b",
@@ -139,9 +151,14 @@
     },
     {
       "name": "RightDiskCenterYellowMarker",
+      "web_display_offset": [-0.03, 0, 0],
       "source_prim": "/World/Workspace/RightDiskCenterYellowMarker",
       "primitive": "circle",
-      "position": [0.59, 0.078, 0.1043],
+      "position": [
+        0.535,
+        0.18,
+        0.1693
+      ],
       "radius": 0.0045,
       "color": "#facc15",
       "opacity": 0.95
@@ -150,11 +167,78 @@
       "name": "RedSpecimenBlock",
       "source_prim": "/World/Workspace/RedSpecimenBlock",
       "primitive": "box",
-      "position": [0.39176446199417114, 0.29575082659721375, 0.015200000256299973],
-      "size": [0.03, 0.03, 0.03],
-      "rotation_z_deg": 0.660172474693212,
+      "position": [
+        0.315,
+        0.2475,
+        0.0152
+      ],
+      "size": [
+        0.03,
+        0.03,
+        0.03
+      ],
+      "rotation_z_deg": -89.33982752530679,
       "color": "#fb7185",
       "opacity": 0.88
+    },
+    {
+      "name": "LeftTrayGuard",
+      "source_prim": "/World/Table/LeftTrayGuard",
+      "primitive": "box",
+      "position": [
+        0.315,
+        0.38,
+        0.025
+      ],
+      "size": [
+        0.175,
+        0.01,
+        0.05
+      ],
+      "color": "#94a3b8",
+      "opacity": 0.6
+    },
+    {
+      "name": "RightTrayGuard",
+      "source_prim": "/World/Table/RightTrayGuard",
+      "primitive": "box",
+      "position": [
+        0.315,
+        -0.005,
+        0.025
+      ],
+      "size": [
+        0.175,
+        0.01,
+        0.05
+      ],
+      "color": "#94a3b8",
+      "opacity": 0.6
+    },
+    {
+      "name": "RobotPocketFrontStrip",
+      "source_prim": "/World/Table/RobotPocketFrontStrip",
+      "primitive": "box",
+      "position": [
+        0.23375,
+        0.055,
+        -0.01
+      ],
+      "size": [
+        0.0125,
+        0.13,
+        0.02
+      ],
+      "color": "#64748b",
+      "opacity": 0.46
     }
-  ]
+  ],
+  "layout_notes": {
+    "datum": "Tray top Z=0; dimensions in meters. Visualization geometry, not calibration.",
+    "measured": "Tray depth 175 mm, left span 265 mm, guards 50 mm, raised base 65 mm, base depth 220 mm. Tray thickness extended downward to 20 mm to meet robot offset; working surface remains Z=0.",
+    "placement": "Drawing datum: tray X=227.5..402.5 mm (175 mm), midpoint X=315 mm aligned with fixed OMX base center. Upper platform begins exactly at tray rear edge X=402.5 mm, with no overlap. Base envelope X=240..390, Y=0..120 mm fits the pocket; 12.5 mm front/rear floor strips surround it. Base front Y=120 to outer guard Y=385 is 265 mm including 10 mm wall.",
+    "retained": "Platen dimensions retained. Upper/lower assembly width Y=-10..385 mm. Robot transform and joints unchanged. The upper vertical face is not pulled inward to contact the robot.",
+    "platen": "Actual U-base front center (315,120) mm; platen center (535,180) mm: +220 mm along rotated depth axis X, +60 mm lateral Y. These are projected distances, not diagonal.",
+    "underside": "Raised and lower platforms share Z=-20 mm underside; upper working surface remains Z=65 mm. No projecting lower seam under the rear platform."
+  }
 }

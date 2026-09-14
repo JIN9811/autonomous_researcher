@@ -15,7 +15,7 @@ module:
       authority: policies/validation_policy.py and existing owner validators
       description: existing printer_preflight checks apply only when that contract is present
   id: specimen
-  label: Specimen Making Module
+  label: Specimen Making Agent Module
   handler: agent.specimen_agent
   llm_role: specimen_reasoning
   editable: true

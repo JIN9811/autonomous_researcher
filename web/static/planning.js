@@ -112,7 +112,7 @@ const DEFAULT_LIVE_AGENTS = [
   { id: "objective", label: "Objective", short: "OBJ", stage: "idle", icon: "◎", iconPath: "/static/live_gui_icons/objective.svg?v=20260602-objective-contract-1" },
   { id: "orchestrator", label: "Orchestrator", short: "ORC", stage: "orchestrator", icon: "◇", iconPath: "/static/live_gui_icons/orchestrator.svg" },
   { id: "design", label: "Design Agent", short: "DSN", stage: "design", icon: "D", iconPath: "/static/live_gui_icons/design_agent.svg" },
-  { id: "specimen", label: "Specimen Agent", short: "SPC", stage: "specimen", icon: "S", iconPath: "/static/live_gui_icons/specimen_agent.svg" },
+  { id: "specimen", label: "Specimen Making Agent Module", short: "SPC", stage: "specimen", icon: "S", iconPath: "/static/live_gui_icons/specimen_agent.svg" },
   { id: "vision", label: "Vision Agent", short: "VIS", stage: "vision", icon: "V", iconPath: "/static/live_gui_icons/vision_agent.svg" },
   { id: "manipulation", label: "Manipulation Agent", short: "MAN", stage: "manipulation", icon: "M", iconPath: "/static/live_gui_icons/manipulation_agent.svg" },
   { id: "equipment", label: "Lab Equipment Agent", short: "EQP", stage: "equipment", icon: "E", iconPath: "/static/live_gui_icons/equipment_agent.svg" },
@@ -229,6 +229,7 @@ let liveKnowledgeActivityChart = null;
 let liveKnowledgeActivityChartMount = null;
 let liveKnowledgeActivityResizeObserver = null;
 let liveBoVisualization = null;
+let liveLhsVisualization = null;
 let liveBoVisualizationHydrationTimer = null;
 let livePrinterMonitorInFlight = null;
 let liveSpecimenVideoPlaying = false;
@@ -314,7 +315,8 @@ let planningMessageRevealQueue = [];
 let planningMessageRevealTimer = null;
 let planningDisplayInitialized = false;
 const planningExpandedChatGroups = new Set();
-let planningInitialChatOpened = false;
+let planningAutoExpandedChatGroup = "";
+let planningLastVisibleChatItemKey = "";
 const planningLoopArtifactCache = new Map();
 const PLANNING_RENDER_CACHE_LIMIT = 240;
 const PLANNING_PERSIST_CACHE_MESSAGE_LIMIT = 80;
@@ -502,7 +504,10 @@ function normalizeLiveAgentManifestItem(item, index = 0) {
   const id = String(raw.id || raw.agent_id || raw.module_id || "").trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_");
   if (!id) return null;
   const fallback = defaultLiveAgentForId(id) || {};
-  const label = String(raw.label || fallback.label || id).trim() || id;
+  const rawLabel = String(raw.label || fallback.label || id).trim() || id;
+  // Preserve custom module names while migrating the old built-in display name.
+  const label = id === "specimen" && rawLabel === "Specimen Making Module"
+    ? "Specimen Making Agent Module" : rawLabel;
   const short = String(raw.short || fallback.short || label.replace(/[^A-Za-z0-9]+/g, "").slice(0, 3).toUpperCase() || "AGT").trim();
   const stage = String(raw.stage || raw.graph_stage || fallback.stage || id).trim() || id;
   const moduleId = String(raw.module_id || raw.moduleId || fallback.moduleId || id).trim();
@@ -558,6 +563,10 @@ function applyLiveAgentManifest(payload) {
 
 function liveAgentModuleHostServices() {
   return {
+    refreshBoReport: () => {
+      invalidateLiveCenterRender("report");
+      if (liveSelectedAgent === "bo" && liveCurrentView === "report" && liveLastSession) renderLiveRuntime(liveLastSession);
+    },
     latestEquipmentReport,
     latestEquipmentResult,
     latestEquipmentSkillExecution,
@@ -573,6 +582,7 @@ function liveAgentModuleHostServices() {
     latestKnowledgeEvolutionProposal,
     latestReportPayload,
     resolveLiveBoVisualization,
+    resolveLiveLhsVisualization: (report) => latestBoInitialDesign(report)?.visualization,
     boOptimizationPhase,
     boInitialDesignStatus,
     boVisualization: window.BOVisualization || null,
@@ -728,7 +738,7 @@ async function hydrateLiveSelectedAgentReport(session, manifestGeneration = live
     const payload = await fetchJsonOrThrowWithTimeout(
       `${endpoint}?run_id=${encodeURIComponent(runId)}`,
       { headers: { "Accept": "application/json" } },
-      1200,
+      agentId === "analysis" ? 5000 : 1200,
     );
     const report = payload && payload.report && typeof payload.report === "object" ? payload.report : null;
     if (
@@ -754,6 +764,39 @@ async function hydrateLiveSelectedAgentReport(session, manifestGeneration = live
               ? sections.bo_handoff
               : {};
     if (reportIdentity.run_id && String(reportIdentity.run_id) !== runId) return session;
+    if (agentId === "analysis") {
+      // Runtime summaries can cut off the tail of a curve. Restore only plotting
+      // data from the same-run owner archive; never replace metrics/decisions.
+      const path = String(analysis.analysis_artifacts?.analysis_report || "").replace(/\\/g, "/");
+      const marker = `runs/${runId}/`;
+      const offset = path.indexOf(marker);
+      const relative = offset >= 0 ? path.slice(offset + marker.length) : "";
+      const sha = analysis.source?.fingerprint?.sha256 || analysis.source?.sha256;
+      if (/^[a-f0-9]{64}$/i.test(sha || "") && /^analysis\/[^/]+\/analysis_report\.json$/.test(relative)) {
+        const key = `${runId}:${relative}:${sha}`;
+        let cached = hydrateLiveSelectedAgentReport.curveCache;
+        if (cached?.key !== key) {
+          try {
+            const saved = await fetchJsonOrThrowWithTimeout(
+              `/api/runs/${encodeURIComponent(runId)}/artifact-file/${relative.split("/").map(encodeURIComponent).join("/")}`,
+              { headers: { "Accept": "application/json" } }, 1200);
+            const savedSha = saved.source?.fingerprint?.sha256 || saved.source?.sha256;
+            const curve = saved.stress_strain_curve;
+            if (savedSha === sha && Array.isArray(curve?.preview) && curve.preview.length <= 200
+                && !curve.preview.some(row => row._truncated_items)) {
+              cached = {key, curve};
+              hydrateLiveSelectedAgentReport.curveCache = cached;
+            }
+          } catch (_archiveError) { /* keep the available summary on read failure */ }
+        }
+        if (cached?.key === key) analysis.stress_strain_curve = cached.curve;
+      }
+      // A tab/run selection or newer refresh may win while the archive is read.
+      if (liveSelectedAgent !== agentId || !knownLiveAgent(agentId)
+          || manifestGeneration !== liveAgentManifestRequestGeneration
+          || session.ownerReportRequestGeneration !== requestGeneration
+          || String(session.state?.run_id || "") !== runId) return session;
+    }
     Object.defineProperty(session, "ownerReport", {
       value: report,
       configurable: true,
@@ -2501,21 +2544,29 @@ function renderLoopArtifactHistory(payload) {
   }).join("");
 }
 
+function syncPlanningChatAutoExpansion(items) {
+  const latest = [...items].reverse().find(item => item.type === "operator"
+    || (item.group && item.group.baseKey !== "system" && item.group.role !== "system"));
+  const key = latest ? planningChatItemRevealKey(latest) : "";
+  if (key === planningLastVisibleChatItemKey) return;
+  if (planningAutoExpandedChatGroup) planningExpandedChatGroups.delete(planningAutoExpandedChatGroup);
+  planningAutoExpandedChatGroup = "";
+  planningLastVisibleChatItemKey = key;
+  const group = latest && latest.group;
+  if (!group || group.kind === "loop_summary" || group.baseKey === "loop_summary") return;
+  planningExpandedChatGroups.add(group.key);
+  planningAutoExpandedChatGroup = group.key;
+  while (planningExpandedChatGroups.size > 3) {
+    planningExpandedChatGroups.delete(planningExpandedChatGroups.values().next().value);
+  }
+}
+
 function renderPlanningChatGroup(group, groupIndex) {
   const latest = group.latest || group.messages[group.messages.length - 1] || {};
   const role = group.role || latest.role || group.key || "orchestrator";
   const baseKey = group.baseKey || group.key;
   const isSystem = baseKey === "system" || String(role || "").toLowerCase() === "system";
   const isLoopSummary = group.kind === "loop_summary" || baseKey === "loop_summary";
-  if (!planningInitialChatOpened && !isSystem) {
-    planningInitialChatOpened = true;
-    if (!isLoopSummary) {
-      planningExpandedChatGroups.add(group.key);
-      while (planningExpandedChatGroups.size > 3) {
-        planningExpandedChatGroups.delete(planningExpandedChatGroups.values().next().value);
-      }
-    }
-  }
   const archiveRunId = String(latest.run_id || liveLastSession?.state?.run_id || "");
   const archiveLoopIndex = Math.max(0, Number(group.loopCycle || 1) - 1);
   const archiveKey = `${archiveRunId}:${archiveLoopIndex}`;
@@ -3422,7 +3473,8 @@ async function loadOlderPlanningMessages() {
 }
 
 function resetPlanningMessageDisplayState() {
-  planningInitialChatOpened = false;
+  planningAutoExpandedChatGroup = "";
+  planningLastVisibleChatItemKey = "";
   planningMessagesCache = [];
   planningDisplayedMessages = [];
   planningDisplayedMessageKeys.clear();
@@ -3440,6 +3492,7 @@ function renderPlanningMessageDom(messages, options = {}) {
   const shouldScrollToBottom = options.scrollToBottom === true;
   const chatMessages = (Array.isArray(messages) ? messages : []).filter(isChatSurfaceMessage);
   if (!chatMessages.length) {
+    syncPlanningChatAutoExpansion([]);
     planningChatLog.innerHTML = `
       <article class="planning-chat-item planning-agent-chat-group orchestrator is-collapsed">
         <button class="planning-agent-chat-collapsed" type="button" disabled>
@@ -3455,7 +3508,9 @@ function renderPlanningMessageDom(messages, options = {}) {
     return;
   }
 
-  const chatItems = buildPlanningChatItems(chatMessages).map((item, index) => {
+  const visibleItems = buildPlanningChatItems(chatMessages);
+  syncPlanningChatAutoExpansion(visibleItems);
+  const chatItems = visibleItems.map((item, index) => {
     if (item.type === "operator") return renderOperatorPlanningMessage(item.msg, item.index);
     return renderPlanningChatGroup(item.group, index);
   }).join("");
@@ -4290,35 +4345,6 @@ function isTransientPrinterCommunicationEvent(event) {
   return haystack.includes("preprint_communication_failed") || haystack.includes("communication_timeout");
 }
 
-function specimenPrinterRuntimeState() {
-  const events = currentRunEventSources();
-  const runningStates = new Set(["RUNNING", "PRINTING", "PREPARE", "PREPARING", "HEATING", "SLICING"]);
-  const failedStates = new Set(["FAILED", "FAIL", "ERROR", "CANCELLED", "CANCELED", "ABORTED"]);
-  const completeStates = new Set(["FINISH", "FINISHED", "IDLE", "READY", "COMPLETE", "COMPLETED"]);
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    const eventType = String(event.event_type || event.type || "");
-    const payload = eventPayload(event);
-    if (eventType === "planning_printer_completion_wait") {
-      const wait = payload.printer_wait && typeof payload.printer_wait === "object" ? payload.printer_wait : {};
-      const waitStatus = String(wait.status || event.status || "").toLowerCase();
-      if (waitStatus === "started") return "running";
-      if (waitStatus === "complete" || waitStatus === "completed") return "complete";
-    }
-    for (const source of nestedPrinterRuntimeObjects(event)) {
-      const deviceScreen = source.device_screen && typeof source.device_screen === "object" ? source.device_screen : {};
-      const progress = deviceScreen.progress_panel && typeof deviceScreen.progress_panel === "object" ? deviceScreen.progress_panel : {};
-      const job = deviceScreen.job && typeof deviceScreen.job === "object" ? deviceScreen.job : {};
-      const state = String(progress.state || job.state || source.state || source.status || event.status || "").toUpperCase();
-      if (!state) continue;
-      if (isTransientPrinterCommunicationEvent(event)) return "running";
-      if (runningStates.has(state)) return "running";
-      if (failedStates.has(state)) return "failed";
-      if (completeStates.has(state)) return "complete";
-    }
-  }
-  return "";
-}
 
 function manipulationExecutionDisplayState(state, running) {
   const clearExecution = state.run_metadata?.utm_clear_execution;
@@ -4390,8 +4416,7 @@ function eventStatusForAgent(agentId, state, running) {
   const pendingInput = agentEvents.some(eventRequiresOperatorInput)
     || planningMessagesCache.some((msg) => agentIdFromMessage(msg) === agentId && Boolean(msg.pending_operator_input));
   if (pendingInput) return running && activeAgent === agentId ? "running" : "waiting";
-  const printerRuntime = agentId === "specimen" ? specimenPrinterRuntimeState() : "";
-  if (printerRuntime === "running") return "running";
+  // Device telemetry belongs to SPC progress, never to the agent lifecycle badge.
   const hasError = agentEvents.some((event) => !isResolvedEmergencyLifecycleEvent(event) && !eventRequiresOperatorInput(event) && (
     !isTransientPrinterCommunicationEvent(event) && (
     String(event.level || event.severity || "").toLowerCase() === "error"
@@ -4942,10 +4967,15 @@ function latestDesignAgentReport(report) {
 function latestBoInitialDesign(report) {
   const state = report && report.state ? report.state : {};
   const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
-  const lhsVisualization = metadata.lhs_visualization && typeof metadata.lhs_visualization === "object"
+  let lhsVisualization = metadata.lhs_visualization && typeof metadata.lhs_visualization === "object"
     ? metadata.lhs_visualization
     : (metadata.bo_agent && typeof metadata.bo_agent.lhs_visualization === "object" ? metadata.bo_agent.lhs_visualization : null);
   const lhsRenderer = window.LHSDesignVisualization;
+  if (liveLhsVisualization && liveLhsVisualization.run_id === state.run_id
+      && (!lhsVisualization || Number(liveLhsVisualization.step) >= Number(lhsVisualization.step))) {
+    lhsVisualization = liveLhsVisualization;
+  }
+  if (lhsVisualization?.run_id && lhsVisualization.run_id !== state.run_id) lhsVisualization = null;
   if (lhsVisualization && lhsRenderer && lhsRenderer.isValid(lhsVisualization)) {
     return { ...lhsVisualization.initial_design, visualization: lhsVisualization };
   }
@@ -14301,7 +14331,13 @@ function analysisScientificTicks(maxValue, targetIntervals = 5) {
 function renderAnalysisCurve(analysis, mode = "ss") {
   const fd = mode === "fd";
   const raw = analysis.utm_curve || {};
-  const points = fd ? (raw.preview || raw.points || []).map(p => ({strain_pct: dashboardFiniteNumber(p.displacement_mm ?? p.displacement), stress_MPa: dashboardFiniteNumber(p.force_N ?? p.force)})).filter(p => p.strain_pct !== null && p.stress_MPa !== null) : analysisStressStrainPoints(analysis);
+  // Both views use the same canonical measured samples and zero reference.
+  // utm_curve.preview is a sparse legacy summary, not a plotting trace.
+  const canonical = analysis.stress_strain_curve || {};
+  const canonicalRows = (canonical.preview || canonical.points || []).filter(p =>
+    dashboardFiniteNumber(p.displacement_mm) !== null && dashboardFiniteNumber(p.force_N) !== null);
+  const fdRows = canonicalRows.length >= 2 ? canonicalRows : (raw.preview || raw.points || []);
+  const points = fd ? fdRows.map(p => ({strain_pct: dashboardFiniteNumber(p.displacement_mm ?? p.displacement), stress_MPa: dashboardFiniteNumber(p.force_N ?? p.force)})).filter(p => p.strain_pct !== null && p.stress_MPa !== null) : analysisStressStrainPoints(analysis);
   if (points.length < 2) return renderVizEmpty("Awaiting data — curve requires valid measurements and units.");
   const width = 900;
   const height = 330;
@@ -17912,14 +17948,27 @@ function updateLiveBoVisualizationCards(visualization, expectedRunId = liveCurre
   return Boolean(equation || posterior);
 }
 
+function updateLiveLhsVisualization(visualization, expectedRunId = liveCurrentRunId()) {
+  if (!visualization || visualization.run_id !== expectedRunId
+      || !window.LHSDesignVisualization?.isValid(visualization)
+      || !visualization.artifacts?.png_url) return false;
+  if (liveLhsVisualization?.run_id === expectedRunId
+      && Number(liveLhsVisualization.step) > Number(visualization.step)) return false;
+  liveLhsVisualization = visualization;
+  invalidateLiveCenterRender("report");
+  return true;
+}
+
 async function hydrateLiveBoVisualization() {
   try {
     const response = await fetch("/api/bo/config", { cache: "no-store" });
     if (!response.ok) return false;
     const payload = await response.json();
     const runId = String(payload?.state?.run_id || payload?.run_id || liveCurrentRunId());
+    if (runId !== liveCurrentRunId()) return false;
+    const lhsUpdated = updateLiveLhsVisualization(payload.recent_lhs_visualization, runId);
     if (!payload.recent_visualization || !Object.keys(payload.recent_visualization).length) {
-      return Boolean(currentRunBoVisualization(liveBoVisualization, runId));
+      return lhsUpdated || Boolean(currentRunBoVisualization(liveBoVisualization, runId));
     }
     return updateLiveBoVisualizationCards(payload.recent_visualization, runId);
   } catch (_err) {
@@ -17955,6 +18004,10 @@ function connectPlanningEventStream() {
         // SSE keeps large posterior arrays compact; fetch the complete state
         // and its server-rendered artifact URLs after the notification.
         hydrateLiveBoVisualization();
+      }
+      if (eventType === "lhs.visualization.updated") {
+        updateLiveLhsVisualization(data.payload?.visualization);
+        hydrateLiveBoVisualization().then(() => schedulePlanningRefresh());
       }
       if (eventType) {
         liveRecentEvents.push(data);
@@ -18719,6 +18772,16 @@ function updateVisionSpecimenCountdowns() {
 }
 
 document.addEventListener("click", (event) => {
+  const boHistoryButton = event.target.closest("[data-bo-history]");
+  if (boHistoryButton && liveReportPanel?.contains(boHistoryButton)) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!boHistoryButton.disabled && liveAgentModuleHost.get("bo")?.movePlotHistory?.(boHistoryButton.dataset.boHistory, Number(boHistoryButton.dataset.direction))) {
+      invalidateLiveCenterRender("report");
+      if (liveLastSession) renderLiveRuntime(liveLastSession);
+    }
+    return;
+  }
   const utmVerificationButton = event.target.closest("[data-utm-verification-select]");
   if (utmVerificationButton && liveReportPanel && liveReportPanel.contains(utmVerificationButton)) {
     event.preventDefault();

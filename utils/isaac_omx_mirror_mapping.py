@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
-ISAAC_OMX_SCENE_RELATIVE_PATH = Path("sim/robotis_omx/scene/omx_table_layout.usda")
+ISAAC_OMX_SCENE_RELATIVE_PATH = Path("sim/robotis_omx/scene/omx_table_layout_20260915.usda")
 ISAAC_OMX_ARTICULATION_ROOT = "/World/Robot/Geometry/link0"
 DYNAMIXEL_POSITION_MAX_TICK = 4095.0
 DYNAMIXEL_DEG_PER_TICK = 360.0 / DYNAMIXEL_POSITION_MAX_TICK
