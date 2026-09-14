@@ -48,6 +48,7 @@ usage() {
 Usage:
   atr up
   atr down
+  atr restart
   atr gui
   atr live
   atr docs
@@ -81,6 +82,7 @@ Usage:
 Commands:
   up          Start the autonomous_researcher GUI server.
   down        Stop this checkout's GUI server process; server shutdown releases LeRobot live subprocesses.
+  restart     Run down, then up only after down succeeds; same stop/start behavior.
   gui         Open the main GUI URL.
   live        Open the Live GUI URL with auto bootstrap.
   docs        Open FastAPI docs.
@@ -491,6 +493,11 @@ if [[ "\${1:-}" == "-h" || "\${1:-}" == "--help" || "\${1:-}" == "help" ]]; then
 fi
 
 case "\${1:-}" in
+  restart)
+    [[ "\$#" -eq 1 ]] || { usage; exit 2; }
+    "\$0" down
+    exec "\$0" up
+    ;;
   up)
     if [[ "\$#" -eq 1 ]]; then
       start_server
@@ -830,6 +837,7 @@ PATH rc file:
 Usage:
   atr up
   atr down
+  atr restart
   atr doctor
   atr status
   atr models

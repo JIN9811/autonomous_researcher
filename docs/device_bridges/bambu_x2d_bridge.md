@@ -189,6 +189,40 @@ Inspection covered provider/client/patcher code, current configuration, API
 handlers, Bambu unit tests, autoejection tests, and the existing completion
 audit contract. It does not establish continuous live reliability for X2D.
 
+### Effective slicing settings and execution modes (2026-09-14)
+
+The default CLI path resolves vendor preset `inherits` and `include` references
+before exporting standalone machine, process, and filament settings. This
+preserves the native X2D start/end programs and inherited process/material
+values. Invalid inheritance blocks slicing. Explicit custom CLI profiles remain
+operator-controlled.
+
+Saved 3DP Print Defaults feed the default slicing path; experiment constraints
+override saved values, and top-level experiment values override constraints.
+Layer heights, bed temperatures, and the enabled first-layer speed setting are
+applied to the exported profiles. The current PLA setup uses Textured PEI at
+60°C, 0.2 mm layers, and **10 mm/s for both first-layer walls and infill**.
+Other speeds retain resolved vendor settings; there is no blanket 75% speed
+multiplier. Existing no-skirt/brim/raft policy remains in place.
+
+| Execution mode | Print body | Temperature-gated ejection wait | Device execution |
+|---|---|---|---|
+| Experiment / LIVE | Retained | Retained | Existing approved physical route |
+| TEST / `physical_print` | Retained | Retained | Existing physical-print route |
+| TEST / `installed_printer` | Omitted | Omitted | Existing ejection-only test route |
+| TEST / `virtual_bridge` | Local preparation/preflight only | No physical wait | No upload or actuation |
+
+Placement validation and bounds-derived autoejection are unchanged. The native
+front test-line postprocessor recognizes the vendor closing marker and leaves
+the source unchanged if the block cannot be safely delimited. Updated defaults
+require re-slicing; they do not rewrite previously prepared artifacts.
+
+Local STL generation, installed Bambu Studio slicing, patched G-code bodies,
+cooldown commands, placement, and checksums were inspected without printer
+communication. This is artifact/path verification, not a new physical print
+validation. Regression coverage includes `test_bambu_slicer_profiles.py`,
+`test_bambu_bridge.py`, and `test_test_mode_execution_profile_matrix.py`.
+
 ## Limitations and Known Gaps
 
 ### AMS material priority (2026-09-06)

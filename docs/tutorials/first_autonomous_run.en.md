@@ -44,6 +44,8 @@ Stop later:
 atr down
 ```
 
+Restart with `atr restart`: it runs the existing `down` path, then `up` only on success. Finish active work first; stop/cleanup behavior is unchanged.
+
 ## 3) Start in Test Mode (Recommended First)
 
 1. Open Live GUI.

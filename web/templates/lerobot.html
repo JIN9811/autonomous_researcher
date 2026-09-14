@@ -919,15 +919,22 @@ Modification guide:
               </span>
             </label>
             <label>
-              Pi0.5 RTC Execution Horizon
-              <input id="lerobot-rollout-rtc-horizon-input" type="number" min="1" max="200" step="1" value="20" title="Pi0.5 RTC execution horizon. Higher values help when inference latency is high." />
+              RTC Enable
+              <span class="checkbox-inline">
+                <input id="lerobot-rollout-rtc-enabled-input" type="checkbox" />
+                Enabled for supported VLA policies
+              </span>
             </label>
             <label>
-              Pi0.5 RTC Guidance Weight
-              <input id="lerobot-rollout-rtc-guidance-input" type="number" min="0" max="20" step="0.1" value="1.0" title="Pi0.5 RTC max guidance weight." />
+              RTC Execution Horizon
+              <input id="lerobot-rollout-rtc-horizon-input" type="number" min="1" max="200" step="1" value="20" title="RTC execution horizon. Higher values help when inference latency is high." />
             </label>
             <label>
-              Pi0.5 Action Queue Refresh Threshold
+              RTC Guidance Weight
+              <input id="lerobot-rollout-rtc-guidance-input" type="number" min="0" max="20" step="0.1" value="1.0" title="RTC maximum guidance weight." />
+            </label>
+            <label>
+              RTC Action Queue Refresh Threshold
               <input id="lerobot-rollout-action-queue-input" type="number" min="1" max="300" step="1" value="60" title="action_queue_size_to_get_new_actions. Must be larger than inference delay plus RTC horizon." />
             </label>
             <label>
@@ -1073,15 +1080,22 @@ Modification guide:
               </span>
             </label>
             <label>
-              Pi0.5 RTC Execution Horizon
-              <input id="lerobot-manipulation-rtc-horizon-input" type="number" min="1" max="200" step="1" value="20" title="Pi0.5 RTC execution horizon. Higher values help when inference latency is high." />
+              RTC Enable
+              <span class="checkbox-inline">
+                <input id="lerobot-manipulation-rtc-enabled-input" type="checkbox" />
+                Enabled for supported VLA policies
+              </span>
             </label>
             <label>
-              Pi0.5 RTC Guidance Weight
-              <input id="lerobot-manipulation-rtc-guidance-input" type="number" min="0" max="20" step="0.1" value="1.0" title="Pi0.5 RTC max guidance weight." />
+              RTC Execution Horizon
+              <input id="lerobot-manipulation-rtc-horizon-input" type="number" min="1" max="200" step="1" value="20" title="RTC execution horizon. Higher values help when inference latency is high." />
             </label>
             <label>
-              Pi0.5 Action Queue Refresh Threshold
+              RTC Guidance Weight
+              <input id="lerobot-manipulation-rtc-guidance-input" type="number" min="0" max="20" step="0.1" value="1.0" title="RTC maximum guidance weight." />
+            </label>
+            <label>
+              RTC Action Queue Refresh Threshold
               <input id="lerobot-manipulation-action-queue-input" type="number" min="1" max="300" step="1" value="60" title="action_queue_size_to_get_new_actions. Must be larger than inference delay plus RTC horizon." />
             </label>
             <label class="planning-message-label train-extra-args">
@@ -1231,15 +1245,15 @@ val=48-59</textarea>
               <div class="lerobot-form-grid train-form-grid">
                 <label>
                   Isaac Lab Path
-                  <input id="isaac-synthetic-isaac-lab-path" type="text" value="/home/jin/IsaacLab" placeholder="/home/jin/IsaacLab" />
+                  <input id="isaac-synthetic-isaac-lab-path" type="text" value="~/IsaacLab" placeholder="~/IsaacLab" />
                 </label>
                 <label>
                   Isaac Sim Python
-                  <input id="isaac-synthetic-isaac-sim-python" type="text" value="/home/jin/IsaacSim/python.sh" placeholder="/home/jin/IsaacSim/python.sh" />
+                  <input id="isaac-synthetic-isaac-sim-python" type="text" value="~/IsaacSim/python.sh" placeholder="~/IsaacSim/python.sh" />
                 </label>
                 <label>
                   Isaac Stage Path
-                  <input id="isaac-synthetic-stage-path" type="text" value="/home/jin/autonomous_researcher/sim/robotis_omx/scene/omx_table_layout.usda" placeholder="/home/jin/autonomous_researcher/sim/robotis_omx/scene/omx_table_layout.usda" />
+                  <input id="isaac-synthetic-stage-path" type="text" value="~/autonomous_researcher/sim/robotis_omx/scene/omx_table_layout.usda" placeholder="~/autonomous_researcher/sim/robotis_omx/scene/omx_table_layout.usda" />
                 </label>
                 <label>
                   Mimic Trials

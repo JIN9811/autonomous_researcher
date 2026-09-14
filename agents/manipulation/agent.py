@@ -475,7 +475,7 @@ class ManipulationAgent(BaseAgent):
         pickup_pose = vision_observation.get("pose_estimate") if isinstance(vision_observation.get("pose_estimate"), dict) else {}
         specimen_id = str(specimen.get("specimen_id") or specimen.get("candidate_id") or "printed specimen")
         profile_id = str(spec.get("lerobot_profile_id") or spec.get("robot_profile_id") or spec.get("profile_id") or "").strip()
-        if state.mode == Mode.TEST and not profile_id:
+        if state.mode == Mode.TEST and not physical_printer_tail and not profile_id:
             profile_id = "fake_omx_ai"
         policy_type = self._policy_type(spec, strategy)
         is_pi05 = self._canonical_policy_type(policy_type) == "pi05"
@@ -500,7 +500,7 @@ class ManipulationAgent(BaseAgent):
             policy_path = ""
             policy_checkpoint_path = ""
             policy_repo_id = ""
-        if state.mode == Mode.TEST and not policy_path and not policy_checkpoint_path and not policy_repo_id:
+        if state.mode == Mode.TEST and not physical_printer_tail and not policy_path and not policy_checkpoint_path and not policy_repo_id:
             policy_path = "fake://pi05_policy" if is_pi05 else "fake://policy"
         explicit_source = spec.get("source_location") if "source_location" in explicit_keys else None
         explicit_target = spec.get("target_location") if "target_location" in explicit_keys else None
@@ -766,6 +766,8 @@ class ManipulationAgent(BaseAgent):
             else:
                 blocking.append("valid_vision_preflight_required")
         policy_ref = payload.get("policy_path") or payload.get("policy_checkpoint_path") or payload.get("policy_repo_id")
+        physical_execution = payload.get("runtime_mode") == "live" or state.mode == Mode.LIVE
+        valid_policy = bool(policy_ref) and not (physical_execution and str(policy_ref).startswith("fake://"))
         policy_type = self._canonical_policy_type(payload.get("policy_type"))
         if not freshness.get("fresh", False):
             blocking.append(str(freshness.get("reason") or "stale_vision_signal"))
@@ -780,9 +782,9 @@ class ManipulationAgent(BaseAgent):
         if strategy in {"lerobot_policy", "pi05_lerobot_policy"}:
             if not payload.get("profile_id"):
                 blocking.append("robot_profile_required")
-            if state.mode == Mode.LIVE and not policy_ref:
+            if physical_execution and not valid_policy:
                 blocking.append("live_policy_ref_required")
-            if state.mode == Mode.LIVE and not payload.get("confirm_live_execute"):
+            if physical_execution and not payload.get("confirm_live_execute"):
                 blocking.append("live_confirmation_required")
             if policy_type == "pi05" and payload.get("rollout_inference_type") != "rtc":
                 warnings.append("pi05_rtc_not_enabled")
@@ -800,9 +802,9 @@ class ManipulationAgent(BaseAgent):
             "profile_id": payload.get("profile_id", ""),
             "robot_ready": bool(payload.get("profile_id")) and not any(item == "robot_profile_required" for item in blocking),
             "camera_ready": bool(payload.get("camera_enabled")),
-            "policy_ready": bool(policy_ref) or state.mode == Mode.TEST or strategy == "fixed_kinematic",
-            "operator_confirmed": bool(payload.get("confirm_live_execute")) if state.mode == Mode.LIVE else True,
-            "live_mode": state.mode == Mode.LIVE,
+            "policy_ready": valid_policy or not physical_execution or strategy == "fixed_kinematic",
+            "operator_confirmed": bool(payload.get("confirm_live_execute")) if physical_execution else True,
+            "live_mode": physical_execution,
             "policy_ref": policy_ref or "",
             "blocking_reasons": blocking,
             "warnings": warnings,

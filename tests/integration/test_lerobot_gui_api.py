@@ -63,7 +63,12 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
     assert "lerobot-manipulation-task-id-input" in page.text
     assert "lerobot-rollout-policy-type-input" in page.text
     assert "Rollout Policy Type" in page.text
-    assert "Pi0.5 RTC Execution Horizon" in page.text
+    assert "RTC Enable" in page.text
+    assert "RTC Execution Horizon" in page.text
+    assert "RTC Guidance Weight" in page.text
+    assert "RTC Action Queue Refresh Threshold" in page.text
+    assert 'id="lerobot-rollout-rtc-enabled-input"' in page.text
+    assert 'id="lerobot-manipulation-rtc-enabled-input"' in page.text
     assert "Manipulation Agent Runtime Report" in page.text
     assert "Save Task Defaults" in page.text
     assert "Test Agent Bridge" in page.text

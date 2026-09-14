@@ -464,8 +464,8 @@ def test_isaac_lab_gui_has_basic_defaults_and_collapsed_advanced_settings() -> N
     assert 'id="isaac-lab-basic-settings" class="lerobot-details isaac-lab-basic-settings" open' in template
     assert '<summary>Basic settings</summary>' in template
     assert 'id="isaac-lab-apply-standard-defaults"' in template
-    assert 'id="isaac-synthetic-isaac-lab-path" type="text" value="/home/jin/IsaacLab"' in template
-    assert 'id="isaac-synthetic-stage-path" type="text" value="/home/jin/autonomous_researcher/sim/robotis_omx/scene/omx_table_layout.usda"' in template
+    assert 'id="isaac-synthetic-isaac-lab-path" type="text" value="~/IsaacLab"' in template
+    assert 'id="isaac-synthetic-stage-path" type="text" value="~/autonomous_researcher/sim/robotis_omx/scene/omx_table_layout.usda"' in template
     assert 'id="isaac-lab-advanced-settings" class="lerobot-details isaac-lab-advanced-settings"' in template
     assert '<summary>Advanced settings</summary>' in template
     assert 'id="isaac-synthetic-mimic-trials" type="number" min="1" max="5000" step="1" value="3"' in template
@@ -479,8 +479,8 @@ def test_isaac_lab_gui_has_basic_defaults_and_collapsed_advanced_settings() -> N
     assert 'bind("isaac-lab-apply-standard-defaults"' in script
     assert "mimic_trials: numberValue(isaacSyntheticMimicTrialsInput, 3)" in script
     assert "mimic_num_envs: numberValue(isaacSyntheticMimicNumEnvsInput, 3)" in script
-    assert 'setInputValue(isaacSyntheticIsaacLabPathInput, "/home/jin/IsaacLab")' in script
-    assert 'setInputValue(isaacSyntheticStagePathInput, "/home/jin/autonomous_researcher/sim/robotis_omx/scene/omx_table_layout.usda")' in script
+    assert 'setInputValue(isaacSyntheticIsaacLabPathInput, "~/IsaacLab")' in script
+    assert 'setInputValue(isaacSyntheticStagePathInput, "~/autonomous_researcher/sim/robotis_omx/scene/omx_table_layout.usda")' in script
     assert 'isaacLabDomainRandomizationProfileInput.value = "standard"' in script
     assert 'isaacSyntheticMimicBackendInput.value = "official"' in script
     assert "syncIsaacLabMimicRgbdInputs(true)" in script
@@ -1011,7 +1011,15 @@ def test_manipulation_bridge_defaults_match_rollout_inference_policy() -> None:
     for policy_type in ["act", "diffusion", "pi0", "pi05", "pi0fast", "xvla", "vqbet"]:
         assert f'<option value="{policy_type}">' in template
     assert 'selectedManipulationPolicyType() || "smolvla"' in script
-    assert 'rollout_inference_type: policyTypeKey === "pi05" ? "rtc" : "",' in script
+    assert 'const RTC_POLICY_TYPES = new Set(["smolvla", "pi0", "pi05", "pi0fast"]);' in script
+    assert "const RTC_DEFAULT_ENABLED_POLICY_TYPES = new Set();" in script
+    assert 'id="lerobot-rollout-rtc-enabled-input" type="checkbox" checked' not in template
+    assert 'id="lerobot-manipulation-rtc-enabled-input" type="checkbox" checked' not in template
+    assert 'rollout_inference_type: "sync",' in script
+    assert 'rollout_inference_type: rtcEnabled ? "rtc" : (rtcSupported ? "sync" : ""),' in script
+    assert "setInputValue(rolloutRtcHorizonInput, profile.rollout_rtc_execution_horizon ?? 20);" in script
+    assert "setInputValue(rolloutRtcGuidanceInput, profile.rollout_rtc_max_guidance_weight ?? 1.0);" in script
+    assert "setInputValue(rolloutActionQueueInput, profile.rollout_action_queue_size_to_get_new_actions ?? 60);" in script
     assert "rollout_action_clamp: manipulationActionClampInput ? boolValue(manipulationActionClampInput) : false," in script
     assert "rollout_max_relative_target: numberValue(manipulationMaxRelativeTargetInput, 5)," in script
     assert (
@@ -1040,6 +1048,7 @@ def test_manipulation_bridge_reuses_rollout_configuration_layout() -> None:
         "lerobot-manipulation-shoulder-lift-backstop-input",
         "lerobot-manipulation-temporal-ensemble-input",
         "lerobot-manipulation-temporal-coeff-input",
+        "lerobot-manipulation-rtc-enabled-input",
         "lerobot-manipulation-rtc-horizon-input",
         "lerobot-manipulation-rtc-guidance-input",
         "lerobot-manipulation-action-queue-input",

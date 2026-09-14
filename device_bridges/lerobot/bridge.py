@@ -2432,19 +2432,21 @@ class LeRobotBridge:
             return self._error("lerobot.rollout.start", "live", request.profile_id, "LEROBOT_POLICY_PATH_REQUIRED", "Live rollout requires policy_path, policy_checkpoint_path, or policy_repo_id.")
         policy_type = self._canonical_policy_type(request.policy_type or "act")
         is_pi05 = self._is_pi05_policy(policy_type)
+        inference_type = str(request.rollout_inference_type or "").strip().lower()
+        if is_pi05 and not inference_type:
+            inference_type = "rtc"
+        rtc_supported = self._is_rtc_supported_policy(policy_type)
+        rtc_enabled = rtc_supported and inference_type == "rtc"
+        uses_rtc_runner = is_pi05 or rtc_enabled
         policy_args = [f"--policy.path={policy_ref or str(self.config.fake_checkpoint_root / 'policy.ckpt')}"]
         device_override = str(raw_payload.get("device") or "").strip()
         if device_override:
-            if is_pi05:
+            if uses_rtc_runner:
                 policy_args.append(f"--device={device_override}")
                 policy_args.append(f"--policy.device={device_override}")
             else:
                 policy_args.append(f"--policy.device={device_override}")
-        inference_type = str(request.rollout_inference_type or "").strip().lower()
-        if is_pi05 and not inference_type:
-            inference_type = "rtc"
-        if is_pi05:
-            rtc_enabled = inference_type != "sync"
+        if uses_rtc_runner:
             policy_args.append(f"--rtc.enabled={_bool_arg(rtc_enabled)}")
             if rtc_enabled and request.rollout_rtc_execution_horizon is not None:
                 policy_args.append(f"--rtc.execution_horizon={int(request.rollout_rtc_execution_horizon)}")
@@ -2453,13 +2455,6 @@ class LeRobotBridge:
             if rtc_enabled and request.rollout_action_queue_size_to_get_new_actions is not None:
                 queue_size = max(1, int(request.rollout_action_queue_size_to_get_new_actions))
                 policy_args.append(f"--action_queue_size_to_get_new_actions={queue_size}")
-        elif inference_type:
-            policy_args.append(f"--inference.type={inference_type}")
-            if inference_type == "rtc":
-                if request.rollout_rtc_execution_horizon is not None:
-                    policy_args.append(f"--inference.rtc.execution_horizon={int(request.rollout_rtc_execution_horizon)}")
-                if request.rollout_rtc_max_guidance_weight is not None:
-                    policy_args.append(f"--inference.rtc.max_guidance_weight={float(request.rollout_rtc_max_guidance_weight)}")
         if "policy_use_amp" in raw_payload:
             policy_args.append(f"--policy.use_amp={_bool_arg(request.policy_use_amp)}")
         if request.rollout_temporal_ensemble and not is_pi05 and not self._is_vla_policy(policy_type):
@@ -2470,7 +2465,7 @@ class LeRobotBridge:
             max_relative_target = max(1, int(round(float(request.rollout_max_relative_target or 5))))
             policy_args.append(f"--robot.max_relative_target={max_relative_target}")
         task_instruction = self._rollout_task_instruction(request, is_pi05=is_pi05)
-        if is_pi05:
+        if uses_rtc_runner:
             duration_source = request.max_duration_s if request.max_duration_s and request.max_duration_s > 0 else request.episode_s
             duration = max(1, int(round(float(duration_source or 1))))
             rollout_extra_args = policy_args + [
@@ -11105,7 +11100,15 @@ class LeRobotBridge:
     def _uses_live_rollout_wrapper(self, request: LeRobotSessionRequest) -> bool:
         return not self._is_pi05_policy(request.policy_type)
 
+    def _uses_rtc_rollout_wrapper(self, request: LeRobotSessionRequest) -> bool:
+        if self._is_pi05_policy(request.policy_type):
+            return True
+        inference_type = str(request.rollout_inference_type or "").strip().lower()
+        return self._is_rtc_supported_policy(request.policy_type) and inference_type == "rtc"
+
     def _workflow_conda_env_name(self, workflow: str, request: LeRobotSessionRequest) -> str:
+        if workflow == "rollout" and self._uses_rtc_rollout_wrapper(request):
+            return self.config.pi05_conda_env_name
         if workflow in {"train", "rollout"} and self._is_pi05_policy(request.policy_type):
             return self.config.pi05_conda_env_name
         if workflow in {"train", "rollout"} and self._is_xvla_policy(request.policy_type):
@@ -12307,6 +12310,10 @@ class LeRobotBridge:
 
     def _is_smolvla_policy(self, policy_type: str) -> bool:
         return self._canonical_policy_type(policy_type) == "smolvla"
+
+    def _is_rtc_supported_policy(self, policy_type: str) -> bool:
+        canonical = self._canonical_policy_type(policy_type)
+        return canonical in {"smolvla", "pi0", "pi05", "pi0fast"}
 
     def _is_vla_policy(self, policy_type: str) -> bool:
         canonical = self._canonical_policy_type(policy_type)

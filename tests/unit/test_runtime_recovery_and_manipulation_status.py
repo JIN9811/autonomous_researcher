@@ -1,6 +1,8 @@
 """Non-actuating regression tests for physical-cycle lifecycle boundaries."""
 from copy import deepcopy
 import asyncio
+import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -23,12 +25,20 @@ def runtime_fixture(tmp_path, stage=Stage.GUARDIAN, agent=None):
     state = OrchestratorState(run_id="run-lifecycle", experiment_id="exp-lifecycle", mode=Mode.TEST, stage=stage)
     state.current_experiment_spec = {"specimen_id": "specimen-1"}
     registry = AgentRegistry()
+    from agents.core.orchestrator.agent import OrchestratorAgent
+    registry.register(OrchestratorAgent())
+    async def model_response(task_type, prompt, **kwargs):
+        packet = json.loads(prompt)
+        return SimpleNamespace(model="controlled-runtime-handoff", raw={}, text=json.dumps({
+            "tool": "prepare_handoff", "arguments": {"candidate": packet["context"]["handoff_candidates"][0]},
+            "reason": "Existing graph edge", "evidence_refs": ["boundary:result"]}))
     if agent:
         registry.register(agent)
     events = []
     runtime = LangGraphRunLoop(
         state=state, agent_registry=registry, orchestrator_agent_name="orchestrator_agent",
-        ctx=object(), logger=StructuredLogger(tmp_path / "events.jsonl", tmp_path / "summary.log"),
+        ctx=SimpleNamespace(complete=model_response, tools=None, force_real_llm_in_test=True),
+        logger=StructuredLogger(tmp_path / "events.jsonl", tmp_path / "summary.log"),
         graph_config_path="graphs/configs/atr_closed_loop.yaml", on_event=events.append,
     )
     return runtime, state, events

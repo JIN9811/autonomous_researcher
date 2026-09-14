@@ -59,3 +59,19 @@ def handoff_no_external(monkeypatch):
                     "reason": "Dispatcher-admitted test boundary", "evidence_refs": ["boundary:result"]}))
         return await original_complete(self, task_type, prompt, **kwargs)
     monkeypatch.setattr(AgentContext, "complete", complete)
+    # Registered module owners select their backend through ModuleRuntimeContext,
+    # not AgentContext.complete. Stub only the model response at that boundary.
+    from orchestrator.langgraph_runtime import ModuleRuntimeContext
+    original_module_complete = ModuleRuntimeContext.complete
+    async def module_complete(self, task_type, prompt, **kwargs):
+        if task_type == "orchestrator_plan":
+            try:
+                request = json.loads(prompt)
+            except (TypeError, ValueError):
+                request = {}
+            if request.get("operation") == "decide_orchestration":
+                return SimpleNamespace(model="controlled-module-handoff-test", raw={}, text=json.dumps({
+                    "tool": "prepare_handoff", "arguments": {"candidate": request["context"]["handoff_candidates"][0]},
+                    "reason": "Dispatcher-admitted test boundary", "evidence_refs": ["boundary:result"]}))
+        return await original_module_complete(self, task_type, prompt, **kwargs)
+    monkeypatch.setattr(ModuleRuntimeContext, "complete", module_complete)

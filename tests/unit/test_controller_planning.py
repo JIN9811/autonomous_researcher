@@ -5,6 +5,7 @@ Unit tests for Live GUI planning handoff adaptation.
 import asyncio
 import copy
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,7 +30,7 @@ def controlled_chat_intake(monkeypatch, handoff_no_external):
     original = AgentContext.complete
     starts = {"실험 수행", "테스트 모드", "테스트 모드, 가상 브릿지", "테스트 모드, 설치 프린터",
               "테스트 모드, 실제 프린터", "테스트 모드, 실제 출력"}
-    replies = {"가상 브릿지", "설치 프린터", "실제 출력", "연결정보 입력 완료", "테스트 모드, 설치 프린터"}
+    replies = {"가상 브릿지", "설치 프린터", "실제 출력", "연결정보 입력 완료", "테스트 모드, 설치 프린터", "아직 연결정보 입력 전"}
     async def complete(self, task_type, prompt, **kwargs):
         try:
             packet = json.loads(prompt)
@@ -37,7 +38,8 @@ def controlled_chat_intake(monkeypatch, handoff_no_external):
             packet = {}
         if packet.get("operation") == "classify_chat_request":
             message, pending = packet["message"], packet["pending_id"]
-            intent = "confirm_pending" if pending and message in replies else "start_run" if message in starts else "question"
+            automatic = message.startswith("[Automatic test input]")
+            intent = "confirm_pending" if pending and (message in replies or automatic) else "start_run" if message in starts or automatic else "question"
             return SimpleNamespace(model="controlled-chat-test", raw={}, text=json.dumps({"intent": intent,
                 "reason": "Explicit test scenario intent", "pending_id": pending if intent == "confirm_pending" else None}))
         return await original(self, task_type, prompt, **kwargs)
@@ -63,6 +65,52 @@ def _controlled_design_model(monkeypatch):
 
     monkeypatch.setattr(ModuleRuntimeContext, "complete", complete)
     return selected_ids
+
+
+def _bind_equipment_simulator(controller, tmp_path):
+    """Replace Windows transport only; keep the registered stacked agent flow."""
+    from tests.unit.test_equipment_agent import _tools
+    tools = _tools(tmp_path)
+    for name in tools.list_tools():
+        if name.startswith("equipment.pyautogui."):
+            controller._deps.agent_context.tools.register(name, lambda payload, name=name: tools.call(name, payload))
+    receipts = {}
+    def run_block(payload):
+        # The Windows deployment is external to this test. Return a complete,
+        # scoped simulator receipt for the block, including a parseable CSV.
+        identity = (payload.get("run_id"), payload.get("specimen_id"))
+        if identity not in receipts:
+            receipts[identity] = tools.call("equipment.pyautogui.run", {**payload, "program_id": "utm_compression_start_v1"})
+        result = copy.deepcopy(receipts[identity])
+        result["program_id"] = payload.get("program_id")
+        result["height"] = {"observed": 118.4, "target": 118.4}
+        for artifact in result.get("output_artifacts", []):
+            if artifact.get("kind") == "utm_csv":
+                artifact.update(run_id=identity[0], specimen_id=identity[1],
+                    linux_path=artifact["local_path"], local_parse_ok=True, pulled_to_linux=True)
+                result["data_acquisition"] = {**artifact, "status": "pulled_to_linux"}
+        return result
+    controller._deps.agent_context.tools.register("equipment.pyautogui.run", run_block)
+
+
+def _simulated_utm_capture(payload, frame):
+    """Scope-correct placement/clearance receipts, not physical validation."""
+    clear = payload.get("purpose") == "utm_clear_verification"
+    return {
+        "ok": True, "tool": "vision.utm_specimen_presence.capture",
+        "schema": "vision_utm_specimen_presence.v1", "simulated": True,
+        "actuation_performed": False, "status": "clear" if clear else "confirmed",
+        "detected": not clear, "clear_confirmed": clear,
+        "source": "virtual_utm_camera", "virtualized": True, "registered": True,
+        "topic": "virtual://utm-clear" if clear else "virtual://utm-placement",
+        "detector": "high_chroma_red_hsv_largest_component",
+        "frame_id": payload.get("frame_id", "controlled-clearance"),
+        "frame_timestamp": time.time(), "raw_frame_path": str(frame),
+        "annotated_frame_path": str(frame), "confidence": 0.95,
+        "width": 640, "height": 480,
+        **{key: payload.get(key, 0 if key == "loop_id" else "")
+           for key in ("run_id", "loop_id", "session_id", "specimen_id")},
+    }
 
 
 def test_planning_snapshot_preserves_latest_bo_visualization_projection() -> None:
@@ -2444,11 +2492,11 @@ async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
     assert result["ok"] is True
     assert isinstance(constraints, dict)
     assert constraints["geometry_type"] == "gyroid"
-    assert len(seeds) == 1
-    assert constraints["cell_size_mm"] == seeds[0]["constraints"]["cell_size_mm"]
-    assert constraints["relative_density"] == seeds[0]["constraints"]["relative_density"]
-    assert controller._state.run_metadata["orchestrator_design_contract"]["requested_parameters"] == {
-        key: seeds[0]["constraints"][key] for key in ("cell_size_mm", "relative_density")}
+    # Input generation no longer mutates BO state before shared ORC admission.
+    # This test replaces that admission boundary; initial BO publication is
+    # covered by the real controller/Design tests below.
+    assert seeds == []
+    assert any(m.get("input_source") == "test_scenario" for m in controller._planning_messages)
     assert constraints["printer_test_path"] == choice
     assert constraints["test_printer_transport"] == transport
     assert constraints["allow_test_printer_live"] is (choice != "virtual_bridge")
@@ -2479,10 +2527,10 @@ async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
         assert constraints["ejection"]["use_ejection_only_project_file"] is False
         assert constraints["ejection"]["source"] == "physical_print_tail"
     assert constraints["top_cap_enabled"] is False
-    assert constraints["bottom_cap_enabled"] is False
-    assert constraints["top_bottom_cap"] is False
+    assert constraints["bottom_cap_enabled"] is True
+    assert constraints["top_bottom_cap"] is True
     assert constraints["require_flat_compression_faces"] is False
-    assert constraints["skin_thickness_mm"] == 0.0
+    assert constraints["skin_thickness_mm"] == 0.8
     assert not controller._state.run_metadata.get("pending_specimen_input")
 
 
@@ -2575,7 +2623,7 @@ async def test_live_gui_bare_test_mode_strips_llm_printer_choice_until_agent_pro
         constraints={},
         session_id="s-bare",
     )
-
+    await asyncio.wait_for(controller._test_scenario.task, timeout=3)
     assert result["ok"] is True
     constraints = captured["constraints"]
     assert isinstance(constraints, dict)
@@ -2625,18 +2673,20 @@ async def test_live_gui_test_mode_virtual_bridge_handoff_returns_before_loop_fin
     )
 
     assert result["ok"] is True
-    assert result["message"] == "Planning handoff started in background."
+    assert result["message"] == "Automatic test scenario input scheduled."
+    await asyncio.wait_for(handoff_started.wait(), timeout=5.0)
     assert controller._planning_handoff_task is not None
-    await asyncio.wait_for(handoff_started.wait(), timeout=1.0)
     assert not controller._planning_handoff_task.done()
 
     release_handoff.set()
     await asyncio.wait_for(controller._planning_handoff_task, timeout=1.0)
+    await asyncio.wait_for(controller._test_scenario.task, timeout=1.0)
 
 
 @pytest.mark.asyncio
 async def test_planning_tail_continues_original_loop_after_specimen(tmp_path: Path) -> None:
     controller = load_runtime()
+    _bind_equipment_simulator(controller, tmp_path)
     controller._state.mode = Mode.LIVE
     # This actual-agent tail previously launched the background UTM runtime.
     # Explicitly simulate that I/O; the suite-wide process denial stays active.
@@ -2671,23 +2721,7 @@ async def test_planning_tail_continues_original_loop_after_specimen(tmp_path: Pa
     )
     controller._deps.agent_context.tools.register(
         "vision.utm_specimen_presence.capture",
-        lambda payload: {
-            "ok": True,
-            "tool": "vision.utm_specimen_presence.capture",
-            "schema": "vision_utm_specimen_presence.v1",
-            "status": "confirmed",
-            "detected": True,
-            "source": "virtual_utm_camera",
-            "frame_id": payload["frame_id"],
-            "annotated_frame_path": str(utm_frame),
-            "raw_frame_path": str(utm_frame),
-            "confidence": 0.95,
-            "width": 640,
-            "height": 480,
-            "run_id": payload["run_id"],
-            "session_id": payload["session_id"],
-            "specimen_id": payload["specimen_id"],
-        },
+        lambda payload: _simulated_utm_capture(payload, utm_frame),
     )
     controller._deps.agent_context.tools.register(
         "lerobot.rollout.stop",
@@ -2721,7 +2755,8 @@ async def test_planning_tail_continues_original_loop_after_specimen(tmp_path: Pa
         "handoff_status": "ready",
         "stl_path": "/tmp/specimen-tail.stl",
     }
-
+    spec = controller._apply_specimen_printer_choice_to_spec(spec, "virtual_bridge")
+    controller._state.current_experiment_spec = spec
     result = await controller._run_planning_loop_tail(spec)
     events = controller.recent_events()
     completed_stages = [
@@ -2729,10 +2764,12 @@ async def test_planning_tail_continues_original_loop_after_specimen(tmp_path: Pa
         for event in events
         if event.get("type") == "node.completed"
     ]
-    post_place_vision_index = max(index for index, stage in enumerate(completed_stages) if stage == "vision")
-    assert completed_stages[post_place_vision_index : post_place_vision_index + 6] == [
-        "vision",
+    equipment_index = completed_stages.index("equipment")
+    assert completed_stages[equipment_index - 1 : equipment_index + 7] == [
+        "vision",  # placement
         "equipment",
+        "manipulation",  # disposal replay
+        "vision",  # clearance
         "analysis",
         "knowledge",
         "bo",
@@ -2745,7 +2782,13 @@ async def test_planning_tail_continues_original_loop_after_specimen(tmp_path: Pa
     assert controller._state.latest_observations["transfer_readiness"]["ready"] is True
     assert controller._state.run_metadata["manipulation_result"]["ok"] is True
     assert controller._state.run_metadata["equipment_handoff"]["status"] == "ready_for_analysis"
-    assert controller._state.latest_analysis["cae_result"]["ok"] is True
+    analysis_result = next(Path("runs", controller._state.run_id).glob(
+        "runtime/loops/loop-*/analysis_agent/attempt-000001/result.json"))
+    analysis = json.loads(analysis_result.read_text())["data"]["analysis"]
+    assert analysis["ok"] is True
+    assert analysis["bo_handoff"]["ok_for_bo"] is True
+    assert analysis["fem_job"]["status"] == "queued"
+    assert controller._state.run_metadata["utm_verifications"]["verification_2"]["confirmed"] is True
     roles = [message["role"] for message in controller.planning_snapshot()["messages"]]
     assert "vision_ai" in roles
     assert "manipulation_ai" in roles
@@ -2756,7 +2799,11 @@ async def test_planning_tail_continues_original_loop_after_specimen(tmp_path: Pa
     assert "guardian" in roles
     assert controller._state.run_metadata["bo_agent"]["knowledge_context"]
     assert any(event.get("type") == "node.completed" and event.get("node_id") == "bo" for event in events)
-    assert any(event.get("type") == "module.step.planned" and event.get("node_id") == "vision" for event in events)
+    # Owner modules publish execution traces; the old module.step events were
+    # replaced during modularization. Read durable logs, not the recent ring.
+    traces = [json.loads(line) for line in Path("runs", controller._state.run_id, "structured.jsonl").read_text().splitlines()]
+    assert any(event.get("event_type") == "execution.node.completed"
+               and event.get("payload", {}).get("module_id") == "vision" for event in traces)
     assert any(
         message.get("module_runtime", {}).get("module_id") == "vision"
         for message in controller.planning_snapshot()["messages"]
@@ -3497,6 +3544,8 @@ async def test_live_gui_test_planning_series_runs_twenty_design_cycles(
     tmp_path: Path,
 ) -> None:
     controller = load_runtime()
+    _bind_equipment_simulator(controller, tmp_path)
+    _controlled_design_model(monkeypatch)
     controller._state.mode = Mode.LIVE
     utm_frame = tmp_path / "utm-confirmed.png"
     utm_frame.write_bytes(b"utm-confirmed")
@@ -3522,23 +3571,7 @@ async def test_live_gui_test_planning_series_runs_twenty_design_cycles(
     )
     controller._deps.agent_context.tools.register(
         "vision.utm_specimen_presence.capture",
-        lambda payload: {
-            "ok": True,
-            "tool": "vision.utm_specimen_presence.capture",
-            "schema": "vision_utm_specimen_presence.v1",
-            "status": "confirmed",
-            "detected": True,
-            "source": "virtual_utm_camera",
-            "frame_id": payload["frame_id"],
-            "annotated_frame_path": str(utm_frame),
-            "raw_frame_path": str(utm_frame),
-            "confidence": 0.95,
-            "width": 640,
-            "height": 480,
-            "run_id": payload["run_id"],
-            "session_id": payload["session_id"],
-            "specimen_id": payload["specimen_id"],
-        },
+        lambda payload: _simulated_utm_capture(payload, utm_frame),
     )
     controller._deps.agent_context.tools.register(
         "lerobot.rollout.stop",
@@ -3572,7 +3605,8 @@ async def test_live_gui_test_planning_series_runs_twenty_design_cycles(
         "handoff_status": "ready",
         "stl_path": "/tmp/specimen-series-1.stl",
     }
-
+    spec = controller._apply_specimen_printer_choice_to_spec(spec, "virtual_bridge")
+    controller._state.current_experiment_spec = spec
     async def fake_specimen_stage(experiment_spec: dict, *, emit_handoff: bool = True) -> dict:
         controller._merge_planning_agent_data(
             Stage.SPECIMEN,
@@ -3627,7 +3661,9 @@ async def test_live_gui_test_planning_series_runs_twenty_design_cycles(
     assert bo_trace
     assert bo_trace[-1]["selected"]["candidate_id"]
     analysis_messages = [message for message in controller.planning_snapshot()["messages"] if message["role"] == "analysis_ai"]
-    assert any(message.get("fem_artifacts", {}).get("contour_url") for message in analysis_messages)
+    # Measurement/BO may finish before background FEM. This non-actuating test
+    # does not run a solver and must not claim completed contour evidence.
+    assert any(message.get("analysis", {}).get("fem_job", {}).get("job_id") for message in analysis_messages)
 
 
 def test_design_constraints_for_cycle_preserves_both_bo_active_variables() -> None:

@@ -36,6 +36,8 @@ supersedes: []
 
 *Role overview; detailed execution and connection diagrams follow below.*
 
+Physical test profiles use the same policy-reference and execution-confirmation preflight as live manipulation. Missing policies are not replaced with `fake://` references when the effective robot mode is live; virtual defaults remain confined to virtual execution. Conditional Manipulation events remain visible in planning chat, including disposal/clearance visits. See [Test Mode](../runtime/test_mode.md).
+
 ## Status at a Glance
 
 | At a glance | Details |

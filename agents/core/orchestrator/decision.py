@@ -207,6 +207,30 @@ async def classify_chat_request(state, ctx, *, message: str, pending_id: str | N
             'operation': 'classify_chat_request', 'message': message,
             'pending_id': pending_id, 'run_id': state.run_id,
             'context': context.get('request', {}),
+            'command_contract': {
+                'scenario_start': ['테스트 모드', '테스트 모드, 가상 브릿지',
+                                   '테스트 모드, 실제 프린터', '테스트 모드, 설치 프린터',
+                                   '테스트 모드, 실제 출력'],
+                'meaning': 'These established standalone commands request starting an automatically generated '
+                           'research scenario through ordinary orchestration: start_run. They are not setup '
+                           'edits, unsupported settings, or direct device commands. No research goal needs '
+                           'to be supplied with a test command; scenario generation supplies it. Bare test '
+                           'mode still leaves printer selection to admission. An explicit 실험 수행 also '
+                           'means start_run; admission collects missing inputs before execution. '
+                           'An [Automatic test input] scenario that explicitly requests experiment execution '
+                           'is also start_run, not a request to edit saved settings. When replying to a '
+                           'current printer-selection pending request, classify its selected option as '
+                           'confirm_pending with that server pending_id instead of starting another run. '
+                           'This contract does not override questions, negations, quotations, hypotheticals, '
+                           'or requests only to edit saved settings. Classification never grants hardware '
+                           'approval and never substitutes for completion evidence.',
+                'negative_precedence': 'Evaluate the WHOLE message before matching a start example. '
+                    '"테스트 모드, 실제 프린터 실행하지 마" negates that test run: unclear, NOT start_run. '
+                    'Never reinterpret a negated physical test as permission to start a virtual test. '
+                    '"지금 실험 수행하지 마" is also not start_run. By contrast, '
+                    '"실행하지 말고 다음 실험 목표 설정만 수정해줘" is change_setup because it '
+                    'explicitly requests editing only. A positive command substring never overrides its negation.',
+            },
             'policy': 'Classify semantics, not keyword substrings. Questions, negations, quoted commands '
                       'and hypothetical examples never authorize execution. An arbitrary yes/approval '
                       'without a server pending_id is unclear. pending_id MUST be null for every '

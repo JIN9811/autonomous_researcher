@@ -22,7 +22,8 @@ from __future__ import annotations
 
 from utils.specimen_placement import normalize_placement, placement_area, placement_from_payload, preflight_placement, requested_center, validate_sliced_placement
 from utils.bambu_material_priority import load_priority, priority_path, select_material, bind_artifact, material_artifact_path
-from utils.printer_profile import load_prusa_print_profile
+from utils.printer_profile import load_prusa_print_profile, normalize_prusa_print_profile
+from device_bridges.printer_fleet.slicer_profiles import resolve_profile
 
 import copy
 import html
@@ -228,6 +229,7 @@ class BambuStudioSlicerRunner:
         extra_args: list[str] | None = None,
         timeout_sec: float | None = None,
         specimen_placement: dict[str, Any] | None = None,
+        experiment_spec: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Slice an STL/3MF into a Bambu artifact and return manifest evidence."""
         source = Path(str(source_path or "")).expanduser()
@@ -264,7 +266,9 @@ class BambuStudioSlicerRunner:
         effective_load_settings = load_settings
         effective_load_filaments = load_filaments
         if not effective_load_settings and not effective_load_filaments:
-            no_skirt_profile = self._default_no_skirt_profile(output_dir)
+            no_skirt_profile = self._default_no_skirt_profile(output_dir, experiment_spec=experiment_spec)
+            if no_skirt_profile.get('reason') == 'profile_resolution_failed':
+                return self._blocked('BAMBU_SLICER_PROFILE_INVALID', slicer_profile=no_skirt_profile)
             if no_skirt_profile.get("ok"):
                 effective_load_settings = no_skirt_profile["load_settings"]
                 effective_load_filaments = no_skirt_profile["load_filaments"]
@@ -830,10 +834,14 @@ class BambuStudioSlicerRunner:
                     skipping = False
                 continue
             if skipping:
+                if line.strip().startswith(('; CHANGE_LAYER', '; MACHINE_START_GCODE_END', '; EXECUTABLE_BLOCK_END')):
+                    return gcode, 0
                 if BambuStudioSlicerRunner._is_front_test_line_end(line):
                     skipping = False
                 continue
             output.append(line)
+        if skipping:
+            return gcode, 0
         return "".join(output), removed_blocks
 
     @staticmethod
@@ -849,7 +857,8 @@ class BambuStudioSlicerRunner:
 
     @staticmethod
     def _is_front_test_line_end(line: str) -> bool:
-        lower = str(line or "").strip().lower()
+        # X2D vendor template spells its closing marker "noozle".
+        lower = str(line or "").strip().lower().replace('noozle', 'nozzle')
         if not lower.startswith(";") or "end" not in lower:
             return False
         return bool(
@@ -858,7 +867,7 @@ class BambuStudioSlicerRunner:
             or re.search(r"\b(?:test|intro|prime)\s+line\b", lower)
         )
 
-    def _default_no_skirt_profile(self, output_dir: Path) -> dict[str, Any]:
+    def _default_no_skirt_profile(self, output_dir: Path, *, experiment_spec: dict[str, Any] | None = None) -> dict[str, Any]:
         if not self.config.auto_no_skirt_profile:
             return {"ok": False, "auto_no_skirt_profile": False, "reason": "disabled"}
         machine = self._resolve_bambu_profile(
@@ -891,14 +900,33 @@ class BambuStudioSlicerRunner:
         machine_out = profile_dir / "machine.json"
         process_out = profile_dir / "process.no-skirt.json"
         filament_out = profile_dir / "filament.json"
-        machine_out.write_bytes(machine.read_bytes())
-        filament_out.write_bytes(filament.read_bytes())
         try:
-            process_payload = json.loads(process.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            process_payload = {}
-        if not isinstance(process_payload, dict):
-            process_payload = {}
+            machine_payload = resolve_profile(machine)
+            process_payload = resolve_profile(process)
+            filament_payload = resolve_profile(filament)
+        except (OSError, ValueError) as exc:
+            return {'ok': False, 'reason': 'profile_resolution_failed', 'error': str(exc)}
+        # Successful X2D/PLA setup: resolved vendor defaults, Textured PEI,
+        # arc fitting off. Operator/experiment values remain authoritative.
+        saved = load_prusa_print_profile(self.repo_root / 'memory/prusa_print_profile.json')
+        spec = experiment_spec if isinstance(experiment_spec, dict) else {}
+        constraints = spec.get('constraints') if isinstance(spec.get('constraints'), dict) else {}
+        effective = normalize_prusa_print_profile({**saved, **constraints, **spec})
+        def vector_like(value: Any, previous: Any) -> list[str]:
+            return [format(float(value), 'g')] * max(1, len(previous) if isinstance(previous, list) else 1)
+        process_payload.update({
+            'curr_bed_type': 'Textured PEI Plate',
+            'enable_arc_fitting': '0',
+            'layer_height': format(effective['layer_height_mm'], 'g'),
+            'initial_layer_print_height': format(effective['first_layer_height_mm'], 'g'),
+        })
+        if effective['slow_first_layer_enabled']:
+            process_payload['initial_layer_speed'] = vector_like(effective['first_layer_speed_mm_s'], process_payload.get('initial_layer_speed'))
+            process_payload['initial_layer_infill_speed'] = vector_like(effective['first_layer_speed_mm_s'], process_payload.get('initial_layer_infill_speed'))
+        filament_payload['textured_plate_temp'] = vector_like(effective['bed_temperature_c'], filament_payload.get('textured_plate_temp'))
+        filament_payload['textured_plate_temp_initial_layer'] = vector_like(effective['first_layer_bed_temperature_c'], filament_payload.get('textured_plate_temp_initial_layer'))
+        machine_out.write_text(json.dumps(machine_payload, indent=2) + '\n', encoding='utf-8')
+        filament_out.write_text(json.dumps(filament_payload, indent=2) + '\n', encoding='utf-8')
         process_payload.update(
             {
                 "skirt_loops": "0",
@@ -916,6 +944,8 @@ class BambuStudioSlicerRunner:
         return {
             "ok": True,
             "auto_no_skirt_profile": True,
+            "inheritance_resolved": True,
+            "print_settings": {key: effective[key] for key in ('layer_height_mm', 'first_layer_height_mm', 'slow_first_layer_enabled', 'first_layer_speed_mm_s', 'bed_temperature_c', 'first_layer_bed_temperature_c')},
             "machine_profile_path": str(machine),
             "process_profile_path": str(process),
             "filament_profile_path": str(filament),
@@ -3841,6 +3871,7 @@ class PrinterDeviceBridgeManager:
             if source_path:
                 slicer_result = BambuStudioSlicerRunner(self.config.slicer, repo_root=self.repo_root).slice(
                     source_path=source_path,
+                    experiment_spec=payload.get('experiment_spec'),
                     specimen_placement=placement_from_payload(payload),
                     specimen_id=str(payload.get("specimen_id") or "bambu-specimen"),
                     load_settings=print_payload.get("load_settings") or payload.get("load_settings") or None,
@@ -4210,6 +4241,7 @@ class PrinterDeviceBridgeManager:
                 }
             slicer_result = BambuStudioSlicerRunner(self.config.slicer, repo_root=self.repo_root).slice(
                 source_path=source_path,
+                experiment_spec=payload.get('experiment_spec'),
                 specimen_placement=placement_from_payload(payload),
                 specimen_id=str(payload.get("specimen_id") or "bambu-specimen"),
                 load_settings=print_payload.get("load_settings") or payload.get("load_settings") or None,

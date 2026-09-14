@@ -343,6 +343,47 @@ def test_live_rollout_wrapper_installs_omx_action_logger(monkeypatch) -> None:
     assert calls == ["units", "depth", "action_log", "record"]
 
 
+def test_live_rollout_wrapper_runs_rtc_inside_existing_entrypoint(monkeypatch) -> None:
+    calls: list[str] = []
+    import scripts.lerobot_live_rollout_wrapper as wrapper
+
+    monkeypatch.setattr(sys, "argv", ["lerobot_live_rollout_wrapper.py", "--rtc.enabled=true"])
+    monkeypatch.setattr(wrapper, "install_omx_follower_runtime_units_patch", lambda: calls.append("units"))
+    monkeypatch.setattr(wrapper, "install_live_depth_observation_patch", lambda: calls.append("depth"))
+    monkeypatch.setattr(wrapper, "install_omx_follower_action_logger", lambda: calls.append("action_log"))
+    monkeypatch.setattr(wrapper, "_lerobot_record_main", lambda: lambda: calls.append("record"))
+    monkeypatch.setattr(wrapper, "_lerobot_rtc_main", lambda: lambda: calls.append("rtc"))
+
+    wrapper.main()
+
+    assert calls == ["units", "depth", "action_log", "rtc"]
+
+
+def test_live_rollout_rtc_retries_transient_omx_observation_timeout(monkeypatch) -> None:
+    class FakeOmxFollower:
+        calls = 0
+
+        def get_observation(self):
+            self.calls += 1
+            if self.calls < 3:
+                raise TimeoutError("transient wrist frame timeout")
+            return {"wrist": "frame"}
+
+    module_name = "lerobot.robots.omx_follower.omx_follower"
+    fake_module = types.ModuleType(module_name)
+    fake_module.OmxFollower = FakeOmxFollower
+    monkeypatch.setitem(sys.modules, module_name, fake_module)
+    monkeypatch.setenv("ATR_LEROBOT_RTC_OBSERVATION_RETRIES", "3")
+    monkeypatch.setenv("ATR_LEROBOT_RTC_OBSERVATION_RETRY_DELAY_S", "0")
+
+    import scripts.lerobot_live_rollout_wrapper as wrapper
+
+    assert wrapper._install_rtc_observation_retry() is True
+    robot = FakeOmxFollower()
+    assert robot.get_observation() == {"wrist": "frame"}
+    assert robot.calls == 3
+
+
 def test_live_rollout_wrapper_defaults_omx_action_log_env(monkeypatch) -> None:
     import scripts.lerobot_live_rollout_wrapper as wrapper
 

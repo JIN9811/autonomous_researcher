@@ -109,7 +109,7 @@ Recommended:
 Run from PowerShell:
 
 ```powershell
-cd C:\Users\user\Documents\autonomous_researcher
+cd "$env:USERPROFILE\Documents\autonomous_researcher"
 py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip setuptools wheel
@@ -212,7 +212,7 @@ For SmolVLA training/rollout experiments, install the LeRobot extra and cache
 the required Hub repos in that same `lerobot` environment:
 
 ```bash
-cd /home/jin/lerobot
+cd ~/lerobot
 conda run --no-capture-output -n lerobot python -m pip install -e ".[smolvla]"
 conda run --no-capture-output -n lerobot hf download lerobot/smolvla_base --max-workers 1
 conda run --no-capture-output -n lerobot hf download HuggingFaceTB/SmolVLM2-500M-Video-Instruct --exclude "onnx/*" --max-workers 1
@@ -305,6 +305,8 @@ atr down
 ```
 
 `atr down` targets this checkout's `app.serve` process. During clean shutdown, the server releases LeRobot live subprocesses tied to this checkout so stale teleoperation/recording jobs do not keep cameras or serial ports open.
+
+Use `atr restart` to run the same `down` command followed by `up`. If `down` fails, it does not start a replacement. Existing shutdown/cleanup behavior and `ATR_DOWN_FORCE` apply unchanged; the restarted server runs in the foreground like `atr up`. Finish active work before using it.
 
 ## CLI Help
 

@@ -190,6 +190,9 @@ class MainController:
         self._planning_session_id: str | None = None
         self._planning_bootstrapped = False
         self._planning_request_lock = asyncio.Lock()
+        from app.test_scenario import TestScenarioInput
+        self._test_scenario = TestScenarioInput(self)
+        self._test_input_revision = 0
         self._planning_handoff_task: asyncio.Task[dict[str, Any]] | None = None
         self._vllm_transition_task: asyncio.Task[dict[str, Any]] | None = None
         self._vision_specimen_retry_locks: dict[str, asyncio.Lock] = {}
@@ -2845,6 +2848,7 @@ class MainController:
             "goal",
             "constraints",
             "operator_intent",
+            "input_source",
             "command_id",
             "program_id",
             "check_id",
@@ -2940,7 +2944,9 @@ class MainController:
 
     def _reset_planning_transcript(self) -> None:
         """Select a fresh session directory without deleting prior evidence."""
+        self._test_scenario.cancel()
         self._planning_messages = []
+        self._test_input_revision += 1
         self._planning_message_total = 0
         self._planning_session_id = make_planning_session_id()
         self._canonical_planning_transcript_path = (
@@ -2950,6 +2956,8 @@ class MainController:
 
     def _record_planning_message(self, entry: dict[str, Any]) -> dict[str, Any]:
         """Persist the full chat message to disk and keep only a recent memory window."""
+        if entry.get("role") == "operator" and self._test_scenario.is_submitting():
+            entry = {**entry, "input_source": "test_scenario"}
         self._seed_planning_transcript_count()
         stored = self._json_safe_planning_message(entry)
         index = self._planning_message_total
@@ -2992,6 +3000,7 @@ class MainController:
             "pendingReasoning",
             "pending_operator_input",
             "requires_response",
+            "input_source",
         }
         compact = {key: entry.get(key) for key in compact_keys if key in entry}
         compact.update(self._planning_knowledge_metadata(entry))
@@ -4859,6 +4868,8 @@ class MainController:
     async def stop(self) -> dict[str, Any]:
         """Request stop for active run."""
         self._state.stop_requested = True
+        self._test_scenario.cancel()
+        self._test_input_revision += 1
         replay_stop = await asyncio.to_thread(self._stop_managed_replay, reason="operator_stop")
         self._cancel_operator_teleop_handoffs(reason="operator_stop")
         if self._run_task and not self._run_task.done():
@@ -4876,6 +4887,8 @@ class MainController:
     async def safe_stop(self) -> dict[str, Any]:
         """Request safe stop for active run."""
         self._state.safe_stop_requested = True
+        self._test_scenario.cancel()
+        self._test_input_revision += 1
         replay_stop = await asyncio.to_thread(self._stop_managed_replay, reason="operator_safe_stop")
         self._cancel_operator_teleop_handoffs(reason="operator_safe_stop")
         await self._emit_control_event(
@@ -5153,6 +5166,8 @@ class MainController:
         is_new_source = self._record_safety_source(clean_source, details)
         already_latched = self._state.emergency_stop_requested
         self._state.emergency_stop_requested = True
+        self._test_scenario.cancel()
+        self._test_input_revision += 1
         replay_stop = await asyncio.to_thread(self._stop_managed_replay, reason=f"emergency_stop:{clean_source}")
         self._state.stop_requested = True
         self._state.safe_stop_requested = False
@@ -5360,8 +5375,16 @@ class MainController:
         constraints: dict[str, Any] | None = None,
         session_id: str | None = None,
         setup_context: dict | None = None,
+        expected_pending_id: str | None = None,
     ) -> dict[str, Any]:
         """Run the top-level orchestrator model for live-planning discussion only."""
+        automatic_input = self._test_scenario.is_submitting()
+        if self._test_scenario.active and not automatic_input:
+            if message.strip() == self._test_scenario.trigger_message:
+                return {"ok": True, "message": "Test scenario input already active.", "session": self.planning_snapshot()}
+            self._test_scenario.cancel()
+        if automatic_input and self._test_scenario._stopped():
+            return {"ok": False, "message": "Automatic input stopped."}
         # Exact standalone safety controls bypass both model and planning lock.
         # Quotes, questions, negations and longer prose are not stop commands.
         safety_command = message.strip().casefold()
@@ -5389,6 +5412,8 @@ class MainController:
         if setup_context is not None:
             self._validate_setup_context(setup_context, session_id)
         scope = self._planning_intake_scope()
+        if expected_pending_id is not None and (not scope["pending"] or scope["pending"]["pending_id"] != expected_pending_id):
+            return {"ok": False, "message": "Pending request changed; automatic reply discarded."}
         from knowledge.chat_memory import manage_memory
         memory_result = manage_memory(self, clean_message, session_id)
         if memory_result is not None:
@@ -5405,6 +5430,8 @@ class MainController:
                 "settings": planning_decision_settings(self._planning_setup_catalog(), self._deps.orchestrator_agent_name)})
         if scope != self._planning_intake_scope():
             return {"ok": False, "message": "Request scope changed while classifying; review the current request.", "session": self.planning_snapshot()}
+        if expected_pending_id is not None and intake["intent"] != "confirm_pending":
+            return {"ok": False, "message": "Reply did not confirm the current request; no action taken."}
         if self._explicit_memory_text(clean_message) is not None:
             intake["intent"] = "question"
         if intake["intent"] == "question":
@@ -5637,7 +5664,8 @@ class MainController:
             metadata = self._state.run_metadata
             metadata.setdefault("operator_followup_context", []).append({"message": message, "source": "planning_reply"})
             metadata["orchestrator_review_revision"] = int(metadata.get("orchestrator_review_revision", 0)) + 1
-            return await self._handoff_planning_to_design(goal=boundary["goal"],
+            handoff = self._start_planning_handoff_background if self._test_scenario.is_submitting() else self._handoff_planning_to_design
+            return await handoff(goal=boundary["goal"],
                 constraints=deepcopy(boundary["constraints"]), new_series=False)
         target_agent = str(
             constraints.get("live_chat_target_resolved")
@@ -5721,7 +5749,7 @@ class MainController:
                 self._ensure_pending_specimen_printer_choice()
             return await self._handle_pending_specimen_operator_input(message=message, session_id=session_id)
 
-        if can_start and not runtime_followup_active and self._should_trigger_test_design(message):
+        if can_start and not runtime_followup_active and self._should_trigger_test_design(message) and not self._test_scenario.is_submitting():
             return await self._run_test_mode_planning(goal=goal, constraints=constraints, operator_message=message)
 
         if can_confirm and not runtime_followup_active and self._should_route_specimen_printer_choice(message):
@@ -5732,9 +5760,17 @@ class MainController:
             readiness = self._planning_design_handoff_readiness(goal=goal, constraints=constraints)
             if readiness["missing"]:
                 return await self._request_missing_design_values(readiness, session_id=session_id)
-            return await self._handoff_planning_to_design(
+            admitted = dict(readiness.get("constraints", constraints))
+            if self._state.mode == Mode.LIVE and not self._is_planning_test_spec(admitted):
+                # Semantic start admission is explicit execution intent; opening
+                # the GUI or building a preview never enters this branch.
+                print_request = dict(admitted.get("print") or {})
+                print_request.setdefault("start_immediately", True)
+                admitted["print"] = print_request
+            handoff = self._start_planning_handoff_background if self._test_scenario.is_submitting() else self._handoff_planning_to_design
+            return await handoff(
                 goal=str(readiness.get("goal") or goal or self._state.active_goal),
-                constraints=dict(readiness.get("constraints", constraints)),
+                constraints=admitted,
             )
 
         prompt = await self._build_live_orchestrator_prompt(
@@ -5871,7 +5907,8 @@ class MainController:
         constraints: dict[str, Any],
         operator_message: str,
     ) -> dict[str, Any]:
-        """Let the orchestrator LLM choose concrete test values, then hand off to DesignAgent."""
+        """Generate test input, then submit it through the ordinary planning chat."""
+        input_revision = self._test_input_revision
         base_goal = goal or "테스트 모드 TPMS gyroid(PLA) 압축 시편 설계"
         defaults = self._default_test_constraints(constraints)
         inline_printer_choice = self._parse_inline_test_mode_printer_choice(operator_message)
@@ -5893,11 +5930,6 @@ class MainController:
                 test_constraints = self._apply_specimen_printer_choice_to_spec(test_constraints, inline_printer_choice)
             else:
                 test_constraints = self._strip_specimen_printer_choice_from_spec(test_constraints)
-            if not self._capture_pending_setup()[1]:
-                test_constraints = self._seed_initial_bo_design_constraints(
-                    test_constraints,
-                    total_cycles=self._planning_cycle_limit(test_constraints),
-                )
             assistant_entry = {
                 "role": "orchestrator",
                 "content": (
@@ -5918,9 +5950,11 @@ class MainController:
                 level="INFO",
                 message=response_message,
             )
-            if inline_printer_choice:
-                return await self._start_planning_handoff_background(goal=test_goal, constraints=test_constraints)
-            return await self._handoff_planning_to_design(goal=test_goal, constraints=test_constraints)
+            if input_revision != self._test_input_revision or self._state.emergency_stop_requested:
+                return {"ok": False, "message": "Test input cancelled by a control/session change."}
+            started = self._test_scenario.start(goal=test_goal, constraints=test_constraints, trigger_message=operator_message.strip())
+            return {"ok": started, "message": "Automatic test scenario input scheduled." if started else "Test scenario input already active.",
+                    "session": self.planning_snapshot()}
         except Exception as exc:
             assistant_entry = {
                 "role": "orchestrator",
@@ -5952,7 +5986,7 @@ class MainController:
                 self._planning_handoff_task = None
             try:
                 done.result()
-            except Exception:
+            except (Exception, asyncio.CancelledError):
                 pass
 
         task.add_done_callback(_clear)
@@ -6069,7 +6103,7 @@ class MainController:
             )
         return await self._handoff_planning_to_design(goal=goal, constraints=design_constraints, new_series=False)
 
-    async def _start_planning_handoff_background(self, *, goal: str | None, constraints: dict[str, Any]) -> dict[str, Any]:
+    async def _start_planning_handoff_background(self, *, goal: str | None, constraints: dict[str, Any], new_series: bool = True) -> dict[str, Any]:
         """Return the Live GUI request before the full test/live planning loop blocks fetch."""
         if self._planning_handoff_active():
             await self._append_planning_message(
@@ -6112,7 +6146,8 @@ class MainController:
 
         async def _runner() -> dict[str, Any]:
             try:
-                return await self._handoff_planning_to_design(goal=goal, constraints=constraints)
+                return await self._handoff_planning_to_design(goal=goal, constraints=constraints,
+                    **({"new_series": False} if not new_series else {}))
             except Exception as exc:
                 await self._append_planning_message(
                     {
@@ -6129,6 +6164,8 @@ class MainController:
 
         task = asyncio.create_task(_runner())
         self._set_planning_handoff_task(task)
+        if self._test_scenario.is_submitting():
+            self._test_scenario.track_admission(task)
         return {"ok": True, "message": "Planning handoff started in background.", "session": self.planning_snapshot()}
 
     async def _build_live_orchestrator_prompt(
@@ -9492,7 +9529,13 @@ class MainController:
 
     def _planning_tail_stages(self, start: Stage) -> set[Stage]:
         """Return active graph stages handled by the post-Specimen planning tail."""
-        stages = self._active_graph_stage_sequence(start, stop_at=Stage.GUARDIAN, include_start=True)
+        config = self._active_graph_config()
+        # Message eligibility is not a prediction of the next default edge.
+        # Conditional/revisited nodes (e.g. manipulation and clear) emit their
+        # own execution events and must remain visible when they actually run.
+        stages = ([Stage(node.stage) for node in config.nodes if node.stage in Stage._value2member_map_]
+                  if config is not None else
+                  self._active_graph_stage_sequence(start, stop_at=Stage.GUARDIAN, include_start=True))
         return {stage for stage in stages if stage not in {Stage.IDLE, Stage.DESIGN, Stage.SPECIMEN, Stage.COMPLETE, Stage.ERROR}}
 
     def _planning_stage_label(self, stage: Stage, module_runtime: dict[str, Any] | None = None) -> str:
@@ -10299,7 +10342,10 @@ class MainController:
             },
             "ejection": {
                 **(constraints.get("ejection") if isinstance(constraints.get("ejection"), dict) else {}),
-                "enabled": bool(validated_defaults.get("allow_ejection", False)),
+                "enabled": bool((constraints.get("ejection") or {}).get("enabled",
+                    (constraints.get("ejection") or {}).get("allow_ejection",
+                        live_physical_print or validated_defaults.get("allow_ejection", False))))
+                    if isinstance(constraints.get("ejection", {}), dict) else bool(live_physical_print),
             },
             "equipment_profile_id": str(pick("equipment_profile_id", "utm_windows_v1")),
         }

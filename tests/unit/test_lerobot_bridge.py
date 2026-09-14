@@ -4917,6 +4917,7 @@ def test_xvla_rollout_uses_generic_lerobot_runtime_without_act_temporal_ensemble
             "profile_id": "fake_omx_ai",
             "policy_path": "fake://xvla_policy",
             "policy_type": "xvla",
+            "rollout_inference_type": "rtc",
             "continuous_rollout": True,
             "camera_enabled": True,
         }
@@ -4944,6 +4945,7 @@ def test_smolvla_rollout_uses_generic_lerobot_runtime_without_act_temporal_ensem
             "profile_id": "fake_omx_ai",
             "policy_path": "fake://smolvla_policy",
             "policy_type": "smolvla",
+            "rollout_inference_type": "sync",
             "continuous_rollout": True,
             "camera_enabled": True,
         }
@@ -4960,6 +4962,37 @@ def test_smolvla_rollout_uses_generic_lerobot_runtime_without_act_temporal_ensem
     assert "--policy.n_action_steps=1" not in result["command_preview"]
     assert "--rtc.enabled=true" not in result["command_preview"]
     assert all(not item.startswith("--robot.max_relative_target=") for item in result["command_preview"])
+
+
+@pytest.mark.parametrize("policy_type", ["smolvla", "pi0", "pi0fast"])
+def test_supported_policy_rtc_stays_on_live_rollout_path_with_common_settings(tmp_path: Path, policy_type: str) -> None:
+    bridge = _bridge(tmp_path)
+
+    result = bridge.rollout_start(
+        {
+            "mode": "test",
+            "profile_id": "fake_omx_ai",
+            "policy_path": f"fake://{policy_type}_policy",
+            "policy_type": policy_type,
+            "rollout_inference_type": "rtc",
+            "rollout_rtc_execution_horizon": 20,
+            "rollout_rtc_max_guidance_weight": 1.0,
+            "rollout_action_queue_size_to_get_new_actions": 60,
+            "continuous_rollout": True,
+            "camera_enabled": True,
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["command_preview"][result["command_preview"].index("-n") + 1] == "lerobot-pi05-torch211"
+    assert not any(Path(part).name == "lerobot_pi05_rollout_wrapper.py" for part in result["command_preview"])
+    assert any(Path(part).name == "lerobot_live_rollout_wrapper.py" for part in result["command_preview"])
+    assert f"--policy.path=fake://{policy_type}_policy" in result["command_preview"]
+    assert "--rtc.enabled=true" in result["command_preview"]
+    assert "--rtc.execution_horizon=20" in result["command_preview"]
+    assert "--rtc.max_guidance_weight=1.0" in result["command_preview"]
+    assert "--action_queue_size_to_get_new_actions=60" in result["command_preview"]
+    assert not any(item.startswith("--inference.") for item in result["command_preview"])
 
 
 def test_rollout_control_fps_can_differ_from_camera_fps(tmp_path: Path) -> None:
@@ -9640,11 +9673,11 @@ def test_lerobot_cleanup_marker_matching_does_not_match_gui_dom_ids() -> None:
     assert LeRobotBridge._cmdline_matches_lerobot_marker(["lerobot-rollout"], markers)
     assert LeRobotBridge._cmdline_matches_lerobot_marker(["python", "-m", "lerobot.rollout"], markers)
     assert LeRobotBridge._cmdline_matches_lerobot_marker(
-        ["python", "/home/jin/autonomous_researcher/scripts/lerobot_pi05_rollout_wrapper.py"],
+        ["python", "/tmp/atr-fixture/autonomous_researcher/scripts/lerobot_pi05_rollout_wrapper.py"],
         markers,
     )
     assert LeRobotBridge._cmdline_matches_lerobot_marker(
-        ["python", "/home/jin/autonomous_researcher/scripts/lerobot_live_rollout_wrapper.py"],
+        ["python", "/tmp/atr-fixture/autonomous_researcher/scripts/lerobot_live_rollout_wrapper.py"],
         markers,
     )
     assert LeRobotBridge._cmdline_matches_lerobot_marker(["python", "eval.py", "--rtc.enabled=true"], markers)
@@ -9694,7 +9727,7 @@ def test_project_lerobot_pids_matches_isaac_mirror_runtime_wrapper_by_workflow(t
 def test_lerobot_display_viewer_marker_matching_targets_teleop_rerun_only() -> None:
     assert LeRobotBridge._cmdline_matches_lerobot_display_viewer(
         [
-            "/home/jin/miniconda3/envs/lerobot/bin/rerun",
+            "/tmp/atr-fixture/miniconda3/envs/lerobot/bin/rerun",
             "--port=9876",
             "--memory-limit=10%",
             "--expect-data-soon",

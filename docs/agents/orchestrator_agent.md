@@ -16,6 +16,7 @@ source_of_truth:
   - app/controller.py
   - app/main.py
   - app/planning_setup.py
+  - app/test_scenario.py
   - orchestrator/experimental_setup.py
   - orchestrator/setup_application.py
   - orchestrator/langgraph_runtime.py
@@ -37,6 +38,10 @@ supersedes: []
 ![orchestrator agent role overview](assets/figures/orchestrator-overview.webp)
 
 *Conceptual role overview; editable, inspection-backed architecture figures follow.*
+
+Test scenarios use the same chat admission and graph as operator-led experiments. After an operator selects a test mode, automatic operator messages supply the scenario and scoped existing input values; they do not bypass ORC decisions or manufacture device evidence. See [Test Mode](../runtime/test_mode.md) for input lifecycle, mode policies and non-actuating verification boundaries.
+
+The High-layer intake contract identifies standalone test commands and explicit experiment starts as start requests, leaving missing-value collection to admission. Questions, negations and Setup-only edits remain non-executing. Registered GPT API and local Gemma 31B verification covered 68 classification cases and 12 controller startup cases, with execution stopped before Design dispatch.
 
 ## Status at a Glance
 

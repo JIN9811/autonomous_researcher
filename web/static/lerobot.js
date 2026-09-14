@@ -68,6 +68,7 @@ const rolloutMaxRelativeTargetInput = $("lerobot-rollout-max-relative-target-inp
 const rolloutShoulderLiftBackstopInput = $("lerobot-rollout-shoulder-lift-backstop-input");
 const rolloutTemporalEnsembleInput = $("lerobot-rollout-temporal-ensemble-input");
 const rolloutTemporalCoeffInput = $("lerobot-rollout-temporal-coeff-input");
+const rolloutRtcEnabledInput = $("lerobot-rollout-rtc-enabled-input");
 const rolloutRtcHorizonInput = $("lerobot-rollout-rtc-horizon-input");
 const rolloutRtcGuidanceInput = $("lerobot-rollout-rtc-guidance-input");
 const rolloutActionQueueInput = $("lerobot-rollout-action-queue-input");
@@ -82,6 +83,7 @@ const manipulationMaxRelativeTargetInput = $("lerobot-manipulation-max-relative-
 const manipulationShoulderLiftBackstopInput = $("lerobot-manipulation-shoulder-lift-backstop-input");
 const manipulationTemporalEnsembleInput = $("lerobot-manipulation-temporal-ensemble-input");
 const manipulationTemporalCoeffInput = $("lerobot-manipulation-temporal-coeff-input");
+const manipulationRtcEnabledInput = $("lerobot-manipulation-rtc-enabled-input");
 const manipulationRtcHorizonInput = $("lerobot-manipulation-rtc-horizon-input");
 const manipulationRtcGuidanceInput = $("lerobot-manipulation-rtc-guidance-input");
 const manipulationActionQueueInput = $("lerobot-manipulation-action-queue-input");
@@ -876,26 +878,36 @@ function setRolloutOptionDisabled(input, disabled) {
   if (label) label.classList.toggle("muted", Boolean(disabled));
 }
 
-function syncRolloutPolicyOptions() {
-  const type = selectedRolloutPolicyType().toLowerCase();
-  const isAct = type === "act";
-  const isPi05 = type === "pi05";
-  setRolloutOptionDisabled(rolloutTemporalEnsembleInput, !isAct);
-  setRolloutOptionDisabled(rolloutTemporalCoeffInput, !isAct);
-  setRolloutOptionDisabled(rolloutRtcHorizonInput, !isPi05);
-  setRolloutOptionDisabled(rolloutRtcGuidanceInput, !isPi05);
-  setRolloutOptionDisabled(rolloutActionQueueInput, !isPi05);
+const RTC_POLICY_TYPES = new Set(["smolvla", "pi0", "pi05", "pi0fast"]);
+const RTC_DEFAULT_ENABLED_POLICY_TYPES = new Set();
+
+function syncRtcPolicyOptions(type, enabledInput, settingsInputs, resetToPolicyDefault = false) {
+  const policyType = String(type || "").trim().toLowerCase();
+  const supported = RTC_POLICY_TYPES.has(policyType);
+  if (enabledInput) {
+    if (!supported) enabledInput.checked = false;
+    else if (resetToPolicyDefault) enabledInput.checked = RTC_DEFAULT_ENABLED_POLICY_TYPES.has(policyType);
+    setRolloutOptionDisabled(enabledInput, !supported);
+  }
+  const enabled = supported && Boolean(enabledInput && enabledInput.checked);
+  settingsInputs.forEach((input) => setRolloutOptionDisabled(input, !enabled));
+  return { supported, enabled };
 }
 
-function syncManipulationPolicyOptions() {
+function syncRolloutPolicyOptions(resetRtcToPolicyDefault = false) {
+  const type = selectedRolloutPolicyType().toLowerCase();
+  const isAct = type === "act";
+  setRolloutOptionDisabled(rolloutTemporalEnsembleInput, !isAct);
+  setRolloutOptionDisabled(rolloutTemporalCoeffInput, !isAct);
+  syncRtcPolicyOptions(type, rolloutRtcEnabledInput, [rolloutRtcHorizonInput, rolloutRtcGuidanceInput, rolloutActionQueueInput], resetRtcToPolicyDefault);
+}
+
+function syncManipulationPolicyOptions(resetRtcToPolicyDefault = false) {
   const type = selectedManipulationPolicyType().toLowerCase();
   const isAct = type === "act";
-  const isPi05 = type === "pi05";
   setRolloutOptionDisabled(manipulationTemporalEnsembleInput, !isAct);
   setRolloutOptionDisabled(manipulationTemporalCoeffInput, !isAct);
-  setRolloutOptionDisabled(manipulationRtcHorizonInput, !isPi05);
-  setRolloutOptionDisabled(manipulationRtcGuidanceInput, !isPi05);
-  setRolloutOptionDisabled(manipulationActionQueueInput, !isPi05);
+  syncRtcPolicyOptions(type, manipulationRtcEnabledInput, [manipulationRtcHorizonInput, manipulationRtcGuidanceInput, manipulationActionQueueInput], resetRtcToPolicyDefault);
 }
 
 function parseObservation() {
@@ -1246,6 +1258,8 @@ function rolloutPayload(overrides = {}) {
   const policy = rolloutPolicyFields();
   const rolloutPolicyType = selectedRolloutPolicyType();
   const rolloutPolicyTypeKey = rolloutPolicyType.toLowerCase();
+  const rtcSupported = RTC_POLICY_TYPES.has(rolloutPolicyTypeKey);
+  const rtcEnabled = rtcSupported && boolValue(rolloutRtcEnabledInput);
   payload.policy_path = policy.policy_path;
   payload.policy_checkpoint_path = policy.policy_checkpoint_path;
   payload.policy_repo_id = policy.policy_path ? "" : policy.policy_repo_id;
@@ -1270,10 +1284,10 @@ function rolloutPayload(overrides = {}) {
   payload.rollout_shoulder_lift_backstop = rolloutShoulderLiftBackstopInput ? boolValue(rolloutShoulderLiftBackstopInput) : true;
   payload.rollout_temporal_ensemble = rolloutPolicyTypeKey === "act" && (rolloutTemporalEnsembleInput ? boolValue(rolloutTemporalEnsembleInput) : true);
   payload.rollout_temporal_ensemble_coeff = numberValue(rolloutTemporalCoeffInput, 0.01);
-  payload.rollout_inference_type = rolloutPolicyTypeKey === "pi05" ? "rtc" : "";
-  payload.rollout_rtc_execution_horizon = rolloutPolicyTypeKey === "pi05" ? numberValue(rolloutRtcHorizonInput, 20) : null;
-  payload.rollout_rtc_max_guidance_weight = rolloutPolicyTypeKey === "pi05" ? numberValue(rolloutRtcGuidanceInput, 1.0) : null;
-  payload.rollout_action_queue_size_to_get_new_actions = rolloutPolicyTypeKey === "pi05" ? numberValue(rolloutActionQueueInput, 60) : null;
+  payload.rollout_inference_type = rtcEnabled ? "rtc" : (rtcSupported ? "sync" : "");
+  payload.rollout_rtc_execution_horizon = rtcEnabled ? numberValue(rolloutRtcHorizonInput, 20) : null;
+  payload.rollout_rtc_max_guidance_weight = rtcEnabled ? numberValue(rolloutRtcGuidanceInput, 1.0) : null;
+  payload.rollout_action_queue_size_to_get_new_actions = rtcEnabled ? numberValue(rolloutActionQueueInput, 60) : null;
   return payload;
 }
 
@@ -1281,6 +1295,8 @@ function currentRolloutProfile() {
   const policy = rolloutPolicyFields();
   const policyType = selectedRolloutPolicyType();
   const policyTypeKey = policyType.toLowerCase();
+  const rtcSupported = RTC_POLICY_TYPES.has(policyTypeKey);
+  const rtcEnabled = rtcSupported && boolValue(rolloutRtcEnabledInput);
   const durationRaw = rolloutDurationInput && rolloutDurationInput.value.trim()
     ? rolloutDurationInput.value.trim()
     : "";
@@ -1301,10 +1317,10 @@ function currentRolloutProfile() {
     rollout_shoulder_lift_backstop: rolloutShoulderLiftBackstopInput ? boolValue(rolloutShoulderLiftBackstopInput) : true,
     rollout_temporal_ensemble: policyTypeKey === "act" && (rolloutTemporalEnsembleInput ? boolValue(rolloutTemporalEnsembleInput) : true),
     rollout_temporal_ensemble_coeff: numberValue(rolloutTemporalCoeffInput, 0.01),
-    rollout_inference_type: policyTypeKey === "pi05" ? "rtc" : "",
-    rollout_rtc_execution_horizon: policyTypeKey === "pi05" ? numberValue(rolloutRtcHorizonInput, 20) : null,
-    rollout_rtc_max_guidance_weight: policyTypeKey === "pi05" ? numberValue(rolloutRtcGuidanceInput, 1.0) : null,
-    rollout_action_queue_size_to_get_new_actions: policyTypeKey === "pi05" ? numberValue(rolloutActionQueueInput, 60) : null,
+    rollout_inference_type: rtcEnabled ? "rtc" : (rtcSupported ? "sync" : ""),
+    rollout_rtc_execution_horizon: rtcEnabled ? numberValue(rolloutRtcHorizonInput, 20) : null,
+    rollout_rtc_max_guidance_weight: rtcEnabled ? numberValue(rolloutRtcGuidanceInput, 1.0) : null,
+    rollout_action_queue_size_to_get_new_actions: rtcEnabled ? numberValue(rolloutActionQueueInput, 60) : null,
     observation: parseObservation(),
   };
 }
@@ -1356,9 +1372,15 @@ function applyRolloutProfile(profile, force = false) {
   setCheckboxValue(rolloutShoulderLiftBackstopInput, profile.rollout_shoulder_lift_backstop);
   setCheckboxValue(rolloutTemporalEnsembleInput, profile.rollout_temporal_ensemble);
   setInputValue(rolloutTemporalCoeffInput, profile.rollout_temporal_ensemble_coeff);
-  setInputValue(rolloutRtcHorizonInput, profile.rollout_rtc_execution_horizon);
-  setInputValue(rolloutRtcGuidanceInput, profile.rollout_rtc_max_guidance_weight);
-  setInputValue(rolloutActionQueueInput, profile.rollout_action_queue_size_to_get_new_actions);
+  const rolloutTypeKey = String(profile.policy_type || "smolvla").toLowerCase();
+  const rolloutInferenceType = String(profile.rollout_inference_type || "").toLowerCase();
+  setCheckboxValue(
+    rolloutRtcEnabledInput,
+    rolloutInferenceType === "rtc" || (!rolloutInferenceType && RTC_DEFAULT_ENABLED_POLICY_TYPES.has(rolloutTypeKey)),
+  );
+  setInputValue(rolloutRtcHorizonInput, profile.rollout_rtc_execution_horizon ?? 20);
+  setInputValue(rolloutRtcGuidanceInput, profile.rollout_rtc_max_guidance_weight ?? 1.0);
+  setInputValue(rolloutActionQueueInput, profile.rollout_action_queue_size_to_get_new_actions ?? 60);
   if (observationInput && profile.observation && typeof profile.observation === "object") {
     observationInput.value = JSON.stringify(profile.observation);
   }
@@ -1423,7 +1445,7 @@ function defaultManipulationTaskProfile(taskId = selectedManipulationTaskId()) {
     rollout_shoulder_lift_backstop: true,
     rollout_temporal_ensemble: true,
     rollout_temporal_ensemble_coeff: 0.01,
-    rollout_inference_type: "",
+    rollout_inference_type: "sync",
     rollout_rtc_execution_horizon: 20,
     rollout_rtc_max_guidance_weight: 1.0,
     rollout_action_queue_size_to_get_new_actions: 60,
@@ -1451,9 +1473,15 @@ function applyManipulationTaskProfile(taskId, profile = {}) {
   setCheckboxValue(manipulationShoulderLiftBackstopInput, merged.rollout_shoulder_lift_backstop);
   setCheckboxValue(manipulationTemporalEnsembleInput, merged.rollout_temporal_ensemble);
   setInputValue(manipulationTemporalCoeffInput, merged.rollout_temporal_ensemble_coeff);
-  setInputValue(manipulationRtcHorizonInput, merged.rollout_rtc_execution_horizon);
-  setInputValue(manipulationRtcGuidanceInput, merged.rollout_rtc_max_guidance_weight);
-  setInputValue(manipulationActionQueueInput, merged.rollout_action_queue_size_to_get_new_actions);
+  const manipulationTypeKey = String(merged.policy_type || "smolvla").toLowerCase();
+  const manipulationInferenceType = String(merged.rollout_inference_type || "").toLowerCase();
+  setCheckboxValue(
+    manipulationRtcEnabledInput,
+    manipulationInferenceType === "rtc" || (!manipulationInferenceType && RTC_DEFAULT_ENABLED_POLICY_TYPES.has(manipulationTypeKey)),
+  );
+  setInputValue(manipulationRtcHorizonInput, merged.rollout_rtc_execution_horizon ?? 20);
+  setInputValue(manipulationRtcGuidanceInput, merged.rollout_rtc_max_guidance_weight ?? 1.0);
+  setInputValue(manipulationActionQueueInput, merged.rollout_action_queue_size_to_get_new_actions ?? 60);
   if (manipulationObservationInput) {
     manipulationObservationInput.value = JSON.stringify(merged.observation || presetProfile.observation);
   }
@@ -1478,6 +1506,8 @@ function currentManipulationTaskProfile(taskId = selectedManipulationTaskId()) {
     : "";
   const continuous = !durationRaw;
   const policyTypeKey = policyType.toLowerCase();
+  const rtcSupported = RTC_POLICY_TYPES.has(policyTypeKey);
+  const rtcEnabled = rtcSupported && boolValue(manipulationRtcEnabledInput);
   return {
     manipulation_strategy: "lerobot_policy",
     policy_backend: "lerobot_cli",
@@ -1497,10 +1527,10 @@ function currentManipulationTaskProfile(taskId = selectedManipulationTaskId()) {
     rollout_shoulder_lift_backstop: manipulationShoulderLiftBackstopInput ? boolValue(manipulationShoulderLiftBackstopInput) : true,
     rollout_temporal_ensemble: policyTypeKey === "act" && (manipulationTemporalEnsembleInput ? boolValue(manipulationTemporalEnsembleInput) : true),
     rollout_temporal_ensemble_coeff: numberValue(manipulationTemporalCoeffInput, 0.01),
-    rollout_inference_type: policyTypeKey === "pi05" ? "rtc" : "",
-    rollout_rtc_execution_horizon: policyTypeKey === "pi05" ? numberValue(manipulationRtcHorizonInput, 20) : null,
-    rollout_rtc_max_guidance_weight: policyTypeKey === "pi05" ? numberValue(manipulationRtcGuidanceInput, 1.0) : null,
-    rollout_action_queue_size_to_get_new_actions: policyTypeKey === "pi05" ? numberValue(manipulationActionQueueInput, 60) : null,
+    rollout_inference_type: rtcEnabled ? "rtc" : (rtcSupported ? "sync" : ""),
+    rollout_rtc_execution_horizon: rtcEnabled ? numberValue(manipulationRtcHorizonInput, 20) : null,
+    rollout_rtc_max_guidance_weight: rtcEnabled ? numberValue(manipulationRtcGuidanceInput, 1.0) : null,
+    rollout_action_queue_size_to_get_new_actions: rtcEnabled ? numberValue(manipulationActionQueueInput, 60) : null,
     observation: parseJsonText(manipulationObservationInput, preset.observation),
   };
 }
@@ -1818,9 +1848,9 @@ function syncExcludeFlaggedEpisodesCheckboxes(source = null) {
 }
 
 function applyIsaacLabStandardDefaults() {
-  setInputValue(isaacSyntheticIsaacLabPathInput, "/home/jin/IsaacLab");
-  setInputValue(isaacSyntheticIsaacSimPythonInput, "/home/jin/IsaacSim/python.sh");
-  setInputValue(isaacSyntheticStagePathInput, "/home/jin/autonomous_researcher/sim/robotis_omx/scene/omx_table_layout.usda");
+  setInputValue(isaacSyntheticIsaacLabPathInput, "~/IsaacLab");
+  setInputValue(isaacSyntheticIsaacSimPythonInput, "~/IsaacSim/python.sh");
+  setInputValue(isaacSyntheticStagePathInput, "~/autonomous_researcher/sim/robotis_omx/scene/omx_table_layout.usda");
   setInputValue(isaacSyntheticMimicTrialsInput, 3);
   setInputValue(isaacSyntheticMimicNumEnvsInput, 3);
   setInputValue(isaacSyntheticRlTeacherStepsInput, 0);
@@ -2078,7 +2108,7 @@ function syncDatasetManageRootFromLocalPaths(force = false) {
     ? datasetRootInput.value.trim()
     : String((lastConfigPaths && lastConfigPaths.dataset_root) || "").trim();
   if (!localRoot) return;
-  const builtInDefaults = new Set(["", "/home/jin/.cache/huggingface/lerobot", "~/.cache/huggingface/lerobot"]);
+  const builtInDefaults = new Set(["", localRoot, "~/.cache/huggingface/lerobot"]);
   if (force || (!datasetManageRootInput.dataset.userEdited && builtInDefaults.has(current))) {
     datasetManageRootInput.value = localRoot;
   }
@@ -3086,7 +3116,7 @@ function applyPolicySelection(value, policyType = "", selectedPolicy = null) {
   } else {
     applyPolicyTypeDefaults();
   }
-  syncRolloutPolicyOptions();
+  syncRolloutPolicyOptions(true);
   return clean;
 }
 
@@ -3105,7 +3135,7 @@ function applyManipulationPolicySelection(value, policyType = "", selectedPolicy
   if (manipulationPolicyInput) manipulationPolicyInput.value = clean;
   if (manipulationPolicySelect) manipulationPolicySelect.value = clean;
   if (inferredPolicyType && manipulationPolicyTypeInput) manipulationPolicyTypeInput.value = inferredPolicyType;
-  syncManipulationPolicyOptions();
+  syncManipulationPolicyOptions(true);
   return clean;
 }
 
@@ -5687,7 +5717,8 @@ if (policyTypeInput) policyTypeInput.addEventListener("change", () => {
   applyPolicyTypeDefaults();
   syncTrainNamingFromDataset({ policyChanged: true });
 });
-if (rolloutPolicyTypeInput) rolloutPolicyTypeInput.addEventListener("change", () => syncRolloutPolicyOptions());
+if (rolloutPolicyTypeInput) rolloutPolicyTypeInput.addEventListener("change", () => syncRolloutPolicyOptions(true));
+if (rolloutRtcEnabledInput) rolloutRtcEnabledInput.addEventListener("change", () => syncRolloutPolicyOptions());
 if (datasetInput) {
   datasetInput.addEventListener("input", () => {
     markUserEdited(datasetInput);
@@ -5763,6 +5794,12 @@ if (manipulationPolicyInput) {
 }
 if (manipulationPolicyTypeInput) {
   manipulationPolicyTypeInput.addEventListener("change", async () => {
+    syncManipulationPolicyOptions(true);
+    await persistManipulationTaskProfile();
+  });
+}
+if (manipulationRtcEnabledInput) {
+  manipulationRtcEnabledInput.addEventListener("change", async () => {
     syncManipulationPolicyOptions();
     await persistManipulationTaskProfile();
   });

@@ -60,13 +60,13 @@ Analysis로 넘어갑니다. 장비 응답 성공만으로 이 조건을 대신�
 - Python 3.11 이상
 - Git
 - Bash terminal
-- 이 저장소: `/home/jin/autonomous_researcher`
+- 이 저장소: `~/autonomous_researcher`
 
 선택/장비별 필요:
 
 - vLLM/Nemoclaw: NVIDIA GPU, Docker/k3s, NemoClaw container
 - 3DP: Bambu Lab X2D가 기본 printer profile이며, Prusa MK4S는 명시 선택 profile로 유지된다. Bambu live camera proxy에는 `ffmpeg`가 필요하다.
-- Robot: `/home/jin/lerobot`, conda env `lerobot`, ROBOTIS/LeRobot 장비
+- Robot: `~/lerobot`, conda env `lerobot`, ROBOTIS/LeRobot 장비
 - Windows bridge: Windows PC, Python, PyAutoGUI bridge server
 - CAE live solver: CalculiX/Gmsh 또는 현재 bridge가 지원하는 solver 환경
 
@@ -75,7 +75,7 @@ Analysis로 넘어갑니다. 장비 응답 성공만으로 이 조건을 대신�
 ### 1.2 설치
 
 ```bash
-cd /home/jin/autonomous_researcher
+cd ~/autonomous_researcher
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -105,6 +105,8 @@ atr up
 ```bash
 atr down
 ```
+
+재시작은 `atr restart`를 사용한다. 기존 `down`이 성공하면 기존 `up`을 실행하며, 종료·정리 동작은 동일하다. 진행 중인 작업을 마친 뒤 사용한다.
 
 직접 실행이 필요할 때:
 
@@ -222,7 +224,7 @@ Live GUI agent 목록은 `web/static/planning.js` 하드코딩 값보다 `/api/r
 - GUI: `/lerobot`
 - profile/port memory: `memory/lerobot_device_ports.json`
 - conda env: `lerobot`
-- LeRobot checkout: `/home/jin/lerobot`
+- LeRobot checkout: `~/lerobot`
 
 처음 해야 할 일:
 
@@ -628,7 +630,7 @@ atr up
 직접 실행으로 traceback 확인:
 
 ```bash
-cd /home/jin/autonomous_researcher
+cd ~/autonomous_researcher
 source .venv/bin/activate
 python -m app.serve
 ```

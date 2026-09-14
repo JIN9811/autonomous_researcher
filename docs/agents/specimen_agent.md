@@ -303,6 +303,14 @@ printer manager, selected provider, Guardian/operator policy, or proof path.
 
 ### Digital Thread
 
+For default Bambu slicing, the existing preparation and virtual-preflight paths
+forward the experiment specification to the printer provider. Saved 3DP Print
+Defaults and experiment overrides therefore reach the resolved vendor profiles;
+explicit custom profiles remain unchanged. The [Bambu settings/mode contract](../device_bridges/bambu_x2d_bridge.md#effective-slicing-settings-and-execution-modes-2026-09-14)
+defines first-layer speeds and the distinction between physical printing,
+ejection-only testing, and non-actuating virtual preparation. Placement and
+autoejection authority remain with the provider.
+
 The digital thread links candidate/specimen IDs, source STL, slice/G-code,
 patched autoejection artifact, hashes, plate/job/provider identifiers, start
 gate/publish response, fresh post-publish status, monitoring, camera/bed-clear
