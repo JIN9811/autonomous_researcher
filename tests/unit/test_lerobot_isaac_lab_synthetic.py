@@ -3151,7 +3151,9 @@ def test_isaac_lab_mimic_and_rl_hooks_track_hdf5_readiness(tmp_path: Path) -> No
     assert build["ok"] is True
     assert build["mimic"]["status"] == "blocked"
     assert build["mimic"]["blocker"] == "MIMIC_HDF5_EXPORT_MISSING"
-    assert build["mimic"]["required_subtasks"] == ["approach", "grasp", "lift", "place", "release"]
+    assert build["mimic"]["required_subtasks"] == [
+        "approach", "grasp", "lift", "place", "cube_lifted", "released_at_target",
+    ]
     assert build["rl_teacher"]["status"] == "blocked"
     assert build["rl_teacher"]["blocker"] == "RL_TEACHER_HDF5_EXPORT_MISSING"
     assert (output_root / "mimic" / "summary.json").is_file()
@@ -3196,6 +3198,8 @@ def test_isaac_lab_mimic_and_rl_hooks_track_hdf5_readiness(tmp_path: Path) -> No
         "cube_lifted",
         "released_at_target",
     ]
+    assert export["mimic"]["required_subtasks"] == build["mimic"]["required_subtasks"]
+    assert export["mimic"]["required_subtasks"] == env_manifest["subtask_termination_signals"]
     assert {term["id"] for term in env_manifest["reward_terms"]} == {
         "reach_object",
         "grasp_candidate",
