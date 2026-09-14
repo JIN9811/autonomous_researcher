@@ -96,7 +96,7 @@ When replacing internals with real programs, keep these output keys stable.
 | `vision` | `observation` | `observation`, `protocol_note` | 3DP output pickup observation via `camera.capture` |
 | `manipulation` | none | `manipulation`, `manipulation_report`, `robot_task_result`, `handoff_packet`, `protocol_note` | bounded robot skills through `robot.pick_place` or Pi0.5/LeRobot rollout |
 | `equipment` | `equipment_result`, `protocol_note` | `equipment_result`, `protocol_note`, `equipment_handoff` | Windows PyAutoGUI bridge macro runner or legacy UTM runner |
-| `analysis` | `analysis` | `analysis` | UTM curve feature extraction + CAE closed-loop objective/uncertainty post-processor |
+| `analysis` | `analysis` | `analysis` | Experimental curve processing, metric extraction and configured objective evaluation |
 | `knowledge` | none | `knowledge` | local+web RAG and memory writer |
 | `guardian` | `guardian` | `guardian` | safety/policy engine |
 
@@ -207,12 +207,10 @@ Current tool-level event producer:
 - `printer.prepare` emits per-step progress for the Specimen Making Agent path.
 - `lerobot.*` emits per-step progress for the Manipulation Agent / LeRobot path.
 - `equipment.pyautogui.run` emits per-step progress for the Equipment Agent / Windows GUI macro path.
-- `cae.run_static_analysis` provides bottom-fixed/top-cyclic CAE metrics for Analysis Agent and `/cae`.
 - Main loop stage order includes `Manipulation -> Equipment -> Analysis`; Equipment stage results are stored in `run_metadata.equipment_result`, `run_metadata.equipment_handoff`, and summary fields under `latest_analysis`.
 - Equipment validation requires `equipment_result` and `protocol_note`. If `equipment_result.ok` is false, the loop retries or errors instead of continuing to Analysis.
 - Analysis Agent reads UTM data from `run_metadata.equipment_result.utm_data`/`utm_curve`/`curve` or from `result_file`/`result_path`/CSV/JSON paths.
 - Test mode may synthesize a deterministic UTM curve when no data is available; live mode must not fabricate UTM metrics and returns `UTM_DATA_REQUIRED` when no readable data is present.
-- Test mode also runs deterministic equivalent CAE when `cae.run_static_analysis` is registered; Analysis blends CAE structural score into `objective_score` and records `analysis.closed_loop_sources`.
 - Typical steps: `PRECHECK`, `RESOLVE_STL`, `PRUSALINK_STORAGE`, `VALIDATE_MESH`, `SLICE`, `VALIDATE_GCODE`, `UPLOAD`, `START_PRINT`, `MONITOR_PRINT`, `COOLDOWN`, `AUTO_EJECT`, `VERIFY_EJECTED`, `DONE`.
 - Runtime events are best-effort UI/logging signals and must not alter hardware safety gates.
 
@@ -230,7 +228,6 @@ Current tool names expected by agents:
 - `equipment.pyautogui.connection_status`
 - `equipment.pyautogui.save_connection`
 - `cae.health`
-- `cae.run_static_analysis`
 - `calculix.health`
 - `calculix.prepare_input`
 - `calculix.solve`
@@ -317,10 +314,9 @@ Equipment-specific integration rule:
 
 Analysis/BO/Guardian multi-fidelity integration rule:
 
-- `AnalysisAgent` owns the multi-fidelity evidence envelope for UTM, CalculiX/CAE, and optional PINN evidence.
+- `AnalysisAgent` owns measured-data evidence, processed curves, metrics and the configured objective.
 - Analysis emits `analysis.multifidelity_comparison` with schema `multifidelity_comparison.v1`, `analysis.trust_score` with schema `trust_score.v1`, and `bo_handoff.schema_version=analysis_bo_handoff_v2`.
 - `experiments.schemas` defines additive typed records: `UTMRecord`, `FEAResult`, `PINNModelRecord`, `MultifidelityJob`, and `TrustScore`.
-- `device_bridges/calculix_bridge.py` is the explicit real CalculiX job contract. It must block real solves unless `runtime_solver_enabled=true`; this prevents hidden solver launches during test or GUI preview.
 - `device_bridges/pinn_bridge.py` is the explicit PINN/surrogate contract. If no active model is registered, `pinn.predict` returns `PINN_MODEL_UNAVAILABLE`; Analysis should display PINN as unavailable, not as a failed experiment.
 - `BOAgent` must read `analysis_bo_handoff_v2.trust_score` and `multifidelity_comparison`; `trust_gate=block` or `calibrate_only` prevents BO from treating the result as a normal optimization observation.
 - `GuardianAgent` must inspect `trust_score` and `multifidelity_comparison`. A blocking trust gate is a recoverable consistency issue unless a higher-priority stop condition exists.
@@ -420,7 +416,7 @@ Frequently written by run loop merge:
   - `layer_height_mm=0.2`
   - `storage=internal`
 - In normal Live GUI mode, `실험 수행` builds `experiment_spec.print` with `start_immediately=true` and `confirm_physical_print=true`, so Specimen Making Agent proceeds through the active printer bridge. The default bridge is Bambu Lab X2D; PrusaLink upload/start is used only when Prusa MK4S is explicitly selected.
-- In Live GUI `테스트 모드` and Main GUI `test`, the generated TPMS gyroid cell size comes from the 3DP GUI saved `test_unit_cell_size_mm`, defaulting to `cell_size_mm=10.0`.
+- In Live GUI `테스트 모드` and Main GUI `test`, the generated TPMS gyroid cell size comes from the 3D GUI saved `test_unit_cell_size_mm`, defaulting to `cell_size_mm=10.0`.
 - In Live GUI `테스트 모드` and Main GUI `test`, `print.start_immediately` remains false until Specimen Making Agent asks for a printer path. Choosing `설치 프린터` promotes the printer step to the selected-printer ejection-only project-file path derived from the actual sliced artifact. Choosing `실제 출력` promotes the printer step to the full physical upload/start/print path.
 - Live GUI one-shot commands `테스트 모드, 가상 브릿지`, `테스트 모드, 설치 프린터`, `테스트 모드, 실제 프린터`, and `테스트 모드, 실제 출력` inject the selected `printer_test_path` before DesignAgent handoff, so Specimen Making Agent proceeds without the separate printer-path prompt.
 - If any required value is missing, the Live GUI must append an Orchestrator message that includes:
@@ -517,7 +513,7 @@ Live Lab Equipment failures are still analysis events, even when they are not ac
 
 - `analysis.artifact_refs` and top-level `knowledge_payload.raw_artifact_refs` preserve UTM CSV paths, screen evidence, bridge artifact IDs, and nested `equipment_report` / `utm_data_ready` evidence refs.
 - `analysis.failure_tags` and `knowledge_payload.failure_tags` include the Analysis failure code, Equipment handoff failure code, signal-quality failure code, and live handoff blockers.
-- `analysis.knowledge_payload` is populated for `EQUIPMENT_HANDOFF_NOT_READY`, `UTM_DATA_REQUIRED`, and `UTM_DATA_*` signal-quality blocks so Knowledge/Guardian/Self-Evolution can learn from failed runs instead of losing provenance.
+- `analysis.knowledge_payload` is populated for `EQUIPMENT_HANDOFF_NOT_READY`, `UTM_DATA_REQUIRED`, and `UTM_DATA_*` signal-quality blocks so Knowledge and Guardian can retain failed-run provenance for later improvement analysis.
 - Blocked payloads do not mark the experiment as Analysis-ready. `bo_observation.status` is `blocked`, and `equipment_handoff_gate.status` remains `blocked` when Equipment proof gates are incomplete.
 
 This implements the Improvement 05 rule that data success, save/export success, and analysis success are separate gates. A failed handoff must remain traceable through raw artifacts and failure tags, not disappear because Analysis refused to compute objective metrics.

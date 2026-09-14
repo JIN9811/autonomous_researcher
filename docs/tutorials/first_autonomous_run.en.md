@@ -90,7 +90,7 @@ If live gate blocks, the run should stop before hardware start and show reason c
 2. Wait for orchestrator handoff line.
 3. Confirm Design and Specimen stages create valid candidate + artifacts.
 4. Confirm downstream stages continue according to graph transitions.
-5. Inspect BO/CAE/analysis artifacts in run artifact panel.
+5. Inspect BO/analysis artifacts in run artifact panel.
 
 ## 6) Verify Artifact Lineage and Trace
 

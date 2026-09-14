@@ -16,7 +16,6 @@ from agents.bo.agent import BOAgent
 from agents.core.knowledge.agent import KnowledgeAgent
 from knowledge.experiment_db import ExperimentDB
 from knowledge.stores import JsonlKnowledgeStore
-from mcp_tools.cae_tools import register_cae_tools
 from mcp_tools.experiment_tools import register_experiment_tools
 from mcp_tools.tool_registry import ToolRegistry
 from objectives.metric_registry import MetricRegistry
@@ -190,11 +189,6 @@ async def test_objective_compiler_analysis_knowledge_bo_survives_restart(tmp_pat
 
     tools = ToolRegistry()
     tools.register_resource("objective.service", service)
-    register_cae_tools(
-        tools,
-        {"devices": {"cae": {"enabled": True, "mode": "test", "artifact_dir": "artifacts/cae"}}},
-        repo_root=tmp_path,
-    )
     register_experiment_tools(tools)
     state = OrchestratorState(
         run_id="run-objective-e2e",

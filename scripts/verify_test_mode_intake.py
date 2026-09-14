@@ -33,62 +33,108 @@ CASES = [
 
 
 async def controller_cases(ctx, root, backend):
-    """Real chat/classifier/generation/readiness; stop before Design dispatch."""
+    """Compatibility CLI flag; verify the current dialogue admission contract."""
+    return await dialogue_cases(ctx, root, backend)
+
+
+async def dialogue_cases(ctx, root, backend, selected_cases=None):
+    """Real models, ordinary dialogue + Setup; execution intercepted before Design."""
     from scripts.verify_orchestrator_setup import controller_for, settle_verification_controller
+    from agents.module_discovery import discover_agent_modules
+    from app.planning_dialogue import dialogue_for, plain_message
     from orchestrator.state import Mode
     from copy import deepcopy
     rows = []
-    inputs = [("virtual", "테스트 모드, 가상 브릿지", "virtual_bridge"),
-              ("installed", "테스트 모드, 실제 프린터", "installed_printer"),
-              ("physical", "테스트 모드, 실제 출력", "physical_print"),
-              ("installed_alias", "테스트 모드, 설치 프린터", "installed_printer"),
-              ("experiment", "실험 수행", None),
-              ("missing_inputs", "실험 수행", None)]
-    for name, message, path in inputs:
-        c = controller_for(ctx, root / backend / name, lifecycle_requests=[])
+    cases = [("virtual", "테스트 모드, 가상 브릿지", "virtual_bridge"),
+             ("installed", "테스트 모드, 실제 프린터", "installed_printer"),
+             ("physical", "테스트 모드, 실제 출력", "physical_print"),
+             ("human_ko", None, None), ("human_en", None, None)]
+    for name, trigger, path in cases:
+        if selected_cases and name not in selected_cases:
+            continue
+        c = controller_for(ctx, root / backend / ("dialogue_" + name), lifecycle_requests=[])
+        for module in discover_agent_modules():
+            if module.agent_name not in c._deps.agent_registry.names():
+                c._deps.agent_registry.register_module(module)
         c._state.mode = Mode.LIVE
         c._bind_planning_session(None)
-        admitted = []
+        admitted, turns = [], []
         async def stop_before_design(*, goal, constraints, **kwargs):
             admitted.append({"goal": goal, "constraints": deepcopy(constraints),
                 "spec": c._build_planning_spec(base_spec={}, constraints=constraints)})
             return {"ok": True, "verification_boundary": "before_design_dispatch"}
         c._handoff_planning_to_design = stop_before_design
-        values = {"goal": "Compare energy absorption", "constraints": {
-            "material": "PLA", "geometry_type": "gyroid", "specimen_size_mm": [30, 30, 30]}} if name == "experiment" else {}
         began = time.monotonic()
         try:
-            result = await c.planning_message(message=message, **values)
-            if c._test_scenario.task:
-                await c._test_scenario.task
-            if c._planning_handoff_task:
-                await c._planning_handoff_task
-            if name == "missing_inputs":
-                passed = not admitted and any(m.get("requires_design_inputs") for m in c._planning_messages)
-            elif path:
-                passed = (len(admitted) == 1 and admitted[0]["constraints"].get("printer_test_path") == path
-                    and any(m.get("input_source") == "test_scenario" for m in c._planning_messages)
-                    and admitted[0]["spec"]["print"]["use_ejection_only_project_file"] == (path == "installed_printer"))
+            result = await c.bootstrap_live_orchestrator()
+            assert result["ok"], result.get("message")
+            if trigger:
+                result = await c.planning_message(message=trigger)
+                await asyncio.wait_for(c._test_scenario.task, 600)
+                if c._planning_handoff_task:
+                    await c._planning_handoff_task
             else:
-                passed = (len(admitted) == 1 and not admitted[0]["constraints"].get("test_mode_autofill")
-                    and admitted[0]["spec"]["print"]["start_immediately"] is True
-                    and admitted[0]["spec"]["ejection"]["enabled"] is True)
-            row = {"backend": backend, "case": "controller_" + name, "passed": bool(passed),
-                "latency_s": round(time.monotonic() - began, 3), "admitted": admitted,
-                "response": {k: result.get(k) for k in ("ok", "message")},
-                "messages": [{k: m.get(k) for k in ("role", "content", "input_source", "requires_design_inputs")}
-                             for m in c._planning_messages]}
+                messages = (["현재 가능한 실험 패키지는 뭐야?", "좋아요. 조건을 정해보죠.",
+                    "에너지 흡수를 개선하고 싶고 재료는 PLA로 할게요.", "그런데 AX4LAB에서 에이전트와 브릿지는 어떻게 달라?",
+                    "시편은 gyroid 구조로 가로 세로 높이 각각 30 mm로 해주세요.",
+                    "재료는 PETG로 변경할게요. 아직 시작하지는 마세요.", "네, 이 조건으로 실험을 시작해 주세요."]
+                    if name == "human_ko" else ["Which experiment packages are available?", "Yes, let's plan one.",
+                    "I want to improve energy absorption, using PLA.", "By the way, how do agents differ from device bridges in AX4LAB?",
+                    "Use a gyroid specimen measuring 30 by 30 by 30 mm.", "Change the material to PETG, but don't start yet.",
+                    "Yes, start the experiment with these conditions."])
+                for i, message in enumerate(messages):
+                    before = deepcopy(dialogue_for(c).values())
+                    result = await c.planning_message(message=message, session_id=c._planning_session_id)
+                    values = dialogue_for(c).values()
+                    assert result["ok"], result.get("message")
+                    if i == 3:
+                        assert values == before, "Question changed accepted research values"
+                    if i < len(messages)-1:
+                        assert not admitted, "Premature execution"
+                    if i == 5:
+                        assert values.get("material") == "PETG", values
+                    turns.append({"message": message, "values": values, "setup_revision": c._setup_store().snapshot()["revision"]})
+                # A model may explicitly re-review the revised material before
+                # accepting execution. Supply a real confirmation, not a bypass.
+                if not admitted and (dialogue_for(c).pending or {}).get("purpose") == "run_review":
+                    confirmation = "네, 방금 검토한 조건으로 실험 실행을 승인합니다." if name == "human_ko" else "Yes, I approve starting the experiment with the conditions you just reviewed."
+                    result = await c.planning_message(message=confirmation, session_id=c._planning_session_id)
+                    assert result["ok"], result.get("message")
+                    turns.append({"message": confirmation, "values": dialogue_for(c).values(),
+                        "setup_revision": c._setup_store().snapshot()["revision"]})
+            assert len(admitted) == 1, {"admitted": len(admitted), "driver": c._test_scenario.status, "last": c._planning_messages[-1:]}
+            actual = admitted[0]
+            assert actual["constraints"].get("printer_test_path") == path
+            if path:
+                assert actual["spec"]["print"]["use_ejection_only_project_file"] == (path == "installed_printer")
+            else:
+                assert actual["constraints"]["material"] == "PETG"
+                assert actual["spec"]["print"]["start_immediately"] is True
+            for m in c._planning_messages:
+                if m.get("role") in {"operator", "orchestrator"}:
+                    plain_message(m["content"])
+            row = {"passed": True}
+        except Exception as exc:
+            row = {"passed": False, "error": str(exc), "error_type": type(exc).__name__,
+                   "dialogue_diagnostic": getattr(dialogue_for(c), "last_error", None)}
         finally:
+            c._test_scenario.cancel()
+            if c._test_scenario.task:
+                await asyncio.gather(c._test_scenario.task, return_exceptions=True)
             await settle_verification_controller(c)
+        row.update(backend=backend, case="dialogue_" + name, latency_s=round(time.monotonic()-began, 3),
+            admitted=admitted, turns=turns, setup=c._planning_setup_projection(),
+            messages=[{k: m.get(k) for k in ("role", "content", "input_source")} for m in c._planning_messages])
         rows.append(row)
-        print(json.dumps({k: row[k] for k in ("backend", "case", "passed", "latency_s", "response")}, ensure_ascii=False), flush=True)
+        print(json.dumps({k: row.get(k) for k in ("backend", "case", "passed", "latency_s", "error")}, ensure_ascii=False), flush=True)
+        (root / (backend + "-dialogue-progress.json")).write_text(json.dumps(rows, ensure_ascii=False, indent=2))
     return rows
 
 
 async def verify(args):
     from scripts.orchestrator_verification_guard import VerificationGuard
     output = Path(tempfile.mkdtemp(prefix="validation-test-intake-", dir=ROOT / "runs")) / "report.json"
-    report = {"scope": "actual registered model chat classification only", "cases": [],
+    report = {"scope": "registered model dialogue before Design dispatch" if args.dialogue or args.controller else "actual registered model chat classification only", "cases": [],
               "physical_calls": 0, "execution_started": False}
     print(json.dumps({"report": str(output)}), flush=True)
     with VerificationGuard() as guard:
@@ -120,7 +166,12 @@ async def verify(args):
             observed = []
             original = provider.complete
             async def record(_original=original, **kwargs):
-                response = await _original(**kwargs)
+                try:
+                    response = await _original(**kwargs)
+                except Exception as exc:
+                    detail = getattr(getattr(exc, "response", None), "text", "")
+                    print(json.dumps({"backend": backend, "provider_error": type(exc).__name__, "detail": detail[:1200]}, ensure_ascii=False), flush=True)
+                    raise
                 observed.append({"model": (response.raw or {}).get("model"), "response": response.text})
                 return response
             provider.complete = record
@@ -129,8 +180,8 @@ async def verify(args):
                 force_real_llm_in_test=True, allow_mock_fallback=False, active_backend=backend)
             state = OrchestratorState(run_id="validation-test-intake", experiment_id="validation",
                                       mode=Mode.LIVE, stage=Stage.IDLE)
-            if args.controller:
-                rows = await controller_cases(ctx, output.parent, backend)
+            if args.controller or args.dialogue:
+                rows = await dialogue_cases(ctx, output.parent, backend, args.dialogue_case) if args.dialogue else await controller_cases(ctx, output.parent, backend)
                 models = sorted({r["model"] for r in observed if r.get("model")})
                 for row in rows:
                     row["served_models"] = models
@@ -166,6 +217,8 @@ if __name__ == "__main__":
     parser.add_argument("--repeat", type=int, default=1)
     parser.add_argument("--starts-only", action="store_true")
     parser.add_argument("--controller", action="store_true")
+    parser.add_argument("--dialogue", action="store_true")
+    parser.add_argument("--dialogue-case", action="append", choices=["virtual", "installed", "physical", "human_ko", "human_en"])
     args = parser.parse_args()
     if not args.execute:
         print(json.dumps({"execution": False, "cases": CASES}, ensure_ascii=False))

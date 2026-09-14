@@ -217,8 +217,7 @@ async def classify_chat_request(state, ctx, *, message: str, pending_id: str | N
                            'to be supplied with a test command; scenario generation supplies it. Bare test '
                            'mode still leaves printer selection to admission. An explicit 실험 수행 also '
                            'means start_run; admission collects missing inputs before execution. '
-                           'An [Automatic test input] scenario that explicitly requests experiment execution '
-                           'is also start_run, not a request to edit saved settings. When replying to a '
+                           'Natural requests to begin research planning are start_run; this is not execution approval. When replying to a '
                            'current printer-selection pending request, classify its selected option as '
                            'confirm_pending with that server pending_id instead of starting another run. '
                            'This contract does not override questions, negations, quotations, hypotheticals, '
@@ -239,6 +238,12 @@ async def classify_chat_request(state, ctx, *, message: str, pending_id: str | N
                       'the operator to explicitly request its described action. If fresh observation is '
                       'required, generic yes/continue is unclear; only an explicit fresh observation '
                       'request can confirm that pending action. '
+                      'For pending_request.kind conversation, use its purpose and recent conversation: '
+                      'agreement to begin_planning, a value answering provide_inputs, or agreement to run_review '
+                      'is confirm_pending with the current pending_id. begin_planning consent is not execution consent. '
+                      'With pending run_review, a request to start the AGREED experiment is confirm_pending; '
+                      'a request to plan a DIFFERENT experiment is start_run, never execution consent for the old review. '
+                      'A system question mid-conversation remains question and preserves the pending request. '
                       'Do not extract execution arguments.',
             'response_schema': {'intent': ['question', 'change_setup', 'start_run', 'confirm_pending', 'out_of_scope', 'unclear'],
                                 'reason': 'short explanation', 'pending_id': 'server pending ID or null'},

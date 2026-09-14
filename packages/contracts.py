@@ -68,6 +68,7 @@ class ExperimentalPackage(StrictModel):
     schema_: Literal["ax4lab.experimental_package.v1"] = Field(alias="schema")
     id: Identifier
     version: ExactVersion
+    display_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=160)] | None = None
     graph: PortableGraph
     agent_packages: list[PackageReference]
     bridge_modules: list[PackageReference] = Field(default_factory=list)

@@ -53,8 +53,6 @@ ACTION_SHIELDED_TOOLS = {
     "robot.pick_place",
     "equipment.pyautogui.run",
     "utm.run_protocol",
-    "self_evolution.activate",
-    "self_evolution.rollback",
     "graph.active_config.activate",
     "knowledge.memory.commit",
 }
@@ -271,7 +269,7 @@ def tool_requires_action_shield(tool: str) -> bool:
         return True
     if name in ACTION_SHIELDED_TOOLS:
         return True
-    return name.startswith(("lerobot.rollout.", "printer.", "self_evolution.", "graph.active_config."))
+    return name.startswith(("lerobot.rollout.", "printer.", "graph.active_config."))
 
 
 def _loop_count(state: Any, payload: dict[str, Any]) -> int:
@@ -589,7 +587,7 @@ def _tool_action_alarm_signals(
             add("HUMAN_APPROVAL_REQUIRED", "warning", "live printer action requires explicit physical print/ejection confirmation", "payload.print")
         return alarms
 
-    if name in {"self_evolution.activate", "self_evolution.rollback", "graph.active_config.activate", "knowledge.memory.commit"}:
+    if name in {"graph.active_config.activate", "knowledge.memory.commit"}:
         if not _bool_any(payload, ("human_approved", "operator_confirmed", "approved", "approval_resolved")):
             add("HUMAN_APPROVAL_REQUIRED", "warning", f"{name} requires an explicit operator approval record", "payload.human_approved")
     return alarms
@@ -1078,7 +1076,7 @@ def _risk_vector_for_alarms(alarms: list[dict[str, Any]], *, stage: str) -> dict
         "equipment": "equipment",
         "analysis": "data",
         "bo": "optimization",
-        "knowledge": "self_evolution",
+        "knowledge": "data",
         "specimen": "hardware",
         "design": "optimization",
     }.get(stage, "hardware")
@@ -1100,7 +1098,7 @@ def _risk_vector_for_alarms(alarms: list[dict[str, Any]], *, stage: str) -> dict
         elif reason.startswith("WORKFLOW"):
             key = stage_key
         elif reason.startswith("SELF_EVOLUTION"):
-            key = "self_evolution"
+            key = "data"
         elif reason.startswith("HUMAN") or reason.startswith("OPERATOR"):
             key = "operator"
         vector[key] = max(vector[key], score)

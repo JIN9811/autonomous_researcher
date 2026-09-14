@@ -127,8 +127,8 @@ def test_guardian_status_api_summarizes_risk_incidents_approvals_and_tool_calls(
         assert payload["safe_stop_verification"]["requested"] is True
         assert payload["evidence_completeness"]["schema"] == "guardian_evidence_completeness.v1"
         assert payload["summary"]["evidence_completeness_status"] in {"missing", "partial", "complete"}
-        assert payload["self_evolution_gate"]["schema"] == "guardian_self_evolution_gate.v1"
-        assert payload["summary"]["self_evolution_gate_status"] == payload["self_evolution_gate"]["status"]
+        assert "self_evolution_gate" not in payload
+        assert "self_evolution_gate_status" not in payload["summary"]
         assert payload["device_data_integrity"]["device_health"]["utm"] == "blocking:UTM_NO_MOTION"
         heartbeats = payload["device_data_integrity"]["live_device_heartbeat"]
         assert any(item["device_id"] == "utm" and item["heartbeat_status"] == "blocked" for item in heartbeats)

@@ -1,6 +1,6 @@
 """
 File purpose:
-- Retrieve guide/web knowledge, write validated experiment memory, and build self-evolution evidence packs.
+- Retrieve guide/web knowledge, write validated experiment memory, and build improvement evidence packs.
 
 Key classes/functions:
 - KnowledgeAgent
@@ -18,7 +18,7 @@ Dependencies:
 Modification guide:
 - Safe places to edit: memory extraction, evidence-pack ranking, report field additions
 - Risky places to edit: MemoryRecord compatibility and AgentResult.data["knowledge"] keys used by GUI/controller
-- Related files: knowledge/*, self_evolution/service.py, app/main.py
+- Related files: knowledge/*, app/main.py
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from typing import Any
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
 from agents.core.knowledge.decision import run_knowledge_decision
 from utils.agent_artifact_archive import archive_agent_run
-from knowledge.evolution_bridge import build_evidence_packs, build_outcomes_for_active_variants, map_pack_to_evolution_task
+from knowledge.improvement_evidence import build_evidence_packs, build_outcomes_for_active_variants
 from knowledge.graph_backend import graph_backend_from_env
 from knowledge.graph_importer import mirror_knowledge_records
 from knowledge.pattern_miner import build_agent_performance_records, rank_evolution_targets, update_failure_patterns, update_success_patterns
@@ -52,7 +52,7 @@ from orchestrator.state import OrchestratorState
 
 
 class KnowledgeAgent(BaseAgent):
-    """Handles retrieval, memory persistence, and self-evolution evidence preparation."""
+    """Handles retrieval, memory persistence, and improvement evidence preparation."""
 
     name = "knowledge_agent"
 
@@ -277,7 +277,6 @@ class KnowledgeAgent(BaseAgent):
             ranked_targets=ranked_targets,
             evidence_refs=artifact_refs,
         )
-        evolution_prefill = [map_pack_to_evolution_task(pack) for pack in evidence_packs]
         evolution_outcomes = build_outcomes_for_active_variants(
             run_id=state.run_id,
             performance_records=performance_records,
@@ -347,7 +346,6 @@ class KnowledgeAgent(BaseAgent):
             "run_id": state.run_id,
             "status": "ready" if evidence_packs else "no_evolution_needed",
             "evidence_packs": [pack.model_dump(mode="json") for pack in evidence_packs],
-            "prefill_tasks": evolution_prefill,
             "outcomes": evolution_outcome_payloads,
             "no_evolution_needed_reason": "No repeated failure, missing-field, retry, or warning pattern crossed the evidence threshold." if not evidence_packs else "",
         }
@@ -371,7 +369,6 @@ class KnowledgeAgent(BaseAgent):
             "agent_performance_records": [record.model_dump(mode="json") for record in performance_records],
             "failure_patterns": [record.model_dump(mode="json") for record in failure_patterns],
             "success_patterns": [record.model_dump(mode="json") for record in success_patterns],
-            "self_evolution": evolution_proposal,
             "evolution_outcomes": evolution_outcome_payloads,
             "data_quality_map": {
                 "artifact_link_coverage": artifact_quality,
@@ -416,7 +413,7 @@ class KnowledgeAgent(BaseAgent):
 
         return AgentResult(
             success=decision["status"] == "accepted",
-            summary=("Knowledge memory, Markdown context and evolution evidence update complete"
+            summary=("Knowledge memory, Markdown context and improvement evidence update complete"
                      if decision["status"] == "accepted" else "Knowledge decision failed; raw evidence and memory retained"),
             data={
                 "knowledge": {
@@ -433,7 +430,6 @@ class KnowledgeAgent(BaseAgent):
                     "knowledge_context": knowledge_context,
                     "knowledge_report": compact_knowledge_report,
                     "evolution_proposal": compact_evolution_proposal,
-                    "self_evolution": {"evidence_packs": compact_evidence_packs, "prefill_tasks": evolution_prefill, "outcomes": evolution_outcome_payloads},
                     "artifact_paths": artifact_paths,
                     "agent_performance_count": len(performance_records),
                     "failure_pattern_count": len(failure_patterns),
@@ -548,7 +544,7 @@ async def _notify_reconciliation_worker(ctx: AgentContext, graph_event_status: d
 
 
 def _guardian_incident_evidence_from_state(state: OrchestratorState) -> dict[str, Any]:
-    """Return Guardian incident/gate evidence for Knowledge and Self-Evolution intake."""
+    """Return Guardian incident/gate evidence for Knowledge improvement analysis."""
     metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
     incidents = _list_of_dicts(metadata.get("incident_records"))[-50:]
     gates = _list_of_dicts(metadata.get("guardian_gates"))[-80:]
@@ -704,7 +700,7 @@ def _deterministic_memory_summary(state: OrchestratorState, retrieval: dict[str,
     return (
         f"Deterministic Knowledge summary for {state.experiment_id}: "
         f"objective_score={score}, uncertainty={uncertainty}, retrieval_coverage={coverage}. "
-        "Preserve provenance, quality flags, and self-evolution evidence before BO/Guardian handoff."
+        "Preserve provenance, quality flags, and improvement evidence before BO/Guardian handoff."
     )[:500]
 
 
@@ -745,7 +741,6 @@ def _compact_record_artifacts(record: Any) -> Any:
 def _compact_knowledge_report(report: dict[str, Any], compact_evolution_proposal: dict[str, Any]) -> dict[str, Any]:
     """Return report payload suitable for Live GUI while full JSON remains in run artifacts."""
     compact = dict(report)
-    compact["self_evolution"] = compact_evolution_proposal
     compact["agent_performance_records"] = [_compact_record_artifacts(item) for item in list(compact.get("agent_performance_records", []))[:12]]
     compact["failure_patterns"] = [_compact_record_artifacts(item) for item in list(compact.get("failure_patterns", []))[:12]]
     compact["success_patterns"] = [_compact_record_artifacts(item) for item in list(compact.get("success_patterns", []))[:12]]

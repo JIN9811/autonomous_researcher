@@ -63,7 +63,7 @@ def test_printer_gui_route_loads() -> None:
     response = client.get("/printer")
 
     assert response.status_code == 200
-    assert "3DP Printer GUI" in response.text
+    assert "3D Printer GUI" in response.text
     assert "Bambu Lab Device Bridge" in response.text
     assert "printer-connection-serial-input" in response.text
     assert "printer-connection-access-code-input" in response.text

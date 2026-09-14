@@ -36,6 +36,10 @@ supersedes: []
 
 # UTM Vision Bridge Reference
 
+<img src="../../web/static/workspace_icons/camera.webp" width="96" alt="Vision Workspace icon">
+
+Main GUI: **Vision · Workspace** opens the camera bridge workspace in a separate window.
+
 ## Status at a Glance
 
 | At a glance | Details |

@@ -4,5 +4,4 @@ version: 1.0.0
 agent_module: {id: analysis, version: 1.0.0}
 handler: agent.analysis_agent
 module_reference: graphs/modules/analysis/module.yaml
-bridge_modules:
-  - {id: cae, version: 1.0.0}
+bridge_modules: []

@@ -1,0 +1,37 @@
+.knp { color:inherit; font-size:14px; line-height:1.5; min-width:0; }
+.knp-scope { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; color:#91aabb; margin-bottom:10px; overflow-wrap:anywhere; font-size:11px; }
+.knp-metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(100px,1fr)); gap:8px; margin:8px 0 12px; }
+.knp-metric { display:flex; flex-direction:column; gap:4px; padding:8px 0; }
+.knp-metric > span,.knp-metric small { color:#9bb3c5; font-size:11px; }
+.knp-metric strong { font-size:19px; color:#daeff5; font-weight:550; }
+.knp-table-wrap { overflow:auto; max-height:340px; }
+.knp table { width:100%; border-collapse:collapse; font-size:14px; }
+.knp th,.knp td { text-align:left; padding:7px 8px; border-bottom:1px solid #2a4052; }
+.knp th { font-weight:500; color:#a9c3d4; }
+.knp thead { background:transparent; }
+.knp caption { text-align:left; font-size:11px; color:#92adbd; padding-bottom:8px; }
+.knp-bar { display:flex; align-items:center; gap:7px; min-width:60px; }
+.knp-bar svg { width:60px; height:6px; flex:1; }
+.knp-bar b { min-width:20px; text-align:right; font-weight:500; }
+.knp-state { color:#a3b5c4; white-space:nowrap; }
+.knp-state[data-state="Used"] { color:#8bd5b5; }
+.knp-state[data-state="Delivered"],.knp-state[data-state="Retrieved"] { color:#8ed1df; }
+.knp-empty { padding:10px 0; color:inherit; font-size:14px; margin:0; }
+.knp-warning { color:#e7bd79; }
+.knp a { color:#8cc9de; }
+.knp-links { display:flex; gap:16px; }
+.knp details { margin-top:10px; font-size:11px; color:#9db3c4; overflow-wrap:anywhere; }
+.knp-memory-line { padding:9px 0; margin-top:6px; border-top:1px solid #2a4052; }
+.knp-supply-layout { display:block; }
+.knp-supply-layout > * { min-width:0; }
+.knp-supply-chart { overflow-x:auto; padding:0; margin:0 0 16px; }
+.knp-supply-chart svg { display:block; width:100%; max-width:1100px; min-width:650px; margin:auto; }
+.knp-supply-layout .knp-table-wrap { max-height:none; }
+.knp-supply-details { border-top:1px solid #344555; padding-top:10px; font-size:14px; }
+.knp-supply-details > summary { cursor:pointer; color:inherit; padding:4px 0; }
+.knp-supply-details[open] > summary { margin-bottom:12px; }
+.knp-legend { display:flex; flex-wrap:wrap; justify-content:center; gap:18px; font-size:11px; color:#9fb2bf; margin-bottom:5px; }
+.knp-legend span:first-child { color:#68b6cf; }
+.knp-legend span:nth-child(2) { color:#83cbb1; }
+.knp small { display:block; margin-top:8px; color:#94afc0; }
+@media(max-width:760px){.knp th,.knp td{padding:7px 5px}.knp-bar svg{width:35px}.knp-table-wrap{max-height:300px}}

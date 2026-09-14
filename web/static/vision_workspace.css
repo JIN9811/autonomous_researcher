@@ -1,0 +1,34 @@
+/* Presentation only: keep the existing Vision bridge controls and contracts. */
+.vision-utm-page { max-width: 1880px; }
+.vision-utm-page .page-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 24px; padding: 24px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--radius);
+}
+.vision-utm-page h1 { font-size: clamp(1.7rem, 2.5vw, 2.4rem); line-height: 1.15; margin-top: 6px; }
+.vision-utm-page h2 { font-size: 1.15rem; color: var(--primary); margin-bottom: 12px; }
+.vision-utm-page .subtitle { color: var(--muted); margin: 10px 0 0; line-height: 1.5; }
+.vision-utm-page .header-actions, .vision-camera-button-row,
+.vision-camera-frame-title-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.vision-utm-page .header-actions { flex-shrink: 0; }
+.vision-utm-page .workspace-status-grid,
+.vision-utm-page .printer-setup-grid,
+.vision-utm-page .settings-grid { display: grid; gap: 16px; }
+.vision-utm-page .printer-card { min-width: 0; }
+.vision-utm-page .status-card { margin: 0; }
+.vision-utm-page .settings-grid label { display: grid; gap: 7px; font-size: .82rem; color: var(--muted); min-width: 0; }
+.vision-utm-page .settings-grid input,
+.vision-utm-page .settings-grid select { width: 100%; min-width: 0; box-sizing: border-box; }
+.vision-camera-test-page { display: grid; gap: 18px; }
+.vision-utm-page .vision-camera-frame-placeholder,
+.vision-utm-page .vision-camera-rqt-flow,
+.vision-utm-page .vision-camera-test-guidance p,
+.vision-utm-page .vision-pose-summary-placeholder,
+.vision-utm-page .vision-pose-summary-grid > div { background: #f3f7ff; border-color: var(--line); }
+.vision-utm-page .vision-camera-page-tab.active { box-shadow: none; }
+.vision-utm-page .equipment-result-log { max-height: 360px; overflow: auto; }
+.vision-utm-page .equipment-command-banner { margin-bottom: 14px; }
+@media (max-width: 980px) {
+  .vision-utm-page .page-header { align-items: flex-start; flex-direction: column; gap: 16px; }
+  .vision-camera-page-tabs { flex-wrap: wrap; }
+}

@@ -6,6 +6,7 @@
 })(typeof window === 'object' ? window : this, function () {
   'use strict';
   const views = new WeakMap();
+  let cardSequence = 0;
 
   function beginEdit(block) {
     return { block_id: block.block_id, revision: block.revision };
@@ -37,17 +38,77 @@
     return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
   }
 
+  function fieldLabel(key) {
+    const labels = {goal:'Goal', 'research.goal':'Goal', material:'Material',
+      specimen_size_mm:'Specimen size', geometry_type:'Structure', experiment_domain:'Experiment type',
+      objective_type:'Objective', objective_direction:'Direction', cell_size_mm:'Cell size',
+      wall_thickness_mm:'Wall thickness', relative_density:'Relative density'};
+    return labels[key] || String(key).replace(/^conversation\.input\./, '').replace(/[_.]+/g, ' ').replace(/^./, s=>s.toUpperCase());
+  }
+
+  function readableValue(value, key) {
+    if (value === null || value === undefined || value === '') return 'Not set';
+    if (typeof value === 'boolean') return value ? 'Enabled' : 'Disabled';
+    if (Array.isArray(value)) {
+      const dimensions = /size_mm$|limit_mm$/.test(key) && value.length === 3;
+      return value.map(v=>readableValue(v, '')).join(dimensions ? ' × ' : ', ') + (dimensions ? ' mm' : '');
+    }
+    if (typeof value === 'object') return Object.entries(value).map(([k,v])=>`${fieldLabel(k)}: ${readableValue(v,k)}`).join('; ');
+    const unit = typeof value === 'number' ? (/mm_s$/.test(key) ? ' mm/s' : /_mm$/.test(key) ? ' mm' : /_percent$/.test(key) ? '%' : /_c$/.test(key) ? ' °C' : '') : '';
+    return String(value).replace(/_/g, ' ') + unit;
+  }
+
+  function currentValues(block) {
+    for (const values of [block.draft_values, block.confirmed_values, block.effective_values]) {
+      if (values && Object.keys(values).length) return values;
+    }
+    return {};
+  }
+
+  function shortStatus(block) {
+    if (block.package_summary) return block.active ? 'Bound' : 'Not bound';
+    if (block.active === false) return 'Inactive';
+    if (['failed','invalid','blocked'].includes(block.validation_status) || ['failed','blocked','rejected','partial','unknown'].includes(block.application_status)) return 'Needs attention';
+    if (block.application_status === 'applying') return 'Applying';
+    if (block.conversation_input) return 'Saved';
+    if (block.current_draft_proposal_id) return 'Unsaved changes';
+    if (block.application_status === 'applied') return 'Applied';
+    if (block.agreement_status === 'confirmed') return 'For next run';
+    return block.editable ? 'Current' : 'Read-only';
+  }
+
+  function setExpanded(card, expanded) {
+    card.body.hidden = !expanded;
+    card.toggle.setAttribute('aria-expanded', String(expanded));
+  }
+
+  function toggleCard(view, id) {
+    const at = view.expanded.indexOf(id);
+    if (at >= 0) view.expanded.splice(at, 1);
+    else { view.expanded.push(id); if (view.expanded.length > 3) view.expanded.shift(); }
+    for (const [key, card] of view.cards) setExpanded(card, view.expanded.includes(key));
+  }
+
   function makeCard(doc) {
     const card = element(doc, 'article', 'setup-block');
-    const title = element(doc, 'h3', 'setup-block-title');
+    const toggle = element(doc, 'button', 'setup-block-toggle');
+    toggle.type = 'button';
+    const title = element(doc, 'span', 'setup-block-title');
+    const preview = element(doc, 'span', 'setup-block-preview');
+    const badge = element(doc, 'span', 'setup-block-badge');
+    toggle.append(title, preview, badge);
+    const body = element(doc, 'div', 'setup-block-body');
+    body.setAttribute('id', `setup-card-body-${++cardSequence}`);
+    toggle.setAttribute('aria-controls', `setup-card-body-${cardSequence}`);
+    const readable = element(doc, 'dl', 'setup-readable-values');
     const meta = element(doc, 'p', 'setup-block-meta');
     const status = element(doc, 'p', 'setup-block-status');
     const timing = element(doc, 'p', 'setup-block-timing');
     const reason = element(doc, 'p', 'setup-readonly-reason');
     const editing = element(doc, 'p', 'setup-editing');
     const details = element(doc, 'details', 'setup-block-details');
-    const summary = element(doc, 'summary', '', 'Values and change diff');
-    details.append(summary);
+    const summary = element(doc, 'summary', '', 'Technical details');
+    details.append(summary, meta, status, timing, reason);
     const values = {};
     for (const label of ['Draft', 'Confirmed', 'Effective', 'Change diff', 'Receipts']) {
       const section = element(doc, 'section', 'setup-value-section');
@@ -62,12 +123,15 @@
       button.type = 'button'; button.dataset.setupAction = label.toLowerCase();
       actions.append(button); buttons[label] = button;
     }
-    card.append(title, meta, status, timing, editing, reason, details, actions);
-    return {card, title, meta, status, timing, editing, reason, details, values, buttons};
+    body.append(readable, editing, actions, details);
+    card.append(toggle, body);
+    const view = {card, toggle, body, title, preview, badge, readable, meta, status, timing, editing, reason, details, values, buttons};
+    setExpanded(view, false);
+    return view;
   }
 
   function updateCard(view, block, callbacks) {
-    const title = block.title || block.topic_key || block.block_id;
+    const title = block.title || fieldLabel(block.topic_key || block.block_id);
     const writable = block.active === true && block.editable === true;
     const request = callbacks.actionRequests && callbacks.actionRequests.get(block.block_id);
     const busy = Boolean(request && request.pending);
@@ -77,11 +141,31 @@
     view.card.dataset.blockId = block.block_id;
     view.card.dataset.revision = String(block.revision);
     view.card.dataset.editable = String(writable);
+    view.card.dataset.kind = block.package_summary ? 'package' : 'setting';
+    view.details.hidden = Boolean(block.package_summary);
     setText(view.title, title);
+    const entries = Object.entries(currentValues(block));
+    const preview = block.package_summary ? readableValue(currentValues(block).package, 'package')
+      : entries.map(([key,value])=>readableValue(value,key)).join(' · ') || 'Not set';
+    setText(view.preview, preview);
+    view.toggle.setAttribute('aria-label', `${title}: ${preview}`);
+    view.toggle.setAttribute('title', `${title}: ${preview}`);
+    setText(view.badge, shortStatus(block));
+    view.card.dataset.status = shortStatus(block).toLowerCase().replace(/ /g, '-');
+    const signature = JSON.stringify(entries);
+    if (view.readableSignature !== signature) {
+      view.readable.textContent = '';
+      entries.forEach(([key, value])=>view.readable.append(
+        element(view.card.ownerDocument, 'dt', '', fieldLabel(key)),
+        element(view.card.ownerDocument, 'dd', '', readableValue(value,key))));
+      view.readableSignature = signature;
+    }
     setText(view.meta, `Owner: ${(block.owners || []).join(', ') || 'Unknown'} · Revision ${block.revision}`);
     setText(view.status, `Agreement: ${block.agreement_status || 'unknown'} · Application: ${block.application_status || 'unknown'}${block.validation_status ? ` · Validation: ${block.validation_status}` : ''}`);
-    setText(view.timing, 'Apply time: next new run only. Confirming does not start a run.');
-    setText(view.editing, editing ? `Editing this block in Chat · revision ${context.revision}${context.revision !== block.revision ? ' (changed — select Edit again to use the latest revision)' : ''}` : '');
+    setText(view.timing, block.conversation_input
+      ? 'Research input saved from Chat. Review and approve execution in Chat.'
+      : 'Apply time: next new run only. Confirming does not start a run.');
+    setText(view.editing, editing ? (context.revision !== block.revision ? 'Updated since editing. Select Edit again.' : 'Editing in Chat') : '');
     view.editing.hidden = !editing;
     view.reason.hidden = writable;
     setText(view.reason, writable ? '' : `Read-only: ${block.readonly_reason || (block.active === false ? 'Inactive in the current graph.' : 'No supported writable setup contract.')}`);
@@ -102,6 +186,8 @@
         && request.body.proposal_id === block.current_draft_proposal_id && request.body.expected_revision === block.revision;
       setText(button, retry ? `Retry ${label.toLowerCase()}` : label);
       button.disabled = !writable || busy || (label !== 'Edit' && !draft);
+      if (block.conversation_input && label !== 'Edit') button.disabled = true;
+      button.hidden = Boolean(block.package_summary || (block.conversation_input && label !== 'Edit'));
       button.setAttribute('aria-label', `${retry ? 'Retry ' : ''}${label} ${title}`);
       button.onclick = () => { if (!button.disabled && callbacks[callback]) callbacks[callback](block); };
     }
@@ -117,22 +203,44 @@
       const notice = element(doc, 'p', 'setup-notice'); notice.setAttribute('role', 'status');
       const blocks = element(doc, 'div', 'setup-block-list');
       const owners = element(doc, 'div', 'setup-owner-list');
-      root.append(intro, notice, blocks, owners);
-      view = {intro, notice, blocks, owners, cards:new Map(), ownerCards:new Map()}; views.set(root, view);
+      const technical = element(doc, 'details', 'setup-technical');
+      technical.append(element(doc, 'summary', '', 'Technical details'), intro, owners);
+      root.append(notice, blocks, technical);
+      view = {intro, notice, blocks, owners, cards:new Map(), ownerCards:new Map(), expanded:[], sessionId:snapshot && snapshot.session_id}; views.set(root, view);
+    }
+    if (snapshot && view.sessionId !== snapshot.session_id) {
+      view.expanded = []; view.sessionId = snapshot.session_id;
+      for (const card of view.cards.values()) card.details.open = false;
     }
     setText(view.intro, snapshot ? `Setup revision ${snapshot.revision} · Availability is owner-reported; unknown is not ready.` : 'Waiting for the current session’s setup snapshot.');
     setText(view.notice, callbacks.notice || ''); view.notice.hidden = !callbacks.notice;
     const ids = new Set();
-    (snapshot && snapshot.blocks || []).forEach((block, index) => {
+    const blocks = [...(snapshot && snapshot.blocks || [])];
+    if (callbacks.graph !== undefined) {
+      const graph = callbacks.graph || {};
+      const pkg = graph.metadata && graph.metadata.experimental_package;
+      const bound = Boolean(pkg && pkg.id && pkg.version);
+      blocks.unshift({block_id:'__experimental_package__', title:'Experimental Package',
+        revision:0, package_summary:true, active:bound, editable:false,
+        readonly_reason:'Composition follows the active orchestration plan. Configure packages in Runtime IDE.',
+        draft_values:bound ? {package:pkg.display_name || pkg.id, package_id:pkg.id,
+          version:pkg.version, orchestration_plan:graph.name || graph.id} : {package:'Not bound',
+          orchestration_plan:graph.name || graph.id || 'Not bound'},
+        owners:[], agreement_status:'unknown', application_status:'not_applied'});
+    }
+    blocks.forEach((block, index) => {
       if (!block || !block.block_id || ids.has(block.block_id)) return;
       ids.add(block.block_id);
       let card = view.cards.get(block.block_id);
       if (!card) { card = makeCard(doc); view.cards.set(block.block_id, card); }
       updateCard(card, block, callbacks);
+      card.toggle.onclick = () => toggleCard(view, block.block_id);
+      setExpanded(card, view.expanded.includes(block.block_id));
       // Never detach an unchanged card: focus and details remain browser-owned.
       if (view.blocks.children[index] !== card.card) view.blocks.insertBefore(card.card, view.blocks.children[index] || null);
     });
     for (const [id, card] of view.cards) if (!ids.has(id)) { card.card.remove(); view.cards.delete(id); }
+    view.expanded = view.expanded.filter(id=>ids.has(id));
     const ownerIds = new Set();
     (snapshot && snapshot.owners || []).forEach((owner, index) => {
       const id = JSON.stringify([owner.owner, owner.node_id, owner.step_id, owner.module_id, owner.handler]);

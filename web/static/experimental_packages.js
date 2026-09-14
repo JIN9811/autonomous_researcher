@@ -212,12 +212,14 @@
     ));
   }
 
-  function buildExportPayload({ graph, agentPackages, moduleConfigurations, sourcePackage, id, version, bindings } = {}) {
+  function buildExportPayload({ graph, agentPackages, moduleConfigurations, sourcePackage, id, version, displayName, bindings } = {}) {
     const source = sourcePackage && typeof sourcePackage === "object" ? sourcePackage : {};
     return {
       schema: PACKAGE_SCHEMA,
-      id: String(id || source.id || packageId(graph?.id)),
-      version: String(version || source.version || "1.0.0"),
+      id: String(id || source.id || graph?.metadata?.experimental_package?.id || packageId(graph?.id)),
+      version: String(version || source.version || graph?.metadata?.experimental_package?.version || "1.0.0"),
+      ...(displayName || source.display_name || graph?.metadata?.experimental_package?.display_name
+        ? {display_name:String(displayName || source.display_name || graph.metadata.experimental_package.display_name)} : {}),
       graph: clone(graph || {}),
       agent_packages: uniqueRefs(agentPackages),
       module_configurations: clone(moduleConfigurations && typeof moduleConfigurations === "object" ? moduleConfigurations : {}),

@@ -213,22 +213,9 @@ def actual_controller(tmp_path, monkeypatch, request):
     from scripts.orchestrator_verification_guard import VerificationGuard
     with VerificationGuard() as guard:
         import app.bootstrap as bootstrap
-        from agents.analysis.runtime import AnalysisRuntimeService
         from knowledge.stores import JsonlKnowledgeStore
         memory = JsonlKnowledgeStore(memory_root=tmp_path / "memory/knowledge", run_root=tmp_path / "runs")
         monkeypatch.setattr(JsonlKnowledgeStore, "default", classmethod(lambda cls, project_root=None: memory))
-        from device_bridges.calculix_bridge import CalculiXBridge
-        def version_process(self, command, **kwargs):
-            assert kwargs["phase"] == "version" and command[-1] in {"-v", "--version"}, command
-            guard.simulated_boundary_requests.append({"tool": "solver.version", "command": command})
-            stdout = kwargs["workdir"] / "version.stdout.log"
-            stderr = kwargs["workdir"] / "version.stderr.log"
-            stdout.write_text("controlled non-executed solver version")
-            stderr.write_text("")
-            return {"status": "completed", "returncode": 0, "stdout_path": str(stdout), "stderr_path": str(stderr)}
-        monkeypatch.setattr(CalculiXBridge, "_run_process", version_process)
-        # Background compute is an explicit non-actuating boundary, not an owner.
-        monkeypatch.setattr(AnalysisRuntimeService, "resume", lambda *a, **k: False)
         configurations = bootstrap._load_configs()
         monkeypatch.setattr(bootstrap, "_load_configs", lambda: deepcopy(configurations))
         original_resolve = bootstrap.resolve_path
@@ -366,11 +353,6 @@ async def test_confirmed_setup_enters_original_initial_lhs_and_real_design(actua
         calibration["limitations"].append("controlled_fixture_not_measured")
         constraints.update(cae_reference_calibration=calibration, equipment_skill_registry_root=equipment["skills"],
             equipment_profile_id="utm_windows_v1")
-        from mcp_tools.cae_tools import register_cae_tools
-        register_cae_tools(controller._deps.agent_context.tools, {"devices": {"cae": {
-            "enabled": True, "mode": "test", "artifact_dir": str(tmp_path / "cae"),
-            "reference_utm_globs": [str(reference)], "reference_target_strain": .5,
-            "reference_specimen_size_mm": [30, 30, 30]}}}, repo_root=tmp_path)
         from mcp_tools.mock_tools import _device_health
         def health(payload):
             guard.simulated_boundary_requests.append({"tool": "device.health", "payload": deepcopy(payload)})

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Browser audit for the 3DP Printer / Bambu proof package workspace.
+"""Browser audit for the 3D Printer / Bambu proof package workspace.
 
 The audit is intentionally non-actuating. It opens `/printer`, verifies that the
 Bambu physical-proof controls render, creates a fail-closed proof template at a
@@ -48,7 +48,7 @@ def run_audit(base_url: str, out_dir: Path, *, width: int, height: int, geckodri
         wait_for_printer_workspace(driver)
         body_text = _visible_text(driver)
         required_text = [
-            "3DP Printer GUI",
+            "3D Printer GUI",
             "Bambu Lab Device Bridge",
             "Bambu G-code Autoejection",
             "Physical Proof Package",

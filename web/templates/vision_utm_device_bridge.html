@@ -3,16 +3,21 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{{ title }}</title>
+    <title>Vision Workspace</title>
     <link rel="icon" href="/favicon.ico" />
     <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="preload" as="image" href="/static/ax4lab-logo-transparent.png">
+    <link rel="stylesheet" href="/static/workspace_boot.css?v=1">
+    <link rel="stylesheet" href="/static/vision_workspace.css?v=1">
   </head>
   <body>
+    {% set workspace_title = "Vision Workspace" %}
+    {% include "workspace_boot.html" %}
     <main class="page equipment-setup-page printer-page vision-utm-page">
       <header class="page-header printer-header">
         <div>
           <p class="eyebrow">Device Workspace</p>
-          <h1>Vision Camera Device Bridge</h1>
+          <h1>Vision Workspace</h1>
           <p class="subtitle">Camera profile, UTM ROS runtime, frame evidence, and checkerboard calibration for the Vision Agent.</p>
         </div>
         <div class="header-actions">

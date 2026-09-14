@@ -1,15 +1,15 @@
-:root {
-  --knw-bg: #111820;
-  --knw-panel: #18222d;
-  --knw-panel-2: #1d2936;
-  --knw-line: #344455;
-  --knw-text: #e8eef5;
-  --knw-muted: #9caec0;
-  --knw-cyan: #46c7d9;
-  --knw-green: #42c98b;
-  --knw-amber: #e8b85f;
-  --knw-blue: #6d9ff2;
-  --knw-red: #eb7881;
+body.knowledge-page {
+  --knw-bg: var(--bg);
+  --knw-panel: var(--surface-strong);
+  --knw-panel-2: #f3f7ff;
+  --knw-line: var(--line);
+  --knw-text: var(--text);
+  --knw-muted: var(--muted);
+  --knw-cyan: var(--primary);
+  --knw-green: var(--ok);
+  --knw-amber: #96620b;
+  --knw-blue: var(--secondary);
+  --knw-red: var(--danger);
 }
 
 body.knowledge-page {
@@ -17,15 +17,15 @@ body.knowledge-page {
   min-width: 320px;
   color: var(--knw-text);
   background: var(--knw-bg);
-  font-family: "IBM Plex Sans", "Noto Sans KR", sans-serif;
+  font-family: "Space Grotesk", "Noto Sans KR", sans-serif;
 }
 
 .knowledge-shell {
   display: grid;
-  gap: 12px;
-  width: min(1880px, calc(100vw - 28px));
+  gap: 18px;
+  width: min(1880px, calc(100% - 48px));
   margin: 0 auto;
-  padding: 14px 0 18px;
+  padding: 24px 0;
 }
 
 .knowledge-hero,
@@ -35,6 +35,9 @@ body.knowledge-page {
 .knowledge-footer {
   border: 1px solid var(--knw-line);
   background: var(--knw-panel);
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(28, 53, 112, .06);
 }
 
 .knowledge-hero {
@@ -53,7 +56,8 @@ body.knowledge-page {
 }
 
 .knowledge-hero h1 {
-  font-size: 1.55rem;
+  font-size: clamp(1.7rem, 2.5vw, 2.4rem);
+  line-height: 1.15;
   letter-spacing: 0.02em;
 }
 
@@ -86,18 +90,19 @@ body.knowledge-page {
 .knowledge-button {
   min-height: 36px;
   padding: 0 14px;
-  border: 1px solid #496078;
-  border-radius: 4px;
+  border: 1px solid var(--knw-line);
+  border-radius: 10px;
   color: var(--knw-text);
-  background: #223043;
+  background: var(--knw-panel);
   font: 700 0.76rem/1 "IBM Plex Sans", sans-serif;
   text-decoration: none;
   cursor: pointer;
 }
 
 .knowledge-button.primary {
-  border-color: #2e9fb1;
-  background: #176c79;
+  border-color: var(--primary);
+  background: var(--primary);
+  color: white;
 }
 
 .knowledge-button.secondary {
@@ -107,8 +112,9 @@ body.knowledge-page {
 }
 
 .knowledge-button.danger {
-  border-color: #a94f59;
-  background: #6f2d35;
+  border-color: var(--danger);
+  background: #fff2f0;
+  color: var(--danger);
 }
 
 .knowledge-button:disabled {
@@ -143,7 +149,7 @@ body.knowledge-page {
 
 .knowledge-status-strip strong {
   overflow: hidden;
-  color: #f5f8fb;
+  color: var(--knw-text);
   font: 700 1rem/1.2 "IBM Plex Mono", monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -167,7 +173,8 @@ body.knowledge-page {
 
 .knowledge-tabs button.active {
   border-bottom-color: var(--knw-cyan);
-  color: #f4fbfc;
+  color: var(--knw-cyan);
+  background: var(--knw-panel-2);
 }
 
 .knowledge-tab-panel {
@@ -513,3 +520,40 @@ body.knowledge-page {
 .knowledge-v2-actions textarea { width: 100%; min-height: 8rem; color: inherit; background: transparent; border: 1px solid #475569; padding: .6rem; }
 .knowledge-preserved-memory { margin-top: 1rem; }
 .knowledge-preserved-memory > summary { cursor: pointer; padding: .5rem 0; }
+
+/* Match the shared light device-workspace surfaces, including dynamic records. */
+.knowledge-query-bar, .knowledge-card, .knowledge-memory-card,
+.knowledge-manual-result, .knowledge-record, .knowledge-markdown-body,
+.knowledge-intake pre { border-color: var(--knw-line); border-radius: 12px; }
+.knowledge-card, .knowledge-memory-card, .knowledge-manual-status article,
+.knowledge-manual-result, .knowledge-record { background: var(--knw-panel); }
+.knowledge-query-bar input, .knowledge-query-bar select, .knowledge-field input,
+.knowledge-v2-actions textarea {
+  background: white; border-color: var(--knw-line); border-radius: 8px;
+  color: var(--knw-text); font: inherit;
+}
+.knowledge-memory-card strong, .knowledge-manual-status strong,
+.knowledge-memory-card li, .knowledge-relation-list span,
+.knowledge-manual-result p, .knowledge-record-excerpt,
+.knowledge-markdown-detail dd, .knowledge-markdown-body, .knowledge-intake pre {
+  color: var(--knw-text);
+}
+.knowledge-markdown-body, .knowledge-intake pre,
+.knowledge-record.selected { background: var(--knw-panel-2); }
+.knowledge-chip-grid span {
+  background: var(--knw-panel-2); color: var(--primary);
+  border-color: var(--knw-line); border-radius: 8px;
+}
+.knowledge-relation-list article { border-color: var(--knw-line); }
+.knowledge-v2-row small, .knowledge-v2-source { color: var(--knw-muted); }
+.knowledge-card h2, .knowledge-section-head h2 { color: var(--primary); font-size: 1.05rem; }
+.knowledge-query-bar label, .knowledge-field,
+.knowledge-status-strip small, .knowledge-status-strip span { font-size: .8rem; }
+.knowledge-scope-summary { margin: 0; padding: 0 4px; font-size: .78rem; }
+.knowledge-button:hover:not(:disabled) { filter: brightness(.96); }
+.knowledge-tab-panel [id$="-browser"] > .knowledge-query-bar { display: flex; flex-wrap: wrap; align-items: end; }
+.knowledge-tab-panel [id$="-browser"] > .knowledge-query-bar label { flex: 1 1 160px; }
+.knowledge-tab-panel [id$="-browser"] > .knowledge-query-bar label:first-child { flex: 3 1 240px; }
+.knowledge-tab-panel [id$="-browser"] > .knowledge-query-bar button { flex: 0 0 auto; }
+.knowledge-tab-panel [id$="-browser"] .knowledge-card { padding: 14px; }
+.knowledge-tab-panel [id$="-browser"] > .knowledge-scope-summary { margin: 10px 0; }

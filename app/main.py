@@ -70,9 +70,6 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, model_validator
 from mcp_tools.lerobot_schemas import IsaacLabSyntheticRequest
 
-from self_evolution import EvolutionTaskCreate, SelfEvolutionService
-from self_evolution.models import EvolutionActivationRequest, EvolutionRollbackRequest
-
 from agents.manipulation.agent import ManipulationAgent
 from agents.bo.agent import BOAgent
 from agents.equipment.agent import LabEquipmentAgent
@@ -113,7 +110,6 @@ from objectives.authoring import objective_authoring_manifest
 from objectives.compiler import ObjectiveCompileError
 from objectives.service import ObjectiveConflict, ObjectiveNotFound, ObjectiveService
 from orchestrator.supervisor import build_mission_contract, build_orchestration_plan, build_orchestrator_control_plane_snapshot
-from policies.guardian_gate import gate_blocks_execution, guardian_gate
 from utils.config_loader import load_all_configs
 from utils.lerobot_rollout_profile import (
     LEROBOT_ROLLOUT_PROFILE_PATH,
@@ -175,8 +171,6 @@ from utils.test_mode_execution_profiles import (
 from utils.operator_teleop_handoff import OperatorTeleopHandoffError
 
 app = FastAPI(title="Autonomous Researcher")
-from app.cae_fields_routes import router as cae_fields_router
-app.include_router(cae_fields_router)
 templates = Jinja2Templates(directory=str(resolve_path("web/templates")))
 app.mount("/static", StaticFiles(directory=str(resolve_path("web/static"))), name="static")
 app.mount(
@@ -237,11 +231,6 @@ async def get_agent_module_asset(module_id: str, asset_path: str):
         raise HTTPException(status_code=404, detail="Unknown module asset")
     return FileResponse(path)
 
-from app.analysis_fem_routes import make_router as make_analysis_fem_router
-app.include_router(make_analysis_fem_router(
-    lambda: controller._deps.agent_context.artifact_run_root or resolve_path('runs'),
-    lambda: controller._deps.agent_context.tools.resource('analysis_improvement'),
-))
 PLC_CONFIG_PATH = resolve_path("configs/plc.yaml")
 PLC_CONFIG_MEMORY_PATH = resolve_path("memory/plc_bridge_config.json")
 PLC_TRANSACTION_STATE_PATH = resolve_path("memory/plc_bridge_state.json")
@@ -253,8 +242,6 @@ EQUIPMENT_SKILL_FLOW_RUNTIME_ROOT = resolve_path("memory/equipment_runtime/equip
 EQUIPMENT_RUNTIME_ROOT = resolve_path("memory/equipment_runtime")
 EQUIPMENT_SKILL_AUTHORING_JOB_ROOT = resolve_path("memory/equipment_runtime/skill_authoring_jobs")
 EQUIPMENT_WORKSPACE_SETTINGS_PATH = resolve_path("memory/equipment_workspace_settings.json")
-CAE_WORKSPACE_SETTINGS_PATH = resolve_path("memory/cae_workspace_settings.json")
-SELF_EVOLUTION_ROOT = resolve_path("memory/evolution")
 KNOWLEDGE_MEMORY_ROOT = resolve_path("memory/knowledge")
 PRIMARY_RUNTIME_GRAPH_ID = "atr_closed_loop"
 RUNTIME_GRAPH_CONFIG_ROOT = resolve_path("graphs/configs")
@@ -685,12 +672,6 @@ async def keep_startup_side_effect_free() -> None:
     await _apply_runtime_api_key_settings(settings, emit_event=False)
     controller._deps.agent_context.on_knowledge_ingest = None
     await _source_ingestion_service().start()
-    # Restore Analysis queue metadata only. Computation requires an explicit
-    # active-runtime admission; GUI startup must not launch archived solvers.
-    from agents.analysis.runtime import service_for
-    improvement = service_for(controller._deps.agent_context)
-    if improvement is not None:
-        improvement.recover_existing()
 
 
 @app.on_event("shutdown")
@@ -698,9 +679,6 @@ async def shutdown_lerobot_subprocesses() -> None:
     """Release LeRobot live subprocesses so cameras/serial ports are not left busy."""
     if _SOURCE_INGESTION_SERVICE is not None:
         await _SOURCE_INGESTION_SERVICE.shutdown()
-    improvement = controller._deps.agent_context.tools.resource("analysis_improvement")
-    if improvement is not None:
-        await improvement.shutdown()
     if _PLC_BRIDGE_SERVICE is not None:
         await _PLC_BRIDGE_SERVICE.shutdown()
     controller.set_terminal_error_notifier(None)
@@ -1002,24 +980,6 @@ class ObjectiveCompareRequest(BaseModel):
     observations: list[dict[str, object]] = Field(default_factory=list)
 
 
-class CAEAnalysisRequest(BaseModel):
-    """Request body for CAE Workspace analysis execution."""
-
-    mode: Literal["test", "live", "virtual", "replay"] = "test"
-    solver: str = "calculix"
-    mesher: str = "gmsh"
-    stl_path: str = ""
-    specimen_id: str = "manual-specimen"
-    specimen_size_mm: list[float] = Field(default_factory=lambda: [20.0, 20.0, 20.0])
-    mesh_size_mm: float = 2.0
-    elastic_modulus_mpa: float = 1800.0
-    poisson_ratio: float = 0.35
-    yield_strength_mpa: float = 35.0
-    load_max_n: float = 500.0
-    load_min_ratio: float = 0.1
-    cycles: int = 10
-    frequency_hz: float = 1.0
-    require_solver: bool = False
 
 
 class PrinterProfileRequest(BaseModel):
@@ -1903,7 +1863,7 @@ def _printer_workflow() -> PrinterAgenticWorkflow:
 
 
 def _printer_bridge_manager() -> PrinterDeviceBridgeManager:
-    """Return the selected-printer bridge manager used by 3DP GUI and printer.prepare."""
+    """Return the selected-printer bridge manager used by 3D GUI and printer.prepare."""
     cfg = load_all_configs(resolve_path("configs"))
     return PrinterDeviceBridgeManager.from_devices_config(cfg.get("devices", {}), repo_root=resolve_path("."))
 
@@ -2694,7 +2654,7 @@ async def printer_gui(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request=request,
         name="printer.html",
-        context={"title": "3DP Printer GUI"},
+        context={"title": "3D Printer GUI"},
     )
 
 
@@ -2708,14 +2668,6 @@ async def bo_gui(request: Request) -> HTMLResponse:
     )
 
 
-@app.get("/cae", response_class=HTMLResponse)
-async def cae_gui(request: Request) -> HTMLResponse:
-    """Serve CAE analysis workspace GUI."""
-    return templates.TemplateResponse(
-        request=request,
-        name="cae.html",
-        context={"title": "CAE Analysis Workspace"},
-    )
 
 
 @app.get("/knowledge", response_class=HTMLResponse)
@@ -2755,16 +2707,6 @@ async def module_management_tool(request: Request) -> HTMLResponse:
         request=request,
         name="module_management.html",
         context={"title": "Module Management Tool"},
-    )
-
-
-@app.get("/evolution-lab", response_class=HTMLResponse)
-async def evolution_lab(request: Request) -> HTMLResponse:
-    """Serve the Self-Evolution Lab GUI."""
-    return templates.TemplateResponse(
-        request=request,
-        name="evolution_lab.html",
-        context={"title": "ATR Self-Evolution Lab"},
     )
 
 
@@ -3211,7 +3153,7 @@ def _guardian_status_payload(run_id: str | None = None, *, snapshot: dict[str, o
         lowered = tuple(str(item).lower() for item in needles)
         return sum(1 for item in tool_records if any(needle in tool_name(item) for needle in lowered))
 
-    risk_classes = ["hardware", "vision", "robot", "equipment", "data", "optimization", "self_evolution", "operator"]
+    risk_classes = ["hardware", "vision", "robot", "equipment", "data", "optimization", "operator"]
     risk_map: dict[str, dict[str, object]] = {
         key: {"risk_class": key, "score": 0.0, "stage": "", "decision": "allow", "reason_code": "OK", "gate_id": ""}
         for key in risk_classes
@@ -3468,41 +3410,6 @@ def _guardian_status_payload(run_id: str | None = None, *, snapshot: dict[str, o
         "provenance_ref_count": len(latest_contract_provenance),
     }
 
-    try:
-        variants = [variant.model_dump(mode="json") for variant in _self_evolution_service().list_variants()]
-    except Exception as exc:
-        variants = []
-        evolution_error = str(exc)
-    else:
-        evolution_error = ""
-    pending_variants = [
-        item
-        for item in variants
-        if str(item.get("status") or "") in {"gate_passed", "approved", "evaluated"}
-    ][-20:]
-    active_variants = [
-        item
-        for item in variants
-        if str(item.get("status") or "") in {"active", "active_next_run"}
-    ][-20:]
-    activation_gate_status = (
-        "active_next_run"
-        if active_variants
-        else "ready_for_activation"
-        if any(str(item.get("status") or "") == "approved" for item in pending_variants)
-        else "pending_operator_approval"
-        if pending_variants
-        else "idle"
-    )
-    self_evolution_gate = {
-        "schema": "guardian_self_evolution_gate.v1",
-        "status": activation_gate_status if not evolution_error else "unavailable",
-        "pending_variants": pending_variants,
-        "active_variants": active_variants,
-        "variant_count": len(variants),
-        "error": evolution_error,
-    }
-
     status = "safe_stop" if any(row.get("decision") == "safe_stop" for row in blocked_gate_rows) else "blocked" if blocked_gate_rows or blocked_tool_rows or blocked_hardware_rows else "approval_required" if merged_pending else "warning" if incidents or max_score >= 0.35 else "allow"
     return {
         "ok": True,
@@ -3522,11 +3429,9 @@ def _guardian_status_payload(run_id: str | None = None, *, snapshot: dict[str, o
             "safety_budget_status": safety_budget_status,
             "safe_stop_status": safe_stop_verification["status"],
             "evidence_completeness_status": evidence_completeness["status"],
-            "self_evolution_gate_status": self_evolution_gate["status"],
         },
         "safety_budget": safety_budget,
         "evidence_completeness": evidence_completeness,
-        "self_evolution_gate": self_evolution_gate,
         "graph_wide_risk_map": list(risk_map.values()),
         "gate_timeline": gate_timeline,
         "blocked_actions": {
@@ -4111,117 +4016,6 @@ def _legacy_knowledge_relation_summary() -> dict[str, object]:
         return {**defaults, "error": str(exc)[:500]}
 
 
-def _self_evolution_service() -> SelfEvolutionService:
-    """Return the file-backed ATR self-evolution service."""
-    return SelfEvolutionService(
-        root=SELF_EVOLUTION_ROOT,
-        run_root=resolve_path("runs"),
-        graph_config_root=RUNTIME_GRAPH_CONFIG_ROOT,
-        graph_version_root=RUNTIME_GRAPH_VERSION_ROOT,
-        module_root=RUNTIME_MODULE_ROOT,
-        module_version_root=RUNTIME_MODULE_VERSION_ROOT,
-        knowledge_memory_root=KNOWLEDGE_MEMORY_ROOT,
-    )
-
-
-def _store_api_guardian_gate(gate: dict[str, Any]) -> dict[str, Any] | None:
-    """Persist a controller/API-origin Guardian gate into current runtime metadata."""
-    metadata = controller._state.run_metadata
-    gates = metadata.setdefault("guardian_gates", [])
-    if not isinstance(gates, list):
-        gates = []
-        metadata["guardian_gates"] = gates
-    gates.append(gate)
-    del gates[:-200]
-    metadata["latest_guardian_gate"] = gate
-    decision = gate.get("guardian_decision") if isinstance(gate.get("guardian_decision"), dict) else {}
-    if decision:
-        metadata["latest_guardian_gate_decision"] = decision
-    contract = gate.get("guardian_contract") if isinstance(gate.get("guardian_contract"), dict) else {}
-    if contract:
-        contracts = metadata.setdefault("guardian_contracts", [])
-        if isinstance(contracts, list):
-            contracts.append(contract)
-            del contracts[:-200]
-    incidents = [dict(item) for item in gate.get("incident_records", []) if isinstance(item, dict)] if isinstance(gate.get("incident_records"), list) else []
-    if incidents and hasattr(controller, "_record_incident_records"):
-        controller._record_incident_records(incidents)
-    else:
-        incident_records = metadata.setdefault("incident_records", [])
-        if not isinstance(incident_records, list):
-            incident_records = []
-            metadata["incident_records"] = incident_records
-        for incident in incidents:
-            incident_records.append(dict(incident))
-        del incident_records[:-100]
-    if str(gate.get("decision") or "") != "require_human_approval":
-        return None
-    approvals = metadata.setdefault("runtime_approvals", {})
-    if not isinstance(approvals, dict):
-        approvals = {}
-        metadata["runtime_approvals"] = approvals
-    gate_id = str(gate.get("gate_id") or make_event_id())
-    gate_key = f"guardian:{gate.get('stage', 'self_evolution')}:{gate.get('phase', '')}:{gate.get('tool') or gate.get('agent') or 'runtime'}:{gate_id}"
-    record = {
-        "approval_id": gate_id.replace("guardian-gate-", "approval-", 1) if gate_id.startswith("guardian-gate-") else make_event_id().replace("evt-", "approval-", 1),
-        "gate_key": gate_key,
-        "source": "guardian_gate",
-        "stage": gate.get("stage", "self_evolution"),
-        "phase": gate.get("phase", "evolution_review"),
-        "tool": gate.get("tool", ""),
-        "agent": gate.get("agent", "self_evolution_service"),
-        "status": "pending",
-        "reason": gate.get("reason_code", "HUMAN_APPROVAL_REQUIRED"),
-        "guardian_gate_id": gate_id,
-        "guardian_gate": gate,
-        "requested_at": datetime.now(timezone.utc).isoformat(),
-    }
-    approvals[gate_key] = record
-    queue = metadata.setdefault("guardian_approval_queue", [])
-    if isinstance(queue, list):
-        queue.append(record)
-        del queue[:-100]
-    return record
-
-
-async def _emit_self_evolution_guardian_gate(
-    *,
-    action: str,
-    variant_id: str,
-    payload: dict[str, Any],
-) -> dict[str, Any]:
-    """Create, persist, and emit a Guardian gate for self-evolution control actions."""
-    tool_name = "self_evolution.rollback" if action == "rollback_variant" else "self_evolution.activate"
-    gate = guardian_gate(
-        state=controller._state,
-        stage="self_evolution",
-        phase="evolution_review",
-        payload={"variant_id": variant_id, **payload},
-        agent="self_evolution_service",
-        tool=tool_name,
-        action=action,
-    )
-    approval_record = _store_api_guardian_gate(gate)
-    await controller.emit_runtime_event(
-        event_type="guardian.gate",
-        message=f"Guardian self-evolution gate {gate.get('decision')} for {action}: {variant_id}",
-        payload={
-            "agent": "guardian_agent",
-            "node_id": "self_evolution",
-            "module_id": "guardian",
-            "status": gate.get("status", ""),
-            "guardian_gate": gate,
-            "guardian_decision": gate.get("guardian_decision", {}),
-            "guardian_contract": gate.get("guardian_contract", {}),
-            "approval_request": approval_record if isinstance(approval_record, dict) else {},
-            "risk_score": gate.get("risk_score", 0.0),
-            "reason_code": gate.get("reason_code", ""),
-        },
-        level="ERROR" if gate_blocks_execution(gate) else "WARNING" if gate.get("decision") in {"require_human_approval", "allow_with_warning"} else "INFO",
-    )
-    return gate
-
-
 def _graph_config_payload(graph_id: str = PRIMARY_RUNTIME_GRAPH_ID) -> dict[str, object]:
     """Return one config-driven LangGraph definition as JSON-safe data."""
     config = _load_runtime_graph_config(graph_id)
@@ -4391,9 +4185,7 @@ _UI_DESCRIPTOR_SAFE_ROUTES = (
     "/printer",
     "/lerobot",
     "/bo",
-    "/cae",
     "/equipment/windows",
-    "/evolution-lab",
 )
 
 
@@ -4444,8 +4236,6 @@ def _infer_ui_descriptor_handoff_workspace(api_url: str) -> str:
         ("/api/printer", "/printer"),
         ("/api/lerobot", "/lerobot"),
         ("/api/bo", "/bo"),
-        ("/api/cae", "/cae"),
-        ("/api/evolution", "/evolution-lab"),
         ("/api/modules", "/module-management"),
         ("/api/graphs", "/ide"),
         ("/api/bridges", "/ide"),
@@ -5260,7 +5050,6 @@ def _bridge_workspace_path(workspace: str, bridge_id: str = "") -> str:
     defaults = {
         "windows_pyautogui_bridge": "/equipment/windows",
         "lerobot_bridge": "/lerobot",
-        "cae_bridge": "/cae",
         "camera_utm_bridge": "/lerobot",
         "prusa_bridge": "/printer",
     }
@@ -5273,7 +5062,6 @@ def _bridge_endpoint_defaults(bridge_id: str, workspace: str) -> tuple[str, str]
         "prusa_bridge": ("/api/printer/status", "/api/printer/spc-readiness"),
         "lerobot_bridge": ("/api/lerobot/config", "/api/lerobot/profiles/validate"),
         "windows_pyautogui_bridge": ("/api/equipment/windows/readiness", "/api/equipment/windows/live-preflight"),
-        "cae_bridge": ("/api/cae/config", "/api/cae/config"),
         "camera_utm_bridge": ("/api/lerobot/config", "/api/lerobot/camera/test"),
     }
     return mapping.get(str(bridge_id or "").strip(), ("/api/devices/state", workspace or "/api/devices/state"))
@@ -5285,7 +5073,6 @@ def _bridge_evidence_defaults(bridge_id: str, tools: list[str]) -> list[str]:
         "prusa_bridge": ["printer_prepare.v1", "printer_runtime.v1", "slicer_artifact.v1"],
         "lerobot_bridge": ["robot_task_result.v1", "lerobot_session.v1", "camera_capture.v1"],
         "windows_pyautogui_bridge": ["equipment_result.v1", "utm_data_ready.v1", "screen_evidence.v1"],
-        "cae_bridge": ["fem_result.v1", "cae_report.v1", "analysis_metrics.v1"],
         "camera_utm_bridge": ["camera_capture.v1", "vision_signal.v1", "utm_result.v1"],
     }
     defaults = list(mapping.get(str(bridge_id or "").strip(), []))
@@ -5739,7 +5526,7 @@ def _module_category(module: dict[str, Any]) -> str:
         return "robotics"
     if any(str(tool).startswith("equipment.") or str(tool).startswith("utm.") for tool in tools):
         return "lab-equipment"
-    if any(str(tool).startswith("cae.") or str(tool).startswith("experiment.") for tool in tools):
+    if any(str(tool).startswith("experiment.") for tool in tools):
         return "analysis-optimization"
     return "runtime"
 
@@ -5905,7 +5692,6 @@ def _module_designer_category(value: str) -> str:
         "robotics": "manipulation",
         "lab-equipment": "equipment",
         "lab": "equipment",
-        "cae": "analysis",
         "bo": "optimization",
         "mbo": "optimization",
         "safety": "guardian",
@@ -6817,6 +6603,9 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
         role_specific.update(installed.describe().get("report_profile", {}))
         # Request-only context preserves owner observation precedence without a new store.
         projection_metadata = {**metadata, "_projection_state": state}
+        if definition["agent_id"] == "bo" and state.get("run_id"):
+            projection_metadata["_objective_status"] = _objective_service().status(run_id=state["run_id"])
+            projection_metadata["_objective_registry"] = _objective_service().registry
         if definition["agent_id"] == "knowledge":
             projection_metadata["_relation_reconciliation"] = _knowledge_relation_summary()
         projection = installed.project_report(projection_metadata, agent_payload)
@@ -8425,82 +8214,10 @@ async def post_bo_run(req: BOAgentRequest) -> dict[str, object]:
     }
 
 
-@app.get("/api/cae/config")
-async def get_cae_config() -> dict[str, object]:
-    """Return CAE Workspace defaults, solver health, and recent analysis state."""
-    health = controller._deps.agent_context.tools.call("cae.health", {})
-    snapshot = controller.snapshot()
-    state = snapshot.get("state", {}) if isinstance(snapshot.get("state"), dict) else {}
-    latest = state.get("latest_analysis", {}) if isinstance(state.get("latest_analysis"), dict) else {}
-    metadata = state.get("run_metadata", {}) if isinstance(state.get("run_metadata"), dict) else {}
-    saved = _read_workspace_settings(CAE_WORKSPACE_SETTINGS_PATH)
-    return {
-        "ok": True,
-        "health": health,
-        "defaults": health.get("defaults", {}),
-        "saved": saved,
-        "settings_path": str(CAE_WORKSPACE_SETTINGS_PATH),
-        "recent": latest.get("cae_result") or metadata.get("last_cae_result") or {},
-        "state": state,
-    }
 
 
-@app.post("/api/cae/config")
-async def save_cae_config(req: CAEAnalysisRequest) -> dict[str, object]:
-    """Persist CAE Workspace settings for future GUI sessions."""
-    saved = req.model_dump()
-    _write_workspace_settings(CAE_WORKSPACE_SETTINGS_PATH, saved)
-    return {
-        "ok": True,
-        "saved": saved,
-        "settings_path": str(CAE_WORKSPACE_SETTINGS_PATH),
-    }
 
 
-@app.post("/api/cae/run")
-async def post_cae_run(req: CAEAnalysisRequest) -> dict[str, object]:
-    """Run CAE analysis from the dedicated workspace."""
-    payload = {
-        "runtime_mode": req.mode,
-        "mode": req.mode,
-        "solver": req.solver,
-        "mesher": req.mesher,
-        "stl_path": req.stl_path,
-        "specimen_id": req.specimen_id,
-        "specimen_size_mm": req.specimen_size_mm,
-        "mesh_size_mm": req.mesh_size_mm,
-        "material": {
-            "elastic_modulus_mpa": req.elastic_modulus_mpa,
-            "poisson_ratio": req.poisson_ratio,
-            "yield_strength_mpa": req.yield_strength_mpa,
-        },
-        "loading": {
-            "load_type": "cyclic_compression",
-            "load_max_n": req.load_max_n,
-            "load_min_ratio": req.load_min_ratio,
-            "cycles": req.cycles,
-            "frequency_hz": req.frequency_hz,
-        },
-        "boundary": {"bottom": "fixed_support", "top": "cyclic_loading"},
-        "require_solver": req.require_solver,
-        "source": "cae_workspace",
-    }
-    result = controller._deps.agent_context.tools.call("cae.run_static_analysis", payload)
-    controller._state.run_metadata["last_cae_result"] = result
-    if result.get("ok"):
-        controller._state.latest_analysis["cae_result"] = result
-        controller._state.latest_analysis["cae_metrics"] = result.get("cae_metrics") or result.get("metrics") or {}
-    await controller.emit_workspace_result(
-        workspace="cae",
-        tool="cae.run_static_analysis",
-        result=result,
-        stage=Stage.ANALYSIS,
-        module_id="analysis",
-        agent="analysis_agent",
-        workflow="cae_static_analysis",
-        node_event=True,
-    )
-    return {"ok": bool(result.get("ok")), "result": result, "snapshot": controller.snapshot()}
 
 
 @app.post("/api/runtime/backend")
@@ -14058,7 +13775,7 @@ async def get_printer_connection() -> dict[str, object]:
 
 @app.post("/api/printer/connection")
 async def post_printer_connection(req: PrinterConnectionRequest) -> dict[str, object]:
-    """Persist selected-printer bridge connection memory from the 3DP GUI."""
+    """Persist selected-printer bridge connection memory from the 3D GUI."""
     manager = _printer_bridge_manager()
     selected_profile, _reason = manager.fleet_selection()
     if selected_profile.provider == "bambulab_x2d":
@@ -17941,7 +17658,7 @@ async def post_lerobot_policy_download(req: LeRobotAPIRequest) -> dict[str, obje
 
 @app.get("/api/knowledge/evolution-packs")
 async def get_knowledge_evolution_packs(target_type: str | None = None, target_id: str | None = None, limit: int = 20) -> dict[str, object]:
-    """List Knowledge-built evidence packs for Self-Evolution prefill."""
+    """List Knowledge-built improvement evidence packs."""
     packs = _knowledge_store().list_evolution_packs(target_type=target_type, target_id=target_id, limit=limit)
     return {"ok": True, "target_type": target_type or "", "target_id": target_id or "", "packs": [pack.model_dump(mode="json") for pack in packs]}
 
@@ -18419,244 +18136,6 @@ async def get_knowledge_safety_context(stage: str | None = None, limit: int = 20
     if stage:
         records = [record for record in records if stage in record.affected_agents]
     return {"ok": True, "stage": stage or "", "risk_patterns": [record.model_dump(mode="json") for record in records[-limit:]]}
-
-
-@app.get("/api/evolution/targets")
-async def get_evolution_targets() -> dict[str, object]:
-    """List self-evolution targets mapped to current graph/module configs."""
-    return {"ok": True, "targets": _self_evolution_service().list_targets()}
-
-
-@app.get("/api/evolution/traces")
-async def get_evolution_traces(limit: int = 12) -> dict[str, object]:
-    """List recent run traces available for self-evolution."""
-    return {"ok": True, "traces": _self_evolution_service().latest_traces(limit=limit)}
-
-
-@app.get("/api/evolution/tasks")
-async def get_evolution_tasks() -> dict[str, object]:
-    """List self-evolution tasks."""
-    tasks = [task.model_dump(mode="json") for task in _self_evolution_service().list_tasks()]
-    return {"ok": True, "tasks": tasks}
-
-
-@app.post("/api/evolution/tasks")
-async def create_evolution_task(req: EvolutionTaskCreate) -> dict[str, object]:
-    """Create a self-evolution task without executing devices."""
-    task = _self_evolution_service().create_task(req)
-    await controller.emit_runtime_event(
-        event_type="evolution.task.created",
-        message=f"Self-evolution task created: {task.target_type}:{task.target_id}",
-        payload={"task": task.model_dump(mode="json")},
-        level="INFO",
-    )
-    return {"ok": True, "task": task.model_dump(mode="json")}
-
-
-@app.get("/api/evolution/tasks/{task_id}")
-async def get_evolution_task(task_id: str) -> dict[str, object]:
-    """Return one self-evolution task."""
-    try:
-        task = _self_evolution_service().read_task(task_id)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {"ok": True, "task": task.model_dump(mode="json")}
-
-
-@app.post("/api/evolution/tasks/{task_id}/run")
-async def run_evolution_task(task_id: str) -> dict[str, object]:
-    """Generate and gate a candidate variant from selected closed-loop traces."""
-    result = _self_evolution_service().run_task(task_id, handler_registry=_runtime_graph_handler_registry())
-    level = "INFO" if result.get("ok") else "ERROR"
-    await controller.emit_runtime_event(
-        event_type="evolution.task.completed" if result.get("ok") else "evolution.task.failed",
-        message=f"Self-evolution task {task_id} {'completed' if result.get('ok') else 'failed'}",
-        payload=result,
-        level=level,
-    )
-    return result
-
-
-@app.get("/api/evolution/tasks/{task_id}/variants")
-async def get_evolution_task_variants(task_id: str) -> dict[str, object]:
-    """List variants generated for one task."""
-    variants = [variant.model_dump(mode="json") for variant in _self_evolution_service().list_variants(task_id)]
-    return {"ok": True, "task_id": task_id, "variants": variants}
-
-
-@app.get("/api/evolution/variants")
-async def get_evolution_variants(task_id: str | None = None, target_type: str | None = None, target_id: str | None = None) -> dict[str, object]:
-    """List self-evolution variants for history/leaderboard views."""
-    variants = _self_evolution_service().list_variants(task_id)
-    if target_type:
-        variants = [variant for variant in variants if variant.target_type == target_type]
-    if target_id:
-        variants = [variant for variant in variants if variant.target_id == target_id]
-    payload = [variant.model_dump(mode="json") for variant in variants]
-    return {"ok": True, "task_id": task_id or "", "target_type": target_type or "", "target_id": target_id or "", "variants": payload}
-
-
-@app.get("/api/evolution/variants/{variant_id}")
-async def get_evolution_variant(variant_id: str) -> dict[str, object]:
-    """Return one self-evolution variant."""
-    try:
-        variant = _self_evolution_service().read_variant(variant_id)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {"ok": True, "variant": variant.model_dump(mode="json")}
-
-
-@app.post("/api/evolution/variants/{variant_id}/validate")
-async def validate_evolution_variant(variant_id: str) -> dict[str, object]:
-    """Re-run schema/compiler/dry-run gates for one variant."""
-    try:
-        variant = _self_evolution_service().evaluate_variant(variant_id, handler_registry=_runtime_graph_handler_registry())
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    await controller.emit_runtime_event(
-        event_type="evolution.variant.validated",
-        message=f"Self-evolution variant validated: {variant_id}",
-        payload={"variant": variant.model_dump(mode="json")},
-        level="INFO" if all(gate.passed for gate in variant.gate_results) else "WARNING",
-    )
-    return {"ok": True, "variant": variant.model_dump(mode="json")}
-
-
-@app.post("/api/evolution/variants/{variant_id}/approve")
-async def approve_evolution_variant(variant_id: str, req: EvolutionActivationRequest | None = None) -> dict[str, object]:
-    """Approve a gate-passed variant for optional next-run activation."""
-    payload = req or EvolutionActivationRequest()
-    try:
-        variant = _self_evolution_service().approve_variant(variant_id, operator=payload.operator, note=payload.note)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    gate = await _emit_self_evolution_guardian_gate(
-        action="approve_variant",
-        variant_id=variant_id,
-        payload={
-            "variant": variant.model_dump(mode="json"),
-            "human_approved": bool(payload.operator),
-            "requires_human_approval": not bool(payload.operator),
-            "approved": True,
-            "approval_resolved": True,
-            "activate_runtime": False,
-        },
-    )
-    await controller.emit_runtime_event(
-        event_type="evolution.variant.approved",
-        message=f"Self-evolution variant approved: {variant_id}",
-        payload={"variant": variant.model_dump(mode="json"), "guardian_gate": gate},
-        level="INFO",
-    )
-    return {"ok": True, "variant": variant.model_dump(mode="json"), "guardian_gate": gate}
-
-
-@app.post("/api/evolution/variants/{variant_id}/activate")
-async def activate_evolution_variant(variant_id: str, req: EvolutionActivationRequest | None = None) -> dict[str, object]:
-    """Activate an approved variant for the next closed-loop run."""
-    payload = req or EvolutionActivationRequest()
-    if controller.snapshot().get("is_running"):
-        gate = await _emit_self_evolution_guardian_gate(
-            action="activate_variant",
-            variant_id=variant_id,
-            payload={
-                "status": "blocked",
-                "failure_code": "SELF_EVOLUTION_GATE_FAILED",
-                "message": "Cannot activate self-evolution variant while a run is active.",
-                "human_approved": bool(payload.operator),
-                "requires_human_approval": not bool(payload.operator),
-                "activate_runtime": payload.activate_runtime,
-            },
-        )
-        raise HTTPException(status_code=409, detail={"message": "Cannot activate self-evolution variant while a run is active.", "guardian_gate": gate})
-    try:
-        candidate_variant = _self_evolution_service().read_variant(variant_id)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    gate = await _emit_self_evolution_guardian_gate(
-        action="activate_variant",
-        variant_id=variant_id,
-        payload={
-            "variant": candidate_variant.model_dump(mode="json"),
-            "human_approved": bool(payload.operator),
-            "requires_human_approval": not bool(payload.operator),
-            "approved": candidate_variant.status in {"approved", "active_next_run", "active"},
-            "approval_resolved": bool(payload.operator),
-            "activate_runtime": payload.activate_runtime,
-            "failure_code": "" if candidate_variant.status in {"approved", "active_next_run", "active"} else "SELF_EVOLUTION_GATE_FAILED",
-            "message": "variant approved for activation" if candidate_variant.status in {"approved", "active_next_run", "active"} else "variant must be approved before activation",
-        },
-    )
-    if gate_blocks_execution(gate) or str(gate.get("decision") or "") == "require_human_approval":
-        raise HTTPException(status_code=409, detail={"message": "Guardian blocked self-evolution activation.", "guardian_gate": gate})
-    try:
-        variant = _self_evolution_service().activate_variant(
-            variant_id,
-            operator=payload.operator,
-            note=payload.note,
-            activate_runtime=payload.activate_runtime,
-            handler_registry=_runtime_graph_handler_registry(),
-        )
-    except ValueError as exc:
-        failure_gate = await _emit_self_evolution_guardian_gate(
-            action="activate_variant",
-            variant_id=variant_id,
-            payload={
-                "status": "blocked",
-                "failure_code": "SELF_EVOLUTION_GATE_FAILED",
-                "message": str(exc),
-                "human_approved": bool(payload.operator),
-                "requires_human_approval": not bool(payload.operator),
-                "activate_runtime": payload.activate_runtime,
-            },
-        )
-        raise HTTPException(status_code=409, detail={"message": str(exc), "guardian_gate": failure_gate}) from exc
-    await controller.emit_runtime_event(
-        event_type="evolution.variant.activated",
-        message=f"Self-evolution variant active for next run: {variant_id}",
-        payload={"variant": variant.model_dump(mode="json"), "guardian_gate": gate},
-        level="WARNING" if payload.activate_runtime else "INFO",
-    )
-    return {"ok": True, "variant": variant.model_dump(mode="json"), "guardian_gate": gate}
-
-
-@app.post("/api/evolution/variants/{variant_id}/rollback")
-async def rollback_evolution_variant(variant_id: str, req: EvolutionRollbackRequest | None = None) -> dict[str, object]:
-    """Mark a self-evolution variant as rolled back in the evolution registry."""
-    payload = req or EvolutionRollbackRequest()
-    try:
-        candidate_variant = _self_evolution_service().read_variant(variant_id)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    gate = await _emit_self_evolution_guardian_gate(
-        action="rollback_variant",
-        variant_id=variant_id,
-        payload={
-            "variant": candidate_variant.model_dump(mode="json"),
-            "human_approved": bool(payload.operator),
-            "requires_human_approval": not bool(payload.operator),
-            "approval_resolved": bool(payload.operator),
-            "approved": True,
-        },
-    )
-    if gate_blocks_execution(gate) or str(gate.get("decision") or "") == "require_human_approval":
-        raise HTTPException(status_code=409, detail={"message": "Guardian blocked self-evolution rollback.", "guardian_gate": gate})
-    variant = _self_evolution_service().rollback_variant(variant_id, operator=payload.operator, note=payload.note)
-    await controller.emit_runtime_event(
-        event_type="evolution.variant.rolled_back",
-        message=f"Self-evolution variant rolled back: {variant_id}",
-        payload={"variant": variant.model_dump(mode="json"), "guardian_gate": gate},
-        level="WARNING",
-    )
-    return {"ok": True, "variant": variant.model_dump(mode="json"), "guardian_gate": gate}
-
-
-@app.get("/api/evolution/lineage/{target_id}")
-async def get_evolution_lineage(target_id: str) -> dict[str, object]:
-    """Return active variant lineage for one target id."""
-    return {"ok": True, **_self_evolution_service().lineage(target_id)}
 
 
 @app.get("/api/events/recent")

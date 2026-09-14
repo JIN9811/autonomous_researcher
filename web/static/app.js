@@ -90,8 +90,6 @@ const lerobotWorkspaceDotEl = document.getElementById("lerobot-workspace-dot");
 const lerobotWorkspaceDetailEl = document.getElementById("lerobot-workspace-detail");
 const boWorkspaceDotEl = document.getElementById("bo-workspace-dot");
 const boWorkspaceDetailEl = document.getElementById("bo-workspace-detail");
-const caeWorkspaceDotEl = document.getElementById("cae-workspace-dot");
-const caeWorkspaceDetailEl = document.getElementById("cae-workspace-detail");
 const knowledgeWorkspaceDotEl = document.getElementById("knowledge-workspace-dot");
 const knowledgeWorkspaceDetailEl = document.getElementById("knowledge-workspace-detail");
 
@@ -479,11 +477,24 @@ function openLiveGuiWindow() {
   if (goalInput && goalInput.value) {
     planningUrl.searchParams.set("goal", goalInput.value);
   }
-  window.open(planningUrl.toString(), "_blank", "width=1440,height=960,popup=yes");
+  // Browser popups have no native maximize API; fit the available desktop
+  // without requesting fullscreen or covering the OS taskbar.
+  const display = window.screen || {};
+  const width = display.availWidth || window.innerWidth || 1440;
+  const height = display.availHeight || window.innerHeight || 960;
+  const left = Number.isFinite(display.availLeft) ? display.availLeft : 0;
+  const top = Number.isFinite(display.availTop) ? display.availTop : 0;
+  window.open(planningUrl.toString(), "_blank", `width=${width},height=${height},left=${left},top=${top},popup=yes`);
+}
+
+function openWorkspaceWindow(path, width = 1320, height = 920) {
+  const url = new URL(path, window.location.origin).toString();
+  const opened = window.open(url, "_blank", `width=${width},height=${height},popup=yes`);
+  if (!opened) window.alert("Allow pop-ups for this site to open the workspace in a separate window.");
 }
 
 function openLerobotWindow() {
-  window.open(new URL("/lerobot", window.location.origin).toString(), "_blank", "width=1440,height=960,popup=yes");
+  openWorkspaceWindow("/lerobot", 1440, 960);
 }
 
 function openTestModeSettingsWindow() {
@@ -495,27 +506,15 @@ function openTestModeSettingsWindow() {
 }
 
 function openPrinterWindow() {
-  const url = new URL("/printer", window.location.origin).toString();
-  const opened = window.open(url, "_blank", "width=1320,height=920,popup=yes");
-  if (!opened) {
-    window.location.href = url;
-  }
+  openWorkspaceWindow("/printer");
 }
 
 function openWindowsBridgeWindow() {
-  const url = new URL("/equipment/windows", window.location.origin).toString();
-  const opened = window.open(url, "_blank", "width=1180,height=880,popup=yes");
-  if (!opened) {
-    window.location.href = url;
-  }
+  openWorkspaceWindow("/equipment/windows", 1180, 880);
 }
 
 function openBoWindow() {
-  const url = new URL("/bo", window.location.origin).toString();
-  const opened = window.open(url, "_blank", "width=1320,height=920,popup=yes");
-  if (!opened) {
-    window.location.href = url;
-  }
+  openWorkspaceWindow("/bo");
 }
 
 function openCaeWindow() {
@@ -1021,7 +1020,6 @@ async function refreshState() {
   await refreshPrinterWorkspaceStatus();
   await refreshWindowsWorkspaceStatus();
   await refreshLerobotWorkspaceStatus();
-  await refreshCaeWorkspaceStatus();
   await refreshPlcWorkspaceStatus();
 }
 
@@ -1158,28 +1156,6 @@ async function refreshBoWorkspaceStatus() {
   }
 }
 
-async function refreshCaeWorkspaceStatus() {
-  if (!caeWorkspaceDetailEl && !caeWorkspaceDotEl) return;
-  try {
-    const res = await fetch("/api/cae/config");
-    const data = await res.json();
-    const health = data.health || {};
-    const solver = health.calculix || {};
-    const mesher = health.gmsh || {};
-    const recent = data.recent || {};
-    setDotState(caeWorkspaceDotEl, data.ok ? "busy" : "warn");
-    if (caeWorkspaceDetailEl) {
-      const recentStatus = recent.status ? ` · latest=${recent.status}` : "";
-      caeWorkspaceDetailEl.textContent = `ccx=${Boolean(solver.available)} · gmsh=${Boolean(mesher.available)} · bottom fixed/top cyclic${recentStatus}`;
-    }
-  } catch (err) {
-    setDotState(caeWorkspaceDotEl, "warn");
-    if (caeWorkspaceDetailEl) {
-      caeWorkspaceDetailEl.textContent = `CAE status unavailable: ${err}`;
-    }
-  }
-}
-
 async function refreshKnowledgeWorkspaceStatus() {
   if (!knowledgeWorkspaceDetailEl && !knowledgeWorkspaceDotEl) return;
   try {
@@ -1293,6 +1269,14 @@ if (btnOpenLerobot) {
   btnOpenLerobot.addEventListener("click", openLerobotWindow);
 }
 
+for (const id of ["btn-open-plc", "btn-open-vision-utm-bridge", "btn-open-knowledge", "btn-open-runtime-ide"]) {
+  const link = document.getElementById(id);
+  link?.addEventListener("click", (event) => {
+    event.preventDefault();
+    openWorkspaceWindow(link.getAttribute("href"));
+  });
+}
+
 if (btnOpenPrinter) {
   btnOpenPrinter.addEventListener("click", (event) => {
     event.preventDefault();
@@ -1383,13 +1367,13 @@ async function safeBootstrapStep(label, fn) {
 async function bootstrap() {
   await safeBootstrapStep("initLangGraph", initLangGraph);
   await safeBootstrapStep("refreshState", refreshState);
+  window.dispatchEvent(new Event('ax4lab:live-ready'));
   await safeBootstrapStep("refreshModelStatuses", refreshModelStatuses);
   await safeBootstrapStep("refreshApiKeyStatus", refreshApiKeyStatus);
   await safeBootstrapStep("refreshPrinterWorkspaceStatus", refreshPrinterWorkspaceStatus);
   await safeBootstrapStep("refreshWindowsWorkspaceStatus", refreshWindowsWorkspaceStatus);
   await safeBootstrapStep("refreshLerobotWorkspaceStatus", refreshLerobotWorkspaceStatus);
   await safeBootstrapStep("refreshBoWorkspaceStatus", refreshBoWorkspaceStatus);
-  await safeBootstrapStep("refreshCaeWorkspaceStatus", refreshCaeWorkspaceStatus);
   await safeBootstrapStep("refreshKnowledgeWorkspaceStatus", refreshKnowledgeWorkspaceStatus);
   await safeBootstrapStep("loadRecentEvents", loadRecentEvents);
   connectEventStream();

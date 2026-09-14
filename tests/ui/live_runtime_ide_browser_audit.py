@@ -2041,56 +2041,6 @@ def wait_for_live_approval_decision(audit: WebDriverAudit, approval_id: str, dec
     return last or {"ok": False, "approval_id": approval_id, "decision": decision}
 
 
-def scenario_evolution_lab(audit: WebDriverAudit, base_url: str, out_dir: Path) -> dict[str, Any]:
-    audit.open(f"{base_url.rstrip('/')}/evolution-lab?target_type=prompt&target_id=design&source=browser_audit", wait_s=2.0)
-    result = audit.js(
-        r"""
-        try {
-          function visible(id) {
-            const el = document.getElementById(id);
-            if (!el) return false;
-            const rect = el.getBoundingClientRect();
-            const style = getComputedStyle(el);
-            return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
-          }
-          return {
-            ok: true,
-            title: document.querySelector('h1')?.textContent || '',
-            targetValue: document.getElementById('evolution-target-input')?.value || '',
-            statusLabel: document.getElementById('evolution-status-label')?.textContent || '',
-            pipelineVisible: visible('evolution-pipeline-output'),
-            leaderboardVisible: visible('evolution-leaderboard-output'),
-            historyVisible: visible('evolution-history-output'),
-            lineageVisible: visible('evolution-lineage-output'),
-            outputVisible: visible('evolution-output'),
-            pipelineSteps: document.querySelectorAll('#evolution-pipeline-output .evolution-pipeline-step').length,
-            leaderboardText: document.getElementById('evolution-leaderboard-output')?.textContent || '',
-            gateText: document.getElementById('evolution-candidate-summary')?.textContent || '',
-            bodyWidth: document.body.scrollWidth,
-            viewportWidth: window.innerWidth,
-          };
-        } catch (err) {
-          return {ok: false, error: String(err && err.message ? err.message : err), stack: String(err && err.stack ? err.stack : '')};
-        }
-        """
-    )
-    if not result.get("ok"):
-        raise AssertionError(result)
-    if "Self-Evolution Lab" not in str(result.get("title")):
-        raise AssertionError(f"Evolution Lab title is missing: {result}")
-    for key in ["pipelineVisible", "leaderboardVisible", "historyVisible", "lineageVisible", "outputVisible"]:
-        if not result.get(key):
-            raise AssertionError(f"Evolution Lab panel {key} is not visible: {result}")
-    if result.get("pipelineSteps") != 6:
-        raise AssertionError(f"Evolution pipeline should render 6 steps: {result}")
-    if "No candidates" not in str(result.get("leaderboardText")) and "score=" not in str(result.get("leaderboardText")):
-        raise AssertionError(f"Candidate leaderboard did not render candidate/empty state: {result}")
-    if result.get("bodyWidth", 0) > result.get("viewportWidth", 0) + 24:
-        raise AssertionError(f"Evolution Lab has unexpected horizontal overflow: {result}")
-    audit.screenshot(out_dir / "evolution_lab_browser_audit.png")
-    return result
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default="http://127.0.0.1:7862")
@@ -2105,9 +2055,8 @@ def main() -> int:
         audit.start()
         out_dir = Path(args.out_dir)
         result = scenario_live_runtime_ide(audit, args.base_url, out_dir)
-        evolution_result = scenario_evolution_lab(audit, args.base_url, out_dir)
         print("live_runtime_ide_browser_audit: PASS")
-        print({"live": result, "evolution_lab": evolution_result})
+        print({"live": result})
         return 0
     finally:
         time.sleep(0.1)

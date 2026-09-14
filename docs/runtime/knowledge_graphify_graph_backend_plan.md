@@ -1,5 +1,11 @@
 # Knowledge Graphify Graph Backend Upgrade Plan
 
+> **2026-09-14 status:** The Self-Evolution service, task-prefill path, API, and
+> workspace discussed below are retired. Evolution-named Knowledge schemas and
+> records remain as read-only improvement evidence and historical attribution;
+> references below to activation or an Evolution Lab are superseded design
+> history, not active runtime instructions.
+
 ## Purpose
 
 이 문서는 8번 개선안의 후속 고도화로, `Knowledge Agent`의 JSON/JSONL 기반 typed memory를 Graphify 기반 project graph 및 graph database backend와 연결하는 계획이다.
@@ -51,7 +57,7 @@ References:
 ## Target Architecture
 
 ```text
-/home/jin/autonomous_researcher
+~/autonomous_researcher
   -> Graphify repository scan
       -> memory/knowledge/graphify/project_graph.json
       -> memory/knowledge/graphify/project_graph.html
@@ -270,7 +276,7 @@ Equivalent script:
 
 ```bash
 python scripts/knowledge_graphify_scan.py \
-  --project-root /home/jin/autonomous_researcher \
+  --project-root ~/autonomous_researcher \
   --out-dir memory/knowledge/graphify
 ```
 
@@ -515,7 +521,7 @@ Verified local operation on 2026-05-30:
 - Neo4j health reported 404 nodes and 2795 edges after repeated runtime verification/import.
 - `target_context` query for `prompt:analysis` returned compact nodes/edges.
 - Graphify-compatible fallback scan produced 56 project nodes and 183 project edges for `agents/` + `docs/runtime/`.
-- Installed `graphifyy==0.4.4`; `graphify --help` works through `/home/jin/.local/bin/graphify`.
+- Installed `graphifyy==0.4.4`; `graphify --help` works through `~/.local/bin/graphify`.
 - `atr knowledge graphify-scan --external-graphify --source agents --source knowledge` used Graphify Python API and produced 642 nodes and 1527 edges.
 - Graphify CLI query was verified against `memory/knowledge/graphify/external_raw/graph.json`; ATR normalized `project_graph.json` remains the backend import artifact.
 - The external Graphify graph was imported into JSON and Neo4j backends; JSON import wrote 1284 nodes and 1527 edges after preserving referenced endpoint placeholders.
@@ -540,7 +546,7 @@ Current limitation:
 
 - External Graphify API execution is optional and disabled by default. Install `graphifyy==0.4.4` and pass `--external-graphify` to run Graphify AST/community extraction first.
 - On this ARM64/Python 3.12 workstation, latest `graphifyy` failed because `tree-sitter-dm` needs `Python.h`; either install `python3.12-dev` or keep the pinned `graphifyy==0.4.4`.
-- The installed terminal command is `/home/jin/.local/bin/graphify`, backed by `/home/jin/autonomous_researcher/.venv/bin/graphify`.
+- The installed terminal command is `~/.local/bin/graphify`, backed by `~/autonomous_researcher/.venv/bin/graphify`.
 - Graphify `graphify query` works on existing graph JSON; generation is called through the installed Graphify Python API because the CLI generation flow is exposed as agent skill instructions rather than a direct `graphify scan` command in `0.4.4`.
 - The fallback scanner is deterministic and local, but less semantically rich than a full Graphify LLM/AST/community extraction pass.
 

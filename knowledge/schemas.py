@@ -13,7 +13,7 @@ Key classes/functions:
 
 Inputs/outputs:
 - Input: runtime reports, metrics, artifacts, provenance refs
-- Output: validated memory/evidence records used by RAG, BO, Guardian, and Self-Evolution
+- Output: validated memory/evidence records used by RAG, BO, Guardian, and improvement analysis
 
 Dependencies:
 - pydantic.BaseModel
@@ -100,7 +100,7 @@ class ExperimentKnowledgeRecord(BaseModel):
 
 
 class AgentPerformanceRecord(BaseModel):
-    """Agent-level performance ledger entry used by self-evolution ranking."""
+    """Agent-level performance ledger entry used by improvement ranking."""
 
     schema_version: str = "agent_performance_v1"
     record_id: str
@@ -152,7 +152,7 @@ class SuccessPatternRecord(BaseModel):
 
 
 class EvolutionEvidencePack(BaseModel):
-    """Knowledge-to-SelfEvolution contract for one proposed target."""
+    """Stable Knowledge improvement-evidence contract for one proposed target."""
 
     schema_version: str = "evolution_evidence_pack_v1"
     pack_id: str

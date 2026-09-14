@@ -246,10 +246,8 @@ descriptor report sections in `/live`, while built-in
 Design/Equipment/Guardian report surfaces do not get displaced by descriptor
 preview cards. `save-version` is allowed while a run is active only when
 `activate=false`; graph activation remains blocked during an active run. The
-planning artifact audit confirms `analysis_ai` FEM/CAE contour cards
-and collapsed-by-default BO surrogate/acquisition cards render in the chat
-without creating the SVG plot until the operator expands the BO card. This
-verification did not change the DSN/design-window layout contract.
+current Analysis projection exposes measured curves, metrics and objective evidence.
+Historical browser audit results do not establish current feature availability.
 
 | Group | Primary source | Operator-facing meaning |
 |---|---|---|
@@ -260,8 +258,7 @@ verification did not change the DSN/design-window layout contract.
 | LeRobot APIs | `device_bridges/lerobot_bridge.py`, `app/main.py` | ROBOTIS/LeRobot teleop, record, train, rollout, manipulation bridge, Isaac Sim mirror-state probe and mirror loop |
 | PyAutoGUI equipment APIs | `device_bridges/windows_pyautogui_bridge.py`, `utils/local_pyautogui_bridge.py`, `app/main.py` | Windows bridge discovery plus managed localhost development target, proof, execution |
 | Recorded Equipment Skills | `utils/equipment_skill_runtime.py`, `Pyautogui_server_for_window/bridge/windows_pyautogui_bridge_server.py`, `agents/equipment/agent.py`, `policies/guardian_gate.py` | Versioned demonstration packages, v2 image-first click/drag locators, deterministic segment execution, exact-model bounded recovery |
-| BO/CAE APIs | `agents/bo/agent.py`, `device_bridges/cae_bridge.py` | Optimizer and analysis workspaces |
-| Knowledge/Evolution APIs | `knowledge/`, `self_evolution/`, `app/main.py`, `web/templates/knowledge.html`, `web/static/knowledge.*` | Durable memory, bounded Neo4j/Graphify inspection, ontology, relation review/edit, activity visualization, and self-evolution tasks |
+| Knowledge APIs | `knowledge/`, `app/main.py`, `web/templates/knowledge.html`, `web/static/knowledge.*` | Durable memory, bounded Neo4j/Graphify inspection, ontology, relation review/edit, activity visualization, and improvement evidence |
 
 Do not use this document as an instruction prompt. Use it as the "what the code
 currently does" layer when updating operator docs, README files, or improvement
@@ -343,12 +340,10 @@ The FastAPI app currently serves these operator pages:
 | `/planning` | `web/templates/planning.html` | `web/static/planning.js` | Legacy alias for Live GUI |
 | `/ide` | `web/templates/runtime_ide.html` | `web/static/runtime_ide.js` | Runtime IDE graph/module editor |
 | `/module-management` | `web/templates/module_management.html` | `web/static/module_management.js` | Module validation, dry-run, versioning, draft module templates |
-| `/printer` | `web/templates/printer.html` | `web/static/printer.js` | 3DP printer workspace, Bambu/Prusa fleet, slicing/start/autoejection gates |
+| `/printer` | `web/templates/printer.html` | `web/static/printer.js` | 3D printer workspace, Bambu/Prusa fleet, slicing/start/autoejection gates |
 | `/lerobot` | `web/templates/lerobot.html` | `web/static/lerobot.js` | ROBOTIS/LeRobot port, teleop, record, train, rollout, manipulation bridge |
 | `/bo` | `web/templates/bo.html` | `web/static/bo.js` | BO/MBO strategy, benchmark, candidate ranking |
-| `/cae` | `web/templates/cae.html` | `web/static/cae.js` | CAE/FEM analysis workspace |
 | `/equipment/windows` | `web/templates/windows_equipment.html` | `web/static/windows_equipment.js` | Windows/local PyAutoGUI target management and UTM bridge workspace |
-| `/evolution-lab` | `web/templates/evolution_lab.html` | `web/static/evolution_lab.js` | Self-evolution task/variant/approval workspace |
 
 ## 2. Runtime Graph And Agent Manifest
 
@@ -682,7 +677,6 @@ It currently returns these graph-level bridge entries:
 prusa_bridge
 lerobot_bridge
 windows_pyautogui_bridge
-cae_bridge
 camera_utm_bridge
 ```
 
@@ -784,7 +778,6 @@ Current normalized bridge endpoint defaults:
 | `prusa_bridge` | `/printer` | `/api/printer/status` | `/api/printer/spc-readiness` |
 | `lerobot_bridge` | `/lerobot` | `/api/lerobot/config` | `/api/lerobot/profiles/validate` |
 | `windows_pyautogui_bridge` | `/equipment/windows` | `/api/equipment/windows/readiness` | `/api/equipment/windows/live-preflight` |
-| `cae_bridge` | `/cae` | `/api/cae/config` | `/api/cae/config` |
 | `camera_utm_bridge` | `/lerobot` | `/api/lerobot/config` | `/api/lerobot/camera/test` |
 
 The graph YAML still contains the legacy Windows workspace alias
@@ -909,7 +902,6 @@ orchestrator_plan      -> orchestrator -> gemma4:31b primary, e4b fallback
 module_designer        -> orchestrator
 design_reasoning       -> e4b
 analysis_reasoning     -> e4b
-analysis_fem_planning  -> e4b
 bo_policy              -> e4b
 knowledge_query        -> e4b
 guardian_reasoning     -> e4b
@@ -948,7 +940,6 @@ The current app also exposes:
 /api/bo/*
 /api/cae/*
 /api/knowledge/*
-/api/evolution/*
 /api/events/recent
 /api/events/stream
 /api/runtime/events
@@ -967,16 +958,16 @@ controller explicitly calls them through the relevant agent/tool bridge.
 Current endpoint ownership rules:
 
 - `/api/bo/*` and `/api/cae/*` are workspace and agent-support APIs. They may
-  produce BO/CAE artifacts, but they do not directly start printers or robots.
+  produce BO/measurement artifacts, but they do not directly start printers or robots.
 - `/api/lerobot/*` can start live subprocesses only through its own live gates
   and profile confirmation. The Manipulation Agent bridge reuses this layer
   instead of generating shell commands in the agent.
 - `/api/equipment/windows/*` owns Windows PyAutoGUI/UTM bridge discovery,
   locator/proof capture, and program execution. Lab Equipment Agent should call
   the bridge/tool layer rather than manipulating GUI state directly.
-- `/api/knowledge/*` and `/api/evolution/*` are evidence/memory/evolution
-  support surfaces. They may inform BO/Guardian/Self-Evolution, but they are not
-  physical actuation APIs.
+- `/api/knowledge/*` exposes evidence and memory support surfaces, including
+  stable evolution-named improvement-evidence pack/outcome records. It may
+  inform BO/Guardian, but it is not a physical actuation API.
 - `/api/runtime/gpu-clear` is an operator maintenance endpoint. It should not
   be called automatically by normal stage execution.
 
@@ -1209,7 +1200,7 @@ page_paths = {
     "/", "/live", "/planning", "/ide", "/module-management", "/printer",
     "/lerobot", "/bo", "/cae", "/knowledge", "/device-bridge/vision-utm",
     "/equipment/windows", "/equipment/windows/console",
-    "/equipment/windows/bridge-ui/{resource_path:path}", "/evolution-lab",
+    "/equipment/windows/bridge-ui/{resource_path:path}",
 }
 favicon_paths = {"/favicon.ico", "/favicon.svg"}
 page = [r.path for r in routes if r.path in page_paths]
@@ -1256,8 +1247,6 @@ def group(path: str) -> str:
         return "events_runs"
     if path.startswith("/api/knowledge"):
         return "knowledge"
-    if path.startswith("/api/evolution"):
-        return "evolution"
     return "other_api"
 for key, value in sorted(Counter(group(r.path) for r in routes).items()):
     print(f"{key}: {value}")

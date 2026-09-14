@@ -31,8 +31,6 @@ from typing import Any
 
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
 from agents.analysis.decisions import decide
-from agents.analysis.runtime import resolve_loop_model, service_for
-import sqlite3
 from utils.agent_artifact_archive import archive_agent_run
 from orchestrator.state import Mode, OrchestratorState
 from utils.equipment_agentic_task import (
@@ -248,161 +246,9 @@ class AnalysisAgent(BaseAgent):
         specimen = metadata.get("specimen_result") if isinstance(metadata.get("specimen_result"), dict) else {}
         return dict(specimen)
 
-    def _cae_payload(self, state: OrchestratorState, geometry: dict[str, Any]) -> dict[str, Any]:
-        spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
-        specimen = self._specimen_result(state)
-        candidate = specimen.get("candidate") if isinstance(specimen.get("candidate"), dict) else {}
-        parameters = candidate.get("parameters") if isinstance(candidate.get("parameters"), dict) else {}
-        material = {
-            "elastic_modulus_mpa": self._safe_float(
-                spec.get("cae_elastic_modulus_mpa")
-                or spec.get("elastic_modulus_mpa")
-                or parameters.get("elastic_modulus_mpa"),
-                1800.0,
-            ),
-            "poisson_ratio": self._safe_float(spec.get("cae_poisson_ratio") or spec.get("poisson_ratio"), 0.35),
-            "yield_strength_mpa": self._safe_float(
-                spec.get("cae_yield_strength_mpa") or spec.get("yield_strength_mpa"),
-                35.0,
-            ),
-        }
-        if isinstance(spec.get("cae_plastic_curve") or spec.get("plastic_curve"), list):
-            material["plastic_curve"] = spec.get("cae_plastic_curve") or spec.get("plastic_curve")
-        elif not any(spec.get(key) is not None for key in ("cae_yield_strength_mpa", "yield_strength_mpa")):
-            # User-selected completed compression reference, not measured PLA
-            # properties. Explicit experiment material settings take precedence.
-            material["yield_strength_mpa"] = 55.0
-            material["plastic_curve"] = [[55.0, 0.0], [55.0, 0.02], [30.0, 0.15],
-                                         [25.0, 0.4], [30.0, 1.0]]
-        loading = {
-            "load_type": "quasistatic_compression",
-            "loading_control": "displacement",
-            "target_strain": self._safe_float(spec.get("cae_target_strain") or spec.get("target_strain"), 0.5),
-            "initial_increment": self._safe_float(spec.get("cae_initial_increment"), 0.01),
-            "minimum_increment": self._safe_float(spec.get("cae_minimum_increment"), 1e-7),
-            "maximum_increment": self._safe_float(spec.get("cae_maximum_increment"), 0.02),
-            "max_increments": int(self._safe_float(spec.get("cae_max_increments"), 500.0)),
-        }
-        boundary_condition = str(spec.get("cae_boundary_condition") or "bottom_fixed_support")
-        loading_mode = str(spec.get("cae_loading_mode") or "top_cyclic_loading")
-        legacy_cap = bool(spec.get("top_bottom_cap", False))
-        return {
-            "runtime_mode": state.mode.value,
-            "mode": state.mode.value,
-            "specimen_id": str(specimen.get("specimen_id") or spec.get("specimen_id") or state.experiment_id),
-            "stl_path": str(specimen.get("stl_path") or spec.get("stl_path") or ""),
-            "specimen_size_mm": geometry.get("specimen_size_mm", [20.0, 20.0, 20.0]),
-            "cross_section_area_mm2": geometry.get("cross_section_area_mm2"),
-            "gauge_length_mm": geometry.get("gauge_length_mm"),
-            "material": material,
-            "loading": loading,
-            "boundary": {
-                "bottom": "frictionless_axial_support",
-                "top": "frictionless_displacement",
-            },
-            "boundary_condition": boundary_condition,
-            "loading_mode": loading_mode,
-            "fixture": {
-                "bottom_face": "u3_fixed_in_plane_free",
-                "top_face": "prescribed_u3_in_plane_free",
-                "rigid_body_stabilization": "two_bottom_nodes_three_in_plane_dofs",
-                "platens": "not_modeled",
-            },
-            "analysis_platens": {
-                "bottom": False,
-                "top": False,
-                "thickness_mm": self._safe_float(spec.get("cae_platen_thickness_mm"), 1.0),
-                "applies_to": "not_modeled",
-            },
-            "generated_model_caps": {
-                "top_cap_enabled": bool(spec.get("top_cap_enabled", legacy_cap)),
-                "bottom_cap_enabled": bool(spec.get("bottom_cap_enabled", legacy_cap)),
-                "top_bottom_cap": bool(spec.get("top_cap_enabled", legacy_cap) or spec.get("bottom_cap_enabled", legacy_cap)),
-                "skin_thickness_mm": self._safe_float(spec.get("skin_thickness_mm"), 0.0),
-            },
-            "design_parameters": {
-                "geometry_type": str(spec.get("geometry_type") or ""),
-                "relative_density": self._safe_float(spec.get("relative_density"), 0.32),
-                "wall_thickness_mm": self._safe_float(spec.get("wall_thickness_mm"), 1.2),
-                "cell_size_mm": self._safe_float(spec.get("cell_size_mm"), 5.0),
-            },
-            "mesh_size_mm": self._safe_float(spec.get("cae_mesh_size_mm") or spec.get("mesh_size_mm"), 0.8),
-            "require_solver": bool(spec.get("require_cae_solver", False)),
-            "runtime_solver_enabled": bool(spec.get("runtime_solver_enabled", False)),
-            "reference_calibration": (
-                dict(spec["cae_reference_calibration"])
-                if isinstance(spec.get("cae_reference_calibration"), dict)
-                else {}
-            ),
-            "source": "analysis_agent",
-        }
 
-    async def _run_cae(self, state: OrchestratorState, ctx: AgentContext, geometry: dict[str, Any]) -> dict[str, Any] | None:
-        tools = getattr(ctx, "tools", None)
-        if tools is None:
-            return None
-        try:
-            available = tools.list_tools() if hasattr(tools, "list_tools") else []
-            if available and "cae.run_static_analysis" not in available:
-                return None
-            payload = self._cae_payload(state, geometry)
-            pin = state.run_metadata.get("analysis_model_pin", {})
-            if pin.get("loop_key") == f"{state.run_id}:loop-{state.loop_count}":
-                payload.update(pin["model"]["parameters"])
-                payload["model_version"] = pin["model"]["version"]
-            service = service_for(ctx)
-            if service is not None:
-                return await service.compute(lambda: tools.call("cae.run_static_analysis", payload))
-            return tools.call("cae.run_static_analysis", payload)
-        except KeyError:
-            return None
-        except Exception as exc:
-            return {
-                "ok": False,
-                "tool": "cae.run_static_analysis",
-                "status": "error",
-                "failure_code": "CAE_TOOL_ERROR",
-                "message": f"{exc.__class__.__name__}: {exc}",
-            }
 
-    def _cae_simulation_loop(self, cae_result: dict[str, Any] | None) -> dict[str, Any]:
-        """Expose CAE/CalculiX simulation evidence in the legacy loop slot."""
-        if not isinstance(cae_result, dict):
-            return {
-                "schema": "analysis_cae_simulation_loop.v1",
-                "status": "skipped",
-                "reason": "cae_tool_unavailable",
-                "iterations": [],
-                "selected_result": {},
-                "tool_sequence": ["cae.health", "cae.run_static_analysis"],
-            }
-        record = {
-            "iteration": 1,
-            "tool": cae_result.get("tool", "cae.run_static_analysis"),
-            "status": cae_result.get("status", "unknown"),
-            "ok": bool(cae_result.get("ok")),
-            "solver": cae_result.get("solver") or cae_result.get("default_solver") or "calculix",
-            "mesh_size_mm": cae_result.get("mesh_size_mm"),
-            "agreement_source": "fem_utm_comparison.v1",
-        }
-        return {
-            "schema": "analysis_cae_simulation_loop.v1",
-            "status": "completed" if cae_result.get("ok") else "blocked",
-            "health": {},
-            "iterations": [record],
-            "selected_iteration": 1 if cae_result.get("ok") else None,
-            "selected_cache_status": cae_result.get("cache_status"),
-            "selected_result": cae_result if cae_result.get("ok") else {},
-            "tool_sequence": ["cae.health", "cae.run_static_analysis"],
-            "safety_rule": "simulation evidence is produced only through registered CAE/CalculiX bridge tools and validated payloads",
-        }
 
-    @staticmethod
-    def _cae_as_fem_result(cae_result: dict[str, Any] | None) -> dict[str, Any]:
-        """Keep legacy FEM report slots backed by CAE/CalculiX evidence."""
-        if not isinstance(cae_result, dict):
-            return {}
-        return {"schema": "fem_result.v1", "source": "cae.run_static_analysis", "result": cae_result}
 
     @staticmethod
     def _equipment_result(state: OrchestratorState) -> dict[str, Any]:
@@ -814,74 +660,6 @@ class AnalysisAgent(BaseAgent):
         policy = spec.get("execution_policy") if isinstance(spec.get("execution_policy"), dict) else {}
         return str(policy.get("lab_equipment") or "").strip().lower() == "preflight_only"
 
-    def _curve_from_preflight_cae(
-        self,
-        equipment_result: dict[str, Any],
-        cae_result: dict[str, Any] | None,
-    ) -> tuple[list[dict[str, float]], dict[str, Any]]:
-        """Promote qualified CAE output only for an explicit no-actuation UTM policy."""
-        equipment_preflight = (
-            equipment_result.get("equipment_preflight")
-            if isinstance(equipment_result.get("equipment_preflight"), dict)
-            else {}
-        )
-        if (
-            equipment_preflight.get("status") != "execution_ready_pending_approval"
-            or equipment_preflight.get("actuation_performed") is not False
-            or equipment_preflight.get("resolved_program_id") != "run_utm_compression_cycle"
-        ):
-            return [], {
-                "source": "equipment_preflight",
-                "failure_code": "EQUIPMENT_PREFLIGHT_NOT_READY",
-                "error": "The complete UTM program must resolve and stop before PyAutoGUI execution.",
-            }
-        if not isinstance(cae_result, dict) or not cae_result.get("ok"):
-            return [], {
-                "source": "cae_reference_calibrated_preflight",
-                "failure_code": "CAE_PREFLIGHT_RESULT_REQUIRED",
-                "error": "A successful CAE result is required when UTM actuation is disabled.",
-            }
-        calibration = (
-            cae_result.get("reference_calibration")
-            if isinstance(cae_result.get("reference_calibration"), dict)
-            else {}
-        )
-        cae_metrics = (
-            cae_result.get("cae_metrics")
-            if isinstance(cae_result.get("cae_metrics"), dict)
-            else cae_result.get("metrics", {})
-        )
-        if calibration.get("applied") is not True or cae_metrics.get("endpoint_reached") is not True:
-            return [], {
-                "source": "cae_reference_calibrated_preflight",
-                "failure_code": "QUALIFIED_CAE_REFERENCE_REQUIRED",
-                "error": "CAE preflight must use qualified historical UTM calibration and reach the planned endpoint.",
-            }
-        raw_curve = cae_result.get("reaction_force_displacement_curve")
-        if not isinstance(raw_curve, list):
-            raw_curve = []
-        curve = self._curve_points_from_rows(raw_curve, sort_by_displacement=True)
-        hashes = [str(value) for value in calibration.get("reference_hashes", []) if str(value).strip()]
-        return curve, {
-            "source": "cae_reference_calibrated_preflight",
-            "observation_kind": "predicted",
-            "fidelity": "cae_mid",
-            "parser_id": "analysis.parsers.cae_force_displacement_curve",
-            "reference_hashes": hashes,
-            "reference_calibration": calibration,
-            "equipment_preflight": equipment_preflight,
-            "column_mapping": {
-                "schema": "analysis_column_mapping.v1",
-                "mappings": {
-                    "displacement_mm": {"canonical": "displacement_mm", "multiplier": 1.0, "unit": "mm"},
-                    "force_N": {"canonical": "force_N", "multiplier": 1.0, "unit": "N"},
-                },
-                "roles": {"displacement_mm": "displacement_mm", "force_N": "force_N"},
-                "column_mapping_confidence": 1.0,
-                "unit_mapping_confidence": 1.0,
-                "warnings": [],
-            },
-        }
 
     def _synthetic_curve(self, state: OrchestratorState, geometry: dict[str, Any]) -> tuple[list[dict[str, float]], dict[str, Any]]:
         spec = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
@@ -1144,7 +922,6 @@ class AnalysisAgent(BaseAgent):
         uncertainty: float,
         source_meta: dict[str, Any],
         equipment_result: dict[str, Any],
-        cae_result: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
         service = self._objective_service(ctx)
         requested = self._compiled_objective_requested(state)
@@ -1166,7 +943,7 @@ class AnalysisAgent(BaseAgent):
             raise RuntimeError("OBJECTIVE_BINDING_MISMATCH: requested and active objective ids differ")
         provenance_refs = [
             str(item.get("path") or item.get("source") or "")
-            for item in self._artifact_refs(equipment_result, source_meta, cae_result)
+            for item in self._artifact_refs(equipment_result, source_meta)
             if str(item.get("path") or item.get("source") or "").strip()
         ]
         if not provenance_refs:
@@ -1403,156 +1180,8 @@ class AnalysisAgent(BaseAgent):
             "summary": "Compared against previous and best measured evaluations.",
         }
 
-    def _fem_utm_comparison(self, metrics: dict[str, Any], fem_result: dict[str, Any] | None, cae_result: dict[str, Any] | None) -> dict[str, Any]:
-        simulation = fem_result if isinstance(fem_result, dict) and fem_result.get("ok") else cae_result
-        sim_metrics = {}
-        if isinstance(simulation, dict):
-            sim_metrics = simulation.get("fem_metrics") if isinstance(simulation.get("fem_metrics"), dict) else simulation.get("cae_metrics") if isinstance(simulation.get("cae_metrics"), dict) else simulation.get("metrics", {})
-        if not isinstance(sim_metrics, dict) or not sim_metrics:
-            return {"schema": "fem_utm_comparison.v1", "available": False, "reason": "no_simulation_metrics"}
-        utm_peak = self._safe_float(metrics.get("peak_force_N"), 0.0)
-        utm_stiffness = self._safe_float(metrics.get("initial_stiffness_N_per_mm"), 0.0)
-        pred_peak = self._safe_float(
-            sim_metrics.get("peak_reaction_force_N")
-            or sim_metrics.get("predicted_peak_force_N")
-            or sim_metrics.get("load_max_N"),
-            0.0,
-        )
-        pred_stiffness = self._safe_float(
-            sim_metrics.get("initial_stiffness_N_per_mm")
-            or sim_metrics.get("predicted_initial_stiffness_N_per_mm")
-            or sim_metrics.get("apparent_stiffness_N_per_mm"),
-            0.0,
-        )
-        comparable_peak = bool(
-            metrics.get("peak_force_limit_reached", True) is True
-            and sim_metrics.get("endpoint_reached", True) is True
-            and utm_peak > 0.0
-            and pred_peak > 0.0
-        )
-        peak_error = abs(pred_peak - utm_peak) / max(abs(utm_peak), 1e-9) * 100.0 if comparable_peak else None
-        stiffness_error = abs(pred_stiffness - utm_stiffness) / max(abs(utm_stiffness), 1e-9) * 100.0 if utm_stiffness > 0 and pred_stiffness > 0 else None
-        utm_energy = self._safe_float(metrics.get("energy_absorption_50pct_mJ"), float("nan"))
-        fea_energy = self._safe_float(sim_metrics.get("energy_absorption_50pct_mJ"), float("nan"))
-        comparable_energy = bool(
-            metrics.get("energy_absorption_limit_reached") is True
-            and sim_metrics.get("endpoint_reached") is True
-            and math.isfinite(utm_energy)
-            and math.isfinite(fea_energy)
-            and utm_energy > 0.0
-            and fea_energy >= 0.0
-        )
-        energy_error = abs(fea_energy - utm_energy) / max(abs(utm_energy), 1e-9) * 100.0 if comparable_energy else None
-        numeric_errors = [item for item in (peak_error, stiffness_error, energy_error) if item is not None]
-        agreement = 1.0 / (1.0 + (sum(numeric_errors) / max(len(numeric_errors), 1)) / 100.0) if numeric_errors else 0.0
-        tags = []
-        if peak_error is not None and peak_error > 40.0:
-            tags.append("peak_force_discrepancy_high")
-        if stiffness_error is not None and stiffness_error > 40.0:
-            tags.append("stiffness_discrepancy_high")
-        if energy_error is not None and energy_error > 40.0:
-            tags.append("energy_absorption_50pct_discrepancy_high")
-        if not tags:
-            tags.append("acceptable" if agreement >= 0.65 else "needs_more_samples_for_calibration")
-        return {
-            "schema": "fem_utm_comparison.v1",
-            "available": True,
-            "simulation_tool": simulation.get("tool") if isinstance(simulation, dict) else "",
-            "peak_force_error_pct": round(peak_error, 6) if peak_error is not None else None,
-            "stiffness_error_pct": round(stiffness_error, 6) if stiffness_error is not None else None,
-            "energy_absorption_50pct_error_pct": round(energy_error, 6) if energy_error is not None else None,
-            "utm_energy_absorption_50pct_mJ": utm_energy if comparable_energy else None,
-            "fea_energy_absorption_50pct_mJ": fea_energy if comparable_energy else None,
-            "agreement_score": round(agreement, 6),
-            "discrepancy_tags": tags,
-        }
 
-    def _multifidelity_comparison(
-        self,
-        metrics: dict[str, Any],
-        fem_utm_comparison: dict[str, Any],
-        cae_result: dict[str, Any] | None,
-        fem_result: dict[str, Any] | None,
-    ) -> dict[str, Any]:
-        simulation = fem_result if isinstance(fem_result, dict) and fem_result.get("ok") else cae_result
-        sim_metrics = {}
-        if isinstance(simulation, dict):
-            sim_metrics = simulation.get("fem_metrics") if isinstance(simulation.get("fem_metrics"), dict) else simulation.get("cae_metrics") if isinstance(simulation.get("cae_metrics"), dict) else simulation.get("metrics", {})
-        return {
-            "schema": "multifidelity_comparison.v1",
-            "available": bool(fem_utm_comparison.get("available")),
-            "curve": {
-                "utm_peak_force_N": metrics.get("peak_force_N"),
-                "fea_peak_force_N": sim_metrics.get("peak_reaction_force_N") or sim_metrics.get("predicted_peak_force_N") or sim_metrics.get("load_max_N"),
-                "peak_force_error_pct": fem_utm_comparison.get("peak_force_error_pct"),
-                "utm_stiffness_N_per_mm": metrics.get("initial_stiffness_N_per_mm"),
-                "fea_stiffness_N_per_mm": sim_metrics.get("initial_stiffness_N_per_mm") or sim_metrics.get("predicted_initial_stiffness_N_per_mm") or sim_metrics.get("apparent_stiffness_N_per_mm"),
-                "stiffness_error_pct": fem_utm_comparison.get("stiffness_error_pct"),
-                "utm_energy_absorption_50pct_mJ": fem_utm_comparison.get("utm_energy_absorption_50pct_mJ"),
-                "fea_energy_absorption_50pct_mJ": fem_utm_comparison.get("fea_energy_absorption_50pct_mJ"),
-                "energy_absorption_50pct_error_pct": fem_utm_comparison.get("energy_absorption_50pct_error_pct"),
-                "agreement_score": fem_utm_comparison.get("agreement_score", 0.0),
-                "tags": fem_utm_comparison.get("discrepancy_tags", []),
-            },
-            "field": {
-                "available": bool(isinstance(simulation, dict) and simulation.get("ok")),
-                "max_von_mises_MPa": sim_metrics.get("max_von_mises_MPa"),
-                "max_displacement_mm": sim_metrics.get("max_displacement_mm"),
-                "structural_score": sim_metrics.get("structural_score"),
-            },
-            "hotspot": {"available": False, "reason": "hotspot_extraction_not_enabled"},
-            "pinn": {"status": "unavailable", "reason": "no_active_pinn_model"},
-            "sources": {
-                "utm": "equipment_handoff",
-                "fea": (simulation or {}).get("tool") if isinstance(simulation, dict) else "unavailable",
-                "pinn": "unavailable",
-            },
-        }
 
-    def _fidelity_records(
-        self,
-        *,
-        state: OrchestratorState,
-        metrics: dict[str, Any],
-        source_meta: dict[str, Any],
-        cae_result: dict[str, Any] | None,
-        fem_result: dict[str, Any] | None,
-        analysis_artifacts: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        artifacts = analysis_artifacts if isinstance(analysis_artifacts, dict) else {}
-        simulation = fem_result if isinstance(fem_result, dict) and fem_result.get("ok") else cae_result
-        sim_metrics = {}
-        if isinstance(simulation, dict):
-            sim_metrics = simulation.get("fem_metrics") if isinstance(simulation.get("fem_metrics"), dict) else simulation.get("cae_metrics") if isinstance(simulation.get("cae_metrics"), dict) else simulation.get("metrics", {})
-        return {
-            "utm_high": {
-                "schema": "utm_record.v1",
-                "status": "available" if metrics else "unavailable",
-                "source": source_meta.get("source") or "utm",
-                "parser_id": source_meta.get("parser_id"),
-                "path": source_meta.get("path"),
-                "metrics_artifact": artifacts.get("metrics"),
-                "canonical_curve_artifact": artifacts.get("canonical_curve"),
-                "peak_force_N": metrics.get("peak_force_N"),
-                "objective_source": True,
-                "run_id": state.run_id,
-                "experiment_id": state.experiment_id,
-            },
-            "fea_mid": {
-                "schema": "fea_result.v1",
-                "status": "available" if isinstance(simulation, dict) and simulation.get("ok") else "unavailable",
-                "tool": (simulation or {}).get("tool") if isinstance(simulation, dict) else None,
-                "artifact": artifacts.get("fem_result"),
-                "metrics": sim_metrics,
-                "objective_source": False,
-            },
-            "pinn_low_or_surrogate": {
-                "schema": "pinn_prediction.v1",
-                "status": "unavailable",
-                "reason": "no_active_pinn_model",
-                "objective_source": False,
-            },
-        }
 
 
     def _write_analysis_artifacts(
@@ -1564,8 +1193,6 @@ class AnalysisAgent(BaseAgent):
         metrics: dict[str, Any],
         analysis: dict[str, Any],
         handoff: dict[str, Any],
-        fem_result: dict[str, Any] | None,
-        cae_result: dict[str, Any] | None,
     ) -> dict[str, str]:
         base = self._analysis_artifact_dir(state)
         canonical = self._canonical_curve(curve, analysis.get("specimen_geometry", {})) if curve else []
@@ -1578,22 +1205,6 @@ class AnalysisAgent(BaseAgent):
         paths["preprocessing_report"] = self._write_json(base / "preprocessing_report.json", preprocessing)
         paths["quality_report"] = self._write_json(base / "quality_report.json", analysis.get("quality_gate", analysis.get("data_quality_gate", {})))
         paths["metrics"] = self._write_json(base / "metrics.json", metrics)
-        if isinstance(fem_result, dict):
-            paths["fem_result"] = self._write_json(base / "fem_result.json", fem_result)
-            if isinstance(fem_result.get("request"), dict):
-                paths["fem_request"] = self._write_json(base / "fem_request.json", fem_result["request"])
-            if fem_result.get("artifacts") and isinstance(fem_result.get("artifacts"), dict) and fem_result["artifacts"].get("fem_cache_manifest"):
-                paths["fem_cache_manifest"] = str(fem_result["artifacts"]["fem_cache_manifest"])
-        elif isinstance(cae_result, dict):
-            paths["fem_result"] = self._write_json(base / "fem_result.json", {"schema": "fem_result.v1", "source": "cae.run_static_analysis", "result": cae_result})
-            if isinstance(cae_result.get("request"), dict):
-                paths["fem_request"] = self._write_json(base / "fem_request.json", cae_result["request"])
-        if analysis.get("fem_agentic_loop"):
-            paths["fem_agentic_loop"] = self._write_json(base / "fem_agentic_loop.json", analysis["fem_agentic_loop"])
-        if analysis.get("fem_utm_comparison"):
-            paths["fem_utm_comparison"] = self._write_json(base / "fem_utm_comparison.json", analysis["fem_utm_comparison"])
-        if analysis.get("multifidelity_comparison"):
-            paths["multifidelity_comparison"] = self._write_json(base / "multifidelity_comparison.json", analysis["multifidelity_comparison"])
         if analysis.get("trust_score"):
             paths["trust_score"] = self._write_json(base / "trust_score.json", analysis["trust_score"])
         if analysis.get("comparison"):
@@ -1607,7 +1218,6 @@ class AnalysisAgent(BaseAgent):
         events = [
             {"event": "analysis.file_discovered", "source": source_meta, "created_at": datetime.now(timezone.utc).isoformat()},
             {"event": "analysis.metrics_computed", "metrics": metrics, "created_at": datetime.now(timezone.utc).isoformat()},
-            {"event": "analysis.cae_simulation_completed", "status": analysis.get("fem_agentic_loop", {}).get("status"), "selected_iteration": analysis.get("fem_agentic_loop", {}).get("selected_iteration"), "created_at": datetime.now(timezone.utc).isoformat()},
             {"event": "analysis.bo_handoff_created", "ok_for_bo": handoff.get("bo_handoff", {}).get("ok_for_bo"), "created_at": datetime.now(timezone.utc).isoformat()},
         ]
         trace_path.write_text("".join(json.dumps(item, ensure_ascii=True, default=str) + "\n" for item in events), encoding="utf-8")
@@ -1615,7 +1225,7 @@ class AnalysisAgent(BaseAgent):
         return paths
 
     @staticmethod
-    def _artifact_refs(equipment_result: dict[str, Any], source_meta: dict[str, Any], cae_result: dict[str, Any] | None) -> list[dict[str, Any]]:
+    def _artifact_refs(equipment_result: dict[str, Any], source_meta: dict[str, Any]) -> list[dict[str, Any]]:
         refs: list[dict[str, Any]] = []
 
         def add_ref(kind: str, *, path: Any = "", artifact_id: Any = "", source: str = "") -> None:
@@ -1682,11 +1292,6 @@ class AnalysisAgent(BaseAgent):
                 add_ref(default_kind, path=item, source=source)
 
         collect_item(equipment_result, default_kind="equipment_artifact", source="equipment_result", depth=0)
-        if isinstance(cae_result, dict):
-            for key in ("contour_svg", "report_path", "artifact_path"):
-                value = cae_result.get(key)
-                if value:
-                    add_ref(f"cae_{key}", path=value, source="cae.run_static_analysis")
         seen: set[tuple[str, str, str, str]] = set()
         unique: list[dict[str, Any]] = []
         for item in refs:
@@ -1703,7 +1308,7 @@ class AnalysisAgent(BaseAgent):
         return unique
 
     @staticmethod
-    def _failure_tags(source_meta: dict[str, Any], metrics: dict[str, Any], equipment_result: dict[str, Any], cae_result: dict[str, Any] | None) -> list[str]:
+    def _failure_tags(source_meta: dict[str, Any], metrics: dict[str, Any], equipment_result: dict[str, Any]) -> list[str]:
         tags: list[str] = []
         if source_meta.get("error"):
             tags.append("utm_source_read_error")
@@ -1726,8 +1331,6 @@ class AnalysisAgent(BaseAgent):
             decision = packet.get("decision") if isinstance(packet.get("decision"), dict) else {}
             if decision.get("failure_code"):
                 tags.append(str(decision["failure_code"]))
-        if isinstance(cae_result, dict) and cae_result.get("failure_code"):
-            tags.append(str(cae_result["failure_code"]))
         return sorted(set(str(item) for item in tags if str(item or "").strip()))
 
     def _handoff_payloads(
@@ -1738,15 +1341,13 @@ class AnalysisAgent(BaseAgent):
         metrics: dict[str, Any],
         source_meta: dict[str, Any],
         equipment_result: dict[str, Any],
-        cae_result: dict[str, Any] | None,
-        fem_result: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        artifact_refs = self._artifact_refs(equipment_result, source_meta, cae_result)
+        artifact_refs = self._artifact_refs(equipment_result, source_meta)
         analysis_artifacts = analysis.get("analysis_artifacts") if isinstance(analysis.get("analysis_artifacts"), dict) else {}
         for kind, path in analysis_artifacts.items():
             if path:
                 artifact_refs.append({"kind": str(kind), "path": str(path), "source": "analysis_agent"})
-        failure_tags = self._failure_tags(source_meta, metrics, equipment_result, cae_result)
+        failure_tags = self._failure_tags(source_meta, metrics, equipment_result)
         extra_failure_tags: list[str] = []
 
         def add_failure_tag(value: Any) -> None:
@@ -1769,21 +1370,6 @@ class AnalysisAgent(BaseAgent):
             if isinstance(state.current_experiment_spec, dict) and key in state.current_experiment_spec
         }
         quality_gate = analysis.get("quality_gate") if isinstance(analysis.get("quality_gate"), dict) else analysis.get("data_quality_gate", {})
-        fem_metrics = analysis.get("fem_metrics") if isinstance(analysis.get("fem_metrics"), dict) else {}
-        simulation_metrics = {
-            "cae": analysis.get("cae_metrics", {}),
-            "fem": fem_metrics,
-        }
-        fem_comparison = analysis.get("fem_utm_comparison") if isinstance(analysis.get("fem_utm_comparison"), dict) else {}
-        multifidelity_comparison = analysis.get("multifidelity_comparison") if isinstance(analysis.get("multifidelity_comparison"), dict) else self._multifidelity_comparison(metrics, fem_comparison, cae_result, fem_result)
-        fidelity_records = analysis.get("fidelity_records") if isinstance(analysis.get("fidelity_records"), dict) else self._fidelity_records(
-            state=state,
-            metrics=metrics,
-            source_meta=source_meta,
-            cae_result=cae_result,
-            fem_result=fem_result,
-            analysis_artifacts=analysis_artifacts,
-        )
         # Compatibility slot, now an explicit admissibility decision, not a
         # weighted trust score. Optional model calibration never blocks data.
         trust_score = {
@@ -1793,8 +1379,6 @@ class AnalysisAgent(BaseAgent):
             "checks": {"analysis_ok": bool(analysis.get("ok")), "data_valid": bool(quality_gate.get("ok_for_metrics"))},
             "reasons": [] if analysis.get("ok") and quality_gate.get("ok_for_metrics") else ["analysis_or_data_invalid"],
         }
-        analysis["multifidelity_comparison"] = multifidelity_comparison
-        analysis["fidelity_records"] = fidelity_records
         analysis["trust_score"] = trust_score
         trust_gate = str(trust_score.get("gate") or "").strip()
         objective_evaluation = analysis.get("objective_evaluation") if isinstance(analysis.get("objective_evaluation"), dict) else {}
@@ -1875,9 +1459,6 @@ class AnalysisAgent(BaseAgent):
             "objective_evaluation": objective_evaluation,
             "uncertainty": analysis.get("uncertainty", 1.0),
             "observed_metrics": bo_metrics,
-            "simulation_metrics": simulation_metrics,
-            "simulation_residual": fem_comparison,
-            "multifidelity_comparison": multifidelity_comparison,
             "trust_score": trust_score,
             "trust_gate": trust_gate,
             "data_quality": quality_gate or metrics.get("curve_quality", {}),
@@ -1908,8 +1489,8 @@ class AnalysisAgent(BaseAgent):
             "mode": state.mode.value,
             "bridge": "analysis",
             "status": (
-                "predicted_analysis_complete"
-                if analysis.get("ok") and observation_fidelity == "cae_mid"
+                "synthetic_analysis_complete"
+                if analysis.get("ok") and observation_fidelity == "synthetic"
                 else "measured_analysis_complete"
                 if analysis.get("ok")
                 else "analysis_blocked"
@@ -1919,13 +1500,7 @@ class AnalysisAgent(BaseAgent):
             "provenance_refs": provenance_refs,
             "objective_score": bo_score if bo_score_available else None,
             "uncertainty": analysis.get("uncertainty", 1.0),
-            "metrics": {**parameters, **metrics, "quality_score": quality_gate.get("score"), "fem_utm_agreement_score": fem_comparison.get("agreement_score")},
-            "fidelity_records": {
-                "utm_high": "metrics",
-                "fem_low": (fem_result or {}).get("artifacts", {}).get("fem_result") if isinstance(fem_result, dict) else None,
-                "agreement": analysis_artifacts.get("fem_utm_comparison"),
-            },
-            "multifidelity_comparison": multifidelity_comparison,
+            "metrics": {**parameters, **metrics, "quality_score": quality_gate.get("score")},
             "trust_score": trust_score,
             "artifacts": analysis_artifacts,
             "artifact_refs": artifact_refs,
@@ -1959,17 +1534,6 @@ class AnalysisAgent(BaseAgent):
             },
             "objective_evaluation": analysis.get("objective_evaluation", {}),
             "metrics": bo_metrics,
-            "fidelity": {
-                "mode": "single_high_fidelity_with_low_fidelity_context",
-                "utm_high": {"objective_source": True, "artifact": analysis_artifacts.get("metrics")},
-                "fem_low": {
-                    "used_for_objective": False,
-                    "artifact": analysis_artifacts.get("fem_result") or ((fem_result or {}).get("artifacts", {}).get("fem_result") if isinstance(fem_result, dict) else None),
-                    "cache_status": (fem_result or {}).get("cache_status") if isinstance(fem_result, dict) else None,
-                },
-            },
-            "fidelity_records": fidelity_records,
-            "multifidelity_comparison": multifidelity_comparison,
             "trust_score": trust_score,
             "trust_gate": trust_gate,
             "quality": quality_gate,
@@ -2009,7 +1573,6 @@ class AnalysisAgent(BaseAgent):
         metrics: dict[str, Any],
         source_meta: dict[str, Any],
         equipment_result: dict[str, Any],
-        cae_result: dict[str, Any] | None,
     ) -> AgentResult:
         # Runtime merges Analysis dictionaries across loops. Explicitly replace
         # every consumable result, rather than leaving a previous ready handoff.
@@ -2026,7 +1589,6 @@ class AnalysisAgent(BaseAgent):
             metrics=metrics,
             source_meta=source_meta,
             equipment_result=equipment_result,
-            cae_result=cae_result,
         )
         analysis["artifact_refs"] = handoff["artifact_refs"]
         analysis["failure_tags"] = handoff["failure_tags"]
@@ -2047,35 +1609,6 @@ class AnalysisAgent(BaseAgent):
             },
         )
 
-    async def _summary(self, state: OrchestratorState, ctx: AgentContext, analysis: dict[str, Any]) -> str:
-        metrics = analysis.get("utm_metrics", {})
-        cae_metrics = analysis.get("cae_metrics", {})
-        use_llm = state.mode.value == "live" or ctx.force_real_llm_in_test
-        fallback = (
-            f"UTM analysis: peak_force={metrics.get('peak_force_N')} N, "
-            f"strength={metrics.get('compressive_strength_MPa')} MPa, "
-            f"energy_density_50pct={metrics.get('energy_density_50pct_MJ_per_m3')} MJ/m3, "
-            f"CAE stress={cae_metrics.get('max_von_mises_MPa', 'n/a')} MPa, "
-            f"objective={analysis.get('objective_score')}, uncertainty={analysis.get('uncertainty')}."
-        )
-        if not use_llm:
-            return fallback
-        timeout_s = 45.0 if state.mode == Mode.TEST else None
-        try:
-            response = await ctx.complete(
-                "analysis_reasoning",
-                (
-                    "Summarize this UTM compression analysis for the operator. "
-                    "Mention peak force, stiffness/strength, total energy, 50%-strain volumetric energy absorption, CAE result, data source, and whether the result is ready for Knowledge/Guardian. "
-                    f"analysis={json.dumps(analysis, ensure_ascii=True, default=str)[:3500]}"
-                ),
-                timeout_s=timeout_s,
-            )
-            return response.text[:420]
-        except Exception as exc:
-            if state.mode == Mode.TEST:
-                return f"{fallback} (analysis LLM degraded: {exc.__class__.__name__})"
-            raise
 
     def execution_catalog(self):
         from agents.analysis.execution import analysis_execution_catalog
@@ -2119,10 +1652,6 @@ class AnalysisAgent(BaseAgent):
                     "ok_for_bo": False,
                     "failure_code": "INVALID_SPECIMEN_GEOMETRY",
                 },
-                "cae_result": {},
-                "cae_metrics": {},
-                "fem_result": {},
-                "fem_metrics": {},
                 "equipment_handoff_gate": {"ok": False, "status": "blocked"},
             }
             return self._blocked_result(
@@ -2132,54 +1661,21 @@ class AnalysisAgent(BaseAgent):
                 metrics={},
                 source_meta=source_meta,
                 equipment_result=equipment_result,
-                cae_result=None,
             )
         decisions = []
         virtual = state.mode != Mode.LIVE and not getattr(ctx, "force_real_llm_in_test", True)
-        try:
-            pin = resolve_loop_model(state, ctx)
-        except (OSError, ValueError, sqlite3.Error) as exc:
-            pin = {}
-            state.run_metadata["analysis_improvement_error"] = type(exc).__name__
-        tools = getattr(ctx, "tools", None)
-        simulation_options = {"run_cae": "cae.run_static_analysis", "hold": None} if tools and "cae.run_static_analysis" in tools.list_tools() else {"unavailable": None}
         equipment_result = self._equipment_result(state)
         curve, source_meta = self._curve_from_equipment(equipment_result)
         live_handoff_ok, live_handoff_gate = (True, {"ok": True, "status": "not_required"})
         if state.mode == Mode.LIVE:
             live_handoff_ok, live_handoff_gate = self._live_equipment_handoff_gate(equipment_result)
-        live_data_valid = bool(curve and live_handoff_ok and self._curve_signal_quality(curve).get("ok"))
-        # Measured objectives are authoritative independently of optional FEM.
-        # Only simulation/preflight data-generation paths still await their source.
-        background_fem = live_data_valid
-        selected = {"tool": None}
-        def blocked_decision(summary, code, reason="", cae=None):
+        def blocked_decision(summary, code, reason=""):
             return self._blocked_result(state=state, summary=summary,
                 analysis={"ok": False, "failure_code": code, "reason": reason, "decisions": decisions,
                           "source": source_meta, "specimen_geometry": geometry},
-                metrics={}, source_meta=source_meta, equipment_result=equipment_result, cae_result=cae)
-        try:
-            if not background_fem and (state.mode != Mode.LIVE or live_data_valid):
-                selected = await decide(ctx, "simulation", {"geometry": geometry, "model": pin.get("model", {}),
-                    "require_solver": bool(state.current_experiment_spec.get("require_cae_solver"))}, simulation_options, virtual=virtual)
-                decisions.append(selected)
-        except Exception as exc:
-            return blocked_decision("Analysis decision invalid", "ANALYSIS_DECISION_INVALID", str(exc))
-        cae_result = await self._run_cae(state, ctx, geometry) if selected["tool"] else None
-        if not background_fem and (state.mode != Mode.LIVE or live_data_valid) and not (isinstance(cae_result, dict) and cae_result.get("ok")) and state.current_experiment_spec.get("require_cae_solver"):
-            return blocked_decision("Required simulation held", "ANALYSIS_SIMULATION_REQUIRED")
-        fem_result: dict[str, Any] | None = None
-        fem_agentic_loop: dict[str, Any] = self._cae_simulation_loop(cae_result)
-        cae_metrics = {}
-        if isinstance(cae_result, dict):
-            raw_cae_metrics = cae_result.get("cae_metrics") if isinstance(cae_result.get("cae_metrics"), dict) else cae_result.get("metrics")
-            cae_metrics = dict(raw_cae_metrics) if isinstance(raw_cae_metrics, dict) else {}
-        fem_metrics = {}
+                metrics={}, source_meta=source_meta, equipment_result=equipment_result)
         equipment_preflight_requested = self._lab_equipment_preflight_requested(state)
         equipment_file_supplied = bool(source_meta.get("path") or source_meta.get("exists") or source_meta.get("source") not in {None, "", "none"})
-        if not curve and equipment_preflight_requested:
-            curve, source_meta = self._curve_from_preflight_cae(equipment_result, cae_result)
-            equipment_file_supplied = True
         if not curve and state.mode != Mode.LIVE and not equipment_file_supplied and not equipment_preflight_requested:
             curve, source_meta = self._synthetic_curve(state, geometry)
         if state.mode == Mode.LIVE and curve and not live_handoff_ok:
@@ -2194,10 +1690,6 @@ class AnalysisAgent(BaseAgent):
                 "uncertainty": None,
                 "source": source_meta,
                 "specimen_geometry": geometry,
-                "cae_result": cae_result or {},
-                "cae_metrics": cae_metrics,
-                "fem_result": fem_result or self._cae_as_fem_result(cae_result),
-                "fem_metrics": fem_metrics,
                 "equipment_handoff_gate": live_handoff_gate,
                 "equipment_result": {
                     "tool": equipment_result.get("tool", ""),
@@ -2212,7 +1704,6 @@ class AnalysisAgent(BaseAgent):
                 metrics=blocked_metrics,
                 source_meta=source_meta,
                 equipment_result=equipment_result,
-                cae_result=cae_result,
             )
         if not curve:
             analysis = {
@@ -2226,10 +1717,6 @@ class AnalysisAgent(BaseAgent):
                 "uncertainty": None,
                 "source": source_meta,
                 "specimen_geometry": geometry,
-                "cae_result": cae_result or {},
-                "cae_metrics": cae_metrics,
-                "fem_result": fem_result or self._cae_as_fem_result(cae_result),
-                "fem_metrics": fem_metrics,
                 "equipment_result": {
                     "tool": equipment_result.get("tool", ""),
                     "status": equipment_result.get("status", ""),
@@ -2244,7 +1731,6 @@ class AnalysisAgent(BaseAgent):
                 metrics={},
                 source_meta=source_meta,
                 equipment_result=equipment_result,
-                cae_result=cae_result,
             )
 
         signal_quality = source_meta.get("signal_quality_probe") if isinstance(source_meta.get("signal_quality_probe"), dict) else self._curve_signal_quality(curve)
@@ -2259,10 +1745,6 @@ class AnalysisAgent(BaseAgent):
                 "uncertainty": None,
                 "source": source_meta,
                 "specimen_geometry": geometry,
-                "cae_result": cae_result or {},
-                "cae_metrics": cae_metrics,
-                "fem_result": fem_result or self._cae_as_fem_result(cae_result),
-                "fem_metrics": fem_metrics,
                 "data_quality": signal_quality,
                 "equipment_handoff_gate": live_handoff_gate,
                 "equipment_result": {
@@ -2278,7 +1760,6 @@ class AnalysisAgent(BaseAgent):
                 metrics={"data_quality": signal_quality},
                 source_meta=source_meta,
                 equipment_result=equipment_result,
-                cae_result=cae_result,
             )
 
         try:
@@ -2287,16 +1768,11 @@ class AnalysisAgent(BaseAgent):
                 {"analyze": "analysis.process_curve", "hold": None}, virtual=virtual)
             decisions.append(selected)
         except Exception as exc:
-            return blocked_decision("Analysis decision invalid", "ANALYSIS_DECISION_INVALID", str(exc), cae_result)
+            return blocked_decision("Analysis decision invalid", "ANALYSIS_DECISION_INVALID", str(exc))
         if selected["tool"] is None:
-            return blocked_decision("Analysis data processing held", "ANALYSIS_DATA_HELD", cae=cae_result)
+            return blocked_decision("Analysis data processing held", "ANALYSIS_DATA_HELD")
         stress_strain_curve = self._stress_strain_curve(curve, geometry)
         metrics = self._metrics(curve, geometry)
-        fem_agentic_loop = self._cae_simulation_loop(cae_result)
-        fem_result = None
-        if isinstance(fem_result, dict):
-            raw_fem_metrics = fem_result.get("fem_metrics") if isinstance(fem_result.get("fem_metrics"), dict) else fem_result.get("metrics")
-            fem_metrics = dict(raw_fem_metrics) if isinstance(raw_fem_metrics, dict) else {}
         uncertainty = None  # No validated observation-error estimator is configured.
         quality_gate = self._quality_gate(signal_quality, metrics, source_meta, True)
         try:
@@ -2304,9 +1780,9 @@ class AnalysisAgent(BaseAgent):
                 {"accept": "analysis.accept_metrics", "hold": None} if quality_gate.get("ok_for_metrics") else {"hold": None}, virtual=virtual)
             decisions.append(selected)
         except Exception as exc:
-            return blocked_decision("Analysis decision invalid", "ANALYSIS_DECISION_INVALID", str(exc), cae_result)
+            return blocked_decision("Analysis decision invalid", "ANALYSIS_DECISION_INVALID", str(exc))
         if selected["tool"] is None:
-            return blocked_decision("Analysis validation held", "ANALYSIS_VALIDATION_HELD", cae=cae_result)
+            return blocked_decision("Analysis validation held", "ANALYSIS_VALIDATION_HELD")
         try:
             objective_evaluation = self._evaluate_compiled_objective(
                 state=state,
@@ -2315,7 +1791,6 @@ class AnalysisAgent(BaseAgent):
                 uncertainty=uncertainty,
                 source_meta=source_meta,
                 equipment_result=equipment_result,
-                cae_result=cae_result,
             )
         except Exception as exc:
             failure_code = str(exc).split(":", 1)[0]
@@ -2332,10 +1807,6 @@ class AnalysisAgent(BaseAgent):
                 "source": source_meta,
                 "specimen_geometry": geometry,
                 "quality_gate": quality_gate,
-                "cae_result": cae_result or {},
-                "cae_metrics": cae_metrics,
-                "fem_result": fem_result or self._cae_as_fem_result(cae_result),
-                "fem_metrics": fem_metrics,
                 "equipment_handoff_gate": live_handoff_gate,
             }
             return self._blocked_result(
@@ -2345,7 +1816,6 @@ class AnalysisAgent(BaseAgent):
                 metrics=metrics,
                 source_meta=source_meta,
                 equipment_result=equipment_result,
-                cae_result=cae_result,
             )
         objective = (
             self._safe_float(objective_evaluation.get("score"), 0.0)
@@ -2353,14 +1823,10 @@ class AnalysisAgent(BaseAgent):
             else metrics.get("energy_density_50pct_MJ_per_m3")
         )
         comparison = self._comparison(state, objective, metrics)
-        fem_utm_comparison = self._fem_utm_comparison(metrics, fem_result, cae_result)
         closed_loop_sources = [source_meta.get("source", "utm")]
-        closed_loop_sources.append("cae.background" if background_fem else
-            "cae.run_static_analysis" if isinstance(cae_result, dict) and cae_result.get("ok") else "cae.unavailable")
         analysis = {
             "ok": True,
             "decisions": decisions,
-            "model_pin": pin,
             "objective_semantics": "compiled_or_physical_observation",
             "uncertainty_status": {"status": "not_estimated", "kind": "observation", "reason": "no_validated_measurement_error_model"},
             "source": source_meta,
@@ -2373,12 +1839,6 @@ class AnalysisAgent(BaseAgent):
             "data_quality_gate": signal_quality,
             "quality_gate": quality_gate,
             "comparison": comparison,
-            "fem_utm_comparison": fem_utm_comparison,
-            "cae_result": cae_result or {},
-            "cae_metrics": cae_metrics,
-            "fem_result": fem_result or self._cae_as_fem_result(cae_result),
-            "fem_metrics": fem_metrics,
-            "fem_agentic_loop": fem_agentic_loop,
             "closed_loop_sources": closed_loop_sources,
             "specimen_geometry": geometry,
             "equipment_result": {
@@ -2400,8 +1860,6 @@ class AnalysisAgent(BaseAgent):
             metrics=metrics,
             source_meta=source_meta,
             equipment_result=equipment_result,
-            cae_result=cae_result,
-            fem_result=fem_result,
         )
         analysis["analysis_artifacts"] = self._write_analysis_artifacts(
             state=state,
@@ -2410,8 +1868,6 @@ class AnalysisAgent(BaseAgent):
             metrics=metrics,
             analysis=analysis,
             handoff=handoff,
-            fem_result=fem_result,
-            cae_result=cae_result,
         )
         handoff = self._handoff_payloads(
             state=state,
@@ -2419,8 +1875,6 @@ class AnalysisAgent(BaseAgent):
             metrics=metrics,
             source_meta=source_meta,
             equipment_result=equipment_result,
-            cae_result=cae_result,
-            fem_result=fem_result,
         )
         analysis["artifact_refs"] = handoff["artifact_refs"]
         analysis["failure_tags"] = handoff["failure_tags"]
@@ -2433,39 +1887,10 @@ class AnalysisAgent(BaseAgent):
             self._write_json(Path(str(final_artifacts["bo_handoff"])), handoff["bo_handoff"])
         if final_artifacts.get("experiment_evaluation"):
             self._write_json(Path(str(final_artifacts["experiment_evaluation"])), handoff["experiment_evaluation"])
-        if final_artifacts.get("multifidelity_comparison"):
-            self._write_json(Path(str(final_artifacts["multifidelity_comparison"])), analysis["multifidelity_comparison"])
         if final_artifacts.get("trust_score"):
             self._write_json(Path(str(final_artifacts["trust_score"])), analysis["trust_score"])
         if final_artifacts.get("analysis_report"):
             self._write_json(Path(str(final_artifacts["analysis_report"])), analysis)
-        try:
-            service = service_for(ctx)
-            if service is not None:
-                payload = self._cae_payload(state, geometry)
-                if pin:
-                    payload.update(pin["model"]["parameters"])
-                analysis["improvement"] = service.submit(state, analysis, curve, payload,
-                    job_kind='fem' if background_fem else 'refinement')
-                if background_fem:
-                    analysis['fem_job'] = dict(analysis['improvement'])
-                    analysis['fem_agentic_loop'] = {'status': analysis['fem_job']['status'],
-                        'execution': 'background', 'job_id': analysis['fem_job']['job_id']}
-                if final_artifacts.get("analysis_report"):
-                    self._write_json(Path(str(final_artifacts["analysis_report"])), analysis)
-            else:
-                analysis["improvement"] = {"status": "unavailable", "reason": "artifact_runtime_not_configured"}
-        except Exception as exc:
-            analysis["improvement"] = {"status": "failed", "reason": type(exc).__name__}
-        if background_fem:
-            analysis['fem_job'] = {**analysis['improvement'], 'run_id': state.run_id,
-                'loop_key': f'{state.run_id}:loop-{state.loop_count}',
-                'specimen_id': state.current_experiment_spec.get('specimen_id')}
-            analysis['fem_agentic_loop'] = {'schema': 'analysis_cae_simulation_loop.v1',
-                'execution': 'background', **analysis['fem_job']}
-            for artifact, value in (('analysis_report', analysis), ('fem_agentic_loop', analysis['fem_agentic_loop'])):
-                if final_artifacts.get(artifact):
-                    self._write_json(Path(str(final_artifacts[artifact])), value)
         return AgentResult(
             success=True,
             summary="UTM analysis complete",

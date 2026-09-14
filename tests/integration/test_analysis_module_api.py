@@ -4,6 +4,14 @@ from copy import deepcopy
 from tests.integration.test_agent_execution_graph_api import actual_controller, module_api
 
 
+def test_retired_computation_routes_are_absent(module_api):
+    client, _, _, guard, _ = module_api
+    paths = client.get('/openapi.json').json()['paths']
+    assert not any(path.startswith(('/api/cae', '/api/analysis/fem', '/api/self-evolution')) for path in paths)
+    assert client.get('/cae').status_code == 404
+    assert not guard.denied
+
+
 def test_analysis_frontend_asset_catalog_and_report_use_installed_owner(module_api):
     client, _, controller, guard, _ = module_api
     module = client.get("/api/modules/analysis").json()
@@ -22,14 +30,8 @@ def test_analysis_frontend_asset_catalog_and_report_use_installed_owner(module_a
     assert {key: manifest["renderer"][key] for key in ("dashboard", "report", "fallback")} == {
         "dashboard": "module", "report": "module", "fallback": "descriptor",
     }
-    assert {
-        card["id"] for card in manifest["cards"] if card["id"].startswith("analysis_fem_")
-    } == {
-        "analysis_fem_overlay",
-        "analysis_fem_response",
-        "analysis_fem_contour",
-        "analysis_fem_progress",
-    }
+    assert "analysis_measured_response" in {card["id"] for card in manifest["cards"]}
+    assert not any(card["id"].startswith("analysis_fem_") for card in manifest["cards"])
     asset = client.get(manifest["implementation"]["frontend"]["asset_url"])
     assert asset.status_code == 200
     assert "AX4LABAnalysisUI" in asset.text
@@ -66,7 +68,7 @@ def test_analysis_frontend_asset_catalog_and_report_use_installed_owner(module_a
     assert sections["analysis_report"]["cae_result"]["solver"] == "CalculiX"
     assert sections["analysis_report"]["fem_agentic_loop"]["attempts"][0]["attempt_id"] == "a1"
     assert sections["analysis_report"]["closed_loop_sources"] == ["measurement", "cae"]
-    assert sections["role_specific"]["fem"]["execution"] == "background"
+    assert "fem" not in sections["role_specific"]
     assert sections["bo_handoff"]["next_agent"] == "bo"
     assert sections["metrics"] == {"peak_force_N": 512.0}
     assert {key: state.run_metadata[key] for key in before} == before
@@ -88,8 +90,7 @@ def test_inactive_analysis_owner_cannot_serve_its_module_asset(module_api):
 def test_live_host_publishes_current_analysis_frontend_asset_versions(module_api):
     client, _, _, guard, _ = module_api
     live_html = client.get("/live").text
-    assert "/static/planning.js?v=20260914-bo-owner-1" in live_html
-    assert "/static/analysis_fem_live.js?v=20260913-common-cards-2" in live_html
-    assert "/static/analysis_fem_live.css?v=20260913-common-cards-2" in live_html
+    assert "/static/planning.js?v=" in live_html
+    assert "/static/analysis_fem_live." not in live_html
     assert guard.physical_call_count == 0
     assert guard.denied == []

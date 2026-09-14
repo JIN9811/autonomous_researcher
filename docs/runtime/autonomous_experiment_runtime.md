@@ -250,20 +250,20 @@ Physical handoff remains Vision-gated: successful LeRobot rollout can produce
 `reported_complete`, but final downstream progression should wait for the
 appropriate Vision verification signal when available.
 
-### 2026-05-30 Knowledge Memory and Self-Evolution Evidence Contract
+### 2026-05-30 Knowledge Memory and Improvement Evidence Contract
 
 `KnowledgeAgent` now preserves legacy `MemoryRecord` writes while adding file-backed typed research memory:
 
 - `knowledge_context.v1`: hot/episodic/semantic/evolution/archival memory summary for downstream agents.
-- `knowledge_report.v1`: Live GUI report payload with memory ledger, retrieval panel, failure/success library, agent performance memory, data quality map, and self-evolution board.
+- `knowledge_report.v1`: Live GUI report payload with memory ledger, retrieval panel, failure/success library, agent performance memory, data quality map, and improvement-evidence board.
 - `experiment_knowledge_v1`: experiment-level memory with parameters, metrics, quality flags, artifact refs, and provenance.
 - `agent_performance_v1`: per-agent ledger with missing fields, warnings, retry count, artifact completeness, and evolution hint.
 - `failure_pattern_v1` / `success_pattern_v1`: reusable pattern memory.
-- `evolution_evidence_pack_v1`: task prefill and evidence contract consumed by `SelfEvolutionService`.
+- `evolution_evidence_pack_v1`: stable Knowledge improvement-evidence contract retained for compatibility and historical analysis.
 
-Per-run artifacts are written to `runs/<run_id>/knowledge/`, and long-term JSONL memory is written to `memory/knowledge/`. The runtime merge layer stores the Knowledge payload under `state.run_metadata.knowledge`, so Live GUI reports and Evolution Lab can read the same evidence.
+Per-run artifacts are written to `runs/<run_id>/knowledge/`, and long-term JSONL memory is written to `memory/knowledge/`. The runtime merge layer stores the Knowledge payload under `state.run_metadata.knowledge`, so Live GUI reports and downstream evidence consumers can read the same evidence.
 
-Self-evolution remains conservative: Knowledge recommends and prepares evidence, while `SelfEvolutionService`, Guardian gates, and operator approval control candidate validation and activation.
+The schema name remains stable, but no task-prefill, candidate executor, activation, rollback, or Self-Evolution workspace is active. Knowledge only accumulates reviewable improvement evidence and historical outcome attribution.
 
 
 ### Historical 2026-05-31 Orchestration Supervisor Follow-up Contract
@@ -281,11 +281,11 @@ New runtime records:
 - `operator_intent.v1`: deterministic Live GUI intent extraction used before LLM fallback. It separates `ask_question`, `set_constraint`, `start_dry_run`, `start_live_run`, `select_option`, `request_status`, `pause`, `resume`, and `stop` instead of relying only on raw keyword matching.
 - `experiment_contract.v1`: mission contract compiled from runtime state, operator intent, current specimen context, objective, constraints, and Guardian safety budget assumptions.
 - `orchestration_plan.v1`: executable supervisor plan with ordered route steps, per-stage required outputs, read-only parallel checks, serial physical actions, expected artifacts, and control-plane ownership.
-- `orchestrator_parallel_checks.v1`: async read-only supervisor check batch executed with `asyncio.gather`/thread offload for prior failure memory, FEM cache references, Guardian device health, BO/design constraints, artifact lookup, and previous-loop comparison. These checks must never actuate hardware.
+- `orchestrator_parallel_checks.v1`: async read-only supervisor check batch executed with `asyncio.gather`/thread offload for prior failure memory, Guardian device health, BO/design constraints, artifact lookup, and previous-loop comparison. These checks must never actuate hardware.
 - `orchestrator_followup.v1`: stage-level supervisor opinion with `opinion`, `confidence`, `concerns`, `recommendation`, optional operator choices, evidence refs, and response requirement.
 - `decision_register.v1`: Orchestrator-owned routing/branch decision record with selected next stage, alternatives, reason, authority, and evidence refs.
 - `handoff_packet.v1` under `state.run_metadata.orchestrator_handoff_packets`: compact Orchestrator handoff broker packet for the next stage. This does not overwrite agent-produced packets in `state.run_metadata.handoff_packets`.
-- `loop_reflection.v1`: loop-level reflection created after Guardian review and stored under `state.run_metadata.loop_reflections` for Knowledge/Self-Evolution use.
+- `loop_reflection.v1`: loop-level reflection created after Guardian review and stored under `state.run_metadata.loop_reflections` for Knowledge improvement analysis.
 
 Runtime storage keys:
 

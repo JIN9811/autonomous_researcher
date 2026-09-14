@@ -21,8 +21,6 @@ source_of_truth:
   - graphs/configs/atr_closed_loop.yaml
   - app/main.py
   - app/controller.py
-  - app/analysis_fem_routes.py
-  - app/cae_fields_routes.py
   - backends
   - device_bridges
   - knowledge
@@ -63,7 +61,7 @@ functional families checked against route declarations and active installers. Th
 `/openapi.json` and do not assign exclusive ownership where services overlap.
 
 The refresh includes agent-local decisions, continuous BO inputs, independent
-Analysis FEM, Knowledge Source Library, Equipment terminal review/recovery,
+Analysis measurement processing, Knowledge Source Library, Equipment terminal review/recovery,
 and the current Sunburst figure references. It adds no runtime or device path.
 
 ## Source of Truth
@@ -113,13 +111,13 @@ and [Windows/PyAutoGUI Reference](../device_bridges/windows_pyautogui_bridge.md)
 | Surface | Current owner and boundary |
 |---|---|
 | Agent/package | `agent.analysis_agent`, installed `analysis@1.0.0`; canonical code under `agents/analysis/` with exact flat-module aliases |
-| Execution | `analysis.task` and `analysis.deliver` preserve the composite measured/BO path and independent background FEM; High LLM decisions, Middle numeric/CAE work, no Low device owner |
-| Live report | `/api/agents/analysis/report` projects the full owner evidence; `/module-assets/analysis/live_report.js` renders its report and four independent common FEM dashboard cards |
-| Bridge | `cae@1.0.0`, runtime identity `cae_bridge`; the internal registered provider is CalculiX, while shared PINN remains inactive |
-| Settings/evidence | Existing Analysis state, FEM job store, artifacts, cancellation and read-only polling; no new settings store, unload API or worker cancellation |
+| Execution | `analysis.task` and `analysis.deliver` preserve measured-data processing and BO delivery; High LLM decisions, Middle numerical processing, no Low device owner |
+| Live report | `/api/agents/analysis/report` projects owner evidence; the module frontend renders measured curves, metrics, quality and BO handoff |
+| Bridge | None; the Analysis package uses agent-local numerical processing |
+| Settings/evidence | Existing Analysis state and run/loop/specimen-scoped measurement artifacts |
 
 See the [Analysis Reference](analysis_agent.md#installed-package-and-executable-structure)
-and [CAE Computation Bridge Reference](../device_bridges/cae_computation_bridges.md).
+and [Analysis Agent Reference](analysis_agent.md).
 
 ### Installed BO Owner (2026-09-14)
 
@@ -139,7 +137,6 @@ See the [BO Reference](bo_agent.md#installed-package-and-executable-structure).
 - `graphs/modules/*/module.yaml`
 - `graphs/configs/atr_closed_loop.yaml`
 - `app/main.py` and `app/controller.py`
-- `app/analysis_fem_routes.py`, `app/cae_fields_routes.py`, `device_bridges/cae/module.py`
 - `knowledge/http_api.py`, `knowledge/source_api.py`, `knowledge/source_runtime.py`
 - `backends/`, `device_bridges/`, and `knowledge/`
 
@@ -160,7 +157,7 @@ through `module_configurations`. See the [Modularity Reference](../modularity.md
 | Vision | `vision` plus verification sidecars | Specimen/manipulation context, camera and scene state | Bounded decision plus ordered raw/annotated review, freshness-bounded observation, and verification signals | Manipulation, Equipment, Specimen completion, Guardian | `physical_possible` through ActiveCam move/capture/return and verified rollout stop |
 | Manipulation | physical transfer and post-test clearance | Specimen result, fresh Vision, configured skill and execution evidence | LLM-selected bounded tool call; task-result judgment after Vision and termination | Vision, Equipment, Analysis, Knowledge | `physical_possible` through existing robot executors |
 | Lab Equipment | `equipment` | Verified placement/specimen, exact stacked Flow/Skills, approvals | Bounded LLM Flow selection; deterministic execution; terminal screenshot/log review | Manipulation clearance → fresh Vision → Analysis | `physical_possible` through existing gated workers |
-| Analysis | `analysis` plus independent background worker | Identified measurement, geometry and bound objective | LLM action/evidence review; tool-computed curves/objective; separately frozen FEM studies | Measured Knowledge/BO handoff without waiting for optional FEM; separate model evidence | none physically; registered computation |
+| Analysis | `analysis` | Identified measurement, geometry and bound objective | LLM processing/review; numerically computed curves and objective | Measured Knowledge/BO handoff | No direct device execution |
 | Knowledge | `knowledge` plus source-intake worker | Analysis, terminal archives and applicable source evidence | One composite executable task; ontology-guided Markdown, scoped retrieval and typed memory; optional pinned declaration overlays owner-supported inputs | Cited BO/agent context; separate Evolution review | none; persistent local Markdown/typed state |
 | BO | `bo` | Analysis observations, continuous domain, settings, Knowledge context | Bounded LLM strategy/tool decision and review of the numerical candidate | Guardian and next Design cycle | none; proposal only |
 | Guardian | Safety/control plane | State, risk, failures, device health, approvals, tool records | One composite executable task; deterministic gates retain authority; an optional pinned declaration adds reference-only advisory context | Orchestrator route translation | no direct action; can block/stop downstream action |
@@ -182,7 +179,7 @@ relationship, not file containment; the badge alone is not model-call evidence.
 | [Vision](vision_agent.md) | Select current observation contract, then review same-capture evidence | `execute_verification`, `accept_visual_evidence`, `return_to_owner`; registered capture/detection callbacks | Detector facts, identity/freshness and existing completion gates |
 | [Manipulation](manipulation_agent.md) | Configured-skill suitability and post-Vision task-result review | Existing rollout, fixed skill or replay proposal; result acceptance only after ended execution and accepted Vision | Saved policy/profile, robot executor and observed result |
 | [Equipment](equipment_agent.md) | Stacked Flow selection, terminal screenshot/log review, eligible recovery | `execute_stacked_workflow`, `observe_workflow`, `accept_workflow_result`, offered wait/focus/resume or operator return | Exact Flow/Skills, invocation claim, CSV/readiness and no-repeat gates |
-| [Analysis](analysis_agent.md) | Measurement admissibility, simulation action, mesh/result and improvement assessment | Phase-specific `option_id` selects offered numeric/CAE actions; background work uses frozen inputs | Numeric tools calculate metrics; FEM evidence does not replace measured objective |
+| [Analysis](analysis_agent.md) | Processing selection and evidence review | Phase-specific `option_id` selects offered processing and validation actions | Numerical tools calculate metrics and the configured objective |
 | [Knowledge](knowledge_agent.md) | Inspect, classify, curate and select scope-bound evidence | Inspect/search/read/write/publish local actions; separate page-stage/consolidate/publish source workflow | Source citations, ontology, append-only Markdown/typed records |
 | [BO](bo_agent.md) | Strategy/evidence sufficiency and exact numerical-result review | `inspect_diagnostics`, `retrieve_knowledge`, `run_optimizer`, `accept_recommendation`, `return_to_owner` | LHS/BoTorch computes coordinates in the declared continuous domain |
 | [Guardian](guardian_agent.md) | Advisory policy note | Existing code evaluates gates; model text does not issue a recovery/device command | Policy, approvals, stop state, evidence and budget |
@@ -205,7 +202,7 @@ progression.
 | Vision | LLM observation choice and same-frame evidence review | Task resolution, detectors, interlocks, capture/status/stop API dispatch | Selected camera and LeRobot device paths |
 | Manipulation | LLM saved-skill suitability and post-Vision result review | Profile binding, API dispatch, preflight and completion supervision | LeRobot robot policy/replay execution and device lifecycle |
 | Lab Equipment | LLM stacked-Flow selection and terminal evidence/recovery review | Existing exact Flow/Skill supervision, APIs, CSV checks and handoff | Selected desktop/instrument worker and device driver |
-| Analysis | LLM data, simulation and model-review choices | Parsing, units, objectives, solver, postprocessing and asynchronous FEM scheduling | No direct device execution |
+| Analysis | LLM processing and measurement-review decisions | Parsing, units, curves, metrics and objective evaluation | No direct device execution |
 | Knowledge | LLM scoped retrieval and evidence curation | Provenance, ontology, Markdown/JSONL persistence and context assembly | No direct device execution |
 | BO | LLM strategy/tool choice and numerical result review | LHS/BoTorch, constraints, numeric recommendation and handoff | No direct device execution |
 | Guardian | Existing LLM policy-evidence review | Deterministic safety/risk checks, health APIs and incident/route results | Hardware interlocks and effective stops remain in device bridges |
@@ -225,7 +222,7 @@ cross-cutting responsibilities, not additional sequential model calls.
 | Vision | available capture/zone/task and fresh context | `vision_report.v1`, `vision_signal.v1`, evidence refs | images, pose/event reports, timestamps/expiry | unavailable capture or stale/low-quality signal |
 | Manipulation | scoped transfer/clearance task, fresh Vision, configured policy or replay and preflight | `manipulation_report.v1`, `robot_task_result.v1`, decision and handoff evidence | rollout/replay session, confirmed termination, measured return and Vision refs | preflight, stale/conflicting Vision, unconfirmed termination, rejected result review |
 | Lab Equipment | exact Profile/Flow/Skills, verified placement, bridge readiness | existing result/report/handoff plus decisions and workflow execution ID | durable invocation, completed-block checkpoint, terminal screenshot/hash, logs, CSV/readiness | existing hard gates, rejected review, changed scope, claimed invocation or unknown effects |
-| Analysis | identifiable measurement, initial geometry/dimensions, units and objective domain | canonical curves/metrics, measured BO handoff; separate FEM jobs/fields/model evidence | frozen raw/geometry hashes, parser/coverage record, decision and job receipts | invalid measurement blocks BO; optional FEM failure does not rewrite the measured result |
+| Analysis | Identified measurement, initial geometry, units and objective | Curves, metrics and measured BO handoff | Source hashes, parser/coverage record and decisions | Invalid measurement blocks BO |
 | Knowledge | source identities, allowed scope and evidence; separate terminal-archive/source intake | `knowledge_context.v1`, `knowledge_report.v1`, `evolution_proposal.v1`, typed records and one curated note per source | Markdown revisions, source/page/block citations, intake receipts and audit | provenance/ontology/scope rejection; failed source stays unavailable to default retrieval |
 | BO | valid observations and bounded search space | numerical candidate, decision, artifacts, Design constraints and domain | tool/evidence trace, numerical result, accepted candidate identity | model/optimizer failure, owner return, candidate validation rejection |
 | Guardian | current state, risk/device/failure/approval context | gate/decision/contract, incidents, corrective actions | Guardian events, approval and incident records | unsafe, uncertain, exhausted budget, missing approval or evidence |
@@ -240,7 +237,7 @@ cross-cutting responsibilities, not additional sequential model calls.
 | Vision | specimen-pose status/snapshot/release | camera, active robot camera, UTM vision/runtime APIs | Vision/UTM workspaces and run retry | `/openapi.json`, Vision tools/bridge handlers |
 | Manipulation | manipulation-agent config/test/run | `/api/lerobot/*` robotics services | LeRobot workspace configuration/training/simulation/mirror | `/openapi.json`, LeRobot bridge |
 | Lab Equipment | `GET /api/agents/equipment/report`; installed frontend asset | `/api/equipment/*`, `/api/bridges*` | equipment skill/profile/worker/UTM workspaces; module/package catalogs | `/openapi.json`, `agents/equipment/module.py`, Windows/PyAutoGUI bridge/tool registry |
-| Analysis | `/api/agents/analysis/report`, `/api/analysis/fem/jobs` and scoped job cancellation; not direct graph-stage execution | `/api/modules/analysis`, `/module-assets/analysis/live_report.js`, `/api/cae/config`, `/api/cae/run`, `/api/cae/fields*` | CAE workspace, field viewer and run artifacts | `/openapi.json`, `agents/analysis/module.py`, `device_bridges/cae/module.py` |
+| Analysis | `/api/agents/analysis/report` | `/api/modules/analysis`, `/module-assets/analysis/live_report.js` | Measurement report and artifacts | `agents/analysis/module.py` |
 | Knowledge | context/report/Markdown via Knowledge service | `/api/knowledge/markdown/*`, `/api/knowledge/sources/*`, ontology and typed-memory surfaces | Source intake settings/scan/retry; archive intake and scoped note lifecycle | `/openapi.json`, active Markdown/source installers; retired graph/manual routes excluded |
 | BO | `/api/bo/run` direct bounded workspace execution | `/api/bo/config`, `/api/bo/benchmark` | BO workspace and graph-run context | `/openapi.json`, BO agent/benchmark services |
 | Guardian | `/api/guardian/status`, run-scoped status | device health and queue status tools | incidents and approval review/resolve APIs | `/openapi.json`, Guardian status/policy services |
@@ -255,7 +252,7 @@ cross-cutting responsibilities, not additional sequential model calls.
 | Vision | `vision_observation` with bounded JSON tools and ordered `LLMImageInput` pairs | decision validation, pose tracker, signal arbitration, evidence packaging | camera, ActiveCam, ROS/UTM runtime, shared API/vLLM multimodal route | cameras; ActiveCam robot motion; rollout stop process | physical_possible through ActiveCam move/capture/return and verified stop |
 | Manipulation | `manipulation_plan` | policy/profile/session logic | LeRobot processes, serial/camera, Isaac services | robot/manipulator | physical_possible |
 | Lab Equipment | Equipment-owned `equipment_workflow_decision`; bounded proposals and shared `LLMImageInput` | terminal decision boundary, durable Equipment Runtime, exact Flow/Skill registry | registered API/local model; existing PyAutoGUI worker and desktop application | profile-selected laboratory equipment | physical_possible through existing gated execution |
-| Analysis | Phase-specific `analysis_reasoning`; manifest role empty | numeric analysis, independent FEM job/model store and field readers | registered API/vLLM decisions; CAE/CalculiX computation bridge | none directly | model/local_state/external computation |
+| Analysis | Phase-specific `analysis_reasoning`; manifest role empty | Agent-local numerical processing | Registered API/vLLM decisions | No device bridge | Model/local state |
 | Knowledge | `knowledge_query` for agent curation and background source curation | ontology, audit, Markdown/typed stores, Source Library and watcher | registered API/vLLM model service; page-wise extraction and consolidation | none | model/local_state |
 | BO | `bo_policy` | strict local tool dispatch and numerical candidate validation | selected model backend for strategy/evidence/result decisions | none | model/local_state |
 | Guardian | Python: `guardian_reasoning`; manifest: `guardian_review` | policy gate, status aggregation, approval/event services | device/queue status and registered model for advisory note | none directly | model plus downstream stop/block |
@@ -321,17 +318,16 @@ internal step an independently scheduled graph node. Checkpointed run state,
 events, planning transcript, artifacts, durable knowledge, and external device
 state have different lifetimes and must not be conflated.
 
-With valid measured data, Analysis publishes its ordinary observation before
-optional FEM completion. Frozen background evidence, candidate models and
-promotion decisions remain separate. Knowledge source intake likewise runs
+With valid measured data, Analysis publishes curves, metrics and the bound objective.
+Knowledge source intake runs
 outside the experimental stage; retrieval supplies context to existing agent
 decisions without changing their configured commands.
 
 ## API Collection Notes
 
 This update inspects route declarations and the installer/retirement sequence,
-not a running application's route count. `app/main.py` installs the Analysis
-FEM and CAE field routers, replaces Knowledge graph routes with retirement
+not a running application's route count. `app/main.py` serves Analysis reports,
+replaces Knowledge graph routes with retirement
 handlers, installs Markdown routes, retires manual-specific routes, and installs
 Source Library routes. A raw prefix search would incorrectly count retired
 definitions as active APIs. Use the deployed `/openapi.json` for that instance's

@@ -102,10 +102,11 @@ the graph does not split the existing transfer, stop, or clearance procedure.
 
 `/api/agents/manipulation/report` uses the owner projector with existing metadata
 precedence. `/module-assets/manipulation/live_report.js` mounts through
-`AX4LABManipulationUI.createFrontend`. The existing eight cards retain their names,
-selectors and shared telemetry updates: Live Robot Pose, Policy Tracking, Runtime
-State Strip, Runtime Execution, Runtime Interlocks, Completion Verification, Run
-Result and Run Metrics. Shared polling, joint/gripper samples, stream buffers,
+`AX4LABManipulationUI.createFrontend`. Live Robot Pose and Policy Tracking retain
+their upper layout. Motion & Grasp and Completion & Handoff group the status and
+verification evidence. Run Metrics, Runtime Execution and Interlocks occupy one
+row below them. Existing field selectors remain mounted and updated.
+Shared polling, joint/gripper samples, stream buffers,
 3D viewer lifecycle and event-status decisions stay in the host. Missing or
 deactivated owner modules contribute no current Manipulation card.
 
@@ -359,6 +360,16 @@ archive. Result review invoked from a Vision sidecar remains labeled
 task in a loop. A different loop has separate identity and existing archive storage.
 
 ### Live GUI telemetry delivery
+
+The pose and policy plots retain their existing layout. Below them, grasp
+diagnostics (all five fields in one horizontal row), home thresholds and result evidence
+are always visible, with no disclosure controls. Execution identifiers and interlock
+evidence remain collapsible. Result summaries retain the terminal
+outcome and next agent without repeating the verification checklist. Success
+rates and all task/grasp counts are always visible in compact rows. All telemetry bindings
+remain mounted; collapsing technical evidence does not pause recording or updates.
+Waiting verification steps are highlighted as active only during running
+execution, not before a rollout starts or after it terminates.
 
 The Live GUI opts into `/ws/lerobot/joint-telemetry?sample_format=compact-v1`.
 History is replayed from the saved log origin in batches of at most 128 points,

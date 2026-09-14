@@ -52,7 +52,10 @@ test('installed Manipulation renders real report evidence and preserves eight te
     assert.doesNotMatch(details, /progress_score|failure_precursor|nominal/);
     const html = ui.renderDashboard(report, status, 'Manipulation', {});
     const names = Array.from(html.matchAll(/<h4>(.*?)<\/h4>/g), match => match[1]);
-    assert.deepEqual(names, ['Live Robot Pose', 'Policy Tracking', 'Runtime State Strip', 'Runtime Execution', 'Runtime Interlocks', 'Completion Verification', 'Run Result', 'Run Metrics']);
+    assert.deepEqual(names, ['Live Robot Pose', 'Policy Tracking', 'Motion &amp; Grasp', 'Completion &amp; Handoff', 'Run Metrics', 'Runtime Execution', 'Interlocks']);
+    for (const label of ['Grasp diagnostics', 'Home thresholds', 'Result evidence']) assert.ok(html.includes(`<div class="ar-man-visible-section"><h5>${label}</h5>`));
+    assert.doesNotMatch(html, /<summary>(Task counts|Grasp counts|Grasp diagnostics|Home thresholds|Result evidence)<\/summary>/);
+    assert.match(html, /ar-man-grasp-single-column/);
     for (const selector of ['data-atr-robot-pose', 'data-atr-joint-selector', 'data-atr-grasp-measured', 'data-atr-runtime-field="execution.run_id"', 'data-atr-runtime-step="ready_for_equipment"', 'data-utm-clear-verification-step']) assert.ok(html.includes(selector));
     assert.match(html, /data-atr-runtime-gate="camera_lease" data-status="unknown"/);
     // Bind the real shared telemetry updater to fields from the owner markup.
@@ -86,7 +89,7 @@ test('installed Manipulation renders real report evidence and preserves eight te
   assert.equal(host.get('manipulation'), null);
   assert.equal(context.renderManipulationDashboardCards({}, 'running', 'Manipulation', {}), '');
   assert.equal(context.renderManipulationReportDetails({}), '');
-  Object.assign(context, {liveSelectedAgent: 'manipulation', agentSpecificReportProfile: () => ({}),
+  Object.assign(context, {activeModuleDescriptorFallback: () => '', liveSelectedAgent: 'manipulation', agentSpecificReportProfile: () => ({}),
     liveAgentNeedsChatPanel: () => false, liveAgentRendererProfile: () => ({id: 'manipulation', dashboardAgent: 'manipulation'})});
   assert.equal(context.renderAgentSpecializedDashboardSections({}, {}, 'running', 'Manipulation'), '');
   await host.reconcile([manifest], context);

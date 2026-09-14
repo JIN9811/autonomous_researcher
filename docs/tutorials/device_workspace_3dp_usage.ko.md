@@ -1,4 +1,4 @@
-# Device Workspaces 사용법: 3DP Printer Bridge
+# Device Workspaces 사용법: 3D Printer Bridge
 
 ## Status at a Glance
 
@@ -9,7 +9,7 @@
 | Preparation | 선택한 프린터 연결, 소재·위치·슬라이서 설정 및 동작 전 확인 |
 | Reference | [Printer Fleet](../device_bridges/printer_fleet_bridge.md) · [Specimen Agent](../agents/specimen_agent.md) |
 
-이 문서는 Main GUI의 **Device Workspaces** 영역과 3DP Printer GUI(`/printer`)를 실제 운영자가 어떻게 쓰는지 정리한 페이지입니다. Live GUI 화면은 아직 UI 조정 대상이므로 여기서는 다루지 않습니다.
+이 문서는 Main GUI의 **Device Workspaces** 영역과 3D Printer GUI(`/printer`)를 실제 운영자가 어떻게 쓰는지 정리한 페이지입니다. Live GUI 화면은 아직 UI 조정 대상이므로 여기서는 다루지 않습니다.
 
 BambuLab X2D bridge의 내부 구조, MQTT/FTPS/HTTP/camera plane 분리, native G-code autoejection gate는 [../hardware/bambulab_x2d_device_bridge_runtime_guideline.md](../hardware/bambulab_x2d_device_bridge_runtime_guideline.md)에 별도로 정리되어 있습니다. 이 문서는 버튼 순서와 운영 절차를 중심으로 설명합니다.
 
@@ -23,7 +23,7 @@ atr up
 
 - 기본 접속: `http://127.0.0.1:7860/`
 - 같은 내부망 장비가 서버 artifact를 가져가야 하는 경우: 서버를 `0.0.0.0`로 띄운 상태에서 LAN IP를 사용합니다.
-- 3DP GUI 직접 접속: `http://127.0.0.1:7860/printer`
+- 3D GUI 직접 접속: `http://127.0.0.1:7860/printer`
 
 Main GUI의 **Device Workspaces**에서 장비별 전용 GUI로 이동합니다.
 
@@ -33,18 +33,16 @@ Main GUI의 **Device Workspaces**에서 장비별 전용 GUI로 이동합니다.
 
 | 카드 | 역할 |
 |---|---|
-| 3DP Printer Bridge | 선택된 printer profile과 bridge telemetry 기준의 3D 프린터 설정/검증 |
+| 3D Printer Bridge | 선택된 printer profile과 bridge telemetry 기준의 3D 프린터 설정/검증 |
 | Windows PyAutoGUI Bridge | Windows PC의 UTM/장비 제어 macro bridge 설정/테스트 |
 | LeRobot / ROBOTIS | teleoperation, recording, training, rollout, manipulation bridge 관리 |
 | BO Workspace | acquisition function, BO/MBO, benchmark 설정 |
-| CAE Analysis | CAE/FEM 해석 bridge, 경계조건, simulation 설정 |
-| Self-Evolution Lab | trace mining, candidate gate, next-run activation 관리 |
 
-## 2. 3DP Printer GUI 개요
+## 2. 3D Printer GUI 개요
 
-`Open 3DP GUI`를 누르면 `/printer`가 새 창으로 열립니다. 현재 구조에서 Bambu Lab X2D가 기본 printer provider이며, Prusa MK4S는 fallback이 아니라 **명시적으로 선택했을 때만** active printer가 됩니다.
+`Open 3D GUI`를 누르면 `/printer`가 새 창으로 열립니다. 현재 구조에서 Bambu Lab X2D가 기본 printer provider이며, Prusa MK4S는 fallback이 아니라 **명시적으로 선택했을 때만** active printer가 됩니다.
 
-![3DP Printer GUI overview](../assets/device_workspace_usage/02_3dp_console_overview.png)
+![3D Printer GUI overview](../assets/device_workspace_usage/02_3dp_console_overview.png)
 
 상단 버튼의 용도는 다음과 같습니다.
 
@@ -67,13 +65,13 @@ Main GUI의 **Device Workspaces**에서 장비별 전용 GUI로 이동합니다.
 
 `Slice Bambu Artifact`는 원본 Bambu Studio preset을 직접 수정하지 않습니다. 명시 `load_settings`가 없으면 Bambu Studio 기본 machine/process/filament preset을 그대로 사용하고, purge/cleaning/filament start-end G-code는 유지합니다. 대신 slicing 후 `.gcode` 또는 `.gcode.3mf` 내부 `Metadata/plate_*.gcode`에서 build plate 앞쪽 test/intro/nozzle-load line block만 제거하고 md5 sidecar를 갱신합니다. 또한 Bambu Studio CLI에는 `--export-3mf` 절대경로가 아니라 output directory 내부 basename을 전달합니다. 이 조건이 깨지면 `.gcode.3mf` export 실패나 artifact/hash 불일치 blocker가 날 수 있습니다.
 
-Live GUI에서 Specimen Making Agent를 선택하면 3DP GUI/API가 만든 같은 증거가 중앙 report card로 표시됩니다. 핵심 카드는 중앙의 `Live Job Monitor`이며, 진행률, layer, queue, remaining time, local/remote G-code path, physical location을 `specimen_agent_report.v1`의 `printer_status`, `build_queue`, `estimated_print_time`, `layer_preview`, `handoff_status`에서 읽습니다. 주변 카드는 `Build Intent`, `Printer Telemetry`, `Readiness Gate`, `Slice Profile`, `Thermal / Material`, `Transfer Queue`, `Layer Preview`, `Camera Evidence`, `Post-Print Automation`, `G-code Validation`, `Handoff / Artifacts`입니다. 값이 없으면 `pending` 또는 `-`로 표시되며, 화면이 임의 layer preview나 fake progress를 만들면 안 됩니다.
+Live GUI에서 Specimen Making Agent를 선택하면 3D GUI/API가 만든 같은 증거가 중앙 report card로 표시됩니다. 핵심 카드는 중앙의 `Live Job Monitor`이며, 진행률, layer, queue, remaining time, local/remote G-code path, physical location을 `specimen_agent_report.v1`의 `printer_status`, `build_queue`, `estimated_print_time`, `layer_preview`, `handoff_status`에서 읽습니다. 주변 카드는 `Build Intent`, `Printer Telemetry`, `Readiness Gate`, `Slice Profile`, `Thermal / Material`, `Transfer Queue`, `Layer Preview`, `Camera Evidence`, `Post-Print Automation`, `G-code Validation`, `Handoff / Artifacts`입니다. 값이 없으면 `pending` 또는 `-`로 표시되며, 화면이 임의 layer preview나 fake progress를 만들면 안 됩니다.
 
-3DP GUI에서 standalone autoejection test를 실행하면 결과는 3DP GUI 로그에만 머물지 않습니다. 백엔드는 같은 결과를 `SpecimenMakingAgent`의 `printer_ai` Live GUI 메시지로 mirror하고, `/api/events/recent` runtime event에도 남깁니다. 따라서 Live GUI가 열려 있는 상태에서는 `Post-Print Automation`/Specimen report와 runtime timeline에서 `standalone_artifact_ready`, `standalone_motion_started`, `published`, `motion_started`, `failure_code`, artifact path를 확인할 수 있어야 합니다. `start_immediately=false`는 artifact 생성/검증만 의미하며, `start_immediately=true`와 live gate 통과 시에만 standalone `.autoeject.gcode.3mf`를 일반 MQTT `project_file` 경로로 publish합니다.
+3D GUI에서 standalone autoejection test를 실행하면 결과는 3D GUI 로그에만 머물지 않습니다. 백엔드는 같은 결과를 `SpecimenMakingAgent`의 `printer_ai` Live GUI 메시지로 mirror하고, `/api/events/recent` runtime event에도 남깁니다. 따라서 Live GUI가 열려 있는 상태에서는 `Post-Print Automation`/Specimen report와 runtime timeline에서 `standalone_artifact_ready`, `standalone_motion_started`, `published`, `motion_started`, `failure_code`, artifact path를 확인할 수 있어야 합니다. `start_immediately=false`는 artifact 생성/검증만 의미하며, `start_immediately=true`와 live gate 통과 시에만 standalone `.autoeject.gcode.3mf`를 일반 MQTT `project_file` 경로로 publish합니다.
 
 `Video Status`와 `Pre-start Check`는 서로 다른 정보를 갱신하지만 화면에서는 같이 보여야 합니다. 영상 probe가 실패해도 기존 MQTT/progress/material 상태가 사라지면 안 됩니다. 반대로 상태 조회가 성공해도 camera frame이 없으면 camera 영역은 명확한 blocker를 표시해야 합니다. GUI의 반복 상태 갱신은 짧은 MQTT snapshot cache를 재사용해 매 poll마다 새 MQTT client와 `pushall`을 만들지 않습니다. 단, `Publish Start` 직후의 post-publish observation은 cache를 우회해 fresh MQTT report로 실제 시작 여부를 판단합니다.
 
-Live GUI가 열린 상태에서는 3D Printer card가 `live` status를 주기적으로 갱신합니다. 이 polling은 `/api/printer/status?mode=live&emit=1`의 `Device Screen`, progress, material, MQTT/transfer, upload/start 가능 여부를 읽어 Live GUI에 `workspace_monitor_snapshot` runtime event로 반영합니다. 반복 monitor snapshot은 채팅 transcript를 늘리거나 artifact 파일을 생성하지 않습니다. 3DP GUI(`/printer`) 자체는 수동 버튼과 작업 결과 표시용으로 남습니다.
+Live GUI가 열린 상태에서는 3D Printer card가 `live` status를 주기적으로 갱신합니다. 이 polling은 `/api/printer/status?mode=live&emit=1`의 `Device Screen`, progress, material, MQTT/transfer, upload/start 가능 여부를 읽어 Live GUI에 `workspace_monitor_snapshot` runtime event로 반영합니다. 반복 monitor snapshot은 채팅 transcript를 늘리거나 artifact 파일을 생성하지 않습니다. 3D GUI(`/printer`) 자체는 수동 버튼과 작업 결과 표시용으로 남습니다.
 
 ## 3. Print Defaults와 Test Options 설정
 

@@ -1,162 +1,54 @@
-/* Analysis-owned report and dashboard composition. FEM polling remains host-owned. */
-(function installAnalysisLiveReport(global) {
-  "use strict";
-
-  function createFrontend(services) {
-    const {
-      latestAnalysisPayload,
-      latestAnalysisBoHandoff,
-      renderRuntimeValue,
-      runtimeRows,
-      renderReportList,
-      renderDashboardRows,
-      renderDashboardMetric,
-      renderDashboardCard,
-      renderAnalysisTrustScore,
-      renderAnalysisCurveOverlay,
-      renderAnalysisFieldLink,
-      renderAnalysisMetricBars,
-      renderAnalysisQualityDonut,
-      renderAnalysisProvenance,
-      renderAnalysisFemEvidence,
-    } = services;
-
-    function renderReport(report) {
-      const analysis = latestAnalysisPayload(report) || {};
-      if (!analysis || typeof analysis !== "object" || !Object.keys(analysis).length) return "";
-      const source = analysis.source || {};
-      const fingerprint = source.fingerprint || {};
-      const columnMapping = source.column_mapping || {};
-      const metrics = analysis.utm_metrics || {};
-      const quality = analysis.quality_gate || analysis.data_quality_gate || {};
-      const comparison = analysis.comparison || {};
-      const femComparison = analysis.fem_utm_comparison || {};
-      const multifidelityComparison = analysis.multifidelity_comparison || {};
-      const trustScore = analysis.trust_score || {};
-      const fidelityRecords = analysis.fidelity_records || {};
-      const femResult = analysis.fem_result || {};
-      const femMetrics = analysis.fem_metrics || {};
-      const femLoop = analysis.fem_agentic_loop || {};
-      const caeResult = analysis.cae_result || {};
-      const artifacts = analysis.analysis_artifacts || {};
-      const boHandoff = latestAnalysisBoHandoff(report) || {};
-      const failureTags = Array.isArray(analysis.failure_tags) ? analysis.failure_tags : [];
-      const closedLoopSources = Array.isArray(analysis.closed_loop_sources) ? analysis.closed_loop_sources : [];
-      const artifactRows = Object.entries(artifacts).map(([key, value]) => `${key} · ${renderRuntimeValue(value)}`);
-      return `
-        <div class="live-agent-specific-report-detail live-agent-specific-analysis-details">
-          <h5>Analysis Admissibility / Gate</h5>
-          ${renderAnalysisTrustScore(analysis)}
-          <h5>Measurement / Simulation Comparison</h5>
-          ${renderAnalysisCurveOverlay(analysis)}
-          <h5>Solver Field Results</h5>
-          ${renderAnalysisFieldLink(analysis)}
-          ${renderAnalysisProvenance(analysis)}
-          <h5>Raw Data Ledger</h5>
-          ${runtimeRows([
-            ["source", source.source || "-"],
-            ["parser_id", source.parser_id || source.format || "-"],
-            ["path", source.path || "-"],
-            ["sha256", fingerprint.sha256 || "-"],
-            ["size_bytes", fingerprint.size_bytes === undefined ? "-" : fingerprint.size_bytes],
-            ["column_mapping_confidence", columnMapping.column_mapping_confidence === undefined ? "-" : columnMapping.column_mapping_confidence],
-            ["unit_mapping_confidence", columnMapping.unit_mapping_confidence === undefined ? "-" : columnMapping.unit_mapping_confidence],
-          ])}
-          <h5>UTM Metrics / Quality Gate</h5>
-          ${runtimeRows([
-            ["peak_force_N", metrics.peak_force_N ?? "-"],
-            ["initial_stiffness_N_per_mm", metrics.initial_stiffness_N_per_mm ?? "-"],
-            ["compressive_strength_MPa", metrics.compressive_strength_MPa ?? "-"],
-            ["apparent_modulus_MPa", metrics.apparent_modulus_MPa ?? "-"],
-            ["energy_absorption_mJ", metrics.energy_absorption_mJ ?? "-"],
-            ["specific_energy_absorption_J_per_g", metrics.specific_energy_absorption_J_per_g ?? "-"],
-            ["ok_for_metrics", quality.ok_for_metrics === undefined ? "-" : quality.ok_for_metrics],
-            ["ok_for_bo", quality.ok_for_bo === undefined ? "-" : quality.ok_for_bo],
-            ["quality_score", quality.score === undefined ? "-" : quality.score],
-            ["quality_warnings", quality.warnings || []],
-          ])}
-          <h5>FEM / CAE / CalculiX Evidence</h5>
-          ${runtimeRows([
-            ["closed_loop_sources", closedLoopSources],
-            ["trust_score", trustScore.score === undefined ? "-" : trustScore.score],
-            ["trust_gate", trustScore.gate || "-"],
-            ["multifidelity_comparison", multifidelityComparison.schema || "-"],
-            ["fidelity_records", Object.keys(fidelityRecords)],
-            ["cae_loop_status", femResult.status || "-"],
-            ["cae_backend", femResult.solver || femResult.solver_backend || "-"],
-            ["fem_cache", femResult.cache_status || "-"],
-            ["predicted_peak_force_N", femMetrics.predicted_peak_force_N ?? "-"],
-            ["predicted_stiffness_N_per_mm", femMetrics.predicted_initial_stiffness_N_per_mm ?? "-"],
-            ["cae_status", caeResult.status || "-"],
-            ["fem_utm_agreement", femComparison.agreement_score === undefined ? "-" : femComparison.agreement_score],
-            ["fem_utm_tags", femComparison.discrepancy_tags || []],
-          ])}
-          <h5>LLM Agentic FEM Loop</h5>
-          ${runtimeRows([
-            ["loop_status", femLoop.status || "-"],
-            ["llm_plan_source", femLoop.llm_plan && femLoop.llm_plan.source ? femLoop.llm_plan.source : "-"],
-            ["selected_iteration", femLoop.selected_iteration === undefined ? "-" : femLoop.selected_iteration],
-            ["acceptance_threshold", femLoop.acceptance_threshold === undefined ? "-" : femLoop.acceptance_threshold],
-            ["tool_sequence", femLoop.tool_sequence || []],
-            ["safety_rule", femLoop.safety_rule || "-"],
-          ])}
-          ${renderReportList((femLoop.iterations || []).map((item) => `iter=${item.iteration} · mesh=${item.mesh_size_mm} mm · agreement=${renderRuntimeValue(item.agreement_score)} · accepted=${renderRuntimeValue(item.accepted)} · cache=${item.cache_status || "-"}`), "No FEM agentic iterations recorded.", 12)}
-          <h5>BO Handoff / Loop Comparison</h5>
-          ${runtimeRows([
-            ["bo_schema", boHandoff.schema_version || "analysis_bo_handoff_v2"],
-            ["ok_for_bo", boHandoff.ok_for_bo === undefined ? "-" : boHandoff.ok_for_bo],
-            ["trust_gate", boHandoff.trust_gate || (boHandoff.trust_score || {}).gate || "-"],
-            ["objective", boHandoff.objective || {}],
-            ["comparison_mode", comparison.mode || "-"],
-            ["comparison_summary", comparison.summary || "-"],
-            ["failure_tags", failureTags],
-          ])}
-          <h5>Analysis Artifact Ledger</h5>
-          ${renderReportList(artifactRows, "No Analysis artifact paths recorded.", 28)}
-        </div>
-      `;
+/* Analysis-owned measurement report; numerical results remain backend-owned. */
+(function(global) {
+  'use strict';
+  const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const num = v => v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v);
+  const fmt = v => num(v) === null ? '—' : Number(v).toLocaleString('en-US',{maximumFractionDigits:4});
+  function createFrontend(s) {
+    let mode = 'ss', expanded = false;
+    const change = e => { if(e.target?.matches?.('[data-anl-curve-mode]')) mode=e.target.value; };
+    const toggle = e => { if(e.target?.matches?.('[data-anl-details]')) expanded=e.target.open; };
+    global.document?.addEventListener('change',change);
+    global.document?.addEventListener('toggle',toggle,true);
+    function renderDashboard(report={}) {
+      const a=s.latestAnalysisPayload(report)||{}, m=a.utm_metrics||{}, source=a.source||{};
+      const h=s.latestAnalysisBoHandoff(report)||a.bo_handoff||{}, o=h.objective||{}, evaluation=a.objective_evaluation||{};
+      const metric=o.metric_name||evaluation.metric_name||evaluation.objective_id;
+      const metricLabel=o.name || (/energy_density/.test(metric||'')?'Energy density':/specific_energy|^sea/.test(metric||'')?'Specific energy absorption':metric?String(metric).replaceAll('_',' '):'Awaiting objective');
+      const formula=o.expression || evaluation.expression || (/energy_density/.test(metric||'')?'f(x) = ∫ σ(ε) dε':/specific_energy|^sea/.test(metric||'')?'f(x) = (1/m) ∫ F(δ) dδ':'');
+      const score=evaluation.score??o.score??h.objective_score??a.objective_score;
+      const strain=num(m.evaluation_strain??m.energy_absorption_limit_strain);
+      const interval=strain===null?'Evaluation interval not recorded':`0–${fmt(strain*100)}% strain`;
+      const quality=a.quality_gate||a.data_quality_gate||{}, allowed=h.ok_for_bo??a.ok_for_bo??quality.ok_for_bo;
+      const gate=allowed===true?'Ready for BO':allowed===false?'Blocked':'Awaiting data';
+      const card=(title,body,eyebrow)=>s.renderDashboardCard(title,body,{span:12,tone:'analysis',eyebrow});
+      const objective=`<div class="anl-objective"><div><span class="anl-kicker">${esc(o.direction||'Configured objective')}</span><h3>${esc(metricLabel)}</h3><p>${esc(formula)}${formula?' · ':''}${esc(interval)}</p></div><div class="anl-objective-value"><strong>${fmt(score)}</strong><span>${esc(o.unit||evaluation.unit||'')}</span></div></div>`;
+      const curve=`<div class="anl-curves"><label><input data-anl-curve-mode type="radio" name="anl-curve-view" value="ss" ${mode==='ss'?'checked':''}> SS curve</label><label><input data-anl-curve-mode type="radio" name="anl-curve-view" value="fd" ${mode==='fd'?'checked':''}> FD curve</label><span>${esc(interval)} · shaded evaluation region</span><div class="anl-ss">${s.renderAnalysisCurveOverlay(a,'ss')}</div><div class="anl-fd">${s.renderAnalysisCurveOverlay(a,'fd')}</div></div>`;
+      const energy=num(m.energy_absorption_50pct_mJ);
+      const metrics=`<div class="anl-metrics ar-report-metrics">${[
+        ['Peak load',m.peak_force_N,'N'],['Peak stress',m.compressive_strength_MPa,'MPa'],
+        ['Absorbed energy',energy===null?null:energy/1000,num(m.energy_absorption_limit_strain)===null?'J · recorded interval':`J · 0–${fmt(Number(m.energy_absorption_limit_strain)*100)}% strain`],
+        ['Measured travel',m.measured_displacement_max_mm,'mm'],
+      ].map(([k,v,u])=>s.renderDashboardMetric(k,fmt(v),u,'info')).join('')}</div>`;
+      const decisions=Array.isArray(a.decisions)?a.decisions:[];
+      const decision=phase=>{const d=decisions.find(x=>x.phase===phase);return !d?'Not recorded':d.ok===false||/hold|block|reject/i.test(d.action||d.option_id||'')?'Held':'Recorded';};
+      const progress=`<div class="ar-spm-progress-steps"><div class="ar-spm-progress-node-rail" role="list" aria-label="Analysis processing stages">${[
+        ['Measurement',a.utm_curve?.point_count?`${a.utm_curve.point_count} points`:'Awaiting data'],
+        ['Processing decision',decision('data_processing')],['Curves & metrics',Object.keys(m).length?'Available':'Awaiting data'],
+        ['Evidence review',decision('data_validation')],['BO handoff',gate],
+      ].map(([k,v],i)=>{const tone=/Held|Blocked/.test(v)?'warn':/Awaiting|Not recorded/.test(v)?'muted':'ok';return `<div role="listitem" class="ar-spm-progress-node tone-${tone}"><i>${String(i+1).padStart(2,'0')}</i><span>${esc(k)}</span><b class="ar-spm-progress-action">${esc(v)}</b></div>${i<4?`<span class="ar-spm-progress-edge tone-${tone}" aria-hidden="true"></span>`:''}`;}).join('')}</div></div>`;
+      const warnings=quality.warnings||a.failure_tags||[];
+      const details=`<details data-anl-details ${expanded?'open':''}><summary>Source & processing details</summary>${s.renderDashboardRows([
+        ['Source',source.path||'Not recorded'],['Parser',source.parser_id||source.format||'Not recorded'],
+        ['SHA-256',source.fingerprint?.sha256||source.sha256||'Not recorded'],['Rows',source.row_count_probe??a.utm_curve?.point_count??'Not recorded'],
+        ['Geometry',a.specimen_geometry||{}],['Metric values',m],['BO contract',h.schema_version||'Not recorded'],
+        ['Canonical curve',a.analysis_artifacts?.canonical_curve||'Not recorded'],['Decision evidence',decisions],['Quality evidence',quality],
+      ])}</details>`;
+      const summary=`<div class="ar-design-handoff-layout"><div class="ar-design-handoff-main"><span class="tone-${allowed===true?'success':'warning'}">${esc(gate)}</span><strong>${esc(h.candidate_id||a.candidate_id||'Candidate not recorded')}</strong><em>${esc(h.specimen_id||a.specimen_id||'Specimen not recorded')}</em></div><div class="ar-design-metric-strip"><span><b>Next</b>${esc(h.next_agent||'BO')}</span><span><b>Data</b>${quality.ok_for_metrics===false?'Blocked':Object.keys(m).length?'Processed':'Awaiting data'}</span><span><b>Objective</b>${fmt(score)} ${esc(o.unit||evaluation.unit||'')}</span><span><b>Warnings</b>${Array.isArray(warnings)?warnings.length:0}</span></div>${Array.isArray(warnings)&&warnings.length?`<div class="ar-design-note-list">${warnings.map(w=>`<span>${esc(w)}</span>`).join('')}</div>`:''}</div>${details}`;
+      return card('Objective',objective,'experiment objective')+card('Measured Response',curve,'experimental data')+card('Key Metrics',metrics,'measured values')+card('Agentic Progress',progress,'analysis workflow')+s.renderDashboardCard('Data Quality & BO Handoff',summary,{span:12,tone:allowed===true?'success':'warning',eyebrow:'anl → bo',className:'ar-design-reference-card ar-design-handoff-card'});
     }
-
-    function renderDashboard(report, status, agentLabel, profile) {
-      const analysis = latestAnalysisPayload(report) || {};
-      const metrics = analysis.utm_metrics || {};
-      const quality = analysis.quality_gate || analysis.data_quality_gate || {};
-      const artifacts = analysis.analysis_artifacts || {};
-      const boHandoff = latestAnalysisBoHandoff(report) || {};
-      return `
-        ${renderAnalysisFemEvidence(analysis)}
-        ${renderDashboardCard("Result Summary", `<div class="ar-report-metrics">
-          ${renderDashboardMetric("Peak", metrics.peak_force_N ?? "-", "N", "info")}
-          ${renderDashboardMetric("Strength", metrics.compressive_strength_MPa ?? "-", "MPa", "success")}
-          ${renderDashboardMetric("Score", analysis.objective_score ?? "-", "objective", "running")}
-          ${renderDashboardMetric("Unc.", analysis.uncertainty ?? "-", "model", "warning")}
-        </div>`, {span: 4, tone: "analysis", eyebrow: "result"})}
-        ${renderDashboardCard("Analysis Admissibility / Gate", renderAnalysisTrustScore(analysis), {span: 4, tone: (analysis.trust_score || {}).gate === "block" ? "danger" : "analysis", eyebrow: "evidence"})}
-        ${renderDashboardCard("Metric Bars", renderAnalysisMetricBars(analysis), {span: 4, tone: "metrics", eyebrow: "features"})}
-        ${renderDashboardCard("Data Quality", renderAnalysisQualityDonut(quality), {span: 4, tone: quality.ok_for_bo === false ? "warning" : "analysis", eyebrow: "qa"})}
-        ${renderDashboardCard("Provenance", renderAnalysisProvenance(analysis), {span: 4, tone: "analysis", eyebrow: "artifacts"})}
-        ${renderDashboardCard("Raw Data Ledger", renderDashboardRows([
-          ["raw_file", analysis.raw_file || analysis.source_file || "-"],
-          ["fingerprint", analysis.file_fingerprint || analysis.checksum || "-"],
-          ["row_count", analysis.row_count || metrics.row_count || "-"],
-          ["unit_confidence", analysis.unit_confidence || "-"],
-          ["canonical_curve", artifacts.canonical_curve || "-"],
-        ]), {span: 4, tone: "analysis", eyebrow: "utm ingest"})}
-        ${renderDashboardCard("BO Handoff", renderDashboardRows([
-          ["schema", boHandoff.schema_version || "analysis_bo_handoff_v2"],
-          ["ok_for_bo", boHandoff.ok_for_bo === undefined ? "-" : boHandoff.ok_for_bo],
-          ["trust_gate", boHandoff.trust_gate || (boHandoff.trust_score || {}).gate || "-"],
-          ["objective_score", boHandoff.objective_score ?? analysis.objective_score ?? "-"],
-          ["uncertainty", boHandoff.uncertainty ?? analysis.uncertainty ?? "-"],
-          ["experiment_evaluation", artifacts.experiment_evaluation || "-"],
-          ["next_agent", boHandoff.next_agent || "BO"],
-        ]), {span: 4, tone: "analysis", eyebrow: "optimization"})}
-      `;
-    }
-
-    function dispose() {}
-    return Object.freeze({renderReport, renderDashboard, dispose});
+    function dispose(){global.document?.removeEventListener('change',change);global.document?.removeEventListener('toggle',toggle,true);}
+    return Object.freeze({renderReport:renderDashboard,renderDashboard,dispose});
   }
-
-  global.AX4LABAnalysisUI = Object.freeze({createFrontend});
-})(typeof window !== "undefined" ? window : globalThis);
+  global.AX4LABAnalysisUI=Object.freeze({createFrontend});
+})(typeof window!=='undefined'?window:globalThis);

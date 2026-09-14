@@ -23,7 +23,6 @@
       const successes = Array.isArray(knowledgeReport.success_patterns) ? knowledgeReport.success_patterns : [];
       const performance = Array.isArray(knowledgeReport.agent_performance_records) ? knowledgeReport.agent_performance_records : [];
       const packs = Array.isArray(evolution.evidence_packs) ? evolution.evidence_packs : [];
-      const prefill = Array.isArray(evolution.prefill_tasks) ? evolution.prefill_tasks : [];
       const outcomes = Array.isArray(evolution.outcomes) ? evolution.outcomes : Array.isArray(knowledgeReport.evolution_outcomes) ? knowledgeReport.evolution_outcomes : [];
       const graphStatus = knowledgeReport.graph_backend_status || context.graph_backend_status || payload.graph_backend_status || {};
       const memoryRows = runtimeRows([
@@ -40,7 +39,6 @@
       const successItems = successes.map((item) => `${item.skill_id || item.scope || "success"} · agent=${item.agent_id || "-"} · ${compactText(item.procedure_summary || item.scope || "", 160)}`);
       const performanceItems = performance.map((item) => `${item.agent_id || item.stage || "agent"} · status=${item.status || "-"} · score=${renderRuntimeValue(item.score)} · missing=${renderRuntimeValue((item.signals || {}).missing_required_fields || [])}`);
       const packItems = packs.map((pack) => `${pack.pack_id || "pack"} · ${pack.target_type || "target"}:${pack.target_id || "-"} · priority=${renderRuntimeValue(pack.priority)} · ${compactText(pack.objective || (pack.why_this_target || []).join("; "), 180)}`);
-      const prefillItems = prefill.map((task) => `${task.target_type || "target"}:${task.target_id || "-"} · ${compactText(task.objective || renderRuntimeValue(task.constraints || {}), 180)}`);
       const outcomeItems = outcomes.map((item) => `${item.variant_id || item.outcome_id || "variant"} · ${item.target_type || "target"}:${item.target_id || "-"} · verdict=${item.verdict || "observe"} · rollback=${renderRuntimeValue(item.rollback_recommended)}`);
       const missingArtifacts = Array.isArray(dataQuality.missing_artifacts) ? dataQuality.missing_artifacts : [];
       return `
@@ -53,12 +51,10 @@
           ${renderReportList(successItems, "No reusable success pattern recorded.", 12)}
           <h5>Agent Performance Ledger</h5>
           ${renderReportList(performanceItems, "No agent performance record available.", 16)}
-          <h5>Self-Evolution Evidence Packs</h5>
+          <h5>Improvement Evidence Packs</h5>
           ${renderReportList(packItems, "No evidence pack prepared.", 10)}
-          <h5>Evolution Lab Prefill</h5>
-          ${renderReportList(prefillItems, "No Evolution Lab prefill task prepared.", 8)}
-          <h5>Evolution Outcome Attribution</h5>
-          ${renderReportList(outcomeItems, "No activated variant outcome attribution recorded yet.", 8)}
+          <h5>Historical Variant Outcome Attribution</h5>
+          ${renderReportList(outcomeItems, "No historical variant outcome attribution recorded.", 8)}
           <h5>Optional Graph Backend</h5>
           ${runtimeRows([
             ["enabled", graphStatus.enabled === undefined ? false : graphStatus.enabled],
@@ -89,16 +85,20 @@
       const packItems = packs.map((item) => `${item.target_type || "target"}:${item.target_id || "unknown"} / ${item.status || "proposed"} / ${item.summary || ""}`);
       return `
         ${renderKnowledgeActivityCard()}
-        ${renderDashboardCard("AX4LAB Wiki", `<div data-live-knowledge-body="wiki">${renderLiveKnowledgeSummary("wiki")}</div>`, {span:4,tone:"knowledge",eyebrow:"shared platform knowledge"})}
-        ${renderDashboardCard("Memory", `<div data-live-knowledge-body="memory">${renderLiveKnowledgeSummary("memory")}</div><details><summary>Operational ledger</summary>${renderKnowledgeMemoryBoard(knowledgeReport,evolution)}</details>`, {span:4,tone:"knowledge",eyebrow:"retained context"})}
-        ${renderDashboardCard("Agent Delivery", `<div data-live-knowledge-body="delivery">${renderLiveKnowledgeSummary("delivery")}</div>`, {span:4,tone:"knowledge",eyebrow:"retrieved / delivered / cited"})}
-        <details style="grid-column:1/-1"><summary>Operational evidence, patterns and Evolution</summary><div class="agent-dashboard-grid">
-        ${renderDashboardCard("Evidence Quality", renderDashboardRows([["artifact_links", evidenceQuality.artifact_link_coverage ?? "-"], ["agent_reports", evidenceQuality.agent_report_coverage ?? "-"], ["guardian_incidents", evidenceQuality.guardian_incident_count ?? "-"], ["context_items", Array.isArray(context.items) ? context.items.length : "-"]]), {span:4,tone:"knowledge",eyebrow:"provenance"})}
-        ${renderDashboardCard("Pattern Library", renderKnowledgePatternBoard(knowledgeReport), {span:6,tone:"knowledge",eyebrow:"failure + success"})}
-        ${renderDashboardCard("Memory Intake", renderDashboardRows([["experiment_record", intake.experiment_record_id || "-"], ["agent_performance", intake.agent_performance_count ?? performance.length ?? "-"], ["failure_patterns", intake.failure_pattern_count ?? failures.length ?? 0], ["success_patterns", intake.success_pattern_count ?? successes.length ?? 0], ["evolution_packs", intake.evolution_pack_count ?? packs.length ?? "-"]]), {span:6,tone:"knowledge",eyebrow:"typed memory"})}
-        ${renderDashboardCard("Evolution Packs", `${renderDashboardRows([["packs", packs.length], ["outcomes", outcomes.length], ["top_target", packs[0] ? `${packs[0].target_type || "target"}:${packs[0].target_id || "unknown"}` : "-"], ["activation_gate", evolution.activation_gate || "Self-Evolution / Guardian / operator"]])}${dashboardList(packItems, "No evolution evidence packs recorded.", 4)}`, {span:6,tone:"knowledge",eyebrow:"self-evolution prep"})}
-        ${renderDashboardCard("Retrieval / Provenance", dashboardObjectList(context.retrieval || payload.retrieval || {}, "No retrieval context recorded.", 4), {span:6,tone:"knowledge",eyebrow:"memory context"})}
-        </div></details>`;
+        ${renderDashboardCard("Reference Library", `<div data-live-knowledge-body="wiki">${renderLiveKnowledgeSummary("wiki")}</div>`, {span:4,tone:"knowledge",eyebrow:"accessible inventory"})}
+        ${renderDashboardCard("Agent Knowledge Supply", `<div data-live-knowledge-body="delivery">${renderLiveKnowledgeSummary("delivery")}</div>`, {span:12,tone:"knowledge",eyebrow:"current run · retrieval is not use"})}
+        ${renderDashboardCard("Recorded Knowledge Outcomes", renderDashboardRows([
+          ["Archived experiment", intake.experiment_record_id || "No record"],
+          ["Agent performance records", intake.agent_performance_count ?? (Array.isArray(knowledgeReport.agent_performance_records) ? performance.length : "No record")],
+          ["Failure patterns", intake.failure_pattern_count ?? (Array.isArray(knowledgeReport.failure_patterns) ? failures.length : "No record")],
+          ["Success patterns", intake.success_pattern_count ?? (Array.isArray(knowledgeReport.success_patterns) ? successes.length : "No record")],
+          ["Evidence packs", intake.evolution_pack_count ?? (Array.isArray(evolution.evidence_packs) ? packs.length : "No record")],
+          ["Evolution outcomes", Array.isArray(evolution.outcomes) || Array.isArray(knowledgeReport.evolution_outcomes) ? outcomes.length : "No record"],
+          ["Artifact coverage", evidenceQuality.artifact_link_coverage ?? "No record"],
+          ["Agent report coverage", evidenceQuality.agent_report_coverage ?? "No record"],
+        ]), {span:4,tone:"knowledge",eyebrow:"recorded report"})}
+        ${renderDashboardCard("Learned Patterns", window.AX4LABKnowledgePanels.patterns(knowledgeReport), {span:4,tone:"knowledge",eyebrow:"failure / success"})}
+        ${renderDashboardCard("Improvement Evidence", window.AX4LABKnowledgePanels.findings(packs, outcomes), {span:4,tone:"knowledge",eyebrow:"proposals and outcomes"})}`;
     }
 
     function dispose() {}

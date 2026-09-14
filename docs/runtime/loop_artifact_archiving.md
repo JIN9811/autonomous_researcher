@@ -74,6 +74,28 @@ results whose loop ownership is unknown.
 
 ## Storage and Identity
 
+### Live GUI file explorer
+
+The Artifacts view projects the existing run artifact index into a folder tree
+and file list. Opening it from an agent selects that agent and the current
+`loop_count`; switching agents or loops resets this default scope. Manual folder
+and filter choices survive ordinary polling. **All files** includes other agents
+and unowned legacy files without assigning them a synthetic loop or agent.
+
+Session selection covers the active run and run IDs referenced by the loaded
+conversation, not a filesystem-wide run catalog. The tree preserves actual
+`runtime/loops/loop-*/<agent>/attempt-*` paths and optional child directories.
+Readable file labels suppress archive hash prefixes; original paths and filenames
+remain available. Existing artifact URLs serve image, bounded text/JSON and CSV
+table previews, with original-file and download links. Large text and other binary
+formats remain available through those links. CSV previews show at most 100 data
+rows and 40 columns; no source data is modified. Conversation artifact links join
+the same explorer under the display-only **Linked references** folder when their
+URL is not already indexed. Embedded BO results appear as JSON records in that
+folder, not newly written files. Missing loop ownership remains unknown and is
+visible under All loops, never assigned to the current loop. No execution,
+storage, or archive API is replaced.
+
 Knowledge delivery now retains separate content-free citation receipts, scoped
 to the available consumer/run/loop/attempt identity. These do not replace the
 original invocation archive or copy private context into it. Private memory
@@ -134,7 +156,7 @@ owning producer actually emits and references them, not mandatory outputs.
 | Vision | Observation/validation data and referenced images/proofs |
 | Manipulation | Task/session/rollout result, streamed motor history, tracking evidence |
 | Equipment | Tool/skill execution results, exported CSV references and copies; successive skill-flow execution snapshots before overwrite |
-| Analysis | Parsed measurement/metric/CAE results, referenced files, runtime-generated plots |
+| Analysis | Parsed measurements and metric results, referenced files, runtime-generated plots |
 | Knowledge | Returned record/provenance/persistence outcomes and referenced allowed files |
 | BO | LHS/optimization/recommendation results and runtime-generated posterior artifacts |
 | Guardian | Risk/approval/continuation/stop decisions and loop-tail events |

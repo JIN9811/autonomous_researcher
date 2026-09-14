@@ -114,7 +114,7 @@ console.log(JSON.stringify({{
 	  lhsReportDetails: detailsBody.includes("Initial Design / LHS") && detailsBody.includes("Candidate ranking is disabled"),
 	  noDuplicateGenericBoVisualization: specializedBody.includes('"analysis", "knowledge", "bo"'),
 	  hydratesLatestVisualization: source.includes('fetch("/api/bo/config", {{ cache: "no-store" }})')
-    && source.includes("await hydrateLiveBoVisualization()"),
+    && !source.slice(source.indexOf("async function initializeLiveGuiRuntime()")).includes("hydrateLiveBoVisualization()"),
 	  hydratesOnVisualizationEvent: source.includes('if (eventType === "bo.visualization.updated")')
 	    && source.includes("hydrateLiveBoVisualization();"),
 	  renderKeyTracksLoop: renderKeyBody.includes("state.loop_count"),
@@ -124,6 +124,17 @@ console.log(JSON.stringify({{
 """
     result = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
     return json.loads(result.stdout)
+
+
+def test_live_startup_does_not_restore_bo_before_chat() -> None:
+    source = PLANNING_JS.read_text(encoding="utf-8")
+    startup = source.split("async function initializeLiveGuiRuntime()", 1)[1]
+    assert "hydrateLiveBoVisualization()" not in startup
+    assert ".then(bootstrapLiveOrchestrator)" in startup
+    assert _inspect_source()["hydratesOnVisualizationEvent"]
+    icon = source.split("function renderChatGroupIcon(", 1)[1].split("function renderPlanningChatMessageDetail", 1)[0]
+    assert 'loading="eager"' in icon
+    assert 'loading="lazy"' not in icon
 
 
 def test_live_gui_bo_dashboard_uses_shared_equation_and_posterior_renderer() -> None:

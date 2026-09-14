@@ -246,6 +246,9 @@ def open_page(context, fixture):
     page.evaluate("Promise.all(document.getAnimations().filter(a=>a.effect.getTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})))")
     assert page.url == URL and page.title() == "Experimental Setup isolated audit"
     expect(page.locator("#live-experiment-setup-panel")).to_contain_text("Research setting 1")
+    assert page.locator('.setup-block-toggle[aria-expanded="true"]').count() == 0
+    for toggle in page.locator('.setup-block-toggle').all():
+        toggle.click()
     return page, errors, console
 
 
@@ -280,7 +283,7 @@ def audit(out):
             page.evaluate("emitSetup", changed)
             assert page.evaluate("auditCard===document.querySelector('[data-block-id=\"block-1\"]') && auditFocus===document.activeElement && auditCard.querySelector('details').open")
             expect(panel).to_contain_text("unavailable")
-            assert panel.locator('[data-block-id="block-2"] button').first.is_disabled()
+            assert panel.locator('[data-block-id="block-2"] [data-setup-action="edit"]').is_disabled()
             checks.append("Equal-revision graph/status event; stable card/detail/focus")
             # Old and foreign events cannot corrupt the canonical projection.
             old = deepcopy(changed); old["revision"] = 1
@@ -389,6 +392,8 @@ def audit(out):
                 assert metrics["scroll"] > metrics["height"] > 0 and metrics["overflow"] == "auto", metrics
                 assert metrics["scrollWidth"] <= metrics["width"] + 1, metrics
                 last = panel.locator('[data-block-id="block-30"]')
+                if last.locator('.setup-block-toggle').get_attribute('aria-expanded') != 'true':
+                    last.locator('.setup-block-toggle').click()
                 edit = last.get_by_role("button", name="Edit Research setting 30", exact=True)
                 edit.focus()
                 page.keyboard.press("Tab")
@@ -410,6 +415,52 @@ def audit(out):
             assert page.evaluate("liveSetupEditContext===null && planningSessionId==='canonical-server-b' && liveSetupSnapshot.revision===1")
             expect(page.locator("#planning-message-input")).to_have_value("Stale text must survive")
             checks.append("Canonical session replacement clears context without losing unsent text")
+            # The same Setup renderer shows conversational values as they arrive.
+            conversation = deepcopy(replacement["state"]["setup"])
+            conversation["revision"] = 2
+            conversation["blocks"] = [block(i, topic_key=f"conversation.input.{key}", title=title,
+                conversation_input=True, draft_values={key:value}, confirmed_values={}, effective_values={})
+                for i,key,title,value in [(1,'material','Material','PLA'),
+                    (2,'specimen_size_mm','Specimen size',[30,30,30]), (3,'geometry_type','Structure','gyroid'),
+                    (4,'goal','Goal','Improve energy absorption')]]
+            page.set_viewport_size({"width": 1920, "height": 1080})
+            page.evaluate("setLiveChatCollapsed(true)")
+            page.evaluate("emitSetup", conversation)
+            material = panel.locator('[data-block-id="block-1"]')
+            assert panel.locator('.setup-block-toggle[aria-expanded="true"]').count() == 0
+            assert 'Revision' not in panel.inner_text() and '{' not in panel.inner_text()
+            screenshots.append(screenshot(page, out, "desktop-compact-collapsed"))
+            for toggle in panel.locator('.setup-block-toggle').all():
+                toggle.click()
+            assert panel.locator('.setup-block-toggle[aria-expanded="true"]').count() == 3
+            expect(material.locator('.setup-block-toggle')).to_have_attribute('aria-expanded','false')
+            fourth = panel.locator('[data-block-id="block-4"] .setup-block-toggle')
+            fourth.click()
+            assert panel.locator('.setup-block-toggle[aria-expanded="true"]').count() == 2
+            material.locator('.setup-block-toggle').click()
+            expect(material.locator('[data-setup-action="confirm"]')).to_be_hidden()
+            expect(material.locator('[data-setup-action="discard"]')).to_be_hidden()
+            before = len(fixture.requests)
+            material.get_by_role("button", name="Edit Material", exact=True).click()
+            expect(page.locator("#planning-message-input")).to_be_focused()
+            assert len(fixture.requests) == before
+            conversation["revision"] = 3
+            conversation["blocks"][0].update(revision=4, draft_values={"material": "PETG"})
+            page.evaluate("emitSetup", conversation)
+            expect(material).to_contain_text("PETG")
+            expect(material).to_contain_text("Review and approve execution in Chat")
+            screenshots.append(screenshot(page, out, "desktop-conversation-edit"))
+            page.evaluate("setLiveChatCollapsed(true)")
+            expect(material).to_be_visible()
+            screenshots.append(screenshot(page, out, "desktop-conversation-input"))
+            assert panel.locator('.setup-block-toggle[aria-expanded="true"]').count() == 3
+            for width,height,label in [(390,640,'narrow-compact'),(1440,480,'short-compact')]:
+                page.set_viewport_size({'width':width,'height':height})
+                material.scroll_into_view_if_needed()
+                metrics=panel.evaluate('el=>({w:el.clientWidth,scroll:el.scrollWidth})')
+                assert metrics['scroll'] <= metrics['w'] + 1
+                screenshots.append(screenshot(page,out,label))
+            checks.append("1920x1080: one-line collapsed cards, max three open with oldest closed, repeat-click closes, value refresh preserves expansion, contextual Edit sends no action")
             assert not errors + errors2, errors + errors2
             assert not fixture.unexpected, fixture.unexpected
             unexpected_console = [entry for entry in console + console2 if "409" not in entry[1]]

@@ -56,7 +56,6 @@ BASE_ROUTE: list[str] = [
 
 PARALLELIZABLE_CHECKS: list[str] = [
     "knowledge.retrieve_prior_failures",
-    "analysis.lookup_fem_cache",
     "guardian.preflight_devices",
     "bo.constraint_sanity_check",
     "artifacts.lookup_existing_outputs",
@@ -242,7 +241,7 @@ def build_orchestration_plan(
         "control_planes": {
             "execution": "LangGraph stage execution and handoff packets",
             "safety": "Guardian gates, incidents, approvals, safe-stop authority",
-            "memory": "Knowledge records and self-evolution evidence packs",
+            "memory": "Knowledge records and improvement evidence packs",
             "gui": "Live GUI report, backend trace, artifacts, and timeline",
         },
         "next_recommended_stage": route_steps[0]["stage"] if route_steps else current_stage,
@@ -595,20 +594,6 @@ def build_orchestrator_parallel_check(
         }
         summary = f"{failure_count} prior failure/incident records available for routing context."
         status = "ok" if failure_count or knowledge else "missing"
-    elif check_id == "analysis.lookup_fem_cache":
-        analysis = metadata.get("analysis") if isinstance(metadata.get("analysis"), dict) else {}
-        artifacts = analysis.get("analysis_artifacts") if isinstance(analysis.get("analysis_artifacts"), dict) else {}
-        fem_loop = analysis.get("fem_agentic_loop") if isinstance(analysis.get("fem_agentic_loop"), dict) else {}
-        cache_refs = [
-            str(artifacts.get("fem_cache_manifest") or ""),
-            str(artifacts.get("fem_result") or ""),
-            str(fem_loop.get("cache_status") or ""),
-        ]
-        cache_refs = [item for item in cache_refs if item.strip()]
-        evidence_refs.extend(cache_refs[:4])
-        details = {"cache_refs": cache_refs, "fem_loop_status": fem_loop.get("status", "")}
-        summary = "FEM cache/reference lookup completed."
-        status = "ok" if cache_refs else "missing"
     elif check_id == "guardian.preflight_devices":
         health = dict(state.device_health or {})
         blocking = {key: value for key, value in health.items() if str(value).lower().startswith(("blocking", "critical", "failed", "error"))}
@@ -1045,7 +1030,7 @@ def build_orchestrator_followup(
             concerns.append("analysis_uncertainty_high")
     elif stage_text == Stage.KNOWLEDGE.value:
         knowledge = _first_dict(data.get("knowledge"))
-        opinion = f"Knowledge memory와 self-evolution evidence pack 갱신 상태를 확인했습니다."
+        opinion = f"Knowledge memory와 improvement evidence pack 갱신 상태를 확인했습니다."
         recommendation = "성공/실패/incident 근거를 다음 BO 및 loop reflection에 반영합니다."
         if not knowledge.get("retrieval_coverage"):
             concerns.append("knowledge_retrieval_coverage_not_reported")

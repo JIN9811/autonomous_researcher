@@ -29,7 +29,7 @@
     return output[0] + ((Number(value) - domain[0]) / span) * (output[1] - output[0]);
   }
 
-  function renderPlot(payload) {
+  function renderPlot(payload, options = {}) {
     if (!isValid(payload)) return '<div class="lhs-viz-empty">LHS design visualization unavailable</div>';
     const continuous = payload.design_space.x.kind === "continuous";
     const title = `${continuous ? "Continuous-space" : "Mixed-space"} Latin hypercube initial design`;
@@ -37,6 +37,7 @@
     if (pngUrl) {
       return `<figure class="lhs-viz-matplotlib-figure"><img class="lhs-viz-matplotlib-image" src="${escapeHtml(pngUrl)}" alt="${title} step ${escapeHtml(payload.step)}"></figure>`;
     }
+    if (options.artifactOnly) return '<div class="lhs-viz-empty">No stored LHS figure for this step.</div>';
 
     const initial = payload.initial_design;
     const xAxis = payload.design_space.x;

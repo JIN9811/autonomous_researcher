@@ -3099,13 +3099,6 @@ class LangGraphRunLoop:
         if pending:
             await self._resume_completed_handoff(pending)
             return
-        # Freeze available model versions before Design; Analysis resolves the
-        # finalized design scope later without adopting mid-loop promotions.
-        from agents.analysis.runtime import pin_loop
-        try:
-            pin_loop(self._state, self._ctx, resume_background=True)
-        except (OSError, ValueError) as exc:
-            self._state.run_metadata["analysis_improvement_error"] = type(exc).__name__
         handler = self._handler_for_stage(stage)
         module_runtime = self._module_runtime_payload(stage)
         module_id = str(module_runtime.get("module_id") or stage.value)

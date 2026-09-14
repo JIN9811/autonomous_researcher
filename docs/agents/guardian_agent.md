@@ -269,6 +269,14 @@ waive physical interlocks, restart fabrication, or implement a recovery action.
 Unresolved pressure causes another hold. Operators must reconcile the cause
 and evidence before proceeding; this is not an automatic stage-retry workflow.
 
+The Live GUI dashboard keeps Current Decision, Gate Checks, Device & Stop
+Verification, Approval Queue, and Incident History visible. Recorded decisions
+and their reasons are separate from the monitor status; missing decisions display
+`Not evaluated`, never a generic orchestration instruction. Compact counters and
+scrollable tables preserve recorded gate, device, approval, and incident evidence
+without collapsing the core status panels. This is a presentation-only view;
+approval actions and safety enforcement retain their existing paths.
+
 Live GUI exposes Guardian report, risk, incidents, approvals, tool records,
 hardware alerts, corrective actions, and budget state. Approval panels resolve
 server-side requests. Incident-note APIs append operator context without

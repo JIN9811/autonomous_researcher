@@ -139,13 +139,21 @@ test("installed BO owner renders initial design, posterior, decision and handoff
     assert.ok(detail.includes(token), `report retains ${token}`);
   }
   const dashboard = frontend.renderDashboard(report, "completed", "BO Agent", {});
-  for (const title of ["BO Objective Equation", "Live Posterior", "Initial Design / LHS", "BO Decision / Tool Audit", "Candidate Ranking", "Next Design Request"]) {
+  for (const title of ["Objective Equation", "Live Posterior", "Initial Design / LHS", "Next Experiment", "Optimization Status", "Selection Evidence", "Agentic Progress"]) {
     assert.ok(dashboard.includes(`data-title="${title}"`), `${title} remains owner-composed`);
   }
   for (const mount of ['data-live-bo-equation', 'data-live-bo-posterior', 'id="lhs"']) {
     assert.ok(dashboard.includes(mount), `${mount} remains mounted`);
   }
   assert.ok(dashboard.includes("normal"), "Design handoff priority remains visible");
+  const empty = frontend.renderDashboard({}, "idle", "BO Agent", {});
+  const titles = html => [...html.matchAll(/data-title="([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(titles(empty), titles(dashboard), "cards keep their identity and order as results arrive");
+  assert.equal(titles(dashboard).at(-1), "Agentic Progress");
+  for (const label of ["Input Check", "Strategy Decision", "LHS / BoTorch", "Result Review", "Design Handoff"]) {
+    assert.ok(empty.includes(label), `${label} is visible before results`);
+    assert.ok(dashboard.includes(label), `${label} remains visible after results`);
+  }
 
   await host.reconcile([], services());
   assert.equal(host.get("bo"), null);

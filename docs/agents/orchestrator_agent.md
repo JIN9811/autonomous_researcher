@@ -16,6 +16,7 @@ source_of_truth:
   - app/controller.py
   - app/main.py
   - app/planning_setup.py
+  - app/planning_dialogue.py
   - app/test_scenario.py
   - orchestrator/experimental_setup.py
   - orchestrator/setup_application.py
@@ -41,7 +42,7 @@ supersedes: []
 
 Test scenarios use the same chat admission and graph as operator-led experiments. After an operator selects a test mode, automatic operator messages supply the scenario and scoped existing input values; they do not bypass ORC decisions or manufacture device evidence. See [Test Mode](../runtime/test_mode.md) for input lifecycle, mode policies and non-actuating verification boundaries.
 
-The High-layer intake contract identifies standalone test commands and explicit experiment starts as start requests, leaving missing-value collection to admission. Questions, negations and Setup-only edits remain non-executing. Registered GPT API and local Gemma 31B verification covered 68 classification cases and 12 controller startup cases, with execution stopped before Design dispatch.
+The High-layer intake contract distinguishes planning consent from execution approval. LLM-led questions collect conditions progressively, and the existing handoff validates admission. Questions, negations and Setup-only edits remain non-executing. See the [dialogue verification scope](../runtime/test_mode.md#source-and-verification) for reproducible non-actuating checks.
 
 ## Status at a Glance
 
@@ -234,6 +235,28 @@ evidence.
 
 ## Configuration and Operation
 
+### Research conversation and incremental Setup
+
+On first load, the existing `orchestrator_plan` route generates a concise Korean/English greeting without experiment parameters. Subsequent messages follow the researcher's language. Package answers describe the experiment enabled by the active graph, not individual agent packages as separate experiments. Unknown device readiness is not promoted to availability.
+
+The same LLM-driven conversation serves human experiments and automatic tests:
+
+| Dialogue decision | Public response | State effect |
+|---|---|---|
+| `invite` | Available experiment and invitation to plan | Pending planning consent, no execution |
+| `collect` | One or two condition questions | Only values grounded in this reply update Setup |
+| `answer` | System explanation | Existing values and pending question preserved |
+| `review` | Agreed conditions and execution question | Pending run review, no execution |
+| `execute` | Brief acknowledgement of explicit approval | Existing controller admission and Design handoff |
+
+`app/planning_dialogue.py` validates the private model response; only its natural-language answer appears in Chat. Each accepted research input is stored as a `conversation.input.*` block in the existing canonical `experimental_setup.json`. Subsequent edits revise that block and emit `planning_setup_changed`. Its Edit action opens Chat with the current block revision. These are planning inputs, not owner configuration receipts: Confirm/Discard owner actions are disabled, and saving a value never starts equipment. Execution review passes the agreed inputs into the existing pipeline. Owner-backed configuration blocks below keep their separate validation and next-run application contracts.
+
+System questions preserve the plan. Automatic test replies use the same conversation and reveal only requested scenario facts; selected test execution policy remains server-owned. State-specific allowed actions and missing-input context prevent planning consent from becoming execution approval. An invalid model action may be reconsidered once before any message or input mutation; an invalid second response produces no execution. Stops, session changes, stale scopes and runtime approvals retain their existing boundaries.
+
+Experimental Setup presents each condition as a compact, one-line title, readable value and status. Clicking the row expands or collapses its card; at most three cards remain open, with the oldest closing when a fourth is opened. Incoming values preserve expansion and focus. Expanded cards show readable values and Edit; raw values, revisions and owner contracts stay under collapsed Technical details. Conversation inputs hide unsupported Confirm/Discard actions. Editing still uses the existing revision-scoped Chat path; this presentation change does not alter owner validation or execution.
+
+### Owner-backed configuration
+
 Experimental Setup is a server-side, canonical-session state beside the
 planning transcript. It is dynamic from graph-linked owner descriptors, not a
 fixed five-block form. Active and historical blocks retain stable IDs and
@@ -256,6 +279,11 @@ validated from one snapshot; same-owner confirmed settings are combined before
 any owner effect. Readback is required before an owner receipt is `applied`.
 Partial, rejected, failed, or unknown receipts remain explicit and do not claim
 a globally applied configuration.
+
+The ORC report places **Response Evidence** after its orchestration cards.
+Retrieved sources, confirmed delivery, explicit use and memory outcomes are
+displayed inline for the selected response; unknown use is not counted as zero.
+The Knowledge report owns library inventory and per-agent comparison charts.
 
 In the existing Live GUI allocation, Setup uses its current dock and internal
 vertical scroll. `Edit in Chat` opens the existing Chat with the same

@@ -32,23 +32,13 @@ def test_analysis_descriptor_owns_sources_without_a_physical_low_boundary():
 
     root = Path(__file__).resolve().parents[2]
     descriptor = MODULE.describe()
-    assert descriptor["dependencies"]["bridge_modules"] == ["cae"]
-    assert descriptor["dependencies"]["tools"] == [
-        "cae.prepare_static_analysis",
-        "cae.run_static_analysis",
-    ]
+    assert descriptor["dependencies"]["bridge_modules"] == []
+    assert descriptor["dependencies"]["tools"] == []
     assert descriptor["dependencies"]["direct_device_effect"] is False
     assert descriptor["storage"]["new_settings_store"] is False
-    assert descriptor["storage"]["background_resource_lifetime"] == "existing_runtime_owned"
     assert descriptor["backend"] == {
         "entrypoint": "agents/analysis/agent.py",
         "decisions": "agents/analysis/decisions.py",
-        "runtime": "agents/analysis/runtime.py",
-        "improvement": "agents/analysis/improvement.py",
-        "refinement": "agents/analysis/refinement.py",
-        "mechanisms": "agents/analysis/mechanisms.py",
-        "calibration": "agents/analysis/calibration.py",
-        "fem": "agents/analysis/fem.py",
         "execution": "agents/analysis/execution.py",
         "structure": "agents/analysis/structure.py",
         "presentation": "agents/analysis/presentation.py",
@@ -197,7 +187,7 @@ def test_analysis_report_projection_preserves_state_precedence_and_inputs():
     result = project_analysis_report(metadata, payload)
     assert result["analysis_report"] is state_analysis
     assert result["role_specific"]["measurement"]["peak_force_N"] == 520.0
-    assert result["role_specific"]["fem"]["execution"] == "background"
+    assert "fem" not in result["role_specific"]
     assert result["role_specific"]["handoff_packet"] == payload["bo_handoff"]
     assert result["decisions"] == [{"phase": "data_validation"}]
     assert result["metrics"] == {"peak_force_N": 520.0}

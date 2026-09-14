@@ -43,8 +43,6 @@ def handoff_no_external(monkeypatch):
             return deny(path)
         return original_open(path, *args, **kwargs)
     monkeypatch.setattr(os, "open", device_open)
-    from agents.analysis.runtime import AnalysisRuntimeService
-    monkeypatch.setattr(AnalysisRuntimeService, "resume", lambda *args, **kwargs: None)
     from agents.base_agent import AgentContext
     original_complete = AgentContext.complete
     async def complete(self, task_type, prompt, **kwargs):

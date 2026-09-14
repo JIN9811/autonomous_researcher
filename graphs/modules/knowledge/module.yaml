@@ -53,7 +53,7 @@ module:
     - bo_context exists or explicit no_bo_context_needed reason exists
     - evolution_evidence_packs exists or explicit no_evolution_needed reason exists
   notes: >-
-    Knowledge is the research memory and self-evolution evidence owner. It writes
+    Knowledge is the research memory and improvement evidence owner. It writes
     typed run artifacts plus memory/knowledge JSONL and ontology-guided Markdown
     records. The normal knowledge_query LLM selects local inspect_evidence,
     search_knowledge, read_knowledge, write_knowledge_note and publish_context

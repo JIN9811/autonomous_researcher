@@ -24,9 +24,13 @@ Modification guide:
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260811-botorch-paper-3" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260915-bo-ready-right-1" />
+    <link rel="preload" as="image" href="/static/ax4lab-logo-transparent.png">
+    <link rel="stylesheet" href="/static/workspace_boot.css?v=1">
   </head>
   <body>
+    {% set workspace_title = "Bayesian Optimization Workspace" %}
+    {% include "workspace_boot.html" %}
     <main class="page equipment-setup-page printer-page bo-page">
       <section class="hero panel">
         <div class="hero-copy">

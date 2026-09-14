@@ -192,6 +192,11 @@ let liveCurrentView = "report";
 let liveReportPage = "agent";
 let liveLastSession = {};
 let liveLastSnapshot = {};
+let liveResourceRefreshInFlight = null;
+let liveResourceRefreshedAt = 0;
+let liveResourceRefreshFailed = false;
+let liveBridgeRegistry = null;
+let liveBottomTab = "events";
 const liveVisionSpecimenRetryCheckpoints = new Set();
 const openedOperatorTeleopHandoffTokens = new Set();
 let liveRecentEvents = [];
@@ -309,6 +314,7 @@ let planningMessageRevealQueue = [];
 let planningMessageRevealTimer = null;
 let planningDisplayInitialized = false;
 const planningExpandedChatGroups = new Set();
+let planningInitialChatOpened = false;
 const planningLoopArtifactCache = new Map();
 const PLANNING_RENDER_CACHE_LIMIT = 240;
 const PLANNING_PERSIST_CACHE_MESSAGE_LIMIT = 80;
@@ -429,11 +435,13 @@ function renderOrcKnowledgeEvidence() {
   const model=window.AX4LABKnowledgeLive?.selectedResponseEvidence(responses,liveKnowledgeSelectedResponseId) || {response_id:'',request:'No retrieval yet',scope_ref:'public',revision:'',retrieved_at:'',source_count:0,memory_activity:'None',status:'No retrieval yet'};
   const provenance=liveKnowledgeProvenance();
   const selector=responses.length ? `<label>Response <select data-live-knowledge-response>${liveKnowledgeSelectedResponseId?'':'<option value="" selected>Select response…</option>'}${responses.map(message=>{const id=liveKnowledgeResponseId(message); return `<option value="${escapeHtml(id)}"${id===liveKnowledgeSelectedResponseId?' selected':''}>${escapeHtml(id)}${message.timestamp?` · ${escapeHtml(formatTime(message.timestamp))}`:''}</option>`;}).join('')}</select></label>` : '<p>No selectable ORC response in the current report context.</p>';
+  if (window.AX4LABKnowledgePanels) return selector + window.AX4LABKnowledgePanels.response(responses.find(message=>liveKnowledgeResponseId(message)===liveKnowledgeSelectedResponseId),window.AX4LABKnowledgeLive.workspaceHref);
   return `${selector}<p><strong>${escapeHtml(model.status)}</strong></p><p>Request: ${escapeHtml(model.request)} · Response: ${escapeHtml(model.response_id || 'No response selected')}</p><p>Scope: ${escapeHtml(model.scope_ref)} · Evidence: ${Number(model.source_count || 0)} · Revision: ${escapeHtml(model.revision || '—')}</p><p>Run: ${escapeHtml(provenance.run_id || '—')} · Loop: ${escapeHtml(provenance.loop_id || '—')} · Attempt: ${escapeHtml(provenance.attempt_id || '—')}</p><p>Retrieved: ${escapeHtml(model.retrieved_at || '—')} · ${escapeHtml(model.memory_activity)}</p><a href="/knowledge#memory" target="_blank" rel="noopener">Manage Memory</a>`;
 }
 
 function renderLiveDeliverySummary() {
   const model=window.AX4LABKnowledgeLive?.deliverySummary(liveKnowledgeDeliveryReports(),liveKnowledgeActiveConsumers(),liveSelectedAgent,liveKnowledgeProvenance()) || {rows:[],selected:{label:'Selected agent',status:'Unknown',citation_ids:[]}};
+  if (window.AX4LABKnowledgePanels) return `<div class="knp-supply-layout">${window.AX4LABKnowledgePanels.supplyChart(model)}<details class="knp-supply-details"><summary>Details</summary>${window.AX4LABKnowledgePanels.delivery(model,liveKnowledgeProvenance(),window.AX4LABKnowledgeLive.workspaceHref)}</details></div>`;
   if (!model.rows.length) return '<p>Unavailable: active graph consumers are not loaded.</p><a href="/knowledge#delivery" target="_blank" rel="noopener">Inspect agent delivery</a>';
   const rows=model.rows.map(row=>`<li>${escapeHtml(row.label)}: <strong>${escapeHtml(row.status)}</strong>${row.decision_at?` · ${escapeHtml(row.decision_at)}`:''}${row.run_id?` · run ${escapeHtml(row.run_id)}`:''}${row.loop_id?` · loop ${escapeHtml(row.loop_id)}`:''}${row.attempt_id?` · attempt ${escapeHtml(row.attempt_id)}`:''}</li>`).join('');
   const selected=model.selected;
@@ -442,12 +450,14 @@ function renderLiveDeliverySummary() {
 }
 
 function renderLiveKnowledgeSummary(kind) {
+  if (kind==='activity') return window.AX4LABKnowledgePanels?.activity(liveKnowledgeActivitySnapshot,liveKnowledgeProvenance(),liveKnowledgeActivityError) || '<p>Activity renderer unavailable.</p>';
+  if ((kind==='wiki'||kind==='memory') && window.AX4LABKnowledgePanels) return window.AX4LABKnowledgePanels.library(liveKnowledgeSummary);
   if (kind==='orc') return renderOrcKnowledgeEvidence();
   if (kind==='delivery') return renderLiveDeliverySummary();
   const summary=liveKnowledgeSummary;
   if (!summary) return '<p>Knowledge scope unavailable or loading.</p>';
   const publicOnly=summary.scope_ref==='public';
-  if (kind==='wiki') return `<p><strong>${Number(summary.wiki?.count || 0)}</strong> reviewed pages</p><p>Default agent corpus · freshness checked</p><a href="/knowledge#wiki" target="_blank" rel="noopener">Browse AX4LAB Wiki</a>`;
+  if (kind==='wiki') return `<p><strong>${summary.wiki?.count == null ? '—' : Number(summary.wiki.count)}</strong> indexed pages</p><a href="/knowledge#wiki" target="_blank" rel="noopener">Browse AX4LAB Wiki</a>`;
   if (kind==='memory') return `<p>${publicOnly?'Wiki-only access; private identity not configured':`${Number(summary.memory?.count || 0)} scoped memory records`}</p><p>Candidate confirmation is separate from run approval.</p><a href="/knowledge#memory" target="_blank" rel="noopener">Manage memory</a>`;
   return '<p>Knowledge scope unavailable or loading.</p>';
 }
@@ -461,9 +471,9 @@ async function refreshLiveKnowledgeSummary() {
       if(session!==planningSessionId) return;
       if(liveKnowledgeScope!==summary.scope_ref || liveKnowledgeSession!==session) {liveKnowledgeReceipts.clear();liveKnowledgeSelectedResponseId='';}
       liveKnowledgeScope=summary.scope_ref; liveKnowledgeSession=session; liveKnowledgeSummary=summary;
-      document.querySelectorAll('[data-live-knowledge-body]').forEach(el=>{el.innerHTML=renderLiveKnowledgeSummary(el.dataset.liveKnowledgeBody);});
+      document.querySelectorAll('[data-live-knowledge-body]').forEach(el=>{const expanded=el.querySelector('.knp-supply-details')?.open;const html=renderLiveKnowledgeSummary(el.dataset.liveKnowledgeBody);if(el.innerHTML!==html){el.innerHTML=html;if(expanded){const details=el.querySelector('.knp-supply-details');if(details)details.open=true;}}});
     }
-  } catch (_error) {liveKnowledgeSummary=null;liveKnowledgeReceipts.clear();}
+  } catch (_error) {liveKnowledgeSummary=null;liveKnowledgeReceipts.clear();document.querySelectorAll('[data-live-knowledge-body="wiki"],[data-live-knowledge-body="memory"]').forEach(el=>{el.innerHTML=renderLiveKnowledgeSummary(el.dataset.liveKnowledgeBody);});}
   finally {if (!liveKnowledgePollingStopped) liveKnowledgeTimer=window.setTimeout(refreshLiveKnowledgeSummary,5000);}
 }
 
@@ -619,11 +629,9 @@ function liveAgentModuleHostServices() {
     renderDashboardMetric,
     renderAnalysisTrustScore,
     renderAnalysisCurveOverlay,
-    renderAnalysisFieldLink,
     renderAnalysisMetricBars,
     renderAnalysisQualityDonut,
     renderAnalysisProvenance,
-    renderAnalysisFemEvidence,
     renderSpecimenProgressBar,
     renderSpecimenNowPrintingBody,
     renderSpecimenPrintMonitoringBody,
@@ -668,7 +676,6 @@ function liveAgentModuleHostServices() {
     renderGuardianLiveHeartbeat,
     renderGuardianSafeStopVerification,
     renderGuardianEvidenceCompleteness,
-    renderGuardianSelfEvolutionGate,
     liveApprovalSnapshot: () => ({
       pending: Array.isArray(liveApprovals.pending) ? liveApprovals.pending : [],
       resolved: Array.isArray(liveApprovals.resolved) ? liveApprovals.resolved : [],
@@ -772,6 +779,7 @@ async function refreshLiveAgentManifest(options = {}) {
     const moduleResult = await liveAgentModuleHost.reconcile(payload.agents, liveAgentModuleHostServices());
     if (requestGeneration !== liveAgentManifestRequestGeneration) return { ok: false, superseded: true };
     liveAgentManifestStatus.moduleErrors = moduleResult && Array.isArray(moduleResult.errors) ? moduleResult.errors : [];
+    if (liveAgentManifestStatus.moduleErrors.length) console.warn("Live agent frontend activation failed", liveAgentManifestStatus.moduleErrors);
     if (liveLastSession && !options.skipRender) renderLiveRuntime(liveLastSession);
     return payload;
   } catch (err) {
@@ -808,13 +816,27 @@ function setLiveBottomCollapsed(collapsed, options = {}) {
   document.body.classList.toggle("live-bottom-collapsed", liveBottomCollapsed);
   if (btnLiveBottomCollapse) {
     btnLiveBottomCollapse.setAttribute("aria-expanded", liveBottomCollapsed ? "false" : "true");
+    btnLiveBottomCollapse.setAttribute("aria-label", liveBottomCollapsed ? "Expand Events and Device Bridges" : "Collapse Events and Device Bridges");
     setCompactTextWithTitle(
       btnLiveBottomCollapse,
       liveBottomCollapsed ? "Show Dock" : "Hide Dock",
-      liveBottomCollapsed ? "Expand bottom event and IO dock" : "Collapse bottom event and IO dock"
+      liveBottomCollapsed ? "Expand Events and Device Bridges" : "Collapse Events and Device Bridges"
     );
   }
   if (options.persist !== false) persistLiveUiState();
+}
+
+function setLiveBottomTab(tabId) {
+  liveBottomTab = tabId === "devices" ? "devices" : "events";
+  document.querySelectorAll("[data-dock-tab]").forEach((button) => {
+    const selected = button.dataset.dockTab === liveBottomTab;
+    button.setAttribute("aria-selected", String(selected));
+    button.classList.toggle("active", selected);
+    button.tabIndex = selected ? 0 : -1;
+  });
+  document.querySelectorAll("[data-dock-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.dockPanel !== liveBottomTab;
+  });
 }
 
 function liveRequestFrame(callback) {
@@ -1383,6 +1405,7 @@ function resetLiveRunScopedStateForAuthoritativeSession(serverSession = {}) {
   liveRuntimeStartedAt = Date.now();
   resetPlanningMessageDisplayState();
   liveLastSnapshot = {
+    system_resources: liveLastSnapshot.system_resources,
     state: serverSession.state || {},
     runtime: serverSession.runtime || {},
   };
@@ -2397,10 +2420,10 @@ function chatGroupAgentDescriptor(group, role) {
 function renderChatGroupIcon(agent) {
   const fallback = escapeHtml(agent.short || agent.icon || "AGT");
   if (!agent.iconPath) return `<span>${fallback}</span>`;
-  return `<img src="${escapeHtml(agent.iconPath)}" alt="" aria-hidden="true" loading="lazy" onerror="this.replaceWith(document.createTextNode('${fallback}'))">`;
+  return `<img src="${escapeHtml(agent.iconPath)}" alt="" aria-hidden="true" loading="eager" onerror="this.replaceWith(document.createTextNode('${fallback}'))">`;
 }
 
-function renderPlanningChatMessageDetail(msg, messageIndex) {
+function renderPlanningChatMessageDetail(msg, messageIndex, controls = "") {
   const role = msg.role || "orchestrator";
   const model = msg.model ? ` / ${msg.model}` : "";
   const content = msg.content
@@ -2410,12 +2433,12 @@ function renderPlanningChatMessageDetail(msg, messageIndex) {
       : "";
   return `
     <div class="planning-agent-chat-message ${escapeHtml(role)}" data-message-index="${escapeHtml(String(messageIndex))}">
-      <small>${escapeHtml(formatTime(msg.timestamp))} / ${escapeHtml(roleLabel(role))}${escapeHtml(model)}</small>
+      <div class="planning-agent-chat-meta">${controls}<small>${escapeHtml(formatTime(msg.timestamp))} / ${escapeHtml(roleLabel(role))}${escapeHtml(model)}</small></div>
       ${renderReasoningBlock(msg)}
       ${content ? `<div class="message-content">${content}</div>` : ""}
       ${window.AX4LABKnowledgeLive?.messageHTML(msg, liveKnowledgeReceipts.get(msg.memory_receipt?.record_id)) || ''}
       ${renderChatReportHint(msg)}
-      ${renderFemContourCard(msg)}
+
       ${renderBoResultCard(msg, `chat-${messageIndex}`)}
     </div>
   `;
@@ -2484,6 +2507,15 @@ function renderPlanningChatGroup(group, groupIndex) {
   const baseKey = group.baseKey || group.key;
   const isSystem = baseKey === "system" || String(role || "").toLowerCase() === "system";
   const isLoopSummary = group.kind === "loop_summary" || baseKey === "loop_summary";
+  if (!planningInitialChatOpened && !isSystem) {
+    planningInitialChatOpened = true;
+    if (!isLoopSummary) {
+      planningExpandedChatGroups.add(group.key);
+      while (planningExpandedChatGroups.size > 3) {
+        planningExpandedChatGroups.delete(planningExpandedChatGroups.values().next().value);
+      }
+    }
+  }
   const archiveRunId = String(latest.run_id || liveLastSession?.state?.run_id || "");
   const archiveLoopIndex = Math.max(0, Number(group.loopCycle || 1) - 1);
   const archiveKey = `${archiveRunId}:${archiveLoopIndex}`;
@@ -2497,12 +2529,13 @@ function renderPlanningChatGroup(group, groupIndex) {
     ? { label: loopLabel, short: "LOOP", icon: "L", iconPath: "" }
     : chatGroupAgentDescriptor(group, role);
   const time = formatTime(latest.timestamp);
+  const controls = `<button class="planning-agent-chat-hide" type="button" data-chat-group-key="${escapeHtml(group.key)}">hide</button><span class="planning-agent-chat-icon">${renderChatGroupIcon(agent)}</span>`;
   const detailMessages = isLoopSummary
     ? group.messages.filter(isLoopArchiveVisibleMessage)
     : group.messages;
   const messageHtml = detailMessages.length
     ? detailMessages.map((msg, index) => (
-        isLoopSummary ? renderPlanningLoopArchiveMessageDetail(msg, index) : renderPlanningChatMessageDetail(msg, index)
+        isLoopSummary ? renderPlanningLoopArchiveMessageDetail(msg, index) : renderPlanningChatMessageDetail(msg, index, index === 0 ? controls : "")
       )).join("")
     : `<div class="planning-agent-chat-message loop-summary-note"><small>Loop archive</small><div class="message-content">시스템 이벤트는 Backend/Event 영역에 보관되었습니다.</div></div>`;
   return `
@@ -2516,9 +2549,7 @@ function renderPlanningChatGroup(group, groupIndex) {
         ${renderChatGroupProgress(group)}
       </button>
       <div class="planning-agent-chat-body">
-        <div class="planning-agent-chat-expanded-tools">
-          <button class="planning-agent-chat-hide" type="button" data-chat-group-key="${escapeHtml(group.key)}">hide</button>
-        </div>
+        ${isLoopSummary ? `<div class="planning-agent-chat-meta">${controls}</div>` : ""}
         ${messageHtml}
         ${isLoopSummary ? `<button type="button" class="btn tiny" data-loop-artifacts-run="${escapeHtml(archiveRunId)}" data-loop-artifacts-index="${archiveLoopIndex}">Loop Artifacts · 조회/새로고침</button>
           <div data-loop-artifacts-output>${planningLoopArtifactCache.get(archiveKey) || ""}</div>` : ""}
@@ -2709,7 +2740,6 @@ function renderSingleArtifactCard(artifacts, spec, label = "", options = {}) {
 
 function renderArtifactCard(msg) {
   if (msg.render_artifacts === false || msg.role === "printer_ai") return "";
-  if (msg.role === "analysis_ai" && msg.fem_artifacts) return "";
   const artifactOptions = { showStlViewer: msg.role !== "design_ai", showStlLink: msg.role !== "design_ai" };
   const pair = msg.artifact_pair || {};
   if (pair.previous || pair.next) {
@@ -2730,22 +2760,6 @@ function renderArtifactCard(msg) {
     return `<div class="artifact-pair">${previousCard}${nextCard}</div>`;
   }
   return renderSingleArtifactCard(msg.artifacts || {}, msg.experiment_spec || {}, "", artifactOptions);
-}
-
-function renderFemContourCard(msg) {
-  const fem = msg.fem_artifacts || {};
-  const contourUrl = safeUrl(fem.contour_url);
-  const reportUrl = safeUrl(fem.report_url);
-  if (!contourUrl && !reportUrl) return "";
-  return `
-    <div class="fem-contour-card">
-      <div class="fem-contour-head">
-        <strong>FEM / CAE Contour</strong>
-        ${reportUrl ? `<a href="${escapeHtml(reportUrl)}" target="_blank" rel="noreferrer">CAE report</a>` : ""}
-      </div>
-      ${contourUrl ? `<img class="fem-contour-preview" src="${escapeHtml(contourUrl)}" alt="FEM contour visualization" />` : ""}
-    </div>
-  `;
 }
 
 function numberText(value, digits = 4) {
@@ -3408,6 +3422,7 @@ async function loadOlderPlanningMessages() {
 }
 
 function resetPlanningMessageDisplayState() {
+  planningInitialChatOpened = false;
   planningMessagesCache = [];
   planningDisplayedMessages = [];
   planningDisplayedMessageKeys.clear();
@@ -3428,7 +3443,7 @@ function renderPlanningMessageDom(messages, options = {}) {
     planningChatLog.innerHTML = `
       <article class="planning-chat-item planning-agent-chat-group orchestrator is-collapsed">
         <button class="planning-agent-chat-collapsed" type="button" disabled>
-          <span class="planning-agent-chat-icon"><img src="/static/live_gui_icons/orchestrator.svg" alt="" aria-hidden="true" loading="lazy"></span>
+          <span class="planning-agent-chat-icon"><img src="/static/live_gui_icons/orchestrator.svg" alt="" aria-hidden="true" loading="eager"></span>
           <span class="planning-agent-chat-time">-</span>
           <span class="planning-agent-chat-title">Orchestrator</span>
           <span class="planning-agent-chat-summary">실험 조건을 입력하면 필요한 값 확인부터 실행까지 진행합니다.</span>
@@ -3910,44 +3925,6 @@ function liveAgentLabel(agentId) {
   return liveAgentById(agentId).label;
 }
 
-function evolutionTargetForAgent(agentId) {
-  const clean = String(agentId || liveSelectedAgent || "orchestrator").toLowerCase();
-  const promptTargets = new Set(["design", "specimen", "vision", "manipulation", "equipment", "analysis", "knowledge", "bo", "guardian"]);
-  if (promptTargets.has(clean)) return { target_type: "prompt", target_id: clean };
-  if (clean === "objective" || clean === "orchestrator") return { target_type: "graph", target_id: "atr_closed_loop" };
-  return { target_type: "prompt", target_id: clean || "design" };
-}
-
-function evolutionObjectiveForAgent(agentId) {
-  const state = liveLastSession.state || {};
-  const event = selectedTimelineEvent();
-  const payload = eventPayload(event);
-  const trace = event ? ` trace_id=${event.trace_id || payload.trace_id || "-"}` : "";
-  const agentLabel = liveAgentLabel(agentId);
-  return `Improve ${agentLabel} behavior for the next ATR closed-loop run using selected Live GUI report, backend trace, and runtime events.${trace} Preserve hardware safety gates and require human approval before activation.`;
-}
-
-function evolutionLabUrl(agentId = liveSelectedAgent) {
-  const state = liveLastSession.state || {};
-  const target = evolutionTargetForAgent(agentId);
-  const params = new URLSearchParams({
-    target_type: target.target_type,
-    target_id: target.target_id,
-    agent_id: agentId || liveSelectedAgent,
-    objective: evolutionObjectiveForAgent(agentId || liveSelectedAgent),
-    source: "live_gui",
-  });
-  if (state.run_id) params.set("run_id", state.run_id);
-  if (liveSelectedEventKey) params.set("event_key", liveSelectedEventKey);
-  return `/evolution-lab?${params.toString()}`;
-}
-
-function openEvolutionLab(agentId = liveSelectedAgent) {
-  const url = evolutionLabUrl(agentId);
-  window.open(url, "_blank", "noopener");
-  setChatStatus("EVOLUTION", "idle");
-}
-
 function agentIdFromStage(stage) {
   const clean = String(stage || "").toLowerCase();
   if (!clean || clean === "idle") return "orchestrator";
@@ -4048,6 +4025,13 @@ function formatTime(value) {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+function formatDockTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true });
+}
+
 function compactText(value, limit = 460) {
   const text = normalizeDisplayText(value).trim();
   return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
@@ -4072,7 +4056,7 @@ function liveHumanizeStatus(value, fallback = "-") {
 function liveMissionTopbarLabel(state = {}) {
   const raw = state.mission_name || state.mission || state.active_goal || state.goal || queryGoal || "";
   const text = normalizeDisplayText(raw).replace(/\.$/, "").trim();
-  return text || "Mission ready";
+  return text || "Contract ready";
 }
 
 function liveRunTopbarLabel(runId, mode, running) {
@@ -4437,7 +4421,7 @@ function liveAgentIconHtml(agent) {
   const fallback = escapeHtml(agent.short || agent.icon || "?");
   if (!agent.iconPath) return `<span class="binder-icon-fallback is-visible" aria-hidden="true" data-fallback="${fallback}"></span>`;
   return `
-    <img src="${escapeHtml(agent.iconPath)}" alt="" aria-hidden="true" loading="lazy" onerror="this.classList.add('is-broken'); this.nextElementSibling?.classList.add('is-visible');">
+    <img src="${escapeHtml(agent.iconPath)}" alt="" aria-hidden="true" loading="eager" onerror="this.classList.add('is-broken'); this.nextElementSibling?.classList.add('is-visible');">
     <span class="binder-icon-fallback" aria-hidden="true" data-fallback="${fallback}"></span>
   `;
 }
@@ -4775,26 +4759,6 @@ function renderGuardianEvidenceCompleteness(status) {
     ["provenance_ref_count", evidence.provenance_ref_count ?? 0],
     ["checks", evidence.checks || {}],
   ]);
-}
-
-function renderGuardianSelfEvolutionGate(status) {
-  const gate = status && status.self_evolution_gate && typeof status.self_evolution_gate === "object" ? status.self_evolution_gate : {};
-  const pending = Array.isArray(gate.pending_variants) ? gate.pending_variants : [];
-  const active = Array.isArray(gate.active_variants) ? gate.active_variants : [];
-  const pendingItems = pending.slice(-8).reverse().map((item) => `${item.variant_id || "variant"} · ${item.target_type || "target"}:${item.target_id || "-"} · ${item.status || "pending"}`);
-  const activeItems = active.slice(-8).reverse().map((item) => `${item.variant_id || "variant"} · ${item.target_type || "target"}:${item.target_id || "-"} · ${item.status || "active"}`);
-  return `
-    ${runtimeRows([
-      ["schema", gate.schema || "guardian_self_evolution_gate.v1"],
-      ["status", gate.status || "idle"],
-      ["variant_count", gate.variant_count ?? 0],
-      ["error", gate.error || "-"],
-    ])}
-    <h5>Pending Variants</h5>
-    ${renderReportList(pendingItems, "No self-evolution variants pending Guardian activation gate.", 8)}
-    <h5>Active / Next-Run Variants</h5>
-    ${renderReportList(activeItems, "No active self-evolution variants recorded.", 8)}
-  `;
 }
 
 function renderGuardianReportDetails(report) {
@@ -5478,9 +5442,7 @@ function agentSpecificReportProfile(report, status, agentLabel) {
   const analysisPayload = latestAnalysisPayload(report) || {};
   const analysisMetrics = analysisPayload.utm_metrics || {};
   const analysisQuality = analysisPayload.quality_gate || analysisPayload.data_quality_gate || {};
-  const analysisComparison = analysisPayload.fem_utm_comparison || {};
   const analysisArtifacts = analysisPayload.analysis_artifacts || {};
-  const analysisFemLoop = analysisPayload.fem_agentic_loop || {};
   const analysisBoHandoff = latestAnalysisBoHandoff(report) || {};
   const knowledgePayload = latestKnowledgePayload(report) || {};
   const knowledgeReport = latestKnowledgeReport(report) || {};
@@ -5628,8 +5590,8 @@ function agentSpecificReportProfile(report, status, agentLabel) {
       checklist: ["Confirm registered UTM profile", "Verify screen state transitions", "Verify Vision physical motion/alignment checks", "Confirm pulled CSV checksum and parse probe", "Only hand off when all gates pass"],
     },
     analysis: {
-      title: "Analysis Agent / UTM-FEM-BO Handoff",
-      summary: "Shows raw UTM ingestion, canonical curve artifacts, quality gate, CAE/CalculiX simulation evidence, FEM-UTM residuals, and BO-ready handoff status.",
+      title: "Analysis Agent / Measured BO Handoff",
+      summary: "Shows measured data ingestion, normalized curves, quality gates, physical metrics and BO-ready provenance.",
       rows: [
         ["objective_score", analysisPayload.objective_score ?? latestReportPayload(report, ["objective_score", "score", "utility"]) ?? "-"],
         ["uncertainty", analysisPayload.uncertainty ?? "-"],
@@ -5637,19 +5599,15 @@ function agentSpecificReportProfile(report, status, agentLabel) {
         ["strength_MPa", analysisMetrics.compressive_strength_MPa ?? "-"],
         ["quality_ok_for_bo", analysisQuality.ok_for_bo === undefined ? "-" : analysisQuality.ok_for_bo],
         ["quality_score", analysisQuality.score === undefined ? "-" : analysisQuality.score],
-        ["fem_agreement", analysisComparison.agreement_score === undefined ? "-" : analysisComparison.agreement_score],
-        ["fem_agentic_loop", analysisFemLoop.status || "-"],
-        ["fem_selected_iteration", analysisFemLoop.selected_iteration === undefined ? "-" : analysisFemLoop.selected_iteration],
         ["bo_handoff", analysisBoHandoff.ok_for_bo === undefined ? "-" : analysisBoHandoff.ok_for_bo],
         ["canonical_curve", analysisArtifacts.canonical_curve || "-"],
-        ["fem_result", analysisArtifacts.fem_result || "-"],
         ["experiment_evaluation", analysisArtifacts.experiment_evaluation || "-"],
       ],
-      checklist: ["Verify raw file fingerprint", "Check column/unit confidence", "Review quality gate", "Inspect FEM/UTM comparison", "Confirm BO handoff provenance"],
+      checklist: ["Verify raw file fingerprint", "Check column/unit confidence", "Review quality gate", "Confirm BO handoff provenance"],
     },
     knowledge: {
-      title: "Knowledge Memory / Self-Evolution Evidence",
-      summary: "Shows typed research memory, provenance health, failure/success patterns, agent performance ledger, and evidence packs prepared for Self-Evolution review.",
+      title: "Knowledge Memory / Improvement Evidence",
+      summary: "Shows typed research memory, provenance health, failure/success patterns, agent performance ledger, and reviewable improvement evidence packs.",
       rows: [
         ["experiment_record", knowledgeMemoryIntake.experiment_record_id || "-"],
         ["agent_performance", knowledgeMemoryIntake.agent_performance_count ?? knowledgePerformance.length ?? "-"],
@@ -5660,7 +5618,7 @@ function agentSpecificReportProfile(report, status, agentLabel) {
         ["artifact_coverage", knowledgeEvidenceQuality.artifact_link_coverage ?? "-"],
         ["top_evolution_target", knowledgePacks[0] ? `${knowledgePacks[0].target_type || "target"}:${knowledgePacks[0].target_id || "unknown"}` : "not recorded"],
       ],
-      checklist: ["Write provenance-backed memory", "Update failure/success pattern library", "Refresh agent performance ledger", "Prepare evidence packs", "Keep activation behind Self-Evolution/Guardian/operator gates"],
+      checklist: ["Write provenance-backed memory", "Update failure/success pattern library", "Refresh agent performance ledger", "Prepare reviewable evidence packs"],
     },
     bo: {
       title: "Bayesian Optimization / Candidate Selection",
@@ -5732,7 +5690,7 @@ function renderOrchestratorReportDetails(report) {
   const reflectionItems = reflections.map((item) => `${item.loop_id ?? "-"} · ${item.guardian_decision || "-"} · ${item.next_loop_recommendation || item.operator_visible_summary || ""}`);
   return `
     <div class="live-agent-specific-report-detail live-agent-specific-orchestrator-details">
-      <h5>Mission Contract</h5>
+      <h5>Experiment Contract</h5>
       ${runtimeRows([
         ["mission_id", missionContract.mission_id || "-"],
         ["run_id", missionContract.run_id || state.run_id || "-"],
@@ -5935,7 +5893,7 @@ function clearLiveBoVisualization() {
   const waiting = '<div class="bo-viz-empty">Waiting for a completed BO step.</div>';
   const equation = liveReportPanel?.querySelector("[data-live-bo-equation]");
   const posterior = liveReportPanel?.querySelector("[data-live-bo-posterior]");
-  if (equation) equation.innerHTML = waiting;
+  // The objective comes from the run report, independently of posterior availability.
   if (posterior) posterior.innerHTML = waiting;
 }
 
@@ -6396,6 +6354,7 @@ function renderLiveSetupEditContext() {
 function renderLiveExperimentSetupPanel() {
   if (!liveExperimentSetupPanel) return;
   ExperimentalSetup.renderBlocks(liveExperimentSetupPanel, liveSetupSnapshot, {
+    graph: (liveGraphPayload && liveGraphPayload.graph) || liveGraphPayload || {},
     onEdit: onEditSetupBlock,
     onConfirm: block => onSetupBlockAction("confirm", block),
     onDiscard: block => onSetupBlockAction("discard", block),
@@ -6804,10 +6763,6 @@ async function runLiveReportAction(action) {
     await recordLiveIntentEvent("node_rerun_requested", "rerun_from_report", `${liveAgentLabel(liveSelectedAgent)} node rerun requested from report.`, { source_action: "report.rerun", target_agent: liveSelectedAgent, target_node_id: graphNodeIdForAgent(liveSelectedAgent) || liveSelectedAgent });
     await runSelectedNodeTest(liveLastSession.state || {});
     return;
-  }
-  if (action === "evolve") {
-    openEvolutionLab(liveSelectedAgent);
-    await recordLiveOperatorEvent("evolution_opened", `${liveAgentLabel(liveSelectedAgent)} self-evolution workspace opened from report.`);
   }
 }
 
@@ -7744,7 +7699,7 @@ function agentDataChannels(report, agentId) {
     const handoffs = Array.isArray(metadata.orchestrator_handoff_packets) ? metadata.orchestrator_handoff_packets : [];
     const followups = Array.isArray(metadata.orchestrator_followups) ? metadata.orchestrator_followups : [];
     return [
-      dashboardChannel("Mission Contract", missionContract),
+      dashboardChannel("Experiment Contract", missionContract),
       dashboardChannel("Route Plan", route, { detail: `${route.length} nodes` }),
       dashboardChannel("Decisions", decisions, { detail: `${decisions.length} logged` }),
       dashboardChannel("Handoffs", handoffs.length ? handoffs : report.handoffs, { detail: `${handoffs.length || report.handoffs.length} packets` }),
@@ -7847,7 +7802,6 @@ function agentDataChannels(report, agentId) {
       dashboardChannel("Raw Data", analysis.raw_data_ledger || analysis.raw_data || analysis.utm_metrics),
       dashboardChannel("UTM Metrics", analysis.utm_metrics),
       dashboardChannel("Quality Gate", quality),
-      dashboardChannel("FEM Comparison", analysis.fem_utm_comparison),
       dashboardChannel("Artifacts", artifactsValue, { detail: dashboardChannelDetail(artifactsValue, "waiting") }),
       dashboardGateChannel("BO Handoff", (latestAnalysisBoHandoff(report) || {}).ok_for_bo),
       ...baseChannels,
@@ -8038,9 +7992,7 @@ function descriptorSafeActionUrl(value) {
     "/printer",
     "/lerobot",
     "/bo",
-    "/cae",
     "/equipment/windows",
-    "/evolution-lab",
   ];
   return allowedPrefixes.some((prefix) => url === prefix || url.startsWith(`${prefix}?`) || url.startsWith(`${prefix}#`))
     ? url
@@ -8456,14 +8408,12 @@ function renderAgentVisualizationCard(report, status, agentLabel) {
     const analysis = latestAnalysisPayload(report) || {};
     const metrics = analysis.utm_metrics || {};
     const quality = analysis.quality_gate || analysis.data_quality_gate || {};
-    const comparison = analysis.fem_utm_comparison || {};
     const rows = [
       ["peak_force_N", metrics.peak_force_N, "N", "info"],
       ["strength_MPa", metrics.compressive_strength_MPa, "MPa", "success"],
       ["objective_score", analysis.objective_score, "score", "running"],
       ["uncertainty", analysis.uncertainty, "model", "warning"],
       ["quality_score", quality.score, "qa", "success"],
-      ["agreement_score", comparison.agreement_score, "fem", "info"],
     ].map(([label, value, unit, tone]) => {
       const number = dashboardFiniteNumber(value);
       return number === null ? null : { label, value: number, meta: `${numberText(number, 4)} ${unit}`, tone };
@@ -10812,19 +10762,19 @@ function renderOrcReferenceStageProgress(model) {
 
 function renderOrcReferenceMissionContract(model) {
   const mission = model.mission || {};
-  const goal = mission.goal || mission.active_goal || mission.objective || model.state.active_goal || "Mission goal not recorded yet.";
+  const goal = mission.goal || mission.active_goal || mission.objective || model.state.active_goal || "Experiment goal not recorded yet.";
   const owner = mission.owner || mission.owner_agent || "OrchestratorAgent";
   const created = mission.created_at || mission.timestamp || model.state.started_at || "-";
   const priority = mission.priority || model.verdict.label || "-";
   return `
     <div class="ar-orc-reference-mission">
       <section class="ar-orc-commander-brief tone-${escapeHtml(model.verdict.tone)}">
-        <span>Commander Brief</span>
+        <span>Experiment Summary</span>
         <strong>${escapeHtml(model.verdict.driver)}</strong>
         <p>${escapeHtml(compactText(model.verdict.why, 150))}</p>
       </section>
       <dl class="ar-orc-reference-kv">
-        <div><dt>Mission ID</dt><dd title="${escapeHtml(renderRuntimeValue(mission.mission_id || "-"))}">${escapeHtml(compactText(mission.mission_id || "-", 34))}</dd></div>
+        <div><dt>Contract ID</dt><dd title="${escapeHtml(renderRuntimeValue(mission.mission_id || "-"))}">${escapeHtml(compactText(mission.mission_id || "-", 34))}</dd></div>
         <div><dt>Run ID</dt><dd title="${escapeHtml(renderRuntimeValue(mission.run_id || model.state.run_id || "-"))}">${escapeHtml(compactRunId(mission.run_id || model.state.run_id || "-"))}</dd></div>
         <div><dt>Goal</dt><dd title="${escapeHtml(renderRuntimeValue(goal))}">${escapeHtml(compactText(goal, 92))}</dd></div>
         <div><dt>Owner</dt><dd>${escapeHtml(compactText(owner, 28))}</dd></div>
@@ -11202,11 +11152,11 @@ function renderOrchestratorDashboardCards(report, status, agentLabel, profile) {
   const ctx = orchestratorContext(report, status);
   const model = buildOrcBriefingModel(report, status, ctx);
   return `
-    ${renderDashboardCard("Knowledge & Memory", `<div data-live-knowledge-body="orc">${renderLiveKnowledgeSummary('orc')}</div>`, {span:12,tone:"knowledge",eyebrow:"current response evidence"})}
-    ${renderDashboardCard("Mission Contract", renderOrcReferenceMissionContract(model), { span: 4, tone: model.verdict.tone, eyebrow: "orchestrator contract", className: "ar-orc-reference-card ar-orc-mission-contract-card" })}
+    ${renderDashboardCard("Experiment Contract", renderOrcReferenceMissionContract(model), { span: 4, tone: model.verdict.tone, eyebrow: "orchestrator contract", className: "ar-orc-reference-card ar-orc-mission-contract-card" })}
     ${renderDashboardCard("Decision Register (Today)", renderOrcReferenceDecisionRegister(report, model), { span: 8, tone: ctx.missingCount ? "warning" : "orchestrator", eyebrow: "decisions + input impact", className: "ar-orc-reference-card ar-orc-decision-register-card" })}
     ${renderDashboardCard("Orchestration Plan / Handoff Route", renderOrcReferenceRoute(model), { span: 7, tone: "route", eyebrow: "execution graph", className: "ar-orc-reference-card ar-orc-route-card" })}
     ${renderDashboardCard("Next Action / Audit", renderOrcReferenceActionEvidence(model), { span: 5, tone: model.riskTone, eyebrow: "operator focus", className: "ar-orc-reference-card ar-orc-action-card" })}
+    ${renderDashboardCard("Response Evidence", `<div data-live-knowledge-body="orc">${renderLiveKnowledgeSummary('orc')}</div>`, {span:12,tone:"knowledge",eyebrow:"selected response · knowledge / memory evidence"})}
   `;
 }
 
@@ -12119,47 +12069,11 @@ function renderDesignRankingChart(screenReport, designReport) {
 }
 
 function renderDesignParameterSweep(screenReport) {
-  if (screenReport && screenReport.evaluation_semantics === "evidence_based_v1") {
-    const rows = Array.isArray(screenReport.candidate_evaluations) ? screenReport.candidate_evaluations : [];
-    return `<div class="ar-design-note-list">${rows.map(e => `<span><b>${escapeHtml(e.candidate_id)}</b> · ${escapeHtml(e.validity.status)} · ${escapeHtml(e.cost.mass.value)} g estimated · performance ${escapeHtml(e.performance.status)}</span>`).join("")}</div>`;
-  }
-  const sweep = screenReport && screenReport.parameter_sweep ? screenReport.parameter_sweep : {};
-  const cells = Array.isArray(sweep.heatmap_cells) ? sweep.heatmap_cells : [];
-  const clean = cells.map((cell) => ({
-    ...cell,
-    value: dashboardFiniteNumber(cell && cell.value),
-    x: dashboardFiniteNumber(cell && cell.x_relative_density),
-    y: dashboardFiniteNumber(cell && cell.y_wall_thickness_mm),
-  })).filter((cell) => cell.value !== null).slice(0, 24);
-  const params = Array.isArray(sweep.parameters) ? sweep.parameters : [];
-  const values = clean.map((cell) => cell.value);
-  const min = values.length ? Math.min(...values) : 0;
-  const max = values.length ? Math.max(...values) : 1;
-  const spread = Math.max(1e-6, max - min);
-  const paramRows = params.slice(0, 5).map((item) => ({
-    label: item.parameter || "parameter",
-    value: item.selected ?? item.value ?? "-",
-    range: [item.min, item.max].filter((value) => value !== undefined && value !== null && value !== "").join(" - "),
-  }));
-  const paramStrip = paramRows.length ? `
-    <div class="ar-design-param-strip">
-      ${paramRows.map((item) => `
-        <span><b>${escapeHtml(compactText(item.label, 18))}</b>${escapeHtml(compactText(renderRuntimeValue(item.value, "-"), 18))}</span>
-      `).join("")}
-    </div>
-  ` : "";
-  if (!clean.length) return `${paramStrip}${renderDesignEmpty("Waiting for sweep.")}`;
-  const chartCells = clean.map((cell) => ({
-    candidate_id: cell.candidate_id || "candidate",
-    x: cell.x,
-    y: cell.y,
-    value: cell.value,
-    status: cell.status || "",
-  }));
-  return `
-    <div class="ar-design-echart ar-design-heatmap-chart" data-orc-echart="dsn-heatmap" data-orc-payload="${orcChartPayloadAttr({ cells: chartCells, min, max, spread })}" aria-label="Design parameter sweep heatmap"></div>
-    ${paramStrip}
-  `;
+  const params = screenReport?.parameter_sweep?.parameters || [];
+  if (!params.length) return renderDesignEmpty("No recorded design variables.");
+  return renderDashboardRows(params.map(p=>[
+    p.parameter, `Selected: ${p.selected ?? p.value ?? "Not recorded"} · Range: ${p.min ?? "?"} – ${p.max ?? "?"}`
+  ]));
 }
 
 function renderDesignDashboardCards(report, status, agentLabel, profile) {
@@ -12728,7 +12642,7 @@ function applyPrinterMonitorSnapshotResult(result) {
     module_id: "specimen",
     agent: "specimen_agent",
     status: result.status || (result.ok === false ? "blocked" : "ready"),
-    message: "3DP printer monitor snapshot refreshed from Live GUI video play.",
+    message: "3D printer monitor snapshot refreshed from Live GUI video play.",
     payload: {
       run_id: runId,
       tool: "printer.status",
@@ -14384,12 +14298,14 @@ function analysisScientificTicks(maxValue, targetIntervals = 5) {
   return ticks;
 }
 
-function renderAnalysisCurve(analysis) {
-  const points = analysisStressStrainPoints(analysis);
-  if (points.length < 2) return renderVizEmpty("No engineering stress-strain preview recorded.");
-  const width = 520;
-  const height = 260;
-  const pad = { left: 72, right: 18, top: 22, bottom: 58 };
+function renderAnalysisCurve(analysis, mode = "ss") {
+  const fd = mode === "fd";
+  const raw = analysis.utm_curve || {};
+  const points = fd ? (raw.preview || raw.points || []).map(p => ({strain_pct: dashboardFiniteNumber(p.displacement_mm ?? p.displacement), stress_MPa: dashboardFiniteNumber(p.force_N ?? p.force)})).filter(p => p.strain_pct !== null && p.stress_MPa !== null) : analysisStressStrainPoints(analysis);
+  if (points.length < 2) return renderVizEmpty("Awaiting data — curve requires valid measurements and units.");
+  const width = 900;
+  const height = 330;
+  const pad = { left: 72, right: 22, top: 22, bottom: 58 };
   const xTicks = analysisScientificTicks(Math.max(0, ...points.map((point) => point.strain_pct)), 5);
   const yTicks = analysisScientificTicks(Math.max(0, ...points.map((point) => point.stress_MPa)), 5);
   const maxX = xTicks[xTicks.length - 1];
@@ -14409,31 +14325,33 @@ function renderAnalysisCurve(analysis) {
     <line x1="${pad.left - 5}" y1="${numberText(y(value), 3)}" x2="${pad.left}" y2="${numberText(y(value), 3)}" class="tick"></line>
     <text x="${pad.left - 9}" y="${numberText(y(value) + 3.5, 3)}" text-anchor="end" class="tick-label y-tick">${escapeHtml(numberText(value, maxY < 1 ? 3 : 2))}</text>
   `).join("");
-  const limitReference = maxX >= 50
-    ? `<line x1="${numberText(x(50), 3)}" y1="${pad.top}" x2="${numberText(x(50), 3)}" y2="${height - pad.bottom}" class="limit-reference"></line>
-       <text x="${numberText(x(50) - 5, 3)}" y="${pad.top + 12}" text-anchor="end" class="limit-label">50% strain</text>`
-    : "";
+  const metrics = analysis.utm_metrics || {};
+  const fraction = dashboardFiniteNumber(metrics.evaluation_strain ?? metrics.energy_absorption_limit_strain);
+  const gauge = dashboardFiniteNumber((analysis.specimen_geometry || {}).gauge_length_mm);
+  const limit = fd ? (fraction !== null && gauge > 0 ? fraction * gauge : dashboardFiniteNumber(metrics.energy_absorption_limit_mm)) : (fraction === null ? null : fraction * 100);
+  const included = limit === null ? [] : points.filter(p => p.strain_pct <= limit);
+  const crossing = limit === null ? -1 : points.findIndex((p,i) => i > 0 && p.strain_pct > limit && points[i-1].strain_pct <= limit);
+  if (crossing > 0) {
+    const a=points[crossing-1], b=points[crossing], t=(limit-a.strain_pct)/(b.strain_pct-a.strain_pct);
+    included.push({strain_pct:limit,stress_MPa:a.stress_MPa+t*(b.stress_MPa-a.stress_MPa)});
+  }
+  const fillPoints = included.length ? [[x(included[0].strain_pct),y(0)],...included.map(p=>[x(p.strain_pct),y(p.stress_MPa)]),[x(included[included.length-1].strain_pct),y(0)]] : [];
+  const limitReference = limit !== null && limit <= maxX ? `<line x1="${x(limit)}" y1="${pad.top}" x2="${x(limit)}" y2="${height-pad.bottom}" class="limit-reference"></line>` : '';
+  const shaded = fillPoints.length ? `<polygon points="${polyline(fillPoints)}" fill="#009ed0" fill-opacity="0.13"></polygon>` : '';
   return `
     <div class="ar-analysis-curve">
-      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Engineering compressive stress strain curve">
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${fd ? 'Force displacement curve' : 'Engineering compressive stress strain curve'}">
         ${xGrid}
         ${yGrid}
-        ${limitReference}
+        ${shaded}${limitReference}
         <line x1="${pad.left}" y1="${height - pad.bottom}" x2="${width - pad.right}" y2="${height - pad.bottom}" class="axis spine"></line>
         <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${height - pad.bottom}" class="axis spine"></line>
         <polyline points="${polyline(line)}" class="curve"></polyline>
-        <text x="${pad.left + plotWidth / 2}" y="${height - 14}" text-anchor="middle" class="axis-label">Engineering compressive strain, ε (%)</text>
-        <text x="18" y="${pad.top + plotHeight / 2}" text-anchor="middle" transform="rotate(-90 18 ${pad.top + plotHeight / 2})" class="axis-label">Engineering stress, σ (MPa)</text>
+        <text x="${pad.left + plotWidth / 2}" y="${height - 14}" text-anchor="middle" class="axis-label">${fd ? 'Displacement (mm)' : 'Engineering compressive strain, ε (%)'}</text>
+        <text x="18" y="${pad.top + plotHeight / 2}" text-anchor="middle" transform="rotate(-90 18 ${pad.top + plotHeight / 2})" class="axis-label">${fd ? 'Force (N)' : 'Engineering stress, σ (MPa)'}</text>
       </svg>
     </div>
   `;
-}
-
-function renderAnalysisFieldLink(analysis) {
-  const result = analysis.cae_result || analysis.fem_result || {};
-  const path = (result.artifacts || {}).field_asset_path || result.field_asset_path || '';
-  const url = path ? `/cae/results?path=${encodeURIComponent(path)}` : '/cae/results';
-  return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">Open solver field results ↗</a><p>${path ? 'Saved nodal fields · read-only viewer' : 'Actual solver fields not recorded for this result.'}</p>`;
 }
 
 function renderAnalysisTrustScore(analysis) {
@@ -14461,7 +14379,6 @@ function renderAnalysisTrustScore(analysis) {
       <div class="ar-report-metrics">
         ${renderDashboardMetric("Trust Score / Gate", score === null ? "-" : numberText(score, 3), gate, gate === "block" ? "danger" : gate === "calibrate_only" ? "warning" : "success")}
         ${renderDashboardMetric("UTM-FEA Agreement", components.q_agreement === undefined ? "-" : numberText(components.q_agreement, 3), "curve agreement", components.q_agreement < 0.65 ? "warning" : "success")}
-        ${renderDashboardMetric("PINN Prediction", (analysis.fidelity_records || {}).pinn_low_or_surrogate?.status || (analysis.multifidelity_comparison || {}).pinn?.status || "unavailable", "optional", "idle")}
       </div>
       ${renderMiniBarChart(rows, { label: "trust_score component bars", compact: true, emptyText: "No trust_score components recorded." })}
       ${renderDashboardRows([
@@ -14472,24 +14389,8 @@ function renderAnalysisTrustScore(analysis) {
   `;
 }
 
-function renderAnalysisCurveOverlay(analysis) {
-  const comparison = analysis.multifidelity_comparison || {};
-  const curve = comparison.curve || {};
-  const pinn = comparison.pinn || (analysis.fidelity_records || {}).pinn_low_or_surrogate || {};
-  return `
-    <div class="ar-analysis-curve-overlay">
-      ${renderAnalysisCurve(analysis)}
-      <div class="ar-analysis-overlay-summary">
-        ${renderDashboardRows([
-          ["multifidelity_comparison", comparison.schema || "multifidelity_comparison.v1"],
-          ["UTM-FEA Agreement", curve.agreement_score === undefined ? "-" : curve.agreement_score],
-          ["peak_force_error_pct", curve.peak_force_error_pct === undefined ? "-" : curve.peak_force_error_pct],
-          ["stiffness_error_pct", curve.stiffness_error_pct === undefined ? "-" : curve.stiffness_error_pct],
-          ["PINN Prediction", pinn.status || "unavailable"],
-        ])}
-      </div>
-    </div>
-  `;
+function renderAnalysisCurveOverlay(analysis, mode = "ss") {
+  return `<div class="ar-analysis-curve-overlay">${renderAnalysisCurve(analysis, mode)}</div>`;
 }
 
 function renderAnalysisProvenance(analysis) {
@@ -14504,11 +14405,8 @@ function renderAnalysisProvenance(analysis) {
         ["source", source.source || "-"],
         ["parser_id", source.parser_id || "-"],
         ["utm_high", fidelity.utm_high?.schema || "-"],
-        ["fea_mid", fidelity.fea_mid?.schema || "-"],
-        ["pinn_low_or_surrogate", fidelity.pinn_low_or_surrogate?.status || "-"],
         ["analysis_bo_handoff_v2", boHandoff.schema_version || "-"],
         ["trust_score", artifacts.trust_score || "-"],
-        ["multifidelity_comparison", artifacts.multifidelity_comparison || "-"],
       ])}
     </div>
   `;
@@ -14688,7 +14586,10 @@ function updateKnowledgeActivitySummary(snapshot = {}) {
   });
 }
 
+let liveKnowledgeActivityError = '';
 function hydrateKnowledgeActivityChart() {
+  const panel=document.querySelector('[data-live-knowledge-body="activity"]');
+  if(panel){const html=renderLiveKnowledgeSummary('activity');if(panel.innerHTML!==html)panel.innerHTML=html;}
   const mount = document.querySelector("[data-atr-knowledge-activity]");
   if (!mount) {
     if (liveKnowledgeActivityChart) liveKnowledgeActivityChart.dispose();
@@ -14733,11 +14634,15 @@ async function refreshKnowledgeActivity(options = {}) {
     if (runId) query.set("run_id", runId);
     try {
       const payload = await fetchJsonOrThrow(`/api/knowledge/activity?${query.toString()}`);
-      liveKnowledgeActivitySnapshot = payload && typeof payload === "object" ? payload : emptyKnowledgeActivitySnapshot();
+      if (runId !== liveCurrentRunId()) return null;
+      if (!payload || payload.run_id !== runId || !Array.isArray(payload.cycles)) throw new Error('Invalid activity snapshot');
+      liveKnowledgeActivitySnapshot = payload;
+      liveKnowledgeActivityError = '';
       liveKnowledgeActivityRefreshedAt = Date.now();
       hydrateKnowledgeActivityChart();
       return liveKnowledgeActivitySnapshot;
     } catch (_err) {
+      liveKnowledgeActivityError = 'Activity refresh failed';
       liveKnowledgeActivityRefreshedAt = Date.now();
       hydrateKnowledgeActivityChart();
       return liveKnowledgeActivitySnapshot;
@@ -14749,6 +14654,10 @@ async function refreshKnowledgeActivity(options = {}) {
 }
 
 function renderKnowledgeActivityCard() {
+  return renderDashboardCard("Recorded Knowledge Activity", `<div data-live-knowledge-body="activity">${renderLiveKnowledgeSummary('activity')}</div>`, {span:8,tone:"knowledge",eyebrow:"run-scoped ledger · cycle comparison"});
+}
+
+function renderLegacyKnowledgeActivityCard() {
   const snapshot = liveKnowledgeActivitySnapshot || emptyKnowledgeActivitySnapshot();
   const totals = snapshot.totals || {};
   return renderDashboardCard("Knowledge Activity", `
@@ -14863,7 +14772,7 @@ function renderBoInitialDesignBoard(report) {
       diagnostics: { coverage_fraction: initial.target ? initial.completed / initial.target : 0, duplicate_count: 0 },
       status: "active",
     };
-    return renderer.renderPlot(initial.visualization || { ...legacyPayload, initial_design: { ...initial, points: legacyPoints } });
+    return renderer.renderPlot(initial.visualization || { ...legacyPayload, initial_design: { ...initial, points: legacyPoints } }, {artifactOnly: true});
   }
   return renderDashboardRows([
     ["sampler", initial.sampler],
@@ -15158,29 +15067,6 @@ function renderEquipmentDashboardCards(report, status, agentLabel, profile) {
     : "";
 }
 
-let liveAnalysisFemController = null;
-
-function refreshLiveAnalysisFemEvidence() {
-  if (liveSelectedAgent !== "analysis" || liveCurrentView !== "report" || liveReportPage !== "agent" || document.hidden) return Promise.resolve();
-  return liveAnalysisFemController ? liveAnalysisFemController.poll() : Promise.resolve();
-}
-
-function renderAnalysisFemEvidence(analysis) {
-  if (!liveAnalysisFemController && window.AnalysisFemLive) {
-    liveAnalysisFemController = window.AnalysisFemLive.createController({
-      renderCard: (title, body, card) => renderDashboardCard(title, body, {
-        span: card.span,
-        tone: card.tone,
-        eyebrow: card.eyebrow,
-        data: {"fem-card": card.id},
-      }),
-    });
-  }
-  if (!liveAnalysisFemController) return "";
-  liveAnalysisFemController.setContext(analysis);
-  return liveAnalysisFemController.html();
-}
-
 function renderAnalysisDashboardCards(report, status, agentLabel, profile) {
   const frontend = liveAgentModuleHost.get("analysis");
   return frontend && typeof frontend.renderDashboard === "function"
@@ -15331,7 +15217,7 @@ function renderLiveReportToolbar() {
 
 function syncLiveReportAttributes(current, next, options = {}) {
   const preserveRendererState = Boolean(options.preserveRendererState);
-  const protectedAttribute = (name) => preserveRendererState && (name === "style" || name.startsWith("_echarts_"));
+  const protectedAttribute = (name) => (name === "open" && current.matches?.('.knp-supply-details, .bo-stage-detail, .bo-equation-details')) || (preserveRendererState && (name === "style" || name.startsWith("_echarts_")));
   Array.from(current.attributes || []).forEach((attribute) => {
     if (!protectedAttribute(attribute.name) && !next.hasAttribute(attribute.name)) current.removeAttribute(attribute.name);
   });
@@ -15445,9 +15331,6 @@ function renderReportPanel(session) {
     </div>
   `;
   const patchResult = updateLiveReportPanel(reportHtml, reportContextKey);
-  if (liveSelectedAgent === "analysis" && liveAnalysisFemController) {
-    liveAnalysisFemController.mount(liveReportPanel.querySelector(".analysis-fem-live"));
-  }
   applyUtmClearCompletionVerification(report.state);
   if (patchResult.fullRender || patchResult.structureChanged || patchResult.chartChanged) scheduleOrcEchartsRender();
   hydrateDesignCaptureCanvases();
@@ -15484,7 +15367,7 @@ function renderReportPanel(session) {
       ${renderReasoningBlock(msg)}
       <p>${escapeHtml(compactText(msg.content || "", 720)).replaceAll("\n", "<br />")}</p>
       ${renderArtifactCard(msg)}
-      ${renderFemContourCard(msg)}
+
       ${renderBoResultCard(msg, `report-card-${index}`)}
     </article>
   `).join("");
@@ -15502,7 +15385,6 @@ function renderReportPanel(session) {
           <button class="btn live-report-action" data-report-action="ask" type="button" title="Ask in Runtime Chat" aria-label="Ask in Runtime Chat"><span class="live-report-action-icon" aria-hidden="true">?</span><span class="live-report-action-label">Ask in Chat</span></button>
           <button class="btn live-report-action" data-report-action="reviewed" type="button" title="Mark reviewed" aria-label="Mark reviewed"><span class="live-report-action-icon" aria-hidden="true">✓</span><span class="live-report-action-label">Mark Reviewed</span></button>
           <button class="btn live-report-action" data-report-action="rerun" type="button" title="Re-run from here" aria-label="Re-run from here"><span class="live-report-action-icon" aria-hidden="true">↻</span><span class="live-report-action-label">Re-run From Here</span></button>
-          <button class="btn live-report-action" data-report-action="evolve" type="button" title="Open Evolution Lab for this agent" aria-label="Open Evolution Lab for this agent"><span class="live-report-action-icon" aria-hidden="true">Δ</span><span class="live-report-action-label">Evolve Agent</span></button>
         </div>
       </div>
       <div class="live-report-grid live-report-academic-grid">
@@ -16255,11 +16137,11 @@ function renderGraphMiniPanel(session) {
 
 function planningArtifactSummaries() {
   return planningMessagesCache
-    .map((msg, index) => ({ msg, html: renderArtifactCard(msg) + renderFemContourCard(msg) + renderBoResultCard(msg, `artifact-${index}`) }))
+    .map((msg, index) => ({ msg, html: renderArtifactCard(msg) + renderBoResultCard(msg, `artifact-${index}`) }))
     .filter((item) => item.html.trim());
 }
 
-function renderArtifactPanel() {
+function renderLegacyArtifactPanel() {
   if (!liveArtifactPanel) return;
   const runArtifacts = (liveRunArtifacts || []).map((artifact) => `
     <article class="live-file-artifact">
@@ -16290,6 +16172,21 @@ function renderArtifactPanel() {
     </div>
   `;
   initStlViewers();
+}
+
+let liveArtifactExplorer = null;
+function renderArtifactPanel() {
+  if (!liveArtifactPanel) return;
+  if (!window.AtrArtifactExplorer) return renderLegacyArtifactPanel();
+  if (!liveArtifactExplorer) {
+    liveArtifactPanel.innerHTML = '<div id="live-artifact-explorer"></div>';
+    liveArtifactExplorer = new window.AtrArtifactExplorer.Explorer(document.getElementById('live-artifact-explorer'));
+  }
+  const state = liveLastSession?.state || liveLastSnapshot.state || {};
+  liveArtifactExplorer.update({run: state.run_id || '', loop: state.loop_count ?? state.loop_index ?? 0,
+    agent: liveSelectedAgent, files: window.AtrArtifactExplorer.mergeReferences(liveRunArtifacts, planningMessagesCache), label: liveAgentLabel,
+    references: planningMessagesCache,
+    runs: planningMessagesCache.map(m=>m.run_id).filter(Boolean)});
 }
 
 function timelineSourceEvents() {
@@ -16345,20 +16242,24 @@ function renderTimelinePanels() {
   const events = filteredTimelineEvents();
   if (liveEventCount) liveEventCount.textContent = `${events.length}/${source.length}`;
   renderTimelineFilters(source.length, events.length);
-  const stripItems = events.slice(-12).map((event) => {
+  const stripItems = events.slice(-12).reverse().map((event) => {
     const kind = eventTimelineKind(event);
     const key = eventStableKey(event);
     const selected = key && key === liveSelectedEventKey ? "selected" : "";
-    const eventTitle = `${formatTime(event.ts || event.timestamp)} · ${event.event_type || event.type || "event"} · ${event.message || event.status || ""}`;
+    const eventTitle = `${formatDockTime(event.ts || event.timestamp)} · ${event.event_type || event.type || "event"} · ${event.message || event.status || ""}`;
     return `
       <button class="live-timeline-item ${selected} severity-${escapeHtml(kind)}" data-agent-id="${escapeHtml(agentIdFromEvent(event))}" data-event-kind="${escapeHtml(kind)}" data-event-key="${escapeHtml(key)}" title="${escapeHtml(eventTitle)}" aria-label="${escapeHtml(eventTitle)}">
-        <span>${escapeHtml(formatTime(event.ts || event.timestamp))}</span>
+        <span>${escapeHtml(formatDockTime(event.ts || event.timestamp))}</span>
+        <span class="live-event-agent">${escapeHtml(liveAgentLabel(agentIdFromEvent(event)))}</span>
         <strong>${escapeHtml(event.event_type || event.type || "event")}</strong>
-        <em>${escapeHtml(compactText(event.message || event.status || "", 80))}</em>
+        <em>${escapeHtml(event.message || event.status || "")}</em>
       </button>
     `;
   }).join("");
-  if (liveTimelineStrip) liveTimelineStrip.innerHTML = stripItems || "<p class='hint'>No events.</p>";
+  if (liveTimelineStrip) {
+    const html = stripItems || "<p class='hint live-dock-empty'>No events in this session.</p>";
+    if (liveTimelineStrip.innerHTML !== html) liveTimelineStrip.innerHTML = html;
+  }
   if (liveTimelineDetailPanel) {
     liveTimelineDetailPanel.innerHTML = `
       <div class="live-timeline-detail">
@@ -16600,7 +16501,7 @@ function renderAttentionReportPage(session = liveLastSession) {
         ${renderReportSection("Pending Approvals", pending.length ? pending.map((item) => renderAttentionApprovalCard(item, runId)).join("") : "<p class='hint'>No pending approvals.</p>", { wide: true })}
         ${renderReportSection("Agent Questions", questions.length ? questions.map(renderQuestionCard).join("") : "<p class='hint'>No agent questions waiting for operator input.</p>", { wide: true })}
         ${renderReportSection("Runtime Faults / Warnings", faults.length ? faults.map(renderFaultCard).join("") : "<p class='hint'>No unread runtime faults.</p>", { wide: true })}
-        ${renderReportSection("Recently Resolved", renderReportList(resolvedItems, "No resolved approvals recorded yet."))}
+        ${renderReportSection("Recently Resolved", renderReportList(resolvedItems, "No resolved approvals recorded yet."), { wide: true })}
       </div>
     </div>
   `;
@@ -17133,7 +17034,7 @@ function renderResourceStatusCard(title, value, detail, status = "ready") {
 
 function liveBridgeContracts(session = liveLastSession, snapshot = liveLastSnapshot) {
   const runtime_ide_contract = (session && session.runtime_ide_contract) || (snapshot && snapshot.runtime_ide_contract) || {};
-  const bridgeList = runtime_ide_contract.device_bridges;
+  const bridgeList = runtime_ide_contract.device_bridges ?? liveBridgeRegistry;
   return Array.isArray(bridgeList)
     ? bridgeList.filter((bridge) => bridge && (bridge.id || bridge.label))
     : [];
@@ -17145,7 +17046,7 @@ function bridgeContractStatus(bridge) {
   if (health.ok === false || ["error", "failed", "blocked", "unsafe"].includes(rawStatus)) return "error";
   if (["waiting", "pending", "degraded", "unknown"].includes(rawStatus)) return "waiting";
   if (["running", "active", "connected", "ready", "ok", "healthy"].includes(rawStatus)) return rawStatus === "running" || rawStatus === "active" ? "active" : "ready";
-  return bridge?.health_endpoint || bridge?.preflight_endpoint ? "ready" : "idle";
+  return "unknown";
 }
 
 function bridgeContractActionSummary(bridge) {
@@ -17193,9 +17094,9 @@ function renderBridgeContractDeviceCards(bridges = liveBridgeContracts()) {
       evidenceSummary,
     ].join("\n");
     return `
-      <article class="live-device-card status-${escapeHtml(status)} bridge-contract-card" title="${escapeHtml(tooltip)}" tabindex="0" data-bridge-id="${escapeHtml(bridge.id || "")}" data-bridge-workspace="${escapeHtml(workspace)}">
-        <span>${escapeHtml(label)}</span>
-        <strong>${escapeHtml(status)}</strong>
+      <details class="live-device-card status-${escapeHtml(status)} bridge-contract-card" data-bridge-id="${escapeHtml(bridge.id || "")}" data-bridge-workspace="${escapeHtml(workspace)}">
+        <summary title="${escapeHtml(label)}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(status)}</strong></summary>
+        <div class="live-bridge-body" title="${escapeHtml(tooltip)}">
         <dl>
           <div class="live-device-field"><dt>workspace</dt><dd>${escapeHtml(workspace)}</dd></div>
           <div class="live-device-field"><dt>health</dt><dd>${escapeHtml(healthEndpoint)}</dd></div>
@@ -17208,50 +17109,88 @@ function renderBridgeContractDeviceCards(bridges = liveBridgeContracts()) {
           ${preflightAction ? `<button type="button" class="live-device-inline-action" data-bridge-action="preflight" data-bridge-id="${escapeHtml(bridge.id || "")}" data-bridge-endpoint="${escapeHtml(preflightAction.endpoint || "")}" data-bridge-method="${escapeHtml(preflightAction.method || "GET")}">Preflight</button>` : ""}
           ${handoffButtons}
         </div>
-      </article>
+        </div>
+      </details>
     `;
   });
 }
 
 function renderDeviceStrip(session) {
+  renderLiveResourceStatus();
   if (!liveDeviceStrip) return;
-  const snapshot = liveLastSnapshot || {};
-  const state = session.state || snapshot.state || {};
-  const resources = snapshot.system_resources || {};
+  const cards = renderBridgeContractDeviceCards(liveBridgeContracts(session));
+  const html = cards.join("") || "<p class='hint live-dock-empty'>No device bridge contracts available.</p>";
+  // Preserve inspection state across telemetry/session refreshes.
+  if (liveDeviceStrip.dataset.renderedCards === html) return;
+  const opened = new Set(Array.from(liveDeviceStrip.querySelectorAll("details[open][data-bridge-id]"), (el) => el.dataset.bridgeId));
+  liveDeviceStrip.innerHTML = html;
+  liveDeviceStrip.dataset.renderedCards = html;
+  liveDeviceStrip.querySelectorAll("details[data-bridge-id]").forEach((el) => {el.open = opened.has(el.dataset.bridgeId);});
+}
+
+function renderLiveResourceStatus() {
+  const resources = liveLastSnapshot.system_resources || {};
   const gpu = resources.gpu || {};
-  const ram = resources.ram || {};
-  const runtime = session.runtime || snapshot.runtime || {};
-  const backend = runtime.backend || {};
   const gpuAgg = gpu.aggregate || {};
+  const ram = resources.ram || {};
+  const numeric = (value) => value === null || value === undefined || value === "" ? NaN : Number(value);
+  const gpuUtilNumber = numeric(gpuAgg.utilization_percent);
+  const ramUsedNumber = numeric(ram.used_gb);
+  const ramTotalNumber = numeric(ram.total_gb);
+  const gpuLabel = Number.isFinite(gpuUtilNumber) ? `${Math.round(gpuUtilNumber)}%` : "-";
+  const memLabel = Number.isFinite(ramUsedNumber) && Number.isFinite(ramTotalNumber) && ramTotalNumber > 0
+    ? `${Math.round((ramUsedNumber / ramTotalNumber) * 100)}%`
+    : "-";
   const gpuValue = `${renderRuntimeValue(gpuAgg.memory_used_gb)}/${renderRuntimeValue(gpuAgg.memory_total_gb)} GB`;
   const ramValue = `${renderRuntimeValue(ram.used_gb)}/${renderRuntimeValue(ram.total_gb)} GB`;
-  const bridgeCards = renderBridgeContractDeviceCards(liveBridgeContracts(session, snapshot));
-  const cards = [
-    renderResourceStatusCard("Run", state.run_id || "-", `mode=${state.mode || "-"} · paused=${Boolean(state.is_paused)}`, state.is_paused ? "waiting" : "ready"),
-    renderResourceStatusCard("GPU", gpuValue, `util=${renderRuntimeValue(gpuAgg.utilization_percent)}% · ${gpu.status || "unknown"}`, gpu.status || "ready"),
-    renderResourceStatusCard("LLM", backend.label || backend.name || "-", `backend=${backend.name || "configured"}`, backend.status || "ready"),
-    ...bridgeCards,
-    renderPrinterDeviceStatusCard(),
-    renderDeviceStatusCard("Robot Arm", latestRuntimeEvent([/robot/, /lerobot/, /manipulation/, /rollout/, /teleop/]), "idle"),
-    renderDeviceStatusCard("UTM", latestRuntimeEvent([/utm/, /tensile/, /compression/, /equipment/]), "idle"),
-    renderUtmRuntimeDeviceCard(),
-    renderDeviceStatusCard("Camera", latestRuntimeEvent([/camera/, /vision/, /capture/, /image/]), "idle"),
-    renderDeviceStatusCard("Windows Bridge", latestRuntimeEvent([/windows/, /pyautogui/, /bridge/, /equipment/]), "idle"),
-    renderDeviceStatusCard("Environment Sensor", latestRuntimeEvent([/environment/, /sensor/, /humidity/, /temperature/]), "idle"),
-  ];
-  liveDeviceStrip.innerHTML = cards.join("");
-  const gpuUtilNumber = Number(gpuAgg.utilization_percent);
-  const ramUsedNumber = Number(ram.used_gb);
-  const ramTotalNumber = Number(ram.total_gb);
-  const gpuLabel = Number.isFinite(gpuUtilNumber) ? `GPU ${Math.round(gpuUtilNumber)}%` : "GPU -";
-  const memLabel = Number.isFinite(ramUsedNumber) && Number.isFinite(ramTotalNumber) && ramTotalNumber > 0
-    ? `Mem ${Math.round((ramUsedNumber / ramTotalNumber) * 100)}%`
-    : "Mem -";
+  const stale = liveResourceRefreshFailed || Boolean(gpu.stale);
   setCompactTextWithTitle(
     liveResourceChip,
-    `GPU/RAM ${gpuLabel.replace(/^GPU\\s*/i, "")}/${memLabel.replace(/^Mem\\s*/i, "")}`,
-    `GPU ${gpuValue}; RAM ${ramValue}; GPU util=${renderRuntimeValue(gpuAgg.utilization_percent)}%`
+    `GPU ${gpuLabel} / RAM ${memLabel}${stale ? " *" : ""}`,
+    `GPU ${gpuValue}; RAM ${ramValue}; GPU util=${renderRuntimeValue(gpuAgg.utilization_percent)}%; updated=${resources.updated_at || "unavailable"}${stale ? "; cached / refresh unavailable" : ""}`
   );
+  if (liveResourceChip) {
+    // Independent utilization colors; unknown/cached readings remain neutral.
+    const color = (value) => {
+      if (stale || !Number.isFinite(value)) return '#94a3b8';
+      const stops = [[52,211,153], [250,204,21], [248,113,113]];
+      const p = Math.max(0, Math.min(100, value)) / 50;
+      const i = Math.min(1, Math.floor(p)), t = p - i;
+      return `rgb(${stops[i].map((v,k) => Math.round(v + (stops[i+1][k] - v) * t)).join(',')})`;
+    };
+    const ramPercent = ramTotalNumber > 0 ? ramUsedNumber / ramTotalNumber * 100 : NaN;
+    liveResourceChip.innerHTML = `<span style="color:${color(gpuUtilNumber)}">GPU ${gpuLabel}</span><strong style="font-weight:800; margin-inline:6px"> / </strong><span style="color:${color(ramPercent)}">RAM ${memLabel}</span>${stale ? ' *' : ''}`;
+    liveResourceChip.classList.toggle("warning", stale);
+  }
+}
+
+async function refreshLiveResources() {
+  if (!liveResourceChip) return;
+  if (liveResourceRefreshInFlight) return liveResourceRefreshInFlight;
+  if (liveResourceRefreshedAt && Date.now() - liveResourceRefreshedAt < 5000) return;
+  liveResourceRefreshedAt = Date.now();
+  liveResourceRefreshInFlight = (async () => {
+    try {
+      // Existing read-only snapshot: no bridge commands or experiment refresh.
+      const payload = await fetchJsonOrThrowWithTimeout("/api/devices/state", {}, 8000);
+      const resources = payload.system_resources;
+      if (!resources || typeof resources !== "object" || !resources.ram || !resources.gpu) {
+        throw new Error("Resource telemetry unavailable");
+      }
+      liveLastSnapshot.system_resources = resources;
+      if (Array.isArray(payload.bridge_contracts)) {
+        liveBridgeRegistry = payload.bridge_contracts;
+        renderDeviceStrip(liveLastSession);
+      }
+      liveResourceRefreshFailed = false;
+    } catch (_) {
+      liveResourceRefreshFailed = true;
+    } finally {
+      renderLiveResourceStatus();
+      liveResourceRefreshInFlight = null;
+    }
+  })();
+  return liveResourceRefreshInFlight;
 }
 
 function latestRuntimeAgeLabel() {
@@ -17288,47 +17227,35 @@ function renderLiveMissionAutomationChips(model) {
   }).join("");
 }
 
+function liveDockSummary(session = liveLastSession) {
+  const snapshot = liveLastSnapshot || {};
+  const state = session?.state || snapshot.state || {};
+  const stage = String(state.stage || "idle");
+  const metadata = state.run_metadata || {};
+  const control = metadata.latest_orchestrator_control_plane || metadata.orchestrator_control_plane || {};
+  const running = liveRunningFlag(session || {}, snapshot, state);
+  const terminal = /^(complete|completed|done|error|failed|stopped|safe_stop|emergency_stopped)$/.test(stage);
+  const idle = stage === "idle" && !running;
+  const pending = session?.pending || session?.pending_request || state.pending_request;
+  const attention = (Array.isArray(liveApprovals.pending) ? liveApprovals.pending.length : 0) + (pending ? 1 : 0);
+  const paused = Boolean(state.is_paused || snapshot.is_paused);
+  const phase = terminal ? stage.replaceAll("_", " ") : paused ? "Paused" : pending ? "Waiting" : running ? "Running" : "Idle";
+  const current = idle ? (pending ? "Awaiting input" : "Awaiting experiment") : liveAgentLabel(agentIdFromStage(stage)) || stage;
+  const sameRun = !control.run_id || control.run_id === state.run_id;
+  const nextStage = sameRun && !idle && !terminal
+    ? control.next_action?.next_stage || control.route_state?.next_recommended_stage || ""
+    : "";
+  return {phase, current, next: nextStage ? liveAgentLabel(agentIdFromStage(nextStage)) || nextStage : "Not scheduled", attention};
+}
+
 function renderLiveMissionProgressSlim(session = liveLastSession) {
   if (!liveMissionProgressSlim) return;
-  const snapshot = liveLastSnapshot || {};
-  const baseReport = selectedReportModel(session || {});
-  const state = (session && session.state) || snapshot.state || baseReport.state || {};
-  const report = { ...baseReport, state: { ...(baseReport.state || {}), ...state } };
-  const activeAgent = agentIdFromStage(state.stage || "") || liveSelectedAgent || "orchestrator";
-  const running = liveRunningFlag(session || {}, snapshot, report.state || {});
-  const status = eventStatusForAgent(activeAgent, report.state || {}, running);
-  const model = buildOrcBriefingModel(report, status, orchestratorContext(report, status));
-  const pct = Math.max(0, Math.min(100, Math.round((model.routeStats.progress || 0) * 100)));
-  const waitingCount = (model.ctx.missingCount || 0) + (model.ctx.pendingApprovals || []).length + (model.routeStats.blocked || 0);
-  const handoff = (model.handoffRows || [])[0];
-  const handoffLabel = handoff ? `${compactText(handoff.from, 10)} -> ${compactText(handoff.to, 10)}` : "handoff waiting";
-  const activeLabel = liveAgentShort(activeAgent);
-  const phaseLabel = compactText(model.state.stage || model.ctx.controlRouteState.current_stage || status || "idle", 18);
-  const eventAge = latestRuntimeAgeLabel();
-  const title = [
-    `phase=${phaseLabel}`,
-    `active=${liveAgentLabel(activeAgent)}`,
-    `progress=${pct}%`,
-    `waiting=${waitingCount}`,
-    `latest=${eventAge}`,
-    `handoff=${handoffLabel}`,
-  ].join("; ");
-  liveMissionProgressSlim.title = title;
+  const summary = liveDockSummary(session);
   liveMissionProgressSlim.innerHTML = `
-    <div class="ar-mission-slim-kpi tone-${escapeHtml(model.verdict.tone)}">
-      <span>Phase</span>
-      <strong>${escapeHtml(phaseLabel)}</strong>
-    </div>
-    <div class="ar-mission-slim-track" aria-label="mission progress ${pct}%">
-      <span style="--progress:${numberText(pct, 0)}%;"></span>
-    </div>
-    <div class="ar-mission-slim-steps">
-      ${renderOrcReferenceStageProgress(model)}
-    </div>
-    <div class="ar-mission-slim-automation" aria-label="automation summary">
-      ${renderLiveMissionAutomationChips(model)}
-    </div>
-  `;
+    <span class="live-dock-phase">${escapeHtml(summary.phase)}</span>
+    <span class="live-dock-current" title="${escapeHtml(summary.current)}"><span>Current</span> <strong>${escapeHtml(summary.current)}</strong></span>
+    <span class="live-dock-next" title="${escapeHtml(summary.next)}"><span>Next</span> <strong>${escapeHtml(summary.next)}</strong></span>
+    <span class="live-dock-attention${summary.attention ? " needs-attention" : ""}">${summary.attention ? `${summary.attention} awaiting input / approval` : "No pending actions"}</span>`;
 }
 
 function renderLiveRuntime(session) {
@@ -17577,7 +17504,7 @@ function applyPlanningSession(session, options = {}) {
   const modeLabel = String(state.mode || "-");
   const missionLabel = `S:${stageLabel}`;
   // Legacy package contract marker: setCompactTextWithTitle(planningStageLabel, `S:${stageLabel}`, ...).
-  setCompactTextWithTitle(planningStageLabel, missionLabel, `Mission: ${state.active_goal || state.goal || queryGoal || "-"}; Stage: ${stageLabel}`);
+  setCompactTextWithTitle(planningStageLabel, missionLabel, `Contract: ${state.active_goal || state.goal || queryGoal || "-"}; Stage: ${stageLabel}`);
   scheduleLiveMissionMarquee();
   const cycleLabel = formatPlanningCycleLabel(state, running);
   setCompactTextWithTitle(planningCycleLabel, cycleLabel, `Cycle: ${cycleLabel}`);
@@ -17732,6 +17659,7 @@ async function refreshPlanningAuxiliaryState(session) {
         liveRecentEvents = dedupeRuntimeEvents(liveRecentEvents).slice(-160);
       }
       liveLastSnapshot = {
+        system_resources: liveLastSnapshot.system_resources,
         state: (session && session.state) || (liveLastSession && liveLastSession.state) || {},
         runtime: (session && session.runtime) || (liveLastSession && liveLastSession.runtime) || {},
         guardian_status: guardianPayload || liveGuardianStatus,
@@ -17765,6 +17693,7 @@ async function refreshPlanningState(options = {}) {
       const session = await sessionRes.json();
       await hydrateLiveSelectedAgentReport(session, liveAgentManifestRequestGeneration);
       liveLastSnapshot = {
+        system_resources: liveLastSnapshot.system_resources,
         state: session.state || {},
         runtime: session.runtime || {},
         guardian_status: liveGuardianStatus,
@@ -17974,8 +17903,9 @@ function updateLiveBoVisualizationCards(visualization, expectedRunId = liveCurre
   if (liveSelectedAgent !== "bo" || liveCurrentView !== "report") return true;
   const equation = liveReportPanel?.querySelector("[data-live-bo-equation]");
   const posterior = liveReportPanel?.querySelector("[data-live-bo-posterior]");
-  if (equation) equation.innerHTML = renderer.renderEquationCard(currentVisualization);
+  // Do not overwrite the run-bound objective with a cached plot's objective.
   if (posterior) posterior.innerHTML = renderer.renderPlot(currentVisualization, {
+    preferArtifact: true,
     mode: "parameter_slice",
     parameter: currentVisualization.view?.selected_parameter || "",
   });
@@ -18055,6 +17985,25 @@ function closeBinderContextMenu() {
   if (!liveBinderContextMenu) return;
   liveBinderContextMenu.hidden = true;
   liveBinderContextMenu.innerHTML = "";
+  delete liveBinderContextMenu.dataset.agentId;
+}
+
+function bindBinderContextMenuDismissal() {
+  if (!liveBinderContextMenu) return;
+  const dismissOutside = (event) => {
+    if (liveBinderContextMenu.hidden || liveBinderContextMenu.contains(event.target)) return;
+    const icon = event.target?.closest?.("[data-agent-id]");
+    if (icon && liveAgentBinderList?.contains(icon) && icon.dataset.agentId === liveBinderContextMenu.dataset.agentId) return;
+    closeBinderContextMenu();
+  };
+  document.addEventListener("pointermove", dismissOutside, {passive: true});
+  document.addEventListener("pointerdown", dismissOutside, true);
+  document.addEventListener("focusin", dismissOutside);
+  document.addEventListener("scroll", (event) => {
+    if (!liveBinderContextMenu.hidden && !liveBinderContextMenu.contains(event.target)) closeBinderContextMenu();
+  }, {capture: true, passive: true});
+  window.addEventListener("blur", closeBinderContextMenu);
+  window.addEventListener("resize", closeBinderContextMenu);
 }
 
 function openBinderContextMenu(agentId, x, y) {
@@ -18066,7 +18015,6 @@ function openBinderContextMenu(agentId, x, y) {
     ["show_tool_calls", "TC", "Show Tool Calls"],
     ["show_artifacts", "A", "Show Artifacts"],
     ["open_graph", "G", "Open Graph"],
-    ["open_evolution", "EV", "Open Evolution"],
     ["mark_read", "OK", "Mark Read"],
     ["run_node_test", "T", "Run Node Test"],
     ["rerun_from_here", "RR", "Re-run From Here"],
@@ -18086,6 +18034,7 @@ function openBinderContextMenu(agentId, x, y) {
   const top = Math.max(8, Math.min(Math.round(y || 0), Math.max(8, window.innerHeight - menuHeight - 8)));
   liveBinderContextMenu.style.left = `${left}px`;
   liveBinderContextMenu.style.top = `${top}px`;
+  liveBinderContextMenu.dataset.agentId = agentId;
   liveBinderContextMenu.hidden = false;
 }
 
@@ -18183,10 +18132,6 @@ function handleContextAction(action, agentId) {
     renderLiveRuntime(liveLastSession);
     return;
   }
-  if (action === "open_evolution") {
-    openEvolutionLab(liveSelectedAgent);
-    return;
-  }
   if (action === "mark_read") {
     markLiveAgentRead(liveSelectedAgent, liveLastSession);
     renderLiveRuntime(liveLastSession);
@@ -18220,6 +18165,8 @@ async function pinAgentReportFromBinder(agentId) {
     "operator.binder"
   );
 }
+
+bindBinderContextMenuDismissal();
 
 if (liveAgentBinderList) {
   liveAgentBinderList.addEventListener("contextmenu", (event) => {
@@ -18304,6 +18251,17 @@ if (btnLiveBottomCollapse) {
     setLiveBottomCollapsed(!liveBottomCollapsed);
   });
 }
+
+document.querySelectorAll("[data-dock-tab]").forEach((button) => {
+  button.addEventListener("click", () => setLiveBottomTab(button.dataset.dockTab));
+  button.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? "events" : event.key === "End" ? "devices" : liveBottomTab === "events" ? "devices" : "events";
+    setLiveBottomTab(next);
+    document.querySelector(`[data-dock-tab="${next}"]`)?.focus();
+  });
+});
 
 if (btnLiveChatCollapse) {
   btnLiveChatCollapse.addEventListener("click", () => {
@@ -18460,10 +18418,6 @@ async function runLiveQuickAction(action) {
   if (action === "open_graph") {
     setLiveView("graph");
     renderLiveRuntime(liveLastSession);
-    return;
-  }
-  if (action === "open_evolution") {
-    openEvolutionLab(liveSelectedAgent);
     return;
   }
   if (action === "approve_next_step") {
@@ -19246,31 +19200,14 @@ async function refreshLivePLCStatus(options = {}) {
   return livePLCStatusRefreshInFlight;
 }
 
-function armLiveEmergencyStop() {
-  liveEmergencyStopArmedUntil = Date.now() + 6000;
-  if (liveEmergencyStopArmTimer) window.clearTimeout(liveEmergencyStopArmTimer);
-  liveEmergencyStopArmTimer = window.setTimeout(resetLiveEmergencyStopArm, 6000);
-  if (btnLiveSafeStop) {
-    btnLiveSafeStop.classList.add("is-armed");
-    btnLiveSafeStop.textContent = "CONFIRM";
-    btnLiveSafeStop.title = "Emergency Stop armed. Click again within 6 seconds to force terminate the active runtime.";
-    btnLiveSafeStop.setAttribute("aria-label", "Confirm Emergency Stop");
-  }
-  setChatStatus("EMERGENCY?", "warning");
-}
-
 async function confirmOrRequestLiveEmergencyStop() {
-  const now = Date.now();
-  if (!liveEmergencyStopArmedUntil || now > liveEmergencyStopArmedUntil) {
-    armLiveEmergencyStop();
-    return;
-  }
   resetLiveEmergencyStopArm();
   try {
     const endpoint = liveEmergencyEndpoint("emergency-stop", "/api/run/emergency-stop");
     setChatStatus("EMERGENCY STOP", "warning");
-    await recordLiveIntentEvent("runtime_command_requested", "emergency_stop", "Live GUI emergency stop confirmed and forced runtime termination requested.", { command: "emergency_stop", confirmation: "double_click_within_6s", endpoint });
     const result = await fetchJsonOrThrow(endpoint, { method: "POST" });
+    // Audit must never delay or prevent the emergency command.
+    recordLiveIntentEvent("runtime_command_requested", "emergency_stop", "Live GUI emergency stop requested immediately.", { command: "emergency_stop", confirmation: "single_click", endpoint }).catch(() => {});
     if (result && result.state) applyPlanningSession({ ...(liveLastSession || {}), state: result.state });
     await refreshPlanningState({ force: true });
     setChatStatus("EMERGENCY STOPPED", "warning");
@@ -19361,12 +19298,11 @@ if (btnLiveEmergencyReset) {
 
 setInterval(() => {
   tickLiveRuntimeClock();
+  refreshLiveResources();
   updateLiveConnectionChips();
   updateVisionSpecimenCountdowns();
   refreshActiveEquipmentProcess();
   refreshLivePLCStatus().catch(() => {});
-  // FEM progress remains live even when the measured foreground run has frozen as complete.
-  refreshLiveAnalysisFemEvidence().catch(() => {});
   if (!shouldFreezeCompletedTestRun(liveLastSession) && liveSyncIsStale() && !liveRefreshInFlight && planningThinkingCount === 0) {
     refreshPlanningState({ background: true }).catch(() => setChatStatus("SYNC ERROR", "warning"));
   }
@@ -19435,8 +19371,8 @@ async function initializeLiveGuiRuntime() {
   }
   connectPlanningEventStream();
   return refreshPlanningState()
-    .then(async (session) => {
-      await hydrateLiveBoVisualization();
+    .then((session) => {
+      window.dispatchEvent(new Event('ax4lab:live-ready'));
       return session;
     })
     .then(bootstrapLiveOrchestrator)
@@ -19476,5 +19412,8 @@ document.addEventListener('change',event=>{
 window.addEventListener('ax4lab:knowledge-changed',()=>{if(!liveKnowledgePollingStopped){window.clearTimeout(liveKnowledgeTimer);refreshLiveKnowledgeSummary();}});
 window.addEventListener('pagehide',()=>{liveKnowledgePollingStopped=true;window.clearTimeout(liveKnowledgeTimer);liveKnowledgeReceipts.clear();liveKnowledgeSummary=null;});
 window.addEventListener('pageshow',()=>{if(liveKnowledgePollingStopped){liveKnowledgePollingStopped=false;refreshLiveKnowledgeSummary();}});
-initializeLiveGuiRuntime().catch(() => setChatStatus("ERROR", "warning"));
+initializeLiveGuiRuntime().catch(() => {
+  setChatStatus("ERROR", "warning");
+  window.dispatchEvent(new Event('ax4lab:live-ready'));
+});
 refreshLiveKnowledgeSummary();

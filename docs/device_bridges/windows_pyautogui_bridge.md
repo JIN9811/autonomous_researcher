@@ -24,6 +24,10 @@ related_docs:
 
 # Windows PyAutoGUI Bridge Reference
 
+<img src="../../web/static/workspace_icons/windows.webp" width="96" alt="Windows Automation Workspace icon">
+
+Main GUI: **Windows Automation · Workspace** opens the Windows bridge workspace in a separate window.
+
 ## Status at a Glance
 
 | At a glance | Details |

@@ -111,28 +111,39 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
     ${reasons.length ? `<div class="ar-design-note-list">${reasons.map((reason) => `<span>${escapeHtml(reason)}</span>`).join("")}</div>` : ""}`;
     }
 
+    function evidenceTable(headers, rows, selectedIndex = -1) {
+      if (!rows.length) return renderEmpty("No recorded evidence.");
+      return `<div style="overflow-x:auto"><table class="ar-design-evidence-table"><thead><tr>${headers.map(h=>`<th>${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((row,i)=>`<tr${i===selectedIndex?' class="dsn-selected-candidate" aria-label="Selected candidate"':''}>${row.map(v=>`<td>${escapeHtml(String(v ?? "Not recorded"))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+    }
+
+    function renderDesignSpace(screenReport, selected) {
+      const parameters = screenReport.parameter_sweep?.parameters || [];
+      const points = (screenReport.parameter_sweep?.heatmap_cells || []).filter(p=>finiteNumber(p.x_relative_density)!==null && finiteNumber(p.y_wall_thickness_mm)!==null);
+      let chart = renderEmpty("Candidate coordinates not recorded.");
+      if (points.length) {
+        const xs=points.map(p=>Number(p.x_relative_density)), ys=points.map(p=>Number(p.y_wall_thickness_mm));
+        const domain=values=>{const lo=Math.min(...values),hi=Math.max(...values),pad=(hi-lo||Math.abs(lo)*0.1||0.1)*0.15;return [lo-pad,hi+pad];};
+        const [xmin,xmax]=domain(xs),[ymin,ymax]=domain(ys);
+        const x=v=>58+(v-xmin)/(xmax-xmin)*326, y=v=>226-(v-ymin)/(ymax-ymin)*192;
+        const ticks=Array.from({length:4},(_,i)=>i/3);
+        chart=`<svg class="dsn-space-chart" viewBox="0 0 420 290" role="img" aria-label="Design candidate positions"><title>Relative density versus wall thickness; outlined marker is selected. Overlapping candidates share a position.</title>${ticks.map(t=>{const xv=xmin+t*(xmax-xmin),yv=ymin+t*(ymax-ymin);return `<path d="M ${x(xv)} 34 V 226 M 58 ${y(yv)} H 384" stroke="currentColor" opacity=".13"/><text x="${x(xv)}" y="247" text-anchor="middle">${scoreText(xv,3)}</text><text x="50" y="${y(yv)+4}" text-anchor="end">${scoreText(yv,3)}</text>`;}).join('')}<path d="M58 34 V226 H384" fill="none" stroke="currentColor"/>${points.map(p=>{const chosen=p.candidate_id===selected.candidate_id||p.status==='selected';return `<circle cx="${x(Number(p.x_relative_density))}" cy="${y(Number(p.y_wall_thickness_mm))}" r="${chosen?8:5}" fill="${chosen?'#54d3ef':'#97aabe'}" stroke="${chosen?'#fff':'none'}" stroke-width="2"><title>${escapeHtml(p.candidate_id||'Candidate')} · ρ=${p.x_relative_density} · wall=${p.y_wall_thickness_mm} mm${chosen?' · selected':''}</title></circle>`;}).join('')}<text x="221" y="278" text-anchor="middle">Relative density (fraction)</text><text transform="translate(15 130) rotate(-90)" text-anchor="middle">Wall thickness (mm)</text></svg><p class="ar-design-empty">Outlined: selected · Other points: candidate positions · No performance score</p>`;
+      }
+      return chart + '<details class="dsn-variable-details"><summary>Variables & ranges</summary>' + evidenceTable(["Variable", "Selected", "Range"], parameters.map(p=>[
+        p.parameter, p.selected ?? p.value ?? selected[p.parameter],
+        p.min != null && p.max != null ? `${p.min} – ${p.max}` : "Not recorded"
+      ])) + '</details>';
+    }
+
     function renderExpectedPerformance(screenReport, designReport, selected = {}) {
-      const evidence = (designReport && designReport.design_evaluation) || (screenReport && screenReport.design_evaluation) || selected.design_evaluation;
-      if (evidence) return renderEvidence(evidence);
-      const expected = screenReport && screenReport.expected_performance ? screenReport.expected_performance : {};
-      const evaluation = designReport && designReport.candidate_evaluation ? designReport.candidate_evaluation : {};
-      const rows = scatterRows(Array.isArray(expected.scatter_points) ? expected.scatter_points : []);
-      const metricRows = [
-        ["OBJ", evaluation.selected_score ?? selected.expected_objective_proxy_score ?? selected.predicted_objective ?? selected.score],
-        ["PRINT", selected.manufacturability_score ?? selected.expected_manufacturability_score],
-        ["INFO", selected.information_gain_score],
-        ["RISK", evaluation.risk_score ?? selected.risk_score],
-      ].map(([label, value]) => ({ label, value: scoreText(value, 2) }));
-      return `
-    <div class="ar-design-performance-map">
-      ${rows.length
-        ? `<div class="ar-design-echart ar-design-scatter-chart" data-orc-echart="dsn-scatter" data-orc-payload="${orcChartPayloadAttr({ rows })}" aria-label="Candidate mass versus predicted objective"></div>`
-        : renderEmpty("Waiting for scatter.")}
-      <div class="ar-design-metric-strip">
-        ${metricRows.map((item) => `<span><b>${escapeHtml(item.label)}</b>${escapeHtml(item.value)}</span>`).join("")}
-      </div>
-    </div>
-  `;
+      const evaluations = screenReport.candidate_evaluations || designReport.candidate_evaluations || [];
+      const fallback = designReport.design_evaluation || screenReport.design_evaluation || selected.design_evaluation;
+      const rows = evaluations.length ? evaluations : fallback ? [fallback] : [];
+      const selectedId = selected.candidate_id || screenReport.design_evaluation?.candidate_id || designReport.design_evaluation?.candidate_id;
+      return '<div class="dsn-comparison-scroll" tabindex="0" role="region" aria-label="Candidate comparison">' + evidenceTable(["Candidate", "Constraints", "Mass (estimated)", "Performance evidence"], rows.map(e=>[
+        `${e.candidate_id ?? 'Not recorded'}${selectedId && e.candidate_id===selectedId?' · Selected':''}`, e.validity?.status,
+        e.cost?.mass?.value != null ? `${e.cost.mass.value} ${e.cost.mass.unit || ""}` : "Not recorded",
+        e.performance?.value != null && e.performance?.source ? `${e.performance.value} ${e.performance.unit || ""}` : "Unassessed"
+      ]), selectedId ? rows.findIndex(e=>e.candidate_id===selectedId) : -1) + '</div>';
     }
 
     function renderArtifactLedger(items) {
@@ -163,34 +174,15 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
   `;
     }
 
-    function renderManufacturabilityCard(screenReport, designReport, selected, spec, material = {}, candidateRows = []) {
-      const evidence = (designReport && designReport.design_evaluation) || (screenReport && screenReport.design_evaluation) || spec.design_evaluation;
-      if (evidence) return renderEvidence(evidence, true);
-      const expected = screenReport && screenReport.expected_performance ? screenReport.expected_performance : {};
-      const evaluation = designReport && designReport.candidate_evaluation ? designReport.candidate_evaluation : {};
-      const manufacturability = (screenReport && screenReport.manufacturability) || (designReport && designReport.manufacturability) || {};
-      const rows = radarRows(Array.isArray(expected.radar) ? expected.radar : [], {
-        ...evaluation,
-        manufacturability_score: firstPresent(manufacturability.manufacturability_score, selected.manufacturability_score, selected.expected_manufacturability_score),
-      });
-      const warnings = Array.isArray(manufacturability.warnings) ? manufacturability.warnings : [];
-      const previewCount = candidateRows.filter((item) => designImageUrlFromSource(item) || designCandidateDirectCaptureUrl(item)).length;
-      return `
-    <div class="ar-design-manufacturing-layout">
-      ${rows.length
-        ? `<div class="ar-design-echart ar-design-radar-chart" data-orc-echart="dsn-radar" data-orc-payload="${orcChartPayloadAttr({ rows })}" aria-label="Manufacturability radar chart"></div>`
-        : renderEmpty("Waiting for gate.")}
-      <div class="ar-design-metric-strip">
-        <span><b>Printer</b>${escapeHtml(compactText(manufacturability.printer_model || spec.printer_model || "-", 18))}</span>
-        <span><b>Material</b>${escapeHtml(compactText(material.material || spec.material || "-", 18))}</span>
-        <span><b>Mass</b>${escapeHtml(`${renderRuntimeValue(firstPresent(manufacturability.expected_mass_g, spec.expected_mass_g, "-"))} g`)}</span>
-        <span><b>Time</b>${escapeHtml(`${renderRuntimeValue(firstPresent(manufacturability.expected_print_time_min, spec.expected_print_time_min, "-"))} min`)}</span>
-        <span><b>Nozzle</b>${escapeHtml(renderRuntimeValue(firstPresent(material.nozzle_diameter_mm, spec.nozzle_diameter_mm, "-")))}</span>
-        <span><b>Captures</b>${escapeHtml(`${previewCount || 0}/${candidateRows.length || 0}`)}</span>
-      </div>
-      ${warnings.length ? `<div class="ar-design-note-list">${warnings.slice(0, 2).map((item) => `<span>${escapeHtml(compactText(item, 72))}</span>`).join("")}</div>` : ""}
-    </div>
-  `;
+    function renderManufacturabilityCard(screenReport, designReport, selected, spec) {
+      const evidence = designReport.design_evaluation || screenReport.design_evaluation || spec.design_evaluation;
+      const rows = evidence?.constraint_margins || [];
+      const bars=rows.filter(m=>finiteNumber(m.actual)!==null && finiteNumber(m.limit)!==null && m.actual>=0 && m.limit>0 && ['>=','<='].includes(m.relation));
+      const chart=bars.map(m=>{const maximum=Math.max(m.actual,m.limit)*1.15,actual=m.actual/maximum*100,limit=m.limit/maximum*100;return `<div class="dsn-constraint-row"><div><strong>${escapeHtml(m.constraint)}</strong><span>${escapeHtml(`${m.actual} ${m.unit||''} · ${m.relation} ${m.limit} · ${m.status||'unknown'}`)}</span></div><svg viewBox="0 0 100 8" preserveAspectRatio="none" role="img" aria-label="Constraint value relative to limit"><rect x="${m.relation==='>='?limit:0}" width="${m.relation==='>='?100-limit:limit}" height="8" fill="#54d3ef" opacity=".09"/><rect y="2" width="${actual}" height="4" fill="${m.status==='fail'?'#e5ad69':'#54c7e8'}"/><path d="M${limit} 0 V8" stroke="#dce8f0" stroke-width=".6"/></svg><small>${escapeHtml(`Margin: ${m.margin??'Not recorded'} ${m.unit||''}`)}</small></div>`;}).join('');
+      return (chart?`<div class="dsn-constraint-bars">${chart}</div>`:'') + '<details class="dsn-variable-details"><summary>Constraint details</summary><p class="ar-design-empty">Line: limit · Shading: allowed region · Each row uses its own scale</p>' + evidenceTable(["Constraint", "Actual", "Limit", "Margin", "Result"], rows.map(m=>[
+        m.constraint, m.actual == null ? "Not recorded" : `${m.actual} ${m.unit || ""}`, m.limit == null ? "Not recorded" : `${m.relation || ""} ${m.limit} ${m.unit || ""}`,
+        m.margin == null ? "Not recorded" : `${m.margin} ${m.unit || ""}`, m.status
+      ])) + '<p class="ar-design-empty">Design constraints only; manufacturing verification belongs to SPC.</p></details>';
     }
 
     function renderMaterialCard(material, spec) {
@@ -256,6 +248,7 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
       renderArtifactLedger,
       renderBriefCard,
       renderManufacturabilityCard,
+      renderDesignSpace,
       renderMaterialCard,
       renderHandoffCard,
       renderEvidenceCard,
@@ -315,9 +308,9 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
       return `
     ${services.renderDashboardCard("Experiment Contract", renderer.renderBriefCard(brief, objective, hypothesis, spec, prior, material, manufacturability, selected), { span: 3, tone: "design", eyebrow: "mission input", className: "ar-design-reference-card ar-design-brief-card" })}
     ${services.renderDashboardCard("Generated Specimens", services.renderDesignCandidateCards(screenReport, designReport, report, { renderEvidence: renderer.renderEvidence }), { span: 9, tone: "design", eyebrow: "built specimen log", className: "ar-design-reference-card ar-design-candidates-card", meta: `${services.renderRuntimeValue(generatedCount)} built / ${services.renderRuntimeValue(validCount)} usable / ${services.renderRuntimeValue(previewCount)} previews` })}
-    ${services.renderDashboardCard("DOE Map / Design Space", services.renderDesignParameterSweep(screenReport), { span: 4, tone: "metrics", eyebrow: "parameter sweep", className: "ar-design-reference-card ar-design-sweep-card" })}
-    ${services.renderDashboardCard("Evaluation Matrix", renderer.renderExpectedPerformance(screenReport, designReport, selected), { span: 4, tone: "metrics", eyebrow: "objective vs mass", className: "ar-design-reference-card ar-design-performance-card" })}
-    ${services.renderDashboardCard("Buildability Gate", renderer.renderManufacturabilityCard(screenReport, designReport, selected, spec, material, specimenRows.length ? specimenRows : candidateRows), { span: 4, tone: handoff.required_fields_present === false || (manufacturability.warnings || []).length ? "warning" : "success", eyebrow: "print path", className: "ar-design-reference-card ar-design-manufacturing-card" })}
+    ${services.renderDashboardCard("Design Space", renderer.renderDesignSpace(screenReport, selected), { span: 4, tone: "metrics", eyebrow: "recorded variables", className: "ar-design-reference-card ar-design-sweep-card" })}
+    ${services.renderDashboardCard("Candidate Comparison", renderer.renderExpectedPerformance(screenReport, designReport, selected), { span: 4, tone: "metrics", eyebrow: "recorded candidate evidence", className: "ar-design-reference-card ar-design-performance-card" })}
+    ${services.renderDashboardCard("Constraint Check", renderer.renderManufacturabilityCard(screenReport, designReport, selected, spec, material, specimenRows.length ? specimenRows : candidateRows), { span: 4, tone: (designReport.design_evaluation || screenReport.design_evaluation || spec.design_evaluation)?.validity?.status === "pass" ? "success" : "warning", eyebrow: "design checks", className: "ar-design-reference-card ar-design-manufacturing-card" })}
     ${services.renderDashboardCard("Active Handoff", renderer.renderHandoffCard(handoff, selected, material, spec, artifactLedger), { span: 12, tone: handoff.required_fields_present === false || rejected.length ? "warning" : "success", eyebrow: "dsn -> spc", className: "ar-design-reference-card ar-design-handoff-card" })}
   `;
     }

@@ -17,6 +17,7 @@ def test_viewer_initialization_is_single_flight_across_report_remounts() -> None
 
 def test_live_report_updates_in_place_and_preserves_telemetry_surfaces() -> None:
     source = PLANNING_PATH.read_text(encoding="utf-8")
+    source += Path("agents/manipulation/frontend/live_report.js").read_text(encoding="utf-8")
 
     assert "function patchLiveReportNode(" in source
     assert "function updateLiveReportPanel(" in source
@@ -24,11 +25,12 @@ def test_live_report_updates_in_place_and_preserves_telemetry_surfaces() -> None
     assert '"live-preserve": "manipulation-pose"' in source
     assert '"live-preserve": "manipulation-policy"' in source
     assert '"live-preserve": "manipulation-motion"' in source
-    assert '"live-preserve": "manipulation-execution"' in source
-    assert '"live-preserve": "manipulation-interlocks"' in source
-    assert '"live-preserve": "manipulation-completion"' in source
-    assert '"live-preserve": "manipulation-result"' in source
-    assert '"live-preserve": "manipulation-metrics"' in source
+    assert '"live-preserve":"manipulation-completion-summary"' in source
+    for name in ['metrics', 'execution', 'interlocks']:
+        assert f'"live-preserve":"manipulation-{name}"' in source
+    for selector in ['data-atr-runtime-execution', 'data-atr-runtime-interlocks',
+                     'data-atr-runtime-completion', 'data-atr-runtime-result', 'data-atr-runtime-metrics']:
+        assert selector in source
     assert "liveReportPanel.innerHTML = reportHtml" not in source
 
 

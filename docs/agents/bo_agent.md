@@ -39,6 +39,10 @@ supersedes: []
 
 # Bayesian Optimization Agent Reference
 
+<img src="../../web/static/workspace_icons/bo.webp" width="96" alt="Bayesian Optimization Workspace icon">
+
+Main GUI: **Bayesian Optimization · Workspace** opens the optimization workspace in a separate window.
+
 ![bo agent role overview](assets/figures/bo-overview.webp)
 
 *Role overview; detailed execution and connection diagrams follow below.*
@@ -346,6 +350,24 @@ attempt; run-local BO files remain latest-view compatibility outputs.
 See [Loop Artifact Archiving](../runtime/loop_artifact_archiving.md).
 
 ### Visualization Contract
+
+Live GUI places the run objective across the full report width, with posterior
+and LHS figures side by side below it. The objective is supplied independently
+of completed BO steps by the owner report API: the exact run binding
+(ID, version and hash) selects the registered expression and metric unit.
+Unbound archived runs retain their historical objective; they are never
+relabeled using a newer experiment's settings. Technical identity is available
+under Details. Posterior updates do not overwrite this objective projection.
+When a stored posterior PNG is available, Live GUI displays that exact figure;
+results without a stored image show an explicit unavailable state on Live GUI.
+The lower report keeps three fixed cards (Next Experiment, Optimization Status,
+Selection Evidence) across empty and populated states. Agentic Progress follows
+as a full-width SPC-style connected workflow row immediately before the host's
+Runtime Support card: Input Check, Strategy Decision, LHS / BoTorch, Result
+Review and Design Handoff. Each stage expands its own evidence; completion is
+derived from available BO results and decision records, not from its position
+in the row. Historical results without LLM decision evidence do not mark the
+LLM stages complete. Detailed tool records remain separately expandable.
 
 LHS and acquisition remain separate read-only projections:
 `lhs_design_visualization.v1` and `bo_visualization.v1`. The LHS card shows

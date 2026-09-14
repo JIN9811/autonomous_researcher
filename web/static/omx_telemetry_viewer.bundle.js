@@ -28085,7 +28085,8 @@ void main() {
     document.querySelectorAll("[data-atr-runtime-step]").forEach((row) => {
       const step = steps.get(String(row.dataset.atrRuntimeStep || "")) || {};
       let status = String(step.status || "waiting");
-      if (status === "waiting" && row.dataset.atrRuntimeStep === currentStep) status = "active";
+      const executing = /^(running|active|in_progress)$/.test(String(runtime.runtimeView?.execution?.runtime_status || ""));
+      if (executing && status === "waiting" && row.dataset.atrRuntimeStep === currentStep) status = "active";
       row.dataset.status = status;
       setNodeTextIfChanged(row.querySelector("strong"), status);
       const evidence = step.evidence_path || step.reason || (step.sequence ? `sequence ${step.sequence}` : "");

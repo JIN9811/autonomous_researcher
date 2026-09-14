@@ -9,17 +9,13 @@ ui:
     report: module
     fallback: descriptor
   cards:
-  - {id: bo_objective_equation, type: chart, title: BO Objective Equation, span: 4, tone: bo}
-  - {id: bo_live_posterior, type: chart, title: Live Posterior, span: 8, tone: bo}
-  - {id: bo_initial_design, type: chart, title: Initial Design / LHS, span: 12, tone: bo}
-  - {id: bo_decision_audit, type: evidence, title: BO Decision / Tool Audit, span: 12, tone: bo}
-  - {id: bo_candidate_ranking, type: chart, title: Candidate Ranking, span: 8, tone: bo}
-  - {id: bo_recommendation, type: metric_group, title: Recommendation, span: 4, tone: bo}
-  - {id: bo_selected_parameters, type: evidence, title: Selected Parameters, span: 4, tone: bo}
-  - {id: bo_acquisition_strategy, type: evidence, title: Acquisition Strategy, span: 4, tone: bo}
-  - {id: bo_prior_memory, type: evidence, title: Prior Memory, span: 4, tone: bo}
-  - {id: bo_ranking_audit, type: evidence, title: Ranking Audit, span: 4, tone: bo}
-  - {id: bo_next_design_request, type: handoff, title: Next Design Request, span: 4, tone: bo}
+  - {id: bo_objective_equation, type: chart, title: Objective Equation, span: 12, tone: bo}
+  - {id: bo_live_posterior, type: chart, title: Live Posterior, span: 6, tone: bo}
+  - {id: bo_initial_design, type: chart, title: Initial Design / LHS, span: 6, tone: bo}
+  - {id: bo_next_experiment, type: handoff, title: Next Experiment, span: 4, tone: bo}
+  - {id: bo_optimization_status, type: metric_group, title: Optimization Status, span: 4, tone: bo}
+  - {id: bo_selection_evidence, type: evidence, title: Selection Evidence, span: 4, tone: bo}
+  - {id: bo_agentic_progress, type: evidence, title: Agentic Progress, span: 12, tone: bo}
   report_sections:
   - id: bo_optimization_evidence
     title: BO Optimization Evidence

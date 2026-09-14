@@ -1,5 +1,5 @@
 ---
-{"topic_id":"knowledge-role","owner":"knowledge_agent","source_refs":["docs/agents/knowledge_agent.md"],"source_revision":{"docs/agents/knowledge_agent.md":"bb87bd7a08bf38bf15050163a6fdb50ec71377e0126d7e496d9b3da7bd1f6598"},"verified_at":"2026-09-14T00:00:00+00:00","applicability":"Public Knowledge Agent responsibilities and handoff","status":"reviewed"}
+{"topic_id":"knowledge-role","owner":"knowledge_agent","source_refs":["docs/agents/knowledge_agent.md"],"source_revision":{"docs/agents/knowledge_agent.md":"7bf052d608dc335f4e91bf8a4d5e22a0ad9a26bdd7468c03aef78ea43ca37733"},"verified_at":"2026-09-14T00:00:00+00:00","applicability":"Public Knowledge Agent responsibilities and handoff","status":"reviewed"}
 ---
 
 # Knowledge Agent

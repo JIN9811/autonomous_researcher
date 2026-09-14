@@ -7,9 +7,13 @@
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
     <link rel="stylesheet" href="/static/styles.css" />
-    <link rel="stylesheet" href="/static/knowledge.css?v=20260913-wiki-memory-1" />
+    <link rel="stylesheet" href="/static/knowledge.css?v=20260915-workspace-light-1" />
+    <link rel="preload" as="image" href="/static/ax4lab-logo-transparent.png">
+    <link rel="stylesheet" href="/static/workspace_boot.css?v=1">
   </head>
   <body class="knowledge-page">
+    {% set workspace_title = "Knowledge Workspace" %}
+    {% include "workspace_boot.html" %}
     <main class="knowledge-shell">
       <header class="knowledge-hero">
         <div>

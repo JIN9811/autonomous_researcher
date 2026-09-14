@@ -20,6 +20,21 @@ function snapshot(overrides = {}) {
     event_seq:9, projection_id:'projection-a', blocks:[block()], owners:[], ...overrides};
 }
 
+test('experimental package stays first and follows the supplied active graph without changing setup', () => {
+  const el=root(); const input=snapshot();
+  const before=JSON.stringify(input);
+  Setup.renderBlocks(el,input,{graph:{id:'graph_a',name:'Graph A',metadata:{experimental_package:{id:'experiment_a',display_name:'Experiment A',version:'1.0.0'}}}});
+  const cards=all(el).filter(e=>e.className==='setup-block');
+  assert.equal(cards[0].dataset.kind,'package');
+  assert.match(visibleText(cards[0]),/Experimental Package.*Experiment A.*Bound/);
+  assert.equal(JSON.stringify(input),before);
+  Setup.renderBlocks(el,input,{graph:{id:'graph_b',metadata:{experimental_package:{id:'experiment_b',display_name:'Experiment B',version:'1.0.0'}}}});
+  assert.match(visibleText(cards[0]),/Experiment B/);
+  Setup.renderBlocks(el,input,{graph:{id:'unbound_graph',name:'Not a package'}});
+  assert.match(visibleText(cards[0]),/Not bound/);
+  assert.doesNotMatch(visibleText(cards[0]),/Experiment B/);
+});
+
 // Deliberately tiny DOM at the renderer boundary; full browser checks live in tests/ui.
 class Element {
   constructor(tag, doc) { this.tagName=tag; this.ownerDocument=doc; this.children=[];
@@ -41,10 +56,80 @@ class Element {
 function root() { const doc={createElement:tag=>new Element(tag,doc)}; return doc.createElement('div'); }
 function all(el) { return [el,...el.children.flatMap(all)]; }
 function find(el, predicate) { return all(el).find(predicate); }
+function visibleText(el) {
+  if (el.hidden) return '';
+  const children=el.tagName==='details' && !el.open ? el.children.filter(c=>c.tagName==='summary') : el.children;
+  return el.text + children.map(visibleText).join(' ');
+}
+
+test('compact setup presents readable values without exposing internal contracts by default', () => {
+  const el=root();
+  Setup.renderBlocks(el,snapshot({blocks:[block({title:'Specimen',draft_values:{material:'PLA',specimen_size_mm:[30,30,30]}})],
+    owners:[{owner:'design_agent',contract_status:'supported',availability:{status:'unknown'}}]}));
+  const visible=visibleText(el);
+  assert.match(visible,/PLA/); assert.match(visible,/30 × 30 × 30 mm/);
+  assert.match(visible,/Unsaved changes/); assert.match(visible,/Technical details/);
+  assert.doesNotMatch(visible,/specimen_size_mm|orchestrator_agent|design_agent|Revision|Agreement:|Contract:|Receipts|\{/);
+  const card=find(el,e=>e.dataset.blockId==='b1');
+  find(card,e=>e.className==='setup-block-toggle').onclick();
+  find(card,e=>e.tagName==='details').open=true;
+  assert.match(visibleText(card),/Revision 3/);
+});
+test('conversation cards show the latest value and only their usable Edit action', () => {
+  const el=root();
+  Setup.renderBlocks(el,snapshot({blocks:[block({title:'Material',conversation_input:true,draft_values:{material:'PETG'}})]}));
+  find(el,e=>e.className==='setup-block-toggle').onclick();
+  const text=visibleText(el);
+  assert.match(text,/PETG/); assert.match(text,/Saved/); assert.match(text,/Edit/);
+  assert.doesNotMatch(text,/Confirm|Discard|Revision|Agreement:/);
+});
+test('one-line cards toggle, keep at most three open, and preserve expansion during value refresh', () => {
+  const el=root();
+  const blocks=[1,2,3,4].map(n=>block({block_id:`b${n}`,title:`Setting ${n}`}));
+  Setup.renderBlocks(el,snapshot({blocks}));
+  const toggles=all(el).filter(e=>e.className==='setup-block-toggle');
+  const openCount=()=>toggles.filter(e=>e.attributes['aria-expanded']==='true').length;
+  assert.equal(openCount(),0);
+  toggles.forEach(t=>t.onclick());
+  assert.equal(openCount(),3);
+  assert.equal(toggles[0].attributes['aria-expanded'],'false');
+  assert.equal(find(el,e=>e.dataset.blockId==='b1').children[1].hidden,true);
+  Setup.renderBlocks(el,snapshot({revision:10,blocks:blocks.map(b=>({...b,revision:4,draft_values:{material:'PETG'}}))}));
+  assert.equal(openCount(),3);
+  assert.match(toggles[3].textContent,/PETG/);
+  toggles[3].onclick(); assert.equal(openCount(),2);
+  assert.equal(toggles[3].attributes['aria-expanded'],'false');
+});
+test('collapsed status never hides rejected or uncertain application receipts as scheduled', () => {
+  for (const status of ['rejected','partial','unknown']) {
+    const el=root();
+    Setup.renderBlocks(el,snapshot({blocks:[block({agreement_status:'confirmed',application_status:status,current_draft_proposal_id:null})]}));
+    assert.match(visibleText(el),/Needs attention/);
+    assert.doesNotMatch(visibleText(el),/For next run/);
+  }
+  const el=root();
+  Setup.renderBlocks(el,snapshot({blocks:[block({agreement_status:'confirmed',application_status:'applying',current_draft_proposal_id:null})]}));
+  assert.match(visibleText(el),/Applying/);
+});
 
 test('editing selects context without sending a command', () => {
   assert.equal(typeof Setup.beginEdit, 'function');
   assert.deepEqual(Setup.beginEdit({block_id:'b1', revision:3}), {block_id:'b1', revision:3});
+});
+test('conversation inputs update the same block and are edited in chat, never confirmed as owner configuration', () => {
+  const el=root(); let edited;
+  const input=block({topic_key:'conversation.input.material',conversation_input:true,draft_values:{material:'PLA'}});
+  Setup.renderBlocks(el,snapshot({blocks:[input]}),{onEdit:b=>edited=b});
+  const card=find(el,e=>e.dataset.blockId==='b1');
+  const edit=find(card,e=>e.textContent==='Edit');
+  assert.equal(edit.disabled,false);
+  assert.equal(find(card,e=>e.textContent==='Confirm').disabled,true);
+  assert.equal(find(card,e=>e.textContent==='Discard').disabled,true);
+  Setup.renderBlocks(el,snapshot({revision:10,blocks:[{...input,revision:4,draft_values:{material:'PETG'}}]}),{onEdit:b=>edited=b});
+  assert.equal(find(el,e=>e.dataset.blockId==='b1'),card);
+  edit.onclick(); assert.equal(edited.revision,4);
+  assert.match(card.textContent,/PETG/);
+  assert.match(card.textContent,/Review and approve execution in Chat/);
 });
 test('old event cannot overwrite a newer block state', () => {
   assert.equal(typeof Setup.acceptSnapshot, 'function');

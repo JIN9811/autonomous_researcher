@@ -21,26 +21,29 @@ Modification guide:
 -->
 <html lang="en">
   <head>
+    <link rel="preload" as="image" href="/static/ax4lab-logo-transparent.png" fetchpriority="high" />
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260622-utm-rqt-flow-1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260915-workspace-cells-1" />
   </head>
   <body>
-    <main class="page">
-      <section class="hero panel">
+    <div id="live-boot-cover" class="main-boot-cover" data-boot-mode="main" role="status" aria-label="Loading AX4LAB Main GUI">
+      <img src="/static/ax4lab-logo-transparent.png" alt="AX4LAB" width="360" height="360" fetchpriority="high" loading="eager" decoding="sync" />
+      <strong class="live-boot-title">MAIN GUI</strong>
+    </div>
+    <script src="/static/live_boot.js?v=4"></script>
+    <noscript><style>#live-boot-cover { display:none; }</style></noscript>
+    <main class="page main-dashboard-page">
+      <section class="hero panel main-dashboard-hero">
         <div class="hero-copy">
-          <p class="eyebrow">Autonomous Researcher Platform</p>
-          <h1>Low Cost Self-Driving Lab</h1>
-          <p class="subhead">
-            NemoClaw-backed multi-agent orchestration with Gemma4 role split, hybrid RAG, and live loop visibility.
-          </p>
-          <div class="hero-badges">
-            <span class="hero-badge">NemoClaw core</span>
-            <span class="hero-badge">Gemma4 hierarchy</span>
-            <span class="hero-badge">Live graph telemetry</span>
+          <div class="main-brand-banner-frame">
+            <img class="main-brand-banner" src="/static/ax4lab-banner.png" alt="AX4LAB — Autonomous Research Platform" fetchpriority="high" />
           </div>
+        </div>
+        <div class="panel-title-row main-llm-control-title">
+          <h2>LLM Control</h2>
         </div>
         <div class="hero-stack">
           <article class="status-card">
@@ -131,10 +134,6 @@ Modification guide:
             </select>
           </label>
           <label>
-            Goal
-            <input id="goal-input" type="text" value="Build autonomous AI researcher pipeline" />
-          </label>
-          <label>
             Fault
             <input id="fault-input" type="text" value="none" />
           </label>
@@ -161,85 +160,25 @@ Modification guide:
         </div>
         <div class="workspace-grid">
           <article class="workspace-card">
-            <div class="status-head">
-              <span class="status-title">3DP Printer Bridge</span>
-              <span id="printer-workspace-dot" class="status-dot idle"></span>
-            </div>
-            <strong>Selected printer profile · bridge telemetry</strong>
-            <p id="printer-workspace-detail">Reading selected 3DP bridge profile status.</p>
-            <a id="btn-open-printer" class="btn primary" href="/printer" target="_blank" rel="noopener">Open 3DP GUI</a>
+            <a id="btn-open-printer" class="workspace-launch" href="/printer" target="_blank" rel="noopener"><img src="/static/workspace_icons/printer.webp" width="72" height="72" alt=""><span><strong>3D Printer</strong><small>Workspace</small></span></a>
           </article>
           <article class="workspace-card">
-            <div class="status-head">
-              <span class="status-title">Windows PyAutoGUI Bridge</span>
-              <span id="windows-workspace-dot" class="status-dot idle"></span>
-            </div>
-            <strong>Internal PC discovery · macro bridge setup</strong>
-            <p id="windows-workspace-detail">Reading saved Windows bridge candidates.</p>
-            <a id="btn-open-windows-bridge" class="btn primary" href="/equipment/windows" target="_blank" rel="noopener">Open Windows Bridge GUI</a>
+            <a id="btn-open-windows-bridge" class="workspace-launch" href="/equipment/windows" target="_blank" rel="noopener"><img src="/static/workspace_icons/windows.webp" width="72" height="72" alt=""><span><strong>Windows Automation</strong><small>Workspace</small></span></a>
           </article>
           <article class="workspace-card">
-            <div class="status-head">
-              <span class="status-title">LeRobot / ROBOTIS</span>
-              <span id="lerobot-workspace-dot" class="status-dot idle"></span>
-            </div>
-            <strong>Manipulation Agent</strong>
-            <p id="lerobot-workspace-detail">Reading LeRobot bridge profile status.</p>
-            <button id="btn-open-lerobot" class="btn primary">Open LeRobot GUI</button>
+            <button id="btn-open-lerobot" class="workspace-launch" type="button"><img src="/static/workspace_icons/lerobot.webp" width="72" height="72" alt=""><span><strong>Manipulation</strong><small>Workspace</small></span></button>
           </article>
           <article class="workspace-card">
-            <div class="status-head">
-              <span class="status-title">BO Workspace</span>
-              <span id="bo-workspace-dot" class="status-dot idle"></span>
-            </div>
-            <strong>Acquisition · BO/MBO · Benchmark</strong>
-            <p id="bo-workspace-detail">Reading optimization defaults.</p>
-            <a id="btn-open-bo" class="btn primary" href="/bo" target="_blank" rel="noopener">Open BO Workspace</a>
+            <a id="btn-open-bo" class="workspace-launch" href="/bo" target="_blank" rel="noopener"><img src="/static/workspace_icons/bo.webp" width="72" height="72" alt=""><span><strong>Bayesian Optimization</strong><small>Workspace</small></span></a>
           </article>
           <article class="workspace-card">
-            <div class="status-head">
-              <span class="status-title">CAE Analysis</span>
-              <span id="cae-workspace-dot" class="status-dot idle"></span>
-            </div>
-            <strong>CalculiX · bottom fixed · top cyclic</strong>
-            <p id="cae-workspace-detail">Reading CAE bridge status.</p>
-            <a id="btn-open-cae" class="btn primary" href="/cae" target="_blank" rel="noopener">Open CAE Workspace</a>
+            <a id="btn-open-plc" class="workspace-launch" href="/plc" target="_blank" rel="noopener"><img src="/static/workspace_icons/plc.webp" width="72" height="72" alt=""><span><strong>PLC Safety</strong><small>Workspace</small></span></a>
           </article>
           <article class="workspace-card">
-            <div class="status-head">
-              <span class="status-title">PLC Safety Bridge</span>
-              <span id="plc-workspace-dot" class="status-dot idle"></span>
-            </div>
-            <strong id="plc-workspace-status">OFFLINE</strong>
-            <p id="plc-workspace-detail">PLC is optional. Manual setup and diagnostics remain available.</p>
-            <a id="btn-open-plc" class="btn primary" href="/plc" target="_blank" rel="noopener">Open PLC Workspace</a>
+            <a id="btn-open-vision-utm-bridge" class="workspace-launch" href="/device-bridge/vision-utm" target="_blank" rel="noopener"><img src="/static/workspace_icons/camera.webp" width="72" height="72" alt=""><span><strong>Vision</strong><small>Workspace</small></span></a>
           </article>
           <article class="workspace-card">
-            <div class="status-head">
-              <span class="status-title">Vision / UTM Camera Bridge</span>
-              <span class="status-dot idle"></span>
-            </div>
-            <strong>Camera mapping · frame probe · calibration</strong>
-            <p>Configure the Camera used by the UTM Vision runtime without binding the bridge to a specific product name.</p>
-            <a id="btn-open-vision-utm-bridge" class="btn primary" href="/device-bridge/vision-utm" target="_blank" rel="noopener">Open Camera Bridge</a>
-          </article>
-          <article class="workspace-card">
-            <div class="status-head">
-              <span class="status-title">Self-Evolution Lab</span>
-              <span class="status-dot idle"></span>
-            </div>
-            <strong>Trace mining · candidate gates · next-run activation</strong>
-            <p>Closed-loop run traces를 기반으로 prompt/graph/report/policy 후보를 검증합니다.</p>
-            <a id="btn-open-evolution" class="btn primary" href="/evolution-lab" target="_blank" rel="noopener">Open Evolution Lab</a>
-          </article>
-          <article class="workspace-card">
-            <div class="status-head">
-              <span class="status-title">Knowledge Workspace</span>
-              <span id="knowledge-workspace-dot" class="status-dot idle"></span>
-            </div>
-            <strong>Ontology · memory · provenance graph</strong>
-            <p id="knowledge-workspace-detail">Reading Knowledge graph and durable outbox status.</p>
-            <a id="btn-open-knowledge" class="btn primary" href="/knowledge" target="_blank" rel="noopener">Open Knowledge Workspace</a>
+            <a id="btn-open-knowledge" class="workspace-launch" href="/knowledge" target="_blank" rel="noopener"><img src="/static/workspace_icons/knowledge.webp" width="72" height="72" alt=""><span><strong>Knowledge</strong><small>Workspace</small></span></a>
           </article>
         </div>
       </section>
@@ -288,9 +227,6 @@ Modification guide:
           <h2>LangGraph Runtime Map</h2>
           <span id="graph-stage-indicator" class="badge idle">STAGE: IDLE</span>
         </div>
-        <p class="graph-subhead">
-          Read-only canvas rendered from the active LangGraph config. Edit routes and modules in Runtime IDE.
-        </p>
         <div class="langgraph-shell runtime-readonly-map" aria-label="Read-only LangGraph runtime canvas">
           <div id="langgraph-cells" class="langgraph-cells" aria-hidden="true"></div>
           <div id="langgraph-nodes" class="langgraph-nodes"></div>
@@ -306,7 +242,7 @@ Modification guide:
             <strong>Runtime IDE</strong>
             <span>LangGraph graph/module config, validation, dry-run, version activation</span>
           </div>
-          <a class="btn primary runtime-map-ide-btn" href="/ide" target="_blank" rel="noopener">Open Runtime IDE</a>
+          <a id="btn-open-runtime-ide" class="btn primary runtime-map-ide-btn" href="/ide" target="_blank" rel="noopener">Open Runtime IDE</a>
         </div>
       </section>
     </main>
@@ -337,6 +273,6 @@ Modification guide:
 
     <script src="/static/runtime_graph_geometry.js?v=atr-ui-20260812-graph-layout-4"></script>
     <script src="/static/runtime_cycle.js?v=20260811-contract-2"></script>
-    <script src="/static/app.js?v=20260904-test-mode-profiles-1" defer></script>
+    <script src="/static/app.js?v=20260915-workspace-popups-1" defer></script>
   </body>
 </html>

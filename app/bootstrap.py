@@ -50,8 +50,6 @@ from knowledge.context_service import KnowledgeContextService
 from device_bridges.specimen_pose_tracker import get_specimen_pose_tracker_bridge
 from device_bridges.utm_runtime_bridge import get_utm_runtime_manager
 from device_bridges.utm_state_observer import observe_utm_state_window
-from device_bridges.cae.calculix_tools import register_calculix_tools
-from device_bridges.cae.tools import register_cae_tools
 from mcp_tools.camera_tools import register_camera_tools
 from device_bridges.windows_pyautogui.tools import register_equipment_tools
 from mcp_tools.experiment_tools import register_experiment_tools
@@ -310,8 +308,6 @@ def load_runtime() -> MainController:
     register_equipment_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
     lerobot_bridge = register_lerobot_tools(tools, cfg.get("lerobot", {}), repo_root=resolve_path("."))
     lerobot_bridge.config.artifact_run_root = resolve_path(system_cfg.get("run_root", "./runs"))
-    register_cae_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
-    register_calculix_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
     register_pinn_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
     register_experiment_tools(tools, cfg.get("devices", {}))
 

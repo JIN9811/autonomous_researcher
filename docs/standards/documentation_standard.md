@@ -424,7 +424,6 @@ canonical set is:
 - `lerobot_bridge.md`;
 - `windows_pyautogui_bridge.md`;
 - `utm_vision_bridge.md`;
-- `cae_computation_bridges.md`;
 - `base_simulator_bridges.md`.
 
 The boundary is operator-visible capability rather than one Python class. The

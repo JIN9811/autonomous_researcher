@@ -32,7 +32,6 @@ OPENAI_MAX_COMPLETION_TOKENS_BY_TASK = {
     "design_reasoning": 1200,
     "specimen_reasoning": 1200,
     "analysis_reasoning": 1000,
-    "analysis_fem_planning": 1000,
     "bo_policy": 1000,
     "knowledge_query": 4096,
     "guardian_reasoning": 1000,

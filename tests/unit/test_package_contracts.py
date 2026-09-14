@@ -87,6 +87,17 @@ def test_roundtrip_detached_rearranged_nodes_and_symbolic_bindings():
     assert len(exported["package"]["graph"]["nodes"]) == 2
 
 
+def test_optional_package_display_name_roundtrips_independently_of_graph_name():
+    draft = payload()
+    draft["display_name"] = "Specimen Compression"
+    result = service().export_experimental(draft)
+    assert result["ok"]
+    imported = service().import_experimental(result["package"])
+    assert imported["ok"]
+    assert imported["draft"]["display_name"] == "Specimen Compression"
+    assert imported["draft"]["graph"] == draft["graph"]
+
+
 @pytest.mark.parametrize("mutation", [
     lambda p: p["agent_packages"].append(p["agent_packages"][0]),
     lambda p: p["agent_packages"][0].update(version=">=1.0.0"),

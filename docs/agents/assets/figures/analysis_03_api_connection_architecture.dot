@@ -1,27 +1,19 @@
-digraph analysis_api_connection_architecture {
-  graph [rankdir=TB, bgcolor="white", pad="0.3", nodesep="0.4", ranksep="0.55", fontname="DejaVu Sans", label="Analysis: existing routing and read-only field APIs", labelloc=t, fontsize=20];
-  node [shape=box, style="rounded,filled", fillcolor="#EEF4FF", color="#315C9B", fontname="DejaVu Sans", fontsize=14, margin="0.17,0.1"];
-  edge [color="#52667A", fontname="DejaVu Sans", fontsize=12];
-  agent [label="Analysis\nforeground + background",penwidth=2];
-  llm [label="AgentContext / analysis_reasoning\nexisting API or local model route",fillcolor="#F2ECFA"];
-  tools [label="ToolRegistry\ncae.prepare_static_analysis\ncae.run_static_analysis",shape=component];
-  bridge [label="CAE / CalculiX bridge\nGmsh + owned cancellable solver\nno background wall deadline",shape=component,fillcolor="#F2ECFA"];
-  raw [label="Equipment CSV + specimen STL\nimmutable hashes + acquisition identity",shape=note,fillcolor="#E9F7EF"];
-  result [label="Reusable native model package\nINP / DAT / FRD + curves / actual fields",shape=note,fillcolor="#E9F7EF"];
-  store [label="Run-owned evidence store\njobs / candidates / validation / pins",shape=cylinder,fillcolor="#E9F7EF"];
-  gui [label="Live Analysis: four consolidated cards\nprevious / next attempt or contour"];
-  jobs [label="GET /api/analysis/fem/jobs\nexact run / loop / specimen",shape=component];
-  api [label="GET /api/cae/fields\n/metadata · /section · /render\nread-only local postprocessing"];
-  viewer [label="/cae/results\nVTK field viewer + 4K export"];
-  raw -> agent;
-  agent -> llm [label="bounded decision"];
-  llm -> agent [label="listed option + reason"];
-  agent -> tools -> bridge -> result;
-  agent -> store [label="frozen evidence"];
-  result -> store [label="linked artifacts",color="#2E7D59"];
-  gui -> viewer;
-  gui -> jobs -> store [label="read only"];
-  gui -> api [label="selected contour only"];
-  viewer -> api [label="read / slice / render"];
-  api -> result [label="saved data only",color="#2E7D59"];
+digraph analysis_api {
+ graph [rankdir=LR,bgcolor="white",pad="0.35",nodesep="0.45",ranksep="0.65",fontname="DejaVu Sans",fontsize=20,label="Analysis — package and API ownership",labelloc=t];
+ node [shape=box,style="rounded,filled",fillcolor="#EEF4FF",color="#315C9B",fontname="DejaVu Sans",fontsize=14,margin="0.2,0.12"];
+ edge [color="#52667A",fontname="DejaVu Sans",fontsize=12];
+ runtime [label="Runtime graph\nanalysis.task → analysis.deliver"];
+ owner [label="Analysis owner\nagent.py"];
+ llm [label="Registered backend\nanalysis_reasoning",fillcolor="#F2ECFA"];
+ objective [label="Objective service\nBinding + measured evaluation"];
+ archive [label="Run / loop / attempt archive",shape=note];
+ report [label="GET /api/agents/analysis/report\nOwner projection"];
+ live [label="Live GUI\nAnalysis frontend module"];
+ runtime -> owner;
+ owner -> llm [label="LLM call"];
+ llm -> owner [style=dashed,label="bounded decision"];
+ owner -> objective;
+ owner -> archive;
+ owner -> report [label="read-only evidence"];
+ report -> live;
 }

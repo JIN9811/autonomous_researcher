@@ -145,7 +145,7 @@ The areas describe responsibilities, not five sequential model calls.
 
 Printer reconnection or uncertain command effect is a Low-Level concern;
 regenerating a failed fabrication artifact is Middle-Level; selecting
-retry/review/stop or another cycle is High-Level. The 3DP Device Workspace is a
+retry/review/stop or another cycle is High-Level. The 3D Device Workspace is a
 manual surface and does not independently complete this agent stage.
 
 ## Closed-Loop Position and Handoffs
@@ -381,7 +381,7 @@ never retries an uncertain physical effect.
 
 ### Operator and GUI Surfaces
 
-The 3DP workspace exposes fleet, connection, live status/video, slicing,
+The 3D workspace exposes fleet, connection, live status/video, slicing,
 prestart, start, autoejection, bed-clear, and proof/audit functions. Live GUI
 shows the agent's manufacturing report and evidence. UI confirmation does not
 bypass server/provider gates.
@@ -436,7 +436,7 @@ Existing fabrication, verification and completion contracts remain authoritative
 | Frontend extraction | 37 JavaScript checks passed; existing report/dashboard and lifecycle behavior retained |
 | Saved execution definition | Guarded API save/reload changed real owner call order; preparation bypass rejected without replacing active configuration |
 | Supervised status | Fully registered runtime: success continues to Vision; failed Specimen result publishes error |
-| Registered-model virtual cycle | Passed through BO, Guardian and next Design: 34 actual `gpt-5.5` calls across all 10 owners, 343.50 s test elapsed, zero physical calls; device observations/data simulated, background FEM not run |
+| Registered-model virtual cycle | Passed through BO, Guardian and next Design: 34 actual `gpt-5.5` calls across all 10 owners, 343.50 s test elapsed, zero physical calls; device observations/data simulated |
 
 Two older isolated status fixtures still fail because they omit the supervisor
 required by their graph. They failed before and after migration; the new guarded

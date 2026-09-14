@@ -1,6 +1,6 @@
 /*
 File purpose:
-- Frontend behavior for the dedicated multi-printer / Bambu Lab 3DP workspace.
+- Frontend behavior for the dedicated multi-printer / Bambu Lab 3D workspace.
 
 Key classes/functions:
 - refreshProfile

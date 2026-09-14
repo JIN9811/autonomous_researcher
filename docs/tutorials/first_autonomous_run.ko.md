@@ -20,7 +20,7 @@
 
 첫 실행 전 아래를 확인합니다.
 
-- 저장소 경로: `/home/jin/autonomous_researcher`
+- 저장소 경로: `~/autonomous_researcher`
 - Python 가상환경 생성/활성화
 - `pip install -r requirements.txt` 완료
 - `bash install/install_cli.sh` 완료
@@ -84,7 +84,7 @@ atr down
 2. 오케스트레이터 handoff 메시지 확인
 3. Design / Specimen 단계의 후보/아티팩트 존재 확인
 4. 그래프 규칙에 따른 다음 단계 진행 확인
-5. BO/CAE/분석 결과를 이벤트 추적에서 확인
+5. BO/분석 결과를 이벤트 추적에서 확인
 
 ## 6) 런 추적/아티팩트 검증
 

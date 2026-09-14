@@ -1,4 +1,4 @@
-"""Integration tests for Knowledge memory and self-evolution API contracts."""
+"""Integration tests for Knowledge memory and improvement-evidence API contracts."""
 
 from __future__ import annotations
 
@@ -183,7 +183,8 @@ def test_knowledge_evolution_outcome_api_appends_reviewed_attribution(tmp_path: 
     assert [item["outcome_id"] for item in listed["records"]] == ["outcome-analysis-1"]
 
 
-def test_knowledge_agent_report_exposes_memory_and_evolution_boards(monkeypatch) -> None:
+def test_knowledge_agent_report_exposes_memory_and_improvement_evidence(monkeypatch) -> None:
+    real_controller = app_main.controller
     monkeypatch.setattr(
         app_main,
         "_knowledge_relation_summary",
@@ -210,7 +211,18 @@ def test_knowledge_agent_report_exposes_memory_and_evolution_boards(monkeypatch)
         "evolution_proposal": {
             "schema": "evolution_proposal.v1",
             "status": "ready",
-            "evidence_packs": [],
+            "evidence_packs": [
+                {
+                    "pack_id": "evo-pack-analysis-1",
+                    "target_type": "prompt",
+                    "target_id": "analysis",
+                    "priority": 0.91,
+                    "why_this_target": ["analysis has repeated low-confidence unit warnings"],
+                }
+            ],
+            "outcomes": [
+                {"outcome_id": "outcome-analysis-1", "variant_id": "variant-analysis-1", "target_type": "prompt", "target_id": "analysis", "verdict": "promising_keep_observing"}
+            ],
         },
         "knowledge_report": {
             "schema": "knowledge_report.v1",
@@ -230,25 +242,6 @@ def test_knowledge_agent_report_exposes_memory_and_evolution_boards(monkeypatch)
             "success_patterns": [
                 {"skill_id": "equipment-utm-export-v1", "agent_id": "equipment"}
             ],
-            "self_evolution": {
-                "schema": "evolution_proposal.v1",
-                "status": "ready",
-                "evidence_packs": [
-                    {
-                        "pack_id": "evo-pack-analysis-1",
-                        "target_type": "prompt",
-                        "target_id": "analysis",
-                        "priority": 0.91,
-                        "why_this_target": ["analysis has repeated low-confidence unit warnings"],
-                    }
-                ],
-                "prefill_tasks": [
-                    {"target_type": "prompt", "target_id": "analysis", "constraints": {"knowledge_evidence_pack_id": "evo-pack-analysis-1"}}
-                ],
-                "outcomes": [
-                    {"outcome_id": "outcome-analysis-1", "variant_id": "variant-analysis-1", "target_type": "prompt", "target_id": "analysis", "verdict": "promising_keep_observing"}
-                ],
-            },
             "evolution_outcomes": [
                 {"outcome_id": "outcome-analysis-1", "variant_id": "variant-analysis-1", "target_type": "prompt", "target_id": "analysis", "verdict": "promising_keep_observing"}
             ],
@@ -257,6 +250,8 @@ def test_knowledge_agent_report_exposes_memory_and_evolution_boards(monkeypatch)
         },
     }
     fake_controller = SimpleNamespace(
+        _planning_setup_catalog=real_controller._planning_setup_catalog,
+        _deps=real_controller._deps,
         snapshot=lambda: {"is_running": False, "state": {"run_id": "run-report", "stage": "knowledge", "run_metadata": {"knowledge": knowledge_payload}}},
         planning_snapshot=lambda: {"state": {"run_id": "run-report", "stage": "knowledge", "run_metadata": {"knowledge": knowledge_payload}}, "messages": []},
         recent_events=lambda: [
@@ -277,13 +272,13 @@ def test_knowledge_agent_report_exposes_memory_and_evolution_boards(monkeypatch)
     assert report["role_specific"]["memory_ledger"]["experiment_record_id"] == "experiment-memory-1"
     assert report["role_specific"]["retrieval_panel"]["coverage"] == 0.87
     assert report["role_specific"]["failure_success_library"]["failure_patterns"][0]["pattern_id"] == "analysis-unit-confidence-low"
-    assert report["role_specific"]["self_evolution_board"]["top_packs"][0]["pack_id"] == "evo-pack-analysis-1"
-    assert report["role_specific"]["self_evolution_board"]["outcomes"][0]["outcome_id"] == "outcome-analysis-1"
+    assert report["role_specific"]["improvement_evidence_board"]["top_packs"][0]["pack_id"] == "evo-pack-analysis-1"
+    assert report["role_specific"]["improvement_evidence_board"]["outcomes"][0]["outcome_id"] == "outcome-analysis-1"
     assert report["role_specific"]["handoff_packet"]["knowledge_context"]["schema"] == "knowledge_context.v1"
     assert report["role_specific"]["relation_reconciliation"]["examined"] == 14
     assert report["role_specific"]["relation_reconciliation"]["pending"] == 3
     assert report["role_specific"]["relation_reconciliation"]["review_url"] == "/knowledge#relations"
-    assert report["decisions"][0]["decision"] == "prepare_self_evolution_evidence_pack"
+    assert report["decisions"][0]["decision"] == "prepare_improvement_evidence_pack"
     assert report["metrics"]["agent_report_coverage"] == 1.0
 
 

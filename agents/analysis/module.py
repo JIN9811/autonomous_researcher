@@ -1,4 +1,4 @@
-"""Code-discovered Analysis owner; the CAE bridge retains computation."""
+"""Code-discovered owner of experimental postprocessing and BO observations."""
 import json
 from pathlib import Path
 
@@ -20,18 +20,11 @@ ANALYSIS_MODULE = AgentModule(
         "capabilities": [
             "utm_measurement_analysis",
             "objective_evaluation",
-            "background_fem_improvement",
             "bo_observation_handoff",
         ],
         "backend": {
             "entrypoint": "agents/analysis/agent.py",
             "decisions": "agents/analysis/decisions.py",
-            "runtime": "agents/analysis/runtime.py",
-            "improvement": "agents/analysis/improvement.py",
-            "refinement": "agents/analysis/refinement.py",
-            "mechanisms": "agents/analysis/mechanisms.py",
-            "calibration": "agents/analysis/calibration.py",
-            "fem": "agents/analysis/fem.py",
             "execution": "agents/analysis/execution.py",
             "structure": "agents/analysis/structure.py",
             "presentation": "agents/analysis/presentation.py",
@@ -48,31 +41,24 @@ ANALYSIS_MODULE = AgentModule(
             "setup_write_enabled": False,
             "source": "graphs/modules/analysis/module.yaml",
             "inputs": ["OrchestratorState.latest_analysis", "OrchestratorState.run_metadata"],
-            "persistence": "existing run artifacts and Analysis improvement database",
+            "persistence": "existing loop-scoped measured-analysis artifacts",
         },
         "storage": {
             "archive_owner": "analysis_agent",
             "archive": "runs/<run_id>/runtime/loops/loop-N/analysis_agent/attempt-N/",
             "analysis_artifacts": "runs/<run_id>/analysis/<specimen_id>/",
-            "improvement": "runs/<run_id>/runtime/analysis_improvement/improvement.sqlite3",
             "new_settings_store": False,
-            "background_resource_lifetime": "existing_runtime_owned",
             "shared_archive": "utils.agent_artifact_archive",
         },
         "dependencies": {
-            "services": ["AgentContext.complete", "AnalysisRuntimeService", "objective.service"],
-            "tools": [
-                "cae.prepare_static_analysis",
-                "cae.run_static_analysis",
-            ],
-            "bridge_modules": ["cae"],
+            "services": ["AgentContext.complete", "objective.service"],
+            "tools": [],
+            "bridge_modules": [],
             "direct_device_effect": False,
-            "computation_ownership": "The registered CAE bridge retains deterministic and native numerical execution",
+            "computation_ownership": "Analysis owns deterministic measurement processing and objective evaluation",
         },
         "owned_references": {
             "objective_service": "objectives/service.py",
-            "shared_pinn": "mcp_tools/pinn_tools.py",
-            "fem_routes": "app/analysis_fem_routes.py",
         },
         "documentation": "docs/agents/analysis_agent.md",
     }, allow_nan=False),

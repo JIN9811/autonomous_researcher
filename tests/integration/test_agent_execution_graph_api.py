@@ -224,7 +224,7 @@ def test_analysis_installed_report_projection_and_graph(module_api):
     sections = report.json()["report"]["sections"]
     assert sections["analysis_report"]["ok"] is True
     assert sections["role_specific"]["measurement"] == {"peak_force_N": 520.0}
-    assert sections["role_specific"]["fem"] == {"execution": "background", "status": "queued"}
+    assert "fem" not in sections["role_specific"]
     assert sections["bo_handoff"] == {"schema_version": "analysis_bo_handoff_v2"}
     assert sections["metrics"] == {"peak_force_N": 520.0}
     assert {key: state.run_metadata[key] for key in before} == before

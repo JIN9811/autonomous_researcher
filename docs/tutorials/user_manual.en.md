@@ -17,7 +17,7 @@ It is split into beginner and advanced sections so a new user can run the GUI wh
 ### 1.1 Install
 
 ```bash
-cd /home/jin/autonomous_researcher
+cd ~/autonomous_researcher
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -78,18 +78,16 @@ stored key but returns local vLLM to first priority.
 | Live GUI | `/live` | Chat-based orchestration and stage progress |
 | Runtime IDE | `/ide` | Graph editing, validation, dry-run, version save |
 | Module Management | `/module-management` | Module validation, load state, draft module creation, `ui.yaml` descriptor management, generated adapter registration |
-| 3DP Workspace | `/printer` | Bambu Lab X2D default bridge, explicit Prusa selection, printer fleet, live video/status, slicing/start gates, auto-ejection, test options |
+| 3D Workspace | `/printer` | Bambu Lab X2D default bridge, explicit Prusa selection, printer fleet, live video/status, slicing/start gates, auto-ejection, test options |
 | LeRobot Workspace | `/lerobot` | Port/camera setup, teleop, recording, training, rollout |
 | BO Workspace | `/bo` | Acquisition/strategy/budget/parameter-space configuration |
-| CAE Workspace | `/cae` | STL analysis settings and results |
 | Windows Equipment | `/equipment/windows` | Windows PyAutoGUI bridge discovery and program execution |
-| Self-Evolution Lab | `/evolution-lab` | Prompt/module/graph variants, validation, approval, rollback |
 
 ### 1.4 Runtime Modes
 
 - `live`: real hardware path, requires device gates and operator confirmation.
 - `test`: dry-run and simulated path, with selected bridge/actual-print options when explicitly requested.
-- In the current 3DP Workspace, `Start Gate Check`, `SPC Readiness`, and `Publish Start` no longer expose manual operator/Guardian/dry-run checkboxes. The frontend sends owner-managed publish defaults (`operator_confirmed=true`, `guardian_approved=true`, `dry_run=false`, ejection path fields true), and the backend remains the actual gate for artifact validity, printer safe state, camera evidence, bed-clear evidence, and post-publish observation.
+- In the current 3D Workspace, `Start Gate Check`, `SPC Readiness`, and `Publish Start` no longer expose manual operator/Guardian/dry-run checkboxes. The frontend sends owner-managed publish defaults (`operator_confirmed=true`, `guardian_approved=true`, `dry_run=false`, ejection path fields true), and the backend remains the actual gate for artifact validity, printer safe state, camera evidence, bed-clear evidence, and post-publish observation.
 - In Live GUI, selecting Specimen Making Agent turns the Report area into a 3DP job monitor. The wide central `Live Job Monitor` shows job progress, layer, queue, remaining time, and local/remote G-code paths from `specimen_agent_report.v1`; surrounding cards show `Build Intent`, `Printer Telemetry`, `Readiness Gate`, `Slice Profile`, `Thermal / Material`, `Transfer Queue`, `Layer Preview`, `Camera Evidence`, `Post-Print Automation`, `G-code Validation`, and `Handoff / Artifacts`. Missing backend values are displayed as pending/unknown, not fabricated by the frontend.
 - `Publish Start` can call the start-publish API, but the backend sends the Bambu MQTT `project_file` command only when the selected printer gate, transfer path, camera/bed-clear requirements, owner-managed publish defaults, and safe-state checks all pass.
 - `SPC Readiness` level cards separate connection, transfer path, owner-managed publish defaults, publish command, and autoejection. `technical_ready_for_start=true` means the technical printer gates are clear, but publish still remains blocked when camera, bed-clear, safe-state, or start-gate evidence fails.
@@ -130,8 +128,7 @@ is required, a successful equipment response alone cannot advance to Analysis.
 The [Orchestration Route](../../README.md#orchestration-route) shows the full
 graph; [Manipulation](../agents/manipulation_agent.md) and
 [Vision](../agents/vision_agent.md) explain the two verification boundaries.
-Analysis publishes the measured objective for BO; configured background FEM
-work is separate from the synchronous measurement-processing handoff.
+Analysis processes measured curves, reviews evidence and publishes the configured objective for BO.
 
 Runtime evidence is emitted through `run.started`, `node.started`, `node.completed`, `edge.traversed`, `approval.*`, `artifact.created`, and terminal run events.
 
@@ -144,7 +141,7 @@ Runtime evidence is emitted through `run.started`, `node.started`, `node.complet
 | vision | `graphs/modules/vision` | Capture observation and transfer readiness |
 | manipulation | `graphs/modules/manipulation` | LeRobot policy rollout or pick-place handoff |
 | equipment | `graphs/modules/equipment` | Windows/UTM/equipment command bridge |
-| analysis | `graphs/modules/analysis` | UTM/CAE metrics and objective score |
+| analysis | `graphs/modules/analysis` | Measurement metrics and objective score |
 | knowledge | `graphs/modules/knowledge` | Memory/evidence update |
 | bo | `graphs/modules/bo` | Candidate selection with benchmark/acquisition logic |
 | guardian | `graphs/modules/guardian` | Safety and continue/stop/error decision |
@@ -158,7 +155,7 @@ Live GUI agent tabs and descriptor cards are loaded from `/api/runtime/agent-man
 - Planning: `/api/planning/session`, `/api/planning/messages`, `/api/planning/bootstrap`, `/api/planning/message`
 - Graphs: `/api/graphs`, `/api/graphs/{graph_id}/validate`, `/compile`, `/dry-run`, `/run`, `/save-version`
 - Modules: `/api/modules`, `/api/modules/management-state`, `/api/runtime/agent-manifests`, `/api/bridges`, `/api/modules/templates/{agent|ui-only|bridge}`, `/api/modules/{module_id}`, `/api/modules/{module_id}/ui`, `/api/modules/{module_id}/validate`, `/dry-run`, `/load`, `/unload`, `/register-generated`
-- Workspaces: `/api/printer/*`, `/api/lerobot/*`, `/api/bo/*`, `/api/cae/*`, `/api/equipment/windows/*`, `/api/evolution/*`
+- Workspaces: `/api/printer/*`, `/api/lerobot/*`, `/api/bo/*`, `/api/cae/*`, `/api/equipment/windows/*`
 
 ### 2.4 Extension Rules
 

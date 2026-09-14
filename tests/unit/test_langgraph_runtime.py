@@ -1434,7 +1434,7 @@ def test_graph_runtime_api_exposes_handlers_modules_and_compile() -> None:
     bridges = client.get("/api/bridges").json()
     assert bridges["ok"] is True
     bridge_by_id = {item["id"]: item for item in bridges["bridges"]}
-    assert {"prusa_bridge", "lerobot_bridge", "windows_pyautogui_bridge", "cae_bridge", "camera_utm_bridge"}.issubset(bridge_by_id)
+    assert {"prusa_bridge", "lerobot_bridge", "windows_pyautogui_bridge", "camera_utm_bridge"}.issubset(bridge_by_id)
     removed_bridge_id = "fe" + "nicsx_cae_bridge"
     removed_solver_token = "fe" + "nics"
     assert removed_bridge_id not in bridge_by_id
@@ -2454,12 +2454,11 @@ def test_runtime_ide_page_and_main_entry_render() -> None:
     assert "renderBoCollapsedBody" in planning_js
     assert "bo-graph-toggle" in planning_js
     assert "renderBoResultCard(msg, `chat-${messageIndex}`)" in planning_js
-    assert "renderFemContourCard(msg)" in planning_js
+    assert "renderFemContourCard(msg)" not in planning_js
     assert "BO Surrogate / Acquisition Trace" in planning_js
-    assert "FEM / CAE Contour" in planning_js
+    assert "FEM / CAE Contour" not in planning_js
     assert "planning_browser_audit_live_artifacts.png" in planning_browser_audit
     assert "boSvgCount" in planning_browser_audit
-    assert "fem-contour-preview" in planning_browser_audit
     assert "module_management_browser_audit.png" in module_management_browser_audit
     assert "registerGeneratedSelected" in module_js
     assert "/register-generated" in module_js
@@ -2606,7 +2605,7 @@ def test_runtime_ide_page_and_main_entry_render() -> None:
     assert "artifactStageFromPath" in js
     assert "workspaceStages" in js
     assert 'bo: "bo"' in js
-    assert 'cae: "analysis"' in js
+    assert 'cae: "analysis"' not in js
     assert "artifactRelatedEvent" in js
     assert "artifactProvenanceMarkup" in js
     assert "Replay Producer Stage" in js
@@ -4140,13 +4139,13 @@ async def test_module_runtime_context_preserves_python_task_when_llm_role_empty(
         Stage.ANALYSIS,
     )
 
-    response = await module_ctx.complete("analysis_fem_planning", "plan FEM loop")
+    response = await module_ctx.complete("analysis_reasoning", "review measured evidence")
 
     assert response.model == "analysis-model"
-    assert backend.calls[-1]["metadata"]["task_type"] == "analysis_fem_planning"
-    assert backend.calls[-1]["metadata"]["requested_task_type"] == "analysis_fem_planning"
+    assert backend.calls[-1]["metadata"]["task_type"] == "analysis_reasoning"
+    assert backend.calls[-1]["metadata"]["requested_task_type"] == "analysis_reasoning"
     assert base_ctx.model_call_events[-1] == {
-        "task_type": "analysis_fem_planning",
+        "task_type": "analysis_reasoning",
         "model": "analysis-model",
         "role": "e4b",
         "backend": "vllm",

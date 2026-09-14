@@ -141,7 +141,6 @@ DEVICE_BRIDGE_REFERENCE_PATHS = {
     "lerobot": "docs/device_bridges/lerobot_bridge.md",
     "windows_pyautogui": "docs/device_bridges/windows_pyautogui_bridge.md",
     "utm_vision": "docs/device_bridges/utm_vision_bridge.md",
-    "cae_computation": "docs/device_bridges/cae_computation_bridges.md",
     "base_simulator": "docs/device_bridges/base_simulator_bridges.md",
 }
 DEVICE_BRIDGE_REFERENCE_TITLES = {
@@ -151,7 +150,6 @@ DEVICE_BRIDGE_REFERENCE_TITLES = {
     "lerobot": "LeRobot",
     "windows_pyautogui": "Windows PyAutoGUI",
     "utm_vision": "UTM Vision",
-    "cae_computation": "CAE Computation",
     "base_simulator": "Base Simulator",
 }
 DEVICE_BRIDGE_REFERENCE_FIGURES = {
@@ -184,11 +182,6 @@ DEVICE_BRIDGE_REFERENCE_FIGURES = {
         "utm_vision_01_system_handoffs",
         "utm_vision_02_execution_effect_boundary",
         "utm_vision_03_api_connection_architecture",
-    ),
-    "cae_computation": (
-        "cae_computation_01_system_handoffs",
-        "cae_computation_02_execution_effect_boundary",
-        "cae_computation_03_api_connection_architecture",
     ),
     "base_simulator": (
         "base_simulator_01_system_handoffs",
@@ -241,11 +234,6 @@ DEVICE_BRIDGE_SOURCE_CONTRACTS = {
     "utm_vision": (
         ("device_bridges/camera_vision/utm_runtime_bridge.py", "class UTMRuntimeProcessManager:"),
         ("app/main.py", '@app.get("/api/equipment/utm-runtime/status")'),
-    ),
-    "cae_computation": (
-        ("device_bridges/cae/calculix_tools.py", 'registry.register("calculix.run_job"'),
-        ("mcp_tools/pinn_tools.py", 'registry.register("pinn.predict"'),
-        ("app/main.py", '@app.post("/api/cae/run")'),
     ),
     "base_simulator": (
         ("device_bridges/base_bridge.py", "class BaseBridge(ABC):"),

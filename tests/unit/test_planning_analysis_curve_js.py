@@ -49,18 +49,10 @@ def _node_eval(script: str) -> str:
     return result.stdout.strip()
 
 
-def test_analysis_field_viewer_link_remains_available_without_fields():
-    helper = _extract_function(PLANNING_JS.read_text(), 'renderAnalysisFieldLink')
-    html = _node_eval('const escapeHtml = x => String(x);\n' + helper + '''
-console.log(JSON.stringify([
-  renderAnalysisFieldLink({}),
-  renderAnalysisFieldLink({cae_result:{artifacts:{field_asset_path:'runs/a b/manifest.fields.json'}}})
-]));
-''')
-    empty, linked = json.loads(html)
-    assert 'href="/cae/results"' in empty
-    assert 'not recorded' in empty
-    assert '/cae/results?path=runs%2Fa%20b%2Fmanifest.fields.json' in linked
+def test_analysis_retired_field_viewer_is_not_exposed():
+    source = PLANNING_JS.read_text()
+    assert "function renderAnalysisFieldLink" not in source
+    assert "function renderFemContourCard" not in source
 
 
 def test_analysis_stress_strain_points_prefer_server_contract_and_normalize_legacy_reports() -> None:
@@ -120,6 +112,7 @@ const polyline = (points) => points.map((point) => point.join(",")).join(" ");
 const escapeHtml = (value) => String(value);
 {helpers}
 const html = renderAnalysisCurve({{
+  utm_metrics: {{evaluation_strain: 0.4}},
   stress_strain_curve: {{ preview: [
     {{ strain_pct: 0, stress_MPa: 0 }},
     {{ strain_pct: 25, stress_MPa: 0.8 }},
@@ -133,7 +126,8 @@ console.log(html);
 
     assert "Engineering compressive strain" in html
     assert "Engineering stress" in html
-    assert "50% strain" in html
+    assert '<polygon' in html
+    assert '50% strain' not in html
     assert "class=\"grid\"" in html
     assert "class=\"tick-label" in html
     assert "class=\"limit-reference\"" in html

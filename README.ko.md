@@ -233,7 +233,6 @@ High-Level은 작업 판단을, Middle-Level은 절차 감독을, Low-Level 도�
 | 로보틱스 | 학습 정책 실행, 리플레이, 로봇 워크스페이스 | [LeRobot](docs/device_bridges/lerobot_bridge.md) |
 | PC 조작 계측기 | 저장된 GUI 워크플로우와 데이터 획득 | [Windows PyAutoGUI](docs/device_bridges/windows_pyautogui_bridge.md) |
 | 시험 영역 비전 | 카메라 관측과 검증 근거 | [UTM Vision](docs/device_bridges/utm_vision_bridge.md) |
-| 해석·연산 | 시뮬레이션과 분석 어댑터 | [CAE](docs/device_bridges/cae_computation_bridges.md) |
 | 가상 장비 | 실제 장비 없이 검증하기 위한 결정론적 대체 장비 | [Base and Simulators](docs/device_bridges/base_simulator_bridges.md) |
 
 ## 시작하기

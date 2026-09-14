@@ -20,6 +20,39 @@ def _dict(value: Any) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def project_objective(metadata: dict, bo_result: dict) -> dict | None:
+    """Prefer this run's immutable binding; never borrow the global latest spec."""
+    from experiments.bo_visualization import objective_display
+    from objectives.metric_registry import MetricRegistry
+
+    state = _dict(metadata.get('_projection_state'))
+    status = _dict(metadata.get('_objective_status'))
+    binding = _dict(status.get('active_binding'))
+    if binding:
+        for item in status.get('objective_states', []):
+            if not all(item.get(key) == binding.get(key) for key in ('objective_id', 'version', 'objective_hash')):
+                continue
+            spec = dict(_dict(item.get('spec')))
+            spec.update(objective_hash=binding.get('objective_hash'), run_bound=True)
+            expression = _dict(spec.get('expression'))
+            if expression.get('op') == 'metric':
+                try:
+                    registry = metadata.get('_objective_registry') or MetricRegistry.default()
+                    spec['unit'] = registry.get(expression.get('metric_id', '')).unit
+                except (KeyError, ValueError):
+                    pass
+            display = objective_display(spec)
+            return {**display, 'run_id': state.get('run_id', '')}
+        return None
+    historical = _dict(_dict(bo_result.get('visualization')).get('objective'))
+    if historical:
+        return {**historical, 'run_id': bo_result.get('run_id') or state.get('run_id', '')}
+    current = _dict(state.get('current_experiment_objective'))
+    if current.get('expression') or current.get('metric_name'):
+        return {**objective_display(current), 'run_id': state.get('run_id', '')}
+    return None
+
+
 def project_bo_report(metadata: dict, agent_payload: dict) -> dict:
     """Project current BO evidence without mutating or recomputing it."""
     bo_result = _dict(metadata.get("bo_agent")) or _dict(agent_payload.get("bo_result"))
@@ -81,6 +114,7 @@ def project_bo_report(metadata: dict, agent_payload: dict) -> dict:
             "visualization": _dict(bo_result.get("visualization")),
         }
     return {
+        "objective_display": project_objective(metadata, bo_result),
         "role_specific": role_specific,
         "decisions": decision_register,
         "metrics": {

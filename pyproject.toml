@@ -95,7 +95,6 @@ include = [
   "policies*",
   "packages*",
   "reporting*",
-  "self_evolution*",
   "submodules*",
   "utils*",
 ]

@@ -40,8 +40,6 @@ def numeric_archive_guard(tmp_path, monkeypatch):
         import agents.analysis.agent as analysis
         original_resolve = analysis.resolve_path
         monkeypatch.setattr(analysis, "resolve_path", lambda p: tmp_path / str(p) if str(p).startswith(("runs", "memory", "artifacts", "output")) else original_resolve(p))
-        from agents.analysis.runtime import AnalysisRuntimeService
-        monkeypatch.setattr(AnalysisRuntimeService, "resume", lambda *a, **k: False)
         yield guard
         assert guard.physical_call_count == 0 and guard.denied == [], guard.denied
 

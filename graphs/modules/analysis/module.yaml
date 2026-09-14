@@ -17,15 +17,14 @@ module:
   safety:
     live_requires_validation: true
     dry_run_supported: true
-  tools:
-  - cae.run_static_analysis
+  tools: []
   execution_graph:
     schema: ax4lab.execution_graph.v1
     entry: task
     nodes:
     - id: task
       handler: analysis.task
-      label: Composite measured analysis and optional background FEM task
+      label: Measurement processing and objective evaluation
       area: middle
       llm: true
     - id: deliver
@@ -39,11 +38,8 @@ module:
     input: OrchestratorState
     output: AgentResult.data merged into OrchestratorState
   notes: >-
-    The executable graph wraps the existing archived owner body once. Actual
-    LLM decisions and Middle numerical, CAE, FEM, calibration and improvement
-    relationships are source-backed implementation details, not additional
-    executable workflow stages. Measured foreground results reach BO without
-    awaiting background FEM. The Analysis agent has no physical Low boundary;
-    the installed CAE bridge owns computation and retains its existing gates,
-    queue, solver settings, and resource lifetime. Python source is not modified
-    by the GUI or LLM.
+    The executable graph invokes the measurement owner once. High-level LLM
+    decisions select data processing and review measured evidence. Middle-level
+    deterministic code parses curves, normalizes geometry, computes metrics and
+    evaluates the bound objective. Existing quality gates control BO admission.
+    Analysis has no physical Low boundary and no device bridge dependency.

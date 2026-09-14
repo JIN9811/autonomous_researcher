@@ -20,14 +20,21 @@ Modification guide:
 -->
 <html lang="ko">
   <head>
+    <link rel="preload" as="image" href="/static/ax4lab-logo-transparent.png" fetchpriority="high" />
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=atr-ui-20260525-11" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260915-banner-small-3" />
     <link rel="stylesheet" href="/static/runtime_ide.css?v=20260914-owner-plan-controls-1" />
   </head>
   <body class="runtime-ide-body">
+    <div id="live-boot-cover" data-boot-mode="ide" role="status" aria-label="Loading AX4LAB Runtime IDE">
+      <img src="/static/ax4lab-logo-transparent.png" alt="AX4LAB" width="360" height="360" fetchpriority="high" loading="eager" decoding="sync" />
+      <strong class="live-boot-title">RUNTIME IDE</strong>
+    </div>
+    <script src="/static/live_boot.js?v=5"></script>
+    <noscript><style>#live-boot-cover { display:none; }</style></noscript>
     <main class="page equipment-setup-page runtime-ide-page">
       <section class="hero panel runtime-ide-hero">
         <div class="hero-copy">
@@ -471,6 +478,6 @@ Modification guide:
     <script src="/static/module_control_view.js?v=20260913-llm-call-label"></script>
     <script src="/static/module_execution_editor.js?v=20260913-internal-relations-2"></script>
     <script src="/static/experimental_packages.js?v=20260914-owner-plans-1"></script>
-    <script src="/static/runtime_ide.js?v=20260914-owner-plan-controls-1" defer></script>
+    <script src="/static/runtime_ide.js?v=20260915-boot-1" defer></script>
   </body>
 </html>

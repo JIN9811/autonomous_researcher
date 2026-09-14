@@ -4,6 +4,39 @@ import subprocess
 import pytest
 
 
+def test_first_chat_opens_once_with_inline_controls():
+    source = (Path(__file__).resolve().parents[2] / "web/static/planning.js").read_text()
+    render = "function renderPlanningChatGroup(" + source.split(
+        "function renderPlanningChatGroup(", 1
+    )[1].split("function syncPlanningChatBubbleHeights(", 1)[0]
+    script = """
+const assert = require('node:assert/strict');
+let planningInitialChatOpened = false;
+const planningExpandedChatGroups = new Set();
+const liveLastSession = null;
+const planningLoopArtifactCache = new Map();
+const escapeHtml = x => String(x ?? '');
+const formatTime = () => '12:00';
+const chatMessageSummaryLine = () => 'Greeting';
+const chatGroupAgentDescriptor = () => ({label:'Orchestrator'});
+const renderChatGroupIcon = () => '<img alt="agent">';
+const renderChatGroupProgress = () => '';
+const renderPlanningChatMessageDetail = (m, i, controls) => controls;
+const group = {key:'greeting',role:'orchestrator',messages:[{content:'Hello'}]};
+""" + render + """
+const html = renderPlanningChatGroup(group, 0);
+assert.match(html, /is-expanded/);
+assert.match(html, /planning-agent-chat-hide/);
+assert.match(html, /<img alt="agent">/);
+assert.ok(!html.includes('planning-agent-chat-expanded-tools'));
+planningExpandedChatGroups.delete('greeting');
+assert.match(renderPlanningChatGroup(group, 0), /is-collapsed/);
+assert.match(renderPlanningChatGroup({...group,key:'second'}, 1), /is-collapsed/);
+"""
+    result = subprocess.run(["node", "-e", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize("immediate", [False, True])
 def test_chat_expansion_survives_refresh_and_preserves_accordion_rules(immediate):
     source = (Path(__file__).resolve().parents[2] / "web/static/planning.js").read_text()

@@ -7,6 +7,9 @@ paths are accepted. Agent IDs are opaque lookup keys and are never evaluated.
 (function installAgentModuleHost(global) {
   "use strict";
 
+  // Refresh presentation assets with the host build, independently of runtime contracts.
+  const assetRevision = global.document?.currentScript?.dataset?.assetRevision || "";
+
   const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
   const FORBIDDEN_PATH_PARTS = new Set(["__proto__", "prototype", "constructor"]);
 
@@ -33,7 +36,8 @@ paths are accepted. Agent IDs are opaque lookup keys and are never evaluated.
       throw new TypeError("invalid frontend asset_url");
     }
     const separator = assetUrl.includes("?") ? "&" : "?";
-    return version ? `${assetUrl}${separator}v=${encodeURIComponent(version)}` : assetUrl;
+    const versioned = version ? `${assetUrl}${separator}v=${encodeURIComponent(version)}` : assetUrl;
+    return assetRevision ? `${versioned}${versioned.includes("?") ? "&" : "?"}ui=${encodeURIComponent(assetRevision)}` : versioned;
   }
 
   function frontendDescriptor(manifest) {
@@ -154,15 +158,22 @@ paths are accepted. Agent IDs are opaque lookup keys and are never evaluated.
 
       const activations = [];
       for (const descriptor of desired.values()) {
-        if (records.has(descriptor.agentId)) continue;
+        const existing = records.get(descriptor.agentId);
+        if (existing) {
+          if (existing.activation) activations.push(existing.activation.catch((error) => {
+            errors.push({ agentId: descriptor.agentId, error: String(error && error.message || error) });
+          }));
+          continue;
+        }
         const record = {
           signature: descriptor.signature,
           instance: null,
           disposed: false,
         };
         records.set(descriptor.agentId, record);
+        record.activation = activate(descriptor, hostServices, record);
         activations.push(
-          activate(descriptor, hostServices, record).catch((error) => {
+          record.activation.catch((error) => {
             errors.push({ agentId: descriptor.agentId, error: String(error && error.message || error) });
           }),
         );

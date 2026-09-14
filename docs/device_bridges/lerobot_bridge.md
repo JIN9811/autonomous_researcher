@@ -37,6 +37,10 @@ supersedes: []
 
 # LeRobot Bridge Reference
 
+<img src="../../web/static/workspace_icons/lerobot.webp" width="96" alt="Manipulation Workspace icon">
+
+Main GUI: **Manipulation · Workspace** opens the manipulation workspace in a separate window.
+
 ## Status at a Glance
 
 | At a glance | Details |

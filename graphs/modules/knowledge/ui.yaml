@@ -9,15 +9,12 @@ ui:
     report: module
     fallback: descriptor
   cards:
-  - {id: knowledge_activity, type: activity, title: Knowledge Agent Activity, span: 12, tone: knowledge}
-  - {id: knowledge_wiki, type: knowledge, title: AX4LAB Wiki, span: 4, tone: knowledge}
-  - {id: knowledge_memory, type: knowledge, title: Memory, span: 4, tone: knowledge}
-  - {id: knowledge_delivery, type: handoff, title: Agent Delivery, span: 4, tone: knowledge}
-  - {id: knowledge_evidence_quality, type: evidence, title: Evidence Quality, span: 4, tone: knowledge}
-  - {id: knowledge_pattern_library, type: evidence, title: Pattern Library, span: 6, tone: knowledge}
-  - {id: knowledge_memory_intake, type: evidence, title: Memory Intake, span: 6, tone: knowledge}
-  - {id: knowledge_evolution_packs, type: evidence, title: Evolution Packs, span: 6, tone: knowledge}
-  - {id: knowledge_retrieval_provenance, type: evidence, title: Retrieval / Provenance, span: 6, tone: knowledge}
+  - {id: knowledge_activity, type: activity, title: Recorded Knowledge Activity, span: 12, tone: knowledge}
+  - {id: knowledge_delivery, type: handoff, title: Agent Knowledge Supply, span: 12, tone: knowledge}
+  - {id: knowledge_wiki, type: knowledge, title: Reference Library, span: 12, tone: knowledge}
+  - {id: knowledge_memory_intake, type: evidence, title: Recorded Knowledge Outcomes, span: 12, tone: knowledge}
+  - {id: knowledge_pattern_library, type: evidence, title: Learned Patterns, span: 12, tone: knowledge}
+  - {id: knowledge_evolution_packs, type: evidence, title: Improvement Evidence, span: 12, tone: knowledge}
   report_sections:
   - id: knowledge_memory_report
     title: Knowledge Memory / Evidence Update

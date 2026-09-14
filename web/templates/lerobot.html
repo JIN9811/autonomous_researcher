@@ -27,8 +27,12 @@ Modification guide:
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
     <!-- Compatibility markers: /static/styles.css?v=20260715-camera-usb-link-1 /static/lerobot.js?v=20260903-background-train-1 -->
     <link rel="stylesheet" href="/static/styles.css?v=20260904-teleop-handoff-1" />
+    <link rel="preload" as="image" href="/static/ax4lab-logo-transparent.png">
+    <link rel="stylesheet" href="/static/workspace_boot.css?v=1">
   </head>
   <body>
+    {% set workspace_title = "Manipulation Workspace" %}
+    {% include "workspace_boot.html" %}
     <main class="page lerobot-page">
       <section class="hero panel lerobot-hero">
         <div class="hero-copy">

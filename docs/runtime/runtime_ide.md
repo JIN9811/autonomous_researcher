@@ -45,7 +45,6 @@ source_of_truth:
   - agents/bo/module.py
   - agents/bo/structure.py
   - agents/bo/frontend/live_report.js
-  - device_bridges/cae/module.py
   - graphs/configs/atr_closed_loop.yaml
   - graphs/modules
   - orchestrator/langgraph_runtime.py
@@ -96,6 +95,38 @@ lifecycle remain unchanged. Absent or deactivated owner modules supply no curren
 Manipulation card. The original `/lerobot` workspace stays available through its
 declared bridge references.
 
+The Live GUI Resource header polls the existing read-only `/api/devices/state`
+snapshot every five seconds, independently of chat, selected agent and completed-run
+freezing. Session refreshes preserve host telemetry. GPU/RAM percentages remain
+compact; missing values display `-`, and cached readings carry `*` with the timestamp
+and refresh status in the tooltip. This polling does not issue device commands.
+
+The Live GUI bottom dock keeps a one-line current-stage / next-stage summary above
+the **Events** and **Device Bridges** tabs. Idle and terminal runs do not present
+historical handoffs as scheduled work. Events are newest-first rows with time,
+agent, event type and message; existing filters and trace selection remain available.
+Bridge summaries expand to show their declared endpoints and existing workspace,
+health and preflight actions. Missing health evidence is shown as `Unknown`, not
+inferred from the presence of an endpoint. Expansion survives polling, and folding
+the dock retains its summary and selected tab. Run, GPU and LLM status cards are not
+duplicated in this dock. Bridge rows retain their expanded content height and scroll
+vertically within the dock instead of overlapping subsequent rows. Tab selection
+and disclosure do not execute bridge actions.
+The registry is read from the existing device snapshot; execution routes are unchanged.
+
+Artifacts uses a compact folder tree and one-line file list, scoped by default to
+the selected agent and current loop. Darker folder navigation, lighter file rows
+and a restrained cyan selection distinguish the regions without large artifact
+cards. Selecting a file reveals its preview and original/download actions;
+conversation-only results join the same explorer without a separate preview section. See
+[Live GUI file explorer](loop_artifact_archiving.md#live-gui-file-explorer) for
+archive identity, session coverage and preview limits.
+
+The Agent Binder context menu dismisses when the pointer leaves both its source
+icon and the menu, when focus moves outside, or when the surrounding page scrolls
+or loses window focus. Escape and existing menu actions remain available; moving
+between the source icon and menu does not dismiss it.
+
 Vision now uses the same installed module contract as Design and Specimen.
 `/api/modules/vision` exposes its executable graph and source-bound implementation
 catalog; edited valid graphs drive the registered Vision owner. The original graph
@@ -126,22 +157,18 @@ delegation. An inactive owner supplies no current cards or frontend asset. The
 generic module canvas renders the executable Equipment graph and source catalog;
 the Profile-bound Skill Flow remains a separate read-only workspace.
 
-Analysis now exposes its installed owner at `/api/modules/analysis`. Its two
-Middle operations retain the existing composite analysis task and delivery
-boundaries; the measured foreground still reaches BO without waiting for
-optional background FEM. Source-bound CODE relationships show actual High LLM
-decisions, Middle processing and CAE computation, cross-cutting Guardian/Evidence,
-and an intentionally empty Low area. `analysis@1.0.0` composes `cae@1.0.0`, which
-opens its internal CAE/CalculiX components without treating the package itself as
-a bridge or enabling the shared PINN adapter. The
+Analysis exposes its installed owner at `/api/modules/analysis`. Its two Middle
+operations retain `analysis.task` and `analysis.deliver`. High LLM processing and
+evidence-review decisions select bounded actions; Middle numerical processing
+computes measured curves, metrics and the configured objective. Guardian quality
+gates and Knowledge provenance remain cross-cutting. There is no device bridge
+or Low hardware owner in this package. The
 [Analysis document figure](../agents/assets/figures/analysis_control_areas.svg)
-uses this same catalog and the shared light document renderer.
+uses the same source catalog and shared light document renderer.
 
-The module-owned frontend supplies the existing report composition. Its four FEM
-views are independent common dashboard cards while the Live host retains the
-single FEM controller, polling, in-place attempt/contour navigation and lifecycle.
-An inactive owner supplies no current Analysis cards or frontend asset; removing
-it does not cancel an already owned computation worker.
+The module-owned frontend supplies measured response, metrics, quality,
+provenance and BO handoff cards. An inactive owner supplies no current Analysis
+cards or frontend asset.
 
 BO now exposes its installed owner at `/api/modules/bo`. The executable view is
 the composite `bo.task` → `bo.deliver` path, while CODE relationships expand
@@ -238,7 +265,6 @@ It does not replace:
 | Equipment executable/source catalog and Live composition | `agents/equipment/module.py`, `agents/equipment/structure.py`, `agents/equipment/frontend/live_report.js` |
 | Analysis executable/source catalog and Live composition | `agents/analysis/module.py`, `agents/analysis/structure.py`, `agents/analysis/frontend/live_report.js` |
 | BO executable/source catalog and Live composition | `agents/bo/module.py`, `agents/bo/structure.py`, `agents/bo/frontend/live_report.js` |
-| Analysis computation bridge catalog | `device_bridges/cae/module.py`, internal `device_bridges/cae/bridge.py`, `device_bridges/cae/calculix.py` |
 | Interaction and runtime regression evidence | `tests/ui/runtime_ide_browser_audit.py`, `tests/unit/test_langgraph_runtime.py` |
 
 Historical Codex packages under `docs/oldversion/ATR_*_Package/` describe implementation
@@ -881,16 +907,10 @@ Windows/PyAutoGUI bridge graph, the original Live cards, and Design → Equipmen
 owner lifecycle after cache-busted reload. The corrected Live check reported no
 console warning or error and made no physical call.
 
-The 2026-09-13 Analysis migration is covered by owner-asset/report admission,
-full source-symbol resolution, execution-catalog/SVG, module-host and FEM
-controller tests. The read-only 1920×1080 check confirmed the generic five-area
-Analysis map, Package → CAE → internal CalculiX drilldown, four independent
-common dashboard cards, report-section selection, attempt navigation,
-stress/strain switching, contour frame/field selection and polling from the
-preserved compact job identity. The scoped registered-model Analysis check
-reached BO readiness without waiting for FEM. No physical or native solver call
-was made, and the unsuccessful whole-cycle attempts stopped at upstream owners
-before Analysis rather than establishing a complete-cycle pass.
+The measurement-only Analysis revision is checked by owner lifecycle, source
+resolution, report API, frontend and objective-handoff tests without device
+actuation. Historical validation artifacts remain separate from current runtime
+capabilities.
 
 A guarded registered API-model retry completed the virtual cycle through the
 next Design with 34 actual saved-provider calls, all ten required owners, zero

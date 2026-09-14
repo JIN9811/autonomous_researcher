@@ -1,0 +1,23 @@
+/* Shared cosmetic entrance; no device or readiness operations. */
+#live-boot-cover[data-boot-mode="workspace"] {
+  position: fixed; inset: 0; z-index: 10000;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 18px; padding: 24px; box-sizing: border-box;
+  background: #fff; opacity: 1;
+  transition: background-color 1000ms ease-in-out, opacity 500ms ease;
+}
+#live-boot-cover[data-boot-mode="workspace"].is-colored { background: #d8efff; }
+#live-boot-cover[data-boot-mode="workspace"] img {
+  width: min(360px, 65vw, 55vh); height: auto; object-fit: contain; opacity: 1;
+}
+#live-boot-cover[data-boot-mode="workspace"] .live-boot-title {
+  color: #10324d; font-size: clamp(24px, 3vw, 38px); font-weight: 800;
+  letter-spacing: .02em; text-align: center; text-shadow: none;
+  opacity: 0; transition: opacity 700ms ease 300ms;
+}
+#live-boot-cover[data-boot-mode="workspace"].is-colored .live-boot-title { opacity: 1; }
+#live-boot-cover[data-boot-mode="workspace"].is-leaving { opacity: 0; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+  #live-boot-cover[data-boot-mode="workspace"],
+  #live-boot-cover[data-boot-mode="workspace"] .live-boot-title { transition: none; }
+}

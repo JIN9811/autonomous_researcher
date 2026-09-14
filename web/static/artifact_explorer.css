@@ -1,0 +1,55 @@
+/* File navigation shares the Live GUI palette, not a separate workspace theme. */
+body.planning-live-body #live-artifact-panel { width:100% !important; max-width:none !important; min-width:0 !important; box-sizing:border-box; padding-right:0 !important; scrollbar-gutter:auto !important; }
+#live-artifact-explorer,.artifact-explorer,.ae-layout,.ae-files,.ae-preview { box-sizing:border-box; width:100%; min-width:0; }
+.ae-preview-content { min-width:0; max-width:100%; overflow:auto; }
+.artifact-explorer { color:#dce6ef; min-width:0; background:#152333; border:1px solid #35495c; border-radius:5px; overflow:hidden; }
+.ae-toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:end; padding:10px; border-bottom:1px solid #334155; }
+.ae-toolbar label { display:flex; flex-direction:column; gap:4px; color:#94a3b8; font-size:12px; min-width:100px; }
+.ae-toolbar label:first-child { flex:1; min-width:180px; max-width:380px; }
+.ae-toolbar select { width:100%; max-width:100%; background:#142333; color:#dce6ef; border:1px solid #40556b; padding:6px; }
+.ae-layout { display:grid; grid-template-columns:minmax(160px,25%) minmax(0,1fr); min-height:360px; }
+.ae-tree { overflow:auto; max-height:65vh; padding:10px 6px; border-right:1px solid #334155; background:#0f1c29; }
+.ae-folder-row { display:flex; align-items:center; min-height:30px; width:max-content; min-width:100%; box-sizing:border-box; }
+.ae-folder-row button { background:transparent; border:0; color:#cbd5e1; cursor:pointer; text-align:left; padding:5px; white-space:nowrap; }
+.ae-folder-row button[aria-current] { background:#234057; color:#8de4f4; border-radius:3px; }
+.ae-indent { width:20px; flex-shrink:0; }
+.ae-files { min-width:0; padding:10px; background:#192b3b; }
+.ae-toolbar { background:#12202e; }
+.ae-files > .ae-table-scroll tbody tr:nth-child(even) { background:#1c3042; }
+.ae-files > .ae-table-scroll tbody tr:hover { background:#27445b; }
+.ae-files > .ae-table-scroll tbody tr:has(button[aria-pressed="true"]) { background:#24485a; box-shadow:inset 2px 0 #62d6e6; }
+.ae-preview { background:#122230; padding:10px; border-radius:3px; }
+.ae-breadcrumb { overflow-wrap:anywhere; padding:6px 0 10px; color:#99c4db; font-size:12px; }
+.ae-breadcrumb span { color:#94a3b8; margin-left:10px; }
+.ae-table-scroll { overflow:auto; max-height:35vh; }
+.artifact-explorer table { width:100%; border-collapse:collapse; font-size:12px; }
+.artifact-explorer th,.artifact-explorer td { padding:5px 8px; text-align:left; border-bottom:1px solid #2c3e50; vertical-align:top; line-height:18px; }
+.artifact-explorer th { color:#94a3b8; background:#152535; position:sticky; top:0; }
+.ae-files td button { border:0; padding:0; color:#c7e8f4; background:transparent; text-align:left; cursor:pointer; max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ae-files > .ae-table-scroll > table { table-layout:fixed; }
+.ae-files > .ae-table-scroll th:first-child { width:65%; }
+.ae-files > .ae-table-scroll td { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ae-preview[hidden] { display:none !important; }
+.artifact-explorer button:focus-visible,.artifact-explorer select:focus-visible { outline:2px solid #67e8f9; outline-offset:-2px; }
+.ae-preview { border-top:1px solid #40556b; margin-top:16px; padding-top:10px; min-width:0; }
+.ae-preview header { display:flex; gap:12px; align-items:center; flex-wrap:wrap; font-size:12px; }
+.ae-preview a { color:#89daee; }
+.ae-preview details { margin:10px 0; font-size:12px; color:#94a3b8; }
+.ae-preview code { overflow-wrap:anywhere; }
+.ae-preview-content img { display:block; max-width:100%; max-height:55vh; object-fit:contain; margin:10px auto; }
+.ae-preview-content pre { max-height:45vh; overflow:auto; white-space:pre; padding:10px; background:#0e1a28; font-size:12px; }
+/* Use the whole Artifacts pane after removing the separate chat-card section. */
+#live-artifact-explorer { height:100%; min-height:0; }
+.artifact-explorer { height:100%; display:flex; flex-direction:column; }
+.ae-toolbar { flex:0 0 auto; }
+.ae-layout { flex:1; min-height:0; overflow:hidden; }
+.ae-tree { max-height:none; min-height:0; }
+.ae-files { display:flex; flex-direction:column; min-height:0; overflow:hidden; }
+.ae-breadcrumb { flex:0 0 auto; }
+.ae-files > .ae-table-scroll { flex:1; max-height:none; min-height:0; }
+.ae-files:has(.ae-preview:not([hidden])) > .ae-table-scroll { flex:0 1 35%; min-height:80px; }
+.ae-preview:not([hidden]) { flex:1; min-height:0; display:flex; flex-direction:column; overflow:auto; }
+.ae-preview-content { flex:1; min-height:0; }
+.ae-preview-content pre { max-height:none; min-height:100%; margin:0; }
+.ae-preview-content img { max-height:100%; }
+@media(max-width:760px){.ae-layout{grid-template-columns:1fr}.ae-tree{max-height:180px;border-right:0;border-bottom:1px solid #334155}.ae-toolbar label{flex:1}}

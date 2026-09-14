@@ -1,0 +1,171 @@
+/* Live GUI footer only: reuse the application's navy/cyan palette and controls. */
+body.planning-live-body .planning-runtime-shell .live-runtime-bottom.runtime-dock #btn-live-bottom-collapse {
+  position: static !important;
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  justify-self: end !important;
+  align-self: center !important;
+  margin: 0 !important;
+  height: 24px !important;
+  min-height: 24px !important;
+  padding: 2px 9px !important;
+  line-height: 18px !important;
+  transform: none !important;
+}
+body.planning-live-body .planning-runtime-shell:not(.live-bottom-collapsed) .runtime-dock::before {
+  content: "" !important;
+  display: block !important;
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 38.5px;
+  height: 1px;
+  background: #50687b !important;
+  pointer-events: none;
+}
+body.planning-live-body .live-runtime-bottom.runtime-dock {
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-rows: 28px 28px minmax(0, 1fr) !important;
+  row-gap: 8px !important;
+  column-gap: 5px !important;
+  padding: 7px 12px !important;
+  background: #111d2a !important;
+  border: 1px solid #334155 !important;
+  border-radius: 5px !important;
+}
+body.planning-live-body .runtime-dock #live-mission-progress-slim {
+  display: flex !important;
+  gap: 22px !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  max-height: 28px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: none !important;
+  margin-right: 100px !important;
+  font-size: 12px !important;
+}
+.runtime-dock .live-dock-phase { text-transform: capitalize; color: #bae6fd; }
+.runtime-dock .live-dock-current, .runtime-dock .live-dock-next {
+  display: flex; gap: 8px; min-width: 0; white-space: nowrap;
+}
+.runtime-dock .live-dock-current > span, .runtime-dock .live-dock-next > span { color: #94a3b8; }
+.runtime-dock strong { font-weight: 550; }
+.runtime-dock .live-dock-current strong, .runtime-dock .live-dock-next strong {
+  overflow: hidden; text-overflow: ellipsis; color: #e2e8f0;
+}
+.runtime-dock .live-dock-attention { margin-left: auto; color: #94a3b8; white-space: nowrap; }
+.runtime-dock .live-dock-attention.needs-attention { color: #fbbf24; }
+.runtime-dock .live-dock-tabs { display: flex; grid-row: 2; gap: 6px; align-items: stretch; }
+body.planning-live-body .runtime-dock .live-dock-tabs .btn {
+  height: 27px !important; padding: 3px 12px !important; font-size: 12px !important;
+  border: 0 !important; border-radius: 3px !important; box-shadow: none !important;
+  color: #94a3b8 !important; background: transparent !important;
+}
+body.planning-live-body .runtime-dock .live-dock-tabs .btn.active {
+  color: #bae6fd !important; background: #223547 !important;
+}
+.runtime-dock #live-event-count { margin-left: 6px; font-size: 11px; color: #94a3b8; }
+body.planning-live-body .live-runtime-bottom.runtime-dock > section {
+  grid-column: 1 !important; grid-row: 3 !important;
+  display: flex !important; flex-direction: column !important; gap: 4px !important;
+  padding: 0 !important; border: 0 !important; background: transparent !important;
+  border-radius: 0 !important;
+  position: static !important;
+}
+body.planning-live-body .runtime-dock > section[hidden] { display: none !important; }
+body.planning-live-body .runtime-dock .live-timeline-title-row {
+  min-height: 24px !important; margin: 0 !important; padding: 0 !important;
+  position: absolute; top: 42px; right: 12px;
+}
+body.planning-live-body .runtime-dock .live-timeline-filters {
+  gap: 3px !important; display: flex !important;
+}
+body.planning-live-body .runtime-dock .live-timeline-filter {
+  width: auto !important; min-width: 0 !important; height: 24px !important;
+  padding: 2px 8px !important; box-shadow: none !important; border: 0 !important;
+  border-radius: 3px !important; font-size: 11px !important; background: transparent !important;
+  color: #94a3b8 !important;
+}
+body.planning-live-body .runtime-dock .live-timeline-filter.active {
+  background: #223547 !important; color: #bae6fd !important;
+}
+body.planning-live-body .runtime-dock .live-filter-icon { display: none !important; }
+body.planning-live-body .runtime-dock .live-timeline-filter-label {
+  display: inline !important; position: static !important; width: auto !important; height: auto !important;
+  clip: auto !important; clip-path: none !important; overflow: visible !important;
+  padding: 0 !important; margin: 0 !important; white-space: nowrap !important;
+}
+body.planning-live-body .runtime-dock #live-timeline-strip {
+  display: flex !important; flex-direction: column !important; gap: 0 !important;
+  overflow: auto !important; min-height: 0 !important; max-height: none !important;
+  padding: 0 !important; flex: 1;
+}
+body.planning-live-body .runtime-dock .live-timeline-item {
+  grid-template-rows: minmax(0, 1fr) !important; row-gap: 0 !important;
+  display: grid !important; grid-template-columns: 100px minmax(110px, 0.7fr) minmax(120px, 1fr) minmax(200px, 3fr) !important;
+  align-items: center !important; gap: 14px !important;
+  width: 100% !important; min-width: 0 !important; max-width: none !important;
+  min-height: 31px !important; height: 31px !important; flex: 0 0 auto !important;
+  padding: 4px 8px !important; margin: 0 !important;
+  border: 0 !important; border-bottom: 1px solid #263445 !important;
+  border-left: 2px solid transparent !important; border-radius: 0 !important;
+  background: transparent !important; box-shadow: none !important; text-align: left !important;
+}
+body.planning-live-body .runtime-dock .live-timeline-item:hover,
+body.planning-live-body .runtime-dock .live-timeline-item.selected { background: #1c3041 !important; }
+body.planning-live-body .runtime-dock .live-timeline-item.severity-error { border-left-color: #fb7185 !important; }
+body.planning-live-body .runtime-dock .live-timeline-item.severity-warning { border-left-color: #fbbf24 !important; }
+body.planning-live-body .runtime-dock .live-timeline-item > * {
+  font-size: 12px !important; font-style: normal !important; line-height: 1.4 !important;
+  overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important;
+  min-width: 0 !important; margin: 0 !important; color: #cbd5e1 !important;
+  grid-column: auto !important; grid-row: auto !important;
+}
+body.planning-live-body .runtime-dock .live-timeline-item > span:first-child { color: #94a3b8 !important; }
+body.planning-live-body .runtime-dock #live-device-strip {
+  display: grid !important; grid-template-columns: repeat(auto-fit, minmax(245px, 1fr)) !important;
+  grid-auto-rows: max-content !important;
+  align-content: start !important; align-items: start !important; gap: 6px !important;
+  overflow: hidden auto !important; scrollbar-gutter: stable; overscroll-behavior: contain;
+  max-height: none !important; min-height: 0 !important; padding: 0 !important;
+}
+body.planning-live-body .runtime-dock .bridge-contract-card {
+  display: block !important; min-width: 0 !important; max-width: none !important;
+  height: auto !important; min-height: 36px !important; padding: 0 !important;
+  background: #172636 !important; border: 1px solid #2d4053 !important;
+  border-radius: 4px !important; box-shadow: none !important; overflow: visible !important;
+}
+.runtime-dock .bridge-contract-card > summary {
+  display: flex; align-items: center; gap: 12px; min-height: 34px;
+  padding: 6px 10px; cursor: pointer; list-style: none; font-size: 12px;
+}
+.runtime-dock .bridge-contract-card > summary::-webkit-details-marker { display: none; }
+.runtime-dock .bridge-contract-card > summary > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #e2e8f0; }
+.runtime-dock .bridge-contract-card > summary > strong { color: #94a3b8; text-transform: capitalize; font-size: 11px; }
+.runtime-dock .bridge-contract-card.status-ready > summary > strong { color: #86efac; }
+.runtime-dock .bridge-contract-card.status-error > summary > strong { color: #fda4af; }
+.runtime-dock .bridge-contract-card[open] > summary { border-bottom: 1px solid #2d4053; }
+.runtime-dock .live-bridge-body { padding: 8px 10px; }
+body.planning-live-body .runtime-dock .live-bridge-body dl { display: grid !important; gap: 4px !important; margin: 0 0 8px !important; }
+body.planning-live-body .runtime-dock .live-device-field { display: grid !important; grid-template-columns: 60px minmax(0, 1fr) !important; gap: 6px !important; font-size: 11px !important; }
+.runtime-dock .live-device-field dd { overflow-wrap: anywhere; white-space: normal !important; }
+body.planning-live-body .runtime-dock .live-device-inline-actions { display: flex !important; gap: 6px !important; flex-wrap: wrap; }
+body.planning-live-body .runtime-dock .live-device-inline-action { font-size: 11px !important; min-height: 26px; }
+.runtime-dock .live-dock-empty { padding: 12px 8px; color: #94a3b8; font-size: 12px; }
+.runtime-dock button:focus-visible, .runtime-dock summary:focus-visible { outline: 2px solid #67e8f9 !important; outline-offset: -2px; }
+body.planning-live-body .planning-runtime-shell.live-bottom-collapsed .runtime-dock {
+  grid-template-rows: 28px !important;
+}
+body.planning-live-body .planning-runtime-shell.live-bottom-collapsed .runtime-dock > section,
+body.planning-live-body .planning-runtime-shell.live-bottom-collapsed .runtime-dock .live-dock-tabs { display: none !important; }
+@media (max-width: 760px) {
+  body.planning-live-body .live-runtime-bottom.runtime-dock { height: 240px !important; max-height: 240px !important; }
+  body.planning-live-body .runtime-dock #live-mission-progress-slim { gap: 8px !important; font-size: 11px !important; }
+  .runtime-dock .live-dock-next, .runtime-dock .live-dock-attention { display: none; }
+  body.planning-live-body .runtime-dock .live-timeline-title-row { position: static; overflow-x: auto; flex-shrink: 0; }
+  body.planning-live-body .runtime-dock .live-timeline-item { grid-template-columns: 74px 100px minmax(180px, 1fr) !important; min-width: 380px !important; gap: 8px !important; }
+  body.planning-live-body .runtime-dock .live-timeline-item > strong { display: none !important; }
+  body.planning-live-body .runtime-dock #live-device-strip { grid-template-columns: minmax(0, 1fr) !important; }
+  body.planning-live-body .planning-runtime-shell.live-bottom-collapsed .runtime-dock { height: 42px !important; max-height: 42px !important; }
+}

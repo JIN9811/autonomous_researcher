@@ -32,12 +32,16 @@ supersedes: []
 
 # Printer Fleet Bridge Reference
 
+<img src="../../web/static/workspace_icons/printer.webp" width="96" alt="3D Printer Workspace icon">
+
+Main GUI: **3D Printer · Workspace** opens the printer workspace in a separate window.
+
 ## Status at a Glance
 
 | At a glance | Details |
 |---|---|
 | Purpose | Select a printer profile and route preparation/status requests |
-| Connects | Specimen / 3DP workspace ↔ selected Bambu or Prusa provider |
+| Connects | Specimen / 3D workspace ↔ selected Bambu or Prusa provider |
 | Effect | Delegated upload and motion are possible; no silent provider fallback |
 | Implementation | [Printer tools](../../mcp_tools/printer_tools.py) |
 | Verification | [Recorded scope and evidence](#current-verification) · 2026-08-09 |

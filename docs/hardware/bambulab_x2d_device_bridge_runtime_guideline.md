@@ -1,14 +1,14 @@
 # BambuLab X2D Device Bridge Runtime Guideline
 
 작성 기준: 2026-06-16
-대상: `3DP Printer Bridge`, `PrinterDeviceBridgeManager`, `SpecimenMakingAgent`, `BambuLab` active printer provider
+대상: `3D Printer Bridge`, `PrinterDeviceBridgeManager`, `SpecimenMakingAgent`, `BambuLab` active printer provider
 문서 성격: 운영자/협업자용 시스템 설명 문서. 구현 지시 원본은 `docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md`를 따른다.
 
 ---
 
 ## 1. 역할 정의
 
-BambuLab X2D bridge는 ATR의 기본 3DP printer provider다. 이 bridge는 단순히 파일을 업로드하는 adapter가 아니라 다음 네 가지 plane을 분리해서 관리한다.
+BambuLab X2D bridge는 ATR의 기본 3D printer provider다. 이 bridge는 단순히 파일을 업로드하는 adapter가 아니라 다음 네 가지 plane을 분리해서 관리한다.
 
 | Plane | 책임 | 대표 evidence |
 |---|---|---|
@@ -38,7 +38,7 @@ BambuLab X2D bridge는 ATR의 기본 3DP printer provider다. 이 bridge는 단�
 | ha-bambulab upload/start 사례 | FTPS upload와 MQTT start가 조합되지만, AMS mapping과 실제 start observation이 별도 문제로 남는다. | FTPS/HTTP transfer proof와 start gate를 분리하고, `published=true`만으로 성공 처리하지 않는다. |
 | Looprint / Factorian 계열 autoeject 사례 | sliced G-code/3MF에 cooldown, push-off, optional sweep을 넣어 반복 출력한다. 모델군별 push axis와 안전 범위가 다르다. | native `bambu_gcode_patch`는 deterministic post-process patch로만 수행하고, model family/envelope/height/residue validator를 gate로 둔다. |
 | Reddit / Bambu community 실패 사례 | bed adhesion, toolhead cover, carbon rod 방향 하중, purge/skirt residue, build plate shift가 실제 리스크로 반복된다. | 물리 환경 관리는 workstation owner/operator가 직접 수행한다. UI 수동 checklist는 제거하고, runtime gate는 printer-state, geometry, camera, bed-clear evidence를 중심으로 둔다. |
-| Bambu Studio Device 화면 | camera, progress/layer, thermal, material/AMS, control 상태가 한 화면에서 동시에 유지된다. | 3DP Device Workspace는 status plane과 camera plane을 동시에 표시하되, video failure가 기존 status를 지우지 않게 한다. |
+| Bambu Studio Device 화면 | camera, progress/layer, thermal, material/AMS, control 상태가 한 화면에서 동시에 유지된다. | 3D Device Workspace는 status plane과 camera plane을 동시에 표시하되, video failure가 기존 status를 지우지 않게 한다. |
 | X2D/H2D MQTT report 사례 | X2D/H2D report는 기존 X1/P1보다 깊은 `2D`, `3D`, `device`, nozzle/material 구조를 가진다. | normalizer는 raw report를 보존하고, 알 수 없는 필드는 버리지 않으며, Device Workspace에는 normalized summary만 표시한다. |
 
 주요 참고 링크:
@@ -215,10 +215,10 @@ Bambu autoejection은 `bambu_gcode_patch` provider로 표시한다. 이는 외�
 
 ### Standalone autoejection test 경로
 
-3DP Device Workspace의 left/center/right standalone autoejection test는 실제 시편 출력 경로와 분리한다.
+3D Device Workspace의 left/center/right standalone autoejection test는 실제 시편 출력 경로와 분리한다.
 
 ```text
-3DP GUI standalone button
+3D GUI standalone button
   -> POST /api/printer/autoejection-test
   -> build_standalone_bambu_autoejection_artifact()
   -> standalone .autoeject.gcode.3mf artifact
@@ -234,7 +234,7 @@ Bambu autoejection은 `bambu_gcode_patch` provider로 표시한다. 이는 외�
 - generated standalone artifact directory: `artifacts/bambu_autoejection/`
 - physical validation summary: `runs/manual_bambu_validation/`
 
-Standalone test도 direct MQTT `gcode_line` motion을 쓰지 않는다. 3DP GUI live gate를 통과한 경우에만 `.autoeject.gcode.3mf` artifact를 일반 upload/start gate로 넘긴다. Tail 내부에서는 전체축 `G28`을 실행하지 않는다. Bambu/X2D full homing은 중앙 probing/접촉 동작을 포함할 수 있으므로 autoejection tail은 프린트 job 시작 시 확립된 좌표계를 보존한다.
+Standalone test도 direct MQTT `gcode_line` motion을 쓰지 않는다. 3D GUI live gate를 통과한 경우에만 `.autoeject.gcode.3mf` artifact를 일반 upload/start gate로 넘긴다. Tail 내부에서는 전체축 `G28`을 실행하지 않는다. Bambu/X2D full homing은 중앙 probing/접촉 동작을 포함할 수 있으므로 autoejection tail은 프린트 job 시작 시 확립된 좌표계를 보존한다.
 
 `Live GUI 테스트 모드, 설치 프린터` 경로는 실제 출력 시간을 기다리지 않는 route validation이다. 실제 STL을 active slicer로 `.gcode.3mf`까지 만들고, 그 artifact를 일반 `project_file` upload/start gate로 publish한다. 성공 기준은 MQTT ack가 아니라 fresh post-publish observation에서 `RUNNING`/preparing 계열 state와 progress-panel evidence가 관측되는 것이다. 이후 즉시 stop을 보내고, 같은 sliced artifact의 `Metadata/plate_#.gcode`에서 extrusion move 기반 object bounds를 추출해 standalone autoejection artifact를 publish한다. extrusion bounds가 없거나 plate G-code를 읽을 수 없으면 `BAMBU_AUTOEJECTION_SOURCE_EXTRUSION_BOUNDS_REQUIRED` 계열 failure로 ejection publish를 차단한다.
 
@@ -250,14 +250,14 @@ Z motion은 절대좌표 기준으로 계산한다. 오토이젝션 push 높이�
 |---|---|---|
 | Main GUI test / Live GUI `테스트 모드, 가상 브릿지` | `virtual` | 없음 |
 | Live GUI `테스트 모드, 설치 프린터` | actual sliced `.gcode.3mf` -> MQTT `project_file` start -> progress observation -> stop -> source-bounds-derived standalone `.autoeject.gcode.3mf` + MQTT `project_file` | actual-printer upload/start validation plus physical ejection-route validation; full print body is started only long enough to prove the progress panel receives a real job |
-| 3DP GUI standalone autoejection test with live gates | standalone `.autoeject.gcode.3mf` + MQTT `project_file` | ejection-only artifact through the same upload/start gate; no direct `gcode_line` |
+| 3D GUI standalone autoejection test with live gates | standalone `.autoeject.gcode.3mf` + MQTT `project_file` | ejection-only artifact through the same upload/start gate; no direct `gcode_line` |
 | Live GUI `테스트 모드, 실제 출력` / normal Live actual print | `.autoeject.gcode.3mf` + MQTT `project_file` | real print body is preserved and deterministic autoejection tail is appended |
 
 ---
 
-## 6. 3DP Device Workspace 표시 원칙
+## 6. 3D Device Workspace 표시 원칙
 
-3DP GUI는 Bambu Studio Device 탭과 유사하게 실시간 운영 정보를 한 화면에 유지해야 한다. 단, GUI가 임의 값을 만들면 안 되고 backend normalized report만 표시한다.
+3D GUI는 Bambu Studio Device 탭과 유사하게 실시간 운영 정보를 한 화면에 유지해야 한다. 단, GUI가 임의 값을 만들면 안 되고 backend normalized report만 표시한다.
 
 필수 표시 영역:
 
@@ -348,14 +348,14 @@ Looprint 계열은 already-sliced G-code/3MF에 cooldown/push-off/loop logic을 
 - 동일 artifact에 대해 `Validate G-code Preview` 성격의 non-mutating 검증은 patched artifact나 manifest를 쓰지 않고 validator evidence만 반환해야 한다.
 - `Generate Patched Artifact` 성격의 patch 실행은 `.autoeject.gcode.3mf`, sidecar manifest, 내부 `Metadata/plate_1.gcode.md5` 갱신까지 확인됐다.
 - HTTP artifact route는 ATR 서버의 LAN IP URL로 server-side fetch 및 sha256 match가 확인됐다. 이 값은 프린터 publish를 실행했다는 뜻이 아니라, 프린터에 전달 가능한 URL 후보가 준비됐다는 뜻이다.
-- 초기 수동-gate 버전의 `Pre-start Check` dry-run은 `camera_status`, optional native patch, HTTP artifact route까지 진행한 뒤 `BAMBU_START_DRY_RUN`, operator confirmation, Guardian approval, ejection checklist blocker로 의도적으로 막혔다. 현재 코드는 이 수동 checklist UI를 제거했고, 3DP GUI가 owner-managed publish 기본값을 보내며 backend는 artifact/camera/bed-clear/start-state blocker로 차단한다.
+- 초기 수동-gate 버전의 `Pre-start Check` dry-run은 `camera_status`, optional native patch, HTTP artifact route까지 진행한 뒤 `BAMBU_START_DRY_RUN`, operator confirmation, Guardian approval, ejection checklist blocker로 의도적으로 막혔다. 현재 코드는 이 수동 checklist UI를 제거했고, 3D GUI가 owner-managed publish 기본값을 보내며 backend는 artifact/camera/bed-clear/start-state blocker로 차단한다.
 - 실제 장비 상태 조회 중 FTPS가 `421 too many connections` 계열로 거부되면 generic network failure가 아니라 `BAMBU_FTPS_TOO_MANY_CONNECTIONS`로 표시한다. 이 경우 MQTT/video plane이 살아 있더라도 FTPS upload-ready는 아니다.
-- 3DP GUI visual QA에서는 `Video Status` 후 Bambu camera panel이 `proxy_ready`/RTSPS 또는 MJPEG proxy 상태를 표시하고, 이후 `Pre-start Check`가 실제 camera frame을 화면에 유지하는 것을 확인했다. 같은 화면에서 MQTT/progress/material card는 유지되고 FTPS blocker만 별도로 표시됐다.
+- 3D GUI visual QA에서는 `Video Status` 후 Bambu camera panel이 `proxy_ready`/RTSPS 또는 MJPEG proxy 상태를 표시하고, 이후 `Pre-start Check`가 실제 camera frame을 화면에 유지하는 것을 확인했다. 같은 화면에서 MQTT/progress/material card는 유지되고 FTPS blocker만 별도로 표시됐다.
 - Autoejection panel visual QA에서는 `Save Autoejection Config`, `Validate G-code Preview`, `Generate Ejection Test Artifact`, `Generate Sweep Test Artifact`, `Generate Patched Artifact`, `Mark Bed Clear`, `Mark Not Clear`, standalone left/center/right artifact buttons가 렌더링됐다. `Validation Evidence`는 기본 접힘 상태이며, 화면에는 full raw G-code block을 표시하지 않는다.
 - 2026-06-16 추가 pre-start audit에서는 실제 Bambu connection memory와 기존 `.gcode.3mf` artifact를 사용해 `0.0.0.0:7862` 임시 서버에서 `camera_status -> existing sliced artifact -> native autoejection patch -> HTTP artifact route -> start gate -> SPC readiness`를 호출했다. `HTTP artifact route`는 LAN IP URL로 `ok=true`, `printer_fetch_ready=true`였고, FTPS가 connection-limit 상태여도 HTTP route transfer evidence는 유지됐다. 과거 수동-gate 요청은 approval/checklist blocker 때문에 `blocked`로 남았지만, 현재 GUI 요청은 owner-managed publish 기본값을 사용한다. 따라서 현행 차단 지점은 artifact validity, camera frame requirement, bed-clear lock, printer safe state, post-publish observation이다.
 - 같은 실제 API 경로에서 owner-managed publish 기본값과 camera/bed-clear/start-state evidence가 모두 통과하면 `Pre-start Check`는 `ready_to_publish_not_started`까지 도달한다. 이 상태에서도 `published=false`, `will_publish=false`가 유지되므로 실제 MQTT publish 또는 motion을 의미하지 않는다.
 - `BAMBU_POST_EJECT_BED_NOT_CLEAR` gate도 실제 API 경로에서 확인했다. `/api/printer/bed-clear`에 `bed_clear_required=true`, `bed_clear_verified=false`를 저장하면 all-confirmed pre-start path도 `BAMBU_POST_EJECT_BED_NOT_CLEAR`로 차단된다. 이후 `bed_clear_required=false`, `bed_clear_verified=true`를 저장하면 같은 start gate는 다시 `ready_to_publish_not_started`로 풀린다. 검증 후 local bed-clear memory는 원상 복구했다.
-- 2026-06-16 현재 코드 smoke에서는 임시 FastAPI 서버의 `/printer`가 `HTTP 200`과 3DP Printer GUI HTML을 반환했고, HTML 안에 `Bambu LAN Connection`, `Bambu G-code Autoejection`, `Pre-start Check`, `Video Status`, `Publish Start`, `Mark Bed Clear`, `Validate G-code Preview` control text가 존재했다. `/api/printer/status?mode=test`는 BambuLab X2D active profile과 device screen payload를 반환했고 `will_publish`/`start_enabled`가 비물리 조회에서 설정되지 않는 것을 확인했다. 같은 서버에서 Selenium/Firefox headless 렌더링은 상단 console과 autoejection section의 핵심 버튼이 실제 DOM에서 표시되는 것을 확인했다. 이 최신 확인은 rendered GUI smoke와 HTML/API smoke evidence이며 physical publish/ejection 검증은 아니다.
+- 2026-06-16 현재 코드 smoke에서는 임시 FastAPI 서버의 `/printer`가 `HTTP 200`과 3D Printer GUI HTML을 반환했고, HTML 안에 `Bambu LAN Connection`, `Bambu G-code Autoejection`, `Pre-start Check`, `Video Status`, `Publish Start`, `Mark Bed Clear`, `Validate G-code Preview` control text가 존재했다. `/api/printer/status?mode=test`는 BambuLab X2D active profile과 device screen payload를 반환했고 `will_publish`/`start_enabled`가 비물리 조회에서 설정되지 않는 것을 확인했다. 같은 서버에서 Selenium/Firefox headless 렌더링은 상단 console과 autoejection section의 핵심 버튼이 실제 DOM에서 표시되는 것을 확인했다. 이 최신 확인은 rendered GUI smoke와 HTML/API smoke evidence이며 physical publish/ejection 검증은 아니다.
 
 실제 장비 검증으로만 완료 처리할 수 있는 범위:
 
@@ -407,7 +407,7 @@ Looprint 계열은 already-sliced G-code/3MF에 cooldown/push-off/loop logic을 
 
 ### 9.3 Completion audit GUI/API
 
-같은 completion audit은 3DP Device Workspace에서도 실행할 수 있다. GUI/API 경로는 CLI를 감싸는 운영자 편의 layer이며, 동작 경계는 CLI와 동일하다.
+같은 completion audit은 3D Device Workspace에서도 실행할 수 있다. GUI/API 경로는 CLI를 감싸는 운영자 편의 layer이며, 동작 경계는 CLI와 동일하다.
 
 | GUI control | API | 동작 |
 | --- | --- | --- |

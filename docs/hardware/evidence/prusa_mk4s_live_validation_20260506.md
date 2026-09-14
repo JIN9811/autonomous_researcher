@@ -152,4 +152,4 @@ Live print execution requires:
 - Operator intent for physical execution through the `실험 수행` trigger in normal Live GUI mode.
 
 Ejection remains off while `memory/prusa_print_profile.json` has `allow_ejection:false`.
-The available ejection implementation is the bed-sweep append-G-code path: when the operator enables ejection in the 3DP GUI, the controller applies it to test, live, and Live GUI test-mode payloads, and the bridge appends a validated tail to the sliced print G-code before PrusaLink upload/start.
+The available ejection implementation is the bed-sweep append-G-code path: when the operator enables ejection in the 3D GUI, the controller applies it to test, live, and Live GUI test-mode payloads, and the bridge appends a validated tail to the sliced print G-code before PrusaLink upload/start.

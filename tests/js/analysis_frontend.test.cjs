@@ -50,7 +50,7 @@ function sandbox() {
   return context;
 }
 
-test("installed Analysis owner retains the measured, solver, gate and BO evidence", async () => {
+test("installed Analysis owner retains measured evidence without reviving historical FEM panels", async () => {
   assert.ok(fs.existsSync(asset), "Analysis must own its frontend composition");
   const context = sandbox();
   const fem = { calls: [], render(analysis) { this.calls.push(analysis); return '<div class="analysis-fem-live">four evidence cards</div>'; } };
@@ -61,7 +61,7 @@ test("installed Analysis owner retains the measured, solver, gate and BO evidenc
   assert.deepEqual(Array.from((await host.reconcile([manifest], services(fem))).errors), []);
   const frontend = host.get("analysis");
   assert.ok(Object.isFrozen(frontend));
-  assert.equal(frontend.renderReport({}), "");
+  assert.match(frontend.renderReport({}), /Awaiting data/);
 
   const report = {analysis: {
     source: {source: "equipment_result", path: "/runs/current/utm.csv", fingerprint: {sha256: "sha-current"}},
@@ -72,19 +72,38 @@ test("installed Analysis owner retains the measured, solver, gate and BO evidenc
     analysis_artifacts: {canonical_curve: "/runs/current/curve.json", experiment_evaluation: "/runs/current/evaluation.json"},
   }, bo_handoff: {schema_version: "analysis_bo_handoff_v2", ok_for_bo: true, next_agent: "BO"}};
   const detail = frontend.renderReport(report);
-  for (const token of ["/runs/current/utm.csv", "sha-current", "512", "queued", "analysis_bo_handoff_v2", "/runs/current/curve.json"]) {
+  for (const token of ["/runs/current/utm.csv", "sha-current", "512", "analysis_bo_handoff_v2", "/runs/current/curve.json"]) {
     assert.ok(detail.includes(token), `report retains ${token}`);
   }
   const dashboard = frontend.renderDashboard(report, "completed", "Analysis Agent", {});
-  assert.equal(fem.calls.length, 1);
-  assert.equal(fem.calls[0], report.analysis);
-  assert.match(dashboard, /analysis-fem-live/);
-  for (const title of ["Result Summary", "Analysis Admissibility / Gate", "Metric Bars", "Data Quality", "Provenance", "Raw Data Ledger", "BO Handoff"]) {
+  assert.match(dashboard, /ar-spm-progress-node-rail/);
+  assert.match(dashboard, /ar-spm-progress-edge/);
+  assert.match(dashboard, /ar-design-handoff-layout/);
+  assert.match(dashboard, /ar-design-metric-strip/);
+  assert.doesNotMatch(dashboard + detail, /analysis-fem-live|FEM|CAE|Solver Field/);
+  for (const title of ["Objective", "Measured Response", "Key Metrics", "Agentic Progress", "Data Quality & BO Handoff"]) {
     assert.ok(dashboard.includes(`data-title="${title}"`), `${title} remains owner-composed`);
   }
 });
 
-test("inactive Analysis owner disappears without cancelling the host-owned FEM controller", async () => {
+test("objective comes from saved handoff, preserves zero, and empty data retains the same cards", async () => {
+  const context = sandbox();
+  vm.runInContext(fs.readFileSync(asset, "utf8"), context);
+  const ui = context.window.AX4LABAnalysisUI.createFrontend(services({render: () => ''}));
+  const empty = ui.renderDashboard({}, 'idle');
+  const actual = ui.renderDashboard({analysis: {utm_metrics: {evaluation_strain: 0.4}, bo_handoff: {
+    objective: {metric_name:'custom_energy', unit:'J/g', score:0, direction:'minimize'}, ok_for_bo:false
+  }}}, 'done');
+  assert.match(actual, /custom energy/i);
+  assert.match(actual, /J\/g/);
+  assert.match(actual, /40%/);
+  assert.doesNotMatch(actual, /Awaiting objective/);
+  assert.deepEqual([...empty.matchAll(/data-title="([^"]+)"/g)].map(x=>x[1]), [...actual.matchAll(/data-title="([^"]+)"/g)].map(x=>x[1]));
+  assert.match(empty, /Awaiting data/);
+  assert.doesNotMatch(empty, /Completed|100%/);
+});
+
+test("inactive Analysis owner disappears from the module host", async () => {
   assert.ok(fs.existsSync(asset), "Analysis frontend asset is required");
   const context = sandbox();
   const fem = { calls: 0, render() { this.calls += 1; return '<div class="analysis-fem-live"></div>'; } };
@@ -96,5 +115,4 @@ test("inactive Analysis owner disappears without cancelling the host-owned FEM c
   host.get("analysis").renderDashboard({analysis: {}}, "idle", "Analysis", {});
   await host.reconcile([], services(fem));
   assert.equal(host.get("analysis"), null);
-  assert.equal(fem.calls, 1);
 });

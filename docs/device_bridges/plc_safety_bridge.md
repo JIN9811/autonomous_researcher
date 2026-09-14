@@ -32,6 +32,10 @@ supersedes: []
 
 # PLC Safety Bridge Operator Guide
 
+<img src="../../web/static/workspace_icons/plc.webp" width="96" alt="PLC Safety Workspace icon">
+
+Main GUI: **PLC Safety · Workspace** opens the PLC workspace in a separate window.
+
 ## Status at a Glance
 
 | At a glance | Details |

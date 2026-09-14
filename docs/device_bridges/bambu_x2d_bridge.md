@@ -38,7 +38,7 @@ supersedes: []
 | At a glance | Details |
 |---|---|
 | Purpose | Slicing, artifact transfer, telemetry and guarded autoejection |
-| Connects | Specimen / 3DP workspace ↔ Bambu provider |
+| Connects | Specimen / 3D workspace ↔ Bambu provider |
 | Effect | Upload, heating and motion are possible through gated commands |
 | Implementation | [Bambu implementation](../../device_bridges/printer_fleet/bridge.py) · [Requirements](../../device_bridges/printer_fleet/providers/bambu-requirements.txt) |
 | Verification | [Recorded scope and evidence](#current-verification) · 2026-09-06 |
@@ -263,7 +263,7 @@ artifact binding, shared GUI/agent mapping, and non-actuating behavior.
 
 ### Operator-adjustable specimen placement (2026-09-06)
 
-The 3DP workspace Print Defaults exposes `specimen_placement`, shared with
+The 3D workspace Print Defaults exposes `specimen_placement`, shared with
 controller initialization, Design/BO redesign handoffs, and Specimen Making.
 Save defaults for subsequent requests; manual Slice/Prestart uses the current
 form values. Existing run snapshots and already sliced files are not relocated.
@@ -289,7 +289,7 @@ preparation/prestart; it never silently reverts to automatic arrangement. Explic
 placement is X2D-only; other providers retain their existing `auto` behavior.
 Normal print-cycle autoejection still follows the actual sliced specimen bounds.
 
-The 3DP GUI no longer exposes `Validate Left/Center/Right` or the three Physical
+The 3D GUI no longer exposes `Validate Left/Center/Right` or the three Physical
 Proof Package `Run Standalone Eject` controls, including their click handlers.
 The remaining ejection-test artifact handler fixes `mode=test` and
 `start_immediately=false`. Preview validation, artifact generation, proof

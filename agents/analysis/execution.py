@@ -37,7 +37,7 @@ def analysis_execution_catalog(agent):
             ExecutionOperation(
                 "analysis.task",
                 task,
-                label="Composite measured analysis and optional background FEM task",
+                label="Measurement processing and objective evaluation",
                 produces=("task_result",),
                 llm=True,
             ),

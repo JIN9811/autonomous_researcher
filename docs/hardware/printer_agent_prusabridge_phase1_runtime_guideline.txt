@@ -293,7 +293,7 @@ devices:
         - "{output_path}"
         - "{stl_path}"
       # Runtime appends --skirts=0 --brim-width=0 --raft-layers=0 unless the
-      # operator enables skirt/brim/raft in the 3DP GUI profile.
+      # operator enables skirt/brim/raft in the 3D GUI profile.
 
     ejection:
       enabled: false
@@ -341,7 +341,7 @@ Important:
 - `mode: test` must remain the default.
 - `virtual_prusalink_dry_run: true` may be the default if the simulator transport is fully local and deterministic.
 - On this validated local MK4S profile, `allow_upload` and `allow_start_print` are true so normal Live GUI `실험 수행` can physically print.
-- Operator bed-sweep ejection is controlled by the 3DP GUI print-default profile field `allow_ejection`.
+- Operator bed-sweep ejection is controlled by the 3D GUI print-default profile field `allow_ejection`.
 - Toolhead-paddle ejection still requires full paddle calibration; bed-sweep append ejection uses the configured MK4S bed/head coordinates and must pass `GCodeSafetyValidator` before upload.
 - Secrets are resolved from environment variables or `memory/prusa_connection.json` at runtime; never hardcode them in source/config templates.
 
@@ -1051,12 +1051,12 @@ devices:
 ```
 
 Runtime adhesion geometry policy:
-- The 3DP GUI exposes skirt/brim/raft as an operator option.
+- The 3D GUI exposes skirt/brim/raft as an operator option.
 - Default profile sets `skirt_enabled=false`.
 - When `skirt_enabled=false`, the bridge appends `--skirts=0 --brim-width=0 --raft-layers=0` to the PrusaSlicer command so auxiliary adhesion structures are not printed around the specimen.
 - TPMS cap skins are separate specimen-geometry options: default bottom-only `bottom_cap_enabled=true`, `top_cap_enabled=false`, `top_bottom_cap=true`, `skin_thickness_mm=0.8` for bed adhesion. Enable the top cap only for explicit flat upper compression-face requirements; disabling both caps is allowed when the operator explicitly wants bare TPMS output.
 - Auto-ejection bed sweep must parse the sliced G-code extrusion moves before appending the tail. Use the derived object bounds to set the nozzle X position to the printed object's center (`resolved_head_x_mm`) and report `object_bounds` / `head_x_source` in `ejection_result`. Keep the full configured Y sweep for physical ejection distance unless a separately validated calibration changes it.
-- Standalone 3DP GUI autoejection tests for left/center/right must use the same bed-sweep ejection builder and safety validator. They may inject synthetic object bounds and run ejection-only G-code, but they must not use a separate unvalidated motion program or include specimen-printing extrusion moves.
+- Standalone 3D GUI autoejection tests for left/center/right must use the same bed-sweep ejection builder and safety validator. They may inject synthetic object bounds and run ejection-only G-code, but they must not use a separate unvalidated motion program or include specimen-printing extrusion moves.
 
 Live safety gates remain authoritative:
 - `allow_upload=false` blocks before any upload network call.
@@ -1153,11 +1153,11 @@ Validation artifact location:
 - `runs/prusa_cube_20260506T124928Z/bridge_comm_log.jsonl`
 
 ============================================================
-19. Main GUI 3DP Printer Workspace Update (2026-05-07)
+19. Main GUI 3D Printer Workspace Update (2026-05-07)
 ============================================================
 
 Device workspace route:
-- Main GUI -> Device Workspaces -> `Open 3DP GUI`.
+- Main GUI -> Device Workspaces -> `Open 3D GUI`.
 - Route: `/printer`.
 - Template/script:
   - `web/templates/printer.html`
@@ -1189,7 +1189,7 @@ Profile memory:
 Connection memory remains separate:
 - Path: `memory/prusa_connection.json`.
 - Stores local PrusaLink connection information.
-- The 3DP GUI `PrusaLink Connection` panel edits this file through `/api/printer/connection`.
+- The 3D GUI `PrusaLink Connection` panel edits this file through `/api/printer/connection`.
 - Editable fields are host/IP, scheme, port, storage, auth mode, username, password, API key header, and API key.
 - Blank password/API key submissions preserve the existing saved secret.
 - `/api/printer/status` and `/api/printer/connection` may report `password_set=true|false` and `api_key_set=true|false` but must not return the password or API key value.
@@ -1197,7 +1197,7 @@ Connection memory remains separate:
 Runtime effect:
 - `MainController._validated_printer_defaults()` loads `memory/prusa_print_profile.json`.
 - Live GUI handoff uses this saved profile when the operator does not override a field in chat.
-- Material from the 3DP GUI is treated as an operator-confirmed default, not an LLM-fabricated value.
+- Material from the 3D GUI is treated as an operator-confirmed default, not an LLM-fabricated value.
 - In normal Live GUI mode, `start_immediately_live=true` makes `실험 수행` generate a `print` block with `start_immediately=true`, `physical_intent=true`, and `confirm_physical_print=true`.
 - If `start_immediately_live=false`, the live workflow may still upload when gates allow it, but does not start the print unless the operator overrides the print block.
 - Test mode and Live GUI `테스트 모드` force `start_immediately=false` and `physical_intent=false` regardless of the saved profile, except when the operator explicitly selects `physical_print` / `실제 출력` or sends the one-shot `테스트 모드, 실제 출력` command.
@@ -1207,7 +1207,7 @@ Live gates:
   - `allow_upload`
   - `allow_start_print`
   - `allow_ejection`
-- The 3DP GUI displays these gates but does not silently change them.
+- The 3D GUI displays these gates but does not silently change them.
 - `runs/prusa_cube_20260506T124928Z/test_log.jsonl`
 - `runs/prusa_cube_20260506T124928Z/cube_2mm.stl`
 - `runs/prusa_cube_20260506T124928Z/cube_2mm_mk4s_safe_start.gcode`

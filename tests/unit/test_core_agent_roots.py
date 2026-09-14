@@ -23,13 +23,7 @@ RETAINED_ROOT_FILES = {
 }
 RETIRED_TO_CANONICAL = {
     "analysis_agent": "agents.analysis.agent",
-    "analysis_calibration": "agents.analysis.calibration",
     "analysis_decisions": "agents.analysis.decisions",
-    "analysis_fem": "agents.analysis.fem",
-    "analysis_improvement": "agents.analysis.improvement",
-    "analysis_mechanisms": "agents.analysis.mechanisms",
-    "analysis_refinement": "agents.analysis.refinement",
-    "analysis_runtime": "agents.analysis.runtime",
     "bo_agent": "agents.bo.agent",
     "bo_decision": "agents.bo.decision",
     "design_agent": "agents.design.agent",
@@ -73,7 +67,7 @@ def test_agent_root_contains_only_shared_runtime_files() -> None:
 
 def test_all_retired_modules_have_canonical_imports() -> None:
     """Would fail if any owner module were unavailable after wrapper retirement."""
-    assert len(RETIRED_TO_CANONICAL) == 31
+    assert len(RETIRED_TO_CANONICAL) == 25
     for module_name in RETIRED_TO_CANONICAL.values():
         assert importlib.import_module(module_name).__name__ == module_name
 

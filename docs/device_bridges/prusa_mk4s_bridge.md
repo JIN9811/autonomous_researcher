@@ -35,7 +35,7 @@ supersedes: []
 | At a glance | Details |
 |---|---|
 | Purpose | Slicing, PrusaLink transfer/start and optional ejection |
-| Connects | Specimen / 3DP workspace ↔ selected Prusa provider |
+| Connects | Specimen / 3D workspace ↔ selected Prusa provider |
 | Effect | Remote storage, heating and motion through enabled actions |
 | Implementation | [Prusa implementation](../../device_bridges/printer_fleet/providers/prusa.py) · [Requirements](../../device_bridges/printer_fleet/providers/prusa-requirements.txt) |
 | Verification | [Recorded scope and evidence](#current-verification) · 2026-08-09 |

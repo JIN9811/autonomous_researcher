@@ -82,7 +82,7 @@ def retrieve_research_context(*, query: str, retrieval_result: dict[str, Any]) -
 
 
 def retrieve_evolution_context(*, target_id: str, evidence_packs: list[dict[str, Any]]) -> dict[str, Any]:
-    """Return ranked self-evolution context for one target."""
+    """Return ranked improvement context for one target."""
     packs = [pack for pack in evidence_packs if isinstance(pack, dict) and (not target_id or pack.get("target_id") == target_id)]
     packs.sort(key=lambda item: float(item.get("priority") or 0.0), reverse=True)
     return {

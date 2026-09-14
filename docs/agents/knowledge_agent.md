@@ -4,7 +4,7 @@ subtype: system
 status: active
 authority: descriptive
 audience: [researcher, reviewer, developer, operator, maintainer]
-scope: [agents, knowledge, ontology, markdown_memory, scoped_rag, self_evolution, source_curation]
+scope: [agents, knowledge, ontology, markdown_memory, scoped_rag, improvement_evidence, source_curation]
 summary: Ontology-guided Markdown knowledge, source-backed LLM curation, scoped retrieval and preserved research-memory contracts.
 source_of_truth:
   - agents/core/knowledge/agent.py
@@ -41,7 +41,6 @@ related_docs:
   - docs/knowledge/markdown_memory_operations.ko.md
   - docs/knowledge/manual_rag_knowledge.ko.md
   - docs/oldversion/superpowers/specs/2026-09-11-source-curation-design.md
-  - docs/agents/knowledge_agent_self_evolution_runtime_guideline.md
   - docs/oldversion/superpowers/specs/2026-09-10-knowledge-markdown-memory-design.md
   - docs/oldversion/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md
   - docs/modularity.md
@@ -49,6 +48,10 @@ supersedes: []
 -->
 
 # Knowledge Agent Reference
+
+<img src="../../web/static/workspace_icons/knowledge.webp" width="96" alt="Knowledge Workspace icon">
+
+Main GUI: **Knowledge · Workspace** opens the knowledge workspace in a separate window.
 
 ![knowledge agent role overview](assets/figures/knowledge-overview.webp)
 
@@ -293,7 +296,7 @@ each execution separately; Markdown identity also includes run, cycle, agent and
 event, so a similar failure in a later cycle is retained independently.
 
 Current `failure_tags` describe the current owner's failure evidence. Guardian
-incident history is retained separately for audit, retrieval and Self-Evolution;
+incident history is retained separately for audit, retrieval and improvement analysis;
 its component, severity and risk-class labels are not new current failures.
 Historical evidence does not replace the current Analysis BO-readiness claim
 or clear active hardware alerts, stop requests or pending approvals.
@@ -352,9 +355,18 @@ place. It provides enablement, scan/retry, background progress, filters and
 full note/source detail. The main dashboard links the same
 `/knowledge` route and reads Markdown status.
 
-Live GUI preserves Knowledge activity, memory, evidence and retrieval cards;
-it does not poll retired graph/relation endpoints or display relation review
-queues. Operator Attention counts runtime approvals, questions and faults only.
+Live GUI separates run-scoped activity, per-agent knowledge supply, accessible
+library inventory, and recorded outcomes. Activity uses cycle rows with
+same-scale SVG microbars; grouped vertical bars along an agent x-axis compare retrieval
+and recorded use, with missing observations left unfilled rather than zeroed.
+Learned patterns and improvement findings remain visible as inline tables.
+The supply chart is always visible; only its supporting table is initially
+collapsed under Details, with the user's expanded state retained during refresh.
+Missing evidence is not shown as a measured zero;
+an indexed Wiki count does not assert review or freshness. The ORC report keeps
+selected-response knowledge and memory evidence at the bottom of its report.
+No retired graph/relation endpoints or relation review queues are used.
+Operator Attention counts runtime approvals, questions and faults only.
 Legacy graph URLs still return HTTP 410; ontology definitions and scoped
 Markdown retrieval remain available.
 
@@ -414,7 +426,7 @@ The 2026-09-11 focused regression run passed **278 tests** in **29.25 s**
 (12 existing warnings). Coverage includes source extraction/curation, atomic
 publication, page provenance, scoped consumers, external validation retention, background intake, retired
 manual endpoints, preserved Knowledge/Equipment APIs and the nonactuating
-two-cycle busy-FEM-boundary integration. This is a targeted set, not the entire
+historical two-cycle background-boundary integration. This is a targeted set, not the entire
 repository test suite.
 
 Workspace QA used an isolated FastAPI fixture and existing Playwright Chromium
@@ -455,6 +467,5 @@ physical closed-loop result.
 - [Markdown Knowledge Operations](../knowledge/markdown_memory_operations.ko.md)
 - [Source Library Operations](../knowledge/manual_rag_knowledge.ko.md)
 - [Source Intake and Curation Contract](../oldversion/superpowers/specs/2026-09-11-source-curation-design.md)
-- [Knowledge/Self-Evolution Guideline](knowledge_agent_self_evolution_runtime_guideline.md)
 - [Agent Matrix](agent_api_connection_matrix.md)
 - [Analysis](analysis_agent.md) · [BO](bo_agent.md)

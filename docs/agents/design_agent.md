@@ -237,6 +237,19 @@ handoff. The non-LLM test branch is explicitly separate.
 
 ## Decision and Evaluation
 
+The Live report separates **Design Space** (recorded variables and ranges),
+**Candidate Comparison** (candidate validity, estimated mass and sourced performance),
+and **Constraint Check** (actual values, limits and margins). Historical heuristic
+scores do not substitute for missing evaluation evidence in these cards. Unassessed
+performance remains unassessed; manufacturing verification belongs to Specimen.
+
+Design Space plots recorded relative density against wall thickness, with an
+outlined selected point and a variable/range table. It does not encode objective
+scores. Coincident candidates share a position. Constraint Check adds per-row
+actual-value bars, limit markers and allowed-region shading; each row has its own
+scale and retains numeric values and units. Missing or unsupported numeric bounds
+remain in the table rather than receiving invented bars.
+
 **Decision question:** Is a realization of the requested experiment suitable
 given its checks, goal, available context and evidence, or is further inspection
 or owner review necessary?
@@ -263,7 +276,7 @@ automatic permission to redesign a BO-requested experiment.
 |---|---|---|
 | Validity | Existing rules plus authorized-pool and locked-input checks | Pass/fail with reasons |
 | Constraint margins | Actual/limit/relation/margin/unit for wall, cell spacing, envelope, estimated mass/time | No saturated aggregate “margin score”; estimates remain estimates |
-| Performance | Explicit `unassessed`, value/source null | No fabricated CAE result, posterior, uncertainty or information gain |
+| Performance | Explicit `unassessed`, value/source null | No fabricated performance result, posterior, uncertainty or information gain |
 | Cost | Envelope×relative-density volume/mass; legacy time estimate | Mass depends on assumed material density; time is not slicer output |
 
 ### Historical Context
@@ -443,7 +456,7 @@ regressions, baseline failures, and the limits of that evidence.
 
 ### Limitations and Known Gaps
 
-Candidate-matched CAE/BO performance integration and parameter-repair tools are
+Candidate-matched BO performance integration and parameter-repair tools are
 not implemented; performance remains unassessed. History lookup provides
 summaries. Valid evidence IDs do not establish correct interpretation or design
 optimality. Model/preview latency and baseline GUI/controller test findings are

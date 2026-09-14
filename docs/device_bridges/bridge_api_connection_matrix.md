@@ -21,8 +21,6 @@ source_of_truth:
   - mcp_tools
   - app/bootstrap.py
   - app/main.py
-  - app/analysis_fem_routes.py
-  - app/cae_fields_routes.py
   - utils/equipment_runtime_service.py
   - utils/plc_bridge_service.py
   - configs/devices.yaml
@@ -54,8 +52,7 @@ sidecars, external computation, and deterministic substitutes at baseline
 does not say that the checked-in default performs that motion.
 
 The refresh includes Equipment Runtime/Flow/Skill records, explicit worker
-selection, LeRobot replay and ActiveCam, staged CAE preparation, independent
-Analysis FEM jobs, and saved-field APIs. No device or solver was executed.
+selection, LeRobot replay and ActiveCam. No device was executed.
 
 ## Source of Truth
 
@@ -75,15 +72,11 @@ LeRobot dependencies. LeRobot retains ActiveCam motion/capture/return and rollou
 stop; Camera/Vision retains observation and evidence services. This changes code
 ownership and discovery without adding a device route or physical validation.
 
-The 2026-09-13 Analysis package migration installs `cae@1.0.0` with canonical
-bridge/tool code under `device_bridges/cae/` and exact legacy aliases. Analysis
-pins this computation bridge; CalculiX is an internal provider and shared PINN
-remains inactive. Existing admission, queue, cancellation and solver semantics
-are unchanged, and no computation is reclassified as Low hardware control.
+Analysis uses no device bridge; its package consumes equipment-produced measurements.
 
 - `device_bridges/` implementations;
 - `mcp_tools/*_tools.py` and `app/bootstrap.py` registration;
-- route declarations in `app/main.py`, `app/analysis_fem_routes.py` and `app/cae_fields_routes.py`;
+- route declarations in `app/main.py`;
 - `utils/equipment_runtime_service.py` and `utils/plc_bridge_service.py`;
 - `configs/devices.yaml` and `configs/lerobot.yaml`;
 - `graphs/configs/atr_closed_loop.yaml` bridge projection.
@@ -98,7 +91,6 @@ are unchanged, and no computation is reclassified as Low hardware control.
 | LeRobot | graph/tool/API runtime | Manipulation, Vision | `lerobot.bridge`, `lerobot.*` | `/api/lerobot/*` |
 | Windows PyAutoGUI | graph/tool/API runtime with durable execution service | Equipment | `equipment.pyautogui.*`; read-only `equipment.runtime.current/list/get`; resource `equipment_runtime` | `/api/equipment/windows/*`, `/api/equipment/runtime/*`, shared Skill/Profile surfaces |
 | UTM Vision | graph/API sidecar | Vision, Equipment | camera/UTM tools plus runtime singletons | `/api/equipment/utm-runtime/*`, specimen-pose and camera routes |
-| CAE Computation | graph/tool/API computation | Analysis | `cae.prepare_static_analysis`, `cae.run_static_analysis`, health; `calculix.*`, `pinn.*` and their resources | `/api/cae/config`, `/api/cae/run`, `/api/cae/fields*`; Analysis-owned `/api/analysis/fem/jobs` |
 | Base and Simulators | test-only substitutes | test-mode agents | mock tools or direct test fixtures | no dedicated owned API |
 
 The graph also exposes `plc_bridge` and `/api/plc/*`. This is a Controller-owned
@@ -131,7 +123,6 @@ independent implementations of the same operation.
 | LeRobot | profile/session/process manager | subprocess, serial, camera, local HTTP sidecars/files | rollout/replay/teleoperation, robot ports, cameras and optional training/Isaac processes | session status/logs, continuous telemetry, camera evidence, datasets and model artifacts |
 | Windows PyAutoGUI | connection/program/locator client and Equipment Runtime | token-gated HTTP; durable local execution records | selected Windows or Local worker and desktop application | health, screenshot, step trace, request log, acquired-file metadata and execution projection |
 | UTM Vision | ROS process/stream/pose managers | ROS 2 topics, subprocess, camera/USB, MJPEG | UTM workspace, YOLO/camera, D455F | graph/status, frames, calibration, pose/evidence artifacts |
-| CAE Computation | facade, Analysis-owned job store, field/model adapters | filesystem and guarded subprocess | Gmsh/CalculiX/postprocessor, optional PINN environment | preparation receipts, decks, mesh checks, reaction curves, saved fields/logs and registry |
 | Base and Simulators | `BaseBridge` and deterministic fixtures | in-process only | no required external target | schema-shaped simulated responses |
 
 ## Configuration and Secret Matrix
@@ -144,7 +135,6 @@ independent implementations of the same operation.
 | LeRobot | `configs/lerobot.yaml` | port/session/profile/calibration, datasets, outputs, logs | `HF_TOKEN` or token file; no token value in docs |
 | Windows PyAutoGUI | `devices.equipment.windows_pyautogui` | selected connection/worker, Profile/Flow/Skill versions, locators, `memory/equipment_runtime`, acquired artifacts | `WINDOWS_PYAUTOGUI_BRIDGE_URL`, `WINDOWS_PYAUTOGUI_BRIDGE_TOKEN`; pairing/worker credentials remain private |
 | UTM Vision | `devices.utm_vision_runtime`, pose tracker | camera profile/calibration, runtime/pose artifacts | device paths and ROS environment; no shared secret in current bridge |
-| CAE Computation | `devices.cae` and adapter defaults | CAE/CalculiX/PINN artifacts; frozen run/loop/specimen FEM job records and field outputs | executable paths; no network credential in current adapters |
 | Base and Simulators | simulator/default sections | deterministic fake artifacts where applicable | none |
 
 ## Mode and Fallback Matrix
@@ -161,7 +151,6 @@ jointly determine the effect. Workspace actions also have their own contracts.
 | LeRobot | fake profiles/sessions/artifacts | profile safety limits and operator confirmation gate processes | profile substitution is explicit, not automatic |
 | Windows PyAutoGUI | simulator by ordinary test path; configured real test promotion or explicit worker requests may reach a real host | selected worker, token, execute gate, payload validation and applicable preflight | worker selection is explicit; TEST does not remove desktop effects |
 | UTM Vision | virtual bridge/pose allowed where configured | ROS workspace, process, topic, camera readiness required | virtual evidence must remain labeled test |
-| CAE Computation | deterministic facade; guarded/unavailable adapters | solver execution requires executable and runtime gate | missing solver/PINN returns unavailable, not fabricated live output |
 | Base and Simulators | always deterministic test path | not a live path | never promoted implicitly |
 
 `device.health` currently supplies the selected printer's health but includes
@@ -178,7 +167,6 @@ independent live probe of all devices; use the owning readiness/status path.
 | LeRobot | rollout/replay/teleop and ActiveCam motion; subprocess effects | applicable profile/ports/policy checks, execution permissions and agent context | session-specific rollout/replay/teleop status and stop APIs | reconcile process termination and fresh visual evidence before motion restart |
 | Windows PyAutoGUI | desktop actions and instrument initiation | selected candidate, token, execute gate, validated exact workflow and agent preflight | worker/runtime status and existing stop path; agent evaluates recovery | inspect execution ID, completed blocks, screenshot, logs and exported files; never repeat completed or unknown-effect work |
 | UTM Vision | observation; runtime process and calibration side effects | config/process/camera probe; freshness for downstream use | runtime/calibration stop APIs | stale/missing frame blocks handoff; process state is queried before restart |
-| CAE Computation | local/external subprocess and filesystem | input schema, executable availability, preparation receipt and applicable solver/PINN gate | process handler; scoped Analysis job cancel request | retain deck/log/partial artifacts; optional FEM failure does not replace or invalidate accepted measured data |
 | Base and Simulators | local deterministic state/files only | test-mode selection | caller/test harness | simulated success cannot resolve live unknown state |
 
 ## Evidence Matrix
@@ -191,7 +179,6 @@ independent live probe of all devices; use the owning readiness/status path.
 | LeRobot | session/task identities, termination state, commands/logs, measured telemetry, ActiveCam/camera evidence, datasets/checkpoints and optional Isaac summaries |
 | Windows PyAutoGUI | durable execution ID/projection, exact Flow/Skill versions, completed-block records, screenshot identity, step/request logs, CSV/artifact metadata and readiness checks |
 | UTM Vision | process graph/status, topic/frame timestamps, camera profile/calibration, pose snapshot and release record |
-| CAE Computation | frozen source hashes, preparation receipt and mesh quality, solver logs/curve/fields, run/loop/specimen job evidence and optional PINN registry |
 | Base and Simulators | labeled synthetic response and fixture artifacts |
 
 ## Runtime and Evidence APIs
@@ -208,16 +195,12 @@ These are selected current interfaces, not instructions to execute live tests.
 | `/api/equipment/skills/*` and `/api/equipment/profiles/*` | Versioned workflow/profile lifecycle and tests | Operator actions may deploy or execute; inspect the individual method/contract |
 | `POST /api/equipment/windows/pair` and `/select` | Pair or select the worker under that prefix | Connection state, not scientific completion |
 | `POST /api/lerobot/replay/start`, `/status`, `/stop` | Configured replay session lifecycle | Start may move a robot; status and stop are separate requests |
-| `GET /api/analysis/fem/jobs` | Read matching run/loop/specimen FEM jobs | Analysis-owned; does not start/resume computation |
-| `POST /api/analysis/fem/jobs/{job_id}/cancel` | Request cancellation of a job within the supplied run | Computation only; acknowledgement is not proof of termination |
-| `GET /api/cae/fields` and its `/metadata`, `/section`, `/render` routes | Read saved fields and perform local postprocessing | No solver invocation or physical device action |
 
 Equipment's bounded LLM selection/review stays in the
 [Equipment Agent](../agents/equipment_agent.md), outside the middle of a stored
 Flow. Eligible recovery requires current evidence and the existing no-repeat
-gates. Analysis owns optional FEM scheduling and review; the CAE adapter owns
-preparation/solving. Valid measured observations can reach Knowledge/BO without
-waiting for optional FEM, while simulation-only paths still await their solver.
+gates. Analysis validates measured observations and passes the configured objective
+to Knowledge/BO without invoking a computation bridge.
 
 ## Supporting Controller Transport
 
@@ -245,8 +228,7 @@ hardware safety controls. Its guide owns configuration, procedure and evidence.
 
 The matrix curates functional families rather than every payload field and
 private helper. Bambu is the checked-in printer default while graph
-metadata exposes a Prusa-named bridge. CalculiX and PINN are registered tools
-inside the CAE capability but are not separate `/api/bridges` entries. Live
+metadata exposes a Prusa-named bridge. Live
 device/protocol combinations were not exhaustively exercised. Legacy graph
 labels, including a named robot policy, do not enumerate current saved profiles.
 

@@ -19,6 +19,7 @@ from agents.specimen.agent import SpecimenMakingAgent
 from app.bootstrap import load_runtime
 from graphs import load_graph_config
 from orchestrator.state import AgentRuntimeStatus, Mode, Stage
+from tests.unit.test_test_scenario_chat import scenario_controller
 
 pytestmark = pytest.mark.usefixtures("handoff_no_external")
 
@@ -290,7 +291,6 @@ def test_safe_preflight_execution_policy_is_validated_and_preserved_for_redesign
         "vision": "preflight_only",
         "manipulation": "preflight_only",
         "lab_equipment": "preflight_only",
-        "cae": "execute",
         "analysis": "execute",
         "bo": "execute",
     }
@@ -316,7 +316,6 @@ def test_safe_preflight_execution_policy_is_validated_and_preserved_for_redesign
         "vision": "preflight_only",
         "manipulation": "preflight_only",
         "lab_equipment": "preflight_only",
-        "cae": "execute",
         "analysis": "execute",
         "bo": "execute",
     }
@@ -362,7 +361,6 @@ def test_test_mode_partial_execution_policy_cannot_drop_safe_stage_defaults() ->
         "vision": "preflight_only",
         "manipulation": "preflight_only",
         "lab_equipment": "preflight_only",
-        "cae": "execute",
         "analysis": "execute",
         "bo": "execute",
     }
@@ -387,7 +385,6 @@ def test_real_printer_choice_preserves_explicit_per_device_policy(choice: str) -
         "vision": "preflight_only",
         "manipulation": "preflight_only",
         "lab_equipment": "preflight_only",
-        "cae": "execute",
         "analysis": "execute",
         "bo": "execute",
     }
@@ -402,7 +399,6 @@ def test_real_printer_choice_preserves_explicit_per_device_policy(choice: str) -
         "vision": "preflight_only",
         "manipulation": "preflight_only",
         "lab_equipment": "preflight_only",
-        "cae": "execute",
         "analysis": "execute",
         "bo": "execute",
     }
@@ -437,7 +433,6 @@ def test_printer_choice_snapshots_saved_hybrid_profile_and_preserves_it_for_rede
         "vision": "execute",
         "manipulation": "preflight_only",
         "lab_equipment": "execute",
-        "cae": "execute",
         "analysis": "execute",
         "bo": "execute",
     }
@@ -462,7 +457,6 @@ async def test_hybrid_teleop_confirmation_resumes_same_cycle_through_utm_vision(
             "vision": "execute",
             "manipulation": "preflight_only",
             "lab_equipment": "execute",
-            "cae": "execute",
             "analysis": "execute",
             "bo": "execute",
         },
@@ -535,7 +529,6 @@ async def test_hybrid_teleop_confirmation_resumes_same_cycle_through_utm_vision(
                 self.state.stage = stages[self.index] if self.index < len(stages) else Stage.COMPLETE
 
     monkeypatch.setattr("app.controller.RunLoop", FakeRunLoop)
-    monkeypatch.setattr(controller, "_write_planning_fem_artifacts", lambda *_args, **_kwargs: {})
     task = asyncio.create_task(controller._run_planning_loop_tail(spec, cycle_index=4, total_cycles=4))
     for _ in range(100):
         pending = controller._state.run_metadata.get("pending_operator_teleop_handoff")
@@ -2403,13 +2396,14 @@ async def test_actual_print_choice_promotes_test_specimen_to_physical_print(monk
 )
 async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
     monkeypatch: pytest.MonkeyPatch,
+    scenario_controller,
     message: str,
     choice: str,
     transport: str,
     physical: bool,
     stop_after_start: bool,
 ) -> None:
-    controller = load_runtime()
+    controller = scenario_controller
     monkeypatch.setattr(
         "app.controller.load_prusa_print_profile",
         lambda: {
@@ -2453,28 +2447,11 @@ async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
         return value
     monkeypatch.setattr(BOAgent, "initial_design_request", classmethod(observe_initial))
 
-    async def fake_complete(*, prompt: str):
-        return (
-            SimpleNamespace(
-                text=(
-                    "테스트 실험값을 생성했습니다.\n"
-                    "```json\n"
-                    "{\"goal\":\"fake test\",\"constraints\":{\"cell_size_mm\":5.0,"
-                    "\"geometry_type\":\"lattice_bcc\",\"print\":{\"start_immediately\":true}}}\n"
-                    "```"
-                ),
-                raw={},
-                model="fake-orchestrator",
-            ),
-            "ok",
-        )
-
     async def fake_handoff(*, goal: str | None, constraints: dict) -> dict:
         captured["goal"] = goal
         captured["constraints"] = constraints
         return {"ok": True, "message": "handoff", "session": controller.planning_snapshot(session_id="s-inline")}
 
-    monkeypatch.setattr(controller, "_complete_live_planning_prompt", fake_complete)
     monkeypatch.setattr(controller, "_handoff_planning_to_design", fake_handoff)
 
     result = await controller._planning_message_locked(
@@ -2483,10 +2460,7 @@ async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
         constraints={},
         session_id="s-inline",
     )
-    for _ in range(10):
-        if captured:
-            break
-        await asyncio.sleep(0)
+    await asyncio.wait_for(controller._test_scenario.task, timeout=60)
 
     constraints = captured["constraints"]
     assert result["ok"] is True
@@ -2526,11 +2500,17 @@ async def test_live_gui_test_mode_inline_printer_choice_handoffs_without_prompt(
         assert constraints["ejection"]["allow_ejection"] is True
         assert constraints["ejection"]["use_ejection_only_project_file"] is False
         assert constraints["ejection"]["source"] == "physical_print_tail"
-    assert constraints["top_cap_enabled"] is False
-    assert constraints["bottom_cap_enabled"] is True
-    assert constraints["top_bottom_cap"] is True
-    assert constraints["require_flat_compression_faces"] is False
+    # Profile defaults are still supplied by existing admission. They are not
+    # misrepresented as values agreed by the researcher in the conversation.
+    facts = controller._test_scenario.constraints
+    assert facts["top_cap_enabled"] is False
+    assert facts["bottom_cap_enabled"] is True
+    assert facts["top_bottom_cap"] is True
+    assert facts["require_flat_compression_faces"] is False
+    assert facts["skin_thickness_mm"] == 0.8
     assert constraints["skin_thickness_mm"] == 0.8
+    from app.planning_dialogue import dialogue_for
+    assert "skin_thickness_mm" not in dialogue_for(controller).values()
     assert not controller._state.run_metadata.get("pending_specimen_input")
 
 
@@ -2586,35 +2566,18 @@ async def test_live_gui_bare_test_mode_ignores_remembered_printer_choice_and_pro
 
 
 @pytest.mark.asyncio
-async def test_live_gui_bare_test_mode_strips_llm_printer_choice_until_agent_prompt(
+async def test_live_gui_bare_test_mode_keeps_printer_choice_unset_until_agent_prompt(
     monkeypatch: pytest.MonkeyPatch,
+    scenario_controller,
 ) -> None:
-    controller = load_runtime()
+    controller = scenario_controller
     controller._state.mode = Mode.LIVE
     captured: dict[str, object] = {}
-
-    async def fake_complete(*, prompt: str):
-        return (
-            SimpleNamespace(
-                text=(
-                    "테스트 실험값을 생성했습니다.\n"
-                    "```json\n"
-                    "{\"goal\":\"fake test\",\"constraints\":{\"geometry_type\":\"gyroid\","
-                    "\"printer_test_path\":\"virtual_bridge\",\"test_printer_transport\":\"virtual\","
-                    "\"allow_test_printer_live\":true}}\n"
-                    "```"
-                ),
-                raw={},
-                model="fake-orchestrator",
-            ),
-            "ok",
-        )
 
     async def fake_handoff(*, goal: str | None, constraints: dict) -> dict:
         captured["constraints"] = constraints
         return {"ok": True, "message": "handoff", "session": controller.planning_snapshot(session_id="s-bare")}
 
-    monkeypatch.setattr(controller, "_complete_live_planning_prompt", fake_complete)
     monkeypatch.setattr(controller, "_handoff_planning_to_design", fake_handoff)
 
     result = await controller._planning_message_locked(
@@ -2623,7 +2586,7 @@ async def test_live_gui_bare_test_mode_strips_llm_printer_choice_until_agent_pro
         constraints={},
         session_id="s-bare",
     )
-    await asyncio.wait_for(controller._test_scenario.task, timeout=3)
+    await asyncio.wait_for(controller._test_scenario.task, timeout=60)
     assert result["ok"] is True
     constraints = captured["constraints"]
     assert isinstance(constraints, dict)
@@ -2633,33 +2596,17 @@ async def test_live_gui_bare_test_mode_strips_llm_printer_choice_until_agent_pro
 
 
 @pytest.mark.asyncio
-async def test_live_gui_test_mode_virtual_bridge_handoff_returns_before_loop_finishes(monkeypatch: pytest.MonkeyPatch) -> None:
-    controller = load_runtime()
+async def test_live_gui_test_mode_virtual_bridge_handoff_returns_before_loop_finishes(monkeypatch: pytest.MonkeyPatch, scenario_controller) -> None:
+    controller = scenario_controller
     controller._state.mode = Mode.LIVE
     release_handoff = asyncio.Event()
     handoff_started = asyncio.Event()
-
-    async def fake_complete(*, prompt: str):
-        return (
-            SimpleNamespace(
-                text=(
-                    "테스트 실험값을 생성했습니다.\n"
-                    "```json\n"
-                    "{\"goal\":\"background virtual bridge test\",\"constraints\":{\"cell_size_mm\":10.0,\"geometry_type\":\"gyroid\",\"specimen_size_mm\":[30,30,30]}}\n"
-                    "```"
-                ),
-                raw={},
-                model="fake-orchestrator",
-            ),
-            "ok",
-        )
 
     async def fake_handoff(*, goal: str | None, constraints: dict) -> dict:
         handoff_started.set()
         await release_handoff.wait()
         return {"ok": True, "message": "handoff completed", "session": controller.planning_snapshot(session_id="s-bg")}
 
-    monkeypatch.setattr(controller, "_complete_live_planning_prompt", fake_complete)
     monkeypatch.setattr(controller, "_handoff_planning_to_design", fake_handoff)
 
     result = await asyncio.wait_for(
@@ -2674,7 +2621,7 @@ async def test_live_gui_test_mode_virtual_bridge_handoff_returns_before_loop_fin
 
     assert result["ok"] is True
     assert result["message"] == "Automatic test scenario input scheduled."
-    await asyncio.wait_for(handoff_started.wait(), timeout=5.0)
+    await asyncio.wait_for(handoff_started.wait(), timeout=60.0)
     assert controller._planning_handoff_task is not None
     assert not controller._planning_handoff_task.done()
 
@@ -2787,7 +2734,7 @@ async def test_planning_tail_continues_original_loop_after_specimen(tmp_path: Pa
     analysis = json.loads(analysis_result.read_text())["data"]["analysis"]
     assert analysis["ok"] is True
     assert analysis["bo_handoff"]["ok_for_bo"] is True
-    assert analysis["fem_job"]["status"] == "queued"
+    assert "fem_job" not in analysis
     assert controller._state.run_metadata["utm_verifications"]["verification_2"]["confirmed"] is True
     roles = [message["role"] for message in controller.planning_snapshot()["messages"]]
     assert "vision_ai" in roles
@@ -3523,7 +3470,6 @@ async def test_live_gui_planning_tail_agent_messages_keep_cycle_metadata(monkeyp
             self._state.stage = self.order[index + 1] if index + 1 < len(self.order) else Stage.COMPLETE
 
     monkeypatch.setattr("app.controller.RunLoop", FakeRunLoop)
-    monkeypatch.setattr(controller, "_write_planning_fem_artifacts", lambda *_args, **_kwargs: {})
 
     result = await controller._run_planning_loop_tail(spec, cycle_index=2, total_cycles=5)
 
@@ -3663,7 +3609,8 @@ async def test_live_gui_test_planning_series_runs_twenty_design_cycles(
     analysis_messages = [message for message in controller.planning_snapshot()["messages"] if message["role"] == "analysis_ai"]
     # Measurement/BO may finish before background FEM. This non-actuating test
     # does not run a solver and must not claim completed contour evidence.
-    assert any(message.get("analysis", {}).get("fem_job", {}).get("job_id") for message in analysis_messages)
+    assert analysis_messages
+    assert all("fem_job" not in message.get("analysis", {}) for message in analysis_messages)
 
 
 def test_design_constraints_for_cycle_preserves_both_bo_active_variables() -> None:

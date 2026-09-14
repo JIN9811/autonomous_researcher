@@ -57,7 +57,7 @@ Guardian-ready hardware alerts:
 - Hardware workspace failures are also emitted as `hardware.alert` runtime events.
 - The API result keeps the same original tool payload and adds `hardware_alert` when a device-specific failure is detected.
 - `hardware_alert` includes `guardian_contract.v1`, `guardian_decision.v1`, and `incident_record.v1` payloads so Guardian can consume the same signal later without reparsing GUI text.
-- Incidents are appended to `runs/<run_id>/guardian_events.jsonl`; this file is the durable source for Guardian/Knowledge/Self-Evolution follow-up.
+- Incidents are appended to `runs/<run_id>/guardian_events.jsonl`; this file is the durable source for Guardian/Knowledge improvement follow-up.
 - `run_metadata.hardware_alerts` keeps the latest in-memory alerts for Live GUI state and Guardian loop review.
 - `device_health` may contain values such as `blocking:LEROBOT_DEVICE_PORT_REQUIRED`; Guardian treats `blocking:` and `critical:` prefixes as unhealthy hardware states.
 

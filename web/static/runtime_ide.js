@@ -6266,6 +6266,9 @@ function dirtyExperimentalPackageTargets(payload) {
 
 function applyExperimentalPackageDraft(pkg, unresolvedBindings = []) {
   const graph = cloneConfig(pkg.graph);
+  graph.metadata = {...(graph.metadata || {}), experimental_package: {
+    id: pkg.id, version: pkg.version, display_name: pkg.display_name || pkg.id,
+  }};
   const main = graphTabs.find((tab) => tab.id === MAIN_GRAPH_TAB_ID);
   upsertGraphTab({
     id: MAIN_GRAPH_TAB_ID, kind: "main", title: main?.title || "Main System", subtitle: graph.name || graph.id || "Experimental Package draft",
@@ -8724,6 +8727,8 @@ async function boot() {
   } catch (err) {
     setStatus("warn", "IDE Error", String(err));
     log(String(err), "error");
+  } finally {
+    window.dispatchEvent(new Event('ax4lab:live-ready'));
   }
 }
 

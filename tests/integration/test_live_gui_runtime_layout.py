@@ -1233,7 +1233,7 @@ def test_gui_favicon_is_available_to_all_runtime_pages() -> None:
     assert response.headers["content-type"].startswith("image/svg+xml")
     assert b"<svg" in response.content
 
-    for route in ["/", "/live", "/ide", "/evolution-lab", "/module-management"]:
+    for route in ["/", "/live", "/ide", "/module-management"]:
         page = client.get(route)
         assert page.status_code == 200
         assert 'rel="icon" type="image/svg+xml" href="/static/favicon.svg"' in page.text
@@ -1384,9 +1384,6 @@ def test_live_gui_static_script_exposes_runtime_ide_adapters() -> None:
         "handleContextAction",
         "openBinderContextMenu",
         "pinAgentReportFromBinder",
-        "evolutionTargetForAgent",
-        "evolutionLabUrl",
-        "openEvolutionLab",
         "liveSessionStorage",
         "persistPlanningSessionId",
         "LIVE_UI_STATE_KEY",
@@ -1784,7 +1781,7 @@ def test_live_gui_analysis_report_exposes_multifidelity_contract() -> None:
         assert f'data-quick-action="{action}"' not in live_html
     assert 'data-decision="cancelled">Revise' in script
     assert 'resolveLiveApproval(state.run_id, pending.approval_id, "cancelled")' in script
-    assert 'data-report-action="evolve"' in script
+    assert 'data-report-action="evolve"' not in script
     live_css = client.get("/static/styles.css").text
     assert "live-bottom-collapsed" in live_css
     assert "Live bottom dock containment" in live_css
@@ -1841,69 +1838,6 @@ def test_live_gui_specimen_runtime_uses_generic_spc_bridge_labels() -> None:
     assert "PrusaSlicer Settings" not in script
     assert "PrusaLink / Bridge" not in script
     assert "PrusaLink runtime evidence" not in script
-
-
-def test_evolution_lab_supports_live_gui_query_prefill() -> None:
-    client = TestClient(app)
-    response = client.get("/evolution-lab?target_type=prompt&target_id=design&run_id=run-demo&source=live_gui")
-    assert response.status_code == 200
-    assert "ATR Self-Evolution Lab" in response.text
-    assert "evolution-pipeline-output" in response.text
-    assert "evolution-leaderboard-output" in response.text
-    assert "evolution-history-output" in response.text
-    assert "evolution-lineage-output" in response.text
-    assert "evolution-evidence-output" in response.text
-    assert "Knowledge Evidence Pack" in response.text
-    assert "Candidate Leaderboard" in response.text
-
-    script = client.get("/static/evolution_lab.js").text
-    for symbol in [
-        "queryParams",
-        "applyQueryPrefill",
-        "renderTaskHistory",
-        "renderLineage",
-        "renderPipeline",
-        "renderLeaderboard",
-        "renderEvidencePacks",
-        "refreshEvidencePacks",
-        "knowledge_evidence_pack_id",
-        "refreshVariantsForTarget",
-        "gateChecklistMarkup",
-        "replayEvalMarkup",
-        "Replay / Held-out Evaluation",
-        "replay_eval",
-        "loadTaskVariants",
-        "loadVariant",
-        "target_type",
-        "target_id",
-        "run_id",
-        "No hardware is executed",
-    ]:
-        assert symbol in script
-
-    packs = client.get("/api/knowledge/evolution-packs?target_type=prompt&target_id=design").json()
-    assert packs["ok"] is True
-    assert packs["target_type"] == "prompt"
-    assert packs["target_id"] == "design"
-    assert isinstance(packs["packs"], list)
-
-    variants = client.get("/api/evolution/variants?target_type=prompt&target_id=design").json()
-    assert variants["ok"] is True
-    assert variants["target_type"] == "prompt"
-    assert variants["target_id"] == "design"
-    assert isinstance(variants["variants"], list)
-
-    planning_script = client.get("/static/planning.js").text
-    for symbol in [
-        "renderKnowledgeReportDetails",
-        "latestKnowledgeReport",
-        "Knowledge Memory / Self-Evolution Evidence",
-        "Self-Evolution Evidence Packs",
-        "Agent Performance Ledger",
-        "Evolution Outcome Attribution",
-    ]:
-        assert symbol in planning_script
-
 
 
 def test_live_gui_package_compatibility_endpoints_expose_existing_runtime_contract() -> None:
@@ -2609,11 +2543,9 @@ def test_live_gui_equipment_report_exposes_utm_visual_control_contract() -> None
             "Live Device Heartbeat",
             "Safe-Stop Verification",
             "Evidence Completeness",
-            "Self-Evolution Gate",
             "guardian_safety_budget.v1",
             "guardian_safe_stop_verification.v1",
             "guardian_evidence_completeness.v1",
-            "guardian_self_evolution_gate.v1",
             "/guardian/incidents/",
             "Blocked Actions",
             "Approval Queue",
@@ -5539,7 +5471,7 @@ def test_joint_telemetry_terminal_snapshot_finalizes_artifacts(tmp_path, monkeyp
     assert payload["artifacts"]["plot_png_url"].startswith("/api/lerobot/visualization/file?path=")
 
 
-def test_live_gui_contains_compact_objective_runtime_card() -> None:
+def test_live_gui_omits_global_objective_card_without_removing_objective_service() -> None:
     client = TestClient(app)
 
     html = client.get("/live").text
@@ -5555,7 +5487,7 @@ def test_live_gui_contains_compact_objective_runtime_card() -> None:
         "live-objective-contributions",
         "live-objective-readiness",
     ):
-        assert f'id="{element_id}"' in html
+        assert f'id="{element_id}"' not in html
     assert "/api/objectives/status" in script
     assert "refreshLiveObjectiveState" in script
 def test_live_gui_loads_shared_bo_visualization_before_planning_runtime() -> None:

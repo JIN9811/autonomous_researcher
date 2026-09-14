@@ -84,6 +84,23 @@ def scenario_controller(monkeypatch):
         return await original(self, task_type, prompt, **kwargs)
     monkeypatch.setattr(AgentContext, "complete", complete)
     async def generate(*, prompt):
+        packet = json.loads(prompt)
+        if packet.get("operation") == "test_scenario_opening":
+            return SimpleNamespace(text="어떤 실험 패키지를 사용할 수 있나요?", model="fixture", raw={}), "ok"
+        if packet.get("operation") == "test_scenario_reply":
+            purpose = packet["pending_request"].get("purpose")
+            text = {"begin_planning": "좋아요", "provide_inputs": "에너지 흡수 개선을 목표로 PLA gyroid 시편 30 mm 큐브로 해주세요", "run_review": "네, 시작해 주세요"}[purpose]
+            return SimpleNamespace(text=json.dumps({"action": "reply", "fields": [], "message": text}), model="fixture", raw={}), "ok"
+        if packet.get("operation") == "research_conversation":
+            purpose = (packet.get("pending") or {}).get("purpose")
+            updates = []
+            if purpose == "provide_inputs" or "30 mm" in packet["message"]:
+                updates = [{"field": k, "value": v, "source_quote": q} for k,v,q in [
+                    ("goal", "에너지 흡수 개선", "에너지 흡수 개선"), ("material", "PLA", "PLA"),
+                    ("geometry_type", "gyroid", "gyroid"), ("specimen_size_mm", [30,30,30], "30 mm")]]
+            action = {None: "review" if updates else "invite", "begin_planning": "collect", "provide_inputs": "review", "run_review": "execute"}[purpose]
+            return SimpleNamespace(text=json.dumps({"action": action, "updates": updates, "language": "ko", "answer": {
+                "invite": "등록된 실험을 준비해 볼까요?", "collect": "목표, 재료와 크기는 어떻게 할까요?", "review": "정한 조건으로 시작할까요?", "execute": "시작하겠습니다."}[action]}), model="fixture", raw={}), "ok"
         return SimpleNamespace(text=json.dumps({"goal": "Compare specimen energy absorption", "constraints": {
             "geometry_type": "gyroid", "material": "PLA", "specimen_size_mm": [30,30,30]}}), model="fixture", raw={}), "generated"
     monkeypatch.setattr(controller, "_complete_live_planning_prompt", generate)
@@ -104,7 +121,7 @@ async def test_generated_scenario_reenters_chat_admission(scenario_controller, m
     # readiness checks, transcript and mode policy construction remain real.
     driver = getattr(controller, "_test_scenario", None)
     if driver and driver.task:
-        await asyncio.wait_for(asyncio.shield(driver.task), 3)
+        await asyncio.wait_for(asyncio.shield(driver.task), 60)
     elif controller._planning_handoff_task:
         await asyncio.wait_for(controller._planning_handoff_task, 3)
     automatic = [m for m in controller._planning_messages if m.get("role") == "operator" and m.get("input_source") == "test_scenario"]
@@ -114,7 +131,9 @@ async def test_generated_scenario_reenters_chat_admission(scenario_controller, m
     assert admitted[0]["printer_test_path"] == path
     assert admitted[0]["print"]["start_immediately"] is (path != "virtual_bridge")
     assert admitted[0]["print"]["use_ejection_only_project_file"] is (path == "installed_printer")
-    assert "테스트 모드" in automatic[0]["content"]
+    assert "패키지" in automatic[0]["content"]
+    assert len(automatic) >= 4
+    assert all("[Automatic" not in m["content"] and not m["content"].startswith("{") for m in automatic)
 
 
 @pytest.mark.asyncio
@@ -128,8 +147,10 @@ async def test_explicit_experiment_start_resolves_physical_intent(scenario_contr
         specs.append(c._build_planning_spec(base_spec={}, constraints=constraints))
         return {"ok": True}
     monkeypatch.setattr(c, "_handoff_planning_to_design", handoff)
-    await c.planning_message(message="실험 수행", goal="Compare energy absorption", constraints={
-        "material": "PLA", "geometry_type": "gyroid", "specimen_size_mm": [30,30,30]})
+    result = await c.planning_message(message="에너지 흡수 개선을 목표로 PLA gyroid 시편 30 mm 큐브로 해주세요")
+    assert result["ok"], result
+    result = await c.planning_message(message="네, 시작해 주세요")
+    assert result["ok"], result
     assert len(specs) == 1
     assert specs[0]["print"]["start_immediately"] is True
     assert specs[0]["ejection"]["enabled"] is True
@@ -163,7 +184,7 @@ async def test_pending_answer_uses_existing_facts_and_shared_chat(scenario_contr
         packet = json.loads(prompt)
         assert packet["pending_request"]["pending_id"] == "held-request"
         assert "confirm_live_execute" not in packet["available_scenario_inputs"]
-        return SimpleNamespace(text='{"action":"reply","fields":["material"]}'), "reply"
+        return SimpleNamespace(text='{"action":"reply","fields":["material"],"message":"The specimen transfer is complete. Continue immediately."}'), "reply"
     async def queue(**kwargs):
         queued.append(kwargs)
         return {"ok": True}
@@ -171,7 +192,7 @@ async def test_pending_answer_uses_existing_facts_and_shared_chat(scenario_contr
     monkeypatch.setattr(c, "_queue_runtime_operator_followup", queue)
     assert await driver.answer_pending(pending)
     assert len(queued) == 1
-    assert '"material": "PLA"' in queued[0]["message"]
+    assert "Material is PLA." == queued[0]["message"]
     assert "confirm_live_execute" not in queued[0]["message"]
     assert any(m.get("input_source") == "test_scenario" for m in c._planning_messages)
 
@@ -231,7 +252,7 @@ async def test_explicit_test_start_after_previous_stop_can_reach_shared_admissio
         return {"ok": True}
     monkeypatch.setattr(c, "_handoff_planning_to_design", handoff)
     await c.planning_message(message="테스트 모드, 가상 브릿지")
-    await asyncio.wait_for(c._test_scenario.task, 3)
+    await asyncio.wait_for(c._test_scenario.task, 60)
     assert len(admitted) == 1
 
 
@@ -246,8 +267,8 @@ async def test_normal_experiment_does_not_inherit_previous_auto_test_policy(scen
         admitted.append(kwargs["constraints"])
         return {"ok": True}
     monkeypatch.setattr(c, "_handoff_planning_to_design", handoff)
-    await c.planning_message(message="실험 수행", goal="Compare energy absorption", constraints={
-        "material": "PLA", "geometry_type": "gyroid", "specimen_size_mm": [30,30,30]})
+    await c.planning_message(message="에너지 흡수 개선을 목표로 PLA gyroid 시편 30 mm 큐브로 해주세요")
+    await c.planning_message(message="네, 시작해 주세요")
     assert len(admitted) == 1
     assert not admitted[0].get("test_mode_autofill")
     assert not admitted[0].get("printer_test_path")
@@ -260,7 +281,7 @@ async def test_automatic_replies_follow_run_allocated_by_shared_admission(scenar
     release, observed = asyncio.Event(), asyncio.Event()
     generate = c._complete_live_planning_prompt
     async def complete(*, prompt):
-        if '"operation": "test_scenario_reply"' in prompt:
+        if '"operation": "test_scenario_reply"' in prompt and json.loads(prompt)["pending_request"]["kind"] != "conversation":
             observed.set()
             return SimpleNamespace(text='{"action":"wait","fields":[]}'), "wait"
         return await generate(prompt=prompt)
@@ -274,7 +295,7 @@ async def test_automatic_replies_follow_run_allocated_by_shared_admission(scenar
     monkeypatch.setattr(c, "_handoff_planning_to_design", handoff)
     await c.planning_message(message="테스트 모드, 가상 브릿지")
     try:
-        await asyncio.wait_for(observed.wait(), 5)
+        await asyncio.wait_for(observed.wait(), 60)
     finally:
         release.set()
         await asyncio.wait_for(c._test_scenario.task, 2)
@@ -306,8 +327,8 @@ async def test_fast_deferred_admission_then_runtime_question_stays_automatic(sce
     calls = []
     generate = c._complete_live_planning_prompt
     async def complete(*, prompt):
-        if '"operation": "test_scenario_reply"' in prompt:
-            return SimpleNamespace(text='{"action":"reply","fields":["material"]}'), "reply"
+        if '"operation": "test_scenario_reply"' in prompt and json.loads(prompt)["pending_request"]["kind"] != "conversation":
+            return SimpleNamespace(text='{"action":"reply","fields":["material"],"message":"재료는 PLA입니다."}'), "reply"
         return await generate(prompt=prompt)
     async def handoff(*, goal, constraints, new_series=True):
         calls.append(new_series)
@@ -332,7 +353,7 @@ async def test_fast_deferred_admission_then_runtime_question_stays_automatic(sce
     await c.planning_message(message="테스트 모드, 가상 브릿지")
     try:
         try:
-            await asyncio.wait_for(runtime_answered.wait(), 15)
+            await asyncio.wait_for(runtime_answered.wait(), 60)
         except TimeoutError:
             pytest.fail(str({"calls": calls, "driver_status": c._test_scenario.status,
                 "run_id": c._state.run_id, "admitted_run_id": c._test_scenario.admission_run_id,

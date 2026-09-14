@@ -22,7 +22,7 @@ It returns `guardian_gate_result.v1` with these nested records:
 
 - `guardian_contract.v1`: stage, phase, status, artifact/provenance refs, approval requirement, next-stage permission, BO permission, risk flags.
 - `guardian_decision.v1`: decision, reason code, risk score/vector, dominant risks, recommended action, required/missing evidence.
-- `incident_record.v1`: durable incident or near-miss record for Guardian, Knowledge, and self-evolution follow-up.
+- `incident_record.v1`: durable incident or near-miss record for Guardian and Knowledge improvement follow-up.
 - `corrective_action.v1`: recommended recovery/debug action derived from the alarm.
 
 Incidents are appended to `runs/<run_id>/guardian_events.jsonl` and mirrored into `state.run_metadata.incident_records`.
@@ -55,8 +55,8 @@ Historical or diagnostic records, such as Knowledge `agent_performance_records`,
 - Vision Agent: reports stale/low-confidence scene signals through `confidence`, transfer-readiness `status`, and `blocking_reason`. Its signal-level `requires_ack` is a downstream-agent acknowledgement marker, not operator approval.
 - Manipulation Agent: reports LeRobot/Pi0.5 preflight blockers, rollout failures, stale vision, and unsafe policy conditions through `blocking_reasons`, `failure_code`, and `failure_tags`.
 - Lab Equipment Agent: emits `hardware_alert.v1` plus `incident_record.v1` for UTM, Windows PyAutoGUI, request-log, screen-evidence, CSV, or no-motion failures.
-- Analysis Agent: reports data/FEM/CAE quality gates through `failure_code`, `failure_tags`, `quality_gate`, and `ok_for_bo`.
-- Knowledge Agent: reports memory/evidence quality warnings and self-evolution evidence gaps through `warnings` and `failure_tags`.
+- Analysis Agent: reports measurement quality gates through `failure_code`, `failure_tags`, `quality_gate`, and `ok_for_bo`.
+- Knowledge Agent: reports memory/evidence quality warnings and improvement-evidence gaps through `warnings` and `failure_tags`.
 - BO Agent: reports unsafe candidates and constraint penalties through `risk_flags`, `warnings`, and recommendation constraints.
 - Guardian Agent: reads `guardian_gates`, `incident_records`, and `hardware_alerts` from `state.run_metadata` and folds them into the final loop decision.
 
@@ -67,7 +67,7 @@ Physical, persistent, or runtime-mutating tool calls now pass through a Guardian
 - Printer and fabrication: `experiment.evaluate`, `printer.prepare`, `printer.start`, `printer.auto_eject`.
 - Robot and manipulation: `lerobot.rollout.start`, `robot.pick_place`.
 - Lab equipment: `equipment.pyautogui.run`, `utm.run_protocol`.
-- Runtime mutation hooks: `self_evolution.activate`, `self_evolution.rollback`, `graph.active_config.activate`, `knowledge.memory.commit`.
+- Runtime mutation hooks: `graph.active_config.activate`, `knowledge.memory.commit`.
 
 The pre-tool shield calls `guardian_gate(stage, phase="action", tool=<tool>, action="pre_tool_call")`. If the decision is `block`, `safe_stop`, or `require_human_approval`, the real tool handler is not called and the caller receives a structured blocked result with:
 
@@ -90,8 +90,8 @@ Other agents should not invent separate alarm channels. They should emit one or 
 - Explicit `hardware_alert.v1` records are merged into `run_metadata.hardware_alerts`, `run_metadata.incident_records`, and `device_health`.
 - Tool-call shield decisions are merged into `run_metadata.guardian_gates`, `guardian_contracts`, `corrective_actions`, `incident_records`, and `guardian_approval_queue`. Tool request/result records are merged into `run_metadata.tool_call_records` and the run-local blackbox log.
 - The Live GUI receives `guardian.tool_shield` planning messages for blocked, warning, and approval-required tool actions.
-- The final Guardian Agent reads `guardian_gates`, `hardware_alerts`, and `incident_records` together, so alarms from Design, Specimen, Vision, Manipulation, Equipment, Analysis, Knowledge, BO, and self-evolution share one decision surface.
-- Knowledge Agent converts Guardian incidents, gate decisions, hardware alerts, and blocked tool records into `guardian_incident_evidence.v1`, folds their reason/failure tags into memory failure tags, and carries them into Knowledge/Self-Evolution evidence payloads.
+- The final Guardian Agent reads `guardian_gates`, `hardware_alerts`, and `incident_records` together, so alarms from Design, Specimen, Vision, Manipulation, Equipment, Analysis, Knowledge, and BO share one decision surface.
+- Knowledge Agent converts Guardian incidents, gate decisions, hardware alerts, and blocked tool records into `guardian_incident_evidence.v1`, folds their reason/failure tags into memory failure tags, and carries them into Knowledge improvement-evidence payloads.
 
 ## Runtime State Fields
 
@@ -117,7 +117,7 @@ The graph-wide Guardian monitor payload is available from:
 - `GET /api/runs/{run_id}/guardian/status` for a requested run id when available.
 - `GET /api/state`, field `guardian_status`, for reload-safe GUI state synchronization.
 
-The payload schema is `guardian_status_report.v1` and includes `graph_wide_risk_map`, `gate_timeline`, `blocked_actions`, `approval_queue`, `incident_ledger`, `policy_version_panel`, `device_data_integrity`, `safety_budget`, `evidence_completeness`, `safe_stop_verification`, `self_evolution_gate`, and `handoff_packet`. This is the canonical data source for the Guardian heatmap/report panel; the visual page renders it compactly and must not recompute safety decisions in JavaScript.
+The payload schema is `guardian_status_report.v1` and includes `graph_wide_risk_map`, `gate_timeline`, `blocked_actions`, `approval_queue`, `incident_ledger`, `policy_version_panel`, `device_data_integrity`, `safety_budget`, `evidence_completeness`, `safe_stop_verification`, and `handoff_packet`. This is the canonical data source for the Guardian heatmap/report panel; the visual page renders it compactly and must not recompute safety decisions in JavaScript.
 
 Additional Guardian monitor sections are normalized in the backend so all agents share the same alarm surface:
 
@@ -125,7 +125,6 @@ Additional Guardian monitor sections are normalized in the backend so all agents
 - `device_data_integrity.live_device_heartbeat`: per-device bridge state, latest command, latest alert id, and heartbeat status derived from `device_health`, hardware alerts, and tool-call records.
 - `safe_stop_verification` (`guardian_safe_stop_verification.v1`): `safe_stop requested -> safe_stop verified` state, with explicit metadata, controller stopped state, or Guardian gate evidence as the verification basis.
 - `evidence_completeness` (`guardian_evidence_completeness.v1`): current gate/contract/artifact/provenance/tool/incident evidence coverage score.
-- `self_evolution_gate` (`guardian_self_evolution_gate.v1`): pending, approved, active-next-run, and active self-evolution variants visible to the Guardian safety board.
 
 ## Live GUI Behavior
 
@@ -136,7 +135,7 @@ The runtime emits:
 - `guardian.tool_shield` planning/tool events when a synchronous pre-tool/post-tool shield warns, blocks, or requests approval.
 - Existing `hardware.alert` events from workspace APIs remain supported.
 
-The Live GUI event stream refreshes on `guardian` and `incident` event types. Warning/error Guardian events are included in Operator Attention, not just the timeline, so the operator sees cross-agent alarms even when the emitting agent is not currently selected. The Guardian Agent report also fetches `/api/runs/{run_id}/guardian/status` and shows the graph-wide risk map, safety budget, live device heartbeat, safe-stop verification, evidence completeness, self-evolution gate status, blocked actions, approval queue with approve/revise/reject controls, incident/near-miss ledger with note attachment, policy/version panel, device/data integrity, and corrective actions.
+The Live GUI event stream refreshes on `guardian` and `incident` event types. Warning/error Guardian events are included in Operator Attention, not just the timeline, so the operator sees cross-agent alarms even when the emitting agent is not currently selected. The Guardian Agent report also fetches `/api/runs/{run_id}/guardian/status` and shows the graph-wide risk map, safety budget, live device heartbeat, safe-stop verification, evidence completeness, blocked actions, approval queue with approve/revise/reject controls, incident/near-miss ledger with note attachment, policy/version panel, device/data integrity, and corrective actions.
 
 Operator notes are attached through `POST /api/runs/{run_id}/guardian/incidents/{incident_id}/notes` or the active-run alias `POST /api/guardian/incidents/{incident_id}/notes`. Notes are mirrored into `run_metadata.guardian_incident_notes`, appended to the matching `incident_record.operator_notes` when present, and written to the Guardian append-only event log as `guardian_incident_note.v1`.
 
@@ -158,7 +157,7 @@ Relevant tests:
 - `tests/unit/test_guardian_gate.py`: alarm normalization, nested warnings, agent-specific alarm keys, signal ACK handling, approval, and blocker handling.
 - `tests/unit/test_guardian_tool_shield.py`: pre-tool action shield blocking/allowing side-effect tools.
 - `tests/unit/test_guardian_agent.py`: Guardian final decision from hardware alerts and graph-wide gates.
-- `tests/unit/test_knowledge_agent.py`: Guardian incidents become Knowledge/Self-Evolution evidence through `guardian_incident_evidence.v1`.
+- `tests/unit/test_knowledge_agent.py`: Guardian incidents become Knowledge improvement evidence through `guardian_incident_evidence.v1`.
 - `tests/unit/test_controller_planning.py`: Live GUI planning messages for Guardian shield events and hardware/tool progress.
 - `tests/unit/test_langgraph_runtime.py`: runtime merge/event behavior, agent-exception Guardian gates, and result-key compatibility.
 

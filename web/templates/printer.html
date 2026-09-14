@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
 File purpose:
-- Multi-printer 3DP workspace GUI with Bambu Lab X2D as the default device bridge.
+- Multi-printer 3D workspace GUI with Bambu Lab X2D as the default device bridge.
 
 Key classes/functions:
 - Consumed by web/static/printer.js
@@ -22,16 +22,20 @@ Modification guide:
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>{{ title }}</title>
+    <title>3D Printer GUI</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260906-material-priority-layout-3" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260915-printer-parts-2" />
+    <link rel="preload" as="image" href="/static/ax4lab-logo-transparent.png">
+    <link rel="stylesheet" href="/static/workspace_boot.css?v=1">
   </head>
   <body>
+    {% set workspace_title = "3D Printer Workspace" %}
+    {% include "workspace_boot.html" %}
     <main class="page equipment-setup-page printer-page bambu-printer-page">
       <section class="hero panel printer-hero">
         <div class="hero-copy">
           <p class="eyebrow">Device Workspace</p>
-          <h1>3DP Printer GUI</h1>
+          <h1>3D Printer GUI</h1>
           <p class="subhead">
             Bambu Lab Device Bridge를 기본 장비로 사용합니다. MQTT 실시간 상태, FTPS 전송 경로,
             slicing gate, autoejection gate를 같은 화면에서 확인하고 Live GUI handoff에 반영합니다.
@@ -89,8 +93,7 @@ Modification guide:
               <span>Control Gate</span>
               <strong id="printer-gate-summary">Loading</strong>
             </div>
-            <div class="bambu-axis-card">
-              <div class="bambu-axis-wheel">Y<br /><span>X / -X</span><br />-Y</div>
+            <div class="bambu-connection-status">
               <div class="bambu-action-list">
                 <span id="printer-mqtt-pill" class="bridge-pill">MQTT</span>
                 <span id="printer-ftps-pill" class="bridge-pill">FTPS</span>
@@ -189,145 +192,8 @@ Modification guide:
         </div>
       </section>
 
-      <section class="panel equipment-setup-grid printer-setup-grid bambu-workspace-grid">
-        <article>
-          <h2>Print Defaults</h2>
-          <p class="hint">Live/Test workflow에서 생성한 STL을 slicing하고 출력 직전까지 검증할 기본값입니다.</p>
-          <div class="lerobot-form-grid">
-            <label>
-              Material
-              <input id="printer-material-input" class="text-input" value="PLA" />
-            </label>
-            <label>
-              Printer Model
-              <input id="printer-model-input" class="text-input" value="Bambu Lab X2D" />
-            </label>
-            <label>
-              Printer Profile
-              <input id="printer-profile-input" class="text-input" value="bambulab_x2d_pla_0p4_nozzle" />
-            </label>
-            <label>
-              Slicer Profile Hint
-              <input id="printer-slicer-profile-input" class="text-input" value="0.2mm_quality" />
-            </label>
-            <label>Specimen placement (Bambu X2D)
-              <select id="printer-placement-mode" class="text-input">
-                <option value="auto">Auto — slicer arrangement</option>
-                <option value="bed_center">Bed center — X128 / Y128 mm</option>
-                <option value="custom">Custom center X / Y</option>
-              </select>
-            </label>
-            <label>Specimen center X (mm)
-              <input id="printer-placement-x" class="text-input" type="number" min="0" max="256" step="0.1" value="128" disabled />
-            </label>
-            <label>Specimen center Y (mm)
-              <input id="printer-placement-y" class="text-input" type="number" min="0" max="256" step="0.1" value="128" disabled />
-            </label>
-            <p class="hint">Re-slice the original STL after changing the position.</p>
-            <label>
-              Nozzle Diameter mm
-              <input id="printer-nozzle-input" class="text-input" type="number" min="0.1" max="2" step="0.05" value="0.4" />
-            </label>
-            <label>
-              Layer Height mm
-              <input id="printer-layer-input" class="text-input" type="number" min="0.02" max="1" step="0.01" value="0.2" />
-            </label>
-            <label>
-              First Layer Height mm
-              <input id="printer-first-layer-height-input" class="text-input" type="number" min="0.02" max="1" step="0.01" value="0.2" />
-            </label>
-            <label>
-              First Layer Speed mm/s
-              <input id="printer-first-layer-speed-input" class="text-input" type="number" min="3" max="60" step="1" value="10" />
-            </label>
-            <label>
-              Bed Temperature C
-              <input id="printer-bed-temp-input" class="text-input" type="number" min="0" max="120" step="1" value="60" />
-            </label>
-            <label>
-              First Layer Bed Temperature C
-              <input id="printer-first-layer-bed-temp-input" class="text-input" type="number" min="0" max="120" step="1" value="60" />
-            </label>
-            <label>
-              Storage Target
-              <input id="printer-storage-input" class="text-input" value="ftps" />
-            </label>
-            <label>
-              Bambu Source STL / 3MF Path
-              <input id="printer-bambu-source-path-input" class="text-input" value="" placeholder="/home/jin/.../specimen.stl" />
-            </label>
-            <label>
-              Bambu Sliced Artifact Path
-              <input id="printer-bambu-artifact-path-input" class="text-input" value="" placeholder="/home/jin/.../specimen.gcode.3mf" />
-            </label>
-            <label>
-              Public Base URL optional
-              <input id="printer-bambu-public-base-url-input" class="text-input" value="" placeholder="auto detect or http://192.168.50.x:8000" />
-            </label>
-            <label>
-              Max Print Time min
-              <input id="printer-max-time-input" class="text-input" type="number" min="1" step="1" value="120" />
-            </label>
-          </div>
-          <label class="checkbox-line">
-            <input id="printer-overwrite-input" type="checkbox" checked />
-            overwrite existing job artifact when the bridge confirms the target path
-          </label>
-          <label class="checkbox-line">
-            <input id="printer-start-input" type="checkbox" />
-            allow live workflow to start print after upload and Guardian approval
-          </label>
-          <label class="checkbox-line">
-            <input id="printer-ejection-input" type="checkbox" />
-            enable configured autoejection routine after print completion
-          </label>
-          <label class="checkbox-line">
-            <input id="printer-slow-first-layer-input" type="checkbox" checked />
-            slow down first layer for bare TPMS bed adhesion
-          </label>
-          <label class="checkbox-line">
-            <input id="printer-skirt-input" type="checkbox" />
-            generate slicer skirt/brim/raft structures
-          </label>
-          <label class="checkbox-line">
-            <input id="printer-bottom-cap-input" type="checkbox" checked />
-            generate bottom cap skin for bed adhesion
-          </label>
-          <label class="checkbox-line">
-            <input id="printer-top-cap-input" type="checkbox" />
-            generate top cap skin for flat compression face
-          </label>
-          <div class="lerobot-form-grid">
-            <label>
-              Cap Skin Thickness mm
-              <input id="printer-skin-input" class="text-input" type="number" min="0.2" max="3" step="0.05" value="0.8" />
-            </label>
-          </div>
-          <label class="planning-message-label">
-            Notes
-            <textarea id="printer-notes-input" class="text-input" rows="4"></textarea>
-          </label>
-          <div class="printer-subsection">
-            <h3>Test Options</h3>
-            <p class="hint">Live GUI의 <code>테스트 모드</code>, <code>테스트 모드, 실제 출력</code>에서 기본값으로 사용됩니다.</p>
-            <div class="lerobot-form-grid">
-              <label>
-                Test Specimen Size mm
-                <input id="printer-test-size-input" class="text-input" value="30,30,30" placeholder="30,30,30 또는 30 x 30 x 30" />
-              </label>
-              <label>
-                Test Unit Cell Size mm
-                <input id="printer-test-cell-input" class="text-input" type="number" min="3" max="10" step="0.5" value="10" />
-              </label>
-            </div>
-          </div>
-          <div class="button-row">
-            <button id="btn-printer-save" class="btn primary">Save Print Defaults & Test Options</button>
-            <button id="btn-printer-reset" class="btn">Reset Fields</button>
-          </div>
-        </article>
-
-        <article>
+      <section class="equipment-setup-grid printer-setup-grid bambu-workspace-grid">
+        <article class="panel printer-workspace-part">
           <h2>Bridge Connection</h2>
           <p class="hint">
             Bambu 연결정보는 <code>memory/bambu_connection.json</code>에 저장됩니다. Access code는 표시하지 않고,
@@ -431,7 +297,144 @@ Modification guide:
           </div>
         </article>
 
-        <article>
+        <article class="panel printer-workspace-part">
+          <h2>Print Defaults</h2>
+          <p class="hint">Live/Test workflow에서 생성한 STL을 slicing하고 출력 직전까지 검증할 기본값입니다.</p>
+          <div class="lerobot-form-grid">
+            <label>
+              Material
+              <input id="printer-material-input" class="text-input" value="PLA" />
+            </label>
+            <label>
+              Printer Model
+              <input id="printer-model-input" class="text-input" value="Bambu Lab X2D" />
+            </label>
+            <label>
+              Printer Profile
+              <input id="printer-profile-input" class="text-input" value="bambulab_x2d_pla_0p4_nozzle" />
+            </label>
+            <label>
+              Slicer Profile Hint
+              <input id="printer-slicer-profile-input" class="text-input" value="0.2mm_quality" />
+            </label>
+            <label>Specimen placement (Bambu X2D)
+              <select id="printer-placement-mode" class="text-input">
+                <option value="auto">Auto — slicer arrangement</option>
+                <option value="bed_center">Bed center — X128 / Y128 mm</option>
+                <option value="custom">Custom center X / Y</option>
+              </select>
+            </label>
+            <label>Specimen center X (mm)
+              <input id="printer-placement-x" class="text-input" type="number" min="0" max="256" step="0.1" value="128" disabled />
+            </label>
+            <label>Specimen center Y (mm)
+              <input id="printer-placement-y" class="text-input" type="number" min="0" max="256" step="0.1" value="128" disabled />
+            </label>
+            <p class="hint">Re-slice the original STL after changing the position.</p>
+            <label>
+              Nozzle Diameter mm
+              <input id="printer-nozzle-input" class="text-input" type="number" min="0.1" max="2" step="0.05" value="0.4" />
+            </label>
+            <label>
+              Layer Height mm
+              <input id="printer-layer-input" class="text-input" type="number" min="0.02" max="1" step="0.01" value="0.2" />
+            </label>
+            <label>
+              First Layer Height mm
+              <input id="printer-first-layer-height-input" class="text-input" type="number" min="0.02" max="1" step="0.01" value="0.2" />
+            </label>
+            <label>
+              First Layer Speed mm/s
+              <input id="printer-first-layer-speed-input" class="text-input" type="number" min="3" max="60" step="1" value="10" />
+            </label>
+            <label>
+              Bed Temperature C
+              <input id="printer-bed-temp-input" class="text-input" type="number" min="0" max="120" step="1" value="60" />
+            </label>
+            <label>
+              First Layer Bed Temperature C
+              <input id="printer-first-layer-bed-temp-input" class="text-input" type="number" min="0" max="120" step="1" value="60" />
+            </label>
+            <label>
+              Storage Target
+              <input id="printer-storage-input" class="text-input" value="ftps" />
+            </label>
+            <label>
+              Bambu Source STL / 3MF Path
+              <input id="printer-bambu-source-path-input" class="text-input" value="" placeholder="~/.../specimen.stl" />
+            </label>
+            <label>
+              Bambu Sliced Artifact Path
+              <input id="printer-bambu-artifact-path-input" class="text-input" value="" placeholder="~/.../specimen.gcode.3mf" />
+            </label>
+            <label>
+              Public Base URL optional
+              <input id="printer-bambu-public-base-url-input" class="text-input" value="" placeholder="auto detect or http://192.168.50.x:8000" />
+            </label>
+            <label>
+              Max Print Time min
+              <input id="printer-max-time-input" class="text-input" type="number" min="1" step="1" value="120" />
+            </label>
+          </div>
+          <label class="checkbox-line">
+            <input id="printer-overwrite-input" type="checkbox" checked />
+            overwrite existing job artifact when the bridge confirms the target path
+          </label>
+          <label class="checkbox-line">
+            <input id="printer-start-input" type="checkbox" />
+            allow live workflow to start print after upload and Guardian approval
+          </label>
+          <label class="checkbox-line">
+            <input id="printer-ejection-input" type="checkbox" />
+            enable configured autoejection routine after print completion
+          </label>
+          <label class="checkbox-line">
+            <input id="printer-slow-first-layer-input" type="checkbox" checked />
+            slow down first layer for bare TPMS bed adhesion
+          </label>
+          <label class="checkbox-line">
+            <input id="printer-skirt-input" type="checkbox" />
+            generate slicer skirt/brim/raft structures
+          </label>
+          <label class="checkbox-line">
+            <input id="printer-bottom-cap-input" type="checkbox" checked />
+            generate bottom cap skin for bed adhesion
+          </label>
+          <label class="checkbox-line">
+            <input id="printer-top-cap-input" type="checkbox" />
+            generate top cap skin for flat compression face
+          </label>
+          <div class="lerobot-form-grid">
+            <label>
+              Cap Skin Thickness mm
+              <input id="printer-skin-input" class="text-input" type="number" min="0.2" max="3" step="0.05" value="0.8" />
+            </label>
+          </div>
+          <label class="planning-message-label">
+            Notes
+            <textarea id="printer-notes-input" class="text-input" rows="4"></textarea>
+          </label>
+          <div class="printer-subsection">
+            <h3>Test Options</h3>
+            <p class="hint">Live GUI의 <code>테스트 모드</code>, <code>테스트 모드, 실제 출력</code>에서 기본값으로 사용됩니다.</p>
+            <div class="lerobot-form-grid">
+              <label>
+                Test Specimen Size mm
+                <input id="printer-test-size-input" class="text-input" value="30,30,30" placeholder="30,30,30 또는 30 x 30 x 30" />
+              </label>
+              <label>
+                Test Unit Cell Size mm
+                <input id="printer-test-cell-input" class="text-input" type="number" min="3" max="10" step="0.5" value="10" />
+              </label>
+            </div>
+          </div>
+          <div class="button-row">
+            <button id="btn-printer-save" class="btn primary">Save Print Defaults & Test Options</button>
+            <button id="btn-printer-reset" class="btn">Reset Fields</button>
+          </div>
+        </article>
+
+        <article class="panel printer-workspace-part">
           <h2>Bambu G-code Autoejection</h2>
           <p class="hint">
             Bambu 기본 profile은 sliced artifact를 deterministic G-code patch로 변환한 뒤 validator, HTTP route,
@@ -556,7 +559,7 @@ Modification guide:
           </div>
         </article>
 
-        <article>
+        <article class="panel printer-workspace-part">
           <h2>Bridge Evidence Log</h2>
           <pre id="printer-result-log" class="equipment-result-log">{}</pre>
         </article>

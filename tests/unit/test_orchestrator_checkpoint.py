@@ -15,8 +15,6 @@ def deny_external(monkeypatch):
         raise AssertionError("Unlisted external effect in checkpoint tests")
     monkeypatch.setattr(socket.socket, "connect", deny)
     monkeypatch.setattr(subprocess, "Popen", deny)
-    from agents.analysis.runtime import AnalysisRuntimeService
-    monkeypatch.setattr(AnalysisRuntimeService, "resume", lambda *args, **kwargs: None)
 
 
 def test_consumption_is_once_and_payload_is_detached():

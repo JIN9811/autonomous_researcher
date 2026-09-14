@@ -31,10 +31,9 @@ def test_knowledge_projection_preserves_existing_metadata_precedence_and_shape()
                 "memory_intake": {"experiment_record_id": "metadata-record"},
                 "evidence_quality": {"artifact_link_coverage": 0.75},
                 "failure_patterns": [{"pattern_id": "failure-1"}],
-                "self_evolution": {"evidence_packs": [{"target_type": "agent", "target_id": "vision"}]},
             },
             "knowledge_context": {"schema": "knowledge_context.v1"},
-            "evolution_proposal": {"schema": "evolution_proposal.v1"},
+            "evolution_proposal": {"schema": "evolution_proposal.v1", "evidence_packs": [{"target_type": "agent", "target_id": "vision"}]},
             "artifact_paths": {"knowledge_report": "knowledge/report.json"},
         }
     }

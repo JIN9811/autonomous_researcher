@@ -82,7 +82,7 @@ each communication protocol.
 | Desktop workflow execution | Instrument software without a usable control API | Selected worker, deployed Flow/Skills and bounded GUI actions | Screenshots, step traces, execution records and acquired files |
 
 These are complementary routes. Observation services support physical tasks;
-CAE adapters provide computation; simulators provide explicitly labeled test
+Simulators provide explicitly labeled test
 responses. A successful API response alone does not establish task completion.
 
 ## Bridge Catalog
@@ -98,7 +98,6 @@ classes or eight identical entries in `/api/bridges`.
 | [LeRobot](lerobot_bridge.md) | Policy rollout, replay, teleoperation and ActiveCam | Manipulation / Vision | Managed processes, serial, camera and optional sidecars |
 | [Windows PyAutoGUI](windows_pyautogui_bridge.md) | Stored desktop workflows and data acquisition | Equipment | Token-gated HTTP to the selected Windows or Local worker |
 | [UTM Vision](utm_vision_bridge.md) | Test-area observation and verification evidence | Vision | Camera/ROS streams, calibration and pose services |
-| [CAE Computation](cae_computation_bridges.md) | Preparation, solver execution and model adapters | Analysis | Filesystem, solver processes and field postprocessing |
 | [Base and Simulators](base_simulator_bridges.md) | Deterministic substitutes for non-hardware checks | Test harness / configured agents | In-process simulated responses |
 
 The [PLC operator guide](plc_safety_bridge.md) covers a separate Controller-owned
@@ -128,7 +127,7 @@ Current paths worth distinguishing:
 
 - **Equipment:** the stored Flow/Skills execute before terminal agent review. Durable execution records, screenshots and CSV/readiness evidence support assessment without replaying completed work.
 - **Robotics and vision:** rollout/replay termination and fresh visual verification are separate evidence. ActiveCam capture can include robot motion; it is not just an image read.
-- **Analysis:** measured-data handoff can proceed while optional, frozen-input FEM jobs run independently. Saved-field retrieval does not start a solver.
+- **Analysis:** consumes measured data without owning a device bridge.
 - **Modes:** TEST does not universally mean no hardware. Selected transport, per-agent settings and live/promotion gates determine the actual effect.
 
 ## Extension Points
@@ -158,14 +157,9 @@ The package reuses the existing Windows/Local worker choice, 18 tool IDs,
 `equipment:windows_pyautogui` queue, `/equipment/windows` workspace and storage.
 Catalog and IDE inspection never pairs, selects or executes a worker.
 
-The installed [Analysis Agent Package](../../packages/agents/analysis/package.yaml)
-references [`cae@1.0.0`](../../device_bridges/cae/module.py). Canonical facade,
-CalculiX provider and registered tools live under `device_bridges/cae/`; the flat
-imports remain exact aliases. Analysis is the package/decision owner, CAE is the
-computation bridge, and CalculiX is its internal provider. The shared PINN bridge
-is not activated by this package. Catalog and IDE inspection never starts a
-solver, changes admission/queue/cancellation state or reclassifies computation
-as a Low-level device.
+The [Analysis Agent Package](../../packages/agents/analysis/package.yaml) has no
+device bridge. It processes equipment-produced measurements and passes validated
+objectives to BO through the existing agent contracts.
 
 ### Existing Integration Boundaries
 
@@ -202,8 +196,7 @@ does not imply plug-and-play compatibility.
 
 `camera_utm_bridge` is a shared visual/equipment evidence projection, not a
 separate implementation of all tools it lists. `prusa_bridge` is a legacy
-graph entry while Bambu is the checked-in default provider. CAE's graph entry
-names the facade; CalculiX and PINN have additional registered tools. PLC is a
+graph entry while Bambu is the checked-in default provider. PLC is a
 separate Controller service. Graph labels are not a current model/provider roster.
 
 </details>
@@ -224,7 +217,6 @@ overview is conceptual; owning references and source code provide detail.
 | LeRobot | [Flow](assets/figures/lerobot_01_system_handoffs.svg) · [Execution](assets/figures/lerobot_02_execution_effect_boundary.svg) · [Connections](assets/figures/lerobot_03_api_connection_architecture.svg) |
 | Windows PyAutoGUI | [Flow](assets/figures/windows_pyautogui_01_system_handoffs.svg) · [Execution](assets/figures/windows_pyautogui_02_execution_effect_boundary.svg) · [Connections](assets/figures/windows_pyautogui_03_api_connection_architecture.svg) |
 | UTM Vision | [Flow](assets/figures/utm_vision_01_system_handoffs.svg) · [Execution](assets/figures/utm_vision_02_execution_effect_boundary.svg) · [Connections](assets/figures/utm_vision_03_api_connection_architecture.svg) |
-| CAE Computation | [Flow](assets/figures/cae_computation_01_system_handoffs.svg) · [Execution](assets/figures/cae_computation_02_execution_effect_boundary.svg) · [Connections](assets/figures/cae_computation_03_api_connection_architecture.svg) |
 | Base and Simulators | [Flow](assets/figures/base_simulator_01_system_handoffs.svg) · [Execution](assets/figures/base_simulator_02_execution_effect_boundary.svg) · [Connections](assets/figures/base_simulator_03_api_connection_architecture.svg) |
 
 </details>
@@ -273,8 +265,7 @@ Reference, code is current and the document has drift.
 - graph classification: `graphs/configs/atr_closed_loop.yaml`;
 - tool/resource registration: `app/bootstrap.py` and `mcp_tools/*_tools.py`;
 - runtime behavior: owning `device_bridges/*.py` implementations;
-- API families: route declarations in `app/main.py`, `app/analysis_fem_routes.py`
-  and `app/cae_fields_routes.py`; deployed `/openapi.json` owns the instance schema;
+- API families: route declarations in `app/main.py`; deployed `/openapi.json` owns the instance schema;
 - configuration: `configs/devices.yaml` and `configs/lerobot.yaml`;
 - operator behavior: linked Guides and focused bridge/API tests.
 
@@ -298,7 +289,7 @@ When a bridge contract changes:
 
 The inventory is capability-oriented and therefore not a class-by-class API
 catalog. The graph projection currently under-represents the Bambu default and
-the separately registered CalculiX/PINN paths. Optional device, solver, camera,
+the separately registered adapters. Optional device, camera,
 ROS, serial, and Windows combinations were not all exercised by this
 documentation inspection.
 

@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from agents.core.knowledge.agent import KnowledgeAgent
-from knowledge.evolution_bridge import build_outcomes_for_active_variants
+from knowledge.improvement_evidence import build_outcomes_for_active_variants
 from knowledge.experiment_db import ExperimentDB
 from knowledge.schemas import AgentPerformanceRecord, EvolutionOutcomeRecord, ExperimentKnowledgeRecord
 from knowledge.stores import JsonlKnowledgeStore
@@ -180,10 +180,13 @@ async def test_knowledge_agent_persists_analysis_artifacts_metrics_and_failure_t
     assert result.data["knowledge"]["agent_performance_count"] >= 1
     assert result.data["knowledge"]["failure_pattern_count"] >= 1
     assert result.data["knowledge"]["evolution_pack_count"] >= 1
-    pack = result.data["knowledge"]["self_evolution"]["evidence_packs"][0]
+    evidence = result.data["knowledge"]["evolution_proposal"]
+    pack = evidence["evidence_packs"][0]
     assert pack["schema_version"] == "evolution_evidence_pack_v1"
     assert pack["target_type"] == "prompt"
     assert pack["constraints"]["require_human_approval"] is True
+    assert "prefill_tasks" not in evidence
+    assert "self_evolution" not in result.data["knowledge"]
     assert "knowledge_report" in result.data["knowledge"]["artifact_paths"]
     record = ctx.experiment_db.list_recent(1)[0]
     assert record.artifact_refs[0]["kind"] == "utm_csv"

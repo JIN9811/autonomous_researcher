@@ -42,6 +42,24 @@ function loadApi(globalObject = {}) {
 
 (async () => {
   {
+    const globalObject = {AX4LABDesignUI: {createFrontend: () => ({dispose() {}})}};
+    const gate = deferred();
+    const started = deferred();
+    const host = loadApi(globalObject).createModuleHost({globalObject, loadAsset: async () => {
+      started.resolve();
+      await gate.promise;
+    }});
+    const first = host.reconcile([manifest()]);
+    await started.promise;
+    let finished = false;
+    const second = host.reconcile([manifest()]).then(() => { finished = true; });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(finished, false, 'refresh must await a module that is still activating');
+    gate.resolve();
+    await Promise.all([first, second]);
+    assert.ok(host.get('design'));
+  }
+  {
     const globalObject = {};
     const api = loadApi(globalObject);
     const calls = { load: [], create: 0, dispose: 0 };

@@ -47,6 +47,12 @@ Replace `graph` with the current existing graph configuration; it is required
 to pass existing graph validation. `module_configurations` maps module ID to
 `{"module": <existing module configuration>}`. Include each edited module draft
 the IDE intends to retain. Export never implicitly opens referenced module files.
+
+An optional `display_name` provides a human-readable package name independently
+of `graph.name`. On import, the IDE draft carries package ID, version and display
+name in `graph.metadata.experimental_package`; only the existing explicit
+save/activation path makes this identity active. Live Setup reads that identity,
+never infers a package name from the graph, and shows `Not bound` when absent.
 Existing declarative `modules/design`, repository-relative source references and
 local API/UI routes are retained as data.
 

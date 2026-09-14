@@ -53,16 +53,31 @@ const adaptedEvidence = {
 const populated = renderer.renderExpectedPerformance({}, { design_evaluation: adaptedEvidence }, {
   expected_objective_proxy_score: 0.9988,
 });
-assert.match(populated, /Performance<\/b>unassessed/);
-assert.match(populated, /Mass \(estimated\)<\/b>0 g/);
+assert.match(populated, /Unassessed/);
+assert.match(populated, /<td>0 g<\/td>/);
 assert.doesNotMatch(populated, /0\.9988/);
 
 const detailed = renderer.renderEvidence(adaptedEvidence, true);
 assert.match(detailed, /minimum_wall: 0\.2 mm margin · pass/);
 
 const empty = renderer.renderExpectedPerformance({}, {}, {});
-assert.match(empty, /Waiting for scatter\./);
-assert.match(empty, /<b>OBJ<\/b>-/);
+const space = renderer.renderDesignSpace({parameter_sweep:{heatmap_cells:[
+  {candidate_id:'a',x_relative_density:0.3,y_wall_thickness_mm:1.2,value:0.9988},
+  {candidate_id:'b',x_relative_density:0.4,y_wall_thickness_mm:1.5}
+]}},{candidate_id:'a'});
+assert.match(space, /Design candidate positions/);
+const selectedComparison = renderer.renderExpectedPerformance({candidate_evaluations:[{candidate_id:'a'},{candidate_id:'b'}]}, {}, {candidate_id:'b'});
+assert.match(selectedComparison, /dsn-comparison-scroll/);
+assert.match(selectedComparison, /class="dsn-selected-candidate"[^>]*><td>b · Selected/);
+assert.doesNotMatch(renderer.renderExpectedPerformance({candidate_evaluations:[{candidate_id:'a'}]}, {}, {}), /dsn-selected-candidate/);
+assert.match(renderer.renderManufacturabilityCard({}, {}, {}, {}), /<details class="dsn-variable-details"><summary>Constraint details<\/summary>/);
+assert.match(space, /<details class="dsn-variable-details"><summary>Variables & ranges<\/summary>/);
+assert.doesNotMatch(space, /0\.9988/);
+assert.match(renderer.renderManufacturabilityCard({}, {design_evaluation:{constraint_margins:[
+  {constraint:'wall',actual:1.4,limit:1.2,relation:'>=',margin:0.2,unit:'mm',status:'pass'}
+]}}, {}, {}), /Constraint value relative to limit/);
+assert.match(empty, /No recorded evidence/);
+assert.doesNotMatch(empty, /dsn-scatter|OBJ/);
 
 assert.deepEqual(
   JSON.parse(JSON.stringify(renderer.scatterRows([
@@ -86,8 +101,8 @@ assert.deepEqual(
 const decimals = renderer.renderExpectedPerformance({}, { candidate_evaluation: { selected_score: 1.20 } }, {
   manufacturability_score: 1.234,
 });
-assert.match(decimals, /<b>OBJ<\/b>1\.2/);
-assert.match(decimals, /<b>PRINT<\/b>1\.23/);
+assert.match(decimals, /No recorded evidence/);
+assert.doesNotMatch(decimals, /1\.234|dsn-scatter/);
 assert.doesNotMatch(decimals, /1\.20/);
 
 const handoff = renderer.renderHandoffCard(
@@ -109,11 +124,10 @@ const zeroManufacturing = renderer.renderManufacturabilityCard(
   { nozzle_diameter_mm: 0 },
   [],
 );
-assert.match(zeroManufacturing, /<b>Mass<\/b>0 g/);
-assert.match(zeroManufacturing, /<b>Time<\/b>0 min/);
-assert.match(zeroManufacturing, /<b>Nozzle<\/b>0/);
+assert.match(zeroManufacturing, /No recorded evidence/);
+assert.doesNotMatch(zeroManufacturing, /dsn-radar/);
 const missingManufacturing = renderer.renderManufacturabilityCard({}, {}, {}, {}, {}, []);
-assert.match(missingManufacturing, /<b>Mass<\/b>- g/);
+assert.match(missingManufacturing, /No recorded evidence/);
 
 const frontend = api.createFrontend({
   escapeHtml,

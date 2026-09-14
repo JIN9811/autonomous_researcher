@@ -371,7 +371,7 @@ or physical validation.
 The resolved all-virtual `virtual_bridge` profile executes the existing decision
 and workflow path against the Windows simulator, including its generated CSV and
 readiness evidence. It does not replace the owner with successful preflight or
-substitute a CAE curve for the equipment export. Explicit virtual transport cannot
+substitute a synthetic curve for the equipment export. Explicit virtual transport cannot
 be promoted to physical I/O by saved connection settings. Standalone preflight and
 mixed-mode operator handoff retain their existing gates; see the
 [virtual-device contract](../runtime/runtime_ide.md#virtual-device-execution-contract).

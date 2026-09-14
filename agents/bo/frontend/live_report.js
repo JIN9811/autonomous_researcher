@@ -125,79 +125,94 @@
       const renderer = boVisualization;
       const visualization = resolveLiveBoVisualization(report, boResult);
       const hasVisualization = Boolean(renderer && renderer.isValid(visualization));
-      const equationBody = hasVisualization
-        ? renderer.renderEquationCard(visualization)
-        : '<div class="bo-viz-empty">Waiting for a completed BO step.</div>';
+      const objective = report.sections?.objective_display;
+      const hasObjectiveReport = Object.prototype.hasOwnProperty.call(report.sections || {}, "objective_display");
+      const equationPayload = objective
+        ? {schema: "bo_visualization.v1", objective, design_space: visualization?.design_space || {}}
+        : (hasObjectiveReport ? null : visualization);
+      const equationBody = equationPayload && renderer
+        ? renderer.renderEquationCard(equationPayload)
+        : '<div class="bo-viz-empty">Objective not configured for this run.</div>';
       const posteriorBody = hasVisualization
-        ? renderer.renderPlot(visualization, {mode: "parameter_slice", parameter: visualization.view?.selected_parameter || ""})
+        ? renderer.renderPlot(visualization, {preferArtifact: true, mode: "parameter_slice", parameter: visualization.view?.selected_parameter || ""})
         : '<div class="bo-viz-empty">Waiting for a completed BO step.</div>';
       const visualizationCards = `
-        ${renderDashboardCard("BO Objective Equation", `<div data-live-bo-equation>${equationBody}</div>`, {span: 4, tone: "bo", eyebrow: "active objective", className: "bo-objective-summary-card"})}
-        ${renderDashboardCard("Live Posterior", `<div data-live-bo-posterior>${posteriorBody}</div>`, {span: 8, tone: "bo", eyebrow: "uncertainty + acquisition"})}
-        ${renderDashboardCard("Initial Design / LHS", renderBoInitialDesignBoard(report), {span: 12, tone: "bo", eyebrow: "declared experimental design space", className: "ar-bo-lhs-card"})}
+        ${renderDashboardCard("Objective Equation", `<div data-live-bo-equation>${equationBody}</div>`, {span: 12, tone: "bo", eyebrow: "optimization objective", className: "bo-objective-summary-card"})}
+        ${renderDashboardCard("Live Posterior", `<div data-live-bo-posterior>${posteriorBody}</div>`, {span: 6, tone: "bo", eyebrow: "uncertainty + acquisition", className: "bo-posterior-card"})}
+        ${renderDashboardCard("Initial Design / LHS", renderBoInitialDesignBoard(report), {span: 6, tone: "bo", eyebrow: "experimental design space", className: "ar-bo-lhs-card"})}
       `;
       const recommendation = boResult.recommendation || boResult.selected || {};
       const reasoning = boResult.reasoning || {};
-      const priorSummary = boResult.prior_summary || {};
-      const ranking = Array.isArray(boResult.candidate_ranking)
-        ? boResult.candidate_ranking
-        : Array.isArray(boResult.candidate_pool) ? boResult.candidate_pool.slice(0, 8) : [];
-      const rankingItems = ranking.map((item, index) => `${index + 1}. ${item.candidate_id || item.id || "candidate"} / acq=${renderRuntimeValue(item.acquisition_score || item.acquisition || "-")} / score=${renderRuntimeValue(item.combined_score || item.objective_score || item.score || "-")}`);
-      if (!ranking.length && !Object.keys(boResult).length) {
-        const analysis = latestAnalysisPayload(report) || {};
-        const quality = analysis.quality_gate || analysis.data_quality_gate || {};
-        const knowledgeReport = latestKnowledgeReport(report) || {};
-        const evolution = latestKnowledgeEvolutionProposal(report) || {};
-        const packs = Array.isArray(evolution.evidence_packs) ? evolution.evidence_packs : [];
-        return `
-          ${visualizationCards}
-          ${renderDashboardCard("BO Gate Status", renderBoGateState(report), {span: 8, tone: "bo", eyebrow: "route state"})}
-          ${renderDashboardCard("Optimization Input", renderDashboardRows([
-            ["objective_score", analysis.objective_score ?? "-"],
-            ["uncertainty", analysis.uncertainty ?? "-"],
-            ["ok_for_bo", quality.ok_for_bo === undefined ? "-" : quality.ok_for_bo],
-            ["quality_warnings", quality.warnings || []],
-            ["knowledge_packs", packs.length],
-          ]), {span: 4, tone: quality.ok_for_bo === false ? "warning" : "bo", eyebrow: "ready check"})}
-          ${renderDashboardCard("Expected BO Payload", renderDashboardRows([
-            ["candidate_ranking", "waiting"], ["recommendation", "waiting"], ["next_design_request", "waiting"],
-            ["memory_failures", Array.isArray(knowledgeReport.failure_patterns) ? knowledgeReport.failure_patterns.length : 0],
-          ]), {span: 4, tone: "bo", eyebrow: "contract"})}
-        `;
-      }
+      const prior = boResult.prior_summary || {};
+      const next = boResult.next_design_request || {};
+      const ranking = Array.isArray(boResult.candidate_ranking) ? boResult.candidate_ranking
+        : Array.isArray(boResult.candidate_pool) ? boResult.candidate_pool : [];
+      const analysis = latestAnalysisPayload(report) || {};
+      const quality = analysis.quality_gate || analysis.data_quality_gate || {};
+      const decision = boResult.decision || {};
+      const trace = Array.isArray(decision.trace) ? decision.trace : [];
+      const esc = (value) => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+      const details = (label, body) => `<details class="bo-equation-details"><summary>${label}</summary>${body}</details>`;
+      const optimizerCalls = trace.filter(item => item.request?.tool === "run_optimizer");
+      const validCall = item => item.status === "valid" || item.result?.status === "completed";
+      const terminalReview = ["accepted", "returned", "failed"].includes(decision.status);
+      const stages = [
+        {label:"Input Check", status: quality.ok_for_bo === false ? "blocked" : (trace.length || prior.measured_count !== undefined ? "done" : "waiting"), rows:[["Measured observations", prior.measured_count ?? "—"], ["Quality gate", quality.ok_for_bo ?? "Not recorded"]]},
+        {label:"Strategy Decision", status: optimizerCalls.length && decision.llm_used ? "done" : "waiting", rows:[["Strategy", boResult.strategy || "—"], ["LLM used", decision.llm_used ?? "Not recorded"], ["Source", decision.provenance || reasoning.source || "—"]]},
+        {label:"LHS / BoTorch", status: optimizerCalls.some(validCall) || recommendation.candidate_id ? "done" : "waiting", rows:[["Phase", boResult.optimization_phase || "—"], ["Backend", boResult.backend_active || "—"], ["Candidate", recommendation.candidate_id || "—"]]},
+        {label:"Result Review", status: decision.status === "accepted" ? "done" : (terminalReview ? "blocked" : "waiting"), rows:[["Decision", decision.status || "Not recorded"], ["Reason", decision.reason || decision.failure_code || "—"]]},
+        {label:"Design Handoff", status: next.status === "ready" ? "done" : (next.status === "blocked" ? "blocked" : "waiting"), rows:[["Target", next.consumer_agent || next.target_agent || "—"], ["Candidate", next.candidate_id || "—"], ["Status", next.status || "Not recorded"]]},
+      ];
+      const progress = `<div class="ar-spm-progress-steps"><div class="ar-spm-progress-node-rail bo-stage-rail" aria-label="BO workflow stages">${stages.map((step, index) => `
+        <details class="bo-stage-detail">
+          <summary class="ar-spm-progress-node tone-${step.status === "done" ? "success" : step.status === "blocked" ? "warning" : "info"} tone-${step.status === "done" ? "done" : step.status === "blocked" ? "blocked" : "idle"}">
+            <i>${String(index + 1).padStart(2, "0")}</i><span>${esc(step.label)}</span><b class="ar-spm-progress-action">${step.status === "done" ? "Complete" : step.status === "blocked" ? "Blocked" : "Waiting"}</b>
+          </summary><div class="bo-stage-evidence">${renderDashboardRows(step.rows)}</div>
+        </details>${index < stages.length - 1 ? `<span class="ar-spm-progress-edge tone-${step.status === "done" ? "done" : "idle"}" aria-hidden="true"></span>` : ""}`).join("")}</div></div>`;
       return `
         ${visualizationCards}
-        ${boResult.decision?.schema === "bo_decision.v1" && renderer?.renderDecision ? renderDashboardCard("BO Decision / Tool Audit", renderer.renderDecision(boResult.decision), {span: 12, tone: boResult.decision.status === "accepted" ? "bo" : "warning", eyebrow: "strategy + result review"}) : ""}
-        ${renderDashboardCard("Candidate Ranking", renderBoRankingBoard(boResult), {span: 8, tone: "bo", eyebrow: "numeric audit"})}
-        ${renderDashboardCard("Recommendation", renderDashboardRows([
-          ["candidate_id", recommendation.candidate_id || recommendation.id || "-"],
-          ["combined_score", recommendation.combined_score || "-"],
-          ["objective_score", recommendation.objective_score || recommendation.score || "-"],
-          ["uncertainty", recommendation.uncertainty || "-"],
-          ["source", recommendation.source_strategy || "-"],
-        ]), {span: 4, tone: "bo", eyebrow: "selected"})}
-        ${renderDashboardCard("Selected Parameters", renderBoParameterChips(recommendation), {span: 4, tone: "bo", eyebrow: "design vector"})}
-        ${renderDashboardCard("Acquisition Strategy", renderDashboardRows([
-          ["strategy", boResult.strategy || "-"], ["benchmark_strategy", boResult.benchmark_strategy || "-"],
-          ["acquisition", boResult.acquisition || latestReportPayload(report, ["acquisition", "acquisition_function"]) || "-"],
-          ["budget", boResult.budget || "-"], ["constraints", boResult.constraints || "-"],
-        ]), {span: 4, tone: "bo", eyebrow: "optimizer"})}
-        ${renderDashboardCard("Prior Memory", renderDashboardRows([
-          ["measured_count", priorSummary.measured_count ?? "-"], ["failed_count", priorSummary.failed_count ?? "-"],
-          ["constraint_count", priorSummary.constraint_count ?? "-"], ["reasoning_source", reasoning.source || "-"],
-          ["failure_penalty", boResult.failure_penalty || "-"],
-        ]), {span: 4, tone: "bo", eyebrow: "knowledge input"})}
-        ${renderDashboardCard("Ranking Audit", `${renderDashboardRows([
-          ["ranked_candidates", ranking.length], ["top_candidate", ranking[0] ? ranking[0].candidate_id || ranking[0].id || "-" : "-"],
-          ["selection_rule", boResult.selection_rule || "-"], ["llm_decision", boResult.decision?.status || reasoning.summary || "-"],
-        ])}${dashboardList(rankingItems, "No BO candidate ranking recorded.", 5)}`, {span: 4, tone: "bo", eyebrow: "audit"})}
-        ${renderDashboardCard("Next Design Request", renderDashboardRows([
-          ["schema", (boResult.next_design_request || {}).schema || "-"],
-          ["target_agent", (boResult.next_design_request || {}).consumer_agent || (boResult.next_design_request || {}).target_agent || "Design"],
-          ["candidate_id", (boResult.next_design_request || {}).candidate_id || recommendation.candidate_id || "-"],
-          ["priority", (boResult.next_design_request || {}).priority || "-"],
-          ["status", (boResult.next_design_request || {}).status || "-"],
-        ]), {span: 4, tone: "bo", eyebrow: "handoff"})}
+        ${renderDashboardCard("Next Experiment", `
+          ${renderDashboardRows([
+            ["Candidate", recommendation.candidate_id || recommendation.id || "Not selected"],
+            ["Objective value", recommendation.objective_score ?? recommendation.score ?? "—"],
+            ["Uncertainty", recommendation.uncertainty ?? "—"],
+            ["Handoff", next.status || "Not recorded"],
+            ["Target", next.consumer_agent || next.target_agent || "—"],
+          ])}
+          ${renderBoParameterChips(recommendation)}
+          ${details("Handoff details", renderDashboardRows([
+            ["Schema", next.schema || "—"], ["Candidate", next.candidate_id || "—"],
+            ["Priority", next.priority || "—"], ["Source", recommendation.source_strategy || "—"],
+          ]))}
+        `, {span:4, tone:"bo", eyebrow:"selected design"})}
+        ${renderDashboardCard("Optimization Status", renderDashboardRows([
+          ["Phase", boResult.optimization_phase || "Waiting"],
+          ["Strategy", boResult.strategy || "—"],
+          ["Acquisition", boResult.acquisition || "—"],
+          ["Measured", prior.measured_count ?? "—"],
+          ["Failed", prior.failed_count ?? "—"],
+          ["Ready for BO", quality.ok_for_bo ?? "—"],
+        ]) + details("Input details", renderDashboardRows([
+          ["Budget", boResult.budget ?? "—"], ["Benchmark", boResult.benchmark_strategy || "—"],
+          ["Constraints", boResult.constraints || "—"], ["Quality warnings", quality.warnings || []],
+          ["Failure penalty", boResult.failure_penalty ?? "—"],
+        ])), {span:4,tone:"bo",eyebrow:"inputs + optimizer"})}
+        ${renderDashboardCard("Selection Evidence", `
+          ${renderDashboardRows([
+            ["Decision", decision.status || "Not recorded"], ["Candidates", ranking.length],
+            ["Source", reasoning.source || "—"], ["Selection rule", boResult.selection_rule || "—"],
+          ])}
+          ${renderBoRankingBoard(boResult)}
+          ${details("Decision details", renderDashboardRows([
+            ["Reason", decision.reason || reasoning.summary || "Not recorded"],
+            ["Combined score", recommendation.combined_score ?? "—"],
+            ["Constraint count", prior.constraint_count ?? "—"],
+          ]))}
+        `, {span:4,tone:"bo",eyebrow:"ranking + reasoning"})}
+        ${renderDashboardCard("Agentic Progress", progress +
+          (decision.schema === "bo_decision.v1" && renderer?.renderDecision
+            ? details("Tool call details", renderer.renderDecision(decision)) : ""),
+          {span:12,tone:"bo",eyebrow:"workflow stages · click for details",className:"bo-agentic-progress-card"})}
       `;
     }
 

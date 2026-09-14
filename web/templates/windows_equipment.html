@@ -36,8 +36,12 @@ Modification guide:
         opacity: 1;
       }
     </style>
+    <link rel="preload" as="image" href="/static/ax4lab-logo-transparent.png">
+    <link rel="stylesheet" href="/static/workspace_boot.css?v=1">
   </head>
   <body>
+    {% set workspace_title = "Windows Automation Workspace" %}
+    {% include "workspace_boot.html" %}
     <main class="page equipment-setup-page">
       <section class="hero panel">
         <div class="hero-copy">

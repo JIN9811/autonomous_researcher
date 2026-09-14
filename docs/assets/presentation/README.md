@@ -47,7 +47,7 @@ Graphical Abstract or the three detailed architecture overviews.
 - Flat technical pictograms on white, consistent navy outlines and cyan connections.
 - Short English labels, one sans-serif family, open layouts without enclosing cards.
 - Distinct reasoning, procedure, tool and evidence roles; arrows preserve actual ownership.
-- Role-specific layouts: peer-agent orchestration, terminal workflow review, and parallel FEM are not forced into one sequential template.
+- Role-specific layouts: peer-agent orchestration, terminal workflow review, and measurement processing are not forced into one sequential template.
 
 The System Contribution strip intentionally uses three equal outlined modules,
 as requested for this figure only. Matching two-line headings, aligned diagram
@@ -56,12 +56,12 @@ Other paper figures retain their open layouts.
 
 The prompts were checked against the corresponding agent references. They retain
 optimizer authority over coordinates, capture before Vision review, terminated
-robot execution before result judgment, and measured handoff independent of FEM.
+robot execution before result judgment, and measured-data objective handoff.
 Guardian's model review remains advisory to policy gates. These are conceptual
 responsibility diagrams, not new runtime paths or validation results.
 
 This refresh changes only generated raster figures and their documentation
-references. Existing SVG diagrams, measured plots, FEM contours, screenshots,
+references. Existing SVG diagrams, measured plots, screenshots,
 branding files, and the approved Graphical Abstract are outside its scope.
 
 The root transformation figure adapts the conceptual shift in the author's

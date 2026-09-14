@@ -102,8 +102,6 @@ class VerificationGuard:
             return await original_send(client, request, *args, **kwargs)
         self.stack.enter_context(patch.object(httpx.AsyncClient, "send", send))
         # These modules define classes only; patch before constructing bootstrap.
-        from agents.analysis.runtime import AnalysisRuntimeService
-        self.stack.enter_context(patch.object(AnalysisRuntimeService, "resume", self.deny))
         from backends.vllm_client import VLLMBackend
         from backends.nemoclaw_vllm_runtime import NemoClawVLLMRuntime
         for cls in (VLLMBackend, NemoClawVLLMRuntime):

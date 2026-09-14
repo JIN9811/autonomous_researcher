@@ -5,14 +5,14 @@ from typing import Any
 
 
 REPORT_PROFILE = {
-    "title": "UTM / FEM / Objective Evaluation",
-    "summary": "Processes measurement or simulation output into force/displacement features and objective scores.",
+    "title": "Experimental Data / Metrics / Objective Evaluation",
+    "summary": "Processes experimental measurements into force/displacement features and objective scores.",
     "focus_rows": [
-        {"label": "Data", "value": "UTM curve, CAE contour, boundary conditions, and specimen metadata"},
+        {"label": "Data", "value": "Measured curve, units, source provenance and specimen metadata"},
         {"label": "Metrics", "value": "stiffness, energy absorption, peak force, mass-normalized score"},
-        {"label": "Evidence", "value": "plots, contour SVG, tabular summary, and objective JSON"},
+        {"label": "Evidence", "value": "Measured curves, tabular metrics and objective JSON"},
     ],
-    "checklist": ["Validate boundary conditions", "Attach quantitative metrics", "Prepare BO observation"],
+    "checklist": ["Validate source, units and geometry", "Attach quantitative metrics", "Prepare BO observation"],
 }
 
 
@@ -34,7 +34,7 @@ def project_analysis_report(metadata: dict, agent_payload: dict) -> dict:
     role_specific: dict[str, Any] = {}
     if analysis:
         role_specific = {
-            "summary": "Measured UTM evaluation, optional CAE/FEM evidence, objective quality gates, and BO handoff.",
+            "summary": "Measured-data evaluation, objective quality gates and BO handoff.",
             "measurement": _dict(analysis.get("utm_metrics")),
             "data_quality": _dict(analysis.get("data_quality_gate")) or _dict(analysis.get("quality_gate")),
             "objective": {
@@ -42,9 +42,6 @@ def project_analysis_report(metadata: dict, agent_payload: dict) -> dict:
                 "uncertainty": analysis.get("uncertainty"),
                 "uncertainty_status": _dict(analysis.get("uncertainty_status")),
             },
-            "cae": _dict(analysis.get("cae_result")),
-            "fem": _dict(analysis.get("fem_agentic_loop")) or _dict(analysis.get("fem_job")) or _dict(analysis.get("fem_result")),
-            "multifidelity_comparison": _dict(analysis.get("multifidelity_comparison")),
             "trust_score": _dict(analysis.get("trust_score")),
             "artifacts": _dict(analysis.get("analysis_artifacts")),
             "handoff_packet": bo_handoff,

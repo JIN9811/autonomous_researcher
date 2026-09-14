@@ -35,11 +35,11 @@ def project_knowledge_report(metadata: dict, agent_payload: dict) -> dict:
     metrics: dict = {}
     if knowledge_report:
         memory_intake = knowledge_report.get("memory_intake") if isinstance(knowledge_report.get("memory_intake"), dict) else {}
-        self_evolution = knowledge_report.get("self_evolution") if isinstance(knowledge_report.get("self_evolution"), dict) else evolution_proposal
-        packs = self_evolution.get("evidence_packs") if isinstance(self_evolution.get("evidence_packs"), list) else []
+        improvement_evidence = evolution_proposal
+        packs = improvement_evidence.get("evidence_packs") if isinstance(improvement_evidence.get("evidence_packs"), list) else []
         performance = knowledge_report.get("agent_performance_records") if isinstance(knowledge_report.get("agent_performance_records"), list) else []
         role_specific.update({
-            "summary": "Research memory board with provenance, failure/success pattern memory, agent performance ledger, and self-evolution evidence packs.",
+            "summary": "Research memory board with provenance, failure/success pattern memory, agent performance ledger, and improvement evidence packs.",
             "memory_ledger": {
                 "experiment_record_id": memory_intake.get("experiment_record_id", ""),
                 "agent_performance_count": memory_intake.get("agent_performance_count", 0),
@@ -58,11 +58,10 @@ def project_knowledge_report(metadata: dict, agent_payload: dict) -> dict:
                 "failure_patterns": knowledge_report.get("failure_patterns", []),
                 "success_patterns": knowledge_report.get("success_patterns", []),
             },
-            "self_evolution_board": {
-                "status": self_evolution.get("status", ""), "top_packs": packs[:5],
-                "prefill_tasks": self_evolution.get("prefill_tasks", []),
-                "outcomes": self_evolution.get("outcomes", knowledge_report.get("evolution_outcomes", [])),
-                "no_evolution_needed_reason": self_evolution.get("no_evolution_needed_reason", ""),
+            "improvement_evidence_board": {
+                "status": improvement_evidence.get("status", ""), "top_packs": packs[:5],
+                "outcomes": improvement_evidence.get("outcomes", knowledge_report.get("evolution_outcomes", [])),
+                "no_evolution_needed_reason": improvement_evidence.get("no_evolution_needed_reason", ""),
             },
             "data_quality_map": knowledge_report.get("data_quality_map", {}),
             "graph_backend_status": knowledge_report.get("graph_backend_status", knowledge_context.get("graph_backend_status", {})),
@@ -70,13 +69,13 @@ def project_knowledge_report(metadata: dict, agent_payload: dict) -> dict:
             "handoff_packet": {"knowledge_context": knowledge_context, "evolution_proposal": evolution_proposal},
         })
         decisions = [{
-            "decision": "prepare_self_evolution_evidence_pack",
+            "decision": "prepare_improvement_evidence_pack",
             "target_type": pack.get("target_type", ""), "target_id": pack.get("target_id", ""),
             "priority": pack.get("priority", 0.0),
             "rationale": "; ".join(pack.get("why_this_target", [])[:2]),
         } for pack in packs[:8] if isinstance(pack, dict)] or [{
             "decision": "no_evolution_needed",
-            "rationale": self_evolution.get("no_evolution_needed_reason", "No evidence pack generated."),
+            "rationale": improvement_evidence.get("no_evolution_needed_reason", "No evidence pack generated."),
         }]
         metrics = knowledge_report.get("evidence_quality", {}) if isinstance(knowledge_report.get("evidence_quality"), dict) else knowledge_context.get("evidence_quality", {}) if isinstance(knowledge_context.get("evidence_quality"), dict) else {}
     return {

@@ -13,17 +13,17 @@
 ## Starting a scenario
 
 In the Live GUI, enter `테스트 모드, 가상 브릿지`, `테스트 모드, 실제 프린터`, or `테스트 모드, 실제 출력`.
-The existing model route generates scenario inputs from saved defaults and the request. The controller submits these as an automatic operator message through `planning_message`; semantic classification, required-value validation, ORC admission, Design and the remaining graph still execute normally.
+The existing model route simulates a researcher: it asks about available experiments, agrees to plan, answers the Orchestrator's condition questions, and approves the reviewed test plan. Saved scenario facts remain private to this input producer; they are not injected wholesale into chat or admission. Each natural-language reply goes through `planning_message`, the same semantic classification, Experimental Setup update and admission as human replies.
 
-The input driver does not dispatch agents, allocate BO observations, or jump to an execution stage. Initial BO design publication stays inside the shared admitted workflow. Automatic messages carry `input_source: test_scenario` and an explicit text label in the transcript.
+The input driver does not dispatch agents, allocate BO observations, or jump to an execution stage. Initial BO design publication stays inside the shared admitted workflow. Automatic messages carry `input_source: test_scenario` as metadata only; the visible conversation contains no JSON envelope or automatic-input prefix.
 
-For supported planning/runtime questions, the model selects existing scenario fields to supply through the same pending-request chat path. Missing information, connection setup, physical transfer confirmation, safety recovery and setup approval remain operator-owned. Changed pending requests invalidate generated replies. Each pending ID is answered at most once; replies cannot start a new run. Human chat takes over automatic input; stop, emergency stop and session reset stop the input producer.
+For condition questions, the model supplies only requested facts in natural language. Agreed values update stable `conversation.input.*` blocks in the canonical Experimental Setup store; changed values revise the same block. Planning consent is not execution consent. A later run-review approval enters the existing handoff. Runtime replies are composed only from model-selected existing facts, never from free-form claims of physical completion, and cannot start another run. Missing information, connection setup, physical transfer confirmation, safety recovery and owner-configuration approval remain operator-owned. Changed pending requests invalidate generated replies. Each pending ID is answered at most once; 24 automatic planning replies pause input for human continuation. Human chat takes over; stop, emergency stop and session reset stop the input producer.
 
 If initial ORC admission is deferred, automatic continuation resumes that same review in the background without starting a new series. The input producer remains available for subsequent runtime questions, including when admission allocated a new run before returning the deferred result.
 
 Bare `테스트 모드` does not authorize an arbitrary physical profile. The existing printer-choice prompt remains until the operator selects a mode.
 
-The ORC classifier receives these commands as an explicit workflow contract, including `설치 프린터` as an installed-printer alias. A standalone test command requests `start_run`, not a saved-Setup edit; generation supplies the research goal. Ordinary `실험 수행` also requests start admission, but missing experiment conditions are collected before handoff. Questions, quoted examples, negated execution and settings-only edits do not authorize a run. This is model-mediated semantic classification, not a keyword execution bypass.
+The ORC classifier receives these commands as an explicit workflow contract, including `설치 프린터` as an installed-printer alias. A standalone test command requests automatic conversation, not a saved-Setup edit. Ordinary experiments use the same LLM-led dialogue with the human providing replies. The initial greeting is bilingual; later replies follow the user's language. Mid-dialogue system questions preserve agreed values and the pending decision. Questions, quoted examples, negated execution and settings-only edits do not authorize a run.
 
 ## Execution profiles
 
@@ -53,11 +53,11 @@ The active BO contract owns initialization, variable domains, acquisition and su
 
 ## Source and verification
 
-- Input producer: `app/test_scenario.py`; shared admission/transcript: `app/controller.py`.
+- Input producer: `app/test_scenario.py`; conversation decisions: `app/planning_dialogue.py`; shared admission/transcript: `app/controller.py`.
 - Tests: `tests/unit/test_test_scenario_chat.py`, `tests/unit/test_controller_planning.py`, `tests/unit/test_utm_clear_cycle.py`.
 - Device-mode resolution: `utils/test_mode_execution_profiles.py`.
 - See [LangGraph runtime](langgraph_runtime.md).
 
-On 2026-09-14, registered GPT API and local Gemma 31B routes passed 68 repeated intake checks covering all test selections, ordinary experiment starts, missing-goal starts, questions, negations and settings-only requests. Twelve additional real-model controller checks passed scenario generation/re-entry and ordinary experiment admission, stopping before Design dispatch. Missing experiment inputs remained pending. These checks did not execute equipment or validate a full physical cycle.
+Classification-only checks do not establish conversation quality or a completed hardware cycle. The dialogue verifier exercises bilingual greeting, three automatic test selections, and Korean/English human conversations with intervening questions and material changes. It checks Setup values and stops at the existing Design handoff without dispatching equipment.
 
-Reproduce with `scripts/verify_test_mode_intake.py --execute --repeat 2` and `--execute --controller` using the project Python environment. Without `--execute`, the script only lists its cases. The verifier denies device/tool access and permits only registered inference endpoints; reports remain in ignored `runs/validation-test-intake-*` directories, outside public knowledge corpora.
+Reproduce with `scripts/verify_test_mode_intake.py --execute --dialogue` using the project Python environment. Select a registered provider with `--backend openai` or `--backend vllm`. Without `--execute`, the script only lists its cases. The verifier denies device/tool access and permits only registered inference endpoints; reports remain in ignored `runs/validation-test-intake-*` directories, outside public knowledge corpora.

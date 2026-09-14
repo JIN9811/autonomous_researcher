@@ -50,7 +50,7 @@ ownership, Package composition, Device Bridges, and configuration lifecycle.
 | At a glance | Details |
 |---|---|
 | Inventory | Ten executable agents on the existing registered graph/module path |
-| Installed packages | Design, Specimen, Vision, Manipulation, Equipment, Analysis and BO expose owned code, execution definitions and live reports; Analysis composes the existing CAE computation bridge, while BO reuses numerical services without a bridge |
+| Installed packages | Design, Specimen, Vision, Manipulation, Equipment, Analysis and BO expose owned code, execution definitions and live reports; Analysis and BO reuse numerical services without a device bridge |
 | Orchestrator | Bounded `orchestrator_plan` decisions and dynamic Experimental Setup are documented against working-tree scope |
 | Configuration ownership | Orchestrator/BO keep existing Setup fields; Knowledge/Guardian declarations use owner validation and explicit future-run module apply |
 | Execution authority | Agent procedures and registered tools/bridges retain execution authority; numerical values are tool-computed |
@@ -70,7 +70,7 @@ composition contract; the Device Bridges view shows the actual bridge components
 
 The [Analysis Reference](analysis_agent.md#installed-package-and-executable-structure)
 covers its composite owner, source-backed five-area view, module-owned Live
-report, and Analysis package → CAE bridge → internal CalculiX relationship.
+report, and Analysis-owned measurement processing.
 
 The [BO Reference](bo_agent.md#installed-package-and-executable-structure)
 covers the single discovered owner, executable composite task, source-backed
@@ -133,7 +133,7 @@ implementations remain authoritative.
 | [Vision](vision_agent.md) | Visual evidence | [Source](../../agents/vision/agent.py) · [Module](../../graphs/modules/vision/module.yaml) |
 | [Manipulation](manipulation_agent.md) | Robot skills and completion | [Source](../../agents/manipulation/agent.py) · [Module](../../graphs/modules/manipulation/module.yaml) · [Control areas](assets/figures/manipulation_control_areas.svg) |
 | [Equipment](equipment_agent.md) | Stacked Flow selection, terminal review and bounded recovery | [Owner](../../agents/equipment/agent.py) · [Code module](../../agents/equipment/module.py) · [Execution graph](../../graphs/modules/equipment/module.yaml) · [Agent Package](../../packages/agents/equipment/package.yaml) · [Control areas](assets/figures/equipment_control_areas.svg) |
-| [Analysis](analysis_agent.md) | Measured objectives and independent background FEM | [Owner](../../agents/analysis/agent.py) · [Code module](../../agents/analysis/module.py) · [Execution graph](../../graphs/modules/analysis/module.yaml) · [Agent Package](../../packages/agents/analysis/package.yaml) · [Control areas](assets/figures/analysis_control_areas.svg) |
+| [Analysis](analysis_agent.md) | Experimental data processing and measured objectives | [Owner](../../agents/analysis/agent.py) · [Code module](../../agents/analysis/module.py) · [Execution graph](../../graphs/modules/analysis/module.yaml) · [Agent Package](../../packages/agents/analysis/package.yaml) · [Control areas](assets/figures/analysis_control_areas.svg) |
 | [Knowledge](knowledge_agent.md) | Ontology-guided Markdown, page-wise source curation and scoped retrieval | [Core source](../../agents/core/knowledge/agent.py) · [Plan query](../../agents/core/knowledge/plan.py) · [Module](../../graphs/modules/knowledge/module.yaml) |
 | [Bayesian Optimization](bo_agent.md) | LLM strategy/review with continuous LHS/BoTorch proposals | [Owner](../../agents/bo/agent.py) · [Code module](../../agents/bo/module.py) · [Execution graph](../../graphs/modules/bo/module.yaml) · [Agent Package](../../packages/agents/bo/package.yaml) · [Control areas](assets/figures/bo_control_areas.svg) |
 | [Guardian](guardian_agent.md) | Policy gates, advisory review and continuation decisions | [Core source](../../agents/core/guardian/agent.py) · [Plan query](../../agents/core/guardian/plan.py) · [Module](../../graphs/modules/guardian/module.yaml) |
@@ -175,7 +175,7 @@ bridges. The complete contract and diagram are in the
 | Vision | LLM observation choice and same-frame evidence review | Task resolution, detectors, interlocks, capture/status/stop API dispatch | Selected camera and LeRobot device paths |
 | Manipulation | LLM saved-skill suitability and post-Vision result review | Profile binding, API dispatch, preflight and completion supervision | LeRobot robot policy/replay execution and device lifecycle |
 | Lab Equipment | LLM stacked-Flow selection and terminal evidence/recovery review | Existing exact Flow/Skill supervision, APIs, CSV checks and handoff | Selected desktop/instrument worker and device driver |
-| Analysis | LLM data, simulation and model-review choices | Parsing, units, objectives, solver, postprocessing and asynchronous FEM scheduling | No direct device execution |
+| Analysis | LLM processing and measurement-review decisions | Parsing, units, curves, metrics and objective evaluation | No direct device execution |
 | Knowledge | LLM scoped retrieval and evidence curation | Provenance, ontology, Markdown/JSONL persistence and context assembly | No direct device execution |
 | Bayesian Optimization | LLM strategy/tool choice and numerical result review | LHS/BoTorch, constraints, numeric recommendation and handoff | No direct device execution |
 | Guardian | Existing LLM policy-evidence review | Deterministic safety/risk checks, health APIs and incident/route results | Hardware interlocks and effective stops remain in device bridges |
@@ -211,12 +211,12 @@ operator intent
 Optional background work has a separate lifetime:
 
 ```text
-Analysis frozen evidence -> FEM preparation / solve / review -> model evidence
+Analysis measured evidence -> curves / metrics / objective -> Knowledge / BO
 Source inbox -> page-wise extraction / LLM curation -> Markdown -> scoped retrieval
 Terminal agent archives -> deterministic evidence preservation
 ```
 
-The measured handoff does not wait for optional FEM; source intake does not
+The measured handoff follows evidence validation; source intake does not
 insert another equipment action into the plan. Simulation-only paths still
 await the solver that supplies their observations.
 
@@ -301,9 +301,7 @@ agent contract:
 | Existing file | Canonical owner | Use |
 |---|---|---|
 | `analysis_utm_runtime_guideline.txt` | [Analysis](analysis_agent.md) | UTM analysis detail |
-| `cae_analysis_runtime_guideline.txt` | [Analysis](analysis_agent.md) | CAE detail |
 | `bo_agent_runtime_guideline.txt` | [BO](bo_agent.md) | BO algorithm/runtime detail |
-| `knowledge_agent_self_evolution_runtime_guideline.md` | [Knowledge](knowledge_agent.md) | Knowledge/self-evolution detail |
 | `manipulation_pi05_transfer_runtime_guideline.txt` | [Manipulation](manipulation_agent.md) | Pi0.5 transfer detail |
 | `specimen_design_existing_runtime_guideline.txt` | [Design](design_agent.md), [Specimen](specimen_agent.md) | Runtime-consumed legacy prompt input, not a reader-facing current contract; retained in place to avoid changing execution |
 | `vision_pickup_observation_runtime_guideline.txt` | [Vision](vision_agent.md) | Pickup observation detail |
@@ -346,7 +344,7 @@ documents identify ownership boundaries without refactoring the implementation.
 ## Index Verification
 
 Updated on 2026-09-11 against `5a190e8`: agent implementations and local
-decision modules, ten manifests, graph handoffs, Analysis FEM/field routes,
+decision modules, ten manifests, graph handoffs, Analysis report routes,
 Knowledge Markdown/source route installers, and owning References were inspected.
 Documentation checks validate links and publication structure; no device,
 model-inference, or new physical-cycle test was performed for this update.

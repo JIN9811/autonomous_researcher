@@ -82,28 +82,31 @@
     const continuousCell = designSpace.cell_size_kind === "continuous";
     const cellBounds = Array.isArray(designSpace.cell_size_bounds_mm) ? designSpace.cell_size_bounds_mm.join("–") : "-";
     const density = Array.isArray(designSpace.relative_density_bounds) ? designSpace.relative_density_bounds.join("–") : "-";
+    const rows = [["Variables", `${designSpace.dimension ? `${designSpace.dimension}D · ` : ""}${variables}`]];
+    if (designSpace.feasible_cell_sizes_mm || designSpace.cell_size_bounds_mm) rows.push(["Cell size", `${continuousCell ? cellBounds : cells} mm`]);
+    if (designSpace.relative_density_bounds) rows.push(["Relative density", density]);
+    if (constraints.length) rows.push(["Constraints", constraints.map((item) => typeof item === "string" ? item : JSON.stringify(item)).join(" · ")]);
     return `
+      <section class="bo-equation-compact">
       <div class="bo-viz-equation-head">
         <div>
-          <span class="bo-viz-kicker">ACTIVE OBJECTIVE</span>
           <h4>${escapeHtml(objective.name || "Objective not bound")}</h4>
         </div>
-        <span class="bo-viz-direction">${escapeHtml(String(objective.direction || "-").toUpperCase())}</span>
+        <span class="bo-viz-direction">${escapeHtml(titleText(objective.direction || "—"))}</span>
       </div>
       <div class="bo-viz-equation"><span>f(x) =</span><strong>${escapeHtml(objective.equation || "-")}</strong><em>${escapeHtml(objective.unit || "")}</em></div>
-      <div class="bo-viz-contract" aria-label="BO design and model contract">
-        <span><b>${escapeHtml(designSpace.dimension || 0)}D</b> ${escapeHtml(variables)}</span>
-        <span><b>${continuousCell ? "Continuous cell size" : escapeHtml(designSpace.cell_size_rule || "Cell size")}</b> · ${escapeHtml(continuousCell ? cellBounds : cells)} mm</span>
-        <span><b>Relative density</b> ${escapeHtml(density)}</span>
+      <dl class="bo-equation-facts">${rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>
+      <details class="bo-equation-details"><summary>Details</summary>
+      <div class="bo-equation-technical">
         <span><b>GP</b> ARD Matérn 5/2 + noise</span>
         <span><b>Acquisition</b> ${escapeHtml(acquisitionLabel(payload))} · ${escapeHtml(backend.input_normalization || "unit_hypercube")}</span>
       </div>
-      ${constraints.length ? `<div class="bo-viz-constraints">${constraints.map((item) => `<code>${escapeHtml(item)}</code>`).join("")}</div>` : ""}
       <div class="bo-viz-equation-meta">
         <span>${escapeHtml(identity)}</span>
         <span>${objective.hash ? `hash ${escapeHtml(String(objective.hash).slice(0, 12))}` : "hash -"}</span>
         <span>${escapeHtml(objective.lifecycle || (objective.run_bound ? "run bound" : "read only"))}</span>
       </div>
+      </details></section>
     `;
   }
 
@@ -223,6 +226,11 @@
 
   function renderPlot(payload, options = {}) {
     if (!isValid(payload)) return '<div class="bo-viz-empty bo-viz-stale">BO visualization unavailable</div>';
+    const pngUrl = String(payload.artifacts?.png_url || "");
+    if (options.preferArtifact && /^\/api\//.test(pngUrl)) {
+      return `<figure class="bo-viz-matplotlib-figure"><img class="bo-viz-matplotlib-image" src="${escapeHtml(pngUrl)}" alt="Stored BO posterior and acquisition · step ${escapeHtml(payload.step)}"></figure>`;
+    }
+    if (options.preferArtifact) return '<div class="bo-viz-empty">No stored posterior figure for this step.</div>';
     const backend = payload.backend || {};
     if (String(backend.active || "").toLowerCase() === "lhs" || String(backend.phase || "").toLowerCase() === "initial_design") {
       return '<div class="bo-viz-empty">BO posterior unavailable during initial design</div>';

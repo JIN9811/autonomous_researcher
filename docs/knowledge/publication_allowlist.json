@@ -1,6 +1,54 @@
 {
   "schema": "knowledge_publication.v1",
   "approved_assets": {
+    "docs/agents/assets/figures/analysis-overview.webp": {
+      "sha256": "9f37e6ad8240841093bcc55820d38a48ff07cd8315ff6b0e2dae165389da78a5",
+      "review": "Reviewed AX4LAB public documentation/UI artwork: framework diagram, branding, or generated workspace pictogram; no private experiment records or credentials."
+    },
+    "web/static/ax4lab-banner.png": {
+      "sha256": "63dec7a3a5933a935424c188df84ec4278e547f50ecb42b8cf266a135a2f28e7",
+      "review": "Reviewed AX4LAB public documentation/UI artwork: framework diagram, branding, or generated workspace pictogram; no private experiment records or credentials."
+    },
+    "web/static/ax4lab-logo-transparent.png": {
+      "sha256": "af9e1a8cb061cb493a3dc93664372efdd7afa8422790b6d2f7940ba5ea14e3d5",
+      "review": "Reviewed AX4LAB public documentation/UI artwork: framework diagram, branding, or generated workspace pictogram; no private experiment records or credentials."
+    },
+    "web/static/ax4lab-logo.png": {
+      "sha256": "a415f4a7c35ffd4fe3e2c291189b8e91e88ac522dd0eb22036bb774eb00eac6f",
+      "review": "Reviewed AX4LAB public documentation/UI artwork: framework diagram, branding, or generated workspace pictogram; no private experiment records or credentials."
+    },
+    "web/static/workspace_icons/bo.webp": {
+      "sha256": "d05e0550e951c1e9abc8fd2eed9683fb59faf89be044121fc60f0ff5bcc66d2a",
+      "review": "Reviewed AX4LAB public documentation/UI artwork: framework diagram, branding, or generated workspace pictogram; no private experiment records or credentials."
+    },
+    "web/static/workspace_icons/camera.webp": {
+      "sha256": "da4111b08dfc261a0912bd70c5a41ef4118a6f3b972eefa29a2daa66ddb477e7",
+      "review": "Reviewed AX4LAB public documentation/UI artwork: framework diagram, branding, or generated workspace pictogram; no private experiment records or credentials."
+    },
+    "web/static/workspace_icons/knowledge.webp": {
+      "sha256": "9460fb3b3dbd9cb25c2e860a37f93cfeffd0dc6b4671cff3b99d051da271d796",
+      "review": "Reviewed AX4LAB public documentation/UI artwork: framework diagram, branding, or generated workspace pictogram; no private experiment records or credentials."
+    },
+    "web/static/workspace_icons/lerobot.webp": {
+      "sha256": "61ca69b0935530273de46206124f7162932e6a90b616cba98db903d390e4be5a",
+      "review": "Reviewed AX4LAB public documentation/UI artwork: framework diagram, branding, or generated workspace pictogram; no private experiment records or credentials."
+    },
+    "web/static/workspace_icons/plc.webp": {
+      "sha256": "41176f56bac959c016e878ec81d06d04e83647ccbe6000aa3b192542144291e5",
+      "review": "Reviewed AX4LAB public documentation/UI artwork: framework diagram, branding, or generated workspace pictogram; no private experiment records or credentials."
+    },
+    "web/static/workspace_icons/printer.webp": {
+      "sha256": "91677f54393749812df68a004899f9117bc61a17b738e66f4cae1e733b2d5cf9",
+      "review": "Reviewed AX4LAB public documentation/UI artwork: framework diagram, branding, or generated workspace pictogram; no private experiment records or credentials."
+    },
+    "web/static/workspace_icons/windows.webp": {
+      "sha256": "567d2013e2762dfe94361a1922f4fad7454a79753091aa50df5fbd3b52b000c2",
+      "review": "Reviewed AX4LAB public documentation/UI artwork: framework diagram, branding, or generated workspace pictogram; no private experiment records or credentials."
+    },
+    "docs/hardware/evidence/prusa_mk4s_live_validation_20260506.md": {
+      "sha256": "d75f42aae1eeffdc5edc5aa3a672de81601d6b0f11a6ffa782c53bfadb906278",
+      "review": "Existing public validation document: only 3DP to 3D display terminology changed; measurements and outcomes unchanged."
+    },
     "docs/maintenance/repository_cleanup.md": {
       "sha256": "6bdb2cffe801ace13605c56ae0a95c2a22505420b5a93368871a6ad791e72fa7",
       "review": "Reviewed cleanup audit or existing public evidence with archive-path updates and personal-home placeholder redaction only. Scientific measurements and historical test outcomes unchanged; no private output files added."

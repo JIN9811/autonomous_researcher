@@ -1666,7 +1666,7 @@ class MainController:
         result: dict[str, Any],
         status: str,
     ) -> dict[str, Any]:
-        """Shape direct 3DP workspace results like Specimen Agent runtime evidence."""
+        """Shape direct 3D workspace results like Specimen Agent runtime evidence."""
         selected_printer = result.get("selected_printer") if isinstance(result.get("selected_printer"), dict) else {}
         autoejection = result.get("autoejection") if isinstance(result.get("autoejection"), dict) else {}
         standalone_artifact = (
@@ -2204,6 +2204,16 @@ class MainController:
 
     def _planning_setup_projection(self) -> dict:
         projection = project_setup(self._setup_store(), self._planning_setup_catalog(), self._state, self._deps.agent_context)
+        from app.planning_dialogue import PREFIX
+        # Projection already resolved active graph membership; avoid reading
+        # every linked module a second time through the activation callback.
+        active_owners = {row["owner"] for row in projection["owners"]} & set(self._deps.agent_registry.names())
+        for block in projection["blocks"]:
+            if block["topic_key"].startswith(PREFIX):
+                active = all(owner in active_owners for owner in block["owners"])
+                block.update(active=active, editable=active and not (self._planning_handoff_active() or bool(self._run_task and not self._run_task.done())), conversation_input=True,
+                    title=block["topic_key"][len(PREFIX):].replace("_", " ").capitalize(),
+                    readonly_reason="Research inputs are reviewed in Chat before execution.")
         projection["session_id"] = self._planning_session_id
         return projection
 
@@ -2220,6 +2230,8 @@ class MainController:
         projection = self._planning_setup_projection()
         proposal = store.proposal(action["proposal_id"])
         block = next(b for b in projection["blocks"] if b["block_id"] == proposal["block_id"])
+        if block.get("conversation_input"):
+            raise SetupValidationError("Review research inputs in Chat; block actions cannot start or approve an experiment")
         if not block["active"]:
             raise SetupValidationError("Setup owner is no longer active in the graph")
         if action["action"] == "discard":
@@ -2265,11 +2277,14 @@ class MainController:
             return {"pending_id": str(held), "kind": "runtime_boundary", "description": "Reply to this held runtime review.",
                     "request": deepcopy(metadata.get("orchestrator_checkpoints", {}).get(str(held), {}))}
         store = getattr(self, "_experimental_setup_store", None)
-        drafts = [b for b in store.snapshot()["blocks"] if b.get("current_draft_proposal_id")] if store else []
+        drafts = [b for b in store.snapshot()["blocks"] if b.get("current_draft_proposal_id") and not b["topic_key"].startswith("conversation.input.")] if store else []
         if len(drafts) == 1:
             block = drafts[0]
             return {"pending_id": block["current_draft_proposal_id"], "kind": "setup_proposal",
                     "description": "Confirm these draft values for the next new run only.", "request": deepcopy(block)}
+        dialogue = getattr(self, "_research_dialogue", None)
+        if dialogue and dialogue.session_id == self._planning_session_id:
+            return deepcopy(dialogue.pending)
         return None
 
     def _planning_intake_scope(self) -> dict:
@@ -2849,6 +2864,8 @@ class MainController:
             "constraints",
             "operator_intent",
             "input_source",
+            "conversation_input",
+            "knowledge_request",
             "command_id",
             "program_id",
             "check_id",
@@ -5400,6 +5417,7 @@ class MainController:
         self._bind_planning_session(session_id)
         self._ensure_planning_intro()
         constraints = deepcopy(constraints or {})
+        self._planning_setup_projection()
         constraints.pop("orchestrator_action", None)
         clean_message = message.strip()
         if not clean_message:
@@ -5426,14 +5444,34 @@ class MainController:
         intake = await classify_chat_request(self._state, self._deps.agent_context, message=clean_message,
             pending_id=pending["pending_id"] if pending else None,
             context={"request": {"pending_request": pending, "setup_context": setup_context,
+                "conversation": self._planning_memory_context(limit=8, max_chars=700),
                 "instruction": "A setup context is editing/discussion only, never run approval. For observation refresh, confirm_pending requires an explicit request for a fresh observation, not yes or ordinary continue."},
                 "settings": planning_decision_settings(self._planning_setup_catalog(), self._deps.orchestrator_agent_name)})
         if scope != self._planning_intake_scope():
             return {"ok": False, "message": "Request scope changed while classifying; review the current request.", "session": self.planning_snapshot()}
-        if expected_pending_id is not None and intake["intent"] != "confirm_pending":
+        if expected_pending_id is not None and intake["intent"] != "confirm_pending" and not (pending and pending["kind"] == "conversation"):
             return {"ok": False, "message": "Reply did not confirm the current request; no action taken."}
         if self._explicit_memory_text(clean_message) is not None:
             intake["intent"] = "question"
+        # Idle research dialogue admits through the existing handoff only after
+        # LLM-led collection/review. Runtime holds and owner setup stay unchanged.
+        conversational = (not scope["running"] and (not pending or pending["kind"] == "conversation")
+            and (intake["intent"] != "change_setup" or (pending and pending["kind"] == "conversation") or setup_context is not None)
+            and self._explicit_memory_text(clean_message) is None)
+        block = self._validate_setup_context(setup_context, session_id) if setup_context else None
+        if conversational and (not block or block.get("conversation_input")):
+            if self._planning_request_lock.locked():
+                return {"ok": False, "message": "Live GUI orchestrator is still reasoning.", "session": self.planning_snapshot()}
+            async with self._planning_request_lock:
+                if intake["intent"] == "start_run" and self._should_trigger_test_design(clean_message) and not automatic_input and not block:
+                    self._record_planning_message({"role": "operator", "content": clean_message, "conversation_input": True})
+                    return await self._run_test_mode_planning(goal=goal, constraints=constraints, operator_message=clean_message)
+                from app.planning_dialogue import dialogue_for
+                dialogue = dialogue_for(self)
+                if not automatic_input and (not pending or intake["intent"] == "start_run"):
+                    dialogue.test_policy = {}
+                return await dialogue.turn(clean_message, intent=intake["intent"], goal=goal,
+                    constraints=constraints, scope=scope, editing=block)
         if intake["intent"] == "question":
             # Questions are a read-only ORC path.  They deliberately precede
             # every Setup/start/confirmation branch below.
@@ -5638,6 +5676,7 @@ class MainController:
         session_id: str | None,
         intake: dict | None = None,
         intake_scope: dict | None = None,
+        recorded_entry: dict | None = None,
     ) -> dict[str, Any]:
         """Handle one operator message while the Live GUI planning lock is held."""
         if intake is None:
@@ -5657,7 +5696,7 @@ class MainController:
             "constraints": constraints,
             "operator_intent": operator_intent,
         }
-        user_entry = self._record_planning_message(user_entry)
+        user_entry = recorded_entry if recorded_entry is not None else self._record_planning_message(user_entry)
         boundary = self._state.run_metadata.get("orchestrator_planning_boundary", {})
         if can_confirm and boundary.get("status") == "deferred":
             # No RunLoop exists yet: this explicit reply resumes only admission.
@@ -5852,21 +5891,19 @@ class MainController:
                     "session": self.planning_snapshot(session_id=session_id),
                 }
 
-            prompt = await self._build_live_orchestrator_prompt(
-                operator_message=(
-                    "Live GUI was opened from the main Start button. "
-                    "No operator message has been sent yet. Start the orchestration discussion by asking for "
-                    "the experiment objective, specimen size, material/printer constraints, and the trigger keyword."
-                ),
-                goal=goal or self._state.active_goal,
-                constraints=constraints or {},
-            )
+            prompt = json.dumps({"operation": "research_greeting", "instruction":
+                "Return only a warm, concise greeting in Korean and English, one short paragraph each. "
+                "Introduce yourself as AX4LAB's orchestrator, address the researcher, explain that they may ask "
+                "about the current system or perform experiments, and ask what they would like to do. "
+                "Do not discuss experiment details, parameters, device lists, missing fields, or trigger keywords. "
+                "No JSON, headings, bullets, status tags or emoji. This is only a greeting, not planning or execution."}, ensure_ascii=False)
 
             try:
                 response, response_message = await self._complete_live_planning_prompt(prompt=prompt)
+                from app.planning_dialogue import plain_message
                 assistant_entry = {
                     "role": "orchestrator",
-                    "content": response.text,
+                    "content": plain_message(response.text),
                     "reasoning": self._extract_reasoning(response.raw),
                     "token_usage": self._extract_token_usage(response.raw),
                     "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -5907,71 +5944,23 @@ class MainController:
         constraints: dict[str, Any],
         operator_message: str,
     ) -> dict[str, Any]:
-        """Generate test input, then submit it through the ordinary planning chat."""
-        input_revision = self._test_input_revision
+        """Keep test facts private; an LLM operator reveals them through chat."""
         base_goal = goal or "테스트 모드 TPMS gyroid(PLA) 압축 시편 설계"
         defaults = self._default_test_constraints(constraints)
         inline_printer_choice = self._parse_inline_test_mode_printer_choice(operator_message)
         if inline_printer_choice:
             defaults = self._apply_specimen_printer_choice_to_spec(defaults, inline_printer_choice)
-        prompt = await self._build_test_mode_orchestrator_prompt(
-            operator_message=operator_message,
-            goal=base_goal,
-            constraints=defaults,
-        )
-
-        try:
-            response, response_message = await self._complete_live_planning_prompt(prompt=prompt)
-            llm_payload = self._extract_test_mode_payload(response.text)
-            test_goal = str(llm_payload.get("goal") or base_goal)
-            llm_constraints = llm_payload.get("constraints") if isinstance(llm_payload.get("constraints"), dict) else {}
-            test_constraints = self._normalize_test_mode_constraints(defaults, llm_constraints)
-            if inline_printer_choice:
-                test_constraints = self._apply_specimen_printer_choice_to_spec(test_constraints, inline_printer_choice)
-            else:
-                test_constraints = self._strip_specimen_printer_choice_from_spec(test_constraints)
-            assistant_entry = {
-                "role": "orchestrator",
-                "content": (
-                    f"{response.text.strip()}\n\n"
-                    "적용할 테스트 실험값:\n"
-                    "```json\n"
-                    f"{json.dumps(test_constraints, ensure_ascii=False, indent=2)}\n"
-                    "```"
-                ),
-                "reasoning": self._extract_reasoning(response.raw),
-                "token_usage": self._extract_token_usage(response.raw),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "model": response.model,
-                "ok": True,
-            }
-            await self._append_planning_message(
-                assistant_entry,
-                level="INFO",
-                message=response_message,
-            )
-            if input_revision != self._test_input_revision or self._state.emergency_stop_requested:
-                return {"ok": False, "message": "Test input cancelled by a control/session change."}
-            started = self._test_scenario.start(goal=test_goal, constraints=test_constraints, trigger_message=operator_message.strip())
-            return {"ok": started, "message": "Automatic test scenario input scheduled." if started else "Test scenario input already active.",
-                    "session": self.planning_snapshot()}
-        except Exception as exc:
-            assistant_entry = {
-                "role": "orchestrator",
-                "content": (
-                    "테스트 모드 실험값 생성에 실패했습니다. NemoClaw/Ollama 연결과 모델 상태를 확인하세요.\n"
-                    f"error={exc.__class__.__name__}: {exc}"
-                ),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "model": None,
-                "ok": False,
-            }
-            await self._append_planning_message(
-                assistant_entry,
-                level="ERROR",
-                message="Live GUI test-mode orchestration failed.",
-            )
-            return {"ok": False, "message": "Live GUI test-mode orchestration failed.", "session": self.planning_snapshot()}
+        from app.planning_dialogue import dialogue_for
+        dialogue = dialogue_for(self)
+        # Execution transport policy is selected by the user's test command;
+        # research values are NOT injected into admission or the conversation.
+        policy_keys = {"test_mode_autofill", "printer_test_path", "test_mode_profile", "execution_policy", "print", "ejection", "test_mode", "mode",
+                       "test_printer_transport", "allow_test_printer_live", "allow_test_equipment_live",
+                       "equipment_agentic_confirm_execute", "prefer_http_artifact"}
+        dialogue.test_policy = {k: deepcopy(v) for k, v in defaults.items() if k in policy_keys}
+        started = self._test_scenario.start(goal=base_goal, constraints=defaults, trigger_message=operator_message.strip())
+        return {"ok": started, "message": "Automatic test scenario input scheduled." if started else "Test scenario input already active.",
+                "session": self.planning_snapshot()}
 
     def _planning_handoff_active(self) -> bool:
         task = self._planning_handoff_task
@@ -6778,8 +6767,12 @@ class MainController:
         for entry in history_entries:
             if not isinstance(entry, dict) or entry.get("role") != "operator":
                 continue
+            if entry.get("knowledge_request"):
+                continue
             entry_constraints = entry.get("constraints") if isinstance(entry.get("constraints"), dict) else {}
             merged_constraints.update(self._clean_design_constraints(entry_constraints))
+            if entry.get("conversation_input"):
+                continue
             content = str(entry.get("content", ""))
             extracted = self._extract_design_values_from_text(content)
             merged_constraints.update({key: value for key, value in extracted.items() if value not in (None, "", [])})
@@ -7197,14 +7190,13 @@ class MainController:
             return {}
         if not isinstance(value, dict):
             raise ValueError("unsupported execution policy: expected a mapping")
-        allowed_stages = {"printer", "vision", "manipulation", "lab_equipment", "cae", "analysis", "bo"}
+        allowed_stages = {"printer", "vision", "manipulation", "lab_equipment", "analysis", "bo"}
         allowed_modes = {"execute", "preflight_only"}
         normalized: dict[str, str] = {
             "printer": "preflight_only",
             "vision": "preflight_only",
             "manipulation": "preflight_only",
             "lab_equipment": "preflight_only",
-            "cae": "execute",
             "analysis": "execute",
             "bo": "execute",
         }
@@ -9637,28 +9629,13 @@ class MainController:
             )
         if stage == Stage.ANALYSIS:
             analysis = data.get("analysis") if isinstance(data.get("analysis"), dict) else {}
-            utm = analysis.get("utm_metrics") if isinstance(analysis.get("utm_metrics"), dict) else {}
-            cae = analysis.get("cae_metrics") if isinstance(analysis.get("cae_metrics"), dict) else {}
-            cae_result = analysis.get("cae_result") if isinstance(analysis.get("cae_result"), dict) else {}
-            platens = cae_result.get("analysis_platens") if isinstance(cae_result.get("analysis_platens"), dict) else {}
-            generated_caps = cae_result.get("generated_model_caps") if isinstance(cae_result.get("generated_model_caps"), dict) else {}
-            trust_score = analysis.get("trust_score") if isinstance(analysis.get("trust_score"), dict) else {}
-            multifidelity = analysis.get("multifidelity_comparison") if isinstance(analysis.get("multifidelity_comparison"), dict) else {}
-            mf_curve = multifidelity.get("curve") if isinstance(multifidelity.get("curve"), dict) else {}
+            metrics = analysis.get("utm_metrics") or {}
             return (
-                "Analysis Agent가 UTM/CAE closed-loop 분석을 완료했습니다.\n\n"
-                f"- objective_score: {self._runtime_value(analysis.get('objective_score'))}\n"
-                f"- uncertainty: {self._runtime_value(analysis.get('uncertainty'))}\n"
-                f"- trust_score/gate: {self._runtime_value(trust_score.get('score'))} / {self._runtime_value(trust_score.get('gate'))}\n"
-                f"- UTM-FEA agreement: {self._runtime_value(mf_curve.get('agreement_score'))}, peak_error_pct={self._runtime_value(mf_curve.get('peak_force_error_pct'))}\n"
-                f"- peak_force_N: {self._runtime_value(utm.get('peak_force_N'))}\n"
-                f"- compressive_strength_MPa: {self._runtime_value(utm.get('compressive_strength_MPa'))}\n"
-                f"- CAE max_von_mises_MPa: {self._runtime_value(cae.get('max_von_mises_MPa'))}\n"
-                f"- CAE effective_modulus_MPa: {self._runtime_value(cae.get('effective_modulus_MPa'))}\n"
-                f"- CAE structural_score: {self._runtime_value(cae.get('structural_score'))}\n"
-                f"- CAE platens: top={self._runtime_value(platens.get('top'))}, bottom={self._runtime_value(platens.get('bottom'))}, applies_to={self._runtime_value(platens.get('applies_to'))}\n"
-                f"- generated_model_caps: {json.dumps(generated_caps, ensure_ascii=False)}\n"
-                f"- closed_loop_sources: {self._runtime_value(analysis.get('closed_loop_sources'))}"
+                "Analysis Agent completed measurement processing and evidence review.\n\n"
+                f"- objective: {self._runtime_value(analysis.get('objective_score'))}\n"
+                f"- quality gate: {self._runtime_value(analysis.get('quality_gate'))}\n"
+                f"- peak force (N): {self._runtime_value(metrics.get('peak_force_N'))}\n"
+                f"- BO admissible: {self._runtime_value(analysis.get('ok_for_bo'))}"
             )
         if stage == Stage.KNOWLEDGE:
             knowledge = data.get("knowledge") if isinstance(data.get("knowledge"), dict) else {}
@@ -9668,7 +9645,7 @@ class MainController:
             packs = proposal.get("evidence_packs") if isinstance(proposal.get("evidence_packs"), list) else []
             top_pack = packs[0] if packs and isinstance(packs[0], dict) else {}
             return (
-                "Knowledge Agent가 연구 기억과 self-evolution 증거팩을 갱신했습니다.\n\n"
+                "Knowledge Agent가 연구 기억과 improvement evidence pack을 갱신했습니다.\n\n"
                 f"- retrieval_coverage: {self._runtime_value(knowledge.get('retrieval_coverage'))}\n"
                 f"- memory_summary: {self._runtime_value(knowledge.get('memory_summary'))}\n"
                 f"- agent_performance_records: {self._runtime_value(knowledge.get('agent_performance_count'))}\n"
@@ -9979,15 +9956,6 @@ class MainController:
                         "evidence_refs": utm_packet.get("evidence_refs", []) if isinstance(utm_packet.get("evidence_refs"), list) else [],
                     }
                 )
-            if stage == Stage.ANALYSIS:
-                fem_artifacts = self._write_planning_fem_artifacts(experiment_spec, data)
-                if fem_artifacts:
-                    message_payload["fem_artifacts"] = fem_artifacts
-                    message_payload["artifacts"] = {
-                        "preview_url": fem_artifacts.get("contour_url", ""),
-                        "experiment_spec_url": fem_artifacts.get("report_url", ""),
-                    }
-                    message_payload["experiment_spec"] = experiment_spec
             if stage == Stage.GUARDIAN:
                 guardian_payload = data.get("guardian", {}) if isinstance(data.get("guardian", {}), dict) else {}
             await self._append_planning_message(
@@ -10475,36 +10443,6 @@ class MainController:
             "stl_url": f"{base}/specimen.stl",
             "preview_url": f"{base}/specimen_preview.svg",
             "experiment_spec_url": f"{base}/experiment_spec.json",
-        }
-
-    def _write_planning_fem_artifacts(
-        self,
-        experiment_spec: dict[str, Any],
-        analysis_data: dict[str, Any],
-    ) -> dict[str, str]:
-        """Copy CAE/FEM contour artifacts into the planning artifact directory."""
-        analysis = analysis_data.get("analysis") if isinstance(analysis_data.get("analysis"), dict) else {}
-        cae_result = analysis.get("cae_result") if isinstance(analysis.get("cae_result"), dict) else {}
-        artifacts = cae_result.get("artifacts") if isinstance(cae_result.get("artifacts"), dict) else {}
-        contour_ref = str(artifacts.get("contour_svg_path") or "").strip()
-        source_contour = Path(contour_ref).expanduser()
-        if not contour_ref or not source_contour.is_file():
-            return {}
-        specimen_id = self._safe_artifact_segment(str(experiment_spec["specimen_id"]))
-        artifact_dir = self._deps.run_root / self._state.run_id / "planning" / specimen_id
-        artifact_dir.mkdir(parents=True, exist_ok=True)
-        contour_path = artifact_dir / "fem_contour.svg"
-        shutil.copy2(source_contour, contour_path)
-        source_report = Path(str(artifacts.get("report_path") or "")).expanduser()
-        report_path = artifact_dir / "cae_report.json"
-        if source_report.is_file():
-            shutil.copy2(source_report, report_path)
-        base = f"/api/planning/artifacts/{self._state.run_id}/{specimen_id}"
-        return {
-            "contour_svg_path": str(contour_path),
-            "contour_url": f"{base}/fem_contour.svg",
-            "report_path": str(report_path) if report_path.exists() else "",
-            "report_url": f"{base}/cae_report.json" if report_path.exists() else "",
         }
 
     @staticmethod

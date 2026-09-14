@@ -16,24 +16,86 @@ body.planning-live-body #live-experiment-setup-panel {
 
 #live-experiment-setup-panel :is(.setup-block-list, .setup-owner-list) {
   display: grid;
-  gap: 10px;
+  gap: 6px;
   min-width: 0;
 }
 
 #live-experiment-setup-panel .setup-block {
   min-width: 0;
-  padding: 12px;
+  padding: 0;
   border: 1px solid rgba(148, 163, 184, .28);
-  border-radius: 10px;
-  background: rgba(148, 163, 184, .06);
+  border-radius: 6px;
+  background: rgba(148, 163, 184, .12);
   overflow-wrap: anywhere;
 }
 
-#live-experiment-setup-panel .setup-block-title {
-  margin: 0 0 7px;
-  font-size: 13px;
-  line-height: 1.4;
+#live-experiment-setup-panel .setup-block[data-kind="package"] {
+  background: rgba(94, 153, 166, .18);
+  border-color: rgba(129, 192, 202, .38);
+  margin-bottom: 4px;
 }
+
+#live-experiment-setup-panel .setup-block-title {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#live-experiment-setup-panel [hidden] { display: none !important; }
+#live-experiment-setup-panel .setup-block-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 8px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  border: 0;
+  border-radius: 5px;
+  padding: 8px 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+#live-experiment-setup-panel .setup-block-toggle:hover { background: rgba(148, 163, 184, .1); }
+#live-experiment-setup-panel .setup-block-toggle::after {
+  content: '';
+  width: 5px; height: 5px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(-45deg);
+  opacity: .65;
+}
+#live-experiment-setup-panel .setup-block-toggle[aria-expanded=true]::after { transform: rotate(45deg); }
+#live-experiment-setup-panel .setup-block-preview {
+  display: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #dbe5ed;
+}
+#live-experiment-setup-panel .setup-block-badge { font-size: 10px; color: #a9bac9; white-space: nowrap; }
+#live-experiment-setup-panel [data-status=saved] .setup-block-badge { color: #67d6e5; }
+#live-experiment-setup-panel [data-status=needs-attention] .setup-block-badge { color: #ffbd86; }
+#live-experiment-setup-panel .setup-block-body { padding: 4px 10px 8px; border-top: 1px solid rgba(148,163,184,.15); }
+#live-experiment-setup-panel .setup-readable-values {
+  display: grid;
+  grid-template-columns: minmax(70px, .8fr) minmax(0, 1.3fr);
+  gap: 5px 10px;
+  margin: 7px 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+#live-experiment-setup-panel .setup-readable-values dt { color: #a9bac9; }
+#live-experiment-setup-panel .setup-readable-values dd { margin: 0; color: #ecf2f7; overflow-wrap: anywhere; }
+#live-experiment-setup-panel .setup-technical { margin-top: 8px; font-size: 11px; color: #a9bac9; }
 
 #live-experiment-setup-panel :is(.setup-intro, .setup-notice, .setup-block-meta, .setup-block-status, .setup-block-timing, .setup-readonly-reason, .setup-editing, .setup-owner) {
   margin: 0 0 7px;

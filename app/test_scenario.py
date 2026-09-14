@@ -77,16 +77,16 @@ class TestScenarioInput:
             return {"ok": False}
         self._submitting = asyncio.current_task()
         try:
-            return await c.planning_message(message=message, goal=self.goal,
-                constraints=deepcopy(self.constraints) if initial else {"live_runtime_followup_queue_only": True},
+            return await c.planning_message(message=message,
+                constraints={"live_runtime_followup_queue_only": True} if pending and (c._planning_pending_request() or {}).get("kind") != "conversation" else {},
                 session_id=self.session_id, expected_pending_id=pending)
         finally:
             self._submitting = None
 
     async def answer_pending(self, pending):
-        """Choose existing scenario facts; free-form assertions cannot be submitted."""
+        """Answer in natural language using only private scenario facts."""
         c = self.controller
-        if pending.get("kind") not in {"planning_boundary", "runtime_boundary"}:
+        if pending.get("kind") not in {"planning_boundary", "runtime_boundary", "conversation"}:
             return False
         before = c._planning_intake_scope()
         facts = {"goal": self.goal, **{k: v for k, v in self.constraints.items()
@@ -94,21 +94,41 @@ class TestScenarioInput:
                  and not any(word in k.lower() for word in ("confirm", "allow", "password", "token", "secret"))}}
         prompt = json.dumps({"operation": "test_scenario_reply", "pending_request": pending,
             "available_scenario_inputs": facts,
-            "instruction": "Select only existing scenario input keys that answer the current question. "
+            "conversation": c._planning_memory_context(limit=12, max_chars=900),
+            "trigger_message": getattr(self, "trigger_message", ""),
+            "instruction": "Act as the researcher in this test conversation, in the language of the trigger message. "
+                "Write a short natural reply to the orchestrator's last question, using only requested facts from available_scenario_inputs. "
+                "Do not dump the scenario, JSON, field names, internal mode keys, bullets, emoji or status tags. "
+                "For a conversation invitation agree to plan; for condition questions supply only the requested values. "
+                "For conversation run_review approve the agreed test experiment. Select fields used, or [] for simple agreement. "
+                "A runtime planning_boundary/runtime_boundary is NOT permission to start a new experiment: answer factual questions only. "
                 "Return wait for missing facts, device/transfer completion, safety or recovery approval, "
                 "credentials, configuration changes, or a failed model decision. Never infer physical evidence. "
-                "No free-form answer, tool call, new value or execution approval is permitted.",
-            "response_schema": {"action": "reply or wait", "fields": list(facts)}}, ensure_ascii=False)
+                "Do not invent new values or claim real actions have happened.",
+            "response_schema": {"action": "reply or wait", "fields": "list of scenario keys used", "message": "natural researcher reply"}}, ensure_ascii=False)
         response, _ = await c._complete_live_planning_prompt(prompt=prompt)
         choice = json.loads(response.text)
         fields = choice.get("fields")
-        if (choice.get("action") != "reply" or not isinstance(fields, list) or not fields
+        if (choice.get("action") != "reply" or not isinstance(fields, list)
                 or not all(isinstance(k, str) and k in facts for k in fields)):
+            return False
+        if pending["kind"] != "conversation" and not fields:
             return False
         if before != c._planning_intake_scope() or self._stopped():
             return False
-        reply = "[Automatic test input] 요청한 시나리오 입력값입니다. 현재 요청을 검토해주세요.\n" + json.dumps(
-            {k: facts[k] for k in fields}, ensure_ascii=False)
+        from app.planning_dialogue import plain_message
+        if pending["kind"] == "conversation":
+            reply = plain_message(choice.get("message"))
+        else:
+            # Runtime holds can unblock physical stages. Only the model-selected
+            # existing facts enter that route, never its free-form assertions.
+            def factual_text(value):
+                if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+                    return str(value)
+                if isinstance(value, list) and all(type(v) in (int, float) for v in value):
+                    return ", ".join(map(str, value))
+                raise ValueError("Unsupported runtime fact shape")
+            reply = " ".join(f"{key.replace('_', ' ').capitalize()} is {factual_text(facts[key])}." for key in fields)
         result = await self._submit(reply, pending=pending["pending_id"])
         return bool(result.get("ok"))
 
@@ -117,15 +137,19 @@ class TestScenarioInput:
         try:
             while c._planning_request_lock.locked():
                 await asyncio.sleep(0.05)
-            mode = self.constraints.get("printer_test_path", "selection pending")
-            result = await self._submit(
-                "[Automatic test input] 테스트 모드, " + mode + ". 아래 시나리오로 실험 수행.\n" +
-                json.dumps({"goal": self.goal, "constraints": self.constraints}, ensure_ascii=False), initial=True)
+            from app.planning_dialogue import plain_message
+            response, _ = await c._complete_live_planning_prompt(prompt=json.dumps({
+                "operation": "test_scenario_opening", "trigger_message": self.trigger_message,
+                "instruction": "Speak as a researcher, not the orchestrator. In the trigger message's language, "
+                    "ask which experiment packages are currently available. One short natural question only. "
+                    "Do not provide research conditions, JSON, mode identifiers, status tags, bullets or emoji. Return plain text only."}, ensure_ascii=False))
+            result = await self._submit(plain_message(response.text), initial=True)
             if not result.get("ok"):
                 self.status = "waiting"
                 return
             run_id = c._state.run_id
             answered = set()
+            conversation_turns = 0
             while not self._stopped() and c._planning_session_id == self.session_id:
                 if c._state.run_id != run_id:
                     # Only our own shared admission task may allocate the run
@@ -138,6 +162,12 @@ class TestScenarioInput:
                 if pending and pending["pending_id"] not in answered:
                     answered.add(pending["pending_id"])
                     self.status = "running" if await self.answer_pending(pending) else "waiting"
+                    if pending["kind"] == "conversation":
+                        conversation_turns += 1
+                        if self.status == "waiting" or conversation_turns >= 24:
+                            self.status = "waiting"
+                            return
+                        continue
                 if not c._planning_handoff_active() and not (c._run_task and not c._run_task.done()):
                     self.status = "waiting" if c._planning_pending_request() else "complete"
                     return

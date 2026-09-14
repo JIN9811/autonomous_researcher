@@ -140,7 +140,7 @@
             <a data-atr-policy-artifact="summary" aria-disabled="true">Summary</a>
           </footer>
         `, { span: 6, tone: "metrics", eyebrow: "actual versus requested action", data: { "live-preserve": "manipulation-policy" } })}
-        ${renderDashboardCard("Runtime State Strip", `
+        ${renderDashboardCard("Motion & Grasp", `
           <div class="ar-man-motion-state" data-atr-motion-state>
             <section class="ar-man-motion-unified">
               <header class="ar-man-motion-legend">
@@ -164,20 +164,20 @@
                 <p data-atr-grasp-reason>Waiting for a measured grasp attempt.</p>
               </header>
               <p data-atr-grasp-result-scope>No contact success recorded yet. Final transfer requires vision verification.</p>
-              <div class="ar-man-grasp-evidence" role="list" aria-label="First successful grasp evidence, or latest attempt before success">
+              <div class="ar-man-visible-section"><h5>Grasp diagnostics</h5><div class="ar-man-grasp-evidence ar-man-grasp-single-column" role="list" aria-label="First successful grasp evidence, or latest attempt before success">
                 <div role="listitem"><small>Measured</small><strong data-atr-grasp-measured>-</strong></div>
                 <div role="listitem"><small>Policy target</small><strong data-atr-grasp-target>-</strong></div>
                 <div role="listitem"><small>Contact gap</small><strong data-atr-grasp-gap>- / 2.00</strong></div>
                 <div role="listitem"><small>Transport overlap</small><strong data-atr-grasp-overlap>no</strong></div>
                 <div role="listitem"><small>Latest closing diagnostic</small><strong data-atr-grasp-latest-attempt>—</strong></div>
-              </div>
+              </div></div>
             </section>
             <section class="ar-man-home-gate" data-atr-home-gate>
               <header>
                 <div><small>Home Gate</small><strong>0.5 s stable dwell</strong></div>
                 <span data-atr-home-status data-tone="waiting">waiting</span>
               </header>
-              <div class="ar-man-home-grid" role="list" aria-label="Home joint thresholds">
+              <div class="ar-man-visible-section"><h5>Home thresholds</h5><div class="ar-man-home-grid" role="list" aria-label="Home joint thresholds">
                 ${homeRanges.map(([joint, minimum, maximum]) => `
                   <div role="listitem" data-home-joint="${joint}" data-pass="waiting">
                     <strong>${joint}</strong>
@@ -185,7 +185,7 @@
                     <small>${minimum} to ${maximum}</small>
                   </div>
                 `).join("")}
-              </div>
+              </div></div>
             </section>
           </div>
         `, { span: 12, tone: "manipulation", eyebrow: "home / moving + grasping / ungrasping", data: { "live-preserve": "manipulation-motion" } })}
@@ -252,31 +252,23 @@
         .map((field) => `<div><small>${escapeHtml(field.replaceAll("_", " "))}</small><strong data-atr-${kind}-${field.replaceAll("_", "-")}>0</strong></div>`)
         .join("");
 
-      return `
-        ${renderDashboardCard("Runtime Execution", `
-          <div class="ar-man-runtime-fields" data-atr-runtime-execution>
-            ${executionFields.map(([label, field]) => renderManipulationRuntimeRow(label, field, "execution")).join("")}
+      const execution = `          <div class="ar-man-runtime-fields" data-atr-runtime-execution>
+            ${executionFields.filter(([,field])=>['task_instruction','source_location','target_location','policy_type','runtime_status','elapsed_s'].includes(field)).map(([label, field]) => renderManipulationRuntimeRow(label, field, "execution")).join("")}
           </div>
-        `, { span: 6, tone: "manipulation", eyebrow: "configured task + measured process", data: { "live-preserve": "manipulation-execution" } })}
-        ${renderDashboardCard("Runtime Interlocks", `
-          <div class="ar-man-runtime-gates" data-atr-runtime-interlocks role="list">
-            ${interlocks.map(([id, label]) => `<div role="listitem" data-atr-runtime-gate="${id}" data-status="unknown"><i></i><span>${label}</span><strong>unknown</strong><small></small></div>`).join("")}
-          </div>
-        `, { span: 6, tone: "manipulation", eyebrow: "measured + event gates", data: { "live-preserve": "manipulation-interlocks" } })}
-        ${renderDashboardCard("Completion Verification", `
-          <div class="ar-man-runtime-completion" data-atr-runtime-completion>
+          <details class="ar-man-details"><summary>Execution details</summary><div class="ar-man-runtime-fields">${executionFields.filter(([,field])=>!['task_instruction','source_location','target_location','policy_type','runtime_status','elapsed_s'].includes(field)).map(([label,field])=>renderManipulationRuntimeRow(label,field,'execution')).join('')}</div></details>`;
+      const interlocksBody = `          <div class="ar-man-runtime-gates" data-atr-runtime-interlocks role="list">
+            ${interlocks.map(([id, label]) => `<div role="listitem" data-atr-runtime-gate="${id}" data-status="unknown"><i></i><span>${label}</span><strong>unknown</strong><details class="ar-man-details"><summary>Evidence</summary><small></small></details></div>`).join("")}
+          </div>`;
+      const completion = `          <div class="ar-man-runtime-completion" data-atr-runtime-completion>
             ${completionSteps.map(([id, label], index) => `<div data-atr-runtime-step="${id}" data-status="waiting"><b>${String(index + 1).padStart(2, "0")}</b><span>${label}</span><strong>waiting</strong><small></small></div>`).join("")}
             <div data-utm-clear-verification-step data-status="waiting"><b>08</b><span>UTM Clear &amp; Verification 2</span><strong>waiting</strong><small></small></div>
-          </div>
-        `, { span: 6, tone: "artifact", eyebrow: "release -> vision -> stop -> handoff", data: { "live-preserve": "manipulation-completion" } })}
-        ${renderDashboardCard("Run Result", `
-          <div class="ar-man-runtime-result" data-atr-runtime-result data-status="not_started">
+          </div>`;
+      const result = `          <div class="ar-man-runtime-result" data-atr-runtime-result data-status="not_started">
             <div class="ar-man-runtime-result-banner"><strong data-atr-runtime-result-status>NOT STARTED</strong><span data-atr-runtime-result-terminal>live state</span></div>
-            <div class="ar-man-runtime-fields">${resultFields.map(([label, field]) => renderManipulationRuntimeRow(label, field, "result")).join("")}</div>
-          </div>
-        `, { span: 6, tone: "manipulation", eyebrow: "terminal physical outcome", data: { "live-preserve": "manipulation-result" } })}
-        ${renderDashboardCard("Run Metrics", `
-          <div class="ar-man-runtime-metrics" data-atr-runtime-metrics>
+            <div class="ar-man-runtime-fields">${resultFields.filter(([,field])=>['reason','next_agent'].includes(field)).map(([label, field]) => renderManipulationRuntimeRow(label, field, "result")).join("")}</div>
+            <div class="ar-man-visible-section"><h5>Result evidence</h5><div class="ar-man-runtime-fields">${resultFields.filter(([,field])=>!['reason','next_agent'].includes(field)).map(([label, field]) => renderManipulationRuntimeRow(label, field, "result")).join("")}</div></div>
+          </div>`;
+      const metrics = `          <div class="ar-man-runtime-metrics ar-man-metrics-compact" data-atr-runtime-metrics>
             <section>
               <div class="ar-man-runtime-donut" data-atr-runtime-donut="task" style="--rate:0%;"><div><strong data-atr-task-success-rate>—</strong><span>Task Success Rate</span></div></div>
               <div class="ar-man-runtime-counts">${metricCounts("task")}</div>
@@ -292,9 +284,13 @@
               ${renderManipulationRuntimeRow("Vision latency", "post_place_verification_latency_s", "metrics")}
               ${renderManipulationRuntimeRow("Stop latency", "stop_latency_s", "metrics")}
             </div>
-          </div>
-        `, { span: 12, tone: "metrics", eyebrow: "derived from task cycle + action artifacts", data: { "live-preserve": "manipulation-metrics" } })}
-      `;
+          </div>`;
+      return renderDashboardCard("Completion & Handoff", `
+        <div class="ar-man-completion-summary">${completion}${result}</div>
+      `, {span:12, tone:"manipulation", eyebrow:"verification + outcome", data:{"live-preserve":"manipulation-completion-summary"}})
+      + renderDashboardCard("Run Metrics", metrics, {span:4, tone:"metrics", eyebrow:"run statistics", className:"ar-man-small-metrics", data:{"live-preserve":"manipulation-metrics"}})
+      + renderDashboardCard("Runtime Execution", execution, {span:4, tone:"manipulation", eyebrow:"task + process", data:{"live-preserve":"manipulation-execution"}})
+      + renderDashboardCard("Interlocks", interlocksBody, {span:4, tone:"manipulation", eyebrow:"readiness", data:{"live-preserve":"manipulation-interlocks"}});
     }
 
     function renderDashboard(report, status, agentLabel, profile) {

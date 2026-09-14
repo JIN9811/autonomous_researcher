@@ -10,7 +10,6 @@ from typing import Any
 import pytest
 
 from agents.analysis.agent import AnalysisAgent
-from mcp_tools.cae_tools import register_cae_tools
 from mcp_tools.tool_registry import ToolRegistry
 from objectives.metric_registry import MetricRegistry
 from objectives.schemas import ObjectiveSpec
@@ -75,51 +74,8 @@ def _state(*, mode: Mode = Mode.TEST, equipment_result: dict[str, Any] | None = 
     )
 
 
-def test_default_cae_request_reproduces_retained_material_without_fixing_specimen_height():
-    from device_bridges.cae_bridge import CAEBridge, CAEBridgeConfig
-    from tests.unit.test_calculix_quasistatic import CUBE_MESH
-    from utils.calculix_quasistatic import build_compression_deck
-
-    state = _state()
-    state.current_experiment_spec.update(specimen_size_mm=[10, 10, 10], cae_target_strain=.4)
-    agent = AnalysisAgent()
-    payload = agent._cae_payload(state, agent._specimen_geometry(state))
-    normalized = CAEBridge(CAEBridgeConfig())._normalized_payload(payload)
-    deck, manifest = build_compression_deck(
-        CUBE_MESH, material=normalized['material'],
-        target_displacement_mm=normalized['specimen_size_mm'][2] * normalized['target_strain'],
-        increments=normalized['increments'], boundary_tolerance_mm=.05)
-
-    assert '*PLASTIC\n55,0\n55,0.02\n30,0.15\n25,0.4\n30,1\n' in deck
-    assert '*STEP,NLGEOM,INC=500\n*STATIC\n0.01,1,1e-07,0.02' in deck
-    assert 'TOP,3,3,-4\n' in deck
-    assert manifest['frictionless_faces'] is True
-    assert payload['mesh_size_mm'] == .8
-    assert payload['runtime_solver_enabled'] is False
 
 
-@pytest.mark.parametrize('overrides, expected_curve, expected_yield', [
-    ({'cae_yield_strength_mpa': 42}, None, 42),
-    ({'yield_strength_mpa': 41}, None, 41),
-    ({'cae_plastic_curve': [[20, 0], [23, .1]]}, [[20, 0], [23, .1]], 35),
-    ({'plastic_curve': [[25, 0], [28, .2]]}, [[25, 0], [28, .2]], 35),
-])
-def test_explicit_cae_settings_override_retained_defaults(overrides, expected_curve, expected_yield):
-    state = _state()
-    state.current_experiment_spec.update(
-        cae_elastic_modulus_mpa=1200, cae_poisson_ratio=.3,
-        cae_mesh_size_mm=1.2, cae_target_strain=.3, **overrides)
-    agent = AnalysisAgent()
-    payload = agent._cae_payload(state, agent._specimen_geometry(state))
-    assert payload['material']['elastic_modulus_mpa'] == 1200
-    assert payload['material']['poisson_ratio'] == .3
-    if expected_curve is None:
-        assert 'plastic_curve' not in payload['material']
-    else:
-        assert payload['material']['plastic_curve'] == expected_curve
-    assert payload['material']['yield_strength_mpa'] == expected_yield
-    assert payload['mesh_size_mm'] == 1.2
-    assert payload['loading']['target_strain'] == .3
 
 
 def _active_objective_service(tmp_path: Path) -> ObjectiveService:
@@ -268,11 +224,6 @@ async def test_analysis_agent_integrates_trapezium_curve_to_planned_50pct_height
     )
     state.current_experiment_spec["specimen_size_mm"] = [20.0, 20.0, 30.0]
     tools = ToolRegistry()
-    register_cae_tools(
-        tools,
-        {"devices": {"cae": {"enabled": True, "mode": "test", "artifact_dir": str(tmp_path / "cae")}}},
-        repo_root=tmp_path,
-    )
 
     result = await AnalysisAgent().run(state, _CtxStub(tools=tools))
 
@@ -512,91 +463,13 @@ async def test_analysis_agent_uses_synthetic_curve_in_test_without_utm_data() ->
     assert "synthetic_utm_curve" in result.data["bo_observation"]["failure_tags"]
 
 
-@pytest.mark.asyncio
-async def test_analysis_agent_uses_cae_for_test_closed_loop(tmp_path: Path) -> None:
-    tools = ToolRegistry()
-    register_cae_tools(
-        tools,
-        {"devices": {"cae": {"enabled": True, "mode": "test", "artifact_dir": "artifacts/cae"}}},
-        repo_root=tmp_path,
-    )
-    equipment = {"ok": True, "tool": "equipment.pyautogui.run", "program_id": "program1"}
-
-    result = await AnalysisAgent().run(_state(equipment_result=equipment), _CtxStub(tools=tools))
-
-    analysis = result.data["analysis"]
-    assert result.success is True
-    assert analysis["source"]["source"] == "synthetic_test_utm_curve"
-    assert analysis["cae_result"]["ok"] is True
-    assert analysis["cae_result"]["boundary_condition"] == "bottom_fixed_support"
-    assert analysis["cae_result"]["analysis_platens"]["bottom"] is False
-    assert analysis["cae_result"]["analysis_platens"]["top"] is False
-    assert analysis["cae_result"]["request"]["target_strain"] == 0.5
-    assert analysis["cae_result"]["request"]["boundary"] == {
-        "bottom": "frictionless_axial_support",
-        "top": "frictionless_displacement",
-    }
-    assert analysis["cae_metrics"]["max_von_mises_MPa"] > 0
-    assert analysis["cae_metrics"]["effective_modulus_MPa"] > 0
-    assert "cae.run_static_analysis" in analysis["closed_loop_sources"]
 
 
-@pytest.mark.asyncio
-async def test_analysis_preflight_uses_only_calibrated_cae_as_mid_fidelity_observation(tmp_path: Path) -> None:
-    tools = ToolRegistry()
-    register_cae_tools(
-        tools,
-        {"devices": {"cae": {"enabled": True, "mode": "test", "artifact_dir": "artifacts/cae"}}},
-        repo_root=tmp_path,
-    )
-    state = _state(
-        equipment_result={
-            "ok": True,
-        }
-    )
-    state.run_metadata["equipment_preflight"] = {
-        "schema": "equipment_preflight.v1",
-        "status": "execution_ready_pending_approval",
-        "actuation_performed": False,
-        "resolved_program_id": "run_utm_compression_cycle",
-    }
-    state.current_experiment_spec["execution_policy"] = {
-        "lab_equipment": "preflight_only",
-        "cae": "execute",
-        "analysis": "execute",
-        "bo": "execute",
-    }
-    state.current_experiment_spec["cae_reference_calibration"] = {
-        "schema": "utm_reference_calibration.v1",
-        "status": "ready",
-        "metric_name": "energy_density_50pct_MJ_per_m3",
-        "unit": "MJ/m3",
-        "reference_value": 2.5,
-        "accepted_count": 2,
-        "reference_hashes": ["a" * 64, "b" * 64],
-        "calibration_method": "median_integrated_force_displacement_energy_density",
-        "limitations": ["historical_unmatched_specimen_reference"],
-    }
-
-    result = await AnalysisAgent().run(state, _CtxStub(tools=tools))
-
-    assert result.success is True
-    assert result.data["analysis"]["source"]["source"] == "cae_reference_calibrated_preflight"
-    assert result.data["analysis"]["source"]["observation_kind"] == "predicted"
-    assert result.data["analysis"]["cae_result"]["reference_calibration"]["applied"] is True
-    assert result.data["bo_observation"]["status"] == "ready"
-    assert result.data["bo_observation"]["fidelity"] == "cae_mid"
-    assert result.data["bo_observation"]["metric_name"] == "energy_density_50pct_MJ_per_m3"
 
 
 @pytest.mark.asyncio
 async def test_analysis_never_uses_cae_after_physical_utm_path_fails(tmp_path: Path) -> None:
     tools = ToolRegistry()
-    register_cae_tools(
-        tools,
-        {"devices": {"cae": {"enabled": True, "mode": "test", "artifact_dir": "artifacts/cae"}}},
-        repo_root=tmp_path,
-    )
     state = _state(mode=Mode.LIVE, equipment_result={"ok": False, "failure_code": "UTM_EXECUTION_FAILED"})
     state.current_experiment_spec["execution_policy"] = {"lab_equipment": "execute", "cae": "execute"}
     state.current_experiment_spec["cae_reference_calibration"] = {
@@ -1037,187 +910,3 @@ async def test_analysis_agent_accepts_negative_force_sign_convention(tmp_path: P
     assert analysis["utm_metrics"]["peak_force_N"] == 310.0
     assert analysis["data_quality_gate"]["force_nonzero"] is True
     assert analysis["data_quality_gate"]["force_changes"] is True
-
-@pytest.mark.asyncio
-async def test_analysis_agent_emits_improvement06_artifacts_bo_handoff_and_calculix_cae(tmp_path: Path) -> None:
-    csv_path = tmp_path / "utm_units.csv"
-    csv_path.write_text(
-        "Time (s),Extension (mm),Load (kN)\n"
-        "0,0,0\n"
-        "1,1,0.10\n"
-        "2,2,0.24\n"
-        "3,3,0.21\n",
-        encoding="utf-8",
-    )
-    tools = ToolRegistry()
-    register_cae_tools(
-        tools,
-        {
-            "devices": {
-                "cae": {
-                    "enabled": True,
-                    "mode": "test",
-                    "artifact_dir": str(tmp_path / "cae"),
-                }
-            }
-        },
-        repo_root=tmp_path,
-    )
-    state = _state(equipment_result={"ok": True, "tool": "equipment.pyautogui.run", "result_file": str(csv_path)})
-    state.run_id = "run-analysis-improvement06"
-    state.experiment_id = "exp-analysis-improvement06"
-    state.current_experiment_spec.update({"geometry_type": "gyroid", "cell_size_mm": 5.0, "tpms_thickness": 0.35})
-    state.current_experiment_spec["gauge_length_mm"] = 6.0
-
-    result = await AnalysisAgent().run(state, _CtxStub(tools=tools))
-
-    analysis = result.data["analysis"]
-    assert result.success is True
-    assert analysis["utm_metrics"]["peak_force_N"] == 240.0
-    assert analysis["source"]["parser_id"] == "analysis.parsers.csv_header"
-    assert analysis["source"]["column_mapping"]["mappings"]["Load (kN)"]["multiplier"] == 1000.0
-    assert analysis["quality_gate"]["ok_for_metrics"] is True
-    assert "cae.background" in analysis["closed_loop_sources"]
-    removed_solver_token = "fe" + "nics"
-    assert not any(removed_solver_token in str(item).lower() for item in analysis["closed_loop_sources"])
-    assert analysis["cae_result"] == {}
-    assert analysis["fem_agentic_loop"]["schema"] == "analysis_cae_simulation_loop.v1"
-    assert analysis["fem_agentic_loop"]["status"] == "unavailable"  # Stub has no application worker.
-    assert analysis["fem_agentic_loop"]["execution"] == "background"
-    assert analysis["fem_utm_comparison"]["schema"] == "fem_utm_comparison.v1"
-    assert analysis["trust_score"]["schema"] == "analysis_admissibility.v1"
-    assert analysis["trust_score"]["gate"] in {"allow_bo", "allow_physical"}
-    assert analysis["multifidelity_comparison"]["schema"] == "multifidelity_comparison.v1"
-    assert analysis["multifidelity_comparison"]["curve"]["peak_force_error_pct"] is None
-    assert analysis["fidelity_records"]["utm_high"]["schema"] == "utm_record.v1"
-    assert analysis["fidelity_records"]["fea_mid"]["schema"] == "fea_result.v1"
-    assert analysis["fidelity_records"]["pinn_low_or_surrogate"]["status"] == "unavailable"
-    assert result.data["bo_handoff"]["schema_version"] == "analysis_bo_handoff_v2"
-    measured_energy_density_50pct = analysis["utm_metrics"]["energy_density_50pct_MJ_per_m3"]
-    assert result.data["bo_handoff"]["objective"]["metric_name"] == "energy_density_50pct_MJ_per_m3"
-    assert result.data["bo_handoff"]["objective"]["unit"] == "MJ/m3"
-    assert result.data["bo_handoff"]["objective"]["score"] == measured_energy_density_50pct
-    assert result.data["bo_handoff"]["metrics"] == {"energy_density_50pct_MJ_per_m3": measured_energy_density_50pct}
-    assert result.data["experiment_evaluation"]["objective"]["metric_name"] == "energy_density_50pct_MJ_per_m3"
-    assert result.data["experiment_evaluation"]["objective_score"] == measured_energy_density_50pct
-    assert result.data["bo_handoff"]["trust_score"]["schema"] == "analysis_admissibility.v1"
-    assert result.data["bo_handoff"]["multifidelity_comparison"]["schema"] == "multifidelity_comparison.v1"
-    assert result.data["bo_handoff"]["fidelity"]["utm_high"]["objective_source"] is True
-    artifacts = analysis["analysis_artifacts"]
-    for key in (
-        "raw_input_sidecar",
-        "parse_report",
-        "canonical_curve",
-        "preprocessing_report",
-        "quality_report",
-        "metrics",
-        "fem_agentic_loop",
-        "fem_utm_comparison",
-        "multifidelity_comparison",
-        "trust_score",
-        "comparison",
-        "analysis_report",
-        "experiment_evaluation",
-        "bo_handoff",
-        "analysis_trace",
-    ):
-        assert Path(artifacts[key]).exists(), key
-    assert result.data["experiment_evaluation"]["fidelity_records"]["utm_high"] == "metrics"
-    assert "fem_result" not in artifacts  # Native result belongs to the background job.
-    assert result.data["experiment_evaluation"]["trust_score"]["schema"] == "analysis_admissibility.v1"
-
-
-@pytest.mark.asyncio
-async def test_analysis_agent_does_not_call_removed_python_fem_tools(tmp_path: Path) -> None:
-    csv_path = tmp_path / "utm_llm_plan.csv"
-    csv_path.write_text(
-        "time_s,displacement_mm,force_N\n"
-        "0,0,0\n"
-        "1,1,120\n"
-        "2,2,260\n"
-        "3,3,240\n",
-        encoding="utf-8",
-    )
-    tools = ToolRegistry()
-    register_cae_tools(
-        tools,
-        {
-            "devices": {
-                "cae": {
-                    "enabled": True,
-                    "mode": "test",
-                    "artifact_dir": str(tmp_path / "cae"),
-                }
-            }
-        },
-        repo_root=tmp_path,
-    )
-    ctx = _CtxStub(force_real_llm_in_test=False, tools=tools)
-    state = _state(equipment_result={"ok": True, "tool": "equipment.pyautogui.run", "result_file": str(csv_path)})
-
-    result = await AnalysisAgent().run(state, ctx)
-
-    analysis = result.data["analysis"]
-    loop = analysis["fem_agentic_loop"]
-    assert result.success is True
-    assert ctx.prompts == []
-    removed_solver_token = "fe" + "nics"
-    assert removed_solver_token not in json.dumps(analysis, ensure_ascii=True).lower()
-    assert loop["schema"] == "analysis_cae_simulation_loop.v1"
-    assert loop["execution"] == "background"
-    assert analysis["cae_result"] == {}
-    assert Path(analysis["analysis_artifacts"]["fem_agentic_loop"]).exists()
-
-
-def test_cae_quasistatic_energy_is_included_in_utm_agreement() -> None:
-    comparison = AnalysisAgent()._fem_utm_comparison(
-        {
-            "peak_force_N": 1_000.0,
-            "initial_stiffness_N_per_mm": 100.0,
-            "energy_absorption_50pct_mJ": 10_000.0,
-            "energy_absorption_limit_reached": True,
-        },
-        None,
-        {
-            "ok": True,
-            "tool": "cae.run_static_analysis",
-            "cae_metrics": {
-                "peak_reaction_force_N": 800.0,
-                "initial_stiffness_N_per_mm": 120.0,
-                "energy_absorption_50pct_mJ": 12_000.0,
-                "endpoint_reached": True,
-            },
-        },
-    )
-
-    assert comparison["peak_force_error_pct"] == 20.0
-    assert comparison["stiffness_error_pct"] == 20.0
-    assert comparison["energy_absorption_50pct_error_pct"] == 20.0
-    assert comparison["utm_energy_absorption_50pct_mJ"] == 10_000.0
-    assert comparison["fea_energy_absorption_50pct_mJ"] == 12_000.0
-    assert comparison["agreement_score"] == pytest.approx(0.833333, abs=1e-6)
-
-
-def test_cae_peak_is_not_compared_when_utm_curve_does_not_reach_50pct_height() -> None:
-    comparison = AnalysisAgent()._fem_utm_comparison(
-        {
-            "peak_force_N": 700.0,
-            "peak_force_limit_reached": False,
-            "initial_stiffness_N_per_mm": 100.0,
-            "energy_absorption_50pct_mJ": None,
-            "energy_absorption_limit_reached": False,
-        },
-        None,
-        {
-            "ok": True,
-            "tool": "cae.run_static_analysis",
-            "cae_metrics": {
-                "peak_reaction_force_N": 800.0,
-                "initial_stiffness_N_per_mm": 120.0,
-                "energy_absorption_50pct_mJ": 12_000.0,
-                "endpoint_reached": True,
-            },
-        },
-    )
-
-    assert comparison["peak_force_error_pct"] is None

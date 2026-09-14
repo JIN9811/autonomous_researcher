@@ -14,7 +14,7 @@
 대상 독자:
 
 - 초보자: GUI를 열고 테스트 모드로 첫 실행을 확인해야 하는 사용자
-- 운영자: 프린터, 로봇, Windows bridge, CAE/BO 워크스페이스를 설정해야 하는 사용자
+- 운영자: 프린터, 로봇, Windows bridge, BO 워크스페이스를 설정해야 하는 사용자
 - 개발자: LangGraph, agent module, API, 테스트를 수정하거나 확장해야 하는 사용자
 
 ## 0. 한눈에 보는 시스템
@@ -38,7 +38,7 @@ Analysis로 넘어갑니다. 장비 응답 성공만으로 이 조건을 대신�
 [Orchestration Route](../../README.ko.md#orchestration-route)에서 전체 그래프를,
 [Manipulation](../agents/manipulation_agent.md)과 [Vision](../agents/vision_agent.md)에서
 배치·정리 검증 경계를 확인할 수 있습니다. Analysis는 실측 목적값을 BO에
-전달하며, 설정된 백그라운드 FEM 작업은 이 동기식 데이터 처리와 분리됩니다.
+전달하며, 수치 계산과 근거 검토는 Analysis가 담당합니다.
 
 핵심 원칙:
 
@@ -68,7 +68,6 @@ Analysis로 넘어갑니다. 장비 응답 성공만으로 이 조건을 대신�
 - 3DP: Bambu Lab X2D가 기본 printer profile이며, Prusa MK4S는 명시 선택 profile로 유지된다. Bambu live camera proxy에는 `ffmpeg`가 필요하다.
 - Robot: `~/lerobot`, conda env `lerobot`, ROBOTIS/LeRobot 장비
 - Windows bridge: Windows PC, Python, PyAutoGUI bridge server
-- CAE live solver: CalculiX/Gmsh 또는 현재 bridge가 지원하는 solver 환경
 
 자세한 설치 조건은 [../../REQUIREMENTS.md](../../REQUIREMENTS.md)를 먼저 봅니다.
 
@@ -142,9 +141,7 @@ atr down
 | 3DP `/printer` | Bambu Lab X2D 기본 device bridge, printer fleet, camera/status, slicing/start gate, autoejection 설정 | connection/profile/test options 저장 |
 | LeRobot `/lerobot` | 포트, 카메라, teleop, record, train, rollout | follower/leader/camera 포트 저장 |
 | BO `/bo` | acquisition/strategy/parameter space 설정 | settings 저장 후 benchmark 실행 |
-| CAE `/cae` | STL 해석 조건 설정 | bottom fixed/top cyclic 기본값 확인 |
 | Windows `/equipment/windows` | Windows PyAutoGUI bridge 연결 | scan, candidate save, test program 실행 |
-| Self-Evolution `/evolution-lab` | prompt/module/graph variant 관리 | target 선택 후 variant validate |
 
 ### 1.6 Live GUI에서 보는 핵심 영역
 
@@ -153,7 +150,7 @@ atr down
 - Report: 선택 agent의 요약 보고서
 - Backend: raw trace, LLM/tool input/output, failure code
 - Graph: 현재 graph/node 흐름
-- Artifacts: STL, G-code, CAE contour, BO plot, log 등 산출물
+- Artifacts: STL, G-code, BO plot, log 등 산출물
 - Timeline: runtime event 순서
 - Device strip: GPU/LLM/Printer/Robot/Camera/Windows bridge 등 상태
 
@@ -167,7 +164,7 @@ Live GUI agent 목록은 `web/static/planning.js` 하드코딩 값보다 `/api/r
 |---|---|
 | `runs/<run-id>/` | run별 이벤트, 로그, workspace evidence |
 | `runs/<run-id>/live_planning_transcript.jsonl` | Live GUI 채팅/시스템 메시지 compact transcript. `/api/planning/messages`가 이 파일을 page 단위로 읽음 |
-| `artifacts/` | STL, G-code, CAE, UI audit 결과 |
+| `artifacts/` | STL, G-code, UI audit 결과 |
 | `memory/` | 로컬 설정, 장비 연결, graph/module version memory |
 | `outputs/train/` | LeRobot training output/checkpoint |
 | `user_files/` | 사용자가 넣는 입력 파일 |
@@ -192,7 +189,7 @@ Live GUI agent 목록은 `web/static/planning.js` 하드코딩 값보다 `/api/r
 4. profile에서 material, nozzle, layer height, bed temperature, first layer speed를 확인한다.
 5. test specimen size와 test unit cell size를 저장한다.
 6. 실제 출력 전에는 upload/start gate, camera/video evidence, bed-clear evidence, autoejection 옵션을 확인한다.
-7. 현재 3DP GUI는 별도 operator/Guardian/dry-run 체크박스를 노출하지 않는다. `Start Gate Check`, `SPC Readiness`, `Publish Start`는 owner-managed publish 기본값(`operator_confirmed=true`, `guardian_approved=true`, `dry_run=false`, ejection path 관리값 true)을 보내고, 백엔드가 artifact, printer safe-state, camera, bed-clear, post-publish observation으로 최종 차단한다.
+7. 현재 3D GUI는 별도 operator/Guardian/dry-run 체크박스를 노출하지 않는다. `Start Gate Check`, `SPC Readiness`, `Publish Start`는 owner-managed publish 기본값(`operator_confirmed=true`, `guardian_approved=true`, `dry_run=false`, ejection path 관리값 true)을 보내고, 백엔드가 artifact, printer safe-state, camera, bed-clear, post-publish observation으로 최종 차단한다.
 8. `SPC Readiness`의 level cards는 connection, transfer path, owner-managed publish default, publish command, autoejection을 분리해서 보여준다. `technical_ready_for_start=true`여도 camera/bed-clear/safe-state/start gate blocker가 있으면 실제 publish는 되지 않는다.
 9. Bambu X2D에서 `Upload Path Probe`는 FTPS가 실제로 write/delete 가능한지 확인한다. login/list만 성공해도 upload-ready가 아니다.
 10. FTPS가 `read_only` 또는 `BAMBU_FTPS_WRITE_FAILED`이면 sliced `.gcode.3mf` 파일을 `Prepare HTTP Artifact`로 노출한다. 이때 backend가 artifact URL을 실제 GET하고 sha256을 비교해 `server_fetch_probe.ok=true`를 반환해야 Upload gate가 ready로 바뀐다. 이 검증은 프린터가 접근 가능한 LAN URL 기준이다. 서버는 기본적으로 `0.0.0.0:7860`에 바인딩되어야 하며, artifact URL은 `http://<ATR서버-LAN-IP>:7860/printer-artifacts/...` 형태여야 한다. `127.0.0.1` 바인딩 또는 localhost URL은 브라우저에서는 동작해도 Bambu 프린터 transfer evidence로 인정하지 않는다.
@@ -332,7 +329,7 @@ GUI에서:
 Windows 후보로 자동 전환하거나 자동 fallback하지 않는다. 최초 설치는
 `bash install/bootstrap_linux.sh --with-local-pyautogui`로 수행한다.
 
-### 2.4 BO / CAE
+### 2.4 BO
 
 BO:
 
@@ -340,13 +337,6 @@ BO:
 - 설정 memory: `memory/bo_workspace_settings.json`
 - 주요 옵션: strategy, acquisition, budget, seed, parameter space
 - 직접 장비를 시작하지 않고 후보 추천/benchmark/evidence 생성에 집중한다.
-
-CAE:
-
-- GUI: `/cae`
-- 설정 memory: `memory/cae_workspace_settings.json`
-- 기본 조건: bottom fixed support, top cyclic compression loading
-- live solver가 없으면 `CAE_SOLVER_REQUIRED`로 차단될 수 있다.
 
 ## 3. 상급자용: 런타임 구조
 
@@ -452,7 +442,7 @@ Module API:
 | vision | output capture, pose estimate, transfer readiness, manipulation handoff |
 | manipulation | policy profile, robot bridge, transfer rollout, equipment handoff |
 | equipment | Windows bridge, program selection, UTM macro, analysis handoff |
-| analysis | UTM curve parse, metrics, CAE, objective score |
+| analysis | UTM curve parse, metrics, objective score |
 | knowledge | prior runs retrieval, failure summary, memory write, BO handoff |
 | bo | history load, surrogate fit, acquisition evaluation, next constraints |
 | guardian | safety gates, failure review, continue/stop/error decision |
@@ -790,5 +780,4 @@ git push
 | 로봇 | [../hardware/lerobot_robotis_manipulation_runtime_guideline.md](../hardware/lerobot_robotis_manipulation_runtime_guideline.md) |
 | Windows bridge | [../hardware/windows_pyautogui_equipment_agent_guideline.md](../hardware/windows_pyautogui_equipment_agent_guideline.md) |
 | BO | [../agents/bo_agent_runtime_guideline.txt](../agents/bo_agent_runtime_guideline.txt) |
-| CAE | [../agents/cae_analysis_runtime_guideline.txt](../agents/cae_analysis_runtime_guideline.txt) |
 | 버전관리 | [../repository/github_version_control.md](../repository/github_version_control.md) |
