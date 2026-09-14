@@ -19341,6 +19341,16 @@ if (planningMessageInput) {
   });
 }
 
+function initializeLiveAgentLanding() {
+  // Restore run data and layout, but never reopen the last inspected agent.
+  // This runs only on page startup; later operator selections remain untouched.
+  liveSelectedAgent = "orchestrator";
+  liveReportPage = "agent";
+  liveSelectedEventKey = "";
+  liveSelectedReportSectionTitle = "Overview / Summary";
+  setLiveView("report");
+}
+
 async function initializeLiveGuiRuntime() {
   applyQueryGoal();
   ensurePlanningSessionId();
@@ -19348,6 +19358,7 @@ async function initializeLiveGuiRuntime() {
   await refreshLiveAgentManifest({ silent: true, skipRender: true });
   restoreLiveUiState();
   restoreCachedPlanningState();
+  initializeLiveAgentLanding();
   setupOrcChartHydrationMonitor();
   if (liveCurrentView === "report") window.setTimeout(() => scheduleOrcEchartsRender(), 0);
   if (planningChatLog && !planningChatLog.dataset.autoScrollObserved) {
