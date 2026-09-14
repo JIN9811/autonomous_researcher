@@ -16,7 +16,6 @@ Primary tracked directories:
 - `deploy/`
 - `device_bridges/`
 - `docs/`
-- `gui/`
 - `image/`
 - `install/`
 - `knowledge/`

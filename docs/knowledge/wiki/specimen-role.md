@@ -1,5 +1,5 @@
 ---
-{"topic_id":"specimen-role","owner":"specimen_agent","source_refs":["docs/agents/specimen_agent.md"],"source_revision":{"docs/agents/specimen_agent.md":"8073f3b51afbf3ed69b4deed29ae6aee4b08b2a1e3c4a77f97f29507b4c4027a"},"verified_at":"2026-09-13T00:00:00+00:00","applicability":"Public Specimen Making Agent responsibilities and handoff","status":"reviewed"}
+{"topic_id":"specimen-role","owner":"specimen_agent","source_refs":["docs/agents/specimen_agent.md"],"source_revision":{"docs/agents/specimen_agent.md":"272c0ce57347517af23eb2eaac0a4bc24a67b8943859a952f748e3ddf5622c68"},"verified_at":"2026-09-14T00:00:00+00:00","applicability":"Public Specimen Making Agent responsibilities and handoff","status":"reviewed"}
 ---
 
 # Specimen Making Agent

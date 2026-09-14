@@ -1,5 +1,5 @@
 ---
-{"topic_id":"vision-role","owner":"vision_agent","source_refs":["docs/agents/vision_agent.md"],"source_revision":{"docs/agents/vision_agent.md":"ee15e088ed1bca3f37881c6729717994f7b0007fc099d44d575958ebe5a64159"},"verified_at":"2026-09-13T00:00:00+00:00","applicability":"Public Vision Agent responsibilities and handoff","status":"reviewed"}
+{"topic_id":"vision-role","owner":"vision_agent","source_refs":["docs/agents/vision_agent.md"],"source_revision":{"docs/agents/vision_agent.md":"ad1d5f86db0693cb2960105b36a3cae4862bead548c81bda323473e3be668b88"},"verified_at":"2026-09-14T00:00:00+00:00","applicability":"Public Vision Agent responsibilities and handoff","status":"reviewed"}
 ---
 
 # Vision Agent

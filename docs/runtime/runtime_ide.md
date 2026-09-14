@@ -58,7 +58,7 @@ related_docs:
   - docs/gui/gui.md
   - docs/device_bridges/README.md
   - docs/standards/documentation_standard.md
-  - docs/superpowers/specs/2026-08-09-runtime-ide-reference-documentation-design.md
+  - docs/oldversion/superpowers/specs/2026-08-09-runtime-ide-reference-documentation-design.md
   - docs/modularity.md
 supersedes: []
 -->
@@ -179,7 +179,7 @@ implementation boundaries until individually migrated.
 
 Removing a node still requires a valid remaining route. This feature does not
 automatically skip experimental stages or implement running-job hot swaps.
-See [Design lifecycle implementation](../superpowers/plans/2026-09-13-design-ide-module-lifecycle.md).
+See [Design lifecycle implementation](../oldversion/superpowers/plans/2026-09-13-design-ide-module-lifecycle.md).
 
 ## Summary
 
@@ -241,7 +241,7 @@ It does not replace:
 | Analysis computation bridge catalog | `device_bridges/cae/module.py`, internal `device_bridges/cae/bridge.py`, `device_bridges/cae/calculix.py` |
 | Interaction and runtime regression evidence | `tests/ui/runtime_ide_browser_audit.py`, `tests/unit/test_langgraph_runtime.py` |
 
-Historical Codex packages under `docs/ATR_*_Package/` describe implementation
+Historical Codex packages under `docs/oldversion/ATR_*_Package/` describe implementation
 inputs and visual intent. They are not the current runtime or interface source
 of truth.
 
@@ -675,7 +675,7 @@ Standalone `preflight_only` remains a separate no-execution request. Mixed devic
 profiles retain operator handoff, while installed-printer and physical-print
 selections retain their existing explicit device authority. Saved connection
 settings cannot upgrade an all-virtual selection to physical I/O. Verification
-status is recorded in the [implementation plan](../superpowers/plans/2026-09-13-specimen-agent-packages.md).
+status is recorded in the [implementation plan](../oldversion/superpowers/plans/2026-09-13-specimen-agent-packages.md).
 
 ## Operator Workflow
 
@@ -862,7 +862,7 @@ The executable Design/Orchestrator addition uses
 contracts, active-byte preservation and snapshots across controller loop
 boundaries. Existing owner-result, mode-path and loop/archive suites are rerun
 with denied external effects. Frontend and SVG acceptance is recorded in the
-[implementation plan](../superpowers/plans/2026-09-13-executable-agent-ide.md).
+[implementation plan](../oldversion/superpowers/plans/2026-09-13-executable-agent-ide.md).
 
 The 2026-09-13 lifecycle addition is covered by
 `tests/integration/test_design_module_lifecycle.py` (real IDE APIs with isolated
@@ -907,7 +907,7 @@ covered invalid JSON, validation without writes, explicit Knowledge-only apply,
 Default restore, export, and detached import with zero physical calls. These
 used controlled model and equipment I/O; they are not live-provider, hardware,
 or scientific evidence. Exact commands are recorded in the
-[core-plan implementation plan](../superpowers/plans/2026-09-14-core-plans-and-modularity-guide.md).
+[core-plan implementation plan](../oldversion/superpowers/plans/2026-09-14-core-plans-and-modularity-guide.md).
 
 This Reference was checked on 2026-08-09 against commit `541c93a` by repository
 inspection of the declared source files. The following evidence types are
@@ -971,4 +971,4 @@ viewport. It does not prove live device readiness or scientific outcomes.
   device-specific effects and recovery
 - [Agent Reference Index](../agents/README.md) — stage roles and handoffs
 - [Documentation Standard](../standards/documentation_standard.md)
-- [Runtime IDE Documentation Design](../superpowers/specs/2026-08-09-runtime-ide-reference-documentation-design.md)
+- [Runtime IDE Documentation Design](../oldversion/superpowers/specs/2026-08-09-runtime-ide-reference-documentation-design.md)

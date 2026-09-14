@@ -18,7 +18,7 @@ verified_against: working-tree-2026-09-14-core-agent-roots
 related_docs:
   - docs/agents/knowledge_agent.md
   - docs/knowledge/markdown_memory_operations.ko.md
-  - docs/superpowers/specs/2026-09-11-source-curation-design.md
+  - docs/oldversion/superpowers/specs/2026-09-11-source-curation-design.md
 supersedes: []
 -->
 

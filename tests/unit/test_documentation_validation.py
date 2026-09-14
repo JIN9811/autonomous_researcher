@@ -855,14 +855,12 @@ def test_manifest_requires_runtime_ide_navigation_links(tmp_path: Path) -> None:
     module = _load_validator()
     _write(tmp_path, "README.md", VALID_INDEX)
     _write(tmp_path, "README.ko.md", VALID_INDEX)
-    _write(tmp_path, "README.en.md", VALID_INDEX)
     _write(tmp_path, "docs/README.md", VALID_INDEX)
     _write(tmp_path, "docs/runtime/langgraph_runtime.md", VALID_REFERENCE)
     document = _write_runtime_ide_reference(tmp_path)
     documents = [
         "README.md",
         "README.ko.md",
-        "README.en.md",
         "docs/README.md",
         "docs/runtime/langgraph_runtime.md",
         document.relative_to(tmp_path).as_posix(),
@@ -873,7 +871,7 @@ def test_manifest_requires_runtime_ide_navigation_links(tmp_path: Path) -> None:
 
     assert len(
         [error for error in errors if "missing Runtime IDE navigation link" in error]
-    ) == 5
+    ) == 4
 
 
 def test_manifest_rejects_duplicate_documents(tmp_path: Path) -> None:

@@ -15,7 +15,6 @@ scope:
 summary: Paper-first landing page for the Autonomous Researcher Framework system and supporting platform.
 related_docs:
   - README.ko.md
-  - README.en.md
   - docs/paper/README.md
   - docs/README.md
   - docs/standards/paper_documentation_standard.md
@@ -36,11 +35,11 @@ supersedes: []
 <sub>Powered by the ATR Framework</sub>
 
 <p>
-  <a href="README.en.md"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat&amp;logo=python&amp;logoColor=white" alt="Python 3.11 or later"></a>
+  <a href="README.md"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat&amp;logo=python&amp;logoColor=white" alt="Python 3.11 or later"></a>
   <a href="docs/agents/agent_api_connection_matrix.md"><img src="https://img.shields.io/badge/FastAPI-10324D?style=flat&amp;logo=fastapi&amp;logoColor=white" alt="FastAPI"></a>
   <a href="docs/runtime/langgraph_runtime.md"><img src="https://img.shields.io/badge/LangGraph-10324D?style=flat&amp;logo=langgraph&amp;logoColor=white" alt="LangGraph"></a>
   <a href="docs/device_bridges/lerobot_bridge.md"><img src="https://img.shields.io/badge/LeRobot-10324D?style=flat&amp;logo=huggingface&amp;logoColor=white" alt="LeRobot"></a>
-  <a href="README.en.md"><img src="https://img.shields.io/badge/vLLM-10324D?style=flat" alt="vLLM"></a>
+  <a href="README.md"><img src="https://img.shields.io/badge/vLLM-10324D?style=flat" alt="vLLM"></a>
 </p>
 
 <p align="center"><a href="README.ko.md">Korean</a></p>
@@ -76,7 +75,7 @@ supersedes: []
 | **[Device bridges](docs/device_bridges/README.md)** | Robotics, equipment, and computation integration contracts. |
 | **[Runtime IDE](docs/runtime/runtime_ide.md)** | Plan editing, execution control, and run inspection. |
 | **[Results and evidence](docs/paper/06_evaluation_and_results.md)** | Demonstrated outcomes and their supporting artifacts. |
-| **[Setup and operation](README.en.md)** | Installation, configuration, and operator workflows. |
+| **[Setup and operation](README.md)** | Installation, configuration, and operator workflows. |
 | **[Documentation index](docs/README.md)** | All references, guides, and documentation standards. |
 
 </div>
@@ -246,7 +245,7 @@ requires integration and validation.
 | Reader | Start here |
 |---|---|
 | Researcher or reviewer | [Problem and contributions](docs/paper/01_problem_and_contributions.md) → [Results](docs/paper/06_evaluation_and_results.md) |
-| Operator | [Installation and operation](README.en.md) → [Device bridges](docs/device_bridges/README.md) |
+| Operator | [Installation and operation](README.md) → [Device bridges](docs/device_bridges/README.md) |
 | Developer | [Runtime reference](docs/runtime/current_code_snapshot.md) → [Agent APIs](docs/agents/agent_api_connection_matrix.md) |
 | Contributor | [Contributing](CONTRIBUTING.md) → [Documentation rules](docs/standards/documentation_standard.md) |
 

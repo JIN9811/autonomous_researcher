@@ -13,8 +13,8 @@ summary: Normative rules for classifying, authoring, verifying, and retiring ATR
 related_docs:
   - docs/templates/document_types.md
   - docs/standards/paper_documentation_standard.md
-  - docs/superpowers/specs/2026-08-08-documentation-governance-design.md
-  - docs/superpowers/specs/2026-08-09-device-bridge-reference-documentation-design.md
+  - docs/oldversion/superpowers/specs/2026-08-08-documentation-governance-design.md
+  - docs/oldversion/superpowers/specs/2026-08-09-device-bridge-reference-documentation-design.md
 supersedes: []
 -->
 
@@ -41,8 +41,7 @@ configuration remain the source of truth for current implemented behavior.
 
 ## Source of Truth
 
-- Documentation governance decision:
-  `docs/superpowers/specs/2026-08-08-documentation-governance-design.md`
+- Current documentation rules: this Standard; earlier decisions are archived history.
 - Governed document set and snapshot expectations:
   `docs/document_manifest.yaml`
 - Copy-ready structures: `docs/templates/document_types.md`
@@ -295,27 +294,31 @@ changes. A stale date alone is a review signal; a contradicted fact is a defect.
 
 ## Document Relocation and Archive
 
-Active material SHOULD stay near its owning domain. A reviewable migration MAY
-introduce a domain-local `research/`, `history/`, or `evidence/` directory when
-the existing location obscures the document's purpose. Such a move MUST keep
-the document body and authority stable, update all inbound relative links and
-repository-root literal paths in the same change, and pass link validation.
+Current executable code and checked-in configuration are the implementation
+baseline. Active References explain that baseline; historical proposals,
+implementation plans, superseded instructions, development iterations and
+retired UI mockups MUST move to `docs/oldversion/` when their work is accepted
+or retired. Do not keep them active merely because an old test or document
+still points to them. New, explicitly pending work may use active Design/Plan
+paths until it is accepted or retired.
 
-`docs/oldversion/` is reserved for material excluded from normal reading paths.
-Age, file format, missing front matter, exclusion from
-`docs/document_manifest.yaml`, or a zero inbound-link count is insufficient on
-its own. An item MAY be archived only when the same change demonstrates all of
-the following:
+An archive change MUST:
 
-1. no active README, document, executable code, configuration, validator, or
-   package manifest consumes it;
-2. a current replacement is named;
-3. the item is not required implementation history, Evidence, or a
-   reproducibility artifact;
-4. all affected Markdown links and repository-root literal paths are updated
-   or shown absent;
-5. `docs/oldversion/README.md` records the archive date, original path,
-   archived path, reason, and replacement.
+1. verify that executable code, configuration and installed packages do not
+   require the files at their former paths; retire obsolete test criteria
+   without removing current behavioral coverage;
+2. name current References or Standards as replacements;
+3. preserve historical content and self-contained assets, and keep scientific
+   evidence and reproducibility artifacts accessible independently;
+4. update inbound links and literal paths, separate historical provenance from
+   current authority, and pass link checks;
+5. record the archive date, original and archived paths, reason and replacement
+   in `docs/oldversion/README.md`.
+
+Missing links, old dates or unusual file names alone do not establish disuse.
+Private runtime outputs MUST stay in an ignored local archive, never in the
+public documentation archive. Archiving history does not authorize changing
+working runtime, agent or device behavior.
 
 An archived tree SHOULD retain its former repository-relative context beneath
 `docs/oldversion/`. Active References and Guides MUST NOT cite archived
@@ -359,7 +362,7 @@ include an API and connection architecture figure. These agents have
 decision-tool, bridge, external-service, device, or persistence boundaries that would be
 ambiguous if compressed into the execution figure.
 
-Design additionally follows the [five-area restructuring contract](../superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md):
+The current [Design Reference](../agents/design_agent.md) implements the five-area contract:
 its existing Reference covers High, Middle, Low, Guardian/Safety and
 Knowledge/Evidence, with a role-fit/decision-authority table. This does not
 require rewriting the remaining agents before their own restructuring.
@@ -367,8 +370,8 @@ require rewriting the remaining agents before their own restructuring.
 All agent figure assets MUST:
 
 - live under `docs/agents/assets/figures/`;
-- use the stable stems defined by the approved
-  [Agent Reference Figures and Navigation Design](../superpowers/specs/2026-08-09-agent-reference-figures-and-navigation-design.md);
+- use the stable stems in `AGENT_REFERENCE_FIGURES` in
+  `scripts/validate_documentation.py` and the current Agent References;
 - include an editable `.dot` source and same-stem checked-in `.svg` rendering;
 - be embedded through a repository-relative Markdown image link in the owning
   Reference;
@@ -462,9 +465,9 @@ Every bridge Reference MUST contain three figures:
 2. internal execution and effect boundary;
 3. API and connection architecture.
 
-The stable figure stems are defined by the approved
-[Device Bridge Reference Documentation Design](../superpowers/specs/2026-08-09-device-bridge-reference-documentation-design.md)
-and enforced by `scripts/validate_documentation.py`. This produces exactly 24
+The stable figure stems are defined and enforced by
+`scripts/validate_documentation.py` and documented in the current Bridge
+References. This produces exactly 24
 `.dot` sources and 24 same-stem `.svg` renderings under
 `docs/device_bridges/assets/figures/`; undeclared figure assets are defects.
 
@@ -658,6 +661,6 @@ uses implementation baseline `188a1d6`.
 ## Related Documents
 
 - [Document Type Templates](../templates/document_types.md)
-- [Documentation Governance Design](../superpowers/specs/2026-08-08-documentation-governance-design.md)
-- [Device Bridge Reference Documentation Design](../superpowers/specs/2026-08-09-device-bridge-reference-documentation-design.md)
+- [Documentation Governance Design](../oldversion/superpowers/specs/2026-08-08-documentation-governance-design.md)
+- [Device Bridge Reference Documentation Design](../oldversion/superpowers/specs/2026-08-09-device-bridge-reference-documentation-design.md)
 - [Documentation Index](../README.md)

@@ -11,8 +11,8 @@ method: Test-driven numerical and orchestration checks, independent code review,
 related_docs:
   - docs/agents/analysis_agent.md
   - docs/paper/evidence/2026-09-09-analysis-improvement-validation.md
-  - docs/superpowers/plans/2026-09-09-feature-informed-fem-calibration.md
-  - docs/superpowers/plans/2026-09-09-sparse-native-fem-improvement.md
+  - docs/oldversion/superpowers/plans/2026-09-09-feature-informed-fem-calibration.md
+  - docs/oldversion/superpowers/plans/2026-09-09-sparse-native-fem-improvement.md
 supersedes: []
 ---
 

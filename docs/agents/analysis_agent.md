@@ -39,7 +39,7 @@ related_docs:
   - docs/agents/bo_agent.md
   - docs/agents/knowledge_agent.md
   - docs/device_bridges/cae_computation_bridges.md
-  - docs/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md
+  - docs/oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md
   - docs/paper/evidence/2026-09-09-analysis-improvement-validation.md
   - docs/paper/evidence/2026-09-09-feature-informed-fem-calibration.md
 supersedes: []
@@ -487,7 +487,7 @@ The report retains `material_hypothesis` separately from `calibration`.
 `--surface-distance-mm` can tighten the remesher's local-operation deviation.
 Final geometry acceptance and element-quality gates remain unchanged. Increasing
 the nominal size alone does not guarantee fewer valid elements in a thin-walled
-geometry. The [sparse native execution plan](../superpowers/plans/2026-09-09-sparse-native-fem-improvement.md)
+geometry. The [sparse native execution plan](../oldversion/superpowers/plans/2026-09-09-sparse-native-fem-improvement.md)
 records rejected meshes and the accepted study settings.
 
 See the [calibration evidence record](../paper/evidence/2026-09-09-feature-informed-fem-calibration.md)
@@ -820,7 +820,7 @@ visual approval remain outside the completed evidence.
 
 ## Related Documents
 
-- [Five-area restructuring contract](../superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md)
-- [Analysis model-improvement design](../superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md)
+- [Five-area restructuring contract](../oldversion/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md)
+- [Analysis model-improvement design](../oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md)
 - [CAE computation bridges](../device_bridges/cae_computation_bridges.md)
 - [Equipment](equipment_agent.md), [Knowledge](knowledge_agent.md), [BO](bo_agent.md)

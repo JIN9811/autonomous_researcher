@@ -76,5 +76,5 @@ ros2 run camera_calibration cameracalibrator --size 9x6 --square 0.021 image:=/c
 ## 관련 문서
 
 - `docs/hardware/utm_ros_vision_runtime_bridge.md`
-- `개선안/16_utm_ros_runtime_bridge_live_gui_plan.md`
-- `개선안/17_vision_agent_camera_device_bridge_live_gui_plan.md`
+- `docs/oldversion/개선안/16_utm_ros_runtime_bridge_live_gui_plan.md`
+- `docs/oldversion/개선안/17_vision_agent_camera_device_bridge_live_gui_plan.md`

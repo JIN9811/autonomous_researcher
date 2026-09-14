@@ -86,7 +86,6 @@ include = [
   "device_bridges*",
   "experiments*",
   "graphs*",
-  "gui*",
   "knowledge*",
   "learning*",
   "logging_system*",
@@ -113,7 +112,6 @@ exclude = [
   "patches*",
   "configs*",
   "web*",
-  "livegui_package*",
   "Pyautogui_server_for_window*",
   "개선안*",
 ]

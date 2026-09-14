@@ -40,10 +40,10 @@ related_docs:
   - docs/agents/agent_api_connection_matrix.md
   - docs/knowledge/markdown_memory_operations.ko.md
   - docs/knowledge/manual_rag_knowledge.ko.md
-  - docs/superpowers/specs/2026-09-11-source-curation-design.md
+  - docs/oldversion/superpowers/specs/2026-09-11-source-curation-design.md
   - docs/agents/knowledge_agent_self_evolution_runtime_guideline.md
-  - docs/superpowers/specs/2026-09-10-knowledge-markdown-memory-design.md
-  - docs/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md
+  - docs/oldversion/superpowers/specs/2026-09-10-knowledge-markdown-memory-design.md
+  - docs/oldversion/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md
   - docs/modularity.md
 supersedes: []
 -->
@@ -380,14 +380,14 @@ package, and module-API tests with 10 existing warning messages; the Package
 Manager/editor suite passed 37 Node tests. Controlled five-route and isolated
 browser/API checks confirmed future-run pinning and explicit apply without a
 physical call. Full command and environment boundaries are recorded in the
-[implementation plan](../superpowers/plans/2026-09-14-core-plans-and-modularity-guide.md).
+[implementation plan](../oldversion/superpowers/plans/2026-09-14-core-plans-and-modularity-guide.md).
 
 The 2026-09-13 current-versus-historical evidence correction passed 48 focused
 Guardian/Knowledge tests (five existing schema-field warnings). The tests use
 the real Knowledge projection and Guardian gate: archival classifications remain
 retrievable without becoming new failures, while active hardware alerts and
 current explicit failures remain enforceable. Registered-model cycle acceptance
-is recorded separately in the [implementation verification record](../superpowers/plans/2026-09-13-specimen-agent-packages.md#verification-record).
+is recorded separately in the [implementation verification record](../oldversion/superpowers/plans/2026-09-13-specimen-agent-packages.md#verification-record).
 
 The 2026-09-11 source-curation matrix passed on both registered providers:
 
@@ -454,7 +454,7 @@ physical closed-loop result.
 
 - [Markdown Knowledge Operations](../knowledge/markdown_memory_operations.ko.md)
 - [Source Library Operations](../knowledge/manual_rag_knowledge.ko.md)
-- [Source Intake and Curation Contract](../superpowers/specs/2026-09-11-source-curation-design.md)
+- [Source Intake and Curation Contract](../oldversion/superpowers/specs/2026-09-11-source-curation-design.md)
 - [Knowledge/Self-Evolution Guideline](knowledge_agent_self_evolution_runtime_guideline.md)
 - [Agent Matrix](agent_api_connection_matrix.md)
 - [Analysis](analysis_agent.md) · [BO](bo_agent.md)

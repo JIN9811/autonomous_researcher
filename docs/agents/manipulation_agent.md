@@ -110,7 +110,7 @@ deactivated owner modules contribute no current Manipulation card.
 Settings and archive locations are unchanged: the existing Manipulation profile,
 run snapshots and `runs/<run_id>/runtime/loops/loop-N/manipulation_agent/attempt-N/`
 remain authoritative. The package introduces no additional settings store or
-robot workspace. [Implementation and validation](../superpowers/plans/2026-09-13-manipulation-agent-package.md)
+robot workspace. [Implementation and validation](../oldversion/superpowers/plans/2026-09-13-manipulation-agent-package.md)
 records virtual-device software evidence; prior physical evidence below retains
 its original provenance and scope.
 
@@ -474,7 +474,7 @@ reusing the earlier transfer's Done state.
 The 2026-09-09 reconstruction is validated without devices: strict tool dispatch,
 unchanged payloads, rejection/malformed/mock responses, scope changes, cancellation,
 duplicate-start prevention, owner model binding, simulated mode, placement and
-clearance handoff gating. See the [implementation and validation ledger](../superpowers/plans/2026-09-09-manipulation-decision-layer.md).
+clearance handoff gating. See the [implementation and validation ledger](../oldversion/superpowers/plans/2026-09-09-manipulation-decision-layer.md).
 Historical evidence below predates the new decision layer and is not commissioning
 proof for it.
 

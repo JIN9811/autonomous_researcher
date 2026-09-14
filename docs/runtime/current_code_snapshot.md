@@ -1154,7 +1154,7 @@ free-modularization goal:
   supported path is the allowlisted `ui.renderer` profile plus descriptor
   cards/report sections and safe actions.
 
-These are tracked in `개선안/12_free_modularization_gap_analysis.md`.
+These are tracked in `docs/oldversion/개선안/12_free_modularization_gap_analysis.md`.
 
 ## 12. Documentation Update Rules For This Snapshot
 
@@ -1168,7 +1168,7 @@ When code changes after this snapshot, update docs in this order:
    - Loop/agent contract change: `docs/runtime/closed_loop_and_pages_reference.md`
    - Graph/module/runtime change: `docs/runtime/langgraph_runtime.md`
    - Device bridge change: `docs/hardware/*` plus the relevant tutorial
-4. Update `README.ko.md`, `README.en.md`, and `docs/README.md` only when the
+4. Update `README.md`, `README.ko.md`, and `docs/README.md` only when the
    public entry point, folder responsibility, or high-level runtime contract
    changed.
 5. Keep design-package or improvement-plan documents separate from this

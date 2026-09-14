@@ -16,7 +16,6 @@ scope:
 summary: AX4LAB의 시스템 기여와 이를 지원하는 플랫폼을 소개하는 한국어 메인 문서.
 related_docs:
   - README.md
-  - README.en.md
   - docs/paper/README.md
   - docs/README.md
   - docs/standards/paper_documentation_standard.md
@@ -37,11 +36,11 @@ supersedes: []
 <sub>Powered by the ATR Framework</sub>
 
 <p>
-  <a href="README.en.md"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat&amp;logo=python&amp;logoColor=white" alt="Python 3.11 이상"></a>
+  <a href="README.md"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat&amp;logo=python&amp;logoColor=white" alt="Python 3.11 이상"></a>
   <a href="docs/agents/agent_api_connection_matrix.md"><img src="https://img.shields.io/badge/FastAPI-10324D?style=flat&amp;logo=fastapi&amp;logoColor=white" alt="FastAPI"></a>
   <a href="docs/runtime/langgraph_runtime.md"><img src="https://img.shields.io/badge/LangGraph-10324D?style=flat&amp;logo=langgraph&amp;logoColor=white" alt="LangGraph"></a>
   <a href="docs/device_bridges/lerobot_bridge.md"><img src="https://img.shields.io/badge/LeRobot-10324D?style=flat&amp;logo=huggingface&amp;logoColor=white" alt="LeRobot"></a>
-  <a href="README.en.md"><img src="https://img.shields.io/badge/vLLM-10324D?style=flat" alt="vLLM"></a>
+  <a href="README.md"><img src="https://img.shields.io/badge/vLLM-10324D?style=flat" alt="vLLM"></a>
 </p>
 
 <p align="center"><a href="README.md">English</a></p>
@@ -77,7 +76,7 @@ supersedes: []
 | **[Device Bridges](docs/device_bridges/README.md)** | 로봇, 실험 장비, 해석 도구의 연동 규약. |
 | **[Runtime IDE](docs/runtime/runtime_ide.md)** | 실행 계획 편집, 실행 제어, 런 상태 확인. |
 | **[결과와 근거](docs/paper/06_evaluation_and_results.md)** | 실증 결과와 이를 뒷받침하는 아티팩트. |
-| **[설치와 운영](README.en.md)** | 설치, 설정, 운영 절차. |
+| **[설치와 운영](README.md)** | 설치, 설정, 운영 절차. |
 | **[전체 문서](docs/README.md)** | 상세 문서, 가이드, 문서 작성 규칙. |
 
 </div>
@@ -242,7 +241,7 @@ High-Level은 작업 판단을, Middle-Level은 절차 감독을, Low-Level 도�
 | 독자 | 시작할 문서 |
 |---|---|
 | 연구자·리뷰어 | [문제 정의와 기여](docs/paper/01_problem_and_contributions.md) → [결과](docs/paper/06_evaluation_and_results.md) |
-| 운영자 | [설치와 운영](README.en.md) → [Device Bridges](docs/device_bridges/README.md) |
+| 운영자 | [설치와 운영](README.md) → [Device Bridges](docs/device_bridges/README.md) |
 | 개발자 | [런타임 상세 문서](docs/runtime/current_code_snapshot.md) → [에이전트 API](docs/agents/agent_api_connection_matrix.md) |
 | 기여자 | [기여 가이드](CONTRIBUTING.md) → [문서 작성 규칙](docs/standards/documentation_standard.md) |
 

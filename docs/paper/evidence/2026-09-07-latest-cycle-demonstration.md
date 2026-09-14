@@ -162,7 +162,7 @@ documentation tests passed; paper publication validation passed. All changed
 Markdown documents passed individual validation. The full general documentation
 validator still reports 27 pre-existing findings in two unchanged files:
 `docs/device_bridges/windows_pyautogui_bridge.md` and
-`docs/superpowers/specs/2026-08-24-plc-safety-bridge-design.md`. Both files were
+`docs/oldversion/superpowers/specs/2026-08-24-plc-safety-bridge-design.md`. Both files were
 verified byte-identical to HEAD; these unrelated format defects were not
 modified or reported as passing by this evidence update.
 

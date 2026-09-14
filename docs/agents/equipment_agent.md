@@ -29,8 +29,8 @@ verified_against: working-tree
 related_docs:
   - docs/device_bridges/windows_pyautogui_bridge.md
   - docs/hardware/windows_pyautogui_equipment_agent_guideline.md
-  - docs/strategy/2026-08-27-windows-lab-equipment-consolidation-report.md
-  - docs/superpowers/plans/2026-09-09-equipment-workflow-decision-layer.md
+  - docs/oldversion/strategy/2026-08-27-windows-lab-equipment-consolidation-report.md
+  - docs/oldversion/superpowers/plans/2026-09-09-equipment-workflow-decision-layer.md
 supersedes: []
 -->
 

@@ -11,7 +11,7 @@ method: Focused automated tests, independent code review, read-only archived evi
 related_docs:
   - docs/agents/analysis_agent.md
   - docs/device_bridges/cae_computation_bridges.md
-  - docs/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md
+  - docs/oldversion/superpowers/specs/2026-09-09-analysis-multifidelity-decision-design.md
   - docs/paper/evidence/2026-09-07-latest-cycle-demonstration.md
 supersedes: []
 ---
@@ -299,6 +299,6 @@ Tests use isolated routes and literal fixtures; archived-evidence tests skip
 when their local-only sources are absent. The original saved run must not be used
 as a new Analysis output directory.
 
-See the [implementation plan](../../superpowers/plans/2026-09-09-analysis-background-improvement.md)
+See the [implementation plan](../../oldversion/superpowers/plans/2026-09-09-analysis-background-improvement.md)
 and [Analysis Reference](../../agents/analysis_agent.md) for lifecycle and tool
 contracts. This evidence does not supersede the prior physical-cycle record.

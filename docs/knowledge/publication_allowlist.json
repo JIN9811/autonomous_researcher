@@ -1,6 +1,475 @@
 {
   "schema": "knowledge_publication.v1",
-  "approved_assets": {},
+  "approved_assets": {
+    "docs/maintenance/repository_cleanup.md": {
+      "sha256": "6bdb2cffe801ace13605c56ae0a95c2a22505420b5a93368871a6ad791e72fa7",
+      "review": "Reviewed cleanup audit or existing public evidence with archive-path updates and personal-home placeholder redaction only. Scientific measurements and historical test outcomes unchanged; no private output files added."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/component_crops_from_design_system/00_header_brand_principles.png": {
+      "sha256": "d4743675f0ec31969b44098cc342e1ea574a127db68543232b0f1be97b37a92d",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/component_crops_from_design_system/01_color_palette.png": {
+      "sha256": "895aef063ca29d613408bff980372983415288d22eced5c978e2fa35fede6423",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/component_crops_from_design_system/02_typography.png": {
+      "sha256": "f7c6d54cb820b0646de43966530ad10017fd147038850ed08ce1fd52e7b2afe3",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/component_crops_from_design_system/03_spacing_grid.png": {
+      "sha256": "ecd84c6abbc07fec36071e3c24022e3600da8bf3e8ee34f6f7865d09acba080c",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/component_crops_from_design_system/04_card_anatomy.png": {
+      "sha256": "570595c7b20c4f1d55b6135a345f29a1e0f05b75b7fddbe72adec316bcbe121c",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/component_crops_from_design_system/05_button_hierarchy_states.png": {
+      "sha256": "0d66fe8348f70ff89c63f07f7220a651eeb708f9a886821c662c11690669cff0",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/component_crops_from_design_system/06_form_elements.png": {
+      "sha256": "9ee54528d95ef7d1bd378e167a2eb360b440d50ea338765e1eefa4012784e1ad",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/component_crops_from_design_system/07_agent_status_chips.png": {
+      "sha256": "0e8e80bb4db55cd3eb1003daa1ea3de3aa7117cb80aec7d4a701a25bea302ccc",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/component_crops_from_design_system/08_icon_style.png": {
+      "sha256": "e061478ed30b7f1f3d31f16c51c7a297200ea9954ed6729de1da3ed4fea22469",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/component_crops_from_design_system/09_alert_notice_states.png": {
+      "sha256": "fb35c4499e84b220fae30d642421282e845c031319ff54da13eb024055ad9999",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/component_crops_from_design_system/10_chart_styles.png": {
+      "sha256": "f6799b9913074136d9c4b44c33718ec653fdfdc13da7560b9c33ac04bfe30f2c",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/component_crops_from_design_system/11_artifact_card.png": {
+      "sha256": "64e3cb2c59489f800842c1c0ae1e75c7b6ca44c3f5f044cdee525dab5e513b29",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/component_crops_from_design_system/12_primary_user_flow.png": {
+      "sha256": "2d521d0fa94c90cba3d451cfb491a6bcabf3295adf1975bf6a4abf4405dc0d03",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/component_crops_from_design_system/13_mini_overall_dashboard.png": {
+      "sha256": "01217447182126bbfb3be587c2596032793c5c7a69b082da6f7688bb794e9562",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/component_crops_from_design_system/14_mini_report_view.png": {
+      "sha256": "822c46391c4e7f5ae6642a9f6b16712d18e649243726b51b65708987c694e1b5",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/component_crops_from_design_system/15_mini_backend_trace.png": {
+      "sha256": "9bd876089c684b0c566d51a224d9384977ae672f713a85d959b461d6df394f8a",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/component_crops_from_design_system/16_mini_approval_modal.png": {
+      "sha256": "136668f3481e02174d632200b5eedbcb8a2eea6e222f5301dbea077208e1a1bb",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/component_crops_from_design_system/17_mini_artifact_viewer.png": {
+      "sha256": "6567f591db5f284e4f7ad783365b6ae94b5f4200ace57f44945469a444266e13",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/generated_full_screens/00_overall_live_gui_layout.png": {
+      "sha256": "e0b5b2c009cefad34afa2b4b92f6049a6002ee4291d8234ffdde552ffcaa3b01",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/generated_full_screens/01_orchestrator_agent_report.png": {
+      "sha256": "719ba93f7870bf6231ab319358629860982ae4465c05a5a29b2126888371aa77",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/generated_full_screens/02_design_agent_report.png": {
+      "sha256": "8650514c6dc9fe7ce69dfdc0355a202970a3849ad71134db627657ed9fea574a",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/generated_full_screens/03_specimen_making_agent_report.png": {
+      "sha256": "d335cd6fd54ccc0b0571ed0b4c013a0831d7b0d38b6a85aca7396d14631c55f0",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/generated_full_screens/04_vision_agent_report.png": {
+      "sha256": "dd812d26d53d5c2c2c66426c497fb6712413fef5635398ea2e88c9b8cb2dd5fc",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/generated_full_screens/05_manipulation_agent_report.png": {
+      "sha256": "d760ccb72a0aa05922eaf400c6e9149ebf542fafb26de45b01c0aeaa7f6087ca",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/generated_full_screens/06_lab_equipment_agent_report.png": {
+      "sha256": "6d922b008a9bde6e7ed66954e90da22e03da0a16c4f7dd4fe0d9bd1c256e81ce",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/generated_full_screens/07_analysis_agent_report.png": {
+      "sha256": "6d471f6072f91be280e4d0037a264a97001dae4c48fe31885af4e94084eed7ed",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/generated_full_screens/08_bayesian_optimization_agent_report.png": {
+      "sha256": "cc446164b006b5570fa2450cc5517040fa50b557342003e2f092b351d510ddbc",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/generated_full_screens/09_uiux_design_system_board.png": {
+      "sha256": "c732c3db26c205d21a2f6d45a71484255dd9c8d83eced6fbb41036847592345e",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/layout_crops_from_overall/00_top_mission_status_bar.png": {
+      "sha256": "2275739b899e4cdf43a3d5ffc420d258ec7069479649189a7c3538039b954882",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/layout_crops_from_overall/01_left_agent_rail.png": {
+      "sha256": "264dcb1563656417022f3c8d3721c8a8c455448bc6cac885ca267998397c3251",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/layout_crops_from_overall/02_center_orchestrator_report_area.png": {
+      "sha256": "6625c2debf320e402fa4cb9321c6f699650b5d9adeed3c5b2ecd9d171467ee01",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/layout_crops_from_overall/03_right_operator_console_chat.png": {
+      "sha256": "02422d1602ef4d4f1f26a78d68dbd8de4f2ecbfdd2525034aba7a8aa407a7e37",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/layout_crops_from_overall/04_bottom_events_devices_logs_artifacts_dock.png": {
+      "sha256": "c5afd440b8379f7945373edf22c9f7bb2205f7ce3b394471d0533482c9dab5e8",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/layout_crops_from_overall/05_mission_contract_card.png": {
+      "sha256": "91c1cdde34f733da0a72cfadda85d2490152dd0940210c1046063d209ba38e2a",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/layout_crops_from_overall/06_decision_register_card.png": {
+      "sha256": "b6b7de200c2bdc5206f120161c0fe903f888268798ee6fbe34e96abd92f8a703",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/layout_crops_from_overall/07_route_graph_card.png": {
+      "sha256": "4ef4d0efa19d077eda741d7657f15dbb5f26ac06972016366fe2771635b79a79",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/layout_crops_from_overall/08_experiment_setup_form.png": {
+      "sha256": "fa079571d069bac6c33aa5ecc03a6efc9e2735e6552218452d0bcc69601c65f0",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/layout_crops_from_overall/09_artifact_strip.png": {
+      "sha256": "64b9caff8b7a533b68b22a6c9217364b3ab35efe881ecdbc528a64f580701fca",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/user_supplied/00_current_live_gui_original.png": {
+      "sha256": "4d5835c0d3fbc5b6881694347efe7e4c6fcb6455e5bf39b2d3ea0f893e60e36a",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/00_references/user_supplied/01_dashboard_style_reference_hiring_overview.png": {
+      "sha256": "84dc192d6bace902708e7cf0a7ce1aa8b4471a69122db8cf8a2326dd67a1b389",
+      "review": "Owner-retired published Live GUI reference asset archived unchanged from ae09f3c. Byte identity and visual review completed; not current GUI acceptance or experiment evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/atr_runtime_ide_concept_reference.png": {
+      "sha256": "87e265a156da0945d80b9eaa564ae43d59906039c538e0ffcf1889d656487048",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/analysis_agent_128.png": {
+      "sha256": "f305bc8d1b199ccbf446e33a118c46ea68a86c2f13cc4f17073983ef6948299c",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/analysis_agent_32.png": {
+      "sha256": "dfede0ad9b705917e5a0d2cf85c0ac422981a827f9f021c9d77f4a998b5f3417",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/analysis_agent_64.png": {
+      "sha256": "27d694f2a901aa0f242e5be562d62863103d1426c1f8b5e7bad3ae4fff94d6dd",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/artifact_128.png": {
+      "sha256": "d74d341afbc8a5586f29d2fa1f16fa76974715489099ef0bf3b73fa8b4bcd915",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/artifact_32.png": {
+      "sha256": "817a71aef1359a77884cd1a36f1ffc60ecc50cc011bc87623f04554ff57c38fd",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/artifact_64.png": {
+      "sha256": "deaf07fb06a373cba2fd44193accbf6c2557c95753e0ca1c3cf23120024844f0",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/bo_agent_128.png": {
+      "sha256": "00cf596b04eb7074de2d2b3faa274f519f6fa436031a6c9dd0c1f9e4174e2fb0",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/bo_agent_32.png": {
+      "sha256": "bf4f74105b67213826f9333e0470942db1c1e41c161af120c843c3460456af83",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/bo_agent_64.png": {
+      "sha256": "69651fa4b2ad35ca4b9190ce72df8bb7d92afda258da4530b8c36335589263e9",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/complete_128.png": {
+      "sha256": "35ac9a3c3c9bea14a1f0cb19c313c7add57fcc18f110b23a6684055c72ffffdb",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/complete_32.png": {
+      "sha256": "91345f25a80aa05d506355d3da0c8132dcf34a9976ce02781f90ac47420aa8a0",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/complete_64.png": {
+      "sha256": "e55c04e5d54b7507a507f083f059334ac8bd6b16b15e5bb1654f38b6f09b1d2d",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/design_agent_128.png": {
+      "sha256": "02bf4114e041bc979a55c0c6d132182ed3e2f80c7f8dce3dd02bf600e78a31d9",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/design_agent_32.png": {
+      "sha256": "2d8c4d585cd9e2c049f79f58edf8af14d038b30cb25ca397b93172f5d30ff9d7",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/design_agent_64.png": {
+      "sha256": "53c70195229d7e9b68afb10bcd852a6cef431688220d4d7b563460a9241589bf",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/device_bridges_128.png": {
+      "sha256": "00d1aa0b7426fb8a984c77dc1a7db77989297156a05988849ed8f52e950a1b2d",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/device_bridges_32.png": {
+      "sha256": "726e2424ca57f21b6c75283de6e1d1cd87b1650f32c5131139f968e69859240e",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/device_bridges_64.png": {
+      "sha256": "8dad9d9e6130cc707a759c73b434ed206dc0e55d263e0e06e0d93f0126f19b5d",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/equipment_agent_128.png": {
+      "sha256": "79275eca0d566885cfff0583b88f98e04f7be6e87ffd88481cc13325e62093ff",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/equipment_agent_32.png": {
+      "sha256": "70b61a3e7bb3a292073bba10fd76b601a09f889a73a8003f93001855446ae3c5",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/equipment_agent_64.png": {
+      "sha256": "062fc2429fcc9d12881236b43fa60c87dbde3f90c6bb60a3716f475df7550099",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/error_128.png": {
+      "sha256": "79bfa2e74d4963e5be8c4e5a2a09f43f2de1a7924065efb511545f83a63b1bce",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/error_32.png": {
+      "sha256": "9074c57a12f181030ab1776ab56dae6ad74b93886bc715261d424ac5583d8517",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/error_64.png": {
+      "sha256": "816a6ddcfab5b4114f68220370027abd745c31dc8fcc5db4ada696346fd10726",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/guardian_agent_128.png": {
+      "sha256": "abd667dd3298471fbc858facd7d0fe62de86341451e9662d5009dc9a17648246",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/guardian_agent_32.png": {
+      "sha256": "08ac43ac22f6e8edfed565e357eae6dbe08fcc15cb6581bc93b6e4628cd2e50e",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/guardian_agent_64.png": {
+      "sha256": "13476fa34df4a4a84e8696d51ae83d90cd5b0b5b44fef1cf74635b7603af55ae",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/knowledge_agent_128.png": {
+      "sha256": "c1e5cbd9bda666048370cf4ec5c7328c69d1dcf0a745660fb4755e2eaf2f7266",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/knowledge_agent_32.png": {
+      "sha256": "b18f7542f6498feb3a52434522552a0142a1d108425165e8835065be4e5889b9",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/knowledge_agent_64.png": {
+      "sha256": "40f91702b06453412e58626be2cb6e7c9f2cb55085e607e869fbd111309b0b20",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/manipulation_agent_128.png": {
+      "sha256": "18cc313b68d4dbcc6f865d875c9c436a0dc104994403a6da4f78f3e5dca45921",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/manipulation_agent_32.png": {
+      "sha256": "e545e38f5879acb5d749cfbe0b1de872458d1097a7379540e5fcb332e36d00c6",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/manipulation_agent_64.png": {
+      "sha256": "93e6674b4e14fc53e983562d243949127f6db24218c4914de630d57f1ee5aa86",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/mcp_tools_128.png": {
+      "sha256": "2740eb0aeb85c276bbaf9fdb4171c7126f284c731d930d30f05790876927bf0a",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/mcp_tools_32.png": {
+      "sha256": "1e74497591b9ee60dbee4a9b7f48d92d0347a68ae44460dbbc109bdda77ad2a7",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/mcp_tools_64.png": {
+      "sha256": "5193b7228dc5f125f45a6a3d529a49f1236389256f380d9713d9fe29801fb15f",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/memory_logs_128.png": {
+      "sha256": "68270c47ae17ef18e13214d14c309679453e6084b0624e409cff4a7f1dbfc51a",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/memory_logs_32.png": {
+      "sha256": "97993afff7babccfbd3ef29bdb33a0657be2009e7b9270646ef0c34f8e3127e0",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/memory_logs_64.png": {
+      "sha256": "c2b4346e638c82bf2591d834beb6dd1762235c0f4df0990e7f8bce457c5e12b0",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/nemoclaw_ollama_128.png": {
+      "sha256": "285297b958158186ab538b52e1feda29c0eee28e8b4dbc95e3cae4511b80c4cb",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/nemoclaw_ollama_32.png": {
+      "sha256": "d28389e64dc2c75081fe436f53118236f8dc15f74486aec3af1c16cebc676186",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/nemoclaw_ollama_64.png": {
+      "sha256": "01c70e51ecc6f256dba2c07216ae0c169edca1c4ada5f92773e4f7b9912bb684",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/orchestrator_128.png": {
+      "sha256": "c4df81cceca2d669a8390277e41ba81c8d3ab7d330f093dd34ddcce38cbadbec",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/orchestrator_32.png": {
+      "sha256": "ee3586f30fe498414266064a2f2216516e90a6e7f9f1e2fefa72eb2953f86562",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/orchestrator_64.png": {
+      "sha256": "c8a192688f5d158754f31feafdeb755f1555e96fec1e38b796bfffac0661fe53",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/pause_128.png": {
+      "sha256": "95f575ecc9b5e748da86032f09712aae9e3f766fd64d9ec6118d3287fb11a884",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/pause_32.png": {
+      "sha256": "2a2e9c743ecf17ab06e88d25f0726350271aba449b840ab3152a009d885ac590",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/pause_64.png": {
+      "sha256": "7e41634667b63c649fefc30136b477560fc872f16fa6c9288a3aad27d27819b1",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/play_128.png": {
+      "sha256": "f45f3bdff829d335dce965662ca7fc22d5b3d78a085ebfebe77a2adcc8079abe",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/play_32.png": {
+      "sha256": "24c0ced138091ccf328c330cfc7cc2bffad17789620a21ae103a00ef45e82bbb",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/play_64.png": {
+      "sha256": "9361fa72daccc50f51c51d839171fcd623c10f26c8395c9ee8887e201ef462c9",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/settings_128.png": {
+      "sha256": "99ce5817bd44a56c11614ec05706f2a9117bf351a0c8cbd2cdbc0291bd5d20f0",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/settings_32.png": {
+      "sha256": "facedf7282210d5455ab31e2164ce97aeed8fbd1f6af37fffdfde2cde792f4d9",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/settings_64.png": {
+      "sha256": "dcdf9097194f15f213b1e9fb38f8cbe12dbd69679162da9b79986114c37b867b",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/specimen_maker_128.png": {
+      "sha256": "1a72a6a9bee0ad6eea785064514077d10c7a9f91891cacce396853d6bcb0cb70",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/specimen_maker_32.png": {
+      "sha256": "27ff18783a71da965222e5161660f8668f6305266d6ea65d07aca77b7a11d493",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/specimen_maker_64.png": {
+      "sha256": "bbfe7bda58c41ba3aa72c29ad29cdaf1275a5916d7ef6fb2f21740faf0574e57",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/stop_128.png": {
+      "sha256": "5ccc45e1be4de3611224765fc562662816e2b83fee8e9c4c07441d0a3b850199",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/stop_32.png": {
+      "sha256": "27986b482bf5ca1874a7031b2f7a4ca159be85834efbae9f5fa2719c8c5aaf6a",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/stop_64.png": {
+      "sha256": "5cc9b3e72ec8f007bf66e47b6cd44a8d888d139ee0bb44667a223066d32bd811",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/vision_agent_128.png": {
+      "sha256": "0f82548a92b51d1f9b89294706245284b38f381e3ad831cbb691174ea9712148",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/vision_agent_32.png": {
+      "sha256": "aff9f86b4865bf716cdce2b1f652e62719aa1e82ba02cb84d5c147f0037d4a48",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_LangGraph_Runtime_IDE_Codex_Package/atr_langgraph_runtime_ide_assets/icons_png/vision_agent_64.png": {
+      "sha256": "069adbd0803afa7afeca63e169afac07c80fdadfb1864173b961afc853494f8a",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_Live_GUI_Graph_Package/assets/reference/graph_editor_reference.png": {
+      "sha256": "87e265a156da0945d80b9eaa564ae43d59906039c538e0ffcf1889d656487048",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_Live_GUI_Graph_Package/assets/reference/main_live_gui_reference.png": {
+      "sha256": "a387ebe96a2961559c9daee4f34ecb1ed835a85d1faad39a2ff86659a1a76896",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/ATR_Self_Evolution_Package/assets/reference/atr_self_evolution_reference.png": {
+      "sha256": "bd17d799d53f1953b7f6df1fe054ffc15cba81fd61f4949ec20c5beda96e0031",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/oldversion/개선안/reference_assets/bambulab_device_screen_20260614.png": {
+      "sha256": "80ba052185fa4d2525bc0aa30e5c24e7805059c2ba66a1a85e0af4309f8b9f07",
+      "review": "Published historical UI concept/icon asset, byte-identical to ae09f3c before relocation and visually reviewed. Archived for preservation, not current GUI acceptance or private runtime evidence."
+    },
+    "docs/hardware/evidence/lab_equipment_utm_visual_control_completion_audit.md": {
+      "sha256": "3bdaa7eee0fa2d7e2f4f132492341a62770612a8ffed3b33061d4b3d1293b7c5",
+      "review": "Reviewed cleanup audit or existing public evidence with archive-path updates and personal-home placeholder redaction only. Scientific measurements and historical test outcomes unchanged; no private output files added."
+    },
+    "docs/paper/evidence/2026-09-07-design-gemma31b-virtual-api-verification.md": {
+      "sha256": "93df15c2fbf0022223d04c2c648e1fbf8f6e1d5dd1054764ea5e9eedbd4a8e68",
+      "review": "Reviewed cleanup audit or existing public evidence with archive-path updates and personal-home placeholder redaction only. Scientific measurements and historical test outcomes unchanged; no private output files added."
+    },
+    "docs/paper/evidence/2026-09-07-latest-cycle-demonstration.md": {
+      "sha256": "2874d8e44d59cef2e28748df02d4742c1ba861ac113f3d4e0dc5587bfc5f924b",
+      "review": "Reviewed cleanup audit or existing public evidence with archive-path updates and personal-home placeholder redaction only. Scientific measurements and historical test outcomes unchanged; no private output files added."
+    },
+    "docs/paper/evidence/2026-09-08-vision-generic-prompt-verification.md": {
+      "sha256": "426b469854978c69207621f57916d36c4fbb78393428fe60d6dcc2b08ea64ef8",
+      "review": "Reviewed cleanup audit or existing public evidence with archive-path updates and personal-home placeholder redaction only. Scientific measurements and historical test outcomes unchanged; no private output files added."
+    },
+    "docs/paper/evidence/2026-09-09-analysis-improvement-validation.md": {
+      "sha256": "437cf3fff87e885b7d742133d4d87081b1a0b5ed793a55dcdc79f81980a6417f",
+      "review": "Reviewed cleanup audit or existing public evidence with archive-path updates and personal-home placeholder redaction only. Scientific measurements and historical test outcomes unchanged; no private output files added."
+    },
+    "docs/paper/evidence/2026-09-09-feature-informed-fem-calibration.md": {
+      "sha256": "134b938ecf3f1273f04a6257b8099de6129a88909f789cc7bbe3bdce526ca9ad",
+      "review": "Reviewed cleanup audit or existing public evidence with archive-path updates and personal-home placeholder redaction only. Scientific measurements and historical test outcomes unchanged; no private output files added."
+    },
+    "docs/runtime/evidence/2026-09-06-loop-artifact-archiving-tests.md": {
+      "sha256": "fd617a137ea86b733f621a7bad3338e54494871de5e9734fcb3f6ad77ee0d071",
+      "review": "Reviewed cleanup audit or existing public evidence with archive-path updates and personal-home placeholder redaction only. Scientific measurements and historical test outcomes unchanged; no private output files added."
+    },
+    "docs/runtime/evidence/guardian_improvement_09_audit.md": {
+      "sha256": "7767c853d1435dcdcaef31547311b9801d0db6a7aeeb512875d1e22e624db4ec",
+      "review": "Reviewed cleanup audit or existing public evidence with archive-path updates and personal-home placeholder redaction only. Scientific measurements and historical test outcomes unchanged; no private output files added."
+    }
+  },
   "approved_corpora": [
     "docs/knowledge/wiki/"
   ]

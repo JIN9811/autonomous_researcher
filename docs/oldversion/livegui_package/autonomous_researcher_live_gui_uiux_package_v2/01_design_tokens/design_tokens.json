@@ -1,0 +1,144 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "name": "Autonomous Researcher Live GUI UI/UX Package v2",
+  "generated_at": "2026-05-31T14:55:41.534188+00:00",
+  "principles": [
+    "Clarity",
+    "Control",
+    "Observability",
+    "Performance"
+  ],
+  "color": {
+    "brand": {
+      "primary": "#4F6BFF",
+      "secondary": "#22D3EE",
+      "accent": "#8B5CF6",
+      "success": "#22C55E",
+      "warning": "#FBBF24",
+      "danger": "#EF4444",
+      "info": "#60A5FA",
+      "teal": "#14B8A6",
+      "coral": "#FF6B57"
+    },
+    "surface": {
+      "navy_950": "#050914",
+      "navy_900": "#0B1020",
+      "navy_850": "#0E1628",
+      "navy_800": "#111827",
+      "slate_750": "#182338",
+      "slate_700": "#1F2A44",
+      "slate_600": "#334155",
+      "slate_500": "#475569",
+      "slate_400": "#64748B",
+      "slate_300": "#94A3B8",
+      "slate_100": "#E2E8F0"
+    },
+    "agent": {
+      "objective": "#3B82F6",
+      "orchestrator": "#22D3EE",
+      "design": "#8B5CF6",
+      "specimen": "#10B981",
+      "vision": "#F59E0B",
+      "manipulation": "#06B6D4",
+      "equipment": "#60A5FA",
+      "analysis": "#38BDF8",
+      "knowledge": "#D946EF",
+      "bo": "#EF4444",
+      "guardian": "#22C55E"
+    },
+    "status": {
+      "active": "#22C55E",
+      "running": "#3B82F6",
+      "waiting": "#8B5CF6",
+      "idle": "#64748B",
+      "blocked": "#EF4444",
+      "warning": "#F59E0B",
+      "complete": "#10B981",
+      "approval": "#FBBF24"
+    }
+  },
+  "typography": {
+    "font_family_ui": "Inter, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+    "font_family_mono": "SFMono-Regular, ui-monospace, Menlo, Consolas, monospace",
+    "scale": {
+      "display": {
+        "font_size": 32,
+        "line_height": 40,
+        "weight": 700
+      },
+      "h1": {
+        "font_size": 24,
+        "line_height": 32,
+        "weight": 650
+      },
+      "h2": {
+        "font_size": 20,
+        "line_height": 28,
+        "weight": 650
+      },
+      "h3": {
+        "font_size": 16,
+        "line_height": 24,
+        "weight": 600
+      },
+      "body": {
+        "font_size": 14,
+        "line_height": 20,
+        "weight": 400
+      },
+      "body_sm": {
+        "font_size": 12,
+        "line_height": 16,
+        "weight": 400
+      },
+      "caption": {
+        "font_size": 11,
+        "line_height": 14,
+        "weight": 500
+      },
+      "mono": {
+        "font_size": 12,
+        "line_height": 16,
+        "weight": 500
+      }
+    }
+  },
+  "spacing": {
+    "base_unit": 8,
+    "scale_px": [
+      0,
+      4,
+      8,
+      12,
+      16,
+      20,
+      24,
+      32,
+      40,
+      48,
+      64,
+      80
+    ]
+  },
+  "radius": {
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 20,
+    "pill": 999
+  },
+  "shadow": {
+    "card": "0 12px 30px rgba(0,0,0,.24)",
+    "elevated": "0 20px 60px rgba(0,0,0,.38)",
+    "inset_border": "inset 0 0 0 1px rgba(148,163,184,.14)"
+  },
+  "layout": {
+    "desktop_min_width": 1440,
+    "preferred_demo_width": 1920,
+    "preferred_demo_height": 1080,
+    "shell_columns": "224px minmax(720px, 1fr) 520px",
+    "header_height": 68,
+    "bottom_dock_height": 208
+  }
+}

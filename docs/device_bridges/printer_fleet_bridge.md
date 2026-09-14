@@ -217,7 +217,7 @@ Specimen linkage, mode-prefix and module/API tests. The registered-model
 virtual-device cycle completed through the next Design handoff: 34 successful
 API model calls across 10 owners, zero physical calls, 393.809 s cycle time.
 Slicer/device boundaries and measurement data were simulated; this is not new
-hardware validation. See the [commands and scope record](../superpowers/plans/2026-09-13-specimen-agent-packages.md#printer-fleet-consolidation-and-ide-separation--2026-09-13).
+hardware validation. See the [commands and scope record](../oldversion/superpowers/plans/2026-09-13-specimen-agent-packages.md#printer-fleet-consolidation-and-ide-separation--2026-09-13).
 
 Inspection covered the manager/config classes, `register_printer_tools`,
 printer route handlers, configured profiles, and focused Bambu/Prusa tests at

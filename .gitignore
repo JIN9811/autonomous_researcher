@@ -77,6 +77,18 @@ meta/
 image/.render_venv/
 .superpowers/
 
+# Generated Graphify cache; runtime graph artifacts already live under memory/.
+/graphify-out/
+
+# Local-only retired outputs may contain screenshots, recordings or personal data.
+/oldversion/
+
+# Public UI design tokens, not authentication tokens; include only these assets.
+!/docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/01_design_tokens/
+/docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/01_design_tokens/*
+!/docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/01_design_tokens/design_tokens.css
+!/docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/01_design_tokens/design_tokens.json
+
 # OS/editor noise
 .DS_Store
 Thumbs.db

@@ -412,7 +412,7 @@ passed the virtual-bridge, installed-printer and physical-print preparation
 prefixes with device transports intercepted. A separate registered-API cycle
 completed all 13 stage transitions through the next Design handoff, with 34
 successful model calls and zero physical calls (393.809 s). This verifies the
-software handoff, not live fabrication. See the [consolidation verification record](../superpowers/plans/2026-09-13-specimen-agent-packages.md#printer-fleet-consolidation-and-ide-separation--2026-09-13).
+software handoff, not live fabrication. See the [consolidation verification record](../oldversion/superpowers/plans/2026-09-13-specimen-agent-packages.md#printer-fleet-consolidation-and-ide-separation--2026-09-13).
 
 Existing per-loop/attempt archiving also retains decision responses, local tool
 requests/results and the final `specimen_decision.v1`. Its `status=executed` means
@@ -434,7 +434,7 @@ Two older isolated status fixtures still fail because they omit the supervisor
 required by their graph. They failed before and after migration; the new guarded
 tests retain real supervisor admission. These checks do not claim physical
 printing or a comparative API/local-model benchmark. Final package/IDE and cycle checks
-are recorded in the [implementation plan](../superpowers/plans/2026-09-13-specimen-agent-packages.md).
+are recorded in the [implementation plan](../oldversion/superpowers/plans/2026-09-13-specimen-agent-packages.md).
 
 ### Decision-Layer Evidence — 2026-09-08
 
@@ -447,7 +447,7 @@ are recorded in the [implementation plan](../superpowers/plans/2026-09-13-specim
 | Six execution intents × two registered backends | 12/12 model/tool-routing checks passed; existing virtual, ejection-only, print, profile and preflight intents |
 | Selected regression suite | 239 Python tests passed, 3 opt-in slicer tests skipped; 13 JS lifecycle tests passed |
 | Existing downstream preflight regression | 20 cycles, 19 BO recommendation applications; Design/Specimen fixture stages, no hardware actuation |
-| Regression/integration results | Commands and results in the [implementation plan](../superpowers/plans/2026-09-08-specimen-decision-layer.md) |
+| Regression/integration results | Commands and results in the [implementation plan](../oldversion/superpowers/plans/2026-09-08-specimen-decision-layer.md) |
 
 Timings are single observations, not latency benchmarks. Model artifacts reside
 at `/tmp/atr-specimen-verify-rHkdne/` locally. No actual hardware was operated for
@@ -506,4 +506,4 @@ camera, and provider availability varies by environment.
 - [Bambu Runtime Guide](../hardware/bambulab_x2d_device_bridge_runtime_guideline.md)
 - [3DP Usage Guide](../tutorials/device_workspace_3dp_usage.ko.md)
 - [Specimen handler](../../agents/specimen/agent.py) and [decision dispatcher](../../agents/specimen/decision.py)
-- [Five-area contract](../superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md)
+- [Five-area contract](../oldversion/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md)

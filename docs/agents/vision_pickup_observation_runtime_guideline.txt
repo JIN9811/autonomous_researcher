@@ -191,7 +191,7 @@ The Manipulation Agent may block, reduce confidence, or request recovery when
 
 This guideline is upgraded from a lightweight pickup observation contract to the
 `vision_report.v1` / `vision_signal.v1` lab perception signal contract described
-in `개선안/03_vision_agent_lab_perception_signal_loop_research.md`.
+in `docs/oldversion/개선안/03_vision_agent_lab_perception_signal_loop_research.md`.
 
 The legacy downstream keys remain authoritative for compatibility:
 

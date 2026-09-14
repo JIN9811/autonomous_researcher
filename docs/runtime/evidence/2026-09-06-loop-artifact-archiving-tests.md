@@ -37,7 +37,7 @@ part of the archival feature.
 
 ## Scope and Evidence Basis
 
-- Workspace: `/home/jin/autonomous_researcher`, local `.venv`, Python 3.12.
+- Workspace: `<home>/autonomous_researcher`, local `.venv`, Python 3.12.
 - Scope: uncommitted working-tree changes on 2026-09-06; the checkout already
   contained other work. This is not a clean-HEAD baseline measurement.
 - Device calls, printers, robots, UTM, model providers, and training jobs were
@@ -122,7 +122,7 @@ The full manifest validator reported existing defects in:
 
 - `docs/device_bridges/windows_pyautogui_bridge.md`: 26 missing metadata,
   required-section, and figure defects.
-- `docs/superpowers/specs/2026-08-24-plc-safety-bridge-design.md`: missing
+- `docs/oldversion/superpowers/specs/2026-08-24-plc-safety-bridge-design.md`: missing
   leading YAML front matter.
 
 Both files were byte-equal to `git show HEAD:<path>` when checked. Neither was

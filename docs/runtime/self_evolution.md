@@ -4,7 +4,8 @@
 
 ATR Self-Evolution is a closed-loop meta-runtime for improving the Autonomous Researcher without directly editing live hardware-control code.
 
-It adapts the package drafts in `docs/ATR_Self_Evolution_Package/` to the current ATR architecture:
+The current implementation uses the following ATR runtime boundaries. Its original
+package drafts are archived under `docs/oldversion/ATR_Self_Evolution_Package/`:
 
 ```text
 closed-loop run trace
@@ -49,7 +50,8 @@ Runtime registry state is stored under `memory/evolution/`, which is ignored by 
 
 ## Package Review Status
 
-The imported draft package `docs/ATR_Self_Evolution_Package/` is directionally appropriate for ATR, but the implementation keeps the first production version deliberately conservative. The repository currently implements the same lifecycle in fewer modules:
+The current repository implements this lifecycle through the modules below.
+The archived draft package is historical context, not the execution contract:
 
 ```text
 TraceCollector + SelfEvolutionService + EvolutionRegistry

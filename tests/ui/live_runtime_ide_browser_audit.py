@@ -32,7 +32,6 @@ from runtime_ide_browser_audit import WebDriverAudit, http_json  # noqa: E402
 
 
 REPO_ROOT = THIS_DIR.parents[1]
-LIVE_REFERENCE_IMAGE = REPO_ROOT / "docs/ATR_Live_GUI_Graph_Package/assets/reference/main_live_gui_reference.png"
 LIVE_AUDIT_DRAFT_MODULE_ID = "ui_audit_draft_descriptor"
 
 
@@ -42,7 +41,7 @@ def cleanup_live_audit_draft_module() -> None:
 
 
 def image_visual_metrics(path: Path) -> dict[str, Any]:
-    """Return coarse visual metrics used to keep Live GUI aligned with reference assets."""
+    """Record current screenshot metrics without enforcing retired UI mockups."""
     image = Image.open(path).convert("RGB")
     stat = ImageStat.Stat(image)
     width, height = image.size
@@ -57,10 +56,6 @@ def image_visual_metrics(path: Path) -> dict[str, Any]:
         "mean_rgb": mean_rgb,
         "bright_ratio": round(bright_pixels / max(len(pixels), 1), 5),
     }
-
-
-def rgb_distance(left: tuple[float, float, float], right: tuple[float, float, float]) -> float:
-    return round(sum((float(a) - float(b)) ** 2 for a, b in zip(left, right)) ** 0.5, 3)
 
 
 def execute_async_script(
@@ -1787,17 +1782,8 @@ def scenario_live_runtime_ide(audit: WebDriverAudit, base_url: str, out_dir: Pat
     screenshot_path = out_dir / "live_runtime_ide_browser_audit.png"
     audit.screenshot(screenshot_path)
     live_metrics = image_visual_metrics(screenshot_path)
-    reference_metrics = image_visual_metrics(LIVE_REFERENCE_IMAGE)
-    distance = rgb_distance(tuple(live_metrics["mean_rgb"]), tuple(reference_metrics["mean_rgb"]))
-    visual_reference = {"live": live_metrics, "reference": reference_metrics, "rgb_distance": distance}
-    if max(live_metrics["mean_rgb"]) > 72:
-        raise AssertionError(f"Live GUI screenshot is too bright compared with dark reference: {visual_reference}")
-    if live_metrics["bright_ratio"] > 0.08:
-        raise AssertionError(f"Live GUI has too much white/light surface area for the reference theme: {visual_reference}")
-    if distance > 42:
-        raise AssertionError(f"Live GUI screenshot color profile drifted from the reference image: {visual_reference}")
     result["api_actions"] = {"approval_block": blocked_execution_result, "report_pin": report_pin_result, "binder_pin": binder_pin_result, "report_ask": ask_result, "approval": approval_result, "revise": revise_result, "graph_validate": graph_validate_status, "graph_compile": graph_compile_result, "graph_save": graph_save_result, "graph_change": graph_change_result, "graph_run_request": graph_run_request, "graph_run_status": graph_run_status, "runtime_command": command_result, "dry_run": dry_result, "node_rerun": rerun_result, "node_test": node_result, "pause": pause_result, "resume": resume_result, "safe_stop": safe_stop_result}
-    result["visual_reference"] = visual_reference
+    result["visual_metrics"] = live_metrics
     return result
 
 

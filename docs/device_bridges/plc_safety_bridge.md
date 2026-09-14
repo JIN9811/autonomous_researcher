@@ -24,8 +24,8 @@ source_of_truth:
 last_verified: 2026-09-03
 verified_against: working-tree
 related_docs:
-  - docs/superpowers/specs/2026-08-24-plc-safety-bridge-design.md
-  - docs/superpowers/plans/2026-08-24-plc-safety-bridge.md
+  - docs/oldversion/superpowers/specs/2026-08-24-plc-safety-bridge-design.md
+  - docs/oldversion/superpowers/plans/2026-08-24-plc-safety-bridge.md
   - docs/device_bridges/README.md
 supersedes: []
 -->
@@ -316,9 +316,9 @@ readlink /proc/<pid>/cwd
 ```
 
 For example, a server whose working directory is
-`/home/jin/autonomous_researcher` imports and serves that checkout. It cannot
+`<home>/autonomous_researcher` imports and serves that checkout. It cannot
 expose a `/plc` route that exists only in
-`/home/jin/.worktrees/autonomous_researcher/plc-safety-bridge` until the
+`<home>/.worktrees/autonomous_researcher/plc-safety-bridge` until the
 reviewed commits are integrated into the serving checkout or the reviewed
 worktree is explicitly started through the normal deployment procedure.
 

@@ -1,5 +1,5 @@
 ---
-{"topic_id":"guardian-role","owner":"guardian_agent","source_refs":["docs/agents/guardian_agent.md"],"source_revision":{"docs/agents/guardian_agent.md":"7c303b0a2ee01ecd41581fb84309543d7aafc7eab23f5765ca1077763baa70bf"},"verified_at":"2026-09-14T00:00:00+00:00","applicability":"Public Guardian Agent responsibilities and handoff","status":"reviewed"}
+{"topic_id":"guardian-role","owner":"guardian_agent","source_refs":["docs/agents/guardian_agent.md"],"source_revision":{"docs/agents/guardian_agent.md":"6edbd8e310524f433a54ac6b925748da6a9042d90c74c17df9dc49fe1d565ee4"},"verified_at":"2026-09-14T00:00:00+00:00","applicability":"Public Guardian Agent responsibilities and handoff","status":"reviewed"}
 ---
 
 # Guardian Agent

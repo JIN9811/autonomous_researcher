@@ -126,7 +126,7 @@ Notes:
   edit itself still uses Runtime IDE drag/drop plus validate/dry-run/Save
   Version gates. Remaining custom-stage report authoring and deeper activation
   authoring are tracked under
-  `개선안/12_free_modularization_gap_analysis.md`.
+  `docs/oldversion/개선안/12_free_modularization_gap_analysis.md`.
 
 ## Model Hierarchy Baseline
 
@@ -336,7 +336,7 @@ LeRobot-specific integration rule:
 - Test mode uses deterministic fake sessions and fake ports so LeRobot can be tested without installed robot hardware.
 - Live mode is blocked by profile gates unless `live_enabled` and the specific `allow_*` workflow gate are explicitly enabled.
 - Live mode also requires `confirm_live_execute=true` from the GUI before a LeRobot subprocess starts.
-- The local runtime command path is `/home/jin/miniconda3/bin/conda run -n lerobot ...`.
+- The local runtime command path is `<home>/miniconda3/bin/conda run -n lerobot ...`.
 - Default local dataset root is `~/.cache/huggingface/lerobot`; default policy/training root is `outputs/train`.
 - `lerobot.find_ports` is non-interactive in the GUI and scans local serial candidates instead of calling the interactive `lerobot-find-port` script.
 - `lerobot.rollout.start` uses the installed LeRobot policy-control path. Because this workstation does not expose `lerobot-rollout`, the bridge uses `lerobot-record` with `--policy.path=<checkpoint_dir>` for real-robot policy execution.

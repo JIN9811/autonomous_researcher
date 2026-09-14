@@ -1,5 +1,5 @@
 ---
-{"topic_id":"equipment-role","owner":"equipment_agent","source_refs":["docs/agents/equipment_agent.md"],"source_revision":{"docs/agents/equipment_agent.md":"f6df5d116bf0756fa94332f841a9322a84060050c876a2620ec2dc60f8f1e804"},"verified_at":"2026-09-13T00:00:00+00:00","applicability":"Public Lab Equipment Agent responsibilities and handoff","status":"reviewed"}
+{"topic_id":"equipment-role","owner":"equipment_agent","source_refs":["docs/agents/equipment_agent.md"],"source_revision":{"docs/agents/equipment_agent.md":"49ae8d188a87e8983b7c222ab77263c4e38fd5d542c762bd8656513ae346e83f"},"verified_at":"2026-09-14T00:00:00+00:00","applicability":"Public Lab Equipment Agent responsibilities and handoff","status":"reviewed"}
 ---
 
 # Lab Equipment Agent

@@ -33,7 +33,7 @@ related_docs:
   - docs/agents/knowledge_agent.md
   - docs/agents/design_agent.md
   - docs/agents/bo_agent_runtime_guideline.txt
-  - docs/superpowers/specs/2026-09-10-bo-strategy-continuous-design.md
+  - docs/oldversion/superpowers/specs/2026-09-10-bo-strategy-continuous-design.md
 supersedes: []
 -->
 
@@ -384,7 +384,7 @@ non-actuating; only BO's own computation has no hardware effect.
 ## Artifacts and Verification
 
 Owner-package verification is recorded in the
-[BO package plan](../superpowers/plans/2026-09-14-bo-agent-package.md); the
+[BO package plan](../oldversion/superpowers/plans/2026-09-14-bo-agent-package.md); the
 earlier strategy verification remains in its linked historical plan.
 Tests cover domain conversion, precision-preserving Design handoff, bounded
 tool decisions, optimizer-result integrity and read-only visualization.
@@ -453,4 +453,4 @@ stopping, automatic re-experimentation and new device validation are excluded.
 - [Knowledge](knowledge_agent.md)
 - [Design](design_agent.md)
 - [BO Runtime Guideline](bo_agent_runtime_guideline.txt)
-- [Approved BO Design](../superpowers/specs/2026-09-10-bo-strategy-continuous-design.md)
+- [Approved BO Design](../oldversion/superpowers/specs/2026-09-10-bo-strategy-continuous-design.md)

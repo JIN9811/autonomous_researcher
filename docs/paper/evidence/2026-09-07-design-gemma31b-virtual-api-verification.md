@@ -10,8 +10,8 @@ evidence_date: 2026-09-08
 method: Run the current DesignAgent and AgentContext with registered backend clients and model routing in isolated non-actuating state, then inspect local tool dispatch, handoff and archives.
 related_docs:
   - docs/agents/design_agent.md
-  - docs/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md
-  - docs/superpowers/plans/2026-09-07-design-decision-layer.md
+  - docs/oldversion/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md
+  - docs/oldversion/superpowers/plans/2026-09-07-design-decision-layer.md
 supersedes: []
 ---
 

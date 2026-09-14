@@ -1805,7 +1805,7 @@ def test_live_gui_analysis_report_exposes_multifidelity_contract() -> None:
 
 
     audit_script = Path("tests/ui/live_runtime_ide_browser_audit.py").read_text(encoding="utf-8")
-    for symbol in ["LIVE_REFERENCE_IMAGE", "image_visual_metrics", "rgb_distance", "titleContrastOnPanel", "bright_ratio"]:
+    for symbol in ["visual_metrics", "image_visual_metrics", "titleContrastOnPanel", "bright_ratio"]:
         assert symbol in audit_script
 
 

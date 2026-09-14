@@ -16,7 +16,7 @@ summary: Normative rules for authoring, reviewing, and releasing paper-facing AT
 related_docs:
   - docs/standards/documentation_standard.md
   - docs/templates/document_types.md
-  - docs/superpowers/specs/2026-08-09-github-paper-first-documentation-design.md
+  - docs/oldversion/superpowers/specs/2026-08-09-github-paper-first-documentation-design.md
 supersedes: []
 -->
 
@@ -51,8 +51,7 @@ claim-evidence contract; the general Standard governs document taxonomy.
 
 ## Source of Truth
 
-- Approved structure and narrative decision:
-  `docs/superpowers/specs/2026-08-09-github-paper-first-documentation-design.md`
+- Current structure and narrative rules: this Standard; earlier proposals are archived.
 - General document governance: `docs/standards/documentation_standard.md`
 - Current implementation facts: executable code and checked-in configuration
 - Current measured snapshot: `docs/runtime/current_code_snapshot.md`
@@ -438,4 +437,4 @@ paper publication validator contract.
 
 - `docs/standards/documentation_standard.md`
 - `docs/templates/document_types.md`
-- `docs/superpowers/specs/2026-08-09-github-paper-first-documentation-design.md`
+- `docs/oldversion/superpowers/specs/2026-08-09-github-paper-first-documentation-design.md`

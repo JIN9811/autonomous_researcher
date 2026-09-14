@@ -10,8 +10,8 @@ evidence_date: 2026-09-08
 method: Compare the original and revised Vision decision prompts through registered API and vLLM routes on fixed archived cases, then evaluate a frozen revision on unused captures without hardware tools.
 related_docs:
   - docs/agents/vision_agent.md
-  - docs/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md
-  - docs/superpowers/plans/2026-09-08-vision-multimodal-decision.md
+  - docs/oldversion/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md
+  - docs/oldversion/superpowers/plans/2026-09-08-vision-multimodal-decision.md
 supersedes: []
 ---
 

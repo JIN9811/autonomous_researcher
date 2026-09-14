@@ -14,7 +14,7 @@ import re
 import subprocess
 import tomllib
 
-PRIVATE_ROOTS = {"memory", "runs", "artifacts", "output", "outputs", "user_files", "logs", "test-results"}
+PRIVATE_ROOTS = {"memory", "runs", "artifacts", "output", "outputs", "user_files", "logs", "test-results", "oldversion"}
 MAX_BLOB = 5_000_000
 CREDENTIALS = re.compile(rb"(?:gh[pousr]_[A-Za-z0-9]{30,}|sk-(?:proj-)?[A-Za-z0-9_-]{24,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)")
 PERSONAL_PATH = re.compile(r"(?:/home/[A-Za-z0-9_.-]+/|[A-Za-z]:\\Users\\[A-Za-z0-9_.-]+\\)")

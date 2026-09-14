@@ -27,7 +27,7 @@ related_docs:
   - docs/agents/specimen_agent.md
   - docs/agents/bo_agent.md
   - docs/runtime/loop_artifact_archiving.md
-  - docs/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md
+  - docs/oldversion/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md
 supersedes: []
 -->
 
@@ -100,7 +100,7 @@ re-addition reuses installed code and the retained backend instance.
 The graph still needs valid transitions; removal never invents a replacement
 experiment route. New editable Design Setup fields, running-job hot swaps,
 package installation and Bridge migration are outside this change. See the
-[lifecycle plan and verification](../superpowers/plans/2026-09-13-design-ide-module-lifecycle.md).
+[lifecycle plan and verification](../oldversion/superpowers/plans/2026-09-13-design-ide-module-lifecycle.md).
 
 ## Overview and Responsibilities
 
@@ -437,7 +437,7 @@ decision evidence for later knowledge work.
 | Actual DesignAgent API / registered vLLM 31B | [Agent verification](../paper/evidence/2026-09-07-design-gemma31b-virtual-api-verification.md) | API 6.34 s / 31B 12.11 s: accepted local decision and matching handoff; 31B used registered model fallback; E4B-primary and closed-loop acceptance pending |
 | Physical closed-loop validation | Not performed for this change | Hardware validation pending; stable-tag evidence remains historical |
 
-The [implementation verification record](../superpowers/plans/2026-09-07-design-decision-layer.md#verification)
+The [implementation verification record](../oldversion/superpowers/plans/2026-09-07-design-decision-layer.md#verification)
 records a successful actual local-model accept/tool-dispatch smoke test, focused
 regressions, baseline failures, and the limits of that evidence.
 
@@ -454,11 +454,11 @@ tracked in the linked verification records.
 - [Design implementation](../../agents/design/agent.py)
 - [Evaluation and local decision tools](../../agents/design/decision.py)
 - [Code module declaration](../../agents/design/module.py)
-- [Module implementation and verification](../superpowers/plans/2026-09-13-design-agent-module.md)
+- [Module implementation and verification](../oldversion/superpowers/plans/2026-09-13-design-agent-module.md)
 - [Module](../../graphs/modules/design/module.yaml)
 - [Controller](../../app/controller.py)
-- [Implementation and verification plan](../superpowers/plans/2026-09-07-design-decision-layer.md)
-- [Five-area contract](../superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md)
+- [Implementation and verification plan](../oldversion/superpowers/plans/2026-09-07-design-decision-layer.md)
+- [Five-area contract](../oldversion/superpowers/specs/2026-09-07-five-area-agent-restructuring-contract-design.md)
 - [API and Connection Matrix](agent_api_connection_matrix.md)
 - [Specimen Making](specimen_agent.md)
 - [Loop Artifact Archiving](../runtime/loop_artifact_archiving.md)

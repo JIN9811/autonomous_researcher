@@ -12,7 +12,7 @@ summary: Copy-ready YAML metadata and body structures for all canonical ATR docu
 related_docs:
   - docs/standards/documentation_standard.md
   - docs/standards/paper_documentation_standard.md
-  - docs/superpowers/specs/2026-08-08-documentation-governance-design.md
+  - docs/oldversion/superpowers/specs/2026-08-08-documentation-governance-design.md
 supersedes: []
 ---
 
@@ -34,8 +34,9 @@ technical review.
 ## Source of Truth
 
 - `docs/standards/documentation_standard.md`
-- `docs/superpowers/specs/2026-08-08-documentation-governance-design.md`
 - `scripts/validate_documentation.py`
+
+Earlier design decisions are historical provenance, not current authoring rules.
 
 ## Shared Authoring Rules
 
@@ -563,5 +564,5 @@ active Documentation Standard.
 ## Related Documents
 
 - [Documentation Standard](../standards/documentation_standard.md)
-- [Documentation Governance Design](../superpowers/specs/2026-08-08-documentation-governance-design.md)
+- [Documentation Governance Design](../oldversion/superpowers/specs/2026-08-08-documentation-governance-design.md)
 - [Documentation Index](../README.md)

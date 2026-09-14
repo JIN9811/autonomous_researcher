@@ -1,5 +1,5 @@
 ---
-{"topic_id":"design-role","owner":"design_agent","source_refs":["docs/agents/design_agent.md"],"source_revision":{"docs/agents/design_agent.md":"cdf8b41d5553b34c2247ceb6e731454091a2c801dfdd01eed12c8cb4fc091709"},"verified_at":"2026-09-13T00:00:00+00:00","applicability":"Public Design Agent responsibilities and handoff","status":"reviewed"}
+{"topic_id":"design-role","owner":"design_agent","source_refs":["docs/agents/design_agent.md"],"source_revision":{"docs/agents/design_agent.md":"b0807693bb5d3d7e4fb65adce530016fd4af0d031fdb8b4a0abc6623dbde54ae"},"verified_at":"2026-09-14T00:00:00+00:00","applicability":"Public Design Agent responsibilities and handoff","status":"reviewed"}
 ---
 
 # Design Agent

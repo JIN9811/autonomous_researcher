@@ -281,7 +281,7 @@ package, and module-API tests with 10 existing warning messages; the Package
 Manager/editor suite passed 37 Node tests. Controlled five-route and isolated
 browser/API checks exercised configured/default behavior without a physical
 call. Exact scope and commands are in the
-[implementation plan](../superpowers/plans/2026-09-14-core-plans-and-modularity-guide.md).
+[implementation plan](../oldversion/superpowers/plans/2026-09-14-core-plans-and-modularity-guide.md).
 
 The 2026-09-13 BO-admission correction passed 48 focused Guardian/Knowledge
 checks and 32 additional Guardian agent, action-shield and fault-matrix checks.
@@ -289,7 +289,7 @@ They cover the curve-boundary warning, canonical and legacy readiness, historica
 evidence isolation and retained current BO/data, stop and approval blockers.
 Both runs reported five existing schema-field warnings. These non-actuating
 regressions are not physical safety validation; registered-model cycle evidence
-is tracked in the [implementation verification record](../superpowers/plans/2026-09-13-specimen-agent-packages.md#verification-record).
+is tracked in the [implementation verification record](../oldversion/superpowers/plans/2026-09-13-specimen-agent-packages.md#verification-record).
 
 The 2026-09-07 working-tree correction preserves unavailable-link diagnostics
 from Equipment transitions explicitly marked `phase: vision`,

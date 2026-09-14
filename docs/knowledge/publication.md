@@ -31,6 +31,10 @@ AX4LAB Wiki is reviewed system knowledge. User profiles, conversations, private
 memory, actual experiment data, source originals and generated indexes stay local.
 Do not promote a remembered user statement into a public Wiki page automatically.
 
+Root `oldversion/` is a private local archive for retired outputs and is blocked
+even if force-added to Git. It is distinct from the public, reviewed development
+history under `docs/oldversion/`.
+
 Before each commit, run:
 
 ```bash

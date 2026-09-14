@@ -1,5 +1,5 @@
 ---
-{"topic_id":"bo-role","owner":"bo_agent","source_refs":["docs/agents/bo_agent.md"],"source_revision":{"docs/agents/bo_agent.md":"474aaf6cb038d21dae6bd2026b3a13146bff0cf95b89827ac787d8fbb5bb7a49"},"verified_at":"2026-09-13T00:00:00+00:00","applicability":"Public BO Agent responsibilities and handoff","status":"reviewed"}
+{"topic_id":"bo-role","owner":"bo_agent","source_refs":["docs/agents/bo_agent.md"],"source_revision":{"docs/agents/bo_agent.md":"c5ade5381497b765961d9a8ada9566d80ecdb34bcaec7522a043c1853107b470"},"verified_at":"2026-09-14T00:00:00+00:00","applicability":"Public BO Agent responsibilities and handoff","status":"reviewed"}
 ---
 
 # BO Agent

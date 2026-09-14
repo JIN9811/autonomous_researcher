@@ -76,7 +76,7 @@ evidence:
       - agents/design/agent.py
     outputs:
       - path: docs/paper/evidence/2026-09-07-latest-cycle-demonstration.md
-        sha256: 0823fcef423f1bd2d0cb239411261ec26099b41f2c4a538f45b0824639c5a9a1
+        sha256: 2874d8e44d59cef2e28748df02d4742c1ba861ac113f3d4e0dc5587bfc5f924b
       - path: docs/paper/evidence/2026-09-07-latest-cycle-summary.json
         sha256: 63b3738a36e4d993c126ab7305d2ee630075cd69640c67d6f47aaffe3eeb79e7
     result: >-

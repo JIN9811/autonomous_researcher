@@ -39,19 +39,19 @@ supersedes: []
 | Shared Wiki, private memory and publication | [Knowledge contracts](knowledge/wiki_memory.md) · [Publication checks](knowledge/publication.md) |
 | Existing equipment integration | [Device bridge references](device_bridges/README.md) |
 | Implemented module and package boundaries | [Modularity Reference](modularity.md) |
-| Installation and operation | [English guide](../README.en.md) |
+| Retired files, reference relocation and retained history | [Repository cleanup audit](maintenance/repository_cleanup.md) |
+| Installation and operation | [English guide](../README.md) |
 | Documentation conventions | [Writing rules](standards/documentation_standard.md) |
-| Proposed package and module architecture | [Package, agent and bridge design](superpowers/specs/2026-09-13-package-agent-bridge-modularization-design.md) |
-| Shared IDE and agent execution definition | [Executable graph contract](superpowers/specs/2026-09-13-executable-agent-ide-contract-design.md) · [Runtime IDE](runtime/runtime_ide.md#five-area-editable-module-canvas) |
+| Shared IDE and agent execution definition | [Runtime IDE](runtime/runtime_ide.md#five-area-editable-module-canvas) |
+| Previous designs and development iterations | [Old Version Index](oldversion/README.md) — historical material only |
 
 
 ## Summary
 
 이 문서는 논문 검토자, 협업자, 운영자, 개발자가 읽는 설명용 문서의
 진입점입니다. 논문 독자는 `docs/paper/`를 먼저 읽고, 구현·운영 독자는 현재
-Reference와 도메인 Guide로 내려갑니다. 시스템 지시, Codex 실행 프롬프트,
-패키지 원본 지침은 `docs/system/`과 각 `docs/ATR_*_Package/`에 분리되어
-있습니다.
+Reference와 도메인 Guide로 내려갑니다. 현재 코드가 구현 기준이며, 이전
+설계·구현 계획·시스템 지시·UI 참고 패키지는 `docs/oldversion/`에 보관합니다.
 
 ## Scope
 
@@ -76,7 +76,7 @@ Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 
 | 논문 전체 논리와 증거 상태 | [paper/README.md](paper/README.md) |
 | 논문 작성·검토 규칙 | [standards/paper_documentation_standard.md](standards/paper_documentation_standard.md) |
 | 주장-증거 추적성 | [paper/09_claim_evidence_traceability.md](paper/09_claim_evidence_traceability.md), [paper/artifact_manifest.yaml](paper/artifact_manifest.yaml) |
-| 전체 프로젝트 흐름 | [../README.ko.md](../README.ko.md), [../README.en.md](../README.en.md) |
+| 전체 프로젝트 흐름 | [한국어 소개](../README.ko.md), [Main README](../README.md) |
 | 초보자/상급자 통합 매뉴얼 | [tutorials/user_manual.ko.md](tutorials/user_manual.ko.md), [tutorials/user_manual.en.md](tutorials/user_manual.en.md) |
 | 에이전트별 실제 역할·API·연결·안전 계약과 피겨 | [agents/README.md](agents/README.md) |
 | 10개 에이전트 교차 비교 | [agents/agent_api_connection_matrix.md](agents/agent_api_connection_matrix.md) |
@@ -107,8 +107,8 @@ Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 
 | Standard | [standards/documentation_standard.md](standards/documentation_standard.md), [standards/paper_documentation_standard.md](standards/paper_documentation_standard.md) | 문서 분류·권한·메타데이터·검증 및 논문 주장·증거·도표·공개 규칙 |
 | Reference | [agents/README.md](agents/README.md), [device_bridges/README.md](device_bridges/README.md), [device_bridges/bridge_api_connection_matrix.md](device_bridges/bridge_api_connection_matrix.md), [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md), [runtime/runtime_ide.md](runtime/runtime_ide.md), [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md), [runtime/three_level_control_model.md](runtime/three_level_control_model.md) | 현재 코드가 실제로 제공하는 역할·계약·동작과 편집 가능한 Graphviz/SVG 피겨 |
 | Guide | [knowledge/markdown_memory_operations.ko.md](knowledge/markdown_memory_operations.ko.md), `tutorials/` | 사용자·운영자 절차와 성공/복구 기준 |
-| Design | [superpowers/specs/2026-08-08-documentation-governance-design.md](superpowers/specs/2026-08-08-documentation-governance-design.md) | 승인 또는 제안된 목표 결정; 현재 구현 사실이 아님 |
-| Plan | `superpowers/plans/` | Design을 실현하는 작업 순서 |
+| Design | [Archived example](oldversion/superpowers/specs/2026-08-08-documentation-governance-design.md) | 승인 또는 제안된 목표 결정; 현재 구현 사실이 아님 |
+| Plan | New work: `superpowers/plans/`; previous work: [archive](oldversion/superpowers/plans/) | Design을 실현하는 작업 순서; 구현 후에는 이력으로 보관 |
 | Evidence | [paper/06_evaluation_and_results.md](paper/06_evaluation_and_results.md), [paper/09_claim_evidence_traceability.md](paper/09_claim_evidence_traceability.md), 조사·감사·시험 보고서 | 기록된 날짜·환경·방법에 한정된 근거 |
 | Archived | [oldversion/README.md](oldversion/README.md) | 현재 소비자가 없고 대체물이 명시된 역사 자료; 정상 읽기 경로에서 제외 |
 
@@ -123,7 +123,9 @@ Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 
    `device_bridges/*`, `web/templates/*`, `web/static/*`의 실제 코드
 2. [runtime/current_code_snapshot.md](runtime/current_code_snapshot.md)
 3. `docs/runtime`, `docs/gui`, `docs/hardware`, `docs/tutorials`의 운영 문서
-4. `개선안/*`과 `docs/ATR_*_Package/*`의 목표 설계/패키지 지침
+
+이전 개선안과 패키지 지침은 구현 기준이 아닙니다. 과거 경위가 필요할 때만
+[보관 색인](oldversion/README.md)에서 확인합니다.
 
 `runtime/current_code_snapshot.md`는 현재 코드가 실제로 노출하는 page
 route, API 그룹, agent manifest, module lifecycle, Module Management typed
@@ -198,13 +200,17 @@ Live GUI의 Specimen Making report는 위 3DP evidence를 `Live Job Monitor` 중
 
 시스템 설명 문서에서 3DP bridge를 설명할 때는 다음 세 계층을 섞지 않습니다.
 
-- `개선안/14_bambulab_gcode_autoejection_runtime_plan.md`: Reddit/GitHub/YouTube/Bambu community 사례조사와 구현 기준을 고정하는 설계 문서
+- `docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md`: 이전 외부 사례조사와 설계 이력; 현재 구현 기준이 아님
 - `docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md`: 운영자/협업자에게 공개할 BambuLab X2D bridge runtime 설명
 - `docs/gui`, `docs/runtime`, `docs/tutorials`: 실제 화면, API, closed-loop, 사용자 절차 설명
 
 즉, 외부 사례의 G-code나 UI를 그대로 복사하지 않고, 검증된 원칙만 ATR의 provider/bridge/evidence 계약으로 재해석합니다.
 
-UTM ROS Vision Runtime은 현재 Windows/PyAutoGUI UTM 제어 증거를 대체하지 않고, 장비의 물리 상태를 `/compression_tester/summary`와 카메라/marker evidence로 보강하는 별도 runtime provider입니다. 구현/운영 기준은 [hardware/utm_ros_vision_runtime_bridge.md](hardware/utm_ros_vision_runtime_bridge.md), [../개선안/16_utm_ros_runtime_bridge_live_gui_plan.md](../개선안/16_utm_ros_runtime_bridge_live_gui_plan.md), [../개선안/17_vision_agent_camera_device_bridge_live_gui_plan.md](../개선안/17_vision_agent_camera_device_bridge_live_gui_plan.md)에 고정합니다. 이 경로는 `vision.equipment_cross_check` tool contract, Device Workspace Loading/Unloading, Camera mapping/frame probe/calibration page, test-mode virtual bridge fallback, fallback message/event trace, `<external-repos>/UTM` launch/script/docs 기준 expected graph, 실제 ROS graph 기반 RQT-like node-flow panel, Live GUI UTM runtime card, 브라우저 조작/캡쳐 기반 full-path 검증을 함께 다루며, 기존 UTM proof/completion audit 문서와 혼동하지 않습니다. 현재 안정 카메라 프로파일은 `640x480 @ 15fps`, `yuyv2rgb`, runtime start 전 `exposure_dynamic_framerate=0` 고정입니다. ATR snapshot/MJPEG, green-dot image input/output, YOLO image subscribers는 Best Effort + Keep Last depth 1로 맞추며, raw `/camera/image_raw`가 느리면 `usb_cam` publisher 교체/패치가 다음 병목입니다.
+UTM ROS Vision Runtime은 Windows/PyAutoGUI 제어 증거를 대체하지 않고,
+장비 상태와 카메라 관측을 보강하는 별도 provider입니다. 현재 구현은
+`device_bridges/utm_runtime_bridge.py`, 운영 설명은
+[UTM ROS Vision Runtime](hardware/utm_ros_vision_runtime_bridge.md)을 기준으로 봅니다.
+이전 ROS·카메라 개선안은 보관 이력이며 현재 실행 계약으로 사용하지 않습니다.
 
 시스템 설명 문서를 갱신할 때는 코드 파일만 나열하지 않고 runtime path, GUI route, device bridge gate, agent report evidence가 어떻게 이어지는지 같이 적어야 합니다. 특히 Bambu/3DP 변경은 `docs/runtime/closed_loop_and_pages_reference.md`, `docs/gui/gui.md`, `docs/tutorials/device_workspace_3dp_usage.ko.md`, `docs/tutorials/user_manual.ko.md`, `docs/tutorials/user_manual.en.md`가 같은 의미로 맞아야 합니다.
 
@@ -217,8 +223,8 @@ UTM ROS Vision Runtime은 현재 Windows/PyAutoGUI UTM 제어 증거를 대체�
 | Runtime IDE | `/ide` | `web/templates/runtime_ide.html`, `web/static/runtime_ide.js` | [runtime/runtime_ide.md](runtime/runtime_ide.md), [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md) |
 | Module Management | `/module-management` | `web/templates/module_management.html`, `web/static/module_management.js` | [runtime/langgraph_runtime.md](runtime/langgraph_runtime.md), [runtime/agent_program_baseline.md](runtime/agent_program_baseline.md) |
 | Knowledge Workspace | `/knowledge` | `web/templates/knowledge.html`, `web/static/knowledge.js`, `web/static/knowledge.css` | [Markdown 지식 운영](knowledge/markdown_memory_operations.ko.md), [Source Library 적재·검색](knowledge/manual_rag_knowledge.ko.md) |
-| 3DP Workspace | `/printer` | `web/templates/printer.html`, `web/static/printer.js`, `device_bridges/bambu_bridge.py`, `device_bridges/bambu_autoejection.py` | [gui/gui.md](gui/gui.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md), [hardware/bambulab_x2d_device_bridge_runtime_guideline.md](hardware/bambulab_x2d_device_bridge_runtime_guideline.md), [../개선안/13_bambulab_x2d_spc_device_bridge_research.md](../개선안/13_bambulab_x2d_spc_device_bridge_research.md), [../개선안/14_bambulab_gcode_autoejection_runtime_plan.md](../개선안/14_bambulab_gcode_autoejection_runtime_plan.md), [tutorials/device_workspace_3dp_usage.ko.md](tutorials/device_workspace_3dp_usage.ko.md), [hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt](hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) |
-| Vision Camera Bridge | `/device-bridge/vision-utm` | `web/templates/vision_utm_device_bridge.html`, `web/static/vision_utm_device_bridge.js`, `device_bridges/utm_runtime_bridge.py` | [hardware/utm_ros_vision_runtime_bridge.md](hardware/utm_ros_vision_runtime_bridge.md), [tutorials/device_workspace_vision_camera_bridge_usage.ko.md](tutorials/device_workspace_vision_camera_bridge_usage.ko.md), [../개선안/17_vision_agent_camera_device_bridge_live_gui_plan.md](../개선안/17_vision_agent_camera_device_bridge_live_gui_plan.md) |
+| 3DP Workspace | `/printer` | `web/templates/printer.html`, `web/static/printer.js`, `device_bridges/bambu_bridge.py`, `device_bridges/bambu_autoejection.py` | [gui/gui.md](gui/gui.md), [runtime/closed_loop_and_pages_reference.md](runtime/closed_loop_and_pages_reference.md), [hardware/bambulab_x2d_device_bridge_runtime_guideline.md](hardware/bambulab_x2d_device_bridge_runtime_guideline.md), [../개선안/13_bambulab_x2d_spc_device_bridge_research.md](oldversion/개선안/13_bambulab_x2d_spc_device_bridge_research.md), [../개선안/14_bambulab_gcode_autoejection_runtime_plan.md](oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md), [tutorials/device_workspace_3dp_usage.ko.md](tutorials/device_workspace_3dp_usage.ko.md), [hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt](hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) |
+| Vision Camera Bridge | `/device-bridge/vision-utm` | `web/templates/vision_utm_device_bridge.html`, `web/static/vision_utm_device_bridge.js`, `device_bridges/utm_runtime_bridge.py` | [hardware/utm_ros_vision_runtime_bridge.md](hardware/utm_ros_vision_runtime_bridge.md), [tutorials/device_workspace_vision_camera_bridge_usage.ko.md](tutorials/device_workspace_vision_camera_bridge_usage.ko.md), [../개선안/17_vision_agent_camera_device_bridge_live_gui_plan.md](oldversion/개선안/17_vision_agent_camera_device_bridge_live_gui_plan.md) |
 | LeRobot Workspace | `/lerobot` | `web/templates/lerobot.html`, `web/static/lerobot.js` | [hardware/lerobot_robotis_manipulation_runtime_guideline.md](hardware/lerobot_robotis_manipulation_runtime_guideline.md), [hardware/isaac_sim_robotis_omx_mirror_mode.md](hardware/isaac_sim_robotis_omx_mirror_mode.md), [runtime/lerobot_dataset_policy_naming.md](runtime/lerobot_dataset_policy_naming.md) |
 | BO Workspace | `/bo` | `web/templates/bo.html`, `web/static/bo.js` | [BO Agent](agents/bo_agent.md) — LLM 전략·도구 선택, LHS/BoTorch 수치 후보, 연속값 핸드오프 |
 | CAE Workspace | `/cae` | `web/templates/cae.html`, `web/static/cae.js` | [Analysis Agent](agents/analysis_agent.md), [CAE Bridge](device_bridges/cae_computation_bridges.md) |
@@ -290,33 +296,24 @@ API·프로토콜·효과·복구를 비교할 때는
 ## 6. 설명용 문서 폴더
 
 - `docs/runtime/`: Runtime IDE, graph, loop, logging, test mode, self-evolution 설명
-- `docs/gui/`: 현재 GUI 설명; `docs/gui/history/`는 구현 계획 이력
+- `docs/gui/`: 현재 GUI 설명과 Runtime 계약
 - `docs/agents/`: agent별 역할과 runtime guideline
 - `docs/device_bridges/`: bridge/provider별 현재 역할, API, 프로토콜, 효과, 증거, 복구 Reference와 피겨
 - `docs/hardware/`: 장비 브릿지와 실제 장비 연동; `research/`와 `evidence/`는 조사·검증 기록
 - `docs/tutorials/`: 사용자 종합 매뉴얼과 첫 실행 튜토리얼
 - `docs/repository/`: GitHub/버전관리 규칙
 - `docs/process/`: Codex 작업 절차
-- `docs/project/`: 프로젝트 기본 가이드
-- `docs/strategy/`: 시스템 개선 전략
-- `docs/knowledge/`: Knowledge Graph 운영 Guide
+- `docs/knowledge/`: Markdown Knowledge, Wiki, RAG 및 메모리 운영 Guide
 - `docs/standards/`: active 규범 문서
 - `docs/templates/`: 문서 유형별 작성 틀
-- `docs/superpowers/specs/`: Design 문서
-- `docs/superpowers/plans/`: 실행 Plan 문서
-- `docs/oldversion/`: 현재 소비자가 없고 대체물이 확인된 보관 자료와 색인
+- `docs/oldversion/`: 이전 설계, 구현 계획, 개선안, UI 참고자료와 보관 색인
 
-## 7. 시스템 지시 문서
+## 7. 이전 개발 자료
 
-일반 협업자는 보통 아래 파일을 직접 수정하지 않습니다. Codex/패키지 적용 기준으로 분리된 자료입니다.
-
-- `docs/system/ATR_LangGraph_Runtime_IDE_Codex_Instructions.txt`
-- `docs/system/ATR_Live_GUI_and_LangGraph_Codex_Instructions.txt`
-- `docs/system/ATR_Self_Evolution_Codex_Instructions.txt`
-- `docs/system/codex_lerobot_robotis_gui_prompt.txt`
-- `docs/ATR_Live_GUI_Graph_Package/`
-- `docs/ATR_LangGraph_Runtime_IDE_Codex_Package/`
-- `docs/ATR_Self_Evolution_Package/`
+과거 시스템 프롬프트와 UI 패키지는 [Old Version Index](oldversion/README.md)에
+보관합니다. 현재 적용 지침으로 다시 실행하지 않습니다. 현재 구조는
+[Modularity](modularity.md), [Runtime IDE](runtime/runtime_ide.md),
+[Agent References](agents/README.md), [Bridge References](device_bridges/README.md)를 봅니다.
 
 ## 8. 문서 유지 규칙
 
@@ -339,8 +336,8 @@ API·프로토콜·효과·복구를 비교할 때는
 1차 이관 범위는 root Index, 이 인덱스, 문서 Standard/템플릿, 세 개의 핵심
 runtime Reference, Knowledge operations Guide입니다. 그 외 Markdown과 기존
 `.txt` guideline은 경로를 유지한 채 도메인별 후속 분류 대상으로 남습니다.
-2026-08-09 위치 정리에서는 명백한 research/history/evidence 문서만 도메인
-하위로 이동했고, 대체가 확인된 미사용 이미지 패키지 하나만 보관했습니다.
+2026-09-14 정리에서는 현재 코드를 기준선으로 두고, 이전 개발 과정과
+미사용 UI 참고자료를 `oldversion`으로 통합했습니다. 실증 자료는 유지합니다.
 
 ## Limitations and Known Gaps
 
@@ -364,4 +361,4 @@ runtime Reference, Knowledge operations Guide입니다. 그 외 Markdown과 기�
 - [Documentation Standard](standards/documentation_standard.md)
 - [Document Type Templates](templates/document_types.md)
 - [Current Code Snapshot](runtime/current_code_snapshot.md)
-- [Documentation Governance Design](superpowers/specs/2026-08-08-documentation-governance-design.md)
+- [Documentation Governance Design](oldversion/superpowers/specs/2026-08-08-documentation-governance-design.md)

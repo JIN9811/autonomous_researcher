@@ -1,5 +1,5 @@
 ---
-{"topic_id":"manipulation-role","owner":"manipulation_agent","source_refs":["docs/agents/manipulation_agent.md"],"source_revision":{"docs/agents/manipulation_agent.md":"908e47fbc9ee42835d376e7b9925f1a8cbe4340e998c70213fbf207e324ed430"},"verified_at":"2026-09-13T00:00:00+00:00","applicability":"Public Manipulation Agent responsibilities and handoff","status":"reviewed"}
+{"topic_id":"manipulation-role","owner":"manipulation_agent","source_refs":["docs/agents/manipulation_agent.md"],"source_revision":{"docs/agents/manipulation_agent.md":"fef922545e6d642ec0f8304935ae41d11946ec7f45b279124f7fa7b1ad3d212c"},"verified_at":"2026-09-14T00:00:00+00:00","applicability":"Public Manipulation Agent responsibilities and handoff","status":"reviewed"}
 ---
 
 # Manipulation Agent

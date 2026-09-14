@@ -2,7 +2,7 @@
 
 작성 기준: 2026-06-16
 대상: `3DP Printer Bridge`, `PrinterDeviceBridgeManager`, `SpecimenMakingAgent`, `BambuLab` active printer provider
-문서 성격: 운영자/협업자용 시스템 설명 문서. 구현 지시 원본은 `개선안/14_bambulab_gcode_autoejection_runtime_plan.md`를 따른다.
+문서 성격: 운영자/협업자용 시스템 설명 문서. 구현 지시 원본은 `docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md`를 따른다.
 
 ---
 
@@ -138,7 +138,7 @@ ATR bridge는 slicing을 upload/start와 분리한다. `Slice Bambu Artifact`는
 
 - `--export-3mf`에는 absolute path가 아니라 `--outputdir` 내부의 basename을 넘긴다. Spark workstation의 BambuStudio `02.07.01.57`에서는 absolute path를 넘기면 output directory가 중복 결합되어 export가 실패할 수 있었다.
 - 명시 `load_settings`가 없으면 bridge runner는 Bambu Studio 기본 machine/process/filament preset을 그대로 사용한다. purge, cleaning, filament start/end G-code 같은 기본 동작은 유지하고, build plate front에 그어지는 test/intro/nozzle-load line만 sliced artifact 후처리에서 제거한다.
-- 실제 검증에서 basename export를 사용하면 `/home/jin/다운로드/specimen(4).stl` 기준 `.gcode.3mf` 생성, 내부 `Metadata/plate_1.gcode` patch, front test line removal, md5 sidecar 갱신, validator 통과가 가능했다. 이 검증은 artifact 생성/patch까지만 의미하며 실제 publish/ejection 성공을 뜻하지 않는다.
+- 실제 검증에서 basename export를 사용하면 `<home>/다운로드/specimen(4).stl` 기준 `.gcode.3mf` 생성, 내부 `Metadata/plate_1.gcode` patch, front test line removal, md5 sidecar 갱신, validator 통과가 가능했다. 이 검증은 artifact 생성/patch까지만 의미하며 실제 publish/ejection 성공을 뜻하지 않는다.
 - 실제 장비에 대해 HTTP artifact route는 ATR 서버 LAN IP URL로 server-side fetch와 sha256 match까지 확인됐다. 현재 GUI는 owner-managed publish 기본값을 보내므로 artifact/camera/bed-clear/start-state blocker가 없으면 `Pre-start Check`가 `ready_to_publish_not_started`까지 도달할 수 있다. 이 route는 여전히 `published=false`, `will_publish=false`를 유지한다.
 - `.gcode.3mf` patch는 요청한 `plate_id`와 정확히 일치하는 `Metadata/plate_<id>.gcode`만 대상으로 한다. 요청 plate가 없고 다른 plate G-code가 존재하더라도 fallback으로 대체하지 않는다. 이는 MQTT `project_file.param`과 내부 plate path가 어긋난 채로 시작되는 것을 막기 위한 live-start gate 계약이다.
 - 로컬 `.gcode.3mf` artifact를 `printer.prepare` 또는 HTTP artifact route에 넘길 때도 같은 검사를 수행한다. 요청한 `plate_id`의 `Metadata/plate_<id>.gcode`가 없으면 FTPS upload나 HTTP export를 만들기 전에 `BAMBU_PROJECT_FILE_PARAM_MISMATCH`로 차단한다.
@@ -300,7 +300,7 @@ Live/Test 모두 같은 API contract를 사용해야 한다. 차이는 bridge mo
 
 Bambu bridge 동작을 바꾸면 다음 문서를 같이 확인한다.
 
-- `개선안/14_bambulab_gcode_autoejection_runtime_plan.md`: 상세 개선안 및 검증 항목
+- `docs/oldversion/개선안/14_bambulab_gcode_autoejection_runtime_plan.md`: 상세 개선안 및 검증 항목
 - `docs/runtime/closed_loop_and_pages_reference.md`: runtime/API/Live GUI 계약
 - `docs/gui/gui.md`: 화면 버튼, 상태, API surface
 - `docs/tutorials/device_workspace_3dp_usage.ko.md`: 운영자 사용법
@@ -334,7 +334,7 @@ Looprint 계열은 already-sliced G-code/3MF에 cooldown/push-off/loop logic을 
 
 - Bambu Studio CLI runner가 `--export-3mf`에 absolute path가 아니라 output directory 내부 basename을 전달한다.
 - 명시 `load_settings`가 없을 때 runner는 Bambu Studio 기본 preset을 보존한다. `--load-settings`/`--load-filaments`를 자동 주입하지 않으며, 산출된 `.gcode` 또는 `.gcode.3mf`의 plate G-code에서 front test/intro/nozzle-load line block만 제거하고 md5 sidecar를 갱신한다.
-- `/home/jin/다운로드/specimen(4).stl` 기준으로 `.gcode.3mf` 생성, 내부 `Metadata/plate_1.gcode` patch, md5 sidecar 갱신, validator 통과가 확인됐다.
+- `<home>/다운로드/specimen(4).stl` 기준으로 `.gcode.3mf` 생성, 내부 `Metadata/plate_1.gcode` patch, md5 sidecar 갱신, validator 통과가 확인됐다.
 - Bambu autoejection tail은 `source_plate_path`, `plate_id`, `loop_index`, material/bed placeholder, cooldown policy, purge/parking strategy, door/front assumption, toolhead-cover risk note를 artifact comment로 기록한다.
 - `Validate G-code Preview` / `Validate Left|Center|Right`는 `validate_only=true`로 동작해 would-be tail과 validator evidence만 반환하며, `.autoeject.*` artifact나 manifest를 쓰지 않는다.
 - `Pre-start Check`는 camera/status, slicing, optional native autoejection patch, HTTP route, start gate, SPC readiness를 병합하되 MQTT publish를 실행하지 않는다.
@@ -344,7 +344,7 @@ Looprint 계열은 already-sliced G-code/3MF에 cooldown/push-off/loop logic을 
 
 2026-06-16 로컬 audit snapshot:
 
-- `/home/jin/다운로드/specimen(4).stl` 기반 Bambu Studio slicing은 `.gcode.3mf` artifact 생성까지 통과했다.
+- `<home>/다운로드/specimen(4).stl` 기반 Bambu Studio slicing은 `.gcode.3mf` artifact 생성까지 통과했다.
 - 동일 artifact에 대해 `Validate G-code Preview` 성격의 non-mutating 검증은 patched artifact나 manifest를 쓰지 않고 validator evidence만 반환해야 한다.
 - `Generate Patched Artifact` 성격의 patch 실행은 `.autoeject.gcode.3mf`, sidecar manifest, 내부 `Metadata/plate_1.gcode.md5` 갱신까지 확인됐다.
 - HTTP artifact route는 ATR 서버의 LAN IP URL로 server-side fetch 및 sha256 match가 확인됐다. 이 값은 프린터 publish를 실행했다는 뜻이 아니라, 프린터에 전달 가능한 URL 후보가 준비됐다는 뜻이다.

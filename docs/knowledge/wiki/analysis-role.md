@@ -1,5 +1,5 @@
 ---
-{"topic_id":"analysis-role","owner":"analysis_agent","source_refs":["docs/agents/analysis_agent.md"],"source_revision":{"docs/agents/analysis_agent.md":"7f1c46280f979b2bffa18d8a922e60747a08fa1c2cf8832f5730fbfdd4fb7348"},"verified_at":"2026-09-13T00:00:00+00:00","applicability":"Public Analysis Agent responsibilities and handoff","status":"reviewed"}
+{"topic_id":"analysis-role","owner":"analysis_agent","source_refs":["docs/agents/analysis_agent.md"],"source_revision":{"docs/agents/analysis_agent.md":"40e6f986bf0376d24ac1930eb73891e3300386a89318e74ff2355a085db3821a"},"verified_at":"2026-09-14T00:00:00+00:00","applicability":"Public Analysis Agent responsibilities and handoff","status":"reviewed"}
 ---
 
 # Analysis Agent

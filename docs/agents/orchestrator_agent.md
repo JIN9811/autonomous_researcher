@@ -28,7 +28,7 @@ related_docs:
   - docs/gui/reference/live_gui_reference_alignment.md
   - docs/runtime/langgraph_runtime.md
   - docs/runtime/runtime_ide.md
-  - docs/superpowers/specs/2026-09-12-orchestrator-dynamic-experimental-setup-design.md
+  - docs/oldversion/superpowers/specs/2026-09-12-orchestrator-dynamic-experimental-setup-design.md
 supersedes: []
 -->
 
@@ -198,7 +198,7 @@ virtual-device route exposed a larger current Guardian contract. Current
 admission facts are retained, optional Wiki context uses only remaining space,
 and an oversized current contract still requires review rather than truncation.
 This input allowance does not change Guardian decisions or authorize devices;
-see the [current integration verification](../superpowers/plans/2026-09-13-specimen-agent-packages.md).
+see the [current integration verification](../oldversion/superpowers/plans/2026-09-13-specimen-agent-packages.md).
 
 Separate fresh capacity probes reported API-served `gpt-5.5-2026-04-23`
 (5,227 input / 1,102 output tokens; 16.28 s) selecting
@@ -291,7 +291,7 @@ checks live in `tests/unit/test_agent_execution_graph.py` and
 `tests/integration/test_agent_execution_graph_api.py`: valid saved routes execute
 registered owner functions, while invalid or busy activation cannot replace the
 active definition. Structural Dry Run is separate from this non-actuating
-execution verification. See the [implementation plan](../superpowers/plans/2026-09-13-executable-agent-ide.md).
+execution verification. See the [implementation plan](../oldversion/superpowers/plans/2026-09-13-executable-agent-ide.md).
 
 ### Earlier orchestration evidence
 
@@ -329,6 +329,6 @@ working-tree scope, not a commit containing these changes.
 
 - [Agent Reference Index](README.md)
 - [Agent API and Connection Matrix](agent_api_connection_matrix.md)
-- [Live GUI reference alignment](../gui/reference/live_gui_reference_alignment.md)
+- [Live GUI runtime contracts](../gui/reference/live_gui_reference_alignment.md)
 - [Runtime IDE Reference](../runtime/runtime_ide.md)
-- [Approved dynamic Experimental Setup design](../superpowers/specs/2026-09-12-orchestrator-dynamic-experimental-setup-design.md)
+- [Approved dynamic Experimental Setup design](../oldversion/superpowers/specs/2026-09-12-orchestrator-dynamic-experimental-setup-design.md)

@@ -43,6 +43,7 @@ def stage_manifest(root, approved_assets=None, approved_corpora=None):
 @pytest.mark.parametrize("path", [
     "memory/knowledge/private/user/note.md", "runs/example/transcript.json", "output/session.json",
     "docs/knowledge/manuals/sources/private-source.pdf", "artifacts/experiment/result.csv",
+    "oldversion/local_windows_path_outputs/example/recording.json",
 ])
 def test_force_added_private_data_is_blocked(repo, path):
     stage(repo, path, "synthetic private content")
@@ -67,6 +68,11 @@ def test_safe_public_wiki_and_memory_source_code_allowed(repo):
     stage(repo, "docs/knowledge/wiki/example.md", "# Wiki\nSource-backed system knowledge.")
     stage(repo, "memory/example.py", '"""Public implementation module."""\n')
     stage(repo, "runs/README.md", "Runtime data stays local.")
+    assert check(repo).returncode == 0
+
+
+def test_public_document_archive_is_distinct_from_private_local_archive(repo):
+    stage(repo, "docs/oldversion/example.md", "# Public development history\n")
     assert check(repo).returncode == 0
 
 

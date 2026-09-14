@@ -1,7 +1,7 @@
 # Lab Equipment Agent UTM Visual-Control/Data-Loop Audit
 
 Date: 2026-05-30
-Source requirement: `개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md`
+Source requirement: `docs/oldversion/개선안/05_lab_equipment_agent_utm_visual_control_data_loop_research.md`
 Status: implementation and simulator/browser evidence strengthened; physical live UTM run evidence is still required before calling the goal fully complete.
 
 ## Completion Rule

@@ -1,7 +1,7 @@
 # Guardian Improvement 09 Implementation Audit
 
 Date: 2026-05-31
-Scope: `개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md`
+Scope: `docs/oldversion/개선안/09_guardian_agent_graphwide_safety_incident_loop_research.md`
 
 This audit records the current implementation evidence for the graph-wide Guardian safety, runtime shield, and incident loop upgrade. It is intentionally requirement-based so future work can verify whether a change preserves the intended safety architecture.
 

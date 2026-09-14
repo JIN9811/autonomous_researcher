@@ -302,7 +302,6 @@ RUNTIME_IDE_SOURCE_CONTRACTS = (
 RUNTIME_IDE_NAVIGATION_LINKS = {
     "README.md": "docs/runtime/runtime_ide.md",
     "README.ko.md": "docs/runtime/runtime_ide.md",
-    "README.en.md": "docs/runtime/runtime_ide.md",
     "docs/README.md": "runtime/runtime_ide.md",
     "docs/runtime/langgraph_runtime.md": "runtime_ide.md",
 }

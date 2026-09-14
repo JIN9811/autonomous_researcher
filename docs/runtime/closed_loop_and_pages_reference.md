@@ -36,7 +36,7 @@ supersedes: []
 
 - **루프가 존재하지 않는 것이 아닙니다.**
   - 닫힌 루프는 `POST /api/run/start` 또는 `POST /api/runtime/start` 호출 이후에만 실행됩니다.
-  - `/home/jin/autonomous_researcher/graphs/configs/atr_closed_loop.yaml`의 `atr_closed_loop` 그래프가 기본 실행 그래프입니다.
+  - `<home>/autonomous_researcher/graphs/configs/atr_closed_loop.yaml`의 `atr_closed_loop` 그래프가 기본 실행 그래프입니다.
 - 루프가 안 도는 것처럼 보이면 대부분은 **`run_start`가 안 되거나, 이벤트를 다른 창에서 못 보고 있거나, guardian/lifecycle 조건이 `complete/error`로 빠른 종료한 경우**입니다.
 
 ## Scope
@@ -178,7 +178,7 @@ edit/activation은 여전히 Runtime IDE의 drag/drop, port 연결,
 validate/dry-run, Save Version gate를 통과해야 합니다. 현재 backend는
 payload/module runtime의 `supervisor_policy`를 읽을 수 있고 Module
 Management는 주요 descriptor 필드를 typed form으로 편집할 수 있습니다. 이 잔여 범위는
-`개선안/12_free_modularization_gap_analysis.md`에 추적합니다.
+`docs/oldversion/개선안/12_free_modularization_gap_analysis.md`에 추적합니다.
 
 ---
 
@@ -266,7 +266,7 @@ dispatch -> idle -> design -> specimen -> vision -> manipulation -> equipment ->
 - **목적**: 실험장비(Windows 브릿지, UTM 매크로) 제어 handoff
 - **핵심 툴**: `equipment.pyautogui.health`, `equipment.pyautogui.list_programs`, `equipment.pyautogui.run`, `utm.run_protocol`
 - **필수 결과 키**: `equipment_result`, `protocol_note`
-- **UTM ROS evidence provider**: `device_bridges/utm_runtime_bridge.py`는 `/home/jin/external_repos/UTM`의 `start_utm_vision_stack.sh`, `camera_rect.launch.py`, `green_dot_monitor.launch.py`, `yolo.sh` 흐름을 기준으로 `usb_cam -> rectify_node -> green_dot_monitor -> yolov8` RQT-like graph를 만든다. 실제 graph는 ROS2 node/topic introspection으로 읽고, image evidence는 `/api/equipment/utm-runtime/frame`이 `/image_utm`, `/yolo/dbg_image`, `/compression_tester/debug_image`, `/camera/image_rect`, `/camera/image_raw` 순서로 1프레임을 캡처한다.
+- **UTM ROS evidence provider**: `device_bridges/utm_runtime_bridge.py`는 `<home>/external_repos/UTM`의 `start_utm_vision_stack.sh`, `camera_rect.launch.py`, `green_dot_monitor.launch.py`, `yolo.sh` 흐름을 기준으로 `usb_cam -> rectify_node -> green_dot_monitor -> yolov8` RQT-like graph를 만든다. 실제 graph는 ROS2 node/topic introspection으로 읽고, image evidence는 `/api/equipment/utm-runtime/frame`이 `/image_utm`, `/yolo/dbg_image`, `/compression_tester/debug_image`, `/camera/image_rect`, `/camera/image_raw` 순서로 1프레임을 캡처한다.
 - **UTM test/live policy**: test mode에서 ROS topic/frame evidence가 없으면 `vision.equipment_cross_check`가 `virtual_utm_bridge`로 진행하되 fallback trace를 남긴다. live mode에서는 virtual evidence로 physical UTM 완료를 선언하지 않고 operator attention/recovery action으로 남긴다.
 
 ### Analysis Agent (`modules/analysis`, `agent.analysis_agent`)

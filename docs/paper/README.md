@@ -166,4 +166,4 @@ and artifact manifest are present.
 
 - [Paper Documentation Standard](../standards/paper_documentation_standard.md)
 - [Current Code Snapshot](../runtime/current_code_snapshot.md)
-- [Paper-first documentation design](../superpowers/specs/2026-08-09-github-paper-first-documentation-design.md)
+- [Paper-first documentation design](../oldversion/superpowers/specs/2026-08-09-github-paper-first-documentation-design.md)

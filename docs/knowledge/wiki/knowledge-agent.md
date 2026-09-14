@@ -1,5 +1,5 @@
 ---
-{"topic_id":"knowledge-agent","owner":"knowledge","source_refs":["docs/agents/knowledge_agent.md"],"source_revision":{"docs/agents/knowledge_agent.md":"316a26c0ff2c9413e501f53806b94f2c719709bbb0822592ad916ef080e97ea3"},"verified_at":"2026-09-14T00:00:00+00:00","applicability":"Knowledge evidence and memory orientation","status":"reviewed"}
+{"topic_id":"knowledge-agent","owner":"knowledge","source_refs":["docs/agents/knowledge_agent.md"],"source_revision":{"docs/agents/knowledge_agent.md":"bb87bd7a08bf38bf15050163a6fdb50ec71377e0126d7e496d9b3da7bd1f6598"},"verified_at":"2026-09-14T00:00:00+00:00","applicability":"Knowledge evidence and memory orientation","status":"reviewed"}
 ---
 
 # Knowledge Agent role

@@ -7,7 +7,7 @@
 | Purpose | Install external runtimes, services and device-side dependencies |
 | Audience | Workstation maintainers and deployment operators |
 | Preparation | Choose the operating system, model backend and required device integrations |
-| Reading path | [Python packages](requirements.txt) · [Setup and operation](README.en.md) · [Device bridges](docs/device_bridges/README.md) |
+| Reading path | [Python packages](requirements.txt) · [Setup and operation](README.md) · [Device bridges](docs/device_bridges/README.md) |
 
 This file lists non-Python installation requirements, external checkouts, local
 services, model downloads, and device-side programs required by this repository.
@@ -125,13 +125,13 @@ Optional but commonly used:
   dependency: it requires ROS apt packages, a built UTM ROS workspace, a built
   `yolo_ros` workspace, `uv`, and the runtime launcher configured in
   `configs/devices.yaml`. The runtime flow follows the cloned UTM program under
-  `/home/jin/external_repos/UTM`; the browser RQT-like view is `usb_cam ->
+  `"$HOME/external_repos/UTM"`; the browser RQT-like view is `usb_cam ->
   rectify_node -> green_dot_monitor -> yolov8`, with live `ros2 node/topic`
   introspection overlaid. Detailed setup and verification are documented in
   `docs/hardware/utm_ros_vision_runtime_bridge.md` and
-  `개선안/16_utm_ros_runtime_bridge_live_gui_plan.md`. Camera bridge setup,
+  `docs/oldversion/개선안/16_utm_ros_runtime_bridge_live_gui_plan.md`. Camera bridge setup,
   V4L2 device mapping, frame probe, and checkerboard calibration are tracked in
-  `개선안/17_vision_agent_camera_device_bridge_live_gui_plan.md`. The stable
+  `docs/oldversion/개선안/17_vision_agent_camera_device_bridge_live_gui_plan.md`. The stable
   BRIO-class UVC profile on this workstation is `640x480 @ 60fps`,
   `pixel_format=mjpeg2rgb`, `io_method=mmap`; ATR pins
   `exposure_dynamic_framerate=0` with `v4l2-ctl` before runtime start and
@@ -170,22 +170,22 @@ Optional but commonly used:
     ros-jazzy-rqt-graph
   sudo rosdep init  # only once
   rosdep update
-  cd /home/jin/external_repos/UTM
+  cd "$HOME/external_repos/UTM"
   source /opt/ros/jazzy/setup.bash
   rosdep check --from-paths src --ignore-src
   colcon build --symlink-install
-  source /home/jin/external_repos/UTM/install/setup.bash
-  cd /home/jin/external_repos
+  source "$HOME/external_repos/UTM/install/setup.bash"
+  cd "$HOME/external_repos"
   git clone https://github.com/mgonzs13/yolo_ros.git yolo_ros
-  cd /home/jin/external_repos/yolo_ros
+  cd "$HOME/external_repos/yolo_ros"
   source /opt/ros/jazzy/setup.bash
   rosdep check --from-paths . --ignore-src
   colcon build --symlink-install
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"
-  uv sync --project /home/jin/external_repos/yolo_ros/install/yolo_ros/share/yolo_ros
-  mkdir -p /home/jin/external_repos/yolo_ros/models
-  curl -L -o /home/jin/external_repos/yolo_ros/models/yolov8m.pt \
+  uv sync --project "$HOME/external_repos/yolo_ros/install/yolo_ros/share/yolo_ros"
+  mkdir -p "$HOME/external_repos/yolo_ros/models"
+  curl -L -o "$HOME/external_repos/yolo_ros/models/yolov8m.pt" \
     https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8m.pt
   ```
   The runtime should expose `ros2`, `colcon`, and the UTM stack topics such as
@@ -204,14 +204,14 @@ Optional but commonly used:
   input, not browser rendering. The accepted local profile is `mjpeg2rgb` at
   `60fps` via `mmap`, plus
   `v4l2-ctl --device=<camera> --set-ctrl=exposure_dynamic_framerate=0`.
-  Local disk note: `/home/jin/external_repos/yolo_ros` is about 5 GB after
+  Local disk note: `"$HOME/external_repos/yolo_ros"` is about 5 GB after
   `uv sync` because it contains PyTorch/CUDA wheels.
 - NVIDIA Isaac Sim for ROBOTIS OMX real-to-sim mirror mode. The Spark
-  workstation path is `/home/jin/IsaacSim/`. The ATR mirror receiver production
+  workstation path is `"$HOME/IsaacSim/"`. The ATR mirror receiver production
   path launches:
   ```bash
-  /home/jin/IsaacSim/isaac-sim.sh \
-    --ext-folder /home/jin/autonomous_researcher/sim/robotis_omx/extensions \
+  "$HOME/IsaacSim/isaac-sim.sh" \
+    --ext-folder "$HOME/autonomous_researcher/sim/robotis_omx/extensions" \
     --enable atr.omx.mirror
   ```
   The receiver extension opens
@@ -222,7 +222,7 @@ Optional but commonly used:
   Play mode automatically. Scene generation must use Isaac Sim Python because
   system Python does not provide `pxr`:
   ```bash
-  /home/jin/IsaacSim/python.sh sim/robotis_omx/tools/build_table_layout_scene.py
+  "$HOME/IsaacSim/python.sh" sim/robotis_omx/tools/build_table_layout_scene.py
   ```
   The generated table scene includes a physics-lite contract: `PhysicsScene`,
   static colliders for table/A4/disk objects, and a dynamic red specimen block
@@ -248,7 +248,7 @@ Optional but commonly used:
   atr doctor
   ```
   Current Spark workstation smoke check:
-  `timeout 15s /home/jin/.local/bin/bambu-studio --help` reports
+  `timeout 15s "$HOME/.local/bin/bambu-studio" --help` reports
   `BambuStudio-02.07.01.57` and documents `--slice`, `--arrange`,
   `--ensure-on-bed`, `--outputdir`, `--load-settings`, and `--load-filaments`.
   The 3DP GUI `Slice Bambu Artifact` action uses those CLI options, passes
@@ -491,7 +491,7 @@ Required for real robot teleoperation, recording, training, and rollout:
 
 - A separate LeRobot checkout, expected locally at:
   - Linux default: `~/lerobot`
-  - Windows example: `C:\Users\user\Documents\lerobot`
+  - Windows example: `%USERPROFILE%\Documents\lerobot`
 - Conda environment:
   - `lerobot`
 - LeRobot CLI entry points available inside that environment:
@@ -646,7 +646,7 @@ Install the RealSense Python SDK into the LeRobot environment as well when robot
 teleoperation, recording, or rollout will use RealSense cameras:
 
 ```bash
-/home/jin/miniconda3/envs/lerobot/bin/python -m pip install pyrealsense2==2.58.2.10647
+"$HOME/miniconda3/envs/lerobot/bin/python" -m pip install pyrealsense2==2.58.2.10647
 ```
 
 Spark workstation D405 fix:
@@ -658,8 +658,8 @@ sudo apt install -y git cmake ninja-build build-essential pkg-config \
   libxinerama-dev libxcursor-dev libxi-dev libxrandr-dev \
   python3-dev python3-pip python3-setuptools python3-numpy \
   v4l-utils udev libcurl4-openssl-dev curl
-git clone https://github.com/realsenseai/librealsense /home/jin/librealsense-rsusb
-cd /home/jin/librealsense-rsusb
+git clone https://github.com/realsenseai/librealsense "$HOME/librealsense-rsusb"
+cd "$HOME/librealsense-rsusb"
 git checkout v2.58.2
 
 # Host udev rule, then reload.
@@ -672,8 +672,8 @@ cmake -S . -B build-rsusb -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DFORCE_RSUSB_BACKEND=ON \
   -DBUILD_PYTHON_BINDINGS=ON \
-  -DPYTHON_EXECUTABLE=/home/jin/autonomous_researcher/.venv/bin/python \
-  -DPython_EXECUTABLE=/home/jin/autonomous_researcher/.venv/bin/python \
+  -DPYTHON_EXECUTABLE="$HOME/autonomous_researcher/.venv/bin/python" \
+  -DPython_EXECUTABLE="$HOME/autonomous_researcher/.venv/bin/python" \
   -DBUILD_EXAMPLES=OFF \
   -DBUILD_GRAPHICAL_EXAMPLES=OFF \
   -DBUILD_TOOLS=ON \
@@ -686,8 +686,8 @@ cmake -S . -B build-rsusb-py310 -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DFORCE_RSUSB_BACKEND=ON \
   -DBUILD_PYTHON_BINDINGS=ON \
-  -DPYTHON_EXECUTABLE=/home/jin/miniconda3/envs/lerobot/bin/python \
-  -DPython_EXECUTABLE=/home/jin/miniconda3/envs/lerobot/bin/python \
+  -DPYTHON_EXECUTABLE="$HOME/miniconda3/envs/lerobot/bin/python" \
+  -DPython_EXECUTABLE="$HOME/miniconda3/envs/lerobot/bin/python" \
   -DBUILD_EXAMPLES=OFF \
   -DBUILD_GRAPHICAL_EXAMPLES=OFF \
   -DBUILD_TOOLS=ON \
@@ -699,7 +699,7 @@ cmake --build build-rsusb-py310 -j 8
 Host-wide RealSense tools for system diagnosis:
 
 ```bash
-cd /home/jin/librealsense-rsusb
+cd "$HOME/librealsense-rsusb"
 cmake -S . -B build-rsusb-system -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX=/usr/local \
@@ -767,12 +767,12 @@ succeeded without changing ATR mapping files.
 Pin the built RSUSB bindings ahead of the pip wheel:
 
 ```bash
-cat > /home/jin/autonomous_researcher/.venv/lib/python3.12/site-packages/atr_realsense_rsusb.pth <<'PTH'
-import os, sys; p='/home/jin/librealsense-rsusb/build-rsusb/Release'; os.path.isdir(p) and p not in sys.path and sys.path.insert(0, p)
+cat > "$HOME/autonomous_researcher/.venv/lib/python3.12/site-packages/atr_realsense_rsusb.pth" <<'PTH'
+import os, sys; p=os.path.expanduser('~/librealsense-rsusb/build-rsusb/Release'); os.path.isdir(p) and p not in sys.path and sys.path.insert(0, p)
 PTH
 
-cat > /home/jin/miniconda3/envs/lerobot/lib/python3.10/site-packages/atr_realsense_rsusb.pth <<'PTH'
-import os, sys; p='/home/jin/librealsense-rsusb/build-rsusb-py310/Release'; os.path.isdir(p) and p not in sys.path and sys.path.insert(0, p)
+cat > "$HOME/miniconda3/envs/lerobot/lib/python3.10/site-packages/atr_realsense_rsusb.pth" <<'PTH'
+import os, sys; p=os.path.expanduser('~/librealsense-rsusb/build-rsusb-py310/Release'); os.path.isdir(p) and p not in sys.path and sys.path.insert(0, p)
 PTH
 ```
 
@@ -791,7 +791,7 @@ PY
 
 # LeRobot execution environment. This is the environment used by live
 # teleoperate/record/rollout subprocesses.
-/home/jin/miniconda3/condabin/conda run --no-capture-output -n lerobot python - <<'PY'
+"$HOME/miniconda3/condabin/conda" run --no-capture-output -n lerobot python - <<'PY'
 import pyrealsense2 as rs
 print("pyrealsense2", rs.__file__)
 ctx = rs.context()
@@ -801,7 +801,7 @@ for dev in ctx.query_devices():
 PY
 
 # Cross-check through LeRobot's own camera discovery command.
-/home/jin/miniconda3/condabin/conda run --no-capture-output -n lerobot lerobot-find-cameras realsense
+"$HOME/miniconda3/condabin/conda" run --no-capture-output -n lerobot lerobot-find-cameras realsense
 
 # Host-wide system tools. These do not write ATR camera mappings.
 rs-enumerate-devices
@@ -891,7 +891,7 @@ LeRobot D405 issue-cleaning rules:
 - If `wrist=352122273019` disappears after a failed session, first run:
 
 ```bash
-cd /home/jin/autonomous_researcher
+cd "$HOME/autonomous_researcher"
 .venv/bin/python scripts/realsense_usb_stabilize.py --include-brio
 ```
 
@@ -910,7 +910,7 @@ Spark workstation RealSense safety note:
 
 - `pyrealsense2` installation only adds the Python SDK wheel; it does not install
   kernel drivers or rewrite camera mappings. On this Spark workstation, D405
-  live use must import the RSUSB build from `/home/jin/librealsense-rsusb/...`
+  live use must import the RSUSB build from `"$HOME/librealsense-rsusb/..."`
   instead of the pip wheel package path.
 - Do not open arbitrary depth/RGB streams as a smoke test. First enumerate the
   device and advertised stream profiles through `RealSenseBridge.enumerate`.
@@ -969,12 +969,12 @@ X-VLA is benchmarked on the same ROBOTIS OMX-AI datasets and real rollout tasks.
 SmolVLA is integrated as an additive LeRobot VLA backend. Training runs through
 the TorchCodec-ready `lerobot-pi05-torch211` conda environment so video decoding
 uses the same TorchCodec stack as Pi0.5. The editable source checkout for that
-environment is `/home/jin/lerobot_pi05`.
+environment is `"$HOME/lerobot_pi05"`.
 
 Install the LeRobot extra and prefetch the required model resources:
 
 ```bash
-cd /home/jin/lerobot_pi05
+cd "$HOME/lerobot_pi05"
 conda run --no-capture-output -n lerobot-pi05-torch211 python -m pip install -e ".[smolvla]"
 conda run --no-capture-output -n lerobot-pi05-torch211 hf download lerobot/smolvla_base --max-workers 1
 conda run --no-capture-output -n lerobot-pi05-torch211 hf download HuggingFaceTB/SmolVLM2-500M-Video-Instruct --exclude "onnx/*" --max-workers 1
@@ -1037,7 +1037,7 @@ Required CAE documentation lives in:
 
 ```text
 docs/agents/cae_analysis_runtime_guideline.txt
-개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md
+docs/oldversion/개선안/15_utm_calculix_pinn_multifidelity_code_first_plan.md
 ```
 
 Keep physical UTM data as the measured source of truth. CAE output is simulation evidence only and must not be inserted into BO as a measured observation.
@@ -1174,7 +1174,7 @@ POST /api/knowledge/graphify/import
 
 The CLI also supports `--json-path` for routing the local JSON graph fallback to a specific file during tests or audits.
 The graph query endpoint supports `project_context` for project code/docs/module graph retrieval separate from runtime experiment memory.
-The installed `graphify` command is also exposed through `/home/jin/.local/bin/graphify`; ATR uses the installed Graphify Python API when `atr knowledge graphify-scan --external-graphify` is used.
+The installed `graphify` command is also exposed through `"$HOME/.local/bin/graphify"`; ATR uses the installed Graphify Python API when `atr knowledge graphify-scan --external-graphify` is used.
 
 The active Knowledge workflow uses scoped Markdown memory and manual retrieval while preserving ontology definitions and original artifacts. Knowledge graph/Neo4j synchronization and reconciliation are retired; their HTTP endpoints return 410. See `docs/knowledge/markdown_memory_operations.ko.md` for current operation. The graph tooling below is retained legacy context, not an active application dependency.
 For `graphify query`, use the raw Graphify node-link file at `memory/knowledge/graphify/external_raw/graph.json`; use `memory/knowledge/graphify/project_graph.json` for ATR JSON/Neo4j import.
@@ -1309,14 +1309,14 @@ The Spark RealSense runtime should prefer the local RSUSB build when Python impo
 `pyrealsense2` directly:
 
 ```bash
-export PYTHONPATH=/home/jin/librealsense-rsusb/build-rsusb-system/Release:$PYTHONPATH
-export LD_LIBRARY_PATH=/home/jin/librealsense-rsusb/build-rsusb-system/Release:$LD_LIBRARY_PATH
+export PYTHONPATH="$HOME/librealsense-rsusb/build-rsusb-system/Release:$PYTHONPATH"
+export LD_LIBRARY_PATH="$HOME/librealsense-rsusb/build-rsusb-system/Release:$LD_LIBRARY_PATH"
 ```
 
 Build the local ROS package:
 
 ```bash
-cd /home/jin/autonomous_researcher/ros
+cd "$HOME/autonomous_researcher/ros"
 colcon build --packages-select atr_specimen_pose_tracker
 ```
 

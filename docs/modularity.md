@@ -33,8 +33,8 @@ related_docs:
   - docs/agents/README.md
   - docs/device_bridges/README.md
   - docs/runtime/runtime_ide.md
-  - docs/superpowers/specs/2026-09-13-package-agent-bridge-modularization-design.md
-  - docs/superpowers/plans/2026-09-14-core-plans-and-modularity-guide.md
+  - docs/oldversion/superpowers/specs/2026-09-13-package-agent-bridge-modularization-design.md
+  - docs/oldversion/superpowers/plans/2026-09-14-core-plans-and-modularity-guide.md
 supersedes: []
 -->
 
@@ -69,8 +69,9 @@ can cross its declared provider or equipment effect boundary.
 This Reference describes the working-tree implementation verified on
 2026-09-14. Executable code, checked-in graph/module configuration, registered
 handlers and tools, and persisted run evidence remain authoritative. The
-[architecture Design](superpowers/specs/2026-09-13-package-agent-bridge-modularization-design.md)
-owns the wider target; this page reports only the implemented subset.
+[archived architecture Design](oldversion/superpowers/specs/2026-09-13-package-agent-bridge-modularization-design.md)
+records the preceding development decisions; it does not override the current
+implementation described here.
 
 ## Terms and Relationships
 
@@ -184,7 +185,7 @@ browser/API checks covered invalid input, validation without writes, explicit
 Knowledge-only application, Default restore, export, and detached import at
 1920 and 900 px. Those checks used controlled model and equipment I/O and made
 no physical calls. Exact commands and boundaries remain in the
-[implementation and verification record](superpowers/plans/2026-09-14-core-plans-and-modularity-guide.md).
+[implementation and verification record](oldversion/superpowers/plans/2026-09-14-core-plans-and-modularity-guide.md).
 
 ## Related Documents
 
@@ -192,4 +193,4 @@ no physical calls. Exact commands and boundaries remain in the
 - [Agent Reference Index](agents/README.md)
 - [Device Bridge Reference Index](device_bridges/README.md)
 - [Runtime IDE Reference](runtime/runtime_ide.md)
-- [Package, Agent, and Device Bridge Design](superpowers/specs/2026-09-13-package-agent-bridge-modularization-design.md)
+- [Package, Agent, and Device Bridge Design](oldversion/superpowers/specs/2026-09-13-package-agent-bridge-modularization-design.md)
