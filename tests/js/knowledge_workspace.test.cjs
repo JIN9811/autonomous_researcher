@@ -37,6 +37,63 @@ test('record detail is text, not active HTML or automatic image fetch',async()=>
  assert.match(el.textContent,/<img src=/);
  assert.equal(all(el).some(x=>x.tagName==='img'||x.tagName==='script'),false);
 });
+test('Wiki renders headings, lists, tables and inline meaning instead of Markdown punctuation',async()=>{
+ const el=root();const content='# Measurement\n\n**Measured** and `force_N`.\n\n## Readout\n\n| Signal | Meaning |\n|---|---|\n| FD | Force |\n\n1. Read source\n2. Check units\n\n- Keep original\n\n```text\nF / A\n```';
+ const view=create(el,{kind:'wiki',request:async()=>envelope([{record_id:'wiki:measurement',topic_id:'measurement',content,freshness:'fresh',status:'reviewed'}])});
+ await view.read('wiki:measurement');
+ for(const tag of ['h2','h3','strong','code','table','th','td','ol','ul','li','pre']) assert.ok(all(el).some(x=>x.tagName===tag),`missing ${tag}`);
+ assert.equal(all(el).find(x=>x.tagName==='td').textContent,'FD');
+ assert.match(el.textContent,/fresh/);
+});
+test('Wiki links stay navigable and only existing public document figure paths load images',async()=>{
+ const el=root();const content='[Overview](platform-overview.md) [Source](../../agents/analysis_agent.md)\n\n![Handoff](../../agents/assets/figures/analysis_01_closed_loop_handoffs.svg)';
+ const view=create(el,{kind:'wiki',request:async()=>envelope([{record_id:'wiki:analysis-role',topic_id:'analysis-role',content}])});
+ await view.read('wiki:analysis-role');
+ const links=all(el).filter(x=>x.tagName==='a');
+ assert.equal(links.length,2);
+ assert.equal(links[0].href,'#wiki/wiki%3Aplatform-overview');
+ assert.equal(links[1].href,'https://github.com/JIN9811/autonomous_researcher/blob/main/docs/agents/analysis_agent.md');
+ const img=all(el).find(x=>x.tagName==='img');assert.ok(img);
+ assert.equal(img.src,'https://raw.githubusercontent.com/JIN9811/autonomous_researcher/main/docs/agents/assets/figures/analysis_01_closed_loop_handoffs.svg');
+ assert.equal(img.alt,'Handoff');assert.equal(img.loading,'lazy');assert.equal(img.referrerPolicy,'no-referrer');
+});
+test('Wiki never activates HTML, device/API links, traversal or remote tracking images',async()=>{
+ const el=root();const content='<script>alert(1)</script>\n\n[x](javascript:alert) [x](/api/run/start) [x](../../../../runs/private.md) [x](//evil.test/a)\n\n![track](https://evil.test/pixel.png) ![raw](https://raw.githubusercontent.com/other/repo/main/x.svg) ![bad](../../agents/assets/figures/x.svg?token=abc)';
+ const view=create(el,{kind:'wiki',request:async()=>envelope([{record_id:'wiki:one',topic_id:'one',content}])});
+ await view.read('wiki:one');
+ assert.equal(all(el).some(x=>['script','img','a','iframe','object'].includes(x.tagName)),false);
+ assert.match(el.textContent,/<script>alert/);
+});
+test('Wiki renderer is not applied to private memory or delivery content',async()=>{
+ for(const kind of ['memory','delivery']) {
+  const el=root();const content='# Private\n\n![No request](../../agents/assets/figures/analysis_01_closed_loop_handoffs.svg)';
+  const view=create(el,{kind,request:async()=>envelope([{record_id:'entry',content,status:'active',revision:1}])});
+  await view.read('entry');
+  assert.ok(el.textContent.includes(content));assert.equal(all(el).some(x=>['img','a','table'].includes(x.tagName)),false);
+ }
+});
+test('Wiki search exposes stale sources before opening a reviewed record',async()=>{
+ const el=root();const view=create(el,{kind:'wiki',request:async()=>envelope([{record_id:'wiki:old',topic_id:'old',status:'reviewed',freshness:'stale'}])});
+ await view.search();assert.match(el.textContent,/stale/);
+});
+test('unavailable published figure leaves an explanatory caption without retrying another origin',async()=>{
+ const el=root();const view=create(el,{kind:'wiki',request:async()=>envelope([{record_id:'wiki:one',content:'![Diagram](../../assets/modularity/contracts.svg)'}])});
+ await view.read('wiki:one');const img=all(el).find(x=>x.tagName==='img');assert.ok(img);
+ img.onerror();assert.equal(all(el).some(x=>x.tagName==='img'),false);assert.match(el.textContent,/Diagram — Figure unavailable/);
+});
+test('Wiki sidebar publishes the selected route so a link back to the previous page can navigate',async()=>{
+ const vm=require('node:vm');const host={location:{hash:'#wiki/wiki%3Aa'}};
+ const context={window:host,module:{exports:{}},URL};vm.createContext(context);vm.runInContext(fs.readFileSync(modulePath,'utf8'),context);
+ const api=context.module.exports,el=root();
+ const records={a:{record_id:'wiki:a',topic_id:'a',content:'# Page A'},b:{record_id:'wiki:b',topic_id:'b',content:'# Page B\n\n[Back](a.md)'}};
+ const view=api.createBrowser(el,{kind:'wiki',request:async(url,body)=>envelope(url.endsWith('/query')?Object.values(records):[records[body.record_id.slice(5)]])});
+ await view.search();await api.openTarget({wiki:view},host.location.hash);
+ await button(el,'b').onclick();assert.equal(host.location.hash,'#wiki/wiki%3Ab');
+ // The real workspace hash listener consumes this route; emulate only browser dispatch.
+ await api.openTarget({wiki:view},host.location.hash);assert.match(el.textContent,/Page B/);
+ const link=all(el).find(x=>x.tagName==='a');assert.notEqual(link.href,host.location.hash);
+ host.location.hash=link.href;await api.openTarget({wiki:view},host.location.hash);assert.match(el.textContent,/Page A/);
+});
 test('late search cannot overwrite new search results or selected scope',async()=>{
  const el=root(); let release;
  const view=create(el,{kind:'wiki',request:async(url,body)=>body.query==='old'?new Promise(r=>release=r):envelope([{record_id:'wiki:new',topic_id:'New'}],{scope_ref:'new'})});

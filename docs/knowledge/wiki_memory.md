@@ -54,6 +54,30 @@ The Wiki is a checked seed corpus, not an automatic copy of every document.
 A source change can make a page stale; stale content is not asserted as the
 current platform contract.
 
+### Reading the expanded Wiki
+
+Start with the [platform guide](wiki/platform-overview.md). The reviewed corpus
+includes ten agent roles and separate explanations of the closed loop, control
+levels, packages/plans, Experimental Setup, test modes, workspaces, measured
+metrics, BO plots, artifacts and recovery. The retained `knowledge-agent` topic
+explains the different stores; `knowledge-role` describes the executing owner.
+Existing topic IDs remain stable for citations and saved links.
+
+Pages lead with a self-contained explanation and keep technical source details
+separate. The context facade still sends bounded excerpts (up to 2,000 characters
+per Wiki search item); expanding the corpus does not enlarge model budgets or
+prove that a model read or used every section. Retrieval, full scoped reads and
+validated citation evidence remain distinct.
+
+The Wiki pane renders a small Markdown subset: headings, paragraphs, lists,
+tables, emphasis, code and reviewed document figures. Raw HTML stays literal.
+Wiki-to-Wiki links stay in the workspace; source-document links open the public
+repository. Only supported figure paths in that repository load images, lazily
+and without a referrer. Images require network access; failure leaves an explicit
+unavailable caption while the explanation remains readable. There is no new
+local file-serving route. Memory and Delivery retain literal text rendering.
+Freshness stays visible; hashes and source metadata are under Sources & verification.
+
 ## Private Memory Lifecycle
 
 | Action | Meaning |

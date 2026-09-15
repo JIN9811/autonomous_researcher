@@ -9,6 +9,79 @@
     if (!response.ok) throw Object.assign(new Error(typeof data.detail === 'string' ? data.detail : 'Knowledge request failed'), {status: response.status});
     return data;
   }
+  // Reviewed Wiki Markdown only. Never parse HTML or load arbitrary remote images.
+  // Public figures reuse the published repository; no private file-serving route.
+  const publicRepo='https://github.com/JIN9811/autonomous_researcher/blob/main/';
+  const publicRaw='https://raw.githubusercontent.com/JIN9811/autonomous_researcher/main/';
+  function wikiUrl(value, image=false) {
+    if(!value || /[\\\s?#%]/.test(value) || value.startsWith('/') || /^[a-z]+:/i.test(value)) return '';
+    const path=new URL(value,'https://wiki.invalid/docs/knowledge/wiki/').pathname.slice(1);
+    if(image) return /^docs\/(?:agents\/assets\/figures|assets\/modularity)\/[a-zA-Z0-9_-]+\.(?:svg|png|webp)$/.test(path)?publicRaw+path:'';
+    const topic=path.match(/^docs\/knowledge\/wiki\/([a-zA-Z0-9_-]+)\.md$/);
+    if(topic) return '#wiki/'+encodeURIComponent('wiki:'+topic[1]);
+    return /^docs\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_.-]+\.md$/.test(path) && !path.includes('/oldversion/') && !path.includes('/sources/')?publicRepo+path:'';
+  }
+  function renderWikiBody(doc, content) {
+    const make=(tag,text='',cls='')=>{const el=doc.createElement(tag);el.textContent=text;el.className=cls;return el;};
+    const root=make('div','','knowledge-wiki-body');
+    function inline(parent,text) {
+      const pattern=/(!?)\[([^\]\n]*)\]\(([^)\n]+)\)|\*\*([^*\n]+)\*\*|`([^`\n]+)`/g;
+      let end=0;
+      for(const m of text.matchAll(pattern)) {
+        if(m.index>end) parent.append(make('span',text.slice(end,m.index)));
+        if(m[4]) parent.append(make('strong',m[4]));
+        else if(m[5]) parent.append(make('code',m[5]));
+        else {
+          const isImage=m[1]==='!',url=wikiUrl(m[3],isImage);
+          if(!url) parent.append(make('span',m[2] || m[0]));
+          else if(isImage) {
+            const figure=make('figure'),img=make('img');
+            img.src=url;img.alt=m[2];img.loading='lazy';img.referrerPolicy='no-referrer';
+            const unavailable=()=>figure.replaceChildren(make('figcaption',m[2]+' — Figure unavailable; see the source document.'));
+            img.addEventListener('error',unavailable);
+            figure.append(img,make('figcaption',m[2]));parent.append(figure);
+          } else {
+            const link=make('a',m[2]);link.href=url;
+            if(!url.startsWith('#')) {link.target='_blank';link.rel='noopener noreferrer';}
+            parent.append(link);
+          }
+        }
+        end=m.index+m[0].length;
+      }
+      if(end<text.length) parent.append(make('span',text.slice(end)));
+    }
+    const lines=String(content).replace(/\r\n/g,'\n').split('\n');
+    const cells=line=>line.trim().replace(/^\||\|$/g,'').split('|').map(x=>x.trim());
+    const divider=line=>/^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line || '');
+    for(let i=0;i<lines.length;) {
+      const line=lines[i];if(!line.trim()){i++;continue;}
+      if(/^```/.test(line)) {
+        const code=[];i++;while(i<lines.length&&!/^```/.test(lines[i]))code.push(lines[i++]);
+        i++;const pre=make('pre');pre.append(make('code',code.join('\n')));root.append(pre);continue;
+      }
+      const heading=line.match(/^(#{1,6})\s+(.+)$/);
+      if(heading) {const h=make('h'+Math.min(heading[1].length+1,6));inline(h,heading[2]);root.append(h);i++;continue;}
+      if(line.includes('|')&&divider(lines[i+1])) {
+        const scroll=make('div','','knowledge-wiki-table'),table=make('table'),head=make('thead'),hr=make('tr');
+        for(const cell of cells(line)){const th=make('th');th.setAttribute('scope','col');inline(th,cell);hr.append(th);}
+        head.append(hr);table.append(head);const body=make('tbody');i+=2;
+        while(i<lines.length&&lines[i].includes('|')&&lines[i].trim()) {
+          const row=make('tr');for(const cell of cells(lines[i++])){const td=make('td');inline(td,cell);row.append(td);}body.append(row);
+        }
+        table.append(body);scroll.append(table);root.append(scroll);continue;
+      }
+      const ordered=/^\d+\.\s+/.test(line),list=/^(?:[-*]|\d+\.)\s+/.test(line);
+      if(list) {
+        const ul=make(ordered?'ol':'ul'),matcher=ordered?/^\d+\.\s+/:/^[-*]\s+/;
+        while(i<lines.length&&matcher.test(lines[i])){const li=make('li');inline(li,lines[i++].replace(matcher,''));ul.append(li);}
+        root.append(ul);continue;
+      }
+      const paragraph=[];
+      do {paragraph.push(lines[i++]);} while(i<lines.length&&lines[i].trim()&&!/^(?:#{1,6}\s|```|[-*]\s|\d+\.\s)/.test(lines[i])&&!divider(lines[i+1]));
+      const p=make('p');inline(p,paragraph.join('\n'));root.append(p);
+    }
+    return root;
+  }
   function createBrowser(root, {kind, request: send = request}) {
     if (!['wiki', 'memory', 'delivery'].includes(kind)) throw new Error('Unknown Knowledge view');
     const doc = root.ownerDocument;
@@ -51,8 +124,16 @@
       for (const row of rows) {
         const card=make('div','','knowledge-v2-row');
         const name=row.topic_id || row.consumer_binding || row.kind || idOf(row);
-        const open=control(name,()=>read(idOf(row)));
-        card.append(open,make('small',[row.status || row.stage || row.freshness, row.revision ? `revision ${row.revision}` : '', idOf(row)].filter(Boolean).join(' · ')));
+        const open=control(name,()=>{
+          // Use the workspace's existing hash router, including its navigation
+          // generation guard. Sidebar reads must not leave a previous Wiki URL.
+          if(kind==='wiki' && global.location) {
+            const target='#wiki/'+encodeURIComponent(idOf(row));
+            if(global.location.hash!==target) {global.location.hash=target;return;}
+          }
+          return read(idOf(row));
+        });
+        card.append(open,make('small',[kind==='wiki'?row.freshness:'',row.status || row.stage || row.freshness, row.revision ? `revision ${row.revision}` : '', idOf(row)].filter(Boolean).join(' · ')));
         list.append(card);
       }
     }
@@ -95,14 +176,23 @@
         const item=data.items?.[0]; if(!item) throw new Error('Missing record');
         selected=item;
         draft=heldDraft && (!scope || scope===data.scope_ref)?{...heldDraft,revision:item.revision,conflict:false}:null;
-        detail.replaceChildren(make('h3',item.topic_id || item.consumer_binding || item.kind || recordId));
-        const state=make('p',item.stage || item.status || item.freshness || 'Recorded'); state.dataset.stage=item.stage || ''; detail.append(state);
-        if(item.content) detail.append(make('div',item.content,'knowledge-v2-body'));
-        for(const source of item.source_refs || []) detail.append(make('p',String(source),'knowledge-v2-source'));
+        detail.replaceChildren();
+        if(kind!=='wiki') detail.append(make('h3',item.topic_id || item.consumer_binding || item.kind || recordId));
+        const state=make('p',kind==='wiki'?[item.freshness,item.status].filter(Boolean).join(' · ') || 'Recorded':item.stage || item.status || item.freshness || 'Recorded'); state.dataset.stage=item.stage || ''; detail.append(state);
+        if(item.content) detail.append(kind==='wiki'?renderWikiBody(doc,item.content):make('div',item.content,'knowledge-v2-body'));
+        const metadata=kind==='wiki'?make('details','','knowledge-wiki-sources'):detail;
+        if(kind==='wiki') {metadata.append(make('summary','Sources & verification'));detail.append(metadata);}
+        for(const source of item.source_refs || []) {
+          const row=make('p',String(source),'knowledge-v2-source');
+          // Source references are repository-relative, unlike body links.
+          const url=kind==='wiki'&&String(source).startsWith('docs/')?wikiUrl('../../../'+source):'';
+          if(url){const link=make('a',String(source));link.href=url;link.target='_blank';link.rel='noopener noreferrer';row.replaceChildren(link);}
+          metadata.append(row);
+        }
         const scalar=value=>['string','number'].includes(typeof value)?String(value).slice(0,160):'';
-        detail.append(make('p',`Scope: ${scalar(item.scope_ref) || JSON.stringify(item.scope || {})} · revision ${scalar(item.revision) || scalar(data.revision) || 'Unknown'}`));
-        for(const field of ['expires_at','created_at','updated_at','verified_at']) if(item[field]) detail.append(make('p',`${field}: ${scalar(item[field])}`));
-        if(item.source_revision) detail.append(make('p',`Source hashes: ${JSON.stringify(item.source_revision)}`));
+        metadata.append(make('p',`Scope: ${scalar(item.scope_ref) || JSON.stringify(item.scope || {})} · revision ${scalar(item.revision) || scalar(data.revision) || 'Unknown'}`));
+        for(const field of ['expires_at','created_at','updated_at','verified_at']) if(item[field]) metadata.append(make('p',`${field}: ${scalar(item[field])}`));
+        if(item.source_revision) metadata.append(make('p',`Source hashes: ${JSON.stringify(item.source_revision)}`));
         if(kind==='delivery') {
           for(const [label,key] of [['Retrieved','citation_ids'],['Delivered','delivered_citation_ids'],['Used','used_citation_ids']]) detail.append(make('p',`${label}: ${(item[key] || []).join(', ') || 'None'}`));
           if(item.use_status) detail.append(make('p',`Use: ${item.use_status}${item.non_use_reason?' · '+item.non_use_reason:''}`));

@@ -1,13 +1,31 @@
 ---
-{"topic_id":"orchestrator-role","owner":"orchestrator_agent","source_refs":["docs/agents/orchestrator_agent.md"],"source_revision":{"docs/agents/orchestrator_agent.md":"32725ccb80484724d57f011ba51d3a2dac956e208b18b2471b6e8938a206a819"},"verified_at":"2026-09-14T00:00:00+00:00","applicability":"Public Orchestrator Agent responsibilities and handoff","status":"reviewed"}
+{"topic_id":"orchestrator-role","owner":"orchestrator_agent","source_refs":["docs/agents/orchestrator_agent.md","docs/runtime/test_mode.md"],"source_revision":{"docs/agents/orchestrator_agent.md":"31147fe1724801e5651b59e083b50e3da41715aa2eedcac54fd993031c3b4f73","docs/runtime/test_mode.md":"e326a6446165d580f9ab9c168811cfcb47126aba570706ba55d463f67dbccedb"},"verified_at":"2026-09-15T00:00:00+00:00","applicability":"Public AX4LAB reference: orchestrator-role","status":"reviewed"}
 ---
 
-# Orchestrator Agent
+# Orchestrator Agent — Conversation and Coordination
 
-Orchestrator coordinates scoped research intent, mission planning, registered owners and admitted handoffs. Bounded LLM choices are schema-validated; code and domain owners validate each effect. Experimental Setup proposals follow the existing review and next-new-run application path. Orchestrator has no direct printer, robot, camera, desktop, instrument or solver tool. Graph registration determines the active owners. A descriptive answer or memory confirmation is not approval to start an experiment.
+Orchestrator (ORC) interprets research requests and connects them to work supported by the current graph and owners. It distinguishes system questions, condition changes and experiment starts; it does not directly operate printers, robots or test machines.
 
-Its agent-run boundary shares one executable definition with Runtime IDE: mission and plan construction, a composite bounded decision, and reporting. Active definitions remain pinned. Program-core Chat/Setup intake remains in its existing path, outside this graph.
+## From conversation to execution
 
-Code-owned details show software tool dispatch, request/effect checks, scoped references and inspection feedback without creating extra operations or device authority. The document SVG uses the same structural data with a separate light theme.
+1. Greet the researcher in Korean and English without demanding experiment details.
+2. Explain available experiments from the active graph, without claiming unverified device readiness.
+3. Once planning is agreed, ask for required conditions and update Experimental Setup.
+4. Review conditions, obtain explicit execution approval and pass existing admission gates.
+5. Coordinate results, holds and next actions under the current contract.
 
-Source: [Orchestrator Agent reference](../../agents/orchestrator_agent.md).
+The LLM conducts this conversation. Agreement to plan is not approval to execute. Intervening system questions do not erase agreed conditions.
+
+## Inputs and outputs
+
+Inputs include user intent, current settings/graph, owner state and prior handoffs. Outputs are validated plans, setting proposals, task handoffs and explanations—not invented equipment-completion evidence.
+
+Conversational Setup updates modify the same block and emit change events. Applying owner settings to the next run requires separate validation and does not retroactively mutate an active snapshot.
+
+## Reading the report
+
+Read the current contract, Orchestration Plan, Handoff and Next Action together. Distinguish saved settings, prepared work and actual execution. Wiki citations and model responses cannot release safety gates.
+
+Test modes use the same conversation and validation path with an automatic scenario participant.
+
+[Conversation and Setup](experimental-setup.md), [test modes](test-modes.md), [Orchestrator reference](../../agents/orchestrator_agent.md).

@@ -114,10 +114,12 @@ def test_mixed_possible_provider_route_excludes_private_memory_without_both_cons
 
     service = KnowledgeContextService(Path(__file__).resolve().parents[2], data_root=tmp_path)
     principal = KnowledgePrincipal(subject_id="synthetic", remote_model_consent=True, local_model_consent=False)
-    service.memory.command(principal, action="propose", payload={"kind": "preference", "content": "synthetic preference",
+    # Keep the private-only query distinct from ordinary public Wiki vocabulary.
+    private_text = "privateconsentfixtureonly"
+    service.memory.command(principal, action="propose", payload={"kind": "preference", "content": private_text,
         "source_refs": ["synthetic:source"], "scope": {"kind": "user"}, "explicit": True}, idempotency_key="propose")
     ctx = CapturingContext(service); ctx.knowledge_principal = principal; ctx.backend_fallbacks = {"vllm": "openai"}
-    reference = build_reference_context(ctx, consumer="orchestrator_agent", query="synthetic preference", include_private=True)
+    reference = build_reference_context(ctx, consumer="orchestrator_agent", query=private_text, include_private=True)
 
     assert reference["pack"]["diagnostics"]["private_context_unavailable"] is True
     assert all(item["corpus"] != "private_memory" for item in reference["pack"]["items"])

@@ -37,6 +37,7 @@ supersedes: []
 | Demonstrated closed loop | [Results and evidence](paper/06_evaluation_and_results.md) |
 | Agent roles, decisions, and tools | [Ten agent references](agents/README.md) |
 | Shared Wiki, private memory and publication | [Knowledge contracts](knowledge/wiki_memory.md) · [Publication checks](knowledge/publication.md) |
+| AX4LAB concepts, agent roles and practical reading guide | [AX4LAB Wiki](knowledge/wiki/platform-overview.md) |
 | Existing equipment integration | [Device bridge references](device_bridges/README.md) |
 | Implemented module and package boundaries | [Modularity Reference](modularity.md) |
 | Retired files, reference relocation and retained history | [Repository cleanup audit](maintenance/repository_cleanup.md) |

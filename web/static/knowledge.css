@@ -557,3 +557,31 @@ body.knowledge-page {
 .knowledge-tab-panel [id$="-browser"] > .knowledge-query-bar button { flex: 0 0 auto; }
 .knowledge-tab-panel [id$="-browser"] .knowledge-card { padding: 14px; }
 .knowledge-tab-panel [id$="-browser"] > .knowledge-scope-summary { margin: 10px 0; }
+
+/* Wiki is a reading surface; private memory retains literal text rendering. */
+#knowledge-wiki-browser .knowledge-markdown-layout { grid-template-columns: minmax(210px, .65fr) minmax(0, 2fr); align-items: start; }
+#knowledge-wiki-browser .knowledge-markdown-layout > .knowledge-card:first-child { max-height: 72vh; overflow-y: auto; }
+#knowledge-wiki-browser .knowledge-v2-detail { max-height: 72vh; padding: 22px clamp(16px, 3vw, 38px); }
+.knowledge-wiki-body { color: var(--knw-text); font-size: .98rem; line-height: 1.8; overflow-wrap: anywhere; }
+.knowledge-wiki-body h2 { font-size: 1.35rem; color: var(--primary); margin: 0 0 18px; line-height: 1.4; }
+.knowledge-wiki-body h3, .knowledge-wiki-body h4 { font-size: 1.08rem; margin: 26px 0 10px; color: var(--knw-text); }
+.knowledge-wiki-body p { margin: 10px 0 16px; white-space: pre-line; }
+.knowledge-wiki-body li { margin: 7px 0; }
+.knowledge-wiki-body ul, .knowledge-wiki-body ol { padding-left: 1.5rem; }
+.knowledge-wiki-body a, .knowledge-wiki-sources a { color: var(--primary); text-underline-offset: 3px; }
+.knowledge-wiki-body code { font-size: .9em; background: var(--knw-panel-2); padding: 2px 5px; border-radius: 4px; }
+.knowledge-wiki-body pre { overflow: auto; padding: 12px; background: var(--knw-panel-2); border-radius: 8px; }
+.knowledge-wiki-table { overflow-x: auto; margin: 14px 0 20px; }
+.knowledge-wiki-body table { width: 100%; border-collapse: collapse; font-size: .94rem; }
+.knowledge-wiki-body th, .knowledge-wiki-body td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--knw-line); line-height: 1.65; }
+.knowledge-wiki-body th { background: var(--knw-panel-2); font-weight: 700; }
+.knowledge-wiki-body figure { margin: 20px 0; padding: 12px; background: #fff; border: 1px solid var(--knw-line); border-radius: 10px; }
+.knowledge-wiki-body img { display: block; width: 100%; height: auto; }
+.knowledge-wiki-body figcaption { margin-top: 10px; color: var(--knw-muted); font-size: .83rem; }
+.knowledge-wiki-sources { margin-top: 26px; padding-top: 12px; border-top: 1px solid var(--knw-line); color: var(--knw-muted); font-size: .82rem; overflow-wrap: anywhere; }
+.knowledge-wiki-sources summary { cursor: pointer; font-weight: 600; }
+@media (max-width: 900px) {
+  #knowledge-wiki-browser .knowledge-markdown-layout { grid-template-columns: 1fr; }
+  #knowledge-wiki-browser .knowledge-markdown-layout > .knowledge-card:first-child { max-height: 240px; }
+  #knowledge-wiki-browser .knowledge-v2-detail { max-height: none; }
+}
