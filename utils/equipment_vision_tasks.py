@@ -6,6 +6,12 @@ from copy import deepcopy
 from typing import Any
 
 
+# Freshness window for Equipment-requested UTM Vision evidence. The tool stamps
+# the envelope at the observation's last fresh sample, so startup/probe latency
+# does not consume the existing five-second safety window.
+EQUIPMENT_VISION_FRESHNESS_TTL_MS = 5_000
+
+
 _TASKS: tuple[dict[str, Any], ...] = (
     {
         "task_id": "utm_state_working",

@@ -6797,6 +6797,8 @@ class MainController:
             "start_immediately_live",
             "allow_ejection",
             "skirt_enabled",
+            "bed_leveling_enabled",
+            "flow_calibration_enabled",
             "top_cap_enabled",
             "bottom_cap_enabled",
             "top_bottom_cap",
@@ -6806,6 +6808,15 @@ class MainController:
             "test_unit_cell_size_mm",
         )
         return {key: profile[key] for key in allowed if key in profile}
+
+    @staticmethod
+    def _print_start_calibration_flags(defaults: dict[str, Any] | None = None) -> dict[str, bool]:
+        """Bambu project_file start flags from the operator 3DP profile (default on)."""
+        source = defaults if isinstance(defaults, dict) else MainController._validated_printer_defaults()
+        return {
+            "bed_leveling": bool(source.get("bed_leveling_enabled", True)),
+            "flow_cali": bool(source.get("flow_calibration_enabled", True)),
+        }
 
     def _with_validated_printer_defaults(self, constraints: dict[str, Any]) -> dict[str, Any]:
         """Apply validated printer defaults while preserving operator overrides."""
@@ -8596,6 +8607,11 @@ class MainController:
 
         print_request = dict(updated.get("print", {})) if isinstance(updated.get("print"), dict) else {}
         if printer_live:
+            calibration = (
+                {"bed_leveling": False, "flow_cali": False}
+                if print_body_skipped
+                else self._print_start_calibration_flags()
+            )
             print_request.update(
                 {
                     "start_immediately": True,
@@ -8605,6 +8621,7 @@ class MainController:
                     "use_ejection_only_project_file": print_body_skipped,
                     "prefer_http_artifact": True,
                     "post_publish_observation_timeout_sec": 180 if not print_body_skipped else 120,
+                    **calibration,
                 }
             )
         else:
@@ -10411,6 +10428,18 @@ class MainController:
                 "start_immediately": bool(live_physical_print),
                 "physical_intent": bool(live_physical_print),
                 "confirm_physical_print": bool(live_physical_print),
+                "bed_leveling": bool(
+                    print_constraints.get(
+                        "bed_leveling",
+                        self._print_start_calibration_flags(validated_defaults)["bed_leveling"],
+                    )
+                ),
+                "flow_cali": bool(
+                    print_constraints.get(
+                        "flow_cali",
+                        self._print_start_calibration_flags(validated_defaults)["flow_cali"],
+                    )
+                ),
             },
             "ejection": {
                 **(constraints.get("ejection") if isinstance(constraints.get("ejection"), dict) else {}),

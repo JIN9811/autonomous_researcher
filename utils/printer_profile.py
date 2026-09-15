@@ -45,6 +45,11 @@ DEFAULT_PRUSA_PRINT_PROFILE: dict[str, Any] = {
     "first_layer_speed_mm_s": 10.0,
     "bed_temperature_c": 60.0,
     "first_layer_bed_temperature_c": 60.0,
+    # Printer-side start options sent with the Bambu MQTT project_file command.
+    # Bambu Studio enables both by default; keep them on for real prints so the
+    # first layer gets a fresh mesh and extrusion calibration.
+    "bed_leveling_enabled": True,
+    "flow_calibration_enabled": True,
     "storage": "usb",
     "max_print_time_min": 120.0,
     "overwrite": True,
@@ -178,6 +183,14 @@ def normalize_prusa_print_profile(raw: dict[str, Any] | None) -> dict[str, Any]:
         bool(DEFAULT_PRUSA_PRINT_PROFILE["slow_first_layer_enabled"]),
     )
     profile["skirt_enabled"] = _clean_bool(profile.get("skirt_enabled"), bool(DEFAULT_PRUSA_PRINT_PROFILE["skirt_enabled"]))
+    profile["bed_leveling_enabled"] = _clean_bool(
+        profile.get("bed_leveling_enabled"),
+        bool(DEFAULT_PRUSA_PRINT_PROFILE["bed_leveling_enabled"]),
+    )
+    profile["flow_calibration_enabled"] = _clean_bool(
+        profile.get("flow_calibration_enabled"),
+        bool(DEFAULT_PRUSA_PRINT_PROFILE["flow_calibration_enabled"]),
+    )
     legacy_cap = _clean_bool(profile.get("top_bottom_cap"), bool(DEFAULT_PRUSA_PRINT_PROFILE["top_bottom_cap"]))
     explicit_top_cap = "top_cap_enabled" in source
     explicit_bottom_cap = "bottom_cap_enabled" in source
@@ -229,6 +242,15 @@ def normalize_prusa_print_profile(raw: dict[str, Any] | None) -> dict[str, Any]:
         max_value=10.0,
     )
     return profile
+
+
+def print_start_calibration_options(profile: dict[str, Any] | None) -> dict[str, bool]:
+    """Return the Bambu project_file start flags derived from the operator print profile."""
+    normalized = normalize_prusa_print_profile(profile if isinstance(profile, dict) else {})
+    return {
+        "bed_leveling": bool(normalized["bed_leveling_enabled"]),
+        "flow_cali": bool(normalized["flow_calibration_enabled"]),
+    }
 
 
 def adapt_print_profile_for_provider(profile: dict[str, Any], provider: str) -> dict[str, Any]:

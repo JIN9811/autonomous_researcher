@@ -125,3 +125,24 @@ def test_printer_profile_disables_flat_skin_when_cap_is_off(tmp_path) -> None:
     assert profile["top_bottom_cap"] is False
     assert profile["skin_thickness_mm"] == 0.0
     assert profile["require_flat_compression_faces"] is False
+
+
+def test_printer_profile_start_calibration_defaults_on_and_persist_off(tmp_path) -> None:
+    from utils.printer_profile import print_start_calibration_options
+
+    path = tmp_path / "prusa_print_profile.json"
+
+    # Legacy profiles without the keys resolve to the Bambu Studio defaults.
+    defaults = load_prusa_print_profile(path)
+    assert defaults["bed_leveling_enabled"] is True
+    assert defaults["flow_calibration_enabled"] is True
+    assert print_start_calibration_options(defaults) == {"bed_leveling": True, "flow_cali": True}
+
+    saved = save_prusa_print_profile(
+        {"bed_leveling_enabled": False, "flow_calibration_enabled": "0"},
+        path=path,
+    )
+    assert saved["bed_leveling_enabled"] is False
+    assert saved["flow_calibration_enabled"] is False
+    reloaded = load_prusa_print_profile(path)
+    assert print_start_calibration_options(reloaded) == {"bed_leveling": False, "flow_cali": False}

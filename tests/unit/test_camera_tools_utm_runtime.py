@@ -449,3 +449,91 @@ def test_non_utm_check_keeps_existing_simulator_behavior() -> None:
     assert result["ok"] is True
     assert result["observer_mode"] == "simulator"
     assert result["results"][0]["source"] == "simulator"
+
+
+def test_live_utm_check_stamps_evidence_at_last_fresh_sample_not_request_start() -> None:
+    import time as _time
+    from datetime import datetime, timedelta, timezone
+
+    started = datetime.now(timezone.utc)
+    sample_times: list[datetime] = []
+
+    def slow_observer(**_kwargs: Any) -> dict[str, Any]:
+        # Runtime start/probe already happened; the sampling window itself
+        # runs now, so fresh samples are stamped after the request arrived.
+        for _ in range(3):
+            _time.sleep(0.02)
+            sample_times.append(datetime.now(timezone.utc))
+        return {
+            "ok": True,
+            "duration_sec": 3.0,
+            "sample_count": 3,
+            "valid_sample_count": 3,
+            "working_count": 0,
+            "not_working_count": 3,
+            "initial_state": "NOT_WORKING",
+            "final_state": "NOT_WORKING",
+            "transition": "STABLE_NOT_WORKING",
+            "stable_state": "NOT_WORKING",
+            "motion_direction": "STABLE",
+            "samples": [
+                {"state": "NOT_WORKING", "timestamp": stamp.isoformat(), "summary_fresh": True}
+                for stamp in sample_times
+            ]
+            # A stale/future or non-fresh sample must never move the stamp.
+            + [{"state": "UNKNOWN", "timestamp": (started + timedelta(seconds=30)).isoformat(), "summary_fresh": True}]
+            + [{"state": "UNKNOWN", "timestamp": (started + timedelta(seconds=1)).isoformat(), "summary_fresh": False}],
+        }
+
+    registry = ToolRegistry()
+    register_camera_tools(registry, utm_state_observer=slow_observer, utm_runtime_manager=FakeRuntimeManager())
+    result = registry.call(
+        "vision.equipment_cross_check",
+        {
+            "runtime_mode": "live",
+            "checks": [{"task_id": "utm_state_not_working", "check_id": "utm_state_not_working", "device": "utm"}],
+            "duration_sec": 3.0,
+            "freshness_ttl_ms": 5000,
+        },
+    )
+
+    item = result["results"][0]
+    assert item["ok"] is True
+    assert item["status"] == "verified"
+    assert item["freshness_ttl_ms"] == 5000
+    # Stamped at the last fresh sample, not at request start.
+    assert datetime.fromisoformat(item["timestamp"]) == sample_times[-1]
+    assert datetime.fromisoformat(item["expires_at"]) == sample_times[-1] + timedelta(milliseconds=5000)
+    request_started_at = datetime.fromisoformat(item["request_started_at"])
+    assert started <= request_started_at < sample_times[0]
+
+
+def test_live_utm_check_without_sample_timestamps_stamps_after_observation() -> None:
+    from datetime import datetime, timezone
+
+    def observer(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "sample_count": 20,
+            "valid_sample_count": 20,
+            "working_count": 20,
+            "not_working_count": 0,
+            "initial_state": "WORKING",
+            "final_state": "WORKING",
+            "transition": "STABLE_WORKING",
+            "stable_state": "WORKING",
+            "motion_direction": "STABLE",
+        }
+
+    registry = ToolRegistry()
+    register_camera_tools(registry, utm_state_observer=observer, utm_runtime_manager=FakeRuntimeManager())
+    before = datetime.now(timezone.utc)
+    result = registry.call(
+        "vision.equipment_cross_check",
+        {"runtime_mode": "live", "checks": [{"task_id": "utm_state_working", "check_id": "utm_state_working", "device": "utm"}]},
+    )
+    item = result["results"][0]
+    assert item["ok"] is True
+    assert item["freshness_ttl_ms"] == 5000
+    assert datetime.fromisoformat(item["timestamp"]) >= before
+    assert datetime.fromisoformat(item["request_started_at"]) <= datetime.fromisoformat(item["timestamp"])

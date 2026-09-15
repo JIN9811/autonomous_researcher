@@ -4098,3 +4098,59 @@ def test_live_gui_agent_stage_messages_remain_chat_visible(tmp_path: Path) -> No
         assert stored["message_class"] == "agent_chat"
         assert "chat" in stored["surface"]
         assert stored["agent_id"] == agent_id
+
+
+def test_physical_print_choice_carries_profile_calibration_flags(tmp_path, monkeypatch) -> None:
+    from utils import printer_profile
+
+    profile_path = tmp_path / "prusa_print_profile.json"
+    monkeypatch.setattr(printer_profile, "PRUSA_PRINT_PROFILE_PATH", profile_path)
+    controller = load_runtime()
+
+    physical = controller._apply_specimen_printer_choice_to_spec(
+        controller._default_test_constraints({}), "physical_print"
+    )
+    assert physical["print"]["use_ejection_only_project_file"] is False
+    assert physical["print"]["bed_leveling"] is True
+    assert physical["print"]["flow_cali"] is True
+
+    installed = controller._apply_specimen_printer_choice_to_spec(
+        controller._default_test_constraints({}), "installed_printer"
+    )
+    assert installed["print"]["use_ejection_only_project_file"] is True
+    assert installed["print"]["bed_leveling"] is False
+    assert installed["print"]["flow_cali"] is False
+
+    printer_profile.save_prusa_print_profile(
+        {"bed_leveling_enabled": False, "flow_calibration_enabled": True}, path=profile_path
+    )
+    physical = controller._apply_specimen_printer_choice_to_spec(
+        controller._default_test_constraints({}), "physical_print"
+    )
+    assert physical["print"]["bed_leveling"] is False
+    assert physical["print"]["flow_cali"] is True
+
+
+def test_live_planning_spec_print_request_carries_profile_calibration_flags(tmp_path, monkeypatch) -> None:
+    from utils import printer_profile
+
+    profile_path = tmp_path / "prusa_print_profile.json"
+    monkeypatch.setattr(printer_profile, "PRUSA_PRINT_PROFILE_PATH", profile_path)
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+
+    spec = controller._build_planning_spec(
+        base_spec={"candidate_id": "cand-live", "geometry_type": "gyroid", "specimen_size_mm": [30, 30, 30]},
+        constraints={"print": {"start_immediately": True}},
+    )
+    assert spec["print"]["start_immediately"] is True
+    assert spec["print"]["bed_leveling"] is True
+    assert spec["print"]["flow_cali"] is True
+
+    printer_profile.save_prusa_print_profile({"flow_calibration_enabled": False}, path=profile_path)
+    spec = controller._build_planning_spec(
+        base_spec={"candidate_id": "cand-live", "geometry_type": "gyroid", "specimen_size_mm": [30, 30, 30]},
+        constraints={"print": {"start_immediately": True, "bed_leveling": False}},
+    )
+    assert spec["print"]["bed_leveling"] is False
+    assert spec["print"]["flow_cali"] is False

@@ -1289,16 +1289,20 @@ class SpecimenMakingAgent(BaseAgent):
                 printer_payload["prefer_http_artifact"] = True
             if printer_live and not profile_driven:
                 print_request = dict(printer_payload["print"]) if isinstance(printer_payload.get("print"), dict) else {}
+                ejection_only_path = printer_test_path == "installed_printer"
                 print_request.update(
                     {
                         "start_immediately": True,
                         "physical_intent": True,
                         "confirm_physical_print": True,
                         "stop_after_start": False,
-                        "use_ejection_only_project_file": printer_test_path == "installed_printer",
+                        "use_ejection_only_project_file": ejection_only_path,
                         "prefer_http_artifact": True,
                     }
                 )
+                if ejection_only_path:
+                    # No extrusion: skip printer-side leveling/flow calibration.
+                    print_request.update({"bed_leveling": False, "flow_cali": False})
                 printer_payload["print"] = print_request
                 ejection_request = dict(printer_payload["ejection"]) if isinstance(printer_payload.get("ejection"), dict) else {}
                 ejection_request.update(

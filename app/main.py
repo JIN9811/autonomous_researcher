@@ -998,6 +998,8 @@ class PrinterProfileRequest(BaseModel):
     first_layer_speed_mm_s: float = 10.0
     bed_temperature_c: float = 60.0
     first_layer_bed_temperature_c: float = 60.0
+    bed_leveling_enabled: bool = True
+    flow_calibration_enabled: bool = True
     storage: str = "usb"
     max_print_time_min: float = 120.0
     overwrite: bool = True

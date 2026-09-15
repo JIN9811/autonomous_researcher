@@ -58,7 +58,7 @@ from utils.equipment_agentic_task import (
     bind_cycle_csv_artifact,
     clearance_screen_evidence,
 )
-from utils.equipment_vision_tasks import build_equipment_vision_check, get_equipment_vision_task
+from utils.equipment_vision_tasks import build_equipment_vision_check, get_equipment_vision_task, EQUIPMENT_VISION_FRESHNESS_TTL_MS
 
 
 class LabEquipmentAgent(BaseAgent):
@@ -3402,6 +3402,7 @@ class LabEquipmentAgent(BaseAgent):
                         "checks": [request_check],
                         "source_stage_context": self._base_run_payload(state)["source_stage_context"],
                         "duration_sec": float(vision_task.get("timeout_s") or 5),
+                        "freshness_ttl_ms": EQUIPMENT_VISION_FRESHNESS_TTL_MS,
                     }
                     passive_vision_call = asyncio.create_task(
                         self._call_tool(ctx, "vision.equipment_cross_check", passive_payload, state=state)
@@ -3514,6 +3515,7 @@ class LabEquipmentAgent(BaseAgent):
                             "checks": [request_check],
                             "source_stage_context": source_context,
                             "duration_sec": float(vision_task.get("timeout_s") or 5),
+                            "freshness_ttl_ms": EQUIPMENT_VISION_FRESHNESS_TTL_MS,
                         }
                         response = await self._call_tool(ctx, "vision.equipment_cross_check", payload, state=state)
                     results = response.get("results") if isinstance(response.get("results"), list) else []
@@ -3925,6 +3927,7 @@ class LabEquipmentAgent(BaseAgent):
                         source_stage_context=source_stage_context,
                     ),
                     "source_stage_context": source_stage_context,
+                    "freshness_ttl_ms": EQUIPMENT_VISION_FRESHNESS_TTL_MS,
                 }
                 vision_result = await self._call_tool(ctx, "vision.equipment_cross_check", vision_payload, state=state)
                 tool_results.append(

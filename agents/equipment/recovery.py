@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from agents.base_agent import AgentResult
 from utils.agent_artifact_archive import record_tool_artifact
 from utils.equipment_agentic_task import project_equipment_cycle_evidence
-from utils.equipment_vision_tasks import get_equipment_vision_task
+from utils.equipment_vision_tasks import EQUIPMENT_VISION_FRESHNESS_TTL_MS, get_equipment_vision_task
 
 
 def completed_candidate(record, flow, state):
@@ -84,7 +84,8 @@ async def refresh_terminal_observations(agent, state, ctx, flow, result):
             response = await agent._call_tool(ctx, "vision.equipment_cross_check", {
                 "run_id": state.run_id, "experiment_id": state.experiment_id,
                 "runtime_mode": agent._effective_runtime_mode(state), "checks": [check],
-                "source_stage_context": source, "duration_sec": float(task["timeout_s"])}, state=state)
+                "source_stage_context": source, "duration_sec": float(task["timeout_s"]),
+                "freshness_ttl_ms": EQUIPMENT_VISION_FRESHNESS_TTL_MS}, state=state)
             result.data.setdefault("terminal_observation_attempts", []).append({
                 "block_id": block["id"], "attempt": observation_attempt + 1,
                 "ok": response.get("ok"), "failure_code": response.get("failure_code"),
@@ -107,7 +108,7 @@ async def refresh_terminal_observations(agent, state, ctx, flow, result):
             times = [stamp for stamp in times if stamp is not None and stamp <= now]
             if times:
                 observed_at = max(times)
-                ttl = min(5000, max(1, int(item.get("freshness_ttl_ms") or 5000)))
+                ttl = min(EQUIPMENT_VISION_FRESHNESS_TTL_MS, max(1, int(item.get("freshness_ttl_ms") or 5000)))
                 item["request_started_at"] = item.get("timestamp")
                 item["timestamp"] = observed_at.isoformat()
                 item["expires_at"] = (observed_at + timedelta(milliseconds=ttl)).isoformat()

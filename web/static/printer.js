@@ -50,6 +50,8 @@ const skirtInput = document.getElementById("printer-skirt-input");
 const topCapInput = document.getElementById("printer-top-cap-input");
 const bottomCapInput = document.getElementById("printer-bottom-cap-input");
 const skinInput = document.getElementById("printer-skin-input");
+const bedLevelingInput = document.getElementById("printer-bed-leveling-input");
+const flowCaliInput = document.getElementById("printer-flow-cali-input");
 const testSizeInput = document.getElementById("printer-test-size-input");
 const testCellInput = document.getElementById("printer-test-cell-input");
 const ejectionObjectSizeInput = document.getElementById("printer-ejection-object-size-input");
@@ -382,6 +384,8 @@ function fillProfile(profile) {
   if (startInput) startInput.checked = data.start_immediately_live !== false;
   if (ejectionInput) ejectionInput.checked = Boolean(data.allow_ejection);
   if (skirtInput) skirtInput.checked = Boolean(data.skirt_enabled);
+  if (bedLevelingInput) bedLevelingInput.checked = data.bed_leveling_enabled !== false;
+  if (flowCaliInput) flowCaliInput.checked = data.flow_calibration_enabled !== false;
   const legacyCap = data.top_bottom_cap !== false;
   const topCap = data.top_cap_enabled === undefined ? false : Boolean(data.top_cap_enabled);
   const bottomCap = data.bottom_cap_enabled === undefined ? legacyCap : Boolean(data.bottom_cap_enabled);
@@ -499,6 +503,8 @@ function readProfile() {
     allow_ejection: ejectionInput ? ejectionInput.checked : false,
     slow_first_layer_enabled: slowFirstLayerInput ? slowFirstLayerInput.checked : true,
     skirt_enabled: skirtInput ? skirtInput.checked : false,
+    bed_leveling_enabled: bedLevelingInput ? bedLevelingInput.checked : true,
+    flow_calibration_enabled: flowCaliInput ? flowCaliInput.checked : true,
     top_cap_enabled: topCapEnabled,
     bottom_cap_enabled: bottomCapEnabled,
     top_bottom_cap: capEnabled,

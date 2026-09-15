@@ -31,6 +31,36 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _parse_iso_time(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+
+
+def _observation_envelope(observation: dict[str, Any], ttl_ms: int) -> tuple[datetime, datetime]:
+    """Stamp evidence at the observation's last fresh sample, never at request start.
+
+    Runtime start/probe and the sampling window run after the request arrives,
+    so a request-time stamp expires before the consumer can evaluate it.
+    """
+    now = _now()
+    samples = observation.get("samples") if isinstance(observation.get("samples"), list) else []
+    times = [
+        stamp
+        for stamp in (_parse_iso_time(sample.get("timestamp")) for sample in samples if isinstance(sample, dict) and sample.get("summary_fresh") is True)
+        if stamp is not None and stamp <= now
+    ]
+    observed_at = max(times) if times else now
+    return observed_at, observed_at + timedelta(milliseconds=max(1, ttl_ms))
+
+
 def _is_utm_check(item: dict[str, Any]) -> bool:
     check_id = str(item.get("check_id") or "")
     device = str(item.get("device") or "").lower()
@@ -404,7 +434,9 @@ def _equipment_cross_check(
     confidence = float(payload.get("confidence", 0.9 if mode != "live" else 0.0))
     ok_default = bool(payload.get("force_ok", mode != "live"))
     ttl_ms = int(payload.get("freshness_ttl_ms") or payload.get("ttl_ms") or 5000)
-    timestamp = _now()
+    request_started_at = _now()
+    # Simulated/non-UTM checks are instantaneous; UTM observations re-stamp below.
+    timestamp = request_started_at
     expires_at = timestamp + timedelta(milliseconds=max(1, ttl_ms))
     duration_sec = float(payload.get("duration_sec", 5.0))
     sample_interval_sec = float(payload.get("sample_interval_sec", 0.2))
@@ -446,10 +478,13 @@ def _equipment_cross_check(
             observer_mode = "virtual_utm_bridge"
             virtualized = True
             runtime_status = {"ok": True, "status": "virtual_bridge_selected", "observer_mode": observer_mode}
+            virtual_observation = _virtual_utm_observation(check_id)
+            observed_at, observed_expires_at = _observation_envelope(virtual_observation, ttl_ms)
             result, failure_code = _utm_result_from_observation(
-                item, _virtual_utm_observation(check_id), source=observer_mode,
-                timestamp=timestamp, expires_at=expires_at, ttl_ms=ttl_ms, payload=payload,
+                item, virtual_observation, source=observer_mode,
+                timestamp=observed_at, expires_at=observed_expires_at, ttl_ms=ttl_ms, payload=payload,
             )
+            result["request_started_at"] = request_started_at.isoformat()
             results.append(result)
             if failure_code:
                 failure_codes.append(failure_code)
@@ -483,15 +518,17 @@ def _equipment_cross_check(
                 observation_error = type(exc).__name__
                 observation = {"ok": False, "failure_code": "TOPIC_TIMEOUT", "error": observation_error, "message": str(exc)}
 
+        observed_at, observed_expires_at = _observation_envelope(observation, ttl_ms)
         result, failure_code = _utm_result_from_observation(
             item,
             observation,
             source="ros_topic",
-            timestamp=timestamp,
-            expires_at=expires_at,
+            timestamp=observed_at,
+            expires_at=observed_expires_at,
             ttl_ms=ttl_ms,
             payload=payload,
         )
+        result["request_started_at"] = request_started_at.isoformat()
 
         if result["ok"]:
             results.append(result)
@@ -502,15 +539,17 @@ def _equipment_cross_check(
             observer_mode = "virtual_utm_bridge"
             virtualized = True
             virtual_observation = _virtual_utm_observation(check_id)
+            observed_at, observed_expires_at = _observation_envelope(virtual_observation, ttl_ms)
             virtual_result, virtual_failure = _utm_result_from_observation(
                 item,
                 virtual_observation,
                 source="virtual_utm_bridge",
-                timestamp=timestamp,
-                expires_at=expires_at,
+                timestamp=observed_at,
+                expires_at=observed_expires_at,
                 ttl_ms=ttl_ms,
                 payload=payload,
             )
+            virtual_result["request_started_at"] = request_started_at.isoformat()
             fallback = _fallback_trace(
                 reason_code,
                 f"UTM ROS evidence was unavailable ({reason_code}); this test-mode loop is continuing with the virtual UTM bridge.",

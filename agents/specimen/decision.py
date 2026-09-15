@@ -24,7 +24,8 @@ def fabrication_evidence(spec, geometry, mesh, manufacturing, execution, printer
     intent.update({k: printer_payload[k] for k in (
         "test_printer_path", "execution_policy_mode", "test_printer_transport") if k in printer_payload})
     for section, allowed in {
-        "print": ("start_immediately", "physical_intent", "use_ejection_only_project_file", "stop_after_start"),
+        "print": ("start_immediately", "physical_intent", "use_ejection_only_project_file", "stop_after_start",
+                  "bed_leveling", "flow_cali"),
         "ejection": ("enabled", "allow_ejection", "use_ejection_only_project_file"),
     }.items():
         values = printer_payload.get(section)

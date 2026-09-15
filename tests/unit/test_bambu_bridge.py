@@ -4092,3 +4092,59 @@ def test_live_bambu_blocks_physical_stl_upload_when_slicer_is_disabled(tmp_path:
     assert result["failure_code"] == "BAMBU_STUDIO_SLICER_DISABLED"
     assert result["preprint_gate"]["blockers"] == ["BAMBU_STUDIO_SLICER_DISABLED"]
     assert result["device_screen"]["actions"]["can_start_print"] is False
+
+
+def _calibration_draft(manager, payload: dict) -> dict:
+    draft = manager._bambu_project_file_draft(
+        connection={"serial": "20PTEST000001"},
+        payload=payload,
+        upload_result={
+            "ok": True,
+            "remote_path": "http://192.168.50.146:7860/printer-artifacts/bambu/abc/specimen.autoeject.gcode.3mf",
+        },
+        artifact_url="",
+    )
+    assert draft["ok"] is True, draft
+    return draft["payload"]["print"]
+
+
+def test_project_file_draft_real_print_follows_operator_profile_calibration_flags(tmp_path: Path) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+    physical = {"specimen_id": "spec", "print": {"start_immediately": True, "physical_intent": True}}
+
+    # No saved profile: Bambu Studio defaults (both on).
+    command = _calibration_draft(manager, physical)
+    assert command["bed_leveling"] is True
+    assert command["flow_cali"] is True
+
+    # Operator turned both off in the 3DP workspace.
+    profile_path = tmp_path / "memory" / "prusa_print_profile.json"
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    profile_path.write_text(
+        json.dumps({"bed_leveling_enabled": False, "flow_calibration_enabled": False}),
+        encoding="utf-8",
+    )
+    command = _calibration_draft(manager, physical)
+    assert command["bed_leveling"] is False
+    assert command["flow_cali"] is False
+
+    # Explicit request values still win over the profile.
+    command = _calibration_draft(manager, {**physical, "print": {**physical["print"], "bed_leveling": True}})
+    assert command["bed_leveling"] is True
+    assert command["flow_cali"] is False
+
+
+def test_project_file_draft_ejection_only_paths_never_run_calibration(tmp_path: Path, monkeypatch) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+
+    # Standalone autoejection publish uses stop_after_start.
+    standalone = {"specimen_id": "spec", "print": {"start_immediately": True, "stop_after_start": True}}
+    command = _calibration_draft(manager, standalone)
+    assert command["bed_leveling"] is False
+    assert command["flow_cali"] is False
+
+    # Installed-printer ejection-only project file.
+    monkeypatch.setattr(manager, "_should_use_bambu_ejection_only_project_file", lambda payload: True)
+    command = _calibration_draft(manager, {"specimen_id": "spec", "print": {"start_immediately": True}})
+    assert command["bed_leveling"] is False
+    assert command["flow_cali"] is False

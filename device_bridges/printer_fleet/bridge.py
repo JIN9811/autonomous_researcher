@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from utils.specimen_placement import normalize_placement, placement_area, placement_from_payload, preflight_placement, requested_center, validate_sliced_placement
 from utils.bambu_material_priority import load_priority, priority_path, select_material, bind_artifact, material_artifact_path
-from utils.printer_profile import load_prusa_print_profile, normalize_prusa_print_profile
+from utils.printer_profile import load_prusa_print_profile, normalize_prusa_print_profile, print_start_calibration_options
 from device_bridges.printer_fleet.slicer_profiles import resolve_profile
 
 import copy
@@ -5250,6 +5250,7 @@ class PrinterDeviceBridgeManager:
             artifact = upload_result.get("artifact") if isinstance(upload_result.get("artifact"), dict) else {}
             filename = str(upload_result.get("filename") or artifact.get("filename") or Path(_remote_path_for_suffix_check(remote_path)).name)
             route_subtask = Path(filename).stem
+        calibration = self._bambu_project_file_calibration_flags(payload)
         return build_bambu_project_file_command_draft(
             serial=str(connection.get("serial") or ""),
             remote_path=remote_path,
@@ -5258,11 +5259,36 @@ class PrinterDeviceBridgeManager:
             use_ams=_as_bool(payload.get("use_ams", print_payload.get("use_ams")), False),
             ams_mapping=payload.get("ams_mapping") if isinstance(payload.get("ams_mapping"), list) else print_payload.get("ams_mapping"),
             timelapse=_as_bool(payload.get("timelapse", print_payload.get("timelapse")), False),
-            bed_leveling=_as_bool(payload.get("bed_leveling", print_payload.get("bed_leveling")), False),
-            flow_cali=_as_bool(payload.get("flow_cali", print_payload.get("flow_cali")), False),
+            bed_leveling=calibration["bed_leveling"],
+            flow_cali=calibration["flow_cali"],
             vibration_cali=_as_bool(payload.get("vibration_cali", print_payload.get("vibration_cali")), False),
             layer_inspect=_as_bool(payload.get("layer_inspect", print_payload.get("layer_inspect")), False),
         )
+
+    def _bambu_project_file_calibration_flags(self, payload: dict[str, Any]) -> dict[str, bool]:
+        """Resolve project_file bed_leveling/flow_cali for the start command.
+
+        Explicit request values win. Otherwise a full physical print follows the
+        operator 3DP profile (Bambu Studio defaults both on), while the
+        ejection-only project file and the standalone autoejection publish never
+        run leveling or extrusion calibration because they extrude nothing.
+        """
+        print_payload = payload.get("print") if isinstance(payload.get("print"), dict) else {}
+        ejection_only = bool(
+            self._should_use_bambu_ejection_only_project_file(payload)
+            or _as_bool(print_payload.get("stop_after_start"), False)
+        )
+        if ejection_only:
+            defaults = {"bed_leveling": False, "flow_cali": False}
+        else:
+            defaults = print_start_calibration_options(
+                load_prusa_print_profile(self.repo_root / "memory/prusa_print_profile.json")
+            )
+        resolved: dict[str, bool] = {}
+        for key in ("bed_leveling", "flow_cali"):
+            explicit = payload.get(key, print_payload.get(key))
+            resolved[key] = _as_bool(explicit, defaults[key]) if explicit is not None else bool(defaults[key])
+        return resolved
 
     def _bambu_remote_artifact_path(
         self,
