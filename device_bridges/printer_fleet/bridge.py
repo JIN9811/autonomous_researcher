@@ -153,6 +153,7 @@ class BambuSlicerConfig:
     default_machine_profile: str = ""
     default_process_profile: str = ""
     default_filament_profile: str = ""
+    start_point_prime_mm: float = 0.1
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any] | None) -> "BambuSlicerConfig":
@@ -167,6 +168,7 @@ class BambuSlicerConfig:
             default_machine_profile=str(raw.get("default_machine_profile", "") or ""),
             default_process_profile=str(raw.get("default_process_profile", "") or ""),
             default_filament_profile=str(raw.get("default_filament_profile", "") or ""),
+            start_point_prime_mm=float(raw.get("start_point_prime_mm", 0.1)),
         )
 
     def resolved_payload(self, *, repo_root: Path | None = None) -> dict[str, Any]:
@@ -498,7 +500,7 @@ class BambuStudioSlicerRunner:
                 "plate_gcode_path": str(selected_gcode),
                 "error": str(exc),
             }
-        patched_gcode, removed_blocks = self._remove_front_test_line_from_gcode(raw_gcode)
+        patched_gcode, removed_blocks = self._remove_front_test_line_from_gcode(raw_gcode, start_point_prime_mm=self.config.start_point_prime_mm)
         encoded = patched_gcode.encode("utf-8")
         object_bounds = extract_object_bounds_mm(patched_gcode)
         export_path.parent.mkdir(parents=True, exist_ok=True)
@@ -767,8 +769,8 @@ class BambuStudioSlicerRunner:
                 original = artifact_path.read_text(encoding="utf-8", errors="replace")
             except OSError as exc:
                 return {"ok": True, "removed": False, "reason": "gcode_read_failed", "error": str(exc)}
-            patched, removed = self._remove_front_test_line_from_gcode(original)
-            if removed:
+            patched, removed = self._remove_front_test_line_from_gcode(original, start_point_prime_mm=self.config.start_point_prime_mm)
+            if patched != original:
                 artifact_path.write_text(patched, encoding="utf-8")
             return {
                 "ok": True,
@@ -797,15 +799,15 @@ class BambuStudioSlicerRunner:
                 text = data.decode("utf-8")
             except UnicodeDecodeError:
                 text = data.decode("latin-1", errors="replace")
-            patched, removed = self._remove_front_test_line_from_gcode(text)
-            if not removed:
+            patched, removed = self._remove_front_test_line_from_gcode(text, start_point_prime_mm=self.config.start_point_prime_mm)
+            if patched == text:
                 continue
             removed_total += removed
             encoded = patched.encode("utf-8")
             patched_entries[name] = encoded
             plate_md5[name] = hashlib.md5(encoded).hexdigest()
 
-        if not removed_total:
+        if not patched_entries:
             return {
                 "ok": True,
                 "removed": False,
@@ -845,28 +847,145 @@ class BambuStudioSlicerRunner:
         return bool(re.fullmatch(r"Metadata/plate_\d+\.gcode", str(name)))
 
     @staticmethod
-    def _remove_front_test_line_from_gcode(gcode: str) -> tuple[str, int]:
+    def _remove_front_test_line_from_gcode(gcode: str, *, start_point_prime_mm: float = 0.1) -> tuple[str, int]:
+        if not 0 <= start_point_prime_mm <= 0.1:
+            raise ValueError("start-point prime must be between 0 and 0.1 mm of filament")
         lines = str(gcode or "").splitlines(keepends=True)
         output: list[str] = []
+        block: list[str] = []
+        g130_removed = False
         skipping = False
         removed_blocks = 0
         for line in lines:
             if not skipping and BambuStudioSlicerRunner._is_front_test_line_start(line):
                 skipping = True
+                block = []
                 removed_blocks += 1
-                if BambuStudioSlicerRunner._is_front_test_line_end(line):
-                    skipping = False
                 continue
             if skipping:
                 if line.strip().startswith(('; CHANGE_LAYER', '; MACHINE_START_GCODE_END', '; EXECUTABLE_BLOCK_END')):
                     return gcode, 0
                 if BambuStudioSlicerRunner._is_front_test_line_end(line):
+                    if any(re.match(r"\s*G130\s", item) for item in block):
+                        # Preserve preparation but remove macro-dependent motion.
+                        output.append("; AX4LAB G130 line removed; preparation preserved\n")
+                        output.extend(item for item in block if not re.match(r"\s*(?:;\s*)?G(?:0|1|130)\s", item))
+                        g130_removed = True
                     skipping = False
+                else:
+                    block.append(line)
                 continue
             output.append(line)
         if skipping:
             return gcode, 0
-        return "".join(output), removed_blocks
+        patched = "".join(output)
+        if g130_removed and start_point_prime_mm > 0:
+            patched = BambuStudioSlicerRunner._prime_first_object_point(patched, start_point_prime_mm)
+        return BambuStudioSlicerRunner._limit_early_layer_speeds(patched), removed_blocks
+
+    @staticmethod
+    def _limit_early_layer_speeds(gcode: str) -> str:
+        """Cap extrusion in layers 2-5 at 50 mm/s and early Z moves at 5 mm/s.
+
+        Restore the original modal feed after each limited move, so travels,
+        retractions, slower paths, and layer 6 onward retain their original feed.
+        """
+        marker = "; AX4LAB early-layer limits: layers2-5=50mm/s Z1-5=5mm/s"
+        if marker in gcode:
+            return gcode
+        body = relative_e = millimeters = False
+        layer = 0
+        feed = None
+        changed = False
+        output: list[str] = []
+        for line in gcode.splitlines(keepends=True):
+            if line.strip() == "; MACHINE_START_GCODE_END":
+                body = True
+            if body and line.strip() == "; CHANGE_LAYER":
+                layer += 1
+            code, separator, comment = line.rstrip("\r\n").partition(";")
+            words = code.strip().upper().split()
+            command = words[0] if words else ""
+            if body and command in {"M82", "M83"}:
+                relative_e = command == "M83"
+            if body and command in {"G20", "G21"}:
+                millimeters = command == "G21"
+            if not body or command not in {"G0", "G1", "G2", "G3"}:
+                output.append(line)
+                continue
+            values = {key: float(value) for key, value in re.findall(r"([XYZEF])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))", code.upper())}
+            feed = values.get("F", feed)
+            limit = feed
+            if 1 <= layer <= 5 and millimeters and feed is not None:
+                if "Z" in values:
+                    # Bound total speed for mixed-axis/Z-hop moves as well;
+                    # this conservatively bounds their Z component.
+                    limit = min(limit, 300.0)
+                if 2 <= layer <= 5 and relative_e and values.get("E", 0) > 0 and ("X" in values or "Y" in values):
+                    limit = min(limit, 3000.0)
+            if limit is not None and feed is not None and limit < feed:
+                if "F" in values:
+                    bounded = re.sub(r"F\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)", f"F{limit:g}", code, flags=re.I)
+                else:
+                    bounded = code.rstrip() + f" F{limit:g}"
+                output.append(bounded + (separator + comment if separator else "") + f"\nG1 F{feed:g}\n")
+                changed = True
+            else:
+                output.append(line)
+        return (marker + "\n" if changed else "") + "".join(output)
+
+    @staticmethod
+    def _prime_first_object_point(gcode: str, amount: float) -> str:
+        """One small relative-E prime after travel/unretract, before object motion.
+
+        Only the known Bambu first-layer format is supported. Never guess at
+        absolute extrusion, units, or position; reject instead of issuing motion.
+        """
+        lines = gcode.splitlines(keepends=True)
+        body = layer = object_seen = False
+        relative_e = absolute_xyz = millimeters = False
+        position: dict[str, float] = {}
+        feed = None
+        for index, line in enumerate(lines):
+            if line.strip() == "; MACHINE_START_GCODE_END":
+                body = True
+            if not body:
+                continue
+            if line.strip() == "; CHANGE_LAYER":
+                if layer:
+                    break
+                layer = True
+            if line.strip().startswith("; OBJECT_ID:"):
+                object_seen = True
+            code = line.split(";", 1)[0].strip().upper()
+            if not code:
+                continue
+            command = code.split()[0]
+            if command in {"M82", "M83"}:
+                relative_e = command == "M83"
+            elif command in {"G90", "G91"}:
+                absolute_xyz = command == "G90"
+            elif command in {"G20", "G21"}:
+                millimeters = command == "G21"
+            if command not in {"G0", "G1", "G2", "G3"}:
+                continue
+            values = {key: float(value) for key, value in re.findall(r"([XYZEF])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))", code)}
+            if "F" in values:
+                feed = values["F"]
+            if layer and values.get("E", 0) > 0 and ("X" in values or "Y" in values):
+                safe = (object_seen and relative_e and absolute_xyz and millimeters
+                        and all(axis in position for axis in "XYZ")
+                        and 0 < position["Z"] <= 0.4 and "Z" not in values
+                        and feed is not None and feed > 0)
+                if not safe:
+                    raise ValueError("Unsupported first-object context for start-point prime")
+                injection = ("; AX4LAB one-shot start-point prime (filament mm)\n"
+                             f"G1 E{amount:g} F60\nG1 F{feed:g}\n")
+                return "".join(lines[:index]) + injection + "".join(lines[index:])
+            for axis in "XYZ":
+                if axis in values:
+                    position[axis] = values[axis]
+        raise ValueError("Missing first-object point for start-point prime")
 
     @staticmethod
     def _is_front_test_line_start(line: str) -> bool:

@@ -4445,7 +4445,9 @@ function eventStatusForAgent(agentId, state, running) {
   // current lifecycle badge. The runtime owns waiting/error/completion state.
   const pendingApproval = (liveApprovals.pending || []).some((item) => agentIdFromFreeText(`${item.stage || ""} ${item.title || ""} ${item.reason || ""}`) === agentId);
   if (pendingApproval) return "waiting";
-  if (running && activeAgent === agentId) return state.is_paused ? "waiting" : "running";
+  // Routing selects the next stage before its prerequisites finish. Only the
+  // runtime/execution records above establish that an agent has actually started.
+  if (running && activeAgent === agentId) return "waiting";
   if (agentId === "specimen") {
     // Diagnostics/chat are report content, not fabrication completion evidence.
     // Scoped physical execution was handled above; retain explicit virtual/legacy

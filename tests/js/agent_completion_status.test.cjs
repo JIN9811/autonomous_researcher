@@ -23,6 +23,11 @@ test('chat and done event alone cannot complete an unstarted agent',()=>{
   assert.equal(status({state:'idle',success:null}),'idle');
 });
 for (const agent of ['orchestrator','design','specimen','vision','manipulation','equipment','analysis','bo','knowledge','guardian']) {
+  test(`${agent}: selecting the next stage waits until runtime execution starts`,()=>{
+    assert.equal(status(undefined,agent,agent),'waiting');
+    assert.equal(status({state:'idle',success:null},agent,agent),'waiting');
+    assert.equal(status({state:'running',success:null,run_id:'current',loop_id:2},agent,agent),'running');
+  });
   test(`${agent}: past messages/errors and other cycles cannot override runtime`,()=>{
     assert.equal(status(undefined,'idle',agent),'idle');
     assert.equal(status({state:'done',success:true},'idle',agent),'done');

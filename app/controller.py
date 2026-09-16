@@ -924,6 +924,7 @@ class MainController:
             return {}
         keep = {
             "agent", "agent_id", "node_id", "module_id", "stage", "status", "mode", "ok",
+            "from_stage", "to_stage",
             "workspace", "workflow", "step", "detail", "surface", "visibility",
             "tool", "tool_name", "requested_tool", "program_id", "check_id",
             "sequence_id",
