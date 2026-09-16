@@ -11,6 +11,25 @@ from ftplib import FTP
 from pathlib import Path
 
 import yaml
+import pytest
+import time
+from types import SimpleNamespace
+
+import device_bridges.printer_fleet.bridge as printer_bridge
+
+
+@pytest.fixture(autouse=True)
+def printer_poll_clock(monkeypatch):
+    """Exercise poll deadlines without waiting for real printer timeout periods."""
+    elapsed = [0.0]
+
+    def advance(seconds):
+        elapsed[0] += seconds
+
+    clock = SimpleNamespace(**{name: getattr(time, name) for name in dir(time) if not name.startswith("__")})
+    clock.monotonic = lambda: elapsed[0]
+    clock.sleep = advance
+    monkeypatch.setattr(printer_bridge, "time", clock)
 
 from device_bridges.bambu_bridge import (
     AutoEjectionConfig,
@@ -947,8 +966,11 @@ def test_prepare_uses_default_bambu_profile_and_locks_selected_profile(tmp_path:
     assert result["device_screen"]["schema"] == "printer_device_screen.v1"
     assert result["device_screen"]["connection"]["mqtt"] == "virtual"
     assert result["device_screen"]["connection"]["video"] == "virtual"
-    assert result["autoejection"]["enabled"] is False
-    assert result["autoejection"]["status"] == "not_configured"
+    assert result["autoejection"]["status"] == "virtual"
+    assert result["autoejection"]["simulated"] is True
+    assert result["autoejection"]["physical_actuation"] is False
+    assert result["autoejection"]["requested"] is False
+    assert result["autoejection"]["blockers"] == []
 
 
 def test_prusa_profile_selection_is_explicit_not_fallback(tmp_path: Path) -> None:
@@ -2605,6 +2627,7 @@ def test_test_mode_installed_printer_uploads_ejection_only_project_file_from_act
             return {"ok": True, "port": port}
 
     class FakeMqttClient:
+        subtask_name = ""
         def read_snapshot(
             self,
             *,
@@ -2619,10 +2642,11 @@ def test_test_mode_installed_printer_uploads_ejection_only_project_file_from_act
             return {
                 "ok": True,
                 "received_at": "now",
-                "report": {"print": {"gcode_state": state, "mc_percent": 1, "bed_temper": 29}},
+                "report": {"print": {"gcode_state": state, "subtask_name": self.subtask_name, "mc_percent": 1, "bed_temper": 29}},
             }
 
         def publish_project_file_command(self, **kwargs) -> dict:
+            self.subtask_name = kwargs["payload"]["print"]["subtask_name"]
             published.append(kwargs)
             return {
                 "ok": True,
@@ -2777,11 +2801,13 @@ def test_test_mode_installed_printer_autoejection_uses_actual_sliced_artifact_bo
             return {"ok": True, "port": port}
 
     class FakeMqttClient:
+        subtask_name = ""
         def read_snapshot(self, **kwargs) -> dict:
             state = "RUNNING" if kwargs.get("force_refresh") else "IDLE"
-            return {"ok": True, "received_at": "now", "report": {"print": {"gcode_state": state, "mc_percent": 1, "bed_temper": 29}}}
+            return {"ok": True, "received_at": "now", "report": {"print": {"gcode_state": state, "subtask_name": self.subtask_name, "mc_percent": 1, "bed_temper": 29}}}
 
         def publish_project_file_command(self, **kwargs) -> dict:
+            self.subtask_name = kwargs["payload"]["print"]["subtask_name"]
             published.append(kwargs)
             return {"ok": True, "status": "published", "will_publish": True, "published": True, "sequence_id": "seq-start", "topic": kwargs.get("topic")}
 
@@ -2970,11 +2996,13 @@ def test_test_mode_physical_print_keeps_actual_print_body_when_autoejection_is_e
             return {"ok": True, "port": port}
 
     class FakeMqttClient:
+        subtask_name = ""
         def read_snapshot(self, **kwargs) -> dict:
             state = "RUNNING" if kwargs.get("force_refresh") else "IDLE"
-            return {"ok": True, "received_at": "now", "report": {"print": {"gcode_state": state, "mc_percent": 1, "bed_temper": 29}}}
+            return {"ok": True, "received_at": "now", "report": {"print": {"gcode_state": state, "subtask_name": self.subtask_name, "mc_percent": 1, "bed_temper": 29}}}
 
         def publish_project_file_command(self, **kwargs) -> dict:
+            self.subtask_name = kwargs["payload"]["print"]["subtask_name"]
             return {"ok": True, "status": "published", "will_publish": True, "published": True, "sequence_id": "seq-start", "topic": kwargs.get("topic")}
 
         def publish_print_control_command(self, **kwargs) -> dict:
@@ -3330,6 +3358,7 @@ def test_test_mode_installed_printer_can_start_after_previous_cancelled_failed_s
             return {"ok": True, "port": port}
 
     class FakeMqttClient:
+        subtask_name = ""
         def read_snapshot(
             self,
             *,
@@ -3341,9 +3370,10 @@ def test_test_mode_installed_printer_can_start_after_previous_cancelled_failed_s
             force_refresh: bool = False,
         ) -> dict:
             state = "PREPARE" if force_refresh else "FAILED"
-            return {"ok": True, "received_at": "now", "report": {"print": {"gcode_state": state}}}
+            return {"ok": True, "received_at": "now", "report": {"print": {"gcode_state": state, "subtask_name": self.subtask_name}}}
 
         def publish_project_file_command(self, **kwargs) -> dict:
+            self.subtask_name = kwargs["payload"]["print"]["subtask_name"]
             return {
                 "ok": True,
                 "status": "published",
@@ -3440,6 +3470,7 @@ def test_test_mode_installed_printer_blocks_when_start_publish_is_not_observed(t
             return {"ok": True, "port": port}
 
     class FakeMqttClient:
+        subtask_name = ""
         def read_snapshot(
             self,
             *,
@@ -3450,9 +3481,10 @@ def test_test_mode_installed_printer_blocks_when_start_publish_is_not_observed(t
             timeout_sec: float,
             force_refresh: bool = False,
         ) -> dict:
-            return {"ok": True, "received_at": "now", "report": {"print": {"gcode_state": "FAILED"}}}
+            return {"ok": True, "received_at": "now", "report": {"print": {"gcode_state": "FAILED", "subtask_name": self.subtask_name}}}
 
         def publish_project_file_command(self, **kwargs) -> dict:
+            self.subtask_name = kwargs["payload"]["print"]["subtask_name"]
             return {
                 "ok": True,
                 "status": "published",
@@ -3567,6 +3599,7 @@ def test_test_mode_installed_printer_does_not_send_second_standalone_project_fil
             return {"ok": True, "port": port}
 
     class FakeMqttClient:
+        subtask_name = ""
         def read_snapshot(self, **kwargs) -> dict:
             nonlocal force_reads
             if kwargs.get("force_refresh"):
@@ -3577,10 +3610,11 @@ def test_test_mode_installed_printer_does_not_send_second_standalone_project_fil
             return {
                 "ok": True,
                 "received_at": "now",
-                "report": {"print": {"gcode_state": state, "mc_percent": 1, "bed_temper": 29}},
+                "report": {"print": {"gcode_state": state, "subtask_name": self.subtask_name, "mc_percent": 1, "bed_temper": 29}},
             }
 
         def publish_project_file_command(self, **kwargs) -> dict:
+            self.subtask_name = kwargs["payload"]["print"]["subtask_name"]
             published.append(kwargs)
             return {
                 "ok": True,
