@@ -1095,6 +1095,13 @@ def test_normalize_bambu_report_maps_real_device_fields() -> None:
     assert normalized["received_at"] == "2026-06-14T01:00:00+09:00"
 
 
+def test_normalize_bambu_report_remaining_time_units() -> None:
+    for raw, minutes in [({"mc_remaining_time": 121}, 121), ({"remain_time": 5}, 5), ({"mc_remaining_time": 0}, 0), ({}, None)]:
+        job = normalize_bambu_report({"print": {"gcode_state": "RUNNING", **raw}})["job"]
+        assert job["remaining_sec"] == (minutes * 60 if minutes is not None else None)
+        assert job["remaining_min"] == minutes
+
+
 def test_normalize_bambu_report_preserves_x2d_device_screen_fields() -> None:
     report = {
         "print": {
@@ -3286,6 +3293,20 @@ def test_test_mode_installed_printer_blocks_autoejection_without_actual_extrusio
     assert result["autoejection_patch"]["failure_code"] == "BAMBU_AUTOEJECTION_SOURCE_EXTRUSION_BOUNDS_REQUIRED"
     assert result["ejection_result"] == {}
     assert gcode_lines == []
+
+
+def test_new_print_ignores_previous_terminal_job_but_not_active_errors(tmp_path: Path) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+    for mode in ("live", "test"):
+        for state in ("FAILED", "FAIL", "CANCELLED", "CANCELED", "ABORTED", "FINISH", "IDLE"):
+            report = normalize_bambu_report({"print": {"gcode_state": state, "fail_reason": "50348044", "err": 0}})
+            assert manager._bambu_printer_state_allows_project_start(normalized_report=report, payload={"runtime_mode": mode})
+        for state in ("RUNNING", "PREPARE", "PAUSE"):
+            report = normalize_bambu_report({"print": {"gcode_state": state}})
+            assert not manager._bambu_printer_state_allows_project_start(normalized_report=report, payload={"runtime_mode": mode})
+        for error_field in ("err", "mc_print_error_code", "mc_err", "print_error"):
+            report = normalize_bambu_report({"print": {"gcode_state": "FAILED", error_field: 123}})
+            assert not manager._bambu_printer_state_allows_project_start(normalized_report=report, payload={"runtime_mode": mode})
 
 
 def test_test_mode_installed_printer_can_start_after_previous_cancelled_failed_state(tmp_path: Path) -> None:

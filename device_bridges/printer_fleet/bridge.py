@@ -2115,6 +2115,8 @@ def normalize_bambu_report(report: dict[str, Any], *, received_at: str = "") -> 
     xcam = print_data.get("xcam") if isinstance(print_data.get("xcam"), dict) else {}
     lights = print_data.get("lights_report") if isinstance(print_data.get("lights_report"), list) else []
     state = str(print_data.get("gcode_state") or print_data.get("stg_cur") or "UNKNOWN")
+    # Firmware remaining-time fields are minutes; normalize seconds at ingress.
+    remaining_min = _first_number(print_data.get("mc_remaining_time"), print_data.get("remain_time"))
     return {
         "state": state,
         "job": {
@@ -2122,7 +2124,8 @@ def normalize_bambu_report(report: dict[str, Any], *, received_at: str = "") -> 
             "progress_percent": _first_number(print_data.get("mc_percent"), print_data.get("percent")),
             "layer": _first_number(print_data.get("layer_num"), print_3d.get("layer_num")),
             "total_layers": _first_number(print_data.get("total_layer_num"), print_3d.get("total_layer_num")),
-            "remaining_sec": _first_number(print_data.get("mc_remaining_time"), print_data.get("remain_time")),
+            "remaining_min": remaining_min,
+            "remaining_sec": remaining_min * 60 if remaining_min is not None else None,
             "prepare_percent": _first_number(print_data.get("gcode_file_prepare_percent"), print_data.get("prepare_per")),
             "task_id": str(print_data.get("task_id") or ""),
             "project_id": str(print_data.get("project_id") or ""),
@@ -4764,12 +4767,18 @@ class PrinterDeviceBridgeManager:
         state = str(normalized_report.get("state") or "").upper()
         if state in {"IDLE", "FINISH", "UNKNOWN"}:
             return True
-        if (
-            state in {"FAILED", "FAIL", "CANCELLED", "CANCELED", "ABORTED"}
-            and self._test_mode_installed_printer_check(payload)
-            and (self._should_stop_after_bambu_start(payload) or self._should_use_bambu_ejection_only_project_file(payload))
-        ):
-            return True
+        if state in {"FAILED", "FAIL", "CANCELLED", "CANCELED", "ABORTED"}:
+            # Terminal status/fail_reason belongs to the previous job. It does
+            # not block a new job, but current device errors still do.
+            health = normalized_report.get("health") or {}
+            control = normalized_report.get("control") or {}
+            err2 = health.get("err2") or {}
+            errors = (
+                health.get("error"), err2.get("err_code"),
+                control.get("mc_print_error_code"), control.get("mc_error"),
+                control.get("print_error"),
+            )
+            return all(error in (None, "", 0, "0", "0.0") for error in errors)
         return False
 
     def _publish_bambu_print_control(
@@ -5677,6 +5686,7 @@ class PrinterDeviceBridgeManager:
                 "current_layer": report_job.get("layer"),
                 "layer": report_job.get("layer"),
                 "total_layers": report_job.get("total_layers"),
+                "remaining_min": report_job.get("remaining_min"),
                 "remaining_sec": report_job.get("remaining_sec"),
                 "prepare_percent": report_job.get("prepare_percent"),
                 "task_id": report_job.get("task_id", ""),
