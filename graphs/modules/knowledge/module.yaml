@@ -36,31 +36,28 @@ module:
     terminals: [deliver]
   io_contract:
     input: OrchestratorState
-    output: AgentResult.data with knowledge_context.v1 and evolution_proposal.v1
+    output: AgentResult.data with knowledge_context.v1 and knowledge_report.v1
   output_contracts:
     - knowledge_context.v1
-    - evolution_proposal.v1
     - knowledge_report.v1
     - experiment_knowledge_v1
     - agent_performance_v1
     - failure_pattern_v1
     - success_pattern_v1
-    - evolution_evidence_pack_v1
   transition_conditions:
     - knowledge_record exists
     - provenance.used is non-empty
     - agent_performance_records exist for completed stages
     - bo_context exists or explicit no_bo_context_needed reason exists
-    - evolution_evidence_packs exists or explicit no_evolution_needed reason exists
   notes: >-
-    Knowledge is the research memory and improvement evidence owner. It writes
+    Knowledge is the research memory and experiment evidence owner. It writes
     typed run artifacts plus memory/knowledge JSONL and ontology-guided Markdown
     records. The normal knowledge_query LLM selects local inspect_evidence,
     search_knowledge, read_knowledge, write_knowledge_note and publish_context
     actions. Those actions are agent-local, not bridge tools. Knowledge graph
     storage and reconciliation are retired. Original scientific values,
     manual citations, ontology and executable graph remain unchanged.
-    Evolution evidence is preserved; variants are never directly activated.
+    Legacy Evolution records are historical only; no proposals or variant outcomes are generated.
 
   metadata:
     control_view:

@@ -104,6 +104,9 @@ def _candidate_proxy(candidate: dict[str, Any]) -> float:
     density = float(candidate.get("relative_density", 0.32) or 0.32)
     wall = float(candidate.get("wall_thickness_mm", 1.2) or 1.2)
     cell = max(0.1, float(candidate.get("cell_size_mm", 5.0) or 5.0))
+    if str(candidate.get("geometry_type", "gyroid")).lower() == "gyroid":
+        from mcp_tools.tpms_geometry import relative_density_for_wall
+        density = relative_density_for_wall(wall, cell)
     geometry_bonus = 0.08 if str(candidate.get("geometry_type", "")).lower() == "gyroid" else 0.0
     density_term = 1.0 - abs(density - 0.32)
     manufacturability = min(1.0, wall / max(1.2, 0.24 * cell))
@@ -124,6 +127,7 @@ def _compact_parameters(candidate: dict[str, Any]) -> dict[str, Any]:
     """Return BO-relevant parameters for trace display without large nested payloads."""
     preferred = (
         "geometry_type",
+        "gyroid_parameterization",
         "relative_density",
         "wall_thickness_mm",
         "cell_size_mm",
@@ -589,7 +593,7 @@ def _run_botorch_strategy(
         selected_parameter = ""
         if phase == "acquisition" and proposal.get("projection"):
             selected_parameter = str(proposal["projection"].get("parameter") or "")
-        if phase == "initial_design" and "cell_size_mm" in parameter_space and "relative_density" in parameter_space:
+        if phase == "initial_design" and "cell_size_mm" in parameter_space and "wall_thickness_mm" in parameter_space:
             trace["lhs_visualization"] = build_lhs_design_visualization(
                 run_id=str(base_request.get("run_id") or ""),
                 parameter_space=parameter_space,
@@ -633,8 +637,7 @@ def run_benchmark(
     parameter_space = payload.get("parameter_space") if isinstance(payload.get("parameter_space"), dict) else {}
     if not parameter_space:
         parameter_space = {
-            "relative_density": [0.18, 0.48],
-            "wall_thickness_mm": [1.2, 2.4],
+            "wall_thickness_mm": [0.6, 1.2],
             "cell_size_mm": [5.0, 10.0],
             "geometry_type": ["gyroid"],
         }

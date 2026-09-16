@@ -81,10 +81,10 @@
     const cells = Array.isArray(designSpace.feasible_cell_sizes_mm) ? designSpace.feasible_cell_sizes_mm.join(", ") : "-";
     const continuousCell = designSpace.cell_size_kind === "continuous";
     const cellBounds = Array.isArray(designSpace.cell_size_bounds_mm) ? designSpace.cell_size_bounds_mm.join("–") : "-";
-    const density = Array.isArray(designSpace.relative_density_bounds) ? designSpace.relative_density_bounds.join("–") : "-";
+    const density = Array.isArray(designSpace.wall_thickness_bounds_mm) ? designSpace.wall_thickness_bounds_mm.join("–") : "-";
     const rows = [["Variables", `${designSpace.dimension ? `${designSpace.dimension}D · ` : ""}${variables}`]];
     if (designSpace.feasible_cell_sizes_mm || designSpace.cell_size_bounds_mm) rows.push(["Cell size", `${continuousCell ? cellBounds : cells} mm`]);
-    if (designSpace.relative_density_bounds) rows.push(["Relative density", density]);
+    if (designSpace.wall_thickness_bounds_mm) rows.push(["Wall thickness (mm)", density]);
     if (constraints.length) rows.push(["Constraints", constraints.map((item) => typeof item === "string" ? item : JSON.stringify(item)).join(" · ")]);
     return `
       <section class="bo-equation-compact">

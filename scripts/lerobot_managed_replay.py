@@ -61,16 +61,13 @@ def load_episode(root: Path, episode_index: int) -> dict:
 
 
 def run_episode(robot, episode: dict, *, sleep=time.sleep, home_timeout_s=None) -> dict:
-    """Execute unchanged recorded actions and separately verify observed end pose."""
-    # Same measured resume policy used by ActiveRobotCamTracker, in native units.
-    tolerance = float(os.environ.get("ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TOLERANCE_DEG", "5.0"))
-    timeout = float(os.environ.get("ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TIMEOUT_S", "4.0")) if home_timeout_s is None else home_timeout_s
-    poll = float(os.environ.get("ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_POLL_S", "0.05"))
-    if not all(math.isfinite(v) and v >= 0 for v in (tolerance, timeout, poll)):
-        raise ValueError("Invalid existing home readback policy.")
-    result = {"ok": False, "replay_home_verified": False, "frames_sent": 0,
-              "follower_closed": False, "home_evidence": {"target_state": episode["target_state"],
-              "reference": "recorded_end_observation.state", "tolerance": tolerance}}
+    """Replay recorded actions; task success is verified separately by Vision.
+
+    home_timeout_s is retained for caller compatibility, not used. A recorded
+    end observation is not a home command or a replay completion condition.
+    """
+    result = {"ok": False, "replay_execution_verified": False, "frames_sent": 0,
+              "follower_closed": False}
     try:
         if not robot.calibration:
             raise ValueError("Saved follower calibration is required; interactive calibration is forbidden.")
@@ -89,31 +86,15 @@ def run_episode(robot, episode: dict, *, sleep=time.sleep, home_timeout_s=None) 
             result["frames_sent"] += 1
             sleep(max(0.0, 1.0 / episode["fps"] - (time.monotonic() - started)))
         result["ok"] = True
-        deadline = time.monotonic() + timeout
-        while True:
-            measured = robot.get_observation()
-            target = episode["target_state"]
-            current = {key: float(measured[key]) for key in target if key in measured}
-            errors = [abs(current.get(key, float("inf")) - value) for key, value in target.items()]
-            valid = len(current) == len(target) and all(math.isfinite(v) for v in current.values())
-            max_error = max(errors)
-            result["home_evidence"].update({"measured_state": current,
-                "max_error": max_error if math.isfinite(max_error) else None})
-            if valid and max_error <= tolerance:
-                result["replay_home_verified"] = True
-                break
-            if time.monotonic() >= deadline:
-                break
-            sleep(poll)
     except BaseException as exc:
-        result.update(ok=False, replay_home_verified=False, error=f"{type(exc).__name__}: {exc}")
+        result.update(ok=False, replay_execution_verified=False, error=f"{type(exc).__name__}: {exc}")
     finally:
         try:
             if robot.bus.is_connected:
                 robot.bus.disconnect(disable_torque=True)
             result["follower_closed"] = not robot.bus.is_connected
         except BaseException as exc:
-            result.update(ok=False, replay_home_verified=False, cleanup_error=f"{type(exc).__name__}: {exc}")
+            result.update(ok=False, replay_execution_verified=False, cleanup_error=f"{type(exc).__name__}: {exc}")
             # Native disconnect stops its sequential disable loop at the first
             # failed motor. Make one bounded independent attempt per motor so
             # an early failure cannot leave every later motor unattempted.
@@ -138,6 +119,8 @@ def run_episode(robot, episode: dict, *, sleep=time.sleep, home_timeout_s=None) 
                     result["follower_closed"] = not robot.bus.is_connected
                 except BaseException:
                     pass
+    result["replay_execution_verified"] = bool(result["ok"] and result["follower_closed"]
+        and result["frames_sent"] == len(episode["actions"]))
     return result
 
 
@@ -156,7 +139,7 @@ def main(argv=None) -> int:
         raise InterruptedError(f"Managed replay interrupted by signal {signum}")
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGALRM):
         signal.signal(sig, interrupted)
-    result = {"ok": False, "replay_home_verified": False}
+    result = {"ok": False, "replay_execution_verified": False}
     try:
         if not math.isfinite(args["max_duration_s"]) or args["max_duration_s"] <= 0:
             raise ValueError("Replay duration must be finite and positive.")
@@ -171,7 +154,7 @@ def main(argv=None) -> int:
             cameras={})
         result = run_episode(OmxFollower(config), episode)
     except BaseException as exc:
-        result.update(ok=False, replay_home_verified=False, error=f"{type(exc).__name__}: {exc}")
+        result.update(ok=False, replay_execution_verified=False, error=f"{type(exc).__name__}: {exc}")
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         result.update(identity)

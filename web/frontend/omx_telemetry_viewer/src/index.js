@@ -3,6 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { boxUnion } from "./box_union.cjs";
 import { specimenPosition } from "./specimen_pose.cjs";
+import { frameBudget } from "./frame_budget.cjs";
 
 const MODEL_ROOT = "/assets/robotis-omx";
 const MODEL_XML_URL = "/assets/robotis-omx/omx.xml";
@@ -847,32 +848,43 @@ async function createViewer() {
   let animationFrame = null;
   let active = false;
   let initialFitApplied = false;
+  let lastFrameAt = -Infinity;
+  let inViewport = true;
+  let viewportWidth = 0;
+  let viewportHeight = 0;
 
   function resize() {
     if (!runtime.poseMount) return;
     const width = Math.max(320, runtime.poseMount.clientWidth || 320);
     const height = Math.max(260, runtime.poseMount.clientHeight || 260);
+    if (width === viewportWidth && height === viewportHeight) return;
+    viewportWidth = width;
+    viewportHeight = height;
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
   }
 
-  function frame() {
+  function frame(now = performance.now()) {
     if (!active) return;
-    interpolateJointMap(currentActual, runtime.latestActualRad, 0.28);
-    interpolateJointMap(currentTarget, runtime.latestTargetRad, 0.28);
+    animationFrame = window.requestAnimationFrame(frame);
+    const budget = frameBudget(now, lastFrameAt, !document.hidden && inViewport);
+    if (!budget) return;
+    lastFrameAt = budget.timestamp;
+    interpolateJointMap(currentActual, runtime.latestActualRad, budget.alpha);
+    interpolateJointMap(currentTarget, runtime.latestTargetRad, budget.alpha);
     applyJointRadians(measuredRobot, currentActual);
     applyJointRadians(policyTargetGhost, currentTarget);
     syncHeldSpecimenPose();
     policyTargetGhost.root.visible = Object.keys(runtime.latestTargetRad || {}).length > 0;
     controls.update();
     renderer.render(scene, camera);
-    animationFrame = window.requestAnimationFrame(frame);
   }
 
   function start() {
     if (active) return;
     active = true;
+    lastFrameAt = -Infinity;
     resize();
     if (!initialFitApplied) {
       Object.assign(currentActual, runtime.latestActualRad);
@@ -892,6 +904,9 @@ async function createViewer() {
   }
 
   const resizeObserver = new ResizeObserver(resize);
+  const visibilityObserver = new IntersectionObserver((entries) => {
+    inViewport = entries.some((entry) => entry.isIntersecting);
+  });
   return {
     renderer,
     scene,
@@ -910,6 +925,7 @@ async function createViewer() {
       poseLocked: false,
     },
     resizeObserver,
+    visibilityObserver,
     start,
     pause,
     resize,
@@ -952,6 +968,8 @@ async function hydratePoseViewer(mount) {
     }
     viewer.resizeObserver.disconnect();
     viewer.resizeObserver.observe(mount);
+    viewer.visibilityObserver.disconnect();
+    viewer.visibilityObserver.observe(mount);
     viewer.start();
     applySpecimenGraspVisualization(
       runtime.latestMotionState.grasp_outcome || null,
@@ -1147,7 +1165,7 @@ function applyMetricDonut(kind, metric) {
 
 function applyRunMetrics(metrics) {
   const value = metrics && typeof metrics === "object" ? metrics : {};
-  applyMetricDonut("task", value.task_cycle);
+  applyMetricDonut("task", value.task_progress);
   applyMetricDonut("grasp", value.grasp);
   applyRuntimeFields("metrics", value);
 }
@@ -1241,6 +1259,10 @@ function applyHomeGate(annotation) {
       const jointGate = gate && gate.joints && gate.joints[joint];
       const value = row.querySelector("[data-home-value]");
       if (value) value.textContent = formatNativeValue(jointGate && jointGate.value);
+      const range = row.querySelector("[data-home-range]");
+      if (range) range.textContent = jointGate
+        ? `${formatNativeValue(jointGate.minimum)} to ${formatNativeValue(jointGate.maximum)} ${sourceUnit(joint)}`
+        : "Waiting for thresholds";
       row.dataset.pass = jointGate ? (jointGate.passed ? "yes" : "no") : "waiting";
     });
   });
@@ -1366,6 +1388,7 @@ function appendSample(sample, updateDisplay = true) {
   const sessionId = String(sample.session_id || "");
   if (sessionId && sessionId !== runtime.sessionId) resetSession(sessionId);
   const executionIndex = sample.execution_index ?? null;
+  if (executionIndex !== null && runtime.executionIndex !== null && Number(executionIndex) < Number(runtime.executionIndex)) return;
   if (executionIndex !== null && runtime.executionIndex !== null && executionIndex !== runtime.executionIndex) resetSession(sessionId);
   runtime.executionIndex = executionIndex;
   const sequence = Number(sample.sequence);
@@ -1411,10 +1434,8 @@ function appendJointSamples(samples, latestSample) {
 }
 
 function replaceJointHistory(samples, latestSample) {
-  runtime.history = [];
-  runtime.latestSequence = -1;
-  runtime.latestActualRad = {};
-  runtime.latestTargetRad = {};
+  // Reconnection backfill is not a new execution. Keep the accepted cursor and
+  // pose; resetSession already clears them for an actual session/reset change.
   const ordered = (Array.isArray(samples) ? samples : [])
     .slice()
     .sort((left, right) => Number(left.execution_index || 0) - Number(right.execution_index || 0)
@@ -1432,6 +1453,8 @@ function consumePacket(packet) {
   }
   const sessionId = String((packet.session && packet.session.session_id) || packet.session_id || "");
   if (sessionId && sessionId !== runtime.sessionId) resetSession(sessionId);
+  const previousSequence = runtime.latestSequence;
+  const previousExecution = runtime.executionIndex;
   runtime.status = String(packet.status || runtime.status || "idle");
   if (packet.type === "joint_history") {
     replaceJointHistory(packet.samples, packet.latest_sample);
@@ -1447,7 +1470,9 @@ function consumePacket(packet) {
     setTrackingStatus(runtime.status, runtime.status);
   }
   // A new logger execution may reset the session while ingesting the batch.
-  if (packet.runtime_view) applyRuntimeView(packet.runtime_view);
+  const staleBatch = ["joint_history", "joint_samples"].includes(packet.type)
+    && runtime.latestSequence === previousSequence && runtime.executionIndex === previousExecution;
+  if (packet.runtime_view && !staleBatch) applyRuntimeView(packet.runtime_view);
 }
 
 function telemetryMountsPresent() {
@@ -1498,10 +1523,14 @@ function connectTelemetrySocket() {
 }
 
 async function loadSnapshot() {
+  const requestedSequence = runtime.latestSequence;
+  const requestedSession = runtime.sessionId;
   try {
     const response = await fetch(SNAPSHOT_URL, { cache: "no-store" });
     if (!response.ok) return;
     const payload = await response.json();
+    // The socket may have delivered newer state while HTTP was in flight.
+    if (runtime.latestSequence !== requestedSequence || runtime.sessionId !== requestedSession) return;
     if (Number(payload.reset_at_ms || 0) < runtime.resetAtMs) return;
     if (Number(payload.reset_at_ms || 0) > runtime.resetAtMs) consumePacket({ ...payload, type: "telemetry_state" });
     // A latest-only snapshot must never advance the history sequence cursor.
@@ -1570,7 +1599,19 @@ function hydrate() {
 
 window.ATRRobotTelemetryCards = { hydrate, disconnect: closeTelemetrySocket };
 
-const domObserver = new MutationObserver(() => window.queueMicrotask(hydrate));
+// Telemetry updates many text nodes. Only mount replacement needs hydration;
+// observing our own status/plot mutations otherwise repeats all card work.
+let hydrationQueued = false;
+const domObserver = new MutationObserver(() => {
+  if (hydrationQueued) return;
+  if (document.querySelector("[data-atr-robot-pose]") === runtime.poseMount
+      && document.querySelector("[data-atr-policy-tracking]") === runtime.chartMount) return;
+  hydrationQueued = true;
+  window.requestAnimationFrame(() => {
+    hydrationQueued = false;
+    hydrate();
+  });
+});
 domObserver.observe(document.documentElement, { childList: true, subtree: true });
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", hydrate, { once: true });
 else hydrate();

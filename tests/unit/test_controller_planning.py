@@ -161,6 +161,19 @@ def test_planning_analysis_message_preserves_compact_background_fem_identity() -
     }
 
 
+def test_analysis_message_uses_the_same_metric_as_bo_handoff() -> None:
+    from app.controller import MainController
+    controller = object.__new__(MainController)
+    message = controller._format_planning_stage_message(Stage.ANALYSIS, {
+        "analysis": {"objective_score": 0.000003657, "quality_gate": {"ok_for_bo": True}},
+        "bo_observation": {"metric_name": "specific_energy_absorption_J_per_g",
+                           "unit": "J/g", "objective_score": 0.425953319, "ok_for_bo": False},
+    }, "")
+    assert "specific_energy_absorption_J_per_g (J/g): 0.425953319" in message
+    assert "BO admissible: False" in message
+    assert "3.657e-06" not in message
+
+
 def test_manipulation_message_contains_result_without_removed_reward_fields() -> None:
     controller = load_runtime()
     message = controller._format_planning_stage_message(
@@ -336,8 +349,8 @@ def test_test_mode_json_declares_two_variable_lhs_then_gp_contract() -> None:
         "direction": "maximize",
         "unit": "MJ/m3",
     }
-    assert optimization["active_variables"]["cell_size_mm"]["feasible_values"] == [5.0, 6.0, 7.5, 10.0]
-    assert optimization["active_variables"]["relative_density"]["bounds"] == [0.20, 0.48]
+    assert optimization["active_variables"]["cell_size_mm"]["bounds"] == [5.0, 10.0]
+    assert optimization["active_variables"]["relative_density"]["bounds"] == [0.20, 0.40]
     assert optimization["initial_design"] == {
         "sampler": "latin_hypercube",
         "size": 8,
@@ -640,7 +653,7 @@ def test_test_mode_initial_design_is_published_as_orchestrator_json_contract() -
         "relative_density": seeded["relative_density"],
     }
     assert contract["parameter_space"]["cell_size_mm"] == [5.0, 10.0]
-    assert contract["parameter_space"]["relative_density"] == [0.20, 0.48]
+    assert contract["parameter_space"]["relative_density"] == [0.20, 0.40]
     assert contract["initial_design"]["index"] == 1
     assert contract["initial_design"]["target"] == 8
     assert len(contract["initial_design"]["points"]) == 8
@@ -743,6 +756,7 @@ def test_next_cycle_contract_republishes_bo_next_design_request() -> None:
         controller._default_test_constraints({}),
         {},
     )
+    constraints.update(cell_size_bounds_mm=[6.2, 9.1], relative_density_bounds=[0.27, 0.44])
     controller._state.run_metadata["next_design_request"] = {
         "schema": "next_design_request.v1",
         "status": "ready",
@@ -1952,12 +1966,12 @@ async def test_specimen_stage_waits_for_physical_printer_completion_before_visio
         {
             "ok": True,
             "status": "PRINT_STARTED",
-            "device_screen": {"progress_panel": {"state": "RUNNING", "progress_percent": 42, "job_name": "specimen.gcode.3mf"}},
+            "device_screen": {"progress_panel": {"state": "RUNNING", "progress_percent": 42, "job_name": "specimen-wait.gcode.3mf"}},
         },
         {
             "ok": True,
             "status": "ready",
-            "device_screen": {"progress_panel": {"state": "FINISH", "progress_percent": 100, "job_name": "specimen.gcode.3mf"}},
+            "device_screen": {"progress_panel": {"state": "FINISH", "progress_percent": 100, "job_name": "specimen-wait.gcode.3mf"}},
         },
     ]
 
@@ -2053,7 +2067,7 @@ async def test_printer_completion_wait_ignores_stale_finished_job_before_current
     assert result["last_status"]["job_name"] == "specimen-current"
 
 
-def test_printer_completion_classifier_treats_communication_ready_as_complete_after_start() -> None:
+def test_printer_completion_classifier_does_not_treat_communication_ready_as_complete() -> None:
     controller = load_runtime()
 
     result = type(controller)._classify_specimen_printer_completion_status(
@@ -2070,8 +2084,28 @@ def test_printer_completion_classifier_treats_communication_ready_as_complete_af
         started_seen=True,
     )
 
-    assert result["status"] == "complete"
+    assert result["status"] == "waiting"
     assert result["state"] == "COMMUNICATION_READY"
+
+
+@pytest.mark.asyncio
+async def test_printer_completion_rejects_other_task_with_same_filename(monkeypatch):
+    controller = load_runtime()
+    spec = {"specimen_id": "specimen-current", "printer_completion_poll_sec": 0}
+    payload = {"printer_path": "installed_printer", "printer_prepare_status": "TEST_PRINTER_EJECTION_PROJECT_STARTED",
+               "print_result": {"published": True, "post_publish_status": {
+                   "status": "running", "file_name": "specimen-current", "task_id": "this-task"}}}
+    samples = iter(["old-task", "this-task"])
+
+    async def read_status():
+        return {"ok": True, "device_screen": {"progress_panel": {
+            "state": "FINISH", "job_name": "specimen-current", "task_id": next(samples), "progress_percent": 100}}}
+
+    monkeypatch.setattr(controller, "_read_specimen_printer_completion_status", read_status)
+    result = await controller._await_specimen_printer_completion_before_vision(spec, payload)
+    assert result["samples"][0]["status"] == "stale_job"
+    assert result["task_id"] == "this-task"
+    assert result["completion_scope"] == "printer_job_only"
 
 
 @pytest.mark.asyncio
@@ -2115,12 +2149,12 @@ async def test_printer_completion_wait_recovers_from_transient_mqtt_timeouts(
         {
             "ok": True,
             "status": "ready",
-            "device_screen": {"progress_panel": {"state": "RUNNING", "progress_percent": 24, "job_name": "specimen.gcode.3mf"}},
+            "device_screen": {"progress_panel": {"state": "RUNNING", "progress_percent": 24, "job_name": "specimen-wait.gcode.3mf"}},
         },
         {
             "ok": True,
             "status": "ready",
-            "device_screen": {"progress_panel": {"state": "FINISH", "progress_percent": 100, "job_name": "specimen.gcode.3mf"}},
+            "device_screen": {"progress_panel": {"state": "FINISH", "progress_percent": 100, "job_name": "specimen-wait.gcode.3mf"}},
         },
     ]
 
@@ -2137,7 +2171,7 @@ async def test_printer_completion_wait_recovers_from_transient_mqtt_timeouts(
 
 
 @pytest.mark.asyncio
-async def test_printer_completion_wait_short_circuits_completed_post_publish(
+async def test_printer_completion_wait_rejects_unverified_completed_post_publish(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     controller = load_runtime()
@@ -2166,16 +2200,12 @@ async def test_printer_completion_wait_short_circuits_completed_post_publish(
     }
 
     async def fail_if_polled() -> dict:
-        raise AssertionError("completed post-publish evidence should not poll MQTT again")
+        raise RuntimeError("fresh observation required")
 
     monkeypatch.setattr(controller, "_read_specimen_printer_completion_status", fail_if_polled)
 
-    result = await controller._await_specimen_printer_completion_before_vision(spec, specimen_payload)
-
-    assert result["status"] == "complete"
-    assert result["poll_count"] == 0
-    assert result["last_status"]["status"] == "completed"
-    assert result["source"] == "prepare_post_publish_status"
+    with pytest.raises(RuntimeError, match="fresh observation required"):
+        await controller._await_specimen_printer_completion_before_vision(spec, specimen_payload)
 
 
 def test_merge_planning_agent_data_preserves_printer_completion_evidence_from_stale_specimen_payload() -> None:
@@ -2265,9 +2295,10 @@ async def test_printer_completion_wait_tolerates_extended_transient_printer_gaps
         {
             "ok": True,
             "status": "ready",
-            "device_screen": {"progress_panel": {"state": "FINISH", "progress_percent": 100, "job_name": "specimen.gcode.3mf"}},
+            "device_screen": {"progress_panel": {"state": "FINISH", "progress_percent": 100, "job_name": "specimen-wait.gcode.3mf"}},
         }
     )
+    specimen_payload["print_result"]["post_publish_status"]["file_name"] = "specimen-wait.gcode.3mf"
 
     async def fake_completion_status() -> dict:
         return statuses.pop(0)
@@ -3664,7 +3695,7 @@ def test_test_mode_initial_cycle_is_seeded_from_bo_lhs() -> None:
     seeded = controller._seed_initial_bo_design_constraints(constraints, total_cycles=5)
 
     assert 5.0 <= seeded["cell_size_mm"] <= 10.0
-    assert 0.20 <= seeded["relative_density"] <= 0.48
+    assert 0.20 <= seeded["relative_density"] <= 0.40
     assert controller._state.run_metadata["bo_initial_design"]["index"] == 1
     assert controller._state.run_metadata["bo_recommended_constraints"]["cell_size_mm"] == seeded["cell_size_mm"]
 

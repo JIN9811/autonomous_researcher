@@ -1304,6 +1304,11 @@ async def test_vision_agent_uses_lerobot_active_robot_cam_routine_for_ejection_c
         "autoejection_gate": {"status": "complete", "method": "bambu_gcode"},
     }
 
+    state.current_experiment_spec["specimen_id"] = state.run_metadata["specimen_result"]["specimen_id"]
+    state.run_metadata["specimen_result"]["printer_completion_wait"] = {
+        "run_id": state.run_id, "loop_id": state.loop_count,
+        "specimen_id": state.current_experiment_spec["specimen_id"],
+        "status": "complete", "completion_scope": "printer_job_only"}
     result = await VisionAgent().run(state, _CtxStub(tools))
 
     assert active_robot_cam_calls
@@ -1322,6 +1327,19 @@ async def test_vision_agent_confirms_spc_autoejection_with_active_cam_capture(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import agents.vision.agent as vision_module
+    original_review = vision_module.review_visual_evidence
+    preview_checks = []
+
+    async def check_preview_before_review(state, ctx, capture, contract_id):
+        preview = state.run_metadata["utm_verifications"]["previews"]["active_cam"]
+        assert preview["artifact"]["path"]
+        assert preview["confirmed"] is False
+        assert preview["status"] == "pending"
+        preview_checks.append(True)
+        return await original_review(state, ctx, capture, contract_id)
+
+    monkeypatch.setattr(vision_module, "review_visual_evidence", check_preview_before_review)
     active_frame = tmp_path / "camera-runtime" / "active_cam_ejection.jpg"
     _write_active_cam_frame(active_frame, specimen=True)
     monkeypatch.setattr(VisionAgent, "_repo_root", staticmethod(lambda: tmp_path))
@@ -1368,6 +1386,7 @@ async def test_vision_agent_confirms_spc_autoejection_with_active_cam_capture(
         **state.current_experiment_spec,
         "active_cam_camera_key": "wrist",
         "robot_profile_id": "robotis_omx_ai",
+        "specimen_id": "specimen-001",
     }
     state.run_metadata["fabrication_report"] = {
         "fabrication_outcome": {"location": "a4_workspace", "autoejection_status": "complete"},
@@ -1377,6 +1396,7 @@ async def test_vision_agent_confirms_spc_autoejection_with_active_cam_capture(
     result = await VisionAgent().run(state, _CtxStub(tools))
 
     assert active_cam_calls
+    assert preview_checks
     assert active_cam_calls[0]["camera_key"] == "wrist"
     observation = result.data["observation"]
     screen_report = result.data["vision_agent_report"]
@@ -1702,6 +1722,11 @@ async def test_test_mode_installed_printer_uses_specimen_fabrication_report_alia
         "autoejection_gate": {"status": "complete", "method": "bambu_project_file"},
     }
 
+    state.current_experiment_spec["specimen_id"] = state.run_metadata["specimen_result"]["specimen_id"]
+    state.run_metadata["specimen_result"]["printer_completion_wait"] = {
+        "run_id": state.run_id, "loop_id": state.loop_count,
+        "specimen_id": state.current_experiment_spec["specimen_id"],
+        "status": "complete", "completion_scope": "printer_job_only"}
     result = await VisionAgent().run(state, _CtxStub(tools))
 
     assert active_cam_calls

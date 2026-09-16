@@ -1144,6 +1144,17 @@ class AnalysisAgent(BaseAgent):
             "failure_code": failure_code,
         }
 
+    def _reported_objective(self, state, metrics, evaluation):
+        """Use the same compiled-or-physical score as the BO observation."""
+        evaluation = evaluation if isinstance(evaluation, dict) else {}
+        compiled = self._safe_float(evaluation.get("score"), float("nan"))
+        if evaluation.get("objective_hash") and math.isfinite(compiled):
+            return compiled
+        from utils.research_objective import SEA_METRIC, uses_sea
+        metric = SEA_METRIC if uses_sea(state.current_experiment_spec, state.active_goal) else "energy_density_50pct_MJ_per_m3"
+        score = self._safe_float(metrics.get(metric), float("nan"))
+        return score if math.isfinite(score) else None
+
     def _comparison(self, state: OrchestratorState, objective_score: float, metrics: dict[str, Any]) -> dict[str, Any]:
         if objective_score is None:
             return {"schema": "analysis_comparison.v1", "mode": "unavailable", "reason": "objective_domain_not_measured"}
@@ -1366,7 +1377,7 @@ class AnalysisAgent(BaseAgent):
         failure_tags = sorted(set(failure_tags + extra_failure_tags))
         parameters = {
             key: state.current_experiment_spec.get(key)
-            for key in ("geometry_type", "relative_density", "wall_thickness_mm", "cell_size_mm", "tpms_thickness")
+            for key in ("geometry_type", "gyroid_parameterization", "relative_density", "wall_thickness_mm", "cell_size_mm", "tpms_thickness")
             if isinstance(state.current_experiment_spec, dict) and key in state.current_experiment_spec
         }
         quality_gate = analysis.get("quality_gate") if isinstance(analysis.get("quality_gate"), dict) else analysis.get("data_quality_gate", {})
@@ -1395,14 +1406,19 @@ class AnalysisAgent(BaseAgent):
             bo_metric_unit = "1"
             bo_score = compiled_score
         else:
-            bo_metric_name = "energy_density_50pct_MJ_per_m3"
-            bo_metric_unit = "MJ/m3"
+            from utils.research_objective import SEA_METRIC, uses_sea
+            sea = uses_sea(state.current_experiment_spec, state.active_goal)
+            bo_metric_name = SEA_METRIC if sea else "energy_density_50pct_MJ_per_m3"
+            bo_metric_unit = "J/g" if sea else "MJ/m3"
             bo_score = self._safe_float(metrics.get(bo_metric_name), float("nan"))
         bo_score_available = math.isfinite(bo_score)
         bo_metrics = {bo_metric_name: bo_score} if bo_score_available else {}
         observation_fidelity = str(source_meta.get("fidelity") or "").strip() or (
             "synthetic" if str(source_meta.get("source") or "").startswith("synthetic") else "utm_high"
         )
+        from utils.test_mode_execution_profiles import is_resolved_all_virtual_bridge
+        if is_resolved_all_virtual_bridge(state.current_experiment_spec, mode=state.mode):
+            observation_fidelity = "synthetic"
         provenance_refs = [
             str(item.get("path") or item.get("source") or "")
             for item in artifact_refs
@@ -1426,7 +1442,7 @@ class AnalysisAgent(BaseAgent):
         quality_ready = (
             quality_gate.get("ok_for_metrics", False)
             if compiled_objective_active
-            else quality_gate.get("ok_for_bo", True)
+            else quality_gate.get("ok_for_bo", False)
         )
         objective_feasible = (
             objective_evaluation.get("feasible") is True
@@ -1817,11 +1833,7 @@ class AnalysisAgent(BaseAgent):
                 source_meta=source_meta,
                 equipment_result=equipment_result,
             )
-        objective = (
-            self._safe_float(objective_evaluation.get("score"), 0.0)
-            if isinstance(objective_evaluation, dict)
-            else metrics.get("energy_density_50pct_MJ_per_m3")
-        )
+        objective = self._reported_objective(state, metrics, objective_evaluation)
         comparison = self._comparison(state, objective, metrics)
         closed_loop_sources = [source_meta.get("source", "utm")]
         analysis = {

@@ -39,6 +39,7 @@ import ssl
 import subprocess
 import sys
 import threading
+import tempfile
 import time
 import uuid
 import zipfile
@@ -230,6 +231,7 @@ class BambuStudioSlicerRunner:
         timeout_sec: float | None = None,
         specimen_placement: dict[str, Any] | None = None,
         experiment_spec: dict[str, Any] | None = None,
+        auto_orient: bool = True,
     ) -> dict[str, Any]:
         """Slice an STL/3MF into a Bambu artifact and return manifest evidence."""
         source = Path(str(source_path or "")).expanduser()
@@ -280,6 +282,27 @@ class BambuStudioSlicerRunner:
                 }
             else:
                 slicer_profile["no_skirt_profile_probe"] = no_skirt_profile
+
+        orientation = {"enabled": False}
+        original_source = source
+        # Orient before explicit placement: rotating an already translated
+        # assembly can move it outside the plate. Never alter the source STL.
+        if auto_orient and source.suffix.lower() == ".stl":
+            orient_dir = Path(tempfile.mkdtemp(prefix="orientation-", dir=output_dir))
+            orient_command = [executable, "--orient", "1", "--ensure-on-bed",
+                              "--export-stl", "--outputdir", str(orient_dir), str(source)]
+            try:
+                oriented = subprocess.run(orient_command, check=False, capture_output=True,
+                                          text=True, timeout=float(timeout_sec if timeout_sec is not None else self.config.timeout_sec))
+                meshes = list(orient_dir.rglob("*.stl"))
+                if oriented.returncode != 0 or len(meshes) != 1:
+                    return self._blocked("BAMBU_AUTO_ORIENT_FAILED", command=orient_command,
+                                         stdout=oriented.stdout[-4000:], stderr=oriented.stderr[-4000:])
+                source = meshes[0]
+                orientation = {"enabled": True, "command": orient_command,
+                               "original_source_path": str(original_source), "oriented_source_path": str(source)}
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                return self._blocked("BAMBU_AUTO_ORIENT_FAILED", command=orient_command, error=str(exc))
 
         before = {path.resolve() for path in self._candidate_outputs(output_dir)}
         try:
@@ -405,7 +428,8 @@ class BambuStudioSlicerRunner:
             "ok": True,
             "tool": "printer.bambu.slice_artifact",
             "status": "sliced_not_published",
-            "source_path": str(source),
+            "source_path": str(original_source),
+            "orientation": orientation,
             "sliced_artifact_path": str(selected),
             "output_dir": str(output_dir),
             "size_bytes": len(data),
@@ -3692,6 +3716,13 @@ class PrinterDeviceBridgeManager:
         if str(payload.get("execution_policy_mode") or "").strip().lower() == "preflight_only":
             return self._prepare_bambu_no_actuation_preflight(profile, payload, result)
         if mode != "live" and not physical_transport:
+            # A virtual invocation must not inherit physical configuration gates.
+            # This is simulation evidence only; live paths retain every gate.
+            result["autoejection"] = {
+                "status": "virtual", "simulated": True, "physical_actuation": False,
+                "requested": bool((payload.get("ejection") or {}).get("enabled")),
+                "blockers": [],
+            }
             result.update(
                 {
                     "status": "VIRTUAL_BAMBU_READY",
@@ -5135,13 +5166,19 @@ class PrinterDeviceBridgeManager:
 
     @staticmethod
     def _bambu_post_publish_expected_subtask_matches(expected: str, actual: str) -> bool:
-        expected_clean = Path(str(expected or "").strip()).stem
-        actual_clean = Path(str(actual or "").strip()).stem
+        def normalize(value: str) -> str:
+            name = Path(str(value or "").strip()).name
+            for suffix in (".gcode.3mf", ".3mf", ".gcode"):
+                if name.endswith(suffix):
+                    return name[:-len(suffix)]
+            return name
+        expected_clean = normalize(expected)
+        actual_clean = normalize(actual)
         if not expected_clean:
             return True
         if not actual_clean:
             return False
-        return expected_clean == actual_clean or expected_clean in actual_clean or actual_clean in expected_clean
+        return expected_clean == actual_clean
 
     def _classify_bambu_post_publish_snapshot(
         self,
@@ -5161,7 +5198,7 @@ class PrinterDeviceBridgeManager:
         job = normalized.get("job") if isinstance(normalized.get("job"), dict) else {}
         file_name = str(job.get("file_name") or "")
         expected_matches = self._bambu_post_publish_expected_subtask_matches(expected_subtask_name, file_name)
-        if expected_subtask_name and file_name and not expected_matches:
+        if expected_subtask_name and not expected_matches:
             return {
                 "status": "stale",
                 "failure_code": "BAMBU_POST_PUBLISH_STALE_REPORT",
@@ -5186,15 +5223,16 @@ class PrinterDeviceBridgeManager:
                 "remaining_sec": job.get("remaining_sec"),
                 "prepare_percent": job.get("prepare_percent"),
             }
-        if upper in {"FINISH", "FINISHED", "IDLE"} and expected_matches:
+        if upper in {"FINISH", "FINISHED"} and expected_matches:
             progress = job.get("progress_percent")
             prepare = job.get("prepare_percent")
             complete_progress = progress in {100, 100.0} or prepare in {100, 100.0} or upper in {"FINISH", "FINISHED"}
             if complete_progress:
                 return {
-                    "status": "completed",
-                    "failure_code": "",
-                    "message": "Printer reported the requested project_file as completed.",
+                    "status": "completion_unverified",
+                    "execution_verified": False,
+                    "failure_code": "BAMBU_JOB_START_NOT_OBSERVED",
+                    "message": "Terminal snapshot alone cannot prove this submission executed.",
                     "state": state,
                     "progress_observed": True,
                     "progress_percent": progress if progress is not None else 100,

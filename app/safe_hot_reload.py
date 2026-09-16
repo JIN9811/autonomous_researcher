@@ -94,6 +94,9 @@ async def reload_equipment_support(controller):
     import hashlib
     import subprocess
     import sys
+    from orchestrator.state import Stage
+    if controller._state.stage == Stage.GUARDIAN and controller._state.is_paused:
+        return await reload_selection_review(controller)
     assert_idle(controller)
     sources = supported_sources()
     root = Path(__file__).resolve().parents[1]
@@ -119,3 +122,41 @@ async def reload_equipment_support(controller):
         {"modules": loaded, "sha256": digests, "actuation_performed": False})
     return {"ok": True, "modules": loaded, "sha256": digests, "server_restarted": False,
             "actuation_performed": False, "scope": "equipment_support_only"}
+
+
+async def reload_selection_review(controller):
+    """Only a rejected pre-actuation selection; no suspended owner workflow."""
+    import asyncio
+    import hashlib
+    import subprocess
+    import sys
+    from app.equipment_selection_recovery import selection_recovery_inputs
+    from orchestrator.state import Stage
+    record, corrected = selection_recovery_inputs(controller)
+    source_id = record["execution_id"]
+    root = Path(__file__).resolve().parents[1]
+    names = ("agents.equipment.decision", "agents.equipment.workflow",
+             "utils.manipulation_execution", "utils.manipulation_runtime_view")
+    sources = {name: Path(importlib.import_module(name).__file__) for name in names}
+    digests = {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in sources.items()}
+    checked = await asyncio.to_thread(subprocess.run, [sys.executable, "-m", "pytest",
+        "tests/unit/test_equipment_selection_recovery.py", "tests/unit/test_equipment_workflow_decision.py",
+        "tests/unit/test_manipulation_task_progress.py", "tests/unit/test_manipulation_runtime_view.py",
+        "-q", "--tb=short"], cwd=root, capture_output=True, text=True, timeout=60)
+    if checked.returncode:
+        raise ValueError("Selection recovery tests failed; live code unchanged")
+    latest, corrected = selection_recovery_inputs(controller)
+    if latest != record or any(hashlib.sha256(path.read_bytes()).hexdigest() != digests[name]
+                              for name, path in sources.items()):
+        raise ValueError("Selection recovery changed during validation")
+    loaded = reload_sources(sources)
+    # Publication and staging are atomic within the event loop. Resume is separate.
+    controller._state.run_metadata["specimen_result"] = corrected
+    controller._state.run_metadata["equipment_selection_retry"] = {"source_execution_id": source_id}
+    controller._state.run_metadata["guardian_recovery_wait"]["status"] = "retry_prepared"
+    controller._state.stage = Stage.EQUIPMENT
+    await controller._emit_control_event("runtime.selection_review_prepared",
+        "Never-executed Equipment selection prepared for fresh review; awaiting Resume",
+        {"source_execution_id": source_id, "modules": loaded, "sha256": digests, "actuation_performed": False})
+    return {"ok": True, "status": "selection_review_prepared", "server_restarted": False,
+            "actuation_performed": False, "source_execution_id": source_id}

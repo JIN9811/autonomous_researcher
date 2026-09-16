@@ -18,9 +18,13 @@ def test_design_intake_requests_configured_lhs_in_test_and_live(test_mode):
     controller._publish_orchestrator_design_contract(constraints, cycle_index=1, total_cycles=20)
     contract = controller._state.run_metadata["orchestrator_design_contract"]
     assert len(contract["initial_design"]["points"]) == 3
+    if test_mode:
+        for point in contract["initial_design"]["points"]:
+            assert 0.6 <= point["parameters"]["wall_thickness_mm"] <= 1.2
+            assert 5.0 <= point["parameters"]["cell_size_mm"] <= 10.0
     assert contract["requested_parameters"] == {
         key: contract["initial_design"]["points"][0]["parameters"][key]
-        for key in ("cell_size_mm", "relative_density")}
+        for key in ("cell_size_mm", "wall_thickness_mm")}
 
 
 @pytest.mark.asyncio

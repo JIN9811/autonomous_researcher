@@ -34,6 +34,67 @@ class Model:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mismatch", [False, True])
+async def test_selection_receives_real_upstream_handoff_not_config_flags(tmp_path, monkeypatch, mismatch):
+    agent, state, tools, executed, _, _ = setup_flow(tmp_path, monkeypatch)
+    state.current_experiment_spec.update(specimen_id="specimen-test", external_specimen_required=True)
+    state.run_metadata["robot_task_result"] = {"run_id": "old-run" if mismatch else state.run_id,
+        "loop_id":f"loop-{state.loop_count}","specimen_id":"specimen-test","completion_status":"verified_complete",
+        "handoff_status":"ready_for_equipment"}
+    state.run_metadata["utm_verifications"] = {"run_id":state.run_id,"loop_id":state.loop_count,
+        "specimen_id":"specimen-test","verification_1":{"confirmed":True}}
+    class EvidenceModel(Model):
+        async def complete(self, task, prompt, **kwargs):
+            packet=json.loads(prompt.split("CONTEXT:\n")[-1])
+            records=packet["incoming_handoff"]["records"]
+            assert records["robot_task_result"]["evidence"]["handoff_status"]=="ready_for_equipment"
+            assert records["utm_verifications"]["identity_status"]=="matched"
+            assert "incoming:robot_task_result" in packet["evidence_refs"]
+            if records["robot_task_result"]["identity_status"]=="mismatch":
+                self.choices=["request_operator"]
+            return await super().complete(task,prompt,**kwargs)
+    result=await agent.run(state,EvidenceModel(tools))
+    assert result.success is (not mismatch)
+    assert executed==([] if mismatch else ["prepare","measure","export"])
+
+
+@pytest.mark.asyncio
+async def test_upstream_verification_change_invalidates_pending_selection(tmp_path, monkeypatch):
+    agent,state,tools,executed,_,_=setup_flow(tmp_path,monkeypatch)
+    state.run_metadata["utm_verifications"]={"verification_1":{"confirmed":True}}
+    class Changed(Model):
+        async def complete(self,*args,**kwargs):
+            state.run_metadata["utm_verifications"]={"verification_1":{"confirmed":False}}
+            return await super().complete(*args,**kwargs)
+    result=await agent.run(state,Changed(tools))
+    assert not result.success
+    assert not executed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("planning_only", [False, True])
+@pytest.mark.parametrize("mode", ["test", "live"])
+async def test_research_goal_is_not_equipment_task(tmp_path, monkeypatch, planning_only, mode):
+    from orchestrator.state import Mode
+    agent, state, tools, executed, _, _ = setup_flow(tmp_path, monkeypatch)
+    state.mode = Mode(mode)
+    state.active_goal = "Plan only; do not execute equipment" if planning_only else "Maximize SEA (J/g)"
+    model = Model(tools, ["request_operator"] if planning_only else [])
+    result = await agent.run(state, model)
+    packet = model.calls[0][0]
+    assert packet["research_goal"] == state.active_goal
+    assert packet["task"] != state.active_goal
+    assert "configured equipment flow" in packet["task"]
+    assert packet["experiment_spec"]
+    # A real-mode path must still reject this simulator's screenshot at terminal
+    # review. Changing goal context must not weaken live evidence requirements.
+    assert result.success is (not planning_only and mode == "test")
+    if mode == "live" and not planning_only:
+        assert "live review requires a live screenshot" in str(result.data)
+    assert executed == ([] if planning_only else ["prepare", "measure", "export"])
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("authority_change", [False, True])
 async def test_model_telemetry_does_not_invalidate_but_approval_changes_do(tmp_path, monkeypatch, authority_change):
     agent, state, tools, executed, _, _ = setup_flow(tmp_path, monkeypatch)
@@ -204,6 +265,7 @@ async def test_standalone_test_workflow_binds_actual_simulator_screen_to_host_id
     from tests.unit.test_equipment_pyautogui_bridge import _bridge
     agent, state, tools, _, _, _ = setup_flow(tmp_path, monkeypatch)
     state.current_experiment_spec["specimen_id"] = "standalone-specimen"
+    state.run_metadata["specimen_result"]["specimen_id"] = "standalone-specimen"
     bridge = _bridge(tmp_path)
     registry = EquipmentSkillRegistry(tmp_path / "skills")
     for name in ("prepare", "measure", "export"):

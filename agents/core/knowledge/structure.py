@@ -19,7 +19,7 @@ def knowledge_implementation_structure():
             ("local_tools", "Inspect, search, read, note and publish tools", "middle", D, "run_knowledge_decision"),
             ("provenance", "Provenance and ontology validation", "guardian", A, "_ingest_local_event"),
             ("storage", "Markdown, JSONL, report and evidence persistence", "knowledge", A, "KnowledgeAgent._run_task"),
-            ("handoff", "Knowledge context and evolution proposal", "middle", A, "KnowledgeAgent._run_task"),
+            ("handoff", "Knowledge context and experiment evidence", "middle", A, "KnowledgeAgent._run_task"),
         ], [
             ("$operation", "binding", "validation", "read current owner settings"),
             ("binding", "intake", "evidence", "scope observed inputs"),

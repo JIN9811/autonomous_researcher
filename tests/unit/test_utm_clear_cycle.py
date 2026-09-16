@@ -37,7 +37,7 @@ def state_with_completed_clear():
     execution.update(
         state="done",
         success=True,
-        replay_home_verified=True,
+        replay_execution_verified=True,
         replay_evidence={"measured": True},
     )
     state.run_metadata["utm_verifications"]["verification_2"] = {
@@ -119,7 +119,7 @@ class ReplayTools:
         identity = {k: payload[k] for k in ("run_id", "loop_id", "specimen_id", "session_id")}
         if name.startswith("lerobot.replay"):
             return {**identity, "ok": True, "status": self.status, "exit_code": 0 if self.status == "COMPLETED" else None,
-                "replay_home_verified": self.home, "replay_evidence": {"measured": True}, "replay_max_duration_s": 60.0}
+                "replay_execution_verified": self.home, "replay_evidence": {"measured": True}, "replay_max_duration_s": 60.0}
         from datetime import datetime, timezone
         return {**identity, "ok": True, "status": "clear", "clear_confirmed": True, "detected": False,
             "captured_at": datetime.now(timezone.utc).isoformat(), "frame_timestamp": datetime.now(timezone.utc).timestamp(),
@@ -130,7 +130,20 @@ class ReplayTools:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("topic", ["/camera/image_raw", "/camera/image_rect"])
-async def test_replay_launch_poll_return_then_fresh_clear_routes_analysis(topic):
+async def test_replay_launch_poll_return_then_fresh_clear_routes_analysis(topic, monkeypatch):
+    import agents.vision.decision as decisions
+    original_review = decisions.review_visual_evidence
+    preview_checks = []
+
+    async def check_preview_before_review(state, ctx, capture, contract_id):
+        preview = state.run_metadata["utm_verifications"]["previews"]["verification_2"]
+        assert preview["artifact"]["path"]
+        assert preview["confirmed"] is False
+        assert "verification_2" not in state.run_metadata["utm_verifications"]
+        preview_checks.append(True)
+        return await original_review(state, ctx, capture, contract_id)
+
+    monkeypatch.setattr(decisions, "review_visual_evidence", check_preview_before_review)
     from utils import utm_clear_cycle as cycle
     from agents.manipulation.agent import ManipulationAgent
     from agents.vision.agent import VisionAgent
@@ -161,6 +174,7 @@ async def test_replay_launch_poll_return_then_fresh_clear_routes_analysis(topic)
     cycle.merge_utm_clear_cycle(state, Stage.VISION, result.data)
     assert result.data["requested_next_stage"] == "analysis"
     assert state.run_metadata["utm_verifications"]["verification_2"]["confirmed"] is True
+    assert preview_checks
     assert guardian_gate(state=state, stage="vision", phase="post", payload=result.data)["ok_for_next_stage"]
     assert not cycle.clearance_missing(state)
     graph = load_graph_config("graphs/configs/atr_closed_loop.yaml")

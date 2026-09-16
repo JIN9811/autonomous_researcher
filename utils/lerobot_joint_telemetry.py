@@ -37,21 +37,24 @@ SOURCE_UNITS = {
     "Joint5": "deg",
     "Gripper": "%",
 }
+HOME_MARGIN_DEG = 2.0
+HOME_MARGIN_NATIVE = HOME_MARGIN_DEG / 1.8
 MEASURED_HOME_RANGES = {
     # HOME is a bounded physical pose, not one exact servo setpoint. These
     # bounds include the measured settling envelope from the current OMX arm.
-    "Joint1": (-15.0, -1.0),
-    "Joint2": (-64.0, -53.0),
-    "Joint3": (50.0, 61.0),
-    "Joint4": (40.0, 53.0),
-    "Joint5": (-11.0, -1.0),
+    "Joint1": (-15.0 - HOME_MARGIN_DEG, -1.0 + HOME_MARGIN_DEG),
+    # Joint2-4 use normalized [-100, 100] for [-180, 180] degrees.
+    "Joint2": (-64.0 - HOME_MARGIN_NATIVE, -53.0 + HOME_MARGIN_NATIVE),
+    "Joint3": (50.0 - HOME_MARGIN_NATIVE, 61.0 + HOME_MARGIN_NATIVE),
+    "Joint4": (40.0 - HOME_MARGIN_NATIVE, 53.0 + HOME_MARGIN_NATIVE),
+    "Joint5": (-13.0, 10.0),
     "Gripper": (55.0, 65.0),
 }
 POLICY_HOME_RANGES = {
     **MEASURED_HOME_RANGES,
     # The follower's motor-2 limit shifts measured feedback away from the
     # requested home target. Keep the policy gate in requested-action space.
-    "Joint2": (-72.0, -62.0),
+    "Joint2": (-72.0 - HOME_MARGIN_NATIVE, -62.0 + HOME_MARGIN_NATIVE),
 }
 
 # Compatibility alias for consumers that imported the original range table.

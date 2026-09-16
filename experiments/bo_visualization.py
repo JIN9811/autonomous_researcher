@@ -125,7 +125,7 @@ def _design_space_display(parameter_space: dict[str, Any]) -> dict[str, Any]:
     active = [dimension.name for dimension in space.active_dimensions]
     cells = parameter_space.get("cell_size_mm") if isinstance(parameter_space.get("cell_size_mm"), list) else []
     feasible_cells = [float(value) for value in cells if _finite(value) is not None]
-    density = parameter_space.get("relative_density") if isinstance(parameter_space.get("relative_density"), list) else []
+    density = parameter_space.get("wall_thickness_mm") if isinstance(parameter_space.get("wall_thickness_mm"), list) else []
     density_bounds = [float(value) for value in density if _finite(value) is not None]
     cell_dimension = next((d for d in space.dimensions if d.name == "cell_size_mm"), None)
     cell_kind = cell_dimension.kind if cell_dimension else "unavailable"
@@ -138,7 +138,7 @@ def _design_space_display(parameter_space: dict[str, Any]) -> dict[str, Any]:
         "cell_size_bounds_mm": cell_bounds,
         "cell_counts": [],
         "feasible_cell_sizes_mm": [] if cell_bounds else feasible_cells,
-        "relative_density_bounds": density_bounds[:2],
+        "wall_thickness_bounds_mm": density_bounds[:2],
         "input_normalization": "unit_hypercube",
     }
 

@@ -84,6 +84,44 @@ def test_projection_is_canonical_and_click_does_not_execute(controller):
     assert controller._run_task is None
 
 
+def test_initial_owner_defaults_are_not_a_user_contract(controller):
+    assert controller._state.active_goal == ""
+    setup = controller.planning_snapshot()["state"]["setup"]
+    assert setup["blocks"]
+    assert all(b["internal_default_only"] for b in setup["blocks"])
+    block = goal_block(controller)
+    controller._setup_store().propose(block["block_id"], block["revision"],
+        {"research.goal": "User requested SEA study"}, "user-goal")
+    projected = controller.planning_snapshot()["state"]["setup"]
+    assert not next(b for b in projected["blocks"] if b["block_id"] == block["block_id"])["internal_default_only"]
+
+
+@pytest.mark.parametrize("goal", ["", "  ", "Build and run autonomous AI researcher loop", "Bootstrap autonomous researcher loop", "Design and validate a live-mode specimen plan before hardware execution."])
+def test_internal_placeholder_is_never_an_executable_goal(controller, goal):
+    controller._state.active_goal = goal
+    assert controller._research_goal_rejection()["failure_code"] == "RESEARCH_GOAL_REQUIRED"
+    controller._state.active_goal = "Maximize SEA (J/g)"
+    assert controller._research_goal_rejection() is None
+
+
+def test_live_gui_does_not_import_legacy_browser_goal(controller):
+    controller.prepare_live_gui(goal="Design and validate a live-mode specimen plan before hardware execution.")
+    assert controller._state.active_goal == ""
+    controller.prepare_live_gui(goal="Maximize SEA (J/g)")
+    assert controller._state.active_goal == "Maximize SEA (J/g)"
+
+
+@pytest.mark.asyncio
+async def test_start_without_research_goal_does_not_launch_loop(controller, monkeypatch):
+    from orchestrator.state import Mode
+    async def ready():
+        return None
+    monkeypatch.setattr(controller, "_plc_service_start_rejection", ready)
+    result = await controller.start(mode=Mode.TEST)
+    assert result["failure_code"] == "RESEARCH_GOAL_REQUIRED"
+    assert controller._run_task is None
+
+
 def test_confirm_stages_next_run_only_and_rejects_stale_or_foreign_scope(controller):
     from orchestrator.experimental_setup import SetupConflict
     block = goal_block(controller)

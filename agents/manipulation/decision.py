@@ -54,7 +54,7 @@ def _evidence(value):
         "policy_checkpoint_path", "policy_repo_id", "policy_pretrained_path", "required_visual_effect",
         "dataset_repo_id", "replay_episode", "terminal_pose", "pickup_pose", "pickup_target", "observation",
         "status", "ok", "detected", "clear_confirmed", "registered", "anomaly", "failure_code",
-        "completion_blocking_reason", "execution_evidence", "replay_evidence", "replay_home_verified",
+        "completion_blocking_reason", "execution_evidence", "replay_evidence", "replay_execution_verified",
         "post_place_interlock", "transfer_task", "timestamp", "captured_at", "frame_id", "frame_timestamp",
         "vision_decision", "rollout_stopped", "rollout_stop_status", "ready_to_stop_rollout",
         "simulated", "actuation_performed", "rollout_stop", "stop_confirmed", "stop_status",

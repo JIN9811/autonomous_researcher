@@ -69,11 +69,15 @@ def _scope(state, context):
             'context': deepcopy(context['current_scope']() if context.get('current_scope') else context.get('scope', {}))}
 
 
+class InvalidHandoffTarget(ValueError):
+    """A model-selected target outside this dispatcher's admitted stage IDs."""
+
+
 def _validate_target(choice, context, evidence):
     tool, args = choice['tool'], choice['arguments']
     if tool == 'prepare_handoff':
         if args['candidate'] not in context.get('handoff_candidates', []):
-            raise ValueError('Candidate is not admitted by the current dispatcher')
+            raise InvalidHandoffTarget('Candidate is not admitted by the current dispatcher')
         if not set(context.get('required_evidence', [])) <= set(evidence):
             raise ValueError('Required handoff evidence is missing')
     if tool in {'inspect_availability', 'request_owner_review'}:
@@ -130,6 +134,8 @@ async def decide_orchestration(state, ctx, *, context: dict, handlers: dict) -> 
                 'operation': 'decide_orchestration', 'scope': scope, 'context': public_context,
                 'evidence': evidence, 'trace': result['trace'],
                 'policy': 'Return only the decision JSON schema, never intake intent/classification fields. '
+                          'For prepare_handoff, copy an exact stage ID from context.handoff_candidates. '
+                          'candidate means the dispatcher stage, not a specimen candidate ID or agent name. '
                           'Cite only enumerated top-level evidence keys; nested provenance references are not registered IDs.',
                 'tools': {name: TOOL_ARGUMENTS[name] for name in handlers if name in TOOL_ARGUMENTS},
                 'response_schema': {'tool': 'registered name', 'arguments': 'exact tool arguments',
@@ -159,6 +165,15 @@ async def decide_orchestration(state, ctx, *, context: dict, handlers: dict) -> 
             _validate_target(selected, context, evidence)
             if _scope(state, context) != scope:
                 raise ValueError('Decision scope changed before effect')
+        except InvalidHandoffTarget as exc:
+            # No handler has run: allow the model to repair its target within
+            # this invocation's existing budget, without widening admission.
+            result['reason'] = f'{type(exc).__name__}: {exc}'
+            result['trace'].append({'choice': selected, 'error': result['reason'],
+                'result': {'allowed_stage_ids': list(context.get('handoff_candidates', []))}})
+            if len(result['trace']) >= max_steps:
+                return result
+            continue
         except Exception as exc:
             result['reason'] = f'{type(exc).__name__}: {exc}'
             return result

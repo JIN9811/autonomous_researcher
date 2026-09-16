@@ -36,6 +36,15 @@ test('experimental package stays first and follows the supplied active graph wit
 });
 
 // Deliberately tiny DOM at the renderer boundary; full browser checks live in tests/ui.
+test('initial internal defaults never appear as current experiment settings', () => {
+  const el=root();
+  Setup.renderBlocks(el,snapshot({blocks:[block({internal_default_only:true})]}),{graph:{}});
+  const cards=all(el).filter(e=>e.className==='setup-block');
+  assert.equal(cards.length,1);
+  assert.equal(cards[0].dataset.kind,'package');
+  assert.doesNotMatch(visibleText(el),/Next goal|Running goal/);
+});
+
 class Element {
   constructor(tag, doc) { this.tagName=tag; this.ownerDocument=doc; this.children=[];
     this.dataset={}; this.attributes={}; this.hidden=false; this.text=''; this.parentNode=null;
@@ -120,16 +129,37 @@ test('conversation inputs update the same block and are edited in chat, never co
   const el=root(); let edited;
   const input=block({topic_key:'conversation.input.material',conversation_input:true,draft_values:{material:'PLA'}});
   Setup.renderBlocks(el,snapshot({blocks:[input]}),{onEdit:b=>edited=b});
-  const card=find(el,e=>e.dataset.blockId==='b1');
-  const edit=find(card,e=>e.textContent==='Edit');
+  const card=find(el,e=>e.dataset.blockId==='__setup_specimen__');
+  const edit=find(card,e=>e.attributes['aria-label']==='Edit Material');
   assert.equal(edit.disabled,false);
   assert.equal(find(card,e=>e.textContent==='Confirm').disabled,true);
   assert.equal(find(card,e=>e.textContent==='Discard').disabled,true);
   Setup.renderBlocks(el,snapshot({revision:10,blocks:[{...input,revision:4,draft_values:{material:'PETG'}}]}),{onEdit:b=>edited=b});
-  assert.equal(find(el,e=>e.dataset.blockId==='b1'),card);
-  edit.onclick(); assert.equal(edited.revision,4);
+  assert.equal(find(el,e=>e.dataset.blockId==='__setup_specimen__'),card);
+  find(card,e=>e.attributes['aria-label']==='Edit Material').onclick(); assert.equal(edited.revision,4);
   assert.match(card.textContent,/PETG/);
-  assert.match(card.textContent,/Review and approve execution in Chat/);
+  assert.match(card.textContent,/editing does not apply or execute a run/);
+});
+
+test('semantic setup groups show each field once and preserve source IDs and run differences', () => {
+  const el=root(); let edited;
+  const conv=(id,key,value)=>block({block_id:id,topic_key:`conversation.input.${key}`,conversation_input:true,draft_values:{[key]:value}});
+  const input=snapshot({current_run_values:{goal:'Previous goal',wall_thickness_bounds_mm:[0.8,1.6]},blocks:[
+    block(),block({block_id:'space',topic_key:'bo.parameter_space',draft_values:{'bo.parameter_space':{cell_size_mm:[5,10],wall_thickness_mm:[0.8,1.6]}}}),
+    conv('goal','goal','Maximize SEA'),conv('objective','objective_type','SEA'),conv('direction','objective_direction','maximize'),
+    conv('wall','wall_thickness_bounds_mm',[0.6,1.2]),conv('cell','cell_size_bounds_mm',[5,10])
+  ]});
+  const before=JSON.stringify(input);
+  Setup.renderBlocks(el,input,{onEdit:b=>edited=b});
+  assert.equal(all(el).filter(e=>e.className==='setup-block').length,2);
+  for(const toggle of all(el).filter(e=>e.className==='setup-block-toggle')) toggle.onclick();
+  assert.equal(all(el).filter(e=>e.tagName==='dt'&&e.textContent==='Goal').length,1);
+  const text=visibleText(el);
+  assert.match(text,/Maximize SEA/); assert.match(text,/Current run: Previous goal/);
+  assert.match(text,/0.6, 1.2/); assert.match(text,/Differs from run/);
+  find(el,e=>e.attributes['aria-label']==='Edit Wall thickness range (mm)').onclick();
+  assert.equal(edited.block_id,'wall'); assert.equal(edited.revision,3);
+  assert.equal(JSON.stringify(input),before);
 });
 test('old event cannot overwrite a newer block state', () => {
   assert.equal(typeof Setup.acceptSnapshot, 'function');

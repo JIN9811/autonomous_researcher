@@ -131,21 +131,22 @@ class SpecimenMakingAgent(BaseAgent):
 
     @staticmethod
     def _enforce_fdm_gyroid_hard_rules(spec: dict[str, Any]) -> dict[str, Any]:
-        """Clamp generated gyroid specs to hard FDM manufacturability rules before tool calls."""
+        """Preserve the physical wall/cell inputs and derive density from them."""
         geometry = str(spec.get("geometry_type", "")).strip().lower()
         if geometry != "gyroid":
             return spec
-        try:
-            density = float(spec.get("relative_density", 0.32))
-        except (TypeError, ValueError):
-            density = 0.32
-        if density >= 0.20:
-            return spec
-        effective = dict(spec)
-        effective["relative_density"] = 0.20
-        constraints = effective.get("constraints") if isinstance(effective.get("constraints"), dict) else {}
-        effective["constraints"] = {**constraints, "relative_density": 0.20}
-        return effective
+        for key in ("wall_thickness_mm", "cell_size_mm"):
+            if key not in spec:
+                raise ValueError(f"Gyroid design requires {key}")
+        from utils.gyroid_contract import validate_candidate
+        nested = spec.get("constraints") if isinstance(spec.get("constraints"), dict) else {}
+        validate_candidate({**nested, **spec})
+        from mcp_tools.tpms_geometry import relative_density_for_wall
+        spec = dict(spec)
+        spec["relative_density"] = relative_density_for_wall(spec["wall_thickness_mm"], spec["cell_size_mm"])
+        spec["porosity"] = 1.0 - spec["relative_density"]
+        spec["gyroid_parameterization"] = "wall_cell_v1"
+        return spec
 
     @staticmethod
     def _normalize_printer_test_path(value: Any) -> str:
@@ -524,7 +525,7 @@ class SpecimenMakingAgent(BaseAgent):
             self._gate("required_fields", "pass", {"missing": []}),
             self._gate("geometry", "pass" if geometry_result.get("ok") else "fail", {"geometry_hash": digital_thread["geometry_hash"], "stl_path": digital_thread["stl_path"]}),
             self._gate("mesh", "pass" if mesh_result.get("ok") and mesh_result.get("mesh_status") == "pass" else "fail", {"mesh_status": mesh_result.get("mesh_status"), "warnings": mesh_result.get("warnings", [])}),
-            self._gate("manufacturability", "pass" if manufacturability_result.get("ok") and manufacturability_result.get("manufacturability_status") == "pass" else "fail", {"status": manufacturability_result.get("manufacturability_status"), "warnings": manufacturability_result.get("warnings", [])}),
+            self._gate("manufacturability", "pass" if manufacturability_result.get("ok") and manufacturability_result.get("manufacturability_status") == "pass" else "fail", {"status": manufacturability_result.get("manufacturability_status"), "warnings": manufacturability_result.get("warnings", []), "wall_thickness_verification": manufacturability_result.get("wall_thickness_verification", {})}),
             self._gate("slicer", self._gate_status_from_result(slicer_result), {"sliced_path": digital_thread["gcode_path"], "failure_code": slicer_result.get("failure_code")}),
             self._gate("gcode", self._gate_status_from_result(gcode_validation), {"failure_code": gcode_validation.get("failure_code"), "violations": gcode_validation.get("violations", [])}),
             self._gate("printer_storage", storage_status, storage_evidence),
@@ -1144,13 +1145,21 @@ class SpecimenMakingAgent(BaseAgent):
         live_gui_test_spec = self._is_live_gui_test_spec(state, spec)
         printer_test_path = self._printer_test_path(spec)
         execution_policy = spec.get("execution_policy") if isinstance(spec.get("execution_policy"), dict) else {}
-        printer_preflight_only = str(execution_policy.get("printer") or "").strip().lower() == "preflight_only"
+        from utils.test_mode_execution_profiles import is_resolved_all_virtual_bridge
+        printer_preflight_only = (
+            str(execution_policy.get("printer") or "").strip().lower() == "preflight_only"
+            and not is_resolved_all_virtual_bridge(spec, mode=state.mode)
+        )
         if live_gui_test_spec and not printer_test_path:
             return self._printer_path_choice_result(state, spec, candidate, specimen_id)
         if self._should_disable_test_surface_caps(state, spec, live_gui_test_spec=live_gui_test_spec):
             spec = self._without_surface_caps(spec)
             state.current_experiment_spec = spec
         spec = self._enforce_fdm_gyroid_hard_rules(spec)
+        contract = state.run_metadata.get("orchestrator_design_contract") or {}
+        if spec.get("geometry_type") == "gyroid" and contract.get("parameter_space"):
+            from utils.gyroid_contract import validate_candidate
+            validate_candidate(spec, contract["parameter_space"])
         state.current_experiment_spec = spec
 
         constraints = spec.get("constraints") if isinstance(spec.get("constraints"), dict) else {}
@@ -1224,7 +1233,7 @@ class SpecimenMakingAgent(BaseAgent):
                     "nozzle_diameter_mm": float(spec.get("nozzle_diameter_mm", 0.4)),
                     "layer_height_mm": float(spec.get("layer_height_mm", 0.2)),
                     "tpms_thickness": spec.get("tpms_thickness"),
-                    "fdm_min_wall_thickness_mm": float(spec.get("fdm_min_wall_thickness_mm", 1.2)),
+                    "fdm_min_wall_thickness_mm": float(spec.get("fdm_min_wall_thickness_mm", constraints.get("fdm_min_wall_thickness_mm", 0.4))),
                     "fdm_max_bridge_distance_mm": float(spec.get("fdm_max_bridge_distance_mm", 10.0)),
                     "fdm_max_unsupported_overhang_deg": float(spec.get("fdm_max_unsupported_overhang_deg", 45.0)),
                     "fdm_max_gyroid_wall_cell_ratio": float(spec.get("fdm_max_gyroid_wall_cell_ratio", 0.28)),
@@ -1237,10 +1246,20 @@ class SpecimenMakingAgent(BaseAgent):
         if not bool(manufacturability_result.get("ok")) or str(
             manufacturability_result.get("manufacturability_status", "fail")
         ) != "pass":
-            raise RuntimeError(
-                "geometry.check_manufacturability failed: "
-                + ", ".join(str(item) for item in manufacturability_result.get("reject_reasons", []))
-            )
+            report = self._build_fabrication_report(
+                state=state, spec=spec, candidate=candidate, specimen_id=specimen_id,
+                geometry_result=geometry_result, mesh_result=mesh_result,
+                manufacturability_result=manufacturability_result, handoff_result={},
+                experiment_response={}, printer_response={}, printer_payload={},
+                protocol_note="Manufacturing check failed; no slicing or printer command issued.",
+                live_gui_test_spec=live_gui_test_spec, printer_test_path=printer_test_path,
+                top_cap_enabled=top_cap_enabled, bottom_cap_enabled=bottom_cap_enabled,
+                geometry_payload=geometry_payload)
+            return AgentResult(success=False, summary="Manufacturing check rejected the agreed candidate",
+                data={"failure_code":"MANUFACTURABILITY_REJECTED", "fabrication_report":report,
+                      "specimen_result":{"ok":False,"status":"blocked","specimen_id":specimen_id,
+                          "candidate_id":candidate,"fabrication_report":report,
+                          "manufacturability":manufacturability_result}})
 
         handoff_result = ctx.tools.call(
             "artifact.create_specimen_handoff",
@@ -1508,6 +1527,8 @@ class SpecimenMakingAgent(BaseAgent):
 
         specimen_result = {
             "specimen_decision": specimen_decision,
+            "run_id": state.run_id,
+            "loop_id": state.loop_count,
             "ok": True,
             "tool": "printer.prepare",
             "experiment_evaluation": experiment_response,

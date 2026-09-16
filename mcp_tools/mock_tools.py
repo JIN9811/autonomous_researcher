@@ -284,12 +284,7 @@ def _try_write_stl_iso_capture_png(
     if not math.isfinite(float(mesh.area)) or mesh.area <= 0:
         return False
 
-    # Keep the surface solid in small GUI cards.  The old 18k face stride made
-    # dense TPMS meshes look like sparse wire/point clouds instead of surfaces.
-    max_faces = 240000
-    if len(faces) > max_faces:
-        stride = max(1, math.ceil(len(faces) / max_faces))
-        faces = faces[::stride]
+    # Never discard triangles: subsampling faces opens holes in closed sheets.
 
     width, height = canvas_size
     scale_factor = 2
@@ -336,7 +331,7 @@ def _try_write_stl_iso_capture_png(
     light = light / np.linalg.norm(light)
     shade = np.clip(normals @ light, 0.0, 1.0)
     shade = 0.40 + shade * 0.60
-    depth = tri_vertices.mean(axis=1) @ np.array([0.62, 0.62, 0.36], dtype=float)
+    depth = tri_vertices.mean(axis=1) @ np.array([0.92, 0.92, 1.0], dtype=float)
     order = np.argsort(depth)
 
     palette = {
@@ -661,7 +656,9 @@ def _generate_geometry_stl(payload: dict[str, Any]) -> dict[str, Any]:
         geometry_type = "gyroid"
     size = _vector3(payload.get("specimen_size_mm"), [30.0, 30.0, 30.0])
     wall = float(payload.get("wall_thickness_mm", 1.2) or 1.2)
-    cell = float(payload.get("cell_size_mm", 7.5) or 7.5)
+    cell = float(payload.get("cell_size_mm", 7.5))
+    if not math.isfinite(cell) or cell <= 0:
+        raise ValueError("cell_size_mm must be positive and finite")
     relative_density = float(payload.get("relative_density", 0.32) or 0.32)
     anisotropy_ratio = float(payload.get("anisotropy_ratio", 1.0) or 1.0)
     orientation_deg = float(payload.get("orientation_deg", 0.0) or 0.0)
@@ -742,6 +739,8 @@ def _generate_geometry_stl(payload: dict[str, Any]) -> dict[str, Any]:
         stl_text = _box_stl(specimen_id, size)
         generator_meta = {"generator_backend": "legacy_box_fallback", "triangle_count": stl_text.count("facet normal")}
 
+    if geometry_type == "gyroid":
+        relative_density = float(generator_meta.get("realized_relative_density_without_caps", relative_density))
     digest_source = {
         "geometry_type": geometry_type,
         "specimen_size_mm": size,
@@ -756,9 +755,9 @@ def _generate_geometry_stl(payload: dict[str, Any]) -> dict[str, Any]:
         "top_cap_enabled": top_cap,
         "bottom_cap_enabled": bottom_cap,
         "top_bottom_cap": cap,
-        "tpms_thickness": payload.get("tpms_thickness"),
+        "tpms_thickness": generator_meta.get("tpms_thickness") if geometry_type == "gyroid" else payload.get("tpms_thickness"),
         "tpms_resolution": payload.get("tpms_resolution"),
-        "tool_version": "tpms-geometry-v3",
+        "tool_version": "tpms-geometry-wall-cell-v1",
     }
     geometry_hash = hashlib.sha1(json.dumps(digest_source, sort_keys=True).encode("utf-8")).hexdigest()
     estimated_volume = float(generator_meta.get("estimated_volume_mm3") or (float(size[0] * size[1] * size[2]) * relative_density))
@@ -916,7 +915,7 @@ def _check_manufacturability(payload: dict[str, Any]) -> dict[str, Any]:
 
     wall = float(constraints.get("wall_thickness_mm", 1.2) or 1.2)
     cell = float(constraints.get("cell_size_mm", 7.5) or 7.5)
-    min_feature = float(constraints.get("minimum_feature_size_mm", 0.8) or 0.8)
+    min_feature = float(constraints.get("minimum_feature_size_mm", 0.4) or 0.4)
     nozzle = float(constraints.get("nozzle_diameter_mm", 0.4) or 0.4)
     layer_height = float(constraints.get("layer_height_mm", 0.2) or 0.2)
     geometry_type = str(constraints.get("geometry_type", "")).strip().lower()
@@ -925,7 +924,7 @@ def _check_manufacturability(payload: dict[str, Any]) -> dict[str, Any]:
     top_cap = _as_bool(constraints.get("top_cap_enabled"), top_bottom_cap)
     bottom_cap = _as_bool(constraints.get("bottom_cap_enabled"), top_bottom_cap)
     require_flat = bool(constraints.get("require_flat_compression_faces", False))
-    fdm_min_wall = float(constraints.get("fdm_min_wall_thickness_mm", max(1.2, 3.0 * nozzle)) or max(1.2, 3.0 * nozzle))
+    fdm_min_wall = float(constraints.get("fdm_min_wall_thickness_mm", 0.4) or 0.4)
     fdm_max_bridge = float(constraints.get("fdm_max_bridge_distance_mm", 10.0) or 10.0)
     fdm_max_overhang = float(constraints.get("fdm_max_unsupported_overhang_deg", 45.0) or 45.0)
     fdm_max_gyroid_wall_cell_ratio = float(constraints.get("fdm_max_gyroid_wall_cell_ratio", 0.28) or 0.28)
@@ -936,20 +935,26 @@ def _check_manufacturability(payload: dict[str, Any]) -> dict[str, Any]:
     bbox = _vector3(mesh_report.get("bbox"), [30.0, 30.0, 30.0])
     bed_contact = float(bbox[0] * bbox[1])
 
-    if wall < min_feature:
+    wall_verification = {}
+    if geometry_type == "gyroid":
+        from mcp_tools.wall_thickness import inspect_wall_thickness
+        required_wall = max(min_feature, fdm_min_wall, float(constraints.get("min_wall_thickness_mm", 0.4)))
+        wall_verification = inspect_wall_thickness(payload.get("stl_path") or "", required_wall)
+        if wall_verification["status"] != "pass":
+            reject_reasons.append("generated_mesh_minimum_wall_" + wall_verification["status"])
+
+    if geometry_type != "gyroid" and wall < min_feature:
         reject_reasons.append("wall_thickness_mm below minimum_feature_size_mm")
-    if wall < max(fdm_min_wall, 2.0 * nozzle):
+    if geometry_type != "gyroid" and wall < max(fdm_min_wall, float(constraints.get("min_wall_thickness_mm", 0.4))):
         reject_reasons.append("wall_thickness_mm below FDM printable wall rule")
-    if cell < 3.0 * wall:
+    if geometry_type != "gyroid" and cell < 3.0 * wall:
         reject_reasons.append("cell_size_mm below 3x wall_thickness_mm")
     if geometry_type == "gyroid":
         if cell > fdm_max_bridge:
             reject_reasons.append("gyroid cell_size_mm exceeds FDM bridge/span rule")
-        if wall / max(cell, 1e-6) > fdm_max_gyroid_wall_cell_ratio:
-            reject_reasons.append("gyroid wall/cell ratio too high for open FDM TPMS channels")
         if require_flat and not (top_cap and bottom_cap):
             reject_reasons.append("gyroid FDM specimen requires top and bottom caps for requested flat compression faces")
-        if rel_density < 0.20:
+        if not 0.0 < rel_density < 1.0:
             reject_reasons.append("gyroid relative_density below FDM continuous-shell rule")
         if layer_height > nozzle * 0.75:
             reject_reasons.append("layer_height_mm too high for FDM nozzle rule")
@@ -974,6 +979,7 @@ def _check_manufacturability(payload: dict[str, Any]) -> dict[str, Any]:
         "expected_print_time_min": round(expected_print_time, 2),
         "expected_mass_g": round(expected_mass, 3),
         "minimum_feature_size_mm": round(min_feature, 3),
+        "wall_thickness_verification": wall_verification,
         "overhang_risk": "low",
         "unsupported_island_risk": "low",
         "bed_contact_area_mm2": round(bed_contact, 2),

@@ -118,7 +118,7 @@
             </div>
           `)}
         `, { span: 4, tone: liveFrameReady ? "success" : "warning", eyebrow: "camera frame", action: renderVisionRuntimeHeaderActions() })}
-        ${renderDashboardCard("Active Cam Ejection", renderVisionActiveCamEjectionCheck(screenReport, latestActiveCamArtifact(report), activeCamIntervention), { span: 4, tone: activeCamConfirmed ? "success" : "warning", eyebrow: "SPC confirmation" })}
+        ${renderDashboardCard("Active Cam Ejection", renderVisionActiveCamEjectionCheck(screenReport, latestActiveCamArtifact(report), activeCamIntervention, utmScope.previews?.active_cam), { span: 4, tone: activeCamConfirmed ? "success" : "warning", eyebrow: "SPC confirmation" })}
         ${renderDashboardCard("UTM Verification", utmVerificationBody, { span: 4, tone: selectedUtmVerification.confirmed ? "success" : "warning", eyebrow: selectedUtmVerification.title, action: renderVisionUtmVerificationTabs(utmScope, selectedUtmVerification.index), className: "ar-vis-utm-verification-card" })}
         ${renderDashboardCard("Camera / Runtime", `
           ${renderVisionCameraRuntimeSummary(screenReport, visionReport, liveFrame, liveProfile)}

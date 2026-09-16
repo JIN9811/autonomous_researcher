@@ -109,9 +109,45 @@ function planningContext(extra = {}) {
 
 function loadPlanningFunctions(names, extra = {}) {
   const context = planningContext(extra);
+  vm.runInContext(functionSource(planningSource, "visionVerificationRoi"), context);
   for (const name of names) vm.runInContext(functionSource(planningSource, name), context);
   return context;
 }
+
+test("capture preview appears pending before review, then yields to final evidence", () => {
+  const c = loadPlanningFunctions(['selectVerification']);
+  const scope = {scope_established:true, previews:{verification_2:{
+    captured_at:'2026-09-16T01:00:00Z', artifact:{path:'/fresh.png'}, confirmed:true}}};
+  assert.equal(c.selectVerification(scope,2).imagePath,'/fresh.png');
+  assert.equal(c.selectVerification(scope,2).confirmed,false);
+  assert.equal(c.selectVerification(scope,2).status,'pending');
+  scope.verification_2 = {captured_at:'2026-09-16T01:00:01Z',status:'clear',confirmed:true,artifact:{path:'/reviewed.png'}};
+  assert.equal(c.selectVerification(scope,2).imagePath,'/reviewed.png');
+  assert.equal(c.selectVerification(scope,2).confirmed,true);
+  scope.scope_established=false;
+  assert.equal(c.selectVerification(scope,2).imagePath,'');
+});
+
+test("render cache includes the local verification selection", () => {
+  const source = functionSource(planningSource,'liveCenterRenderKey');
+  assert.match(source,/liveUtmVerificationSelection.scopeKey/);
+  assert.match(source,/liveUtmVerificationSelection.index/);
+});
+
+test("verification ROI uses the recorded bounds with no invented fallback", () => {
+  const context = loadPlanningFunctions(["renderVisionUtmVerification"]);
+  for (const index of [1, 2]) {
+    const selected = { index, title: `Verification ${index}`, status: "pending", artifact: {},
+      evidence: { width: 640, height: 480, roi_xyxy: [200, 240, 400, 420] }, imageUrl: "/frame.png" };
+    const html = context.renderVisionUtmVerification(selected);
+    assert.match(html, /viewBox="0 0 640 480"/);
+    assert.match(html, /x="200" y="240" width="200" height="180"/);
+    selected.evidence.roi_xyxy = [-1, 0, 400, 420];
+    assert.equal(context.visionVerificationRoi(selected), null);
+    selected.evidence = {};
+    assert.doesNotMatch(context.renderVisionUtmVerification(selected), /<svg/);
+  }
+});
 
 test("both snapshot selectors stay visible and missing Verification 2 is Pending without a V1 fallback", () => {
   const context = loadPlanningFunctions([

@@ -90,7 +90,7 @@ echo "fake slice complete"
     )
     runner = BambuStudioSlicerRunner(config, repo_root=tmp_path)
 
-    result = runner.slice(source_path=source, specimen_id="specimen")
+    result = runner.slice(source_path=source, specimen_id="specimen", auto_orient=False)
 
     sliced_path = Path(result["sliced_artifact_path"])
     assert result["ok"] is True
@@ -156,7 +156,7 @@ with zipfile.ZipFile(output_dir / export_name, "w") as archive:
     )
     runner = BambuStudioSlicerRunner(config, repo_root=tmp_path)
 
-    result = runner.slice(source_path=source, specimen_id="specimen")
+    result = runner.slice(source_path=source, specimen_id="specimen", auto_orient=False)
 
     assert result["ok"] is True
     assert "--load-settings" in result["command"]
@@ -214,7 +214,7 @@ sys.exit(139)
     )
     runner = BambuStudioSlicerRunner(config, repo_root=tmp_path)
 
-    result = runner.slice(source_path=source, specimen_id="specimen")
+    result = runner.slice(source_path=source, specimen_id="specimen", auto_orient=False)
 
     assert result["ok"] is True
     assert result["returncode"] == 139
@@ -270,8 +270,8 @@ printf 'real sliced payload %s' "$count" > "$out/specimen.gcode.3mf"
     )
     runner = BambuStudioSlicerRunner(config, repo_root=tmp_path)
 
-    first = runner.slice(source_path=source, specimen_id="specimen")
-    second = runner.slice(source_path=source, specimen_id="specimen")
+    first = runner.slice(source_path=source, specimen_id="specimen", auto_orient=False)
+    second = runner.slice(source_path=source, specimen_id="specimen", auto_orient=False)
 
     assert first["ok"] is True
     assert second["ok"] is True
@@ -2035,7 +2035,7 @@ def test_bambu_post_publish_running_snapshot_carries_progress_evidence(tmp_path:
     assert idle["failure_code"] == "BAMBU_PROJECT_FILE_ACCEPTED_BUT_NOT_STARTED"
 
 
-def test_bambu_post_publish_fast_ejection_done_snapshot_is_completed(tmp_path: Path) -> None:
+def test_bambu_post_publish_terminal_snapshot_does_not_prove_execution(tmp_path: Path) -> None:
     manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
 
     completed = manager._classify_bambu_post_publish_snapshot(
@@ -2056,8 +2056,9 @@ def test_bambu_post_publish_fast_ejection_done_snapshot_is_completed(tmp_path: P
         expected_subtask_name="specimen-cand-1.ejection-test",
     )
 
-    assert completed["status"] == "completed"
-    assert completed["failure_code"] == ""
+    assert completed["status"] == "completion_unverified"
+    assert completed["execution_verified"] is False
+    assert completed["failure_code"] == "BAMBU_JOB_START_NOT_OBSERVED"
     assert completed["progress_observed"] is True
     assert completed["progress_percent"] == 100
     assert completed["file_name"] == "specimen-cand-1.ejection-test"
@@ -2270,8 +2271,10 @@ def test_live_bambu_prepare_physical_stl_uses_http_artifact_and_publishes_when_f
 set -eu
 out=""
 name="specimen.gcode.3mf"
+orient="no"
 prev=""
 for arg in "$@"; do
+  if [ "$arg" = "--export-stl" ]; then orient="yes"; fi
   if [ "$prev" = "--outputdir" ]; then
     out="$arg"
   fi
@@ -2281,6 +2284,7 @@ for arg in "$@"; do
   prev="$arg"
 done
 mkdir -p "$out"
+if [ "$orient" = "yes" ]; then cp "$arg" "$out/oriented.stl"; exit 0; fi
 python3 - "$out/$name" <<'PY'
 import sys, zipfile
 with zipfile.ZipFile(sys.argv[1], "w") as archive:
@@ -2334,7 +2338,8 @@ PY
             return {
                 "ok": True,
                 "received_at": "2026-06-14T01:00:02+09:00",
-                "report": {"print": {"gcode_state": state, "mc_percent": 100}},
+                "report": {"print": {"gcode_state": state, "mc_percent": 100,
+                    "subtask_name": (published.get("payload") or {}).get("print", {}).get("subtask_name", "")}},
             }
 
         def publish_project_file_command(self, **kwargs) -> dict:
@@ -2378,7 +2383,7 @@ PY
         }
     )
 
-    assert result["ok"] is True
+    assert result["ok"] is True, (result.get("failure_code"), result.get("slicer_result"), result.get("autoejection"))
     assert result["status"] == "PRINT_STARTED"
     assert result["slicer_result"]["ok"] is True
     assert result["http_artifact_route"]["ok"] is True
@@ -2442,7 +2447,8 @@ def test_test_mode_installed_printer_uploads_starts_then_stops_before_autoejecti
         ) -> dict:
             snapshots.append(force_refresh)
             state = "RUNNING" if force_refresh else "IDLE"
-            return {"ok": True, "received_at": "now", "report": {"print": {"gcode_state": state, "mc_percent": 1}}}
+            return {"ok": True, "received_at": "now", "report": {"print": {"gcode_state": state, "mc_percent": 1,
+                "subtask_name": (published.get("payload") or {}).get("print", {}).get("subtask_name", "")}}}
 
         def publish_project_file_command(self, **kwargs) -> dict:
             published.update(kwargs)

@@ -12173,6 +12173,8 @@ body.planning-live-body .planning-chat-item table {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+  align-content: start;
+  align-items: start;
 }
 
 .ar-equipment-method-grid article,
@@ -12226,6 +12228,21 @@ body.planning-live-body .planning-chat-item table {
 .ar-equipment-raw-artifact a,
 .ar-equipment-raw-artifact span {
   overflow-wrap: anywhere;
+}
+
+/* Equipment evidence uses the surrounding Live card surface, not light tiles. */
+body.planning-live-body .ar-equipment-method-grid article,
+body.planning-live-body .ar-equipment-transition-list article,
+body.planning-live-body .ar-equipment-raw-artifact {
+  background: transparent;
+  align-content: start;
+  align-self: start;
+  min-height: 0;
+  height: auto;
+}
+
+body.planning-live-body .ar-equipment-method-grid article > span {
+  align-content: start;
 }
 
 @media (max-width: 760px) {
@@ -26477,6 +26494,37 @@ body.planning-live-body .ar-vis-utm-verification-card .ar-vis-active-cam-frame i
   max-height: 100%;
 }
 
+body.planning-live-body .ar-vis-utm-confirmation-card .ar-vis-active-cam-frame {
+  position: relative;
+}
+
+body.planning-live-body .ar-vis-verification-roi {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+body.planning-live-body .ar-vis-verification-roi rect {
+  fill: none;
+  stroke: #55df98;
+  stroke-width: 2;
+}
+
+body.planning-live-body .ar-vis-verification-roi-caption {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: #55df98;
+}
+
+body.planning-live-body .ar-vis-verification-roi-caption span {
+  color: #9aafc1;
+}
+
 body.planning-live-body .ar-vis-active-cam-frame {
   min-height: 10.5rem;
   aspect-ratio: 4 / 3;
@@ -26907,6 +26955,19 @@ body.planning-live-body .mission-status-stop {
   min-width: 0 !important;
   min-height: 0 !important;
   overflow: hidden !important;
+}
+
+body.planning-live-body .mission-status-stop.is-run-resumable #btn-live-safe-stop {
+  inline-size: 50% !important;
+  width: 50% !important;
+  justify-self: start !important;
+}
+
+body.planning-live-body .mission-status-stop.is-run-resumable #live-emergency-recovery {
+  inline-size: 50% !important;
+  width: 50% !important;
+  justify-self: end !important;
+  grid-template-columns: minmax(0, 1fr) !important;
 }
 
 body.planning-live-body #live-emergency-recovery[hidden] {
@@ -28063,8 +28124,11 @@ body.planning-live-body .ar-man-metrics-compact > section { display:block; paddi
 body.planning-live-body .ar-man-metrics-compact .ar-man-runtime-donut { display:block; width:auto; aspect-ratio:auto; background:none; border-radius:0; }
 body.planning-live-body .ar-man-metrics-compact .ar-man-runtime-donut > div { display:flex; align-items:center; gap:12px; width:auto; aspect-ratio:auto; background:none; border-radius:0; text-align:left; }
 body.planning-live-body .ar-man-metrics-compact .ar-man-runtime-donut span { font-size:13px; margin:0; }
-.dsn-space-chart { width:100%; height:auto; max-height:310px; color:#afc1cf; }
+.dsn-space-chart { display:block; width:100%; height:auto; max-height:310px; color:#afc1cf; }
 .dsn-space-chart text { fill:currentColor; font:13px sans-serif; }
+.dsn-space-chart .dsn-space-axis-label { font-size:14px; }
+.dsn-space-candidate { fill:#97aabe; }
+.dsn-space-selected { fill:none; stroke:#54d3ef; stroke-width:3; stroke-linecap:round; }
 .dsn-comparison-scroll { max-height:340px; overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
 .dsn-comparison-scroll > div { overflow-x:visible!important; }
 .dsn-comparison-scroll thead th { position:sticky; top:0; z-index:1; background:#182635; }

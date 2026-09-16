@@ -95,6 +95,8 @@ body.planning-live-body #live-experiment-setup-panel {
 }
 #live-experiment-setup-panel .setup-readable-values dt { color: #a9bac9; }
 #live-experiment-setup-panel .setup-readable-values dd { margin: 0; color: #ecf2f7; overflow-wrap: anywhere; }
+#live-experiment-setup-panel .setup-run-value { display:block; color:#ffbd86; margin-top:4px; }
+#live-experiment-setup-panel .setup-field-edit { margin-left:8px; padding:2px 7px; font-size:11px; }
 #live-experiment-setup-panel .setup-technical { margin-top: 8px; font-size: 11px; color: #a9bac9; }
 
 #live-experiment-setup-panel :is(.setup-intro, .setup-notice, .setup-block-meta, .setup-block-status, .setup-block-timing, .setup-readonly-reason, .setup-editing, .setup-owner) {

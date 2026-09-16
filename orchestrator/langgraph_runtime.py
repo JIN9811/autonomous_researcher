@@ -76,7 +76,7 @@ from utils.active_cam_artifact import apply_active_cam_artifact_update
 from utils.utm_completion_artifact import apply_utm_completion_artifact_update
 from utils.ids import make_event_id
 from utils.manipulation_execution import sync_manipulation_execution_status
-from utils.specimen_execution import sync_specimen_execution_status
+from utils.specimen_execution import sync_specimen_execution_status, current_printer_execution_verified
 
 EventCallback = Callable[[dict[str, Any]], Awaitable[None] | None]
 RUNTIME_ARTIFACT_COPY_LIMIT_BYTES = 50 * 1024 * 1024
@@ -1615,6 +1615,9 @@ class LangGraphRunLoop:
             self._state.run_metadata["knowledge"] = compact_runtime_payload(data["knowledge"])
         if "bo_result" in data:
             self._state.run_metadata["bo_agent"] = compact_runtime_payload(data["bo_result"])
+            lhs = data["bo_result"].get("lhs_visualization") if isinstance(data["bo_result"], dict) else None
+            if isinstance(lhs, dict) and lhs.get("run_id") == self._state.run_id:
+                self._state.run_metadata["lhs_visualization"] = compact_runtime_payload(lhs)
             visualization = self._bo_visualization_from_result(data)
             if visualization:
                 compact_visualization = compact_runtime_payload(visualization)
@@ -1744,7 +1747,7 @@ class LangGraphRunLoop:
         )
         # Every new active-camera result is authoritative for the SPC card and
         # completion gate.  Keeping an old success makes later failures stale.
-        confirmed = confirmed_now
+        confirmed = confirmed_now and current_printer_execution_verified(self._state, specimen)
         if isinstance(confirmation, dict):
             updated["vision_completion_signal"] = compact_runtime_payload(dict(confirmation))
         if isinstance(active_check, dict):
@@ -2371,13 +2374,27 @@ class LangGraphRunLoop:
     def _artifact_payloads(self, stage: Stage, data: dict[str, Any]) -> list[dict[str, Any]]:
         """Extract artifact-like payloads from agent outputs for Runtime IDE lineage."""
         artifacts: list[dict[str, Any]] = []
+        seen_objects: set[int] = set()
+        seen_references: set[tuple] = set()
 
         def _walk(value: Any, path: str) -> None:
+            if isinstance(value, (dict, list)):
+                if id(value) in seen_objects:
+                    return
+                seen_objects.add(id(value))
             if isinstance(value, dict):
-                is_artifact_key = path.split(".")[-1] in {"artifact", "artifacts", "specimen_artifacts", "fem_artifacts"}
-                has_artifact_fields = any(key in value for key in {"path", "url", "stl_url", "preview_url", "experiment_spec_url", "contour_url", "report_url"})
-                if is_artifact_key or has_artifact_fields:
-                    artifacts.append({"stage": stage.value, "key": path, "value": value})
+                references = {key: child for key, child in value.items()
+                    if isinstance(child, str) and child
+                    and (key in {"path", "url"} or key.endswith(("_path", "_url")))}
+                signature = tuple(sorted(references.items()))
+                if signature and signature not in seen_references:
+                    seen_references.add(signature)
+                    # Full evidence is retained in the stage-result artifact.
+                    # Live aliases carry only references/scalars, not nested
+                    # historical evidence copied into each handoff decision.
+                    summary = {key: child for key, child in value.items()
+                               if child is None or isinstance(child, (str, int, float, bool))}
+                    artifacts.append({"stage": stage.value, "key": path, "value": summary})
                 for key, child in value.items():
                     _walk(child, f"{path}.{key}" if path else str(key))
             elif isinstance(value, list):
@@ -3154,6 +3171,9 @@ class LangGraphRunLoop:
 
         status = self._ensure_agent_status(agent_name)
         status.state = "running"
+        status.success = None
+        status.run_id = self._state.run_id
+        status.loop_id = self._state.loop_count
         status.mode = self._state.mode.value
 
         if module_runtime:
@@ -3271,11 +3291,23 @@ class LangGraphRunLoop:
                 status.state, status.success = "error", False
             await self._record_guardian_gate_result(post_gate)
 
+            completion_blocked = result.success is not True or gate_blocks_execution(post_gate)
+            if completion_blocked:
+                status.state, status.success = "error", False
+            completion_pending = status.state in {"running", "waiting"}
+            from utils.vision_polling import vision_poll_pending
+            if (not completion_blocked and stage == Stage.VISION
+                    and (result_data.get("transition_decision") == "vision_utm_monitoring"
+                         or vision_poll_pending(self._state)
+                         or result_data.get("pending_operator_input") is True)):
+                # A successful monitoring tick is not a completed verification.
+                status.state, status.success = "waiting", None
+                completion_pending = True
             log_agent_event(
                 self._logger,
                 run_id=self._state.run_id,
                 agent_name=agent_name,
-                event_type="completed",
+                event_type="blocked" if completion_blocked else "progress" if completion_pending else "completed",
                 message=result.summary,
                 payload=compact_runtime_payload(result.data),
                 experiment_id=self._state.experiment_id,
@@ -3285,7 +3317,8 @@ class LangGraphRunLoop:
                 message=f"{agent_name}: {result.summary}",
                 payload={"agent": agent_name, "node_id": stage.value, "status": status.state if status.state in {"running", "waiting", "error"} else "done", "module_runtime": module_runtime, "result": compact_runtime_payload(result.data)},
             )
-            await self._emit_module_graph_completed(stage, agent_name, module_runtime, compact_runtime_payload(result_data))
+            if not completion_blocked and not completion_pending:
+                await self._emit_module_graph_completed(stage, agent_name, module_runtime, compact_runtime_payload(result_data))
             await self._emit_artifact_events(
                 stage,
                 agent_name,

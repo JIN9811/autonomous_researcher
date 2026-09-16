@@ -149,6 +149,8 @@ def _result(execution, *, capture=None, summary="UTM clear verification pending"
 
 
 def _explicit_virtual(state):
+    if is_resolved_all_virtual_bridge(state.current_experiment_spec, mode=state.mode):
+        return True
     policy = state.current_experiment_spec.get("execution_policy") or {}
     return all(policy.get(k) in {"virtual", "simulate", "simulation"} for k in ("manipulation", "vision", "lab_equipment"))
 
@@ -199,7 +201,7 @@ async def stop_pending_clear(state, ctx, *, reason):
     if execution.get("state") == "done" and execution.get("success") is True:
         return
     active = execution.get("state") in {"starting", "running", "waiting"} and not execution.get("simulated")
-    if active and not execution.get("replay_home_verified") and not execution.get("stop_attempted"):
+    if active and not execution.get("replay_execution_verified") and not execution.get("stop_attempted"):
         execution["stop_attempted"] = True
         payload = {**scope(state), "session_id": execution["session_id"],
                    "mode": state.mode.value, "runtime_mode": execution.get("runtime_mode", state.mode.value)}
@@ -237,7 +239,7 @@ async def run_clear_manipulation(state, ctx, *, spec):
             return _result(execution)
         execution["manipulation_decision"] = decision
         execution.update(state="waiting", simulated=True, success=None, replay_completed_at=time.time(),
-                         replay_home_verified=True, replay_evidence={"simulated": True, "actuation_performed": False})
+                         replay_execution_verified=True, replay_evidence={"simulated": True, "actuation_performed": False})
         return _result(execution, summary="Explicitly simulated clearance; no replay actuation")
     if not _execution_allowed(state, "manipulation") or not _execution_allowed(state, "lab_equipment"):
         execution.update(state="error", success=False, failure_code="UTM_CLEAR_MANUAL_CLEARANCE_REQUIRED")
@@ -337,11 +339,11 @@ async def run_clear_vision(state, ctx, *, artifact_dir):
         return _result(execution)
     if status != "COMPLETED":
         return _result(execution)
-    if replay.get("exit_code") != 0 or replay.get("replay_home_verified") is not True or not replay.get("replay_evidence"):
-        execution.update(state="error", success=False, failure_code="UTM_CLEAR_MEASURED_RETURN_REQUIRED")
+    if replay.get("exit_code") != 0 or replay.get("replay_execution_verified") is not True or not replay.get("replay_evidence"):
+        execution.update(state="error", success=False, failure_code="UTM_CLEAR_REPLAY_EVIDENCE_REQUIRED")
         return _result(execution)
     execution.setdefault("replay_completed_at", time.time())
-    execution.update(state="waiting", replay_home_verified=True, replay_evidence=deepcopy(replay["replay_evidence"]))
+    execution.update(state="waiting", replay_execution_verified=True, replay_evidence=deepcopy(replay["replay_evidence"]))
     first = state.run_metadata["utm_verifications"].get("verification_1", {})
     evidence = first.get("evidence") or {}
     artifact = first.get("artifact") or {}
@@ -375,6 +377,8 @@ async def run_clear_vision(state, ctx, *, artifact_dir):
     # Replay supervision and measured return above remain independent of model latency.
     from agents.vision.decision import review_visual_evidence, decision_allows_existing_gate, blocked_decision_result
     review_deadline = execution.get("pending_deadline_at")
+    from utils.vision_capture_preview import publish_capture_preview
+    publish_capture_preview(state, capture, "verification_2")
     decision = await review_visual_evidence(state, ctx, capture, "clearance")
     capture["vision_decision"] = decision
     if decision.get("scope_valid") is False:

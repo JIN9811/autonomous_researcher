@@ -5,11 +5,42 @@ This is observation bookkeeping only, never an authorization or motion gate.
 from orchestrator.state import AgentRuntimeStatus, OrchestratorState, Stage
 
 
+def record_task_progress(state):
+    """Display ledger of owner-verified executions, never inferred joint cycles."""
+    records = state.run_metadata.setdefault("manipulation_task_progress", {})
+    for phase, field in (("transfer", "manipulation_execution"), ("clearance", "utm_clear_execution")):
+        execution = state.run_metadata.get(field) or {}
+        if execution.get("run_id") != state.run_id or not execution.get("session_id"):
+            continue
+        key = f"{phase}:{execution.get('loop_id')}:{execution['session_id']}"
+        records[key] = {k: execution.get(k) for k in
+                       ("run_id", "loop_id", "specimen_id", "session_id", "state", "success")}
+
+
+def task_progress_counts(state):
+    metadata = state.get("run_metadata") or {}
+    records = dict(metadata.get("manipulation_task_progress") or {})
+    for phase, field in (("transfer", "initial_manipulation_execution"),
+                         ("transfer", "manipulation_execution"), ("clearance", "utm_clear_execution")):
+        execution = metadata.get(field) or {}
+        if execution.get("session_id"):
+            records[f"{phase}:{execution.get('loop_id')}:{execution['session_id']}"] = execution
+    records = [r for r in records.values() if r.get("run_id") == state.get("run_id") and state.get("run_id")]
+    success = sum(r.get("state") == "done" and r.get("success") is True for r in records)
+    failed = sum(r.get("state") in {"error", "failed", "cancelled"} for r in records)
+    completed = success + failed
+    return {"attempt_count": len(records), "completed_count": completed, "success_count": success,
+            "failed_count": failed, "pending_count": len(records) - completed,
+            "success_rate": success / completed if completed else None,
+            "source": "verified_manipulation_execution"}
+
+
 def sync_manipulation_execution_status(state: OrchestratorState, stage: Stage, *, failed: bool = False) -> None:
     metadata = state.run_metadata
     from utils.utm_clear_cycle import current_clear, sync_clear_status
     if current_clear(state):
         sync_clear_status(state, failed=failed)
+        record_task_progress(state)
         return  # Clearance has its own lifecycle; retain the initial VLA transfer.
     if stage == Stage.MANIPULATION and not failed:
         task = metadata.get("robot_task_result") or {}
@@ -57,6 +88,7 @@ def sync_manipulation_execution_status(state: OrchestratorState, stage: Stage, *
             execution.update(state="waiting", success=None)
     status = state.agent_status.setdefault("manipulation_agent", AgentRuntimeStatus(mode=state.mode.value))
     status.state, status.success = execution["state"], execution["success"]
+    record_task_progress(state)
     status.last_result = {
         "done": "Transfer verified and rollout stopped",
         "error": "Manipulation execution failed or was blocked",

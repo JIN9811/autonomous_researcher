@@ -38,24 +38,27 @@ class ModelContext:
 
 @pytest.mark.asyncio
 async def test_model_selects_nonfirst_candidate_and_legacy_scores_are_not_evidence():
-    ctx = ModelContext([request("inspect_candidate", "cand-1-08"), request("accept_candidate", "cand-1-08")])
+    ctx = ModelContext([request("inspect_candidate", "cand-1-01"), request("accept_candidate", "cand-1-01")])
     result = await DesignAgent().run(state_for_test(), ctx)
     assert result.success
-    assert result.data["experiment_spec"]["candidate_id"] == "cand-1-08"
+    assert result.data["experiment_spec"]["candidate_id"] == "cand-1-01"
     assert len(ctx.prompts) == 2
     assert "expected_objective_proxy_score" not in "".join(ctx.prompts)
     assert "information_gain_score" not in "".join(ctx.prompts)
     evaluation = result.data["experiment_spec"]["design_evaluation"]
     assert evaluation["validity"]["status"] == "pass"
+    wall = next(row for row in evaluation["constraint_margins"] if row["constraint"] == "minimum_wall")
+    assert wall["actual"] is None
+    assert wall["status"] == "unmeasured"
     assert evaluation["performance"]["status"] == "unassessed"
     assert evaluation["cost"]["mass"]["unit"] == "g"
     assert len(result.data["design_decision"]["trace"]) == 2
-    assert result.data["handoff_packet"]["experiment_spec"]["candidate_id"] == "cand-1-08"
+    assert result.data["handoff_packet"]["experiment_spec"]["candidate_id"] == "cand-1-01"
 
 
 @pytest.mark.asyncio
 async def test_model_can_escalate_after_inspection_without_emitting_ready_spec():
-    ctx = ModelContext([request("inspect_candidate", "cand-1-08"), request("return_to_owner")])
+    ctx = ModelContext([request("inspect_candidate", "cand-1-01"), request("return_to_owner")])
     result = await DesignAgent().run(state_for_test(), ctx)
     assert not result.success
     assert "experiment_spec" not in result.data
@@ -76,8 +79,8 @@ async def test_history_cannot_be_cited_before_it_is_read():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("response", [request("printer.start"), request("accept_candidate", "unknown"),
-    request("accept_candidate", "cand-1-08", arguments={"candidate_id":"cand-1-08", "relative_density":0.1}),
-    request("accept_candidate", "cand-1-08", evidence_refs=["fabricated:evidence"]),
+    request("accept_candidate", "cand-1-01", arguments={"candidate_id":"cand-1-01", "relative_density":0.1}),
+    request("accept_candidate", "cand-1-01", evidence_refs=["fabricated:evidence"]),
     {"tool":"accept_candidate"}])
 async def test_invalid_requests_never_emit_ready_handoff(response):
     result = await DesignAgent().run(state_for_test(), ModelContext([response]))
@@ -107,7 +110,7 @@ async def test_locked_bo_request_is_preserved_in_model_selected_design():
     state = state_for_test()
     state.run_metadata["orchestrator_design_contract"] = {
         "contract_id":"locked", "requested_parameters":{"cell_size_mm":6.0,"relative_density":0.37}}
-    result = await DesignAgent().run(state, ModelContext([request("accept_candidate", "cand-1-08")]))
+    result = await DesignAgent().run(state, ModelContext([request("accept_candidate", "cand-1-01")]))
     assert result.success
     spec = result.data["experiment_spec"]
     assert spec["cell_size_mm"] == 6.0
@@ -119,7 +122,7 @@ async def test_locked_bo_request_is_preserved_in_model_selected_design():
 async def test_repeated_inspections_end_at_configured_budget():
     state = state_for_test()
     state.run_metadata["design_decision_settings"] = {"max_calls":2, "timeout_s":5}
-    ctx = ModelContext([request("inspect_candidate", "cand-1-08")]*3)
+    ctx = ModelContext([request("inspect_candidate", "cand-1-01")]*3)
     result = await DesignAgent().run(state, ctx)
     assert not result.success
     assert len(ctx.prompts) == 2
@@ -165,7 +168,7 @@ async def test_cancellation_keeps_completed_tool_evidence(tmp_path):
                 raise asyncio.CancelledError()
             return await super().complete(task_type, prompt, **kwargs)
 
-    ctx = CancelContext([request("inspect_candidate", "cand-1-08")])
+    ctx = CancelContext([request("inspect_candidate", "cand-1-01")])
     ctx.artifact_run_root = str(tmp_path)
     with pytest.raises(asyncio.CancelledError):
         await DesignAgent().run(state, ctx)
@@ -224,11 +227,11 @@ async def test_history_tool_returns_knowledge_without_relabeling_old_scores_as_p
 
 @pytest.mark.asyncio
 async def test_initial_prompt_contains_only_authorized_candidate_details():
-    ctx = ModelContext([request("accept_candidate", "cand-1-08")])
+    ctx = ModelContext([request("accept_candidate", "cand-1-01")])
     await DesignAgent().run(state_for_test(), ctx)
     context = json.loads(ctx.prompts[0][ctx.prompts[0].index('{"context"'):])["context"]
-    assert {c["candidate_id"] for c in context["candidates"]} == {"cand-1-01", "cand-1-08"}
-    assert len(context["other_candidates"]) == 10
+    assert {c["candidate_id"] for c in context["candidates"]} == {"cand-1-01"}
+    assert len(context["other_candidates"]) == 0
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@ import json
 import math
 import re
 from uuid import uuid4
+from utils.gyroid_contract import BOUNDS, POLICY, parameter_space, validate_candidate
 
 from agents.core.knowledge.context import build_reference_context, mark_reference_delivered, record_reference_use
 
@@ -14,6 +15,8 @@ def missing_inputs(values):
     missing = [key for key in ("goal", "material", "specimen_size_mm") if not values.get(key)]
     if not (values.get("geometry_type") or values.get("experiment_domain")):
         missing.append("geometry_type or experiment_domain (either one, not both)")
+    if "gyroid" in str(values.get("geometry_type") or values.get("experiment_domain") or "").lower():
+        missing.extend(key for key in BOUNDS if values.get(key) is None)
     return missing
 
 
@@ -77,6 +80,9 @@ class ResearchDialogue:
                       objective_direction={"type": "str", "enum": ["maximize", "minimize"]})
         # Minimal controller admission fields remain valid in test-only registries.
         fields.setdefault("material", {"type": "str"})
+        fields.update({key: {"type": "list", "description": "Continuous [lower, upper] bounds"} for key in BOUNDS})
+        fields.pop("relative_density", None)
+        fields.pop("relative_density_bounds", None)
         return fields
 
     def _updates(self, updates, message, intent):
@@ -103,6 +109,8 @@ class ResearchDialogue:
                 if not isinstance(value, list) or len(value) != 3 or not all(type(x) in (int, float) and math.isfinite(x) and x > 0 for x in value):
                     raise ValueError("Invalid dimensions")
             result[key] = value
+        parameter_space(result)
+        validate_candidate(result)
         return result
 
     async def turn(self, message, *, intent, goal=None, constraints=None, scope=None, editing=False):
@@ -126,7 +134,7 @@ class ResearchDialogue:
                 "instruction": "If missing_inputs is empty, research conditions are complete: review or answer, do not request optional fields. geometry_type and experiment_domain are alternatives."},
             "language": self.language, "pending": self.pending, "agreed_inputs": current, "editing_only": bool(editing),
             "selected_input": {k: editing[k] for k in ("block_id", "revision", "topic_key", "draft_values")} if editing else None,
-            "input_contract": self.fields(), "registered_context": self.context(),
+            "input_contract": self.fields(), "gyroid_research_policy": POLICY, "registered_context": self.context(),
             "conversation": c._planning_memory_context(limit=10, max_chars=500),
             "reference_only": reference["pack"], "selected_test_policy": self.test_policy,
             "policy": "Converse as AX4LAB's orchestrator, not as a form or a machine log. Determine the language from the user's messages and continue in it (ko/en); a greeting alone is bilingual. "
@@ -140,7 +148,7 @@ class ResearchDialogue:
                 "Example: yes to begin_planning -> action collect, ask the goal and material, updates []. "
                 "Example: PLA in response to a material question -> action collect or review with an update {field:material,value:PLA,source_quote:PLA}. "
                 "Ask one or two relevant questions at a time, dynamically based on the registered input contract and agreed_inputs. Do not assume saved defaults are the user's research choices. "
-                "For initial Design admission collect goal, material, specimen_size_mm, and geometry_type or experiment_domain. When these are present, REVIEW immediately; do not repeatedly ask optional settings or ask again for an already accepted goal. Other values keep owner defaults unless the user requests them. "
+                "For initial Design admission collect goal, material, specimen_size_mm, and geometry_type or experiment_domain. For gyroid also collect both continuous ranges in gyroid_research_policy. When required inputs are present, REVIEW; explain the mandatory 0.4 mm wall rejection rule. Do not ask again for accepted inputs. "
                 "Extract updates only from actual statements in this message with exact source_quote; never fill unstated values. Questions never change values or authorize execution. "
                 "Accept terse answers using the preceding question. Handle system questions mid-discussion and preserve the pending question/inputs. "
                 "When required values are agreed, summarize them briefly and ask whether to execute (action review). Execute ONLY with a pending run_review and current execution consent, even if all values were supplied in a first start request. Planning consent never means execution. Editing_only forbids execution. "
@@ -185,6 +193,15 @@ class ResearchDialogue:
             if before != c._planning_intake_scope():
                 raise ValueError("Conversation scope changed")
             merged = {**current, **updates}
+            # Automatic operator prose is model output, not authority to change
+            # the scenario's objective. Reject drift before writing Setup/admission.
+            driver = c._test_scenario
+            if driver.is_submitting() and "goal" in updates:
+                from utils.research_objective import uses_sea
+                if uses_sea({}, getattr(driver, "goal", "")) and not uses_sea({}, updates["goal"]):
+                    raise ValueError("Automatic test reply changed the SEA research objective")
+            parameter_space(merged)
+            validate_candidate(merged)
             if action in {"execute", "review"} and missing_inputs(merged):
                 raise ValueError("Required research inputs are missing")
             self.language = decision["language"]

@@ -62,7 +62,7 @@
     const yTicks = fixedDensity ? [bounds[0]] : Array.from({ length: 5 }, (_, index) => bounds[0] + ((bounds[1] - bounds[0]) * index) / 4);
     const pointMarkup = initial.points.map((item, fallbackIndex) => {
       const cell = finite(item.parameters?.cell_size_mm);
-      const density = finite(item.parameters?.relative_density);
+      const density = finite(item.parameters?.wall_thickness_mm);
       if (cell === null || density === null) return "";
       const status = String(item.status || "planned").toLowerCase();
       const index = Number(item.index || fallbackIndex + 1);
@@ -85,14 +85,14 @@
         <line class="lhs-viz-axis" x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${pad.top + plotHeight}"></line>
         <line class="lhs-viz-axis" x1="${pad.left}" y1="${pad.top + plotHeight}" x2="${pad.left + plotWidth}" y2="${pad.top + plotHeight}"></line>
         ${pointMarkup}
-        <text class="lhs-viz-axis-label" x="24" y="${pad.top + plotHeight / 2}" text-anchor="middle" transform="rotate(-90 24 ${pad.top + plotHeight / 2})">Relative density</text>
+        <text class="lhs-viz-axis-label" x="24" y="${pad.top + plotHeight / 2}" text-anchor="middle" transform="rotate(-90 24 ${pad.top + plotHeight / 2})">Wall thickness (mm)</text>
         <text class="lhs-viz-axis-label" x="${pad.left + plotWidth / 2}" y="${height - 20}" text-anchor="middle">Cell size (mm)</text>
         <g class="lhs-viz-legend" transform="translate(${pad.left} 82)">
           <circle class="lhs-viz-point lhs-viz-measured" cx="5" cy="0" r="5"></circle><text x="16" y="4">Measured design</text>
           <g class="lhs-viz-next" transform="translate(154 0)"><line x1="-5" y1="-5" x2="5" y2="5"></line><line x1="-5" y1="5" x2="5" y2="-5"></line></g><text x="166" y="4">Next design</text>
           <circle class="lhs-viz-point lhs-viz-planned" cx="270" cy="0" r="5"></circle><text x="281" y="4">Planned design</text>
         </g>
-        <text class="lhs-viz-strata-label" x="${pad.left + plotWidth}" y="${pad.top + plotHeight - 8}" text-anchor="end">${fixedDensity ? "Fixed density" : "Density strata"}</text>
+        <text class="lhs-viz-strata-label" x="${pad.left + plotWidth}" y="${pad.top + plotHeight - 8}" text-anchor="end">${fixedDensity ? "Fixed wall thickness" : "Wall thickness strata"}</text>
       </svg>`;
   }
 

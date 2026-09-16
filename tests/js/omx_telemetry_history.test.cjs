@@ -26,6 +26,20 @@ const sample = (sequence, elapsed_s = sequence - 1) => ({
   target_source: { Joint1: sequence + 1, Gripper: sequence % 100 + 1 },
 });
 
+test("reconnection history cannot rewind the latest pose or runtime view", () => {
+  const {api} = viewer();
+  api.consumePacket({type:'joint_samples', samples:[{...sample(200), execution_index:2,
+    actual_rad:{Joint1:.8}}], runtime_view:{execution:{status:'current'}}});
+  for (const execution_index of [1, 2]) {
+    api.consumePacket({type:'joint_history', samples:[{...sample(1),execution_index,
+      actual_rad:{Joint1:-1}}], runtime_view:{execution:{status:'old'}}});
+  }
+  assert.equal(api.runtime.latestSequence,200);
+  assert.equal(api.runtime.latestActualRad.Joint1,.8);
+  assert.equal(api.runtime.runtimeView.execution.status,'current');
+  assert.equal(api.runtime.history.length,1);
+});
+
 test("reset clears real tracking state, rejects old history and accepts a new rollout", () => {
   const {api} = viewer();
   api.consumePacket({type:'joint_history',samples:[sample(1)],reset_at_ms:0});
@@ -143,13 +157,16 @@ for (const compact of [false, true]) {
   });
 }
 
-test("all recorded samples survive live updates and reconnect history replacement", () => {
+test("all recorded samples survive live updates and reconnect backfill", () => {
   const { api } = viewer();
   for (let i = 1; i <= 1501; i++) api.appendSample(sample(i));
   assert.equal(api.runtime.history.length, 1501);
   api.consumePacket({ type: "joint_history", samples: [sample(1), sample(2)] });
   api.consumePacket({ type: "joint_samples", samples: [sample(3), sample(4)] });
-  assert.deepEqual(Array.from(api.runtime.history, s => s.sequence), [1, 2, 3, 4]);
+  assert.equal(api.runtime.history.length, 1501);
+  assert.equal(api.runtime.latestSequence, 1501);
+  api.consumePacket({type:'joint_samples', samples:[sample(1502)]});
+  assert.equal(api.runtime.history.length, 1502);
 });
 
 test("joint chart uses session time, never rebases a partial history to zero", () => {
@@ -170,6 +187,18 @@ test("late snapshot cannot advance the history cursor and discard backfill", asy
   await api.loadSnapshot();
   api.appendSample(sample(3));
   assert.deepEqual(Array.from(api.runtime.history, s => s.sequence), [1, 2, 3]);
+});
+
+test("HTTP snapshot cannot overwrite a socket update received while awaiting response", async () => {
+  const context = viewer();
+  const {api} = context;
+  context.fetch = async () => {
+    api.consumePacket({type:'joint_samples',samples:[sample(1)],
+      runtime_view:{execution:{status:'fresh'}}});
+    return {ok:true,json:async()=>({status:'complete',runtime_view:{execution:{status:'old'}}})};
+  };
+  await api.loadSnapshot();
+  assert.equal(api.runtime.runtimeView.execution.status,'fresh');
 });
 
 test("first success stays on result card while 3D uses the latest raw attempt", () => {

@@ -14,11 +14,9 @@ ui:
   - {id: knowledge_wiki, type: knowledge, title: Reference Library, span: 12, tone: knowledge}
   - {id: knowledge_memory_intake, type: evidence, title: Recorded Knowledge Outcomes, span: 12, tone: knowledge}
   - {id: knowledge_pattern_library, type: evidence, title: Learned Patterns, span: 12, tone: knowledge}
-  - {id: knowledge_evolution_packs, type: evidence, title: Improvement Evidence, span: 12, tone: knowledge}
   report_sections:
   - id: knowledge_memory_report
     title: Knowledge Memory / Evidence Update
     selectors:
       report: metadata.knowledge.knowledge_report
       context: metadata.knowledge.knowledge_context
-      evolution: metadata.knowledge.evolution_proposal

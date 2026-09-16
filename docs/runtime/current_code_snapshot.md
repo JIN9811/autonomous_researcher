@@ -1308,10 +1308,11 @@ directory proven to have been created by that import.
 
 ## Two-Variable Gyroid SEA Optimization (2026-08-11)
 
-- The canonical active space is `cell_size_mm x relative_density`. For a
-  30 mm Gyroid specimen, cell size is the feasible discrete set
-  `{5.0, 6.0, 7.5, 10.0}` mm from `a=L/N`, `N={6,5,4,3}`; relative density is
-  continuous on `[0.20,0.48]`.
+- As of 2026-09-16, the canonical active space is `cell_size_mm x wall_thickness_mm`.
+  Test defaults are continuous `[5,10]` mm and `[0.8,1.6]` mm. Live bounds are
+  agreed through the orchestrator dialogue. Density is derived, not optimized.
+  The periodic field is center-cropped without snapping decimal cell sizes.
+  The generated mesh retains an independent minimum-wall check of 0.4 mm.
 - `BOParameterSpace` normalizes both dimensions to `[0,1]^2`. The first eight
   accepted observations use one deterministic balanced Latin Hypercube design.
   The normal 20-cycle test run uses those eight initialization cycles followed
@@ -1344,6 +1345,31 @@ directory proven to have been created by that import.
   initial-design, kernel, noise, acquisition, normalization, and objective
   metadata. The selected-parameter graph is a one-dimensional marginal view of
   the two-dimensional model, not a separate one-dimensional optimizer.
+
+### Wall/cell geometry contract (2026-09-16)
+
+The test-mode domain is wall thickness **0.8–1.6 mm** and cell size
+**5–10 mm**. Live experiments collect both continuous bounds through the
+research dialogue; suggested defaults are not user consent. The same bounds
+feed Experimental Setup, the Orchestrator contract, DSN, LHS and BO.
+
+The test-mode objective is **specific energy absorption (SEA, J/g)**,
+`specific_energy_absorption_J_per_g`: the integrated force–displacement energy
+in joules divided by specimen mass in grams. It is not volumetric energy
+density. Explicit compiled objectives retain precedence. Virtual UTM results
+are synthetic workflow evidence, not measured performance validation.
+
+`wall_cell_v1` identifies the new geometry parameterization. Wall thickness is
+a physical normal-width target used to calibrate the implicit Gyroid level,
+not a claim of spatially constant thickness or a measured mesh minimum.
+Relative density and porosity are derived, not independent optimizer inputs.
+The generated mesh must still pass the actual-wall check at **0.4 mm** or a
+stricter requested limit before printer dispatch. A failed preparation cannot
+advance to Vision merely because a result object exists.
+
+Historical density-controlled records are retained, but their nominal wall
+values are not reinterpreted as `wall_cell_v1` BO observations. LHS browser
+plots, saved figures and CSVs use wall thickness in millimetres.
 
 ## Related Documents
 

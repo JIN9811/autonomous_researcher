@@ -187,6 +187,27 @@ function liveAgentRendererProfile(agentId) {
 }
 
 let liveSelectedAgent = "orchestrator";
+let liveLastAgentTransitionKey = "";
+
+function selectAgentOnOrchestrationTransition(event) {
+  if (String(event?.event_type || event?.type || "") !== "stage_transition") return;
+  const payload = event.payload || {};
+  const runId = String(event.run_id || payload.run_id || "");
+  if (!runId || runId !== liveCurrentRunId()) return;
+  const from = agentIdFromStage(payload.from_stage || "");
+  const toStage = String(payload.to_stage || "");
+  if (!toStage || ["idle", "complete", "error"].includes(toStage)) return;
+  const to = agentIdFromStage(toStage);
+  if (!knownLiveAgent(to) || from === to) return;
+  const key = `${runId}:${event.event_id || event.timestamp || event.ts || ''}:${payload.from_stage}:${toStage}`;
+  if (key === liveLastAgentTransitionKey) return;
+  liveLastAgentTransitionKey = key;
+  if (liveSelectedAgent === to) return;
+  // Reuse the binder action, without browser/window focus or synthetic scrolling.
+  const button = Array.from(liveAgentBinderList?.querySelectorAll('[data-agent-id]') || [])
+    .find(item => item.dataset.agentId === to);
+  if (button) button.click();
+}
 let liveOrchestratorReady = false;
 let liveCurrentView = "report";
 let liveReportPage = "agent";
@@ -305,7 +326,7 @@ let liveOrcChartHydrationTimer = null;
 let liveBrowserCacheRestoredRunId = "";
 let liveAppliedAuthoritativeRunId = "";
 
-let queryGoal = "Design and validate a live-mode specimen plan before hardware execution.";
+let queryGoal = "";
 let queryBackend = "vllm";
 let planningMessagesCache = [];
 let planningDisplayedMessages = [];
@@ -418,10 +439,12 @@ function liveKnowledgeDeliveryReports() {
   const metadata=state.run_metadata && typeof state.run_metadata==='object' ? state.run_metadata : {};
   return liveKnowledgeActiveConsumers().map(agent=>{
     const id=String(agent.id || '');
-    const keys=[`${id}_agent_payload`,`latest_${id}_agent_report`,`${id}_agent_report`];
+    const keys=[`${id}_agent_payload`,`latest_${id}_agent_report`,`${id}_agent_report`,`${id}_report`];
     if(id==='bo') keys.push('bo_agent');
     if(id==='orchestrator') keys.push('latest_orchestrator_decision','orchestrator_decision_register');
     const sources=keys.map(key=>metadata[key]).filter(value=>value && typeof value==='object');
+    const receipts=metadata.knowledge_delivery_receipts;
+    if(Array.isArray(receipts)) sources.push(...receipts.filter(row=>String(row?.knowledge_delivery?.consumer_binding || '').replace(/_agent$/, '')===id));
     const last=metadata.last_stage_payload;
     if(last && typeof last==='object' && agentIdFromStage(last.stage || '')===id) sources.push(last);
     const runtime=state.agent_status && typeof state.agent_status==='object' ? state.agent_status[`${id}_agent`] : null;
@@ -659,6 +682,7 @@ function liveAgentModuleHostServices() {
     designImageUrlFromSource,
     designCandidateDirectCaptureUrl,
     latestDesignAgentReport,
+    latestBoInitialDesign,
     latestDesignReport,
     designSelectedCandidate,
     designCandidateRows,
@@ -4387,6 +4411,9 @@ function specimenExecutionDisplayState(state, running) {
 }
 
 function eventStatusForAgent(agentId, state, running) {
+  const scopedStatus = state.agent_status?.[`${agentId}_agent`];
+  if ((scopedStatus?.run_id != null && scopedStatus.run_id !== state.run_id)
+      || (scopedStatus?.loop_id != null && scopedStatus.loop_id !== state.loop_count)) return "idle";
   if (agentId === "specimen") {
     const executionState = specimenExecutionDisplayState(state, running);
     if (executionState) return executionState;
@@ -4400,12 +4427,13 @@ function eventStatusForAgent(agentId, state, running) {
     const executionState = manipulationExecutionDisplayState(state, running);
     if (executionState) return executionState;
   }
-  const events = currentRunEventSources();
-  const agentEvents = events.filter((event) => agentIdFromEvent(event) === agentId);
   const activeAgent = agentIdFromStage(state.stage || "");
   const runtimeStatus = state.agent_status && typeof state.agent_status === "object"
     ? state.agent_status[`${agentId}_agent`]
     : null;
+  if (["error", "failed", "blocked"].includes(runtimeStatus?.state)) return "error";
+  if (["waiting", "waiting_approval"].includes(runtimeStatus?.state)) return "waiting";
+  if (runtimeStatus?.state === "running") return running && !state.is_paused ? "running" : "waiting";
   if (
     !running
     && String(state.stage || "").toLowerCase() === "complete"
@@ -4413,20 +4441,11 @@ function eventStatusForAgent(agentId, state, running) {
     && runtimeStatus.success === true
     && (agentId !== "specimen" || runtimeStatus.state === "done")
   ) return "done";
-  const pendingInput = agentEvents.some(eventRequiresOperatorInput)
-    || planningMessagesCache.some((msg) => agentIdFromMessage(msg) === agentId && Boolean(msg.pending_operator_input));
-  if (pendingInput) return running && activeAgent === agentId ? "running" : "waiting";
-  // Device telemetry belongs to SPC progress, never to the agent lifecycle badge.
-  const hasError = agentEvents.some((event) => !isResolvedEmergencyLifecycleEvent(event) && !eventRequiresOperatorInput(event) && (
-    !isTransientPrinterCommunicationEvent(event) && (
-    String(event.level || event.severity || "").toLowerCase() === "error"
-    || String(event.status || "").toLowerCase() === "failed"
-    )
-  ));
-  if (hasError) return "error";
+  // Historical errors and operator messages belong to the timeline, not the
+  // current lifecycle badge. The runtime owns waiting/error/completion state.
   const pendingApproval = (liveApprovals.pending || []).some((item) => agentIdFromFreeText(`${item.stage || ""} ${item.title || ""} ${item.reason || ""}`) === agentId);
   if (pendingApproval) return "waiting";
-  if (running && activeAgent === agentId) return "running";
+  if (running && activeAgent === agentId) return state.is_paused ? "waiting" : "running";
   if (agentId === "specimen") {
     // Diagnostics/chat are report content, not fabrication completion evidence.
     // Scoped physical execution was handled above; retain explicit virtual/legacy
@@ -4437,8 +4456,10 @@ function eventStatusForAgent(agentId, state, running) {
     }
     return "idle";
   }
-  const agentMessages = planningMessagesCache.filter((msg) => agentIdFromMessage(msg) === agentId);
-  if (agentEvents.length || agentMessages.length) return "done";
+  // Report/chat presence is not execution evidence. The runtime records a
+  // successful finished invocation as idle+success (or explicitly done).
+  if (["idle", "done", "completed"].includes(runtimeStatus?.state)
+      && runtimeStatus.success === true) return "done";
   return "idle";
 }
 
@@ -4546,6 +4567,9 @@ function liveCenterRenderKey(session = liveLastSession) {
     approvalCount,
     guardianKey,
     graphLayoutKey,
+    liveUtmVerificationSelection.scopeKey,
+    liveUtmVerificationSelection.index,
+    JSON.stringify(metadata.utm_verifications?.previews || {}),
   ].join("|");
 }
 
@@ -4967,9 +4991,10 @@ function latestDesignAgentReport(report) {
 function latestBoInitialDesign(report) {
   const state = report && report.state ? report.state : {};
   const metadata = state && typeof state.run_metadata === "object" && state.run_metadata ? state.run_metadata : {};
-  let lhsVisualization = metadata.lhs_visualization && typeof metadata.lhs_visualization === "object"
-    ? metadata.lhs_visualization
-    : (metadata.bo_agent && typeof metadata.bo_agent.lhs_visualization === "object" ? metadata.bo_agent.lhs_visualization : null);
+  let lhsVisualization = [metadata.lhs_visualization, metadata.bo_agent?.lhs_visualization]
+    .filter(value => value && typeof value === "object" && value.run_id === state.run_id)
+    .sort((a,b) => Number(b.step || 0)-Number(a.step || 0)
+      || Number(b.initial_design?.completed || 0)-Number(a.initial_design?.completed || 0))[0] || null;
   const lhsRenderer = window.LHSDesignVisualization;
   if (liveLhsVisualization && liveLhsVisualization.run_id === state.run_id
       && (!lhsVisualization || Number(liveLhsVisualization.step) >= Number(lhsVisualization.step))) {
@@ -13748,9 +13773,15 @@ function canonicalActiveCamEvidence(active = {}, persistedArtifact = {}, interve
   return current;
 }
 
-function renderVisionActiveCamEjectionCheck(screenReport, persistedArtifact = {}, intervention = {}) {
+function renderVisionActiveCamEjectionCheck(screenReport, persistedArtifact = {}, intervention = {}, preview = null) {
   const active = screenReport.active_cam_ejection_check || {};
-  const evidence = canonicalActiveCamEvidence(active, persistedArtifact, intervention);
+  let evidence = canonicalActiveCamEvidence(active, persistedArtifact, intervention);
+  const reviewedAt = evidence.captured_at || persistedArtifact.captured_at;
+  if (preview && (!reviewedAt || Date.parse(preview.captured_at) > Date.parse(reviewedAt))) {
+    evidence = {...preview.evidence, status:'pending', captured_at:preview.captured_at,
+      capture_path:preview.artifact?.path, capture_url:preview.artifact?.url,
+      spc_autoejection_confirmed:false};
+  }
   const interventionActive = intervention.checkpoint === "active_cam_ejection"
     && ["waiting_for_specimen", "retrying"].includes(intervention.status);
   const status = interventionActive ? intervention.status : evidence.status || "waiting";
@@ -13837,9 +13868,13 @@ function selectVerification(scope, index = 1) {
   const selectedIndex = index === 2 ? 2 : 1;
   const title = selectedIndex === 1 ? "Verification 1 — UTM placement" : "Verification 2 — UTM clear";
   const recordKey = `verification_${selectedIndex}`;
-  const rawRecord = scope?.scope_established === true && scope[recordKey] && typeof scope[recordKey] === "object"
+  let rawRecord = scope?.scope_established === true && scope[recordKey] && typeof scope[recordKey] === "object"
     ? scope[recordKey]
     : null;
+  const preview = scope?.scope_established === true ? scope.previews?.[recordKey] : null;
+  if (preview && (!rawRecord?.captured_at || Date.parse(preview.captured_at) > Date.parse(rawRecord.captured_at))) {
+    rawRecord = {...preview, status:'pending', confirmed:false};
+  }
   const artifact = rawRecord?.artifact && typeof rawRecord.artifact === "object" ? rawRecord.artifact : {};
   const evidence = rawRecord?.evidence && typeof rawRecord.evidence === "object" ? rawRecord.evidence : {};
   const allowedStatuses = selectedIndex === 1 ? new Set(["confirmed", "pending"]) : new Set(["clear", "occupied", "unknown"]);
@@ -13870,9 +13905,23 @@ function renderVisionUtmVerificationTabs(scope, selectedIndex = 1) {
   `;
 }
 
+function visionVerificationRoi(selected) {
+  const artifact = selected.artifact || {};
+  const evidence = selected.evidence || {};
+  const width = Number(artifact.frame_width || evidence.frame_width || evidence.width);
+  const height = Number(artifact.frame_height || evidence.frame_height || evidence.height);
+  const bounds = artifact.roi_xyxy?.length === 4 ? artifact.roi_xyxy : evidence.roi_xyxy;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0
+      || !Array.isArray(bounds) || bounds.length !== 4 || !bounds.every(Number.isFinite)) return null;
+  const [left, top, right, bottom] = bounds;
+  if (left < 0 || top < 0 || right > width || bottom > height || right <= left || bottom <= top) return null;
+  return { width, height, left, top, right, bottom };
+}
+
 function renderVisionUtmVerification(selected) {
-  const frameWidth = selected.artifact.frame_width || selected.evidence.frame_width;
-  const frameHeight = selected.artifact.frame_height || selected.evidence.frame_height;
+  const frameWidth = selected.artifact.frame_width || selected.evidence.frame_width || selected.evidence.width;
+  const frameHeight = selected.artifact.frame_height || selected.evidence.frame_height || selected.evidence.height;
+  const roi = visionVerificationRoi(selected);
   const resolution = frameWidth && frameHeight ? `${frameWidth}x${frameHeight}` : "-";
   const result = selected.index === 1
     ? selected.confirmed ? "specimen present" : "awaiting placement"
@@ -13887,7 +13936,9 @@ function renderVisionUtmVerification(selected) {
         ${selected.imageUrl
           ? `<img src="${escapeHtml(selected.imageUrl)}" alt="${escapeHtml(selected.title)} evidence frame" loading="lazy">`
           : `<div><strong>${selected.simulated ? "Explicit simulation" : "UTM Observation"}</strong><span>${escapeHtml(placeholder)}</span></div>`}
+        ${selected.imageUrl && roi ? `<svg class="ar-vis-verification-roi" viewBox="0 0 ${roi.width} ${roi.height}" preserveAspectRatio="xMidYMid meet" aria-label="Verification ${selected.index} inspection ROI"><rect x="${roi.left}" y="${roi.top}" width="${roi.right - roi.left}" height="${roi.bottom - roi.top}" vector-effect="non-scaling-stroke" /></svg>` : ""}
       </div>
+      <div class="ar-vis-verification-roi-caption">${roi ? `Inspection ROI · (${roi.left}, ${roi.top}) – (${roi.right}, ${roi.bottom}) px` : "Inspection ROI unavailable for this snapshot"}<span>Captured frame · not live</span></div>
       <div class="ar-report-metrics ar-vis-active-cam-metrics">
         ${renderDashboardMetric("Status", selected.status, `Verification ${selected.index}`, selected.confirmed ? "success" : "warning")}
         ${renderDashboardMetric("Result", result, "UTM", selected.confirmed ? "success" : "warning")}
@@ -14789,10 +14840,13 @@ function renderBoInitialDesignBoard(report) {
   if (renderer && typeof renderer.renderPlot === "function") {
     const legacyPoints = Array.isArray(initial.points) ? initial.points : [];
     const space = initial.parameter_space || {};
-    const cells = Array.isArray(space.cell_size_mm) ? space.cell_size_mm : [5.0, 6.0, 7.5, 10.0];
-    const densityValues = Array.isArray(space.relative_density) ? space.relative_density : [];
+    const cells = Array.isArray(space.cell_size_mm) ? space.cell_size_mm : [];
+    const densityValues = Array.isArray(space.wall_thickness_mm) ? space.wall_thickness_mm : [];
     const density = densityValues.length === 1 ? [densityValues[0], densityValues[0]]
-      : densityValues.length === 2 ? densityValues : [0.20, 0.48];
+      : densityValues.length === 2 ? densityValues : [];
+    if (!initial.visualization && (!cells.length || !density.length)) {
+      return renderVizEmpty("Waiting for this run's agreed design bounds.");
+    }
     const cellAxis = { name: "cell_size_mm", label: "Cell size", unit: "mm",
       ...(cells.length === 2 && Number(cells[0]) < Number(cells[1])
         ? { kind: "continuous", bounds: cells } : { kind: "discrete", values: cells }) };
@@ -14803,7 +14857,7 @@ function renderBoInitialDesignBoard(report) {
       initial_design: initial,
       design_space: {
         x: cellAxis,
-        y: { name: "relative_density", label: "Relative density", unit: "1", kind: density[0] === density[1] ? "fixed" : "continuous", bounds: density },
+        y: { name: "wall_thickness_mm", label: "Wall thickness", unit: "mm", kind: density[0] === density[1] ? "fixed" : "continuous", bounds: density },
       },
       diagnostics: { coverage_fraction: initial.target ? initial.completed / initial.target : 0, duplicate_count: 0 },
       status: "active",
@@ -14814,7 +14868,7 @@ function renderBoInitialDesignBoard(report) {
     ["sampler", initial.sampler],
     ["progress", `${initial.completed}/${initial.target}`],
     ["next_index", initial.index],
-    ["variables", "cell_size_mm x relative_density"],
+    ["variables", "cell_size_mm x wall_thickness_mm"],
   ]);
 }
 
@@ -18017,6 +18071,7 @@ function connectPlanningEventStream() {
       const sameCompletedRunEvent = shouldFreezeCompletedTestRun(liveLastSession)
         && (!eventRunId || eventRunId === liveCurrentRunId());
       if (sameCompletedRunEvent) return;
+      selectAgentOnOrchestrationTransition(data);
       if (shouldRefreshPlanningForRuntimeEvent(eventType, data)) {
         schedulePlanningRefresh();
       } else {
@@ -19185,21 +19240,25 @@ function updateLiveEmergencyStopControls(session = liveLastSession) {
   const guiSourceLatched = activeSources.has("gui_estop") || activeSources.has("gui");
   const latched = liveEmergencyStopLatched(session) || plcSourceLocked || guiSourceLatched;
   const sourcePending = latched && !plcSourceLocked && !guiSourceLatched;
+  const state = session?.state || liveLastSnapshot?.state || {};
+  const resumable = Boolean(state.run_id && (state.is_paused || state.stage === "error"));
   const cell = btnLiveSafeStop ? btnLiveSafeStop.closest(".mission-status-stop") : null;
   if (cell) {
     cell.classList.toggle("is-emergency-latched", latched);
+    cell.classList.toggle("is-run-resumable", resumable && !latched);
     cell.classList.toggle("is-plc-source-locked", plcSourceLocked);
     cell.title = plcSourceLocked ? livePLCStatusProjection(livePLCStatus) : "Emergency runtime control";
   }
   if (btnLiveSafeStop) btnLiveSafeStop.hidden = latched;
-  if (liveEmergencyRecovery) liveEmergencyRecovery.hidden = !latched;
+  if (liveEmergencyRecovery) liveEmergencyRecovery.hidden = !(latched || resumable);
   if (btnLiveEmergencyResume) {
-    btnLiveEmergencyResume.hidden = plcSourceLocked || sourcePending;
-    btnLiveEmergencyResume.disabled = plcSourceLocked || sourcePending;
+    btnLiveEmergencyResume.hidden = plcSourceLocked || sourcePending || !(latched || resumable);
+    btnLiveEmergencyResume.disabled = btnLiveEmergencyResume.hidden || liveQuickActionBusy;
+    btnLiveEmergencyResume.title = latched ? "Resume from E-STOP latch" : "Resume current run";
   }
   if (btnLiveEmergencyReset) {
-    btnLiveEmergencyReset.hidden = plcSourceLocked || sourcePending;
-    btnLiveEmergencyReset.disabled = plcSourceLocked || sourcePending;
+    btnLiveEmergencyReset.hidden = !latched || plcSourceLocked || sourcePending;
+    btnLiveEmergencyReset.disabled = btnLiveEmergencyReset.hidden;
   }
   if (livePLCEmergencyGuidance) {
     livePLCEmergencyGuidance.hidden = !plcSourceLocked;
@@ -19287,11 +19346,29 @@ async function confirmOrRequestLiveEmergencyStop() {
 }
 
 async function requestLiveEmergencyResume() {
+  if (liveQuickActionBusy) return;
   if (livePLCSourceLocked()) {
     updateLiveEmergencyStopControls(liveLastSession);
     setChatStatus("USE PLC PB1", "warning", "PB1 short press resumes a PLC-originated E-STOP.");
     return;
   }
+  const sources = liveEmergencySourceSet();
+  const latched = liveEmergencyStopLatched() || sources.has("gui_estop") || sources.has("gui");
+  if (!latched) {
+    const state = liveLastSession?.state || liveLastSnapshot?.state || {};
+    if (!state.run_id || !(state.is_paused || state.stage === "error")) return;
+    setLiveQuickActionBusy(true);
+    updateLiveEmergencyStopControls();
+    try {
+      await runLiveQuickAction("resume_run");
+    } finally {
+      setLiveQuickActionBusy(false);
+      updateLiveEmergencyStopControls();
+    }
+    return;
+  }
+  // Unknown E-STOP origin must not be routed through ordinary resume.
+  if (!sources.has("gui_estop") && !sources.has("gui")) return;
   try {
     setChatStatus("E-STOP RESUME", "warning");
     const endpoint = liveEmergencyEndpoint("emergency-resume", "/api/run/emergency-resume");

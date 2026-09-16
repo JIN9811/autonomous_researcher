@@ -370,7 +370,7 @@ def test_refresh_runs_actual_clearance_vision_without_replaying_manipulation(tmp
         # already-saved result boundary (no professional-agent replacement).
         result = await controller._deps.agent_registry.get("manipulation_agent").run(state, controller._deps.agent_context)
         runtime._merge_agent_data(Stage.MANIPULATION, result.data)
-        assert state.run_metadata["utm_clear_execution"]["replay_home_verified"]
+        assert state.run_metadata["utm_clear_execution"]["replay_execution_verified"]
         completed_loop = state.loop_count
         completed_retries = dict(state.retry_counters)
         checkpoints.handoff_checkpoint(state.run_metadata, "completed-clear-result", action="prepare", payload={

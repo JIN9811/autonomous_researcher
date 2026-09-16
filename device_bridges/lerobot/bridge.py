@@ -2484,6 +2484,8 @@ class LeRobotBridge:
                 f"--dataset.push_to_hub={_bool_arg(request.push_to_hub)}",
                 f"--display_data={_bool_arg(request.display_data)}",
             ]
+            if raw_payload.get("play_sounds") is False:
+                rollout_extra_args.append("--play_sounds=false")
         return self._start_session(
             tool="lerobot.rollout.start",
             workflow="rollout",
@@ -2624,28 +2626,21 @@ class LeRobotBridge:
         if session.get("mode") == "test" and session.get("virtual_bridge_simulation") is True and isinstance(simulated, dict):
             completed = session.get("status") == "COMPLETED" and session.get("returncode") == 0
             return {**{key: session.get(key, "") for key in ("run_id", "loop_id", "specimen_id", "replay_episode")},
-                "exit_code": session.get("returncode"), "replay_home_verified": completed,
+                "exit_code": session.get("returncode"), "replay_execution_verified": completed,
                 "replay_max_duration_s": session.get("replay_max_duration_s"),
                 "replay_evidence": dict(simulated), "simulated": True, "ok": completed}
         evidence = self._read_json_file(str(session.get("replay_result_path") or ""))
         keys = ("session_id", "dataset_repo_id", "dataset_path", "replay_episode")
         matches = bool(evidence) and all(evidence.get(k) == session.get(k) for k in keys)
         matches = matches and evidence.get("evidence_token") == session.get("replay_evidence_token")
-        home = evidence.get("home_evidence") if isinstance(evidence.get("home_evidence"), dict) else {}
-        target = session.get("replay_target_state", {})
-        measured = home.get("measured_state") if isinstance(home.get("measured_state"), dict) else {}
-        try:
-            tolerance = float(os.environ.get("ATR_ACTIVE_ROBOT_CAM_RESUME_WAIT_TOLERANCE_DEG", "5.0"))
-            measured_ok = (bool(target) and home.get("target_state") == target and set(measured) == set(target)
-                and math.isfinite(tolerance) and tolerance >= 0
-                and all(math.isfinite(float(measured[k])) and abs(float(measured[k]) - v) <= tolerance for k, v in target.items()))
-        except (ValueError, TypeError):
-            measured_ok = False
+        frames_ok = (type(evidence.get("frames_sent")) is int
+            and evidence["frames_sent"] > 0
+            and evidence["frames_sent"] == session.get("replay_num_frames"))
         completed = session.get("status") == "COMPLETED" and session.get("returncode") == 0
-        verified = bool(completed and matches and measured_ok and evidence.get("ok") is True
-                        and evidence.get("follower_closed") is True and evidence.get("replay_home_verified") is True)
+        verified = bool(completed and matches and frames_ok and evidence.get("ok") is True
+                        and evidence.get("follower_closed") is True)
         return {**{key: session.get(key, "") for key in ("run_id", "loop_id", "specimen_id", "replay_episode")},
-            "exit_code": session.get("returncode"), "replay_home_verified": verified,
+            "exit_code": session.get("returncode"), "replay_execution_verified": verified,
             "replay_max_duration_s": session.get("replay_max_duration_s"),
             "replay_result_path": session.get("replay_result_path", ""),
             "replay_evidence": evidence if matches else {},
@@ -2667,7 +2662,7 @@ class LeRobotBridge:
                                "LEROBOT_REPLAY_SESSION_NOT_FOUND", "Replay session not found.")
         result = self._session_status("lerobot.replay.status", payload, "replay")
         session = self._sessions.get(str(result.get("session_id") or ""))
-        result.update(self._replay_evidence(session) if session else {"exit_code": None, "replay_home_verified": False})
+        result.update(self._replay_evidence(session) if session else {"exit_code": None, "replay_execution_verified": False})
         return result
 
     def replay_stop(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -2682,7 +2677,7 @@ class LeRobotBridge:
                                    "LEROBOT_REPLAY_SESSION_NOT_FOUND", "Replay session not found.")
             result = (self._stop_session("lerobot.replay.stop", payload, "replay", strict_session=True) if session_id else
                       self._stop_all_workflow_sessions("lerobot.replay.stop", payload, "replay"))
-        result.update(exit_code=result.get("returncode"), replay_home_verified=False)
+        result.update(exit_code=result.get("returncode"), replay_execution_verified=False)
         return result
 
     def visualize_start(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:

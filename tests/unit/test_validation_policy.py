@@ -5,6 +5,21 @@ from __future__ import annotations
 from policies.validation_policy import validate_agent_output
 
 
+def test_typed_equipment_failure_is_valid_but_never_ready():
+    from agents.equipment.workflow import _blocked
+    result=_blocked("EQUIPMENT_WORKFLOW_SELECTION_REJECTED")
+    assert not result.success
+    assert validate_agent_output("equipment",result.data)==(True,"ok")
+    assert result.data["failure_code"]=="EQUIPMENT_WORKFLOW_SELECTION_REJECTED"
+    assert result.data["equipment_handoff"]["ready_for_analysis"] is False
+    result.data["utm_data_ready"]={"status":"ready"}
+    assert validate_agent_output("equipment",result.data)[0] is False
+
+
+def test_malformed_equipment_failure_cannot_skip_success_contract():
+    assert validate_agent_output("equipment",{"equipment_workflow_failure":{}})[0] is False
+
+
 def test_equipment_stage_requires_result_contract() -> None:
     ok, message = validate_agent_output("equipment", {"protocol_note": "ready"})
 

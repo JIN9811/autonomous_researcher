@@ -2633,6 +2633,16 @@ def test_leader_and_follower_save_does_not_block_same_serial_port(tmp_path: Path
     assert leader["saved_devices"]["leader"]["port"] == "/dev/ttyUSB0"
 
 
+def test_managed_rollout_sound_override_does_not_change_manual_default(tmp_path: Path, monkeypatch) -> None:
+    bridge = _bridge(tmp_path)
+    monkeypatch.setattr(bridge, "_start_session", lambda **kwargs: kwargs)
+    payload = {"mode": "test", "profile_id": "fake_omx_ai", "policy_path": "fake://policy"}
+    muted = bridge.rollout_start({**payload, "play_sounds": False})
+    manual = bridge.rollout_start(payload)
+    assert "--play_sounds=false" in muted["extra_args"]
+    assert not any(arg.startswith("--play_sounds") for arg in manual["extra_args"])
+
+
 def test_rollout_start_returns_runtime_supervisor_status_blocks(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
 

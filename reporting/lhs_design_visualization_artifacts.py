@@ -51,7 +51,7 @@ def _plot(payload: dict[str, Any]) -> Any:
     for index in range(1 if fixed_density else target + 1):
         boundary = lower + (upper - lower) * index / target
         axis.axhline(boundary, color="#cbd5e1", linewidth=0.55, alpha=0.72, zorder=0)
-    axis.text(1.0, 0.01, "Fixed density" if fixed_density else "Density strata", transform=axis.transAxes, ha="right", va="bottom", fontsize=7, color="#64748b")
+    axis.text(1.0, 0.01, "Fixed wall thickness" if fixed_density else "Wall thickness strata", transform=axis.transAxes, ha="right", va="bottom", fontsize=7, color="#64748b")
 
     groups = {
         "measured": ("Measured design", "#2563eb", "o", 42),
@@ -64,7 +64,7 @@ def _plot(payload: dict[str, Any]) -> Any:
             continue
         axis.scatter(
             [item["parameters"]["cell_size_mm"] for item in selected],
-            [item["parameters"]["relative_density"] for item in selected],
+            [item["parameters"]["wall_thickness_mm"] for item in selected],
             color=color,
             marker=marker,
             s=size,
@@ -85,7 +85,7 @@ def _plot(payload: dict[str, Any]) -> Any:
     else:
         axis.set_ylim(lower, upper)
     axis.set_xlabel("Cell size (mm)", fontsize=9)
-    axis.set_ylabel("Relative density", fontsize=9)
+    axis.set_ylabel("Wall thickness (mm)", fontsize=9)
     space_label = "Continuous-space" if x_axis.get("kind") == "continuous" else "Mixed-space"
     axis.set_title(f"{space_label} Latin hypercube initial design", fontsize=11, fontweight="bold", loc="left")
     axis.text(
@@ -120,12 +120,12 @@ def write_lhs_design_visualization_artifacts(payload: dict[str, Any], output_dir
 
     with paths[".csv"].open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["index", "status", "candidate_id", "cell_size_mm", "relative_density", "density_stratum"])
+        writer.writerow(["index", "status", "candidate_id", "cell_size_mm", "wall_thickness_mm", "density_stratum"])
         for item in normalized["initial_design"]["points"]:
             writer.writerow(
                 [
                     item["index"], item["status"], item["candidate_id"],
-                    item["parameters"]["cell_size_mm"], item["parameters"]["relative_density"], item["density_stratum"],
+                    item["parameters"]["cell_size_mm"], item["parameters"]["wall_thickness_mm"], item["density_stratum"],
                 ]
             )
     paths[".json"].write_text(json.dumps(normalized, indent=2, ensure_ascii=False), encoding="utf-8")

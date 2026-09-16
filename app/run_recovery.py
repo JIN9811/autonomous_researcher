@@ -201,9 +201,9 @@ def prepare_clearance_review_retry(state, root):
     if (state.stage not in {Stage.COMPLETE, Stage.ERROR}
             or any(getattr(state, k) for k in ("stop_requested", "safe_stop_requested", "emergency_stop_requested"))
             or state.run_metadata.get("active_safety_sources")
-            or not (original_failure or retry_wait) or clear.get("replay_home_verified") is not True
+            or not (original_failure or retry_wait) or clear.get("replay_execution_verified") is not True
             or clear.get("task_id") != "clear_utm_to_disposal" or not clear.get("replay_completed_at")
-            or proof.get("ok") is not True or proof.get("replay_home_verified") is not True
+            or proof.get("ok") is not True
             or proof.get("follower_closed") is not True or not proof.get("frames_sent")
             or proof.get("session_id") != clear.get("session_id") or not proof.get("evidence_token")):
         raise ValueError("Clearance retry requires a proven ended replay with only an unresolved Vision review")
@@ -284,7 +284,7 @@ def archived_clearance_capture(state, request, output_dir):
             or request.get("stop_after_cycle") != state.loop_count + 2
             or not source.is_file() or _hash(source) != request.get("source_sha256")
             or recovery.get("source_sha256") != request.get("source_sha256")
-            or clear.get("replay_home_verified") is not True
+            or clear.get("replay_execution_verified") is not True
             or (clear.get("replay_evidence") or {}).get("follower_closed") is not True):
         raise ValueError("Historical review requires explicit same-run authorization and immutable completed replay")
     archived = json.loads(source.read_text())["data"]["utm_verification_2"]

@@ -34,7 +34,7 @@ def candidate_evaluation(agent, state, prepared, candidate):
     contract = metadata.get("orchestrator_design_contract") or {}
     requested = contract.get("requested_parameters") or {}
     bo = metadata.get("bo_recommended_constraints") or {}
-    locked = {key: constraints[key] for key in ("cell_size_mm", "relative_density")
+    locked = {key: constraints[key] for key in ("cell_size_mm", "wall_thickness_mm")
               if key in constraints and (key in requested or key in bo)}
     # The previous emitted spec is context, not a new set of immutable variables.
     # Other constraints stay in the existing generator/filter. No tool can modify
@@ -45,7 +45,7 @@ def candidate_evaluation(agent, state, prepared, candidate):
         locked["geometry_type"] = preferred
     for key, value in locked.items():
         actual = candidate.get(key)
-        tolerance = {"cell_size_mm":0.00051, "relative_density":0.000051}.get(key, 0.0)
+        tolerance = {"cell_size_mm":0.00051, "wall_thickness_mm":0.000000001}.get(key, 0.0)
         same = actual == value
         if tolerance and type(actual) in (int, float) and type(value) in (int, float):
             same = math.isclose(actual, value, rel_tol=0, abs_tol=tolerance)
@@ -54,15 +54,20 @@ def candidate_evaluation(agent, state, prepared, candidate):
     if candidate["candidate_id"] not in {c["candidate_id"] for c in prepared["ranked"]}:
         reasons.append("candidate outside authorized selection pool")
 
-    minimum_wall = max(2 * constraints["nozzle_diameter_mm"], constraints["minimum_feature_size_mm"],
-                       constraints.get("fdm_min_wall_thickness_mm", 1.2))
+    minimum_wall = max(constraints.get("min_wall_thickness_mm", 0.4), constraints["minimum_feature_size_mm"],
+                       constraints.get("fdm_min_wall_thickness_mm", 0.4))
     margins = []
     def margin(name, actual, limit, relation, unit):
         delta = actual - limit if relation == ">=" else limit - actual
         margins.append({"constraint":name, "actual":actual, "limit":limit, "relation":relation,
                         "margin":round(delta, 6), "unit":unit, "status":"pass" if delta >= -1e-9 else "fail"})
-    margin("minimum_wall", candidate["wall_thickness_mm"], minimum_wall, ">=", "mm")
-    margin("cell_wall_spacing", candidate["cell_size_mm"], 3 * candidate["wall_thickness_mm"], ">=", "mm")
+    if candidate["geometry_type"] == "gyroid":
+        margins.append({"constraint": "minimum_wall", "actual": None, "limit": minimum_wall,
+                        "relation": ">=", "margin": None, "unit": "mm", "status": "unmeasured",
+                        "source": "SPC actual-mesh inspection before slicing"})
+    else:
+        margin("minimum_wall", candidate["wall_thickness_mm"], minimum_wall, ">=", "mm")
+        margin("cell_wall_spacing", candidate["cell_size_mm"], 3 * candidate["wall_thickness_mm"], ">=", "mm")
     for axis, actual, maximum, fixture in zip("xyz", candidate["specimen_size_mm"],
                                              constraints["max_specimen_size_mm"], constraints["utm_fixture_limit_mm"]):
         margin(f"envelope_{axis}", actual, min(maximum, fixture), "<=", "mm")

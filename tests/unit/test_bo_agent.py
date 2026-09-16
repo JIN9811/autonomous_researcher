@@ -40,7 +40,8 @@ def _add_completed_lhs_observations(state: OrchestratorState, *, count: int = 8)
                         "geometry_type": "gyroid",
                         "cell_size_mm": 10.0,
                         "relative_density": density,
-                        "wall_thickness_mm": 1.2,
+                        "wall_thickness_mm": 0.8 + 0.8 * index / max(1, count - 1),
+                        "gyroid_parameterization": "wall_cell_v1",
                         "tpms_thickness": 0.0,
                         "orientation_deg": 0.0,
                         "anisotropy_ratio": 1.0,
@@ -173,10 +174,11 @@ def test_initial_design_request_counts_prior_lhs_points_when_derived_fields_chan
                 "metrics": {
                     "geometry_type": "gyroid",
                     "cell_size_mm": point["cell_size_mm"],
-                    "relative_density": point["relative_density"],
-                    "wall_thickness_mm": 1.2,
+                    "relative_density": 0.35,
+                    "wall_thickness_mm": point["wall_thickness_mm"],
+                    "gyroid_parameterization": "wall_cell_v1",
                     # This is a derived geometry value and legitimately changes
-                    # as relative density changes between LHS observations.
+                    # as wall thickness changes between LHS observations.
                     "tpms_thickness": 0.31 + index * 0.08,
                     "energy_density_50pct_MJ_per_m3": 0.40 + index * 0.01,
                 },
@@ -197,7 +199,7 @@ def test_initial_design_request_counts_prior_lhs_points_when_derived_fields_chan
     assert request["phase"] == "initial_design"
     assert request["index"] == 3
     assert request["constraints"]["cell_size_mm"] == lhs[2]["cell_size_mm"]
-    assert request["constraints"]["relative_density"] == pytest.approx(lhs[2]["relative_density"])
+    assert request["constraints"]["wall_thickness_mm"] == pytest.approx(lhs[2]["wall_thickness_mm"])
     assert [point["status"] for point in request["points"][:3]] == ["measured", "measured", "next"]
 
 
@@ -244,7 +246,7 @@ async def test_bo_agent_keeps_cell_size_as_a_feasible_optimization_dimension() -
             "budget": 4,
             "parameter_space": {
                 "geometry_type": ["gyroid"],
-                "relative_density": [0.27, 0.39],
+                "wall_thickness_mm": [0.9, 1.5],
                 "cell_size_mm": [6.2, 9.1],
                 "orientation_deg": [0.0],
                 "anisotropy_ratio": [1.0],
@@ -255,9 +257,9 @@ async def test_bo_agent_keeps_cell_size_as_a_feasible_optimization_dimension() -
 
     assert result.success is True
     assert bo_result["parameter_space"]["cell_size_mm"] == [6.2, 9.1]
-    assert bo_result["parameter_space"]["relative_density"] == [0.27, 0.39]
+    assert bo_result["parameter_space"]["wall_thickness_mm"] == [0.9, 1.5]
     assert 6.2 <= bo_result["recommendation"]["parameters"]["cell_size_mm"] <= 9.1
-    assert 0.27 <= bo_result["recommendation"]["parameters"]["relative_density"] <= 0.39
+    assert 0.9 <= bo_result["recommendation"]["parameters"]["wall_thickness_mm"] <= 1.5
     assert result.data["next_design_request"]["parameter_space"] == bo_result["parameter_space"]
     assert result.data["experiment_spec_update"]["cell_size_mm"] == pytest.approx(
         bo_result["recommendation"]["parameters"]["cell_size_mm"]
@@ -424,6 +426,7 @@ def test_bo_agent_does_not_treat_generic_objective_uncertainty_as_sea_noise() ->
         latest_analysis={
             "bo_handoff": {
                 "schema": "analysis_bo_handoff.v2",
+                "ok_for_bo": True,
                 "candidate_id": "specimen-001",
                 "parameters": {
                     "geometry_type": "gyroid",
@@ -519,7 +522,8 @@ async def test_bo_agent_uses_current_fixed_surface_settings_for_botorch_history(
                     "constraints": {
                         "geometry_type": "gyroid",
                         "relative_density": density,
-                            "wall_thickness_mm": 1.2,
+                            "wall_thickness_mm": 0.8 + 0.8 * (index - 1) / 7,
+                            "gyroid_parameterization": "wall_cell_v1",
                             "cell_size_mm": cell_size,
                             "tpms_thickness": 0.0,
                             "orientation_deg": 0.0,
@@ -540,6 +544,7 @@ async def test_bo_agent_uses_current_fixed_surface_settings_for_botorch_history(
             "strategy": "bo",
             "budget": 1,
             "bo_backend": "botorch",
+            "parameter_space": {"cell_size_mm": [5.0, 10.0], "wall_thickness_mm": [0.8, 1.6]},
         },
     )
     trace = result.data["bo_result"]["benchmark"]["strategies"]["bo"]["surrogate_trace"][-1]
@@ -616,7 +621,7 @@ async def test_registry_run_recovers_current_run_domain_from_existing_handoff() 
         run_metadata={
             "next_design_request": {
                 "schema": "next_design_request.v1",
-                "parameter_space": {"cell_size_mm": [6.375, 8.925], "relative_density": [0.285, 0.365]},
+                "parameter_space": {"cell_size_mm": [6.375, 8.925], "wall_thickness_mm": [0.85, 1.45]},
             }
         },
     )
@@ -625,7 +630,7 @@ async def test_registry_run_recovers_current_run_domain_from_existing_handoff() 
 
     assert result.success is True
     assert result.data["bo_result"]["parameter_space"]["cell_size_mm"] == [6.375, 8.925]
-    assert result.data["bo_result"]["parameter_space"]["relative_density"] == [0.285, 0.365]
+    assert result.data["bo_result"]["parameter_space"]["wall_thickness_mm"] == [0.85, 1.45]
 
 
 @pytest.mark.asyncio
@@ -723,10 +728,11 @@ def test_bo_agent_default_space_is_two_variable_gyroid_problem() -> None:
     settings, _warnings = BOAgent.normalize_settings({})
     space = BOParameterSpace.from_mapping(settings["parameter_space"])
 
-    assert [item.name for item in space.active_dimensions] == ["cell_size_mm", "relative_density"]
+    assert [item.name for item in space.active_dimensions] == ["cell_size_mm", "wall_thickness_mm"]
     assert space.continuous_dimension_count == 2
     assert settings["parameter_space"]["cell_size_mm"] == [5.0, 10.0]
-    assert settings["parameter_space"]["relative_density"] == [0.20, 0.48]
+    assert settings["parameter_space"]["wall_thickness_mm"] == [0.8, 1.6]
+    assert "relative_density" not in settings["parameter_space"]
     assert settings["parameter_space"]["orientation_deg"] == [0.0]
     assert settings["parameter_space"]["anisotropy_ratio"] == [1.0]
     assert settings["initial_design_size"] == 8
@@ -746,7 +752,7 @@ def test_bo_agent_normalizes_legacy_cell_table_and_preserves_fixed_values() -> N
 
     assert warnings == []
     assert settings["parameter_space"]["cell_size_mm"] == [5.0, 10.0]
-    assert settings["parameter_space"]["relative_density"] == [0.22, 0.46]
+    assert "relative_density" not in settings["parameter_space"]
     assert settings["parameter_space"]["wall_thickness_mm"] == [1.35]
     assert settings["parameter_space"]["orientation_deg"] == [15.0]
 
@@ -792,7 +798,7 @@ def test_initial_design_request_uses_custom_bo_settings_domain() -> None:
             "bo_settings": {
                 "parameter_space": {
                     "cell_size_mm": [6.2, 9.1],
-                    "relative_density": [0.27, 0.39],
+                    "wall_thickness_mm": [0.9, 1.5],
                 }
             }
         },
@@ -801,9 +807,9 @@ def test_initial_design_request_uses_custom_bo_settings_domain() -> None:
     request = BOAgent.initial_design_request(state, seed=19)
 
     assert request["parameter_space"]["cell_size_mm"] == [6.2, 9.1]
-    assert request["parameter_space"]["relative_density"] == [0.27, 0.39]
+    assert request["parameter_space"]["wall_thickness_mm"] == [0.9, 1.5]
     assert all(6.2 <= point["parameters"]["cell_size_mm"] <= 9.1 for point in request["points"])
-    assert all(0.27 <= point["parameters"]["relative_density"] <= 0.39 for point in request["points"])
+    assert all(0.9 <= point["parameters"]["wall_thickness_mm"] <= 1.5 for point in request["points"])
 
 
 def test_bo_agent_initial_design_request_advances_through_canonical_lhs() -> None:
@@ -1138,7 +1144,8 @@ async def test_bo_agent_emits_reasoning_ranking_handoff_and_artifacts() -> None:
         }
     }
 
-    result = await agent.run_with_settings(state, _CtxStub(), {"strategy": "llm_preference_bo", "budget": 4})
+    result = await agent.run_with_settings(state, _CtxStub(), {"strategy": "llm_preference_bo", "budget": 4,
+        "parameter_space": {"cell_size_mm": [5.0, 10.0], "relative_density": [0.20, 0.48]}})
     bo_result = result.data["bo_result"]
 
     assert result.success is True
@@ -1208,7 +1215,7 @@ def test_bo_agent_filters_live_observations_by_hash_fidelity_and_lineage() -> No
             "score": 0.7,
             "feasible": True,
             "fidelity": fidelity,
-            "parameters": {"cell_size_mm": 7.5, "relative_density": 0.32},
+            "parameters": {"cell_size_mm": 7.5, "wall_thickness_mm": 1.2, "gyroid_parameterization": "wall_cell_v1"},
             "provenance_refs": [f"artifact:{observation_id}"],
             "ok_for_bo": True,
         }
@@ -1318,7 +1325,7 @@ async def test_next_design_request_carries_active_objective_identity() -> None:
             "schema_version": "analysis_bo_handoff_v2",
             "ok_for_bo": True,
             "candidate_id": "measured-a",
-            "parameters": {"cell_size_mm": 7.5, "relative_density": 0.32},
+            "parameters": {"cell_size_mm": 7.5, "wall_thickness_mm": 1.2, "gyroid_parameterization": "wall_cell_v1"},
             "metric_name": "energy_density_50pct_MJ_per_m3",
             "observed_metrics": {"energy_density_50pct_MJ_per_m3": 0.8},
             "objective_evaluation": {

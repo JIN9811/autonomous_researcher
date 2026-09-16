@@ -418,9 +418,10 @@ class GuardianAgent(BaseAgent):
         mass = self._safe_float(spec.get("expected_mass_g"), -1.0)
         print_time = self._safe_float(spec.get("expected_print_time_min"), -1.0)
 
-        nozzle = self._safe_float(constraints.get("nozzle_diameter_mm"), 0.4)
-        min_feature = self._safe_float(constraints.get("minimum_feature_size_mm"), 0.8)
-        min_wall = max(2.0 * nozzle, min_feature)
+        min_feature = self._safe_float(constraints.get("minimum_feature_size_mm"), 0.4)
+        min_wall = max(min_feature,
+                       self._safe_float(constraints.get("min_wall_thickness_mm"), 0.4),
+                       self._safe_float(constraints.get("fdm_min_wall_thickness_mm"), 0.4))
         if wall < min_wall:
             reject_reasons.append("wall_thickness_mm below nozzle/feature minimum.")
         if cell < 3.0 * max(wall, 1e-6):

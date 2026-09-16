@@ -8,6 +8,15 @@ from pathlib import Path
 
 import pytest
 
+# Initialize numerical dependencies before the scoped external-effect denial.
+# threadpoolctl resolves libc with the read-only ldconfig query on first use.
+# Keep that discovery outside the run; process/network denial remains active
+# for every agent and device boundary during the actual test.
+import torch
+import botorch
+from threadpoolctl import threadpool_info
+threadpool_info()
+
 from app.bootstrap import load_runtime
 from agents.design.agent import DesignAgent
 from agents.core.guardian.agent import GuardianAgent
@@ -15,9 +24,11 @@ from device_bridges.lerobot_bridge import LeRobotBridge
 from orchestrator.state import Mode, Stage
 from utils.agent_artifact_archive import list_executions
 
+pytestmark = pytest.mark.usefixtures("handoff_no_external")
+
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("cycle_count", [2, 20])
+@pytest.mark.parametrize("cycle_count", [2, 20, 3])
 async def test_controller_completes_test_run(monkeypatch: pytest.MonkeyPatch, cycle_count: int) -> None:
     # Exercise the production graph and agents with explicit virtual boundaries.
     # An absent disposal policy intentionally requires operator clearance.
@@ -25,9 +36,12 @@ async def test_controller_completes_test_run(monkeypatch: pytest.MonkeyPatch, cy
 
     def virtual_design_payload(self, *args, **kwargs):
         payload = original_design_payload(self, *args, **kwargs)
-        payload["experiment_spec"]["execution_policy"] = {
-            "manipulation": "virtual", "vision": "virtual", "lab_equipment": "virtual",
-        }
+        payload["experiment_spec"].pop("execution_policy", None)
+        payload["experiment_spec"]["ejection"] = {"enabled": True, "allow_ejection": True}
+        payload["experiment_spec"]["printer_test_path"] = "virtual_bridge"
+        payload["experiment_spec"]["test_printer_transport"] = "virtual"
+        payload["experiment_spec"] = controller._apply_specimen_printer_choice_to_spec(
+            payload["experiment_spec"], "virtual_bridge")
         return payload
 
     monkeypatch.setattr(DesignAgent, "_finalize_design_payload", virtual_design_payload)
@@ -70,12 +84,43 @@ async def test_controller_completes_test_run(monkeypatch: pytest.MonkeyPatch, cy
 
     monkeypatch.setattr(LeRobotBridge, "_rollout_joint_telemetry_contract", virtual_post_place_telemetry)
     controller = load_runtime()
+    if cycle_count == 3:
+        # Explicit user-requested warm start: seven synthetic observations,
+        # then the last LHS specimen and two BO-guided specimens.
+        from agents.bo.agent import BOAgent
+        from learning.bo_parameter_space import BOParameterSpace
+        original_prepare = DesignAgent._prepare_design_payload
+        seeded = False
+        def prepare_with_synthetic_history(self, state, ctx):
+            nonlocal seeded
+            first = not seeded
+            if not seeded:
+                seeded = True
+                points = BOParameterSpace.from_mapping(BOAgent.DEFAULT_PARAMETER_SPACE).lhs_points(8, seed=7)
+                for index, point in enumerate(points[:7]):
+                    score = 0.1 + 0.03 * index
+                    state.experiment_evaluations.append({
+                        "evaluation_id": f"synthetic-sea-{index}", "candidate_id": f"synthetic-sea-{index}",
+                        "source": "analysis_agent", "simulated": True, "fidelity": "synthetic",
+                        "provenance_refs": ["fixture://assumed-prior-data"],
+                        "objective_score": score,
+                        "metrics": {**point, "specific_energy_absorption_J_per_g": score},
+                        "objective": {"metric_name": "specific_energy_absorption_J_per_g", "constraints": point},
+                    })
+            constraints = controller._default_test_constraints({})
+            controller._publish_orchestrator_design_contract(constraints, cycle_index=state.loop_count + 1, total_cycles=3)
+            if first:
+                initial = state.run_metadata["orchestrator_design_contract"]["initial_design"]
+                assert initial["index"] == 8
+            return original_prepare(self, state, ctx)
+        monkeypatch.setattr(DesignAgent, "_prepare_design_payload", prepare_with_synthetic_history)
 
     def forbidden_replay(_payload):
         raise AssertionError("explicit virtual clearance must not start a robot replay")
 
     controller._deps.agent_context.tools.register("lerobot.replay.start", forbidden_replay)
-    result = await controller.start(mode=Mode.TEST, goal="integration test run")
+    goal = "maximize SEA specific energy absorption" if cycle_count == 3 else "integration test run"
+    result = await controller.start(mode=Mode.TEST, goal=goal)
     assert result["ok"] is True
     created_events = [event for event in controller.recent_events() if event.get("type") == "run.created"]
     assert created_events
@@ -85,7 +130,7 @@ async def test_controller_completes_test_run(monkeypatch: pytest.MonkeyPatch, cy
     log_records = [json.loads(line) for line in json_log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert any(record["event_type"] == "run.created" for record in log_records)
 
-    timeout_s = 1200.0
+    timeout_s = max(1200.0, cycle_count * 180.0)
     start = asyncio.get_running_loop().time()
     while True:
         snapshot = controller.snapshot()
@@ -118,9 +163,13 @@ async def test_controller_completes_test_run(monkeypatch: pytest.MonkeyPatch, cy
     assert any(packet["packet"]["schema"] == "utm_data_ready.v1" for packet in snapshot["state"]["run_metadata"]["handoff_packets"])
     assert snapshot["state"]["latest_analysis"]["equipment_ok"] is True
     assert snapshot["state"]["latest_analysis"]["equipment_result_file"]
-    assert snapshot["state"]["latest_analysis"]["cae_result"]["ok"] is True
-    assert snapshot["state"]["latest_analysis"]["cae_result"]["boundary_condition"] == "bottom_fixed_support"
+    assert "cae_result" not in snapshot["state"]["latest_analysis"]
     assert snapshot["state"]["latest_analysis"]["bo_observation"]["schema"] == "bo_observation.v1"
+    if cycle_count == 3:
+        observation = snapshot["state"]["latest_analysis"]["bo_observation"]
+        assert observation["metric_name"] == "specific_energy_absorption_J_per_g"
+        assert observation["unit"] == "J/g"
+        assert snapshot["state"]["run_metadata"]["bo_agent"]["optimization_phase"] == "acquisition"
     assert any(
         item.get("schema") == "experiment_evaluation.v1" and item.get("source") == "analysis_agent"
         for item in snapshot["state"].get("experiment_evaluations", [])
@@ -142,8 +191,8 @@ async def test_controller_completes_test_run(monkeypatch: pytest.MonkeyPatch, cy
                 "equipment_agent", "analysis_agent", "knowledge_agent", "bo_agent", "guardian_agent"} <= completed_agents
         assert all((run_dir / item["result_path"]).is_file() for item in executions)
         loop_prefix = f"runtime/loops/loop-{loop_index + 1:06d}/"
-        assert any(path.startswith(loop_prefix + "analysis_agent/") and path.endswith(".contour.svg") for path in artifact_paths)
-        assert any(path.startswith(loop_prefix + "analysis_agent/") and path.endswith(".report.json") for path in artifact_paths)
+        assert any(path.startswith(loop_prefix + "analysis_agent/") and path.endswith("canonical_curve.csv") for path in artifact_paths)
+        assert any(path.startswith(loop_prefix + "analysis_agent/") and path.endswith("analysis_report.json") for path in artifact_paths)
         assert any(path.startswith(loop_prefix + "bo_agent/") and path.endswith("_bo_agent_result.json") for path in artifact_paths)
     if cycle_count == 20:
         # Two-cycle smoke remains in LHS warmup; the long case exercises posterior output.

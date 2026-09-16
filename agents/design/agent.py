@@ -35,7 +35,7 @@ from agents.design.execution import default_design_execution_graph, execute_desi
 from agents.execution_graph import execution_event_emitter, execution_graph_from_context
 from learning.bo_parameter_space import BOParameterSpace
 from utils.agent_artifact_archive import archive_agent_run
-from mcp_tools.tpms_geometry import tpms_level_for_relative_density
+from mcp_tools.tpms_geometry import tpms_thickness_level, relative_density_for_wall
 from orchestrator.state import Mode, OrchestratorState
 from utils.paths import resolve_path
 
@@ -47,8 +47,8 @@ class DesignAgent(BaseAgent):
     TEST_DEFAULT_GEOMETRY = "gyroid"
     LEGACY_ALIAS_GEOMETRY = "gyroid"
     LEGACY_BO_PARAMETER_SPACE: dict[str, Any] = {
-        "cell_size_mm": [5.0, 6.0, 7.5, 10.0],
-        "relative_density": [0.20, 0.48],
+        "cell_size_mm": [5.0, 10.0],
+        "wall_thickness_mm": [0.6, 1.2],
     }
 
     SUPPORTED_GEOMETRIES = (
@@ -72,10 +72,10 @@ class DesignAgent(BaseAgent):
         "layer_height_mm": 0.2,
         "bed_temperature_c": 60.0,
         "first_layer_bed_temperature_c": 60.0,
-        "min_wall_thickness_mm": 0.8,
-        "minimum_feature_size_mm": 0.8,
+        "min_wall_thickness_mm": 0.4,
+        "minimum_feature_size_mm": 0.4,
         "require_flat_compression_faces": False,
-        "fdm_min_wall_thickness_mm": 1.2,
+        "fdm_min_wall_thickness_mm": 0.4,
         "fdm_max_bridge_distance_mm": 10.0,
         "fdm_max_unsupported_overhang_deg": 45.0,
         "fdm_max_gyroid_wall_cell_ratio": 0.28,
@@ -98,9 +98,8 @@ class DesignAgent(BaseAgent):
     DEFAULT_DESIGN_SPACE: dict[str, Any] = {
         "geometry_types": list(SUPPORTED_GEOMETRIES),
         "specimen_size_mm": [[20.0, 20.0, 20.0], [30.0, 30.0, 30.0]],
-        "cell_size_mm": [3.0, 10.0],
-        "wall_thickness_mm": [1.2, 3.0],
-        "relative_density": [0.10, 0.60],
+        "cell_size_mm": [5.0, 10.0],
+        "wall_thickness_mm": [0.6, 1.2],
         "porosity": [0.40, 0.90],
         "anisotropy_ratio": [0.5, 2.0],
         "orientation_deg": [0, 15, 30, 45, 60, 90],
@@ -142,6 +141,8 @@ class DesignAgent(BaseAgent):
         hard_valid_count = len(valid_pool)
         repaired_candidates: list[dict[str, Any]] = []
         if not valid_pool:
+            if (state.run_metadata.get("orchestrator_design_contract") or {}).get("manufacturing_constraints"):
+                raise ValueError("Agreed design candidate rejected; review required, no silent replacement")
             # Keep the loop moving with a conservative seed, but preserve the failed ledger.
             fallback = self._safe_seed_candidate(state=state, constraints=constraints)
             fallback["repair_source"] = "full_pool_rejected"
@@ -185,7 +186,7 @@ class DesignAgent(BaseAgent):
         selected.update(
             {
                 "specimen_id": self._specimen_id(state=state, candidate=selected),
-                "objective_type": self._objective_type(state.active_goal),
+                "objective_type": objective["objective_type"],
                 "objective_direction": self._objective_direction(state.active_goal),
                 "material": str(constraints["material"]),
                 "printer_profile": self._printer_profile(constraints),
@@ -197,7 +198,8 @@ class DesignAgent(BaseAgent):
                 "nozzle_diameter_mm": round(float(constraints["nozzle_diameter_mm"]), 4),
                 "generation_strategy": strategy,
                 "generation_reason": self._generation_reason(strategy, prior_summary, failure_summary),
-                "design_space": self.DEFAULT_DESIGN_SPACE,
+                "design_space": {key: value for key, value in self._active_parameter_space(state).items()
+                                 if key in {"wall_thickness_mm", "cell_size_mm"}},
                 "constraints": constraints,
                 "prior_results_summary": prior_summary,
                 "failure_memory_summary": failure_summary,
@@ -214,11 +216,11 @@ class DesignAgent(BaseAgent):
         if requested_parameters:
             selected["requested_parameters"] = {
                 "cell_size_mm": float(requested_parameters["cell_size_mm"]),
-                "relative_density": float(requested_parameters["relative_density"]),
+                "wall_thickness_mm": float(requested_parameters["wall_thickness_mm"]),
             }
             selected["realized_parameters"] = {
                 "cell_size_mm": float(selected["cell_size_mm"]),
-                "relative_density": float(selected["relative_density"]),
+                "wall_thickness_mm": float(selected["wall_thickness_mm"]),
             }
             selected["orchestrator_design_contract_ref"] = str(design_contract.get("contract_id") or "")
         selected["bambu_autoejection_readiness"] = self._bambu_autoejection_design_readiness(
@@ -296,6 +298,8 @@ class DesignAgent(BaseAgent):
         constraints["specimen_placement"] = {"mode": "auto", "center_x_mm": 128.0, "center_y_mm": 128.0}
         source = state.current_experiment_spec or {}
         nested = source.get("constraints") if isinstance(source.get("constraints"), dict) else {}
+        if source.get("objective_type") or nested.get("objective_type"):
+            constraints["objective_type"] = source.get("objective_type") or nested["objective_type"]
         explicit_cell_size = any(
             "cell_size_mm" in item and item["cell_size_mm"] not in (None, "", [])
             for item in (source, nested)
@@ -315,7 +319,7 @@ class DesignAgent(BaseAgent):
             try:
                 bo_parameters = {
                     "cell_size_mm": float(bo_recommended.get("cell_size_mm", constraints["cell_size_mm"])),
-                    "relative_density": float(bo_recommended.get("relative_density", constraints["relative_density"])),
+                    "wall_thickness_mm": float(bo_recommended.get("wall_thickness_mm", constraints["wall_thickness_mm"])),
                 }
                 self._validate_active_parameters(
                     bo_parameters,
@@ -335,29 +339,29 @@ class DesignAgent(BaseAgent):
         if requested_parameters:
             try:
                 requested_cell = float(requested_parameters["cell_size_mm"])
-                requested_density = float(requested_parameters["relative_density"])
+                requested_wall = float(requested_parameters["wall_thickness_mm"])
             except (KeyError, TypeError, ValueError) as exc:
-                raise ValueError("orchestrator design contract requires numeric cell_size_mm and relative_density") from exc
+                raise ValueError("orchestrator design contract requires numeric cell_size_mm and wall_thickness_mm") from exc
             requested_parameters = {
                 "cell_size_mm": requested_cell,
-                "relative_density": requested_density,
+                "wall_thickness_mm": requested_wall,
             }
             self._validate_active_parameters(
                 requested_parameters,
                 parameter_space,
                 source="orchestrator design contract",
             )
-            minimum_cell = max(3.0, 3.0 * float(constraints.get("fdm_min_wall_thickness_mm", 1.2)))
+            minimum_cell = max(3.0, 3.0 * float(constraints.get("fdm_min_wall_thickness_mm", 0.4)))
             maximum_cell = float(constraints.get("fdm_max_bridge_distance_mm", 10.0))
             if not minimum_cell <= requested_cell <= maximum_cell:
                 raise ValueError(
                     f"orchestrator design contract cell_size_mm={requested_cell} is outside "
                     f"manufacturing safety bounds [{minimum_cell}, {maximum_cell}]"
                 )
-            if not 0.20 <= requested_density <= 0.60:
+            if not 0.0 < requested_wall < requested_cell / 2:
                 raise ValueError(
-                    f"orchestrator design contract relative_density={requested_density} is outside "
-                    "manufacturing safety bounds [0.2, 0.6]"
+                    f"orchestrator design contract wall_thickness_mm={requested_wall} is outside "
+                    "physical sheet thickness bounds (0, cell/2)"
                 )
         explicit_cell_size = bool(
             explicit_cell_size
@@ -422,8 +426,6 @@ class DesignAgent(BaseAgent):
             "tpms_resolution",
         ):
             constraints[key] = float(constraints[key])
-        if constraints["preferred_geometry_type"] == "gyroid":
-            constraints["relative_density"] = max(0.20, float(constraints["relative_density"]))
         legacy_cap = bool(constraints["top_bottom_cap"])
         if explicit_top_cap or explicit_bottom_cap:
             constraints["top_cap_enabled"] = bool(constraints.get("top_cap_enabled", False))
@@ -447,6 +449,9 @@ class DesignAgent(BaseAgent):
         else:
             constraints["skin_thickness_mm"] = 0.0
             constraints["require_flat_compression_faces"] = False
+        if str(constraints.get("preferred_geometry_type") or "").lower() == "gyroid":
+            constraints["relative_density"] = relative_density_for_wall(
+                constraints["wall_thickness_mm"], constraints["cell_size_mm"])
         return constraints
 
     @classmethod
@@ -458,7 +463,8 @@ class DesignAgent(BaseAgent):
     ) -> dict[str, Any]:
         """Resolve current request metadata without rewriting legacy contracts."""
         metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
-        contract = design_contract if isinstance(design_contract, dict) else {}
+        contract = design_contract if isinstance(design_contract, dict) else metadata.get("orchestrator_design_contract", {})
+        contract = contract if isinstance(contract, dict) else {}
         next_request = metadata.get("next_design_request")
         next_request = next_request if isinstance(next_request, dict) else {}
         bo_result = metadata.get("bo_agent")
@@ -479,7 +485,7 @@ class DesignAgent(BaseAgent):
         """Validate requested active coordinates against their transmitted domain."""
         space = BOParameterSpace.from_mapping(parameter_space)
         dimensions = {dimension.name: dimension for dimension in space.dimensions}
-        missing = [name for name in ("cell_size_mm", "relative_density") if name not in dimensions]
+        missing = [name for name in ("cell_size_mm", "wall_thickness_mm") if name not in dimensions]
         if missing:
             raise ValueError(f"{source} parameter_space is missing {', '.join(missing)}")
         try:
@@ -498,9 +504,13 @@ class DesignAgent(BaseAgent):
         max_size = self._bounded_size(constraints["max_specimen_size_mm"], constraints["utm_fixture_limit_mm"])
         pool: list[dict[str, Any]] = []
         geometry_cycle = self._geometry_cycle(constraints)
+        if constraints.get("preferred_geometry_type") == "gyroid":
+            geometry_cycle = ["gyroid"]
+        contract = state.run_metadata.get("orchestrator_design_contract") or {}
+        requested = contract.get("requested_parameters") or {}
         orientations = self.DEFAULT_DESIGN_SPACE["orientation_deg"]
         base = state.loop_count * 7 + prior_count * 3
-        for idx in range(12):
+        for idx in range(1 if geometry_cycle == ["gyroid"] else 12):
             geometry = str(geometry_cycle[(base + idx) % len(geometry_cycle)])
             rel_density = self._clamp(0.18 + 0.035 * ((base + idx * 2) % 10), 0.10, 0.60)
             wall = self._clamp(1.2 + 0.2 * ((base + idx) % 8), 1.2, 3.0)
@@ -514,22 +524,25 @@ class DesignAgent(BaseAgent):
             if geometry == "gyroid":
                 max_bridge = float(constraints.get("fdm_max_bridge_distance_mm", 10.0))
                 max_ratio = float(constraints.get("fdm_max_gyroid_wall_cell_ratio", 0.28))
-                min_wall = float(constraints.get("fdm_min_wall_thickness_mm", 1.2))
+                min_wall = float(constraints.get("fdm_min_wall_thickness_mm", 0.4))
                 cell = self._clamp(
                     float(constraints.get("cell_size_mm", cell)),
                     max(3.0 * min_wall, 3.0),
                     max_bridge,
                 )
                 wall = self._clamp(wall, min_wall, max(min_wall, cell * max_ratio))
-                wall = self._clamp(float(constraints.get("wall_thickness_mm", wall)), min_wall, max(min_wall, cell * max_ratio))
-                rel_density = self._clamp(float(constraints.get("relative_density", rel_density)), 0.10, 0.60)
+                wall = float(constraints.get("wall_thickness_mm", wall))
+                if not min_wall <= wall < cell / 2:
+                    raise ValueError("Requested wall thickness violates physical bounds")
+                rel_density = relative_density_for_wall(wall, cell)
                 anisotropy = float(constraints.get("anisotropy_ratio", 1.0))
+                defect_ratio = float(constraints.get("defect_ratio", 0.0))
             candidate = {
                 "candidate_id": f"cand-{state.loop_count + 1}-{idx + 1:02d}",
                 "geometry_type": geometry,
                 "specimen_size_mm": list(max_size),
                 "cell_size_mm": float(cell),
-                "wall_thickness_mm": round(wall, 3),
+                "wall_thickness_mm": float(wall),
                 "relative_density": float(rel_density),
                 "porosity": round(1.0 - rel_density, 4),
                 "anisotropy_ratio": round(anisotropy, 3),
@@ -545,7 +558,7 @@ class DesignAgent(BaseAgent):
                 "bottom_cap_enabled": bottom_cap_enabled,
                 "top_bottom_cap": top_bottom_cap,
                 "skirt_enabled": bool(constraints.get("skirt_enabled", False)),
-                "fdm_min_wall_thickness_mm": float(constraints.get("fdm_min_wall_thickness_mm", 1.2)),
+                "fdm_min_wall_thickness_mm": float(constraints.get("fdm_min_wall_thickness_mm", 0.4)),
                 "fdm_max_bridge_distance_mm": float(constraints.get("fdm_max_bridge_distance_mm", 10.0)),
                 "fdm_max_unsupported_overhang_deg": float(constraints.get("fdm_max_unsupported_overhang_deg", 45.0)),
                 "fdm_max_gyroid_wall_cell_ratio": float(constraints.get("fdm_max_gyroid_wall_cell_ratio", 0.28)),
@@ -671,22 +684,18 @@ class DesignAgent(BaseAgent):
         if any(float(size[i]) > float(constraints["utm_fixture_limit_mm"][i]) for i in range(3)):
             reasons.append("specimen_size_mm exceeds UTM fixture constraint")
         min_wall = max(
-            2.0 * float(constraints["nozzle_diameter_mm"]),
+            float(constraints.get("min_wall_thickness_mm", 0.4)),
             float(constraints["minimum_feature_size_mm"]),
-            float(constraints.get("fdm_min_wall_thickness_mm", 1.2)),
+            float(constraints.get("fdm_min_wall_thickness_mm", 0.4)),
         )
-        if float(candidate["wall_thickness_mm"]) < min_wall:
+        if candidate["geometry_type"] != "gyroid" and float(candidate["wall_thickness_mm"]) < min_wall:
             reasons.append("wall_thickness_mm below minimum feature/nozzle rule")
-        if float(candidate["cell_size_mm"]) < 3.0 * float(candidate["wall_thickness_mm"]):
+        if candidate["geometry_type"] != "gyroid" and float(candidate["cell_size_mm"]) < 3.0 * float(candidate["wall_thickness_mm"]):
             reasons.append("cell_size_mm below 3x wall thickness rule")
         if str(candidate["geometry_type"]) == "gyroid":
             if float(candidate["cell_size_mm"]) > float(constraints.get("fdm_max_bridge_distance_mm", 10.0)):
                 reasons.append("gyroid cell_size_mm exceeds FDM bridge/span rule")
-            if float(candidate["wall_thickness_mm"]) / max(float(candidate["cell_size_mm"]), 1e-6) > float(
-                constraints.get("fdm_max_gyroid_wall_cell_ratio", 0.28)
-            ):
-                reasons.append("gyroid wall/cell ratio too high for open FDM TPMS channels")
-            if float(candidate["relative_density"]) < 0.20:
+            if not 0.0 < float(candidate["relative_density"]) < 1.0:
                 reasons.append("gyroid relative_density below FDM continuous-shell rule")
         if float(candidate["expected_mass_g"]) > float(constraints["max_mass_g"]):
             reasons.append("expected_mass_g exceeds max_mass_g")
@@ -724,7 +733,7 @@ class DesignAgent(BaseAgent):
                 constraints.get("top_cap_enabled", False) or constraints.get("bottom_cap_enabled", False)
             ),
             "skirt_enabled": bool(constraints.get("skirt_enabled", False)),
-            "fdm_min_wall_thickness_mm": float(constraints.get("fdm_min_wall_thickness_mm", 1.2)),
+            "fdm_min_wall_thickness_mm": float(constraints.get("fdm_min_wall_thickness_mm", 0.4)),
             "fdm_max_bridge_distance_mm": float(constraints.get("fdm_max_bridge_distance_mm", 10.0)),
             "fdm_max_unsupported_overhang_deg": float(constraints.get("fdm_max_unsupported_overhang_deg", 45.0)),
             "fdm_max_gyroid_wall_cell_ratio": float(constraints.get("fdm_max_gyroid_wall_cell_ratio", 0.28)),
@@ -892,6 +901,9 @@ class DesignAgent(BaseAgent):
 
     @staticmethod
     def _objective_type(goal: str) -> str:
+        from utils.research_objective import uses_sea
+        if uses_sea({}, goal):
+            return "maximize_energy_absorption_per_mass"
         lowered = goal.lower()
         if "peak" in lowered or "피크" in lowered or "하중" in lowered:
             return "maximize_peak_load"
@@ -970,9 +982,11 @@ class DesignAgent(BaseAgent):
     def _tpms_fields(cls, candidate: dict[str, Any]) -> dict[str, Any]:
         """Expose optional TPMS controls while preserving the existing payload contract."""
         rel_density = float(candidate.get("relative_density", 0.32))
-        thickness = tpms_level_for_relative_density(rel_density)
+        thickness = tpms_thickness_level(wall_thickness_mm=float(candidate["wall_thickness_mm"]),
+                                         cell_size_mm=float(candidate["cell_size_mm"]), relative_density=rel_density)
         return {
             "tpms_surface": "gyroid",
+            "gyroid_parameterization": "wall_cell_v1",
             "tpms_thickness": round(thickness, 4),
             "tpms_resolution": int(float(candidate.get("tpms_resolution", 72))),
             "printability_mode": "fdm_closed_shell",
@@ -984,13 +998,15 @@ class DesignAgent(BaseAgent):
         return datetime.now(timezone.utc).isoformat()
 
     def _objective_contract(self, state: OrchestratorState, constraints: dict[str, Any]) -> dict[str, Any]:
-        objective_type = self._objective_type(state.active_goal)
+        from utils.research_objective import uses_sea
+        objective_type = ("maximize_energy_absorption_per_mass" if uses_sea(constraints, state.active_goal)
+                          else self._objective_type(state.active_goal))
         direction = self._objective_direction(state.active_goal)
         metric_map = {
             "maximize_peak_load": "peak_load_n",
             "control_failure_mode": "failure_mode_score",
             "explore_design_space": "information_gain_score",
-            "maximize_energy_absorption_per_mass": "energy_absorption_per_mass",
+            "maximize_energy_absorption_per_mass": "specific_energy_absorption_J_per_g",
             "maximize_energy_density_50pct": "energy_density_50pct_MJ_per_m3",
         }
         primary_metric = metric_map.get(objective_type, "energy_density_50pct_MJ_per_m3")
@@ -1268,7 +1284,7 @@ class DesignAgent(BaseAgent):
 
     @classmethod
     def _parameter_range(cls, name: str, selected: dict[str, Any]) -> dict[str, Any]:
-        raw_range = cls.DEFAULT_DESIGN_SPACE.get(name, [])
+        raw_range = (selected.get("design_space") or {}).get(name, [])
         values = raw_range if isinstance(raw_range, list) else []
         lower: Any = None
         upper: Any = None
@@ -1289,8 +1305,8 @@ class DesignAgent(BaseAgent):
         groups: dict[tuple[float, float], list[dict[str, Any]]] = {}
         order: list[tuple[float, float]] = []
         for index, cell in enumerate(cells):
-            x = cls._numeric(cell.get("x_relative_density"), float("nan"))
-            y = cls._numeric(cell.get("y_wall_thickness_mm"), float("nan"))
+            x = cls._numeric(cell.get("x_wall_thickness_mm"), float("nan"))
+            y = cls._numeric(cell.get("y_cell_size_mm"), float("nan"))
             value = cls._numeric(cell.get("value"), float("nan"))
             if x != x or y != y or value != value:
                 continue
@@ -1384,8 +1400,8 @@ class DesignAgent(BaseAgent):
             heatmap_cells.append(
                 {
                     "candidate_id": candidate.get("candidate_id"),
-                    "x_relative_density": candidate.get("relative_density"),
-                    "y_wall_thickness_mm": candidate.get("wall_thickness_mm"),
+                    "x_wall_thickness_mm": candidate.get("wall_thickness_mm"),
+                    "y_cell_size_mm": candidate.get("cell_size_mm"),
                     "value": candidate.get("expected_objective_proxy_score"),
                     "status": status,
                 }
@@ -1485,15 +1501,12 @@ class DesignAgent(BaseAgent):
             },
             "parameter_sweep": {
                 "chart_type": "heatmap",
-                "x_axis": "relative_density",
-                "y_axis": "wall_thickness_mm",
+                "x_axis": "wall_thickness_mm",
+                "y_axis": "cell_size_mm",
                 "score_field": "expected_objective_proxy_score",
                 "parameters": [
                     self._parameter_range("cell_size_mm", selected),
                     self._parameter_range("wall_thickness_mm", selected),
-                    self._parameter_range("relative_density", selected),
-                    self._parameter_range("orientation_deg", selected),
-                    self._parameter_range("tpms_thickness", selected),
                 ],
                 "heatmap_cells": heatmap_cells,
             },
@@ -1671,7 +1684,8 @@ class DesignAgent(BaseAgent):
             "candidate_generation": {
                 "strategy": strategy,
                 "budget": len(pool),
-                "design_space": self.DEFAULT_DESIGN_SPACE,
+                "design_space": {key: value for key, value in self._active_parameter_space(state).items()
+                                 if key in {"wall_thickness_mm", "cell_size_mm"}},
                 "candidate_count": len(pool),
                 "valid_count": hard_valid_count,
                 "rejected_count": len(rejected),

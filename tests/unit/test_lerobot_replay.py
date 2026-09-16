@@ -134,7 +134,7 @@ def test_exit_does_not_prove_home(boundary, exit_code):
     assert status["status"] == ("COMPLETED" if exit_code == 0 else "FAILED")
     assert status["ok"] is (exit_code == 0)
     assert status["exit_code"] == exit_code
-    assert status["replay_home_verified"] is False
+    assert status["replay_execution_verified"] is False
 
 
 def test_unknown_session_does_not_return_or_stop_another_replay(boundary):
@@ -275,13 +275,13 @@ class FakeRobot:
         return {"shoulder_pan.pos": 2., "shoulder_lift.pos": 80.}
 
 
-def test_runner_uses_recorded_observation_and_preserves_actions(tmp_path):
+def test_runner_preserves_actions_without_home_verification(tmp_path):
     from scripts.lerobot_managed_replay import load_episode, run_episode
     episode = load_episode(dataset_at(tmp_path / "dataset"), 0)
     robot = FakeRobot()
     result = run_episode(robot, episode, sleep=lambda _: None)
-    assert result["replay_home_verified"] is True
-    assert result["home_evidence"]["target_state"]["shoulder_lift.pos"] == 80.
+    assert result["ok"] is True
+    assert "home_evidence" not in result
     assert robot.sent[-1]["shoulder_lift.pos"] == 180.
     assert robot.bus.events == ["connect", "enable", "disconnect"]
 
@@ -291,44 +291,47 @@ def test_runner_closes_follower_after_failure_or_interrupt(tmp_path, failure):
     from scripts.lerobot_managed_replay import load_episode, run_episode
     robot = FakeRobot(failure)
     result = run_episode(robot, load_episode(dataset_at(tmp_path / "dataset"), 0), sleep=lambda _: None)
-    assert not result["replay_home_verified"] and not result["ok"]
+    assert not result["replay_execution_verified"] and not result["ok"]
     assert not robot.bus.is_connected
     assert robot.bus.events[-1] == "disconnect"
 
 
-def test_runner_missing_readback_is_not_verified(tmp_path):
+def test_runner_completion_does_not_require_pose_readback(tmp_path):
     from scripts.lerobot_managed_replay import load_episode, run_episode
     robot = FakeRobot()
-    robot.get_observation = lambda: {}
+    def forbidden_readback():
+        raise AssertionError("Replay must not perform a home readback")
+    robot.get_observation = forbidden_readback
     result = run_episode(robot, load_episode(dataset_at(tmp_path / "dataset"), 0),
         sleep=lambda _: None, home_timeout_s=0)
-    assert result["ok"] and not result["replay_home_verified"]
+    assert result["ok"] and result["replay_execution_verified"]
 
 
-@pytest.mark.parametrize("corrupt", [None, "token", "target", "missing_measurement", "run_mode"])
-def test_home_evidence_requires_current_identity_and_actual_measurements(boundary, corrupt):
+@pytest.mark.parametrize("corrupt", [None, "token", "frames", "missing_frames", "run_mode"])
+def test_replay_evidence_requires_current_identity_and_all_frames(boundary, corrupt):
     bridge, payload, launched = boundary
     started = bridge.replay_start(payload)
     session = bridge._sessions["clear-child"]
     evidence = {"session_id": "clear-child", "dataset_repo_id": "jin/utm_clear",
         "dataset_path": payload["dataset_path"], "replay_episode": 0,
         "evidence_token": session["replay_evidence_token"], "ok": True,
-        "follower_closed": True, "replay_home_verified": True,
+        "follower_closed": True, "frames_sent": session["replay_num_frames"],
+        "replay_home_verified": False,
         "home_evidence": {"reference": "recorded_end_observation.state", "tolerance": 5.,
             "target_state": {"shoulder_pan.pos": 2., "shoulder_lift.pos": 80.},
             "measured_state": {"shoulder_pan.pos": 2., "shoulder_lift.pos": 80.}}}
     if corrupt == "token":
         evidence["evidence_token"] = "stale"
-    elif corrupt == "target":
-        evidence["home_evidence"]["target_state"]["shoulder_lift.pos"] = 180.
-    elif corrupt == "missing_measurement":
-        evidence["home_evidence"].pop("measured_state")
+    elif corrupt == "frames":
+        evidence["frames_sent"] -= 1
+    elif corrupt == "missing_frames":
+        evidence.pop("frames_sent")
     elif corrupt == "run_mode":
         assert not bridge.replay_start({**payload, "mode": "test"})["ok"]
         return
     Path(started["replay_result_path"]).write_text(json.dumps(evidence))
     launched[0][1].returncode = 0
-    assert bridge.replay_status({"session_id": "clear-child"})["replay_home_verified"] is (corrupt is None)
+    assert bridge.replay_status({"session_id": "clear-child"})["replay_execution_verified"] is (corrupt is None)
 
 
 def test_replay_stop_escalates_a_stuck_process(boundary, monkeypatch):
@@ -358,6 +361,8 @@ def test_controller_stop_paths_stop_managed_replay(boundary, stop_kind):
     controller._deps = SimpleNamespace(agent_context=SimpleNamespace(tools=registry))
     controller._state = OrchestratorState(run_id="run-1", experiment_id="exp", mode=Mode.TEST)
     controller._run_task = controller._planning_handoff_task = None
+    controller._test_scenario = SimpleNamespace(cancel=lambda: None)
+    controller._test_input_revision = 0
     controller._cancel_operator_teleop_handoffs = lambda **_: None
     controller._capture_planning_resume_context = lambda **_: {}
     controller._trace = SimpleNamespace(snapshot=lambda: {})
@@ -379,7 +384,7 @@ def test_runner_closes_port_when_torque_disable_fails(tmp_path):
     robot.bus.disconnect = disconnect
     robot.bus.port_handler = SimpleNamespace(closePort=lambda: setattr(robot.bus, "is_connected", False))
     result = run_episode(robot, load_episode(dataset_at(tmp_path / "dataset"), 0), sleep=lambda _: None)
-    assert not result["ok"] and not result["replay_home_verified"]
+    assert not result["ok"] and not result["replay_execution_verified"]
     assert result["follower_closed"] and not robot.bus.is_connected
 
 
@@ -422,7 +427,7 @@ def test_runner_attempts_later_motors_after_early_torque_disable_failure(tmp_pat
     result = run_episode(robot, load_episode(dataset_at(tmp_path / "dataset"), 0), sleep=lambda _: None)
     assert "shoulder_lift" not in robot.bus.enabled_motors
     assert robot.bus.torque_attempts == [("shoulder_pan", 5), ("shoulder_pan", 0), ("shoulder_lift", 0)]
-    assert not result["ok"] and not result["replay_home_verified"]
+    assert not result["ok"] and not result["replay_execution_verified"]
     assert "first motor disable failed" in result["cleanup_error"]
     assert result["follower_closed"] and not robot.bus.is_connected
     assert robot.bus.events[-1] == "close_port"

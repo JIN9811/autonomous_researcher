@@ -51,6 +51,9 @@ def _virtual_score(request: ExperimentEvaluationRequest) -> tuple[float, dict[st
         density = _as_float(params.get("relative_density"), 0.32)
         wall = _as_float(params.get("wall_thickness_mm"), 1.2)
         cell = max(0.1, _as_float(params.get("cell_size_mm"), 5.0))
+        if str(params.get("geometry_type", "gyroid")).lower() == "gyroid":
+            from mcp_tools.tpms_geometry import relative_density_for_wall
+            density = relative_density_for_wall(wall, cell)
         mass = _as_float(params.get("expected_mass_g"), 0.0)
         print_time = _as_float(params.get("expected_print_time_min"), 0.0)
         geometry_bonus = 0.08 if str(params.get("geometry_type", "")).lower() == "gyroid" else 0.0

@@ -21,16 +21,16 @@ def test_lhs_renderer_uses_publication_design_space_semantics() -> None:
         "step": 3,
         "design_space": {
             "x": {"name": "cell_size_mm", "label": "Cell size", "unit": "mm", "kind": "discrete", "values": [5, 6, 7.5, 10]},
-            "y": {"name": "relative_density", "label": "Relative density", "unit": "1", "kind": "continuous", "bounds": [0.2, 0.48]},
+            "y": {"name": "wall_thickness_mm", "label": "Wall thickness (mm)", "unit": "1", "kind": "continuous", "bounds": [0.2, 0.48]},
         },
         "initial_design": {
             "sampler": "latin_hypercube",
             "target": 8,
             "completed": 2,
             "points": [
-                {"index": 1, "status": "measured", "density_stratum": 4, "parameters": {"cell_size_mm": 10, "relative_density": 0.31}},
-                {"index": 2, "status": "next", "density_stratum": 6, "parameters": {"cell_size_mm": 6, "relative_density": 0.39}},
-                {"index": 3, "status": "planned", "density_stratum": 3, "parameters": {"cell_size_mm": 7.5, "relative_density": 0.29}},
+                {"index": 1, "status": "measured", "density_stratum": 4, "parameters": {"cell_size_mm": 10, "wall_thickness_mm": 0.31}},
+                {"index": 2, "status": "next", "density_stratum": 6, "parameters": {"cell_size_mm": 6, "wall_thickness_mm": 0.39}},
+                {"index": 3, "status": "planned", "density_stratum": 3, "parameters": {"cell_size_mm": 7.5, "wall_thickness_mm": 0.29}},
             ],
         },
         "diagnostics": {"coverage_fraction": 0.25, "centered_discrepancy": 0.07, "duplicate_count": 0},
@@ -43,7 +43,7 @@ const plot = renderer.renderPlot(payload);
 console.log(JSON.stringify({{
   valid: renderer.isValid(payload),
   mixedTitle: plot.includes("Mixed-space Latin hypercube initial design"),
-  axes: plot.includes("Cell size (mm)") && plot.includes("Relative density"),
+  axes: plot.includes("Cell size (mm)") && plot.includes("Wall thickness (mm)"),
   strata: plot.includes("lhs-viz-stratum"),
   measured: plot.includes("Measured design"),
   nextPoint: plot.includes("Next design"),
@@ -74,13 +74,13 @@ def test_lhs_renderer_accepts_continuous_cell_size_bounds() -> None:
         "step": 1,
         "design_space": {
             "x": {"name": "cell_size_mm", "label": "Cell size", "unit": "mm", "kind": "continuous", "bounds": [5.0, 8.0]},
-            "y": {"name": "relative_density", "label": "Relative density", "unit": "1", "kind": "continuous", "bounds": [0.2, 0.4]},
+            "y": {"name": "wall_thickness_mm", "label": "Wall thickness (mm)", "unit": "1", "kind": "continuous", "bounds": [0.2, 0.4]},
         },
         "initial_design": {
             "sampler": "latin_hypercube",
             "target": 8,
             "completed": 1,
-            "points": [{"index": 1, "status": "measured", "parameters": {"cell_size_mm": 7.2, "relative_density": 0.31}}],
+            "points": [{"index": 1, "status": "measured", "parameters": {"cell_size_mm": 7.2, "wall_thickness_mm": 0.31}}],
         },
     }
     script = f"""

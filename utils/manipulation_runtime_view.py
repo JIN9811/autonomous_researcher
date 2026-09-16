@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+from utils.manipulation_execution import task_progress_counts
 
 
 RUNTIME_VIEW_SCHEMA = "manipulation_runtime_view.v1"
@@ -302,6 +303,7 @@ def build_manipulation_runtime_view(
     sample_count = int(_first(artifact_data.get("sample_count"), packet_data.get("sequence"), default=0) or 0)
     duration_s = float(_first(artifact_data.get("duration_s"), packet_data.get("elapsed_s"), rollout.get("duration_s"), default=0.0) or 0.0)
     metrics = {
+        "task_progress": task_progress_counts(state_data),
         "task_cycle": task_metrics,
         "grasp": grasp_metrics,
         "grasp_achievement": _dict(motion.get("grasp_achievement")) or _dict(artifact_data.get("grasp_achievement")),

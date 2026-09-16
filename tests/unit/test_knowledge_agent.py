@@ -176,16 +176,13 @@ async def test_knowledge_agent_persists_analysis_artifacts_metrics_and_failure_t
     assert result.data["knowledge"]["failure_tags"] == ["low_point_count"]
     assert result.data["knowledge"]["knowledge_context"]["schema"] == "knowledge_context.v1"
     assert result.data["knowledge"]["knowledge_report"]["schema"] == "knowledge_report.v1"
-    assert result.data["knowledge"]["evolution_proposal"]["schema"] == "evolution_proposal.v1"
+    assert "evolution_proposal" not in result.data
+    assert "evolution_proposal" not in result.data["knowledge"]
     assert result.data["knowledge"]["agent_performance_count"] >= 1
     assert result.data["knowledge"]["failure_pattern_count"] >= 1
-    assert result.data["knowledge"]["evolution_pack_count"] >= 1
-    evidence = result.data["knowledge"]["evolution_proposal"]
-    pack = evidence["evidence_packs"][0]
-    assert pack["schema_version"] == "evolution_evidence_pack_v1"
-    assert pack["target_type"] == "prompt"
-    assert pack["constraints"]["require_human_approval"] is True
-    assert "prefill_tasks" not in evidence
+    assert "evolution_pack_count" not in result.data["knowledge"]
+    assert "evolution_evidence_packs" not in result.data["knowledge"]["artifact_paths"]
+    assert "evolution_outcomes" not in result.data["knowledge"]["artifact_paths"]
     assert "self_evolution" not in result.data["knowledge"]
     assert "knowledge_report" in result.data["knowledge"]["artifact_paths"]
     record = ctx.experiment_db.list_recent(1)[0]
@@ -290,7 +287,7 @@ def test_knowledge_builds_outcome_attribution_for_active_variant(tmp_path) -> No
 
 
 @pytest.mark.asyncio
-async def test_knowledge_agent_ingests_guardian_incidents_as_evolution_evidence() -> None:
+async def test_knowledge_agent_ingests_guardian_incidents_as_experiment_evidence() -> None:
     ctx = _CtxStub()
     state = _state()
     state.run_metadata["incident_records"] = [

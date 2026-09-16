@@ -61,3 +61,12 @@ test("Specimen owner composes six existing cards using shared host inputs", () =
   assert.match(html, /existing STL helper/);
   assert.match(html, /existing camera helper/);
 });
+
+test("Mesh wall evidence replaces unknown values without fabricated success", () => {
+  const ui = frontend();
+  const measured = ui.renderReport({fabrication:{quality_gates:[{gate:"manufacturability",status:"fail",
+    evidence:{wall_thickness_verification:{status:"fail",required_minimum_mm:0.4,minimum_sampled_mm:0.2968,sample_count:128}}}]}});
+  assert.match(measured,/Actual mesh wall check=fail/);
+  assert.match(measured,/Sampled minimum \(mm\)=0.2968/);
+  assert.match(ui.renderReport({fabrication:{}}),/Actual mesh wall check=Not measured/);
+});

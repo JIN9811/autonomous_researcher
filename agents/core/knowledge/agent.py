@@ -1,13 +1,13 @@
 """
 File purpose:
-- Retrieve guide/web knowledge, write validated experiment memory, and build improvement evidence packs.
+- Retrieve guide/web knowledge, write validated experiment memory, and retain experiment evidence.
 
 Key classes/functions:
 - KnowledgeAgent
 
 Inputs/outputs:
 - Input: active goal, analysis result, current experiment metadata
-- Output: knowledge_context.v1, knowledge_report, typed memory artifacts, evolution_evidence_packs
+- Output: knowledge_context.v1, knowledge_report, typed memory artifacts
 
 Dependencies:
 - knowledge.rag.HybridRAG
@@ -16,7 +16,7 @@ Dependencies:
 - knowledge.stores.JsonlKnowledgeStore
 
 Modification guide:
-- Safe places to edit: memory extraction, evidence-pack ranking, report field additions
+- Safe places to edit: memory extraction, provenance, report field additions
 - Risky places to edit: MemoryRecord compatibility and AgentResult.data["knowledge"] keys used by GUI/controller
 - Related files: knowledge/*, app/main.py
 """
@@ -34,10 +34,9 @@ from typing import Any
 from agents.base_agent import AgentContext, AgentResult, BaseAgent
 from agents.core.knowledge.decision import run_knowledge_decision
 from utils.agent_artifact_archive import archive_agent_run
-from knowledge.improvement_evidence import build_evidence_packs, build_outcomes_for_active_variants
 from knowledge.graph_backend import graph_backend_from_env
 from knowledge.graph_importer import mirror_knowledge_records
-from knowledge.pattern_miner import build_agent_performance_records, rank_evolution_targets, update_failure_patterns, update_success_patterns
+from knowledge.pattern_miner import build_agent_performance_records, update_failure_patterns, update_success_patterns
 from knowledge.provenance import build_provenance_ref, stable_id, validate_artifact_refs
 from knowledge.retrieval import format_rag_context, retrieve_research_context
 from knowledge.schemas import ExperimentKnowledgeRecord, KnowledgeSourceRef, MemoryRecord
@@ -52,7 +51,7 @@ from orchestrator.state import OrchestratorState
 
 
 class KnowledgeAgent(BaseAgent):
-    """Handles retrieval, memory persistence, and improvement evidence preparation."""
+    """Handles retrieval, memory persistence, and experiment evidence."""
 
     name = "knowledge_agent"
 
@@ -229,7 +228,6 @@ class KnowledgeAgent(BaseAgent):
             objective_evaluation=objective_evaluation,
             quality={
                 "ok_for_bo": bool(state.latest_analysis.get("ok_for_bo", True)) and not failure_tags,
-                "ok_for_evolution": bool(artifact_refs or metrics or failure_tags),
                 "warnings": failure_tags,
                 "artifact_coverage": artifact_quality,
             },
@@ -242,7 +240,6 @@ class KnowledgeAgent(BaseAgent):
         metadata_for_ledger = dict(state.run_metadata)
         metadata_for_ledger["knowledge"] = {
             "knowledge_report": True,
-            "evolution_evidence_packs": True,
             "memory_summary": memory_summary,
             "artifact_refs": artifact_refs,
         }
@@ -267,24 +264,6 @@ class KnowledgeAgent(BaseAgent):
             existing_patterns=store.list_success_patterns(limit=200),
             evidence_refs=artifact_refs,
         )
-        ranked_targets = rank_evolution_targets(performance_records, failure_patterns)
-        evidence_packs = build_evidence_packs(
-            run_id=state.run_id,
-            experiment_record=experiment_record,
-            performance_records=performance_records,
-            failure_patterns=failure_patterns,
-            success_patterns=success_patterns,
-            ranked_targets=ranked_targets,
-            evidence_refs=artifact_refs,
-        )
-        evolution_outcomes = build_outcomes_for_active_variants(
-            run_id=state.run_id,
-            performance_records=performance_records,
-            evolution_root=project_root / "memory" / "evolution",
-            existing_outcomes=store.list_evolution_outcomes(limit=500),
-            evidence_refs=artifact_refs,
-        )
-        evolution_outcome_payloads = [record.model_dump(mode="json") for record in evolution_outcomes]
         research_context = retrieve_research_context(query=query, retrieval_result=retrieval)
         graph_backend_status = {"ok": True, "enabled": False, "status": "retired"}
         graph_event_status = _ingest_local_event(
@@ -295,7 +274,7 @@ class KnowledgeAgent(BaseAgent):
             occurred_at=now,
             activity_counts={
                 "collected": 1 + len(performance_records) + len(artifact_refs),
-                "updated": len(failure_patterns) + len(success_patterns) + len(evidence_packs) + len(evolution_outcomes),
+                "updated": len(failure_patterns) + len(success_patterns),
                 "retrieved": len(retrieval.get("local_chunks", [])) + len(retrieval.get("web_results", [])),
                 "used": 1,
             },
@@ -318,15 +297,12 @@ class KnowledgeAgent(BaseAgent):
                 "hot": {"warnings": failure_tags, "constraints": memory_summary, "guardian_incidents": guardian_incident_evidence.get("incident_ids", [])},
                 "episodic": [experiment_record.record_id],
                 "semantic": [item.pattern_id for item in failure_patterns] + [item.skill_id for item in success_patterns],
-                "evolution": [item.pack_id for item in evidence_packs],
                 "archival": [item.get("path") or item.get("artifact_id") for item in artifact_refs],
             },
             "evidence_quality": {
                 "provenance_used_count": len(provenance.used),
                 "artifact_link_coverage": artifact_quality.get("coverage", 1.0),
                 "agent_report_coverage": _agent_report_coverage(performance_records),
-                "evolution_pack_count": len(evidence_packs),
-                "evolution_outcome_count": len(evolution_outcomes),
                 "graph_backend_enabled": bool(graph_backend_status.get("enabled", False)),
                 "graph_event_pipeline_enabled": bool(graph_event_status.get("enabled", False)),
                 "graph_pending_event_count": int((graph_event_status.get("outbox") or {}).get("pending", 0)),
@@ -341,14 +317,6 @@ class KnowledgeAgent(BaseAgent):
         }
         if owner_plan is not None:
             knowledge_context["owner_plan"] = deepcopy(owner_plan)
-        evolution_proposal = {
-            "schema": "evolution_proposal.v1",
-            "run_id": state.run_id,
-            "status": "ready" if evidence_packs else "no_evolution_needed",
-            "evidence_packs": [pack.model_dump(mode="json") for pack in evidence_packs],
-            "outcomes": evolution_outcome_payloads,
-            "no_evolution_needed_reason": "No repeated failure, missing-field, retry, or warning pattern crossed the evidence threshold." if not evidence_packs else "",
-        }
         knowledge_report = {
             "schema": "knowledge_report.v1",
             "run_id": state.run_id,
@@ -362,14 +330,11 @@ class KnowledgeAgent(BaseAgent):
                 "agent_performance_count": len(performance_records),
                 "failure_pattern_count": len(failure_patterns),
                 "success_pattern_count": len(success_patterns),
-                "evolution_pack_count": len(evidence_packs),
-                "evolution_outcome_count": len(evolution_outcomes),
             },
             "experiment_memory": experiment_record.model_dump(mode="json"),
             "agent_performance_records": [record.model_dump(mode="json") for record in performance_records],
             "failure_patterns": [record.model_dump(mode="json") for record in failure_patterns],
             "success_patterns": [record.model_dump(mode="json") for record in success_patterns],
-            "evolution_outcomes": evolution_outcome_payloads,
             "data_quality_map": {
                 "artifact_link_coverage": artifact_quality,
                 "retrieval_sources": research_context,
@@ -384,7 +349,6 @@ class KnowledgeAgent(BaseAgent):
         }
         if owner_plan is not None:
             knowledge_report["owner_plan"] = deepcopy(owner_plan)
-        full_evidence_packs = [pack.model_dump(mode="json") for pack in evidence_packs]
         artifact_paths = store.write_run_artifacts(
             state.run_id,
             {
@@ -394,26 +358,18 @@ class KnowledgeAgent(BaseAgent):
                 "agent_performance_records": [record.model_dump(mode="json") for record in performance_records],
                 "failure_patterns": [record.model_dump(mode="json") for record in failure_patterns],
                 "success_patterns": [record.model_dump(mode="json") for record in success_patterns],
-                "evolution_evidence_packs": full_evidence_packs,
-                "evolution_outcomes": evolution_outcome_payloads,
             },
         )
         store.append_experiment_record(experiment_record)
         store.append_agent_performance_records(performance_records)
         store.append_failure_patterns(failure_patterns)
         store.append_success_patterns(success_patterns)
-        store.append_evolution_evidence_packs(evidence_packs)
-        for outcome in evolution_outcomes:
-            store.append_evolution_outcome(outcome)
 
-        compact_evidence_packs = [_compact_evidence_pack(pack) for pack in full_evidence_packs]
-        compact_evolution_proposal = dict(evolution_proposal)
-        compact_evolution_proposal["evidence_packs"] = compact_evidence_packs
-        compact_knowledge_report = _compact_knowledge_report(knowledge_report, compact_evolution_proposal)
+        compact_knowledge_report = _compact_knowledge_report(knowledge_report)
 
         return AgentResult(
             success=decision["status"] == "accepted",
-            summary=("Knowledge memory, Markdown context and improvement evidence update complete"
+            summary=("Knowledge memory, Markdown context and experiment evidence update complete"
                      if decision["status"] == "accepted" else "Knowledge decision failed; raw evidence and memory retained"),
             data={
                 "knowledge": {
@@ -429,13 +385,10 @@ class KnowledgeAgent(BaseAgent):
                     "failure_tags": memory_record.failure_tags,
                     "knowledge_context": knowledge_context,
                     "knowledge_report": compact_knowledge_report,
-                    "evolution_proposal": compact_evolution_proposal,
                     "artifact_paths": artifact_paths,
                     "agent_performance_count": len(performance_records),
                     "failure_pattern_count": len(failure_patterns),
                     "success_pattern_count": len(success_patterns),
-                    "evolution_pack_count": len(evidence_packs),
-                    "evolution_outcome_count": len(evolution_outcomes),
                     "graph_backend_status": graph_backend_status,
                     "graph_event_status": graph_event_status,
                     "guardian_incident_evidence": guardian_incident_evidence,
@@ -443,7 +396,6 @@ class KnowledgeAgent(BaseAgent):
                     **({"owner_plan": deepcopy(owner_plan)} if owner_plan is not None else {}),
                 },
                 "knowledge_context": knowledge_context,
-                "evolution_proposal": compact_evolution_proposal,
             },
         )
 
@@ -700,19 +652,8 @@ def _deterministic_memory_summary(state: OrchestratorState, retrieval: dict[str,
     return (
         f"Deterministic Knowledge summary for {state.experiment_id}: "
         f"objective_score={score}, uncertainty={uncertainty}, retrieval_coverage={coverage}. "
-        "Preserve provenance, quality flags, and improvement evidence before BO/Guardian handoff."
+        "Preserve provenance, quality flags, and experiment evidence before BO/Guardian handoff."
     )[:500]
-
-
-def _compact_evidence_pack(pack: dict[str, Any]) -> dict[str, Any]:
-    """Return a GUI/controller-safe evidence pack without large artifact fan-out."""
-    compact = dict(pack)
-    supporting = dict(compact.get("supporting_records") or {}) if isinstance(compact.get("supporting_records"), dict) else {}
-    artifact_refs = supporting.get("artifact_refs") if isinstance(supporting.get("artifact_refs"), list) else []
-    supporting["artifact_ref_count"] = len(artifact_refs)
-    supporting["artifact_refs"] = artifact_refs[:3]
-    compact["supporting_records"] = supporting
-    return compact
 
 
 def _compact_record_artifacts(record: Any) -> Any:
@@ -738,7 +679,7 @@ def _compact_record_artifacts(record: Any) -> Any:
     return compact
 
 
-def _compact_knowledge_report(report: dict[str, Any], compact_evolution_proposal: dict[str, Any]) -> dict[str, Any]:
+def _compact_knowledge_report(report: dict[str, Any]) -> dict[str, Any]:
     """Return report payload suitable for Live GUI while full JSON remains in run artifacts."""
     compact = dict(report)
     compact["agent_performance_records"] = [_compact_record_artifacts(item) for item in list(compact.get("agent_performance_records", []))[:12]]

@@ -15,6 +15,44 @@ from utils.manipulation_profile import normalize_manipulation_agent_profile
 pytestmark = pytest.mark.usefixtures("handoff_no_external")
 
 
+@pytest.mark.asyncio
+async def test_test_preset_does_not_inherit_planning_only_goal(monkeypatch):
+    controller = load_runtime()
+    captured = {}
+    def start(**kwargs):
+        captured.update(kwargs)
+        return True
+    monkeypatch.setattr(controller._test_scenario, "start", start)
+    await controller._run_test_mode_planning(
+        goal="실제 장비 실행 전에 라이브 모드 시편 계획을 설계하고 검증하는 것",
+        constraints={}, operator_message="테스트 모드")
+    assert "SEA, J/g" in captured["goal"]
+    assert captured["constraints"]["objective_type"] == "maximize_energy_absorption_per_mass"
+    assert captured["constraints"]["wall_thickness_bounds_mm"] == [0.6,1.2]
+    assert captured["constraints"]["cell_size_bounds_mm"] == [5.0,10.0]
+    assert captured["constraints"]["fdm_min_wall_thickness_mm"] == 0.4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("automatic", [True, False])
+async def test_goal_drift_guard_does_not_overwrite_real_user_scope(monkeypatch, automatic):
+    from app.planning_dialogue import dialogue_for
+    controller = load_runtime()
+    controller._bind_planning_session(None)
+    controller._test_scenario.goal = "Maximize SEA (J/g)"
+    monkeypatch.setattr(controller._test_scenario, "is_submitting", lambda: automatic)
+    message = "Plan only, do not run equipment"
+    async def generate(**kwargs):
+        return SimpleNamespace(text=json.dumps({"action":"collect", "answer":"What material?",
+            "language":"en", "updates":[{"field":"goal", "value":message, "source_quote":message}]}),
+            model="fixture", raw={}), "ok"
+    monkeypatch.setattr(controller, "_complete_live_planning_prompt", generate)
+    dialogue = dialogue_for(controller)
+    result = await dialogue.turn(message, intent="change_setup")
+    assert result["ok"] is (not automatic)
+    assert dialogue.values().get("goal") == (None if automatic else message)
+
+
 @pytest.mark.parametrize("path", ["physical_print", "installed_printer"])
 def test_physical_test_missing_policy_is_blocked_before_tool_call(monkeypatch, path):
     controller = load_runtime()
@@ -89,15 +127,16 @@ def scenario_controller(monkeypatch):
             return SimpleNamespace(text="어떤 실험 패키지를 사용할 수 있나요?", model="fixture", raw={}), "ok"
         if packet.get("operation") == "test_scenario_reply":
             purpose = packet["pending_request"].get("purpose")
-            text = {"begin_planning": "좋아요", "provide_inputs": "에너지 흡수 개선을 목표로 PLA gyroid 시편 30 mm 큐브로 해주세요", "run_review": "네, 시작해 주세요"}[purpose]
+            text = {"begin_planning": "좋아요", "provide_inputs": "SEA (J/g) 최대화를 목표로 PLA gyroid 시편 30 mm 큐브, 셀 5–10 mm 벽 두께 0.8–1.6 mm로 해주세요", "run_review": "네, 시작해 주세요"}[purpose]
             return SimpleNamespace(text=json.dumps({"action": "reply", "fields": [], "message": text}), model="fixture", raw={}), "ok"
         if packet.get("operation") == "research_conversation":
             purpose = (packet.get("pending") or {}).get("purpose")
             updates = []
             if purpose == "provide_inputs" or "30 mm" in packet["message"]:
                 updates = [{"field": k, "value": v, "source_quote": q} for k,v,q in [
-                    ("goal", "에너지 흡수 개선", "에너지 흡수 개선"), ("material", "PLA", "PLA"),
-                    ("geometry_type", "gyroid", "gyroid"), ("specimen_size_mm", [30,30,30], "30 mm")]]
+                    ("goal", "SEA (J/g) 최대화", "SEA (J/g) 최대화"), ("material", "PLA", "PLA"),
+                    ("geometry_type", "gyroid", "gyroid"), ("specimen_size_mm", [30,30,30], "30 mm"),
+                    ("cell_size_bounds_mm", [5.,10.], "5–10 mm"), ("wall_thickness_bounds_mm", [.8,1.6], "0.8–1.6 mm")]]
             action = {None: "review" if updates else "invite", "begin_planning": "collect", "provide_inputs": "review", "run_review": "execute"}[purpose]
             return SimpleNamespace(text=json.dumps({"action": action, "updates": updates, "language": "ko", "answer": {
                 "invite": "등록된 실험을 준비해 볼까요?", "collect": "목표, 재료와 크기는 어떻게 할까요?", "review": "정한 조건으로 시작할까요?", "execute": "시작하겠습니다."}[action]}), model="fixture", raw={}), "ok"
@@ -113,6 +152,7 @@ async def test_generated_scenario_reenters_chat_admission(scenario_controller, m
     controller = scenario_controller
     admitted = []
     async def handoff(*, goal, constraints):
+        assert "SEA" in goal
         admitted.append(deepcopy(constraints))
         return {"ok": True}
     monkeypatch.setattr(controller, "_handoff_planning_to_design", handoff)
@@ -147,7 +187,7 @@ async def test_explicit_experiment_start_resolves_physical_intent(scenario_contr
         specs.append(c._build_planning_spec(base_spec={}, constraints=constraints))
         return {"ok": True}
     monkeypatch.setattr(c, "_handoff_planning_to_design", handoff)
-    result = await c.planning_message(message="에너지 흡수 개선을 목표로 PLA gyroid 시편 30 mm 큐브로 해주세요")
+    result = await c.planning_message(message="SEA (J/g) 최대화를 목표로 PLA gyroid 시편 30 mm 큐브, 셀 5–10 mm 벽 두께 0.8–1.6 mm로 해주세요")
     assert result["ok"], result
     result = await c.planning_message(message="네, 시작해 주세요")
     assert result["ok"], result
@@ -267,7 +307,7 @@ async def test_normal_experiment_does_not_inherit_previous_auto_test_policy(scen
         admitted.append(kwargs["constraints"])
         return {"ok": True}
     monkeypatch.setattr(c, "_handoff_planning_to_design", handoff)
-    await c.planning_message(message="에너지 흡수 개선을 목표로 PLA gyroid 시편 30 mm 큐브로 해주세요")
+    await c.planning_message(message="SEA (J/g) 최대화를 목표로 PLA gyroid 시편 30 mm 큐브, 셀 5–10 mm 벽 두께 0.8–1.6 mm로 해주세요")
     await c.planning_message(message="네, 시작해 주세요")
     assert len(admitted) == 1
     assert not admitted[0].get("test_mode_autofill")

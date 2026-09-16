@@ -73,9 +73,9 @@ def clearance_review_fixture(tmp_path):
     execution = {"run_id": "run-test", "loop_id": 0, "specimen_id": "s1",
         "session_id": "clear-test", "task_id": "clear_utm_to_disposal",
         "state": "error", "success": False, "failure_code": "VISION_REVIEW_REQUIRED",
-        "replay_completed_at": 100, "replay_home_verified": True,
+        "replay_completed_at": 100, "replay_execution_verified": True,
         "pending_deadline_at": 120, "pending_timeout_s": 132,
-        "replay_evidence": {"ok": True, "replay_home_verified": True, "follower_closed": True,
+        "replay_evidence": {"ok": True, "replay_execution_verified": True, "follower_closed": True,
             "session_id": "clear-test", "evidence_token": "token", "frames_sent": 542}}
     state.run_metadata["utm_clear_execution"] = execution
     state.run_metadata["utm_verifications"] = {"run_id": "run-test", "loop_id": 0,
@@ -174,7 +174,7 @@ def test_clearance_retry_refuses_unproven_completion_or_changed_scope(tmp_path, 
     state, _ = clearance_review_fixture(tmp_path)
     clear = state.run_metadata["utm_clear_execution"]
     if invalid == "identity": clear["specimen_id"] = "other"
-    elif invalid == "home": clear["replay_home_verified"] = False
+    elif invalid == "home": clear["replay_execution_verified"] = False
     elif invalid == "open_follower": clear["replay_evidence"]["follower_closed"] = False
     elif invalid == "other_error": clear["failure_code"] = "UTM_CLEAR_REPLAY_FAILED_OR_STOPPED"
     elif invalid == "stop": state.safe_stop_requested = True

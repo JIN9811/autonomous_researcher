@@ -104,6 +104,11 @@ test('Live delivery projection reads current runtime metadata rather than chat t
  const projected=context.liveKnowledgeDeliveryReports();
  const model=Live.deliverySummary(projected,[{id:'design',label:'Design Agent',enabled:true,kind:'agent'}],'design',{run_id:'run-current',loop_id:'4',attempt_id:'attempt-2'});
  assert.equal(model.selected.status,'Retrieved'); assert.equal(model.selected.receipt_id,'delivery-design');
+ const receipt=context.liveLastSession.state.run_metadata.design_agent_payload.decisions[0];
+ context.liveLastSession.state.run_metadata={knowledge_delivery_receipts:[receipt]};
+ const compactModel=Live.deliverySummary(context.liveKnowledgeDeliveryReports(),[{id:'design',label:'Design Agent'}],'design',{run_id:'run-current',loop_id:'4',attempt_id:'attempt-2'});
+ assert.equal(compactModel.selected.citation_ids.length,1);
+ assert.equal(compactModel.selected.receipt_id,'delivery-design');
 });
 
 test('Live delivery availability distinguishes an idle unrequested consumer from a missing projection',()=>{

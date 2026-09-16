@@ -42,7 +42,7 @@ class BOAgent(BaseAgent):
     def setup_descriptor(self) -> dict[str, Any]:
         return {"write_enabled": True, "fields": [
             {"id": "bo.parameter_space", "field": "parameter_space", "type": "object",
-             "units": {"cell_size_mm": "mm", "relative_density": "fraction"}},
+             "units": {"cell_size_mm": "mm", "wall_thickness_mm": "mm"}},
             {"id": "bo.acquisition", "field": "acquisition", "type": "string",
              "enum": list(self.SUPPORTED_ACQUISITIONS)}]}
 
@@ -114,9 +114,9 @@ class BOAgent(BaseAgent):
     )
     DEFAULT_PARAMETER_SPACE: dict[str, Any] = {
         "geometry_type": ["gyroid"],
+        "gyroid_parameterization": ["wall_cell_v1"],
         "cell_size_mm": [5.0, 10.0],
-        "relative_density": [0.20, 0.48],
-        "wall_thickness_mm": [1.2],
+        "wall_thickness_mm": [0.6, 1.2],
         "tpms_thickness": [0.0],
         "orientation_deg": [0.0],
         "anisotropy_ratio": [1.0],
@@ -127,6 +127,7 @@ class BOAgent(BaseAgent):
     }
     SHAPE_PARAMETER_KEYS = (
         "geometry_type",
+        "gyroid_parameterization",
         "relative_density",
         "wall_thickness_mm",
         "cell_size_mm",
@@ -251,7 +252,7 @@ class BOAgent(BaseAgent):
     def _two_variable_parameter_space(cls, raw_space: dict[str, Any]) -> dict[str, Any]:
         """Canonicalize the first Gyroid BO problem to two active dimensions."""
         canonical = dict(cls.DEFAULT_PARAMETER_SPACE)
-        for key in set(cls.DEFAULT_PARAMETER_SPACE) - {"cell_size_mm", "relative_density"}:
+        for key in set(cls.DEFAULT_PARAMETER_SPACE) - {"cell_size_mm", "wall_thickness_mm"}:
             if key not in raw_space:
                 continue
             value = raw_space[key]
@@ -264,10 +265,9 @@ class BOAgent(BaseAgent):
             "cell_size_mm",
             raw_space.get("cell_size_mm", cls.DEFAULT_PARAMETER_SPACE["cell_size_mm"]),
         )
-        canonical["relative_density"] = cls._active_numeric_domain(
-            "relative_density",
-            raw_space.get("relative_density", cls.DEFAULT_PARAMETER_SPACE["relative_density"]),
-            safe_bounds=(0.20, 0.48),
+        canonical["wall_thickness_mm"] = cls._active_numeric_domain(
+            "wall_thickness_mm",
+            raw_space.get("wall_thickness_mm", cls.DEFAULT_PARAMETER_SPACE["wall_thickness_mm"]),
         )
         return canonical
 
@@ -290,8 +290,10 @@ class BOAgent(BaseAgent):
             raise ValueError(f"{name} must contain numeric values") from exc
         if any(not math.isfinite(value) for value in numbers):
             raise ValueError(f"{name} values must be finite")
-        if name == "cell_size_mm" and any(value <= 0.0 for value in numbers):
+        if name in {"cell_size_mm", "wall_thickness_mm"} and any(value <= 0.0 for value in numbers):
             raise ValueError("cell_size_mm values must be positive")
+        if name == "relative_density" and any(not 0 < value < 1 for value in numbers):
+            raise ValueError("relative_density must be between zero and one")
         if len(numbers) == 1:
             value = numbers[0]
             if safe_bounds is not None and not safe_bounds[0] <= value <= safe_bounds[1]:
@@ -322,7 +324,7 @@ class BOAgent(BaseAgent):
         resolved = dict(parameter_space)
         current = state.current_experiment_spec if isinstance(state.current_experiment_spec, dict) else {}
         nested = current.get("constraints") if isinstance(current.get("constraints"), dict) else {}
-        fixed_keys = set(cls.DEFAULT_PARAMETER_SPACE) - {"cell_size_mm", "relative_density"}
+        fixed_keys = set(cls.DEFAULT_PARAMETER_SPACE) - {"cell_size_mm", "wall_thickness_mm"}
         for key in fixed_keys:
             for source in (current, nested):
                 if key in source and source[key] not in (None, "", []):
@@ -397,6 +399,8 @@ class BOAgent(BaseAgent):
                 continue
             parameters = prior.get("parameters")
             if not isinstance(parameters, dict):
+                continue
+            if parameters.get("gyroid_parameterization") != "wall_cell_v1":
                 continue
             try:
                 observed.add(space.signature(cls._project_parameters_to_space(parameters, space)))
@@ -473,6 +477,9 @@ class BOAgent(BaseAgent):
         normalized: list[dict[str, Any]] = []
         for prior in priors:
             parameters = prior.get("parameters") if isinstance(prior.get("parameters"), dict) else {}
+            if ("wall_thickness_mm" in {d.name for d in space.active_dimensions}
+                    and parameters.get("gyroid_parameterization") != "wall_cell_v1"):
+                continue  # Historical density-driven nominal walls are not measured coordinates.
             try:
                 projected = cls._project_parameters_to_space(parameters, space)
             except (KeyError, TypeError, ValueError):
@@ -602,18 +609,19 @@ class BOAgent(BaseAgent):
             value = current_spec.get(key, constraints.get(key))
             if value is not None:
                 locked[key] = [value]
-        density_space = locked.get("relative_density")
+        density_space = locked.get("wall_thickness_mm")
         if isinstance(density_space, list) and len(density_space) == 2 and all(isinstance(item, (int, float)) for item in density_space):
-            locked["relative_density"] = [max(0.20, float(density_space[0])), max(0.20, float(density_space[1]))]
+            locked["wall_thickness_mm"] = BOAgent._active_numeric_domain("wall_thickness_mm", density_space)
         elif isinstance(density_space, list):
-            filtered = [item for item in density_space if isinstance(item, (int, float)) and float(item) >= 0.20]
-            locked["relative_density"] = filtered or [0.20]
+            locked["wall_thickness_mm"] = BOAgent._active_numeric_domain("wall_thickness_mm", density_space)
         elif density_space is not None:
             try:
-                locked["relative_density"] = max(0.20, float(density_space))
+                locked["wall_thickness_mm"] = BOAgent._active_numeric_domain("wall_thickness_mm", density_space)[0]
             except (TypeError, ValueError):
-                locked["relative_density"] = [0.20, 0.48]
+                raise ValueError("Invalid operator wall_thickness_mm domain")
         if cell_size_mm is not None:
+            if not math.isfinite(float(cell_size_mm)) or float(cell_size_mm) <= 0:
+                raise ValueError("cell_size_mm must be positive and finite")
             locked["cell_size_mm"] = [float(cell_size_mm)]
         return locked
 
@@ -622,18 +630,15 @@ class BOAgent(BaseAgent):
         """Sanitize BO recommendations before they become next-cycle constraints."""
         sanitized = dict(parameters)
         geometry = str(sanitized.get("geometry_type") or sanitized.get("preferred_geometry_type") or "gyroid").strip().lower()
-        if geometry == "gyroid":
-            try:
-                density = float(sanitized.get("relative_density", 0.32))
-            except (TypeError, ValueError):
-                density = 0.32
-            sanitized["relative_density"] = max(0.20, density)
         if cell_size_mm is not None:
             sanitized["cell_size_mm"] = float(cell_size_mm)
+        sanitized.pop("relative_density", None)
         return sanitized
 
     @staticmethod
     def _objective_from_state(state: OrchestratorState, payload: dict[str, Any]) -> dict[str, Any]:
+        from utils.research_objective import SEA_METRIC, uses_sea
+        sea = uses_sea(state.current_experiment_spec, state.active_goal)
         raw = payload.get("objective") if isinstance(payload.get("objective"), dict) else {}
         current = state.current_experiment_objective if isinstance(state.current_experiment_objective, dict) else {}
         constraints = state.current_experiment_spec.get("constraints") if isinstance(state.current_experiment_spec, dict) else {}
@@ -643,9 +648,9 @@ class BOAgent(BaseAgent):
             "objective_id": raw.get("objective_id") or current.get("objective_id") or "bo-specimen-objective",
             "objective_version": raw.get("objective_version") or raw.get("version") or current.get("objective_version") or current.get("version"),
             "objective_hash": raw.get("objective_hash") or current.get("objective_hash") or "",
-            "name": raw.get("name") or current.get("name") or "50% compression energy density",
+            "name": raw.get("name") or current.get("name") or ("Specific energy absorption" if sea else "50% compression energy density"),
             "description": raw.get("description") or current.get("description") or state.active_goal,
-            "metric_name": raw.get("metric_name") or current.get("metric_name") or "energy_density_50pct_MJ_per_m3",
+            "metric_name": raw.get("metric_name") or current.get("metric_name") or (SEA_METRIC if sea else "energy_density_50pct_MJ_per_m3"),
             "direction": raw.get("direction") or current.get("direction") or "maximize",
             "constraints": {**constraints, **(raw.get("constraints") if isinstance(raw.get("constraints"), dict) else {})},
             "tags": raw.get("tags") if isinstance(raw.get("tags"), list) else ["bo", "specimen", "tpms"],
@@ -740,7 +745,7 @@ class BOAgent(BaseAgent):
             return dict(candidate["parameters"])
         metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
         out: dict[str, Any] = {}
-        for key in ("geometry_type", "relative_density", "wall_thickness_mm", "cell_size_mm"):
+        for key in ("geometry_type", "gyroid_parameterization", "relative_density", "wall_thickness_mm", "cell_size_mm"):
             if key in metrics:
                 out[key] = metrics[key]
         return out
@@ -792,7 +797,7 @@ class BOAgent(BaseAgent):
             score = declared_objective[0] if declared_objective else None
             ok_for_bo = item.get("ok_for_bo")
             if ok_for_bo is None:
-                ok_for_bo = item.get("ok", True) and str(item.get("status") or "ready") not in {"blocked", "failed"}
+                ok_for_bo = False
             trust_score = item.get("trust_score") if isinstance(item.get("trust_score"), dict) else {}
             trust_gate = str(trust_score.get("gate") or item.get("trust_gate") or "").strip()
             if trust_gate in {"block", "calibrate_only"}:
@@ -976,15 +981,13 @@ class BOAgent(BaseAgent):
             wall = cls._safe_float(params.get("wall_thickness_mm"), 0.0)
             condition = ""
             if density > 0:
-                condition = f"relative_density >= {max(0.20, density - 0.02):.3f}"
+                condition = f"relative_density >= {max(0.0, density - 0.02):.3f}"
             if wall > 0:
                 condition = f"{condition} and wall_thickness_mm <= {wall + 0.05:.3f}" if condition else f"wall_thickness_mm <= {wall + 0.05:.3f}"
             key = condition or "failed_prior_region"
             entry = risk_patterns.setdefault(key, {"condition": key, "failure": tags[0], "count": 0, "tags": []})
             entry["count"] += 1
             entry["tags"] = sorted(set(entry.get("tags", []) + tags))
-        if risk_patterns:
-            forbidden.append({"condition": "relative_density < 0.20", "reason": "FDM continuous-shell lower bound"})
         return {"forbidden_regions": forbidden, "risk_patterns": list(risk_patterns.values())}
 
     @classmethod
@@ -1031,7 +1034,7 @@ class BOAgent(BaseAgent):
                 "narrow": {},
                 "expand": {},
                 "lock": {},
-                "forbid": [{"condition": "relative_density < 0.20", "reason": "FDM continuous-shell lower bound"}],
+                "forbid": [],
             },
             "preference_regions": [
                 {
@@ -1241,8 +1244,8 @@ class BOAgent(BaseAgent):
         reasons: list[str] = []
         penalty = 0.0
         valid = True
-        if str(parameters.get("geometry_type", "gyroid")).lower() == "gyroid" and cls._safe_float(parameters.get("relative_density"), 0.32) < 0.20:
-            reasons.append("relative_density below FDM continuous-shell lower bound")
+        if str(parameters.get("geometry_type", "gyroid")).lower() == "gyroid" and not 0 < cls._safe_float(parameters.get("relative_density"), 0.32) < 1:
+            reasons.append("relative_density outside physical bounds (0, 1)")
             penalty += 1.0
             valid = False
         if bool(parameters.get("top_cap_enabled", False)):
@@ -1490,6 +1493,9 @@ class BOAgent(BaseAgent):
         settings: dict[str, Any] | None = None,
     ) -> AgentResult:
         """Run BO Agent with GUI/API-supplied settings."""
+        contract = state.run_metadata.get("orchestrator_design_contract") or {}
+        if contract.get("parameter_space") and contract.get("manufacturing_constraints"):
+            settings = {**(settings or {}), "parameter_space": deepcopy(contract["parameter_space"])}
         normalized, warnings = self.normalize_settings(settings)
         normalized["parameter_space"] = self._fixed_surface_space_for_state(
             normalized["parameter_space"],

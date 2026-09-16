@@ -273,7 +273,7 @@ async def test_design_agent_keeps_preferred_geometry_when_bo_candidate_is_invali
         run_metadata={
             "bo_recommended_constraints": {
                 "geometry_type": "gyroid",
-                "relative_density": 0.18,
+                "relative_density": 0.10,
                 "cell_size_mm": 5.0,
             }
         },
@@ -318,9 +318,11 @@ async def test_design_agent_returns_structured_design_report_and_handoff_packet(
     assert report["candidate_evaluation"]["selected_candidate_fingerprint"] == spec["candidate_fingerprint"]
     assert report["hypothesis"]["statement"]
     assert report["objective"]["primary_metric"] == "energy_density_50pct_MJ_per_m3"
-    assert report["candidate_generation"]["candidate_count"] == 12
+    assert report["candidate_generation"]["candidate_count"] == 1
     assert report["candidate_generation"]["valid_count"] >= 1
-    assert len(report["candidate_generation"]["candidate_ledger"]) >= 12
+    assert len(report["candidate_generation"]["candidate_ledger"]) == 1
+    assert set(spec["design_space"]) == {"relative_density", "cell_size_mm"}
+    assert screen_report["parameter_sweep"]["y_axis"] == "cell_size_mm"
     expected_sections = {
         "design_brief",
         "candidate_board",
@@ -337,7 +339,7 @@ async def test_design_agent_returns_structured_design_report_and_handoff_packet(
     assert screen_report["candidate_ranking"]["rows"][0]["candidate_id"] == spec["candidate_id"]
     assert screen_report["parameter_sweep"]["heatmap_cells"]
     heatmap_coordinates = [
-        (item["x_relative_density"], item["y_wall_thickness_mm"])
+        (item["x_relative_density"], item["y_cell_size_mm"])
         for item in screen_report["parameter_sweep"]["heatmap_cells"]
     ]
     assert len(heatmap_coordinates) == len(set(heatmap_coordinates))
@@ -368,8 +370,9 @@ async def test_design_agent_returns_structured_design_report_and_handoff_packet(
     assert data["decisions"] == report["decision_register"]
 
 
-def test_design_parameter_range_uses_full_numeric_design_space() -> None:
-    row = DesignAgent._parameter_range("orientation_deg", {"orientation_deg": 90})
+def test_design_parameter_range_uses_explicit_numeric_design_space() -> None:
+    row = DesignAgent._parameter_range("orientation_deg", {"orientation_deg": 90,
+        "design_space": {"orientation_deg": [0, 15, 30, 45, 60, 90]}})
 
     assert row["min"] == 0
     assert row["max"] == 90
@@ -383,14 +386,14 @@ def test_design_heatmap_cells_group_duplicate_coordinates_with_selected_represen
             {
                 "candidate_id": "cand-2-05",
                 "x_relative_density": 0.34,
-                "y_wall_thickness_mm": 1.6,
+                "y_cell_size_mm": 1.6,
                 "value": 0.8633,
                 "status": "valid",
             },
             {
                 "candidate_id": "cand-2-12",
                 "x_relative_density": 0.34,
-                "y_wall_thickness_mm": 1.6,
+                "y_cell_size_mm": 1.6,
                 "value": 0.8884,
                 "status": "selected",
             },
@@ -475,6 +478,7 @@ async def test_design_agent_applies_both_bo_design_variables_without_changing_fi
         stage=Stage.DESIGN,
         active_goal="maximize measured SEA",
         run_metadata={
+            "bo_agent": {"parameter_space": {"cell_size_mm": [5, 10], "relative_density": [0.2, 0.48]}},
             "bo_recommended_constraints": {
                 "geometry_type": "gyroid",
                 "cell_size_mm": 7.5,

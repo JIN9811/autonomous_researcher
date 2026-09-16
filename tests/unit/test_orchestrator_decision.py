@@ -96,6 +96,34 @@ async def test_cancellation_propagates():
 
 
 @pytest.mark.asyncio
+async def test_invalid_handoff_target_is_repaired_without_bypassing_admission():
+    effects = []
+    async def handoff(args):
+        effects.append(args)
+        return {}
+    model = Model(choice(arguments={'candidate': 'cand-1-01'}), choice())
+    result = await decision.decide_orchestration(state(), model, context=context(),
+        handlers={'prepare_handoff': handoff})
+    assert result['status'] == 'prepared'
+    assert effects == [{'candidate': 'design'}]
+    assert 'not admitted' in model.prompts[1][0]['trace'][0]['error']
+
+
+@pytest.mark.asyncio
+async def test_invalid_handoff_target_retry_is_bounded_and_never_executes():
+    effects = []
+    async def handoff(args):
+        effects.append(args)
+        return {}
+    model = Model(*(choice(arguments={'candidate': 'equipment'}) for _ in range(3)))
+    result = await decision.decide_orchestration(state(), model, context=context(),
+        handlers={'prepare_handoff': handoff})
+    assert result['status'] == 'failed'
+    assert len(model.prompts) == 3
+    assert effects == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('response,pending,want', [
     ({'intent': 'question', 'reason': 'Asks about TEST mode', 'pending_id': None}, None, 'question'),
     ({'intent': 'confirm_pending', 'reason': 'yes', 'pending_id': 'fake'}, 'real', 'unclear'),

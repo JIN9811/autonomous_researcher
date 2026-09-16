@@ -4,6 +4,7 @@ import os
 import json
 import zipfile
 from types import SimpleNamespace
+from functools import partial
 
 import pytest
 import trimesh
@@ -61,6 +62,8 @@ def runner_fixture(tmp_path, monkeypatch, *, output_center=(110, 145)):
     trimesh.creation.box(extents=[30, 30, 10]).export(source)
     runner = BambuStudioSlicerRunner(BambuSlicerConfig(enabled=True, executable_path="/bin/true",
         output_dir=str(tmp_path / "sliced"), auto_no_skirt_profile=False), repo_root=tmp_path)
+    # These fixtures isolate placement; orientation is covered separately.
+    runner.slice = partial(runner.slice, auto_orient=False)
     calls = []
 
     def slicer(command, **kwargs):

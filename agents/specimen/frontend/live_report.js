@@ -49,6 +49,7 @@
       const outcome = fabricationReport.fabrication_outcome || {};
       const feedback = fabricationReport.feedback_to_design || {};
       const gates = Array.isArray(fabricationReport.quality_gates) ? fabricationReport.quality_gates : [];
+      const wall = gates.find(g => g.gate === "manufacturability")?.evidence?.wall_thickness_verification || {};
       const gateItems = gates.map((gate) => `${gate.gate || "gate"} · ${gate.status || "unknown"}${gate.repair ? ` · repair=${renderRuntimeValue(gate.repair)}` : ""}`);
       const readinessItems = readinessLevels.map((item) => `${item.level_id || item.id || "readiness"} · ${item.status || "unknown"}${item.reason || item.summary ? ` · ${item.reason || item.summary}` : ""}`);
       const operatorActionItems = operatorActions.map((item) => `${item.action_id || item.id || "operator_action"} · ${item.status || "required"}${item.label || item.summary ? ` · ${item.label || item.summary}` : ""}`);
@@ -93,6 +94,12 @@
           ])}
           <h5>Quality Gates</h5>
           ${renderReportList(gateItems, "No manufacturing quality gates recorded.")}
+          ${runtimeRows([
+            ["Actual mesh wall check", wall.status || "Not measured"],
+            ["Required minimum (mm)", wall.required_minimum_mm ?? "-"],
+            ["Sampled minimum (mm)", wall.minimum_sampled_mm ?? "-"],
+            ["Samples", wall.sample_count ?? "-"],
+          ])}
           <h5>Printer Runtime</h5>
           ${runtimeRows([
             ["provider", runtime.provider || thread.printer_provider || selectedPrinter.provider || "-"],

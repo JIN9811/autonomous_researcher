@@ -840,7 +840,7 @@ async def test_specimen_agent_disables_generated_caps_after_first_test_loop(tmp_
 
 
 @pytest.mark.asyncio
-async def test_specimen_agent_clamps_low_gyroid_density_before_manufacturability(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_specimen_agent_preserves_low_gyroid_density_before_manufacturability(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     agent = SpecimenMakingAgent()
     spec = _valid_spec()
     spec["relative_density"] = 0.18
@@ -865,7 +865,7 @@ async def test_specimen_agent_clamps_low_gyroid_density_before_manufacturability
     result = await agent.run(state, ctx)
 
     assert result.success is True
-    assert state.current_experiment_spec["relative_density"] == 0.20
+    assert state.current_experiment_spec["relative_density"] == 0.18
     assert result.data["specimen_result"]["manufacturability_status"] == "pass"
 
 

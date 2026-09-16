@@ -300,7 +300,7 @@ Printer-specific integration rule:
 - For Bambu X2D live use, `printer.prepare` must expose MQTT/FTPS/video evidence and keep upload/start blocked until the selected Bambu gates pass. For Prusa MK4S live use, it must expose storage readiness and map unavailable USB storage to `PRINTER_STORAGE_UNAVAILABLE` before upload/start.
 - `layer_height_mm` and `nozzle_diameter_mm` must be copied as numeric top-level `experiment_spec` fields and must override any value inferred from `slicer_profile_hint` or `printer_profile`.
 - Canonical quality profile hints use decimal notation, for example `0.2mm_quality`; parsers may accept legacy `0p2mm_quality` but must not display it as `2.0 mm`.
-- Runtime cards should show final `cell_size_mm`, `relative_density`, and `expected_mass_g` from the selected candidate, not from an intermediate LLM suggestion.
+- Runtime cards should show final `cell_size_mm`, `wall_thickness_mm`, derived `relative_density`, and `expected_mass_g` from the selected candidate, not from an intermediate LLM suggestion.
 
 Equipment-specific integration rule:
 

@@ -4,7 +4,7 @@ subtype: system
 status: active
 authority: descriptive
 audience: [researcher, reviewer, developer, operator, maintainer]
-scope: [agents, knowledge, ontology, markdown_memory, scoped_rag, improvement_evidence, source_curation]
+scope: [agents, knowledge, ontology, markdown_memory, scoped_rag, experiment_evidence, source_curation]
 summary: Ontology-guided Markdown knowledge, source-backed LLM curation, scoped retrieval and preserved research-memory contracts.
 source_of_truth:
   - agents/core/knowledge/agent.py
@@ -93,8 +93,8 @@ remain Analysis-owned; Knowledge does not reconstruct or optimize their values.
 |---|---|
 | Markdown knowledge, ontology-guided classification and scoped retrieval | Core ontology definitions and experimental settings |
 | Source citations, evidence status and append-only note revisions | Original logs, artifacts, metrics and objective evaluations |
-| Typed memory, patterns, performance and Evolution evidence packs | BO candidate generation and device execution |
-| Local decision/tool trace and explicit evidence gaps | Orchestrator stage transitions and Evolution activation |
+| Typed memory, patterns and performance evidence | BO candidate generation and device execution |
+| Local decision/tool trace and explicit evidence gaps | Orchestrator stage transitions and device execution |
 
 The active Knowledge Graph, Neo4j synchronization, Graphify import and relation
 reconciliation paths are retired. Ontology classes and relation definitions are
@@ -157,7 +157,6 @@ deterministic preservation hook and cannot replay an agent.
 | In | Markdown candidates, project chunks and published source notes | Scoped retrieval with independent source scope |
 | Out | `knowledge_context.v1`: summary, scope, selected records, citations, decision | BO and context consumers |
 | Out | `knowledge_report.v1`, typed memory/pattern/performance records | Reports, workspace and local memory |
-| Out | `evolution_proposal.v1` and evidence packs | Existing operator-reviewed Evolution path |
 
 ## Internal Workflow
 
@@ -165,7 +164,7 @@ deterministic preservation hook and cannot replay an agent.
 2. Freeze source identities and caller scope; expose only evidence inspection initially.
 3. Let the LLM inspect, search, read, classify/write, and publish using agent-local tools.
 4. Preserve existing numerical memory, provenance, patterns and performance records.
-5. Build existing BO/Evolution context and append a local ontology-validated audit event.
+5. Build existing BO experiment context and append a local ontology-validated audit event.
 6. Save the decision/report; the original archive wrapper preserves the terminal result.
 
 ![Knowledge: LLM tools operate behind scope and provenance validation with append-only storage](assets/figures/knowledge_02_execution_effect_boundary.svg)
@@ -343,7 +342,7 @@ source curation layers; deterministic terminal-history intake does not invoke it
 | Lifecycle | POST `/api/knowledge/markdown/{record_id}/status` | Status/reason/replacement → immutable receipt |
 | History intake | POST `/api/knowledge/markdown/intake` | Run, limit, cursor → queued job |
 | Intake progress | GET `/api/knowledge/markdown/intake/{job_id}` | Persisted state and per-file results |
-| Preserved | `/api/knowledge/ontology*`, `/activity`, typed memory/context/Evolution APIs | Existing vocabulary and evidence contracts |
+| Preserved | `/api/knowledge/ontology*`, `/activity`, typed memory/context APIs | Existing vocabulary and evidence contracts |
 | Source status/settings | GET `/api/knowledge/sources/status`, POST `/settings` | Watcher progress and saved explicit enablement |
 | Source scan/retry | POST `/api/knowledge/sources/scan`, `/retry` | Discover or schedule unfinished work; no inference in the HTTP request |
 | Source retrieval/detail | POST `/api/knowledge/sources/query`, `/read` | Scoped notes and original source provenance |
@@ -382,8 +381,8 @@ Markdown retrieval remain available.
 - `knowledge_settings` in run metadata accepts scope, independent `source_scope`, corpora,
   `decision_call_timeout_s` (default 300) and `decision_max_steps` (default 8).
   Core experimental settings and bridges are unchanged.
-- Evolution proposals remain recommendations; approval and activation retain
-  their existing owners.
+- Knowledge no longer generates Evolution proposals, evidence packs, or variant outcomes.
+  Legacy records remain available for historical reference under the old-version policy.
 
 ## Artifacts and Verification
 

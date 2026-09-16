@@ -267,45 +267,6 @@ devices:
       YOLO_MODEL_PATH: /home/jin/external_repos/yolo_ros/models/yolov8m.pt
     allow_virtual_bridge_in_test: true
 
-  cae:
-    enabled: true
-    mode: test                    # test | live
-    provider: calculix
-    solver: calculix
-    mesher: gmsh
-    solver_path: /home/jin/.local/bin/atr-ccx
-    mesher_path: /home/jin/.local/bin/atr-gmsh
-    library_path: /home/jin/.local/opt/atr-cae/usr/lib/aarch64-linux-gnu
-    require_solver_in_live: true
-    artifact_dir: artifacts/cae
-    # Historical UTM runs are calibration context only. Content hashes remove
-    # duplicate copies and the parser rejects curves that do not reach 50% strain.
-    reference_utm_globs:
-      - artifacts/equipment/**/utm/live_*.csv
-    reference_specimen_size_mm: [30.0, 30.0, 30.0]
-    reference_target_strain: 0.5
-    default_material:
-      elastic_modulus_mpa: 1800.0
-      poisson_ratio: 0.35
-      yield_strength_mpa: 35.0
-    default_boundary:
-      bottom: frictionless_axial_support
-      top: frictionless_displacement
-    default_loading:
-      load_type: quasistatic_compression
-      loading_control: displacement
-      target_strain: 0.5
-      initial_increment: 0.01
-      minimum_increment: 1.0e-7
-      maximum_increment: 0.02
-      max_increments: 500
-      load_max_n: 500.0
-      load_min_ratio: 0.1
-      cycles: 10
-      frequency_hz: 1.0
-    mesh:
-      default_mesh_size_mm: 2.0
-
   equipment:
     mode: simulator              # simulator | live
     provider: windows_pyautogui

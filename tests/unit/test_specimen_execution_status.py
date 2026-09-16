@@ -9,6 +9,8 @@ def specimen_data():
     return {"specimen_result": {
         "ok": True, "specimen_id": "specimen-1", "printer_path": "installed_printer",
         "print_result": {"status": "started"},
+        "printer_completion_wait": {"run_id": "run-lifecycle", "loop_id": 0, "specimen_id": "specimen-1",
+                                    "status": "complete", "completion_scope": "printer_job_only"},
         "fabrication_report": {"fabrication_outcome": {
             "status": "ready_for_vision", "requires_after_print_confirmation": True,
         }},
@@ -49,6 +51,16 @@ def test_submit_is_running_until_matching_active_cam_verification(lifecycle):
     assert state.agent_status["specimen_agent"].state == "done"
     assert state.agent_status["specimen_agent"].success is True
     assert state.run_metadata["specimen_execution"]["loop_id"] == 0
+
+
+def test_image_without_current_printer_execution_cannot_finish(lifecycle):
+    state, merge = lifecycle
+    data = specimen_data()
+    data["specimen_result"].pop("printer_completion_wait")
+    merge(Stage.SPECIMEN, data)
+    merge(Stage.VISION, vision_data())
+    assert state.agent_status["specimen_agent"].state != "done"
+    assert state.run_metadata["specimen_result"]["autoejection_completion_verified"] is False
 
 
 @pytest.mark.parametrize("key,value", [("run_id", "other"), ("loop_id", "loop-1"), ("loop_id", None), ("specimen_id", "other")])

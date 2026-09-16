@@ -1419,7 +1419,7 @@ def test_graph_runtime_api_exposes_handlers_modules_and_compile() -> None:
     assert manifest_by_id["guardian"]["cards"]
     assert manifest_by_id["design"]["cards"][0]["id"] == "design_decision_descriptor"
     assert manifest_by_id["design"]["report_sections"][0]["id"] == "design_overview"
-    assert manifest_by_id["equipment"]["report_sections"][0]["id"] == "equipment_overview"
+    assert manifest_by_id["equipment"]["report_sections"][0]["id"] == "equipment_execution_report"
     assert manifest_by_id["guardian"]["report_sections"][0]["id"] == "guardian_overview"
     assert manifest_by_id["design"]["chat"]["mode"] == "open_on_demand"
     assert manifest_by_id["equipment"]["chat"]["mode"] == "open_on_demand"

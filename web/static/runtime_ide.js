@@ -7662,7 +7662,6 @@ function artifactStageFromPath(path = "") {
     const workspace = parts[1] || "workspace";
     const workspaceStages = {
       bo: "bo",
-      cae: "analysis",
       printer: "specimen",
       lerobot: "manipulation",
       equipment: "equipment",
@@ -7675,7 +7674,6 @@ function artifactStageFromPath(path = "") {
     const runtimeStages = {
       bo: "bo",
       analysis: "analysis",
-      cae: "analysis",
       printer: "specimen",
       specimen: "specimen",
       lerobot: "manipulation",

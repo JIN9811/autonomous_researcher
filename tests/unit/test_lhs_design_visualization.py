@@ -16,7 +16,7 @@ def _payload() -> dict[str, object]:
         parameter_space={
             "geometry_type": ["gyroid"],
             "cell_size_mm": [5.0, 6.0, 7.5, 10.0],
-            "relative_density": [0.20, 0.48],
+            "wall_thickness_mm": [0.20, 0.48],
         },
         trace={
             "step": 3,
@@ -27,10 +27,10 @@ def _payload() -> dict[str, object]:
                 "completed": 2,
                 "seed": 7,
                 "points": [
-                    {"index": 1, "status": "measured", "parameters": {"cell_size_mm": 10.0, "relative_density": 0.31}},
-                    {"index": 2, "status": "measured", "parameters": {"cell_size_mm": 5.0, "relative_density": 0.35}},
-                    {"index": 3, "status": "next", "parameters": {"cell_size_mm": 6.0, "relative_density": 0.39}},
-                    {"index": 4, "status": "planned", "parameters": {"cell_size_mm": 7.5, "relative_density": 0.29}},
+                    {"index": 1, "status": "measured", "parameters": {"cell_size_mm": 10.0, "wall_thickness_mm": 0.31}},
+                    {"index": 2, "status": "measured", "parameters": {"cell_size_mm": 5.0, "wall_thickness_mm": 0.35}},
+                    {"index": 3, "status": "next", "parameters": {"cell_size_mm": 6.0, "wall_thickness_mm": 0.39}},
+                    {"index": 4, "status": "planned", "parameters": {"cell_size_mm": 7.5, "wall_thickness_mm": 0.29}},
                 ],
             },
         },
@@ -50,9 +50,9 @@ def test_build_lhs_design_visualization_exposes_mixed_space_contract() -> None:
         "values": [5.0, 6.0, 7.5, 10.0],
     }
     assert payload["design_space"]["y"] == {
-        "name": "relative_density",
-        "label": "Relative density",
-        "unit": "1",
+        "name": "wall_thickness_mm",
+        "label": "Wall thickness (mm)",
+        "unit": "mm",
         "kind": "continuous",
         "bounds": [0.2, 0.48],
     }
@@ -66,8 +66,7 @@ def test_build_lhs_design_visualization_exposes_mixed_space_contract() -> None:
 
 def test_validate_lhs_design_visualization_rejects_invalid_points() -> None:
     payload = _payload()
-    payload["initial_design"]["points"][0]["parameters"]["relative_density"] = 0.8
+    payload["initial_design"]["points"][0]["parameters"]["wall_thickness_mm"] = 0.8
 
-    with pytest.raises(ValueError, match="relative_density"):
+    with pytest.raises(ValueError, match="wall_thickness_mm"):
         validate_lhs_design_visualization(payload)
-

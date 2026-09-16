@@ -99,6 +99,48 @@ def _stopped(state):
                ("stop_requested", "safe_stop_requested", "emergency_stop_requested"))
 
 
+def _incoming_evidence(state):
+    """Carry owner evidence with explicit identity checks, never synthesize success."""
+    specimen_id = state.current_experiment_spec.get("specimen_id")
+    rows = {}
+    for key in ("specimen_result", "robot_task_result", "utm_verifications"):
+        record = state.run_metadata.get(key)
+        if not isinstance(record, dict) or not record:
+            continue
+        record = dict(record)
+        if key == "utm_verifications":
+            # Display-only captures are never decision evidence or authority.
+            record.pop("previews", None)
+        if key == "robot_task_result":
+            verified = state.run_metadata.get("utm_verifications") or {}
+            first = verified.get("verification_1") or {}
+            evidence = first.get("evidence") or {}
+            session = record.get("rollout_session_id") or record.get("session_id")
+            if (verified.get("run_id") == state.run_id and verified.get("loop_id") == state.loop_count
+                    and verified.get("specimen_id") == specimen_id and first.get("confirmed") is True
+                    and session and evidence.get("session_id") == session
+                    and evidence.get("rollout_stopped") is True and evidence.get("rollout_stop_status") == "STOPPED"):
+                record["post_place_interlock"] = deepcopy(evidence.get("post_place_interlock") or {})
+                record["execution_evidence"] = deepcopy(evidence.get("rollout_execution") or {})
+                record["verified_stop"] = {"session_id": session, "rollout_stopped": True,
+                                           "rollout_stop_status": "STOPPED", "source": "verification_1"}
+        checks = {"run_id": state.run_id, "specimen_id": specimen_id, "loop_id": state.loop_count}
+        def matches(name, actual, expected):
+            # Manipulation publishes "loop-0"; Vision publishes integer 0.
+            # Both are zero-based. Do not change numbering or accept other loops.
+            if name == "loop_id":
+                return type(actual) in (str, int) and str(actual) in {str(expected), f"loop-{expected}"}
+            return actual == expected
+        mismatches = [name for name, expected in checks.items()
+                      if record.get(name) is not None and expected is not None and not matches(name, record[name], expected)]
+        missing = [name for name, expected in checks.items() if expected is None or record.get(name) is None]
+        rows[key] = {"identity_status": "mismatch" if mismatches else "incomplete" if missing else "matched",
+                     "mismatched_fields": mismatches, "missing_identity_fields": missing,
+                     "evidence": _bounded_evidence(record)}
+    return {"run_id": state.run_id, "loop_id": state.loop_count,
+            "specimen_id": specimen_id, "records": rows}
+
+
 def _scope(state):
     return deepcopy([state.run_id, state.loop_count, state.experiment_id, state.stage.value,
         state.mode.value, state.active_goal, state.current_experiment_spec,
@@ -106,13 +148,16 @@ def _scope(state):
         {key: value for key, value in state.run_metadata.items()
          if key.startswith(("operator_", "approval", "equipment_decision_settings", "execution_policy"))
          or key in {"runtime_approvals", "guardian_approval_queue", "vision_operator_intervention"}},
-        state.run_metadata.get("robot_task_result", {}), state.run_metadata.get("specimen_result", {})])
+        _incoming_evidence(state)])
 
 
 def _blocked(code, result=None):
     data = deepcopy(result.data) if result else {}
     # Preserve raw completion facts, but revoke every consumable handoff alias.
     data["verified"] = False
+    data["failure_code"] = code
+    data["equipment_workflow_failure"] = {"schema": "equipment_workflow_failure.v1",
+        "status": "blocked", "failure_code": code}
     for key in ("equipment_handoff", "utm_data_ready", "handoff_packet"):
         if key == "equipment_handoff" or key in data:
             data[key] = {"status": "blocked", "ready_for_analysis": False, "failure_code": code}
@@ -120,7 +165,7 @@ def _blocked(code, result=None):
         data["handoff_eligibility"] = {"eligible": False, "failure_code": code}
     report = data.setdefault("equipment_report", {})
     report["decision"] = {"handoff_status": "blocked", "blocking_reasons": [code]}
-    return AgentResult(success=False, summary="Equipment workflow requires review", data=data)
+    return AgentResult(success=False, summary=f"Equipment workflow blocked: {code}", data=data)
 
 
 def _describe(agent, state, flow):
@@ -253,7 +298,17 @@ async def run_decided_workflow(agent, state, ctx, flow):
     scope_digest = _digest([snapshot, description])
     service = EquipmentRuntimeService(agent._RUNTIME_ROOT / "workflow_decisions")
     specimen = state.current_experiment_spec.get("specimen_id") or (state.run_metadata.get("specimen_result") or {}).get("specimen_id") or "specimen-unresolved"
-    record = service.begin(sequence_id=f"stacked-loop-{state.loop_count}", run_id=state.run_id,
+    sequence_id = f"stacked-loop-{state.loop_count}"
+    selection_retry = state.run_metadata.get("equipment_selection_retry") or {}
+    if selection_retry:
+        from app.equipment_selection_recovery import validate_selection_boundary
+        check_state = state.model_copy(deep=True)
+        from orchestrator.state import Stage
+        check_state.stage, check_state.is_paused = Stage.GUARDIAN, True
+        source = service.get(selection_retry["source_execution_id"])
+        validate_selection_boundary(check_state, source)
+        sequence_id += "-review-" + source["execution_id"]
+    record = service.begin(sequence_id=sequence_id, run_id=state.run_id,
         experiment_id=state.experiment_id, specimen_id=specimen, profile_id="stacked_workflow",
         # This is an agent decision record, not a worker execution. Keep its key
         # mode-independent so a mode toggle cannot replay the same delegated work.
@@ -305,11 +360,18 @@ async def run_decided_workflow(agent, state, ctx, flow):
 
     async def decide(phase, proposals, images=None):
         refs = ["task:configured"]
+        incoming = _incoming_evidence(state)
+        refs.extend(f"incoming:{key}" for key in incoming["records"])
         if result is not None:
             refs.append("workflow:terminal")
         if diagnostics:
             refs.append("diagnostics:latest")
-        context = {"task": state.active_goal, **_bounded_evidence(description),
+        context = {"task": "Review and, only if authorized, execute the configured equipment flow for this specimen; validate its measurement handoff.",
+            "research_goal": state.active_goal,
+            "experiment_spec": _bounded_evidence(state.current_experiment_spec),
+            "experiment_objective": _bounded_evidence(state.current_experiment_objective),
+            "incoming_handoff": incoming,
+            **_bounded_evidence(description),
             "source_knowledge": reference_context,
             "success": bool(result and result.success), "evidence_refs": refs,
             "execution": _terminal_evidence(result) if result else {}, "diagnostics": _bounded_evidence(diagnostics),
@@ -327,7 +389,9 @@ async def run_decided_workflow(agent, state, ctx, flow):
         return (decision.get("request") or {}).get("tool", "request_operator")
 
     try:
-        if valid() and retry_result is None:
+        if any(row["identity_status"] == "mismatch" for row in _incoming_evidence(state)["records"].values()):
+            result = _blocked("EQUIPMENT_INCOMING_SCOPE_MISMATCH")
+        if valid() and retry_result is None and result is None:
             preflight = await agent._run_equipment_skill_flow(state, ctx, frozen_flow,
                 checkpoint=checkpoint, validate_only=True)
             if not preflight.success:

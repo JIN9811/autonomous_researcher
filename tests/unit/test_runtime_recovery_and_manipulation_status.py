@@ -115,6 +115,31 @@ def test_live_snapshot_preserves_execution_and_recovery_context():
     assert snapshot["guardian_recovery_wait"] == metadata["guardian_recovery_wait"]
 
 
+def test_live_snapshot_preserves_delivery_without_full_agent_payload():
+    from app.controller import MainController
+    receipt = {"consumer_binding": "vision_agent", "run_id": "run-lifecycle", "loop_id": "0",
+               "stage": "delivered", "citation_ids": ["wiki:test"], "use_status": "unknown"}
+    snapshot = MainController._compact_planning_run_metadata({
+        "vision_agent_payload": {"vision_decision": {"knowledge_delivery": receipt}},
+    })
+    assert "vision_agent_payload" not in snapshot
+    assert snapshot["knowledge_delivery_receipts"] == [{"knowledge_delivery": receipt}]
+
+
+@pytest.mark.asyncio
+async def test_vision_monitoring_tick_is_waiting_not_done(tmp_path):
+    runtime, state, events = runtime_fixture(tmp_path, stage=Stage.VISION,
+        agent=ResultAgent("vision_agent", {
+            "observation": {"transfer_readiness": {"ready": False}},
+            "requested_next_stage": "vision", "transition_decision": "vision_utm_monitoring",
+        }))
+    await runtime.step()
+    assert state.agent_status["vision_agent"].state == "waiting"
+    assert state.agent_status["vision_agent"].success is None
+    results = [e for e in events if e["event_type"] == "agent_result"]
+    assert results[-1]["payload"]["status"] == "waiting"
+
+
 @pytest.mark.asyncio
 async def test_manipulation_handoff_to_vision_remains_running_until_verified_stop(tmp_path):
     runtime, state, events = runtime_fixture(tmp_path, stage=Stage.MANIPULATION,

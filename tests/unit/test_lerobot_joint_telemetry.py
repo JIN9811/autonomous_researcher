@@ -513,10 +513,23 @@ def test_motion_annotation_classifies_stable_home_and_populates_gate() -> None:
     assert measured["home_gate"]["passed"] is True
     assert measured["home_gate"]["joints"]["Joint1"] == {
         "value": pytest.approx(-11.0),
-        "minimum": -15.0,
-        "maximum": -1.0,
+        "minimum": -17.0,
+        "maximum": 1.0,
         "passed": True,
     }
+
+
+def test_measured_wrist_home_margin_is_bounded_and_requires_dwell() -> None:
+    from utils.lerobot_joint_telemetry import _home_gate, POLICY_HOME_RANGES
+
+    settled = {**HOME_POSE, "Joint5": -0.043956}
+    assert _home_gate(settled, stable_for_s=0.6)["passed"]
+    assert _home_gate({**settled, "Joint5": 0.5}, stable_for_s=0.6)["passed"]
+    assert _home_gate({**settled, "Joint5": 10.0}, stable_for_s=0.6)["passed"]
+    assert not _home_gate({**settled, "Joint5": 10.001}, stable_for_s=0.6)["passed"]
+    assert not _home_gate({**settled, "Joint5": -13.001}, stable_for_s=0.6)["passed"]
+    assert not _home_gate(settled, stable_for_s=0.1)["passed"]
+    assert POLICY_HOME_RANGES["Joint5"] == (-13.0, 10.0)
 
 
 def test_motion_annotation_keeps_observed_joint1_quantization_inside_home() -> None:
@@ -527,7 +540,7 @@ def test_motion_annotation_keeps_observed_joint1_quantization_inside_home() -> N
 
     assert measured["base_state"] == "home"
     assert measured["home_gate"]["passed"] is True
-    assert measured["home_gate"]["joints"]["Joint1"]["maximum"] == -1.0
+    assert measured["home_gate"]["joints"]["Joint1"]["maximum"] == 1.0
 
 
 def test_motion_annotation_uses_separate_measured_and_policy_joint2_home_ranges() -> None:
@@ -545,14 +558,14 @@ def test_motion_annotation_uses_separate_measured_and_policy_joint2_home_ranges(
     assert policy["base_state"] == "home"
     assert measured["home_gate"]["joints"]["Joint2"] == {
         "value": pytest.approx(-57.0),
-        "minimum": -64.0,
-        "maximum": -53.0,
+        "minimum": pytest.approx(-64.0 - 2 / 1.8),
+        "maximum": pytest.approx(-53.0 + 2 / 1.8),
         "passed": True,
     }
     assert policy["home_gate"]["joints"]["Joint2"] == {
         "value": pytest.approx(-69.0),
-        "minimum": -72.0,
-        "maximum": -62.0,
+        "minimum": pytest.approx(-72.0 - 2 / 1.8),
+        "maximum": pytest.approx(-62.0 + 2 / 1.8),
         "passed": True,
     }
 
@@ -582,11 +595,11 @@ def test_motion_annotation_accepts_refreshed_measured_home_pose() -> None:
     assert measured["home_gate"]["passed"] is True
     assert measured["home_gate"]["joints"]["Joint2"] == {
         "value": pytest.approx(-61.76),
-        "minimum": -64.0,
-        "maximum": -53.0,
+        "minimum": pytest.approx(-64.0 - 2 / 1.8),
+        "maximum": pytest.approx(-53.0 + 2 / 1.8),
         "passed": True,
     }
-    assert measured["home_gate"]["joints"]["Joint1"]["maximum"] == -1.0
+    assert measured["home_gate"]["joints"]["Joint1"]["maximum"] == 1.0
 
 
 def test_motion_annotation_prefers_home_after_position_dwell_under_servo_jitter() -> None:
@@ -606,7 +619,7 @@ def test_motion_annotation_prefers_home_after_position_dwell_under_servo_jitter(
 
 def test_motion_annotation_uses_arm_enter_exit_hysteresis() -> None:
     mild_home_motion = {**HOME_POSE, "Joint1": -9.08}
-    outside_home = {**HOME_POSE, "Joint1": 0.0}
+    outside_home = {**HOME_POSE, "Joint1": 2.0}
     packets = _annotated_sequence(
         [
             (10.0, HOME_POSE, None),
@@ -643,7 +656,7 @@ def test_motion_annotation_uses_gripper_enter_exit_hysteresis() -> None:
 
 
 def test_motion_annotation_classifies_every_non_home_arm_pose_as_moving() -> None:
-    moving_pose = {**HOME_POSE, "Joint1": 0.0}
+    moving_pose = {**HOME_POSE, "Joint1": 2.0}
     moving = _annotated_pair(HOME_POSE, moving_pose)
     off_home_pose = {**HOME_POSE, "Joint1": 20.0}
     off_home = _annotated_pair(off_home_pose, off_home_pose)
@@ -742,7 +755,7 @@ def test_grasp_outcome_uses_absolute_gripper_gap() -> None:
 def test_grasp_outcome_does_not_count_transport_starting_on_completion_packet() -> None:
     samples = _grasp_attempt_samples(measured_gripper=53.5)
     final_time, final_actual, final_target = samples[-1]
-    samples[-1] = (final_time, {**final_actual, "Joint1": 0.0}, final_target)
+    samples[-1] = (final_time, {**final_actual, "Joint1": 2.0}, final_target)
 
     packets = _annotated_sequence(samples)
 

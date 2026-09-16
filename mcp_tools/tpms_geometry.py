@@ -88,13 +88,24 @@ def tpms_thickness_level(
     tpms_thickness: Any = None,
     wall_thickness_mm: float,
     cell_size_mm: float,
-    relative_density: float,
+    relative_density: float | None = None,
 ) -> float:
     """Return the dimensionless |F| threshold for gyroid shell thickness."""
-    explicit = _safe_float(tpms_thickness, -1.0)
-    if explicit > 0.0:
-        return _clamp(explicit, 0.01, 1.50)
-    return tpms_level_for_relative_density(relative_density)
+    # Calibrate the sheet level using the normal through F(0,0,0)=0,
+    # where |grad F| is maximal. Wall is a physical target, not a density alias.
+    wall, cell = float(wall_thickness_mm), float(cell_size_mm)
+    if not math.isfinite(wall) or not math.isfinite(cell) or not 0 < wall < cell / 2:
+        raise ValueError("wall_thickness_mm must be positive and below half the cell size")
+    return 1.5 * math.sin(2.0 * math.pi * wall / (math.sqrt(3.0) * cell))
+
+
+def relative_density_for_wall(wall_thickness_mm: float, cell_size_mm: float) -> float:
+    """Canonical volume-fraction estimate; actual cropped-mesh volume is reported separately."""
+    from bisect import bisect_right
+    level = tpms_thickness_level(wall_thickness_mm=wall_thickness_mm,
+                                cell_size_mm=cell_size_mm, relative_density=0)
+    samples = _gyroid_absolute_samples(40)
+    return bisect_right(samples, level) / len(samples)
 
 
 @lru_cache(maxsize=256)
@@ -161,9 +172,9 @@ def _cell_counts(size: list[float], cell_size_mm: float, anisotropy_ratio: float
     cell = max(float(cell_size_mm), 1.0)
     anisotropy = _clamp(float(anisotropy_ratio), 0.5, 2.0)
     return (
-        max(1, round(x / cell)),
-        max(1, round(y / cell)),
-        max(1, round((z / cell) * anisotropy)),
+        max(1, math.ceil(x / cell)),
+        max(1, math.ceil(y / cell)),
+        max(1, math.ceil((z / cell) * anisotropy)),
     )
 
 
@@ -175,12 +186,17 @@ def _gyroid_value(
     size: list[float],
     cell_counts_xyz: tuple[int, int, int],
     orientation_rad: float,
+    cell_size_mm: float | None = None,
+    anisotropy_ratio: float = 1.0,
 ) -> float:
     sx, sy, sz = [max(float(item), 1e-6) for item in size]
     cx, cy, cz = cell_counts_xyz
     kx = 2.0 * math.pi * cx / sx
     ky = 2.0 * math.pi * cy / sy
     kz = 2.0 * math.pi * cz / sz
+    if cell_size_mm is not None:
+        kx = ky = 2.0 * math.pi / cell_size_mm
+        kz = kx * _clamp(float(anisotropy_ratio), 0.5, 2.0)
     xc = x - sx / 2.0
     yc = y - sy / 2.0
     zc = z - sz / 2.0
@@ -436,14 +452,17 @@ def generate_gyroid_stl_text(
 
     rel_density = _clamp(float(relative_density), 0.05, 0.85)
     wall = max(float(wall_thickness_mm), 0.05)
-    cell = max(float(cell_size_mm), wall * 2.0, 1.0)
+    cell = float(cell_size_mm)
+    if not math.isfinite(cell) or cell <= 0:
+        raise ValueError("cell_size_mm must be positive and finite")
     thickness_level = tpms_thickness_level(
         tpms_thickness=tpms_thickness,
         wall_thickness_mm=wall,
         cell_size_mm=cell,
         relative_density=rel_density,
     )
-    thickness_source = "explicit" if _safe_float(tpms_thickness, -1.0) > 0.0 else "relative_density_inverse"
+    thickness_source = "wall_thickness_mm_normal_calibration"
+    rel_density = relative_density_for_wall(wall, cell)
     cell_counts_xyz = _cell_counts(size, cell, float(anisotropy_ratio))
     orientation_rad = math.radians(float(orientation_deg))
     defect = _clamp(float(defect_ratio), 0.0, 0.35)
@@ -470,6 +489,8 @@ def generate_gyroid_stl_text(
                         size=[x_dim, y_dim, z_dim],
                         cell_counts_xyz=cell_counts_xyz,
                         orientation_rad=orientation_rad,
+                        cell_size_mm=cell,
+                        anisotropy_ratio=float(anisotropy_ratio),
                     )
                 )
                 - thickness_level
@@ -564,11 +585,20 @@ def generate_gyroid_stl_text(
     estimated_volume = x_dim * y_dim * z_dim * solid_fraction + cap_volume
     metadata = {
         "generator_backend": "tpms_gyroid_marching_tetra_fallback",
+        "gyroid_parameterization": "wall_cell_v1",
+        "target_wall_thickness_mm": wall,
+        "tpms_thickness_source": thickness_source,
+        "estimated_relative_density": round(rel_density, 5),
         "tpms_surface": "gyroid",
         "tpms_equation": "canonical_gyroid: sin(xr)cos(yr)+sin(yr)cos(zc)+sin(zc)cos(xr)=0",
         "tpms_thickness": round(thickness_level, 5),
         "tpms_resolution": [nx + 1, ny + 1, nz + 1],
         "cell_count_xyz": list(cell_counts_xyz),
+        "cell_size_requested_mm": cell,
+        "crop_mode": "centered_periodic_field",
+        "crop_size_mm": size,
+        "generation_envelope_mm": [cell_counts_xyz[0] * cell, cell_counts_xyz[1] * cell,
+                                   cell_counts_xyz[2] * cell / _clamp(float(anisotropy_ratio), 0.5, 2.0)],
         "sampled_inside_count": sampled_inside,
         "boundary_closure_triangle_count": closure_triangle_count,
         "cap_triangle_count": cap_triangle_count,
@@ -620,17 +650,20 @@ def write_smooth_gyroid_stl(
     max_dim = max(x_dim, y_dim, z_dim)
     requested = _safe_int(resolution, 0)
     n = requested or round(max_dim * 3.0)
-    n = max(48, min(160, n))
+    n = max(48, min(256, max(n, math.ceil(max_dim * 3 / max(float(wall_thickness_mm), 0.05)) + 1)))
     rel_density = _clamp(float(relative_density), 0.05, 0.85)
     wall = max(float(wall_thickness_mm), 0.05)
-    cell = max(float(cell_size_mm), wall * 2.0, 1.0)
+    cell = float(cell_size_mm)
+    if not math.isfinite(cell) or cell <= 0:
+        raise ValueError("cell_size_mm must be positive and finite")
     thickness_level = tpms_thickness_level(
         tpms_thickness=tpms_thickness,
         wall_thickness_mm=wall,
         cell_size_mm=cell,
         relative_density=rel_density,
     )
-    thickness_source = "explicit" if _safe_float(tpms_thickness, -1.0) > 0.0 else "relative_density_inverse"
+    thickness_source = "wall_thickness_mm_normal_calibration"
+    rel_density = relative_density_for_wall(wall, cell)
     cx, cy, cz = _cell_counts(size, cell, float(anisotropy_ratio))
     orientation_rad = math.radians(float(orientation_deg))
     xs = np.linspace(0.0, x_dim, n)
@@ -644,9 +677,10 @@ def write_smooth_gyroid_stl(
     sin_a = np.sin(orientation_rad)
     x_rot = x_centered * cos_a - y_centered * sin_a
     y_rot = x_centered * sin_a + y_centered * cos_a
-    kx = 2.0 * np.pi * cx / x_dim
-    ky = 2.0 * np.pi * cy / y_dim
-    kz = 2.0 * np.pi * cz / z_dim
+    # Evaluate the centered crop of a larger periodic field directly. This
+    # avoids allocating discarded cells and does not rescale the requested pitch.
+    kx = ky = 2.0 * np.pi / cell
+    kz = kx * _clamp(float(anisotropy_ratio), 0.5, 2.0)
     field = (
         np.sin(kx * x_rot) * np.cos(ky * y_rot)
         + np.sin(ky * y_rot) * np.cos(kz * z_centered)
@@ -695,24 +729,54 @@ def write_smooth_gyroid_stl(
     removed_triangle_count = 0
     if component_count_before > 1:
         largest = max(components, key=lambda item: len(item.faces))
+        # A coarse grid can sever a low-density sheet. Do not silently publish
+        # a small surviving fragment as the requested full-size specimen.
+        if np.any(largest.extents < np.asarray(size) * 0.95):
+            if n < 160:
+                refined = write_smooth_gyroid_stl(
+                    stl_path=stl_path, name=name, specimen_size_mm=size,
+                    wall_thickness_mm=wall, cell_size_mm=cell, relative_density=rel_density,
+                    anisotropy_ratio=anisotropy_ratio, orientation_deg=orientation_deg,
+                    defect_seed=defect_seed, defect_ratio=defect_ratio,
+                    skin_thickness_mm=skin_thickness_mm, top_bottom_cap=top_bottom_cap,
+                    top_cap_enabled=top_cap_enabled, bottom_cap_enabled=bottom_cap_enabled,
+                    tpms_thickness=tpms_thickness, resolution=160,
+                )
+                if refined is not None:
+                    refined["resolution_refinement"] = {"from": n, "to": 160,
+                        "reason": "coarse grid disconnected the specimen"}
+                return refined
+            raise ValueError("Gyroid is disconnected at maximum resolution; full specimen cannot be retained")
         removed_component_count = component_count_before - 1
         removed_triangle_count = int(len(mesh.faces) - len(largest.faces))
         mesh = largest
         mesh.remove_unreferenced_vertices()
+    # Padding closes the cropped solid; clamp that closure to the exact box.
+    mesh.vertices = np.clip(mesh.vertices, -np.asarray(size) / 2, np.asarray(size) / 2)
+    mesh.merge_vertices()
+    mesh.update_faces(mesh.nondegenerate_faces())
+    mesh.update_faces(mesh.unique_faces())
+    mesh.remove_unreferenced_vertices()
     mesh.metadata["name"] = name
     mesh.export(stl_path)
     solid_fraction = float(np.count_nonzero(levelset <= 0.0)) / float(levelset.size)
     return {
         "generator_backend": "tpms_gyroid_marching_cubes",
+        "gyroid_parameterization": "wall_cell_v1",
         "tpms_surface": "gyroid",
         "tpms_equation": "canonical_gyroid: sin(xr)cos(yr)+sin(yr)cos(zc)+sin(zc)cos(xr)=0",
         "tpms_thickness": round(thickness_level, 5),
         "tpms_thickness_source": thickness_source,
-        "target_relative_density": round(rel_density, 5),
+        "estimated_relative_density": round(rel_density, 5),
+        "target_wall_thickness_mm": wall,
         "realized_relative_density_without_caps": round(realized_density_without_caps, 5),
         "relative_density_absolute_error": round(abs(realized_density_without_caps - rel_density), 5),
         "tpms_resolution": [n, n, n],
         "cell_count_xyz": [cx, cy, cz],
+        "cell_size_requested_mm": cell,
+        "crop_mode": "centered_periodic_field",
+        "crop_size_mm": size,
+        "generation_envelope_mm": [cx * cell, cy * cell, cz * cell / _clamp(float(anisotropy_ratio), 0.5, 2.0)],
         "vertex_count": int(len(mesh.vertices)),
         "triangle_count": int(len(mesh.faces)),
         "connected_component_count_before_cleanup": component_count_before,

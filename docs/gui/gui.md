@@ -25,15 +25,15 @@ Web dashboard panels:
 Real-time updates are streamed via SSE endpoint `/api/events/stream`.
 
 BO visualization surfaces:
-- LHS is a separate Design Agent-owned card backed by `lhs_design_visualization.v1`. It uses a white publication figure with actual `cell_size_mm` and `relative_density` axes, density strata, measured blue points, the next orange cross, and planned gray points.
+- LHS is a separate Design Agent-owned card backed by `lhs_design_visualization.v1`. It uses a white publication figure with actual `cell_size_mm` and `wall_thickness_mm` axes, wall-thickness strata, measured blue points, the next orange cross, and planned gray points.
 - `/bo` preserves the completed initial-design card above a distinct posterior/acquisition card. LHS artifacts use `_lhs_design_step_NNN.{png,svg,csv,json}` and never reuse BO posterior filenames.
 - `/bo` shows the active objective equation and one current posterior/acquisition Figure before candidate audit details.
 - The Live GUI BO Agent report uses the same `bo_visualization.v1` values and shared SVG renderer; it does not maintain a second uncertainty formula.
-- The BO contract strip shows the active two-dimensional Gyroid space (`cell_size_mm`, `relative_density`), feasible `a=L/N` cell sizes, density bounds, LHS progress, ARD Matérn 5/2 plus noise, `[0,1]^2` normalization, EI, and measured SEA objective.
+- The BO contract strip shows the active two-dimensional Gyroid space (`cell_size_mm`, `wall_thickness_mm`), continuous cell-size bounds, wall-thickness bounds, LHS progress, ARD Matérn 5/2 plus noise, `[0,1]^2` normalization, EI, and measured SEA objective.
 - While `optimization_phase=initial_design`, Live GUI labels the card `Latin Hypercube Initial Design`, shows `completed/8` and the next deterministic LHS point, and suppresses candidate ranking, combined score, and active acquisition claims. GP/EI cards become active only after eight accepted measured observations.
-- New LHS payloads plot the actual `cell_size_mm x relative_density` measured, next, and planned coordinates. Older run payloads without stored coordinates retain an empty labeled 2D design space with a missing-coordinate notice and are never backfilled with synthetic positions.
+- New LHS payloads plot the actual `cell_size_mm x wall_thickness_mm` measured, next, and planned coordinates. Older run payloads without stored coordinates retain an empty labeled 2D design space with a missing-coordinate notice and are never backfilled with synthetic positions.
 - Plot and figure interiors use a white publication-style surface with explicit axes, grid, legend, uncertainty, observations, and next-point markers.
-- The BO posterior/EI figure is strictly output-space-only. It renders `Score` against an anonymous normalized search coordinate plus uncertainty, measured scores, EI, and the next query; it must not expose `cell_size_mm`, `relative_density`, any input value, strata/facet labels, parameter slices, or input tooltips. Those details remain in the separate LHS card and backend audit data.
+- The BO posterior/EI figure is strictly output-space-only. It renders `Score` against an anonymous normalized search coordinate plus uncertainty, measured scores, EI, and the next query; it must not expose `cell_size_mm`, `wall_thickness_mm`, any input value, strata/facet labels, parameter slices, or input tooltips. Those details remain in the separate LHS card and backend audit data.
 - An LHS step emits `lhs.visualization.updated`; an acquisition step emits `bo.visualization.updated`. Their latest payloads and compact step histories are stored independently.
 - The default BO plot is the scalar score posterior/EI view, not a numeric parameter slice. `Candidate pool index` remains an audit view of the finite candidate set, not a continuous GP posterior.
 - Missing, invalid, or stale data renders an explicit waiting/stale card. The frontend never fabricates posterior values.

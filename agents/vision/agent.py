@@ -21,6 +21,8 @@ Modification guide:
 
 from __future__ import annotations
 
+from utils.specimen_execution import current_printer_execution_verified
+
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -1105,7 +1107,8 @@ class VisionAgent(BaseAgent):
             or any(value is False for value in explicit_detection_values)
         )
         tool_result_usable = bool(tool_ok or (capture_ok and detection_only_tool_failure))
-        confirmed = bool(tool_result_usable and specimen_detected and release_ok)
+        printer_execution_verified = current_printer_execution_verified(state, specimen)
+        confirmed = bool(tool_result_usable and specimen_detected and release_ok and printer_execution_verified)
         placement_status = "inside" if specimen_detected else "not_detected" if specimen_not_detected else "unknown"
         status = (
             "confirmed"
@@ -1126,6 +1129,8 @@ class VisionAgent(BaseAgent):
         )
         return {
             "schema": "active_cam_ejection_check.v1",
+            "printer_execution_verified": printer_execution_verified,
+            "execution_blocking_reason": "" if printer_execution_verified else "CURRENT_PRINTER_EXECUTION_REQUIRED",
             "status": status,
             "source": str(result.get("tool") or "lerobot.camera.test"),
             "camera_key": result.get("camera_key") or active_camera_key,
@@ -2940,6 +2945,9 @@ class VisionAgent(BaseAgent):
         response["utm_runtime_status"] = utm_runtime_status
         # Freeze evidence time before reasoning; never renew it after model latency.
         response["timestamp"] = capture_timestamp(response)
+        from utils.vision_capture_preview import publish_capture_preview
+        preview_capture = response if placement_handoff else response.get("active_cam_ejection_check") or response
+        publish_capture_preview(state, preview_capture, "verification_1" if placement_handoff else "active_cam")
         if not placement_handoff:
             visual_decision = await review_visual_evidence(state, ctx, response, contract_id)
             if visual_decision.get("scope_valid") is False:
@@ -3109,6 +3117,7 @@ class VisionAgent(BaseAgent):
                             # Use the same evidence that admitted placement verification,
                             # not the zero-action snapshot returned when the skill started.
                             current["execution_evidence"] = dict(execution)
+                            current["post_place_interlock"] = dict(completion.get("post_place_interlock") or {})
                 manipulation_result_decision = await review_manipulation_result(
                     state, ctx, "transfer_to_utm", {**(state.run_metadata.get("manipulation_result") or {}),
                         "status": "STOPPED", "rollout_stopped": True}, response,
@@ -3236,6 +3245,8 @@ class VisionAgent(BaseAgent):
                 if placement_handoff
                 else bool(response.get("ok")) and bool(observation["transfer_readiness"]["ready"])
             ),
-            summary="Vision lab perception signal complete",
+            summary=("Vision verification waiting"
+                     if operator_wait or result_data.get("transition_decision") == "vision_utm_monitoring"
+                     else "Vision lab perception signal complete"),
             data=result_data,
         )

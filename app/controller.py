@@ -78,7 +78,7 @@ from policies.guardian_gate import gate_blocks_execution, tool_requires_action_s
 from utils.active_cam_artifact import apply_active_cam_artifact_update
 from utils.ids import make_event_id, make_experiment_id, make_planning_session_id, make_run_id, run_purpose
 from utils.manipulation_execution import sync_manipulation_execution_status
-from utils.specimen_execution import sync_specimen_execution_status
+from utils.specimen_execution import sync_specimen_execution_status, current_printer_execution_verified
 from utils.utm_completion_artifact import apply_utm_completion_artifact_update
 from utils.vision_operator_intervention import (
     INTERVENTION_SCHEMA,
@@ -99,6 +99,8 @@ from utils.operator_teleop_handoff import (
     OperatorTeleopHandoffRegistry,
 )
 
+
+from utils.gyroid_contract import POLICY as GYROID_RESEARCH_POLICY
 
 WORKSPACE_ARTIFACT_COPY_LIMIT_BYTES = 50 * 1024 * 1024
 PLANNING_TRANSCRIPT_MEMORY_LIMIT = 50
@@ -218,12 +220,23 @@ class MainController:
             active_session_id=self._logger_bundle.run_dir.name,
             mode=mode,
             stage=Stage.IDLE,
-            active_goal="Build and run autonomous AI researcher loop",
+            active_goal="",
             device_health={"printer": "ready", "camera": "ready", "robot": "ready", "utm": "ready"},
             run_metadata=self._runtime_profile(),
             retry_counters={},
             fault_injection={"fault": "none", "stage": ""},
         )
+
+    def _research_goal_rejection(self) -> dict[str, Any] | None:
+        goal = str(self._state.active_goal or "").strip()
+        if not goal or goal in {
+            "Build and run autonomous AI researcher loop",
+            "Bootstrap autonomous researcher loop",
+            "Design and validate a live-mode specimen plan before hardware execution.",
+        }:
+            return {"ok": False, "status": "blocked", "failure_code": "RESEARCH_GOAL_REQUIRED",
+                    "message": "Define the research objective in Chat before starting an experiment."}
+        return None
 
     def _runtime_profile(self) -> dict[str, Any]:
         """Return active backend/model metadata from the shared AgentContext."""
@@ -2239,12 +2252,28 @@ class MainController:
         # every linked module a second time through the activation callback.
         active_owners = {row["owner"] for row in projection["owners"]} & set(self._deps.agent_registry.names())
         for block in projection["blocks"]:
+            # Owner readback seeds are editing capabilities, not a user contract.
+            # Retain them for proposal routing, but never present them as Current
+            # before the user supplies inputs or an experiment is bound.
+            block["internal_default_only"] = (
+                not self._state.current_experiment_spec
+                and not block["topic_key"].startswith(PREFIX)
+                and not block.get("proposal_ids")
+                and not block.get("current_draft_proposal_id")
+                and not block.get("confirmed_proposal_id")
+            )
             if block["topic_key"].startswith(PREFIX):
                 active = all(owner in active_owners for owner in block["owners"])
                 block.update(active=active, editable=active and not (self._planning_handoff_active() or bool(self._run_task and not self._run_task.done())), conversation_input=True,
                     title=block["topic_key"][len(PREFIX):].replace("_", " ").capitalize(),
                     readonly_reason="Research inputs are reviewed in Chat before execution.")
         projection["session_id"] = self._planning_session_id
+        # Read-only comparison: never label a draft as the applied run contract.
+        spec = self._state.current_experiment_spec or {}
+        projection["current_run_values"] = ({"goal": self._state.active_goal, **{
+            key: deepcopy(spec[key]) for key in ("material", "specimen_size_mm", "geometry_type",
+                "objective_type", "objective_direction", "cell_size_bounds_mm", "wall_thickness_bounds_mm",
+                "fdm_min_wall_thickness_mm") if key in spec}} if spec else {})
         return projection
 
     async def planning_setup_action(self, action: dict) -> dict:
@@ -3627,6 +3656,32 @@ class MainController:
         }
 
         compact: dict[str, Any] = {}
+        # Preserve small delivery receipts before stripping heavyweight agent payloads.
+        # Do not traverse historical checkpoints or nested input contexts.
+        receipts: dict[str, dict[str, Any]] = {}
+        def collect_delivery(value: Any, depth: int = 0) -> None:
+            if depth > 10:
+                return
+            if isinstance(value, list):
+                for item in value:
+                    collect_delivery(item, depth + 1)
+            elif isinstance(value, dict):
+                delivery = value.get("knowledge_delivery")
+                if isinstance(delivery, dict) and delivery.get("consumer_binding"):
+                    fields = ("consumer_binding", "run_id", "loop_id", "attempt_id", "request_id",
+                              "receipt_id", "decision_id", "stage", "status", "use_status",
+                              "citation_ids", "used_citation_ids", "created_at", "updated_at", "as_of")
+                    receipt = {key: deepcopy(delivery[key]) for key in fields if key in delivery}
+                    identity = str(delivery.get("receipt_id") or delivery.get("request_id") or
+                                   (delivery.get("consumer_binding"), delivery.get("run_id"), delivery.get("loop_id")))
+                    receipts[identity] = {"knowledge_delivery": receipt}
+                for key, item in value.items():
+                    if key not in {"knowledge_delivery", "context", "scope", "trace", "request_payload", "source_stage_context"}:
+                        collect_delivery(item, depth + 1)
+        for key, value in metadata.items():
+            if key.endswith("_agent_payload") or key in allow_keys or key.endswith("_decision_register"):
+                collect_delivery(value)
+        compact["knowledge_delivery_receipts"] = list(receipts.values())
         for key, value in metadata.items():
             key_text = str(key)
             if key_text in skip_keys or key_text.endswith("_agent_payload"):
@@ -3770,7 +3825,11 @@ class MainController:
             return self.planning_snapshot()
         self._apply_inference_backend(backend)
         self._state.mode = Mode.LIVE
-        if goal:
+        if goal and goal.strip() not in {
+            "Build and run autonomous AI researcher loop",
+            "Bootstrap autonomous researcher loop",
+            "Design and validate a live-mode specimen plan before hardware execution.",
+        }:
             self._state.active_goal = goal
         if reset:
             self._reset_planning_transcript()
@@ -4431,6 +4490,11 @@ class MainController:
         if setup_rejection is not None:
             return setup_rejection
 
+        if mode != Mode.REPLAY:
+            goal_rejection = self._research_goal_rejection()
+            if goal_rejection is not None:
+                return goal_rejection
+
         await self.emit_runtime_event(
             event_type="run.created",
             message=f"Run created in mode={mode.value}",
@@ -4580,6 +4644,8 @@ class MainController:
             status.state = "running"
             status.success = None
             status.last_result = "operator_specimen_placement_retry"
+            status.run_id = self._state.run_id
+            status.loop_id = self._state.loop_count
             await self.emit_runtime_event(
                 event_type="vision_specimen_retry_started",
                 message="Vision specimen placement retry started.",
@@ -6014,8 +6080,12 @@ class MainController:
         operator_message: str,
     ) -> dict[str, Any]:
         """Keep test facts private; an LLM operator reveals them through chat."""
-        base_goal = goal or "테스트 모드 TPMS gyroid(PLA) 압축 시편 설계"
         defaults = self._default_test_constraints(constraints)
+        # A test preset's scientific objective is not the UI's previous planning
+        # goal. Keep its objective consistent with the private scenario inputs.
+        from utils.research_objective import uses_sea
+        base_goal = ("Maximize specific energy absorption (SEA, J/g) of the compression specimen."
+                     if uses_sea(defaults) else goal or str(defaults.get("objective_type") or "Compare compression specimens"))
         inline_printer_choice = self._parse_inline_test_mode_printer_choice(operator_message)
         if inline_printer_choice:
             defaults = self._apply_specimen_printer_choice_to_spec(defaults, inline_printer_choice)
@@ -6239,6 +6309,7 @@ class MainController:
         return (
             "Live GUI operator conversation for the existing autonomous_researcher runtime.\n"
             "Use this compact project contract as the authoritative instruction basis.\n"
+            f"{GYROID_RESEARCH_POLICY}\n"
             f"{self._live_runtime_contract_context()}\n"
             "Use the conversation_memory as short-lived session memory; do not assume it persists after this Live GUI session.\n"
             "Do not create new top-level stages. Use the controller intent state machine before keyword fallback.\n"
@@ -6305,6 +6376,7 @@ class MainController:
             f"{self._live_runtime_contract_context()}\n"
             "Use conversation_memory as short-lived Live GUI session memory.\n"
             "Choose concrete test experiment values yourself, then prepare the DesignAgent handoff.\n"
+            f"{GYROID_RESEARCH_POLICY}\n"
             "The default specimen must be an FDM-printable closed-shell gyroid TPMS, not a visual-only thin TPMS surface.\n"
             "Test-mode printer handling first asks Specimen Making Agent for `가상 브릿지`, `설치 프린터`, or `실제 출력`. `설치 프린터` slices the generated STL, removes the print body from the sliced artifact, and uploads/starts the resulting ejection-only project_file on the selected physical printer. `실제 출력` performs the full physical print.\n"
             "If operator_message already contains one of those choices, set constraints.printer_test_path accordingly so Specimen Making Agent can continue without asking again.\n"
@@ -6321,16 +6393,16 @@ class MainController:
             "    \"preferred_geometry_type\": \"gyroid\",\n"
             "    \"max_specimen_size_mm\": [30, 30, 30],\n"
             "    \"specimen_size_mm\": [30, 30, 30],\n"
-            "    \"objective_type\": \"energy_density_50pct\",\n"
+            "    \"objective_type\": \"maximize_energy_absorption_per_mass\",\n"
             "    \"objective_direction\": \"maximize\",\n"
             "    \"cell_size_mm\": 10.0,\n"
             "    \"wall_thickness_mm\": 1.2,\n"
-            "    \"relative_density\": 0.35,\n"
+            "    \"cell_size_bounds_mm\": [5.0, 10.0],\n"
+            "    \"wall_thickness_bounds_mm\": [0.6, 1.2],\n"
             "    \"tpms_surface\": \"gyroid\",\n"
-            "    \"tpms_thickness\": 0.38,\n"
             "    \"tpms_resolution\": 72,\n"
             "    \"printability_mode\": \"fdm_closed_shell\",\n"
-            "    \"fdm_min_wall_thickness_mm\": 1.2,\n"
+            "    \"fdm_min_wall_thickness_mm\": 0.4,\n"
             "    \"fdm_max_bridge_distance_mm\": 10.0,\n"
             "    \"fdm_max_unsupported_overhang_deg\": 45,\n"
             "    \"fdm_max_gyroid_wall_cell_ratio\": 0.28,\n"
@@ -6638,7 +6710,10 @@ class MainController:
         lowered = text.lower()
         objective = ""
         direction = "maximize"
-        if any(token in lowered for token in ("energy absorption", "specific energy", "sea", "에너지 흡수", "흡수량")):
+        from utils.research_objective import uses_sea
+        if uses_sea({}, text):
+            objective = "maximize_energy_absorption_per_mass"
+        elif any(token in lowered for token in ("energy absorption", "에너지 흡수", "흡수량")):
             objective = "energy_density_50pct"
         elif any(token in lowered for token in ("stiffness", "강성")):
             objective = "stiffness"
@@ -6903,6 +6978,12 @@ class MainController:
                     "example": "예: TPMS gyroid, gyroid metamaterial, BCC lattice",
                 }
             )
+        if "gyroid" in str(merged_constraints.get("geometry_type") or merged_constraints.get("preferred_geometry_type") or merged_constraints.get("experiment_domain") or "").lower():
+            from utils.gyroid_contract import BOUNDS, parameter_space
+            for key in BOUNDS:
+                if merged_constraints.get(key) is None:
+                    missing.append({"field": key, "key": key, "example": "Continuous [lower, upper] range"})
+            parameter_space(merged_constraints)
         return {"goal": detected_goal, "constraints": merged_constraints, "missing": missing}
 
     def _format_design_readiness_message(self, readiness: dict[str, Any]) -> str:
@@ -7032,7 +7113,7 @@ class MainController:
             "geometry_type": MainController.TEST_MODE_FIXED_GEOMETRY,
             "preferred_geometry_type": MainController.TEST_MODE_FIXED_GEOMETRY,
             "specimen_size_mm": printer_defaults.get("test_specimen_size_mm", [30, 30, 30]),
-            "objective_type": "energy_density_50pct",
+            "objective_type": "maximize_energy_absorption_per_mass",
             "objective_direction": "maximize",
             "infill_pattern": MainController.TEST_MODE_FIXED_GEOMETRY,
             "infill_density_percent": 35,
@@ -7045,6 +7126,8 @@ class MainController:
             "wall_thickness_mm": 1.2,
             "cell_size_mm": test_unit_cell_size_mm,
             "relative_density": 0.32,
+            "cell_size_bounds_mm": [5.0, 10.0],
+            "wall_thickness_bounds_mm": [0.6, 1.2],
             "skin_thickness_mm": printer_defaults.get("skin_thickness_mm", 0.8),
             "top_cap_enabled": printer_defaults.get("top_cap_enabled", False),
             "bottom_cap_enabled": printer_defaults.get("bottom_cap_enabled", True),
@@ -7055,7 +7138,7 @@ class MainController:
             "tpms_resolution": 72,
             "printability_mode": "fdm_closed_shell",
             "require_flat_compression_faces": printer_defaults.get("require_flat_compression_faces", False),
-            "fdm_min_wall_thickness_mm": 1.2,
+            "fdm_min_wall_thickness_mm": 0.4,
             "fdm_max_bridge_distance_mm": min(test_unit_cell_size_mm, 10.0),
             "fdm_max_unsupported_overhang_deg": 45.0,
             "fdm_max_gyroid_wall_cell_ratio": 0.28,
@@ -7126,7 +7209,7 @@ class MainController:
         merged["preferred_geometry_type"] = forced_geometry
         merged["infill_pattern"] = forced_geometry
         merged["tpms_surface"] = "gyroid"
-        merged["cell_size_mm"] = float(defaults.get("cell_size_mm", merged.get("cell_size_mm", 10.0)))
+        merged["cell_size_mm"] = float(merged.get("cell_size_mm", defaults.get("cell_size_mm", 10.0)))
         merged["tpms_thickness"] = merged.get("tpms_thickness", 0.38)
         merged["tpms_resolution"] = merged.get("tpms_resolution", 72)
         merged["printability_mode"] = "fdm_closed_shell"
@@ -7157,7 +7240,7 @@ class MainController:
         else:
             merged["skin_thickness_mm"] = 0.0
             merged["require_flat_compression_faces"] = False
-        merged["fdm_min_wall_thickness_mm"] = merged.get("fdm_min_wall_thickness_mm", 1.2)
+        merged["fdm_min_wall_thickness_mm"] = merged.get("fdm_min_wall_thickness_mm", 0.4)
         merged["fdm_max_bridge_distance_mm"] = merged.get("fdm_max_bridge_distance_mm", 10.0)
         merged["fdm_max_unsupported_overhang_deg"] = merged.get("fdm_max_unsupported_overhang_deg", 45.0)
         merged["fdm_max_gyroid_wall_cell_ratio"] = merged.get("fdm_max_gyroid_wall_cell_ratio", 0.28)
@@ -7199,18 +7282,17 @@ class MainController:
         merged["design_optimization"] = {
             "schema": "design_optimization_contract.v1",
             "objective": {
-                "metric": "energy_density_50pct_MJ_per_m3",
+                "metric": "specific_energy_absorption_J_per_g",
                 "direction": "maximize",
                 "unit": "MJ/m3",
             },
             "active_variables": {
                 "cell_size_mm": {
-                    "definition": "a=L/N",
-                    "specimen_length_mm": 30.0,
-                    "feasible_values": [5.0, 6.0, 7.5, 10.0],
+                    "definition": "spatial period in mm; centered crop preserves decimal pitch",
+                    "bounds": merged.get("cell_size_bounds_mm", [5.0, 10.0]),
                 },
-                "relative_density": {
-                    "bounds": [0.20, 0.48],
+                "wall_thickness_mm": {
+                    "bounds": merged.get("wall_thickness_bounds_mm", [0.6, 1.2]),
                     "normalization": "min_max_0_1",
                 },
             },
@@ -7366,18 +7448,15 @@ class MainController:
         contract = self._state.run_metadata.get("orchestrator_design_contract")
         requested = contract.get("requested_parameters") if isinstance(contract, dict) else {}
         if isinstance(requested, dict):
-            for key in ("cell_size_mm", "relative_density"):
+            for key in ("cell_size_mm", "wall_thickness_mm"):
                 if requested.get(key) not in (None, "", []):
                     constraints[key] = requested[key]
         geometry = self._normalize_planning_geometry_type(
             constraints.get("geometry_type") or constraints.get("preferred_geometry_type")
         )
         if geometry == "gyroid":
-            try:
-                density = float(constraints.get("relative_density", 0.32))
-            except (TypeError, ValueError):
-                density = 0.32
-            constraints["relative_density"] = max(0.20, density)
+            from utils.gyroid_contract import validate_candidate
+            validate_candidate(constraints)
         return constraints
 
     def _publish_orchestrator_design_contract(
@@ -7390,6 +7469,9 @@ class MainController:
         """Publish the only authoritative active-variable request consumed by DesignAgent."""
         constraints = dict(base_constraints)
         is_test = self._is_planning_test_spec(constraints)
+        if is_test:
+            constraints.setdefault("cell_size_bounds_mm", [5.0, 10.0])
+            constraints.setdefault("wall_thickness_bounds_mm", [0.6, 1.2])
         if is_test and total_cycles > 1:
             # The closed-loop design artifact must contain only the TPMS body.
             # Compression platens belong to CAE, not to the generated STL.
@@ -7408,10 +7490,16 @@ class MainController:
         next_parameters = next_request.get("constraints") if isinstance(next_request.get("constraints"), dict) else {}
         bo_settings = self._state.run_metadata.get("bo_settings")
         bo_settings = bo_settings if isinstance(bo_settings, dict) else {}
+        from utils.gyroid_contract import parameter_space, validate_candidate
+        agreed_space = parameter_space(constraints)
+        if agreed_space:
+            agreed_space = parameter_space(constraints, required=True)
+            bo_settings = {**bo_settings, "parameter_space": agreed_space}
+            self._state.run_metadata["bo_settings"] = dict(bo_settings)
         normalized_bo_settings, _warnings = BOAgent.normalize_settings(bo_settings)
         request_parameter_space = dict(normalized_bo_settings["parameter_space"])
         next_parameter_space = next_request.get("parameter_space")
-        if isinstance(next_parameter_space, dict) and next_parameter_space:
+        if not agreed_space and isinstance(next_parameter_space, dict) and next_parameter_space:
             canonical_space = BOAgent._two_variable_parameter_space(next_parameter_space)
             request_parameter_space = {
                 key: value for key, value in canonical_space.items() if key in next_parameter_space
@@ -7420,7 +7508,7 @@ class MainController:
         initial_request: dict[str, Any] = {}
         optimization = constraints.get("design_optimization") if isinstance(constraints.get("design_optimization"), dict) else {}
         initial_design = optimization.get("initial_design") if isinstance(optimization.get("initial_design"), dict) else {}
-        uses_lhs = is_test or initial_design.get("sampler") == "latin_hypercube"
+        uses_lhs = bool(agreed_space) or is_test or initial_design.get("sampler") == "latin_hypercube"
         if uses_lhs and (cycle_index <= 1 or not next_parameters):
             initial_request = BOAgent.initial_design_request(
                 self._state,
@@ -7447,7 +7535,7 @@ class MainController:
         else:
             requested = {
                 key: constraints.get(key)
-                for key in ("cell_size_mm", "relative_density")
+                for key in ("cell_size_mm", "wall_thickness_mm")
                 if constraints.get(key) not in (None, "", [])
             }
             phase = "orchestrator_defined"
@@ -7455,9 +7543,12 @@ class MainController:
 
         active = {
             key: requested[key]
-            for key in ("cell_size_mm", "relative_density")
+            for key in ("cell_size_mm", "wall_thickness_mm")
             if requested.get(key) not in (None, "", [])
         }
+        if agreed_space:
+            request_parameter_space = agreed_space
+        validate_candidate({**constraints, **active}, request_parameter_space)
         contract: dict[str, Any] = {
             "schema": "orchestrator_design_contract.v1",
             "contract_id": f"design-{self._state.run_id}-c{int(cycle_index):03d}",
@@ -7469,6 +7560,8 @@ class MainController:
             "total_cycles": int(total_cycles),
             "source": source,
             "requested_parameters": active,
+            "manufacturing_constraints": {"minimum_actual_wall_mm": max(0.4, float(constraints.get("fdm_min_wall_thickness_mm", 0.4))),
+                "inspection": "actual_mesh_before_slice", "on_failure": "reject_without_changing_design_variables"},
             "optimization": constraints.get("design_optimization")
             if isinstance(constraints.get("design_optimization"), dict)
             else {},
@@ -7899,6 +7992,11 @@ class MainController:
                 level="WARNING",
             )
             return {"pending": True, "specimen": specimen_payload}
+        status = self._state.agent_status.get("specimen_agent")
+        if specimen_payload.get("ok") is False or (status and status.success is False):
+            self._state.stage = Stage.SPECIMEN
+            detail = (status.last_result if status else None) or specimen_payload.get("failure_code") or specimen_payload.get("status") or "Specimen fabrication failed"
+            raise RuntimeError(str(detail))
         completion_wait = await self._await_specimen_printer_completion_before_vision(experiment_spec, specimen_payload)
         if completion_wait:
             specimen_payload = self._apply_printer_completion_wait_to_specimen(specimen_payload, completion_wait)
@@ -8112,6 +8210,9 @@ class MainController:
                 return setup_rejection
         else:
             self._state.active_goal = goal or self._state.active_goal
+        goal_rejection = self._research_goal_rejection()
+        if goal_rejection is not None:
+            return goal_rejection
         boundary = self._state.run_metadata.get("orchestrator_planning_boundary")
         if new_series or not isinstance(boundary, dict):
             task_id = uuid4().hex
@@ -8776,6 +8877,7 @@ class MainController:
             "state": str(progress_panel.get("state") or job.get("state") or status_payload.get("state") or status_payload.get("status") or ""),
             "progress_percent": progress,
             "job_name": str(progress_panel.get("job_name") or job.get("name") or ""),
+            "task_id": str(progress_panel.get("task_id") or job.get("task_id") or ""),
             "current_layer": progress_panel.get("current_layer") if progress_panel.get("current_layer") is not None else job.get("current_layer"),
             "total_layers": progress_panel.get("total_layers") if progress_panel.get("total_layers") is not None else job.get("total_layers"),
             "remaining_min": progress_panel.get("remaining_min"),
@@ -8788,9 +8890,6 @@ class MainController:
         name = name.split("?", 1)[0].split("#", 1)[0].strip().lower()
         suffixes = (
             ".gcode.3mf",
-            ".ejection-test",
-            ".ejection_test",
-            ".autoeject",
             ".gcode",
             ".3mf",
         )
@@ -8825,8 +8924,6 @@ class MainController:
             upload.get("url"),
             print_result.get("sliced_path"),
             print_result.get("gcode_path"),
-            post_publish.get("file_name"),
-            post_publish.get("job_name"),
         )
         names = {
             normalized
@@ -8839,15 +8936,10 @@ class MainController:
     def _printer_job_matches_expected(cls, observed: Any, expected_names: tuple[str, ...]) -> bool | None:
         observed_name = cls._normalize_printer_job_name(observed)
         if not expected_names:
-            return True
+            return None
         if not observed_name:
             return None
-        return any(
-            observed_name == expected
-            or (len(expected) >= 8 and expected in observed_name)
-            or (len(observed_name) >= 8 and observed_name in expected)
-            for expected in expected_names
-        )
+        return observed_name in expected_names
 
     @classmethod
     def _classify_specimen_printer_completion_status(
@@ -8865,7 +8957,7 @@ class MainController:
         job_matches_current = cls._printer_job_matches_expected(fields.get("job_name"), expected_job_names)
         failed_states = {"FAILED", "FAIL", "ERROR", "CANCELLED", "CANCELED", "ABORTED"}
         running_states = {"RUNNING", "PRINTING", "PREPARE", "PREPARING", "HEATING", "SLICING"}
-        complete_states = {"FINISH", "FINISHED", "IDLE", "READY", "COMMUNICATION_READY", "INSTALLED_PRINTER_COMMUNICATION_READY"}
+        complete_states = {"FINISH", "FINISHED"}
         if cls._is_transient_printer_communication_issue(status_payload):
             return {
                 "status": "transient",
@@ -8894,7 +8986,7 @@ class MainController:
                 "job_matches_current": job_matches_current,
                 "message": "Printer job is still active.",
             }
-        if started_seen and job_matches_current is not None and (upper in complete_states or (progress is not None and progress >= 100.0)):
+        if started_seen and job_matches_current is True and upper in complete_states:
             return {
                 "status": "complete",
                 **fields,
@@ -8933,10 +9025,10 @@ class MainController:
         print_result = specimen_payload.get("print_result") if isinstance(specimen_payload.get("print_result"), dict) else {}
         post_publish = print_result.get("post_publish_status") if isinstance(print_result.get("post_publish_status"), dict) else {}
         status = str(post_publish.get("status") or "").strip().lower()
-        if status != "completed":
+        if status != "completed" or post_publish.get("execution_verified") is not True:
             return {}
         observed_job = post_publish.get("job_name") or post_publish.get("file_name")
-        if observed_job and cls._printer_job_matches_expected(observed_job, expected_job_names) is False:
+        if cls._printer_job_matches_expected(observed_job, expected_job_names) is not True:
             return {}
         complete_payload = compact_runtime_payload(post_publish)
         return {
@@ -8978,8 +9070,10 @@ class MainController:
         post_publish = print_result.get("post_publish_status") if isinstance(print_result.get("post_publish_status"), dict) else {}
         started_seen = bool(
             str(post_publish.get("status") or "").strip().lower() in {"running", "started", "printing"}
-            or str(print_result.get("status") or "").strip().lower() in {"running", "started", "printing"}
+            and self._printer_job_matches_expected(post_publish.get("file_name") or post_publish.get("job_name"), expected_job_names) is True
         )
+        bound_task_id = str(post_publish.get("task_id") or "") if started_seen else ""
+        execution_scope = (self._state.run_id, self._state.loop_count)
         transient_failures = 0
         samples: list[dict[str, Any]] = []
         await self._append_planning_message(
@@ -8996,13 +9090,19 @@ class MainController:
         )
         while True:
             status_payload = await self._read_specimen_printer_completion_status()
+            if execution_scope != (self._state.run_id, self._state.loop_count):
+                raise RuntimeError("Printer completion belongs to a superseded run or cycle")
             classified = self._classify_specimen_printer_completion_status(
                 status_payload,
                 started_seen=started_seen,
                 expected_job_names=expected_job_names,
             )
-            if classified.get("status") == "running":
+            observed_task_id = str(classified.get("task_id") or "")
+            if bound_task_id and observed_task_id != bound_task_id:
+                classified.update(status="stale_job", message="Printer task identity changed or disappeared; completion is not verified.")
+            if classified.get("status") == "running" and classified.get("job_matches_current") is True:
                 started_seen = True
+                bound_task_id = bound_task_id or observed_task_id
                 transient_failures = 0
             elif classified.get("status") in {"waiting", "stale_job", "complete"}:
                 transient_failures = 0
@@ -9012,6 +9112,11 @@ class MainController:
                 result = {
                     "schema": "specimen_printer_completion_wait.v1",
                     "status": "complete",
+                    "run_id": execution_scope[0],
+                    "loop_id": execution_scope[1],
+                    "specimen_id": experiment_spec.get("specimen_id"),
+                    "task_id": bound_task_id,
+                    "completion_scope": "printer_job_only",
                     "printer_path": specimen_payload.get("printer_path"),
                     "poll_count": len(samples),
                     "last_status": compact_runtime_payload(classified),
@@ -9400,7 +9505,7 @@ class MainController:
         )
         # A newer active-camera observation is authoritative.  Do not retain a
         # prior confirmation after the next capture reports a failure.
-        confirmed = confirmed_now
+        confirmed = confirmed_now and current_printer_execution_verified(self._state, specimen)
         if isinstance(confirmation, dict):
             updated["vision_completion_signal"] = dict(confirmation)
         if isinstance(active_check, dict):
@@ -9750,12 +9855,19 @@ class MainController:
         if stage == Stage.ANALYSIS:
             analysis = data.get("analysis") if isinstance(data.get("analysis"), dict) else {}
             metrics = analysis.get("utm_metrics") or {}
+            observation = data.get("bo_observation") or analysis.get("bo_observation") or {}
+            if not isinstance(observation, dict):
+                observation = {}
+            metric = observation.get("metric_name") or "objective"
+            unit = observation.get("unit") or ""
+            score = observation.get("objective_score", analysis.get("objective_score"))
+            admissible = observation.get("ok_for_bo", (analysis.get("quality_gate") or {}).get("ok_for_bo"))
             return (
                 "Analysis Agent completed measurement processing and evidence review.\n\n"
-                f"- objective: {self._runtime_value(analysis.get('objective_score'))}\n"
+                f"- {metric}{f' ({unit})' if unit else ''}: {self._runtime_value(score)}\n"
                 f"- quality gate: {self._runtime_value(analysis.get('quality_gate'))}\n"
                 f"- peak force (N): {self._runtime_value(metrics.get('peak_force_N'))}\n"
-                f"- BO admissible: {self._runtime_value(analysis.get('ok_for_bo'))}"
+                f"- BO admissible: {self._runtime_value(admissible)}"
             )
         if stage == Stage.KNOWLEDGE:
             knowledge = data.get("knowledge") if isinstance(data.get("knowledge"), dict) else {}
@@ -9891,6 +10003,9 @@ class MainController:
         async def planning_runtime_event(event: dict[str, Any]) -> None:
             nonlocal previous_label, guardian_payload
             await self._broadcast_event(event)
+            from utils.vision_polling import quiet_vision_poll_event
+            if quiet_vision_poll_event(self._state, event):
+                return
             event_type = str(event.get("type") or event.get("event_type") or "")
             payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
             if event_type == "orchestrator.followup":
@@ -10098,8 +10213,8 @@ class MainController:
             ordinary_steps = 0
             while ordinary_steps < max_steps:
                 before_stage = self._state.stage
-                from utils.utm_clear_cycle import clear_poll_pending
-                was_clear_poll = before_stage == Stage.VISION and clear_poll_pending(self._state)
+                from utils.vision_polling import vision_poll_pending
+                was_clear_poll = vision_poll_pending(self._state)
                 await loop.step()
                 if (self._state.run_metadata.get("orchestrator_pending_handoff")
                         or self._state.run_metadata.get("orchestrator_waiting_entry")):
@@ -10107,8 +10222,14 @@ class MainController:
                         return await halt_for_control_flag()
                     await asyncio.sleep(0.25)
                     continue
-                if not was_clear_poll:
+                from utils.vision_polling import placement_poll_pending
+                placement_wait = before_stage == Stage.VISION and placement_poll_pending(self._state)
+                if not was_clear_poll and not placement_wait:
                     ordinary_steps += 1
+                elif placement_wait:
+                    # A read-only poll while the current robot execution settles
+                    # is not a new experiment step. Preserve stop checks below.
+                    await asyncio.sleep(0.25)
                 if self._state.emergency_stop_requested or self._state.safe_stop_requested or self._state.stop_requested:
                     return await halt_for_control_flag()
                 if (
@@ -10389,7 +10510,7 @@ class MainController:
                     validated_defaults.get("require_flat_compression_faces", False),
                 )
             ),
-            "fdm_min_wall_thickness_mm": float(pick("fdm_min_wall_thickness_mm", 1.2)),
+            "fdm_min_wall_thickness_mm": float(pick("fdm_min_wall_thickness_mm", 0.4)),
             "fdm_max_bridge_distance_mm": float(pick("fdm_max_bridge_distance_mm", 10.0)),
             "fdm_max_unsupported_overhang_deg": float(pick("fdm_max_unsupported_overhang_deg", 45.0)),
             "fdm_max_gyroid_wall_cell_ratio": float(pick("fdm_max_gyroid_wall_cell_ratio", 0.28)),
@@ -10471,10 +10592,6 @@ class MainController:
             planning_spec["top_cap_enabled"] = bool(validated_defaults.get("top_cap_enabled", False))
             planning_spec["bottom_cap_enabled"] = bool(validated_defaults.get("bottom_cap_enabled", True))
         planning_spec["top_bottom_cap"] = bool(planning_spec["top_cap_enabled"] or planning_spec["bottom_cap_enabled"])
-        if planning_spec["geometry_type"] == "gyroid" and planning_spec["relative_density"] < 0.20:
-            planning_spec["relative_density"] = 0.20
-            nested_constraints = planning_spec.get("constraints") if isinstance(planning_spec.get("constraints"), dict) else {}
-            planning_spec["constraints"] = {**nested_constraints, "relative_density": 0.20}
         if planning_spec["top_bottom_cap"]:
             planning_spec["skin_thickness_mm"] = max(0.2, float(planning_spec.get("skin_thickness_mm") or 0.8))
             planning_spec["require_flat_compression_faces"] = bool(
@@ -10486,17 +10603,18 @@ class MainController:
             planning_spec["skin_thickness_mm"] = 0.0
             planning_spec["require_flat_compression_faces"] = False
         if geometry_type == "gyroid":
-            wall_ratio = planning_spec["wall_thickness_mm"] / max(planning_spec["cell_size_mm"], 1e-6)
-            physical_min = max(
-                0.18,
-                min(0.68, 0.50 * planning_spec["wall_thickness_mm"] * (6.283185307179586 / max(planning_spec["cell_size_mm"], 1e-6))),
-            )
-            default_tpms_thickness = max(
-                physical_min,
-                min(0.68, 0.10 + 0.40 * planning_spec["relative_density"] + min(0.06, 0.20 * wall_ratio)),
-            )
+            from mcp_tools.tpms_geometry import tpms_thickness_level, relative_density_for_wall
+            from utils.gyroid_contract import BOUNDS, validate_candidate
+            for key in BOUNDS:
+                value = pick(key, None)
+                if value is not None:
+                    planning_spec[key] = value
+            validate_candidate(planning_spec)
             planning_spec["tpms_surface"] = str(pick("tpms_surface", planning_spec.get("tpms_surface", "gyroid")))
-            planning_spec["tpms_thickness"] = float(pick("tpms_thickness", planning_spec.get("tpms_thickness", default_tpms_thickness)))
+            planning_spec["relative_density"] = relative_density_for_wall(planning_spec["wall_thickness_mm"], planning_spec["cell_size_mm"])
+            planning_spec["porosity"] = 1.0 - planning_spec["relative_density"]
+            planning_spec["gyroid_parameterization"] = "wall_cell_v1"
+            planning_spec["tpms_thickness"] = tpms_thickness_level(wall_thickness_mm=planning_spec["wall_thickness_mm"], cell_size_mm=planning_spec["cell_size_mm"], relative_density=planning_spec["relative_density"])
             planning_spec["tpms_resolution"] = int(pick("tpms_resolution", planning_spec.get("tpms_resolution", 72)))
             planning_spec["printability_mode"] = str(pick("printability_mode", planning_spec.get("printability_mode", "fdm_closed_shell")))
         # Preserve Live GUI test-mode handoff markers across the DesignAgent

@@ -1891,6 +1891,8 @@ class ManipulationAgent(BaseAgent):
         elif not preflight_only and strategy in {"lerobot_policy", "pi05_lerobot_policy"} and "lerobot.rollout.start" in available_tools:
             callback = self._tool_event_callback(state, ctx)
             tool_payload = dict(payload)
+            # Silence managed inference announcements only, not manual recording.
+            tool_payload["play_sounds"] = False
             if callback:
                 tool_payload["_event_callback"] = callback
             response = await self._call_tool(ctx, skill_decision["request"]["tool"], tool_payload)

@@ -42,7 +42,8 @@
     const labels = {goal:'Goal', 'research.goal':'Goal', material:'Material',
       specimen_size_mm:'Specimen size', geometry_type:'Structure', experiment_domain:'Experiment type',
       objective_type:'Objective', objective_direction:'Direction', cell_size_mm:'Cell size',
-      wall_thickness_mm:'Wall thickness', relative_density:'Relative density'};
+      wall_thickness_mm:'Wall thickness', cell_size_bounds_mm:'Cell size range (mm)',
+      wall_thickness_bounds_mm:'Wall thickness range (mm)', relative_density:'Relative density (derived)'};
     return labels[key] || String(key).replace(/^conversation\.input\./, '').replace(/[_.]+/g, ' ').replace(/^./, s=>s.toUpperCase());
   }
 
@@ -65,7 +66,47 @@
     return {};
   }
 
+  function groupedBlocks(snapshot) {
+    const originals = (snapshot && snapshot.blocks || []).filter(b=>!b.internal_default_only);
+    if (!originals.some(b=>String(b.topic_key).startsWith('conversation.input.'))) return originals;
+    const definitions = [
+      ['objective','Research objective',['goal','objective_type','objective_direction']],
+      ['specimen','Specimen',['material','specimen_size_mm','geometry_type','experiment_domain']],
+      ['range','Design range',['cell_size_bounds_mm','wall_thickness_bounds_mm']],
+      ['constraints','Constraints',['min_wall_thickness_mm','fdm_min_wall_thickness_mm']],
+      ['bo','BO settings',['bo.acquisition']]
+    ];
+    const groups = definitions.map(([id,title,keys])=>({block_id:`__setup_${id}__`,title,keys,
+      grouped:true,revision:snapshot.revision,active:true,editable:false,owners:[],
+      draft_values:{}, source_fields:{}, source_blocks:[], current_run_values:{}}));
+    const remaining = [];
+    // Conversation values supersede their legacy presentation aliases only.
+    // The underlying versioned blocks remain intact for edits and audit.
+    const sorted = [...originals].sort((a,b)=>Number(String(a.topic_key).startsWith('conversation.input.'))-Number(String(b.topic_key).startsWith('conversation.input.')));
+    for (const block of sorted) {
+      const entries = block.topic_key === 'bo.parameter_space'
+        ? Object.entries(currentValues(block)['bo.parameter_space'] || {}).filter(([k])=>['cell_size_mm','wall_thickness_mm'].includes(k)).map(([k,v])=>[k==='cell_size_mm'?'cell_size_bounds_mm':'wall_thickness_bounds_mm',v])
+        : Object.entries(currentValues(block)).map(([k,v])=>[k==='research.goal'?'goal':k,v]);
+      let used = false;
+      for (const [key,value] of entries) {
+        const group = groups.find(g=>g.keys.includes(key));
+        if (!group) continue;
+        used = true;
+        group.draft_values[key] = value;
+        group.source_fields[key] = block;
+        if (!group.source_blocks.includes(block)) group.source_blocks.push(block);
+        if (Object.prototype.hasOwnProperty.call(snapshot.current_run_values || {},key)) group.current_run_values[key] = snapshot.current_run_values[key];
+      }
+      if (!used) remaining.push(block);
+    }
+    return [...groups.filter(g=>g.source_blocks.length), ...remaining];
+  }
+
   function shortStatus(block) {
+    if (block.grouped) {
+      if (block.source_blocks.some(b=>shortStatus(b)==='Needs attention')) return 'Needs attention';
+      return Object.entries(block.current_run_values).some(([k,v])=>JSON.stringify(v)!==JSON.stringify(block.draft_values[k])) ? 'Differs from run' : 'Saved inputs';
+    }
     if (block.package_summary) return block.active ? 'Bound' : 'Not bound';
     if (block.active === false) return 'Inactive';
     if (['failed','invalid','blocked'].includes(block.validation_status) || ['failed','blocked','rejected','partial','unknown'].includes(block.application_status)) return 'Needs attention';
@@ -152,12 +193,35 @@
     view.toggle.setAttribute('title', `${title}: ${preview}`);
     setText(view.badge, shortStatus(block));
     view.card.dataset.status = shortStatus(block).toLowerCase().replace(/ /g, '-');
-    const signature = JSON.stringify(entries);
+    const signature = JSON.stringify([entries, block.current_run_values, block.source_blocks, callbacks.editContext]);
     if (view.readableSignature !== signature) {
       view.readable.textContent = '';
-      entries.forEach(([key, value])=>view.readable.append(
-        element(view.card.ownerDocument, 'dt', '', fieldLabel(key)),
-        element(view.card.ownerDocument, 'dd', '', readableValue(value,key))));
+      entries.forEach(([key, value])=>{
+        const doc = view.card.ownerDocument;
+        const cell = element(doc, 'dd', '', readableValue(value,key));
+        if (block.grouped) {
+          const applied = block.current_run_values;
+          if (Object.prototype.hasOwnProperty.call(applied,key) && JSON.stringify(applied[key])!==JSON.stringify(value)) {
+            cell.append(element(doc,'small','setup-run-value',`Current run: ${readableValue(applied[key],key)}`));
+          }
+          const source = block.source_fields[key];
+          const edit = element(doc,'button','btn setup-field-edit','Edit');
+          edit.type='button'; edit.disabled=!(source.active && source.editable);
+          edit.setAttribute('aria-label',`Edit ${fieldLabel(key)}`);
+          edit.onclick=()=>{if(!edit.disabled && callbacks.onEdit) callbacks.onEdit(source);};
+          cell.append(edit);
+          if (!source.conversation_input && source.current_draft_proposal_id) {
+            for (const [label,handler] of [['Confirm','onConfirm'],['Discard','onDiscard']]) {
+              const action=element(doc,'button','btn setup-field-edit',label);
+              action.type='button'; action.disabled=edit.disabled;
+              action.setAttribute('aria-label',`${label} ${fieldLabel(key)}`);
+              action.onclick=()=>{if(!action.disabled && callbacks[handler]) callbacks[handler](source);};
+              cell.append(action);
+            }
+          }
+        }
+        view.readable.append(element(doc, 'dt', '', fieldLabel(key)),cell);
+      });
       view.readableSignature = signature;
     }
     setText(view.meta, `Owner: ${(block.owners || []).join(', ') || 'Unknown'} · Revision ${block.revision}`);
@@ -180,6 +244,11 @@
       ? changed.map(key => `${key}\n− ${valueText(baseline[key])}\n+ ${valueText(next[key])}`).join('\n\n')
       : 'No changes from the confirmed values (or effective values if not confirmed).');
     setText(view.values.Receipts, valueText(block.receipts || {}));
+    if (block.grouped) {
+      setText(view.values.Draft, valueText(block.source_blocks));
+      setText(view.timing,'Saved inputs are edited in Chat. Differences from the current run are shown explicitly; editing does not apply or execute a run.');
+      setText(view.values.Effective, valueText(block.current_run_values));
+    }
     for (const [label, callback] of [['Edit', 'onEdit'], ['Confirm', 'onConfirm'], ['Discard', 'onDiscard']]) {
       const button = view.buttons[label];
       const retry = request && !request.pending && request.body.action === label.toLowerCase()
@@ -187,7 +256,7 @@
       setText(button, retry ? `Retry ${label.toLowerCase()}` : label);
       button.disabled = !writable || busy || (label !== 'Edit' && !draft);
       if (block.conversation_input && label !== 'Edit') button.disabled = true;
-      button.hidden = Boolean(block.package_summary || (block.conversation_input && label !== 'Edit'));
+      button.hidden = Boolean(block.package_summary || block.grouped || (block.conversation_input && label !== 'Edit'));
       button.setAttribute('aria-label', `${retry ? 'Retry ' : ''}${label} ${title}`);
       button.onclick = () => { if (!button.disabled && callbacks[callback]) callbacks[callback](block); };
     }
@@ -215,7 +284,7 @@
     setText(view.intro, snapshot ? `Setup revision ${snapshot.revision} · Availability is owner-reported; unknown is not ready.` : 'Waiting for the current session’s setup snapshot.');
     setText(view.notice, callbacks.notice || ''); view.notice.hidden = !callbacks.notice;
     const ids = new Set();
-    const blocks = [...(snapshot && snapshot.blocks || [])];
+    const blocks = [...groupedBlocks(snapshot)];
     if (callbacks.graph !== undefined) {
       const graph = callbacks.graph || {};
       const pkg = graph.metadata && graph.metadata.experimental_package;

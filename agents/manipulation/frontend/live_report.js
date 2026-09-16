@@ -91,12 +91,8 @@
         </div>
       `;
       const homeRanges = [
-        ["Joint1", -15, -6.5],
-        ["Joint2", -61, -53],
-        ["Joint3", 52, 61],
-        ["Joint4", 43, 52],
-        ["Joint5", -11, -3],
-        ["Gripper", 55, 65],
+        ["Joint1"], ["Joint2"], ["Joint3"],
+        ["Joint4"], ["Joint5"], ["Gripper"],
       ];
       const poseFitAction = `
         <button type="button" class="ar-man-pose-fit" data-atr-pose-fit aria-label="Zoom to fit" title="Zoom to fit">
@@ -182,7 +178,7 @@
                   <div role="listitem" data-home-joint="${joint}" data-pass="waiting">
                     <strong>${joint}</strong>
                     <span data-home-value>-</span>
-                    <small>${minimum} to ${maximum}</small>
+                    <small data-home-range>Waiting for thresholds</small>
                   </div>
                 `).join("")}
               </div></div>

@@ -32,6 +32,25 @@ _REQUIRED_KEYS: dict[str, tuple[str, ...]] = {
 
 def validate_agent_output(stage: str, payload: dict[str, object]) -> tuple[bool, str]:
     """Validate required payload keys for selected stages."""
+    if stage == "equipment" and "equipment_workflow_failure" in payload:
+        failure = payload.get("equipment_workflow_failure")
+        handoff = payload.get("equipment_handoff")
+        code = failure.get("failure_code") if isinstance(failure, dict) else None
+        valid = (isinstance(failure, dict) and failure.get("schema") == "equipment_workflow_failure.v1"
+                 and failure.get("status") == "blocked" and isinstance(code, str) and bool(code)
+                 and payload.get("failure_code") == code and payload.get("verified") is False
+                 and isinstance(handoff, dict) and handoff.get("status") == "blocked"
+                 and handoff.get("ready_for_analysis") is False and handoff.get("failure_code") == code)
+        for key in ("utm_data_ready", "handoff_packet"):
+            if key in payload:
+                item = payload[key]
+                valid = valid and isinstance(item, dict) and item.get("status") == "blocked" and item.get("ready_for_analysis") is False
+        if "handoff_eligibility" in payload:
+            item = payload["handoff_eligibility"]
+            valid = valid and isinstance(item, dict) and item.get("eligible") is False
+        # A well-formed failure is not a successful handoff: the runtime still
+        # checks AgentResult.success and Guardian sees the original failure code.
+        return (True, "ok") if valid else (False, "Invalid blocked Equipment workflow contract.")
     if stage == "design" and "design_decision" in payload:
         decision = payload["design_decision"]
         if isinstance(decision, dict) and decision.get("status") in {"returned", "failed"}:

@@ -62,10 +62,42 @@ assert.match(detailed, /minimum_wall: 0\.2 mm margin · pass/);
 
 const empty = renderer.renderExpectedPerformance({}, {}, {});
 const space = renderer.renderDesignSpace({parameter_sweep:{heatmap_cells:[
-  {candidate_id:'a',x_relative_density:0.3,y_wall_thickness_mm:1.2,value:0.9988},
-  {candidate_id:'b',x_relative_density:0.4,y_wall_thickness_mm:1.5}
+  {candidate_id:'a',x_wall_thickness_mm:0.8,y_cell_size_mm:7.1,value:0.9988},
+  {candidate_id:'b',x_wall_thickness_mm:1.6,y_cell_size_mm:9.5}
 ]}},{candidate_id:'a'});
 assert.match(space, /Design candidate positions/);
+assert.match(space, /dsn-space-legend/);
+assert.match(space, /dsn-space-axis-label" x="250"[^>]*>Cell size \(mm\)/);
+assert.match(space, /rotate\(-90\)"[^>]*>Wall thickness \(mm\)/);
+assert.match(space, /class="dsn-space-selected" transform="translate\(/);
+assert.doesNotMatch(space, /lhs-viz|relative_density|NaN|Infinity/);
+const boundedSpace = renderer.renderDesignSpace({parameter_sweep:{parameters:[
+  {parameter:'cell_size_mm',min:5,max:10},
+  {parameter:'wall_thickness_mm',min:0.8,max:1.6}
+],heatmap_cells:[
+  {candidate_id:'lower',x_wall_thickness_mm:0.8,y_cell_size_mm:5},
+  {candidate_id:'upper',x_wall_thickness_mm:1.6,y_cell_size_mm:10}
+]}});
+const coords = [...boundedSpace.matchAll(/class="dsn-space-candidate" cx="([\d.]+)" cy="([\d.]+)"/g)].map(m=>m.slice(1).map(Number));
+assert.equal(coords.length, 2);
+assert.ok(coords[0][0] < coords[1][0] && coords[0][1] > coords[1][1]);
+assert.ok(coords.every(([x,y])=>x>66 && x<434 && y>56 && y<224));
+assert.match(renderer.renderDesignSpace({}), /Candidate coordinates not recorded/);
+const mergedSpace = renderer.renderDesignSpace({},
+  {candidate_id:'dsn-current',cell_size_mm:5,wall_thickness_mm:0.6}, [
+    {candidate_id:'lhs-1',parameters:{cell_size_mm:5,wall_thickness_mm:0.6}},
+    {candidate_id:'lhs-2',parameters:{cell_size_mm:10,wall_thickness_mm:1.2}},
+    {candidate_id:'bo-next',parameters:{cell_size_mm:7.5,wall_thickness_mm:0.9}},
+  ]);
+assert.equal((mergedSpace.match(/class="dsn-space-candidate" cx=/g)||[]).length,3);
+assert.match(mergedSpace,/bo-next/);
+assert.match(mergedSpace,/dsn-current/);
+assert.match(mergedSpace,/class="dsn-space-selected" transform="translate\(/);
+assert.doesNotMatch(mergedSpace,/NaN|Infinity/);
+assert.doesNotMatch(renderer.renderDesignSpace({parameter_sweep:{heatmap_cells:[
+  {x_wall_thickness_mm:null,y_cell_size_mm:5},
+  {x_wall_thickness_mm:0.8,y_cell_size_mm:''}
+]}}), /<svg|NaN/);
 const selectedComparison = renderer.renderExpectedPerformance({candidate_evaluations:[{candidate_id:'a'},{candidate_id:'b'}]}, {}, {candidate_id:'b'});
 assert.match(selectedComparison, /dsn-comparison-scroll/);
 assert.match(selectedComparison, /class="dsn-selected-candidate"[^>]*><td>b · Selected/);

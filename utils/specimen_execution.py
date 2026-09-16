@@ -1,7 +1,36 @@
-"""SPC display bookkeeping; does not authorize motion or change graph routing."""
+"""SPC lifecycle projection and run-scoped printer prerequisite verification.
+
+No function here actuates a device. Vision uses the prerequisite check before
+accepting physical ejection evidence; the display uses the same check.
+"""
 from typing import Any
 
 from orchestrator.state import AgentRuntimeStatus, OrchestratorState, Stage
+
+
+def current_printer_execution_verified(state: OrchestratorState, specimen: dict[str, Any]) -> bool:
+    """Physical image checks cannot substitute for this cycle's printer execution.
+
+    This verifies the printer-job prerequisite, not that an ejection physically
+    succeeded. Virtual fixtures retain their separate simulated semantics.
+    """
+    path = str(specimen.get("printer_path") or "")
+    physical = path in {"installed_printer", "physical_print", "actual_print", "bambulab_x2d", "live", "bambu", "prusalink"}
+    if not physical:
+        intent = (specimen.get("fabrication_report") or {}).get("fabrication_intent") or {}
+        physical = intent.get("physical_intent") is True
+    if not physical:
+        return True
+    receipt = specimen.get("printer_completion_wait") or {}
+    specimen_id = state.current_experiment_spec.get("specimen_id")
+    return bool(
+        specimen_id
+        and receipt.get("status") == "complete"
+        and receipt.get("run_id") == state.run_id
+        and receipt.get("loop_id") == state.loop_count
+        and receipt.get("specimen_id") == specimen_id
+        and receipt.get("completion_scope") == "printer_job_only"
+    )
 
 
 def sync_specimen_execution_status(
@@ -57,7 +86,7 @@ def sync_specimen_execution_status(
             checks.append(confirmation.get("confirmed") is True and confirmation.get("status") == "confirmed")
         if isinstance(active_check, dict):
             checks.append(active_check.get("spc_autoejection_confirmed") is True and active_check.get("status") == "confirmed")
-        verified = all(checks)
+        verified = all(checks) and current_printer_execution_verified(state, metadata.get("specimen_result") or {})
         execution.update(state="done" if verified else "running", success=True if verified else None)
 
     status = state.agent_status.setdefault("specimen_agent", AgentRuntimeStatus(mode=state.mode.value))

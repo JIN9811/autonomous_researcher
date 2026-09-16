@@ -116,17 +116,50 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
       return `<div style="overflow-x:auto"><table class="ar-design-evidence-table"><thead><tr>${headers.map(h=>`<th>${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((row,i)=>`<tr${i===selectedIndex?' class="dsn-selected-candidate" aria-label="Selected candidate"':''}>${row.map(v=>`<td>${escapeHtml(String(v ?? "Not recorded"))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
     }
 
-    function renderDesignSpace(screenReport, selected) {
+    function renderDesignSpace(screenReport, selected = {}, plannedPoints = []) {
       const parameters = screenReport.parameter_sweep?.parameters || [];
-      const points = (screenReport.parameter_sweep?.heatmap_cells || []).filter(p=>finiteNumber(p.x_relative_density)!==null && finiteNumber(p.y_wall_thickness_mm)!==null);
+      const sources = [
+        ...plannedPoints.map(p=>({candidate_id:p.candidate_id, status:p.status || 'planned',
+          x_wall_thickness_mm:(p.parameters || p).wall_thickness_mm,
+          y_cell_size_mm:(p.parameters || p).cell_size_mm})),
+        ...(screenReport.parameter_sweep?.heatmap_cells || []),
+        {...selected, status:'selected', x_wall_thickness_mm:selected.wall_thickness_mm, y_cell_size_mm:selected.cell_size_mm},
+      ];
+      const byPosition = new Map();
+      sources.filter(p=>finiteNumber(p.x_wall_thickness_mm)!==null && finiteNumber(p.y_cell_size_mm)!==null).forEach(p=>{
+        const key=`${Number(p.x_wall_thickness_mm).toFixed(8)}:${Number(p.y_cell_size_mm).toFixed(8)}`;
+        const previous=byPosition.get(key);
+        byPosition.set(key, {...p, measured:p.status==='measured'||p.measured===true||previous?.measured===true});
+      });
+      const points = [...byPosition.values()];
       let chart = renderEmpty("Candidate coordinates not recorded.");
       if (points.length) {
-        const xs=points.map(p=>Number(p.x_relative_density)), ys=points.map(p=>Number(p.y_wall_thickness_mm));
+        // Stored field names predate the LHS axis convention. Map the display,
+        // not the recorded candidate coordinates: cell size on X, wall on Y.
+        const xs=points.map(p=>Number(p.y_cell_size_mm)), ys=points.map(p=>Number(p.x_wall_thickness_mm));
         const domain=values=>{const lo=Math.min(...values),hi=Math.max(...values),pad=(hi-lo||Math.abs(lo)*0.1||0.1)*0.15;return [lo-pad,hi+pad];};
-        const [xmin,xmax]=domain(xs),[ymin,ymax]=domain(ys);
-        const x=v=>58+(v-xmin)/(xmax-xmin)*326, y=v=>226-(v-ymin)/(ymax-ymin)*192;
-        const ticks=Array.from({length:4},(_,i)=>i/3);
-        chart=`<svg class="dsn-space-chart" viewBox="0 0 420 290" role="img" aria-label="Design candidate positions"><title>Relative density versus wall thickness; outlined marker is selected. Overlapping candidates share a position.</title>${ticks.map(t=>{const xv=xmin+t*(xmax-xmin),yv=ymin+t*(ymax-ymin);return `<path d="M ${x(xv)} 34 V 226 M 58 ${y(yv)} H 384" stroke="currentColor" opacity=".13"/><text x="${x(xv)}" y="247" text-anchor="middle">${scoreText(xv,3)}</text><text x="50" y="${y(yv)+4}" text-anchor="end">${scoreText(yv,3)}</text>`;}).join('')}<path d="M58 34 V226 H384" fill="none" stroke="currentColor"/>${points.map(p=>{const chosen=p.candidate_id===selected.candidate_id||p.status==='selected';return `<circle cx="${x(Number(p.x_relative_density))}" cy="${y(Number(p.y_wall_thickness_mm))}" r="${chosen?8:5}" fill="${chosen?'#54d3ef':'#97aabe'}" stroke="${chosen?'#fff':'none'}" stroke-width="2"><title>${escapeHtml(p.candidate_id||'Candidate')} · ρ=${p.x_relative_density} · wall=${p.y_wall_thickness_mm} mm${chosen?' · selected':''}</title></circle>`;}).join('')}<text x="221" y="278" text-anchor="middle">Relative density (fraction)</text><text transform="translate(15 130) rotate(-90)" text-anchor="middle">Wall thickness (mm)</text></svg><p class="ar-design-empty">Outlined: selected · Other points: candidate positions · No performance score</p>`;
+        const agreedDomain=(name,values)=>{const p=parameters.find(p=>p.parameter===name);return p && finiteNumber(p.min)!==null && finiteNumber(p.max)!==null && Number(p.min)<Number(p.max)?[Number(p.min),Number(p.max)]:domain(values);};
+        const [xmin,xmax]=agreedDomain("cell_size_mm",xs),[ymin,ymax]=agreedDomain("wall_thickness_mm",ys);
+        // Keep limit candidates inside the frame so boundary markers stay whole.
+        const x=v=>60+((v-xmin)/(xmax-xmin)+0.05)/1.1*380;
+        const y=v=>230-((v-ymin)/(ymax-ymin)+0.05)/1.1*180;
+        const ticks=Array.from({length:5},(_,i)=>i/4);
+        const chosen=p=>p.status==='selected'||(selected.candidate_id!=null&&p.candidate_id===selected.candidate_id);
+        const markers=[...points.filter(p=>!chosen(p)), ...points.filter(chosen)].map(p=>{
+          const cx=x(Number(p.y_cell_size_mm)),cy=y(Number(p.x_wall_thickness_mm));
+          const title=`<title>${escapeHtml(p.candidate_id||'Candidate')} · cell=${scoreText(p.y_cell_size_mm,3)} mm · wall=${scoreText(p.x_wall_thickness_mm,3)} mm${chosen(p)?' · selected':''}</title>`;
+          const dot = `<circle class="dsn-space-candidate" cx="${cx}" cy="${cy}" data-status="${p.measured?'measured':'planned'}" ${p.measured?'style="fill:#83cbb1;stroke:#d3f7e5"':''} r="5">${title}${p.measured?'<title>Measured / completed</title>':''}</circle>`;
+          return dot + (chosen(p) ? `<g class="dsn-space-selected" transform="translate(${cx} ${cy})"><path d="M-6 -6 L6 6 M-6 6 L6 -6"/>${title}</g>` : '');
+        }).join('');
+        chart=`<svg class="dsn-space-chart" viewBox="0 0 460 290" role="img" aria-label="Design candidate positions">
+          <title>Cell size versus wall thickness; cross marks the selected candidate. Overlapping candidates share a position. No performance score.</title>
+          <g class="dsn-space-legend" transform="translate(60 20)"><circle class="dsn-space-candidate" r="4"/><text x="12" y="4">Candidate</text><g class="dsn-space-selected" transform="translate(116 0)"><path d="M-5 -5 L5 5 M-5 5 L5 -5"/></g><text x="128" y="4">Selected</text></g>
+          <g transform="translate(310 20)"><circle r="4" fill="#83cbb1"/><text x="12" y="4">Measured</text></g>
+          ${ticks.map(t=>{const xv=xmin+t*(xmax-xmin),yv=ymin+t*(ymax-ymin);return `<path d="M ${x(xv)} 50 V 230 M 60 ${y(yv)} H 440" stroke="currentColor" opacity=".13"/><text x="${x(xv)}" y="252" text-anchor="middle">${scoreText(xv,3)}</text><text x="50" y="${y(yv)+4}" text-anchor="end">${scoreText(yv,3)}</text>`;}).join('')}
+          <path d="M60 50 V230 H440" fill="none" stroke="currentColor"/>${markers}
+          <text class="dsn-space-axis-label" x="250" y="282" text-anchor="middle">Cell size (mm)</text>
+          <text class="dsn-space-axis-label" transform="translate(15 140) rotate(-90)" text-anchor="middle">Wall thickness (mm)</text>
+        </svg>`;
       }
       return chart + '<details class="dsn-variable-details"><summary>Variables & ranges</summary>' + evidenceTable(["Variable", "Selected", "Range"], parameters.map(p=>[
         p.parameter, p.selected ?? p.value ?? selected[p.parameter],
@@ -278,6 +311,11 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
       const spec = report && report.spec ? report.spec : {};
       const screenReport = services.latestDesignAgentReport(report) || {};
       const designReport = services.latestDesignReport(report) || {};
+      const plannedPoints = [...(services.latestBoInitialDesign?.(report)?.points || [])];
+      const next = report?.state?.run_metadata?.next_design_request;
+      if (next && next.status === 'ready' && next.run_id === report?.state?.run_id) {
+        plannedPoints.push({candidate_id:next.candidate_id, parameters:next.constraints || {}});
+      }
       const decision = designReport.design_decision;
       if (decision && ["returned", "failed"].includes(decision.status)) {
         return services.renderDashboardCard("Design Decision — Review Required", services.runtimeRows([
@@ -308,7 +346,7 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
       return `
     ${services.renderDashboardCard("Experiment Contract", renderer.renderBriefCard(brief, objective, hypothesis, spec, prior, material, manufacturability, selected), { span: 3, tone: "design", eyebrow: "mission input", className: "ar-design-reference-card ar-design-brief-card" })}
     ${services.renderDashboardCard("Generated Specimens", services.renderDesignCandidateCards(screenReport, designReport, report, { renderEvidence: renderer.renderEvidence }), { span: 9, tone: "design", eyebrow: "built specimen log", className: "ar-design-reference-card ar-design-candidates-card", meta: `${services.renderRuntimeValue(generatedCount)} built / ${services.renderRuntimeValue(validCount)} usable / ${services.renderRuntimeValue(previewCount)} previews` })}
-    ${services.renderDashboardCard("Design Space", renderer.renderDesignSpace(screenReport, selected), { span: 4, tone: "metrics", eyebrow: "recorded variables", className: "ar-design-reference-card ar-design-sweep-card" })}
+    ${services.renderDashboardCard("Design Space", renderer.renderDesignSpace(screenReport, selected, plannedPoints), { span: 4, tone: "metrics", eyebrow: "recorded variables", className: "ar-design-reference-card ar-design-sweep-card" })}
     ${services.renderDashboardCard("Candidate Comparison", renderer.renderExpectedPerformance(screenReport, designReport, selected), { span: 4, tone: "metrics", eyebrow: "recorded candidate evidence", className: "ar-design-reference-card ar-design-performance-card" })}
     ${services.renderDashboardCard("Constraint Check", renderer.renderManufacturabilityCard(screenReport, designReport, selected, spec, material, specimenRows.length ? specimenRows : candidateRows), { span: 4, tone: (designReport.design_evaluation || screenReport.design_evaluation || spec.design_evaluation)?.validity?.status === "pass" ? "success" : "warning", eyebrow: "design checks", className: "ar-design-reference-card ar-design-manufacturing-card" })}
     ${services.renderDashboardCard("Active Handoff", renderer.renderHandoffCard(handoff, selected, material, spec, artifactLedger), { span: 12, tone: handoff.required_fields_present === false || rejected.length ? "warning" : "success", eyebrow: "dsn -> spc", className: "ar-design-reference-card ar-design-handoff-card" })}

@@ -78,6 +78,18 @@ var ATRRobotTelemetryBundle = (() => {
     }
   });
 
+  // src/frame_budget.cjs
+  var require_frame_budget = __commonJS({
+    "src/frame_budget.cjs"(exports, module) {
+      function frameBudget2(now, previous, visible) {
+        if (!visible || now - previous < 1e3 / 15 - 0.5) return null;
+        const elapsed = Math.min(250, Math.max(0, now - previous));
+        return { timestamp: now, alpha: 1 - Math.pow(1 - 0.28, elapsed / (1e3 / 60)) };
+      }
+      module.exports = { frameBudget: frameBudget2 };
+    }
+  });
+
   // node_modules/three/build/three.core.js
   var REVISION = "177";
   var MOUSE = { LEFT: 0, MIDDLE: 1, RIGHT: 2, ROTATE: 0, DOLLY: 1, PAN: 2 };
@@ -27223,6 +27235,7 @@ void main() {
   // src/index.js
   var import_box_union = __toESM(require_box_union());
   var import_specimen_pose = __toESM(require_specimen_pose());
+  var import_frame_budget = __toESM(require_frame_budget());
   var MODEL_ROOT = "/assets/robotis-omx";
   var MODEL_XML_URL = "/assets/robotis-omx/omx.xml";
   var ENVIRONMENT_MANIFEST_URL = "/assets/robotis-omx/scene/omx_table_layout.web.json?v=20260915-web-platen-offset-8";
@@ -28003,29 +28016,40 @@ void main() {
     let animationFrame = null;
     let active = false;
     let initialFitApplied = false;
+    let lastFrameAt = -Infinity;
+    let inViewport = true;
+    let viewportWidth = 0;
+    let viewportHeight = 0;
     function resize() {
       if (!runtime.poseMount) return;
       const width = Math.max(320, runtime.poseMount.clientWidth || 320);
       const height = Math.max(260, runtime.poseMount.clientHeight || 260);
+      if (width === viewportWidth && height === viewportHeight) return;
+      viewportWidth = width;
+      viewportHeight = height;
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
     }
-    function frame() {
+    function frame(now = performance.now()) {
       if (!active) return;
-      interpolateJointMap(currentActual, runtime.latestActualRad, 0.28);
-      interpolateJointMap(currentTarget, runtime.latestTargetRad, 0.28);
+      animationFrame = window.requestAnimationFrame(frame);
+      const budget = (0, import_frame_budget.frameBudget)(now, lastFrameAt, !document.hidden && inViewport);
+      if (!budget) return;
+      lastFrameAt = budget.timestamp;
+      interpolateJointMap(currentActual, runtime.latestActualRad, budget.alpha);
+      interpolateJointMap(currentTarget, runtime.latestTargetRad, budget.alpha);
       applyJointRadians(measuredRobot, currentActual);
       applyJointRadians(policyTargetGhost, currentTarget);
       syncHeldSpecimenPose();
       policyTargetGhost.root.visible = Object.keys(runtime.latestTargetRad || {}).length > 0;
       controls.update();
       renderer.render(scene, camera);
-      animationFrame = window.requestAnimationFrame(frame);
     }
     function start() {
       if (active) return;
       active = true;
+      lastFrameAt = -Infinity;
       resize();
       if (!initialFitApplied) {
         Object.assign(currentActual, runtime.latestActualRad);
@@ -28043,6 +28067,9 @@ void main() {
       animationFrame = null;
     }
     const resizeObserver = new ResizeObserver(resize);
+    const visibilityObserver = new IntersectionObserver((entries) => {
+      inViewport = entries.some((entry) => entry.isIntersecting);
+    });
     return {
       renderer,
       scene,
@@ -28061,6 +28088,7 @@ void main() {
         poseLocked: false
       },
       resizeObserver,
+      visibilityObserver,
       start,
       pause,
       resize,
@@ -28097,6 +28125,8 @@ void main() {
       }
       viewer.resizeObserver.disconnect();
       viewer.resizeObserver.observe(mount);
+      viewer.visibilityObserver.disconnect();
+      viewer.visibilityObserver.observe(mount);
       viewer.start();
       applySpecimenGraspVisualization(
         runtime.latestMotionState.grasp_outcome || null,
@@ -28273,7 +28303,7 @@ void main() {
   }
   function applyRunMetrics(metrics) {
     const value = metrics && typeof metrics === "object" ? metrics : {};
-    applyMetricDonut("task", value.task_cycle);
+    applyMetricDonut("task", value.task_progress);
     applyMetricDonut("grasp", value.grasp);
     applyRuntimeFields("metrics", value);
   }
@@ -28353,6 +28383,8 @@ void main() {
         const jointGate = gate && gate.joints && gate.joints[joint];
         const value = row.querySelector("[data-home-value]");
         if (value) value.textContent = formatNativeValue(jointGate && jointGate.value);
+        const range = row.querySelector("[data-home-range]");
+        if (range) range.textContent = jointGate ? `${formatNativeValue(jointGate.minimum)} to ${formatNativeValue(jointGate.maximum)} ${sourceUnit(joint)}` : "Waiting for thresholds";
         row.dataset.pass = jointGate ? jointGate.passed ? "yes" : "no" : "waiting";
       });
     });
@@ -28467,6 +28499,7 @@ void main() {
     const sessionId = String(sample.session_id || "");
     if (sessionId && sessionId !== runtime.sessionId) resetSession(sessionId);
     const executionIndex = sample.execution_index ?? null;
+    if (executionIndex !== null && runtime.executionIndex !== null && Number(executionIndex) < Number(runtime.executionIndex)) return;
     if (executionIndex !== null && runtime.executionIndex !== null && executionIndex !== runtime.executionIndex) resetSession(sessionId);
     runtime.executionIndex = executionIndex;
     const sequence = Number(sample.sequence);
@@ -28502,10 +28535,6 @@ void main() {
     applySampleDisplay(matchingDetail ? latestSample : latest);
   }
   function replaceJointHistory(samples, latestSample) {
-    runtime.history = [];
-    runtime.latestSequence = -1;
-    runtime.latestActualRad = {};
-    runtime.latestTargetRad = {};
     const ordered = (Array.isArray(samples) ? samples : []).slice().sort((left, right) => Number(left.execution_index || 0) - Number(right.execution_index || 0) || Number(left.sequence || 0) - Number(right.sequence || 0));
     appendJointSamples(ordered, latestSample);
   }
@@ -28519,6 +28548,8 @@ void main() {
     }
     const sessionId = String(packet.session && packet.session.session_id || packet.session_id || "");
     if (sessionId && sessionId !== runtime.sessionId) resetSession(sessionId);
+    const previousSequence = runtime.latestSequence;
+    const previousExecution = runtime.executionIndex;
     runtime.status = String(packet.status || runtime.status || "idle");
     if (packet.type === "joint_history") {
       replaceJointHistory(packet.samples, packet.latest_sample);
@@ -28533,7 +28564,8 @@ void main() {
       setPoseStatus(runtime.status, runtime.status);
       setTrackingStatus(runtime.status, runtime.status);
     }
-    if (packet.runtime_view) applyRuntimeView(packet.runtime_view);
+    const staleBatch = ["joint_history", "joint_samples"].includes(packet.type) && runtime.latestSequence === previousSequence && runtime.executionIndex === previousExecution;
+    if (packet.runtime_view && !staleBatch) applyRuntimeView(packet.runtime_view);
   }
   function telemetryMountsPresent() {
     return Boolean(document.querySelector("[data-atr-robot-pose]") || document.querySelector("[data-atr-policy-tracking]"));
@@ -28579,10 +28611,13 @@ void main() {
     };
   }
   async function loadSnapshot() {
+    const requestedSequence = runtime.latestSequence;
+    const requestedSession = runtime.sessionId;
     try {
       const response = await fetch(SNAPSHOT_URL, { cache: "no-store" });
       if (!response.ok) return;
       const payload = await response.json();
+      if (runtime.latestSequence !== requestedSequence || runtime.sessionId !== requestedSession) return;
       if (Number(payload.reset_at_ms || 0) < runtime.resetAtMs) return;
       if (Number(payload.reset_at_ms || 0) > runtime.resetAtMs) consumePacket({ ...payload, type: "telemetry_state" });
       const sessionId = String(payload.session && payload.session.session_id || "");
@@ -28643,7 +28678,16 @@ void main() {
     }
   }
   window.ATRRobotTelemetryCards = { hydrate, disconnect: closeTelemetrySocket };
-  var domObserver = new MutationObserver(() => window.queueMicrotask(hydrate));
+  var hydrationQueued = false;
+  var domObserver = new MutationObserver(() => {
+    if (hydrationQueued) return;
+    if (document.querySelector("[data-atr-robot-pose]") === runtime.poseMount && document.querySelector("[data-atr-policy-tracking]") === runtime.chartMount) return;
+    hydrationQueued = true;
+    window.requestAnimationFrame(() => {
+      hydrationQueued = false;
+      hydrate();
+    });
+  });
   domObserver.observe(document.documentElement, { childList: true, subtree: true });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", hydrate, { once: true });
   else hydrate();

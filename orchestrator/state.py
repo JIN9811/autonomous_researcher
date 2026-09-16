@@ -77,6 +77,8 @@ class AgentRuntimeStatus(BaseModel):
     last_result: str | None = None
     success: bool | None = None
     mode: str = "test"
+    run_id: str | None = None
+    loop_id: int | None = None
 
 
 class OrchestratorState(BaseModel):
@@ -86,7 +88,7 @@ class OrchestratorState(BaseModel):
     experiment_id: str
     mode: Mode = Mode.TEST
     stage: Stage = Stage.IDLE
-    active_goal: str = "Bootstrap autonomous researcher loop"
+    active_goal: str = ""
     device_health: dict[str, str] = Field(default_factory=dict)
     current_experiment_spec: dict[str, Any] = Field(default_factory=dict)
     current_experiment_objective: dict[str, Any] = Field(default_factory=dict)
