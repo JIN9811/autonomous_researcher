@@ -3,14 +3,66 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import pytest
 
 from device_bridges.utm_state_observer import (
     INSUFFICIENT_EVIDENCE,
+    apply_quasistatic_motion_threshold,
     _parse_ros2_string_data,
     _parse_ros2_string_stream,
     read_compression_tester_summary_once,
     summarize_utm_state_sequence,
 )
+
+
+@pytest.mark.parametrize("drift,expected", [(-0.4, "DOWN"), (-0.25, "DOWN"),
+    (-0.249, "STABLE"), (0.0, "STABLE"), (0.249, "STABLE"), (0.25, "UP"), (0.4, "UP")])
+def test_quasistatic_motion_compares_endpoints(drift, expected):
+    samples = [{"state": "WORKING", "point_count": 4,
+                "span_y": 95 + (drift if i >= 50 else 0)} for i in range(100)]
+    original = summarize_utm_state_sequence(samples)
+    original["duration_sec"] = 10.0
+    result = apply_quasistatic_motion_threshold(original)
+    assert result["motion_direction"] == expected
+    assert result["motion_delta_px"] == pytest.approx(drift)
+    assert result["motion_threshold_px"] == 0.25
+    assert original["motion_direction"] == "STABLE"
+
+
+@pytest.mark.parametrize("jitter", [-0.5, 0.5])
+def test_quasistatic_motion_rejects_endpoint_jitter_and_short_windows(jitter):
+    samples = [{"state": "WORKING", "point_count": 4, "span_y": 95.0} for _ in range(100)]
+    for sample in samples[-1:]:
+        sample["span_y"] += jitter
+    observation = summarize_utm_state_sequence(samples)
+    observation["duration_sec"] = 10.0
+    assert apply_quasistatic_motion_threshold(observation)["motion_direction"] == "STABLE"
+    observation["duration_sec"] = 3.0
+    assert apply_quasistatic_motion_threshold(observation) == observation
+
+
+def test_quasistatic_motion_uses_final_position_not_intermediate_excursion():
+    samples = [{"state": "WORKING", "point_count": 4,
+                "span_y": 95.0 if i < 3 or i >= 97 else 85.0} for i in range(100)]
+    observation = summarize_utm_state_sequence(samples)
+    observation["duration_sec"] = 10.0
+    result = apply_quasistatic_motion_threshold(observation)
+    assert result["motion_direction"] == "STABLE"
+    assert result["motion_delta_px"] == 0.0
+
+
+def test_quasistatic_downward_requires_valid_marker_evidence():
+    samples = [{"state": "UNKNOWN", "point_count": 0, "span_y": 95 - i} for i in range(100)]
+    observation = summarize_utm_state_sequence(samples)
+    observation["duration_sec"] = 10.0
+    assert apply_quasistatic_motion_threshold(observation) == observation
+
+
+def test_quasistatic_downward_preserves_clear_upward_motion():
+    samples = [{"state": "WORKING", "point_count": 4, "span_y": 95 + i} for i in range(100)]
+    observation = summarize_utm_state_sequence(samples)
+    observation["duration_sec"] = 10.0
+    assert apply_quasistatic_motion_threshold(observation)["motion_direction"] == "UP"
 
 
 def test_parse_ros2_string_stream_returns_each_summary_sample() -> None:

@@ -15,11 +15,13 @@ import time
 from typing import Any
 
 from mcp_tools.tool_registry import ToolRegistry
+from device_bridges.camera_vision.utm_state_observer import apply_quasistatic_motion_threshold
 from utils.equipment_vision_tasks import EQUIPMENT_VISION_TASK_IDS
 from utils.utm_specimen_presence import inspect_specimen_presence, virtual_specimen_frame_data_url
 
 UTM_CHECK_IDS = set(EQUIPMENT_VISION_TASK_IDS)
 UTM_MOTION_TRANSITIONS = {"NOT_WORKING_TO_WORKING", "WORKING_TO_NOT_WORKING"}
+UTM_QUASISTATIC_CHECKS = {"utm_motion_down", "utm_motion_confirm", "utm_state_not_working", "utm_test_complete"}
 UTM_PASSIVE_VERIFICATIONS = {
     "utm_state_working": ("WORKING", "state"),
     "utm_motion_down": ("DOWN", "motion_direction"),
@@ -509,11 +511,13 @@ def _equipment_cross_check(
             try:
                 observation = dict(
                     utm_state_observer(
-                        duration_sec=duration_sec,
+                        duration_sec=10.0 if check_id in UTM_QUASISTATIC_CHECKS else duration_sec,
                         sample_interval_sec=sample_interval_sec,
                         minimum_samples=minimum_samples,
                     )
                 )
+                if check_id in UTM_QUASISTATIC_CHECKS:
+                    observation = apply_quasistatic_motion_threshold(observation)
             except Exception as exc:  # Hardware/topic timeout should become explicit evidence, not a traceback.
                 observation_error = type(exc).__name__
                 observation = {"ok": False, "failure_code": "TOPIC_TIMEOUT", "error": observation_error, "message": str(exc)}

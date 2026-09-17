@@ -13,6 +13,7 @@ from collections import Counter
 from collections.abc import Callable
 from datetime import datetime, timezone
 import json
+import math
 import shlex
 from statistics import median
 import subprocess
@@ -21,6 +22,35 @@ from typing import Any
 
 VALID_STATES = {"WORKING", "NOT_WORKING"}
 INSUFFICIENT_EVIDENCE = "UTM_INSUFFICIENT_TEMPORAL_EVIDENCE"
+
+
+def apply_quasistatic_motion_threshold(observation: dict[str, Any]) -> dict[str, Any]:
+    """Resolve slow motion in either direction without changing completion state.
+
+    Compare the first and last three valid spans after the observation window.
+    Endpoint medians reject isolated frame outliers; no trend fitting is used.
+    """
+    result = dict(observation)
+    duration = float(result.get("duration_sec") or 0.0)
+    if not result.get("ok") or duration < 10.0:
+        return result
+    values = [float(sample["span_y"]) for sample in _valid_samples(result.get("samples") or [])
+              if isinstance(sample.get("span_y"), (int, float))
+              and math.isfinite(float(sample["span_y"]))]
+    if len(values) < 8:
+        return result
+    start = float(median(values[:3]))
+    end = float(median(values[-3:]))
+    delta = end - start
+    result.update(motion_method="endpoint_median", span_y_start=start, span_y_end=end,
+                  motion_delta_px=delta, motion_threshold_px=0.25)
+    if delta <= -0.25:
+        result["motion_direction"] = "DOWN"
+    elif delta >= 0.25:
+        result["motion_direction"] = "UP"
+    else:
+        result["motion_direction"] = "STABLE"
+    return result
 
 
 def _now_iso() -> str:

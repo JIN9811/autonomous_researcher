@@ -519,3 +519,22 @@ then moved to USB3 during re-enumeration, but later `NVDA8000:00` reported
 from `lsusb`. In that state, ROS can create publishers but no frames arrive.
 Recover the USB controller by replug/power-cycle/reboot before live D455F
 validation; test mode continues through the deterministic virtual pose path.
+
+### Quasi-static motion evidence (2026-09-18)
+
+Compression, motion confirmation, and return/completion observations use a
+10-second window. Compare the median of the first three finite valid marker spans
+with the median of the final three. Final minus initial span at or below -0.25 px
+means `DOWN`; at or above +0.25 px means `UP`; the open interval between them means
+`STABLE`. No trend fitting or rate normalization is used. At least eight valid
+spans are required. This is a pixel threshold, not millimetres: endpoint medians
+reject isolated frame outliers, but sustained camera movement can still affect
+the measurement. Ordered samples are used because ROS echo timestamps are assigned
+during stream parsing, not at camera acquisition.
+
+Return verification still runs after the skill and requires `NOT_WORKING` marker
+geometry. Upward movement alone cannot authorize robot entry. The existing target
+height, CSV validation, specimen identity, and completion checks remain unchanged.
+An already returned, stationary crosshead can therefore pass the return-state
+check without having to move again. Evidence freshness remains five seconds from
+the last fresh sample, independent of the observation-window duration.

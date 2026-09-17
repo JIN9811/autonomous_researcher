@@ -8,10 +8,62 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from mcp_tools.camera_tools import register_camera_tools
 from mcp_tools.tool_registry import ToolRegistry
+
+
+@pytest.mark.parametrize("check_id,expected_duration,expected_ok", [
+    ("utm_motion_down", 10.0, True), ("utm_state_not_working", 10.0, False),
+    ("utm_state_working", 3.0, True),
+])
+def test_quasistatic_check_duration_preserves_state_requirements(check_id, expected_duration, expected_ok):
+    from device_bridges.camera_vision.utm_state_observer import summarize_utm_state_sequence
+    calls = []
+
+    def observer(**kwargs):
+        calls.append(kwargs)
+        samples = [{"state": "WORKING", "point_count": 4,
+                    "span_y": 95 - 0.4 * (i + 0.5) / 100} for i in range(100)]
+        result = summarize_utm_state_sequence(samples)
+        result["duration_sec"] = kwargs["duration_sec"]
+        return result
+
+    registry = ToolRegistry()
+    register_camera_tools(registry, utm_state_observer=observer)
+    result = registry.call("vision.equipment_cross_check", {
+        "runtime_mode": "live", "duration_sec": 3.0,
+        "checks": [{"check_id": check_id, "device": "utm"}],
+    })
+    assert calls[0]["duration_sec"] == expected_duration
+    assert result["ok"] is expected_ok
+
+
+@pytest.mark.parametrize("state,drift,expected_ok,direction", [
+    ("WORKING", 0.4, False, "UP"),
+    ("NOT_WORKING", 0.4, True, "UP"),
+    ("NOT_WORKING", 0.0, True, "STABLE"),
+])
+def test_return_motion_is_not_a_substitute_for_final_clearance_state(state, drift, expected_ok, direction):
+    from device_bridges.camera_vision.utm_state_observer import summarize_utm_state_sequence
+
+    def observer(**kwargs):
+        assert kwargs["duration_sec"] == 10.0
+        result = summarize_utm_state_sequence([
+            {"state": state, "point_count": 4, "span_y": 280 + drift * (i + 0.5) / 100}
+            for i in range(100)])
+        result["duration_sec"] = kwargs["duration_sec"]
+        return result
+
+    registry = ToolRegistry()
+    register_camera_tools(registry, utm_state_observer=observer)
+    result = registry.call("vision.equipment_cross_check", {
+        "runtime_mode": "live", "checks": [{"check_id": "utm_state_not_working", "device": "utm"}],
+    })
+    assert result["ok"] is expected_ok
+    assert result["results"][0]["evidence"]["motion_direction"] == direction
 
 
 class FakeRuntimeManager:
@@ -119,7 +171,7 @@ def test_live_utm_motion_check_uses_observer_and_runtime_manager() -> None:
 
     assert manager.start_calls == 1
     assert manager.probe_calls == 1
-    assert calls == [{"duration_sec": 5.0, "sample_interval_sec": 0.2, "minimum_samples": 8}]
+    assert calls == [{"duration_sec": 10.0, "sample_interval_sec": 0.2, "minimum_samples": 8}]
     assert result["ok"] is True
     assert result["observer_mode"] == "ros_topic"
     assert result["runtime_status"]["status"] == "running"
