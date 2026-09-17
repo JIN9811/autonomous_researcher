@@ -111,7 +111,6 @@ UTM_COMPRESSION_BLOCKS: tuple[tuple[str, str], ...] = (
 
 UTM_PASSIVE_VISION_SLOTS: dict[str, tuple[str, str]] = {
     "prepare_next_specimen": ("utm_state_working", "WORKING"),
-    "start_test": ("utm_motion_down", "DOWN"),
     "restore_robot_clearance": ("utm_state_not_working", "NOT WORKING"),
 }
 

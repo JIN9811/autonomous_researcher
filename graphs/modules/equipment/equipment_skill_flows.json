@@ -41,11 +41,11 @@
           "vision": {
             "blocking": false,
             "detected": "next",
-            "enabled": true,
+            "enabled": false,
             "error": "__blocked__",
             "not_detected": "__blocked__",
-            "result_label": "DOWN",
-            "task_id": "utm_motion_down",
+            "result_label": "",
+            "task_id": "",
             "timeout": "__blocked__"
           }
         },

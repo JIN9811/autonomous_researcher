@@ -66,7 +66,6 @@ def test_utm_template_builds_the_recorded_cycle_without_runtime_bindings() -> No
     }
     assert passive_vision == {
         "prepare_next_specimen": ("utm_state_working", "WORKING"),
-        "start_test": ("utm_motion_down", "DOWN"),
         "restore_robot_clearance": ("utm_state_not_working", "NOT WORKING"),
     }
     assert all(block["vision"]["blocking"] is False for block in flow["blocks"])

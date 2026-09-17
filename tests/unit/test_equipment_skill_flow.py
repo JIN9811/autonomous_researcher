@@ -73,6 +73,24 @@ def test_flow_store_round_trips_composite_blocks(tmp_path: Path) -> None:
     assert "nodes" not in loaded
 
 
+def test_deployed_utm_assembly_omits_down_observer_but_keeps_start_and_return():
+    path = Path(__file__).resolve().parents[2] / "graphs/modules/equipment/equipment_skill_flows.json"
+    flow = EquipmentSkillFlowStore(path).get("utm_windows_v1")
+    blocks = {block["id"]: block for block in flow["blocks"]}
+    assert blocks["start_test"]["skill"] == {
+        "skill_id": "utm_start_test", "skill_version": "1.0.11"}
+    assert blocks["start_test"]["vision"]["enabled"] is False
+    assert blocks["start_test"]["vision"]["task_id"] == ""
+    assert blocks["start_test"]["agentic"]["failed"] == "__blocked__"
+    assert {key: block["vision"]["task_id"] for key, block in blocks.items()
+            if block["vision"]["enabled"]} == {
+        "prepare_next_specimen": "utm_state_working",
+        "restore_robot_clearance": "utm_state_not_working",
+    }
+    assert "monitor_contact_and_run" in blocks
+    assert "save_raw_data" in blocks and "validate_raw_data" in blocks
+
+
 def test_explicit_agentic_task_is_canonical_and_updates_legacy_label(tmp_path: Path) -> None:
     store = EquipmentSkillFlowStore(tmp_path / "flows.json")
     flow = _flow()

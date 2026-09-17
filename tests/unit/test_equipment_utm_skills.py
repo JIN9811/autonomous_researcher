@@ -370,7 +370,6 @@ def test_stages_eight_bounded_utm_skills_and_binds_exact_deployed_versions(tmp_p
         if block["vision"]["enabled"]
     } == {
         "prepare_next_specimen": "utm_state_working",
-        "start_test": "utm_motion_down",
         "restore_robot_clearance": "utm_state_not_working",
     }
     assert all(block["vision"]["blocking"] is False for block in flow["blocks"])
