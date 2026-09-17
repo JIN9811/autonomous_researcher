@@ -2,12 +2,16 @@
 
 ## Purpose
 
+Paths containing `/home/<user>/` are documentation placeholders. Replace `<user>`
+with the account running the bridge before running commands or editing YAML;
+YAML values must contain the resolved absolute path.
+
 This runtime bridge connects the cloned UTM ROS program into ATR as a live/test device evidence provider. It does not replace the Windows PyAutoGUI UTM control path. It adds ROS camera, marker-state, and RQT-like node-flow evidence that Vision Agent and Lab Equipment Agent can use before handing UTM data to Analysis Agent.
 
 External source-of-truth repository:
 
 ```text
-/home/jin/external_repos/UTM
+/home/<user>/external_repos/UTM
 https://github.com/hylee12345/UTM
 ```
 
@@ -34,10 +38,10 @@ The RQT-like internal flow must follow the cloned UTM program, not a hand-invent
 Source files used for the expected graph:
 
 ```text
-/home/jin/external_repos/UTM/scripts/start_utm_vision_stack.sh
-/home/jin/external_repos/UTM/src/compression_tester_monitor/launch/camera_rect.launch.py
-/home/jin/external_repos/UTM/src/compression_tester_monitor/launch/green_dot_monitor.launch.py
-/home/jin/external_repos/UTM/scripts/yolo.sh
+/home/<user>/external_repos/UTM/scripts/start_utm_vision_stack.sh
+/home/<user>/external_repos/UTM/src/compression_tester_monitor/launch/camera_rect.launch.py
+/home/<user>/external_repos/UTM/src/compression_tester_monitor/launch/green_dot_monitor.launch.py
+/home/<user>/external_repos/UTM/scripts/yolo.sh
 ```
 
 Expected node/topic flow:
@@ -79,17 +83,17 @@ Validated on this workstation:
 ```text
 Ubuntu 24.04.4 LTS noble, aarch64
 ROS 2 Jazzy
-UTM workspace: /home/jin/external_repos/UTM
-YOLO ROS workspace: /home/jin/external_repos/yolo_ros
-YOLO model: /home/jin/external_repos/yolo_ros/models/yolov8m.pt
+UTM workspace: /home/<user>/external_repos/UTM
+YOLO ROS workspace: /home/<user>/external_repos/yolo_ros
+YOLO model: /home/<user>/external_repos/yolo_ros/models/yolov8m.pt
 ```
 
 Validated commands:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-source /home/jin/external_repos/UTM/install/setup.bash
-source /home/jin/external_repos/yolo_ros/install/setup.bash
+source /home/<user>/external_repos/UTM/install/setup.bash
+source /home/<user>/external_repos/yolo_ros/install/setup.bash
 ros2 pkg list | rg '^(compression_tester_monitor|roi_image_cropper|yolo_bringup|yolo_ros|yolo_msgs)$'
 ```
 
@@ -209,7 +213,7 @@ ros2 run camera_calibration cameracalibrator --size 9x6 --square 0.021 image:=/c
 ### UTM Workspace
 
 ```bash
-cd /home/jin/external_repos/UTM
+cd /home/<user>/external_repos/UTM
 source /opt/ros/jazzy/setup.bash
 rosdep check --from-paths src --ignore-src
 colcon build --symlink-install
@@ -220,9 +224,9 @@ ros2 pkg list | rg '^(compression_tester_monitor|roi_image_cropper)$'
 ### YOLO ROS Workspace
 
 ```bash
-cd /home/jin/external_repos
+cd /home/<user>/external_repos
 git clone https://github.com/mgonzs13/yolo_ros.git yolo_ros
-cd /home/jin/external_repos/yolo_ros
+cd /home/<user>/external_repos/yolo_ros
 source /opt/ros/jazzy/setup.bash
 rosdep check --from-paths . --ignore-src
 colcon build --symlink-install
@@ -233,14 +237,14 @@ Install `uv`, then pre-sync the YOLO runtime Python environment used by `yolo_br
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
-uv sync --project /home/jin/external_repos/yolo_ros/install/yolo_ros/share/yolo_ros
+uv sync --project /home/<user>/external_repos/yolo_ros/install/yolo_ros/share/yolo_ros
 ```
 
 Download the local model used by the cloned UTM start script override:
 
 ```bash
-mkdir -p /home/jin/external_repos/yolo_ros/models
-curl -L -o /home/jin/external_repos/yolo_ros/models/yolov8m.pt \
+mkdir -p /home/<user>/external_repos/yolo_ros/models
+curl -L -o /home/<user>/external_repos/yolo_ros/models/yolov8m.pt \
   https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8m.pt
 ```
 
@@ -252,18 +256,18 @@ Disk note: the local `yolo_ros` workspace plus uv environment is about 5 GB on t
 
 ```yaml
 utm_vision_runtime:
-  workspace_root: /home/jin/external_repos/UTM
-  script_path: /home/jin/external_repos/UTM/scripts/start_utm_vision_stack.sh
+  workspace_root: /home/<user>/external_repos/UTM
+  script_path: /home/<user>/external_repos/UTM/scripts/start_utm_vision_stack.sh
   log_dir: artifacts/utm_runtime
   summary_topic: /compression_tester/summary
   frame_topic: /image_utm
   ros_setup_paths:
     - /opt/ros/jazzy/setup.bash
   extra_setup_paths:
-    - /home/jin/external_repos/UTM/install/setup.bash
-    - /home/jin/external_repos/yolo_ros/install/setup.bash
+    - /home/<user>/external_repos/UTM/install/setup.bash
+    - /home/<user>/external_repos/yolo_ros/install/setup.bash
   environment:
-    YOLO_MODEL_PATH: /home/jin/external_repos/yolo_ros/models/yolov8m.pt
+    YOLO_MODEL_PATH: /home/<user>/external_repos/yolo_ros/models/yolov8m.pt
   allow_virtual_bridge_in_test: true
 ```
 
@@ -272,14 +276,14 @@ The runtime command always prepends:
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 source /opt/ros/jazzy/setup.bash
-source /home/jin/external_repos/UTM/install/setup.bash
-source /home/jin/external_repos/yolo_ros/install/setup.bash
-export YOLO_MODEL_PATH=/home/jin/external_repos/yolo_ros/models/yolov8m.pt
+source /home/<user>/external_repos/UTM/install/setup.bash
+source /home/<user>/external_repos/yolo_ros/install/setup.bash
+export YOLO_MODEL_PATH=/home/<user>/external_repos/yolo_ros/models/yolov8m.pt
 v4l2-ctl --device=/dev/video0 --set-ctrl=exposure_dynamic_framerate=0
-export UTM_VISION_ROOT=/home/jin/external_repos/UTM
+export UTM_VISION_ROOT=/home/<user>/external_repos/UTM
 export UTM_CAMERA_FPS=60.0
 export UTM_CAMERA_PIXEL_FORMAT=mjpeg2rgb
-bash /home/jin/external_repos/UTM/scripts/start_utm_vision_stack.sh
+bash /home/<user>/external_repos/UTM/scripts/start_utm_vision_stack.sh
 ```
 
 ## Low-Latency Image Transport Contract
@@ -306,7 +310,7 @@ Applied locations:
 - `yolo_ros` launch through `image_reliability:=1`, which maps to Reliable and
   uses depth 1 inside the local `yolo_ros` nodes.
 - FastDDS transport profile in
-  `/home/jin/external_repos/UTM/config/fastdds_utm_shm.xml`, loaded automatically
+  `/home/<user>/external_repos/UTM/config/fastdds_utm_shm.xml`, loaded automatically
   by `scripts/start_utm_vision_stack.sh` with asynchronous publication.
 
 Measured reason:
@@ -498,7 +502,7 @@ info:  /camera/d455f/color/camera_info
 
 The Spark workstation should prefer the local RSUSB Python/librealsense build
 when Python tools import `pyrealsense2`. The bridge injects
-`/home/jin/librealsense-rsusb/build-rsusb-system/Release` into `PYTHONPATH` and
+`/home/<user>/librealsense-rsusb/build-rsusb-system/Release` into `PYTHONPATH` and
 `LD_LIBRARY_PATH` for the one-shot tracker subprocess.
 
 Runtime boundary:
