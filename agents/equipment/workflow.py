@@ -299,6 +299,12 @@ async def run_decided_workflow(agent, state, ctx, flow):
     service = EquipmentRuntimeService(agent._RUNTIME_ROOT / "workflow_decisions")
     specimen = state.current_experiment_spec.get("specimen_id") or (state.run_metadata.get("specimen_result") or {}).get("specimen_id") or "specimen-unresolved"
     sequence_id = f"stacked-loop-{state.loop_count}"
+    tail_request = None
+    if (state.run_metadata.get('equipment_tail_recovery') or {}).get('status') == 'running':
+        from app.equipment_tail_recovery import read_request, validate, ROOT
+        tail_request = read_request(ROOT / 'runs', state.run_id)
+        validate(state, tail_request, flow)
+        sequence_id += '-tail-' + tail_request['source_execution_id']
     selection_retry = state.run_metadata.get("equipment_selection_retry") or {}
     if selection_retry:
         from app.equipment_selection_recovery import validate_selection_boundary
@@ -352,6 +358,10 @@ async def run_decided_workflow(agent, state, ctx, flow):
     source_scope = source_settings.get("source_scope", {}) if isinstance(source_settings, dict) else {}
     reference_context = await asyncio.to_thread(source_context, ctx, state.active_goal, scope=source_scope)
     checkpoint = deepcopy(record["checkpoint"]) if retry_result else {"workflow_execution_id": execution_id}
+    if tail_request is not None and not record.get('idempotent'):
+        checkpoint = deepcopy(tail_request['checkpoint'])
+        checkpoint['workflow_execution_id'] = execution_id
+        checkpoint.pop('flow_execution_id', None)
     decisions, diagnostics = [], []
     result = retry_result
     attempts = 0

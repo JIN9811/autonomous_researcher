@@ -131,7 +131,7 @@ def test_mixed_possible_provider_route_excludes_private_memory_without_both_cons
 @pytest.mark.asyncio
 @pytest.mark.parametrize("query, expected_stage", [
     ("Lab Equipment Agent", "retrieved"),
-    ("nonexistenttokenonly", "no_match"),
+    ("nonexistenttokenonly", "retrieved"),
 ])
 async def test_deterministic_equipment_entrypoint_never_marks_retrieved_context_delivered(tmp_path, query, expected_stage):
     """Would fail if a no-LLM branch advanced a delivery receipt before any prompt existed."""
@@ -210,4 +210,8 @@ async def test_every_active_owner_actual_decision_prompt_carries_relevant_or_no_
     assert ctx.prompts, owner
     pack = reference_pack_from_prompt(*ctx.prompts[0][:2])
     assert pack["authority"] == "reference_only"
-    assert bool(pack["items"]) is has_match
+    # Operational references explain this owner; unrelated global goals cannot
+    # select arbitrary Wiki articles or suppress the owner's scoped reference.
+    assert [item['citation_id'] for item in pack['items']] == [f'wiki:{owner}-role']
+    assert all(item['excerpt_kind'] == 'runtime_role_summary' for item in pack['items'])
+    assert pack['usage_boundary']['may_authorize_or_block_execution'] is False

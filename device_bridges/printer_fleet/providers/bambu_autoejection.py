@@ -19,6 +19,7 @@ from typing import Any
 
 
 SCHEMA_MARKER = "atr.bambu.autoejection.v1"
+X2D_COOLDOWN_MARKER = "; atr.x2d.pre_eject_nozzle_cooldown.v1"
 DEFAULT_BUILD_ENVELOPE_MM = (256.0, 256.0, 260.0)
 _END_COMMAND_RE = re.compile(r"^\s*(M84|M104\s+S0|M140\s+S0|M107)\b", re.IGNORECASE)
 _MOTION_RE = re.compile(r"^\s*G(?:0|1)\b", re.IGNORECASE)
@@ -49,6 +50,56 @@ def _safe_stem_for_autoeject(path: Path) -> str:
     if lower_name.endswith(".gcode"):
         return path.name[: -len(".gcode")]
     return path.stem
+
+
+def _has_x2d_end_block(gcode_text: str) -> bool:
+    # Slicer configuration comments contain an escaped copy of the end macro.
+    # Only a standalone marker denotes an actual executable end block.
+    return any(line.strip() == ';======== X2D end gcode =========='
+               for line in gcode_text.splitlines())
+
+
+def _x2d_end_anchor(gcode_text: str) -> tuple[list[str], int]:
+    """Recognize the native dual-unload block; never guess at another end macro."""
+    lines = gcode_text.splitlines()
+    starts = [i for i, line in enumerate(lines) if line.strip() == ';======== X2D end gcode ==========']
+    if len(starts) != 1:
+        raise ValueError('Exactly one native X2D end block is required')
+    commands = [(i, line.split(';', 1)[0].strip()) for i, line in enumerate(lines)
+                if i > starts[0] and line.split(';', 1)[0].strip()]
+    expected = ['M620 S65279 B', 'T65279', 'G150.1 F8000', 'M621 S65279 B',
+                'M620 S65535 B', 'T65535', 'G150.1 F8000', 'M621 S65535 B', 'G150.3']
+    matches = [n for n in range(len(commands)) if [s for _, s in commands[n:n+len(expected)]] == expected]
+    if len(matches) != 1:
+        raise ValueError('Native X2D unload/wipe sequence is missing or changed')
+    n = matches[0] + len(expected)
+    if [s for _, s in commands[n:n+5]] != ['M104 S0 T0', 'M104 S0 T1', 'M400', 'M17 S', 'M17 Z0.4']:
+        raise ValueError('Native X2D heater-off/motor-current boundary is missing or changed')
+    # Unload must run outside firmware conditional sections with motors enabled.
+    depth = 0
+    for _, command in commands[:matches[0]]:
+        if command.startswith('M622 '): depth += 1
+        if command == 'M623': depth -= 1
+        if depth < 0 or command.split()[0] in {'M18', 'M84'} or command.startswith('M17 Z'):
+            raise ValueError('Unsafe X2D end boundary')
+    if depth != 0:
+        raise ValueError('X2D unload is conditionally executed')
+    return lines, commands[n][0]
+
+
+def prepare_x2d_nozzle_cooldown(gcode_text: str) -> str:
+    """Retain native unloading, wait at its waste-bin position, then heaters off.
+
+    140 C / M109 S140 A is the X2D native pre-leveling cooling command.
+    The operator validated this sequence; 140 C is not a cold/safe-touch nozzle.
+    No extra extrusion, tool selection or large retraction is introduced.
+    """
+    if X2D_COOLDOWN_MARKER in gcode_text:
+        raise ValueError('X2D cooldown already present; regenerate from the original slice')
+    lines, anchor = _x2d_end_anchor(gcode_text)
+    lines[anchor:anchor] = [X2D_COOLDOWN_MARKER, 'M400',
+        'M109 S140 A ; native X2D pre-eject nozzle cooling wait']
+    return '\n'.join(lines).rstrip() + '\n'
 
 
 def _extract_axis_positions(line: str) -> dict[str, float]:
@@ -326,6 +377,25 @@ class BambuGcodeAutoejectionValidator:
             blockers.append("BAMBU_AUTOEJECTION_TAIL_BEFORE_LAST_EXTRUSION")
         if marker_count > 0 and not self._has_cooldown_wait(gcode_text):
             blockers.append("BAMBU_AUTOEJECTION_COOLDOWN_WAIT_MISSING")
+        if _has_x2d_end_block(gcode_text):
+            # Old already-patched files must not silently retain eject-before-unload.
+            try:
+                if gcode_text.count(X2D_COOLDOWN_MARKER) != 1:
+                    raise ValueError('Nozzle cooldown missing')
+                marker = gcode_text.index(X2D_COOLDOWN_MARKER)
+                end = gcode_text.index('; atr.bambu.autoejection.end')
+                tail = gcode_text.index('; ' + SCHEMA_MARKER)
+                off0 = gcode_text.index('M104 S0 T0', marker)
+                off1 = gcode_text.index('M104 S0 T1', marker)
+                low_current = gcode_text.index('M17 Z0.4', marker)
+                if not marker < off0 < off1 < tail < end < low_current:
+                    raise ValueError('Unsafe X2D cleanup order')
+                if 'M109 S140 A' not in gcode_text[marker:off0]:
+                    raise ValueError('Nozzle cooling wait missing')
+                native = gcode_text[:marker] + gcode_text[off0:tail] + gcode_text[end:].split('\n', 1)[1]
+                _x2d_end_anchor(native)
+            except (ValueError, IndexError):
+                blockers.append('BAMBU_X2D_PRE_EJECT_CLEANUP_INVALID')
         if self._contains_unexpected_home(gcode_text):
             blockers.append("BAMBU_AUTOEJECTION_UNEXPECTED_HOME")
         if self._contains_unsafe_motion(gcode_text):
@@ -1171,6 +1241,25 @@ class BambuGcodeAutoejectionPatcher:
             tail_lines.extend(self._full_bed_sweep_lines())
         tail_lines.extend(["M400", "; atr.bambu.autoejection.end"])
         tail = "\n".join(tail_lines)
+        if _has_x2d_end_block(gcode_text):
+            try:
+                prepared = prepare_x2d_nozzle_cooldown(gcode_text)
+                lines = prepared.splitlines()
+                marker = lines.index(X2D_COOLDOWN_MARKER)
+                off = next(i for i in range(marker, len(lines))
+                           if lines[i].split(';', 1)[0].strip() == 'M104 S0 T1')
+                # Preserve the entire native cleanup and final bed-lowering block.
+                # Never eject at reduced motor current or after motor disable.
+                tail = tail.replace('preserve_slicer_end_gcode_then_eject',
+                                    'native_x2d_unload_cool_then_eject')
+                tail = tail.replace('; atr.bambu.autoejection.end',
+                    f'M140 S0 ; restore native bed-off target after cooldown\n'
+                    f'G0 Z{safe_approach_z:.3f} F{int(self.z_feedrate_mm_min)}\n'
+                    'G150.3 ; native waste-bin park after ejection\nM400\n; atr.bambu.autoejection.end')
+                return '\n'.join([*lines[:off+1], tail, *lines[off+1:]]).rstrip() + '\n'
+            except ValueError:
+                # The validator fails closed instead of choosing a guessed anchor.
+                return gcode_text + '\n; atr_x2d_cleanup_blocked=unrecognized_native_end\n'
         return self._insert_before_end_commands(gcode_text, tail)
 
     def _insert_before_end_commands(self, gcode_text: str, tail: str) -> str:

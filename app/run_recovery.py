@@ -115,6 +115,11 @@ def prepare_error_resume(controller):
     snapshot = controller.snapshot()
     run_id = controller._state.run_id
     _check_boundary(snapshot, run_id)
+    if (controller._state.run_metadata.get('equipment_tail_recovery') or {}).get('status') == 'ready':
+        from app.equipment_tail_recovery import read_request, validate
+        request = read_request(controller._deps.run_root, run_id)
+        validate(controller._state, request, request['description']['flow'])
+        return request['source_execution_id']
     _, data = equipment_archive(controller._deps.run_root, run_id)
     archived_request = controller._state.run_metadata.get("archived_postprocessing_request")
     if archived_request:
@@ -450,6 +455,16 @@ def restore_checkpoint(controller, run_id):
         raise ValueError("Cannot replace another error run")
     if any(getattr(controller._state, k) for k in ("stop_requested", "safe_stop_requested", "emergency_stop_requested")) or controller._active_safety_sources():
         raise ValueError("Safety recovery is required before restore")
+    if (controller._state.run_id == run_id and controller._state.is_paused
+            and (run_directory(controller._deps.run_root, run_id) / 'recovery/equipment_tail_request.json').is_file()):
+        from app.equipment_tail_recovery import read_request, restore
+        request = read_request(controller._deps.run_root, run_id)
+        # This request resumes a particular in-memory cancellation boundary. Its
+        # historical file must not hijack restart recovery or a later specimen.
+        loop_id = request.get('loop_id')
+        if (type(loop_id) is int and controller._state.loop_count in (loop_id, loop_id + 1)
+                and controller._state.current_experiment_spec == request.get('experiment_spec')):
+            return restore(controller, run_id)
     saved = read_checkpoint(controller._deps.run_root, run_id)
     planning = saved.get("planning") or {}
     session_id = planning.get("planning_session_id")

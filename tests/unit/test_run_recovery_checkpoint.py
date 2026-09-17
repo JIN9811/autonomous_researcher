@@ -4,6 +4,46 @@ import json
 import pytest
 
 
+@pytest.mark.parametrize('case', ['fresh_server', 'unpaused', 'later_specimen', 'later_cycle', 'matching'])
+def test_tail_request_only_routes_its_current_paused_boundary(tmp_path, monkeypatch, case):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from app import run_recovery, equipment_tail_recovery
+    from orchestrator.state import OrchestratorState, Stage
+    state = OrchestratorState(run_id='saved-run', experiment_id='e', stage=Stage.ERROR,
+        is_paused=True, current_experiment_spec={'specimen_id': 's1'})
+    request = {'loop_id': 0, 'experiment_spec': {'specimen_id': 's1'}}
+    if case == 'fresh_server':
+        state.run_id, state.stage = 'startup-run', Stage.IDLE
+    elif case == 'unpaused':
+        state.is_paused = False
+    elif case == 'later_specimen':
+        state.current_experiment_spec = {'specimen_id': 's2'}
+    elif case == 'later_cycle':
+        state.loop_count = 2
+    folder = tmp_path / 'saved-run/recovery'
+    folder.mkdir(parents=True)
+    (folder / 'equipment_tail_request.json').write_text('{}')
+    controller = SimpleNamespace(_state=state, _deps=SimpleNamespace(run_root=tmp_path),
+        snapshot=lambda: {'is_running': False}, _active_safety_sources=lambda: [])
+    class OrdinaryCheckpointBoundary(Exception):
+        pass
+    def read_checkpoint(*args):
+        raise OrdinaryCheckpointBoundary  # Existing validation still owns restore.
+    tail_restore = Mock(return_value={'ok': True, 'status': 'tail'})
+    monkeypatch.setattr(run_recovery, 'read_checkpoint', read_checkpoint)
+    monkeypatch.setattr(equipment_tail_recovery, 'read_request', lambda *args: request)
+    monkeypatch.setattr(equipment_tail_recovery, 'restore', tail_restore)
+    if case == 'matching':
+        assert run_recovery.restore_checkpoint(controller, 'saved-run')['status'] == 'tail'
+        tail_restore.assert_called_once_with(controller, 'saved-run')
+    else:
+        with pytest.raises(OrdinaryCheckpointBoundary):
+            run_recovery.restore_checkpoint(controller, 'saved-run')
+        tail_restore.assert_not_called()
+    assert controller._state is state
+
+
 def historical_fixture(tmp_path):
     from PIL import Image
     from app import run_recovery
@@ -249,7 +289,8 @@ def test_checkpoint_rejects_wrong_run_or_unsafe_boundary(tmp_path, state):
         save_checkpoint({"is_running": False, "state": state}, {}, tmp_path, "run-test")
 
 
-def test_restore_rebinds_original_setup_and_transcript_after_new_server_session(tmp_path, monkeypatch):
+@pytest.mark.parametrize('historical_tail_request', [False, True])
+def test_restore_rebinds_original_setup_and_transcript_after_new_server_session(tmp_path, monkeypatch, historical_tail_request):
     from app.bootstrap import load_runtime
     from app import run_recovery
     from orchestrator.state import Stage
@@ -268,13 +309,19 @@ def test_restore_rebinds_original_setup_and_transcript_after_new_server_session(
     controller._planning_session_id = "new-session"
     controller._setup_store()
     state = controller._state.model_copy(deep=True)
+    state.run_id = 'saved-run'
     state.stage = Stage.ERROR
+    if historical_tail_request:
+        recovery = tmp_path / state.run_id / 'recovery'
+        recovery.mkdir(parents=True)
+        (recovery / 'equipment_tail_request.json').write_text('{}')
     saved = {"snapshot": {"state": state.model_dump(mode="json")},
         "csv_sha256": "preserved", "planning": {"planning_session_id": "original-session",
         "transcript_path": str(old_path), "messages": [], "message_total": 0}}
     monkeypatch.setattr(run_recovery, "read_checkpoint", lambda *args: saved)
     monkeypatch.setattr(run_recovery, "prepare_error_resume", lambda *args: "execution")
     run_recovery.restore_checkpoint(controller, state.run_id)
+    assert controller._state.run_id == 'saved-run'
     assert controller._planning_transcript_path() == old_path
     assert controller._setup_store()._session_id == "original-session"
     assert len(controller._setup_store().snapshot()["blocks"]) == 1

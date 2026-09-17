@@ -23,6 +23,22 @@ def test_only_never_executed_selection_is_recoverable():
     validate_selection_boundary(state,record)
 
 
+@pytest.mark.parametrize('mutation', [None, 'model_called', 'scope_changed', 'executed', 'other_error'])
+def test_pre_model_type_error_requires_no_execution_and_unchanged_scope(mutation):
+    state, record = fixture()
+    decision = {'phase': 'select', 'request': None, 'llm_used': False,
+        'scope_valid': True, 'error': 'TypeError: decision could not be validated'}
+    record['workflow_result']['data']['equipment_decisions'] = [decision]
+    if mutation == 'model_called': decision['llm_used'] = True
+    if mutation == 'scope_changed': decision['scope_valid'] = False
+    if mutation == 'executed': record['events'].append({'lifecycle': 'EXECUTING'})
+    if mutation == 'other_error': decision['error'] = 'TimeoutError: decision could not be validated'
+    if mutation is None:
+        validate_selection_boundary(state, record)
+    else:
+        with pytest.raises(ValueError): validate_selection_boundary(state, record)
+
+
 @pytest.mark.parametrize("fault",["executed","not_paused","wrong_run","not_stopped","unverified","estop"])
 def test_rejects_unsafe_boundaries(fault):
     state,record=fixture()

@@ -4,7 +4,8 @@ from copy import deepcopy
 import json
 import math
 from uuid import uuid4
-from agents.core.knowledge.context import build_reference_context, mark_reference_delivered, mark_reference_excluded, record_reference_use
+from agents.core.knowledge.context import mark_reference_delivered, mark_reference_excluded, record_reference_use
+from agents.core.knowledge.runtime_reference import build_execution_reference as build_reference_context
 
 
 TOOL_ARGUMENTS = {

@@ -2351,6 +2351,36 @@ async def test_printer_completion_wait_fails_after_repeated_transient_mqtt_timeo
 
 
 @pytest.mark.asyncio
+async def test_printer_monitor_resolves_failed_job_device_error_on_first_healthy_report(monkeypatch) -> None:
+    from datetime import datetime, timezone
+    from tests.unit.test_hardware_alert_lifecycle import fixture
+    from utils.hardware_alert_lifecycle import active_alerts
+    controller = load_runtime()
+    controller._state.mode = Mode.LIVE
+    _, report, _, _ = fixture()
+    report['observed_job_state'] = 'FAILED'
+    resolution_events = []
+    monkeypatch.setattr(controller, '_append_guardian_event', resolution_events.append)
+
+    async def receive(result):
+        await controller.emit_workspace_result(workspace='printer', tool='printer.status',
+            result=result, stage=Stage.SPECIMEN, module_id='specimen', agent='specimen_agent',
+            workflow='printer_status_monitor', event_type='workspace_monitor_snapshot',
+            mirror_live_message=False)
+
+    await receive({**report, 'ok': False, 'status': 'DEVICE_HEALTH_FAILED',
+                   'failure_code': 'BAMBU_DEVICE_ERROR', 'device_error': '5A0300400C'})
+    assert active_alerts(controller._state)
+    report['mqtt_snapshot']['received_at'] = datetime.now(timezone.utc).isoformat()
+    await receive({**report, 'status': 'COMMUNICATION_READY', 'failure_code': ''})
+    assert not active_alerts(controller._state)
+    assert controller._state.device_health['printer'] == 'ready'
+    assert any(e.get('schema') == 'hardware_alert_resolution.v1' for e in resolution_events)
+    assert all(i.get('status') == 'resolved' for i in controller._state.run_metadata['incident_records'])
+    assert not controller.snapshot()['is_running']
+
+
+@pytest.mark.asyncio
 async def test_printer_monitor_transient_mqtt_snapshot_does_not_raise_hardware_alert() -> None:
     controller = load_runtime()
     controller._state.mode = Mode.LIVE

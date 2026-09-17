@@ -44,6 +44,93 @@ class Model:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tool", ["accept_visual_evidence", "return_to_owner"])
+@pytest.mark.parametrize("mode", [Mode.LIVE, Mode.TEST])
+async def test_empty_clearance_box_reaches_image_review_without_auto_acceptance(state, capture, tool, mode):
+    from agents.vision.decision import review_visual_evidence
+    state.mode = mode
+    capture.update(status="clear", detected=False, clear_confirmed=True, roi_valid=True,
+                   bbox_xyxy=[], roi_xyxy=[2, 3, 28, 22], aggregate_red_area_px=0,
+                   component_count=0, failure_code="")
+    original = deepcopy(capture)
+    model = Model(tool)
+    result = await review_visual_evidence(state, model, capture, "clearance")
+    assert len(model.inputs) == 1 and len(model.inputs[0][2]) == 2
+    context = json.loads(model.inputs[0][1].split("\nCONTEXT:\n")[1])
+    assert context["coordinate_validation"]["bbox_xyxy"]["present"] is False
+    assert context["coordinate_validation"]["roi_xyxy"]["within_image"] is True
+    assert result["status"] == ("accepted" if tool == "accept_visual_evidence" else "review_required")
+    assert capture == original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", [
+    {"status":"occupied"}, {"status":"unknown"}, {"detected":True}, {"ok":False},
+    {"clear_confirmed":False}, {"roi_valid":False}, {"roi_xyxy":[]}, {"roi_xyxy":None},
+    {"roi_xyxy":[0, 0, 100, 100]}, {"failure_code":"CAPTURE_FAILED"}, {"center_px":[5, 5]},
+    {"bbox_xyxy":[0, 0, 0, 0]}, {"bbox_xyxy":[1, 2]}, {"bbox_xyxy":""},
+])
+async def test_empty_clearance_box_does_not_weaken_invalid_evidence_checks(state, capture, change):
+    from agents.vision.decision import review_visual_evidence
+    capture.update(status="clear", detected=False, clear_confirmed=True, roi_valid=True,
+                   bbox_xyxy=[], roi_xyxy=[2, 3, 28, 22], failure_code="")
+    capture.update(change)
+    model = Model()
+    result = await review_visual_evidence(state, model, capture, "clearance")
+    assert result["status"] == "review_required"
+    assert not model.inputs
+
+
+@pytest.mark.asyncio
+async def test_vision_references_are_scoped_before_delivery(state, capture, tmp_path):
+    from pathlib import Path
+    from knowledge.context_service import KnowledgeContextService
+    from agents.vision.decision import review_visual_evidence
+    model = Model()
+    model.knowledge_service = KnowledgeContextService(Path(__file__).resolve().parents[2], tmp_path)
+    state.active_goal = "Maximize SEA BO posterior specimen printing measurement"
+    result = await review_visual_evidence(state, model, capture, "active_cam")
+    context = json.loads(model.inputs[0][1].split("\nCONTEXT:\n")[1])
+    assert [item['citation_id'] for item in context['reference_only']['items']] == ['wiki:vision-role']
+    assert result['knowledge_delivery']['delivered_citation_ids'] == ['wiki:vision-role']
+    assert state.active_goal not in model.inputs[0][1]
+
+
+def test_original_raster_coordinates_are_normalized_without_visual_acceptance():
+    from agents.vision.decision import _coordinate_evidence
+    evidence = _coordinate_evidence({'bbox_xyxy': [348, 71, 393, 125],
+        'center_px': [370, 97], 'roi_xyxy': [115, 0, 538, 298]}, 640, 480)
+    assert evidence['center_percent_from_left_top'] == [57.81, 20.21]
+    assert evidence['bbox_xyxy']['within_image'] is True
+    assert evidence['scope'] == 'numeric_geometry_only_not_visual_acceptance'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('invalid', [
+    {'bbox_xyxy': [-1, 0, 20, 21]}, {'bbox_xyxy': [20, 2, 1, 21]},
+    {'bbox_xyxy': [1, 2, 40, 21]}, {'center_px': [float('nan'), 3]},
+    {'roi_xyxy': [0, 0, 640, 480]},
+    {'center_px': [30, 23]},
+])
+async def test_invalid_numeric_geometry_cannot_be_accepted_by_model(state, capture, invalid):
+    from agents.vision.decision import review_visual_evidence
+    capture.update(invalid)
+    model = Model()
+    result = await review_visual_evidence(state, model, capture, 'active_cam')
+    assert result['status'] == 'review_required'
+    assert not model.inputs
+
+
+@pytest.mark.asyncio
+async def test_valid_numbers_do_not_override_visual_rejection(state, capture):
+    from agents.vision.decision import review_visual_evidence
+    model = Model('return_to_owner')
+    result = await review_visual_evidence(state, model, capture, 'active_cam')
+    assert result['status'] == 'review_required'
+    assert 'do not estimate exact pixel coordinates' in model.inputs[0][1]
+
+
+@pytest.mark.asyncio
 async def test_review_transmits_ordered_images_and_preserves_detector_facts(state, capture):
     from agents.vision.decision import review_visual_evidence
     before, model = deepcopy(capture), Model()
@@ -372,7 +459,8 @@ async def test_clearance_model_disagreement_prevents_analysis_after_completed_re
     def call(name, payload):
         result = original_call(name, payload)
         if name == "vision.utm_specimen_presence.capture":
-            result.update(raw_frame_path=capture["raw_frame_path"], annotated_frame_path=capture["annotated_frame_path"])
+            result.update(raw_frame_path=capture["raw_frame_path"], annotated_frame_path=capture["annotated_frame_path"],
+                          roi_xyxy=[2, 3, 28, 22])  # Match the 32x24 fixture raster.
         return result
     tools.call = call
     def during_review():
@@ -413,6 +501,7 @@ async def test_model_acceptance_does_not_override_clearance_detector_gate(captur
         if name == "vision.utm_specimen_presence.capture":
             result.update(raw_frame_path=capture["raw_frame_path"],
                           annotated_frame_path=capture["annotated_frame_path"],
+                          roi_xyxy=[2, 3, 28, 22],
                           status=detector_status, clear_confirmed=False,
                           detected=detector_status == "occupied")
         return result

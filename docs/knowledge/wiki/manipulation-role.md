@@ -4,6 +4,12 @@
 
 # Manipulation Agent — Robot Tasks and Result Review
 
+## Runtime decision reference
+
+Manipulation supervises only the supplied robot task and registered executor. The current task contract determines required observations and completion checks. Commands, telemetry and visual confirmation are distinct evidence. Descriptions of other task phases do not authorize extra motion, replay or home checks.
+
+## Overview
+
 Manipulation (MAN) supervises configured policies, Skills and replay tasks within delegated scope. The LLM does not generate arbitrary joint commands or new robot policies.
 
 ## Execution sequence

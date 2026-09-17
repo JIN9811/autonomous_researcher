@@ -90,9 +90,12 @@ Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 
 | Runtime IDE 편집·검증·활성화·실행·관측·복구 | [runtime/runtime_ide.md](runtime/runtime_ide.md) |
 | 전체 에이전트의 루프·호출별 산출물 보관 및 과거 결과 조회 | [runtime/loop_artifact_archiving.md](runtime/loop_artifact_archiving.md) |
 | Guardian safety/alarm 계약 | [runtime/guardian_graphwide_safety.md](runtime/guardian_graphwide_safety.md) |
+| Hardware alert lifecycle and fresh recovery evidence | [gui/hardware_alert_lifecycle.md](gui/hardware_alert_lifecycle.md) |
+| X2D pre-ejection nozzle cleanup | [device_bridges/x2d_pre_eject_cleanup.md](device_bridges/x2d_pre_eject_cleanup.md) |
 | Experiment API 계약 | [runtime/autonomous_experiment_runtime.md](runtime/autonomous_experiment_runtime.md) |
 | API key / OpenAI fallback | [runtime/api_keys.md](runtime/api_keys.md) |
 | Live GUI 운영 | [gui/gui.md](gui/gui.md) |
+| Read-only run replay | [gui/run_replay.md](gui/run_replay.md) |
 | Device Workspaces / 3DP 사용법 | [tutorials/device_workspace_3dp_usage.ko.md](tutorials/device_workspace_3dp_usage.ko.md) |
 | Device Workspaces / Vision Camera Bridge | [tutorials/device_workspace_vision_camera_bridge_usage.ko.md](tutorials/device_workspace_vision_camera_bridge_usage.ko.md) |
 | BambuLab X2D bridge 구조 | [hardware/bambulab_x2d_device_bridge_runtime_guideline.md](hardware/bambulab_x2d_device_bridge_runtime_guideline.md) |

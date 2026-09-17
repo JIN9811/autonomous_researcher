@@ -4,7 +4,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from agents.core.knowledge.context import append_reference_only, build_reference_context, mark_reference_delivered, record_reference_use
+from agents.core.knowledge.context import append_reference_only, mark_reference_delivered, record_reference_use
+from agents.core.knowledge.runtime_reference import build_execution_reference as build_reference_context
 
 
 def compact_evidence(value, key=''):

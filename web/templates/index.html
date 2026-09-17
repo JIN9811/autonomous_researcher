@@ -26,7 +26,7 @@ Modification guide:
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{{ title }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260915-workspace-cells-1" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260918-replay-controls-1" />
   </head>
   <body>
     <div id="live-boot-cover" class="main-boot-cover" data-boot-mode="main" role="status" aria-label="Loading AX4LAB Main GUI">
@@ -116,28 +116,35 @@ Modification guide:
           <span id="metric-cycle" class="badge idle" title="Current closed-loop cycle">C:0</span>
           <span id="run-indicator" class="badge idle">IDLE</span>
         </div>
-        <div class="control-grid">
+        <div id="main-run-control-grid" class="control-grid">
           <label>
             Mode
             <select id="mode-select">
               <option value="test">test</option>
               <option value="live">live</option>
-              <option value="replay">replay</option>
+              <option value="replay">replay · read-only review</option>
               <option value="fault-injection">fault-injection</option>
             </select>
           </label>
-          <label>
+          <label id="replay-session-field" hidden style="display:none;min-width:0">
+            Experiment session
+            <select id="replay-session-select" aria-label="Replay experiment session" disabled>
+              <option value="">Select replay mode to load sessions</option>
+            </select>
+            <small id="replay-session-status" role="status"></small>
+          </label>
+          <label id="run-inference-field">
             Inference
             <select id="backend-select">
               <option value="nemoclaw">Ollama / NemoClaw</option>
               <option value="vllm" selected>NemoClaw / vLLM</option>
             </select>
           </label>
-          <label>
+          <label id="run-fault-field">
             Fault
             <input id="fault-input" type="text" value="none" />
           </label>
-          <label>
+          <label id="run-fault-stage-field">
             Fault Stage
             <input id="fault-stage-input" type="text" placeholder="manipulation" />
           </label>
@@ -273,6 +280,7 @@ Modification guide:
 
     <script src="/static/runtime_graph_geometry.js?v=atr-ui-20260812-graph-layout-4"></script>
     <script src="/static/runtime_cycle.js?v=20260811-contract-2"></script>
-    <script src="/static/app.js?v=20260915-workspace-popups-1" defer></script>
+    <script src="/static/run_review_picker.js?v=3" defer></script>
+    <script src="/static/app.js?v=20260917-read-only-replay-1" defer></script>
   </body>
 </html>

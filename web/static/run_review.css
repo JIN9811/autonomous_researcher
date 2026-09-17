@@ -1,0 +1,30 @@
+/* The original LIVE stylesheet and agent card layouts stay authoritative. */
+body.planning-live-body.run-replay-mode .live-runtime-title h1.replay-brand{
+  color:#ffadb7 !important;
+  text-shadow:0 0 10px rgba(255,137,158,.65),0 0 22px rgba(255,137,158,.38) !important;
+  font-size:20px !important;
+  letter-spacing:.06em !important;
+}
+body.planning-live-body.run-replay-mode .mission-status-primary .planning-mission-marquee-window,
+body.planning-live-body.run-replay-mode .mission-status-primary #planning-state-dot,
+body.planning-live-body.run-replay-mode .mission-status-primary #planning-cycle-label,
+body.planning-live-body.run-replay-mode .mission-status-run #planning-run-detail,
+body.planning-live-body.run-replay-mode .mission-status-run #live-runtime-clock{display:none !important}
+body.planning-live-body.run-replay-mode .mission-status-primary,
+body.planning-live-body.run-replay-mode .mission-status-run{
+  display:grid !important;
+  grid-template-columns:minmax(0,1fr) !important;
+  grid-template-rows:12px 26px !important;
+  align-content:center !important;
+  row-gap:2px !important;
+}
+body.planning-live-body.run-replay-mode .mission-status-run::before{
+  position:static !important;grid-column:1 !important;grid-row:1 !important;
+}
+#replay-point-select,#replay-run-select{
+  grid-column:1 / -1 !important;grid-row:2 !important;
+  box-sizing:border-box;min-width:0;max-width:100%;width:100%;height:26px;
+  margin:0;font:inherit;font-size:11px;line-height:normal;color:inherit;
+  background:#172332;border:1px solid #466176;border-radius:3px;padding:2px 4px;
+}
+body.run-replay-mode .planning-trigger-hint{visibility:hidden}

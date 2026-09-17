@@ -2121,7 +2121,7 @@ function normalizeDisplayText(value) {
 
 function safeUrl(value) {
   const url = String(value || "");
-  return url.startsWith("/api/planning/artifacts/") ? url : "";
+  return url.startsWith("/api/planning/artifacts/") || (window.AX4LABReplay && window.AX4LABReplayFiles?.safeUrl(url)) ? url : "";
 }
 
 function roleLabel(role) {
@@ -11444,6 +11444,7 @@ function designSafeImageUrl(value, options = {}) {
     url.startsWith("/api/planning/artifacts/")
     || url.startsWith("/api/runs/")
     || url.startsWith("/api/artifacts/")
+    || (window.AX4LABReplay && window.AX4LABReplayFiles?.safeUrl(url))
     || url.startsWith("/static/")
     || /^https?:\/\//i.test(url)
   );
@@ -16340,6 +16341,8 @@ function renderArtifactPanel() {
   liveArtifactExplorer.update({run: state.run_id || '', loop: state.loop_count ?? state.loop_index ?? 0,
     agent: liveSelectedAgent, files: window.AtrArtifactExplorer.mergeReferences(liveRunArtifacts, planningMessagesCache), label: liveAgentLabel,
     references: planningMessagesCache,
+    readOnlyReplay: Boolean(window.AX4LABReplay),
+    artifactError: window.AX4LABReplay?.artifactError?.(),
     runs: planningMessagesCache.map(m=>m.run_id).filter(Boolean)});
 }
 
@@ -17678,7 +17681,7 @@ function applyPlanningSession(session, options = {}) {
   }
   renderPlanningMessages(mergePlanningMessages(planningMessagesCache, incomingMessages));
   renderLiveRuntime(liveLastSession);
-  recoverAgentAttentionRequest(liveRecentEvents);
+  if (!window.AX4LABReplay) recoverAgentAttentionRequest(liveRecentEvents);
   persistLivePlanningCache(liveLastSession);
 }
 
@@ -17719,14 +17722,15 @@ function liveSpecimenAgentWorking(session = liveLastSession) {
 }
 
 async function refreshLivePrinterMonitorStatus(session = liveLastSession, options = {}) {
-  if (!options.force && !liveSpecimenAgentWorking(session)) return null;
+  // Device observation is independent of an agent's running/error/idle state.
+  if (window.AX4LABReplay) return null;
   if (livePrinterMonitorInFlight) return livePrinterMonitorInFlight;
   if (!options.force && Date.now() - livePrinterMonitorLastRefresh < 2000) return null;
   livePrinterMonitorLastRefresh = Date.now();
   const requestedRunId = liveCurrentRunId();
   livePrinterMonitorInFlight = (async () => {
     try {
-      const status = await fetchJsonOrThrow("/api/printer/status?mode=live&emit=1");
+      const status = await fetchJsonOrThrowWithTimeout("/api/printer/status?mode=live&emit=1", {}, 15000);
       if (requestedRunId !== liveCurrentRunId()) return null;
       applyLivePrinterMonitorStatus(status, requestedRunId);
       renderLiveRuntime(liveLastSession);
@@ -17843,6 +17847,7 @@ function applyLivePrinterMonitorStatus(status, runId) {
 }
 
 async function refreshPlanningState(options = {}) {
+  if (window.AX4LABReplay) return window.AX4LABReplay.refresh();
   if (liveRefreshInFlight && !options.force) return liveRefreshInFlight;
   const background = Boolean(options.background);
   if (background && !options.reconnect && shouldFreezeCompletedTestRun(liveLastSession)) return liveLastSession;
@@ -19518,9 +19523,9 @@ if (btnLiveEmergencyReset) {
   });
 }
 
-setInterval(() => {
+if (!window.AX4LABReplay) setInterval(() => {
   tickLiveRuntimeClock();
-  if (!document.hidden) refreshLivePrinterMonitorStatus(liveLastSession);
+  refreshLivePrinterMonitorStatus(liveLastSession);
   refreshLiveResources();
   updateLiveConnectionChips();
   updateVisionSpecimenCountdowns();
@@ -19646,8 +19651,26 @@ document.addEventListener('change',event=>{
 window.addEventListener('ax4lab:knowledge-changed',()=>{if(!liveKnowledgePollingStopped){window.clearTimeout(liveKnowledgeTimer);refreshLiveKnowledgeSummary();}});
 window.addEventListener('pagehide',()=>{liveKnowledgePollingStopped=true;window.clearTimeout(liveKnowledgeTimer);liveKnowledgeReceipts.clear();liveKnowledgeSummary=null;});
 window.addEventListener('pageshow',()=>{if(liveKnowledgePollingStopped){liveKnowledgePollingStopped=false;refreshLiveKnowledgeSummary();}});
+if (window.AX4LABReplay) {
+  window.AX4LABReplay.start({
+    initialize: async () => {
+      await refreshLiveAgentManifest({silent:true,skipRender:true});
+      initializeLiveAgentLanding();
+      setupOrcChartHydrationMonitor();
+    },
+    render: (point, session) => {
+      resetPlanningMessageDisplayState();
+      liveRecentEvents = point?.events || [];
+      liveRunArtifacts = point?.run_artifacts || [];
+      liveLastSnapshot = {state:session.state || {},runtime:{}};
+      invalidateLiveCenterRender("report");
+      applyPlanningSession(session);
+    },
+  }).catch(window.AX4LABReplay.showError);
+} else {
 initializeLiveGuiRuntime().catch(() => {
   setChatStatus("ERROR", "warning");
   window.dispatchEvent(new Event('ax4lab:live-ready'));
 });
 refreshLiveKnowledgeSummary();
+}

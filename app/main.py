@@ -662,6 +662,39 @@ def _public_wandb_local_api_key_settings(settings: dict[str, Any]) -> dict[str, 
     }
 
 
+from app.run_review_routes import review_router
+from utils.run_review import RunReviewRecorder
+
+app.include_router(review_router(controller._deps.run_root, templates))
+from app.live_fullscreen import router as live_fullscreen_router
+app.include_router(live_fullscreen_router)
+_RUN_REVIEW_RECORDER = None
+
+
+@app.on_event("startup")
+async def start_read_only_run_review() -> None:
+    global _RUN_REVIEW_RECORDER
+    try:
+        _RUN_REVIEW_RECORDER = RunReviewRecorder(controller._deps.run_root, controller._state.run_id)
+        _RUN_REVIEW_RECORDER.start()
+        controller.review_event_sink = _RUN_REVIEW_RECORDER.offer
+        from utils import run_review
+        run_review.capture_sink = _RUN_REVIEW_RECORDER.offer
+    except Exception:
+        # Optional presentation infrastructure cannot prevent runtime startup.
+        controller.review_event_sink = None
+
+
+@app.on_event("shutdown")
+async def stop_read_only_run_review() -> None:
+    controller.review_event_sink = None
+    from utils import run_review
+    run_review.capture_sink = None
+    if _RUN_REVIEW_RECORDER is not None:
+        _RUN_REVIEW_RECORDER.stop()
+        await asyncio.to_thread(_RUN_REVIEW_RECORDER.thread.join, 2.0)
+
+
 @app.on_event("startup")
 async def keep_startup_side_effect_free() -> None:
     """Keep GUI startup free of model prewarming while applying saved secrets."""
@@ -3226,6 +3259,7 @@ def _guardian_status_payload(run_id: str | None = None, *, snapshot: dict[str, o
         for item in tool_records[-80:]
         if str(item.get("status") or "") in {"blocked", "approval_required", "failed"}
     ]
+    from utils.hardware_alert_lifecycle import is_active as hardware_alert_is_active
     blocked_hardware_rows = [
         {
             "alert_id": item.get("alert_id", ""),
@@ -3237,7 +3271,7 @@ def _guardian_status_payload(run_id: str | None = None, *, snapshot: dict[str, o
             "severity": item.get("severity", ""),
         }
         for item in hardware_alerts[-80:]
-        if bool(item.get("blocks_workflow")) or str(item.get("severity") or "") in {"blocking", "critical"}
+        if hardware_alert_is_active(item)
     ]
 
     severity_counts: dict[str, int] = {}
@@ -3429,7 +3463,8 @@ def _guardian_status_payload(run_id: str | None = None, *, snapshot: dict[str, o
         "provenance_ref_count": len(latest_contract_provenance),
     }
 
-    status = "safe_stop" if any(row.get("decision") == "safe_stop" for row in blocked_gate_rows) else "blocked" if blocked_gate_rows or blocked_tool_rows or blocked_hardware_rows else "approval_required" if merged_pending else "warning" if incidents or max_score >= 0.35 else "allow"
+    open_incidents = [item for item in incidents if str(item.get("status") or "open").lower() not in {"resolved", "closed", "dismissed"}]
+    status = "safe_stop" if any(row.get("decision") == "safe_stop" for row in blocked_gate_rows) else "blocked" if blocked_gate_rows or blocked_tool_rows or blocked_hardware_rows else "approval_required" if merged_pending else "warning" if open_incidents or max_score >= 0.35 else "allow"
     return {
         "ok": True,
         "schema": "guardian_status_report.v1",
@@ -18488,6 +18523,26 @@ async def restore_error_run_checkpoint(run_id: str) -> dict[str, object]:
         rejection = await controller._plc_service_start_rejection()
         if rejection:
             return rejection
+        try:
+            return restore_checkpoint(controller, run_id)
+        except (ValueError, OSError, KeyError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/runs/{run_id}/recovery/restore-printer-wait")
+async def restore_printer_wait_checkpoint(run_id: str) -> dict[str, object]:
+    from app.printer_wait_recovery import restore_checkpoint
+    async with controller._error_resume_lock:
+        try:
+            return restore_checkpoint(controller, run_id)
+        except (ValueError, OSError, KeyError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/runs/{run_id}/recovery/restore-equipment-selection")
+async def restore_equipment_selection_checkpoint(run_id: str) -> dict[str, object]:
+    from app.equipment_selection_checkpoint import restore_checkpoint
+    async with controller._error_resume_lock:
         try:
             return restore_checkpoint(controller, run_id)
         except (ValueError, OSError, KeyError) as exc:

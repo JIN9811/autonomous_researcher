@@ -14,7 +14,7 @@ Analysis curves and objectives interpret the same measurements using different u
 | Energy Density | Stress–strain integral over the interval |
 | SEA | Energy normalized by mass; requires mass and objective definition |
 
-A₀ is initial cross-sectional area; L₀ is initial gauge length. Energy, energy density and SEA have distinct units and normalizations. Energy density up to 50% strain is not peak load over the complete recording. The run-bound objective determines the evaluated quantity.
+A₀ is initial cross-sectional area; L₀ is initial gauge length. Energy, energy density and SEA have distinct units and normalizations. Energy over a specified interval is not peak load over the complete recording. Only the run-bound objective supplies the evaluated quantity and interval; this page supplies neither a target nor an acceptance threshold.
 
 ## Preview versus original
 

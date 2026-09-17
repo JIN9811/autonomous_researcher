@@ -13,6 +13,7 @@ import types
 MODULES = ("utils.equipment_vision_tasks", "agents.equipment.recovery", "agents.equipment.workflow",
            "utils.utm_specimen_presence", "utils.utm_clear_cycle", "agents.vision.decision", "app.run_recovery")
 MODULES += ("utils.utm_observation_roi", "device_bridges.camera_vision.tools")
+MODULES += ("app.equipment_tail_recovery",)
 
 
 def stage_cycle_driver(path):
@@ -95,6 +96,21 @@ async def reload_equipment_support(controller):
     import subprocess
     import sys
     from orchestrator.state import Stage
+    if (controller._state.stage in {Stage.COMPLETE, Stage.ERROR}
+            and getattr(controller._state.agent_status.get('vision_agent'), 'success', None) is False
+            and (controller._state.run_metadata.get('specimen_result') or {}).get('printer_completion_verified')):
+        from app.vision_review_recovery import validate_boundary
+        try:
+            validate_boundary(controller)
+        except (ValueError, OSError, KeyError):
+            # Clearance/placement failures are not pre-pickup ActiveCam retries.
+            # Fall through to code-only reload with the normal idle/safety gates;
+            # never prepare a rewind or change the failed run's recovery state.
+            pass
+        else:
+            return await reload_vision_review(controller)
+    if printer_wait_failed(controller):
+        return await reload_printer_wait_support(controller)
     if controller._state.stage == Stage.GUARDIAN and controller._state.is_paused:
         return await reload_selection_review(controller)
     assert_idle(controller)
@@ -108,7 +124,7 @@ async def reload_equipment_support(controller):
         "tests/unit/test_safe_hot_reload.py", "tests/unit/test_run_recovery_checkpoint.py",
         "tests/unit/test_utm_clear_presence.py", "tests/unit/test_utm_clear_cycle.py", "tests/unit/test_vision_decision.py",
         "tests/unit/test_camera_tools_utm_runtime.py",
-        "tests/unit/test_error_run_resume.py", "-q", "--tb=short"], cwd=root,
+        "tests/unit/test_error_run_resume.py", "tests/unit/test_equipment_tail_recovery.py", "-q", "--tb=short"], cwd=root,
         capture_output=True, text=True, timeout=60)
     if checked.returncode:
         raise ValueError("Hot reload validation failed; current code retained")
@@ -122,6 +138,128 @@ async def reload_equipment_support(controller):
         {"modules": loaded, "sha256": digests, "actuation_performed": False})
     return {"ok": True, "modules": loaded, "sha256": digests, "server_restarted": False,
             "actuation_performed": False, "scope": "equipment_support_only"}
+
+
+def stage_resume(path):
+    """Compile only Resume; no controller initialization or other method changes."""
+    import ast
+    from app.controller import MainController
+    current = MainController.resume
+    tree = ast.parse(Path(path).read_text())
+    owner = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'MainController')
+    node = next(n for n in owner.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'resume')
+    if node.decorator_list:
+        raise ValueError('Resume decorators changed')
+    namespace = dict(current.__globals__)
+    module = ast.Module(body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0), node], type_ignores=[])
+    exec(compile(ast.fix_missing_locations(module), str(path), 'exec'), namespace)
+    candidate = namespace['resume']
+    if inspect.signature(current) != inspect.signature(candidate) or current.__code__.co_freevars != candidate.__code__.co_freevars:
+        raise ValueError('Resume signature changed')
+    return current, candidate
+
+
+async def reload_vision_review(controller):
+    import asyncio
+    import hashlib
+    import subprocess
+    import sys
+    from app.vision_review_recovery import validate_boundary
+    boundary = validate_boundary(controller)
+    root = Path(__file__).resolve().parents[1]
+    names = ('agents.core.knowledge.context', 'agents.vision.decision', 'app.vision_review_recovery')
+    sources = {name: Path(importlib.import_module(name).__file__) for name in names}
+    checked_sources = {**sources, 'controller_resume': root / 'app/controller.py'}
+    digests = {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in checked_sources.items()}
+    current, candidate = stage_resume(root / 'app/controller.py')
+    checked = await asyncio.to_thread(subprocess.run, [sys.executable, '-m', 'pytest',
+        'tests/unit/test_vision_decision.py', 'tests/unit/test_vision_review_recovery.py',
+        'tests/unit/test_safe_hot_reload.py', '-q', '--tb=short'], cwd=root,
+        capture_output=True, text=True, timeout=60)
+    if checked.returncode:
+        raise ValueError('Vision hotfix validation failed; live code retained')
+    if validate_boundary(controller) != boundary or any(hashlib.sha256(path.read_bytes()).hexdigest() != digests[name]
+            for name, path in checked_sources.items()):
+        raise ValueError('Vision recovery scope or source changed during validation')
+    loaded = reload_sources(sources)
+    current.__code__ = candidate.__code__
+    controller._state.run_metadata['vision_review_retry'] = {**boundary, 'status': 'ready'}
+    controller._state.is_paused = True
+    await controller._emit_control_event('runtime.vision_review_hotfix',
+        'Vision review hotfixed; fresh capture prepared for operator Resume',
+        {'modules': loaded, 'sha256': digests, 'actuation_performed': False})
+    return {'ok': True, 'modules': loaded, 'sha256': digests, 'status': 'vision_retry_ready',
+            'server_restarted': False, 'actuation_performed': False}
+
+
+def printer_wait_failed(controller):
+    """Only the most recent failed handoff may admit this narrow hotfix."""
+    messages = getattr(controller, "_planning_messages", [])
+    return bool(messages and messages[-1].get("ok") is False and
+                "printer completion wait timed out:" in str(messages[-1].get("content", "")))
+
+
+def assert_printer_wait_inactive(controller):
+    if not printer_wait_failed(controller):
+        raise ValueError("No terminal printer-wait timeout to patch")
+    if controller.snapshot().get("is_running") or controller._planning_request_lock.locked():
+        raise ValueError("Printer wait hotfix requires an inactive workflow")
+    for name in ("_run_task", "_planning_handoff_task"):
+        task = getattr(controller, name, None)
+        if task is not None and not task.done():
+            raise ValueError("Cannot patch a suspended/running workflow")
+    if controller._active_safety_sources() or any(getattr(controller._state, key) for key in
+            ("stop_requested", "safe_stop_requested", "emergency_stop_requested")):
+        raise ValueError("Resolve safety controls before hot reload")
+
+
+def stage_printer_wait_timing(path):
+    """Compile just the pure timeout calculator, retaining the controller instance."""
+    import ast
+    from app.controller import MainController
+    name = "_printer_completion_wait_timing"
+    current = MainController.__dict__[name].__func__
+    tree = ast.parse(Path(path).read_text())
+    owner = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "MainController")
+    node = next(node for node in owner.body if isinstance(node, ast.FunctionDef) and node.name == name)
+    if len(node.decorator_list) != 1 or not isinstance(node.decorator_list[0], ast.Name) or node.decorator_list[0].id != "classmethod":
+        raise ValueError("Printer timing contract changed; restart required")
+    node.decorator_list = []
+    module = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), node], type_ignores=[])
+    namespace = dict(current.__globals__)
+    exec(compile(ast.fix_missing_locations(module), str(path), "exec"), namespace)
+    candidate = namespace[name]
+    if inspect.signature(current) != inspect.signature(candidate) or current.__code__.co_freevars != candidate.__code__.co_freevars:
+        raise ValueError("Printer timing signature changed; restart required")
+    return current, candidate
+
+
+async def reload_printer_wait_support(controller):
+    """No restart, device action, state change, resume, or printer re-submission."""
+    import asyncio
+    import hashlib
+    import subprocess
+    import sys
+    assert_printer_wait_inactive(controller)
+    root = Path(__file__).resolve().parents[1]
+    paths = {"app.controller:printer_wait_timing": root / "app/controller.py",
+             "utils.printer_wait_timing": root / "utils/printer_wait_timing.py"}
+    digests = {name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in paths.items()}
+    current, candidate = stage_printer_wait_timing(paths["app.controller:printer_wait_timing"])
+    checked = await asyncio.to_thread(subprocess.run, [sys.executable, "-m", "pytest",
+        "tests/unit/test_printer_wait_timing.py", "tests/unit/test_safe_hot_reload.py",
+        "-q", "--tb=short"], cwd=root, capture_output=True, text=True, timeout=60)
+    if checked.returncode:
+        raise ValueError("Printer hotfix validation failed; live code retained")
+    assert_printer_wait_inactive(controller)
+    if any(hashlib.sha256(path.read_bytes()).hexdigest() != digests[name] for name, path in paths.items()):
+        raise ValueError("Source changed during validation; live code retained")
+    reload_sources({"utils.printer_wait_timing": paths["utils.printer_wait_timing"]})
+    current.__code__ = candidate.__code__
+    await controller._emit_control_event("runtime.hot_reload", "Slicer-based printer timeout calculator hotfixed; no device action",
+        {"modules": list(paths), "sha256": digests, "actuation_performed": False})
+    return {"ok": True, "scope": "printer_wait_timing_only", "server_restarted": False,
+            "actuation_performed": False, "workflow_resumed": False, "sha256": digests}
 
 
 async def reload_selection_review(controller):

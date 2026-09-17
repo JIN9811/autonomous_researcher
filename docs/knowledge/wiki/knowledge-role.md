@@ -1,8 +1,14 @@
 ---
-{"topic_id":"knowledge-role","owner":"knowledge_agent","source_refs":["docs/agents/knowledge_agent.md","docs/knowledge/wiki_memory.md"],"source_revision":{"docs/agents/knowledge_agent.md":"1ec005351ea74e93e614927f673fc4fb506778f0a3c1d88dabe45e36da35a04e","docs/knowledge/wiki_memory.md":"31aac9e4d4fb449190beaa7d7594f325e59ed6fb45c0d98004337659d67c4307"},"verified_at":"2026-09-15T00:00:00+00:00","applicability":"Public AX4LAB reference: knowledge-role","status":"reviewed"}
+{"topic_id":"knowledge-role","owner":"knowledge_agent","source_refs":["docs/agents/knowledge_agent.md","docs/knowledge/wiki_memory.md"],"source_revision":{"docs/agents/knowledge_agent.md":"e968c74d74babe0293651097693982b45592aacc279ae6508524684681b58f26","docs/knowledge/wiki_memory.md":"31aac9e4d4fb449190beaa7d7594f325e59ed6fb45c0d98004337659d67c4307"},"verified_at":"2026-09-18T00:00:00+09:00","applicability":"Public AX4LAB reference: knowledge-role","status":"reviewed"}
 ---
 
 # Knowledge Agent — Source-Backed Context
+
+## Runtime decision reference
+
+Knowledge curates sources under the supplied scope and records their provenance and applicability. Platform documentation explains roles; it does not establish current measurements, completion, approval or safety. Keep historical observations, hypotheses and current owner evidence distinct.
+
+## Overview
 
 Knowledge (KNW) inspects, searches, reads and curates experimental evidence, literature and records for other agents. It does not replace Analysis calculations or BO selection, authorize device work or approve settings.
 
@@ -25,5 +31,7 @@ Public Wiki describes the platform. Private Memory holds confirmed personal pref
 Retrieved means found by search. Delivered means included in a model request. Used requires valid citation evidence referencing supplied records. Missing citations can mean Unknown, not necessarily deliberate exclusion.
 
 Configured owner plans apply supported scopes, sources and budgets to future runs. They do not alter current experiment evidence or broaden private access.
+
+The active Knowledge owner does not generate Evolution proposals or activate variants. Retired records remain historical reference, not additional tasks required to complete a cycle.
 
 [Knowledge reference](../../agents/knowledge_agent.md), [knowledge stores](knowledge-agent.md), [Wiki and Memory contracts](../wiki_memory.md).

@@ -20,7 +20,7 @@
   }
   function safeUrl(value) {
     const url=String(value || '');
-    return /^\/api\/(?:runs\/[^/?#]+\/artifact-file\/|artifacts\/|planning\/artifacts\/)/.test(url) && !/[\\\r\n]/.test(url) ? url : '';
+    return /^\/api\/(?:runs\/[^/?#]+\/artifact-file\/|artifacts\/|planning\/artifacts\/|review\/[^/?#]+\/(?:files|assets)\/)/.test(url) && !/[\\\r\n]/.test(url) ? url : '';
   }
   function mergeReferences(indexed, messages) {
     const result=[...indexed],seen=new Set(indexed.map(f=>String(f.url||'').split('?')[0]));
@@ -93,6 +93,7 @@
         <label>Agent<select data-ae-scope="agent"><option value="all">All agents / legacy</option>${options(agents.sort(),this.scope.agent,v=>this.context.label(v))}</select></label>
         <button type="button" class="btn" data-ae-action="all">All files</button><button type="button" class="btn" data-ae-action="current">Current context</button>
         <button type="button" class="btn" data-ae-action="refresh">Refresh</button></header>
+        ${this.context.readOnlyReplay?`<p class="hint" role="status">${esc(this.context.artifactError || 'Read-only session files — may include files produced after the selected replay point. Point-in-time images remain separate.')}</p>`:''}
         ${this.error?`<p role="status" class="hint">${esc(this.error)}</p>`:''}
         <div class="ae-layout"><nav class="ae-tree" aria-label="Artifact folders">${tree.filter(f=>!f.path || this.openFolders.has('') && f.path.split('/').slice(0,-1).every((_,i)=>this.openFolders.has(f.path.split('/').slice(0,i+1).join('/')))).map(f=>{
           const children=tree.some(x=>x.path && parent(x.path)===f.path);

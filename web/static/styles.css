@@ -463,7 +463,34 @@ h1 {
 .control-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(170px, 1fr));
+  align-items: start;
   gap: 10px;
+}
+
+/* Replay needs one wide session selector, not four experiment-option slots. */
+#main-run-control-grid[data-mode="replay"] {
+  grid-template-columns: minmax(170px, 1fr) minmax(0, 3fr);
+}
+
+#main-run-control-grid > label,
+#main-run-control-grid select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+#replay-session-select {
+  width: 100%;
+  text-overflow: ellipsis;
+}
+
+#replay-session-status {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 680px) {
+  #main-run-control-grid[data-mode="replay"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 label {

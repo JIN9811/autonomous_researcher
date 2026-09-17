@@ -4,6 +4,12 @@
 
 # Lab Equipment Agent — Testing and Measurement Handoff
 
+## Runtime decision reference
+
+Equipment reviews the supplied approved Flow, scoped task results and measurement export. Current Flow definitions and code-owned gates determine required steps. Documentation is not an instruction to reorder or repeat Skills. A file or a previous success alone does not prove this execution completed.
+
+## Overview
+
 Lab Equipment (EQP) executes configured Skills and Flows in an approved order, then reviews test completion and measurement export. Arbitrary model text is not executed as an equipment command.
 
 ## Profile, Skill and Flow

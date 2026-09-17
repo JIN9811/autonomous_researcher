@@ -4,6 +4,12 @@
 
 # Vision Agent — Observation, Placement and Clearance
 
+## Runtime decision reference
+
+Vision reviews the supplied inspection contract and current same-capture evidence. Code owns configured ROI, coordinate validation, identity, freshness and detector gates. Interpret the observed scene without importing reference thresholds, expected appearance, checks for other inspection phases or prior images as current evidence.
+
+## Overview
+
 Vision (VIS) combines deterministic detection with bounded LLM review of same-capture original/annotated images. Missing detections alone cannot establish task success or an empty platen.
 
 | Inspection | Evidence sought |
@@ -16,7 +22,7 @@ Initial placement reads the monitor's active ROI. Missing/invalid ROI does not p
 
 ## Time and provenance
 
-Handoff observations remain valid for 180 seconds from original observation time in both LIVE and TEST. Separate safety signals—workspace safety, anomalies and UTM motion—retain a five-second limit. A late model response does not refresh the capture timestamp.
+Handoff observations and separate workspace/UTM safety signals have different code-owned validity limits. Read the active contract and runtime freshness result; this page does not supply a timeout. A late model response does not refresh the capture timestamp.
 
 A current view, another run's photo and an archived image are different evidence. Camera failures, occlusion, wrong viewpoints and signal loss remain unknown or require review.
 

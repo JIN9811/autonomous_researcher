@@ -6,7 +6,8 @@ import json
 from copy import deepcopy
 from typing import Any
 
-from agents.core.knowledge.context import build_reference_context, mark_reference_delivered, record_reference_use
+from agents.core.knowledge.context import mark_reference_delivered, record_reference_use
+from agents.core.knowledge.runtime_reference import build_execution_reference as build_reference_context
 
 
 async def run_guardian_advisory(

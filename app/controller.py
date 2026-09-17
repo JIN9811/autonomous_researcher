@@ -206,6 +206,8 @@ class MainController:
         self._deps.agent_context.on_tool_event = self._on_tool_event
         self._deps.agent_context.emit_execution_event = self._emit_agent_execution_event
         self._lhs_publication_lock = asyncio.Lock()
+        # Optional presentation-only sink. It must never await or execute controls.
+        self.review_event_sink = None
 
     def _new_logger_bundle(self, purpose: str = "planning") -> LoggerBundle:
         run_id = make_run_id(purpose)
@@ -511,7 +513,8 @@ class MainController:
             "corrective_action": recovery_hint,
             "created_at": created_at,
         }
-        return {
+        from utils.hardware_alert_lifecycle import stamp_alert
+        return stamp_alert({
             "schema": "hardware_alert.v1",
             "alert_id": alert_id,
             "device_class": device_class,
@@ -527,7 +530,8 @@ class MainController:
             "status": status,
             "message": message,
             "blocks_workflow": blocks_workflow,
-            "requires_ack": blocks_workflow,
+            "requires_ack": blocks_workflow and not (
+                tool == 'printer.status' and failure_code == 'BAMBU_DEVICE_ERROR' and severity != 'critical'),
             "guardian_route_hint": "stop" if severity == "critical" else "recover" if blocks_workflow else "continue_with_warning",
             "reason_code": reason_code,
             "risk_score": risk_score,
@@ -537,7 +541,7 @@ class MainController:
             "incident_record": incident_record,
             "recovery_hint": recovery_hint,
             "created_at": created_at,
-        }
+        }, self._state, result)
 
     def _append_guardian_event(self, event: dict[str, Any]) -> None:
         """Append Guardian-readable incidents without relying only on in-memory state."""
@@ -569,12 +573,8 @@ class MainController:
         del stored[:-100]
 
     def _record_hardware_alert(self, alert: dict[str, Any]) -> None:
-        alerts = self._state.run_metadata.setdefault("hardware_alerts", [])
-        if not isinstance(alerts, list):
-            alerts = []
-            self._state.run_metadata["hardware_alerts"] = alerts
-        alerts.append(alert)
-        del alerts[:-50]
+        from utils.hardware_alert_lifecycle import record_alert, is_active
+        alert = record_alert(self._state, alert)
         guardian_decision = alert.get("guardian_decision")
         if isinstance(guardian_decision, dict):
             self._state.run_metadata["latest_guardian_decision"] = guardian_decision
@@ -584,7 +584,7 @@ class MainController:
         device_class = str(alert.get("device_class") or "hardware")
         failure_code = str(alert.get("failure_code") or alert.get("status") or "alert")
         severity = str(alert.get("severity") or "warning")
-        if device_class:
+        if device_class and is_active(alert):
             self._state.device_health[device_class] = f"{severity}:{failure_code}"
 
     async def _on_model_call(self, *, task_type: str, model: str, role: str, backend: str) -> None:
@@ -1036,6 +1036,12 @@ class MainController:
         return {key: value for key, value in compact.items() if value not in (None, "")}
 
     async def _broadcast_event(self, event: dict[str, Any]) -> None:
+        review_sink = getattr(self, "review_event_sink", None)
+        if review_sink is not None:
+            try:
+                review_sink(event)
+            except Exception:
+                pass  # Archival failure cannot change the experiment outcome.
         compact_event = self._compact_event_for_buffer(event)
         self._trace.add(compact_event)
         stale: list[asyncio.Queue[dict[str, Any]]] = []
@@ -1529,6 +1535,10 @@ class MainController:
             and event_type == "workspace_monitor_snapshot"
             and self._is_transient_printer_communication_issue(result)
         )
+        if workspace == 'printer' and tool == 'printer.status':
+            from utils.hardware_alert_lifecycle import reconcile
+            for resolution in reconcile(self._state, result):
+                self._append_guardian_event(resolution)
         hardware_alert = None if transient_printer_monitor else self._hardware_alert_for_result(
             workspace=workspace,
             tool=tool,
@@ -3524,7 +3534,7 @@ class MainController:
             "uncertainty", "score", "risk_score", "created_at", "artifact_path", "report_url",
             "preview_url", "stl_url", "gcode_path", "result_file", "linux_path",
             "incident_id", "alert_id", "device_class", "component", "severity",
-            "blocks_workflow", "requires_ack", "corrective_action",
+            "blocks_workflow", "requires_ack", "corrective_action", "lifecycle", "resolved_at",
         )
         out: dict[str, Any] = {}
         for key in (*default_keys, *keys):
@@ -3582,6 +3592,7 @@ class MainController:
         allow_keys = {
             "active_safety_sources",
             "pending_specimen_input",
+            "printer_wait_recovery",
             "planning_cycle_contract",
             "mission_contract",
             "latest_mission_contract",
@@ -4556,6 +4567,15 @@ class MainController:
 
     async def resume(self) -> dict[str, Any]:
         """Resume pause, or revalidate a proven completed error boundary."""
+        if (self._state.run_metadata.get("equipment_selection_resume") or {}).get("status") in {"ready", "running"}:
+            from app.equipment_selection_checkpoint import resume_selection
+            return await resume_selection(self)
+        if (self._state.run_metadata.get("vision_review_retry") or {}).get("status") in {"ready", "running"}:
+            from app.vision_review_recovery import resume_vision_review
+            return await resume_vision_review(self)
+        if (self._state.run_metadata.get("printer_wait_recovery") or {}).get("status") in {"ready", "running"}:
+            from app.printer_wait_recovery import resume_printer_wait
+            return await resume_printer_wait(self)
         if self._state.stage == Stage.ERROR:
             async with self._error_resume_lock:
                 if self._planning_handoff_active():
@@ -6046,7 +6066,7 @@ class MainController:
                 }
 
             prompt = json.dumps({"operation": "research_greeting", "instruction":
-                "Return only a warm, concise greeting in Korean and English, one short paragraph each. "
+                "Return only a warm, concise greeting in English first, then Korean below, one short paragraph each separated by a blank line. "
                 "Introduce yourself as AX4LAB's orchestrator, address the researcher, explain that they may ask "
                 "about the current system or perform experiments, and ask what they would like to do. "
                 "Do not discuss experiment details, parameters, device lists, missing fields, or trigger keywords. "
@@ -8064,6 +8084,9 @@ class MainController:
         start_cycle: int = 1,
         resume_tail_stage: Stage | None = None,
     ) -> dict[str, Any]:
+        if resume_tail_stage == Stage.EQUIPMENT and (self._state.run_metadata.get('equipment_tail_recovery') or {}).get('status') == 'ready':
+            from app.equipment_tail_recovery import continue_tail
+            return await continue_tail(self, first_spec, start_cycle)
         if resume_tail_stage is not None and self._state.run_metadata.get("archived_postprocessing_request"):
             from app.run_recovery import continue_archived_postprocessing
             return await continue_archived_postprocessing(self, first_spec=first_spec,
@@ -8861,28 +8884,8 @@ class MainController:
         experiment_spec: dict[str, Any],
         specimen_payload: dict[str, Any],
     ) -> tuple[float, float]:
-        print_request = experiment_spec.get("print") if isinstance(experiment_spec.get("print"), dict) else {}
-        configured_timeout = cls._float_or_none(
-            experiment_spec.get("printer_completion_timeout_sec")
-            or print_request.get("printer_completion_timeout_sec")
-            or specimen_payload.get("printer_completion_timeout_sec")
-        )
-        configured_poll = cls._float_or_none(
-            experiment_spec.get("printer_completion_poll_sec")
-            or print_request.get("printer_completion_poll_sec")
-            or specimen_payload.get("printer_completion_poll_sec")
-        )
-        if configured_timeout is not None:
-            timeout_sec = max(0.0, configured_timeout)
-        else:
-            expected_min = cls._float_or_none(
-                specimen_payload.get("expected_print_time_min")
-                or experiment_spec.get("expected_print_time_min")
-            )
-            printer_path = str(specimen_payload.get("printer_path") or cls._specimen_printer_path(experiment_spec)).strip()
-            timeout_sec = 900.0 if printer_path == "installed_printer" else max(1800.0, (expected_min or 30.0) * 60.0 + 900.0)
-        poll_sec = 2.0 if configured_poll is None else max(0.0, configured_poll)
-        return timeout_sec, min(poll_sec, 10.0)
+        from utils.printer_wait_timing import completion_wait_timing
+        return completion_wait_timing(experiment_spec, specimen_payload)
 
     @staticmethod
     def _printer_completion_progress_fields(status_payload: dict[str, Any]) -> dict[str, Any]:
@@ -9166,6 +9169,18 @@ class MainController:
             if classified.get("status") == "failed":
                 raise RuntimeError(f"printer completion wait failed: {classified.get('message') or classified}")
             if asyncio.get_running_loop().time() >= deadline:
+                # Preserve the existing print identity for the ordinary Resume
+                # button. This never grants completion or submits a new job.
+                if started_seen and bound_task_id:
+                    self._state.run_metadata["printer_wait_recovery"] = {
+                        "status": "ready", "task_id": bound_task_id,
+                        "run_id": execution_scope[0], "loop_id": execution_scope[1],
+                        "specimen_id": experiment_spec.get("specimen_id"),
+                        "stop_after_this_cycle": False,
+                        "reason": "printer_completion_timeout",
+                    }
+                    self._state.stage = Stage.SPECIMEN
+                    self._state.is_paused = True
                 raise RuntimeError(f"printer completion wait timed out: {classified.get('message') or classified}")
             await asyncio.sleep(poll_sec)
 
@@ -9465,7 +9480,8 @@ class MainController:
                     if isinstance(incident, dict):
                         incident_records.append(dict(incident))
                     continue
-                stored_alerts.append(alert)
+                from utils.hardware_alert_lifecycle import record_alert, is_active
+                alert = record_alert(self._state, alert)
                 guardian_decision = alert.get("guardian_decision")
                 if isinstance(guardian_decision, dict):
                     self._state.run_metadata["latest_guardian_decision"] = guardian_decision
@@ -9475,8 +9491,8 @@ class MainController:
                 device_class = str(alert.get("device_class") or "hardware")
                 failure = str(alert.get("failure_code") or alert.get("status") or "alert")
                 severity = str(alert.get("severity") or "warning")
-                self._state.device_health[device_class] = f"{severity}:{failure}"
-            del stored_alerts[:-50]
+                if is_active(alert):
+                    self._state.device_health[device_class] = f"{severity}:{failure}"
         if incident_records:
             self._record_incident_records(incident_records)
         if "knowledge" in data:

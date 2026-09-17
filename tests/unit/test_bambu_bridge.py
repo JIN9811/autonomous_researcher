@@ -3245,7 +3245,10 @@ def test_prefer_http_artifact_skips_ftps_upload_for_installed_printer_ejection_p
     assert result["project_file_draft"]["payload"]["print"]["subtask_name"] == Path(result["upload"]["filename"]).stem
 
 
-def test_test_mode_installed_printer_blocks_autoejection_without_actual_extrusion_bounds(tmp_path: Path) -> None:
+@pytest.mark.parametrize("http_route", ["none", "generated", "provided"])
+@pytest.mark.parametrize("patch_failure", ["bounds", "post_write"])
+@pytest.mark.parametrize("printer_path", ["installed_printer", "physical_print", "live"])
+def test_prepare_patch_failure_never_uploads_or_starts_original_artifact(tmp_path: Path, http_route: str, patch_failure: str, printer_path: str, monkeypatch) -> None:
     manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
     profile = manager.config.default_profile
     BambuConnectionMemory(profile.connection_memory_path).save_from_payload(
@@ -3260,6 +3263,11 @@ def test_test_mode_installed_printer_blocks_autoejection_without_actual_extrusio
     manager.save_autoejection_config({"enabled": True, "provider": "bambu_gcode_patch", "push_direction": "center"})
     sliced = tmp_path / "travel-only.gcode.3mf"
     _write_minimal_bambu_gcode_3mf(sliced, gcode="G90\nG0 X10 Y10 Z10 F1200\nM84\n")
+    if patch_failure == "post_write":
+        monkeypatch.setattr(manager, "_patch_bambu_native_autoejection_for_prepare",
+            lambda **kwargs: {"ok": False, "status": "blocked", "blockers": [
+                "BAMBU_AUTOEJECTION_TAIL_MISSING", "BAMBU_X2D_PRE_EJECT_CLEANUP_INVALID",
+                "BAMBU_AUTOEJECTION_POST_WRITE_VALIDATION_FAILED"]})
     gcode_lines: list[dict[str, object]] = []
 
     class FakeProbe:
@@ -3272,7 +3280,7 @@ def test_test_mode_installed_printer_blocks_autoejection_without_actual_extrusio
             return {"ok": True, "received_at": "now", "report": {"print": {"gcode_state": state, "mc_percent": 1, "bed_temper": 29}}}
 
         def publish_project_file_command(self, **kwargs) -> dict:
-            return {"ok": True, "status": "published", "will_publish": True, "published": True, "sequence_id": "seq-start", "topic": kwargs.get("topic")}
+            raise AssertionError("A failed ejection patch must never publish the original print")
 
         def publish_print_control_command(self, **kwargs) -> dict:
             return {"ok": True, "status": "published", "will_publish": True, "published": True, "sequence_id": "seq-stop", "command": kwargs.get("command"), "topic": kwargs.get("topic")}
@@ -3286,7 +3294,7 @@ def test_test_mode_installed_printer_blocks_autoejection_without_actual_extrusio
             return {"ok": True, "storage": "ftps", "selected_remote_dir": "cache"}
 
         def upload_file(self, *, local_path: Path, remote_path: str, host: str, username: str, access_code: str, timeout_sec: float, delete_after: bool = False) -> dict:
-            return {"ok": True, "status": "uploaded", "storage": "ftps", "remote_path": remote_path, "sha256": hashlib.sha256(Path(local_path).read_bytes()).hexdigest(), "delete_after": delete_after}
+            raise AssertionError("A failed ejection patch must never upload the original print")
 
     manager.live_probe = FakeProbe()
     manager.mqtt_client = FakeMqttClient()
@@ -3294,11 +3302,15 @@ def test_test_mode_installed_printer_blocks_autoejection_without_actual_extrusio
 
     result = manager.prepare(
         {
-            "runtime_mode": "test",
-            "test_printer_path": "installed_printer",
+            "runtime_mode": "live" if printer_path == "live" else "test",
+            "test_printer_path": printer_path,
             "allow_test_printer_live": True,
             "test_printer_transport": "real",
             "bambu_artifact_path": str(sliced),
+            "prefer_http_artifact": http_route != "none",
+            "public_base_url": "http://192.0.2.100:7860",
+            **({"artifact_url": "http://192.0.2.100:7860/printer-artifacts/bambu/original.gcode.3mf"}
+               if http_route == "provided" else {}),
             "print": {
                 "start_immediately": True,
                 "physical_intent": True,
@@ -3316,11 +3328,17 @@ def test_test_mode_installed_printer_blocks_autoejection_without_actual_extrusio
     )
 
     assert result["ok"] is False
-    assert result["failure_code"] == "BAMBU_AUTOEJECTION_SOURCE_EXTRUSION_BOUNDS_REQUIRED"
+    expected = ("BAMBU_AUTOEJECTION_SOURCE_EXTRUSION_BOUNDS_REQUIRED" if patch_failure == "bounds"
+                else "BAMBU_NATIVE_AUTOEJECTION_PATCH_FAILED")
+    assert result["failure_code"] == expected
     assert result["autoejection_patch"]["ok"] is False
-    assert result["autoejection_patch"]["failure_code"] == "BAMBU_AUTOEJECTION_SOURCE_EXTRUSION_BOUNDS_REQUIRED"
+    if patch_failure == "bounds":
+        assert result["autoejection_patch"]["failure_code"] == expected
     assert result["ejection_result"] == {}
     assert gcode_lines == []
+    assert not result["print_result"].get("published")
+    assert not result["upload"].get("ok")
+    assert result["http_artifact_route"] == {}
 
 
 def test_new_print_ignores_previous_terminal_job_but_not_active_errors(tmp_path: Path) -> None:
@@ -3335,6 +3353,17 @@ def test_new_print_ignores_previous_terminal_job_but_not_active_errors(tmp_path:
         for error_field in ("err", "mc_print_error_code", "mc_err", "print_error"):
             report = normalize_bambu_report({"print": {"gcode_state": "FAILED", error_field: 123}})
             assert not manager._bambu_printer_state_allows_project_start(normalized_report=report, payload={"runtime_mode": mode})
+
+
+def test_device_screen_start_uses_production_cancelled_job_rule(tmp_path: Path) -> None:
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+    for state, error, expected in [("FAILED", 0, True), ("CANCELLED", 0, True),
+                                   ("FAILED", 123, False), ("RUNNING", 0, False)]:
+        report = normalize_bambu_report({"print": {"gcode_state": state, "print_error": error}})
+        screen = manager._device_screen_payload(profile=manager.config.default_profile,
+            connection={"mqtt":"connected", "transfer":"connected"}, job_source="test",
+            normalized_report=report, upload_result={"ok":True}, project_file_draft={"ok":True})
+        assert screen["actions"]["can_start_print"] is expected
 
 
 def test_test_mode_installed_printer_can_start_after_previous_cancelled_failed_state(tmp_path: Path) -> None:
@@ -3974,6 +4003,10 @@ def test_bambu_observation_does_not_require_ftps_or_grant_upload(tmp_path, entry
     assert manager.ftps_client.calls == 0
     expected_ok = mqtt_ok and device_error == 0
     assert result["ok"] is expected_ok
+    assert result['error_fields_observed'] is mqtt_ok
+    assert len(result['device_identity']) == 64
+    assert result['observed_job_state'] == ('FINISH' if mqtt_ok else 'UNKNOWN')
+    assert result['device_error'] == str(device_error if mqtt_ok else 0)
     screen = result["device_screen"]
     assert screen["actions"]["can_start_print"] is False
     assert screen["actions"]["can_upload"] is False

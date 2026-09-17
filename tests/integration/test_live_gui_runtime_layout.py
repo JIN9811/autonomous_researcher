@@ -1531,8 +1531,8 @@ def test_live_gui_analysis_report_exposes_multifidelity_contract() -> None:
     assert 'snapshot.tool === "printer.status"' in script
     assert "async function refreshLivePrinterMonitorStatus(session = liveLastSession, options = {})" in script
     assert "function liveSpecimenAgentWorking(" in script
-    assert "if (!options.force && !liveSpecimenAgentWorking(session)) return null;" in script
-    assert 'fetchJsonOrThrow("/api/printer/status?mode=live&emit=1")' in script
+    assert "if (!options.force && !liveSpecimenAgentWorking(session)) return null;" not in script
+    assert 'fetchJsonOrThrowWithTimeout("/api/printer/status?mode=live&emit=1", {}, 15000)' in script
     assert "workspace_monitor_snapshot" in script
     assert "function renderSpecimenPrintControlPanel(" in script
     assert "function renderSpecimenAgenticProgress(" in script

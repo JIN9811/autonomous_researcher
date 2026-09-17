@@ -4,6 +4,12 @@
 
 # Analysis Agent — Measurements and Objectives
 
+## Runtime decision reference
+
+Analysis interprets supplied measurement evidence using the run-bound objective, units and evaluation interval. Numerical tools own calculations and validation. Documentation cannot substitute mass, geometry, an objective, coverage, zero corrections or measurements. Only requirements present in the active analysis contract apply.
+
+## Overview
+
 Analysis (ANL) converts measurement files into curves, physical metrics and objective evaluations. Its scope is experimental-data postprocessing: it performs no FEM/CAE analysis or device actuation and has no device bridge dependency.
 
 ## Processing

@@ -1597,7 +1597,8 @@ class LangGraphRunLoop:
                     if isinstance(incident, dict):
                         incident_records.append(dict(incident))
                     continue
-                stored_alerts.append(alert)
+                from utils.hardware_alert_lifecycle import record_alert, is_active
+                alert = record_alert(self._state, alert)
                 guardian_decision = alert.get("guardian_decision")
                 if isinstance(guardian_decision, dict):
                     self._state.run_metadata["latest_guardian_decision"] = guardian_decision
@@ -1607,8 +1608,8 @@ class LangGraphRunLoop:
                 device_class = str(alert.get("device_class") or "hardware")
                 failure = str(alert.get("failure_code") or alert.get("status") or "alert")
                 severity = str(alert.get("severity") or "warning")
-                self._state.device_health[device_class] = f"{severity}:{failure}"
-            del stored_alerts[:-50]
+                if is_active(alert):
+                    self._state.device_health[device_class] = f"{severity}:{failure}"
         if incident_records:
             self._record_incident_records(incident_records)
         if "knowledge" in data:
@@ -3178,6 +3179,10 @@ class LangGraphRunLoop:
 
         if module_runtime:
             self._state.run_metadata.setdefault("module_runtime", {})[stage.value] = module_runtime
+        from utils.hardware_alert_lifecycle import refresh_before_gate
+        for resolution in await refresh_before_gate(self._state, getattr(self._ctx, 'tools', None)):
+            await self._emit(event_type='hardware_alert.resolved',
+                message='Hardware monitor fault resolved by fresh matching telemetry', payload=resolution)
         pre_gate = guardian_gate(
             state=self._state,
             stage=stage.value,

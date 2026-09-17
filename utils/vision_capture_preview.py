@@ -24,4 +24,10 @@ def publish_capture_preview(state, capture, slot):
         "artifact": {"path": str(path), "url": str(url)},
         "evidence": {k: capture[k] for k in ("roi_xyxy", "width", "height", "frame_width", "frame_height") if k in capture},
     }
+    # Presentation-only observer; failures cannot alter capture or verification.
+    try:
+        from utils.run_review import observe_capture
+        observe_capture(state, slot, records["previews"][slot])
+    except Exception:
+        pass
     return True

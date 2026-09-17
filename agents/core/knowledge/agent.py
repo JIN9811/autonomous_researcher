@@ -527,7 +527,8 @@ def _guardian_incident_evidence_from_state(state: OrchestratorState) -> dict[str
             if value:
                 tags.append(value)
         status = str(alert.get("status") or "").strip().lower()
-        if bool(alert.get("blocks_workflow", False)) and status not in {"resolved", "closed", "dismissed"}:
+        from utils.hardware_alert_lifecycle import is_active
+        if is_active(alert):
             active_hardware_alerts.append(alert)
             for key in ("failure_code", "reason_code"):
                 value = str(alert.get(key) or "").strip()

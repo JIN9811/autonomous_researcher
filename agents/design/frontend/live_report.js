@@ -167,16 +167,41 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
       ])) + '</details>';
     }
 
-    function renderExpectedPerformance(screenReport, designReport, selected = {}) {
-      const evaluations = screenReport.candidate_evaluations || designReport.candidate_evaluations || [];
+    function renderExpectedPerformance(screenReport, designReport, selected = {}, candidates = []) {
+      const evaluations = [...(designReport.candidate_evaluations || []), ...(screenReport.candidate_evaluations || [])];
       const fallback = designReport.design_evaluation || screenReport.design_evaluation || selected.design_evaluation;
-      const rows = evaluations.length ? evaluations : fallback ? [fallback] : [];
       const selectedId = selected.candidate_id || screenReport.design_evaluation?.candidate_id || designReport.design_evaluation?.candidate_id;
-      return '<div class="dsn-comparison-scroll" tabindex="0" role="region" aria-label="Candidate comparison">' + evidenceTable(["Candidate", "Constraints", "Mass (estimated)", "Performance evidence"], rows.map(e=>[
-        `${e.candidate_id ?? 'Not recorded'}${selectedId && e.candidate_id===selectedId?' · Selected':''}`, e.validity?.status,
-        e.cost?.mass?.value != null ? `${e.cost.mass.value} ${e.cost.mass.unit || ""}` : "Not recorded",
-        e.performance?.value != null && e.performance?.source ? `${e.performance.value} ${e.performance.unit || ""}` : "Unassessed"
-      ]), selectedId ? rows.findIndex(e=>e.candidate_id===selectedId) : -1) + '</div>';
+      const byId = new Map();
+      const merge = (item, evaluationOnly = false) => {
+        if (!item || typeof item !== 'object') return;
+        const id = item.candidate_id || item.id || (evaluationOnly ? selectedId || '__unidentified_evaluation' : null);
+        if (!id) return;
+        const previous = byId.get(id) || {};
+        const evaluation = evaluationOnly ? item : item.design_evaluation;
+        byId.set(id, {...previous, ...(evaluationOnly ? {} : item), candidate_id:id,
+          status:previous.status === 'measured' ? 'measured' : item.status || previous.status,
+          parameters:{...(previous.parameters || {}), ...(item.parameters || {})},
+          design_evaluation:evaluation || previous.design_evaluation});
+      };
+      [ ...(screenReport.candidate_board?.candidate_ledger || []),
+        ...(designReport.candidate_generation?.candidate_ledger || []),
+        ...(designReport.candidate_generation?.top_candidates || []), ...candidates ].forEach(item=>merge(item));
+      evaluations.forEach(item=>merge(item, true));
+      if (fallback) merge(fallback, true);
+      if (selectedId) merge({...selected,candidate_id:selectedId});
+      const rows = [...byId.values()];
+      return '<div class="dsn-comparison-scroll" tabindex="0" role="region" aria-label="Candidate comparison">' + evidenceTable(["Candidate", "Cell size (mm)", "Wall (mm)", "Progress", "Constraints", "Mass (estimated)", "Performance evidence"], rows.map(row=>{
+        const e = row.design_evaluation || {};
+        return [
+          `${row.candidate_id === '__unidentified_evaluation' ? 'Not recorded' : row.candidate_id}${selectedId && row.candidate_id===selectedId?' · Selected':''}`,
+          row.cell_size_mm ?? row.parameters?.cell_size_mm ?? 'Not recorded',
+          row.wall_thickness_mm ?? row.parameters?.wall_thickness_mm ?? 'Not recorded',
+          row.status || (row.__actual_specimen ? 'generated' : 'recorded'),
+          e.validity?.status || 'Not evaluated',
+          e.cost?.mass?.value != null ? `${e.cost.mass.value} ${e.cost.mass.unit || ""}` : "Not recorded",
+          e.performance?.value != null && e.performance?.source ? `${e.performance.value} ${e.performance.unit || ""}` : "Unassessed"
+        ];
+      }), selectedId ? rows.findIndex(row=>row.candidate_id===selectedId) : -1) + '</div>';
     }
 
     function renderArtifactLedger(items) {
@@ -208,11 +233,20 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
     }
 
     function renderManufacturabilityCard(screenReport, designReport, selected, spec) {
-      const evidence = designReport.design_evaluation || screenReport.design_evaluation || spec.design_evaluation;
-      const rows = evidence?.constraint_margins || [];
+      const selectedId = spec.candidate_id || selected.candidate_id;
+      const matches = item => item && (!selectedId || !item.candidate_id || item.candidate_id === selectedId);
+      const evidence = [spec.design_evaluation, selected.design_evaluation, screenReport.design_evaluation,
+        designReport.design_evaluation, ...(screenReport.candidate_evaluations || []), ...(designReport.candidate_evaluations || [])].find(matches);
+      const currentRows = evidence?.constraint_margins || [];
+      const selection = evidence?.selection_evaluation;
+      const historical = !currentRows.length && matches(selection) && selection.constraint_margins?.length;
+      const rows = historical ? selection.constraint_margins : currentRows;
+      const summary = evidence ? `<p class="ar-design-empty">Current design: ${escapeHtml(evidence.validity?.status || 'Not evaluated')}${evidence.adapted_fields?.length ? ` · Adapted: ${escapeHtml(evidence.adapted_fields.join(', '))}` : ''}</p>` : '';
+      const provenance = historical ? '<p class="ar-design-empty"><strong>Selection-time evidence — before adaptation.</strong> These checks are not a pass verdict for the current geometry.</p>' : '';
       const bars=rows.filter(m=>finiteNumber(m.actual)!==null && finiteNumber(m.limit)!==null && m.actual>=0 && m.limit>0 && ['>=','<='].includes(m.relation));
       const chart=bars.map(m=>{const maximum=Math.max(m.actual,m.limit)*1.15,actual=m.actual/maximum*100,limit=m.limit/maximum*100;return `<div class="dsn-constraint-row"><div><strong>${escapeHtml(m.constraint)}</strong><span>${escapeHtml(`${m.actual} ${m.unit||''} · ${m.relation} ${m.limit} · ${m.status||'unknown'}`)}</span></div><svg viewBox="0 0 100 8" preserveAspectRatio="none" role="img" aria-label="Constraint value relative to limit"><rect x="${m.relation==='>='?limit:0}" width="${m.relation==='>='?100-limit:limit}" height="8" fill="#54d3ef" opacity=".09"/><rect y="2" width="${actual}" height="4" fill="${m.status==='fail'?'#e5ad69':'#54c7e8'}"/><path d="M${limit} 0 V8" stroke="#dce8f0" stroke-width=".6"/></svg><small>${escapeHtml(`Margin: ${m.margin??'Not recorded'} ${m.unit||''}`)}</small></div>`;}).join('');
-      return (chart?`<div class="dsn-constraint-bars">${chart}</div>`:'') + '<details class="dsn-variable-details"><summary>Constraint details</summary><p class="ar-design-empty">Line: limit · Shading: allowed region · Each row uses its own scale</p>' + evidenceTable(["Constraint", "Actual", "Limit", "Margin", "Result"], rows.map(m=>[
+      const unmeasured = rows.filter(m=>finiteNumber(m.actual)===null).map(m=>`${m.constraint}: ${m.status || 'Not measured'} · limit ${m.relation || ''} ${m.limit ?? 'Not recorded'} ${m.unit || ''}`);
+      return summary + provenance + (chart?`<div class="dsn-constraint-bars">${chart}</div>`:'') + (unmeasured.length ? `<p class="ar-design-empty">${escapeHtml(unmeasured.join(' · '))}</p>` : '') + '<details class="dsn-variable-details"><summary>Constraint details</summary><p class="ar-design-empty">Line: limit · Shading: allowed region · Each row uses its own scale</p>' + evidenceTable(["Constraint", "Actual", "Limit", "Margin", "Result"], rows.map(m=>[
         m.constraint, m.actual == null ? "Not recorded" : `${m.actual} ${m.unit || ""}`, m.limit == null ? "Not recorded" : `${m.relation || ""} ${m.limit} ${m.unit || ""}`,
         m.margin == null ? "Not recorded" : `${m.margin} ${m.unit || ""}`, m.status
       ])) + '<p class="ar-design-empty">Design constraints only; manufacturing verification belongs to SPC.</p></details>';
@@ -337,7 +371,12 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
         : Array.isArray(generation.rejection_log) ? generation.rejection_log
           : Array.isArray(generation.rejected_candidates) ? generation.rejected_candidates
             : Array.isArray(evaluation.rejected_candidates) ? evaluation.rejected_candidates : [];
-      const selected = services.designSelectedCandidate(screenReport, designReport, spec);
+      const selected = {...services.designSelectedCandidate(screenReport, designReport, spec)};
+      if (spec.candidate_id) selected.candidate_id = spec.candidate_id;
+      for (const key of ['cell_size_mm','wall_thickness_mm']) {
+        if (spec[key] != null) selected[key] = spec[key];
+      }
+      if (spec.design_evaluation) selected.design_evaluation = spec.design_evaluation;
       const candidateRows = services.designCandidateRows(screenReport, designReport, report);
       const specimenRows = services.designActualSpecimenRows(screenReport, designReport, report);
       const generatedCount = specimenRows.length;
@@ -347,8 +386,8 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
     ${services.renderDashboardCard("Experiment Contract", renderer.renderBriefCard(brief, objective, hypothesis, spec, prior, material, manufacturability, selected), { span: 3, tone: "design", eyebrow: "mission input", className: "ar-design-reference-card ar-design-brief-card" })}
     ${services.renderDashboardCard("Generated Specimens", services.renderDesignCandidateCards(screenReport, designReport, report, { renderEvidence: renderer.renderEvidence }), { span: 9, tone: "design", eyebrow: "built specimen log", className: "ar-design-reference-card ar-design-candidates-card", meta: `${services.renderRuntimeValue(generatedCount)} built / ${services.renderRuntimeValue(validCount)} usable / ${services.renderRuntimeValue(previewCount)} previews` })}
     ${services.renderDashboardCard("Design Space", renderer.renderDesignSpace(screenReport, selected, plannedPoints), { span: 4, tone: "metrics", eyebrow: "recorded variables", className: "ar-design-reference-card ar-design-sweep-card" })}
-    ${services.renderDashboardCard("Candidate Comparison", renderer.renderExpectedPerformance(screenReport, designReport, selected), { span: 4, tone: "metrics", eyebrow: "recorded candidate evidence", className: "ar-design-reference-card ar-design-performance-card" })}
-    ${services.renderDashboardCard("Constraint Check", renderer.renderManufacturabilityCard(screenReport, designReport, selected, spec, material, specimenRows.length ? specimenRows : candidateRows), { span: 4, tone: (designReport.design_evaluation || screenReport.design_evaluation || spec.design_evaluation)?.validity?.status === "pass" ? "success" : "warning", eyebrow: "design checks", className: "ar-design-reference-card ar-design-manufacturing-card" })}
+    ${services.renderDashboardCard("Candidate Comparison", renderer.renderExpectedPerformance(screenReport, designReport, selected, [...plannedPoints.map((point,index)=>({...point,candidate_id:point.candidate_id || point.id || `LHS ${index+1}`,status:point.status || 'planned'})), ...candidateRows, ...specimenRows]), { span: 4, tone: "metrics", eyebrow: "recorded candidate evidence", className: "ar-design-reference-card ar-design-performance-card" })}
+    ${services.renderDashboardCard("Constraint Check", renderer.renderManufacturabilityCard(screenReport, designReport, selected, spec, material, specimenRows.length ? specimenRows : candidateRows), { span: 4, tone: (spec.design_evaluation || screenReport.design_evaluation || designReport.design_evaluation)?.validity?.status === "pass" ? "success" : "warning", eyebrow: "design checks", className: "ar-design-reference-card ar-design-manufacturing-card" })}
     ${services.renderDashboardCard("Active Handoff", renderer.renderHandoffCard(handoff, selected, material, spec, artifactLedger), { span: 12, tone: handoff.required_fields_present === false || rejected.length ? "warning" : "success", eyebrow: "dsn -> spc", className: "ar-design-reference-card ar-design-handoff-card" })}
   `;
     }

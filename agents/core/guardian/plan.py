@@ -46,6 +46,7 @@ def guardian_plan_contract() -> dict[str, Any]:
 
 
 def _inputs(state: Any) -> dict[str, Any]:
+    from utils.hardware_alert_lifecycle import active_alerts
     metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
     return deepcopy({
         "operator_stop": {
@@ -60,7 +61,7 @@ def _inputs(state: Any) -> dict[str, Any]:
             "retry_counters": state.retry_counters,
             "guardian_gates": metadata.get("guardian_gates", []),
             "incident_records": metadata.get("incident_records", []),
-            "hardware_alerts": metadata.get("hardware_alerts", []),
+            "hardware_alerts": active_alerts(state),
         },
         "references": {
             "consumer": "guardian_agent",

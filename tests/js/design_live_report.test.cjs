@@ -102,6 +102,41 @@ const selectedComparison = renderer.renderExpectedPerformance({candidate_evaluat
 assert.match(selectedComparison, /dsn-comparison-scroll/);
 assert.match(selectedComparison, /class="dsn-selected-candidate"[^>]*><td>b · Selected/);
 assert.doesNotMatch(renderer.renderExpectedPerformance({candidate_evaluations:[{candidate_id:'a'}]}, {}, {}), /dsn-selected-candidate/);
+const allCandidates = renderer.renderExpectedPerformance({candidate_evaluations:[
+  {candidate_id:'current',validity:{status:'pass'}}
+]}, {}, {candidate_id:'current',design_evaluation:{candidate_id:'current',validity:{status:'unassessed'}}}, [
+  {candidate_id:'lhs-a',parameters:{cell_size_mm:5,wall_thickness_mm:0.6},status:'planned'},
+  {candidate_id:'lhs-b',parameters:{cell_size_mm:10,wall_thickness_mm:1.2},status:'measured'},
+  {candidate_id:'old-built',__actual_specimen:true},
+  {candidate_id:'bo-next',parameters:{cell_size_mm:8,wall_thickness_mm:0.9},status:'planned'},
+  {candidate_id:'current'}, {candidate_id:'current'}
+]);
+for (const id of ['lhs-a','lhs-b','old-built','bo-next','current']) assert.match(allCandidates,new RegExp(id));
+assert.equal((allCandidates.match(/<td>current · Selected<\/td>/g)||[]).length,1);
+assert.match(allCandidates,/Cell size \(mm\)/);
+assert.match(allCandidates,/unassessed/);
+assert.match(allCandidates,/Not evaluated/);
+assert.doesNotMatch(allCandidates,/<td>pass<\/td>/);
+const retainedSelection = {candidate_id:'current',validity:{status:'pass'},constraint_margins:[
+  {constraint:'minimum_wall',actual:null,limit:0.4,relation:'>=',unit:'mm',status:'unmeasured'},
+  {constraint:'envelope_x',actual:30,limit:30,relation:'<=',margin:0,unit:'mm',status:'pass'}
+]};
+const adaptedSelection = {candidate_id:'current',validity:{status:'unassessed'},constraint_margins:[],
+  adapted_fields:['tpms_thickness'],selection_evaluation:retainedSelection};
+const before = JSON.stringify(adaptedSelection);
+const adaptedConstraint = renderer.renderManufacturabilityCard({design_evaluation:retainedSelection}, {}, {},
+  {candidate_id:'current',design_evaluation:adaptedSelection});
+assert.match(adaptedConstraint,/Current design: unassessed/);
+assert.match(adaptedConstraint,/Selection-time evidence — before adaptation/);
+assert.match(adaptedConstraint,/Constraint value relative to limit/);
+assert.match(adaptedConstraint,/minimum_wall: unmeasured/);
+assert.match(adaptedConstraint,/not a pass verdict for the current geometry/);
+assert.equal(JSON.stringify(adaptedSelection),before);
+const candidateSpecific = renderer.renderManufacturabilityCard({candidate_evaluations:[
+  {candidate_id:'wrong',constraint_margins:[{constraint:'wrong-candidate'}]},retainedSelection
+]}, {}, {candidate_id:'current'}, {candidate_id:'current'});
+assert.match(candidateSpecific,/envelope_x/);
+assert.doesNotMatch(candidateSpecific,/wrong-candidate/);
 assert.match(renderer.renderManufacturabilityCard({}, {}, {}, {}), /<details class="dsn-variable-details"><summary>Constraint details<\/summary>/);
 assert.match(space, /<details class="dsn-variable-details"><summary>Variables & ranges<\/summary>/);
 assert.doesNotMatch(space, /0\.9988/);

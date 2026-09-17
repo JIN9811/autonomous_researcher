@@ -4,6 +4,12 @@
 
 # Design Agent — Specifications and Candidate Review
 
+## Runtime decision reference
+
+Design reviews the supplied candidate and manufacturing evidence. The current validated request owns coordinates, parameter bounds, fixed conditions and required checks. Documentation examples are not candidate inputs, test results or additional constraints.
+
+## Overview
+
 Design (DSN) turns experiment requests and BO coordinates into a checked specimen specification. Code prepares candidates, checks and geometry; the LLM chooses further checks, acceptance or owner review from supplied evidence. Acceptance is neither fabrication success nor validated performance prediction.
 
 ## Inputs and outputs

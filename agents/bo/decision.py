@@ -15,7 +15,8 @@ from time import monotonic
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from utils.agent_artifact_archive import record_tool_artifact
-from agents.core.knowledge.context import append_reference_only, build_reference_context, mark_reference_delivered, record_reference_use
+from agents.core.knowledge.context import append_reference_only, mark_reference_delivered, record_reference_use
+from agents.core.knowledge.runtime_reference import build_execution_reference as build_reference_context
 
 
 SUPPORTED_ACQUISITIONS = {

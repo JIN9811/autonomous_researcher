@@ -4,6 +4,12 @@
 
 # Orchestrator Agent — Conversation and Coordination
 
+## Runtime decision reference
+
+Orchestrator coordinates the supplied user request, validated run contract, active graph and owner handoffs. Registered candidates and current evidence determine available transitions. Explanatory sequences and example conversations do not define a new plan, approval, goal, device state or missing prerequisite.
+
+## Overview
+
 Orchestrator (ORC) interprets research requests and connects them to work supported by the current graph and owners. It distinguishes system questions, condition changes and experiment starts; it does not directly operate printers, robots or test machines.
 
 ## From conversation to execution

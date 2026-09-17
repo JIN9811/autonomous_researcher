@@ -9,13 +9,14 @@ function context() {
     Date, Promise, liveLastSession: {}, livePrinterMonitorInFlight: null,
     livePrinterMonitorLastRefresh: 0, liveAuxRefreshInFlight: null,
     run: 'run-a', renders: 0, calls: 0, applied: [],
-    liveSpecimenAgentWorking: () => true,
+    window: {}, liveSpecimenAgentWorking: () => false,
   });
   vm.runInContext(`
     function liveCurrentRunId() { return run; }
     function renderLiveRuntime() { renders++; }
     function applyLivePrinterMonitorStatus(status, runId) { applied.push({status, runId}); }
     function fetchJsonOrThrow() { calls++; return new Promise(resolve => { reply = resolve; }); }
+    function fetchJsonOrThrowWithTimeout() { return fetchJsonOrThrow(); }
     function fetch() { return new Promise(() => {}); }
     function refreshLiveObjectiveState() { return new Promise(() => {}); }
   `, ctx);
@@ -55,6 +56,27 @@ test('late response cannot contaminate a different run', async () => {
   await pending;
   assert.equal(ctx.applied.length, 0);
   assert.equal(ctx.renders, 0);
+});
+
+test('idle/error agent does not stop printer monitoring; archive never polls', async () => {
+  const ctx = context();
+  const request = ctx.refreshLivePrinterMonitorStatus({is_running:false, state:{stage:'error'}});
+  assert.equal(ctx.calls, 1);
+  ctx.reply({ok:true});
+  await request;
+  ctx.window.AX4LABReplay = {};
+  await ctx.refreshLivePrinterMonitorStatus({}, {force:true});
+  assert.equal(ctx.calls, 1);
+});
+
+test('rejected monitor request releases in-flight guard so the next poll retries', async () => {
+  const ctx = context();
+  ctx.fetchJsonOrThrowWithTimeout = async () => { throw new Error('timeout'); };
+  await ctx.refreshLivePrinterMonitorStatus({}, {force:true});
+  assert.equal(ctx.livePrinterMonitorInFlight, null);
+  ctx.fetchJsonOrThrowWithTimeout = async () => ({ok:true});
+  await ctx.refreshLivePrinterMonitorStatus({}, {force:true});
+  assert.equal(ctx.renders, 1);
 });
 
 test('video-play snapshot cannot pin an older printer state over new telemetry', () => {

@@ -296,6 +296,10 @@ def _collect_alarm_signals(payload: dict[str, Any]) -> list[dict[str, Any]]:
         )
 
     def walk(value: Any, path: str, *, passive_vision: bool = False) -> None:
+        if (isinstance(value, dict) and value.get('schema') == 'hardware_alert.v1'
+                and value.get('lifecycle') == 'resolved' and value.get('resolution')
+                and value.get('blocks_workflow') is False):
+            return  # Audited history must not become a new payload alarm.
         if isinstance(value, dict):
             # Knowledge retains Guardian history for retrieval and audit. Only
             # its explicitly projected active hardware alerts are current gate
@@ -1037,7 +1041,8 @@ def _state_alarm_signals(*, state: Any, stage: str, phase: str) -> list[dict[str
         alarms.append(_alarm("OPERATOR_STOP_REQUESTED", "blocking", "stop_requested flag is set", "state.stop_requested"))
     if phase == "pre":
         metadata = getattr(state, "run_metadata", {}) if isinstance(getattr(state, "run_metadata", {}), dict) else {}
-        for alert in metadata.get("hardware_alerts", []) if isinstance(metadata.get("hardware_alerts"), list) else []:
+        from utils.hardware_alert_lifecycle import active_alerts
+        for alert in active_alerts(state):
             if not isinstance(alert, dict) or not bool(alert.get("blocks_workflow", False)):
                 continue
             alert_stage = str(alert.get("stage") or alert.get("workspace") or "").lower()

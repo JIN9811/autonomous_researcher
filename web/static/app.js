@@ -1213,6 +1213,10 @@ function connectEventStream() {
 
 btnStart.addEventListener("click", async () => {
   const selectedMode = modeSelect ? modeSelect.value : "test";
+  if (selectedMode === "replay") {
+    window.AX4LABRunReviewPicker?.open();
+    return;
+  }
   if (selectedMode === "live") {
     openLiveGuiWindow();
     await refreshState();

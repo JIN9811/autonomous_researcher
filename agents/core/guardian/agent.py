@@ -347,6 +347,8 @@ class GuardianAgent(BaseAgent):
                     health_request[key] = spec[key]
             health_payload = ctx.tools.call("device.health", health_request)
             if isinstance(health_payload, dict):
+                from utils.hardware_alert_lifecycle import reconcile
+                reconcile(state, health_payload.get('printer') or {})
                 for key in ("printer", "camera", "robot", "utm", "simulator"):
                     if key in health_payload:
                         snapshot[key] = health_payload[key]
@@ -367,7 +369,8 @@ class GuardianAgent(BaseAgent):
                 unhealthy.append(f"{device}:{status}")
 
         active_alerts: list[dict[str, Any]] = []
-        metadata_alerts = state.run_metadata.get("hardware_alerts", []) if isinstance(state.run_metadata, dict) else []
+        from utils.hardware_alert_lifecycle import active_alerts as current_alerts
+        metadata_alerts = current_alerts(state)
         if isinstance(metadata_alerts, list):
             for alert in metadata_alerts[-10:]:
                 if isinstance(alert, dict) and bool(alert.get("blocks_workflow", False)):

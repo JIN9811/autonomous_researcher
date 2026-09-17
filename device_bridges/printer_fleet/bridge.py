@@ -433,6 +433,7 @@ class BambuStudioSlicerRunner:
             return self._blocked(placement_validation["failure_code"], placement_validation=placement_validation,
                                  command=command, output_dir=str(output_dir))
         data = selected.read_bytes()
+        from utils.printer_wait_timing import sliced_duration_seconds
         return {
             "ok": True,
             "tool": "printer.bambu.slice_artifact",
@@ -440,6 +441,8 @@ class BambuStudioSlicerRunner:
             "source_path": str(original_source),
             "orientation": orientation,
             "sliced_artifact_path": str(selected),
+            "estimated_print_time_sec": sliced_duration_seconds(selected),
+            "print_time_source": "sliced_artifact",
             "output_dir": str(output_dir),
             "size_bytes": len(data),
             "sha256": hashlib.sha256(data).hexdigest(),
@@ -3703,6 +3706,8 @@ class PrinterDeviceBridgeManager:
                 "device_screen": result.get("device_screen", {}),
                 "failure_code": result.get("failure_code", ""),
                 "requires_connection_info": bool(result.get("requires_connection_info", False)),
+                **{key: result.get(key) for key in ('physical_transport', 'mqtt_snapshot', 'device_error',
+                    'error_fields_observed', 'observed_job_id', 'observed_job_state', 'device_identity')},
             }
         return {
             "ok": True,
@@ -3980,6 +3985,11 @@ class PrinterDeviceBridgeManager:
                 "mqtt_snapshot": {k: v for k, v in mqtt_snapshot.items() if k != "report"},
                 "ftps_probe": {"status": "not_checked", "skip_reason": "observation_only"},
                 "device_error": device_error, "published": False, "start_enabled": False,
+                "device_identity": hashlib.sha256(json.dumps([profile.profile_id,
+                    connection.get('host'), connection.get('serial')], sort_keys=True).encode()).hexdigest(),
+                "error_fields_observed": any(error not in (None, "") for error in errors),
+                "observed_job_id": str((normalized_report.get('job') or {}).get('task_id') or ''),
+                "observed_job_state": str(normalized_report.get('state') or 'UNKNOWN'),
                 "device_screen": self._device_screen_payload(
                     profile=profile,
                     connection={"mqtt": mqtt_state, "video": "not_checked", "transfer": "not_checked",
@@ -4076,6 +4086,8 @@ class PrinterDeviceBridgeManager:
         artifact_plate_validation: dict[str, Any] = {}
         autoejection_patch: dict[str, Any] = {}
         artifact_integrity_validation: dict[str, Any] = {}
+        # HTTP may recover a transfer failure, never an artifact/patch failure.
+        artifact_gate_ready = True
         expected_artifact_sha256 = ""
         ejection_only_project_file = False
         wants_upload = self._wants_bambu_upload(payload)
@@ -4103,6 +4115,7 @@ class PrinterDeviceBridgeManager:
                 if slicer_result.get("ok") and slicer_result.get("sliced_artifact_path"):
                     artifact_path = Path(str(slicer_result.get("sliced_artifact_path")))
                 else:
+                    artifact_gate_ready = False
                     gate_ready = False
                     gate_state = "blocked"
                     failure_code = str(slicer_result.get("failure_code") or "BAMBU_STUDIO_SLICE_FAILED")
@@ -4117,12 +4130,14 @@ class PrinterDeviceBridgeManager:
                 expected_artifact_sha256 = str(autoejection_patch.get("patched_sha256") or "")
                 ejection_only_project_file = bool(autoejection_patch.get("schema") == "bambu_ejection_only_project_file.v1")
             else:
+                artifact_gate_ready = False
                 gate_ready = False
                 gate_state = "blocked"
                 failure_code = str(autoejection_patch.get("failure_code") or "BAMBU_NATIVE_AUTOEJECTION_PATCH_FAILED")
         if artifact_path and not health_only:
             artifact_plate_validation = validate_bambu_project_file_local_artifact(artifact_path, plate_id=plate_id)
             if not artifact_plate_validation.get("ok"):
+                artifact_gate_ready = False
                 gate_ready = False
                 gate_state = "blocked"
                 failure_code = str(artifact_plate_validation.get("failure_code") or "BAMBU_PROJECT_FILE_PARAM_MISMATCH")
@@ -4130,6 +4145,7 @@ class PrinterDeviceBridgeManager:
                 expected_artifact_sha256 = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
         if (
             artifact_path
+            and artifact_gate_ready
             and not artifact_url
             and not health_only
             and artifact_plate_validation.get("ok", True)
@@ -4155,6 +4171,7 @@ class PrinterDeviceBridgeManager:
                 stage="before_upload",
             )
             if not artifact_integrity_validation.get("ok"):
+                artifact_gate_ready = False
                 gate_ready = False
                 gate_state = "blocked"
                 failure_code = str(
@@ -4213,7 +4230,8 @@ class PrinterDeviceBridgeManager:
                 gate_state = "blocked"
                 failure_code = str(project_file_draft.get("failure_code") or failure_code or "BAMBU_PROJECT_FILE_DRAFT_INVALID")
         http_artifact_ready = bool(
-            mqtt_snapshot.get("ok")
+            artifact_gate_ready
+            and mqtt_snapshot.get("ok")
             and artifact_url
             and _is_http_artifact_url(artifact_url)
             and project_file_draft.get("ok")
@@ -5743,7 +5761,10 @@ class PrinterDeviceBridgeManager:
         can_upload = connection.get("mqtt") == "virtual" or (
             connection.get("mqtt") == "connected" and connection.get("transfer") == "connected"
         )
-        safe_state = state.upper() in {"IDLE", "FINISH", "UNKNOWN"}
+        # Use the same current-error-aware rule as the production start gate.
+        # A cancelled previous job is not an active device fault.
+        safe_state = self._bambu_printer_state_allows_project_start(
+            normalized_report={**normalized_report, "state": state}, payload={})
         can_start_print = bool(can_upload and safe_state and project_file_draft.get("ok") and upload_result.get("ok"))
         action_payload = {
             "can_upload": can_upload,

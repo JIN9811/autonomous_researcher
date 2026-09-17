@@ -4,11 +4,17 @@
 
 # Bayesian Optimization Agent — Initial and Next Designs
 
+## Runtime decision reference
+
+BO reviews the supplied strategy and numerical results. The active request owns the objective, direction, parameter space, fixed values, initialization budget and acquisition configuration. Solver outputs own exact coordinates. Documentation examples cannot override these settings or count as observations.
+
+## Overview
+
 BO calculates design coordinates from the declared parameter space and valid objective observations. The LLM selects bounded strategies/tools and reviews results; LHS and numerical optimization tools determine exact coordinates. Model prose cannot rewrite them.
 
 ## Initial LHS and subsequent BO
 
-When Latin Hypercube initialization is configured, initial points explore the declared space. The current default two-variable setup requires eight valid LHS observations; this is a configuration default, not a universal experiment rule. Failed or ineligible observations do not increase the count.
+When Latin Hypercube initialization is configured, initial points explore the declared space. The active initialization configuration supplies the required observation count; no count is prescribed by this page. Failed or ineligible observations do not increase the count.
 
 During initialization, LHS status and the next index govern progression. GP modeling and acquisition apply when eligible. Default EI uses LogExpectedImprovement; other supported acquisitions may be configured.
 

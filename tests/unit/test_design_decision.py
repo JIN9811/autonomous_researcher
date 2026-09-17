@@ -109,12 +109,12 @@ async def test_empty_valid_pool_is_not_repaired_into_unchecked_success():
 async def test_locked_bo_request_is_preserved_in_model_selected_design():
     state = state_for_test()
     state.run_metadata["orchestrator_design_contract"] = {
-        "contract_id":"locked", "requested_parameters":{"cell_size_mm":6.0,"relative_density":0.37}}
+        "contract_id":"locked", "requested_parameters":{"cell_size_mm":6.0,"wall_thickness_mm":0.8}}
     result = await DesignAgent().run(state, ModelContext([request("accept_candidate", "cand-1-01")]))
     assert result.success
     spec = result.data["experiment_spec"]
     assert spec["cell_size_mm"] == 6.0
-    assert spec["relative_density"] == 0.37
+    assert spec["wall_thickness_mm"] == 0.8
     assert spec["requested_parameters"] == spec["realized_parameters"]
 
 
@@ -240,8 +240,8 @@ async def test_previous_spec_is_context_not_a_new_lock_on_all_generated_variable
     for loop in range(3):
         state.loop_count = loop
         state.run_metadata["orchestrator_design_contract"] = {"contract_id":f"loop-{loop}",
-            "requested_parameters":{"cell_size_mm":6.0,"relative_density":0.3+0.02*loop}}
+            "requested_parameters":{"cell_size_mm":6.0,"wall_thickness_mm":0.8+0.1*loop}}
         result = await DesignAgent().run(state, ModelContext([request("accept_candidate", f"cand-{loop+1}-01")]))
         assert result.success
         state.current_experiment_spec = result.data["experiment_spec"]
-        assert state.current_experiment_spec["relative_density"] == pytest.approx(0.3+0.02*loop)
+        assert state.current_experiment_spec["wall_thickness_mm"] == pytest.approx(0.8+0.1*loop)

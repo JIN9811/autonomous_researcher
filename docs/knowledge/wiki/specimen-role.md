@@ -4,6 +4,12 @@
 
 # Specimen Making Agent — Fabrication
 
+## Runtime decision reference
+
+Specimen Making owns the configured fabrication task. Its current run-bound execution profile and registered workflow determine physical effects and required evidence. Descriptions of other printer modes are not instructions to skip, repeat or add work. Telemetry alone is not proof of this task's completion.
+
+## Overview
+
 Specimen Making (SPC) connects accepted Design specifications to fabrication. It owns geometry/manufacturing checks, bounded LLM decisions, registered printer-tool calls and result review—not merely printer status display.
 
 ## Fabrication sequence

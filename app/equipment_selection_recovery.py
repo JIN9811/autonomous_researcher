@@ -17,10 +17,17 @@ def validate_selection_boundary(state, record):
         raise ValueError("Selection recovery identity mismatch")
     data = (record.get("workflow_result") or {}).get("data") or {}
     decisions = data.get("equipment_decisions") or []
+    selection = decisions[0] if len(decisions) == 1 else {}
+    # A pre-model adapter error has no selected command. Combined with the
+    # lifecycle proof below, it is as non-actuating as an operator-review choice.
+    pre_model_type_error = (selection.get('phase') == 'select'
+        and selection.get('llm_used') is False and selection.get('request') is None
+        and selection.get('scope_valid') is True and 'evidence' not in selection
+        and selection.get('error') == 'TypeError: decision could not be validated')
     if (record.get("lifecycle") != "ESCALATED"
         or data.get("failure_code") != "EQUIPMENT_WORKFLOW_SELECTION_REJECTED"
         or len(decisions) != 1 or decisions[0].get("phase") != "select"
-        or (decisions[0].get("request") or {}).get("tool") != "request_operator"
+        or ((selection.get("request") or {}).get("tool") != "request_operator" and not pre_model_type_error)
         or not record.get("events")
         or any(e.get("lifecycle") not in {"RESOLVING", "ESCALATED"} for e in record["events"])):
         raise ValueError("Cannot prove Equipment was never executed")
