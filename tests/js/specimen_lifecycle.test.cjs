@@ -109,9 +109,9 @@ test("a completed run cannot promote a nonterminal SPC status from success alone
   assert.equal(display()(snapshot, false), "waiting");
 });
 
-test("SPC diagnostics remain visible but printer telemetry cannot promote the agent status", () => {
+test("SPC diagnostic events and printer telemetry cannot promote the agent status", () => {
   const snapshot = { run_id: "r1", stage: "idle", agent_status: {}, run_metadata: {} };
-  assert.equal(display([{ agent: "specimen", level: "ERROR", message: "Printer connection failed" }])(snapshot), "error");
+  assert.equal(display([{ agent: "specimen", level: "ERROR", message: "Printer connection failed" }])(snapshot), "idle");
   for(const status of ["PRINTING","RUNNING","FINISH","FINISHED","IDLE","READY","COMPLETE","COMPLETED"]) {
     assert.equal(display([{ agent: "specimen", status }])(snapshot,false), "idle",status);
     assert.equal(display([{ agent: "specimen", status }])(snapshot,true), "idle",status);

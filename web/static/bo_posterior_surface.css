@@ -1,0 +1,8 @@
+.bo-surface-card { min-width: 0; }
+.bo-surface-toolbar { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.bo-surface-toolbar [role="group"] { display: flex; gap: 4px; }
+.bo-surface-toolbar button { color: #a4bed4; background: #102032; border: 1px solid #36516b; border-radius: 5px; padding: 4px 12px; cursor: pointer; }
+.bo-surface-toolbar button[aria-pressed="true"] { color: #53e5ff; border-color: #53e5ff; }
+.bo-surface-plots[hidden] { display: none; }
+.bo-surface-plots img { display: block; width: 100%; height: auto; border-radius: 9px; background: white; }
+.bo-surface-plots a { display: block; }

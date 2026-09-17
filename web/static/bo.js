@@ -339,7 +339,7 @@ function renderLhsVisualization() {
   }
   if (lhsDesignStatus) {
     const initial = currentLhsVisualization.initial_design || {};
-    lhsDesignStatus.textContent = `${initial.completed || 0} / ${initial.target || 0} measured`;
+    lhsDesignStatus.textContent = `${initial.designed ?? initial.completed ?? 0} designed · ${initial.completed || 0} / ${initial.target || 0} measured`;
   }
 }
 
@@ -347,6 +347,10 @@ function acceptLhsVisualization(payload) {
   const renderer = window.LHSDesignVisualization;
   if (!renderer || !renderer.isValid(payload)) return false;
   const runId = String(payload.run_id || "");
+  if (currentLhsVisualization?.run_id === runId &&
+      (Number(currentLhsVisualization.step) > Number(payload.step)
+       || (Number(currentLhsVisualization.step) === Number(payload.step)
+           && Number(currentLhsVisualization.revision || 0) > Number(payload.revision || 0)))) return false;
   if (currentLhsVisualizationRunId && runId && runId !== currentLhsVisualizationRunId) lhsVisualizationByStep.clear();
   currentLhsVisualizationRunId = runId;
   lhsVisualizationByStep.set(Number(payload.step || 0), payload);

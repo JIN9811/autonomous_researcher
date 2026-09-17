@@ -24,7 +24,7 @@ Modification guide:
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>3D Printer GUI</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260915-printer-parts-2" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260917-print-start-1" />
     <link rel="preload" as="image" href="/static/ax4lab-logo-transparent.png">
     <link rel="stylesheet" href="/static/workspace_boot.css?v=1">
   </head>
@@ -340,20 +340,8 @@ Modification guide:
               <input id="printer-layer-input" class="text-input" type="number" min="0.02" max="1" step="0.01" value="0.2" />
             </label>
             <label>
-              First Layer Height mm
-              <input id="printer-first-layer-height-input" class="text-input" type="number" min="0.02" max="1" step="0.01" value="0.2" />
-            </label>
-            <label>
-              First Layer Speed mm/s
-              <input id="printer-first-layer-speed-input" class="text-input" type="number" min="3" max="60" step="1" value="10" />
-            </label>
-            <label>
               Bed Temperature C
               <input id="printer-bed-temp-input" class="text-input" type="number" min="0" max="120" step="1" value="60" />
-            </label>
-            <label>
-              First Layer Bed Temperature C
-              <input id="printer-first-layer-bed-temp-input" class="text-input" type="number" min="0" max="120" step="1" value="60" />
             </label>
             <label>
               Storage Target
@@ -389,10 +377,6 @@ Modification guide:
             enable configured autoejection routine after print completion
           </label>
           <label class="checkbox-line">
-            <input id="printer-slow-first-layer-input" type="checkbox" checked />
-            slow down first layer for bare TPMS bed adhesion
-          </label>
-          <label class="checkbox-line">
             <input id="printer-skirt-input" type="checkbox" />
             generate slicer skirt/brim/raft structures
           </label>
@@ -404,40 +388,78 @@ Modification guide:
             <input id="printer-top-cap-input" type="checkbox" />
             generate top cap skin for flat compression face
           </label>
-          <label class="checkbox-line">
-            <input id="printer-bed-leveling-input" type="checkbox" checked />
-            run printer bed leveling before each real print (Bambu project_file bed_leveling)
-          </label>
-          <label class="checkbox-line">
-            <input id="printer-flow-cali-input" type="checkbox" checked />
-            run flow dynamics calibration before each real print (Bambu project_file flow_cali)
-          </label>
           <div class="lerobot-form-grid">
             <label>
               Cap Skin Thickness mm
               <input id="printer-skin-input" class="text-input" type="number" min="0.2" max="3" step="0.05" value="0.8" />
             </label>
           </div>
+          <section class="printer-subsection" id="printer-print-start-settings" aria-labelledby="printer-print-start-title">
+            <h3 id="printer-print-start-title">Print Start &amp; Early Layers</h3>
+            <p class="hint">Save, then re-slice the original model. Existing artifacts and active prints are unchanged.</p>
+            <label class="checkbox-line">
+              <input id="printer-slow-first-layer-input" type="checkbox" checked />
+              Override first-layer speed for bed adhesion
+            </label>
+            <div class="lerobot-form-grid">
+              <label>First Layer Height (mm)
+                <input id="printer-first-layer-height-input" class="text-input" type="number" min="0.02" max="1" step="0.01" value="0.2" />
+              </label>
+              <label>First Layer Speed (mm/s)
+                <input id="printer-first-layer-speed-input" class="text-input" type="number" min="3" max="60" step="1" value="10" />
+              </label>
+              <label>First Layer Bed Temperature (°C)
+                <input id="printer-first-layer-bed-temp-input" class="text-input" type="number" min="0" max="120" step="1" value="60" />
+              </label>
+            </div>
+            <h4>Bambu X2D — Start-Point Prime &amp; Speed Caps</h4>
+            <div class="lerobot-form-grid">
+              <div>
+                <label class="checkbox-line"><input id="printer-start-point-prime-enabled-input" type="checkbox" checked /> Start-Point Prime</label>
+                <input id="printer-start-point-prime-input" aria-label="Start-Point Prime (mm of filament)" class="text-input" type="number" min="0" step="0.01" value="0.1" />
+                <p class="hint">Limit: ≥ 0 mm of filament · No upper cap</p>
+              </div>
+              <div>
+                <label class="checkbox-line"><input id="printer-early-layer-speed-limit-input" type="checkbox" checked /> Layers 2–5 Speed Cap</label>
+                <input id="printer-early-layer-speed-input" aria-label="Layers 2–5 Speed Cap (mm/s)" class="text-input" type="number" min="0.1" max="1000" step="0.1" value="50" />
+                <p class="hint">Limit: 0.1–1000 mm/s</p>
+              </div>
+              <div>
+                <label class="checkbox-line"><input id="printer-early-layer-z-speed-limit-input" type="checkbox" checked /> Layers 1–5 Z Speed Cap</label>
+                <input id="printer-early-layer-z-speed-input" aria-label="Layers 1–5 Z Speed Cap (mm/s)" class="text-input" type="number" min="0.1" max="20" step="0.1" value="5" />
+                <p class="hint">Limit: 0.1–20 mm/s</p>
+              </div>
+            </div>
+            <label class="checkbox-line">
+              <input id="printer-bed-leveling-input" type="checkbox" checked />
+              Run bed leveling before each real print (Bambu)
+            </label>
+            <label class="checkbox-line">
+              <input id="printer-flow-cali-input" type="checkbox" checked />
+              Run flow dynamics calibration before each real print (Bambu)
+            </label>
+          </section>
           <label class="planning-message-label">
             Notes
             <textarea id="printer-notes-input" class="text-input" rows="4"></textarea>
           </label>
-          <div class="printer-subsection">
-            <h3>Test Options</h3>
-            <p class="hint">Live GUI의 <code>테스트 모드</code>, <code>테스트 모드, 실제 출력</code>에서 기본값으로 사용됩니다.</p>
+          <div class="printer-subsection" id="printer-test-specimen-defaults">
+            <h3>Test Specimen Defaults</h3>
+            <p class="hint">Fallback inputs for test-mode specimen generation, including real-print test routes. Explicit experimental contract values take precedence; these do not change an active run.</p>
             <div class="lerobot-form-grid">
               <label>
-                Test Specimen Size mm
+                Specimen Size X × Y × Z (mm)
                 <input id="printer-test-size-input" class="text-input" value="30,30,30" placeholder="30,30,30 또는 30 x 30 x 30" />
               </label>
               <label>
-                Test Unit Cell Size mm
+                Fallback Cell Size (mm)
                 <input id="printer-test-cell-input" class="text-input" type="number" min="3" max="10" step="0.5" value="10" />
               </label>
             </div>
+            <p class="hint">The single cell-size value is a compatibility fallback, not a fixed LHS/BO candidate or a search range. LHS/BO selects cell size and wall thickness from the experimental contract. Current test-mode search defaults: cell size 5–10 mm; wall thickness 0.6–1.2 mm.</p>
           </div>
           <div class="button-row">
-            <button id="btn-printer-save" class="btn primary">Save Print Defaults & Test Options</button>
+            <button id="btn-printer-save" class="btn primary">Save Print Defaults</button>
             <button id="btn-printer-reset" class="btn">Reset Fields</button>
           </div>
         </article>
@@ -574,6 +596,6 @@ Modification guide:
       </section>
     </main>
 
-    <script src="/static/printer.js?v=20260906-material-priority-layout-3" defer></script>
+    <script src="/static/printer.js?v=20260917-print-settings-toggles-3" defer></script>
   </body>
 </html>

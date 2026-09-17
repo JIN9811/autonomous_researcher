@@ -91,6 +91,7 @@ class KnowledgeAgent(BaseAgent):
         return await self._execute(state, ctx)
 
     async def _execute(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
+        await self.request_attention(state, ctx, "handoff")
         from agents.core.knowledge.execution import default_knowledge_execution_graph, execute_knowledge_graph
         from agents.execution_graph import execution_event_emitter, execution_graph_from_context
 

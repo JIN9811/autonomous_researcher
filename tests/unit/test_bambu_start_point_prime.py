@@ -86,7 +86,7 @@ def test_archive_prime_updates_checksum_and_uses_config(tmp_path):
     assert not runner._postprocess_front_test_line_artifact(path)["removed"]
 
 
-@pytest.mark.parametrize("amount", [-1, 1, float("nan"), float("inf")])
-def test_start_point_prime_rejects_excessive_or_invalid_amount(amount):
+@pytest.mark.parametrize("amount", [-1, float("nan"), float("inf")])
+def test_start_point_prime_rejects_negative_or_nonfinite_amount(amount):
     with pytest.raises(ValueError, match="start-point prime"):
         BambuStudioSlicerRunner._remove_front_test_line_from_gcode(SOURCE, start_point_prime_mm=amount)

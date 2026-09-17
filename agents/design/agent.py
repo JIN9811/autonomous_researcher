@@ -1774,6 +1774,7 @@ class DesignAgent(BaseAgent):
 
     @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
+        await self.request_attention(state, ctx, "handoff")
         execution = await execute_design_graph(
             self,
             state,
@@ -1783,6 +1784,9 @@ class DesignAgent(BaseAgent):
         )
         if not isinstance(execution.result, AgentResult):
             raise RuntimeError("Design execution graph completed without AgentResult")
+        if execution.result.success:
+            from experiments.lhs_progress import record_design_ready
+            await record_design_ready(state, ctx, execution.result.data.get("experiment_spec") or {})
         return execution.result
 
     def execution_catalog(self):

@@ -2749,7 +2749,7 @@ textarea {
   height: 100%;
   min-height: 280px;
   display: block;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .bambu-connection-status {
@@ -3983,6 +3983,7 @@ body.planning-live-body .bo-viz-confidence-band { fill: #94a3b8; fill-opacity: 0
   width: 100%;
 }
 .lhs-viz-matplotlib-image { display: block; height: auto; object-fit: contain; width: 100%; }
+.lhs-viz-designed { fill: #10b981; stroke: #ffffff; stroke-width: 1.5; }
 .lhs-viz-downloads { display: flex; gap: 5px; position: absolute; right: 8px; top: 8px; }
 .lhs-viz-data-link { background: #fff; border: 1px solid #cbd5e1; color: #334155; font-size: 10px; padding: 3px 6px; }
 .lhs-viz-paper { fill: #ffffff; }
@@ -4494,6 +4495,12 @@ body.planning-live-body .bo-objective-summary-card {
 
 .printer-subsection h3 {
   margin: 0 0 4px;
+}
+
+@media (min-width: 980px) {
+  #printer-print-start-settings .lerobot-form-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .train-form-grid {
@@ -20453,7 +20460,7 @@ body.planning-live-body .ar-spm-monitoring-card .ar-spm-video-frame img {
   inset: 0;
   height: 100%;
   max-height: none;
-  object-fit: cover;
+  object-fit: contain;
   border: 0;
   border-radius: 0;
 }

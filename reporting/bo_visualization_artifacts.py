@@ -305,22 +305,34 @@ def write_bo_visualization_artifacts(payload: dict[str, Any], output_dir: str | 
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         surface = normalized.get("gp_surface") if isinstance(normalized.get("gp_surface"), dict) else {}
-        if surface.get("mode") == "mixed_2d_gp_surface":
-            trace = normalized.get("objective_trace") if isinstance(normalized.get("objective_trace"), dict) else {}
-            writer.writerow(["search_x", surface["x_parameter"], surface["y_parameter"], "mean", "std", "lower_95", "upper_95", "acquisition"])
-            for row in trace.get("rows", []):
+        trace = normalized.get("objective_trace") if isinstance(normalized.get("objective_trace"), dict) else {}
+        # Follow the plot's dispatch, not gp_surface: continuous two-variable
+        # paths have no mixed/discrete surface and must not export a slice.
+        if trace.get("mode") == "normalized_search_path":
+            rows = sorted((row for row in trace.get("rows", []) if isinstance(row, dict)),
+                          key=lambda row: float(row["search_x"]))
+            names = list(trace.get("parameter_names") or [])
+            if not names and surface.get("mode") == "mixed_2d_gp_surface":
+                names = [surface["x_parameter"], surface["y_parameter"]]
+            raw_coordinates = bool(names) and all(all(name in (row.get("parameters") or {}) for name in names) for row in rows)
+            # Old stored continuous paths may only retain unit-hypercube vectors.
+            # Label those as normalized; never invent physical coordinates.
+            vector_size = len(rows[0].get("normalized_vector") or []) if rows else 0
+            coordinate_columns = names if raw_coordinates else [
+                f"normalized_{names[i] if i < len(names) else f'coordinate_{i + 1}'}" for i in range(vector_size)]
+            writer.writerow(["search_x", *coordinate_columns, "mean", "std", "lower_95", "upper_95", "acquisition"])
+            for row in rows:
                 parameters = row.get("parameters") if isinstance(row.get("parameters"), dict) else {}
                 mean = row["mean"]
                 std = row["std"]
                 writer.writerow([
                     row["search_x"],
-                    parameters.get(surface["x_parameter"]),
-                    parameters.get(surface["y_parameter"]),
+                    *([parameters[name] for name in names] if raw_coordinates else (row.get("normalized_vector") or [])),
                     mean,
                     std,
                     mean - 1.96 * std,
                     mean + 1.96 * std,
-                    row["acquisition"],
+                    row.get("acquisition") or 0.0,
                 ])
         else:
             writer.writerow(["x", "mean", "std", "lower_95", "upper_95", "acquisition"])
@@ -336,8 +348,20 @@ def write_bo_visualization_artifacts(payload: dict[str, Any], output_dir: str | 
                 )
             )
 
-    return [
+    records = [
         _record(png_path, "image/png"),
         _record(svg_path, "image/svg+xml"),
         _record(csv_path, "text/csv"),
     ]
+    if (normalized.get("response_surface") or {}).get("mode") == "continuous_2d_gp_surface":
+        from reporting.bo_surface_artifacts import plot_surface_views
+        figures = plot_surface_views(normalized)
+        try:
+            for view, surface_figure in zip(("2d", "3d"), figures, strict=True):
+                path = destination / f"{stem}_{view}.png"
+                surface_figure.savefig(path, dpi=150, facecolor="white")
+                records.append(_record(path, "image/png"))
+        finally:
+            for surface_figure in figures:
+                plt.close(surface_figure)
+    return records

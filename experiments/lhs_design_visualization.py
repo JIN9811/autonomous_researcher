@@ -167,6 +167,6 @@ def validate_lhs_design_visualization(payload: dict[str, Any]) -> dict[str, Any]
             raise ValueError(f"cell_size_mm={cell} is outside the feasible set")
         if density is None or not bounds[0] <= density <= bounds[1]:
             raise ValueError(f"wall_thickness_mm={density} is outside bounds")
-        if str(item.get("status") or "") not in {"measured", "next", "planned"}:
-            raise ValueError("LHS point status must be measured, next, or planned")
+        if str(item.get("status") or "") not in {"measured", "designed", "next", "planned"}:
+            raise ValueError("LHS point status must be measured, designed, next, or planned")
     return payload

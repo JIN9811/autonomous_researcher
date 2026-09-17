@@ -107,6 +107,41 @@ def test_write_bo_visualization_artifacts_rejects_lhs_contract(tmp_path: Path) -
         write_bo_visualization_artifacts(payload, tmp_path)
 
 
+@pytest.mark.parametrize("with_physical_coordinates", [True, False])
+def test_continuous_path_csv_matches_plotted_curve_not_conditional_slice(tmp_path, with_physical_coordinates):
+    payload = _visualization()
+    path = {
+        "mode": "continuous_2d_gp_path", "parameter_names": ["cell_size_mm", "wall_thickness_mm"],
+        "search_x": [0., .9, 1.], "normalized_vectors": [[0., 0.], [.5, .6], [1., 1.]],
+        "mean": [10., 12., 11.], "std": [.1, .2, .3], "acquisition": [-5., -2., -4.],
+        "observation_coordinates": [],
+    }
+    payload["gp_surface"] = {}
+    payload["objective_trace"] = _objective_trace({}, [], {}, objective_path=path,
+        parameter_space={"cell_size_mm": [5., 10.], "wall_thickness_mm": [.6, 1.2]} if with_physical_coordinates else None,
+        acquisition_class="LogExpectedImprovement")
+    records = write_bo_visualization_artifacts(payload, tmp_path)
+    with next(Path(item["path"]) for item in records if item["media_type"] == "text/csv").open() as handle:
+        rows = list(csv.DictReader(handle))
+    figure = _plot_posterior(payload)
+    try:
+        assert [float(row["search_x"]) for row in rows] == pytest.approx(figure.axes[0].lines[0].get_xdata())
+        assert [float(row["mean"]) for row in rows] == pytest.approx(figure.axes[0].lines[0].get_ydata())
+        assert [float(row["acquisition"]) for row in rows] == pytest.approx(figure.axes[1].lines[0].get_ydata())
+    finally:
+        plt.close(figure)
+    assert [float(row["std"]) for row in rows] == path["std"]
+    assert float(rows[1]["lower_95"]) == pytest.approx(12. - 1.96 * .2)
+    assert float(rows[1]["upper_95"]) == pytest.approx(12. + 1.96 * .2)
+    if with_physical_coordinates:
+        assert float(rows[1]["cell_size_mm"]) == pytest.approx(7.5)
+        assert float(rows[1]["wall_thickness_mm"]) == pytest.approx(.96)
+    else:
+        assert "cell_size_mm" not in rows[1]
+        assert float(rows[1]["normalized_cell_size_mm"]) == .5
+        assert float(rows[1]["normalized_wall_thickness_mm"]) == .6
+
+
 def test_two_variable_gp_artifact_renders_objective_response_surface(tmp_path: Path) -> None:
     payload = _visualization()
     payload["view"]["mode"] = "two_dimensional_gp"

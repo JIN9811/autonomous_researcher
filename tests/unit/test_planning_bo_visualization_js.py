@@ -59,8 +59,8 @@ console.log(JSON.stringify({{
   sharedEquation: body.includes("renderer.renderEquationCard"),
   sharedPlot: body.includes("renderer.renderPlot"),
   waiting: body.includes("Waiting for a completed BO step"),
-  equationBeforeRanking: body.indexOf("BO Objective Equation") >= 0 && body.indexOf("BO Objective Equation") < body.indexOf("Candidate Ranking"),
-  posteriorBeforeRanking: body.indexOf("Live Posterior") >= 0 && body.indexOf("Live Posterior") < body.indexOf("Candidate Ranking"),
+  equationBeforeRanking: body.indexOf("Objective Equation") >= 0 && body.indexOf("Objective Equation") < body.indexOf("Selection Evidence"),
+  posteriorBeforeRanking: body.indexOf("Live Posterior") >= 0 && body.indexOf("Live Posterior") < body.indexOf("Selection Evidence"),
   duplicateTrace: body.includes("renderBoTraceSvg"),
   sharedChatPlot: chatBody.includes("BOVisualization.renderPlot"),
   legacyChatPlot: chatBody.includes("renderBoTraceSvg"),
@@ -86,20 +86,17 @@ console.log(JSON.stringify({{
 	  rehydratesNewerCompactVisualization: source.includes("function scheduleLiveBoVisualizationHydration")
 	    && source.includes("incomingStep > cachedStep")
 	    && source.includes("scheduleLiveBoVisualizationHydration()"),
-	  lhsFixedInBoDashboard: body.includes('renderDashboardCard("Initial Design / LHS", renderBoInitialDesignBoard(report)')
-	    && body.indexOf('renderDashboardCard("Initial Design / LHS"') < body.indexOf("if (!ranking.length && !Object.keys(boResult).length)"),
-	  keepsOriginalBoCards: body.includes("Candidate Ranking")
-	    && body.includes("Recommendation")
-	    && body.includes("Selected Parameters")
-	    && body.includes("Acquisition Strategy")
-	    && body.includes("Prior Memory")
-	    && body.includes("Ranking Audit")
-	    && body.includes("Next Design Request"),
+	  lhsFixedInBoDashboard: body.includes('renderDashboardCard("Initial Design / LHS", historyBody(')
+	    && body.indexOf('renderDashboardCard("Initial Design / LHS"') < body.indexOf("const ranking ="),
+	  keepsOriginalBoCards: body.includes("Next Experiment")
+	    && body.includes("Optimization Status")
+	    && body.includes("Selection Evidence")
+	    && body.includes("Agentic Progress"),
 	  noInitialDesignGateCard: !body.includes("BO Initialization Gate")
 	    && !body.includes("Waiting for initial design data"),
 	  lhsRemovedFromDesignDashboard: !designBody.includes("Initial Design / LHS")
 	    && !designBody.includes("renderDesignInitialDesignBoard"),
-	  designDashboardAlwaysShowsDesignSpace: designBody.includes('services.renderDashboardCard("DOE Map / Design Space", services.renderDesignParameterSweep(screenReport)')
+	  designDashboardAlwaysShowsDesignSpace: designBody.includes('services.renderDashboardCard("Design Space", renderer.renderDesignSpace(screenReport')
 	    && !designBody.includes("const initialDesign")
 	    && !designBody.includes("initialDesign ?"),
 	  lhsUsesDedicatedRenderer: source.includes("function renderBoInitialDesignBoard(report)")

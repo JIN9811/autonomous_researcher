@@ -736,9 +736,20 @@ async def test_vision_agent_verifies_utm_placement_after_manipulation(
         },
     )
 
-    result = await VisionAgent().run(state, _CtxStub(tools))
+    ctx = _CtxStub(tools)
+    attention = []
+    state.current_experiment_spec["specimen_id"] = "specimen-001"
+    def receive_attention(event):
+        if event["type"] != "agent.attention_requested":
+            return
+        assert utm_calls, "Navigation must follow the actual home-gated capture"
+        assert state.run_metadata["utm_verifications"]["previews"]["verification_1"]["artifact"]["path"]
+        attention.append(event)
+    ctx.emit_execution_event = receive_attention
+    result = await VisionAgent().run(state, ctx)
 
     assert result.success is True
+    assert [event["payload"]["checkpoint"] for event in attention] == ["placement_home"]
     assert capture_calls == []
     assert len(utm_calls) == 1
     assert utm_calls[0]["session_id"] == "lr-rollout-utm-001"

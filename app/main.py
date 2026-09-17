@@ -93,6 +93,7 @@ from device_bridges.bambu_bridge import (
     validate_bambu_project_file_local_artifact,
 )
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
+from device_bridges.printer_fleet.monitoring import shared_video, close_monitors
 from device_bridges.plc_bridge import PLCBridge, PymcProtocolTransport
 from device_bridges.prusa_bridge import PrusaBridgeConfig, PrinterAgenticWorkflow
 from device_bridges.specimen_pose_tracker import SpecimenPoseTrackerBridge, get_specimen_pose_tracker_bridge
@@ -684,6 +685,7 @@ async def shutdown_lerobot_subprocesses() -> None:
         await _PLC_BRIDGE_SERVICE.shutdown()
     controller.set_terminal_error_notifier(None)
     controller.set_plc_safety_status_provider(None)
+    await asyncio.to_thread(close_monitors)
     _cleanup_bambu_video_stream_processes(include_orphans=True)
     _lerobot_bridge().shutdown()
     _utm_runtime_bridge().shutdown()
@@ -984,7 +986,7 @@ class ObjectiveCompareRequest(BaseModel):
 
 
 class PrinterProfileRequest(BaseModel):
-    """Request body for operator-controlled Prusa MK4S print defaults."""
+    """Request body for operator-controlled printer defaults."""
 
     material: str = "PLA"
     printer_model: str = "Prusa MK4S"
@@ -996,6 +998,12 @@ class PrinterProfileRequest(BaseModel):
     first_layer_height_mm: float = 0.2
     slow_first_layer_enabled: bool = True
     first_layer_speed_mm_s: float = 10.0
+    start_point_prime_mm: float = Field(default=0.1, ge=0, allow_inf_nan=False)
+    start_point_prime_enabled: bool = True
+    early_layer_speed_limit_enabled: bool = True
+    early_layer_z_speed_limit_enabled: bool = True
+    early_layer_speed_mm_s: float = Field(default=50.0, ge=0.1, le=1000, allow_inf_nan=False)
+    early_layer_z_speed_mm_s: float = Field(default=5.0, ge=0.1, le=20, allow_inf_nan=False)
     bed_temperature_c: float = 60.0
     first_layer_bed_temperature_c: float = 60.0
     bed_leveling_enabled: bool = True
@@ -6402,7 +6410,14 @@ def _attach_bo_artifact_urls(visualization: dict[str, Any], run_id: str) -> dict
         path = str(item.get("path") or "")
         path_suffix = Path(path).suffix.lower()
         key = suffixes.get(path_suffix)
-        if key and expected in Path(path).stem and key not in matched:
+        stem = Path(path).stem
+        if path_suffix == ".png" and stem.endswith(expected + "_2d"):
+            key = "surface_2d_url"
+        elif path_suffix == ".png" and stem.endswith(expected + "_3d"):
+            key = "surface_3d_url"
+        elif not stem.endswith(expected):
+            continue
+        if key and key not in matched:
             matched[key] = str(item.get("url") or "")
     if not matched:
         return visualization
@@ -6415,6 +6430,8 @@ def _attach_lhs_artifact_urls(visualization: dict[str, Any], run_id: str) -> dic
     """Attach the current LHS step's dedicated publication artifacts."""
     if not visualization or not run_id:
         return visualization
+    from experiments.lhs_progress import progress_fingerprint
+    revision = progress_fingerprint(visualization)
     step = int(visualization.get("step") or 0)
     suffixes = {".png": "png_url", ".svg": "svg_url", ".csv": "csv_url", ".json": "json_url"}
     expected = f"_lhs_design_step_{step:03d}"
@@ -6427,7 +6444,8 @@ def _attach_lhs_artifact_urls(visualization: dict[str, Any], run_id: str) -> dic
         path = str(item.get("path") or "")
         key = suffixes.get(Path(path).suffix.lower())
         if key and expected in Path(path).stem and key not in matched:
-            matched[key] = str(item.get("url") or "")
+            url = str(item.get("url") or "")
+            matched[key] = f"{url}{'&' if '?' in url else '?'}v={revision}" if url else ""
     if not matched:
         return visualization
     enriched = dict(visualization)
@@ -13449,17 +13467,13 @@ async def post_windows_equipment_request_log(req: WindowsBridgeRequestLogRequest
 async def get_printer_status(mode: Literal["live", "test"] = "live", emit: bool = False) -> dict[str, object]:
     """Return selected-printer fleet/device status for GUI display."""
     manager = _printer_bridge_manager()
-    snapshot = controller.snapshot()
-    state = snapshot.get("state") if isinstance(snapshot.get("state"), dict) else {}
-    specimen_stage_running = bool(snapshot.get("is_running")) and str(state.get("stage") or "") == Stage.SPECIMEN.value
-    skip_ftps_probe = not specimen_stage_running
     health = await asyncio.to_thread(
         manager.prepare,
         {
             "runtime_mode": mode,
             "health_only": True,
             "status_only": True,
-            "skip_ftps_probe": skip_ftps_probe,
+            "skip_ftps_probe": True,
         },
     )
     connection = _redacted_selected_printer_connection(manager)
@@ -13513,8 +13527,8 @@ async def get_printer_status(mode: Literal["live", "test"] = "live", emit: bool 
 @app.get("/api/printer/video-status")
 async def get_printer_video_status() -> dict[str, object]:
     """Probe selected Bambu live-view readiness without exposing access-code secrets."""
-    manager = _printer_bridge_manager()
-    return _sanitize_bambu_video_payload(manager.video_status({}))
+    manager = await asyncio.to_thread(_printer_bridge_manager)
+    return _sanitize_bambu_video_payload(await asyncio.to_thread(manager.video_status, {}))
 
 
 def _sanitize_bambu_video_payload(payload: dict[str, object]) -> dict[str, object]:
@@ -13620,66 +13634,8 @@ def _selected_bambu_video_connection(manager: PrinterDeviceBridgeManager) -> tup
     return host, access_code
 
 
-def _capture_bambu_video_frame_bytes(manager: PrinterDeviceBridgeManager) -> bytes:
-    """Capture one Bambu camera frame without exposing LAN access-code details."""
-    host, access_code = _selected_bambu_video_connection(manager)
-    ffmpeg_path = shutil.which("ffmpeg")
-    if not ffmpeg_path:
-        raise HTTPException(status_code=503, detail="BAMBU_VIDEO_PROXY_FFMPEG_MISSING")
-
-    stream_url = f"rtsps://bblp:{quote(access_code, safe='')}@{host}:{manager.config.video.rtsps_port}/streaming/live/1"
-    command = [
-        ffmpeg_path,
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-rtsp_transport",
-        "tcp",
-        "-i",
-        stream_url,
-        "-frames:v",
-        "1",
-        "-vf",
-        "scale=960:-1",
-        "-q:v",
-        "4",
-        "-f",
-        "image2pipe",
-        "-vcodec",
-        "mjpeg",
-        "-",
-    ]
-    try:
-        completed = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            stdin=subprocess.DEVNULL,
-            timeout=max(5.0, float(manager.config.video.timeout_sec) + 3.0),
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise HTTPException(status_code=504, detail="BAMBU_VIDEO_FRAME_TIMEOUT") from exc
-    if completed.returncode != 0 or not completed.stdout:
-        raise HTTPException(status_code=502, detail="BAMBU_VIDEO_FRAME_CAPTURE_FAILED")
-    return completed.stdout
-
-
-@app.get("/api/printer/video-frame.jpg")
-async def get_printer_video_frame() -> Response:
-    """Return one Bambu camera frame as JPEG for reliable browser preview cards."""
-    manager = _printer_bridge_manager()
-    frame_bytes = _capture_bambu_video_frame_bytes(manager)
-    return Response(
-        content=frame_bytes,
-        media_type="image/jpeg",
-        headers={"Cache-Control": "no-store, max-age=0"},
-    )
-
-
-@app.get("/api/printer/video-stream.mjpeg")
-async def get_printer_video_stream(request: Request) -> StreamingResponse:
-    """Proxy selected Bambu RTSPS live view as MJPEG for the browser device panel."""
-    manager = _printer_bridge_manager()
+def _shared_bambu_video(manager: PrinterDeviceBridgeManager):
+    """Snapshots and all browser viewers share one latest-frame decoder."""
     host, access_code = _selected_bambu_video_connection(manager)
     ffmpeg_path = shutil.which("ffmpeg")
     if not ffmpeg_path:
@@ -13697,58 +13653,56 @@ async def get_printer_video_stream(request: Request) -> StreamingResponse:
         stream_url,
         "-an",
         "-vf",
-        "fps=5,scale=960:-1",
+        "fps=15,scale=960:-1",
         "-q:v",
         "5",
         "-f",
-        "mpjpeg",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
         "-",
     ]
+    # LAN RTSPS negotiation + the first keyframe can exceed the old one-shot
+    # six-second budget. Waiting happens off-loop and subsequent reads are warm.
+    return shared_video(command, max(60.0, float(manager.config.video.timeout_sec) + 3.0))
+
+
+def _capture_bambu_video_frame_bytes(manager: PrinterDeviceBridgeManager) -> bytes:
+    try:
+        return _shared_bambu_video(manager).read()[1]
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="BAMBU_VIDEO_FRAME_TIMEOUT") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail="BAMBU_VIDEO_FRAME_CAPTURE_FAILED") from exc
+
+
+@app.get("/api/printer/video-frame.jpg")
+async def get_printer_video_frame() -> Response:
+    """Return one Bambu camera frame as JPEG for reliable browser preview cards."""
+    manager = await asyncio.to_thread(_printer_bridge_manager)
+    frame_bytes = await asyncio.to_thread(_capture_bambu_video_frame_bytes, manager)
+    return Response(
+        content=frame_bytes,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
+
+
+@app.get("/api/printer/video-stream.mjpeg")
+async def get_printer_video_stream(request: Request) -> StreamingResponse:
+    """Proxy selected Bambu RTSPS live view as MJPEG for the browser device panel."""
+    manager = await asyncio.to_thread(_printer_bridge_manager)
+    video = await asyncio.to_thread(_shared_bambu_video, manager)
 
     async def iter_mjpeg() -> object:
-        process = subprocess.Popen(
-            command,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            bufsize=0,
-        )
-        with _BAMBU_VIDEO_PROCESS_LOCK:
-            _BAMBU_VIDEO_STREAM_PROCESSES.add(process)
-        try:
-            if process.stdout is None:
-                return
-            stdout_fileno = getattr(process.stdout, "fileno", None)
-            if not callable(stdout_fileno):
-                while True:
-                    if await request.is_disconnected():
-                        break
-                    chunk = process.stdout.read(65536)
-                    if not chunk:
-                        break
-                    yield chunk
-                    await asyncio.sleep(0)
-                return
-            fd = stdout_fileno()
-            os.set_blocking(fd, False)
-            while True:
-                if await request.is_disconnected():
-                    break
-                try:
-                    chunk = os.read(fd, 65536)
-                except BlockingIOError:
-                    if process.poll() is not None:
-                        break
-                    await asyncio.sleep(0.05)
-                    continue
-                if not chunk:
-                    if process.poll() is not None:
-                        break
-                    await asyncio.sleep(0.05)
-                    continue
-                yield chunk
-        finally:
-            _terminate_bambu_video_process(process)
+        sequence = 0
+        while not await request.is_disconnected():
+            try:
+                sequence, frame = await asyncio.to_thread(video.read, sequence)
+            except (TimeoutError, RuntimeError):
+                break
+            yield (b"--ffmpeg\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                   + str(len(frame)).encode() + b"\r\n\r\n" + frame + b"\r\n")
 
     return StreamingResponse(iter_mjpeg(), media_type="multipart/x-mixed-replace; boundary=ffmpeg")
 

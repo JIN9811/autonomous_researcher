@@ -1896,6 +1896,10 @@ class ManipulationAgent(BaseAgent):
             if callback:
                 tool_payload["_event_callback"] = callback
             response = await self._call_tool(ctx, skill_decision["request"]["tool"], tool_payload)
+            # The bridge exposes an accepted rollout as POLICY_ACTIVE, while
+            # session polling uses RUNNING. Both are presentation start signals.
+            if response.get("ok") and str(response.get("status") or "").upper() in {"POLICY_ACTIVE", "RUNNING"}:
+                await self.request_attention(state, ctx, "inference_started")
             if callback:
                 await asyncio.sleep(0)
             response = dict(response)

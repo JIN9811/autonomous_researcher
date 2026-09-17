@@ -66,8 +66,8 @@
       if (cell === null || density === null) return "";
       const status = String(item.status || "planned").toLowerCase();
       const index = Number(item.index || fallbackIndex + 1);
-      const label = status === "measured" ? "Measured design" : status === "next" ? "Next design" : "Planned design";
-      const title = `${label} ${index} · cell=${numberText(cell, 3)} mm · density=${numberText(density, 4)}`;
+      const label = status === "measured" ? "Measured design" : status === "designed" ? "Design complete" : status === "next" ? "Next design" : "Planned design";
+      const title = `${label} ${index} · cell=${numberText(cell, 3)} mm · wall=${numberText(density, 4)} mm`;
       if (status === "next") {
         return `<g class="lhs-viz-next" transform="translate(${xScale(cell)} ${yScale(density)})"><line x1="-8" y1="-8" x2="8" y2="8"></line><line x1="-8" y1="8" x2="8" y2="-8"></line><title>${escapeHtml(title)}</title></g>`;
       }
@@ -78,7 +78,7 @@
       <svg class="lhs-viz-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${title} step ${escapeHtml(payload.step)}">
         <rect class="lhs-viz-paper" width="${width}" height="${height}"></rect>
         <text class="lhs-viz-title" x="${pad.left}" y="32">${title}</text>
-        <text class="lhs-viz-subtitle" x="${pad.left}" y="54">${escapeHtml(`${initial.completed} / ${target} measured`)} · ${continuous ? "continuous" : "discrete"} cell size × ${fixedDensity ? "fixed" : "stratified"} relative density</text>
+        <text class="lhs-viz-subtitle" x="${pad.left}" y="54">${escapeHtml(`${initial.designed ?? initial.completed} designed · ${initial.completed} / ${target} measured`)} · cell size × wall thickness</text>
         ${strata.map((tick) => `<line class="lhs-viz-stratum" x1="${pad.left}" y1="${yScale(tick)}" x2="${pad.left + plotWidth}" y2="${yScale(tick)}"></line>`).join("")}
         ${xTicks.map((tick) => `<g><line class="lhs-viz-grid" x1="${xScale(tick)}" y1="${pad.top}" x2="${xScale(tick)}" y2="${pad.top + plotHeight}"></line><text class="lhs-viz-tick" x="${xScale(tick)}" y="${pad.top + plotHeight + 24}" text-anchor="middle">${numberText(tick, 2)}</text></g>`).join("")}
         ${yTicks.map((tick) => `<text class="lhs-viz-tick" x="${pad.left - 12}" y="${yScale(tick) + 4}" text-anchor="end">${numberText(tick, 3)}</text>`).join("")}
@@ -88,6 +88,7 @@
         <text class="lhs-viz-axis-label" x="24" y="${pad.top + plotHeight / 2}" text-anchor="middle" transform="rotate(-90 24 ${pad.top + plotHeight / 2})">Wall thickness (mm)</text>
         <text class="lhs-viz-axis-label" x="${pad.left + plotWidth / 2}" y="${height - 20}" text-anchor="middle">Cell size (mm)</text>
         <g class="lhs-viz-legend" transform="translate(${pad.left} 82)">
+          <circle class="lhs-viz-point lhs-viz-designed" cx="375" cy="0" r="5"></circle><text x="386" y="4">Design complete</text>
           <circle class="lhs-viz-point lhs-viz-measured" cx="5" cy="0" r="5"></circle><text x="16" y="4">Measured design</text>
           <g class="lhs-viz-next" transform="translate(154 0)"><line x1="-5" y1="-5" x2="5" y2="5"></line><line x1="-5" y1="5" x2="5" y2="-5"></line></g><text x="166" y="4">Next design</text>
           <circle class="lhs-viz-point lhs-viz-planned" cx="270" cy="0" r="5"></circle><text x="281" y="4">Planned design</text>

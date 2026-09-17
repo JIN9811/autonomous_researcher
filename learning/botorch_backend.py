@@ -292,6 +292,34 @@ def _projection(
         "acquisition": [round(float(item), 8) for item in acquisition_values.tolist()],
     }
     active_dimensions = parameter_space.active_dimensions
+    if len(active_dimensions) == 2 and all(item.kind == "continuous" for item in active_dimensions):
+        # Presentation-only full grid, evaluated by the fitted GP (not an
+        # interpolation of the 1D display path). Rows are Y, columns are X.
+        grid_size = 33
+        grid_units = torch.linspace(0.0, 1.0, grid_size, dtype=torch.double)
+        gy, gx = torch.meshgrid(grid_units, grid_units, indexing="ij")
+        grid = torch.stack((gx.flatten(), gy.flatten()), dim=-1)
+        grid_mean, grid_std, grid_acq = [], [], []
+        with torch.no_grad():
+            for batch in grid.split(256):
+                prediction = model.posterior(batch)
+                grid_mean.append(prediction.mean.reshape(-1) * objective_sign)
+                grid_std.append(prediction.variance.clamp_min(1e-12).sqrt().reshape(-1))
+                grid_acq.append(acquisition_function(batch.unsqueeze(-2)).reshape(-1))
+        def grid_matrix(parts: list[Any]) -> list[list[float]]:
+            return [[round(float(value), 10) for value in row]
+                    for row in torch.cat(parts).reshape(grid_size, grid_size).tolist()]
+        axes = []
+        for dimension in active_dimensions:
+            lo, hi = map(float, dimension.values)
+            axes.append([round(float(value), 10) for value in (lo + grid_units * (hi - lo)).tolist()])
+        result["response_surface"] = {
+            "mode": "continuous_2d_gp_surface", "matrix_order": "yx",
+            "x_parameter": active_dimensions[0].name, "y_parameter": active_dimensions[1].name,
+            "x_values": axes[0], "y_values": axes[1], "shape": [grid_size, grid_size],
+            "mean": grid_matrix(grid_mean), "std": grid_matrix(grid_std),
+            "acquisition": grid_matrix(grid_acq),
+        }
     if len(active_dimensions) == 2:
         path_anchors = [list(vector) for vector in anchors]
         if not any(

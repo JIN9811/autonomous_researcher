@@ -14,6 +14,7 @@ function harness(response) {
     planningMessageInput: {value: ''}, planningMessagesCache: [], planningDisplayedMessages: [],
     liveSetupTransportVersion: 0, liveSetupAppliedVersion: 0, liveSetupSessionId: 'canonical',
     liveLastSession: {}, liveLastSnapshot: {}, planningSessionId: 'canonical',
+    liveRecentEvents: [], recoverAgentAttentionRequest: noop,
     planningHistorySessionId: 'canonical', planningHistoryHasMore: false, planningHistoryTotal: 0,
     planningChatLog: {}, planningStageLabel: null, planningCycleLabel: null, planningRunDetail: null,
     queryGoal: '', painted: [], requestCount: 0,

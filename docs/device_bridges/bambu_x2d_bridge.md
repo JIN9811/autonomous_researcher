@@ -22,8 +22,8 @@ source_of_truth:
   - utils/specimen_placement.py
   - utils/bambu_material_priority.py
   - web/static/printer.js
-last_verified: 2026-09-06
-verified_against: working-tree placement, AMS priority, and GUI regression checks
+last_verified: 2026-09-17
+verified_against: print-start profile round-trip and G-code validation; no physical printing
 related_docs:
   - docs/device_bridges/printer_fleet_bridge.md
   - docs/hardware/bambulab_x2d_device_bridge_runtime_guideline.md
@@ -56,6 +56,146 @@ Included: Bambu Studio runner, connection/fleet/autoejection/bed-clear memory,
 TLS probe, MQTT report and command clients, FTPS probing/upload, LAN video,
 artifact HTTP route, start gates, and deterministic G-code patching. Excluded:
 device firmware internals and claims for untested printer/firmware variants.
+
+## Read-only live monitoring
+
+Health/status observations share a process-local MQTT subscription per printer
+connection. Incoming `print` deltas are merged under a lock, and readers receive
+independent copies with `received_at` and `cache_age_sec`. Only the read-only
+`pushall` request is published by this monitor; print/start/ejection commands and
+their post-publish verification retain the original transport path.
+
+Disconnected telemetry or reports older than 15 seconds are unavailable, not
+healthy. Reconnection clears prior report fields; access-code/topic changes
+replace the subscription. A periodic 10-second snapshot request refreshes quiet
+printers. Unused subscriptions close after 120 seconds, and registry size is
+bounded to four connections. Test mode never starts these subscriptions.
+
+Camera snapshots and MJPEG viewers share one decoder per source (960-pixel width,
+15 fps). A single latest-JPEG slot replaces per-viewer queues: slow viewers skip
+frames instead of accumulating latency. Frame waiting and camera readiness probes
+run outside the HTTP event loop. Snapshots must be at most two seconds old; failed
+sources do not serve old frames as live. Initial connection/keyframe waiting has
+a 60-second minimum budget; subsequent frame stalls have a 15-second budget.
+This does not extend the two-second freshness limit. Decoders close after 15 seconds without
+consumer requests, on source failure, or on server shutdown. Registries are local
+to each server process, not shared across multiple worker processes.
+
+SPC telemetry refreshes independently of Guardian/graph/detail requests, at most
+once per two seconds per visible Live GUI. Responses from a previous run are
+discarded. These changes affect observation latency only, not agent completion
+criteria or printer permissions. Backend changes require a server restart;
+browser JavaScript changes require a page reload.
+
+## Print Start & Early Layers
+
+Open **3D Printer Workspace → Print Defaults → Print Start & Early Layers**.
+Existing first-layer height, speed override, bed temperature, bed leveling and
+flow calibration controls now live together here, with no duplicate controls.
+General layer height and bed temperature remain in the general defaults area.
+
+### Current operator-tuned profile (2026-09-17)
+
+These saved settings were cross-checked against `memory/prusa_print_profile.json`
+and `GET /api/printer/profile` for `bambulab_x2d_lab_01`. They document the
+operator's tuning, **not a change to code defaults or a universal validated
+preset**. Disabled controls retain their numeric values without applying them.
+
+| Print option / profile key | Current saved value |
+|---|---|
+| Start-point prime / `start_point_prime_enabled`, `start_point_prime_mm` | **On; 1.8 mm of filament** |
+| Layers 2–5 extrusion cap / `early_layer_speed_limit_enabled`, `early_layer_speed_mm_s` | **Off**; stored 50 mm/s is inactive |
+| Layers 1–5 Z cap / `early_layer_z_speed_limit_enabled`, `early_layer_z_speed_mm_s` | **Off**; stored 5 mm/s is inactive |
+| Material / printer / nozzle | PLA / Bambu Lab X2D / 0.4 mm |
+| Slicer profile hint | `0.2mm_quality` |
+| Layer height / first-layer height | 0.2 mm / 0.2 mm |
+| First-layer speed override | On; 10 mm/s |
+| Bed temperature / first-layer bed temperature | 60°C / 60°C |
+| Bed leveling / flow calibration | On / Off |
+| Specimen placement | Custom; center X128 mm / Y58 mm |
+| Skirt / top cap / bottom cap | Off / Off / Off |
+| Combined top-bottom cap / skin thickness / flat-face requirement | Off / 0 mm / Off |
+| Transfer storage / overwrite / maximum print time | FTPS / On / 180 min |
+| Immediate live start / profile-level ejection permission | Off / Off |
+| Test fallback specimen size / unit-cell size | 30 × 30 × 30 mm / 10 mm |
+
+The test fallback cell size is not the LHS/BO search range. Profile-level start
+and ejection options are distinct from separate bridge and Guardian gates;
+this snapshot does not assert that autoejection is globally disabled or
+authorize a device action.
+
+For newly sliced supported files, this profile requests `G1 E1.8 F60` at the
+first object point. The first-layer speed override remains active; layers 2–5
+and early Z motion receive no **additional** AX4LAB speed cap. Slicer and machine
+limits still apply. Existing G-code and active prints are not rewritten by
+saving these options. This update read settings only: no G-code generation,
+upload, or new physical-print validation of the tuned profile was performed.
+
+### Control semantics
+
+Start-point prime accepts a finite, nonnegative filament length with no software
+upper cap; zero disables extra extrusion. It is not Z height or deposited line
+length. The accepted ranges for the optional speed caps are 0.1–1000 mm/s for
+layers 2–5 extrusion and 0.1–20 mm/s for layers 1–5 Z motion. Both caps are
+currently disabled, as recorded above.
+
+The speed-cap upper limits match the current X2D machine profile (`machine_max_speed_x/y=1000`,
+`machine_max_speed_z=20`, in mm/s), not a promise of achieved physical speed. The first layer
+retains its configured extrusion speed. Slower moves are not accelerated. Feed
+is restored after every capped move; XY-only travel, retraction and layer 6 onward
+retain slicer feeds unless the move also includes Z within the capped layers.
+G-code `F` uses mm/min.
+
+Negative and nonfinite priming values are rejected. Increasing this filament
+length can cause a start-point blob or
+over-extrusion. Saving a larger value affects only subsequently generated files.
+
+Each of the three independent checkboxes sits immediately above its numeric
+input, followed by a concise English `Limit` hint. All numeric inputs remain
+editable and saved while unchecked; unchecking controls application, not editing.
+The layers 2–5 toggle is independent of the first-layer speed override and Z
+toggle. A mixed XYZ move can still be limited by either enabled cap. Profiles
+without the new toggle fields retain the previous enabled behavior. Save and
+re-slice the original model to apply either change; already limited G-code
+cannot be used to recover original slicer speeds, and active prints are untouched.
+
+For the recognized X2D `G130` nozzle-load-line block, AX4LAB removes the front
+line/macro and its dependent motion while retaining preparation commands. It
+adds one `G1 E<prime_mm> F60` (currently `E1.8`) at the first object point after travel, descent and
+unretraction, then restores feed before object extrusion. The prime requires
+absolute XYZ, millimetres, relative E, and first-point Z above zero and at most
+0.4 mm. Unsupported priming contexts are rejected rather than guessed. This is
+not a complete reverse-engineering of firmware `G130`, and does not create a
+skirt, brim or substitute purge line.
+
+### Save and apply
+
+1. Edit the grouped controls and **Save Print Defaults**. Each checkbox is
+   directly above its corresponding input.
+2. `POST /api/printer/profile` validates and stores the values in
+   `memory/prusa_print_profile.json`; `GET` returns them. This historical filename
+   is shared profile storage, not a restriction to the Prusa provider.
+3. Re-slice the **original STL/3MF**. The Bambu runner snapshots the three new
+   settings at slice entry. Saving during slicing affects the next slice. These
+   operator-owned postprocessing values are not overridden by experiment/LLM
+   fields. Existing first-layer settings retain their experiment-override behavior;
+   explicit custom slicer presets retain their own first-layer settings.
+4. Inspect `print_start_settings` in the slice result and the generated G-code.
+   `.gcode.3mf` checksums are regenerated. Normal export and recovered CLI-output
+   packaging use the same settings. An artifact already patched with different
+   early-layer caps must be re-sliced, not cumulatively patched.
+
+Profiles missing keys receive code fallbacks, not necessarily the current
+operator-tuned values. Without a saved
+profile file, `devices.printer.bambu.slicer.start_point_prime_mm` remains a legacy
+priming fallback. These controls apply to **Bambu slicing**, including test and
+actual-print paths using that runner; they do not change the Prusa slicer or
+virtual paths that do not generate Bambu G-code.
+
+Saving or generating G-code does **not** upload, publish MQTT commands, start a
+print or modify an active print. Existing artifacts remain unchanged. G-code
+checks are not proof of physical adhesion or print success: those still require
+operator-supervised hardware validation.
 
 ## Source of Truth
 
@@ -185,6 +325,18 @@ draft, gate-ready, published, observed-running, and proof-complete states.
 
 ## Current Verification
 
+### Print-start workspace and generated artifacts (2026-09-17)
+
+Validation covered profile persistence/API range rejection, zero-prime handling,
+normal and recovered archive packaging, checksums, GUI save/reload and single
+ownership of the relocated controls. Browser checks used isolated profile
+storage and intercepted device endpoints: no printer requests were issued.
+
+Earlier generated-artifact checks compared each patched artifact against its
+own raw CLI G-code, including feed preservation and archive checksums. They do
+not validate the current tuned profile by a new physical print; see the
+[current operator-tuned profile](#current-operator-tuned-profile-2026-09-17).
+
 Inspection covered provider/client/patcher code, current configuration, API
 handlers, Bambu unit tests, autoejection tests, and the existing completion
 audit contract. It does not establish continuous live reliability for X2D.
@@ -202,7 +354,7 @@ override saved values, and top-level experiment values override constraints.
 Layer heights, bed temperatures, and the enabled first-layer speed setting are
 applied to the exported profiles. The current PLA setup uses Textured PEI at
 60°C, 0.2 mm layers, and **10 mm/s for both first-layer walls and infill**.
-Other speeds retain resolved vendor settings; there is no blanket 75% speed
+Outside the [early-layer caps](#print-start--early-layers), other speeds retain resolved vendor settings; there is no blanket 75% speed
 multiplier. Existing no-skirt/brim/raft policy remains in place.
 
 | Execution mode | Print body | Temperature-gated ejection wait | Device execution |

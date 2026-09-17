@@ -1572,6 +1572,13 @@ function bindPoseFitButtons() {
   });
 }
 
+function restoreTelemetryStatus() {
+  if (!runtime.history.length) return;
+  applyRobotMotionLabel(runtime.latestMotionState.measured || null);
+  setPoseStatus(runtime.status, runtime.status);
+  setTrackingStatus(`${runtime.history.length} samples`, runtime.status);
+}
+
 function hydrate() {
   const poseMount = document.querySelector("[data-atr-robot-pose]");
   const chartMount = document.querySelector("[data-atr-policy-tracking]");
@@ -1583,6 +1590,10 @@ function hydrate() {
   if (poseMount && poseMount !== runtime.poseMount) hydratePoseViewer(poseMount);
   else if (poseMount && runtime.viewer) runtime.viewer.start();
   if (chartMount && chartMount !== runtime.chartMount) hydrateTrackingChart(chartMount);
+
+  // Remounting a completed session may produce only duplicate socket history.
+  // Restore the accepted display without replaying samples or moving its cursor.
+  if (poseMount || chartMount) restoreTelemetryStatus();
 
   if (poseMount || chartMount) {
     connectTelemetrySocket();

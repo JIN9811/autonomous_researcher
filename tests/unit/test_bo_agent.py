@@ -731,7 +731,7 @@ def test_bo_agent_default_space_is_two_variable_gyroid_problem() -> None:
     assert [item.name for item in space.active_dimensions] == ["cell_size_mm", "wall_thickness_mm"]
     assert space.continuous_dimension_count == 2
     assert settings["parameter_space"]["cell_size_mm"] == [5.0, 10.0]
-    assert settings["parameter_space"]["wall_thickness_mm"] == [0.8, 1.6]
+    assert settings["parameter_space"]["wall_thickness_mm"] == [0.6, 1.2]
     assert "relative_density" not in settings["parameter_space"]
     assert settings["parameter_space"]["orientation_deg"] == [0.0]
     assert settings["parameter_space"]["anisotropy_ratio"] == [1.0]
@@ -1145,7 +1145,7 @@ async def test_bo_agent_emits_reasoning_ranking_handoff_and_artifacts() -> None:
     }
 
     result = await agent.run_with_settings(state, _CtxStub(), {"strategy": "llm_preference_bo", "budget": 4,
-        "parameter_space": {"cell_size_mm": [5.0, 10.0], "relative_density": [0.20, 0.48]}})
+        "parameter_space": {"cell_size_mm": [5.0, 10.0], "wall_thickness_mm": [0.8, 1.6]}})
     bo_result = result.data["bo_result"]
 
     assert result.success is True

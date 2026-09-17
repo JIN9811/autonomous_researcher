@@ -593,13 +593,13 @@ def _run_botorch_strategy(
         selected_parameter = ""
         if phase == "acquisition" and proposal.get("projection"):
             selected_parameter = str(proposal["projection"].get("parameter") or "")
-        if phase == "initial_design" and "cell_size_mm" in parameter_space and "wall_thickness_mm" in parameter_space:
+        if "cell_size_mm" in parameter_space and "wall_thickness_mm" in parameter_space:
             trace["lhs_visualization"] = build_lhs_design_visualization(
                 run_id=str(base_request.get("run_id") or ""),
                 parameter_space=parameter_space,
                 trace=trace,
             )
-        else:
+        if phase != "initial_design" or "lhs_visualization" not in trace:
             trace["visualization"] = build_bo_visualization(
                 run_id=str(base_request.get("run_id") or ""),
                 objective=objective,

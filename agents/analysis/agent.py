@@ -1633,6 +1633,7 @@ class AnalysisAgent(BaseAgent):
 
     @archive_agent_run
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:
+        await self.request_attention(state, ctx, "handoff")
         from agents.analysis.execution import default_analysis_execution_graph, execute_analysis_graph
         from agents.execution_graph import execution_event_emitter, execution_graph_from_context
 

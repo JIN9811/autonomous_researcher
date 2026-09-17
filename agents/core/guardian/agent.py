@@ -355,7 +355,13 @@ class GuardianAgent(BaseAgent):
 
         unhealthy: list[str] = []
         for device, raw_status in snapshot.items():
-            status = str(raw_status).strip().lower()
+            if isinstance(raw_status, dict):
+                status = str(raw_status.get("state") or raw_status.get("status") or "unknown").strip().lower()
+                if raw_status.get("ok") is False or raw_status.get("failure_code"):
+                    unhealthy.append(f"{device}:{raw_status.get('failure_code') or status}")
+                    continue
+            else:
+                status = str(raw_status).strip().lower()
             status_head = status.split(":", 1)[0]
             if status in self._UNHEALTHY_DEVICE_STATES or status_head in self._UNHEALTHY_DEVICE_STATES:
                 unhealthy.append(f"{device}:{status}")

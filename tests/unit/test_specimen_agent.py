@@ -22,6 +22,59 @@ from mcp_tools.tool_registry import ToolRegistry
 from orchestrator.state import Mode, OrchestratorState, Stage
 
 
+@pytest.mark.parametrize("validation,expected", [
+    ({}, "not_reported"),
+    ({"ok": True, "violations": []}, "pass"),
+    ({"ok": False, "failure_code": "GCODE_UNSAFE", "violations": ["unsafe move"]}, "fail"),
+])
+def test_fabrication_report_distinguishes_absent_gcode_evidence_from_failure(validation, expected):
+    agent = SpecimenMakingAgent()
+    state = OrchestratorState(run_id="report-test", experiment_id="report-exp", mode=Mode.TEST, stage=Stage.SPECIMEN)
+    report = agent._build_fabrication_report(
+        state=state, spec=_valid_spec(), candidate="candidate", specimen_id="specimen",
+        geometry_result={"ok": True}, mesh_result={"ok": True, "mesh_status": "pass"},
+        manufacturability_result={"ok": True, "manufacturability_status": "pass"},
+        handoff_result={}, experiment_response={},
+        printer_response={"ok": True, "gcode_validation": validation},
+        printer_payload={}, protocol_note="", live_gui_test_spec=False,
+        printer_test_path="physical_print", top_cap_enabled=False, bottom_cap_enabled=False,
+        geometry_payload={},
+    )
+    gate = next(g for g in report["quality_gates"] if g["gate"] == "gcode")
+    assert gate["status"] == expected
+    from policies.guardian_gate import guardian_gate, gate_blocks_execution
+    decision = guardian_gate(state=state, stage="specimen", phase="post", payload={"gcode_gate": gate})
+    if expected == "not_reported":
+        assert decision["incident_records"] == []
+        assert gate["evidence"]["reason"] == "No G-code validation result was reported; not a validation pass."
+    if expected == "fail":
+        assert gate_blocks_execution(decision)
+
+
+@pytest.mark.parametrize("blockers,expected", [([], "pass"), (["PRINTER_UNSAFE"], "blocked")])
+def test_bambu_report_uses_verified_transport_and_start_evidence(blockers, expected):
+    agent = SpecimenMakingAgent()
+    state = OrchestratorState(run_id="report-test", experiment_id="report-exp", mode=Mode.TEST, stage=Stage.SPECIMEN)
+    report = agent._build_fabrication_report(
+        state=state, spec=_valid_spec(), candidate="candidate", specimen_id="specimen",
+        geometry_result={"ok": True}, mesh_result={"ok": True, "mesh_status": "pass"},
+        manufacturability_result={"ok": True, "manufacturability_status": "pass"},
+        handoff_result={}, experiment_response={}, printer_response={
+            "ok": True, "provider": "bambulab_x2d",
+            "upload": {"ok": True, "route": "http_artifact", "url": "http://192.0.2.1/file.3mf"},
+            "preprint_gate": {"state": "print_started", "blockers": blockers,
+                              "checks": {"storage_transfer_path_verified": True}},
+            "print_result": {"ok": True, "published": True,
+                             "post_publish_status": {"status": "running"}},
+        }, printer_payload={}, protocol_note="", live_gui_test_spec=False,
+        printer_test_path="physical_print", top_cap_enabled=False, bottom_cap_enabled=False, geometry_payload={},
+    )
+    gates = {g["gate"]: g for g in report["quality_gates"]}
+    assert gates["printer_storage"]["status"] == "pass"
+    assert gates["printer_storage"]["evidence"]["transport"] == "http_artifact"
+    assert gates["spc_readiness"]["status"] == expected
+
+
 def _normal_counts_from_stl(stl_path: Path) -> tuple[int, int]:
     data = stl_path.read_bytes()
     axis_facets = 0
@@ -116,7 +169,7 @@ async def test_design_json_handoff_reaches_specimen_selected_tool_without_hardwa
     from agents.design.agent import DesignAgent
     state = OrchestratorState(run_id="design-spc-contract", experiment_id="offline", mode=Mode.TEST,
                                stage=Stage.DESIGN, active_goal="prepare the requested compression specimen")
-    requested = {"cell_size_mm": 6.0, "relative_density": .37}
+    requested = {"cell_size_mm": 6.0, "wall_thickness_mm": .8}
     if origin == "lhs_contract":
         state.run_metadata["orchestrator_design_contract"] = {
             "schema": "orchestrator_design_contract.v1", "contract_id": "fixture-lhs-point",
@@ -133,7 +186,7 @@ async def test_design_json_handoff_reaches_specimen_selected_tool_without_hardwa
     assert design.success
     spec = json.loads(json.dumps(design.data["experiment_spec"]))
     assert spec["cell_size_mm"] == requested["cell_size_mm"]
-    assert spec["relative_density"] == pytest.approx(requested["relative_density"])
+    assert spec["wall_thickness_mm"] == pytest.approx(requested["wall_thickness_mm"])
     if origin == "operator_constraints":
         assert spec["material"] == "PETG"
         assert spec["specimen_size_mm"] == [20., 22., 24.]
@@ -155,6 +208,7 @@ async def test_design_json_handoff_reaches_specimen_selected_tool_without_hardwa
     assert received[0]["specimen_id"] == spec["specimen_id"]
     assert received[0]["experiment_spec"]["cell_size_mm"] == spec["cell_size_mm"]
     assert received[0]["experiment_spec"]["relative_density"] == spec["relative_density"]
+    assert received[0]["experiment_spec"]["wall_thickness_mm"] == requested["wall_thickness_mm"]
     if origin == "operator_constraints":
         assert received[0]["material"] == "PETG"
         assert received[0]["experiment_spec"]["specimen_size_mm"] == [20., 22., 24.]
@@ -318,7 +372,17 @@ def test_mock_geometry_generates_curved_gyroid_tpms_stl(tmp_path: Path) -> None:
         "tpms_gyroid_marching_tetra_fallback",
     }
     assert report["triangle_count"] > 1000
-    assert curved_facets / max(axis_facets + curved_facets, 1) > 0.90
+    # Cropping and the requested bottom skin legitimately add planar faces.
+    # Verify curvature on the interior sheet, excluding those closure surfaces.
+    import numpy as np
+    import trimesh
+    mesh = trimesh.load_mesh(stl_path, process=False)
+    centers = mesh.triangles_center
+    interior = np.all((centers - mesh.bounds[0] > 1.0) & (mesh.bounds[1] - centers > 1.0), axis=1)
+    normals = np.abs(mesh.face_normals[interior])
+    assert len(normals) > 1000
+    assert np.mean(np.max(normals, axis=1) < 1.0 - 1e-6) > 0.90
+    assert axis_facets > 0 and curved_facets > 0
 
 
 def test_mock_geometry_preserves_zero_flat_skin_for_open_tpms(tmp_path: Path) -> None:
@@ -357,7 +421,12 @@ def test_mock_geometry_preserves_zero_flat_skin_for_open_tpms(tmp_path: Path) ->
     assert result["geometry_report"]["cap_skin_thickness_mm"] == 0.0
 
 
-def test_gyroid_manufacturability_rejects_non_fdm_wall() -> None:
+def test_gyroid_manufacturability_rejects_non_fdm_wall(monkeypatch) -> None:
+    calls = []
+    def inspect(path, minimum):
+        calls.append((path, minimum))
+        return {"status": "fail", "minimum_sampled_mm": 0.6, "required_minimum_mm": minimum}
+    monkeypatch.setattr("mcp_tools.wall_thickness.inspect_wall_thickness", inspect)
     tools = ToolRegistry()
     register_mock_tools(tools)
 
@@ -383,7 +452,8 @@ def test_gyroid_manufacturability_rejects_non_fdm_wall() -> None:
     )
 
     assert result["ok"] is False
-    assert "wall_thickness_mm below FDM printable wall rule" in result["reject_reasons"]
+    assert calls == [("", 1.2)]
+    assert "generated_mesh_minimum_wall_fail" in result["reject_reasons"]
 
 
 def test_specimen_fabrication_report_includes_bambu_spc_readiness_contract() -> None:
@@ -840,11 +910,12 @@ async def test_specimen_agent_disables_generated_caps_after_first_test_loop(tmp_
 
 
 @pytest.mark.asyncio
-async def test_specimen_agent_preserves_low_gyroid_density_before_manufacturability(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_specimen_agent_derives_gyroid_density_from_requested_wall(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     agent = SpecimenMakingAgent()
     spec = _valid_spec()
     spec["relative_density"] = 0.18
     spec["constraints"]["relative_density"] = 0.18
+    requested_wall = spec["wall_thickness_mm"]
     spec["tpms_resolution"] = 18
     state = OrchestratorState(
         run_id="run-test",
@@ -865,7 +936,12 @@ async def test_specimen_agent_preserves_low_gyroid_density_before_manufacturabil
     result = await agent.run(state, ctx)
 
     assert result.success is True
-    assert state.current_experiment_spec["relative_density"] == 0.18
+    geometry = result.data["specimen_result"]["geometry_report"]
+    assert state.current_experiment_spec["wall_thickness_mm"] == requested_wall
+    from mcp_tools.tpms_geometry import relative_density_for_wall
+    assert state.current_experiment_spec["relative_density"] == pytest.approx(
+        relative_density_for_wall(requested_wall, spec["cell_size_mm"]))
+    assert 0 < geometry["relative_density"] < 1
     assert result.data["specimen_result"]["manufacturability_status"] == "pass"
 
 

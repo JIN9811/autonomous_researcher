@@ -55,6 +55,7 @@ def _plot(payload: dict[str, Any]) -> Any:
 
     groups = {
         "measured": ("Measured design", "#2563eb", "o", 42),
+        "designed": ("Design complete", "#10b981", "D", 42),
         "next": ("Next design", "#f97316", "x", 68),
         "planned": ("Planned design", "#94a3b8", "o", 30),
     }
@@ -91,14 +92,14 @@ def _plot(payload: dict[str, Any]) -> Any:
     axis.text(
         1.0,
         1.02,
-        f"{design['completed']} / {target} measured",
+        f"{design.get('designed', design['completed'])} designed · {design['completed']} / {target} measured",
         transform=axis.transAxes,
         ha="right",
         va="bottom",
         fontsize=8.5,
         color="#475569",
     )
-    axis.legend(loc="best", frameon=False, fontsize=8, ncols=3)
+    axis.legend(loc="best", frameon=False, fontsize=8, ncols=2)
     return figure
 
 

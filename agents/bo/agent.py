@@ -651,6 +651,7 @@ class BOAgent(BaseAgent):
             "name": raw.get("name") or current.get("name") or ("Specific energy absorption" if sea else "50% compression energy density"),
             "description": raw.get("description") or current.get("description") or state.active_goal,
             "metric_name": raw.get("metric_name") or current.get("metric_name") or (SEA_METRIC if sea else "energy_density_50pct_MJ_per_m3"),
+            "unit": raw.get("unit") or current.get("unit") or ("J/g" if (raw.get("metric_name") or current.get("metric_name") or (SEA_METRIC if sea else "")) == SEA_METRIC else ""),
             "direction": raw.get("direction") or current.get("direction") or "maximize",
             "constraints": {**constraints, **(raw.get("constraints") if isinstance(raw.get("constraints"), dict) else {})},
             "tags": raw.get("tags") if isinstance(raw.get("tags"), list) else ["bo", "specimen", "tpms"],
@@ -2025,6 +2026,7 @@ class BOAgent(BaseAgent):
         settings: dict[str, Any],
     ) -> AgentResult:
         from agents.bo.execution import default_bo_execution_graph, execute_bo_graph
+        await self.request_attention(state, ctx, "handoff")
         from agents.execution_graph import execution_event_emitter, execution_graph_from_context
 
         execution = await execute_bo_graph(

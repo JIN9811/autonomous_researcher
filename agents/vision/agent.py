@@ -2828,6 +2828,8 @@ class VisionAgent(BaseAgent):
             tool_decision = await select_vision_tool(state, ctx, contract_id)
             if not decision_allows_existing_gate(tool_decision):
                 return blocked_decision_result(tool_decision)
+            if contract_id == "active_cam":
+                await self.request_attention(state, ctx, "active_cam")
         if placement_verification:
             tool_name = "vision.utm_specimen_presence.capture"
             if tool_name not in set(ctx.tools.list_tools()):
@@ -2947,7 +2949,9 @@ class VisionAgent(BaseAgent):
         response["timestamp"] = capture_timestamp(response)
         from utils.vision_capture_preview import publish_capture_preview
         preview_capture = response if placement_handoff else response.get("active_cam_ejection_check") or response
-        publish_capture_preview(state, preview_capture, "verification_1" if placement_handoff else "active_cam")
+        preview_published = publish_capture_preview(state, preview_capture, "verification_1" if placement_handoff else "active_cam")
+        if placement_verification and preview_published:
+            await self.request_attention(state, ctx, "placement_home")
         if not placement_handoff:
             visual_decision = await review_visual_evidence(state, ctx, response, contract_id)
             if visual_decision.get("scope_valid") is False:

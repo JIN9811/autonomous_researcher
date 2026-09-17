@@ -540,6 +540,103 @@ def test_guardian_gate_allows_expected_test_dry_run_print_disabled_marker() -> N
     assert not any(alarm["reason_code"] == "START_PRINT_DISABLED" for alarm in gate["alarms"])
 
 
+def _physical_http_print_result() -> dict:
+    return {
+        "ok": True, "status": "PRINT_STARTED", "failure_code": "",
+        "mqtt_snapshot": {"ok": True},
+        "ftps_probe": {"ok": False, "failure_code": "BAMBU_FTPS_PROBE_FAILED",
+                       "error": "TLS handshake timed out"},
+        "upload": {"ok": True, "route": "http_artifact", "url": "http://192.168.1.2/printer-artifacts/current.3mf"},
+        "print_result": {
+            "ok": True, "published": True, "failure_code": "",
+            "start": {"ok": True, "published": True, "command": "project_file",
+                      "url": "http://192.168.1.2/printer-artifacts/current.3mf"},
+            "post_publish_status": {"status": "running", "failure_code": ""},
+        },
+    }
+
+
+@pytest.mark.parametrize("status", ["PRINT_STARTED", "TEST_PRINTER_EJECTION_PROJECT_STARTED"])
+def test_verified_http_start_keeps_unused_ftps_trace_as_diagnostic_not_incident(status):
+    result = _physical_http_print_result()
+    result["status"] = status
+    result["step_trace"] = [{"step": "BAMBU_FTPS_STORAGE", "status": "blocked"}]
+    gate = guardian_gate(state=_state(Stage.SPECIMEN), stage="specimen", phase="post",
+                         payload={"bridge_result": result})
+    assert gate["decision"] == "allow"
+    assert gate["incident_records"] == []
+    assert result["step_trace"][0]["status"] == "blocked"  # Preserve audit evidence.
+
+
+def test_http_start_does_not_hide_non_ftps_or_critical_trace_failure():
+    result = _physical_http_print_result()
+    result["step_trace"] = [
+        {"step": "BAMBU_PROJECT_FILE_DRAFT", "status": "blocked", "failure_code": "BAMBU_ARTIFACT_SHA256_MISMATCH"},
+        {"step": "BAMBU_FTPS_STORAGE", "status": "blocked", "severity": "critical"},
+    ]
+    gate = guardian_gate(state=_state(Stage.SPECIMEN), stage="specimen", phase="post",
+                         payload={"bridge_result": result})
+    assert gate_blocks_execution(gate)
+    assert any(a["source_path"].endswith("step_trace[0]") for a in gate["alarms"])
+    assert any(a["source_path"].endswith("step_trace[1]") for a in gate["alarms"])
+
+
+@pytest.mark.parametrize("same_trace", [True, False])
+def test_http_compensation_handles_only_exact_experiment_trace_projection(same_trace):
+    result = _physical_http_print_result()
+    result["step_trace"] = [{"step": "BAMBU_FTPS_STORAGE", "status": "blocked"}]
+    projected = [dict(result["step_trace"][0])]
+    if not same_trace:
+        projected[0]["detail"] = "Another attempt"
+    gate = guardian_gate(state=_state(Stage.SPECIMEN), stage="specimen", phase="post", payload={
+        "evaluation": {"ok": True, "bridge_result": result, "step_trace": projected},
+    })
+    assert bool(gate["incident_records"]) is (not same_trace)
+
+
+@pytest.mark.parametrize("mode", [Mode.TEST, Mode.LIVE])
+@pytest.mark.parametrize("phase,action", [("post", ""), ("action", "post_tool_call")])
+def test_physical_http_print_does_not_block_on_unused_ftps(mode, phase, action):
+    state = _state(Stage.SPECIMEN)
+    state.mode = mode
+    gate = guardian_gate(state=state, stage="specimen", phase=phase, action=action,
+                         payload={"bridge_result": _physical_http_print_result()})
+    assert not gate_blocks_execution(gate)
+    assert not any(a["reason_code"] == "BAMBU_FTPS_PROBE_FAILED" for a in gate["alarms"])
+
+
+@pytest.mark.parametrize("failure", ["mqtt", "upload", "publish", "observation", "different_file", "bridge"])
+def test_physical_http_print_requires_complete_success_before_compensating_ftps(failure):
+    result = _physical_http_print_result()
+    if failure == "mqtt":
+        result["mqtt_snapshot"]["ok"] = False
+    elif failure == "upload":
+        result["upload"]["ok"] = False
+    elif failure == "publish":
+        result["print_result"]["start"]["published"] = False
+    elif failure == "observation":
+        result["print_result"]["post_publish_status"]["status"] = "timeout"
+    elif failure == "different_file":
+        result["print_result"]["start"]["url"] = "http://192.168.1.2/printer-artifacts/old.3mf"
+    else:
+        result["ok"] = False
+    gate = guardian_gate(state=_state(Stage.SPECIMEN), stage="specimen", phase="post",
+                         payload={"bridge_result": result})
+    assert gate_blocks_execution(gate)
+    assert any(a["reason_code"] == "BAMBU_FTPS_PROBE_FAILED" for a in gate["alarms"])
+
+
+def test_physical_http_success_does_not_compensate_other_result_or_start_failure():
+    gate = guardian_gate(state=_state(Stage.SPECIMEN), stage="specimen", phase="post", payload={
+        "old_result": _physical_http_print_result(),
+        "current_result": {"ftps_probe": {"ok": False, "failure_code": "BAMBU_FTPS_PROBE_FAILED"}},
+        "start_failure": {"failure_code": "BAMBU_PROJECT_FILE_START_FAILED"},
+    })
+    assert gate_blocks_execution(gate)
+    assert any(a["source_path"] == "payload.current_result.ftps_probe" for a in gate["alarms"])
+    assert any(a["reason_code"] == "BAMBU_PROJECT_FILE_START_FAILED" for a in gate["alarms"])
+
+
 def test_guardian_gate_allows_specimen_http_start_after_ftps_probe_failure() -> None:
     state = OrchestratorState(
         run_id="run-gate-http",

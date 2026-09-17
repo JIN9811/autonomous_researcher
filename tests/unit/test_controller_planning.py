@@ -234,7 +234,7 @@ def test_live_gui_analysis_message_preserves_normalized_curve_contract() -> None
     assert displayed["analysis"]["specimen_geometry"] == analysis["specimen_geometry"]
     displayed_curve = displayed["analysis"]["stress_strain_curve"]
     assert displayed_curve["schema"] == "engineering_stress_strain_curve.v1"
-    assert len(displayed_curve["preview"]) <= 80
+    assert displayed_curve["preview"] == preview  # Preserve the analysis-owned 200-point extrema preview.
     assert displayed_curve["preview"][0] == preview[0]
     assert displayed_curve["preview"][-1] == preview[-1]
 
@@ -339,18 +339,18 @@ def test_test_mode_json_declares_two_variable_lhs_then_gp_contract() -> None:
 
     normalized = controller._normalize_test_mode_constraints(
         controller._default_test_constraints({}),
-        {"cell_size_mm": 10.0, "relative_density": 0.35},
+        {"cell_size_mm": 10.0, "wall_thickness_mm": 1.2},
     )
 
     optimization = normalized["design_optimization"]
     assert optimization["schema"] == "design_optimization_contract.v1"
     assert optimization["objective"] == {
-        "metric": "energy_density_50pct_MJ_per_m3",
+        "metric": "specific_energy_absorption_J_per_g",
         "direction": "maximize",
-        "unit": "MJ/m3",
+        "unit": "J/g",
     }
     assert optimization["active_variables"]["cell_size_mm"]["bounds"] == [5.0, 10.0]
-    assert optimization["active_variables"]["relative_density"]["bounds"] == [0.20, 0.40]
+    assert optimization["active_variables"]["wall_thickness_mm"]["bounds"] == [0.6, 1.2]
     assert optimization["initial_design"] == {
         "sampler": "latin_hypercube",
         "size": 8,
@@ -366,7 +366,7 @@ def test_test_mode_partial_execution_policy_cannot_drop_safe_stage_defaults() ->
 
     normalized = controller._normalize_test_mode_constraints(
         defaults,
-        {"execution_policy": {"cae": "execute"}},
+        {"execution_policy": {"analysis": "execute"}},
     )
 
     assert normalized["execution_policy"] == {
@@ -650,10 +650,10 @@ def test_test_mode_initial_design_is_published_as_orchestrator_json_contract() -
     assert contract["source"] == "test_mode_deterministic_lhs"
     assert contract["requested_parameters"] == {
         "cell_size_mm": seeded["cell_size_mm"],
-        "relative_density": seeded["relative_density"],
+        "wall_thickness_mm": seeded["wall_thickness_mm"],
     }
     assert contract["parameter_space"]["cell_size_mm"] == [5.0, 10.0]
-    assert contract["parameter_space"]["relative_density"] == [0.20, 0.40]
+    assert contract["parameter_space"]["wall_thickness_mm"] == [0.6, 1.2]
     assert contract["initial_design"]["index"] == 1
     assert contract["initial_design"]["target"] == 8
     assert len(contract["initial_design"]["points"]) == 8
@@ -663,22 +663,23 @@ def test_test_mode_initial_design_is_published_as_orchestrator_json_contract() -
     assert compact["orchestrator_design_contract"] == contract
     assert {
         key: compact["bo_initial_design"]["constraints"][key]
-        for key in ("cell_size_mm", "relative_density")
+        for key in ("cell_size_mm", "wall_thickness_mm")
     } == contract["requested_parameters"]
 
 
 @pytest.mark.parametrize("source", ["bo_settings", "next_design_request", "bo_agent"])
-def test_first_controller_lhs_uses_current_run_bo_domain(source) -> None:
+def test_first_controller_lhs_uses_agreed_bounds_over_bo_metadata(source) -> None:
     controller = load_runtime()
     controller._state.run_metadata[source] = {"parameter_space": {
-        "cell_size_mm": [8.6, 9.1], "relative_density": [.25, .31]}}
+        "cell_size_mm": [5.0, 10.0], "wall_thickness_mm": [.6, 1.2]}}
     constraints = controller._normalize_test_mode_constraints(controller._default_test_constraints({}), {})
+    constraints.update(cell_size_bounds_mm=[8.6, 9.1], wall_thickness_bounds_mm=[.75, .81])
     controller._seed_initial_bo_design_constraints(constraints, total_cycles=20)
     contract = controller._state.run_metadata["orchestrator_design_contract"]
     assert contract["parameter_space"]["cell_size_mm"] == [8.6, 9.1]
-    assert contract["parameter_space"]["relative_density"] == [.25, .31]
+    assert contract["parameter_space"]["wall_thickness_mm"] == [.75, .81]
     assert 8.6 <= contract["requested_parameters"]["cell_size_mm"] <= 9.1
-    assert .25 <= contract["requested_parameters"]["relative_density"] <= .31
+    assert .75 <= contract["requested_parameters"]["wall_thickness_mm"] <= .81
 
 
 def test_first_test_loop_lhs_specimen_has_no_generated_surface_caps() -> None:
@@ -713,8 +714,8 @@ def test_first_test_loop_lhs_specimen_has_no_generated_surface_caps() -> None:
 
     contract = controller._state.run_metadata["orchestrator_design_contract"]
     assert first_spec["cell_size_mm"] == contract["requested_parameters"]["cell_size_mm"]
-    assert first_spec["relative_density"] == pytest.approx(
-        contract["requested_parameters"]["relative_density"]
+    assert first_spec["wall_thickness_mm"] == pytest.approx(
+        contract["requested_parameters"]["wall_thickness_mm"]
     )
     assert first_spec["top_cap_enabled"] is False
     assert first_spec["bottom_cap_enabled"] is False
@@ -728,13 +729,13 @@ def test_design_constraints_use_orchestrator_contract_as_authority() -> None:
     controller = load_runtime()
     controller._state.run_metadata["bo_recommended_constraints"] = {
         "cell_size_mm": 10.0,
-        "relative_density": 0.24,
+        "wall_thickness_mm": 0.84,
     }
     controller._state.run_metadata["orchestrator_design_contract"] = {
         "schema": "orchestrator_design_contract.v1",
         "requested_parameters": {
             "cell_size_mm": 6.0,
-            "relative_density": 0.37,
+            "wall_thickness_mm": 0.97,
         },
     }
 
@@ -742,12 +743,12 @@ def test_design_constraints_use_orchestrator_contract_as_authority() -> None:
         {
             "geometry_type": "gyroid",
             "cell_size_mm": 7.5,
-            "relative_density": 0.31,
+            "wall_thickness_mm": 0.91,
         }
     )
 
     assert constraints["cell_size_mm"] == 6.0
-    assert constraints["relative_density"] == pytest.approx(0.37)
+    assert constraints["wall_thickness_mm"] == pytest.approx(0.97)
 
 
 def test_next_cycle_contract_republishes_bo_next_design_request() -> None:
@@ -756,17 +757,17 @@ def test_next_cycle_contract_republishes_bo_next_design_request() -> None:
         controller._default_test_constraints({}),
         {},
     )
-    constraints.update(cell_size_bounds_mm=[6.2, 9.1], relative_density_bounds=[0.27, 0.44])
+    constraints.update(cell_size_bounds_mm=[6.2, 9.1], wall_thickness_bounds_mm=[0.67, 1.04])
     controller._state.run_metadata["next_design_request"] = {
         "schema": "next_design_request.v1",
         "status": "ready",
         "parameter_space": {
             "cell_size_mm": [6.2, 9.1],
-            "relative_density": [0.27, 0.44],
+            "wall_thickness_mm": [0.67, 1.04],
         },
         "constraints": {
             "cell_size_mm": 7.5,
-            "relative_density": 0.413,
+            "wall_thickness_mm": 0.913,
         },
     }
     controller._state.run_metadata["bo_agent"] = {
@@ -786,12 +787,12 @@ def test_next_cycle_contract_republishes_bo_next_design_request() -> None:
                     {
                         "index": 1,
                         "status": "measured",
-                        "parameters": {"cell_size_mm": 5.0, "relative_density": 0.28},
+                        "parameters": {"cell_size_mm": 5.0, "wall_thickness_mm": 0.78},
                     },
                     {
                         "index": 2,
                         "status": "next",
-                        "parameters": {"cell_size_mm": 7.5, "relative_density": 0.413},
+                        "parameters": {"cell_size_mm": 7.5, "wall_thickness_mm": 0.913},
                     },
                 ],
             }
@@ -810,17 +811,17 @@ def test_next_cycle_contract_republishes_bo_next_design_request() -> None:
     assert contract["source"] == "bo_agent_next_design_request"
     assert contract["requested_parameters"] == {
         "cell_size_mm": 7.5,
-        "relative_density": pytest.approx(0.413),
+        "wall_thickness_mm": pytest.approx(0.913),
     }
     assert contract["parameter_space"] == {
         "cell_size_mm": [6.2, 9.1],
-        "relative_density": [0.27, 0.44],
+        "wall_thickness_mm": [0.67, 1.04],
     }
     assert contract["initial_design"]["completed"] == 1
     assert contract["initial_design"]["next_index"] == 2
     assert contract["initial_design"]["points"][1]["status"] == "next"
     assert updated["cell_size_mm"] == 7.5
-    assert updated["relative_density"] == pytest.approx(0.413)
+    assert updated["wall_thickness_mm"] == pytest.approx(0.913)
 
 
 def test_live_contract_attaches_current_bo_domain_without_replacing_requested_coordinates() -> None:
@@ -829,13 +830,13 @@ def test_live_contract_attaches_current_bo_domain_without_replacing_requested_co
     controller._state.run_metadata["bo_settings"] = {
         "parameter_space": {
             "cell_size_mm": [6.2, 9.1],
-            "relative_density": [0.27, 0.39],
+            "wall_thickness_mm": [0.67, 0.99],
         }
     }
     requested = {
         "geometry_type": "gyroid",
         "cell_size_mm": 7.13789,
-        "relative_density": 0.32123456,
+        "wall_thickness_mm": 0.82123456,
     }
 
     updated = controller._publish_orchestrator_design_contract(
@@ -848,12 +849,12 @@ def test_live_contract_attaches_current_bo_domain_without_replacing_requested_co
     assert contract["source"] == "orchestrator_json"
     assert contract["requested_parameters"] == {
         "cell_size_mm": pytest.approx(7.13789),
-        "relative_density": pytest.approx(0.32123456),
+        "wall_thickness_mm": pytest.approx(0.82123456),
     }
     assert contract["parameter_space"]["cell_size_mm"] == [6.2, 9.1]
-    assert contract["parameter_space"]["relative_density"] == [0.27, 0.39]
+    assert contract["parameter_space"]["wall_thickness_mm"] == [0.67, 0.99]
     assert updated["cell_size_mm"] == pytest.approx(7.13789)
-    assert updated["relative_density"] == pytest.approx(0.32123456)
+    assert updated["wall_thickness_mm"] == pytest.approx(0.82123456)
 
 
 def test_planning_bo_message_reports_lhs_without_acquisition_scores() -> None:
@@ -1070,9 +1071,10 @@ def test_controller_merge_vision_confirmation_marks_specimen_completion() -> Non
     )
 
     specimen = controller._state.run_metadata["specimen_result"]
-    assert specimen["vision_verification"]["status"] == "confirmed"
-    assert specimen["autoejection_completion_verified"] is True
-    assert specimen["active_cam_ejection_check"]["spc_autoejection_confirmed"] is True
+    # A new negative ActiveCam observation must not inherit an earlier success.
+    assert specimen["vision_verification"]["status"] == "observed"
+    assert specimen["autoejection_completion_verified"] is False
+    assert specimen["active_cam_ejection_check"]["spc_autoejection_confirmed"] is False
 
 
 def test_controller_retains_active_cam_artifact_until_explicit_failure() -> None:
@@ -3695,7 +3697,7 @@ def test_test_mode_initial_cycle_is_seeded_from_bo_lhs() -> None:
     seeded = controller._seed_initial_bo_design_constraints(constraints, total_cycles=5)
 
     assert 5.0 <= seeded["cell_size_mm"] <= 10.0
-    assert 0.20 <= seeded["relative_density"] <= 0.40
+    assert 0.6 <= seeded["wall_thickness_mm"] <= 1.2
     assert controller._state.run_metadata["bo_initial_design"]["index"] == 1
     assert controller._state.run_metadata["bo_recommended_constraints"]["cell_size_mm"] == seeded["cell_size_mm"]
 

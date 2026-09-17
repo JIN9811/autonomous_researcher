@@ -644,6 +644,68 @@ def _filter_expected_non_actuating_print_alarms(
     return filtered
 
 
+def _physical_http_print_ftps_paths(payload: dict[str, Any]) -> set[str]:
+    """Locate unused FTPS diagnostics within verified HTTP print results.
+
+    Evidence must belong to the same bridge result and artifact, not an earlier
+    job elsewhere in the payload. Merely publishing a command is insufficient.
+    """
+    paths: set[str] = set()
+
+    def walk(value: Any, path: str) -> None:
+        if isinstance(value, dict):
+            def mapping(key: str, parent: dict = value) -> dict:
+                item = parent.get(key)
+                return item if isinstance(item, dict) else {}
+
+            upload = mapping("upload")
+            printed = mapping("print_result")
+            start = mapping("start", printed)
+            observed = mapping("post_publish_status", printed)
+            url = str(upload.get("url") or "")
+            if (
+                value.get("ok") is True and not value.get("failure_code")
+                and str(value.get("status") or "").upper() in {
+                    "PRINT_STARTED", "TEST_PRINTER_EJECTION_PROJECT_STARTED",
+                    "TEST_PRINTER_EJECTION_PROJECT_COMPLETED",
+                }
+                and mapping("mqtt_snapshot").get("ok") is True
+                and upload.get("ok") is True and upload.get("route") == "http_artifact"
+                and url.startswith(("http://", "https://"))
+                and printed.get("ok") is True and not printed.get("failure_code")
+                and printed.get("published") is True
+                and start.get("ok") is True and start.get("published") is True
+                and start.get("command") == "project_file" and start.get("url") == url
+                and observed.get("status") in {"running", "completed"}
+                and not observed.get("failure_code")
+            ):
+                paths.add(f"{path}.ftps_probe")
+                steps = value.get("step_trace")
+                for index, step in enumerate(steps if isinstance(steps, list) else []):
+                    if (isinstance(step, dict) and step.get("step") == "BAMBU_FTPS_STORAGE"
+                            and not step.get("failure_code") and not step.get("error_code")):
+                        paths.add(f"{path}.step_trace[{index}]")
+            for key, child in value.items():
+                if key not in {"raw", "raw_output", "prompt"}:
+                    walk(child, f"{path}.{key}")
+            # experiment.evaluate projects the bridge trace at its own level.
+            # Only compensate an exact copy of this successful child result.
+            bridge = mapping("bridge_result")
+            if (value.get("ok") is True and not value.get("failure_code")
+                    and f"{path}.bridge_result.ftps_probe" in paths
+                    and isinstance(value.get("step_trace"), list)
+                    and value["step_trace"] == bridge.get("step_trace")):
+                for index in range(len(value["step_trace"])):
+                    if f"{path}.bridge_result.step_trace[{index}]" in paths:
+                        paths.add(f"{path}.step_trace[{index}]")
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                walk(child, f"{path}[{index}]")
+
+    walk(payload, "payload")
+    return paths
+
+
 def _filter_compensated_bambu_transport_alarms(
     alarms: list[dict[str, Any]],
     *,
@@ -655,6 +717,15 @@ def _filter_compensated_bambu_transport_alarms(
     HTTP artifact URL. In that state FTPS remains a recorded warning for the SPC
     report, but it must not block downstream robot rollout tools.
     """
+    physical_paths = _physical_http_print_ftps_paths(payload) if alarms else set()
+    alarms = [alarm for alarm in alarms if not (
+        alarm.get("source_path") in physical_paths
+        and alarm.get("reason_code") in {
+            "BAMBU_FTPS_PROBE_FAILED", "BAMBU_FTPS_TOO_MANY_CONNECTIONS",
+            "CONTRACT_SCHEMA_INVALID", "RESULT_NOT_OK",
+        }
+        and alarm.get("severity") != "critical"
+    )]
     if not alarms or not _has_bambu_http_artifact_handoff(payload):
         return alarms
     compensated_codes = {

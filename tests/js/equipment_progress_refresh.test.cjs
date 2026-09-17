@@ -122,6 +122,7 @@ test('authoritative session updates refresh equipment while another agent page i
   const c = h.c;
   Object.assign(c, {
     liveSelectedAgent: 'analysis', liveLastSnapshot: {}, planningSessionId: '',
+    liveRecentEvents: [], recoverAgentAttentionRequest: () => {},
     planningStageLabel: null, planningCycleLabel: null, planningRunDetail: null,
     planningHistorySessionId: '', planningMessagesCache: [], queryGoal: '',
     resetLiveRunScopedStateForAuthoritativeSession: () => false,

@@ -3943,6 +3943,71 @@ def test_live_bambu_with_http_artifact_url_verifies_transfer_without_ftps_write(
     assert result["device_screen"]["actions"]["can_start_print"] is True
 
 
+@pytest.mark.parametrize("entrypoint", ["health", "health_only", "status_only"])
+@pytest.mark.parametrize("mqtt_ok", [True, False])
+@pytest.mark.parametrize("device_error", [0, 12345])
+def test_bambu_observation_does_not_require_ftps_or_grant_upload(tmp_path, entrypoint, mqtt_ok, device_error):
+    from orchestrator.state import Mode, OrchestratorState, Stage
+    from policies.guardian_gate import guardian_gate, gate_blocks_execution
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+    BambuConnectionMemory(manager.config.default_profile.connection_memory_path).save_from_payload({
+        "host": "192.0.2.42", "serial": "20PTEST000001",
+        "auth": {"username": "bblp", "access_code": "test-secret"},
+    })
+    class Probe:
+        def probe_tls_port(self, *args):
+            return {"ok": mqtt_ok, "failure_code": "" if mqtt_ok else "BAMBU_MQTT_UNAVAILABLE"}
+    class Mqtt:
+        def read_snapshot(self, **kwargs):
+            return {"ok": True, "report": {"print": {"gcode_state": "FINISH", "mc_percent": 100,
+                                                       "print_error": device_error}}, "received_at": "now"}
+    class Ftps:
+        calls = 0
+        def probe_storage(self, **kwargs):
+            self.calls += 1
+            return {"ok": False, "failure_code": "BAMBU_FTPS_PROBE_FAILED"}
+    manager.live_probe = Probe()
+    manager.mqtt_client = Mqtt()
+    manager.ftps_client = Ftps()
+    payload = {"runtime_mode": "live", "skip_ftps_probe": False}
+    result = manager.health(payload) if entrypoint == "health" else manager.prepare({**payload, entrypoint: True})
+    assert manager.ftps_client.calls == 0
+    expected_ok = mqtt_ok and device_error == 0
+    assert result["ok"] is expected_ok
+    screen = result["device_screen"]
+    assert screen["actions"]["can_start_print"] is False
+    assert screen["actions"]["can_upload"] is False
+    assert "BAMBU_UPLOAD_GATE_BLOCKED" not in screen["control_panel"]["blockers"]
+    gate = guardian_gate(state=OrchestratorState(run_id="health-test", experiment_id="health-exp", mode=Mode.LIVE, stage=Stage.GUARDIAN),
+                         stage="guardian", phase="post", payload={"health": result})
+    assert gate_blocks_execution(gate) is (not expected_ok)
+
+
+def test_shared_monitor_is_used_only_for_health_and_does_not_probe_tls(tmp_path, monkeypatch):
+    manager = PrinterDeviceBridgeManager.from_devices_config(_devices_config(tmp_path), repo_root=tmp_path)
+    BambuConnectionMemory(manager.config.default_profile.connection_memory_path).save_from_payload({
+        "host": "192.0.2.42", "serial": "TEST",
+        "auth": {"username": "bblp", "access_code": "test-secret"},
+    })
+    calls = []
+    def monitor(**kwargs):
+        calls.append("monitor")
+        return {"ok": True, "report": {"print": {"gcode_state": "IDLE", "print_error": 0}}}
+    def probe(*args):
+        calls.append("probe")
+        return {"ok": False, "failure_code": "BAMBU_MQTT_UNAVAILABLE"}
+    monkeypatch.setattr(manager.mqtt_client, "read_monitor_snapshot", monitor)
+    monkeypatch.setattr(manager.live_probe, "probe_tls_port", probe)
+    result = manager.prepare({"runtime_mode": "live", "health_only": True})
+    assert calls == ["monitor"]
+    assert result["ok"]
+    assert not result["published"]
+    assert not result["device_screen"]["actions"]["can_start_print"]
+    calls.clear()
+    manager.prepare({"runtime_mode": "live", "skip_ftps_probe": True})
+    assert calls == ["probe"]
+
+
 def test_live_bambu_with_http_artifact_url_warns_but_continues_when_ftps_has_too_many_connections(
     tmp_path: Path,
 ) -> None:
@@ -3992,6 +4057,8 @@ def test_live_bambu_with_http_artifact_url_warns_but_continues_when_ftps_has_too
     assert result["failure_code"] == ""
     assert result["status"] == "HTTP_ARTIFACT_READY_NOT_STARTED"
     assert result["ftps_probe"]["failure_code"] == "BAMBU_FTPS_TOO_MANY_CONNECTIONS"
+    storage_step = next(step for step in result["step_trace"] if step["step"] == "BAMBU_FTPS_STORAGE")
+    assert storage_step["status"] == "not_used"
     assert result["upload"]["route"] == "http_artifact"
     assert result["preprint_gate"]["checks"]["storage_transfer_path_verified"] is True
     action_codes = [item["code"] for item in result["operator_actions"]]

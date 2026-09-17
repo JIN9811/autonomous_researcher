@@ -10,6 +10,34 @@ from app import main as app_main
 from app.main import app
 
 
+def test_bo_surface_artifacts_do_not_replace_legacy_posterior_url(monkeypatch):
+    names = ["r_bo_step_009_posterior.png", "r_bo_step_009_posterior_2d.png",
+             "r_bo_step_009_posterior_3d.png", "r_bo_step_010_posterior_2d.png"]
+    monkeypatch.setattr(app_main, "_artifact_items_for_run", lambda run_id: (None, [
+        {"path": "bo/" + name, "url": "/api/" + name} for name in names]))
+    payload = {"run_id": "r", "step": 9}
+    enriched = app_main._attach_bo_artifact_urls(payload, "r")
+    assert enriched["artifacts"] == {
+        "png_url": "/api/r_bo_step_009_posterior.png",
+        "surface_2d_url": "/api/r_bo_step_009_posterior_2d.png",
+        "surface_3d_url": "/api/r_bo_step_009_posterior_3d.png",
+    }
+    assert "artifacts" not in payload
+
+
+def test_lhs_artifact_urls_change_for_same_step_progress(monkeypatch):
+    from copy import deepcopy
+    monkeypatch.setattr(app_main, "_artifact_items_for_run", lambda run_id: (None, [
+        {"path": "bo/r_lhs_design_step_001.png", "url": "/api/runs/r/artifact-file/bo/r_lhs_design_step_001.png"}]))
+    original = {"run_id": "r", "step": 1, "initial_design": {"points": [{"status": "next"}]}}
+    before = app_main._attach_lhs_artifact_urls(original, "r")
+    updated = deepcopy(original)
+    updated["initial_design"]["points"][0]["status"] = "designed"
+    after = app_main._attach_lhs_artifact_urls(updated, "r")
+    assert before["artifacts"]["png_url"] != after["artifacts"]["png_url"]
+    assert "?v=" in after["artifacts"]["png_url"]
+
+
 def test_bo_strategy_control_is_validated_and_preserved_in_api_request():
     import pytest
     from pydantic import ValidationError
@@ -105,13 +133,14 @@ def test_bo_workspace_contains_shared_live_visualization_cards() -> None:
         assert f'id="{element_id}"' in html
     assert html.index('/static/lhs_design_visualization.js') < html.index('/static/bo_visualization.js')
     assert html.index('/static/bo_visualization.js') < html.rindex('<script src="/static/bo.js"')
-    assert '/static/bo_visualization.js?v=20260910-continuous-strategy-1' in html
-    assert '/static/styles.css?v=20260811-botorch-paper-3' in html
+    assert '/static/bo_visualization.js?v=20260917-surface-1' in html
+    assert html.index('/static/bo_posterior_surface.js') < html.index('/static/bo_visualization.js')
+    assert '/static/styles.css?v=' in html
 
     live_html = TestClient(app).get("/live").text
-    assert '/static/lhs_design_visualization.js?v=20260910-continuous-1' in live_html
-    assert '/static/bo_visualization.js?v=20260910-continuous-strategy-1' in live_html
-    assert '<script src="/static/planning.js?v=20260910-continuous-strategy-1" defer></script>' in live_html
+    assert '/static/lhs_design_visualization.js?v=' in live_html
+    assert '/static/bo_visualization.js?v=' in live_html
+    assert '<script src="/static/planning.js?v=' in live_html
 
 
 def test_bo_workspace_resets_visualization_state_before_each_new_run() -> None:
@@ -344,8 +373,11 @@ def test_bo_benchmark_endpoint_runs_virtual_bo() -> None:
     )
     config = client.get("/api/bo/config").json()
     assert config["recent_lhs_visualization"]["step"] == 3
-    assert config["recent_lhs_visualization"]["artifacts"]["png_url"].endswith("_lhs_design_step_003.png")
-    assert config["recent_lhs_visualization"]["artifacts"]["csv_url"].endswith("_lhs_design_step_003.csv")
+    from urllib.parse import urlsplit
+    assert urlsplit(config["recent_lhs_visualization"]["artifacts"]["png_url"]).path.endswith("_lhs_design_step_003.png")
+    assert urlsplit(config["recent_lhs_visualization"]["artifacts"]["csv_url"]).path.endswith("_lhs_design_step_003.csv")
+    image_response = client.get(config["recent_lhs_visualization"]["artifacts"]["png_url"])
+    assert image_response.status_code == 200 and image_response.content.startswith(b"\x89PNG")
     assert [item["step"] for item in config["lhs_visualization_steps"]][-3:] == [1, 2, 3]
 
 

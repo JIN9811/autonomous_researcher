@@ -515,10 +515,27 @@ class SpecimenMakingAgent(BaseAgent):
             "slicer_command": settings.get("resolved_command", []),
         }
         storage_status, storage_evidence = self._storage_gate_status(printer, prusalink)
+        upload = self._dict_value(tool_result.get("upload"))
+        checks = self._dict_value(preprint_gate.get("checks"))
+        if (tool_result.get("provider") == "bambulab_x2d" and storage_status == "warn"
+                and upload.get("ok") is True and not upload.get("failure_code")
+                and checks.get("storage_transfer_path_verified") is True):
+            storage_status = "pass"
+            storage_evidence = {"transport": upload.get("route") or "ftps", "storage": upload}
         spc_blockers = preprint_gate.get("blockers") if isinstance(preprint_gate.get("blockers"), list) else []
         spc_status = "warn"
         if preprint_gate:
-            spc_status = "pass" if preprint_gate.get("technical_ready_for_start") else ("blocked" if spc_blockers else "warn")
+            observed = self._dict_value(print_result.get("post_publish_status"))
+            verified_start = (
+                tool_result.get("ok") is True and not tool_result.get("failure_code")
+                and print_result.get("ok") is True and not print_result.get("failure_code")
+                and print_result.get("published") is True
+                and observed.get("status") in {"running", "completed"} and not observed.get("failure_code")
+                and preprint_gate.get("state") in {"print_started", "print_completed"}
+            )
+            spc_status = "blocked" if spc_blockers else (
+                "pass" if preprint_gate.get("technical_ready_for_start") or verified_start else "warn"
+            )
         elif readiness_levels:
             spc_status = "blocked" if any(str(item.get("status")).lower() == "blocked" for item in readiness_levels) else "pass"
         quality_gates = [
@@ -527,7 +544,12 @@ class SpecimenMakingAgent(BaseAgent):
             self._gate("mesh", "pass" if mesh_result.get("ok") and mesh_result.get("mesh_status") == "pass" else "fail", {"mesh_status": mesh_result.get("mesh_status"), "warnings": mesh_result.get("warnings", [])}),
             self._gate("manufacturability", "pass" if manufacturability_result.get("ok") and manufacturability_result.get("manufacturability_status") == "pass" else "fail", {"status": manufacturability_result.get("manufacturability_status"), "warnings": manufacturability_result.get("warnings", []), "wall_thickness_verification": manufacturability_result.get("wall_thickness_verification", {})}),
             self._gate("slicer", self._gate_status_from_result(slicer_result), {"sliced_path": digital_thread["gcode_path"], "failure_code": slicer_result.get("failure_code")}),
-            self._gate("gcode", self._gate_status_from_result(gcode_validation), {"failure_code": gcode_validation.get("failure_code"), "violations": gcode_validation.get("violations", [])}),
+            self._gate(
+                "gcode",
+                self._gate_status_from_result(gcode_validation) if gcode_validation else "not_reported",
+                {"failure_code": gcode_validation.get("failure_code"), "violations": gcode_validation.get("violations", []),
+                 **({"reason": "No G-code validation result was reported; not a validation pass."} if not gcode_validation else {})},
+            ),
             self._gate("printer_storage", storage_status, storage_evidence),
             self._gate(
                 "spc_readiness",
@@ -1430,7 +1452,13 @@ class SpecimenMakingAgent(BaseAgent):
 
         async def execute_fabrication():
             try:
-                return await asyncio.to_thread(ctx.tools.call, "experiment.evaluate", evaluation_payload)
+                result = await asyncio.to_thread(ctx.tools.call, "experiment.evaluate", evaluation_payload)
+                bridge = result.get("bridge_result") or result
+                started = bridge.get("print_result") or {}
+                if (result.get("ok") and bridge.get("status") == "PRINT_STARTED"
+                        and started.get("published") and (started.get("post_publish_status") or {}).get("status") in {"running", "completed"}):
+                    await self.request_attention(state, ctx, "print_started")
+                return result
             except OSError as exc:
                 if not (live_gui_test_spec and printer_test_path == "virtual_bridge"):
                     raise

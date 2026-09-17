@@ -68,6 +68,7 @@ class AgentContext:
     active_backend: str = "vllm"
     on_model_call: Callable[..., Awaitable[None] | None] | None = None
     on_tool_event: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None
+    emit_execution_event: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None
     on_knowledge_ingest: Callable[..., Awaitable[None] | None] | None = None
     model_routers: dict[str, ModelRouter] = field(default_factory=dict)
     primary_backends: dict[str, BaseLLMBackend] = field(default_factory=dict)
@@ -273,6 +274,13 @@ class BaseAgent(ABC):
     """Base class for all pluggable agents."""
 
     name: str = "base_agent"
+
+    async def request_attention(self, state, ctx, checkpoint):
+        from agents.attention import request_attention
+        owner = self.name.removesuffix("_agent")
+        if checkpoint == "handoff" and str(getattr(state.stage, "value", state.stage)) != owner:
+            return False
+        return await request_attention(state, ctx, owner, checkpoint)
 
     @abstractmethod
     async def run(self, state: OrchestratorState, ctx: AgentContext) -> AgentResult:

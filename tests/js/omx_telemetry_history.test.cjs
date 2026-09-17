@@ -15,7 +15,7 @@ function viewer() {
     const originalApplyMotionState = applyMotionState;
     scheduleChartRender = () => {};
     globalThis.api = { runtime, appendSample, consumePacket, chartOption, loadSnapshot,
-      applyMotionState: originalApplyMotionState, applyArtifacts };
+      applyMotionState: originalApplyMotionState, applyArtifacts, restoreTelemetryStatus };
   `, context);
   return context;
 }
@@ -24,6 +24,25 @@ const sample = (sequence, elapsed_s = sequence - 1) => ({
   type: "joint_sample", session_id: "test", sequence, elapsed_s,
   actual_source: { Joint1: sequence, Gripper: sequence % 100 },
   target_source: { Joint1: sequence + 1, Gripper: sequence % 100 + 1 },
+});
+
+test("remounted terminal cards restore accepted status without consuming old samples", () => {
+  const context = viewer();
+  const {api} = context;
+  api.appendSample(sample(30));
+  api.runtime.status = 'complete';
+  api.runtime.latestMotionState = {measured: {base_state:'home', gripper_state:'idle'}};
+  vm.runInContext(`
+    applyRobotMotionLabel = annotation => { globalThis.label = annotation; };
+    setPoseStatus = text => { globalThis.poseStatus = text; };
+    setTrackingStatus = text => { globalThis.trackingStatus = text; };
+  `, context);
+  api.restoreTelemetryStatus();
+  assert.equal(context.label.base_state, 'home');
+  assert.equal(context.poseStatus, 'complete');
+  assert.equal(context.trackingStatus, '1 samples');
+  assert.equal(api.runtime.latestSequence,30);
+  assert.equal(api.runtime.history.length,1);
 });
 
 test("reconnection history cannot rewind the latest pose or runtime view", () => {

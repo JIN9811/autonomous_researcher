@@ -155,6 +155,13 @@ async def test_replay_launch_poll_return_then_fresh_clear_routes_analysis(topic,
     tools = ReplayTools(state)
     tools.topic = topic
     ctx = SimpleNamespace(tools=tools)
+    attention = []
+    def on_event(event):
+        if event["type"] == "agent.attention_requested":
+            preview = state.run_metadata["utm_verifications"]["previews"]["verification_2"]
+            assert preview["artifact"]["path"]
+            attention.append(event)
+    ctx.emit_execution_event = on_event
     result = await ManipulationAgent().run(state, ctx)
     assert result.success
     assert result.data["requested_next_stage"] == "vision"
@@ -168,6 +175,7 @@ async def test_replay_launch_poll_return_then_fresh_clear_routes_analysis(topic,
     waiting = await VisionAgent().run(state, ctx)
     assert waiting.data["requested_next_stage"] == "vision"
     assert all(name != "vision.utm_specimen_presence.capture" for name, _ in tools.calls)
+    assert attention == []
     tools.status, tools.home = "COMPLETED", True
     result = await VisionAgent().run(state, ctx)
     assert validate_agent_output("vision", result.data)[0]
@@ -175,6 +183,7 @@ async def test_replay_launch_poll_return_then_fresh_clear_routes_analysis(topic,
     assert result.data["requested_next_stage"] == "analysis"
     assert state.run_metadata["utm_verifications"]["verification_2"]["confirmed"] is True
     assert preview_checks
+    assert [event["payload"]["checkpoint"] for event in attention] == ["replay_complete"]
     assert guardian_gate(state=state, stage="vision", phase="post", payload=result.data)["ok_for_next_stage"]
     assert not cycle.clearance_missing(state)
     graph = load_graph_config("graphs/configs/atr_closed_loop.yaml")

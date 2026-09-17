@@ -35,6 +35,12 @@ const nozzleInput = document.getElementById("printer-nozzle-input");
 const layerInput = document.getElementById("printer-layer-input");
 const firstLayerHeightInput = document.getElementById("printer-first-layer-height-input");
 const firstLayerSpeedInput = document.getElementById("printer-first-layer-speed-input");
+const startPointPrimeInput = document.getElementById("printer-start-point-prime-input");
+const earlyLayerSpeedInput = document.getElementById("printer-early-layer-speed-input");
+const earlyLayerSpeedLimitInput = document.getElementById("printer-early-layer-speed-limit-input");
+const startPointPrimeEnabledInput = document.getElementById("printer-start-point-prime-enabled-input");
+const earlyLayerZSpeedLimitInput = document.getElementById("printer-early-layer-z-speed-limit-input");
+const earlyLayerZSpeedInput = document.getElementById("printer-early-layer-z-speed-input");
 const bedTempInput = document.getElementById("printer-bed-temp-input");
 const firstLayerBedTempInput = document.getElementById("printer-first-layer-bed-temp-input");
 const storageInput = document.getElementById("printer-storage-input");
@@ -375,6 +381,12 @@ function fillProfile(profile) {
     firstLayerSpeedInput.disabled = data.slow_first_layer_enabled === false;
   }
   if (bedTempInput) bedTempInput.value = Number(data.bed_temperature_c ?? 60);
+  if (startPointPrimeInput) startPointPrimeInput.value = Number(data.start_point_prime_mm ?? 0.1);
+  if (earlyLayerSpeedInput) earlyLayerSpeedInput.value = Number(data.early_layer_speed_mm_s ?? 50);
+  if (earlyLayerSpeedLimitInput) earlyLayerSpeedLimitInput.checked = data.early_layer_speed_limit_enabled !== false;
+  if (startPointPrimeEnabledInput) startPointPrimeEnabledInput.checked = data.start_point_prime_enabled !== false;
+  if (earlyLayerZSpeedLimitInput) earlyLayerZSpeedLimitInput.checked = data.early_layer_z_speed_limit_enabled !== false;
+  if (earlyLayerZSpeedInput) earlyLayerZSpeedInput.value = Number(data.early_layer_z_speed_mm_s ?? 5);
   if (firstLayerBedTempInput) firstLayerBedTempInput.value = Number(data.first_layer_bed_temperature_c ?? data.bed_temperature_c ?? 60);
   if (storageInput) storageInput.value = data.storage || "usb";
   if (bambuArtifactPathInput && data.bambu_artifact_path) bambuArtifactPathInput.value = data.bambu_artifact_path;
@@ -479,6 +491,25 @@ function readConnection() {
   };
 }
 
+function readPrintStartSettings() {
+  const fields = [
+    ["start_point_prime_mm", startPointPrimeInput, 0.1],
+    ["early_layer_speed_mm_s", earlyLayerSpeedInput, 50],
+    ["early_layer_z_speed_mm_s", earlyLayerZSpeedInput, 5],
+  ];
+  const settings = Object.fromEntries(fields.map(([key, input, fallback]) => {
+    if (input && (input.value.trim() === "" || !input.checkValidity() || !Number.isFinite(Number(input.value)))) {
+      input.reportValidity();
+      throw new Error(`${key}: enter a value within the displayed range.`);
+    }
+    return [key, input ? Number(input.value) : fallback];
+  }));
+  return {...settings,
+    start_point_prime_enabled: startPointPrimeEnabledInput ? startPointPrimeEnabledInput.checked : true,
+    early_layer_speed_limit_enabled: earlyLayerSpeedLimitInput ? earlyLayerSpeedLimitInput.checked : true,
+    early_layer_z_speed_limit_enabled: earlyLayerZSpeedLimitInput ? earlyLayerZSpeedLimitInput.checked : true};
+}
+
 function readProfile() {
   const topCapEnabled = topCapInput ? topCapInput.checked : false;
   const bottomCapEnabled = bottomCapInput ? bottomCapInput.checked : false;
@@ -494,6 +525,7 @@ function readProfile() {
     layer_height_mm: Number(layerInput ? layerInput.value : 0.2) || 0.2,
     first_layer_height_mm: Number(firstLayerHeightInput ? firstLayerHeightInput.value : 0.2) || 0.2,
     first_layer_speed_mm_s: Number(firstLayerSpeedInput ? firstLayerSpeedInput.value : 10) || 10,
+    ...readPrintStartSettings(),
     bed_temperature_c: Number(bedTempInput ? bedTempInput.value : 60),
     first_layer_bed_temperature_c: Number(firstLayerBedTempInput ? firstLayerBedTempInput.value : 60),
     storage: storageInput ? storageInput.value.trim() : "usb",
@@ -1406,10 +1438,16 @@ async function runVideoStatus() {
 async function saveProfile() {
   setBusy(btnSave, true);
   try {
+    const requested = readProfile();
     const data = await apiJson("/api/printer/profile", {
       method: "POST",
-      body: JSON.stringify(readProfile()),
+      body: JSON.stringify(requested),
     });
+    for (const key of ["start_point_prime_enabled", "early_layer_speed_limit_enabled", "early_layer_z_speed_limit_enabled", "start_point_prime_mm", "early_layer_speed_mm_s", "early_layer_z_speed_mm_s"]) {
+      if (data.profile?.[key] !== requested[key]) {
+        throw new Error(`Server did not persist ${key}. Server restart/update required; reload the workspace afterward.`);
+      }
+    }
     fillProfile(data.profile || {});
     renderConfig(data);
     await refreshStatus("live");

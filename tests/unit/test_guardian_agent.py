@@ -40,6 +40,18 @@ class _Response:
         self.text = text
 
 
+@pytest.mark.parametrize("printer,expected", [
+    ({"ok": False, "state": "communication_failed", "failure_code": "BAMBU_MQTT_UNAVAILABLE"}, "fail"),
+    ({"ok": True, "state": "COMMUNICATION_READY", "failure_code": ""}, "pass"),
+    ({"ok": True, "state": "offline"}, "fail"),
+])
+def test_guardian_health_understands_structured_device_status(printer, expected):
+    state = OrchestratorState(run_id="health-test", experiment_id="health-exp", stage=Stage.GUARDIAN, mode=Mode.LIVE)
+    ctx = _CtxStub(health={"printer": printer})
+    result = GuardianAgent()._resolve_device_health(state, ctx)
+    assert result["status"] == expected
+
+
 class _ToolsStub:
     def __init__(self, *, health: dict[str, object] | None = None) -> None:
         self._health = health or {

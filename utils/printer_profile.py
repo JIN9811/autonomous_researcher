@@ -23,6 +23,7 @@ Modification guide:
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +33,39 @@ from utils.specimen_placement import normalize_placement
 
 PRUSA_PRINT_PROFILE_PATH = resolve_path("memory/prusa_print_profile.json")
 
+PRINT_START_DEFAULTS = {
+    "start_point_prime_enabled": True,
+    "early_layer_speed_limit_enabled": True,
+    "early_layer_z_speed_limit_enabled": True,
+    "start_point_prime_mm": 0.1,
+    "early_layer_speed_mm_s": 50.0,
+    "early_layer_z_speed_mm_s": 5.0,
+}
+
+
+def normalize_print_start_settings(raw: dict[str, Any]) -> dict[str, float | bool]:
+    """Operator-owned Bambu postprocessing limits; reject invalid motion values."""
+    limits = {"start_point_prime_mm": (0, None),
+              "early_layer_speed_mm_s": (0.1, 1000),
+              "early_layer_z_speed_mm_s": (0.1, 20)}
+    # X2D machine profile: max X/Y = 1000 mm/s, max Z = 20 mm/s.
+    result = {key: _clean_bool(raw.get(key), True) for key in
+              ("start_point_prime_enabled", "early_layer_speed_limit_enabled", "early_layer_z_speed_limit_enabled")}
+    for key, (low, high) in limits.items():
+        try:
+            value = float(raw.get(key, PRINT_START_DEFAULTS[key]))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{key} must be a finite number") from exc
+        if not math.isfinite(value) or value < low:
+            raise ValueError(f"{key} must be finite and at least {low}")
+        if high is not None and value > high:
+            raise ValueError(f"{key} must be between {low} and {high}")
+        result[key] = value
+    return result
+
+
 DEFAULT_PRUSA_PRINT_PROFILE: dict[str, Any] = {
+    **PRINT_START_DEFAULTS,
     "specimen_placement": {"mode": "auto", "center_x_mm": 128.0, "center_y_mm": 128.0},
     "material": "PLA",
     "printer_model": "Prusa MK4S",
@@ -122,6 +155,7 @@ def normalize_prusa_print_profile(raw: dict[str, Any] | None) -> dict[str, Any]:
     profile = dict(DEFAULT_PRUSA_PRINT_PROFILE)
     profile.update({key: value for key, value in source.items() if key in DEFAULT_PRUSA_PRINT_PROFILE})
     profile["specimen_placement"] = normalize_placement(profile.get("specimen_placement"))
+    profile.update(normalize_print_start_settings(profile))
 
     for key, max_len in _STRING_LIMITS.items():
         profile[key] = _clean_string(

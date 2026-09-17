@@ -226,6 +226,7 @@
 
   function renderPlot(payload, options = {}) {
     if (!isValid(payload)) return '<div class="bo-viz-empty bo-viz-stale">BO visualization unavailable</div>';
+    if (globalThis.BOPosteriorSurface?.valid(payload)) return globalThis.BOPosteriorSurface.render(payload);
     const pngUrl = String(payload.artifacts?.png_url || "");
     if (options.preferArtifact && /^\/api\//.test(pngUrl)) {
       return `<figure class="bo-viz-matplotlib-figure"><img class="bo-viz-matplotlib-image" src="${escapeHtml(pngUrl)}" alt="Stored BO posterior and acquisition · step ${escapeHtml(payload.step)}"></figure>`;

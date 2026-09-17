@@ -260,6 +260,7 @@ def _objective_trace(
     selected: dict[str, Any],
     *,
     objective_path: dict[str, Any] | None = None,
+    parameter_space: dict[str, Any] | None = None,
     acquisition_class: str = "",
     direction: str = "maximize",
     exploration_margin: float = 0.01,
@@ -289,6 +290,15 @@ def _objective_trace(
             for index in range(row_count)
             if all(_finite(value) is not None for value in (search_x[index], means[index], stds[index], acquisitions[index]))
         ]
+        parameter_names = list(path.get("parameter_names") or [])
+        if parameter_space:
+            space = BOParameterSpace.from_mapping(parameter_space)
+            active_names = [dimension.name for dimension in space.active_dimensions]
+            if not parameter_names or parameter_names == active_names:
+                parameter_names = active_names
+                for row in rows:
+                    decoded = space.decode(row["normalized_vector"])
+                    row["parameters"] = {name: decoded[name] for name in parameter_names}
         coordinates = path.get("observation_coordinates") if isinstance(path.get("observation_coordinates"), list) else []
         observation_rows = [
             {
@@ -310,6 +320,7 @@ def _objective_trace(
         return {
             "mode": "normalized_search_path",
             "path_mode": "continuous_2d_gp_path",
+            "parameter_names": parameter_names,
             "x_label": "Normalized BO search coordinate",
             "y_label": "Score",
             "rows": rows,
@@ -596,6 +607,14 @@ def build_bo_visualization(
     }
     projection = trace.get("projection") if isinstance(trace.get("projection"), dict) else {}
     gp_surface = _gp_surface(projection, acquisition_class)
+    full_grid = projection.get("response_surface") or {}
+    if full_grid.get("mode") == "continuous_2d_gp_surface":
+        full_grid = {**full_grid, "acquisition": [
+            [_display_acquisition(value, acquisition_class) for value in row]
+            for row in full_grid["acquisition"]
+        ]}
+    else:
+        full_grid = {}
     training_observations = _training_observations(trace, parameter_space)
     gp_series: list[dict[str, Any]] = []
     if gp_series:
@@ -703,11 +722,13 @@ def build_bo_visualization(
         },
         "posterior": selected_slice["posterior"],
         "gp_surface": gp_surface,
+        "response_surface": full_grid,
         "objective_trace": _objective_trace(
             gp_surface,
             training_observations,
             next_point,
             objective_path=projection.get("objective_path"),
+            parameter_space=parameter_space,
             acquisition_class=acquisition_class,
             direction=objective_info["direction"],
             exploration_margin=_finite(trace.get("xi")) or 0.01,
@@ -794,6 +815,7 @@ def rebuild_legacy_continuous_objective_trace(
         observations,
         selected,
         objective_path=proposal["projection"].get("objective_path"),
+        parameter_space=parameter_space,
         acquisition_class=str(proposal["acquisition"].get("class") or ""),
         direction=str(objective.get("direction") or "maximize"),
         exploration_margin=_finite(objective_trace.get("exploration_margin")) or 0.01,
@@ -825,6 +847,24 @@ def validate_bo_visualization(payload: dict[str, Any]) -> dict[str, Any]:
     _validate_numeric_arrays(audit, ("x", "mean", "std", "lower_95", "upper_95", "acquisition"), "candidate index")
     if len(audit["x"]) != len(audit.get("candidate_ids", [])):
         raise ValueError("candidate index arrays must match candidate ids")
+    grid = payload.get("response_surface")
+    if grid:
+        if not isinstance(grid, dict) or grid.get("mode") != "continuous_2d_gp_surface" or grid.get("matrix_order") != "yx":
+            raise ValueError("Response surface must use the continuous Y-by-X grid contract")
+        xs, ys = grid.get("x_values"), grid.get("y_values")
+        for axis in (xs, ys):
+            if (not isinstance(axis, list) or len(axis) < 2
+                    or any(_finite(value) is None for value in axis)
+                    or any(a >= b for a, b in zip(axis, axis[1:]))):
+                raise ValueError("Response surface axes must be finite and strictly increasing")
+        if grid.get("shape") != [len(ys), len(xs)]:
+            raise ValueError("Response surface shape must be Y by X")
+        for key in ("mean", "std", "acquisition"):
+            matrix = grid.get(key)
+            if (not isinstance(matrix, list) or len(matrix) != len(ys)
+                    or any(not isinstance(row, list) or len(row) != len(xs) for row in matrix)
+                    or any(_finite(v) is None or (key == "std" and v < 0) for row in matrix for v in row)):
+                raise ValueError(f"Invalid response surface {key}")
     surface = payload.get("gp_surface") if isinstance(payload.get("gp_surface"), dict) else {}
     if surface:
         x_values = surface.get("x_values")

@@ -52,6 +52,41 @@ supersedes: []
 
 ## Summary
 
+For physical Bambu printing, an unused FTPS probe failure does not block a
+verified HTTP artifact start. This exception requires a successful MQTT snapshot,
+HTTP upload route, published `project_file` command for the same artifact URL,
+and a post-publish `running` or `completed` observation within the same successful
+`PRINT_STARTED` bridge result. It applies only to that result's FTPS probe;
+unrelated results, start failures, and other safety alarms remain gated. Raw
+transport diagnostics remain in the run evidence. This is not proof of print
+completion or permission to skip subsequent specimen checks. The same evidence
+rule covers ejection-project starts, the unused `BAMBU_FTPS_STORAGE` trace entry,
+and its exact `experiment.evaluate` trace projection. These diagnostics remain
+in raw evidence but do not generate a new Guardian incident. Critical alerts and
+unrelated trace failures are not compensated.
+
+An absent SPC G-code validation result is displayed as `not_reported`, not `warn`
+or `pass`. It does not generate a generic warning incident; reported validation
+failures still reach the gate. Missing evidence is not counted as a passed
+quality check.
+
+New bridge traces mark unused FTPS storage checks as `not_used` when HTTP is the
+verified transfer route. SPC storage/readiness cards consume Bambu upload and
+post-publish evidence rather than requiring Prusa-specific storage fields.
+Explicit readiness blockers still take precedence. Historical incidents are
+retained, not rewritten by this reporting correction.
+
+Printer health checks are read-only MQTT observations, not transfer preflights.
+`device.health`, `health_only`, and `status_only` do not open FTPS sessions or
+construct upload/start/ejection gates. Upload readiness remains `not_checked`;
+an unavailable optional video proxy or an unrequested upload is not a device
+fault. MQTT failures and current device error codes remain blocking health
+failures. A terminal previous-job state alone is not a new device error.
+Guardian interprets structured health results (`ok`, `state`, `failure_code`)
+consistently with the final graph gate rather than converting dictionaries to
+strings. Actual prepare/upload/start operations retain their transport and
+safety checks.
+
 The existing LLM decision boundary receives a bounded, reference-only
 [AX4LAB Wiki pack](../knowledge/wiki_memory.md). This supplies platform context
 without changing this agent's tools, numerical authority or execution gates.

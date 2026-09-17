@@ -27,6 +27,7 @@ function harness() {
     liveResourceChip: {textContent: '', title: '', classList: {toggle: noop}},
     liveDeviceStrip: {innerHTML: '', dataset: {}, querySelectorAll: () => []}, liveLastSnapshot: {system_resources: resources()},
     liveLastSession: {}, liveGuardianStatus: null, liveRefreshInFlight: null,
+    document: {hidden: false}, refreshLivePrinterMonitorStatus: async () => {},
     liveSetupTransportVersion: 0, liveAgentManifestRequestGeneration: 0,
     liveResourceRefreshInFlight: null, liveResourceRefreshedAt: 0, liveResourceRefreshFailed: false,
     now: 10000, Date: {now: () => ctx.now}, requests: [], fail: false,

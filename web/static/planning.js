@@ -187,26 +187,84 @@ function liveAgentRendererProfile(agentId) {
 }
 
 let liveSelectedAgent = "orchestrator";
-let liveLastAgentTransitionKey = "";
+const liveAttentionSeen = new Set();
+let livePendingAgentAttention = null;
 
-function selectAgentOnOrchestrationTransition(event) {
-  if (String(event?.event_type || event?.type || "") !== "stage_transition") return;
+function recoverAgentAttentionRequest(events, session = liveLastSession) {
+  // Reconcile only an owner-issued request for the still-active stage. Never
+  // infer navigation from stage transitions or replay old stages after reconnect.
+  const state = session?.state || {};
+  if (session !== liveLastSession || session.is_running === false
+      || state.stop_requested || state.safe_stop_requested || state.emergency_stop_requested) return;
+  const owner = agentIdFromStage(state.stage || "");
+  const candidates = (Array.isArray(events) ? events : []).filter(event => {
+    const p = event.payload || {};
+    const timestamp = Date.parse(event.timestamp || event.ts || "");
+    return String(event.event_type || event.type || "") === "agent.attention_requested"
+      && String(event.run_id || p.run_id || "") === liveCurrentRunId()
+      && p.agent_id === owner && Number(p.loop_index) === Number(state.loop_count || 0)
+      && Number.isFinite(timestamp) && Date.now() - timestamp <= 30000;
+  }).sort((a, b) => Date.parse(b.timestamp || b.ts) - Date.parse(a.timestamp || a.ts));
+  // If the newest request was already handled, do not fall back to an older one.
+  if (candidates.length) selectAgentOnAttentionRequest(candidates[0]);
+}
+
+function selectAgentOnAttentionRequest(event) {
+  if (String(event?.event_type || event?.type || "") !== "agent.attention_requested") return;
   const payload = event.payload || {};
   const runId = String(event.run_id || payload.run_id || "");
   if (!runId || runId !== liveCurrentRunId()) return;
-  const from = agentIdFromStage(payload.from_stage || "");
-  const toStage = String(payload.to_stage || "");
-  if (!toStage || ["idle", "complete", "error"].includes(toStage)) return;
-  const to = agentIdFromStage(toStage);
-  if (!knownLiveAgent(to) || from === to) return;
-  const key = `${runId}:${event.event_id || event.timestamp || event.ts || ''}:${payload.from_stage}:${toStage}`;
-  if (key === liveLastAgentTransitionKey) return;
-  liveLastAgentTransitionKey = key;
-  if (liveSelectedAgent === to) return;
-  // Reuse the binder action, without browser/window focus or synthetic scrolling.
-  const button = Array.from(liveAgentBinderList?.querySelectorAll('[data-agent-id]') || [])
-    .find(item => item.dataset.agentId === to);
-  if (button) button.click();
+  const rules = {
+    design: {handoff: "report"}, specimen: {print_started: "printer_video"},
+    vision: {active_cam: "active_cam", placement_home: "verification_1", replay_complete: "verification_2"},
+    manipulation: {inference_started: "report"}, equipment: {handoff: "report"},
+    analysis: {handoff: "report"}, knowledge: {handoff: "report"}, bo: {handoff: "report"},
+  };
+  const agent = payload.agent_id;
+  const action = rules[agent]?.[payload.checkpoint];
+  if (!action || action !== payload.view_action || payload.presentation_only !== true) return;
+  const key = String(payload.attention_id || "");
+  if (!key || liveAttentionSeen.has(key)) return;
+  const timestamp = Date.parse(event.timestamp || event.ts || "");
+  if (Number.isFinite(timestamp) && Date.now() - timestamp > 30000) return;
+  if (Number(payload.loop_index) < Number(liveLastSession.state?.loop_count || 0)) return;
+  liveAttentionSeen.add(key);
+  if (liveAttentionSeen.size > 128) liveAttentionSeen.delete(liveAttentionSeen.values().next().value);
+  livePendingAgentAttention = {runId, agent, action, selected: false, deadline: Date.now() + 10000};
+  applyPendingAgentAttention();
+  refreshPlanningState({background: true}).then(applyPendingAgentAttention).catch(() => {});
+}
+
+function applyPendingAgentAttention() {
+  const pending = livePendingAgentAttention;
+  if (!pending) return;
+  if (pending.runId !== liveCurrentRunId() || Date.now() > pending.deadline
+      || (pending.selected && liveSelectedAgent !== pending.agent)) {
+    livePendingAgentAttention = null;
+    return;
+  }
+  if (!pending.selected) {
+    const button = Array.from(liveAgentBinderList?.querySelectorAll('[data-agent-id]') || [])
+      .find(item => item.dataset.agentId === pending.agent);
+    if (!button) { window.setTimeout(applyPendingAgentAttention, 250); return; }
+    pending.selected = true;
+    button.click();
+  }
+  let button = null;
+  if (pending.action === "printer_video") {
+    if (liveSpecimenVideoPlaying) { livePendingAgentAttention = null; return; }
+    button = liveReportPanel?.querySelector('[data-spm-video-action="play"]');
+  } else if (pending.action.startsWith("verification_")) {
+    button = liveReportPanel?.querySelector(`[data-utm-verification-select="${pending.action.endsWith("2") ? 2 : 1}"]`);
+  } else {
+    // Active Cam is already visible on the VIS report; no capture/robot command.
+    livePendingAgentAttention = null;
+    return;
+  }
+  if (button && !button.disabled) {
+    livePendingAgentAttention = null;
+    button.click();
+  } else window.setTimeout(applyPendingAgentAttention, 250);
 }
 let liveOrchestratorReady = false;
 let liveCurrentView = "report";
@@ -293,6 +351,8 @@ let liveLastEventAt = null;
 let liveSyncFailureCount = 0;
 let liveRefreshInFlight = null;
 let liveAuxRefreshInFlight = null;
+let livePrinterMonitorLastRefresh = 0;
+let livePrinterMonitorEvent = null;
 let liveObjectiveRefreshInFlight = null;
 let liveObjectiveRefreshedAt = 0;
 const LIVE_AUTO_REFRESH_MS = 5000;
@@ -4999,7 +5059,9 @@ function latestBoInitialDesign(report) {
       || Number(b.initial_design?.completed || 0)-Number(a.initial_design?.completed || 0))[0] || null;
   const lhsRenderer = window.LHSDesignVisualization;
   if (liveLhsVisualization && liveLhsVisualization.run_id === state.run_id
-      && (!lhsVisualization || Number(liveLhsVisualization.step) >= Number(lhsVisualization.step))) {
+      && (!lhsVisualization || Number(liveLhsVisualization.step) > Number(lhsVisualization.step)
+          || (Number(liveLhsVisualization.step) === Number(lhsVisualization.step)
+              && Number(liveLhsVisualization.revision || 0) >= Number(lhsVisualization.revision || 0)))) {
     lhsVisualization = liveLhsVisualization;
   }
   if (lhsVisualization?.run_id && lhsVisualization.run_id !== state.run_id) lhsVisualization = null;
@@ -12744,14 +12806,14 @@ async function startSpecimenVideoPlayback() {
   liveSpecimenVideoStartedAt = Date.now();
   setChatStatus("3DP VIDEO PLAY", "running");
   renderLiveRuntime(liveLastSession);
-  const statusResult = await refreshLivePrinterMonitorStatus(liveLastSession, { force: true });
-  if (!liveSpecimenVideoPlaying || requestSeq !== liveSpecimenVideoStartSeq) return;
-  applyPrinterMonitorSnapshotResult(statusResult);
-  renderLiveRuntime(liveLastSession);
-  const videoResult = await refreshLivePrinterVideoStatus();
-  if (!liveSpecimenVideoPlaying || requestSeq !== liveSpecimenVideoStartSeq) return;
-  applyPrinterVideoStatusResult(videoResult);
-  await refreshPlanningAuxiliaryState(liveLastSession);
+  await Promise.all([
+    refreshLivePrinterMonitorStatus(liveLastSession, { force: true }),
+    refreshLivePrinterVideoStatus().then((videoResult) => {
+      if (!liveSpecimenVideoPlaying || requestSeq !== liveSpecimenVideoStartSeq) return;
+      applyPrinterVideoStatusResult(videoResult);
+      renderLiveRuntime(liveLastSession);
+    }),
+  ]);
   if (!liveSpecimenVideoPlaying || requestSeq !== liveSpecimenVideoStartSeq) return;
   renderLiveRuntime(liveLastSession);
   setChatStatus("3DP VIDEO", "idle");
@@ -16705,16 +16767,13 @@ function renderDeviceStatusCard(title, event, fallbackStatus = "idle") {
 
 function latestPrinterMonitorEvent() {
   const runId = liveCurrentRunId();
-  if (livePrinterMonitorOverride && eventMatchesCurrentRun(livePrinterMonitorOverride, runId)) {
-    return livePrinterMonitorOverride;
-  }
-  const events = timelineSourceEvents().slice().reverse();
-  const currentEvent = events.find((event) => {
+  const events = [...timelineSourceEvents(), livePrinterMonitorOverride, livePrinterMonitorEvent].filter(Boolean);
+  const currentEvent = events.filter((event) => {
     if (!eventMatchesCurrentRun(event, runId)) return false;
     const payload = eventPayload(event);
     const snapshot = payload.monitor_snapshot || {};
     return payload.tool === "printer.status" || snapshot.tool === "printer.status";
-  });
+  }).sort((a, b) => eventTimestampMs(b, 0) - eventTimestampMs(a, 0))[0];
   if (currentEvent) return currentEvent;
   return runId ? null : latestRuntimeEvent([/printer/, /prusa/, /slicer/, /gcode/, /specimen/]);
 }
@@ -17619,6 +17678,7 @@ function applyPlanningSession(session, options = {}) {
   }
   renderPlanningMessages(mergePlanningMessages(planningMessagesCache, incomingMessages));
   renderLiveRuntime(liveLastSession);
+  recoverAgentAttentionRequest(liveRecentEvents);
   persistLivePlanningCache(liveLastSession);
 }
 
@@ -17661,9 +17721,16 @@ function liveSpecimenAgentWorking(session = liveLastSession) {
 async function refreshLivePrinterMonitorStatus(session = liveLastSession, options = {}) {
   if (!options.force && !liveSpecimenAgentWorking(session)) return null;
   if (livePrinterMonitorInFlight) return livePrinterMonitorInFlight;
+  if (!options.force && Date.now() - livePrinterMonitorLastRefresh < 2000) return null;
+  livePrinterMonitorLastRefresh = Date.now();
+  const requestedRunId = liveCurrentRunId();
   livePrinterMonitorInFlight = (async () => {
     try {
-      return await fetchJsonOrThrow("/api/printer/status?mode=live&emit=1");
+      const status = await fetchJsonOrThrow("/api/printer/status?mode=live&emit=1");
+      if (requestedRunId !== liveCurrentRunId()) return null;
+      applyLivePrinterMonitorStatus(status, requestedRunId);
+      renderLiveRuntime(liveLastSession);
+      return status;
     } catch (err) {
       return null;
     } finally {
@@ -17694,12 +17761,14 @@ async function refreshLivePrinterVideoStatus() {
 
 async function refreshPlanningAuxiliaryState(session) {
   if (liveAuxRefreshInFlight) return liveAuxRefreshInFlight;
+  // Printer telemetry renders as soon as it arrives, independently of graph,
+  // Guardian and run-detail requests (and vice versa).
+  refreshLivePrinterMonitorStatus(session);
   liveAuxRefreshInFlight = (async () => {
     try {
-      const [guardianResult, eventsResult, printerStatusResult] = await Promise.allSettled([
+      const [guardianResult, eventsResult] = await Promise.allSettled([
         fetch("/api/guardian/status"),
         fetch("/api/events/recent"),
-        refreshLivePrinterMonitorStatus(session),
         refreshLiveObjectiveState(session),
       ]);
       let guardianPayload = null;
@@ -17710,45 +17779,10 @@ async function refreshPlanningAuxiliaryState(session) {
       if (eventsResult.status === "fulfilled" && eventsResult.value.ok) {
         const recentPayload = await eventsResult.value.json();
         liveRecentEvents = Array.isArray(recentPayload.events) ? recentPayload.events : [];
-      }
-      if (printerStatusResult.status === "fulfilled" && printerStatusResult.value) {
-        const status = printerStatusResult.value;
-        const runId = liveCurrentRunId();
-        liveRecentEvents.push({
-          run_id: runId,
-          event_id: `live-printer-monitor-${Date.now()}`,
-          event_type: "workspace_monitor_snapshot",
-          type: "tool.completed",
-          level: status.ok ? "INFO" : "WARNING",
-          severity: status.ok ? "info" : "warning",
-          node_id: "specimen",
-          module_id: "specimen",
-          agent: "specimen_agent",
-          status: status.status || (status.ok ? "ready" : "blocked"),
-          message: `printer workspace printer.status ${status.status || ""}`.trim(),
-          ts: new Date().toISOString(),
-          timestamp: new Date().toISOString(),
-          payload: {
-            run_id: runId,
-            workspace: "printer",
-            tool: "printer.status",
-            workflow: "printer_status_monitor",
-            monitor_snapshot: {
-              ok: status.ok,
-              tool: status.tool || "printer.status",
-              status: status.status,
-              mode: status.mode,
-              provider: status.provider,
-              selected_printer: status.selected_printer,
-              device_screen: status.device_screen,
-              preprint_gate: status.preprint_gate,
-              operator_actions: status.operator_actions,
-              live_gates: status.live_gates,
-              auto_ejection: status.auto_ejection,
-            },
-          },
-        });
-        liveRecentEvents = dedupeRuntimeEvents(liveRecentEvents).slice(-160);
+        recoverAgentAttentionRequest(liveRecentEvents, session);
+        if (livePrinterMonitorEvent && livePrinterMonitorEvent.run_id === liveCurrentRunId()) {
+          liveRecentEvents = dedupeRuntimeEvents([...liveRecentEvents, livePrinterMonitorEvent]).slice(-160);
+        }
       }
       liveLastSnapshot = {
         system_resources: liveLastSnapshot.system_resources,
@@ -17770,10 +17804,48 @@ async function refreshPlanningAuxiliaryState(session) {
   return liveAuxRefreshInFlight;
 }
 
+function applyLivePrinterMonitorStatus(status, runId) {
+  livePrinterMonitorEvent = {
+    run_id: runId,
+    event_id: `live-printer-monitor-${Date.now()}`,
+    event_type: "workspace_monitor_snapshot",
+    type: "tool.completed",
+    level: status.ok ? "INFO" : "WARNING",
+    severity: status.ok ? "info" : "warning",
+    node_id: "specimen",
+    module_id: "specimen",
+    agent: "specimen_agent",
+    status: status.status || (status.ok ? "ready" : "blocked"),
+    message: `printer workspace printer.status ${status.status || ""}`.trim(),
+    ts: new Date().toISOString(),
+    timestamp: new Date().toISOString(),
+    payload: {
+      run_id: runId,
+      workspace: "printer",
+      tool: "printer.status",
+      workflow: "printer_status_monitor",
+      monitor_snapshot: {
+        ok: status.ok,
+        tool: status.tool || "printer.status",
+        status: status.status,
+        mode: status.mode,
+        provider: status.provider,
+        selected_printer: status.selected_printer,
+        device_screen: status.device_screen,
+        preprint_gate: status.preprint_gate,
+        operator_actions: status.operator_actions,
+        live_gates: status.live_gates,
+        auto_ejection: status.auto_ejection,
+      },
+    },
+  };
+  liveRecentEvents = dedupeRuntimeEvents([...liveRecentEvents, livePrinterMonitorEvent]).slice(-160);
+}
+
 async function refreshPlanningState(options = {}) {
   if (liveRefreshInFlight && !options.force) return liveRefreshInFlight;
   const background = Boolean(options.background);
-  if (background && shouldFreezeCompletedTestRun(liveLastSession)) return liveLastSession;
+  if (background && !options.reconnect && shouldFreezeCompletedTestRun(liveLastSession)) return liveLastSession;
   markLiveSyncRefreshStart();
   liveRefreshInFlight = (async () => {
     try {
@@ -17996,7 +18068,7 @@ function updateLiveBoVisualizationCards(visualization, expectedRunId = liveCurre
   const equation = liveReportPanel?.querySelector("[data-live-bo-equation]");
   const posterior = liveReportPanel?.querySelector("[data-live-bo-posterior]");
   // Do not overwrite the run-bound objective with a cached plot's objective.
-  if (posterior) posterior.innerHTML = renderer.renderPlot(currentVisualization, {
+  if (posterior && posterior.dataset.historyPinned !== "true") posterior.innerHTML = renderer.renderPlot(currentVisualization, {
     preferArtifact: true,
     mode: "parameter_slice",
     parameter: currentVisualization.view?.selected_parameter || "",
@@ -18010,8 +18082,12 @@ function updateLiveLhsVisualization(visualization, expectedRunId = liveCurrentRu
       || !visualization.artifacts?.png_url) return false;
   if (liveLhsVisualization?.run_id === expectedRunId
       && Number(liveLhsVisualization.step) > Number(visualization.step)) return false;
+  if (liveLhsVisualization?.run_id === expectedRunId
+      && Number(liveLhsVisualization.step) === Number(visualization.step)
+      && Number(liveLhsVisualization.revision || 0) > Number(visualization.revision || 0)) return false;
   liveLhsVisualization = visualization;
   invalidateLiveCenterRender("report");
+  if (liveSelectedAgent === "bo" && liveCurrentView === "report") renderLiveRuntime(liveLastSession);
   return true;
 }
 
@@ -18026,7 +18102,7 @@ async function hydrateLiveBoVisualization() {
     if (!payload.recent_visualization || !Object.keys(payload.recent_visualization).length) {
       return lhsUpdated || Boolean(currentRunBoVisualization(liveBoVisualization, runId));
     }
-    return updateLiveBoVisualizationCards(payload.recent_visualization, runId);
+    return updateLiveBoVisualizationCards(payload.recent_visualization, runId) || lhsUpdated;
   } catch (_err) {
     return false;
   }
@@ -18044,6 +18120,10 @@ function connectPlanningEventStream() {
     // Fetch only the canonical planning snapshot on (re)connect, including when
     // ordinary completed-run polling is frozen. Never reconnect by replaying an action.
     refreshLiveSetupState().catch(() => {});
+    refreshPlanningState({background: true, reconnect: true}).then(async () => {
+      const response = await fetch("/api/events/recent", {cache: "no-store"});
+      if (response.ok) recoverAgentAttentionRequest((await response.json()).events);
+    }).catch(() => {});
   };
   source.addEventListener("update", (event) => {
     try {
@@ -18073,7 +18153,7 @@ function connectPlanningEventStream() {
       const sameCompletedRunEvent = shouldFreezeCompletedTestRun(liveLastSession)
         && (!eventRunId || eventRunId === liveCurrentRunId());
       if (sameCompletedRunEvent) return;
-      selectAgentOnOrchestrationTransition(data);
+      selectAgentOnAttentionRequest(data);
       if (shouldRefreshPlanningForRuntimeEvent(eventType, data)) {
         schedulePlanningRefresh();
       } else {
@@ -19440,6 +19520,7 @@ if (btnLiveEmergencyReset) {
 
 setInterval(() => {
   tickLiveRuntimeClock();
+  if (!document.hidden) refreshLivePrinterMonitorStatus(liveLastSession);
   refreshLiveResources();
   updateLiveConnectionChips();
   updateVisionSpecimenCountdowns();

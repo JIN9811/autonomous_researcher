@@ -86,10 +86,11 @@
         <button type="button" data-bo-history="${kind}" data-direction="1" aria-label="Next ${label} step" ${index >= total - 1 ? 'disabled' : ''}>&gt;</button>
       </div>`;
     }
-    function historyBody(kind, fallback, latestStep) {
+    function historyBody(kind, fallback, latestStep, latestUrl) {
       const item = history.current(kind);
       // A new live step can arrive before its PNG is indexed. Keep it visible.
-      if (!item || (history.status(kind).latest && Number(latestStep) > item.step)) return fallback;
+      if (!item || (history.status(kind).latest && (Number(latestStep) > item.step
+          || (Number(latestStep) === item.step && latestUrl)))) return fallback;
       const prefix = kind === 'lhs' ? 'lhs' : 'bo';
       return `<figure class="${prefix}-viz-matplotlib-figure"><img class="${prefix}-viz-matplotlib-image" src="${escape(item.url)}" alt="${kind === 'lhs' ? 'LHS' : 'BO posterior and acquisition'} step ${item.step}"></figure>`;
     }
@@ -238,8 +239,8 @@
         : '<div class="bo-viz-empty">Waiting for a completed BO step.</div>';
       const visualizationCards = `
         ${renderDashboardCard("Objective Equation", `<div data-live-bo-equation>${equationBody}</div>`, {span: 12, tone: "bo", eyebrow: "optimization objective", className: "bo-objective-summary-card"})}
-        ${renderDashboardCard("Live Posterior", `<div data-live-bo-posterior data-history-pinned="${!history.status('posterior').latest}">${historyBody('posterior', posteriorBody, visualization?.step)}</div>`, {span: 6, tone: "bo", eyebrow: "uncertainty + acquisition", className: "bo-posterior-card", action: historyAction('posterior')})}
-        ${renderDashboardCard("Initial Design / LHS", historyBody('lhs', renderBoInitialDesignBoard(report), lhsVisualization?.step), {span: 6, tone: "bo", eyebrow: "experimental design space", className: "ar-bo-lhs-card", action: historyAction('lhs')})}
+        ${renderDashboardCard("Live Posterior", `<div data-live-bo-posterior data-history-pinned="${!history.status('posterior').latest}">${history.status('posterior').latest && global.BOPosteriorSurface?.valid(visualization) ? posteriorBody : historyBody('posterior', posteriorBody, visualization?.step, visualization?.artifacts?.png_url)}</div>`, {span: 6, tone: "bo", eyebrow: "uncertainty + acquisition", className: "bo-posterior-card", action: historyAction('posterior')})}
+        ${renderDashboardCard("Initial Design / LHS", historyBody('lhs', renderBoInitialDesignBoard(report), lhsVisualization?.step, lhsVisualization?.artifacts?.png_url), {span: 6, tone: "bo", eyebrow: "experimental design space", className: "ar-bo-lhs-card", action: historyAction('lhs')})}
       `;
       const recommendation = boResult.recommendation || boResult.selected || {};
       const reasoning = boResult.reasoning || {};

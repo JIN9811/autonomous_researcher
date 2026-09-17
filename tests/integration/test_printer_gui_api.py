@@ -751,7 +751,7 @@ def test_printer_live_status_api_probes_transfer_while_specimen_stage_is_running
 
     assert response.status_code == 200
     payload = response.json()
-    assert calls == [{"runtime_mode": "live", "health_only": True, "status_only": True, "skip_ftps_probe": False}]
+    assert calls == [{"runtime_mode": "live", "health_only": True, "status_only": True, "skip_ftps_probe": True}]
     assert payload["device_screen"]["connection"]["transfer"] == "connected"
     assert payload["live_gates"]["allow_upload"] is True
 
@@ -853,34 +853,18 @@ def test_printer_video_stream_endpoint_uses_saved_bambu_connection_without_echoi
 
     captured: dict[str, object] = {}
 
-    class FakeStdout:
-        def __init__(self) -> None:
-            self._chunks = [b"--ffmpeg\r\nContent-Type: image/jpeg\r\n\r\nFAKEJPEG\r\n", b""]
+    class FakeVideo:
+        def read(self, after=0):
+            if after:
+                raise RuntimeError("end of test stream")
+            return 1, b"\xff\xd8FAKEJPEG\xff\xd9"
 
-        def read(self, _size: int) -> bytes:
-            return self._chunks.pop(0)
-
-    class FakeProcess:
-        def __init__(self) -> None:
-            self.stdout = FakeStdout()
-            self.returncode = None
-
-        def terminate(self) -> None:
-            self.returncode = 0
-
-        def wait(self, timeout=None) -> int:  # noqa: ANN001
-            self.returncode = 0
-            return 0
-
-        def kill(self) -> None:
-            self.returncode = -9
-
-    def fake_popen(command, **kwargs):  # noqa: ANN001
+    def fake_shared_video(command, timeout):
         captured["command"] = command
-        captured["kwargs"] = kwargs
-        return FakeProcess()
+        captured["timeout"] = timeout
+        return FakeVideo()
 
-    monkeypatch.setattr(app_main.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(app_main, "shared_video", fake_shared_video)
     client = TestClient(app)
 
     response = client.get("/api/printer/video-stream.mjpeg")
@@ -890,7 +874,9 @@ def test_printer_video_stream_endpoint_uses_saved_bambu_connection_without_echoi
     assert b"FAKEJPEG" in response.content
     assert b"secret-code" not in response.content
     assert captured["command"][0] == "/usr/bin/ffmpeg"
-    assert captured["kwargs"]["stdin"] == app_main.subprocess.DEVNULL
+    assert captured["command"][captured["command"].index("-vf") + 1] == "fps=15,scale=960:-1"
+    assert "image2pipe" in captured["command"]
+    assert captured["timeout"] >= 60
 
 
 def test_printer_video_frame_endpoint_returns_single_jpeg_without_echoing_secret(tmp_path, monkeypatch) -> None:
@@ -925,17 +911,15 @@ def test_printer_video_frame_endpoint_returns_single_jpeg_without_echoing_secret
 
     captured: dict[str, object] = {}
 
-    class Completed:
-        returncode = 0
-        stdout = b"\xff\xd8FAKEJPEG\xff\xd9"
-        stderr = b""
+    class FakeVideo:
+        def read(self, after=0):
+            return 1, b"\xff\xd8FAKEJPEG\xff\xd9"
 
-    def fake_run(command, **kwargs):  # noqa: ANN001
+    def fake_shared_video(command, timeout):
         captured["command"] = command
-        captured["kwargs"] = kwargs
-        return Completed()
+        return FakeVideo()
 
-    monkeypatch.setattr(app_main.subprocess, "run", fake_run)
+    monkeypatch.setattr(app_main, "shared_video", fake_shared_video)
     client = TestClient(app)
 
     response = client.get("/api/printer/video-frame.jpg")
@@ -944,8 +928,8 @@ def test_printer_video_frame_endpoint_returns_single_jpeg_without_echoing_secret
     assert response.headers["content-type"] == "image/jpeg"
     assert response.content.startswith(b"\xff\xd8")
     assert b"secret-code" not in response.content
-    assert "-frames:v" in captured["command"]
-    assert captured["kwargs"]["stdin"] == app_main.subprocess.DEVNULL
+    assert "-frames:v" not in captured["command"]
+    assert "image2pipe" in captured["command"]
 
 
 def test_printer_upload_path_probe_api_returns_redacted_candidate_results(tmp_path, monkeypatch) -> None:
@@ -2160,13 +2144,19 @@ def test_printer_bambu_slice_artifact_api_creates_real_sliced_artifact_without_p
 set -eu
 out=""
 prev=""
+export_stl=0
 for arg in "$@"; do
   if [ "$prev" = "--outputdir" ]; then
     out="$arg"
   fi
+  if [ "$arg" = "--export-stl" ]; then export_stl=1; fi
   prev="$arg"
 done
 mkdir -p "$out"
+if [ "$export_stl" = 1 ]; then
+  cp "$prev" "$out/oriented.stl"
+  exit 0
+fi
 printf 'api sliced payload' > "$out/specimen.gcode.3mf"
 """,
         encoding="utf-8",
@@ -2228,13 +2218,19 @@ def test_printer_bambu_prestart_check_runs_slice_http_gate_and_autoejection_with
 set -eu
 out=""
 prev=""
+export_stl=0
 for arg in "$@"; do
   if [ "$prev" = "--outputdir" ]; then
     out="$arg"
   fi
+  if [ "$arg" = "--export-stl" ]; then export_stl=1; fi
   prev="$arg"
 done
 mkdir -p "$out"
+if [ "$export_stl" = 1 ]; then
+  cp "$prev" "$out/oriented.stl"
+  exit 0
+fi
 python3 - "$out/specimen.gcode.3mf" <<'PY'
 import sys
 import zipfile
@@ -2527,6 +2523,32 @@ def test_printer_http_artifact_route_rejects_loopback_public_base_url(tmp_path, 
 
     assert response.status_code == 400
     assert "BAMBU_HTTP_ARTIFACT_URL_NOT_PRINTER_REACHABLE" in response.text
+
+
+@pytest.mark.parametrize('prime', [0, 0.03, 0.1, 0.4, 1.0])
+@pytest.mark.parametrize('enabled', [True, False])
+def test_print_start_api_roundtrip_drives_slicer_settings(tmp_path, prime, enabled):
+    from device_bridges.printer_fleet.bridge import BambuSlicerConfig, BambuStudioSlicerRunner
+    client = TestClient(app)
+    settings = {'start_point_prime_mm': prime, 'early_layer_speed_mm_s': 1000, 'early_layer_z_speed_mm_s': 20, 'early_layer_speed_limit_enabled': enabled,
+                'start_point_prime_enabled': not enabled, 'early_layer_z_speed_limit_enabled': enabled}
+    response = client.post('/api/printer/profile', json=settings)
+    assert response.status_code == 200
+    saved = client.get('/api/printer/profile').json()['profile']
+    assert {key: saved[key] for key in settings} == settings
+    runner = BambuStudioSlicerRunner(BambuSlicerConfig(), repo_root=tmp_path)
+    assert runner._print_start_settings() == settings
+
+
+@pytest.mark.parametrize('field,value', [
+    ('start_point_prime_mm', 'Infinity'), ('start_point_prime_mm', -1),
+    ('early_layer_speed_mm_s', 0), ('early_layer_speed_mm_s', 1001), ('early_layer_z_speed_mm_s', 21),
+])
+def test_print_start_api_rejects_invalid_without_overwriting_profile(field, value):
+    client = TestClient(app)
+    before = client.get('/api/printer/profile').json()['profile']
+    assert client.post('/api/printer/profile', json={field: value}).status_code == 422
+    assert client.get('/api/printer/profile').json()['profile'] == before
 
 
 def test_printer_profile_api_reports_saved_print_defaults() -> None:

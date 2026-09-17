@@ -204,6 +204,8 @@ class MainController:
         self._plc_safety_status_provider: Callable[[], object] | None = None
         self._deps.agent_context.on_model_call = self._on_model_call
         self._deps.agent_context.on_tool_event = self._on_tool_event
+        self._deps.agent_context.emit_execution_event = self._emit_agent_execution_event
+        self._lhs_publication_lock = asyncio.Lock()
 
     def _new_logger_bundle(self, purpose: str = "planning") -> LoggerBundle:
         run_id = make_run_id(purpose)
@@ -925,6 +927,7 @@ class MainController:
         keep = {
             "agent", "agent_id", "node_id", "module_id", "stage", "status", "mode", "ok",
             "from_stage", "to_stage",
+            "attention_id", "checkpoint", "view_action", "presentation_only", "loop_index", "invocation_id",
             "workspace", "workflow", "step", "detail", "surface", "visibility",
             "tool", "tool_name", "requested_tool", "program_id", "check_id",
             "sequence_id",
@@ -1043,6 +1046,9 @@ class MainController:
                 stale.append(queue)
         for queue in stale:
             self._event_queues.discard(queue)
+        if (event.get("event_type", event.get("type")) == "design.candidate_ready"
+                and (event.get("payload") or {}).get("run_id") == self._state.run_id):
+            await self._publish_initial_lhs_visualization()
 
     def _workspace_artifact_payloads(self, result: dict[str, Any]) -> list[dict[str, Any]]:
         """Extract artifact-like workspace outputs for Runtime IDE lineage."""
@@ -1271,6 +1277,8 @@ class MainController:
         visualization = self._lhs_visualization_from_result(result)
         if not visualization:
             return []
+        from experiments.lhs_progress import project_design_progress
+        visualization = project_design_progress(visualization, self._state.run_metadata)
         try:
             output_dir = self._workspace_artifact_dir(workspace)
             records = write_lhs_design_visualization_artifacts(visualization, output_dir)
@@ -2053,38 +2061,46 @@ class MainController:
         completed = sum(point.get("status") == "measured" for point in initial["points"])
         step = int(initial.get("index") or initial.get("next_index") or completed + 1)
         latest = metadata.get("lhs_visualization") or {}
-        if latest.get("run_id") == self._state.run_id and int(latest.get("step") or 0) >= step:
+        if latest.get("run_id") == self._state.run_id and int(latest.get("step") or 0) > step:
             return
         visualization = build_lhs_design_visualization(
             run_id=self._state.run_id, parameter_space=contract["parameter_space"],
             trace={"step": step, "initial_design": {**initial, "completed": completed}},
         )
-        records = await asyncio.to_thread(
-            self._write_lhs_visualization_artifacts,
-            workspace="bo", result={"lhs_visualization": visualization},
-        )
-        if self._state.run_id != visualization["run_id"] or self._state.run_metadata is not metadata:
-            return  # A reset/new run must not inherit an in-flight figure.
-        visualization["artifacts"] = {
-            f"{Path(record['path']).suffix.lstrip('.')}_url":
-                f"/api/runs/{self._state.run_id}/artifact-file/{record['path']}"
-            for record in records if record.get("path") and not record.get("error")
-        }
         await self.emit_lhs_visualization(visualization, source="orchestrator_design_contract")
 
     async def emit_lhs_visualization(self, visualization: dict[str, Any], *, source: str) -> dict[str, Any]:
+        async with self._lhs_publication_lock:
+            return await self._emit_lhs_visualization_locked(visualization, source=source)
+
+    async def _emit_lhs_visualization_locked(self, visualization: dict[str, Any], *, source: str) -> dict[str, Any]:
         """Persist and stream one monotonic initial-design visualization."""
-        normalized = dict(validate_lhs_design_visualization(visualization))
+        from experiments.lhs_progress import project_design_progress, progress_fingerprint
+        normalized = project_design_progress(dict(validate_lhs_design_visualization(visualization)), self._state.run_metadata)
         run_id = str(normalized.get("run_id") or self._state.run_id)
         normalized["run_id"] = run_id
+        if run_id != self._state.run_id:
+            return {"emitted": False, "reason": "stale_run"}
         step = int(normalized.get("step") or 0)
         metadata = self._state.run_metadata
         latest = metadata.get("lhs_visualization") if isinstance(metadata.get("lhs_visualization"), dict) else {}
         latest_run_id = str(latest.get("run_id") or "")
         latest_step = int(latest.get("step") or 0)
-        if latest_run_id == run_id and latest_step >= step:
+        if latest_run_id == run_id and (latest_step > step or (
+                latest_step == step and progress_fingerprint(latest) == progress_fingerprint(normalized)
+                and (latest.get("artifacts") or {}).get("png_url"))):
             return {"emitted": False, "reason": "duplicate_or_older_step", "run_id": run_id, "step": step}
-
+        normalized["revision"] = int(latest.get("revision") or 0) + 1
+        records = await asyncio.to_thread(self._write_lhs_visualization_artifacts,
+                                         workspace="bo", result={"lhs_visualization": normalized})
+        if run_id != self._state.run_id or metadata is not self._state.run_metadata:
+            return {"emitted": False, "reason": "stale_run"}
+        stamp = progress_fingerprint(normalized)
+        normalized["artifacts"] = {
+            f"{Path(record['path']).suffix.lstrip('.')}_url":
+                f"/api/runs/{run_id}/artifact-file/{record['path']}?v={stamp}"
+            for record in records if record.get("path") and not record.get("error")
+        }
         metadata["lhs_visualization"] = normalized
         steps = metadata.setdefault("lhs_visualization_steps", [])
         if not isinstance(steps, list):
@@ -2430,6 +2446,8 @@ class MainController:
     async def _emit_agent_execution_event(self, event: dict[str, Any]) -> None:
         """Publish one redacted executable-module trace through controller events."""
         payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        if event.get("type") in {"agent.attention_requested", "design.candidate_ready"} and payload.get("run_id") != self._state.run_id:
+            return
         status = str(payload.get("status") or "")
         await self._emit_control_event(
             str(event.get("type") or "execution.trace"),
@@ -7285,7 +7303,7 @@ class MainController:
             "objective": {
                 "metric": "specific_energy_absorption_J_per_g",
                 "direction": "maximize",
-                "unit": "MJ/m3",
+                "unit": "J/g",
             },
             "active_variables": {
                 "cell_size_mm": {
@@ -10112,6 +10130,9 @@ class MainController:
                 return
 
             if stage == Stage.BO:
+                lhs_visualization = self._lhs_visualization_from_result({"data": data})
+                if lhs_visualization:
+                    await self.emit_lhs_visualization(lhs_visualization, source="planning_langgraph")
                 visualization = self._bo_visualization_from_result(data)
                 if visualization:
                     # Runtime state already owns this step. Re-emit only the

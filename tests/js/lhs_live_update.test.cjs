@@ -14,17 +14,22 @@ test('LHS hydration selects newest current-run figure without a BO result', asyn
   let incoming = {run_id: 'run-a', step: 1, artifacts: {png_url: '/initial.png'}, initial_design: {points: []}};
   const context = {window: {LHSDesignVisualization: {isValid: p => !!p?.initial_design}},
     liveLhsVisualization: null, liveBoVisualization: null,
+    liveSelectedAgent: 'design', liveCurrentView: 'report',
     liveCurrentRunId: () => 'run-a', invalidateLiveCenterRender: () => {},
     currentRunBoVisualization: () => null, updateLiveBoVisualizationCards: () => false,
     fetch: async () => ({ok: true, json: async () => ({state: {run_id: 'run-a'}, recent_lhs_visualization: incoming})})};
   vm.createContext(context);
   vm.runInContext(extract('updateLiveLhsVisualization') + '\n' + extract('latestBoInitialDesign') + '\nasync ' + extract('hydrateLiveBoVisualization'), context);
-  await context.hydrateLiveBoVisualization();
+  assert.equal(await context.hydrateLiveBoVisualization(), true);
   const report = {state: {run_id: 'run-a', run_metadata: {}}};
   assert.equal(context.latestBoInitialDesign(report).visualization.artifacts.png_url, '/initial.png');
   incoming = {...incoming, step: 2, artifacts: {png_url: '/second.png'}};
   await context.hydrateLiveBoVisualization();
   assert.equal(context.latestBoInitialDesign(report).visualization.step, 2);
+  incoming = {...incoming, revision: 2, artifacts: {png_url: '/second.png?v=designed'}};
+  assert.equal(await context.hydrateLiveBoVisualization(), true);
+  context.updateLiveLhsVisualization({...incoming, revision: 1, artifacts: {png_url: '/stale.png'}});
+  assert.equal(context.latestBoInitialDesign(report).visualization.artifacts.png_url, '/second.png?v=designed');
   context.updateLiveLhsVisualization({...incoming, step: 1});
   assert.equal(context.latestBoInitialDesign(report).visualization.step, 2);
   context.updateLiveLhsVisualization({...incoming, run_id: 'other'});

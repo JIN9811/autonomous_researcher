@@ -309,6 +309,8 @@ async def run_clear_vision(state, ctx, *, artifact_dir):
         if not _explicit_virtual(state):
             execution.update(state="error", success=False, failure_code="UTM_CLEAR_SIMULATION_SCOPE_CHANGED")
             return _result(execution)
+        from agents.attention import request_attention
+        await request_attention(state, ctx, "vision", "replay_complete")
         capture = {"ok": True, "status": "clear", "detected": False, "clear_confirmed": True,
                    "simulated": True, "actuation_performed": False, "captured_at": datetime.now(timezone.utc).isoformat()}
         from agents.manipulation.decision import review_manipulation_result, allows
@@ -344,6 +346,7 @@ async def run_clear_vision(state, ctx, *, artifact_dir):
         return _result(execution)
     execution.setdefault("replay_completed_at", time.time())
     execution.update(state="waiting", replay_execution_verified=True, replay_evidence=deepcopy(replay["replay_evidence"]))
+    from agents.attention import request_attention
     first = state.run_metadata["utm_verifications"].get("verification_1", {})
     evidence = first.get("evidence") or {}
     artifact = first.get("artifact") or {}
@@ -378,7 +381,8 @@ async def run_clear_vision(state, ctx, *, artifact_dir):
     from agents.vision.decision import review_visual_evidence, decision_allows_existing_gate, blocked_decision_result
     review_deadline = execution.get("pending_deadline_at")
     from utils.vision_capture_preview import publish_capture_preview
-    publish_capture_preview(state, capture, "verification_2")
+    if publish_capture_preview(state, capture, "verification_2"):
+        await request_attention(state, ctx, "vision", "replay_complete")
     decision = await review_visual_evidence(state, ctx, capture, "clearance")
     capture["vision_decision"] = decision
     if decision.get("scope_valid") is False:

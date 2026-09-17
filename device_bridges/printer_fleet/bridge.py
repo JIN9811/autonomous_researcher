@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from utils.specimen_placement import normalize_placement, placement_area, placement_from_payload, preflight_placement, requested_center, validate_sliced_placement
 from utils.bambu_material_priority import load_priority, priority_path, select_material, bind_artifact, material_artifact_path
-from utils.printer_profile import load_prusa_print_profile, normalize_prusa_print_profile, print_start_calibration_options
+from utils.printer_profile import load_prusa_print_profile, normalize_prusa_print_profile, print_start_calibration_options, normalize_print_start_settings
 from device_bridges.printer_fleet.slicer_profiles import resolve_profile
 
 import copy
@@ -246,6 +246,12 @@ class BambuStudioSlicerRunner:
         if source.suffix.lower() not in {".stl", ".3mf"}:
             return self._blocked("BAMBU_SLICER_SOURCE_EXTENSION_UNSUPPORTED", source_path=str(source))
 
+        # Snapshot once: GUI saves affect the next slice, not this artifact.
+        try:
+            print_start_settings = self._print_start_settings()
+        except ValueError as exc:
+            return self._blocked("BAMBU_PRINT_START_SETTINGS_INVALID", error=str(exc))
+
         resolved = self.config.resolved_payload(repo_root=self.repo_root)
         if not resolved.get("enabled"):
             return self._blocked("BAMBU_STUDIO_SLICER_DISABLED", source_path=str(source), slicer=resolved)
@@ -393,6 +399,7 @@ class BambuStudioSlicerRunner:
                 source_path=source,
                 output_dir=output_dir,
                 returncode=completed.returncode,
+                print_start_settings=print_start_settings,
             )
             if fallback_packaging.get("ok") and fallback_packaging.get("artifact_path"):
                 selected = Path(str(fallback_packaging["artifact_path"]))
@@ -420,7 +427,7 @@ class BambuStudioSlicerRunner:
                 "fallback_packaging": fallback_packaging,
             }
 
-        front_test_line_removal = self._postprocess_front_test_line_artifact(selected)
+        front_test_line_removal = self._postprocess_front_test_line_artifact(selected, print_start_settings=print_start_settings)
         placement_validation = validate_sliced_placement(selected, placement, area=area)
         if not placement_validation["ok"]:
             return self._blocked(placement_validation["failure_code"], placement_validation=placement_validation,
@@ -444,6 +451,7 @@ class BambuStudioSlicerRunner:
             "slicer_profile": slicer_profile,
             "fallback_packaging": fallback_packaging,
             "front_test_line_removal": front_test_line_removal,
+            "print_start_settings": print_start_settings,
             "specimen_placement": placement,
             "placement_preflight": placement_preflight,
             "placement_validation": placement_validation,
@@ -462,6 +470,7 @@ class BambuStudioSlicerRunner:
         source_path: Path,
         output_dir: Path,
         returncode: int,
+        print_start_settings: dict[str, float | bool] | None = None,
     ) -> dict[str, Any]:
         """Bambu Studio can segfault after writing plate_1.gcode in headless mode.
 
@@ -500,7 +509,7 @@ class BambuStudioSlicerRunner:
                 "plate_gcode_path": str(selected_gcode),
                 "error": str(exc),
             }
-        patched_gcode, removed_blocks = self._remove_front_test_line_from_gcode(raw_gcode, start_point_prime_mm=self.config.start_point_prime_mm)
+        patched_gcode, removed_blocks = self._remove_front_test_line_from_gcode(raw_gcode, **(print_start_settings or self._print_start_settings()))
         encoded = patched_gcode.encode("utf-8")
         object_bounds = extract_object_bounds_mm(patched_gcode)
         export_path.parent.mkdir(parents=True, exist_ok=True)
@@ -760,16 +769,23 @@ class BambuStudioSlicerRunner:
             if path.is_file() and any(path.name.lower().endswith(suffix) for suffix in allowed_suffixes)
         ]
 
-    def _postprocess_front_test_line_artifact(self, artifact_path: Path) -> dict[str, Any]:
+    def _print_start_settings(self) -> dict[str, float | bool]:
+        path = self.repo_root / "memory/prusa_print_profile.json"
+        if path.exists():
+            return normalize_print_start_settings(load_prusa_print_profile(path))
+        return normalize_print_start_settings({"start_point_prime_mm": self.config.start_point_prime_mm})
+
+    def _postprocess_front_test_line_artifact(self, artifact_path: Path, *, print_start_settings: dict[str, float | bool] | None = None) -> dict[str, Any]:
+        settings = print_start_settings or self._print_start_settings()
         name = artifact_path.name.lower()
         if name.endswith(".gcode.3mf") or name.endswith(".3mf"):
-            return self._postprocess_front_test_line_3mf(artifact_path)
+            return self._postprocess_front_test_line_3mf(artifact_path, print_start_settings=settings)
         if name.endswith(".gcode"):
             try:
                 original = artifact_path.read_text(encoding="utf-8", errors="replace")
             except OSError as exc:
                 return {"ok": True, "removed": False, "reason": "gcode_read_failed", "error": str(exc)}
-            patched, removed = self._remove_front_test_line_from_gcode(original, start_point_prime_mm=self.config.start_point_prime_mm)
+            patched, removed = self._remove_front_test_line_from_gcode(original, **settings)
             if patched != original:
                 artifact_path.write_text(patched, encoding="utf-8")
             return {
@@ -781,7 +797,8 @@ class BambuStudioSlicerRunner:
             }
         return {"ok": True, "removed": False, "reason": "unsupported_artifact_type", "policy": "remove_front_build_plate_test_line_only"}
 
-    def _postprocess_front_test_line_3mf(self, artifact_path: Path) -> dict[str, Any]:
+    def _postprocess_front_test_line_3mf(self, artifact_path: Path, *, print_start_settings: dict[str, float | bool] | None = None) -> dict[str, Any]:
+        settings = print_start_settings or self._print_start_settings()
         try:
             with zipfile.ZipFile(artifact_path, "r") as src_zip:
                 entries = [(info, src_zip.read(info.filename)) for info in src_zip.infolist()]
@@ -799,7 +816,7 @@ class BambuStudioSlicerRunner:
                 text = data.decode("utf-8")
             except UnicodeDecodeError:
                 text = data.decode("latin-1", errors="replace")
-            patched, removed = self._remove_front_test_line_from_gcode(text, start_point_prime_mm=self.config.start_point_prime_mm)
+            patched, removed = self._remove_front_test_line_from_gcode(text, **settings)
             if patched == text:
                 continue
             removed_total += removed
@@ -847,9 +864,9 @@ class BambuStudioSlicerRunner:
         return bool(re.fullmatch(r"Metadata/plate_\d+\.gcode", str(name)))
 
     @staticmethod
-    def _remove_front_test_line_from_gcode(gcode: str, *, start_point_prime_mm: float = 0.1) -> tuple[str, int]:
-        if not 0 <= start_point_prime_mm <= 0.1:
-            raise ValueError("start-point prime must be between 0 and 0.1 mm of filament")
+    def _remove_front_test_line_from_gcode(gcode: str, *, start_point_prime_mm: float = 0.1, early_layer_speed_mm_s: float = 50.0, early_layer_z_speed_mm_s: float = 5.0, early_layer_speed_limit_enabled: bool = True, start_point_prime_enabled: bool = True, early_layer_z_speed_limit_enabled: bool = True) -> tuple[str, int]:
+        if not 0 <= start_point_prime_mm < float("inf"):
+            raise ValueError("start-point prime must be a finite, nonnegative filament length")
         lines = str(gcode or "").splitlines(keepends=True)
         output: list[str] = []
         block: list[str] = []
@@ -879,20 +896,27 @@ class BambuStudioSlicerRunner:
         if skipping:
             return gcode, 0
         patched = "".join(output)
-        if g130_removed and start_point_prime_mm > 0:
+        if g130_removed and start_point_prime_enabled and start_point_prime_mm > 0:
             patched = BambuStudioSlicerRunner._prime_first_object_point(patched, start_point_prime_mm)
-        return BambuStudioSlicerRunner._limit_early_layer_speeds(patched), removed_blocks
+        return BambuStudioSlicerRunner._limit_early_layer_speeds(patched, early_layer_speed_mm_s=early_layer_speed_mm_s, early_layer_z_speed_mm_s=early_layer_z_speed_mm_s, early_layer_speed_limit_enabled=early_layer_speed_limit_enabled, early_layer_z_speed_limit_enabled=early_layer_z_speed_limit_enabled), removed_blocks
 
     @staticmethod
-    def _limit_early_layer_speeds(gcode: str) -> str:
-        """Cap extrusion in layers 2-5 at 50 mm/s and early Z moves at 5 mm/s.
+    def _limit_early_layer_speeds(gcode: str, *, early_layer_speed_mm_s: float = 50.0, early_layer_z_speed_mm_s: float = 5.0, early_layer_speed_limit_enabled: bool = True, early_layer_z_speed_limit_enabled: bool = True) -> str:
+        """Independently cap extrusion in layers 2-5 and Z in layers 1-5.
 
         Restore the original modal feed after each limited move, so travels,
         retractions, slower paths, and layer 6 onward retain their original feed.
         """
-        marker = "; AX4LAB early-layer limits: layers2-5=50mm/s Z1-5=5mm/s"
+        settings = normalize_print_start_settings({"early_layer_speed_mm_s": early_layer_speed_mm_s, "early_layer_z_speed_mm_s": early_layer_z_speed_mm_s, "early_layer_speed_limit_enabled": early_layer_speed_limit_enabled, "early_layer_z_speed_limit_enabled": early_layer_z_speed_limit_enabled})
+        speed_feed = settings["early_layer_speed_mm_s"] * 60
+        z_feed = settings["early_layer_z_speed_mm_s"] * 60
+        xy_limit = f"{early_layer_speed_mm_s:g}mm/s" if settings["early_layer_speed_limit_enabled"] else "off"
+        z_limit = f"{early_layer_z_speed_mm_s:g}mm/s" if settings["early_layer_z_speed_limit_enabled"] else "off"
+        marker = f"; AX4LAB early-layer limits: layers2-5={xy_limit} Z1-5={z_limit}"
         if marker in gcode:
             return gcode
+        if "; AX4LAB early-layer limits:" in gcode:
+            raise ValueError("Early-layer settings changed: re-slice the original model")
         body = relative_e = millimeters = False
         layer = 0
         feed = None
@@ -917,12 +941,12 @@ class BambuStudioSlicerRunner:
             feed = values.get("F", feed)
             limit = feed
             if 1 <= layer <= 5 and millimeters and feed is not None:
-                if "Z" in values:
+                if settings["early_layer_z_speed_limit_enabled"] and "Z" in values:
                     # Bound total speed for mixed-axis/Z-hop moves as well;
                     # this conservatively bounds their Z component.
-                    limit = min(limit, 300.0)
-                if 2 <= layer <= 5 and relative_e and values.get("E", 0) > 0 and ("X" in values or "Y" in values):
-                    limit = min(limit, 3000.0)
+                    limit = min(limit, z_feed)
+                if settings["early_layer_speed_limit_enabled"] and 2 <= layer <= 5 and relative_e and values.get("E", 0) > 0 and ("X" in values or "Y" in values):
+                    limit = min(limit, speed_feed)
             if limit is not None and feed is not None and limit < feed:
                 if "F" in values:
                     bounded = re.sub(r"F\s*[-+]?(?:\d+(?:\.\d*)?|\.\d+)", f"F{limit:g}", code, flags=re.I)
@@ -2397,6 +2421,11 @@ class BambuMqttReportClient:
         self._snapshot_cache: dict[tuple[str, str, str, str], tuple[float, dict[str, Any]]] = {}
         self._snapshot_cache_lock = threading.Lock()
 
+    def read_monitor_snapshot(self, **kwargs) -> dict[str, Any]:
+        """Shared read-only telemetry; command confirmation keeps read_snapshot."""
+        from device_bridges.printer_fleet.monitoring import read_mqtt_monitor
+        return read_mqtt_monitor(mqtt, self.config.mqtt, **kwargs)
+
     def read_snapshot(
         self,
         *,
@@ -3829,13 +3858,17 @@ class PrinterDeviceBridgeManager:
     def _prepare_bambu(self, profile: PrinterProfile, payload: dict[str, Any], *, selection_reason: str) -> dict[str, Any]:
         mode = str(payload.get("runtime_mode") or self.config.mode or "test").lower()
         installed_printer_test = self._test_mode_installed_printer_check(payload)
-        health_only = _as_bool(payload.get("health_only"), False)
-        skip_ftps_probe = _as_bool(payload.get("skip_ftps_probe"), False)
+        health_only = _as_bool(payload.get("health_only"), False) or _as_bool(payload.get("status_only"), False)
+        if health_only:
+            payload = {**payload, "health_only": True}
+        # Observation is not an upload preflight. Guardian/GUI polling must not
+        # open FTPS sessions or turn an unused transfer path into a health fault.
+        skip_ftps_probe = health_only or _as_bool(payload.get("skip_ftps_probe"), False)
         physical_transport = mode == "live" or self._test_mode_real_transport_requested(payload)
         result = self._base_result(profile, payload, selection_reason=selection_reason)
         result["autoejection"] = self.autoejection_status()
         result["physical_transport"] = bool(physical_transport)
-        if str(payload.get("execution_policy_mode") or "").strip().lower() == "preflight_only":
+        if not health_only and str(payload.get("execution_policy_mode") or "").strip().lower() == "preflight_only":
             return self._prepare_bambu_no_actuation_preflight(profile, payload, result)
         if mode != "live" and not physical_transport:
             # A virtual invocation must not inherit physical configuration gates.
@@ -3903,10 +3936,11 @@ class PrinterDeviceBridgeManager:
             )
             return result
 
-        mqtt_probe = self.live_probe.probe_tls_port(
-            str(connection["host"]),
-            self.config.mqtt.port,
-            self.config.mqtt.timeout_sec,
+        monitor_read = getattr(self.mqtt_client, "read_monitor_snapshot", None) if health_only else None
+        # The authenticated subscription already proves connectivity. Keep the
+        # original probe and fresh observation path for all actuation workflows.
+        mqtt_probe = {"ok": True} if callable(monitor_read) else self.live_probe.probe_tls_port(
+            str(connection["host"]), self.config.mqtt.port, self.config.mqtt.timeout_sec,
         )
         if mqtt_probe.get("ok"):
             mqtt_snapshot_kwargs = {
@@ -3918,7 +3952,7 @@ class PrinterDeviceBridgeManager:
             }
             if payload.get("post_publish_observation") or payload.get("force_mqtt_refresh"):
                 mqtt_snapshot_kwargs["force_refresh"] = True
-            mqtt_snapshot = self.mqtt_client.read_snapshot(**mqtt_snapshot_kwargs)
+            mqtt_snapshot = (monitor_read or self.mqtt_client.read_snapshot)(**mqtt_snapshot_kwargs)
         else:
             mqtt_snapshot = {"ok": False, "failure_code": mqtt_probe.get("failure_code", "BAMBU_MQTT_UNAVAILABLE")}
         mqtt_state = "connected" if mqtt_snapshot.get("ok") else "disconnected"
@@ -3927,6 +3961,34 @@ class PrinterDeviceBridgeManager:
             if mqtt_snapshot.get("ok")
             else {}
         )
+        if health_only:
+            # Stop at the observation boundary. Do not construct upload/start
+            # drafts, auto-ejection gates, or inspect optional FTPS/video paths.
+            report_health = normalized_report.get("health") or {}
+            control = normalized_report.get("control") or {}
+            err2 = report_health.get("err2") or {}
+            errors = (report_health.get("error"), err2.get("err_code"),
+                      control.get("mc_print_error_code"), control.get("mc_error"), control.get("print_error"))
+            device_error = next((str(error) for error in errors if error not in (None, "", 0, "0", "0.0")), "0")
+            failure = str(mqtt_snapshot.get("failure_code") or "BAMBU_MQTT_REPORT_UNAVAILABLE") if not mqtt_snapshot.get("ok") else ""
+            if not failure and device_error not in {"0", "0x0", "0x00000000"}:
+                failure = "BAMBU_DEVICE_ERROR"
+            result.pop("autoejection", None)
+            result.update({
+                "ok": not bool(failure), "status": "COMMUNICATION_READY" if not failure else "DEVICE_HEALTH_FAILED",
+                "failure_code": failure, "observation_only": True, "connection": connection,
+                "mqtt_snapshot": {k: v for k, v in mqtt_snapshot.items() if k != "report"},
+                "ftps_probe": {"status": "not_checked", "skip_reason": "observation_only"},
+                "device_error": device_error, "published": False, "start_enabled": False,
+                "device_screen": self._device_screen_payload(
+                    profile=profile,
+                    connection={"mqtt": mqtt_state, "video": "not_checked", "transfer": "not_checked",
+                                "last_seen_at": str(mqtt_snapshot.get("received_at") or "")},
+                    job_source="mqtt_report", normalized_report=normalized_report, observation_only=True,
+                ),
+                "preprint_gate": self._preprint_gate("not_checked", blockers=[]),
+            })
+            return result
         material_selection = self.resolve_material_selection(payload, normalized_report=normalized_report)
         if not material_selection["ok"]:
             known_artifact = self._bambu_sliced_artifact_path(payload) or self._bambu_artifact_url(payload)
@@ -4305,6 +4367,7 @@ class PrinterDeviceBridgeManager:
                     normalized_report=normalized_report,
                     upload_result=upload_result,
                     project_file_draft=project_file_draft,
+                    observation_only=health_only,
                 ),
                 "step_trace": [
                     {"step": "SELECT_PRINTER_PROFILE", "status": "ok", "detail": profile.profile_id},
@@ -4312,7 +4375,9 @@ class PrinterDeviceBridgeManager:
                     {"step": "BAMBU_MQTT_REPORT", "status": "ok" if mqtt_snapshot.get("ok") else "blocked"},
                     {
                         "step": "BAMBU_FTPS_STORAGE",
-                        "status": "skipped" if skip_ftps_probe and ftps_probe.get("ok") else ("ok" if ftps_probe.get("ok") else "blocked"),
+                        "status": "not_used" if http_artifact_ready else (
+                            "skipped" if skip_ftps_probe and ftps_probe.get("ok") else ("ok" if ftps_probe.get("ok") else "blocked")
+                        ),
                     },
                     {
                         "step": "BAMBU_FTPS_UPLOAD",
@@ -5633,6 +5698,7 @@ class PrinterDeviceBridgeManager:
         upload_result: dict[str, Any] | None = None,
         project_file_draft: dict[str, Any] | None = None,
         video_probe: dict[str, Any] | None = None,
+        observation_only: bool = False,
     ) -> dict[str, Any]:
         now = _utc_now()
         normalized_report = normalized_report if isinstance(normalized_report, dict) else {}
@@ -5718,7 +5784,7 @@ class PrinterDeviceBridgeManager:
         elif connection.get("video") in {"streaming", "streaming_candidate", "snapshot"}:
             camera_status = str(connection.get("video"))
             camera_stream_kind = str(connection.get("video"))
-        if not camera_blockers and camera_status == "unavailable":
+        if not camera_blockers and camera_status == "unavailable" and not observation_only:
             camera_blockers = ["BAMBU_VIDEO_PROXY_NOT_CONNECTED"]
         material_slots = [
             {
@@ -5873,7 +5939,8 @@ class PrinterDeviceBridgeManager:
                 "can_start_print": action_payload["can_start_print"],
                 "requires_guardian": True,
                 "motion_enabled": False,
-                "blockers": [] if can_upload else ["BAMBU_UPLOAD_GATE_BLOCKED"],
+                "blockers": [] if can_upload or observation_only else ["BAMBU_UPLOAD_GATE_BLOCKED"],
+                "upload_readiness": "not_checked" if observation_only else ("ready" if can_upload else "blocked"),
             },
             "materials": {
                 "active_path": "unknown",

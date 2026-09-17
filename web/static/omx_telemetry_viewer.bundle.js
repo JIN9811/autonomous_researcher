@@ -28655,6 +28655,12 @@ void main() {
       });
     });
   }
+  function restoreTelemetryStatus() {
+    if (!runtime.history.length) return;
+    applyRobotMotionLabel(runtime.latestMotionState.measured || null);
+    setPoseStatus(runtime.status, runtime.status);
+    setTrackingStatus(`${runtime.history.length} samples`, runtime.status);
+  }
   function hydrate() {
     const poseMount = document.querySelector("[data-atr-robot-pose]");
     const chartMount = document.querySelector("[data-atr-policy-tracking]");
@@ -28665,6 +28671,7 @@ void main() {
     if (poseMount && poseMount !== runtime.poseMount) hydratePoseViewer(poseMount);
     else if (poseMount && runtime.viewer) runtime.viewer.start();
     if (chartMount && chartMount !== runtime.chartMount) hydrateTrackingChart(chartMount);
+    if (poseMount || chartMount) restoreTelemetryStatus();
     if (poseMount || chartMount) {
       connectTelemetrySocket();
       if (!runtime.sessionId) loadSnapshot();

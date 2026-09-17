@@ -24,6 +24,33 @@ Web dashboard panels:
 
 Real-time updates are streamed via SSE endpoint `/api/events/stream`.
 
+### Agent-owned report attention
+
+`agent.attention_requested` is a presentation-only event issued by an agent at
+an execution checkpoint. Generic `stage_transition` events remain routing trace
+and no longer select a report. Attention performs one existing left-binder click,
+without window focus, scrolling, capture, approval, or device commands.
+
+| Owner | Checkpoint | Additional UI action |
+|---|---|---|
+| DSN | Entry into its design handoff | None |
+| SPC | Current fabrication call confirms a published, started print | Play printer video |
+| VIS | Post-print Active Cam check | Show the report with Active Cam |
+| VIS | Home interlock ready, then a fresh placement photo is published | Select Verification 1 |
+| VIS | Verified replay completion, then a fresh clearance photo is published | Select Verification 2 |
+| MAN | Inference start returns POLICY_ACTIVE or RUNNING | None |
+| EQP, ANL, KNW, BO | Entry into their respective handoff | None |
+
+Printability checks, passive printer status, and routing alone cannot request SPC
+attention. Requests are deduplicated by run/cycle/specimen/checkpoint. The browser
+rejects foreign runs, older cycles, and events older than 30 seconds. A delayed
+panel can retry its UI action for up to 10 seconds; operator navigation cancels
+the pending action. Presentation failure does not fail an experiment.
+
+Vision navigation follows capture-preview publication, before model review. A
+waiting home interlock or failed capture does not navigate. These display events
+do not change robot completion, verification, or equipment handoff decisions.
+
 BO visualization surfaces:
 - LHS is a separate Design Agent-owned card backed by `lhs_design_visualization.v1`. It uses a white publication figure with actual `cell_size_mm` and `wall_thickness_mm` axes, wall-thickness strata, measured blue points, the next orange cross, and planned gray points.
 - `/bo` preserves the completed initial-design card above a distinct posterior/acquisition card. LHS artifacts use `_lhs_design_step_NNN.{png,svg,csv,json}` and never reuse BO posterior filenames.
@@ -34,10 +61,13 @@ BO visualization surfaces:
 - New LHS payloads plot the actual `cell_size_mm x wall_thickness_mm` measured, next, and planned coordinates. Older run payloads without stored coordinates retain an empty labeled 2D design space with a missing-coordinate notice and are never backfilled with synthetic positions.
 - Plot and figure interiors use a white publication-style surface with explicit axes, grid, legend, uncertainty, observations, and next-point markers.
 - The BO posterior/EI figure is strictly output-space-only. It renders `Score` against an anonymous normalized search coordinate plus uncertainty, measured scores, EI, and the next query; it must not expose `cell_size_mm`, `wall_thickness_mm`, any input value, strata/facet labels, parameter slices, or input tooltips. Those details remain in the separate LHS card and backend audit data.
-- An LHS step emits `lhs.visualization.updated`; an acquisition step emits `bo.visualization.updated`. Their latest payloads and compact step histories are stored independently.
+- Successful DSN generation records a green **Design complete** diamond. This is not a measured objective and never enters GP training. Accepted Analysis observations remain blue measured points. Same-step design progress republishes the LHS figure with a revision and content-versioned artifact URL; stale revisions cannot overwrite it.
+- An LHS step emits `lhs.visualization.updated`; an acquisition step also refreshes the completed LHS plan, then emits `bo.visualization.updated`. Their latest payloads and compact step histories are stored independently. This includes the eighth measured point when initialization transitions to GP acquisition.
 - The default BO plot is the scalar score posterior/EI view, not a numeric parameter slice. `Candidate pool index` remains an audit view of the finite candidate set, not a continuous GP posterior.
 - Missing, invalid, or stale data renders an explicit waiting/stale card. The frontend never fabricates posterior values.
 - Completed BO execution registers PNG, SVG, and CSV artifacts under the active run's BO artifact directory. PNG/SVG are publication-style Matplotlib outputs; CSV is the exact numeric source.
+- CSV export follows the same view as PNG/SVG. A normalized search-path figure exports `search_x`, both physical design coordinates (when retained), posterior mean/standard deviation/95% bounds, and the displayed acquisition value. It does not export the unrelated candidate-conditioned slice. Legacy paths with only unit-hypercube coordinates label those columns `normalized_*`. The search coordinate is distance along a visualization path through the two-variable space, not a physical variable or iteration number.
+- `tests/integration/test_bo_virtual_artifact_smoke.py` exercises synthetic SEA observations through the last LHS proposal, real BoTorch `SingleTaskGP`/LogEI, design handoff, and PNG/SVG/CSV/JSON export. It registers only the benchmark tool, refuses evaluation/actuation, and keeps synthetic results in pytest's temporary directory. This validates the software path, not experimental performance.
 
 Terminal launcher:
 - Install with `bash install/install_cli.sh`.
@@ -154,7 +184,7 @@ writable topics and recovery rules.
 - Physical start does not trust the start HTTP response alone. After each start request, the bridge polls PrusaLink `status/job`; if `PRINTING` is not confirmed, it retries the start request every 1 second up to the configured attempt budget. This handles cases where PrusaLink accepts or drops the start signal while the printer is still settling.
 - For Prusa physical start paths, including normal live print, test-mode actual print, standalone Prusa autoejection test, and separate Prusa ejection job mode, the bridge checks PrusaLink `status/job`. It must not start another job while a previous job remains active at 99% or 100%; appended autoejection tails can still be executing homing or bed-sweep moves. The bridge waits until `/api/v1/job` is cleared and the printer reports idle/FINISHED before the next upload/start. The local MK4S PrusaLink 2.1.2 endpoint set does not expose a working `POST /api/printer/ready`, so the runtime must not depend on SetReady.
 - The 3D GUI print profile includes `first_layer_height_mm`, `slow_first_layer_enabled`, `first_layer_speed_mm_s`, `bed_temperature_c`, and `first_layer_bed_temperature_c`; defaults are 0.2 mm first-layer height, slow first layer enabled at 10 mm/s, and 60 C bed targets for PLA adhesion. PrusaSlicer must receive `--layer-height`, `--first-layer-height`, `--bed-temperature`, `--first-layer-bed-temperature`, and, when enabled, `--first-layer-speed`.
-- The 3D GUI has a `Test Options` section. `Test Specimen Size mm` is saved as `test_specimen_size_mm` and `Test Unit Cell Size mm` is saved as `test_unit_cell_size_mm` in `memory/prusa_print_profile.json`; Live GUI `테스트 모드` / `테스트 모드, 실제 출력` handoffs read those saved values as `specimen_size_mm`, `max_specimen_size_mm`, and `cell_size_mm`.
+- The 3D GUI's `Test Specimen Defaults` section retains the active test-mode fallback inputs: specimen X/Y/Z dimensions (`test_specimen_size_mm`) and fallback cell size (`test_unit_cell_size_mm`) in `memory/prusa_print_profile.json`. They supply missing `specimen_size_mm`, `max_specimen_size_mm`, and `cell_size_mm` values, including real-print test routes; explicit contract values take precedence. The single fallback cell size does not pin LHS/BO candidates or configure their search range. Current test-mode search defaults are cell size 5–10 mm and wall thickness 0.6–1.2 mm. Save through `Save Print Defaults`; existing runs are not mutated.
 - In Live GUI `테스트 모드`, the generated test spec uses FDM-printable gyroid TPMS with the 3D GUI saved test unit-cell size, defaulting to `cell_size_mm=10.0`, starts with physical printing off, and routes to Specimen Making Agent's printer-path selection: virtual bridge, installed-printer read-only communication, or explicit actual print.
 - One-shot Live GUI commands `테스트 모드, 가상 브릿지`, `테스트 모드, 설치 프린터`, and `테스트 모드, 실제 출력` set the printer path during orchestration and continue without the separate path prompt.
 - `테스트 모드, 실제 출력` must not keep the browser fetch open through the long PrusaLink upload/start step; it schedules the physical-print workflow in the background and updates the chat via planning events/session refresh.

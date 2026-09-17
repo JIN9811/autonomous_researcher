@@ -66,8 +66,13 @@ async def test_llm_tool_selection_preserves_rollout_payload():
                 "evidence_refs": context["evidence_refs"]}))
     state = _state()
     state.current_experiment_spec["manipulation_task"] = "pick up the cube"
-    result = await ManipulationAgent().run(state, DecisionContext(registry))
+    ctx = DecisionContext(registry)
+    attention = []
+    ctx.emit_execution_event = attention.append
+    result = await ManipulationAgent().run(state, ctx)
     assert result.success
+    assert [event["payload"]["checkpoint"] for event in attention
+            if event["type"] == "agent.attention_requested"] == ["inference_started"]
     assert [call[0] for call in registry.calls] == ["lerobot.rollout.start"]
     assert registry.calls[0][1]["task_instruction"] == "pick up the cube"
     assert registry.calls[0][1]["policy_path"] == "fake://policy"
