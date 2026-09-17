@@ -394,8 +394,10 @@ def test_botorch_twenty_cycle_contract_uses_eight_lhs_then_twelve_acquisition_st
         parameters = candidate["parameters"]
         assert isinstance(parameters, dict)
         cell_size = float(parameters["cell_size_mm"])
-        density = float(parameters["relative_density"])
-        score = 0.8 - ((cell_size - 7.5) / 5.0) ** 2 - ((density - 0.34) / 0.2) ** 2
+        wall_thickness = float(parameters["wall_thickness_mm"])
+        assert 5.0 <= cell_size <= 10.0
+        assert 0.6 <= wall_thickness <= 1.2
+        score = 0.8 - ((cell_size - 7.5) / 5.0) ** 2 - ((wall_thickness - 0.9) / 0.3) ** 2
         return {"ok": True, "objective_score": score, "uncertainty": 0.02}
 
     result = run_benchmark(
@@ -410,8 +412,8 @@ def test_botorch_twenty_cycle_contract_uses_eight_lhs_then_twelve_acquisition_st
             "optimizer_timeout_s": 5.0,
             "parameter_space": {
                 "geometry_type": ["gyroid"],
-                "cell_size_mm": [5.0, 6.0, 7.5, 10.0],
-                "relative_density": [0.2, 0.48],
+                "cell_size_mm": [5.0, 10.0],
+                "wall_thickness_mm": [0.6, 1.2],
                 "orientation_deg": [0.0],
                 "anisotropy_ratio": [1.0],
             },
@@ -430,10 +432,15 @@ def test_botorch_twenty_cycle_contract_uses_eight_lhs_then_twelve_acquisition_st
     assert [item["phase"] for item in trace] == ["initial_design"] * 8 + ["acquisition"] * 12
     assert [item["backend_active"] for item in trace] == ["lhs"] * 8 + ["botorch"] * 12
     assert all(item["acquisition_class"] == "LogExpectedImprovement" for item in trace[8:])
-    assert all(item["lhs_visualization"]["schema"] == "lhs_design_visualization.v1" for item in trace[:8])
+    # The current two-variable design space retains the completed LHS card
+    # alongside the BO posterior rather than dropping it after initialization.
+    assert all(item["lhs_visualization"]["schema"] == "lhs_design_visualization.v1" for item in trace)
+    assert all(item["lhs_visualization"]["design_space"]["x"]["name"] == "cell_size_mm" for item in trace)
+    assert all(item["lhs_visualization"]["design_space"]["y"]["name"] == "wall_thickness_mm" for item in trace)
     assert all("visualization" not in item for item in trace[:8])
     assert all(item["visualization"]["schema"] == "bo_visualization.v1" for item in trace[8:])
-    assert all("lhs_visualization" not in item for item in trace[8:])
+    assert all(item["lhs_visualization"]["status"] == "complete" for item in trace[8:])
+    assert all(len(item["lhs_visualization"]["initial_design"]["points"]) == 8 for item in trace)
 
 
 def test_botorch_benchmark_does_not_invent_observation_noise_for_lhs_scores() -> None:
