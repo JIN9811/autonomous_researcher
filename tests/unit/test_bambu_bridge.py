@@ -79,7 +79,12 @@ def test_bambu_slicer_resolves_path_binary_when_configured_wrapper_is_missing(tm
     assert resolved["output_dir"] == str(tmp_path / "artifacts/bambu_sliced")
 
 
-def test_bambu_studio_slicer_runner_exports_real_artifact_with_fake_cli(tmp_path: Path) -> None:
+def test_bambu_studio_slicer_runner_exports_real_artifact_with_fake_cli(tmp_path: Path, monkeypatch) -> None:
+    mass_paths = []
+    def fake_mass(path):
+        mass_paths.append(path)
+        return 18.19
+    monkeypatch.setattr("utils.slicer_mass.sliced_mass_grams", fake_mass)
     fake_cli = tmp_path / "bambu-studio"
     fake_cli.write_text(
         """#!/bin/sh
@@ -118,6 +123,9 @@ echo "fake slice complete"
     assert sliced_path.name == "specimen.gcode.3mf"
     assert result["size_bytes"] == len(b"real sliced payload")
     assert result["sha256"]
+    assert result["estimated_mass_g"] == 18.19
+    assert result["mass_source"] == "sliced_artifact"
+    assert mass_paths == [sliced_path]
     assert "--slice" in result["command"]
     assert "--arrange" in result["command"]
     assert "--ensure-on-bed" in result["command"]

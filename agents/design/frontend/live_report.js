@@ -167,7 +167,7 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
       ])) + '</details>';
     }
 
-    function renderExpectedPerformance(screenReport, designReport, selected = {}, candidates = []) {
+    function renderExpectedPerformance(screenReport, designReport, selected = {}, candidates = [], report = {}) {
       const evaluations = [...(designReport.candidate_evaluations || []), ...(screenReport.candidate_evaluations || [])];
       const fallback = designReport.design_evaluation || screenReport.design_evaluation || selected.design_evaluation;
       const selectedId = selected.candidate_id || screenReport.design_evaluation?.candidate_id || designReport.design_evaluation?.candidate_id;
@@ -190,6 +190,39 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
       if (fallback) merge(fallback, true);
       if (selectedId) merge({...selected,candidate_id:selectedId});
       const rows = [...byId.values()];
+      const state = report.state || {};
+      const observations = (state.experiment_evaluations || []).filter(item => item &&
+        (!item.run_id || item.run_id === state.run_id) &&
+        (item.source === 'analysis_agent' || item.tool === 'analysis.agent') &&
+        item.ok !== false && item.status !== 'analysis_blocked' &&
+        item.objective?.metric_name && item.objective?.unit &&
+        finiteNumber(item.objective_score) !== null);
+      const performance = row => {
+        const ids = new Set([row.specimen_id, row.candidate_id].filter(Boolean));
+        let measured = [...observations].reverse().find(item=>ids.has(item.candidate_id) || ids.has(item.specimen_id));
+        // Planned LHS/BO IDs differ from fabricated specimen IDs. Match only
+        // a unique, same-run observation at the exact two-variable point.
+        if (!measured && /^(lhs|bo)-candidate-/.test(row.candidate_id || '')) {
+          const matches = observations.filter(item=>['cell_size_mm','wall_thickness_mm'].every(key=>{
+            const a=finiteNumber(row.parameters?.[key] ?? row[key]);
+            const b=finiteNumber(item.parameters?.[key] ?? item.metrics?.[key]);
+            return a !== null && b !== null && Math.abs(a-b) <= 1e-6;
+          }));
+          if (matches.length === 1) measured = matches[0];
+        }
+        if (measured) return `${measured.objective_score} ${measured.objective.unit} · ${measured.objective.metric_name} · ${measured.fidelity === 'synthetic' ? 'Synthetic' : 'Measured'} · Analysis`;
+        const evidence = row.design_evaluation?.performance;
+        return evidence?.value != null && evidence?.source
+          ? `${evidence.value} ${evidence.unit || ''} · ${evidence.source}`
+          : `Unassessed · ${evidence?.reason || 'No analysis result linked to this candidate yet.'}`;
+      };
+      const constraints = row => {
+        const e = row.design_evaluation || {};
+        const checks = e.constraint_margins?.length ? e.constraint_margins : e.selection_evaluation?.constraint_margins || [];
+        if (!checks.length) return e.validity?.status || 'Not evaluated';
+        const counts = checks.reduce((acc, item) => {const key=item.status || 'unassessed'; acc[key]=(acc[key]||0)+1; return acc;}, {});
+        return `${e.validity?.status || 'Not evaluated'} · ${Object.entries(counts).map(([key,count])=>`${count} ${key}`).join(', ')}${e.constraint_margins?.length ? '' : ' · selection-time checks'}`;
+      };
       return '<div class="dsn-comparison-scroll" tabindex="0" role="region" aria-label="Candidate comparison">' + evidenceTable(["Candidate", "Cell size (mm)", "Wall (mm)", "Progress", "Constraints", "Mass (estimated)", "Performance evidence"], rows.map(row=>{
         const e = row.design_evaluation || {};
         return [
@@ -197,9 +230,9 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
           row.cell_size_mm ?? row.parameters?.cell_size_mm ?? 'Not recorded',
           row.wall_thickness_mm ?? row.parameters?.wall_thickness_mm ?? 'Not recorded',
           row.status || (row.__actual_specimen ? 'generated' : 'recorded'),
-          e.validity?.status || 'Not evaluated',
+          constraints(row),
           e.cost?.mass?.value != null ? `${e.cost.mass.value} ${e.cost.mass.unit || ""}` : "Not recorded",
-          e.performance?.value != null && e.performance?.source ? `${e.performance.value} ${e.performance.unit || ""}` : "Unassessed"
+          performance(row)
         ];
       }), selectedId ? rows.findIndex(row=>row.candidate_id===selectedId) : -1) + '</div>';
     }
@@ -236,7 +269,8 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
       const selectedId = spec.candidate_id || selected.candidate_id;
       const matches = item => item && (!selectedId || !item.candidate_id || item.candidate_id === selectedId);
       const evidence = [spec.design_evaluation, selected.design_evaluation, screenReport.design_evaluation,
-        designReport.design_evaluation, ...(screenReport.candidate_evaluations || []), ...(designReport.candidate_evaluations || [])].find(matches);
+        designReport.design_evaluation, ...(screenReport.candidate_evaluations || []), ...(designReport.candidate_evaluations || [])]
+        .find(item => matches(item) && (item.validity || item.constraint_margins?.length || item.selection_evaluation));
       const currentRows = evidence?.constraint_margins || [];
       const selection = evidence?.selection_evaluation;
       const historical = !currentRows.length && matches(selection) && selection.constraint_margins?.length;
@@ -342,7 +376,7 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
     });
 
     function renderDashboard(report, status, label, profile) {
-      const spec = report && report.spec ? report.spec : {};
+      const spec = report?.spec || report?.state?.current_experiment_spec || {};
       const screenReport = services.latestDesignAgentReport(report) || {};
       const designReport = services.latestDesignReport(report) || {};
       const plannedPoints = [...(services.latestBoInitialDesign?.(report)?.points || [])];
@@ -386,7 +420,7 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
     ${services.renderDashboardCard("Experiment Contract", renderer.renderBriefCard(brief, objective, hypothesis, spec, prior, material, manufacturability, selected), { span: 3, tone: "design", eyebrow: "mission input", className: "ar-design-reference-card ar-design-brief-card" })}
     ${services.renderDashboardCard("Generated Specimens", services.renderDesignCandidateCards(screenReport, designReport, report, { renderEvidence: renderer.renderEvidence }), { span: 9, tone: "design", eyebrow: "built specimen log", className: "ar-design-reference-card ar-design-candidates-card", meta: `${services.renderRuntimeValue(generatedCount)} built / ${services.renderRuntimeValue(validCount)} usable / ${services.renderRuntimeValue(previewCount)} previews` })}
     ${services.renderDashboardCard("Design Space", renderer.renderDesignSpace(screenReport, selected, plannedPoints), { span: 4, tone: "metrics", eyebrow: "recorded variables", className: "ar-design-reference-card ar-design-sweep-card" })}
-    ${services.renderDashboardCard("Candidate Comparison", renderer.renderExpectedPerformance(screenReport, designReport, selected, [...plannedPoints.map((point,index)=>({...point,candidate_id:point.candidate_id || point.id || `LHS ${index+1}`,status:point.status || 'planned'})), ...candidateRows, ...specimenRows]), { span: 4, tone: "metrics", eyebrow: "recorded candidate evidence", className: "ar-design-reference-card ar-design-performance-card" })}
+    ${services.renderDashboardCard("Candidate Comparison", renderer.renderExpectedPerformance(screenReport, designReport, selected, [...plannedPoints.map((point,index)=>({...point,candidate_id:point.candidate_id || point.id || `LHS ${index+1}`,status:point.status || 'planned'})), ...candidateRows, ...specimenRows], report), { span: 4, tone: "metrics", eyebrow: "recorded candidate evidence", className: "ar-design-reference-card ar-design-performance-card" })}
     ${services.renderDashboardCard("Constraint Check", renderer.renderManufacturabilityCard(screenReport, designReport, selected, spec, material, specimenRows.length ? specimenRows : candidateRows), { span: 4, tone: (spec.design_evaluation || screenReport.design_evaluation || designReport.design_evaluation)?.validity?.status === "pass" ? "success" : "warning", eyebrow: "design checks", className: "ar-design-reference-card ar-design-manufacturing-card" })}
     ${services.renderDashboardCard("Active Handoff", renderer.renderHandoffCard(handoff, selected, material, spec, artifactLedger), { span: 12, tone: handoff.required_fields_present === false || rejected.length ? "warning" : "success", eyebrow: "dsn -> spc", className: "ar-design-reference-card ar-design-handoff-card" })}
   `;

@@ -1354,9 +1354,21 @@ research dialogue; suggested defaults are not user consent. The same bounds
 feed Experimental Setup, the Orchestrator contract, DSN, LHS and BO.
 
 The test-mode objective is **specific energy absorption (SEA, J/g)**,
-`specific_energy_absorption_J_per_g`: the integrated force–displacement energy
-in joules divided by specimen mass in grams. It is not volumetric energy
-density. Explicit compiled objectives retain precedence. Virtual UTM results
+`specific_energy_absorption_J_per_g`: canonical force–displacement energy
+integrated from zero to **50% of the current specimen's initial height**, converted to
+joules and divided by specimen mass in grams. The integration boundary follows
+the current specimen height, never a fixed travel distance, regardless of extra measured travel. A curve
+that does not reach this boundary, or has no positive specimen mass, has no
+SEA score. Full-curve energy remains a separate diagnostic metric, not SEA.
+For physical specimens, the denominator is the **selected plate's slicer-reported
+mass**, carried from the sliced artifact through SPC into Analysis with its
+source path. It is an estimate, not a balance measurement. Design heuristics and
+`measured_mass_g` do not override this policy. Missing mass leaves SEA unavailable
+rather than silently using a design estimate. Explicitly resolved all-virtual
+execution may use synthetic specimen mass, labeled `synthetic_specimen`.
+Previously saved full-range SEA scores require reanalysis from their raw CSVs
+before comparison with this definition; historical artifacts are not rewritten.
+It is not volumetric energy density. Explicit compiled objectives retain precedence. Virtual UTM results
 are synthetic workflow evidence, not measured performance validation.
 
 `wall_cell_v1` identifies the new geometry parameterization. Wall thickness is

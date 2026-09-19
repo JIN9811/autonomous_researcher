@@ -61,7 +61,7 @@ DEFAULT_METRICS = (
     ),
     _metric(
         "specific_energy_absorption_j_per_g",
-        "Specific energy absorption",
+        "Specific energy absorption to 50% compressive strain",
         "specific_energy_absorption_J_per_g",
         "J/g",
         "specific_energy",

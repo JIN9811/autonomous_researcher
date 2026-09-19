@@ -311,6 +311,26 @@ async def _decide(state, ctx, contract_id, capture=None):
 
 async def select_vision_tool(state, ctx, contract_id):
     """Authorize one existing capture routine; never supply driver arguments."""
+    from utils.test_mode_execution_profiles import is_resolved_all_virtual_bridge
+    from device_bridges.camera_vision.tools import _reload_vision_cycle
+    import asyncio
+    required = {"vision.utm_runtime.start", "vision.utm_runtime.stop", "vision.utm_runtime.status"}
+    if (contract_id in {"active_cam", "pickup"}
+            and not is_resolved_all_virtual_bridge(state.current_experiment_spec, mode=state.mode)
+            and required.issubset(getattr(getattr(ctx, "tools", None), "list_tools", lambda: [])())):
+        key = [state.run_id, state.current_experiment_spec.get("specimen_id")]
+        cached = state.run_metadata.get("vision_entry_ros_reload") or {}
+        if cached.get("key") != key:
+            payload = {"run_id": state.run_id, "source": "vision_entry_reload"}
+            result = await asyncio.to_thread(_reload_vision_cycle, tuple(key),
+                lambda: ctx.tools.call("vision.utm_runtime.stop", payload),
+                lambda: ctx.tools.call("vision.utm_runtime.start", payload),
+                lambda: ctx.tools.call("vision.utm_runtime.status", payload))
+            cached = {"key": key, **result}
+            state.run_metadata["vision_entry_ros_reload"] = cached
+        if cached.get("ok") is not True:
+            return {"status": "review_required", "failure_code": cached.get("failure_code"),
+                    "scope_valid": True, "contract_id": contract_id}
     return await _decide(state, ctx, contract_id)
 
 

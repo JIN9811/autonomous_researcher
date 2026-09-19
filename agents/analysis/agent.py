@@ -229,13 +229,28 @@ class AnalysisAgent(BaseAgent):
             normalization_errors.append("gauge_length_mm")
         valid_size = all(math.isfinite(value) and value > 0.0 for value in size)
         volume = size[0] * size[1] * size[2] if valid_size else 0.0
-        mass = self._safe_float(source.get("measured_mass_g") or source.get("expected_mass_g"), 0.0)
+        from utils.slicer_mass import slicer_mass_evidence
+        from utils.test_mode_execution_profiles import is_resolved_all_virtual_bridge
+        # Never normalize this cycle using another run/specimen's sliced mass.
+        identity_matches = all(
+            not specimen.get(key) or str(specimen[key]) == str(expected)
+            for key, expected in (("run_id", state.run_id), ("specimen_id", spec.get("specimen_id")))
+        ) and (specimen.get("loop_id") is None or specimen["loop_id"] == state.loop_count)
+        mass_evidence = slicer_mass_evidence(specimen if identity_matches else {})
+        if mass_evidence["mass_g"] is None and is_resolved_all_virtual_bridge(spec, mode=state.mode):
+            # Explicit synthetic-only execution has no physical sliced specimen.
+            from utils.slicer_mass import positive_mass
+            mass_evidence = {"mass_g": positive_mass(source.get("expected_mass_g")),
+                             "source": "synthetic_specimen", "estimated": True, "artifact_path": ""}
+        mass = mass_evidence["mass_g"] or 0.0
         return {
             "specimen_size_mm": [round(value, 6) if math.isfinite(value) else 0.0 for value in size],
             "cross_section_area_mm2": round(area, 6) if math.isfinite(area) else 0.0,
             "gauge_length_mm": round(gauge, 6) if math.isfinite(gauge) else 0.0,
             "volume_mm3": round(volume, 6),
             "mass_g": round(mass, 6),
+            "mass_source": mass_evidence["source"],
+            "mass_evidence": mass_evidence,
             "normalization_valid": not normalization_errors,
             "normalization_errors": normalization_errors,
         }
@@ -742,7 +757,7 @@ class AnalysisAgent(BaseAgent):
                     "displacement_mm": float(limit_mm),
                     "force_N": float(left["force_N"]) + ratio * (float(right["force_N"]) - float(left["force_N"])),
                 }
-                if "time_s" in left and "time_s" in right:
+                if left.get("time_s") is not None and right.get("time_s") is not None:
                     boundary["time_s"] = float(left["time_s"]) + ratio * (float(right["time_s"]) - float(left["time_s"]))
                 clipped.append(boundary)
                 return clipped, True
@@ -774,7 +789,7 @@ class AnalysisAgent(BaseAgent):
                 boundary["strain"] = float(limit_strain)
                 boundary["strain_pct"] = float(limit_strain) * 100.0
                 for key in ("stress_MPa", "displacement_mm", "force_N", "time_s"):
-                    if key in left and key in right:
+                    if left.get(key) is not None and right.get(key) is not None:
                         boundary[key] = float(left[key]) + ratio * (float(right[key]) - float(left[key]))
                 clipped.append(boundary)
                 return clipped, True
@@ -873,7 +888,13 @@ class AnalysisAgent(BaseAgent):
             "strain_at_peak": round(strain_at_peak, 6),
             "energy_absorption_mJ": round(energy, 6),
             "energy_density_mJ_per_mm3": round(energy / max(volume, 1e-6), 9),
-            "specific_energy_absorption_J_per_g": round((energy / 1000.0) / mass, 9) if mass > 0 else None,
+            # SEA shares the canonical 0–50% strain interval with absorbed
+            # energy. Extra measured travel must not change the BO objective;
+            # incomplete curves must not produce a partial-range SEA score.
+            "specific_energy_absorption_J_per_g": (
+                round((energy_50pct / 1000.0) / mass, 9)
+                if energy_50pct is not None and mass > 0 else None
+            ),
             "energy_absorption_50pct_mJ": round(energy_50pct, 6) if energy_50pct is not None else None,
             "energy_absorption_limit_fraction": energy_limit_fraction,
             "energy_absorption_limit_strain": energy_limit_fraction,
@@ -1405,12 +1426,17 @@ class AnalysisAgent(BaseAgent):
             bo_metric_name = "objective_score"
             bo_metric_unit = "1"
             bo_score = compiled_score
+            bo_metric_label = "Compiled objective score"
         else:
             from utils.research_objective import SEA_METRIC, uses_sea
             sea = uses_sea(state.current_experiment_spec, state.active_goal)
             bo_metric_name = SEA_METRIC if sea else "energy_density_50pct_MJ_per_m3"
             bo_metric_unit = "J/g" if sea else "MJ/m3"
             bo_score = self._safe_float(metrics.get(bo_metric_name), float("nan"))
+            bo_metric_label = (
+                "Specific energy absorption to 50% compressive strain"
+                if sea else "Volumetric energy absorption to 50% compressive strain"
+            )
         bo_score_available = math.isfinite(bo_score)
         bo_metrics = {bo_metric_name: bo_score} if bo_score_available else {}
         observation_fidelity = str(source_meta.get("fidelity") or "").strip() or (
@@ -1495,7 +1521,7 @@ class AnalysisAgent(BaseAgent):
             "observation_id": observation_id,
             "objective": {
                 "objective_id": objective.get("objective_id") or "bo-specimen-objective",
-                "name": "Compiled objective score" if compiled_objective_active else "Volumetric energy absorption to 50% compressive strain",
+                "name": bo_metric_label,
                 "metric_name": bo_metric_name,
                 "unit": bo_metric_unit,
                 "direction": "maximize",
@@ -1543,6 +1569,7 @@ class AnalysisAgent(BaseAgent):
             "parameters": parameters,
             "objective": {
                 "metric_name": bo_metric_name,
+                "name": bo_metric_label,
                 "unit": bo_metric_unit,
                 "direction": "maximize",
                 "score": bo_score if bo_score_available else None,

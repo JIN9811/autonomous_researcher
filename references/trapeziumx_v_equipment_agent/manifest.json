@@ -13,6 +13,7 @@
     "secondary_validation_target": "method-defined sensor conditions"
   },
   "current_method_values": {
+    "source_note": "Operator-specified conditions updated 2026-09-18; documentation only, not a command to configure the UTM. Historical video values are not current acceptance criteria.",
     "robot_entry_clearance": {
       "value": 150.0,
       "unit": "mm",
@@ -21,7 +22,7 @@
       "owner": "cell configuration"
     },
     "contact_detection_load": {
-      "value": 5.0,
+      "value": 10.0,
       "unit": "N",
       "fixed": false,
       "intent": "Detect real platen-to-specimen contact and establish the relative Stroke origin",
@@ -34,19 +35,13 @@
       "intent": "Provide the current specimen dimension used by the test method",
       "owner": "specimen recipe and test method"
     },
-    "target_compression_ratio": {
-      "value": 0.7,
-      "unit": "ratio",
+    "compression_endpoint": {
+      "source": "currently selected UTM test method",
+      "minimum_measured_strain_for_analysis": 0.5,
+      "minimum_measured_travel_expression": "0.5 * initial_specimen_height_mm",
       "fixed": false,
-      "intent": "Define the current desired deformation level",
-      "owner": "test method"
-    },
-    "derived_target_stroke": {
-      "value": 21.0,
-      "unit": "mm",
-      "fixed": false,
-      "intent": "Current relative travel derived from specimen height and target compression ratio",
-      "owner": "test method derived value"
+      "intent": "Do not prescribe a fixed stopping displacement. Require measured canonical travel to cover at least 50% of initial height for SEA/BO; integrate only to that boundary, never extrapolate.",
+      "owner": "test method owns termination; Analysis Agent owns the evaluation interval"
     },
     "pretest_inter_jig_distance": {
       "value": 32.0,
@@ -56,12 +51,13 @@
       "owner": "test method"
     },
     "test_speed": {
-      "value": 1.0,
-      "unit": "mm/s",
+      "value": 2.0,
+      "unit": "mm/min",
       "fixed": false,
-      "intent": "Set the controlled loading speed for the current demonstration method",
+      "intent": "Set the quasi-static loading speed for the current test method",
       "owner": "test method"
     },
+    "sea_evaluation_strain": 0.5,
     "height_semantics": "absolute",
     "stroke_semantics": "relative from the method-defined contact point"
   },

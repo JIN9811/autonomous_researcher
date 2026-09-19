@@ -69,6 +69,8 @@ def test_return_motion_is_not_a_substitute_for_final_clearance_state(state, drif
 class FakeRuntimeManager:
     def __init__(self, *, probe: dict[str, Any] | None = None, frame: dict[str, Any] | None = None) -> None:
         self.start_calls = 0
+        self.running = True
+        self.pid = 1234
         self.probe_calls = 0
         self.frame_calls = 0
         self.raw_frame_calls = 0
@@ -81,12 +83,16 @@ class FakeRuntimeManager:
 
     def start(self) -> dict[str, Any]:
         self.start_calls += 1
-        return {"ok": True, "status": "running", "pid": 1234}
+        if not self.running:
+            self.pid += 1
+        self.running = True
+        return self.status()
 
     def status(self) -> dict[str, Any]:
-        return {"ok": True, "status": "running", "pid": 1234}
+        return {"ok": True, "status": "running" if self.running else "stopped", "pid": self.pid if self.running else None}
 
     def stop(self) -> dict[str, Any]:
+        self.running = False
         return {"ok": True, "status": "stopped", "was_running": True}
 
     def probe(self) -> dict[str, Any]:

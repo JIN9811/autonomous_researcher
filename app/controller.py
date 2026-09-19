@@ -3801,7 +3801,18 @@ class MainController:
             "device_health": compact_runtime_payload(state_json.get("device_health", {})),
             "current_experiment_spec": cls._planning_display_spec(state_json.get("current_experiment_spec")),
             "current_experiment_objective": compact_runtime_payload(state_json.get("current_experiment_objective", {})),
-            "experiment_evaluations": cls._planning_list_summary(evaluations, limit=3),
+            # Candidate comparisons need identity, units and producer, not raw
+            # curves/artifacts. The generic last-three scalar summary drops
+            # those fields and makes completed experiments look unassessed.
+            "experiment_evaluations": [
+                {
+                    **cls._planning_scalar_summary(item, keys=("run_id", "source", "tool", "fidelity", "specimen_id")),
+                    "objective": cls._select_runtime_fields(item.get("objective", {}), ("metric_name", "unit", "name")),
+                    "parameters": cls._select_runtime_fields(item.get("parameters") or item.get("metrics") or {},
+                        ("cell_size_mm", "wall_thickness_mm")),
+                }
+                for item in evaluations[-256:] if isinstance(item, dict)
+            ],
             "active_session_id": state_json.get("active_session_id", ""),
             "latest_observations": cls._planning_scalar_summary(state_json.get("latest_observations", {})),
             "latest_analysis": cls._planning_scalar_summary(state_json.get("latest_analysis", {})),

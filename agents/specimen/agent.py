@@ -414,6 +414,8 @@ class SpecimenMakingAgent(BaseAgent):
         tool_result = printer_response
         settings = self._dict_value(tool_result.get("slicer_settings"), tool_result.get("settings"))
         slicer_result = self._dict_value(tool_result.get("slicer_result"))
+        from utils.slicer_mass import slicer_mass_evidence
+        mass_evidence = slicer_mass_evidence(tool_result)
         gcode_validation = self._dict_value(tool_result.get("gcode_validation"))
         printer = self._dict_value(tool_result.get("printer"))
         prusalink = self._dict_value(tool_result.get("prusalink"))
@@ -510,7 +512,8 @@ class SpecimenMakingAgent(BaseAgent):
             "cap_skin_policy": cap_policy,
             "ejection_policy": ejection_policy,
             "bambu_autoejection_readiness": bambu_autoejection_readiness,
-            "estimated_mass_g": self._safe_float(self._first_value(settings.get("expected_mass_g"), manufacturability_result.get("expected_mass_g"), spec.get("expected_mass_g")), None),
+            "estimated_mass_g": mass_evidence["mass_g"],
+            "mass_evidence": mass_evidence,
             "estimated_print_time_min": self._safe_float(self._first_value(settings.get("expected_print_time_min"), manufacturability_result.get("expected_print_time_min"), spec.get("expected_print_time_min")), None),
             "slicer_command": settings.get("resolved_command", []),
         }
@@ -765,7 +768,7 @@ class SpecimenMakingAgent(BaseAgent):
         warn_count = sum(1 for gate in gates if gate.get("status") == "warn")
         readiness_score = round(pass_count / max(len(gates), 1), 4)
         estimated_time = self._safe_float(plan.get("estimated_print_time_min"), self._safe_float(spec.get("expected_print_time_min"), None))
-        estimated_mass = self._safe_float(plan.get("estimated_mass_g"), self._safe_float(spec.get("expected_mass_g"), None))
+        estimated_mass = self._safe_float(plan.get("estimated_mass_g"), None)
         material = str(thread.get("material") or spec.get("material") or "")
         slicer_gate = next((gate for gate in gates if gate.get("gate") == "slicer"), {})
         gcode_gate = next((gate for gate in gates if gate.get("gate") == "gcode"), {})
@@ -1591,7 +1594,8 @@ class SpecimenMakingAgent(BaseAgent):
                 "bottom_cap_enabled": bottom_cap_enabled,
                 "skin_thickness_mm": geometry_payload["skin_thickness_mm"],
             },
-            "expected_mass_g": manufacturability_result.get("expected_mass_g"),
+            "expected_mass_g": fabrication_report.get("process_plan", {}).get("estimated_mass_g"),
+            "mass_evidence": fabrication_report.get("process_plan", {}).get("mass_evidence", {}),
             "expected_print_time_min": manufacturability_result.get("expected_print_time_min"),
             "slicer_settings": response.get("slicer_settings", {}),
             "slicer_result": response.get("slicer_result", {}),

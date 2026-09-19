@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import hashlib
 import time
+import threading
 from typing import Any
 
 from mcp_tools.tool_registry import ToolRegistry
@@ -27,6 +28,43 @@ UTM_PASSIVE_VERIFICATIONS = {
     "utm_motion_down": ("DOWN", "motion_direction"),
     "utm_state_not_working": ("NOT WORKING", "state"),
 }
+
+_VISION_RELOAD_LOCK = threading.Lock()
+_VISION_CYCLE_RELOADS = {}
+
+
+def _reload_vision_cycle(key, stop, start, status):
+    with _VISION_RELOAD_LOCK:
+        if key not in _VISION_CYCLE_RELOADS:
+            _VISION_CYCLE_RELOADS[key] = _restart_vision_runtime(stop, start, status)
+            while len(_VISION_CYCLE_RELOADS) > 32:
+                _VISION_CYCLE_RELOADS.pop(next(iter(_VISION_CYCLE_RELOADS)))
+        return dict(_VISION_CYCLE_RELOADS[key])
+
+
+def _restart_vision_runtime(stop, start, status):
+    """Require confirmed process replacement before accepting camera evidence."""
+    before = dict(status())
+    stopped = dict(stop())
+    after_stop = dict(status())
+    if stopped.get("ok") is not True or after_stop.get("status") == "running":
+        return {"ok": False, "failure_code": "VISION_ROS_STOP_UNCONFIRMED"}
+    started = dict(start())
+    after = dict(status())
+    old_pid, new_pid = before.get("pid"), after.get("pid")
+    if (started.get("ok") is not True or after.get("status") != "running" or not new_pid
+            or (old_pid and old_pid == new_pid)):
+        return {"ok": False, "failure_code": "VISION_ROS_RESTART_UNCONFIRMED"}
+    return {"ok": True, "status": "running", "previous_pid": old_pid,
+            "pid": new_pid, "reloaded_at": time.time(), "restart_verified": True}
+
+
+def _reload_for_capture(payload, manager):
+    # Only run-scoped Vision checkpoints, never EQP's continuous observer.
+    if not payload.get("run_id") or not payload.get("specimen_id"):
+        return None
+    key = (payload["run_id"], payload["specimen_id"])
+    return _reload_vision_cycle(key, manager.stop, manager.start, manager.status)
 
 
 def _now() -> datetime:
@@ -251,9 +289,15 @@ def _utm_specimen_presence_capture(
             "observer_mode": "virtual_utm_bridge",
         }
     elif utm_runtime_manager is not None:
+        reload_result = _reload_for_capture(payload, utm_runtime_manager)
+        if reload_result is not None and reload_result.get("ok") is not True:
+            return {**reload_result, "status": "runtime_reload_failed", "detected": False,
+                    "clear_confirmed": False, "run_id": payload.get("run_id"),
+                    "loop_id": payload.get("loop_id"), "specimen_id": payload.get("specimen_id"),
+                    "session_id": payload.get("session_id")}
         runtime_status = dict(
             utm_runtime_manager.start()
-            if not clear_verification and bool(payload.get("auto_start_runtime", True))
+            if reload_result is None and not clear_verification and bool(payload.get("auto_start_runtime", True))
             else utm_runtime_manager.status()
         )
         try:

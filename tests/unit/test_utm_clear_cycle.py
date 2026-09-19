@@ -129,6 +129,43 @@ class ReplayTools:
 
 
 @pytest.mark.asyncio
+async def test_camera_wait_has_ten_minute_budget_without_replaying_or_reviewing(monkeypatch):
+    from utils import utm_clear_cycle as cycle
+    import agents.vision.decision as decisions
+    state = state_with_placement()
+    state.current_experiment_spec["execution_policy"] = {"manipulation": "execute", "vision": "execute", "lab_equipment": "execute"}
+    cycle.merge_utm_clear_cycle(state, Stage.EQUIPMENT, equipment_data(state))
+    execution = cycle.current_clear(state)
+    execution.update(state="waiting", pending_deadline_at=1100, pending_timeout_s=120)
+    clock = [1000.0]
+    monkeypatch.setattr(cycle.time, "time", lambda: clock[0])
+    async def unexpected_review(*args, **kwargs):
+        raise AssertionError("Missing frames must not enter image review")
+    monkeypatch.setattr(decisions, "review_visual_evidence", unexpected_review)
+    tools = ReplayTools(state)
+    tools.status, tools.home = "COMPLETED", True
+    original = tools.call
+    def call(name, payload):
+        if name == "vision.utm_specimen_presence.capture":
+            tools.calls.append((name, deepcopy(payload)))
+            return {"ok": False, "status": "frame_unavailable", "failure_code": "ROS_IMAGE_FRAME_UNAVAILABLE"}
+        return original(name, payload)
+    tools.call = call
+    ctx = SimpleNamespace(tools=tools)
+    result = await cycle.run_clear_vision(state, ctx, artifact_dir="unused")
+    assert result.success and execution["state"] == "waiting"
+    assert execution["frame_wait_deadline_at"] == 1600
+    clock[0] = 1599
+    assert (await cycle.run_clear_vision(state, ctx, artifact_dir="unused")).success
+    assert execution["frame_wait_deadline_at"] == 1600
+    clock[0] = 1600
+    result = await cycle.run_clear_vision(state, ctx, artifact_dir="unused")
+    assert not result.success and result.data["safe_stop_recommended"]
+    assert execution["failure_code"] == "UTM_CLEAR_IMAGE_TIMEOUT"
+    assert all(name != "lerobot.replay.start" for name, _ in tools.calls)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("topic", ["/camera/image_raw", "/camera/image_rect"])
 async def test_replay_launch_poll_return_then_fresh_clear_routes_analysis(topic, monkeypatch):
     import agents.vision.decision as decisions

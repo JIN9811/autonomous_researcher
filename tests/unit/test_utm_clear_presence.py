@@ -82,7 +82,9 @@ def test_off_roi_discarded_red_and_missing_markers_do_not_block(tmp_path, topic)
 
 
 @pytest.mark.parametrize("topic", ["/camera/image_raw", "/camera/image_rect"])
-def test_capture_boundary_uses_ros_timestamp_profile_unique_artifacts(tmp_path, topic):
+def test_capture_boundary_uses_ros_timestamp_profile_unique_artifacts(tmp_path, topic, monkeypatch):
+    from device_bridges.camera_vision import tools
+    monkeypatch.setattr(tools, "_VISION_CYCLE_RELOADS", {})
     from tests.unit.test_camera_tools_utm_runtime import FakeRuntimeManager
     from mcp_tools.camera_tools import _utm_specimen_presence_capture
     output = BytesIO()
@@ -100,7 +102,7 @@ def test_capture_boundary_uses_ros_timestamp_profile_unique_artifacts(tmp_path, 
     assert first["frame_timestamp"] == stamp
     assert first["loop_id"] == 0
     assert first["raw_frame_path"] != second["raw_frame_path"]
-    assert manager.start_calls == 0
+    assert manager.start_calls == 1  # One confirmed ROS reload, never one per poll.
     assert manager.raw_frame_calls == 2
     assert manager.frame_calls == 0
     manager._frame.pop("frame_timestamp")

@@ -434,6 +434,7 @@ class BambuStudioSlicerRunner:
                                  command=command, output_dir=str(output_dir))
         data = selected.read_bytes()
         from utils.printer_wait_timing import sliced_duration_seconds
+        from utils.slicer_mass import sliced_mass_grams
         return {
             "ok": True,
             "tool": "printer.bambu.slice_artifact",
@@ -442,6 +443,8 @@ class BambuStudioSlicerRunner:
             "orientation": orientation,
             "sliced_artifact_path": str(selected),
             "estimated_print_time_sec": sliced_duration_seconds(selected),
+            "estimated_mass_g": sliced_mass_grams(selected),
+            "mass_source": "sliced_artifact",
             "print_time_source": "sliced_artifact",
             "output_dir": str(output_dir),
             "size_bytes": len(data),

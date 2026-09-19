@@ -196,6 +196,21 @@ def test_clearance_review_retry_preserves_motion_completion_and_blocks_replay(tm
     assert clear["state"] != "requested"
 
 
+def test_clearance_retry_accepts_missing_frame_without_replaying(tmp_path):
+    from app import run_recovery
+    state, path = clearance_review_fixture(tmp_path)
+    saved = json.loads(path.read_text())
+    saved["data"]["utm_verification_2"]["record"]["evidence"] = {
+        "status": "frame_unavailable", "failure_code": "ROS_IMAGE_FRAME_UNAVAILABLE"}
+    path.write_text(json.dumps(saved))
+    restored = run_recovery.prepare_clearance_review_retry(state, tmp_path)
+    clear = restored.run_metadata["utm_clear_execution"]
+    assert clear["state"] == "waiting"
+    assert clear["replay_execution_verified"] is True
+    assert clear["replay_evidence"] == state.run_metadata["utm_clear_execution"]["replay_evidence"]
+    assert "frame_wait_deadline_at" not in clear
+
+
 def test_retry_after_intervening_readonly_failure_retains_same_replay_proof(tmp_path):
     from app import run_recovery
     state, path = clearance_review_fixture(tmp_path)

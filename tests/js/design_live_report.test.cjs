@@ -146,6 +146,32 @@ assert.match(renderer.renderManufacturabilityCard({}, {design_evaluation:{constr
 assert.match(empty, /No recorded evidence/);
 assert.doesNotMatch(empty, /dsn-scatter|OBJ/);
 
+const measuredRows = [
+  {candidate_id:'cand-1',specimen_id:'specimen-1',design_evaluation:retainedSelection},
+  {candidate_id:'cand-2',specimen_id:'specimen-2'},
+  {candidate_id:'cand-3',specimen_id:'specimen-3'},
+];
+const observation = {run_id:'current-run',source:'analysis_agent',candidate_id:'specimen-1',
+  objective_score:0,objective:{metric_name:'specific_energy_absorption_J_per_g',unit:'J/g'}};
+const measuredTable = renderer.renderExpectedPerformance({}, {}, {}, measuredRows, {state:{run_id:'current-run',
+  experiment_evaluations:[observation,
+    {...observation,candidate_id:'specimen-2',run_id:'previous-run',objective_score:999},
+    {...observation,candidate_id:'specimen-3',source:'printer',objective_score:888},
+  ]}});
+assert.match(measuredTable,/0 J\/g · specific_energy_absorption_J_per_g · Measured · Analysis/);
+assert.match(measuredTable,/1 unmeasured, 1 pass/);
+assert.match(measuredTable,/No analysis result linked to this candidate yet/);
+assert.doesNotMatch(measuredTable,/999|888/);
+const plannedMeasured = renderer.renderExpectedPerformance({}, {}, {}, [
+  {candidate_id:'lhs-candidate-001',parameters:{cell_size_mm:5,wall_thickness_mm:0.6}},
+], {state:{run_id:'current-run',experiment_evaluations:[{...observation,objective_score:4.5,
+  parameters:{cell_size_mm:5,wall_thickness_mm:0.6}}]}});
+assert.match(plannedMeasured,/4.5 J\/g/);
+const recoveredChecks = renderer.renderManufacturabilityCard({design_evaluation:retainedSelection}, {},
+  {candidate_id:'current'}, {candidate_id:'current',design_evaluation:{}});
+assert.match(recoveredChecks,/envelope_x/);
+assert.match(recoveredChecks,/Constraint value relative to limit/);
+
 assert.deepEqual(
   JSON.parse(JSON.stringify(renderer.scatterRows([
     { candidate_id: "missing", y_predicted_objective: 0.5 },
@@ -222,6 +248,11 @@ assert.equal(frontend.dispose.length, 0);
 const dashboard = frontend.renderDashboard({ design_report: {} }, "idle", "Design Agent", {});
 assert.match(dashboard, /Experiment Contract/);
 assert.match(dashboard, /Generated Specimens/);
+const stateOnlyDashboard = frontend.renderDashboard({state:{current_experiment_spec:{
+  candidate_id:'current', design_evaluation:adaptedSelection,
+}}}, 'done', 'Design Agent', {});
+assert.match(stateOnlyDashboard,/Selection-time evidence — before adaptation/);
+assert.match(stateOnlyDashboard,/Constraint value relative to limit/);
 const reportDetails = frontend.renderReport({
   design_report: {
     report_id: "design-1",

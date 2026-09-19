@@ -345,6 +345,12 @@ async def run_clear_vision(state, ctx, *, artifact_dir):
         execution.update(state="error", success=False, failure_code="UTM_CLEAR_REPLAY_EVIDENCE_REQUIRED")
         return _result(execution)
     execution.setdefault("replay_completed_at", time.time())
+    # Camera availability has its own budget, independent of replay duration.
+    # Each capture remains bounded so stop controls and scope changes stay live.
+    if not execution.get("frame_wait_deadline_at"):
+        execution["frame_wait_deadline_at"] = time.time() + 600.0
+        execution["pending_deadline_at"] = max(
+            execution.get("pending_deadline_at", 0), execution["frame_wait_deadline_at"] + 180.0)
     execution.update(state="waiting", replay_execution_verified=True, replay_evidence=deepcopy(replay["replay_evidence"]))
     from agents.attention import request_attention
     first = state.run_metadata["utm_verifications"].get("verification_1", {})
@@ -362,6 +368,19 @@ async def run_clear_vision(state, ctx, *, artifact_dir):
         capture = await asyncio.to_thread(ctx.tools.call, "vision.utm_specimen_presence.capture", payload)
     except Exception as exc:
         capture = {"ok": False, "status": "unknown", "clear_confirmed": False, "message": str(exc)}
+    if current_clear(state) is not execution or any(getattr(state, flag, False) for flag in
+            ("stop_requested", "safe_stop_requested", "emergency_stop_requested")):
+        return _result(execution)
+    if capture.get("failure_code") in {"ROS_IMAGE_FRAME_UNAVAILABLE", "ROS_IMAGE_TIMEOUT"}:
+        if time.time() < execution["frame_wait_deadline_at"]:
+            execution["frame_wait_last_failure"] = capture.get("failure_code")
+            # Do not send missing imagery to the LLM or publish failed evidence
+            # while the explicitly bounded image-receive window is still open.
+            return _result(execution, summary="Waiting for fresh UTM camera image (up to 10 minutes)")
+        execution.update(state="error", success=False, failure_code="UTM_CLEAR_IMAGE_TIMEOUT")
+        result = _result(execution, capture=capture, summary="UTM camera image unavailable for 10 minutes")
+        result.data["safe_stop_recommended"] = True
+        return result
     try:
         fresh = execution["replay_completed_at"] < float(capture.get("frame_timestamp", 0)) <= time.time() + 1
     except (TypeError, ValueError):

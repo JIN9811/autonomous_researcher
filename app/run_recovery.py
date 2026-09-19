@@ -121,6 +121,8 @@ def prepare_error_resume(controller):
         validate(controller._state, request, request['description']['flow'])
         return request['source_execution_id']
     _, data = equipment_archive(controller._deps.run_root, run_id)
+    if controller._state.run_metadata.get("clearance_review_recovery") and not controller._state.run_metadata.get("archived_postprocessing_request"):
+        return completed_clearance_equipment(controller)["equipment_workflow_execution_id"]
     archived_request = controller._state.run_metadata.get("archived_postprocessing_request")
     if archived_request:
         # This route cannot invoke Equipment. Validate the pinned data/image and
@@ -202,7 +204,7 @@ def prepare_clearance_review_retry(state, root):
     proof = clear.get("replay_evidence") or {}
     previous_retry = state.run_metadata.get("clearance_review_recovery") or {}
     retry_wait = clear.get("state") == "waiting" and clear.get("success") is None and bool(previous_retry)
-    original_failure = clear.get("state") == "error" and clear.get("failure_code") == "VISION_REVIEW_REQUIRED" and clear.get("success") is False
+    original_failure = clear.get("state") == "error" and clear.get("failure_code") in {"VISION_REVIEW_REQUIRED", "UTM_CLEAR_IMAGE_TIMEOUT"} and clear.get("success") is False
     if (state.stage not in {Stage.COMPLETE, Stage.ERROR}
             or any(getattr(state, k) for k in ("stop_requested", "safe_stop_requested", "emergency_stop_requested"))
             or state.run_metadata.get("active_safety_sources")
@@ -230,11 +232,15 @@ def prepare_clearance_review_retry(state, root):
         original = data.get("utm_clear_execution") or {}
         for key in ("state", "success", "failure_code", "pending_deadline_at"):
             comparison[key] = original.get(key)
+    missing_frame = (evidence.get("status") == "frame_unavailable"
+        and evidence.get("failure_code") in {"ROS_IMAGE_FRAME_UNAVAILABLE", "ROS_IMAGE_TIMEOUT"}
+        and evidence.get("clear_confirmed") is not True)
+    unknown_review = (evidence.get("status") == "unknown" and evidence.get("registered") is False
+        and evidence.get("clear_confirmed") is False
+        and evidence.get("unknown_reason") == "capture_profile_material_or_registration_invalid")
     if (_public(data.get("utm_clear_execution")) != comparison or not matches(state, second)
             or second.get("session_id") != clear.get("session_id")
-            or evidence.get("status") != "unknown" or evidence.get("registered") is not False
-            or evidence.get("clear_confirmed") is not False
-            or evidence.get("unknown_reason") != "capture_profile_material_or_registration_invalid"):
+            or not (missing_frame or unknown_review)):
         raise ValueError("Archived clearance failure or execution scope changed")
     timeout = float(clear.get("pending_timeout_s") or 0)
     if not math.isfinite(timeout) or not 0 < timeout <= 180:
@@ -243,6 +249,8 @@ def prepare_clearance_review_retry(state, root):
     restored.stage = Stage.ERROR
     retry = restored.run_metadata["utm_clear_execution"]
     retry.update(state="waiting", success=None, pending_deadline_at=time.time() + timeout)
+    retry.pop("frame_wait_deadline_at", None)
+    retry.pop("frame_wait_last_failure", None)
     retry.pop("failure_code", None)
     retry.pop("visual_clearance_confirmed", None)
     restored.run_metadata["utm_clear_next_stage"] = "vision"
@@ -253,6 +261,44 @@ def prepare_clearance_review_retry(state, root):
     return restored
 
 
+def completed_clearance_equipment(controller):
+    """Validate immutable completed work, not mutable pre-disposal sensor state.
+
+    This authorizes observation-only continuation, never another Equipment call.
+    """
+    state = controller._state
+    root = controller._deps.run_root
+    saved = read_checkpoint(root, state.run_id)
+    original = saved["snapshot"]["state"]
+    recovery = state.run_metadata.get("clearance_review_recovery") or {}
+    from utils.utm_clear_cycle import current_clear
+    from utils.agent_artifact_archive import _public
+    clear = current_clear(state)
+    source = Path(recovery.get("source_result") or "")
+    if (state.loop_count != original["loop_count"] or state.experiment_id != original["experiment_id"]
+            or state.current_experiment_spec != original["current_experiment_spec"]
+            or clear.get("state") != "waiting" or clear.get("replay_execution_verified") is not True
+            or not source.is_file() or _hash(source) != recovery.get("source_sha256")
+            or source.resolve().parent.parent != (run_directory(root, state.run_id) /
+                f"runtime/loops/loop-{state.loop_count + 1:06d}/vision_agent").resolve()):
+        raise ValueError("Completed clearance recovery scope changed")
+    archived = json.loads(source.read_text())["data"]["utm_clear_execution"]
+    if (clear.get("session_id") != archived.get("session_id")
+            or _public(clear.get("replay_evidence")) != archived.get("replay_evidence")
+            or clear.get("replay_completed_at") != archived.get("replay_completed_at")):
+        raise ValueError("Completed replay evidence changed")
+    path, data = equipment_archive(root, state.run_id)
+    handoff = data.get("equipment_handoff") or {}
+    if (str(path.resolve()) != saved["result_path"]
+            or data.get("equipment_workflow_execution_id") != saved["workflow_execution_id"]
+            or handoff.get("run_id") != state.run_id
+            or handoff.get("specimen_id") != state.current_experiment_spec.get("specimen_id")
+            or handoff.get("ready_for_analysis") is not True
+            or ((data.get("equipment_report") or {}).get("llm_workflow_review") or {}).get("accepted") is not True):
+        raise ValueError("Same-specimen accepted Equipment evidence is unavailable")
+    return data
+
+
 def restore_completed_equipment_handoff(controller, execution_id):
     """Rehydrate an already accepted result, not a new judgment about live devices."""
     from agents.equipment.recovery import completed_candidate
@@ -260,16 +306,22 @@ def restore_completed_equipment_handoff(controller, execution_id):
     from utils.equipment_skill_flow import EquipmentSkillFlowStore
     from orchestrator.state import Stage
     agent = controller._deps.agent_registry.get("equipment_agent")
-    record = EquipmentRuntimeService(agent._RUNTIME_ROOT / "workflow_decisions").get(execution_id)
-    flow = EquipmentSkillFlowStore(agent._SKILL_FLOW_PATH).get(
-        controller._state.current_experiment_spec.get("equipment_profile_id") or "utm_windows_v1")
-    candidate = completed_candidate(record, flow, controller._state)
-    accepted = (candidate.data.get("equipment_report") or {}).get("llm_workflow_review") or {}
-    if record.get("lifecycle") != "COMPLETED" or accepted.get("accepted") is not True:
-        raise ValueError("Clearance-only recovery requires an already accepted Equipment result")
+    if not controller._state.run_metadata.get("archived_postprocessing_request"):
+        data = completed_clearance_equipment(controller)
+        if data["equipment_workflow_execution_id"] != execution_id:
+            raise ValueError("Equipment execution identity changed")
+    else:
+        record = EquipmentRuntimeService(agent._RUNTIME_ROOT / "workflow_decisions").get(execution_id)
+        flow = EquipmentSkillFlowStore(agent._SKILL_FLOW_PATH).get(
+            controller._state.current_experiment_spec.get("equipment_profile_id") or "utm_windows_v1")
+        candidate = completed_candidate(record, flow, controller._state)
+        accepted = (candidate.data.get("equipment_report") or {}).get("llm_workflow_review") or {}
+        if record.get("lifecycle") != "COMPLETED" or accepted.get("accepted") is not True:
+            raise ValueError("Clearance-only recovery requires an already accepted Equipment result")
+        data = candidate.data
     recovery_metadata = {key: deepcopy(value) for key, value in controller._state.run_metadata.items()
         if key in {"clearance_review_recovery", "recovery_design_limit", "robot_task_result", "specimen_result"}}
-    controller._merge_planning_agent_data(Stage.EQUIPMENT, candidate.data)
+    controller._merge_planning_agent_data(Stage.EQUIPMENT, data)
     controller._state.run_metadata.update(recovery_metadata)
     controller._state.run_metadata["recovery_resume_stage"] = "vision"
 
@@ -570,9 +622,24 @@ if __name__ == "__main__":
     planning = get("/api/planning/session")
     # Reject a boundary that moved while the transcript was being captured.
     current = get("/api/state")
-    _check_boundary(current, args.run_id)
-    if current["state"] != snapshot["state"]:
+    def checkpoint_boundary(value):
+        state = value["state"]
+        metadata = state.get("run_metadata") or {}
+        return {"running": value.get("is_running"), **{key: state.get(key) for key in
+            ("run_id", "experiment_id", "loop_count", "stage", "current_experiment_spec",
+             "stop_requested", "safe_stop_requested", "emergency_stop_requested")},
+            "evidence": {key: metadata.get(key) for key in
+                ("utm_clear_execution", "utm_verifications", "active_safety_sources")}}
+    if checkpoint_boundary(current) != checkpoint_boundary(snapshot):
         raise ValueError("Run state changed during checkpoint capture; retry")
+    snapshot = current
+    if current["state"].get("stage") == "complete":
+        from orchestrator.state import OrchestratorState
+        # Only a proven ended same-cycle replay may turn a terminal Vision
+        # failure into an observation-only recovery checkpoint.
+        restored = prepare_clearance_review_retry(OrchestratorState.model_validate(current["state"]), args.root)
+        snapshot = {**snapshot, "state": restored.model_dump(mode="json")}
+    _check_boundary(snapshot, args.run_id)
     saved = save_checkpoint(snapshot, planning, args.root, args.run_id)
     print(json.dumps({"run_id": saved["run_id"], "csv_sha256": saved["csv_sha256"],
                       "checkpoint": str(run_directory(args.root, args.run_id) / "recovery/checkpoint.json")}))

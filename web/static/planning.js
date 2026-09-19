@@ -1367,6 +1367,7 @@ function compactPlanningStateForStorage(state = {}) {
     active_goal: state.active_goal || "",
     current_experiment_spec: state.current_experiment_spec || {},
     current_experiment_objective: state.current_experiment_objective || {},
+    experiment_evaluations: Array.isArray(state.experiment_evaluations) ? state.experiment_evaluations.slice(-256) : [],
     is_paused: Boolean(state.is_paused),
     stop_requested: Boolean(state.stop_requested),
     safe_stop_requested: Boolean(state.safe_stop_requested),
