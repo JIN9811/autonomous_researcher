@@ -21,6 +21,8 @@ test('one fixed set of fields before and after generation, without design proxy 
   const labels = html => [...html.matchAll(/<b>(.*?)<\/b>/g)].map(match=>match[1]);
   assert.deepEqual(labels(before),labels(after));
   assert.equal(labels(after).length,8);
+  assert.ok(labels(after).includes('Print time'));
+  assert.doesNotMatch(after, /Print time \(slicer\)/);
   assert.doesNotMatch(before,/999|888|0\.9|OBJ|RSK|INF/);
   assert.match(before,/Awaiting analysis/);
   for(const value of ['7 mm','0.8 mm','14.57 g','126.617 min','5.723 J/g','Ready']) assert.ok(after.includes(value),value);
@@ -74,4 +76,18 @@ test('older cards receive only their own evidence; gcode.3mf is recognized', () 
   assert.equal(rows.find(row=>row.specimen_id==='s1').gcode_url,'/s1.gcode.3mf');
   assert.equal(rows.find(row=>row.specimen_id==='s2').cell_size_mm,9);
   assert.equal(rows.find(row=>row.specimen_id==='s2').performance_evidence,undefined);
+});
+
+test('Validity reflects SPC validation instead of stale design unassessed status', () => {
+  const ctx=vm.createContext({dashboardFiniteNumber:number,escapeHtml:String});
+  inject(ctx,'renderDesignSpecimenMetricStrip');
+  const item={design_evaluation:{validity:{status:'unassessed'}}};
+  assert.match(ctx.renderDesignSpecimenMetricStrip(item), /Awaiting validation/);
+  item.validation_gates=[{gate:'manufacturability',status:'pass'}];
+  assert.match(ctx.renderDesignSpecimenMetricStrip(item), /Pass · SPC/);
+  item.validation_gates=[{gate:'manufacturability',status:'fail',
+    evidence:{wall_thickness_verification:{status:'unverified'}}}];
+  assert.match(ctx.renderDesignSpecimenMetricStrip(item), /Unverified · SPC/);
+  item.validation_gates[0].evidence.wall_thickness_verification.status='fail';
+  assert.match(ctx.renderDesignSpecimenMetricStrip(item), /Fail · SPC/);
 });

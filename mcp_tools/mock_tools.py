@@ -760,7 +760,7 @@ def _generate_geometry_stl(payload: dict[str, Any]) -> dict[str, Any]:
         "top_bottom_cap": cap,
         "tpms_thickness": generator_meta.get("tpms_thickness") if geometry_type == "gyroid" else payload.get("tpms_thickness"),
         "tpms_resolution": payload.get("tpms_resolution"),
-        "tool_version": "tpms-geometry-wall-cell-v1",
+        "tool_version": "tpms-geometry-wall-cell-v2-clean-stl",
     }
     geometry_hash = hashlib.sha1(json.dumps(digest_source, sort_keys=True).encode("utf-8")).hexdigest()
     estimated_volume = float(generator_meta.get("estimated_volume_mm3") or (float(size[0] * size[1] * size[2]) * relative_density))
@@ -769,6 +769,8 @@ def _generate_geometry_stl(payload: dict[str, Any]) -> dict[str, Any]:
 
     if not wrote_stl:
         stl_path.write_text(stl_text, encoding="utf-8")
+        from mcp_tools.mesh_quality import finalize_generated_stl
+        generator_meta['serialized_mesh_cleanup'] = finalize_generated_stl(stl_path, size)
     preview_path.write_text(
         (
             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"760\" height=\"260\" viewBox=\"0 0 760 260\">"
@@ -860,53 +862,22 @@ def _check_mesh_quality(payload: dict[str, Any]) -> dict[str, Any]:
     if compute_enabled():
         return compute_sync('geometry.quality', payload)
     stl_path = Path(str(payload.get("stl_path", "")))
-    if not stl_path.exists():
-        return {
-            "ok": False,
-            "tool": "geometry.check_mesh_quality",
-            "mesh_status": "fail",
-            "mesh_report": {},
-            "watertight": False,
-            "non_manifold_edges": 0,
-            "inverted_normals": 0,
-            "self_intersections": 0,
-            "disconnected_components": 0,
-            "bounding_box_mm": [0.0, 0.0, 0.0],
-            "volume_mm3": 0.0,
-            "reject_reasons": [f"stl_path does not exist: {stl_path}"],
-            "warnings": [],
-        }
-
-    expected_bbox = _vector3(payload.get("expected_bounding_box_mm"), [30.0, 30.0, 30.0])
-    reject_reasons: list[str] = []
-    if any(item <= 0.0 for item in expected_bbox):
-        reject_reasons.append("expected_bounding_box_mm contains non-positive value")
-    if stl_path.stat().st_size < 128:
-        reject_reasons.append("stl file appears too small")
-
-    mesh_ok = len(reject_reasons) == 0
-    mesh_report = {
-        "watertight": True,
-        "non_manifold_edges": 0,
-        "inverted_normals": 0,
-        "self_intersections": 0,
-        "disconnected_components": 1,
-        "bbox": expected_bbox,
-    }
-    volume = float(expected_bbox[0] * expected_bbox[1] * expected_bbox[2]) * 0.3
+    from mcp_tools.mesh_quality import inspect_stl
+    mesh_report = inspect_stl(stl_path, payload.get('expected_bounding_box_mm'))
+    mesh_ok = mesh_report['ok']
     return {
         "ok": mesh_ok,
         "tool": "geometry.check_mesh_quality",
         "mesh_status": "pass" if mesh_ok else "fail",
         "mesh_report": mesh_report,
-        "watertight": True,
-        "non_manifold_edges": 0,
-        "inverted_normals": 0,
-        "self_intersections": 0,
-        "disconnected_components": 1,
-        "bounding_box_mm": expected_bbox,
-        "volume_mm3": round(volume, 3),
-        "reject_reasons": reject_reasons,
+        "watertight": mesh_report.get('watertight', False),
+        "non_manifold_edges": mesh_report.get('non_manifold_edges'),
+        "inverted_normals": mesh_report.get('inverted_normals'),
+        "self_intersections": None,
+        "disconnected_components": mesh_report.get('disconnected_components'),
+        "bounding_box_mm": mesh_report.get('bbox', []),
+        "volume_mm3": mesh_report.get('volume_mm3'),
+        "reject_reasons": mesh_report['reject_reasons'],
         "warnings": [],
     }
 

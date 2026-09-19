@@ -759,6 +759,11 @@ def write_smooth_gyroid_stl(
     mesh.remove_unreferenced_vertices()
     mesh.metadata["name"] = name
     mesh.export(stl_path)
+    # Float32 STL serialization can collapse tiny triangles that were valid in
+    # memory. Clean and inspect the serialized artifact used by SPC/slicers.
+    from mcp_tools.mesh_quality import finalize_generated_stl
+    serialized_cleanup = finalize_generated_stl(stl_path, size)
+    final_mesh = serialized_cleanup['final_validation']
     solid_fraction = float(np.count_nonzero(levelset <= 0.0)) / float(levelset.size)
     return {
         "generator_backend": "tpms_gyroid_marching_cubes",
@@ -777,8 +782,10 @@ def write_smooth_gyroid_stl(
         "crop_mode": "centered_periodic_field",
         "crop_size_mm": size,
         "generation_envelope_mm": [cx * cell, cy * cell, cz * cell / _clamp(float(anisotropy_ratio), 0.5, 2.0)],
-        "vertex_count": int(len(mesh.vertices)),
-        "triangle_count": int(len(mesh.faces)),
+        "vertex_count": final_mesh['vertex_count'],
+        "triangle_count": final_mesh['triangle_count'],
+        "serialized_mesh_cleanup": serialized_cleanup,
+        "stl_sha256": final_mesh['stl_sha256'],
         "connected_component_count_before_cleanup": component_count_before,
         "connected_component_count_after_cleanup": 1 if len(mesh.faces) else 0,
         "removed_disconnected_component_count": removed_component_count,

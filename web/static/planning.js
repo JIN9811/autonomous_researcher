@@ -11477,12 +11477,21 @@ function renderDesignSpecimenMetricStrip(item, helpers = {}) {
     : item.mass_evidence?.source === "slicer" ? item.mass_evidence.mass_g : null;
   const duration = item.duration_evidence?.source === "slicer" ? item.duration_evidence.duration_min : null;
   const performance = item.performance_evidence;
+  const gates = Array.isArray(item.validation_gates) ? item.validation_gates : [];
+  const manufacturing = gates.find(gate => gate.gate === 'manufacturability');
+  const wall = manufacturing?.evidence?.wall_thickness_verification;
+  const failed = gates.find(gate => ['geometry', 'mesh', 'manufacturability'].includes(gate.gate) && ['fail', 'blocked'].includes(gate.status));
+  const designStatus = item.design_evaluation?.validity?.status;
+  const validity = failed
+    ? (failed === manufacturing && wall?.status === 'unverified' ? 'Unverified · SPC' : 'Fail · SPC')
+    : manufacturing?.status === 'pass' ? 'Pass · SPC'
+      : ['pass', 'fail'].includes(designStatus) ? `${designStatus === 'pass' ? 'Pass' : 'Fail'} · Design` : 'Awaiting validation';
   const fields = [
     ["Cell size", quantity(item.cell_size_mm ?? item.parameters?.cell_size_mm, "mm")],
     ["Wall thickness", quantity(item.wall_thickness_mm ?? item.parameters?.wall_thickness_mm, "mm")],
     ["Mass", quantity(mass, "g")],
-    ["Print time (slicer)", quantity(duration, "min", "Awaiting slicer")],
-    ["Validity", item.design_evaluation?.validity?.status || "Not evaluated"],
+    ["Print time", quantity(duration, "min", "Awaiting slicer")],
+    ["Validity", validity],
     ["Performance", performance?.unit ? quantity(performance.value, performance.unit, "Awaiting analysis") : "Awaiting analysis"],
     ["STL", item.stl_url || item.stl_path ? "Ready" : "Pending"],
     ["G-code", item.gcode_url || item.gcode_path ? "Ready" : "Pending"],
@@ -11705,6 +11714,7 @@ function designActualSpecimenRows(screenReport, designReport, report) {
       gcode_path: layer.gcode_path || thread.gcode_path,
       mass_evidence: fabricationReport.process_plan?.mass_evidence,
       duration_evidence: fabricationReport.process_plan?.duration_evidence,
+      validation_gates: fabricationReport.quality_gates,
     });
     if (row && packet.physical_location) row.physical_location = packet.physical_location;
   }
@@ -12273,11 +12283,13 @@ function designArchivedSpecimenEvidence(report) {
             if (result.run_id && result.run_id !== runId) continue;
             const prior = cache.records[id] || {specimen_id: id};
             if (fabrication) {
-              const plan = (result.fabrication_report || payload.data?.fabrication_report)?.process_plan || {};
+              const report = result.fabrication_report || payload.data?.fabrication_report || {};
+              const plan = report.process_plan || {};
               const slicer = result.slicer_result || {};
               const seconds = slicer.ok !== false ? Number(slicer.estimated_print_time_sec) : NaN;
               const grams = slicer.ok !== false ? Number(slicer.estimated_mass_g) : NaN;
               cache.records[id] = {...prior,
+                validation_gates: (report.quality_gates || []).filter(gate => ['geometry', 'mesh', 'manufacturability'].includes(gate.gate)),
                 mass_evidence: plan.mass_evidence?.source === 'slicer' ? plan.mass_evidence
                   : Number.isFinite(grams) && grams > 0 ? {source:'slicer',mass_g:grams} : prior.mass_evidence,
                 duration_evidence: plan.duration_evidence?.source === 'slicer' ? plan.duration_evidence
@@ -13492,7 +13504,7 @@ function renderSpecimenProgressDetailCards(report, status, agentLabel, profile, 
       <div class="ar-report-metrics">
         ${renderDashboardMetric("Layer", slicer.layer_height_mm || plan.layer_height_mm || spec.layer_height_mm || "-", "mm", "info")}
         ${renderDashboardMetric("Nozzle", slicer.nozzle_diameter_mm || plan.nozzle_diameter_mm || spec.nozzle_diameter_mm || "-", "mm", "running")}
-        ${renderDashboardMetric("Print time (slicer)", (estimatedPrintTime.duration_evidence?.source === "slicer" ? estimatedPrintTime.duration_evidence.duration_min : plan.duration_evidence?.source === "slicer" ? plan.duration_evidence.duration_min : null) ?? "Not available", "min", "metrics")}
+        ${renderDashboardMetric("Print time", (estimatedPrintTime.duration_evidence?.source === "slicer" ? estimatedPrintTime.duration_evidence.duration_min : plan.duration_evidence?.source === "slicer" ? plan.duration_evidence.duration_min : null) ?? "Not available", "min", "metrics")}
         ${renderDashboardMetric("Mass", filamentUsage.estimated_mass_g || plan.estimated_mass_g || spec.expected_mass_g || "-", "g", "specimen")}
       </div>
       ${renderDashboardRows([

@@ -102,7 +102,7 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
         ["Validity", validity.status || "unknown"],
         ["Performance", performance.status === "unassessed" ? "unassessed" : quantity(performance)],
         ["Mass (estimated)", quantity(cost.mass)],
-        ["Print time (slicer)", quantity(cost.duration?.source === 'slicer' ? cost.duration : null)],
+        ["Print time", quantity(cost.duration?.source === 'slicer' ? cost.duration : null)],
       ];
       const margins = visibleConstraintRows(details ? e.constraint_margins : []);
       const reasons = Array.isArray(validity.reasons) ? validity.reasons : [];
