@@ -1589,7 +1589,7 @@ def test_live_gui_analysis_report_exposes_multifidelity_contract() -> None:
     assert "function specimenVideoPreviewUrl(" in script
     assert "function specimenVideoStreamUrl(" in script
     assert "function specimenVideoUrlWithCacheBuster(" in script
-    assert 'fetchJsonOrThrow("/api/printer/video-status")' in script
+    assert 'fetchJsonOrThrowWithTimeout("/api/printer/video-status", {}, 15000)' in script
     assert "function printerVideoCameraPanel(" in script
     assert "const cameraPanel = printerVideoCameraPanel(screen.camera_panel || screen.camera || {});" in script
     assert "function applyPrinterVideoStatusResult(" in script
@@ -1604,7 +1604,7 @@ def test_live_gui_analysis_report_exposes_multifidelity_contract() -> None:
     assert "if (!liveSpecimenVideoPlaying || requestSeq !== liveSpecimenVideoStartSeq) return;" in script
     assert "const statusResult = await refreshLivePrinterMonitorStatus(liveLastSession, { force: true });" in script
     assert "applyPrinterMonitorSnapshotResult(statusResult);" in script
-    assert "const videoResult = await refreshLivePrinterVideoStatus();" in script
+    assert "refreshLivePrinterVideoStatus().then((videoResult) =>" in script
     assert "applyPrinterVideoStatusResult(videoResult);" in script
     assert "function renderSpecimenConnectionTestHeaderAction(" in script
     assert 'data-spm-connection-action="test"' in script
@@ -1615,7 +1615,7 @@ def test_live_gui_analysis_report_exposes_multifidelity_contract() -> None:
     assert "function renderSpecimenVideoHeaderControls(" in script
     assert 'data-spm-video-action="play"' in script
     assert 'data-spm-video-action="stop"' in script
-    assert 'aria-label="Play 3DP video"' in script
+    assert 'aria-label="Play or refresh 3DP video"' in script
     assert 'aria-label="Stop 3DP video"' in script
     assert 'action: renderSpecimenVideoHeaderControls(ctx)' in script
     assert 'refreshLivePrinterMonitorStatus(liveLastSession, { force: true })' in script

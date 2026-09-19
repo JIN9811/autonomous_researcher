@@ -12944,7 +12944,7 @@ function renderSpecimenVideoHeaderControls(ctx) {
   const status = active ? "streaming" : (liveSpecimenVideoPlaying ? "snapshot" : compactText(specimenFirstValue(camera.status, camera.summary, camera.mode, "preview"), 22));
   return `
     <div class="ar-spm-video-header-controls" aria-label="3DP video controls" title="${escapeHtml(`3DP video: ${status}`)}">
-      <button type="button" class="ar-spm-video-icon-button primary" data-spm-video-action="play" aria-label="Play 3DP video" title="Play 3DP video" ${active ? "disabled" : ""}><span aria-hidden="true">▶</span></button>
+      <button type="button" class="ar-spm-video-icon-button primary" data-spm-video-action="play" aria-label="Play or refresh 3DP video" title="Play or refresh 3DP video"><span aria-hidden="true">▶</span></button>
       <button type="button" class="ar-spm-video-icon-button" data-spm-video-action="stop" aria-label="Stop 3DP video" title="Stop 3DP video"><span aria-hidden="true">■</span></button>
       <small>${escapeHtml(status)}</small>
     </div>
@@ -13009,17 +13009,28 @@ async function startSpecimenVideoPlayback() {
   const requestSeq = liveSpecimenVideoStartSeq + 1;
   liveSpecimenVideoStartSeq = requestSeq;
   liveSpecimenVideoPlaying = true;
-  liveSpecimenVideoStartedAt = Date.now();
+  liveSpecimenVideoStartedAt = Math.max(Date.now(), Number(liveSpecimenVideoStartedAt || 0) + 1);
   setChatStatus("3DP VIDEO PLAY", "running");
   renderLiveRuntime(liveLastSession);
-  await Promise.all([
-    refreshLivePrinterMonitorStatus(liveLastSession, { force: true }),
-    refreshLivePrinterVideoStatus().then((videoResult) => {
-      if (!liveSpecimenVideoPlaying || requestSeq !== liveSpecimenVideoStartSeq) return;
-      applyPrinterVideoStatusResult(videoResult);
-      renderLiveRuntime(liveLastSession);
-    }),
-  ]);
+  try {
+    await Promise.all([
+      refreshLivePrinterMonitorStatus(liveLastSession, { force: true }),
+      refreshLivePrinterVideoStatus().then((videoResult) => {
+        if (!liveSpecimenVideoPlaying || requestSeq !== liveSpecimenVideoStartSeq) return;
+        if (videoResult?.ok === false) throw new Error(videoResult.error || videoResult.status || "Video status unavailable");
+        applyPrinterVideoStatusResult(videoResult);
+        renderLiveRuntime(liveLastSession);
+      }),
+    ]);
+  } catch (err) {
+    // A stopped/superseded Play must not undo the newest user action.
+    if (!liveSpecimenVideoPlaying || requestSeq !== liveSpecimenVideoStartSeq) return;
+    liveSpecimenVideoPlaying = false;
+    liveSpecimenVideoStartedAt = 0;
+    setChatStatus(`3DP VIDEO ERROR: ${err && err.message ? err.message : err}`, "warning");
+    renderLiveRuntime(liveLastSession);
+    return;
+  }
   if (!liveSpecimenVideoPlaying || requestSeq !== liveSpecimenVideoStartSeq) return;
   renderLiveRuntime(liveLastSession);
   setChatStatus("3DP VIDEO", "idle");
@@ -17974,7 +17985,7 @@ async function refreshLivePrinterVideoStatus() {
   if (livePrinterVideoStatusInFlight) return livePrinterVideoStatusInFlight;
   livePrinterVideoStatusInFlight = (async () => {
     try {
-      return await fetchJsonOrThrow("/api/printer/video-status");
+      return await fetchJsonOrThrowWithTimeout("/api/printer/video-status", {}, 15000);
     } catch (err) {
       return {
         ok: false,
@@ -19211,12 +19222,7 @@ document.addEventListener("click", (event) => {
     event.stopPropagation();
     const action = specimenVideoButton.dataset.spmVideoAction || "";
     if (action === "play") {
-      specimenVideoButton.disabled = true;
-      startSpecimenVideoPlayback().catch((err) => {
-        liveSpecimenVideoPlaying = false;
-        setChatStatus(`3DP VIDEO ERROR: ${err}`, "warning");
-        renderLiveRuntime(liveLastSession);
-      });
+      startSpecimenVideoPlayback();
     } else if (action === "stop") {
       stopSpecimenVideoPlayback("manual");
     }
