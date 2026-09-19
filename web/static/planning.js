@@ -2285,7 +2285,7 @@ function annotatePlanningChatCycles(chatMessages, cycleStartIndex = 0) {
   let totalCycles = 0;
   const startIndex = Math.max(0, Number(cycleStartIndex || 0));
   const annotated = (chatMessages || []).map((msg, index) => {
-    if (index < startIndex) return { msg, index, cycle: 0, totalCycles: 0 };
+    if (index < startIndex && !msg._loopArchive) return { msg, index, cycle: 0, totalCycles: 0 };
     const explicitCycle = planningMessageCycleIndex(msg);
     if (explicitCycle > 0) currentCycle = explicitCycle;
     const explicitTotal = planningMessageTotalCycles(msg);
@@ -2396,7 +2396,9 @@ function makePlanningChatGroupKey(baseKey, msg, fallbackIndex) {
 }
 
 function buildPlanningChatItems(chatMessages) {
-  const sourceMessages = Array.isArray(chatMessages) ? chatMessages : [];
+  const sourceMessages = window.AX4LABLoopChatHistory
+    ? window.AX4LABLoopChatHistory.merge(chatMessages).filter(isChatSurfaceMessage)
+    : (Array.isArray(chatMessages) ? chatMessages : []);
   const latestOperatorIndex = sourceMessages.reduce((latest, msg, index) => (
     isOperatorPlanningMessage(msg) ? index : latest
   ), -1);
@@ -2451,7 +2453,7 @@ function buildPlanningChatItems(chatMessages) {
     const completedLoop = entry.cycle > 0 && latestCycle > 0 && (
       entry.cycle < latestCycle || (workflowComplete && entry.cycle <= latestCycle)
     );
-    if (entry.index >= cycleStartIndex && completedLoop) {
+    if ((entry.index >= cycleStartIndex || msg._loopArchive) && completedLoop) {
       appendLoopSummary(entry);
       return;
     }
@@ -2671,6 +2673,10 @@ function renderLoopArtifactHistory(payload) {
 }
 
 function syncPlanningChatAutoExpansion(items) {
+  // Also normalize UI state saved by an older version on page refresh.
+  while (planningExpandedChatGroups.size > 3) {
+    planningExpandedChatGroups.delete(planningExpandedChatGroups.values().next().value);
+  }
   const latest = [...items].reverse().find(item => item.type === "operator"
     || (item.group && item.group.baseKey !== "system" && item.group.role !== "system"));
   const key = latest ? planningChatItemRevealKey(latest) : "";
@@ -2793,7 +2799,7 @@ function bindPlanningChatGroupToggles() {
       event.preventDefault();
       const key = button.dataset.chatGroupKey || "";
       if (!key || button.disabled) return;
-      // Keep up to three bubbles in opening order, including loop summaries.
+      // All completed loops remain listed; at most three bubbles may be expanded.
       planningExpandedChatGroups.add(key);
       while (planningExpandedChatGroups.size > 3) {
         planningExpandedChatGroups.delete(planningExpandedChatGroups.values().next().value);
@@ -17888,6 +17894,11 @@ function applyPlanningSession(session, options = {}) {
     resetPlanningMessageDisplayState();
   }
   planningHistorySessionId = activeSessionId;
+  if (!window.AX4LABReplay && window.AX4LABLoopChatHistory) {
+    window.AX4LABLoopChatHistory.sync(liveLastSession, () => {
+      renderPlanningMessages(planningMessagesCache, {scrollToBottom: false});
+    });
+  }
   planningHistoryHasMore = Boolean(liveLastSession.has_more_messages);
   planningHistoryTotal = Number(liveLastSession.message_total || 0);
   const incomingMessages = Array.isArray(liveLastSession.messages) ? liveLastSession.messages : [];

@@ -4,6 +4,8 @@ from typing import Any
 
 
 def resolve_image_rechecks(gates: list[dict[str, Any]], incidents: list[dict[str, Any]]) -> None:
+    # Retain the existing caller surface; new checks remain independently scoped.
+    resolve_preprint_rechecks(gates, incidents)
     scope_fields = ("run_id", "experiment_id", "loop_id", "stage", "phase", "tool", "action")
     wrappers = {"ROS_IMAGE_FRAME_UNAVAILABLE", "ROS_IMAGE_TIMEOUT", "MISSING_REQUIRED_INPUT",
                 "SYSTEM_SAFE_STOP_RECOMMENDED", "VISION_REVIEW_REQUIRED"}
@@ -40,4 +42,55 @@ def resolve_image_rechecks(gates: list[dict[str, Any]], incidents: list[dict[str
             for incident in incidents:
                 if isinstance(incident, dict) and incident.get("incident_id") == failed["gate_id"]:
                     incident.update(status="resolved", resolved_by=passed["gate_id"], resolved_at=passed["created_at"])
+            break
+
+
+def resolve_preprint_rechecks(gates, incidents):
+    """Resolve manufacturing holds only with a newer same-specimen passing SPC attempt."""
+    scope = ('run_id', 'experiment_id', 'loop_id', 'stage', 'phase', 'agent', 'tool', 'action')
+    for index, failed in enumerate(gates):
+        if (not isinstance(failed, dict) or failed.get('stage') != 'specimen' or failed.get('phase') != 'post'
+                or failed.get('decision') != 'block' or failed.get('reason_code') != 'MANUFACTURABILITY_REJECTED'):
+            continue
+        audit = failed.get('audit_log') or {}
+        old = audit.get('preprint_validation') or {}
+        if (not all(failed.get(k) for k in ('gate_id','run_id','experiment_id','created_at'))
+                or failed.get('loop_id') is None or not old.get('specimen_id') or not old.get('execution_id')
+                or old.get('execution_status') != 'failed' or old.get('manufacturability') != 'fail'
+                or old.get('wall_status') not in {'fail','unverified'}
+                or not isinstance(old.get('attempt_index'), int)):
+            continue
+        # A nested contract/hardware failure is not a manufacturing-summary wrapper.
+        allowed = True
+        for alarm in failed.get('alarms', []):
+            code, path = alarm.get('reason_code'), alarm.get('source_path', '')
+            if code == 'MANUFACTURABILITY_REJECTED' and path == 'payload':
+                continue
+            if (code in {'CONTRACT_SCHEMA_INVALID','RESULT_NOT_OK','WARN'}
+                    and (path in {'payload.fabrication_report.fabrication_outcome', 'payload.specimen_result',
+                                  'payload.specimen_result.manufacturability', 'payload.artifact_execution'}
+                         or path in {f'payload.fabrication_report.quality_gates[{i}]' for i in range(4)}
+                         or (code == 'WARN' and path == 'payload.fabrication_report.quality_gates[4]'))):
+                continue
+            allowed = False
+        if not allowed:
+            continue
+        for passed in gates[index + 1:]:
+            if not isinstance(passed, dict) or any(passed.get(k) != failed.get(k) for k in scope):
+                continue
+            new = (passed.get('audit_log') or {}).get('preprint_validation') or {}
+            if (passed.get('decision') not in {'allow','allow_with_warning'} or passed.get('ok_for_next_stage') is not True
+                    or not passed.get('gate_id') or str(passed.get('created_at','')) <= str(failed['created_at'])
+                    or new.get('specimen_id') != old['specimen_id'] or not new.get('execution_id')
+                    or new['execution_id'] == old['execution_id'] or new.get('execution_status') != 'completed'
+                    or not isinstance(new.get('attempt_index'), int) or new['attempt_index'] <= old['attempt_index']
+                    or any(new.get(k) != 'pass' for k in ('geometry','mesh','manufacturability','wall_status'))
+                    or not isinstance(new.get('stl_sha256'), str) or len(new['stl_sha256']) != 64
+                    or any(char not in '0123456789abcdef' for char in new['stl_sha256'])):
+                continue
+            audit.update(lifecycle='resolved', resolved_by=passed['gate_id'], resolved_at=passed['created_at'],
+                         resolution='same_specimen_preprint_revalidated', resolved_execution_id=new['execution_id'])
+            for incident in incidents:
+                if isinstance(incident, dict) and incident.get('incident_id') == failed['gate_id']:
+                    incident.update(status='resolved', resolved_by=passed['gate_id'], resolved_at=passed['created_at'])
             break

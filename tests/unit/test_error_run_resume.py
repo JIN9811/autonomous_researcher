@@ -80,7 +80,14 @@ async def test_ordinary_pause_resume_does_not_enter_error_recovery(monkeypatch):
     def forbidden(_):
         pytest.fail("Normal resume must preserve the existing path")
     monkeypatch.setattr(run_recovery, "prepare_error_resume", forbidden, raising=False)
-    result = await controller.resume()
+    release = asyncio.Event()
+    task = asyncio.create_task(release.wait())
+    controller._set_planning_handoff_task(task)
+    try:
+        result = await controller.resume()
+    finally:
+        release.set()
+        await task
     assert result["ok"] and not controller._state.is_paused
     assert controller._state.stage == Stage.ANALYSIS
 

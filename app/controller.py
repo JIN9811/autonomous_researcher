@@ -3782,7 +3782,15 @@ class MainController:
             if not include:
                 continue
             if key_text in list_limits and isinstance(value, list):
-                compact[key_text] = cls._planning_list_summary(value, limit=list_limits[key_text])
+                report_keys = {
+                    "guardian_approval_queue": ("approval_id", "run_id", "stage", "title"),
+                    "tool_call_records": ("record_id", "call_id", "run_id", "stage", "tool", "guardian_decision", "guardian_reason_code"),
+                    "incident_records": ("stage", "risk_class"),
+                }.get(key_text, ())
+                compact[key_text] = [
+                    cls._planning_scalar_summary(item, keys=report_keys) if isinstance(item, dict) else item
+                    for item in value[-list_limits[key_text]:]
+                ]
                 continue
             if key_text == "design_report" and isinstance(value, dict) and value.get("evaluation_semantics") == "evidence_based_v1":
                 compact[key_text] = {**cls._planning_scalar_summary(value),
@@ -3840,7 +3848,7 @@ class MainController:
             )
         if isinstance(metadata.get("guardian_gates"), list):
             compact["guardian_gates"] = [
-                cls._select_runtime_fields(item, ("gate_id", "run_id", "experiment_id", "loop_id", "stage", "phase", "tool", "action", "audit_log", "decision", "reason_code", "risk_score", "alarms", "ok_for_next_stage", "created_at"))
+                cls._select_runtime_fields(item, ("gate_id", "run_id", "experiment_id", "loop_id", "stage", "phase", "agent", "tool", "action", "audit_log", "decision", "reason_code", "risk_score", "risk_vector", "alarms", "ok_for_next_stage", "created_at"))
                 for item in metadata["guardian_gates"][-20:]
                 if isinstance(item, dict)
             ]
@@ -4649,25 +4657,11 @@ class MainController:
         return {"ok": True, "message": "Paused", "state": self._state.model_dump(mode="json")}
 
     async def resume(self) -> dict[str, Any]:
-        """Resume pause, or revalidate a proven completed error boundary."""
-        if (self._state.run_metadata.get("vision_ros_retry") or {}).get("status") == "cycle_finished":
-            from app.vision_ros_recovery import resume_completed_cycle
-            return await resume_completed_cycle(self)
-        if (self._state.run_metadata.get("vision_ros_retry") or {}).get("status") in {"ready", "running"}:
-            from app.vision_ros_recovery import resume
-            return await resume(self)
-        if (self._state.run_metadata.get("guardian_review_retry") or {}).get("status") in {"ready", "running"}:
-            from app.guardian_review_recovery import resume_review
-            return await resume_review(self)
-        if (self._state.run_metadata.get("equipment_selection_resume") or {}).get("status") in {"ready", "running"}:
-            from app.equipment_selection_checkpoint import resume_selection
-            return await resume_selection(self)
-        if (self._state.run_metadata.get("vision_review_retry") or {}).get("status") in {"ready", "running"}:
-            from app.vision_review_recovery import resume_vision_review
-            return await resume_vision_review(self)
-        if (self._state.run_metadata.get("printer_wait_recovery") or {}).get("status") in {"ready", "running"}:
-            from app.printer_wait_recovery import resume_printer_wait
-            return await resume_printer_wait(self)
+        """Resume only an existing task or a scope-verified recovery boundary."""
+        from app.resume_routing import dispatch
+        routed = await dispatch(self)
+        if routed is not None:
+            return routed
         if self._state.stage == Stage.ERROR:
             async with self._error_resume_lock:
                 if self._planning_handoff_active():

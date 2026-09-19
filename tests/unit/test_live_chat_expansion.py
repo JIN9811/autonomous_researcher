@@ -53,6 +53,9 @@ assert.ok(!planningExpandedChatGroups.has('loop:1'));
 planningExpandedChatGroups.add('loop:1');
 syncPlanningChatAutoExpansion([loop]);
 assert.ok(planningExpandedChatGroups.has('loop:1'));
+for (let i=2; i<=7; i++) planningExpandedChatGroups.add(`loop:${i}`);
+syncPlanningChatAutoExpansion([loop,{type:'group',group:{...group,key:'after-loops'}}]);
+assert.equal(planningExpandedChatGroups.size,3,'automatic attention preserves the three-open limit');
 """
     result = subprocess.run(["node", "-e", script], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
@@ -97,7 +100,7 @@ assert.deepEqual([...planningExpandedChatGroups], ['first'], 'removed groups mus
 const callbacks = {};
 const planningChatLog = {querySelectorAll(selector) {
   const kind = selector.includes('chat-open') ? 'open' : 'hide';
-  return ['first', 'second', 'third', 'fourth', 'loop:1'].map(key => ({dataset: {chatGroupKey: key}, disabled: false,
+  return ['first', 'second', 'third', 'fourth', ...Array.from({length:7},(_,i)=>`loop:${i+1}`)].map(key => ({dataset: {chatGroupKey: key}, disabled: false,
            addEventListener(event, callback) { callbacks[`${kind}:${key}`] = callback; }}));
 }};
 let planningMessagesCache = ['first', 'second', 'third', 'fourth'];
@@ -126,7 +129,12 @@ assert.deepEqual([...planningExpandedChatGroups], ['fourth', 'loop:1'], 'reopene
 planningMessagesCache = ['loop:1', 'fourth', 'first', 'second'];
 callbacks['open:first'](event);
 callbacks['open:second'](event);
-assert.deepEqual([...planningExpandedChatGroups], ['loop:1', 'first', 'second'], 'summaries follow the same three-group limit');
+assert.deepEqual([...planningExpandedChatGroups], ['loop:1', 'first', 'second'], 'summaries share the three-group expansion limit');
+planningMessagesCache = [...Array.from({length:7},(_,i)=>`loop:${i+1}`),'fourth','first','second'];
+for (let i=2;i<=7;i++) callbacks[`open:loop:${i}`](event);
+assert.deepEqual([...planningExpandedChatGroups],['loop:5','loop:6','loop:7'],'all loops listed, only latest three opened');
+updatePlanningDisplayedMessages(planningMessagesCache,{immediate:IMMEDIATE});
+assert.deepEqual([...planningExpandedChatGroups],['loop:5','loop:6','loop:7'],'refresh preserves three loop expansions');
 """
     script = script.replace("IMMEDIATE", str(immediate).lower())
     result = subprocess.run(["node", "-e", script], capture_output=True, text=True)

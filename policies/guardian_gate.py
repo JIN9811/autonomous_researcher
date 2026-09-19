@@ -176,7 +176,7 @@ def guardian_gate(
     )
     return {
         "schema": "guardian_gate_result.v1",
-        "audit_log": {"check_scope": (
+        "audit_log": {"preprint_validation": _preprint_validation_evidence(payload, state, stage, phase), "check_scope": (
             "utm_clearance" if payload.get("utm_verification_2") or payload.get("utm_clear_execution")
             else "utm_placement" if payload.get("utm_verification_1")
             else str(payload.get("purpose") or "")
@@ -275,6 +275,38 @@ def tool_requires_action_shield(tool: str) -> bool:
     if name in ACTION_SHIELDED_TOOLS:
         return True
     return name.startswith(("lerobot.rollout.", "printer.", "graph.active_config."))
+
+
+def _preprint_validation_evidence(payload, state, stage, phase):
+    """Bind a fresh SPC check to its own archived attempt, never printer status."""
+    if stage != 'specimen' or phase != 'post':
+        return {}
+    report = payload.get('fabrication_report') or {}
+    execution = payload.get('artifact_execution') or {}
+    if not isinstance(report, dict) or not isinstance(execution, dict):
+        return {}
+    thread = report.get('digital_thread') or {}
+    if not isinstance(thread, dict) or not isinstance(report.get('quality_gates', []), list):
+        return {}
+    specimen = (getattr(state, 'current_experiment_spec', {}) or {}).get('specimen_id')
+    if (not specimen or execution.get('specimen_id') != specimen or thread.get('specimen_id') != specimen
+            or execution.get('run_id') != getattr(state, 'run_id', None)
+            or thread.get('run_id') != execution.get('run_id')
+            or execution.get('loop_index') != getattr(state, 'loop_count', None)
+            or execution.get('agent') != 'specimen_agent' or not execution.get('execution_id')):
+        return {}
+    gates = {g.get('gate'): g for g in report.get('quality_gates', []) if isinstance(g, dict)}
+    evidence = gates.get('manufacturability', {}).get('evidence') or {}
+    if not isinstance(evidence, dict):
+        return {}
+    wall = evidence.get('wall_thickness_verification') or {}
+    if not isinstance(wall, dict):
+        return {}
+    return {'specimen_id': specimen, 'execution_id': execution['execution_id'],
+            'attempt_index': execution.get('attempt_index'), 'execution_status': execution.get('status'),
+            'geometry': gates.get('geometry', {}).get('status'), 'mesh': gates.get('mesh', {}).get('status'),
+            'manufacturability': gates.get('manufacturability', {}).get('status'),
+            'wall_status': wall.get('status'), 'stl_sha256': wall.get('stl_sha256')}
 
 
 def _loop_count(state: Any, payload: dict[str, Any]) -> int:

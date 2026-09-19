@@ -464,7 +464,9 @@ class GuardianAgent(BaseAgent):
             recent_failures=recent_failures,
         )
         if failure_pattern:
-            reject_reasons.append(failure_pattern)
+            # Memory is historical evidence, not a current interlock. Current
+            # design, device and unresolved graph gates still decide blocking.
+            warnings.append(f"Historical failure reference: {failure_pattern}")
 
         if 0 <= mass <= max_mass * 1.05 and mass >= max_mass * 0.9:
             warnings.append("expected_mass_g is close to max_mass_g.")
