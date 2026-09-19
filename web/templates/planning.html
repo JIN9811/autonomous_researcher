@@ -84,7 +84,7 @@ Modification guide:
           <section class="mission-status-cell mission-status-run" data-label="Run" title="Run mode and activity state">
             {% if replay %}<select id="replay-run-select" aria-label="Archived run"><option>Loading…</option></select>{% endif %}
             <span id="planning-run-detail" title="Current run mode and state">No active run</span>
-            <span id="live-runtime-clock" class="runtime-chip">00:00</span>
+            <span id="live-runtime-clock" class="runtime-chip" title="Elapsed since experiment execution approval">--:--</span>
           </section>
           <section class="mission-status-cell mission-status-agent" data-label="Agent" title="Active agent and chat state">
             <span id="live-active-agent-chip" class="badge idle" title="Active agent">Orchestrator</span>

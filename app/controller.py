@@ -3594,6 +3594,7 @@ class MainController:
             "pending_specimen_input",
             "printer_wait_recovery",
             "planning_cycle_contract",
+            "run_clock",
             "mission_contract",
             "latest_mission_contract",
             "latest_orchestration_plan",
@@ -8300,11 +8301,19 @@ class MainController:
                 "key": key, "run_id": self._state.run_id, "loop": self._state.loop_count, "stage": Stage.DESIGN.value}
             prepared_decision = record.get("payload", {}).get("decision")
         boundary["status"] = "consumed"
+        clock = self._state.run_metadata.get("run_clock") or {}
+        if new_series or clock.get("run_id") != self._state.run_id or not clock.get("started_at"):
+            self._state.run_metadata["run_clock"] = {
+                "run_id": self._state.run_id,
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "source": "workflow_trigger_accepted",
+            }
         await self._append_planning_message(
             {
                 "role": "orchestrator",
                 "content": "SYSTEM_EVENT: WORKFLOW_TRIGGER_ACCEPTED\nstatus=started",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": self._state.run_metadata["run_clock"]["started_at"],
+                "run_id": self._state.run_id,
                 "model": "orchestrator_plan",
                 "ok": True,
             },

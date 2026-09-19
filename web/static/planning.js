@@ -343,7 +343,10 @@ let liveReadMarkers = {};
 let liveReviewedAgents = {};
 let livePinnedFindings = [];
 let liveOperatorReportStateRunId = "";
-let liveRuntimeStartedAt = Date.now();
+let liveRuntimeStartedAt = null;
+let liveRuntimeClockRunId = "";
+let liveRuntimeClockRequest = "";
+let liveRuntimeClockRetryAt = 0;
 let liveStreamState = "connecting";
 let liveSyncState = "idle";
 let liveLastSyncAt = null;
@@ -1336,6 +1339,7 @@ function compactPlanningStateForStorage(state = {}) {
     "latest_orchestrator_decision",
     "latest_orchestrator_handoff",
     "planning_cycle_contract",
+    "run_clock",
     "safety_budget",
     "latest_mission_contract",
     "latest_orchestration_plan",
@@ -1530,7 +1534,9 @@ function resetLiveRunScopedStateForAuthoritativeSession(serverSession = {}) {
   liveGraphActionStatus = null;
   liveGuardianStatus = null;
   liveVisionSpecimenRetryCheckpoints.clear();
-  liveRuntimeStartedAt = Date.now();
+  liveRuntimeStartedAt = null;
+  liveRuntimeClockRunId = "";
+  liveRuntimeClockRetryAt = 0;
   resetPlanningMessageDisplayState();
   liveLastSnapshot = {
     system_resources: liveLastSnapshot.system_resources,
@@ -17415,6 +17421,7 @@ function renderLiveMissionProgressSlim(session = liveLastSession) {
 
 function renderLiveRuntime(session) {
   if (!session) return;
+  syncLiveRuntimeClock(session);
   if (liveSelectedAgent !== "specimen") stopSpecimenVideoPlayback("agent_page_change", { render: false });
   const snapshot = liveLastSnapshot || {};
   const state = session.state || snapshot.state || {};
@@ -17540,12 +17547,59 @@ async function resolveLiveApproval(runId, approvalId, decision) {
   }
 }
 
+function liveWorkflowStartedAt(messages, runId) {
+  const times = (Array.isArray(messages) ? messages : []).filter(message =>
+    (!message.run_id || message.run_id === runId) && message.ok !== false &&
+    (message.event_type === "planning.workflow_trigger_accepted" ||
+      String(message.content || "").startsWith("SYSTEM_EVENT: WORKFLOW_TRIGGER_ACCEPTED\n")))
+    .map(message => Date.parse(message.timestamp || "")).filter(Number.isFinite);
+  return times.length ? Math.min(...times) : null;
+}
+
+function syncLiveRuntimeClock(session) {
+  if (window.AX4LABReplay) return;
+  const state = session?.state || {};
+  const runId = String(state.run_id || "");
+  if (runId !== liveRuntimeClockRunId) {
+    liveRuntimeClockRunId = runId;
+    liveRuntimeStartedAt = null;
+    liveRuntimeClockRetryAt = 0;
+  }
+  const clock = state.run_metadata?.run_clock || {};
+  const authoritative = clock.run_id === runId ? Date.parse(clock.started_at || "") : NaN;
+  if (Number.isFinite(authoritative)) liveRuntimeStartedAt = authoritative;
+  tickLiveRuntimeClock();
+  if (!runId || liveRuntimeStartedAt !== null || liveRuntimeClockRequest === runId || Date.now() < liveRuntimeClockRetryAt) return;
+  // Compatibility for already running servers: read the durable opening
+  // transcript, not a browser's arrival time or the planning-session creation.
+  liveRuntimeClockRequest = runId;
+  liveRuntimeClockRetryAt = Date.now() + 30000;
+  const query = new URLSearchParams({ before: "240", limit: "240" });
+  if (session.planning_session_id) query.set("session_id", session.planning_session_id);
+  fetch(`/api/planning/messages?${query}`).then(response => response.ok ? response.json() : null).then(page => {
+    if (liveRuntimeClockRunId !== runId || liveRuntimeStartedAt !== null || !page) return;
+    const path = String(page.transcript_path || "").replaceAll("\\", "/");
+    if (!path.split("/").includes(runId)) return; // Never borrow another run's clock.
+    liveRuntimeStartedAt = liveWorkflowStartedAt(page.messages, runId);
+    tickLiveRuntimeClock();
+  }).catch(() => {}).finally(() => {
+    if (liveRuntimeClockRequest === runId) liveRuntimeClockRequest = "";
+  });
+}
+
 function tickLiveRuntimeClock() {
   if (!liveRuntimeClock) return;
+  if (liveRuntimeStartedAt === null) {
+    liveRuntimeClock.textContent = "--:--";
+    return;
+  }
   const elapsed = Math.max(0, Math.floor((Date.now() - liveRuntimeStartedAt) / 1000));
-  const minutes = String(Math.floor(elapsed / 60)).padStart(2, "0");
+  const days = Math.floor(elapsed / 86400);
+  const hours = String(Math.floor(elapsed / 3600) % 24).padStart(2, "0");
+  const minutes = String(Math.floor(elapsed / 60) % 60).padStart(2, "0");
   const seconds = String(elapsed % 60).padStart(2, "0");
-  liveRuntimeClock.textContent = `${minutes}:${seconds}`;
+  liveRuntimeClock.textContent = `${days}d ${hours}h ${minutes}m ${seconds}s`;
+  liveRuntimeClock.title = `Elapsed since experiment execution approval: ${new Date(liveRuntimeStartedAt).toISOString()}`;
 }
 
 function setLiveGuiDebugState(payload = {}) {
