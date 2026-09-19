@@ -41,3 +41,17 @@ test('new steps return to latest; unchanged refresh preserves browsing and new r
   assert.equal(h.status('lhs').total, 0);
   assert.equal(h.move('posterior', -1), false);
 });
+
+test('2D and 3D artifacts belong to one BO step and survive legacy PNG refreshes', () => {
+  const h = model(); h.reset('run-a');
+  const base = artifact(8);
+  const surface = mode => ({...base, name: base.name.replace('.png', `_${mode}.png`), url: `/step8_${mode}.png`});
+  h.accept([surface('3d'), base, surface('2d')]);
+  assert.equal(h.status('posterior').total, 1);
+  assert.equal(h.current('posterior').artifacts.surface_2d_url, '/step8_2d.png');
+  assert.equal(h.current('posterior').artifacts.surface_3d_url, '/step8_3d.png');
+  h.accept([base]);
+  assert.equal(h.current('posterior').artifacts.surface_3d_url, '/step8_3d.png');
+  h.reset('run-b');
+  assert.equal(h.current('posterior'), null);
+});

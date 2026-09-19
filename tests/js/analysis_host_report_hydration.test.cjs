@@ -34,6 +34,11 @@ test("FD retains the same measured peak and drop as the normalized SS preview", 
   context.analysis.stress_strain_curve = {};
   const legacy = vm.runInContext("renderAnalysisCurve(analysis, 'fd')", context);
   assert.equal(legacy.match(/<polyline points="([^"]+)" class="curve"/)[1].split(" ").length, 2);
+  context.analysis.stress_strain_curve = {preview: [{strain_pct: 25, stress_MPa: 1}, {_truncated_items: 120}]};
+  for (const mode of ['ss', 'fd']) {
+    assert.equal(vm.runInContext(`renderAnalysisCurve(analysis, '${mode}')`, context), 'empty',
+      'a truncated prefix must not be plotted as the complete measured curve');
+  }
 });
 
 function declaration(name) {

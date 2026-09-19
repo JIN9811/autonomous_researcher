@@ -27243,6 +27243,7 @@ void main() {
   var SNAPSHOT_URL = "/api/lerobot/joint-telemetry/snapshot";
   var SPECIMEN_POSE_URL = "/api/lerobot/active-robot-cam/specimen-pose";
   var SPECIMEN_POSE_POLL_MS = 1e3;
+  var CHART_RENDER_INTERVAL_MS = 1e3 / 15;
   var CAMERA_FIT_PADDING = 1;
   var CAMERA_FIT_DISTANCE_SCALE = 1.8;
   var CAMERA_FIT_VERTICAL_OFFSET_M = 0;
@@ -27282,6 +27283,10 @@ void main() {
     reconnectTimer: null,
     reconnectAttempt: 0,
     chartFrame: null,
+    chartTimer: null,
+    chartRenderedAt: -Infinity,
+    chartProjection: null,
+    telemetryUrl: "",
     selectedJoint: "Gripper",
     poseMount: null,
     chartMount: null,
@@ -28142,10 +28147,35 @@ void main() {
   function chartOption() {
     const joint = runtime.selectedJoint;
     const originElapsed = 0;
-    const actual = runtime.history.map((sample) => [normalizedElapsed(sample, originElapsed), sample.actual_source && sample.actual_source[joint]]);
-    const target = runtime.history.map((sample) => [normalizedElapsed(sample, originElapsed), sample.target_source && sample.target_source[joint]]);
+    let projection = runtime.chartProjection;
+    if (!projection || projection.history !== runtime.history || projection.joint !== joint) {
+      projection = runtime.chartProjection = {
+        history: runtime.history,
+        joint,
+        count: 0,
+        actual: [],
+        target: [],
+        minimum: Infinity,
+        maximum: -Infinity
+      };
+    }
+    for (; projection.count < runtime.history.length; projection.count++) {
+      const sample = runtime.history[projection.count];
+      const elapsed = normalizedElapsed(sample, originElapsed);
+      const actualValue = sample.actual_source && sample.actual_source[joint];
+      const targetValue = sample.target_source && sample.target_source[joint];
+      projection.actual.push([elapsed, actualValue]);
+      projection.target.push([elapsed, targetValue]);
+      for (const value of [actualValue, targetValue]) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) continue;
+        projection.minimum = Math.min(projection.minimum, numeric);
+        projection.maximum = Math.max(projection.maximum, numeric);
+      }
+    }
+    const { actual, target } = projection;
     const unit = sourceUnit(joint);
-    const yDomain = stableYDomain(joint, actual, target);
+    const yDomain = stableYDomain(joint, [[0, projection.minimum], [0, projection.maximum]]);
     const latestElapsed = runtime.history.length ? normalizedElapsed(runtime.history[runtime.history.length - 1], originElapsed) : 1;
     return {
       backgroundColor: "#ffffff",
@@ -28432,11 +28462,17 @@ void main() {
     applySpecimenGraspVisualization(state.grasp_outcome || null, state.measured || null);
   }
   function scheduleChartRender() {
-    if (runtime.chartFrame) return;
-    runtime.chartFrame = window.requestAnimationFrame(() => {
-      runtime.chartFrame = null;
-      if (runtime.chart) runtime.chart.setOption(chartOption(), true);
-    });
+    if (runtime.chartFrame !== null || runtime.chartTimer !== null) return;
+    const delay = Math.max(0, CHART_RENDER_INTERVAL_MS - (performance.now() - runtime.chartRenderedAt));
+    runtime.chartTimer = window.setTimeout(() => {
+      runtime.chartTimer = null;
+      runtime.chartFrame = window.requestAnimationFrame(() => {
+        runtime.chartFrame = null;
+        if (!runtime.chart || document.hidden) return;
+        runtime.chartRenderedAt = performance.now();
+        runtime.chart.setOption(chartOption(), { notMerge: false, lazyUpdate: true });
+      });
+    }, delay);
   }
   function hydrateTrackingChart(mount) {
     runtime.chartMount = mount;
@@ -28479,6 +28515,7 @@ void main() {
     resetSpecimenGraspVisualization();
     runtime.sessionId = sessionId;
     runtime.history = [];
+    runtime.chartProjection = null;
     runtime.latestSequence = -1;
     runtime.executionIndex = null;
     runtime.latestActualRad = {};
@@ -28590,12 +28627,14 @@ void main() {
     if (!telemetryMountsPresent()) return;
     if (runtime.websocket && [WebSocket.CONNECTING, WebSocket.OPEN].includes(runtime.websocket.readyState)) return;
     telemetryConnecting = true;
-    let url = websocketUrl();
+    let url = runtime.telemetryUrl || websocketUrl();
     try {
-      const response = await fetch("/api/monitor-workers/robot", { cache: "no-store", signal: AbortSignal.timeout(15e3) });
-      if (response.ok) {
-        const worker = await response.json();
-        if (worker.isolated && worker.websocket_url) url = worker.websocket_url;
+      if (!runtime.telemetryUrl) {
+        const response = await fetch("/api/monitor-workers/robot", { cache: "no-store", signal: AbortSignal.timeout(15e3) });
+        if (response.ok) {
+          const worker = await response.json();
+          if (worker.isolated && worker.websocket_url) runtime.telemetryUrl = url = worker.websocket_url;
+        }
       }
     } catch (_) {
     } finally {
@@ -28620,6 +28659,7 @@ void main() {
     socket.onerror = () => setPoseStatus("telemetry connection error", "failed");
     socket.onclose = () => {
       if (runtime.websocket === socket) runtime.websocket = null;
+      runtime.telemetryUrl = "";
       if (!telemetryMountsPresent()) return;
       const delay = Math.min(5e3, 250 * 2 ** runtime.reconnectAttempt);
       runtime.reconnectAttempt = Math.min(runtime.reconnectAttempt + 1, 5);
@@ -28692,6 +28732,10 @@ void main() {
       connectTelemetrySocket();
       if (!runtime.sessionId) loadSnapshot();
     } else {
+      if (runtime.chartTimer !== null) window.clearTimeout(runtime.chartTimer);
+      if (runtime.chartFrame !== null) window.cancelAnimationFrame(runtime.chartFrame);
+      runtime.chartTimer = null;
+      runtime.chartFrame = null;
       if (runtime.viewer) runtime.viewer.pause();
       if (runtime.chart) runtime.chart.dispose();
       runtime.chart = null;
@@ -28701,6 +28745,9 @@ void main() {
     }
   }
   window.ATRRobotTelemetryCards = { hydrate, disconnect: closeTelemetrySocket };
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && runtime.chart) scheduleChartRender();
+  });
   var hydrationQueued = false;
   var domObserver = new MutationObserver(() => {
     if (hydrationQueued) return;

@@ -100,6 +100,65 @@ function sandbox() {
   return context;
 }
 
+test('Objective Equation stays stable through compact hydration and resets only with its run', () => {
+  const context=sandbox();
+  vm.runInContext(fs.readFileSync(asset,'utf8'),context);
+  const s=services(), renders=[];
+  s.boVisualization.renderEquationCard=payload=>{renders.push(payload);return `<div>${payload.objective?.name || 'empty'}</div>`;};
+  const ui=context.window.AX4LABBOUI.createFrontend(s);
+  const report={state:{run_id:'run-a'},sections:{objective_display:{run_id:'run-a',name:'SEA'}}};
+  assert.match(ui.renderDashboard(report),/>SEA</);
+  for(const sections of [{},{objective_display:null},{objective_display:{run_id:'foreign',name:'wrong'}}]) {
+    assert.match(ui.renderDashboard({state:report.state,sections}),/>SEA</);
+  }
+  assert.equal(renders.length,1,'polling must not collapse/rebuild the equation');
+  report.sections.objective_display.name='Changed objective';
+  assert.match(ui.renderDashboard(report),/Changed objective/);
+  assert.equal(renders.length,2);
+  assert.doesNotMatch(ui.renderDashboard({state:{run_id:'run-b'},sections:{objective_display:null}}),/Changed objective|>SEA</);
+});
+
+test("restored and historical BO plots retain approved 2D/3D artifacts without live GP metadata", async () => {
+  const context = sandbox();
+  const surface = require('../../web/static/bo_posterior_surface.js');
+  context.window.BOPosteriorSurface = surface;
+  context.window.fetch = async () => ({ok: true, json: async () => ({run_id: 'run-a', artifacts:
+    [7, 8].flatMap(step => ['', '_2d', '_3d'].map(suffix => ({
+      run_id: 'run-a', name: `run-a_bo_step_00${step}_posterior${suffix}.png`, url: `/bo-${step}${suffix}.png`,
+    })))})});
+  vm.runInContext(fs.readFileSync(asset, 'utf8'), context);
+  const frontend = context.window.AX4LABBOUI.createFrontend(services());
+  const report = {state: {run_id: 'run-a'}};
+  frontend.renderDashboard(report);
+  await new Promise(resolve => setImmediate(resolve));
+  let html = frontend.renderDashboard(report);
+  assert.match(html, /data-bo-surface-mode="2d"/);
+  assert.match(html, /data-bo-surface-mode="3d"/);
+  assert.match(html, /src="\/bo-8_2d.png"/);
+  assert.match(html, /src="\/bo-8_3d.png"/);
+  assert.doesNotMatch(html, /src="\/bo-8.png"/);
+  frontend.movePlotHistory('posterior', -1);
+  html = frontend.renderDashboard(report);
+  assert.match(html, /src="\/bo-7_2d.png"/);
+  assert.doesNotMatch(html, /src="\/bo-8/);
+});
+
+test("compact refresh preserves same-run archived surfaces but clears a foreign run", () => {
+  const surface = {dataset: {boSurfaceRun:'run-a'}};
+  const posterior = {innerHTML:'approved surfaces', querySelector: () => surface};
+  const context = vm.createContext({
+    liveBoVisualizationHydrationTimer:null,liveBoVisualization:null,
+    invalidateLiveCenterRender:()=>{},liveSelectedAgent:'bo',liveCurrentView:'report',
+    liveReportPanel:{querySelector:()=>posterior},liveCurrentRunId:()=> 'run-a',
+  });
+  vm.runInContext(declaration('clearLiveBoVisualization'), context);
+  context.clearLiveBoVisualization();
+  assert.equal(posterior.innerHTML, 'approved surfaces');
+  surface.dataset.boSurfaceRun = 'old-run';
+  context.clearLiveBoVisualization();
+  assert.match(posterior.innerHTML, /Waiting for a completed BO step/);
+});
+
 test("BO header arrows browse real artifact entries independently without changing objective", async () => {
   const context = sandbox();
   let fetched = 0;

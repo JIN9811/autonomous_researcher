@@ -13,8 +13,10 @@ function viewer() {
   });
   vm.runInContext(source + `
     const originalApplyMotionState = applyMotionState;
+    const originalScheduleChartRender = scheduleChartRender;
     scheduleChartRender = () => {};
     globalThis.api = { runtime, appendSample, consumePacket, chartOption, loadSnapshot,
+      scheduleChartRender:originalScheduleChartRender, connectTelemetrySocket, closeTelemetrySocket,
       applyMotionState: originalApplyMotionState, applyArtifacts, restoreTelemetryStatus };
   `, context);
   return context;
@@ -24,6 +26,62 @@ const sample = (sequence, elapsed_s = sequence - 1) => ({
   type: "joint_sample", session_id: "test", sequence, elapsed_s,
   actual_source: { Joint1: sequence, Gripper: sequence % 100 },
   target_source: { Joint1: sequence + 1, Gripper: sequence % 100 + 1 },
+});
+
+test('chart projection appends once and resets for a joint or session change without losing points', () => {
+  const {api}=viewer();
+  for(let i=1;i<=5000;i++) api.appendSample(sample(i));
+  const first=api.chartOption();
+  const points=first.series[0].data;
+  assert.equal(points.length,5000);
+  assert.equal(api.chartOption().series[0].data,points);
+  api.appendSample(sample(5001));
+  assert.equal(api.chartOption().series[0].data,points);
+  assert.equal(points.length,5001);
+  api.runtime.selectedJoint='Joint1';
+  assert.notEqual(api.chartOption().series[0].data,points);
+  assert.equal(api.chartOption().series[0].data.at(-1)[1],5001);
+  api.appendSample({...sample(1),session_id:'new'});
+  assert.equal(api.chartOption().series[0].data.length,1);
+});
+
+test('chart bursts coalesce at 15 FPS while every received sample remains available', () => {
+  const context=viewer(), {api}=context;
+  let now=0, timer, frame, delay, paints=0;
+  context.performance={now:()=>now};
+  context.window.setTimeout=(fn,ms)=>{timer=fn;delay=ms;return 1;};
+  context.window.requestAnimationFrame=fn=>{frame=fn;return 2;};
+  api.runtime.chart={setOption:(option,config)=>{
+    paints++;assert.equal(config.notMerge,false);
+    assert.equal(option.series[0].data.length,api.runtime.history.length);
+  }};
+  for(let i=1;i<=128;i++){api.appendSample(sample(i));api.scheduleChartRender();}
+  timer();frame();
+  assert.equal(paints,1);
+  now=10;api.appendSample(sample(129));api.scheduleChartRender();
+  assert.ok(delay>56&&delay<57);
+  now=67;timer();frame();
+  assert.equal(paints,2);
+  assert.equal(api.runtime.history.length,129);
+});
+
+test('remount reuses worker discovery but unexpected disconnect discovers a new worker', async () => {
+  const context=viewer(),{api}=context;
+  context.document.querySelector=()=>({});
+  context.window.location={protocol:'http:',host:'127.0.0.1:7860'};
+  context.AbortSignal=AbortSignal;
+  context.window.setTimeout=()=>1;
+  context.window.clearTimeout=()=>{};
+  let discoveries=0;
+  context.fetch=async()=>{discoveries++;return {ok:true,json:async()=>({isolated:true,websocket_url:'ws://worker/joints'})};};
+  context.WebSocket=class {static CONNECTING=0;static OPEN=1;readyState=1;close(){}};
+  await api.connectTelemetrySocket();
+  api.closeTelemetrySocket();
+  await api.connectTelemetrySocket();
+  assert.equal(discoveries,1);
+  api.runtime.websocket.onclose();
+  await api.connectTelemetrySocket();
+  assert.equal(discoveries,2);
 });
 
 test("remounted terminal cards restore accepted status without consuming old samples", () => {

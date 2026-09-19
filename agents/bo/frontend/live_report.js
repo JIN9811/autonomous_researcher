@@ -19,14 +19,20 @@
       for (const item of artifacts || []) {
         if (item.run_id !== runId || !item.url) continue;
         const name = String(item.name || item.path?.split('/').pop() || '');
-        const posterior = name.match(/_bo_step_(\d+)_posterior\.png$/);
+        const posterior = name.match(/_bo_step_(\d+)_posterior(?:_(2d|3d))?\.png$/);
         const lhs = name.match(/_lhs_design_step_(\d+)\.png$/);
         if (!posterior && !lhs) continue;
         const kind = posterior ? 'posterior' : 'lhs';
-        const entry = {...item, key: name, step: Number((posterior || lhs)[1])};
-        const index = entries[kind].findIndex(row => row.key === name);
+        const key = posterior ? name.replace(/_(2d|3d)\.png$/, '.png') : name;
+        const artifactKey = posterior?.[2] ? `surface_${posterior[2]}_url` : 'png_url';
+        const entry = {...item, key, step: Number((posterior || lhs)[1]), artifacts: {[artifactKey]: item.url}};
+        const index = entries[kind].findIndex(row => row.key === key);
         if (index < 0) entries[kind].push(entry);
-        else if (item.execution_id || !entries[kind][index].execution_id) entries[kind][index] = entry;
+        else if (item.execution_id || !entries[kind][index].execution_id) {
+          const previous = entries[kind][index];
+          const sameAttempt = !previous.execution_id || !item.execution_id || previous.execution_id === item.execution_id;
+          entries[kind][index] = {...entry, artifacts: {...(sameAttempt ? previous.artifacts : {}), ...entry.artifacts}};
+        }
       }
       for (const kind of ['posterior', 'lhs']) {
         entries[kind].sort((a, b) => a.step - b.step || a.key.localeCompare(b.key));
@@ -56,12 +62,14 @@
     let historyRequest = null;
     let historyFetchedAt = 0;
     let disposed = false;
+    let equationCache = null;
     function refreshHistory(run) {
       if (run !== historyRun) {
         historyRun = run;
         history.reset(run);
         historyRequest = null;
         historyFetchedAt = 0;
+        equationCache = null;
       }
       if (!run || !global.fetch || historyRequest || Date.now() - historyFetchedAt < 15000) return;
       const request = global.fetch(`/api/runs/${encodeURIComponent(run)}/artifacts`, {cache: "no-store"});
@@ -88,11 +96,17 @@
     }
     function historyBody(kind, fallback, latestStep, latestUrl) {
       const item = history.current(kind);
+      // Archived steps retain both approved views even when compact live state
+      // has no GP payload. Never route them through the legacy 1D PNG.
+      if (kind === 'posterior' && item && !(history.status(kind).latest && Number(latestStep) > item.step)) {
+        const surface = {run_id: historyRun, step: item.step, artifacts: item.artifacts};
+        if (global.BOPosteriorSurface?.valid(surface)) return global.BOPosteriorSurface.render(surface);
+      }
       // A new live step can arrive before its PNG is indexed. Keep it visible.
       if (!item || (history.status(kind).latest && (Number(latestStep) > item.step
           || (Number(latestStep) === item.step && latestUrl)))) return fallback;
       const prefix = kind === 'lhs' ? 'lhs' : 'bo';
-      return `<figure class="${prefix}-viz-matplotlib-figure"><img class="${prefix}-viz-matplotlib-image" src="${escape(item.url)}" alt="${kind === 'lhs' ? 'LHS' : 'BO posterior and acquisition'} step ${item.step}"></figure>`;
+      return `<figure class="${prefix}-viz-matplotlib-figure"><img class="${prefix}-viz-matplotlib-image" src="${escape(item.artifacts?.png_url || item.url)}" alt="${kind === 'lhs' ? 'LHS' : 'BO posterior and acquisition'} step ${item.step}"></figure>`;
     }
     const {
       latestReportBoResult,
@@ -228,12 +242,21 @@
       const hasVisualization = Boolean(renderer && renderer.isValid(visualization));
       const objective = report.sections?.objective_display;
       const hasObjectiveReport = Object.prototype.hasOwnProperty.call(report.sections || {}, "objective_display");
-      const equationPayload = objective
-        ? {schema: "bo_visualization.v1", objective, design_space: visualization?.design_space || {}}
-        : (hasObjectiveReport ? null : visualization);
-      const equationBody = equationPayload && renderer
-        ? renderer.renderEquationCard(equationPayload)
-        : '<div class="bo-viz-empty">Objective not configured for this run.</div>';
+      // Compact snapshots omit the run-bound objective. Do not alternate a
+      // resolved equation with an empty/legacy one on each hydration cycle.
+      const sameRunObjective = objective && (!objective.run_id || objective.run_id === historyRun);
+      const equationPayload = sameRunObjective
+        ? {schema: "bo_visualization.v1", objective,
+            design_space: Object.keys(visualization?.design_space || {}).length
+              ? visualization.design_space : equationCache?.payload.design_space || {}}
+        : equationCache?.payload || (hasObjectiveReport ? null : visualization);
+      if (equationPayload && renderer) {
+        const signature = JSON.stringify(equationPayload);
+        if (signature !== equationCache?.signature) {
+          equationCache = {signature, payload: equationPayload, body: renderer.renderEquationCard(equationPayload)};
+        }
+      }
+      const equationBody = equationCache?.body || '<div class="bo-viz-empty">Objective not configured for this run.</div>';
       const posteriorBody = hasVisualization
         ? renderer.renderPlot(visualization, {preferArtifact: true, mode: "parameter_slice", parameter: visualization.view?.selected_parameter || ""})
         : '<div class="bo-viz-empty">Waiting for a completed BO step.</div>';

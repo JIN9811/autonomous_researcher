@@ -11,7 +11,7 @@
   function render(payload) {
     if (!valid(payload)) return "";
     const run = String(payload.run_id || ""), mode = modes.get(run) || "2d";
-    return `<section class="bo-surface-card" data-bo-surface-run="${esc(run)}">
+    return `<section class="bo-surface-card" data-bo-surface-run="${esc(run)}" data-bo-surface-step="${esc(payload.step)}">
       <div class="bo-surface-toolbar"><div role="group" aria-label="Posterior view">${["2d","3d"].map(m => `<button type="button" data-bo-surface-mode="${m}" aria-pressed="${m === mode}">${m.toUpperCase()}</button>`).join("")}</div></div>
       ${["2d","3d"].map(m => `<div class="bo-surface-plots" data-bo-surface-view="${m}" ${m !== mode ? "hidden" : ""}><a href="${esc(payload.artifacts[`surface_${m}_url`])}" target="_blank" rel="noopener"><img src="${esc(payload.artifacts[`surface_${m}_url`])}" alt="Live Posterior ${m.toUpperCase()}: posterior mean, uncertainty and acquisition; step ${esc(payload.step)}${payload.synthetic_only ? '; synthetic data only' : ''}" /></a></div>`).join("")}
     </section>`;

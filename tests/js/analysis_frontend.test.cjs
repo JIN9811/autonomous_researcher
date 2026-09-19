@@ -33,7 +33,7 @@ function services(fem) {
     renderReportList: (items, empty) => items.length ? `<ul>${items.map((item) => `<li>${value(item)}</li>`).join("")}</ul>` : `<p>${empty}</p>`,
     renderDashboardRows: (rows) => `<dl>${rows.map(([key, item]) => `<dt>${key}</dt><dd>${value(item)}</dd>`).join("")}</dl>`,
     renderDashboardMetric: (label, item, meta) => `<div><b>${label}</b><strong>${value(item)}</strong><small>${meta}</small></div>`,
-    renderDashboardCard: (title, body, options = {}) => `<section data-title="${title}" data-span="${options.span}">${body}</section>`,
+    renderDashboardCard: (title, body, options = {}) => `<section data-title="${title}" data-span="${options.span}">${options.action || ''}${body}</section>`,
     renderAnalysisTrustScore: () => "trust evidence",
     renderAnalysisCurveOverlay: () => "curve evidence",
     renderAnalysisFieldLink: () => "field evidence",
@@ -103,6 +103,54 @@ test("objective comes from saved handoff, preserves zero, and empty data retains
   assert.doesNotMatch(empty, /Completed|100%/);
 });
 
+test("truncated summary hydrates both plots from the same specimen archive without replacing metrics", async () => {
+  const context = sandbox();
+  context.AbortController = AbortController;
+  Object.assign(context.window, {setTimeout, clearTimeout});
+  const calls = [], plots = [];
+  let refreshes = 0;
+  const curve = {preview: [
+    {displacement_mm: 0, strain_pct: 0, force_N: 0, stress_MPa: 0},
+    {displacement_mm: 16, strain_pct: 160 / 3, force_N: 900, stress_MPa: 1},
+  ]};
+  context.window.fetch = async url => {
+    if (url.includes('/artifacts?')) return {ok: true, json: async () => ({})};
+    calls.push(url);
+    return {ok: true, json: async () => ({source: {sha256: 'hash-a'}, stress_strain_curve: curve, utm_metrics: {peak_force_N: 999}})};
+  };
+  vm.runInContext(fs.readFileSync(asset, 'utf8'), context);
+  const ui = context.window.AX4LABAnalysisUI.createFrontend({...services({render: () => ''}),
+    refreshAnalysisReport: () => refreshes++,
+    renderAnalysisCurveOverlay: (a, mode) => {plots.push({a,mode});return 'curve';},
+  });
+  const report = {state: {run_id: 'run-a'}, analysis: {
+    analysis_artifacts: {analysis_report: '/repo/runs/run-a/analysis/spec-8/analysis_report.json'},
+    stress_strain_curve: {preview: [{strain_pct: 0}, {_truncated_items: 120}]},
+    utm_metrics: {peak_force_N: 900},
+  }};
+  ui.renderDashboard(report);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(refreshes, 1);
+  ui.renderDashboard(report);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /^\/api\/runs\/run-a\/artifact-file\/analysis\/spec-8\//);
+  for (const p of plots.slice(-2)) {
+    assert.equal(p.a.stress_strain_curve, curve);
+    assert.equal(p.a.utm_metrics.peak_force_N, 900);
+  }
+  assert.deepEqual(plots.slice(-2).map(p => p.mode), ['ss','fd']);
+  const foreign = {...report, state: {run_id:'run-b'}};
+  ui.renderDashboard(foreign);
+  assert.equal(calls.length, 1, 'no reads from another run');
+  assert.notEqual(plots.at(-1).a.stress_strain_curve, curve);
+  report.analysis.source = {sha256: 'different-hash'};
+  ui.renderDashboard(report);
+  await new Promise(resolve => setImmediate(resolve));
+  ui.renderDashboard(report);
+  assert.notEqual(plots.at(-1).a.stress_strain_curve, curve, 'mismatched source rejected');
+  ui.dispose();
+});
+
 test("inactive Analysis owner disappears from the module host", async () => {
   assert.ok(fs.existsSync(asset), "Analysis frontend asset is required");
   const context = sandbox();
@@ -115,4 +163,67 @@ test("inactive Analysis owner disappears from the module host", async () => {
   host.get("analysis").renderDashboard({analysis: {}}, "idle", "Analysis", {});
   await host.reconcile([], services(fem));
   assert.equal(host.get("analysis"), null);
+});
+
+test('Analysis cycle arrows keep archived curves, metrics and handoff together', async () => {
+  const context = sandbox();
+  context.AbortController = AbortController;
+  Object.assign(context.window, {setTimeout, clearTimeout});
+  const item = (cycle, attempt=1) => ({run_id:'run-a', agent:'analysis_agent', loop_number:cycle,
+    attempt_index:attempt, name:'hash_analysis_report.json',
+    url:`/api/runs/run-a/artifact-file/runtime/cycle-${cycle}/attempt-${attempt}/analysis_report.json`});
+  let reads=0;
+  context.window.fetch = async url => ({ok:true, json:async () => {
+    if (url.includes('/artifacts?')) return {run_id:'run-a', artifacts:[item(1),item(2),item(2,2),item(3)]};
+    reads++;
+    assert.match(url, /cycle-2\/attempt-2/);
+    return {stress_strain_curve:{preview:[{displacement_mm:12,strain_pct:40}]},
+      utm_metrics:{peak_force_N:222}, bo_handoff:{run_id:'run-a',candidate_id:'old-candidate',
+        objective:{name:'Old objective',score:2}}, objective_evaluation:{score:2}};
+  }});
+  vm.runInContext(fs.readFileSync(asset,'utf8'),context);
+  const curves=[];
+  const ui=context.window.AX4LABAnalysisUI.createFrontend({...services({render:()=>''}),
+    renderAnalysisCurveOverlay:(a,mode)=>{curves.push({a,mode});return 'curve';}});
+  const report={state:{run_id:'run-a'},analysis:{utm_metrics:{peak_force_N:333}},
+    bo_handoff:{candidate_id:'current-candidate',objective:{name:'Current objective',score:3}}};
+  ui.renderDashboard(report);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.match(ui.renderDashboard(report),/Cycle 3 · 3\/3/);
+  assert.equal(ui.moveHistory(-1),true);
+  assert.match(ui.renderDashboard(report),/Loading saved analysis/);
+  await new Promise(resolve=>setImmediate(resolve));
+  const previous=ui.renderDashboard(report);
+  assert.match(previous,/Cycle 2 · 2\/3 · Archived/);
+  assert.match(previous,/222|Old objective/);
+  assert.match(previous,/old-candidate/);
+  assert.doesNotMatch(previous,/current-candidate|Current objective/);
+  assert.equal(curves.at(-1).a.stress_strain_curve.preview[0].displacement_mm,12);
+  ui.renderDashboard(report);
+  assert.equal(reads,1);
+  ui.moveHistory(1);
+  assert.match(ui.renderDashboard(report),/Current objective/);
+  ui.renderDashboard({state:{run_id:'run-b'}});
+  assert.equal(ui.moveHistory(-1),false);
+  ui.dispose();
+});
+
+test('Analysis history stays on the selected cycle when newer results arrive', () => {
+  const context=sandbox();
+  vm.runInContext(fs.readFileSync(asset,'utf8'),context);
+  const history=context.window.AX4LABAnalysisUI.createHistory();
+  history.sync('run-a');
+  const item=cycle=>({run_id:'run-a',agent:'analysis_agent',loop_number:cycle,
+    name:'analysis_report.json',url:`/api/runs/run-a/artifact-file/cycle-${cycle}/analysis_report.json`});
+  history.accept([item(1),item(2),item(3)]);
+  history.move(-1);
+  history.accept([item(1),item(2),item(3),item(4),{...item(5),run_id:'foreign'}]);
+  assert.equal(history.status().item.cycle,2);
+  assert.equal(history.status().total,4);
+  history.move(1);
+  assert.equal(history.status().item.cycle,3);
+  history.move(1);
+  assert.equal(history.status().pinned,false);
+  history.sync('run-b');
+  assert.equal(history.status().total,0);
 });

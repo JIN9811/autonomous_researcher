@@ -732,6 +732,11 @@ function liveAgentModuleHostServices() {
     renderAnalysisMetricBars,
     renderAnalysisQualityDonut,
     renderAnalysisProvenance,
+    refreshAnalysisReport: () => {
+      if (liveSelectedAgent !== 'analysis') return;
+      invalidateLiveCenterRender('report');
+      renderLiveRuntime(liveLastSession);
+    },
     renderSpecimenProgressBar,
     renderSpecimenNowPrintingBody,
     renderSpecimenPrintMonitoringBody,
@@ -6077,6 +6082,8 @@ function clearLiveBoVisualization() {
   const equation = liveReportPanel?.querySelector("[data-live-bo-equation]");
   const posterior = liveReportPanel?.querySelector("[data-live-bo-posterior]");
   // The objective comes from the run report, independently of posterior availability.
+  const archivedSurface = posterior?.querySelector?.('[data-bo-surface-run]');
+  if (archivedSurface && archivedSurface.dataset.boSurfaceRun === String(liveCurrentRunId())) return;
   if (posterior) posterior.innerHTML = waiting;
 }
 
@@ -14682,6 +14689,9 @@ function renderAnalysisCurve(analysis, mode = "ss") {
   // Both views use the same canonical measured samples and zero reference.
   // utm_curve.preview is a sparse legacy summary, not a plotting trace.
   const canonical = analysis.stress_strain_curve || {};
+  if ((canonical.preview || canonical.points || []).some(row => row._truncated_items)) {
+    return renderVizEmpty("Loading complete measured curve…");
+  }
   const canonicalRows = (canonical.preview || canonical.points || []).filter(p =>
     dashboardFiniteNumber(p.displacement_mm) !== null && dashboardFiniteNumber(p.force_N) !== null);
   const fdRows = canonicalRows.length >= 2 ? canonicalRows : (raw.preview || raw.points || []);
@@ -18322,6 +18332,10 @@ function updateLiveBoVisualizationCards(visualization, expectedRunId = liveCurre
   const equation = liveReportPanel?.querySelector("[data-live-bo-equation]");
   const posterior = liveReportPanel?.querySelector("[data-live-bo-posterior]");
   // Do not overwrite the run-bound objective with a cached plot's objective.
+  const savedSurface = posterior?.querySelector?.('[data-bo-surface-run]');
+  if (!window.BOPosteriorSurface?.valid(currentVisualization) && savedSurface
+      && savedSurface.dataset.boSurfaceRun === String(expectedRunId)
+      && Number(savedSurface.dataset.boSurfaceStep) >= Number(currentVisualization.step)) return true;
   if (posterior && posterior.dataset.historyPinned !== "true") posterior.innerHTML = renderer.renderPlot(currentVisualization, {
     preferArtifact: true,
     mode: "parameter_slice",
@@ -19179,6 +19193,16 @@ function updateVisionSpecimenCountdowns() {
 
 document.addEventListener("click", (event) => {
   const boHistoryButton = event.target.closest("[data-bo-history]");
+  const analysisHistoryButton = event.target.closest("[data-anl-history]");
+  if (analysisHistoryButton && liveReportPanel?.contains(analysisHistoryButton)) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!analysisHistoryButton.disabled && liveAgentModuleHost.get('analysis')?.moveHistory?.(Number(analysisHistoryButton.dataset.anlHistory))) {
+      invalidateLiveCenterRender('report');
+      if (liveLastSession) renderLiveRuntime(liveLastSession);
+    }
+    return;
+  }
   if (boHistoryButton && liveReportPanel?.contains(boHistoryButton)) {
     event.preventDefault();
     event.stopPropagation();
