@@ -118,7 +118,7 @@ async def test_cycle_driver_reload_preserves_controller_instance_and_rejects_sig
     source.write_text('raise RuntimeError("module body must not execute")\n'
         'class MainController:\n'
         '    async def _run_planning_cycle_series(self, *, first_spec: dict[str, Any], '
-        'design_constraints: dict[str, Any], start_cycle: int = 1, resume_tail_stage: Stage | None = None) -> dict[str, Any]:\n'
+        'design_constraints: dict[str, Any], start_cycle: int = 1, resume_tail_stage: Stage | None = None, start_with_design: bool = False) -> dict[str, Any]:\n'
         '        return {"run_id": self._state.run_id, "decision": "paused_after_design"}\n')
     current, candidate = safe_hot_reload.stage_cycle_driver(source)
     original = current.__code__

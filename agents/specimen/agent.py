@@ -415,7 +415,9 @@ class SpecimenMakingAgent(BaseAgent):
         settings = self._dict_value(tool_result.get("slicer_settings"), tool_result.get("settings"))
         slicer_result = self._dict_value(tool_result.get("slicer_result"))
         from utils.slicer_mass import slicer_mass_evidence
+        from utils.printer_wait_timing import slicer_duration_evidence
         mass_evidence = slicer_mass_evidence(tool_result)
+        duration_evidence = slicer_duration_evidence(tool_result)
         gcode_validation = self._dict_value(tool_result.get("gcode_validation"))
         printer = self._dict_value(tool_result.get("printer"))
         prusalink = self._dict_value(tool_result.get("prusalink"))
@@ -514,7 +516,8 @@ class SpecimenMakingAgent(BaseAgent):
             "bambu_autoejection_readiness": bambu_autoejection_readiness,
             "estimated_mass_g": mass_evidence["mass_g"],
             "mass_evidence": mass_evidence,
-            "estimated_print_time_min": self._safe_float(self._first_value(settings.get("expected_print_time_min"), manufacturability_result.get("expected_print_time_min"), spec.get("expected_print_time_min")), None),
+            "estimated_print_time_min": duration_evidence["duration_min"],
+            "duration_evidence": duration_evidence,
             "slicer_command": settings.get("resolved_command", []),
         }
         storage_status, storage_evidence = self._storage_gate_status(printer, prusalink)
@@ -767,7 +770,8 @@ class SpecimenMakingAgent(BaseAgent):
         fail_count = sum(1 for gate in gates if gate.get("status") == "fail")
         warn_count = sum(1 for gate in gates if gate.get("status") == "warn")
         readiness_score = round(pass_count / max(len(gates), 1), 4)
-        estimated_time = self._safe_float(plan.get("estimated_print_time_min"), self._safe_float(spec.get("expected_print_time_min"), None))
+        duration_evidence = self._dict_value(plan.get("duration_evidence"))
+        estimated_time = self._safe_float(duration_evidence.get("duration_min"), None) if duration_evidence.get("source") == "slicer" else None
         estimated_mass = self._safe_float(plan.get("estimated_mass_g"), None)
         material = str(thread.get("material") or spec.get("material") or "")
         slicer_gate = next((gate for gate in gates if gate.get("gate") == "slicer"), {})
@@ -877,11 +881,8 @@ class SpecimenMakingAgent(BaseAgent):
             {"label": "blocked", "value": blocked_count},
             {"label": "fail", "value": fail_count},
         ]
-        print_time_bars = [
-            {"label": "slice", "value": 2.0 if thread.get("gcode_path") else 0.0, "unit": "min"},
-            {"label": "print", "value": estimated_time or 0.0, "unit": "min"},
-            {"label": "handoff", "value": 1.0 if handoff_packet.get("status") == "ready" else 0.0, "unit": "min"},
-        ]
+        print_time_bars = ([{"label": "print (slicer)", "value": estimated_time, "unit": "min"}]
+                           if estimated_time is not None else [])
 
         return {
             "schema": "specimen_agent_report.v1",
@@ -919,6 +920,7 @@ class SpecimenMakingAgent(BaseAgent):
             },
             "estimated_print_time": {
                 "estimated_print_time_min": estimated_time,
+                "duration_evidence": duration_evidence,
                 "bars": print_time_bars,
             },
             "filament_usage": {
@@ -1160,6 +1162,14 @@ class SpecimenMakingAgent(BaseAgent):
         return execution.result
 
     def _prepare_fabrication(self, state: OrchestratorState, ctx: AgentContext) -> dict[str, Any] | AgentResult:
+        from utils.compute_pool import run_tool_steps
+        return run_tool_steps(self._prepare_fabrication_steps(state, ctx), ctx.tools)
+
+    async def _prepare_fabrication_async(self, state, ctx):
+        from utils.compute_pool import run_tool_steps_async
+        return await run_tool_steps_async(self._prepare_fabrication_steps(state, ctx), ctx.tools, state)
+
+    def _prepare_fabrication_steps(self, state: OrchestratorState, ctx: AgentContext):
         """Resolve the request and retain the existing geometry/manufacturing gates."""
         spec = dict(state.current_experiment_spec or {})
         candidate = str(spec.get("candidate_id", "cand-unknown"))
@@ -1221,11 +1231,11 @@ class SpecimenMakingAgent(BaseAgent):
         for optional_key in ("tpms_surface", "tpms_thickness", "tpms_resolution"):
             if optional_key in spec and spec[optional_key] not in (None, "", []):
                 geometry_payload[optional_key] = spec[optional_key]
-        geometry_result = ctx.tools.call("geometry.generate_metamaterial_stl", geometry_payload)
+        geometry_result = yield ("geometry.generate_metamaterial_stl", geometry_payload)
         if not bool(geometry_result.get("ok")):
             raise RuntimeError(f"geometry.generate_metamaterial_stl failed: {geometry_result.get('error_message', 'unknown')}")
 
-        mesh_result = ctx.tools.call(
+        mesh_result = yield (
             "geometry.check_mesh_quality",
             {
                 "stl_path": geometry_result.get("stl_path"),
@@ -1239,7 +1249,7 @@ class SpecimenMakingAgent(BaseAgent):
                 + ", ".join(str(item) for item in mesh_result.get("reject_reasons", []))
             )
 
-        manufacturability_result = ctx.tools.call(
+        manufacturability_result = yield (
             "geometry.check_manufacturability",
             {
                 "stl_path": geometry_result.get("stl_path"),
@@ -1286,7 +1296,7 @@ class SpecimenMakingAgent(BaseAgent):
                           "candidate_id":candidate,"fabrication_report":report,
                           "manufacturability":manufacturability_result}})
 
-        handoff_result = ctx.tools.call(
+        handoff_result = yield (
             "artifact.create_specimen_handoff",
             {
                 "run_id": state.run_id,
@@ -1596,7 +1606,8 @@ class SpecimenMakingAgent(BaseAgent):
             },
             "expected_mass_g": fabrication_report.get("process_plan", {}).get("estimated_mass_g"),
             "mass_evidence": fabrication_report.get("process_plan", {}).get("mass_evidence", {}),
-            "expected_print_time_min": manufacturability_result.get("expected_print_time_min"),
+            "expected_print_time_min": fabrication_report.get("process_plan", {}).get("estimated_print_time_min"),
+            "duration_evidence": fabrication_report.get("process_plan", {}).get("duration_evidence", {}),
             "slicer_settings": response.get("slicer_settings", {}),
             "slicer_result": response.get("slicer_result", {}),
             "gcode_validation": response.get("gcode_validation", {}),

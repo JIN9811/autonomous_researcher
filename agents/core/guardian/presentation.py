@@ -5,6 +5,10 @@ from __future__ import annotations
 from copy import deepcopy
 
 
+# Read-only report input contract; unlisted state is never copied for this view.
+REPORT_METADATA_KEYS = ["latest_guardian_decision","latest_guardian_report","guardian_status"]
+REPORT_STATE_FIELDS = []
+
 REPORT_PROFILE = {
     "title": "Safety Gate / Continue-Stop Decision",
     "summary": "Checks live/test gate results, hardware risk, and operator approvals before continuation.",

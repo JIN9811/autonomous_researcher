@@ -17,13 +17,51 @@ import re
 import threading
 from typing import Any
 from uuid import uuid4
+from urllib.parse import unquote, urlsplit, parse_qs
 
 _CURRENT: ContextVar[Any] = ContextVar("agent_artifact_execution", default=None)
 _LOOP: ContextVar[Any] = ContextVar("artifact_stage_loop", default=None)
 _LOG = logging.getLogger(__name__)
 _SECRET = re.compile(r"(^|_)(password|passwd|secret|token|api_key|access_code|authorization|credential)(s|$)", re.I)
 _EXTENSIONS = {".csv", ".json", ".jsonl", ".png", ".jpg", ".jpeg", ".svg", ".webp",
-               ".stl", ".3mf", ".gcode", ".txt", ".log", ".inp", ".dat", ".frd", ".mp4", ".rrd"}
+               ".stl", ".3mf", ".gcode", ".txt", ".log", ".inp", ".dat", ".frd", ".mp4", ".rrd",
+               ".pdf", ".md", ".yaml", ".yml", ".npz", ".npy", ".parquet", ".ply", ".glb", ".webm"}
+_PRESERVATION_SINK = None
+
+
+def set_preservation_sink(sink):
+    global _PRESERVATION_SINK
+    _PRESERVATION_SINK = sink
+
+
+def resolve_artifact_reference(value, project_root: Path, run_dir: Path) -> Path | None:
+    """Resolve local evidence URLs without HTTP, other runs, or path traversal."""
+    text = str(value)
+    if not text.strip() or text in {"unknown", "none", "physical_print", "virtual"}:
+        return None
+    if text.startswith('/api/'):
+        parsed = urlsplit(text)
+        path = unquote(parsed.path)
+        prefix = f'/api/runs/{run_dir.name}/artifact-file/'
+        planning = f'/api/planning/artifacts/{run_dir.name}/'
+        if path.startswith(prefix):
+            resolved = (run_dir / path[len(prefix):]).resolve()
+        elif path.startswith(planning):
+            relative = path[len(planning):]
+            resolved = (run_dir / 'planning' / relative).resolve()
+            if not resolved.exists():
+                resolved = (run_dir / 'specimens' / relative).resolve()
+        elif path == '/api/lerobot/visualization/file':
+            # The capture allowlist below still applies; never trust a URL as authority.
+            candidate = parse_qs(parsed.query).get('path', [''])[0]
+            return Path(candidate).resolve() if candidate else None
+        else:
+            return None
+        return resolved if resolved.is_relative_to(run_dir.resolve()) else None
+    if '://' in text:
+        return None
+    candidate = Path(text)
+    return (candidate if candidate.is_absolute() else project_root / candidate).resolve()
 
 
 def current_execution():
@@ -85,6 +123,8 @@ def _file_candidates(value: Any, key: str = "result"):
             yield from _file_candidates(child, f"{key}[{index}]")
     elif isinstance(value, (str, Path)):
         text = str(value)
+        if not text.strip() or text in {"unknown", "none", "physical_print", "virtual"}:
+            return
         if len(text) < 4096 and "\n" not in text and "://" not in text:
             path = Path(text)
             if path.suffix.lower() in _EXTENSIONS or key.endswith(("_path", ".path", "_file")):
@@ -164,9 +204,13 @@ class AgentArtifactExecution:
     def capture(self, payload: Any) -> None:
         with self.lock:
             for key, candidate in _file_candidates(payload):
-                source = (candidate if candidate.is_absolute() else self.project_root / candidate).resolve()
+                source = resolve_artifact_reference(candidate, self.project_root, self.run_dir)
+                if source is None:
+                    continue
                 roots = (self.run_root, self.project_root / "artifacts", self.project_root / "memory" / "equipment_runtime",
-                         self.project_root / "memory" / "knowledge")
+                         self.project_root / "memory" / "knowledge",
+                         Path('/tmp/atr_lerobot_latest_frame'), Path('/tmp/atr_specimen_pose_from_lerobot'),
+                         Path('/tmp/atr_specimen_pose_pending'), Path('/tmp/atr_active_robot_cam_request'))
                 if source.is_relative_to(self.directory):
                     continue
                 item = {"key": key, "source_path": str(source), "status": "external"}
@@ -237,6 +281,11 @@ class AgentArtifactExecution:
                 self.manifest["knowledge_intake"] = {"ok": False, "error": type(exc).__name__}
                 _json(self.directory / "manifest.json", self.manifest)
                 _error(self.state, exc)
+            if _PRESERVATION_SINK is not None:
+                try:
+                    _PRESERVATION_SINK(self.run_dir)
+                except Exception as exc:
+                    _error(self.state, exc)
 
 
 def archive_agent_run(function):

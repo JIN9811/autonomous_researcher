@@ -5,6 +5,10 @@ from __future__ import annotations
 from copy import deepcopy
 
 
+# Read-only report input contract; unlisted state is never copied for this view.
+REPORT_METADATA_KEYS = ["knowledge"]
+REPORT_STATE_FIELDS = []
+
 REPORT_PROFILE = {
     "title": "Knowledge Memory / Evidence Update",
     "summary": "Writes validated outcomes into session/project knowledge so BO and later reports use observed evidence.",

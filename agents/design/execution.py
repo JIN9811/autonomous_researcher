@@ -68,7 +68,11 @@ def design_execution_catalog(agent: Any) -> ExecutionCatalog:
         if decision.get("status") not in {"accepted", "deterministic_test"} or scope.get("accepted_decision") is not True:
             raise ExecutionGraphError("Design finalization requires an accepted decision")
         owner_decision = decision if decision.get("status") == "accepted" else None
-        payload = agent._finalize_design_payload(state, ctx, scope["prepared"], scope["candidate"], owner_decision)
+        from utils.compute_pool import compute_enabled
+        if compute_enabled():
+            payload = await agent._finalize_design_payload_async(state, ctx, scope['prepared'], scope['candidate'], owner_decision)
+        else:
+            payload = agent._finalize_design_payload(state, ctx, scope["prepared"], scope["candidate"], owner_decision)
         if owner_decision is None:
             payload["design_decision"] = decision
         result = AgentResult(

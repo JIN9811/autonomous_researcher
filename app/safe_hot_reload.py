@@ -96,6 +96,9 @@ async def reload_equipment_support(controller):
     import subprocess
     import sys
     from orchestrator.state import Stage
+    if (controller._state.run_metadata.get("vision_agent_payload") or {}).get("failure_code") in {
+            "VISION_ROS_STOP_UNCONFIRMED", "VISION_ROS_RESTART_UNCONFIRMED"}:
+        return await reload_vision_ros_support(controller)
     if (controller._state.stage in {Stage.COMPLETE, Stage.ERROR}
             and getattr(controller._state.agent_status.get('vision_agent'), 'success', None) is False
             and (controller._state.run_metadata.get('specimen_result') or {}).get('printer_completion_verified')):
@@ -138,6 +141,108 @@ async def reload_equipment_support(controller):
         {"modules": loaded, "sha256": digests, "actuation_performed": False})
     return {"ok": True, "modules": loaded, "sha256": digests, "server_restarted": False,
             "actuation_performed": False, "scope": "equipment_support_only"}
+
+
+def assert_vision_ros_patch_boundary(controller):
+    """Code-only repair: retain the stopped run, safety controls and live bridges."""
+    from orchestrator.state import Stage
+    state = controller._state
+    if (controller.snapshot().get("is_running") or controller._planning_request_lock.locked()
+            or state.stage not in {Stage.COMPLETE, Stage.ERROR}):
+        raise ValueError("ROS hotfix requires an inactive terminal workflow")
+    for name in ("_run_task", "_planning_handoff_task"):
+        task = getattr(controller, name, None)
+        if task is not None and not task.done():
+            raise ValueError("ROS hotfix cannot patch an active workflow")
+    if (state.run_metadata.get("vision_agent_payload") or {}).get("failure_code") not in {
+            "VISION_ROS_STOP_UNCONFIRMED", "VISION_ROS_RESTART_UNCONFIRMED"}:
+        raise ValueError("No failed ROS reload to repair")
+
+
+async def reload_vision_ros_support(controller):
+    """Patch only three leaf function bodies; never recreate the ROS manager."""
+    import ast
+    import asyncio
+    import hashlib
+    import subprocess
+    import sys
+    assert_vision_ros_patch_boundary(controller)
+    root = Path(__file__).resolve().parents[1]
+    targets = {
+        "device_bridges.camera_vision.tools": ("_reload_vision_cycle", "_restart_vision_runtime", "_reload_for_capture"),
+        "agents.vision.decision": ("select_vision_tool",),
+    }
+    staged, digests = [], {}
+    for name, functions in targets.items():
+        module = importlib.import_module(name)
+        path = Path(module.__file__)
+        source = path.read_bytes()
+        digests[str(path)] = hashlib.sha256(source).hexdigest()
+        tree = ast.parse(source)
+        for function in functions:
+            current = getattr(module, function)
+            node = next(n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == function)
+            if node.decorator_list:
+                raise ValueError("ROS leaf decorators changed")
+            candidate_tree = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), node], type_ignores=[])
+            namespace = dict(module.__dict__)
+            exec(compile(ast.fix_missing_locations(candidate_tree), str(path), "exec"), namespace)
+            candidate = namespace[function]
+            if inspect.signature(current) != inspect.signature(candidate) or current.__code__.co_freevars != candidate.__code__.co_freevars:
+                raise ValueError("ROS leaf signature changed")
+            staged.append((current, candidate))
+    # Only the cycle-admission method is published, not other controller edits.
+    from app.controller import MainController
+    path = root / "app/controller.py"
+    source = path.read_bytes()
+    digests[str(path)] = hashlib.sha256(source).hexdigest()
+    owner = next(n for n in ast.parse(source).body if isinstance(n, ast.ClassDef) and n.name == "MainController")
+    current = MainController._run_planning_design_stage
+    node = next(n for n in owner.body if isinstance(n, ast.AsyncFunctionDef) and n.name == current.__name__)
+    namespace = dict(current.__globals__)
+    tree = ast.Module(body=[ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0), node], type_ignores=[])
+    exec(compile(ast.fix_missing_locations(tree), str(path), "exec"), namespace)
+    candidate = namespace[current.__name__]
+    if inspect.signature(current) != inspect.signature(candidate) or current.__code__.co_freevars != candidate.__code__.co_freevars:
+        raise ValueError("Cycle admission signature changed")
+    staged.append((current, candidate))
+    helper = root / "utils/vision_cycle_runtime.py"
+    compile(helper.read_bytes(), str(helper), "exec")
+    digests[str(helper)] = hashlib.sha256(helper.read_bytes()).hexdigest()
+    staged.append(stage_resume(root / "app/controller.py"))
+    helper = root / "app/vision_ros_recovery.py"
+    compile(helper.read_bytes(), str(helper), "exec")
+    digests[str(helper)] = hashlib.sha256(helper.read_bytes()).hexdigest()
+    checked = await asyncio.to_thread(subprocess.run, [sys.executable, "-m", "pytest",
+        "tests/unit/test_vision_ros_cycle_reload.py", "tests/unit/test_camera_tools_utm_runtime.py",
+        "tests/unit/test_safe_hot_reload.py", "tests/unit/test_vision_ros_recovery.py", "-q", "--tb=short"], cwd=root,
+        capture_output=True, text=True, timeout=60)
+    if checked.returncode:
+        raise ValueError("ROS hotfix tests failed; live code retained")
+    assert_vision_ros_patch_boundary(controller)
+    if any(hashlib.sha256(Path(path).read_bytes()).hexdigest() != digest for path, digest in digests.items()):
+        raise ValueError("ROS source changed during validation")
+    from device_bridges.camera_vision import tools
+    if not tools._VISION_RELOAD_LOCK.acquire(blocking=False):
+        raise ValueError("ROS reload is in progress; retry after it finishes")
+    try:
+        for current, candidate in staged:
+            current.__code__ = candidate.__code__
+    finally:
+        tools._VISION_RELOAD_LOCK.release()
+    result = {"ok": True, "scope": "vision_ros_reload_only", "sha256": digests,
+              "server_restarted": False, "actuation_performed": False,
+              "run_resumed": False, "successful_cycle_cache_preserved": True}
+    from app.vision_ros_recovery import validate
+    try:
+        boundary = validate(controller)
+    except ValueError as exc:
+        result["recovery_blocked"] = str(exc)
+    else:
+        controller._state.run_metadata["vision_ros_retry"] = {**boundary, "status": "ready"}
+        result["recovery_status"] = "ready"
+    await controller._emit_control_event("runtime.vision_ros_hotfix", "ROS reload leaf functions patched; run and safety state retained", result)
+    return result
 
 
 def stage_resume(path):

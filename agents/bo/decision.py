@@ -186,9 +186,10 @@ async def _invoke_bounded(callback: Callable[..., Any], *args: Any, timeout_s: f
     if inspect.iscoroutinefunction(callback):
         value = callback(*args)
     else:
-        # Cancellation cannot terminate native work already running in a thread;
-        # the backend's existing optimizer timeout remains independently in effect.
-        value = await asyncio.wait_for(asyncio.to_thread(callback, *args), timeout=timeout_s)
+        # The orchestration callback stays in a thread; CPU-worker cancellation
+        # reaches its numerical subprocess. Existing optimizer timeouts remain.
+        from utils.compute_pool import offload_wait
+        value = await asyncio.wait_for(offload_wait(callback, *args), timeout=timeout_s)
     if inspect.isawaitable(value):
         remaining = timeout_s - (monotonic() - started)
         if remaining <= 0:

@@ -4,6 +4,10 @@ from __future__ import annotations
 from typing import Any
 
 
+# Read-only report input contract; unlisted state is never copied for this view.
+REPORT_METADATA_KEYS = ["bo_agent","next_design_request"]
+REPORT_STATE_FIELDS = ["current_experiment_objective"]
+
 REPORT_PROFILE = {
     "title": "Bayesian Optimization / Candidate Selection",
     "summary": "Uses measured evidence and the existing numerical optimizer to propose the next Design constraints.",

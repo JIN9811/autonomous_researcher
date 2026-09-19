@@ -1,5 +1,9 @@
 """Vision-owned report projection with transient observation context."""
 
+# Read-only report input contract; unlisted state is never copied for this view.
+REPORT_METADATA_KEYS = ["latest_vision_observation","latest_vision_agent_report","vision_report","vision_signal","vision_metrics"]
+REPORT_STATE_FIELDS = ["latest_observations"]
+
 REPORT_PROFILE = {
         "title": "Lab Perception Signal Bus / Visual Evidence",
         "summary": "Converts camera or screenshot evidence into zone states, freshness-bounded agent signals, visual evidence, and downstream handoff gates.",

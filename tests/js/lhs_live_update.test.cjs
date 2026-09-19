@@ -17,7 +17,10 @@ test('LHS hydration selects newest current-run figure without a BO result', asyn
     liveSelectedAgent: 'design', liveCurrentView: 'report',
     liveCurrentRunId: () => 'run-a', invalidateLiveCenterRender: () => {},
     currentRunBoVisualization: () => null, updateLiveBoVisualizationCards: () => false,
-    fetch: async () => ({ok: true, json: async () => ({state: {run_id: 'run-a'}, recent_lhs_visualization: incoming})})};
+    fetchJsonOrThrowWithTimeout: async (url) => {
+      assert.equal(url, '/api/bo/config?visualization_only=true');
+      return {run_id: 'run-a', recent_lhs_visualization: incoming};
+    }};
   vm.createContext(context);
   vm.runInContext(extract('updateLiveLhsVisualization') + '\n' + extract('latestBoInitialDesign') + '\nasync ' + extract('hydrateLiveBoVisualization'), context);
   assert.equal(await context.hydrateLiveBoVisualization(), true);

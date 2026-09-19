@@ -18,7 +18,9 @@ def specimen_execution_catalog(agent):
         if scope.get("preparation_started"):
             raise ExecutionGraphError("Specimen preparation cannot repeat within an invocation")
         scope["preparation_started"] = True
-        prepared = agent._prepare_fabrication(state, ctx)
+        from utils.compute_pool import compute_enabled
+        prepared = (await agent._prepare_fabrication_async(state, ctx) if compute_enabled()
+                    else agent._prepare_fabrication(state, ctx))
         if isinstance(prepared, AgentResult):
             return OperationResult("operator_input", {"pending_result": prepared})
         return OperationResult("ready", {"prepared": prepared})

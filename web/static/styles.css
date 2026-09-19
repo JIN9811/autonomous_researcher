@@ -16893,6 +16893,36 @@ body.planning-live-body .ar-report-metrics {
   min-width: 0;
 }
 
+body.planning-live-body .runtime-support-detail > summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+body.planning-live-body .runtime-support-detail > summary::-webkit-details-marker { display: none; }
+body.planning-live-body .runtime-support-detail > summary:focus-visible {
+  outline: 2px solid var(--ar-info);
+  outline-offset: 4px;
+}
+body.planning-live-body .runtime-support-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+body.planning-live-body .runtime-support-metrics .ar-report-metric { min-height: 0; }
+body.planning-live-body .runtime-support-metrics .ar-report-metric strong { font-size: 1rem; }
+body.planning-live-body .runtime-support-toggle { color: var(--ar-muted); font-size: .72rem; }
+body.planning-live-body .runtime-support-toggle span { display: inline-block; }
+body.planning-live-body .runtime-support-detail[open] .runtime-support-toggle span { transform: rotate(180deg); }
+body.planning-live-body .runtime-support-content { margin-top: 14px; }
+@media (max-width: 620px) {
+  body.planning-live-body .runtime-support-detail > summary { flex-wrap: wrap; }
+  body.planning-live-body .runtime-support-metrics { flex-basis: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 body.planning-live-body .ar-report-metric {
   display: grid;
   gap: 4px;
@@ -25586,6 +25616,30 @@ body.planning-live-body .ar-design-specimen-metrics {
   gap: 5px;
   min-width: 0;
 }
+
+body.planning-live-body .dsn-generated-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  align-self: start;
+}
+body.planning-live-body .dsn-generated-metrics > div {
+  min-width: 0;
+  min-height: 43px;
+  padding: 5px;
+  border: 1px solid rgba(148, 163, 184, .13);
+  border-radius: 5px;
+  background: rgba(8, 14, 24, .58);
+}
+body.planning-live-body .dsn-generated-metrics b,
+body.planning-live-body .dsn-generated-metrics span {
+  display: block;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+  font-size: .62rem;
+}
+body.planning-live-body .dsn-generated-metrics b { color: #9fb0c9; font-weight: 500; }
+body.planning-live-body .dsn-generated-metrics span { color: #e2e8f0; }
 
 body.planning-live-body .ar-design-specimen-metric {
   position: relative;

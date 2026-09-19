@@ -59,6 +59,19 @@ assert.match(populated, /<th>Mass<\/th>/);
 assert.doesNotMatch(populated, /0\.9988/);
 
 const detailed = renderer.renderEvidence(adaptedEvidence, true);
+assert.doesNotMatch(detailed, /rough estimate|32 min/);
+assert.match(renderer.renderEvidence({cost: {duration: {source: 'slicer', value: 71, unit: 'min'}}}), /71 min/);
+for (const historical of [false, true]) {
+  const checks = {candidate_id: 'c', constraint_margins: [
+    {constraint: 'estimated_mass', actual: 20, limit: 30, relation: '<=', status: 'pass'},
+    {constraint: 'estimated_duration', actual: 32, limit: 90, relation: '<=', status: 'pass'},
+    {constraint: 'minimum_wall', actual: 0.8, limit: 0.4, relation: '>=', status: 'pass'},
+  ]};
+  const evidence = historical ? {candidate_id: 'c', selection_evaluation: checks} : checks;
+  const card = renderer.renderManufacturabilityCard({}, {}, {}, {candidate_id: 'c', design_evaluation: evidence});
+  assert.doesNotMatch(card, /estimated_mass|estimated_duration/);
+  assert.match(card, /minimum_wall/);
+}
 const seaComparison = renderer.renderExpectedPerformance({}, {}, {candidate_id:'cand-6'}, [], {
   state:{run_id:'run', experiment_evaluations:[{run_id:'run',candidate_id:'cand-6',source:'analysis_agent',
     objective_score:2.1,objective:{metric_name:'SEA',unit:'J/g'},

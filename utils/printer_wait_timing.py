@@ -42,6 +42,26 @@ def sliced_duration_seconds(path, plate_index=1):
     return None
 
 
+def slicer_duration_evidence(payload):
+    """Read duration only from this specimen's slicer result, never design proxies."""
+    payload = payload if isinstance(payload, dict) else {}
+    tool = payload.get("tool_result")
+    tool = tool if isinstance(tool, dict) else {}
+    slicer = payload.get("slicer_result") or tool.get("slicer_result") or {}
+    slicer = slicer if isinstance(slicer, dict) else {}
+    path = slicer.get("sliced_artifact_path") or payload.get("sliced_path") or tool.get("sliced_path")
+    plate = slicer.get("plate_index") or payload.get("plate_index") or tool.get("plate_index") or 1
+    duration = None
+    if slicer.get("ok") is not False:
+        value = slicer.get("estimated_print_time_sec")
+        duration = None if isinstance(value, bool) else positive(value)
+        if duration is None and isinstance(path, (str, Path)) and path:
+            duration = sliced_duration_seconds(path, plate)
+    return {"duration_sec": duration, "duration_min": duration / 60 if duration is not None else None,
+            "source": "slicer" if duration is not None else "unavailable",
+            "artifact_path": str(path or ""), "plate_index": plate}
+
+
 def completion_wait_timing(spec, payload):
     request = spec.get("print") or {}
     timeout = next((positive(source.get("printer_completion_timeout_sec")) for source in

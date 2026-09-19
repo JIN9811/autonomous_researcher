@@ -1,5 +1,9 @@
 """Owner report projection preserving metadata and payload precedence."""
 
+# Read-only report input contract; unlisted state is never copied for this view.
+REPORT_METADATA_KEYS = ["latest_manipulation_agent_report","manipulation_report","robot_task_result","manipulation_metrics"]
+REPORT_STATE_FIELDS = []
+
 REPORT_PROFILE = {
         "title": "Manipulation Agent / Runtime Supervision",
         "summary": "Supervises bounded LeRobot policy skills, preflight readiness, task stages, Vision verification dependency, and robot_task_result handoff.",

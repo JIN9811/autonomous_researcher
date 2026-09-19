@@ -4,6 +4,10 @@ from __future__ import annotations
 from typing import Any
 
 
+# Read-only report input contract; unlisted state is never copied for this view.
+REPORT_METADATA_KEYS = ["analysis_report","analysis_bo_observation","analysis_bo_handoff","analysis_experiment_evaluation","analysis_knowledge_payload","analysis_metrics"]
+REPORT_STATE_FIELDS = ["latest_analysis"]
+
 REPORT_PROFILE = {
     "title": "Experimental Data / Metrics / Objective Evaluation",
     "summary": "Processes experimental measurements into force/displacement features and objective scores.",

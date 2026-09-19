@@ -171,6 +171,14 @@ class DesignAgent(BaseAgent):
                 "hard_valid_count": hard_valid_count, "valid_pool": valid_pool}
 
     def _finalize_design_payload(self, state, ctx, prepared, candidate, decision=None):
+        from utils.compute_pool import run_tool_steps
+        return run_tool_steps(self._finalize_design_steps(state, ctx, prepared, candidate, decision), getattr(ctx, 'tools', None))
+
+    async def _finalize_design_payload_async(self, state, ctx, prepared, candidate, decision=None):
+        from utils.compute_pool import run_tool_steps_async
+        return await run_tool_steps_async(self._finalize_design_steps(state, ctx, prepared, candidate, decision), ctx.tools, state)
+
+    def _finalize_design_steps(self, state, ctx, prepared, candidate, decision=None):
         """Use the existing report/handoff builders only after selection."""
         constraints, objective = prepared["constraints"], prepared["objective"]
         prior_summary, failure_summary = prepared["prior_summary"], prepared["failure_summary"]
@@ -229,7 +237,7 @@ class DesignAgent(BaseAgent):
         )
         for item in [*pool, *ranked]:
             item["design_evaluation"] = candidate_evaluation(self, state, prepared, item)
-        self._attach_candidate_preview_artifacts(state=state, ctx=ctx, pool=pool, constraints=constraints)
+        yield from self._candidate_preview_steps(state=state, ctx=ctx, pool=pool, constraints=constraints)
         design_report = self._design_report(
             state=state,
             selected=selected,
@@ -1178,6 +1186,16 @@ class DesignAgent(BaseAgent):
         return payload
 
     def _attach_candidate_preview_artifacts(
+        self, *, state, ctx, pool, constraints,
+    ):
+        from utils.compute_pool import run_tool_steps
+        return run_tool_steps(self._candidate_preview_steps(state=state, ctx=ctx, pool=pool, constraints=constraints), getattr(ctx, 'tools', None))
+
+    async def _attach_candidate_preview_artifacts_async(self, *, state, ctx, pool, constraints):
+        from utils.compute_pool import run_tool_steps_async
+        return await run_tool_steps_async(self._candidate_preview_steps(state=state, ctx=ctx, pool=pool, constraints=constraints), ctx.tools, state)
+
+    def _candidate_preview_steps(
         self,
         *,
         state: OrchestratorState,
@@ -1200,7 +1218,7 @@ class DesignAgent(BaseAgent):
                 output_dir=output_dir,
             )
             try:
-                result = tools.call("geometry.generate_metamaterial_stl", payload)
+                result = yield ("geometry.generate_metamaterial_stl", payload)
             except Exception as exc:
                 candidate["viewer_capture_error"] = f"preview_generation_failed: {exc}"
                 continue

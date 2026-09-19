@@ -5,11 +5,19 @@ application workers: that would duplicate in-memory run state and device owners.
 
 Local HTTP browser sessions use two lazy, read-only subprocesses instead:
 
-- **Printer video:** shared latest-frame decoder and direct MJPEG HTTP delivery,
+- **Video (printer and Vision preview):** shared latest-frame decoder and direct MJPEG HTTP delivery,
   targeting 30 FPS at 960 px width. Slow viewers skip old frames; no video history
   is retained. Up to eight viewers share the source. The decoder closes after
   15 seconds without consumers. This is a target, not a guarantee of camera/LAN
   throughput, and memory overhead is bounded, not zero.
+  Vision's existing ROS MJPEG subscriber and byte-for-byte multipart delivery are
+  hosted in this same video worker (up to four topic/FPS/quality configurations).
+  Each topic retains only the latest frame; multiple viewers share its subscriber.
+  Runtime shutdown/reload releases only the Vision sources, not printer video.
+  Source configuration travels over the private parent pipe, not a browser API.
+  Raw decision capture, ROI settings, capture timing, LLM inputs, verification
+  conditions, and ROS runtime ownership remain on their existing paths. This
+  isolates presentation, **not** the Vision agent or its decision processing.
 - **Robot telemetry:** tails the existing motor action log, streams measured and
   requested joint samples, and produces policy-tracking graph artifacts on session
   completion. It has no robot command, serial, camera acquisition, inference, or

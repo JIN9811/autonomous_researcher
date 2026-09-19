@@ -25,7 +25,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
+from utils.yaml_cache import read_yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from agents.core.plans import OwnerPlanDeclaration
@@ -418,7 +418,7 @@ class GraphConfig(BaseModel):
 def load_graph_config(path: str | Path) -> GraphConfig:
     """Load and validate a YAML graph configuration."""
     graph_path = Path(path)
-    raw = yaml.safe_load(graph_path.read_text(encoding="utf-8")) or {}
+    raw = read_yaml(graph_path) or {}
     graph = raw.get("graph", raw)
     return GraphConfig.model_validate(graph)
 
@@ -426,6 +426,6 @@ def load_graph_config(path: str | Path) -> GraphConfig:
 def load_module_config(path: str | Path) -> ModuleConfig:
     """Load and validate a YAML module configuration."""
     module_path = Path(path)
-    raw = yaml.safe_load(module_path.read_text(encoding="utf-8")) or {}
+    raw = read_yaml(module_path) or {}
     module = raw.get("module", raw) if isinstance(raw, dict) else raw
     return ModuleConfig.model_validate(module)

@@ -12,7 +12,7 @@ from utils.lerobot_joint_telemetry import (
 )
 
 
-async def stream_robot_samples(socket, *, context, reset, public_session, runtime_view, artifacts):
+async def stream_robot_samples(socket, *, context, reset, public_session, runtime_view, artifacts, publisher_fresh=lambda: True):
     await socket.accept()
     observer = JointTelemetryFileObserver(preserve_history=True)
     compact = socket.query_params.get("sample_format") == "compact-v1"
@@ -36,8 +36,11 @@ async def stream_robot_samples(socket, *, context, reset, public_session, runtim
                 status = "live" if packets else "waiting"
             if packets:
                 latest = packets[-1]
+            fresh = publisher_fresh()
+            if selected and not fresh and str(session.get("status") or "").upper() not in TERMINAL_SESSION_STATUSES:
+                status = "stale"
             base = {"ok": True, "schema": TELEMETRY_SCHEMA, "reset_at_ms": reset_ms,
-                    "status": status, "session": public_session(session)}
+                    "status": status, "publisher_stale": not fresh, "session": public_session(session)}
             if selected and (packets or not history_sent):
                 batches = ([packets[i:i + 128] for i in range(0, len(packets), 128)] or [[]]) if compact else [packets]
                 for batch in batches:

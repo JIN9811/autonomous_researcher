@@ -5,6 +5,10 @@ import json
 from typing import Any
 
 
+# Read-only report input contract; unlisted state is never copied for this view.
+REPORT_METADATA_KEYS = ["equipment_report","equipment_result","utm_data_ready","equipment_handoff","hardware_alert","hardware_alerts","incident_records","equipment_metrics"]
+REPORT_STATE_FIELDS = []
+
 REPORT_PROFILE = {
     "title": "Lab Equipment / UTM Visual Control",
     "summary": "Shows Windows/UTM control trace, screen-state assertions, Vision physical cross-checks, data artifact ledger, and Analysis handoff gate evidence.",

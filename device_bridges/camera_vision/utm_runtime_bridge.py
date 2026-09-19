@@ -439,12 +439,12 @@ class SharedMjpegTopicStream:
             self._session_frames += count
             self._frame_times.extend(timestamp for _ in range(count))
 
-    def frames(self) -> Iterator[bytes]:
+    def frames(self, *, cancelled: threading.Event | None = None) -> Iterator[bytes]:
         self._add_client()
         last_seq = 0
         try:
             while True:
-                frame = self._wait_for_next_frame(last_seq)
+                frame = self._wait_for_next_frame(last_seq, cancelled=cancelled)
                 if frame is None:
                     break
                 last_seq, payload = frame
@@ -482,9 +482,11 @@ class SharedMjpegTopicStream:
                 self._last_client_left = time.monotonic()
             self._condition.notify_all()
 
-    def _wait_for_next_frame(self, last_seq: int) -> tuple[int, bytes] | None:
+    def _wait_for_next_frame(self, last_seq: int, *, cancelled: threading.Event | None = None) -> tuple[int, bytes] | None:
         while True:
             with self._condition:
+                if cancelled is not None and cancelled.is_set():
+                    return None
                 if self._seq != last_seq and self._latest_frame is not None:
                     return self._seq, self._latest_frame
                 if self._stop_requested:
@@ -492,7 +494,7 @@ class SharedMjpegTopicStream:
                 process_alive = self._process is not None and self._process.poll() is None
                 if not process_alive:
                     self._ensure_started_locked()
-                self._condition.wait(timeout=2.0)
+                self._condition.wait(timeout=0.2 if cancelled is not None else 2.0)
 
     def _ensure_started_locked(self) -> None:
         if self._process is not None and self._process.poll() is None:
@@ -1178,6 +1180,9 @@ class UTMRuntimeProcessManager:
         self._started_monotonic = 0.0
         self._last_log_path: Path | None = None
         self._mjpeg_streams: dict[str, SharedMjpegTopicStream] = {}
+        self._remote_mjpeg_streams: dict[str, Any] = {}
+        self._remote_mjpeg_lock = threading.Lock()
+        self._mjpeg_generation = 0
         self._graph_builder = UTMGraphSnapshotBuilder(
             workspace_root=config.workspace_root,
             command_runner=self._run_ros_command,
@@ -1373,6 +1378,16 @@ class UTMRuntimeProcessManager:
         status = self.status()
         if status.get("status") != "running":
             return
+        stream_key, settings = self._frame_stream_settings(topic=topic, fps=fps, quality=quality)
+        with self._lock:
+            stream = self._mjpeg_streams.get(stream_key)
+            if stream is None:
+                stream = SharedMjpegTopicStream(**settings)
+                self._mjpeg_streams[stream_key] = stream
+        yield from stream.frames()
+
+    def _frame_stream_settings(self, *, topic="", fps=None, quality=82):
+        """Identical subscription/encoding for inline and isolated display transport."""
         profile = self._active_camera_profile()
         selected_topic = self._stream_topic_for_request(topic, profile)
         target_fps = _coerce_float(fps, float(profile.fps or 15), minimum=1.0) if fps is not None else float(profile.fps or 15)
@@ -1387,19 +1402,31 @@ class UTMRuntimeProcessManager:
             f"{target_fps:.3f}",
             str(jpeg_quality),
         ])
-        with self._lock:
-            stream = self._mjpeg_streams.get(stream_key)
-            if stream is None:
-                stream = SharedMjpegTopicStream(
-                    key=hashlib.sha1(stream_key.encode("utf-8")).hexdigest()[:8],
-                    command=command,
-                    cwd=str(self.config.workspace_root),
-                    topic=selected_topic,
-                    target_fps=target_fps,
-                    jpeg_quality=jpeg_quality,
-                )
-                self._mjpeg_streams[stream_key] = stream
-        yield from stream.frames()
+        return stream_key, dict(key=hashlib.sha1(stream_key.encode("utf-8")).hexdigest()[:8],
+                                command=command, cwd=str(self.config.workspace_root),
+                                topic=selected_topic, target_fps=target_fps, jpeg_quality=jpeg_quality)
+
+    def frame_stream_url(self, *, topic="", fps=None, quality=82) -> str:
+        """Only the GUI preview is delegated; raw_frame/decision capture stay local."""
+        if self.status().get("status") != "running":
+            return ""
+        from utils.vision_monitor_stream import RemoteVisionStream
+        stream_key, settings = self._frame_stream_settings(topic=topic, fps=fps, quality=quality)
+        # Process startup/IPC must not hold the ROS manager lock used by capture.
+        with self._remote_mjpeg_lock:
+            with self._lock:
+                generation = self._mjpeg_generation
+                stream = self._remote_mjpeg_streams.get(stream_key)
+            if stream is None or not stream.alive():
+                stream = RemoteVisionStream(**settings)
+                with self._lock:
+                    stale = generation != self._mjpeg_generation
+                    if not stale:
+                        self._remote_mjpeg_streams[stream_key] = stream
+                if stale:
+                    stream.stop()
+                    return ""  # Runtime was stopped/reloaded during registration.
+            return stream.url()
 
     def frame_stream_status(
         self,
@@ -1415,6 +1442,13 @@ class UTMRuntimeProcessManager:
         target_fps = max(min(target_fps, 60.0), 1.0)
         jpeg_quality = _coerce_int(quality, 82, minimum=40, maximum=95)
         stream_key = f"{selected_topic}|{target_fps:.3f}|{jpeg_quality}"
+        with self._lock:
+            remote = getattr(self, "_remote_mjpeg_streams", {}).get(stream_key)
+        if remote is not None and remote.alive():
+            try:
+                return remote.stats()
+            except (OSError, ValueError):
+                pass  # Display diagnostics never fail a vision decision.
         with self._lock:
             stream = self._mjpeg_streams.get(stream_key)
         if stream is None:
@@ -1448,8 +1482,12 @@ class UTMRuntimeProcessManager:
         return requested_topic or output_topic or "/image_utm"
 
     def _stop_mjpeg_streams_locked(self) -> None:
+        self._mjpeg_generation += 1
         streams = list(self._mjpeg_streams.values())
         self._mjpeg_streams.clear()
+        remote = getattr(self, "_remote_mjpeg_streams", {})
+        streams.extend(remote.values())
+        remote.clear()
         for stream in streams:
             stream.stop()
 

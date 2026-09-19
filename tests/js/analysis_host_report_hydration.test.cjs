@@ -164,7 +164,7 @@ test("active Analysis falls back to its installed descriptors when the owner ass
 });
 
 test("the existing planning refresh hydrates the current Analysis owner report with production response shape", async () => {
-  assert.match(declaration("refreshPlanningState"), /await hydrateLiveSelectedAgentReport\(session, liveAgentManifestRequestGeneration\)/);
+  assert.match(declaration("refreshPlanningState"), /scheduleLiveOwnerReportHydration\(liveLastSession\)/);
   const fullAnalysis = {
     source: {path: "runs/current/utm.csv", fingerprint: {sha256: "full-fingerprint"}, column_mapping: {force: "Force"}},
     utm_curve: {preview: [{displacement_mm: 1, force_N: 20}]},

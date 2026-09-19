@@ -8,6 +8,14 @@ const files = [
   {run_id:'two',path:'other.csv',agent:'analysis_agent',loop_index:0},
   {run_id:'one',path:'legacy.csv',agent:null,loop_index:null},
 ];
+test('live artifact history remains visible before the current cycle produces graphs',()=>{
+  const explorer=new api.Explorer({addEventListener(){}});explorer.render=()=>{};
+  explorer.update({run:'one',loop:2,agent:'analysis',includeHistory:true,files,label:x=>x});
+  assert.equal(explorer.scope.loop,'all');
+  assert.deepEqual(explorer.visible(),[files[0],files[1]]);
+  explorer.scope.loop='0';explorer.update(explorer.context);
+  assert.equal(explorer.scope.loop,'0');
+});
 test('run, loop and agent filters do not mix history or unowned legacy files',()=>{
   assert.deepEqual(api.filterFiles?.(files,{run:'one',loop:'0',agent:'analysis'}),[files[0]]);
   assert.deepEqual(api.filterFiles?.(files,{run:'one',loop:'all',agent:'all'}),[files[0],files[1],files[3]]);

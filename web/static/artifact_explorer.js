@@ -66,7 +66,7 @@
     update(context) {
       this.context=context;
       const key=[context.run,context.loop,context.agent].join(':');
-      if(key!==this.contextKey){this.contextKey=key;this.scope={run:context.run,loop:String(context.loop ?? 'all'),agent:owner(context.agent)||'all'};this.files=context.files || [];this.folder=null;this.selected=null;this.error='';this.ticket++;this.previewTicket++;}
+      if(key!==this.contextKey){this.contextKey=key;this.scope={run:context.run,loop:context.includeHistory?'all':String(context.loop ?? 'all'),agent:owner(context.agent)||'all'};this.files=context.files || [];this.folder=null;this.selected=null;this.error='';this.ticket++;this.previewTicket++;}
       else if(this.scope.run===context.run) {
         if(!this.files.length && context.files?.length && this.folder==='' && this.scope.agent!=='all')this.folder=null;
         this.files=context.files || [];
@@ -86,12 +86,13 @@
       const agents=[...new Set(this.files.map(x=>owner(x.agent)).filter(Boolean))];
       if(this.scope.agent!=='all'&&!agents.includes(this.scope.agent))agents.push(this.scope.agent);
       const options=(values,selected,label)=>values.map(v=>`<option value="${esc(v)}" ${v===selected?'selected':''}>${esc(label(v))}</option>`).join('');
-      const list=files.filter(f=>parent(f.path)===this.folder);
+      const list=this.imageOnly?files.filter(f=>f.preview_kind==='image'):files.filter(f=>parent(f.path)===this.folder);
       this.host.innerHTML=`<section class="artifact-explorer">
         <header class="ae-toolbar"><label>Session<select data-ae-scope="run">${options(runs,this.scope.run,v=>v)}</select></label>
         <label>Loop<select data-ae-scope="loop"><option value="all">All loops / legacy</option>${options(loops.sort((a,b)=>a-b),this.scope.loop,v=>`Loop ${Number(v)+1}`)}</select></label>
         <label>Agent<select data-ae-scope="agent"><option value="all">All agents / legacy</option>${options(agents.sort(),this.scope.agent,v=>this.context.label(v))}</select></label>
         <button type="button" class="btn" data-ae-action="all">All files</button><button type="button" class="btn" data-ae-action="current">Current context</button>
+        <button type="button" class="btn" data-ae-action="images" aria-pressed="${Boolean(this.imageOnly)}">Charts / Images</button>
         <button type="button" class="btn" data-ae-action="refresh">Refresh</button></header>
         ${this.context.readOnlyReplay?`<p class="hint" role="status">${esc(this.context.artifactError || 'Read-only session files — may include files produced after the selected replay point. Point-in-time images remain separate.')}</p>`:''}
         ${this.error?`<p role="status" class="hint">${esc(this.error)}</p>`:''}
@@ -99,8 +100,8 @@
           const children=tree.some(x=>x.path && parent(x.path)===f.path);
           return `<div class="ae-folder-row" style="padding-left:${f.depth*12}px">${children?`<button type="button" data-ae-toggle="${esc(f.path)}" aria-label="Toggle ${esc(f.label)}" aria-expanded="${this.openFolders.has(f.path)}">${this.openFolders.has(f.path)?'▾':'▸'}</button>`:'<span class="ae-indent"></span>'}<button type="button" data-ae-folder="${esc(f.path)}" ${f.path===this.folder?'aria-current="location"':''} title="${esc(f.path || '/')}">${esc(f.label)}</button></div>`;
         }).join('')}</nav>
-        <section class="ae-files" aria-label="Artifact files"><div class="ae-breadcrumb">${esc(this.folder || '/')} <span>${list.length} files</span></div>
-        <div class="ae-table-scroll"><table><thead><tr><th>File</th><th>Type</th><th>Size</th></tr></thead><tbody>${list.map(f=>`<tr><td><button type="button" data-ae-file="${esc(f.path)}" title="${esc(f.name || f.path)}">${esc(displayName(f))}</button></td><td>${esc(f.suffix || f.preview_kind || 'file')}</td><td>${bytes(f.size_bytes)}</td></tr>`).join('')}</tbody></table>
+        <section class="ae-files" aria-label="Artifact files"><div class="ae-breadcrumb">${this.imageOnly?'Charts / Images · all folders':esc(this.folder || '/')} <span>${list.length} files</span></div>
+        <div class="ae-table-scroll"><table><thead><tr><th>File</th><th>Type</th><th>Size</th></tr></thead><tbody>${list.map(f=>`<tr><td><button type="button" data-ae-file="${esc(f.path)}" title="${esc(f.path)}">${this.imageOnly&&f.loop_index!=null?`Cycle ${Number(f.loop_index)+1} · `:''}${esc(displayName(f))}</button></td><td>${esc(f.suffix || f.preview_kind || 'file')}</td><td>${bytes(f.size_bytes)}</td></tr>`).join('')}</tbody></table>
         ${!list.length?`<p class="hint">${files.length?'Select a child folder to view its files.':'No indexed files for this scope. Use All files to include legacy and other agents.'}</p>`:''}</div>
         <section class="ae-preview" aria-label="Artifact preview" hidden></section></section></div>
         </section>`;
@@ -114,11 +115,12 @@
     async click(event) {
       const el=event.target.closest('[data-ae-folder],[data-ae-toggle],[data-ae-file],[data-ae-action]');if(!el)return;
       if(el.hasAttribute('data-ae-file'))return this.preview(el.dataset.aeFile);
-      if(el.hasAttribute('data-ae-folder')){this.folder=el.dataset.aeFolder;this.selected=null;this.openFolders.add(this.folder);}
+      if(el.hasAttribute('data-ae-folder')){this.imageOnly=false;this.folder=el.dataset.aeFolder;this.selected=null;this.openFolders.add(this.folder);}
       if(el.hasAttribute('data-ae-toggle')){const p=el.dataset.aeToggle;this.openFolders.has(p)?this.openFolders.delete(p):this.openFolders.add(p);}
       const action=el.dataset.aeAction;
       if(action==='refresh')return this.load();
-      if(action==='all'){this.scope.loop='all';this.scope.agent='all';this.folder='';this.selected=null;}
+      if(action==='all'){this.imageOnly=false;this.scope.loop='all';this.scope.agent='all';this.folder='';this.selected=null;}
+      if(action==='images'){this.imageOnly=!this.imageOnly;this.selected=null;}
       if(action==='current'){this.contextKey=null;this.update(this.context);return;}
       this.previewTicket++;this.render();
     }

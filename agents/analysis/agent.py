@@ -1710,7 +1710,13 @@ class AnalysisAgent(BaseAgent):
         decisions = []
         virtual = state.mode != Mode.LIVE and not getattr(ctx, "force_real_llm_in_test", True)
         equipment_result = self._equipment_result(state)
-        curve, source_meta = self._curve_from_equipment(equipment_result)
+        from utils.compute_pool import compute_async, compute_enabled, ensure_current
+        compute_identity = (state.run_id, state.experiment_id, state.loop_count)
+        if compute_enabled():
+            curve, source_meta = await compute_async('analysis.read_curve', equipment_result)
+            ensure_current(state, compute_identity)
+        else:
+            curve, source_meta = self._curve_from_equipment(equipment_result)
         live_handoff_ok, live_handoff_gate = (True, {"ok": True, "status": "not_required"})
         if state.mode == Mode.LIVE:
             live_handoff_ok, live_handoff_gate = self._live_equipment_handoff_gate(equipment_result)
@@ -1816,8 +1822,13 @@ class AnalysisAgent(BaseAgent):
             return blocked_decision("Analysis decision invalid", "ANALYSIS_DECISION_INVALID", str(exc))
         if selected["tool"] is None:
             return blocked_decision("Analysis data processing held", "ANALYSIS_DATA_HELD")
-        stress_strain_curve = self._stress_strain_curve(curve, geometry)
-        metrics = self._metrics(curve, geometry)
+        if compute_enabled():
+            computed = await compute_async('analysis.metrics', {'curve': curve, 'geometry': geometry})
+            ensure_current(state, compute_identity)
+            stress_strain_curve, metrics = computed['stress_strain_curve'], computed['metrics']
+        else:
+            stress_strain_curve = self._stress_strain_curve(curve, geometry)
+            metrics = self._metrics(curve, geometry)
         uncertainty = None  # No validated observation-error estimator is configured.
         quality_gate = self._quality_gate(signal_quality, metrics, source_meta, True)
         try:

@@ -70,3 +70,14 @@ test("Mesh wall evidence replaces unknown values without fabricated success", ()
   assert.match(measured,/Sampled minimum \(mm\)=0.2968/);
   assert.match(ui.renderReport({fabrication:{}}),/Actual mesh wall check=Not measured/);
 });
+
+test("Print time requires slicer provenance, including archived reports", () => {
+  const ui = frontend();
+  const legacy = ui.renderReport({fabrication:{process_plan:{estimated_print_time_min:999}}});
+  assert.match(legacy, /slicer_print_time_min=Not available/);
+  assert.doesNotMatch(legacy, /999/);
+  const current = ui.renderReport({fabrication:{process_plan:{estimated_print_time_min:999,
+    duration_evidence:{source:'slicer',duration_min:70}}}});
+  assert.match(current, /slicer_print_time_min=70/);
+  assert.doesNotMatch(current, /999/);
+});

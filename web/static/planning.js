@@ -827,7 +827,7 @@ async function hydrateLiveSelectedAgentReport(session, manifestGeneration = live
     const payload = await fetchJsonOrThrowWithTimeout(
       `${endpoint}?run_id=${encodeURIComponent(runId)}`,
       { headers: { "Accept": "application/json" } },
-      agentId === "analysis" ? 5000 : 1200,
+      10000,
     );
     const report = payload && payload.report && typeof payload.report === "object" ? payload.report : null;
     if (
@@ -898,7 +898,39 @@ async function hydrateLiveSelectedAgentReport(session, manifestGeneration = live
   return session;
 }
 
+function scheduleLiveOwnerReportHydration(session) {
+  const agentId = liveSelectedAgent;
+  if (!["analysis", "bo", "knowledge", "guardian"].includes(agentId)) return;
+  const scheduler = scheduleLiveOwnerReportHydration;
+  if (scheduler.inFlight) {
+    scheduler.pending = session;
+    return;
+  }
+  const generation = liveAgentManifestRequestGeneration;
+  const identity = value => `${value?.state?.run_id || ""}:${value?.state?.loop_count ?? ""}:${value?.state?.stage || ""}`;
+  const requestIdentity = identity(session);
+  scheduler.inFlight = hydrateLiveSelectedAgentReport(session, generation).then(() => {
+    const report = liveOwnerReportForSession(session, agentId);
+    if (!report || liveSelectedAgent !== agentId || generation !== liveAgentManifestRequestGeneration
+        || identity(liveLastSession) !== requestIdentity) return;
+    // A newer compact refresh may arrive during the read. Keep the latest
+    // session state and attach only the read-only report for this same stage.
+    Object.defineProperty(liveLastSession, "ownerReport", {value: report, configurable: true, writable: true, enumerable: false});
+    invalidateLiveCenterRender("report");
+    renderLiveRuntime(liveLastSession);
+  }).catch(() => {}).finally(() => {
+    scheduler.inFlight = null;
+    const pending = scheduler.pending;
+    scheduler.pending = null;
+    if (pending && pending === liveLastSession) scheduleLiveOwnerReportHydration(pending);
+  });
+}
+
 async function refreshLiveAgentManifest(options = {}) {
+  // Reconcile periodically, not ahead of every graph/state refresh. Explicit
+  // refreshes and a new browser window still fetch the manifest immediately.
+  if (options.silent && options.skipRender && liveAgentManifestStatus.ok
+      && Date.now() - (refreshLiveAgentManifest.fetchedAt || 0) < 30000) return;
   const requestGeneration = ++liveAgentManifestRequestGeneration;
   try {
     const res = await fetch("/api/runtime/agent-manifests", { headers: { "Accept": "application/json" } });
@@ -911,6 +943,7 @@ async function refreshLiveAgentManifest(options = {}) {
     const moduleResult = await liveAgentModuleHost.reconcile(payload.agents, liveAgentModuleHostServices());
     if (requestGeneration !== liveAgentManifestRequestGeneration) return { ok: false, superseded: true };
     liveAgentManifestStatus.moduleErrors = moduleResult && Array.isArray(moduleResult.errors) ? moduleResult.errors : [];
+    refreshLiveAgentManifest.fetchedAt = Date.now();
     if (liveAgentManifestStatus.moduleErrors.length) console.warn("Live agent frontend activation failed", liveAgentManifestStatus.moduleErrors);
     if (liveLastSession && !options.skipRender) renderLiveRuntime(liveLastSession);
     return payload;
@@ -7259,10 +7292,28 @@ function renderRuntimeSupportCard(report, status) {
     renderDashboardMetric("Artifacts", artifactCount, "available", artifactCount ? "success" : "idle"),
     renderDashboardMetric("Approvals", approvalCount, "pending", approvalCount ? "warning" : "success"),
   ].join("");
-  const warningList = warningCount
-    ? dashboardList(report.warnings.slice(0, 2), "No active warnings.", 2)
+  const agentId = String(liveSelectedAgent || "").toLowerCase();
+  const extraControlDetails = liveAgentNeedsChatPanel(agentId) && !["orchestrator", "objective"].includes(agentId)
+    ? `${renderDashboardCard("Runtime Signals", renderRuntimeSignalGraph(report, status), { span: 8 })}
+       ${renderDashboardCard("Orchestration Route", renderRouteGraphDashboard(report, status), { span: 8 })}
+       ${renderDashboardCard("Next Action", renderReportList([report.nextAction || "Wait for the next orchestrator instruction."], "No next action recorded.", 1), { span: 4 })}`
     : "";
-  return `<div class="ar-report-metrics">${supportMetrics}</div>${warningList}`;
+  return `<details class="runtime-support-detail">
+    <summary aria-label="Expand runtime support details">
+      <span class="runtime-support-metrics">${supportMetrics}</span>
+      <span class="runtime-support-toggle">Details <span aria-hidden="true">▾</span></span>
+    </summary>
+    <div class="ar-report-grid runtime-support-content">
+      ${renderDashboardCard("Stage Progress", renderStageProgressCard(report), { span: 12 })}
+      ${renderDashboardCard("Backend Trace", renderBackendConnectionCard(report) + renderDashboardRows([
+        ["messages", (report.messages || []).length], ["events", (report.events || []).length],
+      ]), { span: 4 })}
+      ${renderDashboardCard("Warnings", renderEvidenceWarningsCard(report), { span: 4, tone: warningCount ? "warning" : "metrics" })}
+      ${renderDashboardCard("Artifacts", renderArtifactDashboardCard(report), { span: 4 })}
+      ${renderDashboardCard("Approvals / Decisions", renderDecisionRegisterCard(report), { span: 4, tone: approvalCount ? "warning" : "metrics" })}
+      ${extraControlDetails}
+    </div>
+  </details>`;
 }
 
 function renderAgentEvidenceDashboardCard(report, status, agentLabel) {
@@ -11416,30 +11467,28 @@ function renderDesignSpecimenMetric(label, value, options = {}) {
 }
 
 function renderDesignSpecimenMetricStrip(item, helpers = {}) {
-  if (item && item.design_evaluation && typeof helpers.renderEvidence === "function") {
-    return helpers.renderEvidence(item.design_evaluation);
-  }
-  if (item && item.__actual_specimen) {
-    const maxLoop = dashboardFiniteNumber(item.__max_loop) || Math.max(dashboardFiniteNumber(item.loop_index) || 1, 1);
-    const hasStl = Boolean(item.stl_url || item.stl_path);
-    const hasGcode = Boolean(item.gcode_url || item.gcode_path);
-    return `
-      <div class="ar-design-specimen-metrics" aria-label="actual specimen build metrics">
-        ${renderDesignSpecimenMetric("LOOP", item.loop_index, { tone: "info", max: maxLoop, display: `L${renderRuntimeValue(item.loop_index || "-")}` })}
-        ${renderDesignSpecimenMetric("OBJ", designCandidateMetricValue(item, ["expected_objective_proxy_score", "predicted_objective", "y_predicted_objective", "score", "value"]), { tone: "objective" })}
-        ${renderDesignSpecimenMetric("STL", hasStl ? 1 : 0, { tone: hasStl ? "print" : "risk", display: hasStl ? "OK" : "-" })}
-        ${renderDesignSpecimenMetric("GCODE", hasGcode ? 1 : 0, { tone: hasGcode ? "print" : "risk", display: hasGcode ? "OK" : "-" })}
-      </div>
-    `;
-  }
-  return `
-    <div class="ar-design-specimen-metrics" aria-label="specimen evaluation metrics">
-      ${renderDesignSpecimenMetric("OBJ", designCandidateMetricValue(item, ["expected_objective_proxy_score", "predicted_objective", "y_predicted_objective", "score", "value"]), { tone: "objective" })}
-      ${renderDesignSpecimenMetric("PRT", designCandidateMetricValue(item, ["manufacturability_score", "expected_manufacturability_score", "printability_score"]), { tone: "print" })}
-      ${renderDesignSpecimenMetric("RSK", designCandidateMetricValue(item, ["risk_score", "risk", "failure_probability"]), { tone: "risk" })}
-      ${renderDesignSpecimenMetric("INF", designCandidateMetricValue(item, ["information_gain_score", "info_gain", "novelty_score"]), { tone: "info" })}
-    </div>
-  `;
+  item = item || {};
+  const quantity = (value, unit, missing = "Not recorded") => {
+    const number = dashboardFiniteNumber(value);
+    return number === null ? missing : `${Number(number.toFixed(3))} ${unit}`;
+  };
+  const geometry = item.specimen_geometry || {};
+  const mass = geometry.mass_source === "slicer" ? geometry.mass_g
+    : item.mass_evidence?.source === "slicer" ? item.mass_evidence.mass_g : null;
+  const duration = item.duration_evidence?.source === "slicer" ? item.duration_evidence.duration_min : null;
+  const performance = item.performance_evidence;
+  const fields = [
+    ["Cell size", quantity(item.cell_size_mm ?? item.parameters?.cell_size_mm, "mm")],
+    ["Wall thickness", quantity(item.wall_thickness_mm ?? item.parameters?.wall_thickness_mm, "mm")],
+    ["Mass", quantity(mass, "g")],
+    ["Print time (slicer)", quantity(duration, "min", "Awaiting slicer")],
+    ["Validity", item.design_evaluation?.validity?.status || "Not evaluated"],
+    ["Performance", performance?.unit ? quantity(performance.value, performance.unit, "Awaiting analysis") : "Awaiting analysis"],
+    ["STL", item.stl_url || item.stl_path ? "Ready" : "Pending"],
+    ["G-code", item.gcode_url || item.gcode_path ? "Ready" : "Pending"],
+  ];
+  return `<div class="dsn-generated-metrics" aria-label="Specimen evidence">${fields.map(([label, value]) =>
+    `<div title="${escapeHtml(`${label}: ${value}`)}"><b>${escapeHtml(label)}</b><span>${escapeHtml(value)}</span></div>`).join("")}</div>`;
 }
 
 function renderDesignEmpty(message) {
@@ -11628,7 +11677,7 @@ function designActualSpecimenRows(screenReport, designReport, report) {
       row.preview_render_source = "generated_stl";
     }
     else if (name === "specimen.stl" || /\.stl$/i.test(name)) row.stl_url = url;
-    else if (/\.(?:gcode|bgcode)$/i.test(name)) row.gcode_url = url;
+    else if (/\.(?:gcode(?:\.3mf)?|bgcode)$/i.test(name)) row.gcode_url = url;
     else if (name === "handoff_package.json") row.handoff_package_url = url;
   });
 
@@ -11654,10 +11703,31 @@ function designActualSpecimenRows(screenReport, designReport, report) {
       gcode_url: designRunArtifactUrlFromPath(layer.gcode_path || thread.gcode_path, report),
       stl_path: layer.stl_path || thread.stl_path,
       gcode_path: layer.gcode_path || thread.gcode_path,
+      mass_evidence: fabricationReport.process_plan?.mass_evidence,
+      duration_evidence: fabricationReport.process_plan?.duration_evidence,
     });
     if (row && packet.physical_location) row.physical_location = packet.physical_location;
   }
 
+  // Join only the same specimen's evidence; never copy the latest specimen's
+  // parameters, slicer totals, or analysis into older cards.
+  const saved = report.specimenEvidence || [];
+  for (const [id, row] of rows) {
+    const archived = saved.find(item => item.specimen_id === id);
+    let enriched = mergeDesignActualSpecimenRecord(row, archived);
+    const current = report.spec || {};
+    if (current.specimen_id === id) {
+      const {cell_size_mm, wall_thickness_mm, geometry_type, design_evaluation} = current;
+      enriched = mergeDesignActualSpecimenRecord(enriched, {cell_size_mm, wall_thickness_mm, geometry_type, design_evaluation});
+    }
+    const observation = [...(report.state?.experiment_evaluations || [])].reverse().find(item =>
+      (!item.run_id || item.run_id === report.state?.run_id) && item.specimen_id === id &&
+      (item.source === 'analysis_agent' || item.tool === 'analysis.agent') && item.ok !== false &&
+      item.status !== 'analysis_blocked' && item.objective?.unit && dashboardFiniteNumber(item.objective_score) !== null);
+    if (observation) enriched = {...enriched, specimen_geometry: observation.specimen_geometry || enriched.specimen_geometry,
+      performance_evidence: {value: observation.objective_score, unit: observation.objective.unit}};
+    rows.set(id, enriched);
+  }
   const sorted = Array.from(rows.values()).sort((a, b) => {
     const aLoop = dashboardFiniteNumber(a.loop_index) || 9999;
     const bLoop = dashboardFiniteNumber(b.loop_index) || 9999;
@@ -12176,17 +12246,18 @@ function designArchivedSpecimenEvidence(report) {
   if (!cache.pending) {
     const files = liveRunArtifacts.map(artifact => {
       const path = String(artifact.path || "").replaceAll("\\", "/");
-      const match = path.match(/(?:^|\/)(planning|analysis)\/([^/]+)\/(experiment_spec|analysis_report)\.json$/);
+      const match = path.match(/(?:^|\/)(planning|analysis|specimens)\/([^/]+)\/(experiment_spec|analysis_report|handoff_package)\.json$/);
+      const fabrication = /(?:^|\/)runtime\/loops\/loop-\d+\/specimen_agent\/attempt-\d+\/result\.json$/.test(path);
       const url = artifact.url || artifact.compat_url || artifact.download_url;
       const key = `${path}:${artifact.updated_at || artifact.modified_at || artifact.mtime || artifact.size_bytes || ""}`;
-      return match && url && !cache.fetched.has(key) ? {match, url, key} : null;
+      return (match || fabrication) && url && !cache.fetched.has(key) ? {match, fabrication, url, key} : null;
     }).filter(Boolean).slice(-256);
     if (files.length) {
       cache.pending = true;
       (async () => {
         let changed = false;
         // Serial, cached reads: do not add a frame/poll-time fetch loop.
-        for (const {match, url, key} of files) {
+        for (const {match, fabrication, url, key} of files) {
           if (liveDesignEvidenceCache !== cache) break;
           cache.fetched.add(key);
           try {
@@ -12194,17 +12265,36 @@ function designArchivedSpecimenEvidence(report) {
             if (!response.ok) continue;
             const payload = await response.json();
             if (liveDesignEvidenceCache !== cache) break;
-            const id = match[2];
+            const result = fabrication ? payload.data?.specimen_result || {} : {};
+            const id = fabrication ? result.specimen_id : match[2];
+            if (!id) continue;
             if (payload.run_id && payload.run_id !== runId) continue;
             if (payload.specimen_id && payload.specimen_id !== id) continue;
+            if (result.run_id && result.run_id !== runId) continue;
             const prior = cache.records[id] || {specimen_id: id};
-            if (match[3] === "experiment_spec") {
-              cache.records[id] = {...prior, candidate_id: payload.candidate_id,
-                candidate_fingerprint: payload.candidate_fingerprint,
-                cell_size_mm: payload.cell_size_mm, wall_thickness_mm: payload.wall_thickness_mm,
-                design_evaluation: payload.design_evaluation};
+            if (fabrication) {
+              const plan = (result.fabrication_report || payload.data?.fabrication_report)?.process_plan || {};
+              const slicer = result.slicer_result || {};
+              const seconds = slicer.ok !== false ? Number(slicer.estimated_print_time_sec) : NaN;
+              const grams = slicer.ok !== false ? Number(slicer.estimated_mass_g) : NaN;
+              cache.records[id] = {...prior,
+                mass_evidence: plan.mass_evidence?.source === 'slicer' ? plan.mass_evidence
+                  : Number.isFinite(grams) && grams > 0 ? {source:'slicer',mass_g:grams} : prior.mass_evidence,
+                duration_evidence: plan.duration_evidence?.source === 'slicer' ? plan.duration_evidence
+                  : Number.isFinite(seconds) && seconds > 0 ? {source:'slicer',duration_min:seconds/60} : prior.duration_evidence,
+                gcode_path: result.sliced_path || prior.gcode_path};
+            } else if (["experiment_spec", "handoff_package"].includes(match[3])) {
+              const spec = match[3] === "handoff_package" ? payload.experiment_spec || {} : payload;
+              const recorded = {candidate_id: spec.candidate_id, candidate_fingerprint: spec.candidate_fingerprint,
+                cell_size_mm: spec.cell_size_mm, wall_thickness_mm: spec.wall_thickness_mm,
+                geometry_type: spec.geometry_type, design_evaluation: spec.design_evaluation};
+              cache.records[id] = {...prior, ...Object.fromEntries(Object.entries(recorded).filter(([,value])=>value != null))};
             } else {
-              cache.records[id] = {...prior, specimen_geometry: payload.specimen_geometry};
+              const value = payload.objective_score ?? payload.bo_observation?.objective_score;
+              const unit = payload.bo_observation?.unit || payload.objective?.unit;
+              cache.records[id] = {...prior, specimen_geometry: payload.specimen_geometry,
+                performance_evidence: payload.ok !== false && value != null && Number.isFinite(Number(value)) && unit
+                  ? {value:Number(value),unit} : prior.performance_evidence};
             }
             changed = true;
           } catch (_) { /* Missing archived evidence stays unavailable, never estimated. */ }
@@ -13402,7 +13492,7 @@ function renderSpecimenProgressDetailCards(report, status, agentLabel, profile, 
       <div class="ar-report-metrics">
         ${renderDashboardMetric("Layer", slicer.layer_height_mm || plan.layer_height_mm || spec.layer_height_mm || "-", "mm", "info")}
         ${renderDashboardMetric("Nozzle", slicer.nozzle_diameter_mm || plan.nozzle_diameter_mm || spec.nozzle_diameter_mm || "-", "mm", "running")}
-        ${renderDashboardMetric("Time", estimatedPrintTime.estimated_print_time_min || plan.estimated_print_time_min || spec.expected_print_time_min || "-", "min", "metrics")}
+        ${renderDashboardMetric("Print time (slicer)", (estimatedPrintTime.duration_evidence?.source === "slicer" ? estimatedPrintTime.duration_evidence.duration_min : plan.duration_evidence?.source === "slicer" ? plan.duration_evidence.duration_min : null) ?? "Not available", "min", "metrics")}
         ${renderDashboardMetric("Mass", filamentUsage.estimated_mass_g || plan.estimated_mass_g || spec.expected_mass_g || "-", "g", "specimen")}
       </div>
       ${renderDashboardRows([
@@ -15386,46 +15476,11 @@ function renderAgentSpecializedDashboardSections(session, report, status, agentL
 }
 
 function renderLiveDashboardReportSections(session, report, status, agentLabel) {
-  const agentId = String(liveSelectedAgent || "").toLowerCase();
-  const controlSurface = liveAgentNeedsChatPanel(agentId);
-  const orchestratorSurface = agentId === "orchestrator";
-  const objectiveSurface = agentId === "objective";
-  const metricCards = [
-    renderDashboardMetric("Messages", report.messages.length, "selected agent", "info"),
-    renderDashboardMetric("Events", report.events.length, "agent scoped", "running"),
-    renderDashboardMetric("Artifacts", liveRunArtifacts.length + report.artifactItems.length, "run + report", "success"),
-    renderDashboardMetric("Approvals", (liveApprovals.pending || []).length, "pending", (liveApprovals.pending || []).length ? "warning" : "success"),
-  ].join("");
-  const nextAction = report.nextAction || "Wait for the next orchestrator instruction.";
   const specializedCards = renderAgentSpecializedDashboardSections(session, report, status, agentLabel);
-  const controlCards = controlSurface
-    ? `
-      ${renderDashboardCard("Orchestration Route", renderRouteGraphDashboard(report, status), { span: 8, tone: "route", eyebrow: "agent graph" })}
-      ${renderDashboardCard("Decision Register", renderDecisionRegisterCard(report), { span: 4, tone: "success", eyebrow: "today" })}
-      ${renderDashboardCard("Next Action", renderReportList([nextAction], "No next action recorded.", 1), { span: 4, tone: "accent", eyebrow: "handoff" })}
-    `
-    : "";
-  const supportCards = controlSurface
-    ? orchestratorSurface
-      ? ""
-      : objectiveSurface
-      ? `
-      ${renderDashboardCard("Run Metrics", `<div class="ar-report-metrics">${metricCards}</div>`, { span: 5, tone: "metrics", eyebrow: "runtime" })}
-      ${renderDashboardCard("Backend Trace", renderBackendConnectionCard(report), { span: objectiveSurface ? 3 : 4, tone: "backend", eyebrow: "raw evidence lives in Trace" })}
-      ${objectiveSurface ? renderDashboardCard("Warnings", renderEvidenceWarningsCard(report), { span: 2, tone: "danger", eyebrow: "guardian" }) : ""}
-      ${renderDashboardCard("Artifacts", renderArtifactDashboardCard(report), { span: objectiveSurface ? 2 : 3, tone: "artifact", eyebrow: "ledger" })}
-    `
-      : `
-      ${renderDashboardCard("Stage Progress", renderStageProgressCard(report), { span: 4, tone: "info", eyebrow: "runtime" })}
-      ${renderDashboardCard("Run Metrics", `<div class="ar-report-metrics">${metricCards}</div>${renderRuntimeSignalGraph(report, status)}`, { span: 8, tone: "metrics", eyebrow: "runtime" })}
-      ${controlCards}
-      ${renderDashboardCard("Trace Link", renderBackendConnectionCard(report), { span: 4, tone: "backend", eyebrow: "backend" })}
-      ${renderDashboardCard("Warnings", renderEvidenceWarningsCard(report), { span: 4, tone: "danger", eyebrow: "guardian" })}
-      ${renderDashboardCard("Artifacts", renderArtifactDashboardCard(report), { span: 4, tone: "artifact", eyebrow: "ledger" })}
-    `
-    : `
-      ${renderDashboardCard("Runtime Support", renderRuntimeSupportCard(report, status), { span: 12, tone: report.warnings.length ? "warning" : "metrics", eyebrow: "runtime + trace summary" })}
-    `;
+  const needsAttention = report.warnings.length || (liveApprovals.pending || []).length;
+  const supportCards = renderDashboardCard("Runtime Support", renderRuntimeSupportCard(report, status), {
+    span: 12, tone: needsAttention ? "warning" : "metrics", eyebrow: "runtime + trace summary",
+  });
   return `
     ${specializedCards}
     ${supportCards}
@@ -15469,7 +15524,7 @@ function renderLiveReportToolbar() {
 
 function syncLiveReportAttributes(current, next, options = {}) {
   const preserveRendererState = Boolean(options.preserveRendererState);
-  const protectedAttribute = (name) => (name === "open" && current.matches?.('.knp-supply-details, .bo-stage-detail, .bo-equation-details')) || (preserveRendererState && (name === "style" || name.startsWith("_echarts_")));
+  const protectedAttribute = (name) => (name === "open" && current.matches?.('.knp-supply-details, .bo-stage-detail, .bo-equation-details, .runtime-support-detail')) || (preserveRendererState && (name === "style" || name.startsWith("_echarts_")));
   Array.from(current.attributes || []).forEach((attribute) => {
     if (!protectedAttribute(attribute.name) && !next.hasAttribute(attribute.name)) current.removeAttribute(attribute.name);
   });
@@ -16438,6 +16493,7 @@ function renderArtifactPanel() {
   }
   const state = liveLastSession?.state || liveLastSnapshot.state || {};
   liveArtifactExplorer.update({run: state.run_id || '', loop: state.loop_count ?? state.loop_index ?? 0,
+    includeHistory: true,
     agent: liveSelectedAgent, files: window.AtrArtifactExplorer.mergeReferences(liveRunArtifacts, planningMessagesCache), label: liveAgentLabel,
     references: planningMessagesCache,
     readOnlyReplay: Boolean(window.AX4LABReplay),
@@ -18007,7 +18063,6 @@ async function refreshPlanningState(options = {}) {
       const sessionRes = await fetch(`/api/planning/session?session_id=${sessionId}`);
       if (!sessionRes.ok) throw new Error(`session HTTP ${sessionRes.status}`);
       const session = await sessionRes.json();
-      await hydrateLiveSelectedAgentReport(session, liveAgentManifestRequestGeneration);
       liveLastSnapshot = {
         system_resources: liveLastSnapshot.system_resources,
         state: session.state || {},
@@ -18017,6 +18072,9 @@ async function refreshPlanningState(options = {}) {
       if (!session.state && liveLastSnapshot.state) session.state = liveLastSnapshot.state;
       if (!session.runtime && liveLastSnapshot.runtime) session.runtime = liveLastSnapshot.runtime;
       applyPlanningSession(session, { setupVersion });
+      // Show the fresh compact state first. Slow report/archive reads must not
+      // hold up stage, telemetry, chat, or other agent graph refreshes.
+      scheduleLiveOwnerReportHydration(liveLastSession);
       markLiveSyncComplete();
       if (!shouldFreezeCompletedTestRun(session)) refreshPlanningAuxiliaryState(session);
       return session;
@@ -18244,19 +18302,34 @@ function updateLiveLhsVisualization(visualization, expectedRunId = liveCurrentRu
 }
 
 async function hydrateLiveBoVisualization() {
-  try {
-    const response = await fetch("/api/bo/config", { cache: "no-store" });
-    if (!response.ok) return false;
-    const payload = await response.json();
-    const runId = String(payload?.state?.run_id || payload?.run_id || liveCurrentRunId());
-    if (runId !== liveCurrentRunId()) return false;
-    const lhsUpdated = updateLiveLhsVisualization(payload.recent_lhs_visualization, runId);
-    if (!payload.recent_visualization || !Object.keys(payload.recent_visualization).length) {
-      return lhsUpdated || Boolean(currentRunBoVisualization(liveBoVisualization, runId));
+  // Coalesce SSE bursts; repeat once if an update arrived during the read.
+  if (hydrateLiveBoVisualization.inFlight) {
+    hydrateLiveBoVisualization.pending = true;
+    return hydrateLiveBoVisualization.inFlight;
+  }
+  const request = (async () => {
+    try {
+      const payload = await fetchJsonOrThrowWithTimeout("/api/bo/config?visualization_only=true", { cache: "no-store" }, 10000);
+      const runId = String(payload?.state?.run_id || payload?.run_id || liveCurrentRunId());
+      if (runId !== liveCurrentRunId()) return false;
+      const lhsUpdated = updateLiveLhsVisualization(payload.recent_lhs_visualization, runId);
+      if (!payload.recent_visualization || !Object.keys(payload.recent_visualization).length) {
+        return lhsUpdated || Boolean(currentRunBoVisualization(liveBoVisualization, runId));
+      }
+      return updateLiveBoVisualizationCards(payload.recent_visualization, runId) || lhsUpdated;
+    } catch (_err) {
+      return false;
     }
-    return updateLiveBoVisualizationCards(payload.recent_visualization, runId) || lhsUpdated;
-  } catch (_err) {
-    return false;
+  })();
+  hydrateLiveBoVisualization.inFlight = request;
+  try {
+    return await request;
+  } finally {
+    hydrateLiveBoVisualization.inFlight = null;
+    if (hydrateLiveBoVisualization.pending) {
+      hydrateLiveBoVisualization.pending = false;
+      scheduleLiveBoVisualizationHydration();
+    }
   }
 }
 
@@ -18977,7 +19050,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   const section = event.target.closest && event.target.closest(".live-report-section[data-report-section-title]");
-  if (section && (event.key === "Enter" || event.key === " ")) {
+  if (section && !event.target.closest(".runtime-support-detail > summary") && (event.key === "Enter" || event.key === " ")) {
     event.preventDefault();
     selectLiveReportSection(section.dataset.reportSectionTitle || "");
     return;
@@ -19269,7 +19342,7 @@ document.addEventListener("click", (event) => {
     return;
   }
   const reportSection = event.target.closest(".live-report-section[data-report-section-title]");
-  if (reportSection && !event.target.closest("button, a, input, select, textarea")) {
+  if (reportSection && !event.target.closest("button, a, input, select, textarea, .runtime-support-detail > summary")) {
     closeBinderContextMenu();
     selectLiveReportSection(reportSection.dataset.reportSectionTitle || "");
     return;

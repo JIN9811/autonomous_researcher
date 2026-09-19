@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from contextlib import asynccontextmanager
 import json
 from pathlib import Path
@@ -11,17 +12,24 @@ import threading
 import time
 from urllib.parse import quote
 
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.responses import Response, StreamingResponse
 import uvicorn
 
 
 def create_monitor_app(kind, config, token, latest):
+    vision_sources = {}
+    source_lock = threading.Lock()
     # Imports stay in their own process/domain; no server/application import.
     @asynccontextmanager
     async def lifespan(app):
         yield
         if kind == "video":
+            with source_lock:
+                sources = list(vision_sources.values())
+                vision_sources.clear()
+            for source in sources:
+                await asyncio.to_thread(source.stop)
             from device_bridges.printer_fleet.monitoring import close_monitors
             await asyncio.to_thread(close_monitors)
 
@@ -31,9 +39,90 @@ def create_monitor_app(kind, config, token, latest):
 
     if kind == "video":
         from device_bridges.printer_fleet.monitoring import shared_video
+        printer_config = config
+
+        def control(payload):
+            nonlocal printer_config
+            operation = payload["operation"]
+            if operation == "printer":
+                printer_config = payload["config"]
+                return {"ok": True}
+            if operation == "vision_stop":
+                with source_lock:
+                    source = vision_sources.pop(payload["source_id"], None)
+                if source is not None:
+                    source.stop()
+                return {"ok": True}
+            with source_lock:
+                if operation == "vision_register":
+                    # Import the existing byte-preserving subscriber, not a runtime manager.
+                    from device_bridges.camera_vision.utm_runtime_bridge import SharedMjpegTopicStream
+                    settings = payload["config"]
+                    source_id = hashlib.sha256(json.dumps(settings, sort_keys=True).encode()).hexdigest()[:24]
+                    if source_id not in vision_sources:
+                        if len(vision_sources) >= 4:
+                            raise ValueError("Vision display source limit reached")
+                        vision_sources[source_id] = SharedMjpegTopicStream(**settings)
+                    return {"ok": True, "source_id": source_id}
+                raise ValueError("Unknown video configuration")
+        app.state.video_control = control
+
+        def vision_source(source_id):
+            with source_lock:
+                source = vision_sources.get(source_id)
+            if source is None:
+                raise HTTPException(status_code=404, detail="Display source unavailable")
+            return source
+
+        @app.get(prefix + "/vision/{source_id}/status")
+        async def vision_status(source_id: str):
+            return vision_source(source_id).stats()
+
+        @app.get(prefix + "/vision/{source_id}/stream.mjpeg")
+        async def vision_stream(source_id: str):
+            nonlocal viewers
+            source = vision_source(source_id)
+            if viewers >= 8:
+                return Response(status_code=429)
+            viewers += 1
+
+            async def frames():
+                nonlocal viewers
+                cancelled = threading.Event()
+                iterator = source.frames(cancelled=cancelled)
+                sentinel = object()
+                task = None
+                try:
+                    while True:
+                        task = asyncio.create_task(asyncio.to_thread(next, iterator, sentinel))
+                        chunk = await asyncio.shield(task)
+                        task = None
+                        if chunk is sentinel:
+                            break
+                        yield chunk
+                finally:
+                    cancelled.set()
+                    # Closing a generator while next() is running is unsafe. Disconnect
+                    # must release its viewer even when ROS stops producing images.
+                    if task is not None and not task.done():
+                        def release(_):
+                            try:
+                                _.result()
+                                iterator.close()
+                            except (Exception, asyncio.CancelledError):
+                                pass
+                        task.add_done_callback(release)
+                    else:
+                        iterator.close()
+                    viewers -= 1
+            return StreamingResponse(frames(), media_type="multipart/x-mixed-replace; boundary=frame",
+                                     headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
 
         def video():
-            return shared_video(config["command"], config["timeout"])
+            settings = printer_config
+            if not settings:
+                raise HTTPException(status_code=503, detail="Printer display source not configured")
+            return shared_video(settings["command"], settings["timeout"])
 
         @app.get(prefix + "/frame.jpg")
         async def frame():
@@ -66,8 +155,10 @@ def create_monitor_app(kind, config, token, latest):
         artifact_lock = threading.Lock()
 
         def current():
-            # Stop showing live data if the owning server stops publishing.
-            return latest[0] if time.monotonic() - latest[1] < 5 else {}
+            # A delayed publisher is not an explicit session reset. Continue
+            # reading its known log, with freshness reported separately. Parent
+            # death still shuts this process down through EOF on the control pipe.
+            return latest[0]
 
         def artifacts(path, session):
             with artifact_lock:
@@ -88,6 +179,7 @@ def create_monitor_app(kind, config, token, latest):
             try:
                 await stream_robot_samples(ws,
                     context=lambda: current().get("context"),
+                    publisher_fresh=lambda: time.monotonic() - latest[1] < 5,
                     reset=lambda: latest[0].get("reset_at_ms", 0),
                     public_session=lambda session: session,
                     runtime_view=lambda session, packet, artifacts=None: build_manipulation_runtime_view(
@@ -112,6 +204,13 @@ def main():
         for line in sys.stdin:
             try:
                 payload = json.loads(line)
+                if first["kind"] == "video" and "monitor_control" in payload:
+                    try:
+                        reply = app.state.video_control(payload["monitor_control"])
+                    except Exception as exc:
+                        reply = {"ok": False, "error": str(exc)}
+                    print(json.dumps(reply), flush=True)
+                    continue
                 latest[:] = [payload, time.monotonic()]
             except (ValueError, TypeError):
                 continue

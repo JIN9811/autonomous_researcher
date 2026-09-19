@@ -110,7 +110,7 @@ console.log(JSON.stringify({{
 	  lhsChatCard: resultBody.includes("Latin Hypercube Initial Design") && resultBody.includes("acquisition inactive"),
 	  lhsReportDetails: detailsBody.includes("Initial Design / LHS") && detailsBody.includes("Candidate ranking is disabled"),
 	  noDuplicateGenericBoVisualization: specializedBody.includes('"analysis", "knowledge", "bo"'),
-	  hydratesLatestVisualization: source.includes('fetch("/api/bo/config", {{ cache: "no-store" }})')
+	  hydratesLatestVisualization: source.includes('fetchJsonOrThrowWithTimeout("/api/bo/config?visualization_only=true"')
     && !source.slice(source.indexOf("async function initializeLiveGuiRuntime()")).includes("hydrateLiveBoVisualization()"),
 	  hydratesOnVisualizationEvent: source.includes('if (eventType === "bo.visualization.updated")')
 	    && source.includes("hydrateLiveBoVisualization();"),

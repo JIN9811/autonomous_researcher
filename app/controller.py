@@ -1444,7 +1444,24 @@ class MainController:
                 "error": f"{exc.__class__.__name__}: {exc}",
             }
 
-    def _register_workspace_artifacts(self, *, workspace: str, tool: str, result: dict[str, Any]) -> list[dict[str, Any]]:
+    async def _register_workspace_artifacts_async(self, *, workspace, tool, result):
+        from utils.compute_pool import compute_async, compute_enabled, ensure_current
+        records = None
+        visualization = self._bo_visualization_from_result(result) if workspace == 'bo' else None
+        if compute_enabled() and visualization:
+            identity = (self._state.run_id, self._state.experiment_id, self._state.loop_count)
+            try:
+                raw = await compute_async('bo.render', {'payload': visualization,
+                    'output_dir': str(self._workspace_artifact_dir(workspace))})
+                records = [{**r, 'key': f"workspace.bo_posterior.{Path(str(r['path'])).suffix.lstrip('.')}",
+                    'path': self._workspace_artifact_relpath(Path(str(r['path']))), 'workspace': workspace} for r in raw]
+            except Exception as exc:
+                records = [{'key': 'workspace.bo_posterior.warning', 'path': '', 'name': '',
+                    'source': 'bo_visualization.v1', 'workspace': workspace, 'error': f'{type(exc).__name__}: {exc}'}]
+            ensure_current(self._state, identity)
+        return self._register_workspace_artifacts(workspace=workspace, tool=tool, result=result, bo_records=records)
+
+    def _register_workspace_artifacts(self, *, workspace: str, tool: str, result: dict[str, Any], bo_records=None) -> list[dict[str, Any]]:
         """Materialize workspace evidence under the active run directory."""
         records: list[dict[str, Any]] = []
         result_record = self._write_workspace_result_artifact(workspace=workspace, tool=tool, result=result)
@@ -1456,7 +1473,7 @@ class MainController:
                 records.extend(self._write_lhs_visualization_artifacts(workspace=workspace, result=result))
             bo_visualization = self._bo_visualization_from_result(result)
             if bo_visualization:
-                records.extend(self._write_bo_visualization_artifacts(workspace=workspace, result=result))
+                records.extend(bo_records if bo_records is not None else self._write_bo_visualization_artifacts(workspace=workspace, result=result))
             else:
                 bo_plot = self._write_bo_plot_artifact(workspace=workspace, result=result)
                 if bo_plot:
@@ -1557,7 +1574,7 @@ class MainController:
         registered_artifacts = (
             []
             if event_type == "workspace_monitor_snapshot"
-            else self._register_workspace_artifacts(workspace=workspace, tool=tool, result=result)
+            else await self._register_workspace_artifacts_async(workspace=workspace, tool=tool, result=result)
         )
         if registered_artifacts:
             base_payload["runtime_artifacts"] = registered_artifacts
@@ -4633,6 +4650,12 @@ class MainController:
 
     async def resume(self) -> dict[str, Any]:
         """Resume pause, or revalidate a proven completed error boundary."""
+        if (self._state.run_metadata.get("vision_ros_retry") or {}).get("status") == "cycle_finished":
+            from app.vision_ros_recovery import resume_completed_cycle
+            return await resume_completed_cycle(self)
+        if (self._state.run_metadata.get("vision_ros_retry") or {}).get("status") in {"ready", "running"}:
+            from app.vision_ros_recovery import resume
+            return await resume(self)
         if (self._state.run_metadata.get("guardian_review_retry") or {}).get("status") in {"ready", "running"}:
             from app.guardian_review_recovery import resume_review
             return await resume_review(self)
@@ -7933,6 +7956,8 @@ class MainController:
                 "source": deepcopy(source_record["payload"]["authorization_scope"]),
                 "scope": authorization_scope(self._state)}
         design_status_times = {name: status.last_run_time for name, status in self._state.agent_status.items()}
+        from utils.vision_cycle_runtime import prepare_cycle_vision_runtime
+        await prepare_cycle_vision_runtime(self._state, self._deps.agent_context, cycle_index)
         await self._run_planning_langgraph_stage(
             Stage.DESIGN,
             run_orchestrator_before_design=False,
@@ -8152,6 +8177,7 @@ class MainController:
         design_constraints: dict[str, Any],
         start_cycle: int = 1,
         resume_tail_stage: Stage | None = None,
+        start_with_design: bool = False,
     ) -> dict[str, Any]:
         if resume_tail_stage == Stage.EQUIPMENT and (self._state.run_metadata.get('equipment_tail_recovery') or {}).get('status') == 'ready':
             from app.equipment_tail_recovery import continue_tail
@@ -8181,7 +8207,7 @@ class MainController:
                 total_cycles=total_cycles,
                 phase="cycle_start",
             )
-            if cycle_index > start_cycle:
+            if cycle_index > start_cycle or start_with_design:
                 self._store_planning_resume_context(
                     goal=self._state.active_goal,
                     current_spec=current_spec,

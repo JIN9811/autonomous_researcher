@@ -35,7 +35,7 @@ _VISION_CYCLE_RELOADS = {}
 
 def _reload_vision_cycle(key, stop, start, status):
     with _VISION_RELOAD_LOCK:
-        if key not in _VISION_CYCLE_RELOADS:
+        if _VISION_CYCLE_RELOADS.get(key, {}).get("ok") is not True:
             _VISION_CYCLE_RELOADS[key] = _restart_vision_runtime(stop, start, status)
             while len(_VISION_CYCLE_RELOADS) > 32:
                 _VISION_CYCLE_RELOADS.pop(next(iter(_VISION_CYCLE_RELOADS)))
@@ -47,8 +47,16 @@ def _restart_vision_runtime(stop, start, status):
     before = dict(status())
     stopped = dict(stop())
     after_stop = dict(status())
+    # The launch shell can exit before its ROS children finish shutting down.
+    # Do not confuse that brief draining interval with a failed stop, nor start
+    # a second camera owner while any of those children still exist.
+    deadline = time.monotonic() + 10.0
+    while stopped.get("ok") is True and after_stop.get("status") == "running" and time.monotonic() < deadline:
+        time.sleep(0.1)
+        after_stop = dict(status())
     if stopped.get("ok") is not True or after_stop.get("status") == "running":
-        return {"ok": False, "failure_code": "VISION_ROS_STOP_UNCONFIRMED"}
+        return {"ok": False, "failure_code": "VISION_ROS_STOP_UNCONFIRMED",
+                "runtime_status": after_stop}
     started = dict(start())
     after = dict(status())
     old_pid, new_pid = before.get("pid"), after.get("pid")
@@ -60,11 +68,10 @@ def _restart_vision_runtime(stop, start, status):
 
 
 def _reload_for_capture(payload, manager):
-    # Only run-scoped Vision checkpoints, never EQP's continuous observer.
-    if not payload.get("run_id") or not payload.get("specimen_id"):
-        return None
-    key = (payload["run_id"], payload["specimen_id"])
-    return _reload_vision_cycle(key, manager.stop, manager.start, manager.status)
+    # Capture must not stop the shared runtime after MAN has completed.
+    # Cycle admission owns the once-per-cycle reload; ordinary start/status
+    # below remains idempotent and fresh-frame evidence is still required.
+    return None
 
 
 def _now() -> datetime:

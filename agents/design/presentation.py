@@ -1,6 +1,10 @@
 """Design-owned projection consumed by the existing live report API."""
 from __future__ import annotations
 
+# Read-only report input contract; unlisted state is never copied for this view.
+REPORT_METADATA_KEYS = ["latest_design_agent_report","design_report"]
+REPORT_STATE_FIELDS = []
+
 REPORT_PROFILE = {
     "title": "Design Geometry / Manufacturability",
     "summary": "Converts approved requirements into printable TPMS/FDM specimen geometry with traceable parameters.",

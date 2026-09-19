@@ -25,13 +25,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import yaml
+from utils.yaml_cache import read_yaml
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
     """Load one YAML file and return an empty dict if the file is empty."""
-    with path.open("r", encoding="utf-8") as handle:
-        loaded = yaml.safe_load(handle) or {}
+    loaded = read_yaml(path) or {}
     if not isinstance(loaded, dict):
         raise ValueError(f"YAML root must be an object: {path}")
     return loaded

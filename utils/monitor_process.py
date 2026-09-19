@@ -52,6 +52,25 @@ class MonitorProcess:
     def url(self, path: str) -> str:
         return f"http://127.0.0.1:{self.port}/{self.token}/{path}"
 
+    def control(self, payload: dict) -> dict:
+        """Configure display readers over the private pipe, never a browser API."""
+        line = json.dumps({"monitor_control": payload}) + "\n"
+        if len(line.encode()) > 1024 * 1024:
+            raise ValueError("Monitor configuration exceeds 1 MiB")
+        with self.lock:
+            self.process.stdin.write(line)
+            self.process.stdin.flush()
+            with selectors.DefaultSelector() as selector:
+                selector.register(self.process.stdout, selectors.EVENT_READ)
+                if not selector.select(5):
+                    # An unacknowledged reply must not be mistaken for the next one.
+                    self.close()
+                    raise TimeoutError("Monitor configuration timed out")
+                reply = json.loads(self.process.stdout.readline())
+            if not reply.get("ok"):
+                raise RuntimeError(reply.get("error", "Monitor configuration failed"))
+            return reply
+
     def close(self):
         if self.process.poll() is None:
             self.process.terminate()
@@ -74,6 +93,12 @@ def monitor_process(kind: str, config: dict) -> MonitorProcess:
         raise ValueError("Unknown monitoring domain")
     with _lock:
         worker = _workers.get(kind)
+        if kind == "video" and worker and worker.process.poll() is None:
+            # Vision and printer share the video server, not each other's source.
+            if config and worker.config != config:
+                worker.control({"operation": "printer", "config": config})
+                worker.config = config
+            return worker
         if worker and worker.process.poll() is None and worker.config == config:
             return worker
         if worker:

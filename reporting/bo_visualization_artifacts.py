@@ -286,6 +286,9 @@ def _plot_grouped_posterior(normalized: dict[str, Any], series_rows: list[dict[s
 
 def write_bo_visualization_artifacts(payload: dict[str, Any], output_dir: str | Path) -> list[dict[str, Any]]:
     """Persist one validated BO projection as PNG, SVG, and numeric CSV."""
+    from utils.compute_pool import compute_enabled, compute_sync
+    if compute_enabled():
+        return compute_sync('bo.render', {'payload': payload, 'output_dir': str(output_dir)})
     normalized = validate_bo_visualization(payload)
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)

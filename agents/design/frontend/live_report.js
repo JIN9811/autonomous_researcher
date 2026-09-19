@@ -102,9 +102,9 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
         ["Validity", validity.status || "unknown"],
         ["Performance", performance.status === "unassessed" ? "unassessed" : quantity(performance)],
         ["Mass (estimated)", quantity(cost.mass)],
-        ["Time (rough estimate)", quantity(cost.duration)],
+        ["Print time (slicer)", quantity(cost.duration?.source === 'slicer' ? cost.duration : null)],
       ];
-      const margins = details && Array.isArray(e.constraint_margins) ? e.constraint_margins : [];
+      const margins = visibleConstraintRows(details ? e.constraint_margins : []);
       const reasons = Array.isArray(validity.reasons) ? validity.reasons : [];
       return `<div class="ar-design-metric-strip">${rows.map(([label, value]) => `<span><b>${escapeHtml(label)}</b>${escapeHtml(value)}</span>`).join("")}</div>
     ${margins.length ? `<div class="ar-design-note-list">${margins.map((margin) => `<span>${escapeHtml(margin.constraint)}: ${escapeHtml(margin.margin)} ${escapeHtml(margin.unit)} margin · ${escapeHtml(margin.status)}</span>`).join("")}</div>` : ""}
@@ -232,7 +232,7 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
       };
       const constraints = row => {
         const e = row.design_evaluation || {};
-        const checks = e.constraint_margins?.length ? e.constraint_margins : e.selection_evaluation?.constraint_margins || [];
+        const checks = visibleConstraintRows(e.constraint_margins?.length ? e.constraint_margins : e.selection_evaluation?.constraint_margins);
         if (!checks.length) return e.validity?.status || 'Not evaluated';
         const counts = checks.reduce((acc, item) => {const key=item.status || 'unassessed'; acc[key]=(acc[key]||0)+1; return acc;}, {});
         return `${e.validity?.status || 'Not evaluated'} · ${Object.entries(counts).map(([key,count])=>`${count} ${key}`).join(', ')}${e.constraint_margins?.length ? '' : ' · selection-time checks'}`;
@@ -279,6 +279,11 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
   `;
     }
 
+    function visibleConstraintRows(rows) {
+      return (Array.isArray(rows) ? rows : []).filter(row =>
+        !['estimated_mass', 'estimated_duration'].includes(String(row.constraint || '').toLowerCase().replace(/\s+/g, '_')));
+    }
+
     function renderManufacturabilityCard(screenReport, designReport, selected, spec) {
       const selectedId = spec.candidate_id || selected.candidate_id;
       const matches = item => item && (!selectedId || !item.candidate_id || item.candidate_id === selectedId);
@@ -288,7 +293,7 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
       const currentRows = evidence?.constraint_margins || [];
       const selection = evidence?.selection_evaluation;
       const historical = !currentRows.length && matches(selection) && selection.constraint_margins?.length;
-      const rows = historical ? selection.constraint_margins : currentRows;
+      const rows = visibleConstraintRows(historical ? selection.constraint_margins : currentRows);
       const summary = evidence ? `<p class="ar-design-empty">Current design: ${escapeHtml(evidence.validity?.status || 'Not evaluated')}${evidence.adapted_fields?.length ? ` · Adapted: ${escapeHtml(evidence.adapted_fields.join(', '))}` : ''}</p>` : '';
       const provenance = historical ? '<p class="ar-design-empty"><strong>Selection-time evidence — before adaptation.</strong> These checks are not a pass verdict for the current geometry.</p>' : '';
       const bars=rows.filter(m=>finiteNumber(m.actual)!==null && finiteNumber(m.limit)!==null && m.actual>=0 && m.limit>0 && ['>=','<='].includes(m.relation));

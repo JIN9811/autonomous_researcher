@@ -132,10 +132,13 @@ async def test_real_orchestrator_entrypoint_preserves_each_loop(tmp_path):
     ctx = SimpleNamespace(artifact_run_root=tmp_path / "runs", complete=offline)
     for loop in (0, 1):
         result = await OrchestratorAgent().run(state(loop), ctx)
-        assert result.success
+        # The model is deliberately unavailable: preserve the failed invocation,
+        # rather than requiring production to fabricate a successful decision.
+        assert result.success is False
     entries = list_executions(tmp_path / "runs" / "run-archive")
     assert [e["agent"] for e in entries] == ["orchestrator_agent", "orchestrator_agent"]
     assert [e["loop_index"] for e in entries] == [0, 1]
+    assert all(e["status"] == "failed" for e in entries)
 
 
 @pytest.mark.asyncio

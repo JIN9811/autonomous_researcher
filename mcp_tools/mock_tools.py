@@ -640,6 +640,9 @@ def _auxetic_reentrant_stl(name: str, size: list[float], wall: float, cell_size:
 
 
 def _generate_geometry_stl(payload: dict[str, Any]) -> dict[str, Any]:
+    from utils.compute_pool import compute_enabled, compute_sync
+    if compute_enabled():
+        return compute_sync('geometry.generate', payload)
     run_id = _safe_segment(payload.get("run_id", "run"), "run")
     specimen_id = _safe_segment(payload.get("specimen_id", "specimen"), "specimen")
     raw_geometry_type = payload.get("geometry_type", "gyroid")
@@ -853,6 +856,9 @@ def _generate_geometry_stl(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _check_mesh_quality(payload: dict[str, Any]) -> dict[str, Any]:
+    from utils.compute_pool import compute_enabled, compute_sync
+    if compute_enabled():
+        return compute_sync('geometry.quality', payload)
     stl_path = Path(str(payload.get("stl_path", "")))
     if not stl_path.exists():
         return {
@@ -906,6 +912,9 @@ def _check_mesh_quality(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _check_manufacturability(payload: dict[str, Any]) -> dict[str, Any]:
+    from utils.compute_pool import compute_enabled, compute_sync
+    if compute_enabled():
+        return compute_sync('geometry.manufacturability', payload)
     constraints = payload.get("constraints", {})
     constraints = constraints if isinstance(constraints, dict) else {}
     mesh_report = payload.get("mesh_report", {})

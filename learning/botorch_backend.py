@@ -491,6 +491,16 @@ def propose_next(
     projection_candidate: Mapping[str, Any] | None = None,
 ) -> BoTorchProposal:
     """Fit a SingleTaskGP and directly optimize one next mixed-space candidate."""
+    from utils.compute_pool import compute_enabled, compute_sync
+    if compute_enabled():
+        result = compute_sync('bo.propose', {
+            'parameter_space': {d.name: list(d.values) for d in parameter_space.dimensions},
+            'observations': list(observations), 'acquisition': acquisition,
+            'objective_direction': objective_direction, 'random_seed': random_seed,
+            'kappa': kappa, 'num_restarts': num_restarts, 'raw_samples': raw_samples,
+            'optimizer_timeout_s': optimizer_timeout_s, 'fit_max_iter': fit_max_iter,
+            'projection_candidate': projection_candidate})
+        return BoTorchProposal(**result)
     if not is_available():
         raise BoTorchBackendError(
             "torch/botorch/gpytorch are not installed",

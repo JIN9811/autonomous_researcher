@@ -90,7 +90,7 @@
             ["cap_skin", `top=${renderRuntimeValue(cap.top_cap_enabled)} bottom=${renderRuntimeValue(cap.bottom_cap_enabled)} thickness=${renderRuntimeValue(cap.skin_thickness_mm)}`],
             ["ejection_policy", `${ejection.status || "-"} requested=${renderRuntimeValue(ejection.requested)}`],
             ["estimated_mass_g", plan.estimated_mass_g || "-"],
-            ["estimated_print_time_min", plan.estimated_print_time_min || "-"],
+            ["slicer_print_time_min", plan.duration_evidence?.source === 'slicer' ? plan.duration_evidence.duration_min : "Not available"],
           ])}
           <h5>Quality Gates</h5>
           ${renderReportList(gateItems, "No manufacturing quality gates recorded.")}

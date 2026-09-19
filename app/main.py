@@ -112,6 +112,7 @@ from objectives.compiler import ObjectiveCompileError
 from objectives.service import ObjectiveConflict, ObjectiveNotFound, ObjectiveService
 from orchestrator.supervisor import build_mission_contract, build_orchestration_plan, build_orchestrator_control_plane_snapshot
 from utils.config_loader import load_all_configs
+from utils.yaml_cache import read_yaml
 from utils.lerobot_rollout_profile import (
     LEROBOT_ROLLOUT_PROFILE_PATH,
     load_lerobot_rollout_profile,
@@ -670,6 +671,30 @@ app.include_router(review_router(controller._deps.run_root, templates))
 from app.live_fullscreen import router as live_fullscreen_router
 app.include_router(live_fullscreen_router)
 _RUN_REVIEW_RECORDER = None
+_ARTIFACT_PRESERVATION_SERVICE = None
+
+
+@app.on_event("startup")
+async def start_artifact_preservation() -> None:
+    global _ARTIFACT_PRESERVATION_SERVICE
+    from utils.artifact_preservation import PreservationService
+    from utils.agent_artifact_archive import set_preservation_sink
+    try:
+        _ARTIFACT_PRESERVATION_SERVICE = PreservationService()
+        set_preservation_sink(_ARTIFACT_PRESERVATION_SERVICE.offer)
+        run = controller._deps.run_root / controller._state.run_id
+        if (run / 'runtime/loops').is_dir():
+            _ARTIFACT_PRESERVATION_SERVICE.offer(run)
+    except Exception:
+        set_preservation_sink(None)  # Optional derived export cannot block the server.
+
+
+@app.on_event("shutdown")
+async def stop_artifact_preservation() -> None:
+    from utils.agent_artifact_archive import set_preservation_sink
+    set_preservation_sink(None)
+    if _ARTIFACT_PRESERVATION_SERVICE is not None:
+        _ARTIFACT_PRESERVATION_SERVICE.close()
 
 
 @app.on_event("startup")
@@ -708,6 +733,24 @@ async def keep_startup_side_effect_free() -> None:
     await _apply_runtime_api_key_settings(settings, emit_event=False)
     controller._deps.agent_context.on_knowledge_ingest = None
     await _source_ingestion_service().start()
+
+
+@app.on_event("startup")
+async def start_cpu_compute_pool() -> None:
+    from utils.compute_pool import configure_compute_pool
+    configure_compute_pool(int(os.environ.get('ATR_CPU_WORKERS', '3')))
+
+
+@app.on_event("shutdown")
+async def stop_cpu_compute_pool() -> None:
+    from utils.compute_pool import close_compute_pool
+    await asyncio.to_thread(close_compute_pool)
+
+
+@app.get('/api/runtime/compute')
+async def cpu_compute_status() -> dict[str, Any]:
+    from utils.compute_pool import compute_status
+    return compute_status()
 
 
 @app.on_event("shutdown")
@@ -3647,6 +3690,16 @@ async def get_utm_runtime_frame() -> dict[str, object]:
 @app.get("/api/equipment/utm-runtime/frame-stream.mjpeg")
 async def get_utm_runtime_frame_stream(request: Request, topic: str = "", fps: float | None = None) -> StreamingResponse:
     """Stream UTM image evidence as browser-consumable MJPEG at the configured GUI FPS."""
+    from fastapi.responses import RedirectResponse
+    if _local_monitor_client(request):
+        try:
+            url = await asyncio.to_thread(_utm_runtime_bridge().frame_stream_url, topic=topic, fps=fps)
+            if url:
+                return RedirectResponse(url, status_code=307, headers={"Cache-Control": "no-store"})
+            return Response(status_code=204)
+        except (OSError, ValueError, RuntimeError, TimeoutError):
+            # Preview worker startup failure may fall back, never affect capture.
+            pass
     sentinel = object()
     source = iter(_utm_runtime_bridge().frame_stream(topic=topic, fps=fps))
 
@@ -3697,7 +3750,7 @@ async def get_utm_runtime_frame_stream_status(
     quality: int = 82,
 ) -> dict[str, object]:
     """Return rolling delivery statistics for the shared GUI MJPEG worker."""
-    return _utm_runtime_bridge().frame_stream_status(topic=topic, fps=fps, quality=quality)
+    return await asyncio.to_thread(_utm_runtime_bridge().frame_stream_status, topic=topic, fps=fps, quality=quality)
 
 
 @app.get("/api/equipment/utm-runtime/camera-config")
@@ -3830,8 +3883,9 @@ async def get_agents_compat() -> dict[str, object]:
 
 
 @app.get("/api/agents/{agent_id}/report")
-async def get_agent_report_compat(agent_id: str, run_id: str | None = None) -> dict[str, object]:
+async def get_agent_report_compat(agent_id: str, response: Response, run_id: str | None = None) -> dict[str, object]:
     """Compatibility endpoint returning a structured agent report payload."""
+    response.headers['Cache-Control'] = 'no-store'
     return {"ok": True, "report": _agent_report_payload(agent_id, run_id=run_id)}
 
 
@@ -4200,7 +4254,7 @@ def _module_ui_payload(module_id: str, *, module_root: Path | None = None) -> tu
     if not ui_path.exists():
         return {}, ""
     try:
-        raw = yaml.safe_load(ui_path.read_text(encoding="utf-8")) or {}
+        raw = read_yaml(ui_path) or {}
     except (OSError, yaml.YAMLError):
         return {}, str(ui_path)
     ui = raw.get("ui", raw) if isinstance(raw, dict) else {}
@@ -4736,7 +4790,7 @@ def _module_payload_by_id(module_root: Path | None = None) -> dict[str, dict[str
     modules: dict[str, dict[str, Any]] = {}
     for module_path in sorted((module_root or RUNTIME_MODULE_ROOT).glob("*/module.yaml")):
         try:
-            raw = yaml.safe_load(module_path.read_text(encoding="utf-8")) or {}
+            raw = read_yaml(module_path) or {}
         except (OSError, yaml.YAMLError):
             continue
         module = raw.get("module", raw) if isinstance(raw, dict) else {}
@@ -5550,7 +5604,7 @@ def _module_config_payload(module_id: str) -> dict[str, object]:
     module_path = RUNTIME_MODULE_ROOT / safe_module / "module.yaml"
     if not module_path.exists():
         raise HTTPException(status_code=404, detail=f"Unknown module_id={module_id}")
-    raw = yaml.safe_load(module_path.read_text(encoding="utf-8")) or {}
+    raw = read_yaml(module_path) or {}
     return raw if isinstance(raw, dict) else {}
 
 
@@ -5592,7 +5646,7 @@ def _module_category(module: dict[str, Any]) -> str:
 def _module_list_item(path: Path) -> dict[str, object]:
     """Return one catalog item for Runtime IDE module listing."""
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        raw = read_yaml(path) or {}
     except (OSError, yaml.YAMLError):
         raw = {}
     module = raw.get("module", {}) if isinstance(raw, dict) else {}
@@ -6564,8 +6618,11 @@ def _events_for_agent(agent_id: str, run_id: str | None = None) -> tuple[dict[st
 def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str, object]:
     """Build a lightweight academic-report payload for compatibility consumers."""
     definition, events = _events_for_agent(agent_id, run_id=run_id)
-    planning_snapshot = controller.planning_snapshot()
-    snapshot = controller.snapshot()
+    from app.report_snapshot import report_snapshot
+    installed = _installed_agent_module(definition["module_id"])
+    # Reports need the transcript page, not another complete planning projection.
+    planning_snapshot = controller.planning_messages_page()
+    snapshot = report_snapshot(controller, definition, installed)
     state = snapshot.get("state", {}) if isinstance(snapshot.get("state"), dict) else {}
     messages = [msg for msg in planning_snapshot.get("messages", []) if isinstance(msg, dict)]
     role_aliases = {definition["agent_id"], definition["stage"], definition["module_id"]}
@@ -6664,7 +6721,6 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
         )
         report_decisions = decisions
         report_metrics = role_specific["run_health"]
-    installed = _installed_agent_module(definition["module_id"])
     if installed is not None and installed.project_report is not None:
         role_specific.update(installed.describe().get("report_profile", {}))
         # Request-only context preserves owner observation precedence without a new store.
@@ -6955,7 +7011,7 @@ def _runtime_module_ids() -> set[str]:
     ids: set[str] = set()
     for path in RUNTIME_MODULE_ROOT.glob("*/module.yaml"):
         try:
-            raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            raw = read_yaml(path) or {}
         except (OSError, yaml.YAMLError):
             ids.add(path.parent.name)
             continue
@@ -8078,8 +8134,31 @@ async def get_objective_status(run_id: str = "") -> dict[str, object]:
 
 
 @app.get("/api/bo/config")
-async def get_bo_config() -> dict[str, object]:
+async def get_bo_config(visualization_only: bool = False) -> dict[str, object]:
     """Return BO Workspace defaults and recent BO state."""
+    if visualization_only:
+        # Plot refreshes never need the run history, device state, or GP refit.
+        # Select before serialization so large unrelated metadata is not copied.
+        state = controller._state.model_dump(mode="json", include={
+            "run_id": True,
+            "run_metadata": {"bo_visualization", "lhs_visualization"},
+        })
+        metadata = state.get("run_metadata", {})
+        run_id = str(state.get("run_id") or "")
+        def current_plot(key, validate, attach):
+            plot = metadata.get(key, {})
+            try:
+                validate(plot)
+            except (TypeError, ValueError):
+                return {}
+            if str(plot.get("run_id") or "") != run_id:
+                return {}
+            return attach(plot, run_id)
+        return {
+            "ok": True, "run_id": run_id,
+            "recent_visualization": current_plot("bo_visualization", validate_bo_visualization, _attach_bo_artifact_urls),
+            "recent_lhs_visualization": current_plot("lhs_visualization", validate_lhs_design_visualization, _attach_lhs_artifact_urls),
+        }
     snapshot = controller.snapshot()
     state = snapshot.get("state", {}) if isinstance(snapshot.get("state"), dict) else {}
     metadata = state.get("run_metadata", {}) if isinstance(state.get("run_metadata"), dict) else {}

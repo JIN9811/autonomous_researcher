@@ -1,5 +1,9 @@
 """Specimen-owned projection preserving the existing live report precedence."""
 
+# Read-only report input contract; unlisted state is never copied for this view.
+REPORT_METADATA_KEYS = ["specimen_result","latest_specimen_agent_report","fabrication_report","specimen_fabricated","specimen_metrics"]
+REPORT_STATE_FIELDS = []
+
 REPORT_PROFILE = {
     "title": "Manufacturing Digital Thread / Printer Runtime",
     "summary": "Transforms the selected STL into a fabrication digital thread with slicer settings, quality gates, printer runtime evidence, monitoring handoff, and feedback to the next loop.",

@@ -2331,7 +2331,25 @@ class LangGraphRunLoop:
                 "error": f"{exc.__class__.__name__}: {exc}",
             }
 
-    def _register_runtime_artifacts(self, stage: Stage, agent_name: str, data: dict[str, Any]) -> list[dict[str, Any]]:
+    async def _register_runtime_artifacts_async(self, stage, agent_name, data):
+        from utils.compute_pool import compute_async, compute_enabled, ensure_current
+        self._runtime_evidence_execution = data.get("artifact_execution") or {}
+        records = None
+        visualization = self._bo_visualization_from_result(data) if stage == Stage.BO else None
+        if compute_enabled() and visualization:
+            identity = (self._state.run_id, self._state.experiment_id, self._state.loop_count)
+            try:
+                raw = await compute_async('bo.render', {'payload': visualization,
+                    'output_dir': str(self._runtime_artifact_dir(stage))})
+                records = [{**r, 'key': f"runtime.bo_posterior.{Path(str(r['path'])).suffix.lstrip('.')}",
+                            'path': self._runtime_artifact_relpath(Path(str(r['path']))), 'stage': stage.value} for r in raw]
+            except Exception as exc:
+                records = [{'key': 'runtime.bo_posterior.warning', 'path': '', 'name': '',
+                    'source': 'bo_visualization.v1', 'stage': stage.value, 'error': f'{type(exc).__name__}: {exc}'}]
+            ensure_current(self._state, identity)
+        return self._register_runtime_artifacts(stage, agent_name, data, bo_records=records)
+
+    def _register_runtime_artifacts(self, stage: Stage, agent_name: str, data: dict[str, Any], *, bo_records=None) -> list[dict[str, Any]]:
         """Materialize closed-loop BO/CAE evidence under the active run directory."""
         self._runtime_evidence_execution = data.get("artifact_execution") or {}
         if stage not in {Stage.BO, Stage.ANALYSIS}:
@@ -2341,7 +2359,7 @@ class LangGraphRunLoop:
         if result_record:
             records.append(result_record)
         if stage == Stage.BO:
-            visualization_records = self._write_bo_visualization_artifacts(stage, data)
+            visualization_records = bo_records if bo_records is not None else self._write_bo_visualization_artifacts(stage, data)
             if visualization_records:
                 records.extend(visualization_records)
                 visualization = self._bo_visualization_from_result(data)
@@ -2421,7 +2439,7 @@ class LangGraphRunLoop:
         artifacts = (
             registered_artifacts
             if registered_artifacts is not None
-            else self._register_runtime_artifacts(stage, agent_name, data)
+            else await self._register_runtime_artifacts_async(stage, agent_name, data)
         )
         for artifact in artifacts:
             if not artifact.get("path"):
@@ -3286,7 +3304,7 @@ class LangGraphRunLoop:
                 result_data.setdefault("incident_records", []).extend(post_gate.get("incident_records", []))
             if post_gate.get("corrective_actions"):
                 result_data.setdefault("corrective_actions", []).extend(post_gate.get("corrective_actions", []))
-            runtime_artifacts = self._register_runtime_artifacts(stage, agent_name, result_data)
+            runtime_artifacts = await self._register_runtime_artifacts_async(stage, agent_name, result_data)
             status.state = "idle"
             status.last_result = result.summary
             status.last_run_time = self._agent_now_iso(agent)

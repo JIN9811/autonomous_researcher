@@ -78,6 +78,37 @@ def test_robot_worker_publishes_real_graph_artifacts_from_saved_samples(tmp_path
     assert json.loads((tmp_path / "policy_tracking_summary.json").read_text())["sample_count"] == 4
 
 
+def test_delayed_publisher_keeps_pose_and_log_without_replaying_history(tmp_path):
+    path = tmp_path / "motor_events.jsonl"
+    path.write_text(json.dumps(_action_event(1, 100)) + "\n")
+    payload = {"context": {"session": {"session_id": "same-session", "status": "POLICY_ACTIVE"},
+                           "log_path": str(path)}, "reset_at_ms": 4}
+    latest = [payload, time.monotonic() - 10]
+    app = create_monitor_app("robot", {"origins": ["http://localhost:7860"]}, "key", latest)
+    with TestClient(app) as client:
+        with client.websocket_connect("/key/joints", headers={"origin": "http://localhost:7860"}) as ws:
+            first = ws.receive_json()
+            assert first["type"] == "joint_history" and first["status"] == "stale"
+            assert first["session"]["session_id"] == "same-session"
+            with path.open("a") as stream:
+                stream.write(json.dumps(_action_event(2, 101)) + "\n")
+            next_packet = ws.receive_json()
+            if next_packet["type"] == "telemetry_state":
+                next_packet = ws.receive_json()
+            assert next_packet["type"] == "joint_samples"
+            assert [p["sequence"] for p in next_packet["samples"]] == [2]
+            latest[1] = time.monotonic()
+            resumed = ws.receive_json()
+            while resumed["publisher_stale"]:
+                resumed = ws.receive_json()
+            assert resumed["type"] == "telemetry_state"
+            assert resumed["session"]["session_id"] == "same-session"
+            assert resumed["status"] != "idle"
+            latest[:] = [{"context": None, "reset_at_ms": 5}, time.monotonic()]
+            cleared = ws.receive_json()
+            assert cleared["status"] == "idle" and cleared["reset_at_ms"] == 5
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("initially_empty", [False, True])
 @pytest.mark.parametrize("compact", [False, True])
