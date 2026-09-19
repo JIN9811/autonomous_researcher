@@ -3121,9 +3121,15 @@ async def test_first_live_gui_test_design_cycle_uses_single_artifact(monkeypatch
     assert evaluation["adapted_fields"]
     assert controller._state.run_metadata["design_report"]["design_evaluation"] == evaluation
     assert controller._state.run_metadata["latest_design_agent_report"]["design_evaluation"] == evaluation
+    # Both active design variables are lengths in mm; density is a derived
+    # property, not an independently requested/realized design coordinate.
+    expected_parameters = {"cell_size_mm", "wall_thickness_mm"}
+    assert set(spec["requested_parameters"]) == expected_parameters
+    assert set(spec["realized_parameters"]) == expected_parameters
     # Preserve the existing generator's serialized precision, not raw LHS floats.
-    for key, tolerance in (("cell_size_mm", 0.00051), ("relative_density", 0.000051)):
+    for key, tolerance in (("cell_size_mm", 0.00051), ("wall_thickness_mm", 0.00051)):
         assert spec["realized_parameters"][key] == pytest.approx(spec["requested_parameters"][key], abs=tolerance)
+        assert spec["realized_parameters"][key] == spec[key]
     assert "artifact_pair" not in design_message
     assert design_message.get("artifacts", {}).get("stl_url")
     assert "생성된 형상" in design_message["content"]
