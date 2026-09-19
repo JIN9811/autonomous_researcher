@@ -102,7 +102,7 @@ def test_capture_boundary_uses_ros_timestamp_profile_unique_artifacts(tmp_path, 
     assert first["frame_timestamp"] == stamp
     assert first["loop_id"] == 0
     assert first["raw_frame_path"] != second["raw_frame_path"]
-    assert manager.start_calls == 1  # One confirmed ROS reload, never one per poll.
+    assert manager.start_calls == 0  # Cycle admission owns ROS reload; capture never restarts it.
     assert manager.raw_frame_calls == 2
     assert manager.frame_calls == 0
     manager._frame.pop("frame_timestamp")

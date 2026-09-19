@@ -330,12 +330,12 @@ selected tool, reason, evidence refs, image hashes, and error/failure state.
 
 ## Post-Test Clearance Baseline
 
-Initial live placement detection is restricted to the green Live Observation
-region. It reads the enabled pixel bounds from the monitor's current
-`/compression_tester/summary` → `x_roi`, rather than duplicating display constants
-or accepting a caller's full-frame override. Missing/disabled/invalid live ROI
-returns unresolved; it never falls back to whole-frame detection. The current
-installation publishes x=180–410 across the image height.
+Placement detection and Verification 2 share the fixed platen ROI
+`[200, 240, 400, 420]` in the 640 × 480 camera view through
+`utm_platen_roi_normalized()`. This applies to physical and virtual UTM capture
+routes; ActiveCam keeps its own workspace ROI. The monitor's full-height
+`x_roi` and caller-supplied overrides do not control placement inspection.
+Placement still requires a detected specimen; clearance requires supported absence.
 
 Verification 1 remains placement evidence. Verification 2 uses the separate
 post-clear detector after managed replay completion and measured robot return.

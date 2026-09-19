@@ -28,6 +28,11 @@ _RED_MIN_SATURATION = 0.50
 _RED_MIN_VALUE = 0.25
 
 
+def utm_platen_roi_normalized() -> tuple[float, float, float, float]:
+    """Shared Verification 1/2 inspection region in the fixed 640x480 view."""
+    return tuple(v / (640 if i % 2 == 0 else 480) for i, v in enumerate(UTM_CLEAR_ROI_XYXY))
+
+
 def _safe_name(value: Any, default: str) -> str:
     clean = _SAFE_NAME_RE.sub("-", str(value or "").strip()).strip(".-")
     return clean or default
@@ -136,6 +141,8 @@ def _inspect_specimen_presence_image(
 
     annotated = image.copy()
     draw = ImageDraw.Draw(annotated)
+    if roi_normalized is not None:
+        draw.rectangle(roi_xyxy, outline=(70, 170, 230), width=1)
     detected = region is not None
     bbox_xyxy: list[int] = []
     center_px: list[int] = []
@@ -214,8 +221,7 @@ def _inspect_clear_presence(image, *, output_dir, specimen_id, frame_id, evidenc
 
 def _inspect_clear_at(image, *, output_dir, specimen_id, frame_id, evidence, observation_time):
     """Fixed-camera ROI residual check; visual review still establishes visibility."""
-    configured_roi = list(_normalized_roi_box(image,
-        tuple(v / (640 if i % 2 == 0 else 480) for i, v in enumerate(UTM_CLEAR_ROI_XYXY))))
+    configured_roi = list(_normalized_roi_box(image, utm_platen_roi_normalized()))
     result = {**evidence, "schema": SPECIMEN_PRESENCE_SCHEMA, "purpose": "utm_clear_verification",
         "ok": True, "status": "unknown", "clear_confirmed": False, "detected": False,
         "failure_code": "", "roi_valid": False, "inspection_method": "fixed_platen_roi", "specimen_id": specimen_id,

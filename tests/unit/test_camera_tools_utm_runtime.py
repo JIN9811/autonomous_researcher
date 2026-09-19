@@ -309,23 +309,30 @@ def test_utm_specimen_presence_captures_exactly_one_runtime_frame(tmp_path: Path
     assert Path(result["annotated_frame_path"]).is_file()
 
 
-def test_placement_uses_live_observation_roi_and_ignores_larger_red_outside(tmp_path):
+@pytest.mark.parametrize("mode", ["live", "test"])
+@pytest.mark.parametrize("on_platen", [False, True])
+def test_placement_uses_verification2_roi_not_full_height_monitor_or_caller_override(tmp_path, mode, on_platen):
     from mcp_tools.camera_tools import _utm_specimen_presence_capture
-    arr = np.full((120, 180, 3), 160, dtype=np.uint8)
-    arr[10:115, 5:45] = [230, 20, 25]
-    arr[50:80, 70:95] = [230, 20, 25]
+    arr = np.full((480, 640, 3), 160, dtype=np.uint8)
+    # Regression: loop 10 accepted this off-platen component as placement.
+    arr[419:454, 264:282] = [230, 20, 25]
+    arr[10:200, 180:410] = [230, 20, 25]
+    if on_platen:
+        arr[300:340, 270:310] = [230, 20, 25]
     stream = BytesIO()
     Image.fromarray(arr).save(stream, format="PNG")
-    frame = {**_red_specimen_frame(), "data_url": "data:image/png;base64," + base64.b64encode(stream.getvalue()).decode()}
+    frame = {**_red_specimen_frame(), "width":640, "height":480,
+        "data_url": "data:image/png;base64," + base64.b64encode(stream.getvalue()).decode()}
     manager = FakeRuntimeManager(frame=frame)
-    payload = {"runtime_mode": "live", "output_dir": str(tmp_path), "roi_normalized": [0, 0, 1, 1]}
+    def monitor_must_not_be_read(*args, **kwargs):
+        raise AssertionError("Placement must not use the monitor ROI")
+    manager._run_ros_frame_command = monitor_must_not_be_read
+    payload = {"runtime_mode": mode, "output_dir": str(tmp_path), "roi_normalized": [0, 0, 1, 1]}
     result = _utm_specimen_presence_capture(payload, utm_runtime_manager=manager)
-    assert result["roi_xyxy"] == [50, 0, 115, 120]
-    assert result["bbox_xyxy"] == [70, 50, 95, 80]
-    manager._run_ros_frame_command = lambda *args, **kwargs: (1, "", "unavailable")
-    result = _utm_specimen_presence_capture(payload, utm_runtime_manager=manager)
-    assert result["ok"] is False and result["detected"] is False
-    assert result["failure_code"] == "UTM_OBSERVATION_ROI_UNAVAILABLE"
+    assert result["roi_xyxy"] == [200, 240, 400, 420]
+    assert result["detected"] is on_platen
+    assert result["bbox_xyxy"] == ([270, 300, 310, 340] if on_platen else [])
+    assert result["failure_code"] == ("" if on_platen else "SPECIMEN_NOT_DETECTED")
 
 
 def test_utm_specimen_presence_retries_transient_ros_frame_failure(tmp_path: Path) -> None:

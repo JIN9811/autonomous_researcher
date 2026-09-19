@@ -18,7 +18,7 @@ from typing import Any
 from mcp_tools.tool_registry import ToolRegistry
 from device_bridges.camera_vision.utm_state_observer import apply_quasistatic_motion_threshold
 from utils.equipment_vision_tasks import EQUIPMENT_VISION_TASK_IDS
-from utils.utm_specimen_presence import inspect_specimen_presence, virtual_specimen_frame_data_url
+from utils.utm_specimen_presence import inspect_specimen_presence, virtual_specimen_frame_data_url, utm_platen_roi_normalized
 
 UTM_CHECK_IDS = set(EQUIPMENT_VISION_TASK_IDS)
 UTM_MOTION_TRANSITIONS = {"NOT_WORKING_TO_WORKING", "WORKING_TO_NOT_WORKING"}
@@ -415,15 +415,10 @@ def _utm_specimen_presence_capture(
     if clear_verification:
         from uuid import uuid4
         frame_id = f"utm-clear-{uuid4().hex}"
-    roi_normalized = payload.get("roi_normalized")
-    if not clear_verification and not virtualized:
-        from utils.utm_observation_roi import observation_roi
-        try:
-            roi_normalized = observation_roi(utm_runtime_manager, int(frame["width"]), int(frame["height"]))
-        except (ValueError, KeyError, TypeError, OSError) as exc:
-            return {"ok": False, "status": "unknown", "detected": False,
-                "failure_code": "UTM_OBSERVATION_ROI_UNAVAILABLE", "message": str(exc),
-                **{key: payload.get(key) for key in ("run_id", "loop_id", "specimen_id", "session_id")}}
+    # Placement and post-clear inspection use the same platen region. A live
+    # monitor's full-height x_roi or caller override must not admit discarded
+    # red material below the platen as a specimen ready for compression.
+    roi_normalized = utm_platen_roi_normalized()
     try:
         result = inspect_specimen_presence(
             str(frame.get("data_url") or ""),
