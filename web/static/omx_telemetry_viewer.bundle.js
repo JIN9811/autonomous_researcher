@@ -28584,10 +28584,26 @@ void main() {
     runtime.websocket = null;
     runtime.reconnectAttempt = 0;
   }
-  function connectTelemetrySocket() {
+  var telemetryConnecting = false;
+  async function connectTelemetrySocket() {
+    if (telemetryConnecting) return;
     if (!telemetryMountsPresent()) return;
     if (runtime.websocket && [WebSocket.CONNECTING, WebSocket.OPEN].includes(runtime.websocket.readyState)) return;
-    const socket = new WebSocket(websocketUrl());
+    telemetryConnecting = true;
+    let url = websocketUrl();
+    try {
+      const response = await fetch("/api/monitor-workers/robot", { cache: "no-store", signal: AbortSignal.timeout(15e3) });
+      if (response.ok) {
+        const worker = await response.json();
+        if (worker.isolated && worker.websocket_url) url = worker.websocket_url;
+      }
+    } catch (_) {
+    } finally {
+      telemetryConnecting = false;
+    }
+    if (!telemetryMountsPresent()) return;
+    if (runtime.websocket && [WebSocket.CONNECTING, WebSocket.OPEN].includes(runtime.websocket.readyState)) return;
+    const socket = new WebSocket(url);
     runtime.websocket = socket;
     socket.onopen = () => {
       runtime.reconnectAttempt = 0;

@@ -1014,7 +1014,7 @@ function updateIndicators(snapshot) {
 }
 
 async function refreshState() {
-  const res = await fetch("/api/state");
+  const res = await fetch("/api/state?view=display");
   const data = await res.json();
   updateIndicators(data);
   await refreshPrinterWorkspaceStatus();

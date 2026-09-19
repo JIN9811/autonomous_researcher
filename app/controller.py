@@ -35,6 +35,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from copy import deepcopy
+from contextvars import ContextVar
 
 import httpx
 
@@ -107,6 +108,7 @@ PLANNING_TRANSCRIPT_MEMORY_LIMIT = 50
 PLANNING_TRANSCRIPT_PAGE_LIMIT = 160
 PLANNING_TRANSCRIPT_MAX_PAGE_LIMIT = 240
 PLANNING_RESUME_CONTEXT_KEY = "_planning_resume_context"
+_DISPLAY_OWNER_CATALOG: ContextVar = ContextVar("display_owner_catalog", default=None)
 EMERGENCY_STOP_INTERRUPTED_RUNTIME_KEY = "_emergency_stop_interrupted_runtime"
 ACTIVE_SAFETY_SOURCES_KEY = "active_safety_sources"
 PLC_SAFETY_SOURCE = "plc_pb2"
@@ -1967,6 +1969,18 @@ class MainController:
             "agents": self._deps.agent_registry.active_names(),
         }
 
+    def display_snapshot(self) -> dict[str, Any]:
+        """Read-only UI projection; never serialize the full experiment state."""
+        return {
+            "state": self._planning_state_payload(),
+            "runtime": self._runtime_profile(),
+            "logs": {"run_dir": str(self._logger_bundle.run_dir),
+                     "json": str(self._logger_bundle.json_log_path),
+                     "summary": str(self._logger_bundle.summary_log_path)},
+            "is_running": bool(self._run_task and not self._run_task.done()) or self._planning_handoff_active(),
+            "agents": self._deps.agent_registry.active_names(),
+        }
+
     def recent_events(self) -> list[dict[str, Any]]:
         """Return buffered recent events in display-sized form."""
         return [self._compact_event_for_buffer(event) for event in self._trace.snapshot()]
@@ -2266,6 +2280,9 @@ class MainController:
                 "session": self.planning_snapshot()}
 
     def _planning_setup_catalog(self) -> OwnerCatalog:
+        display_scope = _DISPLAY_OWNER_CATALOG.get()
+        if display_scope is not None and display_scope[0] is self:
+            return display_scope[1]
         graph = load_graph_config(self._active_graph_config_path or Path(__file__).resolve().parents[1] / "graphs/configs/atr_closed_loop.yaml")
         # Freeze only this resolution so describe/readback can share bindings.
         # The next call (including after a model await) reads current graph files.
@@ -2273,7 +2290,15 @@ class MainController:
                             graph_root=self._active_graph_module_root()).snapshot()
 
     def _planning_setup_projection(self) -> dict:
-        projection = project_setup(self._setup_store(), self._planning_setup_catalog(), self._state, self._deps.agent_context)
+        catalog = self._planning_setup_catalog()
+        # This synchronous display operation already resolved active membership.
+        # Owner readbacks must use that same resolution, not parse every linked
+        # YAML again for each registry lookup. Never cache across calls/awaits.
+        token = _DISPLAY_OWNER_CATALOG.set((self, catalog))
+        try:
+            projection = project_setup(self._setup_store(), catalog, self._state, self._deps.agent_context)
+        finally:
+            _DISPLAY_OWNER_CATALOG.reset(token)
         from app.planning_dialogue import PREFIX
         # Projection already resolved active graph membership; avoid reading
         # every linked module a second time through the activation callback.
@@ -3690,11 +3715,18 @@ class MainController:
         # Preserve small delivery receipts before stripping heavyweight agent payloads.
         # Do not traverse historical checkpoints or nested input contexts.
         receipts: dict[str, dict[str, Any]] = {}
+        receipt_seen: set[int] = set()
+        receipt_budget = 8192
         def collect_delivery(value: Any, depth: int = 0) -> None:
-            if depth > 10:
+            nonlocal receipt_budget
+            if depth > 10 or receipt_budget <= 0 or not isinstance(value, (dict, list)):
                 return
+            if id(value) in receipt_seen:
+                return
+            receipt_seen.add(id(value))
+            receipt_budget -= 1
             if isinstance(value, list):
-                for item in value:
+                for item in value[-64:]:
                     collect_delivery(item, depth + 1)
             elif isinstance(value, dict):
                 delivery = value.get("knowledge_delivery")
@@ -3707,8 +3739,15 @@ class MainController:
                                    (delivery.get("consumer_binding"), delivery.get("run_id"), delivery.get("loop_id")))
                     receipts[identity] = {"knowledge_delivery": receipt}
                 for key, item in value.items():
-                    if key not in {"knowledge_delivery", "context", "scope", "trace", "request_payload", "source_stage_context"}:
+                    if key not in {"knowledge_delivery", "context", "scope", "trace", "request_payload", "source_stage_context",
+                                   "raw_trace", "raw_events", "full_context", "full_payload", "prior_evaluations",
+                                   "mesh_vertices", "mesh_faces", "stl_bytes", "orchestrator_checkpoints"}:
                         collect_delivery(item, depth + 1)
+        collect_delivery(metadata.get("knowledge_delivery_receipts"))
+        # Current agent receipts take priority over historical reports.
+        for key, value in metadata.items():
+            if key.endswith("_agent_payload"):
+                collect_delivery(value)
         for key, value in metadata.items():
             if key.endswith("_agent_payload") or key in allow_keys or key.endswith("_decision_register"):
                 collect_delivery(value)
@@ -3837,11 +3876,20 @@ class MainController:
     def _planning_state_payload(self) -> dict[str, Any]:
         """Return a compact state payload for high-frequency Live GUI refreshes."""
         self._ensure_orchestrator_supervisor_baseline()
-        state_json = self._state.model_dump(mode="json")
+        # Shallow references are used only synchronously, before any await.
+        # Select the display fields first; model_dump of the full state used to
+        # copy tens of MB of historical traces for every small UI response.
+        from pydantic_core import to_jsonable_python
+        state_json = dict(vars(self._state))
+        state_json["agent_status"] = {
+            key: value.model_dump(mode="json") if hasattr(value, "model_dump") else value
+            for key, value in self._state.agent_status.items()
+        }
         compact = self._compact_planning_state_for_display(state_json)
         compact["setup"] = self._planning_setup_projection()
         compact["pending_request"] = self._planning_pending_request()
-        return compact
+        # Detach the small result, preserving the existing JSON wire types.
+        return to_jsonable_python(compact)
 
     def planning_snapshot(self, *, session_id: str | None = None) -> dict[str, Any]:
         """Return current live-planning context with only the latest transcript page."""

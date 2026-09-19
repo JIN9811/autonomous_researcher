@@ -129,6 +129,7 @@ from utils.lerobot_joint_telemetry import (
     session_status_label,
 )
 from utils.manipulation_runtime_view import build_manipulation_runtime_view
+from utils.monitor_process import monitor_process, close_monitor_processes, existing_monitor_process
 from utils.manipulation_profile import (
     MANIPULATION_AGENT_PROFILE_PATH,
     load_manipulation_agent_profile,
@@ -718,6 +719,9 @@ async def shutdown_lerobot_subprocesses() -> None:
         await _PLC_BRIDGE_SERVICE.shutdown()
     controller.set_terminal_error_notifier(None)
     controller.set_plc_safety_status_provider(None)
+    if _ROBOT_MONITOR_PUBLISHER is not None:
+        _ROBOT_MONITOR_PUBLISHER.cancel()
+    await asyncio.to_thread(close_monitor_processes)
     await asyncio.to_thread(close_monitors)
     _cleanup_bambu_video_stream_processes(include_orphans=True)
     _lerobot_bridge().shutdown()
@@ -3532,9 +3536,9 @@ def _guardian_status_payload(run_id: str | None = None, *, snapshot: dict[str, o
 
 
 @app.get("/api/state")
-async def get_state() -> dict[str, object]:
+async def get_state(view: Literal["full", "display"] = "full") -> dict[str, object]:
     """Return current controller state plus host/GPU resource telemetry."""
-    snapshot = controller.snapshot()
+    snapshot = controller.display_snapshot() if view == "display" else controller.snapshot()
     controller_state = snapshot.get("state") if isinstance(snapshot.get("state"), dict) else {}
     equipment_execution = _equipment_runtime_service().latest(
         run_id=str(controller_state.get("run_id") or "")
@@ -6371,9 +6375,7 @@ def _artifact_preview_kind(path: Path) -> str:
 
 def _current_run_id() -> str:
     """Return current controller run id."""
-    snapshot = controller.snapshot()
-    state = snapshot.get("state", {}) if isinstance(snapshot.get("state"), dict) else {}
-    return str(state.get("run_id") or "")
+    return str(controller._state.run_id or "")
 
 
 def _artifact_items_for_run(run_id: str) -> tuple[Path, list[dict[str, object]]]:
@@ -6768,7 +6770,7 @@ def _agent_report_payload(agent_id: str, run_id: str | None = None) -> dict[str,
 
 def _device_state_payload() -> dict[str, object]:
     """Build package-compatible device state from controller health and resources."""
-    snapshot = controller.snapshot()
+    snapshot = controller.display_snapshot()
     state = snapshot.get("state", {}) if isinstance(snapshot.get("state"), dict) else {}
     health = state.get("device_health", {}) if isinstance(state.get("device_health"), dict) else {}
     resources = _system_resource_snapshot()
@@ -13669,8 +13671,8 @@ def _selected_bambu_video_connection(manager: PrinterDeviceBridgeManager) -> tup
     return host, access_code
 
 
-def _shared_bambu_video(manager: PrinterDeviceBridgeManager):
-    """Snapshots and all browser viewers share one latest-frame decoder."""
+def _bambu_video_config(manager: PrinterDeviceBridgeManager) -> dict:
+    """Prepare decoder configuration without starting it in the control process."""
     host, access_code = _selected_bambu_video_connection(manager)
     ffmpeg_path = shutil.which("ffmpeg")
     if not ffmpeg_path:
@@ -13699,11 +13701,37 @@ def _shared_bambu_video(manager: PrinterDeviceBridgeManager):
     ]
     # LAN RTSPS negotiation + the first keyframe can exceed the old one-shot
     # six-second budget. Waiting happens off-loop and subsequent reads are warm.
-    return shared_video(command, max(60.0, float(manager.config.video.timeout_sec) + 3.0))
+    return {"command": command, "timeout": max(60.0, float(manager.config.video.timeout_sec) + 3.0)}
+
+
+def _shared_bambu_video(manager: PrinterDeviceBridgeManager):
+    config = _bambu_video_config(manager)
+    return shared_video(config["command"], config["timeout"])
+
+
+def _local_monitor_client(request: Request) -> bool:
+    # A remote browser cannot reach the server's loopback port. Retain its
+    # existing same-origin route, and never expose a controller replica.
+    return (os.environ.get("ATR_MONITOR_WORKERS", "1") != "0"
+            and request.client is not None
+            and request.client.host in {"127.0.0.1", "::1"}
+            and request.url.hostname in {"127.0.0.1", "localhost", "::1"}
+            and request.url.scheme == "http")
 
 
 def _capture_bambu_video_frame_bytes(manager: PrinterDeviceBridgeManager) -> bytes:
     try:
+        worker = existing_monitor_process("video")
+        if worker is not None and worker.config == _bambu_video_config(manager):
+            # GUI/evidence snapshots share the already-open worker decoder.
+            # Otherwise the printer would get a second concurrent RTSPS reader.
+            from urllib.request import urlopen
+            from urllib.error import URLError
+            try:
+                with urlopen(worker.url("frame.jpg"), timeout=worker.config["timeout"] + 3) as response:
+                    return response.read(4 * 1024 * 1024)
+            except URLError as exc:
+                raise RuntimeError("BAMBU_VIDEO_WORKER_UNAVAILABLE") from exc
         return _shared_bambu_video(manager).read()[1]
     except TimeoutError as exc:
         raise HTTPException(status_code=504, detail="BAMBU_VIDEO_FRAME_TIMEOUT") from exc
@@ -13727,6 +13755,12 @@ async def get_printer_video_frame() -> Response:
 async def get_printer_video_stream(request: Request) -> StreamingResponse:
     """Proxy selected Bambu RTSPS live view as MJPEG for the browser device panel."""
     manager = await asyncio.to_thread(_printer_bridge_manager)
+    if _local_monitor_client(request):
+        from fastapi.responses import RedirectResponse
+        config = await asyncio.to_thread(_bambu_video_config, manager)
+        worker = await asyncio.to_thread(monitor_process, "video", config)
+        return RedirectResponse(worker.url("stream.mjpeg"), status_code=307,
+                                headers={"Cache-Control": "no-store"})
     video = await asyncio.to_thread(_shared_bambu_video, manager)
 
     async def iter_mjpeg() -> object:
@@ -16638,6 +16672,47 @@ async def get_lerobot_sessions() -> dict[str, object]:
                 seen.add(session_id)
             sessions.append(session)
     return {"ok": True, "sessions": sessions}
+
+
+_ROBOT_MONITOR_PUBLISHER: asyncio.Task | None = None
+_ROBOT_MONITOR_OWNER = None
+
+
+def _robot_monitor_context() -> dict:
+    context = _joint_telemetry_session_context()
+    return {
+        "reset_at_ms": getattr(controller, "telemetry_reset_at_ms", 0),
+        "state": _manipulation_runtime_state(),
+        "context": {"session": _joint_telemetry_public_session(context["session"]),
+                    "log_path": str(context["log_path"])} if context else None,
+    }
+
+
+@app.get("/api/monitor-workers/robot")
+async def get_robot_monitor_worker(request: Request) -> dict:
+    """Publish read-only context; worker tails logs and builds graph artifacts."""
+    global _ROBOT_MONITOR_PUBLISHER, _ROBOT_MONITOR_OWNER
+    if not _local_monitor_client(request):
+        return {"ok": True, "isolated": False}
+    port = request.url.port or 80
+    config = {"origins": [f"http://{host}:{port}" for host in ("127.0.0.1", "localhost", "[::1]")]}
+    worker = await asyncio.to_thread(monitor_process, "robot", config)
+    await asyncio.to_thread(worker.update, _robot_monitor_context())
+    if _ROBOT_MONITOR_OWNER is not worker or _ROBOT_MONITOR_PUBLISHER is None or _ROBOT_MONITOR_PUBLISHER.done():
+        if _ROBOT_MONITOR_PUBLISHER is not None:
+            _ROBOT_MONITOR_PUBLISHER.cancel()
+        _ROBOT_MONITOR_OWNER = worker
+        async def publish():
+            while worker.process.poll() is None:
+                try:
+                    payload = _robot_monitor_context()
+                    await asyncio.to_thread(worker.update, payload)
+                except (OSError, ValueError):
+                    break
+                await asyncio.sleep(0.5)
+        _ROBOT_MONITOR_PUBLISHER = asyncio.create_task(publish())
+    return {"ok": True, "isolated": True,
+            "websocket_url": worker.url("joints").replace("http://", "ws://") + "?sample_format=compact-v1"}
 
 
 @app.get("/api/lerobot/joint-telemetry/snapshot")

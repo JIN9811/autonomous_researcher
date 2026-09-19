@@ -7884,7 +7884,7 @@ async function previewArtifact(index) {
 
 async function loadRunContext(options = {}) {
   const preservedEventId = options.preserveSelectedEventId || selectedTimelineEvent()?.event_id || "";
-  const state = await requestJson("/api/state");
+  const state = await requestJson("/api/state?view=display");
   latestStateSnapshot = state;
   if (currentRunId !== (state?.state?.run_id || "")) {
     artifactLoopFilter = "";

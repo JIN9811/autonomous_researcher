@@ -5159,6 +5159,7 @@ def test_joint_telemetry_snapshot_reports_idle_without_rollout(monkeypatch) -> N
     assert response.status_code == 200
     payload = response.json()
     runtime_view = payload.pop("runtime_view")
+    assert payload.pop("reset_at_ms") == getattr(main_module.controller, "telemetry_reset_at_ms", 0)
     assert payload == {
         "ok": True,
         "schema": "atr.robot_joint_telemetry.v1",
