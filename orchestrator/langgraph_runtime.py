@@ -1907,6 +1907,8 @@ class LangGraphRunLoop:
             gates = []
             self._state.run_metadata["guardian_gates"] = gates
         gates.append(gate)
+        from policies.guardian_gate_lifecycle import resolve_image_rechecks
+        resolve_image_rechecks(gates, self._state.run_metadata.get("incident_records", []))
         del gates[:-200]
         self._state.run_metadata["latest_guardian_gate"] = gate
         decision = gate.get("guardian_decision")
@@ -1941,6 +1943,8 @@ class LangGraphRunLoop:
             gates = []
             self._state.run_metadata["guardian_gates"] = gates
         gates.append(gate)
+        from policies.guardian_gate_lifecycle import resolve_image_rechecks
+        resolve_image_rechecks(gates, self._state.run_metadata.get("incident_records", []))
         del gates[:-200]
         self._state.run_metadata["latest_guardian_gate"] = gate
         decision = gate.get("guardian_decision")
@@ -3370,7 +3374,8 @@ class LangGraphRunLoop:
                 if await self._pause_for_guardian_recovery(stage=stage, status=status, result_data=result_data):
                     return
                 guardian_decision = str(result.data.get("guardian", {}).get("decision", "continue"))
-                self._state.loop_count += 1
+                from orchestrator.cycle_progress import record_guardian_completion
+                record_guardian_completion(self._state)
             transition_context = {**self._state.run_metadata, "agent_result": compact_runtime_payload(result.data)}
             next_stage = self._coerce_stage(
                 self._graph_config.next_stage(

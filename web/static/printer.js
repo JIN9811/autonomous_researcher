@@ -1241,6 +1241,7 @@ function renderCameraPanel(data, options = {}) {
     } else if (!options.preserveExistingStream || !existingStream) {
       cameraPlaceholder.innerHTML = `<span>Live video proxy is not connected yet.</span>`;
     }
+    window.ATRPrinterVideoVisibility?.sync(cameraPlaceholder);
   }
   if (cameraDetail) {
     const stream = cameraPanel.proxy_url || camera.rtsp_url || camera.proxy_url || "";

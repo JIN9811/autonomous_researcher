@@ -197,7 +197,7 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
         item.ok !== false && item.status !== 'analysis_blocked' &&
         item.objective?.metric_name && item.objective?.unit &&
         finiteNumber(item.objective_score) !== null);
-      const performance = row => {
+      const measuredObservation = row => {
         const ids = new Set([row.specimen_id, row.candidate_id].filter(Boolean));
         let measured = [...observations].reverse().find(item=>ids.has(item.candidate_id) || ids.has(item.specimen_id));
         // Planned LHS/BO IDs differ from fabricated specimen IDs. Match only
@@ -210,11 +210,25 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
           }));
           if (matches.length === 1) measured = matches[0];
         }
+        return measured;
+      };
+      const performance = row => {
+        const measured = measuredObservation(row);
         if (measured) return `${measured.objective_score} ${measured.objective.unit} · ${measured.objective.metric_name} · ${measured.fidelity === 'synthetic' ? 'Synthetic' : 'Measured'} · Analysis`;
         const evidence = row.design_evaluation?.performance;
         return evidence?.value != null && evidence?.source
           ? `${evidence.value} ${evidence.unit || ''} · ${evidence.source}`
           : `Unassessed · ${evidence?.reason || 'No analysis result linked to this candidate yet.'}`;
+      };
+      const mass = row => {
+        const measured = measuredObservation(row);
+        const archived = (report.specimenEvidence || []).find(item =>
+          (row.specimen_id && item.specimen_id === row.specimen_id) ||
+          (row.candidate_id && item.candidate_id === row.candidate_id) ||
+          (measured?.candidate_id && item.candidate_id === measured.candidate_id));
+        const geometry = measured?.specimen_geometry || archived?.specimen_geometry;
+        const grams = finiteNumber(geometry?.mass_g);
+        return grams !== null && grams > 0 && geometry.mass_source === 'slicer' ? `${grams} g` : 'Not recorded';
       };
       const constraints = row => {
         const e = row.design_evaluation || {};
@@ -223,7 +237,7 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
         const counts = checks.reduce((acc, item) => {const key=item.status || 'unassessed'; acc[key]=(acc[key]||0)+1; return acc;}, {});
         return `${e.validity?.status || 'Not evaluated'} · ${Object.entries(counts).map(([key,count])=>`${count} ${key}`).join(', ')}${e.constraint_margins?.length ? '' : ' · selection-time checks'}`;
       };
-      return '<div class="dsn-comparison-scroll" tabindex="0" role="region" aria-label="Candidate comparison">' + evidenceTable(["Candidate", "Cell size (mm)", "Wall (mm)", "Progress", "Constraints", "Mass (estimated)", "Performance evidence"], rows.map(row=>{
+      return '<div class="dsn-comparison-scroll" tabindex="0" role="region" aria-label="Candidate comparison">' + evidenceTable(["Candidate", "Cell size (mm)", "Wall (mm)", "Progress", "Constraints", "Mass", "Performance evidence"], rows.map(row=>{
         const e = row.design_evaluation || {};
         return [
           `${row.candidate_id === '__unidentified_evaluation' ? 'Not recorded' : row.candidate_id}${selectedId && row.candidate_id===selectedId?' · Selected':''}`,
@@ -231,7 +245,7 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
           row.wall_thickness_mm ?? row.parameters?.wall_thickness_mm ?? 'Not recorded',
           row.status || (row.__actual_specimen ? 'generated' : 'recorded'),
           constraints(row),
-          e.cost?.mass?.value != null ? `${e.cost.mass.value} ${e.cost.mass.unit || ""}` : "Not recorded",
+          mass(row),
           performance(row)
         ];
       }), selectedId ? rows.findIndex(row=>row.candidate_id===selectedId) : -1) + '</div>';
@@ -376,7 +390,15 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
     });
 
     function renderDashboard(report, status, label, profile) {
-      const spec = report?.spec || report?.state?.current_experiment_spec || {};
+      const currentSpec = report?.spec || report?.state?.current_experiment_spec || {};
+      const specimenEvidence = services.designArchivedSpecimenEvidence?.(report) || [];
+      const saved = specimenEvidence.find(item => item.specimen_id === currentSpec.specimen_id &&
+        item.candidate_id === currentSpec.candidate_id &&
+        ['cell_size_mm','wall_thickness_mm'].every(key => currentSpec[key] == null || item[key] === currentSpec[key]) &&
+        (!currentSpec.candidate_fingerprint || item.candidate_fingerprint === currentSpec.candidate_fingerprint));
+      // Durable, same-specimen evidence survives compact refresh messages.
+      const spec = saved?.design_evaluation ? {...currentSpec, design_evaluation:saved.design_evaluation} : currentSpec;
+      report = {...report, spec, specimenEvidence};
       const screenReport = services.latestDesignAgentReport(report) || {};
       const designReport = services.latestDesignReport(report) || {};
       const plannedPoints = [...(services.latestBoInitialDesign?.(report)?.points || [])];
@@ -412,7 +434,10 @@ It performs no polling, subscriptions, DOM mutation, or hardware actions.
       }
       if (spec.design_evaluation) selected.design_evaluation = spec.design_evaluation;
       const candidateRows = services.designCandidateRows(screenReport, designReport, report);
-      const specimenRows = services.designActualSpecimenRows(screenReport, designReport, report);
+      const specimenRows = services.designActualSpecimenRows(screenReport, designReport, report).map(row => {
+        const archived = specimenEvidence.find(item => item.specimen_id === row.specimen_id);
+        return archived ? {...row, design_evaluation:archived.design_evaluation || row.design_evaluation} : row;
+      });
       const generatedCount = specimenRows.length;
       const validCount = specimenRows.filter((item) => !/reject|fail|block|invalid/i.test(String(item.status || item.candidate_status || ""))).length;
       const previewCount = specimenRows.filter((item) => services.designImageUrlFromSource(item)).length;

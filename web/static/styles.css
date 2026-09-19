@@ -28306,20 +28306,27 @@ body.planning-live-body .planning-agent-chat-state {
 @media(max-width:900px) { .anl-progress { grid-template-columns:repeat(3,minmax(0,1fr)); }.anl-metrics.ar-report-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }.anl-objective { flex-wrap:wrap; } }
 
 /* Keep the day/hour clock readable without squeezing the run status. */
+body.planning-live-body:not(.run-replay-mode) .mission-status-run {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) max-content !important;
+  grid-template-rows: 14px 16px !important;
+  align-content: center !important;
+  gap: 3px 7px !important;
+}
 body.planning-live-body:not(.run-replay-mode) .mission-status-run::before {
   position: static !important;
-  grid-column: 1 !important;
+  grid-column: 1 / -1 !important;
   grid-row: 1 !important;
 }
 body.planning-live-body:not(.run-replay-mode) .mission-status-run #planning-run-detail {
-  grid-column: 2 !important;
-  grid-row: 1 !important;
+  grid-column: 1 !important;
+  grid-row: 2 !important;
   height: 16px !important;
   min-height: 16px !important;
   max-height: 16px !important;
 }
 body.planning-live-body:not(.run-replay-mode) .mission-status-run #live-runtime-clock {
-  grid-column: 1 / -1 !important;
+  grid-column: 2 !important;
   grid-row: 2 !important;
   height: 16px !important;
   min-height: 16px !important;

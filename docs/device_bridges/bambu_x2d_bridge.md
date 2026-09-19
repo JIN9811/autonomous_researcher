@@ -72,14 +72,19 @@ printers. Unused subscriptions close after 120 seconds, and registry size is
 bounded to four connections. Test mode never starts these subscriptions.
 
 Camera snapshots and MJPEG viewers share one decoder per source (960-pixel width,
-15 fps). A single latest-JPEG slot replaces per-viewer queues: slow viewers skip
+30 fps target). A single latest-JPEG slot replaces per-viewer queues: slow viewers skip
 frames instead of accumulating latency. Frame waiting and camera readiness probes
 run outside the HTTP event loop. Snapshots must be at most two seconds old; failed
 sources do not serve old frames as live. Initial connection/keyframe waiting has
 a 60-second minimum budget; subsequent frame stalls have a 15-second budget.
 This does not extend the two-second freshness limit. Decoders close after 15 seconds without
 consumer requests, on source failure, or on server shutdown. Registries are local
-to each server process, not shared across multiple worker processes.
+to each server process, not shared across multiple worker processes. Live GUI and
+Printer Workspace disconnect MJPEG images while the tab or camera card is hidden,
+and reconnect when visible. Browser code keeps no frame history. Increasing the
+target frame rate does not increase the frame queue size; decoding CPU, bandwidth,
+and bounded decoder/browser memory still have a cost. Source FPS can limit actual
+unique-frame throughput.
 
 SPC telemetry refreshes independently of Guardian/graph/detail requests, at most
 once per two seconds per visible Live GUI. Responses from a previous run are

@@ -76,6 +76,20 @@ def test_all_runtime_surfaces_load_shared_cycle_formatter_before_page_script() -
         assert text.index('<script src="/static/runtime_cycle.js') < text.index(f'<script src="{page_script}')
 
 
+def test_rechecked_guardian_count_does_not_advance_actual_cycle_label() -> None:
+    script = f"""
+global.window = global;
+require({json.dumps(str(RUNTIME_CYCLE_JS))});
+const state = {{mode:'test', stage:'specimen', loop_count:7, run_metadata:{{
+  planning_cycle_contract:{{total_cycles:20}},
+  planning_resume_context:{{kind:'planning_cycle_series',cycle_index:7,total_cycles:20}}
+}}}};
+console.log(JSON.stringify([true,false].map(running => ATRRuntimeCycle.format(state,running))));
+"""
+    result = subprocess.run([shutil.which("node"), "-e", script], check=True, capture_output=True, text=True)
+    assert json.loads(result.stdout) == ["C:7/20", "C:7/20"]
+
+
 def test_runtime_surface_formatters_have_no_fixed_five_cycle_label() -> None:
     for relative_path in (
         "web/static/app.js",

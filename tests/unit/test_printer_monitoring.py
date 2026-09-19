@@ -136,6 +136,20 @@ def test_video_shared_decoder_latest_frame_and_slow_viewer_skips_backlog():
     assert not video.thread.is_alive()
 
 
+def test_video_high_frame_count_retains_only_latest_jpeg(monkeypatch):
+    monkeypatch.setattr(m.LatestVideo, "_run", lambda self: None)
+    video = m.LatestVideo(["unused"], 1)
+    try:
+        for index in range(10000):
+            video._publish(b"\xff\xd8" + str(index).encode() + b"\xff\xd9")
+        assert video.sequence == 10000
+        assert video.frame == b"\xff\xd89999\xff\xd9"
+        assert video.read()[1] == video.frame
+        assert not any(isinstance(value, list) for key, value in vars(video).items() if key != "command")
+    finally:
+        video.close()
+
+
 def test_video_idle_process_is_reaped(monkeypatch):
     monkeypatch.setattr(m.LatestVideo, "IDLE_TIMEOUT", .1)
     video = m.shared_video(video_command(), 2)

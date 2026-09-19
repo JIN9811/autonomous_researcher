@@ -176,6 +176,11 @@ def guardian_gate(
     )
     return {
         "schema": "guardian_gate_result.v1",
+        "audit_log": {"check_scope": (
+            "utm_clearance" if payload.get("utm_verification_2") or payload.get("utm_clear_execution")
+            else "utm_placement" if payload.get("utm_verification_1")
+            else str(payload.get("purpose") or "")
+        ) if stage == "vision" else ""},
         "gate_id": gate_id,
         "run_id": run_id,
         "experiment_id": experiment_id,

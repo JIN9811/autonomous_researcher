@@ -13688,7 +13688,7 @@ def _shared_bambu_video(manager: PrinterDeviceBridgeManager):
         stream_url,
         "-an",
         "-vf",
-        "fps=15,scale=960:-1",
+        "fps=30,scale=960:-1",
         "-q:v",
         "5",
         "-f",

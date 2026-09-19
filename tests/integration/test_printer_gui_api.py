@@ -874,7 +874,7 @@ def test_printer_video_stream_endpoint_uses_saved_bambu_connection_without_echoi
     assert b"FAKEJPEG" in response.content
     assert b"secret-code" not in response.content
     assert captured["command"][0] == "/usr/bin/ffmpeg"
-    assert captured["command"][captured["command"].index("-vf") + 1] == "fps=15,scale=960:-1"
+    assert captured["command"][captured["command"].index("-vf") + 1] == "fps=30,scale=960:-1"
     assert "image2pipe" in captured["command"]
     assert captured["timeout"] >= 60
 

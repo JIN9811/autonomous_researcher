@@ -54,10 +54,26 @@ const populated = renderer.renderExpectedPerformance({}, { design_evaluation: ad
   expected_objective_proxy_score: 0.9988,
 });
 assert.match(populated, /Unassessed/);
-assert.match(populated, /<td>0 g<\/td>/);
+assert.doesNotMatch(populated, /<td>0 g<\/td>|Mass \(estimated\)/);
+assert.match(populated, /<th>Mass<\/th>/);
 assert.doesNotMatch(populated, /0\.9988/);
 
 const detailed = renderer.renderEvidence(adaptedEvidence, true);
+const seaComparison = renderer.renderExpectedPerformance({}, {}, {candidate_id:'cand-6'}, [], {
+  state:{run_id:'run', experiment_evaluations:[{run_id:'run',candidate_id:'cand-6',source:'analysis_agent',
+    objective_score:2.1,objective:{metric_name:'SEA',unit:'J/g'},
+    specimen_geometry:{mass_g:12.36,mass_source:'slicer'}}]},
+});
+assert.match(seaComparison, /12\.36 g/);
+assert.doesNotMatch(seaComparison, /estimated/i);
+const archivedComparison = renderer.renderExpectedPerformance({}, {}, {candidate_id:'cand-6'}, [], {
+  state:{run_id:'run'}, specimenEvidence:[{candidate_id:'cand-6',specimen_id:'s6',
+    specimen_geometry:{mass_g:12.36,mass_source:'slicer'}}],
+});
+assert.match(archivedComparison, /12\.36 g/);
+assert.doesNotMatch(renderer.renderExpectedPerformance({}, {}, {candidate_id:'cand-7'}, [], {
+  state:{run_id:'run'}, specimenEvidence:[{candidate_id:'cand-6',specimen_geometry:{mass_g:12.36,mass_source:'slicer'}}],
+}), /12\.36 g/);
 assert.match(detailed, /minimum_wall: 0\.2 mm margin · pass/);
 
 const empty = renderer.renderExpectedPerformance({}, {}, {});
@@ -222,7 +238,9 @@ assert.doesNotMatch(zeroManufacturing, /dsn-radar/);
 const missingManufacturing = renderer.renderManufacturabilityCard({}, {}, {}, {}, {}, []);
 assert.match(missingManufacturing, /No recorded evidence/);
 
+let archivedSpecimenEvidence = [];
 const frontend = api.createFrontend({
+  designArchivedSpecimenEvidence: () => archivedSpecimenEvidence,
   escapeHtml,
   compactText,
   renderRuntimeValue,
@@ -253,6 +271,14 @@ const stateOnlyDashboard = frontend.renderDashboard({state:{current_experiment_s
 }}}, 'done', 'Design Agent', {});
 assert.match(stateOnlyDashboard,/Selection-time evidence — before adaptation/);
 assert.match(stateOnlyDashboard,/Constraint value relative to limit/);
+archivedSpecimenEvidence = [{specimen_id:'s-current',candidate_id:'current',candidate_fingerprint:'same',design_evaluation:adaptedSelection}];
+const compactedDashboard = frontend.renderDashboard({spec:{specimen_id:'s-current',candidate_id:'current',candidate_fingerprint:'same',
+  design_evaluation:{validity:{status:'unassessed'},selection_evaluation:{_truncated:'depth_limit'}}}}, 'done', 'Design Agent', {});
+assert.match(compactedDashboard,/Selection-time evidence — before adaptation/);
+assert.match(compactedDashboard,/Constraint value relative to limit/);
+const wrongRevision = frontend.renderDashboard({spec:{specimen_id:'s-current',candidate_id:'current',candidate_fingerprint:'different'}}, 'done', 'Design Agent', {});
+assert.doesNotMatch(wrongRevision,/Selection-time evidence — before adaptation/);
+archivedSpecimenEvidence = [];
 const reportDetails = frontend.renderReport({
   design_report: {
     report_id: "design-1",

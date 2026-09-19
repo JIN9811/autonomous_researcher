@@ -36,6 +36,11 @@
   }
 
   function current(state = {}, running = false) {
+    const metadata = state.run_metadata || {};
+    const context = metadata.planning_resume_context || metadata._planning_resume_context || {};
+    const cycle = positiveInteger(context.cycle_index);
+    if (context.kind === "planning_cycle_series" && cycle
+        && (!context.run_id || context.run_id === state.run_id)) return cycle;
     const stage = String(state.stage || "idle").toLowerCase();
     const completed = Math.max(0, Number(state.loop_count || 0));
     const active = Boolean(running && !["complete", "error", "idle"].includes(stage));

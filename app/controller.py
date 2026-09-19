@@ -3713,6 +3713,11 @@ class MainController:
             if key.endswith("_agent_payload") or key in allow_keys or key.endswith("_decision_register"):
                 collect_delivery(value)
         compact["knowledge_delivery_receipts"] = list(receipts.values())
+        resume = metadata.get(PLANNING_RESUME_CONTEXT_KEY)
+        if isinstance(resume, dict) and resume.get("kind") == "planning_cycle_series":
+            compact["planning_resume_context"] = {
+                key: resume[key] for key in ("kind", "cycle_index", "total_cycles", "phase") if key in resume
+            }
         for key, value in metadata.items():
             key_text = str(key)
             if key_text in skip_keys or key_text.endswith("_agent_payload"):
@@ -3779,7 +3784,7 @@ class MainController:
             )
         if isinstance(metadata.get("guardian_gates"), list):
             compact["guardian_gates"] = [
-                cls._select_runtime_fields(item, ("stage", "phase", "decision", "reason_code", "risk_score", "ok_for_next_stage", "created_at"))
+                cls._select_runtime_fields(item, ("gate_id", "run_id", "experiment_id", "loop_id", "stage", "phase", "tool", "action", "audit_log", "decision", "reason_code", "risk_score", "alarms", "ok_for_next_stage", "created_at"))
                 for item in metadata["guardian_gates"][-20:]
                 if isinstance(item, dict)
             ]
@@ -3809,6 +3814,7 @@ class MainController:
                 {
                     **cls._planning_scalar_summary(item, keys=("run_id", "source", "tool", "fidelity", "specimen_id")),
                     "objective": cls._select_runtime_fields(item.get("objective", {}), ("metric_name", "unit", "name")),
+                    "specimen_geometry": cls._select_runtime_fields(item.get("specimen_geometry", {}), ("mass_g", "mass_source", "mass_evidence")),
                     "parameters": cls._select_runtime_fields(item.get("parameters") or item.get("metrics") or {},
                         ("cell_size_mm", "wall_thickness_mm")),
                 }
@@ -4579,6 +4585,9 @@ class MainController:
 
     async def resume(self) -> dict[str, Any]:
         """Resume pause, or revalidate a proven completed error boundary."""
+        if (self._state.run_metadata.get("guardian_review_retry") or {}).get("status") in {"ready", "running"}:
+            from app.guardian_review_recovery import resume_review
+            return await resume_review(self)
         if (self._state.run_metadata.get("equipment_selection_resume") or {}).get("status") in {"ready", "running"}:
             from app.equipment_selection_checkpoint import resume_selection
             return await resume_selection(self)

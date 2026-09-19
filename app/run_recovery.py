@@ -498,7 +498,11 @@ async def finish_archived_design(controller, *, request, first_spec, design_cons
 
 
 def restore_checkpoint(controller, run_id):
-    """Restore an error boundary only. Operator Resume remains a separate action."""
+    """Restore a verified review boundary; Operator Resume remains separate."""
+    if controller._state.run_id == run_id and controller._state.stage.value == "complete" and (
+        controller._state.run_metadata.get("guardian") or {}).get("reason") == "Guardian graph-wide gate requested safe stop: SYSTEM_SAFE_STOP_RECOMMENDED":
+        from app.guardian_review_recovery import prepare
+        return prepare(controller)
     from logging_system.logger_factory import build_logger_bundle
     from orchestrator.state import OrchestratorState, Stage
     if controller.snapshot().get("is_running") or controller._state.stage not in {Stage.IDLE, Stage.ERROR, Stage.COMPLETE}:

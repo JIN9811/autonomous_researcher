@@ -281,6 +281,7 @@ const openedOperatorTeleopHandoffTokens = new Set();
 let liveRecentEvents = [];
 let liveRunEvents = [];
 let liveRunArtifacts = [];
+let liveDesignEvidenceCache = { runId: "", records: {}, fetched: new Set(), pending: false };
 let liveGraphPayload = null;
 let liveUtmRuntimeStatus = null;
 let liveUtmRuntimeGraph = null;
@@ -649,6 +650,7 @@ function applyLiveAgentManifest(payload) {
 
 function liveAgentModuleHostServices() {
   return {
+    designArchivedSpecimenEvidence,
     refreshBoReport: () => {
       invalidateLiveCenterRender("report");
       if (liveSelectedAgent === "bo" && liveCurrentView === "report" && liveLastSession) renderLiveRuntime(liveLastSession);
@@ -12130,6 +12132,94 @@ function hydrateDesignCaptureCanvases(root = liveReportPanel) {
   });
 }
 
+const generatedSpecimenAttention = { runId: "", seen: new Set(), scrollLeft: 0, nodes: new WeakMap() };
+
+function attendLatestGeneratedSpecimen(root, runId) {
+  if (!root || window.AX4LABReplay) return;
+  const grid = root.querySelector(".ar-design-candidate-grid");
+  if (!grid || !grid.clientWidth) return;
+  const memory = generatedSpecimenAttention;
+  if (memory.runId !== runId) {
+    memory.runId = runId;
+    memory.seen.clear();
+    memory.scrollLeft = 0;
+  }
+  const latest = grid.querySelector("[data-generated-specimen-id]:last-child");
+  const id = latest?.dataset.generatedSpecimenId;
+  if (!id) return;
+  const isNew = !memory.seen.has(id);
+  const newNode = !memory.nodes.has(grid);
+  memory.nodes.set(grid, runId);
+  if (newNode) {
+    grid.addEventListener("scroll", () => {
+      if (memory.runId === memory.nodes.get(grid) && grid.isConnected) memory.scrollLeft = grid.scrollLeft;
+    }, { passive: true });
+  }
+  if (isNew) {
+    memory.seen.add(id);
+    // Only this card's horizontal viewport moves, never the page/focus.
+    grid.scrollLeft = Math.max(0, grid.scrollWidth - grid.clientWidth);
+    memory.scrollLeft = grid.scrollLeft;
+  } else if (newNode) {
+    grid.scrollLeft = memory.scrollLeft;
+  }
+}
+
+function designArchivedSpecimenEvidence(report) {
+  if (window.AX4LABReplay) return [];
+  const runId = String(report?.state?.run_id || "");
+  if (!runId) return [];
+  if (liveDesignEvidenceCache.runId !== runId) {
+    liveDesignEvidenceCache = { runId, records: {}, fetched: new Set(), pending: false };
+  }
+  const cache = liveDesignEvidenceCache;
+  if (!cache.pending) {
+    const files = liveRunArtifacts.map(artifact => {
+      const path = String(artifact.path || "").replaceAll("\\", "/");
+      const match = path.match(/(?:^|\/)(planning|analysis)\/([^/]+)\/(experiment_spec|analysis_report)\.json$/);
+      const url = artifact.url || artifact.compat_url || artifact.download_url;
+      const key = `${path}:${artifact.updated_at || artifact.modified_at || artifact.mtime || artifact.size_bytes || ""}`;
+      return match && url && !cache.fetched.has(key) ? {match, url, key} : null;
+    }).filter(Boolean).slice(-256);
+    if (files.length) {
+      cache.pending = true;
+      (async () => {
+        let changed = false;
+        // Serial, cached reads: do not add a frame/poll-time fetch loop.
+        for (const {match, url, key} of files) {
+          if (liveDesignEvidenceCache !== cache) break;
+          cache.fetched.add(key);
+          try {
+            const response = await fetch(url);
+            if (!response.ok) continue;
+            const payload = await response.json();
+            if (liveDesignEvidenceCache !== cache) break;
+            const id = match[2];
+            if (payload.run_id && payload.run_id !== runId) continue;
+            if (payload.specimen_id && payload.specimen_id !== id) continue;
+            const prior = cache.records[id] || {specimen_id: id};
+            if (match[3] === "experiment_spec") {
+              cache.records[id] = {...prior, candidate_id: payload.candidate_id,
+                candidate_fingerprint: payload.candidate_fingerprint,
+                cell_size_mm: payload.cell_size_mm, wall_thickness_mm: payload.wall_thickness_mm,
+                design_evaluation: payload.design_evaluation};
+            } else {
+              cache.records[id] = {...prior, specimen_geometry: payload.specimen_geometry};
+            }
+            changed = true;
+          } catch (_) { /* Missing archived evidence stays unavailable, never estimated. */ }
+        }
+        cache.pending = false;
+        if (changed && liveDesignEvidenceCache === cache && liveSelectedAgent === "design" && liveLastSession) {
+          invalidateLiveCenterRender("report");
+          renderLiveRuntime(liveLastSession);
+        }
+      })();
+    }
+  }
+  return Object.values(cache.records);
+}
+
 function renderDesignCandidateCards(screenReport, designReport, report, helpers = {}) {
   const rows = designActualSpecimenRows(screenReport, designReport, report);
   if (!rows.length) return renderDesignEmpty("No generated specimens yet.");
@@ -12152,7 +12242,7 @@ function renderDesignCandidateCards(screenReport, designReport, report, helpers 
         const capturePayload = designCandidateCapturePayload(item, screenReport, designReport, report, rank);
         const captureMode = designCandidateCaptureMode(item, imageUrl, item.__actual_specimen ? "STL VIEWER PNG" : "IMAGE PREVIEW");
         return `
-          <article class="ar-design-candidate-card tone-${escapeHtml(tone)}${isSelected ? " selected" : ""}${imageUrl ? " has-capture" : ""}" role="listitem" aria-label="${escapeHtml(candidateId)}">
+          <article class="ar-design-candidate-card tone-${escapeHtml(tone)}${isSelected ? " selected" : ""}${imageUrl ? " has-capture" : ""}" role="listitem" data-generated-specimen-id="${escapeHtml(candidateId)}" aria-label="${escapeHtml(candidateId)}">
             <div class="ar-design-cad-capture">
               ${imageUrl
                 ? renderDesignCaptureImage(imageUrl, capturePayload, candidateId, rank, { mode: captureMode, alt: `Generated specimen ${candidateId}` })
@@ -15496,6 +15586,8 @@ function renderReportPanel(session) {
   applyUtmClearCompletionVerification(report.state);
   if (patchResult.fullRender || patchResult.structureChanged || patchResult.chartChanged) scheduleOrcEchartsRender();
   hydrateDesignCaptureCanvases();
+  window.ATRPrinterVideoVisibility?.sync(liveReportPanel);
+  attendLatestGeneratedSpecimen(liveReportPanel, String(report.state?.run_id || ""));
   renderDesignCaptureViewerOverlay();
   renderSpecimenProgressDetailOverlay();
   if (window.ATRRobotTelemetryCards && typeof window.ATRRobotTelemetryCards.hydrate === "function") {

@@ -263,10 +263,16 @@ class GuardianAgent(BaseAgent):
         metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
         gates = metadata.get("guardian_gates") if isinstance(metadata.get("guardian_gates"), list) else []
         incidents = metadata.get("incident_records") if isinstance(metadata.get("incident_records"), list) else []
+        from policies.guardian_gate_lifecycle import resolve_image_rechecks
+
+        resolve_image_rechecks(gates, incidents)
         active_gates: list[dict[str, Any]] = []
         warning_gates: list[dict[str, Any]] = []
         for gate in gates[-30:]:
             if not isinstance(gate, dict):
+                continue
+            audit = gate.get("audit_log") or {}
+            if audit.get("lifecycle") == "resolved" and audit.get("resolved_by"):
                 continue
             decision = str(gate.get("decision") or gate.get("status") or "").lower()
             stage = str(gate.get("stage") or "").lower()

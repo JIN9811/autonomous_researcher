@@ -125,6 +125,7 @@ async def test_analysis_agent_extracts_inline_utm_metrics() -> None:
     assert analysis["utm_metrics"]["compressive_strength_MPa"] == 1.3
     assert analysis["utm_metrics"]["energy_absorption_mJ"] > 1500
     assert analysis["specimen_geometry"]["cross_section_area_mm2"] == 400.0
+    assert result.data["experiment_evaluation"]["specimen_geometry"] == analysis["specimen_geometry"]
     assert analysis["recommendation"] == "review_utm_curve_quality_before_model_update"
     assert analysis["utm_metrics"]["energy_absorption_limit_reached"] is False
 

@@ -1543,6 +1543,7 @@ class AnalysisAgent(BaseAgent):
             "objective_score": bo_score if bo_score_available else None,
             "uncertainty": analysis.get("uncertainty", 1.0),
             "metrics": {**parameters, **metrics, "quality_score": quality_gate.get("score")},
+            "specimen_geometry": dict(analysis.get("specimen_geometry") or {}),
             "trust_score": trust_score,
             "artifacts": analysis_artifacts,
             "artifact_refs": artifact_refs,
