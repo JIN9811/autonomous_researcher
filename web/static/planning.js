@@ -439,6 +439,8 @@ let liveSetupTransportVersion = 0;
 let liveSetupAppliedVersion = 0;
 let planningThinkingCount = 0;
 let planningMessageSubmitInFlight = false;
+let planningPendingRequestSeq = 0;
+const planningPendingRequestIds = new Set();
 let liveQuickActionBusy = false;
 let liveSafeStopArmedUntil = 0;
 let liveSafeStopArmTimer = null;
@@ -3552,9 +3554,23 @@ function planningMessageKey(msg, fallbackIndex = 0) {
   return `fallback:${fallbackIndex}:${role}`;
 }
 
+function createPlanningPendingMessage(role, model) {
+  const messageId = `local-pending:${++planningPendingRequestSeq}`;
+  planningPendingRequestIds.add(messageId);
+  return {role, model, content: "", pendingReasoning: true, message_id: messageId};
+}
+
+function finishPlanningPendingMessage(message) {
+  planningPendingRequestIds.delete(message.message_id);
+  // Keep events received while awaiting the response, removing only stale placeholders.
+  renderPlanningMessages(planningMessagesCache, {immediate: true, scrollToBottom: false});
+}
+
 function limitPlanningMessageCache(messages, limit = PLANNING_RENDER_CACHE_LIMIT) {
-  if (!Array.isArray(messages) || messages.length <= limit) return Array.isArray(messages) ? messages : [];
-  return messages.slice(messages.length - limit);
+  // A printer/handoff task can be busy without an outstanding chat response.
+  const current = (Array.isArray(messages) ? messages : []).filter(message =>
+    !message?.pendingReasoning || planningPendingRequestIds.has(message.message_id));
+  return current.length <= limit ? current : current.slice(current.length - limit);
 }
 
 function mergePlanningMessages(...messageLists) {
@@ -18150,6 +18166,7 @@ async function sendPlanningMessage(message) {
   const baseMessages = [...planningMessagesCache];
   const pendingRole = queueOnly ? "orchestrator" : (planningPendingSpecimenInput ? "printer_ai" : "orchestrator");
   const pendingModel = queueOnly ? "orchestrator_supervisor" : (planningPendingSpecimenInput ? "specimen_agent" : "orchestrator_plan");
+  const pendingMessage = createPlanningPendingMessage(pendingRole, pendingModel);
   setChatStatus(queueOnly ? "QUEUING" : "REASONING", "running");
   pushPlanningThinking();
   renderPlanningMessages([
@@ -18158,12 +18175,7 @@ async function sendPlanningMessage(message) {
       role: "operator",
       content: clean,
     },
-    {
-      role: pendingRole,
-      content: "",
-      pendingReasoning: true,
-      model: pendingModel,
-    },
+    pendingMessage,
   ]);
 
   try {
@@ -18209,6 +18221,7 @@ async function sendPlanningMessage(message) {
     }
   } finally {
     planningMessageSubmitInFlight = false;
+    finishPlanningPendingMessage(pendingMessage);
     popPlanningThinking();
   }
 }
@@ -18229,16 +18242,12 @@ async function bootstrapLiveOrchestrator() {
   planningBootstrapStarted = true;
 
   const baseMessages = [...planningMessagesCache];
+  const pendingMessage = createPlanningPendingMessage("orchestrator", "orchestrator_plan");
   setChatStatus("REASONING", "running");
   pushPlanningThinking();
   renderPlanningMessages([
     ...baseMessages,
-    {
-      role: "orchestrator",
-      content: "",
-      pendingReasoning: true,
-      model: "orchestrator_plan",
-    },
+    pendingMessage,
   ]);
 
   try {
@@ -18260,6 +18269,7 @@ async function bootstrapLiveOrchestrator() {
       },
     ]);
   } finally {
+    finishPlanningPendingMessage(pendingMessage);
     popPlanningThinking();
   }
 }
