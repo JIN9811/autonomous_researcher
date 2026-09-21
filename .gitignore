@@ -90,6 +90,7 @@ image/.render_venv/
 !/docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/01_design_tokens/design_tokens.json
 
 # OS/editor noise
+/.worktrees/
 .DS_Store
 Thumbs.db
 *.swp
