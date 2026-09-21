@@ -119,6 +119,8 @@ exclude = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+pythonpath = [".", "tests/integration", "tests/unit"]
 
 [tool.ruff]
 line-length = 100

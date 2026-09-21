@@ -298,10 +298,31 @@ Modification guide:
             </label>
           </div>
           <textarea id="bo-objective-input" hidden>{}</textarea>
-          <label class="planning-message-label">
-            Parameter Space JSON
-            <textarea id="bo-parameter-space-input" class="text-input" rows="12"></textarea>
-          </label>
+          <section class="printer-subsection" aria-labelledby="bo-design-space-title">
+            <h3 id="bo-design-space-title">Design Space</h3>
+            <div class="lerobot-form-grid">
+              <label>Cell size · Min (mm)
+                <input id="bo-cell-size-min" class="text-input" type="number" min="0" step="any" aria-describedby="bo-design-space-error" />
+              </label>
+              <label>Cell size · Max (mm)
+                <input id="bo-cell-size-max" class="text-input" type="number" min="0" step="any" aria-describedby="bo-design-space-error" />
+              </label>
+              <label>Wall thickness · Min (mm)
+                <input id="bo-wall-thickness-min" class="text-input" type="number" min="0" step="any" aria-describedby="bo-design-space-error" />
+              </label>
+              <label>Wall thickness · Max (mm)
+                <input id="bo-wall-thickness-max" class="text-input" type="number" min="0" step="any" aria-describedby="bo-design-space-error" />
+              </label>
+            </div>
+            <p id="bo-design-space-error" class="hint" role="alert" hidden></p>
+            <details>
+              <summary>Advanced · Parameter Space JSON</summary>
+              <label class="planning-message-label">
+                Parameter Space JSON
+                <textarea id="bo-parameter-space-input" class="text-input" rows="12" aria-describedby="bo-design-space-error"></textarea>
+              </label>
+            </details>
+          </section>
           <div class="button-row">
             <button id="btn-bo-benchmark" class="btn">Run Benchmark</button>
             <button id="btn-bo-run" class="btn primary">Run BO Agent</button>
@@ -385,6 +406,7 @@ Modification guide:
     <link rel="stylesheet" href="/static/bo_posterior_surface.css?v=20260917-1">
     <script src="/static/bo_posterior_surface.js?v=20260917-1"></script>
     <script src="/static/bo_visualization.js?v=20260917-surface-1"></script>
+    <script src="/static/bo_parameter_space_editor.js?v=20260921-1"></script>
     <script src="/static/bo.js"></script>
   </body>
 </html>

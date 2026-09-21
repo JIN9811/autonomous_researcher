@@ -21,6 +21,39 @@ import pytest
 
 
 @pytest.fixture
+def simulated_vision_process(monkeypatch):
+    """Replace ROS process I/O, keeping cycle admission and restart checks real."""
+    from itertools import count
+    from weakref import WeakKeyDictionary
+    from device_bridges.camera_vision import tools
+    from device_bridges.camera_vision.utm_runtime_bridge import UTMRuntimeProcessManager
+
+    processes = WeakKeyDictionary()
+    pids = count(10000)
+    monkeypatch.setattr(tools, "_VISION_CYCLE_RELOADS", {})
+
+    def status(manager):
+        pid = processes.get(manager)
+        return {"ok": True, "status": "running" if pid else "stopped", "pid": pid,
+                "source": "controlled_test_process"}
+
+    def start(manager):
+        already_running = bool(processes.get(manager))
+        if not already_running:
+            processes[manager] = next(pids)
+        return {**status(manager), "already_running": already_running}
+
+    def stop(manager):
+        previous_pid = processes.pop(manager, None)
+        return {**status(manager), "previous_pid": previous_pid,
+                "was_running": bool(previous_pid)}
+
+    monkeypatch.setattr(UTMRuntimeProcessManager, "start", start)
+    monkeypatch.setattr(UTMRuntimeProcessManager, "stop", stop)
+    monkeypatch.setattr(UTMRuntimeProcessManager, "status", status)
+
+
+@pytest.fixture
 def handoff_no_external(monkeypatch):
     """Opt-in physical/process denial, installed before a test bootstraps runtime.
 

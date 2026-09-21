@@ -14312,16 +14312,24 @@ function renderVisionUtmPlacementConfirmation(screenReport, completion = {}, per
   const captureUrl = intervention.capture_url
     || artifact.url
     || (capturePath ? `/api/lerobot/visualization/file?path=${encodeURIComponent(capturePath)}` : "");
-  const frameWidth = artifact.frame_width || signal.frame_width;
-  const frameHeight = artifact.frame_height || signal.frame_height;
+  const frameWidth = artifact.frame_width || signal.frame_width || signal.width;
+  const frameHeight = artifact.frame_height || signal.frame_height || signal.height;
   const resolution = frameWidth && frameHeight ? `${frameWidth}x${frameHeight}` : "-";
   const confidence = artifact.confidence ?? signal.confidence;
+  // Registered platen region shared with Verification 2 (640x480 camera).
+  // Keep this configured overlay separate from the historical detection verdict.
+  const roi = visionVerificationRoi({
+    artifact: { frame_width: frameWidth, frame_height: frameHeight,
+      roi_xyxy: [200, 240, 400, 420] },
+    evidence: {},
+  });
   return `
     <div class="ar-vis-active-cam-card ar-vis-utm-confirmation-card">
       <div class="ar-vis-active-cam-frame ${captureUrl ? "has-frame" : "is-empty"}">
         ${captureUrl
           ? `<img src="${escapeHtml(captureUrl)}" alt="UTM specimen placement confirmation frame" loading="lazy">`
           : `<div><strong>UTM Observation</strong><span>${escapeHtml(compactText(signal.blocking_reason || status, 42))}</span></div>`}
+        ${captureUrl && roi ? `<svg class="ar-vis-verification-roi" viewBox="0 0 ${roi.width} ${roi.height}" preserveAspectRatio="xMidYMid meet" aria-label="Verification 1 inspection ROI"><rect x="${roi.left}" y="${roi.top}" width="${roi.right - roi.left}" height="${roi.bottom - roi.top}" vector-effect="non-scaling-stroke" /></svg>` : ""}
       </div>
       <div class="ar-report-metrics ar-vis-active-cam-metrics">
         ${renderDashboardMetric("Placement", detected ? "confirmed" : "waiting", "UTM", detected ? "success" : "warning")}

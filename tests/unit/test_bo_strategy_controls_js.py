@@ -13,14 +13,16 @@ def test_workspace_strategy_control_survives_defaults_restore_and_submission():
 const fs = require('fs'), vm = require('vm');
 const source = fs.readFileSync({json.dumps(str(script))}, 'utf8');
 const elements = {{}};
-const context = {{document: {{getElementById: id => elements[id] ||= {{
+const context = {{window: {{}}, document: {{getElementById: id => elements[id] ||= {{
+  addEventListener() {{}}, setAttribute() {{}},
   _value:'', get value() {{ return this._value; }}, set value(v) {{ this._value=String(v); }} }} }},
   pretty: JSON.stringify, defaults: {{}}}};
 vm.createContext(context);
+vm.runInContext(fs.readFileSync({json.dumps(str(ROOT / 'web/static/bo_parameter_space_editor.js'))}, 'utf8'), context);
 const bindings = source.slice(source.indexOf('const strategyInput ='), source.indexOf('const btnBenchmark ='));
 const funcs = source.slice(source.indexOf('function boolValue('), source.indexOf('function renderCurve('));
 vm.runInContext(bindings + funcs, context);
-context.applyDefaults({{defaults: {{parameter_space: {{cell_size_mm:[5,10], relative_density:[.2,.48]}}}}}});
+context.applyDefaults({{defaults: {{parameter_space: {{cell_size_mm:[5,10], wall_thickness_mm:[.6,1.2]}}}}}});
 const initial = context.settingsPayload();
 context.applySettings({{strategy_control:'adaptive', acquisition:'upper_confidence_bound',
   llm_preference_enabled:true, llm_candidate_weight:.45}});

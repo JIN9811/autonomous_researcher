@@ -6196,7 +6196,7 @@ class IsaacLabSyntheticPipeline:
     def _planned_camera_pose(camera: str) -> dict[str, Any]:
         key = str(camera or "").lower()
         specs: dict[str, dict[str, Any]] = {
-            "top": {"position": [0.315, 0.205, 0.72], "look_at": [0.315, 0.265, 0.0], "focal_length": 18.0},
+            "top": {"position": [0.266, 0.521, 0.423], "look_at": [0.354, 0.026, 0.0], "focal_length": 12.71},  # fitted to the real D455F (runs/sim_camera_alignment_20260920)
             "front": {"position": [0.36, 0.96, 0.52], "look_at": [0.36, 0.28, 0.025], "focal_length": 14.0},
             "right": {"position": [0.86, 0.58, 0.52], "look_at": [0.38, 0.24, 0.02], "focal_length": 10.0},
             "wrist": {"position": [0.19, 0.08, 0.28], "look_at": [0.36, 0.28, 0.02], "focal_length": 18.0},

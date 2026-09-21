@@ -39,6 +39,7 @@ class TestScenarioInput:
             return False
         self.goal = goal
         self.trigger_message = trigger_message
+        self._trigger_inputs_delivered = False
         self.constraints = deepcopy(constraints)
         self.session_id = self.controller._planning_session_id
         self.admission_task = None
@@ -92,6 +93,9 @@ class TestScenarioInput:
         facts = {"goal": self.goal, **{k: v for k, v in self.constraints.items()
                  if k not in {"print", "ejection", "execution_policy", "test_mode_profile"}
                  and not any(word in k.lower() for word in ("confirm", "allow", "password", "token", "secret"))}}
+        dialogue = getattr(c, "_research_dialogue", None)
+        selected_bo = getattr(dialogue, "test_bo_defaults", {}) if getattr(dialogue, "session_id", None) == self.session_id else {}
+        facts.update(deepcopy(selected_bo))
         prompt = json.dumps({"operation": "test_scenario_reply", "pending_request": pending,
             "available_scenario_inputs": facts,
             "conversation": c._planning_memory_context(limit=12, max_chars=900),
@@ -120,8 +124,16 @@ class TestScenarioInput:
         if before != c._planning_intake_scope() or self._stopped():
             return False
         from app.planning_dialogue import plain_message
+        deliver_trigger = False
         if pending["kind"] == "conversation":
             reply = plain_message(choice.get("message"))
+            # Preserve the human's original scientific overrides in the actual
+            # message validated by ResearchDialogue, not just model context.
+            deliver_trigger = bool(selected_bo and getattr(self, "trigger_message", "")
+                and not getattr(self, "_trigger_inputs_delivered", False)
+                and pending.get("purpose") in {"provide_inputs", "run_review"})
+            if deliver_trigger:
+                reply += "\n\n" + self.trigger_message
         else:
             # Runtime holds can unblock physical stages. Only the model-selected
             # existing facts enter that route, never its free-form assertions.
@@ -133,6 +145,8 @@ class TestScenarioInput:
                 raise ValueError("Unsupported runtime fact shape")
             reply = " ".join(f"{key.replace('_', ' ').capitalize()} is {factual_text(facts[key])}." for key in fields)
         result = await self._submit(reply, pending=pending["pending_id"])
+        if deliver_trigger and result.get("ok"):
+            self._trigger_inputs_delivered = True
         return bool(result.get("ok"))
 
     async def _run(self):

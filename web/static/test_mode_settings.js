@@ -15,6 +15,7 @@ const updated = document.getElementById("test-mode-profile-updated");
 const activeLabel = document.getElementById("test-mode-active-profile");
 const derived = document.getElementById("test-mode-derived-flow");
 const validation = document.getElementById("test-mode-validation");
+const totalCycles = document.getElementById("test-mode-total-cycles");
 
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 
@@ -34,6 +35,8 @@ function collectDraft() {
 
 function validate(profile) {
   const blockers = [];
+  const cycles = Number(totalCycles.value);
+  if (!Number.isSafeInteger(cycles) || cycles < 1) blockers.push("Total Cycles must be a positive integer.");
   const warnings = [];
   if (profile.printer_flow.print_body === "execute" && profile.printer_flow.cooling_wait === "skip") {
     blockers.push("Cooling can be skipped only with a skipped print body.");
@@ -86,6 +89,8 @@ async function readJson(response) {
 }
 
 function acceptDocument(document) {
+  totalCycles.value = document.total_cycles ?? '';
+  totalCycles.disabled = false;
   state.revision = document.revision;
   state.profiles = clone(document.profiles);
   state.drafts = clone(document.profiles);
@@ -102,10 +107,11 @@ async function loadProfiles() {
 
 async function saveProfile() {
   const profile = collectDraft();
+  if (validate(profile).blockers.length) { renderDerived(profile); return; }
   try {
     const document = await readJson(await fetch(`/api/test-mode-execution-profiles/${state.active}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ expected_revision: state.revision, profile }),
+      body: JSON.stringify({ expected_revision: state.revision, profile, total_cycles: Number(totalCycles.value) }),
     }));
     acceptDocument(document);
     validation.textContent = "Saved. This revision applies to the next run.";
@@ -124,6 +130,7 @@ async function resetProfiles(profileId) {
 tabs.forEach((tab) => tab.addEventListener("click", () => { collectDraft(); state.active = tab.dataset.profileId; render(); }));
 agentCards.forEach((card) => card.querySelector("select").addEventListener("change", () => renderDerived(collectDraft())));
 [printBody, coolingWait, autoEjection].forEach((control) => control.addEventListener("change", render));
+totalCycles.addEventListener("input", () => renderDerived(collectDraft()));
 document.getElementById("btn-test-mode-save").addEventListener("click", saveProfile);
 document.getElementById("btn-test-mode-reload").addEventListener("click", loadProfiles);
 document.getElementById("btn-test-mode-restore").addEventListener("click", () => resetProfiles(state.active));

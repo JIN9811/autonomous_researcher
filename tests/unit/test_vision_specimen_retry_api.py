@@ -245,6 +245,8 @@ async def test_controller_utm_operator_retry_calls_vision_only_and_never_restart
 
 def test_run_scoped_retry_endpoint_validates_run_and_checkpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = SimpleNamespace(
+        # The run guard reads controller._state.run_id, not the snapshot.
+        _state=SimpleNamespace(run_id="run-api"),
         snapshot=lambda: {"state": {"run_id": "run-api"}},
         retry_vision_specimen_placement=AsyncMock(
             return_value={

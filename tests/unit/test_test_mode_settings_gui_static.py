@@ -14,7 +14,7 @@ def test_main_run_control_opens_test_mode_settings_after_gpu_clear():
 
     assert gpu_index < settings_index < end_of_button_row
     assert "Test Mode Settings" in page
-    assert '/static/app.js?v=20260904-test-mode-profiles-1' in page
+    assert '/static/app.js?v=' in page
 
 
 def test_settings_page_exposes_complete_nonconditional_profile_editor():
@@ -25,6 +25,7 @@ def test_settings_page_exposes_complete_nonconditional_profile_editor():
     for agent in ("specimen", "vision", "manipulation", "lab_equipment"):
         assert f'data-agent-id="{agent}"' in page
     for element_id in (
+        "test-mode-total-cycles",
         "test-mode-print-body",
         "test-mode-cooling-wait",
         "test-mode-auto-ejection",

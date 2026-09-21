@@ -318,7 +318,11 @@ async def test_saved_manipulation_graph_uses_registered_archived_owner(module_ap
     assert result.data["artifact_execution"]
     assert [event["payload"]["node_id"] for event in events
         if event["type"] == "execution.node.completed"] == ["saved_task", "deliver"]
-    assert all(event["payload"]["graph_revision"] == loaded["execution_graph_revision"] for event in events)
+    # Attention shares this sink but is not part of the execution-graph schema.
+    graph_events = [event for event in events if event["type"].startswith("execution.")]
+    assert graph_events
+    assert all(event["payload"]["graph_revision"] == loaded["execution_graph_revision"]
+               for event in graph_events)
     assert [name for name, _ in ctx.tools.calls] == ["lerobot.rollout.start"]
     assert guard.physical_call_count == 0
 

@@ -19,9 +19,10 @@ from agents.specimen.agent import SpecimenMakingAgent
 from app.bootstrap import load_runtime
 from graphs import load_graph_config
 from orchestrator.state import AgentRuntimeStatus, Mode, Stage
+from orchestrator.runtime_defaults import TEST_MODE_LOOP_CYCLES
 from tests.unit.test_test_scenario_chat import scenario_controller
 
-pytestmark = pytest.mark.usefixtures("handoff_no_external")
+pytestmark = pytest.mark.usefixtures("handoff_no_external", "simulated_vision_process")
 
 
 @pytest.fixture(autouse=True)
@@ -287,14 +288,14 @@ def test_planning_cycle_contract_is_exposed_to_live_gui() -> None:
     )
     compact = controller.planning_snapshot()["state"]["run_metadata"]
 
-    assert total_cycles == 20
+    assert total_cycles == TEST_MODE_LOOP_CYCLES
     assert compact["planning_cycle_contract"] == {
         "schema": "planning_cycle_contract.v1",
         "mode": "test",
-        "total_cycles": 20,
+        "total_cycles": TEST_MODE_LOOP_CYCLES,
         "source": "planning_runtime",
     }
-    assert compact["safety_budget"]["max_loop_count"] == 20
+    assert compact["safety_budget"]["max_loop_count"] == TEST_MODE_LOOP_CYCLES
 
 
 def test_safe_preflight_execution_policy_is_validated_and_preserved_for_redesign() -> None:
@@ -2837,6 +2838,9 @@ async def test_specimen_retry_merges_result_before_loop_tail(monkeypatch: pytest
             "test_mode_autofill": True,
             "test_mode_llm_generated": True,
             "printer_test_path": "virtual_bridge",
+            # This case verifies one retry handoff, not the configurable
+            # multi-cycle experiment covered by the cycle-series tests.
+            "test_total_cycles": 1,
         },
     )
     controller._state.current_experiment_spec = spec
@@ -3620,6 +3624,9 @@ async def test_live_gui_test_planning_series_runs_twenty_design_cycles(
         "handoff_status": "ready",
         "stl_path": "/tmp/specimen-series-1.stl",
     }
+    # This long-run regression deliberately exercises twenty cycles regardless
+    # of the configurable default for new requests.
+    spec["test_total_cycles"] = 20
     spec = controller._apply_specimen_printer_choice_to_spec(spec, "virtual_bridge")
     controller._state.current_experiment_spec = spec
     async def fake_specimen_stage(experiment_spec: dict, *, emit_handoff: bool = True) -> dict:
@@ -3739,7 +3746,7 @@ def test_test_mode_initial_cycle_is_seeded_from_bo_lhs() -> None:
 
 
 @pytest.mark.parametrize("printer_path", ["virtual_bridge", "installed_printer"])
-def test_test_mode_printer_routes_use_twenty_cycle_bo_budget(printer_path: str) -> None:
+def test_test_mode_printer_routes_use_configured_cycle_bo_budget(printer_path: str) -> None:
     controller = load_runtime()
 
     assert controller._planning_cycle_limit(
@@ -3747,7 +3754,7 @@ def test_test_mode_printer_routes_use_twenty_cycle_bo_budget(printer_path: str) 
             "test_mode_llm_generated": True,
             "printer_test_path": printer_path,
         }
-    ) == 20
+    ) == TEST_MODE_LOOP_CYCLES
 
 
 @pytest.mark.asyncio

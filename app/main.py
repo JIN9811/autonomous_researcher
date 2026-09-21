@@ -794,6 +794,7 @@ class TestModeExecutionProfileSaveRequest(BaseModel):
 
     expected_revision: int = Field(..., ge=0)
     profile: dict[str, Any]
+    total_cycles: int | None = Field(default=None, ge=1, strict=True)
 
 
 class TestModeExecutionProfileResetRequest(BaseModel):
@@ -2492,6 +2493,7 @@ async def put_test_mode_execution_profile(
             profile_id,
             request.profile,
             expected_revision=request.expected_revision,
+            total_cycles=request.total_cycles,
         )
     except TestModeExecutionProfileConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

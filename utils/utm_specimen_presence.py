@@ -123,8 +123,14 @@ def _inspect_specimen_presence_image(
     frame_id: str,
     min_area_px: float = 300.0,
     roi_normalized: tuple[float, float, float, float] | None = None,
+    draw_roi: bool = False,
 ) -> dict[str, Any]:
-    """Inspect one RGB frame, persist raw/annotated evidence, and return a bounded contract."""
+    """Inspect one RGB frame, persist raw/annotated evidence, and return a bounded contract.
+
+    ``draw_roi`` outlines the inspection region on the annotated image. Only the
+    UTM platen checks ask for it; the Active Cam keeps an unmarked frame so the
+    operator sees the workspace exactly as the camera captured it.
+    """
     image = image.convert("RGB")
     roi_xyxy = _normalized_roi_box(image, roi_normalized)
     roi_image = image.crop(roi_xyxy)
@@ -141,7 +147,7 @@ def _inspect_specimen_presence_image(
 
     annotated = image.copy()
     draw = ImageDraw.Draw(annotated)
-    if roi_normalized is not None:
+    if draw_roi and roi_normalized is not None:
         draw.rectangle(roi_xyxy, outline=(70, 170, 230), width=1)
     detected = region is not None
     bbox_xyxy: list[int] = []
@@ -204,8 +210,13 @@ def inspect_specimen_presence(
     if purpose == "utm_clear_verification":
         return _inspect_clear_presence(_decode_data_url(data_url), output_dir=output_dir,
             specimen_id=specimen_id, frame_id=frame_id, evidence=capture_evidence or {})
+    if purpose == "utm_placement_verification":
+        # Verification 1 shares Verification 2's registered detection region,
+        # even when a caller supplies an older, full-height monitoring ROI.
+        roi_normalized = utm_platen_roi_normalized()
     return _inspect_specimen_presence_image(
         _decode_data_url(data_url),
+        draw_roi=True,
         output_dir=output_dir,
         specimen_id=specimen_id,
         frame_id=frame_id,

@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app import main as app_main
 from app.main import app
+import pytest
 
 
 def _installed_hybrid_profile() -> dict:
@@ -84,3 +85,24 @@ def test_profile_api_rejects_stale_revision_and_unsafe_cooling(tmp_path, monkeyp
 
     assert stale.status_code == 409
     assert invalid.status_code == 422
+
+
+def test_total_cycles_roundtrip_and_page_input(tmp_path, monkeypatch):
+    monkeypatch.setattr(app_main, "TEST_MODE_EXECUTION_PROFILES_PATH", tmp_path / "profiles.json")
+    client = TestClient(app)
+    assert 'id="test-mode-total-cycles"' in client.get('/test-mode-settings').text
+    saved = client.put('/api/test-mode-execution-profiles/installed_printer',
+        json={'expected_revision': 0, 'profile': _installed_hybrid_profile(), 'total_cycles': 6})
+    assert saved.status_code == 200
+    assert saved.json()['total_cycles'] == 6
+    assert client.get('/api/test-mode-execution-profiles').json()['total_cycles'] == 6
+
+
+@pytest.mark.parametrize('count', [0, -2, 1.5, True, '3'])
+def test_total_cycles_api_rejects_invalid_count(tmp_path, monkeypatch, count):
+    target = tmp_path / 'profiles.json'
+    monkeypatch.setattr(app_main, 'TEST_MODE_EXECUTION_PROFILES_PATH', target)
+    result = TestClient(app).put('/api/test-mode-execution-profiles/installed_printer',
+        json={'expected_revision': 0, 'profile': _installed_hybrid_profile(), 'total_cycles': count})
+    assert result.status_code == 422
+    assert not target.exists()

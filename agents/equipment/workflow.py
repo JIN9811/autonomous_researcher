@@ -291,6 +291,27 @@ def _focus_action(state, result):
     return None
 
 
+def explicit_restart_suffix(state, service):
+    """Separate an operator-requested retry from the immutable failed claim."""
+    import re
+    request = state.run_metadata.get('equipment_explicit_restart') or {}
+    if not request or request.get('run_id') != state.run_id or request.get('loop_id') != state.loop_count:
+        return ''
+    specimen = state.current_experiment_spec.get('specimen_id')
+    attempt = str(request.get('attempt_id') or '')
+    if (request.get('requested_by') != 'operator' or request.get('specimen_id') != specimen
+            or not re.fullmatch(r'[a-zA-Z0-9_-]{1,48}', attempt)):
+        raise ValueError('Invalid explicit Equipment restart request')
+    source = service.get(request['source_execution_id'])
+    identity = source.get('identity') or {}
+    if (identity.get('run_id') != state.run_id or identity.get('experiment_id') != state.experiment_id
+            or identity.get('specimen_id') != specimen or not str(identity.get('sequence_id','')).startswith(f'stacked-loop-{state.loop_count}')
+            or source.get('lifecycle') not in {'ESCALATED', 'BLOCKED', 'ABORTED'}
+            or (source.get('workflow_result') or {}).get('success') is not False):
+        raise ValueError('A matching failed Equipment execution is required')
+    return '-restart-' + attempt
+
+
 async def run_decided_workflow(agent, state, ctx, flow):
     snapshot, frozen_flow = _scope(state), deepcopy(flow)
     description = _describe(agent, state, flow)
@@ -299,6 +320,7 @@ async def run_decided_workflow(agent, state, ctx, flow):
     service = EquipmentRuntimeService(agent._RUNTIME_ROOT / "workflow_decisions")
     specimen = state.current_experiment_spec.get("specimen_id") or (state.run_metadata.get("specimen_result") or {}).get("specimen_id") or "specimen-unresolved"
     sequence_id = f"stacked-loop-{state.loop_count}"
+    sequence_id += explicit_restart_suffix(state, service)
     tail_request = None
     if (state.run_metadata.get('equipment_tail_recovery') or {}).get('status') == 'running':
         from app.equipment_tail_recovery import read_request, validate, ROOT

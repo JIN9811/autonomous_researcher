@@ -24,7 +24,7 @@ from device_bridges.lerobot_bridge import LeRobotBridge
 from orchestrator.state import Mode, Stage
 from utils.agent_artifact_archive import list_executions
 
-pytestmark = pytest.mark.usefixtures("handoff_no_external")
+pytestmark = pytest.mark.usefixtures("handoff_no_external", "simulated_vision_process")
 
 
 @pytest.mark.asyncio
@@ -252,6 +252,7 @@ async def test_safe_physical_printer_preflight_completes_twenty_redesign_cycles_
         {
             "test_mode_llm_generated": True,
             "candidate_id": "safe-cycle-01",
+            "test_total_cycles": 20,
             "specimen_id": "specimen-safe-cycle-01",
             "execution_policy": {
                 "printer": "preflight_only",

@@ -2484,8 +2484,9 @@ def test_rgbd_render_backend_camera_create_kwargs_preserves_explicit_lens_option
 
 def test_rgbd_render_backend_default_camera_specs_are_top_front_right_obliques() -> None:
     assert IsaacReplicatorRgbdRenderBackend._default_camera_spec("top") == {
-        "position": (0.315, 0.205, 0.72),
-        "look_at": (0.315, 0.265, 0.0),
+        "position": (0.266, 0.521, 0.423),
+        "look_at": (0.354, 0.026, 0.0),
+        "focal_length": 12.71,
     }
     assert IsaacReplicatorRgbdRenderBackend._default_camera_spec("front") == {
         "position": (0.36, 0.96, 0.52),

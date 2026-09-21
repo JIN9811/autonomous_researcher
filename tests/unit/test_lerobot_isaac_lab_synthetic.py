@@ -765,8 +765,8 @@ def Xform "World"
     assert result["ok"] is True
     assert camera_prims["top"]["path"] == "/World/ATRRenderCameras/top"
     assert camera_prims["top"]["source"] == "replicator_worker_fallback"
-    assert camera_prims["top"]["planned_pose"]["position"] == [0.315, 0.205, 0.72]
-    assert camera_prims["top"]["planned_pose"]["look_at"] == [0.315, 0.265, 0.0]
+    assert camera_prims["top"]["planned_pose"]["position"] == [0.266, 0.521, 0.423]
+    assert camera_prims["top"]["planned_pose"]["look_at"] == [0.354, 0.026, 0.0]
     assert camera_prims["top"]["found"] is False
     assert camera_prims["front"]["path"] == "/World/ATRRenderCameras/front"
     assert camera_prims["front"]["source"] == "replicator_worker_fallback"

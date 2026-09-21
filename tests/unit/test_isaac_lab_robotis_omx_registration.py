@@ -414,10 +414,6 @@ def test_physical_env_contract_uses_real_omx_articulation_contacts_and_cameras()
         "TableTopFrontRight",
         "RobotBasePocketFloor",
         "A4Sheet",
-        "A4CornerMarker_1",
-        "A4CornerMarker_2",
-        "A4CornerMarker_3",
-        "A4CornerMarker_4",
         "A4CenterMarker",
         "RightDiskAluminumTop",
         "RightDiskBlackBase",
@@ -428,6 +424,8 @@ def test_physical_env_contract_uses_real_omx_articulation_contacts_and_cameras()
 
 def test_physical_reset_randomizes_cube_after_scene_default_reset() -> None:
     module = importlib.import_module("integrations.isaac_lab_robotis_omx.robotis_omx_physical_env_cfg")
+    if module.sim_utils is None:
+        pytest.skip("Isaac Lab runtime required for physical event configuration")
 
     cfg = module.RobotisOMXPhysicalPickPlaceEnvCfg()
     reset_terms = [name for name in dir(cfg.events) if name.startswith("reset")]
@@ -456,6 +454,8 @@ def test_physical_env_camera_resolution_can_be_overridden(monkeypatch) -> None:
 
 def test_physical_rgbd_cameras_match_standard_training_views(monkeypatch) -> None:
     module = importlib.import_module("integrations.isaac_lab_robotis_omx.robotis_omx_physical_env_cfg")
+    if module.sim_utils is None:
+        pytest.skip("Isaac Lab runtime required for physical camera configuration")
     monkeypatch.delenv("ROBOTIS_OMX_CAMERA_MODE", raising=False)
 
     cfg = module.RobotisOMXPhysicalPickPlaceEnvCfg()
@@ -466,10 +466,10 @@ def test_physical_rgbd_cameras_match_standard_training_views(monkeypatch) -> Non
     assert top.convention == "opengl"
     assert front.convention == "opengl"
     assert right.convention == "opengl"
-    assert top.pos == (0.315, 0.205, 0.72)
+    assert top.pos == (0.266, 0.521, 0.423)
     assert front.pos == (0.36, 0.96, 0.52)
     assert right.pos == (0.86, 0.58, 0.52)
-    assert getattr(cfg.scene.top_cam.spawn, "focal_length") == pytest.approx(18.0)
+    assert getattr(cfg.scene.top_cam.spawn, "focal_length") == pytest.approx(12.71)
     assert getattr(cfg.scene.front_cam.spawn, "focal_length") == pytest.approx(14.0)
     assert getattr(cfg.scene.right_cam.spawn, "focal_length") == pytest.approx(10.0)
 
@@ -577,8 +577,11 @@ def test_physical_contact_force_reads_isaac_lab_proxy_array_torch_payload() -> N
     assert torch.allclose(force, torch.tensor([0.30], dtype=torch.float32))
 
 
-def test_physical_gripper_contact_hold_clamps_both_gripper_joints() -> None:
+def test_physical_gripper_contact_hold_clamps_both_gripper_joints(monkeypatch) -> None:
     actions = importlib.import_module("integrations.isaac_lab_robotis_omx.mdp.actions")
+    # Exercise the real tensor algorithm even when the optional Isaac action
+    # classes are unavailable in the application test interpreter.
+    monkeypatch.setattr(actions, "torch", torch)
 
     processed = torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 0.20, -0.20]], dtype=torch.float32)
     last = torch.tensor([0.25], dtype=torch.float32)

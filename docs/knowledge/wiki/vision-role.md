@@ -1,5 +1,5 @@
 ---
-{"topic_id":"vision-role","owner":"vision_agent","source_refs":["docs/agents/vision_agent.md"],"source_revision":{"docs/agents/vision_agent.md":"4bcba27369ea9a3062679b959aba80700d3658499e2abd675da464643a1286d6"},"verified_at":"2026-09-15T00:00:00+00:00","applicability":"Public AX4LAB reference: vision-role","status":"reviewed"}
+{"topic_id":"vision-role","owner":"vision_agent","source_refs":["docs/agents/vision_agent.md"],"source_revision":{"docs/agents/vision_agent.md":"6a99279562646059815ff7b651b9fae66016c7528b0f38997a0da68df55e66b7"},"verified_at":"2026-09-15T00:00:00+00:00","applicability":"Public AX4LAB reference: vision-role","status":"reviewed"}
 ---
 
 # Vision Agent — Observation, Placement and Clearance

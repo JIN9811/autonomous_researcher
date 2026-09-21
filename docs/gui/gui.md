@@ -24,6 +24,19 @@ Web dashboard panels:
 
 Real-time updates are streamed via SSE endpoint `/api/events/stream`.
 
+### Test Mode Settings: run length
+
+Open **Test Mode Settings** from Run Control and set **Total Cycles**, then
+select **Save profile**. This positive integer is shared by Virtual Bridge,
+Installed Printer, and Physical Print test paths. New test requests snapshot
+the saved count; changing it does not resize active or resumed runs. Actual
+experiment mode is unaffected. The initial default comes from
+`configs/test_modes.yaml` (`dry_run.max_cycles`, currently **15**).
+
+**Restore this profile** retains the shared count; **Restore all profiles**
+also resets the count to the configured default. Existing profile files without
+this field retain their device settings and use that default until saved.
+
 ### Agent-owned report attention
 
 `agent.attention_requested` is a presentation-only event issued by an agent at
@@ -253,6 +266,8 @@ BO Workspace GUI route:
 - Route: `/bo`
 - API surface: `/api/bo/config`, `/api/bo/benchmark`, and `/api/bo/run`.
 - The workspace has a `Save Settings` control. Saved settings are persisted in `memory/bo_workspace_settings.json` and are reapplied when a new BO GUI window is opened.
+- `Design Space` provides decimal Min/Max inputs for cell size and wall thickness (mm). These synchronize in both directions with the collapsed `Advanced · Parameter Space JSON` editor, preserving other JSON fields. Invalid JSON, empty/non-positive endpoints, and Min ≥ Max block submission; fix the input or use `Reset Defaults`. Saving, loading, and resetting keep both editors aligned.
+- New automatic test-planning requests snapshot only the saved LHS initial-design count and the continuous cell-size / wall-thickness bounds. Explicit request or chat values take precedence. The agreed values enter the ordinary design contract and stay fixed for that run; saving the workspace again does not change a running test. This applies to virtual-bridge, installed-printer, and physical-print test paths. Real experiment planning still uses chat-agreed research inputs, not the workspace preset. Other saved BO settings (including mode and objective) are not imported into the test loop. An absent file retains the standard 8-point LHS and 5–10 mm / 0.6–1.2 mm ranges; `auto` resolves to 8, and invalid saved test inputs are reported before admission.
 - Saved BO settings include mode, objective, strategy, numeric backend (`botorch` by default or explicit `lightweight_pool` comparison), Latin Hypercube initial-design size, acquisition function, optimizer restarts/raw samples/timeout, budget, seed, LLM preference audit controls, and parameter-space bounds. Legacy `botorch_optional` settings migrate to `botorch`.
 - Benchmark and BO Agent actions remain virtual optimization controls only; the BO GUI does not directly start printer or robot hardware. `/api/bo/run` shows LHS initialization state or, after initialization, evidence intake, LLM reasoning audit, candidate ranking, and `next_design_request.v1` handoff.
 - During acquisition, Live GUI BO Agent messages render surrogate/acquisition graphs in a collapsed state by default. During LHS initialization, the card instead shows deterministic sample progress and does not imply that a GP or acquisition function has selected the point.

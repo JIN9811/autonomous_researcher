@@ -39,10 +39,6 @@ ROBOTIS_OMX_STAGE_STATIC_PRIM_NAMES = (
     "TableTopFrontRight",
     "RobotBasePocketFloor",
     "A4Sheet",
-    "A4CornerMarker_1",
-    "A4CornerMarker_2",
-    "A4CornerMarker_3",
-    "A4CornerMarker_4",
     "A4CenterMarker",
     "RightDiskAluminumTop",
     "RightDiskBlackBase",
@@ -68,6 +64,20 @@ def _env_bool(name: str, default: bool) -> bool:
     if not value:
         return default
     return value not in {"0", "false", "none", "off", "disabled", "no"}
+
+
+# Optional D405 wrist camera on the gripper wrist link (ROBOTIS_OMX_WRIST_CAMERA=1), fitted from the 2026-09-03
+# recordings (runs/sim_camera_alignment_20260920/wrist_fit, robot root at z=-0.02). Offset is relative to the link5
+# prim; rot is (x, y, z, w), OpenGL convention. The fit assumes the joint zero offsets in
+# memory/isaac_omx_mirror_calibration.json.proposed; without them the view is off by several degrees.
+ROBOTIS_OMX_WRIST_CAMERA_PARENT_LINK = "link5"
+ROBOTIS_OMX_WRIST_CAMERA_OFFSET_POS_M = (0.0221, 0.0103, 0.0704)
+ROBOTIS_OMX_WRIST_CAMERA_OFFSET_ROT_XYZW = (-0.3154884, 0.3371254, 0.6382974, -0.6159464)
+ROBOTIS_OMX_WRIST_CAMERA_FOCAL_LENGTH_MM = 12.866  # fx 392.91 px at 640 px on a 20.955 mm aperture (D405 colour)
+
+
+def _wrist_camera_enabled() -> bool:
+    return _env_bool("ROBOTIS_OMX_WRIST_CAMERA", False)
 
 
 try:
@@ -343,46 +353,18 @@ class RobotisOMXPhysicalSceneCfg(InteractiveSceneCfg):
         )
         a4_sheet = _stage_cuboid_asset(
             "{ENV_REGEX_NS}/Workspace/A4Sheet",
-            size=(0.297, 0.21, 0.00012),
-            pos=(0.315, 0.265, 0.00006),
+            size=(0.170, 0.250, 0.00012),  # real workspace sheet, 170 x 250 mm portrait (measured from 20260903_3 top frames)
+            pos=(0.315, 0.245, 0.00006),
             diffuse_color=(0.93, 0.93, 0.9),
             static_friction=1.1,
             dynamic_friction=0.9,
             contact_offset=0.001,
         )
-        a4_corner_marker_1 = _stage_marker_cylinder_asset(
-            "{ENV_REGEX_NS}/Workspace/A4CornerMarker_1",
-            radius=0.004,
-            height=0.00003,
-            pos=(0.1665, 0.16, 0.00014),
-            diffuse_color=(0.02, 0.42, 0.9),
-        )
-        a4_corner_marker_2 = _stage_marker_cylinder_asset(
-            "{ENV_REGEX_NS}/Workspace/A4CornerMarker_2",
-            radius=0.004,
-            height=0.00003,
-            pos=(0.4635, 0.16, 0.00014),
-            diffuse_color=(0.02, 0.42, 0.9),
-        )
-        a4_corner_marker_3 = _stage_marker_cylinder_asset(
-            "{ENV_REGEX_NS}/Workspace/A4CornerMarker_3",
-            radius=0.004,
-            height=0.00003,
-            pos=(0.1665, 0.37, 0.00014),
-            diffuse_color=(0.02, 0.42, 0.9),
-        )
-        a4_corner_marker_4 = _stage_marker_cylinder_asset(
-            "{ENV_REGEX_NS}/Workspace/A4CornerMarker_4",
-            radius=0.004,
-            height=0.00003,
-            pos=(0.4635, 0.37, 0.00014),
-            diffuse_color=(0.02, 0.42, 0.9),
-        )
         a4_center_marker = _stage_marker_cylinder_asset(
             "{ENV_REGEX_NS}/Workspace/A4CenterMarker",
             radius=0.004,
             height=0.00003,
-            pos=(0.315, 0.265, 0.00014),
+            pos=(0.315, 0.245, 0.00014),
             diffuse_color=(0.02, 0.42, 0.9),
         )
         right_disk_aluminum_top = _stage_collision_cylinder_asset(
@@ -458,13 +440,13 @@ class RobotisOMXPhysicalSceneCfg(InteractiveSceneCfg):
             height=480,
             update_period=1.0 / 15.0,
             spawn=sim_utils.PinholeCameraCfg(
-                focal_length=18.0,
+                focal_length=12.71,  # fx 388.17 px at 640 px on a 20.955 mm aperture (RealSense D455F colour)
                 horizontal_aperture=20.955,
                 clipping_range=(0.05, 2.0),
             ),
             offset=CameraCfg.OffsetCfg(
-                pos=(0.315, 0.205, 0.72),
-                rot=(0.0415586345, -0.0, -0.0, 0.9991360903),
+                pos=(0.266, 0.521, 0.423),  # fitted to the real top camera (runs/sim_camera_alignment_20260920, 3.3 px)
+                rot=(-0.0733779, 0.4153388, 0.906702, -0.000949),  # Isaac Lab quaternion order is (x, y, z, w)
                 convention="opengl",
             ),
         )
@@ -502,6 +484,23 @@ class RobotisOMXPhysicalSceneCfg(InteractiveSceneCfg):
                 convention="opengl",
             ),
         )
+        wrist_cam = CameraCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/Geometry/link0/link1/link2/link3/link4/" + ROBOTIS_OMX_WRIST_CAMERA_PARENT_LINK + "/CameraWrist",
+            data_types=["rgb", "depth"],
+            width=640,
+            height=480,
+            update_period=1.0 / 15.0,
+            spawn=sim_utils.PinholeCameraCfg(
+                focal_length=ROBOTIS_OMX_WRIST_CAMERA_FOCAL_LENGTH_MM,
+                horizontal_aperture=20.955,
+                clipping_range=(0.01, 2.0),
+            ),
+            offset=CameraCfg.OffsetCfg(
+                pos=ROBOTIS_OMX_WRIST_CAMERA_OFFSET_POS_M,
+                rot=ROBOTIS_OMX_WRIST_CAMERA_OFFSET_ROT_XYZW,
+                convention="opengl",
+            ),
+        )
 
 
 @configclass
@@ -523,6 +522,8 @@ class RobotisOMXPhysicalObservationsCfg:
             front_depth = ObsTerm(func=mdp.image, params={"sensor_cfg": SceneEntityCfg("front_cam"), "data_type": "depth", "normalize": False})
             right_rgb = ObsTerm(func=mdp.image, params={"sensor_cfg": SceneEntityCfg("right_cam"), "data_type": "rgb", "normalize": False})
             right_depth = ObsTerm(func=mdp.image, params={"sensor_cfg": SceneEntityCfg("right_cam"), "data_type": "depth", "normalize": False})
+            wrist_rgb = ObsTerm(func=mdp.image, params={"sensor_cfg": SceneEntityCfg("wrist_cam"), "data_type": "rgb", "normalize": False})
+            wrist_depth = ObsTerm(func=mdp.image, params={"sensor_cfg": SceneEntityCfg("wrist_cam"), "data_type": "depth", "normalize": False})
 
             def __post_init__(self) -> None:
                 self.enable_corruption = False
@@ -560,6 +561,8 @@ class RobotisOMXPhysicalObservationsCfg:
             "front_depth",
             "right_rgb",
             "right_depth",
+            "wrist_rgb",
+            "wrist_depth",
         )
 
 
@@ -684,6 +687,7 @@ class RobotisOMXPhysicalPickPlaceEnvCfg(ManagerBasedRLEnvCfg):
             maximum=1080,
         )
         cameras_enabled = _camera_mode_enabled()
+        wrist_camera_enabled = cameras_enabled and _wrist_camera_enabled()
         camera_attrs = ("top_cam", "front_cam", "right_cam")
         if cameras_enabled:
             for camera_attr in camera_attrs:
@@ -691,7 +695,15 @@ class RobotisOMXPhysicalPickPlaceEnvCfg(ManagerBasedRLEnvCfg):
                 if camera_cfg is not None:
                     camera_cfg.width = camera_width
                     camera_cfg.height = camera_height
-        else:
+        if not wrist_camera_enabled:
+            # The wrist camera is opt-in: it is only needed for real-policy evaluation in sim.
+            if hasattr(self.scene, "wrist_cam"):
+                self.scene.wrist_cam = None
+            policy_obs = getattr(self.observations, "policy", None)
+            for obs_attr in ("wrist_rgb", "wrist_depth"):
+                if policy_obs is not None and hasattr(policy_obs, obs_attr):
+                    setattr(policy_obs, obs_attr, None)
+        if not cameras_enabled:
             for camera_attr in camera_attrs:
                 if hasattr(self.scene, camera_attr):
                     setattr(self.scene, camera_attr, None)
@@ -736,6 +748,13 @@ class RobotisOMXPhysicalPickPlaceEnvCfg(ManagerBasedRLEnvCfg):
             "rgb_encoding": "png",
             "depth_encoding": "png16",
             "depth_scale_m_per_unit": ROBOTIS_OMX_DEPTH_SCALE_M_PER_UNIT,
+            "wrist_camera": {
+                "enabled": wrist_camera_enabled,
+                "parent_link": ROBOTIS_OMX_WRIST_CAMERA_PARENT_LINK,
+                "offset_pos_m": list(ROBOTIS_OMX_WRIST_CAMERA_OFFSET_POS_M),
+                "offset_rot_xyzw": list(ROBOTIS_OMX_WRIST_CAMERA_OFFSET_ROT_XYZW),
+                "focal_length_mm": ROBOTIS_OMX_WRIST_CAMERA_FOCAL_LENGTH_MM,
+            },
         }
         self.scene_contract = {
             "layout_basis": "omx_table_layout_usda_static_props",

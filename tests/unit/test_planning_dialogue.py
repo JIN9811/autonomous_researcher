@@ -125,6 +125,7 @@ async def test_new_human_package_conversation_clears_previous_test_policy(monkey
     c._bind_planning_session(None)
     d = ResearchDialogue(c)
     d.test_policy = {"test_mode_autofill": True, "printer_test_path": "installed_printer"}
+    d.test_bo_defaults = {"initial_design_size": 12, "cell_size_bounds_mm": [6, 9]}
     async def classify(*args, **kwargs):
         return {"intent": "question", "pending_id": None, "reason": "package question"}
     async def model(**kwargs):
@@ -134,6 +135,7 @@ async def test_new_human_package_conversation_clears_previous_test_policy(monkey
     result = await c.planning_message(message="어떤 실험을 할 수 있나요?")
     assert result["ok"]
     assert d.test_policy == {}
+    assert d.test_bo_defaults == {}
     assert d.pending["purpose"] == "begin_planning"
 
 

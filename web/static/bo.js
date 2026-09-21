@@ -38,6 +38,14 @@ const rawSamplesInput = document.getElementById("bo-raw-samples-input");
 const optimizerTimeoutInput = document.getElementById("bo-timeout-input");
 const objectiveInput = document.getElementById("bo-objective-input");
 const parameterSpaceInput = document.getElementById("bo-parameter-space-input");
+const parameterSpaceEditor = window.BOParameterSpaceEditor.create({
+  jsonInput: parameterSpaceInput,
+  fields: {
+    cell_size_mm: [document.getElementById("bo-cell-size-min"), document.getElementById("bo-cell-size-max")],
+    wall_thickness_mm: [document.getElementById("bo-wall-thickness-min"), document.getElementById("bo-wall-thickness-max")],
+  },
+  error: document.getElementById("bo-design-space-error"),
+});
 const btnBenchmark = document.getElementById("btn-bo-benchmark");
 const btnRun = document.getElementById("btn-bo-run");
 const btnSave = document.getElementById("btn-bo-save");
@@ -215,7 +223,7 @@ function settingsPayload() {
     raw_samples: Number(rawSamplesInput?.value || 256),
     optimizer_timeout_s: Number(optimizerTimeoutInput?.value || 30),
     objective: parseJsonField(objectiveInput, {}),
-    parameter_space: parseJsonField(parameterSpaceInput, defaults.parameter_space || {}),
+    parameter_space: parameterSpaceEditor.read(),
     mode: "test",
   };
 }
@@ -238,7 +246,7 @@ function applyDefaults(data) {
   if (restartsInput) restartsInput.value = defaults.num_restarts || 12;
   if (rawSamplesInput) rawSamplesInput.value = defaults.raw_samples || 256;
   if (optimizerTimeoutInput) optimizerTimeoutInput.value = defaults.optimizer_timeout_s || 30;
-  parameterSpaceInput.value = pretty(defaults.parameter_space || {});
+  parameterSpaceEditor.load(defaults.parameter_space || {});
   objectiveInput.value = "{}";
 }
 
@@ -261,7 +269,7 @@ function applySettings(settings) {
   if (settings.raw_samples !== undefined && rawSamplesInput) rawSamplesInput.value = settings.raw_samples;
   if (settings.optimizer_timeout_s !== undefined && optimizerTimeoutInput) optimizerTimeoutInput.value = settings.optimizer_timeout_s;
   if (settings.parameter_space && typeof settings.parameter_space === "object") {
-    parameterSpaceInput.value = pretty(settings.parameter_space);
+    parameterSpaceEditor.load({...defaults.parameter_space, ...settings.parameter_space});
   }
   if (settings.objective && typeof settings.objective === "object") {
     objectiveInput.value = pretty(settings.objective);
@@ -1001,6 +1009,7 @@ async function saveSettings() {
     setDot(boStatusDot, "busy");
     boStatusLabel.textContent = "Saving";
     const data = await postJson("/api/bo/config", settingsPayload());
+    if (data.ok && data.saved) applySettings(data.saved);
     boStatusLabel.textContent = data.ok ? "Settings saved" : "Save failed";
     boStatusDetail.textContent = data.ok ? `Saved to ${data.settings_path || "memory/bo_workspace_settings.json"}` : pretty(data);
     setDot(boStatusDot, data.ok ? "busy" : "warn");

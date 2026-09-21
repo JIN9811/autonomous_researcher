@@ -753,6 +753,18 @@ def write_smooth_gyroid_stl(
         mesh.remove_unreferenced_vertices()
     # Padding closes the cropped solid; clamp that closure to the exact box.
     mesh.vertices = np.clip(mesh.vertices, -np.asarray(size) / 2, np.asarray(size) / 2)
+    # Marching cubes interpolates in float32 voxel coordinates. Near a grid
+    # intersection, roundoff can leave distinct vertices joined by a sub-micron
+    # edge. Deleting those needle faces alone opens holes. Snap only coordinates
+    # within that numerical precision of a grid plane, then weld at STL's actual
+    # float32 precision BEFORE removing collapsed faces. This is not hole filling
+    # or a wall/pitch adjustment; serialized topology is still strictly checked.
+    grid_origin = -np.asarray(size) / 2
+    grid_vertices = np.round((mesh.vertices - grid_origin) / spacing) * spacing + grid_origin
+    grid_tolerance = np.finfo(np.float32).eps * np.asarray(size)
+    vertices = np.where(np.abs(mesh.vertices - grid_vertices) <= grid_tolerance,
+                        grid_vertices, mesh.vertices)
+    mesh.vertices = vertices.astype(np.float32).astype(np.float64)
     mesh.merge_vertices()
     mesh.update_faces(mesh.nondegenerate_faces())
     mesh.update_faces(mesh.unique_faces())

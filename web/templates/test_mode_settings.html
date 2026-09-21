@@ -25,6 +25,14 @@
       </section>
 
       <section class="panel">
+        <h2>Run Length</h2>
+        <label>Total Cycles
+          <input id="test-mode-total-cycles" class="text-input" type="number" min="1" step="1" required disabled aria-describedby="test-mode-cycle-hint" />
+        </label>
+        <p id="test-mode-cycle-hint" class="hint">Shared by all three test paths. Applies to new runs only; active and resumed runs keep their original cycle count. Saved together with Save profile.</p>
+      </section>
+
+      <section class="panel">
         <div class="test-mode-tabs" role="tablist" aria-label="Test path profiles">
           <button class="btn active" type="button" data-profile-id="virtual_bridge">Virtual Bridge</button>
           <button class="btn" type="button" data-profile-id="installed_printer">Installed Printer</button>
@@ -95,6 +103,6 @@
         <button id="btn-test-mode-restore-all" class="btn danger" type="button">Restore all profiles</button>
       </section>
     </main>
-    <script src="/static/test_mode_settings.js?v=20260904-test-mode-settings-1"></script>
+    <script src="/static/test_mode_settings.js?v=20260921-total-cycles-1"></script>
   </body>
 </html>

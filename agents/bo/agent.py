@@ -390,7 +390,10 @@ class BOAgent(BaseAgent):
         parameter_space = cls._two_variable_parameter_space(raw_space) if raw_space is not None else dict(cls.DEFAULT_PARAMETER_SPACE)
         parameter_space = cls._fixed_surface_space_for_state(parameter_space, state)
         space = BOParameterSpace.from_mapping(parameter_space)
-        target = cls._initial_design_size_for_run(initial_design_size, state)
+        # An explicit incoming Design request is authoritative over retained
+        # settings/previous contracts. Runtime BO uses the unchanged auto path.
+        target = (max(2, int(initial_design_size)) if initial_design_size not in (None, "", "auto")
+                  else cls._initial_design_size_for_run(initial_design_size, state))
         candidates = space.lhs_points(target, seed=seed)
         observed: set[str] = set()
         for prior in cls._prior_evaluations_from_state(state):

@@ -5,6 +5,7 @@ import math
 import re
 from uuid import uuid4
 from utils.gyroid_contract import BOUNDS, POLICY, parameter_space, validate_candidate
+from app.test_bo_settings import validate_initial_design_size, with_initial_design
 
 from agents.core.knowledge.context import build_reference_context, mark_reference_delivered, record_reference_use
 
@@ -40,6 +41,7 @@ class ResearchDialogue:
         self.pending = None
         self.language = None
         self.test_policy = {}
+        self.test_bo_defaults = {}
         controller._research_dialogue = self
 
     def values(self):
@@ -78,6 +80,7 @@ class ResearchDialogue:
                       geometry_type={"type": "str", "enum": geometries},
                       experiment_domain={"type": "str"}, objective_type={"type": "str"},
                       objective_direction={"type": "str", "enum": ["maximize", "minimize"]})
+        fields["initial_design_size"] = {"type": "int", "description": "Number of initial LHS designs (at least 2)"}
         # Minimal controller admission fields remain valid in test-only registries.
         fields.setdefault("material", {"type": "str"})
         fields.update({key: {"type": "list", "description": "Continuous [lower, upper] bounds"} for key in BOUNDS})
@@ -105,6 +108,8 @@ class ResearchDialogue:
                 raise ValueError("Non-finite input")
             if descriptor.get("enum") and value not in descriptor["enum"]:
                 raise ValueError("Unsupported input option")
+            if key == "initial_design_size":
+                validate_initial_design_size(value)
             if key in {"specimen_size_mm", "max_specimen_size_mm", "utm_fixture_limit_mm"}:
                 if not isinstance(value, list) or len(value) != 3 or not all(type(x) in (int, float) and math.isfinite(x) and x > 0 for x in value):
                     raise ValueError("Invalid dimensions")
@@ -115,7 +120,9 @@ class ResearchDialogue:
 
     async def turn(self, message, *, intent, goal=None, constraints=None, scope=None, editing=False):
         c = self.controller
-        current = self.values()
+        # A new test selection replaces old session BO inputs. Accepted updates
+        # below amend this selection, so only this request's chat wins over it.
+        current = {**self.values(), **deepcopy(self.test_bo_defaults)}
         before = scope or c._planning_intake_scope()
         reference = build_reference_context(c._deps.agent_context, consumer="orchestrator_agent", query=message,
             include_private=True, run_id=c._state.run_id, loop_id=str(c._state.loop_count))
@@ -137,6 +144,7 @@ class ResearchDialogue:
             "input_contract": self.fields(), "gyroid_research_policy": POLICY, "registered_context": self.context(),
             "conversation": c._planning_memory_context(limit=10, max_chars=500),
             "reference_only": reference["pack"], "selected_test_policy": self.test_policy,
+            "selected_test_bo_defaults": deepcopy(self.test_bo_defaults),
             "policy": "Converse as AX4LAB's orchestrator, not as a form or a machine log. Determine the language from the user's messages and continue in it (ko/en); a greeting alone is bilingual. "
                 "Answer in one or two short sentences (at most 90 words); do not repeatedly announce non-execution or repeat mode/readiness caveats. "
                 "Explain the experiment enabled by the ACTIVE GRAPH as a whole, based on its owners and supplied knowledge. Agent packages are components, NOT separate experiment packages. "
@@ -148,6 +156,7 @@ class ResearchDialogue:
                 "Example: yes to begin_planning -> action collect, ask the goal and material, updates []. "
                 "Example: PLA in response to a material question -> action collect or review with an update {field:material,value:PLA,source_quote:PLA}. "
                 "Ask one or two relevant questions at a time, dynamically based on the registered input contract and agreed_inputs. Do not assume saved defaults are the user's research choices. "
+                "Only in an explicitly selected test scenario, selected_test_bo_defaults are the selected preset; user statements override them. Include the LHS count and both ranges in the run review when provided. "
                 "For initial Design admission collect goal, material, specimen_size_mm, and geometry_type or experiment_domain. For gyroid also collect both continuous ranges in gyroid_research_policy. When required inputs are present, REVIEW; explain the mandatory 0.4 mm wall rejection rule. Do not ask again for accepted inputs. "
                 "Extract updates only from actual statements in this message with exact source_quote; never fill unstated values. Questions never change values or authorize execution. "
                 "Accept terse answers using the preceding question. Handle system questions mid-discussion and preserve the pending question/inputs. "
@@ -210,6 +219,8 @@ class ResearchDialogue:
                 block = store.ensure_block(PREFIX + key, c._deps.orchestrator_agent_name, {key: None})["block"]
                 if block["draft_values"].get(key) != value:
                     store.propose(block["block_id"], block["revision"], {key: value}, str(uuid4()))
+            self.test_bo_defaults.update({key: deepcopy(value) for key, value in updates.items()
+                                          if key in self.test_bo_defaults})
             recorded_entry = c._record_planning_message({"role": "operator", "content": message, "conversation_input": True,
                 "goal": merged.get("goal"), "constraints": {k:v for k,v in updates.items() if k != "goal"}})
             if action in {"invite", "collect", "review"}:
@@ -238,7 +249,7 @@ class ResearchDialogue:
             if committed_scope != c._planning_intake_scope():
                 return {"ok": False, "message": "Request changed before execution; review the current conversation."}
             self.pending = None
-            admitted = {**(constraints or {}), **{k:v for k,v in merged.items() if k != "goal"}, **self.test_policy}
+            admitted = with_initial_design({**(constraints or {}), **{k:v for k,v in merged.items() if k != "goal"}, **self.test_policy})
             return await c._planning_message_locked(message=message, goal=merged.get("goal") or goal,
                 constraints=admitted, session_id=c._planning_session_id,
                 intake={"intent": "start_run"}, intake_scope=c._planning_intake_scope(), recorded_entry=recorded_entry)

@@ -427,7 +427,7 @@ def _utm_specimen_presence_capture(
             frame_id=frame_id,
             min_area_px=float(payload.get("min_area_px") or 300.0),
             roi_normalized=roi_normalized,
-            purpose=str(payload.get("purpose") or ""),
+            purpose=str(payload.get("purpose") or "utm_placement_verification"),
             capture_evidence={"topic": frame.get("topic"), "camera_profile_id": frame.get("camera_profile_id"),
                 "frame_timestamp": frame.get("frame_timestamp"), "frame_age_ms": frame.get("frame_age_ms"),
                 "material": payload.get("material"), "after_timestamp": payload.get("after_timestamp"),

@@ -1,5 +1,7 @@
 """Installed BO frontend, package and report ownership under the no-effects guard."""
 from copy import deepcopy
+from html.parser import HTMLParser
+from urllib.parse import parse_qs, urlsplit
 
 from tests.integration.test_agent_execution_graph_api import actual_controller, module_api
 
@@ -115,6 +117,25 @@ def test_bo_report_uses_owner_payload_when_compact_metadata_is_absent(module_api
 
 def test_live_host_publishes_current_bo_frontend_asset_version(module_api):
     client, _, _, guard, _ = module_api
-    assert "/static/planning.js?v=20260914-bo-owner-1" in client.get("/live").text
+    class ScriptSources(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.sources = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "script":
+                self.sources.append(dict(attrs).get("src", ""))
+
+    page = client.get("/live")
+    assert page.status_code == 200
+    parser = ScriptSources()
+    parser.feed(page.text)
+    sources = [src for src in parser.sources if urlsplit(src).path == "/static/planning.js"]
+    assert len(sources) == 1
+    assert parse_qs(urlsplit(sources[0]).query).get("v")
+    asset = client.get(sources[0])
+    assert asset.status_code == 200
+    assert "javascript" in asset.headers["content-type"]
+    assert asset.content
     assert guard.physical_call_count == 0
     assert guard.denied == []

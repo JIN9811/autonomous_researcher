@@ -11,6 +11,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
+from orchestrator.runtime_defaults import TEST_MODE_LOOP_CYCLES
 
 
 STORE_SCHEMA = "test_mode_execution_profiles.v1"
@@ -111,6 +112,12 @@ def _document_hash(document: Mapping[str, Any]) -> str:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def validate_total_cycles(value: Any) -> int:
+    if type(value) is not int or value < 1:
+        raise TestModeExecutionProfileValidationError("total_cycles must be a positive integer")
+    return value
 
 
 def _validate_exact_keys(value: Mapping[str, Any], allowed: set[str], label: str) -> None:
@@ -234,6 +241,7 @@ class TestModeExecutionProfileStore:
             "revision": 0,
             "updated_at": None,
             "profiles": copy.deepcopy(BUILTIN_PROFILES),
+            "total_cycles": TEST_MODE_LOOP_CYCLES,
         }
         document["sha256"] = _document_hash(document)
         return document
@@ -243,7 +251,7 @@ class TestModeExecutionProfileStore:
         if not isinstance(raw, Mapping):
             raise TestModeExecutionProfileValidationError("profile store must be an object")
         allowed = {"schema", "revision", "updated_at", "profiles", "sha256"}
-        _validate_exact_keys(raw, allowed, "profile store")
+        _validate_exact_keys(raw, allowed | ({"total_cycles"} if "total_cycles" in raw else set()), "profile store")
         if raw.get("schema") != STORE_SCHEMA:
             raise TestModeExecutionProfileValidationError("unsupported profile store schema")
         revision = raw.get("revision")
@@ -256,15 +264,18 @@ class TestModeExecutionProfileStore:
         if not isinstance(profiles, Mapping):
             raise TestModeExecutionProfileValidationError("profiles must be an object")
         _validate_exact_keys(profiles, set(PROFILE_IDS), "profiles")
+        # Authenticate legacy documents before adding the optional common budget;
+        # upgrading must never discard customized physical execution boundaries.
+        if raw.get("sha256") != _document_hash(raw):
+            raise TestModeExecutionProfileValidationError("profile store hash mismatch")
         document: dict[str, Any] = {
             "schema": STORE_SCHEMA,
             "revision": revision,
             "updated_at": updated_at,
             "profiles": {profile_id: validate_profile(profiles[profile_id]) for profile_id in PROFILE_IDS},
+            "total_cycles": validate_total_cycles(raw.get("total_cycles", TEST_MODE_LOOP_CYCLES)),
         }
         expected_hash = _document_hash(document)
-        if raw.get("sha256") != expected_hash:
-            raise TestModeExecutionProfileValidationError("profile store hash mismatch")
         document["sha256"] = expected_hash
         return document
 
@@ -327,14 +338,19 @@ class TestModeExecutionProfileStore:
         profile: Mapping[str, Any],
         *,
         expected_revision: int,
+        total_cycles: int | None = None,
     ) -> dict[str, Any]:
         if profile_id not in PROFILE_IDS:
             raise TestModeExecutionProfileValidationError(f"unknown profile_id: {profile_id}")
         normalized = validate_profile(profile)
+        if total_cycles is not None:
+            validate_total_cycles(total_cycles)
         with self._lock:
             document = self._read()
             self._assert_revision(document, expected_revision)
             document["profiles"][profile_id] = normalized
+            if total_cycles is not None:
+                document["total_cycles"] = total_cycles
             document["revision"] += 1
             document["updated_at"] = _utc_now()
             return self._write(document)
@@ -347,6 +363,7 @@ class TestModeExecutionProfileStore:
             self._assert_revision(document, expected_revision)
             if profile_id is None:
                 document["profiles"] = copy.deepcopy(BUILTIN_PROFILES)
+                document["total_cycles"] = TEST_MODE_LOOP_CYCLES
             else:
                 document["profiles"][profile_id] = copy.deepcopy(BUILTIN_PROFILES[profile_id])
             document["revision"] += 1
@@ -380,6 +397,7 @@ class TestModeExecutionProfileStore:
             "source_revision": snapshot["revision"],
             "source_sha256": snapshot["sha256"],
             "resolved_at": _utc_now(),
+            "total_cycles": snapshot["total_cycles"],
             **copy.deepcopy(profile),
             "execution_policy": policy,
             "derived": {

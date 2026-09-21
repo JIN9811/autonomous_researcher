@@ -5730,6 +5730,7 @@ class MainController:
                 dialogue = dialogue_for(self)
                 if not automatic_input and (not pending or intake["intent"] == "start_run"):
                     dialogue.test_policy = {}
+                    dialogue.test_bo_defaults = {}
                 return await dialogue.turn(clean_message, intent=intake["intent"], goal=goal,
                     constraints=constraints, scope=scope, editing=block)
         if intake["intent"] == "question":
@@ -6205,7 +6206,31 @@ class MainController:
         operator_message: str,
     ) -> dict[str, Any]:
         """Keep test facts private; an LLM operator reveals them through chat."""
-        defaults = self._default_test_constraints(constraints)
+        if self._test_scenario.active:
+            return {"ok": False, "message": "Test scenario input already active.", "session": self.planning_snapshot()}
+        from app.test_bo_settings import load_test_bo_defaults, with_initial_design
+        try:
+            bo_defaults = load_test_bo_defaults()
+            # Explicit request values precede workspace defaults, including the
+            # existing nested contract representation of the LHS count.
+            requested = deepcopy(constraints)
+            initial = (requested.get("design_optimization") or {}).get("initial_design") or {}
+            if "size" in initial and "initial_design_size" not in requested:
+                requested["initial_design_size"] = initial["size"]
+            inputs = with_initial_design({**bo_defaults, **requested})
+            inputs["test_total_cycles"] = TestModeExecutionProfileStore(
+                self._test_mode_execution_profiles_path).snapshot()["total_cycles"]
+            from utils.gyroid_contract import parameter_space, validate_candidate
+            parameter_space(inputs, required=True)
+            validate_candidate(inputs)
+        except (OSError, ValueError, TypeError, AttributeError) as exc:
+            return {"ok": False, "message": f"Invalid test BO settings: {exc}", "session": self.planning_snapshot()}
+        defaults = self._default_test_constraints(inputs)
+        # LHS selects these coordinates. Do not turn an old fixed test point
+        # into a conflicting condition when a narrower workspace range is saved.
+        for key in ("cell_size_mm", "wall_thickness_mm"):
+            if key not in constraints:
+                defaults.pop(key, None)
         # A test preset's scientific objective is not the UI's previous planning
         # goal. Keep its objective consistent with the private scenario inputs.
         from utils.research_objective import uses_sea
@@ -6216,9 +6241,12 @@ class MainController:
             defaults = self._apply_specimen_printer_choice_to_spec(defaults, inline_printer_choice)
         from app.planning_dialogue import dialogue_for
         dialogue = dialogue_for(self)
+        dialogue.test_bo_defaults = deepcopy({key: inputs[key] for key in bo_defaults})
         # Execution transport policy is selected by the user's test command;
-        # research values are NOT injected into admission or the conversation.
+        # test BO defaults are separate, lower-priority research inputs. They
+        # are snapshotted here, shown at review, and never reread during a run.
         policy_keys = {"test_mode_autofill", "printer_test_path", "test_mode_profile", "execution_policy", "print", "ejection", "test_mode", "mode",
+                       "test_total_cycles",
                        "test_printer_transport", "allow_test_printer_live", "allow_test_equipment_live",
                        "equipment_agentic_confirm_execute", "prefer_http_artifact"}
         dialogue.test_policy = {k: deepcopy(v) for k, v in defaults.items() if k in policy_keys}
@@ -6280,6 +6308,10 @@ class MainController:
         if not design_constraints:
             spec_constraints = current_spec.get("constraints") if isinstance(current_spec.get("constraints"), dict) else {}
             design_constraints = {**spec_constraints, **current_spec}
+        cycle_contract = self._state.run_metadata.get("planning_cycle_contract") or {}
+        bound_cycles = (cycle_contract.get("total_cycles")
+                        if cycle_contract.get("mode") == "test"
+                        and self._is_planning_test_cycle({**design_constraints, **current_spec}) else None)
         context.update(
             {
                 "kind": context.get("kind") or "planning_cycle_series",
@@ -6288,7 +6320,7 @@ class MainController:
                 "current_spec": context.get("current_spec") if isinstance(context.get("current_spec"), dict) else dict(current_spec),
                 "design_constraints": dict(design_constraints),
                 "cycle_index": int(context.get("cycle_index") or max(1, int(self._state.loop_count or 0) + 1)),
-                "total_cycles": int(context.get("total_cycles") or self._planning_cycle_limit(current_spec or design_constraints)),
+                "total_cycles": int(context.get("total_cycles") or bound_cycles or self._planning_cycle_limit(current_spec or design_constraints)),
                 "interrupted_stage": self._state.stage.value,
                 "stopped_reason": reason,
                 "stopped_at": datetime.now(timezone.utc).isoformat(),
@@ -6322,6 +6354,11 @@ class MainController:
             design_constraints = {**spec_constraints, **current_spec}
         cycle_index = max(1, int(context.get("cycle_index") or 1))
         total_cycles = max(cycle_index, int(context.get("total_cycles") or self._planning_cycle_limit(current_spec or design_constraints)))
+        if self._is_planning_test_cycle({**design_constraints, **current_spec}):
+            if current_spec:
+                current_spec = {**current_spec, "test_mode_autofill": True, "test_total_cycles": total_cycles}
+            design_constraints = {**design_constraints, "test_total_cycles": total_cycles}
+            self._bind_planning_cycle_contract({**design_constraints, "test_mode_autofill": True})
         self._store_planning_resume_context(
             goal=goal,
             current_spec=current_spec,
@@ -7466,9 +7503,23 @@ class MainController:
         }
         return normalized if normalized in supported else ""
 
+    @classmethod
+    def _is_planning_test_cycle(cls, payload: dict[str, Any]) -> bool:
+        # During initial Design, the spec's test policy is still nested. Limit
+        # this normalization to cycle accounting, not device execution policy.
+        nested = payload.get("constraints") if isinstance(payload.get("constraints"), dict) else {}
+        return cls._is_planning_test_spec({**nested, **payload})
+
     def _planning_cycle_limit(self, payload: dict[str, Any]) -> int:
         """Return planned Live GUI cycle count for test-mode handoffs."""
-        return self.TEST_MODE_LOOP_CYCLES if self._is_planning_test_spec(payload) else 1
+        if not self._is_planning_test_cycle(payload):
+            return 1
+        from utils.test_mode_execution_profiles import validate_total_cycles
+        nested = payload.get("constraints") if isinstance(payload.get("constraints"), dict) else {}
+        raw_profile = payload.get("test_mode_profile", nested.get("test_mode_profile"))
+        profile = raw_profile if isinstance(raw_profile, dict) else {}
+        count = payload.get("test_total_cycles", nested.get("test_total_cycles", profile.get("total_cycles", self.TEST_MODE_LOOP_CYCLES)))
+        return validate_total_cycles(count)
 
     @staticmethod
     def _normalize_execution_policy(value: Any) -> dict[str, str]:
@@ -7498,7 +7549,7 @@ class MainController:
     def _bind_planning_cycle_contract(self, payload: dict[str, Any]) -> int:
         """Publish the resolved loop budget as the only GUI cycle denominator."""
         total_cycles = self._planning_cycle_limit(payload)
-        is_test_plan = self._is_planning_test_spec(payload)
+        is_test_plan = self._is_planning_test_cycle(payload)
         self._state.run_metadata["planning_cycle_contract"] = {
             "schema": "planning_cycle_contract.v1",
             "mode": "test" if is_test_plan else self._state.mode.value,
@@ -8184,7 +8235,12 @@ class MainController:
             already_reset = bool(self._state.run_metadata.pop("_planning_workflow_controls_reset", False))
             if not already_reset:
                 self._reset_planning_workflow_controls()
-        total_cycles = self._planning_cycle_limit(first_spec)
+        cycle_contract = self._state.run_metadata.get("planning_cycle_contract") or {}
+        total_cycles = (cycle_contract.get("total_cycles")
+                        if self._is_planning_test_cycle(first_spec) and cycle_contract.get("mode") == "test"
+                        else None)
+        if type(total_cycles) is not int or total_cycles < 1:
+            total_cycles = self._planning_cycle_limit(first_spec)
         static_design_constraints = self._closed_loop_static_design_constraints(design_constraints)
         current_spec = first_spec
         previous_spec: dict[str, Any] | None = None if start_cycle == 1 else dict(first_spec)
@@ -10713,6 +10769,9 @@ class MainController:
         raw_test_mode_profile = pick("test_mode_profile", None)
         if isinstance(raw_test_mode_profile, dict):
             planning_spec["test_mode_profile"] = dict(raw_test_mode_profile)
+        if test_handoff and pick("test_total_cycles", None) is not None:
+            from utils.test_mode_execution_profiles import validate_total_cycles
+            planning_spec["test_total_cycles"] = validate_total_cycles(pick("test_total_cycles", None))
         explicit_top_cap = "top_cap_enabled" in constraints or "top_cap_enabled" in base_spec
         explicit_bottom_cap = "bottom_cap_enabled" in constraints or "bottom_cap_enabled" in base_spec
         explicit_legacy_cap = "top_bottom_cap" in constraints or "top_bottom_cap" in base_spec

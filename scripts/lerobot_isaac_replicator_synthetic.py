@@ -533,7 +533,7 @@ def _find_stage_camera_path(stage: Any, camera_key: str) -> str:
 def _default_camera_spec(camera_key: str) -> dict[str, Any]:
     key = str(camera_key or "").lower()
     if key == "top":
-        return {"position": (0.315, 0.205, 0.72), "look_at": (0.315, 0.265, 0.0)}
+        return {"position": (0.266, 0.521, 0.423), "look_at": (0.354, 0.026, 0.0), "focal_length": 12.71}  # fitted real D455F pose
     if key == "front":
         return {"position": (0.36, 0.96, 0.52), "look_at": (0.36, 0.28, 0.025), "focal_length": 14.0}
     if key == "right":

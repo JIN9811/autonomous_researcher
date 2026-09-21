@@ -11,9 +11,11 @@ def test_main_gui_declares_utm_runtime_workspace_card() -> None:
     html = (ROOT / "web/templates/index.html").read_text(encoding="utf-8")
 
     assert "/device-bridge/vision-utm" in html
-    assert "Vision / UTM Camera Bridge" in html
     assert 'id="btn-open-vision-utm-bridge"' in html
-    assert 'id="btn-open-vision-utm-bridge" class="btn primary" href="/device-bridge/vision-utm" target="_blank"' in html
+    # The launcher is a workspace card now; it still owns the same target page.
+    assert ('id="btn-open-vision-utm-bridge" class="workspace-launch" '
+            'href="/device-bridge/vision-utm" target="_blank"') in html
+    assert "<strong>Vision</strong><small>Workspace</small>" in html
     assert "utm-runtime-workspace-dot" not in html
     assert "btn-utm-runtime-load" not in html
     assert "btn-utm-runtime-stop" not in html
@@ -64,7 +66,7 @@ def test_live_gui_js_renders_utm_runtime_device_card() -> None:
     assert "function renderVisionActiveCamEjectionCheck(screenReport, persistedArtifact" in js
     active_cam_source = js[js.index("function renderVisionActiveCamEjectionCheck("):js.index("function renderVisionDashboardCards")]
     assert 'const failed = /failed|blocked|error/i.test(String(status));' in active_cam_source
-    assert "const evidence = canonicalActiveCamEvidence(active, persistedArtifact, intervention);" in active_cam_source
+    assert "let evidence = canonicalActiveCamEvidence(active, persistedArtifact, intervention);" in active_cam_source
     assert 'evidence.status === "confirmed"' in active_cam_source
     assert "const detected = !failed && evidence.specimen_detected === true;" in active_cam_source
     assert "evidence.confidence" in active_cam_source
@@ -74,7 +76,9 @@ def test_live_gui_js_renders_utm_runtime_device_card() -> None:
     assert 'const captureUrl = evidence.url || evidence.capture_url' in active_cam_source
     assert 'const capturePath = failed ? ""' not in active_cam_source
     assert 'const captureUrl = failed' not in active_cam_source
-    assert 'renderVisionActiveCamEjectionCheck(screenReport, latestActiveCamArtifact(report), activeCamIntervention)' in js
+    # A fourth argument carries the pending capture preview into the card.
+    assert ('renderVisionActiveCamEjectionCheck(screenReport, latestActiveCamArtifact(report), '
+            'activeCamIntervention, utmScope.previews?.active_cam)') in js
     assert 'const activeCamConfirmed = activeCamCheck.status === "confirmed"' in vision_dashboard_source
     assert "function latestUtmCompletionArtifact(report)" in js
     assert "metadata.latest_utm_completion_artifact" in js
@@ -194,7 +198,8 @@ def test_vision_utm_device_bridge_page_wires_camera_api() -> None:
     html = (ROOT / "web/templates/vision_utm_device_bridge.html").read_text(encoding="utf-8")
     js = (ROOT / "web/static/vision_utm_device_bridge.js").read_text(encoding="utf-8")
 
-    assert "Vision Camera Device Bridge" in html
+    assert "<title>Vision Workspace</title>" in html
+    assert "<h1>Vision Workspace</h1>" in html
     assert "btn-vision-camera-page-runtime" in html
     assert "btn-vision-camera-page-test" in html
     assert 'data-vision-camera-page-panel="runtime"' in html
@@ -272,10 +277,18 @@ def test_utm_runtime_api_offloads_slow_ros_calls_from_event_loop() -> None:
     assert "return _utm_runtime_bridge().cleanup_ports" in main_py
 
 
-def test_utm_runtime_mjpeg_stream_rate_limits_to_requested_fps_with_jitter_tolerance() -> None:
-    bridge_py = (ROOT / "device_bridges/camera_vision/utm_runtime_bridge.py").read_text(encoding="utf-8")
+def test_utm_runtime_mjpeg_stream_passes_source_frames_without_second_rate_limit() -> None:
+    """The worker forwards every source frame; usb_cam already caps the rate.
 
-    assert "emit_interval_tolerance = 0.80" in bridge_py
-    assert "rate_limit_enabled = True" in bridge_py
-    assert "fps < 15.0" not in bridge_py[bridge_py.index("ROS_IMAGE_MJPEG_STREAM_SCRIPT"):bridge_py.index("class MjpegStreamSubscriber")]
-    assert "min_interval * emit_interval_tolerance" in bridge_py
+    A second emit gate here dropped frames the camera had already paced, so the
+    requested fps is carried to the worker and the drop logic stays removed.
+    """
+    bridge_py = (ROOT / "device_bridges/camera_vision/utm_runtime_bridge.py").read_text(encoding="utf-8")
+    script = bridge_py[bridge_py.index("ROS_IMAGE_MJPEG_STREAM_SCRIPT"):bridge_py.index("class MjpegStreamSubscriber")]
+
+    assert "fps = max(float(sys.argv[2]), 1.0)" in script
+    for dropped in ("emit_interval_tolerance", "should_emit", "emit_tokens", "now - self.last_emit"):
+        assert dropped not in script
+    assert "self.target_fps = max(float(target_fps), 1.0)" in bridge_py
+    assert '"requested_fps": round(self.target_fps, 2)' in bridge_py
+    assert '"measured_fps": round(measured_fps, 2)' in bridge_py

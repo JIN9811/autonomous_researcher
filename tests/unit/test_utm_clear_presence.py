@@ -8,6 +8,23 @@ import pytest
 from utils import utm_specimen_presence as presence
 
 
+@pytest.mark.parametrize("on_platen", [False, True])
+def test_placement_detector_enforces_registered_roi(tmp_path, on_platen):
+    arr = np.full((480, 640, 3), 160, dtype=np.uint8)
+    arr[430:470, 260:320] = [225, 30, 35]
+    if on_platen:
+        arr[300:340, 270:310] = [225, 30, 35]
+    output = BytesIO()
+    Image.fromarray(arr).save(output, format="PNG")
+    result = presence.inspect_specimen_presence(
+        "data:image/png;base64," + base64.b64encode(output.getvalue()).decode(),
+        output_dir=tmp_path, specimen_id="test", frame_id="placement",
+        purpose="utm_placement_verification", roi_normalized=(0, 0, 1, 1))
+    assert result["roi_xyxy"] == list(presence.UTM_CLEAR_ROI_XYXY)
+    assert result["detected"] is on_platen
+    assert result["bbox_xyxy"] == ([270, 300, 310, 340] if on_platen else [])
+
+
 def frame(red=False):
     arr = np.full((480, 640, 3), 160, dtype=np.uint8)
     arr[363:373, 235:245] = [20, 220, 40]
