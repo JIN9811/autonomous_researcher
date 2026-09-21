@@ -38,6 +38,7 @@ from agents.vision.decision import (
 )
 from utils.agent_artifact_archive import archive_agent_run
 from utils.test_mode_execution_profiles import is_resolved_all_virtual_bridge
+from utils.virtual_specimen_mesh import virtual_stl_sha256
 from orchestrator.state import Mode, OrchestratorState
 from utils.utm_specimen_presence import inspect_specimen_presence_path
 from utils.vision_operator_intervention import (
@@ -2877,9 +2878,8 @@ class VisionAgent(BaseAgent):
                     mesh_path = Path(str(specimen.get("stl_path") or "")).expanduser()
                     mesh_sha = ""
                     try:
-                        if mesh_path.is_file() and mesh_path.stat().st_size <= 64 * 1024 * 1024:
-                            mesh_sha = hashlib.sha256(mesh_path.read_bytes()).hexdigest()
-                    except OSError:
+                        mesh_sha = virtual_stl_sha256(mesh_path)
+                    except (OSError, ValueError):
                         pass  # The registered camera returns unknown for an invalid requested mesh.
                     tool_payload.update(loop_id=state.loop_count,
                         candidate_id=spec.get("candidate_id") or specimen.get("candidate_id"),

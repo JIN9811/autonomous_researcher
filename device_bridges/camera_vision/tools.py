@@ -10,7 +10,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-import hashlib
 import time
 import threading
 from typing import Any
@@ -18,6 +17,7 @@ from typing import Any
 from mcp_tools.tool_registry import ToolRegistry
 from device_bridges.camera_vision.utm_state_observer import apply_quasistatic_motion_threshold
 from utils.equipment_vision_tasks import EQUIPMENT_VISION_TASK_IDS
+from utils.virtual_specimen_mesh import virtual_stl_sha256
 from utils.utm_specimen_presence import inspect_specimen_presence, virtual_specimen_frame_data_url, utm_platen_roi_normalized
 
 UTM_CHECK_IDS = set(EQUIPMENT_VISION_TASK_IDS)
@@ -374,12 +374,10 @@ def _utm_specimen_presence_capture(
                 mesh = payload.get("virtual_specimen_mesh")
                 if (not isinstance(mesh, dict) or mesh.get("schema") != "virtual_specimen_mesh.v1"
                     or any(mesh.get(key) != payload.get(key) for key in ("run_id", "loop_id", "specimen_id", "session_id", "candidate_id"))
-                    or any(not mesh.get(key) for key in ("run_id", "specimen_id", "session_id", "candidate_id", "geometry_hash", "stl_sha256"))):
+                    or any(not mesh.get(key) for key in ("run_id", "specimen_id", "session_id", "candidate_id", "geometry_hash"))):
                     raise ValueError("current candidate mesh identity is missing or mismatched")
                 source = Path(str(mesh.get("stl_path") or "")).expanduser().resolve(strict=True)
-                if not source.is_file() or source.suffix.lower() != ".stl" or not 0 < source.stat().st_size <= 64 * 1024 * 1024:
-                    raise ValueError("candidate mesh must be a bounded regular STL file")
-                digest = hashlib.sha256(source.read_bytes()).hexdigest()
+                digest = virtual_stl_sha256(source)
                 if digest != mesh["stl_sha256"]:
                     raise ValueError("candidate mesh content changed")
                 mesh_path = Path(str(payload.get("output_dir") or "runs/utm_specimen_presence")).expanduser() / f"candidate-render-{uuid4().hex}.png"
@@ -387,7 +385,7 @@ def _utm_specimen_presence_capture(
                     specimen_id=mesh["specimen_id"], geometry_type="", material_color=(225, 30, 35),
                     canvas_size=(640, 480), background_color=(210, 210, 210)):
                     raise ValueError("actual candidate mesh could not be rendered")
-                if hashlib.sha256(source.read_bytes()).hexdigest() != digest:
+                if virtual_stl_sha256(source) != digest:
                     raise ValueError("candidate mesh changed during capture")
                 mesh_render = {**mesh, "stl_path": str(source), "stl_sha256": digest,
                     "synthetic": True, "renderer": "actual_stl_cpu", "material_color": [225, 30, 35],

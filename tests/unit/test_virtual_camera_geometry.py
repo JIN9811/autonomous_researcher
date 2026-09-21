@@ -37,6 +37,68 @@ def camera_tools():
     return tools
 
 
+def enlarge_binary_mesh(request):
+    """A valid dense STL above the former 64 MiB capture limit."""
+    import struct
+    path = Path(request["virtual_specimen_mesh"]["stl_path"])
+    original = path.read_bytes()
+    copies = 115_000
+    with path.open("wb") as stream:
+        stream.write(original[:80])
+        stream.write(struct.pack("<I", 12 * copies))
+        block = original[84:] * 1000
+        for _ in range(copies // 1000):
+            stream.write(block)
+    with path.open("rb") as stream:
+        request["virtual_specimen_mesh"]["stl_sha256"] = hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def test_dense_candidate_above_old_limit_is_rendered_and_detected(tmp_path):
+    request = mesh_request(tmp_path)
+    enlarge_binary_mesh(request)
+    result = camera_tools().call("vision.utm_specimen_presence.capture", request)
+    assert result["ok"] and result["detected"], result
+    assert result["frame_capture"]["mesh_render"]["stl_sha256"] == request["virtual_specimen_mesh"]["stl_sha256"]
+
+
+@pytest.mark.parametrize("size", [0, 256 * 1024 * 1024 + 1])
+def test_out_of_budget_mesh_is_rejected_before_render(tmp_path, size):
+    request = mesh_request(tmp_path)
+    with Path(request["virtual_specimen_mesh"]["stl_path"]).open("wb") as stream:
+        stream.truncate(size)
+    # A rejected host hash must not conceal the actual size failure.
+    request["virtual_specimen_mesh"]["stl_sha256"] = ""
+    result = camera_tools().call("vision.utm_specimen_presence.capture", request)
+    assert not result["ok"] and not result["detected"]
+    assert result["failure_code"] == "VIRTUAL_SPECIMEN_MESH_INVALID"
+    assert "256 MiB" in result["message"]
+
+
+def test_mesh_hash_does_not_materialize_whole_file(tmp_path, monkeypatch):
+    from utils.virtual_specimen_mesh import virtual_stl_sha256
+    request = mesh_request(tmp_path)
+    reference = request["virtual_specimen_mesh"]
+    monkeypatch.setattr(Path, "read_bytes", lambda *_: pytest.fail("unbounded file read"))
+    assert virtual_stl_sha256(Path(reference["stl_path"])) == reference["stl_sha256"]
+
+
+def test_mesh_changed_during_render_is_rejected(tmp_path, monkeypatch):
+    import mcp_tools.mock_tools as render_tools
+    request = mesh_request(tmp_path)
+    original_render = render_tools._try_write_stl_iso_capture_png
+
+    def render_then_change(*args, **kwargs):
+        rendered = original_render(*args, **kwargs)
+        with kwargs["stl_path"].open("r+b") as stream:
+            stream.write(b"changed header")
+        return rendered
+
+    monkeypatch.setattr(render_tools, "_try_write_stl_iso_capture_png", render_then_change)
+    result = camera_tools().call("vision.utm_specimen_presence.capture", request)
+    assert not result["ok"] and not result["detected"]
+    assert "changed during capture" in result["message"]
+
+
 def test_distinct_actual_meshes_produce_distinct_detector_bound_same_capture_pairs(tmp_path):
     tools, raw_frames = camera_tools(), []
     for shape in ("box", "sphere"):
@@ -101,7 +163,8 @@ def test_render_material_option_does_not_change_default_preview_or_use_schematic
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("virtual", [True, False])
-async def test_vision_passes_current_host_mesh_only_on_strict_virtual_placement(tmp_path, monkeypatch, virtual):
+@pytest.mark.parametrize("dense", [False, True])
+async def test_vision_passes_current_host_mesh_only_on_strict_virtual_placement(tmp_path, monkeypatch, virtual, dense):
     from agents.vision.agent import VisionAgent
     from tests.unit.test_vision_agent import _state, _CtxStub
     from tests.unit.test_virtual_device_llm_execution import virtualize
@@ -111,6 +174,8 @@ async def test_vision_passes_current_host_mesh_only_on_strict_virtual_placement(
     if virtual: virtualize(state, tmp_path)
     else: state.mode = Mode.LIVE
     request = mesh_request(tmp_path)
+    if dense:
+        enlarge_binary_mesh(request)
     reference = request["virtual_specimen_mesh"]
     state.current_experiment_spec.update(specimen_id="current-specimen", candidate_id="current-candidate")
     state.run_metadata["specimen_result"].update(specimen_id="current-specimen", candidate_id="current-candidate",
