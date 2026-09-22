@@ -193,12 +193,12 @@ def test_isaac_mirror_publisher_can_suppress_active_cam_posts(tmp_path: Path, mo
 
 
 def test_isaac_mirror_publisher_caps_legacy_timeout_for_live_post(monkeypatch) -> None:
-    monkeypatch.setenv("ATR_ISAAC_MIRROR_TIMEOUT_S", "0.5")
+    monkeypatch.setenv("ATR_ISAAC_MIRROR_TIMEOUT_S", "2.0")
     monkeypatch.delenv("ATR_ISAAC_MIRROR_POST_TIMEOUT_S", raising=False)
 
     publisher = IsaacMirrorPublisher()
 
-    assert publisher.timeout_s == pytest.approx(0.15)
+    assert publisher.timeout_s == pytest.approx(0.5)
 
 
 def test_isaac_mirror_runtime_wrapper_queues_rgbd_render_request_separately(tmp_path: Path, monkeypatch) -> None:
@@ -357,13 +357,13 @@ def test_isaac_mirror_rgbd_render_worker_does_not_block_mirror_post(tmp_path: Pa
 
 
 def test_isaac_mirror_rgbd_render_worker_caps_legacy_timeout_for_queue_post(monkeypatch) -> None:
-    monkeypatch.setenv("ATR_ISAAC_RGBD_RENDER_TIMEOUT_S", "0.5")
+    monkeypatch.setenv("ATR_ISAAC_RGBD_RENDER_TIMEOUT_S", "2.0")
     monkeypatch.delenv("ATR_ISAAC_RGBD_RENDER_POST_TIMEOUT_S", raising=False)
 
     context = IsaacRgbdRenderContext()
     worker = IsaacRgbdRenderWorker(context, mirror_endpoint="http://127.0.0.1:8766/joints", default_timeout_s=0.5)
 
-    assert worker.timeout_s == pytest.approx(0.15)
+    assert worker.timeout_s == pytest.approx(0.5)
 
 
 def test_isaac_mirror_rgbd_render_worker_replaces_stale_queued_jobs(tmp_path: Path, monkeypatch) -> None:
@@ -2548,7 +2548,7 @@ def test_record_loop_patch_posts_isaac_timeline_play_after_active_cam_preflight(
             "url": "http://127.0.0.1:8766/timeline/play",
             "method": "POST",
             "body": {"reason": "record_start"},
-            "timeout": 0.15,
+            "timeout": 0.5,
         }
     ]
 

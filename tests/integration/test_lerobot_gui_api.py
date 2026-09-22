@@ -124,8 +124,8 @@ def test_lerobot_gui_and_test_mode_api_workflow(tmp_path: Path, monkeypatch: Any
 
     home = client.get("/")
     assert home.status_code == 200
-    assert "Open LeRobot GUI" in home.text
-    assert "Manipulation Agent" in home.text
+    assert 'id="btn-open-lerobot"' in home.text
+    assert '<strong>Manipulation</strong><small>Workspace</small>' in home.text
 
     config = client.get("/api/lerobot/config").json()
     assert config["ok"] is True

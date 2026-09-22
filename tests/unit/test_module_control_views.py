@@ -36,7 +36,7 @@ def test_document_svg_is_current_renderer_output(module_id):
     from scripts.render_module_control_views import render
     generated = render(module_id, ROOT)
     assert ET.fromstring(generated).tag.endswith('svg')
-    assert (ROOT / f'docs/agents/assets/figures/{module_id}_control_areas.svg').read_text() == generated
+    assert (ROOT / f'docs/agents/assets/figures/{module_id}_control_areas.svg').read_text().strip() == generated.strip()
 
 
 def test_real_ide_graph_projection_preserves_transitions_and_manual_position():

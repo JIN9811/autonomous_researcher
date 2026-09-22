@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 import app.main as app_main
@@ -17,6 +19,7 @@ from knowledge.schemas import (
     SuccessPatternRecord,
 )
 from knowledge.stores import JsonlKnowledgeStore
+from orchestrator.state import OrchestratorState
 
 
 def _store(tmp_path: Path, monkeypatch) -> JsonlKnowledgeStore:
@@ -183,7 +186,11 @@ def test_knowledge_evolution_outcome_api_appends_reviewed_attribution(tmp_path: 
     assert [item["outcome_id"] for item in listed["records"]] == ["outcome-analysis-1"]
 
 
-def test_knowledge_agent_report_exposes_memory_and_improvement_evidence(monkeypatch) -> None:
+@pytest.mark.parametrize("recorded_decision", [
+    {"decision": "store_observed_evidence", "reason": "Verified source artifacts"},
+    {},
+])
+def test_knowledge_agent_report_preserves_memory_and_recorded_evidence(monkeypatch, recorded_decision) -> None:
     real_controller = app_main.controller
     monkeypatch.setattr(
         app_main,
@@ -226,6 +233,7 @@ def test_knowledge_agent_report_exposes_memory_and_improvement_evidence(monkeypa
         },
         "knowledge_report": {
             "schema": "knowledge_report.v1",
+            "decision": deepcopy(recorded_decision),
             "memory_intake": {
                 "experiment_record_id": "experiment-memory-1",
                 "agent_performance_count": 2,
@@ -254,6 +262,12 @@ def test_knowledge_agent_report_exposes_memory_and_improvement_evidence(monkeypa
         _deps=real_controller._deps,
         snapshot=lambda: {"is_running": False, "state": {"run_id": "run-report", "stage": "knowledge", "run_metadata": {"knowledge": knowledge_payload}}},
         planning_snapshot=lambda: {"state": {"run_id": "run-report", "stage": "knowledge", "run_metadata": {"knowledge": knowledge_payload}}, "messages": []},
+        planning_messages_page=lambda: {"messages": []},
+        _state=OrchestratorState(run_id="run-report", experiment_id="report-fixture", stage="knowledge",
+                                 run_metadata={"knowledge": knowledge_payload}),
+        _ensure_orchestrator_supervisor_baseline=lambda: None,
+        _run_task=None,
+        _planning_handoff_active=lambda: False,
         recent_events=lambda: [
             {
                 "run_id": "run-report",
@@ -265,6 +279,7 @@ def test_knowledge_agent_report_exposes_memory_and_improvement_evidence(monkeypa
         ],
     )
     monkeypatch.setattr(app_main, "controller", fake_controller)
+    before = deepcopy(fake_controller._state.run_metadata)
 
     report = TestClient(app).get("/api/agents/knowledge/report?run_id=run-report").json()["report"]
 
@@ -272,14 +287,17 @@ def test_knowledge_agent_report_exposes_memory_and_improvement_evidence(monkeypa
     assert report["role_specific"]["memory_ledger"]["experiment_record_id"] == "experiment-memory-1"
     assert report["role_specific"]["retrieval_panel"]["coverage"] == 0.87
     assert report["role_specific"]["failure_success_library"]["failure_patterns"][0]["pattern_id"] == "analysis-unit-confidence-low"
-    assert report["role_specific"]["improvement_evidence_board"]["top_packs"][0]["pack_id"] == "evo-pack-analysis-1"
-    assert report["role_specific"]["improvement_evidence_board"]["outcomes"][0]["outcome_id"] == "outcome-analysis-1"
+    # Historical outcomes remain evidence, not a synthesized Evolution action.
+    assert report["sections"]["knowledge_report"] == knowledge_payload["knowledge_report"]
+    assert report["sections"]["knowledge_report"]["evolution_outcomes"][0]["outcome_id"] == "outcome-analysis-1"
+    assert "improvement_evidence_board" not in report["role_specific"]
     assert report["role_specific"]["handoff_packet"]["knowledge_context"]["schema"] == "knowledge_context.v1"
     assert report["role_specific"]["relation_reconciliation"]["examined"] == 14
     assert report["role_specific"]["relation_reconciliation"]["pending"] == 3
     assert report["role_specific"]["relation_reconciliation"]["review_url"] == "/knowledge#relations"
-    assert report["decisions"][0]["decision"] == "prepare_improvement_evidence_pack"
+    assert report["decisions"] == [recorded_decision]
     assert report["metrics"]["agent_report_coverage"] == 1.0
+    assert fake_controller._state.run_metadata == before
 
 
 

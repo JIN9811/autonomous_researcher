@@ -157,13 +157,13 @@ async def test_design_agent_uses_orchestrator_requested_parameters_as_authority(
             "constraints": {
                 "geometry_type": "gyroid",
                 "cell_size_mm": 10.0,
-                "relative_density": 0.24,
+                "wall_thickness_mm": 0.6,
             }
         },
         run_metadata={
             "bo_recommended_constraints": {
                 "cell_size_mm": 7.5,
-                "relative_density": 0.29,
+                "wall_thickness_mm": 0.8,
             },
             "orchestrator_design_contract": {
                 "schema": "orchestrator_design_contract.v1",
@@ -171,7 +171,7 @@ async def test_design_agent_uses_orchestrator_requested_parameters_as_authority(
                 "phase": "initial_design",
                 "requested_parameters": {
                     "cell_size_mm": 6.0,
-                    "relative_density": 0.37,
+                    "wall_thickness_mm": 1.0,
                 },
             },
         },
@@ -181,10 +181,10 @@ async def test_design_agent_uses_orchestrator_requested_parameters_as_authority(
     spec = result.data["experiment_spec"]
 
     assert spec["cell_size_mm"] == 6.0
-    assert spec["relative_density"] == pytest.approx(0.37)
+    assert spec["wall_thickness_mm"] == 1.0
     assert spec["requested_parameters"] == {
         "cell_size_mm": 6.0,
-        "relative_density": pytest.approx(0.37),
+        "wall_thickness_mm": 1.0,
     }
     assert spec["orchestrator_design_contract_ref"] == "design-run-orchestrator-contract-c001"
 
@@ -204,12 +204,11 @@ def test_design_agent_preserves_contract_precision_in_geometry_arguments(tmp_pat
                 "parameter_space": {
                     "geometry_type": ["gyroid"],
                     "cell_size_mm": [6.2, 9.1],
-                    "relative_density": [0.20, 0.48],
-                    "wall_thickness_mm": [1.2],
+                    "wall_thickness_mm": [0.6, 1.2],
                 },
                 "requested_parameters": {
                     "cell_size_mm": 7.13789,
-                    "relative_density": 0.32123456,
+                    "wall_thickness_mm": 0.92123456,
                 },
             }
         },
@@ -224,13 +223,19 @@ def test_design_agent_preserves_contract_precision_in_geometry_arguments(tmp_pat
         output_dir=tmp_path,
     )
 
-    assert candidate["cell_size_mm"] == pytest.approx(7.13789)
-    assert candidate["relative_density"] == pytest.approx(0.32123456)
-    assert payload["cell_size_mm"] == pytest.approx(7.13789)
-    assert payload["relative_density"] == pytest.approx(0.32123456)
+    assert candidate["cell_size_mm"] == 7.13789
+    assert candidate["wall_thickness_mm"] == 0.92123456
+    assert payload["cell_size_mm"] == 7.13789
+    assert payload["wall_thickness_mm"] == 0.92123456
 
 
-def test_design_agent_rejects_requested_coordinate_outside_transmitted_domain() -> None:
+@pytest.mark.parametrize(
+    ("cell_size_mm", "wall_thickness_mm"),
+    [(9.2, 0.9), (7.5, 1.3)],
+)
+def test_design_agent_rejects_requested_coordinate_outside_transmitted_domain(
+    cell_size_mm: float, wall_thickness_mm: float,
+) -> None:
     state = OrchestratorState(
         run_id="run-invalid-continuous-request",
         experiment_id="exp-invalid-continuous-request",
@@ -240,11 +245,11 @@ def test_design_agent_rejects_requested_coordinate_outside_transmitted_domain() 
             "orchestrator_design_contract": {
                 "parameter_space": {
                     "cell_size_mm": [6.2, 9.1],
-                    "relative_density": [0.20, 0.48],
+                    "wall_thickness_mm": [0.6, 1.2],
                 },
                 "requested_parameters": {
-                    "cell_size_mm": 9.2,
-                    "relative_density": 0.32,
+                    "cell_size_mm": cell_size_mm,
+                    "wall_thickness_mm": wall_thickness_mm,
                 },
             }
         },
@@ -268,12 +273,13 @@ async def test_design_agent_keeps_preferred_geometry_when_bo_candidate_is_invali
                 "geometry_type": "gyroid",
                 "preferred_geometry_type": "gyroid",
                 "cell_size_mm": 10.0,
+                "wall_thickness_mm": 0.9,
             }
         },
         run_metadata={
             "bo_recommended_constraints": {
                 "geometry_type": "gyroid",
-                "relative_density": 0.10,
+                "wall_thickness_mm": 0.1,
                 "cell_size_mm": 5.0,
             }
         },
@@ -285,7 +291,7 @@ async def test_design_agent_keeps_preferred_geometry_when_bo_candidate_is_invali
     assert result.success is True
     assert spec["geometry_type"] == "gyroid"
     assert spec["cell_size_mm"] == 10.0
-    assert spec["relative_density"] >= 0.20
+    assert spec["wall_thickness_mm"] == 0.9
     assert "honeycomb" not in spec["specimen_id"]
 
 
@@ -321,7 +327,8 @@ async def test_design_agent_returns_structured_design_report_and_handoff_packet(
     assert report["candidate_generation"]["candidate_count"] == 1
     assert report["candidate_generation"]["valid_count"] >= 1
     assert len(report["candidate_generation"]["candidate_ledger"]) == 1
-    assert set(spec["design_space"]) == {"relative_density", "cell_size_mm"}
+    assert set(spec["design_space"]) == {"wall_thickness_mm", "cell_size_mm"}
+    assert screen_report["parameter_sweep"]["x_axis"] == "wall_thickness_mm"
     assert screen_report["parameter_sweep"]["y_axis"] == "cell_size_mm"
     expected_sections = {
         "design_brief",
@@ -339,7 +346,7 @@ async def test_design_agent_returns_structured_design_report_and_handoff_packet(
     assert screen_report["candidate_ranking"]["rows"][0]["candidate_id"] == spec["candidate_id"]
     assert screen_report["parameter_sweep"]["heatmap_cells"]
     heatmap_coordinates = [
-        (item["x_relative_density"], item["y_cell_size_mm"])
+        (item["x_wall_thickness_mm"], item["y_cell_size_mm"])
         for item in screen_report["parameter_sweep"]["heatmap_cells"]
     ]
     assert len(heatmap_coordinates) == len(set(heatmap_coordinates))
@@ -385,15 +392,15 @@ def test_design_heatmap_cells_group_duplicate_coordinates_with_selected_represen
         [
             {
                 "candidate_id": "cand-2-05",
-                "x_relative_density": 0.34,
-                "y_cell_size_mm": 1.6,
+                "x_wall_thickness_mm": 0.9,
+                "y_cell_size_mm": 7.5,
                 "value": 0.8633,
                 "status": "valid",
             },
             {
                 "candidate_id": "cand-2-12",
-                "x_relative_density": 0.34,
-                "y_cell_size_mm": 1.6,
+                "x_wall_thickness_mm": 0.9,
+                "y_cell_size_mm": 7.5,
                 "value": 0.8884,
                 "status": "selected",
             },
@@ -449,9 +456,9 @@ async def test_design_agent_records_bo_knowledge_and_failure_feedback_context() 
             "bo_agent": {
                 "strategy": "single_objective_ei",
                 "acquisition": "expected_improvement",
-                "recommendation": {"geometry_type": "gyroid", "relative_density": 0.34},
+                "recommendation": {"geometry_type": "gyroid", "wall_thickness_mm": 0.9},
             },
-            "bo_recommended_constraints": {"geometry_type": "gyroid", "relative_density": 0.34},
+            "bo_recommended_constraints": {"geometry_type": "gyroid", "wall_thickness_mm": 0.9},
         },
     )
 
@@ -466,7 +473,7 @@ async def test_design_agent_records_bo_knowledge_and_failure_feedback_context() 
     assert prior["bo_recommendation"]["acquisition"] == "expected_improvement"
     assert "random_voronoi" in prior["failure_memory"]["failed_geometry_types"]
     assert result.data["experiment_spec"]["geometry_type"] == "gyroid"
-    assert result.data["experiment_spec"]["relative_density"] == 0.34
+    assert result.data["experiment_spec"]["wall_thickness_mm"] == 0.9
 
 
 @pytest.mark.asyncio
@@ -478,11 +485,11 @@ async def test_design_agent_applies_both_bo_design_variables_without_changing_fi
         stage=Stage.DESIGN,
         active_goal="maximize measured SEA",
         run_metadata={
-            "bo_agent": {"parameter_space": {"cell_size_mm": [5, 10], "relative_density": [0.2, 0.48]}},
+            "bo_agent": {"parameter_space": {"cell_size_mm": [5, 10], "wall_thickness_mm": [0.6, 1.2]}},
             "bo_recommended_constraints": {
                 "geometry_type": "gyroid",
                 "cell_size_mm": 7.5,
-                "relative_density": 0.41,
+                "wall_thickness_mm": 1.1,
             }
         },
     )
@@ -491,6 +498,6 @@ async def test_design_agent_applies_both_bo_design_variables_without_changing_fi
     spec = result.data["experiment_spec"]
 
     assert spec["cell_size_mm"] == 7.5
-    assert spec["relative_density"] == 0.41
+    assert spec["wall_thickness_mm"] == 1.1
     assert spec["orientation_deg"] == 0.0
     assert spec["anisotropy_ratio"] == 1.0

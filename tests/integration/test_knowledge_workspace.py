@@ -4,6 +4,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 import subprocess
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -28,7 +29,7 @@ def test_workspace_has_scoped_markdown_search_and_preserved_evidence_tabs():
     response = TestClient(app).get("/knowledge")  # Deliberately no lifespan context.
     assert response.status_code == 200
     page = WorkspaceControls(response.text)
-    assert page.tabs == ["markdown", "memory", "ontology", "manuals"]
+    assert page.tabs == ["wiki", "memory", "manuals", "delivery", "ontology"]
     assert "Source Library" in response.text and "Manual RAG Knowledge" not in response.text
     assert "knowledge-source-enable" in page.controls
     for field in ("query", "run", "cycle", "agent", "type", "fidelity", "status", "tags", "applicability"):
@@ -39,10 +40,13 @@ def test_workspace_has_scoped_markdown_search_and_preserved_evidence_tabs():
         assert control in page.controls
 
 
-def test_main_dashboard_knowledge_status_uses_markdown_counts():
+@pytest.mark.parametrize("status_widget_present", [True, False])
+def test_main_dashboard_knowledge_launcher_and_optional_status_widget(status_widget_present):
     client = TestClient(app)
     page = WorkspaceControls(client.get("/").text)
-    assert "knowledge-workspace-dot" in page.controls
+    tag, launcher = page.controls["btn-open-knowledge"]
+    assert tag == "a" and launcher["href"] == "/knowledge"
+    assert launcher["target"] == "_blank" and "noopener" in launcher["rel"]
     script = client.get("/static/app.js").text
     start = script.index("async function refreshKnowledgeWorkspaceStatus()")
     end = script.index("\nasync function ", start + 1)
@@ -50,8 +54,9 @@ def test_main_dashboard_knowledge_status_uses_markdown_counts():
     # Execute the real status formatter in isolation: no dashboard/model/device bootstrap.
     runner = """
       const assert = require('node:assert/strict');
-      const knowledgeWorkspaceDetailEl = {textContent: ''};
-      const knowledgeWorkspaceDotEl = {};
+      const present = STATUS_WIDGET_PRESENT;
+      const knowledgeWorkspaceDetailEl = present ? {textContent: ''} : null;
+      const knowledgeWorkspaceDotEl = present ? {} : null;
       const urls = [];
       const setDotState = (el, value) => {el.state = value;};
       const fetch = async url => {
@@ -62,6 +67,10 @@ def test_main_dashboard_knowledge_status_uses_markdown_counts():
       };
     """ + function + """
       refreshKnowledgeWorkspaceStatus().then(() => {
+        if (!present) {
+          assert.deepEqual(urls, []);
+          return;
+        }
         assert.deepEqual(urls, ['/api/knowledge/status']);
         assert.equal(knowledgeWorkspaceDotEl.state, 'active');
         assert.match(knowledgeWorkspaceDetailEl.textContent, /7 records/);
@@ -69,6 +78,7 @@ def test_main_dashboard_knowledge_status_uses_markdown_counts():
         assert.doesNotMatch(knowledgeWorkspaceDetailEl.textContent, /graph|nodes|edges|neo4j/i);
       });
     """
+    runner = runner.replace("STATUS_WIDGET_PRESENT", str(status_widget_present).lower())
     result = subprocess.run(["node", "-e", runner], text=True, capture_output=True, check=False)
     assert result.returncode == 0, result.stderr
 

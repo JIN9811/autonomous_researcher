@@ -13,7 +13,7 @@ from tests.unit.test_bo_visualization_js import RENDERER, _node_eval, _payload
 def test_continuous_plot_domain_does_not_claim_integer_cell_counts():
     payload = build_bo_visualization(
         run_id="continuous-viz", objective=_objective(),
-        parameter_space={"cell_size_mm": [6.2, 9.1], "relative_density": [.2, .48]},
+        parameter_space={"cell_size_mm": [6.2, 9.1], "wall_thickness_mm": [.6, 1.2]},
         trace=_trace())
     domain = payload["design_space"]
     assert domain.get("cell_size_kind") == "continuous"
@@ -25,46 +25,46 @@ def test_continuous_plot_domain_does_not_claim_integer_cell_counts():
 
 def test_continuous_lhs_metadata_preserves_non_table_coordinates():
     point = {"index": 1, "status": "next", "parameters": {
-        "cell_size_mm": 7.13789, "relative_density": .32123456}}
+        "cell_size_mm": 7.13789, "wall_thickness_mm": .92123456}}
     payload = build_lhs_design_visualization(
         run_id="continuous-lhs", parameter_space={"cell_size_mm": [6.2, 9.1],
-        "relative_density": [.2, .48]}, trace={"initial_design": {"target": 8, "points": [point]}})
+        "wall_thickness_mm": [.6, 1.2]}, trace={"initial_design": {"target": 8, "points": [point]}})
     assert payload["design_space"]["mode"] == "continuous_2d"
     assert payload["design_space"]["x"]["bounds"] == [6.2, 9.1]
     assert payload["initial_design"]["points"][0]["parameters"] == point["parameters"]
 
 
-def test_lhs_fixed_density_is_not_displayed_as_a_variable_default_range():
+def test_lhs_fixed_wall_thickness_is_not_displayed_as_a_variable_default_range():
     payload = build_lhs_design_visualization(
-        run_id="fixed-density-lhs", parameter_space={"cell_size_mm": [6.2, 9.1],
-        "relative_density": [.32123456]}, trace={"initial_design": {"target": 8,
-        "points": [{"parameters": {"cell_size_mm": 7.13789, "relative_density": .32123456}}]}})
+        run_id="fixed-wall-lhs", parameter_space={"cell_size_mm": [6.2, 9.1],
+        "wall_thickness_mm": [.92123456]}, trace={"initial_design": {"target": 8,
+        "points": [{"parameters": {"cell_size_mm": 7.13789, "wall_thickness_mm": .92123456}}]}})
     assert payload["design_space"]["y"]["kind"] == "fixed"
-    assert payload["design_space"]["y"]["bounds"] == [.32123456, .32123456]
+    assert payload["design_space"]["y"]["bounds"] == [.92123456, .92123456]
     assert payload["design_space"]["dimension"] == 1
     renderer = RENDERER.parent / "lhs_design_visualization.js"
     rendered = _node_eval(f"""
 const renderer = require({json.dumps(str(renderer))});
 const html = renderer.renderPlot({json.dumps(payload)});
-console.log(JSON.stringify({{fixed: html.includes('Fixed density'),
-  noStrata: !html.includes('Density strata'), finite: !/NaN|Infinity/.test(html)}}));
+console.log(JSON.stringify({{fixed: html.includes('Fixed wall thickness'),
+  noStrata: !html.includes('Wall thickness strata'), finite: !/NaN|Infinity/.test(html)}}));
 """)
     assert rendered == {"fixed": True, "noStrata": True, "finite": True}
     from matplotlib import pyplot as plt
     from reporting.lhs_design_visualization_artifacts import _plot
     figure = _plot(payload)
     try:
-        assert list(figure.axes[0].get_yticks()) == [.32123456]
-        assert any(text.get_text() == "Fixed density" for text in figure.axes[0].texts)
+        assert list(figure.axes[0].get_yticks()) == [.92123456]
+        assert any(text.get_text() == "Fixed wall thickness" for text in figure.axes[0].texts)
     finally:
         plt.close(figure)
 
 
 def test_equation_and_next_point_labels_follow_continuous_domain_and_acquisition():
     payload = _payload()
-    payload["design_space"] = {"dimension": 2, "variables": ["cell_size_mm", "relative_density"],
+    payload["design_space"] = {"dimension": 2, "variables": ["cell_size_mm", "wall_thickness_mm"],
         "cell_size_kind": "continuous", "cell_size_bounds_mm": [6.2, 9.1],
-        "feasible_cell_sizes_mm": [], "relative_density_bounds": [.2, .48]}
+        "feasible_cell_sizes_mm": [], "wall_thickness_bounds_mm": [.6, 1.2]}
     payload["acquisition"]["name"] = "upper_confidence_bound"
     result = _node_eval(f"""
 const renderer = require({json.dumps(str(RENDERER))});
@@ -72,13 +72,14 @@ const payload = {json.dumps(payload)};
 const equation = renderer.renderEquationCard(payload);
 const plot = renderer.renderPlot(payload, {{mode: "parameter_slice"}});
 console.log(JSON.stringify({{
-  continuous: equation.includes("Continuous cell size") && equation.includes("6.2–9.1"),
+  continuous: equation.includes("<dt>Cell size</dt><dd>6.2–9.1 mm</dd>"),
+  wallBounds: equation.includes("<dt>Wall thickness (mm)</dt><dd>0.6–1.2</dd>"),
   noIntegerRule: !equation.includes("a=L/N"),
   actualAcquisition: equation.includes("UCB") && plot.includes("UCB-selected"),
   noFalseEi: !plot.includes("EI-selected")
 }}));
 """)
-    assert result == {"continuous": True, "noIntegerRule": True,
+    assert result == {"continuous": True, "wallBounds": True, "noIntegerRule": True,
                       "actualAcquisition": True, "noFalseEi": True}
 
 
@@ -94,9 +95,9 @@ vm.createContext(context);
 vm.runInContext(extract('latestBoInitialDesign', 'latestSpecimenFabricationReport') +
   extract('renderBoInitialDesignBoard', 'renderBoParameterChips'), context);
 const report = {{state: {{run_metadata: {{orchestrator_design_contract: {{
-  parameter_space: {{cell_size_mm: [6.2, 9.1], relative_density: [.23, .42]}},
+  parameter_space: {{cell_size_mm: [6.2, 9.1], wall_thickness_mm: [.65, 1.15]}},
   initial_design: {{target: 8, index: 1, points: [{{index: 1, status: 'next',
-    parameters: {{cell_size_mm: 7.13789, relative_density: .32123456}}}}]}}
+    parameters: {{cell_size_mm: 7.13789, wall_thickness_mm: .92123456}}}}]}}
 }}}}}}}};
 const payload = context.renderBoInitialDesignBoard(report);
 console.log(JSON.stringify({{x: payload.design_space.x, y: payload.design_space.y,
@@ -104,8 +105,9 @@ console.log(JSON.stringify({{x: payload.design_space.x, y: payload.design_space.
 """)
     assert result["x"] == {"name": "cell_size_mm", "label": "Cell size", "unit": "mm",
                            "kind": "continuous", "bounds": [6.2, 9.1]}
-    assert result["y"]["bounds"] == [.23, .42]
-    assert result["point"] == {"cell_size_mm": 7.13789, "relative_density": .32123456}
+    assert result["y"] == {"name": "wall_thickness_mm", "label": "Wall thickness", "unit": "mm",
+                           "kind": "continuous", "bounds": [.65, 1.15]}
+    assert result["point"] == {"cell_size_mm": 7.13789, "wall_thickness_mm": .92123456}
 
 
 def _ucb_trace():

@@ -56,13 +56,15 @@ DEFAULT_MANIPULATION_AGENT_PROFILE: dict[str, Any] = {
     "display_data": False,
     "continuous_rollout": True,
     "rollout_action_clamp": False,
+    "rollout_linear_enabled": False,
+    "rollout_linear_hz": 100,
     "rollout_max_relative_target": 5,
     "rollout_shoulder_lift_backstop": True,
     "rollout_temporal_ensemble": True,
     "rollout_temporal_ensemble_coeff": 0.01,
     "rollout_inference_type": "",
-    "rollout_rtc_execution_horizon": 20,
-    "rollout_rtc_max_guidance_weight": 1.0,
+    "rollout_rtc_execution_horizon": 10,
+    "rollout_rtc_max_guidance_weight": 10.0,
     "rollout_action_queue_size_to_get_new_actions": 60,
     "max_duration_s": 30.0,
     "observation": {"observation_id": "manual-transfer", "anomaly": False},
@@ -105,6 +107,8 @@ _TASK_PROFILE_KEYS = {
     "policy_backend",
     "continuous_rollout",
     "rollout_action_clamp",
+    "rollout_linear_enabled",
+    "rollout_linear_hz",
     "rollout_max_relative_target",
     "rollout_shoulder_lift_backstop",
     "rollout_temporal_ensemble",
@@ -236,11 +240,12 @@ def _normalize_task_profile(task_id: str, raw: dict[str, Any] | None) -> dict[st
 
     profile["rollout_max_relative_target"] = _clean_int(profile.get("rollout_max_relative_target"), 5, min_value=1, max_value=180)
     profile["rollout_temporal_ensemble_coeff"] = _clean_float(profile.get("rollout_temporal_ensemble_coeff"), 0.01, min_value=0.0, max_value=1.0)
-    profile["rollout_rtc_execution_horizon"] = _clean_int(profile.get("rollout_rtc_execution_horizon"), 20, min_value=1, max_value=200) if profile.get("rollout_rtc_execution_horizon") not in (None, "") else None
+    profile["rollout_rtc_execution_horizon"] = _clean_int(profile.get("rollout_rtc_execution_horizon"), 10, min_value=1, max_value=200) if profile.get("rollout_rtc_execution_horizon") not in (None, "") else None
     profile["rollout_action_queue_size_to_get_new_actions"] = _clean_int(profile.get("rollout_action_queue_size_to_get_new_actions"), 60, min_value=1, max_value=300) if profile.get("rollout_action_queue_size_to_get_new_actions") not in (None, "") else None
-    profile["rollout_rtc_max_guidance_weight"] = _clean_float(profile.get("rollout_rtc_max_guidance_weight"), 1.0, min_value=0.0, max_value=20.0) if profile.get("rollout_rtc_max_guidance_weight") not in (None, "") else None
+    profile["rollout_rtc_max_guidance_weight"] = _clean_float(profile.get("rollout_rtc_max_guidance_weight"), 10.0, min_value=0.0, max_value=20.0) if profile.get("rollout_rtc_max_guidance_weight") not in (None, "") else None
     profile["max_duration_s"] = _clean_float(profile.get("max_duration_s"), 30.0, min_value=1.0, max_value=86400.0) if profile.get("max_duration_s") not in (None, "") else None
-    for key in ("continuous_rollout", "rollout_action_clamp", "rollout_shoulder_lift_backstop", "rollout_temporal_ensemble"):
+    profile["rollout_linear_hz"] = _clean_int(profile.get("rollout_linear_hz"), 100, min_value=1, max_value=100)
+    for key in ("continuous_rollout", "rollout_action_clamp", "rollout_linear_enabled", "rollout_shoulder_lift_backstop", "rollout_temporal_ensemble"):
         profile[key] = _clean_bool(profile.get(key), bool(DEFAULT_MANIPULATION_AGENT_PROFILE[key]))
     profile["observation"] = _clean_observation(profile.get("observation"), DEFAULT_MANIPULATION_AGENT_PROFILE["observation"])
     return profile
@@ -258,6 +263,7 @@ def normalize_manipulation_agent_profile(raw: dict[str, Any] | None) -> dict[str
 
     profile["fps"] = _clean_int(profile.get("fps"), 30, min_value=1, max_value=240)
     profile["camera_fps"] = _clean_int(profile.get("camera_fps"), 30, min_value=1, max_value=240)
+    profile["rollout_linear_hz"] = _clean_int(profile.get("rollout_linear_hz"), 100, min_value=1, max_value=100)
     profile["rollout_max_relative_target"] = _clean_int(
         profile.get("rollout_max_relative_target"),
         5,
@@ -272,7 +278,7 @@ def normalize_manipulation_agent_profile(raw: dict[str, Any] | None) -> dict[str
     )
     profile["rollout_rtc_execution_horizon"] = _clean_int(
         profile.get("rollout_rtc_execution_horizon"),
-        20,
+        10,
         min_value=1,
         max_value=200,
     ) if profile.get("rollout_rtc_execution_horizon") not in (None, "") else None
@@ -284,7 +290,7 @@ def normalize_manipulation_agent_profile(raw: dict[str, Any] | None) -> dict[str
     ) if profile.get("rollout_action_queue_size_to_get_new_actions") not in (None, "") else None
     profile["rollout_rtc_max_guidance_weight"] = _clean_float(
         profile.get("rollout_rtc_max_guidance_weight"),
-        1.0,
+        10.0,
         min_value=0.0,
         max_value=20.0,
     ) if profile.get("rollout_rtc_max_guidance_weight") not in (None, "") else None
@@ -299,6 +305,7 @@ def normalize_manipulation_agent_profile(raw: dict[str, Any] | None) -> dict[str
         "display_data",
         "continuous_rollout",
         "rollout_action_clamp",
+        "rollout_linear_enabled",
         "rollout_shoulder_lift_backstop",
         "rollout_temporal_ensemble",
     ):

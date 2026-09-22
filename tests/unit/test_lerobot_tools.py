@@ -40,7 +40,10 @@ def test_lerobot_rollout_tool_runs_in_test_mode(tmp_path: Path) -> None:
     assert result["workflow"] == "rollout"
     assert result["command_preview"][0].endswith("conda")
     assert result["command_preview"][1:5] == ["run", "--no-capture-output", "-n", "lerobot"]
-    assert "lerobot-record" in result["command_preview"]
+    assert result["command_preview"][5:7] == [
+        "python", str(tmp_path / "scripts" / "lerobot_live_rollout_wrapper.py"),
+    ]
+    assert "--policy.path=fake://policy" in result["command_preview"]
 
 
 def test_register_lerobot_tools_exposes_isaac_lab_synthetic_contract(tmp_path: Path) -> None:

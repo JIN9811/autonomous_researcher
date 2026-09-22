@@ -1729,6 +1729,8 @@ class LeRobotAPIRequest(BaseModel):
     num_episodes: int = 1
     continuous_rollout: bool = False
     rollout_action_clamp: bool = False
+    rollout_linear_enabled: bool = False
+    rollout_linear_hz: int = Field(default=100, ge=1, le=100)
     rollout_max_relative_target: int = 5
     rollout_shoulder_lift_backstop: bool = True
     rollout_temporal_ensemble: bool = True
@@ -17527,6 +17529,8 @@ def _rollout_profile_from_request(req: LeRobotAPIRequest) -> dict[str, object]:
         "continuous_rollout": req.continuous_rollout,
         "max_duration_s": req.max_duration_s,
         "rollout_action_clamp": req.rollout_action_clamp,
+        "rollout_linear_enabled": req.rollout_linear_enabled,
+        "rollout_linear_hz": req.rollout_linear_hz,
         "rollout_max_relative_target": req.rollout_max_relative_target,
         "rollout_shoulder_lift_backstop": req.rollout_shoulder_lift_backstop,
         "rollout_temporal_ensemble": req.rollout_temporal_ensemble,
@@ -17606,6 +17610,8 @@ def _manipulation_profile_from_request(req: ManipulationAgentBridgeRequest) -> d
         "display_data": req.display_data,
         "continuous_rollout": req.continuous_rollout,
         "rollout_action_clamp": req.rollout_action_clamp,
+        "rollout_linear_enabled": req.rollout_linear_enabled,
+        "rollout_linear_hz": req.rollout_linear_hz,
         "rollout_max_relative_target": req.rollout_max_relative_target,
         "rollout_shoulder_lift_backstop": req.rollout_shoulder_lift_backstop,
         "rollout_temporal_ensemble": req.rollout_temporal_ensemble,
@@ -17661,6 +17667,8 @@ def _manipulation_spec_from_request(req: ManipulationAgentBridgeRequest) -> dict
         "rollout_num_episodes": req.num_episodes,
         "continuous_rollout": profile.get("continuous_rollout"),
         "rollout_action_clamp": profile.get("rollout_action_clamp"),
+        "rollout_linear_enabled": profile.get("rollout_linear_enabled", False),
+        "rollout_linear_hz": profile.get("rollout_linear_hz", 100),
         "rollout_max_relative_target": profile.get("rollout_max_relative_target"),
         "rollout_shoulder_lift_backstop": profile.get("rollout_shoulder_lift_backstop"),
         "rollout_temporal_ensemble": profile.get("rollout_temporal_ensemble"),

@@ -1,6 +1,7 @@
 """Execute the Live GUI refresh with non-actuating transport boundaries."""
 from pathlib import Path
 import subprocess
+from test_planning_design_report_js import _extract_function
 
 
 def test_auxiliary_refresh_does_not_request_retired_knowledge_graph():
@@ -11,7 +12,8 @@ def test_auxiliary_refresh_does_not_request_retired_knowledge_graph():
     script = """
 const assert = require('node:assert/strict');
 let liveAuxRefreshInFlight = null, liveGuardianStatus = null, liveRecentEvents = [];
-let liveLastSnapshot = null, liveLastSession = {}, liveKnowledgeRelationSummary = {};
+let liveLastSnapshot = {system_resources: {cpu_percent: 12}}, liveLastSession = {}, liveKnowledgeRelationSummary = {};
+let livePrinterMonitorEvent = null;
 const requests = [], errors = [];
 const fetch = async url => { requests.push(url); return {ok: true, json: async () => ({events: []})}; };
 const normalizeGuardianStatusPayload = x => x;
@@ -23,7 +25,7 @@ const refreshLiveRunDetails = async () => {};
 const renderLiveRuntime = () => {};
 const persistLivePlanningCache = () => {};
 const markLiveSyncError = e => errors.push(String(e));
-""" + "async function refreshPlanningAuxiliaryState(session) {" + function + """
+""" + _extract_function(source, "recoverAgentAttentionRequest") + "\n" + "async function refreshPlanningAuxiliaryState(session) {" + function + """
 (async () => {
   await refreshPlanningAuxiliaryState({state: {run_id: 'test'}});
   await refreshPlanningAuxiliaryState({state: {run_id: 'test'}});
@@ -31,6 +33,7 @@ const markLiveSyncError = e => errors.push(String(e));
   assert.deepEqual(requests, ['/api/guardian/status', '/api/events/recent',
                               '/api/guardian/status', '/api/events/recent']);
   assert.equal(liveAuxRefreshInFlight, null);
+  assert.deepEqual(liveLastSnapshot.system_resources, {cpu_percent: 12});
 })().catch(e => { console.error(e); process.exitCode = 1; });
 """
     result = subprocess.run(["node", "-e", script], capture_output=True, text=True)

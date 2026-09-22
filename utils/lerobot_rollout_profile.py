@@ -21,6 +21,8 @@ DEFAULT_LEROBOT_ROLLOUT_PROFILE: dict[str, Any] = {
     "continuous_rollout": True,
     "max_duration_s": None,
     "rollout_action_clamp": False,
+    "rollout_linear_enabled": False,
+    "rollout_linear_hz": 100,
     "rollout_max_relative_target": 5,
     "rollout_shoulder_lift_backstop": True,
     "rollout_temporal_ensemble": False,
@@ -112,11 +114,13 @@ def normalize_lerobot_rollout_profile(raw: dict[str, Any] | None) -> dict[str, A
     for key in (
         "continuous_rollout",
         "rollout_action_clamp",
+        "rollout_linear_enabled",
         "rollout_shoulder_lift_backstop",
         "rollout_temporal_ensemble",
     ):
         profile[key] = _clean_bool(profile.get(key), bool(DEFAULT_LEROBOT_ROLLOUT_PROFILE[key]))
 
+    profile["rollout_linear_hz"] = _clean_int(profile.get("rollout_linear_hz"), 100, 1, 100)
     profile["rollout_max_relative_target"] = _clean_int(
         profile.get("rollout_max_relative_target"), 5, 1, 180
     )
@@ -138,6 +142,7 @@ def normalize_lerobot_rollout_profile(raw: dict[str, Any] | None) -> dict[str, A
 
 def load_lerobot_rollout_profile(*, fallback: dict[str, Any] | None = None) -> dict[str, Any]:
     """Load persisted rollout defaults, using an existing saved task profile once for migration."""
+    fallback = {**(fallback or {}), "rollout_linear_enabled": False}
     if not LEROBOT_ROLLOUT_PROFILE_PATH.exists():
         return normalize_lerobot_rollout_profile(fallback)
     try:

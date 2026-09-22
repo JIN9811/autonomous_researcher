@@ -61,6 +61,8 @@ class ManipulationAgent(BaseAgent):
         "target_location": (),
         "continuous_rollout": ("lerobot_continuous_rollout",),
         "rollout_action_clamp": ("lerobot_rollout_action_clamp",),
+        "rollout_linear_enabled": ("lerobot_rollout_linear_enabled",),
+        "rollout_linear_hz": ("lerobot_rollout_linear_hz",),
         "rollout_max_relative_target": ("lerobot_rollout_max_relative_target",),
         "rollout_shoulder_lift_backstop": ("lerobot_rollout_shoulder_lift_backstop",),
         "rollout_temporal_ensemble": ("lerobot_rollout_temporal_ensemble",),
@@ -551,6 +553,8 @@ class ManipulationAgent(BaseAgent):
             if device_workspace_bridge
             else True,
             "rollout_action_clamp": self._bool_spec(spec, "lerobot_rollout_action_clamp", "rollout_action_clamp", default=False),
+            "rollout_linear_enabled": self._bool_spec(spec, "lerobot_rollout_linear_enabled", "rollout_linear_enabled", default=False),
+            "rollout_linear_hz": self._safe_int(spec.get("lerobot_rollout_linear_hz", spec.get("rollout_linear_hz", 100)), 100),
             "rollout_max_relative_target": self._safe_int(
                 spec.get("lerobot_rollout_max_relative_target") or spec.get("rollout_max_relative_target"),
                 5,

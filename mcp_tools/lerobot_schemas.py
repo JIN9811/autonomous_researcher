@@ -393,6 +393,8 @@ class LeRobotSessionRequest(LeRobotBaseRequest):
     num_episodes: int = 1
     continuous_rollout: bool = False
     rollout_action_clamp: bool = False
+    rollout_linear_enabled: bool = False
+    rollout_linear_hz: int = Field(default=100, ge=1, le=100)
     rollout_max_relative_target: int = 5
     rollout_shoulder_lift_backstop: bool = True
     rollout_temporal_ensemble: bool = True

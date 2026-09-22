@@ -6,6 +6,7 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
+import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -51,12 +52,13 @@ def _node_eval(script: str) -> str:
     return result.stdout.strip()
 
 
-def test_evidence_cards_show_units_and_unassessed_performance_without_proxy_scores():
+@pytest.mark.parametrize("duration_source", ["slicer", "rough_heuristic"])
+def test_evidence_cards_show_units_and_unassessed_performance_without_proxy_scores(duration_source):
     source = DESIGN_LIVE_REPORT_JS.read_text(encoding="utf-8")
     evaluation = {"schema":"design_evaluation.v1", "validity":{"status":"pass", "reasons":[]},
                   "performance":{"status":"unassessed", "value":None},
                   "cost":{"mass":{"value":0,"unit":"g","status":"estimated"},
-                          "duration":{"value":32,"unit":"min","status":"rough_heuristic"}},
+                          "duration":{"value":32,"unit":"min","source":duration_source}},
                   "constraint_margins":[{"constraint":"minimum_wall", "margin":0.2,"unit":"mm","status":"pass"}]}
     script = f"""
 const window = {{}};
@@ -84,7 +86,9 @@ console.log(JSON.stringify([
     html = " ".join(json.loads(_node_eval(script)))
     assert "unassessed" in html
     assert "0 g" in html
-    assert "32 min" in html
+    assert ("32 min" in html) is (duration_source == "slicer")
+    if duration_source != "slicer":
+        assert "unavailable" in html
     assert "0.2 mm" in html
     assert "0.9988" not in html
 

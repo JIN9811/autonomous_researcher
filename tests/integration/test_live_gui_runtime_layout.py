@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import subprocess
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +16,7 @@ from fastapi.testclient import TestClient
 from agents.base_agent import AgentResult
 from agents.equipment.agent import LabEquipmentAgent
 from app.main import app, controller, _package_runtime_event
+from tests.integration.test_orchestrator_setup_loop import actual_controller
 
 
 TINY_PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"atr-test-screen-evidence"
@@ -30,20 +32,66 @@ def _live_equipment_sources(client: TestClient) -> str:
     return client.get("/static/planning.js").text + "\n" + _equipment_frontend_source(client)
 
 
-def test_live_host_keeps_analysis_fem_timer_dependency_outside_equipment_frontend() -> None:
-    client = TestClient(app)
-    host = client.get("/static/planning.js").text
-    equipment_frontend = _equipment_frontend_source(client)
+def _module_frontend_source(client: TestClient, module_id: str) -> str:
+    response = client.get(f"/module-assets/{module_id}/live_report.js")
+    assert response.status_code == 200
+    return response.text
 
-    declaration = "let liveAnalysisFemController = null;"
-    helper = "function refreshLiveAnalysisFemEvidence()"
-    timer_call = "refreshLiveAnalysisFemEvidence().catch(() => {});"
-    assert declaration in host
-    assert helper in host
-    assert timer_call in host
-    assert host.index(declaration) < host.index("function renderAnalysisDashboardCards(")
-    assert declaration not in equipment_frontend
-    assert helper not in equipment_frontend
+
+def _run_javascript(source: str) -> None:
+    result = subprocess.run(["node", "-e", source], text=True, capture_output=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.fixture
+def operator_reply_controller(actual_controller, monkeypatch):
+    """Queue a reply on a held runtime boundary without executing its next step."""
+    from app import main
+    from agents.base_agent import AgentContext
+    isolated, guard = actual_controller
+    isolated._state.run_metadata["orchestrator_pending_handoff"] = "held-review"
+    monkeypatch.setattr(main, "controller", isolated)
+
+    async def complete(self, task_type, prompt, **kwargs):
+        packet = json.loads(prompt)
+        assert packet["operation"] == "classify_chat_request"
+        assert packet["pending_id"] == "held-review"
+        return SimpleNamespace(text=json.dumps({"intent": "confirm_pending", "reason": "Reply to held review",
+                                                "pending_id": "held-review"}), model="fixture", raw={})
+
+    monkeypatch.setattr(AgentContext, "complete", complete)
+    yield isolated
+    assert isolated._state.run_metadata["orchestrator_pending_handoff"] == "held-review"
+    assert guard.physical_call_count == 0 and not guard.denied
+
+
+def test_live_analysis_renders_measured_evidence_without_synthesizing_model_predictions() -> None:
+    client = TestClient(app)
+    _run_javascript(_module_frontend_source(client, "analysis") + """
+      const assert = require('node:assert/strict');
+      const frontend = AX4LABAnalysisUI.createFrontend({
+        latestAnalysisPayload: report => report.analysis,
+        latestAnalysisBoHandoff: report => report.analysis?.bo_handoff,
+        renderDashboardCard: (title, body) => title + body,
+        renderDashboardMetric: (title, value, unit) => `${title}: ${value} ${unit}`,
+        renderDashboardRows: rows => JSON.stringify(rows),
+        renderAnalysisCurveOverlay: (data, mode) => `${mode}:${JSON.stringify(data.stress_strain_curve || {})}`,
+      });
+      const empty = frontend.renderDashboard({analysis: {}});
+      assert.match(empty, /Awaiting data/);
+      assert.doesNotMatch(empty, /Ready for BO|PINN Prediction|FEM/);
+      const blocked = frontend.renderDashboard({analysis: {
+        utm_metrics: {peak_force_N: 12}, stress_strain_curve: {preview: [{strain: 0.1, stress: 2}]},
+        bo_handoff: {ok_for_bo: false, schema_version: 'analysis_bo_handoff_v2'},
+      }});
+      assert.match(blocked, /Peak load: 12 N/);
+      assert.match(blocked, /analysis_bo_handoff_v2/);
+      assert.match(blocked, /Blocked/);
+      assert.doesNotMatch(blocked, /Ready for BO|PINN Prediction/);
+      const ready = frontend.renderDashboard({analysis: {bo_handoff: {ok_for_bo: true}}});
+      assert.match(ready, /Ready for BO/);
+      frontend.dispose();
+    """)
 
 
 def test_skill_workflow_editor_preserves_step_rows_inside_scroll_viewport() -> None:
@@ -100,9 +148,29 @@ def test_completed_test_run_keeps_its_final_live_gui_snapshot() -> None:
     assert 'String(cycleContract.mode || missionContract.mode || "").toLowerCase() === "test"' in script
     assert 'String(state.stage || "").toLowerCase() === "complete"' in script
     assert "completedCycles >= totalCycles" in script
-    assert "background && shouldFreezeCompletedTestRun(liveLastSession)" in script
+    assert "background && !options.reconnect && shouldFreezeCompletedTestRun(liveLastSession)" in script
     assert "!shouldFreezeCompletedTestRun(liveLastSession)" in script
     assert "sameCompletedRunEvent" in script
+    predicate = script[script.index("function shouldFreezeCompletedTestRun("):script.index("function liveChatContextSummary(")]
+    _run_javascript("""
+      const assert = require('node:assert/strict');
+      const liveLastSnapshot = {};
+      const liveRunningFlag = session => !!session.is_running;
+    """ + predicate + """
+      for (const [mode,stage,completed,total,running,expected] of [
+        ['test','complete',2,2,false,true],
+        ['test','complete',3,2,false,true],
+        ['test','complete',1,2,false,false],
+        ['test','complete',2,2,true,false],
+        ['test','specimen',2,2,false,false],
+        ['live','complete',2,2,false,false],
+        ['test','complete',0,0,false,false],
+      ]) {
+        const session = {is_running:running,state:{stage,loop_count:completed,
+          run_metadata:{planning_cycle_contract:{mode,total_cycles:total}}}};
+        assert.equal(shouldFreezeCompletedTestRun(session),expected);
+      }
+    """)
 
 
 def test_common_equipment_profiles_expose_token_safe_utm_profile() -> None:
@@ -531,9 +599,12 @@ def test_equipment_skill_flow_exposes_the_code_owned_utm_cycle_template(
         if block["vision"]["enabled"]
     } == {
         "prepare_next_specimen": "WORKING",
-        "start_test": "DOWN",
         "restore_robot_clearance": "NOT WORKING",
     }
+    start_test = next(block for block in template["blocks"] if block["id"] == "start_test")
+    assert start_test["vision"]["enabled"] is False
+    assert start_test["vision"]["task_id"] == ""
+    assert start_test["agentic"]["failed"] == "__blocked__"
 
 
 def test_equipment_skill_flow_execution_is_filtered_to_requested_run(
@@ -669,7 +740,7 @@ def test_agent_manager_is_the_only_equipment_skill_flow_editor() -> None:
     runtime = client.get("/ide").text
     workspace_script = client.get("/static/windows_equipment.js").text
     runtime_script = client.get("/static/runtime_ide.js").text
-    live_script = client.get("/static/planning.js").text
+    live_script = _live_equipment_sources(client)
 
     assert manager.status_code == 200
     for element_id in ("equipment-manager-add-skill", "equipment-manager-blocks", "equipment-manager-save"):
@@ -1221,8 +1292,23 @@ def test_live_gui_specimen_pending_input_is_not_rendered_as_hard_error() -> None
 
     assert "function eventRequiresOperatorInput(event)" in script_text
     assert 'if (eventRequiresOperatorInput(event)) return "warning";' in script_text
-    assert "const pendingInput = agentEvents.some(eventRequiresOperatorInput)" in script_text
-    assert 'if (pendingInput) return running && activeAgent === agentId ? "running" : "waiting";' in script_text
+    status = script_text[script_text.index("function eventStatusForAgent("):script_text.index("function liveAgentIconHtml(")]
+    _run_javascript("""
+      const assert = require('node:assert/strict');
+      const specimenExecutionDisplayState = () => null;
+      const agentIdFromStage = value => value;
+      const agentIdFromFreeText = value => value;
+      const liveApprovals = {pending: []};
+    """ + status + """
+      const state = {run_id:'current',loop_count:1,stage:'specimen',agent_status:{}};
+      assert.equal(eventStatusForAgent('specimen',state,true),'waiting');
+      state.agent_status.specimen_agent={state:'waiting_approval'};
+      assert.equal(eventStatusForAgent('specimen',state,false),'waiting');
+      state.agent_status.specimen_agent={state:'error'};
+      assert.equal(eventStatusForAgent('specimen',state,false),'error');
+      state.agent_status.specimen_agent={state:'error',run_id:'previous'};
+      assert.equal(eventStatusForAgent('specimen',state,false),'idle');
+    """)
 
 
 def test_gui_favicon_is_available_to_all_runtime_pages() -> None:
@@ -1411,9 +1497,9 @@ def test_live_gui_static_script_exposes_runtime_ide_adapters() -> None:
         assert symbol in script
 
 
-def test_live_gui_analysis_report_exposes_multifidelity_contract() -> None:
+def test_live_gui_analysis_and_runtime_shell_expose_current_evidence_contracts() -> None:
     client = TestClient(app)
-    script = client.get("/static/planning.js").text
+    script = client.get("/static/planning.js").text + _module_frontend_source(client, "specimen")
     runtime_script = client.get("/static/runtime_ide.js").text
 
     for token in [
@@ -1422,9 +1508,8 @@ def test_live_gui_analysis_report_exposes_multifidelity_contract() -> None:
         "renderAnalysisCurveOverlay",
         "Trust Score / Gate",
         "UTM-FEA Agreement",
-        "PINN Prediction",
         "Provenance",
-        "multifidelity_comparison",
+        "stress_strain_curve",
         "trust_score",
         "analysis_bo_handoff_v2",
     ]:
@@ -1448,7 +1533,7 @@ def test_live_gui_analysis_report_exposes_multifidelity_contract() -> None:
         script.index("function eventStatusForAgent"):
         script.index("function liveAgentIconHtml")
     ]
-    assert "isResolvedEmergencyLifecycleEvent(event)" in agent_status_source
+    assert 'runtimeStatus?.state' in agent_status_source
 
     fault_source = script[
         script.index("function isRuntimeFaultEvent"):
@@ -1596,7 +1681,9 @@ def test_live_gui_analysis_report_exposes_multifidelity_contract() -> None:
     assert "livePrinterVideoOverride = {" in script
     assert "mergePrinterMonitorVideoStatusResult(" not in script
     assert "livePrinterMonitorOverride = event" in script
-    assert "livePrinterMonitorOverride && eventMatchesCurrentRun(livePrinterMonitorOverride, runId)" in script
+    monitor = script[script.index("function latestPrinterMonitorEvent()"):script.index("function printerMonitorBridgeStatus(")]
+    assert "livePrinterMonitorOverride" in monitor
+    assert "if (!eventMatchesCurrentRun(event, runId)) return false;" in monitor
     assert "const frameSrc = active ? specimenVideoUrlWithCacheBuster(frameUrl) : frameUrl;" in script
     assert 'const loadingAttr = active ? "" : " loading=\\"lazy\\"";' in script
     assert 'data-spm-video-action="stop" aria-label="Stop 3DP video" title="Stop 3DP video"><span aria-hidden="true">■</span></button>' in script
@@ -1661,10 +1748,9 @@ def test_live_gui_analysis_report_exposes_multifidelity_contract() -> None:
     assert "operator.context" in script
     assert "operator.attention" in script
     assert "attention_event_key" in script
-    assert "/api/knowledge/relations/summary" in script
-    assert "knowledge_relation_review" in script
-    assert 'href="/knowledge#relations"' in script
-    assert "Relation Reconciliation" in script
+    assert client.get("/api/knowledge/relations/summary").status_code == 410
+    assert "/api/knowledge/relations/summary" not in script
+    assert client.get("/knowledge").status_code == 200
     assert '<div class="binder-title binder-title-att" title="Operator Attention">ATT</div>' in script
     assert '<div class="binder-title binder-title-att" title="Operator Attention">ATTENTION</div>' not in script
     assert "Operator attention is surfaced only through the ATT binder/report page." in script
@@ -2099,17 +2185,19 @@ def test_live_gui_operator_report_pin_review_payloads_are_auditable() -> None:
     assert reviewed[-1]["payload"]["reviewed_at"] == "2026-05-26T10:01:00Z"
 
 
-def test_live_gui_operator_reply_is_recorded_as_runtime_trace_event() -> None:
+def test_live_gui_operator_reply_is_recorded_as_runtime_trace_event(operator_reply_controller) -> None:
+    controller = operator_reply_controller
     client = TestClient(app)
     cursor = len(controller.recent_events())
 
     response = client.post(
         "/api/planning/message",
         json={
-            "message": "실험 수행",
+            "message": "Continue the held review with this operator context.",
             "session_id": "trace-contract-test",
             "constraints": {
                 "live_chat_target": "specimen",
+                "live_runtime_followup_queue_only": True,
                 "live_selected_agent": "specimen",
                 "live_chat_mode": "command",
                 "live_selected_trace_id": "trace-question-contract",
@@ -2119,15 +2207,16 @@ def test_live_gui_operator_reply_is_recorded_as_runtime_trace_event() -> None:
     )
 
     assert response.status_code == 200
+    assert response.json()["ok"] is True, response.text
     new_events = controller.recent_events()[cursor:]
     user_reply_events = [event for event in new_events if event.get("event_type") == "user_reply"]
-    assert user_reply_events
+    assert user_reply_events, (response.json().get("message"), cursor, [(event.get("event_type"), event.get("message")) for event in controller.recent_events()])
     event = user_reply_events[-1]
     assert event["payload"]["source"] == "live_gui"
     assert event["payload"]["agent_id"] == "specimen"
     assert event["payload"]["trace_id"] == "trace-question-contract"
     assert event["payload"]["event_key"] == "evt-question-contract"
-    assert event["payload"]["latest"]["content"] == "실험 수행"
+    assert event["payload"]["latest"]["content"] == "Continue the held review with this operator context."
 
     trace = client.get("/api/agents/specimen/backend-trace").json()
     assert trace["ok"] is True
@@ -2138,17 +2227,19 @@ def test_live_gui_operator_reply_is_recorded_as_runtime_trace_event() -> None:
     assert event["payload"]["selected_event_key"] == "evt-question-contract"
 
 
-def test_live_gui_operator_reply_separates_target_agent_from_selected_context() -> None:
+def test_live_gui_operator_reply_separates_target_agent_from_selected_context(operator_reply_controller) -> None:
+    controller = operator_reply_controller
     client = TestClient(app)
     cursor = len(controller.recent_events())
 
     response = client.post(
         "/api/planning/message",
         json={
-            "message": "테스트 모드",
+            "message": "Continue the held review with the selected specimen context.",
             "session_id": "trace-target-context-test",
             "constraints": {
                 "live_chat_target": "specimen",
+                "live_runtime_followup_queue_only": True,
                 "live_chat_target_resolved": "specimen",
                 "live_chat_target_mode": "selected_agent",
                 "live_selected_agent": "orchestrator",
@@ -2171,9 +2262,10 @@ def test_live_gui_operator_reply_separates_target_agent_from_selected_context() 
     )
 
     assert response.status_code == 200
+    assert response.json()["ok"] is True, response.text
     new_events = controller.recent_events()[cursor:]
     user_reply_events = [event for event in new_events if event.get("event_type") == "user_reply"]
-    assert user_reply_events
+    assert user_reply_events, (response.json().get("message"), cursor, [(event.get("event_type"), event.get("message")) for event in controller.recent_events()])
     event = user_reply_events[-1]
     payload = event["payload"]
     assert payload["agent_id"] == "specimen"
@@ -2493,7 +2585,7 @@ def test_live_gui_equipment_report_exposes_utm_visual_control_contract() -> None
         assert role_specific["live_evidence_audit"]["request_audit_log"]["execute_event_seen"] is True
         assert role_specific["live_evidence_audit"]["save_export"]["ok"] is True
 
-        script = _live_equipment_sources(client)
+        script = _live_equipment_sources(client) + _module_frontend_source(client, "guardian")
         for token in [
             "latestEquipmentReport",
             "renderEquipmentReportDetails",
@@ -4712,10 +4804,39 @@ def test_live_gui_recovery_controls_are_gated_by_estop_source_not_plc_connection
     assert 'activeSources.has("plc_pb2")' in script
     assert 'activeSources.has("gui_estop") || activeSources.has("gui")' in script
     assert "const sourcePending = latched && !plcSourceLocked && !guiSourceLatched;" in script
-    assert "btnLiveEmergencyResume.hidden = plcSourceLocked || sourcePending;" in script
-    assert "btnLiveEmergencyReset.hidden = plcSourceLocked || sourcePending;" in script
-    assert "btnLiveEmergencyResume.disabled = plcSourceLocked || sourcePending" in script
-    assert "btnLiveEmergencyReset.disabled = plcSourceLocked || sourcePending" in script
+    controls = script[script.index("function updateLiveEmergencyStopControls("):script.index("function livePLCStatusMaterialSignature(")]
+    _run_javascript("""
+      const assert = require('node:assert/strict');
+      let livePLCStatus = {}, liveLastSnapshot = {}, liveQuickActionBusy = false;
+      const btnLiveSafeStop = null, liveEmergencyRecovery = {}, livePLCEmergencyGuidance = {};
+      const btnLiveEmergencyResume = {}, btnLiveEmergencyReset = {};
+      const liveEmergencySourceSet = s => new Set(s.sources || []);
+      const liveEmergencyStopLatched = s => !!s.latched;
+      const livePLCStatusProjection = () => '';
+      const resetLiveEmergencyStopArm = () => {};
+    """ + controls + """
+      for (const connection_state of ['online','offline']) {
+        livePLCStatus = {connection_state};
+        for (const [sources, latched, state, resume, reset] of [
+          [['plc_pb2'],true,{run_id:'r',is_paused:true},false,false],
+          [[],true,{run_id:'r',is_paused:true},false,false],
+          [['gui_estop'],true,{run_id:'r',is_paused:true},true,true],
+          [[],false,{run_id:'r',is_paused:true},true,false],
+          [[],false,{run_id:'r',stage:'error'},true,false],
+          [[],false,{run_id:'r',stage:'specimen'},false,false],
+          [[],false,{},false,false],
+        ]) {
+          updateLiveEmergencyStopControls({sources,latched,state});
+          assert.equal(!btnLiveEmergencyResume.hidden,resume);
+          assert.equal(!btnLiveEmergencyResume.disabled,resume);
+          assert.equal(!btnLiveEmergencyReset.hidden,reset);
+          assert.equal(!btnLiveEmergencyReset.disabled,reset);
+        }
+      }
+      liveQuickActionBusy = true;
+      updateLiveEmergencyStopControls({sources:['gui_estop'],latched:true,state:{run_id:'r'}});
+      assert.equal(btnLiveEmergencyResume.disabled,true);
+    """)
     assert "const plcRecoveryLocked = plcSourceLocked || livePLCOnline;" not in script
     assert "LIVE_PLC_STATUS_REFRESH_MS" in script
     assert "LIVE_PLC_STATUS_FETCH_TIMEOUT_MS" in script
@@ -4843,13 +4964,13 @@ def test_live_gui_emergency_reset_uses_one_authoritative_run_transition_path() -
 
 def test_live_gui_manipulation_agent_uses_current_supervisor_language() -> None:
     client = TestClient(app)
-    script = client.get("/static/planning.js").text
+    script = _module_frontend_source(client, "manipulation")
     report = client.get("/api/agents/manipulation/report").json()["report"]
 
     assert "Runtime Execution" in script
-    assert "Runtime Interlocks" in script
-    assert "Completion Verification" in script
-    assert "Run Result" in script
+    assert "Interlocks" in script
+    assert "Completion & Handoff" in script
+    assert "Result evidence" in script
     assert "Run Metrics" in script
     assert "Task Success Rate" in script
     assert "Grasp Attempt Success Rate" in script
@@ -4894,7 +5015,7 @@ def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundle
     client = TestClient(app)
 
     html = client.get("/live").text
-    script = client.get("/static/planning.js").text
+    script = client.get("/static/planning.js").text + _module_frontend_source(client, "manipulation")
     styles = client.get("/static/styles.css").text
     bundle_response = client.get("/static/omx_telemetry_viewer.bundle.js")
 
@@ -4907,11 +5028,11 @@ def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundle
         "Live Robot Pose",
         "Robot motion state :",
         "Policy Tracking",
-        "Runtime State Strip",
+        "Motion & Grasp",
         "Runtime Execution",
-        "Runtime Interlocks",
-        "Completion Verification",
-        "Run Result",
+        "Interlocks",
+        "Completion & Handoff",
+        "Result evidence",
         "Run Metrics",
         "data-atr-robot-pose",
         "data-atr-robot-motion-state",
@@ -4940,7 +5061,20 @@ def test_live_gui_manipulation_pose_and_policy_tracking_cards_are_locally_bundle
         "Grasp Attempt Success Rate",
     ]:
         assert required in script
-    assert '["Joint1", -15, -6.5]' in script
+    _run_javascript("const window = globalThis;\n" + _module_frontend_source(client, "manipulation") + """
+      const assert = require('node:assert/strict');
+      const frontend = AX4LABManipulationUI.createFrontend({
+        escapeHtml: value => String(value ?? ''),
+        renderDashboardCard: (title, body) => title + body,
+      });
+      const rendered = frontend.renderDashboard({});
+      for (const joint of ['Joint1','Joint2','Joint3','Joint4','Joint5','Gripper']) {
+        assert.ok(rendered.includes(`data-home-joint="${joint}" data-pass="waiting"`));
+      }
+      assert.match(rendered, /Waiting for thresholds/);
+      assert.doesNotMatch(rendered, /data-pass="yes"/);
+      frontend.dispose();
+    """)
     for required in [
         "/ws/lerobot/joint-telemetry",
         "/assets/robotis-omx/omx.xml",
@@ -5064,15 +5198,19 @@ def test_live_robot_pose_has_repeatable_zoom_to_fit_control() -> None:
     client = TestClient(app)
 
     html = client.get("/live").text
-    script = client.get("/static/planning.js").text
+    script = _module_frontend_source(client, "manipulation")
     styles = client.get("/static/styles.css").text
     bundle = client.get("/static/omx_telemetry_viewer.bundle.js").text
 
     assert 'data-atr-pose-fit' in script
     assert 'aria-label="Zoom to fit"' in script
-    assert "CAMERA_FIT_DISTANCE_SCALE = 1.34" in bundle
-    assert "CAMERA_FIT_VERTICAL_OFFSET_M = -0.115" in bundle
-    assert "new Vector3(0.03, 0, CAMERA_FIT_VERTICAL_OFFSET_M)" in bundle
+    fit = bundle[bundle.index("function zoomToFit()"):bundle.index("const currentActual", bundle.index("function zoomToFit()"))]
+    assert "bounds.setFromObject(measuredRobot.root)" in fit
+    assert "bounds.expandByObject(environmentGroup)" in fit
+    assert "bounds.getCenter(fitTarget)" in fit
+    assert "camera.zoom = 1" in fit
+    assert "camera.updateProjectionMatrix()" in fit
+    assert "camera.aspect" in fit
     assert "zoomToFit" in bundle
     assert "bindPoseFitButtons" in bundle
     assert ".ar-man-pose-fit" in styles
@@ -5135,6 +5273,7 @@ def test_live_gui_active_robot_cam_specimen_pose_endpoint(monkeypatch) -> None:
         "orientation_deg": {"yaw": 8.0},
     }
     monkeypatch.setattr(main_module, "_recording_active_cam_specimen_pose", lambda: pose)
+    monkeypatch.setattr(main_module.controller, "telemetry_reset_at_ms", app.state.specimen_pose_server_started_at_ms + 1000, raising=False)
     client = TestClient(app)
 
     response = client.get("/api/lerobot/active-robot-cam/specimen-pose")
@@ -5143,7 +5282,7 @@ def test_live_gui_active_robot_cam_specimen_pose_endpoint(monkeypatch) -> None:
     assert response.json() == {
         "ok": True,
         "source": "recording_active_robot_cam",
-        "server_started_at_ms": app.state.specimen_pose_server_started_at_ms,
+        "server_started_at_ms": app.state.specimen_pose_server_started_at_ms + 1000,
         "pose": pose,
     }
 
@@ -5319,6 +5458,7 @@ def test_joint_telemetry_snapshot_reads_existing_rollout_action_log(tmp_path, mo
 
 def test_joint_telemetry_context_prefers_active_rollout(tmp_path, monkeypatch) -> None:
     import app.main as main_module
+    monkeypatch.setattr(main_module.controller, "telemetry_reset_at_ms", 0, raising=False)
 
     class FakeBridge:
         def __init__(self, sessions):

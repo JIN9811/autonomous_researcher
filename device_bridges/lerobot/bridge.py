@@ -2401,6 +2401,11 @@ class LeRobotBridge:
         """Start LeRobot policy inference/rollout."""
         raw_payload = dict(payload or {})
         request = LeRobotSessionRequest.model_validate(raw_payload)
+        try:
+            self._linear_environment('rollout', request, request.session_id or 'preflight')
+        except ValueError as exc:
+            return self._error('lerobot.rollout.start', request.runtime_mode or request.mode,
+                               request.profile_id, 'LEROBOT_LINEAR_CONFIG_INVALID', str(exc))
         unsafe = self._unsafe_arguments([request.policy_checkpoint_path, request.policy_path, request.policy_repo_id])
         if unsafe:
             return self._error("lerobot.rollout.start", request.runtime_mode or request.mode, request.profile_id, "LEROBOT_UNSAFE_ARGUMENT", f"Unsafe command argument rejected: {unsafe}")
@@ -11119,12 +11124,28 @@ class LeRobotBridge:
             return self.config.smolvla_conda_env_name
         return self.config.conda_env_name
 
+    def _linear_environment(self, workflow: str, request: LeRobotSessionRequest, session_id: str) -> dict[str, str]:
+        if not request.rollout_linear_enabled:
+            return {'ATR_LINEAR_ENABLED': '0'}
+        if workflow != 'rollout':
+            raise ValueError('Linear interpolation supports rollout only')
+        if (request.runtime_mode or request.mode) != 'live' or request.profile_id != 'robotis_omx_ai':
+            raise ValueError('Linear interpolation supports live OMX inference only')
+        profile = self._profile(request.profile_id)
+        uses_rtc = self._is_pi05_policy(request.policy_type) or self._uses_rtc_rollout_wrapper(request)
+        input_hz = request.fps if request.fps is not None else ((profile.fps if profile else 30) if uses_rtc else 30)
+        if not 0 < input_hz <= request.rollout_linear_hz <= 100:
+            raise ValueError('Output rate must be at least the action/input FPS and at most 100 Hz')
+        config = {'input_hz': input_hz, 'output_hz': request.rollout_linear_hz, 'session_id': session_id}
+        return {'ATR_LINEAR_ENABLED': '1', 'ATR_LINEAR_CONFIG': json.dumps(config)}
+
     def _workflow_env_overrides(self, workflow: str, request: LeRobotSessionRequest, *, session_id: str = "") -> dict[str, str]:
         profile = self._profile(request.profile_id or self._selected_profile_id)
         pipeline_id = self._request_observation_pipeline_id(request, profile)
         env: dict[str, str] = {
             "ATR_LEROBOT_OBSERVATION_PIPELINE_ID": pipeline_id,
         }
+        env.update(self._linear_environment(workflow, request, session_id))
         mode = request.runtime_mode or request.mode
         if mode == "live" and workflow in {"teleoperate", "record"} and request.isaac_mirror_enabled:
             mirror_session_id = session_id or request.session_id or ""

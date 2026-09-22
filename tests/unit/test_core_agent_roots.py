@@ -14,6 +14,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 RETAINED_ROOT_FILES = {
     "__init__.py",
+    "attention.py",
     "base_agent.py",
     "control_structure.py",
     "execution_graph.py",

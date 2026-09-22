@@ -4,6 +4,8 @@ from pathlib import Path
 
 import yaml
 
+from agents.execution_graph import compile_execution_graph
+from agents.vision.execution import vision_execution_catalog
 from graphs import load_graph_config
 
 
@@ -14,13 +16,19 @@ def _yaml(path: str) -> dict:
 def test_vision_module_uses_active_cam_without_d455_snapshot_steps() -> None:
     payload = _yaml("graphs/modules/vision/module.yaml")
     module = payload["module"]
-    step_ids = {item["id"] for item in module["internal_graph"]}
+    # Compile only: validate the installed allowlisted route without executing tools.
+    graph = compile_execution_graph(module["execution_graph"], vision_execution_catalog(None))
+    step_ids = {item.id for item in graph.nodes}
 
     assert "lerobot.active_robot_cam.capture" in module["tools"]
     assert "lerobot.rollout.stop" in module["tools"]
     assert "vision.utm_specimen_presence.capture" in module["tools"]
     assert "vision.specimen_pose_snapshot" not in module["tools"]
     assert not any("d455" in step_id.lower() for step_id in step_ids)
+    assert {item.handler for item in graph.nodes} == {
+        "vision.prepare", "vision.observe", "vision.clearance", "vision.deliver",
+        "vision.deliver_prepared", "vision.deliver_clearance",
+    }
     assert "specimen_pose.v1" not in module["io_contract"]["produces"]
 
 

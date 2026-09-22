@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "joint-linear-interpolation"
+version = "0.1.0"
+description = "Transmit-only causal linear joint interpolation for an existing robot bus"
+requires-python = ">=3.10"
+dependencies = []
+readme = "README.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]

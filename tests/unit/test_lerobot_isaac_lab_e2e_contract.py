@@ -4,13 +4,59 @@ from __future__ import annotations
 
 import os
 import json
+import importlib.util
+import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
 from device_bridges.lerobot_bridge import LeRobotBridge, LeRobotBridgeConfig
 from device_bridges.isaac_lab_synthetic import IsaacLabSyntheticPipeline
 from mcp_tools.lerobot_schemas import IsaacLabSyntheticRequest
+
+
+@pytest.fixture
+def official_datagen_pool(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Load the real CPU dataset reader without Isaac Sim's package startup.
+
+    These contract tests require an Isaac Lab checkout, but not Kit, Warp,
+    CUDA initialization, or the simulation-heavy package __init__ modules.
+    Every class and function used by the validator remains upstream code.
+    """
+    source = Path(os.environ.get("ISAAC_LAB_PATH", str(Path.home() / "IsaacLab"))) / "source"
+    packages = {
+        "isaaclab": source / "isaaclab" / "isaaclab",
+        "isaaclab.utils": source / "isaaclab" / "isaaclab" / "utils",
+        "isaaclab.utils.datasets": source / "isaaclab" / "isaaclab" / "utils" / "datasets",
+        "isaaclab_mimic": source / "isaaclab_mimic" / "isaaclab_mimic",
+        "isaaclab_mimic.datagen": source / "isaaclab_mimic" / "isaaclab_mimic" / "datagen",
+    }
+    for name, path in packages.items():
+        assert path.is_dir(), f"Isaac Lab checkout required; set ISAAC_LAB_PATH (missing {path})"
+        package = ModuleType(name)
+        package.__path__ = [str(path)]
+        monkeypatch.setitem(sys.modules, name, package)
+
+    def load(name: str):
+        parent, leaf = name.rsplit(".", 1)
+        path = packages[parent] / f"{leaf}.py"
+        spec = importlib.util.spec_from_file_location(name, path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        monkeypatch.setitem(sys.modules, name, module)
+        spec.loader.exec_module(module)
+        return module
+
+    load("isaaclab.utils.math")
+    episode = load("isaaclab.utils.datasets.episode_data")
+    load("isaaclab.utils.datasets.dataset_file_handler_base")
+    handler = load("isaaclab.utils.datasets.hdf5_dataset_file_handler")
+    datasets = sys.modules["isaaclab.utils.datasets"]
+    datasets.EpisodeData = episode.EpisodeData
+    datasets.HDF5DatasetFileHandler = handler.HDF5DatasetFileHandler
+    load("isaaclab_mimic.datagen.datagen_info")
+    load("isaaclab_mimic.datagen.datagen_info_pool")
 
 
 def _bridge(tmp_path: Path) -> LeRobotBridge:
@@ -56,8 +102,9 @@ def test_mimic_runner_uses_joint_replay_backend_for_physical_joint_actions(tmp_p
         dataset_path=str(dataset),
         output_root=str(output_root),
         isaac_lab_path=str(isaac_lab),
-        isaac_sim_python="/home/jin/IsaacSim/python.sh",
+        isaac_sim_python="/tmp/atr-fixture/IsaacSim/python.sh",
         enable_mimic=True,
+        mimic_generation_backend="joint_replay",
         mimic_trials=3,
         mimic_num_envs=2,
         domain_randomization_profile="standard",
@@ -154,8 +201,9 @@ def test_visual_joint_replay_mimic_runner_replays_actual_generated_process(tmp_p
         dataset_path=str(dataset),
         output_root=str(output_root),
         isaac_lab_path=str(isaac_lab),
-        isaac_sim_python="/home/jin/IsaacSim/python.sh",
+        isaac_sim_python="/tmp/atr-fixture/IsaacSim/python.sh",
         enable_mimic=True,
+        mimic_generation_backend="joint_replay",
         mimic_trials=3,
         mimic_num_envs=2,
         dry_run=False,
@@ -200,8 +248,9 @@ def test_visual_joint_replay_mimic_runner_uses_lab_step_generation_not_preview_o
     request = IsaacLabSyntheticRequest(
         dataset_path=str(dataset),
         output_root=str(output_root),
-        isaac_sim_python="/home/jin/IsaacSim/python.sh",
+        isaac_sim_python="/tmp/atr-fixture/IsaacSim/python.sh",
         enable_mimic=True,
+        mimic_generation_backend="joint_replay",
         mimic_trials=3,
         mimic_num_envs=3,
         dry_run=False,
@@ -235,8 +284,9 @@ def test_headless_joint_replay_mimic_runner_still_generates_lab_step_dataset(tmp
     request = IsaacLabSyntheticRequest(
         dataset_path=str(dataset),
         output_root=str(output_root),
-        isaac_sim_python="/home/jin/IsaacSim/python.sh",
+        isaac_sim_python="/tmp/atr-fixture/IsaacSim/python.sh",
         enable_mimic=True,
+        mimic_generation_backend="joint_replay",
         mimic_trials=3,
         mimic_num_envs=3,
         dry_run=False,
@@ -268,8 +318,8 @@ def test_live_e2e_check_command_uses_real_10s_three_episode_preset(tmp_path: Pat
         mode="live",
         runtime_mode="live",
         dataset_path=str(dataset),
-        isaac_lab_path="/home/jin/IsaacLab",
-        isaac_sim_python="/home/jin/IsaacSim/python.sh",
+        isaac_lab_path="/tmp/atr-fixture/IsaacLab",
+        isaac_sim_python="/tmp/atr-fixture/IsaacSim/python.sh",
         dry_run=False,
         e2e_create_fixture=False,
         e2e_episodes=3,
@@ -554,7 +604,7 @@ def test_api_run_e2e_refreshes_vla_import_without_il_train(tmp_path: Path, monke
     assert result["training_exposure"]["eval"] == {}
 
 
-def test_visual_mimic_generation_opens_kit_viewport_without_enabling_cameras(tmp_path: Path) -> None:
+def test_official_mimic_separates_headless_generation_from_visual_preview(tmp_path: Path) -> None:
     dataset = tmp_path / "dataset"
     output_root = dataset / "sidecar" / "isaac_lab_synthetic" / "latest"
     request = IsaacLabSyntheticRequest(
@@ -562,12 +612,11 @@ def test_visual_mimic_generation_opens_kit_viewport_without_enabling_cameras(tmp
         dataset_path=str(dataset),
         output_root=str(output_root),
         isaac_lab_path=str(tmp_path / "IsaacLab"),
-        isaac_sim_python="/home/jin/IsaacSim/python.sh",
+        isaac_sim_python="/tmp/atr-fixture/IsaacSim/python.sh",
         enable_mimic=True,
         dry_run=False,
         isaac_lab_visualize_generation=True,
         mimic_enable_cameras=False,
-        mimic_generation_backend="official",
     )
     pipeline = IsaacLabSyntheticPipeline(repo_root=tmp_path, allowed_roots=[tmp_path])
 
@@ -578,16 +627,25 @@ def test_visual_mimic_generation_opens_kit_viewport_without_enabling_cameras(tmp
         smoke_summary={"output_root": str(output_root)},
     )
 
-    assert "--headless" not in command
-    assert "--viz" in command
-    assert command[command.index("--viz") + 1] == "kit"
-    assert "--kit_args" in command
-    assert "--/app/useFabricSceneDelegate=false" in command[command.index("--kit_args") + 1]
+    assert "--headless" in command
+    assert "--viz" not in command
+    assert "--kit_args" not in command
     assert "--robotis-camera-mode" in command
     assert command[command.index("--robotis-camera-mode") + 1] == "off"
     assert "--enable_cameras" not in command
-    assert "--rendering_mode" in command
-    assert command[command.index("--rendering_mode") + 1] == "balanced"
+    assert "--rendering-mode" not in command
+
+    preview = pipeline._joint_replay_preview_command(
+        request, output_root=output_root, hook_summary={},
+    )
+    assert "--preview-only" in preview
+    assert preview[preview.index("--input-file") + 1] == str(output_root / "mimic" / "generated_dataset.hdf5")
+    assert "--headless" not in preview
+    assert preview[preview.index("--viz") + 1] == "kit"
+    assert "--/app/useFabricSceneDelegate=false" in preview[preview.index("--kit-args") + 1]
+    assert preview[preview.index("--robotis-camera-mode") + 1] == "off"
+    assert "--enable-cameras" not in preview
+    assert preview[preview.index("--rendering-mode") + 1] == "balanced"
 
 
 def test_headless_live_annotation_keeps_cameras_enabled(tmp_path: Path) -> None:
@@ -598,7 +656,7 @@ def test_headless_live_annotation_keeps_cameras_enabled(tmp_path: Path) -> None:
         dataset_path=str(dataset),
         output_root=str(output_root),
         isaac_lab_path=str(tmp_path / "IsaacLab"),
-        isaac_sim_python="/home/jin/IsaacSim/python.sh",
+        isaac_sim_python="/tmp/atr-fixture/IsaacSim/python.sh",
         dry_run=False,
         isaac_lab_visualize_generation=False,
         mimic_enable_cameras=True,
@@ -626,7 +684,7 @@ def test_lerobot_degree_actions_export_as_robotis_joint_targets() -> None:
     assert action == pytest.approx([0.0, 1.5707963, -1.5707963, 0.7853982, 0.5235988, 1.0471976, -1.0471976])
 
 
-def test_preannotated_hdf5_passthrough_completes_without_runner(tmp_path: Path) -> None:
+def test_preannotated_hdf5_passthrough_completes_without_runner(tmp_path: Path, official_datagen_pool) -> None:
     h5py = pytest.importorskip("h5py")
     np = pytest.importorskip("numpy")
 
@@ -721,7 +779,7 @@ def test_hdf5_contract_requires_env_args_and_datagen_info(tmp_path: Path) -> Non
     assert "DATAGEN_INFO_MISSING" in report["blockers"]
 
 
-def test_hdf5_contract_loads_into_official_datagen_info_pool(tmp_path: Path) -> None:
+def test_hdf5_contract_loads_into_official_datagen_info_pool(tmp_path: Path, official_datagen_pool) -> None:
     from device_bridges.isaac_lab_hdf5 import validate_isaac_lab_datagen_pool_contract
 
     h5py = pytest.importorskip("h5py")
@@ -776,8 +834,8 @@ def test_annotation_command_uses_external_callback(tmp_path: Path) -> None:
     request = IsaacLabSyntheticRequest(
         dataset_path=str(tmp_path / "dataset"),
         output_root=str(tmp_path / "out"),
-        isaac_lab_path="/home/jin/IsaacLab",
-        isaac_sim_python="/home/jin/IsaacSim/python.sh",
+        isaac_lab_path="/tmp/atr-fixture/IsaacLab",
+        isaac_sim_python="/tmp/atr-fixture/IsaacSim/python.sh",
         isaac_lab_task_name="ATR-Robotis-OMX-PickPlace-Mimic-v0",
     )
     pipeline = IsaacLabSyntheticPipeline(repo_root=tmp_path, allowed_roots=[tmp_path])
@@ -791,7 +849,7 @@ def test_il_train_command_uses_wrapper_because_train_has_no_external_callback(tm
     request = IsaacLabSyntheticRequest(
         dataset_path=str(tmp_path / "dataset"),
         output_root=str(tmp_path / "out"),
-        isaac_sim_python="/home/jin/IsaacSim/python.sh",
+        isaac_sim_python="/tmp/atr-fixture/IsaacSim/python.sh",
         isaac_lab_policy_task_name="ATR-Robotis-OMX-PickPlace-v0",
         robomimic_algo="bc",
         domain_randomization_profile="standard",
@@ -816,7 +874,7 @@ def test_mimic_generation_never_applies_stress_profile_to_generated_data(tmp_pat
         dataset_path=str(dataset),
         output_root=str(output_root),
         isaac_lab_path=str(tmp_path / "IsaacLab"),
-        isaac_sim_python="/home/jin/IsaacSim/python.sh",
+        isaac_sim_python="/tmp/atr-fixture/IsaacSim/python.sh",
         enable_mimic=True,
         domain_randomization_profile="stress",
         dry_run=False,
@@ -849,7 +907,7 @@ def test_official_mimic_runner_uses_isaaclab_dash_p_launcher(tmp_path: Path) -> 
         dataset_path=str(dataset),
         output_root=str(output_root),
         isaac_lab_path=str(tmp_path / "IsaacLab"),
-        isaac_sim_python="/home/jin/IsaacLab/isaaclab.sh",
+        isaac_sim_python="/tmp/atr-fixture/IsaacLab/isaaclab.sh",
         enable_mimic=True,
         mimic_generation_backend="official",
         dry_run=False,
@@ -864,12 +922,12 @@ def test_official_mimic_runner_uses_isaaclab_dash_p_launcher(tmp_path: Path) -> 
     )
 
     assert command[:3] == [
-        "/home/jin/IsaacLab/isaaclab.sh",
+        "/tmp/atr-fixture/IsaacLab/isaaclab.sh",
         "-p",
         str(tmp_path / "scripts" / "lerobot_isaac_lab_official_mimic_generate.py"),
     ]
     assert "--isaac-python" in command
-    assert command[command.index("--isaac-python") + 1] == "/home/jin/IsaacLab/isaaclab.sh"
+    assert command[command.index("--isaac-python") + 1] == "/tmp/atr-fixture/IsaacLab/isaaclab.sh"
 
     runner = pipeline._runner_summary(  # noqa: SLF001
         request,
@@ -892,7 +950,7 @@ def test_official_mimic_runner_uses_default_isaac_lab_root_when_path_is_omitted(
     request = IsaacLabSyntheticRequest(
         dataset_path=str(dataset),
         output_root=str(output_root),
-        isaac_sim_python="/home/jin/IsaacSim/python.sh",
+        isaac_sim_python="/tmp/atr-fixture/IsaacSim/python.sh",
         enable_mimic=True,
         mimic_generation_backend="official",
         mimic_trials=3,
@@ -910,17 +968,17 @@ def test_official_mimic_runner_uses_default_isaac_lab_root_when_path_is_omitted(
     )
 
     assert command[command.index("--annotate-script") + 1] == (
-        "/home/jin/IsaacLab/scripts/imitation_learning/isaaclab_mimic/annotate_demos.py"
+        str(Path.home() / "IsaacLab/scripts/imitation_learning/isaaclab_mimic/annotate_demos.py")
     )
     assert command[command.index("--generate-script") + 1] == (
-        "/home/jin/IsaacLab/scripts/imitation_learning/isaaclab_mimic/generate_dataset.py"
+        str(Path.home() / "IsaacLab/scripts/imitation_learning/isaaclab_mimic/generate_dataset.py")
     )
     replay_command = pipeline._official_mimic_replay_promote_command(  # noqa: SLF001
         request,
         output_root=output_root,
     )
     assert replay_command[replay_command.index("--replay-script") + 1] == (
-        "/home/jin/IsaacLab/scripts/tools/replay_demos.py"
+        str(Path.home() / "IsaacLab/scripts/tools/replay_demos.py")
     )
 
 
@@ -958,7 +1016,7 @@ def test_eval_il_resolves_nested_robomimic_checkpoint_from_latest_run(tmp_path: 
         mode="live",
         dataset_path=str(dataset),
         output_root=str(output_root),
-        isaac_sim_python="/home/jin/IsaacSim/python.sh",
+        isaac_sim_python="/tmp/atr-fixture/IsaacSim/python.sh",
         isaac_lab_policy_task_name="ATR-Robotis-OMX-PickPlace-v0",
         dry_run=False,
         domain_randomization_profile="stress",

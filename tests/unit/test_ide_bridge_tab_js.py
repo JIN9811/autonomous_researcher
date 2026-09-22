@@ -11,7 +11,9 @@ def test_bridge_navigation_uses_one_tab_and_preserves_graph_module_and_trace():
         "activeGraphTab", "rememberActiveGraphDraft", "upsertGraphTab", "normalizeGraphTabId",
         "activateGraphTab", "closeGraphTab", "currentExperimentalPackageGraph",
         "openPackageCompositionView", "closePackageCompositionView", "focusModuleForNode", "selectNode", "openDeviceBridgeInternal",
+        "ownerPlanModulePayload",
     ))
+    functions += "\nasync " + _extract_function(source, "ensureOwnerPlanModuleDrafts")
     script = """
 const assert = require('node:assert/strict');
 const MAIN_GRAPH_TAB_ID='main-system', MODULE_TAB_PREFIX='module:', BRIDGE_GRAPH_TAB_ID='infra:device-bridges', PACKAGE_MANAGER_TAB_ID='infra:package-manager';
@@ -23,6 +25,12 @@ let activeGraphTabId=MAIN_GRAPH_TAB_ID, activeGraph=main, selectedNodeId='bridge
 let canvasAutoSelectNode=true,activeRuntimeEdge=null,edgeConnectDraft=null,edgeConnectSource='',edgeConnectMode=false;
 let activeModuleId='',moduleOpenToken=null;
 const moduleSelect=null,modulePayloadCache=new Map();
+const normalizedModulePayload=payload=>payload;
+const rememberExecutionContract=()=>{};
+const requestJson=async url=>{
+  assert.ok(['/api/modules/knowledge','/api/modules/guardian'].includes(url));
+  return {module:{id:url.split('/').pop()}};
+};
 const graphJson={value:JSON.stringify(main)};
 const dryRunOutput={innerHTML:'previous trace',dataset:{},scrollIntoView(){}};
 const packageCompositionOutput={scrollIntoView(){}};

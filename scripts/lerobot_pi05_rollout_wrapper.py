@@ -4,7 +4,7 @@ File purpose:
 
 Key behavior:
 - Imports OMX follower support before draccus parses --robot.type=omx_follower.
-- Delegates CLI parsing/execution to /home/jin/lerobot_pi05/examples/rtc/eval_with_real_robot.py.
+- Delegates CLI parsing/execution to ~/lerobot_pi05/examples/rtc/eval_with_real_robot.py.
 """
 
 from __future__ import annotations
@@ -92,7 +92,11 @@ def _install_atr_action_logger() -> None:
 install_omx_follower_runtime_units_patch()
 _install_atr_action_logger()
 install_live_depth_observation_patch()
+from scripts.lerobot_linear_interpolation import install_linear_if_enabled
+install_linear_if_enabled()
 
-DEFAULT_RTC_SCRIPT = "/home/jin/lerobot_pi05/examples/rtc/eval_with_real_robot.py"
+DEFAULT_RTC_SCRIPT = str(Path.home() / "lerobot_pi05/examples/rtc/eval_with_real_robot.py")
 script_path = Path(os.environ.get("ATR_PI05_RTC_SCRIPT", DEFAULT_RTC_SCRIPT)).expanduser()
+from scripts.lerobot_rtc_queue_alignment import install_rtc_queue_alignment
+install_rtc_queue_alignment()
 runpy.run_path(str(script_path), run_name="__main__")

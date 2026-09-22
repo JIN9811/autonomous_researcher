@@ -3071,8 +3071,13 @@ async def test_design_pregate_block_cannot_reuse_previous_acceptance(monkeypatch
 @pytest.mark.parametrize("response", ["return", "timeout", "invalid"])
 async def test_planning_design_failure_does_not_adapt_previous_spec(monkeypatch, response):
     from orchestrator.langgraph_runtime import ModuleRuntimeContext
+    original_complete = ModuleRuntimeContext.complete
 
     async def failed_complete(self, task_type, prompt, **kwargs):
+        # Fail only Design's model decision. Orchestrator admission still needs
+        # its own valid response before the current Design invocation can run.
+        if task_type != "design_reasoning":
+            return await original_complete(self, task_type, prompt, **kwargs)
         if response == "timeout":
             raise TimeoutError()
         return SimpleNamespace(text="invalid" if response == "invalid" else json.dumps({
@@ -3766,6 +3771,15 @@ async def test_live_gui_experiment_trigger_requests_missing_design_values(monkey
         raise AssertionError("Design handoff should not run with missing values.")
 
     monkeypatch.setattr(controller, "_handoff_planning_to_design", fail_handoff)
+    async def collect_inputs(*, prompt):
+        packet = json.loads(prompt)
+        assert packet["operation"] == "research_conversation"
+        assert {"goal", "material", "specimen_size_mm"} <= set(packet["admission_status"]["missing_inputs"])
+        return SimpleNamespace(text=json.dumps({
+            "action": "collect", "updates": [], "language": "ko",
+            "answer": "실험 목표, 재료, 시편 크기와 형상을 알려 주세요.",
+        }), model="controlled-input-collection", raw={}), "controlled response"
+    monkeypatch.setattr(controller, "_complete_live_planning_prompt", collect_inputs)
 
     result = await controller._planning_message_locked(
         message="실험 수행",
@@ -3775,31 +3789,37 @@ async def test_live_gui_experiment_trigger_requests_missing_design_values(monkey
     )
 
     assert result["ok"] is True
-    assert result["message"] == "Design handoff requires operator inputs."
     last_message = controller._planning_messages[-1]
     assert last_message["requires_design_inputs"] is True
-    assert "현재 확인된 값" in last_message["content"]
-    assert "추가로 필요한 값" in last_message["content"]
-    missing_fields = {item["key"] for item in last_message["missing_design_inputs"]}
-    assert {"objective", "specimen_size_mm", "geometry_or_domain"} <= missing_fields
-    assert "Bambu Lab X2D" in last_message["content"]
+    pending = controller._planning_pending_request()
+    assert pending["kind"] == "conversation"
+    assert pending["purpose"] == "provide_inputs"
+    assert pending["request"]["agreed_inputs"] == {}
+    assert controller._planning_handoff_task is None
 
 
 @pytest.mark.asyncio
-async def test_live_gui_experiment_trigger_uses_session_values(monkeypatch: pytest.MonkeyPatch) -> None:
-    controller = load_runtime()
-    controller._state.mode = Mode.LIVE
-    controller._planning_messages.append(
-        {
-            "role": "operator",
-            "content": (
-                "PLA로 30 x 30 x 30 mm bending-dominated lattice 압축 시편을 만들고 "
-                "specific energy absorption을 최대화하고 싶어. 프린터는 Prusa MK4S, nozzle 0.4 mm, layer 0.2 mm."
-            ),
-            "constraints": {},
-        }
-    )
+async def test_live_gui_experiment_trigger_uses_session_values(scenario_controller, monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = scenario_controller
     captured: dict[str, object] = {}
+    original_complete = controller._complete_live_planning_prompt
+
+    async def collect_session_values(*, prompt):
+        response, message = await original_complete(prompt=prompt)
+        packet = json.loads(prompt)
+        if packet.get("operation") == "research_conversation" and "Prusa MK4S" in packet["message"]:
+            decision = json.loads(response.text)
+            decision["updates"].extend({"field": key, "value": value, "source_quote": quote}
+                for key, value, quote in [
+                    ("experiment_domain", "bending_dominated_lattice", "bending-dominated lattice"),
+                    ("printer_model", "Prusa MK4S", "Prusa MK4S"),
+                    ("nozzle_diameter_mm", 0.4, "0.4 mm"),
+                    ("layer_height_mm", 0.2, "0.2 mm"),
+                ])
+            response.text = json.dumps(decision)
+        return response, message
+
+    monkeypatch.setattr(controller, "_complete_live_planning_prompt", collect_session_values)
 
     async def fake_handoff(*, goal: str | None, constraints: dict) -> dict:
         captured["goal"] = goal
@@ -3808,25 +3828,31 @@ async def test_live_gui_experiment_trigger_uses_session_values(monkeypatch: pyte
 
     monkeypatch.setattr(controller, "_handoff_planning_to_design", fake_handoff)
 
-    result = await controller._planning_message_locked(
-        message="실험 수행",
-        goal=None,
-        constraints={},
-        session_id="s-ready",
+    # Inputs are accepted with provenance through the conversation, not inferred
+    # from an arbitrary transcript append. A separate review consent starts work.
+    reviewed = await controller.planning_message(
+        message=("SEA (J/g) 최대화를 목표로 PLA gyroid bending-dominated lattice 시편 30 mm 큐브, "
+                 "셀 5–10 mm 벽 두께 0.8–1.6 mm로 해주세요. 프린터는 Prusa MK4S, nozzle 0.4 mm, layer 0.2 mm."),
     )
+    assert reviewed["ok"] is True
+    assert captured == {}
+    assert controller._planning_pending_request()["purpose"] == "run_review"
+    result = await controller.planning_message(message="네, 시작해 주세요")
 
     constraints = captured["constraints"]
     assert result["ok"] is True
-    assert "specific energy absorption" in captured["goal"]
+    assert captured["goal"] == "SEA (J/g) 최대화"
     assert constraints["material"] == "PLA"
     assert constraints["specimen_size_mm"] == [30.0, 30.0, 30.0]
     assert constraints["max_specimen_size_mm"] == [30.0, 30.0, 30.0]
-    assert constraints["experiment_domain"] == "bending_dominated_lattice"
     assert constraints["geometry_type"] == "gyroid"
+    assert constraints["experiment_domain"] == "bending_dominated_lattice"
     assert constraints["printer_model"] == "Prusa MK4S"
     assert constraints["nozzle_diameter_mm"] == 0.4
     assert constraints["layer_height_mm"] == 0.2
     assert constraints["storage"] == "usb"
+    assert constraints["cell_size_bounds_mm"] == [5.0, 10.0]
+    assert constraints["wall_thickness_bounds_mm"] == [0.8, 1.6]
 
 
 def test_planning_vision_stage_message_summarizes_signal_board() -> None:
@@ -4014,18 +4040,35 @@ async def test_planning_guardian_tool_shield_event_becomes_live_chat_message() -
 
 
 @pytest.mark.asyncio
-async def test_live_gui_busy_runtime_message_queues_operator_followup(tmp_path: Path) -> None:
+@pytest.mark.parametrize("held", [False, True])
+async def test_live_gui_busy_runtime_message_queues_only_a_held_review_reply(tmp_path: Path, monkeypatch, held) -> None:
     controller = load_runtime()
     controller._logger_bundle.run_dir = tmp_path
     controller._planning_messages = []
     controller._planning_message_total = 0
     controller._state.mode = Mode.TEST
     controller._state.stage = Stage.DESIGN
+    if held:
+        from orchestrator.orchestrator_checkpoint import handoff_checkpoint
+        metadata = controller._state.run_metadata
+        handoff_checkpoint(metadata, "held-design-review", action="prepare", payload={"stage": "design"})
+        handoff_checkpoint(metadata, "held-design-review", action="defer", payload={"reason": "operator_review"})
+        metadata["orchestrator_pending_handoff"] = "held-design-review"
+    async def classify(self, task_type, prompt, **kwargs):
+        packet = json.loads(prompt)
+        assert packet["operation"] == "classify_chat_request"
+        assert packet["pending_id"] == ("held-design-review" if held else None)
+        return SimpleNamespace(text=json.dumps({
+            "intent": "confirm_pending" if held else "question",
+            "reason": "Reply to the current review only when one exists",
+            "pending_id": packet["pending_id"],
+        }), model="controlled-runtime-reply", raw={})
+    monkeypatch.setattr(type(controller._deps.agent_context), "complete", classify)
 
     await controller._planning_request_lock.acquire()
     try:
         result = await controller.planning_message(
-            message="다음 loop에서는 벽 두께를 조금 줄여서 진행해줘",
+            message="현재 보류된 검토를 계속해 주세요",
             goal="follow-up test",
             constraints={
                 "live_is_running": True,
@@ -4040,12 +4083,16 @@ async def test_live_gui_busy_runtime_message_queues_operator_followup(tmp_path: 
     finally:
         controller._planning_request_lock.release()
 
+    if not held:
+        assert result["ok"] is False
+        assert not controller._state.run_metadata.get("operator_followup_queue")
+        return
     assert result["ok"] is True
     assert result["message"] == "Runtime follow-up queued."
     queue = controller._state.run_metadata["operator_followup_queue"]
     assert queue[-1]["schema"] == "operator_runtime_followup.v1"
     assert queue[-1]["status"] == "queued"
-    assert queue[-1]["message"].startswith("다음 loop")
+    assert queue[-1]["message"] == "현재 보류된 검토를 계속해 주세요"
     assert queue[-1]["target_agent"] == "orchestrator"
     page = controller.planning_snapshot(session_id="s-followup")["messages"]
     assert page[-2]["role"] == "operator"

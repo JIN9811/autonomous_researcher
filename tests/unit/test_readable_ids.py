@@ -1,4 +1,5 @@
 """Human-readable identities without changing execution or archive ownership."""
+import asyncio
 from datetime import datetime, timezone
 import importlib
 import json
@@ -8,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from utils import ids
+from tests.unit.test_test_scenario_chat import scenario_controller
 
 
 @pytest.fixture
@@ -77,8 +79,8 @@ async def test_new_run_and_resume_preserve_existing_session_and_log_paths(contro
         reached.append(controller._state.run_id)
     monkeypatch.setattr(controller, "_run_live_or_test", stopped_at_runtime_boundary)
     monkeypatch.setattr(controller, "_run_replay", stopped_at_runtime_boundary)
-    result = await controller.start(mode=Mode(mode))
-    assert result["ok"]
+    result = await controller.start(mode=Mode(mode), goal="naming check")
+    assert result["ok"], result
     await controller._run_task
     run_id = result["run_id"]
     assert re.fullmatch(rf"\d{{8}}_\d{{6}}_KST_{purpose}_[0-9a-f]{{8}}", run_id)
@@ -166,15 +168,17 @@ def test_artifact_reference_accepts_old_and_new_run_ids(controller, monkeypatch,
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("handoff_no_external")
 @pytest.mark.parametrize("message,purpose", [
     ("테스트 모드, 가상 브릿지", "test_virtual"),
     ("테스트 모드, 실제 프린터", "test_real_printer"),
     ("테스트 모드, 실제 출력", "test_physical_print"),
     ("테스트 모드", "test"),
 ])
-async def test_live_gui_test_request_names_run_without_changing_live_execution_mode(controller, monkeypatch, message, purpose):
+async def test_live_gui_test_request_names_run_without_changing_live_execution_mode(scenario_controller, monkeypatch, message, purpose):
     from orchestrator.state import Mode
     from orchestrator.setup_application import SetupApplication
+    controller = scenario_controller
     controller.prepare_live_gui()
     assert controller._state.mode == Mode.LIVE
     store = controller._setup_store()
@@ -182,17 +186,18 @@ async def test_live_gui_test_request_names_run_without_changing_live_execution_m
     proposal = store.propose(block["block_id"], block["revision"], {"research.goal": "GUI naming"}, "gui-proposal")
     await SetupApplication(store, controller._planning_setup_catalog()).confirm(
         proposal["proposal_id"], proposal["block_revision"], "gui-confirm", controller._state)
-    async def completion(**kwargs):
-        return SimpleNamespace(text=json.dumps({"goal": "GUI naming", "constraints": {}}),
-            model="controlled-naming", raw={}), "controlled response"
     async def review(**kwargs):
         return {"status": "deferred"}
-    monkeypatch.setattr(controller, "_complete_live_planning_prompt", completion)
     monkeypatch.setattr(importlib.import_module("app.controller"), "review_handoff", review)
-    await controller._run_test_mode_planning(goal=None, constraints={}, operator_message=message)
+    result = await controller._run_test_mode_planning(goal=None, constraints={}, operator_message=message)
+    assert result["ok"], result
+    # Test input now enters the normal model-mediated conversation. Wait for
+    # that admission task before checking the run identity it establishes.
+    assert controller._test_scenario.task is not None
+    await asyncio.wait_for(controller._test_scenario.task, timeout=60)
     task = controller._planning_handoff_task
     if task is not None:
-        await task
+        await asyncio.wait_for(task, timeout=5)
     assert re.fullmatch(rf"\d{{8}}_\d{{6}}_KST_{purpose}_[0-9a-f]{{8}}", controller._state.run_id)
     assert controller._state.mode == Mode.LIVE
     assert controller._setup_store() is store

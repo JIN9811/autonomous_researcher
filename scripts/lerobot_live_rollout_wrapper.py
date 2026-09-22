@@ -55,6 +55,8 @@ def _lerobot_rtc_main():
     script_path = Path(os.environ.get("ATR_LEROBOT_RTC_SCRIPT", DEFAULT_RTC_SCRIPT)).expanduser()
 
     def run() -> None:
+        from scripts.lerobot_rtc_queue_alignment import install_rtc_queue_alignment
+        install_rtc_queue_alignment()
         runpy.run_path(str(script_path), run_name="__main__")
 
     return run
@@ -125,6 +127,8 @@ def main() -> None:
     _ensure_omx_action_log_env_defaults()
     install_omx_follower_runtime_units_patch()
     install_live_depth_observation_patch()
+    from scripts.lerobot_linear_interpolation import install_linear_if_enabled
+    install_linear_if_enabled()
     install_omx_follower_action_logger()
     if _rtc_requested():
         _install_rtc_observation_retry()

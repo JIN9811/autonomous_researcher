@@ -184,15 +184,6 @@ TEST_DEVICE_BRIDGE_REFERENCES = {
             "utm_vision_03_api_connection_architecture",
         ),
     ),
-    "cae_computation": (
-        "docs/device_bridges/cae_computation_bridges.md",
-        "CAE Computation",
-        (
-            "cae_computation_01_system_handoffs",
-            "cae_computation_02_execution_effect_boundary",
-            "cae_computation_03_api_connection_architecture",
-        ),
-    ),
     "base_simulator": (
         "docs/device_bridges/base_simulator_bridges.md",
         "Base Simulator",
@@ -240,7 +231,7 @@ TEST_DEVICE_BRIDGE_SOURCE_CONTRACTS = {
         ("mcp_tools/printer_tools.py", 'selected_provider(normalized) == "prusa_mk4s"'),
     ),
     "lerobot": (
-        ("mcp_tools/lerobot_tools.py", 'registry.register("lerobot.rollout.start"'),
+        ("device_bridges/lerobot/tools.py", 'registry.register("lerobot.rollout.start"'),
         ("app/main.py", '@app.post("/api/lerobot/rollout/start")'),
     ),
     "windows_pyautogui": (
@@ -250,11 +241,6 @@ TEST_DEVICE_BRIDGE_SOURCE_CONTRACTS = {
     "utm_vision": (
         ("device_bridges/camera_vision/utm_runtime_bridge.py", "class UTMRuntimeProcessManager:"),
         ("app/main.py", '@app.get("/api/equipment/utm-runtime/status")'),
-    ),
-    "cae_computation": (
-        ("mcp_tools/calculix_tools.py", 'registry.register("calculix.run_job"'),
-        ("mcp_tools/pinn_tools.py", 'registry.register("pinn.predict"'),
-        ("app/main.py", '@app.post("/api/cae/run")'),
     ),
     "base_simulator": (
         ("device_bridges/base_bridge.py", "class BaseBridge(ABC):"),
@@ -698,13 +684,17 @@ def test_device_bridge_reference_requires_figure_embed_and_caption(tmp_path: Pat
 def test_device_bridge_reference_detects_registered_tool_or_api_drift(tmp_path: Path) -> None:
     module = _load_validator()
     document = _write_device_bridge_reference(tmp_path, "lerobot")
-    source = tmp_path / "mcp_tools/lerobot_tools.py"
+    assert module.validate_document(document, tmp_path) == []
+
+    source = tmp_path / "device_bridges/lerobot/tools.py"
     source.write_text("# registration removed\n", encoding="utf-8")
 
     errors = module.validate_document(document, tmp_path)
 
-    assert any("missing device bridge source contract" in error for error in errors)
-    assert any("lerobot.rollout.start" in error for error in errors)
+    assert errors == [
+        "docs/device_bridges/lerobot_bridge.md: missing device bridge source "
+        'contract in device_bridges/lerobot/tools.py: registry.register("lerobot.rollout.start"'
+    ]
 
 
 def test_manifest_requires_root_readme_links_for_all_device_bridges(tmp_path: Path) -> None:
@@ -718,7 +708,12 @@ def test_manifest_requires_root_readme_links_for_all_device_bridges(tmp_path: Pa
 
     errors = module.validate_manifest(tmp_path, manifest)
 
-    assert len([error for error in errors if "missing root README device bridge link" in error]) == 8
+    assert [
+        error for error in errors if "missing root README device bridge link" in error
+    ] == [
+        f"docs/document_manifest.yaml: missing root README device bridge link: {path}"
+        for path, _title, _stems in TEST_DEVICE_BRIDGE_REFERENCES.values()
+    ]
 
 
 def test_manifest_requires_device_bridge_index_reference_and_figure_links(tmp_path: Path) -> None:
@@ -733,8 +728,19 @@ def test_manifest_requires_device_bridge_index_reference_and_figure_links(tmp_pa
 
     errors = module.validate_manifest(tmp_path, manifest)
 
-    assert len([error for error in errors if "missing device bridge index reference link" in error]) == 8
-    assert len([error for error in errors if "missing device bridge index figure link" in error]) == 24
+    assert [
+        error for error in errors if "missing device bridge index reference link" in error
+    ] == [
+        f"docs/document_manifest.yaml: missing device bridge index reference link: {Path(path).name}"
+        for path, _title, _stems in TEST_DEVICE_BRIDGE_REFERENCES.values()
+    ]
+    assert [
+        error for error in errors if "missing device bridge index figure link" in error
+    ] == [
+        f"docs/document_manifest.yaml: missing device bridge index figure link: assets/figures/{stem}.svg"
+        for _path, _title, stems in TEST_DEVICE_BRIDGE_REFERENCES.values()
+        for stem in stems
+    ]
 
 
 def test_manifest_rejects_duplicate_device_bridge_root_table_row(tmp_path: Path) -> None:
@@ -743,17 +749,23 @@ def test_manifest_rejects_duplicate_device_bridge_root_table_row(tmp_path: Path)
         f"| [{bridge_id}]({path}) | role | entry | protocol | effect | details | figures |"
         for bridge_id, (path, _title, _stems) in TEST_DEVICE_BRIDGE_REFERENCES.items()
     ]
-    root_body = VALID_INDEX + "\n## Device Bridge References\n\n" + "\n".join(rows + [rows[0]]) + "\n"
-    _write(tmp_path, "README.md", root_body)
+    root_body = VALID_INDEX + "\n## Device Bridge References\n\n" + "\n".join(rows) + "\n"
+    readme = _write(tmp_path, "README.md", root_body)
     documents = ["README.md"]
     for bridge_id in TEST_DEVICE_BRIDGE_REFERENCES:
         document = _write_device_bridge_reference(tmp_path, bridge_id)
         documents.append(document.relative_to(tmp_path).as_posix())
     manifest = _write_manifest(tmp_path, documents)
+    assert module.validate_manifest(tmp_path, manifest) == []
+
+    readme.write_text(root_body + rows[0] + "\n", encoding="utf-8")
 
     errors = module.validate_manifest(tmp_path, manifest)
 
-    assert any("root README device bridge table must contain exactly 8 rows" in error for error in errors)
+    assert errors == [
+        "docs/document_manifest.yaml: root README device bridge table must contain "
+        "exactly 7 rows; found 8"
+    ]
 
 
 def test_manifest_rejects_undeclared_device_bridge_figure_assets(tmp_path: Path) -> None:

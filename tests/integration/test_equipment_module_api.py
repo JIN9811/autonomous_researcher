@@ -1,5 +1,9 @@
 """Installed Equipment frontend and report ownership under the no-effects guard."""
 from copy import deepcopy
+from html.parser import HTMLParser
+from urllib.parse import parse_qs, urlsplit
+
+import pytest
 
 from tests.integration.test_agent_execution_graph_api import actual_controller, module_api
 
@@ -74,9 +78,32 @@ def test_inactive_equipment_owner_cannot_serve_its_module_asset(module_api):
     assert guard.denied == []
 
 
-def test_equipment_frontend_hosts_publish_current_asset_versions(module_api):
+@pytest.mark.parametrize(
+    ("host", "asset_path"),
+    [("/live", "/static/planning.js"), ("/ide", "/static/runtime_ide.js")],
+)
+def test_equipment_frontend_hosts_publish_versioned_loadable_assets(module_api, host, asset_path):
     client, _, _, guard, _ = module_api
-    assert '/static/planning.js?v=20260914-bo-owner-1' in client.get('/live').text
-    assert '/static/runtime_ide.js?v=20260913-llm-call-label' in client.get('/ide').text
+
+    class ScriptSources(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.sources = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "script":
+                self.sources.append(dict(attrs).get("src", ""))
+
+    page = client.get(host)
+    assert page.status_code == 200
+    parser = ScriptSources()
+    parser.feed(page.text)
+    sources = [src for src in parser.sources if urlsplit(src).path == asset_path]
+    assert len(sources) == 1
+    assert parse_qs(urlsplit(sources[0]).query).get("v")
+    asset = client.get(sources[0])
+    assert asset.status_code == 200
+    assert "javascript" in asset.headers["content-type"]
+    assert asset.content
     assert guard.physical_call_count == 0
     assert guard.denied == []

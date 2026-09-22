@@ -91,6 +91,11 @@ def fixture_server(root: Path):
 
     install_markdown_routes(app, store_factory=lambda: store, run_root_factory=lambda: root / "runs",
                             memory_root_factory=lambda: root / "memory" / "knowledge")
+    from knowledge.context_service import KnowledgeContextService, KnowledgePrincipal
+    from knowledge.workspace_api import install_workspace_routes
+    workspace_service = KnowledgeContextService(root)
+    install_workspace_routes(app, service_factory=lambda: workspace_service,
+                             principal_resolver=lambda request: KnowledgePrincipal("browser-fixture"))
     retire_graph_routes(app)
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -134,7 +139,10 @@ def audit(base_url: str, screenshot_path: Path) -> dict[str, object]:
                 expect(page.locator("#knowledge-backend-status")).to_have_text("Markdown")
                 expect(page.locator("#knowledge-record-count")).to_have_text("3")
                 expect(page.locator("#knowledge-markdown-results button")).to_have_count(2)
-                assert page.locator("[data-knowledge-tab]").all_text_contents() == ["Markdown Knowledge", "Memory", "Ontology", "Source Library"]
+                assert page.locator("[data-knowledge-tab]").all_text_contents() == ["AX4LAB Wiki", "Memory", "Source Library", "Agent Delivery", "Ontology"]
+                expect(page.locator('[data-knowledge-panel="wiki"]')).to_be_visible()
+                page.locator('[data-knowledge-tab="memory"]').click()
+                page.locator(".knowledge-preserved-memory > summary").filter(has_text="Execution knowledge").click()
                 assert not page.locator("vite-error-overlay, nextjs-portal, #webpack-dev-server-client-overlay").count()
                 assert "neo4j" not in page.locator(".knowledge-status-strip").inner_text().lower()
                 for control, value in (("run", "run-a"), ("cycle", "loop-000001"), ("agent", "analysis"),
@@ -185,6 +193,8 @@ def audit(base_url: str, screenshot_path: Path) -> dict[str, object]:
                 job_id = page.locator("#knowledge-intake-job").input_value()
                 assert len(job_id) == 32
                 page.reload()
+                expect(page.locator('[data-knowledge-panel="memory"]')).to_be_visible()
+                page.locator(".knowledge-preserved-memory > summary").filter(has_text="Execution knowledge").click()
                 expect(page.locator("#knowledge-intake-job")).to_have_value(job_id)
                 page.locator("#knowledge-intake-controls summary").click()
                 page.locator("#knowledge-intake-refresh").click()
@@ -194,6 +204,7 @@ def audit(base_url: str, screenshot_path: Path) -> dict[str, object]:
                     expect(page.locator(f'[data-knowledge-panel="{tab}"]')).to_be_visible()
                     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 2"), f"Overflow in {tab} at {width}px"
                     if tab == "memory":
+                        page.locator(".knowledge-preserved-memory > summary").filter(has_text="Operational memory").click()
                         expect(page.locator("#knowledge-memory-grid")).to_contain_text("Evolution packs")
                         expect(page.locator("#knowledge-memory-grid")).to_contain_text("Preserved typed memory evidence")
                     if tab == "ontology":
@@ -224,9 +235,9 @@ def audit(base_url: str, screenshot_path: Path) -> dict[str, object]:
                 shot = screenshot_path / f"knowledge-source-{width}.png"
                 page.screenshot(path=str(shot), full_page=width == 390)
                 screenshots.append(str(shot))
-                page.locator('[data-knowledge-tab="markdown"]').click()
+                page.locator('[data-knowledge-tab="memory"]').click()
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 2"), f"Overflow at {width}px"
-                assert page.url.endswith("/knowledge#markdown")
+                expect(page).to_have_url(f"{base_url}/knowledge#memory")
                 page.close()
             assert not errors, errors
             assert not retired_requests, retired_requests

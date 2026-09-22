@@ -200,9 +200,11 @@ def test_editor_load_does_not_reactivate_excluded_module(lifecycle):
 
 
 @pytest.mark.parametrize("handler", ["runtime.step_complete", "module.generated_adapter"])
-def test_attached_non_agent_module_stays_visible_without_borrowing_design_implementation(lifecycle, handler):
+def test_attached_non_agent_module_retains_metadata_without_design_execution_admission(lifecycle, handler):
     import yaml
     client, controller, _, graph_root = lifecycle
+    registry = controller._deps.agent_registry
+    installed = registry.get_module("design").describe()
     path = graph_root / "modules/design/module.yaml"
     payload = yaml.safe_load(path.read_text())
     payload["module"]["handler"] = handler
@@ -212,5 +214,11 @@ def test_attached_non_agent_module_stays_visible_without_borrowing_design_implem
     manifests = client.get("/api/runtime/agent-manifests").json()["agents"]
     design = next(item for item in manifests if item["id"] == "design")
     assert design["handler"] == handler
-    assert design["implementation"] is None
-    assert "design_agent" not in controller._deps.agent_registry.active_names()
+    # Implementation describes installed code, not admission to execute it.
+    assert design["implementation"] == installed
+    assert design["activation"]["included"] is True
+    assert design["activation"]["owner"] == ""
+    assert "design_agent" not in registry.active_names()
+    with pytest.raises(KeyError, match="inactive"):
+        registry.get("design_agent")
+    assert client.get("/module-assets/design/live_report.js").status_code == 404

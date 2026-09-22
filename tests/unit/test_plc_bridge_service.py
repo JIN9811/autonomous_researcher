@@ -370,7 +370,9 @@ async def test_monitor_reconciles_orphan_ack_after_read_only_preflight(
 
         assert await service.start() is True
         deadline = time.monotonic() + 1.0
-        while transport.writes != [("D102", 0)] and time.monotonic() < deadline:
+        # The D102 write precedes readback and publication of the reconciled
+        # state. Wait for the public completion condition, not an intermediate IO.
+        while service.status()["failure_code"] != "PLC_RECONCILIATION_REQUIRED" and time.monotonic() < deadline:
             await asyncio.sleep(0.001)
 
         assert transport.writes == [("D102", 0)]

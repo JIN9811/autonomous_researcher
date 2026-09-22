@@ -120,13 +120,18 @@ def test_build_bo_visualization_emits_shared_finite_contract() -> None:
 
 def test_build_bo_visualization_exposes_two_variable_gyroid_sea_contract() -> None:
     trace = _trace()
+    # The current fabrication contract varies wall thickness; density remains
+    # an objective metric, not a tunable geometry coordinate.
+    for point in [*trace["candidates"], *trace["evaluated_points"]]:
+        density = point["parameters"].pop("relative_density")
+        point["parameters"]["wall_thickness_mm"] = {0.2: 0.6, 0.3: 0.9, 0.4: 1.2}[density]
     trace.update(
         {
             "phase": "initial_design",
             "initial_design": {"sampler": "latin_hypercube", "target": 8, "completed": 2},
             "selected": {
                 "candidate_id": "candidate-003",
-                "parameters": {"relative_density": 0.40, "cell_size_mm": 7.5},
+                "parameters": {"wall_thickness_mm": 1.2, "cell_size_mm": 7.5},
             },
             "model": {
                 "kernel": "ScaleKernel(MaternKernel(nu=2.5, ard_num_dims=2))",
@@ -142,22 +147,22 @@ def test_build_bo_visualization_exposes_two_variable_gyroid_sea_contract() -> No
         parameter_space={
             "geometry_type": ["gyroid"],
             "cell_size_mm": [5.0, 6.0, 7.5, 10.0],
-            "relative_density": [0.20, 0.48],
+            "wall_thickness_mm": [0.6, 1.2],
             "orientation_deg": [0.0],
         },
         trace=trace,
-        selected_parameter="relative_density",
+        selected_parameter="wall_thickness_mm",
     )
 
     assert payload["design_space"] == {
         "dimension": 2,
-        "variables": ["cell_size_mm", "relative_density"],
+        "variables": ["cell_size_mm", "wall_thickness_mm"],
         "cell_size_kind": "discrete",
         "cell_size_rule": "discrete",
         "cell_size_bounds_mm": [],
         "cell_counts": [],
         "feasible_cell_sizes_mm": [5.0, 6.0, 7.5, 10.0],
-        "relative_density_bounds": [0.2, 0.48],
+        "wall_thickness_bounds_mm": [0.6, 1.2],
         "input_normalization": "unit_hypercube",
     }
     assert payload["initial_design"] == {
@@ -169,19 +174,19 @@ def test_build_bo_visualization_exposes_two_variable_gyroid_sea_contract() -> No
                 "index": 1,
                 "candidate_id": "candidate-001",
                 "status": "measured",
-                "parameters": {"relative_density": 0.20, "cell_size_mm": 5.0},
+                "parameters": {"wall_thickness_mm": 0.6, "cell_size_mm": 5.0},
             },
             {
                 "index": 2,
                 "candidate_id": "candidate-002",
                 "status": "measured",
-                "parameters": {"relative_density": 0.30, "cell_size_mm": 5.0},
+                "parameters": {"wall_thickness_mm": 0.9, "cell_size_mm": 5.0},
             },
             {
                 "index": 3,
                 "candidate_id": "candidate-003",
                 "status": "next",
-                "parameters": {"relative_density": 0.40, "cell_size_mm": 7.5},
+                "parameters": {"wall_thickness_mm": 1.2, "cell_size_mm": 7.5},
             },
         ],
     }

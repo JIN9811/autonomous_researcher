@@ -656,13 +656,14 @@ def test_joint_replay_rgbd_mirror_renderer_preplays_first_frame_before_render(tm
     assert summary["ok"] is True
     assert summary["preplay_count"] == 1
     assert summary["last_preplay"]["status"] == "preplay_stable"
-    post_paths = [call["path"] for call in calls if call["method"] == "POST"]
+    posts = [call for call in calls if call["method"] == "POST"]
+    post_paths = [call["path"] for call in posts]
     assert post_paths[:4] == ["/timeline/stop", "/specimen_pose", "/timeline/play", "/joints"]
     assert post_paths[4] == "/render"
-    preplay_joint_payload = calls[3]["payload"]
+    preplay_joint_payload = posts[3]["payload"]
     assert "render_request" not in preplay_joint_payload
     assert preplay_joint_payload["joint_state"]
-    first_render_payload = calls[4]["payload"]
+    first_render_payload = posts[4]["payload"]
     assert first_render_payload["render_request"]["frame_index"] == 0
 
 

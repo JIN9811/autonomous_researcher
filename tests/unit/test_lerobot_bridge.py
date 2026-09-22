@@ -368,12 +368,18 @@ def _write_mixed_isaac_lab_training_import(path: Path) -> None:
 
 
 def _mark_lerobot_dataset_v30(path: Path) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
     info_path = path / "meta" / "info.json"
     info = json.loads(info_path.read_text(encoding="utf-8"))
     info["codebase_version"] = "v3.0"
     info_path.write_text(json.dumps(info), encoding="utf-8")
     _write_raw_depth_manifest(path)
-    (path / "meta" / "tasks.parquet").write_bytes(b"PAR1")
+    pq.write_table(
+        pa.table({"task_index": [0], "task": ["Pick up the cylinder"]}),
+        path / "meta" / "tasks.parquet",
+    )
     (path / "meta" / "stats.json").write_text(
         json.dumps({"observation.state": {"q01": [0.0], "q99": [1.0], "count": [1]}, "action": {"q01": [0.0], "q99": [1.0], "count": [1]}}),
         encoding="utf-8",
@@ -383,7 +389,16 @@ def _mark_lerobot_dataset_v30(path: Path) -> None:
     ):
         target = path / rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(b"PAR1")
+        pq.write_table(
+            pa.table({
+                "episode_index": [0],
+                "tasks": [["Pick up the cylinder"]],
+                "length": [1],
+                "dataset_from_index": [0],
+                "dataset_to_index": [1],
+            }),
+            target,
+        )
 
 
 def _make_policy_checkpoint(path: Path, *, repo_id: str = "jin/demo_policy") -> None:
@@ -2870,9 +2885,13 @@ def test_live_teleoperate_blocks_missing_saved_realsense_camera_before_process_s
     assert result["ok"] is False
     assert result["failure_code"] == "LEROBOT_REALSENSE_CAMERA_UNAVAILABLE"
     assert "wrist=352122273019" in result["message"]
-    assert result["active_camera_lease"]["status"] == "blocked"
-    assert result["active_camera_lease"]["owner"] == "unknown"
-    assert result["active_camera_lease"]["conflict_reason"] == "LEROBOT_REALSENSE_CAMERA_UNAVAILABLE"
+    assert result["status"] == "blocked"
+    assert result["session_id"] == ""
+    assert result["command_preview"] == []
+    assert result["step_trace"] == [{
+        "step": "PRECHECK", "status": "blocked", "detail": "LEROBOT_REALSENSE_CAMERA_UNAVAILABLE",
+    }]
+    assert bridge.sessions_recent() == []
     assert "visible RealSense devices: 341522300873" in result["message"]
 
 
@@ -3712,6 +3731,7 @@ def test_pi05_live_train_uses_dedicated_hf_cache(tmp_path: Path) -> None:
     bridge = _bridge(tmp_path)
     dataset = tmp_path / "hf_datasets" / "jin" / "record-test"
     _make_trainable_lerobot_dataset(dataset)
+    _mark_lerobot_dataset_v30(dataset)
     captured: dict[str, object] = {}
     bridge._live_block_if_needed = lambda **_: None  # type: ignore[method-assign]
 
@@ -4414,7 +4434,13 @@ def test_train_progress_parses_compact_k_step_log(tmp_path: Path) -> None:
     assert status["training"]["last_loss"] == 0.019
 
 
-def test_train_progress_does_not_inflate_step_from_sample_count(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("batch_size", "expected_step", "expected_percent"),
+    [(0, 1000, 33.33), (32, 1031, 34.37), (64, 1000, 33.33)],
+)
+def test_train_progress_uses_batch_size_without_treating_sample_count_as_steps(
+    tmp_path: Path, batch_size: int, expected_step: int, expected_percent: float,
+) -> None:
     bridge = _bridge(tmp_path)
     log_path = tmp_path / "train.log"
     log_path.write_text("INFO step:1K smpl:33K ep:28 loss:0.017\n", encoding="utf-8")
@@ -4430,14 +4456,14 @@ def test_train_progress_does_not_inflate_step_from_sample_count(tmp_path: Path) 
         "log_path": str(log_path),
         "pid": None,
         "returncode": None,
-        "train_config": {"steps": 3000, "batch_size": 32},
+        "train_config": {"steps": 3000, "batch_size": batch_size},
     }
 
     status = bridge.train_status({"mode": "live", "profile_id": "fake_omx_ai", "session_id": "train-active"})
 
     assert status["ok"] is True
-    assert status["training"]["current_step"] == 1000
-    assert status["training"]["progress_percent"] == 33.33
+    assert status["training"]["current_step"] == expected_step
+    assert status["training"]["progress_percent"] == expected_percent
     assert status["training"]["last_loss"] == 0.017
 
 
@@ -7662,6 +7688,12 @@ def test_train_dataset_mix_defaults_are_sim2real_balanced_for_all_policies(tmp_p
         "schema": "atr.lerobot.fidelity_weights.v1",
         "enabled": True,
         "mode": "source_loss_weight",
+        "source_selection": {
+            "real_original": True,
+            "isaac_rgbd": True,
+            "isaac_augmentation": True,
+            "isaac_lab_synthetic": True,
+        },
         "weights": {"real_original": 1.0, "isaac_rgbd": 0.55, "isaac_augmentation": 0.0, "isaac_lab_synthetic": 0.25},
     }
     assert result["dataset_mix"]["effective_counts"] == {
@@ -8201,10 +8233,12 @@ def test_isaac_lab_mimic_and_rl_runner_endpoints_generate_training_sources(tmp_p
     assert mimic["mimic"]["runner"]["status"] == "completed"
     assert mimic["mimic"]["runner"]["dry_run"] is True
     assert mimic["mimic"]["runner"]["operation"] == "mimic_generate_dataset"
-    assert mimic["mimic"]["runner"]["generation_config"]["object_pose_randomization"]["workspace"] == "a4_sheet"
-    assert mimic["mimic"]["runner"]["generation_config"]["object_pose_randomization"]["bounds_m"] == {
-        "x": [-0.105, 0.105],
-        "y": [-0.1485, 0.1485],
+    assert mimic["mimic"]["runner"]["generation_config"]["object_pose_randomization"] == {
+        "workspace": "a4_sheet",
+        "enabled": False,
+        "bounds_m": {"x": [0.0, 0.0], "y": [0.0, 0.0]},
+        "yaw_bounds_rad": [0.0, 0.0],
+        "source": "recorded_specimen_pose",
     }
     assert mimic["mimic"]["runner"]["generation_config"]["success_filter"]["success_only"] is True
     assert mimic["mimic"]["runner"]["generation_config"]["success_filter"]["excluded_manifest"].endswith("mimic/failures.jsonl")

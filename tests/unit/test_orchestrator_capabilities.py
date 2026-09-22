@@ -114,7 +114,7 @@ async def test_setup_is_consumed_by_real_initial_design_and_run(monkeypatch):
     fresh = state()
     prior = {"constraints": {"cell_size_mm": 99}}
     fresh.run_metadata["next_design_request"] = deepcopy(prior)
-    changes = {"parameter_space": {"cell_size_mm": [6, 7], "relative_density": [.25, .30]},
+    changes = {"parameter_space": {"cell_size_mm": [6, 7], "wall_thickness_mm": [.6, .9]},
                "acquisition": "upper_confidence_bound"}
     owner.apply_setup(changes, fresh, "request")
     assert owner.read_setup(fresh)["acquisition"] == "upper_confidence_bound"
@@ -177,9 +177,10 @@ async def test_catalog_delegates_setup_and_reports_normalization():
     registry.register(OrchestratorAgent())
     catalog = capabilities.OwnerCatalog(registry, load_graph_config("graphs/configs/atr_closed_loop.yaml"))
     fresh = state()
-    validation = catalog.validate("bo_agent", {"parameter_space": {"relative_density": [.1, .4]}}, fresh)
+    validation = catalog.validate("bo_agent", {"parameter_space": {"wall_thickness_mm": [.6, .9]}}, fresh)
     assert validation["requires_confirmation"] is True
-    assert validation["values"]["parameter_space"]["relative_density"] == [.2, .4]
+    assert validation["values"]["parameter_space"]["wall_thickness_mm"] == [.6, .9]
+    assert validation["values"]["parameter_space"]["cell_size_mm"] == [5., 10.]
     await catalog.apply("bo_agent", {"acquisition": "exploration"}, fresh, "request")
     assert catalog.readback("bo_agent", fresh)["acquisition"] == "exploration"
     row = next(row for row in catalog.describe(fresh, None) if row["owner"] == "orchestrator_agent")

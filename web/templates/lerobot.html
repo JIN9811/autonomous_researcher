@@ -895,6 +895,12 @@ Modification guide:
               Rollout Duration Seconds (optional)
               <input id="lerobot-rollout-duration-input" type="number" min="1" step="1" placeholder="blank = run until Stop Rollout" />
             </label>
+            <label title="Transmit-only interpolation. Uses the action FPS as input; does not change inference or camera FPS. Applies to the next session.">
+              <span class="checkbox-inline"><input id="lerobot-rollout-linear-input" type="checkbox" /> Linear interpolation</span>
+              Output rate (Hz)
+              <input id="lerobot-rollout-linear-hz-input" type="number" min="1" max="100" step="1" value="100" aria-label="Inference linear interpolation output rate in Hz" />
+              <small>At least the action FPS; up to 100 Hz. Next session only.</small>
+            </label>
             <label>
               Safe Action Clamp
               <span class="input-action-row">
@@ -931,11 +937,11 @@ Modification guide:
             </label>
             <label>
               RTC Execution Horizon
-              <input id="lerobot-rollout-rtc-horizon-input" type="number" min="1" max="200" step="1" value="20" title="RTC execution horizon. Higher values help when inference latency is high." />
+              <input id="lerobot-rollout-rtc-horizon-input" type="number" min="1" max="200" step="1" value="10" title="RTC execution horizon. Higher values help when inference latency is high." />
             </label>
             <label>
               RTC Guidance Weight
-              <input id="lerobot-rollout-rtc-guidance-input" type="number" min="0" max="20" step="0.1" value="1.0" title="RTC maximum guidance weight." />
+              <input id="lerobot-rollout-rtc-guidance-input" type="number" min="0" max="20" step="0.1" value="10.0" title="RTC maximum guidance weight." />
             </label>
             <label>
               RTC Action Queue Refresh Threshold
@@ -1056,6 +1062,12 @@ Modification guide:
               Rollout Duration Seconds (optional)
               <input id="lerobot-manipulation-duration-input" type="number" min="1" step="1" placeholder="blank = run until Stop Rollout" />
             </label>
+            <label title="Saved per task. Uses the action FPS as input; does not change inference or camera FPS. Applies to the next session.">
+              <span class="checkbox-inline"><input id="lerobot-manipulation-linear-input" type="checkbox" /> Linear interpolation</span>
+              Output rate (Hz)
+              <input id="lerobot-manipulation-linear-hz-input" type="number" min="1" max="100" step="1" value="100" aria-label="Agent linear interpolation output rate in Hz" />
+              <small>At least the action FPS; up to 100 Hz. Next session only.</small>
+            </label>
             <label>
               Safe Action Clamp
               <span class="input-action-row">
@@ -1092,11 +1104,11 @@ Modification guide:
             </label>
             <label>
               RTC Execution Horizon
-              <input id="lerobot-manipulation-rtc-horizon-input" type="number" min="1" max="200" step="1" value="20" title="RTC execution horizon. Higher values help when inference latency is high." />
+              <input id="lerobot-manipulation-rtc-horizon-input" type="number" min="1" max="200" step="1" value="10" title="RTC execution horizon. Higher values help when inference latency is high." />
             </label>
             <label>
               RTC Guidance Weight
-              <input id="lerobot-manipulation-rtc-guidance-input" type="number" min="0" max="20" step="0.1" value="1.0" title="RTC maximum guidance weight." />
+              <input id="lerobot-manipulation-rtc-guidance-input" type="number" min="0" max="20" step="0.1" value="10.0" title="RTC maximum guidance weight." />
             </label>
             <label>
               RTC Action Queue Refresh Threshold
@@ -1494,6 +1506,6 @@ val=48-59</textarea>
         </article>
       </section>
     </main>
-    <script src="/static/lerobot.js?v=20260904-teleop-handoff-1" defer></script>
+    <script src="/static/lerobot.js?v=20260923-rtc-defaults-1" defer></script>
   </body>
 </html>

@@ -54,7 +54,7 @@ def simulated_vision_process(monkeypatch):
 
 
 @pytest.fixture
-def handoff_no_external(monkeypatch):
+def handoff_no_external(monkeypatch, tmp_path):
     """Opt-in physical/process denial, installed before a test bootstraps runtime.
 
     Only the scoped handoff suites opt in. Simulations replace registered I/O
@@ -64,6 +64,15 @@ def handoff_no_external(monkeypatch):
     import subprocess
     import json
     from types import SimpleNamespace
+    from utils import manipulation_profile
+
+    # Virtual handoff runs must not inherit an operator's persisted live robot
+    # options (for example, live-only linear interpolation). Keep the production
+    # validation enabled, and give each test its own initially empty profile.
+    monkeypatch.setattr(
+        manipulation_profile, "MANIPULATION_AGENT_PROFILE_PATH",
+        tmp_path / "manipulation_agent_bridge.json",
+    )
     def deny(*args, **kwargs):
         raise AssertionError("Unlisted external effect in handoff verification")
     monkeypatch.setattr(socket.socket, "connect", deny)

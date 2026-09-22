@@ -1,16 +1,33 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+from test_planning_design_report_js import _extract_function
 
 
 def test_live_gui_opens_each_pending_operator_teleop_handoff_once() -> None:
     script = Path("web/static/planning.js").read_text(encoding="utf-8")
-    template = Path("web/templates/planning.html").read_text(encoding="utf-8")
-
-    assert "function openPendingOperatorTeleopHandoff" in script
-    assert 'metadata.pending_operator_teleop_handoff' in script
-    assert 'handoff.status !== "pending_operator_teleop_handoff"' in script
-    assert 'window.open(handoff.popup_url, "atr-operator-teleop-handoff"' in script
-    assert "openedOperatorTeleopHandoffTokens.add(token)" in script
-    assert "openPendingOperatorTeleopHandoff(metadata)" in script
-    assert '/static/planning.js?v=20260904-teleop-handoff-1' in template
+    program = """
+const assert = require('node:assert/strict');
+const openedOperatorTeleopHandoffTokens = new Set();
+const popups = [], statuses = [];
+const window = {open: (...args) => {popups.push(args); return {};}};
+const setChatStatus = (...args) => statuses.push(args);
+""" + _extract_function(script, "openPendingOperatorTeleopHandoff") + """
+const metadata = {pending_operator_teleop_handoff: {
+  status: 'pending_operator_teleop_handoff', handoff_token: 'one', popup_url: '/lerobot?handoff=one'
+}};
+assert.equal(openPendingOperatorTeleopHandoff({}), false);
+assert.equal(openPendingOperatorTeleopHandoff(metadata), true);
+assert.equal(openPendingOperatorTeleopHandoff(metadata), false);
+assert.equal(popups.length, 1);
+assert.deepEqual(popups[0].slice(0, 2), ['/lerobot?handoff=one', 'atr-operator-teleop-handoff']);
+metadata.pending_operator_teleop_handoff.handoff_token = 'two';
+metadata.pending_operator_teleop_handoff.status = 'completed';
+assert.equal(openPendingOperatorTeleopHandoff(metadata), false);
+metadata.pending_operator_teleop_handoff.status = 'pending_operator_teleop_handoff';
+assert.equal(openPendingOperatorTeleopHandoff(metadata), true);
+assert.equal(popups.length, 2);
+"""
+    result = subprocess.run(["node", "-e", program], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

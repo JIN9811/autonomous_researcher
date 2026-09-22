@@ -31,6 +31,12 @@ def test_knowledge_projection_preserves_existing_metadata_precedence_and_shape()
                 "memory_intake": {"experiment_record_id": "metadata-record"},
                 "evidence_quality": {"artifact_link_coverage": 0.75},
                 "failure_patterns": [{"pattern_id": "failure-1"}],
+                "decision": {
+                    "schema": "knowledge_decision.v1",
+                    "status": "accepted",
+                    "summary": "Current experiment evidence retained",
+                    "citations": [{"source_id": "analysis:current"}],
+                },
             },
             "knowledge_context": {"schema": "knowledge_context.v1"},
             "evolution_proposal": {"schema": "evolution_proposal.v1", "evidence_packs": [{"target_type": "agent", "target_id": "vision"}]},
@@ -39,16 +45,32 @@ def test_knowledge_projection_preserves_existing_metadata_precedence_and_shape()
     }
     agent_payload = {"knowledge": {"knowledge_report": {"memory_intake": {"experiment_record_id": "stale"}}}}
     before = deepcopy(metadata)
+    agent_before = deepcopy(agent_payload)
 
     projected = KNOWLEDGE_MODULE.project_report(metadata, agent_payload)
 
     assert metadata == before
     assert projected["knowledge_report"]["memory_intake"]["experiment_record_id"] == "metadata-record"
     assert projected["knowledge_context"]["schema"] == "knowledge_context.v1"
-    assert projected["evolution_proposal"]["schema"] == "evolution_proposal.v1"
+    # Archived Evolution payloads must not become current Knowledge decisions.
+    assert "evolution_proposal" not in projected
     assert projected["role_specific"]["memory_ledger"]["experiment_record_id"] == "metadata-record"
-    assert projected["decisions"][0]["target_id"] == "vision"
+    assert projected["decisions"] == [{
+        "schema": "knowledge_decision.v1",
+        "status": "accepted",
+        "summary": "Current experiment evidence retained",
+        "citations": [{"source_id": "analysis:current"}],
+    }]
     assert projected["metrics"] == {"artifact_link_coverage": 0.75}
+    assert projected["role_specific"]["memory_ledger"]["artifact_paths"] == {
+        "knowledge_report": "knowledge/report.json",
+    }
+    projected["decisions"][0]["citations"].clear()
+    projected["role_specific"]["memory_ledger"]["artifact_paths"].clear()
+    projected["knowledge_report"]["memory_intake"]["experiment_record_id"] = "edited"
+    projected["metrics"]["artifact_link_coverage"] = 0
+    assert metadata == before
+    assert agent_payload == agent_before
 
 
 def test_guardian_projection_is_detached_and_keeps_existing_report_sections():
