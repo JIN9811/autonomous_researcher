@@ -57,6 +57,48 @@ function sandbox() {
   return context;
 }
 
+function progressItems(html) {
+  const body = html.match(/data-title="Agentic Progress"[^>]*>([\s\S]*?)<\/section>/)[1];
+  return [...body.matchAll(/class="ar-vis-agentic-step is-([^\"]+)"[\s\S]*?<strong>(.*?)<\/strong>/g)]
+    .map((match) => ({status: match[1], label: match[2]}));
+}
+
+test("Equipment progress keeps the cycle steps while runtime data arrives", () => {
+  const context = sandbox();
+  vm.runInContext(fs.readFileSync(asset, "utf8"), context);
+  const host = services();
+  let snapshot = {};
+  host.equipmentRuntimeState = () => ({snapshot, currentRunId: "run-current"});
+  const frontend = context.window.AX4LABEquipmentUI.createFrontend(host);
+  const render = () => frontend.renderDashboard({}, "running", "Equipment", {});
+  const initial = progressItems(render());
+  assert.equal(initial.length, 8);
+  assert.equal(new Set(initial.map((item) => item.label)).size, 8);
+  assert.ok(initial.every((item) => item.status === "waiting"));
+  snapshot = {
+    canonicalProjection: {execution_id: "skill-1", lifecycle: "EXECUTING", status: "running"},
+    canonicalExecution: {lifecycle_contract: {RESOLVING: ["BLOCKED", "EXECUTING"], EXECUTING: ["RECOVERING", "COMPLETED"]}},
+  };
+  assert.deepEqual(progressItems(render()), initial, "internal lifecycle must not replace cycle steps");
+  snapshot.canonicalExecution.metadata = {agentic_progress: "RECORDING"};
+  assert.deepEqual(progressItems(render()), initial, "authoring stages must not replace cycle steps");
+  snapshot.canonicalSkillFlow = {blocks: [
+    {id: "prepare_next_specimen", label: "Move Jigs for Next Specimen"},
+    {id: "start_test", label: "Start Test"},
+  ]};
+  snapshot.canonicalSkillFlowExecution = {
+    run_id: "run-current", active_node: "start_test.skill",
+    transitions: [{node_id: "prepare_next_specimen.skill", success: true, outcome: "completed"}],
+  };
+  assert.deepEqual(progressItems(render()), [
+    {label: "Move Jigs for Next Specimen", status: "complete"},
+    {label: "Start Test", status: "active"},
+  ], "received profile steps and current-run evidence remain authoritative");
+  snapshot.canonicalSkillFlowExecution.run_id = "old-run";
+  assert.ok(progressItems(render()).every((item) => item.status === "waiting"));
+  assert.equal((render().match(/data-title="Agentic Progress"/g) || []).length, 1);
+});
+
 test("installed Equipment owner renders the existing evidence and dashboard action contract", async () => {
   assert.ok(fs.existsSync(asset), "Equipment must own its frontend composition");
   const context = sandbox();
