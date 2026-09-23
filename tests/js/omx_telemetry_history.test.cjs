@@ -28,6 +28,18 @@ const sample = (sequence, elapsed_s = sequence - 1) => ({
   target_source: { Joint1: sequence + 1, Gripper: sequence % 100 + 1 },
 });
 
+test('legacy server snapshot cannot overwrite isolated worker grasp evidence', async () => {
+  const context = viewer(), {api} = context;
+  api.runtime.telemetryUrl = 'ws://worker/joints';
+  const evidence = {latest_grasp_outcome: {status: 'success'}};
+  api.runtime.artifacts = evidence;
+  context.fetch = async () => ({ok:true, json:async () => ({
+    artifacts:{latest_grasp_outcome:{status:'failed'}}, status:'idle'
+  })});
+  await api.loadSnapshot();
+  assert.equal(api.runtime.artifacts, evidence);
+});
+
 test('chart projection appends once and resets for a joint or session change without losing points', () => {
   const {api}=viewer();
   for(let i=1;i<=5000;i++) api.appendSample(sample(i));

@@ -20,10 +20,45 @@ import uvicorn
 def create_monitor_app(kind, config, token, latest):
     vision_sources = {}
     source_lock = threading.Lock()
+    task_snapshot = {}
+
+    async def refresh_legacy_task_state():
+        nonlocal task_snapshot
+        from utils.robot_task_metrics import read_task_state, merge_task_state, update_task_summary
+        while True:
+            state = latest[0].get('state', {})
+            if viewers and state.get('run_id') and state.get('task_progress_projection_version') != 1:
+                try:
+                    task_snapshot = await asyncio.to_thread(read_task_state, config.get('origins', []))
+                except (OSError, ValueError):
+                    task_snapshot = {}
+            else:
+                task_snapshot = {}
+            state = latest[0].get('state', {})
+            context = latest[0].get('context') or {}
+            if viewers and context.get('log_path') and (state.get('task_progress_projection_version') == 1
+                    or (task_snapshot.get('run_id') and task_snapshot.get('run_id') == state.get('run_id'))):
+                try:
+                    def update_summary():
+                        with artifact_lock:
+                            update_task_summary(context['log_path'], merge_task_state(state, task_snapshot))
+                    await asyncio.to_thread(update_summary)
+                except (OSError, ValueError):
+                    pass
+            await asyncio.sleep(5)
     # Imports stay in their own process/domain; no server/application import.
     @asynccontextmanager
     async def lifespan(app):
-        yield
+        refresh = asyncio.create_task(refresh_legacy_task_state()) if kind == 'robot' else None
+        try:
+            yield
+        finally:
+            if refresh is not None:
+                refresh.cancel()
+                try:
+                    await refresh
+                except asyncio.CancelledError:
+                    pass
         if kind == "video":
             with source_lock:
                 sources = list(vision_sources.values())
@@ -152,6 +187,7 @@ def create_monitor_app(kind, config, token, latest):
         from utils.lerobot_joint_telemetry import finalize_policy_tracking_artifacts
         from utils.manipulation_runtime_view import build_manipulation_runtime_view
         from utils.robot_monitor_stream import stream_robot_samples
+        from utils.robot_task_metrics import merge_task_state
         artifact_lock = threading.Lock()
 
         def current():
@@ -162,7 +198,10 @@ def create_monitor_app(kind, config, token, latest):
 
         def artifacts(path, session):
             with artifact_lock:
-                result = finalize_policy_tracking_artifacts(path, session)
+                # A live parent may still serve the old snapshot implementation.
+                # Keep revised display evidence separate from its legacy cache.
+                result = finalize_policy_tracking_artifacts(path, session,
+                    artifact_dir=path.parent / "grasp_display_v5")
             for key in ("plot_png_path", "summary_json_path", "raw_jsonl_path", "raw_csv_path", "grasp_outcomes_path"):
                 value = str(result.get(key) or "")
                 if value and Path(value).is_file():
@@ -183,7 +222,8 @@ def create_monitor_app(kind, config, token, latest):
                     reset=lambda: latest[0].get("reset_at_ms", 0),
                     public_session=lambda session: session,
                     runtime_view=lambda session, packet, artifacts=None: build_manipulation_runtime_view(
-                        session=session, packet=packet, artifacts=artifacts or {}, state=current().get("state", {})),
+                        session=session, packet=packet, artifacts=artifacts or {},
+                        state=merge_task_state(current().get("state", {}), task_snapshot)),
                     artifacts=artifacts)
             finally:
                 viewers -= 1

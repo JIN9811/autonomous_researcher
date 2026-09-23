@@ -481,9 +481,7 @@ def _grasp_attempt_samples(
         (start_s + 0.6, open_pose, policy),
         (start_s + 1.2, closing_pose, policy),
         (start_s + 1.8, contact_pose, policy),
-        (start_s + 2.4, contact_pose, policy),
-        (start_s + 2.65, contact_pose, policy),
-    ]
+    ] + [(start_s + 1.8 + i / 10, contact_pose, policy) for i in range(1, 13)]
 
 
 def _append_release_samples(
@@ -705,7 +703,7 @@ def test_grasp_outcome_enters_pending_then_succeeds_from_contact_gap() -> None:
     result = packets[-1]["motion_state"]["grasp_outcome"]
     assert result == {
         "status": "success",
-        "reason": "absolute gripper gap met contact threshold",
+        "reason": "closing contact gap sustained for 1.0 s",
         "attempt_index": 1,
         "observation_only": True,
         "contact_gap": pytest.approx(3.5),
@@ -714,12 +712,12 @@ def test_grasp_outcome_enters_pending_then_succeeds_from_contact_gap() -> None:
         "policy_target_gripper": pytest.approx(50.0),
         "transport_overlap": False,
         "started_s": pytest.approx(1.2),
-        "completed_s": pytest.approx(2.65),
+        "completed_s": pytest.approx(2.8),
     }
 
 
-@pytest.mark.parametrize("gap,status", [(1.19, "failed"), (1.2, "success"),
-    (1.4273458627554092, "success"), (1.7986906515081884, "success"), (-1.43, "success")])
+@pytest.mark.parametrize("gap,status", [(1.19, "pending"), (1.2, "success"),
+    (1.4273458627554092, "success"), (1.7986906515081884, "success"), (-1.43, "pending")])
 def test_grasp_contact_display_threshold_preserves_observation_only(gap, status):
     packets = _annotated_sequence(
         _grasp_attempt_samples(measured_gripper=50.0 + gap, policy_gripper=50.0)
@@ -730,22 +728,23 @@ def test_grasp_contact_display_threshold_preserves_observation_only(gap, status)
 
 
 def test_grasp_outcome_fails_when_contact_gap_is_below_threshold() -> None:
-    packets = _annotated_sequence(
-        _grasp_attempt_samples(measured_gripper=50.1, policy_gripper=50.0)
-    )
+    samples = _grasp_attempt_samples(measured_gripper=50.1, policy_gripper=50.0)
+    _append_release_samples(samples, start_s=33.25)
+    packets = _annotated_sequence(samples)
 
     result = packets[-1]["motion_state"]["grasp_outcome"]
     assert result["status"] == "failed"
-    assert result["reason"] == "absolute gripper gap below required threshold"
+    assert result["reason"] == "released before sustained contact was confirmed"
     assert result["contact_gap"] == pytest.approx(0.1)
     assert result["transport_overlap"] is False
 
 
 def test_grasp_threshold_update_reclassifies_cached_failure_from_unchanged_log(tmp_path, monkeypatch):
     path = tmp_path / "motor_events.jsonl"
+    samples = _grasp_attempt_samples(measured_gripper=51.43)
+    _append_release_samples(samples, start_s=33.25)
     rows = [_pose_event(i, t, actual=actual, target=target)
-            for i, (t, actual, target) in enumerate(
-                _grasp_attempt_samples(measured_gripper=51.43), 1)]
+            for i, (t, actual, target) in enumerate(samples, 1)]
     _write_jsonl(path, rows)
     session = {"session_id": "cached-contact", "status": "STOPPED"}
     with monkeypatch.context() as old:
@@ -766,19 +765,19 @@ def test_grasp_outcome_ignores_arm_transport_when_contact_gap_is_sufficient() ->
 
     result = packets[-1]["motion_state"]["grasp_outcome"]
     assert result["status"] == "success"
-    assert result["reason"] == "absolute gripper gap met contact threshold"
+    assert result["reason"] == "closing contact gap sustained for 1.0 s"
     assert result["contact_gap"] == pytest.approx(3.5)
     assert result["transport_overlap"] is True
 
 
-def test_grasp_outcome_uses_absolute_gripper_gap() -> None:
+def test_grasp_outcome_rejects_reverse_direction_gripper_gap() -> None:
     packets = _annotated_sequence(
         _grasp_attempt_samples(measured_gripper=47.5, policy_gripper=50.0)
     )
 
     result = packets[-1]["motion_state"]["grasp_outcome"]
-    assert result["status"] == "success"
-    assert result["contact_gap"] == pytest.approx(2.5)
+    assert result["status"] == "pending"
+    assert result["contact_gap"] == pytest.approx(-2.5)
 
 
 def test_grasp_outcome_does_not_count_transport_starting_on_completion_packet() -> None:
@@ -833,8 +832,7 @@ def test_first_success_achievement_preserves_attempts_and_artifact_replay(tmp_pa
     samples = []
     for i, value in enumerate(measured):
         samples.extend(_grasp_attempt_samples(start_s=100 + i * 5, measured_gripper=value))
-        if i == 0:
-            _append_release_samples(samples, start_s=103.25)
+        _append_release_samples(samples, start_s=103.25 + i * 5)
     rows = [_pose_event(i, t, actual=a, target=b) for i, (t, a, b) in enumerate(samples, 1)]
     packets = _annotated_sequence(samples)
     expected_index = next((i for i, v in enumerate(measured, 1) if abs(v - 50) >= 2), None)

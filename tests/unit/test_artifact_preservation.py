@@ -87,6 +87,26 @@ def test_recording_is_not_completed_or_rendered(tmp_path):
     assert not (directory/'preserved').exists()
 
 
+def test_manipulation_prefers_reclassified_display_artifacts_and_refreshes_receipt(tmp_path):
+    run, directory, _ = execution(tmp_path, 'manipulation')
+    stream = directory / 'streams/s'
+    stream.mkdir(parents=True)
+    (stream / 'session.json').write_text('{"session_id":"s","status":"STOPPED"}')
+    (stream / 'policy_tracking.png').write_bytes(b'old graph')
+    revised = stream / 'grasp_display_v5'
+    revised.mkdir()
+    for name in ['policy_tracking.png', 'policy_tracking_summary.json', 'grasp_outcomes.json']:
+        (revised / name).write_bytes(b'new derived evidence')
+    receipt = preserve_execution(run, directory / 'manifest.json')
+    paths = {item['path'] for item in receipt['generated']}
+    assert len(paths) == 3
+    assert all('/grasp_display_v5/' in path for path in paths)
+    (revised / 'policy_tracking_summary.json').write_text('{"task_progress":{"success_count":2}}')
+    refreshed = preserve_execution(run, directory / 'manifest.json')
+    summary = next(item for item in refreshed['generated'] if item['path'].endswith('policy_tracking_summary.json'))
+    assert summary['sha256'] == digest(revised / 'policy_tracking_summary.json')
+
+
 def test_missing_canonical_is_explicit_not_synthetic(tmp_path):
     run,directory,_=execution(tmp_path)
     result=preserve_execution(run,directory/'manifest.json')

@@ -80,6 +80,9 @@ def preserve_execution(run_dir, manifest_path):
     source_hash = digest(result_path)
     manifest_hash = digest(manifest_path)
     stream_hashes = {str(p.relative_to(run)): digest(_inside(run, p)) for p in directory.glob('streams/*/session.json')}
+    for p in directory.glob('streams/*/grasp_display_v5/*'):
+        if p.is_file() and p.name in {'policy_tracking.png', 'policy_tracking_summary.json', 'grasp_outcomes.json'}:
+            stream_hashes[str(p.relative_to(run))] = digest(_inside(run, p))
     output = _inside(run, directory / 'preserved')
     output.mkdir(exist_ok=True)
     if any(path.is_symlink() for path in output.rglob('*')):
@@ -164,6 +167,12 @@ def preserve_execution(run_dir, manifest_path):
             session = json.loads(stream_path.read_text())
             if str(session.get('status', '')).upper() in {'COMPLETED', 'STOPPED', 'FAILED', 'CANCELLED'}:
                 log = _inside(run, stream_path.parent / 'motor_events.jsonl')
+                revised = _inside(run, stream_path.parent / 'grasp_display_v5')
+                if all((revised / name).is_file() for name in (
+                        'policy_tracking.png', 'policy_tracking_summary.json', 'grasp_outcomes.json')):
+                    for name in ('policy_tracking.png', 'policy_tracking_summary.json', 'grasp_outcomes.json'):
+                        record(revised / name, str(log.relative_to(run)))
+                    continue
                 graph = _inside(run, stream_path.parent / 'policy_tracking.png')
                 if log.is_file() and not graph.is_file():
                     from utils.lerobot_joint_telemetry import finalize_policy_tracking_artifacts

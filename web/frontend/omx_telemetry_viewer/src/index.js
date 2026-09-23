@@ -604,7 +604,6 @@ function applySpecimenGraspVisualization(outcome, measuredMotion, viewer = runti
     state.original = null;
     captureSpecimenOrigin(viewer, specimen);
     state.poseLocked = true;
-    attachSpecimenToGripper(viewer);
     setGripperOutcomeGlow("idle", viewer);
     return true;
   }
@@ -619,6 +618,10 @@ function applySpecimenGraspVisualization(outcome, measuredMotion, viewer = runti
 
   if (status === "success") {
     if (gripperState === "ungrasping") {
+      // A backfill may first expose success at release; use this sample's pose.
+      if (!state.held && state.releasedAttemptIndex !== state.attemptIndex) {
+        attachSpecimenToGripper(viewer);
+      }
       releaseSpecimenFromGripper(viewer);
       setGripperOutcomeGlow("idle", viewer);
       return true;
@@ -1579,6 +1582,9 @@ async function loadSnapshot() {
     const response = await fetch(SNAPSHOT_URL, { cache: "no-store" });
     if (!response.ok) return;
     const payload = await response.json();
+    // An isolated worker owns display interpretation and may be hotfixed while
+    // the experiment server intentionally retains its older snapshot code.
+    if (runtime.telemetryUrl) return;
     // The socket may have delivered newer state while HTTP was in flight.
     if (runtime.latestSequence !== requestedSequence || runtime.sessionId !== requestedSession) return;
     if (Number(payload.reset_at_ms || 0) < runtime.resetAtMs) return;

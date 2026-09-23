@@ -27794,7 +27794,6 @@ void main() {
       state.original = null;
       captureSpecimenOrigin(viewer, specimen);
       state.poseLocked = true;
-      attachSpecimenToGripper(viewer);
       setGripperOutcomeGlow("idle", viewer);
       return true;
     }
@@ -27807,6 +27806,9 @@ void main() {
     }
     if (status === "success") {
       if (gripperState === "ungrasping") {
+        if (!state.held && state.releasedAttemptIndex !== state.attemptIndex) {
+          attachSpecimenToGripper(viewer);
+        }
         releaseSpecimenFromGripper(viewer);
         setGripperOutcomeGlow("idle", viewer);
         return true;
@@ -28673,6 +28675,7 @@ void main() {
       const response = await fetch(SNAPSHOT_URL, { cache: "no-store" });
       if (!response.ok) return;
       const payload = await response.json();
+      if (runtime.telemetryUrl) return;
       if (runtime.latestSequence !== requestedSequence || runtime.sessionId !== requestedSession) return;
       if (Number(payload.reset_at_ms || 0) < runtime.resetAtMs) return;
       if (Number(payload.reset_at_ms || 0) > runtime.resetAtMs) consumePacket({ ...payload, type: "telemetry_state" });

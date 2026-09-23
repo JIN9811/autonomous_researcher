@@ -2398,9 +2398,11 @@ def _manipulation_runtime_state() -> dict[str, Any]:
         "stage": state.stage.value,
         "safe_stop_requested": state.safe_stop_requested,
         "emergency_stop_requested": state.emergency_stop_requested,
+        "task_progress_projection_version": 1,
         "run_metadata": {
             key: metadata[key]
-            for key in ("manipulation_report", "robot_task_result")
+            for key in ("manipulation_report", "robot_task_result", "manipulation_task_progress",
+                        "initial_manipulation_execution", "manipulation_execution", "utm_clear_execution")
             if isinstance(metadata.get(key), dict)
         },
     }

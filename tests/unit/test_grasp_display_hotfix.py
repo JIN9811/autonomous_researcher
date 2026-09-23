@@ -5,13 +5,17 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_grasp_display_hotfix_leaves_live_workflow_untouched(monkeypatch):
+async def test_grasp_display_hotfix_leaves_live_workflow_untouched(monkeypatch, tmp_path):
     from app import safe_hot_reload
     from utils import lerobot_joint_telemetry as telemetry
     from utils import monitor_process
 
     monkeypatch.setattr(telemetry, "GRASP_CONTACT_GAP_THRESHOLD", 2.0)
     monkeypatch.setattr(telemetry, "GRASP_OUTCOME_RULE_VERSION", "absolute_contact_gap_v3")
+    # Exercise the historical constants-only migration with its approved source.
+    source = tmp_path / "telemetry.py"
+    source.write_text('GRASP_CONTACT_GAP_THRESHOLD = 1.2\nGRASP_OUTCOME_RULE_VERSION = "absolute_contact_gap_v4"\n')
+    monkeypatch.setattr(telemetry, "__file__", str(source))
     closed = []
     worker = SimpleNamespace(close=lambda: closed.append("robot"))
     monkeypatch.setattr(monitor_process, "existing_monitor_process", lambda kind: worker if kind == "robot" else None)
@@ -25,8 +29,10 @@ async def test_grasp_display_hotfix_leaves_live_workflow_untouched(monkeypatch):
     assert controller._state is state
     assert state == {"run_id": "active-run", "stage": "manipulation", "is_running": True}
     latch = telemetry._GraspOutcomeLatch()
-    telemetry._finalize_grasp_outcome(latch, {"actual_source": {"Gripper": 53.84615384615385},
-        "target_source": {"Gripper": 52.41880798339844}})
+    for i in range(11):
+        telemetry._finalize_grasp_outcome(latch, {"monotonic_s": i / 10,
+            "actual_source": {"Gripper": 53.84615384615385},
+            "target_source": {"Gripper": 52.41880798339844}})
     assert latch.current["status"] == "success"
     assert latch.current["observation_only"] is True
 

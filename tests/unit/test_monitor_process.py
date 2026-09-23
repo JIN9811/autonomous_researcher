@@ -79,8 +79,30 @@ def test_robot_worker_publishes_real_graph_artifacts_from_saved_samples(tmp_path
             assert result["type"] == "telemetry_artifacts"
             assert result["artifacts"]["ok"]
             assert result["artifacts"]["plot_png_url"].startswith("/api/lerobot/visualization/file?")
-    assert (tmp_path / "policy_tracking.png").is_file()
-    assert json.loads((tmp_path / "policy_tracking_summary.json").read_text())["sample_count"] == 4
+    artifact_dir = tmp_path / "grasp_display_v5"
+    assert (artifact_dir / "policy_tracking.png").is_file()
+    assert json.loads((artifact_dir / "policy_tracking_summary.json").read_text())["sample_count"] == 4
+    assert not (tmp_path / "policy_tracking_summary.json").exists()
+    assert result["artifacts"]["grasp_outcome_rule_version"] == "sustained_closing_contact_v5"
+
+
+def test_completed_robot_stream_refreshes_task_totals_without_new_joint_samples(tmp_path):
+    path = tmp_path / 'motor_events.jsonl'
+    path.write_text(json.dumps(_action_event(1, 100)) + '\n')
+    state = {'run_id': 'r', 'task_progress_projection_version': 1, 'run_metadata': {}}
+    latest = [{'state': state, 'context': {'session': {'session_id': 's', 'status': 'COMPLETED'},
+                                         'log_path': str(path)}}, time.monotonic()]
+    app = create_monitor_app('robot', {'origins': ['http://localhost:7860']}, 'key', latest)
+    with TestClient(app) as client:
+        with client.websocket_connect('/key/joints', headers={'origin': 'http://localhost:7860'}) as ws:
+            ws.receive_json()
+            assert ws.receive_json()['type'] == 'telemetry_artifacts'
+            assert ws.receive_json()['type'] == 'telemetry_state'
+            state['run_metadata']['manipulation_task_progress'] = {'one': {
+                'run_id': 'r', 'session_id': 's', 'state': 'done', 'success': True}}
+            packet = ws.receive_json()
+            assert packet['runtime_view']['metrics']['task_progress']['success_count'] == 1
+            assert packet['type'] == 'telemetry_state'
 
 
 def test_delayed_publisher_keeps_pose_and_log_without_replaying_history(tmp_path):

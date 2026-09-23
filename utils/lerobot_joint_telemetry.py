@@ -17,8 +17,10 @@ TELEMETRY_SCHEMA = "atr.robot_joint_telemetry.v1"
 ARTIFACT_SCHEMA = "atr.policy_tracking_artifact.v1"
 GRASP_OUTCOME_SCHEMA = "atr.grasp_outcomes.v1"
 GRASP_ACHIEVEMENT_SCHEMA = "atr.grasp_achievement.v1"
-GRASP_OUTCOME_RULE_VERSION = "absolute_contact_gap_v4"
+GRASP_OUTCOME_RULE_VERSION = "sustained_closing_contact_v5"
 GRASP_CONTACT_GAP_THRESHOLD = 1.2
+GRASP_CONTACT_HOLD_S = 1.0
+GRASP_CONTACT_MAX_SAMPLE_GAP_S = 0.25
 JOINT_NAMES = tuple(str(item["isaac_joint_name"]) for item in ISAAC_OMX_JOINT_MAP)
 TERMINAL_SESSION_STATUSES = {"STOPPED", "FAILED", "COMPLETED", "CANCELLED", "DATASET_COMPLETE"}
 SOURCE_JOINT_KEYS = {
@@ -249,6 +251,8 @@ class _GraspOutcomeLatch:
     awaiting_evidence: bool = False
     previous_gripper_state: str = "idle"
     last_time_s: float | None = None
+    contact_started_s: float | None = None
+    last_evidence_s: float | None = None
     current: dict[str, Any] = field(default_factory=_grasp_outcome_state)
     completed_attempts: list[dict[str, Any]] = field(default_factory=list)
 
@@ -258,6 +262,8 @@ class _GraspOutcomeLatch:
         self.awaiting_evidence = False
         self.previous_gripper_state = "idle"
         self.last_time_s = None
+        self.contact_started_s = None
+        self.last_evidence_s = None
         self.current = _grasp_outcome_state()
         self.completed_attempts.clear()
 
@@ -420,9 +426,16 @@ def _packet_elapsed_s(packet: Mapping[str, Any]) -> float:
 
 
 def _finalize_grasp_outcome(latch: _GraspOutcomeLatch, packet: Mapping[str, Any]) -> None:
+    """Accumulate signed closing contact, including the stationary hold phase."""
+    current_time = _safe_float(packet.get("monotonic_s"), 0.0)
     measured = _gripper_value(packet, "actual_source")
     target = _gripper_value(packet, "target_source")
+    previous_time = latch.last_evidence_s
+    latch.last_evidence_s = current_time
+    if previous_time is None or current_time - previous_time > GRASP_CONTACT_MAX_SAMPLE_GAP_S:
+        latch.contact_started_s = None
     if measured is None or target is None:
+        latch.contact_started_s = None
         latch.awaiting_evidence = True
         latch.current.update(
             {
@@ -436,13 +449,21 @@ def _finalize_grasp_outcome(latch: _GraspOutcomeLatch, packet: Mapping[str, Any]
         )
         return
 
-    contact_gap = abs(measured - target)
-    if contact_gap < GRASP_CONTACT_GAP_THRESHOLD:
-        status = "failed"
-        reason = "absolute gripper gap below required threshold"
+    # A closing gripper blocked by contact stays MORE open than its target.
+    # Opposite-direction tracking lag is not evidence of grasping an object.
+    contact_gap = measured - target
+    if contact_gap >= GRASP_CONTACT_GAP_THRESHOLD:
+        if latch.contact_started_s is None:
+            latch.contact_started_s = current_time
     else:
+        latch.contact_started_s = None
+    held_for_s = _elapsed_since(latch.contact_started_s, current_time)
+    if latch.contact_started_s is not None and held_for_s >= GRASP_CONTACT_HOLD_S - 1e-9:
         status = "success"
-        reason = "absolute gripper gap met contact threshold"
+        reason = "closing contact gap sustained for 1.0 s"
+    else:
+        status = "pending"
+        reason = "waiting for closing contact gap sustained for 1.0 s"
     latch.awaiting_evidence = False
     latch.current.update(
         {
@@ -451,10 +472,11 @@ def _finalize_grasp_outcome(latch: _GraspOutcomeLatch, packet: Mapping[str, Any]
             "contact_gap": contact_gap,
             "measured_gripper": measured,
             "policy_target_gripper": target,
-            "completed_s": _packet_elapsed_s(packet),
+            "completed_s": _packet_elapsed_s(packet) if status == "success" else None,
         }
     )
-    latch.completed_attempts.append(dict(latch.current))
+    if status == "success":
+        latch.completed_attempts.append(dict(latch.current))
 
 
 def _update_grasp_outcome(
@@ -469,12 +491,14 @@ def _update_grasp_outcome(
     gripper_state = str(measured_motion.get("gripper_state") or "idle")
 
     entering_grasp = gripper_state == "grasping" and latch.previous_gripper_state != "grasping"
-    if entering_grasp:
+    if entering_grasp and not latch.active:
         if latch.attempt_index and latch.current.get("status") == "pending":
             latch.completed_attempts.append(dict(latch.current))
         latch.attempt_index += 1
         latch.active = True
         latch.awaiting_evidence = False
+        latch.contact_started_s = None
+        latch.last_evidence_s = None
         latch.current = _grasp_outcome_state(
             status="pending",
             reason="measured grasp in progress",
@@ -484,24 +508,18 @@ def _update_grasp_outcome(
             started_s=_packet_elapsed_s(packet),
         )
 
-    leaving_grasp = (
-        latch.active
-        and latch.previous_gripper_state == "grasping"
-        and gripper_state != "grasping"
-    )
-    if latch.active:
-        latch.current["measured_gripper"] = _gripper_value(packet, "actual_source")
-        latch.current["policy_target_gripper"] = _gripper_value(packet, "target_source")
-        if (
-            not leaving_grasp
-            and _safe_float(measured_motion.get("arm_speed"), 0.0) >= ARM_MOTION_ENTER_THRESHOLD
-        ):
-            latch.current["transport_overlap"] = True
-
-    if leaving_grasp:
+    if latch.active and gripper_state == "ungrasping":
+        # Release ends the contact window; opening lag must not create success.
+        if latch.current.get("status") == "pending":
+            latch.current.update(status="failed", reason="released before sustained contact was confirmed",
+                                 completed_s=_packet_elapsed_s(packet))
+            latch.completed_attempts.append(dict(latch.current))
         latch.active = False
-        _finalize_grasp_outcome(latch, packet)
-    elif latch.awaiting_evidence:
+        latch.awaiting_evidence = False
+        latch.contact_started_s = None
+    elif latch.active and latch.current.get("status") == "pending":
+        if _safe_float(measured_motion.get("arm_speed"), 0.0) >= ARM_MOTION_ENTER_THRESHOLD:
+            latch.current["transport_overlap"] = True
         _finalize_grasp_outcome(latch, packet)
 
     latch.previous_gripper_state = gripper_state
@@ -1130,8 +1148,10 @@ def _write_grasp_outcome_artifact(
     session: Mapping[str, Any],
     attempts: list[dict[str, Any]],
     stat: Any,
+    artifact_dir: Path | None = None,
 ) -> dict[str, Any]:
-    artifact_path = log_path.with_name("grasp_outcomes.json")
+    artifact_path = (artifact_dir or log_path.parent) / "grasp_outcomes.json"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema": GRASP_OUTCOME_SCHEMA,
         "rule_version": GRASP_OUTCOME_RULE_VERSION,
@@ -1178,16 +1198,18 @@ def finalize_grasp_outcome_artifact(path: Path | str, session: Mapping[str, Any]
     return _write_grasp_outcome_artifact(log_path, session, attempts, stat)
 
 
-def finalize_policy_tracking_artifacts(path: Path | str, session: Mapping[str, Any]) -> dict[str, Any]:
+def finalize_policy_tracking_artifacts(path: Path | str, session: Mapping[str, Any], *,
+                                      artifact_dir: Path | None = None) -> dict[str, Any]:
     """Write an idempotent six-joint publication figure and metric summary."""
 
     log_path = Path(path).expanduser().resolve()
     if not log_path.is_file():
         return {"ok": False, "failure_code": "JOINT_TELEMETRY_LOG_NOT_FOUND", "path": str(log_path)}
     stat = log_path.stat()
-    png_path = log_path.with_name("policy_tracking.png")
-    summary_path = log_path.with_name("policy_tracking_summary.json")
-    grasp_path = log_path.with_name("grasp_outcomes.json")
+    output = artifact_dir or log_path.parent
+    png_path = output / "policy_tracking.png"
+    summary_path = output / "policy_tracking_summary.json"
+    grasp_path = output / "grasp_outcomes.json"
     cached_summary = _read_json(summary_path)
     if (
         cached_summary.get("source_size") == stat.st_size
@@ -1208,7 +1230,7 @@ def finalize_policy_tracking_artifacts(path: Path | str, session: Mapping[str, A
 
     metrics = _tracking_metrics(packets)
     source_metrics = _source_tracking_metrics(packets)
-    grasp_artifact = _write_grasp_outcome_artifact(log_path, session, grasp_attempts, stat)
+    grasp_artifact = _write_grasp_outcome_artifact(log_path, session, grasp_attempts, stat, artifact_dir=output)
     _write_tracking_figure(packets, png_path, session_id=str(session.get("session_id") or log_path.parent.name))
     summary = {
         "schema": ARTIFACT_SCHEMA,
@@ -1260,6 +1282,9 @@ def _artifact_response(summary: Mapping[str, Any], *, cached: bool) -> dict[str,
         "raw_jsonl_path": str(summary.get("raw_jsonl_path") or ""),
         "raw_csv_path": str(summary.get("raw_csv_path") or ""),
         "grasp_outcomes_path": str(summary.get("grasp_outcomes_path") or ""),
+        "grasp_outcome_rule_version": str(summary.get("grasp_outcome_rule_version") or ""),
+        "task_progress": dict(summary.get("task_progress") or {}),
+        "task_progress_run_id": str(summary.get("task_progress_run_id") or ""),
         "grasp_outcomes": dict(summary.get("grasp_outcomes") or empty_grasp_outcome_summary()),
         "latest_grasp_outcome": dict(summary.get("latest_grasp_outcome") or _grasp_outcome_state()),
         "grasp_achievement": dict(summary.get("grasp_achievement") or {}),

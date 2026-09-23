@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 from starlette.websockets import WebSocketDisconnect
@@ -41,6 +42,9 @@ async def stream_robot_samples(socket, *, context, reset, public_session, runtim
                 status = "stale"
             base = {"ok": True, "schema": TELEMETRY_SCHEMA, "reset_at_ms": reset_ms,
                     "status": status, "publisher_stale": not fresh, "session": public_session(session)}
+            view = runtime_view(session, latest)
+            state_signature = (identity, status, session.get("status"), fresh,
+                               json.dumps(view.get('metrics', {}).get('task_progress', {}), sort_keys=True))
             if selected and (packets or not history_sent):
                 batches = ([packets[i:i + 128] for i in range(0, len(packets), 128)] or [[]]) if compact else [packets]
                 for batch in batches:
@@ -48,9 +52,9 @@ async def stream_robot_samples(socket, *, context, reset, public_session, runtim
                                             **build_joint_telemetry_batch(batch, compact=compact),
                                             "runtime_view": runtime_view(session, batch[-1] if batch else latest)})
                     history_sent = True
-            elif signature != (identity, status, session.get("status")):
-                await socket.send_json({**base, "type": "telemetry_state", "runtime_view": runtime_view(session, latest)})
-                signature = (identity, status, session.get("status"))
+            elif signature != state_signature:
+                await socket.send_json({**base, "type": "telemetry_state", "runtime_view": view})
+                signature = state_signature
             if selected and str(session.get("status") or "").upper() in TERMINAL_SESSION_STATUSES and not finalized:
                 result = await asyncio.to_thread(artifacts, Path(selected["log_path"]), session)
                 await socket.send_json({**base, "ok": bool(result.get("ok")), "type": "telemetry_artifacts",
