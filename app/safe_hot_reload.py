@@ -115,6 +115,9 @@ async def reload_equipment_support(controller):
     if printer_wait_failed(controller):
         return await reload_printer_wait_support(controller)
     if controller._state.stage == Stage.GUARDIAN and controller._state.is_paused:
+        from app.equipment_entry_resume import matches, hot_reload
+        if matches(controller._state):
+            return await hot_reload(controller)
         return await reload_selection_review(controller)
     assert_idle(controller)
     sources = supported_sources()

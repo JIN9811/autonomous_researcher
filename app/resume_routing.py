@@ -18,6 +18,9 @@ async def dispatch(controller):
     if controller._active_safety_sources() or any(getattr(state, key) for key in
             ('stop_requested', 'safe_stop_requested', 'emergency_stop_requested')):
         return {'ok': False, 'status': 'blocked', 'message': 'Use the existing safety recovery controls first.'}
+    from app.equipment_entry_resume import matches, resume as resume_equipment_entry
+    if matches(state):
+        return await resume_equipment_entry(controller)
     task = getattr(controller, '_run_task', None)
     active = controller._planning_handoff_active() or (task is not None and not task.done())
     if active:
