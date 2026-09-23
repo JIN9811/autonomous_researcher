@@ -15540,6 +15540,7 @@ function renderAgentSpecializedDashboardSections(session, report, status, agentL
 
 function renderLiveDashboardReportSections(session, report, status, agentLabel) {
   const specializedCards = renderAgentSpecializedDashboardSections(session, report, status, agentLabel);
+  if (String(liveSelectedAgent || "").toLowerCase() === "orchestrator") return specializedCards;
   const needsAttention = report.warnings.length || (liveApprovals.pending || []).length;
   const supportCards = renderDashboardCard("Runtime Support", renderRuntimeSupportCard(report, status), {
     span: 12, tone: needsAttention ? "warning" : "metrics", eyebrow: "runtime + trace summary",
@@ -15593,6 +15594,11 @@ function syncLiveReportAttributes(current, next, options = {}) {
   });
   Array.from(next.attributes || []).forEach((attribute) => {
     if (protectedAttribute(attribute.name)) return;
+    // A video reconnect owns only its retry nonce; periodic report patches must
+    // not replace that live connection with the original (ended) request.
+    if (attribute.name === "src" && current.matches?.('.ar-spm-video-stream')
+        && /[?&]video_retry=/.test(current.getAttribute("src") || "")
+        && (current.getAttribute("src") || "").replace(/[?&]video_retry=[^&]*/g, "") === attribute.value) return;
     if (current.getAttribute(attribute.name) !== attribute.value) current.setAttribute(attribute.name, attribute.value);
   });
 }

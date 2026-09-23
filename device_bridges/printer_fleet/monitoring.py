@@ -8,7 +8,11 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
+from logging.handlers import RotatingFileHandler
 import os
+from pathlib import Path
+import re
 import ssl
 import subprocess
 import threading
@@ -168,7 +172,9 @@ def read_mqtt_monitor(mqtt, config, *, timeout_sec, force_refresh=False, **conne
 class LatestVideo:
     """One decoder per source, one bounded latest JPEG; no per-viewer backlog."""
     IDLE_TIMEOUT = 15.0
-    FRAME_TIMEOUT = 300.0  # Established stream: tolerate up to five minutes without a new frame.
+    FRAME_TIMEOUT = 15.0
+    RECONNECT_TIMEOUT = 5.0
+    RETRY_DELAY = 1.0
 
     def __init__(self, command, timeout_sec):
         self.command = command
@@ -210,18 +216,50 @@ class LatestVideo:
                 self.last_access = time.monotonic()
 
     def _run(self):
+        try:
+            while not self.stop.is_set():
+                reason, detail = self._decode_once()
+                if reason in {"idle", "stopped"}:
+                    break
+                _video_diagnostic(reason, detail)
+                # A source which has never produced a frame retains its original
+                # startup failure behavior. Established viewers survive reconnects.
+                if not self.sequence or self.stop.wait(self.RETRY_DELAY):
+                    break
+        finally:
+            with self.condition:
+                self.closed = True
+                self.frame = b""
+                self.condition.notify_all()
+
+    def _decode_once(self):
         process = None
+        reason = "stopped"
+        errors = bytearray()
         try:
             process = subprocess.Popen(self.command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                       stderr=subprocess.DEVNULL, bufsize=0)
+                                       stderr=subprocess.PIPE, bufsize=0)
             fd = process.stdout.fileno()
             os.set_blocking(fd, False)
+            stderr = getattr(process, "stderr", None)
+            if stderr:
+                os.set_blocking(stderr.fileno(), False)
             buffer = bytearray()
             last_frame = time.monotonic()
             while not self.stop.is_set():
                 now = time.monotonic()
-                frame_timeout = self.timeout if not self.sequence else self.FRAME_TIMEOUT
-                if (not self.readers and now - self.last_access > self.IDLE_TIMEOUT) or now - last_frame > frame_timeout:
+                if stderr:
+                    try:
+                        errors.extend(os.read(stderr.fileno(), 4096))
+                        del errors[:-2048]
+                    except BlockingIOError:
+                        pass
+                if not self.readers and now - self.last_access > self.IDLE_TIMEOUT:
+                    reason = "idle"
+                    break
+                frame_timeout = self.timeout if not self.sequence else self.RECONNECT_TIMEOUT
+                if now - last_frame > frame_timeout:
+                    reason = "frame_stalled"
                     break
                 try:
                     chunk = os.read(fd, 65536)
@@ -229,6 +267,7 @@ class LatestVideo:
                     self.stop.wait(.02)
                     continue
                 if not chunk:
+                    reason = "decoder_eof"
                     break
                 buffer.extend(chunk)
                 while True:
@@ -240,11 +279,10 @@ class LatestVideo:
                     last_frame = time.monotonic()
                     del buffer[:end + 2]
                 if len(buffer) > 4 * 1024 * 1024:
+                    reason = "frame_buffer_limit"
                     break
         except OSError:
-            # Readers receive a source-failed result; never leak a credentialed
-            # ffmpeg command through an unhandled worker traceback.
-            pass
+            reason = "decoder_io_error"
         finally:
             if process is not None:
                 if process.poll() is None:
@@ -256,10 +294,9 @@ class LatestVideo:
                         process.wait(timeout=2)
                 if process.stdout:
                     process.stdout.close()
-            with self.condition:
-                self.closed = True
-                self.frame = b""
-                self.condition.notify_all()
+                if getattr(process, "stderr", None):
+                    process.stderr.close()
+        return reason, errors.decode("utf-8", errors="replace")
 
     def close(self):
         self.stop.set()
@@ -271,6 +308,26 @@ class LatestVideo:
 
 _video_lock = threading.Lock()
 _videos = {}
+
+
+def _video_diagnostic(reason, detail):
+    # Redact whole source URLs, not just passwords. Keep logging bounded and
+    # separate from control/experiment evidence, even in the isolated worker.
+    logger = logging.getLogger("atr.printer_video")
+    try:
+        if not logger.handlers:
+            path = Path(os.environ.get("ATR_VIDEO_LOG_PATH") or
+                        Path(__file__).resolve().parents[2] / "runs/monitoring/printer_video.log")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handler = RotatingFileHandler(path, maxBytes=1024 * 1024, backupCount=2)
+            handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+            logger.addHandler(handler)
+            logger.setLevel(logging.INFO)
+            logger.propagate = False
+        safe = re.sub(r"(?:rtsps?|https?)://\S+", "[source redacted]", detail)
+        logger.warning("%s %s", reason, safe[-2048:].replace("\n", " "))
+    except OSError:
+        pass  # Logging must never stop the display reader.
 
 
 def shared_video(command, timeout_sec):

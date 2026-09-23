@@ -21,8 +21,15 @@ function setup(agent = 'design', pending = []) {
   return context;
 }
 const report = {state: {stage: 'equipment'}, warnings: [], artifactItems: [], messages: [], events: []};
-test('every agent keeps specialized cards and has one collapsed runtime support', () => {
-  for (const agent of ['orchestrator', 'objective', 'design', 'specimen', 'vision', 'manipulation', 'equipment', 'analysis', 'knowledge', 'bo', 'guardian']) {
+test('orchestrator keeps its report without rendering runtime support', () => {
+  const context = setup('orchestrator', [{}]);
+  context.renderRuntimeSupportCard = () => { throw new Error('Orchestrator must not render support'); };
+  const html = context.renderLiveDashboardReportSections({}, {...report, warnings:['attention']}, 'running', 'Orchestrator');
+  assert.match(html, /Original agent cards/);
+  assert.doesNotMatch(html, /Runtime Support|runtime-support-detail/);
+});
+test('other agents keep specialized cards and one collapsed runtime support', () => {
+  for (const agent of ['objective', 'design', 'specimen', 'vision', 'manipulation', 'equipment', 'analysis', 'knowledge', 'bo', 'guardian']) {
     const html = setup(agent).renderLiveDashboardReportSections({}, report, 'running', agent);
     assert.equal((html.match(/<h4>Runtime Support<\/h4>/g) || []).length, 1, agent);
     assert.match(html, /Original agent cards/);

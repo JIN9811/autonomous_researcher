@@ -46,7 +46,13 @@ class FakeClient:
 
 
 @pytest.fixture(autouse=True)
-def cleanup():
+def cleanup(monkeypatch, tmp_path):
+    import logging
+    monkeypatch.setenv("ATR_VIDEO_LOG_PATH", str(tmp_path / "video.log"))
+    logger = logging.getLogger("atr.printer_video")
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        handler.close()
     m.close_monitors()
     FakeClient.instances.clear()
     yield
@@ -165,8 +171,8 @@ def test_video_source_exit_returns_error_not_old_frame():
         video.read()
 
 
-@pytest.mark.parametrize("gap", [299.0, 301.0])
-def test_established_video_reader_waits_five_minutes(monkeypatch, gap):
+@pytest.mark.parametrize("gap", [14.0, 16.0])
+def test_established_video_reader_waits_fifteen_seconds(monkeypatch, gap):
     monkeypatch.setattr(m.LatestVideo, "_run", lambda self: None)
     clock = [1000.0]
     monkeypatch.setattr(m, "time", SimpleNamespace(monotonic=lambda: clock[0]))
@@ -180,18 +186,18 @@ def test_established_video_reader_waits_five_minutes(monkeypatch, gap):
 
     monkeypatch.setattr(video.condition, "wait", wait)
     try:
-        if gap < 300:
+        if gap < 15:
             assert video.read(1) == (2, b"new")
         else:
             with pytest.raises(TimeoutError):
                 video.read(1)
-            assert clock[0] == 1300.0
+            assert clock[0] == 1015.0
     finally:
         video.close()
 
 
-@pytest.mark.parametrize("gap, publishes", [(299.0, True), (301.0, False)])
-def test_established_decoder_survives_gap_under_five_minutes(monkeypatch, gap, publishes):
+@pytest.mark.parametrize("gap, publishes", [(4.0, True), (6.0, False)])
+def test_decoder_reconnects_after_five_second_gap(monkeypatch, gap, publishes):
     monkeypatch.setattr(m.threading.Thread, "start", lambda self: None)
     clock = [1000.0]
     monkeypatch.setattr(m, "time", SimpleNamespace(monotonic=lambda: clock[0]))
@@ -199,7 +205,13 @@ def test_established_decoder_survives_gap_under_five_minutes(monkeypatch, gap, p
     video.readers = 1
     video._publish(b"old")
     process = SimpleNamespace(stdout=SimpleNamespace(fileno=lambda: 7, close=lambda: None), poll=lambda: 0)
-    monkeypatch.setattr(m.subprocess, "Popen", lambda *a, **kw: process)
+    starts = []
+    def popen(*a, **kw):
+        starts.append(1)
+        if len(starts) > 1:
+            video.stop.set()
+        return process
+    monkeypatch.setattr(m.subprocess, "Popen", popen)
     monkeypatch.setattr(m.os, "set_blocking", lambda *a: None)
     calls = []
 
@@ -216,6 +228,38 @@ def test_established_decoder_survives_gap_under_five_minutes(monkeypatch, gap, p
     video._run()
     assert video.sequence == (2 if publishes else 1)
     assert video.closed
+    assert len(starts) == 2
+
+
+def test_video_reconnects_after_source_exit_without_losing_reader(monkeypatch, tmp_path):
+    monkeypatch.setattr(m.LatestVideo, "RETRY_DELAY", .02, raising=False)
+    marker = tmp_path / "started"
+    command = [sys.executable, "-u", "-c",
+               "import pathlib,sys,time; p=pathlib.Path(sys.argv[1]); "
+               "old=p.exists(); p.touch(); "
+               "sys.stdout.buffer.write(b'\\xff\\xd8' + (b'new' if old else b'old') + b'\\xff\\xd9'); "
+               "sys.stdout.flush(); time.sleep(1 if old else .15)", str(marker)]
+    video = m.shared_video(command, 2)
+    sequence, first = video.read()
+    assert first == b"\xff\xd8old\xff\xd9"
+    newer, second = video.read(sequence)
+    assert newer > sequence
+    assert second == b"\xff\xd8new\xff\xd9"
+
+
+def test_video_diagnostics_are_bounded_and_redact_source_credentials(monkeypatch, tmp_path):
+    import logging
+    logger = logging.getLogger("atr.printer_video")
+    target = tmp_path / "video.log"
+    monkeypatch.setenv("ATR_VIDEO_LOG_PATH", str(target))
+    m._video_diagnostic("frame_stalled", "rtsps://bblp:secret@printer/stream failed")
+    text = target.read_text()
+    assert "frame_stalled" in text
+    assert "secret" not in text and "bblp" not in text
+    assert "[source redacted]" in text
+    assert logger.handlers[0].maxBytes == 1024 * 1024
+    assert logger.handlers[0].backupCount == 2
+    logger.handlers[0].close()
 
 
 def test_waiting_first_viewer_is_not_reaped_by_short_idle_timeout(monkeypatch):

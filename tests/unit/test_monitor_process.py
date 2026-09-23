@@ -15,6 +15,11 @@ from utils.robot_monitor_stream import stream_robot_samples
 from tests.unit.test_lerobot_joint_telemetry import _action_event
 
 
+@pytest.fixture(autouse=True)
+def isolate_video_diagnostic_log(monkeypatch, tmp_path):
+    monkeypatch.setenv("ATR_VIDEO_LOG_PATH", str(tmp_path / "video.log"))
+
+
 def test_video_runs_in_separate_process_and_stops_without_device_io():
     # Synthetic JPEG byte stream only; no printer, camera or network device.
     command = [sys.executable, "-u", "-c",
