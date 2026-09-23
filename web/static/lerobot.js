@@ -319,6 +319,7 @@ const defaultRealsenseCameraKeys = new Set(["top", "wrist"]);
 const cameraRealsenseOverrides = new Map();
 const cameraFpsOverrides = new Map();
 let recordStatusTimer = null;
+let recordStatusGeneration = 0;
 let trainStatusTimer = null;
 let rolloutStatusTimer = null;
 let isaacRgbdRenderStatusTimer = null;
@@ -3203,6 +3204,9 @@ async function useLatestManipulationPolicy(statusTarget = null) {
 }
 
 async function runAction(label, url, payload = null, statusTarget = null, timeoutMs = 30000) {
+  if (url === "/api/lerobot/record/start") {
+    stopRecordStatusPolling();
+  }
   renderResult(`${label} running`, { ok: true, status: "request_sent" });
   setActionStatus(statusTarget, "running", label, { status: "request sent" });
   try {
@@ -3338,11 +3342,24 @@ function handleRecordProgressResponse(data) {
 
 function startRecordStatusPolling(sessionId = "") {
   stopRecordStatusPolling();
+  const generation = recordStatusGeneration;
+  let pending = false;
   const target = $("lerobot-record-action-status");
+  const unavailable = () => setActionStatus(target, "running", "record status reconnecting", {
+    status: "Status unavailable; retrying. Recording state is not yet confirmed.",
+  });
   recordStatusTimer = window.setInterval(async () => {
+    if (generation !== recordStatusGeneration || pending) return;
+    pending = true;
     try {
       const data = await postJson("/api/lerobot/record/status", sessionPayload("record", sessionId ? { session_id: sessionId } : {}));
-      setActionStatus(target, data && data.ok ? "ok" : "error", "record status", data);
+      if (generation !== recordStatusGeneration) return;
+      if (!data || data.workflow !== "record" || !data.session_id || (sessionId && data.session_id !== sessionId)) {
+        unavailable();
+        return;
+      }
+      const failed = String(data.status || "").toUpperCase() === "FAILED";
+      setActionStatus(target, failed || !data.ok ? "error" : "ok", "record status", data);
       renderResult("record status", data);
       syncFieldsFromWorkflowResponse(data);
       handleIsaacRgbdRenderResponse(data);
@@ -3351,13 +3368,15 @@ function startRecordStatusPolling(sessionId = "") {
         await refreshConfig();
       }
     } catch (err) {
-      setActionStatus(target, "error", "record status", { error: String(err) });
-      stopRecordStatusPolling();
+      if (generation === recordStatusGeneration) unavailable();
+    } finally {
+      pending = false;
     }
   }, 3000);
 }
 
 function stopRecordStatusPolling() {
+  recordStatusGeneration += 1;
   if (recordStatusTimer) {
     window.clearInterval(recordStatusTimer);
     recordStatusTimer = null;

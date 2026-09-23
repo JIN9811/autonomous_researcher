@@ -17619,10 +17619,23 @@ function liveDockSummary(session = liveLastSession) {
   const paused = Boolean(state.is_paused || snapshot.is_paused);
   const phase = terminal ? stage.replaceAll("_", " ") : paused ? "Paused" : pending ? "Waiting" : running ? "Running" : "Idle";
   const current = idle ? (pending ? "Awaiting input" : "Awaiting experiment") : liveAgentLabel(agentIdFromStage(stage)) || stage;
-  const sameRun = !control.run_id || control.run_id === state.run_id;
-  const nextStage = sameRun && !idle && !terminal
-    ? control.next_action?.next_stage || control.route_state?.next_recommended_stage || ""
-    : "";
+  const sameScope = (!control.run_id || control.run_id === state.run_id)
+    && (!control.experiment_id || control.experiment_id === state.experiment_id)
+    && (control.loop_id == null || control.loop_id === state.loop_count);
+  let nextStage = "";
+  if (sameScope && !idle && !terminal) {
+    const recommended = control.next_action?.next_stage || control.route_state?.next_recommended_stage || "";
+    if (recommended && recommended !== stage && (!control.stage || control.stage === stage)) {
+      nextStage = recommended;
+    } else {
+      // The control-plane plan includes the active stage as its first item.
+      // This dock previews its successor; it does not alter execution routing.
+      const route = Array.isArray(control.route_state?.route) ? control.route_state.route : [];
+      const currentIndex = route.findIndex(item => item?.stage === stage);
+      const successor = currentIndex >= 0 ? route[currentIndex + 1]?.stage : "";
+      if (successor && successor !== stage) nextStage = successor;
+    }
+  }
   return {phase, current, next: nextStage ? liveAgentLabel(agentIdFromStage(nextStage)) || nextStage : "Not scheduled", attention};
 }
 
@@ -17894,6 +17907,30 @@ function openPendingOperatorTeleopHandoff(metadata = {}) {
   return true;
 }
 
+function liveContractStageLabel(state = {}) {
+  const stage = String(state.stage || "idle");
+  if (stage !== "vision") return stage;
+  const metadata = state.run_metadata || {};
+  const execution = metadata.specimen_execution || {};
+  const specimen = metadata.specimen_result || {};
+  const specimenId = state.current_experiment_spec?.specimen_id;
+  const sameSpecimen = value => Boolean(specimenId) && value.run_id === state.run_id
+    && value.loop_id === state.loop_count && value.specimen_id === specimenId;
+  const physical = ["installed_printer", "physical_print", "actual_print", "bambulab_x2d", "live", "bambu", "prusalink"].includes(specimen.printer_path)
+    || specimen.fabrication_report?.fabrication_intent?.physical_intent === true;
+  if (!sameSpecimen(execution) || !sameSpecimen(specimen) || execution.state !== "running"
+      || !physical || specimen.print_result?.published !== true) return stage;
+  const receipt = specimen.printer_completion_wait || {};
+  const completed = sameSpecimen(receipt) && receipt.status === "complete"
+    && receipt.completion_scope === "printer_job_only";
+  const vision = state.agent_status?.vision_agent || {};
+  const visionInvoked = vision.run_id === state.run_id && vision.loop_id === state.loop_count
+    && (["running", "waiting", "done", "error", "failed"].includes(vision.state) || typeof vision.success === "boolean");
+  // The graph has selected Vision, but the outer controller still owns the
+  // printer wait. Correct only the Contract label; never rewrite runtime state.
+  return !completed && !visionInvoked ? "specimen" : stage;
+}
+
 function applyPlanningSession(session, options = {}) {
   // Ignore a request dispatched before a later authoritative Setup event or
   // session response when it would switch sessions. Same-session Chat replies
@@ -17925,7 +17962,7 @@ function applyPlanningSession(session, options = {}) {
   const running = liveRunningFlag(liveLastSession, snapshot, state);
   setLiveBackendPlanningBusy(Boolean(liveLastSession.is_planning_busy));
   setPlanningDot(running);
-  const stageLabel = String(state.stage || "idle");
+  const stageLabel = liveContractStageLabel(state);
   const runId = String(state.run_id || "-");
   const modeLabel = String(state.mode || "-");
   const missionLabel = `S:${stageLabel}`;

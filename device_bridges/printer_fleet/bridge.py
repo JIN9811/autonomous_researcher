@@ -28,6 +28,7 @@ from device_bridges.printer_fleet.slicer_profiles import resolve_profile, scale_
 import copy
 import html
 import json
+import math
 import hashlib
 import ipaddress
 import io
@@ -1055,17 +1056,28 @@ class BambuStudioSlicerRunner:
                           percent: float) -> tuple[str | Path | None, dict[str, Any]]:
         from utils.printer_profile import normalize_xy_speed_scale
         percent = normalize_xy_speed_scale(percent)
-        evidence = {"percent": percent, "applied": False, "process_override_paths": []}
+        evidence = {"percent": percent, "axes": ["x", "y", "z"], "applied": False, "process_override_paths": []}
         if percent == 100:
             return load_settings, evidence
         if not load_settings:
-            raise ValueError("XY scaling requires a resolved process profile")
+            raise ValueError("XYZ scaling requires a resolved process profile")
+        profiles = [(self._resolve_existing_optional(name), resolve_profile(self._resolve_existing_optional(name)))
+                    for name in str(load_settings).split(";")]
+        z_limits = []
+        for _, payload in profiles:
+            if payload.get("type") == "machine":
+                values = payload.get("machine_max_speed_z", [])
+                for value in values if isinstance(values, list) else [values]:
+                    limit = float(value)
+                    if not math.isfinite(limit) or limit <= 0:
+                        raise ValueError("XYZ scaling requires valid machine Z speed limits")
+                    z_limits.append(limit)
+        z_speed_limit = min(z_limits) if z_limits else None
+        evidence["z_reference_limit_mm_s"] = z_speed_limit
         settings = []
-        for index, name in enumerate(str(load_settings).split(";")):
-            source = self._resolve_existing_optional(name)
-            payload = resolve_profile(source)
+        for index, (source, payload) in enumerate(profiles):
             if payload.get("type") == "process":
-                scaled = scale_xy_process_profile(payload, percent)
+                scaled = scale_xy_process_profile(payload, percent, z_speed_limit=z_speed_limit)
                 folder = output_dir / "_atr_xy_speed_profile"
                 folder.mkdir(parents=True, exist_ok=True)
                 target = folder / f"process-{index}.json"
@@ -1075,7 +1087,7 @@ class BambuStudioSlicerRunner:
             else:
                 settings.append(str(source))
         if not evidence["process_override_paths"]:
-            raise ValueError("XY scaling requires a resolved process profile")
+            raise ValueError("XYZ scaling requires a resolved process profile")
         evidence["applied"] = True
         return ";".join(settings), evidence
 

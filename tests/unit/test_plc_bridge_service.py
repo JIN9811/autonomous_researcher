@@ -115,6 +115,81 @@ class FailingStopProbe(ControllerProbe):
         raise RuntimeError("Controller callback disconnected")
 
 
+class TransientHealthProbe(ControllerProbe):
+    failure = "PLC_DEVICE_HEALTH_UNSAFE"
+    run_id = "run-probe"
+    after_check = None
+
+    async def plc_recovery_readiness(self, command):
+        self.readiness_calls.append(command)
+        if self.after_check:
+            self.after_check()
+        return {"ok": not self.failure, "failure_code": self.failure}
+
+    def plc_runtime_identity(self):
+        return {"run_id": self.run_id, "session_id": "session-probe"}
+
+
+@pytest.mark.parametrize("change", ["healthy", "unsafe", "cancel", "run", "sources", "other_failure", "reset", "cancel_during_check", "run_during_check"])
+@async_test
+async def test_held_resume_rechecks_only_same_transient_health_request(tmp_path, monkeypatch, change):
+    import utils.plc_bridge_service as module
+
+    now = [100.0]
+    monkeypatch.setattr(module, "_readiness_retry_clock", lambda: now[0], raising=False)
+    transport = ServiceTransport()
+    transport.connected = True
+    transport.words = [2 if change == "reset" else 1, 1, 0]
+    callbacks = TransientHealthProbe()
+    service = PLCBridgeService(PLCBridge(transport), callbacks, state_path=tmp_path / "plc.json")
+    try:
+        await service.accept_snapshot(words=tuple(transport.words))
+        assert len(callbacks.readiness_calls) == 1
+        assert transport.writes == []
+        callbacks.failure = ""
+        await service.accept_snapshot(words=tuple(transport.words))
+        assert len(callbacks.readiness_calls) == 1  # throttled, not every PLC poll
+        if change == "unsafe":
+            callbacks.failure = "PLC_DEVICE_HEALTH_UNSAFE"
+        elif change == "cancel":
+            transport.words = [0, 1, 0]
+        elif change == "run":
+            callbacks.run_id = "another-run"
+        elif change == "sources":
+            service._active_estop_sources.add("other-safety-source")
+        elif change == "other_failure":
+            callbacks.failure = "PLC_PHYSICAL_COMMAND_ACTIVE"
+        elif change == "cancel_during_check":
+            callbacks.after_check = lambda: setattr(transport, "words", [0, 1, 0])
+        elif change == "run_during_check":
+            callbacks.after_check = lambda: setattr(callbacks, "run_id", "another-run")
+        now[0] += 1.1
+        await service.accept_snapshot(words=tuple(transport.words))
+        expected_checks = 1 if change in {"cancel", "run", "sources", "reset"} else 2
+        assert len(callbacks.readiness_calls) == expected_checks
+        if change == "healthy":
+            assert transport.writes == [("D102", 1)]
+            transport.words = [0, 0, 1]
+            await service.accept_snapshot(words=tuple(transport.words))
+            assert len(callbacks.resume_calls) == 1
+            await service.accept_snapshot(words=tuple(transport.words))
+            assert len(callbacks.resume_calls) == 1
+            assert service.status()["failure_code"] is None
+        else:
+            assert transport.writes == []
+            assert callbacks.resume_calls == []
+            assert callbacks.reset_calls == []
+            if change == "unsafe":
+                assert len([event for event in service.events() if event["event"] == "plc.request.rejected"]) == 1
+            if change == "other_failure":
+                callbacks.failure = ""
+                now[0] += 2
+                await service.accept_snapshot(words=tuple(transport.words))
+                assert transport.writes == []  # never retry a physical-action rejection
+    finally:
+        await service.shutdown()
+
+
 class RecoveryOutcomeProbe(ControllerProbe):
     def __init__(self, *, outcome: str) -> None:
         super().__init__()

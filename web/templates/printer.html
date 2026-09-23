@@ -415,9 +415,9 @@ Modification guide:
             <h4>Bambu X2D — Start-Point Prime &amp; Speed Controls</h4>
             <div class="lerobot-form-grid">
               <div>
-                <label for="printer-xy-speed-scale-input">XY speed scale (%)</label>
+                <label for="printer-xy-speed-scale-input">XYZ speed scale (%)</label>
                 <input id="printer-xy-speed-scale-input" class="text-input" type="number" min="1" max="100" step="any" value="100" />
-                <p class="hint">Limit: 1–100% · 100% = original speed · All layers on the next slice · Slicer minimum speeds apply</p>
+                <p class="hint">Limit: 1–100% · 100% = original speed · XY + Z travel / Z-hop on the next slice · Early-layer caps and slicer minimums still apply</p>
               </div>
               <div>
                 <label class="checkbox-line"><input id="printer-start-point-prime-enabled-input" type="checkbox" checked /> Start-Point Prime</label>
@@ -602,6 +602,6 @@ Modification guide:
     </main>
 
     <script src="/static/printer_video_visibility.js?v=20260923-reconnect-1" defer></script>
-    <script src="/static/printer.js?v=20260923-xy-speed-scale-1" defer></script>
+    <script src="/static/printer.js?v=20260923-xyz-speed-scale-1" defer></script>
   </body>
 </html>

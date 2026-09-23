@@ -9,9 +9,10 @@ const vm = require('node:vm');
 function harness(response) {
   const noop = () => {};
   const context = vm.createContext({
-    console, planningMessageSubmitInFlight: false, liveBackendPlanningBusy: false,
+    console, window: {}, planningMessageSubmitInFlight: false, liveBackendPlanningBusy: false,
     planningThinkingCount: 0, liveQuickActionBusy: false, planningPendingSpecimenInput: null,
     planningMessageInput: {value: ''}, planningMessagesCache: [], planningDisplayedMessages: [],
+    planningPendingRequestSeq: 0, planningPendingRequestIds: new Set(), PLANNING_RENDER_CACHE_LIMIT: 200,
     liveSetupTransportVersion: 0, liveSetupAppliedVersion: 0, liveSetupSessionId: 'canonical',
     liveLastSession: {}, liveLastSnapshot: {}, planningSessionId: 'canonical',
     liveRecentEvents: [], recoverAgentAttentionRequest: noop,
@@ -29,13 +30,14 @@ function harness(response) {
     renderSpecSummary: noop, resetPlanningMessageDisplayState: noop,
     mergePlanningMessages: (_old, incoming) => incoming, renderLiveRuntime: noop, persistLivePlanningCache: noop,
     isPlanningChatNearBottom: () => true, planningMessageKey: (m, i) => m.message_id || String(i),
-    limitPlanningMessageCache: messages => messages, updateLiveChatUnreadFromMessages: noop,
+    updateLiveChatUnreadFromMessages: noop,
     updatePlanningDisplayedMessages: messages => messages,
     renderPlanningMessageDom: messages => { context.painted = messages.map(m => ({role: m.role, content: m.content})); },
   });
   const source = fs.readFileSync(path.join(__dirname, '../../web/static/planning.js'), 'utf8');
-  for (const name of ['messageSurfaces', 'parsePlanningSystemEvent', 'isPlanningSystemMessage',
-    'isChatSurfaceMessage', 'renderPlanningMessages', 'applyPlanningSession', 'sendPlanningMessage']) {
+  for (const name of ['createPlanningPendingMessage', 'finishPlanningPendingMessage', 'limitPlanningMessageCache',
+    'messageSurfaces', 'parsePlanningSystemEvent', 'isPlanningSystemMessage',
+    'isChatSurfaceMessage', 'renderPlanningMessages', 'liveContractStageLabel', 'applyPlanningSession', 'sendPlanningMessage']) {
     const start = source.search(new RegExp('(?:async )?function ' + name + '\\('));
     assert.ok(start >= 0);
     vm.runInContext(source.slice(start, source.indexOf('\n}', start) + 2), context);

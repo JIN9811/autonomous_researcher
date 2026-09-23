@@ -29,6 +29,7 @@ from utils.plc_safety_state import (
 
 
 PLC_PHYSICAL_SOURCE = "plc_pb2"
+_readiness_retry_clock = time.monotonic
 _ACTIVE_HANDSHAKE_PHASES = frozenset({"validated", "acknowledged", "release_observed"})
 _SAMPLE_FAILURE_CODES = frozenset(
     {
@@ -155,6 +156,9 @@ class PLCBridgeService:
         self._pc_estop_origins: set[str] = set()
         self._failure_code: str | None = None
         self._last_error: str | None = None
+        # Only a pre-ack, transient health rejection may retain operator intent.
+        # Never persist this authorization across service lifetimes.
+        self._deferred_resume: dict[str, Any] | None = None
         self._transaction = self._load_transaction()
         self._restore_persisted_latch()
         self._reconnect_attempt = 0
@@ -426,6 +430,7 @@ class PLCBridgeService:
 
     async def mark_disconnected(self, reason: str) -> None:
         """Disable the optional layer while retaining any observed physical latch."""
+        self._deferred_resume = None
         was_connected = self._connected
         self._connected = False
         self._stale = False
@@ -669,6 +674,9 @@ class PLCBridgeService:
             snapshot,
             valid=transition.state is not PLCSafetyState.PROTOCOL_FAULT,
         )
+
+        if self._deferred_resume and not self._deferred_resume_matches(snapshot):
+            self._deferred_resume = None
         self._set_observed_safety_state(transition.state)
         return transition
 
@@ -686,6 +694,8 @@ class PLCBridgeService:
             snapshot,
             valid=transition.state is not PLCSafetyState.PROTOCOL_FAULT,
         )
+        if self._deferred_resume and not self._deferred_resume_matches(snapshot):
+            self._deferred_resume = None
 
         if transition.state is PLCSafetyState.PROTOCOL_FAULT:
             failure_code = transition.failure_code or "PLC_INVALID_COMMAND_VALUE"
@@ -746,6 +756,21 @@ class PLCBridgeService:
 
         if allow_recovery and transition.command is not PLCCommand.NONE:
             await self._start_handshake(transition.command, snapshot)
+        elif allow_recovery and self._deferred_resume:
+            if self._deferred_resume_matches(snapshot):
+                if _readiness_retry_clock() >= self._deferred_resume["retry_at"]:
+                    await self._start_handshake(PLCCommand.RESUME, snapshot, retry=True)
+            else:
+                self._deferred_resume = None
+
+    def _deferred_resume_matches(self, snapshot: PLCRegisterSnapshot) -> bool:
+        pending = self._deferred_resume
+        return bool(
+            pending
+            and self._words(snapshot) == (1, 1, 0)
+            and self._runtime_identity() == pending["identity"]
+            and self._active_estop_sources == pending["sources"]
+        )
 
     async def _ensure_estop(
         self, source: str, details: dict[str, object]
@@ -766,9 +791,13 @@ class PLCBridgeService:
         self._safety_state = PLCSafetyState.ESTOP_LATCHED
 
     async def _start_handshake(
-        self, command: PLCCommand, snapshot: PLCRegisterSnapshot
+        self, command: PLCCommand, snapshot: PLCRegisterSnapshot, *, retry: bool = False
     ) -> None:
         command_name = command.value
+        identity = self._runtime_identity()
+        sources_before = set(self._active_estop_sources)
+        if not retry:
+            self._deferred_resume = None
         try:
             readiness = await self._maybe_await(
                 self._callbacks.plc_recovery_readiness(command_name)
@@ -782,16 +811,40 @@ class PLCBridgeService:
         ready, failure_code = self._result_status(
             readiness, "PLC_RESUME_READINESS_FAILED"
         )
+        if retry:
+            # Read again after the awaited controller check: an operator may
+            # have withdrawn the request or changed sessions while it ran.
+            fresh = await self._read_snapshot()
+            if not self._deferred_resume_matches(fresh):
+                self._deferred_resume = None
+                return
+            snapshot = fresh
         if not ready:
             self._set_failure(
                 failure_code, f"Controller rejected PLC {command_name}"
             )
-            self._emit(
-                "plc.request.rejected",
-                {"command": command_name, "failure_code": failure_code},
-            )
+            if not retry or failure_code != "PLC_DEVICE_HEALTH_UNSAFE":
+                self._emit(
+                    "plc.request.rejected",
+                    {"command": command_name, "failure_code": failure_code},
+                )
+            self._deferred_resume = None
+            if (
+                command is PLCCommand.RESUME
+                and failure_code == "PLC_DEVICE_HEALTH_UNSAFE"
+                and self._words(snapshot) == (1, 1, 0)
+                and identity["run_id"]
+                and identity == self._runtime_identity()
+                and sources_before == self._active_estop_sources
+            ):
+                self._deferred_resume = {
+                    "identity": identity,
+                    "sources": sources_before,
+                    "retry_at": _readiness_retry_clock() + 1.0,
+                }
             return
 
+        self._deferred_resume = None
         identity = self._runtime_identity()
         prior_details = (
             self._transaction.get("details")

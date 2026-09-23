@@ -236,7 +236,7 @@ def test_planning_input_materialization_keeps_one_admission(tmp_path, monkeypatc
             "loop": state.loop_count, "stage": "design"}
         with pytest.raises(RuntimeError, match="checked actual materialization boundary"):
             await controller._run_planning_design_stage(previous_spec={"size": 99} if mutation == "previous_spec" else {},
-                design_constraints={"cell_size_mm": 99 if mutation == "constraints" else 7},
+                design_constraints={"cell_size_mm": 8 if mutation == "constraints" else 7},
                 cycle_index=1, total_cycles=1, emit_handoff=False)
     asyncio.run(run())
 
@@ -765,7 +765,9 @@ def test_planning_new_series_applies_setup_before_review_preserving_profile(tmp_
     async def run():
         if with_setup:
             block = store.ensure_block("experiment", ["orchestrator_agent", "bo_agent"], {})
-            space = {**BOAgent.defaults()["parameter_space"], "cell_size_mm": [7, 8], "relative_density": [0.3, 0.4]}
+            # Setup proposals carry the operator-edited coordinates, not the
+            # derived/fixed geometry metadata returned by the BO read model.
+            space = {"cell_size_mm": [7, 8], "wall_thickness_mm": [0.6, 0.9]}
             p = store.propose(block["block_id"], block["block_revision"], {"research.goal": "new confirmed goal",
                 "bo.parameter_space": space}, "draft")
             confirmed = await SetupApplication(store, OwnerCatalog(registry, load_graph_config("graphs/configs/atr_closed_loop.yaml")).snapshot()).confirm(
@@ -783,7 +785,7 @@ def test_planning_new_series_applies_setup_before_review_preserving_profile(tmp_
             assert controller._state.run_metadata["bo_settings"]["parameter_space"]["cell_size_mm"] == [7, 8]
             seeded = controller._seed_initial_bo_design_constraints(constraints, total_cycles=20)
             assert 7 <= seeded["cell_size_mm"] <= 8
-            assert 0.3 <= seeded["relative_density"] <= 0.4
+            assert 0.6 <= seeded["wall_thickness_mm"] <= 0.9
         else:
             assert controller._state is old
     asyncio.run(run())

@@ -282,7 +282,7 @@ def Xform "tn__omxscene_h8" (
                                         bool physics:collisionEnabled = 1
                                         double size = 1
                                         uniform token purpose = "guide"
-                                        float3 xformOp:scale = (0.01264, 0.0008, 0.02094)
+                                        float3 xformOp:scale = (0.01164, 0.0008, 0.01994)
                                         double3 xformOp:translate = (0.05868, -0.00855, 0)
                                         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
                                     }
@@ -330,7 +330,7 @@ def Xform "tn__omxscene_h8" (
                                         bool physics:collisionEnabled = 1
                                         double size = 1
                                         uniform token purpose = "guide"
-                                        float3 xformOp:scale = (0.01263, 0.0008, 0.02174)
+                                        float3 xformOp:scale = (0.01163, 0.0008, 0.02074)
                                         double3 xformOp:translate = (0.05869, 0.00855, 0)
                                         uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
                                     }

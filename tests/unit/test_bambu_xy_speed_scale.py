@@ -1,4 +1,4 @@
-"""Operator XY scale changes slice-time speeds, never machine programs or geometry."""
+"""The saved speed scale covers XYZ without changing machine programs or geometry."""
 import copy
 import json
 from pathlib import Path
@@ -29,7 +29,8 @@ def test_xy_scale_persists_and_reaches_explicit_cli_process(tmp_path, percent):
     assert float(scaled["initial_layer_speed"][0]) == pytest.approx(10 * percent / 100)
     assert scaled["small_perimeter_speed"][0] == "50%"  # relative to the scaled wall
     assert float(scaled["small_perimeter_speed"][1]) == pytest.approx(40 * percent / 100)
-    for key in ("travel_speed_z", "retraction_speed", "layer_height", "default_acceleration", "overhang_1_4_speed"):
+    assert float(scaled["travel_speed_z"][0]) == pytest.approx(20 * percent / 100)
+    for key in ("retraction_speed", "layer_height", "default_acceleration", "overhang_1_4_speed"):
         assert scaled[key] == process[key]
     assert json.loads(source.read_text()) == process
     assert evidence["percent"] == percent
@@ -58,8 +59,28 @@ def test_xy_scale_resolves_inheritance_without_scaling_machine_or_filament(tmp_p
     assert process == before
     assert scaled["outer_wall_speed"] == ["160"]
     assert scaled["bridge_speed"] == ["40"]
-    for key in set(process) - {"outer_wall_speed", "bridge_speed"}:
+    assert scaled["travel_speed_z"] == ["8"]
+    for key in set(process) - {"outer_wall_speed", "bridge_speed", "travel_speed_z"}:
         assert scaled[key] == process[key]
+
+
+@pytest.mark.parametrize("z_speed", [["0", "10"], ["1000", "10"]])
+def test_shared_scale_reduces_effective_z_speed_below_machine_limit(tmp_path, z_speed):
+    """Zero inherits XY travel; scaling 1000 to 650 alone still hits Z's 20 mm/s cap."""
+    process = tmp_path / "process.json"
+    machine = tmp_path / "machine.json"
+    process.write_text(json.dumps({"type": "process", "travel_speed": ["1000", "1000"],
+                                   "travel_speed_z": z_speed}))
+    machine_data = {"type": "machine", "machine_max_speed_z": ["20", "20"],
+                    "machine_start_gcode": "G0 Z32 F3000", "machine_end_gcode": "G0 Z15 F3000"}
+    machine.write_text(json.dumps(machine_data))
+    runner = BambuStudioSlicerRunner(BambuSlicerConfig(), repo_root=tmp_path)
+    settings, evidence = runner._xy_speed_profile(tmp_path, f"{machine};{process}", 65)
+    scaled = json.loads(Path(str(settings).split(';')[1]).read_text())
+    assert scaled["travel_speed"] == ["650", "650"]
+    assert scaled["travel_speed_z"] == ["13", "6.5"]
+    assert json.loads(machine.read_text()) == machine_data
+    assert evidence["axes"] == ["x", "y", "z"]
 
 
 def test_xy_scale_requires_an_explicit_process_when_no_profile_is_resolved(tmp_path):
@@ -75,4 +96,4 @@ def test_one_percent_honors_slicer_minimum_speeds():
         "outer_wall_speed": ["20"], "prime_tower_max_speed": "90"}, 1)
     assert scaled == {"initial_layer_infill_speed": ["1"],
         "support_interface_speed": ["1"], "travel_speed": ["1"],
-        "outer_wall_speed": ["0.2"], "prime_tower_max_speed": "10"}
+        "outer_wall_speed": ["0.2"], "prime_tower_max_speed": "10", "travel_speed_z": "0.5"}

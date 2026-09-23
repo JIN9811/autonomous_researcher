@@ -130,7 +130,7 @@ test('authoritative session updates refresh equipment while another agent page i
     mergePlanningMessages: () => [],
   });
   for (const name of ['persistPlanningSessionId', 'syncLiveSetupSession', 'openPendingOperatorTeleopHandoff', 'syncLiveBoVisualizationFromState', 'setLiveBackendPlanningBusy', 'setPlanningDot', 'setCompactTextWithTitle', 'scheduleLiveMissionMarquee', 'renderSpecSummary', 'resetPlanningMessageDisplayState', 'renderPlanningMessages', 'persistLivePlanningCache']) c[name] = () => {};
-  load(c, ['applyPlanningSession']);
+  load(c, ['liveContractStageLabel', 'applyPlanningSession']);
   c.applyPlanningSession(c.liveLastSession);
   assert.ok(c.liveEquipmentRuntimeRefreshInFlight, 'state receipt must initiate progress synchronization');
 });

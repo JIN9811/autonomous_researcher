@@ -101,18 +101,22 @@ General layer height and bed temperature remain in the general defaults area.
 
 ### Current operator-tuned profile (2026-09-17)
 
-#### Adjustable XY speed scale (2026-09-23)
+#### Adjustable XYZ speed scale (2026-09-23)
 
 The 3DP workspace's **Start-Point Prime & Speed Controls** section includes
-**XY speed scale (%)** (`xy_speed_scale_percent`). Save any finite value from
+**XYZ speed scale (%)** (the existing storage/API key remains `xy_speed_scale_percent`
+for compatibility). One input controls both XY and Z. Save any finite value from
 **1 through 100**, inclusive; fractional percentages are supported. **100%**
 preserves the original speeds and is the fallback for older saved profiles.
 The value is operator-controlled, not fixed at 80%.
 
-The next Bambu slice scales absolute XY print and travel speed settings across
+The next Bambu slice scales absolute XY print and travel speed settings and Z travel/Z-hop across
 all layers, including layer 7 onward. Relative speeds (for example, small
 perimeters at 50% of outer-wall speed) retain their ratios to avoid double
-scaling. Z speed, retraction, extrusion quantity, acceleration, and machine
+scaling. Z travel uses the original resolved travel speed, bounded by the machine's
+Z speed limit before scaling; a zero Z setting inherits the original XY travel speed.
+For example, a 20 mm/s effective Z speed becomes 13 mm/s at 65%.
+Retraction, extrusion quantity, acceleration, and machine
 start/end programs are unchanged; existing early-layer caps still apply.
 Vendor minimum speeds remain enforced (1 mm/s for initial-layer infill,
 support interface, and XY travel; 10 mm/s for the prime tower), including at
@@ -121,7 +125,7 @@ differ from a uniform percentage of the previous G-code.
 
 Scaling is applied to isolated process-profile copies **before slicing**, so
 the slicer's duration estimate uses the scaled settings. The slice manifest
-records `slicer_profile.xy_speed_scale`. Custom process profiles use the same
+records `slicer_profile.xy_speed_scale` with `axes: [x, y, z]`. Custom process profiles use the same
 path; a non-100% request without a resolved process profile is rejected instead
 of silently ignored. Re-slice existing artifacts to use a new value. Saving
 does not alter an active print or start any equipment.

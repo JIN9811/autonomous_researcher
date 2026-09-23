@@ -9,7 +9,7 @@ from pathlib import Path
 from utils.printer_profile import normalize_xy_speed_scale
 
 
-# Explicit XY process speeds only: never scale Z, retraction, fans, acceleration,
+# Explicit XY process speeds; Z is resolved separately below. Never scale retraction, fans, acceleration,
 # extrusion volume, or machine start/end G-code. Relative speeds inherit scaling
 # from their parent speed and must not be multiplied twice.
 XY_PROCESS_SPEEDS = frozenset({
@@ -30,7 +30,8 @@ XY_SPEED_MINIMUMS = {
 }
 
 
-def scale_xy_process_profile(profile: dict, percent: float) -> dict:
+def scale_xy_process_profile(profile: dict, percent: float, *, z_speed_limit: float | None = None) -> dict:
+    """Scale XYZ; keep the historical name/key for saved-profile compatibility."""
     factor = normalize_xy_speed_scale(percent) / 100.0
     result = copy.deepcopy(profile)
     if factor == 1:
@@ -50,6 +51,23 @@ def scale_xy_process_profile(profile: dict, percent: float) -> dict:
 
     for key in XY_PROCESS_SPEEDS & result.keys():
         result[key] = scaled(result[key], XY_SPEED_MINIMUMS.get(key, 0))
+    if "travel_speed_z" in profile or "travel_speed" in profile:
+        z_values = profile.get("travel_speed_z", "0")
+        travel = profile.get("travel_speed", "0")
+        def z_scaled(value, index):
+            speed = float(value)
+            if not math.isfinite(speed) or speed < 0:
+                raise ValueError("Invalid Z speed in process profile")
+            if speed == 0:
+                inherited = travel[min(index, len(travel) - 1)] if isinstance(travel, list) and travel else travel
+                speed = float(inherited)
+            if not math.isfinite(speed) or speed <= 0:
+                raise ValueError("Z scaling requires a positive resolved travel speed")
+            if z_speed_limit is not None:
+                speed = min(speed, z_speed_limit)
+            return format(speed * factor, ".10g")
+        result["travel_speed_z"] = ([z_scaled(value, index) for index, value in enumerate(z_values)]
+                                    if isinstance(z_values, list) else z_scaled(z_values, 0))
     return result
 
 
