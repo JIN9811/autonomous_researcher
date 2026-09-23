@@ -168,6 +168,7 @@ def read_mqtt_monitor(mqtt, config, *, timeout_sec, force_refresh=False, **conne
 class LatestVideo:
     """One decoder per source, one bounded latest JPEG; no per-viewer backlog."""
     IDLE_TIMEOUT = 15.0
+    FRAME_TIMEOUT = 300.0  # Established stream: tolerate up to five minutes without a new frame.
 
     def __init__(self, command, timeout_sec):
         self.command = command
@@ -192,7 +193,7 @@ class LatestVideo:
 
     def read(self, after=0):
         with self.condition:
-            deadline = time.monotonic() + (self.timeout if not self.sequence else min(15.0, self.timeout))
+            deadline = time.monotonic() + (self.timeout if not self.sequence else self.FRAME_TIMEOUT)
             self.last_access = time.monotonic()
             self.readers += 1
             try:
@@ -219,7 +220,7 @@ class LatestVideo:
             last_frame = time.monotonic()
             while not self.stop.is_set():
                 now = time.monotonic()
-                frame_timeout = self.timeout if not self.sequence else min(15.0, self.timeout)
+                frame_timeout = self.timeout if not self.sequence else self.FRAME_TIMEOUT
                 if (not self.readers and now - self.last_access > self.IDLE_TIMEOUT) or now - last_frame > frame_timeout:
                     break
                 try:

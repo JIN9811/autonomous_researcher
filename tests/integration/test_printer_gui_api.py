@@ -2541,6 +2541,7 @@ def test_print_start_api_roundtrip_drives_slicer_settings(tmp_path, prime, enabl
 
 
 @pytest.mark.parametrize('field,value', [
+    ('xy_speed_scale_percent', 0), ('xy_speed_scale_percent', 100.1), ('xy_speed_scale_percent', 'Infinity'),
     ('start_point_prime_mm', 'Infinity'), ('start_point_prime_mm', -1),
     ('early_layer_speed_mm_s', 0), ('early_layer_speed_mm_s', 1001), ('early_layer_z_speed_mm_s', 21),
 ])
@@ -2549,6 +2550,18 @@ def test_print_start_api_rejects_invalid_without_overwriting_profile(field, valu
     before = client.get('/api/printer/profile').json()['profile']
     assert client.post('/api/printer/profile', json={field: value}).status_code == 422
     assert client.get('/api/printer/profile').json()['profile'] == before
+
+
+@pytest.mark.parametrize('percent', [1, 40.5, 80, 100])
+def test_xy_speed_scale_profile_api_roundtrip(percent):
+    client = TestClient(app)
+    before = client.get('/api/printer/profile').json()['profile']
+    response = client.post('/api/printer/profile', json={**before, 'xy_speed_scale_percent': percent})
+    assert response.status_code == 200
+    saved = client.get('/api/printer/profile').json()['profile']
+    assert saved['xy_speed_scale_percent'] == percent
+    assert saved['start_point_prime_mm'] == before['start_point_prime_mm']
+    assert saved['early_layer_speed_limit_enabled'] == before['early_layer_speed_limit_enabled']
 
 
 def test_printer_profile_api_reports_saved_print_defaults() -> None:

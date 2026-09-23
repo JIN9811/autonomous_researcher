@@ -1079,6 +1079,7 @@ class PrinterProfileRequest(BaseModel):
     first_layer_height_mm: float = 0.2
     slow_first_layer_enabled: bool = True
     first_layer_speed_mm_s: float = 10.0
+    xy_speed_scale_percent: float = Field(default=100.0, ge=1, le=100, allow_inf_nan=False)
     start_point_prime_mm: float = Field(default=0.1, ge=0, allow_inf_nan=False)
     start_point_prime_enabled: bool = True
     early_layer_speed_limit_enabled: bool = True

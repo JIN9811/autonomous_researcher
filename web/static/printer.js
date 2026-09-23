@@ -41,6 +41,7 @@ const earlyLayerSpeedLimitInput = document.getElementById("printer-early-layer-s
 const startPointPrimeEnabledInput = document.getElementById("printer-start-point-prime-enabled-input");
 const earlyLayerZSpeedLimitInput = document.getElementById("printer-early-layer-z-speed-limit-input");
 const earlyLayerZSpeedInput = document.getElementById("printer-early-layer-z-speed-input");
+const xySpeedScaleInput = document.getElementById("printer-xy-speed-scale-input");
 const bedTempInput = document.getElementById("printer-bed-temp-input");
 const firstLayerBedTempInput = document.getElementById("printer-first-layer-bed-temp-input");
 const storageInput = document.getElementById("printer-storage-input");
@@ -387,6 +388,7 @@ function fillProfile(profile) {
   if (startPointPrimeEnabledInput) startPointPrimeEnabledInput.checked = data.start_point_prime_enabled !== false;
   if (earlyLayerZSpeedLimitInput) earlyLayerZSpeedLimitInput.checked = data.early_layer_z_speed_limit_enabled !== false;
   if (earlyLayerZSpeedInput) earlyLayerZSpeedInput.value = Number(data.early_layer_z_speed_mm_s ?? 5);
+  if (xySpeedScaleInput) xySpeedScaleInput.value = Number(data.xy_speed_scale_percent ?? 100);
   if (firstLayerBedTempInput) firstLayerBedTempInput.value = Number(data.first_layer_bed_temperature_c ?? data.bed_temperature_c ?? 60);
   if (storageInput) storageInput.value = data.storage || "usb";
   if (bambuArtifactPathInput && data.bambu_artifact_path) bambuArtifactPathInput.value = data.bambu_artifact_path;
@@ -496,6 +498,7 @@ function readPrintStartSettings() {
     ["start_point_prime_mm", startPointPrimeInput, 0.1],
     ["early_layer_speed_mm_s", earlyLayerSpeedInput, 50],
     ["early_layer_z_speed_mm_s", earlyLayerZSpeedInput, 5],
+    ["xy_speed_scale_percent", xySpeedScaleInput, 100],
   ];
   const settings = Object.fromEntries(fields.map(([key, input, fallback]) => {
     if (input && (input.value.trim() === "" || !input.checkValidity() || !Number.isFinite(Number(input.value)))) {
@@ -1444,7 +1447,7 @@ async function saveProfile() {
       method: "POST",
       body: JSON.stringify(requested),
     });
-    for (const key of ["start_point_prime_enabled", "early_layer_speed_limit_enabled", "early_layer_z_speed_limit_enabled", "start_point_prime_mm", "early_layer_speed_mm_s", "early_layer_z_speed_mm_s"]) {
+    for (const key of ["start_point_prime_enabled", "early_layer_speed_limit_enabled", "early_layer_z_speed_limit_enabled", "start_point_prime_mm", "early_layer_speed_mm_s", "early_layer_z_speed_mm_s", "xy_speed_scale_percent"]) {
       if (data.profile?.[key] !== requested[key]) {
         throw new Error(`Server did not persist ${key}. Server restart/update required; reload the workspace afterward.`);
       }

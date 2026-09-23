@@ -23,7 +23,7 @@ from __future__ import annotations
 from utils.specimen_placement import normalize_placement, placement_area, placement_from_payload, preflight_placement, requested_center, validate_sliced_placement
 from utils.bambu_material_priority import load_priority, priority_path, select_material, bind_artifact, material_artifact_path
 from utils.printer_profile import load_prusa_print_profile, normalize_prusa_print_profile, print_start_calibration_options, normalize_print_start_settings
-from device_bridges.printer_fleet.slicer_profiles import resolve_profile
+from device_bridges.printer_fleet.slicer_profiles import resolve_profile, scale_xy_process_profile
 
 import copy
 import html
@@ -249,6 +249,9 @@ class BambuStudioSlicerRunner:
         # Snapshot once: GUI saves affect the next slice, not this artifact.
         try:
             print_start_settings = self._print_start_settings()
+            xy_speed_scale = load_prusa_print_profile(
+                self.repo_root / "memory/prusa_print_profile.json"
+            )["xy_speed_scale_percent"]
         except ValueError as exc:
             return self._blocked("BAMBU_PRINT_START_SETTINGS_INVALID", error=str(exc))
 
@@ -290,6 +293,14 @@ class BambuStudioSlicerRunner:
                 }
             else:
                 slicer_profile["no_skirt_profile_probe"] = no_skirt_profile
+
+        try:
+            effective_load_settings, xy_speed_evidence = self._xy_speed_profile(
+                output_dir, effective_load_settings, xy_speed_scale
+            )
+        except (OSError, ValueError, TypeError) as exc:
+            return self._blocked("BAMBU_XY_SPEED_PROFILE_INVALID", error=str(exc))
+        slicer_profile["xy_speed_scale"] = xy_speed_evidence
 
         orientation = {"enabled": False}
         original_source = source
@@ -1039,6 +1050,34 @@ class BambuStudioSlicerRunner:
             or re.search(r"front.*(?:test|prime).*line", lower)
             or re.search(r"\b(?:test|intro|prime)\s+line\b", lower)
         )
+
+    def _xy_speed_profile(self, output_dir: Path, load_settings: str | Path | None,
+                          percent: float) -> tuple[str | Path | None, dict[str, Any]]:
+        from utils.printer_profile import normalize_xy_speed_scale
+        percent = normalize_xy_speed_scale(percent)
+        evidence = {"percent": percent, "applied": False, "process_override_paths": []}
+        if percent == 100:
+            return load_settings, evidence
+        if not load_settings:
+            raise ValueError("XY scaling requires a resolved process profile")
+        settings = []
+        for index, name in enumerate(str(load_settings).split(";")):
+            source = self._resolve_existing_optional(name)
+            payload = resolve_profile(source)
+            if payload.get("type") == "process":
+                scaled = scale_xy_process_profile(payload, percent)
+                folder = output_dir / "_atr_xy_speed_profile"
+                folder.mkdir(parents=True, exist_ok=True)
+                target = folder / f"process-{index}.json"
+                target.write_text(json.dumps(scaled, indent=2) + "\n", encoding="utf-8")
+                settings.append(str(target))
+                evidence["process_override_paths"].append(str(target))
+            else:
+                settings.append(str(source))
+        if not evidence["process_override_paths"]:
+            raise ValueError("XY scaling requires a resolved process profile")
+        evidence["applied"] = True
+        return ";".join(settings), evidence
 
     def _default_no_skirt_profile(self, output_dir: Path, *, experiment_spec: dict[str, Any] | None = None) -> dict[str, Any]:
         if not self.config.auto_no_skirt_profile:

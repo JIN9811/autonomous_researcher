@@ -165,6 +165,59 @@ def test_video_source_exit_returns_error_not_old_frame():
         video.read()
 
 
+@pytest.mark.parametrize("gap", [299.0, 301.0])
+def test_established_video_reader_waits_five_minutes(monkeypatch, gap):
+    monkeypatch.setattr(m.LatestVideo, "_run", lambda self: None)
+    clock = [1000.0]
+    monkeypatch.setattr(m, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    video = m.LatestVideo(["unused"], 60)
+    video._publish(b"old")
+
+    def wait(timeout):
+        clock[0] += min(gap, timeout)
+        if gap < timeout:
+            video._publish(b"new")
+
+    monkeypatch.setattr(video.condition, "wait", wait)
+    try:
+        if gap < 300:
+            assert video.read(1) == (2, b"new")
+        else:
+            with pytest.raises(TimeoutError):
+                video.read(1)
+            assert clock[0] == 1300.0
+    finally:
+        video.close()
+
+
+@pytest.mark.parametrize("gap, publishes", [(299.0, True), (301.0, False)])
+def test_established_decoder_survives_gap_under_five_minutes(monkeypatch, gap, publishes):
+    monkeypatch.setattr(m.threading.Thread, "start", lambda self: None)
+    clock = [1000.0]
+    monkeypatch.setattr(m, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    video = m.LatestVideo(["unused"], 60)
+    video.readers = 1
+    video._publish(b"old")
+    process = SimpleNamespace(stdout=SimpleNamespace(fileno=lambda: 7, close=lambda: None), poll=lambda: 0)
+    monkeypatch.setattr(m.subprocess, "Popen", lambda *a, **kw: process)
+    monkeypatch.setattr(m.os, "set_blocking", lambda *a: None)
+    calls = []
+
+    def read(fd, size):
+        calls.append(1)
+        if len(calls) == 1:
+            clock[0] += gap
+            raise BlockingIOError
+        if len(calls) == 2:
+            return b"\xff\xd8new\xff\xd9"
+        return b""
+
+    monkeypatch.setattr(m.os, "read", read)
+    video._run()
+    assert video.sequence == (2 if publishes else 1)
+    assert video.closed
+
+
 def test_waiting_first_viewer_is_not_reaped_by_short_idle_timeout(monkeypatch):
     monkeypatch.setattr(m.LatestVideo, "IDLE_TIMEOUT", .05)
     command = [sys.executable, "-u", "-c",

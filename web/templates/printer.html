@@ -412,8 +412,13 @@ Modification guide:
                 <input id="printer-first-layer-bed-temp-input" class="text-input" type="number" min="0" max="120" step="1" value="60" />
               </label>
             </div>
-            <h4>Bambu X2D — Start-Point Prime &amp; Speed Caps</h4>
+            <h4>Bambu X2D — Start-Point Prime &amp; Speed Controls</h4>
             <div class="lerobot-form-grid">
+              <div>
+                <label for="printer-xy-speed-scale-input">XY speed scale (%)</label>
+                <input id="printer-xy-speed-scale-input" class="text-input" type="number" min="1" max="100" step="any" value="100" />
+                <p class="hint">Limit: 1–100% · 100% = original speed · All layers on the next slice · Slicer minimum speeds apply</p>
+              </div>
               <div>
                 <label class="checkbox-line"><input id="printer-start-point-prime-enabled-input" type="checkbox" checked /> Start-Point Prime</label>
                 <input id="printer-start-point-prime-input" aria-label="Start-Point Prime (mm of filament)" class="text-input" type="number" min="0" step="0.01" value="0.1" />
@@ -597,6 +602,6 @@ Modification guide:
     </main>
 
     <script src="/static/printer_video_visibility.js?v=20260919-1" defer></script>
-    <script src="/static/printer.js?v=20260919-video-visibility-1" defer></script>
+    <script src="/static/printer.js?v=20260923-xy-speed-scale-1" defer></script>
   </body>
 </html>

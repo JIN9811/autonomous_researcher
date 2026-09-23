@@ -66,6 +66,7 @@ def normalize_print_start_settings(raw: dict[str, Any]) -> dict[str, float | boo
 
 DEFAULT_PRUSA_PRINT_PROFILE: dict[str, Any] = {
     **PRINT_START_DEFAULTS,
+    "xy_speed_scale_percent": 100.0,
     "specimen_placement": {"mode": "auto", "center_x_mm": 128.0, "center_y_mm": 128.0},
     "material": "PLA",
     "printer_model": "Prusa MK4S",
@@ -149,6 +150,16 @@ def _clean_vector3(value: Any, default: list[float], *, min_value: float, max_va
     return cleaned
 
 
+def normalize_xy_speed_scale(value: Any = 100.0) -> float:
+    try:
+        percent = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("xy_speed_scale_percent must be between 1 and 100") from exc
+    if isinstance(value, bool) or not math.isfinite(percent) or not 1 <= percent <= 100:
+        raise ValueError("xy_speed_scale_percent must be between 1 and 100")
+    return percent
+
+
 def normalize_prusa_print_profile(raw: dict[str, Any] | None) -> dict[str, Any]:
     """Normalize GUI-supplied profile values and enforce safe field ranges."""
     source = raw if isinstance(raw, dict) else {}
@@ -156,6 +167,7 @@ def normalize_prusa_print_profile(raw: dict[str, Any] | None) -> dict[str, Any]:
     profile.update({key: value for key, value in source.items() if key in DEFAULT_PRUSA_PRINT_PROFILE})
     profile["specimen_placement"] = normalize_placement(profile.get("specimen_placement"))
     profile.update(normalize_print_start_settings(profile))
+    profile["xy_speed_scale_percent"] = normalize_xy_speed_scale(profile["xy_speed_scale_percent"])
 
     for key, max_len in _STRING_LIMITS.items():
         profile[key] = _clean_string(
