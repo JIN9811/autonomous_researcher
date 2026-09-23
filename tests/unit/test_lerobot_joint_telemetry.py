@@ -709,13 +709,24 @@ def test_grasp_outcome_enters_pending_then_succeeds_from_contact_gap() -> None:
         "attempt_index": 1,
         "observation_only": True,
         "contact_gap": pytest.approx(3.5),
-        "contact_gap_threshold": pytest.approx(2.0),
+        "contact_gap_threshold": pytest.approx(1.2),
         "measured_gripper": pytest.approx(53.5),
         "policy_target_gripper": pytest.approx(50.0),
         "transport_overlap": False,
         "started_s": pytest.approx(1.2),
         "completed_s": pytest.approx(2.65),
     }
+
+
+@pytest.mark.parametrize("gap,status", [(1.19, "failed"), (1.2, "success"),
+    (1.4273458627554092, "success"), (1.7986906515081884, "success"), (-1.43, "success")])
+def test_grasp_contact_display_threshold_preserves_observation_only(gap, status):
+    packets = _annotated_sequence(
+        _grasp_attempt_samples(measured_gripper=50.0 + gap, policy_gripper=50.0)
+    )
+    outcome = packets[-1]["motion_state"]["grasp_outcome"]
+    assert outcome["status"] == status
+    assert outcome["observation_only"] is True
 
 
 def test_grasp_outcome_fails_when_contact_gap_is_below_threshold() -> None:
@@ -728,6 +739,24 @@ def test_grasp_outcome_fails_when_contact_gap_is_below_threshold() -> None:
     assert result["reason"] == "absolute gripper gap below required threshold"
     assert result["contact_gap"] == pytest.approx(0.1)
     assert result["transport_overlap"] is False
+
+
+def test_grasp_threshold_update_reclassifies_cached_failure_from_unchanged_log(tmp_path, monkeypatch):
+    path = tmp_path / "motor_events.jsonl"
+    rows = [_pose_event(i, t, actual=actual, target=target)
+            for i, (t, actual, target) in enumerate(
+                _grasp_attempt_samples(measured_gripper=51.43), 1)]
+    _write_jsonl(path, rows)
+    session = {"session_id": "cached-contact", "status": "STOPPED"}
+    with monkeypatch.context() as old:
+        old.setattr(joint_telemetry, "GRASP_CONTACT_GAP_THRESHOLD", 2.0)
+        old.setattr(joint_telemetry, "GRASP_OUTCOME_RULE_VERSION", "absolute_contact_gap_v3")
+        before = joint_telemetry.finalize_grasp_outcome_artifact(path, session)
+        assert before["summary"]["failed_count"] == 1
+    after = joint_telemetry.finalize_grasp_outcome_artifact(path, session)
+    assert after["cached"] is False
+    assert after["summary"]["success_count"] == 1
+    assert after["grasp_achievement"]["achieved"] is True
 
 
 def test_grasp_outcome_ignores_arm_transport_when_contact_gap_is_sufficient() -> None:

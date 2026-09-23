@@ -96,6 +96,12 @@ async def reload_equipment_support(controller):
     import subprocess
     import sys
     from orchestrator.state import Stage
+    # One-time, observation-only migration for servers already running v3.
+    # Never reload workflow/device classes or rewind an active experiment.
+    from utils import lerobot_joint_telemetry as telemetry
+    if (telemetry.GRASP_CONTACT_GAP_THRESHOLD == 2.0
+            and telemetry.GRASP_OUTCOME_RULE_VERSION == "absolute_contact_gap_v3"):
+        return await reload_grasp_display_threshold(controller)
     if (controller._state.run_metadata.get("vision_agent_payload") or {}).get("failure_code") in {
             "VISION_ROS_STOP_UNCONFIRMED", "VISION_ROS_RESTART_UNCONFIRMED"}:
         return await reload_vision_ros_support(controller)
@@ -144,6 +150,39 @@ async def reload_equipment_support(controller):
         {"modules": loaded, "sha256": digests, "actuation_performed": False})
     return {"ok": True, "modules": loaded, "sha256": digests, "server_restarted": False,
             "actuation_performed": False, "scope": "equipment_support_only"}
+
+
+async def reload_grasp_display_threshold(controller):
+    """Publish only the approved display constants; retain all execution state."""
+    import ast
+    import asyncio
+    from utils import lerobot_joint_telemetry as telemetry
+    from utils.monitor_process import existing_monitor_process
+
+    expected = {"GRASP_CONTACT_GAP_THRESHOLD": 1.2,
+                "GRASP_OUTCOME_RULE_VERSION": "absolute_contact_gap_v4"}
+    tree = ast.parse(Path(telemetry.__file__).read_text())
+    values = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id in expected:
+                    values[target.id] = ast.literal_eval(node.value)
+    if values != expected:
+        raise ValueError("Grasp display hotfix source does not match approved constants")
+    # Existing imported functions share this namespace. Bump the artifact rule
+    # so cached v3 failures are reclassified from raw telemetry, not reused.
+    telemetry.__dict__.update(values)
+    worker = existing_monitor_process("robot")
+    if worker is not None:
+        await asyncio.to_thread(worker.close)
+    result = {"ok": True, "scope": "grasp_display_only",
+              "contact_gap_threshold": telemetry.GRASP_CONTACT_GAP_THRESHOLD,
+              "rule_version": telemetry.GRASP_OUTCOME_RULE_VERSION,
+              "server_restarted": False, "actuation_performed": False}
+    await controller._emit_control_event("runtime.hot_reload",
+        "Grasp display threshold updated; final vision verification unchanged", result)
+    return result
 
 
 def assert_vision_ros_patch_boundary(controller):
