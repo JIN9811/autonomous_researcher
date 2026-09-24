@@ -499,6 +499,18 @@ async def finish_archived_design(controller, *, request, first_spec, design_cons
 
 def restore_checkpoint(controller, run_id):
     """Restore a verified review boundary; Operator Resume remains separate."""
+    from app.safe_hot_reload import reload_sources
+    from app import equipment_entry_resume
+    if (controller._state.run_id == run_id and controller._state.stage.value == 'complete'
+            and (controller._state.run_metadata.get('guardian_recovery_wait') or {}).get('status') == 'stopped'
+            and (controller._state.run_metadata.get('equipment_agent_payload') or {}).get('failure_code')
+                == 'EQUIPMENT_WORKFLOW_REVIEW_REQUIRED'):
+        # The server may have loaded the older paused-only dispatcher. Publish
+        # this stateless leaf only at the existing inactive restore boundary.
+        from app.safe_hot_reload import assert_idle
+        assert_idle(controller)
+        reload_sources({'app.equipment_entry_resume': Path(equipment_entry_resume.__file__)})
+        return equipment_entry_resume.prepare_stopped(controller)
     if controller._state.run_id == run_id and controller._state.stage.value == "complete" and (
         controller._state.run_metadata.get("guardian") or {}).get("reason") == "Guardian graph-wide gate requested safe stop: SYSTEM_SAFE_STOP_RECOMMENDED":
         from app.guardian_review_recovery import prepare

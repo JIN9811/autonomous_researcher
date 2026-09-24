@@ -43,6 +43,9 @@ async def dispatch(controller):
                                              {'status': 'resumed', 'operator_action': True})
         return {'ok': True, 'status': 'resumed', 'run_id': state.run_id}
     metadata = state.run_metadata
+    from app.equipment_entry_resume import stopped_matches, resume_stopped
+    if stopped_matches(state):
+        return await resume_stopped(controller)
     for key, module, function in ROUTES:
         record = metadata.get(key) or {}
         if not isinstance(record, dict):

@@ -32,6 +32,126 @@ def fixture():
     return state, record, program
 
 
+def test_stopped_entry_retry_matches_only_same_unfinished_cycle():
+    from app import equipment_entry_resume as recovery
+    state, _, _ = fixture()
+    state.stage = Stage.COMPLETE
+    state.loop_count = 1
+    state.is_paused = False
+    state.run_metadata['guardian_recovery_wait']['status'] = 'stopped'
+    state.run_metadata['_planning_resume_context'] = {'cycle_index': 1, 'total_cycles': 3,
+        'current_spec': {'specimen_id': 'spec'}}
+    matches = getattr(recovery, 'stopped_matches', lambda state: False)
+    assert matches(state)
+    state.loop_count = 2
+    assert not matches(state)
+    state.loop_count = 1
+    state.run_metadata['_planning_resume_context']['current_spec']['specimen_id'] = 'other'
+    assert not matches(state)
+
+
+def test_readonly_recheck_stops_before_first_device_action():
+    from app import equipment_entry_resume as recovery
+    _, _, program = fixture()
+    prefix = getattr(recovery, 'readonly_prefix', lambda program: [])(program)
+    assert [step['action'] for step in prefix] == ['screenshot', 'wait_until_image']
+    assert prefix[-1]['target'] == 'entry_height_150_mm'
+
+
+def stopped_fixture(tmp_path, monkeypatch):
+    from app import equipment_entry_resume as recovery
+    state, record, program = fixture()
+    state.stage, state.loop_count, state.is_paused = Stage.COMPLETE, 1, False
+    state.run_metadata['guardian_recovery_wait']['status'] = 'stopped'
+    state.run_metadata['_planning_resume_context'] = {'cycle_index': 1, 'total_cycles': 3,
+        'current_spec': {'specimen_id': 'spec'}, 'design_constraints': {'material': 'PLA'}}
+    state.run_metadata['hardware_alerts'] = [dict(schema='hardware_alert.v1', alert_id='capture',
+        run_id='run', loop_id=0, device_class='equipment', tool='equipment.pyautogui.screenshot',
+        failure_code='PYAUTOGUI_SCREENSHOT_FAILED', lifecycle='active', severity='blocking',
+        blocks_workflow=True, requires_ack=True, message='failed')]
+    state.device_health['equipment'] = 'blocking:PYAUTOGUI_SCREENSHOT_FAILED'
+    state.run_metadata['guardian_gates'] = [dict(gate_id='entry', run_id='run', loop_id=0,
+        stage='equipment', phase='action', decision='block', reason_code='UI_LOCATOR_NOT_FOUND',
+        alarms=[dict(reason_code='UI_LOCATOR_NOT_FOUND', severity='blocking',
+                     message='Required screen target not found: entry_height_150_mm', source_path='payload')])]
+    state.run_metadata['incident_records'] = [dict(incident_id='entry', status='open')]
+    tasks = []
+    c = SimpleNamespace(_state=state, _run_task=None, _deps=SimpleNamespace(run_root=tmp_path),
+        _planning_handoff_active=lambda: bool(tasks and not tasks[-1].done()),
+        _planning_request_lock=asyncio.Lock(), _error_resume_lock=asyncio.Lock(),
+        _active_safety_sources=lambda:{}, _plc_service_start_rejection=AsyncMock(return_value=None),
+        _emit_control_event=AsyncMock(), _set_planning_handoff_task=tasks.append,
+        _run_planning_cycle_series=AsyncMock(return_value={'ok': True}),
+        snapshot=lambda: {'state':state.model_dump(mode='json'), 'is_running':False})
+    monkeypatch.setattr(recovery, 'stopped_inputs', lambda controller: (deepcopy(record), deepcopy(program)), raising=False)
+    proof = dict(ok=True, status='completed', step_trace=[dict(step='SEQ_2_WAIT_UNTIL_IMAGE',
+        status='ok', detail='entry_height_150_mm via image')],
+        output_artifacts=[{'local_path':'/readonly/screen.png', 'sha256':'capture-hash'}])
+    monkeypatch.setattr(recovery, 'recheck_entry', AsyncMock(return_value=proof), raising=False)
+    return c, tasks, record, program
+
+
+@pytest.mark.asyncio
+async def test_terminal_resume_rechecks_then_continues_same_eqp_without_print_or_transfer(tmp_path, monkeypatch):
+    c, tasks, record, _ = stopped_fixture(tmp_path, monkeypatch)
+    original = deepcopy(record)
+    result = await resume_routing.dispatch(c)
+    assert result['ok'] and result['cycle_index'] == 1
+    assert c._state.loop_count == 0 and c._state.stage == Stage.EQUIPMENT
+    assert (await resume_routing.dispatch(c))['status'] == 'already_running'
+    await tasks[0]
+    c._run_planning_cycle_series.assert_awaited_once_with(first_spec={'specimen_id':'spec'},
+        design_constraints={'material':'PLA'}, start_cycle=1, resume_tail_stage=Stage.EQUIPMENT)
+    assert record == original
+    assert c._state.run_metadata['hardware_alerts'][0]['lifecycle'] == 'resolved'
+    assert c._state.run_metadata['guardian_gates'][0]['decision'] == 'block'
+    assert c._state.run_metadata['guardian_gates'][0]['audit_log']['resolved_by']
+    assert c._state.device_health['equipment'] == 'ready'
+    assert list((tmp_path/'run/recovery').glob('equipment_entry_before_*.json'))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('fault', ['safety','plc','failed_capture','unknown_alert','other_run_alert',
+    'unknown_gate','changed_boundary','source_changed'])
+async def test_terminal_recovery_never_releases_unproven_or_changed_boundary(tmp_path, monkeypatch, fault):
+    from app import equipment_entry_resume as recovery
+    c, tasks, record, _ = stopped_fixture(tmp_path, monkeypatch)
+    if fault == 'safety': c._state.emergency_stop_requested = True
+    if fault == 'plc': c._plc_service_start_rejection.return_value = {'ok':False, 'status':'blocked'}
+    if fault == 'failed_capture': recovery.recheck_entry.return_value = {'ok':False}
+    if fault == 'unknown_alert': c._state.run_metadata['hardware_alerts'][0]['failure_code'] = 'MOTOR_FAULT'
+    if fault == 'other_run_alert': c._state.run_metadata['hardware_alerts'][0]['run_id'] = 'other'
+    if fault == 'unknown_gate': c._state.run_metadata['guardian_gates'][0]['reason_code'] = 'COLLISION'
+    if fault == 'changed_boundary':
+        async def changed(*args):
+            c._state.loop_count = 2
+            return {'ok':True}
+        recovery.recheck_entry.side_effect = changed
+    if fault == 'source_changed':
+        async def changed(*args):
+            record['execution_id'] = 'different'
+            return {'ok':True}
+        recovery.recheck_entry.side_effect = changed
+    before = deepcopy(c._state.run_metadata)
+    result = await resume_routing.dispatch(c)
+    assert not result['ok'] and not tasks
+    assert c._state.run_metadata == before
+
+
+@pytest.mark.asyncio
+async def test_unrelated_monitor_refresh_does_not_invalidate_eqp_recheck(tmp_path, monkeypatch):
+    from app import equipment_entry_resume as recovery
+    c, tasks, _, _ = stopped_fixture(tmp_path, monkeypatch)
+    proof = recovery.recheck_entry.return_value
+    async def monitor_refresh(*args):
+        c._state.run_metadata['printer_monitor'] = {'updated_at': 'newer'}
+        return proof
+    recovery.recheck_entry.side_effect = monitor_refresh
+    result = await resume_routing.dispatch(c)
+    assert result['ok']
+    await tasks[0]
+
+
 def test_proven_read_only_first_block_failure_is_retryable_without_changing_evidence():
     from app.equipment_entry_resume import validate_record
     state, record, program = fixture()
