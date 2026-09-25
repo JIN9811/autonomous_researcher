@@ -149,6 +149,19 @@ test("verification ROI uses the recorded bounds with no invented fallback", () =
   }
 });
 
+test("placement overlay uses raised default but preserves recorded historical ROI", () => {
+  const context = loadPlanningFunctions([], {renderVisionSpecimenIntervention: () => ""});
+  const start = planningSource.indexOf("function renderVisionUtmPlacementConfirmation(");
+  const end = planningSource.indexOf("\nfunction ", start + 1);
+  vm.runInContext(planningSource.slice(start, end), context);
+  const artifact = {path:"/frame.png", frame_width:640, frame_height:480};
+  const fresh = context.renderVisionUtmPlacementConfirmation({}, {}, artifact);
+  assert.match(fresh, /x="200" y="240" width="200" height="160"/);
+  const historical = context.renderVisionUtmPlacementConfirmation({}, {},
+    {...artifact, roi_xyxy:[200,240,400,420]});
+  assert.match(historical, /x="200" y="240" width="200" height="180"/);
+});
+
 test("both snapshot selectors stay visible and missing Verification 2 is Pending without a V1 fallback", () => {
   const context = loadPlanningFunctions([
     "utmVerificationScope",

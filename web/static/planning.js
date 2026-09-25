@@ -14317,10 +14317,10 @@ function renderVisionUtmPlacementConfirmation(screenReport, completion = {}, per
   const resolution = frameWidth && frameHeight ? `${frameWidth}x${frameHeight}` : "-";
   const confidence = artifact.confidence ?? signal.confidence;
   // Registered platen region shared with Verification 2 (640x480 camera).
-  // Keep this configured overlay separate from the historical detection verdict.
+  // Keep recorded evidence bounds intact; only new/unrecorded views use the current default.
   const roi = visionVerificationRoi({
     artifact: { frame_width: frameWidth, frame_height: frameHeight,
-      roi_xyxy: [200, 240, 400, 420] },
+      roi_xyxy: artifact.roi_xyxy || signal.roi_xyxy || [200, 240, 400, 400] },
     evidence: {},
   });
   return `

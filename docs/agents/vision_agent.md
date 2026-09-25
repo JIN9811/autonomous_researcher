@@ -331,7 +331,7 @@ selected tool, reason, evidence refs, image hashes, and error/failure state.
 ## Post-Test Clearance Baseline
 
 Placement detection and Verification 2 share the fixed platen ROI
-`[200, 240, 400, 420]` in the 640 × 480 camera view through
+`[200, 240, 400, 400]` in the 640 × 480 camera view through
 `utm_platen_roi_normalized()`. This applies to physical and virtual UTM capture
 routes; ActiveCam keeps its own workspace ROI. The monitor's full-height
 `x_roi` and caller-supplied overrides do not control placement inspection.
@@ -342,7 +342,7 @@ post-clear detector after managed replay completion and measured robot return.
 It reuses the placement detector's high-chroma-red mask and normalized ROI crop
 path, but aggregates small residuals instead of looking only for the largest
 specimen. The fixed 640 × 480 camera profile uses a generous platen ROI
-`[200, 240, 400, 420]` (left, top, right, bottom); discarded specimens outside
+`[200, 240, 400, 400]` (left, top, right, bottom); discarded specimens outside
 that region do not count. Green marker registration is not required. The model
 does not move the ROI or change the material/area thresholds.
 

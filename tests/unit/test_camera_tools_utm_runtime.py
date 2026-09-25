@@ -329,7 +329,7 @@ def test_placement_uses_verification2_roi_not_full_height_monitor_or_caller_over
     manager._run_ros_frame_command = monitor_must_not_be_read
     payload = {"runtime_mode": mode, "output_dir": str(tmp_path), "roi_normalized": [0, 0, 1, 1]}
     result = _utm_specimen_presence_capture(payload, utm_runtime_manager=manager)
-    assert result["roi_xyxy"] == [200, 240, 400, 420]
+    assert result["roi_xyxy"] == [200, 240, 400, 400]
     assert result["detected"] is on_platen
     assert result["bbox_xyxy"] == ([270, 300, 310, 340] if on_platen else [])
     assert result["failure_code"] == ("" if on_platen else "SPECIMEN_NOT_DETECTED")

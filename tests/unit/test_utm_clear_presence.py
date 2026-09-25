@@ -33,6 +33,23 @@ def frame(red=False):
     return arr
 
 
+@pytest.mark.parametrize("on_platen", [False, True])
+def test_both_verifications_exclude_material_below_green_marker_boundary(tmp_path, on_platen):
+    arr = frame(red=on_platen)
+    # Disposed material below the green marker boundary, formerly inside ROI.
+    arr[403:419, 260:300] = [225, 30, 35]
+    output = BytesIO()
+    Image.fromarray(arr).save(output, format="PNG")
+    placement = presence.inspect_specimen_presence(
+        "data:image/png;base64," + base64.b64encode(output.getvalue()).decode(),
+        output_dir=tmp_path, specimen_id="test", frame_id="placement-marker-boundary",
+        purpose="utm_placement_verification")
+    clearance = inspect(arr, tmp_path)
+    assert placement["detected"] is on_platen
+    assert clearance["clear_confirmed"] is (not on_platen)
+    assert placement["roi_xyxy"] == clearance["roi_xyxy"] == [200, 240, 400, 400]
+
+
 def inspect(arr, tmp_path, **kwargs):
     output = BytesIO()
     Image.fromarray(arr).save(output, format="PNG")
@@ -59,7 +76,7 @@ def test_markerless_platen_uses_roi_not_anchor_registration(tmp_path, red):
     if red: arr[375:390, 260:290] = [225, 30, 35]
     result = inspect(arr, tmp_path)
     assert result["status"] == ("occupied" if red else "clear")
-    assert result["roi_xyxy"] == [200, 240, 400, 420]
+    assert result["roi_xyxy"] == [200, 240, 400, 400]
     assert result["roi_valid"] is True
     assert result["inspection_method"] == "fixed_platen_roi"
     assert "registered" not in result

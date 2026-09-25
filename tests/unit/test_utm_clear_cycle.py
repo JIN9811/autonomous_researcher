@@ -123,7 +123,7 @@ class ReplayTools:
         from datetime import datetime, timezone
         return {**identity, "ok": True, "status": "clear", "clear_confirmed": True, "detected": False,
             "captured_at": datetime.now(timezone.utc).isoformat(), "frame_timestamp": datetime.now(timezone.utc).timestamp(),
-            "roi_valid": True, "inspection_method": "fixed_platen_roi", "roi_xyxy": [200, 240, 400, 420],
+            "roi_valid": True, "inspection_method": "fixed_platen_roi", "roi_xyxy": [200, 240, 400, 400],
             "topic": self.topic, "camera_profile_id": "camera_utm_primary",
             "raw_frame_path": "synthetic.png", "evidence_path": "synthetic.json", "failure_code": ""}
 

@@ -18,7 +18,7 @@ Vision (VIS) combines deterministic detection with bounded LLM review of same-ca
 | Initial placement | Specimen inside the fixed platen ROI shared with Verification 2 |
 | Post-test removal | Residue within the platen ROI after removal and home return |
 
-Placement and removal share the fixed platen ROI `[200, 240, 400, 420]` in the 640 × 480 camera view. Placement does not use the monitor's full-height ROI or accept caller overrides. Removal aggregates small red remnants and does not require green-marker registration. Presence and clearance retain separate success criteria; neither the model nor the caller can widen the ROI.
+Placement and removal share the fixed platen ROI `[200, 240, 400, 400]` in the 640 × 480 camera view, with the lower boundary just below the green platen markers. Placement does not use the monitor's full-height ROI or accept caller overrides. Removal aggregates small red remnants and does not require green-marker registration. Presence and clearance retain separate success criteria; neither the model nor the caller can widen the ROI. Historical evidence retains its originally recorded ROI.
 
 ## Time and provenance
 

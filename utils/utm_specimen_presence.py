@@ -22,7 +22,8 @@ SPECIMEN_PRESENCE_SCHEMA = "vision_utm_specimen_presence.v1"
 # Unannotated sources returned by the shared UTM1/UTM2 raw_frame() path.
 # Both must still satisfy the camera profile, image geometry and freshness checks.
 UTM_CLEAR_CAMERA_TOPICS = frozenset({"/camera/image_raw", "/camera/image_rect"})
-UTM_CLEAR_ROI_XYXY = (200, 240, 400, 420)
+# Shared Verification 1/2 region: bottom just below the green platen markers.
+UTM_CLEAR_ROI_XYXY = (200, 240, 400, 400)
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 _RED_MIN_SATURATION = 0.50
 _RED_MIN_VALUE = 0.25
