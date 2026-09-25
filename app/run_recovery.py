@@ -499,6 +499,9 @@ async def finish_archived_design(controller, *, request, first_spec, design_cons
 
 def restore_checkpoint(controller, run_id):
     """Restore a verified review boundary; Operator Resume remains separate."""
+    from app.bo_budget_recovery import checkpoint_path, restore as restore_bo
+    if controller._state.stage.value == 'idle' and checkpoint_path(controller._deps.run_root, run_id).is_file():
+        return restore_bo(controller, run_id)
     from app.safe_hot_reload import reload_sources
     from app import equipment_entry_resume
     if (controller._state.run_id == run_id and controller._state.stage.value == 'complete'

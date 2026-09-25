@@ -1501,6 +1501,13 @@ class BOAgent(BaseAgent):
         if contract.get("parameter_space") and contract.get("manufacturing_constraints"):
             settings = {**(settings or {}), "parameter_space": deepcopy(contract["parameter_space"])}
         normalized, warnings = self.normalize_settings(settings)
+        cycle_contract = state.run_metadata.get("planning_cycle_contract") or {}
+        total_cycles = cycle_contract.get("total_cycles")
+        if (cycle_contract.get("schema") == "planning_cycle_contract.v1"
+                and type(total_cycles) is int and total_cycles > 0):
+            # The approved run owns its experiment count; the workspace default
+            # is only a fallback for standalone BO, not a second run limit.
+            normalized["budget"] = total_cycles
         normalized["parameter_space"] = self._fixed_surface_space_for_state(
             normalized["parameter_space"],
             state,

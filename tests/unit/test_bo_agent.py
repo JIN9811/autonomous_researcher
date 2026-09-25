@@ -23,6 +23,26 @@ class _CtxStub:
         self.force_real_llm_in_test = False
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('total,expected', [(15, 15), (4, 4), (None, 8), (True, 8), (0, 8)])
+async def test_bo_decision_budget_follows_run_contract_not_workspace_default(monkeypatch, total, expected):
+    import agents.bo.agent as module
+    state = OrchestratorState(run_id='budget-run', experiment_id='budget-exp',
+        mode=Mode.TEST, stage=Stage.BO, loop_count=7)
+    if total is not None:
+        state.run_metadata['planning_cycle_contract'] = {
+            'schema': 'planning_cycle_contract.v1', 'total_cycles': total, 'mode': 'test'}
+    captured = {}
+    async def decision(**kwargs):
+        captured.update(kwargs)
+        return {'status': 'returned', 'reason': 'test stops before external optimizer'}
+    monkeypatch.setattr(module, 'run_bo_decision', decision)
+    await BOAgent().run_with_settings(state, _CtxStub(), {'budget': 8})
+    assert captured['context']['experiment_budget'] == expected
+    assert captured['settings']['budget'] == expected
+    assert state.run_metadata['bo_settings']['budget'] == expected
+
+
 def _add_completed_lhs_observations(state: OrchestratorState, *, count: int = 8) -> None:
     """Seed measured points so tests that target ranking run after LHS initialization."""
     for index in range(count):

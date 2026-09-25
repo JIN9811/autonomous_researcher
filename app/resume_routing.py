@@ -5,6 +5,7 @@ from orchestrator.state import Stage
 
 
 ROUTES = (
+    ('bo_budget_retry', 'app.bo_budget_recovery', 'resume'),
     ('vision_ros_retry', 'app.vision_ros_recovery', 'resume'),
     ('guardian_review_retry', 'app.guardian_review_recovery', 'resume_review'),
     ('equipment_selection_resume', 'app.equipment_selection_checkpoint', 'resume_selection'),
