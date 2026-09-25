@@ -1624,6 +1624,12 @@ class BOAgent(BaseAgent):
                 summary="BO blocked: no valid measured observation for the active objective",
                 data={"bo_result": blocked_result, "experiment_objective": objective},
             )
+        if (cycle_contract.get("schema") == "planning_cycle_contract.v1"
+                and type(total_cycles) is int and total_cycles > 0
+                and state.loop_count + 1 == total_cycles):
+            from agents.bo.final_report import finalize_bo
+            return await finalize_bo(self, state, normalized, objective, compatible_observations,
+                                     observation_integrity, knowledge_context)
         failure_model = self._failure_model(priors)
         benchmark: dict[str, Any] = {}
 

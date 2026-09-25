@@ -489,10 +489,13 @@ def propose_next(
     optimizer_timeout_s: float | None = None,
     fit_max_iter: int = 50,
     projection_candidate: Mapping[str, Any] | None = None,
+    report_only: bool = False,
 ) -> BoTorchProposal:
     """Fit a SingleTaskGP and directly optimize one next mixed-space candidate."""
     from utils.compute_pool import compute_enabled, compute_sync
-    if compute_enabled():
+    # Final reporting is called from a background thread, including on servers
+    # whose persistent compute workers predate this optional argument.
+    if compute_enabled() and not report_only:
         result = compute_sync('bo.propose', {
             'parameter_space': {d.name: list(d.values) for d in parameter_space.dimensions},
             'observations': list(observations), 'acquisition': acquisition,
@@ -560,6 +563,29 @@ def propose_next(
             train_y=train_y,
             kappa=kappa,
         )
+        model_info = {
+            "class": "SingleTaskGP", "observation_count": observation_count,
+            "training_count": len(vectors), "duplicate_observation_count": observation_count - len(vectors),
+            "noise_mode": noise_mode, "fit_max_iter": int(max(5, fit_max_iter)),
+            "kernel": f"ScaleKernel(MaternKernel(nu=2.5, ard_num_dims={parameter_space.active_dimension_count}))",
+            "ard_num_dims": parameter_space.active_dimension_count, "input_normalization": "unit_hypercube",
+        }
+        if report_only:
+            # Condition inactive axes on the best *measured* design, not a new
+            # acquisition optimum. Acquisition is evaluated for display only.
+            best_index = max(range(len(scores)), key=lambda i: objective_sign * scores[i])
+            projection = _projection(model=model, acquisition_function=acq_function,
+                parameter_space=parameter_space, candidate_vector=vectors[best_index],
+                anchor_vectors=vectors, objective_sign=objective_sign)
+            if isinstance(projection.get("objective_path"), dict):
+                projection["objective_path"]["next_point_coordinate"] = None
+            projection["anchor_source"] = "best_observed_final_report"
+            return BoTorchProposal(backend_requested="botorch", backend_active="botorch",
+                objective_direction=direction, schema_hash=parameter_space.schema_hash,
+                candidate={}, normalized_vector=[], posterior={},
+                acquisition={"requested": acquisition, "class": acq_class, "value": None, "kappa": float(kappa)},
+                optimizer={"function": "not_run_final_report", "q": 0},
+                model=model_info, projection=projection)
         bounds = torch.stack(
             [
                 torch.zeros(parameter_space.active_dimension_count, dtype=torch.double),
@@ -630,17 +656,7 @@ def propose_next(
                 "duplicate_replaced": duplicate_replaced,
                 "duplicate_avoidance": "sobol_acquisition_rescore",
             },
-            model={
-                "class": "SingleTaskGP",
-                "observation_count": observation_count,
-                "training_count": len(vectors),
-                "duplicate_observation_count": observation_count - len(vectors),
-                "noise_mode": noise_mode,
-                "fit_max_iter": int(max(5, fit_max_iter)),
-                "kernel": f"ScaleKernel(MaternKernel(nu=2.5, ard_num_dims={parameter_space.active_dimension_count}))",
-                "ard_num_dims": parameter_space.active_dimension_count,
-                "input_normalization": "unit_hypercube",
-            },
+            model=model_info,
             projection=_projection(
                 model=model,
                 acquisition_function=acq_function,

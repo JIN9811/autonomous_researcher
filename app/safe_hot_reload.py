@@ -96,6 +96,10 @@ async def reload_equipment_support(controller):
     import subprocess
     import sys
     from orchestrator.state import Stage
+    # Bounded code-only migration for servers started before final BO reporting.
+    from app.bo_final_hotfix import needs_patch, apply_hotfix
+    if needs_patch():
+        return await apply_hotfix(controller)
     # One-time, observation-only migration for servers already running v3.
     # Never reload workflow/device classes or rewind an active experiment.
     from utils import lerobot_joint_telemetry as telemetry

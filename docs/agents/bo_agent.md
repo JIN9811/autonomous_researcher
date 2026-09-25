@@ -61,6 +61,17 @@ Main GUI: **Bayesian Optimization · Workspace** opens the optimization workspac
 
 ## Installed Package and Executable Structure
 
+At the final cycle of an approved `planning_cycle_contract.v1`, BO performs a
+final assessment instead of requesting another design. It refits the same GP
+using accepted measurements (including the last cycle), saves posterior and
+uncertainty/acquisition visualizations, and returns `optimization_phase:
+final_report`. Acquisition values are displayed but are not optimized to
+propose an additional specimen. No next-design handoff is emitted; the existing
+Guardian review and run-completion path remain in force. With insufficient
+distinct observations, the report explicitly records that a GP could not be
+fitted; missing evidence or genuine model errors are not converted into success.
+Intermediate cycles retain the existing LHS/BO decision path.
+
 BO is discovered once from `agents/bo/module.py` and installed as
 `bo@1.0.0`. Canonical implementation lives under `agents/bo/`. Maintained
 callers and monkeypatch targets now import that owner directly; the former root

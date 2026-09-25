@@ -10092,6 +10092,12 @@ class MainController:
 
     def _format_planning_bo_message(self, data: dict[str, Any]) -> str:
         bo_result = data.get("bo_result") if isinstance(data.get("bo_result"), dict) else {}
+        if bo_result.get("optimization_phase") == "final_report":
+            count = (bo_result.get("model") or {}).get("observation_count", 0)
+            return (f"BO 최종 평가 완료 · {bo_result.get('budget')}회차\n\n"
+                    f"- 최종 GP 관측 수: {count}\n"
+                    "- 다음 후보를 생성하지 않고 최종 평가 결과를 저장했습니다.\n"
+                    "- Guardian 최종 검토 후 런을 종료합니다.")
         recommendation = bo_result.get("recommendation") if isinstance(bo_result.get("recommendation"), dict) else {}
         knowledge = bo_result.get("knowledge_context") if isinstance(bo_result.get("knowledge_context"), dict) else {}
         reasoning = bo_result.get("reasoning") if isinstance(bo_result.get("reasoning"), dict) else {}
