@@ -2803,6 +2803,13 @@ class VisionAgent(BaseAgent):
             if placement_handoff
             else {}
         )
+        if placement_handoff:
+            from agents.manipulation.startup_retry import observe_rollout
+            failure_result = observe_rollout(
+                state, rollout_status, self._rollout_execution_evidence(state, rollout_status)
+            )
+            if failure_result is not None:
+                return failure_result
         status_interlock = (
             rollout_status.get("post_place_interlock")
             if isinstance(rollout_status.get("post_place_interlock"), dict)

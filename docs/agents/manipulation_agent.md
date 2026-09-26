@@ -9,6 +9,7 @@ summary: Manipulation-owned bounded LLM skill selection and post-Vision result j
 source_of_truth:
   - agents/manipulation/agent.py
   - agents/manipulation/decision.py
+  - agents/manipulation/startup_retry.py
   - agents/manipulation/execution.py
   - agents/manipulation/structure.py
   - agents/manipulation/presentation.py
@@ -47,7 +48,32 @@ Physical test profiles use the same policy-reference and execution-confirmation 
 | Physical effect | Possible only through existing rollout, fixed-skill and managed-replay executors |
 | Primary handoff | `robot_task_result.v1` → Vision → Equipment; verified clearance → Analysis |
 | Live hardware validation | Not performed for this reconstruction |
-| Known gap | No new pose-to-policy routing; LIVE pickup freshness can expire during model inference |
+| Known gap | No new pose-to-policy routing; failures after motion still require explicit recovery review |
+
+### Asynchronous startup failure and Vision admission
+
+Process acceptance (`POLICY_ACTIVE`) is not evidence that inference or robot motion
+started. Vision forwards a terminated rollout to the existing Manipulation owner
+instead of waiting indefinitely for its post-place/home gate. A bounded retry is
+eligible only with positive pre-policy failure evidence (a nonzero process exit
+and a synchronous `robot.connect()` traceback), no observed policy actions, and
+the same run, cycle, specimen, and accepted Vision evidence. A missing action
+counter alone is **not** proof of zero motion.
+
+Manipulation rechecks process status before and after its normal bounded skill
+decision, then uses its existing rollout-start path and configuration. The existing
+retry budget is retained; each replacement claim keeps the failed attempt and
+receives a new session/artifact identity. There is no direct API restart, automatic
+homing, or unconditional ActiveCam recapture. Unknown or post-motion failures are
+reported for recovery review rather than restarted automatically.
+
+Fresh Vision evidence is admitted at MAN entry. Model loading and robot connection
+do not consume that task's execution-validity window. The window is anchored once,
+when same-session policy actions are first observed; polling does not renew it.
+`policy_start_observed_at` records that observation time, not an invented precise
+first-motor-command timestamp. Original image timestamps and producer expiry fields
+remain unchanged. A stopped/cancelled scope, changed specimen/configuration, or new
+conflicting observation cannot reuse the retained admission.
 
 ## Summary
 

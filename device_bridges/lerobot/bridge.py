@@ -10391,6 +10391,19 @@ class LeRobotBridge:
             "message": message,
             "action_count": action_count,
             "action_count_observed": action_count_observed,
+            # A missing counter is UNKNOWN. A terminal traceback at the sync
+            # entry point's connect() call is positive pre-policy evidence.
+            "failed_before_policy_start": bool(
+                workflow == "rollout" and status == "FAILED"
+                and isinstance(returncode, int) and not isinstance(returncode, bool) and returncode > 0
+                and re.search(r'File "[^"\n]*lerobot_record\.py", line \d+, in record\n\s+robot\.connect\(\)', text)
+                and "Traceback (most recent call last):" in text
+                and not action_matches and action_count == 0
+                and not any(marker in text for marker in (
+                    "Recording episode", "Started actor thread", "OmxFollower connected",
+                    "Total actions executed:", "[ATR_ACTION]",
+                ))
+            ),
             "max_abs_delta": max_abs_delta,
             "warnings": sorted(set(warnings)),
             "log_path": session.get("log_path", ""),

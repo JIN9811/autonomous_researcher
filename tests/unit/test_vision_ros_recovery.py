@@ -99,6 +99,27 @@ async def test_legacy_completed_recovery_starts_next_design_not_old_tail():
 
 
 @pytest.mark.asyncio
+async def test_completed_image_review_routes_to_next_design_without_repeating_cycle():
+    from app.resume_routing import dispatch
+    c = completed_controller()
+    c._state.experiment_id = 'exp'
+    c._state.run_metadata['vision_review_retry'] = c._state.run_metadata.pop('vision_ros_retry')
+    calls, tasks = [], []
+    async def series(**kwargs):
+        calls.append(kwargs)
+        return {'ok': True, 'decision': 'continue'}
+    c._run_planning_cycle_series = series
+    c._set_planning_handoff_task = tasks.append
+    result = await dispatch(c)
+    assert result['ok'] and result['cycle_index'] == 8
+    await tasks[0]
+    assert calls == [{'first_spec': {'specimen_id': 's'}, 'design_constraints': {},
+                      'start_cycle': 8, 'start_with_design': True}]
+    assert not c._state.is_paused
+    assert not (await dispatch(c))['ok']
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('problem', ['safety', 'guardian', 'run', 'cycle', 'budget'])
 async def test_legacy_recovery_does_not_bypass_changed_boundary(problem):
     c = completed_controller()
@@ -116,6 +137,7 @@ async def test_real_series_next_design_entry_and_guardian_stop(recover_tail):
     from app.controller import MainController
     c = completed_controller()
     c._state.active_goal = 'SEA'
+    c._is_planning_test_cycle = lambda spec: False
     c._store_planning_resume_context = lambda **kw: None
     c._closed_loop_static_design_constraints = lambda value: value
     calls = []

@@ -55,9 +55,10 @@ async def dispatch(controller):
             continue  # Old recovery markers are audit, not current routing authority.
         if record.get('experiment_id') and record['experiment_id'] != state.experiment_id:
             continue
-        if key == 'vision_ros_retry' and record.get('status') == 'cycle_finished':
+        if key in {'vision_ros_retry', 'vision_review_retry'} and record.get('status') == 'cycle_finished':
             if record.get('loop_id') == state.loop_count - 1 and state.stage == Stage.DESIGN:
-                return await getattr(importlib.import_module(module), 'resume_completed_cycle')(controller)
+                from app.vision_ros_recovery import resume_completed_cycle
+                return await resume_completed_cycle(controller, recovery_key=key)
         loop = record.get('cycle') if key == 'guardian_review_retry' else record.get('loop_id')
         if loop != state.loop_count or record.get('status') not in {'ready', 'running'}:
             continue

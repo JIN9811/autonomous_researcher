@@ -72,11 +72,11 @@ async def resume(controller):
         return {"ok": True, "status": "resuming", "resume_stage": "vision", "one_cycle_only": False, **boundary}
 
 
-async def resume_completed_cycle(controller):
+async def resume_completed_cycle(controller, *, recovery_key="vision_ros_retry"):
     """Compatibility for the old one-cycle recovery already stopped at next Design."""
     async with controller._error_resume_lock:
         state = controller._state
-        record = state.run_metadata.get("vision_ros_retry") or {}
+        record = state.run_metadata.get(recovery_key) or {}
         result = record.get("result") or {}
         if controller._planning_handoff_active():
             return {"ok": True, "status": "already_resuming"}

@@ -400,6 +400,10 @@ class ManipulationAgent(BaseAgent):
 
     @staticmethod
     def _vision_signal_freshness(state: OrchestratorState) -> dict[str, Any]:
+        from agents.manipulation.startup_retry import held_vision_freshness
+        held = held_vision_freshness(state)
+        if held is not None:
+            return held
         observation = dict(state.latest_observations or {})
         readiness = observation.get("transfer_readiness") if isinstance(observation.get("transfer_readiness"), dict) else {}
         signal = observation.get("vision_signal") if isinstance(observation.get("vision_signal"), dict) else {}
@@ -1780,6 +1784,10 @@ class ManipulationAgent(BaseAgent):
         from utils.utm_clear_cycle import current_clear, run_clear_manipulation
         if current_clear(state):
             return await run_clear_manipulation(state, ctx, spec=self._spec(state))
+        from agents.manipulation.startup_retry import prepare_retry, admit_vision
+        retry_blocked = await prepare_retry(state, ctx)
+        if retry_blocked is not None:
+            return retry_blocked
         from agents.manipulation.decision import select_manipulation_tool, review_manipulation_result, allows, claim_skill_execution
         skill_decision = None
         result_decision = None
@@ -1837,6 +1845,10 @@ class ManipulationAgent(BaseAgent):
             else "robot.pick_place"
         )
         if not preflight_only and existing_completion_response is None:
+            # Admit fresh producer evidence once. Model/process initialization
+            # does not consume the execution validity window.
+            if (state.run_metadata.get("manipulation_startup_retry") or {}).get("status") != "ready":
+                admit_vision(state, payload["session_id"])
             skill_decision = await select_manipulation_tool(state, ctx, would_execute_tool, payload)
             # Recheck consumer freshness and configuration after model latency.
             fresh_now = self._vision_signal_freshness(state)
@@ -1844,15 +1856,20 @@ class ManipulationAgent(BaseAgent):
                 freshness=fresh_now, vision_context=self._vision_context(state, fresh_now))
             unchanged = payload == self._lerobot_payload(state, protocol_note, self._strategy(state))
             if not allows(skill_decision) or recheck.get("status") == "fail" or not unchanged or would_execute_tool not in available_tools:
+                state.run_metadata.pop("manipulation_vision_admission", None)
                 blocked = self._blocked_result(state=state, strategy=strategy, payload=payload,
                     preflight={**recheck, "status": "fail", "blocking_reasons": ["manipulation_decision_required"]},
                     vision_context=vision_context, protocol_note=protocol_note)
                 blocked.data.update(manipulation_decision=skill_decision, failure_code="MANIPULATION_REVIEW_REQUIRED")
                 return blocked
+            retry_blocked = await prepare_retry(state, ctx)
+            if retry_blocked is not None:
+                return retry_blocked
             if not claim_skill_execution(state, task_id, payload):
                 return AgentResult(success=False, summary="Existing skill attempt requires status review; no duplicate start",
                     data={"failure_code": "MANIPULATION_START_ALREADY_ATTEMPTED", "safe_stop_recommended": True,
                           "manipulation_decision": skill_decision})
+            admit_vision(state, payload["session_id"], bind_session=True)
         if preflight_only:
             response = {
                 "ok": True,

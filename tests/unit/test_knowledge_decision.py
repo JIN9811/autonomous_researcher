@@ -32,6 +32,38 @@ def setup(tmp_path, responses):
     return state, Context(), store_for(project_root=tmp_path), evidence
 
 
+def test_evidence_prompt_groups_repeated_guardian_history_without_rewriting_audit():
+    from agents.core.knowledge.decision import _model_observations
+    records = [{"incident_id": f"incident-{i}", "loop_id": i,
+                "stage": "equipment", "status": "open", "severity": "near_miss",
+                "immediate_cause": "RESULT_NOT_OK", "summary": "Owner review needed",
+                "risk_score": i / 100, "message": "duplicate detail " * 200}
+               for i in range(20)]
+    alert = {"status": "active", "failure_code": "DEVICE_ERROR", "blocks_workflow": True}
+    content = {"objective_score": 4.512143499, "metrics": {"mass_g": 13.72},
+               "artifact_refs": ["runs/example/analysis.json"],
+               "guardian_incidents": {"incident_count": 20, "incident_records": records,
+                   "current_failure_tags": ["DEVICE_ERROR"], "active_hardware_alerts": [alert]}}
+    trace = [{"tool": "inspect_evidence", "observation": {"sources": [
+        {"id": "current-analysis", "source_ref": "runs/example/intake.json", "content": content}]}}]
+    original = deepcopy(trace)
+    projected = _model_observations(trace)[0]["observation"]["sources"][0]
+    assert trace == original
+    assert projected["source_ref"] == "runs/example/intake.json"
+    assert projected["content"]["objective_score"] == 4.512143499
+    assert projected["content"]["metrics"] == {"mass_g": 13.72}
+    guardian = projected["content"]["guardian_incidents"]
+    assert len(guardian["incident_records"]) == 1
+    assert guardian["incident_records"][0]["count"] == 20
+    assert guardian["incident_records"][0]["loop_ids"] == list(range(20))
+    assert guardian["incident_records"][0]["max_risk_score"] == .19
+    assert guardian["active_hardware_alerts"] == [alert]
+    assert guardian["current_failure_tags"] == ["DEVICE_ERROR"]
+    assert projected["content"]["artifact_ref_count"] == 1
+    assert "source_ref" in projected["content"]["projection_note"]
+    assert len(json.dumps(projected)) < 2500
+
+
 @pytest.mark.asyncio
 async def test_model_inspects_writes_real_md_and_publishes_cited_context(tmp_path):
     assert importlib.util.find_spec("agents.core.knowledge.decision") is not None
@@ -90,6 +122,47 @@ async def test_model_can_read_its_successful_write_receipt_without_new_search(tm
     assert result["status"] == "accepted"
     assert len(result["note_receipts"]) == 1
     assert store.status()["records"] == 1
+
+
+@pytest.mark.asyncio
+async def test_prompt_separates_citable_evidence_from_unread_write_receipts(tmp_path):
+    from agents.core.knowledge.decision import run_knowledge_decision
+    state, ctx, store, evidence = setup(tmp_path, [])
+    async def complete(task, prompt, **kwargs):
+        packet = json.loads(prompt)
+        observations = packet["observations"]
+        if not observations:
+            value = request("inspect_evidence")
+        elif len(observations) == 1:
+            value = request("write_knowledge_note", title="Result", body="Evidence preserved.",
+                ontology_type="KnowledgeClaim", evidence_kind="derived", source_ids=["current-analysis"])
+        else:
+            assert packet["available_citation_ids"] == ["current-analysis"]
+            assert observations[-1]["observation"]["record_id"] in packet["readable_record_ids"]
+            value = request("publish_context", summary="Evidence preserved.",
+                source_ids=packet["available_citation_ids"])
+        return SimpleNamespace(text=value, model="fixture")
+    ctx.complete = complete
+    result = await run_knowledge_decision(state, ctx, store=store, evidence=evidence, scope={"run_id": state.run_id})
+    assert result["status"] == "accepted"
+    assert result["citations"][0]["source_id"] == "current-analysis"
+
+
+@pytest.mark.asyncio
+async def test_unknown_citation_is_rejected_before_effect_and_model_can_correct_it(tmp_path):
+    from agents.core.knowledge.decision import run_knowledge_decision
+    responses = [request("inspect_evidence"),
+        request("publish_context", summary="Result", source_ids=["unread-note"]),
+        request("publish_context", summary="Original evidence only", source_ids=["current-analysis"],
+                no_knowledge_reason="No new note needed")]
+    state, ctx, store, evidence = setup(tmp_path, responses)
+    result = await run_knowledge_decision(state, ctx, store=store, evidence=evidence, scope={"run_id": state.run_id})
+    assert result["status"] == "accepted"
+    assert result["citations"][0]["source_id"] == "current-analysis"
+    assert store.status()["records"] == 0
+    error = json.loads(ctx.prompts[-1])["observations"][-1]
+    assert error["tool"] == "protocol_error"
+    assert "Unknown or unread source identity" in error["observation"]["error"]
 
 
 @pytest.mark.asyncio

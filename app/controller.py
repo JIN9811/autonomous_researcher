@@ -9756,6 +9756,7 @@ class MainController:
             "operator_followup_queue", "operator_followup_context", "bo_initial_design",
             "next_design_request", "bo_recommended_constraints", "orchestrator_design_contract",
             "specimen_result", "robot_task_result", "clearance_review_recovery",
+            "manipulation_skill_attempts", "manipulation_vision_admission", "manipulation_startup_retry",
             "recovery_design_limit", "recovery_resume_stage", "archived_postprocessing_request",
             "completed_recovery_design_limit", "completed_archived_postprocessing",
             PLANNING_RESUME_CONTEXT_KEY, "_planning_workflow_controls_reset",

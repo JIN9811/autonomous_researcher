@@ -14,7 +14,7 @@ from agents.core.knowledge.runtime_reference import build_execution_reference as
 
 _TOOLS = {
     "inspect_evidence": {},
-    "search_knowledge": {"query": "string", "scope": "optional object; only narrow allowed scope", "top_k": "1..12", "corpus": "markdown (default), project, or sources"},
+    "search_knowledge": {"query": "string", "scope": "optional; omit to inherit allowed_scope. objective_id is nested under applicability, never a top-level scope key", "top_k": "1..12", "corpus": "markdown (default), project, or sources"},
     "read_knowledge": {"record_id": "ID from search results"},
     "write_knowledge_note": {"title": "string", "body": "Markdown", "ontology_type": "allowed ontology class", "source_ids": "nonempty IDs from inspected/read evidence", "evidence_kind": "derived or hypothesis", "tags": "optional string list"},
     "publish_context": {"summary": "concise supported context", "source_ids": "IDs from inspected/read evidence", "no_knowledge_reason": "reason if no new reusable note is warranted; otherwise empty"},
@@ -80,6 +80,45 @@ def _model_observations(trace: list[dict]) -> list[dict]:
     projected = deepcopy(trace)
     for event in projected:
         observation = event.get("observation", {})
+        if event.get("tool") == "inspect_evidence":
+            for source in observation.get("sources", []):
+                content = source.get("content", {})
+                if not isinstance(content, dict) or not isinstance(content.get("guardian_incidents"), dict):
+                    continue
+                # The content-addressed intake remains the full citation/audit.
+                # Repeated historical incidents are not new measurements or
+                # current blockers; expose their scopes and counts, not copies
+                # of every message, corrective-action list and artifact path.
+                guardian = content["guardian_incidents"]
+                fields_by_kind = {
+                    "incident_records": {"stage", "phase", "severity", "class", "component",
+                        "immediate_cause", "guardian_decision", "status", "summary"},
+                    "gate_decisions": {"stage", "phase", "decision", "reason_code"},
+                    "blocked_tool_records": {"stage", "status", "tool", "result_ok", "result_status",
+                        "failure_code", "guardian_decision", "guardian_reason_code"},
+                }
+                for kind, fields in fields_by_kind.items():
+                    if kind not in guardian:
+                        continue
+                    groups = {}
+                    for record in guardian[kind]:
+                        item = {key: value for key, value in record.items() if key in fields}
+                        key = json.dumps(item, sort_keys=True, ensure_ascii=False, default=str)
+                        group = groups.setdefault(key, {**item, "count": 0, "loop_ids": []})
+                        group["count"] += 1
+                        if "loop_id" in record and record["loop_id"] not in group["loop_ids"]:
+                            group["loop_ids"].append(record["loop_id"])
+                        if isinstance(record.get("risk_score"), (int, float)):
+                            group["max_risk_score"] = max(group.get("max_risk_score", 0), record["risk_score"])
+                    guardian[kind] = list(groups.values())
+                guardian.pop("incident_ids", None)
+                if isinstance(content.get("artifact_refs"), list):
+                    content["artifact_ref_count"] = len(content.pop("artifact_refs"))
+                content["projection_note"] = (
+                    "Guardian history is grouped by matching facts; counts and loop_ids describe historical scope, "
+                    "not new failures. Current failure tags and active alerts are unchanged. "
+                    "Full records, individual identities and artifact references remain in source_ref. "
+                    "Do not infer unshown details or treat historical occurrences as current blockers.")
         if event.get("tool") == "search_knowledge" and observation.get("corpus") == "sources":
             observation["hits"] = [{key: value for key, value in hit.items() if key in {
                 "record_id", "title", "excerpt", "category", "applicability", "source_id"}}
@@ -279,8 +318,12 @@ async def run_knowledge_decision(state, ctx, *, store, evidence: list[dict], sco
             if llm_used:
                 permitted = _TOOLS if inspected else {"inspect_evidence": {}}
                 prompt = json.dumps({**intro, "tools": permitted,
+                    "available_citation_ids": list(available),
+                    "readable_record_ids": list(candidates),
                     "phase": "curate_evidence" if inspected else "inspect_sources_before_deciding",
-                    "instruction": ("Choose one of the available tools and include only its declared arguments."
+                    "instruction": ("Choose one available tool with only its declared arguments. source_ids must come from "
+                        "available_citation_ids. An unread write receipt is only in readable_record_ids: read it first, "
+                        "or cite the original inspected evidence instead."
                         if inspected else 'Call exactly {"tool":"inspect_evidence","arguments":{}}. No scope, query, corpus or other arguments are allowed for this tool.'),
                     "observations": _model_observations(trace)}, ensure_ascii=False, default=str)
                 result["knowledge_delivery"] = mark_reference_delivered(ctx, reference)
@@ -288,12 +331,14 @@ async def run_knowledge_decision(state, ctx, *, store, evidence: list[dict], sco
                 result["model"] = str(getattr(response, "model", ""))
                 try:
                     tool, arguments = _request(response.text)
-                except (ValueError, TypeError):
+                    if tool in {"write_knowledge_note", "publish_context"}:
+                        _source_ids(arguments, available, allow_empty=tool == "publish_context")
+                except (ValueError, TypeError) as exc:
                     protocol_errors += 1
                     if protocol_errors > 2:
                         raise
                     trace.append({"tool": "protocol_error", "arguments": {}, "observation": {
-                        "error": "Invalid tool JSON or argument keys. No tool was executed.",
+                        "error": f"Invalid tool request: {str(exc)[:300]}. No tool was executed.",
                         "allowed_tools": permitted}})
                     continue
             elif step == 0:

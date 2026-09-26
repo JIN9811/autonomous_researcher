@@ -118,7 +118,7 @@ async def test_agent_context_does_not_duplicate_backend_prepare() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_context_uses_openai_backend_as_last_fallback() -> None:
+async def test_agent_context_uses_enabled_openai_route_before_local_models() -> None:
     local_backend = _FailingBackend()
     openai_backend = _RecordingBackend()
     local_router = ModelRouter(
@@ -164,7 +164,7 @@ async def test_agent_context_uses_openai_backend_as_last_fallback() -> None:
     response = await ctx.complete("orchestrator_plan", "plan this")
 
     assert response.text == "openai-ok"
-    assert local_backend.calls == ["local-primary", "local-fallback"]
+    assert local_backend.calls == []
     assert openai_backend.calls == ["gpt-5.5"]
     assert model_events == [
         {
@@ -277,6 +277,28 @@ def test_vllm_backend_bounds_common_task_tokens() -> None:
     assert VLLMBackend._max_tokens_for_metadata({"task_type": "orchestrator_plan"}) == 320
     assert VLLMBackend._max_tokens_for_metadata({"task_type": "tool_formatting"}) == 96
     assert VLLMBackend._max_tokens_for_metadata({"task_type": "tool_formatting", "max_tokens": 12}) == 12
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("task_type", ["knowledge_query", "bo_policy"])
+async def test_knowledge_request_leaves_room_for_evidence_in_8k_context(monkeypatch, task_type):
+    import httpx
+    original_client = httpx.AsyncClient
+
+    def server(request):
+        import json
+        payload = json.loads(request.content)
+        # A six-thousand-token curated evidence packet must fit the deployed
+        # 8192-token model together with its requested output allocation.
+        if 6000 + payload["max_tokens"] > 8192:
+            return httpx.Response(400, json={"error": "maximum context length exceeded"})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "accepted"}}]})
+
+    transport = httpx.MockTransport(server)
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original_client(transport=transport, **kwargs))
+    response = await VLLMBackend().complete(model="gemma4:31b", system_prompt="curate evidence",
+        user_prompt="curated evidence packet", metadata={"task_type": task_type})
+    assert response.text == "accepted"
 
 
 def test_vllm_backend_requests_json_object_for_structured_completion() -> None:

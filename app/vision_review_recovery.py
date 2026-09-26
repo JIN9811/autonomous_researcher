@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import json
+from copy import deepcopy
 
 from app.run_recovery import run_directory
 from orchestrator.state import Stage
@@ -72,27 +73,24 @@ async def resume_vision_review(controller):
 
         async def continue_from_fresh_capture():
             try:
-                result = await controller._run_planning_loop_tail(state.current_experiment_spec,
-                    cycle_index=boundary['loop_id'] + 1,
-                    total_cycles=controller._planning_cycle_limit(state.current_experiment_spec),
-                    resume_stage=Stage.VISION)
+                context = state.run_metadata.get('_planning_resume_context') or {}
+                result = await controller._run_planning_cycle_series(
+                    first_spec=deepcopy(state.current_experiment_spec),
+                    design_constraints=deepcopy(context.get('design_constraints') or {}),
+                    start_cycle=boundary['loop_id'] + 1, resume_tail_stage=Stage.VISION)
                 failed = any(owner.success is False and owner.run_id == state.run_id
-                    and owner.loop_id == boundary['loop_id'] for owner in state.agent_status.values())
+                    and owner.loop_id == state.loop_count for owner in state.agent_status.values())
                 done = bool(result.get('ok')) and result.get('decision') in {'continue', 'complete', 'stop'} and not failed
-                record.update(status='cycle_finished' if done else 'needs_attention', result=result)
-                printer = state.run_metadata.get('printer_wait_recovery')
-                if isinstance(printer, dict):
-                    printer.update(status=record['status'], result=result)
+                record.update(status='finished' if done else 'needs_attention', result=result)
                 return result
             except Exception as exc:
                 record.update(status='needs_attention', error=f'{type(exc).__name__}: {exc}')
                 state.stage = Stage.ERROR
+                state.is_paused = True
                 return {'ok': False, 'message': record['error']}
             finally:
-                # Preserve this run's previously requested one-cycle boundary.
-                state.is_paused = True
                 await controller._emit_control_event('vision_review_retry.finished',
-                    'Fresh Vision retry returned; no next fabrication dispatched', dict(record))
+                    'Fresh Vision retry returned through the normal cycle series', dict(record))
 
         controller._set_planning_handoff_task(asyncio.create_task(continue_from_fresh_capture()))
         await controller._emit_control_event('vision_review_retry.started',

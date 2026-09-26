@@ -57,10 +57,14 @@ def test_unsafe_or_different_boundaries_reject(controller, case):
 @pytest.mark.asyncio
 async def test_resume_starts_fresh_vision_not_fabrication_and_does_not_call_stop_success(controller):
     controller._state.run_metadata['vision_review_retry'] = {**validate_boundary(controller), 'status': 'ready'}
+    async def failed_series(**kwargs):
+        assert kwargs['resume_tail_stage'] == Stage.VISION
+        controller._state.is_paused = True
+        return {'ok': False, 'decision': 'stop'}
+    controller._run_planning_cycle_series = failed_series
     result = await resume_vision_review(controller)
     assert result['status'] == 'resuming_fresh_vision'
     await controller.tasks[0]
-    assert controller._run_planning_loop_tail.await_args.kwargs['resume_stage'] == Stage.VISION
     assert controller._state.run_metadata['vision_review_retry']['status'] == 'needs_attention'
     assert controller._state.is_paused
 
@@ -75,6 +79,22 @@ async def test_plc_latch_and_changed_archive_prevent_resumption(controller):
     controller._state.run_metadata['vision_review_retry']['source_sha256'] = 'changed'
     assert (await resume_vision_review(controller))['ok'] is False
     assert not controller.tasks
+
+
+@pytest.mark.asyncio
+async def test_successful_review_recovery_keeps_normal_series_running(controller):
+    controller._state.run_metadata['vision_review_retry'] = {**validate_boundary(controller), 'status': 'ready'}
+    calls = []
+    async def series(**kwargs):
+        calls.append(kwargs)
+        controller._state.agent_status['vision_agent'].success = True
+        return {'ok': True, 'decision': 'continue'}
+    controller._run_planning_cycle_series = series
+    await resume_vision_review(controller)
+    await controller.tasks[0]
+    assert calls == [{'first_spec': {'specimen_id': 's1'}, 'design_constraints': {},
+                      'start_cycle': 1, 'resume_tail_stage': Stage.VISION}]
+    assert not controller._state.is_paused
 
 
 def test_resume_staging_does_not_execute_controller_module(tmp_path):

@@ -37,14 +37,29 @@ def _digest(value):
 
 
 def claim_skill_execution(state, task, payload):
-    """One start attempt per delegated task/loop, even after an uncertain response."""
+    """One start per claim; only a verified pre-policy failure can receive another."""
     specimen = state.current_experiment_spec.get("specimen_id") or (state.run_metadata.get("specimen_result") or {}).get("specimen_id")
     key = _digest([state.run_id, state.loop_count, specimen, task])
     attempts = state.run_metadata.setdefault("manipulation_skill_attempts", {})
-    if _stopped(state) or key in attempts:
+    if _stopped(state):
         return False
+    previous = attempts.get(key)
+    history = []
+    if previous:
+        from agents.manipulation.startup_retry import _scope
+        retry = state.run_metadata.get("manipulation_startup_retry") or {}
+        if not (previous.get("retry_ready") and retry.get("status") == "ready"
+                and retry.get("scope") == _scope(state)
+                and retry.get("session_id") == previous.get("session_id")
+                and payload.get("session_id") and payload["session_id"] != previous.get("session_id")):
+            return False
+        history = [*previous.get("history", []),
+                   {k: deepcopy(v) for k, v in previous.items() if k not in {"history", "retry_ready"}}]
+        retry["status"] = "started"
+        retry["retry_session_id"] = payload["session_id"]
     attempts[key] = {"task_id": task, "session_id": payload.get("session_id"),
-        "run_id": state.run_id, "loop_id": state.loop_count, "status": "start_attempted"}
+        "run_id": state.run_id, "loop_id": state.loop_count, "status": "start_attempted",
+        **({"history": history} if history else {})}
     return True
 
 

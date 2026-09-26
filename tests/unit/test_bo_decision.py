@@ -76,6 +76,34 @@ def _optimizer_result():
 
 
 @pytest.mark.asyncio
+async def test_prompt_uses_observation_table_without_changing_numeric_inputs():
+    context = _decision_context()
+    for row in context["observations"]:
+        row["artifact_refs"] = ["runs/long-evidence-path/" * 100]
+        row["provenance_refs"] = ["runs/raw-file/" * 100]
+    original = deepcopy(context)
+    ctx = _Context([_request("inspect_diagnostics", {}, ["context:observations"]),
+        _request("run_optimizer", {}, ["diagnostics:current"]),
+        _request("accept_recommendation", {"candidate_id": "solver-candidate-007"}, ["candidate:solver-candidate-007"])])
+    result = await run_bo_decision(context=context, ctx=ctx, settings={"strategy_control": "configured"},
+        run_optimizer=lambda _: _optimizer_result())
+    assert result["status"] == "accepted"
+    assert context == original
+    packet = json.loads(ctx.calls[0][1].split("\n", 1)[1])["context"]
+    table = packet["observations"]
+    decoded = [{**table["shared_fields"], **dict(zip(table["columns"], row))} for row in table["rows"]]
+    assert [row["score"] for row in decoded] == [0.41, 0.66]
+    assert [row["parameters"] for row in decoded] == [row["parameters"] for row in original["observations"]]
+    assert all(row["ok_for_bo"] is True and row["artifact_refs_count"] == 1 for row in decoded)
+    assert result["diagnostics"]["observation_count"] == 2
+    assert "long-evidence-path" not in ctx.calls[0][1]
+    last_packet = json.loads(ctx.calls[-1][1].split("\n", 1)[1])
+    assert "response" not in last_packet["trace"][0]
+    assert result["trace"][0]["response"]
+    assert last_packet["trace"][0]["result"] == result["trace"][0]["result"]
+
+
+@pytest.mark.asyncio
 async def test_configured_policy_inspects_retrieves_runs_once_and_accepts_solver_candidate():
     responses = [
         _request("inspect_diagnostics", {}, ["context:observations"]),

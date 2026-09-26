@@ -30,6 +30,30 @@ SUPPORTED_ACQUISITIONS = {
 _STRATEGY_KEYS = {"acquisition", "kappa", "xi", "exploration_weight", "exploitation_weight"}
 
 
+def _model_context(context: Mapping[str, Any]) -> dict[str, Any]:
+    """Encode every numeric observation compactly; solver/audit keep originals."""
+    projected = deepcopy(dict(context))
+    observations = projected.get("observations")
+    if not isinstance(observations, (list, tuple)) or not observations or not all(isinstance(row, Mapping) for row in observations):
+        return projected
+    rows = [dict(row) for row in observations]
+    for row in rows:
+        for key in ("artifact_refs", "provenance_refs"):
+            if key in row:
+                refs = row.pop(key)
+                row[key + "_count"] = len(refs) if isinstance(refs, (list, dict, tuple)) else int(bool(refs))
+    shared = {key: value for key, value in rows[0].items()
+              if all(key in row and row[key] == value for row in rows[1:])}
+    columns = sorted(set().union(*(row.keys() for row in rows)) - shared.keys())
+    projected["observations"] = {
+        "encoding": "Each row uses columns plus shared_fields; missing cells are null. No observations are sampled or rounded.",
+        "shared_fields": shared, "columns": columns,
+        "rows": [[row.get(key) for key in columns] for row in rows],
+        "provenance_note": "Full artifact/provenance paths remain in the archived BO input; only their counts are shown here.",
+    }
+    return projected
+
+
 def _finite_number(value: Any) -> bool:
     return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(float(value))
 
@@ -297,7 +321,10 @@ async def run_bo_decision(
                     "example": {"tool": "accept_recommendation", "arguments": {"candidate_id": candidate_id}, "reason": "Accept checked numeric result.", "evidence_refs": [f"candidate:{candidate_id}"]},
                 }
             prompt = instructions + "\n" + json.dumps(
-                {"context": frozen, "tools": {name: tool_schemas[name] for name in sorted(available_tools)}, "evidence_refs": sorted(evidence), "trace": result["trace"]},
+                {"context": _model_context(frozen), "tools": {name: tool_schemas[name] for name in sorted(available_tools)},
+                 "evidence_refs": sorted(evidence), "trace": [
+                     {key: value for key, value in entry.items() if key not in {"response", "model"}}
+                     for entry in result["trace"]]},
                 ensure_ascii=False, allow_nan=False, default=str,
             )
             response_entry: dict[str, Any] = {"step": index + 1}
