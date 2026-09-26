@@ -22,11 +22,14 @@ Modification guide:
 from __future__ import annotations
 
 from typing import Any
+import logging
 
 import httpx
 
 from backends.llm_backend import BaseLLMBackend, LLMImageInput, LLMResponse, openai_user_content
 from backends.nemoclaw_vllm_runtime import NemoClawVLLMRuntime
+
+LOG = logging.getLogger(__name__)
 
 
 DEFAULT_MAX_TOKENS_BY_TASK = {
@@ -37,6 +40,8 @@ DEFAULT_MAX_TOKENS_BY_TASK = {
     "knowledge_query": 1536,
     "bo_policy": 768,
     "guardian_reasoning": 256,
+    "manipulation_plan": 768,
+    "vision_observation": 1536,
     "tool_formatting": 96,
     "equipment_workflow_decision": 768,
     "gui_helper": 96,
@@ -179,6 +184,11 @@ class VLLMBackend(BaseLLMBackend):
             )
             response.raise_for_status()
             data = response.json()
+
+        usage = data.get("usage") or {}
+        LOG.info("LLM usage task=%s model=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s",
+                 (metadata or {}).get("task_type", "unknown"), model,
+                 usage.get("prompt_tokens"), usage.get("completion_tokens"), usage.get("total_tokens"))
 
         content = ""
         choices = data.get("choices")

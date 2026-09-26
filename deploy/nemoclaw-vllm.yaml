@@ -35,7 +35,8 @@ spec:
             - --quantization
             - modelopt_fp4
             - --max-model-len
-            - "8192"
+            # Preserve full equipment contracts plus image/output token headroom.
+            - "32768"
             - --max-num-batched-tokens
             - "4096"
             - --gpu-memory-utilization

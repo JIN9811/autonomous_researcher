@@ -113,6 +113,210 @@ def _image_evidence(images):
     return evidence
 
 
+def _share_prompt_values(envelope):
+    """Lossless common values; exact response shapes are deliberately excluded."""
+    counts = {}
+    exact = {"tools", "response_options", "evidence_refs"}
+    def count(value):
+        encoded = _json(value)
+        if len(encoded) > 24:
+            counts[encoded] = counts.get(encoded, 0) + 1
+        if isinstance(value, dict):
+            for item in value.values():
+                count(item)
+        elif isinstance(value, list):
+            for item in value:
+                count(item)
+    for key, value in envelope.items():
+        if key not in exact:
+            count(value)
+    shared, names = {}, {}
+    def encode(value, root=False):
+        encoded = _json(value)
+        if not root and counts.get(encoded, 0) > 1:
+            if encoded not in names:
+                name = str(len(names))
+                names[encoded] = name
+                shared[name] = encode(value, root=True)
+            return {"shared_value": names[encoded]}
+        if isinstance(value, dict):
+            return {key: encode(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [encode(item) for item in value]
+        return value
+    result = {key: deepcopy(value) if key in exact else encode(value) for key, value in envelope.items()}
+    if shared:
+        result["shared_values"] = shared
+        result["shared_value_encoding"] = "An object containing only shared_value is an exact reference into shared_values."
+    return result
+
+
+def _prompt_context(envelope):
+    """Presentation only: current owner contracts, not recursive prior prompts.
+
+    Callers still compare and archive the complete frozen envelope. In particular
+    identity wrappers, stop/interlock evidence and terminal/recovery results are
+    not inferred from configuration or replaced by successful status labels.
+    """
+    result = deepcopy(envelope)
+
+    def decision_summary(value):
+        if isinstance(value, dict):
+            return {key: deepcopy(item) for key, item in value.items()
+                    if key in {"status", "scope_valid", "run_id", "loop_id", "specimen_id", "session_id",
+                               "checkpoint", "failure_code", "error", "reason"}}
+        if isinstance(value, list):
+            return [decision_summary(item) for item in value]
+        return value
+
+    def upstream(value):
+        if isinstance(value, dict):
+            return {key: decision_summary(item) if key.endswith("_decision") else upstream(item)
+                    for key, item in value.items()}
+        if isinstance(value, list):
+            return [upstream(item) for item in value]
+        return value
+
+    def tables(value):
+        if isinstance(value, dict):
+            return {key: tables(item) for key, item in value.items()}
+        if isinstance(value, list):
+            rows = [tables(item) for item in value]
+            if len(rows) > 4 and all(isinstance(row, dict) for row in rows):
+                shared = {key: item for key, item in rows[0].items()
+                          if all(key in row and _json(row[key]) == _json(item) for row in rows)}
+                columns = sorted({key for row in rows for key in row} - shared.keys())
+                return {"encoding": "Rows inherit shared; columns align; missing_fields marks absent, not null.",
+                        "shared": shared, "columns": columns,
+                        "rows": [[row.get(key) for key in columns] for row in rows],
+                        "missing_fields": {str(i): [key for key in columns if key not in row]
+                            for i, row in enumerate(rows) if any(key not in row for key in columns)}}
+            return rows
+        return value
+
+    incoming = result.get("incoming_handoff")
+    if isinstance(incoming, dict):
+        result["incoming_handoff"] = upstream(incoming)
+        records = result["incoming_handoff"].get("records", {})
+        specimen = (records.get("specimen_result") or {}).get("evidence")
+        if isinstance(specimen, dict):
+            # These trees repeat fabrication preparation or historical model
+            # context. The published fabrication and completion contracts below
+            # remain current evidence, including their warnings and failures.
+            for key in ("experiment_evaluation", "tool_result", "device_screen", "geometry_report", "slicer_result"):
+                specimen.pop(key, None)
+            report = specimen.get("fabrication_report")
+            if isinstance(report, dict):
+                specimen["fabrication_report"] = {key: value for key, value in report.items()
+                    if key in {"fabrication_intent", "digital_thread", "quality_gates", "fabrication_outcome"}}
+            report = specimen.get("specimen_agent_report")
+            if isinstance(report, dict):
+                specimen["specimen_agent_report"] = {key: value for key, value in report.items()
+                    if key in {"run_id", "loop_id", "loop_index", "specimen_id", "gcode_validation",
+                               "print_readiness", "autoejection_gate", "handoff_status", "printer_completion"}}
+            wait = specimen.get("printer_completion_wait")
+            if isinstance(wait, dict):
+                wait.pop("samples", None)
+            for key in ("selected_printer", "surface_cap_policy", "slicer_settings", "printer", "prusalink",
+                        "print_result", "step_trace", "decisions", "metrics", "evidence_refs",
+                        "mass_evidence", "duration_evidence", "autoejection"):
+                specimen.pop(key, None)
+            if isinstance(specimen.get("specimen_fabricated"), dict):
+                specimen["specimen_fabricated"].pop("decisions", None)
+                specimen["specimen_fabricated"].pop("evidence_refs", None)
+        robot = (records.get("robot_task_result") or {}).get("evidence")
+        if isinstance(robot, dict) and isinstance(robot.get("rollout_stop"), dict):
+            stop = robot["rollout_stop"]
+            robot["rollout_stop"] = {key: value for key, value in stop.items()
+                if key in {"ok", "tool", "mode", "profile_id", "session_id", "status", "failure_code",
+                           "error", "message", "stop_confirmed", "actuation_performed", "effects_known",
+                           "runtime", "runtime_phase", "runtime_message", "action_count", "action_count_observed",
+                           "max_abs_delta", "returncode", "virtual_bridge_simulation", "post_place_interlock",
+                           "idempotent", "stopped_session_ids", "port_lease", "active_camera_lease", "stop_status",
+                           "rollout_stopped"}}
+            telemetry = stop.get("joint_telemetry")
+            if isinstance(telemetry, dict):
+                robot["rollout_stop"]["joint_telemetry"] = {key: value for key, value in telemetry.items()
+                    if key in {"status", "session_id", "source", "error"}}
+                packet = telemetry.get("packet")
+                if isinstance(packet, dict):
+                    robot["rollout_stop"]["joint_telemetry"]["packet"] = {key: value for key, value in packet.items()
+                        if key in {"session_id", "sequence", "timestamp", "elapsed_s", "source", "actual_source",
+                                   "measured_base_state", "home_gate_passed", "policy_start_observed", "anomaly", "error"}}
+        if isinstance(robot, dict):
+            for key in ("decisions", "evidence_refs", "pickup_pose", "pickup_target"):
+                robot.pop(key, None)
+    spec = result.get("experiment_spec")
+    if isinstance(spec, dict):
+        for key in ("design_evaluation", "candidate_pool_summary", "prior_results_summary",
+                    "failure_memory_summary", "design_space"):
+            spec.pop(key, None)
+    reference = result.get("reference_only")
+    if isinstance(reference, dict):
+        for item in reference.get("items", []):
+            if isinstance(item, dict):
+                for key in ("record_id", "topic_id", "owner", "source_revision", "verified_at", "corpus", "excerpt_kind"):
+                    item.pop(key, None)
+    for skill in result.get("skills", []):
+        if not isinstance(skill, dict):
+            continue
+        for key in ("workflow_sha256", "programs_sha256"):
+            skill.pop(key, None)
+        if isinstance(skill.get("deployment"), dict):
+            skill["deployment"] = {key: value for key, value in skill["deployment"].items()
+                                   if key not in {"sha256", "program_sha256", "program_ids", "deployed_at"}}
+    blocks = {block.get("id"): block for block in (result.get("flow") or {}).get("blocks", [])}
+    for skill in result.get("skills", []):
+        block = blocks.get(skill.get("block_id"), {})
+        if skill.get("binding") == block.get("skill"):
+            skill.pop("binding", None)
+            skill["binding_ref"] = "flow.blocks[id=block_id].skill"
+    execution = result.get("execution") or {}
+    flow_execution = execution.get("equipment_skill_flow_execution") or {}
+    for step in flow_execution.get("transitions", []):
+        block = blocks.get(step.get("block_id"), {})
+        if step.get("task") == block.get("label"):
+            step.pop("task", None)
+        binding = block.get("skill", {})
+        expected = f"Equipment Skill step verified: {binding.get('skill_id')}@{binding.get('skill_version')}"
+        if step.get("summary") == expected:
+            step.pop("summary", None)
+    if envelope.get("phase") in {"terminal_review", "recovery_review"}:
+        # Execution owns concrete transitions and measured gates at these
+        # checkpoints. Repeat only the selected block's intent/binding and
+        # mandatory vision flags, not its already-executed routing program.
+        for block in (result.get("flow") or {}).get("blocks", []):
+            if isinstance(block, dict):
+                block.pop("agentic", None)
+                vision = block.get("vision")
+                if isinstance(vision, dict):
+                    block["vision"] = {key: value for key, value in vision.items()
+                                       if key not in {"detected", "not_detected", "error"}}
+        for skill in result.get("skills", []):
+            if isinstance(skill, dict):
+                skill.pop("workflow_summary", None)
+                skill.pop("deployment", None)
+        # Old pickup signalboards describe the pre-transfer scene. Their
+        # negatives remain explicit, but are not duplicated as a current UTM
+        # readiness requirement after the same-session transfer contract.
+        incoming = result.get("incoming_handoff") or {}
+        specimen = ((incoming.get("records") or {}).get("specimen_result") or {}).get("evidence")
+        if isinstance(specimen, dict):
+            verification = specimen.get("vision_verification") or {}
+            signal = verification.get("vision_signal") or {}
+            for row in signal.get("signals", []):
+                if isinstance(row, dict):
+                    for key in ("run_id", "loop_id", "specimen_id", "timestamp", "expires_at", "confidence", "requires_ack"):
+                        # Identity/time differences are retained, never turned
+                        # into matching headers or fresh positive evidence.
+                        if key in row and key in signal and _json(row[key]) == _json(signal[key]):
+                            row.pop(key)
+            signal.pop("decisions", None)
+    result = {key: value if key in {"tools", "response_options", "evidence_refs"} else tables(value)
+              for key, value in result.items()}
+    return _share_prompt_values(result) if len(_json(result)) > 16000 else result
+
+
 async def decide_equipment(state, ctx, *, phase, context, proposals, images=None) -> dict:
     """Validate one registered model request; callers must still enforce all gates."""
     snapshot = _scope(state)
@@ -147,7 +351,8 @@ async def decide_equipment(state, ctx, *, phase, context, proposals, images=None
         envelope = append_reference_only(envelope, reference)
         result["knowledge_delivery"] = reference["delivery"]
         # Never serialize the raster objects or data URLs into the prompt/archive.
-        serialized = _json(envelope)
+        serialized = json.dumps(_prompt_context(envelope), sort_keys=True,
+                                ensure_ascii=False, allow_nan=False, separators=(",", ":"))
         result["evidence"] = envelope
         if state.mode == Mode.TEST and not bool(getattr(ctx, "force_real_llm_in_test", False)):
             tool = "request_operator"

@@ -6,6 +6,28 @@ The runtime writes:
 
 Each event includes `run_id`, `experiment_id`, `layer`, `event_type`, and payload.
 
+## Local model request budgets
+
+The vLLM backend logs the model-reported `prompt_tokens`, `completion_tokens`,
+and `total_tokens` with the task type and model name after successful requests.
+These usage lines contain neither prompt text nor API credentials. They are
+server diagnostics, not experimental measurements or agent success evidence.
+
+Manipulation and Equipment use prompt-only evidence projections to avoid
+recursively including earlier model requests, raw driver logs, and duplicate
+reports. Full decision evidence remains in the existing agent artifacts. Shared
+values and signal tables preserve identities, missing values, and conflicting
+facts; they do not modify the frozen execution payload, tool arguments, safety
+gates, or completion criteria. BO additionally uses compact JSON serialization
+without dropping or rounding its observations.
+
+Input budgeting must include the system prompt, the runtime reference pack,
+images for multimodal reviews, and the reserved output tokens. A short initial
+request is not sufficient validation: inspect later tool rounds and terminal
+reviews too. Token counts depend on the selected model and the current evidence;
+verify them with that model's tokenizer. Output reservations are configured in
+`backends/vllm_client.py`; they do not silently truncate input evidence.
+
 ## Readable Run and Session Names
 
 New run IDs use `YYYYMMDD_HHMMSS_KST_<purpose>_<8-hex-suffix>`.
@@ -71,3 +93,12 @@ Guardian graph-wide gates:
 - Tool shield approval interrupts are persisted in `run_metadata.guardian_approval_queue` and `run_metadata.runtime_approvals`.
 - Live GUI refreshes on `guardian` and `incident` event types and surfaces warning/error gates in Operator Attention.
 - `/api/guardian/status` and `/api/state.guardian_status` expose the same Guardian blackbox state as a report payload for risk heatmap, approval queue, incident ledger, and handoff review panels.
+### Local decision context capacity
+
+Gemma 31B serving uses a 32,768-token context with the existing 0.55 GPU-memory
+allocation. Prompt compaction is not truncation: equipment constraints and
+current stop/interlock facts must remain available. Archived EQP terminal
+requests can still require over 13,000 text tokens after removing recursive
+prior prompts, so 8,192 tokens is insufficient. Include image tokens and the
+requested output allowance when checking capacity. Offline character-size
+tests detect recursive serialization regressions; they do not certify token fit.

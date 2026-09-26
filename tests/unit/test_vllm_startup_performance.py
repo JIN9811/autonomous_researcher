@@ -280,7 +280,7 @@ def test_vllm_backend_bounds_common_task_tokens() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("task_type", ["knowledge_query", "bo_policy"])
+@pytest.mark.parametrize("task_type", ["knowledge_query", "bo_policy", "manipulation_plan", "vision_observation"])
 async def test_knowledge_request_leaves_room_for_evidence_in_8k_context(monkeypatch, task_type):
     import httpx
     original_client = httpx.AsyncClient
@@ -299,6 +299,23 @@ async def test_knowledge_request_leaves_room_for_evidence_in_8k_context(monkeypa
     response = await VLLMBackend().complete(model="gemma4:31b", system_prompt="curate evidence",
         user_prompt="curated evidence packet", metadata={"task_type": task_type})
     assert response.text == "accepted"
+
+
+@pytest.mark.asyncio
+async def test_vllm_records_usage_without_logging_prompt_or_credentials(monkeypatch, caplog):
+    import httpx
+    import logging
+    original_client = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={
+        "usage": {"prompt_tokens": 6195, "completion_tokens": 163, "total_tokens": 6358},
+        "choices": [{"message": {"content": "accepted"}}]}))
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original_client(transport=transport, **kwargs))
+    with caplog.at_level(logging.INFO, logger="backends.vllm_client"):
+        await VLLMBackend(api_key="private-key").complete(model="gemma4:31b", system_prompt="private-system",
+            user_prompt="private-input", metadata={"task_type": "manipulation_plan"})
+    assert "task=manipulation_plan" in caplog.text and "prompt_tokens=6195" in caplog.text
+    assert "completion_tokens=163" in caplog.text
+    assert not any(secret in caplog.text for secret in ("private-key", "private-input", "private-system"))
 
 
 def test_vllm_backend_requests_json_object_for_structured_completion() -> None:
@@ -326,3 +343,11 @@ def test_nemoclaw_vllm_deployment_memory_profile_allows_resident_gemma4_models()
         "vllm-gemma4-31b": "0.55",
         "vllm-gemma4-e4b": "0.14",
     }
+
+
+def test_gemma31b_context_reserves_room_for_equipment_contract_and_images() -> None:
+    path = Path(__file__).resolve().parents[2] / "deploy" / "nemoclaw-vllm.yaml"
+    deployment = next(doc for doc in yaml.safe_load_all(path.read_text())
+        if doc.get("kind") == "Deployment" and doc["metadata"]["name"] == "vllm-gemma4-31b")
+    args = deployment["spec"]["template"]["spec"]["containers"][0]["args"]
+    assert int(args[args.index("--max-model-len") + 1]) == 32768

@@ -325,7 +325,7 @@ async def run_bo_decision(
                  "evidence_refs": sorted(evidence), "trace": [
                      {key: value for key, value in entry.items() if key not in {"response", "model"}}
                      for entry in result["trace"]]},
-                ensure_ascii=False, allow_nan=False, default=str,
+                ensure_ascii=False, allow_nan=False, default=str, separators=(",", ":"),
             )
             response_entry: dict[str, Any] = {"step": index + 1}
             try:

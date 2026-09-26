@@ -6,6 +6,7 @@ from copy import deepcopy
 import hashlib
 import json
 import math
+from os.path import commonprefix
 
 from orchestrator.state import Mode
 from utils.agent_artifact_archive import record_tool_artifact
@@ -76,6 +77,146 @@ def _evidence(value):
         "simulated", "actuation_performed", "rollout_stop", "stop_confirmed", "stop_status",
         "teleop_stop_verified", "robot_port_released", "camera_returned_to_vision"}
     return deepcopy({k: v for k, v in value.items() if k in fields})
+
+
+def _signal_table(signals):
+    if not (isinstance(signals, list) and len(signals) > 4 and all(isinstance(s, dict) for s in signals)):
+        return signals
+    shared = {key: value for key, value in signals[0].items()
+              if all(key in row and json.dumps(row[key], sort_keys=True) == json.dumps(value, sort_keys=True) for row in signals)}
+    columns = sorted({key for row in signals for key in row} - shared.keys())
+    table = {
+        "encoding": "rows inherit shared fields; columns align with each row; missing_fields distinguishes absent from null",
+        "shared": shared, "columns": columns,
+        "rows": [[row.get(key) for key in columns] for row in signals],
+        "missing_fields": {str(i): [key for key in columns if key not in row]
+                           for i, row in enumerate(signals) if any(key not in row for key in columns)},
+    }
+    prefixes, dictionaries = {}, {}
+    for index, key in enumerate(columns):
+        values = [row[index] for row in table["rows"]]
+        if key == "signal_id" and all(isinstance(value, str) for value in values):
+            prefix = commonprefix(values)
+            if len(prefix) * (len(values) - 1) > 80:
+                prefixes[key] = prefix
+                values = [value[len(prefix):] for value in values]
+                for row, value in zip(table["rows"], values):
+                    row[index] = value
+        # Repeated dates/labels are categorical cells, not sampled evidence.
+        # Compare complete wire costs; use indices only when they save space.
+        unique, indices, seen = [], [], {}
+        for value in values:
+            encoded = json.dumps(value, sort_keys=True, ensure_ascii=False)
+            if encoded not in seen:
+                seen[encoded] = len(unique)
+                unique.append(value)
+            indices.append(seen[encoded])
+        if len(json.dumps({"column_dictionaries": {key: unique}, "indices": indices})) < len(json.dumps(values)):
+            dictionaries[key] = unique
+            for row, value in zip(table["rows"], indices):
+                row[index] = value
+    if prefixes:
+        table["string_prefixes"] = prefixes
+    if dictionaries:
+        table["column_dictionaries"] = dictionaries
+    if prefixes or dictionaries:
+        table["encoding"] += "; decode column_dictionaries indices first, then prepend string_prefixes to those columns"
+    return table
+
+
+def _same_fact(left, right):
+    return json.dumps(left, sort_keys=True, ensure_ascii=False) == json.dumps(right, sort_keys=True, ensure_ascii=False)
+
+
+def _fact_ref(container, key, source, source_key, path):
+    if key in container and source_key in source and _same_fact(container[key], source[source_key]):
+        container.pop(key)
+        container[key + "_ref"] = path
+
+
+def _prompt_context(context):
+    """Project display/driver diagnostics out of the LLM input, never execution.
+
+    The original evidence and frozen payload remain authoritative and archived.
+    Keep all normalized observations, including contradictory signals; only an
+    exactly duplicated signal list is represented by a reference.
+    """
+    result = deepcopy(context)
+    for section_name in ("task", "vision"):
+        section = result.get(section_name, {})
+        observation = section.get("observation")
+        if not isinstance(observation, dict):
+            continue
+        observation.pop("raw", None)
+        signals = (observation.get("vision_signal") or {}).get("signals")
+        if signals is not None and observation.get("agent_signals") == signals:
+            observation.pop("agent_signals")
+            observation["agent_signals_ref"] = f"{section_name}.observation.vision_signal.signals"
+        agents = observation.get("agent_signals")
+        if (isinstance(signals, list) and isinstance(agents, list) and len(signals) == len(agents) > 4
+                and all(isinstance(a, dict) and isinstance(b, dict) and
+                        {k: v for k, v in a.items() if k != "consumer_agents"} ==
+                        {k: v for k, v in b.items() if k != "consumer_agents"}
+                        and "consumer_agents" in a and "consumer_agents" in b
+                        for a, b in zip(signals, agents))
+                and all(row["consumer_agents"] == signals[0]["consumer_agents"] for row in signals)):
+            observation["vision_signal"]["signals"] = {
+                "rows_ref": f"{section_name}.observation.agent_signals",
+                "override_shared": {"consumer_agents": signals[0]["consumer_agents"]}}
+        elif signals is not None:
+            observation["vision_signal"]["signals"] = _signal_table(signals)
+        if "agent_signals" in observation:
+            observation["agent_signals"] = _signal_table(observation["agent_signals"])
+    binding = result.get("skill_binding", {})
+    for name in ("configured_parameters", "task_contract"):
+        fields = binding.get(name)
+        if not isinstance(fields, dict):
+            continue
+        original = fields.get("observation")
+        if original is not None and original == (context.get("task") or {}).get("observation"):
+            fields.pop("observation")
+            fields["observation_ref"] = "task.observation"
+    stop = (result.get("task") or {}).get("rollout_stop")
+    if isinstance(stop, dict):
+        fields = {"ok", "status", "session_id", "profile_id", "runtime", "runtime_phase", "runtime_message",
+                  "action_count", "action_count_observed", "max_abs_delta", "returncode", "error",
+                  "virtual_bridge_simulation", "post_place_interlock", "idempotent", "stopped_session_ids",
+                  "port_lease", "active_camera_lease", "stop_confirmed", "stop_status", "rollout_stopped"}
+        receipt = {key: value for key, value in stop.items() if key in fields}
+        telemetry = stop.get("joint_telemetry")
+        if isinstance(telemetry, dict):
+            receipt["joint_telemetry"] = {key: value for key, value in telemetry.items()
+                                          if key in {"status", "session_id", "source", "error"}}
+            packet = telemetry.get("packet")
+            if isinstance(packet, dict):
+                receipt["joint_telemetry"]["packet"] = {key: value for key, value in packet.items()
+                    if key in {"session_id", "sequence", "timestamp", "elapsed_s", "source", "actual_source",
+                               "measured_base_state", "home_gate_passed", "policy_start_observed", "anomaly", "error"}}
+        receipt["projection"] = "Lifecycle receipt; raw command/log/telemetry details retained in archived decision evidence."
+        result["task"]["rollout_stop"] = receipt
+    task, vision = result.get("task", {}), result.get("vision", {})
+    observation = task.get("observation")
+    if isinstance(observation, dict):
+        _fact_ref(task, "pickup_pose", observation, "pose_estimate", "task.observation.pose_estimate")
+        _fact_ref(task, "pickup_target", observation, "pickup_target", "task.observation.pickup_target")
+    _fact_ref(vision, "post_place_interlock", task, "post_place_interlock", "task.post_place_interlock")
+    _fact_ref(vision, "session_id", task, "session_id", "task.session_id")
+    if isinstance(task.get("rollout_stop"), dict):
+        _fact_ref(task["rollout_stop"], "post_place_interlock", task, "post_place_interlock", "task.post_place_interlock")
+        _fact_ref(task["rollout_stop"], "session_id", task, "session_id", "task.session_id")
+    for section_name, section in (("task", task), ("vision", vision)):
+        review = section.get("vision_decision")
+        if not isinstance(review, dict) or not isinstance(review.get("request"), dict):
+            continue
+        try:
+            decoded = json.loads(review.get("response", ""))
+        except (ValueError, TypeError):
+            decoded = None
+        if isinstance(decoded, dict) and _same_fact(decoded, review["request"]):
+            review.pop("response")
+            review["response_ref"] = section_name + ".vision_decision.request"
+        _fact_ref(review, "reason", review["request"], "reason", section_name + ".vision_decision.request.reason")
+    return result
 
 
 async def _decide(state, ctx, tool, payload, *, checkpoint, capture=None, eligible=True, task_context=None):
@@ -169,7 +310,10 @@ async def _decide(state, ctx, tool, payload, *, checkpoint, capture=None, eligib
             "evidence_refs must contain ONLY exact IDs from CONTEXT.evidence_refs, never field paths or expressions. "
             "For acceptance copy the entire evidence_refs list. For rejection cite task:configured and "
             "execution:ended and/or vision:verified when provided. Put specific field paths, values and "
-            "contradictions in reason, NOT evidence_refs.\nCONTEXT:\n" + json.dumps(context, ensure_ascii=False, allow_nan=False))
+            "contradictions in reason, NOT evidence_refs. "
+            "Fields ending in _ref point to identical evidence elsewhere in CONTEXT. "
+            "Observation raw capture/report dumps are archived separately; use the normalized observation fields.\nCONTEXT:\n"
+            + json.dumps(_prompt_context(context), ensure_ascii=False, allow_nan=False, separators=(",", ":")))
         owned = ctx
         if callable(getattr(ctx, "for_agent_decision", None)):
             owned = ctx.for_agent_decision("manipulation")

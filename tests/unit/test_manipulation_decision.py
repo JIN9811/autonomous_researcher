@@ -46,6 +46,162 @@ async def test_selected_skill_is_exactly_bound_to_payload(tool):
 
 
 @pytest.mark.asyncio
+async def test_selection_prompt_omits_raw_vision_dump_without_losing_observed_gates():
+    from agents.manipulation.decision import select_manipulation_tool, allows
+    signal = {"signal": "pickup_ready", "value": True, "confidence": .86,
+              "run_id": "decision", "loop_id": 0, "blocking_reason": None}
+    observation = {"anomaly": False, "pose_estimate": {"x": .1, "frame": "camera"},
+        "transfer_readiness": {"ready": True, "camera_ok": True},
+        "vision_signal": {"status": "ready", "signals": [signal]},
+        "agent_signals": [signal], "raw": {"vision_report": "raw diagnostic " * 15000}}
+    payload = {"session_id": "s", "task_instruction": "pick and place", "observation": observation}
+    original = deepcopy(payload)
+    model = Model()
+    decision = await select_manipulation_tool(state(), model, "lerobot.rollout.start", payload)
+    context = model.calls[0][1]
+    assert len(json.dumps(context)) < 6000
+    assert context["task"]["observation"]["transfer_readiness"] == {"ready": True, "camera_ok": True}
+    assert context["task"]["observation"]["vision_signal"]["signals"] == [signal]
+    assert context["task"]["observation"]["pose_estimate"] == {"x": .1, "frame": "camera"}
+    assert payload == original
+    assert decision["evidence"]["task"]["observation"] == original["observation"]
+    assert allows(decision)
+
+
+@pytest.mark.asyncio
+async def test_prompt_preserves_conflicting_signal_lists_and_review_verdicts():
+    from agents.manipulation.decision import select_manipulation_tool, allows
+    observation = {"anomaly": True, "transfer_readiness": {"ready": False, "blocking_reason": "occluded"},
+        "vision_signal": {"signals": [{"signal": "pickup_ready", "value": True}]},
+        "agent_signals": [{"signal": "pickup_ready", "value": False}], "raw": {"dump": "x" * 90000}}
+    model = Model("return_to_owner")
+    result = await select_manipulation_tool(state(), model, "lerobot.rollout.start", {"observation": observation})
+    rendered = model.calls[0][1]["task"]["observation"]
+    assert "raw" not in rendered
+    assert rendered["anomaly"] is True
+    assert rendered["agent_signals"] == [{"signal": "pickup_ready", "value": False}]
+    assert rendered["transfer_readiness"]["blocking_reason"] == "occluded"
+    assert not allows(result)
+
+
+def test_signal_table_is_lossless_including_missing_and_conflicting_fields():
+    from agents.manipulation.decision import _prompt_context
+    signals = [{"run_id": "run", "loop_id": 12, "signal": f"s{i}", "value": i % 2 == 0,
+                "blocking_reason": None if i != 4 else "blocked"} for i in range(16)]
+    signals[-1].pop("blocking_reason")
+    context = {"task": {"observation": {"vision_signal": {"signals": signals}}}}
+    table = _prompt_context(context)["task"]["observation"]["vision_signal"]["signals"]
+    assert isinstance(table, dict)
+    restored = [{**table["shared"], **{k: v for k, v in zip(table["columns"], row)
+                 if k not in table["missing_fields"].get(str(i), [])}} for i, row in enumerate(table["rows"])]
+    assert restored == signals
+    assert context["task"]["observation"]["vision_signal"]["signals"] == signals
+
+
+@pytest.mark.parametrize("section", ["task", "vision"])
+def test_signal_references_are_scoped_to_their_own_section(section):
+    from agents.manipulation.decision import _prompt_context
+    signals = [{"signal": f"s{i}", "value": False, "consumer_agents": ["vision"]} for i in range(6)]
+    agents = [{**row, "consumer_agents": ["manipulation"]} for row in signals]
+    context = {section: {"observation": {"vision_signal": {"signals": signals}, "agent_signals": agents}}}
+    projected = _prompt_context(context)[section]["observation"]
+    assert projected["vision_signal"]["signals"]["rows_ref"] == f"{section}.observation.agent_signals"
+    context[section]["observation"]["agent_signals"] = deepcopy(signals)
+    projected = _prompt_context(context)[section]["observation"]
+    assert projected["agent_signals_ref"] == f"{section}.observation.vision_signal.signals"
+
+
+def test_signal_table_repeated_strings_decode_exactly_without_rounding():
+    from agents.manipulation.decision import _signal_table
+    signals = [{"signal_id": f"sig-long-run-identity-20260923-11-signal-{i}",
+                "expires_at": "2026-09-26T07:22:11.223904+00:00" if i % 2 else None,
+                "consumer_agents": ["manipulation_agent"], "confidence": 0.123456789 + i,
+                "blocking_reason": "not_observed_in_current_stage" if i % 3 else None}
+               for i in range(16)]
+    signals[-1].pop("expires_at")
+    before = deepcopy(signals)
+    table = _signal_table(signals)
+    assert table.get("string_prefixes", {}).get("signal_id")
+    assert "expires_at" in table.get("column_dictionaries", {})
+    restored = []
+    for i, row in enumerate(table["rows"]):
+        item = deepcopy(table["shared"])
+        for key, value in zip(table["columns"], row):
+            if key in table["missing_fields"].get(str(i), []):
+                continue
+            if key in table.get("column_dictionaries", {}):
+                value = table["column_dictionaries"][key][value]
+            if key in table.get("string_prefixes", {}):
+                value = table["string_prefixes"][key] + value
+            item[key] = value
+        restored.append(item)
+    assert restored == signals == before
+
+
+def test_prompt_refs_deduplicate_only_equal_pose_interlock_and_review_json():
+    from agents.manipulation.decision import _prompt_context
+    pose = {"x": .123456789, "frame": "camera"}
+    target = {"id": "specimen", "detected": True}
+    interlock = {"ready": True, "session_id": "same-session"}
+    request = {"tool": "accept_visual_evidence", "arguments": {"contract_id": "placement"},
+               "reason": "Observed target is consistent.", "evidence_refs": ["frame:current"]}
+    context = {"task": {"session_id": "same-session", "pickup_pose": pose, "pickup_target": target,
+        "observation": {"pose_estimate": pose, "pickup_target": target},
+        "post_place_interlock": interlock, "rollout_stop": {"session_id": "same-session", "post_place_interlock": interlock}},
+        "vision": {"session_id": "same-session", "post_place_interlock": interlock, "vision_decision": {
+            "request": request, "response": json.dumps(request), "reason": request["reason"]}}}
+    original = deepcopy(context)
+    projected = _prompt_context(context)
+    assert projected["task"]["pickup_pose_ref"] == "task.observation.pose_estimate"
+    assert projected["task"]["pickup_target_ref"] == "task.observation.pickup_target"
+    assert projected["vision"]["post_place_interlock_ref"] == "task.post_place_interlock"
+    assert projected["vision"]["session_id_ref"] == "task.session_id"
+    assert projected["task"]["rollout_stop"]["session_id_ref"] == "task.session_id"
+    assert projected["task"]["rollout_stop"]["post_place_interlock_ref"] == "task.post_place_interlock"
+    review = projected["vision"]["vision_decision"]
+    assert review["response_ref"] == "vision.vision_decision.request"
+    assert review["reason_ref"] == "vision.vision_decision.request.reason"
+    assert review["request"] == request
+    assert context == original
+    context["task"]["pickup_pose"] = {"x": .999, "frame": "camera"}
+    context["vision"]["post_place_interlock"] = {"ready": False, "session_id": "same-session"}
+    context["vision"]["session_id"] = "different-session"
+    context["vision"]["vision_decision"]["response"] = '{"tool":"return_to_owner"}'
+    context["vision"]["vision_decision"]["reason"] = "Contradictory review"
+    changed = _prompt_context(context)
+    assert changed["task"]["pickup_pose"] == {"x": .999, "frame": "camera"}
+    assert changed["vision"]["post_place_interlock"]["ready"] is False
+    assert changed["vision"]["session_id"] == "different-session"
+    assert changed["vision"]["vision_decision"]["response"] == '{"tool":"return_to_owner"}'
+    assert changed["vision"]["vision_decision"]["reason"] == "Contradictory review"
+
+
+def test_result_prompt_keeps_stop_conflicts_but_not_driver_dumps():
+    from agents.manipulation.decision import _prompt_context
+    context = {"checkpoint": "result_review", "task": {"rollout_stop": {
+        "ok": True, "session_id": "s1", "status": "STOPPED", "returncode": -15,
+        "runtime": {"phase": "RUNNING", "warnings": ["contradiction"], "action_count_observed": False},
+        "active_camera_lease": {"status": "blocked", "conflict_reason": "camera in use"},
+        "port_lease": {"status": "occupied"}, "error": "driver warning",
+        "log_tail": "diagnostic text " * 10000, "command_preview": "shell config " * 10000,
+        "joint_telemetry": {"status": "available", "session_id": "s2", "packet": {
+            "sequence": 22, "home_gate_passed": False, "measured_base_state": "moving",
+            "samples": [0] * 10000}}}}, "vision": {"detected": False}}
+    before = deepcopy(context)
+    projected = _prompt_context(context)
+    stop = projected["task"]["rollout_stop"]
+    assert len(json.dumps(projected)) < 4000
+    assert stop["status"] == "STOPPED" and stop["runtime"]["phase"] == "RUNNING"
+    assert stop["error"] == "driver warning" and stop["returncode"] == -15
+    assert stop["active_camera_lease"]["status"] == "blocked"
+    assert stop["joint_telemetry"]["session_id"] == "s2"
+    assert stop["joint_telemetry"]["packet"]["home_gate_passed"] is False
+    assert stop["joint_telemetry"]["packet"]["measured_base_state"] == "moving"
+    assert projected["vision"]["detected"] is False
+    assert context == before
+
+
+@pytest.mark.asyncio
 async def test_replay_selection_exposes_task_to_executor_binding_without_changing_recording():
     from agents.manipulation.decision import select_manipulation_tool, allows
     s, model = state(), Model()

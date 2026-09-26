@@ -101,6 +101,13 @@ async def test_prompt_uses_observation_table_without_changing_numeric_inputs():
     assert "response" not in last_packet["trace"][0]
     assert result["trace"][0]["response"]
     assert last_packet["trace"][0]["result"] == result["trace"][0]["result"]
+    # Whitespace in every table cell/trace field spent the remaining Gemma
+    # context margin despite preserving the same evidence. Keep wire overhead
+    # below the ordinary pretty-spaced JSON without dropping any decoded data.
+    for _, prompt, _ in ctx.calls:
+        wire = prompt.split("\n", 1)[1]
+        spaced = json.dumps(json.loads(wire), ensure_ascii=False)
+        assert len(wire) < len(spaced) * 0.95
 
 
 @pytest.mark.asyncio

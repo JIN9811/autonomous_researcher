@@ -47,6 +47,152 @@ class Model:
 
 
 @pytest.mark.asyncio
+async def test_prompt_projection_keeps_current_handoff_conflicts_and_archive(monkeypatch):
+    from agents.equipment import decision
+    context, proposals = inputs()
+    context["incoming_handoff"] = {"run_id": "equipment-decision", "loop_id": 0,
+        "specimen_id": "s1", "records": {
+            "robot_task_result": {"identity_status": "mismatch", "mismatched_fields": ["run_id"],
+                "missing_identity_fields": ["loop_id"], "evidence": {
+                    "run_id": "other-run", "specimen_id": "s1", "handoff_status": "ready_for_equipment",
+                    "post_place_interlock": {"ready_for_utm_snapshot": False, "home_gate_passed": False},
+                    "execution_evidence": {"observed": False},
+                    "verified_stop": {"session_id": "current", "rollout_stopped": False,
+                        "rollout_stop_status": "UNKNOWN"}}},
+            "utm_verifications": {"identity_status": "incomplete", "missing_identity_fields": ["specimen_id"],
+                "evidence": {"verification_1": {"confirmed": False, "evidence": {
+                    "session_id": "stale", "blocking_reason": "transfer unverified",
+                    "manipulation_result_decision": {"status": "review_required", "scope_valid": False,
+                        "evidence": {"raw": "duplicated-model-context " * 20000}}}}}}}}
+    original = deepcopy(context)
+    monkeypatch.setattr(decision, "record_tool_artifact", lambda *args: None)
+    model = Model()
+    result = await decision.decide_equipment(state(), model, phase="select", context=context, proposals=proposals)
+    packet = model.calls[0][3]
+    assert len(model.calls[0][1]) < 16000
+    records = packet["incoming_handoff"]["records"]
+    assert records["robot_task_result"] == original["incoming_handoff"]["records"]["robot_task_result"]
+    verification = records["utm_verifications"]
+    assert verification["identity_status"] == "incomplete"
+    assert verification["missing_identity_fields"] == ["specimen_id"]
+    current = verification["evidence"]["verification_1"]
+    assert current["confirmed"] is False
+    assert current["evidence"]["session_id"] == "stale"
+    assert current["evidence"]["blocking_reason"] == "transfer unverified"
+    assert current["evidence"]["manipulation_result_decision"]["scope_valid"] is False
+    assert result["evidence"]["incoming_handoff"] == original["incoming_handoff"]
+    assert context == original
+    assert packet["tools"] == proposals
+    assert result["request"]["arguments"] == proposals["execute_stacked_workflow"]
+
+
+def test_equipment_projection_keeps_absent_null_and_false_distinct():
+    from agents.equipment.decision import _prompt_context
+    envelope = {"execution": {"screen_checks": [
+        {"checkpoint": "a", "ok": False}, {"checkpoint": "b", "ok": None},
+        {"checkpoint": "c"}]}, "experiment_spec": {"planning_only": True,
+        "execution_policy": {"lab_equipment": "forbid"}, "external_specimen_required": True}}
+    assert _prompt_context(envelope) == envelope
+
+
+def test_equipment_projection_preserves_numeric_limits_and_conflicting_stop_receipt():
+    from agents.equipment.decision import _prompt_context
+    stop = {"status": "STOPPED", "returncode": 2, "runtime": {"phase": "RUNNING", "action_count": 0,
+        "action_count_observed": False}, "port_lease": {"released": False}, "active_camera_lease": {"released": None}}
+    envelope = {"experiment_spec": {"compression_speed_mm_min": 0.350001,
+        "constraints": {"force_limit_n": 123.456789, "strain_limit": 0.60001}},
+        "experiment_objective": {"constraints": {"force_limit_n": 120.0}},
+        "incoming_handoff": {"records": {"robot_task_result": {"evidence": {"rollout_stop": stop}}}}}
+    packet = _prompt_context(envelope)
+    assert packet["experiment_spec"] == envelope["experiment_spec"]
+    assert packet["experiment_objective"] == envelope["experiment_objective"]
+    assert packet["incoming_handoff"]["records"]["robot_task_result"]["evidence"]["rollout_stop"] == stop
+
+
+def test_equipment_projection_keeps_conflicting_fabrication_gates_and_outcome():
+    from agents.equipment.decision import _prompt_context
+    report = {"quality_gates": [{"gate": "mass", "status": "fail", "evidence": {
+        "threshold": 123.456789, "measured": 125.000001}, "repair": None}],
+        "fabrication_outcome": {"status": "blocked", "requires_after_print_confirmation": True,
+            "failure_code": "MASS_LIMIT", "warnings": ["material mismatch"]}}
+    envelope = {"incoming_handoff": {"records": {"specimen_result": {"identity_status": "matched",
+        "evidence": {"ok": True, "fabrication_report": report}}}}}
+    record = _prompt_context(envelope)["incoming_handoff"]["records"]["specimen_result"]["evidence"]
+    assert record["ok"] is True
+    assert record["fabrication_report"] == report
+
+
+def test_equipment_projection_preserves_all_signal_rows_and_missing_fields():
+    from agents.equipment.decision import _prompt_context
+    signals = [{"signal": "s" + str(i), "run_id": "same-run", "ok": False} for i in range(8)]
+    signals[1]["ok"] = None
+    del signals[2]["ok"]
+    original = {"incoming_handoff": {"signals": signals}}
+    packet = _prompt_context(original)
+    table = packet["incoming_handoff"]["signals"]
+    assert isinstance(table, dict)
+    rebuilt = []
+    for index, row in enumerate(table["rows"]):
+        record = {**table["shared"], **dict(zip(table["columns"], row))}
+        for key in table["missing_fields"].get(str(index), []):
+            record.pop(key)
+        rebuilt.append(record)
+    assert rebuilt == signals
+
+
+def test_equipment_shared_prompt_values_are_lossless_and_never_rewrite_tools():
+    from agents.equipment.decision import _share_prompt_values
+    same = {"session_id": "long-session-identifier-" * 10, "ready": False}
+    original = {"a": [deepcopy(same)] * 8, "b": {"current": same, "missing": None},
+        "tools": {"request_operator": same}, "response_options": [same], "evidence_refs": ["ref"]}
+    projected = _share_prompt_values(original)
+    def expand(value):
+        if isinstance(value, dict) and set(value) == {"shared_value"}:
+            return expand(projected["shared_values"][value["shared_value"]])
+        if isinstance(value, dict):
+            return {key: expand(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [expand(item) for item in value]
+        return value
+    assert len(json.dumps(projected)) < len(json.dumps(original))
+    assert {key: expand(projected[key]) for key in original} == original
+    assert projected["tools"] == original["tools"]
+    assert projected["response_options"] == original["response_options"]
+
+
+def test_handoff_projection_preserves_unknown_contract_fields_and_stop_ids():
+    from agents.equipment.decision import _prompt_context
+    original = {"incoming_handoff": {"records": {
+        "robot_task_result": {"evidence": {"rollout_stop": {
+            "status": "STOPPED", "session_id": "current", "stopped_session_ids": ["other-session"]}}},
+        "specimen_result": {"evidence": {"fabrication_report": {
+            "fabrication_intent": {"execution_policy_mode": "physical", "printer_test_path": "print"},
+            "digital_thread": {"material": "PLA", "design_hash": "different", "geometry_hash": "expected"}}}},
+        "additional_contract": {"new_restriction": ["must_remain"], "units": "mm"}}}}
+    projected = _prompt_context(original)
+    assert projected == original
+
+
+@pytest.mark.parametrize("index", [0, 1])
+def test_archived_equipment_prompt_removes_recursive_context_without_changing_proposals(index):
+    from pathlib import Path
+    from agents.equipment.decision import _prompt_context, _PROMPT, _PHASE_GUIDANCE
+    archive = Path(__file__).resolve().parents[2] / "runs/20260923_235947_KST_planning_a3966381/runtime/loops/loop-000012/equipment_agent/attempt-000001/result.json"
+    if not archive.exists():
+        pytest.skip("optional local regression archive is not shipped with the source")
+    decision = json.loads(archive.read_text())["data"]["equipment_decisions"][index]
+    original = decision["evidence"]
+    prompt = _PROMPT + "\nCURRENT DECISION:\n" + _PHASE_GUIDANCE[decision["phase"]] + "\nCONTEXT:\n" + json.dumps(
+        _prompt_context(original), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    # Character count is NOT a token budget. This only guards recursive-context
+    # regression; tokenizer + image/output capacity is validated separately.
+    assert len(prompt) < len(json.dumps(original, ensure_ascii=False)) / 5
+    projected = _prompt_context(original)
+    assert projected["tools"] == original["tools"]
+    assert projected["response_options"] == original["response_options"]
+
+
+@pytest.mark.asyncio
 async def test_response_options_are_built_from_current_proposals_not_evidence():
     """A model must receive exact response shapes, not phase names as actions."""
     from agents.equipment.decision import decide_equipment
