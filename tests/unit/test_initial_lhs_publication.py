@@ -1,11 +1,31 @@
 """Initial DSN intake publishes BO's real LHS before any measurements exist."""
 from dataclasses import replace
+from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
 
 from app.bootstrap import load_runtime
 from orchestrator.state import Mode, Stage
+
+
+@pytest.mark.asyncio
+async def test_truncated_lhs_notification_does_not_replace_plot_or_fail_the_workflow(tmp_path):
+    controller = load_runtime()
+    controller._logger_bundle = replace(controller._logger_bundle, run_dir=tmp_path)
+    controller._state.run_id = "lhs-truncated-event"
+    controller._publish_orchestrator_design_contract(controller._default_test_constraints({}), cycle_index=1, total_cycles=20)
+    await controller._publish_initial_lhs_visualization()
+    previous = deepcopy(controller._state.run_metadata["lhs_visualization"])
+    damaged = deepcopy(previous)
+    damaged["design_space"]["x"] = {"_truncated": "depth_limit", "keys": ["kind", "bounds"]}
+    result = await controller.emit_lhs_visualization(damaged, source="planning_langgraph")
+    assert result["emitted"] is False
+    assert result["reason"] == "invalid_visualization"
+    assert controller._state.run_metadata["lhs_visualization"] == previous
+    warnings = [event for event in controller.recent_events() if event.get("event_type") == "lhs.visualization.rejected"]
+    assert len(warnings) == 1
+    assert warnings[0]["payload"]["source"] == "planning_langgraph"
 
 
 @pytest.mark.parametrize("test_mode", [True, False])

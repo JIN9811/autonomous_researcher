@@ -263,9 +263,15 @@ class GuardianAgent(BaseAgent):
         metadata = state.run_metadata if isinstance(state.run_metadata, dict) else {}
         gates = metadata.get("guardian_gates") if isinstance(metadata.get("guardian_gates"), list) else []
         incidents = metadata.get("incident_records") if isinstance(metadata.get("incident_records"), list) else []
-        from policies.guardian_gate_lifecycle import resolve_image_rechecks
+        from copy import deepcopy
+        from policies.guardian_gate_lifecycle import resolve_completed_retries, resolve_image_rechecks
 
         resolve_image_rechecks(gates, incidents)
+        # Retry summarization must not silently rewrite persisted audit records. The
+        # runtime completion hook persists resolution; this projection also
+        # handles restored checkpoints already carrying verified completion.
+        gates, incidents = deepcopy((gates, incidents))
+        resolve_completed_retries(gates, incidents, [])
         active_gates: list[dict[str, Any]] = []
         warning_gates: list[dict[str, Any]] = []
         for gate in gates[-30:]:

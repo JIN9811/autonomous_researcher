@@ -114,7 +114,7 @@ def clearance_review_fixture(tmp_path):
         "session_id": "clear-test", "task_id": "clear_utm_to_disposal",
         "state": "error", "success": False, "failure_code": "VISION_REVIEW_REQUIRED",
         "replay_completed_at": 100, "replay_execution_verified": True,
-        "pending_deadline_at": 120, "pending_timeout_s": 132,
+        "pending_deadline_at": 120, "pending_timeout_s": 132, "frame_wait_deadline_at": 110,
         "replay_evidence": {"ok": True, "replay_execution_verified": True, "follower_closed": True,
             "session_id": "clear-test", "evidence_token": "token", "frames_sent": 542}}
     state.run_metadata["utm_clear_execution"] = execution
@@ -189,19 +189,21 @@ def test_clearance_review_retry_preserves_motion_completion_and_blocks_replay(tm
     assert clear["state"] == "waiting" and clear["success"] is None
     assert clear["replay_completed_at"] == 100
     assert clear["replay_evidence"] == state.run_metadata["utm_clear_execution"]["replay_evidence"]
-    assert clear["pending_deadline_at"] > 120
+    # Operator wait after Restore is not camera acquisition time.
+    assert clear["pending_deadline_at"] is None
     assert clearance_missing(restored)
     merge_utm_clear_cycle(restored, Stage.EQUIPMENT, {})
     assert restored.run_metadata["utm_clear_next_stage"] == "vision"
     assert clear["state"] != "requested"
 
 
-def test_clearance_retry_accepts_missing_frame_without_replaying(tmp_path):
+@pytest.mark.parametrize("failure", ["ROS_IMAGE_FRAME_UNAVAILABLE", "ROS_IMAGE_TIMEOUT", "UTM_RUNTIME_NOT_RUNNING"])
+def test_clearance_retry_accepts_missing_frame_without_replaying(tmp_path, failure):
     from app import run_recovery
     state, path = clearance_review_fixture(tmp_path)
     saved = json.loads(path.read_text())
     saved["data"]["utm_verification_2"]["record"]["evidence"] = {
-        "status": "frame_unavailable", "failure_code": "ROS_IMAGE_FRAME_UNAVAILABLE"}
+        "status": "frame_unavailable", "failure_code": failure}
     path.write_text(json.dumps(saved))
     restored = run_recovery.prepare_clearance_review_retry(state, tmp_path)
     clear = restored.run_metadata["utm_clear_execution"]
@@ -221,6 +223,31 @@ def test_retry_after_intervening_readonly_failure_retains_same_replay_proof(tmp_
     path.write_text("{}")
     with pytest.raises(ValueError):
         run_recovery.prepare_clearance_review_retry(first, tmp_path)
+
+
+@pytest.mark.parametrize("guardian_advanced", [False, True])
+def test_retry_after_old_restore_timer_expired_requires_pinned_original_capture(tmp_path, guardian_advanced):
+    from app import run_recovery
+    from utils.agent_artifact_archive import _public
+    state, path = clearance_review_fixture(tmp_path)
+    restored = run_recovery.prepare_clearance_review_retry(state, tmp_path)
+    clear = restored.run_metadata["utm_clear_execution"]
+    clear.update(state="error", success=False, failure_code="UTM_CLEAR_PENDING_TIMEOUT")
+    latest = path.parent.parent / "attempt-000002/result.json"
+    latest.parent.mkdir()
+    latest.write_text(json.dumps({"status": "failed", "data": {
+        "failure_code": "UTM_CLEAR_PENDING_TIMEOUT", "utm_clear_execution": _public(clear)}}))
+    if guardian_advanced:
+        from orchestrator.state import Stage
+        restored.stage = Stage.COMPLETE
+        restored.loop_count += 1
+    retry = run_recovery.prepare_clearance_review_retry(restored, tmp_path)
+    assert retry.loop_count == 0
+    assert retry.run_metadata["utm_clear_execution"]["pending_deadline_at"] is None
+    assert retry.run_metadata["clearance_review_recovery"]["source_result"] == str(path)
+    path.write_text("{}")
+    with pytest.raises(ValueError):
+        run_recovery.prepare_clearance_review_retry(restored, tmp_path)
 
 
 @pytest.mark.parametrize("invalid", ["identity", "home", "open_follower", "other_error", "changed_evidence", "stop"])

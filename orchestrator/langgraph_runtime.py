@@ -3250,6 +3250,8 @@ class LangGraphRunLoop:
             payload={"agent": agent_name, "node_id": stage.value, "status": "running", "module_runtime": module_runtime},
         )
         await self._emit_module_graph_started(stage, agent_name, module_runtime)
+        from policies.guardian_gate_lifecycle import new_agent_attempt
+        agent_attempt = new_agent_attempt(self._state, pre_gate["gate_id"], stage=stage.value)
         try:
             self._apply_fault_injection()
             if not await self._review_stage_entry(stage):
@@ -3284,6 +3286,7 @@ class LangGraphRunLoop:
                     payload=gate_payload,
                     agent=agent_name,
                 )
+                validation_gate["audit_log"]["agent_attempt"] = dict(agent_attempt)
                 result_data["guardian_gate"] = validation_gate
                 result_data["guardian_contract"] = validation_gate.get("guardian_contract", {})
                 result_data.setdefault("incident_records", []).extend(validation_gate.get("incident_records", []))
@@ -3298,6 +3301,7 @@ class LangGraphRunLoop:
                 payload=gate_payload,
                 agent=agent_name,
             )
+            post_gate["audit_log"]["agent_attempt"] = dict(agent_attempt)
             result_data["guardian_gate"] = post_gate
             result_data["guardian_contract"] = post_gate.get("guardian_contract", {})
             if post_gate.get("incident_records"):
@@ -3316,8 +3320,6 @@ class LangGraphRunLoop:
             if stage == Stage.SPECIMEN and (not result.success or gate_blocks_execution(post_gate)):
                 sync_specimen_execution_status(self._state, stage, failed=True)
                 status.state, status.success = "error", False
-            await self._record_guardian_gate_result(post_gate)
-
             completion_blocked = result.success is not True or gate_blocks_execution(post_gate)
             if completion_blocked:
                 status.state, status.success = "error", False
@@ -3330,6 +3332,16 @@ class LangGraphRunLoop:
                 # A successful monitoring tick is not a completed verification.
                 status.state, status.success = "waiting", None
                 completion_pending = True
+            if not completion_blocked and not completion_pending:
+                from policies.guardian_gate_lifecycle import complete_agent_attempt
+                complete_agent_attempt(post_gate, result_data)
+            await self._record_guardian_gate_result(post_gate)
+            from policies.guardian_gate_lifecycle import resolve_completed_retries
+            resolve_completed_retries(
+                self._state.run_metadata.get("guardian_gates", []),
+                self._state.run_metadata.get("incident_records", []),
+                self._state.run_metadata.get("corrective_actions", []),
+            )
             log_agent_event(
                 self._logger,
                 run_id=self._state.run_id,
@@ -3439,6 +3451,7 @@ class LangGraphRunLoop:
                 },
                 agent=agent_name,
             )
+            exception_gate["audit_log"]["agent_attempt"] = dict(agent_attempt)
             await self._record_guardian_gate_result(exception_gate)
             status.state = "error"
             status.last_result = str(exc)

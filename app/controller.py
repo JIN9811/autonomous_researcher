@@ -2117,7 +2117,16 @@ class MainController:
     async def _emit_lhs_visualization_locked(self, visualization: dict[str, Any], *, source: str) -> dict[str, Any]:
         """Persist and stream one monotonic initial-design visualization."""
         from experiments.lhs_progress import project_design_progress, progress_fingerprint
-        normalized = project_design_progress(dict(validate_lhs_design_visualization(visualization)), self._state.run_metadata)
+        try:
+            normalized = project_design_progress(dict(validate_lhs_design_visualization(visualization)), self._state.run_metadata)
+        except (TypeError, ValueError) as exc:
+            # Event summaries may contain depth-limit markers, not a complete
+            # figure contract. Keep the last valid plot and report the display
+            # fault without turning it into a failed experiment/agent retry.
+            await self._emit_control_event("lhs.visualization.rejected",
+                "Incomplete LHS visualization notification; last valid figure retained",
+                {"source": source, "status": "warning", "error": str(exc)}, level="WARNING")
+            return {"emitted": False, "reason": "invalid_visualization", "error": str(exc)}
         run_id = str(normalized.get("run_id") or self._state.run_id)
         normalized["run_id"] = run_id
         if run_id != self._state.run_id:
@@ -10300,6 +10309,11 @@ class MainController:
                 return
 
             if event_type != "node.completed":
+                return
+            # Legacy agent_result events share the node.completed envelope even
+            # for failed attempts. The failure was already broadcast; do not
+            # publish a success chat/plot or raise a secondary rendering error.
+            if payload.get("status") in {"error", "failed", "blocked"}:
                 return
             data = payload.get("result") if isinstance(payload.get("result"), dict) else {}
             if not data:

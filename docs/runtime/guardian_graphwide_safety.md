@@ -150,6 +150,41 @@ Operator notes are attached through `POST /api/runs/{run_id}/guardian/incidents/
 
 `gate_blocks_execution()` currently blocks `block` and `safe_stop` decisions. Human approval remains visible through the approval/event layer and should be resolved before an operator starts a physical action.
 
+### Validated retry completion
+
+The common runtime completion hook applies to every registered stage owner,
+including generated agents. Before invocation, `new_agent_attempt(state,
+attempt_id)` freezes a `guardian_agent_attempt.v1` record containing a hash of
+the input specification, effective objective and goal, plus specimen/candidate
+and task identity. Manipulation transfer/disposal and Vision
+pickup/placement/clearance are distinct tasks. BO binds its effective objective,
+settings, design bounds and observations; it excludes the obsolete evaluated
+candidate constraints in `current_experiment_objective`, which BO does not use.
+Transient rollout/session IDs are deliberately excluded. Post and exception
+gates retain that record at `audit_log.agent_attempt`.
+
+Only a successful, output-validated, nonblocked, nonpending completion may call
+`complete_agent_attempt(gate, payload)`. It adds `audit_log.agent_completion`
+with the same identity and `validated: true`, `success: true`, and
+`status: completed`. A post `allow`, an idle status, monitoring progress, or an
+operator wait alone is never completion evidence. Bounded recursive inspection
+also rejects nested preflight, unverified physical handoff and pending completion
+statuses, without treating the designated audit/history containers as new work.
+
+`resolve_completed_retries(gates, incidents, corrective_actions)` retires only
+older software-failure post/exception gates with identical run, experiment,
+cycle, stage, owner and work identity, and a different attempt ID. The original
+decisions and alarms remain intact; matching records receive resolved lifecycle
+state, the resolving gate ID/time and completion evidence. Explicit stop or
+approval gates, tool-action gates, hardware alarms, and different work remain
+active. The legacy BO `BO_CANDIDATE_UNSAFE` wrapper is eligible only for the exact
+`BO_DECISION_INVALID` subtype and matching candidate evidence, never a genuine
+candidate-safety rejection.
+
+Guardian pressure can project this verified resolution without changing retry
+audit history. Legacy gates without bound attempt/completion proof remain active;
+restoration must explicitly verify archived attempts before adding any proof.
+
 ## Test Coverage
 
 Relevant tests:
@@ -157,10 +192,21 @@ Relevant tests:
 - `tests/unit/test_guardian_gate.py`: alarm normalization, nested warnings, agent-specific alarm keys, signal ACK handling, approval, and blocker handling.
 - `tests/unit/test_guardian_tool_shield.py`: pre-tool action shield blocking/allowing side-effect tools.
 - `tests/unit/test_guardian_agent.py`: Guardian final decision from hardware alerts and graph-wide gates.
+- `tests/unit/test_guardian_retry_completion.py`: same-work retry completion, linked audit lifecycle, cross-scope and safety exclusions, and the shared runtime hook.
 - `tests/unit/test_knowledge_agent.py`: Guardian incidents become Knowledge improvement evidence through `guardian_incident_evidence.v1`.
 - `tests/unit/test_controller_planning.py`: Live GUI planning messages for Guardian shield events and hardware/tool progress.
 - `tests/unit/test_langgraph_runtime.py`: runtime merge/event behavior, agent-exception Guardian gates, and result-key compatibility.
 
 ### Cross-Agent Alarm Semantics
+
+An ended disposal replay and a failed camera observation are separate facts.
+Observation-only recovery preserves the scoped replay proof and starts the
+existing camera timeout when execution resumes, not when a checkpoint is restored.
+A missing ROS runtime is an unavailable frame, never a successful clearance.
+Historical clearance camera holds can be resolved only by a newer same-work
+completion: verified ended replay, fresh clear image, and accepted Vision and
+Manipulation reviews. A pending or generic post-allow gate is insufficient.
+Other equipment/motion hazards remain blocking; original failure records remain
+available with their resolving gate reference.
 
 Guardian reads cross-agent alarm fields such as `failure_code`, `blocking_reasons`, `warnings`, `failure_tags`, `confidence`, `hardware_alert.v1`, and `incident_record.v1` across Design, Specimen, Vision, Manipulation, Equipment, Analysis, Knowledge, BO, and Guardian outputs. TEST/virtual/dry-run printer `START_PRINT_DISABLED` markers are treated as expected non-actuating evidence, while live physical print/ejection requests still block on the same marker. TEST mode loop caps override recoverable graph-gate pressure so deterministic test runs do not retry indefinitely.

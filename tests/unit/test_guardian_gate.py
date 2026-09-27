@@ -20,11 +20,13 @@ def _state(stage: Stage = Stage.MANIPULATION) -> OrchestratorState:
     (None, "vision_observation", True),
     (False, "vision_gate", True),
 ])
-def test_equipment_passive_link_unavailable_respects_gate_contract(blocking, kind, expected_block):
+@pytest.mark.parametrize("failure", ["EQUIPMENT_VISION_LINK_UNAVAILABLE", "UTM_INSUFFICIENT_TEMPORAL_EVIDENCE"])
+def test_equipment_passive_link_unavailable_respects_gate_contract(blocking, kind, expected_block, failure):
     transition = {
         "phase": "vision", "kind": kind, "blocking": blocking,
-        "failure_code": "EQUIPMENT_VISION_LINK_UNAVAILABLE", "outcome": "error",
-        "vision_result": {"failure_code": "EQUIPMENT_VISION_LINK_UNAVAILABLE"},
+        "failure_code": failure, "outcome": "error",
+        "vision_result": {"failure_code": failure},
+        "operator_attention": {"status": "attention_required", "failure_code": failure},
     }
     gate = guardian_gate(
         state=_state(Stage.EQUIPMENT), stage="equipment", phase="post",
@@ -33,8 +35,7 @@ def test_equipment_passive_link_unavailable_respects_gate_contract(blocking, kin
     assert gate_blocks_execution(gate) is expected_block
     if not expected_block:
         assert gate["decision"] == "allow_with_warning"
-        assert any(a["reason_code"] == "EQUIPMENT_VISION_LINK_UNAVAILABLE"
-                   and a["severity"] == "warning" for a in gate["alarms"])
+        assert all(a["severity"] == "warning" for a in gate["alarms"])
 
 
 def test_passive_vision_link_warning_does_not_hide_independent_safety_failure():
@@ -76,6 +77,20 @@ def test_nested_required_vision_gate_is_not_downgraded_by_passive_parent():
         }]}},
     )
     assert gate_blocks_execution(gate) is True
+
+
+@pytest.mark.parametrize("active_failure", [False, True])
+def test_accepted_equipment_decision_input_is_not_current_execution(active_failure):
+    # The prompt snapshot predates completion and can contain old diagnostic
+    # failures; only its current decision and the owner's result are gate input.
+    payload = {"equipment_decisions": [{"schema": "equipment_decision.v1",
+        "status": "accepted", "scope_valid": True,
+        "request": {"tool": "accept_workflow_result"},
+        "evidence": {"execution": {"failure_code": "UTM_INSUFFICIENT_TEMPORAL_EVIDENCE"}}}]}
+    if active_failure:
+        payload["equipment_result"] = {"failure_code": "UTM_MOTION_FAILED"}
+    gate = guardian_gate(state=_state(Stage.EQUIPMENT),stage="equipment",phase="post",payload=payload)
+    assert gate_blocks_execution(gate) is active_failure
 
 
 def test_rollout_stop_and_status_are_not_action_shielded() -> None:

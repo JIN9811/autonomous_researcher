@@ -149,6 +149,10 @@ class AgentContext:
                 "user_prompt": user_prompt,
                 "metadata": {"task_type": task_type, "role": role},
             }
+            if task_type == "equipment_workflow_decision":
+                # Exact server-owned proposals require machine-readable output
+                # on primary and fallback providers, not just a prose request.
+                call_kwargs["metadata"]["response_format"] = "json_object"
             if images:
                 call_kwargs["images"] = images
             coro = backend.complete(**call_kwargs)

@@ -1891,6 +1891,25 @@ async def test_planning_langgraph_stage_syncs_returned_runloop_state(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_failed_bo_notification_is_not_published_as_success(monkeypatch):
+    controller = load_runtime()
+    spec = {"candidate_id": "c13", "specimen_id": "s13", "test_mode_llm_generated": True}
+    class FailedBO:
+        def __init__(self, *, state, on_event, **kwargs):
+            self.state, self.on_event = state, on_event
+        async def step(self):
+            await self.on_event({"type": "node.completed", "payload": {
+                "node_id": "bo", "agent": "bo_agent", "status": "error", "result": {
+                    "bo_result": {"ok": False, "failure_code": "BO_DECISION_INVALID", "lhs_visualization": {
+                        "schema": "lhs_design_visualization.v1", "design_space": {"_truncated": "depth_limit"}}}}}})
+            self.state.stage = Stage.COMPLETE
+    monkeypatch.setattr("app.controller.RunLoop", FailedBO)
+    await controller._run_planning_loop_tail(spec, cycle_index=13, total_cycles=15, resume_stage=Stage.BO)
+    assert not [m for m in controller.planning_snapshot()["messages"] if m.get("role") == "bo_ai" and m.get("ok")]
+    assert not controller._state.run_metadata.get("lhs_visualization")
+
+
+@pytest.mark.asyncio
 async def test_specimen_stage_does_not_reuse_stale_operator_prompt_after_agent_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

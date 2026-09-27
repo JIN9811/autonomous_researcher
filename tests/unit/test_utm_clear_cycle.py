@@ -129,14 +129,16 @@ class ReplayTools:
 
 
 @pytest.mark.asyncio
-async def test_camera_wait_has_ten_minute_budget_without_replaying_or_reviewing(monkeypatch):
+@pytest.mark.parametrize("failure", ["ROS_IMAGE_FRAME_UNAVAILABLE", "UTM_RUNTIME_NOT_RUNNING"])
+@pytest.mark.parametrize("pending_deadline", [1100, None])
+async def test_camera_wait_has_ten_minute_budget_without_replaying_or_reviewing(monkeypatch, failure, pending_deadline):
     from utils import utm_clear_cycle as cycle
     import agents.vision.decision as decisions
     state = state_with_placement()
     state.current_experiment_spec["execution_policy"] = {"manipulation": "execute", "vision": "execute", "lab_equipment": "execute"}
     cycle.merge_utm_clear_cycle(state, Stage.EQUIPMENT, equipment_data(state))
     execution = cycle.current_clear(state)
-    execution.update(state="waiting", pending_deadline_at=1100, pending_timeout_s=120)
+    execution.update(state="waiting", pending_deadline_at=pending_deadline, pending_timeout_s=120)
     clock = [1000.0]
     monkeypatch.setattr(cycle.time, "time", lambda: clock[0])
     async def unexpected_review(*args, **kwargs):
@@ -148,7 +150,7 @@ async def test_camera_wait_has_ten_minute_budget_without_replaying_or_reviewing(
     def call(name, payload):
         if name == "vision.utm_specimen_presence.capture":
             tools.calls.append((name, deepcopy(payload)))
-            return {"ok": False, "status": "frame_unavailable", "failure_code": "ROS_IMAGE_FRAME_UNAVAILABLE"}
+            return {"ok": False, "status": "frame_unavailable", "failure_code": failure}
         return original(name, payload)
     tools.call = call
     ctx = SimpleNamespace(tools=tools)

@@ -11,6 +11,7 @@ from copy import deepcopy
 import hashlib
 import json
 import math
+from time import monotonic
 
 from backends.llm_backend import LLMImageInput
 from orchestrator.state import Mode
@@ -376,24 +377,52 @@ async def decide_equipment(state, ctx, *, phase, context, proposals, images=None
         if frozen_images:
             kwargs["images"] = frozen_images
         result["knowledge_delivery"] = mark_reference_delivered(ctx, reference)
-        response = await asyncio.wait_for(
-            owned.complete("equipment_workflow_decision",
-                _PROMPT + "\nCURRENT DECISION:\n" + _PHASE_GUIDANCE[phase] + "\nCONTEXT:\n" + serialized,
-                **kwargs), timeout)
-        if (getattr(response, "raw", None) or {}).get("mock"):
-            raise ValueError("mock backend cannot establish model judgment")
-        result.update(llm_used=True, model=getattr(response, "model", "unknown"))
-        output = response.text
-        if not isinstance(output, str) or len(output) > 16000:
-            raise ValueError("invalid or oversized decision response")
-        # Some registered models wrap otherwise valid JSON despite the prompt.
-        # Unwrap one whole-response fence only; never extract JSON from prose.
-        output = output.strip()
-        lines = output.splitlines()
-        if len(lines) >= 3 and lines[0] in ("```json", "```") and lines[-1] == "```":
-            output = "\n".join(lines[1:-1])
-        # Keep validated bounded requests rather than arbitrary raw output in logs.
-        request = json.loads(output, object_pairs_hook=_object, parse_constant=_invalid_constant)
+        deadline = monotonic() + timeout
+        result["response_attempts"] = []
+        for attempt in range(2):
+            if _stopped(state) or _scope(state) != snapshot:
+                raise ValueError("decision scope changed before response correction")
+            remaining = timeout if attempt == 0 else deadline - monotonic()
+            if remaining <= 0:
+                raise TimeoutError("decision response correction budget exhausted")
+            kwargs["timeout_s"] = remaining
+            correction = ("\nThe previous response was invalid JSON or truncated. Return one complete JSON object, "
+                "choose again from the SAME options, copy exact arguments and references, and keep reason to one short sentence. "
+                "This is a format correction only, not permission to execute or change proposals.\n" if attempt else "")
+            response = await asyncio.wait_for(
+                owned.complete("equipment_workflow_decision",
+                    _PROMPT + "\nCURRENT DECISION:\n" + _PHASE_GUIDANCE[phase] + correction + "\nCONTEXT:\n" + serialized,
+                    **kwargs), remaining)
+            raw = getattr(response, "raw", None) or {}
+            if raw.get("mock"):
+                raise ValueError("mock backend cannot establish model judgment")
+            result.update(llm_used=True, model=getattr(response, "model", "unknown"))
+            output = response.text
+            if not isinstance(output, str) or len(output) > 16000:
+                raise ValueError("invalid or oversized decision response")
+            choices = raw.get("choices") or []
+            finish = choices[0].get("finish_reason") if choices and isinstance(choices[0], dict) else raw.get("done_reason")
+            receipt = {"attempt": attempt + 1, "sha256": hashlib.sha256(output.encode()).hexdigest(),
+                       "characters": len(output), "finish_reason": finish, "status": "received",
+                       "usage": {key: value for key, value in (raw.get("usage") or {}).items()
+                                 if key in {"prompt_tokens", "completion_tokens", "total_tokens"} and type(value) is int}}
+            result["response_attempts"].append(receipt)
+            output = output.strip()
+            lines = output.splitlines()
+            if len(lines) >= 3 and lines[0] in ("```json", "```") and lines[-1] == "```":
+                output = "\n".join(lines[1:-1])
+            try:
+                if finish == "length":
+                    raise json.JSONDecodeError("truncated model response", output, len(output))
+                request = json.loads(output, object_pairs_hook=_object, parse_constant=_invalid_constant)
+            except json.JSONDecodeError as exc:
+                receipt.update(status="invalid_format", error_type="JSONDecodeError", position=exc.pos,
+                               line=exc.lineno, column=exc.colno)
+                if attempt == 0:
+                    continue
+                raise
+            receipt["status"] = "parsed"
+            break
         if not isinstance(request, dict) or set(request) != {"tool", "arguments", "reason", "evidence_refs"}:
             raise ValueError("invalid decision fields")
         tool, cited = request["tool"], request["evidence_refs"]

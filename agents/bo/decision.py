@@ -30,6 +30,10 @@ SUPPORTED_ACQUISITIONS = {
 _STRATEGY_KEYS = {"acquisition", "kappa", "xi", "exploration_weight", "exploitation_weight"}
 
 
+class _MissingCandidateCitation(ValueError):
+    """An otherwise valid exact-candidate approval needs an explicit citation."""
+
+
 def _model_context(context: Mapping[str, Any]) -> dict[str, Any]:
     """Encode every numeric observation compactly; solver/audit keep originals."""
     projected = deepcopy(dict(context))
@@ -197,7 +201,7 @@ def _parse_request(text: Any, evidence: set[str], tools: set[str]) -> dict[str, 
         or not reason.strip()
         or len(reason) > 2000
         or not isinstance(refs, list)
-        or not refs
+        or (not refs and tool != "accept_recommendation")
         or any(not isinstance(ref, str) or ref not in evidence for ref in refs)
     ):
         raise ValueError("invalid decision tool, reason, or evidence")
@@ -282,6 +286,7 @@ async def run_bo_decision(
         tools = {"inspect_diagnostics", "retrieve_knowledge", "run_optimizer", "return_to_owner"}
         optimizer_result: dict[str, Any] | None = None
         candidate_id: str | None = None
+        correction: dict[str, Any] | None = None
         inspected = False
         deadline = monotonic() + float(total_timeout)
 
@@ -290,7 +295,9 @@ async def run_bo_decision(
             "On the normal path inspect diagnostics, optionally retrieve relevant local knowledge, run the optimizer once, "
             "then accept the exact solver candidate or return to the owner. Never create or edit coordinates, objective, "
             "bounds, budget, initial LHS size/seed/phase, or device actions. Output exactly one JSON object containing only "
-            "tool, arguments, reason, evidence_refs. Cite only supplied evidence IDs."
+            "tool, arguments, reason, evidence_refs. Cite only supplied evidence IDs. "
+            "To accept_recommendation, evidence_refs MUST include candidate:<candidate_id> for the exact solver "
+            "candidate being accepted; context or diagnostic citations alone are insufficient."
         )
         for index in range(max_calls):
             remaining = min(float(call_timeout), deadline - monotonic())
@@ -318,10 +325,12 @@ async def run_bo_decision(
                 tool_schemas["accept_recommendation"] = {
                     "arguments": {"candidate_id": candidate_id},
                     "effect": "accept only this exact solver candidate with unchanged coordinates",
+                    "required_evidence_refs": [f"candidate:{candidate_id}"],
                     "example": {"tool": "accept_recommendation", "arguments": {"candidate_id": candidate_id}, "reason": "Accept checked numeric result.", "evidence_refs": [f"candidate:{candidate_id}"]},
                 }
             prompt = instructions + "\n" + json.dumps(
                 {"context": _model_context(frozen), "tools": {name: tool_schemas[name] for name in sorted(available_tools)},
+                 **({"correction": correction} if correction is not None else {}),
                  "evidence_refs": sorted(evidence), "trace": [
                      {key: value for key, value in entry.items() if key not in {"response", "model"}}
                      for entry in result["trace"]]},
@@ -432,7 +441,7 @@ async def run_bo_decision(
                     if set(arguments) != {"candidate_id"} or candidate_id is None or arguments.get("candidate_id") != candidate_id:
                         raise ValueError("only the exact solver candidate ID can be accepted")
                     if f"candidate:{candidate_id}" not in request["evidence_refs"]:
-                        raise ValueError("accepted candidate must be cited")
+                        raise _MissingCandidateCitation("accepted candidate must be cited")
                     result.update(status="accepted", candidate_id=candidate_id, reason=request["reason"], evidence_refs=request["evidence_refs"])
                     response_entry["result"] = {"status": "accepted", "candidate_id": candidate_id}
                     response_entry["status"] = "valid"
@@ -451,11 +460,22 @@ async def run_bo_decision(
                 record_tool_artifact("evidence_result", f"bo.{tool}", response_entry)
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
                 response_entry["status"] = "invalid"
                 response_entry["error_type"] = "BO_DECISION_INVALID_REQUEST"
                 result["trace"].append(response_entry)
                 record_tool_artifact("decision_response", "bo.invalid", response_entry)
+                # Only the missing citation on an otherwise validated exact-candidate
+                # approval earns one model correction. Never synthesize acceptance,
+                # reset the budgets, or reopen optimizer dispatch.
+                if isinstance(exc, _MissingCandidateCitation) and correction is None and index + 1 < max_calls:
+                    correction = {
+                        "error": "accepted candidate must be cited",
+                        "required_evidence_refs": [f"candidate:{candidate_id}"],
+                        "instruction": "Correct only the missing citation in the previous exact-candidate approval, or return_to_owner. The optimizer result and coordinates are unchanged. This is the only correction attempt.",
+                    }
+                    tools = {"accept_recommendation", "return_to_owner"}
+                    continue
                 raise
         result["failure_code"] = "BO_DECISION_BUDGET_EXHAUSTED"
     except asyncio.CancelledError:

@@ -371,7 +371,7 @@ async def run_clear_vision(state, ctx, *, artifact_dir):
     if current_clear(state) is not execution or any(getattr(state, flag, False) for flag in
             ("stop_requested", "safe_stop_requested", "emergency_stop_requested")):
         return _result(execution)
-    if capture.get("failure_code") in {"ROS_IMAGE_FRAME_UNAVAILABLE", "ROS_IMAGE_TIMEOUT"}:
+    if capture.get("failure_code") in {"ROS_IMAGE_FRAME_UNAVAILABLE", "ROS_IMAGE_TIMEOUT", "UTM_RUNTIME_NOT_RUNNING"}:
         if time.time() < execution["frame_wait_deadline_at"]:
             execution["frame_wait_last_failure"] = capture.get("failure_code")
             # Do not send missing imagery to the LLM or publish failed evidence

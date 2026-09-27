@@ -211,6 +211,130 @@ async def test_identical_solver_candidate_can_be_accepted_or_returned_to_owner()
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("missing_refs", [["diagnostics:current"], []])
+async def test_missing_candidate_citation_gets_one_local_correction_without_rerunning_solver(missing_refs):
+    original_request = _request("accept_recommendation", {"candidate_id": "solver-candidate-007"}, missing_refs)
+    ctx = _Context([
+        _request("inspect_diagnostics", {}, ["context:observations"]),
+        _request("run_optimizer", {}, ["diagnostics:current"]),
+        original_request,
+        _request("accept_recommendation", {"candidate_id": "solver-candidate-007"}, ["candidate:solver-candidate-007"]),
+    ])
+    context = _decision_context()
+    frozen = deepcopy(context)
+    solver_calls = []
+
+    async def optimizer(strategy):
+        solver_calls.append(deepcopy(strategy))
+        return _optimizer_result()
+
+    decision = await run_bo_decision(
+        context=context, ctx=ctx,
+        settings={"strategy_control": "configured", "acquisition": "expected_improvement"},
+        run_optimizer=optimizer,
+    )
+
+    assert decision["status"] == "accepted"
+    assert decision["candidate_id"] == "solver-candidate-007"
+    assert decision["optimizer_result"] == _optimizer_result()
+    assert solver_calls == [{"acquisition": "expected_improvement"}]
+    assert context == frozen
+    assert len(ctx.calls) == 4
+    rejected = decision["trace"][2]
+    assert rejected["status"] == "invalid"
+    assert rejected["request"] == original_request
+    assert json.loads(rejected["response"]) == original_request
+    assert decision["trace"][3]["request"]["evidence_refs"] == ["candidate:solver-candidate-007"]
+    for _, prompt, _ in ctx.calls[2:]:
+        packet = json.loads(prompt.split("\n", 1)[1])
+        assert packet["tools"]["accept_recommendation"]["required_evidence_refs"] == ["candidate:solver-candidate-007"]
+        assert "run_optimizer" not in packet["tools"]
+    correction = json.loads(ctx.calls[3][1].split("\n", 1)[1])
+    assert correction["correction"]["required_evidence_refs"] == ["candidate:solver-candidate-007"]
+    assert set(correction["tools"]) == {"accept_recommendation", "return_to_owner"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("max_calls", "expected_calls"), [(3, 3), (4, 4), (12, 4)])
+async def test_permanently_missing_candidate_citation_fails_after_at_most_one_correction(max_calls, expected_calls):
+    missing = _request("accept_recommendation", {"candidate_id": "solver-candidate-007"}, ["diagnostics:current"])
+    ctx = _Context([
+        _request("inspect_diagnostics", {}, ["context:observations"]),
+        _request("run_optimizer", {}, ["diagnostics:current"]),
+        missing, missing,
+    ])
+    solver_calls = []
+
+    async def optimizer(strategy):
+        solver_calls.append(strategy)
+        return _optimizer_result()
+
+    decision = await run_bo_decision(
+        context=_decision_context(), ctx=ctx,
+        settings={"decision_max_calls": max_calls}, run_optimizer=optimizer,
+    )
+
+    assert decision["status"] == "failed"
+    assert decision["failure_code"] == "BO_DECISION_INVALID"
+    assert len(ctx.calls) == expected_calls
+    assert len(solver_calls) == 1
+    assert decision["optimizer_result"] == _optimizer_result()
+    assert all(entry["status"] == "invalid" for entry in decision["trace"][2:])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_request", [
+    _request("accept_recommendation", {"candidate_id": "invented"}, ["diagnostics:current"]),
+    _request("accept_recommendation", {"candidate_id": "solver-candidate-007", "parameters": {"cell_size_mm": 8}}, ["diagnostics:current"]),
+    _request("accept_recommendation", {"candidate_id": "solver-candidate-007"}, ["unknown:evidence"]),
+    _request("run_optimizer", {}, ["diagnostics:current"]),
+])
+async def test_non_citation_approval_errors_never_get_local_correction(bad_request):
+    ctx = _Context([
+        _request("inspect_diagnostics", {}, ["context:observations"]),
+        _request("run_optimizer", {}, ["diagnostics:current"]),
+        bad_request,
+        _request("accept_recommendation", {"candidate_id": "solver-candidate-007"}, ["candidate:solver-candidate-007"]),
+    ])
+    decision = await run_bo_decision(
+        context=_decision_context(), ctx=ctx, settings={},
+        run_optimizer=lambda _: _optimizer_result(),
+    )
+
+    assert decision["status"] == "failed"
+    assert decision["failure_code"] == "BO_DECISION_INVALID"
+    assert len(ctx.calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_candidate_citation_correction_does_not_extend_total_deadline(monkeypatch):
+    now = [0.0]
+    monkeypatch.setattr("agents.bo.decision.monotonic", lambda: now[0])
+
+    class ExpiringContext(_Context):
+        async def complete(self, task_type, prompt, *, timeout_s=None):
+            response = await super().complete(task_type, prompt, timeout_s=timeout_s)
+            if len(self.calls) == 3:
+                now[0] = 2.0
+            return response
+
+    ctx = ExpiringContext([
+        _request("inspect_diagnostics", {}, ["context:observations"]),
+        _request("run_optimizer", {}, ["diagnostics:current"]),
+        _request("accept_recommendation", {"candidate_id": "solver-candidate-007"}, ["diagnostics:current"]),
+    ])
+    decision = await run_bo_decision(
+        context=_decision_context(), ctx=ctx, settings={"decision_total_timeout_s": 1.0},
+        run_optimizer=lambda _: _optimizer_result(),
+    )
+
+    assert decision["status"] == "failed"
+    assert decision["failure_code"] == "BO_DECISION_TIMEOUT"
+    assert len(ctx.calls) == 3
+    assert decision["trace"][-1]["status"] == "invalid"
+
+
+@pytest.mark.asyncio
 async def test_return_to_owner_before_optimization_does_not_dispatch_numeric_tool():
     ctx = _Context([
         _request("return_to_owner", {}, ["context:request"]),

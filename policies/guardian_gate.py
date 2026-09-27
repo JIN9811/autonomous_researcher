@@ -176,7 +176,8 @@ def guardian_gate(
     )
     return {
         "schema": "guardian_gate_result.v1",
-        "audit_log": {"preprint_validation": _preprint_validation_evidence(payload, state, stage, phase), "check_scope": (
+        "audit_log": {"clearance_completion": _clearance_completion_evidence(payload, state, stage, phase),
+            "preprint_validation": _preprint_validation_evidence(payload, state, stage, phase), "check_scope": (
             "utm_clearance" if payload.get("utm_verification_2") or payload.get("utm_clear_execution")
             else "utm_placement" if payload.get("utm_verification_1")
             else str(payload.get("purpose") or "")
@@ -205,6 +206,45 @@ def guardian_gate(
         "ok_for_bo": ok_for_bo,
         "created_at": now,
     }
+
+
+def _clearance_completion_evidence(payload, state, stage, phase):
+    """Minimal measured/owner-reviewed proof, not a generic post-allow signal."""
+    import math
+    if stage != "vision" or phase != "post":
+        return {}
+    clear, second = payload.get("utm_clear_execution") or {}, payload.get("utm_verification_2") or {}
+    if not isinstance(clear, dict) or not isinstance(second, dict) or not clear or not second:
+        return {}
+    record = second.get("record") or {}
+    if not isinstance(record, dict):
+        return {}
+    image = record.get("evidence") or {}
+    replay = clear.get("replay_evidence") or {}
+    decisions = (clear.get("manipulation_result_decision") or {}, image.get("vision_decision") or {}) if isinstance(image, dict) else ()
+    if not isinstance(image, dict) or not isinstance(replay, dict) or not all(isinstance(d, dict) for d in decisions):
+        return {}
+    scope = {"run_id": state.run_id, "loop_id": state.loop_count,
+             "specimen_id": (state.current_experiment_spec or {}).get("specimen_id")}
+    if (not scope["specimen_id"] or any(item.get(k) != v for item in (clear, second) for k, v in scope.items())
+            or not clear.get("session_id") or second.get("session_id") != clear["session_id"]
+            or clear.get("state") != "done" or clear.get("success") is not True
+            or clear.get("replay_execution_verified") is not True or replay.get("ok") is not True
+            or replay.get("follower_closed") is not True or not replay.get("frames_sent")
+            or replay.get("session_id") != clear["session_id"]
+            or record.get("confirmed") is not True or record.get("status") != "clear"
+            or image.get("clear_confirmed") is not True or image.get("detected") is not False
+            or any(decision.get("status") != "accepted" or decision.get("scope_valid") is not True
+                   for decision in decisions)):
+        return {}
+    try:
+        if (not math.isfinite(float(image["frame_timestamp"]))
+                or not 0 < float(clear["replay_completed_at"]) < float(image["frame_timestamp"])):
+            return {}
+    except (TypeError, ValueError, KeyError):
+        return {}
+    return {**scope, "session_id": clear["session_id"], "verified": True,
+            "frame_timestamp": image["frame_timestamp"], "replay_completed_at": clear["replay_completed_at"]}
 
 
 def gate_blocks_execution(gate: dict[str, Any]) -> bool:
@@ -374,7 +414,9 @@ def _collect_alarm_signals(payload: dict[str, Any]) -> list[dict[str, Any]]:
             message = str(value.get("message") or value.get("error") or failure or status or "")
             if failure:
                 severity = str(value.get("severity") or "blocking")
-                if passive_vision and failure == "EQUIPMENT_VISION_LINK_UNAVAILABLE" and not value.get("severity"):
+                if (passive_vision and failure in {
+                        "EQUIPMENT_VISION_LINK_UNAVAILABLE", "UTM_INSUFFICIENT_TEMPORAL_EVIDENCE"}
+                        and not value.get("severity")):
                     severity = "warning"
                 add(str(failure), severity, message, path)
             elif status in TERMINAL_FAILURE_STATUSES:
@@ -423,8 +465,15 @@ def _collect_alarm_signals(payload: dict[str, Any]) -> list[dict[str, Any]]:
             for key, child in value.items():
                 if key in {"raw", "raw_output", "prompt"}:
                     continue
+                # A validated terminal decision's prompt snapshot is historical
+                # input, not another execution result. Current owner outputs,
+                # mandatory gates and explicit safety signals stay inspected.
+                if (key == "evidence" and value.get("schema") == "equipment_decision.v1"
+                        and value.get("status") == "accepted" and value.get("scope_valid") is True
+                        and (value.get("request") or {}).get("tool") == "accept_workflow_result"):
+                    continue
                 walk(child, f"{path}.{key}" if path else str(key),
-                     passive_vision=passive_vision and key == "vision_result")
+                     passive_vision=passive_vision and key in {"vision_result", "operator_attention", "evidence", "results"})
         elif isinstance(value, list):
             for index, child in enumerate(value):
                 walk(child, f"{path}[{index}]", passive_vision=passive_vision)

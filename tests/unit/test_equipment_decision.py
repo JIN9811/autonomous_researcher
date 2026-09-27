@@ -47,6 +47,66 @@ class Model:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("first_failure", ["syntax", "length"])
+async def test_response_format_retry_preserves_proposals_and_records_diagnostics(first_failure):
+    from agents.equipment.decision import decide_equipment
+    class RetryModel(Model):
+        async def complete(self, *args, **kwargs):
+            response = await super().complete(*args, **kwargs)
+            if len(self.calls) == 1:
+                if first_failure == "syntax":
+                    response.text = '{"tool":'
+                response.raw = {"choices": [{"finish_reason": "length" if first_failure == "length" else "stop"}],
+                                "usage": {"completion_tokens": 768}}
+            return response
+    context, proposals = inputs()
+    model = RetryModel()
+    result = await decide_equipment(state(), model, phase="select", context=context, proposals=proposals)
+    assert result["status"] == "accepted"
+    assert result["request"]["arguments"] == {"proposal_id": "bound-flow", "revision": 1}
+    assert len(model.calls) == 2
+    assert model.calls[0][3]["tools"] == model.calls[1][3]["tools"] == proposals
+    assert 0 < model.calls[1][2]["timeout_s"] <= model.calls[0][2]["timeout_s"]
+    assert len(result["response_attempts"]) == 2
+    assert result["response_attempts"][0]["status"] == "invalid_format"
+    assert len(result["response_attempts"][0]["sha256"]) == 64
+    assert "response_text" not in result["response_attempts"][0]
+
+
+@pytest.mark.asyncio
+async def test_repeated_invalid_json_stops_after_one_nonactuating_correction():
+    from agents.equipment.decision import decide_equipment
+    class Invalid(Model):
+        async def complete(self, *args, **kwargs):
+            response = await super().complete(*args, **kwargs)
+            response.text = '{"tool":'
+            return response
+    context, proposals = inputs()
+    model = Invalid()
+    result = await decide_equipment(state(), model, phase="select", context=context, proposals=proposals)
+    assert result["status"] == "review_required" and result["request"] is None
+    assert len(model.calls) == 2
+    assert all(a["status"] == "invalid_format" for a in result["response_attempts"])
+
+
+@pytest.mark.asyncio
+async def test_stop_during_invalid_response_prevents_correction_call():
+    from agents.equipment.decision import decide_equipment
+    current = state()
+    class Stopped(Model):
+        async def complete(self, *args, **kwargs):
+            response = await super().complete(*args, **kwargs)
+            current.stop_requested = True
+            response.text = '{"tool":'
+            return response
+    context, proposals = inputs()
+    model = Stopped()
+    result = await decide_equipment(current, model, phase="select", context=context, proposals=proposals)
+    assert result["status"] == "review_required" and result["scope_valid"] is False
+    assert len(model.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_prompt_projection_keeps_current_handoff_conflicts_and_archive(monkeypatch):
     from agents.equipment import decision
     context, proposals = inputs()

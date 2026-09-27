@@ -200,15 +200,30 @@ def prepare_clearance_review_retry(state, root):
     import time
     from orchestrator.state import Stage
     from utils.utm_clear_cycle import current_clear, matches
+    raw = state.run_metadata.get("utm_clear_execution") or {}
+    prior = state.run_metadata.get("clearance_review_recovery") or {}
+    # Guardian finalization advances the counter even on a stop. Recover only
+    # this same specimen's unfinished observation, never an already-started cycle.
+    if (state.stage == Stage.COMPLETE and type(raw.get("loop_id")) is int
+            and raw["loop_id"] + 1 == state.loop_count
+            and raw.get("run_id") == state.run_id
+            and raw.get("specimen_id") == state.current_experiment_spec.get("specimen_id")
+            and prior.get("session_id") == raw.get("session_id") and prior):
+        state = state.model_copy(deep=True)
+        state.run_metadata["clearance_recovery_cursor"] = {"from_loop": state.loop_count, "to_loop": raw["loop_id"]}
+        state.loop_count = raw["loop_id"]
     clear = current_clear(state)
     proof = clear.get("replay_evidence") or {}
     previous_retry = state.run_metadata.get("clearance_review_recovery") or {}
     retry_wait = clear.get("state") == "waiting" and clear.get("success") is None and bool(previous_retry)
+    expired_restore = (clear.get("state") == "error" and clear.get("success") is False
+        and clear.get("failure_code") == "UTM_CLEAR_PENDING_TIMEOUT" and bool(previous_retry)
+        and not clear.get("frame_wait_deadline_at"))
     original_failure = clear.get("state") == "error" and clear.get("failure_code") in {"VISION_REVIEW_REQUIRED", "UTM_CLEAR_IMAGE_TIMEOUT"} and clear.get("success") is False
     if (state.stage not in {Stage.COMPLETE, Stage.ERROR}
             or any(getattr(state, k) for k in ("stop_requested", "safe_stop_requested", "emergency_stop_requested"))
             or state.run_metadata.get("active_safety_sources")
-            or not (original_failure or retry_wait) or clear.get("replay_execution_verified") is not True
+            or not (original_failure or retry_wait or expired_restore) or clear.get("replay_execution_verified") is not True
             or clear.get("task_id") != "clear_utm_to_disposal" or not clear.get("replay_completed_at")
             or proof.get("ok") is not True
             or proof.get("follower_closed") is not True or not proof.get("frames_sent")
@@ -218,22 +233,35 @@ def prepare_clearance_review_retry(state, root):
         f"loop-{state.loop_count + 1:06d}/vision_agent").glob("attempt-*/result.json"))
     if not paths:
         raise ValueError("Archived clearance review is unavailable")
-    archived = json.loads(paths[-1].read_text())
+    source = paths[-1]
+    archived = json.loads(source.read_text())
+    from utils.agent_artifact_archive import _public
+    if expired_restore:
+        latest = archived.get("data") or {}
+        source = Path(previous_retry.get("source_result") or "")
+        if (source not in paths[:-1] or _hash(source) != previous_retry.get("source_sha256")
+                or latest.get("utm_verification_2")
+                or latest.get("failure_code") != "UTM_CLEAR_PENDING_TIMEOUT"
+                or latest.get("utm_clear_execution") != _public(clear)):
+            raise ValueError("Expired restore lacks unchanged archived observation-only evidence")
+        archived = json.loads(source.read_text())
     data = archived.get("data") or {}
     second = data.get("utm_verification_2") or {}
     evidence = (second.get("record") or {}).get("evidence") or {}
-    from utils.agent_artifact_archive import _public
     # Runtime archives redact evidence tokens. Compare the same public projection;
     # run_clear_vision still fetches the exact live replay session before capture.
     comparison = _public(clear)
-    if retry_wait:
-        if previous_retry.get("source_sha256") != _hash(paths[-1]) or previous_retry.get("session_id") != clear.get("session_id"):
+    if retry_wait or expired_restore:
+        if previous_retry.get("source_sha256") != _hash(source) or previous_retry.get("session_id") != clear.get("session_id"):
             raise ValueError("Original clearance retry evidence changed")
         original = data.get("utm_clear_execution") or {}
         for key in ("state", "success", "failure_code", "pending_deadline_at"):
             comparison[key] = original.get(key)
+        for key in ("frame_wait_deadline_at", "frame_wait_last_failure", "visual_clearance_confirmed"):
+            if key not in comparison and key in original:
+                comparison[key] = original[key]
     missing_frame = (evidence.get("status") == "frame_unavailable"
-        and evidence.get("failure_code") in {"ROS_IMAGE_FRAME_UNAVAILABLE", "ROS_IMAGE_TIMEOUT"}
+        and evidence.get("failure_code") in {"ROS_IMAGE_FRAME_UNAVAILABLE", "ROS_IMAGE_TIMEOUT", "UTM_RUNTIME_NOT_RUNNING"}
         and evidence.get("clear_confirmed") is not True)
     unknown_review = (evidence.get("status") == "unknown" and evidence.get("registered") is False
         and evidence.get("clear_confirmed") is False
@@ -248,14 +276,16 @@ def prepare_clearance_review_retry(state, root):
     restored = state.model_copy(deep=True)
     restored.stage = Stage.ERROR
     retry = restored.run_metadata["utm_clear_execution"]
-    retry.update(state="waiting", success=None, pending_deadline_at=time.time() + timeout)
+    # Restoration is not execution. run_clear_vision starts its existing camera
+    # budget only after revalidating the ended replay when Resume actually runs.
+    retry.update(state="waiting", success=None, pending_deadline_at=None)
     retry.pop("frame_wait_deadline_at", None)
     retry.pop("frame_wait_last_failure", None)
     retry.pop("failure_code", None)
     retry.pop("visual_clearance_confirmed", None)
     restored.run_metadata["utm_clear_next_stage"] = "vision"
     restored.run_metadata["clearance_review_recovery"] = {
-        "source_result": str(paths[-1]), "source_sha256": _hash(paths[-1]),
+        "source_result": str(source), "source_sha256": _hash(source),
         "session_id": clear["session_id"], "requested_at": time.time(),
         "previous_deadline_at": clear.get("pending_deadline_at"), "actuation_performed": False}
     return restored
@@ -514,8 +544,28 @@ def restore_checkpoint(controller, run_id):
         assert_idle(controller)
         reload_sources({'app.equipment_entry_resume': Path(equipment_entry_resume.__file__)})
         return equipment_entry_resume.prepare_stopped(controller)
-    if controller._state.run_id == run_id and controller._state.stage.value == "complete" and (
-        controller._state.run_metadata.get("guardian") or {}).get("reason") == "Guardian graph-wide gate requested safe stop: SYSTEM_SAFE_STOP_RECOMMENDED":
+    if ((not controller._state.run_metadata.get("clearance_review_recovery")
+            or (controller._state.run_metadata.get("guardian_review_retry") or {}).get("status") in {"finished", "ready"}
+            or (controller._state.run_metadata.get("utm_clear_execution") or {}).get("success") is True)
+            and controller._state.run_id == run_id and controller._state.stage.value == "complete" and (
+                (controller._state.run_metadata.get("guardian") or {}).get("reason") == "Guardian graph-wide gate requested safe stop: SYSTEM_SAFE_STOP_RECOMMENDED"
+                or (controller._state.run_metadata.get("guardian_review_retry") or {}).get("status") in {"finished", "ready"})):
+        # Publish pure evidence reconciliation at this inactive boundary; no
+        # hardware workflow classes or controller state are replaced.
+        import importlib
+        import subprocess
+        import sys
+        from app.safe_hot_reload import assert_idle
+        assert_idle(controller)
+        names = ("policies.guardian_gate", "policies.guardian_gate_lifecycle", "app.guardian_review_recovery")
+        sources = {name: Path(importlib.import_module(name).__file__) for name in names}
+        digests = {name: _hash(path) for name, path in sources.items()}
+        checked = subprocess.run([sys.executable, "-m", "pytest", "tests/unit/test_guardian_image_recheck.py",
+            "tests/unit/test_guardian_gate.py", "tests/unit/test_guardian_retry_completion.py", "-q"],
+            cwd=Path(__file__).resolve().parents[1], capture_output=True, timeout=30)
+        if checked.returncode or any(_hash(path) != digests[name] for name, path in sources.items()):
+            raise ValueError("Guardian evidence reconciliation validation failed")
+        reload_sources(sources)
         from app.guardian_review_recovery import prepare
         return prepare(controller)
     from logging_system.logger_factory import build_logger_bundle

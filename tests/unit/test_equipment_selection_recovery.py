@@ -23,6 +23,22 @@ def test_only_never_executed_selection_is_recoverable():
     validate_selection_boundary(state,record)
 
 
+@pytest.mark.parametrize('fault', [None, 'executed', 'scope_changed', 'wrong_phase'])
+def test_json_failure_recovery_requires_proven_unexecuted_selection(fault):
+    state, record = fixture()
+    decision = {'phase': 'select', 'status': 'review_required', 'request': None,
+                'llm_used': True, 'scope_valid': True,
+                'error': 'JSONDecodeError: decision could not be validated'}
+    record['workflow_result']['data']['equipment_decisions'] = [decision]
+    if fault == 'executed': record['events'].append({'lifecycle': 'EXECUTING'})
+    if fault == 'scope_changed': decision['scope_valid'] = False
+    if fault == 'wrong_phase': decision['phase'] = 'terminal_review'
+    if fault is None:
+        validate_selection_boundary(state, record)
+    else:
+        with pytest.raises(ValueError): validate_selection_boundary(state, record)
+
+
 @pytest.mark.parametrize('mutation', [None, 'model_called', 'scope_changed', 'executed', 'other_error'])
 def test_pre_model_type_error_requires_no_execution_and_unchanged_scope(mutation):
     state, record = fixture()

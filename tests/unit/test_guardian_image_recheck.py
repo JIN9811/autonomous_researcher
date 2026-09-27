@@ -29,6 +29,81 @@ def test_successful_same_check_resolves_image_hold_without_erasing_audit():
     assert state.run_metadata["incident_records"][0]["status"] == "resolved"
 
 
+@pytest.mark.parametrize("message,path", [
+    ("UTM Vision runtime is not running; ROS frame capture was skipped.", "payload.observation.utm_clear_verification"),
+    ("UTM_CLEAR_PENDING_TIMEOUT", "payload"),
+])
+def test_legacy_clearance_camera_holds_require_completed_same_work_proof(message, path):
+    gates = records()
+    gates[0]["alarms"] = [{"reason_code": "UTM_MACRO_MISMATCH", "message": message, "source_path": path}]
+    attempt = {"work_id": "work", "specimen_id": "specimen", "task_id": "utm_clearance"}
+    for gate in gates:
+        gate["audit_log"]["agent_attempt"] = deepcopy(attempt)
+    resolve_image_rechecks(gates, [])
+    assert "resolved_by" not in gates[0]["audit_log"]
+    gates[1]["audit_log"]["clearance_completion"] = {
+        "run_id": "run", "loop_id": 5, "specimen_id": "specimen", "session_id": "clear",
+        "verified": True}
+    for changed in ("other_work", "other_specimen", "real_hazard"):
+        negative = deepcopy(gates)
+        if changed == "other_work": negative[1]["audit_log"]["agent_attempt"]["work_id"] = "other"
+        elif changed == "other_specimen": negative[1]["audit_log"]["clearance_completion"]["specimen_id"] = "other"
+        else: negative[0]["alarms"].append({"reason_code": "UTM_MACRO_MISMATCH", "message": "unsafe motion", "source_path": "payload"})
+        resolve_image_rechecks(negative, [])
+        assert "resolved_by" not in negative[0]["audit_log"]
+    resolve_image_rechecks(gates, [])
+    assert gates[0]["audit_log"]["resolved_by"] == "passed"
+
+
+def test_clearance_completion_audit_requires_fresh_image_and_both_owner_reviews():
+    from policies.guardian_gate import _clearance_completion_evidence
+    state = OrchestratorState(run_id="run", experiment_id="exp", current_experiment_spec={"specimen_id": "s"})
+    scope = {"run_id": "run", "loop_id": 0, "specimen_id": "s", "session_id": "clear"}
+    accepted = {"status": "accepted", "scope_valid": True}
+    payload = {"utm_clear_execution": {**scope, "state": "done", "success": True,
+        "replay_execution_verified": True, "replay_completed_at": 100,
+        "replay_evidence": {"ok": True, "follower_closed": True, "frames_sent": 10, "session_id": "clear"},
+        "manipulation_result_decision": accepted},
+        "utm_verification_2": {**scope, "record": {"confirmed": True, "status": "clear",
+        "evidence": {"clear_confirmed": True, "detected": False, "frame_timestamp": 101,
+                     "vision_decision": accepted}}}}
+    assert _clearance_completion_evidence(payload, state, "vision", "post")["verified"] is True
+    for mutation in ("old_frame", "unfinished", "rejected", "other_scope"):
+        changed = deepcopy(payload)
+        if mutation == "old_frame": changed["utm_verification_2"]["record"]["evidence"]["frame_timestamp"] = 99
+        elif mutation == "unfinished": changed["utm_clear_execution"]["success"] = None
+        elif mutation == "rejected": changed["utm_clear_execution"]["manipulation_result_decision"]["status"] = "rejected"
+        else: changed["utm_verification_2"]["specimen_id"] = "other"
+        assert not _clearance_completion_evidence(changed, state, "vision", "post")
+
+
+@pytest.mark.parametrize("premature_cap", [False, True])
+def test_completed_clearance_routes_to_guardian_reconciliation_not_recapture(monkeypatch, premature_cap):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from app import run_recovery, safe_hot_reload, guardian_review_recovery
+    from orchestrator.state import Stage
+    import subprocess
+    state = OrchestratorState(run_id="run", experiment_id="exp", stage=Stage.COMPLETE,
+        run_metadata={"clearance_review_recovery": {"session_id": "clear"},
+            "utm_clear_execution": {"success": True}, "guardian": {
+                "reason": "Guardian graph-wide gate requested safe stop: SYSTEM_SAFE_STOP_RECOMMENDED"}})
+    controller = SimpleNamespace(_state=state)
+    if premature_cap:
+        state.run_metadata.pop("utm_clear_execution")
+        state.run_metadata["guardian_review_retry"] = {"status": "finished"}
+        state.run_metadata["guardian"]["reason"] = "Test run reached planned 15-cycle loop cap."
+    idle = Mock()
+    monkeypatch.setattr(safe_hot_reload, "assert_idle", idle)
+    monkeypatch.setattr(safe_hot_reload, "reload_sources", Mock())
+    monkeypatch.setattr(subprocess, "run", Mock(return_value=SimpleNamespace(returncode=0)))
+    prepare = Mock(return_value={"status": "guardian_recheck_ready"})
+    monkeypatch.setattr(guardian_review_recovery, "prepare", prepare)
+    assert run_recovery.restore_checkpoint(controller, "run")["status"] == "guardian_recheck_ready"
+    prepare.assert_called_once_with(controller)
+    idle.assert_called_once_with(controller)
+
+
 @pytest.mark.parametrize("patch", [
     {"run_id": "other"}, {"experiment_id": "other"}, {"loop_id": 6},
     {"audit_log": {"check_scope": "utm_placement"}}, {"phase": "pre"}, {"tool": "different"},
@@ -94,9 +169,26 @@ async def test_recovery_resumes_guardian_not_completed_physical_stages():
     kwargs = controller._run_planning_cycle_series.call_args.kwargs
     assert kwargs["start_cycle"] == 6
     assert kwargs["resume_tail_stage"] == Stage.GUARDIAN
+    assert state.loop_count == 5  # Guardian sees the same zero-based cycle, not the next one.
     state.emergency_stop_requested = True
     with pytest.raises(ValueError, match="safety controls"):
         await resume_review(controller)
+
+
+def test_guardian_recheck_premature_cap_requires_matching_finished_recovery():
+    from types import SimpleNamespace
+    from app.guardian_review_recovery import validate_boundary
+    from orchestrator.state import Stage
+    state = OrchestratorState(run_id="run", experiment_id="exp", stage=Stage.COMPLETE, loop_count=14,
+        current_experiment_spec={"specimen_id": "s14"}, run_metadata={
+            "guardian": {"reason": "Test run reached planned 15-cycle loop cap."},
+            "_planning_resume_context": {"cycle_index": 14, "total_cycles": 15, "current_spec": {"specimen_id": "s14"}},
+            "guardian_review_retry": {"run_id": "run", "experiment_id": "exp", "cycle": 14, "status": "finished"}})
+    controller = SimpleNamespace(_state=state, snapshot=lambda: {"is_running": False},
+        _planning_handoff_active=lambda: False, _active_safety_sources=lambda: [])
+    assert validate_boundary(controller) == ("run", "exp", 14)
+    state.run_metadata["guardian_review_retry"]["cycle"] = 13
+    with pytest.raises(ValueError): validate_boundary(controller)
 
 
 def test_legacy_projection_reconciliation_requires_unique_matching_audit(tmp_path):
@@ -117,3 +209,19 @@ def test_legacy_projection_reconciliation_requires_unique_matching_audit(tmp_pat
     path.write_text("")
     with pytest.raises(ValueError, match="lacks a proven"):
         reconciled_gates(state, path)
+
+
+def test_log_reconstruction_does_not_undo_already_audited_resolution(tmp_path):
+    import json
+    from app.guardian_review_recovery import reconciled_gates
+    gates = records()
+    historical = deepcopy(gates[0])
+    historical.update(gate_id="equipment-old", stage="equipment")
+    persisted = deepcopy(historical)
+    persisted["audit_log"].update(lifecycle="resolved", resolved_by="equipment-revalidated", resolution="archived_completion_verified")
+    state = OrchestratorState(run_id="run", experiment_id="exp",
+        run_metadata={"guardian_gates": [persisted, *gates]})
+    path = tmp_path / "structured.jsonl"
+    path.write_text("\n".join(json.dumps({"payload": {"guardian_gate": gate}}) for gate in [historical, *gates]))
+    repaired, _ = reconciled_gates(state, path)
+    assert repaired[0]["audit_log"]["resolved_by"] == "equipment-revalidated"

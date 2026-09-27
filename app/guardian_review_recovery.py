@@ -19,12 +19,18 @@ def validate_boundary(controller):
     ):
         raise ValueError("Guardian recovery cannot release safety controls")
     guardian = state.run_metadata.get("guardian") or {}
-    if guardian.get("reason") != "Guardian graph-wide gate requested safe stop: SYSTEM_SAFE_STOP_RECOMMENDED":
-        raise ValueError("Not a terminal graph-gate review")
     context = state.run_metadata.get("_planning_resume_context") or {}
     cycle = int(context.get("cycle_index") or 0)
     if not cycle or cycle != state.loop_count or cycle >= int(context.get("total_cycles") or 0):
         raise ValueError("No unfinished cycle-series continuation")
+    retry = state.run_metadata.get("guardian_review_retry") or {}
+    premature_cap = (guardian.get("reason") == f"Test run reached planned {context.get('total_cycles')}-cycle loop cap."
+        and retry.get("status") in {"finished", "ready"}
+        and (retry.get("run_id"), retry.get("experiment_id"), retry.get("cycle")) == (state.run_id, state.experiment_id, cycle)
+        and state.current_experiment_spec.get("specimen_id")
+        and (context.get("current_spec") or {}).get("specimen_id") == state.current_experiment_spec["specimen_id"])
+    if guardian.get("reason") != "Guardian graph-wide gate requested safe stop: SYSTEM_SAFE_STOP_RECOMMENDED" and not premature_cap:
+        raise ValueError("Not a terminal graph-gate review")
     return state.run_id, state.experiment_id, cycle
 
 
@@ -41,6 +47,14 @@ def reconciled_gates(state, log_path):
             gate = deepcopy(gate)
             if payload.get("utm_verification_2") or payload.get("utm_clear_execution"):
                 gate.setdefault("audit_log", {})["check_scope"] = "utm_clearance"
+                from policies.guardian_gate import _clearance_completion_evidence
+                # Reconstruct only from the original scoped runtime result,
+                # never from a currently empty camera or an allow gate alone.
+                if type(gate.get("loop_id")) is int and gate.get("experiment_id") == state.experiment_id:
+                    scoped = state.model_copy(update={"loop_count": gate["loop_id"]})
+                    proof = _clearance_completion_evidence(payload, scoped, gate.get("stage"), gate.get("phase"))
+                    if proof:
+                        gate["audit_log"]["clearance_completion"] = proof
             elif payload.get("utm_verification_1"):
                 gate.setdefault("audit_log", {})["check_scope"] = "utm_placement"
             old = audit.get(gate["gate_id"], {})
@@ -52,7 +66,16 @@ def reconciled_gates(state, log_path):
             ("stage", "phase", "decision", "reason_code", "risk_score", "created_at")
         ) and (not gate.get("gate_id") or gate["gate_id"] == full["gate_id"])]
         if len(candidates) == 1:
-            gates[index] = candidates[0]
+            full = candidates[0]
+            persisted = gate.get("audit_log") or {}
+            if (persisted.get("lifecycle") == "resolved" and persisted.get("resolved_by")
+                    and all(gate.get(key) == full.get(key) for key in
+                        ("gate_id", "run_id", "experiment_id", "loop_id", "stage", "phase"))):
+                # A creation-time log entry predates later verified resolution.
+                # Rebuilding missing projection fields must not reopen that hold.
+                full.setdefault("audit_log", {}).update({key: value for key, value in persisted.items()
+                    if key == "lifecycle" or key.startswith(("resolved_", "resolution"))})
+            gates[index] = full
     incidents = deepcopy(state.run_metadata.get("incident_records") or [])
     resolve_image_rechecks(gates, incidents)
     blocked = [g for g in gates if g.get("decision") in {"block", "safe_stop"}]
@@ -120,6 +143,9 @@ async def resume_review(controller):
             # subsequent cycles must use the ordinary runtime controls.
             marker["status"] = "consumed"
             try:
+                # Finalization records the completed count; owner checks use
+                # the zero-based current cycle. A review is not a new cycle.
+                controller._state.loop_count = boundary[2] - 1
                 return await controller._run_planning_cycle_series(
                     first_spec=controller._state.current_experiment_spec,
                     design_constraints=context.get("design_constraints") or {},

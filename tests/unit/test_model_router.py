@@ -62,6 +62,21 @@ class _OrderBackend(BaseLLMBackend):
         return LLMResponse(text=f"ok:{self.name}:{model}", model=model, raw={})
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('task,expected', [('equipment_workflow_decision', 'json_object'), ('guardian_reasoning', None)])
+async def test_equipment_request_requires_json_on_backend_boundary(task, expected):
+    class MetadataBackend(_OrderBackend):
+        async def complete(self, **kwargs):
+            return LLMResponse(text='{}', model=kwargs['model'], raw={'metadata': kwargs['metadata']})
+    backend = MetadataBackend('fixture', [])
+    router = ModelRouter({'models': {'owner': {'primary': 'fixture'}}, 'task_routes': {task: 'owner'}})
+    ctx = AgentContext(model_router=router, primary_backend=backend, fallback_backend=backend,
+        rag=HybridRAG(local_index=None, web_retriever=None), experiment_db=ExperimentDB(),
+        failure_memory=FailureMemory(), tools=ToolRegistry())
+    response = await ctx.complete(task, 'Return JSON')
+    assert response.raw['metadata'].get('response_format') == expected
+
+
 class _ModelBehaviorBackend(BaseLLMBackend):
     def __init__(self, name: str, calls: list[tuple[str, str]], behavior: dict[str, object]) -> None:
         self.name = name
