@@ -22,8 +22,8 @@ source_of_truth:
   - orchestrator/langgraph_runtime.py
   - web/templates/knowledge.html
   - web/static/knowledge.js
-last_verified: 2026-08-09
-verified_against: 4329853
+last_verified: 2026-09-28
+verified_against: e70daa1
 related_docs:
   - docs/runtime/langgraph_runtime.md
   - docs/runtime/closed_loop_and_pages_reference.md
@@ -35,11 +35,12 @@ supersedes: []
 
 ## Summary
 
-This Reference records the current routes, executable graph, module/runtime
-contracts, workspace surfaces, and selected source-size checks. The Knowledge
-relation reconciliation layer is verified against implementation commit
-`4329853`. Counts are observations used to detect documentation drift,
-not stability guarantees.
+This Reference records the main-branch implementation at `e70daa1`, inspected
+on 2026-09-28. Current inventory and contracts are distinguished from dated
+browser/model/device checks below. Those older checks retain their original
+scope; they are not fresh deployment health checks. See the
+[documentation reconciliation](../maintenance/code_documentation_audit_20260928.md)
+for current domain references and the separate, not-yet-deployed RPT worktree.
 
 ## Scope
 
@@ -57,7 +58,15 @@ are available in every environment.
 - `web/templates/` and `web/static/`
 - `knowledge/` and `scripts/knowledge_graph_cli.py`
 
-## Knowledge Graph Runtime (2026-08-09)
+## Knowledge Graph Runtime (retained 2026-08-09 subsystem record)
+
+The current Knowledge owner uses reviewed Wiki context, scoped Markdown notes,
+typed memory and explicit publication contracts. Neo4j/reconciliation is an
+optional subsystem, not a prerequisite for each closed-loop Knowledge call.
+Use [Wiki and memory](../knowledge/wiki_memory.md) and
+[Knowledge Agent](../agents/knowledge_agent.md) for the current owner contract.
+The following dated subsystem observations do not claim a graph service is
+currently running or that every cycle uses it.
 
 - ATR Core Ontology `atr-core-1.0.0` is defined under `knowledge/ontology/` with class, relation domain/range, event-family, and lifecycle validation.
 - `knowledge_event.v1` records use deterministic event/idempotency identifiers.
@@ -120,23 +129,21 @@ inspecting FastAPI `APIRoute` objects. A raw decorator grep can report a smaller
 number because a few routes use multiline decorators or are registered by
 FastAPI outside the simple `@app.<method>("...")` pattern.
 
-The current FastAPI `APIRoute` scan finds:
+The 2026-09-28 FastAPI `APIRoute` scan finds (controller construction stubbed;
+no ASGI startup, model, device or live controller invocation):
 
 ```text
-operator page paths: 16
-favicon route entries: 2
-API/artifact APIRoute entries: 328
-total FastAPI APIRoute entries in app/main.py: 346
-total app.routes entries including docs/openapi/static: 353
+API/page/artifact APIRoute entries: 420
+total app.routes entries including docs/openapi/static: 430
 ```
 
 Machine-checked snapshot labels used by `docs/document_manifest.yaml`:
 
 ```text
-FastAPI APIRoute count: 346
-Total app.routes count: 353
+FastAPI APIRoute count: 420
+Total app.routes count: 430
 Graph nodes: 19
-Graph edges: 68
+Graph edges: 73
 stage_dispatch edges: 12
 ```
 
@@ -145,29 +152,21 @@ are the operational API/page endpoints; the extra non-APIRoute entries are
 FastAPI's OpenAPI/docs routes plus the mounted static route. New routes may be
 added, but documentation should keep the same grouping:
 
-Current endpoint group count from the same scan:
+Selected current API-prefix counts from the same scan:
 
 ```text
-bo: 4
-bridges: 2
-cae: 3
-equipment_windows: 25
-events_runs: 30
-evolution: 14
-favicon: 2
-graphs: 16
-knowledge: 20
-lerobot: 87
-modules: 15
-operator_pages: 15
-other_api: 43
-planning: 5
-printer: 27
-printer_artifacts: 3
-runtime: 21
+equipment: 84
+knowledge: 46
+lerobot: 96
+modules: 17
+planning: 8
+printer: 29
+runtime: 23
+graphs: 14
 ```
 
-Current TestClient sanity checks from the same source tree report:
+Historical TestClient observations (not repeated by the 2026-09-28 static
+inventory; saved profiles and runtime responses may differ):
 
 ```text
 GET /api/runtime/agent-manifests -> ok=true, count=11, graph=atr_closed_loop@0.2.0
@@ -200,8 +199,7 @@ path. Renderer profile behavior is covered by targeted module-template tests.
 artifact, GPU, documentation-baseline, and compatibility endpoints that do not
 fit the primary workspace prefixes.
 
-Current source-size sanity check for the files most likely to drift with this
-snapshot:
+Historical source-size observations (not current counts and not API contracts):
 
 ```text
 app/main.py: 15977 lines
@@ -1300,16 +1298,16 @@ directory proven to have been created by that import.
 - BO Workspace can still run a full synthetic budget for random/grid/BO comparison.
 - BoTorch failures are typed and visible. No automatic lightweight backend substitution is allowed.
 - Live GUI, BO Workspace, and PNG/SVG/CSV artifacts consume the same `bo_visualization.v1` posterior arrays.
-- The visible BO posterior/EI figure is output-only: it shows score, uncertainty,
-  measured scores, EI, and an anonymous normalized search coordinate. The two
-  model inputs remain part of fitting and provenance but are not rendered as
-  axes, strata, labels, facets, or tooltips in this figure; input-space display
-  belongs to the separate LHS card.
+- The current posterior uses the full two-variable domain: posterior mean,
+  standard deviation and expected improvement are available as a 2D triptych
+  and stacked 3D surfaces. Observations and the next candidate retain physical
+  cell-size/wall-thickness coordinates. The old anonymous 1D display is not the
+  current two-variable presentation. See [BO visualization](../knowledge/wiki/bo-visualization.md).
 
 ## Two-Variable Gyroid SEA Optimization (2026-08-11)
 
 - As of 2026-09-16, the canonical active space is `cell_size_mm x wall_thickness_mm`.
-  Test defaults are continuous `[5,10]` mm and `[0.8,1.6]` mm. Live bounds are
+  Test defaults are continuous `[5,10]` mm and `[0.6,1.2]` mm. Live bounds are
   agreed through the orchestrator dialogue. Density is derived, not optimized.
   The periodic field is center-cropped without snapping decimal cell sizes.
   The generated mesh retains an independent minimum-wall check of 0.4 mm.
@@ -1326,8 +1324,8 @@ directory proven to have been created by that import.
   as if they selected the point.
 - After eight valid measured observations, BoTorch fits `SingleTaskGP` with an
   ARD Matérn 5/2 covariance and Gaussian observation noise, then maximizes
-  `LogExpectedImprovement`. Discrete feasible cell sizes are enumerated as
-  fixed features while relative density is optimized continuously.
+  `LogExpectedImprovement`. Both cell size and wall thickness are continuous;
+  `optimize_acqf_mixed` remains available for explicitly mixed generic spaces.
 - The authoritative objective is measured
   `specific_energy_absorption_J_per_g` in J/g. Composite proxy scores,
   rejected observations, and infeasible observations do not enter the GP.
@@ -1343,12 +1341,12 @@ directory proven to have been created by that import.
   LHS from the remaining count.
 - Live and BO Workspace cards expose the same two-variable design-space,
   initial-design, kernel, noise, acquisition, normalization, and objective
-  metadata. The selected-parameter graph is a one-dimensional marginal view of
-  the two-dimensional model, not a separate one-dimensional optimizer.
+  metadata. The 2D/3D views render the same GP; neither is a separately fitted
+  one-dimensional optimizer.
 
 ### Wall/cell geometry contract (2026-09-16)
 
-The test-mode domain is wall thickness **0.8–1.6 mm** and cell size
+The test-mode default domain is wall thickness **0.6–1.2 mm** and cell size
 **5–10 mm**. Live experiments collect both continuous bounds through the
 research dialogue; suggested defaults are not user consent. The same bounds
 feed Experimental Setup, the Orchestrator contract, DSN, LHS and BO.

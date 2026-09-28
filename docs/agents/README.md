@@ -39,6 +39,11 @@ runtime modes, safety gates, error recovery, operator surfaces, and current
 verification boundary.
 
 The individual agent References retain their declared verification baselines.
+The [2026-09-28 code/documentation audit](../maintenance/code_documentation_audit_20260928.md)
+adds current main-code checks and the retained fifteen-iteration campaign;
+earlier test-local "no hardware run" statements do not describe the entire
+project's current evidence inventory. RPT is implemented in a separate
+development worktree and is not an additional stage in this main-loop inventory.
 The shared [Loop Artifact Archiving](../runtime/loop_artifact_archiving.md)
 Reference describes the newer run/loop/agent/invocation storage contract,
 including failed/cancelled calls, file snapshots, and saved-loop GUI access.

@@ -45,7 +45,7 @@ supersedes: []
 | LLM decision layer | Implemented / locally verified |
 | Physical effect | None |
 | Primary handoff | `design_candidate.v1` → Specimen |
-| Live hardware validation | Not applicable to Design / downstream pending |
+| Live hardware validation | Design is software-only; fifteen matched Design/Specimen/Analysis records are retained in the [campaign audit](../paper/evidence/2026-09-28-campaign-archive-audit.md), not independent fabrication certification |
 | Known gap | Candidate-matched performance prediction unavailable |
 
 ### Module Ownership and Layout
@@ -448,7 +448,7 @@ decision evidence for later knowledge work.
 | Module frontend extraction | `tests/js/design_live_report.test.cjs` and isolated browser fixture | Existing markup/values preserved; no operating Live GUI server restarted |
 | Continuous BO domain and exact coordinates (2026-09-10) | BO, Design, parameter-space, BoTorch and controller regression tests | Custom bounds, legacy compatibility and `7.13789` / `0.32123456` preserved through geometry arguments; no device execution |
 | Actual DesignAgent API / registered vLLM 31B | [Agent verification](../paper/evidence/2026-09-07-design-gemma31b-virtual-api-verification.md) | API 6.34 s / 31B 12.11 s: accepted local decision and matching handoff; 31B used registered model fallback; E4B-primary and closed-loop acceptance pending |
-| Physical closed-loop validation | Not performed for this change | Hardware validation pending; stable-tag evidence remains historical |
+| Retained campaign linkage (2026-09-28) | [Fifteen-iteration audit](../paper/evidence/2026-09-28-campaign-archive-audit.md) | 15/15 Design-result identities and Design/Specimen STL hashes match; no new device action or independent physical certification |
 
 The [implementation verification record](../oldversion/superpowers/plans/2026-09-07-design-decision-layer.md#verification)
 records a successful actual local-model accept/tool-dispatch smoke test, focused

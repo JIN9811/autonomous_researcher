@@ -1,5 +1,5 @@
 ---
-{"topic_id":"specimen-role","owner":"specimen_agent","source_refs":["docs/agents/specimen_agent.md","docs/runtime/test_mode.md"],"source_revision":{"docs/agents/specimen_agent.md":"c8e58f4b23b7cf500e927ab6dd0a41714e1e542d4d6897327ff2efc703b9c230","docs/runtime/test_mode.md":"e326a6446165d580f9ab9c168811cfcb47126aba570706ba55d463f67dbccedb"},"verified_at":"2026-09-15T00:00:00+00:00","applicability":"Public AX4LAB reference: specimen-role","status":"reviewed"}
+{"topic_id":"specimen-role","owner":"specimen_agent","source_refs":["docs/agents/specimen_agent.md","docs/runtime/test_mode.md"],"source_revision":{"docs/agents/specimen_agent.md":"1f5173dbbe4727f66bcd4f2b0707e7811c9f1a6b275f2de612cfd14e27cce4f7","docs/runtime/test_mode.md":"e326a6446165d580f9ab9c168811cfcb47126aba570706ba55d463f67dbccedb"},"verified_at":"2026-09-28T00:00:00+09:00","applicability":"Public AX4LAB reference: specimen-role","status":"reviewed"}
 ---
 
 # Specimen Making Agent — Fabrication

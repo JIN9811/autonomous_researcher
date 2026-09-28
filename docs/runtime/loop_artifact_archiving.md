@@ -38,6 +38,11 @@ supersedes: []
 
 ## Summary
 
+The [2026-09-28 retained-campaign audit](../paper/evidence/2026-09-28-campaign-archive-audit.md)
+checks fifteen completed observation sets and all 485 invocation statuses.
+This is later artifact-retention evidence, separate from the original no-device
+implementation tests. It does not certify every physical action or erase failed attempts.
+
 ATR stores execution evidence beneath the existing run directory, partitioned
 by loop, agent, and invocation. A later loop or retry does not overwrite the
 earlier invocation's input, result, or copied file bytes. This is an observation

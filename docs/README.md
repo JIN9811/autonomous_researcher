@@ -35,6 +35,7 @@ supersedes: []
 |---|---|
 | Research purpose and system contribution | [Paper overview](paper/README.md) |
 | Demonstrated closed loop | [Results and evidence](paper/06_evaluation_and_results.md) |
+| Current code/documentation reconciliation | [2026-09-28 audit](maintenance/code_documentation_audit_20260928.md) |
 | Agent roles, decisions, and tools | [Ten agent references](agents/README.md) |
 | Shared Wiki, private memory and publication | [Knowledge contracts](knowledge/wiki_memory.md) · [Publication checks](knowledge/publication.md) |
 | AX4LAB concepts, agent roles and practical reading guide | [AX4LAB Wiki](knowledge/wiki/platform-overview.md) |
@@ -64,6 +65,7 @@ Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 
 
 ## Evidence Basis
 
+- 15사이클 보존 산출물 점검: [2026-09-28 campaign archive audit](paper/evidence/2026-09-28-campaign-archive-audit.md) — STL·곡선·물성·BO 연결과 해시 확인; 새 장비 실험 또는 독립 제조 인증과 구분.
 - 감독하 폐루프 1회 실증: [2026-09-07 report](paper/evidence/2026-09-07-supervised-closed-loop.md) — ejection-only 프린터 경로, 실장비 UTM, Analysis, BO 관리 LHS, 다음 Design 연결; 재료 성능 검증과 구분.
 - 문서 유형과 권한: [standards/documentation_standard.md](standards/documentation_standard.md)
 - 이관 완료 집합: [document_manifest.yaml](document_manifest.yaml)
@@ -183,7 +185,8 @@ operator-facing follow-up 문구를 직접 제어하려면 payload 또는
 Module Management typed form은 handler/LLM/tool/prompt/safety/step 편집용이며,
 `supervisor_policy`의 required outputs, opinion/recommendation template,
 response-required status, concern rules, options도 typed editor에서 편집할 수
-있습니다. graph attach/save lifecycle 통합은 아직 후속 범위입니다.
+있습니다. 기존 graph attach/validate/dry-run/save-version 경로로 실행 구성을
+반영하며, Load/Unload만으로 실행 그래프가 바뀌지는 않습니다.
 
 LLM backend와 API key 상태는 Main GUI `Current Models` 영역과 아래 API가 같은 상태를 봅니다.
 
@@ -349,8 +352,9 @@ runtime Reference, Knowledge operations Guide입니다. 그 외 Markdown과 기�
 
 ## Index Verification
 
-2026-08-08에 커밋 `09bbe32`의 route/page 구조와 현재 repository path를
-대조했습니다. 이관 완료 문서는 다음 명령으로 검사합니다.
+2026-09-28에 메인 코드 `e70daa1`의 route/graph 수치와 현재 문서의 주요
+계약을 대조했습니다. 과거 실증의 날짜와 환경은 해당 Evidence에 유지합니다.
+이관 완료 문서는 다음 명령으로 검사합니다.
 
 ```bash
 .venv/bin/python scripts/validate_documentation.py

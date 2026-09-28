@@ -2,6 +2,14 @@ version: 1
 release_status: development
 verified_commit: 0b7627b
 claims:
+  - id: C-TRACE-CAMPAIGN-01
+    proposition: >-
+      Fifteen completed Analysis observation sets have identity-matched Design
+      and Specimen artifacts, canonical stress-strain curves, metrics and BO
+      records; this is retained-archive evidence, not independent fabrication certification.
+    research_questions: [RQ1, RQ2]
+    status: supported
+    evidence_ids: [E-INSPECT-CAMPAIGN-001]
   - id: C-SYS-LOOP-01
     proposition: >-
       One supervised mixed-mode iteration reached live UTM clearance,
@@ -57,6 +65,31 @@ claims:
     evidence_ids:
       - E-TEST-DOC-001
 evidence:
+  - id: E-INSPECT-CAMPAIGN-001
+    environment: inspection
+    verified_commit: "e70daa1 inspection; archived execution used a changing working tree"
+    command: >-
+      Read-only seven-step archive reconciliation protocol in
+      docs/paper/evidence/2026-09-28-campaign-archive-audit.md:
+      enumerate all attempt statuses, select completed owner results,
+      verify identities and copied-file SHA-256, compare curve rows/metrics,
+      check SEA energy-to-mass normalization and final BO behavior.
+      No model, device or runtime API was invoked.
+    inputs:
+      - utils/agent_artifact_archive.py
+      - agents/analysis/agent.py
+      - agents/bo/agent.py
+    outputs:
+      - path: docs/paper/evidence/2026-09-28-campaign-archive-audit.md
+        sha256: d38b292e00f497377c75cfd9108b5e64840bf13098bd2b0e9ab6f91aa387b8d1
+      - path: docs/paper/evidence/2026-09-28-campaign-archive-summary.json
+        sha256: bf1c396ab8326caacf07699fc697c57e82f7b1d379a035e87b58e17f4107030a
+    result: >-
+      Fifteen completed observation sets passed identity, STL hash, curve/metric
+      retention and recorded SEA normalization checks. There are 485 attempts:
+      471 completed, 13 failed, one cancelled. Iteration 15 emits a final report
+      without a next candidate. Raw data remain local; no first-attempt physical
+      success rate, fabrication certification or causal scientific benefit is inferred.
   - id: E-LIVE-LOOP-002
     environment: live
     verified_commit: "39958d8 at audit; executed process/working-tree revision not immutably fingerprinted"

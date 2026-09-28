@@ -200,7 +200,7 @@ evidence needed to explain that state. A run may end successfully, stop by
 policy, await review, or terminate with a diagnosable error; these outcomes
 must remain distinct.
 
-The [latest one-cycle demonstration](evidence/2026-09-07-latest-cycle-demonstration.md)
+The [earlier one-cycle demonstration](evidence/2026-09-07-latest-cycle-demonstration.md)
 records this continuation boundary: measured compression data passed through
 Analysis and BO-managed initialization into the next Design/Specimen stage.
 Its mixed-mode scope and non-blocking findings are recorded separately from
@@ -208,10 +208,11 @@ full-manufacturing, campaign-level, and scientific-validation claims.
 
 ## Limitations and Known Gaps
 
-This method description has not yet been validated as a complete live-hardware
-campaign across all stages. It does not quantify throughput, recovery time,
-operator burden, hazard coverage, or scientific improvement from the feedback
-loop.
+The [fifteen-iteration archive](evidence/2026-09-28-campaign-archive-audit.md)
+now records multi-cycle completion, matched geometry/measurement outputs and
+the final BO report. The audit is not independent certification of every
+physical action. It does not quantify recovery effectiveness, operator burden,
+hazard coverage or causal scientific improvement from the feedback loop.
 
 ## Verification
 

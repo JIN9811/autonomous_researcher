@@ -52,7 +52,7 @@ The High-layer intake contract distinguishes planning consent from execution app
 | LLM decision layer | `orchestrator_plan` selects only schema-validated, registered decision tools; code and owners validate every effect |
 | Physical effect | No direct device tool or bridge path; downstream routes remain subject to their owners, Guardian, approvals, and device gates |
 | Primary handoff | Existing planning/runtime boundary prepares an admitted handoff for the graph-selected domain owner |
-| Live hardware validation | None in this work; device actuation and operating-service changes were not performed |
+| Live hardware validation | No direct actuation; [later campaign records](../paper/evidence/2026-09-28-campaign-archive-audit.md) document multi-cycle coordination, while the cited admission tests remain non-actuating |
 | Verification | Corrected aggregate passed for 78 bounded cases per provider; see [verification evidence](../runtime/evidence/2026-09-12-orchestrator-dynamic-setup-verification.md) for capture/postprocessor epochs and limits |
 
 ## Overview and Responsibilities

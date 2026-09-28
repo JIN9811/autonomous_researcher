@@ -135,7 +135,7 @@ through declared schemas, policies, and evidence paths.
 | Priority | Contribution | RQ | Initial claim | Current evidence state |
 |---|---|---|---|---|
 | Primary | A declared, resumable multi-agent graph spanning the research loop | RQ1 | `C-SYS-ARCH-01` | `supported` by bounded repository inspection |
-| Primary | An evidence model separating inspection, tests, replay, simulation, browser, and live results | RQ2 | `C-TRACE-DOC-01` | `partially_supported`; documentation contracts are testable, full run lineage is not yet evaluated here |
+| Primary | An evidence model separating inspection, tests, replay, simulation, browser, and live results | RQ2 | `C-TRACE-DOC-01` | `partially_supported`; document contracts are tested and a separate fifteen-iteration archive audit checks artifact linkage, not independent physical identity |
 | Supporting mechanism | Guardian, dry-run, approval, stop, and error routes around consequential actions | RQ3 | `C-SAFE-LIVE-01` | `not_evaluated` for live effectiveness |
 | Secondary | Module, backend, bridge, graph, and workspace extension surfaces | RQ4 | `C-PLAT-EXT-01` | `supported` as an inspected architecture claim |
 
@@ -164,10 +164,11 @@ rather than requiring the thesis to be rewritten around overbroad claims.
 
 ## Limitations and Known Gaps
 
-The current paper package does not yet include a controlled baseline study,
-multi-run physical experiment series, user study, incident analysis, or
-statistical comparison. The contribution table reports only the evidence state
-available at publication-package construction time.
+The current paper package includes a retained fifteen-iteration campaign audit
+in addition to earlier one-cycle demonstrations. It does not include a controlled
+baseline, independent multi-campaign reliability study, user study or statistical
+superiority comparison. Recorded failed attempts remain visible rather than
+being erased by later completion; see [current results](06_evaluation_and_results.md).
 
 ## Verification
 

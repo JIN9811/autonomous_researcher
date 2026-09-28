@@ -1062,14 +1062,18 @@ Verified assumptions:
 - LeRobot provides teleoperation, recording, training, and rollout/inference workflows.
 - ROBOTIS OMX-AI is a leader/follower manipulation kit suitable as the first robot profile.
 
-Unverified until local installation/hardware test:
+Installation-specific checks (not a claim that the LeRobot integration remains unimplemented):
 
-- Exact installed LeRobot CLI entrypoints and flags in the target environment.
-- Exact ROBOTIS Physical AI Tools local command behavior.
-- Real USB port names.
-- Real camera topic/device names.
-- Real ROS 2 node names and process lifecycle on this machine.
-- Safe live payload limits for the actual hardware setup.
+- Current command construction, recording, rollout, replay and optional linear
+  interpolation are implemented in the [LeRobot bridge](../device_bridges/lerobot_bridge.md).
+- Saved profile ports, camera identities, installed CLI versions and ROS process
+  health must be checked on the target installation; old machine-specific values
+  are not universal defaults.
+- The [later campaign archive](../paper/evidence/2026-09-28-campaign-archive-audit.md)
+  retains Manipulation attempts. This is not payload-limit certification or a
+  cross-device safety study.
+- The dated Pi0.5 update below records its original settings; current saved
+  policy/RTC/interpolation settings take precedence for a new invocation.
 
 ## 22. Do Not Do
 

@@ -1,0 +1,474 @@
+{
+  "audit_date": "2026-09-28",
+  "audit_environment": "inspection",
+  "source": "Locally retained 15-cycle campaign; raw archive not publicly bundled",
+  "execution_revision": "Working-tree execution with recoveries; no single clean-commit reproducibility claim",
+  "attempt_status_counts": {
+    "analysis_agent": {
+      "completed": 15
+    },
+    "bo_agent": {
+      "completed": 15,
+      "failed": 3
+    },
+    "design_agent": {
+      "completed": 15
+    },
+    "equipment_agent": {
+      "completed": 15,
+      "failed": 2
+    },
+    "guardian_agent": {
+      "completed": 28
+    },
+    "knowledge_agent": {
+      "completed": 15,
+      "failed": 2
+    },
+    "manipulation_agent": {
+      "completed": 30,
+      "failed": 1
+    },
+    "orchestrator_agent": {
+      "completed": 142,
+      "failed": 2,
+      "cancelled": 1
+    },
+    "specimen_agent": {
+      "completed": 15
+    },
+    "vision_agent": {
+      "completed": 181,
+      "failed": 3
+    }
+  },
+  "attempt_count": 485,
+  "iterations": [
+    {
+      "iteration": 1,
+      "cell_size_mm": 8.687452266697667,
+      "wall_thickness_mm": 0.7051393099515212,
+      "mass_g": 8.88,
+      "mass_source": "slicer",
+      "sea_J_per_g": 3.141575165,
+      "curve_rows": 48005,
+      "artifacts_sha256": {
+        "generated_stl": "41091e5c931a14cad14e949d845e3cc05f4f76bb2abfcd78705d23ddf4341f10",
+        "canonical_curve": "a556da5e112133aa6f55f46ed4df26e4fa96acd4f661fbc462cf8c448e8b384d",
+        "metrics": "411c64e7aa4d392d04ad557a90a60c453e98346f8d9716451cec03d8186c978f",
+        "design_result": "3ce362da53f7e35b19b263bfc0226618309b69c88983921b73f23818c74282f6",
+        "specimen_result": "166a3ef3710f083a361506bd2afea014a01315a7c9ee9b61e31d4b7e540b4dc2",
+        "analysis_result": "32f9cee0e96b058cf568b644bd094131a342e3ae0434478d090c796c0a12ec7e",
+        "bo_result": "646160e007bf92cd3876d531d4254990af6e2b238508598443d727386f509e97"
+      },
+      "bo_phase": "initial_design",
+      "bo_decision": "accepted",
+      "next_candidate_present": true,
+      "curve_quality": {
+        "ok": true,
+        "point_count": 48005,
+        "monotonic_displacement_ratio": 1,
+        "warnings": []
+      }
+    },
+    {
+      "iteration": 2,
+      "cell_size_mm": 7.612157154877403,
+      "wall_thickness_mm": 0.8387396405004705,
+      "mass_g": 12.18,
+      "mass_source": "slicer",
+      "sea_J_per_g": 4.034863328,
+      "curve_rows": 48005,
+      "artifacts_sha256": {
+        "generated_stl": "a763a9e035b0939cca249f786ad243018bc530752be89edba9a9eea0b0da0158",
+        "canonical_curve": "b456c7c738d25d464fd8cb0d22d401ef849e580b780e63c79c48e1cf2f4523bf",
+        "metrics": "d96b592641fd5040a4c4ca2d526020cbba127a78cae5141e9c96589cfd72386a",
+        "design_result": "53cd6d114e1ad7e3ddb09cdff6d22fc44f290599e31f9e75d74edbf2b9982621",
+        "specimen_result": "1de573dff63f8cdc7250e51293f6cba141c67c4b09b428c0d2eb40c8711a64ee",
+        "analysis_result": "df452e007dbb92175414241df0b50709e7912b9584af551efaf001e2c61bb478",
+        "bo_result": "2936c47bd29a40118c79abb4b122fffb44432f6c3cefb96bb48232f0be387771"
+      },
+      "bo_phase": "initial_design",
+      "bo_decision": "accepted",
+      "next_candidate_present": true,
+      "curve_quality": {
+        "ok": true,
+        "point_count": 48005,
+        "monotonic_displacement_ratio": 1,
+        "warnings": []
+      }
+    },
+    {
+      "iteration": 3,
+      "cell_size_mm": 8.349916857544388,
+      "wall_thickness_mm": 0.6063223277301869,
+      "mass_g": 8.26,
+      "mass_source": "slicer",
+      "sea_J_per_g": 2.84999183,
+      "curve_rows": 48005,
+      "artifacts_sha256": {
+        "generated_stl": "5a6124839b6c2808bc95cd3328dceafb6c9d92a9051d16bb9d7ff9dac98b31e9",
+        "canonical_curve": "b650aa279ecb3f8752d26e7997619775920314c8c95b8fbf868e5c8acfeae66b",
+        "metrics": "88028f1457236081c72710ef9b3ebf1192b405034538de6c6d2fe20bf0acd723",
+        "design_result": "97e26b639a14083e3790c2a573ce3922dc2d206b44f4e6c17e3fe7ec8e368045",
+        "specimen_result": "512cb315ca468c96401fc2679f04069eef72a62783c96ac5cc4b6db33ba3a736",
+        "analysis_result": "dd4a5f6f1ab08620e7ad59027afc5a0ddf8e8296f8409eaa123dbe31038d28f5",
+        "bo_result": "302b97b2fa2b335c2b61ef3dbc7775c2e7bbf49b77a90b2c46382619fb8fe5d9"
+      },
+      "bo_phase": "initial_design",
+      "bo_decision": "accepted",
+      "next_candidate_present": true,
+      "curve_quality": {
+        "ok": true,
+        "point_count": 48005,
+        "monotonic_displacement_ratio": 1,
+        "warnings": []
+      }
+    },
+    {
+      "iteration": 4,
+      "cell_size_mm": 6.997367347717213,
+      "wall_thickness_mm": 0.7589385790808617,
+      "mass_g": 12.04,
+      "mass_source": "slicer",
+      "sea_J_per_g": 4.816562416,
+      "curve_rows": 48005,
+      "artifacts_sha256": {
+        "generated_stl": "79fd722b0fda0248b0770129605a23303bc0993d998448067cba4f1afc935911",
+        "canonical_curve": "7c41dcc6fa12266be7aff95d29c42d91b4e69d0b5ae6ef69d826bbb4115f1001",
+        "metrics": "d2fdad6ed246eae49c2c184160c13bf04da04a78cadec5c2e918c893c5b34e4a",
+        "design_result": "92a7e88c77a7f6a9cd9ed35c3075c0f664fc580574034ef9c4d6a93215121d6c",
+        "specimen_result": "7dc2280666ea9ceabbc3718d218ba51f217ce9423b2466d76de9877265547b27",
+        "analysis_result": "c9a465d20f5c3fa05377d10d7089b84cdd8f6bc1d832ff869bb56ed939ae0368",
+        "bo_result": "2bebb08d415720080d643c159116f8bb75d3e8cb29028939de67e0c69fe84450"
+      },
+      "bo_phase": "initial_design",
+      "bo_decision": "accepted",
+      "next_candidate_present": true,
+      "curve_quality": {
+        "ok": false,
+        "point_count": 48005,
+        "monotonic_displacement_ratio": 1,
+        "warnings": [
+          "peak_at_curve_boundary"
+        ]
+      }
+    },
+    {
+      "iteration": 5,
+      "cell_size_mm": 7.101465285623977,
+      "wall_thickness_mm": 0.6766032523578139,
+      "mass_g": 10.38,
+      "mass_source": "slicer",
+      "sea_J_per_g": 3.214893864,
+      "curve_rows": 48006,
+      "artifacts_sha256": {
+        "generated_stl": "c0d7dad1723884396463d7b82aeb0d5eaa8a0b157fb9847aed273d36988f8ca7",
+        "canonical_curve": "4150597f6cc82cb73e8cc8aa7391f3126bc6d37901daeba578451887b79c656e",
+        "metrics": "468ee2e98ded7b395d8de407985ed1a660ecbf6b4d00490b583b8919f57aaea1",
+        "design_result": "87f9744ccba29bc7f3ba95c4cd508f3f5e91318ede4c3d44ccb07396dc6f875f",
+        "specimen_result": "a384edcd08286bcfa89550f6ec9b219dbc98a00bf89b60beffdb89681ce696a8",
+        "analysis_result": "f22451fdf52ba2a807fc35eef9f90595a7b1035ffd7e3bddf0c77fb30940b7b5",
+        "bo_result": "b94136b184746f5d9ee2bc2c04ad895ecf35c8bfc44a0ef3ae76e4f01429e083"
+      },
+      "bo_phase": "initial_design",
+      "bo_decision": "accepted",
+      "next_candidate_present": true,
+      "curve_quality": {
+        "ok": true,
+        "point_count": 48006,
+        "monotonic_displacement_ratio": 1,
+        "warnings": []
+      }
+    },
+    {
+      "iteration": 6,
+      "cell_size_mm": 6.348483786590343,
+      "wall_thickness_mm": 0.8860787193949613,
+      "mass_g": 15.69,
+      "mass_source": "slicer",
+      "sea_J_per_g": 5.794220463,
+      "curve_rows": 48006,
+      "artifacts_sha256": {
+        "generated_stl": "972becf090e90e0e19c6f5a4b0a896f623f61af9422a923e99d7559daf992468",
+        "canonical_curve": "eb67ce6e3f7df9daf197dc174c9b08ecc9451f62c425e750f040521acfc66431",
+        "metrics": "f6ce8abb019ab24520a957e7d3c5af8c7b43ab632861b1688e4ac7ded0df78a4",
+        "design_result": "0500d6ff60e1e49a7a4bfef4f8c4e294112f65b2b55a60ca409e0db0c3350a85",
+        "specimen_result": "e0ea3ec4b5287afd51a6132f3d0972f15397216fd88572550f6d7799166725e1",
+        "analysis_result": "3585f59482a0c98dbbcb93b0bd87807b823e681b4019ef6bc1b2c29f897f42d7",
+        "bo_result": "569cf216bfb11c6fb12fe4af29f2a56eb85772b6b907aef8baaddda78d24fcc5"
+      },
+      "bo_phase": "acquisition",
+      "bo_decision": "accepted",
+      "next_candidate_present": true,
+      "curve_quality": {
+        "ok": false,
+        "point_count": 48006,
+        "monotonic_displacement_ratio": 1,
+        "warnings": [
+          "peak_at_curve_boundary"
+        ]
+      }
+    },
+    {
+      "iteration": 7,
+      "cell_size_mm": 6.224522137769363,
+      "wall_thickness_mm": 0.8262300215877302,
+      "mass_g": 14.82,
+      "mass_source": "slicer",
+      "sea_J_per_g": 4.48812666,
+      "curve_rows": 48005,
+      "artifacts_sha256": {
+        "generated_stl": "dbd3b3ef763a1f042be90c505291506b9f7de582f8f1240029934becbdcdef58",
+        "canonical_curve": "0393963a84a3b55ca7555223e273afbeecb3edf38540fd8e831cc078419d0ba9",
+        "metrics": "8bf4bf24a13e5fd8caa6d8690688d578a6145788fac0b0993e2d746cc5ce4842",
+        "design_result": "b2d4a6506713ce9f15dc8b3c82da5e6796d39b9f5708a14c46370e838af8cb1f",
+        "specimen_result": "8bf7acd8c215490eb0fbcfbd41cecebf13834ecde48c5f695d7be7ba0c030ec1",
+        "analysis_result": "f5ab700ad3d5d7a94f39277bcda9b20b24a8edfe60a82ad6dce8db515daa42ab",
+        "bo_result": "ee3d860783b0814f68ad40dfbd74cf65271e722e2dad50bf99461de1e1b7764b"
+      },
+      "bo_phase": "acquisition",
+      "bo_decision": "accepted",
+      "next_candidate_present": true,
+      "curve_quality": {
+        "ok": true,
+        "point_count": 48005,
+        "monotonic_displacement_ratio": 1,
+        "warnings": []
+      }
+    },
+    {
+      "iteration": 8,
+      "cell_size_mm": 6,
+      "wall_thickness_mm": 0.9,
+      "mass_g": 16.86,
+      "mass_source": "slicer",
+      "sea_J_per_g": 6.166571167,
+      "curve_rows": 48006,
+      "artifacts_sha256": {
+        "generated_stl": "5d42ae10b5f53b47e6e40291b79460aa7066203d48f01f6d5300b45eacd6db04",
+        "canonical_curve": "a7a2c6e5332c9b4831068179a1a2d5d80a636f970e2b45d856ff9547dbb8d11f",
+        "metrics": "4b4b3a9e16c83c1ffca7db46384f13b5c37199ef855180d7ecb35711a5bc057b",
+        "design_result": "11c3850ca1087a8eab90afd6e4f4368c22b3775f5112ca1583417ca5f59aa0fe",
+        "specimen_result": "21fa02dbe5670b071d5f303def8d855b7d56cbc3e1e259d6adcbb8976058a1ac",
+        "analysis_result": "34b74261af88fd9311efa281465c025660f244ac276a8b3d68d7d062b780c61f",
+        "bo_result": "8a9d916335d4e5a2141481225bb1c8090ffb5c879c4e3afd2f56ce433d1d04df"
+      },
+      "bo_phase": "acquisition",
+      "bo_decision": "accepted",
+      "next_candidate_present": true,
+      "curve_quality": {
+        "ok": false,
+        "point_count": 48006,
+        "monotonic_displacement_ratio": 1,
+        "warnings": [
+          "peak_at_curve_boundary"
+        ]
+      }
+    },
+    {
+      "iteration": 9,
+      "cell_size_mm": 7.481860778725734,
+      "wall_thickness_mm": 0.9,
+      "mass_g": 13.28,
+      "mass_source": "slicer",
+      "sea_J_per_g": 4.225763658,
+      "curve_rows": 48005,
+      "artifacts_sha256": {
+        "generated_stl": "c5453dec9c24a5d1ae9db5f735e8dc1db0c3edf9b3954d066f155d6616962934",
+        "canonical_curve": "9dfd805b54bc460006d94e4c5dde96df2d468b2fba4ddaf88ca8124ef5f8b11c",
+        "metrics": "f75f66195d3454ab36036425eec8a35256779b7cb415147f6b7d54871256ba93",
+        "design_result": "c577665720a90f4becbd6ccc40a3eee4ac9d5e9871674469cc7f72c4c1a2011a",
+        "specimen_result": "05d42783be116acef7c256ae2422bccaa095948f310185784bded2be8714fb56",
+        "analysis_result": "e4ea652d01e4c5770c6694a1561d236bb210e6ea076c0065c7af599a41e96eca",
+        "bo_result": "6f1b41d4b914c401c523844a446cc09c9c6e46c405c691671f88a2db6a1aba42"
+      },
+      "bo_phase": "acquisition",
+      "bo_decision": "accepted",
+      "next_candidate_present": true,
+      "curve_quality": {
+        "ok": true,
+        "point_count": 48005,
+        "monotonic_displacement_ratio": 1,
+        "warnings": []
+      }
+    },
+    {
+      "iteration": 10,
+      "cell_size_mm": 6.011713167652488,
+      "wall_thickness_mm": 0.8907137453556061,
+      "mass_g": 16.61,
+      "mass_source": "slicer",
+      "sea_J_per_g": 5.594417245,
+      "curve_rows": 48006,
+      "artifacts_sha256": {
+        "generated_stl": "038c0d33cf6bd24197f5faa7838bffeded769d2a8684e1333ccb6caa5a653cb5",
+        "canonical_curve": "bf0e076684a0f3cf9ef5936b0c6fdd8c26ded6ae6be748f57b6af6329c844804",
+        "metrics": "f1f42e769821de0bcd512e5859a201ad714ae57cd436103486b9838641e82855",
+        "design_result": "d08c4b1b4f6d25f21930a2722cc04699c655c5699ec0768c09bd98d65afb3613",
+        "specimen_result": "a6c210e82356a1aae282fe6f92846b72fe60867d8a85372e24f455771215a298",
+        "analysis_result": "b0b22ea08e042c8220ce4cf53bfdc9011e9d8cf248fa3e92ef4583a9dccf6039",
+        "bo_result": "3648bc5f3669a4c7c454eb3d19cc3291beb39413126c105cbc269e572ff8df38"
+      },
+      "bo_phase": "acquisition",
+      "bo_decision": "accepted",
+      "next_candidate_present": true,
+      "curve_quality": {
+        "ok": true,
+        "point_count": 48006,
+        "monotonic_displacement_ratio": 1,
+        "warnings": []
+      }
+    },
+    {
+      "iteration": 11,
+      "cell_size_mm": 6.323200740401048,
+      "wall_thickness_mm": 0.9,
+      "mass_g": 15.99,
+      "mass_source": "slicer",
+      "sea_J_per_g": 5.426575534,
+      "curve_rows": 48005,
+      "artifacts_sha256": {
+        "generated_stl": "cffc51a38611d18c9ec71697c3484ca72c65500382909d443b31d013063d1be9",
+        "canonical_curve": "56d40c4388660b851ea7648a537d0501d92f5fa3ea2b458660b643e9be3fcc9a",
+        "metrics": "5be47f9a4ca651749a7ba0d6435595b709cd012ff229ffbe8e306b037d7d8e59",
+        "design_result": "d1d2a75482ee58032e07228888906e14f303b00e9a7823b8cd2a0ac58ea83435",
+        "specimen_result": "e0b2aac2eba19b91e5a534e2f6efae3df8affb2e2ea9d6ee2db54635ffe1d230",
+        "analysis_result": "036d3e351ab33a5cedd584c07ec9cfa6b1b7a74652c0801c902ee636e64001c2",
+        "bo_result": "7073071a698934a43ed985d1938983ac93c75a964698ab1cbaabd665232d682e"
+      },
+      "bo_phase": "acquisition",
+      "bo_decision": "accepted",
+      "next_candidate_present": true,
+      "curve_quality": {
+        "ok": false,
+        "point_count": 48005,
+        "monotonic_displacement_ratio": 1,
+        "warnings": [
+          "peak_at_curve_boundary"
+        ]
+      }
+    },
+    {
+      "iteration": 12,
+      "cell_size_mm": 6.0429289089515805,
+      "wall_thickness_mm": 0.7467195421457291,
+      "mass_g": 13.72,
+      "mass_source": "slicer",
+      "sea_J_per_g": 4.512143499,
+      "curve_rows": 48005,
+      "artifacts_sha256": {
+        "generated_stl": "3c393f8561c57a565415c4e073813fa9595eb1520ea10c4c7413509e4203d41a",
+        "canonical_curve": "83289a54bb1de4be52d9c979384997e98e8d18f2e334f58f506b9ff307a9e8bb",
+        "metrics": "7df5542aa05c8f68392b69c1de488334669cbf439383894b63558d9873db6a25",
+        "design_result": "92d07360d9252d3960e3ec3d7ed1663116fe1c4f99b36dfaf47786c5f5889883",
+        "specimen_result": "94ba84b6d764822e8613813af8dd03850a57d1022375f4d04da44560e39a90c5",
+        "analysis_result": "f8bd7ca32370126fb3faee3195ca0d8996f02737a3180c7ca546ed5598483f59",
+        "bo_result": "748b21c44d48b9c9d5c564ab4c7865acda78b8e1d8403d49577e608463e0208d"
+      },
+      "bo_phase": "acquisition",
+      "bo_decision": "accepted",
+      "next_candidate_present": true,
+      "curve_quality": {
+        "ok": true,
+        "point_count": 48005,
+        "monotonic_displacement_ratio": 1,
+        "warnings": []
+      }
+    },
+    {
+      "iteration": 13,
+      "cell_size_mm": 8.992542743682861,
+      "wall_thickness_mm": 0.7904534339904785,
+      "mass_g": 9.79,
+      "mass_source": "slicer",
+      "sea_J_per_g": 4.536930481,
+      "curve_rows": 48005,
+      "artifacts_sha256": {
+        "generated_stl": "4ec811cd0a62b742add429104d6d099d4a90b97cceb5cd3a2ee7f09e619e1011",
+        "canonical_curve": "42896dfbb76f3fef1e07d0110739bb3aca9972829907bd45f40df8f176ab4d7d",
+        "metrics": "b4a6da440121de38cba42327f2c38319663dca24d75cdee651d5325f3cff7580",
+        "design_result": "a1c6eeaffef62a783ec4e6d92a7c23b3c7d95a79f18b35f3d94a3bb39013a871",
+        "specimen_result": "39804dad8836396570d1846251b985e23b8c9264310956b0943131bbb43d1920",
+        "analysis_result": "43c188906bc4b30f5bac72e0fae5c40b3a20ba585e0cfaa5bb6a5cb786c01f19",
+        "bo_result": "cc65c7084864ec4d9b09e683d7cb075a1cc321fbf857bd87d6c19eda83e45db6"
+      },
+      "bo_phase": "acquisition",
+      "bo_decision": "accepted",
+      "next_candidate_present": true,
+      "curve_quality": {
+        "ok": true,
+        "point_count": 48005,
+        "monotonic_displacement_ratio": 1,
+        "warnings": []
+      }
+    },
+    {
+      "iteration": 14,
+      "cell_size_mm": 6.065331492573023,
+      "wall_thickness_mm": 0.8730051040649414,
+      "mass_g": 16.15,
+      "mass_source": "slicer",
+      "sea_J_per_g": 6.516349274,
+      "curve_rows": 48005,
+      "artifacts_sha256": {
+        "generated_stl": "ed0a154c244f848882be5b30a87799b06d2ea9ce2f4ec23a5e7fa23e20352431",
+        "canonical_curve": "f08e74d0d706f33abc99e8db621bebf097f36f72caae8124e0f18e6e8b082eb4",
+        "metrics": "747dc27f2927a3c547f1035f7fe23e328d393bb2f5594f7694d7841b1fc8566b",
+        "design_result": "bca79bdf67cfce3a2f49d4bdb1c57145cb84621f58e047059da715833ea0f64f",
+        "specimen_result": "503c14ff43ea2535a51514e16fd0fa9e877d8863db46eb45999d89f7b57f34c3",
+        "analysis_result": "7e1b9a793a0be1c89eb00b2f9fb07c5424f83d78e5f30ad2fbedc2260fa72dd3",
+        "bo_result": "630dc22148826826ce6c40b67287b0964a82d7058aaa410fd53b01a4bce63378"
+      },
+      "bo_phase": "acquisition",
+      "bo_decision": "accepted",
+      "next_candidate_present": true,
+      "curve_quality": {
+        "ok": false,
+        "point_count": 48005,
+        "monotonic_displacement_ratio": 1,
+        "warnings": [
+          "peak_at_curve_boundary"
+        ]
+      }
+    },
+    {
+      "iteration": 15,
+      "cell_size_mm": 6,
+      "wall_thickness_mm": 0.6,
+      "mass_g": 11.4,
+      "mass_source": "slicer",
+      "sea_J_per_g": 4.943147673,
+      "curve_rows": 48005,
+      "artifacts_sha256": {
+        "generated_stl": "23f1e842be60deebcfec4ad6eef701373f217666c5aaddada60932575dd059c7",
+        "canonical_curve": "7cf984014ae1f81299444588bd5f36d9f27dd6f6823142838d7a1b1649d9f171",
+        "metrics": "f7317d2274a4a374e74a4a21ddfd12e1ce928f47172b387a160d5d58da54c3b0",
+        "design_result": "9dcce907cb1dc552a3cb9aaa6f9b70db93f47c5b5fcbd1fdef678fd8e814dbe9",
+        "specimen_result": "ee498ae161227690cb685a4d1352cabd1f78f7bd34d07bdaf02315a359f54717",
+        "analysis_result": "198f51df98f1fbb835d29f0a52fc6da336bb41673fc6fb14c98cf8d7fbe772e9",
+        "bo_result": "2d88c43f52c10280e2ccd8aba4d29c6081b577166ff4720eca26360f5f3e1ede"
+      },
+      "bo_phase": "final_report",
+      "bo_decision": "completed",
+      "next_candidate_present": false,
+      "curve_quality": {
+        "ok": false,
+        "point_count": 48005,
+        "monotonic_displacement_ratio": 1,
+        "warnings": [
+          "peak_at_curve_boundary"
+        ]
+      }
+    }
+  ],
+  "verification": {
+    "identity_matches": 15,
+    "design_fabrication_stl_hash_matches": 15,
+    "curve_and_metric_hash_matches": 15,
+    "sea_formula_matches": 15,
+    "new_device_actions": 0,
+    "physical_fabrication_independently_audited": false,
+    "failure_records_retained": true
+  }
+}

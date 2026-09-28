@@ -35,7 +35,7 @@ supersedes: []
 | LLM decision layer | Processing selection and evidence review; numerical results remain code-owned |
 | Physical effect | None; no device bridge dependency |
 | Primary handoff | `bo_observation.v1` and `analysis_bo_handoff_v2`, with provenance |
-| Verification scope | No-hardware owner, numerical and contract regression tests; no new physical validation |
+| Verification scope | Numerical/contract regressions plus [15 retained observation sets](../paper/evidence/2026-09-28-campaign-archive-audit.md): identity, canonical curve/metrics hashes and SEA normalization checked; no new physical test |
 | Known gap | No validated measurement-error estimator; observation uncertainty remains unset |
 
 ## Overview and Responsibilities

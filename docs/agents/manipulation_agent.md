@@ -47,7 +47,7 @@ Physical test profiles use the same policy-reference and execution-confirmation 
 | LLM decision layer | Implemented; registered API and local vLLM each matched 4/4 non-actuating development cases |
 | Physical effect | Possible only through existing rollout, fixed-skill and managed-replay executors |
 | Primary handoff | `robot_task_result.v1` → Vision → Equipment; verified clearance → Analysis |
-| Live hardware validation | Not performed for this reconstruction |
+| Live hardware validation | The [later campaign archive](../paper/evidence/2026-09-28-campaign-archive-audit.md) retains transfer/clearance attempts; invocation completion is not a measured grasp-success rate; earlier reconstruction tests remain non-actuating |
 | Known gap | No new pose-to-policy routing; failures after motion still require explicit recovery review |
 
 ### Asynchronous startup failure and Vision admission

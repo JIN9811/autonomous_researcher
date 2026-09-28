@@ -1,5 +1,5 @@
 ---
-{"topic_id":"analysis-role","owner":"analysis_agent","source_refs":["docs/agents/analysis_agent.md"],"source_revision":{"docs/agents/analysis_agent.md":"dd1427c585819820ad7a410301f0b69fb54057cd93b37f05ef5e58f2120bfd96"},"verified_at":"2026-09-15T00:00:00+00:00","applicability":"Public AX4LAB reference: analysis-role","status":"reviewed"}
+{"topic_id":"analysis-role","owner":"analysis_agent","source_refs":["docs/agents/analysis_agent.md"],"source_revision":{"docs/agents/analysis_agent.md":"8963c88b1ca2a74dad2ea35a2195bf5f91f7d9f9e3ea66520d05a13cbb5e851b"},"verified_at":"2026-09-28T00:00:00+09:00","applicability":"Public AX4LAB reference: analysis-role","status":"reviewed"}
 ---
 
 # Analysis Agent — Measurements and Objectives

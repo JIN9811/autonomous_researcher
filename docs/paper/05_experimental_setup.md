@@ -208,16 +208,17 @@ what was removed and why a result remains reproducible or becomes restricted.
 
 ## Limitations and Known Gaps
 
-The current repository package does not yet pin a venue-specific experimental
-matrix, physical equipment inventory, statistical power analysis, or domain
-scientific endpoint. Those choices depend on the submitted study and must not
-be inferred from available integration code.
+The retained Gyroid campaign has a recorded domain and SEA endpoint: see the
+[campaign audit](evidence/2026-09-28-campaign-archive-audit.md) for its geometry,
+mass source and observation count. Those run-specific settings are not global
+defaults. A venue-specific comparison matrix, statistical power analysis and
+independent physical fabrication audit remain outside the recorded evaluation.
 
 ## Verification
 
-Reviewed on 2026-08-09 against requirements, graph modes, tests, and the paper
-evidence schema. Only the inspection and documentation-test records are
-instantiated in the initial artifact manifest.
+Initial protocol reviewed on 2026-08-09. The current artifact manifest also
+contains the 2026-09-07 live integration records and 2026-09-28 retained-campaign
+inspection; these records retain distinct environments and claims.
 
 ## Related Documents
 

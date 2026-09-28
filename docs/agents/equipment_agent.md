@@ -48,7 +48,7 @@ supersedes: []
 | LLM decision layer | Implemented; archived terminal evidence checked through registered API/local models |
 | Physical effect | Existing gated Skills and Windows/Local workers only |
 | Primary handoff | Verified CSV/readiness → Manipulation clearance → fresh Vision → Analysis |
-| Live hardware validation | No new hardware run; prior physical proof remains separately sourced |
+| Live hardware validation | Prior physical proof plus a [later multi-cycle archive](../paper/evidence/2026-09-28-campaign-archive-audit.md); fifteen completed Equipment records and two failed attempts retained, not a new commissioning test |
 | Known limit | One unchanged registered-model retry completed; the first attempt stopped on a Knowledge tool-contract error, so both outcomes remain in the reliability record |
 
 ## Summary and Actual Role

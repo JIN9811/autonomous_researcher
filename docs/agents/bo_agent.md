@@ -56,7 +56,7 @@ Main GUI: **Bayesian Optimization · Workspace** opens the optimization workspac
 | Numeric candidate authority | LHS / BoTorch; two continuous variables by default |
 | Physical effect | None |
 | Primary handoff | `next_design_request.v1` → Orchestrator → Design |
-| Live hardware validation | No new device validation in this revision |
+| Live hardware validation | BO has no device authority; [15-cycle archive](../paper/evidence/2026-09-28-campaign-archive-audit.md) retains recommendations and terminal final report; no controlled optimization-benefit claim |
 | Known gap | No demonstrated optimization gain from the LLM decision layer |
 
 ## Installed Package and Executable Structure

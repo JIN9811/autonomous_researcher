@@ -9,7 +9,7 @@
 | Preparation | 선택한 프린터 연결, 소재·위치·슬라이서 설정 및 동작 전 확인 |
 | Reference | [Printer Fleet](../device_bridges/printer_fleet_bridge.md) · [Specimen Agent](../agents/specimen_agent.md) |
 
-이 문서는 Main GUI의 **Device Workspaces** 영역과 3D Printer GUI(`/printer`)를 실제 운영자가 어떻게 쓰는지 정리한 페이지입니다. Live GUI 화면은 아직 UI 조정 대상이므로 여기서는 다루지 않습니다.
+이 문서는 Main GUI의 **Device Workspaces** 영역과 3D Printer GUI(`/printer`)의 운영 절차를 다룹니다. 이미 구현된 Live GUI의 SPC 영상·진행 상태·재생/재접속 표시는 [Live GUI](../gui/gui.md)와 [모니터링 워커](../gui/monitoring_workers.md)를 참고합니다.
 
 BambuLab X2D bridge의 내부 구조, MQTT/FTPS/HTTP/camera plane 분리, native G-code autoejection gate는 [../hardware/bambulab_x2d_device_bridge_runtime_guideline.md](../hardware/bambulab_x2d_device_bridge_runtime_guideline.md)에 별도로 정리되어 있습니다. 이 문서는 버튼 순서와 운영 절차를 중심으로 설명합니다.
 

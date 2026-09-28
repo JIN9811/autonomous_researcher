@@ -151,7 +151,7 @@ uncertainty treatment.
 
 | ID | Limitation | Consequence | Required next evidence |
 |---|---|---|---|
-| `C-LIMIT-EVAL-01` | No paper-scoped end-to-end physical campaign | System-level efficacy and reliability remain unknown | Supervised Tier 4 campaign with complete lineage |
+| `C-LIMIT-EVAL-01` | Fifteen-iteration archive audited, but no independent per-cycle fabrication certification or controlled efficacy study | Archive completion does not establish unattended reliability or scientific superiority | Independent physical provenance and controlled comparative protocol |
 | L-SAFE-01 | Guardian effectiveness not behaviorally scored here | RQ3 remains open beyond architecture | Test/simulation hazard scenario matrix, then bounded live cases |
 | L-SCI-01 | No comparative scientific baseline | No improvement or superiority conclusion | Controlled study with denominator and uncertainty |
 | L-EXT-01 | No representative cross-adapter matrix | General platform compatibility is unknown | Tiered extension evaluation |

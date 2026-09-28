@@ -1,5 +1,5 @@
 ---
-{"topic_id":"bo-visualization","owner":"documentation","source_refs":["docs/agents/bo_agent.md","docs/agents/analysis_agent.md"],"source_revision":{"docs/agents/bo_agent.md":"4cfbe0eb15190935ef636c3cbf50f4b6c657f4c9994cbbad750495acd996e29a","docs/agents/analysis_agent.md":"dd1427c585819820ad7a410301f0b69fb54057cd93b37f05ef5e58f2120bfd96"},"verified_at":"2026-09-15T00:00:00+00:00","applicability":"Public AX4LAB reference: bo-visualization","status":"reviewed"}
+{"topic_id":"bo-visualization","owner":"documentation","source_refs":["docs/agents/bo_agent.md","docs/agents/analysis_agent.md"],"source_revision":{"docs/agents/bo_agent.md":"c3c2a286fd4c5373fc8f70d666298ef6d9b5ba8df7eae9f0d63c04db007f7d04","docs/agents/analysis_agent.md":"8963c88b1ca2a74dad2ea35a2195bf5f91f7d9f9e3ea66520d05a13cbb5e851b"},"verified_at":"2026-09-28T00:00:00+09:00","applicability":"Public AX4LAB reference: bo-visualization","status":"reviewed"}
 ---
 
 # BO Visualization — LHS, Live Posterior and Objective
@@ -15,6 +15,13 @@ Read the completed count, target count and next index together. Failed or inelig
 ## Live Posterior
 
 The posterior represents model predictions and uncertainty from available observations. Model uncertainty is not equipment measurement error or repeat-test variability. Early stages may not yet satisfy the conditions for fitting a posterior.
+
+For the two-variable Gyroid space, the current report offers a 2D heatmap
+triptych and three vertically stacked 3D surfaces: predicted objective,
+uncertainty and expected improvement. Both views use the same GP values and
+physical cell-size/wall-thickness axes. They retain observations, the next
+candidate and separate color scales. The old anonymous 1D display is a legacy
+view, not a separate optimizer or the required current presentation.
 
 ## EI / LogEI
 

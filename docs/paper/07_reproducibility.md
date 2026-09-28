@@ -45,6 +45,12 @@ supersedes: []
 
 ## Summary
 
+The latest [fifteen-iteration archive audit](evidence/2026-09-28-campaign-archive-audit.md)
+provides a bounded read-only reproduction protocol and per-iteration hashes.
+The public summary does not bundle private raw run data. Re-running the
+experiment, re-analyzing retained CSV and checking an archive are different
+reproduction tasks; none is silently performed by opening Replay.
+
 Reproduction is progressive. A reviewer can validate the public document and
 architecture contracts without models or devices, then proceed to tests,
 replay, browser workflows, and supervised hardware only when the required

@@ -49,7 +49,7 @@ supersedes: []
 | LLM decision layer | Implemented / API and local-model verified without actuation |
 | Physical effect | Possible through existing gated printer tools |
 | Primary handoff | `specimen_fabricated.v1` → Vision / Manipulation |
-| Live hardware validation | Not performed for this decision-layer change |
+| Live hardware validation | The earlier decision-layer tests were non-actuating; later [campaign artifacts](../paper/evidence/2026-09-28-campaign-archive-audit.md) cover fifteen completed specimen records, without independently certifying every print |
 | Known gap | Suitability decisions do not establish physical print quality |
 
 ### Module Ownership and Layout

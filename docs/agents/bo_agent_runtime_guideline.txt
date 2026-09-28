@@ -68,11 +68,11 @@ Numerical path
 
 Continuous parameter contract
 - Default cell_size_mm: [5.0, 10.0].
-- Default relative_density: [0.20, 0.48].
+- Default wall_thickness_mm: [0.6, 1.2].
 - Scalar/one-element input is fixed; two finite ascending values are continuous bounds.
 - New BO requests migrate a legacy numeric cell table to its min/max range.
 - Invalid, non-finite, reversed or non-positive cell-size domains fail explicitly.
-- Relative density retains the existing supported BO safety range.
+- Under wall_cell_v1, relative density and porosity are derived geometry outputs, not independent active variables. Historical density-controlled records retain their original parameterization.
 - Other geometry/process parameters remain fixed; they do not become new active dimensions.
 - initial_design_request reads the configured domain before first LHS.
 - Initial and next requests include parameter_space; Orchestrator forwards it without changing coordinates.

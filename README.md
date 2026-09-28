@@ -178,11 +178,15 @@ returns, alongside control, device-bridge and evidence connections.
 
 ## Demonstration and Evidence
 
-The retained supervised **mixed-mode closed-loop demonstration** completed
-equipment testing, post-test clearance, Analysis, BO-managed LHS advancement,
-and the next Design handoff. Printing deposition was skipped in that run;
-specimen identity was not independently validated. It therefore demonstrates
-that integrated path, not unattended end-to-end manufacturing.
+The latest [retained campaign audit](docs/paper/evidence/2026-09-28-campaign-archive-audit.md)
+reconciles **15 completed experimental observations** with per-iteration Gyroid
+STL, stress–strain curves, properties and BO input/next-point records. Matching
+artifact hashes and SEA normalization were checked; failed attempts and recovery
+history remain preserved. This is evidence of recorded multi-cycle operation,
+not a claim of unattended manufacturing or controlled scientific superiority.
+
+Earlier supervised mixed-mode one-cycle demonstrations remain separately
+documented, including their skipped deposition and specimen-identity limits.
 
 Compression testing is the current application example, **not the definition
 of the platform**.
@@ -196,7 +200,9 @@ of the platform**.
 
 Agent-local API, local-model, and virtual-device checks are reported in the
 individual references. They do not replace physical validation. Comparative
-cost, scientific benefit, and multi-run reliability remain evaluation work.
+cost, causal scientific benefit, and reliability across independent campaigns
+remain evaluation work. The [documentation audit](docs/maintenance/code_documentation_audit_20260928.md)
+separates main-code implementation, tests, campaign evidence and isolated RPT development.
 
 ## Agent References
 

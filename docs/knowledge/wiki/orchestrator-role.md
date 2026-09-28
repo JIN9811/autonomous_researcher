@@ -1,5 +1,5 @@
 ---
-{"topic_id":"orchestrator-role","owner":"orchestrator_agent","source_refs":["docs/agents/orchestrator_agent.md","docs/runtime/test_mode.md"],"source_revision":{"docs/agents/orchestrator_agent.md":"31147fe1724801e5651b59e083b50e3da41715aa2eedcac54fd993031c3b4f73","docs/runtime/test_mode.md":"e326a6446165d580f9ab9c168811cfcb47126aba570706ba55d463f67dbccedb"},"verified_at":"2026-09-15T00:00:00+00:00","applicability":"Public AX4LAB reference: orchestrator-role","status":"reviewed"}
+{"topic_id":"orchestrator-role","owner":"orchestrator_agent","source_refs":["docs/agents/orchestrator_agent.md","docs/runtime/test_mode.md"],"source_revision":{"docs/agents/orchestrator_agent.md":"297d2ea5076932738fcffd7e147f0526e23929a2f00158262fee5f999c33a0bb","docs/runtime/test_mode.md":"e326a6446165d580f9ab9c168811cfcb47126aba570706ba55d463f67dbccedb"},"verified_at":"2026-09-28T00:00:00+09:00","applicability":"Public AX4LAB reference: orchestrator-role","status":"reviewed"}
 ---
 
 # Orchestrator Agent — Conversation and Coordination
@@ -14,7 +14,7 @@ Orchestrator (ORC) interprets research requests and connects them to work suppor
 
 ## From conversation to execution
 
-1. Greet the researcher in Korean and English without demanding experiment details.
+1. Greet the researcher in English, followed by Korean, without demanding experiment details.
 2. Explain available experiments from the active graph, without claiming unverified device readiness.
 3. Once planning is agreed, ask for required conditions and update Experimental Setup.
 4. Review conditions, obtain explicit execution approval and pass existing admission gates.

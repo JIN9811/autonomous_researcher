@@ -8,6 +8,7 @@ documents:
   - docs/README.md
   - docs/modularity.md
   - docs/maintenance/repository_cleanup.md
+  - docs/maintenance/code_documentation_audit_20260928.md
   - docs/oldversion/README.md
   - docs/standards/documentation_standard.md
   - docs/standards/paper_documentation_standard.md
@@ -38,6 +39,7 @@ documents:
   - docs/paper/README.md
   - docs/paper/evidence/2026-09-07-supervised-closed-loop.md
   - docs/paper/evidence/2026-09-07-latest-cycle-demonstration.md
+  - docs/paper/evidence/2026-09-28-campaign-archive-audit.md
   - docs/paper/01_problem_and_contributions.md
   - docs/paper/02_system_architecture.md
   - docs/paper/03_closed_loop_method.md
@@ -70,8 +72,8 @@ legacy_scope:
 snapshot:
   document: docs/runtime/current_code_snapshot.md
   expected:
-    api_routes: 346
-    app_routes: 353
+    api_routes: 420
+    app_routes: 430
     graph_nodes: 19
-    graph_edges: 68
+    graph_edges: 73
     stage_dispatch_edges: 12

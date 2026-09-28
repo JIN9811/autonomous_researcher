@@ -49,9 +49,10 @@ robotic transfer, testing, analysis, knowledge, and optimization. Scoped LLM
 decision layers interpret evidence and call tools, while established numerical
 methods and device bridges execute bounded tasks. Explicit handoffs preserve
 measurement identity and feed observations into subsequent design decisions.
-A retained supervised mixed-mode run demonstrates equipment testing through
-analysis, next-point selection, and next-design entry; its printing deposition
-was skipped. The extensible platform supports this system through modular
+A retained campaign now provides fifteen completed Analysis observations with
+matching geometry, curves, metrics and BO records, audited without re-executing
+hardware. Earlier mixed-mode one-cycle demonstrations retain their distinct
+skipped-deposition scope. The extensible platform supports this system through modular
 interfaces and operator workspaces. The system places integration complexity in structured software rather than
 extensive hardware modification. Equipment reuse and VLA-enabled manipulation
 provide a route to lower equipment and fixture costs; comparative savings and
@@ -146,9 +147,12 @@ outputs, and hashes are recorded in the evidence package.
 
 The repository contains historical and domain-specific documents outside this
 paper path. They remain useful but are not automatically paper evidence. The
-paper package does not yet contain comparative benchmarks, a physical
-end-to-end experiment series, an approved author list, a venue-formatted
-manuscript, or an archival DOI.
+paper package now indexes a [fifteen-iteration archive audit](evidence/2026-09-28-campaign-archive-audit.md),
+but not a complete public raw dataset, comparative benchmarks or independent
+per-cycle fabrication certification. An approved author list, venue-formatted
+submission and archival DOI remain separate publication decisions. RPT has
+generated PDF/Word drafts in an isolated development worktree; that is not a
+production deployment or evidence of publication readiness.
 
 ## Verification
 

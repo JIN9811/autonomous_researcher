@@ -49,7 +49,7 @@ supersedes: []
 | LLM decision layer | Generic multimodal review implemented; revised API/local choices matched 12/13 development expectations each, with remaining errors |
 | Physical effect | Possible through existing ActiveCam move/capture/return and verified rollout-stop paths |
 | Primary handoff | `vision_signal.v1` and role-specific verification evidence to the current graph consumer |
-| Live hardware validation | Not performed for this reconstruction |
+| Live hardware validation | Earlier reconstruction tests were non-actuating; the [later campaign archive](../paper/evidence/2026-09-28-campaign-archive-audit.md) retains Vision attempts and failures; no new visual-classifier accuracy study is claimed |
 | Freshness | Handoff evidence expires 180 seconds after observation in LIVE and TEST; safety signals retain 5 seconds |
 
 ## Installed Package and Executable Structure

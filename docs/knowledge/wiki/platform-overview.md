@@ -1,5 +1,5 @@
 ---
-{"topic_id":"platform-overview","owner":"documentation","source_refs":["docs/README.md","docs/modularity.md","docs/runtime/three_level_control_model.md"],"source_revision":{"docs/README.md":"7350abfcdd4cc391eb39e7c840a01f2b0d84043ca39bf1544561742c2e2bd5f1","docs/modularity.md":"dbb5f75b8abe1a1b9f9a5e1b64fe7853d7da60d77ec29dd0103e9f2c2a24cfd3","docs/runtime/three_level_control_model.md":"85195ea1600067c61996f1201b29d3221cd2c91a05a038067d494b1de52d661b"},"verified_at":"2026-09-18T00:00:00+09:00","applicability":"Public AX4LAB reference: platform-overview","status":"reviewed"}
+{"topic_id":"platform-overview","owner":"documentation","source_refs":["docs/README.md","docs/modularity.md","docs/runtime/three_level_control_model.md"],"source_revision":{"docs/README.md":"7b259c16134066b2fa8b946dc2a210509aa5e6efc12210010453bb4d5ed7fc96","docs/modularity.md":"dbb5f75b8abe1a1b9f9a5e1b64fe7853d7da60d77ec29dd0103e9f2c2a24cfd3","docs/runtime/three_level_control_model.md":"85195ea1600067c61996f1201b29d3221cd2c91a05a038067d494b1de52d661b"},"verified_at":"2026-09-28T00:00:00+09:00","applicability":"Public AX4LAB reference: platform-overview","status":"reviewed"}
 ---
 
 # AX4LAB Platform — System Guide
