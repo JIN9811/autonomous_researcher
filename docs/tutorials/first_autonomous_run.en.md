@@ -1,143 +1,219 @@
-# First Autonomous Run (English)
+<!-- atr-doc
+doc_type: guide
+subtype: tutorial
+status: active
+authority: procedural
+audience: [user, operator, researcher]
+scope: [gui_tutorial, operator_workflow]
+summary: Screenshot-led first virtual run, evidence inspection and recovery checkpoints.
+source_of_truth:
+  - web/templates/index.html
+  - web/static/app.js
+  - web/templates/planning.html
+  - web/static/planning.js
+  - utils/test_mode_execution_profiles.py
+last_verified: 2026-09-29
+verified_against: fcfba9f
+related_docs:
+  - docs/gui/visual_structure.md
+  - docs/runtime/test_mode.md
+supersedes: []
+-->
 
-## Status at a Glance
+# First Autonomous Run — Step by Step
 
-| At a glance | Details |
-|---|---|
-| Purpose | Check stage progression, artifacts and trace on a first run |
-| Audience | First-time operators |
-| Preparation | Dependencies, model and execution mode; physical actions are opt-in |
-| Reading path | [Complete user manual](user_manual.en.md) |
+[한국어](first_autonomous_run.ko.md) · [All tutorials](first_autonomous_run.md)
 
-This tutorial validates the whole cycle from operator message to run completion without skipping safety gates.
+## Goal and prerequisites
 
-## Scope
+Complete one **virtual** experiment through the existing Live conversation, then
+find its design, analysis and optimization evidence. This walkthrough does not
+require a printer or robot. A virtual result is not a physical experiment result.
 
-- Covers: Live/bo loop entry, test mode, specimen generation, queue-based hardware calls, and trace verification.
-- Hardware required: only when you intentionally execute live print/robot actions.
+You need a configured AX4LAB installation, a reachable LLM backend and a browser.
+If installation is incomplete, follow [Requirements](../../REQUIREMENTS.md) first.
+Use a desktop viewport of 1920 × 1080 to match the figures. Screenshot numbers and
+saved settings belong to the captured installation; do not copy them blindly.
 
-## 1) Pre-Check
+## Step 1 — Open the application
 
-Before the first run, complete each item:
-
-- `git status` is clean (or you know intentional pending changes)
-- Virtual environment is activated
-- Dependencies installed: `pip install -r requirements.txt`
-- Launcher is installed: `bash install/install_cli.sh`
-- Required ports are reachable: server uses 7860
-- Optional: correct model and hardware profile exists
-
-## 2) Start System
+From a terminal on the installed workstation:
 
 ```bash
 atr up
 ```
 
-Open:
+Open `http://localhost:7860`. If the server is already running, use that instance;
+do not restart an active experiment to follow this guide.
 
-- `http://localhost:7860`
-- `http://localhost:7860/live`
+![Main dashboard: models above Run Control](../gui/assets/screenshots/2026-09-29/main-dashboard.png)
 
-Stop later:
+**Expected:** the Main dashboard shows model/backend controls and **Run Control**.
+A loaded model indicates availability, not an active experiment.
+If the page is unreachable, check the launcher output and local server before
+trying any device action.
 
-```bash
-atr down
-```
+## Step 2 — Choose the virtual execution profile
 
-Restart with `atr restart`: it runs the existing `down` path, then `up` only on success. Finish active work first; stop/cleanup behavior is unchanged.
+1. In **Run Control**, click **Test Mode Settings**.
+2. Select **Virtual Bridge**.
+3. Inspect the per-agent physical boundaries. Keep the virtual/preflight configuration
+   for the first exercise; do not change an agent to **Real device**.
+4. Set **Total Cycles** to `1` for this exercise and click **Save profile**.
+5. Click **Reload** and confirm the saved value/profile. This change affects future
+   runs, not the cycle count of an already active or resumed run.
 
-## 3) Start in Test Mode (Recommended First)
+![Test Mode Settings: virtual profile and device boundaries](../gui/assets/screenshots/2026-09-29/test-mode-settings.png)
 
-1. Open Live GUI.
-2. Ensure backend and model are loaded.
-3. In main control or Live GUI, select `Test` mode.
-4. Start the run.
-5. Confirm:
-   - The run state becomes active.
-   - Event stream emits `run.started` and stage transitions.
-   - `experiment.evaluate` and `printer.prepare` produce structured output (if printer stage is involved).
-   - `job_id` appears when queued hardware tools are used.
+**Expected:** a saved revision and the intended virtual boundaries.
+The screenshot's cycle count is illustrative, not the value required by this exercise.
 
-If any stage fails:
+Do not choose another profile just because it contains the word “test”:
 
-- open the timeline for failed node
-- inspect artifact and context in Runtime IDE or event payload
+| Profile | Printer path | Other device implications |
+|---|---|---|
+| Virtual Bridge | Virtual/preflight path | No physical calls under the virtual profile |
+| Installed Printer | Slices, then sends an ejection-only artifact; print body/cooling skipped | Vision, manipulation and UTM can be real |
+| Physical Print | Full sliced print, cooling and configured ejection | Vision, manipulation and UTM can be real |
 
-## 4) Test-mode Print Paths
+The saved per-agent overrides also matter. See [Test Mode](../runtime/test_mode.md).
 
-In Live GUI chat, you can request:
+## Step 3 — Open the Live conversation
 
-- `테스트 모드, 가상 브릿지`
-- `테스트 모드, 설치 프린터`
-- `테스트 모드, 실제 출력`
+1. Return to Main.
+2. Select the configured **Inference** backend. Verify its model or API route is ready.
+3. Set **Mode** to **live**, then click **Start**.
+4. Allow pop-ups for the local application if no new window appears.
 
-Routing behavior:
+![Live GUI: agent list, report and conversation](../gui/assets/screenshots/2026-09-29/live-overview.png)
 
-- 가상 브릿지: slicing + virtual path validation
-- 설치 프린터: active printer profile connection check + live gate checks. Bambu X2D is the default; Prusa runs only after explicit profile selection.
-- 실제 출력: slice/upload/start path when live gate passes
+**Expected:** Live GUI opens separately and initializes its conversation.
+This is the chat-driven entry used in this tutorial. Main's **test → Start** instead
+calls the direct run-start route; it is not the same button sequence.
 
-If live gate blocks, the run should stop before hardware start and show reason code.
+The figure contains historical data. Opening Live is not evidence that a new run
+has been admitted.
 
-## 5) Run in Live Mode
+## Step 4 — Request and review the test plan
 
-1. Send a clear execution goal such as:
+In Live chat, enter this supported example:
 
 ```text
-실험 수행
+테스트 모드, 가상 브릿지
 ```
 
-2. Wait for orchestrator handoff line.
-3. Confirm Design and Specimen stages create valid candidate + artifacts.
-4. Confirm downstream stages continue according to graph transitions.
-5. Inspect BO/analysis artifacts in run artifact panel.
+This means “test mode, virtual bridge.” The scenario-input driver asks/answers
+planning questions through the normal Orchestrator conversation. Read the resulting
+**Experiment Contract** and **Experimental Setup**, not only the greeting.
 
-## 6) Verify Artifact Lineage and Trace
+Check the objective and units, specimen dimensions/material, design-variable names
+and bounds, execution profile, and number of cycles. For the gyroid workflow,
+the design variables are **cell size** and **wall thickness**, not an old density
+search space. State corrections in chat if the proposed plan differs from your intent.
 
-Open Runtime IDE: `http://localhost:7860/ide`
+![Orchestrator: experiment contract and decisions](../gui/assets/screenshots/2026-09-29/live-orchestrator.png)
 
-Minimum checks:
+**Expected:** a reviewed contract and a run-specific admission/handoff.
+Planning consent is distinct from execution consent; the test scenario can supply
+the normal review replies, but missing connection facts and physical confirmations
+remain operator-owned. Do not answer a physical confirmation with fictional evidence.
+If it is requested in this virtual exercise, check the selected profile.
 
-1. Select the latest run.
-2. Confirm event order and `run.created -> run.started -> node.started/completed`.
-3. Open node-level error details when anything fails.
-4. Open Artifact Lineage for the run and confirm producer + artifact type.
-5. Confirm trace can be returned to source node from artifact preview.
+## Step 5 — Check design and specimen preparation
 
-## 7) Queue and Recovery
+Click **DSN** on the left, then **Report**.
 
-Check queue status from tool layer:
+![Design report: generated specimens, design space and comparison](../gui/assets/screenshots/2026-09-29/live-design.png)
 
-```python
-ctx.tools.call("experiment.queue.status", {})
-```
+1. Match the selected candidate to this run/cycle.
+2. Inspect **Generated Specimens**, **Design Space**, **Candidate Comparison** and
+   **Constraint Check**.
+3. Open a generated STL from **Artifacts** and check that it belongs to this candidate.
+4. Select **SPC** to inspect slicing/preparation evidence.
 
-Practical recovery checklist:
+**Expected:** an identifiable candidate, current constraint evidence and the
+corresponding artifact. A thumbnail alone is not a pass verdict. Missing mass/time
+before slicing is not a measurement; use the actual recorded slicer/analysis source
+when it becomes available.
 
-- Missing connection info: update `memory/prusa_connection.json` and retry specimen stage.
-- Model context issue: reload model and re-run.
-- Stale run state: refresh, then check SSE status in Live header.
-- Device busy: wait for existing job completion or use explicit stop/restart controls.
+## Step 6 — Follow the agents without taking over their devices
 
-## 8) Completion
+![SPC report: preparation and printer evidence](../gui/assets/screenshots/2026-09-29/live-specimen.png)
 
-A successful first run should yield:
+Use the left agent list to inspect VIS, MAN and EQP reports as the workflow
+progresses. Their virtual/preflight outcomes must remain distinguishable from
+physical completion. Do not open a workspace and manually run a second print or
+rollout to make a pending card turn green.
 
-- Stable planning trace
-- Stage transitions according to graph config
-- At least one artifact per stage output (where applicable)
-- Queue metadata in hardware-involved operations
-- Completed `Guardian` terminal state
+**Expected:** stage-specific evidence for the current run, then a handoff to ANL.
+If a stage stops, open its **Timeline** and **Artifacts** before retrying.
+Use the checklist in Step 9.
 
-## 9) Additional CLI/GUI Cross-check
+## Step 7 — Read analysis and BO
 
-Run:
+Select **ANL → Report**. Inspect the SS/FD views and their units, selected specimen,
+mass source and metric result. Then select **BO → Report**.
 
-```bash
-atr model list
-atr status
-atr events recent
-atr modules
-```
+![Analysis report and measured-response evidence](../gui/assets/screenshots/2026-09-29/live-analysis.png)
 
-Main GUI and CLI should return consistent high-level states.
+![BO report with posterior and candidate evidence](../gui/assets/screenshots/2026-09-29/live-bo.png)
+
+**Expected:** analysis tied to the current candidate. A GP posterior is meaningful
+only when sufficient observations exist; an initial LHS-only state is not a plotting
+failure. In a one-cycle exercise a new BO recommendation is not guaranteed.
+When available, inspect the 2D/3D mean, uncertainty and acquisition views and the
+candidate coordinates. Never treat the synthetic/virtual result as measured SEA.
+
+These figures show a historical multi-cycle run, not the result you must reproduce
+after a single cycle.
+
+## Step 8 — Find the files and review the session
+
+1. Select the relevant agent, then **Artifacts**.
+2. Use **All files** or the image filter as appropriate; an empty filter does not
+   establish that the run lost its files.
+3. Open the STL, curve image/data and BO files that actually exist.
+4. Record the run ID, cycle and candidate ID alongside the file paths.
+
+![Artifacts view: retained files and figure previews](../gui/assets/screenshots/2026-09-29/live-artifacts.png)
+
+Run records live under `runs/<run-id>/`; artifacts can be stored separately under
+`artifacts/`. Follow recorded references rather than assuming every file is inside
+one run folder. For read-only history, return to Main, select **replay**, choose an
+**Experiment session**, and click **Start**.
+
+![Main: Replay mode and experiment-session selector](assets/screenshots/2026-09-29/main-replay.png)
+
+**Expected:** a separate Replay window with recorded points, not device controls.
+Only saved points can be selected; legacy sessions may not cover every cycle.
+See [Replay](../gui/run_replay.md).
+
+## Step 9 — Finish, or diagnose the first failure
+
+A successful exercise has a terminal run result and inspectable artifacts for the
+stages it actually executed. “No error on screen” alone is not completion.
+
+| Symptom | First check | Do not do this |
+|---|---|---|
+| Live window did not open | Browser pop-up permission; Main mode must be live | Repeatedly start another run |
+| LLM response stalls | Selected route/model, backend error and quota/availability | Change the experiment objective to bypass an API error |
+| Real-device confirmation appears | Saved execution profile and per-agent boundaries | Confirm an action that did not occur |
+| Card is pending or empty | Current run/cycle, Timeline, artifact source/filter | Reuse an old successful result as current evidence |
+| Paused/error run | Read the unresolved reason; correct it, then use existing Resume | Start a new run to “resume” the old one |
+| Recovery requests physical action | Operator supervision and actual device state | Assume virtual testing authorizes hardware |
+
+For an idle system you intend to shut down, run `atr down`.
+Do not use `atr restart` as a substitute for run recovery.
+
+## Next exercise
+
+Restore the cycle count you intend to use for future runs. Continue with the
+[operator walkthroughs](user_manual.en.md) and
+[printer setup](device_workspace_3dp_usage.en.md) before selecting physical devices.
+
+## Verification scope
+
+The instructions were checked against the current templates, browser handlers and
+runtime references at `fcfba9f`. Screenshots were captured read-only on 29 September
+2026; no new experiment was run for documentation. This is a navigation/procedure
+check, not certification of the pictured hardware state.

@@ -7,6 +7,14 @@ documents:
   - CHANGELOG.md
   - docs/README.md
   - docs/gui/visual_structure.md
+  - docs/tutorials/first_autonomous_run.en.md
+  - docs/tutorials/first_autonomous_run.ko.md
+  - docs/tutorials/user_manual.en.md
+  - docs/tutorials/user_manual.ko.md
+  - docs/tutorials/device_workspace_3dp_usage.en.md
+  - docs/tutorials/device_workspace_3dp_usage.ko.md
+  - docs/tutorials/device_workspace_vision_camera_bridge_usage.en.md
+  - docs/tutorials/device_workspace_vision_camera_bridge_usage.ko.md
   - docs/modularity.md
   - docs/maintenance/repository_cleanup.md
   - docs/maintenance/code_documentation_audit_20260928.md

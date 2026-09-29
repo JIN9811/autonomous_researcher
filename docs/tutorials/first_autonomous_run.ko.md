@@ -1,133 +1,212 @@
-# 첫 번째 자동실험 실행 가이드
+<!-- atr-doc
+doc_type: guide
+subtype: tutorial
+status: active
+authority: procedural
+audience: [user, operator, researcher]
+scope: [gui_tutorial, operator_workflow]
+summary: Screenshot-led first virtual run, evidence inspection and recovery checkpoints.
+source_of_truth:
+  - web/templates/index.html
+  - web/static/app.js
+  - web/templates/planning.html
+  - web/static/planning.js
+  - utils/test_mode_execution_profiles.py
+last_verified: 2026-09-29
+verified_against: fcfba9f
+related_docs:
+  - docs/gui/visual_structure.md
+  - docs/runtime/test_mode.md
+supersedes: []
+-->
 
-## Status at a Glance
+# 첫 자율 실험 — 단계별 따라 하기
 
-| At a glance | Details |
-|---|---|
-| Purpose | 첫 실행의 단계 진행·산출물·추적 근거 확인 |
-| Audience | 첫 실행을 준비하는 사용자 |
-| Preparation | 의존성·모델·실행 모드 확인; 물리 동작은 별도 선택 |
-| Reading path | [전체 사용자 매뉴얼](user_manual.ko.md) |
+[English](first_autonomous_run.en.md) · [전체 튜토리얼](first_autonomous_run.md)
 
-이 가이드는 오케스트레이터 대화부터 실행 완료까지의 기본 루프를 안전하게 검증하기 위한 최초 실행 절차입니다.
+## 목표와 준비물
 
-## 적용 범위
+기존 Live 대화 경로로 **가상 실험 1회**를 수행하고 설계·분석·최적화 근거를
+찾는 실습입니다. 프린터와 로봇은 필요하지 않습니다. 가상 결과를 실제 실험
+결과로 해석하지 않습니다.
 
-- 운영 항목: Live GUI, 테스트 모드, 시편 생성, 장비 큐 연동, 추적/아티팩트 확인
-- 하드웨어 사용은 테스트 단계에서 선택적으로 수행
+설치된 AX4LAB, 사용 가능한 LLM 백엔드, 브라우저가 필요합니다.
+설치 전이라면 [Requirements](../../REQUIREMENTS.md)를 먼저 읽습니다.
+화면은 1920 × 1080 기준입니다. 캡처 속 숫자와 저장값은 해당 설치 환경의
+예시이지 그대로 복사할 권장 설정이 아닙니다.
 
-## 1) 사전 점검
+## Step 1 — 서버와 메인 화면 열기
 
-첫 실행 전 아래를 확인합니다.
-
-- 저장소 경로: `~/autonomous_researcher`
-- Python 가상환경 생성/활성화
-- `pip install -r requirements.txt` 완료
-- `bash install/install_cli.sh` 완료
-- Live GUI 포트(7860) 접근
-- 모델 로드 상태 확인(필요시 수동 로드)
-
-## 2) 시스템 시작
+설치된 워크스테이션의 터미널에서 실행합니다.
 
 ```bash
 atr up
 ```
 
-접속 URL:
+`http://localhost:7860`에 접속합니다. 이미 서버가 실행 중이면 그 서버를
+사용합니다. 이 실습 때문에 진행 중인 실험을 재시작하지 않습니다.
 
-- `http://localhost:7860`
-- `http://localhost:7860/live`
+![모델 설정과 Run Control이 있는 메인 화면](../gui/assets/screenshots/2026-09-29/main-dashboard.png)
 
-중지:
+**확인:** Main에 모델·백엔드 설정과 **Run Control**이 보입니다.
+모델이 로딩되어 있다는 표시와 실험이 실행 중이라는 표시는 다릅니다.
+접속되지 않으면 장비 버튼보다 먼저 실행 터미널과 서버 상태를 확인합니다.
 
-```bash
-atr down
-```
+## Step 2 — 가상 실행 프로필 선택하기
 
-## 3) 먼저 테스트 모드부터 실행
+1. **Run Control → Test Mode Settings**를 누릅니다.
+2. **Virtual Bridge**를 선택합니다.
+3. 에이전트별 물리 실행 경계를 확인합니다. 첫 실습에서는 가상/preflight
+   설정을 유지하고 **Real device**로 바꾸지 않습니다.
+4. **Total Cycles**를 `1`로 입력하고 **Save profile**을 누릅니다.
+5. **Reload**로 다시 읽어 저장값을 확인합니다. 새 런에 적용되는 설정이며
+   이미 실행 중이거나 복구한 런의 사이클 수를 바꾸지 않습니다.
 
-테스트 모드는 하드웨어 동작을 최소화하고 핵심 실행 체인을 점검합니다.
+![가상 프로필과 장비 실행 경계](../gui/assets/screenshots/2026-09-29/test-mode-settings.png)
 
-1. Live GUI에서 모델/백엔드 상태 확인
-2. `Test` 모드 선택
-3. `Start` 실행
-4. 확인 포인트
-   - run 상태 active 전환
-   - 이벤트 스트림에서 `run.started`와 단계 전이 존재
-   - printer 관련 도구가 호출되면 `job_id` 확인
-   - 실패 시 에러 노드/타임라인에서 원인 확인
+**확인:** 저장 revision과 가상 실행 경계가 맞습니다.
+그림의 사이클 수는 캡처 당시 값이며 이 실습의 목표값이 아닙니다.
 
-## 4) 테스트 모드의 출력 모드
+‘테스트’라는 이름만 보고 다른 프로필을 선택하면 안 됩니다.
 
-입력 예시:
+| 프로필 | 프린터 경로 | 나머지 장비 |
+|---|---|---|
+| Virtual Bridge | 가상/preflight 경로 | 가상 프로필에서는 실제 장비 호출 없음 |
+| Installed Printer | 슬라이싱 후 배출 전용 파일 전송, 출력 본문·냉각 생략 | 비전·로봇·UTM은 실제 동작 가능 |
+| Physical Print | 전체 출력·냉각·설정된 자동 배출 | 비전·로봇·UTM은 실제 동작 가능 |
 
-- `테스트 모드, 가상 브릿지`
-- `테스트 모드, 설치 프린터`
-- `테스트 모드, 실제 출력`
+저장된 에이전트별 override도 확인합니다. 상세 계약은
+[Test Mode](../runtime/test_mode.md)에 있습니다.
 
-동작:
+## Step 3 — Live 대화창 열기
 
-- 가상 브릿지: 슬라이싱 + 가상 검증 경로
-- 설치 프린터: 현재 active printer profile(Bambu X2D 기본, Prusa는 명시 선택)의 연결 체크 + live gate 검증
-- 실제 출력: live gate 통과 시 업로드/시작 경로
+1. Main으로 돌아갑니다.
+2. 준비된 **Inference** 백엔드를 고르고 모델/API 연결을 확인합니다.
+3. **Mode = live**로 바꾼 뒤 **Start**를 누릅니다.
+4. 창이 안 뜨면 로컬 사이트의 팝업 허용을 확인합니다.
 
-실제 출력이 gate에서 차단되면 시작 전 단계에서 중단되어 이유가 표시되어야 합니다.
+![에이전트 목록·리포트·대화가 있는 Live GUI](../gui/assets/screenshots/2026-09-29/live-overview.png)
 
-## 5) Live 모드 실행
+**확인:** 별도 Live 창과 초기 대화가 열립니다.
+이 실습은 대화 기반 진입 경로입니다. Main의 **test → Start**는 직접
+run-start 경로를 호출하므로 같은 버튼 순서가 아닙니다.
 
-1. 대화에서 실행 트리거를 명확히 입력:
+그림에는 과거 런 정보가 있습니다. Live 창을 열었다는 사실만으로 새 실험이
+승인·시작되었다고 판단하지 않습니다.
+
+## Step 4 — 테스트 요청과 실험 계획 검토하기
+
+Live 채팅에 아래 예시를 입력합니다.
 
 ```text
-실험 수행
+테스트 모드, 가상 브릿지
 ```
 
-2. 오케스트레이터 handoff 메시지 확인
-3. Design / Specimen 단계의 후보/아티팩트 존재 확인
-4. 그래프 규칙에 따른 다음 단계 진행 확인
-5. BO/분석 결과를 이벤트 추적에서 확인
+시나리오 입력기가 기존 Orchestrator 대화 경로로 계획 질문에 응답합니다.
+환영 메시지만 보지 말고 **Experiment Contract**와 **Experimental Setup**을
+읽습니다.
 
-## 6) 런 추적/아티팩트 검증
+목표·단위, 시편 크기·재료, 설계변수·범위, 실행 프로필, 사이클 수를 확인합니다.
+Gyroid 경로의 설계변수는 **cell size와 wall thickness**입니다. 과거 relative
+density 탐색 범위를 그대로 사용하지 않습니다. 의도와 다르면 채팅으로 정정합니다.
 
-Runtime IDE로 이동: `http://localhost:7860/ide`
+![실험 계약과 결정 내역](../gui/assets/screenshots/2026-09-29/live-orchestrator.png)
 
-최소 점검 항목:
+**확인:** 검토된 계약과 이번 런의 admission/handoff가 남습니다.
+계획 동의와 실행 동의는 다릅니다. 테스트 입력기가 정상 검토 응답을 제공할
+수 있지만 연결 정보 부족·물리 동작 확인은 운영자 책임입니다. 하지 않은
+물리 동작을 했다고 답하지 않습니다. 가상 실습인데 물리 확인을 요구하면
+실행 프로필을 다시 확인합니다.
 
-1. 최신 run 선택
-2. `run.created -> run.started -> node.started/completed` 순서 확인
-3. 실패 이벤트의 노드 상세 확인
-4. Artifact Lineage에서 producer/타입/경로 확인
-5. 미리보기 가능한 파일은 Inline, 대형 파일은 경로 추적이 남는지 확인
+## Step 5 — 설계와 시편 준비 확인하기
 
-## 7) 큐/복구 점검
+왼쪽 **DSN → Report**를 선택합니다.
 
-도구 레이어 점검:
+![생성 시편·설계 공간·후보 비교](../gui/assets/screenshots/2026-09-29/live-design.png)
 
-```python
-ctx.tools.call("experiment.queue.status", {})
-```
+1. 선택 후보가 이번 런·사이클에 속하는지 확인합니다.
+2. **Generated Specimens**, **Design Space**, **Candidate Comparison**,
+   **Constraint Check**를 읽습니다.
+3. **Artifacts**에서 STL을 열어 후보와 연결되는지 확인합니다.
+4. **SPC**로 이동해 슬라이싱·준비 근거를 확인합니다.
 
-복구 체크리스트:
+**확인:** 후보 ID, 현재 제약 검사, 해당 산출물이 연결됩니다.
+썸네일이 있다는 것만으로 통과가 아닙니다. 슬라이싱 전 질량·시간 공란은
+측정값이 아니며, 나중에 기록된 실제 슬라이서/분석 출처를 사용합니다.
 
-- 연결 정보 누락: `memory/prusa_connection.json` 갱신 후 시편 단계 재실행
-- 모델 컨텍스트 문제: 모델 재로드 후 재시도
-- 장시간 정적 상태: Live 화면에서 SSE/동기화 상태 새로고침
-- 장비 점유 중: 기존 job 완료 대기 또는 정지 제어 사용
+## Step 6 — 장비를 따로 실행하지 않고 흐름 관찰하기
 
-## 8) 성공 기준
+![SPC의 준비 상태와 프린터 근거](../gui/assets/screenshots/2026-09-29/live-specimen.png)
 
-- 계획/메시지 trace가 안정적으로 연결됨
-- 설정한 그래프 순서대로 단계 전이됨
-- 각 단계에서 가능한 stage artifact 생성
-- 장비 호출 시 큐 메타데이터 존재
-- Guardian 경유 완료 상태로 수렴
+왼쪽 목록으로 VIS·MAN·EQP 리포트를 확인합니다. 가상/preflight 결과와
+실제 물리 완료를 구분합니다. 카드가 pending이라고 워크스페이스에서 별도
+출력이나 롤아웃을 시작하지 않습니다.
 
-## 9) CLI와 GUI 일치 확인
+**확인:** 이번 런의 단계별 근거가 쌓이고 ANL로 이어집니다.
+멈추면 해당 에이전트의 **Timeline**, **Artifacts**부터 보고 Step 9를 따릅니다.
 
-```bash
-atr model list
-atr status
-atr events recent
-atr modules
-```
+## Step 7 — 분석과 BO 결과 읽기
 
-CLI 출력과 GUI 상태가 동일한 큰 흐름을 보여야 합니다.
+**ANL → Report**에서 SS/FD, 단위, 선택 시편, 질량 출처, 물성값을 확인합니다.
+이후 **BO → Report**를 선택합니다.
+
+![ANL의 곡선과 응답 근거](../gui/assets/screenshots/2026-09-29/live-analysis.png)
+
+![BO의 포스테리어와 후보 근거](../gui/assets/screenshots/2026-09-29/live-bo.png)
+
+**확인:** 분석 결과가 해당 후보와 연결됩니다. GP는 관측값이 충분해야 하므로
+초기 LHS만 있는 상태를 그래프 오류로 보지 않습니다. 1사이클 실습에서는
+새 BO 추천이 반드시 생성되는 것은 아닙니다. 생성되면 2D/3D 평균·불확실성·
+획득함수와 후보 좌표를 함께 봅니다. 가상 결과를 실측 SEA로 사용하지 않습니다.
+
+이 그림은 과거 다중 사이클 런의 화면입니다. 한 사이클만 수행해 동일한
+그래프가 나와야 한다는 의미가 아닙니다.
+
+## Step 8 — 산출물과 다시보기 찾기
+
+1. 해당 에이전트의 **Artifacts**를 선택합니다.
+2. **All files** 또는 이미지 필터를 선택합니다. 필터가 비었다고 파일이
+   사라졌다고 단정하지 않습니다.
+3. 실제 존재하는 STL, 곡선 이미지·데이터, BO 파일을 엽니다.
+4. 파일 경로와 함께 run ID, cycle, candidate ID를 기록합니다.
+
+![Artifacts의 파일과 그림 미리보기](../gui/assets/screenshots/2026-09-29/live-artifacts.png)
+
+런 기록은 `runs/<run-id>/`, 산출물은 별도 `artifacts/`에도 있습니다.
+모든 파일이 런 폴더 안에 있다고 가정하지 말고 기록된 참조를 따릅니다.
+Main에서 **replay → Experiment session 선택 → Start**로 다시보기를 엽니다.
+
+![메인의 Replay 모드와 세션 선택](assets/screenshots/2026-09-29/main-replay.png)
+
+**확인:** 장비 실행이 없는 별도 Replay 창이 열립니다.
+저장된 시점만 선택 가능하고 오래된 세션은 모든 사이클이 남아 있지 않을 수
+있습니다. 자세한 동작은 [Replay](../gui/run_replay.md)를 봅니다.
+
+## Step 9 — 완료 확인 또는 오류 진단하기
+
+실제로 수행한 단계의 산출물과 런 종료 결과를 확인하면 실습 완료입니다.
+단순히 화면에 오류가 없다는 것만으로 완료가 아닙니다.
+
+| 증상 | 먼저 볼 것 | 하지 말 것 |
+|---|---|---|
+| Live 창이 안 열림 | 팝업 허용, Main의 live 모드 | Start 연타로 새 런 만들기 |
+| LLM 응답 대기 | 선택 백엔드·모델·API 오류/할당량 | API 오류를 피해 실험 목표 바꾸기 |
+| 물리 확인 요청 | 저장 프로필과 에이전트별 실행 경계 | 하지 않은 동작 확인하기 |
+| 카드 공란/pending | 현재 run/cycle, Timeline, 파일 필터·출처 | 과거 성공 결과를 이번 근거로 재사용 |
+| 일시정지/오류 | 미해결 원인 수정 후 기존 Resume | 새 Start로 이전 런을 이어가려 하기 |
+| 복구 중 물리 동작 필요 | 현장 감독과 실제 장비 상태 | 가상 실습 승인을 장비 승인으로 간주 |
+
+시스템이 idle이고 종료하려는 경우 `atr down`을 실행합니다.
+`atr restart`를 런 복구의 대체 수단으로 사용하지 않습니다.
+
+## 다음 실습
+
+향후 사용할 사이클 수로 설정을 되돌립니다.
+실제 장비를 선택하기 전 [운영자 실습](user_manual.ko.md)과
+[프린터 설정](device_workspace_3dp_usage.ko.md)을 진행합니다.
+
+## 검증 범위
+
+`fcfba9f`의 템플릿·브라우저 핸들러·런타임 문서와 절차를 대조했습니다.
+2026-09-29 화면은 읽기 전용으로 촬영했으며 문서 작성용 새 실험은 돌리지
+않았습니다. 화면·절차 검증이지 캡처 속 장비 상태의 새 물리 검증이 아닙니다.

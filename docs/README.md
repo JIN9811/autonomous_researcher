@@ -98,8 +98,9 @@ Reference, 절차 Guide, 목표 Design, 실행 Plan, 조사·감사 Evidence를 
 | API key / OpenAI fallback | [runtime/api_keys.md](runtime/api_keys.md) |
 | Live GUI 운영 | [gui/gui.md](gui/gui.md) |
 | Read-only run replay | [gui/run_replay.md](gui/run_replay.md) |
-| Device Workspaces / 3DP 사용법 | [tutorials/device_workspace_3dp_usage.ko.md](tutorials/device_workspace_3dp_usage.ko.md) |
-| Device Workspaces / Vision Camera Bridge | [tutorials/device_workspace_vision_camera_bridge_usage.ko.md](tutorials/device_workspace_vision_camera_bridge_usage.ko.md) |
+| 스크린샷 단계별 튜토리얼 목차 | [Tutorials — English / 한국어](tutorials/first_autonomous_run.md) |
+| Device Workspaces / 3DP 사용법 | [한국어](tutorials/device_workspace_3dp_usage.ko.md) · [English](tutorials/device_workspace_3dp_usage.en.md) |
+| Device Workspaces / Vision Camera Bridge | [한국어](tutorials/device_workspace_vision_camera_bridge_usage.ko.md) · [English](tutorials/device_workspace_vision_camera_bridge_usage.en.md) |
 | BambuLab X2D bridge 구조 | [hardware/bambulab_x2d_device_bridge_runtime_guideline.md](hardware/bambulab_x2d_device_bridge_runtime_guideline.md) |
 | 첫 실행 튜토리얼 | [tutorials/first_autonomous_run.ko.md](tutorials/first_autonomous_run.ko.md), [tutorials/first_autonomous_run.en.md](tutorials/first_autonomous_run.en.md) |
 | Git/GitHub 운영 | [repository/github_version_control.md](repository/github_version_control.md) |

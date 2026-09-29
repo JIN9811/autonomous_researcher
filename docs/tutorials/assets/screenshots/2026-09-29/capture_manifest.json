@@ -1,0 +1,137 @@
+{
+  "schema": "atr_tutorial_screenshots.v1",
+  "captured_at": "2026-09-29",
+  "source_commit": "fcfba9ffd22439672d576b7c2450307a7a5ffcca",
+  "viewport": {
+    "width": 1920,
+    "height": 1080,
+    "device_scale_factor": 1
+  },
+  "capture_method": "Existing application rendered in headless Chromium through Playwright. UI navigation, section expansion and profile selection only; no new layout or fabricated success state.",
+  "safety": {
+    "configuration_saved": false,
+    "experiments_started": false,
+    "robot_motion_started": false,
+    "printer_jobs_started": false,
+    "camera_captures_started": false,
+    "ros_commands_started": false,
+    "request_guard": "All non-read requests blocked, except explicitly audited read-only Knowledge query endpoints (not needed for these new captures). Device video streams blocked.",
+    "limitations": [
+      "Screens contain installation-specific saved values and historical run state, not recommended defaults or fresh physical verification.",
+      "Vision frame/ROS panels are unqueried; camera/robot status may be idle. Printer monitoring may report stale-device warnings.",
+      "LeRobot background dataset-list and mimic-status POST requests were blocked by the capture guard. No successful result was substituted.",
+      "Private addresses, credentials, serials and local identity paths were redacted in presentation only before capture."
+    ]
+  },
+  "reused_images": "../../../../gui/assets/screenshots/2026-09-29/capture_manifest.json",
+  "images": [
+    {
+      "file": "main-replay.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 235744,
+      "sha256": "684cdac48a51428b3be312a96c59c4fa02273d5c292b04d901a855b4744f4579",
+      "route": "/",
+      "section": "Run Control, Mode = replay; session picker populated; Start not clicked"
+    },
+    {
+      "file": "printer-connection.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 179881,
+      "sha256": "e1b514aaed3f687e359c58d6a4713549bd0fb62ae8fca81a93d0730274da1dea",
+      "route": "/printer",
+      "section": "Bridge Connection"
+    },
+    {
+      "file": "printer-defaults.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 155254,
+      "sha256": "f36f4dc8413fb81085a39087e706a6787baf6e6ff491bd30181015f1500e0574",
+      "route": "/printer",
+      "section": "Print Defaults"
+    },
+    {
+      "file": "printer-ejection.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 167541,
+      "sha256": "11879177cfbe27a8202a7142ce5466a30c011774dde07057d96cede388187164",
+      "route": "/printer",
+      "section": "Bambu G-code Autoejection"
+    },
+    {
+      "file": "printer-proof.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 178420,
+      "sha256": "dd2cb7c358f2e2aa4f286b8e82dc5f3e79fe802f358f539b5f81caf982180c90",
+      "route": "/printer",
+      "section": "Physical Proof Package"
+    },
+    {
+      "file": "printer-start-options.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 164522,
+      "sha256": "4822666e38226b671cd1a71ba9891623bdb9912bdcf19a7de9dd326456dcb0db",
+      "route": "/printer",
+      "section": "Print Start & Early Layers"
+    },
+    {
+      "file": "profile-installed.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 281309,
+      "sha256": "e0822581c9acea0b4b47dd02340adf2583a6491d5b6f8f602e1a9b49e394b9d9",
+      "route": "/test-mode-settings",
+      "section": "Installed Printer selected; no save"
+    },
+    {
+      "file": "profile-physical.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 276922,
+      "sha256": "827a3642f1ce80f6a73a92d3dcc0dcc0d0da22fd4f79699a714cbbbedb7d7797",
+      "route": "/test-mode-settings",
+      "section": "Physical Print selected; no save"
+    },
+    {
+      "file": "robot-devices.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 330074,
+      "sha256": "e75c0c5dd6856bd1a949e5fccb209e55d383c82dd069272f5cc22f02dc9795eb",
+      "route": "/lerobot",
+      "section": "Device Port Setup expanded; no detection/capture"
+    },
+    {
+      "file": "robot-recording.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 224151,
+      "sha256": "638ed140da10d4a03478feb20fa0627a5286b7c9a5ab64227dcf9ac49421fe5a",
+      "route": "/lerobot",
+      "section": "Recording section; recording not started"
+    },
+    {
+      "file": "vision-frame.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 116753,
+      "sha256": "8367b76b26f1e0ac7911fccb46792134ef65039e65d9512dd0c89cf65428185d",
+      "route": "/device-bridge/vision-utm",
+      "section": "Runtime Bridge, Live Frame Evidence; no frame requested"
+    },
+    {
+      "file": "vision-pose.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 320727,
+      "sha256": "d4c4b44bf80681338e1a79e0e48cc7b881f54fbfee85eb9f356e7567833c826b",
+      "route": "/device-bridge/vision-utm",
+      "section": "Specimen Pose Test; read-only status, no test/capture"
+    }
+  ]
+}

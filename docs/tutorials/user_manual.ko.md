@@ -1,783 +1,261 @@
-# Autonomous Researcher 사용자 종합 매뉴얼
+<!-- atr-doc
+doc_type: guide
+subtype: tutorial
+status: active
+authority: procedural
+audience: [user, operator, researcher]
+scope: [gui_tutorial, operator_workflow]
+summary: Practical operator exercises for devices, evidence, recovery and read-only replay.
+source_of_truth:
+  - web/templates
+  - web/static
+  - app/main.py
+  - app/run_review_routes.py
+last_verified: 2026-09-29
+verified_against: fcfba9f
+related_docs:
+  - docs/gui/visual_structure.md
+  - docs/runtime/test_mode.md
+supersedes: []
+-->
 
-## Status at a Glance
+# 운영자 실습 가이드
 
-| At a glance | Details |
-|---|---|
-| Purpose | 설치부터 GUI 운영·확장까지 전체 사용 경로 안내 |
-| Audience | 신규 사용자 · 운영자 · 개발자 |
-| Preparation | 실행 환경, 모델 설정, 사용할 장비 프로필 확인 |
-| Reading path | [설치 요구사항](../../REQUIREMENTS.md) · [에이전트](../agents/README.md) |
+[English](user_manual.en.md) · [첫 실행](first_autonomous_run.ko.md) · [튜토리얼 목차](first_autonomous_run.md)
 
-이 문서는 새 사용자가 저장소를 받아서 실행하고, 기존 사용자가 구조를 이해해 수정/확장할 수 있도록 만든 운영 매뉴얼입니다.
+## 시작 전
 
-대상 독자:
+첫 가상 런을 마친 다음 진행하는 실습입니다. 각 실습은 목표·실제 버튼·완료
+확인을 함께 설명합니다. 첫 장비 설정은 숙련된 운영자와 진행하며, 이 문서는
+무인 로봇/UTM 동작을 승인하는 문서가 아닙니다.
 
-- 초보자: GUI를 열고 테스트 모드로 첫 실행을 확인해야 하는 사용자
-- 운영자: 프린터, 로봇, Windows bridge, BO 워크스페이스를 설정해야 하는 사용자
-- 개발자: LangGraph, agent module, API, 테스트를 수정하거나 확장해야 하는 사용자
+설치는 [Requirements](../../REQUIREMENTS.md)를 따릅니다. 설치가 끝났으면
+`atr up` 후 `http://localhost:7860`에 접속합니다.
+문서 실습 때문에 진행 중인 런을 재시작하지 않습니다.
 
-## 0. 한눈에 보는 시스템
+그림은 2026-09-29의 1920 × 1080 캡처이며 과거 런이나 idle 상태도 포함합니다.
+새 물리 실험 증거가 아닙니다. 연결 정보·로컬 경로는 마스킹했고 화면의
+숫자를 모든 장비에 적용할 기본값으로 사용하지 않습니다.
 
-```text
-사용자
-  -> Main GUI 또는 Live GUI
-  -> FastAPI runtime controller
-  -> LangGraphRunLoop
-  -> design -> specimen -> vision(픽업 관측) -> manipulation(이송)
-  -> vision(배치 검증) -> equipment
-  -> manipulation(시험 후 정리) -> vision(정리 검증)
-  -> analysis -> knowledge -> bo -> guardian
-  -> continue면 design으로 반복, stop이면 complete, error면 error
-```
+## Exercise 1 — 올바른 워크스페이스 찾기
 
-위 경로는 현재 시편 이송·정리가 포함된 구성의 예시이며, 모든 실험·모드에
-강제되는 일직선 순서는 아닙니다. Vision은 대기하거나 경로를 전환할 수 있고,
-시험 후 정리가 요구되면 같은 run·cycle·specimen의 완료·검증 근거가 있어야
-Analysis로 넘어갑니다. 장비 응답 성공만으로 이 조건을 대신하지 않습니다.
-[Orchestration Route](../../README.ko.md#orchestration-route)에서 전체 그래프를,
-[Manipulation](../agents/manipulation_agent.md)과 [Vision](../agents/vision_agent.md)에서
-배치·정리 검증 경계를 확인할 수 있습니다. Analysis는 실측 목적값을 BO에
-전달하며, 수치 계산과 근거 검토는 Analysis가 담당합니다.
+**목표:** 설정 화면과 그 설정을 사용하는 실험 런을 구분합니다.
 
-핵심 원칙:
+1. Main에서 **Device Workspaces**로 스크롤합니다.
+2. 설정하려는 장비를 고릅니다.
+3. 런의 지시·승인·리포트는 Live GUI에서 처리합니다.
 
-- GUI, CLI, API는 같은 runtime state/event/artifact를 본다.
-- 실제 실행 순서는 `graphs/configs/atr_closed_loop.yaml`이 기준이다.
-- 각 단계의 실제 계약은 `graphs/modules/<agent>/module.yaml`이 기준이다.
-- Live GUI의 agent 표시와 일부 report card는 `/api/runtime/agent-manifests`가 기준이며, `graphs/modules/<agent>/ui.yaml`은 표시 전용 descriptor다.
-- 현재 코드가 실제로 노출하는 route/API/manifest/model 상태는 [../runtime/current_code_snapshot.md](../runtime/current_code_snapshot.md)에 정리한다.
-- 실제 장비는 bridge와 safety gate를 통과해야만 호출된다.
-- generated output, 비밀번호, 로컬 장비 IP, 모델 캐시는 Git에 넣지 않는다.
+![메인 워크스페이스 목록](../gui/assets/screenshots/2026-09-29/main-workspaces.png)
 
-## 1. 초보자용: 처음 실행하기
-
-### 1.1 준비물
-
-필수:
-
-- Linux workstation
-- Python 3.11 이상
-- Git
-- Bash terminal
-- 이 저장소: `~/autonomous_researcher`
-
-선택/장비별 필요:
-
-- vLLM/Nemoclaw: NVIDIA GPU, Docker/k3s, NemoClaw container
-- 3DP: Bambu Lab X2D가 기본 printer profile이며, Prusa MK4S는 명시 선택 profile로 유지된다. Bambu live camera proxy에는 `ffmpeg`가 필요하다.
-- Robot: `~/lerobot`, conda env `lerobot`, ROBOTIS/LeRobot 장비
-- Windows bridge: Windows PC, Python, PyAutoGUI bridge server
-
-자세한 설치 조건은 [../../REQUIREMENTS.md](../../REQUIREMENTS.md)를 먼저 봅니다.
-
-### 1.2 설치
-
-```bash
-cd ~/autonomous_researcher
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-bash install/install_cli.sh
-```
-
-새 터미널에서 `atr` 명령이 안 보이면:
-
-```bash
-source ~/.bashrc
-```
-
-### 1.3 서버 실행과 종료
-
-```bash
-atr up
-```
-
-브라우저에서 접속:
-
-- Main GUI: `http://localhost:7860/`
-- Live GUI: `http://localhost:7860/live`
-- API 문서: `http://localhost:7860/docs`
-
-종료:
-
-```bash
-atr down
-```
-
-재시작은 `atr restart`를 사용한다. 기존 `down`이 성공하면 기존 `up`을 실행하며, 종료·정리 동작은 동일하다. 진행 중인 작업을 마친 뒤 사용한다.
-
-직접 실행이 필요할 때:
-
-```bash
-.venv/bin/python -m app.serve
-```
-
-### 1.4 첫 테스트 실행 권장 순서
-
-1. `atr up`으로 서버를 켠다.
-2. Main GUI `http://localhost:7860/`에 들어간다.
-3. 모델 상태와 Device Workspace 버튼이 보이는지 확인한다.
-4. Live GUI `http://localhost:7860/live`를 연다.
-5. 채팅에 `테스트 모드` 또는 테스트 목적을 입력한다.
-6. Report, Backend, Graph, Artifacts, Timeline 탭을 보면서 단계가 진행되는지 확인한다.
-7. 결과 파일은 `runs/`, `artifacts/`, `memory/` 아래에서 확인한다.
-
-테스트 모드에서 봐야 하는 증거:
-
-- `run_id`가 생성됨
-- `design`, `specimen`, `analysis`, `bo`, `guardian` 등 stage 이벤트가 기록됨
-- 실패 시 `failure_code`, `node.failed`, `run.failed`가 표시됨
-- 실제 장비를 쓰지 않는 경로에서는 upload/start/rollout 같은 live action이 실행되지 않음
-
-### 1.5 GUI 페이지별 사용법
-
-| 화면 | 언제 쓰는가 | 처음 할 일 |
+| 작업 | 워크스페이스 | 따라 할 문서 |
 |---|---|---|
-| Main GUI `/` | 전체 상태 확인, 서버/모델/장비 진입 | runtime state, model status, device workspace 확인 |
-| Live GUI `/live` | 오케스트레이터와 대화하며 실험 실행 | 먼저 test mode로 목표 입력 |
-| Runtime IDE `/ide` | graph 구조를 보고 수정/검증 | Main System graph dry-run 확인 |
-| Module Management `/module-management` | agent module 검증/버전 관리, draft module 생성, `ui.yaml` 표시 descriptor 관리 | 각 module validate/dry-run 확인, draft는 실행되지 않는지 확인 |
-| 3DP `/printer` | Bambu Lab X2D 기본 device bridge, printer fleet, camera/status, slicing/start gate, autoejection 설정 | connection/profile/test options 저장 |
-| LeRobot `/lerobot` | 포트, 카메라, teleop, record, train, rollout | follower/leader/camera 포트 저장 |
-| BO `/bo` | acquisition/strategy/parameter space 설정 | settings 저장 후 benchmark 실행 |
-| Windows `/equipment/windows` | Windows PyAutoGUI bridge 연결 | scan, candidate save, test program 실행 |
-
-### 1.6 Live GUI에서 보는 핵심 영역
-
-- Chat: 사용자와 오케스트레이터/agent 메시지
-- Agent Binder: 현재 stage와 agent별 상태
-- Report: 선택 agent의 요약 보고서
-- Backend: raw trace, LLM/tool input/output, failure code
-- Graph: 현재 graph/node 흐름
-- Artifacts: STL, G-code, BO plot, log 등 산출물
-- Timeline: runtime event 순서
-- Device strip: GPU/LLM/Printer/Robot/Camera/Windows bridge 등 상태
-
-Specimen Making Agent를 선택하면 Report 영역은 3DP 작업 모니터로 동작합니다. 중앙의 `Live Job Monitor`가 현재 job progress, layer, queue, remaining time, local/remote G-code path를 보여주고, 주변에 `Build Intent`, `Printer Telemetry`, `Readiness Gate`, `Slice Profile`, `Thermal / Material`, `Transfer Queue`, `Layer Preview`, `Camera Evidence`, `Post-Print Automation`, `G-code Validation`, `Handoff / Artifacts` card가 배치됩니다. 이 값들은 `specimen_agent_report.v1`과 3DP bridge API evidence에서 읽으며, 값이 없으면 임의로 만들지 않고 pending/unknown으로 표시합니다.
-
-Live GUI agent 목록은 `web/static/planning.js` 하드코딩 값보다 `/api/runtime/agent-manifests`를 우선합니다. 이 manifest는 graph YAML, module YAML, 선택적 `ui.yaml`을 합칩니다. `ui.yaml`은 label, short name, icon, report card selector 같은 화면 표시만 바꿀 수 있고, handler/tool/graph transition/live device 권한은 바꾸지 않습니다.
-
-### 1.7 작업 결과가 저장되는 곳
-
-| 위치 | 내용 |
-|---|---|
-| `runs/<run-id>/` | run별 이벤트, 로그, workspace evidence |
-| `runs/<run-id>/live_planning_transcript.jsonl` | Live GUI 채팅/시스템 메시지 compact transcript. `/api/planning/messages`가 이 파일을 page 단위로 읽음 |
-| `artifacts/` | STL, G-code, UI audit 결과 |
-| `memory/` | 로컬 설정, 장비 연결, graph/module version memory |
-| `outputs/train/` | LeRobot training output/checkpoint |
-| `user_files/` | 사용자가 넣는 입력 파일 |
-
-## 2. 초보자용: 장비별 설정
-
-### 2.1 3DP / Bambu Lab X2D 기본 + Prusa MK4S 명시 선택
-
-설정 위치:
-
-- GUI: `/printer`
-- printer fleet 선택: `memory/printer_fleet.json`
-- Bambu 연결 정보: `memory/bambu_connection.json`
-- Prusa 연결 정보: `memory/prusa_connection.json`
-- 출력 profile: `memory/prusa_print_profile.json`
-
-처음 해야 할 일:
-
-1. `/printer`의 Printer Fleet에서 기본 `bambulab_x2d_lab_01` 또는 명시적 `prusa_mk4s_lab_01`을 선택한다.
-2. Bambu를 쓸 때는 host/IP, SN, printer name, LAN access code를 저장한다. access code 원문은 GUI/API 응답에 표시되지 않는다.
-3. Bambu `Live Status`로 MQTT/FTPS/storage 상태를 확인하고, `Video Status`로 RTSPS/JPEG video port와 `ffmpeg` proxy 준비 상태를 확인한다.
-4. profile에서 material, nozzle, layer height, bed temperature, first layer speed를 확인한다.
-5. test specimen size와 test unit cell size를 저장한다.
-6. 실제 출력 전에는 upload/start gate, camera/video evidence, bed-clear evidence, autoejection 옵션을 확인한다.
-7. 현재 3D GUI는 별도 operator/Guardian/dry-run 체크박스를 노출하지 않는다. `Start Gate Check`, `SPC Readiness`, `Publish Start`는 owner-managed publish 기본값(`operator_confirmed=true`, `guardian_approved=true`, `dry_run=false`, ejection path 관리값 true)을 보내고, 백엔드가 artifact, printer safe-state, camera, bed-clear, post-publish observation으로 최종 차단한다.
-8. `SPC Readiness`의 level cards는 connection, transfer path, owner-managed publish default, publish command, autoejection을 분리해서 보여준다. `technical_ready_for_start=true`여도 camera/bed-clear/safe-state/start gate blocker가 있으면 실제 publish는 되지 않는다.
-9. Bambu X2D에서 `Upload Path Probe`는 FTPS가 실제로 write/delete 가능한지 확인한다. login/list만 성공해도 upload-ready가 아니다.
-10. FTPS가 `read_only` 또는 `BAMBU_FTPS_WRITE_FAILED`이면 sliced `.gcode.3mf` 파일을 `Prepare HTTP Artifact`로 노출한다. 이때 backend가 artifact URL을 실제 GET하고 sha256을 비교해 `server_fetch_probe.ok=true`를 반환해야 Upload gate가 ready로 바뀐다. 이 검증은 프린터가 접근 가능한 LAN URL 기준이다. 서버는 기본적으로 `0.0.0.0:7860`에 바인딩되어야 하며, artifact URL은 `http://<ATR서버-LAN-IP>:7860/printer-artifacts/...` 형태여야 한다. `127.0.0.1` 바인딩 또는 localhost URL은 브라우저에서는 동작해도 Bambu 프린터 transfer evidence로 인정하지 않는다.
-11. `cache/specimen.gcode.3mf` 같은 일반 remote path는 HTTP artifact route가 아니다. FTPS write 검증을 우회할 수 있는 것은 `/api/printer/http-artifact-route`가 만든 `http://` 또는 `https://` URL 중 fetch probe가 통과한 URL뿐이다.
-12. `HTTP_ARTIFACT_READY_NOT_STARTED`는 artifact URL과 guarded start-command draft가 준비됐다는 뜻이다. 실제 출력 시작은 아니며, `Publish Start`는 browser confirmation 이후에도 owner-managed publish defaults와 backend start gate, camera/bed-clear/safe-state 검증을 모두 통과해야 한다.
-13. `Publish Start`가 MQTT `project_file` 명령을 보냈더라도 그것만으로 실제 출력 시작으로 간주하지 않는다. backend는 즉시 fresh printer observation을 다시 읽고 `post_publish_status`를 붙인다. 프린터가 `IDLE` 또는 not-started 상태로 남으면 `published=true`여도 `ok=false`, `BAMBU_PROJECT_FILE_ACCEPTED_BUT_NOT_STARTED`로 표시한다.
-14. Bambu autoejection의 `Fill Native G-code Defaults`는 native patch 입력값만 채운다. source artifact와 plate target을 확인한 뒤 `Save Autoejection Config`를 눌러야 `memory/bambu_autoejection.json`에 반영된다. 이 단계는 artifact patch/검증 준비이며, 실제 시작은 별도의 `Publish Start` gate가 통과해야 한다.
-15. `Validate G-code Preview`와 left/center/right validation은 원본 artifact를 바꾸지 않는 검증 동작이다. 이 validation-only 경로는 `.autoeject.*` 파일이나 manifest를 만들지 않고 would-be tail, object bounds, candidate hash, blocker만 반환한다. `Generate Ejection Test Artifact`와 `Generate Sweep Test Artifact`는 publish 없는 standalone 검증 파일만 만든다. 실제 `.autoeject.*` 출력 파일이 필요하면 `Generate Patched Artifact`를 사용하고, 실제 프린터 motion은 `Publish Start` live gate가 통과한 경우에만 허용한다.
-16. Bambu autoejection 조정값은 push direction, Z push offset, push lane offset, push speed, full-bed sweep, sweep Z, sweep speed로 관리한다. P1/P1S/X1/X1C 계열과 A1/A1 Mini 계열은 ejection generator가 다르므로 서로 같은 G-code path를 쓰지 않는다.
-17. `.autoeject.*` 실제 publish 전 물리 환경(front path/door, ramp/bin, toolhead cover, release surface/profile, supervised first ejection)은 workstation owner/operator가 프린터 앞에서 직접 관리한다. GUI는 수동 checklist 대신 `operator_managed=true` evidence를 기록하고, backend는 camera/bed-clear/artifact/start-state blocker로 차단한다.
-18. `Video Status` 또는 camera refresh가 실패해도 기존 MQTT/progress/material status는 유지되어야 한다. camera는 별도 plane이며, 실패 시 camera 영역에 blocker를 표시한다.
-19. Bambu bridge evidence는 `artifact`, `validation`, `transport`, `runtime`, `bed-clear` 5개 plane으로 읽는다. 실제 autoejection 성공은 `published=true`가 아니라 camera/operator observation, post-publish status, bed-clear lock/unlock, 다음 job gate 해제까지 확인됐을 때만 인정한다.
-20. 실제 Bambu autoejection 완료 판정은 `/printer`의 `Physical Proof Package` 또는 `scripts/audit_bambu_autoejection_completion.py`로 수행한다. `Build Fail-Closed Proof Template`은 증거 작성용 JSON을 만들 뿐이고, `Run Completion Audit`이 file-backed camera/manifest/post-publish/bed-clear/next-job evidence를 모두 확인하기 전까지 physical success가 아니다.
-
-주의:
-
-- password/API key는 Git에 커밋하지 않는다.
-- Bambu LAN access code도 Git에 커밋하지 않는다.
-- `/api/bridges`는 graph bridge registry이며 Bambu printer fleet 선택 API가 아니다. Bambu 기본 profile은 `/api/printer/fleet`에서 확인한다.
-- Bambu live camera browser view는 `ffmpeg`가 설치되어야 `/api/printer/video-stream.mjpeg`로 표시된다.
-- `test` 기본 흐름은 dry/virtual이어야 한다.
-- `테스트 모드, 실제 출력`은 명시적으로 실제 출력 경로를 요청한 경우에만 사용한다.
-- `Publish Start`를 눌러도 backend gate가 차단하면 MQTT start command는 전송되지 않는다.
-
-### 2.2 LeRobot / ROBOTIS
-
-설정 위치:
-
-- GUI: `/lerobot`
-- profile/port memory: `memory/lerobot_device_ports.json`
-- conda env: `lerobot`
-- LeRobot checkout: `~/lerobot`
-
-처음 해야 할 일:
-
-1. follower와 leader를 각각 연결한다.
-2. baseline/detect 방식으로 follower/leader 포트를 저장한다.
-3. 기본 카메라 `top`, `wrist`를 각각 capture test한다.
-4. teleoperation을 먼저 확인한다.
-5. recording, visualization, training, rollout 순서로 진행한다.
-
-주의:
-
-- `/dev/ttyACM*`, `/dev/video*`는 재부팅 후 바뀔 수 있으므로 by-id/by-path 저장을 우선한다.
-- live motion은 operator confirmation과 profile gate가 필요하다.
-- rollout은 duration을 비워두면 stop할 때까지 이어지는 경로로 동작할 수 있다.
-
-### 2.3 Windows PyAutoGUI Bridge
-
-#### 녹화 기반 Equipment Skill
-
-처음 사용하는 기능은 Windows 로컬 Program Manager의 `EXAMPLES` 탭에서
-확인한다. `Open Capability Lab`은 마우스, 드래그/스크롤, 키보드/단축키,
-화면/픽셀, 창 제어를 시험할 수 있는 로컬 페이지를 연다. `Load Example`은
-JSON 편집기에만 불러오며 등록하지 않는다. `Run Safe Test`는 안전 예제만
-실행되고 수동 대화상자 예제에는 비활성화된다.
-
-기본 예제는 총 8개다. 마우스 고급 동작, 키 입력 수명주기, 화면/픽셀,
-창 제어를 포함한 5개 예제는 제한된 안전 테스트로 실행할 수 있다. 이미지
-탐색, 장비 출력 파일 대기, 운영자 대화상자 예제는 실제 locator/경로 또는
-확인이 필요하므로 자동 실행되지 않는다. 8개 예제를 합치면 브리지에서
-공개한 안전 코어 액션 전체를 확인할 수 있다.
-
-Windows 로컬 Program Manager의 `RECORD` 탭에서 대상 창을 지정하고
-`Record -> Checkpoint -> Stop -> Save` 순서로 데모를 저장한다. Windows는
-recording package까지만 소유한다. `/equipment/windows`의 `Skill Recording`에서
-Recording ID, Skill ID, version, worker를 입력하고 `Import & Build Draft`를
-눌러 Linux Skill registry로 가져온다.
-
-녹화기는 클릭과 드래그를 구분하고 가로/세로 스크롤을 보존한다. 연속
-문자는 하나의 `write` 액션으로 정리되며 단축키와 특수키는 별도 액션으로
-남는다. 선택한 녹화의 `Coverage`에서 실제 포함된 기능군을 확인한다.
-비밀번호, 토큰, API key를 입력하는 과정은 녹화하지 않는다.
-
-새 녹화는 이미지 추적이 기본으로 켜진 `atr.equipment_recording.v2`다.
-클릭 위치의 작은 target crop과 주변 문맥 crop을 함께 저장하며, 드래그는
-시작점과 종료점을 각각 저장한다. `Coverage` 옆의 image locator 준비 수와
-아래 미리보기에서 실제 대상이 잘렸는지 확인한다. `Allow coordinate
-fallback`은 기본 해제 상태로 둔다. 이 옵션을 켜지 않은 상태에서 대상
-이미지를 찾지 못하면 브리지는 현재 화면 증거를 남기고 멈추며, 녹화 당시
-좌표를 임의로 클릭하지 않는다. 기존 v1 recording만 호환을 위해 좌표
-방식으로 읽을 수 있다.
-
-`/equipment/windows`의 `Skill Management`에서는 정확한 버전을 선택한 뒤
-Workflow Editor 아이콘으로 순차 workflow를 확인하고 `Save -> Deploy`를 수행한다.
-Editor는 별도 창에서 열리며 단계 이동/복제/삭제, timer wait, image/text/file until
-wait, locator PNG 교체를 지원한다. 분기와 loop는 지원하지 않는다. Save하면 이전
-compiled 결과가 무효화되고, Deploy 한 번이 compile, validate, Windows transfer를
-자동으로 수행한다. Deploy 자체는 Skill을 실행하지 않는다. 배포된 정확 버전은
-읽기 전용이므로 수정하려면 새 version을 만든다. Windows
-Program Manager는 로컬 draft와 Linux에서 배포된 read-only program을 확인하는
-경량 화면으로 유지한다. Test는 물리 동작 없는 test mode가 기본이며 live
-시험은 Linux API에서 명시적 실행 확인이 필요하다.
-
-locator 대상이 너무 넓거나 빗나갔다면 해당 step을 펼쳐 `Edit Crop`을 누른다.
-원본 pre-action 화면 위 ROI를 드래그하고 8개 핸들로 크기를 조정한 뒤 오른쪽
-미리보기를 확인한다. `Reset to AI`는 자동 annotation 위치로 복원하고 `Apply Crop`은
-현재 편집 상태에만 반영한다. 이후 상단 `Save`를 눌러야 저장된다. 이 기능은 Target
-ROI만 수정하며 Context ROI는 유지한다. 별도 PNG를 직접 지정해야 할 때만
-`Replace Locator`를 사용한다.
-
-정상 Skill 실행은 LLM을 호출하지 않는다. 예외 복구가 필요한 경우에만
-Skill에 기록된 정확 provider/model을 한 번 호출하며 다른 모델로
-폴백하지 않는다. 실행 상태와 복구 경계는 Live GUI의 Equipment 보고서에
-표시된다.
-
-설정 위치:
-
-- GUI: `/equipment/windows`
-- Windows server package: `Pyautogui_server_for_window/`
-- 연결 memory: `memory/windows_pyautogui_connection.json`
-
-Windows에서:
-
-```powershell
-cd .\Pyautogui_server_for_window
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_bridge.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_bridge.ps1 -OpenBrowser
-```
-
-GUI에서:
-
-1. subnet으로 scan한다.
-2. candidate가 뜨면 Windows Console의 임시 4자리 코드를 입력한다.
-3. Pair & Save로 원하는 이름과 내부 연결 설정을 저장한다.
-4. saved target을 select한다.
-5. `Agentic Progress`에서 recording부터 handoff까지 현재 canonical 상태를 확인한다.
-6. `Skill Recording`으로 recording package를 가져온다.
-7. `Skill Management`에서 정확한 Skill version을 편집/저장하고 Deploy 한 번으로 compile, validate, transfer한다.
-8. `Main Progress`의 Preflight 또는 Run Test Bridge로 프론트-백엔드-Worker 경로를 확인한다.
-9. 필요할 때만 `Vision Link`를 켠다. 체크/해제 값은 Profile별로 즉시 자동 저장되어 창 닫기, 새로고침, 서버 재시작 후에도 유지되며, Profile의 필수 mode 설정은 백엔드 gate가 유지한다.
-10. `Evidence & Data Transfer`에서 화면, 요청 로그, 결과 파일, Vision evidence와 Analysis handoff를 확인한다.
-
-현재 Ubuntu PC에서 먼저 실제 GUI macro를 개발하려면 같은 화면의
-`Bridge on This PC`에서 `Start -> Health -> Select`를 누른다.
-로컬 브릿지는 `127.0.0.1:8767`, 후보명 `local_development`를 사용하며
-Windows 후보로 자동 전환하거나 자동 fallback하지 않는다. 최초 설치는
-`bash install/bootstrap_linux.sh --with-local-pyautogui`로 수행한다.
-
-### 2.4 BO
-
-BO:
-
-- GUI: `/bo`
-- 설정 memory: `memory/bo_workspace_settings.json`
-- 주요 옵션: strategy, acquisition, budget, seed, parameter space
-- 직접 장비를 시작하지 않고 후보 추천/benchmark/evidence 생성에 집중한다.
-
-## 3. 상급자용: 런타임 구조
-
-### 3.1 실행 엔트리포인트
-
-주요 route는 `app/main.py`에 있다.
-
-| 기능 | API |
-|---|---|
-| runtime state | `GET /api/runtime/state`, `GET /api/state` |
-| recent events | `GET /api/events/recent` |
-| SSE stream | `GET /api/events/stream` |
-| start/pause/resume/stop | `POST /api/run/start`, `/api/run/pause`, `/api/run/resume`, `/api/run/stop` |
-| safe stop | `POST /api/run/safe-stop` |
-| run detail | `GET /api/runs/{run_id}` |
-| run events/artifacts | `GET /api/runs/{run_id}/events`, `GET /api/runs/{run_id}/artifacts` |
-| approvals | `GET/POST /api/runs/{run_id}/approvals`, `POST /api/runs/{run_id}/approvals/{approval_id}/resolve` |
-
-### 3.2 Graph 계약
-
-기본 graph:
-
-- `graphs/configs/atr_closed_loop.yaml`
-
-workspace graph templates:
-
-- `graphs/configs/printer_pipeline.yaml`
-- `graphs/configs/lerobot_pick_place.yaml`
-- `graphs/configs/utm_test_flow.yaml`
-
-Graph API:
-
-- `GET /api/graphs`
-- `GET /api/graphs/{graph_id}`
-- `POST /api/graphs/{graph_id}/validate`
-- `POST /api/graphs/{graph_id}/validate-draft`
-- `POST /api/graphs/{graph_id}/compile`
-- `POST /api/graphs/{graph_id}/export-yaml`
-- `POST /api/graphs/{graph_id}/import-yaml`
-- `POST /api/graphs/{graph_id}/dry-run`
-- `GET /api/graphs/{graph_id}/dry-run-gate`
-- `POST /api/graphs/{graph_id}/save-version`
-- `POST /api/graphs/{graph_id}/run`
-
-Live 실행 전 요구:
-
-- graph validate 통과
-- compile 통과
-- dry-run gate 통과
-- Guardian/safety gate 통과
-- 장비별 live gate 통과
-
-### 3.3 Module 계약
-
-각 stage module은 `graphs/modules/<module>/module.yaml`에 있다.
-화면 표시 descriptor는 선택적으로 `graphs/modules/<module>/ui.yaml`에 둔다.
-
-공통 필드:
-
-- `module.id`
-- `module.label`
-- `module.handler`
-- `module.llm_role`
-- `module.safety`
-- `module.tools`
-- `module.pre_execution`
-- `module.internal_graph`
-- `module.io_contract`
-
-Module API:
-
-- `GET /api/modules`
-- `GET /api/modules/management-state`
-- `GET /api/runtime/agent-manifests`
-- `GET /api/bridges`
-- `POST /api/modules`
-- `POST /api/modules/templates/{agent|ui-only|bridge}`
-- `GET /api/modules/{module_id}`
-- `GET /api/modules/{module_id}/ui`
-- `PUT /api/modules/{module_id}/ui`
-- `POST /api/modules/{module_id}/load`
-- `POST /api/modules/{module_id}/unload`
-- `POST /api/modules/{module_id}/validate`
-- `POST /api/modules/{module_id}/dry-run`
-- `GET /api/modules/{module_id}/versions`
-- `GET /api/modules/{module_id}/versions/{version_id}`
-- `POST /api/modules/{module_id}/register-generated`
-
-중요한 경계:
-
-- GUI가 module YAML을 수정해도 arbitrary Python을 바로 실행하지 않는다.
-- handler는 allowlisted registry를 통과해야 한다.
-- `ui.yaml`은 Live GUI 표시 전용이다. 실행 handler, tool allowlist, graph transition, device 권한을 바꾸지 않는다.
-- `/api/modules/templates/*`가 만든 draft module은 `status=draft`, `enabled=false`, `graph.attached=false`라서 validate/dry-run/graph attach/save 전에는 실행되지 않는다.
-- generated adapter는 register/approval 없이는 실제 runtime handler로 승격되지 않는다.
-
-### 3.4 Agent 단계별 내부 step
-
-| Stage | 내부 step 요약 |
-|---|---|
-| design | constraint intake, candidate spec, FDM printability, specimen handoff |
-| specimen | print profile, TPMS STL, slicing, upload/virtual bridge, vision handoff |
-| vision | output capture, pose estimate, transfer readiness, manipulation handoff |
-| manipulation | policy profile, robot bridge, transfer rollout, equipment handoff |
-| equipment | Windows bridge, program selection, UTM macro, analysis handoff |
-| analysis | UTM curve parse, metrics, objective score |
-| knowledge | prior runs retrieval, failure summary, memory write, BO handoff |
-| bo | history load, surrogate fit, acquisition evaluation, next constraints |
-| guardian | safety gates, failure review, continue/stop/error decision |
-
-### 3.5 LLM backend
-
-관련 위치:
-
-- `backends/`
-- `deploy/nemoclaw-vllm.yaml`
-- Main GUI model controls
-- `POST /api/runtime/backend`
-- `GET /api/runtime/models`
-- `POST /api/runtime/models/load`
-- `POST /api/runtime/models/unload`
-- `POST /api/runtime/gpu-clear`
-
-운영 원칙:
-
-- backend switching은 runtime 전체에 영향을 준다.
-- model load/unload는 GUI와 CLI가 같은 API를 쓴다.
-- 현재 Main GUI/API가 관리하는 로컬 vLLM 모델은 `gemma4:31b`와
-  `gemma4:e4b-it-nvfp4` 두 개다. `e2b`는 현재 managed model surface가
-  아니다.
-- `31b`는 orchestrator route의 primary이며 MTP speculative decoding을
-  사용한다. `e4b`는 design/analysis/knowledge/guardian/tool-formatting 등
-  하위 route의 primary이며 NVFP4 target-only로 서빙한다.
-- OpenAI API key는 Main GUI `Current Models`의 `API Key` 버튼에서
-  저장/Loading/Unloading한다. `Loading` 상태에서는 OpenAI가 첫 inference
-  route가 되고, `Unloading`하면 저장값은 유지하되 local vLLM이 다시
-  우선된다.
-- vLLM/Nemoclaw 모델 상태가 준비됐다고 해서 첫 generation JIT 지연이 없다는 뜻은 아니다.
-- context overflow가 나면 최근 대화/프롬프트/출력 토큰을 먼저 줄인다.
-
-### 3.6 CLI와 GUI 상호호환
-
-`atr`는 GUI와 같은 API를 호출한다.
-
-자주 쓰는 명령:
-
-```bash
-atr
-atr up
-atr down
-atr status
-atr events
-atr run start test
-atr run start live "PLA compression specimen"
-atr run safe-stop
-atr models
-atr model load 31b
-atr model load e4b
-atr model unload 31b
-atr model unload e4b
-atr graph validate atr_closed_loop
-atr graph dry-run atr_closed_loop
-atr module validate design
-atr module dry-run design
-atr chat "테스트 모드"
-```
-
-GUI에서 바꾼 graph/module은 API를 통해 저장되므로 CLI에서도 같은 상태를 확인해야 한다.
-
-## 4. 상급자용: 개발/확장 규칙
-
-### 4.1 새로운 agent나 module을 추가할 때
-
-1. `graphs/modules/<new_module>/module.yaml`을 만든다.
-2. handler는 기존 allowlist 방식에 맞춘다.
-3. `tools` allowlist를 최소화한다.
-4. `internal_graph`를 단계별로 나눈다.
-5. Runtime IDE 또는 API로 validate/dry-run한다.
-6. 필요하면 `graphs/configs/*.yaml`에 node/edge/transition을 추가한다.
-7. 테스트와 문서를 같이 갱신한다.
-
-### 4.2 새로운 장비 bridge를 추가할 때
-
-1. bridge health API를 먼저 만든다.
-2. test/virtual/live mode를 분리한다.
-3. live gate는 fail-closed로 둔다.
-4. 실제 장비 action은 job/session id를 남긴다.
-5. command input/output, status, log path, artifact path를 event로 남긴다.
-6. GUI와 CLI/API가 같은 저장 설정을 보게 한다.
-7. 비밀번호/token/IP는 `memory/*.json` 또는 `.env`에만 둔다.
-
-### 4.3 Runtime IDE에서 graph를 수정할 때
-
-권장 순서:
-
-1. Main System 또는 agent tab에서 draft를 수정한다.
-2. Validate를 실행한다.
-3. Dry Run을 실행한다.
-4. Compile summary와 transition path를 확인한다.
-5. Save Version을 실행한다.
-6. live mode 전에는 dry-run gate digest가 active graph와 맞는지 확인한다.
-
-하지 말아야 할 것:
-
-- 검증 없이 live run 시작
-- handler allowlist 없이 Python 실행
-- Guardian stop/error route 제거
-- 장비 gate를 우회하는 edge 추가
-
-### 4.4 Module Designer를 사용할 때
-
-Module Designer는 Python 파일을 ATR 통신규약에 맞는 module 형태로 변환하는 도구다.
-
-흐름:
-
-1. Python 파일 업로드
-2. Gemma 31B로 module metadata/adapter 초안 생성
-3. `graphs/modules/<module_id>/handler.py`와 `module.yaml` 생성
-4. module validate/dry-run
-5. explicit register-generated 승인
-6. graph에 연결하고 dry-run
-
-보안/안전 원칙:
-
-- 업로드된 Python은 바로 실행하지 않는다.
-- generated handler는 wrapper/adapter와 registry gate를 통과해야 한다.
-- 실행 전 `module.dry-run` evidence를 남긴다.
-
-## 5. 테스트와 검증
-
-기본 테스트:
-
-```bash
-pytest
-```
-
-분야별 테스트:
-
-```bash
-pytest tests/unit/test_design_agent.py
-pytest tests/unit/test_specimen_agent.py
-pytest tests/unit/test_printer_tools.py
-pytest tests/integration/test_controller_run.py
-pytest tests/integration/test_live_gui_runtime_layout.py
-pytest tests/integration/test_printer_gui_api.py
-pytest tests/integration/test_lerobot_gui_api.py
-pytest tests/integration/test_bo_gui_api.py
-pytest tests/integration/test_cae_gui_api.py
-```
-
-브라우저/UI audit:
-
-```bash
-python tests/ui/planning_browser_audit.py
-python tests/ui/runtime_ide_browser_audit.py
-python tests/ui/module_management_browser_audit.py
-python tests/ui/live_runtime_ide_browser_audit.py
-```
-
-검증 기준:
-
-- API route가 200/정상 JSON을 반환한다.
-- Live GUI가 event/session/artifact를 같은 run_id로 본다.
-- graph validate/compile/dry-run이 통과한다.
-- 장비 live action은 gate 없이는 실행되지 않는다.
-- generated artifact가 `runs/` 또는 `artifacts/`에 남는다.
-- 실패는 `failure_code`, `node.failed`, `run.failed`로 추적 가능해야 한다.
-
-## 6. 트러블슈팅
-
-### 서버가 안 켜질 때
-
-확인:
-
-```bash
-atr status
-atr down
-atr up
-```
-
-직접 실행으로 traceback 확인:
-
-```bash
-cd ~/autonomous_researcher
-source .venv/bin/activate
-python -m app.serve
-```
-
-### Live GUI가 멈춘 것처럼 보일 때
-
-확인 순서:
-
-1. `GET /api/runtime/state`에서 `run_id`, `stage`, `is_running` 확인
-2. `GET /api/events/recent`에서 최근 event 확인
-3. `GET /api/runs/{run_id}/events`에서 run event 확인
-4. `guardian` decision, approval pending, failure_code 확인
-5. 브라우저를 새로고침해도 session state가 유지되는지 확인
-
-### 모델 호출이 실패할 때
-
-확인:
-
-- backend가 원하는 값인지
-- 모델이 loaded인지
-- context length를 넘지 않았는지
-- vLLM 첫 generation JIT 지연인지
-- GPU memory가 다른 프로세스에 잡혀 있는지
-
-명령:
-
-```bash
-atr backend
-atr models
-atr model load 31b
-atr model load e4b
-atr gpu clear
-```
-
-### 프린터가 upload만 하고 start하지 않을 때
-
-확인:
-
-- `memory/prusa_connection.json` host/auth
-- `/printer`의 upload/start gate
-- PrusaLink storage filename과 requested filename 차이
-- transfer idle 대기 여부
-- `/api/v1/job`이 이전 작업 99/100% 상태에 남아 있는지
-- start retry history
-
-### LeRobot 카메라/포트가 안 잡힐 때
-
-확인:
-
-- saved port가 `/dev/serial/by-id` 또는 `/dev/v4l/by-id`인지
-- follower/leader 역할이 바뀌지 않았는지
-- top/wrist 카메라 index 또는 by-id 링크가 현재 연결 상태와 맞는지
-- stale subprocess가 카메라/serial을 점유 중인지
-- RealSense를 쓰는 경우 SDK serial이 보이는지. 현재 기본값은
-  `top=D455F/341522300873`, `wrist=D405/352122273019`이다.
-
-조치:
-
-```bash
-atr down
-atr up
-```
-
-필요하면 LeRobot GUI의 force stop/status를 사용한다.
-
-RealSense 전역 진단:
-
-```bash
-rs-enumerate-devices
-rs-fw-update -l
-python3 - <<'PY'
-import pyrealsense2 as rs
-ctx = rs.context()
-print("device_count", len(list(ctx.query_devices())))
-for dev in ctx.query_devices():
-    print(
-        dev.get_info(rs.camera_info.name),
-        dev.get_info(rs.camera_info.serial_number),
-        dev.get_info(rs.camera_info.usb_type_descriptor),
-    )
-PY
-```
-
-정상 기준:
-
-- D455F와 D405가 모두 보여야 한다.
-- 둘 다 SDK USB `3.2` 또는 sysfs `5000M`으로 잡히는 것이 안정적이다.
-- `2.1` 또는 `480M`이면 코드 문제가 아니라 USB 허브/케이블/포트 협상 문제부터 본다.
-
-D455F/D405가 보이는데 스트림만 `RS2_USB_STATUS_BUSY`,
-`failed to set power state`, 또는 frame timeout이면:
-
-```bash
-fuser -v /dev/video* 2>/dev/null || true
-```
-
-점유 프로세스가 없으면 허브를 power-cycle/replug한 뒤 다시 시도한다.
-필요할 때만 root smoke test로 power-state를 깨운 뒤 일반 사용자로 재시도한다.
-이 상태에서는 카메라 역할 매핑을 OpenCV `/dev/video*`로 바꾸지 않는다.
-
-### graph가 live에서 막힐 때
-
-확인:
-
-- graph validate 통과 여부
-- dry-run gate digest가 active graph와 일치하는지
-- Guardian terminal route가 있는지
-- cycle에 guard가 있는지
-- handler signature/registry error가 없는지
-
-## 7. Git/GitHub 운영
-
-기본 원칙:
-
-- `main`은 실행 가능한 기준선으로 유지한다.
-- 작은 문서/안전 변경은 바로 main에서 처리할 수 있다.
-- 위험 변경이나 사용자가 브랜치를 요청한 작업은 branch에서 진행한다.
-- 커밋 전 `git status`로 의도하지 않은 변경을 확인한다.
-- secrets, device IP/password, generated STL/G-code, model cache는 커밋하지 않는다.
-
-권장 순서:
-
-```bash
-git status
-git add <files>
-git commit -m "docs: update user manual"
-git push
-```
-
-자세한 규칙은 [../repository/github_version_control.md](../repository/github_version_control.md)를 본다.
-
-## 8. 문서 유지 규칙
-
-변경 종류별로 같이 고쳐야 하는 문서:
-
-| 변경 | 같이 수정할 문서 |
-|---|---|
-| GUI route/API 변경 | `docs/README.md`, `docs/gui/gui.md`, 이 문서 |
-| graph/stage 변경 | `docs/runtime/langgraph_runtime.md`, `docs/runtime/closed_loop_and_pages_reference.md`, 이 문서 |
-| agent module 변경 | `docs/agents/*`, `docs/runtime/agent_program_baseline.md`, 이 문서 |
-| 프린터 변경 | `docs/hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt`, 이 문서 |
-| LeRobot 변경 | `docs/hardware/lerobot_robotis_manipulation_runtime_guideline.md`, 이 문서 |
-| Windows bridge 변경 | `docs/hardware/windows_pyautogui_equipment_agent_guideline.md`, 이 문서 |
-| 설치 의존성 변경 | `REQUIREMENTS.md`, `install/README.md`, 이 문서 |
-| Git workflow 변경 | `docs/repository/github_version_control.md` |
-
-## 9. 빠른 판단표
-
-| 상황 | 먼저 볼 곳 |
-|---|---|
-| 처음 실행 | 이 문서 1장, [../../REQUIREMENTS.md](../../REQUIREMENTS.md) |
-| 루프 이해 | [../runtime/closed_loop_and_pages_reference.md](../runtime/closed_loop_and_pages_reference.md) |
-| GUI 사용 | [../gui/gui.md](../gui/gui.md) |
-| graph 수정 | [../runtime/langgraph_runtime.md](../runtime/langgraph_runtime.md) |
-| agent 수정 | `graphs/modules/*/module.yaml`, [../runtime/agent_program_baseline.md](../runtime/agent_program_baseline.md) |
-| 프린터 | [../hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt](../hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) |
-| 로봇 | [../hardware/lerobot_robotis_manipulation_runtime_guideline.md](../hardware/lerobot_robotis_manipulation_runtime_guideline.md) |
-| Windows bridge | [../hardware/windows_pyautogui_equipment_agent_guideline.md](../hardware/windows_pyautogui_equipment_agent_guideline.md) |
-| BO | [../agents/bo_agent_runtime_guideline.txt](../agents/bo_agent_runtime_guideline.txt) |
-| 버전관리 | [../repository/github_version_control.md](../repository/github_version_control.md) |
+| 출력 설정·슬라이싱·전송 | 3D Printer, `/printer` | [프린터 실습](device_workspace_3dp_usage.ko.md) |
+| 포트·녹화·롤아웃 | Manipulation, `/lerobot` | 아래 실습 3–4 |
+| UTM 카메라·ROS | Vision, `/device-bridge/vision-utm` | [비전 실습](device_workspace_vision_camera_bridge_usage.ko.md) |
+| Windows 브릿지·Skills | Windows Automation, `/equipment/windows` | 실습 5 |
+| BO 설정 | Bayesian Optimization, `/bo` | 실습 6 |
+| 장비 인터록 | PLC Safety, `/plc` | [PLC 브릿지](../device_bridges/plc_safety_bridge.md) |
+| 축적 지식 | Knowledge, `/knowledge` | 실습 7 |
+
+**완료 확인:** 다른 장비 동작을 시작하지 않고 기존 Live 런으로 돌아올 수 있습니다.
+페이지를 연 것은 에이전트 단계 완료가 아닙니다.
+
+## Exercise 2 — 가상 테스트에서 실제 장비로 전환하기
+
+**목표:** 새 런을 시작하기 전에 물리 실행 범위를 정합니다.
+
+1. Main의 **Test Mode Settings**를 엽니다.
+2. **Installed Printer**, **Physical Print**를 비교합니다.
+3. 각 에이전트 경계, 출력 본문·냉각, 자동 배출을 확인합니다.
+4. 사용할 프로필만 저장하고 다시 읽어 확인합니다.
+5. Live에 `테스트 모드, 실제 프린터` 또는 `테스트 모드, 실제 출력`으로
+   선택한 경로를 명시합니다.
+
+![출력 본문 없이 배출 경로를 사용하는 Installed Printer](assets/screenshots/2026-09-29/profile-installed.png)
+
+![출력과 냉각을 수행하는 Physical Print](assets/screenshots/2026-09-29/profile-physical.png)
+
+**완료 확인:** 승인된 계약과 선택 프로필이 같습니다.
+Installed Printer는 dry-run이 아닙니다. 배출 및 이후 실제 장비를 작동시킬 수
+있습니다. 시편을 직접 공급한다면 현재 확인 요청에 따라 실제로 놓거나 치운 뒤
+응답합니다. Physical Print는 전체 출력 경로를 사용합니다.
+
+실제 프린터 경로 통과만으로 첫 층 접착·전체 출력 시간·노즐 정리가 검증되지는
+않습니다. 실제 출력은 별도 현장 감독하에 검증합니다. 프로필 변경은 다음
+승인 런부터 적용됩니다. 상세는 [Test Mode](../runtime/test_mode.md)를 봅니다.
+
+## Exercise 3 — 로봇 포트 설정과 데모 한 편 녹화하기
+
+**목표:** 녹화·학습·실험 실행을 혼동하지 않고 식별 가능한 로컬 데모를 만듭니다.
+
+1. **Manipulation → Profile**에서 사용할 로봇 프로필을 선택합니다.
+2. **2. Device Port Setup**을 펼쳐 follower·leader·카메라 저장값을 확인합니다.
+3. 설정이 필요하면 대상 장치에서 **Baseline → ID Detect & Save** 순으로 화면
+   안내를 따릅니다. 수동 설정은 **Manual Port Override**의 역할/카메라 key를
+   고른 뒤 **Save Manual Port**를 사용합니다. 저장·장치 탐색 작업입니다.
+4. 동작 전에 [LeRobot 브릿지](../device_bridges/lerobot_bridge.md)에 따라
+   캘리브레이션과 카메라 점유 상태를 확인합니다.
+
+![펼친 로봇 포트와 카메라 설정](assets/screenshots/2026-09-29/robot-devices.png)
+
+5. **4. Local Paths**에 dataset root와 dataset repo ID/local name을 지정합니다.
+   새 녹화는 새 데이터셋 이름을 사용합니다. **Resume dataset**은 호환되는
+   기존 데이터셋에만 사용하며, 폴더 삭제가 resume 방법은 아닙니다.
+6. **6. Recording**에서 **Task Instruction**, **Episodes**,
+   **Episode Time (s)**, **Reset Time (s)**를 입력합니다.
+   첫 감독 실습은 한 에피소드로 진행합니다.
+7. 로봇 동작 범위를 비운 뒤 **Start Record**를 누릅니다.
+
+![녹화 입력과 에피소드 조작 버튼](assets/screenshots/2026-09-29/robot-recording.png)
+
+8. **Save / Next →**는 수락, **Retry Current ←**는 현재 에피소드 재시도,
+   **Finish Gracefully (Esc)**는 정상 종료입니다.
+   **Force Stop**은 비상 정리이며 일반 저장 버튼이 아닙니다.
+9. 학습 전에 동작 상태·로그와 데이터셋 저장 결과를 확인합니다.
+
+**완료 확인:** 원하는 경로에 카메라·관절 채널을 가진 에피소드가 저장됩니다.
+프로세스가 실행됐다는 것만으로 녹화 성공은 아닙니다.
+실패하면 세션 로그·포트·캘리브레이션·데이터셋 이름을 봅니다.
+다른 세션이 점유한 장치 재연결이나 캘리브레이션 삭제로 해결하지 않습니다.
+
+## Exercise 4 — 단독 인퍼런스와 에이전트 설정 구분하기
+
+**목표:** 다른 경로의 저장 버튼을 눌러 설정이 안 바뀌는 혼동을 피합니다.
+
+1. 감독하의 단독 시험은 **10. Inference / Rollout**에서 설정합니다.
+2. 체크포인트·task·action rate를 확인합니다.
+3. 선형 보간과 RTC 사용 여부를 명시합니다. 보간 출력 Hz는 정책/action FPS와
+   별개이며 입력 rate보다 낮으면 안 됩니다. GUI 상한은 100 Hz입니다.
+4. **Save Rollout Defaults**로 저장합니다. 주변이 안전할 때만 실행합니다.
+
+![단독 롤아웃 설정](../gui/assets/screenshots/2026-09-29/lerobot-inference.png)
+
+5. 루프에 사용할 값은 **11. Manipulation Agent Bridge**에서 설정합니다.
+6. 해당 task를 선택하고 그 task의 정책·rate·옵션을 확인한 뒤
+   **Save Task Defaults**를 누릅니다. 단독 설정 저장을 에이전트 task 저장과
+   동일하게 취급하지 않습니다.
+
+![태스크별 에이전트 브릿지 설정](../gui/assets/screenshots/2026-09-29/lerobot-agent-bridge.png)
+
+**완료 확인:** 다음 세션의 task별 저장값이 의도와 일치합니다.
+실행 중 MAN의 telemetry·policy tracking·산출물을 확인합니다.
+3D 로봇이 보이는 것만으로 파지/배치 성공이 아닙니다.
+루프가 MAN을 사용 중일 때 단독 롤아웃을 중복 실행하지 않습니다.
+
+## Exercise 5 — Windows/UTM 자동화 준비하기
+
+**목표:** 실행 승인 전에 실제 대상 화면과 장비 순서를 확인합니다.
+
+1. **Windows Automation**에서 브릿지·worker 연결을 확인합니다.
+2. 수신 화면이 로그인·업데이트·다른 창이 아닌 의도한 UTM 앱인지 확인합니다.
+   장비 운영자와 조율합니다.
+3. 사용할 Skills와 증거를 읽습니다. 화면을 채우려는 목적으로 실행하지 않습니다.
+
+![Windows 자동화 워크스페이스](../gui/assets/screenshots/2026-09-29/equipment-windows.png)
+
+4. `/equipment/agent-manager`에서 **Equipment Flow**와 프로필을 확인합니다.
+5. Skill 순서·Vision slot을 사용할 메소드와 대조합니다.
+   [Equipment Agent](../agents/equipment_agent.md),
+   [Windows 브릿지](../device_bridges/windows_pyautogui_bridge.md)를 따릅니다.
+   실패한 동작을 건너뛰려고 실행 중 flow를 편집하지 않습니다.
+
+![Equipment Agent Manager의 흐름 구성](../gui/assets/screenshots/2026-09-29/equipment-agent-manager.png)
+
+**완료 확인:** worker·화면·메소드·flow가 맞고 EQP 진입 전 현재 관측 근거가
+이번 런에 연결됩니다. 연결 표시가 초록이라고 압축·높이 복귀 완료는 아닙니다.
+
+## Exercise 6 — 한 후보를 설계부터 BO까지 추적하기
+
+**목표:** 서로 다른 사이클의 결과를 섞지 않습니다.
+
+1. Live의 **DSN → Report**에서 후보 ID, cell size, wall thickness,
+   형상 파일, 제약 결과를 기록합니다.
+2. **ANL → Report**에서 선택 사이클·SS/FD 축과 단위·원본 CSV·SEA 질량
+   출처·실제 적분/strain 근거를 확인합니다.
+3. **BO → Report**에서 목적함수·최대화/최소화·관측 개수를 확인합니다.
+4. GP가 있으면 2D/3D 평균·불확실성·획득함수·다음 후보를 봅니다.
+
+![ANL 곡선과 물성 근거](../gui/assets/screenshots/2026-09-29/live-analysis.png)
+
+![BO 포스테리어와 추천](../gui/assets/screenshots/2026-09-29/live-bo.png)
+
+**완료 확인:** 설계 → 원본 측정 → 분석 물성 → BO 관측이 같은 ID로 이어집니다.
+슬라이싱 전 질량 공란은 미확인이며 이후에는 분석에 사용된 기록값을 사용합니다.
+다른 형상 추정치로 대체하지 않습니다. 추천 후보는 이미 실험한 시편이 아닙니다.
+초기 LHS 단계에 GP가 없는 것은 정상일 수 있습니다.
+[ANL](../agents/analysis_agent.md), [BO](../agents/bo_agent.md)를 참고합니다.
+
+## Exercise 7 — 축적 지식의 출처 확인하기
+
+1. **Knowledge → Wiki**를 엽니다.
+2. 글을 선택하고 출처·적용 범위를 읽습니다.
+3. **Source Library**로 원문 출처를 봅니다.
+   Memory·Agent Delivery는 별도 조회 화면이지 추가 물리 센서가 아닙니다.
+
+![출처가 연결된 Knowledge Wiki](../gui/assets/screenshots/2026-09-29/knowledge-wiki.png)
+
+**완료 확인:** 과거 정보·절차 설명·현재 실험 근거를 구분할 수 있습니다.
+Wiki의 문장이 오늘의 장비 실행을 증명하지 않습니다.
+Private 화면은 권한이 필요하며 401을 우회하지 않습니다.
+[Knowledge 운영](../knowledge/markdown_memory_operations.ko.md)을 참고합니다.
+
+## Exercise 8 — 같은 런을 진단하고 재개하기
+
+1. run ID·cycle·agent와 정확한 미해결 사유를 기록합니다.
+2. 해당 에이전트의 **Timeline**, **Artifacts**, 필요시 **Backend**를 봅니다.
+3. 실제 원인인 연결·입력·물리 상태를 수정하며 현재 근거를 보존합니다.
+4. 런타임이 복구를 제공하면 기존 **Resume**을 사용합니다.
+5. 같은 run ID·의도한 재개 지점·새 근거를 확인합니다.
+
+![멈춘 단계를 찾는 Timeline](../gui/assets/screenshots/2026-09-29/live-timeline.png)
+
+**완료 확인:** 완료 플래그를 복사한 새 런이 아니라 기존 런의 복구로 기록됩니다.
+Resume은 복구 가능한 단계를 반복할 수 있으므로 물리 동작 exactly-once를
+무조건 보장하지 않습니다. 동작 승인 전에 요청 경로·실제 장비 상태를 봅니다.
+과거 실패 기록 삭제, PLC 무조건 해제, Start를 Resume처럼 쓰는 행동은 피합니다.
+[런타임 흐름·복구](../runtime/closed_loop_and_pages_reference.md)를 참고합니다.
+
+## Exercise 9 — 읽기 전용 다시보기 열기
+
+1. Main에서 **Mode = replay**를 고릅니다.
+2. **Experiment session → Start**로 새 창을 엽니다.
+3. Contract 영역의 시점 선택을 사용합니다.
+4. 좌우 키는 저장 시점, 상하 키는 존재하는 사이클 사이를 이동합니다.
+   텍스트/select 입력 중에는 방향키를 가로채지 않습니다.
+
+![Main의 Replay 세션 선택](assets/screenshots/2026-09-29/main-replay.png)
+
+![기존 Live 구조를 사용하는 Replay](../gui/assets/screenshots/2026-09-29/replay.png)
+
+**완료 확인:** **REPLAY** 표시와 선택 run/cycle/point가 바뀌고 장비 동작은 없습니다.
+없는 스냅샷을 새 카메라 촬영으로 채우지 않습니다.
+파일은 선택 시점 이후에 생성됐을 수도 있으므로 시점 근거와 일반 보관 파일을
+구분합니다. [Replay](../gui/run_replay.md)를 참고합니다.
+
+## Exercise 10 — 루프를 바꾸지 않고 런타임 구조 살펴보기
+
+1. `/ide`에서 graph와 node/module 설정을 읽습니다.
+2. 연결 계약과 관련 실행 근거를 찾아봅니다.
+3. 별도의 개발 작업에서만 draft validation/compile/dry-run 후 저장 버전 적용을
+   진행합니다. 이 실습에서는 편집본을 활성화하지 않습니다.
+
+![Runtime IDE 그래프와 검사 영역](../gui/assets/screenshots/2026-09-29/ide-graph.png)
+
+**완료 확인:** UI 리포트·모듈 구현·패키지 연결 계약·실행 graph를 구분합니다.
+화면 표시 정보 변경이 장비 권한을 부여하지 않습니다.
+[Runtime IDE](../runtime/runtime_ide.md), [모듈화](../modularity.md),
+[Module Management 화면](../gui/visual_structure.md)을 참고합니다.
+
+## 완료 체크와 추가 문서
+
+- 새 런 전에 물리 실행 범위를 선택할 수 있습니다.
+- 프린터·단독 롤아웃·에이전트 task별 저장 버튼을 구분합니다.
+- 한 후보의 원본 근거와 보관 파일을 찾을 수 있습니다.
+- Resume, 새 Start, 읽기 전용 Replay를 구분합니다.
+- 과거 스크린샷을 현재 물리 증거로 사용하지 않았습니다.
+
+보관할 때 `runs/<run-id>/`와 참조 산출물을 함께 유지합니다.
+`memory/`의 연결·설정에는 비밀정보가 있을 수 있으므로 공개 첨부하지 않습니다.
+
+개발 환경·테스트·기여 절차는 [CONTRIBUTING](../../CONTRIBUTING.md),
+전체 화면 지도는 [GUI 구조](../gui/visual_structure.md)를 참고합니다.

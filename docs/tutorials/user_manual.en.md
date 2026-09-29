@@ -1,203 +1,273 @@
-# Autonomous Researcher Complete User Manual
+<!-- atr-doc
+doc_type: guide
+subtype: tutorial
+status: active
+authority: procedural
+audience: [user, operator, researcher]
+scope: [gui_tutorial, operator_workflow]
+summary: Practical operator exercises for devices, evidence, recovery and read-only replay.
+source_of_truth:
+  - web/templates
+  - web/static
+  - app/main.py
+  - app/run_review_routes.py
+last_verified: 2026-09-29
+verified_against: fcfba9f
+related_docs:
+  - docs/gui/visual_structure.md
+  - docs/runtime/test_mode.md
+supersedes: []
+-->
 
-## Status at a Glance
+# Operator Walkthroughs
 
-| At a glance | Details |
-|---|---|
-| Purpose | Navigate installation, GUI operation and extension workflows |
-| Audience | New users, operators and developers |
-| Preparation | Runtime environment, model configuration and selected device profiles |
-| Reading path | [Requirements](../../REQUIREMENTS.md) · [Agent references](../agents/README.md) |
+[한국어](user_manual.ko.md) · [First run](first_autonomous_run.en.md) · [Tutorial index](first_autonomous_run.md)
 
-This manual is the operator and developer entry point for the current repository.
-It is split into beginner and advanced sections so a new user can run the GUI while a developer can trace the runtime contracts, APIs, and extension points.
+## Before you start
 
-## 1. Beginner Path
+Use this guide after the first virtual run. Each exercise states its goal, exact
+controls and completion check. The first device setup requires a trained operator;
+these pages do not authorize unattended robot or UTM motion.
 
-### 1.1 Install
+Read [Requirements](../../REQUIREMENTS.md) for installation. For an already installed
+system, `atr up` opens the server at `http://localhost:7860`.
+Do not restart a running experiment for a documentation exercise.
 
-```bash
-cd ~/autonomous_researcher
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-bash install/install_cli.sh
-atr up
-```
+Figures are 1920 × 1080 captures from 29 September 2026. Some show historical or idle
+state; none is a new hardware test. Private paths/connection details are redacted.
+Values shown are not universal settings.
 
-Open:
+## Exercise 1 — Find the right workspace
 
-- Main GUI: `http://localhost:7860/`
-- Live GUI: `http://localhost:7860/live`
-- API docs: `http://localhost:7860/docs`
+**Goal:** distinguish configuration from the run that consumes it.
 
-Stop:
+1. Open Main and scroll to **Device Workspaces**.
+2. Choose the device you intend to configure.
+3. Keep Live GUI for run-bound commands, approvals and agent reports.
 
-```bash
-atr down
-```
+![Main workspace navigation](../gui/assets/screenshots/2026-09-29/main-workspaces.png)
 
-Full external requirements are tracked in [../../REQUIREMENTS.md](../../REQUIREMENTS.md).
-The current code-exposed route/API/manifest/model snapshot is tracked in
-[../runtime/current_code_snapshot.md](../runtime/current_code_snapshot.md).
-
-Current local model controls expose two managed NemoClaw/vLLM deployments:
-`gemma4:31b` and `gemma4:e4b-it-nvfp4`. `e2b` is not part of the managed model
-surface. `31b` is the orchestrator primary route and uses MTP speculative
-decoding; `e4b` is the subordinate route and is served as NVFP4 target-only.
-Use the Main GUI `Current Models` panel or the CLI commands below:
-
-```bash
-atr models
-atr model load 31b
-atr model load e4b
-atr model unload 31b
-atr model unload e4b
-```
-
-OpenAI API-key operation is separate from managed local model loading. The
-Main GUI `API Key` dialog stores the key in local `memory/api_keys.json`.
-`Loading` promotes OpenAI to the first inference route; `Unloading` keeps the
-stored key but returns local vLLM to first priority.
-
-### 1.2 First Run
-
-1. Start the server with `atr up`.
-2. Open the Main GUI and confirm runtime/model/device status.
-3. Open `/live`.
-4. Send `테스트 모드` or a test objective.
-5. Watch Report, Backend, Graph, Artifacts, and Timeline tabs.
-6. Confirm that a `run_id`, stage events, and artifacts appear.
-7. Review outputs under `runs/`, `artifacts/`, and `memory/`.
-
-### 1.3 GUI Map
-
-| Page | URL | Purpose |
+| Task | Workspace | Tutorial/reference |
 |---|---|---|
-| Main GUI | `/` | Runtime status, model state, run controls, device workspace launchers |
-| Live GUI | `/live` | Chat-based orchestration and stage progress |
-| Runtime IDE | `/ide` | Graph editing, validation, dry-run, version save |
-| Module Management | `/module-management` | Module validation, load state, draft module creation, `ui.yaml` descriptor management, generated adapter registration |
-| 3D Workspace | `/printer` | Bambu Lab X2D default bridge, explicit Prusa selection, printer fleet, live video/status, slicing/start gates, auto-ejection, test options |
-| LeRobot Workspace | `/lerobot` | Port/camera setup, teleop, recording, training, rollout |
-| BO Workspace | `/bo` | Acquisition/strategy/budget/parameter-space configuration |
-| Windows Equipment | `/equipment/windows` | Windows PyAutoGUI bridge discovery and program execution |
+| Print defaults, slicing, transfer | 3D Printer, `/printer` | [Printer walkthrough](device_workspace_3dp_usage.en.md) |
+| Robot devices, recording, rollout | Manipulation, `/lerobot` | Exercises 3–4 below |
+| UTM camera and ROS | Vision, `/device-bridge/vision-utm` | [Vision walkthrough](device_workspace_vision_camera_bridge_usage.en.md) |
+| Windows bridge and Skills | Windows Automation, `/equipment/windows` | Exercise 5 |
+| BO configuration | Bayesian Optimization, `/bo` | Exercise 6 |
+| Hardware interlocks | PLC Safety, `/plc` | [PLC bridge](../device_bridges/plc_safety_bridge.md) |
+| Retained knowledge | Knowledge, `/knowledge` | Exercise 7 |
 
-### 1.4 Runtime Modes
+**Checkpoint:** you can return to the same run in Live without launching another
+workspace operation. Opening a page is not a stage-completion action.
 
-- `live`: real hardware path, requires device gates and operator confirmation.
-- `test`: dry-run and simulated path, with selected bridge/actual-print options when explicitly requested.
-- In the current 3D Workspace, `Start Gate Check`, `SPC Readiness`, and `Publish Start` no longer expose manual operator/Guardian/dry-run checkboxes. The frontend sends owner-managed publish defaults (`operator_confirmed=true`, `guardian_approved=true`, `dry_run=false`, ejection path fields true), and the backend remains the actual gate for artifact validity, printer safe state, camera evidence, bed-clear evidence, and post-publish observation.
-- In Live GUI, selecting Specimen Making Agent turns the Report area into a 3DP job monitor. The wide central `Live Job Monitor` shows job progress, layer, queue, remaining time, and local/remote G-code paths from `specimen_agent_report.v1`; surrounding cards show `Build Intent`, `Printer Telemetry`, `Readiness Gate`, `Slice Profile`, `Thermal / Material`, `Transfer Queue`, `Layer Preview`, `Camera Evidence`, `Post-Print Automation`, `G-code Validation`, and `Handoff / Artifacts`. Missing backend values are displayed as pending/unknown, not fabricated by the frontend.
-- `Publish Start` can call the start-publish API, but the backend sends the Bambu MQTT `project_file` command only when the selected printer gate, transfer path, camera/bed-clear requirements, owner-managed publish defaults, and safe-state checks all pass.
-- `SPC Readiness` level cards separate connection, transfer path, owner-managed publish defaults, publish command, and autoejection. `technical_ready_for_start=true` means the technical printer gates are clear, but publish still remains blocked when camera, bed-clear, safe-state, or start-gate evidence fails.
-- For Bambu X2D, `Upload Path Probe` checks whether FTPS is actually writable. Login/list alone is not enough. If the probe reports read-only or `BAMBU_FTPS_WRITE_FAILED`, use `Prepare HTTP Artifact` with a sliced `.gcode.3mf` file. The backend must then GET the generated URL and match sha256 (`server_fetch_probe.ok=true`) before the GUI treats Upload as ready.
-- `/api/bridges` is the graph bridge registry, not the printer fleet selector. Check the active Bambu/Prusa printer provider through `/api/printer/fleet`.
-- That probe must use a printer-reachable LAN URL. The server default is `0.0.0.0:7860`, so operators may open `localhost` in the browser while Bambu receives `http://<ATR-server-LAN-IP>:7860/printer-artifacts/...`. A loopback-only bind or localhost artifact URL is not valid transfer evidence for the printer.
-- A plain remote path such as `cache/specimen.gcode.3mf` is not an HTTP artifact route. It cannot bypass FTPS write verification. Only generated `http://` or `https://` artifact URLs with a passing fetch probe are treated as ready transfer evidence.
-- `HTTP_ARTIFACT_READY_NOT_STARTED` means the artifact URL and guarded start-command draft are ready for review. It does not start printing; `Publish Start` still requires browser confirmation plus owner-managed publish defaults and a passing backend start gate.
-- A Bambu MQTT `project_file` publish acknowledgement is not treated as proof that printing started. The backend immediately reads a fresh printer observation and returns `post_publish_status`. If the printer remains `IDLE` or not-started, the response keeps `published=true` but returns `ok=false` with `BAMBU_PROJECT_FILE_ACCEPTED_BUT_NOT_STARTED`.
-- `Fill Native G-code Defaults` only fills Bambu autoejection patch fields locally. It does not save readiness evidence, patch the source artifact, or run motion. The gate changes only after the operator verifies the source artifact/plate target and clicks `Save Autoejection Config`; physical start still requires `Publish Start` after the normal gate passes.
-- `Validate G-code Preview` and left/center/right validation are non-mutating checks. This validation-only path writes no `.autoeject.*` file and no manifest; it only returns the would-be tail, object bounds, candidate hash, and blockers. `Generate Ejection Test Artifact` and `Generate Sweep Test Artifact` create standalone validation files only and must not publish printer motion. Use `Generate Patched Artifact` to create a `.autoeject.*` file, then use `Publish Start` only after the normal live gate passes.
-- Bambu native autoejection exposes push direction, Z push offset, push lane offset, push speed, full-bed sweep, sweep Z, and sweep speed. P1/P1S/X1/X1C use an X-axis multi-lane generator; A1/A1 Mini require a separate bed-slinger/wiggle generator.
-- Before publishing a `.autoeject.*` artifact, the workstation owner/operator must physically manage front path/door clearance, ramp/bin readiness, toolhead cover security, release surface/profile, and supervised first ejection at the printer. The GUI records this as `operator_managed=true` evidence instead of a manual checklist, while the backend still blocks on camera, bed-clear, artifact, and start-state evidence.
-- Camera/video status is a separate plane from MQTT progress/material status. A failed video probe must show a camera blocker without clearing already loaded printer progress or AMS/material evidence.
-- Read Bambu bridge evidence as five planes: `artifact`, `validation`, `transport`, `runtime`, and `bed-clear`. Physical autoejection is not considered successful from `published=true` alone; it requires camera/operator observation, post-publish state, bed-clear lock/unlock evidence, and a clear next-job gate.
-- Physical Bambu autoejection completion is audited through the `/printer` `Physical Proof Package` controls or `scripts/audit_bambu_autoejection_completion.py`. `Build Fail-Closed Proof Template` only creates a JSON scaffold. `Run Completion Audit` must verify file-backed camera, manifest, post-publish, bed-clear, and next-job gate evidence before the system may describe Bambu autoejection as physically complete.
-- `virtual`: no physical device actions.
+## Exercise 2 — Move from virtual testing to hardware
 
-## 2. Advanced Path
+**Goal:** select the intended physical boundary before a new run.
 
-### 2.1 Orchestration Route
+1. Open **Test Mode Settings** from Main.
+2. Compare **Installed Printer** and **Physical Print**.
+3. Inspect each agent's boundary, print-body/cooling choices and auto-ejection.
+4. Save only the profile you intend to use; reload to verify.
+5. In Live, explicitly request the matching scenario:
+   `테스트 모드, 실제 프린터` or `테스트 모드, 실제 출력`.
 
-The executable source of truth is [../../graphs/configs/atr_closed_loop.yaml](../../graphs/configs/atr_closed_loop.yaml).
+![Installed Printer: ejection path without printing the body](assets/screenshots/2026-09-29/profile-installed.png)
 
-```text
-dispatch -> current executable stage
-idle -> design -> specimen -> vision (pickup) -> manipulation (transfer)
-     -> vision (placement verification) -> equipment
-     -> manipulation (post-test clearance) -> vision (clearance verification)
-     -> analysis -> knowledge -> bo -> guardian
-guardian: continue -> design | stop -> complete | error -> error
-```
+![Physical Print: printing and cooling enabled](assets/screenshots/2026-09-29/profile-physical.png)
 
-This is the configured specimen-transfer/clearance path, not a mandatory
-sequence for every experiment or mode. Vision can wait or redirect, and the
-post-test handoff is guarded by same-run/cycle/specimen evidence. When clearance
-is required, a successful equipment response alone cannot advance to Analysis.
-The [Orchestration Route](../../README.md#orchestration-route) shows the full
-graph; [Manipulation](../agents/manipulation_agent.md) and
-[Vision](../agents/vision_agent.md) explain the two verification boundaries.
-Analysis processes measured curves, reviews evidence and publishes the configured objective for BO.
+**Checkpoint:** the admitted contract and selected profile agree.
+Installed Printer is not a dry-run: it can eject and operate downstream real devices.
+If supplying a specimen yourself, follow the current operator request; do not mark
+a sample present or removed before actually observing it. Physical Print uses the
+full print path.
 
-Runtime evidence is emitted through `run.started`, `node.started`, `node.completed`, `edge.traversed`, `approval.*`, `artifact.created`, and terminal run events.
+Passing the installed-printer exercise does not validate first-layer adhesion,
+full print duration or nozzle-cleaning performance. Validate physical printing
+separately under supervision. Profile edits affect the next admitted run, not an
+already running one. See [Test Mode](../runtime/test_mode.md).
 
-### 2.2 Agent Modules
+## Exercise 3 — Configure robot ports and record one demonstration
 
-| Stage | Module | Responsibility |
-|---|---|---|
-| design | `graphs/modules/design` | Convert objective into TPMS/specimen design contract |
-| specimen | `graphs/modules/specimen` | Generate STL/G-code/manufacturing handoff |
-| vision | `graphs/modules/vision` | Capture observation and transfer readiness |
-| manipulation | `graphs/modules/manipulation` | LeRobot policy rollout or pick-place handoff |
-| equipment | `graphs/modules/equipment` | Windows/UTM/equipment command bridge |
-| analysis | `graphs/modules/analysis` | Measurement metrics and objective score |
-| knowledge | `graphs/modules/knowledge` | Memory/evidence update |
-| bo | `graphs/modules/bo` | Candidate selection with benchmark/acquisition logic |
-| guardian | `graphs/modules/guardian` | Safety and continue/stop/error decision |
+**Goal:** create an identifiable local demonstration without confusing recording,
+training and experiment execution.
 
-Live GUI agent tabs and descriptor cards are loaded from `/api/runtime/agent-manifests`, which merges graph YAML, module YAML, and optional `graphs/modules/<module>/ui.yaml` files. `ui.yaml` is presentation-only: labels, short names, icons, report card selectors, and report sections may change there, but handlers, graph routes, tool allowlists, and live device authority do not.
+1. Open **Manipulation → Profile** and select the intended robot profile.
+2. Expand **2. Device Port Setup**. Read the saved follower, leader and camera entries.
+3. If setup is needed, use **Baseline** then **ID Detect & Save** for the intended
+   device, following the displayed detection guidance. Alternatively expand
+   **Manual Port Override**, select the role/camera key and **Save Manual Port**.
+   These are configuration actions, not harmless inspection buttons.
+4. Check calibration and camera ownership using the
+   [LeRobot bridge guide](../device_bridges/lerobot_bridge.md) before motion.
 
-### 2.3 Core APIs
+![Expanded follower, leader and camera setup](assets/screenshots/2026-09-29/robot-devices.png)
 
-- Runtime: `/api/runtime/state`, `/api/events/recent`, `/api/events/stream`, `/api/run/start`, `/api/run/stop`, `/api/run/safe-stop`
-- Runs: `/api/runs/{run_id}`, `/api/runs/{run_id}/events`, `/api/runs/{run_id}/artifacts`, `/api/runs/{run_id}/approvals`
-- Planning: `/api/planning/session`, `/api/planning/messages`, `/api/planning/bootstrap`, `/api/planning/message`
-- Graphs: `/api/graphs`, `/api/graphs/{graph_id}/validate`, `/compile`, `/dry-run`, `/run`, `/save-version`
-- Modules: `/api/modules`, `/api/modules/management-state`, `/api/runtime/agent-manifests`, `/api/bridges`, `/api/modules/templates/{agent|ui-only|bridge}`, `/api/modules/{module_id}`, `/api/modules/{module_id}/ui`, `/api/modules/{module_id}/validate`, `/dry-run`, `/load`, `/unload`, `/register-generated`
-- Workspaces: `/api/printer/*`, `/api/lerobot/*`, `/api/bo/*`, `/api/cae/*`, `/api/equipment/windows/*`
+5. In **4. Local Paths**, set the dataset root and dataset repo ID/local name.
+   For a new recording, choose a new dataset identity. Use **Resume dataset** only
+   for an existing compatible dataset; deleting its folder is not a resume method.
+6. In **6. Recording**, enter **Task Instruction**, **Episodes**, **Episode Time (s)**
+   and **Reset Time (s)**. For a supervised first recording, use one episode.
+7. Clear the robot workspace, then click **Start Record**.
 
-### 2.4 Extension Rules
+![Recording inputs and live episode controls](assets/screenshots/2026-09-29/robot-recording.png)
 
-- Add or change execution order in graph YAML, then validate and dry-run.
-- Add or change stage behavior in `graphs/modules/<module>/module.yaml`.
-- Add or change Live GUI presentation in `graphs/modules/<module>/ui.yaml`; do not use it for execution authority.
-- Draft modules created by `/api/modules/templates/*` are preview-only until attached to a graph, validated, dry-run, and saved.
-- Keep tool allowlists minimal.
-- Never execute arbitrary uploaded Python directly; use generated adapter approval.
-- Keep real hardware calls behind live gates, job/session IDs, and runtime events.
-- Update documentation and tests with runtime behavior changes.
+8. Use **Save / Next →** to accept the episode, **Retry Current ←** to reject/retry it,
+   and **Finish Gracefully (Esc)** to close normally. **Force Stop** is emergency
+   cleanup, not the normal save button.
+9. Inspect the action status/log and recorded dataset before training.
 
-### 2.5 Verification
+**Checkpoint:** a saved episode at the intended path, with the expected camera and
+joint channels. A successful launch without saved frames/actions is not a recording.
+If startup fails, inspect the session log, ports, calibration and dataset identity;
+do not delete calibration or reconnect a device while another session owns it.
 
-```bash
-pytest
-pytest tests/integration/test_controller_run.py
-pytest tests/integration/test_live_gui_runtime_layout.py
-pytest tests/integration/test_printer_gui_api.py
-pytest tests/integration/test_lerobot_gui_api.py
-pytest tests/integration/test_bo_gui_api.py
-pytest tests/integration/test_cae_gui_api.py
-```
+## Exercise 4 — Configure standalone inference and the experiment bridge
 
-Browser audits:
+**Goal:** avoid saving a rollout option in the wrong place.
 
-```bash
-python tests/ui/planning_browser_audit.py
-python tests/ui/runtime_ide_browser_audit.py
-python tests/ui/module_management_browser_audit.py
-python tests/ui/live_runtime_ide_browser_audit.py
-```
+1. Open **10. Inference / Rollout** for a standalone supervised policy test.
+2. Check the policy checkpoint, task and action rate.
+3. Choose optional linear interpolation/RTC settings explicitly.
+   Interpolation output Hz is distinct from policy/action FPS; the output must not
+   be below the input rate and the GUI supports up to 100 Hz.
+4. Click **Save Rollout Defaults**. Start only when the robot work area is clear.
 
-### 2.6 Where to Look
+![Standalone rollout options](../gui/assets/screenshots/2026-09-29/lerobot-inference.png)
 
-| Need | Source |
-|---|---|
-| Overall docs | [../README.md](../README.md) |
-| Closed loop details | [../runtime/closed_loop_and_pages_reference.md](../runtime/closed_loop_and_pages_reference.md) |
-| LangGraph runtime | [../runtime/langgraph_runtime.md](../runtime/langgraph_runtime.md) |
-| Live GUI | [../gui/gui.md](../gui/gui.md) |
-| Printer | [../hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt](../hardware/printer_agent_prusabridge_phase1_runtime_guideline.txt) |
-| LeRobot | [../hardware/lerobot_robotis_manipulation_runtime_guideline.md](../hardware/lerobot_robotis_manipulation_runtime_guideline.md) |
-| Windows bridge | [../hardware/windows_pyautogui_equipment_agent_guideline.md](../hardware/windows_pyautogui_equipment_agent_guideline.md) |
-| Git workflow | [../repository/github_version_control.md](../repository/github_version_control.md) |
+5. Open **11. Manipulation Agent Bridge** for settings consumed by the loop.
+6. Select the intended task, inspect its own policy/rates/options, and click
+   **Save Task Defaults**. Do not assume saving standalone rollout defaults changed
+   the selected agent task.
+
+![Task-specific Manipulation Agent Bridge settings](../gui/assets/screenshots/2026-09-29/lerobot-agent-bridge.png)
+
+**Checkpoint:** the task-specific saved configuration matches the intended next
+session. Inspect MAN's live telemetry, policy tracking and artifacts during a real
+run. A 3D robot display alone does not prove grasp or placement success.
+Do not run a standalone rollout concurrently with a loop-owned manipulation.
+
+## Exercise 5 — Prepare Windows/UTM automation
+
+**Goal:** verify the actual target desktop and equipment sequence before admission.
+
+1. Open **Windows Automation** and inspect the selected bridge/worker connection.
+2. Check that the received desktop is the intended UTM application, not a login,
+   update or unrelated window. Coordinate with the equipment operator.
+3. Inspect the selected Skills and their evidence without executing them just to
+   populate a screenshot.
+
+![Windows automation workspace](../gui/assets/screenshots/2026-09-29/equipment-windows.png)
+
+4. Open `/equipment/agent-manager` and inspect **Equipment Flow** and its profile.
+5. Check the ordered Skills and Vision slots against the intended method.
+   Follow [Equipment Agent](../agents/equipment_agent.md) and
+   [Windows bridge](../device_bridges/windows_pyautogui_bridge.md) for configuration.
+   Do not edit an active flow to skip a failed device action.
+
+![Equipment Agent Manager and flow composition](../gui/assets/screenshots/2026-09-29/equipment-agent-manager.png)
+
+**Checkpoint:** correct worker, desktop, method and flow; current observation evidence
+belongs to the run before EQP executes. A green connection indicator does not prove
+compression or height return completed.
+
+## Exercise 6 — Inspect one candidate from design to optimization
+
+**Goal:** follow one candidate rather than combining unrelated cycles.
+
+1. In Live, select **DSN → Report**. Record candidate ID, cell size, wall thickness,
+   geometry artifact and constraint result.
+2. Select **ANL → Report**. Check the selected cycle, SS/FD axes and units, source CSV,
+   mass used in SEA, and the actual integration/strain evidence.
+3. Select **BO → Report**. Check objective identity/direction and observation count.
+4. If a GP exists, inspect the 2D/3D mean, uncertainty, acquisition and next candidate.
+
+![Analysis report with curve and performance evidence](../gui/assets/screenshots/2026-09-29/live-analysis.png)
+
+![BO posterior and recommendation](../gui/assets/screenshots/2026-09-29/live-bo.png)
+
+**Checkpoint:** design → source measurement → analyzed metric → BO observation are
+linked to the same identity. Before slicing, absent mass is unknown; afterward use
+the recorded mass used by analysis, not an unrelated geometry estimate.
+A BO candidate is a recommendation, not an already tested specimen.
+An initial LHS view without GP data can be correct.
+See [Analysis](../agents/analysis_agent.md) and [BO](../agents/bo_agent.md).
+
+## Exercise 7 — Find retained knowledge without changing run evidence
+
+1. Open **Knowledge → Wiki**.
+2. Select an article and read its source references and scope.
+3. Use **Source Library** to inspect provenance. Memory and Agent Delivery are
+   separate views, not additional physical sensors.
+
+![Knowledge Wiki with source-backed content](../gui/assets/screenshots/2026-09-29/knowledge-wiki.png)
+
+**Checkpoint:** you can identify the source and whether it is historical, procedural
+or current run evidence. A wiki instruction cannot prove today's device action.
+Some private views require authorized access; a 401 is not an invitation to bypass
+authentication. See [Knowledge operations](../knowledge/markdown_memory_operations.ko.md).
+
+## Exercise 8 — Diagnose and resume the same run
+
+1. Note run ID, cycle, agent and the exact unresolved reason.
+2. Open that agent's **Timeline**, **Artifacts**, and **Backend** as needed.
+3. Correct the actual cause (connection, missing input or physical state), keeping
+   the current run's evidence intact.
+4. Use the existing **Resume** control if the runtime offers recovery.
+5. Confirm the same run ID and intended continuation point; verify the new evidence.
+
+![Timeline for locating a blocked step](../gui/assets/screenshots/2026-09-29/live-timeline.png)
+
+**Checkpoint:** recovery is recorded on the existing run, not a duplicate run with
+copied completion flags. Resume may repeat a recoverable step; it is not a blanket
+guarantee of exactly-once physical execution. Inspect the requested route and device
+state before approving motion. Do not delete failure history, clear PLC latches
+blindly, or press Start to impersonate Resume.
+See [Runtime flow and recovery](../runtime/closed_loop_and_pages_reference.md).
+
+## Exercise 9 — Open a read-only replay
+
+1. Return to Main; choose **Mode = replay**.
+2. Select an **Experiment session** and click **Start**.
+3. In the new window, use the Contract-area point selector.
+4. Use Left/Right to move between recorded points and Up/Down between available
+   cycles. Keyboard shortcuts do not take over text/select inputs.
+
+![Replay session selector in Main](assets/screenshots/2026-09-29/main-replay.png)
+
+![Replay window reusing the Live layout](../gui/assets/screenshots/2026-09-29/replay.png)
+
+**Checkpoint:** the header says **REPLAY**, selected run/cycle/point changes, and no
+hardware action is issued. Missing snapshots cannot be reconstructed by fetching a
+new live camera frame. Artifact files may outlive their recorded point; distinguish
+point-bound evidence from a general retained file.
+See [Replay reference](../gui/run_replay.md).
+
+## Exercise 10 — Inspect runtime composition without changing the loop
+
+1. Open `/ide` and inspect the graph and node/module configuration.
+2. Follow an edge to its contract and locate the associated runtime evidence.
+3. For a separate development task, use draft validation/compile/dry-run before any
+   saved-version activation. Do not activate edits during this tutorial.
+
+![Runtime IDE graph and inspector](../gui/assets/screenshots/2026-09-29/ide-graph.png)
+
+**Checkpoint:** distinguish a UI report, a module implementation, a package connection
+contract and the executing graph. Changing display metadata does not grant device
+permissions. See [Runtime IDE](../runtime/runtime_ide.md),
+[Modularity](../modularity.md) and [Module Management screens](../gui/visual_structure.md).
+
+## Completion checklist and further reference
+
+- You can select the physical boundary before starting a new run.
+- You know which save button owns printer, rollout and task settings.
+- You can locate one candidate's source evidence and retained files.
+- You can distinguish Resume, a new Start and read-only Replay.
+- You have not treated historical screenshots as current physical proof.
+
+Keep `runs/<run-id>/` and its referenced artifacts together when archiving.
+Connection/configuration files under `memory/` can contain secrets; do not publish
+them as tutorial attachments.
+
+For developer installation, tests and contribution workflow, use
+[CONTRIBUTING](../../CONTRIBUTING.md). For the complete screen map, use
+[GUI Structure](../gui/visual_structure.md).

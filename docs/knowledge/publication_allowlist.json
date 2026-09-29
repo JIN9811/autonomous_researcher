@@ -1,6 +1,54 @@
 {
   "schema": "knowledge_publication.v1",
   "approved_assets": {
+    "docs/tutorials/assets/screenshots/2026-09-29/main-replay.png": {
+      "sha256": "684cdac48a51428b3be312a96c59c4fa02273d5c292b04d901a855b4744f4579",
+      "review": "Owner-requested public tutorial screenshot. Visually reviewed at 1920x1080; private connection credentials, serials and local identity paths redacted where present. Saved settings, historical run IDs and visible idle/error states illustrate the existing GUI, not new physical validation. No hardware action or configuration save performed. Captured 2026-09-29."
+    },
+    "docs/tutorials/assets/screenshots/2026-09-29/printer-connection.png": {
+      "sha256": "e1b514aaed3f687e359c58d6a4713549bd0fb62ae8fca81a93d0730274da1dea",
+      "review": "Owner-requested public tutorial screenshot. Visually reviewed at 1920x1080; private connection credentials, serials and local identity paths redacted where present. Saved settings, historical run IDs and visible idle/error states illustrate the existing GUI, not new physical validation. No hardware action or configuration save performed. Captured 2026-09-29."
+    },
+    "docs/tutorials/assets/screenshots/2026-09-29/printer-defaults.png": {
+      "sha256": "f36f4dc8413fb81085a39087e706a6787baf6e6ff491bd30181015f1500e0574",
+      "review": "Owner-requested public tutorial screenshot. Visually reviewed at 1920x1080; private connection credentials, serials and local identity paths redacted where present. Saved settings, historical run IDs and visible idle/error states illustrate the existing GUI, not new physical validation. No hardware action or configuration save performed. Captured 2026-09-29."
+    },
+    "docs/tutorials/assets/screenshots/2026-09-29/printer-ejection.png": {
+      "sha256": "11879177cfbe27a8202a7142ce5466a30c011774dde07057d96cede388187164",
+      "review": "Owner-requested public tutorial screenshot. Visually reviewed at 1920x1080; private connection credentials, serials and local identity paths redacted where present. Saved settings, historical run IDs and visible idle/error states illustrate the existing GUI, not new physical validation. No hardware action or configuration save performed. Captured 2026-09-29."
+    },
+    "docs/tutorials/assets/screenshots/2026-09-29/printer-proof.png": {
+      "sha256": "dd2cb7c358f2e2aa4f286b8e82dc5f3e79fe802f358f539b5f81caf982180c90",
+      "review": "Owner-requested public tutorial screenshot. Visually reviewed at 1920x1080; private connection credentials, serials and local identity paths redacted where present. Saved settings, historical run IDs and visible idle/error states illustrate the existing GUI, not new physical validation. No hardware action or configuration save performed. Captured 2026-09-29."
+    },
+    "docs/tutorials/assets/screenshots/2026-09-29/printer-start-options.png": {
+      "sha256": "4822666e38226b671cd1a71ba9891623bdb9912bdcf19a7de9dd326456dcb0db",
+      "review": "Owner-requested public tutorial screenshot. Visually reviewed at 1920x1080; private connection credentials, serials and local identity paths redacted where present. Saved settings, historical run IDs and visible idle/error states illustrate the existing GUI, not new physical validation. No hardware action or configuration save performed. Captured 2026-09-29."
+    },
+    "docs/tutorials/assets/screenshots/2026-09-29/profile-installed.png": {
+      "sha256": "e0822581c9acea0b4b47dd02340adf2583a6491d5b6f8f602e1a9b49e394b9d9",
+      "review": "Owner-requested public tutorial screenshot. Visually reviewed at 1920x1080; private connection credentials, serials and local identity paths redacted where present. Saved settings, historical run IDs and visible idle/error states illustrate the existing GUI, not new physical validation. No hardware action or configuration save performed. Captured 2026-09-29."
+    },
+    "docs/tutorials/assets/screenshots/2026-09-29/profile-physical.png": {
+      "sha256": "827a3642f1ce80f6a73a92d3dcc0dcc0d0da22fd4f79699a714cbbbedb7d7797",
+      "review": "Owner-requested public tutorial screenshot. Visually reviewed at 1920x1080; private connection credentials, serials and local identity paths redacted where present. Saved settings, historical run IDs and visible idle/error states illustrate the existing GUI, not new physical validation. No hardware action or configuration save performed. Captured 2026-09-29."
+    },
+    "docs/tutorials/assets/screenshots/2026-09-29/robot-devices.png": {
+      "sha256": "e75c0c5dd6856bd1a949e5fccb209e55d383c82dd069272f5cc22f02dc9795eb",
+      "review": "Owner-requested public tutorial screenshot. Visually reviewed at 1920x1080; private connection credentials, serials and local identity paths redacted where present. Saved settings, historical run IDs and visible idle/error states illustrate the existing GUI, not new physical validation. No hardware action or configuration save performed. Captured 2026-09-29."
+    },
+    "docs/tutorials/assets/screenshots/2026-09-29/robot-recording.png": {
+      "sha256": "638ed140da10d4a03478feb20fa0627a5286b7c9a5ab64227dcf9ac49421fe5a",
+      "review": "Owner-requested public tutorial screenshot. Visually reviewed at 1920x1080; private connection credentials, serials and local identity paths redacted where present. Saved settings, historical run IDs and visible idle/error states illustrate the existing GUI, not new physical validation. No hardware action or configuration save performed. Captured 2026-09-29."
+    },
+    "docs/tutorials/assets/screenshots/2026-09-29/vision-frame.png": {
+      "sha256": "8367b76b26f1e0ac7911fccb46792134ef65039e65d9512dd0c89cf65428185d",
+      "review": "Owner-requested public tutorial screenshot. Visually reviewed at 1920x1080; private connection credentials, serials and local identity paths redacted where present. Saved settings, historical run IDs and visible idle/error states illustrate the existing GUI, not new physical validation. No hardware action or configuration save performed. Captured 2026-09-29."
+    },
+    "docs/tutorials/assets/screenshots/2026-09-29/vision-pose.png": {
+      "sha256": "d4c4b44bf80681338e1a79e0e48cc7b881f54fbfee85eb9f356e7567833c826b",
+      "review": "Owner-requested public tutorial screenshot. Visually reviewed at 1920x1080; private connection credentials, serials and local identity paths redacted where present. Saved settings, historical run IDs and visible idle/error states illustrate the existing GUI, not new physical validation. No hardware action or configuration save performed. Captured 2026-09-29."
+    },
     "docs/gui/assets/screenshots/2026-09-29/bo.png": {
       "sha256": "810e80a8c444ad7d2b2c7291befd763c9b6edb728c6927d0a6ae7612a3e79fd4",
       "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
