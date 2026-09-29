@@ -168,6 +168,15 @@ creating retired service panels or starting computation.
 
 ## Configuration and Operation
 
+### GUI Screen Reference
+
+![analysis agent report at 1920 × 1080](../gui/assets/screenshots/2026-09-29/live-analysis.png)
+
+Measured-response cards and the SS/FD graph present analysis evidence. Use the report's history controls to inspect retained cycles rather than treating the currently selected curve as every cycle.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../gui/visual_structure.md) for shared navigation,
+capture conditions and the distinction between report selection and execution.
+
 Use the existing experiment setup for geometry, available mass, objective and
 execution mode. Analysis adds no separate device settings or solver workspace.
 Virtual test input can exercise the numerical path but is labeled synthetic and

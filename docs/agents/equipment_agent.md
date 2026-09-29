@@ -344,6 +344,15 @@ evidence failures. Vision observes; it does not directly control equipment input
 
 ## Execution Records and Projections
 
+### GUI Screen Reference
+
+![equipment agent report at 1920 × 1080](../gui/assets/screenshots/2026-09-29/live-equipment.png)
+
+The equipment report groups run-bound progress, configured/observed method values and completion evidence. Recorded completion is distinct from current bridge readiness.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../gui/visual_structure.md) for shared navigation,
+capture conditions and the distinction between report selection and execution.
+
 `EquipmentExecutionRecord` retains:
 
 - `execution_id`, `sequence_id`

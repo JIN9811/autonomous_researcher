@@ -159,6 +159,17 @@ without another physical write.
 
 ## API And GUI Surfaces
 
+### GUI Screen Reference
+
+![PLC Safety Bridge: connection, registers, safety state and transport health](../gui/assets/screenshots/2026-09-29/plc.png)
+
+*PLC Safety Bridge: connection, registers, safety state and transport health.*
+
+Read the transport freshness together with decoded register state. The captured ONLINE state is time-specific, not blanket authorization to operate equipment.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../gui/visual_structure.md) for navigation and capture conditions.
+
+
 | Method | Route | Operator purpose |
 |---|---|---|
 | `GET` | `/api/plc/config` | Read non-secret editable settings and fixed register mapping. |

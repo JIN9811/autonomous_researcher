@@ -1,5 +1,5 @@
 ---
-{"topic_id":"measurement-metrics","owner":"documentation","source_refs":["docs/agents/analysis_agent.md"],"source_revision":{"docs/agents/analysis_agent.md":"8963c88b1ca2a74dad2ea35a2195bf5f91f7d9f9e3ea66520d05a13cbb5e851b"},"verified_at":"2026-09-28T00:00:00+09:00","applicability":"Public AX4LAB reference: measurement-metrics","status":"reviewed"}
+{"topic_id":"measurement-metrics","owner":"documentation","source_refs":["docs/agents/analysis_agent.md"],"source_revision":{"docs/agents/analysis_agent.md":"92288bc305c63d5864c9e7680e233fa4ec85d3a1996e742541734972672400ad"},"verified_at":"2026-09-28T00:00:00+09:00","applicability":"Public AX4LAB reference: measurement-metrics","status":"reviewed"}
 ---
 
 # Measurement Metrics — SS, FD and Energy

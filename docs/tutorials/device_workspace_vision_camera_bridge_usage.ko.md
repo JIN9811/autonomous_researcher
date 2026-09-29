@@ -1,5 +1,14 @@
 # Vision / UTM Camera Bridge 사용법
 
+## 화면 안내
+
+![Vision Workspace](../gui/assets/screenshots/2026-09-29/device-bridge-vision-utm.png)
+
+2026-09-29, 1920 × 1080 캡처입니다. 상단 상태, 명시적인 ROS·카메라 조작,
+카메라 프로필이 분리되어 있습니다. 촬영을 위해 장치 탐색이나 ROS 로딩을
+실행하지 않았으므로 미조회 상태는 그대로 남아 있습니다. 실험별 촬영·판정
+결과는 별도의 [Vision Agent 화면](../agents/vision_agent.md#gui-screen-reference)에서 봅니다.
+
 ## Status at a Glance
 
 | At a glance | Details |

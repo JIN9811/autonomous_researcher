@@ -277,6 +277,15 @@ attachments and active endpoints are retired, while historical files remain.
 
 ## Storage, Scope and Lifecycle
 
+### GUI Screen Reference
+
+![knowledge agent report at 1920 × 1080](../gui/assets/screenshots/2026-09-29/live-knowledge.png)
+
+The report summarizes retained knowledge, retrieval and delivery evidence. Its individual cards can have different scopes; the captured unknown-cycle labels are not filled in or inferred.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../gui/visual_structure.md) for shared navigation,
+capture conditions and the distinction between report selection and execution.
+
 ```text
 memory/knowledge/markdown/
   <run_id>/<cycle_id>/<agent_id>/<record_id>/revision-000001.md

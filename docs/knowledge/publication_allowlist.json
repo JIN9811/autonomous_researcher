@@ -1,6 +1,150 @@
 {
   "schema": "knowledge_publication.v1",
   "approved_assets": {
+    "docs/gui/assets/screenshots/2026-09-29/bo.png": {
+      "sha256": "810e80a8c444ad7d2b2c7291befd763c9b6edb728c6927d0a6ae7612a3e79fd4",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/device-bridge-vision-utm.png": {
+      "sha256": "4636b8842c6f06c1d9603813eac71cce21530ed436ce24b7de454e9a954bb823",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/equipment-agent-manager.png": {
+      "sha256": "79bf427a2211c55a6f9552eb07608360d8a67889c34e1408a4039783b0690ec3",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/equipment-windows.png": {
+      "sha256": "8199cce2784391485be4e92df7529f1820cdfd450a2c629f68a6c89725652abb",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/ide-graph.png": {
+      "sha256": "16e9a3bc7157d8461871d0a0d03c6573834d573cac1fb096741e779bc9f4e326",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/ide.png": {
+      "sha256": "b199ff5f0ffff3c41bc7296a3e26bbd3cf553dc6159b1ace1159aad7f10b70e5",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/knowledge-delivery.png": {
+      "sha256": "f37085be7762f1aa3587b7b395bc88fe2f7a148079e52678b7aad6c7ae49b747",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/knowledge-memory.png": {
+      "sha256": "bfcfb908c8e0b0083b7617ac0a9c9b0d6fd9b8dda06cac4ba0e248172bc0ead7",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/knowledge-sources.png": {
+      "sha256": "1164b7f2984200d7a5b06b54dbeef85d1570cc07f28286e18b218ecb390f31c0",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/knowledge-wiki.png": {
+      "sha256": "a46bf504d2286f9d72cf21c21ef8eb18786f7a923371ee112583403436b45482",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/lerobot-agent-bridge.png": {
+      "sha256": "91041de84ac8b5026350a085d76854cd336e4bae3808db57f4c1b3d7762ea139",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/lerobot-inference.png": {
+      "sha256": "880748f2a50e492189db5d4be72397ff7ae555abf6c47e5492c45db4e300309e",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/lerobot.png": {
+      "sha256": "08be4709950a03ed037d6176f6e285b2ea1c4005ec1ff73bcc59a5549aa3286f",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/live-analysis.png": {
+      "sha256": "2e3cb56bf911ab8c96d553eb333ad7c81f16a09c84d553476e2d455215f0c54b",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/live-artifacts.png": {
+      "sha256": "5d4889a99044ee120691b2437b2515b1e24b2fbeddeee5c8a3b5f7c663cbb271",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/live-backend.png": {
+      "sha256": "9d5ebc0a909d688da5848c491566ac1925f9c87cb584bc1d2bd11864afdae17e",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/live-bo.png": {
+      "sha256": "81f727a3c6829bfb28281cfaf8f1b1f91b5b4571d8f4bfdd9d9cb0178ae7a985",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/live-design.png": {
+      "sha256": "855720b61fa42a8a6c2aa8f76ba4ca3b13fef6746447bb25f7e1ca77970c20b3",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/live-equipment.png": {
+      "sha256": "7b6b00392f8108d806505933fd9e331095b3c70e72ff016f27502596e2872860",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/live-graph.png": {
+      "sha256": "7ca9f8ca7dca239c17e5a2e1c6ea443c737616e2a45c93c0a507b2414f2ace2f",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/live-guardian.png": {
+      "sha256": "5a10c0c79cb9db2adaa39ba56f5bf159d3f6bed60bb8a965ccea300a2c89831a",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/live-knowledge.png": {
+      "sha256": "c5fa2b52f101a0c3d11fc54d7e36ed798d8b4ebbdd44103313b379af187004b0",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/live-manipulation.png": {
+      "sha256": "b332e386d04634a9e1c95f7aa7721ea70c27420c7ce2f673cc1508a2b61b0be5",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/live-orchestrator.png": {
+      "sha256": "8f824326b48b8c02e3b179a3acfc35074becedf96269838899388ea2dc7131c1",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/live-overview.png": {
+      "sha256": "d4ab332ab6a32d153d571936c4c45cd0bec8d0757da96e734b9eaf95432ce48d",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/live-specimen.png": {
+      "sha256": "0cebe406316795296dd19188b0f1cece48818b110726a7ca9f3c64cf40f85f2e",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/live-timeline.png": {
+      "sha256": "cd4fa5bf868c8d645187f79e9abcaeef5505be58c4a4db44ab870ef04154ca71",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/live-vision.png": {
+      "sha256": "11d385b35a58ccf8e9c99ba5502a4d6d08387034e1e25b81f8230d3068de1f03",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/main-dashboard.png": {
+      "sha256": "8a9d70888ba72c98462e2aef1a5f8b5c49851af32f9092fa6eb06c55e269b313",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/main-workspaces.png": {
+      "sha256": "738de2081eb247671c8d1529282e7e3953dce0765a7d5969c51a28bdfc519fb0",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/module-management.png": {
+      "sha256": "907668004016df86ad4781022f2f45cc866058a5e2734ea6318d5c2b5c8810c9",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/plc.png": {
+      "sha256": "441c868f0d8b620073c8fb55e8e3bb5d80bb27fb53a417db9d30f89756b05217",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/printer-print-options.png": {
+      "sha256": "4822666e38226b671cd1a71ba9891623bdb9912bdcf19a7de9dd326456dcb0db",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/printer.png": {
+      "sha256": "9c14a2d18e6b8bdc30024bbc94dac580f3feabc199c3b1f170323a74d465c8cc",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/replay.png": {
+      "sha256": "7525fe1b89a1a505936b246c9b18d6b991217523b70bc90d5ffedfaf04533561",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
+    "docs/gui/assets/screenshots/2026-09-29/test-mode-settings.png": {
+      "sha256": "187d5c2b22d6b7b80657267b5d1d230423ddc7d0c0b1d4341261d2bcda18eb50",
+      "review": "Owner-requested public GUI documentation screenshot, visually reviewed at 1920x1080. Private addresses, credentials and local paths redacted where present. Retained run IDs, selected results and UI states intentionally illustrate existing screens; not a new hardware validation or publication of raw run records. Captured 2026-09-29."
+    },
     "docs/agents/assets/figures/analysis-overview.webp": {
       "sha256": "9f37e6ad8240841093bcc55820d38a48ff07cd8315ff6b0e2dae165389da78a5",
       "review": "Reviewed AX4LAB public documentation/UI artwork: framework diagram, branding, or generated workspace pictogram; no private experiment records or credentials."

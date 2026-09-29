@@ -223,6 +223,10 @@ UTM ROS Vision Runtime은 Windows/PyAutoGUI 제어 증거를 대체하지 않고
 
 ## 3. 페이지별 문서 맵
 
+[GUI Structure and Screen Reference](gui/visual_structure.md)는 실제
+1920 × 1080 스크린샷과 함께 각 화면의 구조·역할·이동 경로를 설명합니다.
+에이전트와 장비별 참조 문서에도 해당 화면을 직접 수록했습니다.
+
 | 페이지 | URL | 코드 | 설명 문서 |
 |---|---|---|---|
 | Main GUI | `/` | `web/templates/index.html`, `web/static/app.js` | [gui/gui.md](gui/gui.md) |

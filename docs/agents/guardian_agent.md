@@ -293,6 +293,15 @@ missing evidence, stale health, or unknown effect routes to review/stop/error.
 
 ## Operator and GUI Surfaces
 
+### GUI Screen Reference
+
+![guardian agent report at 1920 × 1080](../gui/assets/screenshots/2026-09-29/live-guardian.png)
+
+Safety and decision evidence belong to the selected run/stage. Empty decision or heartbeat projections in this completed-session view must not be read as proof of hardware safety.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../gui/visual_structure.md) for shared navigation,
+capture conditions and the distinction between report selection and execution.
+
 In the 2026-09-06 working-tree update, `decision=continue` with `action=recover`
 or `action=retry` is a review hold, not a completed experiment. The runtime stays
 at Guardian, preserves the specimen and loop number, sets `is_paused`, and

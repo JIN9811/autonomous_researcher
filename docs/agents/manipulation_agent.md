@@ -519,6 +519,15 @@ is prohibited.
 
 ## Operator and GUI Surfaces
 
+### GUI Screen Reference
+
+![manipulation agent report at 1920 × 1080](../gui/assets/screenshots/2026-09-29/live-manipulation.png)
+
+Live robot pose, joint selector and policy tracking share a report. The model is rendered, but telemetry is disconnected and the tracking chart is idle in this capture.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../gui/visual_structure.md) for shared navigation,
+capture conditions and the distinction between report selection and execution.
+
 The 2026-09-06 working-tree lifecycle update separates an agent call returning
 from its asynchronous transfer finishing. `run_metadata.manipulation_execution`
 is scoped by run, loop, specimen, and rollout session. Launching a policy leaves

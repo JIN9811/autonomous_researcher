@@ -386,6 +386,15 @@ never retries an uncertain physical effect.
 
 ### Operator and GUI Surfaces
 
+### GUI Screen Reference
+
+![specimen agent report at 1920 × 1080](../gui/assets/screenshots/2026-09-29/live-specimen.png)
+
+Specimen/print evidence and printer observation. UNKNOWN telemetry and an inactive video are preserved from the idle capture; they are not print-completion evidence.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../gui/visual_structure.md) for shared navigation,
+capture conditions and the distinction between report selection and execution.
+
 The 3D workspace exposes fleet, connection, live status/video, slicing,
 prestart, start, autoejection, bed-clear, and proof/audit functions. Live GUI
 shows the agent's manufacturing report and evidence. UI confirmation does not

@@ -292,6 +292,25 @@ until the old process and physical effect state are reconciled.
 
 ## Operator and GUI Surfaces
 
+### GUI Screen Reference
+
+![LeRobot profile and section navigation](../gui/assets/screenshots/2026-09-29/lerobot.png)
+
+*LeRobot profile and section navigation.*
+
+![Inference / Rollout configuration](../gui/assets/screenshots/2026-09-29/lerobot-inference.png)
+
+*Inference / Rollout configuration.*
+
+![Manipulation Agent Bridge configuration](../gui/assets/screenshots/2026-09-29/lerobot-agent-bridge.png)
+
+*Manipulation Agent Bridge configuration.*
+
+The numbered sections distinguish standalone rollout from the agent-bridge task path. The screenshots show the existing interpolation and RTC inputs without starting a robot session. Values are installation snapshots, not validated recommendations.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../gui/visual_structure.md) for navigation and capture conditions.
+
+
 The `/lerobot` workspace exposes profiles, ports, camera, teleop/record/train/
 rollout, policies, sessions, visualization, augmentation, Isaac, and mirror
 operations. The live manipulation workspace can call a bounded agent run, but

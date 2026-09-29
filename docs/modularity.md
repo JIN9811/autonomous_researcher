@@ -130,6 +130,13 @@ runtime snapshots are outside the portable contract.
 
 ## IDE, Package, and Owner-Plan Lifecycle
 
+![Module Management library and designer](gui/assets/screenshots/2026-09-29/module-management.png)
+
+*The existing module library, management-load controls and five-area designer,
+captured at 1920 × 1080 on 2026-09-29. This is the editing surface; loading a
+descriptor is not activation of a new experiment route. See the
+[GUI structure guide](gui/visual_structure.md) for the adjoining Runtime IDE.*
+
 ![Owner plan lifecycle from detached draft through validation and explicit apply to a pinned future run](assets/modularity/lifecycle.svg)
 
 **Figure Modularity-2.** Import or editing creates a detached draft; validation

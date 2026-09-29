@@ -283,6 +283,21 @@ not satisfy a new acquisition.
 
 ## Operator and GUI Surfaces
 
+### GUI Screen Reference
+
+![Windows equipment connection workspace](../gui/assets/screenshots/2026-09-29/equipment-windows.png)
+
+*Windows equipment connection workspace.*
+
+![Equipment Agent Manager: deployed Skill and Vision sequence](../gui/assets/screenshots/2026-09-29/equipment-agent-manager.png)
+
+*Equipment Agent Manager: deployed Skill and Vision sequence.*
+
+The Windows workspace owns worker/profile setup; Agent Manager displays the profile-bound Flow. Displaying a saved worker or Flow does not execute its actions.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../gui/visual_structure.md) for navigation and capture conditions.
+
+
 ### Windows Console
 
 기본 화면은 다음 네 영역만 표시합니다.

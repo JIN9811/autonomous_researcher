@@ -247,6 +247,11 @@ requires integration and validation.
 
 ## Getting Started
 
+For a screenshot-based tour of the existing application, see
+[GUI Structure and Screen Reference](docs/gui/visual_structure.md):
+Main/Live navigation, agent reports, device workspaces, Runtime IDE and Replay
+at 1920 × 1080.
+
 | Reader | Start here |
 |---|---|
 | Researcher or reviewer | [Problem and contributions](docs/paper/01_problem_and_contributions.md) → [Results](docs/paper/06_evaluation_and_results.md) |

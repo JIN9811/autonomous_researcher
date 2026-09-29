@@ -359,6 +359,15 @@ normal model decisions.
 
 ### Operator and GUI Surfaces
 
+### GUI Screen Reference
+
+![design agent report at 1920 × 1080](../gui/assets/screenshots/2026-09-29/live-design.png)
+
+Generated specimen history, design space, candidate comparison and constraint evidence. A selected candidate is not automatically a measured result.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../gui/visual_structure.md) for shared navigation,
+capture conditions and the distinction between report selection and execution.
+
 Live GUI exposes candidate previews, the Design report, evidence-based evaluation
 and the current decision/review state. Model and API selection remain shared
 platform settings.

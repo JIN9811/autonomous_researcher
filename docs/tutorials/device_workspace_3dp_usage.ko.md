@@ -1,5 +1,16 @@
 # Device Workspaces 사용법: 3D Printer Bridge
 
+## 화면 안내
+
+![Printer Workspace](../gui/assets/screenshots/2026-09-29/printer.png)
+
+![Print Start and Early Layers](../gui/assets/screenshots/2026-09-29/printer-print-options.png)
+
+2026-09-29에 기존 GUI를 1920 × 1080으로 촬영한 화면입니다. 위는 연결·관측
+영역, 아래는 스크롤해서 보는 출력 옵션 영역입니다. 표시된 수치는 권장 기본값이
+아닌 당시 저장값이며, 이 촬영에서 출력이나 설정 저장을 실행하지 않았습니다.
+전체 화면 구성은 [GUI 구조 안내](../gui/visual_structure.md)를 참고하세요.
+
 ## Status at a Glance
 
 | At a glance | Details |

@@ -27,6 +27,17 @@ The ORC classifier receives these commands as an explicit workflow contract, inc
 
 ## Execution profiles
 
+### GUI Screen Reference
+
+![Test Mode Settings: cycle count and per-agent execution boundaries](../gui/assets/screenshots/2026-09-29/test-mode-settings.png)
+
+*Test Mode Settings: cycle count and per-agent execution boundaries.*
+
+Profile selection exposes physical/preflight boundaries separately from run length. This capture shows the Virtual Bridge tab; it does not establish what another profile or an already admitted run will execute.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../gui/visual_structure.md) for navigation and capture conditions.
+
+
 | Selection | Printer behavior | Remaining equipment |
 |---|---|---|
 | `virtual_bridge` | Existing slicer preparation and virtual printer boundary | Resolved virtual policy; no physical actuation |

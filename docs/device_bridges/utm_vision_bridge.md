@@ -222,6 +222,17 @@ handoff; it is not converted to a negative physical observation.
 
 ## Operator and GUI Surfaces
 
+### GUI Screen Reference
+
+![Vision Workspace: runtime bridge, camera profile and operator controls](../gui/assets/screenshots/2026-09-29/device-bridge-vision-utm.png)
+
+*Vision Workspace: runtime bridge, camera profile and operator controls.*
+
+The runtime and camera controls are separate from the Live VIS report's run-bound image verdicts. Discovery, ROS loading and calibration were not invoked for this screenshot; loading/unknown fields are retained.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../gui/visual_structure.md) for navigation and capture conditions.
+
+
 The Vision/UTM workspace exposes runtime graph/status, frames, stream, camera
 configuration/discovery/probe/apply, calibration, and pose/evidence controls.
 The LeRobot workspace also consumes camera/pose data. Operator displays must

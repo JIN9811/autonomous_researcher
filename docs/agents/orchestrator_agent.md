@@ -235,6 +235,15 @@ evidence.
 
 ## Configuration and Operation
 
+### GUI Screen Reference
+
+![orchestrator agent report at 1920 × 1080](../gui/assets/screenshots/2026-09-29/live-orchestrator.png)
+
+Mission contract and decision register. The selected ORC report is independent of the active stage shown in the top strip.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../gui/visual_structure.md) for shared navigation,
+capture conditions and the distinction between report selection and execution.
+
 ### Research conversation and incremental Setup
 
 On first load, the existing `orchestrator_plan` route generates a concise Korean/English greeting without experiment parameters. Subsequent messages follow the researcher's language. Package answers describe the experiment enabled by the active graph, not individual agent packages as separate experiments. Unknown device readiness is not promoted to availability.

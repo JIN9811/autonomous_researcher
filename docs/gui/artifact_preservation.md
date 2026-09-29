@@ -1,5 +1,11 @@
 # Agent evidence preservation
 
+![Live artifact explorer](assets/screenshots/2026-09-29/live-artifacts.png)
+
+*Live GUI → Artifacts, 1920 × 1080, 2026-09-29. Session, loop and agent filters
+scope the file list; All files broadens inspection beyond the current context.
+Private paths are redacted. Browsing evidence does not execute it.*
+
 Every agent invocation owns an immutable run, zero-based loop, attempt, and
 execution ID. The common archive retains inputs, outputs, decisions/handoffs,
 tool events and referenced evidence. Read-only derived outputs are stored in

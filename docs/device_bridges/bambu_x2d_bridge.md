@@ -355,6 +355,21 @@ has no device effect.
 
 ## Operator and GUI Surfaces
 
+### GUI Screen Reference
+
+![Printer workspace: provider selection, telemetry and preparation](../gui/assets/screenshots/2026-09-29/printer.png)
+
+*Printer workspace: provider selection, telemetry and preparation.*
+
+![Saved Print Start & Early Layers controls](../gui/assets/screenshots/2026-09-29/printer-print-options.png)
+
+*Saved Print Start & Early Layers controls.*
+
+The workspace separates connection/observation from slicing defaults and explicit print actions. These are captured installation values, not recommended settings; saved defaults apply through newly prepared artifacts.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../gui/visual_structure.md) for navigation and capture conditions.
+
+
 The `/printer` workspace exposes fleet, connection, slicing, video, probe,
 start-gate, autoejection, bed-clear, and proof views. Operators must distinguish
 draft, gate-ready, published, observed-running, and proof-complete states.

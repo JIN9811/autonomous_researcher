@@ -1,5 +1,14 @@
 # GUI
 
+For the current page map and actual 1920 × 1080 screenshots, start with
+[GUI Structure and Screen Reference](visual_structure.md).
+This page retains detailed behavior and historical implementation notes.
+
+![Live GUI shared shell](assets/screenshots/2026-09-29/live-overview.png)
+
+*Live GUI, 2026-09-29: runtime strip, agent binder, selected report, chat and event
+dock. Completed-session data; private values redacted.*
+
 ## Status at a Glance
 
 | At a glance | Details |

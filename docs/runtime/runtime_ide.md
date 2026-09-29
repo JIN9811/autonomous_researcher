@@ -308,6 +308,25 @@ Important boundaries:
 
 ## Operator Surface Map
 
+### GUI Screen Reference
+
+![Runtime IDE entry controls](../gui/assets/screenshots/2026-09-29/ide.png)
+
+*Runtime IDE entry controls.*
+
+![Runtime IDE graph canvas and explorer](../gui/assets/screenshots/2026-09-29/ide-graph.png)
+
+*Runtime IDE graph canvas and explorer.*
+
+![Module Management library and designer](../gui/assets/screenshots/2026-09-29/module-management.png)
+
+*Module Management library and designer.*
+
+Runtime IDE is the composition/editor surface, not the Live report. Graph drafts, validation/dry-run gates and activation remain distinct; opening either page does not activate a draft.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../gui/visual_structure.md) for navigation and capture conditions.
+
+
 | Surface | Operator purpose | Primary API/state | Persisted change | Highest possible effect |
 |---|---|---|---|---|
 | Header and top bar | Identify run, stage, agent, elapsed time, health; pause/resume/stop | `/api/state`, `/api/runs/{run_id}`, run-control endpoints | Runtime events/state; no config write | Active run control |

@@ -1,5 +1,5 @@
 ---
-{"topic_id":"bo-role","owner":"bo_agent","source_refs":["docs/agents/bo_agent.md"],"source_revision":{"docs/agents/bo_agent.md":"c3c2a286fd4c5373fc8f70d666298ef6d9b5ba8df7eae9f0d63c04db007f7d04"},"verified_at":"2026-09-28T00:00:00+09:00","applicability":"Public AX4LAB reference: bo-role","status":"reviewed"}
+{"topic_id":"bo-role","owner":"bo_agent","source_refs":["docs/agents/bo_agent.md"],"source_revision":{"docs/agents/bo_agent.md":"c94fd36eaae85610dc266287337db37f8315640ca1fe4a7a7f26a22bdea47c14"},"verified_at":"2026-09-28T00:00:00+09:00","applicability":"Public AX4LAB reference: bo-role","status":"reviewed"}
 ---
 
 # Bayesian Optimization Agent — Initial and Next Designs

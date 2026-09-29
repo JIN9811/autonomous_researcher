@@ -369,6 +369,21 @@ See [Loop Artifact Archiving](../runtime/loop_artifact_archiving.md).
 
 ### Visualization Contract
 
+### GUI Screen Reference
+
+![BO objective workspace at 1920 × 1080](../gui/assets/screenshots/2026-09-29/bo.png)
+
+The separate BO workspace edits and inspects versioned objectives. The selected
+saved objective in this screenshot is not proof that it is bound to the live run.
+The Live report below instead displays run-bound optimization evidence.
+
+![bo agent report at 1920 × 1080](../gui/assets/screenshots/2026-09-29/live-bo.png)
+
+Objective, posterior and LHS cards are separate. The captured posterior is step 15 with 15 measured observations; the LHS panel shows six designed and measured initial points. Their history controls are independent.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../gui/visual_structure.md) for shared navigation,
+capture conditions and the distinction between report selection and execution.
+
 Live Posterior and Initial Design / LHS have independent previous/next arrows
 at the right of their card headers. They browse stored PNG artifacts from the
 current run, show the step and position, and disable unavailable directions.

@@ -1,5 +1,5 @@
 ---
-{"topic_id":"manipulation-role","owner":"manipulation_agent","source_refs":["docs/agents/manipulation_agent.md"],"source_revision":{"docs/agents/manipulation_agent.md":"a62c42054dc81f369b25a2b9629370b05e7b57c801a814c74b01af9ed96e7487"},"verified_at":"2026-09-28T00:00:00+09:00","applicability":"Public AX4LAB reference: manipulation-role","status":"reviewed"}
+{"topic_id":"manipulation-role","owner":"manipulation_agent","source_refs":["docs/agents/manipulation_agent.md"],"source_revision":{"docs/agents/manipulation_agent.md":"f6673a42857a5ee3d3439c4d44eabf7332ce252e72554dea40168fb2a510236d"},"verified_at":"2026-09-28T00:00:00+09:00","applicability":"Public AX4LAB reference: manipulation-role","status":"reviewed"}
 ---
 
 # Manipulation Agent — Robot Tasks and Result Review

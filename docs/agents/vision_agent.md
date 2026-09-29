@@ -414,6 +414,15 @@ retry policy.
 
 ## Operator and GUI Surfaces
 
+### GUI Screen Reference
+
+![vision agent report at 1920 × 1080](../gui/assets/screenshots/2026-09-29/live-vision.png)
+
+ActiveCam, placement verification and clearance evidence are separate observation slots. The retained image is historical; missing slots do not mean that a fresh check passed.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../gui/visual_structure.md) for shared navigation,
+capture conditions and the distinction between report selection and execution.
+
 Existing Vision, LeRobot, UTM, agent-report, event, and artifact surfaces remain
 projections over runtime state. They may display the current decision, evidence
 pair, detector facts, freshness, and owner-review reason. A UI action or image

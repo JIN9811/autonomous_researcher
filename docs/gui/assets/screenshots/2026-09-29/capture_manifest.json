@@ -1,0 +1,358 @@
+{
+  "capture_date": "2026-09-29",
+  "source_commit": "a787f2b8d7d48446eee6340b5d00595cbe574009",
+  "purpose": "Existing GUI structure documentation, not hardware or scientific validation",
+  "viewport": {
+    "width": 1920,
+    "height": 1080,
+    "device_scale_factor": 1,
+    "full_page": false
+  },
+  "browser": "Chromium through Playwright; headless; en-US; reduced motion",
+  "source_session": {
+    "run_id": "20260923_235947_KST_planning_a3966381",
+    "state": "complete",
+    "cycle": 15
+  },
+  "capture_controls": {
+    "application_writes": "Blocked at browser request routing except audited read-only Knowledge POST query/read endpoints",
+    "live_entry": "Unchanged planning.html rendered locally; existing read APIs; /live session preparation and auto bootstrap avoided",
+    "privacy": "Credentials, local paths and private addresses redacted in browser presentation only; no saved values edited",
+    "hardware_actions": "None requested; video stream startup blocked",
+    "server_restart": false,
+    "synthetic_data": false
+  },
+  "limitations": [
+    "Completed-session cards may be idle, stale or partially populated.",
+    "Replay contains retained points, not every cycle.",
+    "Knowledge private access not bypassed.",
+    "Graph not loaded in Live capture; the separate Runtime IDE graph is populated.",
+    "Viewport snapshots preserve existing scroll boundaries and UI language."
+  ],
+  "images": [
+    {
+      "file": "bo.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 411887,
+      "sha256": "810e80a8c444ad7d2b2c7291befd763c9b6edb728c6927d0a6ae7612a3e79fd4",
+      "route": "/bo",
+      "view": "bo"
+    },
+    {
+      "file": "device-bridge-vision-utm.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 285039,
+      "sha256": "4636b8842c6f06c1d9603813eac71cce21530ed436ce24b7de454e9a954bb823",
+      "route": "/device-bridge/vision-utm",
+      "view": "device-bridge-vision-utm"
+    },
+    {
+      "file": "equipment-agent-manager.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 193606,
+      "sha256": "79bf427a2211c55a6f9552eb07608360d8a67889c34e1408a4039783b0690ec3",
+      "route": "/equipment/agent-manager",
+      "view": "equipment-agent-manager"
+    },
+    {
+      "file": "equipment-windows.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 304266,
+      "sha256": "8199cce2784391485be4e92df7529f1820cdfd450a2c629f68a6c89725652abb",
+      "route": "/equipment/windows",
+      "view": "equipment-windows"
+    },
+    {
+      "file": "ide-graph.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 730513,
+      "sha256": "16e9a3bc7157d8461871d0a0d03c6573834d573cac1fb096741e779bc9f4e326",
+      "route": "/ide",
+      "view": "Graph Canvas"
+    },
+    {
+      "file": "ide.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 691688,
+      "sha256": "b199ff5f0ffff3c41bc7296a3e26bbd3cf553dc6159b1ace1159aad7f10b70e5",
+      "route": "/ide",
+      "view": "ide"
+    },
+    {
+      "file": "knowledge-delivery.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 105085,
+      "sha256": "f37085be7762f1aa3587b7b395bc88fe2f7a148079e52678b7aad6c7ae49b747",
+      "route": "/knowledge",
+      "view": "Agent Delivery; trusted identity unavailable"
+    },
+    {
+      "file": "knowledge-memory.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 119906,
+      "sha256": "bfcfb908c8e0b0083b7617ac0a9c9b0d6fd9b8dda06cac4ba0e248172bc0ead7",
+      "route": "/knowledge",
+      "view": "Memory; trusted identity unavailable"
+    },
+    {
+      "file": "knowledge-sources.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 129934,
+      "sha256": "1164b7f2984200d7a5b06b54dbeef85d1570cc07f28286e18b218ecb390f31c0",
+      "route": "/knowledge",
+      "view": "Source Library"
+    },
+    {
+      "file": "knowledge-wiki.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 201318,
+      "sha256": "a46bf504d2286f9d72cf21c21ef8eb18786f7a923371ee112583403436b45482",
+      "route": "/knowledge",
+      "view": "AX4LAB Wiki; platform overview article"
+    },
+    {
+      "file": "lerobot-agent-bridge.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 200146,
+      "sha256": "91041de84ac8b5026350a085d76854cd336e4bae3808db57f4c1b3d7762ea139",
+      "route": "/lerobot",
+      "view": "11. Manipulation Agent Bridge"
+    },
+    {
+      "file": "lerobot-inference.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 138278,
+      "sha256": "880748f2a50e492189db5d4be72397ff7ae555abf6c47e5492c45db4e300309e",
+      "route": "/lerobot",
+      "view": "10. Inference / Rollout"
+    },
+    {
+      "file": "lerobot.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 413244,
+      "sha256": "08be4709950a03ed037d6176f6e285b2ea1c4005ec1ff73bcc59a5549aa3286f",
+      "route": "/lerobot",
+      "view": "lerobot"
+    },
+    {
+      "file": "live-analysis.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 267293,
+      "sha256": "2e3cb56bf911ab8c96d553eb333ad7c81f16a09c84d553476e2d455215f0c54b",
+      "route": "/live?auto=0",
+      "view": "live-analysis"
+    },
+    {
+      "file": "live-artifacts.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 359737,
+      "sha256": "5d4889a99044ee120691b2437b2515b1e24b2fbeddeee5c8a3b5f7c663cbb271",
+      "route": "/live?auto=0",
+      "view": "Artifacts; All files, Charts / Images"
+    },
+    {
+      "file": "live-backend.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 462342,
+      "sha256": "9d5ebc0a909d688da5848c491566ac1925f9c87cb584bc1d2bd11864afdae17e",
+      "route": "/live?auto=0",
+      "view": "live-backend"
+    },
+    {
+      "file": "live-bo.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 375711,
+      "sha256": "81f727a3c6829bfb28281cfaf8f1b1f91b5b4571d8f4bfdd9d9cb0178ae7a985",
+      "route": "/live?auto=0",
+      "view": "live-bo"
+    },
+    {
+      "file": "live-design.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 367110,
+      "sha256": "855720b61fa42a8a6c2aa8f76ba4ca3b13fef6746447bb25f7e1ca77970c20b3",
+      "route": "/live?auto=0",
+      "view": "live-design"
+    },
+    {
+      "file": "live-equipment.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 469936,
+      "sha256": "7b6b00392f8108d806505933fd9e331095b3c70e72ff016f27502596e2872860",
+      "route": "/live?auto=0",
+      "view": "live-equipment"
+    },
+    {
+      "file": "live-graph.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 636413,
+      "sha256": "7ca9f8ca7dca239c17e5a2e1c6ea443c737616e2a45c93c0a507b2414f2ace2f",
+      "route": "/live?auto=0",
+      "view": "live-graph"
+    },
+    {
+      "file": "live-guardian.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 279430,
+      "sha256": "5a10c0c79cb9db2adaa39ba56f5bf159d3f6bed60bb8a965ccea300a2c89831a",
+      "route": "/live?auto=0",
+      "view": "live-guardian"
+    },
+    {
+      "file": "live-knowledge.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 284923,
+      "sha256": "c5fa2b52f101a0c3d11fc54d7e36ed798d8b4ebbdd44103313b379af187004b0",
+      "route": "/live?auto=0",
+      "view": "live-knowledge"
+    },
+    {
+      "file": "live-manipulation.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 380397,
+      "sha256": "b332e386d04634a9e1c95f7aa7721ea70c27420c7ce2f673cc1508a2b61b0be5",
+      "route": "/live?auto=0",
+      "view": "live-manipulation"
+    },
+    {
+      "file": "live-orchestrator.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 534290,
+      "sha256": "8f824326b48b8c02e3b179a3acfc35074becedf96269838899388ea2dc7131c1",
+      "route": "/live?auto=0",
+      "view": "live-orchestrator"
+    },
+    {
+      "file": "live-overview.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 534426,
+      "sha256": "d4ab332ab6a32d153d571936c4c45cd0bec8d0757da96e734b9eaf95432ce48d",
+      "route": "/live?auto=0",
+      "view": "live-overview"
+    },
+    {
+      "file": "live-specimen.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 370852,
+      "sha256": "0cebe406316795296dd19188b0f1cece48818b110726a7ca9f3c64cf40f85f2e",
+      "route": "/live?auto=0",
+      "view": "live-specimen"
+    },
+    {
+      "file": "live-timeline.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 667012,
+      "sha256": "cd4fa5bf868c8d645187f79e9abcaeef5505be58c4a4db44ab870ef04154ca71",
+      "route": "/live?auto=0",
+      "view": "live-timeline"
+    },
+    {
+      "file": "live-vision.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 663096,
+      "sha256": "11d385b35a58ccf8e9c99ba5502a4d6d08387034e1e25b81f8230d3068de1f03",
+      "route": "/live?auto=0",
+      "view": "live-vision"
+    },
+    {
+      "file": "main-dashboard.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 675585,
+      "sha256": "8a9d70888ba72c98462e2aef1a5f8b5c49851af32f9092fa6eb06c55e269b313",
+      "route": "/",
+      "view": "main-dashboard"
+    },
+    {
+      "file": "main-workspaces.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 527603,
+      "sha256": "738de2081eb247671c8d1529282e7e3953dce0765a7d5969c51a28bdfc519fb0",
+      "route": "/",
+      "view": "Scrolled to Device Workspaces"
+    },
+    {
+      "file": "module-management.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 454487,
+      "sha256": "907668004016df86ad4781022f2f45cc866058a5e2734ea6318d5c2b5c8810c9",
+      "route": "/module-management",
+      "view": "module-management"
+    },
+    {
+      "file": "plc.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 294881,
+      "sha256": "441c868f0d8b620073c8fb55e8e3bb5d80bb27fb53a417db9d30f89756b05217",
+      "route": "/plc",
+      "view": "plc"
+    },
+    {
+      "file": "printer-print-options.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 164522,
+      "sha256": "4822666e38226b671cd1a71ba9891623bdb9912bdcf19a7de9dd326456dcb0db",
+      "route": "/printer",
+      "view": "Print Start & Early Layers"
+    },
+    {
+      "file": "printer.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 297283,
+      "sha256": "9c14a2d18e6b8bdc30024bbc94dac580f3feabc199c3b1f170323a74d465c8cc",
+      "route": "/printer",
+      "view": "printer"
+    },
+    {
+      "file": "replay.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 436533,
+      "sha256": "7525fe1b89a1a505936b246c9b18d6b991217523b70bc90d5ffedfaf04533561",
+      "route": "/replay?run_id=20260923_235947_KST_planning_a3966381",
+      "view": "Retained cycle 8 point"
+    },
+    {
+      "file": "test-mode-settings.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 277185,
+      "sha256": "187d5c2b22d6b7b80657267b5d1d230423ddc7d0c0b1d4341261d2bcda18eb50",
+      "route": "/test-mode-settings",
+      "view": "test-mode-settings"
+    }
+  ]
+}

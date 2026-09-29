@@ -242,6 +242,10 @@ BO 입력·다음 추천 기록을 대조했습니다. 산출물 해시와 SEA �
 
 ## 시작하기
 
+실제 1920 × 1080 화면으로 Main/Live, 에이전트 리포트, 장비 Workspace,
+Runtime IDE와 Replay를 설명한
+[GUI 구조·화면 안내](docs/gui/visual_structure.md)를 참고하세요.
+
 | 독자 | 시작할 문서 |
 |---|---|
 | 연구자·리뷰어 | [문제 정의와 기여](docs/paper/01_problem_and_contributions.md) → [결과](docs/paper/06_evaluation_and_results.md) |

@@ -136,6 +136,29 @@ expand tool authority. Absence of a citation is not a deliberate exclusion.
 
 ## Workspace and Live Views
 
+### GUI Screen Reference
+
+![Knowledge Workspace: shared Wiki article](../gui/assets/screenshots/2026-09-29/knowledge-wiki.png)
+
+*Knowledge Workspace: shared Wiki article.*
+
+![Source Library and provenance controls](../gui/assets/screenshots/2026-09-29/knowledge-sources.png)
+
+*Source Library and provenance controls.*
+
+![Private Memory with access boundary](../gui/assets/screenshots/2026-09-29/knowledge-memory.png)
+
+*Private Memory with access boundary.*
+
+![Agent Delivery with access boundary](../gui/assets/screenshots/2026-09-29/knowledge-delivery.png)
+
+*Agent Delivery with access boundary.*
+
+Wiki, sources, private memory and delivery receipts answer different questions. The capture browser had Wiki-only access; the private tabs correctly refused reads without a trusted identity. No private records were fabricated or permissions changed.
+Captured on 2026-09-29 at 1920 × 1080; private values are redacted.
+See the [GUI structure guide](../gui/visual_structure.md) for navigation and capture conditions.
+
+
 The existing `/knowledge` page provides Wiki, Memory, Source Library, Agent
 Delivery and Ontology tabs. Lists use scoped cursors; detail reads and lifecycle
 commands use the same service contracts as Chat. Candidate confirmation does
