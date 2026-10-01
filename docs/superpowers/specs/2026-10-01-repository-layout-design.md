@@ -1,12 +1,12 @@
 <!-- atr-doc
 doc_type: design
 subtype: architecture
-status: review
+status: active
 authority: proposal
-decision_status: proposed
+decision_status: approved
 audience: [developer, maintainer, operator]
 scope: [repository_layout, path_resolution, documentation_separation, runtime_compatibility]
-summary: Proposed staged repository relocation with unchanged module identities, isolated verification, and separately controlled private-state migration.
+summary: Approved staged repository relocation design with unchanged module identities, isolated verification, and separately controlled private-state migration.
 related_docs:
   - docs/modularity.md
   - docs/runtime/runtime_ide.md
@@ -21,11 +21,11 @@ supersedes: []
 
 ## Summary
 
-The user approved the four-directory concept on 2026-10-01 and requested that
-obsolete design documents be reviewed and discarded. This document specifies
-the proposed migration; it does not claim that files have moved or that a new
-server has been deployed. The written design still requires review before an
-implementation plan is prepared.
+The user approved the four-directory concept and this written design on
+2026-10-01, and requested that obsolete design documents be reviewed and
+discarded. This document specifies the approved migration design; it does not
+claim that files have moved or that a new server has been deployed. The detailed
+implementation plan requires review before implementation begins.
 
 The rollback baseline is `c3c0c6e4ffedb83e62b86503632119635ae53616`, already pushed
 to `main` before this work. The preceding dependency audit inventoried 2,312
