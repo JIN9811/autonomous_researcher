@@ -83,6 +83,29 @@ image/.render_venv/
 # Local-only retired outputs may contain screenshots, recordings or personal data.
 /oldversion/
 
+# Split-layout private stores; publication guard also rejects forced additions.
+/workspace/
+/runtime/memory/*
+!/runtime/memory/README.md
+!/runtime/memory/__init__.py
+!/runtime/memory/experiment_db.py
+!/runtime/memory/failure_memory.py
+!/runtime/memory/retrieval.py
+!/runtime/memory/schemas.py
+/runtime/runs/*
+!/runtime/runs/README.md
+/runtime/artifacts/*
+!/runtime/artifacts/README.md
+/runtime/output/
+/runtime/outputs/*
+!/runtime/outputs/README.md
+/runtime/user_files/*
+!/runtime/user_files/README.md
+/runtime/logs/
+/runtime/test-results/
+/runtime/oldversion/
+/system/knowledge/manuals/sources/
+
 # Public UI design tokens, not authentication tokens; include only these assets.
 !/docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/01_design_tokens/
 /docs/oldversion/livegui_package/autonomous_researcher_live_gui_uiux_package_v2/01_design_tokens/*

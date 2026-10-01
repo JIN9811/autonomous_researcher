@@ -24,6 +24,8 @@ jobs:
           EVENT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
+          # Frozen asset history is required; the event base is not its authority.
+          git cat-file -e ba273ddb0fc2bf8795630d51d93d3932748e0a51^{commit}
           if [ -z "$EVENT_BASE" ] || [ "$EVENT_BASE" = "0000000000000000000000000000000000000000" ]; then
             EVENT_BASE=$(git hash-object -t tree -w --stdin </dev/null)
           fi

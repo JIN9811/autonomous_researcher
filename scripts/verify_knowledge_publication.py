@@ -19,7 +19,23 @@ MAX_BLOB = 5_000_000
 CREDENTIALS = re.compile(rb"(?:gh[pousr]_[A-Za-z0-9]{30,}|sk-(?:proj-)?[A-Za-z0-9_-]{24,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----)")
 PERSONAL_PATH = re.compile(r"(?:/home/[A-Za-z0-9_.-]+/|[A-Za-z]:\\Users\\[A-Za-z0-9_.-]+\\)")
 ALLOWLIST = "docs/knowledge/publication_allowlist.json"
-WIKI_ROOT = "docs/knowledge/wiki/"
+ALLOWLIST_PATHS = (ALLOWLIST, "system/knowledge/publication_allowlist.json")
+WIKI_ROOTS = ("docs/knowledge/wiki/", "system/knowledge/wiki/")
+# Exact public source/sentinel rows from the ba273dd relocation inventory.
+# Deliberately not inferred from filenames or a mutable review manifest.
+PUBLIC_STORE_SOURCES = frozenset({
+    "memory/__init__.py", "memory/experiment_db.py", "memory/failure_memory.py",
+    "memory/retrieval.py", "memory/schemas.py", "memory/README.md",
+    "runs/README.md", "artifacts/README.md", "outputs/README.md", "user_files/README.md",
+})
+PUBLIC_STORE_PATHS = PUBLIC_STORE_SOURCES | {"runtime/" + path for path in PUBLIC_STORE_SOURCES}
+RELOCATION_ASSET = {
+    "source": "models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx",
+    "destination": "runtime/models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx",
+    "baseline": "ba273ddb0fc2bf8795630d51d93d3932748e0a51",
+    "size": 63201294,
+    "sha256": "5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f",
+}
 EVIDENCE_DIRECTORY = "evidence"
 EVIDENCE_DOC_TYPE = "evidence"
 FRONT_MATTER_DOC_TYPE = re.compile(r"(?mi)^\s*doc_type\s*:\s*['\"]?evidence['\"]?\s*$")
@@ -30,18 +46,26 @@ def _git(root: Path, *args: str) -> bytes:
     return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True).stdout
 
 
+def _parts(path: str) -> tuple[str, ...] | None:
+    """Accept canonical repository-relative POSIX paths; never repair input."""
+    if (not isinstance(path, str) or not path or "\\" in path or "\0" in path
+            or re.match(r"^[A-Za-z]:", path)):
+        return None
+    parts = tuple(path.split("/"))
+    return None if any(part in {"", ".", ".."} for part in parts) else parts
+
+
 def private_path(path: str) -> bool:
-    parts = PurePosixPath(path).parts
-    if not parts:
+    parts = _parts(path)
+    if parts is None:
         return True
-    if parts[0] in PRIVATE_ROOTS:
-        if len(parts) == 2 and parts[1] in {"README.md", ".gitkeep"}:
-            return False
-        if parts[0] == "memory" and len(parts) == 2 and parts[1].endswith(".py"):
-            return False
+    if parts[0] == "workspace":
         return True
-    if path.startswith("docs/knowledge/manuals/sources/"):
-        return path not in {"docs/knowledge/manuals/sources/README.md", "docs/knowledge/manuals/sources/.gitkeep"}
+    if parts[0] in PRIVATE_ROOTS or (len(parts) > 1 and parts[0] == "runtime" and parts[1] in PRIVATE_ROOTS):
+        return path not in PUBLIC_STORE_PATHS
+    if parts[:4] in {("docs", "knowledge", "manuals", "sources"),
+                     ("system", "knowledge", "manuals", "sources")}:
+        return True
     return any(part == ".env" or (part.startswith(".env.") and part != ".env.example") for part in parts)
 
 
@@ -73,7 +97,67 @@ def requires_evidence_review(path: str, blob: bytes) -> bool:
 
 
 def in_approved_corpus(path: str, approved_corpora: list[str]) -> bool:
-    return any(path.startswith(corpus) for corpus in approved_corpora)
+    parts = _parts(path)
+    if parts is None:
+        return False
+    for corpus in approved_corpora:
+        prefix = _parts(corpus[:-1]) if isinstance(corpus, str) and corpus.endswith("/") else None
+        if prefix and len(parts) > len(prefix) and parts[:len(prefix)] == prefix:
+            return True
+    return False
+
+
+def _entry(root: Path, path: str, revision: str | None) -> tuple[str, str] | None:
+    """Return exact Git mode/object, never dereferencing working-tree links."""
+    if _parts(path) is None:
+        return None
+    rows = (_git(root, "ls-tree", "-z", revision, "--", path) if revision else
+            _git(root, "ls-files", "--stage", "-z", "--", path))
+    for row in rows.split(b"\0"):
+        if not row:
+            continue
+        metadata, name = row.split(b"\t", 1)
+        if name.decode("utf-8", "surrogateescape") != path:
+            continue
+        fields = metadata.decode().split()
+        if revision:
+            return fields[0], fields[2]
+        if fields[2] == "0":
+            return fields[0], fields[1]
+    return None
+
+
+def _valid_relocation_record(record: dict) -> bool:
+    return (isinstance(record, dict) and record == RELOCATION_ASSET
+            and set(record) == set(RELOCATION_ASSET)
+            and type(record.get("size")) is int
+            and all(isinstance(record.get(key), str) for key in ("source", "destination", "baseline", "sha256"))
+            and bool(re.fullmatch(r"[0-9a-f]{40}", record["baseline"]))
+            and not private_path(record["source"]) and not private_path(record["destination"]))
+
+
+def validate_relocation_asset(root: Path, record: dict, *, base: str, head: str | None) -> bool:
+    """Prove the single reviewed byte-identical move against immutable Git objects."""
+    if not _valid_relocation_record(record):
+        return False
+    try:
+        baseline = _git(root, "rev-parse", "--verify", "--end-of-options",
+                        record["baseline"] + "^{commit}").decode().strip()
+        if baseline != record["baseline"]:
+            return False
+        original = _entry(root, record["source"], baseline)
+        source = _entry(root, record["source"], base)
+        destination = _entry(root, record["destination"], head)
+        if (not original or original[0] not in {"100644", "100755"} or source != original
+                or destination != original or _entry(root, record["source"], head) is not None
+                or _entry(root, record["destination"], base) is not None):
+            return False
+        blob = _git(root, "cat-file", "blob", original[1])
+        return (len(blob) == record["size"] and hashlib.sha256(blob).hexdigest() == record["sha256"]
+                and not CREDENTIALS.search(blob)
+                and not (b"\0" not in blob and PERSONAL_PATH.search(blob.decode("utf-8", "replace"))))
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        return False
 
 
 def inspect(root: Path, base: str | None = None, head: str | None = None) -> dict:
@@ -88,20 +172,29 @@ def inspect(root: Path, base: str | None = None, head: str | None = None) -> dic
         paths = _git(root, "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMRT", "--")
     failures = []
     files = [p.decode("utf-8", "surrogateescape") for p in paths.split(b"\0") if p]
-    manifest_ref = f"{head}:{ALLOWLIST}" if head else f":{ALLOWLIST}"
-    try:
-        manifest = json.loads(_git(root, "show", manifest_ref))
-    except subprocess.CalledProcessError:
-        manifest = {"schema": "knowledge_publication.v1", "approved_assets": {}, "approved_corpora": []}
+    manifests = []
+    for path in ALLOWLIST_PATHS:
+        entry = _entry(root, path, head)
+        if entry:
+            if entry[0] not in {"100644", "100755"}:
+                raise ValueError("Invalid publication review manifest")
+            manifests.append(json.loads(_git(root, "cat-file", "blob", entry[1])))
+    if len(manifests) > 1:
+        raise ValueError("Ambiguous publication review manifest")
+    manifest = manifests[0] if manifests else {"schema": "knowledge_publication.v1", "approved_assets": {}, "approved_corpora": []}
     if (not isinstance(manifest, dict) or manifest.get("schema") != "knowledge_publication.v1"
             or not isinstance(manifest.get("approved_assets"), dict)
             or not isinstance(manifest.get("approved_corpora"), list)
-            or not all(isinstance(corpus, str) and corpus.endswith("/") and not corpus.startswith("/")
-                       and ".." not in PurePosixPath(corpus).parts
-                       for corpus in manifest["approved_corpora"])):
+            or not all(_parts(path) for path in manifest["approved_assets"])
+            or not all(isinstance(corpus, str) and corpus.endswith("/") and _parts(corpus[:-1])
+                       for corpus in manifest["approved_corpora"])
+            or not isinstance(manifest.get("relocation_assets", []), list)
+            or len(manifest.get("relocation_assets", [])) > 1
+            or not all(_valid_relocation_record(record) for record in manifest.get("relocation_assets", []))):
         raise ValueError("Invalid publication review manifest")
     approved = manifest["approved_assets"]
     approved_corpora = manifest["approved_corpora"]
+    relocations = {record["destination"]: record for record in manifest.get("relocation_assets", [])}
     for index, path in enumerate(files, 1):
         reasons = []
         if private_path(path):
@@ -109,14 +202,19 @@ def inspect(root: Path, base: str | None = None, head: str | None = None) -> dic
         else:
             ref = f"{head}:{path}" if head else f":{path}"
             size = int(_git(root, "cat-file", "-s", ref))
-            if size > MAX_BLOB:
+            blob = _git(root, "show", ref)
+            if CREDENTIALS.search(blob):
+                reasons.append("credential_pattern")
+            if b"\0" not in blob and PERSONAL_PATH.search(blob.decode("utf-8", "replace")):
+                reasons.append("personal_path")
+            relocated = False
+            if path in relocations and not reasons:
+                relocated = validate_relocation_asset(root, relocations[path], base=base or "HEAD", head=head)
+                if not relocated:
+                    reasons.append("invalid_asset_relocation")
+            if size > MAX_BLOB and not relocated:
                 reasons.append("oversized_blob_requires_publication_review")
-            else:
-                blob = _git(root, "show", ref)
-                if CREDENTIALS.search(blob):
-                    reasons.append("credential_pattern")
-                if b"\0" not in blob and PERSONAL_PATH.search(blob.decode("utf-8", "replace")):
-                    reasons.append("personal_path")
+            elif not relocated:
                 review = approved.get(path, {})
                 reviewed = (isinstance(review, dict) and bool(review.get("review"))
                             and review.get("sha256") == hashlib.sha256(blob).hexdigest())
@@ -124,7 +222,7 @@ def inspect(root: Path, base: str | None = None, head: str | None = None) -> dic
                     reasons.append("binary_requires_publication_review")
                 if requires_evidence_review(path, blob) and not reviewed:
                     reasons.append("evidence_requires_publication_review")
-                if path.startswith(WIKI_ROOT) and not requires_evidence_review(path, blob) and not reviewed \
+                if in_approved_corpus(path, WIKI_ROOTS) and not requires_evidence_review(path, blob) and not reviewed \
                         and not in_approved_corpus(path, approved_corpora):
                     reasons.append("wiki_requires_corpus_approval")
         if reasons:

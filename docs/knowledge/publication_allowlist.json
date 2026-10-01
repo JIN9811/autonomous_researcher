@@ -722,6 +722,15 @@
       "review": "Existing public Guardian evidence reviewed 2026-10-01 for owner-requested documentation publication. Current-contract annotations preserve historical scientific measurements and test outcomes; no private records, credentials or new physical verification claims."
     }
   },
+  "relocation_assets": [
+    {
+      "source": "models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx",
+      "destination": "runtime/models/tts/piper/en_US-lessac-medium/en_US-lessac-medium.onnx",
+      "baseline": "ba273ddb0fc2bf8795630d51d93d3932748e0a51",
+      "size": 63201294,
+      "sha256": "5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f"
+    }
+  ],
   "approved_corpora": [
     "docs/knowledge/wiki/"
   ]
