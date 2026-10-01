@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+from copy import deepcopy
 
 import pytest
 
@@ -171,3 +172,94 @@ with fixture_application("import_only") as (app, guard, _):
     result = subprocess.run([sys.executable, "-S", "-c", script], env={**os.environ, "ATR_LAYOUT_CONFIG": str(config)},
                             capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.fixture
+def split_bridge_runtime(disposable_paths, tmp_path, monkeypatch):
+    from app import bootstrap
+    from backends.mock_llm import MockLLMBackend
+    paths = replace(disposable_paths, repository_root=tmp_path / "legacy-volume/repository",
+                    runtime_root=tmp_path / "source-volume/runtime")
+    configs = {"system": {"system": {}}, "models": {}, "devices": {"devices": {}}, "lerobot": {}}
+    monkeypatch.setattr(bootstrap, "_load_configs", lambda paths: configs)
+    monkeypatch.setattr(bootstrap, "_build_backend", lambda *a, **kw: MockLLMBackend())
+    return paths, configs
+
+
+@pytest.mark.parametrize("artifact_setting", [None, "artifacts/custom-pinn", "absolute"])
+def test_pinn_storage_preserves_explicit_paths_and_uses_typed_default(split_bridge_runtime, tmp_path, artifact_setting):
+    from app import bootstrap
+    paths, configs = split_bridge_runtime
+    pinn = {"enabled": True, "active_model_id": "existing-model", "runtime_training_enabled": False}
+    if artifact_setting is not None:
+        pinn["artifact_dir"] = str(tmp_path / "external-pinn") if artifact_setting == "absolute" else artifact_setting
+    configs["devices"]["devices"]["pinn"] = pinn
+    before = deepcopy(configs)
+    controller = bootstrap.load_runtime(paths=paths)
+    bridge = controller._deps.agent_context.tools.resource("pinn_bridge")
+    expected = (tmp_path / "external-pinn" if artifact_setting == "absolute" else
+                paths.repository_root / "artifacts/custom-pinn" if artifact_setting else paths.artifact_root / "pinn")
+    assert bridge.config.artifact_dir == expected
+    assert expected.is_dir()
+    assert bridge.config.active_model_id == "existing-model"
+    assert bridge.config.runtime_training_enabled is False
+    assert configs == before
+    assert not (paths.runtime_root / "artifacts").exists()
+
+
+def test_changed_mixed_bridge_arguments_keep_legacy_storage_base(split_bridge_runtime, monkeypatch):
+    from app import bootstrap
+    from mcp_tools import printer_tools
+    paths, configs = split_bridge_runtime
+    configs["devices"]["devices"] = {
+        "utm_vision_runtime": {"log_dir": "custom/utm-logs"},
+        "specimen_pose_tracker": {"log_dir": "custom/pose-logs", "artifact_dir": "custom/pose-runs",
+                                  "script_path": "scripts/custom-pose.sh"},
+        "printer": {"connection_memory_path": "custom/printer.json"},
+        "equipment": {"windows_pyautogui": {"artifact_dir": "custom/equipment",
+                        "connection_memory_path": "custom/equipment.json"}},
+    }
+    configs["lerobot"] = {"lerobot": {"session_memory_path": "custom/sessions.json", "output_root": "custom/training"}}
+    captured = {}
+    def observe_factory(owner, name, key):
+        original = getattr(owner, name)
+        def capture(*args, **kwargs):
+            result = original(*args, **kwargs)
+            captured[key] = result
+            return result
+        monkeypatch.setattr(owner, name, capture)
+    observe_factory(bootstrap, "get_utm_runtime_manager", "utm")
+    observe_factory(bootstrap, "get_specimen_pose_tracker_bridge", "pose")
+    observe_factory(printer_tools.PrinterDeviceBridgeManager, "from_devices_config", "printer")
+    controller = bootstrap.load_runtime(paths=paths)
+    registry = controller._deps.agent_context.tools
+    equipment = registry.resource("equipment.bridge").config
+    lerobot = registry.resource("lerobot.bridge").config
+    actual = {
+        "utm_log": captured["utm"].config.log_dir,
+        "utm_memory": captured["utm"].config.camera_config.memory_path,
+        "pose_log": captured["pose"].config.log_dir,
+        "pose_artifact": captured["pose"].config.artifact_dir,
+        "pose_script": captured["pose"].config.script_path,
+        "printer_memory": captured["printer"].config.connection_memory_path,
+        "equipment_artifact": equipment.artifact_dir,
+        "equipment_memory": equipment.connection_memory_path,
+        "equipment_profile": equipment.utm_profile_memory_path,
+        "lerobot_memory": lerobot.session_memory_path,
+        "lerobot_output": lerobot.output_root,
+        "lerobot_logs": lerobot.session_log_root,
+    }
+    suffixes = {
+        "utm_log": "custom/utm-logs", "utm_memory": "memory/device_bridge/utm_camera_config.json",
+        "pose_log": "custom/pose-logs", "pose_artifact": "custom/pose-runs", "pose_script": "scripts/custom-pose.sh",
+        "printer_memory": "custom/printer.json", "equipment_artifact": "custom/equipment",
+        "equipment_memory": "custom/equipment.json", "equipment_profile": "memory/equipment_utm_profile.json",
+        "lerobot_memory": "custom/sessions.json", "lerobot_output": "custom/training", "lerobot_logs": "runs/lerobot_sessions",
+    }
+    assert actual == {name: paths.repository_root / suffix for name, suffix in suffixes.items()}
+    assert lerobot.artifact_run_root == paths.run_root
+    # The direct UTM test handler is software-only and writes a synthetic CSV.
+    result = registry.call("utm.run_protocol", {"mode": "test", "run_id": "binding-check", "specimen_id": "fixture"})
+    assert Path(result["result_file"]).is_relative_to(paths.repository_root / "artifacts/equipment/binding-check/utm")
+    assert Path(result["result_file"]).is_file()
+    assert not paths.runtime_root.exists()

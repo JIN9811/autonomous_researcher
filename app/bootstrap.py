@@ -23,6 +23,7 @@ Modification guide:
 from __future__ import annotations
 
 import os
+from copy import deepcopy
 from dataclasses import replace
 from typing import Any
 
@@ -306,20 +307,27 @@ def load_runtime(*, paths: RuntimePaths | None = None) -> MainController:
     from mcp_tools.source_tools import register_source_tools
     register_source_tools(tools, lambda: library_for(paths.repository_root))
     register_mock_tools(tools)
-    register_utm_tools(tools, repo_root=paths.runtime_root)
-    utm_runtime_manager = get_utm_runtime_manager(cfg.get("devices", {}), repo_root=paths.runtime_root)
-    specimen_pose_tracker = get_specimen_pose_tracker_bridge(cfg.get("devices", {}), repo_root=paths.runtime_root)
+    # These legacy APIs mix source and storage paths under one repo_root.
+    # Keep its repository-relative contract until those consumers are split.
+    register_utm_tools(tools, repo_root=paths.repository_root)
+    utm_runtime_manager = get_utm_runtime_manager(cfg.get("devices", {}), repo_root=paths.repository_root)
+    specimen_pose_tracker = get_specimen_pose_tracker_bridge(cfg.get("devices", {}), repo_root=paths.repository_root)
     register_camera_tools(
         tools,
         utm_state_observer=observe_utm_state_window,
         utm_runtime_manager=utm_runtime_manager,
         specimen_pose_tracker=specimen_pose_tracker,
     )
-    register_printer_tools(tools, cfg.get("devices", {}), repo_root=paths.runtime_root)
-    register_equipment_tools(tools, cfg.get("devices", {}), repo_root=paths.runtime_root)
-    lerobot_bridge = register_lerobot_tools(tools, cfg.get("lerobot", {}), repo_root=paths.runtime_root)
+    register_printer_tools(tools, cfg.get("devices", {}), repo_root=paths.repository_root)
+    register_equipment_tools(tools, cfg.get("devices", {}), repo_root=paths.repository_root)
+    lerobot_bridge = register_lerobot_tools(tools, cfg.get("lerobot", {}), repo_root=paths.repository_root)
     lerobot_bridge.config.artifact_run_root = paths.run_root
-    register_pinn_tools(tools, cfg.get("devices", {}), repo_root=paths.runtime_root)
+    # PINN's sole path is storage: supply the typed default without rewriting
+    # any explicitly configured legacy relative or absolute artifact setting.
+    pinn_config = deepcopy(cfg.get("devices", {}))
+    pinn_devices = pinn_config.get("devices", pinn_config)
+    pinn_devices.setdefault("pinn", {}).setdefault("artifact_dir", str(paths.artifact_root / "pinn"))
+    register_pinn_tools(tools, pinn_config, repo_root=paths.repository_root)
     register_experiment_tools(tools, cfg.get("devices", {}))
 
     agent_context = AgentContext(
