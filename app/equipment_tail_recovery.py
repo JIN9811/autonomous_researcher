@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 from app.run_recovery import run_directory
+from utils.persisted_references import historical_reference, reference_options
 
 ROOT = Path(__file__).resolve().parents[1]
 ADOPT = (("await_auto_return", "utm_await_auto_return", "1.0.9"),
@@ -50,7 +51,7 @@ def boundary(state, record):
     return loop
 
 
-def read_request(root, run_id):
+def read_request(root, run_id, *, reference_roots=None, relocation_map=None):
     directory = run_directory(root, run_id) / 'recovery'
     envelope = json.loads((directory / 'equipment_tail_request.json').read_text())
     raw = envelope['payload_json']
@@ -60,15 +61,19 @@ def read_request(root, run_id):
     if request.get('run_id') != run_id or request.get('requested_by') != 'operator':
         raise ValueError('Tail request identity mismatch')
     for path, sha in request['evidence_hashes'].items():
-        if digest(path) != sha:
+        physical = historical_reference(path, schema=request.get('schema'), field='evidence_hashes.keys',
+            run_id=run_id, reference_roots=reference_roots, relocation_map=relocation_map)
+        if digest(physical) != sha:
             raise ValueError('Tail evidence changed: ' + path)
     return request
 
 
-def validate(state, request, flow):
+def validate(state, request, flow, *, reference_roots=None, relocation_map=None):
     from agents.equipment.agent import LabEquipmentAgent
     from agents.equipment.workflow import _describe
-    source = json.loads(Path(request['source_path']).read_text())
+    source_path = historical_reference(request['source_path'], schema=request.get('schema'), field='source_path',
+        run_id=state.run_id, reference_roots=reference_roots, relocation_map=relocation_map)
+    source = json.loads(source_path.read_text())
     loop = boundary(state, source)
     if loop != request['loop_id']:
         raise ValueError('Tail cycle changed')
@@ -193,13 +198,14 @@ def prepare_request(snapshot, root, execution_id):
     return {'request_path': str(path), 'next_block': flow['blocks'][6]['id'], 'loop_id': loop}
 
 
-def restore(controller, run_id):
+def restore(controller, run_id, *, reference_roots=None, relocation_map=None):
     from orchestrator.state import Stage
-    request = read_request(controller._deps.run_root, run_id)
+    context = reference_options(reference_roots=reference_roots, relocation_map=relocation_map)
+    request = read_request(controller._deps.run_root, run_id, **context)
     state = controller._state
     if state.run_id != run_id or not state.is_paused or controller._planning_request_lock.locked():
         raise ValueError('Restore requires this paused inactive run')
-    validate(state, request, request['description']['flow'])
+    validate(state, request, request['description']['flow'], **context)
     retry_unstarted = unstarted_tail(controller, request)
     if (run_directory(controller._deps.run_root, run_id) / 'recovery/equipment_tail.claim').exists() and not retry_unstarted:
         raise ValueError('Equipment tail was already dispatched')
@@ -220,12 +226,13 @@ def restore(controller, run_id):
         'resume_stage': 'equipment', 'next_block': 'advance_without_save', 'actuation_performed': False}
 
 
-async def continue_tail(controller, first_spec, start_cycle):
+async def continue_tail(controller, first_spec, start_cycle, *, reference_roots=None, relocation_map=None):
     """The original orchestration tail, not a standalone device executor."""
     from orchestrator.state import Stage
     state = controller._state
-    request = read_request(controller._deps.run_root, state.run_id)
-    validate(state, request, request['description']['flow'])
+    context = reference_options(reference_roots=reference_roots, relocation_map=relocation_map)
+    request = read_request(controller._deps.run_root, state.run_id, **context)
+    validate(state, request, request['description']['flow'], **context)
     if start_cycle != request['loop_id'] + 1 or first_spec != request['experiment_spec']:
         raise ValueError('Planning tail cycle/specimen changed')
     path = run_directory(controller._deps.run_root, state.run_id) / 'recovery/equipment_tail.claim'

@@ -31,7 +31,29 @@ def preview_kind(path: Path) -> str:
     return "mesh" if path.suffix.lower() == ".stl" else "download"
 
 
-def artifact_index(root: Path, run_id: str) -> dict:
+def artifact_alias_path(root: Path, run_id: str, alias: str) -> Path:
+    """Resolve provenance only to one existing archive copy, never its source.
+
+    This is a read-only replay lookup, not a checkpoint/resume capability. All
+    candidates re-enter artifact_path, the only file-serving authority.
+    """
+    from utils.agent_artifact_archive import list_executions
+    run = safe_child(Path(root).resolve(), run_id)
+    if not safe_child(safe_child(run, "review"), "index.json").is_file():
+        raise ValueError("Not a recorded session")
+    candidates = []
+    for execution in list_executions(run):
+        if execution.get("run_id") != run_id:
+            continue
+        for item in execution.get("artifacts", []):
+            if isinstance(item, dict) and item.get("status") == "copied" and item.get("source_path") == alias:
+                candidates.append(artifact_path(root, run_id, item.get("path", "")))
+    if len(candidates) != 1:
+        raise ValueError("Historical alias is missing or ambiguous")
+    return candidates[0]
+
+
+def artifact_index(root: Path, run_id: str, *, paths=None) -> dict:
     from utils.agent_artifact_archive import list_executions
     run = safe_child(Path(root).resolve(), run_id)
     if not safe_child(safe_child(run, "review"), "index.json").is_file():

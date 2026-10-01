@@ -7,6 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from orchestrator.state import OrchestratorState, Stage
+from utils.persisted_references import historical_reference
 
 
 def prepare_state(state):
@@ -91,7 +92,7 @@ def save(snapshot, planning, root):
     return path
 
 
-def restore(controller, run_id):
+def restore(controller, run_id, *, reference_roots=None, relocation_map=None):
     from app.controller import PLANNING_TRANSCRIPT_MEMORY_LIMIT
     from orchestrator.experimental_setup import SetupStore
     from logging_system.logger_factory import build_logger_bundle
@@ -108,7 +109,9 @@ def restore(controller, run_id):
         raise ValueError('BO checkpoint run identity mismatch')
     restored = prepare_state(state)
     planning = saved['planning']
-    transcript = Path(planning.get('transcript_path') or '').resolve()
+    transcript = historical_reference(planning.get('transcript_path') or '', schema='atr.bo_budget_checkpoint.v1',
+        field='planning.transcript_path', run_id=run_id,
+        reference_roots=reference_roots, relocation_map=relocation_map)
     session = planning.get('planning_session_id')
     if (not session or not transcript.is_relative_to(Path(controller._deps.run_root).resolve())
             or transcript.name != 'live_planning_transcript.jsonl' or not transcript.is_file()):

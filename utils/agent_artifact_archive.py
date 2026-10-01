@@ -134,13 +134,19 @@ def _file_candidates(value: Any, key: str = "result"):
 class AgentArtifactExecution:
     """One invocation, with an exclusive on-disk attempt number and frozen identity."""
 
-    def __init__(self, run_root: Path, state, agent: str):
+    def __init__(self, run_root: Path, state, agent: str, *, paths=None, reference_roots=None):
         self.state = state
         self.run_root = Path(run_root).resolve()
         self.run_dir = (self.run_root / _safe(state.run_id)).resolve()
         if not self.run_dir.is_relative_to(self.run_root):
             raise ValueError("Archive run directory escapes run root")
-        self.project_root = self.run_root.parent
+        self.project_root = paths.repository_root if paths is not None else self.run_root.parent
+        memory = paths.memory_root if paths is not None else self.project_root / "memory"
+        artifacts = paths.artifact_root if paths is not None else self.project_root / "artifacts"
+        self.reference_roots = tuple(Path(root).resolve() for root in reference_roots) if reference_roots is not None else (
+            self.run_root, artifacts, memory / "equipment_runtime", memory / "knowledge",
+            Path('/tmp/atr_lerobot_latest_frame'), Path('/tmp/atr_specimen_pose_from_lerobot'),
+            Path('/tmp/atr_specimen_pose_pending'), Path('/tmp/atr_active_robot_cam_request'))
         loop_index = int(state.loop_count)
         if loop_index < 0:
             raise ValueError("Negative loop index")
@@ -207,14 +213,10 @@ class AgentArtifactExecution:
                 source = resolve_artifact_reference(candidate, self.project_root, self.run_dir)
                 if source is None:
                     continue
-                roots = (self.run_root, self.project_root / "artifacts", self.project_root / "memory" / "equipment_runtime",
-                         self.project_root / "memory" / "knowledge",
-                         Path('/tmp/atr_lerobot_latest_frame'), Path('/tmp/atr_specimen_pose_from_lerobot'),
-                         Path('/tmp/atr_specimen_pose_pending'), Path('/tmp/atr_active_robot_cam_request'))
                 if source.is_relative_to(self.directory):
                     continue
                 item = {"key": key, "source_path": str(source), "status": "external"}
-                if not any(source.is_relative_to(root.resolve()) for root in roots):
+                if not any(source.is_relative_to(root) for root in self.reference_roots):
                     if item not in self.manifest["artifacts"]:
                         self.manifest["artifacts"].append(item)
                     continue
@@ -299,7 +301,7 @@ def archive_agent_run(function):
             return await function(self, state, ctx, *args, **kwargs)
         execution = None
         try:
-            execution = AgentArtifactExecution(Path(root), state, self.name)
+            execution = AgentArtifactExecution(Path(root), state, self.name, paths=getattr(ctx, "paths", None))
             _json(execution.directory / "input.json", {"state": state.model_dump(mode="json"), "args": args, "kwargs": kwargs})
             execution.event("agent_started", execution.descriptor())
         except Exception as exc:

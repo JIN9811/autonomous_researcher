@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from utils.run_review import safe_child
 
 
-def review_router(root: Path, templates):
+def review_router(root: Path, templates, *, paths=None):
     router = APIRouter()
     root = Path(root).resolve()
 
@@ -40,7 +40,7 @@ def review_router(root: Path, templates):
         import re
         from utils.run_review import AGENTS
         agents = []
-        package_root = Path(__file__).resolve().parents[1] / "agents"
+        package_root = (paths.runtime_root if paths is not None else Path(__file__).resolve().parents[1]) / "agents"
         for owner in AGENTS:
             source = package_root / owner / "frontend" / "live_report.js"
             item = {"id": owner, "stage": owner, "module_id": owner, "enabled": True}
@@ -97,7 +97,7 @@ def review_router(root: Path, templates):
     def artifacts(run_id: str):
         from utils.run_review_artifacts import artifact_index
         try:
-            return artifact_index(root, run_id)
+            return artifact_index(root, run_id, paths=paths)
         except (ValueError, OSError):
             raise HTTPException(404, "Recorded session artifacts unavailable")
 

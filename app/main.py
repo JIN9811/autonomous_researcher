@@ -671,7 +671,7 @@ def _public_wandb_local_api_key_settings(settings: dict[str, Any]) -> dict[str, 
 from app.run_review_routes import review_router
 from utils.run_review import RunReviewRecorder
 
-app.include_router(review_router(controller._deps.run_root, templates))
+app.include_router(review_router(controller._deps.run_root, templates, paths=RUNTIME_PATHS))
 from app.live_fullscreen import router as live_fullscreen_router
 app.include_router(live_fullscreen_router)
 _RUN_REVIEW_RECORDER = None
@@ -684,7 +684,7 @@ async def start_artifact_preservation() -> None:
     from utils.artifact_preservation import PreservationService
     from utils.agent_artifact_archive import set_preservation_sink
     try:
-        _ARTIFACT_PRESERVATION_SERVICE = PreservationService()
+        _ARTIFACT_PRESERVATION_SERVICE = PreservationService(paths=RUNTIME_PATHS)
         set_preservation_sink(_ARTIFACT_PRESERVATION_SERVICE.offer)
         run = controller._deps.run_root / controller._state.run_id
         if (run / 'runtime/loops').is_dir():
@@ -705,7 +705,7 @@ async def stop_artifact_preservation() -> None:
 async def start_read_only_run_review() -> None:
     global _RUN_REVIEW_RECORDER
     try:
-        _RUN_REVIEW_RECORDER = RunReviewRecorder(controller._deps.run_root, controller._state.run_id)
+        _RUN_REVIEW_RECORDER = RunReviewRecorder(controller._deps.run_root, controller._state.run_id, paths=RUNTIME_PATHS)
         _RUN_REVIEW_RECORDER.start()
         controller.review_event_sink = _RUN_REVIEW_RECORDER.offer
         from utils import run_review

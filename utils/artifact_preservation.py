@@ -64,9 +64,11 @@ def _curves(source, output, title):
             plt.close(fig)
 
 
-def preserve_execution(run_dir, manifest_path):
+def preserve_execution(run_dir, manifest_path, *, paths=None):
     """Only finished, identity-qualified evidence; never manufacture missing inputs."""
     run = Path(run_dir).resolve()
+    project_root = paths.repository_root if paths is not None else run.parent.parent
+    memory_root = paths.memory_root if paths is not None else project_root / 'memory'
     manifest_path = _inside(run, manifest_path)
     directory = manifest_path.parent
     manifest = json.loads(manifest_path.read_text())
@@ -106,7 +108,11 @@ def preserve_execution(run_dir, manifest_path):
     copied_sources = {str(x.get('source_path')) for x in manifest.get('artifacts', []) if x.get('status') == 'copied'}
     seen_references = set()
     for key, candidate in _file_candidates(payload):
-        resolved = resolve_artifact_reference(candidate, run.parent.parent, run)
+        # A manifest alias only identifies a frozen copy; it never opens today's
+        # source file (or becomes recovery authority).
+        if str(candidate) in copied_sources:
+            continue
+        resolved = resolve_artifact_reference(candidate, project_root, run)
         if resolved is None or str(resolved) in copied_sources or str(resolved) in seen_references:
             continue
         seen_references.add(str(resolved))
@@ -117,7 +123,7 @@ def preserve_execution(run_dir, manifest_path):
                 sources.append({'path': resolved.relative_to(run).as_posix(), 'meaning': 'Existing execution-scoped evidence'})
             continue
         # Immutable knowledge revisions from this exact run can also be restored.
-        knowledge = run.parent.parent / 'memory/knowledge/markdown/records' / run.name
+        knowledge = memory_root / 'knowledge/markdown/records' / run.name
         immutable_note = resolved.is_relative_to(knowledge.resolve()) and resolved.name.startswith('revision-')
         if not (resolved.is_relative_to(run) or immutable_note):
             if str(candidate).startswith('/api/') or str(resolved).startswith('/tmp/atr_'):
@@ -241,7 +247,7 @@ def preserve_execution(run_dir, manifest_path):
     return receipt
 
 
-def preserve_run(run_dir):
+def preserve_run(run_dir, *, paths=None):
     run = Path(run_dir).resolve()
     os.environ.setdefault('OMP_NUM_THREADS', '1')
     os.environ.setdefault('OPENBLAS_NUM_THREADS', '1')
@@ -253,7 +259,7 @@ def preserve_run(run_dir):
         receipts = []
         for manifest in sorted((run / 'runtime/loops').glob('loop-*/*/attempt-*/manifest.json')):
             try:
-                receipts.append(preserve_execution(run, manifest))
+                receipts.append(preserve_execution(run, manifest, paths=paths))
             except Exception as exc:
                 receipts.append({'status': 'error', 'manifest': manifest.relative_to(run).as_posix(), 'reason': type(exc).__name__})
         coverage = {agent: {'executions': 0, 'generated': 0, 'gaps': 0} for agent in AGENTS}
@@ -278,7 +284,8 @@ def _worker_setup():
 
 class PreservationService:
     """One background process, coalesced per run; never wait in the experiment."""
-    def __init__(self):
+    def __init__(self, *, paths=None):
+        self.paths = paths
         self.pool = ProcessPoolExecutor(max_workers=1, mp_context=get_context('spawn'), initializer=_worker_setup)
         self.lock = threading.RLock()
         self.pending, self.dirty = set(), set()
@@ -293,7 +300,7 @@ class PreservationService:
                 self.dirty.add(run)
                 return
             self.pending.add(run)
-            future = self.pool.submit(preserve_run, run)
+            future = self.pool.submit(preserve_run, run, paths=self.paths)
             future.add_done_callback(lambda task: self._done(run, task))
 
     def _done(self, run, task):

@@ -6,6 +6,8 @@ from pathlib import Path
 import re
 import shutil
 
+from utils.persisted_references import historical_reference, reference_options
+
 
 def run_directory(root, run_id):
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,191}", run_id):
@@ -86,7 +88,7 @@ def save_checkpoint(snapshot, planning, root, run_id):
     return read_checkpoint(root, run_id)
 
 
-def read_checkpoint(root, run_id):
+def read_checkpoint(root, run_id, *, reference_roots=None, relocation_map=None):
     run = run_directory(root, run_id)
     envelope = json.loads((run / "recovery/checkpoint.json").read_text())
     encoded = envelope["payload_json"].encode()
@@ -96,15 +98,22 @@ def read_checkpoint(root, run_id):
     _check_boundary(payload["snapshot"], run_id)
     if payload.get("run_id") != run_id:
         raise ValueError("Recovery run identity mismatch")
-    if (_hash(payload["csv_path"]) != payload["csv_sha256"] or
+    context = reference_options(reference_roots=reference_roots, relocation_map=relocation_map)
+    def resolve(field):
+        return historical_reference(payload[field], schema=payload.get("schema"), field=field,
+            run_id=run_id, **context)
+    if (_hash(resolve("csv_path")) != payload["csv_sha256"] or
             _hash(run / "recovery/compression.csv") != payload["csv_sha256"]):
         raise ValueError("CSV integrity mismatch")
-    if _hash(payload["result_path"]) != payload["result_sha256"]:
+    result = resolve("result_path")
+    if context and not result.is_relative_to(run):
+        raise ValueError("Archived Equipment result belongs outside this run")
+    if _hash(result) != payload["result_sha256"]:
         raise ValueError("Archived Equipment result integrity mismatch")
     return payload
 
 
-def prepare_error_resume(controller):
+def prepare_error_resume(controller, *, reference_roots=None, relocation_map=None):
     """Validate the durable completed boundary without changing device/run state."""
     from agents.equipment.agent import LabEquipmentAgent
     from agents.equipment.recovery import completed_candidate
@@ -114,20 +123,21 @@ def prepare_error_resume(controller):
     from utils.equipment_skill_flow import EquipmentSkillFlowStore
     snapshot = controller.snapshot()
     run_id = controller._state.run_id
+    context = reference_options(reference_roots=reference_roots, relocation_map=relocation_map)
     _check_boundary(snapshot, run_id)
     if (controller._state.run_metadata.get('equipment_tail_recovery') or {}).get('status') == 'ready':
         from app.equipment_tail_recovery import read_request, validate
-        request = read_request(controller._deps.run_root, run_id)
-        validate(controller._state, request, request['description']['flow'])
+        request = read_request(controller._deps.run_root, run_id, **context)
+        validate(controller._state, request, request['description']['flow'], **context)
         return request['source_execution_id']
     _, data = equipment_archive(controller._deps.run_root, run_id)
     if controller._state.run_metadata.get("clearance_review_recovery") and not controller._state.run_metadata.get("archived_postprocessing_request"):
-        return completed_clearance_equipment(controller)["equipment_workflow_execution_id"]
+        return completed_clearance_equipment(controller, **context)["equipment_workflow_execution_id"]
     archived_request = controller._state.run_metadata.get("archived_postprocessing_request")
     if archived_request:
         # This route cannot invoke Equipment. Validate the pinned data/image and
         # unchanged experiment inputs instead of a mutable device-review digest.
-        saved = read_checkpoint(controller._deps.run_root, run_id)
+        saved = read_checkpoint(controller._deps.run_root, run_id, **context)
         original = saved["snapshot"]["state"]
         from orchestrator.langgraph_runtime import compact_runtime_payload
         if (controller._state.experiment_id != original["experiment_id"]
@@ -135,7 +145,7 @@ def prepare_error_resume(controller):
                     original["current_experiment_spec"], compact_runtime_payload(original["current_experiment_spec"]))):
             raise ValueError("Archived analysis experiment conditions changed")
         archived_clearance_capture(controller._state, archived_request,
-            run_directory(controller._deps.run_root, run_id) / "recovery/archived_review")
+            run_directory(controller._deps.run_root, run_id) / "recovery/archived_review", **context)
         return saved["workflow_execution_id"]
     agent = controller._deps.agent_registry.get("equipment_agent")
     if not isinstance(agent, LabEquipmentAgent):
@@ -194,7 +204,7 @@ def reload_analysis_decisions(controller):
     reload_sources(sources)
 
 
-def prepare_clearance_review_retry(state, root):
+def prepare_clearance_review_retry(state, root, *, reference_roots=None, relocation_map=None):
     """Retry observation after a proven ended replay, never rearm its motion."""
     import math
     import time
@@ -238,7 +248,9 @@ def prepare_clearance_review_retry(state, root):
     from utils.agent_artifact_archive import _public
     if expired_restore:
         latest = archived.get("data") or {}
-        source = Path(previous_retry.get("source_result") or "")
+        source = historical_reference(previous_retry.get("source_result") or "",
+            schema="atr.clearance_recovery.v1", field="source_result", run_id=state.run_id,
+            reference_roots=reference_roots, relocation_map=relocation_map)
         if (source not in paths[:-1] or _hash(source) != previous_retry.get("source_sha256")
                 or latest.get("utm_verification_2")
                 or latest.get("failure_code") != "UTM_CLEAR_PENDING_TIMEOUT"
@@ -291,20 +303,22 @@ def prepare_clearance_review_retry(state, root):
     return restored
 
 
-def completed_clearance_equipment(controller):
+def completed_clearance_equipment(controller, *, reference_roots=None, relocation_map=None):
     """Validate immutable completed work, not mutable pre-disposal sensor state.
 
     This authorizes observation-only continuation, never another Equipment call.
     """
     state = controller._state
     root = controller._deps.run_root
-    saved = read_checkpoint(root, state.run_id)
+    context = reference_options(reference_roots=reference_roots, relocation_map=relocation_map)
+    saved = read_checkpoint(root, state.run_id, **context)
     original = saved["snapshot"]["state"]
     recovery = state.run_metadata.get("clearance_review_recovery") or {}
     from utils.utm_clear_cycle import current_clear
     from utils.agent_artifact_archive import _public
     clear = current_clear(state)
-    source = Path(recovery.get("source_result") or "")
+    source = historical_reference(recovery.get("source_result") or "", schema="atr.clearance_recovery.v1",
+        field="source_result", run_id=state.run_id, **context)
     if (state.loop_count != original["loop_count"] or state.experiment_id != original["experiment_id"]
             or state.current_experiment_spec != original["current_experiment_spec"]
             or clear.get("state") != "waiting" or clear.get("replay_execution_verified") is not True
@@ -319,7 +333,9 @@ def completed_clearance_equipment(controller):
         raise ValueError("Completed replay evidence changed")
     path, data = equipment_archive(root, state.run_id)
     handoff = data.get("equipment_handoff") or {}
-    if (str(path.resolve()) != saved["result_path"]
+    result_path = historical_reference(saved["result_path"], schema="atr.error_run_checkpoint.v1",
+        field="result_path", run_id=state.run_id, **context)
+    if (path.resolve() != result_path
             or data.get("equipment_workflow_execution_id") != saved["workflow_execution_id"]
             or handoff.get("run_id") != state.run_id
             or handoff.get("specimen_id") != state.current_experiment_spec.get("specimen_id")
@@ -329,7 +345,7 @@ def completed_clearance_equipment(controller):
     return data
 
 
-def restore_completed_equipment_handoff(controller, execution_id):
+def restore_completed_equipment_handoff(controller, execution_id, *, reference_roots=None, relocation_map=None):
     """Rehydrate an already accepted result, not a new judgment about live devices."""
     from agents.equipment.recovery import completed_candidate
     from utils.equipment_runtime_service import EquipmentRuntimeService
@@ -337,7 +353,8 @@ def restore_completed_equipment_handoff(controller, execution_id):
     from orchestrator.state import Stage
     agent = controller._deps.agent_registry.get("equipment_agent")
     if not controller._state.run_metadata.get("archived_postprocessing_request"):
-        data = completed_clearance_equipment(controller)
+        data = completed_clearance_equipment(controller,
+            **reference_options(reference_roots=reference_roots, relocation_map=relocation_map))
         if data["equipment_workflow_execution_id"] != execution_id:
             raise ValueError("Equipment execution identity changed")
     else:
@@ -356,7 +373,7 @@ def restore_completed_equipment_handoff(controller, execution_id):
     controller._state.run_metadata["recovery_resume_stage"] = "vision"
 
 
-def archived_clearance_capture(state, request, output_dir):
+def archived_clearance_capture(state, request, output_dir, *, reference_roots=None, relocation_map=None):
     """Re-evaluate immutable past evidence, never claim a current camera capture."""
     import math
     import time
@@ -365,7 +382,10 @@ def archived_clearance_capture(state, request, output_dir):
     from utils.utm_specimen_presence import _inspect_clear_at
     recovery = state.run_metadata.get("clearance_review_recovery") or {}
     clear = current_clear(state)
-    source = Path(recovery.get("source_result") or "")
+    def resolve(value, field):
+        return historical_reference(value, schema="atr.clearance_recovery.v1", field=field, run_id=state.run_id,
+            reference_roots=reference_roots, relocation_map=relocation_map)
+    source = resolve(recovery.get("source_result") or "", "source_result")
     if (not matches(state, request) or request.get("requested_by") != "operator"
             or request.get("session_id") != clear.get("session_id")
             or request.get("stop_after_cycle") != state.loop_count + 2
@@ -378,9 +398,10 @@ def archived_clearance_capture(state, request, output_dir):
     evidence = archived["record"]["evidence"]
     if not matches(state, archived) or not matches(state, evidence) or evidence.get("session_id") != clear["session_id"]:
         raise ValueError("Historical image identity differs")
-    raw = Path(evidence.get("raw_frame_path") or "").resolve()
+    raw = resolve(evidence.get("raw_frame_path") or "", "record.evidence.raw_frame_path")
     images = (evidence.get("vision_decision") or {}).get("images") or []
-    proof = next((v for v in images if v.get("label") == "raw frame" and Path(v.get("path", "")).resolve() == raw), {})
+    proof = next((v for v in images if v.get("label") == "raw frame" and
+        resolve(v.get("path", ""), "record.evidence.vision_decision.images[].path") == raw), {})
     if not raw.is_file() or not proof.get("sha256") or _hash(raw) != proof["sha256"]:
         raise ValueError("Original image integrity mismatch")
     stamp = float(evidence.get("frame_timestamp", 0))
@@ -425,7 +446,8 @@ class PostprocessingTools:
         return self.original.queue_status()
 
 
-async def continue_archived_postprocessing(controller, *, first_spec, design_constraints, start_cycle):
+async def continue_archived_postprocessing(controller, *, first_spec, design_constraints, start_cycle,
+                                           reference_roots=None, relocation_map=None):
     """One authorized offline tail plus one Design, without fabrication or device I/O."""
     import time
     from dataclasses import replace
@@ -438,7 +460,8 @@ async def continue_archived_postprocessing(controller, *, first_spec, design_con
     if start_cycle != state.loop_count + 1:
         raise ValueError("Archived continuation cycle changed")
     directory = run_directory(controller._deps.run_root, state.run_id) / "recovery/archived_review"
-    capture = archived_clearance_capture(state, request, directory)
+    context_options = reference_options(reference_roots=reference_roots, relocation_map=relocation_map)
+    capture = archived_clearance_capture(state, request, directory, **context_options)
     original_context = controller._deps.agent_context
     context = replace(original_context, tools=PostprocessingTools(original_context.tools))
     controller._deps.agent_context = context
@@ -447,7 +470,7 @@ async def continue_archived_postprocessing(controller, *, first_spec, design_con
             raise ValueError("Recovery interrupted by safety controls")
         if request.get("phase") == "design_only":
             return await finish_archived_design(controller, request=request, first_spec=first_spec,
-                design_constraints=design_constraints, start_cycle=start_cycle)
+                design_constraints=design_constraints, start_cycle=start_cycle, **context_options)
         state.stage = Stage.VISION
         await controller._emit_control_event("recovery.archived_review", "Reviewing saved post-removal image; no camera/device I/O", capture)
         decision = await review_visual_evidence(state, context, capture, "clearance")
@@ -476,12 +499,13 @@ async def continue_archived_postprocessing(controller, *, first_spec, design_con
         if not tail.get("ok") or tail.get("decision") != "continue":
             return tail
         return await finish_archived_design(controller, request=request, first_spec=first_spec,
-            design_constraints=design_constraints, start_cycle=start_cycle)
+            design_constraints=design_constraints, start_cycle=start_cycle, **context_options)
     finally:
         controller._deps.agent_context = original_context
 
 
-async def finish_archived_design(controller, *, request, first_spec, design_constraints, start_cycle):
+async def finish_archived_design(controller, *, request, first_spec, design_constraints, start_cycle,
+                                 reference_roots=None, relocation_map=None):
     """Draft only: retain physical Guardian holds, never resume equipment."""
     import time
     from orchestrator.state import Stage
@@ -490,7 +514,9 @@ async def finish_archived_design(controller, *, request, first_spec, design_cons
         raise ValueError("Draft recovery requires the non-actuating tool guard")
     run = run_directory(controller._deps.run_root, state.run_id)
     if request.get("phase") == "design_only":
-        path = (run / request["bo_result_relative"]).resolve()
+        path = historical_reference(request["bo_result_relative"], schema="atr.clearance_recovery.v1",
+            field="bo_result_relative", run_id=state.run_id, reference_kind="run-relative", base=run,
+            reference_roots=reference_roots, relocation_map=relocation_map)
         if not path.is_relative_to(run) or _hash(path) != request.get("bo_result_sha256"):
             raise ValueError("BO draft source changed")
         archived = json.loads(path.read_text())
@@ -527,11 +553,12 @@ async def finish_archived_design(controller, *, request, first_spec, design_cons
         "message": "Requested next design completed; no fabrication or equipment dispatched."}
 
 
-def restore_checkpoint(controller, run_id):
+def restore_checkpoint(controller, run_id, *, reference_roots=None, relocation_map=None):
     """Restore a verified review boundary; Operator Resume remains separate."""
     from app.bo_budget_recovery import checkpoint_path, restore as restore_bo
+    context = reference_options(reference_roots=reference_roots, relocation_map=relocation_map)
     if controller._state.stage.value == 'idle' and checkpoint_path(controller._deps.run_root, run_id).is_file():
-        return restore_bo(controller, run_id)
+        return restore_bo(controller, run_id, **context)
     from app.safe_hot_reload import reload_sources
     from app import equipment_entry_resume
     if (controller._state.run_id == run_id and controller._state.stage.value == 'complete'
@@ -579,17 +606,18 @@ def restore_checkpoint(controller, run_id):
     if (controller._state.run_id == run_id and controller._state.is_paused
             and (run_directory(controller._deps.run_root, run_id) / 'recovery/equipment_tail_request.json').is_file()):
         from app.equipment_tail_recovery import read_request, restore
-        request = read_request(controller._deps.run_root, run_id)
+        request = read_request(controller._deps.run_root, run_id, **context)
         # This request resumes a particular in-memory cancellation boundary. Its
         # historical file must not hijack restart recovery or a later specimen.
         loop_id = request.get('loop_id')
         if (type(loop_id) is int and controller._state.loop_count in (loop_id, loop_id + 1)
                 and controller._state.current_experiment_spec == request.get('experiment_spec')):
-            return restore(controller, run_id)
-    saved = read_checkpoint(controller._deps.run_root, run_id)
+            return restore(controller, run_id, **context)
+    saved = read_checkpoint(controller._deps.run_root, run_id, **context)
     planning = saved.get("planning") or {}
     session_id = planning.get("planning_session_id")
-    transcript = Path(planning.get("transcript_path") or "").resolve()
+    transcript = historical_reference(planning.get("transcript_path") or "",
+        schema="atr.error_run_checkpoint.v1", field="planning.transcript_path", run_id=run_id, **context)
     if (not session_id or not transcript.is_relative_to(Path(controller._deps.run_root).resolve())
             or transcript.name != "live_planning_transcript.jsonl" or not transcript.is_file()):
         raise ValueError("Original planning transcript is unavailable")
@@ -628,13 +656,16 @@ def restore_checkpoint(controller, run_id):
                 "from_loop": restored.loop_count, "to_loop": request["loop_id"],
                 "reason": "Resume unfinished nonphysical tail of the same specimen; retain all attempts"}
             restored.loop_count = request["loop_id"]
-        source = run_directory(controller._deps.run_root, run_id) / request["source_result_relative"]
+        run = run_directory(controller._deps.run_root, run_id)
+        source = historical_reference(request["source_result_relative"], schema="atr.clearance_recovery.v1",
+            field="source_result_relative", run_id=run_id, reference_kind="run-relative", base=run,
+            reference_roots=reference_roots, relocation_map=relocation_map)
         if not source.resolve().is_relative_to(run_directory(controller._deps.run_root, run_id)):
             raise ValueError("Historical review path outside this run")
         restored.run_metadata["clearance_review_recovery"] = {"source_result": str(source),
             "source_sha256": request["source_sha256"]}
     elif controller._state.stage == Stage.COMPLETE or current_clear(controller._state):
-        restored = prepare_clearance_review_retry(controller._state, controller._deps.run_root)
+        restored = prepare_clearance_review_retry(controller._state, controller._deps.run_root, **context)
     else:
         restored = OrchestratorState.model_validate(saved["snapshot"]["state"])
     limit_path = run_directory(controller._deps.run_root, run_id) / "recovery/stop_after_design.json"
@@ -650,14 +681,14 @@ def restore_checkpoint(controller, run_id):
         request_path = run_directory(controller._deps.run_root, run_id) / "recovery/archived_postprocessing.json"
         if request_path.is_file():
             request = json.loads(request_path.read_text())
-            archived_clearance_capture(restored, request, request_path.parent / "archived_review")
+            archived_clearance_capture(restored, request, request_path.parent / "archived_review", **context)
             restored.run_metadata["archived_postprocessing_request"] = request
-        execution_id = prepare_error_resume(controller)
+        execution_id = prepare_error_resume(controller, **context)
         if restored.run_metadata.get("clearance_review_recovery"):
-            restore_completed_equipment_handoff(controller, execution_id)
+            restore_completed_equipment_handoff(controller, execution_id, **context)
         if request_path.is_file():
             request = json.loads(request_path.read_text())
-            archived_clearance_capture(restored, request, request_path.parent / "archived_review")
+            archived_clearance_capture(restored, request, request_path.parent / "archived_review", **context)
             restored.run_metadata["archived_postprocessing_request"] = request
             reload_analysis_decisions(controller)
     except Exception:

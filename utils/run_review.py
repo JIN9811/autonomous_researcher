@@ -68,8 +68,10 @@ class RunReviewRecorder:
     Input is an already-created GUI event, not live state or a device connection.
     Overload drops review events, not experiment events. All I/O is on one daemon.
     """
-    def __init__(self, root: Path, excluded_run: str):
+    def __init__(self, root: Path, excluded_run: str, *, paths=None, image_base=None):
         self.root = Path(root).resolve()
+        self.image_base = Path(image_base).resolve() if image_base is not None else (
+            paths.repository_root if paths is not None else self.root.parent)
         self.excluded_run = excluded_run
         self.queue = queue.Queue(maxsize=8)
         self.dropped = 0
@@ -135,7 +137,7 @@ class RunReviewRecorder:
             elif isinstance(obj, str) and Path(obj).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
                 path = Path(obj)
                 if not path.is_absolute():
-                    path = self.root.parent / path
+                    path = self.image_base / path
                 path = path.resolve()
                 if not path.is_relative_to(run_dir) or not path.is_file():
                     return
