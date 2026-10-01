@@ -4,9 +4,77 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+import importlib.util
+import os
+import sys
 import pytest
 
 from utils.local_pyautogui_bridge import LocalPyAutoGUIBridgeSupervisor
+
+
+@pytest.mark.parametrize('server_relative', [
+    'Pyautogui_server_for_window/bridge/windows_pyautogui_bridge_server.py',
+    'install/windows_pyautogui_bridge_server.py',
+])
+def test_managed_raw_csv_plan_and_reservation_stay_outside_source(tmp_path, monkeypatch, server_relative):
+    from tests.unit.test_runtime_worker_origins import bound_layout
+    paths, _, _ = bound_layout(tmp_path)
+    source = paths.runtime_root / server_relative
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes((Path(__file__).resolve().parents[2] / server_relative).read_bytes())
+    supervisor = LocalPyAutoGUIBridgeSupervisor(paths.repository_root, paths=paths)
+    expected_root = paths.artifact_root / 'local_pyautogui_bridge/artifacts/raw_csv'
+    monkeypatch.setenv('WINDOWS_PYAUTOGUI_RAW_CSV_ROOT', str(tmp_path / 'ambient-unselected'))
+    monkeypatch.setattr(supervisor, 'status', lambda: {'running': False})
+    monkeypatch.setattr(supervisor, '_health', lambda: {'ok': True})
+    before = {str(p.relative_to(paths.runtime_root)): p.read_bytes() if p.is_file() else None
+              for p in paths.runtime_root.rglob('*')}
+    exercised = []
+    def inspect_launch(command, **options):
+        # Exercise the actual standalone callee with only the supervisor's child
+        # environment. Never enter main(), HTTP serving, GUI or device execution.
+        with monkeypatch.context() as child:
+            for key in tuple(os.environ):
+                child.delenv(key)
+            for key, value in options['env'].items():
+                child.setenv(key, value)
+            spec = importlib.util.spec_from_file_location('managed_raw_csv_under_test', source)
+            module = importlib.util.module_from_spec(spec)
+            child.setitem(sys.modules, spec.name, module)
+            spec.loader.exec_module(module)
+            payload = {'export_context': {'mode': 'test', 'session_id': 'fixture',
+                'specimen_id': 'cube', 'loop_index': 2, 'repeat_index': 4},
+                'raw_csv_root': str(tmp_path / 'request-unselected'),
+                'windows_path': str(tmp_path / 'request-unselected/evil.csv')}
+            plan = module._raw_csv_export_plan(payload)
+            target = expected_root / 'test_fixture_cube_loop-0002_rep-0004.csv'
+            assert plan['ok'] and Path(plan['windows_path']) == target
+            assert module._active_raw_csv_root() == expected_root
+            reservation = module._reserve_raw_csv_export(plan)
+            assert reservation == expected_root / '.reservations' / (target.name + '.lock')
+            assert reservation.is_file()
+            with pytest.raises(module.RawCsvExportError) as error:
+                module._reserve_raw_csv_export(plan)
+            assert error.value.failure_code == 'UTM_RAW_CSV_NAME_RESERVED'
+            assert module._raw_csv_export_plan(payload)['failure_code'] == 'UTM_RAW_CSV_NAME_RESERVED'
+            module._release_raw_csv_reservation(reservation)
+            assert not reservation.exists()
+            target.write_bytes(b'time_s,force_N\n0,1\n')
+            assert module._raw_csv_export_plan(payload)['failure_code'] == 'UTM_RAW_CSV_ALREADY_EXISTS'
+            with pytest.raises(module.RawCsvExportError) as error:
+                module._reserve_raw_csv_export(plan)
+            assert error.value.failure_code == 'UTM_RAW_CSV_ALREADY_EXISTS'
+            assert target.read_bytes() == b'time_s,force_N\n0,1\n'
+            exercised.append(target)
+        return SimpleNamespace(pid=123, poll=lambda: None)
+    monkeypatch.setattr('utils.local_pyautogui_bridge.subprocess.Popen', inspect_launch)
+    assert supervisor.start()['status'] == 'running'
+    assert len(exercised) == 1
+    assert not (tmp_path / 'ambient-unselected').exists()
+    assert not (tmp_path / 'request-unselected').exists()
+    after = {str(p.relative_to(paths.runtime_root)): p.read_bytes() if p.is_file() else None
+             for p in paths.runtime_root.rglob('*')}
+    assert after == before
 
 
 def test_injected_bridge_separates_source_state_and_desktop_environment(tmp_path, monkeypatch):

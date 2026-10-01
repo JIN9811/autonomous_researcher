@@ -128,6 +128,7 @@ class LocalPyAutoGUIBridgeSupervisor:
         env.update({
             'ATR_WINDOWS_BRIDGE_PACKAGE_ROOT': str(self.package_root),
             'WINDOWS_PYAUTOGUI_BRIDGE_ARTIFACT_ROOT': str(self.artifact_root),
+            'WINDOWS_PYAUTOGUI_RAW_CSV_ROOT': str(self.artifact_root / 'raw_csv'),
             'WINDOWS_PYAUTOGUI_LOCATOR_ROOT': str(self.locator_root),
             'WINDOWS_PYAUTOGUI_UTM_EXPORT_DIR': str(self.utm_export_root),
             'WINDOWS_PYAUTOGUI_PROGRAM_DIR': str(self.program_root),

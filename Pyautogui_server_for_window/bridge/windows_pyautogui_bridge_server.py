@@ -154,8 +154,9 @@ TOKEN_HEADER = os.getenv("WINDOWS_PYAUTOGUI_BRIDGE_TOKEN_HEADER", "X-Bridge-Toke
 ARTIFACT_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_BRIDGE_ARTIFACT_ROOT", r"C:\ATR\bridge_artifacts"))
 LOCATOR_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_LOCATOR_ROOT", r"C:\ATR\equipment_locators"))
 UTM_EXPORT_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_UTM_EXPORT_DIR", r"C:\ATR\utm_exports"))
-# Kept overrideable for tests and worker deployments, but never accepted from a request.
-RAW_CSV_ROOT: Path | None = None
+# Trusted launch-time configuration only; never accepted from a request.
+RAW_CSV_ROOT: Path | None = (Path(os.environ["WINDOWS_PYAUTOGUI_RAW_CSV_ROOT"])
+                             if os.environ.get("WINDOWS_PYAUTOGUI_RAW_CSV_ROOT") else None)
 PROGRAM_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_PROGRAM_DIR", r"C:\ATR\programs"))
 RECORDING_ROOT = Path(os.getenv("WINDOWS_PYAUTOGUI_RECORDING_DIR", r"C:\ATR\recordings"))
 BRIDGE_RELEASE_VERSION = _bridge_release_version()
