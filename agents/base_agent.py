@@ -40,6 +40,7 @@ from knowledge.failure_memory import FailureMemory
 from knowledge.rag import HybridRAG
 from mcp_tools.tool_registry import ToolRegistry
 from orchestrator.state import OrchestratorState
+from utils.runtime_paths import RuntimePaths
 
 
 @dataclass(slots=True)
@@ -81,6 +82,7 @@ class AgentContext:
     # inject one immutable principal per request/decision; the default is None.
     knowledge_service: Any | None = None
     knowledge_principal: Any | None = None
+    paths: RuntimePaths | None = None
 
     def set_active_backend(self, backend_name: str) -> dict[str, Any]:
         """Switch the shared inference backend for all agents."""

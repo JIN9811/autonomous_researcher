@@ -23,7 +23,7 @@ Modification guide:
 from __future__ import annotations
 
 import os
-from pathlib import Path
+from dataclasses import replace
 from typing import Any
 
 from dotenv import load_dotenv
@@ -64,12 +64,14 @@ from objectives.service import ObjectiveService
 from objectives.store import ObjectiveStore
 from objectives.tools import register_objective_tools
 from utils.config_loader import load_all_configs
-from utils.paths import resolve_path
+from utils.runtime_paths import (
+    RuntimePaths, current_paths, finalize_paths, resolve_repository_path,
+    resolve_runtime_path, resolve_system_path,
+)
 
 
-def _load_configs() -> dict[str, Any]:
-    root = resolve_path(".")
-    cfg = load_all_configs(root / "configs")
+def _load_configs(paths: RuntimePaths | None = None) -> dict[str, Any]:
+    cfg = load_all_configs(resolve_runtime_path("configs", paths=paths))
     return cfg
 
 
@@ -225,15 +227,24 @@ def _build_runtime_profile(
     }
 
 
-def load_runtime() -> MainController:
+def load_runtime(*, paths: RuntimePaths | None = None) -> MainController:
     """Create fully initialized runtime controller."""
-    load_dotenv(resolve_path(".env"), override=False)
-    cfg = _load_configs()
+    injected = paths is not None
+    paths = paths or current_paths()
+    load_dotenv(resolve_repository_path(".env", paths=paths), override=False)
+    cfg = _load_configs(paths)
     system_cfg = cfg.get("system", {}).get("system", {})
     base_models_cfg = cfg.get("models", {})
     logging_cfg = cfg.get("logging", {})
 
-    guide_path = resolve_path(system_cfg.get("guide_path", "./docs/project/Project_guide.txt"))
+    # Existing operator values keep their old repository-relative semantics.
+    if system_cfg.get("run_root"):
+        paths = replace(paths, run_root=resolve_repository_path(system_cfg["run_root"], paths=paths))
+    if not injected:
+        paths = finalize_paths(paths)
+    guide_path = (resolve_repository_path(system_cfg["guide_path"], paths=paths)
+                  if system_cfg.get("guide_path")
+                  else resolve_system_path("project/Project_guide.txt", paths=paths))
     local_index = LocalRAGIndex.from_file(guide_path)
     web_retriever = WebRetriever(
         tavily_api_key=os.getenv("TAVILY_API_KEY"),
@@ -293,22 +304,22 @@ def load_runtime() -> MainController:
     tools = ToolRegistry()
     from knowledge.source_runtime import library_for
     from mcp_tools.source_tools import register_source_tools
-    register_source_tools(tools, lambda: library_for(resolve_path(".")))
+    register_source_tools(tools, lambda: library_for(paths.repository_root))
     register_mock_tools(tools)
-    register_utm_tools(tools, repo_root=resolve_path("."))
-    utm_runtime_manager = get_utm_runtime_manager(cfg.get("devices", {}), repo_root=resolve_path("."))
-    specimen_pose_tracker = get_specimen_pose_tracker_bridge(cfg.get("devices", {}), repo_root=resolve_path("."))
+    register_utm_tools(tools, repo_root=paths.runtime_root)
+    utm_runtime_manager = get_utm_runtime_manager(cfg.get("devices", {}), repo_root=paths.runtime_root)
+    specimen_pose_tracker = get_specimen_pose_tracker_bridge(cfg.get("devices", {}), repo_root=paths.runtime_root)
     register_camera_tools(
         tools,
         utm_state_observer=observe_utm_state_window,
         utm_runtime_manager=utm_runtime_manager,
         specimen_pose_tracker=specimen_pose_tracker,
     )
-    register_printer_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
-    register_equipment_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
-    lerobot_bridge = register_lerobot_tools(tools, cfg.get("lerobot", {}), repo_root=resolve_path("."))
-    lerobot_bridge.config.artifact_run_root = resolve_path(system_cfg.get("run_root", "./runs"))
-    register_pinn_tools(tools, cfg.get("devices", {}), repo_root=resolve_path("."))
+    register_printer_tools(tools, cfg.get("devices", {}), repo_root=paths.runtime_root)
+    register_equipment_tools(tools, cfg.get("devices", {}), repo_root=paths.runtime_root)
+    lerobot_bridge = register_lerobot_tools(tools, cfg.get("lerobot", {}), repo_root=paths.runtime_root)
+    lerobot_bridge.config.artifact_run_root = paths.run_root
+    register_pinn_tools(tools, cfg.get("devices", {}), repo_root=paths.runtime_root)
     register_experiment_tools(tools, cfg.get("devices", {}))
 
     agent_context = AgentContext(
@@ -328,12 +339,13 @@ def load_runtime() -> MainController:
         backend_fallbacks=backend_fallbacks,
         runtime_profiles=runtime_profiles,
         llm_lease=LLMLeaseCoordinator(),
-        artifact_run_root=str(resolve_path(system_cfg.get("run_root", "./runs"))),
-        knowledge_service=KnowledgeContextService(resolve_path("."), data_root=resolve_path("memory/knowledge")),
+        artifact_run_root=str(paths.run_root),
+        knowledge_service=KnowledgeContextService(paths.repository_root, data_root=paths.memory_root / "knowledge"),
+        paths=paths,
     )
 
     objective_service = ObjectiveService(
-        store=ObjectiveStore(resolve_path("memory/objectives"), run_root=resolve_path(system_cfg.get("run_root", "./runs"))),
+        store=ObjectiveStore(paths.memory_root / "objectives", run_root=paths.run_root),
         registry=MetricRegistry.default(),
         context=agent_context,
     )
@@ -346,14 +358,14 @@ def load_runtime() -> MainController:
     agent_registry.register(KnowledgeAgent())
     agent_registry.register(GuardianAgent())
 
-    run_root = resolve_path(system_cfg.get("run_root", "./runs"))
     deps = ControllerDeps(
         agent_registry=agent_registry,
         orchestrator_agent_name="orchestrator_agent",
         agent_context=agent_context,
-        run_root=Path(run_root),
+        run_root=paths.run_root,
         logging_config=logging_cfg,
         system_config=system_cfg,
         runtime_profile=runtime_profile,
+        paths=paths,
     )
     return MainController(deps)

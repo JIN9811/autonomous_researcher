@@ -157,6 +157,7 @@ from utils.equipment_skill_vision import (
 from utils.equipment_runtime_service import EquipmentRuntimeContractError, EquipmentRuntimeService
 from utils.local_pyautogui_bridge import LocalPyAutoGUIBridgeSupervisor
 from utils.paths import resolve_path
+from utils.runtime_paths import resolve_runtime_path
 from utils.printer_profile import (
     PRUSA_PRINT_PROFILE_PATH,
     adapt_print_profile_for_provider,
@@ -173,13 +174,18 @@ from utils.test_mode_execution_profiles import (
 )
 from utils.operator_teleop_handoff import OperatorTeleopHandoffError
 
+controller = load_runtime()
+RUNTIME_PATHS = controller._deps.paths
+if RUNTIME_PATHS is None:
+    raise RuntimeError("Bootstrap must supply finalized RuntimePaths")
+
 app = FastAPI(title="Autonomous Researcher")
 app.state.specimen_pose_server_started_at_ms = int(time.time() * 1000)
-templates = Jinja2Templates(directory=str(resolve_path("web/templates")))
-app.mount("/static", StaticFiles(directory=str(resolve_path("web/static"))), name="static")
+templates = Jinja2Templates(directory=str(resolve_runtime_path("web/templates", paths=RUNTIME_PATHS)))
+app.mount("/static", StaticFiles(directory=str(resolve_runtime_path("web/static", paths=RUNTIME_PATHS))), name="static")
 app.mount(
     "/assets/robotis-omx",
-    StaticFiles(directory=str(resolve_path("sim/robotis_omx"))),
+    StaticFiles(directory=str(resolve_runtime_path("sim/robotis_omx", paths=RUNTIME_PATHS))),
     name="robotis-omx-assets",
 )
 
@@ -199,9 +205,7 @@ _PLC_BRIDGE_SERVICE: PLCBridgeService | None = None
 @app.head("/favicon.ico", include_in_schema=False)
 async def favicon() -> FileResponse:
     """Serve the ATR GUI favicon for browser default icon requests."""
-    return FileResponse(resolve_path("web/static/favicon.svg"), media_type="image/svg+xml")
-
-controller = load_runtime()
+    return FileResponse(resolve_runtime_path("web/static/favicon.svg", paths=RUNTIME_PATHS), media_type="image/svg+xml")
 
 
 def _installed_agent_module(module_id: str):
@@ -235,30 +239,30 @@ async def get_agent_module_asset(module_id: str, asset_path: str):
         raise HTTPException(status_code=404, detail="Unknown module asset")
     return FileResponse(path)
 
-PLC_CONFIG_PATH = resolve_path("configs/plc.yaml")
-PLC_CONFIG_MEMORY_PATH = resolve_path("memory/plc_bridge_config.json")
-PLC_TRANSACTION_STATE_PATH = resolve_path("memory/plc_bridge_state.json")
-AGENT_BASELINE_DOC_PATH = resolve_path("docs/runtime/agent_program_baseline.md")
-BO_WORKSPACE_SETTINGS_PATH = resolve_path("memory/bo_workspace_settings.json")
-EQUIPMENT_SKILL_ROOT = resolve_path("memory/equipment_skills")
-EQUIPMENT_SKILL_FLOW_PATH = resolve_path("graphs/modules/equipment/equipment_skill_flows.json")
-EQUIPMENT_SKILL_FLOW_RUNTIME_ROOT = resolve_path("memory/equipment_runtime/equipment_skill_flow_latest")
-EQUIPMENT_RUNTIME_ROOT = resolve_path("memory/equipment_runtime")
-EQUIPMENT_SKILL_AUTHORING_JOB_ROOT = resolve_path("memory/equipment_runtime/skill_authoring_jobs")
-EQUIPMENT_WORKSPACE_SETTINGS_PATH = resolve_path("memory/equipment_workspace_settings.json")
-KNOWLEDGE_MEMORY_ROOT = resolve_path("memory/knowledge")
+PLC_CONFIG_PATH = RUNTIME_PATHS.runtime_root / "configs/plc.yaml"
+PLC_CONFIG_MEMORY_PATH = RUNTIME_PATHS.memory_root / "plc_bridge_config.json"
+PLC_TRANSACTION_STATE_PATH = RUNTIME_PATHS.memory_root / "plc_bridge_state.json"
+AGENT_BASELINE_DOC_PATH = RUNTIME_PATHS.system_root / "runtime/agent_program_baseline.md"
+BO_WORKSPACE_SETTINGS_PATH = RUNTIME_PATHS.memory_root / "bo_workspace_settings.json"
+EQUIPMENT_SKILL_ROOT = RUNTIME_PATHS.memory_root / "equipment_skills"
+EQUIPMENT_SKILL_FLOW_PATH = RUNTIME_PATHS.runtime_root / "graphs/modules/equipment/equipment_skill_flows.json"
+EQUIPMENT_SKILL_FLOW_RUNTIME_ROOT = RUNTIME_PATHS.memory_root / "equipment_runtime/equipment_skill_flow_latest"
+EQUIPMENT_RUNTIME_ROOT = RUNTIME_PATHS.memory_root / "equipment_runtime"
+EQUIPMENT_SKILL_AUTHORING_JOB_ROOT = RUNTIME_PATHS.memory_root / "equipment_runtime/skill_authoring_jobs"
+EQUIPMENT_WORKSPACE_SETTINGS_PATH = RUNTIME_PATHS.memory_root / "equipment_workspace_settings.json"
+KNOWLEDGE_MEMORY_ROOT = RUNTIME_PATHS.memory_root / "knowledge"
 PRIMARY_RUNTIME_GRAPH_ID = "atr_closed_loop"
-RUNTIME_GRAPH_CONFIG_ROOT = resolve_path("graphs/configs")
+RUNTIME_GRAPH_CONFIG_ROOT = RUNTIME_PATHS.runtime_root / "graphs/configs"
 RUNTIME_GRAPH_CONFIG_PATH = RUNTIME_GRAPH_CONFIG_ROOT / f"{PRIMARY_RUNTIME_GRAPH_ID}.yaml"
-RUNTIME_GRAPH_VERSION_ROOT = resolve_path("memory/graph_versions")
-RUNTIME_MODULE_ROOT = resolve_path("graphs/modules")
-RUNTIME_MODULE_VERSION_ROOT = resolve_path("memory/module_versions")
-API_KEY_SETTINGS_PATH = resolve_path("memory/api_keys.json")
-WANDB_LOCAL_API_KEY_SETTINGS_PATH = resolve_path("memory/wandb_local_api_key.json")
-TEST_MODE_EXECUTION_PROFILES_PATH = resolve_path("memory/test_mode_execution_profiles.json")
-LEROBOT_ACTION_LOG_ROOT = resolve_path("runs/lerobot_action_logs")
-ACTIVE_ROBOT_CAM_LATEST_RESULT_PATH = resolve_path("runs/active_robot_cam/latest_active_robot_cam_result.json")
-BAMBU_HTTP_EXPORT_ROOT = resolve_path("artifacts/bambu_http_exports")
+RUNTIME_GRAPH_VERSION_ROOT = RUNTIME_PATHS.memory_root / "graph_versions"
+RUNTIME_MODULE_ROOT = RUNTIME_PATHS.runtime_root / "graphs/modules"
+RUNTIME_MODULE_VERSION_ROOT = RUNTIME_PATHS.memory_root / "module_versions"
+API_KEY_SETTINGS_PATH = RUNTIME_PATHS.memory_root / "api_keys.json"
+WANDB_LOCAL_API_KEY_SETTINGS_PATH = RUNTIME_PATHS.memory_root / "wandb_local_api_key.json"
+TEST_MODE_EXECUTION_PROFILES_PATH = RUNTIME_PATHS.memory_root / "test_mode_execution_profiles.json"
+LEROBOT_ACTION_LOG_ROOT = RUNTIME_PATHS.run_root / "lerobot_action_logs"
+ACTIVE_ROBOT_CAM_LATEST_RESULT_PATH = RUNTIME_PATHS.run_root / "active_robot_cam/latest_active_robot_cam_result.json"
+BAMBU_HTTP_EXPORT_ROOT = RUNTIME_PATHS.artifact_root / "bambu_http_exports"
 BAMBU_DIRECT_COOLDOWN_POLL_SEC = 5.0
 BAMBU_DIRECT_COOLDOWN_MAX_WAIT_SEC = 1800.0
 _BAMBU_DIRECT_COOLDOWN_POLL_SEC = BAMBU_DIRECT_COOLDOWN_POLL_SEC

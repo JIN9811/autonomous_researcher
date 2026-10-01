@@ -33,8 +33,8 @@ system:
   force_real_llm_in_test: true
   allow_mock_fallback: false
   inference_backend: vllm
-  guide_path: ./docs/project/Project_guide.txt
-  run_root: ./runs
+  # Guide/run defaults are typed roots in repository_layout.json. Optional
+  # legacy guide_path/run_root overrides remain repository-relative.
 
 control:
   allow_fault_injection: true

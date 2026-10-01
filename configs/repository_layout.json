@@ -1,0 +1,25 @@
+{
+  "schema": "atr.path_layout.v1",
+  "repository_root": "..",
+  "runtime_root": "..",
+  "system_root": "../docs",
+  "workspace_root": "../workspace",
+  "defaults": {
+    "run_root": "runs",
+    "memory_root": "memory",
+    "artifact_root": "artifacts",
+    "output_root": "outputs",
+    "source_inbox_root": "docs/knowledge/manuals/sources",
+    "user_file_root": "user_files",
+    "log_root": "logs"
+  },
+  "candidates": {
+    "run_root": ["../workspace/runs"],
+    "memory_root": ["../workspace/memory"],
+    "artifact_root": ["../workspace/artifacts"],
+    "output_root": ["../workspace/outputs"],
+    "source_inbox_root": ["../workspace/source_inbox"],
+    "user_file_root": ["../workspace/user_files"],
+    "log_root": ["../workspace/logs"]
+  }
+}

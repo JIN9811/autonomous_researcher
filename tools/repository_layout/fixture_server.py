@@ -74,13 +74,25 @@ def fixture_application(lifespan_mode: str):
         stack.enter_context(patch.object(os, "killpg", guard.deny))
         import app.bootstrap as bootstrap
         from backends.mock_llm import MockLLMBackend
-        synthetic = {"system": {"system": {"run_root": "runs", "inference_backend": "ollama",
+        synthetic = {"system": {"system": {"inference_backend": "ollama",
                      "force_real_llm_in_test": False, "allow_mock_fallback": True}},
                      "models": {"models": {"e4b": {"primary": "fixture-only"},
                                              "orchestrator": {"primary": "fixture-only"}}},
                      "devices": {}, "lerobot": {}, "logging": {}}
         from copy import deepcopy
-        stack.enter_context(patch.object(bootstrap, "_load_configs", lambda: deepcopy(synthetic)))
+        stack.enter_context(patch.object(bootstrap, "_load_configs", lambda *a, **kw: deepcopy(synthetic)))
+        # Explicit disposable stores; source roots stay in the exported snapshot.
+        from dataclasses import replace
+        from tempfile import TemporaryDirectory
+        from utils.runtime_paths import current_paths
+        fixture_root = Path(stack.enter_context(TemporaryDirectory(prefix="atr-fixture-")))
+        fixture_paths = replace(current_paths(), workspace_root=fixture_root / "workspace",
+            run_root=fixture_root / "run-volume/runs", memory_root=fixture_root / "state-volume/memory",
+            artifact_root=fixture_root / "export-volume/artifacts", output_root=fixture_root / "outputs",
+            source_inbox_root=fixture_root / "inbox", user_file_root=fixture_root / "user-files",
+            log_root=fixture_root / "logs")
+        original_load_runtime = bootstrap.load_runtime
+        stack.enter_context(patch.object(bootstrap, "load_runtime", lambda: original_load_runtime(paths=fixture_paths)))
         stack.enter_context(patch.object(bootstrap, "_build_backend", lambda *a, **kw: MockLLMBackend()))
 
         from utils import plc_bridge_service, artifact_preservation, run_review, compute_pool

@@ -22,11 +22,12 @@ Modification guide:
 from __future__ import annotations
 
 from pathlib import Path
+from utils.runtime_paths import current_paths
 
 
 def project_root() -> Path:
-    """Return repository root based on this file location."""
-    return Path(__file__).resolve().parent.parent
+    """Compatibility base: the explicit repository, never the source container."""
+    return current_paths().repository_root
 
 
 def resolve_path(path: str | Path) -> Path:

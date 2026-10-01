@@ -217,8 +217,8 @@ def actual_controller(tmp_path, monkeypatch, request):
         memory = JsonlKnowledgeStore(memory_root=tmp_path / "memory/knowledge", run_root=tmp_path / "runs")
         monkeypatch.setattr(JsonlKnowledgeStore, "default", classmethod(lambda cls, project_root=None: memory))
         configurations = bootstrap._load_configs()
-        monkeypatch.setattr(bootstrap, "_load_configs", lambda: deepcopy(configurations))
-        original_resolve = bootstrap.resolve_path
+        monkeypatch.setattr(bootstrap, "_load_configs", lambda *args, **kwargs: deepcopy(configurations))
+        from utils.paths import resolve_path as original_resolve
         def resolve(path):
             value = str(path).removeprefix("./")
             if value == ".":
@@ -226,12 +226,18 @@ def actual_controller(tmp_path, monkeypatch, request):
             if value.startswith(("memory", "runs", "output", "logs")):
                 return tmp_path / value
             return original_resolve(path)
-        monkeypatch.setattr(bootstrap, "resolve_path", resolve)
         import agents.analysis.agent as analysis_module
         monkeypatch.setattr(analysis_module, "resolve_path", resolve)
         from agents.vision.agent import VisionAgent
         monkeypatch.setattr(VisionAgent, "_repo_root", staticmethod(lambda: tmp_path))
-        controller = bootstrap.load_runtime()
+        from dataclasses import replace
+        from utils.runtime_paths import current_paths
+        paths = replace(current_paths(), repository_root=tmp_path, workspace_root=tmp_path / "workspace",
+            run_root=tmp_path / "runs", memory_root=tmp_path / "memory",
+            artifact_root=tmp_path / "artifacts", output_root=tmp_path / "outputs",
+            source_inbox_root=tmp_path / "source_inbox", user_file_root=tmp_path / "user_files",
+            log_root=tmp_path / "logs")
+        controller = bootstrap.load_runtime(paths=paths)
         controller._state.active_session_id = "controlled-session"
         controller._state.run_id = "controlled-run"
         controller._state.experiment_id = "controlled-experiment"

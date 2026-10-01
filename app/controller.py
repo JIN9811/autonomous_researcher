@@ -93,6 +93,7 @@ from reporting.bo_visualization_artifacts import write_bo_visualization_artifact
 from reporting.lhs_design_visualization_artifacts import write_lhs_design_visualization_artifacts
 from utils.config_loader import load_all_configs
 from utils.paths import resolve_path
+from utils.runtime_paths import RuntimePaths, current_paths
 from utils.printer_profile import adapt_print_profile_for_provider, load_prusa_print_profile
 from utils.test_mode_execution_profiles import TestModeExecutionProfileStore
 from utils.operator_teleop_handoff import (
@@ -131,6 +132,7 @@ class ControllerDeps:
     logging_config: dict[str, Any]
     system_config: dict[str, Any]
     runtime_profile: dict[str, Any]
+    paths: RuntimePaths | None = None
 
 
 class MainController:
@@ -175,7 +177,7 @@ class MainController:
 
     def __init__(self, deps: ControllerDeps) -> None:
         self._deps = deps
-        self._test_mode_execution_profiles_path = deps.run_root.parent / "memory" / "test_mode_execution_profiles.json"
+        self._test_mode_execution_profiles_path = (deps.paths or current_paths()).memory_root / "test_mode_execution_profiles.json"
         self._operator_teleop_handoffs = OperatorTeleopHandoffRegistry()
         self._trace = RunTrace(max_events=int(deps.system_config.get("event_buffer_size", 300)))
         self._event_queues: set[asyncio.Queue[dict[str, Any]]] = set()
@@ -1176,7 +1178,7 @@ class MainController:
         source = Path(value).expanduser()
         if source.is_absolute():
             return source.resolve()
-        return (self._deps.run_root.parent / source).resolve()
+        return ((self._deps.paths or current_paths()).repository_root / source).resolve()
 
     def _copy_workspace_file_artifact(self, *, workspace: str, key: str, source_value: str) -> dict[str, Any] | None:
         """Copy a workspace-produced file into the current run directory, or store a pointer for large files."""
@@ -6524,7 +6526,7 @@ class MainController:
                 lines.append(f"[source={source}]\n{text[:1200]}")
 
         specimen_guideline = self._load_optional_guideline(
-            self._deps.run_root.parent / "docs" / "agents" / "specimen_design_existing_runtime_guideline.txt",
+            (self._deps.paths or current_paths()).system_root / "agents" / "specimen_design_existing_runtime_guideline.txt",
             limit=1800,
         )
         if specimen_guideline:
